@@ -19,90 +19,6 @@
 namespace at {
 namespace native {
 
-template<class scalar_t>
-void cusolver_LU(int m, int n, scalar_t* dA, int ldda, int* ipiv, int* info);
-
-template<class scalar_t>
-void cusolver_getrs(int n, int nrhs, scalar_t* dA, int lda, int* ipiv, scalar_t* ret, int ldb, int* info);
-
-template<class scalar_t>
-void cublas_LU_batched(int _m, int n, scalar_t** dA_array, int ldda, int* ipiv_array, int* info_array, int batchsize);
-
-template<class scalar_t>
-void cublas_getri_batched(int _m, int n, scalar_t** dA_array, int ldda, int* ipiv_array, int* info_array, int batchsize, scalar_t** dC_array);
-
-template<class scalar_t>
-static void _apply_single_inverse_helper(scalar_t* self_ptr, scalar_t* self_inv_ptr, int* ipiv_ptr, int* info_ptr, int n);
-
-template<>
-void cusolver_LU<double>(int m, int n, double* dA, int ldda, int* ipiv, int* info) {
-  auto handle = at::cuda::getCurrentCUDASolverDnHandle();
-  int lwork;
-  TORCH_CUSOLVER_CHECK(cusolverDnDgetrf_bufferSize(handle, m, n, dA, ldda, &lwork));
-  Tensor buffer = at::empty({lwork}, at::device(at::kCUDA).dtype(at::kDouble));
-  Tensor devInfo = at::empty({1}, at::device(at::kCUDA).dtype(at::kInt));
-  TORCH_CUSOLVER_CHECK(cusolverDnDgetrf(handle, m, n, dA, ldda, buffer.data_ptr<double>(), ipiv, devInfo.data_ptr<int>()));
-  *info = devInfo.item<int>();
-}
-
-template<>
-void cusolver_LU<float>(int m, int n, float* dA, int ldda, int* ipiv, int* info) {
-  auto handle = at::cuda::getCurrentCUDASolverDnHandle();
-  int lwork;
-  TORCH_CUSOLVER_CHECK(cusolverDnSgetrf_bufferSize(handle, m, n, dA, ldda, &lwork));
-  Tensor buffer = at::empty({lwork}, at::device(at::kCUDA).dtype(at::kFloat));
-  Tensor devInfo = at::empty({1}, at::device(at::kCUDA).dtype(at::kInt));
-  TORCH_CUSOLVER_CHECK(cusolverDnSgetrf(handle, m, n, dA, ldda, buffer.data_ptr<float>(), ipiv, devInfo.data_ptr<int>()));
-  *info = devInfo.item<int>();
-}
-
-template<>
-void cusolver_getrs<double>(int n, int nrhs, double* dA, int lda, int* ipiv, double* ret, int ldb, int* info) {
-  Tensor dinfo = at::empty({1}, at::device(at::kCUDA).dtype(at::kInt));
-  TORCH_CUSOLVER_CHECK(cusolverDnDgetrs(at::cuda::getCurrentCUDASolverDnHandle(), CUBLAS_OP_N, n, nrhs, dA, lda, ipiv, ret, ldb, dinfo.data_ptr<int>()));
-  *info = dinfo.item<int>();
-}
-
-template<>
-void cusolver_getrs<float>(int n, int nrhs, float* dA, int lda, int* ipiv, float* ret, int ldb, int* info) {
-  Tensor dinfo = at::empty({1}, at::device(at::kCUDA).dtype(at::kInt));
-  TORCH_CUSOLVER_CHECK(cusolverDnSgetrs(at::cuda::getCurrentCUDASolverDnHandle(), CUBLAS_OP_N, n, nrhs, dA, lda, ipiv, ret, ldb, dinfo.data_ptr<int>()));
-  *info = dinfo.item<int>();
-}
-
-template<>
-void cublas_LU_batched<double>(
-    int _m, int n, double** dA_array, int ldda,
-    int* ipiv_array, int* info_array, int batchsize){
-  auto handle = at::cuda::getCurrentCUDABlasHandle();
-  TORCH_CUDABLAS_CHECK(cublasDgetrfBatched(handle, n, dA_array, ldda, ipiv_array, info_array, batchsize));
-}
-
-template<>
-void cublas_LU_batched<float>(
-    int _m, int n, float** dA_array, int ldda,
-    int* ipiv_array, int* info_array, int batchsize){
-  auto handle = at::cuda::getCurrentCUDABlasHandle();
-  TORCH_CUDABLAS_CHECK(cublasSgetrfBatched(handle, n, dA_array, ldda, ipiv_array, info_array, batchsize));
-}
-
-template<>
-void cublas_getri_batched<double>(
-    int _m, int n, double** dA_array, int ldda,
-    int* ipiv_array, int* info_array, int batchsize, double** dC_array){
-  auto handle = at::cuda::getCurrentCUDABlasHandle();
-  TORCH_CUDABLAS_CHECK(cublasDgetriBatched(handle, n, dA_array, ldda, ipiv_array, dC_array, n, info_array, batchsize));
-}
-
-template<>
-void cublas_getri_batched<float>(
-    int _m, int n, float** dA_array, int ldda,
-    int* ipiv_array, int* info_array, int batchsize, float** dC_array){
-  auto handle = at::cuda::getCurrentCUDABlasHandle();
-  TORCH_CUDABLAS_CHECK(cublasSgetriBatched(handle, n, dA_array, ldda, ipiv_array, dC_array, n, info_array, batchsize));
-}
-
-
 #ifdef USE_MAGMA
 template<class scalar_t>
 void magmaSolve(
@@ -114,6 +30,11 @@ void magmaSolveBatched(
     magma_int_t n, magma_int_t nrhs, scalar_t** dA_array, magma_int_t ldda,
     magma_int_t** dipiv_array, scalar_t** dB_array, magma_int_t lddb,
     magma_int_t* dinfo_array, magma_int_t batch_count, const MAGMAQueue& magma_queue);
+
+template<class scalar_t>
+void magmaLu(
+    magma_int_t m, magma_int_t n, scalar_t* dA, magma_int_t ldda,
+    magma_int_t* ipiv, magma_int_t* info);
 
 template<class scalar_t>
 void magmaLuBatched(
@@ -133,6 +54,11 @@ void magmaLuNoPivBatched(
 
 template<class scalar_t>
 inline magma_int_t magmaGetriOptimalBlocksize(magma_int_t n);
+
+template<class scalar_t>
+void magmaGetri(
+    magma_int_t n, scalar_t* dA, magma_int_t ldda, magma_int_t* ipiv, scalar_t* dwork,
+    magma_int_t lwork, magma_int_t* info);
 
 template<class scalar_t>
 void magmaGetriBatched(
@@ -245,6 +171,24 @@ void magmaSolveBatched<float>(
 }
 
 template<>
+void magmaLu<double>(
+    magma_int_t m, magma_int_t n, double* dA, magma_int_t ldda,
+    magma_int_t* ipiv, magma_int_t* info) {
+  MagmaStreamSyncGuard guard;
+  magma_dgetrf_gpu(m, n, dA, ldda, ipiv, info);
+  AT_CUDA_CHECK(cudaGetLastError());
+}
+
+template<>
+void magmaLu<float>(
+    magma_int_t m, magma_int_t n, float* dA, magma_int_t ldda,
+    magma_int_t* ipiv, magma_int_t* info) {
+  MagmaStreamSyncGuard guard;
+  magma_sgetrf_gpu(m, n, dA, ldda, ipiv, info);
+  AT_CUDA_CHECK(cudaGetLastError());
+}
+
+template<>
 void magmaLuBatched<double>(
     magma_int_t m, magma_int_t n, double** dA_array, magma_int_t ldda,
     magma_int_t** ipiv_array, magma_int_t* info_array, magma_int_t batchsize,
@@ -304,6 +248,24 @@ inline magma_int_t magmaGetriOptimalBlocksize<double>(magma_int_t n) {
 template<>
 inline magma_int_t magmaGetriOptimalBlocksize<float>(magma_int_t n) {
   return magma_get_sgetri_nb(n);
+}
+
+template<>
+void magmaGetri<double>(
+    magma_int_t n, double* dA, magma_int_t ldda, magma_int_t* ipiv, double* dwork,
+    magma_int_t lwork, magma_int_t* info) {
+  MagmaStreamSyncGuard guard;
+  magma_dgetri_gpu(n, dA, ldda, ipiv, dwork, lwork, info);
+  AT_CUDA_CHECK(cudaGetLastError());
+}
+
+template<>
+void magmaGetri<float>(
+    magma_int_t n, float* dA, magma_int_t ldda, magma_int_t* ipiv, float* dwork,
+    magma_int_t lwork, magma_int_t* info) {
+  MagmaStreamSyncGuard guard;
+  magma_sgetri_gpu(n, dA, ldda, ipiv, dwork, lwork, info);
+  AT_CUDA_CHECK(cudaGetLastError());
 }
 
 template<>
@@ -660,26 +622,28 @@ std::tuple<Tensor, Tensor> _solve_helper_cuda(const Tensor& self, const Tensor& 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ inverse ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template <typename scalar_t>
-static void apply_batched_inverse(Tensor& self, Tensor& self_inv, Tensor& infos) {
-  const int batch_size = cuda_int_cast(batchCount(self), "batchCount");
-  const int n = cuda_int_cast(self.size(-2), "self.size(-2)");
-
-  const bool use_loop_launch_ = use_loop_launch(batch_size, n);
-
-  if (use_loop_launch_) {
-    self_inv = at::eye({n}, self.options()).expand_as(self).clone();
-    self_inv.unsafeGetTensorImpl()->set_stride(self.dim()-2, 1); // These two lines set self_inv to column-major
-    self_inv.unsafeGetTensorImpl()->set_stride(self.dim()-1, n);
-  }
-
+static void apply_batched_inverse(Tensor& self, Tensor& self_inv, std::vector<int64_t>& infos) {
+#ifndef USE_MAGMA
+AT_ERROR("inverse: MAGMA library not found in "
+    "compilation. Please rebuild with MAGMA.");
+#else
   auto self_data = self.data_ptr<scalar_t>();
   auto self_mat_stride = matrixStride(self);
   auto self_inv_data = self_inv.data_ptr<scalar_t>();
   auto self_inv_mat_stride = matrixStride(self_inv);
 
+  magma_int_t batch_size = magma_int_cast(batchCount(self), "batchCount");
+  magma_int_t n = magma_int_cast(self.size(-2), "self.size(-2)");
+
+  magma_int_t* info_array;
+  magma_int_t* ipiv_data;
+  magma_int_t** ipiv_array;
   scalar_t** self_array;
   scalar_t** self_inv_array;
 
+  ALLOCATE_ARRAY(info_array, magma_int_t, batch_size);
+  ALLOCATE_ARRAY(ipiv_data, magma_int_t, batch_size * n);
+  ALLOCATE_ARRAY(ipiv_array, magma_int_t*, batch_size);
   ALLOCATE_ARRAY(self_array, scalar_t*, batch_size);
   ALLOCATE_ARRAY(self_inv_array, scalar_t*, batch_size);
 
@@ -687,67 +651,86 @@ static void apply_batched_inverse(Tensor& self, Tensor& self_inv, Tensor& infos)
   for (int64_t i = 0; i < batch_size; i++) {
     self_array[i] = &self_data[i * self_mat_stride];
     self_inv_array[i] = &self_inv_data[i * self_inv_mat_stride];
+    ipiv_array[i] = &ipiv_data[i * n];
   }
 
-  Tensor ipiv_array = at::zeros({batch_size * n}, self.options().dtype(at::kInt));
+  MAGMAQueue magma_queue(self.get_device());
+  magmaLuBatched<scalar_t>(
+    n, n, self_array, n, ipiv_array, info_array,
+    batch_size, magma_queue);
 
-  if (use_loop_launch_) {
-    infos = infos.cpu();
-    int* p_ipiv_array = ipiv_array.data_ptr<int>();
-    int* p_infos = infos.data_ptr<int>();
-    for (int64_t i = 0; i < batch_size; i++) {
-      _apply_single_inverse_helper<scalar_t>(self_array[i], self_inv_array[i], p_ipiv_array + i * n, p_infos + i, n);
-    }
-  } else {
-    cublas_LU_batched<scalar_t>(n, n, self_array, n,
-      ipiv_array.data_ptr<int>(), infos.data_ptr<int>(), batch_size);
+  constexpr int64_t batch_limit = 65535;
+  // Compute as many batches of 65535 possible
+  // The number of "mini"-batches are floor(batch_size / batch_limit)
+  // and these cover floor(batch_size / batch_limit) * batch_limit matrix solves
+  int64_t mini_batches = batch_size / batch_limit, mini_idx;
+  for (mini_idx = 0; mini_idx < mini_batches * batch_limit; mini_idx += batch_limit) {
+    scalar_t** self_array_cur = &self_array[mini_idx];
+    scalar_t** self_inv_array_cur = &self_inv_array[mini_idx];
+    magma_int_t** ipiv_array_cur = &ipiv_array[mini_idx];
+    magma_int_t* info_array_cur = &info_array[mini_idx];
 
-    cublas_getri_batched<scalar_t>(n, n, self_array, n,
-      ipiv_array.data_ptr<int>(), infos.data_ptr<int>(), batch_size, self_inv_array);
+    magmaGetriBatched<scalar_t>(
+      n, self_array_cur, n, ipiv_array_cur, self_inv_array_cur,
+      n, info_array_cur, batch_limit, magma_queue);
   }
+
+  // Compute whatever is left = batch_size - floor(batch_size / batch_limit) * batch_limit
+  // which concisely is equal to batch_size % batch_limit
+  if (batch_size % batch_limit != 0) {
+    magmaGetriBatched<scalar_t>(
+      n, &self_array[mini_idx], n, &ipiv_array[mini_idx], &self_inv_array[mini_idx],
+      n, &info_array[mini_idx], batch_size % batch_limit, magma_queue);
+  }
+
+  for (int64_t i = 0; i < batch_size; i++) {
+    infos[i] = info_array[i];
+  }
+#endif
 }
 
 template <typename scalar_t>
-static void apply_single_inverse(const Tensor& self, Tensor& self_inv, int64_t& info) {
-  int n = cuda_int_cast(self.size(-2), "self.size(-2)");
+static void apply_single_inverse(Tensor& self, int64_t& info) {
+#ifndef USE_MAGMA
+AT_ERROR("inverse: MAGMA library not found in "
+    "compilation. Please rebuild with MAGMA.");
+#else
+  auto self_data = self.data_ptr<scalar_t>();
+  magma_int_t n = magma_int_cast(self.size(-2), "self.size(-2)");
+  magma_int_t lwork = n * magmaGetriOptimalBlocksize<scalar_t>(n);
+  magma_int_t info_tmp = 0;
 
-  Tensor ipiv = at::empty({n}, self.options().dtype(at::kInt));
-  self_inv = at::eye(n, self.options());
-  self_inv.unsafeGetTensorImpl()->set_stride(0, 1); // These two lines set self_inv to column-major
-  self_inv.unsafeGetTensorImpl()->set_stride(1, n);
-
-  int info_tmp = 0;
-  _apply_single_inverse_helper<scalar_t>(self.data_ptr<scalar_t>(), self_inv.data_ptr<scalar_t>(), ipiv.data_ptr<int>(), &info_tmp, n);
+  Tensor ipiv = at::empty({n}, at::kInt);
+  Tensor dwork = at::empty({lwork}, self.options());
+  magmaLu<scalar_t>(n, n, self_data, n, ipiv.data_ptr<magma_int_t>(), &info_tmp);
+  if (info_tmp != 0) {
+    info = info_tmp;
+    return;
+  }
+  magmaGetri<scalar_t>(
+    n, self_data, n, ipiv.data_ptr<magma_int_t>(), dwork.data_ptr<scalar_t>(), lwork, &info_tmp);
   info = info_tmp;
-}
-
-template <typename scalar_t>
-inline static void _apply_single_inverse_helper(scalar_t* self_ptr, scalar_t* self_inv_ptr, int* ipiv_ptr, int* info_ptr, int n) {
-  // self_inv_ptr should already be an identity matrix
-  cusolver_LU<scalar_t>(n, n, self_ptr, n, ipiv_ptr, info_ptr);
-  cusolver_getrs<scalar_t>(n, n, self_ptr, n, ipiv_ptr, self_inv_ptr, n, info_ptr);
+#endif
 }
 
 Tensor _inverse_helper_cuda(const Tensor& self) {
-  auto self_working_copy = cloneBatchedColumnMajor(self);
+  auto self_inv_working_copy = cloneBatchedColumnMajor(self);
   if (self.dim() > 2) {
-    auto self_inv_working_copy = at::empty_like(self_working_copy);
-    Tensor infos = at::zeros({batchCount(self)}, self.options().dtype(kInt));
+    std::vector<int64_t> infos(batchCount(self), 0);
+    auto self_working_copy = cloneBatchedColumnMajor(self);
     AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "inverse_cuda", [&]{
       apply_batched_inverse<scalar_t>(
         self_working_copy, self_inv_working_copy, infos);
     });
     batchCheckErrors(infos, "inverse_cuda");
-    return self_inv_working_copy;
   } else {
-    Tensor self_inv;
     int64_t info = 0;
     AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "inverse_cuda", [&]{
-      apply_single_inverse<scalar_t>(self_working_copy, self_inv, info);
+      apply_single_inverse<scalar_t>(self_inv_working_copy, info);
     });
     singleCheckErrors(info, "inverse_cuda");
-    return self_inv;
   }
+  return self_inv_working_copy;
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ cholesky_solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -933,19 +916,18 @@ AT_ERROR("lu: MAGMA library not found in "
 
   if (self.dim() == 2) {
     // If `pivots` is defined, then we have to compute them.
-    // magmaLuNoPiv use a hybrid CPU-GPU algorithm to compute
+    // magmaLu and magmaLuNoPiv use a hybrid CPU-GPU algorithm to compute
     // the partially-pivoted LU decomposition with / without pivots.
     // The driver routines magma_(d/s)getrf_(nopiv_)gpu accepts a tensor on the CPU for pivots.
     // The data is later copied back to the appropriate output tensor.
     Tensor info_tmp = at::zeros({}, at::kInt);
     if (get_pivots) {
-      Tensor piv_tmp = at::zeros_like(pivots, self.options().dtype(at::kInt));
-      cusolver_LU<scalar_t>(m, n, self_data, m, piv_tmp.data_ptr<int>(), info_tmp.data_ptr<int>());
+      Tensor piv_tmp = at::empty({k}, at::kInt);
+      magmaLu<scalar_t>(
+        m, n, self_data, m, piv_tmp.data_ptr<magma_int_t>(), info_tmp.data_ptr<magma_int_t>());
       pivots.copy_(piv_tmp);
     } else {
       magmaLuNoPiv<scalar_t>(m, n, self_data, m, info_tmp.data_ptr<magma_int_t>());
-      // cusolverDnXgetrf LU impl without pivoting is unstable and may create NaN.
-      // cusolver_LU<scalar_t>(m, n, self_data, m, nullptr, info_tmp.data_ptr<int>());
     }
     infos.copy_(info_tmp);
   } else {
@@ -971,13 +953,9 @@ AT_ERROR("lu: MAGMA library not found in "
       for (int64_t i = 0; i < batch_size; i++) {
         pivots_array[i] = &pivots_data[i * pivots_matrix_stride];
       }
-      if (m != n) {
-        magmaLuBatched<scalar_t>(
-          m, n, self_array, m, pivots_array,
-          infos.data_ptr<magma_int_t>(), batch_size, magma_queue);
-      } else {
-        cublas_LU_batched<scalar_t>(m, n, self_array, m, *pivots_array, infos.data_ptr<int>(), batch_size);
-      }
+      magmaLuBatched<scalar_t>(
+        m, n, self_array, m, pivots_array,
+        infos.data_ptr<magma_int_t>(), batch_size, magma_queue);
     } else {
       magmaLuNoPivBatched<scalar_t>(
         m, n, self_array, m, infos.data_ptr<magma_int_t>(),
