@@ -51,8 +51,9 @@ $_cmake_bin_path \
   -DSWIFTSHADER_BUILD_TESTS=0 \
   -DSWIFTSHADER_LESS_DEBUG_INFO=1 \
   -DSWIFTSHADER_WARNINGS_AS_ERRORS=1 \
-  -D_CMAKE_TOOLCHAIN_PREFIX=llvm- \
   -DCMAKE_EXE_LINKER_FLAGS=" -fuse-ld=gold " \
+  -DCMAKE_AR=llvm-ar-9 \
+  -DCMAKE_RANLIB=llvm-ranlib-9 \
   ..
 
 make SHELL='sh -x' VERBOSE=1 AM_DEFAULT_VERBOSITY=1 --debug=j --jobs=8
