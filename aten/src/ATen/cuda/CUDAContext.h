@@ -5,7 +5,10 @@
 #include <cuda_runtime_api.h>
 #include <cusparse.h>
 #include <cublas_v2.h>
+
+#ifdef CUDART_VERSION
 #include <cusolverDn.h>
+#endif
 
 #include <ATen/core/ATenGeneral.h>
 #include <ATen/Context.h>
@@ -64,11 +67,9 @@ TORCH_CUDA_API Allocator* getCUDADeviceAllocator();
 /* Handles */
 TORCH_CUDA_API cusparseHandle_t getCurrentCUDASparseHandle();
 TORCH_CUDA_API cublasHandle_t getCurrentCUDABlasHandle();
-TORCH_CUDA_API cusolverDnHandle_t getCurrentCUDASolverDnHandle();
 
-#if defined(__CUDACC__) && CUDART_VERSION >= 10000
-// some cusolver functions doesn't work well on cuda 9.2, cusolver is used on cuda >= 10.0
-#define USE_CUSOLVER
+#ifdef CUDART_VERSION
+TORCH_CUDA_API cusolverDnHandle_t getCurrentCUDASolverDnHandle();
 #endif
 
 } // namespace cuda

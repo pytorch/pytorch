@@ -1,6 +1,8 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/DeviceThreadHandles.h>
 
+#ifdef CUDART_VERSION
+
 namespace at { namespace cuda {
 namespace {
 
@@ -45,3 +47,5 @@ cusolverDnHandle_t getCurrentCUDASolverDnHandle() {
 }
 
 }} // namespace at::cuda
+
+#endif // CUDART_VERSION

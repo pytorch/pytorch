@@ -16,7 +16,7 @@ namespace at {
 namespace native {
 
 template<>
-void cusolver_LU<double>(int m, int n, double* dA, int ldda, int* ipiv, int* info) {
+void cusolver_getrf<double>(int m, int n, double* dA, int ldda, int* ipiv, int* info) {
   auto handle = at::cuda::getCurrentCUDASolverDnHandle();
   int lwork;
   TORCH_CUSOLVER_CHECK(cusolverDnDgetrf_bufferSize(handle, m, n, dA, ldda, &lwork));
@@ -27,7 +27,7 @@ void cusolver_LU<double>(int m, int n, double* dA, int ldda, int* ipiv, int* inf
 }
 
 template<>
-void cusolver_LU<float>(int m, int n, float* dA, int ldda, int* ipiv, int* info) {
+void cusolver_getrf<float>(int m, int n, float* dA, int ldda, int* ipiv, int* info) {
   auto handle = at::cuda::getCurrentCUDASolverDnHandle();
   int lwork;
   TORCH_CUSOLVER_CHECK(cusolverDnSgetrf_bufferSize(handle, m, n, dA, ldda, &lwork));
@@ -52,7 +52,7 @@ void cusolver_getrs<float>(int n, int nrhs, float* dA, int lda, int* ipiv, float
 }
 
 template<>
-void cublas_LU_batched<double>(
+void cublas_getrf_batched<double>(
     int _m, int n, double** dA_array, int ldda,
     int* ipiv_array, int* info_array, int batchsize){
   auto handle = at::cuda::getCurrentCUDABlasHandle();
@@ -60,7 +60,7 @@ void cublas_LU_batched<double>(
 }
 
 template<>
-void cublas_LU_batched<float>(
+void cublas_getrf_batched<float>(
     int _m, int n, float** dA_array, int ldda,
     int* ipiv_array, int* info_array, int batchsize){
   auto handle = at::cuda::getCurrentCUDABlasHandle();
@@ -125,7 +125,7 @@ static void apply_batched_inverse_lib(Tensor& self, Tensor& self_inv, Tensor& in
       _apply_single_inverse_helper<scalar_t>(self_array[i], self_inv_array[i], p_ipiv_array + i * n, p_infos + i, n);
     }
   } else {
-    cublas_LU_batched<scalar_t>(n, n, self_array, n,
+    cublas_getrf_batched<scalar_t>(n, n, self_array, n,
       ipiv_array.data_ptr<int>(), infos.data_ptr<int>(), batch_size);
 
     cublas_getri_batched<scalar_t>(n, n, self_array, n,
@@ -150,7 +150,7 @@ static void apply_single_inverse_lib(const Tensor& self, Tensor& self_inv, int64
 template <typename scalar_t>
 inline static void _apply_single_inverse_helper(scalar_t* self_ptr, scalar_t* self_inv_ptr, int* ipiv_ptr, int* info_ptr, int n) {
   // self_inv_ptr should already be an identity matrix
-  cusolver_LU<scalar_t>(n, n, self_ptr, n, ipiv_ptr, info_ptr);
+  cusolver_getrf<scalar_t>(n, n, self_ptr, n, ipiv_ptr, info_ptr);
   cusolver_getrs<scalar_t>(n, n, self_ptr, n, ipiv_ptr, self_inv_ptr, n, info_ptr);
 }
 
