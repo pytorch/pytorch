@@ -15,6 +15,7 @@
 #include <c10/core/ScalarType.h>
 #include <c10/util/Deprecated.h>
 #include <ATen/native/Resize.h>
+#include <ATen/native/Packbits.h>
 #include <ATen/native/TensorFactories.h>
 #include <c10/core/TensorOptions.h>
 #include <TH/THAllocator.h>
@@ -472,13 +473,7 @@ Tensor scalar_tensor(Scalar s, const TensorOptions& options) {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ packbits ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor packbits(const Tensor& bit_array, c10::optional<int64_t> dim, bool big_endian) {
-  TORCH_CHECK(true, "packbits works with boolean tensors only");
-
-  if (dim) {
-    bit_array.print();
-  }
-  auto result = at::zeros_like(bit_array);
-  return result;
+  return at::native::packbits_test::packbits(bit_array, dim, big_endian);
 }
 
 // Tensor packbits(const Tensor& bit_array, int64_t dim, const TensorOptions& options) {
