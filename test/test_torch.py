@@ -16461,7 +16461,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                     self.assertEqual(res1, res2)
 
     @onlyCPU
-    @dtypes(torch.float, torch.double)
+    @dtypes(torch.float, torch.double, torch.complex64, torch.complex128)
     def test_dot(self, device, dtype):
         v1 = torch.randn(100, dtype=dtype, device=device)
         v2 = torch.randn(100, dtype=dtype, device=device)
