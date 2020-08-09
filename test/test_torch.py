@@ -7034,80 +7034,85 @@ class TestTorchDeviceType(TestCase):
     def test_logical_or(self, device):
         self._test_logical(device, 'logical_or', [10, 0, 1, 0], [1, 0, 0, 10], [1, 0, 1, 1])
 
+    # Tests clamp and its alias, clip
     def test_clamp(self, device):
-        m1 = torch.rand(100, device=device).mul(5).add(-2.5)  # uniform in [-2.5, 2.5]
-        # just in case we're extremely lucky.
-        min_val = -1
-        max_val = 1
-        m1[1] = min_val
-        m1[2] = max_val
+        op_list = ((torch.clamp, torch.Tensor.clamp, torch.Tensor.clamp_),
+                   (torch.clip, torch.Tensor.clip, torch.Tensor.clip_))
+        for op, method_op, inplace_op in op_list:
 
-        res1 = m1.clone()
-        res1.clamp_(min_val, max_val)
-        res2 = m1.clone()
-        for i in iter_indices(res2):
-            res2[i] = max(min_val, min(max_val, res2[i]))
-        self.assertEqual(res1, res2)
+            m1 = torch.rand(100, device=device).mul(5).add(-2.5)  # uniform in [-2.5, 2.5]
+            # just in case we're extremely lucky.
+            min_val = -1
+            max_val = 1
+            m1[1] = min_val
+            m1[2] = max_val
 
-        out = m1.clone()
-        torch.clamp(m1, min=min_val, max=max_val, out=out)
-        self.assertEqual(out, res1)
+            res1 = m1.clone()
+            inplace_op(res1, min_val, max_val)
+            res2 = m1.clone()
+            for i in iter_indices(res2):
+                res2[i] = max(min_val, min(max_val, res2[i]))
+            self.assertEqual(res1, res2)
 
-        res1 = torch.clamp(m1, min=min_val)
-        res2 = m1.clone()
-        for i in iter_indices(res2):
-            res2[i] = max(min_val, res2[i])
-        self.assertEqual(res1, res2)
+            out = m1.clone()
+            op(m1, min=min_val, max=max_val, out=out)
+            self.assertEqual(out, res1)
 
-        torch.clamp(m1, min=min_val, out=out)
-        self.assertEqual(out, res1)
+            res1 = op(m1, min=min_val)
+            res2 = m1.clone()
+            for i in iter_indices(res2):
+                res2[i] = max(min_val, res2[i])
+            self.assertEqual(res1, res2)
 
-        res1 = torch.clamp(m1, max=max_val)
-        res2 = m1.clone()
-        for i in iter_indices(res2):
-            res2[i] = min(max_val, res2[i])
-        self.assertEqual(res1, res2)
+            op(m1, min=min_val, out=out)
+            self.assertEqual(out, res1)
 
-        torch.clamp(m1, max=max_val, out=out)
-        self.assertEqual(out, res1)
+            res1 = op(m1, max=max_val)
+            res2 = m1.clone()
+            for i in iter_indices(res2):
+                res2[i] = min(max_val, res2[i])
+            self.assertEqual(res1, res2)
 
-        # if the tensor contains nan case
-        test_tens = torch.tensor([nan], device=device)
+            op(m1, max=max_val, out=out)
+            self.assertEqual(out, res1)
 
-        res1 = test_tens.clone()
-        res1.clamp_(min_val, max_val)
-        res2 = test_tens.clone()
-        for i in iter_indices(res2):
-            res2[i] = max(min(res2[i], max_val), min_val)
-        self.assertEqual(torch.isnan(res1), torch.isnan(res2))
+            # if the tensor contains nan case
+            test_tens = torch.tensor([nan], device=device)
 
-        out = test_tens.clone()
-        torch.clamp(test_tens, min=min_val, max=max_val, out=out)
-        self.assertEqual(torch.isnan(out), torch.isnan(res1))
+            res1 = test_tens.clone()
+            inplace_op(res1, min_val, max_val)
+            res2 = test_tens.clone()
+            for i in iter_indices(res2):
+                res2[i] = max(min(res2[i], max_val), min_val)
+            self.assertEqual(torch.isnan(res1), torch.isnan(res2))
 
-        res1 = torch.clamp(test_tens, min=min_val)
-        res2 = test_tens.clone()
-        for i in iter_indices(res2):
-            res2[i] = max(res2[i], min_val)
-        self.assertEqual(torch.isnan(res1), torch.isnan(res2))
+            out = test_tens.clone()
+            op(test_tens, min=min_val, max=max_val, out=out)
+            self.assertEqual(torch.isnan(out), torch.isnan(res1))
 
-        torch.clamp(test_tens, min=min_val, out=out)
-        self.assertEqual(torch.isnan(out), torch.isnan(res1))
+            res1 = op(test_tens, min=min_val)
+            res2 = test_tens.clone()
+            for i in iter_indices(res2):
+                res2[i] = max(res2[i], min_val)
+            self.assertEqual(torch.isnan(res1), torch.isnan(res2))
 
-        res1 = torch.clamp(test_tens, max=max_val)
-        res2 = test_tens.clone()
-        for i in iter_indices(res2):
-            res2[i] = min(res2[i], max_val)
-        self.assertEqual(torch.isnan(res1), torch.isnan(res2))
+            op(test_tens, min=min_val, out=out)
+            self.assertEqual(torch.isnan(out), torch.isnan(res1))
 
-        torch.clamp(test_tens, max=max_val, out=out)
-        self.assertEqual(torch.isnan(out), torch.isnan(res1))
+            res1 = op(test_tens, max=max_val)
+            res2 = test_tens.clone()
+            for i in iter_indices(res2):
+                res2[i] = min(res2[i], max_val)
+            self.assertEqual(torch.isnan(res1), torch.isnan(res2))
 
-        error_msg = 'At least one of \'min\' or \'max\' must not be None'
-        with self.assertRaisesRegex(RuntimeError, error_msg):
-            m1.clamp()
-        with self.assertRaisesRegex(RuntimeError, error_msg):
-            m1.clamp_()
+            op(test_tens, max=max_val, out=out)
+            self.assertEqual(torch.isnan(out), torch.isnan(res1))
+
+            error_msg = 'At least one of \'min\' or \'max\' must not be None'
+            with self.assertRaisesRegex(RuntimeError, error_msg):
+                method_op(m1)
+            with self.assertRaisesRegex(RuntimeError, error_msg):
+                inplace_op(m1)
 
     def test_cat_empty_legacy(self, device):
         # FIXME: this is legacy behavior and should be removed
