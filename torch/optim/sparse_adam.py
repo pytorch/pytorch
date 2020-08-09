@@ -73,5 +73,5 @@ class SparseAdam(Optimizer):
         del exp_avg_update_values, exp_avg_sq_update_values
         bias_correction1 = 1 - beta1 ** state['step']
         bias_correction2 = 1 - beta2 ** state['step']
-        step_size = group['lr'] * math.sqrt(bias_correction2) / bias_correction1
-        return make_sparse(-step_size * numer.div_(denom))
+        correction = math.sqrt(bias_correction2) / bias_correction1
+        return make_sparse(correction * numer.div_(denom))

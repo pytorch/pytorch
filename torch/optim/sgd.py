@@ -87,5 +87,5 @@ class SGD(Optimizer):
             else:
                 d_p = buf
         return d_p
-    
+
     get_sparse_update = get_update
