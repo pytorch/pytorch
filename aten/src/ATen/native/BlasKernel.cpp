@@ -6,8 +6,8 @@
 
 #if AT_BUILD_WITH_BLAS()
 extern "C" double ddot_(int *n, double *x, int *incx, double *y, int *incy);
-extern "C" void cdotu(float* dotc, int *n, float *x, int *incx, float *y, int *incy);
-extern "C" void zdotu(double* dotc, int *n, double *x, int *incx, double *y, int *incy);
+extern "C" void cdotu_(float* dotc, int *n, float *x, int *incx, float *y, int *incy);
+extern "C" void zdotu_(double* dotc, int *n, double *x, int *incx, double *y, int *incy);
 extern "C" void dscal_(int *n, double *a, double *x, int *incx);
 extern "C" void sscal_(int *n, float *a, float *x, int *incx);
 extern "C" void dgemv_(char *trans, int *m, int *n, double *alpha, double *a, int *lda, double *x, int *incx, double *beta, double *y, int *incy);
@@ -203,7 +203,7 @@ c10::complex<float> dot_fast_path(int n, c10::complex<float>* x, int incx, c10::
   auto cast_x = reinterpret_cast<float*>(x);
   auto cast_y = reinterpret_cast<float*>(y);
   float dotc[2];
-  cdotu(dotc, &n, cast_x, &incx, cast_y, &incy);
+  cdotu_(dotc, &n, cast_x, &incx, cast_y, &incy);
   return c10::complex<float>{dotc[0], dotc[1]};
 }
 
@@ -211,7 +211,7 @@ c10::complex<double> dot_fast_path(int n, c10::complex<double>* x, int incx, c10
   auto cast_x = reinterpret_cast<double*>(x);
   auto cast_y = reinterpret_cast<double*>(y);
   double dotz[2];
-  zdotu(dotz, &n, cast_x, &incx, cast_y, &incy);
+  zdotu_(dotz, &n, cast_x, &incx, cast_y, &incy);
   return c10::complex<double>{dotz[0], dotz[1]};
 }
 #endif
