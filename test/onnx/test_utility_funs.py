@@ -732,6 +732,7 @@ class TestUtilityFuns(TestCase):
 
         x = torch.tensor([1, 2])
         verify(MyModel(), x, backend, do_constant_folding=False)
+
     def test_fuse_conv_bn(self):
         class Fuse(torch.nn.Module):
             def __init__(self):
