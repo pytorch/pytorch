@@ -23,6 +23,7 @@ kEpsilon = 1e-8
 
 class ArithmeticOpsTest(serial.SerializedTestCase):
     @given(seed=st.integers(0, 65534))
+    @settings(deadline=1000)
     def _test_binary_op_graph(self, name, seed):
         np.random.seed(seed)
         workspace.ResetWorkspace()
@@ -92,8 +93,11 @@ class ArithmeticOpsTest(serial.SerializedTestCase):
             Y_glow[Y_glow == np.Inf] = np.finfo(np.float16).max
             Y_glow[Y_glow == np.NINF] = np.finfo(np.float16).min
 
+            # Ignore mismatches solely due to difference in precision
+            fp16_finite = np.isfinite(A.astype(np.float16) / B.astype(np.float16))
+
             # Results should be identical since we are comparing with the C2 emulation
-            if not np.allclose(Y_c2, Y_glow):
+            if not np.allclose(Y_c2[fp16_finite], Y_glow[fp16_finite]):
                 diff = np.abs((Y_glow - Y_c2) / (Y_c2 + kEpsilon))
                 print_test_debug_info(name, {
                     "dims": dims, "iter": _, "seed": seed, "A": A, "B": B,
@@ -114,6 +118,7 @@ class ArithmeticOpsTest(serial.SerializedTestCase):
 
 
 class UnaryOpTest(serial.SerializedTestCase):
+    @settings(deadline=1000)
     def _test_unary_op(self, opname, X, rtol=1e-5, atol=1e-8):
         workspace.ResetWorkspace()
 
@@ -287,6 +292,7 @@ class UnaryOpTest(serial.SerializedTestCase):
 
 class ReluTest(serial.SerializedTestCase):
     @given(seed=st.integers(0, 65534))
+    @settings(deadline=10000)
     def relu_test(self, inputs, gc, dc, seed):
         np.random.seed(seed)
         inputs = np.random.rand(1).astype(np.float32)

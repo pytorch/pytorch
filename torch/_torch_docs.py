@@ -1425,8 +1425,7 @@ Example::
             [-0.0889,  0.2122,  0.1412]])
 """)
 
-add_docstr(torch.clamp,
-           r"""
+add_docstr(torch.clamp, r"""
 clamp(input, min, max, out=None) -> Tensor
 
 Clamp all elements in :attr:`input` into the range `[` :attr:`min`, :attr:`max` `]` and return
@@ -1495,6 +1494,12 @@ Example::
     tensor([ 0.7753, -0.4702, -0.4599,  1.1899])
     >>> torch.clamp(a, max=0.5)
     tensor([ 0.5000, -0.4702, -0.4599,  0.5000])
+""".format(**common_args))
+
+add_docstr(torch.clip, r"""
+clip(input, min, max, *, out=None) -> Tensor
+
+Alias for :func:`torch.clamp`.
 """.format(**common_args))
 
 add_docstr(torch.conj,
