@@ -65,7 +65,7 @@ static inline bool allIntegral(std::initializer_list<std::reference_wrapper<Scal
 } // namespace
 
 DEFINE_DISPATCH(complex_stub);
-DEFINE_DISPATCH(complex_polar_stub);
+DEFINE_DISPATCH(polar_stub);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ arange ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -101,7 +101,7 @@ Tensor _dim_arange(const Tensor& like, int64_t dim) {
   return at::arange(like.size(dim), like.options().dtype(at::kLong));
 }
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~ complex / complex_polar ~~~~~~~~~~~~~~~~~~~~~~~~~~
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ complex / polar ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 void complex_check_floating(const Tensor& a, const Tensor& b) {
   TORCH_CHECK((a.scalar_type() == kFloat || a.scalar_type() == kDouble) &&
@@ -145,10 +145,7 @@ Tensor complex(const Tensor& real, const Tensor& imag) {
   return at::complex_out(result, real, imag);
 }
 
-Tensor& complex_polar_out(
-    Tensor& result,
-    const Tensor& abs,
-    const Tensor& angle) {
+Tensor& polar_out(Tensor& result, const Tensor& abs, const Tensor& angle) {
   complex_check_dtype(result, abs, angle);
   auto iter = TensorIteratorConfig()
       .set_check_mem_overlap(true)
@@ -157,16 +154,16 @@ Tensor& complex_polar_out(
       .add_input(angle)
       .check_all_same_dtype(false)
       .build();
-  complex_polar_stub(iter.device_type(), iter);
+  polar_stub(iter.device_type(), iter);
   return result;
 }
 
-Tensor complex_polar(const Tensor& abs, const Tensor& angle) {
+Tensor polar(const Tensor& abs, const Tensor& angle) {
   complex_check_floating(abs, angle);
   c10::TensorOptions options = abs.options();
   options = options.dtype(toComplexType(abs.scalar_type()));
   Tensor result = at::empty(0, options);
-  return at::complex_polar_out(result, abs, angle);
+  return at::polar_out(result, abs, angle);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ empty ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

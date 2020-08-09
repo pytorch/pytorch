@@ -15,8 +15,8 @@ void complex_kernel(TensorIterator& iter) {
   });
 }
 
-void complex_polar_kernel(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES(iter.input_dtype(), "complex_polar_cpu", [&]() {
+void polar_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES(iter.input_dtype(), "polar_cpu", [&]() {
     cpu_kernel(iter, [=](scalar_t a, scalar_t b) -> c10::complex<scalar_t> {
       return c10::complex<scalar_t>(a * std::cos(b), a * std::sin(b));
     });
@@ -26,7 +26,7 @@ void complex_polar_kernel(TensorIterator& iter) {
 } // anonymous namespace
 
 REGISTER_DISPATCH(complex_stub, &complex_kernel);
-REGISTER_DISPATCH(complex_polar_stub, &complex_polar_kernel);
+REGISTER_DISPATCH(polar_stub, &polar_kernel);
 
 } // namespace native
 } // namespace at

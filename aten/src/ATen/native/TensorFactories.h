@@ -90,7 +90,7 @@ inline void check_supported_max_int_with_precision(int64_t n, const Tensor& tens
 using binary_fn = void (*)(TensorIterator&);
 
 DECLARE_DISPATCH(binary_fn, complex_stub);
-DECLARE_DISPATCH(binary_fn, complex_polar_stub);
+DECLARE_DISPATCH(binary_fn, polar_stub);
 
 } // namespace native
 } // namespace at

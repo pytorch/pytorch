@@ -19,8 +19,8 @@ void complex_kernel_cuda(TensorIterator& iter) {
   });
 }
 
-void complex_polar_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES(iter.input_dtype(0), "complex_polar_cuda", [&]() {
+void polar_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES(iter.input_dtype(0), "polar_cuda", [&]() {
     gpu_kernel(
       iter, [] GPU_LAMBDA(scalar_t a, scalar_t b) -> c10::complex<scalar_t> {
         return c10::complex<scalar_t>(a * std::cos(b), a * std::sin(b));
@@ -31,7 +31,7 @@ void complex_polar_kernel_cuda(TensorIterator& iter) {
 } // anonymous namespace
 
 REGISTER_DISPATCH(complex_stub, &complex_kernel_cuda);
-REGISTER_DISPATCH(complex_polar_stub, &complex_polar_kernel_cuda);
+REGISTER_DISPATCH(polar_stub, &polar_kernel_cuda);
 
 } // namespace native
 } // namespace at

@@ -74,7 +74,7 @@ Creation Ops
     quantize_per_channel
     dequantize
     complex
-    complex_polar
+    polar
 
 Indexing, Slicing, Joining, Mutating Ops
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

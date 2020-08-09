@@ -336,7 +336,7 @@
   real: at::real(grad)
   imag: at::imag(grad) * -1
 
-- name: complex_polar(Tensor abs, Tensor angle) -> Tensor
+- name: polar(Tensor abs, Tensor angle) -> Tensor
   abs: at::real(grad) * angle.cos()  - at::imag(grad) * angle.sin()
   angle: (at::real(grad) * angle.cos()  + at::imag(grad) * angle.sin()) * abs * -1
 
