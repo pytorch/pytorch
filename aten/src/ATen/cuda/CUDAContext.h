@@ -5,7 +5,6 @@
 #include <cuda_runtime_api.h>
 #include <cusparse.h>
 #include <cublas_v2.h>
-#include <cusolver_common.h>
 #include <cusolverDn.h>
 
 #include <ATen/core/ATenGeneral.h>
@@ -67,6 +66,10 @@ TORCH_CUDA_API cusparseHandle_t getCurrentCUDASparseHandle();
 TORCH_CUDA_API cublasHandle_t getCurrentCUDABlasHandle();
 TORCH_CUDA_API cusolverDnHandle_t getCurrentCUDASolverDnHandle();
 
+#if defined(__CUDACC__) && CUDART_VERSION >= 10000
+// some cusolver functions doesn't work well on cuda 9.2, cusolver is used on cuda >= 10.0
+#define USE_CUSOLVER
+#endif
 
 } // namespace cuda
 } // namespace at
