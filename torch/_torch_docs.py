@@ -4034,7 +4034,7 @@ Example::
     >>> torch.quantile(a, q)
     tensor([-0.5446,  0.0700,  0.9214])
 
-.. function:: quantile(input, q, dim=None, keepdim=False, out=None) -> Tensor
+.. function:: quantile(input, q, dim=None, keepdim=False, *, out=None) -> Tensor
 
 Returns the q-th quantiles of each row of the :attr:`input` tensor along the dimension
 :attr:`dim`, doing a linear interpolation when the q-th quantile lies between two 
