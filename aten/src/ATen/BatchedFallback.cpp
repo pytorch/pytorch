@@ -58,7 +58,7 @@ void batchedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Sta
               "We could not generate a fallback.");
   TORCH_CHECK(num_returns >= 1,
               "Batching rule not implemented for ", schema, ". ",
-              "We do not support operations with no returns.");
+              "The fallback path does not support operations with no returns.");
   TORCH_WARN("Batching rule not implemented for ", schema, " falling back "
              "to slow (for loop and stack) implementation");
 
