@@ -2,6 +2,7 @@ import unittest
 import os
 import sys
 import typing
+import typing_extensions
 from typing import List, Dict, Optional, Tuple
 
 import torch
@@ -172,8 +173,20 @@ class TestRecursiveScript(JitTestCase):
 
         self.checkModule(M1(), (torch.randn(2, 2),))
 
+        class M2(torch.nn.Module):
+            x : typing_extensions.Final[int]
+
+            def __init__(self):
+                super().__init__()
+                self.x = 2
+
+            def forward(self, t):
+                return t + self.x
+
+        self.checkModule(M2(), (torch.randn(2, 2),))
+
         if sys.version_info[:2] >= (3, 8):
-            class M2(torch.nn.Module):
+            class M3(torch.nn.Module):
                 x : typing.Final[int]
 
                 def __init__(self):
@@ -183,7 +196,7 @@ class TestRecursiveScript(JitTestCase):
                 def forward(self, t):
                     return t + self.x
 
-            self.checkModule(M2(), (torch.randn(2, 2),))
+            self.checkModule(M3(), (torch.randn(2, 2),))
 
     def test_ignore_class(self):
         @torch.jit.ignore
