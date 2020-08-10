@@ -233,6 +233,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: chunk
    .. automethod:: clamp
    .. automethod:: clamp_
+   .. automethod:: clip
+   .. automethod:: clip_
    .. automethod:: clone
    .. automethod:: contiguous
    .. automethod:: copy_
