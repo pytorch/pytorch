@@ -1138,6 +1138,8 @@ Tensor& stack_out(Tensor& result, TensorList tensors, int64_t dim) {
 }
 
 Tensor hstack(TensorList tensors) {
+  TORCH_CHECK(tensors.size() > 0,
+           "hstack expects a non-empty TensorList");
   auto rep = at::atleast_1d(tensors);
   if (rep[0].dim() == 1) {
     return at::cat(rep, 0);
@@ -1146,6 +1148,8 @@ Tensor hstack(TensorList tensors) {
 }
 
 Tensor& hstack_out(Tensor& result, TensorList tensors) {
+  TORCH_CHECK(tensors.size() > 0,
+           "hstack expects a non-empty TensorList");
   auto rep = at::atleast_1d(tensors);
   if (rep[0].dim() == 1) {
     return at::cat_out(result, rep, 0);
@@ -1154,20 +1158,28 @@ Tensor& hstack_out(Tensor& result, TensorList tensors) {
 }
 
 Tensor vstack(TensorList tensors) {
+  TORCH_CHECK(tensors.size() > 0,
+           "vstack expects a non-empty TensorList");
   auto rep = at::atleast_2d(tensors);
   return at::cat(rep, 0);
 }
 
 Tensor& vstack_out(Tensor& result, TensorList tensors) {
+  TORCH_CHECK(tensors.size() > 0,
+           "vstack expects a non-empty TensorList");
   auto rep = at::atleast_2d(tensors);
   return at::cat_out(result, rep, 0);
 }
 
 Tensor dstack(TensorList tensors) {
+  TORCH_CHECK(tensors.size() > 0,
+           "dstack expects a non-empty TensorList");
   auto rep = at::atleast_3d(tensors);
   return at::cat(rep, 2);
 }
 Tensor& dstack_out(Tensor& result, TensorList tensors) {
+  TORCH_CHECK(tensors.size() > 0,
+           "dstack expects a non-empty TensorList");
   auto rep = at::atleast_3d(tensors);
   return at::cat_out(result, rep, 2);
 }
