@@ -1386,6 +1386,12 @@ ger(vec2) -> Tensor
 See :func:`torch.ger`
 """)
 
+add_docstr_all('outer', r"""
+outer(vec2) -> Tensor
+
+See :func:`torch.outer`.
+""")
+
 add_docstr_all('indices',
                r"""
 indices() -> Tensor
