@@ -3,6 +3,7 @@ from types import CodeType, FunctionType
 import torch
 
 from .graph import Graph
+from .graph_module import GraphModule
 
 HAS_VARSTUFF = inspect.CO_VARARGS | inspect.CO_VARKEYWORDS
 
@@ -80,4 +81,4 @@ def symbolic_trace(root, is_leaf_module=is_leaf_module):
         graph.output(fn(*args))
     finally:
         torch.nn.Module.__call__ = orig_call
-    return graph
+    return GraphModule(root, graph)

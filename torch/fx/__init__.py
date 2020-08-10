@@ -20,7 +20,7 @@ class MyModule(torch.nn.Module):
         return torch.topk(torch.sum(self.linear(x + self.linear.weight).relu(), dim=-1), 3)
 
 m = MyModule()
-gm = GraphModule(m)
+gm = symbolic_trace(m)
 ```
 
 The Intermediate Representation centers around a 5-opcode format:
