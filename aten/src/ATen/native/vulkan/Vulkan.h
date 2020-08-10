@@ -85,7 +85,7 @@ const VContext& context();
 class VBuffer;
 class VImage;
 
-using ImageSize = std::array<uint32_t, 3>;
+using ImageSize = std::array<int32_t, 3>;
 struct ImageSizes {
   ImageSize imageSize;
   ImageSize dataSize;
@@ -252,11 +252,11 @@ class VBuffer final {
                    VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER};
   }
 
-  MapMemory map() {
+  MapMemory map() const {
     return MapMemory{context().device(), bufferMemory_, 0, bufferSizeBytes_};
   }
 
-  void copy_from_device_to_host(void* outputData, int64_t size);
+  void copy_from_device_to_host(void* outputData, int64_t size) const;
   void copy_from_host_to_device(const void* data, int64_t size);
   void set_zeros();
 

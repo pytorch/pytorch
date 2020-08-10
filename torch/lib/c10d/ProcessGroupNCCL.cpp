@@ -10,7 +10,6 @@
 #include <c10/cuda/CUDAGuard.h>
 
 #include <c10d/Utils.hpp>
-
 namespace c10d {
 
 constexpr const char* const kNCCLAbortedCommStoreKey = "NCCLABORTEDCOMM";
@@ -36,7 +35,7 @@ struct AutoNcclGroup {
 };
 
 // NCCL op mapping
-std::map<ReduceOp, ncclRedOp_t> ncclOp = {
+const std::map<ReduceOp, ncclRedOp_t> ncclOp = {
     {ReduceOp::MIN, ncclMin},
     {ReduceOp::MAX, ncclMax},
     {ReduceOp::SUM, ncclSum},
@@ -69,13 +68,30 @@ ncclDataType_t getNcclDataType(at::ScalarType type) {
 }
 
 ncclRedOp_t getNcclReduceOp(const ReduceOp reduceOp, at::Tensor& input) {
-  if (reduceOp == ReduceOp::SUM && input.scalar_type() == at::kBool) {
-    // For bool tensors, map sum to max, which both represent a bitwise or.
-    // This is to prevent overflow issues with sum, since we use uint8 to
-    // represent a bool (see ncclDataType mapping).
-    return ncclMax;
+  try {
+    if (reduceOp == ReduceOp::SUM && input.scalar_type() == at::kBool) {
+      // For bool tensors, map sum to max, which both represent a bitwise or.
+      // This is to prevent overflow issues with sum, since we use uint8 to
+      // represent a bool (see ncclDataType mapping).
+      return ncclMax;
+    }
+    return ncclOp.at(reduceOp);
+  } catch (const std::out_of_range& e) {
+    switch (reduceOp) {
+      case ReduceOp::BAND:
+        throw std::runtime_error("Cannot use ReduceOp.BAND with NCCL");
+        break;
+      case ReduceOp::BOR:
+        throw std::runtime_error("Cannot use ReduceOp.BOR with NCCL");
+        break;
+      case ReduceOp::BXOR:
+        throw std::runtime_error("Cannot use ReduceOp.BXOR with NCCL");
+        break;
+      default:
+        throw std::runtime_error("Unhandled ReduceOp");
+        break;
+    }
   }
-  return ncclOp[reduceOp];
 }
 
 // Get the deviceList String from the list of devices
@@ -288,14 +304,18 @@ void ProcessGroupNCCL::WorkNCCL::synchronize() {
   synchronizeInternal(kNoTimeout);
 }
 
-// Waiting on the work's corresponding CUDA events
-void ProcessGroupNCCL::WorkNCCL::synchronizeInternal(
-    std::chrono::milliseconds timeout) {
+void ProcessGroupNCCL::WorkNCCL::synchronizeStreams() {
   for (size_t i = 0; i < devices_.size(); ++i) {
     auto currentStream = at::cuda::getCurrentCUDAStream(devices_[i].index());
     // Block the current stream on the NCCL stream
     cudaEvents_[i].block(currentStream);
   }
+}
+
+// Waiting on the work's corresponding CUDA events
+void ProcessGroupNCCL::WorkNCCL::synchronizeInternal(
+    std::chrono::milliseconds timeout) {
+  synchronizeStreams();
 
   // In case of blocking, wait for the operation to complete.
   if (blockingWait_) {
@@ -750,6 +770,14 @@ std::shared_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
   return std::make_shared<ProcessGroupNCCL::WorkNCCL>(devices);
 }
 
+c10::intrusive_ptr<c10::ivalue::Future> ProcessGroupNCCL::WorkNCCL::
+    getFuture() {
+  // FutureNCCL has a reference to WorkNCCL. Therefore, we don't store a
+  // FutureNCCL reference inside WorkNCCL and we create a new object here
+  // to avoid circular reference between WorkNCCL and FutureNCCL.
+  return c10::make_intrusive<FutureNCCL>(shared_from_this(), outputs_);
+}
+
 template <typename Fn, typename PreProcess, typename PostProcess>
 std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
     std::vector<at::Tensor>& inputs,
@@ -766,6 +794,9 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
 
   // Work itself will create the CUDA events on all GPUs of tensors
   auto work = initWork(devices);
+
+  // Store a reference to outputs to be used by WorkNCCL::getFuture.
+  work->outputs_ = std::make_shared<std::vector<at::Tensor>>(outputs);
 
   at::cuda::OptionalCUDAGuard gpuGuard;
 

@@ -6,7 +6,7 @@ from __future__ import unicode_literals
 import numpy as np
 from scipy.sparse import coo_matrix
 
-from hypothesis import given
+from hypothesis import given, settings
 import hypothesis.strategies as st
 
 from caffe2.python import core
@@ -19,6 +19,7 @@ class TestSparseGradient(hu.HypothesisTestCase):
            K=st.integers(min_value=5, max_value=15),
            sparsity=st.floats(min_value=0.1, max_value=1.0),
            **hu.gcs_cpu_only)
+    @settings(deadline=10000)
     def test_sparse_gradient(self, M, N, K, sparsity, gc, dc):
         X = np.random.randn(M, K).astype(np.float32)
         X[X > sparsity] = 0
