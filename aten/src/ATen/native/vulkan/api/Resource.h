@@ -2,24 +2,67 @@
 
 #include <ATen/native/vulkan/api/Common.h>
 #include <ATen/native/vulkan/api/Allocator.h>
-#include <ATen/native/vulkan/api/Cache.h>
-#include <c10/util/hash.h>
 
 namespace at {
 namespace native {
 namespace vulkan {
 namespace api {
 
-class Buffer final {
- public:
-  Buffer(VkBuffer buffer, VmaAllocation)
-
- private:
-};
-
 struct Resource final {
-  struct Pool final {
-    VmaAllocator allocator_;
+  /*
+    Memory
+  */
+
+  struct Memory final {
+    VmaAllocator allocator;
+    VmaAllocation allocation;
+    VmaAllocationInfo allocation_info;
+  };
+
+  /*
+    Buffer
+  */
+
+  struct Buffer final {
+    VkBuffer handle;
+    Memory memory;
+
+    struct Descriptor final {
+      VkDeviceSize size;
+      VkBufferUsageFlags usage;
+    };
+  };
+
+  /*
+    Image
+  */
+
+  struct Image final {
+    VkImage handle;
+    VkImageView view;
+    Memory memory;
+
+    struct Descriptor final {
+      VkExtent3D extent;
+    };
+  };
+
+  /*
+    Pool
+  */
+
+  class Pool final {
+   public:
+    explicit Pool(VkDevice device);
+
+    Buffer allocate(const Buffer::Descriptor& descriptor);
+    Image allocate(const Image::Descriptor& descriptor);
+    void purge();
+
+   private:
+    Handle<VmaAllocator, decltype(&vmaDestroyAllocator)> allocator_;
+    std::vector<Handle<Buffer>> buffers_;
+    std::vector<Handle<Image>> images_;
   };
 };
 

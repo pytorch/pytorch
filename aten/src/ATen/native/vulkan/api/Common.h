@@ -57,7 +57,7 @@ VK_DELETER_NON_DISPATCHABLE_DECLARE(CommandPool);
 // types, and even though they default to the same implementation as dispatchable
 // handles on some platforms - making the use of std::unique_ptr possible - they
 // are only required by the spec to weakly aliases 64-bit integers which is the
-// implementations some platforms default to.  This makes the use of std::unique_ptr
+// implementation some platforms default to.  This makes the use of std::unique_ptr
 // difficult since semantically unique_ptrs store pointers to their payload
 // which is also what passed onto the custom deleters.
 
