@@ -104,3 +104,7 @@ instantiate_device_type_tests(TestForeach, globals())
 
 if __name__ == '__main__':
     run_tests()
+
+
+
+# TEST
