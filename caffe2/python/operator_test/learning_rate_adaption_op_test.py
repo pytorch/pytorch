@@ -7,18 +7,19 @@ from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
 
-from hypothesis import given
+from hypothesis import given, settings
 import hypothesis.strategies as st
 import numpy as np
 
 
 class TestLearningRateAdaption(serial.SerializedTestCase):
-    @serial.given(inputs=hu.tensors(n=2),
+    @given(inputs=hu.tensors(n=2),
            lr=st.floats(min_value=0.01, max_value=0.99,
                         allow_nan=False, allow_infinity=False),
            lr_alpha=st.floats(min_value=0.01, max_value=0.99,
                            allow_nan=False, allow_infinity=False),
            **hu.gcs_cpu_only)
+    @settings(deadline=None, max_examples=50)
     def test_learning_rate_adaption_op_normalization(self, inputs, lr, lr_alpha,
                                                      gc, dc):
         grad, effgrad = inputs
