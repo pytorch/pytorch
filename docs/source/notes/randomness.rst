@@ -47,12 +47,15 @@ is implemented using :meth:`index_select`, the backward path for
 which is implemented using :meth:`index_add_`, which is known to operate
 nondeterministically (in the forward direction) on the CUDA backend (see above).
 
-CuDNN
+cuDNN
 .....
-When running on the CuDNN backend, two further options must be set::
+When running on the cuDNN backend, two further options must be set::
 
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
+
+On some versions of cuDNN and CUDA, RNN and LSTM may have non-deterministic behavior.
+See :meth:`torch.nn.RNN` and :meth:`torch.nn.LSTM` for details and workarounds.
 
 .. warning::
 

@@ -61,6 +61,7 @@ PyRRef pyRemoteTorchscript(
     const std::string& dstWorkerName,
     const std::string& qualifiedNameStr,
     const float rpcTimeoutSeconds,
+    const bool isAsyncExecution,
     const py::args& args,
     const py::kwargs& kwargs);
 

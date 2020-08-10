@@ -181,15 +181,35 @@ Tensor & selu_(Tensor & self) {
 }
 
 Tensor celu(const Tensor & self, Scalar alpha) {
+  TORCH_CHECK(alpha.to<double>() != 0,
+      "ZeroDivisionError: alpha cannot be 0 for CELU");
   double inv_alpha = 1. / alpha.to<double>();
   return at::elu(self, alpha, Scalar(1.0), Scalar(inv_alpha));
 }
 
 Tensor & celu_(Tensor & self, Scalar alpha) {
+  TORCH_CHECK(alpha.to<double>() != 0,
+      "ZeroDivisionError: alpha cannot be 0 for CELU");
   double inv_alpha = 1. / alpha.to<double>();
   return at::elu_(self, alpha, Scalar(1.0), Scalar(inv_alpha));
 }
 
+Tensor silu(const Tensor& self) {
+  return self * at::sigmoid(self);
+}
+
+Tensor& silu_(Tensor& self) {
+  return self.mul_(at::sigmoid(self));
+}
+
+Tensor& silu_out(Tensor& result, const Tensor& self) {
+  return at::mul_out(result, self, at::sigmoid(self));
+}
+
+Tensor silu_backward(const Tensor& grad, const Tensor& self) {
+  auto self_sigmoid = at::sigmoid(self);
+  return grad * (self_sigmoid * (1 + self * (1 - self_sigmoid)));
+}
 
 template <typename scalar_t>
 inline void _rrelu_with_noise_train(
@@ -756,13 +776,13 @@ Tensor log_sigmoid(const Tensor & self) {
 
 Tensor log_sigmoid_backward_cpu(const Tensor& grad_output, const Tensor& input, const Tensor& buffer) {
   Tensor grad_input;
-  auto iter = at::TensorIterator();
-  iter.set_check_mem_overlap(true);
-  iter.add_output(grad_input);
-  iter.add_input(input);
-  iter.add_input(buffer);
-  iter.add_input(grad_output);
-  iter.build();
+  auto iter = at::TensorIteratorConfig()
+    .set_check_mem_overlap(true)
+    .add_output(grad_input)
+    .add_input(input)
+    .add_input(buffer)
+    .add_input(grad_output)
+    .build();
   log_sigmoid_backward_cpu_stub(kCPU, iter);
   return iter.output();
 }
@@ -772,13 +792,13 @@ Tensor& log_sigmoid_backward_out_cpu(
     const Tensor& grad_output,
     const Tensor& input,
     const Tensor& buffer) {
-  auto iter = at::TensorIterator();
-  iter.set_check_mem_overlap(true);
-  iter.add_output(grad_input);
-  iter.add_input(input);
-  iter.add_input(buffer);
-  iter.add_input(grad_output);
-  iter.build();
+  auto iter = TensorIteratorConfig()
+    .set_check_mem_overlap(true)
+    .add_output(grad_input)
+    .add_input(input)
+    .add_input(buffer)
+    .add_input(grad_output)
+    .build();
   log_sigmoid_backward_cpu_stub(kCPU, iter);
   return grad_input;
 }

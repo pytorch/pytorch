@@ -85,21 +85,6 @@ class TestClassType(JitTestCase):
 
         self.assertEqual(fn(1), 3)
 
-    def test_staticmethod(self):
-        class X(object):
-            def __init__(self, x):
-                # type: (int) -> None
-                self.x = x
-
-            @staticmethod
-            def identity(x):
-                return x
-
-        def fn(x, y):
-            return X.identity(x)
-
-        self.checkScript(fn, (torch.randn(2, 2), torch.randn(2, 2)))
-
     def test_set_attr_type_mismatch(self):
         with self.assertRaisesRegex(RuntimeError, "Wrong type for attribute assignment"):
             @torch.jit.script
@@ -983,3 +968,85 @@ class TestClassType(JitTestCase):
 
         with self.assertRaises(torch.jit.Error):
             script_module.calls_unused_indirectly()
+
+    def test_self_referential_method(self):
+        """
+        Test that a scripted class can have a method that refers to the class itself
+        in its type annotations.
+        """
+        @torch.jit.script
+        class Meta(object):
+            def __init__(self, a: int):
+                self.a = a
+
+            def method(self, other: List['Meta']) -> 'Meta':
+                return Meta(len(other))
+
+        class ModuleWithMeta(torch.nn.Module):
+            def __init__(self, a: int):
+                super().__init__()
+                self.meta = Meta(a)
+
+            def forward(self):
+                new_obj = self.meta.method([self.meta])
+                return new_obj.a
+
+        self.checkModule(ModuleWithMeta(5), ())
+
+    def test_type_annotation(self):
+        """
+        Test that annotating container attributes with types works correctly
+        """
+        @torch.jit.script
+        class CompetitiveLinkingTokenReplacementUtils:
+            def __init__(self):
+                self.my_list : List[Tuple[float, int, int]] = []
+                self.my_dict : Dict[int, int] = {}
+
+        @torch.jit.script
+        def foo():
+            y = CompetitiveLinkingTokenReplacementUtils()
+            new_dict : Dict[int, int] = {1: 1, 2: 2}
+            y.my_dict = new_dict
+
+            new_list : List[Tuple[float, int, int]] = [(1.0, 1, 1)]
+            y.my_list = new_list
+            return y
+
+    def test_staticmethod(self):
+        """
+        Test static methods on class types.
+        """
+        global ClassWithStaticMethod
+
+        @torch.jit.script
+        class ClassWithStaticMethod:
+            def __init__(self, a: int, b: int):
+                self.a: int = a
+                self.b: int = b
+
+            def get_a(self):
+                return self.a
+
+            def get_b(self):
+                return self.b
+
+            def __eq__(self, other: 'ClassWithStaticMethod'):
+                return self.a == other.a and self.b == other.b
+
+            # staticmethod that calls constructor.
+            @staticmethod
+            def create(args: List['ClassWithStaticMethod']) -> 'ClassWithStaticMethod':
+                return ClassWithStaticMethod(args[0].a, args[0].b)
+
+            # staticmethod that calls another staticmethod.
+            @staticmethod
+            def create_from(a: int, b: int) -> 'ClassWithStaticMethod':
+                a = ClassWithStaticMethod(a, b)
+                return ClassWithStaticMethod.create([a])
+
+        # Script function that calls staticmethod.
+        def test_function(a: int, b: int) -> 'ClassWithStaticMethod':
+            return ClassWithStaticMethod.create_from(a, b)
+
+        self.checkScript(test_function, (1, 2))

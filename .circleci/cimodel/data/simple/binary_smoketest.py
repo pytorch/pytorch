@@ -5,7 +5,7 @@ TODO: Refactor circleci/cimodel/data/binary_build_data.py to generate this file
 
  NB: If you modify this file, you need to also modify
  the binary_and_smoke_tests_on_pr variable in
- pytorch-ci-hud to adjust the list of whitelisted builds
+ pytorch-ci-hud to adjust the allowed build list
  at https://github.com/ezyang/pytorch-ci-hud/blob/master/src/BuildHistoryDisplay.js
 
  Note:
@@ -54,7 +54,7 @@ class SmoketestJob:
             props_dict["docker_image"] = self.docker_image
 
         if self.is_master_only:
-            props_dict["filters"] = cimodel.data.simple.util.branch_filters.gen_branches_only_filter_dict()
+            props_dict["filters"] = cimodel.data.simple.util.branch_filters.gen_filter_dict()
 
         if self.has_libtorch_variant:
             props_dict["libtorch_variant"] = "shared-with-deps"

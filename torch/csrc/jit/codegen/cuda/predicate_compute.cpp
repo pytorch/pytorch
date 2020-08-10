@@ -18,18 +18,26 @@ bool PredicateCompute::hasPredicates(const TensorIndex* ti) {
 
 std::vector<Bool*> PredicateCompute::computePredicates(const TensorIndex* ti) {
   const TensorView* tv = ti->view();
-  TensorDomain* root = tv->getRootDomain();
+  const std::vector<IterDomain*>& root = tv->getRootDomain();
 
   std::vector<Bool*> preds;
-  if (FusionGuard::getCurFusion()->origin(tv->domain()) == nullptr &&
-      tv->nDims() == ti->nDims())
+
+  bool no_pred_needed = true;
+  for (auto id : tv->domain()->domain())
+    if (id->getOrigin() != nullptr)
+      no_pred_needed = false;
+
+  if (no_pred_needed)
     return preds;
 
-  TORCH_INTERNAL_ASSERT(root->nDims() == ti->nDims());
+  TORCH_INTERNAL_ASSERT(root.size() == ti->nDims());
   for (decltype(ti->nDims()) i{0}; i < ti->nDims(); i++)
 
-    if (FusionGuard::getCurFusion()->origin(ti->index(i)) != nullptr) {
-      Val* pred = lt(ti->index(i), root->axis(i)->extent());
+    // I believe the second part of this check is redundant, but it doesn't
+    // hurt.
+    if (FusionGuard::getCurFusion()->origin(ti->index(i)) != nullptr &&
+        !root[i]->isBroadcast()) {
+      Val* pred = lt(ti->index(i), root[i]->extent());
       TORCH_INTERNAL_ASSERT(
           pred->getValType().value() == ValType::Scalar &&
           pred->getDataType().value() == DataType::Bool);

@@ -443,6 +443,14 @@ CAFFE2_MAKE_SINGULAR_ARGUMENT(string, s)
 #undef CAFFE2_MAKE_SINGULAR_ARGUMENT
 
 template <>
+C10_EXPORT Argument MakeArgument(const string& name, const NetDef& value) {
+  Argument arg;
+  arg.set_name(name);
+  *arg.mutable_n() = value;
+  return arg;
+}
+
+template <>
 C10_EXPORT bool ArgumentHelper::RemoveArgument(OperatorDef& def, int index);
 template <>
 bool ArgumentHelper::RemoveArgument(NetDef& def, int index);

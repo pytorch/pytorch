@@ -16,6 +16,7 @@ using torch::autograd::Engine;
 using torch::autograd::FutureVariableList;
 using torch::autograd::GraphRoot;
 using torch::autograd::GraphTask;
+using torch::autograd::GraphTaskGuard;
 using torch::autograd::InputBuffer;
 using torch::autograd::Node;
 using torch::autograd::NodeTask;
@@ -40,6 +41,7 @@ class DistAccumulateGradCaptureHook
         autogradContext_(std::move(autogradContext)) {}
 
   at::Tensor operator()(const at::Tensor& grad) override {
+    ThreadLocalDistAutogradContext contextGuard{ContextPtr(autogradContext_)};
     variable_list inputGrads = {grad};
     // It's intended that pre/post hooks are still called even if the grad is
     // undenfined here.
@@ -59,7 +61,6 @@ class DistAccumulateGradCaptureHook
       autogradContext_->accumulateGrad(
           accumulateGrad_->variable, inputGrads[0], 3 /* num_expected_refs */);
     }
-
     const variable_list kEmptyOuput;
     for (const auto& hook : accumulateGrad_->post_hooks()) {
       (*hook)(kEmptyOuput, inputGrads);
@@ -73,7 +74,37 @@ class DistAccumulateGradCaptureHook
 };
 
 DistEngine::DistEngine()
-    : initializedContextIds_(), engine_(Engine::get_default_engine()) {}
+    : initializedContextIds_(),
+      engine_(Engine::get_default_engine()),
+      global_cpu_ready_queue_(std::make_shared<ReadyQueue>()),
+      global_cpu_thread_(
+          &Engine::thread_init,
+          &engine_,
+          torch::autograd::CPU_DEVICE,
+          global_cpu_ready_queue_,
+          /* increment */ false) /* We track the thread in DistEngine */ {
+  // Note [GPU to CPU continuations]
+  // ~~~~~~~~~~~~~~~~~~~~~~~~~~
+  // HACK: Initialize a single CPU thread to execute continuations from GPU
+  // tasks. The multithreaded structure for the distributed engine works
+  // well only for CPU tasks. If we have an order of tasks like
+  // CPU->GPU->CPU, distributed autograd has no thread to execute the last
+  // CPU task on. To fix this, we introduce a global CPU thread to handle
+  // such situations and it will be responsible for executing these CPU
+  // tasks. The CPU thread has its own ready_queue which is used as the
+  // cpu_ready_queue for all GraphTasks for DistEngine. This ensures all GPU
+  // to CPU continuations are enqueued on this thread. This is a short term
+  // fix for PyTorch 1.6 and we plan to work towards a better design as we
+  // add full GPU support for the RPC framework.
+  // See https://github.com/pytorch/pytorch/issues/40255 for more details.
+  global_cpu_thread_.detach();
+}
+
+DistEngine::~DistEngine() {
+  // Ensure we shutdown the CPU thread.
+  global_cpu_ready_queue_->pushShutdownTask();
+  global_cpu_thread_.join();
+}
 
 DistEngine& DistEngine::getInstance() {
   // Leaky singleton to avoid module destructor race.
@@ -91,8 +122,7 @@ void DistEngine::validateRootsAndRetrieveEdges(
 
   // Verify roots are all scalar and require gradients.
   for (const auto& root : roots) {
-    TORCH_CHECK(
-        root.requires_grad(), "requires_grad not set on: ", root.name());
+    TORCH_CHECK(root.requires_grad(), "requires_grad not set on root");
     TORCH_CHECK(
         root.numel() == 1,
         root.name(),
@@ -129,7 +159,7 @@ void DistEngine::computeDependencies(
       /* keep_graph */ retainGraph,
       /* create_graph */ false,
       /* depth */ 0,
-      /* cpu_ready_queue */ nullptr,
+      /* cpu_ready_queue */ global_cpu_ready_queue_,
       /* exit_on_error */ true);
 
   // Run BFS to traverse the graph locally. The roots of the graph are
@@ -277,6 +307,7 @@ void DistEngine::execute_graph_task_until_ready_queue_empty(
       if (task.fn_ && !local_graph_task->has_error_.load()) {
         AutoGradMode grad_mode(local_graph_task->grad_mode_);
         try {
+          GraphTaskGuard guard(local_graph_task);
           engine_.evaluate_function(
               local_graph_task, task.fn_.get(), task.inputs_, cpu_ready_queue);
         } catch (std::exception& e) {

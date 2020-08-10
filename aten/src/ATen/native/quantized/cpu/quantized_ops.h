@@ -15,10 +15,17 @@ using qclamp_fn = void (*)(
     Scalar min,
     Scalar max,
     at::Tensor& /*qy*/);
+using qthreshold_fn = void (*)(
+    const at::Tensor& /*qx*/,
+    Scalar threshold,
+    Scalar value,
+    at::Tensor& /*qy*/);
 using qtanh_fn = void (*)(const at::Tensor& /*qx*/, at::Tensor& /*qy*/);
 using qelu_fn = void(*)(
     const at::Tensor& /*qx*/,
     Scalar /*alpha*/,
+    Scalar /*scale*/,
+    Scalar /*input_scale*/,
     at::Tensor& /*qy*/);
 using qbinary_fn =
     void (*)(Tensor& /*out*/, const Tensor& /*self*/, const Tensor& /*other*/);
@@ -54,7 +61,22 @@ using qadaptive_avg_pool2d_fn = void (*)(
     int64_t istrideC,
     int64_t istrideH,
     int64_t istrideW);
-
+using qadaptive_avg_pool3d_fn = void (*)(
+    const Tensor& qx,
+    Tensor& qy,
+    int64_t b,
+    int64_t sizeC,
+    int64_t isizeD,
+    int64_t isizeH,
+    int64_t isizeW,
+    int64_t osizeD,
+    int64_t osizeH,
+    int64_t osizeW,
+    int64_t istrideB,
+    int64_t istrideC,
+    int64_t istrideD,
+    int64_t istrideH,
+    int64_t istrideW);
 using qavg_pool2d_fn = void (*)(
     const Tensor& qx,
     Tensor& qy,
@@ -137,6 +159,7 @@ DECLARE_DISPATCH(qrelu_leaky_fn, qrelu_leaky_stub);
 DECLARE_DISPATCH(qsigmoid_fn, qsigmoid_stub);
 DECLARE_DISPATCH(qhardsigmoid_fn, qhardsigmoid_stub);
 DECLARE_DISPATCH(qclamp_fn, qclamp_stub);
+DECLARE_DISPATCH(qthreshold_fn, qthreshold_stub);
 DECLARE_DISPATCH(qtanh_fn, qtanh_stub);
 DECLARE_DISPATCH(qbinary_fn, qadd_stub);
 DECLARE_DISPATCH(qbinary_fn, qadd_relu_stub);
@@ -148,6 +171,7 @@ DECLARE_DISPATCH(qhardswish_fn, qhardswish_stub);
 DECLARE_DISPATCH(qelu_fn, qelu_stub);
 DECLARE_DISPATCH(qmaxpool_2d_fn, qmaxpool_2d_nhwc_stub);
 DECLARE_DISPATCH(qadaptive_avg_pool2d_fn, qadaptive_avg_pool2d_nhwc_stub);
+DECLARE_DISPATCH(qadaptive_avg_pool3d_fn, qadaptive_avg_pool3d_ndhwc_stub);
 DECLARE_DISPATCH(qavg_pool2d_fn, qavg_pool2d_nhwc_stub);
 DECLARE_DISPATCH(qavg_pool3d_fn, qavg_pool3d_nhwc_stub);
 DECLARE_DISPATCH(qupsample_bilinear2d_fn, qupsample_bilinear2d_nhwc_stub);

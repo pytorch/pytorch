@@ -1,14 +1,13 @@
 from collections import OrderedDict
+from dataclasses import dataclass, field
+from typing import List, Optional
 
-from cimodel.data.pytorch_build_data import TopLevelNode, CONFIG_TREE_DATA
 import cimodel.data.dimensions as dimensions
 import cimodel.lib.conf_tree as conf_tree
 import cimodel.lib.miniutils as miniutils
-from cimodel.data.simple.util.branch_filters import gen_branches_only_filter_dict
-from cimodel.data.simple.util.docker_constants import gen_docker_image_path
-
-from dataclasses import dataclass, field
-from typing import List, Optional
+from cimodel.data.pytorch_build_data import CONFIG_TREE_DATA, TopLevelNode
+from cimodel.data.simple.util.branch_filters import gen_filter_dict
+from cimodel.data.simple.util.docker_constants import gen_docker_image
 
 
 @dataclass
@@ -18,17 +17,23 @@ class Conf:
     parms_list_ignored_for_docker_image: Optional[List[str]] = None
     pyver: Optional[str] = None
     cuda_version: Optional[str] = None
+    rocm_version: Optional[str] = None
     # TODO expand this to cover all the USE_* that we want to test for
     #  tesnrorrt, leveldb, lmdb, redis, opencv, mkldnn, ideep, etc.
     # (from https://github.com/pytorch/pytorch/pull/17323#discussion_r259453608)
     is_xla: bool = False
+    vulkan: bool = False
     restrict_phases: Optional[List[str]] = None
     gpu_resource: Optional[str] = None
     dependent_tests: List = field(default_factory=list)
-    parent_build: Optional['Conf'] = None
+    parent_build: Optional["Conf"] = None
     is_libtorch: bool = False
     is_important: bool = False
     parallel_backend: Optional[str] = None
+
+    @staticmethod
+    def is_test_phase(phase):
+        return "test" in phase
 
     # TODO: Eliminate the special casing for docker paths
     # In the short term, we *will* need to support special casing as docker images are merged for caffe2 and pytorch
@@ -48,24 +53,36 @@ class Conf:
 
         cuda_parms = []
         if self.cuda_version:
-            cuda_parms.extend(["cuda" + self.cuda_version, "cudnn7"])
+            cudnn = "cudnn8" if self.cuda_version.startswith("11.") else "cudnn7"
+            cuda_parms.extend(["cuda" + self.cuda_version, cudnn])
+        if self.rocm_version:
+            cuda_parms.extend([f"rocm{self.rocm_version}"])
         result = leading + ["linux", self.distro] + cuda_parms + self.parms
         if not for_docker and self.parms_list_ignored_for_docker_image is not None:
             result = result + self.parms_list_ignored_for_docker_image
         return result
 
     def gen_docker_image_path(self):
-
         parms_source = self.parent_build or self
         base_build_env_name = "-".join(parms_source.get_parms(True))
+        image_name, _ = gen_docker_image(base_build_env_name)
+        return miniutils.quote(image_name)
 
-        return miniutils.quote(gen_docker_image_path(base_build_env_name))
+    def gen_docker_image_requires(self):
+        parms_source = self.parent_build or self
+        base_build_env_name = "-".join(parms_source.get_parms(True))
+        _, requires = gen_docker_image(base_build_env_name)
+        return miniutils.quote(requires)
 
     def get_build_job_name_pieces(self, build_or_test):
         return self.get_parms(False) + [build_or_test]
 
     def gen_build_name(self, build_or_test):
-        return ("_".join(map(str, self.get_build_job_name_pieces(build_or_test)))).replace(".", "_").replace("-", "_")
+        return (
+            ("_".join(map(str, self.get_build_job_name_pieces(build_or_test))))
+            .replace(".", "_")
+            .replace("-", "_")
+        )
 
     def get_dependents(self):
         return self.dependent_tests or []
@@ -77,20 +94,24 @@ class Conf:
         build_env_name = "-".join(map(str, build_job_name_pieces))
         parameters["build_environment"] = miniutils.quote(build_env_name)
         parameters["docker_image"] = self.gen_docker_image_path()
-        if phase == "test" and self.gpu_resource:
+        if Conf.is_test_phase(phase) and self.gpu_resource:
             parameters["use_cuda_docker_runtime"] = miniutils.quote("1")
-        if phase == "test":
+        if Conf.is_test_phase(phase):
             resource_class = "large"
             if self.gpu_resource:
                 resource_class = "gpu." + self.gpu_resource
+            if self.rocm_version is not None:
+                resource_class = "pytorch/amd-gpu"
             parameters["resource_class"] = resource_class
+        if phase == "build" and self.rocm_version is not None:
+            parameters["resource_class"] = "xlarge"
         return parameters
 
     def gen_workflow_job(self, phase):
         job_def = OrderedDict()
         job_def["name"] = self.gen_build_name(phase)
 
-        if phase == "test":
+        if Conf.is_test_phase(phase):
 
             # TODO When merging the caffe2 and pytorch jobs, it might be convenient for a while to make a
             #  caffe2 test job dependent on a pytorch build job. This way we could quickly dedup the repeated
@@ -102,12 +123,13 @@ class Conf:
             job_name = "pytorch_linux_test"
         else:
             job_name = "pytorch_linux_build"
+            job_def["requires"] = [self.gen_docker_image_requires()]
 
         if not self.is_important:
-            job_def["filters"] = gen_branches_only_filter_dict()
+            job_def["filters"] = gen_filter_dict()
         job_def.update(self.gen_workflow_params(phase))
 
-        return {job_name : job_def}
+        return {job_name: job_def}
 
 
 # TODO This is a hack to special case some configs just for the workflow list
@@ -117,21 +139,40 @@ class HiddenConf(object):
         self.parent_build = parent_build
 
     def gen_workflow_job(self, phase):
-        return {self.gen_build_name(phase): {"requires": [self.parent_build.gen_build_name("build")]}}
+        return {
+            self.gen_build_name(phase): {
+                "requires": [self.parent_build.gen_build_name("build")]
+            }
+        }
 
     def gen_build_name(self, _):
         return self.name
 
+class DocPushConf(object):
+    def __init__(self, name, parent_build=None, branch="master"):
+        self.name = name
+        self.parent_build = parent_build
+        self.branch = branch
+
+    def gen_workflow_job(self, phase):
+        return {
+            "pytorch_doc_push": {
+                "name": self.name,
+                "branch": self.branch,
+                "requires": [self.parent_build],
+                "context": "org-member",
+                "filters": gen_filter_dict(branches_list=["nightly"])
+            }
+        }
 
 # TODO Convert these to graph nodes
 def gen_dependent_configs(xenial_parent_config):
 
     extra_parms = [
         (["multigpu"], "large"),
-        (["NO_AVX2"], "medium"),
-        (["NO_AVX", "NO_AVX2"], "medium"),
+        (["nogpu", "NO_AVX2"], None),
+        (["nogpu", "NO_AVX"], None),
         (["slow"], "medium"),
-        (["nogpu"], None),
     ]
 
     configs = []
@@ -156,9 +197,40 @@ def gen_dependent_configs(xenial_parent_config):
 def gen_docs_configs(xenial_parent_config):
     configs = []
 
-    for x in ["pytorch_python_doc_push", "pytorch_cpp_doc_push", "pytorch_doc_test"]:
-        configs.append(HiddenConf(x, parent_build=xenial_parent_config))
+    configs.append(
+        HiddenConf(
+            "pytorch_python_doc_build",
+            parent_build=xenial_parent_config
+        )
+    )
+    configs.append(
+        DocPushConf(
+            "pytorch_python_doc_push",
+            parent_build="pytorch_python_doc_build",
+            branch="site",
+        )
+    )
 
+    configs.append(
+        HiddenConf(
+            "pytorch_cpp_doc_build",
+            parent_build=xenial_parent_config
+        )
+    )
+    configs.append(
+        DocPushConf(
+            "pytorch_cpp_doc_push",
+            parent_build="pytorch_cpp_doc_build",
+            branch="master",
+        )
+    )
+
+    configs.append(
+        HiddenConf(
+            "pytorch_doc_test",
+            parent_build=xenial_parent_config
+        )
+    )
     return configs
 
 
@@ -187,6 +259,10 @@ def instantiate_configs():
         is_xla = fc.find_prop("is_xla") or False
         parms_list_ignored_for_docker_image = []
 
+        vulkan = fc.find_prop("vulkan") or False
+        if vulkan:
+            parms_list_ignored_for_docker_image.append("vulkan")
+
         python_version = None
         if compiler_name == "cuda" or compiler_name == "android":
             python_version = fc.find_prop("pyver")
@@ -195,8 +271,13 @@ def instantiate_configs():
             parms_list = ["py" + fc.find_prop("pyver")]
 
         cuda_version = None
+        rocm_version = None
         if compiler_name == "cuda":
             cuda_version = fc.find_prop("compiler_version")
+
+        elif compiler_name == "rocm":
+            rocm_version = fc.find_prop("compiler_version")
+            restrict_phases = ["build", "test1", "test2", "caffe2_test"]
 
         elif compiler_name == "android":
             android_ndk_version = fc.find_prop("compiler_version")
@@ -212,13 +293,13 @@ def instantiate_configs():
             parms_list.append(gcc_version)
 
             # TODO: This is a nasty special case
-            if gcc_version == 'clang5' and not is_xla:
+            if gcc_version == "clang5" and not is_xla:
                 parms_list.append("asan")
                 python_version = fc.find_prop("pyver")
                 parms_list[0] = fc.find_prop("abbreviated_pyver")
+                restrict_phases = ["build", "test1", "test2"]
 
-        if cuda_version in ["9.2", "10", "10.1", "10.2"]:
-            # TODO The gcc version is orthogonal to CUDA version?
+        if cuda_version:
             cuda_gcc_version = fc.find_prop("cuda_gcc_override") or "gcc7"
             parms_list.append(cuda_gcc_version)
 
@@ -239,7 +320,9 @@ def instantiate_configs():
             parms_list_ignored_for_docker_image,
             python_version,
             cuda_version,
+            rocm_version,
             is_xla,
+            vulkan,
             restrict_phases,
             gpu_resource,
             is_libtorch=is_libtorch,
@@ -249,20 +332,25 @@ def instantiate_configs():
 
         # run docs builds on "pytorch-linux-xenial-py3.6-gcc5.4". Docs builds
         # should run on a CPU-only build that runs on all PRs.
-        if distro_name == 'xenial' and fc.find_prop("pyver") == '3.6' \
-                and cuda_version is None \
-                and parallel_backend is None \
-                and compiler_name == 'gcc' \
-                and fc.find_prop('compiler_version') == '5.4':
+        if (
+            distro_name == "xenial"
+            and fc.find_prop("pyver") == "3.6"
+            and cuda_version is None
+            and parallel_backend is None
+            and compiler_name == "gcc"
+            and fc.find_prop("compiler_version") == "5.4"
+        ):
             c.dependent_tests = gen_docs_configs(c)
 
         if cuda_version == "10.1" and python_version == "3.6" and not is_libtorch:
             c.dependent_tests = gen_dependent_configs(c)
 
-        if (compiler_name == "gcc"
-                and compiler_version == "5.4"
-                and not is_libtorch
-                and parallel_backend is None):
+        if (
+            compiler_name == "gcc"
+            and compiler_version == "5.4"
+            and not is_libtorch
+            and parallel_backend is None
+        ):
             bc_breaking_check = Conf(
                 "backward-compatibility-check",
                 [],
@@ -291,7 +379,7 @@ def get_workflow_jobs():
         for phase in phases:
 
             # TODO why does this not have a test?
-            if phase == "test" and conf_options.cuda_version == "10":
+            if Conf.is_test_phase(phase) and conf_options.cuda_version == "10":
                 continue
 
             x.append(conf_options.gen_workflow_job(phase))

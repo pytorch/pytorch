@@ -13,7 +13,7 @@ class TestBucketizeOp(hu.HypothesisTestCase):
     @given(
         x=hu.tensor(
             min_dim=1, max_dim=2, dtype=np.float32,
-            elements=st.floats(min_value=-5, max_value=5)),
+            elements=hu.floats(min_value=-5, max_value=5)),
         **hu.gcs)
     def test_bucketize_op(self, x, gc, dc):
         length = np.random.randint(low=1, high=5)

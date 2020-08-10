@@ -127,12 +127,12 @@ template<class scalar_t>
 void lapackLuSolve(char trans, int n, int nrhs, scalar_t *a, int lda, int *ipiv, scalar_t *b, int ldb, int *info);
 
 
-template<> void lapackSolve<std::complex<double>>(int n, int nrhs, std::complex<double> *a, int lda, int *ipiv, std::complex<double> *b, int ldb, int *info) {
-  zgesv_(&n, &nrhs, a, &lda, ipiv, b, &ldb, info);
+template<> void lapackSolve<c10::complex<double>>(int n, int nrhs, c10::complex<double> *a, int lda, int *ipiv, c10::complex<double> *b, int ldb, int *info) {
+  zgesv_(&n, &nrhs, reinterpret_cast<std::complex<double>*>(a), &lda, ipiv, reinterpret_cast<std::complex<double>*>(b), &ldb, info);
 }
 
-template<> void lapackSolve<std::complex<float>>(int n, int nrhs, std::complex<float> *a, int lda, int *ipiv, std::complex<float> *b, int ldb, int *info) {
-  cgesv_(&n, &nrhs, a, &lda, ipiv, b, &ldb, info);
+template<> void lapackSolve<c10::complex<float>>(int n, int nrhs, c10::complex<float> *a, int lda, int *ipiv, c10::complex<float> *b, int ldb, int *info) {
+  cgesv_(&n, &nrhs, reinterpret_cast<std::complex<float>*>(a), &lda, ipiv, reinterpret_cast<std::complex<float>*>(b), &ldb, info);
 }
 
 template<> void lapackSolve<double>(int n, int nrhs, double *a, int lda, int *ipiv, double *b, int ldb, int *info) {
@@ -143,12 +143,12 @@ template<> void lapackSolve<float>(int n, int nrhs, float *a, int lda, int *ipiv
   sgesv_(&n, &nrhs, a, &lda, ipiv, b, &ldb, info);
 }
 
-template<> void lapackGetri<std::complex<double>>(int n, std::complex<double> *a, int lda, int *ipiv, std::complex<double> *work, int lwork, int *info) {
-  zgetri_(&n, a, &lda, ipiv, work, &lwork, info);
+template<> void lapackGetri<c10::complex<double>>(int n, c10::complex<double> *a, int lda, int *ipiv, c10::complex<double> *work, int lwork, int *info) {
+  zgetri_(&n, reinterpret_cast<std::complex<double>*>(a), &lda, ipiv, reinterpret_cast<std::complex<double>*>(work), &lwork, info);
 }
 
-template<> void lapackGetri<std::complex<float>>(int n, std::complex<float> *a, int lda, int *ipiv, std::complex<float> *work, int lwork, int *info) {
-  cgetri_(&n, a, &lda, ipiv, work, &lwork, info);
+template<> void lapackGetri<c10::complex<float>>(int n, c10::complex<float> *a, int lda, int *ipiv, c10::complex<float> *work, int lwork, int *info) {
+  cgetri_(&n, reinterpret_cast<std::complex<float>*>(a), &lda, ipiv, reinterpret_cast<std::complex<float>*>(work), &lwork, info);
 }
 
 template<> void lapackGetri<double>(int n, double *a, int lda, int *ipiv, double *work, int lwork, int *info) {
@@ -159,12 +159,12 @@ template<> void lapackGetri<float>(int n, float *a, int lda, int *ipiv, float *w
   sgetri_(&n, a, &lda, ipiv, work, &lwork, info);
 }
 
-template<> void lapackLu<std::complex<double>>(int m, int n, std::complex<double> *a, int lda, int *ipiv, int *info) {
-  zgetrf_(&m, &n, a, &lda, ipiv, info);
+template<> void lapackLu<c10::complex<double>>(int m, int n, c10::complex<double> *a, int lda, int *ipiv, int *info) {
+  zgetrf_(&m, &n, reinterpret_cast<std::complex<double>*>(a), &lda, ipiv, info);
 }
 
-template<> void lapackLu<std::complex<float>>(int m, int n, std::complex<float> *a, int lda, int *ipiv, int *info) {
-  cgetrf_(&m, &n, a, &lda, ipiv, info);
+template<> void lapackLu<c10::complex<float>>(int m, int n, c10::complex<float> *a, int lda, int *ipiv, int *info) {
+  cgetrf_(&m, &n, reinterpret_cast<std::complex<float>*>(a), &lda, ipiv, info);
 }
 
 template<> void lapackLu<double>(int m, int n, double *a, int lda, int *ipiv, int *info) {
@@ -175,12 +175,12 @@ template<> void lapackLu<float>(int m, int n, float *a, int lda, int *ipiv, int 
   sgetrf_(&m, &n, a, &lda, ipiv, info);
 }
 
-template<> void lapackCholeskySolve<std::complex<double>>(char uplo, int n, int nrhs, std::complex<double> *a, int lda, std::complex<double> *b, int ldb, int *info) {
-  zpotrs_(&uplo, &n, &nrhs, a, &lda, b, &ldb, info);
+template<> void lapackCholeskySolve<c10::complex<double>>(char uplo, int n, int nrhs, c10::complex<double> *a, int lda, c10::complex<double> *b, int ldb, int *info) {
+  zpotrs_(&uplo, &n, &nrhs, reinterpret_cast<std::complex<double>*>(a), &lda, reinterpret_cast<std::complex<double>*>(b), &ldb, info);
 }
 
-template<> void lapackCholeskySolve<std::complex<float>>(char uplo, int n, int nrhs, std::complex<float> *a, int lda, std::complex<float> *b, int ldb, int *info) {
-  cpotrs_(&uplo, &n, &nrhs, a, &lda, b, &ldb, info);
+template<> void lapackCholeskySolve<c10::complex<float>>(char uplo, int n, int nrhs, c10::complex<float> *a, int lda, c10::complex<float> *b, int ldb, int *info) {
+  cpotrs_(&uplo, &n, &nrhs, reinterpret_cast<std::complex<float>*>(a), &lda, reinterpret_cast<std::complex<float>*>(b), &ldb, info);
 }
 
 template<> void lapackCholeskySolve<double>(char uplo, int n, int nrhs, double *a, int lda, double *b, int ldb, int *info) {
@@ -191,12 +191,12 @@ template<> void lapackCholeskySolve<float>(char uplo, int n, int nrhs, float *a,
   spotrs_(&uplo, &n, &nrhs, a, &lda, b, &ldb, info);
 }
 
-template<> void lapackCholesky<std::complex<double>>(char uplo, int n, std::complex<double> *a, int lda, int *info) {
-  zpotrf_(&uplo, &n, a, &lda, info);
+template<> void lapackCholesky<c10::complex<double>>(char uplo, int n, c10::complex<double> *a, int lda, int *info) {
+  zpotrf_(&uplo, &n, reinterpret_cast<std::complex<double>*>(a), &lda, info);
 }
 
-template<> void lapackCholesky<std::complex<float>>(char uplo, int n, std::complex<float> *a, int lda, int *info) {
-  cpotrf_(&uplo, &n, a, &lda, info);
+template<> void lapackCholesky<c10::complex<float>>(char uplo, int n, c10::complex<float> *a, int lda, int *info) {
+  cpotrf_(&uplo, &n, reinterpret_cast<std::complex<float>*>(a), &lda, info);
 }
 
 template<> void lapackCholesky<double>(char uplo, int n, double *a, int lda, int *info) {
@@ -207,12 +207,12 @@ template<> void lapackCholesky<float>(char uplo, int n, float *a, int lda, int *
   spotrf_(&uplo, &n, a, &lda, info);
 }
 
-template<> void lapackTriangularSolve<std::complex<double>>(char uplo, char trans, char diag, int n, int nrhs, std::complex<double> *a, int lda, std::complex<double> *b, int ldb, int *info) {
-  ztrtrs_(&uplo, &trans, &diag, &n, &nrhs, a, &lda, b, &ldb, info);
+template<> void lapackTriangularSolve<c10::complex<double>>(char uplo, char trans, char diag, int n, int nrhs, c10::complex<double> *a, int lda, c10::complex<double> *b, int ldb, int *info) {
+  ztrtrs_(&uplo, &trans, &diag, &n, &nrhs, reinterpret_cast<std::complex<double>*>(a), &lda, reinterpret_cast<std::complex<double>*>(b), &ldb, info);
 }
 
-template<> void lapackTriangularSolve<std::complex<float>>(char uplo, char trans, char diag, int n, int nrhs, std::complex<float> *a, int lda, std::complex<float> *b, int ldb, int *info) {
-  ctrtrs_(&uplo, &trans, &diag, &n, &nrhs, a, &lda, b, &ldb, info);
+template<> void lapackTriangularSolve<c10::complex<float>>(char uplo, char trans, char diag, int n, int nrhs, c10::complex<float> *a, int lda, c10::complex<float> *b, int ldb, int *info) {
+  ctrtrs_(&uplo, &trans, &diag, &n, &nrhs, reinterpret_cast<std::complex<float>*>(a), &lda, reinterpret_cast<std::complex<float>*>(b), &ldb, info);
 }
 
 template<> void lapackTriangularSolve<double>(char uplo, char trans, char diag, int n, int nrhs, double *a, int lda, double *b, int ldb, int *info) {
@@ -223,12 +223,12 @@ template<> void lapackTriangularSolve<float>(char uplo, char trans, char diag, i
   strtrs_(&uplo, &trans, &diag, &n, &nrhs, a, &lda, b, &ldb, info);
 }
 
-template<> void lapackGeqrf<std::complex<double>>(int m, int n, std::complex<double> *a, int lda, std::complex<double> *tau, std::complex<double> *work, int lwork, int *info) {
-  zgeqrf_(&m, &n, a, &lda, tau, work, &lwork, info);
+template<> void lapackGeqrf<c10::complex<double>>(int m, int n, c10::complex<double> *a, int lda, c10::complex<double> *tau, c10::complex<double> *work, int lwork, int *info) {
+  zgeqrf_(&m, &n, reinterpret_cast<std::complex<double>*>(a), &lda, reinterpret_cast<std::complex<double>*>(tau), reinterpret_cast<std::complex<double>*>(work), &lwork, info);
 }
 
-template<> void lapackGeqrf<std::complex<float>>(int m, int n, std::complex<float> *a, int lda, std::complex<float> *tau, std::complex<float> *work, int lwork, int *info) {
-  cgeqrf_(&m, &n, a, &lda, tau, work, &lwork, info);
+template<> void lapackGeqrf<c10::complex<float>>(int m, int n, c10::complex<float> *a, int lda, c10::complex<float> *tau, c10::complex<float> *work, int lwork, int *info) {
+  cgeqrf_(&m, &n, reinterpret_cast<std::complex<float>*>(a), &lda, reinterpret_cast<std::complex<float>*>(tau), reinterpret_cast<std::complex<float>*>(work), &lwork, info);
 }
 
 template<> void lapackGeqrf<double>(int m, int n, double *a, int lda, double *tau, double *work, int lwork, int *info) {
@@ -239,12 +239,12 @@ template<> void lapackGeqrf<float>(int m, int n, float *a, int lda, float *tau, 
   sgeqrf_(&m, &n, a, &lda, tau, work, &lwork, info);
 }
 
-template<> void lapackOrgqr<std::complex<double>>(int m, int n, int k, std::complex<double> *a, int lda, std::complex<double> *tau, std::complex<double> *work, int lwork, int *info) {
-  zungqr_(&m, &n, &k, a, &lda, tau, work, &lwork, info);
+template<> void lapackOrgqr<c10::complex<double>>(int m, int n, int k, c10::complex<double> *a, int lda, c10::complex<double> *tau, c10::complex<double> *work, int lwork, int *info) {
+  zungqr_(&m, &n, &k, reinterpret_cast<std::complex<double>*>(a), &lda, reinterpret_cast<std::complex<double>*>(tau), reinterpret_cast<std::complex<double>*>(work), &lwork, info);
 }
 
-template<> void lapackOrgqr<std::complex<float>>(int m, int n, int k, std::complex<float> *a, int lda, std::complex<float> *tau, std::complex<float> *work, int lwork, int *info) {
-  cungqr_(&m, &n, &k, a, &lda, tau, work, &lwork, info);
+template<> void lapackOrgqr<c10::complex<float>>(int m, int n, int k, c10::complex<float> *a, int lda, c10::complex<float> *tau, c10::complex<float> *work, int lwork, int *info) {
+  cungqr_(&m, &n, &k, reinterpret_cast<std::complex<float>*>(a), &lda, reinterpret_cast<std::complex<float>*>(tau), reinterpret_cast<std::complex<float>*>(work), &lwork, info);
 }
 
 template<> void lapackOrgqr<double>(int m, int n, int k, double *a, int lda, double *tau, double *work, int lwork, int *info) {
@@ -263,14 +263,16 @@ template<> void lapackSymeig<float>(char jobz, char uplo, int n, float *a, int l
   ssyev_(&jobz, &uplo, &n, a, &lda, w, work, &lwork, info);
 }
 
-template<> void lapackSvd<std::complex<double>, double>(char jobz, int m, int n, std::complex<double> *a, int lda,
-                                  double *s, std::complex<double> *u, int ldu, std::complex<double> *vt, int ldvt, std::complex<double> *work, int lwork, int *rwork, int *iwork, int *info) {
-  zgesdd_(&jobz, &m, &n, a, &lda, s, u, &ldu, vt, &ldvt, work, &lwork, rwork, iwork, info);
+template<> void lapackSvd<c10::complex<double>, double>(char jobz, int m, int n, c10::complex<double> *a, int lda,
+                                  double *s, c10::complex<double> *u, int ldu, c10::complex<double> *vt, int ldvt, c10::complex<double> *work, int lwork, int *rwork, int *iwork, int *info) {
+  zgesdd_(&jobz, &m, &n, reinterpret_cast<std::complex<double>*>(a), &lda, s, reinterpret_cast<std::complex<double>*>(u), &ldu,
+          reinterpret_cast<std::complex<double>*>(vt), &ldvt, reinterpret_cast<std::complex<double>*>(work), &lwork, rwork, iwork, info);
 }
 
-template<> void lapackSvd<std::complex<float>, float>(char jobz, int m, int n, std::complex<float> *a, int lda,
-                                 float *s, std::complex<float> *u, int ldu, std::complex<float> *vt, int ldvt, std::complex<float> *work, int lwork, int *rwork, int *iwork, int *info) {
-  cgesdd_(&jobz, &m, &n, a, &lda, s, u, &ldu, vt, &ldvt, work, &lwork, rwork, iwork, info);
+template<> void lapackSvd<c10::complex<float>, float>(char jobz, int m, int n, c10::complex<float> *a, int lda,
+                                 float *s, c10::complex<float> *u, int ldu, c10::complex<float> *vt, int ldvt, c10::complex<float> *work, int lwork, int *rwork, int *iwork, int *info) {
+  cgesdd_(&jobz, &m, &n, reinterpret_cast<std::complex<float>*>(a), &lda, s, reinterpret_cast<std::complex<float>*>(u), &ldu,
+          reinterpret_cast<std::complex<float>*>(vt), &ldvt, reinterpret_cast<std::complex<float>*>(work), &lwork, rwork, iwork, info);
 }
 
 template<> void lapackSvd<double>(char jobz, int m, int n, double *a, int lda,
@@ -283,12 +285,12 @@ template<> void lapackSvd<float>(char jobz, int m, int n, float *a, int lda,
   sgesdd_(&jobz, &m, &n, a, &lda, s, u, &ldu, vt, &ldvt, work, &lwork, iwork, info);
 }
 
-template<> void lapackLuSolve<std::complex<double>>(char trans, int n, int nrhs, std::complex<double> *a, int lda, int *ipiv, std::complex<double> *b, int ldb, int *info) {
-  zgetrs_(&trans, &n, &nrhs, a, &lda, ipiv, b, &ldb, info);
+template<> void lapackLuSolve<c10::complex<double>>(char trans, int n, int nrhs, c10::complex<double> *a, int lda, int *ipiv, c10::complex<double> *b, int ldb, int *info) {
+  zgetrs_(&trans, &n, &nrhs, reinterpret_cast<std::complex<double>*>(a), &lda, ipiv, reinterpret_cast<std::complex<double>*>(b), &ldb, info);
 }
 
-template<> void lapackLuSolve<std::complex<float>>(char trans, int n, int nrhs, std::complex<float> *a, int lda, int *ipiv, std::complex<float> *b, int ldb, int *info) {
-  cgetrs_(&trans, &n, &nrhs, a, &lda, ipiv, b, &ldb, info);
+template<> void lapackLuSolve<c10::complex<float>>(char trans, int n, int nrhs, c10::complex<float> *a, int lda, int *ipiv, c10::complex<float> *b, int ldb, int *info) {
+  cgetrs_(&trans, &n, &nrhs, reinterpret_cast<std::complex<float>*>(a), &lda, ipiv, reinterpret_cast<std::complex<float>*>(b), &ldb, info);
 }
 
 template<> void lapackLuSolve<double>(char trans, int n, int nrhs, double *a, int lda, int *ipiv, double *b, int ldb, int *info) {
@@ -375,7 +377,7 @@ static void apply_inverse(Tensor& self, std::vector<int64_t>& infos) {
 #ifndef USE_LAPACK
   AT_ERROR("inverse: LAPACK library not found in compilation");
 #else
-  using value_t = typename ztype<scalar_t>::value_t;
+  using value_t = typename c10::scalar_value_type<scalar_t>::type;
   auto self_data = self.data_ptr<scalar_t>();
   auto self_matrix_stride = matrixStride(self);
   auto batch_size = batchCount(self);
@@ -694,7 +696,7 @@ static void apply_geqrf(Tensor& self, Tensor& tau, int64_t m, int64_t n,
 #ifndef USE_LAPACK
   AT_ERROR("qr: LAPACK library not found in compilation");
 #else
-  using value_t = typename ztype<scalar_t>::value_t;
+  using value_t = typename c10::scalar_value_type<scalar_t>::type;
   auto self_data = self.data_ptr<scalar_t>();
   auto tau_data = tau.data_ptr<scalar_t>();
   auto self_matrix_stride = matrixStride(self);
@@ -732,7 +734,7 @@ static void apply_orgqr(Tensor& self, const Tensor& tau, int64_t m, int64_t n_co
 #ifndef USE_LAPACK
   AT_ERROR("qr: LAPACK library not found in compilation");
 #else
-  using value_t = typename ztype<scalar_t>::value_t;
+  using value_t = typename c10::scalar_value_type<scalar_t>::type;
   auto self_data = self.data_ptr<scalar_t>();
   auto tau_data = tau.data_ptr<scalar_t>();
   auto self_matrix_stride = matrixStride(self);
@@ -848,7 +850,7 @@ static void apply_symeig(Tensor& self, Tensor& eigvals, bool eigenvectors, bool 
 #ifndef USE_LAPACK
   AT_ERROR("symeig: LAPACK library not found in compilation");
 #else
-  using value_t = typename ztype<scalar_t>::value_t;
+  using value_t = typename c10::scalar_value_type<scalar_t>::type;
   auto self_data = self.data_ptr<scalar_t>();
   auto eigvals_data = eigvals.data_ptr<scalar_t>();
   auto self_matrix_stride = matrixStride(self);
@@ -934,7 +936,7 @@ static void apply_svd(Tensor& self, Tensor& U, Tensor& S, Tensor& VT,
 #ifndef USE_LAPACK
   AT_ERROR("svd: LAPACK library not found in compilation");
 #else
-  using value_t = typename ztype<scalar_t>::value_t;
+  using value_t = typename c10::scalar_value_type<scalar_t>::type;
   auto self_data = self.data_ptr<scalar_t>();
   auto U_data = U.data_ptr<scalar_t>();
   auto S_data = S.data_ptr<value_t>();

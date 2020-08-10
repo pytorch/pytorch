@@ -310,6 +310,11 @@ def saved_variables(formula, args):
             'suffix': '_scalar_type',
             'type': 'ScalarType',
         }),
+        # replace self.dim() with self_dim
+        (r'{}.dim\(\)', {
+            'suffix': '_dim',
+            'type': 'int64_t',
+        }),
     ]
 
     for arg in args:

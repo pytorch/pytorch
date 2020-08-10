@@ -164,7 +164,7 @@ class DeviceTypeTestBase(TestCase):
 
     # Precision is a thread-local setting since it may be overridden per test
     _tls = threading.local()
-    _tls.precision = TestCase.precision
+    _tls.precision = TestCase._precision
 
     @property
     def precision(self):
@@ -435,8 +435,36 @@ def largeCUDATensorTest(size):
     return unittest.skipIf(not valid, "No CUDA or Has CUDA but GPU RAM is not large enough")
 
 
+def _has_sufficient_memory(device, size):
+    if device.startswith('cuda'):
+        return (torch.cuda.is_available() and
+                torch.cuda.get_device_properties(0).total_memory >= size)
+    if device == 'xla':
+        raise unittest.SkipTest('TODO: Memory availability checks for XLA?')
+
+    if device != 'cpu':
+        raise unittest.SkipTest('Unknown device type')
+
+    # CPU
+    if not HAS_PSUTIL:
+        raise unittest.SkipTest('Need psutil to determine if memory is sufficient')
+
+    # The sanitizers have significant memory overheads
+    if TEST_WITH_ASAN or TEST_WITH_TSAN or TEST_WITH_UBSAN:
+        effective_size = size * 10
+    else:
+        effective_size = size
+
+    if psutil.virtual_memory().available < effective_size:
+        gc.collect()
+    return psutil.virtual_memory().available >= effective_size
+
+
 def largeTensorTest(size):
-    """Skip test if the device has insufficient memory to run the test"""
+    """Skip test if the device has insufficient memory to run the test
+
+    size may be a number of bytes, a string of the form "N GB", or a callable
+    """
     if isinstance(size, str):
         assert size.endswith("GB") or size.endswith("gb"), "only bytes or GB supported"
         size = 1024 ** 3 * int(size[:-2])
@@ -444,24 +472,8 @@ def largeTensorTest(size):
     def inner(fn):
         @wraps(fn)
         def dep_fn(self, *args, **kwargs):
-            if self.device_type == 'cuda':
-                valid = (torch.cuda.is_available() and
-                         torch.cuda.get_device_properties(0).total_memory >= size)
-            else:
-                if not HAS_PSUTIL:
-                    raise unittest.SkipTest('Need psutil to determine if memory is sufficient')
-
-                # The sanitizers have significant memory overheads
-                if TEST_WITH_ASAN or TEST_WITH_TSAN or TEST_WITH_UBSAN:
-                    effective_size = size * 10
-                else:
-                    effective_size = size
-
-                if psutil.virtual_memory().available < effective_size:
-                    gc.collect()
-                valid = psutil.virtual_memory().available >= effective_size
-
-            if not valid:
+            size_bytes = size(self, *args, **kwargs) if callable(size) else size
+            if not _has_sufficient_memory(self.device_type, size_bytes):
                 raise unittest.SkipTest('Insufficient {} memory'.format(self.device_type))
 
             return fn(self, *args, **kwargs)
@@ -635,6 +647,48 @@ def onlyCUDA(fn):
 def expectedFailureCUDA(fn):
     return expectedFailure('cuda')(fn)
 
+class expectedAlertNondeterministic:
+    def __init__(self, caller_name, device_type=None, fn_has_device_arg=True):
+        self.device_type = device_type
+        self.error_message = caller_name + ' does not have a deterministic implementation, but you set'
+        self.fn_has_device_arg = fn_has_device_arg
+
+    def __call__(self, fn):
+        @wraps(fn)
+        def efail_fn(slf, device, *args, **kwargs):
+            if self.device_type is None or self.device_type == slf.device_type:
+                deterministic_restore = torch.is_deterministic()
+                torch.set_deterministic(True)
+                try:
+                    if self.fn_has_device_arg:
+                        fn(slf, device, *args, **kwargs)
+                    else:
+                        fn(slf, *args, **kwargs)
+                except RuntimeError as e:
+                    torch.set_deterministic(deterministic_restore)
+                    if self.error_message not in str(e):
+                        slf.fail(
+                            'expected non-deterministic error message to start with "'
+                            + self.error_message
+                            + '" but got this instead: "' + str(e) + '"')
+                    return
+                else:
+                    torch.set_deterministic(deterministic_restore)
+                    slf.fail('expected a non-deterministic error, but it was not raised')
+
+            if self.fn_has_device_arg:
+                return fn(slf, device, *args, **kwargs)
+            else:
+                return fn(slf, *args, **kwargs)
+
+        @wraps(fn)
+        def efail_fn_no_device(slf, *args, **kwargs):
+            return efail_fn(slf, None, *args, **kwargs)
+
+        if self.fn_has_device_arg:
+            return efail_fn
+        else:
+            return efail_fn_no_device
 
 # Skips a test on CPU if LAPACK is not available.
 def skipCPUIfNoLapack(fn):

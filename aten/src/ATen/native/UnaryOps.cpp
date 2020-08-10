@@ -67,7 +67,7 @@ static inline Tensor& unary_op_impl_with_complex_to_float_out(Tensor& result, co
 
       // Copies the complex result to the actual result and returns it
       result.resize_(complex_result.sizes());
-      result.copy_(complex_result);
+      result.copy_(at::real(complex_result));
       return result;
     }
 
@@ -151,6 +151,17 @@ Tensor abs(const Tensor& self) {
 }
 Tensor& abs_(Tensor& self) { return unary_op_impl_(self, at::abs_out); }
 
+// Absolute, alias for abs
+Tensor& absolute_out(Tensor& result, const Tensor& self) {
+  return at::abs_out(result, self);
+}
+Tensor absolute(const Tensor& self) {
+  return self.abs();
+}
+Tensor& absolute_(Tensor& self) {
+  return self.abs_();
+}
+
 Tensor& angle_out(Tensor& result, const Tensor& self) {
   return unary_op_impl_with_complex_to_float_out(result, self, angle_stub);
 }
@@ -160,8 +171,8 @@ Tensor angle(const Tensor& self) {
 
 Tensor real(const Tensor& self) {
   if (self.is_complex()) {
-    auto float_tensor = at::native::view_complex_as_float(self);
-    return at::select(float_tensor, float_tensor.dim() - 1, 0);
+    auto real_tensor = at::view_as_real(self);
+    return at::select(real_tensor, real_tensor.dim() - 1, 0);
   } else {
     TORCH_CHECK(false, "real is not implemented for tensors with non-complex dtypes.");
   }
@@ -169,8 +180,8 @@ Tensor real(const Tensor& self) {
 
 Tensor imag(const Tensor& self) {
   if (self.is_complex()) {
-    auto float_tensor = at::native::view_complex_as_float(self);
-    return at::select(float_tensor, float_tensor.dim() - 1, 1);
+    auto real_tensor = at::view_as_real(self);
+    return at::select(real_tensor, real_tensor.dim() - 1, 1);
   } else {
     TORCH_CHECK(false, "imag is not implemented for tensors with non-complex dtypes.");
   }
@@ -298,6 +309,27 @@ Tensor& sigmoid_out(Tensor& result, const Tensor& self) { return unary_op_impl_o
 Tensor sigmoid(const Tensor& self) { return unary_op_impl(self, at::sigmoid_out);  }
 Tensor& sigmoid_(Tensor& self) { return unary_op_impl_(self, at::sigmoid_out);  }
 
+Tensor& logit_out(
+    Tensor& result,
+    const Tensor& self,
+    c10::optional<double> eps) {
+  auto iter = TensorIterator::unary_op(
+      result,
+      self,
+      /*check_mem_overlap=*/true);
+  logit_stub(iter.device_type(), iter, Scalar(eps ? eps.value() : -1.0));
+  return result;
+}
+
+Tensor logit(const Tensor& self, c10::optional<double> eps) {
+  Tensor result = at::empty({0}, self.options());
+  return at::logit_out(result, self, eps);
+}
+
+Tensor& logit_(Tensor& self, c10::optional<double> eps) {
+  return at::logit_out(self, self, eps);
+}
+
 Tensor& tanh_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, tanh_stub); }
 Tensor tanh(const Tensor& self) { return unary_op_impl(self, at::tanh_out); }
 Tensor& tanh_(Tensor& self) { return unary_op_impl_(self, at::tanh_out); }
@@ -335,14 +367,38 @@ Tensor& logical_not_(Tensor& self) {
 }
 
 Tensor& logical_not_out(Tensor& result, const Tensor& self) {
-  TensorIterator iter;
-  iter.dont_compute_common_dtype();
-  iter.set_check_mem_overlap(true);
-  iter.add_output(result);
-  iter.add_input(self);
-  iter.build();
+  TensorIterator iter = TensorIteratorConfig()
+    .check_all_same_dtype(false)
+    .set_check_mem_overlap(true)
+    .add_output(result)
+    .add_input(self)
+    .build();
   logical_not_stub(iter.device_type(), iter);
   return result;
+}
+
+Tensor& signbit_out(Tensor& result, const Tensor& self) {
+  TORCH_CHECK(!self.is_complex(), "signbit is not implemented for complex tensors.");
+  TORCH_CHECK(result.scalar_type() == at::kBool, "signbit does not support non-boolean outputs.");
+  result.resize_(self.sizes());
+
+  if (self.dtype() == at::kBool) {
+    return result.fill_(false);
+  } else {
+    TensorIterator iter = TensorIteratorConfig()
+      .check_all_same_dtype(false)
+      .set_check_mem_overlap(true)
+      .add_output(result)
+      .add_input(self)
+      .build();
+    signbit_stub(iter.device_type(), iter);
+  }
+  return result;
+}
+
+Tensor signbit(const Tensor& self) {
+  Tensor result = at::empty({0}, self.options().dtype(kBool));
+  return at::signbit_out(result, self);
 }
 
 Tensor& clamp_out(Tensor& result, const Tensor& self, optional<Scalar> min, optional<Scalar> max) {
@@ -408,6 +464,19 @@ Tensor clamp_min(const Tensor& self, Scalar min) {
 
 Tensor& clamp_min_(Tensor& self, Scalar min) {
   return at::clamp_min_out(self, self, min);
+}
+
+// Implements the "clip" alias for clamp
+Tensor& clip_out(Tensor& result, const Tensor& self, optional<Scalar> min, optional<Scalar> max) {
+  return at::clamp_out(result, self, min, max);
+}
+
+Tensor clip(const Tensor& self, optional<Scalar> min, optional<Scalar> max) {
+  return at::clamp(self, min, max);
+}
+
+Tensor& clip_(Tensor& self, optional<Scalar> min, optional<Scalar> max) {
+  return at::clamp_(self, min, max);
 }
 
 Tensor polygamma(int64_t n, const Tensor& self) {
@@ -520,7 +589,9 @@ DEFINE_DISPATCH(reciprocal_stub);
 DEFINE_DISPATCH(round_stub);
 DEFINE_DISPATCH(rsqrt_stub);
 DEFINE_DISPATCH(sigmoid_stub);
+DEFINE_DISPATCH(logit_stub);
 DEFINE_DISPATCH(sign_stub);
+DEFINE_DISPATCH(signbit_stub);
 DEFINE_DISPATCH(sin_stub);
 DEFINE_DISPATCH(sinh_stub);
 DEFINE_DISPATCH(sqrt_stub);
@@ -529,5 +600,6 @@ DEFINE_DISPATCH(tanh_stub);
 DEFINE_DISPATCH(trigamma_stub);
 DEFINE_DISPATCH(trunc_stub);
 DEFINE_DISPATCH(lgamma_stub);
-}
+
+} // namespace native
 } // namespace at

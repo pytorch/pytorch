@@ -145,14 +145,11 @@ ProcessGroup
 
 - `ProcessGroup.hpp <https://github.com/pytorch/pytorch/blob/v1.4.0/torch/lib/c10d/ProcessGroup.hpp>`__:
   contains the abstract API of all process group implementations. The ``c10d``
-  library provides 4 implementations out of the box, namely,
-  `ProcessGroupGloo`, `ProcessGroupNCCL`, `ProcessGroupMPI`, and
-  `ProcessGroupRoundRobin`, where `ProcessGroupRoundRobin` is a composition of
-  multiple process group instances and launches collective communications in a
-  round-robin manner. ``DistributedDataParallel`` uses
-  ``ProcessGroup::broadcast()`` to send model states from the process with rank
-  0 to others during initialization and ``ProcessGroup::allreduce()`` to sum
-  gradients.
+  library provides 3 implementations out of the box, namely,
+  `ProcessGroupGloo`, `ProcessGroupNCCL`, and `ProcessGroupMPI`. 
+  ``DistributedDataParallel`` uses ``ProcessGroup::broadcast()`` to send  
+  model states from the process with rank 0 to others during initialization  
+  and ``ProcessGroup::allreduce()`` to sum gradients.
 
 
 - `Store.hpp <https://github.com/pytorch/pytorch/blob/v1.4.0/torch/lib/c10d/Store.hpp>`__:
@@ -175,7 +172,7 @@ DistributedDataParallel
   broadcast model states during initialization and synchronize model buffers
   before the forward pass.
 
-- `reducer.h <https://github.com/pytorch/pytorch/blob/v1.4.0/torch/csrc/distributed/c10d/comm.h>`__:
+- `reducer.h <https://github.com/pytorch/pytorch/blob/v1.4.0/torch/csrc/distributed/c10d/reducer.h>`__:
   provides the core implementation for gradient synchronization in the backward
   pass. It has three entry point functions:
 

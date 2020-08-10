@@ -207,7 +207,8 @@ def gradcheck(
     rtol: float = 1e-3,
     raise_exception: bool = True,
     check_sparse_nnz: bool = False,
-    nondet_tol: float = 0.0
+    nondet_tol: float = 0.0,
+    check_undefined_grad: bool = True
 ) -> bool:
     r"""Check gradients computed via small finite differences against analytical
     gradients w.r.t. tensors in :attr:`inputs` that are of floating point or complex type
@@ -242,6 +243,8 @@ def gradcheck(
         nondet_tol (float, optional): tolerance for non-determinism. When running
             identical inputs through the differentiation, the results must either match
             exactly (default, 0.0) or be within this tolerance.
+        check_undefined_grad (bool, options): if True, check if undefined output grads
+            are supported and treated as zeros
 
     Returns:
         True if all differences satisfy allclose condition
@@ -349,6 +352,52 @@ def gradcheck(
             if gi.size() != i.size():
                 return fail_test('grad is incorrect size')
 
+        if check_undefined_grad:
+            def warn_bc_breaking():
+                warnings.warn((
+                    'Backwards compatibility: New undefined gradient support checking '
+                    'feature is enabled by default, but it may break existing callers '
+                    'of this function. If this is true for you, you can call this '
+                    'function with "check_undefined_grad=False" to disable the feature'))
+
+            def check_undefined_grad_support(output_to_check):
+                grads_output = [torch.zeros_like(o, memory_format=torch.legacy_contiguous_format) for o in output_to_check]
+                try:
+                    grads_input = torch.autograd.grad(output_to_check,
+                                                      diff_input_list,
+                                                      grads_output,
+                                                      allow_unused=True)
+                except RuntimeError:
+                    warn_bc_breaking()
+                    return fail_test((
+                        'Expected backward function to handle undefined output grads. '
+                        'Please look at "Notes about undefined output gradients" in '
+                        '"tools/autograd/derivatives.yaml"'))
+
+                for gi, i in zip(grads_input, diff_input_list):
+                    if (gi is not None) and (not gi.eq(0).all()):
+                        warn_bc_breaking()
+                        return fail_test((
+                            'Expected all input grads to be undefined or zero when all output grads are undefined '
+                            'or zero. Please look at "Notes about undefined output gradients" in '
+                            '"tools/autograd/derivatives.yaml"'))
+                return True
+
+            # All backward functions must work properly if all output grads are undefined
+            outputs_to_check = [[torch._C._functions.UndefinedGrad()(o) for o in _differentiable_outputs(func(*tupled_inputs))]]
+
+            # If there are multiple output grads, we should be able to undef one at a time without error
+            if len(outputs_to_check[0]) > 1:
+                for undef_grad_idx in range(len(output)):
+                    output_to_check = _differentiable_outputs(func(*tupled_inputs))
+                    outputs_to_check.append([
+                        torch._C._functions.UndefinedGrad()(o) if idx == undef_grad_idx else o
+                        for idx, o in enumerate(output_to_check)])
+
+            for output_to_check in outputs_to_check:
+                if not check_undefined_grad_support(output_to_check):
+                    return False
+
     return True
 
 
@@ -361,7 +410,8 @@ def gradgradcheck(
     rtol: float = 1e-3,
     gen_non_contig_grad_outputs: bool = False,
     raise_exception: bool = True,
-    nondet_tol: float = 0.0
+    nondet_tol: float = 0.0,
+    check_undefined_grad: bool = True
 ) -> bool:
     r"""Check gradients of gradients computed via small finite differences
     against analytical gradients w.r.t. tensors in :attr:`inputs` and
@@ -406,6 +456,8 @@ def gradgradcheck(
             exactly (default, 0.0) or be within this tolerance. Note that a small amount
             of nondeterminism in the gradient will lead to larger inaccuracies in
             the second derivative.
+        check_undefined_grad (bool, options): if True, check if undefined output grads
+            are supported and treated as zeros
 
     Returns:
         True if all differences satisfy allclose condition
@@ -437,4 +489,4 @@ def gradgradcheck(
         return grad_inputs
 
     return gradcheck(new_func, tupled_inputs + tupled_grad_outputs, eps, atol, rtol, raise_exception,
-                     nondet_tol=nondet_tol)
+                     nondet_tol=nondet_tol, check_undefined_grad=check_undefined_grad)

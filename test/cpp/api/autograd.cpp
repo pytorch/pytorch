@@ -193,7 +193,34 @@ TEST(CustomAutogradTest, FunctionReturnsInput) {
 
   Variable x(torch::ones(1, torch::requires_grad()));
   MyFunction::apply(x).backward(torch::ones(1) , true, true);
-  ASSERT_VARIABLE_EQ(x.grad(), torch::full(1,2));
+  ASSERT_VARIABLE_EQ(x.grad(), torch::full(1, 2.));
+}
+
+TEST(CustomAutogradTest, FunctionReturnsUndefined) {
+  struct MyFunction : public Function<MyFunction> {
+    static Variable forward(AutogradContext *ctx, Variable var) {
+      return var * 2;
+    }
+
+    static variable_list backward(AutogradContext *ctx, variable_list grad_output) {
+      at::Tensor undefined_tensor;
+      return {undefined_tensor};
+    }
+  };
+
+  auto x = torch::ones(1, torch::requires_grad());
+  
+  MyFunction::apply(x).backward();
+  ASSERT_FALSE(x.grad().defined());
+
+  MyFunction::apply(x.pow(2)).backward();
+  ASSERT_FALSE(x.grad().defined());
+
+  MyFunction::apply(x).sum().backward();
+  ASSERT_FALSE(x.grad().defined());
+
+  ASSERT_FALSE(torch::autograd::grad(
+    {MyFunction::apply(x)}, {x}, {}, false, false, true)[0].defined());
 }
 
 TEST(CustomAutogradTest, NoGradCustomFunction) {

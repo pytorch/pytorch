@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
 #include <torch/csrc/jit/jit_log.h>
+#include <regex>
 #include <stack>
 
 namespace torch {
@@ -133,7 +134,7 @@ bool SubgraphMatcher::matchAttributes(const Node* n1, Node* n2) {
     }
     switch (n1->kindOf(attr_name)) {
       case AttributeKind::s:
-        if (n1->s(attr_name) != n2->s(attr_name)) {
+        if (!std::regex_match(n2->s(attr_name), std::regex(n1->s(attr_name)))) {
           GRAPH_DEBUG(
               "Nodes did not match because attribute '",
               attr_name.toQualString(),

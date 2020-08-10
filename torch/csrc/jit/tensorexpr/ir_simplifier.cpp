@@ -942,6 +942,50 @@ const Expr* PolynomialTransformer::mutate(const Div* v) {
   return new Div(lhs_new, rhs_new);
 }
 
+const Expr* PolynomialTransformer::mutate(const Max* v) {
+  const Expr* lhs_new = v->lhs()->accept_mutator(this);
+  const Expr* rhs_new = v->rhs()->accept_mutator(this);
+
+  // Constant Folding.
+  if (lhs_new->isConstant() && rhs_new->isConstant()) {
+    return evaluateOp(new Max(lhs_new, rhs_new, v->propagate_nans()));
+  }
+
+  const Expr* diff = new Sub(lhs_new, rhs_new);
+  diff = diff->accept_mutator(this);
+  if (!diff->isConstant()) {
+    return new Max(lhs_new, rhs_new, v->propagate_nans());
+  }
+
+  if (immediateAs<int>(diff) > 0) {
+    return lhs_new;
+  }
+
+  return rhs_new;
+}
+
+const Expr* PolynomialTransformer::mutate(const Min* v) {
+  const Expr* lhs_new = v->lhs()->accept_mutator(this);
+  const Expr* rhs_new = v->rhs()->accept_mutator(this);
+
+  // Constant Folding.
+  if (lhs_new->isConstant() && rhs_new->isConstant()) {
+    return evaluateOp(new Min(lhs_new, rhs_new, v->propagate_nans()));
+  }
+
+  const Expr* diff = new Sub(lhs_new, rhs_new);
+  diff = diff->accept_mutator(this);
+  if (!diff->isConstant()) {
+    return new Min(lhs_new, rhs_new, v->propagate_nans());
+  }
+
+  if (immediateAs<int>(diff) < 0) {
+    return lhs_new;
+  }
+
+  return rhs_new;
+}
+
 const Expr* PolynomialTransformer::mutate(const Intrinsics* v) {
   std::vector<const Expr*> new_params;
   bool changed = false;
@@ -1049,6 +1093,15 @@ Stmt* IRSimplifierBase::mutate(const Cond* v) {
     return Stmt::clone(true_new);
   }
 
+  Block* true_block = dynamic_cast<Block*>(true_new);
+  Block* false_block = dynamic_cast<Block*>(false_new);
+  bool true_empty = !true_new || (true_block && true_block->nstmts() == 0);
+  bool false_empty = !false_new || (false_block && false_block->nstmts() == 0);
+
+  if (true_empty && false_empty) {
+    return new Block({});
+  }
+
   if (cond_old == cond_new && true_old == true_new && false_old == false_new) {
     return (Stmt*)v;
   }
@@ -1109,7 +1162,6 @@ Stmt* IRSimplifierBase::mutate(const For* v) {
 }
 
 Stmt* IRSimplifierBase::mutate(const Block* v) {
-  auto vars = v->varBindings();
   std::vector<Stmt*> stmts;
   for (Stmt* stmt : *v) {
     Stmt* stmt_new = stmt->accept_mutator(this);
@@ -1118,10 +1170,6 @@ Stmt* IRSimplifierBase::mutate(const Block* v) {
     }
 
     if (auto* subBlock = dynamic_cast<Block*>(stmt_new)) {
-      for (auto& pair : subBlock->varBindings()) {
-        vars.emplace_back(pair.first, pair.second);
-      }
-
       for (Block::iterator I = subBlock->begin(), E = subBlock->end();
            I != E;) {
         // Be careful to avoid invalidating the iterator.
@@ -1134,7 +1182,7 @@ Stmt* IRSimplifierBase::mutate(const Block* v) {
     }
   }
 
-  return new Block(vars, stmts);
+  return new Block(stmts);
 }
 
 // TermExpander

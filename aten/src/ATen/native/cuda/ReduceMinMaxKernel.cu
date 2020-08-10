@@ -90,7 +90,7 @@ void argmin_kernel_cuda(TensorIterator& iter) {
 }
 
 static void min_kernel_impl(Tensor& result, Tensor& indice, const Tensor& self, int64_t dim, bool keepdim) {
-  at::TensorIterator iter = make_reduction("min", result, indice, self, dim, keepdim, self.scalar_type(), kLong, false);
+  at::TensorIterator iter = make_reduction("min", result, indice, self, dim, keepdim, self.scalar_type(), kLong);
   AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.dtype(2), "min_cuda", [&]() {
     gpu_reduce_kernel<scalar_t, scalar_t>(
       iter,
@@ -100,7 +100,7 @@ static void min_kernel_impl(Tensor& result, Tensor& indice, const Tensor& self, 
 }
 
 static void max_kernel_impl(Tensor& result, Tensor& indice, const Tensor& self, int64_t dim, bool keepdim) {
-  at::TensorIterator iter = make_reduction("max", result, indice, self, dim, keepdim, self.scalar_type(), kLong, false);
+  at::TensorIterator iter = make_reduction("max", result, indice, self, dim, keepdim, self.scalar_type(), kLong);
   AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.dtype(2), "max_cuda", [&]() {
     gpu_reduce_kernel<scalar_t, scalar_t>(
       iter,

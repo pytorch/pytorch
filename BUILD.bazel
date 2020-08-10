@@ -19,7 +19,6 @@ COMMON_COPTS = [
     "-DTH_HAVE_THREAD",
     "-DUSE_FBGEMM",
     "-DUSE_DISTRIBUTED",
-    "-DAT_PARALLEL_NATIVE=1",
     "-DATEN_THREADING=NATIVE",
     "-DNO_CUDNN_DESTROY_HANDLE",
 ] + if_cuda([
@@ -128,6 +127,7 @@ genrule(
         "aten/src/ATen/CPUType.h",
         "aten/src/ATen/CPUType.cpp",
         "aten/src/ATen/Functions.h",
+        "aten/src/ATen/Functions.cpp",
         "aten/src/ATen/LegacyTHFunctionsCPU.h",
         "aten/src/ATen/LegacyTHFunctionsCPU.cpp",
         "aten/src/ATen/NativeFunctions.h",
@@ -186,12 +186,6 @@ libtorch_cpp_generated_sources = [
         "torch/csrc/autograd/generated/VariableType_3.cpp",
         "torch/csrc/autograd/generated/VariableType_4.cpp",
         # "torch/csrc/autograd/generated/VariableTypeEverything.cpp",
-        "torch/csrc/autograd/generated/ProfiledType_0.cpp",
-        "torch/csrc/autograd/generated/ProfiledType_1.cpp",
-        "torch/csrc/autograd/generated/ProfiledType_2.cpp",
-        "torch/csrc/autograd/generated/ProfiledType_3.cpp",
-        "torch/csrc/autograd/generated/ProfiledType_4.cpp",
-        # "torch/csrc/autograd/generated/ProfiledTypeEverything.cpp",
         "torch/csrc/autograd/generated/TraceType_0.cpp",
         "torch/csrc/autograd/generated/TraceType_1.cpp",
         "torch/csrc/autograd/generated/TraceType_2.cpp",
@@ -213,6 +207,8 @@ libtorch_python_generated_sources = [
         "torch/csrc/autograd/generated/python_variable_methods.cpp",
         "torch/csrc/autograd/generated/python_torch_functions.cpp",
         "torch/csrc/autograd/generated/python_nn_functions.cpp",
+        "torch/csrc/autograd/generated/python_fft_functions.cpp",
+        "torch/csrc/autograd/generated/python_linalg_functions.cpp",
 ]
 
 genrule(
@@ -299,8 +295,8 @@ filegroup(
 )
 
 filegroup(
-    name = "aten_native_vulkan_stub",
-    srcs = glob(["aten/src/ATen/native/vulkan/stub/*.cpp"]),
+    name = "aten_base_vulkan",
+    srcs = glob(["aten/src/ATen/vulkan/*.cpp"]),
 )
 
 filegroup(
@@ -325,7 +321,6 @@ filegroup(
         "aten/src/TH/THStorageFunctions.cpp",
         "aten/src/TH/THTensor.cpp",
         "aten/src/TH/THTensorEvenMoreMath.cpp",
-        "aten/src/TH/THTensorFill.cpp",
         "aten/src/TH/THTensorLapack.cpp",
         "aten/src/TH/THTensorMath.cpp",
         "aten/src/TH/THTensorMoreMath.cpp",
@@ -545,6 +540,9 @@ template_rule(
         "@AT_NNPACK_ENABLED@": "0",
         "@CAFFE2_STATIC_LINK_CUDA_INT@": "0",
         "@USE_BLAS@": "1",
+        "@AT_PARALLEL_OPENMP@": "0",
+        "@AT_PARALLEL_NATIVE@": "1",
+        "@AT_PARALLEL_NATIVE_TBB@": "0",
     },
 )
 
@@ -564,7 +562,10 @@ template_rule(
     src = "aten/src/TH/THGeneral.h.in",
     out = "aten/src/TH/THGeneral.h",
     substitutions = {
-        "cmakedefine": "define",
+        "#cmakedefine USE_BLAS": "#define USE_BLAS",
+        "#cmakedefine USE_LAPACK": "#define USE_LAPACK",
+        "#cmakedefine BLAS_F2C": "/* #undef BLAS_F2C */",
+        "#cmakedefine BLAS_USE_CBLAS_DOT": "#define BLAS_USE_CBLAS_DOT",
     },
 )
 
@@ -646,13 +647,13 @@ cc_library(
         ":ATen_CORE_SRCS",
         ":ATen_QUANTIZED_SRCS",
         ":aten_base_cpp",
+        ":aten_base_vulkan",
         ":aten_native_cpp",
         ":aten_native_mkl_cpp",
         ":aten_native_mkldnn_cpp",
         ":aten_native_quantized_cpp",
         ":aten_native_sparse_cpp",
         ":aten_native_xnnpack",
-        ":aten_native_vulkan_stub",
         ":aten_src_ATen_config",
         ":generated_cpp",
     ],
@@ -1216,9 +1217,9 @@ filegroup(
         "caffe2/perfkernels/adagrad.cc",
         "caffe2/perfkernels/embedding_lookup.cc",
         "caffe2/perfkernels/embedding_lookup_idx.cc",
-        "caffe2/perfkernels/fused_8bit_rowwise_conversion.cc",
         "caffe2/perfkernels/fused_8bit_rowwise_embedding_lookup.cc",
         "caffe2/perfkernels/fused_8bit_rowwise_embedding_lookup_idx.cc",
+        "caffe2/perfkernels/fused_nbit_rowwise_conversion.cc",
         "caffe2/perfkernels/lstm_unit_cpu_common.cc",
         "caffe2/perfkernels/math_cpu_base.cc",
         "caffe2/perfkernels/typed_axpy.cc",
@@ -1262,6 +1263,7 @@ filegroup(
         "caffe2/quantization/server/fully_connected_dnnlowp_op.cc",
         "caffe2/quantization/server/fully_connected_fake_lowp_op.cc",
         "caffe2/quantization/server/group_norm_dnnlowp_op.cc",
+        "caffe2/quantization/server/int8_gen_quant_params.cc",
         "caffe2/quantization/server/kl_minimization.cc",
         "caffe2/quantization/server/lstm_unit_dnnlowp_op.cc",
         "caffe2/quantization/server/norm_minimization.cc",
@@ -1348,7 +1350,6 @@ filegroup(
         "caffe2/utils/smart_tensor_printer.cc",
         "caffe2/utils/string_utils.cc",
         "caffe2/utils/threadpool/ThreadPool.cc",
-        "caffe2/utils/threadpool/ThreadPoolMobile.cc",
         "caffe2/utils/threadpool/pthreadpool.cc",
         "caffe2/utils/threadpool/pthreadpool_impl.cc",
     ],

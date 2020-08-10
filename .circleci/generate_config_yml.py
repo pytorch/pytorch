@@ -6,23 +6,24 @@ Please see README.md in this directory for details.
 """
 
 import os
-import sys
 import shutil
+import sys
 from collections import namedtuple
 
-import cimodel.data.pytorch_build_definitions as pytorch_build_definitions
-import cimodel.data.windows_build_definitions as windows_build_definitions
 import cimodel.data.binary_build_definitions as binary_build_definitions
 import cimodel.data.caffe2_build_definitions as caffe2_build_definitions
+import cimodel.data.pytorch_build_definitions as pytorch_build_definitions
+import cimodel.data.simple.android_definitions
+import cimodel.data.simple.bazel_definitions
+import cimodel.data.simple.binary_smoketest
+import cimodel.data.simple.docker_definitions
+import cimodel.data.simple.ge_config_tests
+import cimodel.data.simple.ios_definitions
 import cimodel.data.simple.macos_definitions
 import cimodel.data.simple.mobile_definitions
-import cimodel.data.simple.bazel_definitions
-import cimodel.data.simple.ge_config_tests
-import cimodel.data.simple.binary_smoketest
-import cimodel.data.simple.ios_definitions
-import cimodel.data.simple.android_gradle
 import cimodel.data.simple.nightly_android
 import cimodel.data.simple.nightly_ios
+import cimodel.data.windows_build_definitions as windows_build_definitions
 import cimodel.lib.miniutils as miniutils
 import cimodel.lib.miniyaml as miniyaml
 
@@ -31,6 +32,7 @@ class File(object):
     """
     Verbatim copy the contents of a file into config.yml
     """
+
     def __init__(self, filename):
         self.filename = filename
 
@@ -39,7 +41,7 @@ class File(object):
             shutil.copyfileobj(fh, output_filehandle)
 
 
-class FunctionGen(namedtuple('FunctionGen', 'function depth')):
+class FunctionGen(namedtuple("FunctionGen", "function depth")):
     __slots__ = ()
 
 
@@ -56,6 +58,7 @@ class Listgen(FunctionGen):
     """
     Insert the content of a YAML list into config.yml
     """
+
     def write(self, output_filehandle):
         miniyaml.render(output_filehandle, self.function(), self.depth)
 
@@ -65,7 +68,6 @@ def horizontal_rule():
 
 
 class Header(object):
-
     def __init__(self, title, summary=None):
         self.title = title
         self.summary_lines = summary or []
@@ -81,9 +83,10 @@ class Header(object):
 
 def gen_build_workflows_tree():
     build_workflows_functions = [
+        cimodel.data.simple.docker_definitions.get_workflow_jobs,
         pytorch_build_definitions.get_workflow_jobs,
         cimodel.data.simple.macos_definitions.get_workflow_jobs,
-        cimodel.data.simple.android_gradle.get_workflow_jobs,
+        cimodel.data.simple.android_definitions.get_workflow_jobs,
         cimodel.data.simple.ios_definitions.get_workflow_jobs,
         cimodel.data.simple.mobile_definitions.get_workflow_jobs,
         cimodel.data.simple.ge_config_tests.get_workflow_jobs,
@@ -93,6 +96,7 @@ def gen_build_workflows_tree():
         cimodel.data.simple.nightly_ios.get_workflow_jobs,
         cimodel.data.simple.nightly_android.get_workflow_jobs,
         windows_build_definitions.get_windows_workflows,
+        binary_build_definitions.get_post_upload_jobs,
         binary_build_definitions.get_binary_smoke_test_jobs,
     ]
 
@@ -106,12 +110,10 @@ def gen_build_workflows_tree():
         "workflows": {
             "binary_builds": {
                 "when": r"<< pipeline.parameters.run_binary_tests >>",
-                "jobs": [f() for f in binary_build_functions]
+                "jobs": [f() for f in binary_build_functions],
             },
-            "build": {
-                "jobs": [f() for f in build_workflows_functions],
-            },
-        },
+            "build": {"jobs": [f() for f in build_workflows_functions]},
+        }
     }
 
 
@@ -120,13 +122,11 @@ YAML_SOURCES = [
     File("header-section.yml"),
     File("commands.yml"),
     File("nightly-binary-build-defaults.yml"),
-
     Header("Build parameters"),
     File("build-parameters/pytorch-build-params.yml"),
     File("build-parameters/caffe2-build-params.yml"),
     File("build-parameters/binary-build-params.yml"),
     File("build-parameters/promote-build-params.yml"),
-
     Header("Job specs"),
     File("job-specs/pytorch-job-specs.yml"),
     File("job-specs/caffe2-job-specs.yml"),
@@ -136,12 +136,8 @@ YAML_SOURCES = [
     File("job-specs/binary_update_htmls.yml"),
     File("job-specs/binary-build-tests.yml"),
     File("job-specs/docker_jobs.yml"),
-
     Header("Workflows"),
     Treegen(gen_build_workflows_tree, 0),
-
-    File("workflows/workflows-s3-html.yml"),
-    File("workflows/workflows-docker-builder.yml"),
     File("workflows/workflows-ecr-gc.yml"),
     File("workflows/workflows-promote.yml"),
 ]

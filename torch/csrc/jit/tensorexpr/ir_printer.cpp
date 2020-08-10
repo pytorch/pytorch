@@ -266,6 +266,17 @@ void IRPrinter::visit(const BaseCallNode* v) {
   os() << ")";
 }
 
+void IRPrinter::visit(const FunctionCall* v) {
+  os() << *v->tensor()->buf() << "(";
+  for (int i = 0; i < v->nparams(); i++) {
+    if (i > 0) {
+      os() << ", ";
+    }
+    os() << *v->param(i);
+  }
+  os() << ")";
+}
+
 void IRPrinter::visit(const Term* v) {
   os() << "Term(";
   v->scalar()->accept(this);
@@ -382,14 +393,6 @@ void IRPrinter::visit(const Block* v) {
   os() << "{" << std::endl;
   indent_++;
 
-  for (const auto& pair : v->varBindings()) {
-    const Var* var = pair.first;
-    const Expr* val = pair.second;
-    emitIndent();
-    os() << var->dtype().ToCppString() << " " << *var << " = " << *val << "; "
-         << std::endl;
-  }
-
   for (Stmt* s : *v) {
     os() << *s;
   }
@@ -415,6 +418,13 @@ void IRPrinter::visit(const Allocate* v) {
 void IRPrinter::visit(const Free* v) {
   emitIndent();
   os() << "Free(" << *v->buffer_var() << ");" << std::endl;
+}
+
+void IRPrinter::visit(const Let* v) {
+  emitIndent();
+  os() << v->dtype().ToCppString() << " " << *v->var();
+  os() << " = " << *v->value();
+  os() << "; " << std::endl;
 }
 
 void IRPrinter::visit(const Cond* v) {

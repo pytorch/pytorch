@@ -31,9 +31,6 @@ class C10_API Scalar {
 
   AT_FORALL_SCALAR_TYPES_AND2(Half, BFloat16, DEFINE_IMPLICIT_CTOR)
   AT_FORALL_COMPLEX_TYPES(DEFINE_IMPLICIT_CTOR)
-  // TODO: remove the std::complex below
-  DEFINE_IMPLICIT_CTOR(std::complex<float>, x)
-  DEFINE_IMPLICIT_CTOR(std::complex<double>, x)
 
 #undef DEFINE_IMPLICIT_CTOR
 
@@ -153,18 +150,5 @@ inline T Scalar::to() const {
   }
 AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF(DEFINE_TO)
 #undef DEFINE_TO
-
-// TODO(@zasdfgbnm): Remove this!
-// This is needed only when the migration of std::complex to c10::complex
-// is not done. This should be removed once the migration is done.
-template <>
-inline std::complex<float> Scalar::to() const {
-  return static_cast<std::complex<float>>(toComplexFloat());
-}
-template <>
-inline std::complex<double> Scalar::to() const {
-  return static_cast<std::complex<double>>(toComplexDouble());
-}
-// end TODO
 
 } // namespace c10

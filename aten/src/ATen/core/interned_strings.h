@@ -66,9 +66,14 @@ namespace c10 {
   _(prim, ListConstruct)             \
   _(prim, ListUnpack)                \
   _(prim, DictConstruct)             \
+  _(prim, EnumName)                  \
+  _(prim, EnumValue)                 \
   _(prim, StringIndex)               \
   _(prim, NumToTensor)               \
   _(prim, Uninitialized)             \
+  _(prim, With)                      \
+  _(prim, Enter)                     \
+  _(prim, Exit)                      \
   _(aten, Bool)                      \
   _(aten, Int)                       \
   _(aten, FloatImplicit)             \
@@ -134,9 +139,14 @@ namespace c10 {
   _(prim, TracedFork)                \
   _(prim, TracedAttr)                \
   _(prim, rpc_async)                 \
+  _(prim, is_cuda)                   \
   _(aten, abs_)                      \
   _(aten, absolute)                  \
   _(aten, absolute_)                 \
+  _(aten, clamp)                     \
+  _(aten, clamp_)                    \
+  _(aten, clip)                      \
+  _(aten, clip_)                     \
   _(aten, append)                    \
   _(aten, item)                      \
   _(aten, format)                    \
@@ -184,6 +194,7 @@ namespace c10 {
   _(prim, unchecked_unwrap_optional) \
   _(aten, __contains__)              \
   _(prim, BailoutTemplate)           \
+  _(prim, grad)                      \
   _(aten, zero_)                     \
   _(aten, fill_)                     \
   FORALL_ATEN_BASE_SYMBOLS(_)        \
@@ -234,6 +245,8 @@ namespace c10 {
   _(onnx, LogSoftmax)                \
   _(onnx, ReduceL1)                  \
   _(onnx, ReduceL2)                  \
+  _(onnx, Conv)                      \
+  _(onnx, BatchNormalization)        \
   FORALL_ATTR_BASE_SYMBOLS(_)        \
   _(attr, Subgraph)                  \
   _(attr, ReverseSubgraph)           \

@@ -155,53 +155,6 @@ sampleMultinomialWithReplacement(std::pair<uint64_t, uint64_t> seeds,
   }
 }
 
-template <typename scalar_t>
-__global__ void
-sampleMultinomialWithoutReplacement(std::pair<uint64_t, uint64_t> seeds,
-                                    int totalSamples,
-                                    int sample,
-                                    int64_t* dest,
-                                    int64_t distributions,
-                                    int categories,
-                                    scalar_t* origDist,
-                                    scalar_t* normDistPrefixSum) {
-  // At the moment, each warp computes one sample value in the binary
-  // search due to divergence. It seems possible to compute multiple
-  // values and limit divergence though later on.
-
-  // global index formula for 1D grid of 2D blocks
-  int idx = blockIdx.x * blockDim.x * blockDim.y + threadIdx.y * blockDim.x + threadIdx.x;
-
-  curandStatePhilox4_32_10_t state;
-  curand_init(seeds.first, idx, seeds.second, &state);
-
-  // The block and warp determines the distribution for which we
-  // generate a point
-  for (int64_t curDist = blockIdx.x * blockDim.y + threadIdx.y;
-       curDist < distributions;
-       curDist += gridDim.x * blockDim.y) {
-
-    auto rand = curand_uniform4(&state);
-    scalar_t r = static_cast<scalar_t>(rand.x);
-
-    if (threadIdx.x == 0) {
-      // Find the bucket that a uniform sample lies in
-      int choice = binarySearchForMultinomial<scalar_t>(
-          normDistPrefixSum + curDist * categories,
-          origDist + curDist * categories,
-          categories,
-          r);
-
-      // Torch indices are 1-based
-      dest[curDist * totalSamples + sample] = choice;
-
-      // Without replacement, so update the original probability so it
-      // is not considered a second time
-      origDist[curDist * categories + choice] = static_cast<scalar_t>(0);
-    }
-  }
-}
-
 template <typename scalar_t, typename accscalar_t>
 #ifdef __HIP_PLATFORM_HCC__
 C10_LAUNCH_BOUNDS_1(1024)
@@ -438,52 +391,6 @@ void multinomial_kernel_impl(Tensor& result, const Tensor& self, const int64_t n
                 numDist, numCategories,
                 prefixSum.data_ptr<scalar_t>(),
                 normDist.data_ptr<scalar_t>());
-      } else {
-        // Sample without replacement
-
-        // Binary search is warp divergent (so effectively we're running
-        // with just a single thread), but for better utilization,
-        // we need each block to have at least 4 warps.
-        dim3 block(32, 4);
-
-        // Each warp in a block will generate a sample from a different
-        // distribution concurrently.
-        ptrdiff_t numBlocks = (numDist + 4 - 1) / 4;
-        dim3 grid(numBlocks < MAX_NUM_BLOCKS ? numBlocks : MAX_NUM_BLOCKS);
-
-        for (int sample = 0; sample < n_sample; ++sample) {
-          if (sample > 0) {
-            // Update probabilities
-            // Renorm along rows
-            normDist.copy_(origDist);
-            renormRows(normDist);
-
-            // Prefix sum along rows
-            at::_cumsum_out(prefixSum, normDist, 1);
-          }
-          {
-            // See Note [Acquire lock when using random generators]
-            std::lock_guard<std::mutex> lock(gen->mutex_);
-
-            // each thread will utilize distributions/(gridDim.x*blockDim.y) randoms, however, since we have to use
-            // curand_uniform4 (See Note [Register spilling in curand call for CUDA < 10]),
-            // offset is 4 times that.
-            auto offset = ((numDist-1)/(grid.x*block.y)+1)*4;
-            rng_engine_inputs = gen->philox_engine_inputs(offset);
-          }
-
-          // The kernel can only draw one sample before we have to
-          // recalculate our distribution
-          sampleMultinomialWithoutReplacement
-              <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
-              rng_engine_inputs,
-                  n_sample,
-                  sample,
-                  result.data_ptr<int64_t>(),
-                  numDist, numCategories,
-                  origDist.data_ptr<scalar_t>(),
-                  prefixSum.data_ptr<scalar_t>());
-        }
       }
     }
   });

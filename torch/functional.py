@@ -3,7 +3,7 @@ from typing import Tuple, Optional
 import torch
 import torch.nn.functional as F
 from ._lowrank import svd_lowrank, pca_lowrank
-from ._overrides import has_torch_function, handle_torch_function
+from .overrides import has_torch_function, handle_torch_function
 from ._jit_internal import boolean_dispatch, List
 from ._jit_internal import _overload as overload
 
@@ -11,6 +11,9 @@ Tensor = torch.Tensor
 from torch import _VF
 
 __all__ = [
+    'atleast_1d',
+    'atleast_2d',
+    'atleast_3d',
     'align_tensors',
     'broadcast_tensors',
     'cartesian_prod',
@@ -82,6 +85,27 @@ def split(tensor, split_size_or_sections, dim=0):
         split_size_or_sections (int) or (list(int)): size of a single chunk or
             list of sizes for each chunk
         dim (int): dimension along which to split the tensor.
+
+    Example::
+        >>> a = torch.arange(10).reshape(5,2)
+        >>> a
+        tensor([[0, 1],
+                [2, 3],
+                [4, 5],
+                [6, 7],
+                [8, 9]])
+        >>> torch.split(a, 2)
+        (tensor([[0, 1],
+                 [2, 3]]),
+         tensor([[4, 5],
+                 [6, 7]]),
+         tensor([[8, 9]]))
+        >>> torch.split(a, [1,4])
+        (tensor([[0, 1]]),
+         tensor([[2, 3],
+                 [4, 5],
+                 [6, 7],
+                 [8, 9]]))
     """
     if not torch.jit.is_scripting():
         if type(tensor) is not Tensor and has_torch_function((tensor,)):
@@ -295,7 +319,6 @@ Examples::
     if not torch.jit.is_scripting():
         if any(type(t) is not Tensor for t in operands) and has_torch_function(operands):
             return handle_torch_function(einsum, operands, equation, *operands)
-
     if len(operands) == 1 and isinstance(operands[0], (list, tuple)):
         # the old interface of passing the operands as one list argument
         operands = operands[0]
@@ -960,6 +983,119 @@ def cdist(x1, x2, p=2., compute_mode='use_mm_for_euclid_dist_if_necessary'):
     else:
         raise ValueError("{} is not a valid value for compute_mode".format(compute_mode))
 
+def atleast_1d(*tensors):
+    r"""
+    Returns a 1-dimensional view of each input tensor with zero dimensions.
+    Input tensors with one or more dimensions are returned as-is.
+
+    Args:
+        input (Tensor or list of Tensors)
+
+    Returns:
+        output (Tensor or tuple of Tensors)
+
+    Example::
+        >>> x = torch.randn(2)
+        >>> x
+        tensor([1.4584, 0.7583])
+        >>> torch.atleast_1d(x)
+        tensor([1.4584, 0.7583])
+        >>> x = torch.tensor(1.)
+        >>> x
+        tensor(1.)
+        >>> torch.atleast_1d(x)
+        tensor([1.])
+        >>> x = torch.tensor(0.5)
+        >>> y = torch.tensor(1.)
+        >>> torch.atleast_1d((x,y))
+        (tensor([0.5000]), tensor([1.]))
+    """
+    if not torch.jit.is_scripting():
+        if any(type(t) is not Tensor for t in tensors) and has_torch_function(tensors):
+            return handle_torch_function(atleast_1d, tensors, *tensors)
+    if len(tensors) == 1:
+        tensors = tensors[0]
+    return _VF.atleast_1d(tensors)
+
+def atleast_2d(*tensors):
+    r"""
+    Returns a 2-dimensional view of each each input tensor with zero dimensions.
+    Input tensors with two or more dimensions are returned as-is.
+    Args:
+        input (Tensor or list of Tensors)
+
+    Returns:
+        output (Tensor or tuple of Tensors)
+
+    Example::
+        >>> x = torch.tensor(1.)
+        >>> x
+        tensor(1.)
+        >>> torch.atleast_2d(x)
+        tensor([[1.]])
+        >>> x = torch.randn(2,2)
+        >>> x
+        tensor([[2.2086, 2.5165],
+                [0.1757, 0.5194]])
+        >>> torch.atleast_2d(x)
+        tensor([[2.2086, 2.5165],
+                [0.1757, 0.5194]])
+        >>> x = torch.tensor(0.5)
+        >>> y = torch.tensor(1.)
+        >>> torch.atleast_2d((x,y))
+        (tensor([[0.5000]]), tensor([[1.]]))
+    """
+    if not torch.jit.is_scripting():
+        if any(type(t) is not Tensor for t in tensors) and has_torch_function(tensors):
+            return handle_torch_function(atleast_2d, tensors, *tensors)
+    if len(tensors) == 1:
+        tensors = tensors[0]
+    return _VF.atleast_2d(tensors)
+
+def atleast_3d(*tensors):
+    r"""
+    Returns a 3-dimensional view of each each input tensor with zero dimensions.
+    Input tensors with three or more dimensions are returned as-is.
+    Args:
+        input (Tensor or list of Tensors)
+
+    Returns:
+        output (Tensor or tuple of Tensors)
+
+    Example:
+
+        >>> x = torch.tensor(0.5)
+        >>> x
+        tensor(0.5000)
+        >>> torch.atleast_3d(x)
+        tensor([[[0.5000]]])
+        >>> y = torch.randn(2,2)
+        >>> y
+        tensor([[-0.8079,  0.7460],
+                [-1.1647,  1.4734]])
+        >>> torch.atleast_3d(y)
+        tensor([[[-0.8079],
+                [ 0.7460]],
+                <BLANKLINE>
+                [[-1.1647],
+                [ 1.4734]]])
+        >>> x = torch.randn(1,1,1)
+        >>> x
+        tensor([[[-1.5689]]])
+        >>> torch.atleast_3d(x)
+        tensor([[[-1.5689]]])
+        >>> x = torch.tensor(0.5)
+        >>> y = torch.tensor(1.)
+        >>> torch.atleast_3d((x,y))
+        (tensor([[[0.5000]]]), tensor([[[1.]]]))
+    """
+    if not torch.jit.is_scripting():
+        if any(type(t) is not Tensor for t in tensors) and has_torch_function(tensors):
+            return handle_torch_function(atleast_3d, tensors, *tensors)
+    if len(tensors) == 1:
+        tensors = tensors[0]
+    return _VF.atleast_3d(tensors)
+
 # TODO: type dim as BroadcastingList when https://github.com/pytorch/pytorch/issues/33782 is fixed
 @overload  # noqa: 749
 def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa: 749
@@ -1053,9 +1189,10 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
     if dim is None and out is None and dtype is None and p is not None:
         if isinstance(p, str):
             if p == "fro":
-                return _VF.frobenius_norm(input)
+                return _VF.frobenius_norm(input, dim=(), keepdim=keepdim)
         if not isinstance(p, str):
-            return _VF.norm(input, p)
+            _dim = [i for i in range(ndim)]  # noqa: C416 TODO: rewrite as list(range(m))
+            return _VF.norm(input, p, dim=_dim, keepdim=keepdim)
 
     # TODO: when https://github.com/pytorch/pytorch/issues/33782 is fixed
     # remove the overloads where dim is an int and replace with BraodcastingList1

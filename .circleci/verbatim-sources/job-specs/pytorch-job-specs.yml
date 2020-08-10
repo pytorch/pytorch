@@ -6,8 +6,8 @@ jobs:
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - checkout
+    - calculate_docker_image_tag
     - setup_linux_system_environment
-    - checkout
     - optional_merge_target_branch
     - setup_ci_environment
     - run:
@@ -15,10 +15,14 @@ jobs:
         no_output_timeout: "1h"
         command: |
           set -e
+          # TODO: Remove this after we figure out why rocm tests are failing
+          if [[ "${DOCKER_IMAGE}" == *rocm* ]]; then
+            export DOCKER_TAG="ab1632df-fa59-40e6-8c23-98e004f61148"
+          fi
           # Pull Docker image and run build
-          echo "DOCKER_IMAGE: "${DOCKER_IMAGE}
-          time docker pull ${DOCKER_IMAGE} >/dev/null
-          export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
+          echo "DOCKER_IMAGE: "${DOCKER_IMAGE}:${DOCKER_TAG}
+          time docker pull ${DOCKER_IMAGE}:${DOCKER_TAG} >/dev/null
+          export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${DOCKER_IMAGE}:${DOCKER_TAG})
 
           git submodule sync && git submodule update -q --init --recursive
 
@@ -31,7 +35,7 @@ jobs:
           fi
           echo "Parallel backend flags: "${PARALLEL_FLAGS}
 
-          export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo '"$PARALLEL_FLAGS"' && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/build.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
+          export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo '"$PARALLEL_FLAGS"' && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/build.sh && find ${BUILD_ROOT} -type f -name "*.a" -or -name "*.o" -delete") | docker exec -u jenkins -i "$id" bash) 2>&1'
 
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
 
@@ -41,11 +45,15 @@ jobs:
             # The xla build uses the same docker image as
             # pytorch-linux-trusty-py3.6-gcc5.4-build. In the push step, we have to
             # distinguish between them so the test can pick up the correct image.
-            output_image=${DOCKER_IMAGE}-${CIRCLE_SHA1}
+            output_image=${DOCKER_IMAGE}:${DOCKER_TAG}-${CIRCLE_SHA1}
             if [[ ${BUILD_ENVIRONMENT} == *"xla"* ]]; then
               export COMMIT_DOCKER_IMAGE=$output_image-xla
             elif [[ ${BUILD_ENVIRONMENT} == *"libtorch"* ]]; then
               export COMMIT_DOCKER_IMAGE=$output_image-libtorch
+            elif [[ ${BUILD_ENVIRONMENT} == *"paralleltbb"* ]]; then
+              export COMMIT_DOCKER_IMAGE=$output_image-paralleltbb
+            elif [[ ${BUILD_ENVIRONMENT} == *"parallelnative"* ]]; then
+              export COMMIT_DOCKER_IMAGE=$output_image-parallelnative
             elif [[ ${BUILD_ENVIRONMENT} == *"android-ndk-r19c-x86_64"* ]]; then
               export COMMIT_DOCKER_IMAGE=$output_image-android-x86_64
             elif [[ ${BUILD_ENVIRONMENT} == *"android-ndk-r19c-arm-v7a"* ]]; then
@@ -54,6 +62,8 @@ jobs:
               export COMMIT_DOCKER_IMAGE=$output_image-android-arm-v8a
             elif [[ ${BUILD_ENVIRONMENT} == *"android-ndk-r19c-x86_32"* ]]; then
               export COMMIT_DOCKER_IMAGE=$output_image-android-x86_32
+            elif [[ ${BUILD_ENVIRONMENT} == *"android-ndk-r19c-vulkan-x86_32"* ]]; then
+              export COMMIT_DOCKER_IMAGE=$output_image-android-vulkan-x86_32
             else
               export COMMIT_DOCKER_IMAGE=$output_image
             fi
@@ -68,6 +78,7 @@ jobs:
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - checkout
+    - calculate_docker_image_tag
     - setup_linux_system_environment
     - setup_ci_environment
     - run:
@@ -75,12 +86,21 @@ jobs:
         no_output_timeout: "90m"
         command: |
           set -e
+          export PYTHONUNBUFFERED=1
+          # TODO: Remove this after we figure out why rocm tests are failing
+          if [[ "${DOCKER_IMAGE}" == *rocm* ]]; then
+            export DOCKER_TAG="ab1632df-fa59-40e6-8c23-98e004f61148"
+          fi
           # See Note [Special build images]
-          output_image=${DOCKER_IMAGE}-${CIRCLE_SHA1}
+          output_image=${DOCKER_IMAGE}:${DOCKER_TAG}-${CIRCLE_SHA1}
           if [[ ${BUILD_ENVIRONMENT} == *"xla"* ]]; then
             export COMMIT_DOCKER_IMAGE=$output_image-xla
           elif [[ ${BUILD_ENVIRONMENT} == *"libtorch"* ]]; then
             export COMMIT_DOCKER_IMAGE=$output_image-libtorch
+          elif [[ ${BUILD_ENVIRONMENT} == *"paralleltbb"* ]]; then
+            export COMMIT_DOCKER_IMAGE=$output_image-paralleltbb
+          elif [[ ${BUILD_ENVIRONMENT} == *"parallelnative"* ]]; then
+            export COMMIT_DOCKER_IMAGE=$output_image-parallelnative
           else
             export COMMIT_DOCKER_IMAGE=$output_image
           fi
@@ -96,7 +116,10 @@ jobs:
           time docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
 
           if [ -n "${USE_CUDA_DOCKER_RUNTIME}" ]; then
-            export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
+            export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --runtime=nvidia --shm-size=2g -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
+          elif [[ ${BUILD_ENVIRONMENT} == *"rocm"* ]]; then
+            hostname
+            export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --shm-size=8g --ipc=host --device /dev/kfd --device /dev/dri --group-add video -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
           else
             export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
           fi
@@ -121,8 +144,8 @@ jobs:
           }
 
           if is_vanilla_build; then
-            echo "apt-get update && apt-get install -y qemu-user" | docker exec -u root -i "$id" bash
-            echo "cd workspace/build; qemu-x86_64 -cpu Broadwell -E ATEN_CPU_CAPABILITY=default ./bin/basic --gtest_filter=BasicTest.BasicTestCPU" | docker exec -u jenkins -i "$id" bash
+            echo "apt-get update && apt-get install -y qemu-user gdb" | docker exec -u root -i "$id" bash
+            echo "cd workspace/build; qemu-x86_64 -g 2345 -cpu Broadwell -E ATEN_CPU_CAPABILITY=default ./bin/basic --gtest_filter=BasicTest.BasicTestCPU & gdb ./bin/basic -ex 'set pagination off' -ex 'target remote :2345' -ex 'continue' -ex 'bt' -ex='set confirm off' -ex 'quit \$_isvoid(\$_exitcode)'" | docker exec -u jenkins -i "$id" bash
           else
             echo "Skipping for ${BUILD_ENVIRONMENT}"
           fi
@@ -132,12 +155,25 @@ jobs:
         command: |
           set -e
 
+          cat >docker_commands.sh \<<EOL
+          # =================== The following code will be executed inside Docker container ===================
+          set -ex
+          export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}
+          export SCRIBE_GRAPHQL_ACCESS_TOKEN="${SCRIBE_GRAPHQL_ACCESS_TOKEN}"
+          ${PARALLEL_FLAGS}
+          source ./workspace/env
+          cd workspace
+          EOL
           if [[ ${BUILD_ENVIRONMENT} == *"multigpu"* ]]; then
-            export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "${PARALLEL_FLAGS}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/multigpu-test.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
+            echo ".jenkins/pytorch/multigpu-test.sh" >> docker_commands.sh
+          elif [[ ${BUILD_ENVIRONMENT} == *caffe2* ]]; then
+            echo "pip -q install --user -b /tmp/pip_install_onnx \"file:///var/lib/jenkins/workspace/third_party/onnx#egg=onnx\"" >> docker_commands.sh
+            echo ".jenkins/caffe2/test.sh" >> docker_commands.sh
           else
-            export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "export CIRCLE_PULL_REQUEST=${CIRCLE_PULL_REQUEST}" && echo "${PARALLEL_FLAGS}" && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/test.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
+            echo ".jenkins/pytorch/test.sh" >> docker_commands.sh
           fi
-          echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
+          echo "(cat docker_commands.sh | docker exec -u jenkins -i "$id" bash) 2>&1" > command.sh
+          unbuffer bash command.sh | ts
     - run:
         name: Report results
         no_output_timeout: "5m"
@@ -156,7 +192,7 @@ jobs:
     parameters:
       executor:
         type: string
-        default: "windows-cpu-with-nvidia-cuda"
+        default: "windows-xlarge-cpu-with-nvidia-cuda"
       build_environment:
         type: string
         default: ""
@@ -171,10 +207,10 @@ jobs:
         default: "3.6"
       vc_version:
         type: string
-        default: "14.11"
+        default: "14.16"
       vc_year:
         type: string
-        default: "2017"
+        default: "2019"
       vc_product:
         type: string
         default: "BuildTools"
@@ -185,49 +221,17 @@ jobs:
     steps:
       - checkout
       - run:
-          name: Install VS2017
-          command: |
-            if [[ "${VC_YEAR}" == "2017" ]]; then
-              powershell .circleci/scripts/vs_install.ps1
-            fi
-      - run:
           name: Install Cuda
           no_output_timeout: 30m
           command: |
             if [[ "${USE_CUDA}" == "1" ]]; then
-              curl --retry 3 -kLO https://ossci-windows.s3.amazonaws.com/cuda_10.1.243_426.00_win10.exe
-              7z x cuda_10.1.243_426.00_win10.exe -ocuda_10.1.243_426.00_win10
-              cd cuda_10.1.243_426.00_win10
-              mkdir cuda_install_logs
-              ./setup.exe -s nvcc_10.1 cuobjdump_10.1 nvprune_10.1 cupti_10.1 cublas_10.1 cublas_dev_10.1 cudart_10.1 cufft_10.1 cufft_dev_10.1 curand_10.1 curand_dev_10.1 cusolver_10.1 cusolver_dev_10.1 cusparse_10.1 cusparse_dev_10.1 nvgraph_10.1 nvgraph_dev_10.1 npp_10.1 npp_dev_10.1 nvrtc_10.1 nvrtc_dev_10.1 nvml_dev_10.1 -loglevel:6 -log:"$(pwd -W)/cuda_install_logs"
-              if [[ "${VC_YEAR}" == "2017" ]]; then
-                cp -r CUDAVisualStudioIntegration/extras/visual_studio_integration/MSBuildExtensions/* "C:/Program Files (x86)/Microsoft Visual Studio/2017/BuildTools/Common7/IDE/VC/VCTargets/BuildCustomizations/"
-              else
-                cp -r CUDAVisualStudioIntegration/extras/visual_studio_integration/MSBuildExtensions/* "C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/MSBuild/Microsoft/VC/v160/BuildCustomizations/"
-              fi
-              curl --retry 3 -kLO https://ossci-windows.s3.amazonaws.com/NvToolsExt.7z
-              7z x NvToolsExt.7z -oNvToolsExt
-              mkdir -p "C:/Program Files/NVIDIA Corporation/NvToolsExt"
-              cp -r NvToolsExt/* "C:/Program Files/NVIDIA Corporation/NvToolsExt/"
-              export NVTOOLSEXT_PATH="C:\\Program Files\\NVIDIA Corporation\\NvToolsExt\\"
-              cat cuda_install_logs/LOG.setup.exe.log
-              if ! ls "/c/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v10.1/bin/nvcc.exe"
-              then
-                echo "CUDA installation failed"
-                exit 1
-              fi
-              cd ..
-              rm -rf ./cuda_10.1.243_426.00_win10
-              rm -f ./cuda_10.1.243_426.00_win10.exe
+              .circleci/scripts/windows_cuda_install.sh
             fi
       - run:
           name: Install Cudnn
           command : |
             if [[ "${USE_CUDA}" == "1" ]]; then
-              cd c:/
-              curl --retry 3 -O https://ossci-windows.s3.amazonaws.com/cudnn-10.1-windows10-x64-v7.6.4.38.zip
-              7z x cudnn-10.1-windows10-x64-v7.6.4.38.zip -ocudnn
-              cp -r cudnn/cuda/* "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v10.1/"
+              .circleci/scripts/windows_cudnn_install.sh
             fi
       - run:
           name: Build
@@ -250,7 +254,7 @@ jobs:
     parameters:
       executor:
         type: string
-        default: "windows-cpu-with-nvidia-cuda"
+        default: "windows-medium-cpu-with-nvidia-cuda"
       build_environment:
         type: string
         default: ""
@@ -265,10 +269,10 @@ jobs:
         default: "3.6"
       vc_version:
         type: string
-        default: "14.11"
+        default: "14.16"
       vc_year:
         type: string
-        default: "2017"
+        default: "2019"
       vc_product:
         type: string
         default: "BuildTools"
@@ -281,49 +285,22 @@ jobs:
       - attach_workspace:
           at: c:/users/circleci/workspace
       - run:
-          name: Install VS2017
-          command: |
-            if [[ "${VC_YEAR}" == "2017" ]]; then
-              powershell .circleci/scripts/vs_install.ps1
-            fi
-      - run:
           name: Install Cuda
           no_output_timeout: 30m
           command: |
-            if [[ "${CUDA_VERSION}" != "cpu" && "${JOB_EXECUTOR}" != "windows-with-nvidia-gpu" ]]; then
-              curl --retry 3 -kLO https://ossci-windows.s3.amazonaws.com/cuda_10.1.243_426.00_win10.exe
-              7z x cuda_10.1.243_426.00_win10.exe -ocuda_10.1.243_426.00_win10
-              cd cuda_10.1.243_426.00_win10
-              mkdir cuda_install_logs
-              ./setup.exe -s nvcc_10.1 cuobjdump_10.1 nvprune_10.1 cupti_10.1 cublas_10.1 cublas_dev_10.1 cudart_10.1 cufft_10.1 cufft_dev_10.1 curand_10.1 curand_dev_10.1 cusolver_10.1 cusolver_dev_10.1 cusparse_10.1 cusparse_dev_10.1 nvgraph_10.1 nvgraph_dev_10.1 npp_10.1 npp_dev_10.1 nvrtc_10.1 nvrtc_dev_10.1 nvml_dev_10.1 -loglevel:6 -log:"$(pwd -W)/cuda_install_logs"
-              if [[ "${VC_YEAR}" == "2017" ]]; then
-                cp -r CUDAVisualStudioIntegration/extras/visual_studio_integration/MSBuildExtensions/* "C:/Program Files (x86)/Microsoft Visual Studio/2017/BuildTools/Common7/IDE/VC/VCTargets/BuildCustomizations/"
-              else
-                cp -r CUDAVisualStudioIntegration/extras/visual_studio_integration/MSBuildExtensions/* "C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/MSBuild/Microsoft/VC/v160/BuildCustomizations/"
+            if [[ "${CUDA_VERSION}" != "cpu" ]]; then
+              if [[ "${CUDA_VERSION}" != "10" || "${JOB_EXECUTOR}" != "windows-with-nvidia-gpu" ]]; then
+                .circleci/scripts/windows_cuda_install.sh
               fi
-              curl --retry 3 -kLO https://ossci-windows.s3.amazonaws.com/NvToolsExt.7z
-              7z x NvToolsExt.7z -oNvToolsExt
-              mkdir -p "C:/Program Files/NVIDIA Corporation/NvToolsExt"
-              cp -r NvToolsExt/* "C:/Program Files/NVIDIA Corporation/NvToolsExt/"
-              export NVTOOLSEXT_PATH="C:\\Program Files\\NVIDIA Corporation\\NvToolsExt\\"
-              cat cuda_install_logs/LOG.setup.exe.log
-              if ! ls "/c/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v10.1/bin/nvcc.exe"
-              then
-                echo "CUDA installation failed"
-                exit 1
+              if [[ "${CUDA_VERSION}" != "10" && "${JOB_EXECUTOR}" == "windows-with-nvidia-gpu" ]]; then
+                .circleci/scripts/driver_update.bat
               fi
-              cd ..
-              rm -rf ./cuda_10.1.243_426.00_win10
-              rm -f ./cuda_10.1.243_426.00_win10.exe
             fi
       - run:
           name: Install Cudnn
           command : |
-            if [[ "${CUDA_VERSION}" != "cpu" && "${JOB_EXECUTOR}" != "windows-with-nvidia-gpu" ]]; then
-              cd c:/
-              curl --retry 3 -O https://ossci-windows.s3.amazonaws.com/cudnn-10.1-windows10-x64-v7.6.4.38.zip
-              7z x cudnn-10.1-windows10-x64-v7.6.4.38.zip -ocudnn
-              cp -r cudnn/cuda/* "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v10.1/"
+            if [[ "${CUDA_VERSION}" != "cpu" ]]; then
+              .circleci/scripts/windows_cudnn_install.sh
             fi
       - run:
           name: Test

@@ -59,6 +59,7 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
       case IntType::Kind:
       case NoneType::Kind:
       case GeneratorType::Kind:
+      case QuantizerType::Kind:
       case BoolType::Kind:
       case VarType::Kind:
       case CapsuleType::Kind:
@@ -74,8 +75,12 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
       case AnyListType::Kind:
       case AnyTupleType::Kind:
       case AnyClassType::Kind:
+      case AnyEnumType::Kind:
         // no op, there is nothing to tag
         break;
+      case EnumType::Kind:
+        // TODO(gmagogsfm): Implement serialization/deserialization of Enum.
+        AT_ASSERT(false);
       case TupleType::Kind: {
         auto t = w.value.toTuple();
         auto ttype = w.static_type->expect<TupleType>();
@@ -149,7 +154,7 @@ void restoreContainerTypeTags(IValue& ivalue, TypePtr type) {
   } else if (auto list_type = type->cast<ListType>()) {
     ivalue.toList().unsafeSetElementType(list_type->getElementType());
   } else {
-    AT_ERROR("Unknown type for tag restoration: " + type->python_str());
+    AT_ERROR("Unknown type for tag restoration: " + type->annotation_str());
   }
 }
 
@@ -636,7 +641,7 @@ void Unpickler::rebuildTensor(bool quantized) {
     } else {
       result = at::empty({0}, storage_tensor.options());
     }
-    bool requires_grad = elements.at(idx++).toBool();
+    bool requires_grad = elements.at(idx).toBool();
     // elements[idx++] is empty backwards hooks
     at::TensorImpl* impl = result.unsafeGetTensorImpl();
     impl->set_storage_keep_dtype(storage_tensor.storage());

@@ -1,10 +1,11 @@
 #include <torch/csrc/jit/runtime/profiling_record.h>
+#include <ATen/core/interned_strings.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/clear_profiling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
+#include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
-#include <ostream>
 
 namespace torch {
 namespace jit {
@@ -146,16 +147,57 @@ void ProfilingRecord::insertShapeProfile(Node* n, Value* i) {
   n->replaceInputWith(i, pn->output());
 }
 
+bool needsProfiledInputs(Node* n) {
+  if (tensorexpr::isSupported(n)) {
+    return true;
+  }
+
+  switch (n->kind()) {
+    // specialize_autogradzero
+    case prim::AutogradAdd:
+    case prim::AutogradAnyNonZero:
+    case prim::AutogradZero:
+    // peephole
+    case aten::dim:
+    case aten::size:
+    case aten::expand:
+    case prim::dtype:
+    case prim::device:
+    case prim::is_cuda:
+    case aten::is_floating_point:
+    case aten::type_as:
+    // TODO: hack to make `test_lstm_gates_permutations_cuda`
+    // pass.
+    case aten::t:
+    case aten::mm:
+      return true;
+    default:
+      return false;
+  }
+}
+
+bool needsProfiledOutput(Node* n) {
+  if (tensorexpr::isSupported(n)) {
+    return true;
+  }
+
+  switch (n->kind()) {
+    case prim::AutogradAdd:
+    case prim::AutogradZero:
+      return true;
+    default:
+      return false;
+  }
+}
+
 void ProfilingRecord::instrumentBlock(Block* block) {
   for (auto it = block->nodes().begin(); it != block->nodes().end(); ++it) {
     auto n = *it;
     for (auto i : n->inputs()) {
-      if (!i->type()->isSubtypeOf(TensorType::get()) ||
-          i->node()->kind() == prim::profile) {
-        continue;
+      if (i->type()->kind() == c10::TypeKind::TensorType &&
+          (needsProfiledInputs(n) || needsProfiledOutput(i->node()))) {
+        insertShapeProfile(n, i);
       }
-
-      insertShapeProfile(n, i);
     }
 
     for (auto b : n->blocks()) {
@@ -178,6 +220,7 @@ void ProfilingRecord::instrumentBlock(Block* block) {
 std::unique_ptr<ProfilingRecord> ProfilingRecord::instrumentGraph(
     const std::shared_ptr<Graph>& graph) {
   auto new_g = graph->copy();
+
   auto pr = std::unique_ptr<ProfilingRecord>(new ProfilingRecord(new_g));
   auto raw_pr = pr.get();
   unprofileGraphInputs(new_g);
@@ -259,6 +302,7 @@ std::unique_ptr<ProfilingRecord> ProfilingRecord::instrumentGraph(
 
   auto pop = pr->createProfileNode(counter, {});
   new_g->appendNode(pop);
+  GRAPH_DUMP("Instrumented Graph: ", new_g);
   return pr;
 }
 

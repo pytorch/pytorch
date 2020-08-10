@@ -526,6 +526,17 @@ class TestQuantizedTensor(TestCase):
         with self.assertRaisesRegex(RuntimeError, "Squeeze is only possible on non-axis dimension for Per-Channel"):
             qz = qy.squeeze()
 
+    def test_repeat(self):
+        scale, zero_point, dtype = 1.0, 2, torch.uint8
+        for device in get_supported_device_types():
+            q_int = torch.randint(0, 100, [3], dtype=dtype, device=device)
+            q_int_repeat = q_int.repeat(4, 2)
+            q_ref = torch._make_per_tensor_quantized_tensor(q_int_repeat, scale=scale, zero_point=zero_point)
+
+            q = torch._make_per_tensor_quantized_tensor(q_int, scale=scale, zero_point=zero_point)
+            q_repeat = q.repeat(4, 2)
+            self.assertEqual(q_ref, q_repeat)
+
     def test_qscheme_pickle(self):
         f = Foo()
         buf = io.BytesIO()
@@ -561,3 +572,25 @@ class TestQuantizedTensor(TestCase):
             # dequantized values must be the same
             r_cpu, r_cuda = qr_cpu.dequantize().numpy(), qr_cuda.dequantize().cpu().numpy()
             np.testing.assert_almost_equal(r_cuda, r_cpu, decimal=5)
+
+    @unittest.skipIf(not torch.cuda.is_available() or TEST_WITH_ROCM, 'CUDA is not available')
+    def test_cuda_quantization_does_not_pin_memory(self):
+        # Context - https://github.com/pytorch/pytorch/issues/41115
+        x = torch.randn(3)
+        self.assertEqual(x.is_pinned(), False)
+
+        q_int = torch.randint(0, 100, [1, 2, 3], device="cuda", dtype=torch.uint8)
+        q = torch._make_per_tensor_quantized_tensor(q_int, scale=0.1, zero_point=0)
+
+        x = torch.randn(3)
+        self.assertEqual(x.is_pinned(), False)
+
+
+    def test_fp16_saturate_op(self):
+        x = torch.ones(5, 5, dtype=torch.float32) * 65532
+        x[0] = torch.ones(5) * -65532
+        # range of fp16 value is [-65504, + 65504]
+        ref = torch.ones(5, 5) * 65504
+        ref[0] = torch.ones(5) * -65504
+        y = torch._saturate_weight_to_fp16(x)
+        self.assertEqual(y, ref)

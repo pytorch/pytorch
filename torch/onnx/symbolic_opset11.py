@@ -224,18 +224,25 @@ def gather(g, self, dim, index, sparse_grad=False):
 
 @parse_args('v', 'i', 'v', 'v')
 def scatter(g, self, dim, index, src):
+    from torch.onnx.symbolic_opset9 import expand_as
     if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
         return g.op("ATen", self, dim, index, src, operator_s="scatter")
-    return g.op("ScatterElements", self, index, src, axis_i=dim)
+    src = sym_help._maybe_get_scalar(src)
+    if sym_help._is_value(src):
+        return g.op("ScatterElements", self, index, src, axis_i=dim)
+    else:
+        return g.op("ScatterElements", self, index, expand_as(g, src, index), axis_i=dim)
 
 
 @parse_args('v', 'i', 'none')
 def cumsum(g, self, dim, dtype=None):
     dim_tensor = g.op("Constant", value_t=torch.tensor(dim, dtype=torch.int))
-    csum = g.op("CumSum", self, dim_tensor)
     if dtype and dtype.node().kind() != 'prim::Constant':
         parsed_dtype = sym_help._get_const(dtype, 'i', 'dtype')
-        csum = g.op("Cast", csum, to_i=sym_help.scalar_type_to_onnx[parsed_dtype])
+        cast = g.op("Cast", self, to_i=sym_help.scalar_type_to_onnx[parsed_dtype])
+    else:
+        cast = self
+    csum = g.op("CumSum", cast, dim_tensor)
     return csum
 
 
@@ -353,12 +360,29 @@ def round(g, self):
     return g.op("Round", self)
 
 
-@parse_args('v', 'v', 'i')
-def split_with_sizes(g, self, split_sizes, dim):
-    if sym_help._is_value(split_sizes) and split_sizes.node().kind() == 'prim::ListConstruct':
-        return g.op("SplitToSequence", self, split_sizes, axis_i=dim)
+@parse_args('v', 'v', 'i', 'i')
+def split(g, self, split_size_or_sizes, dim, _outputs=None):
+    if not sym_help._is_split_static(split_size_or_sizes, _outputs):
+        split_out = g.op("SplitToSequence", self, split_size_or_sizes, axis_i=dim)
+        if _outputs is None:
+            return split_out
+        return [g.op("SequenceAt", split_out, g.op("Constant", value_t=torch.tensor([i], dtype=torch.long)))
+                for i in range(_outputs)]
     else:
-        return torch.onnx.symbolic_opset9.split_with_sizes(g, self, split_sizes, dim)
+        return torch.onnx.symbolic_opset9.split(g, self, split_size_or_sizes, dim, _outputs)
+
+
+@parse_args('v', 'v', 'i', 'i')
+def split_with_sizes(g, self, split_sizes, dim, _outputs=None):
+    return split(g, self, split_sizes, dim, _outputs)
+
+
+@parse_args('v', 'i', 'i')
+def unbind(g, self, dim=0, _outputs=None):
+    if _outputs is None:
+        return g.op("SplitToSequence", self, g.op("Constant", value_t=torch.tensor(1, dtype=torch.long)), axis_i=dim, keepdims_i=0)
+    else:
+        return torch.onnx.symbolic_opset9.unbind(g, self, dim, _outputs)
 
 
 # Generate paddings in ONNX order based on pad in pytorch.
@@ -646,29 +670,20 @@ def im2col(g, input, kernel_size, dilation, padding, stride):
 @parse_args('v', 'i', 'i')
 def flatten(g, input, start_dim, end_dim):
     dim = input.type().dim()
+    if dim is None:
+        return _unimplemented("dim",
+                              "ONNX and PyTorch use different strategies to split the input. "
+                              "Input rank must be known at export time.")
+
     # use ONNX's Flatten operator for cases where the output shape is 2D
     if start_dim == 1:
-        if (end_dim == -1 or (end_dim is not None and end_dim == dim - 1)):
+        if (end_dim == -1 or end_dim == dim - 1):
             return g.op("Flatten", input, axis_i=start_dim)
     elif start_dim == 0:
-        if (end_dim == -2 or (end_dim is not None and end_dim == dim - 2)):
+        if (end_dim == -2 or end_dim == dim - 2):
             return g.op("Flatten", input, axis_i=end_dim + 1)
-    # use Reshape for cases where the output shape is not 2D
-    if not input.isCompleteTensor():
-        return _unimplemented("flatten",
-                              "input size not accessible "
-                              "(consider using reshape op instead of flatten op to export to ONNX)")
     # if end_dim is negative add dim
     if end_dim < 0 :
         end_dim = dim + end_dim
-    input_dims = input.type().sizes()
-    output_dims = []
-    for i in range(0, dim):
-        if start_dim < i and end_dim >= i:
-            output_dims[start_dim] = output_dims[start_dim] * input_dims[i]
-        else:
-            output_dims.append(input_dims[i])
-    shape = g.op("Constant", value_t=torch.LongTensor(output_dims))
-    from torch.onnx.symbolic_opset9 import _reshape_from_tensor
-    p = _reshape_from_tensor(g, input, shape)
-    return p
+
+    return sym_help._flatten_helper(g, input, start_dim, end_dim, dim)

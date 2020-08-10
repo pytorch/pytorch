@@ -1223,6 +1223,42 @@ void testSimplifyOpaqueTerms() {
   }
 }
 
+void testSimplifySymbolicMinMax() {
+  KernelScope kernel_scope;
+
+  {
+    // Minimum with constant difference between terms.
+    VarHandle x("x", kInt);
+    ExprHandle body = Min::make(x + 3, x + 7, true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Add, simplified.node(), add);
+    IS_VAR_WITH_NAME(add->lhs(), "x");
+    IS_IMM_WITH_VAL(Int, add->rhs(), 3);
+  }
+
+  {
+    // Maximum with constant difference between terms.
+    VarHandle x("x", kInt);
+    ExprHandle body = Max::make(x + 3, x + 7, true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Add, simplified.node(), add);
+    IS_VAR_WITH_NAME(add->lhs(), "x");
+    IS_IMM_WITH_VAL(Int, add->rhs(), 7);
+  }
+
+  {
+    // Can't simplify multiples because of signedness of variable component.
+    // TODO: maybe we could for unsigned types?
+    VarHandle x("x", kInt);
+    ExprHandle body = Max::make(x * 3, x * 7, true);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE(Max, simplified.node());
+  }
+}
+
 void testSimplifyWontReorderFloat() {
   KernelScope kernel_scope;
 
@@ -1816,6 +1852,34 @@ void testSimplifyConstantCond() {
     Stmt* simplified = IRSimplifier::simplify(body);
     Block* block = dynamic_cast<Block*>(simplified);
     ASSERT_EQ(block, nullptr);
+  }
+}
+
+void testSimplifyEliminateEmptyCond() {
+  KernelScope kernel_scope;
+  // If the branches are empty in different ways, eliminate.
+  {
+    VarHandle x("x", kInt);
+    ExprHandle condition(x);
+    Stmt* true_val = new Block({});
+
+    Stmt* body = new Cond(condition.node(), true_val, nullptr);
+    Stmt* simplified = IRSimplifier::simplify(body);
+    Block* block = dynamic_cast<Block*>(simplified);
+    ASSERT_NE(block, nullptr);
+    ASSERT_EQ(block->nstmts(), 0);
+  }
+
+  {
+    VarHandle x("x", kInt);
+    ExprHandle condition(x);
+    Stmt* false_val = new Block({});
+
+    Stmt* body = new Cond(condition.node(), nullptr, false_val);
+    Stmt* simplified = IRSimplifier::simplify(body);
+    Block* block = dynamic_cast<Block*>(simplified);
+    ASSERT_NE(block, nullptr);
+    ASSERT_EQ(block->nstmts(), 0);
   }
 }
 
