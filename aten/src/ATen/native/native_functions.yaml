@@ -229,8 +229,6 @@
 #
 # 1) Copy the original functions native_functions.yaml entry, but replace the
 #      original function's name with their own.
-#    NOTE: due to current test limitations, if the original function has
-#      a method variant the alias must, too!
 # 2) Implement the corresponding functions and have them redispatch to the
 #      original function.
 # 3) Add entries for the alias (and original function, if needed) to
@@ -6981,7 +6979,7 @@
 - func: linalg_det(Tensor self) -> Tensor
   python_module: linalg
   use_c10_dispatcher: full
-  variants: function, method
+  variants: function
 
 - func: det(Tensor self) -> Tensor
   use_c10_dispatcher: full

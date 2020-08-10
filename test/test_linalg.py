@@ -48,8 +48,7 @@ class TestLinalg(TestCase):
             return torch.linalg.det(t)
 
         ops = (torch.det, torch.Tensor.det,
-               torch.linalg.det, torch.Tensor.linalg_det,
-               torch.jit.script(_fn))
+               torch.linalg.det, torch.jit.script(_fn))
         for t in tensors:
             expected = np.linalg.det(t.cpu().numpy())
             for op in ops:
