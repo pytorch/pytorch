@@ -24,13 +24,25 @@ struct Resource final {
   */
 
   struct Buffer final {
-    VkBuffer handle;
-    Memory memory;
+    /*
+      Descriptor
+    */
 
     struct Descriptor final {
       VkDeviceSize size;
-      VkBufferUsageFlags usage;
+
+      struct {
+        VkBufferUsageFlags buffer;
+        VmaMemoryUsage memory;
+      } usage;
     };
+
+    VkBuffer handle;
+    Memory memory;
+
+    inline operator bool() const {
+      return VK_NULL_HANDLE != handle;
+    }
   };
 
   /*
@@ -38,13 +50,33 @@ struct Resource final {
   */
 
   struct Image final {
+    /*
+      Descriptor
+    */
+
+    struct Descriptor final {
+      VkImageType type;
+      VkFormat format;
+      VkExtent3D extent;
+
+      struct {
+        VkImageViewType type;
+        VkFormat format;
+      } view;
+
+      struct {
+        VkImageUsageFlags image;
+        VmaMemoryUsage memory;
+      } usage;
+    };
+
     VkImage handle;
     VkImageView view;
     Memory memory;
 
-    struct Descriptor final {
-      VkExtent3D extent;
-    };
+    inline operator bool() const {
+      return VK_NULL_HANDLE != handle;
+    }
   };
 
   /*
@@ -53,16 +85,21 @@ struct Resource final {
 
   class Pool final {
    public:
-    explicit Pool(VkDevice device);
+    Pool(VkInstance instance, VkPhysicalDevice physical_device, VkDevice device);
 
     Buffer allocate(const Buffer::Descriptor& descriptor);
     Image allocate(const Image::Descriptor& descriptor);
     void purge();
 
    private:
-    Handle<VmaAllocator, decltype(&vmaDestroyAllocator)> allocator_;
-    std::vector<Handle<Buffer>> buffers_;
-    std::vector<Handle<Image>> images_;
+    struct Configuration final {
+      static constexpr uint32_t kReserve = 256u;
+    };
+
+    VkDevice device_;
+    Handle<VmaAllocator, void(*)(VmaAllocator)> allocator_;
+    std::vector<Handle<Buffer, void(*)(const Buffer&)>> buffers_;
+    std::vector<Handle<Image, void(*)(const Image&)>> images_;
   };
 };
 
