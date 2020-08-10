@@ -297,6 +297,8 @@ def gen_autograd_python(aten_path, out, autograd_dir):
         out, aten_decls, template_path)
     gen_python_functions.gen_py_fft_functions(
         out, aten_decls, template_path)
+    gen_python_functions.gen_py_linalg_functions(
+        out, aten_decls, template_path)
 
 
 def main():

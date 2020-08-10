@@ -5,7 +5,7 @@ from __future__ import unicode_literals
 
 import unittest
 import hypothesis.strategies as st
-from hypothesis import given
+from hypothesis import given, settings
 import numpy as np
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace
@@ -17,6 +17,7 @@ class ReluTest(hu.HypothesisTestCase):
     @given(X=hu.tensor(),
            inplace=st.booleans(),
            **mu.gcs)
+    @settings(deadline=1000)
     def test_relu(self, X, inplace, gc, dc):
         op = core.CreateOperator(
             "Relu",
@@ -36,6 +37,7 @@ class ReluTest(hu.HypothesisTestCase):
            batch_size=st.integers(1, 3),
            inplace=st.booleans(),
            **mu.gcs_cpu_ideep)
+    @settings(max_examples=10, deadline=None)
     def test_int8_relu(self, size, input_channels, batch_size, inplace, gc, dc):
         relu_fp32 = core.CreateOperator(
             "Relu",
