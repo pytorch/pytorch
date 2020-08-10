@@ -22,15 +22,14 @@ class CPUCachingAllocator {
    * No speculative allocation for any future allocations.
    */
   private:
-    std::mutex mutex_;
     // Invariants.
     // 1. If memory is ever allocated via this allocator then
     //    the pointer will exist in allocation_map_, unless the allocator
     //    returned the memory to OS via free_cached.
-    //  1.1. Therefore even when the said memory is freed via this
-    //       allocator, it will continue to stay in allocaiton_map_.
-    //       Furthermore it will also exist in available_map_.
-    //       Thus an allocated memory pointer can be in both
+    //  1.1. Therefore even when the said memory is "freed" via this
+    //       allocator (and thus cached), it will continue to stay
+    //       in allocaiton_map_. Furthermore it will also exist in
+    //       available_map_. Thus an allocated memory pointer can be in both
     //       allocation_map_ and available_map_ simultaneously.
     // 2. Memory pointer maybe removed from allocation_map_, when it
     //    is freed outside of the scope of this allocator, but was allocated
@@ -39,16 +38,16 @@ class CPUCachingAllocator {
     //    by this allocator and subsequently freed by this allocator.
     // As a result of above invariants, allocated memory ptr cannot be in
     // available_map_ unless it is in allocation_map_ as well.
-    ska::flat_hash_map<void*, size_t> allocation_map_;
-    // TODO:
-    // Replace std::vector with c10::SmallVector
-    // At the moment using that fails to compile due to the way
-    // flat_hash_map is written.
-    ska::flat_hash_map<size_t, std::vector<void*>> available_map_;
+    ska::flat_hash_map<size_t, c10::SmallVector<void*, 16>> available_map_;
+    static ska::flat_hash_map<void*, size_t> allocation_map_;
+    // Since allocation_map, which is a global instance, is mutated/read via
+    // all public APIs we need a global mutex.
+    static std::mutex mutex_;
     inline void* allocate_and_cache(const size_t bytes);
     inline void* use_cached(const size_t bytes);
     void free_cached();
   public:
+    static void record_free(void* ptr);
     // Checks the cache to see if allocation of size bytes can be found.
     // If so return cached memory, else
     // allocates memory, records it for caching and returns.
@@ -57,28 +56,50 @@ class CPUCachingAllocator {
     // an earlier call to allocate. If so cache the allocation.
     // Otherwise free.
     void free(void* ptr);
-    void record_free(void* ptr);
     // Mainly for testing
     ~CPUCachingAllocator();
 };
 
-CPUCachingAllocator& GetCPUCachingAllocator();
+CPUCachingAllocator* GetDefaultCPUCachingAllocator();
 
 class C10_API CachingAllocatorInfo {
   public:
-    void set(const CachingAllocatorInfo& other);
+    void set_allocator(CPUCachingAllocator* allocator);
+    CPUCachingAllocator* get_allocator();
     bool enabled();
     void enable();
     void disable();
   private:
     bool is_enabled_{false};
+    CPUCachingAllocator* allocator_{nullptr};
 };
 
 CachingAllocatorInfo& GetThreadLocalCachingAllocatorInfo();
 
+/*
+ * Usage pattern:
+ * std::unique_ptr<c10::CPUCachingAllocator> caching_allocator =
+ *   std::make_unique<c10::CPUCachingAllocator>();
+ * {
+ * WithCPUCachingAllocatorGuard(caching_allocator.get());
+ * ...
+ * }
+ * // Selectively enabling/disabling.
+ * {
+ * // Also enables caching allocator by default.
+ * WithCPUCachingAllocatorGuard(caching_allocator.get());
+ * ...
+ * // Disable.
+ * GetThreadLocalCachingAllocatorInfo().disable();
+ * ....
+ * // Enable.
+ * GetThreadLocalCachingAllocatorInfo.enable();
+ * }
+ */
+
 class C10_API WithCPUCachingAllocatorGuard {
   public:
-    WithCPUCachingAllocatorGuard(bool enabled=true);
+    WithCPUCachingAllocatorGuard(CPUCachingAllocator* allocator, bool enabled=true);
     ~WithCPUCachingAllocatorGuard();
   private:
     CachingAllocatorInfo prev_info_;
