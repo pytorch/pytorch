@@ -3,6 +3,7 @@
 #include <c10/core/impl/LocalDispatchKeySet.h>
 
 namespace at {
+namespace impl {
 
 // VmapMode contains a thread local count of how many nested vmaps
 // we are currently inside. That number is known as the `vmap level`.
@@ -23,4 +24,5 @@ struct CAFFE2_API VmapMode {
   static int64_t decrement_nesting();
 };
 
+} // namespace impl
 } // namespace at

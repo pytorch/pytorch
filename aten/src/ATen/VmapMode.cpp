@@ -1,6 +1,7 @@
 #include <ATen/VmapMode.h>
 
 namespace at {
+namespace impl {
 
 /// thread_local is a feature that is not enabled by Caffe2 mobile
 /// build (e.g. iOS). Therefore, we only provide `at::VmapMode`
@@ -46,4 +47,5 @@ int64_t VmapMode::decrement_nesting() {
 
 #endif
 
+} // namespace impl
 } // namespace at
