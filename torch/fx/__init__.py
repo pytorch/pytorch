@@ -1,3 +1,5 @@
+# type: ignore
+
 r'''
 **This feature is experimental and its stability is not currently guaranteed. Proceed at your own risk**
 

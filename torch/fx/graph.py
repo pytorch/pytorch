@@ -1,3 +1,5 @@
+# type: ignore
+
 from .node import Node, Attribute, magic_methods
 
 import builtins
