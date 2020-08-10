@@ -1,4 +1,5 @@
 #include <ATen/BatchedFallback.h>
+#include <ATen/MatrixRef.h>
 #include <ATen/VmapTransforms.h>
 
 namespace at {
@@ -147,9 +148,9 @@ void batchedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Sta
 
   // For each output Tensor, stack the shards of the tensor together to form a return
   torch::jit::drop(stack, num_arguments);
+  auto output_shards_chunks = MatrixRef<Tensor>(output_shards, num_batches);
   for (int64_t return_idx = 0; return_idx < num_returns; ++return_idx) {
-    const auto* shards_begin = output_shards.data() + (return_idx * num_batches);
-    auto shards = TensorList(shards_begin, num_batches);
+    auto shards = output_shards_chunks[return_idx];
     auto flat_output = at::stack(shards);
     VmapDimVector output_sizes(batch_sizes);
     output_sizes.insert(
