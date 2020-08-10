@@ -10,7 +10,7 @@ import caffe2.python.hypothesis_test_util as hu
 from caffe2.python.model_helper import ModelHelper
 import caffe2.python.serialized_test.serialized_test_util as serial
 
-from hypothesis import given, assume
+from hypothesis import given, assume, settings
 import hypothesis.strategies as st
 import numpy as np
 import unittest
@@ -216,10 +216,14 @@ class TestSpatialBN(serial.SerializedTestCase):
             reduce_size = batch_size * size * size
             saved_mean = np.mean(X, (0, 2, 3))
             saved_var = np.var(X, (0, 2, 3))
+            if reduce_size == 1:
+                unbias_scale = float('inf')
+            else:
+                unbias_scale = reduce_size / (reduce_size - 1)
             running_mean = momentum * running_mean + (
                 1.0 - momentum) * saved_mean
-            running_var = momentum * running_var + (1.0 - momentum) * (
-                reduce_size / (reduce_size - 1)) * saved_var
+            running_var = momentum * running_var + (
+                1.0 - momentum) * unbias_scale * saved_var
             std = np.sqrt(saved_var + epsilon)
             broadcast_shape = (1, C, 1, 1)
             Y = (X - np.reshape(saved_mean, broadcast_shape)) / np.reshape(
@@ -246,6 +250,7 @@ class TestSpatialBN(serial.SerializedTestCase):
            momentum=st.floats(0.5, 0.9),
            engine=st.sampled_from(["", "CUDNN"]),
            **hu.gcs)
+    @settings(deadline=None, max_examples=50)
     def test_spatialbn_train_mode_gradient_check(
             self, size, input_channels, batch_size, seed, order, epsilon,
             momentum, engine, gc, dc):
@@ -286,6 +291,7 @@ class TestSpatialBN(serial.SerializedTestCase):
            momentum=st.floats(min_value=0.5, max_value=0.9),
            engine=st.sampled_from(["", "CUDNN"]),
            **hu.gcs)
+    @settings(deadline=10000)
     def test_spatialbn_train_mode_gradient_check_1d(
             self, size, input_channels, batch_size, seed, order, epsilon,
             momentum, engine, gc, dc):
@@ -399,6 +405,7 @@ class TestSpatialBN(serial.SerializedTestCase):
            in_place=st.booleans(),
            engine=st.sampled_from(["", "CUDNN"]),
            **hu.gcs)
+    @settings(deadline=1000)
     def test_spatial_bn_multi_batch_grad(
             self, N, C, H, W, epsilon, order, num_batches, in_place, engine,
             gc, dc):

@@ -156,15 +156,6 @@ void logit_kernel(TensorIterator& iter, Scalar eps_scalar) {
       });
 }
 
-template<typename T>
-T abs_impl(T v) {
-  return std::abs(v);
-}
-template<>
-uint8_t abs_impl(uint8_t v) {
-  return v;
-}
-
 static void abs_kernel(TensorIterator& iter) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, iter.dtype(), "abs_cpu", [&]() {
     cpu_kernel_vec(

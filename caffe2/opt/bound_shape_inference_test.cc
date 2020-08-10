@@ -325,7 +325,7 @@ TEST(
           {TensorBoundShape_DimType_CONSTANT,
            TensorBoundShape_DimType_CONSTANT},
           {16, 101},
-          TensorProto_DataType_UINT8,
+          TensorProto_DataType_INT8,
           true));
   shape_map.emplace(
       "B0",
@@ -634,6 +634,8 @@ TEST(BoundShapeInference, DISABLED_ON_WINDOWS(FC)) {
       CreateOperatorDef("FC", "", {"X0", "W0", "B0"}, {"Out0"}, {}));
   net.add_op()->CopyFrom(
       CreateOperatorDef("FCTransposed", "", {"X1", "W1", "B1"}, {"Out1"}, {}));
+  net.add_op()->CopyFrom(CreateOperatorDef(
+      "Int8FC", "", {"X2", "W2", "B2", "quant_param"}, {"Out2"}, {}));
   ShapeInfoMap shape_map;
   shape_map.emplace(
       "W0",
@@ -651,6 +653,18 @@ TEST(BoundShapeInference, DISABLED_ON_WINDOWS(FC)) {
           {16, 1024}));
   shape_map.emplace(
       "B1", makeTensorInfo({TensorBoundShape_DimType_CONSTANT}, {1024}));
+
+  shape_map.emplace(
+      "W2",
+      makeTensorInfo(
+          {TensorBoundShape_DimType_CONSTANT,
+           TensorBoundShape_DimType_CONSTANT},
+          {16, 1024}));
+  shape_map.emplace(
+      "B2", makeTensorInfo({TensorBoundShape_DimType_CONSTANT}, {16}));
+  shape_map.emplace(
+      "quant_param", makeTensorInfo({TensorBoundShape_DimType_CONSTANT}, {1}));
+
   BoundShapeSpec spec(20, 1000);
   BoundShapeInferencer eng(spec);
   eng.InferBoundShapeAndType(net, shape_map, nullptr);
@@ -675,6 +689,20 @@ TEST(BoundShapeInference, DISABLED_ON_WINDOWS(FC)) {
       "Out1",
       {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
       {spec.max_batch_size, 1024});
+  verifyShapeInfo(
+      out_shape,
+      "X2",
+      {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
+      {spec.max_batch_size, 1024},
+      TensorProto_DataType_UINT8,
+      true);
+  verifyShapeInfo(
+      out_shape,
+      "Out2",
+      {TensorBoundShape_DimType_BATCH, TensorBoundShape_DimType_CONSTANT},
+      {spec.max_batch_size, 16},
+      TensorProto_DataType_UINT8,
+      true);
 }
 
 TEST(BoundShapeInference, FC3D) {
