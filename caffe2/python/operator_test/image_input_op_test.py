@@ -366,7 +366,7 @@ class TestImport(hu.HypothesisTestCase):
         color_jitter=st.integers(min_value=0, max_value=1),
         color_lighting=st.integers(min_value=0, max_value=1),
         **hu.gcs)
-    @settings(verbosity=Verbosity.verbose)
+    @settings(verbosity=Verbosity.verbose, max_examples=10, deadline=None)
     def test_imageinput(
             self, size_tuple, means, stds, label_type,
             num_labels, is_test, scale_jitter_type, color_jitter, color_lighting,
@@ -402,7 +402,7 @@ class TestImport(hu.HypothesisTestCase):
         output1=st.floats(min_value=1, max_value=10),
         output2_size=st.integers(min_value=2, max_value=10),
         **hu.gcs)
-    @settings(verbosity=Verbosity.verbose)
+    @settings(verbosity=Verbosity.verbose, max_examples=10, deadline=None)
     def test_imageinput_with_additional_outputs(
             self, size_tuple, means, stds, label_type,
             num_labels, is_test, scale_jitter_type, color_jitter, color_lighting,
