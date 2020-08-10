@@ -56,7 +56,7 @@ from torch.testing._internal.jit_utils import JitTestCase, enable_cpu_fuser, dis
     execWrapper, _inline_everything, _tmp_donotuse_dont_inline_everything, \
     RUN_CUDA
 from torch.testing._internal.jit_metaprogramming_utils import create_script_fn, nn_functional_tests, get_script_args, \
-    get_call, script_template, EXCLUDE_SCRIPT, additional_module_tests, EXCLUDE_SCRIPT_MODULES, \
+    EXCLUDE_SCRIPT, additional_module_tests, EXCLUDE_SCRIPT_MODULES, \
     get_nn_module_name_from_kwargs, script_method_template, create_traced_fn
 
 from torch.testing._internal.common_nn import module_tests, new_module_tests, criterion_tests
