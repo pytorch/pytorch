@@ -3883,17 +3883,17 @@ def _pad_circular(input, padding):
         assert (padding[-(idx * 2 + 1)] + padding[-(idx * 2 + 2)] + size) >= 0
 
     # Get shape of padded array
-    padded_shape = shape[:2]
+    out_shape = shape[:2]
     for idx, size in enumerate(paddable_shape):
-        padded_shape += (size + padding[-(idx * 2 + 1)] + padding[-(idx * 2 + 2)],)
+        out_shape += (size + padding[-(idx * 2 + 1)] + padding[-(idx * 2 + 2)],)
 
-    out = torch.empty(padded_shape, dtype=input.dtype, layout=input.layout,
+    out = torch.empty(out_shape, dtype=input.dtype, layout=input.layout,
                       device=input.device)
 
     # Put original array in padded array
     if ndim == 1:
         out_d0 = max(padding[-2], 0)
-        out_d1 = padded_shape[2] - max(padding[-1], 0)
+        out_d1 = out_shape[2] - max(padding[-1], 0)
 
         in_d0 = max(-padding[-2], 0)
         in_d1 = shape[2] - max(-padding[-1], 0)
@@ -3901,10 +3901,10 @@ def _pad_circular(input, padding):
         out[..., out_d0:out_d1] = input[..., in_d0:in_d1]
     elif ndim == 2:
         out_d0 = max(padding[-2], 0)
-        out_d1 = padded_shape[2] - max(padding[-1], 0)
+        out_d1 = out_shape[2] - max(padding[-1], 0)
 
         out_h0 = max(padding[-4], 0)
-        out_h1 = padded_shape[3] - max(padding[-3], 0)
+        out_h1 = out_shape[3] - max(padding[-3], 0)
 
         in_d0 = max(-padding[-2], 0)
         in_d1 = shape[2] - max(-padding[-1], 0)
@@ -3916,13 +3916,13 @@ def _pad_circular(input, padding):
             input[..., in_d0:in_d1, in_h0:in_h1]
     elif ndim == 3:
         out_d0 = max(padding[-2], 0)
-        out_d1 = padded_shape[2] - max(padding[-1], 0)
+        out_d1 = out_shape[2] - max(padding[-1], 0)
 
         out_h0 = max(padding[-4], 0)
-        out_h1 = padded_shape[3] - max(padding[-3], 0)
+        out_h1 = out_shape[3] - max(padding[-3], 0)
 
         out_w0 = max(padding[-6], 0)
-        out_w1 = padded_shape[4] - max(padding[-5], 0)
+        out_w1 = out_shape[4] - max(padding[-5], 0)
 
         in_d0 = max(-padding[-2], 0)
         in_d1 = shape[2] - max(-padding[-1], 0)
@@ -3947,7 +3947,7 @@ def _pad_circular(input, padding):
         out[:, :, :padding[-2]] = \
             out[:, :, -(padding[-2] + padding[-1]):-padding[-1]]
     if padding[-1] > 0:
-        out[:, :, (padded_shape[2] - padding[-1]):] = \
+        out[:, :, (out_shape[2] - padding[-1]):] = \
             out[:, :, padding[-2]:(padding[-2] + padding[-1])]
 
     # Pad second conv dim (height-wise)
@@ -3956,7 +3956,7 @@ def _pad_circular(input, padding):
             out[:, :, :, :padding[-4]] = \
                 out[:, :, :, -(padding[-4] + padding[-3]):-padding[-3]]
         if padding[-3] > 0:
-            out[:, :, :, (padded_shape[3] - padding[-3]):] = \
+            out[:, :, :, (out_shape[3] - padding[-3]):] = \
                 out[:, :, :, padding[-4]:(padding[-4] + padding[-3])]
 
     # Pad third conv dim (width-wise)
@@ -3965,7 +3965,7 @@ def _pad_circular(input, padding):
             out[:, :, :, :, :padding[-6]] = \
                 out[:, :, :, :, -(padding[-6] + padding[-5]):-padding[-5]]
         if padding[-5] > 0:
-            out[:, :, :, :, (padded_shape[4] - padding[-5]):] = \
+            out[:, :, :, :, (out_shape[4] - padding[-5]):] = \
                 out[:, :, :, :, padding[-6]:(padding[-6] + padding[-5])]
 
     return out
