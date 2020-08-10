@@ -208,6 +208,7 @@ libtorch_python_generated_sources = [
         "torch/csrc/autograd/generated/python_torch_functions.cpp",
         "torch/csrc/autograd/generated/python_nn_functions.cpp",
         "torch/csrc/autograd/generated/python_fft_functions.cpp",
+        "torch/csrc/autograd/generated/python_linalg_functions.cpp",
 ]
 
 genrule(
