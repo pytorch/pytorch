@@ -15241,8 +15241,8 @@ class TestTorchDeviceType(TestCase):
         test_cases = [
             # input1 size, input2 size, error regex
             ((10,), (2,), r"'input' should be 2 dimensional"),
-            ((10, 6), (20,), r"input.size\(\)\[1\] must be greater than or equal to input2.size\(\)\[0\]"),
-            ((6, 10), (5,), r"input.size\(\)\[0\] must be greater than or equal to input.size\(\)\[1\]"),
+            ((10, 6), (20,), r"input.size\(1\) must be greater than or equal to input2.size\(0\)"),
+            ((6, 10), (5,), r"input.size\(0\) must be greater than or equal to input.size\(1\)"),
             ((0, 0), (0,), r"'input' should not be empty")
         ]
         for a_size, tau_size, error_regex in test_cases:

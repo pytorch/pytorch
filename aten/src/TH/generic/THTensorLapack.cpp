@@ -419,8 +419,8 @@ void THTensor_(orgqr)(THTensor *ra_, THTensor *a, THTensor *tau)
   int n = THTensor_(size)(ra__, 1);
   int k = THTensor_sizeLegacyNoScalars(tau, 0);
 
-  THArgCheck(m >= n, 1, "input.size()[0] must be greater than or equal to input.size()[1]");
-  THArgCheck(n >= k, 1, "input.size()[1] must be greater than or equal to input2.size()[0]");
+  THArgCheck(m >= n, 1, "input.size(0) must be greater than or equal to input.size(1)");
+  THArgCheck(n >= k, 1, "input.size(1) must be greater than or equal to input2.size(0)");
 
   int lda = m;
 
