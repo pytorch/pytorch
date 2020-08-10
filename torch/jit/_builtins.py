@@ -12,7 +12,7 @@ from collections import OrderedDict
 
 _builtin_table = None
 
-_modules_containing_builtins = (torch, torch._C._nn, torch._C._fft)
+_modules_containing_builtins = (torch, torch._C._nn, torch._C._fft, torch._C._linalg)
 
 _builtin_ops = [
     # Pairs of (function, op_name)

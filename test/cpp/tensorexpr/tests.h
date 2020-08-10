@@ -208,7 +208,7 @@ namespace jit {
   _(UnrollMultipleStatements)               \
   _(UnrollEmpty)                            \
   _(NoUnroll)                               \
-  _(UnrollWithVarMap)                       \
+  _(UnrollWithLet)                          \
   _(Kernel_1)                               \
   _(Kernel_2)                               \
   _(Kernel_3)                               \
