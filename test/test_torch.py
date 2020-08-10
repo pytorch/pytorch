@@ -6749,7 +6749,7 @@ class TestTorchDeviceType(TestCase):
             # second call, now that matrix_inverse_out is transposed
             torch.inverse(matrix, out=matrix_inverse_out)
             self.assertEqual(matrix_inverse_out, matrix_inverse, atol=0, rtol=0)
-        
+
             # one batch
             matrix = random_fullrank_matrix_distinct_singular_value(n, 1).to(device)
             matrix_inverse = torch.inverse(matrix)
@@ -7438,7 +7438,7 @@ class TestTorchDeviceType(TestCase):
             matrices_inverse = torch.inverse(matrices)
             self.assertEqual(torch.matmul(matrices_inverse, matrices),
                              torch.eye(b, dtype=torch.float64).to(device).expand_as(matrices))
-        
+
         test_inverse_many_batches_helper(5, 256)
         test_inverse_many_batches_helper(3, 512)
         test_inverse_many_batches_helper(64, 64)

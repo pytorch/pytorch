@@ -24,7 +24,6 @@ from torch.testing._internal.common_utils import TestCase, get_gpu_type, freeze_
     NO_MULTIPROCESSING_SPAWN, skipIfRocm, load_tests, \
     slowTest, skipCUDANonDefaultStreamIf, TEST_WITH_ROCM, TEST_NUMPY
 from torch.testing._internal.autocast_test_lists import AutocastTestLists
-from torch.testing._internal.common_cuda import TEST_MAGMA
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
