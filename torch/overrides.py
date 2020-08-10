@@ -270,6 +270,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.cholesky_solve: lambda input1, input2, upper=False, out=None: -1,
         torch.chunk: lambda input, chunks, dim=0: -1,
         torch.clamp: lambda input, min=None, max=None, out=None: -1,
+        torch.clip: lambda input, min=None, max=None, out=None: -1,
         torch.clamp_min: lambda input, min, out=None: -1,
         torch.clamp_max: lambda input, max, out=None: -1,
         torch.clone: lambda input: -1,
@@ -1064,7 +1065,7 @@ def get_overridable_functions() -> Dict[Any, List[Callable]]:
         for func_name in ns_funcs:
             # ignore private functions or functions that are deleted in torch.__init__
             if namespace is not torch.Tensor:
-                if func_name.startswith('_'): 
+                if func_name.startswith('_'):
                     continue
                 elif func_name.endswith('_'):
                     continue
