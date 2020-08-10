@@ -24,6 +24,7 @@
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/distributed/c10d/comm.h>
 #include <torch/csrc/distributed/c10d/reducer.h>
+#include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/pybind.h>
 
@@ -136,12 +137,19 @@ PyObject* c10d_init(PyObject* _unused) {
       py::arg("state"),
       py::arg("comm_hook"));
 
-  shared_ptr_class_<::c10d::GradBucket>(module, "GradBucket")
+  shared_ptr_class_<::c10d::GradBucket>(module, "_GradBucket")
       .def(py::init<std::vector<Tensor>&>(), py::arg("tensors"))
       .def(
           "get_tensors",
           &::c10d::GradBucket::getTensors,
-          py::call_guard<py::gil_scoped_release>());
+          py::call_guard<py::gil_scoped_release>(),
+          R"(
+            ``get_tensors`` returns a list of ``torch.Tensor``. Each tensor in
+            the list refers to the replica on each device. There will be multiple
+            replicas only in the case of single process multiple device mode. In
+            the single process single device mode, this list would consist of only
+            a single tensor.
+           )");
 
   shared_ptr_class_<::c10d::Reducer>(module, "Reducer")
       .def(
@@ -700,7 +708,47 @@ They are used in specifying strategies for reduction collectives, e.g.,
           "wait",
           &::c10d::ProcessGroup::Work::wait,
           py::arg("timeout") = kNoTimeout,
-          py::call_guard<py::gil_scoped_release>());
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "get_future",
+          [](::c10d::ProcessGroup::Work& work)
+              -> std::shared_ptr<jit::PythonFutureWrapper> {
+            return std::make_shared<jit::PythonFutureWrapper>(work.getFuture());
+          },
+          R"(
+            Returns:
+                A ``torch._C.Future`` object which is associated with the completion of
+                the ``ProcessGroup::Work``. As an example, a future object can be retrieved
+                by ``fut = process_group.allreduce(tensors).get_future()``.
+
+            Example::
+                Below is an example of a simple allreduce DDP communication hook that uses
+                ``get_future` API to retrieve a Future associated with the completion of
+                ``allreduce`` work.
+
+                >>> def allreduce(state: object, bucket: dist._GradBucket): -> torch._C.Future
+                >>>     work = process_group.allreduce(bucket.get_tensors())
+                >>>     return work.get_future()
+
+                >>> ddp_model._register_comm_hook(state = None, hook = allreduce)
+
+            .. warning ::
+                ``get_future`` API supports only NCCL backend. The ``torch._C.Future`` object
+                returned by this API can be used in ``DistributedDataParallel._register_comm_hook``,
+                but it is subject to some subtle differences compared to ``torch.futures.Future``
+                due to compromises made for performance reasons.
+
+                In the example above, ``allreduce`` work will be done on GPU using NCCL backend,
+                ``fut.wait()`` will return after synchronizing the appropriate NCCL streams
+                with PyTorch's default device streams to ensure we can have asynchronous CUDA
+                execution and it does not wait for the entire operation to complete on GPU.
+                If ``NCCL_BLOCKING_WAIT`` is enabled, in that case, it would wait for the entire
+                operation to complete before returning. In addition, if a callback function was
+                added by ``fut.then()``, it will wait until WorkNCCL's wait returns and invoke
+                the callback inline.
+
+                Note that ``fut.done()`` returns if the work was completed on the GPU.
+           )");
 
   module.def(
       "_compute_bucket_assignment_by_size",
