@@ -727,7 +727,8 @@ They are used in specifying strategies for reduction collectives, e.g.,
                 ``allreduce`` work.
 
                 >>> def allreduce(state: object, bucket: dist._GradBucket): -> torch._C.Future
-                >>>     work = process_group.allreduce(bucket.get_tensors())
+                >>>     tensors = [t / process_group.world_size for t in bucket.get_tensors()]
+                >>>     work = process_group.allreduce(tensors)
                 >>>     return work.get_future()
 
                 >>> ddp_model._register_comm_hook(state = None, hook = allreduce)
