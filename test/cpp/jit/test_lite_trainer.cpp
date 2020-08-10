@@ -82,8 +82,9 @@ void testMobileNamedParameters() {
   )");
   Module child("m2");
   child.register_parameter("foo", 4 * torch::ones({}), false);
+  child.register_parameter("bar", 4 * torch::ones({}), false);
   m.register_module("child1", child);
-  m.register_module("child2", child);
+  m.register_module("child2", child.clone());
   std::stringstream ss;
   m._save_for_mobile(ss);
   mobile::Module bc = _load_for_mobile(ss);
@@ -108,7 +109,7 @@ void testMobileSaveLoadData() {
   child.register_parameter("foo", 4 * torch::ones({}), false);
   child.register_parameter("bar", 3 * torch::ones({}), false);
   m.register_module("child1", child);
-  m.register_module("child2", child);
+  m.register_module("child2", child.clone());
   auto full_params = m.named_parameters();
 
   std::stringstream ss;
