@@ -2780,6 +2780,8 @@ class _DistTestBase(object):
         model = test_case.model
         inp = test_case.inp
         rank = self.rank
+        # Ensure all outsanding GPU work is comlete so this test runs independently.
+        torch.cuda.synchronize()
         # Bucket_cap_mb is intentionally low to test allreduce scheduling when
         # there are many buckets.
         net = torch.nn.parallel.DistributedDataParallel(
