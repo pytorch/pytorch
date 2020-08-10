@@ -18632,6 +18632,7 @@ fn(*args)
         for ndims in range(0, 6):
             for i in range(0, 10):
                 shape = self._rand_shape(ndims, min_size=5, max_size=10)
+                a = self._generate_input(shape, dtype, device, with_extremal=False)
                 torch_input = [a] * random.randint(1, 10)
                 np_input = [input.cpu().numpy() for input in torch_input]
                 actual = torch_fn(torch_input)
