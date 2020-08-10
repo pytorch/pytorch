@@ -1,5 +1,6 @@
 import torch
 from torch import nn
+import numpy as np
 
 
 class Accelerant:
@@ -50,6 +51,35 @@ class MultiHeadAttentionLayer(nn.Module):
         return x, attention
 
 
+# Taken from https://github.com/facebookresearch/dlrm/blob/master/dlrm_s_pytorch.py
+def create_mlp(ln, sigmoid_layer):
+    layers = nn.ModuleList()
+    for i in range(0, len(ln) - 1):
+        n = ln[i]
+        m = ln[i + 1]
+
+        LL = nn.Linear(int(n), int(m), bias=True)
+
+        mean = 0.0  # std_dev = np.sqrt(variance)
+        std_dev = np.sqrt(2 / (m + n))  # np.sqrt(1 / m) # np.sqrt(1 / n)
+        W = np.random.normal(mean, std_dev, size=(m, n)).astype(np.float32)
+        std_dev = np.sqrt(1 / m)  # np.sqrt(2 / (m + 1))
+        bt = np.random.normal(mean, std_dev, size=m).astype(np.float32)
+        LL.weight.data = torch.tensor(W, requires_grad=True)
+        LL.bias.data = torch.tensor(bt, requires_grad=True)
+        layers.append(LL)
+
+        if i == sigmoid_layer:
+            layers.append(nn.Sigmoid())
+        else:
+            layers.append(nn.ReLU())
+
+    with torch.no_grad():
+        s = torch.jit.script(torch.nn.Sequential(*layers))
+    s.eval()
+    return s
+
+
 def trivial_graph(a, b, c):
     s = torch.tensor([[3, 3], [3, 3]])
     return a + b * c + s
@@ -83,3 +113,21 @@ if __name__ == "__main__":
     tg_a = Accelerant(tg)
     o_test = tg_a(s, s, s)[0]
     torch.testing.assert_allclose(o_ref, o_test)
+
+    # Arguments taken from benchmark script, ./bench/dlrm_s_benchmark.sh
+    ln_bot = [512, 512, 64]
+    sigmoid_bot = -1
+    ln_top = [100, 1024, 1024, 1024, 1]
+    sigmoid_top = 3
+    bot_l = create_mlp(ln_bot, sigmoid_bot)
+    bot_l_acc = Accelerant(bot_l)
+    top_l = create_mlp(ln_top, sigmoid_top)
+    top_l_acc = Accelerant(top_l)
+    bot_inp = torch.randn(2048, 512)  # torch.Size([2048, 512])
+    top_inp = torch.randn(2048, 100)  # torch.Size([2048, 100])
+    ref_bot = bot_l(bot_inp)
+    acc_bot = bot_l_acc(bot_inp)[0]
+    torch.testing.assert_allclose(acc_bot, ref_bot)
+    ref_top = top_l(top_inp)
+    acc_top = top_l_acc(top_inp)[0]
+    torch.testing.assert_allclose(acc_top, ref_top)
