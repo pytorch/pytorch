@@ -15397,55 +15397,84 @@ class TestTorchDeviceType(TestCase):
     @dtypes(*(torch.testing.get_all_int_dtypes() + [torch.bool]))
     def test_maximum_minimum_int_and_bool(self, device, dtype):
         ops = ((torch.maximum, np.maximum), (torch.minimum, np.minimum))
-        a_vals = (2, 3, 4, -2)
-        b_vals = (-1, 5, 2, 0)
+        rng = np.random.default_rng()
+        a_np = np.array(rng.integers(-100, 100, size=10), dtype=torch_to_numpy_dtype_dict[dtype])
+        b_np = np.array(rng.integers(-100, 100, size=10), dtype=torch_to_numpy_dtype_dict[dtype])
 
         for torch_op, numpy_op in ops:
-            a_tensor = torch.tensor(a_vals, device=device, dtype=dtype)
-            b_tensor = torch.tensor(b_vals, device=device, dtype=dtype)
+            a_tensor = torch.from_numpy(a_np).to(device=device, dtype=dtype)
+            b_tensor = torch.from_numpy(b_np).to(device=device, dtype=dtype)
             tensor_result = torch_op(a_tensor, b_tensor)
 
             out = torch.empty_like(a_tensor)
             torch_op(a_tensor, b_tensor, out=out)
 
-            a_np = np.array(a_vals, dtype=torch_to_numpy_dtype_dict[dtype])
-            b_np = np.array(b_vals, dtype=torch_to_numpy_dtype_dict[dtype])
             numpy_result = numpy_op(a_np, b_np)
 
-            self.assertEqual(tensor_result.cpu(), torch.from_numpy(numpy_result))
-            self.assertEqual(out.cpu(), torch.from_numpy(numpy_result))
+            self.assertEqual(tensor_result, numpy_result)
+            self.assertEqual(out, numpy_result)
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     @dtypes(*(torch.testing.get_all_fp_dtypes()))
     def test_maximum_minimum_float(self, device, dtype):
+        ops = ((torch.maximum, np.maximum), (torch.minimum, np.minimum))
+
+        if dtype == torch.bfloat16:
+            a_np = np.random.randn(10).astype(np.float64)
+            b_np = np.random.randn(10).astype(np.float64)
+        else:
+            a_np = np.random.randn(10).astype(torch_to_numpy_dtype_dict[dtype])
+            b_np = np.random.randn(10).astype(torch_to_numpy_dtype_dict[dtype])
+
+        for torch_op, numpy_op in ops:
+            numpy_result = numpy_op(a_np, b_np)
+
+            a_tensor = torch.from_numpy(a_np).to(device=device, dtype=dtype)
+            b_tensor = torch.from_numpy(b_np).to(device=device, dtype=dtype)
+            tensor_result = torch_op(a_tensor, b_tensor)
+            out = torch.empty_like(a_tensor)
+            torch_op(a_tensor, b_tensor, out=out)
+
+            if dtype == torch.bfloat16:
+                # rtol and atol of torch.bfloat16 here refer to
+                # the dtype_precisions from torch/testing/_internal/common_utils.py
+                # https://github.com/pytorch/pytorch/blob/master/torch/testing/_internal/common_utils.py#L942
+                self.assertEqual(tensor_result, numpy_result, rtol=0.016, atol=1e-5, exact_dtype=False)
+                self.assertEqual(out, numpy_result, rtol=0.016, atol=1e-5, exact_dtype=False)
+            else:
+                self.assertEqual(tensor_result, numpy_result)
+                self.assertEqual(out, numpy_result)
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @dtypes(*(torch.testing.get_all_fp_dtypes()))
+    def test_maximum_minimum_float_nan_and_inf(self, device, dtype):
         # np.maximum and np.minimum functions compare input arrays element-wisely.
         # if one of the elements being compared is a NaN, then that element is returned.
         ops = ((torch.maximum, np.maximum), (torch.minimum, np.minimum))
-        a_vals = (float('inf'), -float('inf'), 2.0, float('nan'), -1.0, float('nan'))
-        b_vals = (1, float('nan'), 2.1, float('inf'), -float('inf'), float('nan'))
+        a_vals = (float('inf'), -float('inf'), float('nan'), float('nan'))
+        b_vals = (-float('inf'), float('inf'), float('inf'), float('nan'))
+        if dtype == torch.bfloat16:
+            a_np = np.array(a_vals, dtype=np.float64)
+            b_np = np.array(b_vals, dtype=np.float64)
+        else:
+            a_np = np.array(a_vals, dtype=torch_to_numpy_dtype_dict[dtype])
+            b_np = np.array(b_vals, dtype=torch_to_numpy_dtype_dict[dtype])
 
         for torch_op, numpy_op in ops:
-            a_tensor = torch.tensor(a_vals, device=device, dtype=dtype)
-            b_tensor = torch.tensor(b_vals, device=device, dtype=dtype)
-            tensor_result = torch_op(a_tensor, b_tensor)
+            numpy_result = numpy_op(a_np, b_np)
 
+            a_tensor = torch.from_numpy(a_np).to(device=device, dtype=dtype)
+            b_tensor = torch.from_numpy(b_np).to(device=device, dtype=dtype)
+            tensor_result = torch_op(a_tensor, b_tensor)
             out = torch.empty_like(a_tensor)
             torch_op(a_tensor, b_tensor, out=out)
-            # Manual check here as numpy does not support bfloat16
+
             if dtype == torch.bfloat16:
-                if torch_op == torch.maximum:
-                    target_vals = (float('inf'), float('nan'), 2.1, float('nan'), -1.0, float('nan'))
-                else:
-                    target_vals = (1, float('nan'), 2.0, float('nan'), -float('inf'), float('nan'))
-                target_tensor = torch.tensor(target_vals, device=device, dtype=dtype)
-                self.assertEqual(tensor_result, target_tensor)
-                self.assertEqual(out, target_tensor)
+                self.assertEqual(tensor_result, numpy_result, exact_dtype=False)
+                self.assertEqual(out, numpy_result, exact_dtype=False)
             else:
-                a_np = np.array(a_vals, dtype=torch_to_numpy_dtype_dict[dtype])
-                b_np = np.array(b_vals, dtype=torch_to_numpy_dtype_dict[dtype])
-                numpy_result = numpy_op(a_np, b_np)
-                self.assertEqual(tensor_result.cpu(), torch.from_numpy(numpy_result))
-                self.assertEqual(out.cpu(), torch.from_numpy(numpy_result))
+                self.assertEqual(tensor_result, numpy_result)
+                self.assertEqual(out, numpy_result)
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     @dtypes(*product(torch.testing.get_all_complex_dtypes(), torch.testing.get_all_dtypes()))

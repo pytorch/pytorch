@@ -512,10 +512,11 @@ void maximum_kernel(TensorIterator& iter) {
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.input_dtype(), "maximum_cpu", [&]() {
       cpu_kernel(iter, [](scalar_t a, scalar_t b) -> scalar_t {
-        if (_isnan(a)) {
+        // If one of the elements being compared is a NaN, then that element is returned.
+        if (a != a) {
           return a;
         }
-        if (_isnan(b)) {
+        if (b != b) {
           return b;
         }
         return a >= b ? a : b;
@@ -534,10 +535,11 @@ void minimum_kernel(TensorIterator& iter) {
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.input_dtype(), "minimum_cpu", [&]() {
       cpu_kernel(iter, [](scalar_t a, scalar_t b) -> scalar_t {
-        if (_isnan(a)) {
+        // If one of the elements being compared is a NaN, then that element is returned.
+        if (a != a) {
           return a;
         }
-        if (_isnan(b)) {
+        if (b != b) {
           return b;
         }
         return a <= b ? a : b;

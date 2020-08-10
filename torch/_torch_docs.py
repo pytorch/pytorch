@@ -3863,12 +3863,11 @@ Example::
 add_docstr(torch.maximum, r"""
 maximum(input, other, *, out=None) -> Tensor
 
-Compares the element-wise maximum of :attr:`input` and :attr:`other`.
+Computes the element-wise maximum of :attr:`input` and :attr:`other`.
 
 .. note::
     If one of the elements being compared is a NaN, then that element is returned.
-    If both elements are NaNs then the first is returned.
-    The complex NaNs are defined as at least one of the real or imaginary parts being a NaN.
+    :func:`maximum` is not supported for tensors with complex dtypes.
 
 Args:
     {input}
@@ -3882,10 +3881,6 @@ Example::
     >>> torch.maximum(torch.tensor([[2.1, 1], [float('inf'), 6]]), torch.tensor([[1.2, 2], [4, float('nan')]]))
     tensor([[2.1000, 2.0000],
             [   inf,    nan]])
-    >>> torch.maximum(torch.tensor([complex(2, 1), complex(1, 2)]), torch.tensor([complex(1, 10), complex(1, 8)]))
-    tensor([2.+1.j, 1.+8.j])
-    >>> torch.maximum(torch.tensor([complex(float('nan'), 1)]), torch.tensor([complex(2, float('nan'))]))
-    tensor([nan+1.j])
 """.format(**common_args))
 
 add_docstr(torch.argmax,
@@ -4133,12 +4128,11 @@ Example::
 add_docstr(torch.minimum, r"""
 minimum(input, other, *, out=None) -> Tensor
 
-Compares the element-wise minimum of :attr:`input` and :attr:`other`.
+Computes the element-wise minimum of :attr:`input` and :attr:`other`.
 
 .. note::
     If one of the elements being compared is a NaN, then that element is returned.
-    If both elements are NaNs then the first is returned.
-    The complex NaNs are defined as at least one of the real or imaginary parts being a NaN.
+    :func:`minimum` is not supported for tensors with complex dtypes.
 
 Args:
     {input}
@@ -4152,10 +4146,6 @@ Example::
     >>> torch.minimum(torch.tensor([[2.1, 1], [-float('inf'), 6]]), torch.tensor([[1.2, 2], [4, float('nan')]]))
     tensor([[1.2000, 1.0000],
             [  -inf,    nan]])
-    >>> torch.minimum(torch.tensor([complex(2, 1), complex(1, 2)]), torch.tensor([complex(1, 10), complex(1, 8)]))
-    tensor([1.+10.j, 1.+2.j])
-    >>> torch.minimum(torch.tensor([complex(float('nan'), 1)]), torch.tensor([complex(2, float('nan'))]))
-    tensor([nan+1.j])
 """.format(**common_args))
 
 add_docstr(torch.argmin,
