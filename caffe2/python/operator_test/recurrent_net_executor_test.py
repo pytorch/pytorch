@@ -12,7 +12,7 @@ import numpy as np
 import unittest
 import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
-from hypothesis import given
+from hypothesis import given, settings
 
 
 class TestRNNExecutor(test_util.TestCase):
@@ -28,6 +28,7 @@ class TestRNNExecutor(test_util.TestCase):
         T=st.integers(10, 100),
         forward_only=st.booleans(),
         **hu.gcs)
+    @settings(deadline=10000)
     def test_lstm_with_attention_equal_simplenet(self, T, forward_only, gc, dc):
         self.Tseq = [T, T // 2, T // 2 + T // 4, T, T // 2 + 1]
         workspace.ResetWorkspace()
@@ -203,6 +204,7 @@ class TestRNNExecutor(test_util.TestCase):
         T=st.integers(4, 100),
         forward_only=st.booleans(),
         **hu.gcs)
+    @settings(deadline=10000)
     def test_lstm_equal_simplenet(self, num_layers, T, forward_only, gc, dc):
         '''
         Test that the RNN executor produces same results as

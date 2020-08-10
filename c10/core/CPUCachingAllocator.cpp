@@ -3,16 +3,11 @@
 namespace c10 {
 
 namespace {
-// We can make this thread_local perhaps. Then we would not need mutex.
-// However making it thread_local may increase memory usage.
-static CPUCachingAllocator cpu_caching_allocator;
-
 thread_local CachingAllocatorInfo caching_allocator_info;
 } // namespace
 
-CPUCachingAllocator& GetCPUCachingAllocator() {
-  return cpu_caching_allocator;
-}
+std::mutex CPUCachingAllocator::mutex_;
+ska::flat_hash_map<void*, size_t> CPUCachingAllocator::allocation_map_;
 
 inline void* CPUCachingAllocator::allocate_and_cache(const size_t bytes) {
   void* ptr;
@@ -34,8 +29,7 @@ inline void* CPUCachingAllocator::allocate_and_cache(const size_t bytes) {
 }
 
 inline void* CPUCachingAllocator::use_cached(const size_t bytes) {
-  void* ptr = available_map_[bytes].back();
-  available_map_[bytes].pop_back();
+  void* ptr = available_map_[bytes].pop_back_val();
   return ptr;
 }
 
@@ -77,6 +71,7 @@ void CPUCachingAllocator::record_free(void* ptr) {
   // If the memory is freed in some other way, then we will likely
   // have undefined behavior or page fault. But this can be
   // the case without caching allocator as well.
+  std::lock_guard<std::mutex> guard(mutex_);
   const auto& it = allocation_map_.find(ptr);
   if (it != allocation_map_.end()) {
     allocation_map_.erase(it);
@@ -84,11 +79,15 @@ void CPUCachingAllocator::record_free(void* ptr) {
 }
 
 void CPUCachingAllocator::free_cached() {
-  for (const auto& it : allocation_map_) {
-    c10::free_cpu(it.first);
+  for (const auto& it : available_map_) {
+    for (const auto ptr : it.second) {
+      c10::free_cpu(ptr);
+      // When cached memory is return to OS, it must be removed
+      // from allocation_map.
+      allocation_map_.erase(ptr);
+    }
   }
   available_map_.clear();
-  allocation_map_.clear();
 }
 
 CPUCachingAllocator::~CPUCachingAllocator() {
@@ -99,26 +98,40 @@ CachingAllocatorInfo& GetThreadLocalCachingAllocatorInfo() {
   return caching_allocator_info;
 }
 
-void CachingAllocatorInfo::set(
-    const CachingAllocatorInfo& other) {
-  *this = other;
-}
-
 bool CachingAllocatorInfo::enabled() {
   return is_enabled_;
 }
 
 void CachingAllocatorInfo::enable() {
+  TORCH_CHECK(
+      allocator_ != nullptr,
+      "Enabling of caching allocator requires allocator "
+      "to be initialized via set_allocator");
   is_enabled_ = true;
+}
+
+// Unfortunately get_allocator, cannot be inlined
+// because tis definition is removed, which result in
+// undefined ref.
+// Alternatively is to add allocate and free interface to
+// CachineAllocatorInfo, but that does not seem clean.
+CPUCachingAllocator* CachingAllocatorInfo::get_allocator() {
+  return allocator_;
+}
+
+void CachingAllocatorInfo::set_allocator(CPUCachingAllocator* allocator) {
+  allocator_ = allocator;
 }
 
 void CachingAllocatorInfo::disable() {
   is_enabled_ = false;
 }
 
-WithCPUCachingAllocatorGuard::WithCPUCachingAllocatorGuard(bool enabled) {
+WithCPUCachingAllocatorGuard::WithCPUCachingAllocatorGuard(
+    CPUCachingAllocator* allocator, bool enable) {
   prev_info_ = GetThreadLocalCachingAllocatorInfo();
-  if (enabled) {
+  GetThreadLocalCachingAllocatorInfo().set_allocator(allocator);
+  if (enable) {
     GetThreadLocalCachingAllocatorInfo().enable();
   } else {
     GetThreadLocalCachingAllocatorInfo().disable();

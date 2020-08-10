@@ -20,12 +20,12 @@ class Int8OpsTest(serial.SerializedTestCase):
         zero_point = int(round(np.clip(zero_point, 0, 255.0)))
         return (scale, zero_point)
 
+    @settings(max_examples=30, deadline=None)
     @given(
         n=st.integers(2, 1024),
         rand_seed=st.integers(0, 65534),
         non_zero_offset=st.booleans()
     )
-    @settings(max_examples=100)
     def test_int8_quantize(self, n, rand_seed, non_zero_offset):
         print("n={}, rand_seed={}".format(n, rand_seed))
         np.random.seed(rand_seed)
@@ -125,7 +125,7 @@ class Int8OpsTest(serial.SerializedTestCase):
         rand_seed=st.integers(0, 65534),
         quantize_bias=st.sampled_from([False]),
     )
-    @settings(max_examples=100)
+    @settings(deadline=None, max_examples=30)
     def test_int8_fc(
         self, n, m, k, rand_seed, quantize_bias
     ):
@@ -227,7 +227,7 @@ class Int8OpsTest(serial.SerializedTestCase):
         n=st.integers(1, 4),
         rand_seed=st.integers(0, 65534)
     )
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=1000)
     def test_int8_small_input(self, n, rand_seed):
         print("n={}, rand_seed={}".format(n, rand_seed))
         np.random.seed(rand_seed)

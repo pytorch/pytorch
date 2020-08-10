@@ -156,12 +156,14 @@ class DefaultMobileCPUAllocator final : public at::Allocator {
     // TODO: enable with better TLS support on mobile
     // profiledCPUMemoryReporter().Delete(pointer);
     if (GetThreadLocalCachingAllocatorInfo().enabled()) {
-      GetCPUCachingAllocator().free(pointer);
+      GetThreadLocalCachingAllocatorInfo()
+        .get_allocator()
+        ->free(pointer);
     } else {
       c10::free_cpu(pointer);
       // This adds extra cost to freeing memory to the default case when
       // caching allocator is not enabled.
-      GetCPUCachingAllocator().record_free(pointer);
+      CPUCachingAllocator::record_free(pointer);
     }
   }
 
@@ -178,7 +180,10 @@ class DefaultMobileCPUAllocator final : public at::Allocator {
     auto alloc_size = PreGuardBytes + nbytes + PostGuardBytes;
     void* data;
     if (GetThreadLocalCachingAllocatorInfo().enabled()) {
-      data = GetCPUCachingAllocator().allocate(alloc_size);
+      data =
+        GetThreadLocalCachingAllocatorInfo()
+          .get_allocator()
+          ->allocate(alloc_size);
     } else {
       data = c10::alloc_cpu(alloc_size);
     }
