@@ -12,13 +12,14 @@ _supported_modules_quantized = {nnq.Linear, nnq.Conv2d}
 def get_module(model, name):
     ''' Given name of submodule, this function grabs the submodule from given model
     '''
-    current = model
-    name = name.split('.')
-    for subname in name:
-        if subname == '':
-            return current
-        current = current._modules[subname]
-    return current
+    # current = model
+    # name = name.split('.')
+    # for subname in name:
+    #     if subname == '':
+    #         return current
+    #     current = current._modules[subname]
+    # return current
+    return model.named_modules()[name]
 
 def get_parent_module(model, name):
     ''' Given name of submodule, this function grabs the parent of the submodule, from given model
@@ -33,10 +34,10 @@ def get_param(module, attr):
     gives a function that will give you the raw tensor, this function takes care of that logic
     '''
     param = getattr(module, attr, None)
-    if isinstance(param, nn.Parameter) or isinstance(param, torch.Tensor):
-        return param
-    elif callable(param):
+    if callable(param):
         return param()
+    else:
+        return param
     return None
 
 class MeanShadowLogger(ns.Logger):
@@ -53,6 +54,7 @@ class MeanShadowLogger(ns.Logger):
 
     def forward(self, x, y):
         if len(x) > 1:
+            print("does the condision in mean shadowLogger ever get used")
             x = x[0]
         if len(y) > 1:
             y = y[0]
@@ -94,8 +96,6 @@ def bias_correction(float_model, quantized_model, img_data, neval_batches=30):
             for data in img_data:
                 quantized_model(data[0])
                 count += 1
-                if count % 10 == 0:
-                    print('.', end='')  # keeps devserver open
                 if count == neval_batches:
                     break
             ob_dict = ns.get_logger_dict(quantized_model)
@@ -109,7 +109,6 @@ def bias_correction(float_model, quantized_model, img_data, neval_batches=30):
             expected_error = torch.mean(quantization_error, dims)
 
             updated_bias = bias.data - expected_error
-            updated_bias = updated_bias.reshape(bias.data.size())
 
             bias.data = updated_bias
 
