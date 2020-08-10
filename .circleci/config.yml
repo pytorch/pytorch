@@ -2057,14 +2057,17 @@ jobs:
                 # explicitly exit the step here ourselves before it causes too much trouble
                 exit 0
               fi
-              if [[ -n "<< pipeline.git.base_revision >>" ]]; then
-                PREVIOUS_DOCKER_TAG=$(git rev-parse "$(git merge-base HEAD << pipeline.git.base_revision >>):.circleci/docker")
-                # If no image exists but the hash is the same as the previous hash then we should error out here
-                if [[ ${PREVIOUS_DOCKER_TAG} = ${DOCKER_TAG} ]]; then
-                  echo "ERROR: Something has gone wrong and the previous image isn't available for the merge-base of your branch"
-                  echo "       contact the PyTorch team to restore the original images"
-                  exit 1
-                fi
+              # Covers the case where a previous tag doesn't exist for the tree
+              # this is only really applicable on trees that don't have `.circleci/docker` at its merge base, i.e. nightly
+              if ! git rev-parse "$(git merge-base HEAD << pipeline.git.base_revision >>):.circleci/docker"; then
+                exit 0
+              fi
+              PREVIOUS_TAG=$(git rev-parse "$(git merge-base HEAD << pipeline.git.base_revision >>):.circleci/docker")
+              # If no image exists but the hash is the same as the previous hash then we should error out here
+              if [[ "${PREVIOUS_TAG}" = "${DOCKER_TAG}" ]]; then
+                echo "ERROR: Something has gone wrong and the previous image isn't available for the merge-base of your branch"
+                echo "       contact the PyTorch team to restore the original images"
+                exit 1
               fi
         - run:
             name: build_docker_image_<< parameters.image_name >>
