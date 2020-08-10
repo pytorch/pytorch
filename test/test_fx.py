@@ -1,5 +1,5 @@
 import torch
-from torch.fx import GraphModule, symbolic_trace
+from torch.fx import symbolic_trace
 
 from torch.testing._internal.common_utils import TestCase, run_tests
 
