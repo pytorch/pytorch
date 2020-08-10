@@ -51,9 +51,9 @@ def adaround_demo(input_model, data_loader, data_loader_test):
     results.append(str('Evaluation accuracy on %d images, %2.2f' % (num_eval_batches * eval_batch_size, top1.avg)))
     results.append('Per tensor quantization accuracy results, no adaround')
 
-    _adaround.learn_adaround(quantized_tensor_model, data_loader_test)
+    _adaround.learn_adaround(model, data_loader_test)
 
-    top1, top5 = evaluate(quantized_tensor_model, criterion, data_loader_test, neval_batches=num_eval_batches)
+    top1, top5 = evaluate(model, criterion, data_loader_test, neval_batches=num_eval_batches)
     results.append(str('Evaluation accuracy on %d images, %2.2f' % (num_eval_batches * eval_batch_size, top1.avg)))
     results.append('Per tensor quantization accuracy results, with adaround')
 

@@ -40,6 +40,7 @@ class TestBiasCorrection(QuantizationTestCase):
                 artificial_bias = _correct_bias.get_param(artificial_submodule, 'bias')
 
                 if artificial_submodule in _supported_modules:
+                    print("not getting executed")
                     if artificial_bias.is_quantized:
                         artificial_bias = artificial_bias.dequantize()
                     self.assertTrue(self.computeSqnr(float_bias, artificial_bias) > 35,

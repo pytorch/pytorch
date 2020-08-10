@@ -11,7 +11,7 @@ import copy
 _supported_modules = {nn.Conv2d, nn.Linear}
 
 def clipped_sigmoid(continous_V):
-    sigmoid_applied = torch.sigmoid(continous_V)
+    sigmoid_applied = torch.sigmoid(continous_V * 100)
     scale_n_add = (sigmoid_applied * 1.2) - 0.1
     clip = torch.clamp(scale_n_add, 0, 1)
     return clip
@@ -29,28 +29,28 @@ def modified_quantized(model, x):
     return rtn
 
 def loss_function_leaf(model, count):
-    high = 4
-    low = 1
+    high = 8
+    low = 2
     beta = count / 10 * (high - low) + low
     _lambda = .01
 
     adaround_instance = model.wrapped_module.weight_fake_quant
     float_weight = model.wrapped_module.weight
-    clipped_weight = modified_quantized(adaround_instance, float_weight)
 
+    clipped_weight = modified_quantized(adaround_instance, float_weight)
     quantized_weight = torch.fake_quantize_per_tensor_affine(clipped_weight, float(adaround_instance.scale),
                                                              int(adaround_instance.zero_point), adaround_instance.quant_min,
                                                              adaround_instance.quant_max)
+    Frobenius_norm = torch.norm(float_weight - quantized_weight)
+    # bring back x in expression
 
-    scale = model.wrapped_module.weight_fake_quant.scale
-    continous_V = model.wrapped_module.weight_fake_quant.continous_V
+    scale = adaround_instance.scale
+    continous_V = adaround_instance.continous_V
 
     clip_V = clipped_sigmoid(continous_V)
     spreading_range = torch.abs((2 * clip_V) - 1)
     one_minus_beta = 1 - (spreading_range ** beta)  # torch.exp
     regulization = torch.sum(one_minus_beta)
-
-    Frobenius_norm = torch.norm(float_weight - quantized_weight)
 
     print("loss function break down: ", Frobenius_norm * 100, _lambda * regulization)
     print("sqnr of float and quantized: ", computeSqnr(float_weight, quantized_weight))
@@ -159,7 +159,7 @@ class OuputWrapper(nn.Module):
             return self.dequant(self.wrapped_module(x))
 
 
-araround_fake_quant = adaround.with_args(observer=MovingAverageMinMaxObserver, quant_min=-128, quant_max=127,
+araround_fake_quant = adaround.with_args(observer=HistogramObserver, quant_min=-128, quant_max=127,
                                          dtype=torch.qint8, qscheme=torch.per_tensor_symmetric, reduce_range=False)
 
 adaround_qconfig = QConfig(activation=default_fake_quant,
@@ -179,7 +179,7 @@ def load_conv():
     model.train()
     img_data = [(torch.rand(10, 3, 125, 125, dtype=torch.float, requires_grad=True), torch.randint(0, 1, (2,), dtype=torch.long))
                 for _ in range(500)]
-    return copy_of_model, model, img_data
+    return model, img_data
 
 def quick_function(qat_model, dummy, data_loader_test):
     # turning off observer and turning on tuning
@@ -239,6 +239,9 @@ def learn_adaround(float_model, data_loader_test):
                 yield image
     generator = uniform_images()
 
+
+
+
     def optimize_V(leaf_module):
         '''Takes in a leaf module with an adaround attached to its
         weight_fake_quant attribute'''
@@ -262,25 +265,33 @@ def learn_adaround(float_model, data_loader_test):
                 print("ruh roh")
             print("running count during optimazation: ", count)
 
-    V_s = add_wrapper_class(float_model, {nnqat.Linear, nnqat.Conv2d})
+    V_s = add_wrapper_class(float_model, _supported_modules)
 
-    float_model.qconfig = torch.quantization.default_qconfig
-    torch.quantization.prepare(float_model, inplace=True)
+    # float_model.qconfig = torch.quantization.default_qconfig # change to qat qconfig
+    # torch.quantization.prepare_qat(float_model, inplace=True)
     print("bruh")
+    # print(float_model)
     batch = 0
     for name, submodule in float_model.named_modules():
+        # if type(submodule) in _supported_modules:
+        # print(name)
+        # print(name, getattr(submodule, 'qconfig'))
         if isinstance(submodule, OuputWrapper):
             batch += 1
             if batch <= 1:
+                # assert hasattr(submodule, 'qconfig')
                 # quick quantization calibration
                 submodule.on = True
                 submodule.wrapped_module.qconfig = adaround_qconfig
-                submodule.wrapped_module.activation_post_process = torch.quantization.fake_quantize.default_fake_quant()
-                submodule.wrapped_module.weight_fake_quant = araround_fake_quant()
-                # torch.quantization.prepare_qat(submodule, inplace=True)
-                # for count in range(10):
-                #     float_model(next(generator))
-                # submodule.wrapped_module.weight_fake_quant.disable_observer()
+                # submodule.wrapped_module.activation_post_process = torch.quantization.fake_quantize.default_fake_quant()
+                # submodule.wrapped_module.weight_fake_quant = araround_fake_quant()
+                torch.quantization.prepare_qat(submodule, inplace=True)
+                print(submodule.wrapped_module.__dict__.keys())
+                print(submodule.wrapped_module._modules.keys())
+                for count in range(10):
+                    float_model(next(generator))
+                submodule.wrapped_module.weight_fake_quant.disable_observer()
+                # try randomizing values for contin V
                 submodule.wrapped_module.weight_fake_quant.continous_V = \
                     torch.nn.Parameter(torch.ones(submodule.wrapped_module.weight.size()) / 10)
 
@@ -290,13 +301,14 @@ def learn_adaround(float_model, data_loader_test):
                 torch.quantization.convert(submodule, inplace=True)
                 submodule.on = False
             if batch == 1:
+                print(float_model)
+                print(submodule)
+                print(submodule.qconfig)
+                torch.quantization.convert(float_model, inplace=True)
                 return float_model
 
-            # submodule.wrapped_module.weight_fake_quant.disable_observer()
-
-
-    # qat_model.eval()
-    # torch.quantization.convert(qat_model, inplace=True)
+    print(float_model)
+    torch.quantization.convert(float_model, inplace=True)
     return float_model
 
 if __name__ == "__main__":
