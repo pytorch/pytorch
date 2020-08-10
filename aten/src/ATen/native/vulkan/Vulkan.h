@@ -85,7 +85,7 @@ const VContext& context();
 class VBuffer;
 class VImage;
 
-using ImageSize = std::array<uint32_t, 3>;
+using ImageSize = std::array<int32_t, 3>;
 struct ImageSizes {
   ImageSize imageSize;
   ImageSize dataSize;

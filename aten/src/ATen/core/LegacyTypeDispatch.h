@@ -62,7 +62,7 @@ struct CAFFE2_API AutoNonVariableTypeMode {
   }
 
   // disable all autograd dispatch keys
-  c10::impl::ExcludeDispatchKeySetGuard autograd_guard_;
+  c10::impl::ExcludeDispatchKeyGuard autograd_guard_;
 };
 
 } // namespace at
