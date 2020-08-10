@@ -40,7 +40,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from typing import Dict, List, Tuple, Union
 import torch.backends.quantized
 import torch.testing._internal.data
-from torch.testing._internal.common_cuda import tf32_on_and_off
+from torch.testing._internal.common_cuda import tf32_on_and_off, _get_torch_cuda_version, TEST_MAGMA
 
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
@@ -6726,65 +6726,83 @@ class TestTorchDeviceType(TestCase):
             res_neg_op = -a.clone()
             self.assertEqual(res_neg_op, res_add)
 
-    @skipCUDAIfNoMagma
+    @skipCUDAIf(
+        _get_torch_cuda_version() < [10, 0] and not TEST_MAGMA,
+        "On cuda 9.2, torch.inverse relies on magma"
+    )
     @skipCPUIfNoLapack
     def test_inverse(self, device):
         from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
 
-        # no batches: 2-D tensors
-        matrix = random_fullrank_matrix_distinct_singular_value(5).to(device)
-        matrix_inverse = torch.inverse(matrix)
+        def test_inverse_helper_matrix_size(n):
+            # no batches: 2-D tensors
+            matrix = random_fullrank_matrix_distinct_singular_value(n).to(device)
+            matrix_inverse = torch.inverse(matrix)
 
-        identity = torch.eye(5, dtype=torch.float64, device=device)
-        self.assertEqual(identity, torch.mm(matrix, matrix_inverse), atol=1e-8, rtol=0)
-        self.assertEqual(identity, torch.mm(matrix_inverse, matrix), atol=1e-8, rtol=0)
+            identity = torch.eye(n, dtype=torch.float64, device=device)
+            self.assertEqual(identity, torch.mm(matrix, matrix_inverse), atol=1e-8, rtol=0)
+            self.assertEqual(identity, torch.mm(matrix_inverse, matrix), atol=1e-8, rtol=0)
 
-        matrix_inverse_out = torch.empty(5, 5, dtype=torch.float64, device=device)
-        torch.inverse(matrix, out=matrix_inverse_out)
-        self.assertEqual(matrix_inverse_out, matrix_inverse, atol=0, rtol=0)
-        # second call, now that matrix_inverse_out is transposed
-        torch.inverse(matrix, out=matrix_inverse_out)
-        self.assertEqual(matrix_inverse_out, matrix_inverse, atol=0, rtol=0)
+            matrix_inverse_out = torch.empty(n, n, dtype=torch.float64, device=device)
+            torch.inverse(matrix, out=matrix_inverse_out)
+            self.assertEqual(matrix_inverse_out, matrix_inverse, atol=0, rtol=0)
+            # second call, now that matrix_inverse_out is transposed
+            torch.inverse(matrix, out=matrix_inverse_out)
+            self.assertEqual(matrix_inverse_out, matrix_inverse, atol=0, rtol=0)
+        
+            # one batch
+            matrix = random_fullrank_matrix_distinct_singular_value(n, 1).to(device)
+            matrix_inverse = torch.inverse(matrix)
+            expected_inv = matrix.squeeze(0).inverse()
+            self.assertEqual(matrix_inverse, expected_inv.unsqueeze(0))
 
-        # one batch
-        matrix = random_fullrank_matrix_distinct_singular_value(5, 1).to(device)
-        matrix_inverse = torch.inverse(matrix)
-        expected_inv = matrix.squeeze(0).inverse()
-        self.assertEqual(matrix_inverse, expected_inv.unsqueeze(0))
+            # four batches
+            matrices = random_fullrank_matrix_distinct_singular_value(n, 4).to(device)
+            expected_inv_list = []
+            for i in range(0, 4):
+                expected_inv_list.append(torch.inverse(matrices[i]))
+            expected_inv = torch.stack(expected_inv_list)
+            matrices_inverse = torch.inverse(matrices)
+            self.assertEqual(matrices_inverse, expected_inv)
 
-        # four batches
-        matrices = random_fullrank_matrix_distinct_singular_value(5, 4).to(device)
-        expected_inv_list = []
-        for i in range(0, 4):
-            expected_inv_list.append(torch.inverse(matrices[i]))
-        expected_inv = torch.stack(expected_inv_list)
-        matrices_inverse = torch.inverse(matrices)
-        self.assertEqual(matrices_inverse, expected_inv)
+            # six batches (2 x 3)
+            matrices = random_fullrank_matrix_distinct_singular_value(n, 2, 3).to(device)
+            expected_inv_list = []
+            for mat in matrices.view(-1, n, n):
+                expected_inv_list.append(torch.inverse(mat))
+            expected_inv = torch.stack(expected_inv_list).view(2, 3, n, n)
+            matrices_inverse = torch.inverse(matrices)
+            self.assertEqual(matrices_inverse, expected_inv)
 
-        # six batches (2 x 3)
-        matrices = random_fullrank_matrix_distinct_singular_value(5, 2, 3).to(device)
-        expected_inv_list = []
-        for mat in matrices.view(-1, 5, 5):
-            expected_inv_list.append(torch.inverse(mat))
-        expected_inv = torch.stack(expected_inv_list).view(2, 3, 5, 5)
-        matrices_inverse = torch.inverse(matrices)
-        self.assertEqual(matrices_inverse, expected_inv)
+            # large batch size
+            # large n will be tested in test_inverse_many_batches (slow test)
+            if n == 5:
+                matrices = random_fullrank_matrix_distinct_singular_value(n, 32).to(device)
+                expected_inv_list = []
+                for i in range(0, 32):
+                    expected_inv_list.append(torch.inverse(matrices[i]))
+                expected_inv = torch.stack(expected_inv_list)
+                matrices_inverse = torch.inverse(matrices)
+                self.assertEqual(matrices_inverse, expected_inv)
+
+            # correctness test
+            matrices = random_fullrank_matrix_distinct_singular_value(n, 3).to(device)
+            matrices_inverse = torch.inverse(matrices)
+            self.assertEqual(torch.matmul(matrices, matrices_inverse), identity.expand_as(matrices))
+            self.assertEqual(torch.matmul(matrices_inverse, matrices), identity.expand_as(matrices))
+
+            # torch.inverse with out and batches
+            matrices = random_fullrank_matrix_distinct_singular_value(n, 3).to(device)
+            matrices_inverse = torch.empty(3, n, n, dtype=torch.float64, device=device)
+            torch.inverse(matrices, out=matrices_inverse)
+            self.assertEqual(torch.inverse(matrices), matrices_inverse)
+
+        test_inverse_helper_matrix_size(5)
+        test_inverse_helper_matrix_size(256)  # large matrix size
 
         # incorrect input test
         with self.assertRaisesRegex(RuntimeError, "must be batches of square matrices"):
             torch.inverse(torch.randn(2, 3, 4, 3))
-
-        # correctness test
-        matrices = random_fullrank_matrix_distinct_singular_value(5, 3).to(device)
-        matrices_inverse = torch.inverse(matrices)
-        self.assertEqual(torch.matmul(matrices, matrices_inverse), identity.expand_as(matrices))
-        self.assertEqual(torch.matmul(matrices_inverse, matrices), identity.expand_as(matrices))
-
-        # torch.inverse with out and batches
-        matrices = random_fullrank_matrix_distinct_singular_value(5, 3).to(device)
-        matrices_inverse = torch.empty(3, 5, 5, dtype=torch.float64, device=device)
-        torch.inverse(matrices, out=matrices_inverse)
-        self.assertEqual(torch.inverse(matrices), matrices_inverse)
 
         # non-contiguous inputs
         if not TEST_NUMPY:
@@ -7415,15 +7433,15 @@ class TestTorchDeviceType(TestCase):
     def test_inverse_many_batches(self, device):
         from torch.testing._internal.common_utils import random_fullrank_matrix_distinct_singular_value
 
-        matrices = random_fullrank_matrix_distinct_singular_value(5, 256, 256).to(device)
-        matrices_inverse = torch.inverse(matrices)
-        self.assertEqual(torch.matmul(matrices_inverse, matrices),
-                         torch.eye(5, dtype=torch.float64).to(device).expand_as(matrices))
-
-        matrices = random_fullrank_matrix_distinct_singular_value(3, 512, 512).to(device)
-        matrices_inverse = torch.inverse(matrices)
-        self.assertEqual(torch.matmul(matrices, matrices_inverse),
-                         torch.eye(3, dtype=torch.float64).to(device).expand_as(matrices))
+        def test_inverse_many_batches_helper(b, n):
+            matrices = random_fullrank_matrix_distinct_singular_value(b, n, n).to(device)
+            matrices_inverse = torch.inverse(matrices)
+            self.assertEqual(torch.matmul(matrices_inverse, matrices),
+                             torch.eye(b, dtype=torch.float64).to(device).expand_as(matrices))
+        
+        test_inverse_many_batches_helper(5, 256)
+        test_inverse_many_batches_helper(3, 512)
+        test_inverse_many_batches_helper(64, 64)
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
