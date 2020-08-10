@@ -1,5 +1,6 @@
 from __future__ import print_function
 import pytest
+import time
 import torch
 from .runner import get_nn_runners
 
@@ -24,22 +25,22 @@ def modeldef(request, net_name):
     }
     return rnn_creator(**creator_args)
 
-def cuda_sync(func, *args, **kwargs):
-    out = func(*args, **kwargs)
+def cuda_timer():
     torch.cuda.synchronize()
-    return out
+    return time.perf_counter()
 
 @pytest.mark.benchmark(
     warmup=True,
     warmup_iterations=3,
     disable_gc=True,
     max_time=0.1,
+    timer=cuda_timer if torch.has_cuda and torch.cuda.is_available() else time.perf_counter,
     group="fastrnns",
 )
 class TestBenchNetwork:
     # See 'modeldef' fixture, which provides the things to benchmark
     def test_forward(self, modeldef, benchmark):
-        forward_output = benchmark(cuda_sync, modeldef.forward, *modeldef.inputs)
+        forward_output = benchmark(modeldef.forward, *modeldef.inputs)
 
     def test_backward(self, modeldef, benchmark):
         backward_input = modeldef.forward(*modeldef.inputs)
@@ -47,7 +48,7 @@ class TestBenchNetwork:
             backward_input = modeldef.backward_setup(backward_input)
 
         if modeldef.backward is not None:
-            benchmark(cuda_sync, modeldef.backward, *backward_input, retain_graph=True)
+            benchmark(modeldef.backward, *backward_input, retain_graph=True)
 
             for param in modeldef.params:
                 assert param.grad is not None
