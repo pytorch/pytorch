@@ -3871,8 +3871,8 @@ def _pad_circular(input, padding):
         >>> print(z)
         >>> print(z.shape)  # torch.Size([1, 1, 6, 5])
     """
-    shape = input.shape
-    paddable_shape = shape[2:]
+    in_shape = input.shape
+    paddable_shape = in_shape[2:]
     ndim = len(paddable_shape)
 
     for idx, size in enumerate(paddable_shape):
@@ -3883,7 +3883,7 @@ def _pad_circular(input, padding):
         assert (padding[-(idx * 2 + 1)] + padding[-(idx * 2 + 2)] + size) >= 0
 
     # Get shape of padded array
-    out_shape = shape[:2]
+    out_shape = in_shape[:2]
     for idx, size in enumerate(paddable_shape):
         out_shape += (size + padding[-(idx * 2 + 1)] + padding[-(idx * 2 + 2)],)
 
@@ -3896,7 +3896,7 @@ def _pad_circular(input, padding):
         out_d1 = out_shape[2] - max(padding[-1], 0)
 
         in_d0 = max(-padding[-2], 0)
-        in_d1 = shape[2] - max(-padding[-1], 0)
+        in_d1 = in_shape[2] - max(-padding[-1], 0)
 
         out[..., out_d0:out_d1] = input[..., in_d0:in_d1]
     elif ndim == 2:
@@ -3907,10 +3907,10 @@ def _pad_circular(input, padding):
         out_h1 = out_shape[3] - max(padding[-3], 0)
 
         in_d0 = max(-padding[-2], 0)
-        in_d1 = shape[2] - max(-padding[-1], 0)
+        in_d1 = in_shape[2] - max(-padding[-1], 0)
 
         in_h0 = max(-padding[-4], 0)
-        in_h1 = shape[3] - max(-padding[-3], 0)
+        in_h1 = in_shape[3] - max(-padding[-3], 0)
 
         out[..., out_d0:out_d1, out_h0:out_h1] = \
             input[..., in_d0:in_d1, in_h0:in_h1]
@@ -3925,13 +3925,13 @@ def _pad_circular(input, padding):
         out_w1 = out_shape[4] - max(padding[-5], 0)
 
         in_d0 = max(-padding[-2], 0)
-        in_d1 = shape[2] - max(-padding[-1], 0)
+        in_d1 = in_shape[2] - max(-padding[-1], 0)
 
         in_h0 = max(-padding[-4], 0)
-        in_h1 = shape[3] - max(-padding[-3], 0)
+        in_h1 = in_shape[3] - max(-padding[-3], 0)
 
         in_w0 = max(-padding[-6], 0)
-        in_w1 = shape[4] - max(-padding[-5], 0)
+        in_w1 = in_shape[4] - max(-padding[-5], 0)
 
         out[..., out_d0:out_d1, out_h0:out_h1, out_w0:out_w1] = \
             input[..., in_d0:in_d1, in_h0:in_h1, in_w0:in_w1]
