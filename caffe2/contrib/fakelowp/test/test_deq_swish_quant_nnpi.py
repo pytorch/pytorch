@@ -106,7 +106,7 @@ class DeqSwishQuantTest(serial.SerializedTestCase):
 
         # run ref_net
         workspace.RunNetOnce(ref_net1)
-        Y_fbgemm = workspace.FetchBlob("Y")
+        Y_fbgemm = workspace.FetchInt8Blob("Y")
 
         # run onnxifi net
         ref_net.Proto().op[0].type = "Int8Quantize"
@@ -133,11 +133,12 @@ class DeqSwishQuantTest(serial.SerializedTestCase):
         Y_glow = workspace.FetchInt8Blob("Y")
         U_int8 = workspace.FetchInt8Blob("U_int8")
 
-        diff_Y = np.abs(Y_glow.data.astype(np.int32) -
-                        Y_fbgemm.data)
+        diff_Y = np.abs(Y_glow.data - Y_fbgemm.data)
+
         num_mismatches = np.count_nonzero(diff_Y)
         max_diff = np.max(diff_Y)
-        if max_diff > 0:
+        if max_diff > 0 or Y_glow.scale != Y_fbgemm.scale or \
+           Y_glow.zero_point != Y_fbgemm.zero_point:
             print_test_debug_info(
                 "QuantizedSwish",
                 {
