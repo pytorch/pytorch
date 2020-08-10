@@ -193,6 +193,19 @@ struct TORCH_API Operator {
   c10::either<C10Operator, JitOnlyOperator> op_;
 };
 
+//#ifdef C10_MOBILE
+TORCH_API c10::optional<Operator> operatorGenerator(
+    std::string schema,
+    Operation op,
+    c10::AliasAnalysisKind alias_analysis);
+
+TORCH_API c10::optional<Operator> operatorGenerator(
+    std::string schema,
+    std::function<int(Stack&)> op,
+    c10::AliasAnalysisKind alias_analysis);
+
+//#endif
+
 TORCH_API std::string canonicalSchemaString(const FunctionSchema& schema);
 
 TORCH_API const std::vector<std::shared_ptr<Operator>> getAllOperators();
