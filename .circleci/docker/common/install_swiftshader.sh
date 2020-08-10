@@ -39,9 +39,6 @@ popd
 
 pushd "$_swiftshader_dir/build"
 
-#  -DCMAKE_AR=/usr/bin/llvm-ar-9 \
-#  -DCMAKE_RANLIB=/usr/bin/llvm-ranlib-9 \
-#  -DCMAKE_LINKER=/usr/bin/llvm-link-9 \
 #  -DSWIFTSHADER_LESS_DEBUG_INFO=1 \
 
 $_cmake_bin_path \
@@ -55,6 +52,9 @@ $_cmake_bin_path \
   -DSWIFTSHADER_BUILD_PVR=0 \
   -DSWIFTSHADER_BUILD_TESTS=1 \
   -DSWIFTSHADER_WARNINGS_AS_ERRORS=1 \
+  -DCMAKE_AR=/usr/bin/llvm-ar-9 \
+  -DCMAKE_RANLIB=/usr/bin/llvm-ranlib-9 \
+  -DCMAKE_LINKER=/usr/bin/llvm-link-9 \
   ..
 
 make SHELL='sh -x' VERBOSE=1 AM_DEFAULT_VERBOSITY=1 --debug=j --jobs=8
