@@ -59,7 +59,7 @@ VK_DELETER_NON_DISPATCHABLE_DECLARE(CommandPool);
 // are only required by the spec to weakly aliases 64-bit integers which is the
 // implementation some platforms default to.  This makes the use of std::unique_ptr
 // difficult since semantically unique_ptrs store pointers to their payload
-// which is also what passed onto the custom deleters.
+// which is also what is passed onto the custom deleters.
 
 template<typename Type, typename Deleter>
 class Handle final {
