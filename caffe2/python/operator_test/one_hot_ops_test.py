@@ -5,7 +5,7 @@ from __future__ import unicode_literals
 
 from caffe2.python import core, workspace
 from caffe2.proto import caffe2_pb2
-from hypothesis import given
+from hypothesis import given, settings
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
 import hypothesis.strategies as st
@@ -57,12 +57,13 @@ class TestOneHotOps(serial.SerializedTestCase):
         op = core.CreateOperator('BatchOneHot', ["X", "LENS", "VALS"], ["Y"])
         self.assertReferenceChecks(gc, op, [x, lens, vals], ref)
 
-    @serial.given(
+    @given(
         x=hu.tensor(
             min_dim=2, max_dim=2, dtype=np.float32,
             elements=st.integers(min_value=-5, max_value=5)),
         seed=st.integers(min_value=0, max_value=1000),
         **hu.gcs_cpu_only)
+    @settings(deadline=1000)
     def test_batch_bucketized_one_hot(self, x, seed, gc, dc):
         np.random.seed(seed)
         d = x.shape[1]
