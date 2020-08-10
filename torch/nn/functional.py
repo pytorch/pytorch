@@ -3882,7 +3882,7 @@ def _pad_circular(input, padding):
         # Negative padding should not result in negative sizes
         assert (padding[-(idx * 2 + 1)] + padding[-(idx * 2 + 2)] + size) >= 0
 
-    # Get shape of padded array
+    # Get shape of padded tensor
     out_shape = in_shape[:2]
     for idx, size in enumerate(paddable_shape):
         out_shape += (size + padding[-(idx * 2 + 1)] + padding[-(idx * 2 + 2)],)
@@ -3890,7 +3890,7 @@ def _pad_circular(input, padding):
     out = torch.empty(out_shape, dtype=input.dtype, layout=input.layout,
                       device=input.device)
 
-    # Put original array in padded array
+    # Put original tensor in padded tensor
 
     def calc_indices(in_size, out_size, padding):
         """Calculates indices for placing original tensor into new tensor.
