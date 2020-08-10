@@ -63,7 +63,8 @@ C10_API void _force_tls_local_dispatch_key_set(LocalDispatchKeySet key_set);
 
 class C10_API IncludeDispatchKeyGuard {
 public:
-  IncludeDispatchKeyGuard(DispatchKey);
+  IncludeDispatchKeyGuard(DispatchKeySet);
+  IncludeDispatchKeyGuard(DispatchKey k) : IncludeDispatchKeyGuard(DispatchKeySet(k)) {}
   IncludeDispatchKeyGuard(const IncludeDispatchKeyGuard&) = delete;
   IncludeDispatchKeyGuard operator=(const IncludeDispatchKeyGuard&) = delete;
   IncludeDispatchKeyGuard(IncludeDispatchKeyGuard&&) = delete;
@@ -73,34 +74,18 @@ private:
   // A little micro-optimization to save us from tls_get_addr call
   // on destruction
   PODLocalDispatchKeySet* tls_;
-  DispatchKey id_;
-  bool prev_state_;
+  DispatchKeySet include_;
 };
 
 class C10_API ExcludeDispatchKeyGuard {
 public:
-  ExcludeDispatchKeyGuard(DispatchKey);
+  ExcludeDispatchKeyGuard(DispatchKeySet);
+  ExcludeDispatchKeyGuard(DispatchKey k) : ExcludeDispatchKeyGuard(DispatchKeySet(k)) {}
   ExcludeDispatchKeyGuard(const ExcludeDispatchKeyGuard&) = delete;
   ExcludeDispatchKeyGuard operator=(const ExcludeDispatchKeyGuard&) = delete;
   ExcludeDispatchKeyGuard(ExcludeDispatchKeyGuard&&) = delete;
   ExcludeDispatchKeyGuard operator=(ExcludeDispatchKeyGuard&&) = delete;
   ~ExcludeDispatchKeyGuard();
-private:
-  // A little micro-optimization to save us from tls_get_addr call
-  // on destruction
-  PODLocalDispatchKeySet* tls_;
-  DispatchKey id_;
-  bool prev_state_;
-};
-
-class C10_API ExcludeDispatchKeySetGuard {
-public:
-  ExcludeDispatchKeySetGuard(DispatchKeySet);
-  ExcludeDispatchKeySetGuard(const ExcludeDispatchKeySetGuard&) = delete;
-  ExcludeDispatchKeySetGuard operator=(const ExcludeDispatchKeySetGuard&) = delete;
-  ExcludeDispatchKeySetGuard(ExcludeDispatchKeySetGuard&&) = delete;
-  ExcludeDispatchKeySetGuard operator=(ExcludeDispatchKeySetGuard&&) = delete;
-  ~ExcludeDispatchKeySetGuard();
 private:
   // A little micro-optimization to save us from tls_get_addr call
   // on destruction
