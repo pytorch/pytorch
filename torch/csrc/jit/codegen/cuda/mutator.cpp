@@ -80,27 +80,7 @@ Statement* OptOutMutator::mutate(TensorView* tv) {
 }
 
 Statement* OptOutMutator::mutate(kir::TensorIndex* ti) {
-  std::vector<Statement*> inds;
-  for (auto* ind : ti->indices())
-    inds.push_back(mutateAsVal(ind));
-
-  bool changed = false;
-  for (decltype(inds.size()) i{0}; i < inds.size(); i++) {
-    TORCH_INTERNAL_ASSERT(inds[i]->isVal() && inds[i]->asVal()->isAnInt());
-    if (!inds[i]->sameAs(ti->index(i)))
-      changed = true;
-  }
-
-  if (!changed)
-    return ti;
-
-  std::vector<Val*> valInds(inds.size(), nullptr);
-  for (decltype(inds.size()) i{0}; i < inds.size(); i++)
-    valInds[i] = inds[i]->asVal();
-
-  Val* mutated_val = new kir::TensorIndex(ti->view(), valInds);
-  registerMutation(ti, mutated_val);
-  return mutated_val;
+  return ti;
 }
 
 Statement* OptOutMutator::mutate(Bool* b) {
@@ -221,44 +201,10 @@ Statement* OptOutMutator::mutate(kir::GridReduction* gr) {
 }
 
 Statement* OptOutMutator::mutate(BroadcastOp* bop) {
-  Val* out = mutateAsVal(bop->out())->asVal();
-  Val* in = mutateAsVal(bop->in())->asVal();
-  if (out->sameAs(bop->out()) && in->sameAs(bop->in()))
-    return bop;
-
-  TORCH_INTERNAL_ASSERT(
-      out->getValType().value() == ValType::TensorView &&
-      in->getValType().value() == ValType::TensorView)
-  return new BroadcastOp(out->as<TensorView>(), in->as<TensorView>());
+  return bop;
 }
 
 Statement* OptOutMutator::mutate(kir::ForLoop* fl) {
-  Val* index = mutateAsVal(fl->index())->asVal();
-  Val* val_id = mutateAsVal(fl->iter_domain())->asVal();
-
-  TORCH_INTERNAL_ASSERT(val_id->getValType() == ValType::IterDomain);
-  IterDomain* id = val_id->as<IterDomain>();
-
-  bool is_mutated = !index->sameAs(fl->index());
-  is_mutated = is_mutated | !id->sameAs(fl->iter_domain());
-
-  std::vector<Expr*> mutated_exprs;
-  for (auto expr : fl->body().exprs()) {
-    Statement* mutated_stmt = mutate(expr);
-    TORCH_INTERNAL_ASSERT(
-        mutated_stmt->isExpr(),
-        "While mutating a for loop, received a non-expression for a body entry.");
-    Expr* mutated_expr = mutated_stmt->as<Expr>();
-    mutated_exprs.push_back(mutated_expr);
-    // could use sameAs here, but we'd have to check the output value separately
-    is_mutated = is_mutated | (mutated_expr != expr);
-  }
-
-  if (is_mutated) {
-    auto newFL = new kir::ForLoop(index, id, mutated_exprs, fl->parentScope());
-    return newFL;
-  }
-
   return fl;
 }
 

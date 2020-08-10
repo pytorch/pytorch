@@ -34,12 +34,11 @@ namespace fuser {
 
 class PredicateCompute {
  public:
-  // Return if there are any predicates
-  static bool hasPredicates(const kir::TensorIndex*);
-
   // Return the series of predicates, if an axis doesn't have a predicate
   // reutrns 1
-  static std::vector<kir::Bool*> computePredicates(const kir::TensorIndex*);
+  static std::vector<kir::Bool*> computePredicates(
+      const TensorView* tv,
+      const std::vector<Val*>& indices);
 };
 
 } // namespace fuser

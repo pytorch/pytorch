@@ -150,6 +150,82 @@ void ExpressionEvaluator::handle(BinaryOp* bop) {
   }
 }
 
+void ExpressionEvaluator::handle(kir::NamedScalar* i) {
+  if (i->isAnInt()) {
+    const auto& bound_value = context_->concreteValue(i);
+    if (bound_value.has_value()) {
+      values_[i] = *bound_value;
+    }
+  }
+}
+
+void ExpressionEvaluator::handle(kir::Int* i) {
+  if (i->value().has_value()) {
+    values_[i] = *i->value();
+  } else if (const auto* def = context_->fusion()->origin(i)) {
+    const auto& def_result = value(def);
+    if (def_result.has_value()) {
+      values_[i] = *def_result;
+    }
+  } else {
+    const auto& bound_value = context_->concreteValue(i);
+    if (bound_value.has_value()) {
+      values_[i] = *bound_value;
+    }
+  }
+}
+
+void ExpressionEvaluator::handle(kir::UnaryOp* uop) {
+  const auto in = value(uop->in());
+  if (in.has_value()) {
+    switch (uop->getUnaryOpType()) {
+      case UnaryOpType::Neg:
+        values_[uop] = -*in;
+        break;
+      case UnaryOpType::Cast:
+        values_[uop] = *in;
+        break;
+      default:
+        TORCH_CHECK(!"Unexpected operator type");
+    }
+  }
+}
+
+void ExpressionEvaluator::handle(kir::BinaryOp* bop) {
+  const auto lhs = value(bop->lhs());
+  const auto rhs = value(bop->rhs());
+  if (lhs.has_value() && rhs.has_value()) {
+    switch (bop->getBinaryOpType()) {
+      case BinaryOpType::Add:
+        values_[bop] = *lhs + *rhs;
+        break;
+      case BinaryOpType::Sub:
+        values_[bop] = *lhs - *rhs;
+        break;
+      case BinaryOpType::Mul:
+        values_[bop] = *lhs * *rhs;
+        break;
+      case BinaryOpType::Div:
+        TORCH_CHECK(*rhs != 0);
+        values_[bop] = *lhs / *rhs;
+        break;
+      case BinaryOpType::Mod:
+        TORCH_CHECK(*rhs != 0);
+        values_[bop] = *lhs % *rhs;
+        break;
+      case BinaryOpType::CeilDiv:
+        TORCH_CHECK(*rhs != 0);
+        values_[bop] = (*lhs + *rhs - 1) / *rhs;
+        break;
+      case BinaryOpType::And:
+        values_[bop] = Int::ScalarType(*lhs && *rhs);
+        break;
+      default:
+        TORCH_CHECK(!"Unexpected operator type");
+    }
+  }
+}
+
 } // namespace fuser
 } // namespace jit
 } // namespace torch

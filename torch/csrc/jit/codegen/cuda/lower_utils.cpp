@@ -338,14 +338,15 @@ Expr* getParent(Expr* scope) {
 
 // Open a new inner most for loop
 kir::ForLoop* openFor(Expr* scope, IterDomain* id) {
+  const auto kir_id = new kir::IterDomain(id);
   kir::ForLoop* new_scope = nullptr;
   if (id->isThread()) {
     std::stringstream ss;
     ss << id->getParallelType();
     new_scope = new kir::ForLoop(
-        new NamedScalar(ss.str(), DataType::Int), id, {}, scope);
+        new kir::NamedScalar(ss.str(), DataType::Int), kir_id, {}, scope);
   } else {
-    new_scope = new kir::ForLoop(new Int(), id, {}, scope);
+    new_scope = new kir::ForLoop(new kir::Int(c10::nullopt), kir_id, {}, scope);
   }
   if (scope != nullptr)
     pushBack(scope, new_scope);
@@ -396,14 +397,6 @@ std::vector<Val*> indices(std::vector<kir::ForLoop*> loops) {
         return fl->index();
       });
   return inds;
-}
-
-std::vector<IterDomain*> iterDomains(std::vector<kir::ForLoop*> loops) {
-  std::vector<IterDomain*> ids(loops.size());
-  std::transform(loops.begin(), loops.end(), ids.begin(), [](kir::ForLoop* fl) {
-    return fl->iter_domain();
-  });
-  return ids;
 }
 
 bool isTV(const Val* val) {
@@ -587,7 +580,7 @@ ParallelTypeBitmap getParallelBroadcastDomains(
     const Val* bop_out,
     const ThreadPredicateMap& preds) {
   if (bop_out->getValType().value() == ValType::TensorIndex) {
-    bop_out = bop_out->as<kir::TensorIndex>()->view();
+    bop_out = bop_out->as<kir::TensorIndex>()->view()->fuserTv();
   }
   TORCH_INTERNAL_ASSERT(
       bop_out->getValType().value() == ValType::TensorView,

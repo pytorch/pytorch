@@ -15,13 +15,13 @@ Val* newScalar(ValType vtype, DataType dtype) {
     case (ValType::NamedScalar):
     case (ValType::Scalar):
       switch (dtype) {
-        case (DataType::Bool):
+        case DataType::Bool:
           return new Bool();
-        case (DataType::Float):
+        case DataType::Float:
           return new Float();
-        case (DataType::Half):
+        case DataType::Half:
           return new Half();
-        case (DataType::Int):
+        case DataType::Int:
           return new Int();
         default:
           break;

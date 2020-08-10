@@ -223,18 +223,12 @@ class TORCH_CUDA_API TernaryOp : public Expr {
   Val* const in3_ = nullptr;
 };
 
-/*
- * Simply a representation of an annotated 1D iterable from start to extent.
- * TensorDomains which represent how to iterate over a tensor is made up of
- * IterDomains to form an ND iterable. We directly set parallization strategies
- * on IterDomains.
- */
+// Simply a representation of an annotated 1D iterable from start to extent.
+// TensorDomains which represent how to iterate over a tensor is made up of
+// IterDomains to form an ND iterable. We directly set parallization strategies
+// on IterDomains.
 class TORCH_CUDA_API IterDomain : public Val {
  public:
-  ~IterDomain() = default;
-
-  IterDomain() = delete;
-
   IterDomain(
       Val* _start,
       Val* _extent,

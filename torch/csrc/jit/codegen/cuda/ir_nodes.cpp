@@ -2,6 +2,7 @@
 #include <torch/csrc/jit/codegen/cuda/ir_cloner.h>
 #include <torch/csrc/jit/codegen/cuda/ir_interface_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
+#include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
 #include <torch/csrc/jit/codegen/cuda/transform_iter.h>
 #include <torch/csrc/jit/codegen/cuda/transform_rfactor.h>
 
@@ -305,6 +306,8 @@ IterDomain::IterDomain(
       _extent,
       " .");
 
+  // TORCH_INTERNAL_ASSERT(!kir::isLoweredVal(_extent));
+
   name_ = fusion_->registerVal(this);
 }
 
@@ -418,6 +421,7 @@ std::pair<IterDomain*, IterDomain*> IterDomain::split(
   return {ido, idi};
 }
 
+// TODO(kir): review if this is still needed in the Fusion IR
 Val* IterDomain::extent() const {
   if (isThread()) {
     if (extent_->getValType() == ValType::Scalar)

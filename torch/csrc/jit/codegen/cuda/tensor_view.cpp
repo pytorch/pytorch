@@ -504,6 +504,19 @@ TensorView* TensorView::cache_after() {
   return consumer;
 }
 
+void TensorView::setMemoryType(MemoryType mt) {
+  memory_type_ = mt;
+  if (fusion()->hasInput(this) || fusion()->hasOutput(this)) {
+    TORCH_INTERNAL_ASSERT(
+        mt == MemoryType::Global,
+        "Tried to set an input or output to the fusion to a non-global memory type.");
+  } else {
+    TORCH_INTERNAL_ASSERT(
+        mt != MemoryType::Global,
+        "Tried to set an intermediate tensor in the fusion to the global memory type.");
+  }
+}
+
 namespace {
 
 // Create New Expr given consumer - [output of the expression]

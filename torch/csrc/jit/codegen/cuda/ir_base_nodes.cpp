@@ -42,14 +42,51 @@ void Statement::print() const {
 }
 
 // When we create a Val we immediately register them with the active fusion.
-Val::Val(ValType _vtype, DataType _dtype, bool register_val)
-    : vtype_{_vtype}, dtype_{_dtype} {
+Val::Val(ValType _vtype, DataType _dtype, bool register_val, bool lowered)
+    : vtype_(_vtype), dtype_(_dtype) {
   Fusion* fusion = FusionGuard::getCurFusion();
   TORCH_CHECK(
       fusion != nullptr, "No active fusion group found when creating a Val.");
   fusion_ = fusion;
-  if (register_val)
-    name_ = fusion_->registerVal(this);
+  if (register_val) {
+    if (lowered) {
+      name_ = fusion_->registerLoweredVal(this);
+    } else {
+      name_ = fusion_->registerVal(this);
+    }
+  }
+}
+
+namespace {
+
+// TODO(kir): remove this
+ValType lowerValType(ValType vtype) {
+  switch (vtype) {
+    case ValType::Scalar:
+      return ValType::KirScalar;
+    case ValType::NamedScalar:
+      return ValType::KirNamedScalar;
+    case ValType::TensorDomain:
+      return ValType::KirTensorDomain;
+    case ValType::IterDomain:
+      return ValType::KirIterDomain;
+    case ValType::TensorView:
+      return ValType::KirTensorView;
+    default:
+      TORCH_CHECK(false, "Unexpected");
+  }
+}
+
+} // namespace
+
+// TODO(kir): remove this
+Val::Val(const Val* fusion_ir_node)
+    : vtype_(lowerValType(fusion_ir_node->vtype_)),
+      dtype_(fusion_ir_node->dtype_) {
+  // The lowered nodes preserve the names from the fusion IR counterparts
+  name_ = fusion_ir_node->name_;
+  fusion_ = fusion_ir_node->fusion_;
+  fusion_->registerLoweredVal(this);
 }
 
 Val::Val(const Val* src, IrCloner* ir_cloner)

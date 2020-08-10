@@ -61,7 +61,7 @@ Expr* LoopNestGenerator::pushAlloc(TensorView* tv) {
   // to get the total size
   Val* size = nullptr;
   if (alloc_dims.size() == 0) {
-    size = new Int(1);
+    size = new kir::Int(1);
   } else {
     size = alloc_dims[0];
     for (size_t i = 1; i < alloc_dims.size(); i++) {
@@ -150,12 +150,12 @@ void LoopNestGenerator::initReduction(
   // dimensions. Everything else will be iterated over to cover the entire
   // buffer. Index compute will ignore [block, grid]Dims depending on buffer
   // memory location
-  std::vector<IterDomain*> ids;
+  std::vector<kir::IterDomain*> ids;
   for (auto i = alloc_pos; i < tv->nDims(); i++) {
     IterDomain* dim = tv->getComputeAtAxis(i).first;
     if (dim->isReduction())
       continue;
-    ids.push_back(dim);
+    ids.push_back(new kir::IterDomain(dim));
   }
 
   // Unsafe clone, as we want an exact replica of tv so we can create a UnaryOp
@@ -186,10 +186,10 @@ void LoopNestGenerator::initReduction(
       std::stringstream ss;
       ss << id->getParallelType();
       new_fl = new kir::ForLoop(
-          new NamedScalar(ss.str(), DataType::Int), id, {}, inner_fl);
+          new kir::NamedScalar(ss.str(), DataType::Int), id, {}, inner_fl);
     } else {
       // Otherwise it's just a new int-
-      new_fl = new kir::ForLoop(new Int(), id, {}, inner_fl);
+      new_fl = new kir::ForLoop(new kir::Int(c10::nullopt), id, {}, inner_fl);
     }
 
     if (init_loop_nest == nullptr) {
@@ -264,7 +264,7 @@ void LoopNestGenerator::handle(Expr* expr) {
           " cannot lower ",
           out->getValType().value());
 
-      pushBack(new kir::Allocate(out, MemoryType::Local, new Int(1)));
+      pushBack(new kir::Allocate(out, MemoryType::Local, new kir::Int(1)));
     }
     pushBack(expr);
     return;

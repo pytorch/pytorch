@@ -98,6 +98,15 @@ void Val::dispatch(T handler, Val* val) {
     case ValType::KirNamedScalar:
       ptr(handler)->handle(val->as<kir::NamedScalar>());
       return;
+    case ValType::KirIterDomain:
+      ptr(handler)->handle(val->as<kir::IterDomain>());
+      return;
+    case ValType::KirTensorDomain:
+      ptr(handler)->handle(val->as<kir::TensorDomain>());
+      return;
+    case ValType::KirTensorView:
+      ptr(handler)->handle(val->as<kir::TensorView>());
+      return;
 
     default:
       break;
@@ -235,6 +244,15 @@ void Val::constDispatch(T handler, const Val* val) {
       break;
     case ValType::KirNamedScalar:
       ptr(handler)->handle(val->as<kir::NamedScalar>());
+      return;
+    case ValType::KirIterDomain:
+      ptr(handler)->handle(val->as<kir::IterDomain>());
+      return;
+    case ValType::KirTensorDomain:
+      ptr(handler)->handle(val->as<kir::TensorDomain>());
+      return;
+    case ValType::KirTensorView:
+      ptr(handler)->handle(val->as<kir::TensorView>());
       return;
 
     default:

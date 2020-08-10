@@ -134,6 +134,18 @@ void IrCloner::handle(const kir::NamedScalar* node) {
   clone_ = new kir::NamedScalar(node, this);
 }
 
+void IrCloner::handle(const kir::IterDomain* node) {
+  clone_ = new kir::IterDomain(node, this);
+}
+
+void IrCloner::handle(const kir::TensorDomain* node) {
+  clone_ = new kir::TensorDomain(node, this);
+}
+
+void IrCloner::handle(const kir::TensorView* node) {
+  clone_ = new kir::TensorView(node, this);
+}
+
 void IrCloner::handle(const kir::UnaryOp* node) {
   clone_ = new kir::UnaryOp(node, this);
 }

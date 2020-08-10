@@ -9,6 +9,28 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
+Val* IndexLowering::lowerOperand(Val* op, Val* out) const {
+  if (ir_utils::isTV(op)) {
+    return Index::getProducerIndex(
+        ir_utils::asTV(op),
+        ir_utils::asTV(out),
+        scope_utils::getLoops(active_scope_expr));
+  } else {
+    return kir::lowerValue(op);
+  }
+}
+
+Val* IndexLowering::lowerOutput(Expr* expr) const {
+  TORCH_CHECK(expr->outputs().size() == 1);
+  const auto out = expr->output(0);
+  if (ir_utils::isTVOp(expr)) {
+    return Index::getConsumerIndex(
+        ir_utils::asTV(out), scope_utils::getLoops(active_scope_expr));
+  } else {
+    return kir::lowerValue(out);
+  }
+}
+
 void IndexLowering::pushBack(Expr* expr) {
   if (active_scope == nullptr)
     lowered_exprs.push_back(expr);
@@ -59,79 +81,41 @@ void IndexLowering::handle(kir::ForLoop* fl) {
 }
 
 void IndexLowering::handle(UnaryOp* uop) {
+  // TODO(kir): lower this expression
   if (!ir_utils::isTVOp(uop)) {
     pushBack(uop);
     return;
   }
 
-  kir::TensorIndex* out = Index::getConsumerIndex(
-      ir_utils::asTV(uop->out()), scope_utils::getLoops(active_scope_expr));
-  Val* in = uop->in();
-  if (ir_utils::isTV(in))
-    in = Index::getProducerIndex(
-        ir_utils::asTV(in),
-        ir_utils::asTV(uop->out()),
-        scope_utils::getLoops(active_scope_expr));
-  pushBack(new UnaryOp(uop->getUnaryOpType(), out, in));
+  const auto in = lowerOperand(uop->in(), uop->out());
+  const auto out = lowerOutput(uop);
+  pushBack(new kir::UnaryOp(uop->getUnaryOpType(), out, in));
 }
 
 void IndexLowering::handle(BinaryOp* bop) {
+  // TODO(kir): lower this expression
   if (!ir_utils::isTVOp(bop)) {
     pushBack(bop);
     return;
   }
 
-  kir::TensorIndex* out = Index::getConsumerIndex(
-      ir_utils::asTV(bop->out()), scope_utils::getLoops(active_scope_expr));
-
-  Val* lhs = bop->lhs();
-  Val* rhs = bop->rhs();
-
-  if (ir_utils::isTV(lhs))
-    lhs = Index::getProducerIndex(
-        ir_utils::asTV(lhs),
-        ir_utils::asTV(bop->out()),
-        scope_utils::getLoops(active_scope_expr));
-
-  if (ir_utils::isTV(rhs))
-    rhs = Index::getProducerIndex(
-        ir_utils::asTV(rhs),
-        ir_utils::asTV(bop->out()),
-        scope_utils::getLoops(active_scope_expr));
-
-  pushBack(new BinaryOp(bop->getBinaryOpType(), out, lhs, rhs));
+  const auto lhs = lowerOperand(bop->lhs(), bop->out());
+  const auto rhs = lowerOperand(bop->rhs(), bop->out());
+  const auto out = lowerOutput(bop);
+  pushBack(new kir::BinaryOp(bop->getBinaryOpType(), out, lhs, rhs));
 }
 
 void IndexLowering::handle(TernaryOp* top) {
+  // TODO(kir): lower this expression
   if (!ir_utils::isTVOp(top)) {
     pushBack(top);
     return;
   }
 
-  kir::TensorIndex* out = Index::getConsumerIndex(
-      ir_utils::asTV(top->out()), scope_utils::getLoops(active_scope_expr));
-  Val* in1 = top->in1();
-  Val* in2 = top->in2();
-  Val* in3 = top->in3();
-
-  if (ir_utils::isTV(in1))
-    in1 = Index::getProducerIndex(
-        ir_utils::asTV(in1),
-        ir_utils::asTV(top->out()),
-        scope_utils::getLoops(active_scope_expr));
-
-  if (ir_utils::isTV(in2))
-    in2 = Index::getProducerIndex(
-        ir_utils::asTV(in2),
-        ir_utils::asTV(top->out()),
-        scope_utils::getLoops(active_scope_expr));
-
-  if (ir_utils::isTV(in3))
-    in3 = Index::getProducerIndex(
-        ir_utils::asTV(in3),
-        ir_utils::asTV(top->out()),
-        scope_utils::getLoops(active_scope_expr));
-
+  const auto in1 = lowerOperand(top->in1(), top->out());
+  const auto in2 = lowerOperand(top->in2(), top->out());
+  const auto in3 = lowerOperand(top->in3(), top->out());
+  const auto out = lowerOutput(top);
   pushBack(new TernaryOp(top->getTernaryOpType(), out, in1, in2, in3));
 }
 
@@ -186,14 +170,13 @@ void IndexLowering::handle(ReductionOp* rop) {
   auto loops = scope_utils::getLoops(active_scope_expr);
 
   kir::TensorIndex* out = Index::getConsumerIndex(out_tv, loops);
-  Val* in = rop->in();
-  in = Index::getProducerIndex(
-      ir_utils::asTV(in), ir_utils::asTV(rop->out()), loops);
+  Val* in = Index::getProducerIndex(
+      ir_utils::asTV(rop->in()), ir_utils::asTV(rop->out()), loops);
 
   kir::ReductionOp* block_reduction = nullptr;
   if (is_block_reduce) {
-    block_reduction =
-        new kir::ReductionOp(rop->getReductionOpType(), rop->init(), out, in);
+    block_reduction = new kir::ReductionOp(
+        rop->getReductionOpType(), kir::lowerValue(rop->init()), out, in);
     pushBack(block_reduction);
   }
 
@@ -213,7 +196,7 @@ void IndexLowering::handle(ReductionOp* rop) {
         buffer_ids.end());
 
     Val* buffer_size =
-        buffer_ids.empty() ? new Int(1) : buffer_ids[0]->rawExtent();
+        buffer_ids.empty() ? new kir::Int(1) : buffer_ids[0]->rawExtent();
     for (size_t i = 1; i < buffer_ids.size(); i++) {
       buffer_size = mul(buffer_size, buffer_ids[i]->rawExtent());
     }
@@ -228,16 +211,17 @@ void IndexLowering::handle(ReductionOp* rop) {
             }),
         sync_ids.end());
 
-    Val* sync_size = sync_ids.empty() ? new Int(1) : sync_ids[0]->rawExtent();
+    Val* sync_size =
+        sync_ids.empty() ? new kir::Int(1) : sync_ids[0]->rawExtent();
     for (size_t i = 1; i < sync_ids.size(); i++) {
       sync_size = mul(sync_size, sync_ids[i]->rawExtent());
     }
 
-    IterDomain* buffer_id = new IterDomain(new Int(0), buffer_size);
+    IterDomain* buffer_id = new IterDomain(new kir::Int(0), buffer_size);
     TensorView* reduce_buffer_tv = new TensorView(
         new TensorDomain({buffer_id}), out->getDataType().value());
 
-    IterDomain* sync_id = new IterDomain(new Int(0), sync_size);
+    IterDomain* sync_id = new IterDomain(new kir::Int(0), sync_size);
     TensorView* reduce_sync_tv =
         new TensorView(new TensorDomain({sync_id}), DataType::Int);
 
@@ -248,10 +232,12 @@ void IndexLowering::handle(ReductionOp* rop) {
     pushBack(reduce_buffer);
     pushBack(sync_buffer);
     pushBack(new kir::GridReduction(
-        block_reduction == nullptr
-            ? new kir::ReductionOp(
-                  rop->getReductionOpType(), rop->init(), out, in)
-            : block_reduction,
+        block_reduction == nullptr ? new kir::ReductionOp(
+                                         rop->getReductionOpType(),
+                                         kir::lowerValue(rop->init()),
+                                         out,
+                                         in)
+                                   : block_reduction,
         reduce_buffer,
         sync_buffer));
   }

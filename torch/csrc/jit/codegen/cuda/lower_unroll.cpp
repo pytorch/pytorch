@@ -113,7 +113,7 @@ kir::Bool* getPredicate(
       for (size_t ind_i = 0, consumer_tv_i = 0;
            consumer_tv_i < consumer_tv->nDims();) {
         if (consumer_tv->axis(consumer_tv_i++)->isReduction()) {
-          inds.push_back(new Int(0));
+          inds.push_back(new kir::Int(0));
         } else {
           TORCH_INTERNAL_ASSERT(
               ind_i < inds_.size(),
@@ -127,9 +127,9 @@ kir::Bool* getPredicate(
 
     // Compute indices based on consumer_tv and all contiguity information
     // combined
-    all_preds = PredicateCompute::computePredicates(new kir::TensorIndex(
+    all_preds = PredicateCompute::computePredicates(
         consumer_tv,
-        IndexCompute::get(consumer_tv->domain(), inds, overall_contiguity)));
+        IndexCompute::get(consumer_tv->domain(), inds, overall_contiguity));
   }
 
   // If we have thread predicates, add those
@@ -211,11 +211,11 @@ void UnrollPass::handle(kir::ForLoop* fl) {
 
     // Indicies inside the unroll
     while (it != for_loops.end()) {
-      IterDomain* id = (*it)->iter_domain();
+      kir::IterDomain* id = (*it)->iter_domain();
       if (id->isThread())
         unroll_pred_inds.push_back((*it)->index());
       else
-        unroll_pred_inds.push_back(sub(id->extent(), new Int(1)));
+        unroll_pred_inds.push_back(kir::subExpr(id->extent(), new kir::Int(1)));
       it++;
     }
 

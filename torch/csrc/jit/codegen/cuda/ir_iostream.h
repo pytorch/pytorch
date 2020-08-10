@@ -40,12 +40,28 @@ class BroadcastOp;
 // Kernel IR
 namespace kir {
 
+class Bool;
+class Float;
+class Half;
+class Int;
+class NamedScalar;
+
+class IterDomain;
+class TensorDomain;
+class TensorView;
+
+class UnaryOp;
+class BinaryOp;
+class TernaryOp;
+class ReductionOp;
+class BroadcastOp;
+
 class TensorIndex;
 class Allocate;
-class Sync;
 class ForLoop;
 class IfThenElse;
 class GridReduction;
+class Sync;
 
 } // namespace kir
 
@@ -124,6 +140,10 @@ class TORCH_CUDA_API IRPrinter : public OptInConstDispatch {
   void handle(const kir::Half*) override;
   void handle(const kir::Int*) override;
   void handle(const kir::NamedScalar*) override;
+
+  void handle(const kir::IterDomain*) override;
+  void handle(const kir::TensorDomain*) override;
+  void handle(const kir::TensorView*) override;
 
   void handle(const kir::UnaryOp*) override;
   void handle(const kir::BinaryOp*) override;

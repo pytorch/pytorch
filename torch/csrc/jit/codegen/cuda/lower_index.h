@@ -43,6 +43,10 @@ class TORCH_CUDA_API IndexLowering : public OptInDispatch {
 
   void generate(const std::vector<Expr*>& exprs);
 
+  Val* lowerOperand(Val* op, Val* out) const;
+  Val* lowerOutput(Expr* expr) const;
+
+ private:
   std::vector<Expr*> lowered_exprs;
 
   // This is a slight work around as scope has a couple definitions, we have the

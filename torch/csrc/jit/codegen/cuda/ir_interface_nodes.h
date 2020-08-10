@@ -329,18 +329,7 @@ class TORCH_CUDA_API TensorView : public Val {
     return memory_type_;
   }
 
-  void setMemoryType(MemoryType mt) {
-    memory_type_ = mt;
-    if (fusion()->hasInput(this) || fusion()->hasOutput(this)) {
-      TORCH_INTERNAL_ASSERT(
-          mt == MemoryType::Global,
-          "Tried to set an input or output to the fusion to a non-global memory type.");
-    } else {
-      TORCH_INTERNAL_ASSERT(
-          mt != MemoryType::Global,
-          "Tried to set an intermediate tensor in the fusion to the global memory type.");
-    }
-  }
+  void setMemoryType(MemoryType mt);
 
   friend TORCH_CUDA_API TransformReplay;
   friend TORCH_CUDA_API OptOutMutator;

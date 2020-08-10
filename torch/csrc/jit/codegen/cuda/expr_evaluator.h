@@ -66,6 +66,12 @@ class TORCH_CUDA_API ExpressionEvaluator : private IterVisitor {
   void handle(UnaryOp*) override;
   void handle(BinaryOp*) override;
 
+  // TODO(kir): remove this
+  void handle(kir::NamedScalar*) override;
+  void handle(kir::Int*) override;
+  void handle(kir::UnaryOp*) override;
+  void handle(kir::BinaryOp*) override;
+
  private:
   const EvaluationContext* context_ = nullptr;
   std::unordered_map<const Statement*, Int::ScalarType> values_;

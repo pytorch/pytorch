@@ -199,7 +199,11 @@ class TORCH_CUDA_API Val : public Statement {
   explicit Val(
       ValType _vtype,
       DataType _dtype = DataType::Null,
-      bool register_val = true);
+      bool register_val = true,
+      bool lowered = false);
+
+  // Lowers an existing Fusion IR node into a Kernel IR counterpart
+  explicit Val(const Val* fusion_ir_node);
 
   Val(const Val* src, IrCloner* ir_cloner);
 

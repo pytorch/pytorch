@@ -25,6 +25,9 @@ enum class ValType {
   TensorIndex,
   KirNamedScalar,
   KirScalar,
+  KirTensorDomain,
+  KirIterDomain,
+  KirTensorView,
 };
 
 enum class DataType { Bool, Float, Half, Int, Null };

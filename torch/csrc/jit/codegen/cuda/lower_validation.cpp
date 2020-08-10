@@ -76,10 +76,16 @@ void IrBuildSizesMap(Fusion* fusion) {
       std::stringstream ss;
       ss << "T" << tv->name() << ".size[" << dim++ << "]";
       Val* new_size =
-          new NamedScalar(ss.str(), orig_size->getDataType().value());
+          new kir::NamedScalar(ss.str(), orig_size->getDataType().value());
       if (!orig_size->sameAs(new_size) ||
-          size_map.find(orig_size) == size_map.end())
+          size_map.find(orig_size) == size_map.end()) {
         size_map[orig_size] = new_size;
+
+        // TODO(kir): temporary duplicating the mapping
+        //  to make sure we get to the right size from either
+        //  the Fusion IR value or the Kernel IR one
+        size_map[kir::lowerValue(orig_size)] = new_size;
+      }
     }
   }
 

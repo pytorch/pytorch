@@ -57,8 +57,6 @@ namespace ir_utils {
 
 std::vector<Val*> indices(std::vector<kir::ForLoop*>);
 
-std::vector<IterDomain*> iterDomains(std::vector<kir::ForLoop*>);
-
 bool isTV(const Val* const);
 
 bool isTVOp(const Expr*);
