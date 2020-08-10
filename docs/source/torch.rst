@@ -82,7 +82,9 @@ Indexing, Slicing, Joining, Mutating Ops
 
     cat
     chunk
+    dstack
     gather
+    hstack
     index_select
     masked_select
     narrow
@@ -96,6 +98,7 @@ Indexing, Slicing, Joining, Mutating Ops
     transpose
     unbind
     unsqueeze
+    vstack
     where
 
 .. _generators:
