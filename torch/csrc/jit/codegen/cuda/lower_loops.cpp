@@ -358,7 +358,13 @@ void findTargetTensor(Expr* expr, TensorView*& target, unsigned& score) {
 
   auto axis = out_tv->getRelativeComputeAtAxis();
   target = out_tv->getComputeAtView();
-  std::tie(axis, target) = target->getComputeAtPos(axis);
+  while (target->hasComputeAt()) {
+    if (target->getThisComputeAtAxis() < axis)
+      break;
+    TORCH_INTERNAL_ASSERT(target->getThisComputeAtAxis() == axis);
+    axis = target->getComputeAtRelPos(axis);
+    target = target->getComputeAtView();
+  }
 
   score = axis;
 }

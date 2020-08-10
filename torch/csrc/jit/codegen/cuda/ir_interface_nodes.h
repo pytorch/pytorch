@@ -244,6 +244,9 @@ class TORCH_CUDA_API TensorView : public Val {
     return relative_compute_at_axis_;
   }
 
+  // Return position in compute_at_view that lines up with this->axis(pos)?
+  int getComputeAtRelPos(int pos);
+
   // Will check if an axis is inside computeAtAxis and will fetch the reference
   // to be used in code generation.
   std::pair<int, TensorView*> getComputeAtPos(int pos) {
@@ -389,8 +392,6 @@ class TORCH_CUDA_API TensorView : public Val {
       TensorView* current,
       TensorView* producer);
 
-  // Return position in compute_at_view that lines up with this->axis(pos)?
-  int getComputeAtRelPos(int pos);
   void setThisComputeAtAxis();
 
  private:

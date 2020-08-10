@@ -2815,6 +2815,63 @@ void testGPU_FusionReductionTFT() {
   TORCH_CHECK(aten_output.allclose(cg_output));
 }
 
+void testGPU_FusionBranches() {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  // Set up your input tensor views
+  TensorView* tv0 = makeDummyTensor(2);
+  TensorView* tv1 = makeDummyTensor(2);
+  TensorView* tv2 = makeDummyTensor(2);
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+  fusion.addInput(tv2);
+
+  auto tv3 = add(tv0, new Float(1.0));
+  auto tv4 = add(tv3, tv1);
+  auto tv5 = add(tv3, tv2);
+  auto tv6 = add(tv4, tv5);
+
+  fusion.addOutput(tv6);
+
+  constexpr int x = 63, y = 33;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  at::Tensor t0 = at::randn({x, y}, options);
+  at::Tensor t1 = at::randn({x, y}, options);
+  at::Tensor t2 = at::randn({x, y}, options);
+
+  torch::jit::fuser::cuda::FusionExecutor fe;
+  tv6->merge(0);
+  tv6->split(0, 128);
+  tv6->split(0, 4);
+
+  tv6->axis(0)->parallelize(ParallelType::BIDx);
+
+  tv0->computeAt(tv6, 1);
+  tv1->computeAt(tv6, 1);
+  tv2->computeAt(tv6, 1);
+
+  tv3->axis(-2)->parallelize(ParallelType::Unroll);
+  tv3->axis(-1)->parallelize(ParallelType::TIDx);
+  tv4->axis(-2)->parallelize(ParallelType::Unroll);
+  tv4->axis(-1)->parallelize(ParallelType::TIDx);
+  tv5->axis(-2)->parallelize(ParallelType::Unroll);
+  tv5->axis(-1)->parallelize(ParallelType::TIDx);
+  tv6->axis(-1)->parallelize(ParallelType::TIDx);
+
+  fe.compileFusion(&fusion);
+  auto outputs = fe.runFusion({t0, t1, t2});
+
+  auto t3 = t0.add(1.0);
+  auto t4 = t3.add(t1);
+  auto t5 = t3.add(t2);
+  auto t6 = t4.add(t5);
+
+  TORCH_CHECK(t6.allclose(outputs[0]));
+}
+
 void testGPU_FusionSimpleBCast() {
   {
     Fusion fusion;
