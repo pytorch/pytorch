@@ -276,6 +276,8 @@ def method_tests():
         ('clamp', (), (None, 0.5), 'min_scalar', (True,)),
         ('clamp', (), (0.5, None), 'max_scalar', (True,)),
         ('clamp', (S, S), (), 'max_scalar_kwarg', (True,), (), (), ident, {'max': 1}),
+        ('clip', (S, S, S), dont_convert((0, 1)), '', (False,)),
+        ('clip_', (S, S, S), dont_convert((0, 1)), '', (False,)),
         ('sqrt', torch.rand(S, S, S) + 5e-4, NO_ARGS, '', (True,)),
         ('sqrt', uniform_scalar(5e-4, requires_grad=True), NO_ARGS, 'scalar', (True,)),
         ('sin', (S, S, S), NO_ARGS, '', (True,)),
