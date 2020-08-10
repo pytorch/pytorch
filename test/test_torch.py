@@ -18628,6 +18628,31 @@ fn(*args)
         self._test_atleast_dim(torch.atleast_2d, np.atleast_2d, device, dtype)
         self._test_atleast_dim(torch.atleast_3d, np.atleast_3d, device, dtype)
 
+    def _test_special_stacks(self, torch_fn, np_fn, device, dtype):
+        for ndims in range(0, 6):
+            shape = self._rand_shape(ndims, min_size=5, max_size=10)
+            for i in range(0, 10):
+                a = self._generate_input(shape, dtype, device, with_extremal=False)
+                self.compare_with_numpy(torch_fn, np_fn, a, device=device, dtype=dtype)
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False) +
+              torch.testing.get_all_complex_dtypes()))
+    def test_hstack(self, device, dtype):
+        self._test_special_stacks(torch.hstack, np.hstack, device, dtype)
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False) +
+              torch.testing.get_all_complex_dtypes()))
+    def test_vstack(self, device, dtype):
+        self._test_special_stacks(torch.vstack, np.vstack, device, dtype)
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False) +
+              torch.testing.get_all_complex_dtypes()))
+    def test_dstack(self, device, dtype):
+        self._test_special_stacks(torch.dstack, np.dstack, device, dtype)
+
 
 # NOTE [Linspace+Logspace precision override]
 # Our Linspace and logspace torch.half CUDA kernels are not very precise.
