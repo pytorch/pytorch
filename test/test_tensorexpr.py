@@ -5,7 +5,7 @@ import unittest
 
 from torch.testing._internal.common_utils import suppress_warnings, num_profiled_runs
 
-from te_utils import CudaCodeGenCreated, CudaCodeGenExecuted, \
+from torch.testing._internal.te_utils import CudaCodeGenCreated, CudaCodeGenExecuted, \
     LLVMCodeGenExecuted, SimpleIREvalExecuted
 
 class BaseTestClass(unittest.TestCase):
