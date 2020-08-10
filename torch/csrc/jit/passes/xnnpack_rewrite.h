@@ -11,6 +11,7 @@ enum class MobileOptimizerType : int8_t {
   INSERT_FOLD_PREPACK_OPS,
   REMOVE_DROPOUT,
   FUSE_ADD_RELU,
+  HOIST_CONV_PACKED_PARAMS,
 };
 
 TORCH_API void insertPrePackedOps(std::shared_ptr<Graph>& graph);
