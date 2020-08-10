@@ -202,6 +202,13 @@ namespace jit {
   _(LoopNestReorderLongStringFull)          \
   _(LoopNestReorderInternalLoopNest)        \
   _(OuterLoopVectorization)                 \
+  _(Unroll)                                 \
+  _(UnrollOuter)                            \
+  _(UnrollInner)                            \
+  _(UnrollMultipleStatements)               \
+  _(UnrollEmpty)                            \
+  _(NoUnroll)                               \
+  _(UnrollWithLet)                          \
   _(Kernel_1)                               \
   _(Kernel_2)                               \
   _(Kernel_3)                               \
@@ -344,7 +351,8 @@ namespace jit {
   _(CudaNoThreadIdxWrite_1)                \
   _(CudaSharedMemReduce_1)                 \
   _(CudaLocalMemReduce_1)                  \
-  _(CudaTestRand01)
+  _(CudaTestRand01)                        \
+  _(CudaSigmoid)
 
 #define DECLARE_TENSOREXPR_TEST(name) void test##name();
 TH_FORALL_TENSOREXPR_TESTS(DECLARE_TENSOREXPR_TEST)
