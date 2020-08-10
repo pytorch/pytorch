@@ -304,14 +304,18 @@ void ProcessGroupNCCL::WorkNCCL::synchronize() {
   synchronizeInternal(kNoTimeout);
 }
 
-// Waiting on the work's corresponding CUDA events
-void ProcessGroupNCCL::WorkNCCL::synchronizeInternal(
-    std::chrono::milliseconds timeout) {
+void ProcessGroupNCCL::WorkNCCL::synchronizeStreams() {
   for (size_t i = 0; i < devices_.size(); ++i) {
     auto currentStream = at::cuda::getCurrentCUDAStream(devices_[i].index());
     // Block the current stream on the NCCL stream
     cudaEvents_[i].block(currentStream);
   }
+}
+
+// Waiting on the work's corresponding CUDA events
+void ProcessGroupNCCL::WorkNCCL::synchronizeInternal(
+    std::chrono::milliseconds timeout) {
+  synchronizeStreams();
 
   // In case of blocking, wait for the operation to complete.
   if (blockingWait_) {
@@ -766,6 +770,14 @@ std::shared_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
   return std::make_shared<ProcessGroupNCCL::WorkNCCL>(devices);
 }
 
+c10::intrusive_ptr<c10::ivalue::Future> ProcessGroupNCCL::WorkNCCL::
+    getFuture() {
+  // FutureNCCL has a reference to WorkNCCL. Therefore, we don't store a
+  // FutureNCCL reference inside WorkNCCL and we create a new object here
+  // to avoid circular reference between WorkNCCL and FutureNCCL.
+  return c10::make_intrusive<FutureNCCL>(shared_from_this(), outputs_);
+}
+
 template <typename Fn, typename PreProcess, typename PostProcess>
 std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
     std::vector<at::Tensor>& inputs,
@@ -782,6 +794,9 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
 
   // Work itself will create the CUDA events on all GPUs of tensors
   auto work = initWork(devices);
+
+  // Store a reference to outputs to be used by WorkNCCL::getFuture.
+  work->outputs_ = std::make_shared<std::vector<at::Tensor>>(outputs);
 
   at::cuda::OptionalCUDAGuard gpuGuard;
 
