@@ -54,6 +54,7 @@ CONFIG_TREE_DATA = [
             ("9", [
                 ("3.6", [
                     ("xla", [XImportant(True)]),
+                    ("vulkan", [XImportant(True)]),
                 ]),
             ]),
         ]),
@@ -127,6 +128,7 @@ class ExperimentalFeatureConfigNode(TreeConfigNode):
 
         next_nodes = {
             "xla": XlaConfigNode,
+            "vulkan": VulkanConfigNode,
             "parallel_tbb": ParallelTBBConfigNode,
             "parallel_native": ParallelNativeConfigNode,
             "libtorch": LibTorchConfigNode,
@@ -143,6 +145,17 @@ class XlaConfigNode(TreeConfigNode):
 
     def init2(self, node_name):
         self.props["is_xla"] = node_name
+
+    def child_constructor(self):
+        return ImportantConfigNode
+
+
+class VulkanConfigNode(TreeConfigNode):
+    def modify_label(self, label):
+        return "Vulkan=" + str(label)
+
+    def init2(self, node_name):
+        self.props["is_vulkan"] = node_name
 
     def child_constructor(self):
         return ImportantConfigNode

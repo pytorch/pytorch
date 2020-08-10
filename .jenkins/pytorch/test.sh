@@ -228,6 +228,13 @@ test_libtorch() {
   fi
 }
 
+test_vulkan() {
+  if [[ "$BUILD_ENVIRONMENT" == *vulkan* ]]; then
+    mkdir -p test/test-reports/cpp-vulkan
+    build/bin/vulkan_test --gtest_output=xml:test/test-reports/cpp-vulkan/vulkan_test.xml
+  fi
+}
+
 test_distributed() {
   if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
     echo "Testing distributed C++ tests"
@@ -369,6 +376,8 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 ]]; t
   test_custom_script_ops
   test_custom_backend
   test_torch_function_benchmark
+elif [[ "${BUILD_ENVIRONMENT}" == *vulkan* ]]; then
+  test_vulkan
 elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   test_bazel
 elif [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc5.4* ]]; then
