@@ -29,7 +29,7 @@ from itertools import product, permutations
 from test_jit import backward_graph, all_backward_graphs, get_lstm_inputs, get_milstm_inputs, \
     LSTMCellC, LSTMCellF, LSTMCellS, MiLSTMCell
 
-from te_utils import CudaCodeGenExecuted
+from torch.testing._internal.te_utils import CudaCodeGenExecuted
 
 FUSION_GROUP = 'tensorexpr::Group'
 
