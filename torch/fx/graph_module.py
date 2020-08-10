@@ -1,11 +1,6 @@
 import torch
 import torch.overrides
 import linecache
-import inspect
-from types import FunctionType, CodeType
-
-from .graph import Graph
-from .symbolic_trace import symbolic_trace
 
 # normal exec loses the source code, however we can patch
 # the linecache module to still recover it.
