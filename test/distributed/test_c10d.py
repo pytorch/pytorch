@@ -1942,6 +1942,15 @@ class TestDdpCommHook(nn.Module):
         return self.t0(x + rank)
 
 
+class SparseGradientModule(nn.Module):
+    def __init__(self):
+        super(SparseGradientModule, self).__init__()
+        self.embedding = nn.EmbeddingBag(10, 10, sparse=True)
+
+    def forward(self, x):
+        return F.softmax(self.embedding(x), dim=1)
+
+
 @unittest.skipIf(TEST_WITH_TSAN, "TSAN is not fork-safe since we're forking in a multi-threaded environment")
 class DistributedDataParallelTest(MultiProcessTestCase):
     def setUp(self):
@@ -2822,28 +2831,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             loss = criterion(output, target)
             loss.backward()
 
-    @requires_gloo()
-    def test_sparse_gradients(self):
-        store = c10d.FileStore(self.file_name, self.world_size)
-        process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
-
-        class SparseGradientModule(nn.Module):
-            def __init__(self):
-                super(SparseGradientModule, self).__init__()
-                self.embedding = nn.EmbeddingBag(10, 10, sparse=True)
-
-            def forward(self, x):
-                return F.softmax(self.embedding(x), dim=1)
-
-        # Ensure initialized weights and inputs are identical across processes
-        torch.manual_seed(1337)
-
-        vanilla_model = SparseGradientModule()
-        ddp_model = DistributedDataParallel(
-            copy.deepcopy(vanilla_model),
-            process_group=process_group,
-        )
-
+    def _run_and_verify_sparse_gradients(self, vanilla_model, ddp_model):
         mult = 2
         batch_size = mult * self.world_size
         criterion = nn.CrossEntropyLoss()
@@ -2862,6 +2850,22 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         vanilla_parameter = next(vanilla_model.parameters())
         ddp_parameter = next(ddp_model.parameters())
         self.assertEqual(vanilla_parameter.grad, ddp_parameter.grad)
+
+    @requires_gloo()
+    def test_sparse_gradients(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
+
+        # Ensure initialized weights and inputs are identical across processes
+        torch.manual_seed(1337)
+
+        vanilla_model = SparseGradientModule()
+        ddp_model = DistributedDataParallel(
+            copy.deepcopy(vanilla_model),
+            process_group=process_group,
+        )
+
+        self._run_and_verify_sparse_gradients(vanilla_model, ddp_model)
 
     def _test_grad_layout(self, replica_devices, layer_devs, local_batch_size):
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -3113,7 +3117,8 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
         def allreduce_hook(state: object, bucket: dist._GradBucket) -> torch._C.Future:
-            return process_group.allreduce(bucket.get_tensors()).get_future()
+            tensors = [t / self.world_size for t in bucket.get_tensors()]
+            return process_group.allreduce(tensors).get_future()
 
         # Get GPU model with allreduce_hook registered.
         gpu_model = self._gpu_model_with_ddp_comm_hook(process_group, allreduce_hook)
@@ -3134,7 +3139,8 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         def allreduce_with_then_hook(
             state: object, bucket: dist._GradBucket
         ) -> torch.futures.Future:
-            fut = process_group.allreduce(bucket.get_tensors()).get_future()
+            tensors = [t / self.world_size for t in bucket.get_tensors()]
+            fut = process_group.allreduce(tensors).get_future()
 
             def mult(fut):
                 # Multiply the result by 10.
@@ -3239,6 +3245,39 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             RuntimeError, "register_comm_hook can only be called once."
         ):
             model._register_comm_hook(None, dummy_hook)
+
+    @requires_gloo()
+    def test_ddp_comm_hook_sparse_gradients(self):
+        """
+        Runs "test_sparse_gradients" unit test with DDP communication hook. We define a
+        simple hook that does allreduce and works with gloo backend for this test.
+        """
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
+
+        # Ensure initialized weights and inputs are identical across processes
+        torch.manual_seed(1337)
+
+        vanilla_model = SparseGradientModule()
+        ddp_model = DistributedDataParallel(
+            copy.deepcopy(vanilla_model),
+            process_group=process_group,
+        )
+
+        # "get_future" API does not support gloo backend, see GH Issue #42048.
+        # Instead, we wait for an allreduce work, and write its result to a Future.
+        def allreduce_hook_gloo(state: object, bucket: dist._GradBucket) -> torch.futures.Future:
+            # Prepare allreduced grad bucket tensors by running an async work.
+            work = process_group.allreduce(bucket.get_tensors())
+            work.wait()
+
+            fut = torch.futures.Future()
+            fut.set_result([t / self.world_size for t in bucket.get_tensors()])
+            return fut
+
+        ddp_model._register_comm_hook(None, allreduce_hook_gloo)
+
+        self._run_and_verify_sparse_gradients(vanilla_model, ddp_model)
 
 
 class ReducerModule(nn.Module):
