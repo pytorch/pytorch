@@ -412,21 +412,6 @@ void CudaPrinter::visit(const IfThenElse* v) {
 void CudaPrinter::visit(const Block* v) {
   os() << "{" << std::endl;
   indent_++;
-  for (const auto& pair : v->varBindings()) {
-    emitIndent();
-    const Var* var = pair.first;
-    const Expr* val = pair.second;
-
-    if (var->dtype().scalar_type() == ScalarType::Half) {
-      // we do math in floats so use that.
-      os() << "float";
-    } else {
-      os() << cudaDtypeCppString(var->dtype());
-    }
-    os() << " " << *var << " = ";
-    val->accept(this);
-    os() << "; " << std::endl;
-  }
 
   for (Stmt* s : v->stmts()) {
     s->accept(this);
@@ -435,6 +420,19 @@ void CudaPrinter::visit(const Block* v) {
   indent_--;
   emitIndent();
   os() << "}";
+}
+
+void CudaPrinter::visit(const Let* v) {
+  emitIndent();
+  if (v->dtype().scalar_type() == ScalarType::Half) {
+    // we do math in floats so use that.
+    os() << "float";
+  } else {
+    os() << cudaDtypeCppString(v->dtype());
+  }
+  os() << " " << *v->var() << " = ";
+  v->value()->accept(this);
+  os() << ";" << std::endl;
 }
 
 class PrioritizeLoad : public IRMutator {
@@ -551,14 +549,23 @@ class PrioritizeLoad : public IRMutator {
       return stmt;
     }
 
+    // TODO: this probably isn't going to order nicely in all cases, vars need
+    // too be inserted before their first usage.
     if (Block* b = dynamic_cast<Block*>(stmt)) {
+      Stmt* last = nullptr;
       for (const auto& pair : load_list) {
-        b->add_var_binding(pair.first, pair.second);
+        Stmt* news = new Let(pair.first, pair.second);
+        if (last == nullptr) {
+          b->prepend_stmt(news);
+        } else {
+          b->insert_stmt_after(news, last);
+        }
+        last = news;
       }
       return b;
     }
 
-    return Block::make(load_list, {stmt});
+    return Block::make({stmt});
   }
 
   MemoryLoadStack load_stack_;
@@ -590,12 +597,12 @@ std::string CudaCodeGen::GetUniqueFuncName(const std::string& func_prefix) {
 // and wrap them under a trivial thread idx.
 class NoThreadIdxRewriter : public IRMutator {
  private:
-  Stmt* rewrite(const VarMapping& vars, const std::vector<Stmt*>& stmts) {
+  Stmt* rewrite(const std::vector<Stmt*>& stmts) {
     std::vector<Stmt*> cloned_stmts(stmts.size());
     for (size_t index = 0; index < stmts.size(); index++) {
       cloned_stmts[index] = Stmt::clone(stmts[index]);
     }
-    Stmt* new_block = Block::make(vars, cloned_stmts);
+    Stmt* new_block = Block::make(cloned_stmts);
     // Wrap the new block under a trivial thread-idx
     //   for t in 0..1: // threadIdx
     //     if (t < 1):
@@ -671,7 +678,7 @@ class NoThreadIdxRewriter : public IRMutator {
       Stmt* parent = v->get_parent();
       For* loop_parent = dynamic_cast<For*>(parent);
       if (loop_parent && loop_parent->loop_options().is_gpu_block_index()) {
-        Stmt* new_block = rewrite(v->varBindings(), new_stmts);
+        Stmt* new_block = rewrite(new_stmts);
         return new_block;
       }
       need_rewrite_ = true;
@@ -698,12 +705,12 @@ class NoThreadIdxRewriter : public IRMutator {
       // Rewrite the stmts from [start, stop)
       std::vector<Stmt*> stmts_to_rewrite(
           new_stmts.begin() + start, new_stmts.begin() + stop);
-      Stmt* rewritten_stmt = rewrite(v->varBindings(), stmts_to_rewrite);
+      Stmt* rewritten_stmt = rewrite(stmts_to_rewrite);
       rewrite_stmts.push_back(rewritten_stmt);
 
       start = stop;
     }
-    Stmt* rewritten_block = Block::make(v->varBindings(), rewrite_stmts);
+    Stmt* rewritten_block = Block::make(rewrite_stmts);
     return rewritten_block;
   }
 
