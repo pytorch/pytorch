@@ -11,6 +11,8 @@ from torch.testing._internal.common_device_type import \
 # NOTE: ending the alias_name with an underscore will interpret the test
 #   as the test for an inplace method of that name
 class AliasInfo(object):
+    __slots__ = ['alias_name', 'alias_op', 'original_name', 'input', 'args', 'decorators']
+
     def __init__(self,
                  alias_name,  # the name of the alias
                  alias_op,  # the aliased op
