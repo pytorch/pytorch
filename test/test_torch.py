@@ -18630,10 +18630,18 @@ fn(*args)
 
     def _test_special_stacks(self, torch_fn, np_fn, device, dtype):
         for ndims in range(0, 6):
-            shape = self._rand_shape(ndims, min_size=5, max_size=10)
             for i in range(0, 10):
+                shape = self._rand_shape(ndims, min_size=5, max_size=10)
+                # Check single tensor
                 a = self._generate_input(shape, dtype, device, with_extremal=False)
-                self.compare_with_numpy(torch_fn, np_fn, a, device=device, dtype=dtype)
+                self.compare_with_numpy(torch_fn, np_fn, a, device=None, dtype=None)
+
+                # Check multiple tensors
+                torch_input = [a] * random.randint(2, 10)
+                np_input = [input.cpu().numpy() for input in torch_input]
+                actual = torch_fn(torch_input)
+                expected = np_fn(np_input)
+                self.assertEqual(actual, expected)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False) +
