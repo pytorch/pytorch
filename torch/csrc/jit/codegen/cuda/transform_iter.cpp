@@ -285,7 +285,7 @@ BestEffortReplay::BestEffortReplay(
     {
       size_t i = 0;
       for (auto r_inp : r_expr->inputs()) {
-        if (i > r_inps.size()) {
+        if (i >= r_inps.size()) {
           mismatched_inputs = true;
           break;
         }
