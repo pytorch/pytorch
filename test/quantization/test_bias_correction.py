@@ -1,12 +1,16 @@
 import torch
 import torch.nn as nn
 from torch.testing._internal.common_quantization import QuantizationTestCase
-from torch.quantization import QuantStub, DeQuantStub
-import torch.quantization._correct_bias as _correct_bias
-from torch.quantization._correct_bias import _supported_modules, _supported_modules_quantized
-from torchvision.models.quantization import mobilenet_v2
-import copy
+
 from torch.quantization import default_qconfig
+from torch.quantization import QuantStub, DeQuantStub
+
+import torch.quantization._correct_bias as correct_bias
+from torch.quantization._correct_bias import _supported_modules, _supported_modules_quantized
+
+# from torchvision.models.quantization import mobilenet_v2
+import copy
+
 
 class TestBiasCorrection(QuantizationTestCase):
     def compute_sqnr(self, x, y):
@@ -27,24 +31,33 @@ class TestBiasCorrection(QuantizationTestCase):
         # manually changing bias
         for name, submodule in artificial_model.named_modules():
             if type(submodule) in _supported_modules_quantized:
-                x = _correct_bias.get_param(submodule, 'bias')
+                x = correct_bias.get_param(submodule, 'bias')
                 if x is not None:
                     x.data = x.data * 10
 
         bias_correction(float_model, artificial_model, img_data)
 
         for name, artificial_submodule in artificial_model.named_modules():
-            if type(artificial_submodule) in _correct_bias._supported_modules_quantized:
-                submodule = _correct_bias.get_module(float_model, name)
-                float_bias = _correct_bias.get_param(submodule, 'bias')
-                artificial_bias = _correct_bias.get_param(artificial_submodule, 'bias')
+            if type(artificial_submodule) in correct_bias._supported_modules_quantized:
+                submodule = correct_bias.get_module(float_model, name)
+                float_bias = correct_bias.get_param(submodule, 'bias')
+                artificial_bias = correct_bias.get_param(artificial_submodule, 'bias')
 
-                if artificial_submodule in _supported_modules:
-                    print("not getting executed")
-                    if artificial_bias.is_quantized:
-                        artificial_bias = artificial_bias.dequantize()
+                if artificial_submodule in _supported_modules_q:
+                    # if artificial_bias.is_quantized:  # jerry says this shouldn't be needed, but artificial model is quantized
+                    #     artificial_bias = artificial_bias.dequantize()
+
+                    # big ruh roh, this wasn't executing the entire time
                     self.assertTrue(self.computeSqnr(float_bias, artificial_bias) > 35,
                                     "Correcting quantized bias produced too much noise, sqnr score too low")
+
+    # abuse 4 bit quantization, try accuracy on one layer or something?
+    # hard code some expected numbers
+    def four_bit_test(self, float_model, bias_correction, img_data):
+        pass
+
+    def pen_paper_test(self, float_model, bias_correction, img_data):
+        pass
 
     def test_linear_chain(self):
         class LinearChain(nn.Module):
@@ -66,7 +79,7 @@ class TestBiasCorrection(QuantizationTestCase):
         float_model = LinearChain()
         img_data = [(torch.rand(10, 3, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long))
                     for _ in range(50)]
-        self.correct_artificial_bias(float_model, _correct_bias.bias_correction, img_data)
+        self.correct_artificial_bias(float_model, correct_bias.bias_correction, img_data)
 
     def test_conv_chain(self):
         class ConvChain(nn.Module):
@@ -88,7 +101,7 @@ class TestBiasCorrection(QuantizationTestCase):
         float_model = ConvChain()
         img_data = [(torch.rand(10, 3, 125, 125, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long))
                     for _ in range(50)]
-        self.correct_artificial_bias(float_model, _correct_bias.bias_correction, img_data)
+        self.correct_artificial_bias(float_model, correct_bias.bias_correction, img_data)
 
     def test_mobilenet(self):
         float_model = mobilenet_v2(pretrained=True, quantize=False)
@@ -96,4 +109,4 @@ class TestBiasCorrection(QuantizationTestCase):
         float_model.fuse_model()
         img_data = [(torch.rand(10, 3, 224, 224, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long))
                     for _ in range(50)]
-        self.correct_artificial_bias(float_model, _correct_bias.bias_correction, img_data)
+        self.correct_artificial_bias(float_model, correct_bias.bias_correction, img_data)
