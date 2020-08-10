@@ -466,6 +466,19 @@ Tensor& clamp_min_(Tensor& self, Scalar min) {
   return at::clamp_min_out(self, self, min);
 }
 
+// Implements the "clip" alias for clamp
+Tensor& clip_out(Tensor& result, const Tensor& self, optional<Scalar> min, optional<Scalar> max) {
+  return at::clamp_out(result, self, min, max);
+}
+
+Tensor clip(const Tensor& self, optional<Scalar> min, optional<Scalar> max) {
+  return at::clamp(self, min, max);
+}
+
+Tensor& clip_(Tensor& self, optional<Scalar> min, optional<Scalar> max) {
+  return at::clamp_(self, min, max);
+}
+
 Tensor polygamma(int64_t n, const Tensor& self) {
   Tensor result = at::empty({0}, self.options());
   at::polygamma_out(result, n, self);
