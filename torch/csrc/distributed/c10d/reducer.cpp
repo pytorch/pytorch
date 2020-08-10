@@ -90,8 +90,12 @@ Reducer::Reducer(
            variable_index++) {
         auto& variable = replicas_[replica_index][variable_index];
         const auto index = VariableIndex{
+#ifdef _WIN32
+            replica_index, variable_index
+#else
             .replica_index = replica_index,
             .variable_index = variable_index,
+#endif
         };
 
         // The gradient accumulator function is lazily initialized once.
@@ -851,8 +855,13 @@ void Reducer::initialize_buckets(
           variable_index < variable_locators_.size(),
           "Out of range variable index specified.");
       variable_locators_[variable_index] = VariableLocator{
+#ifdef _WIN32
+          bucket_index,
+          intra_bucket_index++,
+#else
           .bucket_index = bucket_index,
           .intra_bucket_index = intra_bucket_index++,
+#endif
       };
     }
     bucket.variable_indices = std::move(bucket_indices[bucket_index]);

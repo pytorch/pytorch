@@ -8,7 +8,11 @@ namespace torch {
 namespace distributed {
 namespace rpc {
 
+#ifdef _WIN32
+class RequestCallbackImpl : public RequestCallbackNoPython {
+#else
 class TORCH_API RequestCallbackImpl : public RequestCallbackNoPython {
+#endif
  public:
   std::unique_ptr<RpcCommandBase> deserializePythonRpcCommand(
       std::unique_ptr<RpcCommandBase> rpc,

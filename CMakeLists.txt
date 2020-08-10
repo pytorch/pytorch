@@ -103,7 +103,7 @@ endif()
 
 # For non-supported platforms, turn USE_DISTRIBUTED off by default.
 # It is not tested and likely won't work without additional changes.
-if(NOT LINUX)
+if(APPLE)
   set(USE_DISTRIBUTED OFF CACHE STRING "Use distributed")
   # On macOS, if USE_DISTRIBUTED is enabled (specified by the user),
   # then make Gloo build with the libuv transport.

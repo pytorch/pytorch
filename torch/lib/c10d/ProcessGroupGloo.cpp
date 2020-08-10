@@ -2,10 +2,15 @@
 
 #include <c10d/GlooDeviceFactory.hpp>
 
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
 #include <netdb.h>
 #include <sys/socket.h>
-#include <sys/types.h>
 #include <unistd.h>
+#endif
+#include <sys/types.h>
 
 #include <type_traits>
 
@@ -36,6 +41,36 @@
 #include <gloo/rendezvous/context.h>
 #include <gloo/rendezvous/prefix_store.h>
 
+#ifdef _WIN32
+#define GENERATE_ALL_TYPES(type, func, ...)            \
+  switch (type) {                                      \
+    case ::at::ScalarType::Float:                      \
+      func<float>(__VA_ARGS__);                        \
+      break;                                           \
+    case ::at::ScalarType::Double:                     \
+      func<double>(__VA_ARGS__);                       \
+      break;                                           \
+    case ::at::ScalarType::Half:                       \
+      func<gloo::float16>(__VA_ARGS__);                \
+      break;                                           \
+    case ::at::ScalarType::Char:                       \
+      func<int8_t>(__VA_ARGS__);                       \
+      break;                                           \
+    case ::at::ScalarType::Byte:                       \
+      func<uint8_t>(__VA_ARGS__);                      \
+      break;                                           \
+    case ::at::ScalarType::Int:                        \
+      func<int32_t>(__VA_ARGS__);                      \
+      break;                                           \
+    case ::at::ScalarType::Long:                       \
+      func<int64_t>(__VA_ARGS__);                      \
+      break;                                           \
+    default:                                           \
+      throw std::runtime_error("Invalid scalar type"); \
+  }
+
+#define HOST_NAME_MAX 256
+#else
 #define GENERATE_ALL_TYPES(type, func, args...)        \
   switch (type) {                                      \
     case ::at::ScalarType::Float:                      \
@@ -62,6 +97,7 @@
     default:                                           \
       throw std::runtime_error("Invalid scalar type"); \
   }
+#endif
 
 namespace c10d {
 
@@ -431,7 +467,11 @@ bool doesHostnameResolveToUsableAddress(const std::string& hostname) {
       continue;
     }
     rv = bind(fd, rp->ai_addr, rp->ai_addrlen);
+#ifdef _WIN32
+    closesocket(fd);
+#else
     close(fd);
+#endif
     if (rv == -1) {
       continue;
     }
@@ -443,14 +483,11 @@ bool doesHostnameResolveToUsableAddress(const std::string& hostname) {
 
 } // namespace
 
-#if defined(__linux__) || defined(__APPLE__)
 std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
-    createDeviceForInterface(const std::string& interface) {
-  return ::c10d::GlooDeviceFactory::makeDeviceForInterface(interface);
+    createDeviceForInterface(const std::string& interface_name) {
+  return ::c10d::GlooDeviceFactory::makeDeviceForInterface(interface_name);
 }
-#endif
 
-#if defined(__linux__) || defined(__APPLE__)
 std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
     createDeviceForHostname(const std::string& hostname) {
   TORCH_CHECK(
@@ -460,9 +497,8 @@ std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
       " to a (local) address");
   return ::c10d::GlooDeviceFactory::makeDeviceForHostname(hostname);
 }
-#endif
 
-#ifdef __linux__
+#if defined(__linux__) || defined(_WIN32)
 std::shared_ptr<::gloo::transport::Device> ProcessGroupGloo::
     createDefaultDevice() {
   // Use the hostname to resolve the network address to

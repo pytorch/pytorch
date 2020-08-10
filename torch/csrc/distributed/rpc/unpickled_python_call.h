@@ -15,7 +15,11 @@ namespace rpc {
 // places for different message types.
 // NB: The reason for not consolidating class into PythonCall is because
 // PythonCall is a libtorch type which should not depend on Python types.
+#ifdef _WIN32
+class UnpickledPythonCall : public RpcCommandBase {
+#else
 class TORCH_API UnpickledPythonCall : public RpcCommandBase {
+#endif
  public:
   UnpickledPythonCall(
       const SerializedPyObj& serializedPyObj,
