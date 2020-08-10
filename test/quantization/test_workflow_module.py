@@ -31,7 +31,7 @@ import math
 import numpy as np
 
 # Testing utils
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
@@ -582,6 +582,7 @@ class TestRecordHistogramObserver(QuantizationTestCase):
     @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
            qscheme=st.sampled_from((torch.per_tensor_affine, torch.per_tensor_symmetric)),
            reduce_range=st.booleans())
+    @settings(max_examples=10)
     def test_histogram_observer(self, qdtype, qscheme, reduce_range):
         myobs = HistogramObserver(bins=3, dtype=qdtype, qscheme=qscheme, reduce_range=reduce_range)
         # Calculate qparams should work for empty observers
