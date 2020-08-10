@@ -69,34 +69,34 @@ constexpr size_t size(T(&)[N]) {
 
 
 template <typename Filter, typename T>
-typename std::enable_if_t<std::is_same<Filter, nullptr_t>::value, void>
+typename std::enable_if_t<std::is_same<Filter, std::nullptr_t>::value, void>
 call_filter(Filter filter, T& val) {}
 
 template <typename Filter, typename T>
-typename std::enable_if_t< std::is_same<Filter, nullptr_t>::value, void>
+typename std::enable_if_t< std::is_same<Filter, std::nullptr_t>::value, void>
 call_filter(Filter filter, T& first, T& second) { }
 
 template <typename Filter, typename T>
-typename std::enable_if_t< std::is_same<Filter, nullptr_t>::value, void>
+typename std::enable_if_t< std::is_same<Filter, std::nullptr_t>::value, void>
 call_filter(Filter filter, T& first, T& second, T& third) {  }
 
 template <typename Filter, typename T>
 typename std::enable_if_t<
-    !std::is_same<Filter, nullptr_t>::value, void>
+    !std::is_same<Filter, std::nullptr_t>::value, void>
     call_filter(Filter filter, T& val) {
     return filter(val);
 }
 
 template <typename Filter, typename T>
 typename std::enable_if_t<
-    !std::is_same<Filter, nullptr_t>::value, void>
+    !std::is_same<Filter, std::nullptr_t>::value, void>
     call_filter(Filter filter, T& first, T& second) {
     return filter(first, second);
 }
 
 template <typename Filter, typename T>
 typename std::enable_if_t<
-    !std::is_same<Filter, nullptr_t>::value, void>
+    !std::is_same<Filter, std::nullptr_t>::value, void>
     call_filter(Filter filter, T& first, T& second, T& third) {
     return filter(first, second, third);
 }
@@ -125,7 +125,6 @@ template <>
 struct BitStr<1> {
     using type = uint8_t;
 };
-
 
 
 template <typename T>
@@ -174,7 +173,7 @@ std::ostream& operator<<(std::ostream& stream, const CheckWithinDomains<T>& dmn)
 
 template <class To, class From>
 typename std::enable_if<
-    (sizeof(To) == sizeof(From)) && std::is_trivially_copyable<From>::value&&
+    (sizeof(To) == sizeof(From)) && std::is_trivially_copyable<From>::value &&
     std::is_trivial<To>::value,
     // this implementation requires that To is trivially default constructible
     To>::type
@@ -195,7 +194,7 @@ To bit_cast_ptr(T* p, size_t N = sizeof(To)) noexcept {
 template <typename T>
 std::enable_if_t<std::is_floating_point<T>::value, bool> check_both_nan(T x,
     T y) {
-    return isnan(x) && isnan(y);  //(std::fpclassify(x) == FP_NAN &&
+    return std::isnan(x) && std::isnan(y);  //(std::fpclassify(x) == FP_NAN &&
                                       //std::fpclassify(y) == FP_NAN);
 }
 
@@ -210,38 +209,35 @@ template<class T> struct is_complex<Complex<T>> : std::true_type {};
 
 
 template<typename T>
-inline T
-safe_fpt_division(T f1, T f2)
+T safe_fpt_division(T f1, T f2)
 {
     //code was taken from boost
     // Avoid overflow.
-    if (f2 < static_cast<T>(1) && f1 > f2 * std::numeric_limits<T>::max())
+    if ((f2 < static_cast<T>(1)) && (f1 > f2 * std::numeric_limits<T>::max())) {
         return std::numeric_limits<T>::max();
-
+    }
     // Avoid underflow.
-    if (f1 == static_cast<T>(0) ||
-        f2 > static_cast<T>(1) && f1 < f2 * std::numeric_limits<T>::min())
+    if ((f1 == static_cast<T>(0)) || (f2 > static_cast<T>(1)) && (f1 < f2 * std::numeric_limits<T>::min())) {
         return static_cast<T>(0);
-
+    }
     return f1 / f2;
 }
 
 template<class T>
 bool nearlyEqual(T a, T b, T tolerance) {
-    if (isinf(a) && isinf(b)) return true;
+    if (std::isinf(a) && std::isinf(b)) return true;
     T absA = std::abs(a);
     T absB = std::abs(b);
     T diff = std::abs(a - b);
 
-    if (diff <= tolerance)
+    if (diff <= tolerance) {
         return true;
-    T d1 = safe_fpt_division(diff, absB);
-    T d2 = safe_fpt_division(diff, absA);
+    }
+    T d1 = safe_fpt_division<T>(diff, absB);
+    T d2 = safe_fpt_division<T>(diff, absA);
 
-    return   (d1 <= tolerance || d2 <= tolerance);
+    return (d1 <= tolerance) || (d2 <= tolerance);
 }
-
-
 
 template <typename T>
 T reciprocal(T x) {
@@ -252,8 +248,6 @@ template <typename T>
 T rsqrt(T x) {
     return 1 / std::sqrt(x);
 }
-
-
 
 template <class T>
 T maximum(const T& a, const T& b) {
@@ -387,7 +381,7 @@ filter_mult_overflow(T& val1, T& val2) {
     if (std::is_integral<T>::value == false) return;
     if (!is_zero(val2)) {
         T c = (std::numeric_limits<T>::max() - 1) / val2;
-        if (abs(val1) >= c) {
+        if (std::abs(val1) >= c) {
             // correct first;
             val1 = c;
         }
@@ -771,7 +765,7 @@ public:
 };
 
 
-template< typename T, typename Op1, typename Op2, typename Filter = nullptr_t>
+template< typename T, typename Op1, typename Op2, typename Filter = std::nullptr_t>
 void test_unary(
     std::string testName,
     Op1 expectedFunction,
@@ -855,7 +849,7 @@ double getDefaultTolerance() {
     return 1.e-9;
 }
 
-template< typename T, typename Op1, typename Op2, typename Filter = nullptr_t>
+template< typename T, typename Op1, typename Op2, typename Filter = std::nullptr_t>
 void
 test_unary(
     std::string testName,
@@ -891,7 +885,7 @@ test_unary(
 
 
 
-template< typename T, typename Op1, typename Op2, typename Filter = nullptr_t>
+template< typename T, typename Op1, typename Op2, typename Filter = std::nullptr_t>
 void test_binary(
     std::string testName,
     Op1 expectedFunction,
@@ -965,7 +959,7 @@ void test_binary(
 
 }
 
-template< typename T, typename Op1, typename Op2, typename Filter = nullptr_t>
+template< typename T, typename Op1, typename Op2, typename Filter = std::nullptr_t>
 void
 test_binary(
     std::string testName,
@@ -998,7 +992,7 @@ test_binary(
     test_binary<T, Op1, Op2, Filter>(testName, expectedFunction, actualFunction, testCase, filter);
 }
 
-template< typename T, typename Op1, typename Op2, typename Filter = nullptr_t>
+template< typename T, typename Op1, typename Op2, typename Filter = std::nullptr_t>
 void test_ternary(
     std::string testName,
     Op1 expectedFunction,
@@ -1063,7 +1057,7 @@ void test_ternary(
 
 }
 
-template< typename T, typename Op1, typename Op2, typename Filter = nullptr_t>
+template< typename T, typename Op1, typename Op2, typename Filter = std::nullptr_t>
 void
 test_ternary(
     std::string testName,
