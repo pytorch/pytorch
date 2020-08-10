@@ -47,6 +47,12 @@ class TestE2EBase : public ::testing::Test {
     rpcAgent->start();
   }
 
+  void TearDown() override {
+    rpcAgent->join();
+    rpcAgent->shutdown();
+    RpcAgent::setCurrentRpcAgent(nullptr);
+  }
+
   c10::intrusive_ptr<OwnerRRef> createRemoteRRef(
       at::Tensor t1,
       at::Tensor t2,

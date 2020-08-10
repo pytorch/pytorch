@@ -4,7 +4,7 @@ import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
 import numpy as np
 from caffe2.python import core, dyndep, utils, workspace
-from hypothesis import given
+from hypothesis import given, settings
 
 
 dyndep.InitOpsLibrary("//caffe2/caffe2/quantization/server:dnnlowp_ops")
@@ -19,6 +19,7 @@ class DNNLowPChannelShuffleOpsTest(hu.HypothesisTestCase):
         order=st.sampled_from(["NCHW", "NHWC"]),
         **hu.gcs_cpu_only
     )
+    @settings(max_examples=10, deadline=None)
     def test_channel_shuffle(self, channels_per_group, groups, n, order, gc, dc):
         X = np.round(np.random.rand(n, channels_per_group * groups, 5, 6) * 255).astype(
             np.float32
@@ -70,6 +71,7 @@ class DNNLowPChannelShuffleOpsTest(hu.HypothesisTestCase):
         n=st.integers(0, 2),
         **hu.gcs_cpu_only
     )
+    @settings(max_examples=10, deadline=None)
     def test_channel_shuffle_fast_path(self, channels_per_group, n, gc, dc):
         order = "NHWC"
         groups = 4

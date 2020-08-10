@@ -7034,80 +7034,85 @@ class TestTorchDeviceType(TestCase):
     def test_logical_or(self, device):
         self._test_logical(device, 'logical_or', [10, 0, 1, 0], [1, 0, 0, 10], [1, 0, 1, 1])
 
+    # Tests clamp and its alias, clip
     def test_clamp(self, device):
-        m1 = torch.rand(100, device=device).mul(5).add(-2.5)  # uniform in [-2.5, 2.5]
-        # just in case we're extremely lucky.
-        min_val = -1
-        max_val = 1
-        m1[1] = min_val
-        m1[2] = max_val
+        op_list = ((torch.clamp, torch.Tensor.clamp, torch.Tensor.clamp_),
+                   (torch.clip, torch.Tensor.clip, torch.Tensor.clip_))
+        for op, method_op, inplace_op in op_list:
 
-        res1 = m1.clone()
-        res1.clamp_(min_val, max_val)
-        res2 = m1.clone()
-        for i in iter_indices(res2):
-            res2[i] = max(min_val, min(max_val, res2[i]))
-        self.assertEqual(res1, res2)
+            m1 = torch.rand(100, device=device).mul(5).add(-2.5)  # uniform in [-2.5, 2.5]
+            # just in case we're extremely lucky.
+            min_val = -1
+            max_val = 1
+            m1[1] = min_val
+            m1[2] = max_val
 
-        out = m1.clone()
-        torch.clamp(m1, min=min_val, max=max_val, out=out)
-        self.assertEqual(out, res1)
+            res1 = m1.clone()
+            inplace_op(res1, min_val, max_val)
+            res2 = m1.clone()
+            for i in iter_indices(res2):
+                res2[i] = max(min_val, min(max_val, res2[i]))
+            self.assertEqual(res1, res2)
 
-        res1 = torch.clamp(m1, min=min_val)
-        res2 = m1.clone()
-        for i in iter_indices(res2):
-            res2[i] = max(min_val, res2[i])
-        self.assertEqual(res1, res2)
+            out = m1.clone()
+            op(m1, min=min_val, max=max_val, out=out)
+            self.assertEqual(out, res1)
 
-        torch.clamp(m1, min=min_val, out=out)
-        self.assertEqual(out, res1)
+            res1 = op(m1, min=min_val)
+            res2 = m1.clone()
+            for i in iter_indices(res2):
+                res2[i] = max(min_val, res2[i])
+            self.assertEqual(res1, res2)
 
-        res1 = torch.clamp(m1, max=max_val)
-        res2 = m1.clone()
-        for i in iter_indices(res2):
-            res2[i] = min(max_val, res2[i])
-        self.assertEqual(res1, res2)
+            op(m1, min=min_val, out=out)
+            self.assertEqual(out, res1)
 
-        torch.clamp(m1, max=max_val, out=out)
-        self.assertEqual(out, res1)
+            res1 = op(m1, max=max_val)
+            res2 = m1.clone()
+            for i in iter_indices(res2):
+                res2[i] = min(max_val, res2[i])
+            self.assertEqual(res1, res2)
 
-        # if the tensor contains nan case
-        test_tens = torch.tensor([nan], device=device)
+            op(m1, max=max_val, out=out)
+            self.assertEqual(out, res1)
 
-        res1 = test_tens.clone()
-        res1.clamp_(min_val, max_val)
-        res2 = test_tens.clone()
-        for i in iter_indices(res2):
-            res2[i] = max(min(res2[i], max_val), min_val)
-        self.assertEqual(torch.isnan(res1), torch.isnan(res2))
+            # if the tensor contains nan case
+            test_tens = torch.tensor([nan], device=device)
 
-        out = test_tens.clone()
-        torch.clamp(test_tens, min=min_val, max=max_val, out=out)
-        self.assertEqual(torch.isnan(out), torch.isnan(res1))
+            res1 = test_tens.clone()
+            inplace_op(res1, min_val, max_val)
+            res2 = test_tens.clone()
+            for i in iter_indices(res2):
+                res2[i] = max(min(res2[i], max_val), min_val)
+            self.assertEqual(torch.isnan(res1), torch.isnan(res2))
 
-        res1 = torch.clamp(test_tens, min=min_val)
-        res2 = test_tens.clone()
-        for i in iter_indices(res2):
-            res2[i] = max(res2[i], min_val)
-        self.assertEqual(torch.isnan(res1), torch.isnan(res2))
+            out = test_tens.clone()
+            op(test_tens, min=min_val, max=max_val, out=out)
+            self.assertEqual(torch.isnan(out), torch.isnan(res1))
 
-        torch.clamp(test_tens, min=min_val, out=out)
-        self.assertEqual(torch.isnan(out), torch.isnan(res1))
+            res1 = op(test_tens, min=min_val)
+            res2 = test_tens.clone()
+            for i in iter_indices(res2):
+                res2[i] = max(res2[i], min_val)
+            self.assertEqual(torch.isnan(res1), torch.isnan(res2))
 
-        res1 = torch.clamp(test_tens, max=max_val)
-        res2 = test_tens.clone()
-        for i in iter_indices(res2):
-            res2[i] = min(res2[i], max_val)
-        self.assertEqual(torch.isnan(res1), torch.isnan(res2))
+            op(test_tens, min=min_val, out=out)
+            self.assertEqual(torch.isnan(out), torch.isnan(res1))
 
-        torch.clamp(test_tens, max=max_val, out=out)
-        self.assertEqual(torch.isnan(out), torch.isnan(res1))
+            res1 = op(test_tens, max=max_val)
+            res2 = test_tens.clone()
+            for i in iter_indices(res2):
+                res2[i] = min(res2[i], max_val)
+            self.assertEqual(torch.isnan(res1), torch.isnan(res2))
 
-        error_msg = 'At least one of \'min\' or \'max\' must not be None'
-        with self.assertRaisesRegex(RuntimeError, error_msg):
-            m1.clamp()
-        with self.assertRaisesRegex(RuntimeError, error_msg):
-            m1.clamp_()
+            op(test_tens, max=max_val, out=out)
+            self.assertEqual(torch.isnan(out), torch.isnan(res1))
+
+            error_msg = 'At least one of \'min\' or \'max\' must not be None'
+            with self.assertRaisesRegex(RuntimeError, error_msg):
+                method_op(m1)
+            with self.assertRaisesRegex(RuntimeError, error_msg):
+                inplace_op(m1)
 
     def test_cat_empty_legacy(self, device):
         # FIXME: this is legacy behavior and should be removed
@@ -14120,7 +14125,8 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(torch.full((2, 3), beta * value, dtype=dtype, device=device),
                          torch.addmm(input=input, mat1=mat, mat2=mat2, alpha=alpha, beta=beta, out=out))
 
-    def test_blas_nan_out(self, device):
+    @dtypes(*(torch.testing.get_all_complex_dtypes() + torch.testing.get_all_fp_dtypes()))
+    def test_blas_nan_out(self, device, dtype):
         # These functions should work correctly with NaN filled outputs,
         # but need special handling, see [NOTE: cpu_zero]
         b = 3
@@ -14139,6 +14145,9 @@ class TestTorchDeviceType(TestCase):
         mp = torch.randn((p, m), device=device).t()
         np_out = torch.full((n, p), float('nan'), device=device)
         self.assertEqual(torch.mm(nm, mp), torch.mm(nm, mp, out=np_out))
+
+        if dtype.is_complex and device.startswith('cuda'):
+            return
 
         # torch.bmm
         bnm = torch.randn((b, m, n), device=device).transpose(1, 2)
@@ -16990,7 +16999,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @slowTest
     @onlyOnCPUAndCUDA
     @dtypes(torch.float32, torch.float64, torch.bfloat16, torch.int32, torch.int64, torch.cfloat, torch.cdouble)
-    @dtypesIfCUDA(torch.float32, torch.float64)
+    @dtypesIfCUDA(torch.float32, torch.float64, torch.cfloat, torch.cdouble)
     @tf32_on_and_off(0.01)
     def test_mm(self, device, dtype):
         def _test_mm(n, m, p, dtype, genf):
@@ -17101,7 +17110,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         self.compare_with_numpy(torch_fn, np_fn, sx[0])
 
     @onlyCPU
-    @dtypes(torch.float)
+    @dtypes(*(torch.testing.get_all_complex_dtypes() + [torch.float, torch.double]))
     def test_bmm(self, device, dtype):
         num_batches = 10
         M, N, O = 23, 8, 12
@@ -17197,7 +17206,7 @@ fn(*args)
                          "'%s', but did not get an error" % test_case_info()))
 
     @onlyCPU
-    @dtypes(torch.float)
+    @dtypes(*(torch.testing.get_all_complex_dtypes() + [torch.float, torch.double]))
     def test_addbmm(self, device, dtype):
         # num_batches = 10
         # M, N, O = 12, 8, 5
@@ -17241,7 +17250,7 @@ fn(*args)
         self.assertEqual(res6, res2 * .1 + .5 * res.sum(0)),
 
     @onlyCPU
-    @dtypes(torch.float)
+    @dtypes(*(torch.testing.get_all_complex_dtypes() + [torch.float, torch.double]))
     def test_baddbmm(self, device, dtype):
         num_batches = 10
         M, N, O = 12, 8, 5
@@ -19285,6 +19294,9 @@ _float_types2 = _float_types + [torch.bfloat16] if TEST_WITH_ROCM else _float_ty
 
 _complex_and_float_types2 = _float_types2 + _complex_types
 
+_float_types_2_and_complex_if_not_rocm = \
+    (_float_types2 + _complex_types) if not TEST_WITH_ROCM else _float_types2
+
 _signed_types = [
     torch.half, torch.float, torch.double,
     torch.int8, torch.short, torch.int, torch.long
@@ -19453,12 +19465,12 @@ tensor_op_tests = [
     ('pow', 'tensor', _small_3d, lambda t, d: [_small_3d(t, d).abs()],
         1e-1, 1e-1, 1e-5, _float_types2),
     ('addbmm', '', _small_2d, lambda t, d: [_small_3d(t, d), _small_3d(t, d)],
-        1e-1, 1e-1, 1e-4, _float_types2, _cpu_types, True, [tf32_on_and_off(0.005)]),
+        1e-1, 1e-1, 1e-4, _float_types_2_and_complex_if_not_rocm, _cpu_types, True, [tf32_on_and_off(0.005)]),
     ('addbmm', 'scalar', _small_2d, lambda t, d: [_number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)],
-        1e-1, 1e-1, 1e-4, _float_types2, _cpu_types, True,
+        1e-1, 1e-1, 1e-4, _float_types_2_and_complex_if_not_rocm, _cpu_types, True,
         [tf32_on_and_off(0.005), _wrap_maybe_warns("This overload of addbmm_? is deprecated")]),
     ('addbmm', 'two_scalars', _small_2d, lambda t, d: [_number(0.5, 3, t), _number(0.4, 2, t), _small_3d(t, d), _small_3d(t, d)],
-        1e-1, 1e-1, 1e-4, _float_types2, _cpu_types, True,
+        1e-1, 1e-1, 1e-4, _float_types_2_and_complex_if_not_rocm, _cpu_types, True,
         [tf32_on_and_off(0.005), _wrap_maybe_warns("This overload of addbmm_? is deprecated")]),
     ('baddbmm', '', _small_3d, lambda t, d: [_small_3d(t, d), _small_3d(t, d)],
         1e-2, 1e-1, 1e-4, _float_types2),
