@@ -61,6 +61,7 @@ TESTS = [
     'test_torch',
     'test_type_info',
     'test_type_hints',
+    'test_unary_ufuncs',
     'test_utils',
     'test_namedtuple_return_api',
     'test_jit_profiling',
