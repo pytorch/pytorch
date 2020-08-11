@@ -579,6 +579,34 @@ void AssertVec256(T expected, T actual,
     }
 }
 
+struct TestSeed {
+
+    TestSeed() : testSeed( std::chrono::high_resolution_clock::now().time_since_epoch().count()){
+    }
+
+    TestSeed(uint64_t seed) : testSeed(seed) {
+    }
+
+    uint64_t getSeed() {
+        return testSeed;
+    }
+
+    operator uint64_t () {
+        return testSeed;
+    }
+
+    uint64_t nextSeed() {
+        auto ret = testSeed + index;
+        ++index;
+        return ret;
+    }
+
+private:
+    uint64_t testSeed;
+    int index = 0;
+};
+
+
 template <typename T, typename U = typename CmpHelper<T>::cmpType, bool is_floating_point = std::is_floating_point<U>::value>
 struct ValueGen {
     std::uniform_int_distribution<int64_t> dis;
@@ -586,8 +614,11 @@ struct ValueGen {
 
     ValueGen() :ValueGen(std::numeric_limits<U>::min(), std::numeric_limits<U>::max()) {
     }
-    ValueGen(U start, U stop) {
-        auto seed = std::chrono::high_resolution_clock::now().time_since_epoch().count();
+     
+    ValueGen(uint64_t seed) : ValueGen(std::numeric_limits<U>::min(), std::numeric_limits<U>::max(), seed) {
+    } 
+
+    ValueGen(U start, U stop, uint64_t seed = TestSeed()) {
         gen = std::mt19937(seed);
         dis = std::uniform_int_distribution<int64_t>(start, stop);
     }
@@ -607,18 +638,19 @@ struct ValueGen<T, U, true> {
     U _stop;
     bool use_sign_change = false;
     bool use_round = true;
-    ValueGen() :ValueGen(std::numeric_limits<U>::min(), std::numeric_limits<U>::max()) {
+
+    ValueGen(): ValueGen(std::numeric_limits<U>::min(), std::numeric_limits<U>::max()) {
     }
-    ValueGen(U start, U stop) {
-        auto seed = std::chrono::high_resolution_clock::now().time_since_epoch().count();
+
+    ValueGen(uint64_t seed) : ValueGen(std::numeric_limits<U>::min(), std::numeric_limits<U>::max(), seed) {
+    }
+
+    ValueGen(U start, U stop, uint64_t seed = TestSeed()) {
         gen = std::mt19937(seed);
         U mean = start * (U)0.5 + stop * (U)0.5;
         //make it  normal +-3sigma  
         U divRange = (U)(6.0);
         U stdev = std::abs(stop / divRange - start / divRange);
-#if 0
-        std::cout << mean << "_____" << stdev << std::endl;
-#endif
         normal = std::normal_distribution<U>{ mean,stdev };
         // in real its hard to get rounded value
         // so we will force it by  uniform chance
@@ -702,7 +734,6 @@ public:
         return specialCheck;
     }
 
-
     size_t getTrialCount() const { return trials; }
 
     bool isBitwise() const { return bitwise; }
@@ -715,6 +746,10 @@ public:
         return customCheck;
     }
 
+    TestSeed getTestSeed() const {
+        return testSeed;
+    }
+
 private:
     // if domains is empty we will test default
     std::vector<CheckWithinDomains<U>> domains;
@@ -722,6 +757,7 @@ private:
     bool specialCheck = false;
     bool bitwise = false;  // test bitlevel
     size_t trials = 0;
+    TestSeed testSeed;
 };
 
 template <typename T, typename U >
@@ -733,6 +769,11 @@ public:
     TestCaseBuilder<T, U>& set(bool bitwise, bool checkSpecialValues) {
         _case.bitwise = bitwise;
         _case.specialCheck = checkSpecialValues;
+        return *this;
+    }
+
+    TestCaseBuilder<T, U>& setRandomSeed(uint64_t seed) {
+        _case.testSeed = TestSeed(seed);
         return *this;
     }
 
@@ -784,14 +825,16 @@ void test_unary(
     auto domains = testCase.getDomains();
     auto domains_size = domains.size();
     auto test_trials = testCase.getTrialCount();
-    int trialCount = getTrialCount<UVT>(test_trials, domains_size);
+    int trialCount = getTrialCount<UVT>(test_trials, domains_size); 
+    TestSeed seed = testCase.getTestSeed();
+    std::cout << "Test Seed: " << seed << std::end;
     for (const CheckWithinDomains<UVT>& dmn : domains) {
 
         size_t dmn_argc = dmn.ArgsDomain.size();
         UVT start = dmn_argc > 0 ? dmn.ArgsDomain[0].start : default_start;
         UVT end = dmn_argc > 0 ? dmn.ArgsDomain[0].end : default_end;
         std::cout << dmn << std::endl;
-        ValueGen<VT> generator(start, end);
+        ValueGen<VT> generator(start, end, seed.nextSeed());
         for (int trial = 0; trial < trialCount; trial++) {
 
             for (int k = 0; k < el_count; k++) {
@@ -904,7 +947,10 @@ void test_binary(
     auto domains = testCase.getDomains();
     auto domains_size = domains.size();
     auto test_trials = testCase.getTrialCount();
-    int trialCount = getTrialCount<UVT>(test_trials, domains_size);
+    int trialCount = getTrialCount<UVT>(test_trials, domains_size); 
+    TestSeed seed = testCase.getTestSeed();
+    std::cout << "Test Seed: " << seed << std::end;
+
     for (const CheckWithinDomains<UVT>& dmn : testCase.getDomains()) {
 
         size_t dmn_argc = dmn.ArgsDomain.size();
@@ -913,8 +959,8 @@ void test_binary(
         UVT start1 = dmn_argc > 1 ? dmn.ArgsDomain[1].start : default_start;
         UVT end1 = dmn_argc > 1 ? dmn.ArgsDomain[1].end : default_end;
         std::cout << dmn << std::endl;
-        ValueGen<VT> generator0(start0, end0);
-        ValueGen<VT> generator1(start1, end1);
+        ValueGen<VT> generator0(start0, end0, seed.nextSeed());
+        ValueGen<VT> generator1(start1, end1, seed.nextSeed());
         for (int trial = 0; trial < trialCount; trial++) {
 
             for (int k = 0; k < el_count; k++) {
@@ -1013,6 +1059,10 @@ void test_ternary(
     auto domains_size = domains.size();
     auto test_trials = testCase.getTrialCount();
     int trialCount = getTrialCount<UVT>(test_trials, domains_size);
+
+    TestSeed seed = testCase.getTestSeed();
+    std::cout << "Test Seed: " << seed << std::end;
+
     for (const CheckWithinDomains<UVT>& dmn : testCase.getDomains()) {
 
         size_t dmn_argc = dmn.ArgsDomain.size();
@@ -1022,9 +1072,10 @@ void test_ternary(
         UVT end1 = dmn_argc > 1 ? dmn.ArgsDomain[1].end : default_end;
         UVT start2 = dmn_argc > 2 ? dmn.ArgsDomain[2].start : default_start;
         UVT end2 = dmn_argc > 2 ? dmn.ArgsDomain[2].end : default_end;
-        ValueGen<VT> generator0(start0, end0);
-        ValueGen<VT> generator1(start1, end1);
-        ValueGen<VT> generator2(start2, end2);
+        ValueGen<VT> generator0(start0, end0, seed.nextSeed());
+        ValueGen<VT> generator1(start1, end1, seed.nextSeed());
+        ValueGen<VT> generator2(start2, end2, seed.nextSeed());
+
         std::cout << dmn << std::endl;
         for (int trial = 0; trial < trialCount; trial++) {
 
