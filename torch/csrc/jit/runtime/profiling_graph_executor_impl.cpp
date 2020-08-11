@@ -68,7 +68,7 @@ static bool needsGradientInProfilingMode(Block* b) {
 
     for (auto o : n->outputs()) {
       if (auto ptt = o->type()->cast<TensorType>()) {
-        if (ptt->requiresGrad() && *ptt->requiresGrad()) {
+        if (!ptt->requiresGrad() || *ptt->requiresGrad()) {
           return true;
         }
       }
@@ -203,9 +203,9 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(
   if (!pr_) {
     auto copy = graph->copy();
     runProfilingInsensitiveOptimizations(copy);
-    if (remaining_bailout_depth == getBailoutDepth()) {	
-      PeelProfilingLoops(copy);	
-    }
+    // if (remaining_bailout_depth == getBailoutDepth()) {	
+    //   PeelProfilingLoops(copy);	
+    // }
     pr_ = ProfilingRecord::instrumentGraph(copy);
     auto pr_copy = pr_->graph()->copy();
     GRAPH_DUMP("Profiled Graph: ", pr_copy);
