@@ -237,7 +237,7 @@ public:
 
       return std::move(*this).kernel(
         std::move(dispatch_key),
-        KernelFunction::makeFromUnboxedFunction(CompileTimeFunctionPointer<FuncType, kernel_func>()),
+        KernelFunction::makeFromUnboxedFunction(TORCH_FN(kernel_func)),
         impl::CppSignature::make<FuncType>(),
         // TODO Do schema inference without relying on WrapFunctionIntoFunctor
         detail::inferFunctionSchemaFromFunctor<typename impl::WrapFunctionIntoFunctor<CompileTimeFunctionPointer<FuncType, kernel_func>>::type>()
