@@ -1,6 +1,8 @@
 from contextlib import contextmanager
 import copy
 import itertools
+import os
+import inspect
 
 import torch
 
@@ -28,6 +30,62 @@ def _find_tensors(obj):
     if isinstance(obj, dict):
         return itertools.chain(*map(_find_tensors, obj.values()))
     return []
+
+def _dump_DDP_relevant_env_vars():
+    relevant_env_vars = [
+        "RANK",
+        "LOCAL_RANK",
+        "WORLD_SIZE",
+        "MASTER_PORT",
+        "MASTER_ADDR",
+        "CUDA_VISIBLE_DEVICES",
+        "GLOO_SOCKET_IFNAME",
+        "GLOO_DEVICE_TRANSPORT",
+        "NCCL_SOCKET_IFNAME",
+        "NCCL_BLOCKING_WAIT",
+        "NCCL_DEBUG",
+        "NCCL_DEBUG_SUBSYS",
+        "NCCL_IB_DISABLE",
+        # More NCCL env vars:
+        "NCCL_P2P_DISABLE",
+        "NCCL_P2P_LEVEL",
+        "NCCL_SHM_DISABLE",
+        "NCCL_SOCKET_NTHREADS",
+        "NCCL_NSOCKS_PERTHREAD",
+        "NCCL_BUFFSIZE",
+        "NCCL_NTHREADS",
+        "NCCL_RINGS",
+        "NCCL_MAX_NCHANNELS",
+        "NCCL_MIN_NCHANNELS",
+        "NCCL_CHECKS_DISABLE",
+        "NCCL_CHECK_POINTERS",
+        "NCCL_LAUNCH_MODE",
+        "NCCL_IB_HCA",
+        "NCCL_IB_TIMEOUT",
+        "NCCL_IB_RETRY_CNT",
+        "NCCL_IB_GID_INDEX",
+        "NCCL_IB_SL",
+        "NCCL_IB_TC",
+        "NCCL_IB_AR_THRESHOLD",
+        "NCCL_IB_CUDA_SUPPORT",
+        "NCCL_NET_GDR_LEVEL",
+        "NCCL_NET_GDR_READ",
+        "NCCL_SINGLE_RING_THRESHOLD",
+        "NCCL_LL_THRESHOLD",
+        "NCCL_TREE_THRESHOLD",
+        "NCCL_ALGO",
+        "NCCL_PROTO",
+        "NCCL_IGNORE_CPU_AFFINITY",
+        "NCCL_DEBUG_FILE",
+        "NCCL_COLLNET_ENABLE",
+        "NCCL_TOPO_FILE",
+        "NCCL_TOPO_DUMP_FILE",
+    ]
+    formatted_output = ""
+    for var in relevant_env_vars:
+        value = os.environ[var] if var in os.environ else "N/A"
+        formatted_output += "env:%s=%s\n" % (var, value)
+    print(formatted_output)
 
 
 class DistributedDataParallel(Module):
@@ -68,6 +126,10 @@ class DistributedDataParallel(Module):
     In order to spawn up multiple processes per node, you can use either
     ``torch.distributed.launch`` or ``torch.multiprocessing.spawn``
 
+    .. note ::
+        Please refer to `PyTorch Distributed Overview <https://pytorch.org/tutorials/beginner/dist_overview.html>`__
+        for a brief introduction to all features related to distributed training.
+
     .. note:: ``nccl`` backend is currently the fastest and
         highly recommended backend to be used with Multi-Process Single-GPU
         distributed training and this applies to both single-node and multi-node
@@ -85,6 +147,14 @@ class DistributedDataParallel(Module):
         ``map_location`` is configured properly for every process. Without
         ``map_location``, ``torch.load`` would recover the module to devices
         where the module was saved from.
+
+    .. note:: When a model is trained on ``M`` nodes with ``batch=N``, the
+        gradient will be ``M`` times smaller when compared to the same model
+        trained on a single node with ``batch=M*N`` (because the gradients
+        between different nodes are averaged). You should take this into
+        consideration when you want to obtain a mathematically equivalent
+        training process compared to the non-DistributedDataParallel
+        counterpart.
 
     .. warning::
         This module works only with the ``gloo`` and ``nccl`` backends.
@@ -540,6 +610,94 @@ class DistributedDataParallel(Module):
         super(DistributedDataParallel, self).train(mode)
         for module in self._module_copies[1:]:
             module.train(mode)
+        return self
+
+    def _register_comm_hook(self, state: object, hook: callable):
+        r"""
+        Register a communication hook which is an enhancement that provides a
+        flexible hook to users where they can specify how DDP aggregates gradients
+        across multiple workers.
+
+        This hook would be very useful for researchers to try out new ideas. For
+        example, this hook can be used to implement several algorithms like GossipGrad
+        and gradient compression which involve different communication strategies for
+        parameter syncs while running Distributed DataParallel training.
+
+        Arguments:
+            state (object): state is passed to the hook and can be used to maintain
+                            and update any state information that users would like to
+                            maintain as part of the training process. Examples: error
+                            feedback in gradient compression, peers to communicate with
+                            next in GossipGrad etc.
+            hook (callable): is defined as:
+                             hook(state: object, bucket: dist._GradBucket) -> torch.futures.Future:
+
+                             This function is called once the bucket is ready. The
+                             hook can perform whatever processing is needed and return
+                             a Future indicating completion of any async work (ex: allreduce).
+                             If the hook doesn't perform any communication, it can also
+                             just return a completed Future. The Future should hold the
+                             new value of grad bucket's tensors. Once a bucket is ready,
+                             c10d reducer would call this hook and use the tensors returned
+                             by the Future and copy grads to individual parameters.
+
+                             We also provide an API called ``get_future`` to retrieve a
+                             Future associated with the completion of ``c10d.ProcessGroup.work``.
+
+        .. warning ::
+            Grad bucket's tensors will not be predivided by world_size. User is responsible
+            to divide by the world_size in case of operations like allreduce.
+
+        .. warning ::
+            DDP communication hook can only be registered once and should be registered
+            before calling backward.
+
+        .. warning ::
+            The Future object that hook returns should contain a result that has the same
+            shape with the tensors inside grad bucket.
+
+        .. warning ::
+            DDP communication hook does not support single process multiple device mode.
+            Gradbucket tensors should consist of only a single tensor.
+
+        .. warning ::
+            ``get_future`` API supports only NCCL backend and will return a ``torch._C.Future``
+            which is an internal type and should be used with caution. It can still be used by
+            ``_register_comm_hook`` API, but it is subject to some subtle differences compared
+            to ``torch.futures.Future``.
+
+        .. warning ::
+            DDP communication hook is experimental and subject to change.
+
+        Example::
+            Below is an example of a noop hook that returns back the same tensors:
+
+            >>> def noop(state: object, bucket: dist._GradBucket): -> torch.futures.Future
+            >>>     fut = torch.futures.Future()
+            >>>     fut.set_result(bucket.get_tensors())
+            >>>     return fut
+
+            >>> ddp._register_comm_hook(state = None, hook = noop)
+
+        Example::
+            Below is an example of a Parallel SGD algorithm where gradients are encoded before
+            allreduce, and then decoded after allreduce.
+
+            >>> def encode_and_decode(state: object, bucket: dist._GradBucket): -> torch.futures.Future
+            >>>     tensors = [t / process_group.world_size for t in bucket.get_tensors()]
+            >>>     encoded_tensors = encode(tensors) # encode gradients
+            >>>     fut = process_group.allreduce(encoded_tensors).get_future()
+            >>>     # Define the then callback to decode.
+            >>>     def decode(fut):
+            >>>         decoded_tensors = decode(fut.wait()) # decode gradients
+            >>>         return decoded_tensors
+            >>>     return fut.then(decode)
+
+            >>> ddp._register_comm_hook(state = None, hook = encode_and_decode)
+
+        """
+        self._check_comm_hook(hook)
+        dist._register_comm_hook(self.reducer, state, hook)
 
     def _distributed_broadcast_coalesced(self, tensors, buffer_size):
         dist._broadcast_coalesced(self.process_group, tensors, buffer_size)
@@ -569,7 +727,10 @@ class DistributedDataParallel(Module):
                         # to zero the grads on all model replicas as well.
                         # This snippet is copied from torch.optim.Optimizer.
                         if param.grad is not None:
-                            param.grad.detach_()
+                            if param.grad.grad_fn is not None:
+                                param.grad.detach_()
+                            else:
+                                param.grad.requires_grad_(False)
                             param.grad.zero_()
 
             # module buffer sync
@@ -599,3 +760,24 @@ class DistributedDataParallel(Module):
                     assert self.device_type != 'cpu', "SyncBatchNorm layers only work with GPU modules"
                     layer._specify_ddp_gpu_num(
                         len(self.device_ids) if self.device_ids else 1)
+
+    def _check_comm_hook(self, hook):
+        if not callable(hook):
+            raise TypeError("Communication hook must be callable.")
+
+        sig = inspect.signature(hook)
+        if (
+            sig.parameters["bucket"].annotation != inspect._empty
+            and sig.parameters["bucket"].annotation != dist._GradBucket
+        ):
+            raise ValueError(
+                "Communication hook: bucket annotation should be dist._GradBucket."
+            )
+
+        if sig.return_annotation != inspect._empty and (
+            sig.return_annotation != torch.futures.Future
+            and sig.return_annotation != torch._C.Future
+        ):
+            raise ValueError(
+                "Communication hook: return annotation should be torch.futures.Future or torch._C.Future."
+            )

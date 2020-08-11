@@ -24,7 +24,7 @@ from hypothesis import given, settings
 
 
 class TestInt8GenQuantParamsOperator(hu.HypothesisTestCase):
-    @settings(max_examples=50)
+    @settings(max_examples=20, deadline=None)
     @given(
         n=st.integers(10, 100),
         m=st.integers(1, 128),
@@ -78,6 +78,13 @@ class TestInt8GenQuantParamsOperator(hu.HypothesisTestCase):
             gen_quant_params_net
         ), "Failed to run the gen_quant_params net"
         scale, zero_point = dnnlowp_pybind11.ObserveInt8QuantParamsBlob("quant_param")
+        shapes, types = workspace.InferShapesAndTypes(
+            [gen_quant_params_net],
+            blob_dimensions={"X": [n, m, k], "quant_scheme": [1]},
+            blob_types={"X": core.DataType.FLOAT, "quant_scheme": core.DataType.STRING}
+        )
+        self.assertEqual(shapes["quant_param"], [1])
+        self.assertEqual(types["quant_param"], core.DataType.FLOAT)
 
         np.testing.assert_equal(scale, X_qparam.scale)
         np.testing.assert_equal(zero_point, X_qparam.zero_point)

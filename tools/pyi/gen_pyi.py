@@ -50,7 +50,7 @@ FACTORY_PARAMS = f"dtype: Optional[_dtype]=None, {DEVICE_PARAM}, requires_grad: 
 # this could be more precise w.r.t list contents etc. How to do Ellipsis?
 INDICES = "indices: Union[None, _int, slice, Tensor, List, Tuple]"
 
-blacklist = [
+blocklist = [
     '__init_subclass__',
     '__new__',
     '__subclasshook__',
@@ -90,6 +90,9 @@ blacklist = [
     'norm',
     'split',
     'unique_consecutive',
+    'atleast_1d',
+    'atleast_2d',
+    'atleast_3d',
     # These are handled specially by python_arg_parser.cpp
     'add',
     'add_',
@@ -248,7 +251,7 @@ def generate_type_hints(fname, decls, namedtuples, is_tensor=False):
     This function currently encodes quite a bit about the semantics of
     the translation C++ -> Python.
     """
-    if fname in blacklist:
+    if fname in blocklist:
         return []
 
     type_hints = []

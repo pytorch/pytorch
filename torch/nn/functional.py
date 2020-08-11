@@ -12,7 +12,7 @@ from .modules.utils import _single, _pair, _triple, _list_with_default
 from . import grad  # noqa: F401
 from torch import _VF
 from .._jit_internal import boolean_dispatch, List, Optional, _overload
-from .._overrides import has_torch_function, handle_torch_function
+from ..overrides import has_torch_function, handle_torch_function
 
 
 Tensor = torch.Tensor
@@ -1083,18 +1083,26 @@ def feature_alpha_dropout(input, p=0.5, training=False, inplace=False):
             else _VF.feature_alpha_dropout(input, p, training))
 
 
-def threshold(input, threshold, value, inplace=False):
+def _threshold(input, threshold, value, inplace=False):
     # type: (Tensor, float, float, bool) -> Tensor
     r"""Thresholds each element of the input Tensor.
 
     See :class:`~torch.nn.Threshold` for more details.
     """
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(
+                _threshold, (input,), input, threshold, value, inplace=inplace)
     if inplace:
         result = _VF.threshold_(input, threshold, value)
     else:
         result = _VF.threshold(input, threshold, value)
     return result
 
+# We define this function as _threshold because it takes an argument
+# named threshold, which clobbers the recursive reference to the
+# function needed for __torch_function__ support
+threshold = _threshold
 
 threshold_ = _add_docstr(_VF.threshold_, r"""
 threshold_(input, threshold, value) -> Tensor
@@ -1659,7 +1667,7 @@ def linear(input, weight, bias=None):
 
     Shape:
 
-        - Input: :math:`(N, *, in\_features)` where `*` means any number of
+        - Input: :math:`(N, *, in\_features)` N is the batch size, `*` means any number of
           additional dimensions
         - Weight: :math:`(out\_features, in\_features)`
         - Bias: :math:`(out\_features)`
@@ -1700,6 +1708,29 @@ def bilinear(input1, input2, weight, bias=None):
     """
     return torch.bilinear(input1, input2, weight, bias)
 
+def silu(input, inplace=False):
+    # type: (Tensor, bool) -> Tensor
+    r"""Applies the silu function, element-wise.
+
+    .. math::
+        \text{silu}(x) = x * \sigma(x), \text{where } \sigma(x) \text{ is the logistic sigmoid.}
+
+    .. note::
+        See `Gaussian Error Linear Units (GELUs) <https://arxiv.org/abs/1606.08415>`_ 
+        where the SiLU (Sigmoid Linear Unit) was originally coined, and see 
+        `Sigmoid-Weighted Linear Units for Neural Network Function Approximation 
+        in Reinforcement Learning <https://arxiv.org/abs/1702.03118>`_ and `Swish: 
+        a Self-Gated Activation Function <https://arxiv.org/abs/1710.05941v1>`_ 
+        where the SiLU was experimented with later.
+
+    See :class:`~torch.nn.SiLU` for more details.
+    """
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(silu, (input,), input, inplace=inplace)
+    if inplace:
+        return torch._C._nn.silu_(input)
+    return torch._C._nn.silu(input)
 
 def hardswish(input, inplace=False):
     # type: (Tensor, bool) -> Tensor
@@ -1918,10 +1949,14 @@ def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
 
     if input.dim() == 2:
         if offsets is not None:
+            type_str = "<unknown>"
+            # TODO: Remove this once script supports type() calls
+            if not torch.jit.is_scripting():
+                type_str = str(type(offsets))
             raise ValueError("if input is 2D, then offsets has to be None"
                              ", as input is treated is a mini-batch of"
                              " fixed length sequences. However, found "
-                             "offsets of type {}".format(type(offsets)))
+                             "offsets of type {}".format(type_str))
         offsets = torch.arange(0, input.numel(), input.size(1),
                                dtype=torch.long, device=input.device)
 
@@ -2045,6 +2080,10 @@ def layer_norm(input, normalized_shape, weight=None, bias=None, eps=1e-5):
 
     See :class:`~torch.nn.LayerNorm` for details.
     """
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(
+                layer_norm, (input,), input, normalized_shape, weight=weight, bias=bias, eps=eps)
     return torch.layer_norm(input, normalized_shape, weight, bias, eps,
                             torch.backends.cudnn.enabled)
 
@@ -2469,12 +2508,8 @@ def binary_cross_entropy(input, target, weight=None, size_average=None,
     else:
         reduction_enum = _Reduction.get_enum(reduction)
     if target.size() != input.size():
-        warnings.warn("Using a target size ({}) that is different to the input size ({}) is deprecated. "
-                      "Please ensure they have the same size.".format(target.size(), input.size()),
-                      stacklevel=2)
-    if input.numel() != target.numel():
-        raise ValueError("Target and input must have the same number of elements. target nelement ({}) "
-                         "!= input nelement ({})".format(target.numel(), input.numel()))
+        raise ValueError("Using a target size ({}) that is different to the input size ({}) is deprecated. "
+                         "Please ensure they have the same size.".format(target.size(), input.size()))
 
     if weight is not None:
         new_size = _infer_size(target.size(), weight.size())
@@ -2551,14 +2586,14 @@ def _pointwise_loss(lambd, lambd_optimized, input, target, reduction='mean'):
         return lambd_optimized(expanded_input, expanded_target, _Reduction.get_enum(reduction))
 
 
-def _smooth_l1_loss(input, target):
-    # type: (Tensor, Tensor) -> Tensor
+def _smooth_l1_loss(input, target, delta=1.):
+    # type: (Tensor, Tensor, float) -> Tensor
     t = torch.abs(input - target)
-    return torch.where(t < 1, 0.5 * t ** 2, t - 0.5)
+    return torch.where(t < delta, 0.5 * t ** 2, t * delta - (0.5 * delta ** 2))
 
 
-def smooth_l1_loss(input, target, size_average=None, reduce=None, reduction='mean'):
-    # type: (Tensor, Tensor, Optional[bool], Optional[bool], str) -> Tensor
+def smooth_l1_loss(input, target, size_average=None, reduce=None, reduction='mean', delta=1.):
+    # type: (Tensor, Tensor, Optional[bool], Optional[bool], str, float) -> Tensor
     r"""Function that uses a squared term if the absolute
     element-wise error falls below 1 and an L1 term otherwise.
 
@@ -2578,7 +2613,7 @@ def smooth_l1_loss(input, target, size_average=None, reduce=None, reduction='mea
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
     if target.requires_grad:
-        ret = _smooth_l1_loss(input, target)
+        ret = _smooth_l1_loss(input, target, delta=delta)
         if reduction != 'none':
             ret = torch.mean(ret) if reduction == 'mean' else torch.sum(ret)
     else:
@@ -2997,11 +3032,11 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
             Default: ``False``
         recompute_scale_factor (bool, optional): recompute the scale_factor for use in the
             interpolation calculation.  When `scale_factor` is passed as a parameter, it is used
-            to compute the `output_size`.  If `recompute_scale_factor` is ```True`` or not specified,
-            a new `scale_factor` will be computed based on the output and input sizes for use in the
-            interpolation computation (i.e. the computation will be identical to if the computed
-            `output_size` were passed-in explicitly).  Otherwise, the passed-in `scale_factor` will
-            be used in the interpolation computation.  Note that when `scale_factor` is floating-point,
+            to compute the `output_size`.  If `recompute_scale_factor` is ```False`` or not specified,
+            the passed-in `scale_factor` will be used in the interpolation computation.
+            Otherwise, a new `scale_factor` will be computed based on the output and input sizes for
+            use in the interpolation computation (i.e. the computation will be identical to if the computed
+            `output_size` were passed-in explicitly).  Note that when `scale_factor` is floating-point,
             the recomputed scale_factor may differ from the one passed in due to rounding and precision
             issues.
 
@@ -3023,10 +3058,9 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
     .. warning::
         When scale_factor is specified, if recompute_scale_factor=True,
         scale_factor is used to compute the output_size which will then
-        be used to infer new scales for the interpolation. This is the current
-        default behavior when recompute_scale_factor is not specified.
-        The default behavior for recompute_scale_factor will change to False
-        in 1.6.0, and scale_factor will be used in the interpolation
+        be used to infer new scales for the interpolation.
+        The default behavior for recompute_scale_factor changed to False
+        in 1.6.0, and scale_factor is used in the interpolation
         calculation.
 
     Note:
@@ -3055,8 +3089,9 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
 
     scale_factor_len = input.dim() - 2
     scale_factor_list = torch.jit.annotate(List[Optional[float]], [None for _ in range(scale_factor_len)])
-    if scale_factor is not None and recompute_scale_factor is False:
-        if isinstance(scale_factor, list):
+    # default value of recompute_scale_factor is False
+    if scale_factor is not None and (recompute_scale_factor is False or recompute_scale_factor is None):
+        if isinstance(scale_factor, (list, tuple)):
             _scale_factor_repeated = scale_factor
         else:
             _scale_factor_repeated = [scale_factor for _ in range(scale_factor_len)]  # noqa: C416
@@ -3295,6 +3330,9 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros', align_corner
         behaviour in its backward pass that is not easily switched off.
         Please see the notes on :doc:`/notes/randomness` for background.
 
+    Note:
+        NaN values in :attr:`grid` would be interpreted as ``-1``.
+
     Args:
         input (Tensor): input of shape :math:`(N, C, H_\text{in}, W_\text{in})` (4-D case)
                         or :math:`(N, C, D_\text{in}, H_\text{in}, W_\text{in})` (5-D case)
@@ -3412,7 +3450,7 @@ def affine_grid(theta, size, align_corners=None):
         Up to version 1.2.0, all grid points along a unit dimension were
         considered arbitrarily to be at ``-1``.
         From version 1.3.0, under ``align_corners = True`` all grid points
-        along a unit dimension are condsidered to be at ```0``
+        along a unit dimension are considered to be at ```0``
         (the center of the input image).
     """
     if not torch.jit.is_scripting():

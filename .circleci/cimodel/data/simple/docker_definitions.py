@@ -26,7 +26,6 @@ IMAGE_NAMES = [
     "pytorch-linux-xenial-py3.6-gcc5.4",
     "pytorch-linux-xenial-py3.6-gcc7.2",
     "pytorch-linux-xenial-py3.6-gcc7",
-    "pytorch-linux-xenial-pynightly",
     "pytorch-linux-xenial-rocm3.3-py3.6",
     "pytorch-linux-xenial-rocm3.5.1-py3.6",
 ]
@@ -38,7 +37,10 @@ def get_workflow_jobs():
         OrderedDict(
             {
                 "docker_build_job": OrderedDict(
-                    {"name": quote(image_name), "image_name": quote(image_name)}
+                    {
+                        "name": quote(f"docker-{image_name}"),
+                        "image_name": quote(image_name),
+                    }
                 )
             }
         )

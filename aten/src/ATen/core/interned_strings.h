@@ -66,6 +66,8 @@ namespace c10 {
   _(prim, ListConstruct)             \
   _(prim, ListUnpack)                \
   _(prim, DictConstruct)             \
+  _(prim, EnumName)                  \
+  _(prim, EnumValue)                 \
   _(prim, StringIndex)               \
   _(prim, NumToTensor)               \
   _(prim, Uninitialized)             \
@@ -141,6 +143,10 @@ namespace c10 {
   _(aten, abs_)                      \
   _(aten, absolute)                  \
   _(aten, absolute_)                 \
+  _(aten, clamp)                     \
+  _(aten, clamp_)                    \
+  _(aten, clip)                      \
+  _(aten, clip_)                     \
   _(aten, append)                    \
   _(aten, item)                      \
   _(aten, format)                    \
@@ -239,6 +245,8 @@ namespace c10 {
   _(onnx, LogSoftmax)                \
   _(onnx, ReduceL1)                  \
   _(onnx, ReduceL2)                  \
+  _(onnx, Conv)                      \
+  _(onnx, BatchNormalization)        \
   FORALL_ATTR_BASE_SYMBOLS(_)        \
   _(attr, Subgraph)                  \
   _(attr, ReverseSubgraph)           \

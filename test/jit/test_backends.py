@@ -185,10 +185,11 @@ class TestBackends(JitTestCase):
 
     def __init__(self, name):
         super().__init__(name)
-        self.basic_module_test = BasicModuleTest()
-        self.nested_module_test = NestedModuleTest()
+        self.basic_module_test = BasicModuleTest(name)
+        self.nested_module_test = NestedModuleTest(name)
 
     def setUp(self):
+        super().setUp()
         if not TEST_WITH_ROCM:
             self.basic_module_test.setUp()
             self.nested_module_test.setUp()

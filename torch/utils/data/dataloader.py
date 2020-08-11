@@ -109,6 +109,9 @@ class DataLoader(Generic[T_co]):
         worker_init_fn (callable, optional): If not ``None``, this will be called on each
             worker subprocess with the worker id (an int in ``[0, num_workers - 1]``) as
             input, after seeding and before data loading. (default: ``None``)
+        prefetch_factor (int, optional, keyword-only arg): Number of sample loaded
+            in advance by each worker. ``2`` means there will be a total of
+            2 * num_workers samples prefetched across all workers. (default: ``2``)
 
 
     .. warning:: If the ``spawn`` start method is used, :attr:`worker_init_fn`
@@ -116,14 +119,23 @@ class DataLoader(Generic[T_co]):
                  :ref:`multiprocessing-best-practices` on more details related
                  to multiprocessing in PyTorch.
 
-    .. note:: ``len(dataloader)`` heuristic is based on the length of the sampler used.
-              When :attr:`dataset` is an :class:`~torch.utils.data.IterableDataset`,
-              ``len(dataset)`` (if implemented) is returned instead, regardless
-              of multi-process loading configurations, because PyTorch trust
-              user :attr:`dataset` code in correctly handling multi-process
-              loading to avoid duplicate data. See `Dataset Types`_ for more
-              details on these two types of datasets and how
-              :class:`~torch.utils.data.IterableDataset` interacts with `Multi-process data loading`_.
+    .. warning:: ``len(dataloader)`` heuristic is based on the length of the sampler used.
+                 When :attr:`dataset` is an :class:`~torch.utils.data.IterableDataset`,
+                 it instead returns an estimate based on ``len(dataset) / batch_size``, with proper
+                 rounding depending on :attr:`drop_last`, regardless of multi-process loading
+                 configurations. This represents the best guess PyTorch can make because PyTorch
+                 trusts user :attr:`dataset` code in correctly handling multi-process
+                 loading to avoid duplicate data.
+
+                 However, if sharding results in multiple workers having incomplete last batches,
+                 this estimate can still be inaccurate, because (1) an otherwise complete batch can
+                 be broken into multiple ones and (2) more than one batch worth of samples can be
+                 dropped when :attr:`drop_last` is set. Unfortunately, PyTorch can not detect such
+                 cases in general.
+
+                 See `Dataset Types`_ for more details on these two types of datasets and how
+                 :class:`~torch.utils.data.IterableDataset` interacts with
+                 `Multi-process data loading`_.
     """
     dataset: Dataset[T_co]
     batch_size: Optional[int]
@@ -132,6 +144,7 @@ class DataLoader(Generic[T_co]):
     drop_last: bool
     timeout: float
     sampler: Sampler
+    prefetch_factor: int
 
     __initialized = False
 
@@ -141,7 +154,8 @@ class DataLoader(Generic[T_co]):
                  num_workers: int = 0, collate_fn: _collate_fn_t = None,
                  pin_memory: bool = False, drop_last: bool = False,
                  timeout: float = 0, worker_init_fn: _worker_init_fn_t = None,
-                 multiprocessing_context=None, generator=None):
+                 multiprocessing_context=None, generator=None,
+                 *, prefetch_factor: int = 2):
         torch._C._log_api_usage_once("python.data_loader")  # type: ignore
 
         if num_workers < 0:
@@ -151,8 +165,14 @@ class DataLoader(Generic[T_co]):
         if timeout < 0:
             raise ValueError('timeout option should be non-negative')
 
+        if num_workers == 0 and prefetch_factor != 2:
+            raise ValueError('prefetch_factor option could only be specified in multiprocessing.'
+                             'let num_workers > 0 to enable multiprocessing.')
+        assert prefetch_factor > 0
+
         self.dataset = dataset
         self.num_workers = num_workers
+        self.prefetch_factor = prefetch_factor
         self.pin_memory = pin_memory
         self.timeout = timeout
         self.worker_init_fn = worker_init_fn
@@ -339,7 +359,7 @@ class DataLoader(Generic[T_co]):
 
             # Cannot statically verify that dataset is Sized
             length = self._IterableDataset_len_called = len(self.dataset)  # type: ignore
-            if self.batch_size is not None:
+            if self.batch_size is not None:  # IterableDataset doesn't allow custom sampler or batch_sampler
                 from math import ceil
                 if self.drop_last:
                     length = length // self.batch_size
@@ -359,6 +379,7 @@ class _BaseDataLoaderIter(object):
         self._drop_last = loader.drop_last
         self._index_sampler = loader._index_sampler
         self._num_workers = loader.num_workers
+        self._prefetch_factor = loader.prefetch_factor
         self._pin_memory = loader.pin_memory and torch.cuda.is_available()
         self._timeout = loader.timeout
         self._collate_fn = loader.collate_fn
@@ -707,6 +728,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
         super(_MultiProcessingDataLoaderIter, self).__init__(loader)
 
         assert self._num_workers > 0
+        assert self._prefetch_factor > 0
 
         if loader.multiprocessing_context is None:
             multiprocessing_context = multiprocessing
@@ -775,12 +797,13 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
         else:
             self._data_queue = self._worker_result_queue
 
-        _utils.signal_handling._set_worker_pids(id(self), tuple(w.pid for w in self._workers))
+        # .pid can be None only before process is spawned (not the case, so ignore)
+        _utils.signal_handling._set_worker_pids(id(self), tuple(w.pid for w in self._workers))  # type: ignore
         _utils.signal_handling._set_SIGCHLD_handler()
         self._worker_pids_set = True
 
         # prime the prefetch loop
-        for _ in range(2 * self._num_workers):
+        for _ in range(self._prefetch_factor * self._num_workers):
             self._try_put_index()
 
     def _try_get_data(self, timeout=_utils.MP_STATUS_CHECK_INTERVAL):
@@ -1009,7 +1032,8 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                 return self._process_data(data)
 
     def _try_put_index(self):
-        assert self._tasks_outstanding < 2 * self._num_workers
+        assert self._tasks_outstanding < self._prefetch_factor * self._num_workers
+
         try:
             index = self._next_index()
         except StopIteration:

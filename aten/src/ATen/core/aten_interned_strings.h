@@ -42,7 +42,6 @@ _(aten, _cast_Long) \
 _(aten, _cast_Short) \
 _(aten, _cat) \
 _(aten, _ceil) \
-_(aten, _clamp) \
 _(aten, _clamp_max) \
 _(aten, _clamp_min) \
 _(aten, _convolution) \
@@ -207,6 +206,9 @@ _(aten, as_tensor) \
 _(aten, asin) \
 _(aten, atan) \
 _(aten, atan2) \
+_(aten, atleast_1d) \
+_(aten, atleast_2d) \
+_(aten, atleast_3d) \
 _(aten, avg_pool1d) \
 _(aten, avg_pool2d) \
 _(aten, avg_pool2d_backward) \
@@ -240,7 +242,6 @@ _(aten, cholesky) \
 _(aten, cholesky_inverse) \
 _(aten, cholesky_solve) \
 _(aten, chunk) \
-_(aten, clamp) \
 _(aten, clamp_max) \
 _(aten, clamp_min) \
 _(aten, clone) \
@@ -348,6 +349,7 @@ _(aten, frobenius_norm) \
 _(aten, full) \
 _(aten, full_like) \
 _(aten, gather) \
+_(aten, gcd) \
 _(aten, ge) \
 _(aten, gelu) \
 _(aten, geometric) \
@@ -401,7 +403,10 @@ _(aten, is_set_to) \
 _(aten, is_signed) \
 _(aten, is_sparse) \
 _(aten, isclose) \
+_(aten, isreal) \
 _(aten, istft) \
+_(aten, isposinf) \
+_(aten, isneginf) \
 _(aten, kl_div) \
 _(aten, kl_div_backward) \
 _(aten, kthvalue) \
@@ -409,6 +414,7 @@ _(aten, l1_loss) \
 _(aten, l1_loss_backward) \
 _(aten, l1_loss_forward) \
 _(aten, layer_norm) \
+_(aten, lcm) \
 _(aten, le) \
 _(aten, leaky_relu) \
 _(aten, leaky_relu_backward) \
@@ -430,6 +436,7 @@ _(aten, _log_softmax) \
 _(aten, _log_softmax_backward_data) \
 _(aten, logcumsumexp) \
 _(aten, logdet) \
+_(aten, logit) \
 _(aten, logspace) \
 _(aten, logsumexp) \
 _(aten, lstm) \
@@ -543,6 +550,7 @@ _(aten, _euclidean_dist) \
 _(aten, pdist) \
 _(aten, cdist) \
 _(aten, permute) \
+_(aten, movedim) \
 _(aten, pin_memory) \
 _(aten, pinverse) \
 _(aten, pixel_shuffle) \
@@ -609,6 +617,8 @@ _(aten, selu) \
 _(aten, set) \
 _(aten, sigmoid) \
 _(aten, sign) \
+_(aten, signbit) \
+_(aten, silu) \
 _(aten, sin) \
 _(aten, sinh) \
 _(aten, size) \
@@ -703,6 +713,9 @@ _(aten, type_as) \
 _(aten, unbind) \
 _(aten, unfold) \
 _(aten, uniform) \
+_(aten, unsafe_chunk) \
+_(aten, unsafe_split) \
+_(aten, unsafe_split_with_sizes) \
 _(aten, unsqueeze) \
 _(aten, upsample_bilinear2d) \
 _(aten, upsample_bilinear2d_backward) \
