@@ -4734,27 +4734,25 @@ class TestAutogradComplex(TestCase):
 
         self.assertEqual(z.grad, z1.grad)
 
-    @onlyOnCPUAndCUDA
-    @dtypes(torch.float32, torch.float64)
-    def test_torch_complex_backward(self, device, dtype):
-        real = torch.tensor([1, 2], device=device, dtype=dtype, requires_grad=True)
-        imag = torch.tensor([3, 4], device=device, dtype=dtype, requires_grad=True)
+    # remove this test after gradcheck support is added for non-holomorphic functions
+    def test_torch_complex_backward(self):
+        real = torch.tensor([1.0, 2.0], requires_grad=True)
+        imag = torch.tensor([3.0, 4.0], requires_grad=True)
         z = torch.complex(real, imag)
         loss = z.sum()
         loss.backward()
-        self.assertEqual(torch.tensor([1.0, 1.0], dtype=dtype), real.grad, atol=1e-5, rtol=1e-5)
-        self.assertEqual(torch.tensor([0.0, 0.0], dtype=dtype), imag.grad, atol=1e-5, rtol=1e-5)
+        self.assertEqual(torch.tensor([1.0, 1.0]), real.grad, atol=1e-5, rtol=1e-5)
+        self.assertEqual(torch.tensor([0.0, 0.0]), imag.grad, atol=1e-5, rtol=1e-5)
 
-    @onlyOnCPUAndCUDA
-    @dtypes(torch.float32, torch.float64)
-    def test_torch_polar_backward(self, device, dtype):
-        abs = torch.tensor([1, 2], device=device, dtype=dtype, requires_grad=True)
-        angle = torch.tensor([math.pi / 2, 5 * math.pi / 4], device=device, dtype=dtype, requires_grad=True)
+    # remove this test after gradcheck support is added for non-holomorphic functions
+    def test_torch_polar_backward(self):
+        abs = torch.tensor([1.0, 2.0], requires_grad=True)
+        angle = torch.tensor([math.pi / 2, 5 * math.pi / 4], requires_grad=True)
         z = torch.polar(abs, angle)
         loss = z.sum()
         loss.backward()
-        self.assertEqual(torch.tensor([0.0, -0.70710678118], dtype=dtype), abs.grad, atol=1e-5, rtol=1e-5)
-        self.assertEqual(torch.tensor([0.0, 1.41421356237], dtype=dtype), angle.grad, atol=1e-5, rtol=1e-5)
+        self.assertEqual(torch.tensor([0.0, -0.70710678118]), abs.grad, atol=1e-5, rtol=1e-5)
+        self.assertEqual(torch.tensor([0.0, 1.41421356237]), angle.grad, atol=1e-5, rtol=1e-5)
 
 class TestAutogradFunctional(TestCase):
     def _assert_same_struct(self, res, base):
