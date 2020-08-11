@@ -21,7 +21,7 @@ from torch._utils_internal import get_source_lines_and_file
 from torch.futures import Future
 from typing import Tuple, List, Dict, Optional, Union, Any, TypeVar, Generic, Callable  # noqa: F401
 
-if sys.version_info > (3, 7):
+if sys.version_info[:2] > (3, 7):
     from typing import Final
 else:
     from typing_extensions import Final
