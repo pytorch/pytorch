@@ -7,12 +7,9 @@ from torch.autograd import Variable
 
 from torch.testing import \
     (make_non_contiguous,
-     get_common_float_types,
-     get_all_float_types,
-     get_common_float_and_complex_types,
-     get_common_float_and_complex_types_plus_half,
-     get_common_float_and_complex_types_plus_bfloat16,
-     get_all_float_and_complex_types)
+     _dispatch_dtypes,
+     floating_types, floating_types_and,
+     floating_and_complex_types, floating_and_complex_types_and)
 from torch.testing._internal.common_device_type import \
     (skipCUDAIfNoMagma, skipCPUIfNoLapack, expectedFailureCUDA,
      expectedAlertNondeterministic)
@@ -29,14 +26,15 @@ class OpInfo(object):
     def __init__(self,
                  name,  # the string name of the function
                  *,
-                 dtypes=get_common_float_types(),  # dtypes this function is expected to work with
+                 dtypes=floating_types(),  # dtypes this function is expected to work with
                  dtypesIfCPU=None,  # dtypes this function is expected to work with on CPU
                  dtypesIfCUDA=None,  # dtypes this function is expected to work with on CUDA
                  dtypesIfROCM=None,  # dtypes this function is expected to work with on ROCM
-                 has_out_kwarg=None,  # whether this function has an out kwarg
-                 test_autograd=True,  # whether this function's autograd should be tested
-                 supports_complex_autograd=None,  # whether this function supports complex autograd
                  decorators=None):  # decorators to apply to generated tests
+        # Validates the dtypes are generated from the dispatch-related functions
+        for dtype_list in (dtypes, dtypesIfCPU, dtypesIfCUDA, dtypesIfROCM):
+            assert isinstance(dtype_list, _dispatch_dtypes)
+
         self.name = name
 
         self.dtypes = dtypes
@@ -48,31 +46,23 @@ class OpInfo(object):
         self.method_variant = getattr(torch.Tensor, name) if hasattr(torch.Tensor, name) else None
         inplace_name = name + "_"
         self.inplace_variant = getattr(torch.Tensor, inplace_name) if hasattr(torch.Tensor, name) else None
-        self.has_out_kwarg = has_out_kwarg
-
-        self.test_autograd = test_autograd
-        self.supports_complex_autograd = supports_complex_autograd
-        if self.supports_complex_autograd is None:
-            self.supports_complex_autograd = (torch.cfloat in self.dtypesIfCPU or
-                                              torch.cdouble in self.dtypesIfCPU)
-
         self.decorators = decorators
-
-    def getOp(self):
-        """Returns the function variant of the operator, torch.<op_name>."""
-        return self.op
 
     def __call__(self, *args, **kwargs):
         """Calls the function variant of the operator."""
         return self.op(*args, **kwargs)
 
-    def getMethod(self):
+    def get_op(self):
+        """Returns the function variant of the operator, torch.<op_name>."""
+        return self.op
+
+    def get_method(self):
         """Returns the method variant of the operator, torch.Tensor.<op_name>.
         Returns None if the operator has no method variant.
         """
         return self.method_variant
 
-    def getInplace(self):
+    def get_inplace(self):
         """Returns the inplace variant of the operator, torch.Tensor.<op_name>_.
         Returns None if the operator has no inplace variant.
         """
@@ -98,18 +88,16 @@ class UnaryUfuncInfo(OpInfo):
     def __init__(self,
                  name,  # the string name of the function
                  *,
-                 dtypes=get_common_float_types(),
-                 dtypesIfCPU=get_common_float_and_complex_types_plus_bfloat16(),
-                 dtypesIfCUDA=get_common_float_and_complex_types_plus_half(),
-                 dtypesIfROCM=get_all_float_types(),
-                 has_out_kwarg=True,
+                 dtypes=floating_types(),
+                 dtypesIfCPU=floating_and_complex_types_and(torch.bfloat16),
+                 dtypesIfCUDA=floating_and_complex_types_and(torch.half),
+                 dtypesIfROCM=floating_types_and(torch.half, torch.bfloat16),
                  **kwargs):
         super(UnaryUfuncInfo, self).__init__(name,
                                              dtypes=dtypes,
                                              dtypesIfCPU=dtypesIfCPU,
                                              dtypesIfCUDA=dtypesIfCUDA,
                                              dtypesIfROCM=dtypesIfROCM,
-                                             has_out_kwarg=has_out_kwarg,
                                              **kwargs)
 
 L = 20
@@ -119,9 +107,9 @@ S = 5
 # Operator database
 op_db = [
     UnaryUfuncInfo('cos',
-                   dtypesIfCUDA=get_all_float_and_complex_types()),
+                   dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16)),
     UnaryUfuncInfo('cosh',
-                   dtypesIfCPU=get_common_float_and_complex_types()),
+                   dtypesIfCPU=floating_and_complex_types()),
 ]
 
 # Common operator groupings

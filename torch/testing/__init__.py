@@ -250,40 +250,68 @@ def make_non_contiguous(tensor: torch.Tensor) -> torch.Tensor:
     # Use .data here to hide the view relation between input and other temporary Tensors
     return input.data
 
-# Common type groups
-_common_float_types = (torch.float32, torch.float64)
-_common_float_types_plus_half = _common_float_types + (torch.float16,)
-_common_float_types_plus_bfloat16 = _common_float_types + (torch.bfloat16,)
-_all_float_types = (torch.float16, torch.bfloat16, torch.float32, torch.float64)
-_complex_types = (torch.complex64, torch.complex128)
-_common_float_and_complex_types = _common_float_types + _complex_types
-_common_float_and_complex_types_plus_half = _common_float_types_plus_half + _complex_types
-_common_float_and_complex_types_plus_bfloat16 = _common_float_types_plus_bfloat16 + _complex_types
-_all_float_and_complex_types = _all_float_types + _complex_types
 
-def get_common_float_types():
-    return _common_float_types
+# Functions and classes for describing the dtypes a function supports
 
-def get_all_float_types():
-    return _all_float_types
+# Verifies input is either a tuple of torch.dtypes or a single torch.dtype
+# Returns a tuple containing all the given torch.dtypes
+def _tuple_of_dtypes(*dtypes):
+    for dtype in dtypes:
+        assert isinstance(dtype, torch.dtype)
+    return dtypes
 
-def get_common_float_types_plus_half():
-    return _common_float_types_plus_half
+# class for tuples corresponding to a PyTorch dispatch macro
+class _dispatch_dtypes(tuple):
+    def __add__(self, other):
+        assert isinstance(other, tuple)
+        return _dispatch_dtypes(tuple.__add__(self, other))
 
-def get_common_float_types_plus_bfloat16():
-    return _common_float_types_plus_bfloat16
+_floating_types = _dispatch_dtypes((torch.float32, torch.float64))
+def floating_types():
+    return _floating_types
 
-def get_common_float_and_complex_types():
-    return _common_float_and_complex_types
+_floating_types_and_half = _floating_types + (torch.half,)
+def floating_types_and_half():
+    return _floating_types_and_half
 
-def get_common_float_and_complex_types_plus_bfloat16():
-    return _common_float_and_complex_types_plus_bfloat16
+def floating_types_and(*dtypes):
+    return _floating_types + _tuple_of_dtypes(*dtypes)
 
-def get_common_float_and_complex_types_plus_half():
-    return _common_float_and_complex_types_plus_half
+_floating_and_complex_types = _floating_types + (torch.cfloat, torch.cdouble)
+def floating_and_complex_types():
+    return _floating_and_complex_types
 
-def get_all_float_and_complex_types():
-    return _all_float_and_complex_types
+def floating_and_complex_types_and(*dtypes):
+    return _floating_and_complex_types + _tuple_of_dtypes(*dtypes)
+
+_integral_types = _dispatch_dtypes((torch.uint8, torch.int, torch.int16, torch.int32, torch.int64))
+def integral_types():
+    return _integral_types
+
+def integral_types_and(*dtypes):
+    return _integral_types + _tuple_of_dtypes(*dtypes)
+
+_all_types = _floating_types + _integral_types
+def all_types():
+    return _all_types
+
+def all_types_and(*dtypes):
+    return _all_types + _tuple_of_dtypes(*dtypes)
+
+_complex_types = (torch.cfloat, torch.cdouble)
+def complex_types():
+    return _complex_types
+
+_all_types_and_complex = _all_types + _complex_types
+def all_types_and_complex():
+    return _all_types_and_complex
+
+def all_types_and_complex_and(*dtypes):
+    return _all_types_and_complex + _tuple_of_dtypes(*dtypes)
+
+_all_types_and_half = _all_types + (torch.half,)
+def all_types_and_half():
+    return _all_types_and_half
 
 def get_all_dtypes(include_half=True, include_bfloat16=True, include_bool=True, include_complex=True) -> List[torch.dtype]:
     dtypes = get_all_int_dtypes() + get_all_fp_dtypes(include_half=include_half, include_bfloat16=include_bfloat16)
@@ -292,7 +320,6 @@ def get_all_dtypes(include_half=True, include_bfloat16=True, include_bool=True, 
     if include_complex:
         dtypes += get_all_complex_dtypes()
     return dtypes
-
 
 def get_all_math_dtypes(device) -> List[torch.dtype]:
     return get_all_int_dtypes() + get_all_fp_dtypes(include_half=device.startswith('cuda'),

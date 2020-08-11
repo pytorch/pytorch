@@ -284,7 +284,7 @@ class DeviceTypeTestBase(TestCase):
                                             dtype=dtype,
                                             op=op)
         else:
-            # Handles tests that don't use the ops decoartor
+            # Handles tests that don't use the ops decorator
             dtypes = cls._get_dtypes(test)
             dtypes = tuple(dtypes) if dtypes is not None else (None,)
             for dtype in dtypes:
