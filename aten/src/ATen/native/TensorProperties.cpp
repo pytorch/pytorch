@@ -70,11 +70,6 @@ Tensor & detach_(Tensor & self) {
   return self;
 }
 
-TORCH_LIBRARY_IMPL(aten, CatchAll, m) {
-  m.impl("detach", TORCH_FN(detach));
-  m.impl_UNBOXED("detach_", detach_);
-}
-
 Tensor contiguous(const Tensor & self) {
   return contiguous(self, MemoryFormat::Contiguous);
 }

@@ -123,7 +123,11 @@ if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
 fi
 
 if [[ "$BUILD_ENVIRONMENT" != *android* && "$BUILD_ENVIRONMENT" == *vulkan* ]]; then
+  echo "XXX-test-build"
+  env
+  echo "XXX-test-build~"
   export USE_VULKAN=1
+  export VULKAN_SDK=/var/lib/jenkins/vulkansdk/1.2.148.0
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then

@@ -1425,8 +1425,7 @@ Example::
             [-0.0889,  0.2122,  0.1412]])
 """)
 
-add_docstr(torch.clamp,
-           r"""
+add_docstr(torch.clamp, r"""
 clamp(input, min, max, out=None) -> Tensor
 
 Clamp all elements in :attr:`input` into the range `[` :attr:`min`, :attr:`max` `]` and return
@@ -1495,6 +1494,12 @@ Example::
     tensor([ 0.7753, -0.4702, -0.4599,  1.1899])
     >>> torch.clamp(a, max=0.5)
     tensor([ 0.5000, -0.4702, -0.4599,  0.5000])
+""".format(**common_args))
+
+add_docstr(torch.clip, r"""
+clip(input, min, max, *, out=None) -> Tensor
+
+Alias for :func:`torch.clamp`.
 """.format(**common_args))
 
 add_docstr(torch.conj,
@@ -7512,8 +7517,7 @@ Example::
 .. _[2]: https://www.jstor.org/stable/2156365
 """)
 
-add_docstr(torch.fft,
-           r"""
+add_docstr(torch.fft, r"""
 fft(input, signal_ndim, normalized=False) -> Tensor
 
 Complex-to-complex Discrete Fourier Transform
@@ -7547,6 +7551,10 @@ The inverse of this function is :func:`~torch.ifft`.
     repeatedly running FFT methods on tensors of same geometry with same
     configuration. See :ref:`cufft-plan-cache` for more details on how to
     monitor and control the cache.
+
+.. warning::
+    If the torch.fft module is imported then "torch.fft" will refer to the
+    module and not this function. Use :meth:`torch.Tensor.fft` instead.
 
 .. warning::
     Due to limited dynamic range of half datatype, performing this operation in half
