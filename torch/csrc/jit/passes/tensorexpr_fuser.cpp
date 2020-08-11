@@ -595,13 +595,6 @@ void insertGuards(
 
     
     auto graph = b->owningGraph();
-    auto fp = new GraphFunction("<tensorexpr>", fusion_group->g(attr::Subgraph), nullptr);
-    Value* fn_constant = graph->insertNode(graph->create(prim::Constant))
-                           ->s_(attr::name, "tensorexpr")
-                           ->output()
-                           ->setType(FunctionType::create(fp));
-    std::vector<Value*> inputs = {fn_constant};
-
     auto copy_fusion_group = fusion_group->g(attr::Subgraph)->copy();
     auto otypes = c10::fmap(copy_fusion_group->return_node()->inputs(), [](Value* v) {return v->type(); });
     auto tuple_type = TupleType::create(otypes);
@@ -612,6 +605,12 @@ void insertGuards(
     }
     copy_fusion_group->registerOutput(return_tuple->output());
     GRAPH_DUMP("copy_fusion_group", copy_fusion_group);
+    auto fp = new GraphFunction("<tensorexpr>", copy_fusion_group, nullptr);
+    Value* fn_constant = graph->insertNode(graph->create(prim::Constant))
+                           ->s_(attr::name, "tensorexpr")
+                           ->output()
+                           ->setType(FunctionType::create(fp));
+    std::vector<Value*> inputs = {fn_constant};
     Value* result = graph->insertNode(graph->create(prim::CallFunction, inputs))
                       ->output()
                       ->setType(tuple_type);
