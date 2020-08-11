@@ -172,6 +172,22 @@ namespace jit {
   _(SimplifyEliminateEmptyFor)              \
   _(SimplifyFlattenBlock)                   \
   _(SimplifyEliminateZeroLengthAlloc)       \
+  _(RegisterizerSimple)                     \
+  _(RegisterizerLoop)                       \
+  _(RegisterizerLoopFixedLoad)              \
+  _(RegisterizerMultiVar)                   \
+  _(RegisterizerVariableLoad)               \
+  _(RegisterizerSymbolicIndices)            \
+  _(RegisterizerEarlyStop)                  \
+  _(RegisterizerMultiLoop)                  \
+  _(RegisterizerRepeated)                   \
+  _(RegisterizerNoLoads)                    \
+  _(RegisterizerNoRepeatedStores)           \
+  _(RegisterizerMultiVarOverlap)            \
+  _(RegisterizerAllocs)                     \
+  _(RegisterizerNoInitializer)              \
+  _(RegisterizerLoadThenStore)              \
+  _(RegisterizerParallelized)               \
   _(StmtClone)                              \
   _(BoundsInference_1)                      \
   _(BoundsInference_2)                      \

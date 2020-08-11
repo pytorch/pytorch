@@ -59,7 +59,7 @@ void checkQuantizedTensor(const std::string& fn_name, Tensor t) {
 }
 
 template <typename T>
-void checkZeroPoint(const std::string& fn_name, T zero_point) {
+void checkZeroPoint(const std::string& fn_name, int64_t zero_point) {
   TORCH_CHECK(
       zero_point <= std::numeric_limits<T>::max(),
       fn_name,
