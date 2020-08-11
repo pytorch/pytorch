@@ -1,5 +1,3 @@
-# type: ignore
-
 import inspect
 from types import CodeType, FunctionType
 import torch
