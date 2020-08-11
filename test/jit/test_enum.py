@@ -111,13 +111,13 @@ class TestEnum(JitTestCase):
             False)
 
     def test_heterogenous_value_type_enum_error(self):
-        global ColorDiffType
+        global Color
 
-        class ColorDiffType(Enum):
+        class Color(Enum):
             RED = 1
             GREEN = "green"
 
-        def enum_comp(x: ColorDiffType, y: ColorDiffType) -> bool:
+        def enum_comp(x: Color, y: Color) -> bool:
             return x == y
 
         # TODO(gmagogsfm): Re-enable hooks when serialization/deserialization
@@ -162,7 +162,7 @@ class TestEnum(JitTestCase):
         self.assertEqual(scripted_enum_value(Color.GREEN), Color.GREEN.value)
 
     def test_enum_as_const(self):
-        global Color
+        global ColorConst
 
         class Color(Enum):
             RED = 1
