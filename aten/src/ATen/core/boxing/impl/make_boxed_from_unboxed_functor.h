@@ -275,7 +275,8 @@ using supported_primitive_arg_types = guts::typelist::typelist<
   }
 
   template<class Functor, bool AllowDeprecatedTypes, size_t... ivalue_arg_indices>
-  std::remove_cv_t<std::remove_reference_t<typename guts::infer_function_traits_t<Functor>::return_type>> call_functor_with_args_from_stack_(Functor* functor, Stack* stack, std::index_sequence<ivalue_arg_indices...>) {
+  std::decay_t<typename guts::infer_function_traits_t<Functor>::return_type>
+  call_functor_with_args_from_stack_(Functor* functor, Stack* stack, std::index_sequence<ivalue_arg_indices...>) {
     (void)(stack); // when sizeof...(ivalue_arg_indices) == 0, this argument would be unused and we have to silence the compiler warning.
 
     constexpr size_t num_ivalue_args = sizeof...(ivalue_arg_indices);
@@ -289,13 +290,13 @@ using supported_primitive_arg_types = guts::typelist::typelist<
      */
     using ArgTypes = typename guts::infer_function_traits_t<Functor>::parameter_types;
     return (*functor)(reference_cast<guts::typelist::element_t<ivalue_arg_indices, ArgTypes>>(
-      ivalue_to_arg<std::remove_cv_t<std::remove_reference_t<guts::typelist::element_t<ivalue_arg_indices, ArgTypes>>>, AllowDeprecatedTypes>::call(
+      ivalue_to_arg<std::decay_t<guts::typelist::element_t<ivalue_arg_indices, ArgTypes>>, AllowDeprecatedTypes>::call(
         std::move(torch::jit::peek(*stack, ivalue_arg_indices, num_ivalue_args))
     ))...);
   }
 
   template<class Functor, bool AllowDeprecatedTypes>
-  std::remove_cv_t<std::remove_reference_t<typename guts::infer_function_traits_t<Functor>::return_type>> call_functor_with_args_from_stack(Functor* functor, Stack* stack) {
+  std::decay_t<typename guts::infer_function_traits_t<Functor>::return_type> call_functor_with_args_from_stack(Functor* functor, Stack* stack) {
     constexpr size_t num_ivalue_args = guts::infer_function_traits_t<Functor>::number_of_parameters;
     return call_functor_with_args_from_stack_<Functor, AllowDeprecatedTypes>(functor, stack, std::make_index_sequence<num_ivalue_args>());
   }
@@ -334,9 +335,11 @@ using supported_primitive_arg_types = guts::typelist::typelist<
 
       using ReturnType = typename guts::infer_function_traits_t<KernelFunctor>::return_type;
       constexpr bool has_outputs = !std::is_same<void, ReturnType>::value;
-      guts::if_constexpr<has_outputs>([&] (auto _) {
-        using ReturnType_ = std::remove_cv_t<std::remove_reference_t<typename decltype(_)::template type_identity<ReturnType>>>;
-        ReturnType_ output = call_functor_with_args_from_stack<KernelFunctor, AllowDeprecatedTypes>(functor_, _(stack));
+      guts::if_constexpr<has_outputs>([&] (auto delay_check) {
+        // Decay ReturnType to ReturnType_ so that if a reference gets returned, we actually store it by value
+        // and don't get a dangling reference. This is only required because some kernels still return `Tensor&`.
+        using ReturnType_ = std::decay_t<typename decltype(delay_check)::template type_identity<ReturnType>>;
+        ReturnType_ output = call_functor_with_args_from_stack<KernelFunctor, AllowDeprecatedTypes>(functor_, delay_check(stack));
         torch::jit::drop(*stack, num_inputs);
         push_outputs<ReturnType_, AllowDeprecatedTypes>::call(std::move(output), stack);
       }, /* else */ [&] {
