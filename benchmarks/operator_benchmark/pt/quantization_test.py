@@ -233,8 +233,6 @@ class FakeQuantizePerChannelOpBenchmark(op_bench.TorchBenchmarkBase):
         self.scale = torch.tensor([1.] * C).to(device)
         self.zero_point = torch.tensor([0.] * C).to(device)
         self.input.requires_grad_()
-        self.scale.requires_grad_()
-        self.zero_point.requires_grad_()
         self.args = [
             self.input, self.scale, self.zero_point,
             self.axis, self.quant_min, self.quant_max
@@ -245,6 +243,8 @@ class FakeQuantizePerChannelOpBenchmark(op_bench.TorchBenchmarkBase):
         elif op_type == 'learnable_kernel':
             self.op = torch._fake_quantize_learnable_per_channel_affine
         else:
+            self.scale.requires_grad = False
+            self.args[2] = torch.tensor([0] * C).to(device)
             self.op = torch.fake_quantize_per_channel_affine
 
     def forward(self):

@@ -11,6 +11,7 @@ import inspect
 import weakref
 import warnings
 import torch
+import sys
 # This is needed. `torch._jit_internal` is imported before `torch.distributed.__init__`.
 # Explicitly ask to import `torch.distributed.__init__` first.
 # Otherwise, "AttributeError: module 'torch' has no attribute 'distributed'" is raised.
@@ -19,7 +20,11 @@ from torch._six import builtins
 from torch._utils_internal import get_source_lines_and_file
 from torch.futures import Future
 from typing import Tuple, List, Dict, Optional, Union, Any, TypeVar, Generic, Callable  # noqa: F401
-from typing_extensions import Final
+
+if sys.version_info[:2] > (3, 7):
+    from typing import Final
+else:
+    from typing_extensions import Final
 
 # Wrapper functions that can call either of 2 functions depending on a boolean
 # argument
@@ -690,7 +695,7 @@ if torch.distributed.rpc.is_available():
         return getattr(ann, "__origin__", None) is RRef
 
 def is_final(ann):
-    return ann.__module__ == 'typing_extensions' and \
+    return ann.__module__ in {'typing', 'typing_extensions'} and \
         (getattr(ann, '__origin__', None) is Final)
 
 # allows BroadcastingList instance to be subscriptable
