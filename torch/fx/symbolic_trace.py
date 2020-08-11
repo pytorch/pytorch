@@ -1,5 +1,4 @@
 # type: ignore
-
 import inspect
 from types import CodeType, FunctionType
 from typing import Any, Callable, Dict, Tuple, Union
