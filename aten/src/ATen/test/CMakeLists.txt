@@ -80,7 +80,7 @@ list(APPEND ATen_VULKAN_TEST_SRCS
 
 list(APPEND ATen_VEC256_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/vec256_test.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/Vec256Test.cpp  
+  ${CMAKE_CURRENT_SOURCE_DIR}/vec256_test_all_types.cpp  
   )
 
 # ---[ Send the lists to the parent scope.
