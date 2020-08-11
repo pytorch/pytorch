@@ -204,6 +204,8 @@ Tensor run(
       context.cached_output_ptr != output.data_ptr<float>() ||
       context.batch_size !=
         padded_input_nhwc.size(Layout::Activation4D::batch) ||
+      context.input_channels !=
+        padded_input_nhwc.size(Layout::Activation4D::channels) ||
       context.input_height !=
         padded_input_nhwc.size(Layout::Activation4D::height) ||
       context.input_width !=
@@ -226,6 +228,7 @@ Tensor run(
     context.cached_input_ptr = padded_input_nhwc.data_ptr<float>();
     context.cached_output_ptr = output.data_ptr<float>();
     context.batch_size = padded_input_nhwc.size(Layout::Activation4D::batch);
+    context.input_channels = padded_input_nhwc.size(Layout::Activation4D::channels);
     context.input_height = padded_input_nhwc.size(Layout::Activation4D::height);
     context.input_width = padded_input_nhwc.size(Layout::Activation4D::width);
   }

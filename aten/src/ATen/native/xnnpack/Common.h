@@ -41,7 +41,7 @@ struct ContextConv2D final {
   std::array<int64_t, 2> dilation_;
   float* cached_input_ptr{nullptr};
   float* cached_output_ptr{nullptr};
-  size_t input_height{0}, input_width{0}, batch_size{0};
+  size_t input_height{0}, input_width{0}, batch_size{0}, input_channels{0};
 
   ContextConv2D() = delete;
 
