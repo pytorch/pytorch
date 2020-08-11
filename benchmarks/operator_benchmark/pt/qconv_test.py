@@ -64,12 +64,8 @@ class QConv2dBenchmark(op_bench.TorchBenchmarkBase):
         return self.qconv2d(self.input)
 
 
-def _remove_cuda(config_list):
-    cuda_config = {'device': 'cuda'}
-    return [config for config in config_list if cuda_config not in config]
-
-op_bench.generate_pt_test(_remove_cuda(configs.conv_1d_configs_short + configs.conv_1d_configs_long), QConv1dBenchmark)
-op_bench.generate_pt_test(_remove_cuda(configs.conv_2d_configs_short + configs.conv_2d_configs_long), QConv2dBenchmark)
+op_bench.generate_pt_test(configs.remove_cuda(configs.conv_1d_configs_short + configs.conv_1d_configs_long), QConv1dBenchmark)
+op_bench.generate_pt_test(configs.remove_cuda(configs.conv_2d_configs_short + configs.conv_2d_configs_long), QConv2dBenchmark)
 
 
 if __name__ == "__main__":
