@@ -252,6 +252,7 @@ def make_non_contiguous(tensor: torch.Tensor) -> torch.Tensor:
 
 
 # Functions and classes for describing the dtypes a function supports
+# NOTE: these helpers should correspond to PyTorch's C++ dispatch macros
 
 # Verifies input is either a tuple of torch.dtypes or a single torch.dtype
 # Returns a tuple containing all the given torch.dtypes
