@@ -79,7 +79,7 @@ void batchedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Sta
     if (!tensor.defined()) {
       continue;
     }
-    const auto* batched = maybeGetBatched(tensor);
+    const auto* batched = maybeGetBatchedImpl(tensor);
     if (!batched) {
       continue;
     }
