@@ -59,13 +59,8 @@ namespace impl {
       guts::if_constexpr<guts::typelist::contains<supported_primitive_arg_types, T>::value>([] {
         /* everything is ok, this is a primitive type */
       }, /* else */ [] {
-        // TODO This is called for each operator call and potentially expensive.
-        // This check should be moved to operator registration time instead.
-        TORCH_CHECK(
-          c10::isCustomClassRegistered<T>(),
-          "Tried to use undefined class ",
-          c10::util::get_fully_qualified_type_name<T>(),
-          " as input argument");
+        /* otherwise T must be a custom class. this is dynamically checked in IValue constructor,
+           so no benefit in double-checking here */
       });
     }
   };
@@ -171,9 +166,8 @@ namespace impl {
       guts::if_constexpr<guts::typelist::contains<supported_primitive_arg_types, T>::value>([] {
         /* everything is ok, this is a primitive type */
       }, /* else */ [] {
-        // TODO This is called for each operator call and potentially expensive.
-        // This check should be moved to operator registration time instead.
-        TORCH_CHECK(c10::isCustomClassRegistered<T>(), "Tried to use undefined class ", c10::util::get_fully_qualified_type_name<T>(), " as output");
+        /* otherwise this must be an instance of a valid custom class, since it can only
+           have entered the jit via IValue(x), which checks this dynamically. */
       });
     }
   };
