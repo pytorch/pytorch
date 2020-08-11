@@ -2705,6 +2705,52 @@ class TestAutograd(TestCase):
                 last_end = info.cpu_interval.end
             self.assertEqual(info.name, expected_name)
 
+    def test_profiler_seq_nr(self):
+        with profile() as p:
+            x = torch.randn(10, 10, requires_grad=True)
+            y = torch.randn(10, 10, requires_grad=True)
+            z = x + y
+            s = z.sum()
+            s.backward()
+        # expecting aten::add, aten::sum to have the sequence numbers,
+        # expecting the corresponding backward nodes to have the same numbers
+        # as the forward ops
+        add_seq_nr = -1
+        sum_seq_nr = -1
+        found_add = found_sum = False
+        found_bwd_add = found_bwd_sum = False
+        found_empty = False
+        for e in p.function_events:
+            if e.name == "aten::add":
+                add_seq_nr = e.sequence_nr
+                self.assertFalse(found_add)
+                found_add = True
+            elif e.name == "aten::sum":
+                sum_seq_nr = e.sequence_nr
+                self.assertFalse(found_sum)
+                found_sum = True
+            elif "Add" in e.name and "Backward" in e.name:
+                self.assertEqual(e.sequence_nr, add_seq_nr)
+                self.assertFalse(found_bwd_add)
+                found_bwd_add = True
+            elif "Sum" in e.name and "Backward" in e.name:
+                self.assertEqual(e.sequence_nr, sum_seq_nr)
+                self.assertFalse(found_bwd_sum)
+                found_bwd_sum = True
+            # check that nested ops (e.g. empty) don't have
+            # sequence number
+            if e.name == "aten::empty":
+                self.assertEqual(e.sequence_nr, -1)
+                found_empty = True
+        self.assertGreaterEqual(add_seq_nr, 0)
+        self.assertGreaterEqual(sum_seq_nr, 0)
+        self.assertNotEqual(add_seq_nr, sum_seq_nr)
+        self.assertTrue(found_add)
+        self.assertTrue(found_sum)
+        self.assertTrue(found_bwd_add)
+        self.assertTrue(found_bwd_sum)
+        self.assertTrue(found_empty)
+
     def test_profiler_unboxed_only(self):
         x = torch.rand(3, 4)
 
@@ -5984,6 +6030,23 @@ class TestAutogradDeviceType(TestCase):
         y = torch.randn(5, 5, 1, device=device, requires_grad=True)
         gradcheck(where, [cond, x, y], raise_exception=True)
         gradgradcheck(where, [cond, x, y], [torch.randn(5, 5, 5, device=device)])
+
+    def test_where_scalar(self, device):
+        x = torch.randn(5, 5, device=device, requires_grad=True)
+        scalar = 4.
+        cond = mask_not_all_zeros((5, 5)).to(device=device)
+
+        def where_scalar_first(cond, x):
+            return torch.where(cond, scalar, x)
+
+        def where_scalar_second(cond, x):
+            return torch.where(cond, x, scalar)
+
+        gradcheck(where_scalar_first, (cond, x))
+        gradgradcheck(where_scalar_first, (cond, x))
+
+        gradcheck(where_scalar_second, (cond, x))
+        gradgradcheck(where_scalar_second, (cond, x))
 
     @skipCUDAIf(True, """Test is flaky on Linux and Windows, typical error message:
             https://github.com/pytorch/pytorch/issues/34870""")

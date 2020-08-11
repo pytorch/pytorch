@@ -12,22 +12,7 @@ _supported_modules_quantized = {nnq.Linear, nnq.Conv2d}
 def get_module(model, name):
     ''' Given name of submodule, this function grabs the submodule from given model
     '''
-    # current = model
-    # name = name.split('.')
-    # for subname in name:
-    #     if subname == '':
-    #         return current
-    #     current = current._modules[subname]
-    # return current
-    return model.named_modules()[name]
-
-def get_parent_module(model, name):
-    ''' Given name of submodule, this function grabs the parent of the submodule, from given model
-    '''
-    parent_name = name.rsplit('.', 1)[0]
-    if parent_name == name:
-        parent_name = ''
-    return get_module(model, parent_name)
+    return {name: submodule for name, submodule in model.named_modules()}[name]
 
 def parent_child_names(name):
     '''Splits full name of submodule into parent submodule's full name and submodule's name
@@ -62,27 +47,25 @@ class MeanShadowLogger(ns.Logger):
         self.quant_sum = None
 
     def forward(self, x, y):
-        if len(x) > 1:
-            print("does the condision in mean shadowLogger ever get used")
-            x = x[0]
-        if len(y) > 1:
-            y = y[0]
+        ''' The inputs x,y are output data from the quantized and floating-point modules.
+        x is for the quantized module, y is for the floating point module
+        '''
         if x.is_quantized:
             x = x.dequantize()
 
-        self.count += 1
+        self.count += x.size(0)
         if self.stats["quantized"] is None:
-            self.stats["quantized"] = x
-            self.quant_sum = x
+            self.stats["quantized"] = torch.sum(x, 0)
+            self.quant_sum = torch.sum(x, 0)
         else:
-            self.quant_sum += x
+            self.quant_sum += torch.sum(x, 0)
             self.stats["quantized"] = self.quant_sum / self.count
 
         if self.stats["float"] is None:
-            self.stats["float"] = y
-            self.float_sum = y
+            self.stats["float"] = torch.sum(y, 0)
+            self.float_sum = torch.sum(y, 0)
         else:
-            self.float_sum += y
+            self.float_sum += torch.sum(y, 0)
             self.stats["float"] = self.float_sum / self.count
 
 def bias_correction(float_model, quantized_model, img_data, neval_batches=30):
@@ -91,13 +74,13 @@ def bias_correction(float_model, quantized_model, img_data, neval_batches=30):
     by quantization
     Paper reference: https://arxiv.org/pdf/1906.04721.pdf (Section 4.2)
     '''
-    biased_modules = {}
+    uncorrected_modules = {}
     for name, submodule in quantized_model.named_modules():
         if type(submodule) in _supported_modules_quantized:
-            biased_modules[name] = submodule
+            uncorrected_modules[name] = submodule
 
-    for biased_module in biased_modules:
-        quantized_submodule = get_module(quantized_model, biased_module)
+    for uncorrected_module in uncorrected_modules:
+        quantized_submodule = get_module(quantized_model, uncorrected_module)
         bias = get_param(quantized_submodule, 'bias')
         if bias is not None:
             ns.prepare_model_with_stubs(float_model, quantized_model, _supported_modules, MeanShadowLogger)
@@ -109,8 +92,8 @@ def bias_correction(float_model, quantized_model, img_data, neval_batches=30):
                     break
             ob_dict = ns.get_logger_dict(quantized_model)
 
-            float_data = ob_dict[biased_module + '.stats']['float']
-            quant_data = ob_dict[biased_module + '.stats']['quantized']
+            float_data = ob_dict[uncorrected_module + '.stats']['float']
+            quant_data = ob_dict[uncorrected_module + '.stats']['quantized']
 
             # math for expected_error
             quantization_error = quant_data - float_data
@@ -126,5 +109,4 @@ def bias_correction(float_model, quantized_model, img_data, neval_batches=30):
                 if isinstance(submodule, ns.Shadow):
                     parent_name, child_name = parent_child_names(name)
                     parent = get_module(quantized_model, parent_name)
-                    # child_name = name.rsplit('.', 1)[-1]
                     parent._modules[child_name] = submodule.orig_module

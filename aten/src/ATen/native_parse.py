@@ -414,9 +414,6 @@ def propagate_field_names(output_arguments, return_arguments):
             if 'field_name' in r:
                 output_arguments[i]['field_name'] = r['field_name']
 
-def is_named_tensor_only(declaration):
-    return any(['Dimname' in arg['type'] for arg in declaration['arguments']])
-
 
 def run(paths):
     declarations = []

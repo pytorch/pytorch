@@ -63,7 +63,7 @@ def adaround_demo(input_model, data_loader, data_loader_test):
 
 def correct_bias_demo(input_model, data_loader, data_loader_test):
     eval_batch_size = 30
-    num_eval_batches = 10 * 3
+    num_eval_batches = 3
     num_calibration_batches = 10
     criterion = nn.CrossEntropyLoss()
     model = copy.deepcopy(input_model)
@@ -166,5 +166,5 @@ def equalize_accuracy_demo(input_model, data_loader, data_loader_test):
 
 if __name__ == "__main__":
     # equalize_accuracy_demo(*imagenet_download())
-    # correct_bias_demo(*imagenet_download())
-    adaround_demo(*imagenet_download())
+    correct_bias_demo(*imagenet_download())
+    # adaround_demo(*imagenet_download())
