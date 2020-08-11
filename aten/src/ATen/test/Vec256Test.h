@@ -827,7 +827,7 @@ void test_unary(
     auto test_trials = testCase.getTrialCount();
     int trialCount = getTrialCount<UVT>(test_trials, domains_size); 
     TestSeed seed = testCase.getTestSeed();
-    std::cout << "Test Seed: " << seed << std::end;
+    std::cout << "Test Seed: " << seed << std::endl;
     for (const CheckWithinDomains<UVT>& dmn : domains) {
 
         size_t dmn_argc = dmn.ArgsDomain.size();
@@ -949,7 +949,7 @@ void test_binary(
     auto test_trials = testCase.getTrialCount();
     int trialCount = getTrialCount<UVT>(test_trials, domains_size); 
     TestSeed seed = testCase.getTestSeed();
-    std::cout << "Test Seed: " << seed << std::end;
+    std::cout << "Test Seed: " << seed << std::endl;
 
     for (const CheckWithinDomains<UVT>& dmn : testCase.getDomains()) {
 
@@ -1061,7 +1061,7 @@ void test_ternary(
     int trialCount = getTrialCount<UVT>(test_trials, domains_size);
 
     TestSeed seed = testCase.getTestSeed();
-    std::cout << "Test Seed: " << seed << std::end;
+    std::cout << "Test Seed: " << seed << std::endl;
 
     for (const CheckWithinDomains<UVT>& dmn : testCase.getDomains()) {
 

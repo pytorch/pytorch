@@ -138,7 +138,7 @@ namespace {
         CACHE_ALIGN unsigned char storage[128 * b_size];
         
         auto seed = TestSeed();
-        std::cout << "Test Seed: " << seed << std::end;
+        std::cout << "Test Seed: " << seed << std::endl;
         ValueGen<unsigned char> generator(seed);
 
         for (auto& x : ref_storage) {
@@ -955,7 +955,7 @@ namespace {
         typename vec_type::int_vec_return_type  int_ret;
 
         auto seed = TestSeed();
-        std::cout << "Test Seed: " << seed << std::end;
+        std::cout << "Test Seed: " << seed << std::endl;
 
         //zero point 
         ValueGen<int32_t> generator_zp(min_val, max_val, seed.nextSeed());
@@ -1005,7 +1005,7 @@ namespace {
         typename vec_type::int_vec_return_type  expected_int_ret;
 
         auto seed = TestSeed();
-        std::cout << "Test Seed: " << seed << std::end;
+        std::cout << "Test Seed: " << seed << std::endl;
         ValueGen<underlying> generator(min_val, max_val, seed);
 
         for (int i = 0; i < trials; i++) {
