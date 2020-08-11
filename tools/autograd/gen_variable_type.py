@@ -139,8 +139,6 @@ DONT_REQUIRE_DERIVATIVE = {
     'quantize_per_tensor', 'quantize_per_channel',
     # Functions that return integers should not have output that require gradients
     'argmax', 'argmin', 'argsort',
-    # Foreach functions for now.
-    '_foreach_add_'
 }
 
 # Some operators invalidate the grad_accumulator. Let's reset it.
