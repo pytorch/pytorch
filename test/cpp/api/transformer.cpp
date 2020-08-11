@@ -290,7 +290,8 @@ void transformer_decoder_layer_test_helper(bool is_cuda){
                               {{2.428457, 0.027053, -0.602275, -0.073462},
                                {2.431970, 0.029387, -0.599789, -0.071621}},
                               {{2.431934, 0.028196, -0.599802, -0.073809},
-                               {2.432306, 0.028858, -0.599542, -0.072846}}});
+                               {2.432306, 0.028858, -0.599542, -0.072846}}},
+                               tensor_options);
   ASSERT_EQ(result.sizes().size(),ref_output.sizes().size());
   ASSERT_TRUE(torch::allclose(result, ref_output, 1e-7, 1e-5,
                               /*equal_nan=*/true));
