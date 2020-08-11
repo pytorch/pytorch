@@ -234,42 +234,63 @@ void lshift_kernel(TensorIterator& iter) {
 }
 
 void logical_and_kernel(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND3(kBool, kBFloat16, kHalf, iter.common_dtype(), "logical_and_cpu", [&]() {
-    using scalar_in_t = scalar_t;  // promoted type between the inputs
-    AT_DISPATCH_ALL_TYPES_AND3(kBool, kBFloat16, kHalf, iter.dtype(), "logical_and_cpu", [&]() {
-      // We have to explicitly obtain the type of the output because dynamic casting is currently unavailable on CPU
+  // We use if-else here specifically for bool instead of using iter.common_dtype() like the CUDA implementation because
+  // common_dtype() is unavailable for bfloat16.
+  if (iter.dtype() == ScalarType::Bool) {
+    AT_DISPATCH_ALL_TYPES_AND3(kBool, kBFloat16, kHalf, iter.input_dtype(), "logical_and_cpu", [&]() {
       cpu_kernel(iter,
-        [](scalar_in_t a, scalar_in_t b) -> scalar_t {
+        [](scalar_t a, scalar_t b) -> bool {
           return a && b;
         });
     });
-  });
+  } else {
+    AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "logical_and_cpu", [&]() {
+      cpu_kernel(iter,
+        [](scalar_t a, scalar_t b) -> scalar_t {
+          return static_cast<scalar_t>(a && b);
+        });
+    });
+  }
 }
 
 void logical_or_kernel(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND3(kBool, kBFloat16, kHalf, iter.common_dtype(), "logical_or_cpu", [&]() {
-    using scalar_in_t = scalar_t;  // promoted type between the inputs
-    AT_DISPATCH_ALL_TYPES_AND3(kBool, kBFloat16, kHalf, iter.dtype(), "logical_or_cpu", [&]() {
-      // We have to explicitly obtain the type of the output because dynamic casting is currently unavailable on CPU
+  // We use if-else here specifically for bool instead of using iter.common_dtype() like the CUDA implementation because
+  // common_dtype() is unavailable for bfloat16.
+  if (iter.dtype() == ScalarType::Bool) {
+    AT_DISPATCH_ALL_TYPES_AND3(kBool, kBFloat16, kHalf, iter.input_dtype(), "logical_or_cpu", [&]() {
       cpu_kernel(iter,
-        [](scalar_in_t a, scalar_in_t b) -> scalar_t {
+        [](scalar_t a, scalar_t b) -> bool {
           return a || b;
         });
     });
-  });
+  } else {
+    AT_DISPATCH_ALL_TYPES_AND3(kBool, kBFloat16, kHalf, iter.dtype(), "logical_or_cpu", [&]() {
+      cpu_kernel(iter,
+        [](scalar_t a, scalar_t b) -> scalar_t {
+          return static_cast<scalar_t>(a || b);
+        });
+      });
+  }
 }
 
 void logical_xor_kernel(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND3(kBool, kBFloat16, kHalf, iter.common_dtype(), "logical_xor_cpu", [&]() {
-    using scalar_in_t = scalar_t;  // promoted type between the inputs
-    AT_DISPATCH_ALL_TYPES_AND3(kBool, kBFloat16, kHalf, iter.dtype(), "logical_xor_cpu", [&]() {
-      // We have to explicitly obtain the type of the output because dynamic casting is currently unavailable on CPU
+  // We use if-else here specifically for bool instead of using iter.common_dtype() like the CUDA implementation because
+  // common_dtype() is unavailable for bfloat16.
+  if (iter.dtype() == ScalarType::Bool) {
+    AT_DISPATCH_ALL_TYPES_AND3(kBool, kBFloat16, kHalf, iter.input_dtype(), "logical_xor_cpu", [&]() {
       cpu_kernel(iter,
-        [](scalar_in_t a, scalar_in_t b) -> scalar_t {
+        [](scalar_t a, scalar_t b) -> bool {
           return bool(a) != bool(b);
         });
     });
-  });
+  } else {
+    AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "logical_xor_cpu", [&]() {
+      cpu_kernel(iter,
+        [](scalar_t a, scalar_t b) -> scalar_t {
+          return static_cast<scalar_t>(bool(a) != bool(b));
+        });
+    });
+  }
 }
 
 void rshift_kernel(TensorIterator& iter) {

@@ -95,6 +95,32 @@ DONT_PROFILE = {
     'size', 'storage_offset', 'stride',
 }
 
+# Note [Manual catchAll kernels]
+# For these ops, we want to manually register to dispatch key catchAll and
+# skip codegen-ed registeration to all keys before catchAll.
+# For codegen this means:
+#   - op set below must match ops with manual_kernel_registration=True in native_functions.yaml
+#     where we skip codegen catchall kernels
+#   - all ops below are part of MANUAL_AUTOGRAD to skip codegen Autograd kernel registration
+#   - all ops below are part of MANUAL_TRACER to skip codegen Tracer kernel registration
+# Note: we still register to dispatch key Profiler for these ops, keeping it untouched for now.
+# You can find the manual registration in torch/csrc/autograd/VariableTypeManual.cpp
+MANUAL_CATCHALL = set([
+    'options', 'data', 'set_data', 'is_leaf', 'output_nr', '_version', 'retain_grad',
+    'backward', 'requires_grad_',
+])
+
+# For these ops we want to skip the codegen-ed registration to both Autograd and Tracer keys.
+# You can find the manual registration in torch/csrc/autograd/VariableTypeManual.cpp
+MANUAL_AUTOGRAD_AND_TRACER = set([
+    'resize_', 'resize_as_', 'detach', 'detach_', 'copy_',
+])
+
+# Currently MANUAL_AUTOGRAD and MANUAL_TRACER share the same set of ops:
+#   union(MANUAL_CATCHALL, MANUAL_AUTOGRAD_AND_TRACER)
+# You can find the manual registration in torch/csrc/autograd/VariableTypeManual.cpp
+MANUAL_AUTOGRAD = MANUAL_TRACER = MANUAL_CATCHALL | MANUAL_AUTOGRAD_AND_TRACER
+
 # We don't set or modify grad_fn on these methods. Generally, they return
 # tensors that have requires_grad=False. In-place functions listed here will
 # not examine or modify requires_grad or grad_fn.
@@ -337,23 +363,6 @@ ${statements}
 REGISTRATION_DECLARATION = CodeTemplate("""\
 ${return_type} ${api_name}(${declaration_formals}); // {"schema": "${schema_string}", "compound": "${compound}"}
 """)
-
-# TODO(iliacher): remove Profile wrappers
-# ProfiledType templates
-# See NOTE[UnboxedOnly] in function_wrapper.py
-UNBOXED_PROFILE_DISPATCH = CodeTemplate("""\
-static auto op = c10::Dispatcher::singleton()
-    .findSchemaOrThrow("aten::${operator_name}", "${overload_name}")
-    .typed<${return_type} (${profiled_arg_types})>();
-return c10::Dispatcher::singleton().redispatch<${profiled_ret_and_arg_types}>(${profiled_dispatch_args});
-""")
-PROFILE_DISPATCH = CodeTemplate("""\
-static auto op = c10::Dispatcher::singleton()
-    .findSchemaOrThrow("aten::${operator_name}", "${overload_name}")
-    .typed<${return_type} (${profiled_arg_types})>();
-return c10::Dispatcher::singleton().redispatch<${profiled_ret_and_arg_types}>(${profiled_dispatch_args});
-""")
-
 
 # TraceType templates
 # TODO: change `redispatch` to `NoTracerDispatchMode` + regular `call`.
@@ -652,21 +661,19 @@ def gen_variable_type(out, aten_declarations, template_path):
 def gen_variable_type_shard(out, aten_declarations, template_path, suffix, header):
     VARIABLE_TYPE_H = CodeTemplate.from_file(template_path + '/VariableType.h')
     VARIABLE_TYPE_CPP = CodeTemplate.from_file(template_path + '/VariableType.cpp')
-    PROFILED_TYPE_CPP = CodeTemplate.from_file(template_path + '/ProfiledType.cpp')
     TRACE_TYPE_CPP = CodeTemplate.from_file(template_path + '/TraceType.cpp')
 
     type_declarations = []
     type_definitions = []
     wrapper_registrations = []
-    profiled_method_definitions = []
-    profiled_wrapper_registrations = []
     trace_method_definitions = []
     trace_wrapper_registrations = []
 
     for declaration in aten_declarations:
         formal_types = [arg['type'] for arg in declaration['arguments']]
         type_declarations.append(METHOD_DECLARATION.substitute(declaration))
-        if not declaration['manual_kernel_registration']:
+        strategy = dispatch_strategy(declaration)
+        if declaration['name'] not in MANUAL_AUTOGRAD and strategy == 'use_derived':
             body = emit_body(declaration)
             type_definitions.append(METHOD_DEFINITION.substitute(
                 declaration, type_definition_body=body))
@@ -678,21 +685,11 @@ def gen_variable_type_shard(out, aten_declarations, template_path, suffix, heade
                 wrapper_registrations.append(UNBOXEDONLY_WRAPPER_REGISTRATION.substitute(
                     declaration, class_type='VariableType'))
 
-        # Emit ProfiledType code
-        profiled_body = emit_profiled_body(declaration)
-        profiled_method_definitions.append(METHOD_DEFINITION.substitute(
-            declaration, type_definition_body=profiled_body))
-
-        if declaration['use_c10_dispatcher'] == 'full':
-            profiled_wrapper_registrations.append(WRAPPER_REGISTRATION.substitute(
-                declaration, class_type='ProfiledType'))
-        else:
-            assert declaration['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
-            profiled_wrapper_registrations.append(UNBOXEDONLY_WRAPPER_REGISTRATION.substitute(
-                declaration, class_type='ProfiledType'))
+        # See Note [Manual catchAll kernels]
+        assert (declaration['name'] in MANUAL_CATCHALL) == declaration['manual_kernel_registration']
 
         # Emit TraceType code
-        if not declaration['manual_kernel_registration']:
+        if declaration['name'] not in MANUAL_TRACER:
             trace_body = emit_trace_body(declaration)
             trace_method_definitions.append(METHOD_DEFINITION.substitute(
                 declaration, type_definition_body=trace_body))
@@ -708,8 +705,6 @@ def gen_variable_type_shard(out, aten_declarations, template_path, suffix, heade
         'type_derived_method_declarations': type_declarations,
         'type_derived_method_definitions': type_definitions,
         'wrapper_registrations': wrapper_registrations,
-        'profiled_method_definitions': profiled_method_definitions,
-        'profiled_wrapper_registrations': profiled_wrapper_registrations,
         'trace_method_definitions': trace_method_definitions,
         'trace_wrapper_registrations': trace_wrapper_registrations,
     }
@@ -717,62 +712,7 @@ def gen_variable_type_shard(out, aten_declarations, template_path, suffix, heade
         write(out, 'VariableType.h', VARIABLE_TYPE_H, env)
     else:
         write(out, 'VariableType%s.cpp' % suffix, VARIABLE_TYPE_CPP, env)
-        write(out, 'ProfiledType%s.cpp' % suffix, PROFILED_TYPE_CPP, env)
         write(out, 'TraceType%s.cpp' % suffix, TRACE_TYPE_CPP, env)
-
-
-def emit_profiled_body(declaration):
-    arguments = declaration['arguments']
-    returns = declaration['returns']
-    func = declaration['derivative']
-    name = declaration['name']
-    inplace = declaration['inplace']
-    is_out_fn = name.endswith('_out')
-    modifies_arguments = inplace or is_out_fn
-    returns_void = len(returns) == 0
-
-    processed_args = []
-    for a in arguments:
-        processed_args.append('{}'.format(a['name']))
-
-    arg_types = ', '.join([a['type'] for a in declaration['arguments']])
-    ret_and_arg_types = ', '.join([declaration['return_type']] + [a['type'] for a in declaration['arguments']])
-    schema_order_arg_types = ', '.join([a['type'] for a in declaration['schema_order_arguments']])
-    schema_order_ret_and_arg_types = ', '.join(
-        [declaration['return_type']] + [a['type'] for a in declaration['schema_order_arguments']])
-
-    def check_record_function_input_type(simple_type):
-        return simple_type in ['Tensor', 'Scalar']
-
-    def record_function_input_names():
-        return ', '.join([
-            arg['name'] for arg in declaration['arguments']
-            if check_record_function_input_type(arg['simple_type'])])
-
-    profiled_dispatch_args = ['op', 'c10::DispatchKey::Profiler'] + declaration['args']
-    schema_order_profiled_dispatch_args = ['op', 'c10::DispatchKey::Profiler'] + declaration['schema_order_args']
-
-    if declaration['use_c10_dispatcher'] == 'full':
-        profiled_arg_types = schema_order_arg_types
-        profiled_ret_and_arg_types = schema_order_ret_and_arg_types
-        profiled_dispatch_args = schema_order_profiled_dispatch_args
-    else:
-        assert declaration['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
-        profiled_arg_types = arg_types
-        profiled_ret_and_arg_types = ret_and_arg_types
-        profiled_dispatch_args = profiled_dispatch_args
-
-    call = PROFILE_DISPATCH.substitute(
-        declaration,
-        name=name,
-        input_names=record_function_input_names(),
-        return_type=declaration['return_type'],
-        profiled_arg_types=profiled_arg_types,
-        profiled_ret_and_arg_types=profiled_ret_and_arg_types,
-        profiled_dispatch_args=profiled_dispatch_args,
-    )
-
-    return [call]
 
 
 def emit_trace_body(declaration):
