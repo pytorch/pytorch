@@ -31,14 +31,19 @@ ignored_attributes = [
     "dump_patches",
 ]
 
+# A list of (cls, [ignored_attribute_names]) that helps exclude
+# unscriptable properties from JIT compilation.
 ignored_properties = [
-    # Temporary fix for RNN module property named 'all_weights' being scripted
-    "all_weights",
-    "original_name",
-    "graph",
-    "inlined_graph",
-    "code",
-    "code_with_constants",
+    (torch.nn.Module, [
+        "original_name",
+        "graph",
+        "inlined_graph",
+        "code",
+        "code_with_constants",
+    ]),
+    (torch.nn.RNNBase, [
+        "all_weights",
+    ]),
 ]
 
 def make_stub(func, name):
@@ -430,7 +435,8 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
     for property_stub in property_stubs:
         property_name = property_stub.def_.name().name
         fget = cpp_module._get_method(property_stub.def_.getter_name().name)
-        fset = cpp_module._get_method(property_stub.def_.setter_name().name)
+        setter_name = property_stub.def_.setter_name().name
+        fset = cpp_module._get_method(setter_name) if setter_name else None
         script_module.__dict__[property_name] = property(property_name, fget, fset)
 
     # copy over python methods to script module if they aren't defined on the script module
@@ -567,6 +573,17 @@ def infer_methods_to_compile(nn_module):
     return overload_stubs + stubs
 
 
+def should_compile_property(cls, property_name):
+    """
+    Returns True if the given property on the given class should be included
+    in JIT compilation. This is used primarily to exclude properties in
+    core modules that are not yet scriptable.
+    """
+    for base, ignored in ignored_properties:
+        if issubclass(cls, base):
+            return property_name not in ignored
+
+
 def get_property_stubs(nn_module):
     """
     Create property stubs for the properties of the module by creating method
@@ -578,7 +595,7 @@ def get_property_stubs(nn_module):
 
     for name in dir(module_ty):
         item = getattr(module_ty, name, None)
-        if isinstance(item, property) and name not in ignored_properties:
+        if isinstance(item, property) and should_compile_property(module_ty, name):
             if not item.fget:
                 raise RuntimeError(f'Property {name} of {nn_module.__name__} must have a getter')
 

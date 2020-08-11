@@ -554,8 +554,22 @@ class TestScriptPy3(JitTestCase):
                 else:
                     self.a = 0
 
+        class ModuleWithNoSetter(torch.nn.Module):
+            def __init__(self, a: int):
+                super().__init__()
+                self.a = a
+
+            def forward(self, a: int, b: int):
+                self.attr + a + b
+
+            @property
+            def attr(self):
+                return self.a + 1
+
         self.checkModule(ModuleWithProperties(5), (5, 6,))
         self.checkModule(ModuleWithProperties(5), (-5, -6,))
+        self.checkModule(ModuleWithNoSetter(5), (5, 6,))
+        self.checkModule(ModuleWithNoSetter(5), (-5, -6,))
 
     def test_export_opnames_interface(self):
         global OneTwoModule
