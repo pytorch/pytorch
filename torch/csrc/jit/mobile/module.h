@@ -46,7 +46,7 @@ class TORCH_API Module {
   void train(bool on = true);
   /// Calls train(false) to enable "eval" mode.
   void eval() {
-   train(/*on=*/false);
+    train(/*on=*/false);
   }
   /// True if the module is in training mode.
   bool is_training() const;
