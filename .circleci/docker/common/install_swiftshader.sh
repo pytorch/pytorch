@@ -31,19 +31,10 @@ retry git clone https://github.com/google/swiftshader.git "$_swiftshader_dir"
 pushd "$_swiftshader_dir"
 git submodule sync && git submodule update -q --init --recursive
 popd
-#_tmp_swiftshader_zip=/tmp/swiftshader-master-200805-1128.zip
-#curl --silent --show-error --location --fail --retry 3 --output "$_tmp_swiftshader_zip" "$_https_amazon_aws/swiftshader-master-200805-1128.zip"
-#unzip -qo "$_tmp_swiftshader_zip" -d "$_swiftshader_root_dir"
-#_swiftshader_dir="$_swiftshader_root_dir/swiftshader-master"
-#rm "$_tmp_swiftshader_zip"
 
 pushd "$_swiftshader_dir/build"
 
-#  -DSWIFTSHADER_LESS_DEBUG_INFO=1 \
-
 $_cmake_bin_path \
-  -DCMAKE_C_COMPILER=/usr/bin/clang \
-  -DCMAKE_CXX_COMPILER=/usr/bin/clang++ \
   -DCMAKE_BUILD_TYPE=Release \
   -DSWIFTSHADER_BUILD_VULKAN=1 \
   -DSWIFTSHADER_BUILD_EGL=0 \
@@ -52,9 +43,10 @@ $_cmake_bin_path \
   -DSWIFTSHADER_BUILD_PVR=0 \
   -DSWIFTSHADER_BUILD_TESTS=1 \
   -DSWIFTSHADER_WARNINGS_AS_ERRORS=1 \
+  -DCMAKE_C_COMPILER=/usr/bin/clang \
+  -DCMAKE_CXX_COMPILER=/usr/bin/clang++ \
   -DCMAKE_AR=/usr/bin/llvm-ar-9 \
   -DCMAKE_RANLIB=/usr/bin/llvm-ranlib-9 \
-  -DCMAKE_LINKER=/usr/bin/llvm-link-9 \
   ..
 
 make SHELL='sh -x' VERBOSE=1 AM_DEFAULT_VERBOSITY=1 --debug=j --jobs=8
