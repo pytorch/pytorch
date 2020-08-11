@@ -168,14 +168,14 @@ std::vector<Tensor> foreach_tensor_list_op_(TensorList tensors1, TensorList tens
     TORCH_CHECK(tensors1.size() ==  tensors2.size(), "Tensor lists must be of the same length.");
 
     if (!check_fast_route(tensors1, tensors2)) {
-        return at::native::foreach_add_list__kernel_fallback(tensors1, tensors2);
+        return at::native::foreach_add_list_kernel_fallback_(tensors1, tensors2);
     }
 
     std::vector<std::vector<at::Tensor>> tensor_lists; 
     tensor_lists.emplace_back(std::move(tensors1.vec()));
     tensor_lists.emplace_back(std::move(tensors2.vec()));
 
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kBFloat16, kHalf, tensors1[0].scalar_type(), "foreach_binary_op_list__cuda", [&]() {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kBFloat16, kHalf, tensors1[0].scalar_type(), "foreach_binary_op_list_cuda_", [&]() {
         multi_tensor_apply<2>(tensor_lists, BinaryOpListFunctor_<scalar_t, Op>());
     });
 
@@ -193,12 +193,12 @@ std::vector<Tensor> foreach_tensor_add_list_kernel_cuda(TensorList tensors1, Ten
     return foreach_tensor_list_op<std::plus>(tensors1, tensors2);
 }
 
-std::vector<Tensor> foreach_tensor_add_list__kernel_cuda(TensorList tensors1, TensorList tensors2) {
+std::vector<Tensor> foreach_tensor_add_list_kernel_cuda_(TensorList tensors1, TensorList tensors2) {
     TORCH_CHECK(tensors1.size() > 0, "Tensor list must have at least one tensor.");
     TORCH_CHECK(tensors1.size() ==  tensors2.size(), "Tensor lists must be of the same length.");
 
     if (!check_fast_route(tensors1, tensors2)) {
-        return at::native::foreach_add_list__kernel_fallback(tensors1, tensors2);
+        return at::native::foreach_add_list_kernel_fallback_(tensors1, tensors2);
     }
 
     return foreach_tensor_list_op_<std::plus>(tensors1, tensors2);
@@ -215,12 +215,12 @@ std::vector<Tensor> foreach_tensor_sub_list_kernel_cuda(TensorList tensors1, Ten
     return foreach_tensor_list_op<std::minus>(tensors1, tensors2);
 }
 
-std::vector<Tensor> foreach_tensor_sub_list__kernel_cuda(TensorList tensors1, TensorList tensors2) {
+std::vector<Tensor> foreach_tensor_sub_list_kernel_cuda_(TensorList tensors1, TensorList tensors2) {
     TORCH_CHECK(tensors1.size() > 0, "Tensor list must have at least one tensor.");
     TORCH_CHECK(tensors1.size() ==  tensors2.size(), "Tensor lists must be of the same length.");
 
     if (!check_fast_route(tensors1, tensors2)) {
-        return at::native::foreach_sub_list__kernel_fallback(tensors1, tensors2);
+        return at::native::foreach_sub_list_kernel_fallback_(tensors1, tensors2);
     }
 
     return foreach_tensor_list_op_<std::minus>(tensors1, tensors2);
@@ -237,12 +237,12 @@ std::vector<Tensor> foreach_tensor_mul_list_kernel_cuda(TensorList tensors1, Ten
     return foreach_tensor_list_op<std::multiplies>(tensors1, tensors2);
 }
 
-std::vector<Tensor> foreach_tensor_mul_list__kernel_cuda(TensorList tensors1, TensorList tensors2) {
+std::vector<Tensor> foreach_tensor_mul_list_kernel_cuda_(TensorList tensors1, TensorList tensors2) {
     TORCH_CHECK(tensors1.size() > 0, "Tensor list must have at least one tensor.");
     TORCH_CHECK(tensors1.size() ==  tensors2.size(), "Tensor lists must be of the same length.");
 
     if (!check_fast_route(tensors1, tensors2)) {
-        return at::native::foreach_mul_list__kernel_fallback(tensors1, tensors2);
+        return at::native::foreach_mul_list_kernel_fallback_(tensors1, tensors2);
     }
 
     return foreach_tensor_list_op_<std::multiplies>(tensors1, tensors2);
@@ -259,12 +259,12 @@ std::vector<Tensor> foreach_tensor_div_list_kernel_cuda(TensorList tensors1, Ten
     return foreach_tensor_list_op<std::divides>(tensors1, tensors2);
 }
 
-std::vector<Tensor> foreach_tensor_div_list__kernel_cuda(TensorList tensors1, TensorList tensors2) {
+std::vector<Tensor> foreach_tensor_div_list_kernel_cuda_(TensorList tensors1, TensorList tensors2) {
     TORCH_CHECK(tensors1.size() > 0, "Tensor list must have at least one tensor.");
     TORCH_CHECK(tensors1.size() ==  tensors2.size(), "Tensor lists must be of the same length.");
 
     if (!check_fast_route(tensors1, tensors2)) {
-        return at::native::foreach_div_list__kernel_fallback(tensors1, tensors2);
+        return at::native::foreach_div_list_kernel_fallback_(tensors1, tensors2);
     }
 
     return foreach_tensor_list_op_<std::divides>(tensors1, tensors2);

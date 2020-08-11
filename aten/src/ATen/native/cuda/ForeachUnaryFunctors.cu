@@ -170,11 +170,11 @@ std::vector<Tensor> foreach_tensor_exp_cuda(TensorList tensors) {
     return foreach_unary_op<Exp>(tensors);
 }
 
-std::vector<Tensor> foreach_tensor_exp__cuda(TensorList tensors) {
+std::vector<Tensor> foreach_tensor_exp_cuda_(TensorList tensors) {
     TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
 
     if (!check_fast_route(tensors)) {
-        return at::native::foreach_exp__fallback(tensors);
+        return at::native::foreach_exp_fallback_(tensors);
     }
 
     return foreach_unary_op_<Exp>(tensors);
@@ -191,11 +191,11 @@ std::vector<Tensor> foreach_tensor_sqrt_cuda(TensorList tensors) {
 
 }
 
-std::vector<Tensor> foreach_tensor_sqrt__cuda(TensorList tensors) {
+std::vector<Tensor> foreach_tensor_sqrt_cuda_(TensorList tensors) {
     TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
 
     if (!check_fast_route(tensors)) {
-        return at::native::foreach_sqrt__fallback(tensors);
+        return at::native::foreach_sqrt_fallback_(tensors);
     }
 
     return foreach_unary_op_<Sqrt>(tensors);

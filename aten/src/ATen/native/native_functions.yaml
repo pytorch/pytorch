@@ -5471,8 +5471,8 @@
   device_guard: False
   variants: function
   dispatch:
-    CPU: foreach_add_scalar__kernel_fallback
-    CUDA: foreach_tensor_add_scalar__kernel_cuda
+    CPU: foreach_add_scalar_kernel_fallback_
+    CUDA: foreach_tensor_add_scalar_kernel_cuda_
 
 - func: _foreach_sub.Scalar(Tensor[] tensors, Scalar scalar) -> Tensor[]
   device_guard: False
@@ -5485,8 +5485,8 @@
   device_guard: False
   variants: function
   dispatch:
-    CPU: foreach_sub_scalar__kernel_fallback
-    CUDA: foreach_tensor_sub_scalar__kernel_cuda
+    CPU: foreach_sub_scalar_kernel_fallback_
+    CUDA: foreach_tensor_sub_scalar_kernel_cuda_
 
 - func: _foreach_mul.Scalar(Tensor[] tensors, Scalar scalar) -> Tensor[]
   device_guard: False
@@ -5499,8 +5499,8 @@
   device_guard: False
   variants: function
   dispatch:
-    CPU: foreach_mul_scalar__kernel_fallback
-    CUDA: foreach_tensor_mul_scalar__kernel_cuda
+    CPU: foreach_mul_scalar_kernel_fallback_
+    CUDA: foreach_tensor_mul_scalar_kernel_cuda_
 
 - func: _foreach_div.Scalar(Tensor[] tensors, Scalar scalar) -> Tensor[]
   device_guard: False
@@ -5513,8 +5513,8 @@
   device_guard: False
   variants: function
   dispatch:
-    CPU: foreach_div_scalar__kernel_fallback
-    CUDA: foreach_tensor_div_scalar__kernel_cuda
+    CPU: foreach_div_scalar_kernel_fallback_
+    CUDA: foreach_tensor_div_scalar_kernel_cuda_
 
 - func: _foreach_add.List(Tensor[] tensors1, Tensor[] tensors2) -> Tensor[]
   device_guard: False
@@ -5527,8 +5527,8 @@
   device_guard: False
   variants: function
   dispatch:
-    CPU: foreach_add_list__kernel_fallback
-    CUDA: foreach_tensor_add_list__kernel_cuda
+    CPU: foreach_add_list_kernel_fallback_
+    CUDA: foreach_tensor_add_list_kernel_cuda_
 
 - func: _foreach_sub.List(Tensor[] tensors1, Tensor[] tensors2) -> Tensor[]
   device_guard: False
@@ -5541,8 +5541,8 @@
   device_guard: False
   variants: function
   dispatch:
-    CPU: foreach_sub_list__kernel_fallback
-    CUDA: foreach_tensor_sub_list__kernel_cuda
+    CPU: foreach_sub_list_kernel_fallback_
+    CUDA: foreach_tensor_sub_list_kernel_cuda_
 
 - func: _foreach_mul.List(Tensor[] tensors1, Tensor[] tensors2) -> Tensor[]
   device_guard: False
@@ -5555,8 +5555,8 @@
   device_guard: False
   variants: function
   dispatch:
-    CPU: foreach_mul_list__kernel_fallback
-    CUDA: foreach_tensor_mul_list__kernel_cuda
+    CPU: foreach_mul_list_kernel_fallback_
+    CUDA: foreach_tensor_mul_list_kernel_cuda_
 
 - func: _foreach_div.List(Tensor[](a!) self, Tensor[] other) -> Tensor[](a!)
   device_guard: False
@@ -5569,8 +5569,8 @@
   device_guard: False
   variants: function
   dispatch:
-    CPU: foreach_div_list__kernel_fallback
-    CUDA: foreach_tensor_div_list__kernel_cuda
+    CPU: foreach_div_list_kernel_fallback_
+    CUDA: foreach_tensor_div_list_kernel_cuda_
 
 - func: _foreach_exp(Tensor[] tensors) -> Tensor[]
   device_guard: False
@@ -5583,8 +5583,8 @@
   device_guard: False
   variants: function
   dispatch:
-    CPU: foreach_exp__fallback
-    CUDA: foreach_tensor_exp__cuda
+    CPU: foreach_exp_fallback_
+    CUDA: foreach_tensor_exp_cuda_
 
 - func: _foreach_sqrt(Tensor[] tensors) -> Tensor[]
   device_guard: False
@@ -5597,22 +5597,22 @@
   device_guard: False
   variants: function
   dispatch:
-    CPU: foreach_sqrt__fallback
-    CUDA: foreach_tensor_sqrt__cuda
+    CPU: foreach_sqrt_fallback_
+    CUDA: foreach_tensor_sqrt_cuda_
 
 - func: _foreach_addcdiv_(Tensor[](a!) self, Tensor[] tensor1, Tensor[] tensor2, Scalar value=1) -> Tensor[](a!)
   device_guard: False
   variants: function
   dispatch:
-    CPU: foreach_addcdiv__fallback
-    CUDA: foreach_tensor_addcdiv__cuda
+    CPU: foreach_addcdiv_fallback_
+    CUDA: foreach_tensor_addcdiv_cuda_
 
 - func: _foreach_addcmul_(Tensor[](a!) self, Tensor[] tensor1, Tensor[] tensor2, Scalar value=1) -> Tensor[](a!)
   device_guard: False
   variants: function
   dispatch:
-    CPU: foreach_addcmul__fallback
-    CUDA: foreach_tensor_addcmul__cuda
+    CPU: foreach_addcmul_fallback_
+    CUDA: foreach_tensor_addcmul_cuda_
 
 - func: _foreach_addcdiv(Tensor[] input, Tensor[] tensor1, Tensor[] tensor2, Scalar value=1) -> Tensor[]
   device_guard: False

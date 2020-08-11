@@ -12,22 +12,22 @@ class TestForeach(TestCase):
     #
     @dtypes(*[torch.float, torch.double, torch.complex64, torch.complex128])
     def test_sqrt(self, device, dtype):
-        tensors = [torch.ones(self.H, self.W, device=device, dtype=dtype) for n in range(self.N)]
+        tensors = [torch.ones(self.H, self.W, device=device, dtype=dtype) for _ in range(self.N)]
 
         res = torch._foreach_sqrt(tensors)
         torch._foreach_sqrt_(tensors)
 
-        self.assertEqual([torch.sqrt(torch.ones(self.H, self.W, device=device, dtype=dtype)) for n in range(self.N)], res)
+        self.assertEqual([torch.sqrt(torch.ones(self.H, self.W, device=device, dtype=dtype)) for _ in range(self.N)], res)
         self.assertEqual(tensors, res)
 
     @dtypes(*[torch.float, torch.double, torch.complex64, torch.complex128])
     def test_exp(self, device, dtype):
-        tensors = [torch.ones(self.H, self.W, device=device, dtype=dtype) for n in range(self.N)]
+        tensors = [torch.ones(self.H, self.W, device=device, dtype=dtype) for _ in range(self.N)]
 
         res = torch._foreach_exp(tensors)
         torch._foreach_exp_(tensors)
 
-        self.assertEqual([torch.exp(torch.ones(self.H, self.W, device=device, dtype=dtype)) for n in range(self.N)], res)
+        self.assertEqual([torch.exp(torch.ones(self.H, self.W, device=device, dtype=dtype)) for _ in range(self.N)], res)
         self.assertEqual(tensors, res)
 
     #
@@ -74,9 +74,9 @@ class TestForeach(TestCase):
     #
     @dtypes(*torch.testing.get_all_dtypes())
     def test_add_scalar__with_same_size_tensors(self, device, dtype):
-        tensors = [torch.zeros(self.H, self.W, device=device, dtype=dtype) for n in range(self.N)]
+        tensors = [torch.zeros(self.H, self.W, device=device, dtype=dtype) for _ in range(self.N)]
 
-        # bool tensor + 1 will result in int64 tensor
+        # inplace addition of 1 to bool fails
         if dtype == torch.bool:
             torch._foreach_add_(tensors, True)
         else:
@@ -87,7 +87,7 @@ class TestForeach(TestCase):
 
     @dtypes(*torch.testing.get_all_dtypes())
     def test_add_scalar_with_same_size_tensors(self, device, dtype):
-        tensors = [torch.zeros(self.H, self.W, device=device, dtype=dtype) for n in range(self.N)]
+        tensors = [torch.zeros(self.H, self.W, device=device, dtype=dtype) for _ in range(self.N)]
 
         res = torch._foreach_add(tensors, 1)
         for t in res:
@@ -165,7 +165,7 @@ class TestForeach(TestCase):
             # Subtraction, the `-` operator, with a bool tensor is not supported.
             return
 
-        tensors = [torch.ones(self.H, self.W, device=device, dtype=dtype) for n in range(self.N)]
+        tensors = [torch.ones(self.H, self.W, device=device, dtype=dtype) for _ in range(self.N)]
         res = torch._foreach_sub(tensors, 1)
         for t in res:
             if dtype == torch.bool and device == 'cpu':
@@ -178,7 +178,7 @@ class TestForeach(TestCase):
             # Subtraction, the `-` operator, with a bool tensor is not supported.
             return
 
-        tensors = [torch.ones(self.H, self.W, device=device, dtype=dtype) for n in range(self.N)]
+        tensors = [torch.ones(self.H, self.W, device=device, dtype=dtype) for _ in range(self.N)]
         torch._foreach_sub_(tensors, 1)
         for t in tensors:
             if dtype == torch.bool and device == 'cpu':
@@ -190,7 +190,7 @@ class TestForeach(TestCase):
         if dtype == torch.bool:
             return
 
-        tensors = [torch.ones(self.H, self.W, device=device, dtype=dtype) for n in range(self.N)]
+        tensors = [torch.ones(self.H, self.W, device=device, dtype=dtype) for _ in range(self.N)]
         res = torch._foreach_mul(tensors, 3)
         for t in res:
             self.assertEqual(t, torch.ones(self.H, self.W, device=device, dtype=dtype).mul(3))
@@ -200,7 +200,7 @@ class TestForeach(TestCase):
         if dtype == torch.bool:
             return
 
-        tensors = [torch.ones(self.H, self.W, device=device, dtype=dtype) for n in range(self.N)]
+        tensors = [torch.ones(self.H, self.W, device=device, dtype=dtype) for _ in range(self.N)]
         torch._foreach_mul_(tensors, 3)
         for t in tensors:
             self.assertEqual(t, torch.ones(self.H, self.W, device=device, dtype=dtype).mul(3))
@@ -214,7 +214,7 @@ class TestForeach(TestCase):
             # Integer division of tensors using div or / is no longer supported
             return
 
-        tensors = [torch.ones(self.H, self.W, device=device, dtype=dtype) for n in range(self.N)]
+        tensors = [torch.ones(self.H, self.W, device=device, dtype=dtype) for _ in range(self.N)]
         res = torch._foreach_div(tensors, 2)
         for t in res:
             self.assertEqual(t, torch.ones(self.H, self.W, device=device, dtype=dtype).div(2))
@@ -228,7 +228,7 @@ class TestForeach(TestCase):
             # Integer division of tensors using div or / is no longer supported
             return
 
-        tensors = [torch.ones(self.H, self.W, device=device, dtype=dtype) for n in range(self.N)]
+        tensors = [torch.ones(self.H, self.W, device=device, dtype=dtype) for _ in range(self.N)]
         torch._foreach_div_(tensors, 2)
         for t in tensors:
             self.assertEqual(t, torch.ones(self.H, self.W, device=device, dtype=dtype).div(2))

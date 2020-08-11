@@ -6,30 +6,30 @@ namespace at { namespace native {
 
 namespace {
 
-template<typename x_t, template<class> class Op>
+template<typename T, template<class> class Op>
 struct PointwiseOpFunctor_ {
     __device__ void operator() (
         int chunk_size,
         TensorListMetadata<3>& tl,
-        x_t scalar) {
+        T scalar) {
             int tensor_loc = tl.block_to_tensor[blockIdx.x];
             int chunk_idx = tl.block_to_chunk[blockIdx.x];
             int n = tl.sizes[tensor_loc];
 
-            x_t* x = (x_t*)tl.addresses[0][tensor_loc];
+            T* x = (T*)tl.addresses[0][tensor_loc];
             x += chunk_idx * chunk_size;
             
-            x_t* y = (x_t*)tl.addresses[1][tensor_loc];
+            T* y = (T*)tl.addresses[1][tensor_loc];
             y += chunk_idx * chunk_size;
 
-            x_t* z = (x_t*)tl.addresses[2][tensor_loc];
+            T* z = (T*)tl.addresses[2][tensor_loc];
             z += chunk_idx * chunk_size;
 
             n -= chunk_idx * chunk_size;
 
-            x_t r_x[kILP];
-            x_t r_y[kILP];
-            x_t r_z[kILP];
+            T r_x[kILP];
+            T r_y[kILP];
+            T r_z[kILP];
 
             // to make things simple, we put aligned case in a different code path
             if(n % kILP == 0 && chunk_size % kILP == 0 && is_aligned(x) && is_aligned(y) && is_aligned(z)) {
@@ -40,7 +40,7 @@ struct PointwiseOpFunctor_ {
                     load_store(r_z, z, 0 , i_start);
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
-                        r_x[ii] = static_cast<x_t>(r_x[ii]) + scalar * Op<x_t>()(static_cast<x_t>(r_y[ii]), static_cast<x_t>(r_z[ii]));
+                        r_x[ii] = static_cast<T>(r_x[ii]) + scalar * Op<T>()(static_cast<T>(r_y[ii]), static_cast<T>(r_z[ii]));
                     }
                     // store
                     load_store(x, r_x, i_start, 0);
@@ -65,7 +65,7 @@ struct PointwiseOpFunctor_ {
                     }
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
-                        r_x[ii] = static_cast<x_t>(r_x[ii]) + scalar * Op<x_t>()(static_cast<x_t>(r_y[ii]), static_cast<x_t>(r_z[ii]));
+                        r_x[ii] = static_cast<T>(r_x[ii]) + scalar * Op<T>()(static_cast<T>(r_y[ii]), static_cast<T>(r_z[ii]));
                     }
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
@@ -78,34 +78,34 @@ struct PointwiseOpFunctor_ {
         }
 };
 
-template<typename x_t, template<class> class Op>
+template<typename T, template<class> class Op>
 struct PointwiseOpFunctor {
     __device__ void operator() (
         int chunk_size,
         TensorListMetadata<4>& tl,
-        x_t scalar) {
+        T scalar) {
             int tensor_loc = tl.block_to_tensor[blockIdx.x];
             int chunk_idx = tl.block_to_chunk[blockIdx.x];
             int n = tl.sizes[tensor_loc];
 
-            x_t* x = (x_t*)tl.addresses[0][tensor_loc];
+            T* x = (T*)tl.addresses[0][tensor_loc];
             x += chunk_idx * chunk_size;
 
-            x_t* y = (x_t*)tl.addresses[1][tensor_loc];
+            T* y = (T*)tl.addresses[1][tensor_loc];
             y += chunk_idx * chunk_size;
 
-            x_t* z = (x_t*)tl.addresses[2][tensor_loc];
+            T* z = (T*)tl.addresses[2][tensor_loc];
             z += chunk_idx * chunk_size;
 
-            x_t* out = (x_t*)tl.addresses[3][tensor_loc];
+            T* out = (T*)tl.addresses[3][tensor_loc];
             out += chunk_idx * chunk_size;
 
             n -= chunk_idx * chunk_size;
 
-            x_t r_x[kILP];
-            x_t r_y[kILP];
-            x_t r_z[kILP];
-            x_t r_out[kILP];
+            T r_x[kILP];
+            T r_y[kILP];
+            T r_z[kILP];
+            T r_out[kILP];
 
             // to make things simple, we put aligned case in a different code path
             if(n % kILP == 0 && chunk_size % kILP == 0 && is_aligned(x) && is_aligned(y) && is_aligned(z) && is_aligned(out)) {
@@ -116,7 +116,7 @@ struct PointwiseOpFunctor {
                     load_store(r_z, z, 0 , i_start);
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
-                        r_out[ii] = static_cast<x_t>(r_x[ii]) + scalar * Op<x_t>()(static_cast<x_t>(r_y[ii]), static_cast<x_t>(r_z[ii]));
+                        r_out[ii] = static_cast<T>(r_x[ii]) + scalar * Op<T>()(static_cast<T>(r_y[ii]), static_cast<T>(r_z[ii]));
                     }
                     // store
                     load_store(out, r_out, i_start, 0);
@@ -140,7 +140,7 @@ struct PointwiseOpFunctor {
                     }
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
-                        r_out[ii] = static_cast<x_t>(r_x[ii]) + scalar * Op<x_t>()(static_cast<x_t>(r_y[ii]), static_cast<x_t>(r_z[ii]));
+                        r_out[ii] = static_cast<T>(r_x[ii]) + scalar * Op<T>()(static_cast<T>(r_y[ii]), static_cast<T>(r_z[ii]));
                     }
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
@@ -203,7 +203,7 @@ std::vector<Tensor> foreach_tensor_addcdiv_cuda(TensorList input, TensorList ten
     return foreach_pointwise_op<std::divides>(input, tensors1, tensors2, scalar);
 }
 
-std::vector<Tensor> foreach_tensor_addcdiv__cuda(TensorList input, TensorList tensors1, TensorList tensors2, Scalar scalar) {
+std::vector<Tensor> foreach_tensor_addcdiv_cuda_(TensorList input, TensorList tensors1, TensorList tensors2, Scalar scalar) {
     TORCH_CHECK(input.size() > 0, "Tensor list must have at least one tensor.");
     TORCH_CHECK(input.size() ==  tensors1.size(), "Tensor lists must be of the same length.");
     TORCH_CHECK(tensors1.size() ==  tensors2.size(), "Tensor lists must be of the same length.");
@@ -211,7 +211,7 @@ std::vector<Tensor> foreach_tensor_addcdiv__cuda(TensorList input, TensorList te
     if (!check_fast_route(input, scalar) ||
         !check_fast_route(tensors1, tensors2) ||
         !check_fast_route(input, tensors1)) {
-        return at::native::foreach_addcdiv__fallback(input, tensors1, tensors2, scalar);
+        return at::native::foreach_addcdiv_fallback_(input, tensors1, tensors2, scalar);
     }
 
     return foreach_pointwise_op_<std::divides>(input, tensors1, tensors2, scalar);
@@ -231,7 +231,7 @@ std::vector<Tensor> foreach_tensor_addcmul_cuda(TensorList input, TensorList ten
     return foreach_pointwise_op<std::multiplies>(input, tensors1, tensors2, scalar);
 }
 
-std::vector<Tensor> foreach_tensor_addcmul__cuda(TensorList input, TensorList tensors1, TensorList tensors2, Scalar scalar) {
+std::vector<Tensor> foreach_tensor_addcmul_cuda_(TensorList input, TensorList tensors1, TensorList tensors2, Scalar scalar) {
     TORCH_CHECK(input.size() > 0, "Tensor list must have at least one tensor.");
     TORCH_CHECK(input.size() ==  tensors1.size(), "Tensor lists must be of the same length.");
     TORCH_CHECK(tensors1.size() ==  tensors2.size(), "Tensor lists must be of the same length.");
@@ -239,7 +239,7 @@ std::vector<Tensor> foreach_tensor_addcmul__cuda(TensorList input, TensorList te
     if (!check_fast_route(input, scalar) ||
         !check_fast_route(tensors1, tensors2) ||
         !check_fast_route(input, tensors1)) {
-        return at::native::foreach_addcmul__fallback(input, tensors1, tensors2, scalar);
+        return at::native::foreach_addcmul_fallback_(input, tensors1, tensors2, scalar);
     }
 
     return foreach_pointwise_op_<std::multiplies>(input, tensors1, tensors2, scalar);
