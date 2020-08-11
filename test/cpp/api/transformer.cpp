@@ -282,7 +282,7 @@ void transformer_decoder_layer_test_helper(bool is_cuda){
 
   // memory_key_padding_mask
   at::Tensor t_key_padding_mask = {};
-  key_padding_mask = torch::zeros({2, 5}) == 1;
+  key_padding_mask = torch::zeros({2, 5}, tensor_options) == 1;
   result = model(decoder_input, memory_input, t_mask, m_mask,
                  t_key_padding_mask, key_padding_mask).detach();
   ref_output = torch::tensor({{{2.430065, 0.027862, -0.601136, -0.073096},
