@@ -8,9 +8,9 @@ class TestForeach(TestCase):
         N = 20
         H = 20
         W = 20
-        tensors = [torch.zeros(H, W, device=device, dtype=dtype) for n in range(N)]
+        tensors = [torch.zeros(H, W, device=device, dtype=dtype) for _ in range(N)]
 
-        # bool tensor + 1 will result in int64 tensor
+        # inplace addition of 1 to bool fails
         if dtype == torch.bool:
             torch._foreach_add_(tensors, True)
         else:
@@ -24,7 +24,7 @@ class TestForeach(TestCase):
         N = 20
         H = 20
         W = 20
-        tensors = [torch.zeros(H, W, device=device, dtype=dtype) for n in range(N)]
+        tensors = [torch.zeros(H, W, device=device, dtype=dtype) for _ in range(N)]
 
         res = torch._foreach_add(tensors, 1)
         for t in res:

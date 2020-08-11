@@ -836,7 +836,7 @@ void addOutput(Node* node, const c10::List<at::Tensor>& outputs) {
 }
 
 void addOutput(Node* node, const at::TensorList outputs) {
-  return addOutput(node, outputs.vec());
+  addOutput(node, outputs.vec());
 }
 
 void addOutput(

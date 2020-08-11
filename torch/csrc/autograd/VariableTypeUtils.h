@@ -55,6 +55,12 @@ inline void check_inplace(const Tensor& tensor) {
   }
 }
 
+inline void check_inplace(const TensorList tensors) {
+  for (const auto& tensor : tensors) {
+    check_inplace(tensor);
+  }
+}
+
 inline void throw_error_out_requires_grad(const char* name) {
   AT_ERROR(
       name, "(): functions with out=... arguments don't support automatic differentiation, "
