@@ -1,6 +1,88 @@
 #include <ATen/ATen.h>
-#include <torch/library.h>
 #include <ATen/Parallel.h>
+#include <ATen/native/quantized/cpu/embedding_packed_params.h>
+#include <ATen/native/quantized/cpu/fbgemm_utils.h>
+#include <torch/library.h>
+
+torch::class_<EmbeddingPackedParamsBase> register_embedding_params();
+
+/*
+ * Prepack function for embedding_bag weights.
+ * This function expects a per-row quantized weight tensor
+ * with a floating point scale and zero_point value.
+ * zero point is set to be (-Xmin/scale)
+ * To prepack the weights we store the scale and bias (where bias is Xmin)
+ * for each row along with the quantized weights.
+ */
+// TODO: Extend this to support 4-bits once 4-bit qtensor support is added.
+c10::intrusive_ptr<EmbeddingPackedParamsBase> PackedEmbeddingWeight::prepack(
+    at::Tensor qweight) {
+  static constexpr int64_t version = 1;
+  TORCH_CHECK(
+      qweight.dim() == 2,
+      "quantized::embedding_bag_prepack weight tensor rank should be 2");
+
+  at::Tensor weight_contig =
+      qweight.contiguous(qweight.suggest_memory_format());
+  const uint8_t* weight_data =
+      reinterpret_cast<uint8_t*>(weight_contig.data_ptr<c10::quint8>());
+
+  int64_t embedding_rows = qweight.size(0);
+  int64_t embedding_cols = qweight.size(1);
+  const auto qtype = qweight.qscheme();
+  TORCH_CHECK(
+      qtype == c10::kPerChannelAffineFloatQParams,
+      "Expect embedding_bag weights to be quantized using kPerChannelAffineFloatQParams");
+  std::vector<float> weight_bias(embedding_rows, 0);
+  std::vector<float> weight_scales(embedding_rows, 1.0);
+  std::vector<float> weight_zero_points(embedding_rows, 0);
+
+  for (int64_t i = 0; i < embedding_rows; ++i) {
+    weight_scales[i] = qweight.q_per_channel_scales()[i].item<float>();
+    weight_zero_points[i] =
+        qweight.q_per_channel_zero_points()[i].item<float>();
+    weight_bias[i] = qweight.q_per_channel_zero_points()[i].item<float>() *
+        weight_scales[i] * -1;
+  }
+
+  std::vector<int64_t> output_shape = {
+      embedding_rows,
+      embedding_cols +
+          8}; // extra 8 bytes to store FP scale and zero_point per row.
+  size_t output_columns = output_shape[1];
+
+  // Allocate output packed weights.
+  at::Tensor output = at::empty(
+      output_shape,
+      weight_contig.options().dtype(at::kByte),
+      weight_contig.suggest_memory_format());
+  auto* output_data = output.data_ptr<uint8_t>();
+
+  at::parallel_for(
+      0, embedding_rows, 1, [&](int32_t start_idx, int32_t end_idx) {
+        for (int64_t row = start_idx; row < end_idx; ++row) {
+          const uint8_t* input_row = weight_data + row * embedding_cols;
+          std::uint8_t* output_row = output_data + row * output_columns;
+          float* output_row_scale_bias =
+              reinterpret_cast<float*>(output_row + embedding_cols);
+          output_row_scale_bias[0] = weight_scales[row];
+          output_row_scale_bias[1] = weight_bias[row];
+          for (int64_t col = 0; col < embedding_cols; ++col) {
+            output_row[col] = input_row[col];
+          }
+        }
+      });
+
+  auto packed_ptr = c10::make_intrusive<PackedEmbeddingWeight>(
+      output,
+      weight_scales,
+      weight_zero_points,
+      8 /* bit rate */,
+      qtype,
+      version);
+
+  return packed_ptr;
+}
 
 namespace at {
 namespace native {
@@ -134,72 +216,19 @@ Tensor qembeddingbag_4bit_prepack(const Tensor& weight) {
   return output;
 }
 
-/*
- * Prepack function for embedding_bag weights.
- * This function expects a per-row quantized weight tensor
- * with a floating point scale and zero_point value.
- * zero point is set to be (-Xmin/scale)
- * To prepack the weights we store the scale and bias (where bias is Xmin)
- * for each row along with the quantized weights.
- */
-// TODO: Extend this to support 4-bits once 4-bit qtensor support is added.
-Tensor qembeddingbag_prepack(at::Tensor qweight) {
-  Tensor weight_contig = qweight.contiguous(qweight.suggest_memory_format());
-  const uint8_t* weight_data =
-      reinterpret_cast<uint8_t*>(weight_contig.data_ptr<c10::quint8>());
-
-  int64_t embedding_rows = qweight.size(0);
-  int64_t embedding_cols = qweight.size(1);
-  const auto qtype = qweight.qscheme();
-  TORCH_CHECK(
-      qtype == c10::kPerChannelAffineFloatQParams,
-      "Expect embedding_bag weights to be quantized using kPerChannelAffineFloatQParams");
-  std::vector<float> weight_bias(embedding_rows, 0);
-  std::vector<float> weight_scales(embedding_rows, 1.0);
-
-  for (int64_t i = 0; i < embedding_rows; ++i) {
-    weight_scales[i] = qweight.q_per_channel_scales()[i].item<float>();
-    weight_bias[i] = qweight.q_per_channel_zero_points()[i].item<float>() *
-        weight_scales[i] * -1;
+class QEmbeddingPackWeights final {
+ public:
+  static c10::intrusive_ptr<EmbeddingPackedParamsBase> run(at::Tensor weight) {
+    return PackedEmbeddingWeight::prepack(std::move(weight));
   }
-
-  std::vector<int64_t> output_shape = {
-      embedding_rows,
-      embedding_cols +
-          8}; // extra 8 bytes to store FP scale and zero_point per row.
-  size_t output_columns = output_shape[1];
-
-  // Allocate output packed weights.
-  // TODO add torchbind support for packed weights.
-  auto output = at::empty(
-      output_shape,
-      weight_contig.options().dtype(at::kByte),
-      weight_contig.suggest_memory_format());
-  auto* output_data = output.data_ptr<uint8_t>();
-
-  at::parallel_for(
-      0, embedding_rows, 1, [&](int32_t start_idx, int32_t end_idx) {
-        for (int64_t row = start_idx; row < end_idx; ++row) {
-          const uint8_t* input_row = weight_data + row * embedding_cols;
-          std::uint8_t* output_row = output_data + row * output_columns;
-          float* output_row_scale_bias =
-              reinterpret_cast<float*>(output_row + embedding_cols);
-          output_row_scale_bias[0] = weight_scales[row];
-          output_row_scale_bias[1] = weight_bias[row];
-          for (int64_t col = 0; col < embedding_cols; ++col) {
-            output_row[col] = input_row[col];
-          }
-        }
-      });
-  return output;
-}
+};
 
 TORCH_LIBRARY_IMPL(quantized, CPU, m) {
   m.impl("embedding_bag_byte_prepack", qembeddingbag_byte_prepack);
   m.impl("embedding_bag_4bit_prepack", qembeddingbag_4bit_prepack);
 }
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
-  m.impl("embedding_bag_prepack", qembeddingbag_prepack);
+  m.impl("embedding_bag_prepack", TORCH_FN(QEmbeddingPackWeights::run));
 }
 
 } // namespace

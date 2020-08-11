@@ -17,6 +17,7 @@
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
 
 torch::class_<LinearPackedParamsBase> register_linear_params();
+torch::class_<EmbeddingPackedParamsBase> register_embedding_params();
 
 #ifdef USE_FBGEMM
 
@@ -385,10 +386,65 @@ torch::class_<LinearPackedParamsBase> register_linear_params() {
   return register_linear_params;
 }
 
+torch::class_<EmbeddingPackedParamsBase> register_embedding_params() {
+  // Type for __getstate__/__setstate__ serialization
+  //
+  // Element 0 is a string to say what kind of EmbeddingParam this is
+  // Element 1 is the Tensors contained in the Param instance
+  // Element 2 is the double values (if any) contained in the Param instance
+  // Element 3 is the int values (if any) contained in the Param instance
+
+  using EmbeddingParamsSerializationType = std::tuple<
+    std::string,
+    std::vector<at::Tensor>,
+    std::vector<double>,
+    std::vector<int64_t>>;
+
+  static auto register_embedding_params =
+    torch::class_<EmbeddingPackedParamsBase>(
+      "quantized", "EmbeddingPackedParamsBase")
+      .def_pickle(
+          [](const c10::intrusive_ptr<EmbeddingPackedParamsBase>& params)
+              -> EmbeddingParamsSerializationType { // __getstate__ call
+            at::Tensor weight = params->unpack();
+            std::vector<at::Tensor> tensors_to_serialize = {weight};
+            std::vector<double> doubles_to_serialize = {};
+            int bit_rate = params->bit_rate();
+            int version = params->version();
+            std::vector<int64_t> longs_to_serialize = {bit_rate, version};
+            return EmbeddingParamsSerializationType(
+              "qembedding_bag",
+              std::move(tensors_to_serialize),
+              std::move(doubles_to_serialize),
+              std::move(longs_to_serialize));
+          },
+          [](EmbeddingParamsSerializationType state)
+              -> c10::intrusive_ptr<EmbeddingPackedParamsBase> { // __setstate__ call
+
+            std::string type = std::get<0>(state);
+            TORCH_INTERNAL_ASSERT(type == "qembedding_bag", "Expected EmbeddingParamsSerializationType");
+            std::vector<at::Tensor> tensors;
+            std::vector<double> doubles;
+            std::vector<int64_t> longs;
+            std::tie(std::ignore, tensors, doubles, longs) = std::move(state);
+
+            TORCH_INTERNAL_ASSERT(tensors.size() == 1, "Expected weight tensor to be serialized");
+            TORCH_INTERNAL_ASSERT(longs.size() == 2, "Expected bit_rate and version to be serialized");
+
+            at::Tensor weight = std::move(tensors[0]);
+            return PackedEmbeddingWeight::prepack(weight);
+          })
+      .def("bit_rate", &EmbeddingPackedParamsBase::bit_rate)
+      .def("version", &EmbeddingPackedParamsBase::version);
+
+  return register_embedding_params;
+}
+
 namespace {
 
 static auto conv2d_params = register_conv_params<2>();
 static auto conv3d_params = register_conv_params<3>();
 static auto linear_params = register_linear_params();
+static auto embedding_params = register_embedding_params();
 
 } // namespace

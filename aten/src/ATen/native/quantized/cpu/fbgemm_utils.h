@@ -8,6 +8,7 @@
 #include <ATen/Tensor.h>
 #include <ATen/native/quantized/cpu/conv_packed_params.h>
 #include <ATen/native/quantized/cpu/packed_params.h>
+#include <ATen/native/quantized/cpu/embedding_packed_params.h>
 #include <c10/core/QScheme.h>
 
 
@@ -204,6 +205,49 @@ struct CAFFE2_API PackedConvWeight : public ConvPackedParamsBase<kSpatialDim> {
       const at::Tensor& input,
       double output_scale,
       int64_t output_zero_point);
+};
+
+
+struct CAFFE2_API PackedEmbeddingWeight : public EmbeddingPackedParamsBase {
+  PackedEmbeddingWeight(
+    at::Tensor packed_w,
+    std::vector<float> w_scale,
+    std::vector<float> w_zp,
+    int64_t bit_rate,
+    c10::QScheme q_scheme,
+    int64_t version)
+    : packed_w(std::move(packed_w)),
+      w_scale(std::move(w_scale)),
+      w_zp(std::move(w_zp)),
+      bit_rate_(bit_rate),
+      q_scheme(q_scheme),
+      version_(version) {}
+
+  at::Tensor packed_w;
+  std::vector<float> w_scale;
+  std::vector<float> w_zp;
+  int64_t bit_rate_;
+  c10::QScheme q_scheme;
+  int64_t version_;
+
+  at::Tensor unpack() override;
+  static c10::intrusive_ptr<EmbeddingPackedParamsBase> prepack(at::Tensor weight);
+
+  int64_t bit_rate() const override {
+    return bit_rate_;
+  }
+
+  int64_t version() const override {
+    return version_;
+  }
+
+  private:
+    at::Tensor embeddingbag_byte(
+      const at::Tensor& indices,
+      const at::Tensor& offsets,
+      bool sparse,
+      const c10::optional<at::Tensor>& per_sample_weights_,
+      bool include_last_offset);
 };
 
 // PackWeight: Convert the weight from uint8 to int8.
