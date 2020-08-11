@@ -856,6 +856,25 @@ class TorchIntegration(hu.HypothesisTestCase):
         )
         torch.testing.assert_allclose(expected_output, actual_output.cpu())
 
+    def test_batch_bucket_one_hot_op(self):
+        data = np.array([[2, 3], [4, 1], [2, 5]]).astype(np.float32)
+        lengths = np.array([2, 3]).astype(np.int32)
+        boundaries = np.array([0.1, 2.5, 1, 3.1, 4.5]).astype(np.float32)
+
+        def _batch_bucket_one_hot_ref(data, lengths, boundaries):
+            ref_op = core.CreateOperator('BatchBucketOneHot', ["data", "lengths", "boundaries"], ["Y"])
+            workspace.FeedBlob("data", data)
+            workspace.FeedBlob("lengths", lengths)
+            workspace.FeedBlob("boundaries", boundaries)
+            workspace.RunOperatorOnce(ref_op)
+            return workspace.FetchBlob("Y")
+
+        expected_output = _batch_bucket_one_hot_ref(data, lengths, boundaries)
+        actual_output = torch.ops._caffe2.BatchBucketOneHot(
+            torch.tensor(data), torch.Tensor(lengths).int(), torch.Tensor(boundaries)
+        )
+        torch.testing.assert_allclose(expected_output, actual_output.cpu())
+
 
 if __name__ == '__main__':
     unittest.main()
