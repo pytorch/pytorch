@@ -254,9 +254,8 @@ def make_non_contiguous(tensor: torch.Tensor) -> torch.Tensor:
 # Functions and classes for describing the dtypes a function supports
 # NOTE: these helpers should correspond to PyTorch's C++ dispatch macros
 
-# Verifies input is either a tuple of torch.dtypes or a single torch.dtype
-# Returns a tuple containing all the given torch.dtypes
-def _tuple_of_dtypes(*dtypes):
+# Verifies each given dtype is a torch.dtype
+def _validate_dtypes(*dtypes):
     for dtype in dtypes:
         assert isinstance(dtype, torch.dtype)
     return dtypes
@@ -276,28 +275,28 @@ def floating_types_and_half():
     return _floating_types_and_half
 
 def floating_types_and(*dtypes):
-    return _floating_types + _tuple_of_dtypes(*dtypes)
+    return _floating_types + _validate_dtypes(*dtypes)
 
 _floating_and_complex_types = _floating_types + (torch.cfloat, torch.cdouble)
 def floating_and_complex_types():
     return _floating_and_complex_types
 
 def floating_and_complex_types_and(*dtypes):
-    return _floating_and_complex_types + _tuple_of_dtypes(*dtypes)
+    return _floating_and_complex_types + _validate_dtypes(*dtypes)
 
 _integral_types = _dispatch_dtypes((torch.uint8, torch.int, torch.int16, torch.int32, torch.int64))
 def integral_types():
     return _integral_types
 
 def integral_types_and(*dtypes):
-    return _integral_types + _tuple_of_dtypes(*dtypes)
+    return _integral_types + _validate_dtypes(*dtypes)
 
 _all_types = _floating_types + _integral_types
 def all_types():
     return _all_types
 
 def all_types_and(*dtypes):
-    return _all_types + _tuple_of_dtypes(*dtypes)
+    return _all_types + _validate_dtypes(*dtypes)
 
 _complex_types = (torch.cfloat, torch.cdouble)
 def complex_types():
@@ -308,7 +307,7 @@ def all_types_and_complex():
     return _all_types_and_complex
 
 def all_types_and_complex_and(*dtypes):
-    return _all_types_and_complex + _tuple_of_dtypes(*dtypes)
+    return _all_types_and_complex + _validate_dtypes(*dtypes)
 
 _all_types_and_half = _all_types + (torch.half,)
 def all_types_and_half():
