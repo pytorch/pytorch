@@ -19,6 +19,25 @@ namespace at {
 namespace cuda {
 namespace blas {
 
+// RAII guard that sets the CuBLAS pointer mode and restores it to
+// its previous value when the guard is destroyed
+class PointerModeGuard {
+public:
+  PointerModeGuard(cublasHandle_t handle, cublasPointerMode_t mode) :
+      handle(handle) {
+    TORCH_CUDABLAS_CHECK(cublasGetPointerMode(handle, &previous_mode));
+    TORCH_CUDABLAS_CHECK(cublasSetPointerMode(handle, mode));
+  }
+
+  ~PointerModeGuard() {
+    cublasSetPointerMode(handle, previous_mode);
+  }
+
+private:
+  cublasHandle_t handle;
+  cublasPointerMode_t previous_mode;
+};
+
 /* LEVEL 3 BLAS FUNCTIONS */
 
 #define CUDABLAS_GEMM_ARGTYPES(Dtype)                                       \
