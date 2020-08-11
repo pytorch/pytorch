@@ -135,6 +135,10 @@ GeneratorTypePtr GeneratorType::get() {
   static auto value = GeneratorType::create();
   return value;
 }
+QuantizerTypePtr QuantizerType::get() {
+  static auto value = QuantizerType::create();
+  return value;
+}
 QSchemeTypePtr QSchemeType::get() {
   static auto value = QSchemeType::create();
   return value;
@@ -1352,6 +1356,7 @@ c10::optional<ClassType::Property> ClassType::getProperty(const std::string& nam
 }
 
 void ClassType::addProperty(const std::string& name, torch::jit::Function* getter, torch::jit::Function* setter) {
+  TORCH_INTERNAL_ASSERT(!getProperty(name), "Property named ", name, " already exists!");
   properties_.push_back({name, getter, setter});
 }
 

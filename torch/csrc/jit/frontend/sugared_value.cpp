@@ -293,10 +293,8 @@ void SimpleValue::setAttr(
       // Check and see if it's a setter attribute.
       auto prop = classType->getProperty(field);
       if (prop && prop->setter) {
-        auto& g = *m.graph();
-        MatchedSchema setter_matched_schema = matchSchema(
-            prop->setter->getSchema(), loc, g, {value_, newValue}, {});
-        g.insertMethodCall(prop->setter->name(), setter_matched_schema);
+        MethodValue(value_, prop->setter->name())
+            .call(loc, m, {newValue}, {}, /*n_binders=*/1);
         return;
       }
 

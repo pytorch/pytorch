@@ -3,7 +3,7 @@ import sys
 
 import torch
 from enum import Enum
-from typing import Any
+from typing import Any, List
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -262,6 +262,30 @@ class TestEnum(JitTestCase):
 
         self.assertEqual(scripted(), Color.RED.value)
 
+    def test_enum_iterate(self):
+        global ColorForIterate
+
+        class ColorForIterate(Enum):
+            RED = 1
+            GREEN = 2
+            PURPLE = 3
+
+        def iterate_enum(x: ColorForIterate):
+            res: List[int] = []
+            for e in ColorForIterate:
+                if e != x:
+                    res.append(e.value)
+            return res
+
+        with torch._jit_internal._disable_emit_hooks():
+            scripted = torch.jit.script(iterate_enum)
+
+        # PURPLE always appear last because we follow Python's Enum definition order.
+        self.assertEqual(scripted(ColorForIterate.RED), [ColorForIterate.GREEN.value, ColorForIterate.PURPLE.value])
+        self.assertEqual(scripted(ColorForIterate.GREEN), [ColorForIterate.RED.value, ColorForIterate.PURPLE.value])
+
+        # TODO(gmagogsfm): Add FileCheck test after serialization and ir representation is completed.
+
 
 # Tests that Enum support features are properly guarded before they are mature.
 class TestEnumFeatureGuard(JitTestCase):
@@ -284,6 +308,5 @@ class TestEnumFeatureGuard(JitTestCase):
         def enum_comp(x: Color, y: Color) -> bool:
             return x == y
 
-        with self.assertRaisesRegex(NotImplementedError,
-                                    "Enum support is work in progress"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "Unknown type name 'Color'", "Color"):
             torch.jit.script(enum_comp)

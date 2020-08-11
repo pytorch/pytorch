@@ -354,6 +354,8 @@ static StrongFunctionPtr script_compile_overloaded_function(
   auto cu = get_python_cu();
   auto defined_functions = cu->define(
       QualifiedName(name.prefix()),
+      /*properties=*/{},
+      /*propResolvers=*/{},
       {new_def},
       {pythonResolver(std::move(rcb))},
       nullptr,
@@ -380,6 +382,8 @@ static StrongFunctionPtr script_compile_function(
   auto cu = get_python_cu();
   auto defined_functions = cu->define(
       QualifiedName(name.prefix()),
+      /*properties=*/{},
+      /*propResolvers=*/{},
       {def},
       {pythonResolver(std::move(rcb))},
       nullptr,
@@ -1309,7 +1313,8 @@ void initJitScriptBindings(PyObject* module) {
               pythonResolver(rcb, classDef.name().name(), classType));
         }
 
-        // Compile getters and setters for properties as regular methods.
+        // Gather definitions for property getters and setters as well as
+        // corresponding resolution callbacks.
         if (classDef.properties().present()) {
           for (const auto& prop : classDef.properties().get()) {
             props.emplace_back(prop);
@@ -1575,7 +1580,13 @@ void initJitScriptBindings(PyObject* module) {
             const auto& prefix = selfType->name().value();
             const auto self = ModuleSelf(std::move(concreteType));
             auto cu = selfType->compilation_unit();
-            cu->define(prefix, defs, resolvers, &self);
+            cu->define(
+                prefix,
+                /*properties=*/{},
+                /*propResolvers=*/{},
+                defs,
+                resolvers,
+                &self);
             // Stitch in default arguments for each Def if provided
             auto defaults_it = defaults.begin();
             auto defs_it = defs.begin();

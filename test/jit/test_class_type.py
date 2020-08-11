@@ -85,21 +85,6 @@ class TestClassType(JitTestCase):
 
         self.assertEqual(fn(1), 3)
 
-    def test_staticmethod(self):
-        class X(object):
-            def __init__(self, x):
-                # type: (int) -> None
-                self.x = x
-
-            @staticmethod
-            def identity(x):
-                return x
-
-        def fn(x, y):
-            return X.identity(x)
-
-        self.checkScript(fn, (torch.randn(2, 2), torch.randn(2, 2)))
-
     def test_set_attr_type_mismatch(self):
         with self.assertRaisesRegex(RuntimeError, "Wrong type for attribute assignment"):
             @torch.jit.script
@@ -1028,10 +1013,51 @@ class TestClassType(JitTestCase):
             y.my_list = new_list
             return y
 
+    def test_staticmethod(self):
+        """
+        Test static methods on class types.
+        """
+        global ClassWithStaticMethod
+
+        @torch.jit.script
+        class ClassWithStaticMethod:
+            def __init__(self, a: int, b: int):
+                self.a: int = a
+                self.b: int = b
+
+            def get_a(self):
+                return self.a
+
+            def get_b(self):
+                return self.b
+
+            def __eq__(self, other: 'ClassWithStaticMethod'):
+                return self.a == other.a and self.b == other.b
+
+            # staticmethod that calls constructor.
+            @staticmethod
+            def create(args: List['ClassWithStaticMethod']) -> 'ClassWithStaticMethod':
+                return ClassWithStaticMethod(args[0].a, args[0].b)
+
+            # staticmethod that calls another staticmethod.
+            @staticmethod
+            def create_from(a: int, b: int) -> 'ClassWithStaticMethod':
+                a = ClassWithStaticMethod(a, b)
+                return ClassWithStaticMethod.create([a])
+
+        # Script function that calls staticmethod.
+        def test_function(a: int, b: int) -> 'ClassWithStaticMethod':
+            return ClassWithStaticMethod.create_from(a, b)
+
+        self.checkScript(test_function, (1, 2))
+
     def test_properties(self):
         """
         Test that a scripted class can make use of the @property decorator.
         """
+        def free_function(x: int) -> int:
+            return x + 1
+
         @torch.jit.script
         class Properties(object):
             def __init__(self, a: int):
@@ -1039,11 +1065,11 @@ class TestClassType(JitTestCase):
 
             @property
             def attr(self) -> int:
-                return self.a
+                return self.a - 1
 
             @attr.setter
             def attr(self, value: int):
-                self.a = value
+                self.a = value + 3
 
         @torch.jit.script
         class NoSetter(object):
@@ -1052,7 +1078,7 @@ class TestClassType(JitTestCase):
 
             @property
             def attr(self) -> int:
-                return self.a
+                return free_function(self.a)
 
         @torch.jit.script
         class MethodThatUsesProperty(object):
@@ -1061,11 +1087,11 @@ class TestClassType(JitTestCase):
 
             @property
             def attr(self) -> int:
-                return self.a
+                return self.a - 2
 
             @attr.setter
             def attr(self, value: int):
-                self.a = value
+                self.a = value + 4
 
             def forward(self):
                 return self.attr

@@ -84,23 +84,15 @@ struct TORCH_API CompilationUnit {
     return true;
   }
 
-  // Version of define but with support for properties.
+  // for historic reasons, these are defined in ir_emitter.cpp
+  // Returns the list of Function's just defined.
   std::vector<Function*> define(
       const c10::optional<c10::QualifiedName>& prefix,
       const std::vector<Property>& properties,
       const std::vector<ResolverPtr>& propResolvers,
       const std::vector<Def>& definitions,
-      const std::vector<ResolverPtr>& defResolvers,
-      const Self* self,
-      bool shouldMangle = false);
-
-  // for historic reasons, these are defined in ir_emitter.cpp
-  // Returns the list of Function's just defined.
-  std::vector<Function*> define(
-      const c10::optional<c10::QualifiedName>& prefix,
-      const std::vector<Def>& definitions,
       const std::vector<ResolverPtr>&
-          resolvers, /* determines how we handle free
+          defResolvers, /* determines how we handle free
                      variables in each definition*/
       // if non-null, the first argument to each def, is bound to this value
       const Self* self,
@@ -273,7 +265,9 @@ struct TORCH_API CompilationUnit {
       const std::unordered_map<std::string, Function*>& function_table,
       bool shouldMangle = false) const;
 
-  std::pair<std::unique_ptr<Function>, std::unique_ptr<Function>> define(
+  // Define a property on \p self.
+  struct PropertyPair;
+  PropertyPair define_property(
       const c10::optional<c10::QualifiedName>& prefix,
       const Property& prop,
       const ResolverPtr& resolver,
