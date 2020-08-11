@@ -220,7 +220,7 @@
   variants: function, method
 
 - func: abs_(Tensor(a!) self) -> Tensor(a!)
-  variants: method
+  variants: function, method
 
 - func: abs.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
 
