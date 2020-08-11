@@ -3066,7 +3066,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
         def fut_then(fut):
             # Add ones to fut's result.
-            return [t + torch.ones_like(t) for t in fut.wait()]
+            return [t + torch.ones_like(t) for t in fut.value()]
 
         return fut.then(fut_then)
 
@@ -3144,11 +3144,11 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
             def mult(fut):
                 # Multiply the result by 10.
-                return [10 * t for t in fut.wait()]
+                return [10 * t for t in fut.value()]
 
             def div(fut):
                 # Divide the result by 2.
-                return [0.5 * t for t in fut.wait()]
+                return [0.5 * t for t in fut.value()]
 
             return fut.then(mult).then(div)
 
@@ -3432,7 +3432,7 @@ class ReducerTest(TestCase):
 
         with self.assertRaisesRegex(
             RuntimeError,
-            "Communication hook does not support single process multiple device mode.",
+            "Communication hook does not support single-process multiple-device mode.",
         ):
             dist._register_comm_hook(reducer, None, dummy_hook)
 
