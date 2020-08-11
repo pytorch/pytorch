@@ -12,7 +12,7 @@ from .modules.utils import _single, _pair, _triple, _list_with_default
 from . import grad  # noqa: F401
 from torch import _VF
 from .._jit_internal import boolean_dispatch, List, Optional, _overload
-from .._overrides import has_torch_function, handle_torch_function
+from ..overrides import has_torch_function, handle_torch_function
 
 
 Tensor = torch.Tensor
@@ -3329,6 +3329,9 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros', align_corner
         When using the CUDA backend, this operation may induce nondeterministic
         behaviour in its backward pass that is not easily switched off.
         Please see the notes on :doc:`/notes/randomness` for background.
+
+    Note:
+        NaN values in :attr:`grid` would be interpreted as ``-1``.
 
     Args:
         input (Tensor): input of shape :math:`(N, C, H_\text{in}, W_\text{in})` (4-D case)

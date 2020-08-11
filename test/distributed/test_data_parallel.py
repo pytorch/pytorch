@@ -684,6 +684,7 @@ class TestDataParallel(TestCase):
         torch.save(dpm, data)
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skipIfRocm
     def test_strided_grad_layout(self):
         class ConvNet(nn.Module):
             def __init__(self, layouts, dtypes):
