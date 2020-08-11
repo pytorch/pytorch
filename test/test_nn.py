@@ -9901,6 +9901,12 @@ class TestNNDeviceType(NNTestCase):
         fn = fn_wrapper(device)
         _assertGradAndGradgradChecks(self, fn, (weight, ))
 
+    def test_embedding_scalar_weight_error(self, device):
+        indices = torch.rand(2, 2, device=device).long()
+        weight = torch.tensor(1.0, device=device)
+        with self.assertRaisesRegex(RuntimeError, "'weight' must be at least 1-D"):
+            torch.nn.functional.embedding(indices, weight)
+
     @dtypesIfCUDA(torch.float16, torch.float64)
     @dtypes(torch.float64)
     def test_embedding_backward(self, device, dtype):
