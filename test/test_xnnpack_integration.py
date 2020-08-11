@@ -704,6 +704,78 @@ class TestXNNPACKRewritePass(TestCase):
         TestXNNPACKRewritePass.validate_transformed_module(DecomposedLinearMatmulAdd(), pattern_count_map, data_shape)
         TestXNNPACKRewritePass.validate_transformed_module(DecomposedLinearMatmul(), pattern_count_map, data_shape)
 
+@unittest.skipUnless(torch.backends.xnnpack.enabled,
+                     " XNNPACK must be enabled for these tests."
+                     " Please build with USE_XNNPACK=1.")
+class TestXNNPACKConv1dTransformPass(TestCase):
+    @staticmethod
+    def validate_transform_conv1d_to_conv2d(
+            self,
+            pattern_count_map,
+            data_shape):
+        module_instance = self
+        scripted_model = torch.jit.script(module_instance)
+        scripted_model.eval()
+        input_data = torch.normal(1, 20, size=data_shape)
+        ref_result = scripted_model(input_data)
+        torch._C._jit_pass_transform_conv1d_to_conv2d(scripted_model._c)
+
+        buffer = io.BytesIO()
+        torch.jit.save(scripted_model, buffer)
+        buffer.seek(0)
+        deserialized_scripted_model = torch.jit.load(buffer)
+        for pattern, v in pattern_count_map.items():
+            if (v == 0):
+                FileCheck().check(pattern).run(deserialized_scripted_model.graph)
+            elif (v == -1):
+                FileCheck().check_not(pattern).run(deserialized_scripted_model.graph)
+            else:
+                FileCheck().check_count(pattern, v, exactly=True).run(deserialized_scripted_model.graph)
+        xnnpack_result = deserialized_scripted_model(input_data)
+        torch.testing.assert_allclose(ref_result, xnnpack_result, rtol=1e-2, atol=1e-3)
+
+    @given(batch_size=st.integers(0, 3),
+           input_channels_per_group=st.integers(1, 32),
+           height=st.integers(5, 64),
+           output_channels_per_group=st.integers(1, 32),
+           groups=st.integers(1, 16),
+           kernel=st.integers(1, 7),
+           strides=st.integers(1, 2),
+           paddings=st.integers(0, 2),
+           dilations=st.integers(1, 2))
+    def test_conv1d_basic(self,
+                          batch_size,
+                          input_channels_per_group,
+                          height,
+                          output_channels_per_group,
+                          groups,
+                          kernel,
+                          strides,
+                          paddings,
+                          dilations):
+        input_channels = input_channels_per_group * groups
+        output_channels = output_channels_per_group * groups
+        conv_weight_shape = (output_channels, input_channels_per_group, kernel)
+        conv_bias_shape = (output_channels)
+
+        class Conv1D(torch.nn.Module):
+            def __init__(self):
+                super(Conv1D, self).__init__()
+                self.weight = torch.nn.Parameter(torch.Tensor(torch.rand(conv_weight_shape)), requires_grad=False)
+                self.bias = torch.nn.Parameter(torch.Tensor(torch.rand(conv_bias_shape)), requires_grad=False)
+                self.strides = strides
+                self.paddings = paddings
+                self.dilations = dilations
+                self.groups = groups
+
+            def forward(self, x):
+                return F.conv1d(x, self.weight, self.bias,
+                                self.strides, self.paddings, self.dilations, self.groups)
+
+        data_shape = (batch_size, input_channels, height)
+        pattern_count_map = {"Tensor = aten::conv1d": -1,
+                             "Tensor = aten::conv2d": 1}
+        TestXNNPACKConv1dTransformPass.validate_transform_conv1d_to_conv2d(Conv1D(), pattern_count_map, data_shape)
 
 if __name__ == "__main__":
     run_tests()
