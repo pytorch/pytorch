@@ -368,7 +368,7 @@ def split(g, self, split_size_or_sizes, dim, _outputs=None):
             return split_out
         # Convert to multiple slice nodes iff number of splits and number of outputs are statically known.
         if sym_help._is_value(split_size_or_sizes) and split_size_or_sizes.node().kind() == 'prim::ListConstruct' \
-            and len(list(split_size_or_sizes.node().inputs())) == _outputs:
+                and len(list(split_size_or_sizes.node().inputs())) == _outputs:
             split_sizes = [g.op("Unsqueeze", v, axes_i=[0]) for v in split_size_or_sizes.node().inputs()]
             start = g.op("Constant", value_t=torch.tensor([0], dtype=torch.long))
             end = split_sizes[0]
