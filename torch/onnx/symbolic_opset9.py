@@ -486,24 +486,26 @@ def prim_ConstantChunk(g, self, chunks, dim):
     return prim_ConstantSplit(g, self, split_size, dim)
 
 
-@parse_args('v', 'i', 'i')
-def unsafe_chunk(g, self, chunks, dim):
+@parse_args('v', 'i', 'i', 'i')
+def unsafe_chunk(g, self, chunks, dim, _outputs=None):
+    if _outputs is None:
+        return sym_help._onnx_opset_unsupported_detailed('unsafe_chunk', 9, 11, 'Dynamic number of outputs not supported')
     split_size = (self.type().sizes()[dim] + chunks - 1) // chunks
     size = self.type().sizes()[dim]
     splits = [split_size] * (size // split_size)
     leftover = size % split_size
     if leftover:
         splits.append(leftover)
-    return g.op("Split", self, split_i=splits, axis_i=dim, outputs=1)
+    return g.op("Split", self, split_i=splits, axis_i=dim, outputs=_outputs)
 
 
-def split(g, self, split_size_or_sizes, dim):
-    if sym_help._is_value(split_size_or_sizes) and split_size_or_sizes.node().kind() != 'onnx::Constant':
-        raise RuntimeError("ONNX symbolic expected a constant value of the {} argument, got `{}`"
-                           .format('split_size_or_sizes', split_size_or_sizes))
+@parse_args('v', 'v', 'v', 'i')
+def split(g, self, split_size_or_sizes, dim, _outputs=None):
+    if not sym_help._is_split_static(split_size_or_sizes, _outputs):
+        return sym_help._onnx_opset_unsupported_detailed('split', 9, 11, 'Dynamic number of outputs not supported')
     split_val = split_size_or_sizes.node()['value']
     if split_val.dim() > 0:
-        return split_with_sizes(g, self, split_size_or_sizes, dim)
+        return split_with_sizes(g, self, split_size_or_sizes, dim, _outputs)
     split_size = sym_help._get_const(split_size_or_sizes, 'i', 'split_size')
     dim = sym_help._get_const(dim, 'i', 'dim')
 
@@ -512,28 +514,33 @@ def split(g, self, split_size_or_sizes, dim):
     leftover = size % split_size
     if leftover:
         splits.append(leftover)
-    return g.op("Split", self, split_i=splits, axis_i=dim, outputs=1)
+    return g.op("Split", self, split_i=splits, axis_i=dim, outputs=_outputs)
 
 
-def unsafe_split(g, self, split_size_or_sizes, dim):
-    return split(g, self, split_size_or_sizes, dim)
+def unsafe_split(g, self, split_size_or_sizes, dim, _outputs=None):
+    return split(g, self, split_size_or_sizes, dim, _outputs)
 
 
-@parse_args('v', 'is', 'i')
-def split_with_sizes(g, self, split_sizes, dim):
-    return g.op("Split", self, split_i=split_sizes, axis_i=dim, outputs=1)
+@parse_args('v', 'is', 'i', 'i')
+def split_with_sizes(g, self, split_sizes, dim, _outputs=None):
+    if not sym_help._is_split_static(split_sizes, _outputs):
+        return sym_help._onnx_opset_unsupported_detailed('split_with_sizes', 9, 11, 'Dynamic number of outputs not supported')
+    return g.op("Split", self, split_i=split_sizes, axis_i=dim, outputs=_outputs)
 
 
-@parse_args('v', 'is', 'i')
-def unsafe_split_with_sizes(g, self, split_sizes, dim):
-    return split_with_sizes(g, self, split_sizes, dim)
+def unsafe_split_with_sizes(g, self, split_sizes, dim, _outputs=None):
+    return split_with_sizes(g, self, split_sizes, dim, _outputs)
 
 
-@parse_args('v', 'i')
-def unbind(g, self, dim=0):
-    # NOTE: This conversion of this node is handled in onnx peephole pass.
-    # Due to that an additional Squeeze node needs to be inserted for each output from unbind.
-    return g.op("aten::unbind", self, axis_i=dim)
+@parse_args('v', 'i', 'i')
+def unbind(g, self, dim=0, _outputs=None):
+    if _outputs is None:
+        return sym_help._onnx_opset_unsupported_detailed('unbind', 9, 11, 'Dynamic number of outputs not supported')
+
+    outputs = g.op("Split", self, split_i=[1] * _outputs, axis_i=dim, outputs=_outputs)
+    outputs = [outputs] if _outputs == 1 else outputs
+    squeezed_outputs = [g.op("Squeeze", out, axes_i=[dim]) for out in outputs]
+    return squeezed_outputs
 
 
 @parse_args('v', 'i', 'v')
@@ -1038,6 +1045,9 @@ def __lshift_(g, self, other):
 
 
 def where(g, condition, self, other):
+    # Assumes that torch.where's first argument takes only Bool and Byte tensors.
+    if condition.type().scalarType() != 'Bool': 
+        condition = g.op("Cast", condition, to_i=sym_help.cast_pytorch_to_onnx['Bool'])
     return g.op("Where", condition, self, other)
 
 
@@ -1493,6 +1503,24 @@ def scalar_tensor(g, scalar, dtype, *options):
     scalar = g.op("Cast", scalar, to_i=sym_help.scalar_type_to_onnx[dtype])
     return scalar
 
+def tensor(g, data, dtype=None, device=None, requires_grad=False):
+    dtype = sym_help._get_const(dtype, 'i', 'dtype')
+    if sym_help._is_packed_list(data):
+        if dtype is None:
+            dtype = sym_help._unpack_list(data)[0].type().scalarType()
+            dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
+        input_list = list()   
+        for t in sym_help._unpack_list(data):
+            shape_reference = g.op("Constant", value_t=torch.LongTensor([1]))
+            t = g.op("Reshape", t, shape_reference)
+            t = g.op("Cast", t, to_i=sym_help.scalar_type_to_onnx[dtype])
+            input_list.append(t)    
+        return g.op("Concat", *input_list, axis_i=0)
+    else:
+        if dtype is None:
+            dtype = sym_help._maybe_get_const(data, 't').type().scalarType()
+            dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
+    return g.op("Cast", data, to_i=sym_help.scalar_type_to_onnx[dtype])
 
 @parse_args('v', 'i', 'v', 'v', 'v')
 def zeros(g, sizes, dtype, layout, device, pin_memory=False):
@@ -1563,6 +1591,11 @@ def full_like(g, input, fill_value, dtype=None, layout=None, device=None, pin_me
         return g.op("ConstantOfShape", shape,
                     value_t=torch.tensor([fill_value], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
 
+
+def eye(g, n, m, dtype=None, layout=None, device=None, pin_memory=False):
+    shape = g.op("Concat", g.op("Unsqueeze", n, axes_i=[0]), g.op("Unsqueeze", m, axes_i=[0]), axis_i=0)
+    tensor = zeros(g, shape, dtype, layout, device)
+    return g.op("EyeLike", tensor)
 
 @parse_args('v', 'v', 'v', 'v', 'i')
 def slice(g, self, dim, start, end, step):
@@ -2066,7 +2099,11 @@ def argmin(g, input, dim, keepdim):
 
 @parse_args('v', 'i', 'v', 'v')
 def scatter(g, self, dim, index, src):
-    return g.op("Scatter", self, index, src, axis_i=dim)
+    src = sym_help._maybe_get_scalar(src)
+    if sym_help._is_value(src):
+        return g.op("Scatter", self, index, src, axis_i=dim)
+    else:
+        return g.op("Scatter", self, index, expand_as(g, src, index), axis_i=dim)
 
 
 @parse_args('v', 'i', 'v', 'v')
@@ -2443,3 +2480,33 @@ def take(g, self, index):
     out = index_select(g, self_flattened, 0, index)
     out = reshape_as(g, out, index)
     return out
+
+@parse_args('v', 'v', 'is', 'i')
+def as_strided(g, self, sizes, strides, offset=None):
+    sizes = sym_help._maybe_get_const(sizes, 'is')
+    rank = len(strides)
+    self_1d = g.op("Reshape", self, g.op("Constant", value_t=torch.tensor([-1], dtype=torch.int64)))
+    if not sym_help._is_value(sizes):
+        ind = torch.tensor([0], dtype=torch.long)
+        for i, (size, stride) in enumerate(zip(sizes, strides)):
+            r_size = [1] * rank
+            r_size[i] = -1
+            ind = ind + torch.arange(size).view(r_size) * stride
+        if offset:
+            ind = ind + offset
+        return g.op("Gather", self_1d, g.op("Constant", value_t=ind))
+    else:
+        ind = None
+        for i, stride in enumerate(strides):
+            r_size = [1] * rank
+            r_size[i] = -1
+            size = select(g, sizes, g.op("Constant", value_t=torch.tensor([0])), g.op("Constant", value_t=torch.tensor(i)))
+            tmp_ind = g.op("Reshape", arange(g, size, 4, None, None, None), g.op("Constant", value_t=torch.tensor(r_size)))
+            tmp_ind = g.op("Mul", tmp_ind, g.op("Constant", value_t=torch.tensor([stride])))
+            if ind is None:
+                ind = tmp_ind
+            else:
+                ind = g.op("Add", ind, tmp_ind)
+        if offset:
+            ind = g.op("Add", ind, g.op("Constant", torch.tensor([offset])))
+        return g.op("Gather", self_1d, ind)

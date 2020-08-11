@@ -1441,107 +1441,8 @@ void qadaptive_avg_pool3d_ndhwc_kernel(
                              istrideW);
 }
 
-void qavg_pool2d_nhwc_kernel(
-    const Tensor& qx,
-    Tensor& qy,
-    int64_t b,
-    int64_t nInputPlane,
-    int64_t inputWidth,
-    int64_t inputHeight,
-    int64_t outputWidth,
-    int64_t outputHeight,
-    int kW,
-    int kH,
-    int dW,
-    int dH,
-    int padW,
-    int padH,
-    bool count_include_pad,
-    c10::optional<int64_t> divisor_override) {
-  AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "avg_pool2d_nhwc", [&]() {
-    scalar_t* idata = static_cast<scalar_t*>(qx.data_ptr());
-    scalar_t* odata = static_cast<scalar_t*>(qy.data_ptr());
-    int64_t batch_size = nInputPlane * inputWidth * inputHeight;
-    auto* i_p = reinterpret_cast<typename scalar_t::underlying*>(
-        idata + b * batch_size);
-
-    // lift these operations outside the loop to reduce access overheads
-    float input_scale = qx.q_scale();
-    float output_scale = qy.q_scale();
-    int input_zero_point = qx.q_zero_point();
-    int output_zero_point = qy.q_zero_point();
-    int64_t divisor_override_factor =
-        divisor_override.has_value() ? divisor_override.value() : 0;
-
-    for (int64_t oh = 0; oh < outputHeight; oh++) {
-      for (int64_t ow = 0; ow < outputWidth; ow++) {
-        auto* o_p = reinterpret_cast<typename scalar_t::underlying*>(
-            odata + b * nInputPlane * outputWidth * outputHeight +
-            (oh * outputWidth + ow) * nInputPlane);
-        int64_t hstart = oh * dH - padH;
-        int64_t wstart = ow * dW - padW;
-        int64_t hend = std::min(hstart + kH, inputHeight + padH);
-        int64_t wend = std::min(wstart + kW, inputWidth + padW);
-        int64_t pool_size = (hend - hstart) * (wend - wstart);
-        hstart = std::max(hstart, (int64_t)0);
-        wstart = std::max(wstart, (int64_t)0);
-        hend = std::min(hend, inputHeight);
-        wend = std::min(wend, inputWidth);
-
-        int size = (hend - hstart) * (wend - wstart);
-        int divide_size = count_include_pad ? pool_size : size;
-        int divide_factor =
-            divisor_override_factor ? divisor_override_factor : divide_size;
-        float multiplier = input_scale / output_scale / divide_factor;
-        int input_zero_point_m_size = -input_zero_point * size;
-
-        int64_t c = 0;
-        // For int8 quantization, we implicitly use int32 as accumulation
-        // Or else, it will go to the slow path
-        // TODO: support 16bit, 32bit, and etc.
-        do_avg_pool_on_AVX2<scalar_t>(
-            i_p,
-            o_p,
-            c,
-            nInputPlane,
-            nInputPlane,
-            input_zero_point_m_size,
-            output_zero_point,
-            multiplier,
-            0,
-            1,
-            hstart,
-            hend,
-            wstart,
-            wend,
-            1,
-            1,
-            inputWidth,
-            1);
-        // 1) The following loop handles the remaining channels
-        // 2) It also handles the Non-AVX2 path
-        for (; c < nInputPlane; ++c) {
-          int32_t acc_int32 = input_zero_point_m_size;
-          int64_t tcntr = 0;
-          for (int64_t ih = hstart; ih < hend; ih++) {
-            for (int64_t iw = wstart; iw < wend; iw++) {
-              tcntr = ih * inputWidth + iw;
-              auto val = *(i_p + tcntr * nInputPlane + c);
-              acc_int32 += val;
-            }
-          }
-          double acc_fp = acc_int32 * 1.0;
-          // clamp
-          o_p[c] = at::native::quantize_val<scalar_t>(
-                       1.0f / multiplier, output_zero_point, acc_fp)
-                       .val_;
-        } // c
-      } // ow
-    } // oh
-  });
-}
-
-void qavg_pool3d_nhwc_kernel(
+void _qavg_pool_nhwc_kernel(
+    const std::string& fn_name,
     const Tensor& qx,
     Tensor& qy,
     int64_t b,
@@ -1563,12 +1464,19 @@ void qavg_pool3d_nhwc_kernel(
     int padD,
     bool count_include_pad,
     c10::optional<int64_t> divisor_override) {
-  AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "avg_pool3d_nhwc", [&]() {
+  AT_DISPATCH_QINT_TYPES(qx.scalar_type(), fn_name, [&]() {
     scalar_t* idata = static_cast<scalar_t*>(qx.data_ptr());
     scalar_t* odata = static_cast<scalar_t*>(qy.data_ptr());
-    int batch_size = nInputPlane * inputWidth * inputHeight * inputDepth;
-    auto* i_p = reinterpret_cast<typename scalar_t::underlying*>(
-        idata + b * batch_size);
+    int strideC = 1;
+    int strideW = strideC * nInputPlane;
+    int istrideH = strideW * inputWidth;
+    int istrideD = istrideH * inputHeight;
+    int istrideB = istrideD * inputDepth;
+    int ostrideH = strideW * outputWidth;
+    int ostrideD = ostrideH * outputHeight;
+    int ostrideB = ostrideD * outputDepth;
+    auto* i_p =
+        reinterpret_cast<typename scalar_t::underlying*>(idata + b * istrideB);
 
     // lift these operations outside the loop to reduce access overheads
     float input_scale = qx.q_scale();
@@ -1582,10 +1490,8 @@ void qavg_pool3d_nhwc_kernel(
       for (int oh = 0; oh < outputHeight; oh++) {
         for (int ow = 0; ow < outputWidth; ow++) {
           auto* o_p = reinterpret_cast<typename scalar_t::underlying*>(
-              odata +
-              b * nInputPlane * outputWidth * outputHeight * outputDepth +
-              (od * outputHeight * outputWidth + oh * outputWidth + ow) *
-                  nInputPlane);
+              odata + b * ostrideB + od * ostrideD + oh * ostrideH +
+              ow * strideW);
           int dstart = od * dD - padD;
           int hstart = oh * dH - padH;
           int wstart = ow * dW - padW;
@@ -1636,12 +1542,12 @@ void qavg_pool3d_nhwc_kernel(
           // 2) It also handles the Non-AVX2 path
           for (int c = c_start; c < nInputPlane; ++c) {
             int32_t acc_int32 = input_zero_point_m_size;
-            int64_t tcntr = 0;
             for (int64_t id = dstart; id < dend; id++) {
               for (int64_t ih = hstart; ih < hend; ih++) {
                 for (int64_t iw = wstart; iw < wend; iw++) {
-                  tcntr = id * inputHeight * inputWidth + ih * inputWidth + iw;
-                  auto val = *(i_p + tcntr * nInputPlane + c);
+                  auto val =
+                      *(i_p + id * istrideD + ih * istrideH + iw * strideW +
+                        c * strideC);
                   acc_int32 += val;
                 }
               }
@@ -1656,6 +1562,95 @@ void qavg_pool3d_nhwc_kernel(
       } // oh
     } // od
   });
+}
+
+void qavg_pool2d_nhwc_kernel(
+    const Tensor& qx,
+    Tensor& qy,
+    int64_t b,
+    int64_t nInputPlane,
+    int64_t inputWidth,
+    int64_t inputHeight,
+    int64_t outputWidth,
+    int64_t outputHeight,
+    int kW,
+    int kH,
+    int dW,
+    int dH,
+    int padW,
+    int padH,
+    bool count_include_pad,
+    c10::optional<int64_t> divisor_override) {
+  _qavg_pool_nhwc_kernel(
+      "avg_pool2d_nhwc",
+      qx,
+      qy,
+      b,
+      nInputPlane,
+      inputWidth,
+      inputHeight,
+      1,
+      outputWidth,
+      outputHeight,
+      1,
+      kW,
+      kH,
+      1,
+      dW,
+      dH,
+      1,
+      padW,
+      padH,
+      0,
+      count_include_pad,
+      divisor_override);
+}
+
+void qavg_pool3d_nhwc_kernel(
+    const Tensor& qx,
+    Tensor& qy,
+    int64_t b,
+    int64_t nInputPlane,
+    int64_t inputWidth,
+    int64_t inputHeight,
+    int64_t inputDepth,
+    int64_t outputWidth,
+    int64_t outputHeight,
+    int64_t outputDepth,
+    int kW,
+    int kH,
+    int kD,
+    int dW,
+    int dH,
+    int dD,
+    int padW,
+    int padH,
+    int padD,
+    bool count_include_pad,
+    c10::optional<int64_t> divisor_override) {
+  _qavg_pool_nhwc_kernel(
+      "avg_pool3d_nhwc",
+      qx,
+      qy,
+      b,
+      nInputPlane,
+      inputWidth,
+      inputHeight,
+      inputDepth,
+      outputWidth,
+      outputHeight,
+      outputDepth,
+      kW,
+      kH,
+      kD,
+      dW,
+      dH,
+      dD,
+      padW,
+      padH,
+      padD,
+      count_include_pad,
+      divisor_override);
 }
 
 template <typename T>
@@ -2048,50 +2043,51 @@ void fake_quantize_grad_tensor_kernel(
   });
 }
 
-void fake_quantize_learnable_scale_grad_tensor_kernel(
-    Tensor& input_grad,
-    const Tensor& input,
-    const Tensor& output_grad,
+void fake_quantize_learnable_tensor_grad_kernel_cpu(
+    TensorIterator& iter,
     float scale,
+    float inv_scale,
     int64_t zero_point,
     int64_t quant_min,
     int64_t quant_max) {
-  float inv_scale = 1.0f / scale;
-  float grad_small = quant_min - zero_point;
-  float grad_big = quant_max - zero_point;
-  auto iter_scale = TensorIterator::binary_op(input_grad, input, output_grad);
-  // TODO: Implement the vectorized per tensor version for the learnable backprop kernel on scale.
-  cpu_kernel(iter_scale, [&](float x, float dy) -> float {
-    int64_t xq = static_cast<int64_t>(zero_point + std::nearbyint(x * inv_scale));
-    xq = std::max(std::min(xq, quant_max), quant_min);
-    if (xq == quant_min) {
-      return dy * grad_small;
-    } else if (xq == quant_max) {
-      return dy * grad_big;
+  float dscale_small = quant_min - zero_point;
+  float dscale_big = quant_max - zero_point;
+  iter.for_each([&](char** data, const int64_t* strides, int64_t n) {
+    /*  When a for_each call is made on a TensorIterator with multiple inputs and outputs,
+        the order they are accessed follows the order they are built within the iterator.
+        For example, if an iterator is built in the following order:
+        auto iter = TensorIteratorConfig().
+          .add_output(firstOutput)
+          .add_output(secondOutput)
+          .add_input(firstInput)
+          .add_input(secondInput)
+          .build()
+        data will contain 4 pointers to pointers to values in the following order:
+        firstOutput, secondOutput, firstInput, secondInput.
+        Proper pointer referencing and dereferencing, along with the usage of strides
+        (to move onto different elements), can allow accessing of the input and assignment
+        to the right output.
+    */
+    for (int64_t i = 0; i < n; i++) {
+      float* dXOutput = (float*)(data[0] + i * strides[0]);
+      float* dScaleOutput = (float*)(data[1] + i * strides[1]);
+      float* dZeroPointOutput = (float*)(data[2] + i * strides[2]);
+      float* XInput = (float*)(data[3] + i * strides[3]);
+      float* dYInput = (float*)(data[4] + i * strides[4]);
+      // Calculate gradients for X.
+      int64_t xqi = std::nearbyint(zero_point + (*XInput) * inv_scale);
+      *dXOutput = (*dYInput) * (xqi >= quant_min && xqi <= quant_max);
+      // Calculate gradients for scale and zero point.
+      xqi = std::max(std::min(xqi, quant_max), quant_min);
+      float xfqi = static_cast<float>((xqi - zero_point) * scale);
+      if (xqi == quant_min || xqi == quant_max) {
+        *dZeroPointOutput = (*dYInput) * (-1) * scale;
+        *dScaleOutput = (xqi == quant_min) ? ((*dYInput) * dscale_small) : ((*dYInput) * dscale_big);
+      } else {
+        *dZeroPointOutput = 0;
+        *dScaleOutput = (*dYInput) * (xfqi - (*XInput)) * inv_scale;
+      }
     }
-    float x_fq = static_cast<float>((xq - zero_point) * scale);
-    return dy * (x_fq - x) * inv_scale;
-  });
-}
-
-void fake_quantize_learnable_zero_point_grad_tensor_kernel(
-    Tensor& input_grad,
-    const Tensor& input,
-    const Tensor& output_grad,
-    float scale,
-    int64_t zero_point,
-    int64_t quant_min,
-    int64_t quant_max) {
-  float inv_scale = 1.0f / scale;
-  auto iter_scale = TensorIterator::binary_op(input_grad, input, output_grad);
-  // TODO: Implement the vectorized per tensor version for the learnable backprop kernel on zero point.
-  cpu_kernel(iter_scale, [&](float x, float dy) -> float {
-    int64_t xq = static_cast<int64_t>(zero_point + std::nearbyint(x * inv_scale));
-    xq = std::max(std::min(xq, quant_max), quant_min);
-    if (xq == quant_min || xq == quant_max) {
-      return dy * (-1) * scale;
-    }
-    return 0;
   });
 }
 
@@ -2125,50 +2121,41 @@ void fake_quant_grad_per_channel_cpu(
       });
 }
 
-void fake_quantize_learnable_scale_grad_channel_kernel(
-    Tensor& input_grad,
-    const Tensor& input,
-    const Tensor& output_grad,
-    float scale,
-    int64_t zero_point,
+void fake_quantize_learnable_channel_grad_kernel_cpu(
+    TensorIterator& iter,
     int64_t quant_min,
     int64_t quant_max) {
-  float inv_scale = 1.0f / scale;
-  float grad_small = quant_min - zero_point;
-  float grad_big = quant_max - zero_point;
-  auto iter_scale = TensorIterator::binary_op(input_grad, input, output_grad);
-  // TODO: Implement the vectorized per channel version for the learnable backprop kernel on scale.
-  cpu_kernel(iter_scale, [&](float x, float dy) -> float {
-    int64_t xq = static_cast<int64_t>(zero_point + std::nearbyint(x * inv_scale));
-    xq = std::max(std::min(xq, quant_max), quant_min);
-    float x_fq = static_cast<float>((xq - zero_point) * scale);
-    if (xq == quant_min) {
-      return dy * grad_small;
-    } else if (xq == quant_max) {
-      return dy * grad_big;
-    }
-    return dy * (x_fq - x) * inv_scale;
-  });
-}
+  iter.for_each([&](char** data, const int64_t* strides, int64_t n) {
+    /*  To see how the input and outputs are referenced and assigned,
+        please see the implemenetation of
+        fake_quantize_learnable_tensor_grad_kernel_cpu.
+    */
+    for (int64_t i = 0; i < n; i++) {
+      float* dx_output = (float*)(data[0] + i * strides[0]);
+      float* dscale_output = (float*)(data[1] + i * strides[1]);
+      float* dzero_point_output = (float*)(data[2] + i * strides[2]);
+      float* x_input = (float*)(data[3] + i * strides[3]);
+      float* dy_input = (float*)(data[4] + i * strides[4]);
+      float* scale_input = (float*)(data[5] + i * strides[5]);
+      float* zero_point_input = (float*)(data[6] + i * strides[6]);
 
-void fake_quantize_learnable_zero_point_grad_channel_kernel(
-    Tensor& input_grad,
-    const Tensor& input,
-    const Tensor& output_grad,
-    float scale,
-    int64_t zero_point,
-    int64_t quant_min,
-    int64_t quant_max) {
-  float inv_scale = 1.0f / scale;
-  auto iter_zero_point = TensorIterator::binary_op(input_grad, input, output_grad);
-  // TODO: Implement the vectorized per channel version for the learnable backprop kernel on zero point.
-  cpu_kernel(iter_zero_point, [&](float x, float dy) -> float {
-    int64_t xq = static_cast<int64_t>(zero_point + std::nearbyint(x * inv_scale));
-    xq = std::max(std::min(xq, quant_max), quant_min);
-    if (xq == quant_min || xq == quant_max) {
-      return dy * (-1) * scale;
+      float inv_scale = 1.0f / (*scale_input);
+      float dscale_small = quant_min - (*zero_point_input);
+      float dscale_big = quant_max - (*zero_point_input);
+      // Calculate gradients for X.
+      int64_t xqi = std::nearbyint((*zero_point_input) + (*x_input) * inv_scale);
+      *dx_output = (*dy_input) * (xqi >= quant_min && xqi <= quant_max);
+      // Calculate gradients for scale and zero point.
+      xqi = std::max(std::min(xqi, quant_max), quant_min);
+      float xfqi = static_cast<float>((xqi - (*zero_point_input)) * (*scale_input));
+      if (xqi == quant_min || xqi == quant_max) {
+        *dzero_point_output = (*dy_input) * (-1) * (*scale_input);
+        *dscale_output = (xqi == quant_min) ? ((*dy_input) * dscale_small) : ((*dy_input) * dscale_big);
+      } else {
+        *dzero_point_output = 0;
+        *dscale_output = (*dy_input) * (xfqi - (*x_input)) * inv_scale;
+      }
     }
-    return 0;
   });
 }
 
@@ -2595,60 +2582,56 @@ void dequantize_tensor_per_channel_affine_cpu(
 
 } // namespace
 
-REGISTER_DISPATCH(qrelu_stub, &qrelu_kernel);
-REGISTER_DISPATCH(qrelu6_stub, &qrelu6_kernel);
-REGISTER_DISPATCH(qrelu_leaky_stub, &leaky_qrelu_out_kernel);
-REGISTER_DISPATCH(qsigmoid_stub, &qsigmoid_kernel);
-REGISTER_DISPATCH(qhardsigmoid_stub, &qhardsigmoid_kernel);
-REGISTER_DISPATCH(qclamp_stub, &qclamp_kernel);
-REGISTER_DISPATCH(qthreshold_stub, &qthreshold_kernel);
-REGISTER_DISPATCH(qtanh_stub, &qtanh_kernel);
-REGISTER_DISPATCH(qhardswish_stub, &qhardswish_kernel);
-REGISTER_DISPATCH(qelu_stub, &qelu_kernel);
+REGISTER_DISPATCH(dequantize_tensor_per_channel_affine_stub,
+                  &dequantize_tensor_per_channel_affine_cpu);
+REGISTER_DISPATCH(dequantize_tensor_per_tensor_affine_stub,
+                  &dequantize_tensor_per_tensor_affine_cpu);
+REGISTER_DISPATCH(fake_quant_grad_learnable_tensor_stub,
+                  &fake_quantize_learnable_tensor_grad_kernel_cpu);
+REGISTER_DISPATCH(fake_quant_grad_per_channel_stub,
+                  &fake_quant_grad_per_channel_cpu);
+REGISTER_DISPATCH(fake_quant_grad_tensor_stub,
+                  &fake_quantize_grad_tensor_kernel);
+REGISTER_DISPATCH(fake_quant_per_channel_stub, &fake_quant_per_channel_cpu);
+REGISTER_DISPATCH(fake_quant_tensor_stub, &fake_quantize_tensor_kernel);
+REGISTER_DISPATCH(qadaptive_avg_pool2d_nhwc_stub,
+                  &qadaptive_avg_pool2d_nhwc_kernel);
+REGISTER_DISPATCH(qadaptive_avg_pool3d_ndhwc_stub,
+                  &qadaptive_avg_pool3d_ndhwc_kernel);
 REGISTER_DISPATCH(qadd_relu_stub, &qadd_kernel<true>);
-REGISTER_DISPATCH(qadd_stub, &qadd_kernel<false>);
 REGISTER_DISPATCH(qadd_scalar_relu_stub, &qadd_scalar_kernel<true>);
 REGISTER_DISPATCH(qadd_scalar_stub, &qadd_scalar_kernel<false>);
-REGISTER_DISPATCH(qmul_relu_stub, &qmul_kernel<true>);
-REGISTER_DISPATCH(qmul_stub, &qmul_kernel<false>);
-REGISTER_DISPATCH(qmaxpool_2d_nhwc_stub, &qmaxpool_2d_nhwc_kernel);
-REGISTER_DISPATCH(
-    qadaptive_avg_pool2d_nhwc_stub,
-    &qadaptive_avg_pool2d_nhwc_kernel);
-REGISTER_DISPATCH(
-    qadaptive_avg_pool3d_ndhwc_stub,
-    &qadaptive_avg_pool3d_ndhwc_kernel);
+REGISTER_DISPATCH(qadd_stub, &qadd_kernel<false>);
 REGISTER_DISPATCH(qavg_pool2d_nhwc_stub, &qavg_pool2d_nhwc_kernel);
 REGISTER_DISPATCH(qavg_pool3d_nhwc_stub, &qavg_pool3d_nhwc_kernel);
-REGISTER_DISPATCH(
-    qupsample_bilinear2d_nhwc_stub,
-    &qupsample_bilinear2d_nhwc_kernel);
+REGISTER_DISPATCH(qbatch_norm_relu_stub, &q_batch_norm_kernel<true>);
+REGISTER_DISPATCH(qbatch_norm_stub, &q_batch_norm_kernel<false>);
 REGISTER_DISPATCH(qcat_nhwc_stub, &qcat_nhwc_kernel<false>);
 REGISTER_DISPATCH(qcat_relu_nhwc_stub, &qcat_nhwc_kernel<true>);
+REGISTER_DISPATCH(qclamp_stub, &qclamp_kernel);
+REGISTER_DISPATCH(qelu_stub, &qelu_kernel);
+REGISTER_DISPATCH(qhardsigmoid_stub, &qhardsigmoid_kernel);
+REGISTER_DISPATCH(qhardswish_stub, &qhardswish_kernel);
+REGISTER_DISPATCH(qmaxpool_2d_nhwc_stub, &qmaxpool_2d_nhwc_kernel);
+REGISTER_DISPATCH(qmul_relu_stub, &qmul_kernel<true>);
+REGISTER_DISPATCH(qmul_stub, &qmul_kernel<false>);
+REGISTER_DISPATCH(qrelu6_stub, &qrelu6_kernel);
+REGISTER_DISPATCH(qrelu_leaky_stub, &leaky_qrelu_out_kernel);
+REGISTER_DISPATCH(qrelu_stub, &qrelu_kernel);
+REGISTER_DISPATCH(qsigmoid_stub, &qsigmoid_kernel);
+REGISTER_DISPATCH(qtanh_stub, &qtanh_kernel);
+REGISTER_DISPATCH(qthreshold_stub, &qthreshold_kernel);
 REGISTER_DISPATCH(qtopk_stub, &qtopk_kernel);
-REGISTER_DISPATCH(qbatch_norm_stub, &q_batch_norm_kernel<false>);
-REGISTER_DISPATCH(qbatch_norm_relu_stub, &q_batch_norm_kernel<true>);
-REGISTER_DISPATCH(fake_quant_tensor_stub, &fake_quantize_tensor_kernel);
-REGISTER_DISPATCH(fake_quant_grad_tensor_stub, &fake_quantize_grad_tensor_kernel);
-REGISTER_DISPATCH(fake_quant_grad_learnable_scale_tensor_stub, &fake_quantize_learnable_scale_grad_tensor_kernel);
-REGISTER_DISPATCH(fake_quant_grad_learnable_zero_point_tensor_stub, &fake_quantize_learnable_zero_point_grad_tensor_kernel);
-REGISTER_DISPATCH(fake_quant_per_channel_stub, &fake_quant_per_channel_cpu);
-REGISTER_DISPATCH(fake_quant_grad_per_channel_stub, &fake_quant_grad_per_channel_cpu);
-REGISTER_DISPATCH(fake_quant_grad_learnable_scale_channel_stub, &fake_quantize_learnable_scale_grad_channel_kernel);
-REGISTER_DISPATCH(fake_quant_grad_learnable_zero_point_channel_stub, &fake_quantize_learnable_zero_point_grad_channel_kernel);
+REGISTER_DISPATCH(fake_quant_grad_learnable_channel_stub, &fake_quantize_learnable_channel_grad_kernel_cpu);
 REGISTER_DISPATCH(
     quantize_tensor_per_tensor_affine_stub,
     &quantize_tensor_per_tensor_affine_cpu);
 REGISTER_DISPATCH(
     quantize_tensor_per_channel_affine_stub,
     &quantize_tensor_per_channel_affine_cpu);
-REGISTER_DISPATCH(
-    dequantize_tensor_per_tensor_affine_stub,
-    &dequantize_tensor_per_tensor_affine_cpu);
-REGISTER_DISPATCH(
-    dequantize_tensor_per_channel_affine_stub,
-    &dequantize_tensor_per_channel_affine_cpu);
 REGISTER_DISPATCH(quantized_normalize_stub, &quantized_normalize_kernel);
+REGISTER_DISPATCH(qupsample_bilinear2d_nhwc_stub,
+                  &qupsample_bilinear2d_nhwc_kernel);
 
 } // namespace native
 } // namespace at

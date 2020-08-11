@@ -492,6 +492,47 @@ class TestONNXRuntime(unittest.TestCase):
                       input_names=['input_1'],
                       dynamic_axes={'input_1': [0, 1, 2]})
 
+    def test_tensor(self):
+        class ScalarInputModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, input):
+                return torch.tensor(input.shape[1]) 
+
+        x = torch.randn(3, 4)
+        self.run_test(ScalarInputModel(), x)
+
+        class TensorInputModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, input):
+                return torch.tensor([input.shape[0], input.shape[1]]) 
+
+        x = torch.randn(3, 4)
+        self.run_test(TensorInputModel(), x)
+
+        class FloatInputModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, input):
+                return torch.tensor([float(input)])
+
+        x = torch.randn(1)
+        self.run_test(FloatInputModel(), x)
+
+        class InputWithDtypeModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, input):
+                return torch.tensor(input.shape[1], dtype=torch.long) 
+
+        x = torch.randn(3, 4)
+        self.run_test(InputWithDtypeModel(), x)
+
+        class MixedInputModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, input):
+                return torch.tensor([input.shape[0], int(input)]) 
+
+        x = torch.randn(1)
+        self.run_test(MixedInputModel(), x)
+
     def test_hardtanh(self):
         model = torch.nn.Hardtanh(-1.5, 2.5)
         x = torch.arange(-5, 5).to(dtype=torch.float32)
@@ -929,6 +970,19 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(5, 3, 2)
         self.run_test(SizeModel(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_as_strided(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                chunk_size = list(x.size())
+                chunk_size[1] = chunk_size[1] * 2 - 1
+                chunk_stride = list(x.stride())
+                chunk_stride[1] = chunk_stride[1] // 2
+                return x.as_strided((3, 3, 3), (1, 4, 2), storage_offset=2), x.as_strided(chunk_size, chunk_stride)
+
+        x = torch.randn(5, 8, 7)
+        self.run_test(Model(), x)
 
     def _test_index_generic(self, fn):
         class MyModel(torch.nn.Module):
@@ -1630,6 +1684,17 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(10, 3, 128, 128, 128)
         model = torch.nn.BatchNorm3d(3, affine=False)
         self.run_test(model, x)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_scatter_with_scalar(self):
+        class ScatterModel(torch.nn.Module):
+            def forward(self, input, indices):
+                values = 1.0
+                return input.scatter(1, indices, values)
+
+        input = torch.tensor([[0., 0., 0.], [0., 0., 0.], [0., 0., 0.]], dtype=torch.float64)
+        indices = torch.tensor([[1, 0], [0, 1], [0, 1]], dtype=torch.int64)
+        self.run_test(ScatterModel(), input=(input, indices))
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_scatter(self):
@@ -2452,6 +2517,14 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(5, 4, 3)
         self.run_test(SplitModel2(), x)
 
+        class SplitModel3(torch.nn.Module):
+            def forward(self, input):
+                out1, out2, out3 = input.split([2, 1, 2])
+                return out3, out1
+
+        x = torch.randn(5, 4, 3)
+        self.run_test(torch.jit.script(SplitModel3()), x)
+
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_split_size_as_list(self):
         class SplitModel(torch.nn.Module):
@@ -2620,6 +2693,18 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3, 4)
         self.run_test(TensorFactory(), x)
 
+    @enableScriptTest()
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_eye(self):
+        class TensorFactory(torch.nn.Module):
+            def forward(self, x):
+                return torch.eye(x.size()[1], 3), torch.eye(4, 4, dtype=torch.long), torch.eye(x.size()[1], 2, dtype=torch.long)
+
+        x = torch.randn(2, 3, 4)
+        another_x = torch.randn(5, 6, 7)
+        self.run_test(TensorFactory(), x, test_with_inputs=[another_x],
+                      input_names=['input_1'], dynamic_axes={'input_1': [0, 1, 2]})
+
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_inplace_zero(self):
         class Zero_(torch.nn.Module):
@@ -2744,7 +2829,8 @@ class TestONNXRuntime(unittest.TestCase):
 
         class ComparisonModel(torch.nn.Module):
             def forward(self, x, y):
-                return x.ge(0.5) & y.le(2)
+                a = torch.tensor([12.0])
+                return x.lt(1.5) & y.le(2) & x.le(1), x.gt(y), x.lt(y), a.ge(x.size(0))
 
         x = torch.ones(2, 3, dtype=torch.int32)
         y = torch.ones(2, 3, dtype=torch.float32)
@@ -3548,6 +3634,30 @@ class TestONNXRuntime(unittest.TestCase):
         mat1 = torch.randn(2, 3)
         mat2 = torch.randn(3, 3)
         self.run_test(M(), input=(mat1, mat2))
+
+    @skipIfUnsupportedMinOpsetVersion(9)  # Because where op is not supported for opset < 9.
+    def test_where_with_bool_tensor(self):
+        class M(torch.nn.Module):
+            def forward(self, mat1, mat2):
+                out = torch.where(mat1 > 0, mat1, mat2)
+                return out
+
+        mat1 = torch.randn(2, 3)
+        mat2 = torch.ones(2, 3)
+        self.run_test(M(), input=(mat1, mat2))
+
+    @skipIfUnsupportedMinOpsetVersion(9)  # Because where op is not supported for opset < 9.
+    def test_where_with_byte_tensor(self):
+        class M(torch.nn.Module):
+            def forward(self, cond, mat1, mat2):
+                out = torch.where(cond, mat1, mat2)
+                return out
+
+        cond = torch.ones(2, 3, dtype=torch.uint8)
+        cond[1, 2] = 0
+        mat1 = torch.randn(2, 3)
+        mat2 = torch.ones(2, 3)
+        self.run_test(M(), input=(cond, mat1, mat2))
 
     def test_dropout(self):
         class M(torch.nn.Module):
