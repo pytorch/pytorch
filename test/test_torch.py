@@ -7076,7 +7076,7 @@ class TestTorchDeviceType(TestCase):
     @dtypes(torch.float32, torch.float64)
     def test_torch_polar(self, device, dtype):
         abs = torch.tensor([1, 2, -3, -4.5, 1, 1], device=device, dtype=dtype)
-        angle = torch.tensor([PI / 2, 5 * PI / 4, 0, -11 * PI / 6, PI, -PI],
+        angle = torch.tensor([math.pi / 2, 5 * math.pi / 4, 0, -11 * math.pi / 6, math.pi, -math.pi],
                              device=device, dtype=dtype)
         z = torch.polar(abs, angle)
         complex_dtype = torch.complex64 if dtype == torch.float32 else torch.complex128
@@ -7151,7 +7151,7 @@ class TestTorchDeviceType(TestCase):
     @dtypes(torch.float32, torch.float64)
     def test_torch_polar_backward(self, device, dtype):
         abs = torch.tensor([1, 2], device=device, dtype=dtype, requires_grad=True)
-        angle = torch.tensor([PI / 2, 5 * PI / 4], device=device, dtype=dtype, requires_grad=True)
+        angle = torch.tensor([math.pi / 2, 5 * math.pi / 4], device=device, dtype=dtype, requires_grad=True)
         z = torch.polar(abs, angle)
         loss = z.sum()
         loss.backward()
