@@ -811,14 +811,14 @@ class Tensor(torch._C._TensorBase):
         r"""Expands the dimension :attr:`dim` of the :attr:`self` tensor over multiple dimensions
         of sizes given by :attr:`sizes`.
 
-        * :attr:`sizes` is the new shape of the unflattened dimension and it can be a `Iterable[int]` as well
-          as `torch.Size` if :attr:`self` is a `Tensor`, or `namedshape` (iterable of ``(name, size)`` tuples) 
-          if :attr:`self` is a `NamedTensor`. The total number of elements in sizes must match the number 
+        * :attr:`sizes` is the new shape of the unflattened dimension and it can be a `Tuple[int]` as well
+          as `torch.Size` if :attr:`self` is a `Tensor`, or `namedshape` (Tuple[(name: str, size: int)])
+          if :attr:`self` is a `NamedTensor`. The total number of elements in sizes must match the number
           of elements in the original dim being unflattened.
 
         Arguments:
             dim (Union[int, str]): Dimension to unflatten
-            sizes (Union[torch.Size, Iterable[Tuple[str, int]]]): New shape of the unflattened dimension
+            sizes (Union[Tuple[int] or torch.Size, Tuple[Tuple[str, int]]]): New shape of the unflattened dimension
 
         Examples:
             >>> torch.randn(3, 4, 1).unflatten(1, (2, 2)).shape
@@ -839,11 +839,8 @@ class Tensor(torch._C._TensorBase):
             return handle_torch_function(Tensor.unflatten, relevant_args, self, dim, namedshape)
 
         names = None
-        if isinstance(dim, str) or self.has_names():
-            try:
-                names, sizes = unzip_namedshape(sizes)
-            except TypeError:
-                raise TypeError("unflatten: Expected sizes to be of type Iterable[Tuple[str, int]] but got " + type(sizes).__name__)
+        if sizes and isinstance(sizes, (tuple, list)) and isinstance(sizes[0], (tuple, list)):
+            names, sizes = unzip_namedshape(sizes)
         return super(Tensor, self).unflatten(dim, sizes, names)
 
 
