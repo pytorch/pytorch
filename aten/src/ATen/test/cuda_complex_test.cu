@@ -52,6 +52,14 @@ __global__ void test_reinterpret_cast() {
   cuDoubleComplex cuDoubleComplex_zzzz = *reinterpret_cast<cuDoubleComplex*>(&zzzz);
   assert(cuDoubleComplex_zzzz.x == double(1));
   assert(cuDoubleComplex_zzzz.y == double(2));
+
+  rocblas_float_complex rocblas_float_complex_zz = *reinterpret_cast<rocblas_float_complex*>(&zz);
+  assert(rocblas_float_complex_zz.x == float(1));
+  assert(rocblas_float_complex_zz.y == float(2));
+
+  rocblas_double_complex rocblas_double_complex_zzzz = *reinterpret_cast<rocblas_double_complex*>(&zzzz);
+  assert(rocblas_double_complex_zzzz.x == double(1));
+  assert(rocblas_double_complex_zzzz.y == double(2));
 }
 
 int safeDeviceCount() {
