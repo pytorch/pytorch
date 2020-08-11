@@ -16,8 +16,8 @@ sudo apt-get install -y libx11-dev libxcb1-dev libx11-xcb-dev libxext-dev libegl
 # CMake >= 3.13 is required by SwiftShader
 CMAKE_VERSION_SWIFTSHADER=3.16.8
 # Turn 3.16.8 into v3.16
-_cmake_vpath=$(echo "${CMAKE_VERSION}" | sed -e 's/\([0-9].[0-9]\+\).*/v\1/')
-_cmake_file="cmake-${CMAKE_VERSION}-Linux-x86_64"
+_cmake_vpath=$(echo "${CMAKE_VERSION_SWIFTSHADER}" | sed -e 's/\([0-9].[0-9]\+\).*/v\1/')
+_cmake_file="cmake-${CMAKE_VERSION_SWIFTSHADER}-Linux-x86_64"
 
 _cmake_dir=/var/lib/jenkins/swiftshader-cmake
 mkdir -p $_cmake_dir
