@@ -330,5 +330,36 @@ void TransformerDecoderImpl::reset() {
     LayerNorm(LayerNormOptions(std::vector<int64_t> {options.d_model()})));
 }
 
+
+  // ========================TransformerDecoderImpl=========================
+  TransformerDecoderImpl::TransformerDecoderImpl(
+    const TransformerDecoderOptions& options_ )
+    : options(options_){
+    reset();
+  }
+
+  void TransformerDecoderImpl::reset() {
+
+    //Create the layers based and clone them for the number of layers
+
+  }
+
+  void TransformerDecoderImpl::reset_parameters() {
+
+    //reset the parameters
+
+  }
+
+  Tensor TransformerDecoderImpl::forward(Tensor tgt, const Tensor& memory,
+    const Tensor& tgt_mask,
+    const Tensor& memory_mask,
+    const Tensor& tgt_key_padding_mask,
+    const Tensor& memory_key_padding_mask){
+      at::Tensor temp = {};
+      return temp;
+  }
+
+  void TransformerDecoderImpl::pretty_print(std::ostream& stream) const {}
+
 } // namespace nn
 } // namespace torch
