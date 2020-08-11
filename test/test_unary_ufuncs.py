@@ -5,7 +5,7 @@ from torch.testing._internal.common_utils import \
 from torch.testing._internal.common_methods_invocations import \
     (unary_ufuncs)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, ops, onlyOnCPUAndCUDA)
+    (instantiate_device_type_tests, ops, onlyOnCPUAndCUDA, skipCUDAIfRocm)
 
 
 # Tests for unary "universal functions (ufuncs)" that accept a single
@@ -25,6 +25,7 @@ class TestUnaryUfuncs(TestCase):
     # Verifies that the unary ufuncs have their supported dtypes
     #   registered correctly by testing that each unlisted dtype
     #   throws a runtime error
+    @skipCUDAIfRocm
     @onlyOnCPUAndCUDA
     @ops(unary_ufuncs, unsupported_dtypes_only=True)
     def test_unsupported_dtypes(self, device, dtype, op):
