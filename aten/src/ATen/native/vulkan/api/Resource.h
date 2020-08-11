@@ -22,10 +22,14 @@ struct Resource final {
     template<typename Type>
     using Data = Handle<Type, Scope>;
 
-    template<typename Type, typename Pointer = std::add_pointer_t<std::add_const_t<Type>>>
+    template<
+        typename Type,
+        typename Pointer = std::add_pointer_t<std::add_const_t<Type>>>
     Data<Pointer> map() const;
 
-    template<typename Type, typename Pointer = std::add_pointer_t<Type>>
+    template<
+        typename Type,
+        typename Pointer = std::add_pointer_t<Type>>
     Data<Pointer> map();
   };
 
@@ -95,7 +99,10 @@ struct Resource final {
 
   class Pool final {
    public:
-    Pool(VkInstance instance, VkPhysicalDevice physical_device, VkDevice device);
+    Pool(
+        VkInstance instance,
+        VkPhysicalDevice physical_device,
+        VkDevice device);
 
     Buffer allocate(const Buffer::Descriptor& descriptor);
     Image allocate(const Image::Descriptor& descriptor);
@@ -110,7 +117,14 @@ struct Resource final {
     Handle<VmaAllocator, void(*)(VmaAllocator)> allocator_;
     std::vector<Handle<Buffer, void(*)(const Buffer&)>> buffers_;
     std::vector<Handle<Image, void(*)(const Image&)>> images_;
-  };
+  } pool;
+
+  Resource(
+      const VkInstance instance,
+      const VkPhysicalDevice physical_device,
+      const VkDevice device)
+    : pool(instance, physical_device, device) {
+  }
 };
 
 //

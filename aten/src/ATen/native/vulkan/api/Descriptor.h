@@ -123,7 +123,6 @@ struct Descriptor final {
     explicit Pool(const VkDevice device)
       : cache(Factory(device)) {
     }
-
   } pool;
 
   /*
