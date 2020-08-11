@@ -11,7 +11,7 @@ retry () {
 _https_amazon_aws=https://ossci-android.s3.amazonaws.com
 
 apt-get update
-sudo apt-get install -y libx11-dev libxcb1-dev libx11-xcb-dev libxext-dev
+sudo apt-get install -y libx11-dev libxcb1-dev libx11-xcb-dev libxext-dev libegl-mesa0 libglfw3-dev libgles2-mesa-dev
 
 # CMake >= 3.13 is required by SwiftShader
 _cmake_dir=/var/lib/jenkins/swiftshader-cmake
@@ -37,9 +37,9 @@ pushd "$_swiftshader_dir/build"
 $_cmake_bin_path \
   -DCMAKE_BUILD_TYPE=Release \
   -DSWIFTSHADER_BUILD_VULKAN=1 \
-  -DSWIFTSHADER_BUILD_EGL=0 \
-  -DSWIFTSHADER_BUILD_GLESv2=0 \
-  -DSWIFTSHADER_BUILD_GLES_CM=0 \
+  -DSWIFTSHADER_BUILD_EGL=1 \
+  -DSWIFTSHADER_BUILD_GLESv2=1 \
+  -DSWIFTSHADER_BUILD_GLES_CM=1 \
   -DSWIFTSHADER_BUILD_PVR=0 \
   -DSWIFTSHADER_BUILD_TESTS=1 \
   -DSWIFTSHADER_WARNINGS_AS_ERRORS=1 \
