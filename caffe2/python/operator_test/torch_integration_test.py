@@ -837,6 +837,24 @@ class TorchIntegration(hu.HypothesisTestCase):
         )
         torch.testing.assert_allclose(expected_output, actual_output.cpu())
 
+    def test_percentile(self):
+        original_values = np.array([[3., 5., 3], [5., 1., 6.]]).astype(np.float32)
+        value_to_pct = np.array([[3, 0.2], [5, 0.5], [1, 0.3], [3, 0.6]]).astype(np.float32)
+        lengths = np.array([2, 1, 1]).astype(np.int32)
+
+        def _percentile_ref(original_values, value_to_pct, lengths):
+            ref_op = core.CreateOperator('Percentile', ["original_values", "value_to_pct", "lengths"], ["Y"])
+            workspace.FeedBlob("original_values", original_values)
+            workspace.FeedBlob("value_to_pct", value_to_pct)
+            workspace.FeedBlob("lengths", lengths)
+            workspace.RunOperatorOnce(ref_op)
+            return workspace.FetchBlob("Y")
+
+        expected_output = _percentile_ref(original_values, value_to_pct, lengths)
+        actual_output = torch.ops._caffe2.Percentile(
+            torch.tensor(original_values), torch.Tensor(value_to_pct), torch.Tensor(lengths).int()
+        )
+        torch.testing.assert_allclose(expected_output, actual_output.cpu())
 
 
 if __name__ == '__main__':

@@ -360,7 +360,6 @@ def quantize_qat(model, run_fn, run_args, inplace=False):
     convert(model, inplace=True)
     return model
 
-# TODO: remove `remove_qconfig` option, this method should always remove qconfig
 def convert(module, mapping=None, inplace=False, remove_qconfig=True):
     r"""Converts submodules in input module to a different module according to `mapping`
     by calling `from_float` method on the target module class. And remove qconfig at the
