@@ -31,8 +31,18 @@ VmaAllocator create_allocator(
   return allocator;
 }
 
-void destroy_allocator(const VmaAllocator allocator) {
-  vmaDestroyAllocator(allocator);
+VmaAllocationCreateInfo create_allocation_create_info(
+    const VmaMemoryUsage usage) {
+  return VmaAllocationCreateInfo{
+    0u, /* VMA_ALLOCATION_CREATE_MAPPED_BIT - MoltenVK Issue #175 */
+        /* VMA_ALLOCATION_CREATE_STRATEGY_MIN_FRAGMENTATION_BIT */
+    usage,
+    0u,
+    0u,
+    0u,
+    VK_NULL_HANDLE,
+    nullptr,
+  };
 }
 
 void release_buffer(const Resource::Buffer& buffer) {
@@ -55,21 +65,20 @@ void release_image(const Resource::Image& image) {
       image.memory.allocation);
 }
 
-VmaAllocationCreateInfo create_allocation_create_info(
-    const VmaMemoryUsage usage) {
-  return VmaAllocationCreateInfo{
-    0u, /* VMA_ALLOCATION_CREATE_MAPPED_BIT - MoltenVK Issue #175 */
-        /* VMA_ALLOCATION_CREATE_STRATEGY_MIN_FRAGMENTATION_BIT */
-    usage,
-    0u,
-    0u,
-    0u,
-    VK_NULL_HANDLE,
-    nullptr,
-  };
-}
-
 } // namespace
+
+void* map(const Resource::Memory& memory) {
+  // Call will be ignored by implementation if the memory type this allocation
+  // belongs to is not HOST_VISIBLE or is HOST_COHERENT, which is the behavior
+  // we want.
+  VK_CHECK(vmaInvalidateAllocation(
+      memory.allocator, memory.allocation, 0u, VK_WHOLE_SIZE));
+
+  void* data = nullptr;
+  VK_CHECK(vmaMapMemory(memory.allocator, memory.allocation, &data));
+
+  return data;
+}
 
 Resource::Memory::Scope::Scope(
     const VmaAllocator allocator,
@@ -100,7 +109,7 @@ Resource::Pool::Pool(
     const VkPhysicalDevice physical_device,
     const VkDevice device)
   : device_(device),
-    allocator_(create_allocator(instance, physical_device, device), destroy_allocator) {
+    allocator_(create_allocator(instance, physical_device, device), vmaDestroyAllocator) {
     buffers_.reserve(Configuration::kReserve);
     images_.reserve(Configuration::kReserve);
 }

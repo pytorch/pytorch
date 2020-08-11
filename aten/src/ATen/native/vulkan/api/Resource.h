@@ -18,17 +18,15 @@ struct Resource final {
     VmaAllocation allocation;
     VmaAllocationInfo allocation_info;
 
-    enum class Access;
     class Scope;
-
     template<typename Type>
     using Data = Handle<Type, Scope>;
 
-    template<typename Type, typename ConstType = std::add_const_t<Type>>
-    Data<ConstType> Map() const;
+    template<typename Type, typename Pointer = std::add_pointer_t<std::add_const_t<Type>>>
+    Data<Pointer> map() const;
 
-    template<typename Type>
-    Data<Type> Map();
+    template<typename Type, typename Pointer = std::add_pointer_t<Type>>
+    Data<Pointer> map();
   };
 
   /*
@@ -119,13 +117,13 @@ struct Resource final {
 // Impl
 //
 
-enum class Resource::Memory::Access {
-  Read,
-  Write,
-};
-
 class Resource::Memory::Scope final {
  public:
+  enum class Access {
+    Read,
+    Write,
+  };
+
   Scope(VmaAllocator allocator, VmaAllocation allocation, Access access);
   void operator()(const void* data) const;
 
@@ -135,26 +133,23 @@ class Resource::Memory::Scope final {
   Access access_;
 };
 
-template<typename Type, typename ConstType>
-inline Resource::Memory::Data<ConstType> Resource::Memory::Map() const {
-  Type data{};
-  VK_CHECK(vmaMapMemory(allocator, allocation, data));
+template<typename, typename Pointer>
+inline Resource::Memory::Data<Pointer> Resource::Memory::map() const {
+  void* map(const Memory& memory);
 
-  return Data<ConstType>{
-    data,
-    Scope(allocator, allocation, Access::Read),
+  return Data<Pointer>{
+    reinterpret_cast<Pointer>(map(*this)),
+    Scope(allocator, allocation, Scope::Access::Read),
   };
 }
 
-template<typename Type>
-inline Resource::Memory::Data<Type> Resource::Memory::Map() {
-  Type data{};
+template<typename, typename Pointer>
+inline Resource::Memory::Data<Pointer> Resource::Memory::map() {
+  void* map(const Memory& memory);
 
-  VK_CHECK(vmaMapMemory(allocator, allocation, data));
-
-  return Data<Type>{
-    data,
-    Scope(allocator, allocation, Access::Write),
+  return Data<Pointer>{
+    reinterpret_cast<Pointer>(map(*this)),
+    Scope(allocator, allocation, Scope::Access::Write),
   };
 }
 
