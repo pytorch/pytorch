@@ -940,8 +940,16 @@ Tensor compute_T12(const Tensor& A) {
   auto Bs = at::native::_compute_linear_combination(As, bs);
 
   // compute A6
-  Bs.select(0, 2).add_(at::matmul(Bs.select(0, 3), Bs.select(0, 3)));
-  return Bs.select(0,0).add_(at::matmul(
+  Bs.select(0, 2).add_(at::native::matmul(
+    // tmp buffer for this matrix product
+    As.select(0, 0),
+    Bs.select(0, 3),
+    Bs.select(0, 3)
+  ));
+
+  return Bs.select(0,0).add_(at::native::matmul(
+    // tmp buffer for this matrix product
+    As.select(0, 0),
     Bs.select(0, 1).add_(Bs.select(0, 2)),
     Bs.select(0, 2)
   ));
@@ -1004,8 +1012,16 @@ Tensor compute_T18(const Tensor& A) {
   auto Bs = at::native::_compute_linear_combination(As, bs);
 
   // compute A9
-  Bs.select(0, 3).add_(at::matmul(Bs.select(0, 0), Bs.select(0, 4)));
-  return Bs.select(0, 1).add_(at::matmul(
+  Bs.select(0, 3).add_(at::native::matmul(
+    // tmp buffer for this matrix product
+    As.select(0, 0),
+    Bs.select(0, 0),
+    Bs.select(0, 4))
+  );
+
+  return Bs.select(0, 1).add_(at::native::matmul(
+    // tmp buffer for this matrix product
+    As.select(0, 0),
     Bs.select(0, 2).add_(Bs.select(0, 3)),
     Bs.select(0, 3)
   ));
