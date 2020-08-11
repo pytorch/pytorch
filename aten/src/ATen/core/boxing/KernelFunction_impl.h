@@ -132,7 +132,7 @@ inline KernelFunction KernelFunction::makeFromUnboxedFunction(FuncPtr func_ptr) 
     // On mobile, we rather want to optimize for binary size than for performance,
     // so let's not inline the kernel into the wrapper but use makeFromUnboxedRuntimeFunction
     // instead.
-    return makeFromUnboxedRuntimeFunction(func_ptr);
+    return makeFromUnboxedRuntimeFunction(func_ptr.func_ptr());
 #endif
 }
 
@@ -152,7 +152,7 @@ inline KernelFunction KernelFunction::makeFromUnboxedOnlyFunction(FuncPtr func_p
     // On mobile, we rather want to optimize for binary size than for performance,
     // so let's not inline the kernel into the wrapper but use makeFromUnboxedOnlyRuntimeFunction
     // instead.
-    return makeFromUnboxedOnlyRuntimeFunction(func_ptr);
+    return makeFromUnboxedOnlyRuntimeFunction(func_ptr.func_ptr());
 #endif
 }
 
