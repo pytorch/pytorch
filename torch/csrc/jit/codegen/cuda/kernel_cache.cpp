@@ -193,29 +193,46 @@ FusionExecutorCache::FusionExecutorCache(
 // TODO: dummy cache
 std::vector<at::Tensor> FusionExecutorCache::runFusionWithInputs(
     const at::ArrayRef<IValue>& inputs) {
-  if (fusion_executor_cache_.empty()) {
-    // TODO: enable Kevin's scheduleReduction, right now it's breaking CI tests
-    // if (fusion_->hasReduction()) {
-    if (false) {
-      TensorView* red_tv = nullptr;
-      FusionGuard fg(fusion_.get());
-      for (auto expr : fusion_->exprs()) {
-        if (expr->getExprType().has_value() &&
-            expr->getExprType().value() == ExprType::ReductionOp) {
-          red_tv = expr->outputs()[0]->as<TensorView>();
-          break;
-        }
+  // caching strategy is different for pw-fusion and reduction-fusion.
+  if (fusion_->hasReduction()) {
+    // copy the fusion, since each FusionExecutor needs to manipulate the fusion
+    // in order to generate kernel.
+    Fusion fusion = *fusion_;
+    FusionGuard fg(&fusion);
+    TensorView* red_tv = nullptr;
+    for (auto expr : fusion.exprs()) {
+      if (expr->getExprType().has_value() &&
+          expr->getExprType().value() == ExprType::ReductionOp) {
+        red_tv = expr->outputs()[0]->as<TensorView>();
+        break;
       }
-      scheduleReduction(fusion_.get(), inputs, red_tv);
-    } else {
-      scheduleFusion(fusion_.get(), inputs);
     }
-    fusion_executor_cache_.emplace_back(std::make_unique<FusionExecutor>());
-    CompileOptions options;
-    options.device = device_;
-    fusion_executor_cache_.back()->compileFusion(fusion_.get(), options);
+    auto reduction_params = scheduleReduction(&fusion, inputs, red_tv);
+    TORCH_INTERNAL_ASSERT(
+        reduction_params.has_value(),
+        "reduction schedule failed in `scheduleReduction`");
+    auto& fusion_executor =
+        red_fusion_executor_cache_[reduction_params.value()];
+    if (!fusion_executor.compiled()) {
+      // This means we have not found a previously generated kernel that's
+      // compatible with the new reduction params. We need to finish codegen.
+      CompileOptions options;
+      options.device = device_;
+      fusion_executor.compileFusion(&fusion, options);
+    }
+    return fusion_executor.runFusion(inputs);
+  } else {
+    if (!pw_fusion_executor_cache_) {
+      pw_fusion_executor_cache_ = std::make_unique<FusionExecutor>();
+      CompileOptions options;
+      options.device = device_;
+      // no need to copy fusion_, as we are not generating more than 1 kernel
+      // for PW.
+      scheduleFusion(fusion_.get(), inputs);
+      pw_fusion_executor_cache_->compileFusion(fusion_.get(), options);
+    }
+    return pw_fusion_executor_cache_->runFusion(inputs);
   }
-  return fusion_executor_cache_.back()->runFusion(inputs);
 }
 
 GraphCache::InputsRequirement::InputsRequirement(

@@ -58,6 +58,7 @@ void FusionExecutor::compileFusion(Fusion* fusion, CompileOptions options) {
       structured_code,
       (kernelNamespace() + "::" + kernelName()).c_str(),
       fusion_id);
+  compiled_ = true;
 }
 
 namespace {

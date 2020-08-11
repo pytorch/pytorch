@@ -35,6 +35,12 @@ class TORCH_CUDA_API FusionExecutor {
     return runFusion(inputs, {}, launch_constraints);
   }
 
+  // function to query whether a `FusionExecutor` has a compiled kernel to
+  // execute
+  bool compiled() const {
+    return compiled_;
+  };
+
  private:
   std::string kernelName() const {
     std::stringstream ss;
@@ -59,6 +65,8 @@ class TORCH_CUDA_API FusionExecutor {
   std::vector<at::Tensor> allocOutputs(EvaluationContext& ec);
 
  private:
+  bool compiled_ = false;
+
   Fusion fusion_;
 
   CompileOptions options_;

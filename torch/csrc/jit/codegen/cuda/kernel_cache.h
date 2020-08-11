@@ -2,6 +2,7 @@
 
 #include <torch/csrc/jit/codegen/cuda/executor.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
+#include <torch/csrc/jit/codegen/cuda/scheduler.h>
 
 #include <c10/util/ArrayRef.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
@@ -36,9 +37,10 @@ namespace cuda {
 //          the GraphCache instance (We push back to both `input_stacks_` and
 //          `fe_cache_`, fusion executor cache.
 //     b. FusionExecutorCache
-//        - holds a vector of `FusionExecutor` to handle dynamic shape (varying
+//        - holds a group of `FusionExecutor` to handle dynamic shape (varying
 //          tensor sizes)
-//        - currently this is only a dummy implementation;
+//        - currently this is a dummy implementation and has branching to handle
+//          different scheduler for point-wise fusion and reduction fusion;
 //
 // * note computational graph
 // In theory, computational graph should refer to only the computational nodes
@@ -54,8 +56,6 @@ namespace cuda {
 // information now by generating an entry in GraphCache with the given profiling
 // record.
 
-// TODO: FusionExecutorCache is only a place holder here. It's populated in a
-// later PR.
 class FusionExecutorCache {
  public:
   // create new fusion executor cache at a given device to handle kernel
@@ -75,8 +75,23 @@ class FusionExecutorCache {
   // original un-scheduled `Fusion`;
   std::unique_ptr<Fusion> fusion_;
 
-  // TODO: placeholder that will be updated;
-  std::vector<std::unique_ptr<FusionExecutor>> fusion_executor_cache_;
+  // TODO: ugly logic for now. We should integrate the hashing of cache for
+  //       different kernels. (alternatively we could do so in scheduler).
+  // ugly bits now:
+  // The fact that we have heuristics only for reduction, but use a general
+  // kernel for all point-wise fusion ended up with this:
+  // 1. For point-wise fusion, we have a single `FusionExecutor` in
+  //    `pw_fusion_executor_cache_`
+  // 2. For reduction fusion we have a hash table with ReductionParams as entry
+  //    pointing to the actual `FusionExecutor` in `red_fusion_executor_cache_`
+  //
+  // Unfortunately, at run-time in order to search compatible `FusionExecutor`,
+  // we have to call `scheduleReduction` in order to get an instance of
+  // `ReductionParams` for indexing. This is not very efficient. Hence the TODO:
+  // add a direct cache from inputs shapes to `FusionExecutor` entries.
+  std::unique_ptr<FusionExecutor> pw_fusion_executor_cache_;
+  std::unordered_map<ReductionParams, FusionExecutor, ReductionParamsHash>
+      red_fusion_executor_cache_;
 };
 
 class GraphCache {
