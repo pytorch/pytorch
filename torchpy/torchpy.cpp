@@ -1,5 +1,3 @@
 #include <torchpy.h>
 
-void torchpy::init(){
-
-}
+void torchpy::init() {}
