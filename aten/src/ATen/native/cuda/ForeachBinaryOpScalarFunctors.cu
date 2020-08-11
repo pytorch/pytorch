@@ -1,136 +1,12 @@
 #include <ATen/Dispatch.h>
-#include <ATen/native/cuda/ForeachUtils.cuh>
-#include <ATen/native/cuda/MultiTensorApply.cuh>
+#include <ATen/native/ForeachUtils.h>
+#include <ATen/native/cuda/ForeachFunctors.cuh>
 
 namespace at { namespace native {
 
-namespace {
-
-template<typename T, template<class> class Op>
-struct BinaryOpScalarFunctor_ {
-    __device__ void operator() (
-        int chunk_size,
-        TensorListMetadata<1>& tl,
-        T scalar) {
-            int tensor_loc = tl.block_to_tensor[blockIdx.x];
-            int chunk_idx = tl.block_to_chunk[blockIdx.x];
-            int n = tl.sizes[tensor_loc];
-
-            T* x = (T*)tl.addresses[0][tensor_loc];
-            x += chunk_idx * chunk_size;
-
-            n -= chunk_idx * chunk_size;
-
-            T r_x[kILP];
-
-            // to make things simple, we put aligned case in a different code path
-            if(n % kILP == 0 && chunk_size % kILP == 0 && is_aligned(x)) {
-                for(int i_start = threadIdx.x; i_start * kILP < n && i_start * kILP < chunk_size; i_start += blockDim.x) {
-                    // load
-                    load_store(r_x, x, 0 , i_start);
-#pragma unroll
-                    for(int ii = 0; ii < kILP; ii++) {
-                        r_x[ii] = Op<T>()(static_cast<T>(r_x[ii]), scalar);
-                    }
-                    // store
-                    load_store(x, r_x, i_start, 0);
-                }
-            }
-            else {
-                // Non-divergent exit condition for __syncthreads, not necessary here
-                for(int i_start = 0; i_start < n && i_start < chunk_size; i_start += blockDim.x * kILP) {
-#pragma unroll
-                    for(int ii = 0; ii < kILP; ii++) {
-                        r_x[ii] = 0;
-                        int i = i_start + threadIdx.x + ii * blockDim.x;
-                        if(i < n && i < chunk_size) {
-                            r_x[ii] = x[i];
-                        }
-                    }
-#pragma unroll
-                    for(int ii = 0; ii < kILP; ii++) {
-                        r_x[ii] = Op<T>()(static_cast<T>(r_x[ii]), scalar);
-                    }
-#pragma unroll
-                    for(int ii = 0; ii < kILP; ii++) {
-                        int i = i_start + threadIdx.x + ii * blockDim.x;
-                        if(i < n && i < chunk_size)
-                            x[i] = r_x[ii];
-                    }
-                }
-            }
-        }
-};
-
-template<typename T, template<class> class Op>
-struct BinaryOpScalarFunctor {
-    __device__ void operator() (
-        int chunk_size,
-        TensorListMetadata<2>& tl,
-        T scalar) {
-            int tensor_loc = tl.block_to_tensor[blockIdx.x];
-            int chunk_idx = tl.block_to_chunk[blockIdx.x];
-            int n = tl.sizes[tensor_loc];
-
-            T* x = (T*)tl.addresses[0][tensor_loc];
-            x += chunk_idx * chunk_size;
-
-            T* out = (T*)tl.addresses[1][tensor_loc];
-            out += chunk_idx * chunk_size;
-
-            n -= chunk_idx * chunk_size;
-
-            T r_x[kILP];
-            T r_out[kILP];
-
-            // to make things simple, we put aligned case in a different code path
-            if(n % kILP == 0 && chunk_size % kILP == 0 && is_aligned(x) && is_aligned(out)) {
-                for(int i_start = threadIdx.x; i_start * kILP < n && i_start * kILP < chunk_size; i_start += blockDim.x) {
-                    // load
-                    load_store(r_x, x, 0 , i_start);
-#pragma unroll
-                    for(int ii = 0; ii < kILP; ii++) {
-                        r_out[ii] = Op<T>()(static_cast<T>(r_x[ii]), scalar);
-                    }
-                    // store
-                    load_store(out, r_out, i_start, 0);
-                }
-            }
-            else {
-                // Non-divergent exit condition for __syncthreads, not necessary here
-                for(int i_start = 0; i_start < n && i_start < chunk_size; i_start += blockDim.x * kILP) {
-#pragma unroll
-                    for(int ii = 0; ii < kILP; ii++) {
-                        r_x[ii] = 0;
-                        int i = i_start + threadIdx.x + ii * blockDim.x;
-                        if(i < n && i < chunk_size) {
-                            r_x[ii] = x[i];
-                        }
-                    }
-#pragma unroll
-                    for(int ii = 0; ii < kILP; ii++) {
-                        r_out[ii] = Op<T>()(static_cast<T>(r_x[ii]), scalar);
-                    }
-#pragma unroll
-                    for(int ii = 0; ii < kILP; ii++) {
-                        int i = i_start + threadIdx.x + ii * blockDim.x;
-                        if(i < n && i < chunk_size)
-                            out[i] = r_out[ii];
-                    }
-                }
-            }
-        }
-};
-
-} // namespace
-
 template<template<class> class Op>
 std::vector<Tensor> foreach_binary_op(TensorList tensors, Scalar scalar) {
-    TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
-
-    if (!check_fast_route(tensors, scalar)) {
-        return at::native::foreach_add_scalar_kernel_fallback(tensors, scalar);
-    }
+    verify_list(tensors);
 
     std::vector<std::vector<at::Tensor>> tensor_lists; 
     std::vector<at::Tensor> vec_res;
@@ -149,6 +25,8 @@ std::vector<Tensor> foreach_binary_op(TensorList tensors, Scalar scalar) {
 
 template<template<class> class Op>
 std::vector<Tensor> foreach_binary_op_(TensorList tensors, Scalar scalar) {
+    verify_list(tensors);
+
     std::vector<std::vector<at::Tensor>> tensor_lists; 
     tensor_lists.emplace_back(std::move(tensors.vec()));
 
@@ -159,7 +37,7 @@ std::vector<Tensor> foreach_binary_op_(TensorList tensors, Scalar scalar) {
 }
 
 std::vector<Tensor> foreach_tensor_add_scalar_kernel_cuda(TensorList tensors, Scalar scalar) {
-    TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
+    verify_list(tensors);
 
     if (!check_fast_route(tensors, scalar)) {
         return at::native::foreach_add_scalar_kernel_fallback(tensors, scalar);
@@ -169,7 +47,7 @@ std::vector<Tensor> foreach_tensor_add_scalar_kernel_cuda(TensorList tensors, Sc
 }
 
 std::vector<Tensor> foreach_tensor_add_scalar_kernel_cuda_(TensorList tensors, Scalar scalar) {
-    TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
+    verify_list(tensors);
 
     if (!check_fast_route(tensors, scalar)) {
         return at::native::foreach_add_scalar_kernel_fallback_(tensors, scalar);
@@ -179,7 +57,7 @@ std::vector<Tensor> foreach_tensor_add_scalar_kernel_cuda_(TensorList tensors, S
 }
 
 std::vector<Tensor> foreach_tensor_sub_scalar_kernel_cuda(TensorList tensors, Scalar scalar) {
-    TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
+    verify_list(tensors);
 
     if (!check_fast_route(tensors, scalar)) {
         return at::native::foreach_sub_scalar_kernel_fallback(tensors, scalar);
@@ -189,7 +67,7 @@ std::vector<Tensor> foreach_tensor_sub_scalar_kernel_cuda(TensorList tensors, Sc
 }
 
 std::vector<Tensor> foreach_tensor_sub_scalar_kernel_cuda_(TensorList tensors, Scalar scalar) {
-    TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
+    verify_list(tensors);
 
     if (!check_fast_route(tensors, scalar)) {
         return at::native::foreach_sub_scalar_kernel_fallback_(tensors, scalar);
@@ -199,7 +77,7 @@ std::vector<Tensor> foreach_tensor_sub_scalar_kernel_cuda_(TensorList tensors, S
 }
 
 std::vector<Tensor> foreach_tensor_mul_scalar_kernel_cuda(TensorList tensors, Scalar scalar) {
-    TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
+    verify_list(tensors);
 
     if (!check_fast_route(tensors, scalar)) {
         return at::native::foreach_mul_scalar_kernel_fallback(tensors, scalar);
@@ -209,7 +87,7 @@ std::vector<Tensor> foreach_tensor_mul_scalar_kernel_cuda(TensorList tensors, Sc
 }
 
 std::vector<Tensor> foreach_tensor_mul_scalar_kernel_cuda_(TensorList tensors, Scalar scalar) {
-    TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
+    verify_list(tensors);
 
     if (!check_fast_route(tensors, scalar)) {
         return at::native::foreach_mul_scalar_kernel_fallback_(tensors, scalar);
@@ -219,7 +97,7 @@ std::vector<Tensor> foreach_tensor_mul_scalar_kernel_cuda_(TensorList tensors, S
 }
 
 std::vector<Tensor> foreach_tensor_div_scalar_kernel_cuda(TensorList tensors, Scalar scalar) {
-    TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
+    verify_list(tensors);
 
     if (!check_fast_route(tensors, scalar)) {
         return at::native::foreach_div_scalar_kernel_fallback(tensors, scalar);
@@ -229,7 +107,7 @@ std::vector<Tensor> foreach_tensor_div_scalar_kernel_cuda(TensorList tensors, Sc
 }
 
 std::vector<Tensor> foreach_tensor_div_scalar_kernel_cuda_(TensorList tensors, Scalar scalar) {
-    TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
+    verify_list(tensors);
 
     if (!check_fast_route(tensors, scalar)) {
         return at::native::foreach_div_scalar_kernel_fallback_(tensors, scalar);
