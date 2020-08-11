@@ -58,9 +58,11 @@ def create_alias_tests(cls):
             op = info.alias_op
             is_inplace = info.alias_name.endswith('_')
 
-            # NOTE: this workaround necessary to satisfy the JIT, which
-            #   does allow Python aliasing or direct calling of torch.Tensor
-            #   methods when scripting
+            # Checks that scripting converts aliases
+            # NOTE: the code to test scripting must be generated since
+            #   scripting does not support splatting args or directly
+            #   calling torch.Tensor methods. The following
+            #   splats args after the first tensor by inlining them as constants.
             if is_inplace:
                 fn_template = '''
                     def _fn(t):
@@ -69,9 +71,6 @@ def create_alias_tests(cls):
                 arg_string = ', '.join((str(arg) for arg in info.args))
                 script = fn_template.format(alias_name=info.alias_name, args=arg_string)
             else:
-                # Checks that scripting converts aliases
-                # NOTE: scripting doesn't support splatting args, so this
-                #  generates the script with the args already splatted (as constants)
                 fn_template = '''
                     def _fn(t):
                         return op(t{args})

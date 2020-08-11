@@ -20,12 +20,8 @@ class TestLinalg(TestCase):
         a = torch.randn(50, device=device, dtype=dtype)
         b = torch.randn(50, device=device, dtype=dtype)
 
-        def _fn(a, b):
-            return torch.outer(a, b)
-
         ops = (torch.ger, torch.Tensor.ger,
-               torch.outer, torch.Tensor.outer,
-               torch.jit.script(_fn))
+               torch.outer, torch.Tensor.outer)
 
         expected = np.outer(a.cpu().numpy(), b.cpu().numpy())
         for op in ops:
@@ -44,11 +40,9 @@ class TestLinalg(TestCase):
             torch.randn((3, 52, 52), device=device, dtype=dtype),
             torch.randn((4, 2, 26, 26), device=device, dtype=dtype))
 
-        def _fn(t):
-            return torch.linalg.det(t)
 
         ops = (torch.det, torch.Tensor.det,
-               torch.linalg.det, torch.jit.script(_fn))
+               torch.linalg.det)
         for t in tensors:
             expected = np.linalg.det(t.cpu().numpy())
             for op in ops:
@@ -57,12 +51,9 @@ class TestLinalg(TestCase):
 
         # NOTE: det requires a 2D+ tensor
         t = torch.randn(1, device=device, dtype=dtype)
-        for op in ops:
-            try:
-                op(t)
-            except Exception as e:
-                continue
-            self.assertTrue(False, msg="Failed to throw error on 1D tensor!")
+        with self.assertRaises(IndexError):
+            op(t)
+
 
 instantiate_device_type_tests(TestLinalg, globals())
 
