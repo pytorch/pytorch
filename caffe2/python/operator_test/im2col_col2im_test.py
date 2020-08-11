@@ -4,7 +4,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from caffe2.python import core
-from hypothesis import assume, given
+from hypothesis import assume, given, settings
 
 import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
@@ -123,6 +123,7 @@ class TestReduceFrontSum(hu.HypothesisTestCase):
            channels=st.integers(1, 8),
            order=st.sampled_from(["NCHW"]),
            **hu.gcs)
+    @settings(deadline=10000)
     def test_col2im_gradients(self, batch_size, stride, pad, kernel,
                               dilation, size, channels, order, gc, dc):
         assume(size >= dilation * (kernel - 1) + 1)
