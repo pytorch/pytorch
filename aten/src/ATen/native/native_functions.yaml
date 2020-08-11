@@ -5471,8 +5471,8 @@
   device_guard: False
   variants: function
   dispatch:
-    CPU: foreach_add_scalar__kernel_fallback
-    CUDA: foreach_tensor_add_scalar__kernel_cuda
+    CPU: foreach_add_scalar_kernel_fallback_
+    CUDA: foreach_tensor_add_scalar_kernel_cuda_
 
 - func: _foreach_add.List(Tensor[] tensors1, Tensor[] tensors2) -> Tensor[]
   device_guard: False
