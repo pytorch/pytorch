@@ -22,7 +22,31 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
+// [ Note -- cache entry indexing ]
+//
+// CudaFusionManager holds the cache and handles interfacing to CudaFusionGroup
+// node, including selection, construction and execution of FusionExecutors.
+//
+// CudaFusionManager bridges PyTorch IR node CudaFusionGroup to GraphCache.
+// Therefore, we want to cache on stringified graph. But it is expensive to
+// stringify and hash on a computational graph, we cache the hash of a
+// stringified graph on node via cache_id.
+//
+// CudaFusionGroup node stores:
+//     i.  a PyTorch IR in `attr::Subgraph`
+//     ii. an int in `attr::cache_id`, (a cached hash value of `attr::Subgraph`)
+//
+// We have 2 unordered_map at CudaFusionGroup:
+//   std::unordered_map<std::string, int32_t> graph_cache_ids_;
+//   std::unordered_map<int64_t, std::unique_ptr<GraphCache>> graph_cache_;
+//
+// Mapping from std::string to graph_cache_id ensures that we assign the same
+// cache_id to CudaFusionGroup with identical computational grah, allowing
+// kernel reuse; Direct mapping from cache_id to GraphCache allows efficient
+// graph_cache indexing;
+
 namespace {
+
 c10::Device getDevice(const at::ArrayRef<IValue>& inputs) {
   // find device in inputs.
   for (const auto& input : inputs) {
@@ -37,14 +61,9 @@ c10::Device getDevice(const at::ArrayRef<IValue>& inputs) {
       false, "Could not detect device of inputs to a fusion.");
 }
 
-// CudaFusionManager holds a FusionExecutor and handles all interfacing
-// including compilation and execution.
-//
-// We cache two maps here:
-//   a. string of graph -> kernel_id
-//   b. kernel_id -> FusionExecutor
-//
-// This allows FusionExecutor reuse across nodes;
+// CudaFusionManager is not thread safe!
+// TODO: we should make the tradeoff here to use thread_local instead of global
+// singleton;
 class CudaFusionManager {
  public:
   static CudaFusionManager& getManager() {
@@ -67,12 +86,15 @@ class CudaFusionManager {
     Canonicalize(graph, false);
     auto repr = graph->toString(false);
 
-    // create new graph_cache_ entry;
-    if (graph_cache_.count(repr) == 0) {
+    // create new graph_cache_ids_ entry if none existed yet;
+    if (graph_cache_ids_.count(repr) == 0) {
       int32_t kernel_id = getNextUniqueID();
-      graph_cache_[repr] = kernel_id;
+      graph_cache_ids_[repr] = kernel_id;
+      TORCH_CHECK(
+          graph_cache_.insert({kernel_id, std::make_unique<GraphCache>(graph)})
+              .second);
     }
-    return graph_cache_[repr];
+    return graph_cache_ids_[repr];
   };
 
   std::vector<at::Tensor> runFusionNode(
@@ -80,33 +102,7 @@ class CudaFusionManager {
       std::shared_ptr<Graph>& graph,
       const at::ArrayRef<IValue> inputs) {
     std::lock_guard<std::mutex> guard(mutex_);
-
-    auto inputs_vec = dimSortInputs(graph, inputs);
-    const at::ArrayRef<IValue> inputs_ref = inputs_vec;
-
-    FusionExecutor* fe;
-    if (kernel_cache_.find(kernel_id) == kernel_cache_.end()) {
-      // search kernel cache failed, we need to codegen new kernel for given
-      // inputs;
-
-      // we still need to permute input tensor type in the graph properly.
-      auto copy = dimSortGraph(graph);
-      auto fusion = parseJitIR(copy);
-
-      // TODO: update the API to let `scheduleFusion` consume & return a fusion
-      // magic scheduler updates fusion instance via transformation and setup
-      // launch configurations;
-      scheduleFusion(fusion.get(), inputs_ref);
-
-      CompileOptions options;
-      options.device = getDevice(inputs_ref);
-
-      kernel_cache_[kernel_id] = std::make_unique<FusionExecutor>();
-      kernel_cache_[kernel_id]->compileFusion(fusion.get(), options);
-    }
-
-    fe = kernel_cache_[kernel_id].get();
-    return dimSortOutputs(graph, fe->runFusion(inputs_ref));
+    return graph_cache_[kernel_id]->runGraphWithInputs(inputs);
   }
 
  private:
@@ -144,56 +140,6 @@ class CudaFusionManager {
       }
     }
     return acc_type;
-  }
-
-  void debugPrint(const TensorTypePtr& type) {
-    printf("\nsizes:");
-    if (auto sizes = type->symbolic_sizes().sizes()) {
-      // for (const auto& shape_symbol : sizes.value()) {
-      int rank = static_cast<int>(sizes->size());
-      for (int i = 0; i < rank; i++) {
-        const auto& shape_symbol = sizes.value()[i];
-        if (shape_symbol.is_static()) {
-          printf("%ld, ", shape_symbol.static_size());
-        } else {
-          printf("s(%ld), ", *reinterpret_cast<const int64_t*>(&shape_symbol));
-        }
-      }
-    } else {
-      printf("no size available\n");
-    }
-    if (const auto& stride_properties = type->stride_properties().sizes()) {
-      int rank = static_cast<int>(stride_properties->size());
-      printf("\nstride: ");
-      for (int i = 0; i < rank; i++) {
-        if ((*stride_properties)[i].has_value() &&
-            (*stride_properties)[i]->stride_.has_value()) {
-          printf("%ld, ", (*stride_properties)[i]->stride_.value());
-        } else {
-          printf("?, ");
-        }
-      }
-      printf("\nstride index: ");
-      for (int i = 0; i < rank; i++) {
-        if ((*stride_properties)[i].has_value() &&
-            (*stride_properties)[i]->stride_index_.has_value()) {
-          printf("%ld, ", (*stride_properties)[i]->stride_index_.value());
-        } else {
-          printf("?, ");
-        }
-      }
-      printf("\ncontiguous: ");
-      for (int i = 0; i < rank; i++) {
-        if ((*stride_properties)[i].has_value() &&
-            (*stride_properties)[i]->contiguous_.has_value()) {
-          printf("%d, ", (*stride_properties)[i]->contiguous_.value());
-        } else {
-          printf("?, ");
-        }
-      }
-    } else {
-      printf("no stride properties available\n");
-    }
   }
 
   // return a permutation order that would undo `permuted`
@@ -249,113 +195,6 @@ class CudaFusionManager {
     return permute_seq;
   }
 
-  std::vector<IValue> dimSortInputs(
-      std::shared_ptr<Graph>& graph,
-      const at::ArrayRef<IValue> inputs) {
-    if (!IsNewExecutorEnabled() || graphHasReduction(graph)) {
-      return inputs.vec();
-    }
-    auto acc_type = mergeInputTensorType(graph);
-
-    if (!acc_type->dim().has_value()) {
-      return inputs.vec();
-    }
-
-    auto strategy = getSortStrideScheme(acc_type);
-    // TODO: early return if permutation is no-op;
-
-    std::vector<IValue> permuted_inputs;
-    for (const auto& input : inputs) {
-      if (input.isTensor()) {
-        permuted_inputs.emplace_back(input.toTensor().permute(strategy));
-      } else {
-        permuted_inputs.emplace_back(input);
-      }
-    }
-    return permuted_inputs;
-  }
-
-  std::vector<at::Tensor> dimSortOutputs(
-      const std::shared_ptr<Graph>& graph,
-      const std::vector<at::Tensor>& outputs) {
-    if (!IsNewExecutorEnabled() || graphHasReduction(graph)) {
-      return outputs;
-    }
-    auto acc_type = mergeInputTensorType(graph);
-    if (!acc_type->dim().has_value()) {
-      return outputs;
-    }
-
-    auto strategy = getSortStrideScheme(acc_type);
-    // TODO: early return if permutation is no-op;
-
-    auto restore_strategy = restorePermutation(strategy);
-
-    std::vector<at::Tensor> permuted_outputs;
-    TORCH_INTERNAL_ASSERT(outputs.size() == graph->outputs().size());
-    permuted_outputs.reserve(outputs.size());
-    for (const auto& output : outputs) {
-      permuted_outputs.emplace_back(output.permute(restore_strategy));
-    }
-    return permuted_outputs;
-  }
-
-  // two thing need to be adjusted:
-  // 1. permutation of size_ -> so we declare broadcast for size-1 dimension
-  //    properly;
-  // 2. contiguity_ -> which is needed when we register input tensor to codegen
-  //    to indicate dimension collapsing.
-  std::shared_ptr<Graph> dimSortGraph(std::shared_ptr<Graph>& graph) {
-    if (!IsNewExecutorEnabled() || graphHasReduction(graph)) {
-      return graph->copy();
-    }
-    auto acc_type = mergeInputTensorType(graph);
-
-    if (!acc_type->dim().has_value()) {
-      return graph->copy();
-    }
-
-    auto strategy = getSortStrideScheme(acc_type);
-    // TODO: early return if permutation is no-op;
-
-    std::shared_ptr<Graph> copy = graph->copy();
-
-    auto type_permute_fn = [&](const TensorTypePtr& type) {
-      // std::vector<c10::ShapeSymbol> vec_shape_symbol =
-      // type->symbolic_sizes().sizes().value();
-      auto vec_shape_symbol = type->symbolic_sizes().sizes().value();
-      // std::vector<c10::optional<c10::Stride>> vec_optional_stride =
-      // type->stride_properties().sizes().value();
-      auto vec_optional_stride = type->stride_properties().sizes().value();
-
-      int rank = static_cast<int>(type->dim().value());
-
-      std::vector<c10::ShapeSymbol> permuted_vec_ss;
-      std::vector<c10::optional<c10::Stride>> permuted_vec_optional_stride;
-      for (int i = 0; i < rank; i++) {
-        // permuted_vec_ss.emplace_back(type->symbolic_sizes().sizes().value()[strategy[i]]);
-        // permuted_vec_optional_stride.emplace_back(type->stride_properties().sizes().value()[strategy[i]]);
-        permuted_vec_ss.emplace_back(vec_shape_symbol[strategy[i]]);
-        permuted_vec_optional_stride.emplace_back(
-            vec_optional_stride[strategy[i]]);
-      }
-
-      return TensorType::create(
-          type->scalarType(),
-          type->device(),
-          permuted_vec_ss,
-          permuted_vec_optional_stride,
-          type->requires_grad());
-    };
-
-    for (auto input : copy->inputs()) {
-      if (auto input_type = input->type()->cast<TensorType>()) {
-        input->setType(type_permute_fn(input_type));
-      }
-    }
-    return copy;
-  }
-
  private:
   std::mutex mutex_;
 
@@ -368,8 +207,8 @@ class CudaFusionManager {
     return next_unique_id_++;
   };
 
-  std::unordered_map<std::string, int32_t> graph_cache_;
-  std::unordered_map<int64_t, std::unique_ptr<FusionExecutor>> kernel_cache_;
+  std::unordered_map<std::string, int32_t> graph_cache_ids_;
+  std::unordered_map<int64_t, std::unique_ptr<GraphCache>> graph_cache_;
 
   int32_t next_unique_id_ = 0;
 };
@@ -407,6 +246,8 @@ void runCudaFusionGroup(const Node* fusion_node, Stack& stack) {
     const auto nInputs = graph->inputs().size();
     at::ArrayRef<IValue> inputs = last(stack, nInputs);
 
+    // TODO: we would/could want an extra layer of graph cache in order to
+    //       handle varying contiguity/broadcast;
     // Only needed if we are doing codegen
     // if no shape information available, we feed current shape into the kernel;
     // This is needed because our current broadcast on size-1 dimension

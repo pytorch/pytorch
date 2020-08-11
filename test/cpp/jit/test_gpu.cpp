@@ -770,16 +770,107 @@ void testGPU_FusionTopoSort() {
 void testGPU_FusionTensor() {
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
 
-  auto tensor = at::randn({2, 3, 4, 5}, options);
-  auto sizes = tensor.sizes().vec();
-  auto tensor_type = TensorType::create(tensor);
-
   Fusion fusion;
   FusionGuard fg(&fusion);
 
-  auto fuser_tensor = new TensorView(tensor_type);
-  TORCH_CHECK(fuser_tensor->getDataType().value() == DataType::Float);
-  TORCH_CHECK(fuser_tensor->domain() != nullptr);
+  {
+    auto tensor = at::randn({2, 3, 4, 5}, options);
+    auto tensor_type = TensorType::create(tensor);
+    auto fuser_tensor = new TensorView(tensor_type);
+    TORCH_CHECK(fuser_tensor->nDims() == tensor.dim());
+    TORCH_CHECK(fuser_tensor->getDataType().value() == DataType::Float);
+    TORCH_CHECK(fuser_tensor->domain() != nullptr);
+    for (int i = 0; i < static_cast<int>(fuser_tensor->nDims()); i++) {
+      // size 1 dimension are makred as broadcast
+      TORCH_CHECK(
+          fuser_tensor->axis(i)->isBroadcast() == (tensor.sizes()[i] == 1));
+      // check contiguity information;
+      TORCH_CHECK(fuser_tensor->domain()->contiguity()[i]);
+    }
+  }
+
+  {
+    auto tensor = at::randn({2, 1, 4}, options);
+    auto tensor_type = TensorType::create(tensor);
+    auto fuser_tensor = new TensorView(tensor_type);
+    TORCH_CHECK(fuser_tensor->nDims() == tensor.dim());
+    TORCH_CHECK(fuser_tensor->getDataType().value() == DataType::Float);
+    TORCH_CHECK(fuser_tensor->domain() != nullptr);
+    for (int i = 0; i < static_cast<int>(fuser_tensor->nDims()); i++) {
+      // size 1 dimension are makred as broadcast
+      TORCH_CHECK(
+          fuser_tensor->axis(i)->isBroadcast() == (tensor.sizes()[i] == 1));
+    }
+    TORCH_CHECK(fuser_tensor->domain()->contiguity()[2]);
+
+    // temporary WAR to disable contig & bcast; issue # 230
+    // TODO: insert the check where broadcast & contiguous cannot be marked
+    // together
+    TORCH_CHECK(!fuser_tensor->domain()->contiguity()[0]);
+    TORCH_CHECK(!fuser_tensor->domain()->contiguity()[1]);
+  }
+
+  {
+    auto tensor = at::randn({2, 3, 1}, options);
+    auto tensor_type = TensorType::create(tensor);
+    auto fuser_tensor = new TensorView(tensor_type);
+    TORCH_CHECK(fuser_tensor->nDims() == tensor.dim());
+    TORCH_CHECK(fuser_tensor->getDataType().value() == DataType::Float);
+    TORCH_CHECK(fuser_tensor->domain() != nullptr);
+    for (int i = 0; i < static_cast<int>(fuser_tensor->nDims()); i++) {
+      // size 1 dimension are makred as broadcast
+      TORCH_CHECK(
+          fuser_tensor->axis(i)->isBroadcast() == (tensor.sizes()[i] == 1));
+    }
+    TORCH_CHECK(fuser_tensor->domain()->contiguity()[0]);
+
+    // temporary WAR to disable contig & bcast; issue # 230
+    // TODO: insert the check where broadcast & contiguous cannot be marked
+    // together
+    TORCH_CHECK(!fuser_tensor->domain()->contiguity()[1]);
+    TORCH_CHECK(!fuser_tensor->domain()->contiguity()[2]);
+  }
+
+  // TensorType::create fills stride_properties, which helps us to mark
+  // IterDomain properly
+  // Note: implementation could change, depending on how much we want to invest
+  // in our home-brew contiguity coalescing. For now let's make sure that we
+  // properly test what we are using.
+  {
+    auto tensor = at::randn({4, 4, 4}, options);
+    auto sliced_tensor = tensor.slice(1, 0, -1, 2);
+
+    auto tensor_type = TensorType::create(sliced_tensor);
+    auto fuser_tensor = new TensorView(tensor_type);
+    TORCH_CHECK(fuser_tensor->nDims() == tensor.dim());
+    TORCH_CHECK(fuser_tensor->getDataType().value() == DataType::Float);
+    TORCH_CHECK(fuser_tensor->domain() != nullptr);
+    for (int i = 0; i < static_cast<int>(fuser_tensor->nDims()); i++) {
+      // size 1 dimension are makred as broadcast
+      TORCH_CHECK(fuser_tensor->axis(i)->isBroadcast() == false);
+    }
+    TORCH_CHECK(fuser_tensor->domain()->contiguity()[0]);
+    TORCH_CHECK(!fuser_tensor->domain()->contiguity()[1]);
+    TORCH_CHECK(fuser_tensor->domain()->contiguity()[2]);
+  }
+
+  {
+    auto tensor = at::randn({2, 3, 4, 5}, options);
+    auto permuted_tensor = tensor.permute({0, 3, 1, 2});
+    auto tensor_type = TensorType::create(permuted_tensor);
+    auto fuser_tensor = new TensorView(tensor_type);
+    TORCH_CHECK(fuser_tensor->nDims() == tensor.dim());
+    TORCH_CHECK(fuser_tensor->getDataType().value() == DataType::Float);
+    TORCH_CHECK(fuser_tensor->domain() != nullptr);
+    for (int i = 0; i < static_cast<int>(fuser_tensor->nDims()); i++) {
+      // size 1 dimension are makred as broadcast
+      TORCH_CHECK(fuser_tensor->axis(i)->isBroadcast() == false);
+    }
+    TORCH_CHECK(!fuser_tensor->domain()->contiguity()[0]);
+    TORCH_CHECK(!fuser_tensor->domain()->contiguity()[1]);
+    TORCH_CHECK(fuser_tensor->domain()->contiguity()[2]);
+    TORCH_CHECK(!fuser_tensor->domain()->contiguity()[3]);
+  }
 }
 
 void testGPU_FusionFilterVals() {
