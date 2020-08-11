@@ -6,7 +6,7 @@ from __future__ import unicode_literals
 import numpy as np
 
 import caffe2.python.fakelowp.init_shared_libs  # noqa
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core
