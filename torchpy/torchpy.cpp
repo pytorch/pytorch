@@ -1,8 +1,12 @@
 #include <torchpy.h>
+#include <Python.h>
 #include <torch/torch.h>
 #include <iostream>
 
 void torchpy::init() {
-  torch::Tensor tensor = torch::rand({2, 3});
-  std::cout << tensor << std::endl;
+  Py_Initialize();
+  PyRun_SimpleString(
+      "from time import time,ctime\n"
+      "print('Today is',ctime(time()))\n");
+  Py_Finalize();
 }
