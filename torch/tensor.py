@@ -838,8 +838,11 @@ class Tensor(torch._C._TensorBase):
         if type(self) is not Tensor and has_torch_function(relevant_args):
             return handle_torch_function(Tensor.unflatten, relevant_args, self, dim, namedshape)
 
+        if not sizes:
+            raise RuntimeError("unflatten: sizes must be non-empty")
+
         names = None
-        if sizes and isinstance(sizes, (tuple, list)) and isinstance(sizes[0], (tuple, list)):
+        if isinstance(sizes, OrderedDict) or (isinstance(sizes, (tuple, list)) and isinstance(sizes[0], (tuple, list))):
             names, sizes = unzip_namedshape(sizes)
         return super(Tensor, self).unflatten(dim, sizes, names)
 
