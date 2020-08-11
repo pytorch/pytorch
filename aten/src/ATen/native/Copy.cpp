@@ -6,13 +6,11 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/quantized/Copy.h>
 #include <ATen/quantized/Quantizer.h>
+#include <ATen/vulkan/Context.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
 #include <torch/library.h>
 
-#ifdef USE_VULKAN
-#include <ATen/native/vulkan/VulkanAten.h>
-#endif
 namespace {
 
 using namespace at;
@@ -131,11 +129,9 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
     TORCH_CHECK(false, "Copying from quantized Tensor to non-quantized Tensor is not allowed, please use dequantize to get a float Tensor from a quantized Tensor");
   }
 
-#ifdef USE_VULKAN
   if (self.device().type() == at::kVulkan || src.device().type() == at::kVulkan) {
-    return vulkan_copy_(self, src);
+    return at::vulkan::vulkan_copy_(self, src);
   }
-#endif
 
   auto iter = TensorIteratorConfig()
     .set_check_mem_overlap(true)

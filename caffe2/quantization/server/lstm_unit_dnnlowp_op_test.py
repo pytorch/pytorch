@@ -6,7 +6,7 @@ import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
 import numpy as np
 from caffe2.python import core, dyndep, workspace
-from hypothesis import given
+from hypothesis import given, settings
 
 
 dyndep.InitOpsLibrary("//caffe2/caffe2/quantization/server:dnnlowp_ops")
@@ -20,6 +20,7 @@ class DNNLowPLSTMUnitOpTest(hu.HypothesisTestCase):
         forget_bias=st.integers(0, 4),
         **hu.gcs_cpu_only
     )
+    @settings(max_examples=10, deadline=None)
     def test_dnnlowp_lstm_unit(self, N, D, forget_bias, gc, dc):
 
         # X has scale 1, so exactly represented after quantization
