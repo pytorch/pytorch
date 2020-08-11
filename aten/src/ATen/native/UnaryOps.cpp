@@ -151,6 +151,17 @@ Tensor abs(const Tensor& self) {
 }
 Tensor& abs_(Tensor& self) { return unary_op_impl_(self, at::abs_out); }
 
+// Absolute, alias for abs
+Tensor& absolute_out(Tensor& result, const Tensor& self) {
+  return at::abs_out(result, self);
+}
+Tensor absolute(const Tensor& self) {
+  return self.abs();
+}
+Tensor& absolute_(Tensor& self) {
+  return self.abs_();
+}
+
 Tensor& angle_out(Tensor& result, const Tensor& self) {
   return unary_op_impl_with_complex_to_float_out(result, self, angle_stub);
 }
@@ -453,6 +464,19 @@ Tensor clamp_min(const Tensor& self, Scalar min) {
 
 Tensor& clamp_min_(Tensor& self, Scalar min) {
   return at::clamp_min_out(self, self, min);
+}
+
+// Implements the "clip" alias for clamp
+Tensor& clip_out(Tensor& result, const Tensor& self, optional<Scalar> min, optional<Scalar> max) {
+  return at::clamp_out(result, self, min, max);
+}
+
+Tensor clip(const Tensor& self, optional<Scalar> min, optional<Scalar> max) {
+  return at::clamp(self, min, max);
+}
+
+Tensor& clip_(Tensor& self, optional<Scalar> min, optional<Scalar> max) {
+  return at::clamp_(self, min, max);
 }
 
 Tensor polygamma(int64_t n, const Tensor& self) {
