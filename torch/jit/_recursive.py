@@ -603,7 +603,7 @@ def get_property_stubs(nn_module):
 
     stubs = []
     for ast in properties_asts:
-        if ast.name().name not in ignored_properties:
+        if should_compile_property(module_ty, ast.name().name):
             stubs.append(PropertyStub(rcbs[ast.name().name], ast))
 
     return stubs
