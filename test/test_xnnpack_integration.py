@@ -739,7 +739,7 @@ class TestXNNPACKConv1dTransformPass(TestCase):
            height=st.integers(5, 64),
            output_channels_per_group=st.integers(1, 32),
            groups=st.integers(1, 16),
-           kernel=st.integers(1, 7),
+           kernel=st.integers(1, 5),
            strides=st.integers(1, 2),
            paddings=st.integers(0, 2),
            dilations=st.integers(1, 2))
