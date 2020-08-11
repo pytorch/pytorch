@@ -59,6 +59,15 @@ class _ContextMethodMixin(object):
         """
         self.non_differentiable = args
 
+    def set_materialize_grads(self, value):
+        r"""Sets whether to materialize output grad tensors. Default is true.
+
+        **This should be called only from inside the** :func:`forward` **method**
+
+        If true, undefined output grad tensors will be expanded to tensors full
+        of zeros prior to calling the :func:`backward` method.
+        """
+        self.materialize_grads = value
 
 class _HookMixin(object):
 

@@ -102,6 +102,32 @@ class LayerNormFakeFp16Op final : public Operator<Context> {
     calcY(
         M, N, X_data, mean_data, sigma_data, gamma_data, beta_data, Y_data);
 
+    if (InputSize() == 3 && !elementwise_affine_) {
+      // handle scale and bias via fp16_fma
+      std::vector<float> scale_data(N);
+      std::vector<float> bias_data(N);
+      fbgemm::RoundToFloat16(
+          Input(1).template data<float>(),
+          scale_data.data(),
+          N,
+          FLAGS_caffe2_fbgemm_fake_fp16_clamp,
+          false /*USE_ACC_FP16*/);
+      fbgemm::RoundToFloat16(
+          Input(2).template data<float>(),
+          bias_data.data(),
+          N,
+          FLAGS_caffe2_fbgemm_fake_fp16_clamp,
+          false /*USE_ACC_FP16*/);
+
+      for (int i = 0; i < M; ++i) {
+        // fma_fp16(A, B, Out) -> Out = A * B + Out
+        std::vector<float> out(N);
+        std::memcpy(out.data(), bias_data.data(), sizeof(float) * N);
+        fake_fp16::fma_fp16(N, Y_data + i * N, scale_data.data(), out.data());
+        std::memcpy(Y_data + i * N, out.data(), sizeof(float) * N);
+      }
+    }
+
     return true;
   }
 
