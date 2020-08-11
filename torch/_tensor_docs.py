@@ -787,6 +787,18 @@ clamp_(min, max) -> Tensor
 In-place version of :meth:`~Tensor.clamp`
 """)
 
+add_docstr_all('clip', r"""
+clip(min, max) -> Tensor
+
+Alias for :meth:`~Tensor.clamp`.
+""")
+
+add_docstr_all('clip_', r"""
+clip_(min, max) -> Tensor
+
+Alias for :meth:`~Tensor.clamp_`.
+""")
+
 add_docstr_all('clone',
                r"""
 clone(memory_format=torch.preserve_format) -> Tensor
@@ -2294,6 +2306,13 @@ add_docstr_all('qscheme',
 qscheme() -> torch.qscheme
 
 Returns the quantization scheme of a given QTensor.
+""")
+
+add_docstr_all('quantile',
+               r"""
+quantile(q, dim=None, keepdim=False) -> Tensor
+
+See :func:`torch.quantile`
 """)
 
 add_docstr_all('q_scale',
