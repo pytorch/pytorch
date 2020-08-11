@@ -99,7 +99,7 @@ class TORCH_API Block : public StmtNode<Block> {
     set_parent(s, this);
   }
 
-  void insert_stmt_before(Stmt* s, Stmt* before) {
+  void insert_stmt_before(Stmt* s, const Stmt* before) {
     if (s->get_parent()) {
       throw malformed_input("Block append Stmt with existing parent", s);
     }
@@ -114,7 +114,7 @@ class TORCH_API Block : public StmtNode<Block> {
     set_parent(s, this);
   }
 
-  void insert_stmt_after(Stmt* s, Stmt* after) {
+  void insert_stmt_after(Stmt* s, const Stmt* after) {
     if (s->get_parent()) {
       throw malformed_input("Block append Stmt with existing parent", s);
     }
@@ -216,6 +216,32 @@ class TORCH_API Block : public StmtNode<Block> {
     }
 
     stmts_.splice(it, other->stmts_);
+  }
+
+  static const Block* getSharedParent(const Stmt* p1, const Stmt* p2) {
+    std::unordered_set<const Block*> enclosing;
+
+    const Stmt* p1_p = p1;
+    while (p1_p) {
+      if (const Block* b = dynamic_cast<const Block*>(p1_p)) {
+        if (b) {
+          enclosing.insert(b);
+        }
+      }
+      p1_p = p1_p->get_parent();
+    }
+
+    const Stmt* p2_p = p2;
+    while (p2_p) {
+      if (const Block* b = dynamic_cast<const Block*>(p2_p)) {
+        if (enclosing.count(b) != 0) {
+          return b;
+        }
+      }
+      p2_p = p2_p->get_parent();
+    }
+
+    return nullptr;
   }
 
  private:
