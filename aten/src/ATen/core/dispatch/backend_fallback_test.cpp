@@ -104,6 +104,8 @@ TEST(BackendFallbackTest, TestBackendFallbackWithWrapper) {
 TEST(BackendFallbackTest, TestFallthroughBackendFallback) {
   auto m = MAKE_TORCH_LIBRARY_IMPL(aten, TESTING_ONLY_GenericMode);
   m.impl("mul.Tensor", torch::CppFunction::makeFromBoxedFunction<&generic_mode_fallback>());
+  m.impl("abs_", torch::CppFunction::makeNamedNotSupported());
+  m.impl("add.Tensor", torch::CppFunction::makeNamedNotSupported());
 
   auto gm = MAKE_TORCH_LIBRARY_IMPL(_, TESTING_ONLY_GenericMode);
   gm.fallback(torch::CppFunction::makeFallthrough());

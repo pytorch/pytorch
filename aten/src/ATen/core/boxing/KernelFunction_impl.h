@@ -174,7 +174,7 @@ inline KernelFunction KernelFunction::makeFromUnboxedLambda(Lambda&& lambda) {
 }
 
 inline void KernelFunction::setManuallyBoxedKernel_(InternalBoxedKernelFunction* func) {
-    if (boxed_kernel_func_ == &fallthrough_kernel) {
+    if (boxed_kernel_func_ == &fallthrough_kernel || boxed_kernel_func_ == &named_not_supported_kernel) {
       // special case no-op
       return;
     }
