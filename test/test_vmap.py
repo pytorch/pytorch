@@ -523,7 +523,7 @@ class TestVmapAPI(TestCase):
         x = torch.randn(3, requires_grad=True)
         y = torch.randn(5)
         grad = torch.randn_like(x)
-        err_msg = "backward\(\) called inside torch.vmap"
+        err_msg = r'backward\(\) called inside torch.vmap'
 
         def backward_on_vmapped_tensor(x):
             x.sum().backward()
@@ -545,7 +545,7 @@ class TestVmapAPI(TestCase):
 
     def test_grad_unsupported_interaction(self):
         input_tensor = torch.randn(3, requires_grad=True)
-        err_msg = "autograd.grad.* called inside torch.vmap"
+        err_msg = 'autograd.grad.* called inside torch.vmap'
 
         captured = torch.randn(3, requires_grad=True)
 
