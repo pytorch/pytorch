@@ -40,12 +40,7 @@ class TestForeach(TestCase):
         W = 20
 
         tensors = [torch.zeros(H + n, W + n, device=device, dtype=dtype) for n in range(N)]
-        res = torch._foreach_add(tensors, 1)
-
-        # bool tensor + 1 will result in int64 tensor
-        if dtype == torch.bool:
-            dtype = torch.int64
-        self.assertEqual([torch.ones(H + n, W + n, device=device, dtype=dtype) for n in range(N)], torch._foreach_add(tensors, 1))
+        self.assertRaises(RuntimeError, lambda: torch._foreach_add(tensors, 1))
 
     @dtypes(*torch.testing.get_all_dtypes())
     def test_add_scalar_with_empty_list_and_empty_tensor(self, device, dtype):
@@ -76,8 +71,7 @@ class TestForeach(TestCase):
         expected = [torch.tensor([2.1], dtype=torch.float, device=device), 
                     torch.tensor([2], dtype=torch.long, device=device)]
 
-        res = torch._foreach_add(tensors, 1)
-        self.assertEqual(res, expected)
+        self.assertRaises(RuntimeError, lambda: torch._foreach_add(tensors, 1))
 
     def test_add_scalar_with_different_scalar_type(self, device):
         # int tensor with float scalar
@@ -104,7 +98,3 @@ instantiate_device_type_tests(TestForeach, globals())
 
 if __name__ == '__main__':
     run_tests()
-
-
-
-# TEST
