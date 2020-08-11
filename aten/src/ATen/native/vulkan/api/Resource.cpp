@@ -35,20 +35,6 @@ void destroy_allocator(const VmaAllocator allocator) {
   vmaDestroyAllocator(allocator);
 }
 
-VmaAllocationCreateInfo create_allocation_create_info(
-    const VmaMemoryUsage usage) {
-  return VmaAllocationCreateInfo{
-    0u, /* VMA_ALLOCATION_CREATE_MAPPED_BIT - MoltenVK Issue #175 */
-        /* VMA_ALLOCATION_CREATE_STRATEGY_MIN_FRAGMENTATION_BIT */
-    usage,
-    0u,
-    0u,
-    0u,
-    VK_NULL_HANDLE,
-    nullptr,
-  };
-}
-
 void release_buffer(const Resource::Buffer& buffer) {
   vmaDestroyBuffer(
       buffer.memory.allocator,
@@ -69,7 +55,45 @@ void release_image(const Resource::Image& image) {
       image.memory.allocation);
 }
 
+VmaAllocationCreateInfo create_allocation_create_info(
+    const VmaMemoryUsage usage) {
+  return VmaAllocationCreateInfo{
+    0u, /* VMA_ALLOCATION_CREATE_MAPPED_BIT - MoltenVK Issue #175 */
+        /* VMA_ALLOCATION_CREATE_STRATEGY_MIN_FRAGMENTATION_BIT */
+    usage,
+    0u,
+    0u,
+    0u,
+    VK_NULL_HANDLE,
+    nullptr,
+  };
+}
+
 } // namespace
+
+Resource::Memory::Scope::Scope(
+    const VmaAllocator allocator,
+    const VmaAllocation allocation,
+    const Access access)
+  : allocator_(allocator),
+    allocation_(allocation),
+    access_(access) {
+}
+
+void Resource::Memory::Scope::operator()(const void* const data) const {
+  if (C10_UNLIKELY(!data)) {
+    return;
+  }
+
+  vmaUnmapMemory(allocator_, allocation_);
+
+  if (access_ == Access::Write) {
+    // Call will be ignored by implementation if the memory type this allocation
+    // belongs to is not HOST_VISIBLE or is HOST_COHERENT, which is the behavior
+    // we want.
+    VK_CHECK(vmaFlushAllocation(allocator_, allocation_, 0u, VK_WHOLE_SIZE));
+  }
+}
 
 Resource::Pool::Pool(
     const VkInstance instance,
