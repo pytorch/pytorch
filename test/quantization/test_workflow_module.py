@@ -39,7 +39,6 @@ from torch.testing._internal.common_cuda import TEST_MULTIGPU, TEST_CUDA
 from torch.testing._internal.common_utils import TestCase
 from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
-    ModelWithNoQconfigPropagation,
     AnnotatedSingleLayerLinearModel,
     test_only_eval_fn,
 )
