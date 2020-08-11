@@ -3,7 +3,7 @@ from typing import Tuple, Optional
 import torch
 import torch.nn.functional as F
 from ._lowrank import svd_lowrank, pca_lowrank
-from ._overrides import has_torch_function, handle_torch_function
+from .overrides import has_torch_function, handle_torch_function
 from ._jit_internal import boolean_dispatch, List
 from ._jit_internal import _overload as overload
 
@@ -319,7 +319,6 @@ Examples::
     if not torch.jit.is_scripting():
         if any(type(t) is not Tensor for t in operands) and has_torch_function(operands):
             return handle_torch_function(einsum, operands, equation, *operands)
-
     if len(operands) == 1 and isinstance(operands[0], (list, tuple)):
         # the old interface of passing the operands as one list argument
         operands = operands[0]
