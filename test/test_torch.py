@@ -2472,32 +2472,12 @@ class AbstractTestCases:
             self.assertEqual(torch.tensor([1, 2, 3, 4]).unflatten(0, torch.Size([2, 2])), torch.tensor([[1, 2], [3, 4]]))
             self.assertEqual(torch.ones(2, 10).unflatten(1, (5, 2)), torch.ones(2, 5, 2))
 
-            # test args: tensor, int, namedshape
-            self.assertTrue(torch.equal(torch.ones(4).unflatten(0, (('A', 2), ('B', 2))), torch.ones(2, 2, names=('A', 'B'))))
-            self.assertTrue(torch.equal(torch.ones(4).unflatten(0, [('A', 2), ('B', 2)]), torch.ones(2, 2, names=('A', 'B'))))
-            self.assertTrue(torch.equal(torch.ones(4).unflatten(0, (['A', 2], ['B', 2])), torch.ones(2, 2, names=('A', 'B'))))
-
-            # test args: namedtensor, int, namedshape
-            self.assertTrue(torch.equal(
-                torch.ones(2, 4, names=('A', 'B')).unflatten(1, (('B1', 2), ('B2', 2))), 
-                torch.ones(2, 2, 2, names=('A', 'B1', 'B2'))))
-
-            # test args: namedtensor, str, namedshape
-            self.assertTrue(torch.equal(
-                torch.ones(2, 4, names=('A', 'B')).unflatten('B', (('B1', 2), ('B2', 2))), 
-                torch.ones(2, 2, 2, names=('A', 'B1', 'B2'))))
-
-            # test invalid args: ..., str, sizes
+            # test invalid args: tensor, str, sizes
             self.assertRaises(TypeError, lambda: torch.tensor([1]).unflatten('A', (1, 1)))
-            self.assertRaises(TypeError, lambda: torch.tensor([1], names=('A',)).unflatten('A', (1, 1)))
 
             # test invalid args: tensor, str, namedshape
             with self.assertRaisesRegex(RuntimeError, r"Name 'A' not found in Tensor\[None\]."):
                 torch.ones(4).unflatten('A', (('A', 2), ('B', 2)))
-
-            # test invalid args: namedtensor, int, sizes
-            with self.assertRaisesRegex(RuntimeError, r"input is a named tensor but no names were given for unflattened sizes"):
-                torch.tensor([1], names=("A",)).unflatten(0, (1, 1))
 
             # test other invalid arguments
             with self.assertRaisesRegex(RuntimeError, r"sizes must be non-empty"):
