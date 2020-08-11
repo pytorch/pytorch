@@ -83,6 +83,7 @@ TESTS = [
     'test_jit_py3',
     'test_determination',
     'test_futures',
+    'test_fx',
 ]
 
 WINDOWS_BLOCKLIST = [
