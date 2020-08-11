@@ -86,9 +86,9 @@ RUN rm build.gradle
 ENV INSTALLED_ANDROID ${ANDROID}
 
 # (optional) Install Vulkan SDK
-ARG VULKAN_SDK
+ARG VULKAN_SDK_VERSION
 ADD ./common/install_vulkan_sdk.sh install_vulkan_sdk.sh
-RUN if [ -n "${VULKAN_SDK}" ]; then bash ./install_vulkan_sdk.sh; fi
+RUN if [ -n "${VULKAN_SDK_VERSION}" ]; then bash ./install_vulkan_sdk.sh; fi
 RUN rm install_vulkan_sdk.sh
 
 # (optional) Install Vulkan SDK
