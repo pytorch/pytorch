@@ -3845,31 +3845,49 @@ def _pad_circular(input, padding):
     """Circularly pads tensor.
 
     Tensor values at the beginning are used to pad the end, and values at the
-    end are used to pad the beginning. The first and second axes of the tensor
-    are not padded.
+    end are used to pad the beginning. For example, consider a single dimension
+    with values [0, 1, 2, 3]. With circular padding of (1, 1) it would be
+    padded to [3, 0, 1, 2, 3, 0], and with padding (1, 2) it would be padded to
+    [3, 0, 1, 2, 3, 0, 1]. If negative padding is applied then the ends of the
+    tensor get removed. With circular padding of (-1, -1) the previous example
+    would become [1, 2]. Circular padding of (-1, 1) would produce
+    [1, 2, 3, 1].
+
+    The first and second dimensions of the tensor are not padded.
 
     Args:
         input: Tensor with shape :math:`(N, C, D[, H, W])`.
         padding: Tuple containing the number of elements to pad each side of
             the tensor. The length of padding must be twice the number of
-            paddable axes. For example, the length of padding should be 4 for a
-            tensor of shape :math:`(N, C, H, W)`, and the length should be 6
-            for a tensor of shape :math:`(N, C, D, H, W)`.
+            paddable dimensions. For example, the length of padding should be 4
+            for a tensor of shape :math:`(N, C, H, W)`, and the length should
+            be 6 for a tensor of shape :math:`(N, C, D, H, W)`.
 
     Examples::
 
-        >>> x = torch.arange(6).view(1, 1, 2, 3)  # Create tensor
+        >>> x = torch.tensor([[[[0, 1, 2], [3, 4, 5]]]])  # Create tensor
         >>> # Example 1
         >>> padding = (1, 1, 1, 1)
         >>> y = F.pad(x, padding, mode='circular')
-        >>> print(x)
         >>> print(y)
-        >>> print(y.shape)  # torch.Size([1, 1, 4, 5])
+        tensor([[[[5, 3, 4, 5, 3],
+                  [2, 0, 1, 2, 0],
+                  [5, 3, 4, 5, 3],
+                  [2, 0, 1, 2, 0]]]])
+        >>> print(y.shape)
+        torch.Size([1, 1, 4, 5])
         >>> # Example 2
         >>> padding = (1, 1, 2, 2)
         >>> z = F.pad(x, padding, mode='circular')
         >>> print(z)
-        >>> print(z.shape)  # torch.Size([1, 1, 6, 5])
+        tensor([[[[2, 0, 1, 2, 0],
+                  [5, 3, 4, 5, 3],
+                  [2, 0, 1, 2, 0],
+                  [5, 3, 4, 5, 3],
+                  [2, 0, 1, 2, 0],
+                  [5, 3, 4, 5, 3]]]])
+        >>> print(z.shape)
+        torch.Size([1, 1, 6, 5])
     """
     in_shape = input.shape
     paddable_shape = in_shape[2:]
