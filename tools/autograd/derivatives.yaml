@@ -1082,6 +1082,16 @@
   self: where(condition, grad, zeros_like(grad, at::MemoryFormat::Preserve))
   other: where(condition, zeros_like(grad, at::MemoryFormat::Preserve), grad)
 
+- name: maximum(Tensor self, Tensor other) -> Tensor
+  condition: non_differentiable
+  self: where((self != self) | ((other == other) & (self >= other)), grad, zeros_like(grad, at::MemoryFormat::Preserve))
+  other: where((self != self) | ((other == other) & (self >= other)), zeros_like(grad, at::MemoryFormat::Preserve), grad)
+
+- name: minimum(Tensor self, Tensor other) -> Tensor
+  condition: non_differentiable
+  self: where((self != self) | ((other == other) & (self < other)), grad, zeros_like(grad, at::MemoryFormat::Preserve))
+  other: where((self != self) | ((other == other) & (self < other)), zeros_like(grad, at::MemoryFormat::Preserve), grad)
+
 # weight_norm_cuda_interface_backward does not have an explicitly defined derivative, so if we do happen
 # to be running backward with create_graph=True, fall back to a backward function that uses
 # differentiable ops.

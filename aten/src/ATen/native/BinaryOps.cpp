@@ -804,8 +804,7 @@ Tensor maximum(const Tensor& self, const Tensor& other) {
   TORCH_CHECK(!self.is_complex() && !other.is_complex(), "maximum does not support complex inputs.");
 
   Tensor result;
-  auto iter = TensorIterator::binary_op(result, self, other,
-                                        /*check_mem_overlap=*/true);
+  auto iter = TensorIterator::binary_op(result, self, other);
   maximum_stub(iter.device_type(), iter);
   return iter.output();
 }
@@ -823,8 +822,7 @@ Tensor minimum(const Tensor& self, const Tensor& other) {
   TORCH_CHECK(!self.is_complex() && !other.is_complex(), "minimum does not support complex inputs.");
 
   Tensor result;
-  auto iter = TensorIterator::binary_op(result, self, other,
-                                        /*check_mem_overlap=*/true);
+  auto iter = TensorIterator::binary_op(result, self, other);
   minimum_stub(iter.device_type(), iter);
   return iter.output();
 }

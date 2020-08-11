@@ -5249,18 +5249,12 @@
   variants: method, function
 
 - func: maximum.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU: maximum_out
-    CUDA: maximum_out
 
 - func: minimum(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
 
 - func: minimum.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU: minimum_out
-    CUDA: minimum_out
 
 # Return: (Tensor min, Tensor max)
 - func: _min_max(Tensor self) -> (Tensor, Tensor)
