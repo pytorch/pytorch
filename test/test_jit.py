@@ -4354,6 +4354,14 @@ a")
 
         self.checkScript(foo, ())
 
+    def test_string_sort(self):
+        @torch.jit.script
+        def foo(strs: List[str]):
+            return sorted(strs)
+
+        inputs = ["str3", "str2", "str1"]
+        self.assertEqual(foo(inputs), sorted(inputs))
+
     def test_string_new_line(self):
         with self.assertRaisesRegex(RuntimeError, "expected a valid token*"):
             torch.jit.CompilationUnit('''

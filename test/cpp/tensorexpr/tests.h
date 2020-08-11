@@ -25,6 +25,8 @@ namespace jit {
   _(ExprDoubleTest)                         \
   _(ExprVectorAdd01)                        \
   _(ExprCompareSelectEQ)                    \
+  _(ExprCompareSelectDtypes)                \
+  _(ExprIntrinsicsDtypes)                   \
   _(ExprSubstitute01)                       \
   _(ExprMath01)                             \
   _(ExprUnaryMath01)                        \
@@ -83,6 +85,7 @@ namespace jit {
   _(Cond01)                                 \
   _(IfThenElse01)                           \
   _(IfThenElse02)                           \
+  _(IfThenElse03)                           \
   _(ATen_cast_Float)                        \
   _(ATennegInt)                             \
   _(ATennegFloat)                           \
@@ -199,6 +202,13 @@ namespace jit {
   _(LoopNestReorderLongStringFull)          \
   _(LoopNestReorderInternalLoopNest)        \
   _(OuterLoopVectorization)                 \
+  _(Unroll)                                 \
+  _(UnrollOuter)                            \
+  _(UnrollInner)                            \
+  _(UnrollMultipleStatements)               \
+  _(UnrollEmpty)                            \
+  _(NoUnroll)                               \
+  _(UnrollWithLet)                          \
   _(Kernel_1)                               \
   _(Kernel_2)                               \
   _(Kernel_3)                               \
@@ -341,7 +351,8 @@ namespace jit {
   _(CudaNoThreadIdxWrite_1)                \
   _(CudaSharedMemReduce_1)                 \
   _(CudaLocalMemReduce_1)                  \
-  _(CudaTestRand01)
+  _(CudaTestRand01)                        \
+  _(CudaSigmoid)
 
 #define DECLARE_TENSOREXPR_TEST(name) void test##name();
 TH_FORALL_TENSOREXPR_TESTS(DECLARE_TENSOREXPR_TEST)
