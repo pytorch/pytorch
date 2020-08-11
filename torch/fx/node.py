@@ -12,7 +12,7 @@ class TraceError(ValueError):
 # For simplicitly, they also have methods defined on them so that they serve as proxy objects for _building_
 # more nodes.
 class Node:
-    def __init__(self, graph, name, op, target, args, kwargs):
+    def __init__(self, graph, name, op, target, args, kwargs, is_valid_call):
         self.graph = graph
         self.name = name  # unique name of value being created
         self.op = op  # the kind of operation = placeholder|call_method|call_module|call_function|getattr
@@ -21,6 +21,7 @@ class Node:
         self.args = args
         self.kwargs = kwargs
         self.uses = 0
+        self.is_valid_call = is_valid_call
 
     def __repr__(self):
         return self.name
@@ -28,7 +29,7 @@ class Node:
     def __getattr__(self, k):
         # note: not added to the graph yet, if this is a method call
         # we peephole optimize to the method invocation
-        return Attribute(self, k)
+        return Attribute(self, k, self.is_valid_call)
 
     def __call__(self, *args, **kwargs):
         return self._create_node('call_method', '__call__', [self] + args, kwargs)
@@ -47,19 +48,22 @@ class Node:
     def __bool__(self):
         self._no_control_flow()
 
-    def __torch_function__(self, orig_method, types, args=(), kwargs=None):
-        if kwargs is None:
-            kwargs = {}
+    def __torch_function__(self, orig_method, types, args=None, kwargs=None):
+        args = args if args else ()
+        kwargs = kwargs if kwargs else {}
         if torch.overrides.is_tensor_method_or_property(orig_method):
+            self.is_valid_call(orig_method.__name__, args, kwargs)
             return self.graph._create_node('call_method', orig_method.__name__, args, kwargs)
         else:
+            self.is_valid_call(orig_method, args, kwargs)
             return self.graph._create_node('call_function', orig_method, args, kwargs, name=self.graph._name(orig_method.__name__))
 
 class Attribute(Node):
-    def __init__(self, node, attr):
-        super().__init__(node.graph, node.graph._name(attr), 'call_function', getattr, [node, attr], {})
+    def __init__(self, node, attr, is_valid_call):
+        super().__init__(node.graph, node.graph._name(attr), 'call_function', getattr, [node, attr], {}, is_valid_call)
 
     def __call__(self, *args, **kwargs):
+        self.is_valid_call(self.args[1], [self.args[0]] + list(args), kwargs)
         return self.node.graph._create_node('call_method', self.args[1], [self.args[0]] + list(args), kwargs)
 
 reflectable_magic_methods = {

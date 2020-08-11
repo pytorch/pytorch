@@ -2,6 +2,7 @@
 
 import inspect
 from types import CodeType, FunctionType
+from typing import Any, Callable, Dict, Tuple, Union
 import torch
 
 from .graph import Graph
@@ -44,7 +45,32 @@ def _patch_function(fn, nargs):
 def is_leaf_module(m):
     return m.__module__.startswith('torch.nn') and not isinstance(m, torch.nn.Sequential)
 
-def symbolic_trace(root, is_leaf_module=is_leaf_module):
+def default_is_valid_call(target : Union[str, Callable], args : Tuple[Any], kwargs : Dict[str, Any]):
+    pass
+
+# Symbolic tracing API
+#
+# Given an `nn.Module` instance `root`, this function will return a `GraphModule`
+# constructed by recording operations seen while tracing through `root`.
+#
+# Args:
+#   - root - the `nn.Module` instance to trace
+#   - is_leaf_module : A callable to specify whether a given `nn.Module` is a "leaf"
+#                      module. Leaf modules are the atomic units that appear in
+#                      the IR, referenced by `call_module` calls. By default,
+#                      Modules in the PyTorch standard library namespace (torch.nn)
+#                      are leaf modules. All other modules are traced through and
+#                      their constituent ops are recorded, unless specified otherwise
+#                      via this parameter.
+#   - is_valid_call : A callable to validate whether a given target, args, and
+#                     kwargs should be recorded. This can be used, for example,
+#                     to error out when symbolic tracing encounters an in-place
+#                     operation. The passed-in callable should throw an exception
+#                     if it encounters a call that is not supported.
+def symbolic_trace(root : torch.nn.Module,
+                   is_leaf_module : Callable[[torch.nn.Module], bool] = is_leaf_module,
+                   is_valid_call : Callable[
+                       [Union[str, Callable], Tuple[Any]], Dict[str, Any]] = default_is_valid_call):
     def _use_parameter(graph, a):
         if isinstance(a, torch.nn.Parameter):
             for n, p in root.named_parameters():
@@ -52,7 +78,7 @@ def symbolic_trace(root, is_leaf_module=is_leaf_module):
                     return graph.get_param(n)
             raise NameError('parameter is not a member of this module')
         return NotImplemented
-    graph = Graph(arg_handler=_use_parameter)
+    graph = Graph(arg_handler=_use_parameter, is_valid_call=is_valid_call)
     fn = type(root).forward
 
     co = fn.__code__

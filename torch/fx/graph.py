@@ -68,9 +68,10 @@ def map_arg(a, fn):
         return a
 
 class Graph:
-    def __init__(self, arg_handler=None):
+    def __init__(self, is_valid_call, arg_handler=None):
         self.nodes = []
         self._used_names = {}  # base name -> number
+        self.is_valid_call = is_valid_call
         self.arg_handler = arg_handler
 
     def _create_node(self, op, target=None, args=None, kwargs=None, name=None):
@@ -78,7 +79,7 @@ class Graph:
         kwargs = {} if kwargs is None else kwargs
         args = self._create_args(args)
         kwargs = self._create_args(kwargs)
-        n = Node(self, name if name is not None else self._name(target or op), op, target, args, kwargs)
+        n = Node(self, name if name is not None else self._name(target or op), op, target, args, kwargs, self.is_valid_call)
         self.nodes.append(n)
         return n
 

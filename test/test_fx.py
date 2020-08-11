@@ -73,5 +73,42 @@ class TestFX(TestCase):
 
         self.assertEqual(out, ref_out)
 
+    def test_disallow_override(self):
+        # Validation function to disallow in-place tensor operations
+        def no_mutable_is_valid_call(target, args, kwargs):
+            name = target if isinstance(target, str) else torch.typename(target)
+            if name[-1] == '_':
+                raise RuntimeError('In-place operations are not supported')
+
+        # Test method
+        class MyInplaceMod(torch.nn.Module):
+            def forward(self, x):
+                x.add_(3.0)
+                return x
+
+        m = MyInplaceMod()
+
+        with self.assertRaisesRegex(RuntimeError, 'In-place operations'):
+            symbolic_trace(m, is_valid_call=no_mutable_is_valid_call)
+
+        # Test free function
+        class MyInplaceMod2(torch.nn.Module):
+            def forward(self, x):
+                torch.log_(x)
+                return x
+        m2 = MyInplaceMod2()
+        with self.assertRaisesRegex(RuntimeError, 'In-place operations'):
+            symbolic_trace(m2, is_valid_call=no_mutable_is_valid_call)
+
+        # Test symbolic node as an arg
+        class MyInplaceMod3(torch.nn.Module):
+            def forward(self, x):
+                y = torch.ones(3, 4)
+                y.add_(x)
+                return x
+        m3 = MyInplaceMod3()
+        with self.assertRaisesRegex(RuntimeError, 'In-place operations'):
+            symbolic_trace(m3, is_valid_call=no_mutable_is_valid_call)
+
 if __name__ == '__main__':
     run_tests()
