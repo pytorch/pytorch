@@ -69,7 +69,7 @@ def default_is_valid_call(target : Union[str, Callable], args : Tuple[Any], kwar
 def symbolic_trace(root : torch.nn.Module,
                    is_leaf_module : Callable[[torch.nn.Module], bool] = is_leaf_module,
                    is_valid_call : Callable[
-                       [Union[str, Callable], Tuple[Any]], Dict[str, Any]] = default_is_valid_call):
+                       [Union[str, Callable], Tuple[Any], Dict[str, Any]], None] = default_is_valid_call):
     def _use_parameter(graph, a):
         if isinstance(a, torch.nn.Parameter):
             for n, p in root.named_parameters():
