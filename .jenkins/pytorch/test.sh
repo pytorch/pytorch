@@ -346,8 +346,25 @@ test_benchmarks() {
     pip_install --user "requests"
     BENCHMARK_DATA="benchmarks/.data"
     mkdir -p ${BENCHMARK_DATA}
-    pytest benchmarks/fastrnns/test_bench.py --benchmark-sort=Name --benchmark-json=${BENCHMARK_DATA}/fastrnns.json
+    cd .. && git clone git@github.com:fairinternal/pytorch-benchmark-data
+    if [[ -e ../pytorch-benchmark-data/fastrnns.json ]]; then
+      pytest benchmarks/fastrnns/test_bench.py --benchmark-sort=Name --benchmark-json=${BENCHMARK_DATA}/fastrnns.json --benchmark-compare ../pytorch-benchmark-data/fastrnns.json --benchmark-compare-fail=mean:50%
+    else
+      pytest benchmarks/fastrnns/test_bench.py --benchmark-sort=Name --benchmark-json=${BENCHMARK_DATA}/fastrnns.json
+    fi
     python benchmarks/upload_scribe.py --pytest_bench_json ${BENCHMARK_DATA}/fastrnns.json
+
+    # upload latest bench data for comparison baseline only on master commits
+    if [[ ${CIRCLE_BRANCH} -eq "master" ]]; then
+      cp ${BENCHMARK_DATA}/fastrnns.json ../pytorch-benchmark-data/
+      cd ../pytorch-benchmark-data && git add fastrnns.json && git commit -m"${JOB_BASE_NAME} ..." && git push origin master
+    fi
+
+    # Hack to upload on the first run
+    echo "CIRCLE_BRANCH=${CIRCLE_BRANCH}"
+    cp ${BENCHMARK_DATA}/fastrnns.json ../pytorch-benchmark-data/
+    cd ../pytorch-benchmark-data && git add fastrnns.json && git commit -m"${JOB_BASE_NAME} ..." && git push origin master
+
     assert_git_not_dirty
   fi
 }
