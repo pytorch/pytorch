@@ -16,6 +16,8 @@ set(TORCHPY_TEST_SOURCES
 )
 add_library(torchpy ${TORCHPY_LIB_SOURCES})
 target_include_directories(torchpy PRIVATE ${TORCHPY_DIR})
+target_link_libraries(torchpy PRIVATE torch)
+
 add_executable(torchpy_test ${TORCHPY_TEST_SOURCES})
 target_include_directories(torchpy_test PRIVATE ${TORCHPY_DIR})
 target_link_libraries(torchpy_test PRIVATE torchpy gtest)
