@@ -1,4 +1,4 @@
-#include <ATen/test/Vec256Test.h>
+#include <ATen/test/vec256_test_all_types.h>
 namespace {
 
 #if GTEST_HAS_TYPED_TEST
@@ -82,7 +82,7 @@ namespace {
     using RealFloatIntTestedTypes = ::testing::Types<vfloat, vdouble, vlong, vint, vshort>;
     using FloatIntTestedTypes = ::testing::Types<vfloat, vdouble, vcomplex, vcomplexDbl, vlong, vint, vshort>;
     using SingleFloat = ::testing::Types<vfloat>;
-    using ComplexTypes = ::testing::Types<  vcomplex, vcomplexDbl>;
+    using ComplexTypes = ::testing::Types<vcomplex, vcomplexDbl>;
 
     TYPED_TEST_CASE(Memory, ALLTestedTypes);
 
