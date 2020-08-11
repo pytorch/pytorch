@@ -1,6 +1,6 @@
 from .module import Module
 
-from typing import Iterable, Tuple, Union
+from typing import Tuple, Union
 from torch import Tensor
 from torch import Size
 
@@ -53,7 +53,7 @@ class Unflatten(Module):
       be either `int` or `str` when `Tensor` or `NamedTensor` is used, respectively.
 
     * :attr:`unflattened_size` is the new shape of the unflattened dimension of the tensor and it can be
-      a `tuple` of ints or `torch.Size` for `Tensor` input or a `NamedShape` (iterable of `(name, size)` tuples)
+      a `tuple` of ints or `torch.Size` for `Tensor` input or a `NamedShape` (tuple of `(name, size)` tuples)
       for `NamedTensor` input.
 
     Shape:
@@ -91,7 +91,7 @@ class Unflatten(Module):
         >>> output.size()
         torch.Size([2, 2, 5, 5])
     """
-    NamedShape = Iterable[Tuple[str, int]]
+    NamedShape = Tuple[Tuple[str, int]]
 
     __constants__ = ['dim', 'unflattened_size']
     dim: Union[int, str]

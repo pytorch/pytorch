@@ -1542,6 +1542,7 @@ Tensor unflatten(const Tensor& self, int64_t dim, IntArrayRef sizes, c10::option
     TORCH_CHECK(numel == self.size(dim),
       "unflatten: Provided sizes ", sizes, " don't multiply up to the size of dim ", 
       dim, " (", self.names()[dim], ": ", self.size(dim), ") in Tensor", self.names());
+    TORCH_CHECK(names, "unflatten: input is a named tensor but no names were given for unflattened sizes");
   } else {
     TORCH_CHECK(numel == self.size(dim),
       "unflatten: Provided sizes ", sizes, " don't multiply up to the size of dim ",
