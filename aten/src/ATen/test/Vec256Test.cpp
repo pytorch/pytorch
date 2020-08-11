@@ -77,13 +77,10 @@ namespace {
 
     using RealFloatTestedTypes = ::testing::Types<vfloat, vdouble>;
     using FloatTestedTypes = ::testing::Types<vfloat, vdouble, vcomplex, vcomplexDbl>;
-    using ALLTestedTypes = ::testing::Types<vfloat, vdouble, vcomplex, vlong, vint, vshort,
-        vqint8, vquint8, vqint>;
+    using ALLTestedTypes = ::testing::Types<vfloat, vdouble, vcomplex, vlong, vint, vshort, vqint8, vquint8, vqint>;
     using QuantTestedTypes = ::testing::Types<vqint8, vquint8, vqint>;
-    using RealFloatIntTestedTypes =
-        ::testing::Types<vfloat, vdouble, vlong, vint, vshort>;
-    using FloatIntTestedTypes =
-        ::testing::Types<vfloat, vdouble, vcomplex, vcomplexDbl, vlong, vint, vshort>;
+    using RealFloatIntTestedTypes = ::testing::Types<vfloat, vdouble, vlong, vint, vshort>;
+    using FloatIntTestedTypes = ::testing::Types<vfloat, vdouble, vcomplex, vcomplexDbl, vlong, vint, vshort>;
     using SingleFloat = ::testing::Types<vfloat>;
     using ComplexTypes = ::testing::Types<  vcomplex, vcomplexDbl>;
 
@@ -139,9 +136,13 @@ namespace {
         constexpr size_t b_size = vec_type::size() * sizeof(VT);
         CACHE_ALIGN unsigned char ref_storage[128 * b_size];
         CACHE_ALIGN unsigned char storage[128 * b_size];
-        // fill with gibberish
+        
+        auto seed = TestSeed();
+        std::cout << "Test Seed: " << seed << std::end;
+        ValueGen<unsigned char> generator(seed);
+
         for (auto& x : ref_storage) {
-            x = std::rand() % 255;
+            x = generator.get();
         }
         // test counted load stores
 #if defined(CPU_CAPABILITY_VSX)
@@ -952,13 +953,18 @@ namespace {
         CACHE_ALIGN c10::qint32 unit_int_vec[el_count];
         CACHE_ALIGN underlying expected_qint_vals[vec_type::size()];
         typename vec_type::int_vec_return_type  int_ret;
+
+        auto seed = TestSeed();
+        std::cout << "Test Seed: " << seed << std::end;
+
+        //zero point 
+        ValueGen<int32_t> generator_zp(min_val, max_val, seed.nextSeed());
+        //scale
+        ValueGen<float> generator_sc(1.f, 15.f, seed.nextSeed());
+        //value
+        ValueGen<int32_t> gen(-65535, 65535, seed.nextSeed());
+
         for (int i = 0; i < trials; i++) {
-            //zero point 
-            ValueGen<int32_t> generator_zp(min_val, max_val);
-            //scale
-            ValueGen<float> generator_sc(1.f, 15.f);
-            //value
-            ValueGen<int32_t> gen(-65535, 65535);
 
             float multiplier = 1.f / (generator_sc.get());
             auto zero_point_val = generator_zp.get();
@@ -997,9 +1003,12 @@ namespace {
         CACHE_ALIGN underlying qint_vals[vec_type::size()];
         CACHE_ALIGN underlying qint_b[vec_type::size()];
         typename vec_type::int_vec_return_type  expected_int_ret;
-        for (int i = 0; i < trials; i++) {
 
-            ValueGen<underlying> generator(min_val, max_val);
+        auto seed = TestSeed();
+        std::cout << "Test Seed: " << seed << std::end;
+        ValueGen<underlying> generator(min_val, max_val, seed);
+
+        for (int i = 0; i < trials; i++) {
 
             //generate vals
             for (int j = 0; j < vec_type::size(); j++) {
@@ -1074,18 +1083,7 @@ namespace {
             }, test_case);
     }
 
-#if 0
-    //add your simple tests for quick checks
-    TEST(ComplexTests, Playground) {
-        Complex<float> t1 = Complex<float>(-4.48172e+37, 3.24563e+37);
-        vcomplex x = vcomplex{ t1 };
-        vcomplex act = x.abs();
-        std::cout << act << std::endl;
-        std::cout << std::abs(t1) << std::endl;
-        vcomplex exp = vcomplex(std::abs(t1));
-        AssertVec256(act, exp);
-    }
-#endif
-
+#else
+#error GTEST does not have TYPED_TEST
 #endif
 }  // namespace
