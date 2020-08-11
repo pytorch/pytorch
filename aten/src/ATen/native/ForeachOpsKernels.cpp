@@ -1,8 +1,10 @@
 #include <ATen/ATen.h>
+#include <ATen/native/ForeachUtils.h>
+
 namespace at { namespace native {
 
 std::vector<Tensor> foreach_exp_fallback(TensorList tensors) {
-  TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
+  verify_list(tensors);
 
   std::vector<Tensor> result;
   for (const auto& t : tensors) {
@@ -14,7 +16,7 @@ std::vector<Tensor> foreach_exp_fallback(TensorList tensors) {
 }
 
 std::vector<Tensor> foreach_exp_fallback_(TensorList tensors) {
-  TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
+  verify_list(tensors);
 
   for (auto& t : tensors) {
     t.exp_();
@@ -24,7 +26,7 @@ std::vector<Tensor> foreach_exp_fallback_(TensorList tensors) {
 }
 
 std::vector<Tensor> foreach_sqrt_fallback(TensorList tensors) {
-  TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
+  verify_list(tensors);
 
   std::vector<Tensor> result;
   for (const auto& t : tensors) {
@@ -36,7 +38,7 @@ std::vector<Tensor> foreach_sqrt_fallback(TensorList tensors) {
 }
 
 std::vector<Tensor> foreach_sqrt_fallback_(TensorList tensors) {
-  TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
+  verify_list(tensors);
 
   for (auto& t : tensors) {
     t.sqrt_();
@@ -46,7 +48,7 @@ std::vector<Tensor> foreach_sqrt_fallback_(TensorList tensors) {
 }
 
 std::vector<Tensor> foreach_add_scalar_kernel_fallback(TensorList tensors, Scalar scalar) {
-  TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
+  verify_list(tensors);
 
   std::vector<Tensor> result;
   for (const auto& t : tensors) {
@@ -58,7 +60,7 @@ std::vector<Tensor> foreach_add_scalar_kernel_fallback(TensorList tensors, Scala
 }
 
 std::vector<Tensor> foreach_add_scalar_kernel_fallback_(TensorList tensors, Scalar scalar) {
-  TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
+  verify_list(tensors);
 
   for (auto& t : tensors) {
     t.add_(scalar);
@@ -68,7 +70,7 @@ std::vector<Tensor> foreach_add_scalar_kernel_fallback_(TensorList tensors, Scal
 }
 
 std::vector<Tensor> foreach_sub_scalar_kernel_fallback(TensorList tensors, Scalar scalar) {
-  TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
+  verify_list(tensors);
 
   std::vector<Tensor> result;
   for (const auto& t: tensors) {
@@ -80,7 +82,7 @@ std::vector<Tensor> foreach_sub_scalar_kernel_fallback(TensorList tensors, Scala
 }
 
 std::vector<Tensor> foreach_sub_scalar_kernel_fallback_(TensorList tensors, Scalar scalar) {
-  TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
+  verify_list(tensors);
 
   for (auto& t: tensors) {
     t.sub_(scalar);
@@ -90,7 +92,7 @@ std::vector<Tensor> foreach_sub_scalar_kernel_fallback_(TensorList tensors, Scal
 }
 
 std::vector<Tensor> foreach_div_scalar_kernel_fallback(TensorList tensors, Scalar scalar) {
-  TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
+  verify_list(tensors);
 
   std::vector<Tensor> result;
   for (const auto& t: tensors) {
@@ -102,7 +104,7 @@ std::vector<Tensor> foreach_div_scalar_kernel_fallback(TensorList tensors, Scala
 }
 
 std::vector<Tensor> foreach_div_scalar_kernel_fallback_(TensorList tensors, Scalar scalar) {
-  TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
+  verify_list(tensors);
 
   for (auto& t: tensors) {
     t.div_(scalar);
@@ -112,7 +114,7 @@ std::vector<Tensor> foreach_div_scalar_kernel_fallback_(TensorList tensors, Scal
 }
 
 std::vector<Tensor> foreach_mul_scalar_kernel_fallback(TensorList tensors, Scalar scalar) {
-  TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
+  verify_list(tensors);
 
   std::vector<Tensor> result;
   for (const auto& t: tensors) {
@@ -124,7 +126,7 @@ std::vector<Tensor> foreach_mul_scalar_kernel_fallback(TensorList tensors, Scala
 }
 
 std::vector<Tensor> foreach_mul_scalar_kernel_fallback_(TensorList tensors, Scalar scalar) {
-  TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
+  verify_list(tensors);
 
   for (auto& t: tensors) {
     t.mul_(scalar);
@@ -134,8 +136,7 @@ std::vector<Tensor> foreach_mul_scalar_kernel_fallback_(TensorList tensors, Scal
 }
 
 std::vector<Tensor> foreach_add_list_kernel_fallback(TensorList tensors1, TensorList tensors2) {
-  TORCH_CHECK(tensors1.size() > 0, "Tensor list must have at least one tensor.");
-  TORCH_CHECK(tensors1.size() ==  tensors2.size(), "Tensor lists must be of the same length.");
+  verify_list(tensors1, tensors2);
 
   std::vector<Tensor> result;
   for (int i = 0; i < tensors1.size(); i++) {
@@ -147,8 +148,7 @@ std::vector<Tensor> foreach_add_list_kernel_fallback(TensorList tensors1, Tensor
 }
 
 std::vector<Tensor> foreach_add_list_kernel_fallback_(TensorList tensors1, TensorList tensors2) {
-  TORCH_CHECK(tensors1.size() > 0, "Tensor list must have at least one tensor.");
-  TORCH_CHECK(tensors1.size() ==  tensors2.size(), "Tensor lists must be of the same length.");
+  verify_list(tensors1, tensors2);
 
   for (int i = 0; i < tensors1.size(); i++) {
     tensors1[i].add_(tensors2[i]);
@@ -158,8 +158,7 @@ std::vector<Tensor> foreach_add_list_kernel_fallback_(TensorList tensors1, Tenso
 }
 
 std::vector<Tensor> foreach_sub_list_kernel_fallback(TensorList tensors1, TensorList tensors2) {
-  TORCH_CHECK(tensors1.size() > 0, "Tensor list must have at least one tensor.");
-  TORCH_CHECK(tensors1.size() ==  tensors2.size(), "Tensor lists must be of the same length.");
+  verify_list(tensors1, tensors2);
 
   std::vector<Tensor> result;
   for (int i = 0; i < tensors1.size(); i++) {
@@ -171,8 +170,7 @@ std::vector<Tensor> foreach_sub_list_kernel_fallback(TensorList tensors1, Tensor
 }
 
 std::vector<Tensor> foreach_sub_list_kernel_fallback_(TensorList tensors1, TensorList tensors2) {
-  TORCH_CHECK(tensors1.size() > 0, "Tensor list must have at least one tensor.");
-  TORCH_CHECK(tensors1.size() ==  tensors2.size(), "Tensor lists must be of the same length.");
+  verify_list(tensors1, tensors2);
 
   for (int i = 0; i < tensors1.size(); i++) {
     tensors1[i].sub_(tensors2[i]);
@@ -182,8 +180,7 @@ std::vector<Tensor> foreach_sub_list_kernel_fallback_(TensorList tensors1, Tenso
 }
 
 std::vector<Tensor> foreach_mul_list_kernel_fallback(TensorList tensors1, TensorList tensors2) {
-  TORCH_CHECK(tensors1.size() > 0, "Tensor list must have at least one tensor.");
-  TORCH_CHECK(tensors1.size() ==  tensors2.size(), "Tensor lists must be of the same length.");
+  verify_list(tensors1, tensors2);
 
   std::vector<Tensor> result;
   for (int i = 0; i < tensors1.size(); i++) {
@@ -195,8 +192,7 @@ std::vector<Tensor> foreach_mul_list_kernel_fallback(TensorList tensors1, Tensor
 }
 
 std::vector<Tensor> foreach_mul_list_kernel_fallback_(TensorList tensors1, TensorList tensors2) {
-  TORCH_CHECK(tensors1.size() > 0, "Tensor list must have at least one tensor.");
-  TORCH_CHECK(tensors1.size() ==  tensors2.size(), "Tensor lists must be of the same length.");
+  verify_list(tensors1, tensors2);
 
   for (int i = 0; i < tensors1.size(); i++) {
     tensors1[i].mul_(tensors2[i]);
@@ -206,8 +202,7 @@ std::vector<Tensor> foreach_mul_list_kernel_fallback_(TensorList tensors1, Tenso
 }
 
 std::vector<Tensor> foreach_div_list_kernel_fallback(TensorList tensors1, TensorList tensors2) {
-  TORCH_CHECK(tensors1.size() > 0, "Tensor list must have at least one tensor.");
-  TORCH_CHECK(tensors1.size() ==  tensors2.size(), "Tensor lists must be of the same length.");
+  verify_list(tensors1, tensors2);
 
   std::vector<Tensor> result;
   for (int i = 0; i < tensors1.size(); i++) {
@@ -219,8 +214,7 @@ std::vector<Tensor> foreach_div_list_kernel_fallback(TensorList tensors1, Tensor
 }
 
 std::vector<Tensor> foreach_div_list_kernel_fallback_(TensorList tensors1, TensorList tensors2) {
-  TORCH_CHECK(tensors1.size() > 0, "Tensor list must have at least one tensor.");
-  TORCH_CHECK(tensors1.size() ==  tensors2.size(), "Tensor lists must be of the same length.");
+  verify_list(tensors1, tensors2);
 
   for (int i = 0; i < tensors1.size(); i++) {
     tensors1[i].div_(tensors2[i]);
