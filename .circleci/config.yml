@@ -516,6 +516,8 @@ jobs:
               export COMMIT_DOCKER_IMAGE=$output_image-android-x86_32
             elif [[ ${BUILD_ENVIRONMENT} == *"android-ndk-r19c-vulkan-x86_32"* ]]; then
               export COMMIT_DOCKER_IMAGE=$output_image-android-vulkan-x86_32
+            elif [[ ${BUILD_ENVIRONMENT} == *"vulkan-linux"* ]]; then
+              export COMMIT_DOCKER_IMAGE=$output_image-vulkan
             else
               export COMMIT_DOCKER_IMAGE=$output_image
             fi
@@ -553,6 +555,8 @@ jobs:
             export COMMIT_DOCKER_IMAGE=$output_image-paralleltbb
           elif [[ ${BUILD_ENVIRONMENT} == *"parallelnative"* ]]; then
             export COMMIT_DOCKER_IMAGE=$output_image-parallelnative
+          elif [[ ${BUILD_ENVIRONMENT} == *"vulkan-linux"* ]]; then
+            export COMMIT_DOCKER_IMAGE=$output_image-vulkan
           else
             export COMMIT_DOCKER_IMAGE=$output_image
           fi
@@ -2072,7 +2076,7 @@ jobs:
               fi
         - run:
             name: build_docker_image_<< parameters.image_name >>
-            no_output_timeout: "5h"
+            no_output_timeout: "1h"
             command: |
               set +x
               export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_DOCKER_BUILDER_V1}
@@ -2086,7 +2090,7 @@ jobs:
         - checkout
         - run:
             name: build_docker_image_for_ecr_gc
-            no_output_timeout: "5h"
+            no_output_timeout: "1h"
             command: |
               cd .circleci/ecr_gc_docker
               docker build . -t 308535385114.dkr.ecr.us-east-1.amazonaws.com/gc/ecr
@@ -2118,7 +2122,7 @@ jobs:
         - run:
             # NOTE: see 'docker_build_job' for how these tags actually get built
             name: dynamically generate tags to keep
-            no_output_timeout: "5h"
+            no_output_timeout: "1h"
             command: |
               GENERATED_IMAGE_TAG=$(\
                 git log --oneline --pretty='%H' .circleci/docker \
@@ -2127,7 +2131,7 @@ jobs:
               echo "export GENERATED_IMAGE_TAG='${GENERATED_IMAGE_TAG}'" >> ${BASH_ENV}
         - run:
             name: garbage collecting for ecr images
-            no_output_timeout: "5h"
+            no_output_timeout: "1h"
             command: |
               set +x
               export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_DOCKER_BUILDER_V1}
