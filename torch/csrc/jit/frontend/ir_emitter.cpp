@@ -3750,8 +3750,6 @@ CompilationUnit::CompilationUnit(const std::string& source)
 // compiling a Property.
 struct CompilationUnit::PropertyPair
     : public std::pair<std::unique_ptr<Function>, std::unique_ptr<Function>> {
-  using pair::pair;
-
   PropertyPair(
       std::unique_ptr<Function> getter,
       std::unique_ptr<Function> setter) {
