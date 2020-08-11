@@ -2600,13 +2600,10 @@ t2.start()
             model()
             model_jit_script()
 
-    # To discuss: this test should probably be tried without cudnn as well.
-    # Two lines below trigger a flake8 error in CI so we don't forget.
-
-
     # cudnn RNNs require special backend handling (weights are cast to FP16 and reflattened)
     # so they get a dedicated test.
     # Despite the large number of RNN cases it tries, the test takes < 15 seconds on a Titan V (similar to V100).
+    @skipIfRocm
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_autocast_rnn(self):
         with torch.backends.cudnn.flags(enabled=True, deterministic=True):
