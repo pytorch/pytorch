@@ -230,9 +230,6 @@ test_libtorch() {
 
 test_vulkan() {
   if [[ "$BUILD_ENVIRONMENT" == *vulkan* ]]; then
-    echo "XXX-test-env"
-    env
-    echo "XXX-test-env~"
     export VK_ICD_FILENAMES=/var/lib/jenkins/swiftshader/build/Linux/vk_swiftshader_icd.json
     mkdir -p test/test-reports/cpp-vulkan
     build/bin/vulkan_test --gtest_output=xml:test/test-reports/cpp-vulkan/vulkan_test.xml

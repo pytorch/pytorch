@@ -622,7 +622,8 @@ TEST(VulkanTest, adaptive_avg_pool2d) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanTest, adaptive_avg_pool2d_2) {
+//TODO: Enable when view operator for Vulkan landed
+TEST(VulkanTest, DISABLED_adaptive_avg_pool2d_2) {
   if (!at::is_vulkan_available())
     return;
 

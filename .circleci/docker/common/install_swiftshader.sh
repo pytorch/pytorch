@@ -30,10 +30,6 @@ tar -C "${_cmake_dir}" -xzf "${_tmp_cmake_targz}"
 _cmake_bin_path="${_cmake_dir}/${_cmake_file}/bin/cmake"
 rm "${_tmp_cmake_targz}"
 
-echo "XXX-install-swiftshader-env"
-env
-echo "XXX-install-swiftshader-env~"
-
 # SwiftShader
 _swiftshader_root_dir=/var/lib/jenkins
 _swiftshader_dir="${_swiftshader_root_dir}"/swiftshader
