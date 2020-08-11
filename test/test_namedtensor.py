@@ -1063,16 +1063,28 @@ class TestNamedTensor(TestCase):
 
     def test_unflatten(self):
         # test args: tensor, int, namedshape
-        self.assertTrue(torch.equal(torch.ones(4).unflatten(0, (('A', 2), ('B', 2))), torch.ones(2, 2, names=('A', 'B'))))
-        self.assertTrue(torch.equal(torch.ones(4).unflatten(0, [('A', 2), ('B', 2)]), torch.ones(2, 2, names=('A', 'B'))))
-        self.assertTrue(torch.equal(torch.ones(4).unflatten(0, (['A', 2], ['B', 2])), torch.ones(2, 2, names=('A', 'B'))))
-        self.assertTrue(torch.equal(torch.ones(4).unflatten(-1, (['A', 2], ['B', 2])), torch.ones(2, 2, names=('A', 'B'))))
+        self.assertTrue(torch.equal(
+            torch.ones(4).unflatten(0, (('A', 2), ('B', 2))),
+            torch.ones(2, 2, names=('A', 'B'))))
+        self.assertTrue(torch.equal(
+            torch.ones(4).unflatten(0, [('A', 2), ('B', 2)]),
+            torch.ones(2, 2, names=('A', 'B'))))
+        self.assertTrue(torch.equal(
+            torch.ones(4).unflatten(0, (['A', 2], ['B', 2])),
+            torch.ones(2, 2, names=('A', 'B'))))
+        self.assertTrue(torch.equal(
+            torch.ones(4).unflatten(-1, (['A', 2], ['B', 2])),
+            torch.ones(2, 2, names=('A', 'B'))))
 
         # test args: namedtensor, int, namedshape
-        self.assertTrue(torch.equal(torch.ones(2, 4, names=('A', 'B')).unflatten(1, (('B1', 2), ('B2', 2))), torch.ones(2, 2, 2, names=('A', 'B1', 'B2'))))
+        self.assertTrue(torch.equal(
+            torch.ones(2, 4, names=('A', 'B')).unflatten(1, (('B1', 2), ('B2', 2))),
+            torch.ones(2, 2, 2, names=('A', 'B1', 'B2'))))
 
         # test args: namedtensor, str, namedshape
-        self.assertTrue(torch.equal(torch.ones(2, 4, names=('A', 'B')).unflatten('B', (('B1', 2), ('B2', 2))), torch.ones(2, 2, 2, names=('A', 'B1', 'B2'))))
+        self.assertTrue(torch.equal(
+            torch.ones(2, 4, names=('A', 'B')).unflatten('B', (('B1', 2), ('B2', 2))),
+            torch.ones(2, 2, 2, names=('A', 'B1', 'B2'))))
 
         # test invalid args: namedtensor, str, sizes
         self.assertRaises(TypeError, lambda: torch.tensor([1], names=('A',)).unflatten('A', (1, 1)))
