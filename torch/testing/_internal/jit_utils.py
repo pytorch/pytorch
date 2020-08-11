@@ -679,4 +679,6 @@ def attrs_with_prefix(module, prefix):
 op_alias_mappings = {
     "absolute" : "abs",
     "absolute_" : "abs_",
+    "clip" : "clamp",
+    "clip_" : "clamp_",
 }
