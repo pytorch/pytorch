@@ -9,9 +9,9 @@ class TestForeach(TestCase):
 
     @dtypes(*torch.testing.get_all_dtypes())
     def test_add_scalar__same_size_tensors(self, device, dtype):
-        tensors = [torch.zeros(self.H, self.W, device=device, dtype=dtype) for n in range(self.N)]
+        tensors = [torch.zeros(self.H, self.W, device=device, dtype=dtype) for _ in range(self.N)]
 
-        # bool tensor + 1 will result in int64 tensor
+        # inplace addition of 1 to bool fails
         if dtype == torch.bool:
             torch._foreach_add_(tensors, True)
         else:
@@ -25,7 +25,7 @@ class TestForeach(TestCase):
         N = 20
         H = 20
         W = 20
-        tensors = [torch.zeros(self.H, self.W, device=device, dtype=dtype) for n in range(self.N)]
+        tensors = [torch.zeros(self.H, self.W, device=device, dtype=dtype) for _ in range(self.N)]
 
         res = torch._foreach_add(tensors, 1)
         for t in res:
