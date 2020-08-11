@@ -10,7 +10,8 @@ namespace {
 static const std::unordered_map<Symbol, Symbol> alias_map = {
     {aten::absolute, aten::abs},
     {aten::absolute_, aten::abs_},
-};
+    {aten::clip, aten::clamp},
+    {aten::clip_, aten::clamp_}};
 
 void replaceNodeWithNewSymbol(Node* node, Symbol new_symbol) {
   WithInsertPoint insert_guard{node};

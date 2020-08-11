@@ -69,10 +69,11 @@ void testExprLetStmtTest01() {
 
   ExprHandle load_a = Load::make(a_buf, {0}, 1);
   VarHandle var = VarHandle("v", kFloat);
+  Stmt* let_store = Let::make(var, load_a);
   Stmt* store_b = Store::make(b_buf, {0}, var, 1);
-  Stmt* let_store = Block::make({{var.node(), load_a.node()}}, {store_b});
+  Block* block = Block::make({let_store, store_b});
 
-  SimpleIREvaluator eval(let_store, a_buf, b_buf);
+  SimpleIREvaluator eval(block, a_buf, b_buf);
 
   PaddedBuffer<float> a_v(1);
   PaddedBuffer<float> b_v(1);
