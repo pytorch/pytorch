@@ -46,9 +46,9 @@ class TestBiasCorrection(QuantizationTestCase):
 
                 if type(artificial_submodule) in _supported_modules_quantized:
                     print(self.compute_sqnr(float_bias, artificial_bias))
-                    float_bias = correct_bias.get_param(submodule, 'weight')
-                    artificial_bias = correct_bias.get_param(artificial_submodule, 'weight').dequantize()
-                    print("change in weights: ", self.compute_sqnr(float_bias, artificial_bias))
+                    # float_bias = correct_bias.get_param(submodule, 'weight')
+                    # artificial_bias = correct_bias.get_param(artificial_submodule, 'weight').dequantize()
+                    # print("change in weights: ", self.compute_sqnr(float_bias, artificial_bias))
                     # print("executing")
                     # self.assertTrue(self.compute_sqnr(float_bias, artificial_bias) > 35,
                     #                 "Correcting quantized bias produced too much noise, sqnr score too low")
@@ -106,14 +106,14 @@ class TestBiasCorrection(QuantizationTestCase):
         with simple input data that the bias is being corrected
         After manual bias change, but before bias correction:
             Float module:       [1,1,1] -> [4,4,4,4]
-            Quantized module    [1,1,1] -> [6,6,6,6]
+            Quantized module    [1,1,1] -> [13,13,13,13]
 
         Expected after bias correction:
             Float module:       [1,1,1] -> [4,4,4,4]
             Quantized module    [1,1,1] -> [4,4,4,4]
         '''
-        # Linear module that is filled with ones, makes math easier
-        float_model = nn.Linear(3,4)
+        # Conv module that is filled with ones, makes math easier
+        float_model = nn.Conv2d(3,4,2,2)
         float_model.weight.data = torch.ones(float_model.weight.size())
         float_model.bias.data = torch.ones(float_model.bias.size())
         float_model = QuantWrapper(float_model)
@@ -126,7 +126,7 @@ class TestBiasCorrection(QuantizationTestCase):
         artificial_model.module.bias().data *= 3
 
         # Bias correction
-        input = [(torch.ones(1,3), 0)]  # single batch with (1,3) tensor
+        input = [(torch.ones(1,3,2,2), 0)]  # single batch with (1,3) tensor
         bias_correction(float_model, artificial_model, input)
 
         self.assertTrue(torch.all(float_model(input[0][0]).eq(artificial_model(input[0][0]))))
@@ -166,11 +166,3 @@ class TestBiasCorrection(QuantizationTestCase):
         img_data = [(torch.rand(10, 3, 125, 125, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long))
                     for _ in range(50)]
         self.correct_artificial_bias(float_model, correct_bias.bias_correction, img_data)
-
-    # def test_mobilenet(self):
-    #     float_model = mobilenet_v2(pretrained=True, quantize=False)
-    #     float_model.eval()
-    #     float_model.fuse_model()
-    #     img_data = [(torch.rand(10, 3, 224, 224, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long))
-    #                 for _ in range(50)]
-    #     self.correct_artificial_bias(float_model, correct_bias.bias_correction, img_data)

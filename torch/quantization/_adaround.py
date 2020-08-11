@@ -32,7 +32,7 @@ def loss_function_leaf(model, count):
     high = 8
     low = 2
     beta = count / 10 * (high - low) + low
-    _lambda = .01
+    _lambda = 1
 
     adaround_instance = model.wrapped_module.weight_fake_quant
     float_weight = model.wrapped_module.weight
@@ -42,6 +42,7 @@ def loss_function_leaf(model, count):
                                                              int(adaround_instance.zero_point), adaround_instance.quant_min,
                                                              adaround_instance.quant_max)
     Frobenius_norm = torch.norm(float_weight - quantized_weight)
+    # Frobenius_norm = torch.norm(model.float_output - model.quantized_output)
     # bring back x in expression
 
     scale = adaround_instance.scale
@@ -145,7 +146,6 @@ class OuputWrapper(nn.Module):
     def forward(self, x):
         x = self.quant(x)
         if self.on:
-            print(type(self.wrapped_module))
             self.wrapped_module.activation_post_process.disable_fake_quant()
             self.wrapped_module.weight_fake_quant.disable_fake_quant()
             self.float_output = self.wrapped_module(x).detach()
@@ -241,14 +241,12 @@ def learn_adaround(float_model, data_loader_test):
 
 
 
-
     def optimize_V(leaf_module):
         '''Takes in a leaf module with an adaround attached to its
         weight_fake_quant attribute'''
-        # optimizing V step
         def dummy_generator():
             yield leaf_module.wrapped_module.weight_fake_quant.continous_V
-        optimizer = torch.optim.Adam(dummy_generator(), lr=.1)
+        optimizer = torch.optim.Adam(dummy_generator(), lr=10)
 
         for count in range(10):
             output = float_model(next(generator))
@@ -267,30 +265,20 @@ def learn_adaround(float_model, data_loader_test):
 
     V_s = add_wrapper_class(float_model, _supported_modules)
 
-    # float_model.qconfig = torch.quantization.default_qconfig # change to qat qconfig
-    # torch.quantization.prepare_qat(float_model, inplace=True)
-    print("bruh")
-    # print(float_model)
     batch = 0
     for name, submodule in float_model.named_modules():
-        # if type(submodule) in _supported_modules:
-        # print(name)
-        # print(name, getattr(submodule, 'qconfig'))
         if isinstance(submodule, OuputWrapper):
             batch += 1
             if batch <= 1:
-                # assert hasattr(submodule, 'qconfig')
-                # quick quantization calibration
+
                 submodule.on = True
+                print("training submodule")
                 submodule.wrapped_module.qconfig = adaround_qconfig
-                # submodule.wrapped_module.activation_post_process = torch.quantization.fake_quantize.default_fake_quant()
-                # submodule.wrapped_module.weight_fake_quant = araround_fake_quant()
                 torch.quantization.prepare_qat(submodule, inplace=True)
-                print(submodule.wrapped_module.__dict__.keys())
-                print(submodule.wrapped_module._modules.keys())
-                for count in range(10):
+                for count in range(100):
                     float_model(next(generator))
                 submodule.wrapped_module.weight_fake_quant.disable_observer()
+
                 # try randomizing values for contin V
                 submodule.wrapped_module.weight_fake_quant.continous_V = \
                     torch.nn.Parameter(torch.ones(submodule.wrapped_module.weight.size()) / 10)
@@ -301,13 +289,9 @@ def learn_adaround(float_model, data_loader_test):
                 torch.quantization.convert(submodule, inplace=True)
                 submodule.on = False
             if batch == 1:
-                print(float_model)
-                print(submodule)
-                print(submodule.qconfig)
                 torch.quantization.convert(float_model, inplace=True)
                 return float_model
 
-    print(float_model)
     torch.quantization.convert(float_model, inplace=True)
     return float_model
 

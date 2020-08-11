@@ -55,11 +55,3 @@ class TestAdaround(QuantizationTestCase):
         img_data = [(torch.rand(10, 3, 125, 125, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long))
                     for _ in range(50)]
         self.single_layer_adaround(float_model, _adaround.learn_adaround, img_data)
-
-    def test_mobilenet(self):
-        float_model = mobilenet_v2(pretrained=True, quantize=False)
-        float_model.eval()
-        float_model.fuse_model()
-        img_data = [(torch.rand(10, 3, 224, 224, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long))
-                    for _ in range(50)]
-        self.single_layer_adaround(float_model, _adaround.learn_adaround, img_data)
