@@ -52,10 +52,10 @@ namespace std {
   }
 
   // TODO: this function needs to be implemented and tested. Currently just throw an error.
-  inline float hypot(float x, long double y) {
+  inline float hypot(float x, float y) {
     throw std::runtime_error("std::hypot is not implemented on older Android");
   }
-  inline double hypot(double x, long double y) {
+  inline double hypot(double x, double y) {
     throw std::runtime_error("std::hypot is not implemented on older Android");
   }
 
