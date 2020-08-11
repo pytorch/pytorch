@@ -490,7 +490,6 @@ void dot<float>(CUDABLAS_DOT_ARGTYPES(float)) {
   TORCH_CUDABLAS_CHECK(cublasSdot(handle, n, x, incx, y, incy, result));
 }
 
-#ifndef __HIP_PLATFORM_HCC__
 template <>
 void dot<c10::complex<double>>(CUDABLAS_DOT_ARGTYPES(c10::complex<double>)) {
   TORCH_CUDABLAS_CHECK(cublasZdotu(handle, n, reinterpret_cast<const cuDoubleComplex*>(x),
@@ -504,7 +503,6 @@ void dot<c10::complex<float>>(CUDABLAS_DOT_ARGTYPES(c10::complex<float>)) {
                                    incx, reinterpret_cast<const cuComplex*>(y), incy,
                                    reinterpret_cast<cuComplex*>(result)));
 }
-#endif
 
 template <>
 void dot<at::Half>(CUDABLAS_DOT_ARGTYPES(at::Half)) {
