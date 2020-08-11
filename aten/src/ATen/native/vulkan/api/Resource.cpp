@@ -96,7 +96,7 @@ void Resource::Memory::Scope::operator()(const void* const data) const {
 
   vmaUnmapMemory(allocator_, allocation_);
 
-  if (access_ == Access::Write) {
+  if (Access::Write == access_) {
     // Call will be ignored by implementation if the memory type this allocation
     // belongs to is not HOST_VISIBLE or is HOST_COHERENT, which is the behavior
     // we want.
