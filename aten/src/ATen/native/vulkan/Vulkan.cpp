@@ -1042,8 +1042,7 @@ void copy_buffer_to_image(const VBuffer& buffer, VImage& image) {
     int32_t h;
   };
   const ConstBlock constBlock{image.w(), image.h()};
-  VBuffer constBuffer =
-      makeUniformConstBuffer(&constBlock, sizeof(constBlock));
+  VBuffer constBuffer = makeUniformConstBuffer(&constBlock, sizeof(constBlock));
 
   VkDescriptorSetLayout descrSetLayout{};
   VkDescriptorSetLayoutBinding bindings[] = {
@@ -1103,8 +1102,7 @@ void copy_image_to_buffer(
     int32_t h;
   };
   const ConstBlock constBlock{image.w(), image.h()};
-  VBuffer constBuffer =
-      makeUniformConstBuffer(&constBlock, sizeof(constBlock));
+  VBuffer constBuffer = makeUniformConstBuffer(&constBlock, sizeof(constBlock));
 
   VkDescriptorSetLayout descrSetLayout{};
   const VkDescriptorSetLayoutBinding bindings[] = {
@@ -1155,15 +1153,17 @@ void copy_image_to_buffer(
 void copy_buffer_to_buffer(
     const VBuffer& srcBuffer,
     VBuffer& dstBuffer,
-    VkDeviceSize size) {
+    VkDeviceSize size,
+    VkDeviceSize srcOffset,
+    VkDeviceSize dstOffset) {
   auto device = context().device();
   VkCommandBuffer commandBuffer{};
   allocateCommandBuffer(device, &commandBuffer);
   beginCommandBuffer(commandBuffer);
 
   VkBufferCopy copyRegion{};
-  copyRegion.srcOffset = 0;
-  copyRegion.dstOffset = 0;
+  copyRegion.srcOffset = srcOffset;
+  copyRegion.dstOffset = dstOffset;
   copyRegion.size = size;
   vkCmdCopyBuffer(
       commandBuffer,
