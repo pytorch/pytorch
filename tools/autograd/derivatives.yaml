@@ -515,6 +515,10 @@
 - name: hardswish(Tensor self) -> Tensor
   self: hardswish_backward(grad, self)
 
+- name: hypot(Tensor self, Tensor other) -> Tensor
+  self: grad * self / result
+  other: grad * other / result
+
 - name: index.Tensor(Tensor self, Tensor?[] indices) -> Tensor
   self: index_backward(zeros_like(self), indices, grad)
   indices: TensorList()

@@ -261,6 +261,15 @@ public:
     auto o2 = Sleef_fmodf8(x_hi, q_hi);
     return cvtfp32_bf16(o1, o2);
   }
+  Vec256<BFloat16> hypot(const Vec256<BFloat16> &b) const {
+    __m256 lo, hi;
+    __m256 b1, b2;
+    cvtbf16_fp32(values, lo, hi);
+    cvtbf16_fp32(b.values, b1, b2);
+    auto o1 = Sleef_hypotf8_u05(lo, b1);
+    auto o2 = Sleef_hypotf8_u05(hi, b2);
+    return cvtfp32_bf16(o1, o2);
+  }
   Vec256<BFloat16> log() const {
     return map(Sleef_logf8_u10);
   }
