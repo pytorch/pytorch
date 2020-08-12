@@ -236,7 +236,7 @@ class UnaryOpTest(serial.SerializedTestCase):
     # Once hypothesis.testing version is updated, we can re-enable
     # testing with different hypothesis examples.
     @settings(deadline=None)
-    def test_logit(self):
+    def Skip_test_logit(self):
         workspace.ResetWorkspace()
         n = 1
         m = 15361
