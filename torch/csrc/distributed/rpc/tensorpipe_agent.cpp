@@ -36,22 +36,22 @@ std::vector<c10::DeviceIndex> mapTensorDevices(
     const std::vector<torch::Tensor>& tensors,
     const std::unordered_map<
         std::string,
-        std::unordered_map<c10::DeviceIndex, c10::DeviceIndex>>& mapLocations) {
-  const auto workerIter = mapLocations.find(remoteName);
-  if (workerIter == mapLocations.end()) {
+        std::unordered_map<c10::DeviceIndex, c10::DeviceIndex>>& deviceMaps) {
+  const auto workerIter = deviceMaps.find(remoteName);
+  if (workerIter == deviceMaps.end()) {
     return {};
   } else {
     std::vector<c10::DeviceIndex> deviceIndices;
     deviceIndices.reserve(tensors.size());
-    const auto& mapLocation = workerIter->second;
+    const auto& deviceMap = workerIter->second;
     for (const auto& tensor : tensors) {
-      const auto deviceIter = mapLocation.find(tensor.device().index());
-      if (deviceIter == mapLocation.end()) {
+      const auto deviceIter = deviceMap.find(tensor.device().index());
+      if (deviceIter == deviceMap.end()) {
         TORCH_CHECK(
             tensor.device() == at::kCPU,
             "TensorPipeAgent only supports CPU tensors by default. Sending "
             "GPU tensors using RPC requires explicitly calling "
-            "`set_map_location` on TensorPipeRpcBackendOptions. Got a tensor "
+            "`set_device_map` on TensorPipeRpcBackendOptions. Got a tensor "
             "with device ",
             tensor.device(),
             ", but no map location is specified.");
@@ -439,12 +439,12 @@ void TensorPipeAgent::pipeWrite(
   tensorpipe::Message tpMessage;
   TensorpipeWriteBuffers tpBuffers;
 
-  const auto& mapLocations =
-      rpcMessage.isRequest() ? opts_.mapLocations : reverseMapLocations_;
+  const auto& deviceMaps =
+      rpcMessage.isRequest() ? opts_.deviceMaps : reverseDeviceMaps_;
   std::tie(tpMessage, tpBuffers) = tensorpipeSerialize(
       std::move(rpcMessage),
       mapTensorDevices(
-          pipe->getRemoteName(), rpcMessage.tensors(), mapLocations));
+          pipe->getRemoteName(), rpcMessage.tensors(), deviceMaps));
 
   pipe->write(
       std::move(tpMessage),
@@ -476,15 +476,15 @@ void TensorPipeAgent::sendCompletedResponseMessage(
   Message&& responseMessage = std::move(*futureResponseMessage).moveValue();
   responseMessage.setId(messageId);
   if (!error) {
-    const auto& iter = reverseMapLocations_.find(pipe->getRemoteName());
-    if (iter == opts_.mapLocations.end()) {
+    const auto& iter = reverseDeviceMaps_.find(pipe->getRemoteName());
+    if (iter == opts_.deviceMaps.end()) {
       for (const auto& t : responseMessage.tensors()) {
         if (!t.device().is_cpu()) {
           responseMessage = createExceptionResponse(
               c10::str(
                   "TensorPipe RPC backend only supports CPU tensors by default,"
                   " please move your tensors to CPU before sending them over "
-                  "RPC, or call `set_map_location` on "
+                  "RPC, or call `set_device_map` on "
                   "`TensorPipeRpcBackendOptions` to explicitly configure "
                   "device mapping. Response device mapping is not available for "
                   "destination ",
@@ -496,10 +496,10 @@ void TensorPipeAgent::sendCompletedResponseMessage(
         }
       }
     } else {
-      const auto& mapLocation = iter->second;
+      const auto& deviceMap = iter->second;
       for (const auto& t : responseMessage.tensors()) {
         if (!t.device().is_cpu() &&
-            mapLocation.find(t.device().index()) == mapLocation.end()) {
+            deviceMap.find(t.device().index()) == deviceMap.end()) {
           responseMessage = createExceptionResponse(
               c10::str(
                   "TensorPipe RPC backend only supports CPU tensors by default."

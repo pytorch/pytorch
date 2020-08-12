@@ -173,65 +173,65 @@ def _tensorpipe_construct_rpc_backend_options_handler(
     )
 
 
-# detect if any worker has invalid map_location configurations, and return
+# detect if any worker has invalid device_map configurations, and return
 # names of failed workers
-def _tensorpipe_check_device_maps(agent, map_locations):
-    if not map_locations:
-        return
+def _tensorpipe_check_device_maps(agent, device_maps):
+    if device_maps is None:
+        device_maps = {}
 
-    def check_one_worker(name, map_locations, all_device_counts):
+    def check_one_worker(name, device_maps, all_device_counts):
         device_count = all_device_counts[name]
-        wrong_worker_names = set(map_locations) - set(all_device_counts)
+        wrong_worker_names = set(device_maps) - set(all_device_counts)
         if wrong_worker_names:
             raise ValueError(f"Wrong worker names: {wrong_worker_names}")
         for worker_name in all_device_counts:
             remote_device_count = all_device_counts[worker_name]
-            if worker_name in map_locations:
-                map_location = map_locations[worker_name]
-                key_set = set(map_location.keys())
-                val_set = set(map_location.values())
+            if worker_name in device_maps:
+                device_map = device_maps[worker_name]
+                key_set = set(device_map.keys())
+                val_set = set(device_map.values())
                 if not all([
-                    len(map_location) == len(key_set),
-                    len(map_location) == len(val_set),  # check 1-to-1 mapping
+                    len(device_map) == len(key_set),
+                    len(device_map) == len(val_set),  # check 1-to-1 mapping
                     min(key_set) >= -1,
                     max(key_set) < device_count,  # check local range
                     min(val_set) >= -1,
                     max(val_set) < remote_device_count  # check remote range
                 ]):
                     raise ValueError(
-                        f"Invalid map_location configuration on {name}:\n"
-                        f"map_locations = {map_locations}"
+                        f"Invalid device_map configuration on {name}:\n"
+                        f"device_maps = {device_maps}"
                     )
 
-                if -1 not in map_location and -1 in map_location.values():
+                if -1 not in device_map and -1 in device_map.values():
                     raise ValueError(
-                        f"Invalid map_location configuration on {name}. "
+                        f"Invalid device_map configuration on {name}. "
                         "It maps a non-CPU device to CPU, when combined with "
                         "the default CPU-CPU mapping, device mapping for CPU "
                         "tensors is ambiguous:\n"
-                        f"map_locations = {map_locations}"
+                        f"device_maps = {device_maps}"
                     )
 
 
-    gathered = api._all_gather([torch.cuda.device_count(), map_locations])
+    gathered = api._all_gather([torch.cuda.device_count(), device_maps])
     all_device_counts = {name: gathered[name][0] for name in gathered}
-    all_map_locations = {name: gathered[name][1] for name in gathered}
-    for worker_name in all_map_locations:
-        worker_map_locations = all_map_locations[worker_name]
-        check_one_worker(worker_name, worker_map_locations, all_device_counts)
+    all_device_maps = {name: gathered[name][1] for name in gathered}
+    for worker_name in all_device_maps:
+        worker_device_maps = all_device_maps[worker_name]
+        check_one_worker(worker_name, worker_device_maps, all_device_counts)
 
     # passed all checked, construct reverse mapping for return values
-    reverse_map_locations = {}
+    reverse_device_maps = {}
     local_name = api.get_worker_info().name
-    for worker_name in all_map_locations:
-        remote_map_locations = all_map_locations[worker_name]
-        if local_name in remote_map_locations:
-            remote_map_location = remote_map_locations[local_name]
-            reverse_map_locations[worker_name] = {
-                remote_map_location[k]: k for k in remote_map_location
+    for worker_name in all_device_maps:
+        remote_device_maps = all_device_maps[worker_name]
+        if local_name in remote_device_maps:
+            remote_device_map = remote_device_maps[local_name]
+            reverse_device_maps[worker_name] = {
+                remote_device_map[k]: k for k in remote_device_map
             }
 
-    agent._set_reverse_map_locations(reverse_map_locations)
+    agent._set_reverse_device_maps(reverse_device_maps)
 
 
 def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_options):
@@ -264,7 +264,7 @@ def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_
     api._init_rpc_states(agent)
 
     try:
-        _tensorpipe_check_device_maps(agent, rpc_backend_options.map_locations)
+        _tensorpipe_check_device_maps(agent, rpc_backend_options.device_maps)
     except Exception:
         api.shutdown()
         raise

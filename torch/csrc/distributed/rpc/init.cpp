@@ -502,12 +502,12 @@ PyObject* rpc_init(PyObject* /* unused */) {
               requests.
           )")
       .def_readwrite(
-          "map_locations",
-          &TensorPipeRpcBackendOptions::mapLocations,
+          "device_maps",
+          &TensorPipeRpcBackendOptions::deviceMaps,
           R"(The device map locations.)")
       .def(
-          "set_map_location",
-          &TensorPipeRpcBackendOptions::setMapLocation,
+          "set_device_map",
+          &TensorPipeRpcBackendOptions::setDeviceMap,
           R"(
               Set device mapping between each RPC caller and callee pairs. This
               function can be called multiple times to incrementally update
@@ -515,7 +515,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
 
               Arguments:
                   worker_name (str): Callee name.
-                  map_location (Dict[int, int]): Device placment mappings from
+                  device_map (Dict[int, int]): Device placment mappings from
                   this worker to the callee. This map must be invertible.
           )");
 
@@ -561,9 +561,9 @@ PyObject* rpc_init(PyObject* /* unused */) {
               TensorPipeAgent::getWorkerInfos,
           py::call_guard<py::gil_scoped_release>())
       .def(
-          "_set_reverse_map_locations",
+          "_set_reverse_device_maps",
           // intentionally not releasing GIL to avoid unnecessary context switch
-          &TensorPipeAgent::setReverseMapLocations);
+          &TensorPipeAgent::setReverseDeviceMaps);
 
   module.def("_is_current_rpc_agent_set", &RpcAgent::isCurrentRpcAgentSet);
 
