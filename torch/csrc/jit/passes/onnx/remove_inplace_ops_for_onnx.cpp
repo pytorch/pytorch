@@ -428,8 +428,7 @@ static void PrepareListAppendAndInsertForONNX(Block* b) {
 //   %5 : Tensor = aten::zero_(%3)
 //   ...
 
-static void PrepareForRemoveMutations(MutationRemover& mr,
-    Block* b) {
+static void PrepareForRemoveMutations(MutationRemover& mr, Block* b) {
   for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
     for (auto* child_block : it->blocks()) {
       PrepareForRemoveMutations(mr, child_block);
@@ -471,7 +470,6 @@ static void PrepareForRemoveMutations(MutationRemover& mr,
 
 } // namespace
 
-
 void PrepareInplaceOpsForONNX(const std::shared_ptr<Graph>& graph) {
   PrepareCopyForONNX(graph->block());
   PrepareIndexPutForONNX(graph->block());
@@ -480,10 +478,8 @@ void PrepareInplaceOpsForONNX(const std::shared_ptr<Graph>& graph) {
 }
 
 void RemoveInplaceOpsForONNX(const std::shared_ptr<Graph>& graph) {
-  std::cout << "g " << graph->toString();
   MutationRemover mr(graph);
   PrepareForRemoveMutations(mr, graph->block());
-  std::cout << "G " << graph->toString();
   RemoveTensorMutation(graph);
   RemoveListMutation(graph);
 }

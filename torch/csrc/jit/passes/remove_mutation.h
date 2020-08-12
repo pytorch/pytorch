@@ -1,9 +1,9 @@
 #pragma once
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
-#include <torch/csrc/jit/ir/ir.h>
 #include <c10/util/Exception.h>
+#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
+#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/utils/memory.h>
 
 namespace torch {
@@ -266,18 +266,12 @@ struct MutationRemover {
   std::shared_ptr<Graph> graph_;
 };
 
-
 // Replaces in-place aten ops with their functional equivalents
 // when it can be proven that this does not change graph semantics
 TORCH_API void RemoveListMutation(const std::shared_ptr<Graph>& graph);
 
 // Removes list mutation with functional equivalents
 TORCH_API void RemoveTensorMutation(const std::shared_ptr<Graph>& graph);
-
-// Return True if node is an in-place aten op
-TORCH_API bool isInplaceOpVariant(
-    const std::shared_ptr<Graph>& graph,
-    Node* node);
 
 } // namespace jit
 } // namespace torch
