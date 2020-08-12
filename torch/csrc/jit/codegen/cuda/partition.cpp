@@ -71,49 +71,10 @@ bool hasReductionOperation(const Node* node) {
   return false;
 }
 
-// TODO: remove the hack to disable broadcast after proper support.
-//
-// This is fairly conservative in reporting `hasBroadcastOnInputs`
-bool hasBroadcastOnInputs(const Node* node) {
-  // uniform_shape records the shape/dim we've seen as we iterate through inputs
-  std::vector<c10::optional<int64_t>> uniform_shape;
-  for (const auto& input : node->inputs()) {
-    if (auto input_type = input->type()->cast<TensorType>()) {
-      // only check shapes of tensor types with known dimensions for broadcast;
-      auto input_sizes = input_type->sizes();
-      if (input_sizes.size()) {
-        if (uniform_shape.empty()) {
-          // if we haven't seen any shape yet, just move along;
-          uniform_shape = input_sizes.sizes().value();
-        } else {
-          if (input_sizes.size().value() != uniform_shape.size()) {
-            return true;
-          }
-          for (int i = 0; i < static_cast<int>(uniform_shape.size()); i++) {
-            if (!uniform_shape[i].has_value()) {
-              // if we haven't observed the size for a specific dimension yet;
-              // we'll just bluntly put current shape in;
-              uniform_shape[i] = input_sizes[i];
-            } else if (
-                input_sizes[i].has_value() &&
-                uniform_shape[i] != input_sizes[i].value()) {
-              // if we observe the shape differ, that is the input_sizes[i] has
-              // a value that disagrees with uniform_shape[i], we report
-              // broadcast;
-              return true;
-            }
-          }
-        }
-      }
-    }
-  }
-  return false;
-}
-
 } // namespace
 
 bool isFusableCudaFusionGroup(const Node* node) {
-  if (isFusableNode(node) && !hasBroadcastOnInputs(node)) {
+  if (isFusableNode(node)) {
     return isFusableDevice(node);
   }
   return false;
