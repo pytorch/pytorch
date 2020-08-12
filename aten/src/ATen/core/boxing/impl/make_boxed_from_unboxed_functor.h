@@ -49,8 +49,19 @@ namespace impl {
     at::Dimname
   >;
 
+  // We have an unboxed functor in hand that takes C++ arguments, and
+  // we're building a boxed functor wrapper for it that takes IValues.
+  // So "outside" is boxed and "inside" is unboxed.
+  //
+  // So a valid input type is one that our boxed functor wrapper can
+  // unbox from an IValue into a C++ value.
+  //
+  // Whereas a valid output type is one that our wrapper can recieve
+  // as a C++ value from the unboxed functor, and box into an IValue.
+
   //
   // assert_is_valid_input_type
+  // checks that T can be unboxed from an IValue into a C++ value.
   //
 
   template<class T, bool AllowDeprecatedTypes, class Enable = void>
@@ -59,13 +70,8 @@ namespace impl {
       guts::if_constexpr<guts::typelist::contains<supported_primitive_arg_types, T>::value>([] {
         /* everything is ok, this is a primitive type */
       }, /* else */ [] {
-        // TODO This is called for each operator call and potentially expensive.
-        // This check should be moved to operator registration time instead.
-        TORCH_CHECK(
-          c10::isCustomClassRegistered<T>(),
-          "Tried to use undefined class ",
-          c10::util::get_fully_qualified_type_name<T>(),
-          " as input argument");
+        /* otherwise this must be an instance of a valid custom class, since it can only
+           have been created via IValue(x), which ensures this. */
       });
     }
   };
@@ -171,9 +177,8 @@ namespace impl {
       guts::if_constexpr<guts::typelist::contains<supported_primitive_arg_types, T>::value>([] {
         /* everything is ok, this is a primitive type */
       }, /* else */ [] {
-        // TODO This is called for each operator call and potentially expensive.
-        // This check should be moved to operator registration time instead.
-        TORCH_CHECK(c10::isCustomClassRegistered<T>(), "Tried to use undefined class ", c10::util::get_fully_qualified_type_name<T>(), " as output");
+        /* otherwise T is verified to be a registered custom class in the IValue
+          constructor, so no benefit in double-checking here */
       });
     }
   };
