@@ -197,8 +197,8 @@ void setstateTuple(
   if (checkHasValidSetGetState(type)) {
     Function& setstate = type->getMethod("__setstate__");
     if (setstate.isGraphFunction()) {
-      auto func_tuple = getFunctionTuple(
-          module, setstate, save_mobile_debug_info);
+      auto func_tuple =
+          getFunctionTuple(module, setstate, save_mobile_debug_info);
       elements.push_back(func_tuple.first);
       if (save_mobile_debug_info) {
         debug_info_elements->push_back(func_tuple.second.value());
@@ -207,7 +207,11 @@ void setstateTuple(
   } else {
     for (size_t i = 0, n = type->numAttributes(); i < n; ++i) {
       setstateTuple(
-          module, obj->getSlot(i), elements, debug_info_elements, save_mobile_debug_info);
+          module,
+          obj->getSlot(i),
+          elements,
+          debug_info_elements,
+          save_mobile_debug_info);
     }
   }
 }
@@ -221,8 +225,8 @@ void moduleMethodsTuple(
   auto methods = module.get_methods();
   // top level methods
   for (const auto& method : methods) {
-    auto func_tuple = getFunctionTuple(
-        module, method.function(), save_mobile_debug_info);
+    auto func_tuple =
+        getFunctionTuple(module, method.function(), save_mobile_debug_info);
     elements.push_back(func_tuple.first);
     if (save_mobile_debug_info) {
       debug_info_elements->push_back(func_tuple.second.value());
@@ -231,7 +235,11 @@ void moduleMethodsTuple(
 
   // __setstate__ of all components
   setstateTuple(
-      module, module._ivalue(), elements, debug_info_elements, save_mobile_debug_info);
+      module,
+      module._ivalue(),
+      elements,
+      debug_info_elements,
+      save_mobile_debug_info);
 }
 
 void SetExportModuleExtraFilesHook(ExportModuleExtraFilesHook hook) {
