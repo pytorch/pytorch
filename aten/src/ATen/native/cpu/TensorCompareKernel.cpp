@@ -23,7 +23,7 @@ static inline void compare_base_kernel(Tensor& result1, Tensor& result2,
   auto self_sizes = ensure_nonempty_vec(self.sizes().vec());
   self_sizes[dim] = 1;
 
-  // result1 and indice may be a empty tensor, if not,
+  // result1 and result2 may be a empty tensor, if not,
   // reshape them as self dims
   if (!keepdim) {
     if (result1.ndimension() >= dim) {
@@ -49,15 +49,15 @@ static inline void compare_base_kernel(Tensor& result1, Tensor& result2,
 
   auto loop = [&](char** data, const int64_t* strides, int64_t n) {
     auto* result1_data_bytes = data[0];
-    auto* indice_data_bytes = data[1];
+    auto* result2_data_bytes = data[1];
     const auto* self_data_bytes = data[2];
     for (int64_t i = 0; i < n; ++i) {
       f(
-        (scalar_t*)result1_data_bytes, (scalar_t_2*)indice_data_bytes,
+        (scalar_t*)result1_data_bytes, (scalar_t_2*)result2_data_bytes,
         (scalar_t*)self_data_bytes, self_dim_stride
       );
       result1_data_bytes += strides[0];
-      indice_data_bytes += strides[1];
+      result2_data_bytes += strides[1];
       self_data_bytes += strides[2];
     }
   };
