@@ -579,9 +579,13 @@ def should_compile_property(cls, property_name):
     in JIT compilation. This is used primarily to exclude properties in
     core modules that are not yet scriptable.
     """
+    # If the property appears in the ignore list of *any* of its superclasses,
+    # do not compile it.
     for base, ignored in ignored_properties:
-        if issubclass(cls, base):
-            return property_name not in ignored
+        if issubclass(cls, base) and property_name in ignored:
+            return False
+
+    return True
 
 
 def get_property_stubs(nn_module):
