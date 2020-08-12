@@ -212,7 +212,43 @@ Tensor ConvertToChannelsLast3dTensor(const Tensor& src) {
 #endif // USE_FBGEMM
 
 template <int kSpatialDim = 2>
+CAFFE2_API torch::class_<LegacyConvPackedParamsBase<kSpatialDim>> register_legacy_conv_params() {
+  TORCH_WARN("DEBUG legacy!");
+  static auto register_legacy_conv_params =
+    torch::class_<LegacyConvPackedParamsBase<kSpatialDim>>(
+        "quantized", "LegacyConv" + c10::to_string(kSpatialDim) + "dPackedParamsBase")
+    .def_pickle(
+        [](const c10::intrusive_ptr<LegacyConvPackedParamsBase<kSpatialDim>>& params)
+        -> LegacyConvSerializationType { // __getstate__
+          return serialize_legacy_conv<kSpatialDim>(params);
+        },
+        [](LegacyConvSerializationType state)
+        -> c10::intrusive_ptr<LegacyConvPackedParamsBase<kSpatialDim>> { // __setstate__
+          return deserialize_legacy_conv<kSpatialDim>(state);
+        })
+    .def("weight", [](const c10::intrusive_ptr<LegacyConvPackedParamsBase<kSpatialDim>>& self) {
+                     at::Tensor weight;
+                     c10::optional<at::Tensor> bias;
+                     std::tie(weight, bias) = self->unpack();
+                     return weight;
+                   })
+    .def("bias", [](const c10::intrusive_ptr<LegacyConvPackedParamsBase<kSpatialDim>>& self) {
+                   at::Tensor weight;
+                   c10::optional<at::Tensor> bias;
+                   std::tie(weight, bias) = self->unpack();
+                   return bias;
+                 })
+    .def("unpack", &LegacyConvPackedParamsBase<kSpatialDim>::unpack)
+    .def("stride", &LegacyConvPackedParamsBase<kSpatialDim>::stride)
+    .def("padding", &LegacyConvPackedParamsBase<kSpatialDim>::padding)
+    .def("dilation", &LegacyConvPackedParamsBase<kSpatialDim>::dilation)
+    .def("groups", &LegacyConvPackedParamsBase<kSpatialDim>::groups);
+  return register_legacy_conv_params;
+}
+
+template <int kSpatialDim = 2>
 CAFFE2_API torch::class_<ConvPackedParamsBase<kSpatialDim>> register_conv_params() {
+  TORCH_WARN("DEBUG!");
   static auto register_conv_params =
     torch::class_<ConvPackedParamsBase<kSpatialDim>>(
         "quantized", "Conv" + c10::to_string(kSpatialDim) + "dPackedParamsBase")
@@ -251,6 +287,10 @@ template
 CAFFE2_API torch::class_<ConvPackedParamsBase<2>> register_conv_params<2>();
 template
 CAFFE2_API torch::class_<ConvPackedParamsBase<3>> register_conv_params<3>();
+template
+CAFFE2_API torch::class_<LegacyConvPackedParamsBase<2>> register_legacy_conv_params<2>();
+template
+CAFFE2_API torch::class_<LegacyConvPackedParamsBase<3>> register_legacy_conv_params<3>();
 
 torch::class_<LinearPackedParamsBase> register_linear_params() {
   using SerializationType = std::tuple<at::Tensor, c10::optional<at::Tensor>>;
@@ -307,7 +347,9 @@ torch::class_<LinearPackedParamsBase> register_linear_params() {
 }
 
 namespace {
-
+// Why does the order matter?
+static auto legacy_conv2d_params = register_legacy_conv_params<2>();
+static auto legacy_conv3d_params = register_legacy_conv_params<3>();
 static auto conv2d_params = register_conv_params<2>();
 static auto conv3d_params = register_conv_params<3>();
 static auto linear_params = register_linear_params();

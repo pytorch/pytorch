@@ -17,16 +17,13 @@ using SerializationType = std::tuple<
   std::vector<int64_t> /*list of all integers*/
 >;
 
-/* Legacy serialization types */
-
-
 /* Convolution prepacked parameters serialization.
  *
  * Files that need to be updated if version changes:
  * - ATen/native/quantized/cpu/fbgemm_utils.cpp
  * - jit/passes/onnx/unpack_quantized_weights.cpp
  *
- * Version 1 (Legacy)
+ * Version 1 (Legacy) -- defined beloow
  * - Fields:
  *  1. weight
  *  2. bias
@@ -158,7 +155,7 @@ auto& ctx = at::globalContext();
   if (ctx.qEngine() == at::QEngine::QNNPACK) {
     TORCH_CHECK(
         kSpatialDim == 2,
-        "prepack/__setstate__: QNNPACK only supports Conv2d "
+        "prepack/__setstate__: QNNPACK only supports ", name,
         "now.");
     return PackedConvWeightsQnnp<kSpatialDim>::prepack(
       weight,
@@ -174,6 +171,105 @@ auto& ctx = at::globalContext();
 #endif // USE_PYTORCH_QNNPACK
 TORCH_CHECK(
   false,
-  "Didn't find engine for when deserializing ConvPackedParams: ",
+  "Didn't find engine for deserializing ConvPackedParams: ",
   toString(ctx.qEngine()));
 }
+
+
+/* Legacy serialization types */
+
+using LegacyConvSerializationType = std::tuple<
+  at::Tensor /*weight*/,
+  c10::optional<at::Tensor> /*bias*/,
+  // these are meant to be torch::List<int64_t> but
+  // it's not supported by onnx, so we'll use Tensor as
+  // a workaround
+  torch::List<at::Tensor> /*strides*/,
+  torch::List<at::Tensor> /*padding*/,
+  torch::List<at::Tensor> /*dilation*/,
+  at::Tensor /*groups*/
+>;
+
+template <uint32_t kSpatialDim>
+LegacyConvSerializationType serialize_legacy_conv(
+    const c10::intrusive_ptr<LegacyConvPackedParamsBase<kSpatialDim>>& params) {
+  at::Tensor weight;
+  c10::optional<at::Tensor> bias;
+  std::tie(weight, bias) = params->unpack();
+  torch::List<at::Tensor> stride;
+  torch::List<at::Tensor> padding;
+  torch::List<at::Tensor> dilation;
+  at::Tensor groups;
+  for (int64_t s : params->stride()) {
+    stride.emplace_back(at::tensor(s));
+  }
+  for (int64_t p : params->padding()) {
+    padding.emplace_back(at::tensor(p));
+  }
+  for (int64_t d : params->dilation()) {
+    dilation.emplace_back(at::tensor(d));
+  }
+  groups = at::tensor(params->groups());
+  return std::make_tuple(
+      std::move(weight),
+      std::move(bias),
+      stride,
+      padding,
+      dilation,
+      groups);
+}
+
+template <uint32_t kSpatialDim>
+c10::intrusive_ptr<LegacyConvPackedParamsBase<kSpatialDim>> deserialize_legacy_conv(LegacyConvSerializationType state) {
+  at::Tensor weight;
+  c10::optional<at::Tensor> bias;
+  torch::List<at::Tensor> stride_tensor, padding_tensor,
+    dilation_tensor;
+  at::Tensor groups_tensor;
+  torch::List<int64_t> stride, padding, dilation;
+  int64_t groups;
+  std::tie(weight, bias, stride_tensor, padding_tensor, dilation_tensor, groups_tensor) = state;
+  for (at::Tensor s : stride_tensor) {
+    stride.emplace_back(s[0].item<int64_t>());
+  }
+  for (at::Tensor p : padding_tensor) {
+    padding.emplace_back(p[0].item<int64_t>());
+  }
+  for (at::Tensor d : dilation_tensor) {
+    dilation.emplace_back(d[0].item<int64_t>());
+  }
+  groups = groups_tensor[0].item<int64_t>();
+  auto& ctx = at::globalContext();
+
+#ifdef USE_FBGEMM
+  if (ctx.qEngine() == at::QEngine::FBGEMM) {
+    return PackedConvWeight<kSpatialDim>::prepack(
+        weight,
+        bias,
+        stride,
+        padding,
+        dilation,
+        groups);
+  }
+#endif // USE_FBGEMM
+#ifdef USE_PYTORCH_QNNPACK
+  if (ctx.qEngine() == at::QEngine::QNNPACK) {
+    TORCH_CHECK(
+        kSpatialDim == 2,
+        "prepack/__setstate__: QNNPACK only supports Conv2d "
+        "now.");
+    return PackedConvWeightsQnnp<kSpatialDim>::prepack(
+        weight,
+        bias,
+        stride,
+        padding,
+        dilation,
+        groups);
+  }
+#endif // USE_PYTORCH_QNNPACK
+  TORCH_CHECK(
+      false,
+      "Didn't find engine for when deserializing ConvPackedParams: ",
+      toString(ctx.qEngine()));
+}
+

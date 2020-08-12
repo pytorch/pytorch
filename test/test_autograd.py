@@ -191,6 +191,35 @@ class TestAutograd(TestCase):
 
         self.assertIsNone(torch.autograd.grad(MyFunction.apply(x), x, allow_unused=True)[0])
 
+    def test_materialize_grads(self):
+        class MyFunction(Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x
+
+            @staticmethod
+            def backward(ctx, grad):
+                self.assertEqual(grad, torch.zeros(1))
+                return grad
+
+        x = torch.ones(1, requires_grad=True)
+        torch._C._functions.UndefinedGrad()(MyFunction.apply(x)).backward()
+
+    def test_dont_materialize_grads(self):
+        class MyFunction(Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.set_materialize_grads(False)
+                return x
+
+            @staticmethod
+            def backward(ctx, grad):
+                self.assertIsNone(grad)
+                return grad
+
+        x = torch.ones(1, requires_grad=True)
+        torch._C._functions.UndefinedGrad()(MyFunction.apply(x)).backward()
+
     def test_legacy_function_deprecation_exception(self):
         # Trigger exception
         class MyFunction(Function):
