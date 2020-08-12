@@ -5170,6 +5170,15 @@
     CPU: fmod
     CUDA: fmod_cuda
 
+- func: hypot.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+
+- func: hypot(Tensor self, Tensor other) -> Tensor
+  use_c10_dispatcher: full
+  variants: method, function
+
+- func: hypot_(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  variants: method
+
 - func: remainder.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA: remainder_out
