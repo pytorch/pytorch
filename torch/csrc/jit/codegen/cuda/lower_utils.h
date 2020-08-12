@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 
 #include <bitset>
+#include <map>
 
 // Provides utilities for dealing with nested ForLoop and IfThenElse scopes
 
@@ -55,6 +56,31 @@ Expr* firstInnerMostScope(Expr* scope);
 
 namespace ir_utils {
 
+// Somtimes we want to temporarily view a tensorview with another tensordomain.
+// This isn't a permanent transformation, but in indexing we want to index
+// producers with a consumer set of indices, so we need to view the producer
+// transformed like consumer while we index. This will set the tv with td for
+// the life of this context guard.
+class TVDomainGuard {
+ private:
+  TensorView* tv_;
+  TensorDomain* prev_domain;
+
+ public:
+  explicit TVDomainGuard(TensorView* _tv, TensorDomain* td);
+
+  ~TVDomainGuard();
+};
+
+// Return inputs of provided IterDomains that are IterDomains
+std::vector<IterDomain*> iterDomainInputsOf(const std::vector<IterDomain*>&);
+
+// Return inputs of provided IterDomains that are IterDomains, order as the
+// second provided vector.
+std::vector<IterDomain*> iterDomainInputsOfOrderedAs(
+    const std::vector<IterDomain*>& of,
+    const std::vector<IterDomain*>& order);
+
 std::vector<Val*> indices(std::vector<kir::ForLoop*>);
 
 bool isTV(const Val* const);
@@ -71,11 +97,14 @@ bool isScope(const Expr*);
 
 Expr* asExpr(Statement*);
 
+// TODO: Remove in favor of ->as<TensorView>()
 TensorView* asTV(Val*);
 
+// TODO: Remove in favor of ->as<ForLoop>()
 kir::ForLoop* asForLoop(Statement*);
 
-const TensorView* asConstTV(const Val* const);
+// TODO: Remove in favor of ->as<TensorView>()
+const TensorView* asConstTV(const Val*);
 
 bool isUnrolledFor(const Expr*);
 
@@ -124,6 +153,36 @@ ParallelTypeBitmap getParallelBroadcastDomains(
     const ThreadPredicateMap& preds);
 
 } // namespace ir_utils
+
+namespace loop_utils {
+
+// I wanted to make the tv's in these util functions constant, but that started
+// a long const-ness project going into TensorView (making functions const
+// there) then into lower_loops where we sort exprs.
+// TODO: We should fix this when we have some time.
+
+// Figure out which loop the allocation needs to be in. Returns nullptr if
+// outside the first loop in loops. Also find out which index in tv the
+// first dimension that needs to be allocated is. Meaning we need to allocate
+// that local axis and above.
+std::pair<kir::ForLoop*, int64_t> getAllocPoint(
+    TensorView* tv,
+    const std::vector<kir::ForLoop*>& loops);
+
+// Go through exprs mapping root domains from producer to consumer. Provides a
+// ground truth for how root domains map through our expressions. Needed for
+// unrolling.
+std::unordered_map<IterDomain*, IterDomain*> p2cRootMap(
+    const std::vector<Expr*>& exprs);
+
+// Given a root IterationDomain and a p2c_root_map find the root IterationDomain
+// furthest down in the sorted expr list it maps to. Needed for unrolling.
+IterDomain* getTermIDInMap(
+    IterDomain* root_id,
+    std::unordered_map<IterDomain*, IterDomain*> p2c_root_map);
+
+} // namespace loop_utils
+
 } // namespace fuser
 } // namespace jit
 } // namespace torch

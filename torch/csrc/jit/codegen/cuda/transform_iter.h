@@ -23,25 +23,6 @@ struct id_int_lt {
   }
 };
 
-// Simply grabs all exprs needed to produce provided outputs.
-class Exprs : public IterVisitor {
- private:
-  std::vector<Expr*> exprs;
-  void handle(Expr* e) override {
-    exprs.push_back(e);
-  }
-
- public:
-  static std::vector<Expr*> getFrom(std::vector<Val*> outputs) {
-    if (outputs.empty())
-      return std::vector<Expr*>();
-
-    Exprs inst;
-    inst.traverseFrom(outputs[0]->fusion(), outputs);
-    return inst.exprs;
-  }
-};
-
 } // namespace
 
 // Uses the history of _target_domain, and replays that history using the

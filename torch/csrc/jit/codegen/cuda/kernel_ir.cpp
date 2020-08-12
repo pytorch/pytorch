@@ -95,11 +95,11 @@ TensorDomain::TensorDomain(const fuser::TensorDomain* tensor_domain)
         return lowered_domains;
       };
 
-  root_domain_ = lowerIterDomains(tensor_domain->rootDomain());
+  root_domain_ = lowerIterDomains(tensor_domain->getRootDomain());
   domain_ = lowerIterDomains(tensor_domain->domain());
   no_bcast_domain_ = lowerIterDomains(tensor_domain->noBroadcasts());
   no_reduction_domain_ = lowerIterDomains(tensor_domain->noReductions());
-  rfactor_domain_ = lowerIterDomains(tensor_domain->rfactorDomain());
+  rfactor_domain_ = lowerIterDomains(tensor_domain->getRFactorDomain());
 }
 
 TensorDomain::TensorDomain(const TensorDomain* src, IrCloner* ir_cloner)
@@ -539,6 +539,7 @@ Val* newLogicExpr(BinaryOpType op_type, Val* lhs, Val* rhs) {
 } // namespace
 
 Val* lowerValue(const Val* val) {
+  TORCH_INTERNAL_ASSERT(!kir::isLoweredVal(val), val, " is already lowered.");
   return FusionGuard::getCurFusion()->lowerValue(val);
 }
 

@@ -76,6 +76,10 @@ class TORCH_CUDA_API IterVisitor : public OptOutDispatch {
   // throughout traversal).
   std::vector<std::vector<Statement*>> stmt_stack;
 
+  // Statements to stop traversal on if they're hit (pretends they're leaf
+  // nodes in next)
+  std::unordered_set<Statement*> termination_stmts;
+
   void traverse_(
       Fusion* fusion,
       bool from_outputs_only = false,
@@ -86,18 +90,23 @@ class TORCH_CUDA_API IterVisitor : public OptOutDispatch {
   // Calls handle on all Statement*s in topological sorted order.
   // traverseAllPaths = false only call handle on each Statement* once
   // traverseAllPaths = true traverses all paths from nodes in from to inputs.
-  //   Handle on a Statement* for every path from "from" nodes, to inputs.
+  // Handle on a Statement* for every path from "from" nodes, to inputs.
+  // to argument allows specification of nodes to stop at if we want to stop
+  // beffore we hit all leaf nodes. This can be helpful when we want to traverse
+  // from TensorView::domain(), to the rfactor domain, instead of root domain.
   void traverseFrom(
       Fusion* fusion,
       const std::vector<Val*>& from,
       bool traverseAllPaths = false);
 
   // from_outputs_only = true start from outputs registered with fusion,
-  // from_outputs_only = false start from all leaf nodes,
+  // from_outputs_only = false start from all leaf nodes. Calls into
+  // traverseFrom.
   void traverse(Fusion* fusion, bool from_outputs_only = false);
 
   // from_outputs_only = true start from outputs registered with fusion,
-  // from_outputs_only = false start from all leaf nodes,
+  // from_outputs_only = false start from all leaf nodes. Calls into
+  // traverseFrom.
   void traverseAllPaths(Fusion* fusion, bool from_outputs_only = false);
 
   static std::unordered_set<Val*> getInputsTo(const std::vector<Val*>& vals);

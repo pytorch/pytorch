@@ -416,6 +416,8 @@ class TORCH_CUDA_API TensorDomain : public Val {
   bool hasBroadcast() const;
   bool hasRFactor() const;
 
+  c10::optional<unsigned int> getReductionAxis() const;
+
   const std::vector<IterDomain*>& noReductions() const {
     return no_reduction_domain_;
   }
@@ -424,13 +426,19 @@ class TORCH_CUDA_API TensorDomain : public Val {
     return no_bcast_domain_;
   }
 
-  const std::vector<IterDomain*>& rootDomain() const {
+  const std::vector<IterDomain*>& getRootDomain() const {
     return root_domain_;
   };
 
-  const std::vector<IterDomain*>& rfactorDomain() const {
+  const std::vector<IterDomain*>& getRFactorDomain() const {
     return rfactor_domain_;
   };
+
+  // If rfactor domain exists in domain() return it, otherwise return root
+  // domain.
+  const std::vector<IterDomain*>& getMaybeRFactorDomain() const {
+    return hasRFactor() ? getRFactorDomain() : getRootDomain();
+  }
 
   void resetDomains() {
     no_reduction_domain_ = noReductions(domain_);
@@ -467,8 +475,8 @@ class TORCH_CUDA_API TensorDomain : public Val {
   static bool hasBroadcast(const std::vector<IterDomain*>&);
   static bool hasReduction(const std::vector<IterDomain*>&);
 
-  // return pairs of producer axes and consumer axes that represent
-  // mapping between corresponding axies. Not all axes have
+  // return std::pair<producer_id, consumer_id> representing
+  // the mapping between corresponding axes. Not all axes have
   // corresponding mapping, e.g., broadcast axis in consumer
   // does not have any corresponding axis in producer.
   static std::vector<std::pair<int, int>> mapDomainPandC(
@@ -488,23 +496,35 @@ class TORCH_CUDA_API TensorDomain : public Val {
       const TensorDomain* consumer,
       const TensorDomain* producer,
       const std::unordered_set<IterDomain*>& consumer_root_dims_to_map);
+
   static std::unordered_map<IterDomain*, IterDomain*> mapRootCtoP(
       const TensorDomain* consumer,
       const TensorDomain* producer) {
-    return mapRootCtoP(consumer, producer, {});
+    return mapRootCtoP(
+        consumer,
+        producer,
+        std::unordered_set<IterDomain*>(
+            consumer->getRootDomain().begin(),
+            consumer->getRootDomain().end()));
   }
 
   // Create a map from producer root IterDomains -> consumer root IterDomains.
-  // Only those root producer IDs present in producer_root_dims_to_map
+  // Only those root producer IDs present in producer_maybe_rfactor_dims_to_map
   // will be attempted to map to their corresponding consumer IDs.
   static std::unordered_map<IterDomain*, IterDomain*> mapRootPtoC(
       const TensorDomain* producer,
       const TensorDomain* consumer,
-      const std::unordered_set<IterDomain*>& producer_root_dims_to_map);
+      const std::unordered_set<IterDomain*>&
+          producer_maybe_rfactor_dims_to_map);
+
   static std::unordered_map<IterDomain*, IterDomain*> mapRootPtoC(
       const TensorDomain* producer,
       const TensorDomain* consumer) {
-    return mapRootPtoC(producer, consumer, {});
+    auto p_root = producer->getMaybeRFactorDomain();
+    return mapRootPtoC(
+        producer,
+        consumer,
+        std::unordered_set<IterDomain*>(p_root.begin(), p_root.end()));
   }
 
   // pair is in order where second is the consumer of first

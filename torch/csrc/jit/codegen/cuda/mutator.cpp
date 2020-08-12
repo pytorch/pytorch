@@ -52,7 +52,7 @@ Statement* OptOutMutator::mutate(TensorDomain* td) {
 
   if (mutated) {
     Val* mutated_val = new TensorDomain(
-        td->rootDomain(), td->rfactorDomain(), dom, td->contiguity());
+        td->getRootDomain(), td->getRFactorDomain(), dom, td->contiguity());
     registerMutation(td, mutated_val);
     return mutated_val;
   }

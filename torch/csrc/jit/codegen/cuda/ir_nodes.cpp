@@ -242,11 +242,9 @@ ReductionOp::ReductionOp(
         "Reduction operation was created that does not have tensor inputs and outputs.");
 
     TORCH_INTERNAL_ASSERT(
-        TensorDomain::noReductions(_in->as<TensorView>()->getRootDomain())
-                    .size() == _out->as<TensorView>()->getRootDomain().size() ||
-            TensorDomain::noReductions(
-                _in->as<TensorView>()->domain()->rfactorDomain())
-                    .size() == _out->as<TensorView>()->getRootDomain().size(),
+        TensorDomain::noReductions(
+            _in->as<TensorView>()->getMaybeRFactorDomain())
+                .size() == _out->as<TensorView>()->getRootDomain().size(),
         "Reduction operation created with mismatched domains.");
 
   } else {
@@ -549,21 +547,21 @@ TensorDomain::TensorDomain(const TensorDomain* src, IrCloner* ir_cloner)
 bool TensorDomain::sameAs(const TensorDomain* const other) const {
   if (nDims() != other->nDims())
     return false;
-  if (rootDomain().size() != other->rootDomain().size())
+  if (getRootDomain().size() != other->getRootDomain().size())
     return false;
-  if (rfactorDomain().size() != other->rfactorDomain().size())
+  if (getRFactorDomain().size() != other->getRFactorDomain().size())
     return false;
 
   for (size_t i = 0; i < nDims(); i++)
     if (!(axis(i)->sameAs(other->axis(i))))
       return false;
 
-  for (size_t i = 0; i < rootDomain().size(); i++)
-    if (!(rootDomain()[i]->sameAs(other->rootDomain()[i])))
+  for (size_t i = 0; i < getRootDomain().size(); i++)
+    if (!(getRootDomain()[i]->sameAs(other->getRootDomain()[i])))
       return false;
 
-  for (size_t i = 0; i < rfactorDomain().size(); i++)
-    if (!(rfactorDomain()[i]->sameAs(other->rfactorDomain()[i])))
+  for (size_t i = 0; i < getRFactorDomain().size(); i++)
+    if (!(getRFactorDomain()[i]->sameAs(other->getRFactorDomain()[i])))
       return false;
 
   return true;
@@ -604,6 +602,17 @@ bool TensorDomain::hasBroadcast() const {
 
 bool TensorDomain::hasRFactor() const {
   return !rfactor_domain_.empty();
+}
+
+c10::optional<unsigned int> TensorDomain::getReductionAxis() const {
+  auto it = std::find_if(domain_.begin(), domain_.end(), [](const auto& id) {
+    return id->isReduction();
+  });
+  if (it == domain_.end()) {
+    return c10::optional<unsigned int>();
+  } else {
+    return c10::optional<unsigned int>(std::distance(domain_.begin(), it));
+  }
 }
 
 // i here is int, as we want to accept negative value and ::size_type can be a
@@ -876,9 +885,8 @@ std::vector<std::pair<int, int>> TensorDomain::mapDomainPandC(
 std::vector<std::pair<IterDomain*, IterDomain*>> TensorDomain::mapRootPandC(
     const TensorDomain* producer,
     const TensorDomain* consumer) {
-  auto consumer_root = consumer->rootDomain();
-  auto producer_root = producer->hasRFactor() ? producer->rfactorDomain()
-                                              : producer->rootDomain();
+  auto consumer_root = consumer->getRootDomain();
+  auto producer_root = producer->getMaybeRFactorDomain();
   std::vector<std::pair<IterDomain*, IterDomain*>> root_id_map;
   for (const auto& m : mapDomainPandC(producer_root, consumer_root)) {
     auto producer_axis = producer_root[m.first];
@@ -907,13 +915,13 @@ std::unordered_map<IterDomain*, IterDomain*> TensorDomain::mapRootCtoP(
 std::unordered_map<IterDomain*, IterDomain*> TensorDomain::mapRootPtoC(
     const TensorDomain* producer,
     const TensorDomain* consumer,
-    const std::unordered_set<IterDomain*>& producer_root_dims_to_map) {
+    const std::unordered_set<IterDomain*>& producer_maybe_rfactor_dims_to_map) {
   std::unordered_map<IterDomain*, IterDomain*> root_id_map;
   for (const auto& kv : mapRootPandC(producer, consumer)) {
     auto producer_axis = kv.first;
     auto consumer_axis = kv.second;
-    if (producer_root_dims_to_map.find(producer_axis) !=
-        producer_root_dims_to_map.end()) {
+    if (producer_maybe_rfactor_dims_to_map.find(producer_axis) !=
+        producer_maybe_rfactor_dims_to_map.end()) {
       root_id_map[producer_axis] = consumer_axis;
     }
   }

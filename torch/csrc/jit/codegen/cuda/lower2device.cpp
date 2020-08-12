@@ -80,9 +80,12 @@ void GPULower::lower() {
 
   // Run our passes keeping the lowered expressions and forwarding
   // them.
-  LoopNestGenerator lng(fusion_, preds, fusion_->exprs(true));
+  const auto lowered_exprs =
+      LoopNestGenerator::loweredExprs(fusion_, preds, fusion_->exprs(true));
+
   const auto unrolled_loops =
-      UnrollPass::runPass(fusion_, lng.loweredExprs(), lng.initExprs(), preds);
+      UnrollPass::runPass(fusion_, lowered_exprs, preds);
+
   const auto indexed_loops =
       IndexLowering::getIndexedExprs(fusion_, unrolled_loops);
 

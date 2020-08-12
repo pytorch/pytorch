@@ -1,6 +1,10 @@
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
+#include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
+#include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/lower_thread_predicate.h>
+
+#include <algorithm>
 
 namespace torch {
 namespace jit {
@@ -338,7 +342,7 @@ Expr* getParent(Expr* scope) {
 
 // Open a new inner most for loop
 kir::ForLoop* openFor(Expr* scope, IterDomain* id) {
-  const auto kir_id = new kir::IterDomain(id);
+  const auto kir_id = kir::lowerValue(id)->as<kir::IterDomain>();
   kir::ForLoop* new_scope = nullptr;
   if (id->isThread()) {
     std::stringstream ss;
@@ -389,6 +393,44 @@ Expr* firstInnerMostScope(Expr* scope) {
 } // namespace scope_utils
 
 namespace ir_utils {
+
+TVDomainGuard::TVDomainGuard(TensorView* _tv, TensorDomain* td)
+    : tv_(_tv), prev_domain(tv_->domain()) {
+  tv_->setDomain(td);
+}
+
+TVDomainGuard::~TVDomainGuard() {
+  tv_->setDomain(prev_domain);
+}
+
+std::vector<IterDomain*> iterDomainInputsOf(
+    const std::vector<IterDomain*>& input_ids) {
+  auto inputs = IterVisitor::getInputsTo({input_ids.begin(), input_ids.end()});
+  std::vector<IterDomain*> id_inputs(
+      ir_utils::filterByType<IterDomain>(inputs).begin(),
+      ir_utils::filterByType<IterDomain>(inputs).end());
+  return id_inputs;
+}
+
+std::vector<IterDomain*> iterDomainInputsOfOrderedAs(
+    const std::vector<IterDomain*>& of,
+    const std::vector<IterDomain*>& order) {
+  auto inputs_vec = iterDomainInputsOf(of);
+
+  std::unordered_set<IterDomain*> inputs_set(
+      inputs_vec.begin(), inputs_vec.end());
+
+  std::vector<IterDomain*> ordered_inputs;
+  std::copy_if(
+      order.begin(),
+      order.end(),
+      std::back_inserter(ordered_inputs),
+      [&inputs_set](const auto& id) {
+        return inputs_set.find(id) != inputs_set.end();
+      });
+
+  return ordered_inputs;
+}
 
 std::vector<Val*> indices(std::vector<kir::ForLoop*> loops) {
   std::vector<Val*> inds(loops.size());
@@ -604,6 +646,89 @@ ParallelTypeBitmap getParallelBroadcastDomains(
 }
 
 } // namespace ir_utils
+
+namespace loop_utils {
+
+std::pair<kir::ForLoop*, int64_t> getAllocPoint(
+    TensorView* tv,
+    const std::vector<kir::ForLoop*>& loops) {
+  // If in global memory, it can be all the way outside the loops.
+  if (tv->getMemoryType() == MemoryType::Global) {
+    return {nullptr, 0};
+  }
+
+  // Figure out where we want to place alloc/reduction initialization. We want
+  // outside an unroll loop, or inside our computeAt point.
+  kir::ForLoop* alloc_loop = nullptr;
+
+  auto loops_it = loops.begin();
+
+  // Look at each axis individually in out's domain
+  for (int64_t tv_i = 0; tv_i < (int64_t)tv->getThisComputeAtAxis(); tv_i++) {
+    // Grab the axis ID
+
+    auto ca_id = tv->getComputeAtAxis(tv_i).first;
+    auto kir_ca_id = kir::lowerValue(ca_id)->as<kir::IterDomain>();
+
+    loops_it =
+        std::find_if(loops_it, loops.end(), [&kir_ca_id](const auto& loop) {
+          return kir_ca_id == loop->iter_domain() ||
+              loop->iter_domain()->getParallelType() == ParallelType::Unroll;
+        });
+
+    TORCH_INTERNAL_ASSERT(
+        loops_it != loops.end(),
+        "Could not find all required axes for indexing.");
+
+    if (kir_ca_id->getParallelType() == ParallelType::Unroll) {
+      return {alloc_loop, tv_i};
+    }
+
+    alloc_loop = *loops_it;
+    ++loops_it;
+  }
+
+  return {alloc_loop, (int64_t)tv->getThisComputeAtAxis()};
+}
+
+std::unordered_map<IterDomain*, IterDomain*> p2cRootMap(
+    const std::vector<Expr*>& exprs) {
+  std::unordered_map<IterDomain*, IterDomain*> p2c_root_map;
+
+  for (auto expr : exprs) {
+    auto out_tv = ir_utils::getTVOutput(expr);
+    for (auto inp : expr->inputs()) {
+      if (inp->getValType().value() != ValType::TensorView) {
+        continue;
+      }
+
+      auto root_p2c = TensorDomain::mapRootPtoC(
+          inp->as<TensorView>()->domain(), out_tv->domain());
+      for (auto entry : root_p2c) {
+        auto p_id = entry.first;
+        auto c_id = entry.second;
+        // Careful we don't allow circular references
+        if (p_id != c_id) {
+          p2c_root_map[p_id] = c_id;
+        }
+      }
+    }
+  }
+
+  return p2c_root_map;
+}
+
+IterDomain* getTermIDInMap(
+    IterDomain* root_id,
+    std::unordered_map<IterDomain*, IterDomain*> p2c_root_map) {
+  auto entry = root_id;
+  while (p2c_root_map.find(entry) != p2c_root_map.end()) {
+    entry = p2c_root_map.at(entry);
+  }
+  return entry;
+}
+
+} // namespace loop_utils
 
 } // namespace fuser
 } // namespace jit

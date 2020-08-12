@@ -55,13 +55,13 @@ class TORCH_CUDA_API UnrollPass : public OptOutDispatch {
 
   // We will track which loops in the incomming IR will be replaced and by what
   std::unordered_map<Expr*, Expr*> loop_replacement_map;
+
   // Hold on to a reference to the fusion for convenience
   Fusion* fusion_;
+
   // Hold on to the incoming exprs, but don't modify them. We don't set the
   // Expr* to be const as Exprs' are const by virtue of their interface design
   const std::vector<Expr*>& incoming_exprs_;
-  // Hold on to the incoming initialization exprs
-  const std::unordered_set<Expr*>& incoming_init_exprs_;
 
   // Keep all for loops conveniently to make unrolling easier
   std::vector<kir::ForLoop*> for_loops;
@@ -69,8 +69,10 @@ class TORCH_CUDA_API UnrollPass : public OptOutDispatch {
   // Map from TensorView
   const ThreadPredicateMap& thread_predicates_;
 
+  std::unordered_map<IterDomain*, IterDomain*> p2c_root_map;
+
   // keep track if we're within an unrolled loop
-  bool within_unroll = false;
+  bool look_for_unroll = true;
 
   // Custom dispatch for Expr, want to find out of it's a TV op
   void handle(Expr*) final;
@@ -82,12 +84,12 @@ class TORCH_CUDA_API UnrollPass : public OptOutDispatch {
   UnrollPass(
       Fusion* _fusion,
       const std::vector<Expr*>& _incoming_exprs,
-      const std::unordered_set<Expr*>& _incoming_init_exprs,
       const ThreadPredicateMap& _thread_predicates)
       : fusion_(_fusion),
         incoming_exprs_(_incoming_exprs),
-        incoming_init_exprs_(_incoming_init_exprs),
-        thread_predicates_(_thread_predicates) {}
+        thread_predicates_(_thread_predicates) {
+    auto p2c_root_map = loop_utils::p2cRootMap(_fusion->exprs(true));
+  }
 
   // Generate the for Expr replacement map
   void computeMap();
@@ -98,7 +100,6 @@ class TORCH_CUDA_API UnrollPass : public OptOutDispatch {
   static std::vector<Expr*> runPass(
       Fusion* fusion,
       const std::vector<Expr*>& exprs,
-      const std::unordered_set<Expr*>& init_exprs,
       const ThreadPredicateMap& thread_predicates);
 };
 

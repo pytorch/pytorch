@@ -40,13 +40,13 @@ class TORCH_CUDA_API LoopNestGenerator : public OptOutDispatch {
   // Track the active computeAt scope, and what view we're "computeAt-ing" into
   std::vector<std::pair<IterDomain*, TensorView*>> compute_at_scope;
 
-  // Track the array initialization expressions as they need be
-  // treated differently when adding predicatation.
-  std::unordered_set<Expr*> init_exprs_;
-
   // Predicates from ThreadPredicates that we will extend to reduction buffer
   // initialization
   ThreadPredicateMap& thread_predicates_;
+
+  // Create the allocation for tv, place it inside the loop associated with
+  // alloc_id, return the node
+  Expr* pushAlloc(TensorView*);
 
   // Fusion shared_memory values
   // Tracks if shared memory is modified
@@ -62,9 +62,6 @@ class TORCH_CUDA_API LoopNestGenerator : public OptOutDispatch {
   // False if TensorView is not shared memory buffer
   bool isModifiedSharedMemory(Val* key) const;
 
-  // Create, place, and return the allocation for tv
-  Expr* pushAlloc(TensorView*);
-
   // Open a new inner most for loop, track which TV it was constructed from
   // according to the computeAt chain.
   void openFor(std::pair<IterDomain*, TensorView*>);
@@ -76,13 +73,9 @@ class TORCH_CUDA_API LoopNestGenerator : public OptOutDispatch {
   // straight to lower_exprs
   void pushBack(Expr*);
 
-  // Update for loop structure based on this TensorView, see implementation for
-  // more details
-  void updateLoopNest(TensorView*);
-
   // Initialize a buffer to init_val. If this buffer is in smem or registers,
   // pass in its allocation statement so we can make sure that we insert this
-  // initialization comes after the allocation.
+  // initialization after the allocation.
   void initReduction(TensorView* tv, Val* init_val, Expr* alloc_expr = nullptr);
 
   // Check if expr is a TV op and handle accordingly.
@@ -91,7 +84,6 @@ class TORCH_CUDA_API LoopNestGenerator : public OptOutDispatch {
   // Run the pass and accumulate output in lowered_exprs
   void generate(const std::vector<Expr*>& exprs);
 
- public:
   LoopNestGenerator(
       Fusion* _fusion,
       ThreadPredicateMap& _thread_predicates,
@@ -100,12 +92,13 @@ class TORCH_CUDA_API LoopNestGenerator : public OptOutDispatch {
     generate(exprs);
   }
 
-  const auto& loweredExprs() const {
-    return lowered_exprs;
-  }
-
-  const auto& initExprs() const {
-    return init_exprs_;
+ public:
+  static std::vector<Expr*> loweredExprs(
+      Fusion* _fusion,
+      ThreadPredicateMap& _thread_predicates,
+      const std::vector<Expr*>& exprs) {
+    LoopNestGenerator generator(_fusion, _thread_predicates, exprs);
+    return generator.lowered_exprs;
   }
 };
 

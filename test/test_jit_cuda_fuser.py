@@ -412,6 +412,8 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING and GRAPH_EXECUTOR !=
                      ProfilingMode.LEGACY, "Requires fusion optimization pass to be effective")
     def test_dynamic_size(self):
+        torch._C._jit_set_bailout_depth(2)
+
         def t(x: torch.Tensor, y: torch.Tensor, z: float):
             o = x + y
             o = o + z
@@ -427,11 +429,17 @@ class TestCudaFuser(JitTestCase):
         x = torch.randn(8, 32, 16, 8, dtype=torch.float, device="cuda")
         y = torch.randn(16, 8, dtype=torch.float, device="cuda")
         jit_o = t_jit(x, y, 2.0)
+        jit_o = t_jit(x, y, 2.0)
         o = t(x, y, 2.0)
         self.assertEqual(o, jit_o)
+        self.assertGraphContains(t_jit.graph_for(x, y, 2.0), FUSION_GROUP)
         x = torch.randn(8, 17, 8, dtype=torch.float, device="cuda")
         y = torch.randn(8, 17, 1, dtype=torch.float, device="cuda")
         jit_o = t_jit(x, y, 2.0)
+        jit_o = t_jit(x, y, 2.0)
+        o = t(x, y, 2.0)
+        self.assertEqual(o, jit_o)
+        self.assertGraphContains(t_jit.graph_for(x, y, 2.0), FUSION_GROUP)
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     def test_random_topo(self):

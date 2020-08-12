@@ -167,7 +167,7 @@ void IndexLowering::handle(ReductionOp* rop) {
         "Found a reduction stage that has both a non-parallelized reduction and a grid reduction.",
         " This is not supported, please use rfactor to do the serialized reduction first, then the grid reduction.");
   }
-  auto loops = scope_utils::getLoops(active_scope_expr);
+  const auto loops = scope_utils::getLoops(active_scope_expr);
 
   kir::TensorIndex* out = Index::getConsumerIndex(out_tv, loops);
   Val* in = Index::getProducerIndex(
@@ -253,14 +253,15 @@ void IndexLowering::handle(BroadcastOp* bop) {
       "Cannot have a broadcast operation on something other than a tensor view, but received ",
       bop);
 
-  kir::TensorIndex* out = Index::getConsumerIndex(
-      ir_utils::asTV(bop->out()), scope_utils::getLoops(active_scope_expr));
+  auto loops = scope_utils::getLoops(active_scope_expr);
+
+  kir::TensorIndex* out =
+      Index::getConsumerIndex(ir_utils::asTV(bop->out()), loops);
+
   Val* in = bop->in();
   if (ir_utils::isTV(in))
     in = Index::getProducerIndex(
-        ir_utils::asTV(in),
-        ir_utils::asTV(bop->out()),
-        scope_utils::getLoops(active_scope_expr));
+        ir_utils::asTV(in), ir_utils::asTV(bop->out()), loops);
   pushBack(new kir::BroadcastOp(out, in));
 }
 

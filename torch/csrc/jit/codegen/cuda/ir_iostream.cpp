@@ -342,8 +342,18 @@ void IRPrinter::handle(const kir::NamedScalar* i) {
   os << i->name();
 }
 
-void IRPrinter::handle(const kir::IterDomain*) {
-  TORCH_INTERNAL_ASSERT(false, "Unreachable");
+void IRPrinter::handle(const kir::IterDomain* id) {
+  os << id->getIterType();
+  os << id->getParallelType();
+  os << "{";
+  if (!id->start()->isZeroInt()) {
+    print_inline(id->start());
+    os << " : ";
+  }
+  print_inline(id->extent());
+  os << "}";
+  if (id->isRFactorProduct())
+    os << "rf";
 }
 
 void IRPrinter::handle(const kir::TensorDomain*) {
@@ -622,6 +632,7 @@ void IRPrinter::handle(const kir::TernaryOp* top) {
 
 void IRPrinter::handle(const ReductionOp* rop) {
   TORCH_CHECK(rop->out()->getValType() != ValType::TensorIndex);
+  indent();
   os << rop->out() << " = reduction( " << rop->in()
      << ", op = " << rop->getReductionOpType()
      << ", initial value = " << rop->init() << " )\n";
@@ -732,6 +743,7 @@ void IRPrinter::handle(const kir::GridReduction* gr) {
 
 void IRPrinter::handle(const BroadcastOp* bop) {
   TORCH_CHECK(bop->out()->getValType() != ValType::TensorIndex);
+  indent();
   os << bop->out() << " = broadcast( " << bop->in() << " )\n";
 }
 

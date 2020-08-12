@@ -64,6 +64,16 @@ static const char* val_type2string(ValType t) {
       return "Scalar";
     case ValType::NamedScalar:
       return "NamedScalar";
+    case ValType::KirIterDomain:
+      return "KirIterDomain";
+    case ValType::KirNamedScalar:
+      return "KirNamedScalar";
+    case ValType::KirScalar:
+      return "KirScalar";
+    case ValType::KirTensorDomain:
+      return "KirTensorDomain";
+    case ValType::KirTensorView:
+      return "KirTensorView";
     default:
       break;
   }

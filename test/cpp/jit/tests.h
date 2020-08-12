@@ -148,6 +148,7 @@ namespace jit {
   _(GPU_FusionReduction5)                           \
   _(GPU_FusionReductionTFT)                         \
   _(GPU_FusionSimpleBCast)                          \
+  _(GPU_FusionComplexBCast)                         \
   _(GPU_FusionSimpleGemm)                           \
   _(GPU_FusionSoftmax1D)                            \
   _(GPU_FusionSoftmax1DNormalized)                  \
