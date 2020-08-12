@@ -13,8 +13,6 @@ if not dist.is_available():
     sys.exit(0)
 
 BACKEND = os.environ["BACKEND"]
-INIT_METHOD = os.getenv("INIT_METHOD", "env://")
-
 
 if BACKEND == "gloo" or BACKEND == "nccl":
 
