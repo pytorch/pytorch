@@ -1386,6 +1386,12 @@ ger(vec2) -> Tensor
 See :func:`torch.ger`
 """)
 
+add_docstr_all('outer', r"""
+outer(vec2) -> Tensor
+
+See :func:`torch.outer`.
+""")
+
 add_docstr_all('hypot',
                r"""
 hypot(other) -> Tensor
@@ -3077,6 +3083,13 @@ add_docstr_all('sum',
 sum(dim=None, keepdim=False, dtype=None) -> Tensor
 
 See :func:`torch.sum`
+""")
+
+add_docstr_all('nansum',
+               r"""
+nansum(dim=None, keepdim=False, dtype=None) -> Tensor
+
+See :func:`torch.nansum`
 """)
 
 add_docstr_all('svd',

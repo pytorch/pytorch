@@ -18,7 +18,14 @@ TORCH_LIBRARY(quantized, m) {
   register_conv_params<3>();
 
   m.def("add(Tensor qa, Tensor qb, float scale, int zero_point) -> Tensor qc");
+  m.def("add.out(Tensor qa, Tensor qb, Tensor(a!) out) -> Tensor(a!) out");
+  m.def("add.Scalar(Tensor qa, Scalar b) -> Tensor qc");
+  m.def("add.Scalar_out(Tensor qa, Scalar b, Tensor(a!) out) -> Tensor(a!) out");
   m.def("add_relu(Tensor qa, Tensor qb, float scale, int zero_point) -> Tensor qc");
+  m.def("add_relu.Scalar(Tensor qa, Scalar b) -> Tensor qc");
+  m.def("add_relu.out(Tensor qa, Tensor qb, Tensor(a!) out) -> Tensor(a!) out");
+  m.def("add_relu.Scalar_out(Tensor qa, Scalar b, Tensor(a!) out) -> Tensor(a!) out");
+  // deprecated functions, kept for backward compatibility
   m.def("add_out(Tensor qa, Tensor qb, Tensor(a!) out) -> Tensor(a!) out");
   m.def("add_relu_out(Tensor qa, Tensor qb, Tensor(a!) out) -> Tensor(a!) out");
   m.def("add_scalar(Tensor qa, Scalar b) -> Tensor qc");
@@ -117,7 +124,14 @@ TORCH_LIBRARY(quantized, m) {
   m.def(
       "linear_unpack_fp16.legacy(Tensor W_prepack) -> (Tensor W_origin, Tensor? B_origin)");
   m.def("mul(Tensor qa, Tensor qb, float scale, int zero_point)-> Tensor qc");
+  m.def("mul.out(Tensor qa, Tensor qb, Tensor(a!) out)-> Tensor(a!) out");
+  m.def("mul.Scalar(Tensor qa, Scalar b)-> Tensor qc");
+  m.def("mul.Scalar_out(Tensor qa, Scalar b, Tensor(a!) out)-> Tensor(a!) out");
   m.def("mul_relu(Tensor qa, Tensor qb, float scale, int zero_point)-> Tensor qc");
+  m.def("mul_relu.out(Tensor qa, Tensor qb, Tensor(a!) out)-> Tensor(a!) out");
+  m.def("mul_relu.Scalar(Tensor qa, Scalar b)-> Tensor qc");
+  m.def("mul_relu.Scalar_out(Tensor qa, Scalar b, Tensor(a!) out)-> Tensor(a!) out");
+  // deprecated functions, kept for backward compatibility
   m.def("mul_out(Tensor qa, Tensor qb, Tensor(a!) out)-> Tensor(a!) out");
   m.def("mul_relu_out(Tensor qa, Tensor qb, Tensor(a!) out)-> Tensor(a!) out");
   m.def("mul_scalar(Tensor qa, Scalar b)-> Tensor qc");

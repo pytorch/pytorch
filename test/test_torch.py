@@ -2164,6 +2164,32 @@ class AbstractTestCases:
             torch.manual_seed(2)
             y = torch.randn(100)
             self.assertEqual(x, y)
+
+            max_int64 = 0x7fff_ffff_ffff_ffff
+            min_int64 = -max_int64 - 1
+            max_uint64 = 0xffff_ffff_ffff_ffff
+            # Check all boundary cases of valid seed value inputs
+            test_cases = [
+                # (seed, expected_initial_seed)
+                # Positive seeds should be unchanged
+                (max_int64, max_int64),
+                (max_int64 + 1, max_int64 + 1),
+                (max_uint64, max_uint64),
+                (0, 0),
+                # Negative seeds wrap around starting from the largest seed value
+                (-1, max_uint64),
+                (min_int64, max_int64 + 1)
+            ]
+            for seed, expected_initial_seed in test_cases:
+                torch.manual_seed(seed)
+                actual_initial_seed = torch.initial_seed()
+                msg = "expected initial_seed() = %x after calling manual_seed(%x), but got %x instead" % (
+                    expected_initial_seed, seed, actual_initial_seed)
+                self.assertEqual(expected_initial_seed, actual_initial_seed, msg=msg)
+            for invalid_seed in [min_int64 - 1, max_uint64 + 1]:
+                with self.assertRaisesRegex(RuntimeError, r'Overflow when unpacking long'):
+                    torch.manual_seed(invalid_seed)
+
             torch.set_rng_state(rng_state)
 
         def test_numel(self):
@@ -18202,6 +18228,19 @@ fn(*args)
                 if lazy_init_scale:
                     self.assertEqual(b.scale(torch.tensor([4.0], dtype=torch.float32, device=device)), 12.0)
 
+    @dtypesIfCUDA(torch.half, torch.float, torch.double,
+                  torch.int8, torch.short, torch.int, torch.long)
+    @dtypes(torch.float, torch.double,
+            torch.int8, torch.short, torch.int, torch.long)
+    def test_nansum(self, device, dtype):
+        x = (torch.randn(3, 3))
+        if dtype in [torch.half, torch.float, torch.double]:
+            x[x < 0.2] = float('nan')
+        # Randomly scale the values
+        x = (x * random.randint(10, 100)).tolist()
+
+        self.compare_with_numpy(torch.nansum, np.nansum, x, device, dtype)
+
     @onlyCUDA
     @tf32_on_and_off(0.005)
     def test_mv_stride_0(self, device):
@@ -18288,7 +18327,9 @@ fn(*args)
 
         return x
 
-    def _test_reduction_function_with_numpy(self, torch_func, np_func, device, dtype, with_extremal=False):
+    def _test_reduction_function_with_numpy(self, torch_func, np_func, device, dtype,
+                                            with_extremal=False, atol=None, rtol=None,
+                                            exact_dtype=True, with_keepdim=False):
         # Test 0-d to 3-d tensors.
         for ndims in range(0, 4):
             shape = self._rand_shape(ndims, min_size=5, max_size=10)
@@ -18300,12 +18341,18 @@ fn(*args)
 
                         if count_dim == ():
                             # Default `dims=None` case
-                            self.compare_with_numpy(torch_func, np_func, x, device=None, dtype=None)
+                            self.compare_with_numpy(torch_func, np_func, x, device=None, dtype=None,
+                                                    atol=atol, rtol=rtol, exact_dtype=exact_dtype)
                         else:
                             # With `dims: tuple of ints` case
-                            torch_func_partial = partial(torch_func, dim=count_dim)
-                            np_func_partial = partial(np_func, axis=count_dim)
-                            self.compare_with_numpy(torch_func_partial, np_func_partial, x, device=None, dtype=None)
+                            if with_keepdim:
+                                torch_func_partial = partial(torch_func, keepdim=True, dim=count_dim)
+                                np_func_partial = partial(np_func, keepdims=True, axis=count_dim)
+                            else:
+                                torch_func_partial = partial(torch_func, dim=count_dim)
+                                np_func_partial = partial(np_func, axis=count_dim)
+                            self.compare_with_numpy(torch_func_partial, np_func_partial, x, device=None, dtype=None,
+                                                    atol=atol, rtol=rtol, exact_dtype=exact_dtype)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False) +
@@ -18313,6 +18360,69 @@ fn(*args)
     def test_count_nonzero(self, device, dtype):
         self._test_reduction_function_with_numpy(torch.count_nonzero, np.count_nonzero, device, dtype)
         self._test_reduction_function_with_numpy(torch.count_nonzero, np.count_nonzero, device, dtype, True)
+
+    def _test_sum_reduction_vs_numpy(self, torch_fn, np_fn, device, dtype, with_keepdim=False, with_extremal=False):
+        def is_integral(dtype):
+            return dtype in torch.testing.get_all_int_dtypes()
+
+        # On Windows CI, the current version of `numpy` promotes all lower integers
+        # dtypes to int32 while `torch` promotes them to int64. Hence we skip on checking
+        # the exact dtype.
+        # Reference : https://dr.pytorch.org/api/view-log-full?build_id=122051580
+        # PR : https://github.com/pytorch/pytorch/pull/38628#issuecomment-655905370
+        exact_dtype = False if (IS_WINDOWS and is_integral(dtype)) else True
+
+        if dtype == torch.uint8:
+            with self.assertRaises(TypeError):
+                self._test_reduction_function_with_numpy(torch_fn, np_fn, device, dtype, with_extremal=with_extremal)
+        else:
+            # TODO: Investigate why the output is not close to numpy.
+            if dtype == torch.float16:
+                atol = 0.4
+                rtol = 1e-2
+            elif dtype == torch.float32:
+                atol = 7e-05
+                rtol = 3e-06
+            else:
+                # Default values
+                atol = None
+                rtol = None
+            self._test_reduction_function_with_numpy(torch_fn, np_fn, device, dtype,
+                                                     atol=atol, rtol=rtol, exact_dtype=exact_dtype,
+                                                     with_keepdim=with_keepdim, with_extremal=with_extremal)
+
+    @onlyOnCPUAndCUDA
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False)))
+    def test_sum_vs_numpy(self, device, dtype):
+        self._test_sum_reduction_vs_numpy(torch.sum, np.sum, device, dtype)
+        self._test_sum_reduction_vs_numpy(torch.sum, np.sum, device, dtype, with_extremal=True)
+        self._test_sum_reduction_vs_numpy(torch.sum, np.sum, device, dtype, with_keepdim=True)
+
+    @onlyOnCPUAndCUDA
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False)))
+    def test_nansum_vs_numpy(self, device, dtype):
+        self._test_sum_reduction_vs_numpy(torch.nansum, np.nansum, device, dtype)
+        self._test_sum_reduction_vs_numpy(torch.nansum, np.nansum, device, dtype, with_extremal=True)
+        self._test_sum_reduction_vs_numpy(torch.nansum, np.nansum, device, dtype, with_keepdim=True)
+
+    @dtypes(*(torch.testing.get_all_complex_dtypes()))
+    def test_nansum_complex(self, device, dtype):
+        x = torch.randn((3, 3, 3), device=device, dtype=dtype)
+        with self.assertRaisesRegex(RuntimeError, "nansum does not support complex inputs"):
+            torch.nansum(x)
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_nansum_out_dtype(self, device):
+        dtypes = list(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False))
+        for inp_dtype, out_dtype in combinations(dtypes, 2):
+            shape = self._rand_shape(random.randint(2, 5), min_size=5, max_size=10)
+            x = self._generate_input(shape, inp_dtype, device, with_extremal=False)
+            torch_fn = partial(torch.nansum, dtype=out_dtype)
+            np_out_dtype = torch_to_numpy_dtype_dict[out_dtype]
+            np_fn = partial(np.nansum, dtype=np_out_dtype)
+            self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None)
 
     @dtypes(torch.int32, torch.int64)
     def test_large_linspace(self, device, dtype):
