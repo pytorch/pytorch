@@ -7,6 +7,7 @@ from typing import List, Tuple, Optional
 
 import torch
 import torch.nn as nn
+import sys
 
 def _with_args(cls_or_self, **kwargs):
     r"""Wrapper that allows creation of class factories.
@@ -678,6 +679,13 @@ class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
         new_axis_list[0] = self.ch_axis
         y = x.permute(tuple(new_axis_list))
         y = torch.flatten(y, start_dim=1)
+
+        # debug only
+        if y.device != min_vals.device or y.device != max_vals.device:
+            print("ERROR: Device mismatch:", "y", y.device,
+                  "min_vals", min_vals.device, "max_vals", max_vals.device)
+            sys.exit(1)
+
         if min_vals.numel() == 0 or max_vals.numel() == 0:
             min_vals = torch.min(y, 1)[0]
             max_vals = torch.max(y, 1)[0]
