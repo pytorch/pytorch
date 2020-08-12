@@ -377,6 +377,13 @@ public:
   Vec256<T> floor() const {
     return map(at::native::floor_impl);
   }
+  Vec256<T> hypot(const Vec256<T> &b) const {
+    Vec256<T> ret;
+    for (int64_t i = 0; i < size(); i++) {
+      ret[i] = std::hypot(values[i], b[i]);
+    }
+    return ret;
+  }
   Vec256<T> neg() const {
     // NB: the trailing return type is needed because we need to coerce the
     // return value back to T in the case of unary operator- incuring a

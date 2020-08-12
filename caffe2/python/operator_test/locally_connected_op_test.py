@@ -3,7 +3,7 @@ from __future__ import division
 from __future__ import print_function
 
 import numpy as np
-from hypothesis import given
+from hypothesis import given, settings, assume
 import hypothesis.strategies as st
 
 from caffe2.python import core, utils
@@ -12,7 +12,7 @@ import caffe2.python.serialized_test.serialized_test_util as serial
 
 
 class TestLocallyConnectedOp(serial.SerializedTestCase):
-    @serial.given(N=st.integers(1, 3),
+    @given(N=st.integers(1, 3),
            C=st.integers(1, 3),
            H=st.integers(1, 5),
            W=st.integers(1, 5),
@@ -22,12 +22,15 @@ class TestLocallyConnectedOp(serial.SerializedTestCase):
            order=st.sampled_from(["NCHW", "NHWC"]),
            use_bias=st.booleans(),
            **hu.gcs)
+    @settings(deadline=10000)
     def test_lc_2d(
             self, N, C, H, W, M, kernel, op_name, order, use_bias, gc, dc):
         if H < kernel:
             kernel = H
         if W < kernel:
             kernel = W
+
+        assume(C == kernel * N)
 
         op = core.CreateOperator(
             op_name,
@@ -99,6 +102,7 @@ class TestLocallyConnectedOp(serial.SerializedTestCase):
            op_name=st.sampled_from(["LC", "LC1D"]),
            use_bias=st.booleans(),
            **hu.gcs)
+    @settings(deadline=1000)
     def test_lc_1d(self, N, C, size, M, kernel, op_name, use_bias, gc, dc):
         if size < kernel:
             kernel = size
@@ -157,6 +161,7 @@ class TestLocallyConnectedOp(serial.SerializedTestCase):
            op_name=st.sampled_from(["LC", "LC3D"]),
            use_bias=st.booleans(),
            **hu.gcs)
+    @settings(deadline=1000)
     def test_lc_3d(self, N, C, T, H, W, M, kernel, op_name, use_bias, gc, dc):
         if T < kernel:
             kernel = T

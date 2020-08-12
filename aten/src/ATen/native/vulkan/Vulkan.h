@@ -85,7 +85,7 @@ const VContext& context();
 class VBuffer;
 class VImage;
 
-using ImageSize = std::array<uint32_t, 3>;
+using ImageSize = std::array<int32_t, 3>;
 struct ImageSizes {
   ImageSize imageSize;
   ImageSize dataSize;
@@ -376,7 +376,9 @@ void copy_image_to_buffer(
 void copy_buffer_to_buffer(
     const VBuffer& srcBuffer,
     VBuffer& dstBuffer,
-    VkDeviceSize size);
+    VkDeviceSize size,
+    VkDeviceSize srcOffset = 0,
+    VkDeviceSize dstOffset = 0);
 
 VkDescriptorSetLayoutBinding descriptorSetLayoutBinding(
     uint32_t binding,
