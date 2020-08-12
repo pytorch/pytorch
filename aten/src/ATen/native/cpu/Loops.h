@@ -220,7 +220,7 @@ void cpu_kernel_vec(TensorIterator& iter, func_t&& op, vec_func_t&& vop) {
 
   iter.for_each([&](char** data, const int64_t* strides, int64_t n) {
     if (is_contiguous<traits>(strides)) {
-      return vectorized_loop(data, n, 0, std::forward<func_t>(op), std::forward<vec_func_t>(vop));
+      vectorized_loop(data, n, 0, std::forward<func_t>(op), std::forward<vec_func_t>(vop));
     } else {
       using Indices = std::make_index_sequence<traits::arity>;
       unroll_contiguous_scalar_checks<traits>(strides, Indices{}, [&](size_t idx) {
@@ -273,7 +273,7 @@ void cpu_serial_kernel_vec(TensorIterator& iter, func_t&& op, vec_func_t&& vop, 
 
   iter.serial_for_each([&](char** data, const int64_t* strides, int64_t n) {
     if (is_contiguous<traits>(strides)) {
-      return vectorized_loop(data, n, 0, std::forward<func_t>(op), std::forward<vec_func_t>(vop));
+      vectorized_loop(data, n, 0, std::forward<func_t>(op), std::forward<vec_func_t>(vop));
     } else {
       using Indices = std::make_index_sequence<traits::arity>;
       unroll_contiguous_scalar_checks<traits>(strides, Indices{}, [&](size_t idx) {

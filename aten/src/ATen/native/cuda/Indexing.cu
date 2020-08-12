@@ -425,6 +425,8 @@ bool indexShouldBeMajor(cuda::detail::TensorInfo<scalar_t, unsigned int> &info,
 }
 
 Tensor& index_add_cuda_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
+  // Nondeterministic because of atomicAdd usage
+  globalContext().alertNotDeterministic("index_add_cuda_");
   dim = maybe_wrap_dim(dim, self.dim());
 
   TensorArg self_arg{self, "self", 1}, index_arg{index, "index", 3}, source_arg{source, "source", 4};

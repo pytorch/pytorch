@@ -47,7 +47,7 @@ def async_execution(fn):
         >>>     # the callback is installed through the `then(cb)` API. In the
         >>>     # mean time, the `rpc_async` to "worker2" can run concurrently.
         >>>     # When the return value of that `rpc_async` arrives at
-        >>>     # "worker1", "worker1" will run the lambda function accordinly
+        >>>     # "worker1", "worker1" will run the lambda function accordingly
         >>>     # and set the value for the previously returned `Future`, which
         >>>     # will then trigger RPC to send the result back to "worker0".
         >>>     return rpc.rpc_async(to, torch.add, args=(x, y)).then(

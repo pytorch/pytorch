@@ -261,6 +261,7 @@ Pointwise Ops
     bitwise_xor
     ceil
     clamp
+    clip
     conj
     cos
     cosh
@@ -303,6 +304,7 @@ Pointwise Ops
     rsqrt
     sigmoid
     sign
+    signbit
     sin
     sinh
     sqrt
@@ -326,7 +328,9 @@ Reduction Ops
     median
     mode
     norm
+    nansum
     prod
+    quantile
     std
     std_mean
     sum
@@ -351,7 +355,10 @@ Comparison Ops
     isclose
     isfinite
     isinf
+    isposinf
+    isneginf
     isnan
+    isreal
     kthvalue
     le
     lt
@@ -387,6 +394,9 @@ Other Operations
     :toctree: generated
     :nosignatures:
 
+    atleast_1d
+    atleast_2d
+    atleast_3d
     bincount
     block_diag
     broadcast_tensors
@@ -464,6 +474,7 @@ BLAS and LAPACK Operations
     mv
     orgqr
     ormqr
+    outer
     pinverse
     qr
     solve

@@ -142,12 +142,12 @@ if(NOT INTERN_BUILD_MOBILE OR BUILD_CAFFE2_MOBILE)
   add_subdirectory(transforms)
 endif()
 
-# Advanced: if we have white list specified, we will do intersections for all
+# Advanced: if we have allow list specified, we will do intersections for all
 # main lib srcs.
-if(CAFFE2_WHITELISTED_FILES)
-  caffe2_do_whitelist(Caffe2_CPU_SRCS CAFFE2_WHITELISTED_FILES)
-  caffe2_do_whitelist(Caffe2_GPU_SRCS CAFFE2_WHITELISTED_FILES)
-  caffe2_do_whitelist(Caffe2_HIP_SRCS CAFFE2_WHITELISTED_FILES)
+if(CAFFE2_ALLOWLISTED_FILES)
+  caffe2_do_allowlist(Caffe2_CPU_SRCS CAFFE2_ALLOWLISTED_FILES)
+  caffe2_do_allowlist(Caffe2_GPU_SRCS CAFFE2_ALLOWLISTED_FILES)
+  caffe2_do_allowlist(Caffe2_HIP_SRCS CAFFE2_ALLOWLISTED_FILES)
 endif()
 
 # Debug messages - if you want to get a list of source files, enable the
@@ -278,7 +278,6 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     add_library(process_group_agent "${TORCH_SRC_DIR}/csrc/distributed/rpc/process_group_agent.cpp" "${TORCH_SRC_DIR}/csrc/distributed/rpc/process_group_agent.h")
     target_link_libraries(process_group_agent PRIVATE torch c10d fmt::fmt-header-only)
     add_dependencies(process_group_agent torch c10d)
-    target_include_directories(process_group_agent PRIVATE ${TORCH_ROOT}/third_party/tensorpipe)
   endif()
 
   set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
@@ -309,11 +308,6 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_2.cpp"
       "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_3.cpp"
       "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_4.cpp"
-      "${TORCH_SRC_DIR}/csrc/autograd/generated/ProfiledType_0.cpp"
-      "${TORCH_SRC_DIR}/csrc/autograd/generated/ProfiledType_1.cpp"
-      "${TORCH_SRC_DIR}/csrc/autograd/generated/ProfiledType_2.cpp"
-      "${TORCH_SRC_DIR}/csrc/autograd/generated/ProfiledType_3.cpp"
-      "${TORCH_SRC_DIR}/csrc/autograd/generated/ProfiledType_4.cpp"
       "${TORCH_SRC_DIR}/csrc/autograd/generated/TraceType_0.cpp"
       "${TORCH_SRC_DIR}/csrc/autograd/generated/TraceType_1.cpp"
       "${TORCH_SRC_DIR}/csrc/autograd/generated/TraceType_2.cpp"
@@ -338,10 +332,16 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_variable_methods.cpp"
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_torch_functions.cpp"
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_nn_functions.cpp"
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_fft_functions.cpp"
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_linalg_functions.cpp"
     )
 
   set(GENERATED_H_PYTHON
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_functions.h"
+    )
+
+  set(GENERATED_TESTING_PYTHON
+    "${TORCH_SRC_DIR}/testing/_internal/generated/annotated_fn_args.py"
     )
 
   set(TORCH_GENERATED_CODE
@@ -349,6 +349,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${GENERATED_H_TORCH}
     ${GENERATED_CXX_PYTHON}
     ${GENERATED_H_PYTHON}
+    ${GENERATED_TESTING_PYTHON}
     )
 
   add_custom_command(
@@ -365,7 +366,6 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
     "${TOOLS_PATH}/autograd/templates/VariableType.h"
     "${TOOLS_PATH}/autograd/templates/VariableType.cpp"
-    "${TOOLS_PATH}/autograd/templates/ProfiledType.cpp"
     "${TOOLS_PATH}/autograd/templates/TraceType.cpp"
     "${TOOLS_PATH}/autograd/templates/Functions.h"
     "${TOOLS_PATH}/autograd/templates/Functions.cpp"
@@ -374,7 +374,10 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${TOOLS_PATH}/autograd/templates/python_variable_methods.cpp"
     "${TOOLS_PATH}/autograd/templates/python_torch_functions.cpp"
     "${TOOLS_PATH}/autograd/templates/python_nn_functions.cpp"
+    "${TOOLS_PATH}/autograd/templates/python_fft_functions.cpp"
+    "${TOOLS_PATH}/autograd/templates/python_linalg_functions.cpp"
     "${TOOLS_PATH}/autograd/templates/variable_factories.h"
+    "${TOOLS_PATH}/autograd/templates/annotated_fn_args.py"
     "${TOOLS_PATH}/autograd/deprecated.yaml"
     "${TOOLS_PATH}/autograd/derivatives.yaml"
     "${TOOLS_PATH}/autograd/gen_autograd_functions.py"
@@ -416,10 +419,12 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     set(MOBILE_SRCS
        ${TORCH_SRC_DIR}/csrc/jit/mobile/function.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/import.cpp
+       ${TORCH_SRC_DIR}/csrc/jit/mobile/import_data.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/module.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/observer.cpp
-       ${TORCH_SRC_DIR}/csrc/jit/mobile/register_mobile_autograd.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/interpreter.cpp
+       ${TORCH_SRC_DIR}/csrc/jit/mobile/export.cpp
+       ${TORCH_SRC_DIR}/csrc/jit/mobile/optim/sgd.cpp
        )
     list(APPEND TORCH_SRCS ${MOBILE_SRCS})
   endif()
@@ -556,6 +561,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/pooling.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/rnn.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/upsampling.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/transformer.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/container/functional.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/activation.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/adaptive.cpp
@@ -570,6 +576,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/pooling.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/rnn.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/vision.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/nn/options/transformer.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/optim/adagrad.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/optim/adam.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/optim/adamw.cpp

@@ -18,7 +18,14 @@ TORCH_LIBRARY(quantized, m) {
   register_conv_params<3>();
 
   m.def("add(Tensor qa, Tensor qb, float scale, int zero_point) -> Tensor qc");
+  m.def("add.out(Tensor qa, Tensor qb, Tensor(a!) out) -> Tensor(a!) out");
+  m.def("add.Scalar(Tensor qa, Scalar b) -> Tensor qc");
+  m.def("add.Scalar_out(Tensor qa, Scalar b, Tensor(a!) out) -> Tensor(a!) out");
   m.def("add_relu(Tensor qa, Tensor qb, float scale, int zero_point) -> Tensor qc");
+  m.def("add_relu.Scalar(Tensor qa, Scalar b) -> Tensor qc");
+  m.def("add_relu.out(Tensor qa, Tensor qb, Tensor(a!) out) -> Tensor(a!) out");
+  m.def("add_relu.Scalar_out(Tensor qa, Scalar b, Tensor(a!) out) -> Tensor(a!) out");
+  // deprecated functions, kept for backward compatibility
   m.def("add_out(Tensor qa, Tensor qb, Tensor(a!) out) -> Tensor(a!) out");
   m.def("add_relu_out(Tensor qa, Tensor qb, Tensor(a!) out) -> Tensor(a!) out");
   m.def("add_scalar(Tensor qa, Scalar b) -> Tensor qc");
@@ -38,6 +45,8 @@ TORCH_LIBRARY(quantized, m) {
   // implemented
   m.def("batch_norm(Tensor qx, Tensor? weight, Tensor? bias, Tensor mean, Tensor var, float eps, float output_scale, int output_zero_point) -> Tensor");
   m.def("batch_norm_relu(Tensor qx, Tensor? weight, Tensor? bias, Tensor mean, Tensor var, float eps, float output_scale, int output_zero_point) -> Tensor");
+  m.def("batch_norm1d(Tensor qx, Tensor? weight, Tensor? bias, Tensor mean, Tensor var, float eps, float output_scale, int output_zero_point) -> Tensor");
+  m.def("batch_norm1d_relu(Tensor qx, Tensor? weight, Tensor? bias, Tensor mean, Tensor var, float eps, float output_scale, int output_zero_point) -> Tensor");
   m.def("batch_norm2d(Tensor qx, Tensor? weight, Tensor? bias, Tensor mean, Tensor var, float eps, float output_scale, int output_zero_point) -> Tensor");
   m.def("batch_norm2d_relu(Tensor qx, Tensor? weight, Tensor? bias, Tensor mean, Tensor var, float eps, float output_scale, int output_zero_point) -> Tensor");
   m.def("batch_norm3d(Tensor qx, Tensor? weight, Tensor? bias, Tensor mean, Tensor var, float eps, float output_scale, int output_zero_point) -> Tensor");
@@ -83,6 +92,8 @@ TORCH_LIBRARY(quantized, m) {
   m.def("embedding_bag_4bit_unpack(Tensor weight) -> Tensor");
   m.def("embedding_bag_byte_rowwise_offsets(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq=False, int mode=0, bool sparse=False, Tensor? per_sample_weights=None, bool include_last_offset=False) -> Tensor");
   m.def("embedding_bag_4bit_rowwise_offsets(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq=False, int mode=0, bool sparse=False, Tensor? per_sample_weights=None, Tensor? compressed_indices_mapping=None, bool include_last_offset=False) -> Tensor");
+  m.def("celu(Tensor self, float output_scale, int output_zero_point, Scalar alpha=1) -> Tensor");
+  m.def("hardswish(Tensor input, float output_scale, int output_zero_point) -> Tensor");
   m.def("group_norm(Tensor input, int num_groups, Tensor? weight, Tensor? bias, float eps, float output_scale, int output_zero_point) -> Tensor");
   m.def("hardswish(Tensor input, float output_scale, int output_zero_point) -> Tensor");
   m.def("instance_norm(Tensor input, Tensor? weight, Tensor? bias, float eps, float output_scale, int output_zero_point) -> Tensor");
@@ -113,7 +124,14 @@ TORCH_LIBRARY(quantized, m) {
   m.def(
       "linear_unpack_fp16.legacy(Tensor W_prepack) -> (Tensor W_origin, Tensor? B_origin)");
   m.def("mul(Tensor qa, Tensor qb, float scale, int zero_point)-> Tensor qc");
+  m.def("mul.out(Tensor qa, Tensor qb, Tensor(a!) out)-> Tensor(a!) out");
+  m.def("mul.Scalar(Tensor qa, Scalar b)-> Tensor qc");
+  m.def("mul.Scalar_out(Tensor qa, Scalar b, Tensor(a!) out)-> Tensor(a!) out");
   m.def("mul_relu(Tensor qa, Tensor qb, float scale, int zero_point)-> Tensor qc");
+  m.def("mul_relu.out(Tensor qa, Tensor qb, Tensor(a!) out)-> Tensor(a!) out");
+  m.def("mul_relu.Scalar(Tensor qa, Scalar b)-> Tensor qc");
+  m.def("mul_relu.Scalar_out(Tensor qa, Scalar b, Tensor(a!) out)-> Tensor(a!) out");
+  // deprecated functions, kept for backward compatibility
   m.def("mul_out(Tensor qa, Tensor qb, Tensor(a!) out)-> Tensor(a!) out");
   m.def("mul_relu_out(Tensor qa, Tensor qb, Tensor(a!) out)-> Tensor(a!) out");
   m.def("mul_scalar(Tensor qa, Scalar b)-> Tensor qc");

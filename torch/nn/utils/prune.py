@@ -233,7 +233,8 @@ class BasePruningMethod(ABC):
         weight = self.apply_mask(module)  # masked weights
 
         # delete and reset
-        delattr(module, self._tensor_name)
+        if hasattr(module, self._tensor_name):
+            delattr(module, self._tensor_name)
         orig = module._parameters[self._tensor_name + "_orig"]
         orig.data = weight.data
         del module._parameters[self._tensor_name + "_orig"]

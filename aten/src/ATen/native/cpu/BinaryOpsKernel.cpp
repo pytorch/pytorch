@@ -646,6 +646,7 @@ void fmod_scalar_kernel(TensorIterator& iter, Scalar divisor) {
   if (isIntegralType(iter.dtype(), /*includeBool=*/ false)) {
     AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "fmod_scalar_cpu", [&]() {
       const auto div = divisor.to<scalar_t>();
+      TORCH_CHECK(div != 0, "ZeroDivisionError");
       cpu_kernel(iter, [=](scalar_t x) -> scalar_t {
         return x % div;
       });
@@ -732,7 +733,7 @@ void lcm_kernel(TensorIterator& iter) {
           iter,
           [](scalar_t a, scalar_t b) -> scalar_t {
             scalar_t g = calc_gcd(a, b);
-            return (g == 0) ? 0 : a / g * b;
+            return (g == 0) ? 0 : std::abs(a / g * b);
           });
     });
 }
