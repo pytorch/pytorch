@@ -13,6 +13,7 @@
 #include <gloo/rendezvous/store.h>
 #include <gloo/transport/device.h>
 
+#include <sys/types.h>
 #include <torch/csrc/utils/hash.h>
 
 #ifdef USE_CUDA
@@ -111,7 +112,7 @@ class ProcessGroupGloo : public ProcessGroup {
         at::Tensor& tensor,
         std::unique_ptr<::gloo::transport::UnboundBuffer> buffer);
 
-    int sourceRank() const override;
+    int64_t sourceRank() const override;
 
     bool wait(std::chrono::milliseconds timeout = kNoTimeout) override;
 

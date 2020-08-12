@@ -377,7 +377,7 @@ ProcessGroupGloo::RecvWork::RecvWork(
     std::unique_ptr<::gloo::transport::UnboundBuffer> buffer)
     : tensor_(tensor), buffer_(std::move(buffer)), srcRank_(-1) {}
 
-int ProcessGroupGloo::RecvWork::sourceRank() const {
+int64_t ProcessGroupGloo::RecvWork::sourceRank() const {
   std::lock_guard<std::mutex> lock(mutex_);
   return srcRank_;
 }
