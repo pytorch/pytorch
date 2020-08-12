@@ -1549,7 +1549,7 @@ Tensor unflatten(const Tensor& self, int64_t dim, IntArrayRef sizes, c10::option
       dim, " (", self.size(dim), ") in the input tensor");
   }
 
-  auto shape = self.sizes().vec();
+  DimVector shape(self.sizes().begin(), self.sizes().end());
   shape.erase(shape.begin() + dim);
   shape.insert(shape.begin() + dim, sizes.begin(), sizes.end());
 
