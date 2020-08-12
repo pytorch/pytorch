@@ -170,12 +170,6 @@ bool canHandle(Node* node) {
     }
     return true;
   }
-  if (node->kind() == prim::Loop) {
-    return false; // TODO
-  }
-  if (!allShapesAreKnown(node)) {
-    return false;
-  }
 
   // Don't include nodes whose inputs are tensor constants - we cannot handle
   // them at the moment.
