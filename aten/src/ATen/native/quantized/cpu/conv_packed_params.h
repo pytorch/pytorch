@@ -4,7 +4,7 @@
 #include <ATen/core/ivalue.h>
 
 template <int kSpatialDim = 2>
-struct ConvPackedParamsBase : public torch::jit::CustomClassHolder {
+struct LegacyConvPackedParamsBase : public torch::jit::CustomClassHolder {
   virtual at::Tensor apply(
       const at::Tensor& input,
       double output_scale,
@@ -23,3 +23,6 @@ struct ConvPackedParamsBase : public torch::jit::CustomClassHolder {
   virtual int64_t groups() const = 0;
   virtual bool transpose() const = 0;
 };
+
+template <int kSpatialDim = 2>
+struct ConvPackedParamsBase : public LegacyConvPackedParamsBase<kSpatialDim> {};
