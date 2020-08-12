@@ -21,6 +21,16 @@
 
 namespace at { namespace native {
 
+namespace {
+
+template<typename T>
+struct is_pair : public std::false_type {};
+
+template<typename T1, typename T2>
+struct is_pair<thrust::pair<T1, T2>> : public std::true_type {};
+
+}  // namespace
+
 #ifdef __HIP_PLATFORM_HCC__
 template<typename T, int size>
 struct ROCm_Bug {
@@ -74,14 +84,14 @@ struct ReduceConfig {
   static constexpr int MAX_NUM_THREADS = 512;
   static constexpr int input_vec_size = 4;
 
-  ReduceConfig(int element_size_bytes, int num_outputs, int num_inputs)
+  ReduceConfig(int element_size_bytes, int num_output_elements, int num_inputs)
     : element_size_bytes(element_size_bytes)
     , num_inputs(num_inputs)
-    , num_outputs(num_outputs) {}
+    , num_output_elements(num_output_elements) {}
 
   int element_size_bytes;
   int num_inputs;
-  int num_outputs;
+  int num_output_elements;
   int step_input = 1;
   int step_output = 1;
   int ctas_per_output = 1;
@@ -122,7 +132,7 @@ struct ReduceConfig {
   }
 
   dim3 grid() const {
-    return dim3(div_up(num_outputs / output_vec_size, step_output), ctas_per_output);
+    return dim3(div_up(num_output_elements / output_vec_size, step_output), ctas_per_output);
   }
 
   C10_HOST_DEVICE bool should_block_x_reduce() const {
@@ -138,7 +148,7 @@ struct ReduceConfig {
   }
 
   C10_DEVICE bool should_store(int output_idx) const {
-    return output_idx < num_outputs &&
+    return output_idx < num_output_elements &&
       (!should_block_x_reduce() || threadIdx.x == 0) &&
       (!should_block_y_reduce() || threadIdx.y == 0);
   }
@@ -192,7 +202,7 @@ struct ReduceConfig {
     if (!should_global_reduce()) {
       return 0;
     }
-    auto size = (int64_t)element_size_bytes * num_outputs * ctas_per_output;
+    auto size = (int64_t)element_size_bytes * num_output_elements * ctas_per_output;
     if (!should_block_x_reduce()) {
       size *= block().x * output_vec_size;
     }
@@ -219,18 +229,28 @@ __global__ void reduce_kernel(R reduction) {
   reduction.template run<output_vec_size>();
 }
 
-template <typename index_t>
-static OffsetCalculator<2, index_t> make_output_calculator(const TensorIterator& iter) {
+template <typename index_t, int num_outputs=1>
+static OffsetCalculator<num_outputs + 1, index_t> make_output_calculator(const TensorIterator& iter) {
+  static_assert(num_outputs == 1 || num_outputs == 2, "At most 2 outputs are supported");
   int num_reduce_dims = iter.num_reduce_dims();
   int num_output_dims = iter.ndim() - num_reduce_dims;
   int input_index = iter.ntensors() - 1;
   int output_index = 0;
-  std::array<const int64_t*, 2> strides = {
-    iter.strides(output_index).data() + num_reduce_dims,
-    iter.strides(input_index).data() + num_reduce_dims,
-  };
   auto shape = iter.shape().data() + num_reduce_dims;
-  return OffsetCalculator<2, index_t>(num_output_dims, shape, strides.data());
+  return c10::guts::if_constexpr<num_outputs == 1>([&]() {
+    std::array<const int64_t*, 2> strides = {
+      iter.strides(output_index).data() + num_reduce_dims,
+      iter.strides(input_index).data() + num_reduce_dims,
+    };
+    return OffsetCalculator<2, index_t>(num_output_dims, shape, strides.data());
+  }, /* else */ [&]() {
+    std::array<const int64_t*, 3> strides = {
+      iter.strides(output_index).data() + num_reduce_dims,
+      iter.strides(output_index + 1).data() + num_reduce_dims,
+      iter.strides(input_index).data() + num_reduce_dims,
+    };
+    return OffsetCalculator<3, index_t>(num_output_dims, shape, strides.data());
+  });
 }
 
 template <typename index_t>
@@ -278,9 +298,11 @@ template <typename scalar_t, typename ops_t, typename index_t, typename out_scal
 struct ReduceOp {
   using traits = function_traits<decltype(&ops_t::reduce)>;
   using arg_t = typename std::decay<typename traits::template arg<0>::type>::type;
+  using project_traits = function_traits<decltype(&ops_t::project)>;
+  static constexpr int num_outputs = is_pair<typename project_traits::result_type>::value ? 2 : 1;
 
   using InputCalculator = OffsetCalculator<1, index_t>;
-  using OutputCalculator = OffsetCalculator<2, index_t>;
+  using OutputCalculator = OffsetCalculator<num_outputs + 1, index_t>;
 
   static constexpr bool can_accumulate_in_output =
     std::is_convertible<arg_t, out_scalar_t>::value
@@ -344,13 +366,13 @@ struct ReduceOp {
     extern __shared__ char shared_memory[];
     index_t output_idx = config.output_idx<output_vec_size>();
     index_t input_idx = config.input_idx();
-    auto base_offsets1 = output_calc.get(output_idx)[1];
+    auto base_offsets_input = output_calc.get(output_idx)[num_outputs];
 
     using arg_vec_t = at::detail::Array<arg_t, output_vec_size>;
     arg_vec_t value;
 
-    if (output_idx < config.num_outputs && input_idx < config.num_inputs) {
-      const scalar_t* input_slice = (const scalar_t*)((const char*)src + base_offsets1);
+    if (output_idx < config.num_output_elements && input_idx < config.num_inputs) {
+      const scalar_t* input_slice = (const scalar_t*)((const char*)src + base_offsets_input);
       value = thread_reduce<output_vec_size>(input_slice);
     }
 
@@ -362,14 +384,14 @@ struct ReduceOp {
     }
 
     using out_ptr_vec_t = at::detail::Array<out_scalar_t*, output_vec_size>;
-    using offset_vec_t = at::detail::Array<index_t, output_vec_size>;
+    using offset_vec_t = at::detail::Array<at::detail::Array<index_t, num_outputs + 1>, output_vec_size>;
     offset_vec_t base_offsets;
     out_ptr_vec_t out;
 
     #pragma unroll
     for (int i = 0; i < output_vec_size; i++) {
-      base_offsets[i] = output_calc.get(output_idx + i)[0];
-      out[i] = (out_scalar_t*)((char*)dst[0] + base_offsets[i]);
+      base_offsets[i] = output_calc.get(output_idx + i);
+      out[i] = (out_scalar_t*)((char*)dst[0] + base_offsets[i][0]);
     }
 
     arg_vec_t* acc = nullptr;
@@ -377,7 +399,7 @@ struct ReduceOp {
       size_t numerator = sizeof(arg_t);
       size_t denominator = sizeof(out_scalar_t);
       reduce_fraction(numerator, denominator);
-      acc = (arg_vec_t*)((char*)acc_buf + (base_offsets[0] * numerator / denominator));
+      acc = (arg_vec_t*)((char*)acc_buf + (base_offsets[0][0] * numerator / denominator));
     }
 
     if (config.should_global_reduce()) {
@@ -704,29 +726,27 @@ struct ReduceOp {
   }
 
   template<class T>
-  C10_DEVICE void set_results(const T x, const index_t base_offset) const {
+  C10_DEVICE void set_results(const T x, const at::detail::Array<index_t, num_outputs + 1> base_offset) const {
     assert(noutputs == 1);
-    auto res = (out_scalar_t*)((char*)dst[0] + base_offset);
+    auto res = (out_scalar_t*)((char*)dst[0] + base_offset[0]);
     *res = x;
   }
 
   //Currently implemented for max of two outputs
   template<class T1, class T2>
-  C10_DEVICE void set_results(const thrust::pair<T1, T2> x, const index_t base_offset) const {
+  C10_DEVICE void set_results(const thrust::pair<T1, T2> x, const at::detail::Array<index_t, num_outputs + 1> base_offset) const {
     if (noutputs >= 1) {
-      auto res0 = (T1*)((char*)dst[0] + base_offset);
+      auto res0 = (T1*)((char*)dst[0] + base_offset[0]);
       *res0 = x.first;
     }
     if (noutputs >= 2) {
-      // base offset is computed assuming element size being sizeof(T1), so we need to make a
-      // correction to obtain the correct base offset
-      auto res1 = (T2*) ((char *) dst[1] + base_offset / sizeof(T1) * sizeof(T2));
+      auto res1 = (T2*) ((char *) dst[1] + base_offset[1]);
       *res1 = x.second;
     }
   }
 
   template <int output_vec_size>
-  C10_DEVICE void set_results_to_output(at::detail::Array<arg_t, output_vec_size> value, at::detail::Array<index_t, output_vec_size> base_offset) const {
+  C10_DEVICE void set_results_to_output(at::detail::Array<arg_t, output_vec_size> value, at::detail::Array<at::detail::Array<index_t, num_outputs + 1>, output_vec_size> base_offset) const {
     assert(final_output);
     #pragma unroll
     for (int i = 0; i < output_vec_size; i++) {
@@ -738,7 +758,7 @@ struct ReduceOp {
   C10_DEVICE at::detail::Array<arg_t, output_vec_size> global_reduce(at::detail::Array<arg_t, output_vec_size> value, at::detail::Array<arg_t, output_vec_size> *acc, char* shared_memory) const {
     using arg_vec_t = at::detail::Array<arg_t, output_vec_size>;
     using out_ptr_vec_t = at::detail::Array<out_scalar_t*, output_vec_size>;
-    using offset_vec_t = at::detail::Array<index_t, output_vec_size>;
+    using offset_vec_t = at::detail::Array<at::detail::Array<index_t, num_outputs + 1>, output_vec_size>;
 
     arg_vec_t* reduce_buffer = (arg_vec_t*)cta_buf;
     index_t output_idx = config.output_idx<output_vec_size>();
@@ -747,8 +767,8 @@ struct ReduceOp {
 
     #pragma unroll
     for (int i = 0; i < output_vec_size; i++) {
-      base_offsets[i] = output_calc.get(output_idx + i)[0];
-      out[i] = (out_scalar_t*)((char*)dst[0] + base_offsets[i]);
+      base_offsets[i] = output_calc.get(output_idx + i);
+      out[i] = (out_scalar_t*)((char*)dst[0] + base_offsets[i][0]);
     }
 
     bool should_store = config.should_store(output_idx);
@@ -916,7 +936,7 @@ int get_output_vec_size(TensorIterator &iter) {
 template <typename scalar_t, typename out_scalar_t, int vt0=4, typename ops_t, typename ident_t=double>
 inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t ident=0,
                               AccumulationBuffer* acc_buf_ptr=nullptr, int64_t base_idx=0) {
-  AT_ASSERT(iter.numel() > 0 && iter.ntensors() - iter.noutputs() == 1 && iter.noutputs() >= 1);
+  TORCH_INTERNAL_ASSERT(iter.numel() > 0 && iter.ntensors() - iter.noutputs() == 1 && iter.noutputs() >= 1);
 
   using traits = function_traits<decltype(&ops_t::reduce)>;
   using arg_t = typename traits::template arg<0>::type;
@@ -971,11 +991,11 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
 
   // Start by assuming that each thread handles a single output and all
   // the inputs for that output.
-  int64_t num_outputs = iter.num_output_elements();
-  int64_t inputs_per_output = iter.numel() / num_outputs;
+  int64_t num_output_elements = iter.num_output_elements();
+  int64_t inputs_per_output = iter.numel() / num_output_elements;
   int input_index = iter.ntensors() - 1;
 
-  auto config = ReduceConfig(sizeof(arg_t), num_outputs, inputs_per_output);
+  auto config = ReduceConfig(sizeof(arg_t), num_output_elements, inputs_per_output);
 
   int64_t dim0;
   int64_t dim1;
@@ -1000,9 +1020,9 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
     if (reduction_on_fastest_striding_dimension) {
       // Map block.x to the fastest reducing dimension. It implies:
       //   1. block_x_reduce is required.
-      //   2. block.y now max out to num_outputs.
+      //   2. block.y now max out to num_output_elements.
       dim0 = iter.shape()[0];
-      dim1 = num_outputs;
+      dim1 = num_output_elements;
       fastest_moving_stride = iter.strides(/*arg=*/input_index)[0];
     } else {
       // Map block.x to the fastest non reducing dimension. It implies:
@@ -1108,10 +1128,11 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
     AT_CUDA_CHECK(cudaMemsetAsync(semaphores.get(), 0, config.semaphore_size(), stream));
   }
 
-  AT_ASSERT(can_use_32bit_indexing);
-  auto output_calc = make_output_calculator<uint32_t>(iter);
+  TORCH_INTERNAL_ASSERT(can_use_32bit_indexing);
+  using ReduceOpType = ReduceOp<scalar_t, ops_t, uint32_t, out_scalar_t, vt0>;
+  auto output_calc = make_output_calculator<uint32_t, ReduceOpType::num_outputs>(iter);
   auto input_calc = make_input_calculator<uint32_t>(iter);
-  auto reduce = ReduceOp<scalar_t, ops_t, uint32_t, out_scalar_t, vt0>(
+  auto reduce = ReduceOpType(
       ops,
       config,
       input_calc,
