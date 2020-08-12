@@ -576,7 +576,7 @@ static void eraseListConstruct(Block* block, int opset_version) {
               i, std::vector<Value*>({concat_node->output()}));
 
         } else {
-          if (opset_version < onnx::OPSET_VERSION_11) {
+          if (opset_version < OPSET_VERSION_11) {
             // Tensor lists are used mostly for inputs to cat/stack. They are
             // already handled in those symbolics, and should become dead
             // afterwards.
