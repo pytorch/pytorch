@@ -2395,14 +2395,14 @@ add_docstr_all('degrees',
                r"""
 degrees() -> Tensor
 
-Alias for :meth:`~Tensor.deg2rad`
+Alias for :meth:`~Tensor.rad2deg`
 """)
 
 add_docstr_all('degrees_',
                r"""
 degrees_() -> Tensor
 
-Alias for :meth:`~Tensor.deg2rad_`
+Alias for :meth:`~Tensor.rad2deg_`
 """)
 
 add_docstr_all('reciprocal',

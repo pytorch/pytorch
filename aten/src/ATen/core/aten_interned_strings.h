@@ -564,6 +564,7 @@ _(aten, put) \
 _(aten, qr) \
 _(aten, quantile) \
 _(aten, rad2deg) \
+_(aten, rad2deg_) \
 _(aten, rand) \
 _(aten, rand_like) \
 _(aten, randint) \

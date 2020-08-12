@@ -130,9 +130,9 @@ Tensor& deg2rad_out(Tensor& result, const Tensor& self) {
 Tensor deg2rad(const Tensor& self) { return unary_op_impl(self, at::deg2rad_out); }
 Tensor& deg2rad_(Tensor& self) { return unary_op_impl_(self, at::deg2rad_out); }
 
-Tensor degrees(const Tensor& self) { return at::native::deg2rad(self); }
-Tensor& degrees_(Tensor& self) { return at::native::deg2rad_(self); }
-Tensor& degrees_out(Tensor& result, const Tensor& self) { return at::native::deg2rad_out(result, self); }
+Tensor degrees(const Tensor& self) { return at::native::rad2deg(self); }
+Tensor& degrees_(Tensor& self) { return at::native::rad2deg_(self); }
+Tensor& degrees_out(Tensor& result, const Tensor& self) { return at::native::rad2deg_out(result, self); }
 
 Tensor& asin_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, asin_stub); }
 Tensor asin(const Tensor& self) { return unary_op_impl(self, at::asin_out); }
@@ -146,7 +146,7 @@ Tensor& atan_(Tensor& self) { return unary_op_impl_(self, at::atan_out); }
 // Complex inputs to abs and angle return float results by default.
 // abs and angle, in both NumPy and C++, returns a float result when given a
 // complex input. This makes sense mathematically since the absolute value
-// and angle of a complex number has no imaginary part.
+// and angle of a complex number has no imaginary part.d
 Tensor& abs_out(Tensor& result, const Tensor& self) {
   return unary_op_impl_with_complex_to_float_out(result, self, abs_stub);
 }

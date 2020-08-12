@@ -405,6 +405,7 @@ def method_tests():
         ('ceil', (S, S, S), NO_ARGS, '', (True,)),
         ('ceil', (), NO_ARGS, 'scalar', (True,)),
         ('rad2deg', (S, S, S), NO_ARGS),
+        ('rad2deg_', (S, S, S), NO_ARGS),
         ('deg2rad', (S, S, S), NO_ARGS),
         ('deg2rad_', (S, S, S), NO_ARGS),
         ('degrees', dont_convert((S, S, S)), NO_ARGS),
