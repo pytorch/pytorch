@@ -884,6 +884,7 @@ struct CAFFE2_API DictType : public Type {
     switch (key->kind()) {
       case TypeKind::AnyType:
       case TypeKind::IntType:
+      case TypeKind::BoolType:
       case TypeKind::FloatType:
       case TypeKind::StringType:
       case TypeKind::TensorType:
