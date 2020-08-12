@@ -199,7 +199,7 @@ class TestEnum(JitTestCase):
             scripted = torch.jit.script(enum_const)
 
         FileCheck() \
-            .check("prim::Constant[value=Enum<__torch__.jit.test_enum.Color.RED>]") \
+            .check("prim::Constant[value=__torch__.jit.test_enum.Color.RED]") \
             .check_next("aten::eq") \
             .check_next("return") \
             .run(str(scripted.graph))

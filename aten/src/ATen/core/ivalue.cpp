@@ -455,8 +455,8 @@ std::ostream& IValue::repr(
       return printMaybeAnnotatedDict(out, v, formatter);
     case IValue::Tag::Enum: {
       auto enum_holder = v.toEnumHolder();
-      return out << "Enum<" << enum_holder->qualifiedClassName() << "." <<
-          enum_holder->name() << ">";
+      return out << enum_holder->qualifiedClassName() << "." <<
+          enum_holder->name();
     }
     default:
       TORCH_INTERNAL_ASSERT(false, "repr() not defined on: ", v.tagKind());
