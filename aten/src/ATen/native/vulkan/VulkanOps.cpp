@@ -92,6 +92,21 @@ VulkanTensor reshape_copy(
   return output;
 }
 
+VulkanTensor cat(
+    VulkanTensor& output,
+    ArrayRef<VulkanTensor> inputs,
+    int64_t dim) {
+  VkDeviceSize outputOffset = 0;
+  for (const auto& input : inputs) {
+    input.sync_image_to_buffer();
+    const auto sizeBytes = sizeof(float) * input.numel();
+    copy_buffer_to_buffer(
+        *(input.buffer()), *(output.buffer()), sizeBytes, 0, outputOffset);
+    outputOffset += sizeBytes;
+  }
+  return output;
+}
+
 void adaptive_avg_pool2d(
     VulkanTensor& output,
     const VulkanTensor& input,
