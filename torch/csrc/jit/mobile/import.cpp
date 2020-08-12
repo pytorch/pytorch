@@ -84,7 +84,7 @@ void print_unsupported_ops_and_throw(
 
 void parseMethods(
     const std::vector<IValue>& vals,
-    const std::vector<IValue>& debug_info_vals,
+    const c10::optional<std::vector<IValue>>& debug_info_vals,
     mobile::CompilationUnit& mcu) {
   TORCH_CHECK(vals.size() > 0, "Bytecode has no elements. ");
   // Initialized with the version number when kProducedBytecodeVersion was
@@ -104,10 +104,10 @@ void parseMethods(
       " but the model version is ",
       model_version);
 
-  bool has_debug_info = debug_info_vals.size() > 0;
+  bool has_debug_info = debug_info_vals.has_value();
   if (has_debug_info) {
     TORCH_CHECK(
-        debug_info_vals.size() == vals.size(),
+        debug_info_vals->size() == vals.size(),
         "The numbers of bytecode values and debug info values do not match.");
   }
 
@@ -140,7 +140,7 @@ void parseMethods(
 
     std::vector<IValue> module_debug_info_list;
     if (has_debug_info) {
-      const auto& debug_info_element = debug_info_vals[i];
+      const auto& debug_info_element = (*debug_info_vals)[i];
       const auto& debug_info_m_tuple = debug_info_element.toTuple()->elements();
       const std::string& debug_info_function_name =
           debug_info_m_tuple[0].toStringRef();
@@ -236,7 +236,7 @@ mobile::Module BytecodeDeserializer::deserialize(
   auto mcu = std::make_shared<mobile::CompilationUnit>();
   auto bvals = readArchive("bytecode", mcu).toTuple()->elements();
 
-  std::vector<IValue> debug_info_bvals;
+  c10::optional<std::vector<IValue>> debug_info_bvals;
   if (reader_->hasRecord("mobile_debug.pkl")) {
     debug_info_bvals = readArchive("mobile_debug", mcu).toTuple()->elements();
   }

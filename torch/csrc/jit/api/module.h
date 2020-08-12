@@ -222,12 +222,12 @@ struct TORCH_API Module : public Object {
   void _save_for_mobile(
       std::ostream& out,
       const ExtraFilesMap& extra_files = ExtraFilesMap(),
-      bool save_debug_info_in_bytecode = false) const;
+      bool save_mobile_debug_info = false) const;
 
   void _save_for_mobile(
       const std::string& filename,
       const ExtraFilesMap& extra_files = ExtraFilesMap(),
-      bool save_debug_info_in_bytecode = false) const;
+      bool save_mobile_debug_info = false) const;
 
   Module copy() const;
 

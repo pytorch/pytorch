@@ -26,9 +26,14 @@
 namespace torch {
 namespace jit {
 
+using debug_info_vector_type = c10::optional<std::vector<c10::IValue>>;
+
 char const* toString(OpCode op);
 
 namespace {
+
+using func_tuple_type = std::pair<IValue, c10::optional<IValue>>;
+
 ExportModuleExtraFilesHook& GetExtraFilesHook() {
   static ExportModuleExtraFilesHook func = nullptr;
   return func;
@@ -64,16 +69,14 @@ std::string getModulePath(Node* node) {
   return modulePath.substr(start, end - start);
 }
 
-void getFunctionTuple(
+func_tuple_type getFunctionTuple(
     const Module& module,
     const Function& func,
-    std::vector<c10::IValue>& elements,
-    std::vector<c10::IValue>& debug_info_elements,
-    bool save_debug_info_in_bytecode) {
+    bool save_mobile_debug_info) {
   auto graph = func.graph()->copy();
 
   Inline(*graph);
-  if (save_debug_info_in_bytecode) {
+  if (save_mobile_debug_info) {
     ReconstructScopes(module, *graph, "top");
   }
 
@@ -89,7 +92,7 @@ void getFunctionTuple(
     if (ins.op == OP || ins.op == OPN) {
       auto node = code.instructions_source()[i];
       opnames.emplace_back(node->schema().operator_name());
-      if (save_debug_info_in_bytecode) {
+      if (save_mobile_debug_info) {
         op_module_paths.emplace_back(getModulePath(node));
       }
     }
@@ -165,9 +168,10 @@ void getFunctionTuple(
                       {"constants", Tup(constants)},
                       {"types", Tup(types)},
                       {"register_size", register_size}});
-  elements.push_back(Tup({func.qualname().qualifiedName(), table}));
+  auto bytecode_vals = Tup({func.qualname().qualifiedName(), table});
 
-  if (save_debug_info_in_bytecode) {
+  c10::optional<IValue> debug_info_vals;
+  if (save_mobile_debug_info) {
     // module debug info
     std::vector<IValue> module_paths;
     module_paths.reserve(op_module_paths.size());
@@ -175,17 +179,17 @@ void getFunctionTuple(
       module_paths.emplace_back(std::move(path));
     }
     auto module_debug_info = Table({{"module_debug_info", Tup(module_paths)}});
-    debug_info_elements.push_back(
-        Tup({func.qualname().qualifiedName(), module_debug_info}));
+    debug_info_vals = Tup({func.qualname().qualifiedName(), module_debug_info});
   }
+  return std::make_pair(bytecode_vals, debug_info_vals);
 }
 
 void setstateTuple(
     const Module& module,
     const IValue& ivalue,
     std::vector<c10::IValue>& elements,
-    std::vector<c10::IValue>& debug_info_elements,
-    bool save_debug_info_in_bytecode) {
+    debug_info_vector_type& debug_info_elements,
+    bool save_mobile_debug_info) {
   if (!ivalue.isObject())
     return;
   auto obj = ivalue.toObject();
@@ -193,21 +197,17 @@ void setstateTuple(
   if (checkHasValidSetGetState(type)) {
     Function& setstate = type->getMethod("__setstate__");
     if (setstate.isGraphFunction()) {
-      getFunctionTuple(
-          module,
-          setstate,
-          elements,
-          debug_info_elements,
-          save_debug_info_in_bytecode);
+      auto func_tuple = getFunctionTuple(
+          module, setstate, save_mobile_debug_info);
+      elements.push_back(func_tuple.first);
+      if (save_mobile_debug_info) {
+        debug_info_elements->push_back(func_tuple.second.value());
+      }
     }
   } else {
     for (size_t i = 0, n = type->numAttributes(); i < n; ++i) {
       setstateTuple(
-          module,
-          obj->getSlot(i),
-          elements,
-          debug_info_elements,
-          save_debug_info_in_bytecode);
+          module, obj->getSlot(i), elements, debug_info_elements, save_mobile_debug_info);
     }
   }
 }
@@ -216,26 +216,22 @@ void setstateTuple(
 void moduleMethodsTuple(
     const Module& module,
     std::vector<c10::IValue>& elements,
-    std::vector<c10::IValue>& debug_info_elements,
-    bool save_debug_info_in_bytecode) {
+    debug_info_vector_type& debug_info_elements,
+    bool save_mobile_debug_info) {
   auto methods = module.get_methods();
   // top level methods
   for (const auto& method : methods) {
-    getFunctionTuple(
-        module,
-        method.function(),
-        elements,
-        debug_info_elements,
-        save_debug_info_in_bytecode);
+    auto func_tuple = getFunctionTuple(
+        module, method.function(), save_mobile_debug_info);
+    elements.push_back(func_tuple.first);
+    if (save_mobile_debug_info) {
+      debug_info_elements->push_back(func_tuple.second.value());
+    }
   }
 
   // __setstate__ of all components
   setstateTuple(
-      module,
-      module._ivalue(),
-      elements,
-      debug_info_elements,
-      save_debug_info_in_bytecode);
+      module, module._ivalue(), elements, debug_info_elements, save_mobile_debug_info);
 }
 
 void SetExportModuleExtraFilesHook(ExportModuleExtraFilesHook hook) {
@@ -255,7 +251,7 @@ class ScriptModuleSerializer {
       const Module& module,
       const ExtraFilesMap& extra_files,
       bool bytecode_format,
-      bool save_debug_info_in_bytecode) {
+      bool save_mobile_debug_info) {
     C10_LOG_API_USAGE_ONCE("torch.script.save");
     writeExtraFiles(module, extra_files);
     // Serialize the model object
@@ -268,7 +264,7 @@ class ScriptModuleSerializer {
         constant_table_.begin(), constant_table_.end());
     writeArchive("constants", c10::ivalue::Tuple::create(ivalue_constants));
     if (bytecode_format) {
-      writeByteCode(module, save_debug_info_in_bytecode);
+      writeByteCode(module, save_mobile_debug_info);
     }
 
     // Acquires and sets minimum (dynamic) version
@@ -375,22 +371,23 @@ class ScriptModuleSerializer {
     }
   }
 
-  void writeByteCode(const Module& module, bool save_debug_info_in_bytecode) {
+  void writeByteCode(const Module& module, bool save_mobile_debug_info) {
     std::vector<c10::IValue> elements;
     elements.emplace_back(
         static_cast<int64_t>(caffe2::serialize::kProducedBytecodeVersion));
-    std::vector<c10::IValue> debug_info_elements;
-    if (save_debug_info_in_bytecode) {
-      debug_info_elements.emplace_back(
+    debug_info_vector_type debug_info_elements;
+    if (save_mobile_debug_info) {
+      debug_info_elements = std::vector<c10::IValue>();
+      debug_info_elements->emplace_back(
           static_cast<int64_t>(caffe2::serialize::kProducedBytecodeVersion));
     }
 
     moduleMethodsTuple(
-        module, elements, debug_info_elements, save_debug_info_in_bytecode);
+        module, elements, debug_info_elements, save_mobile_debug_info);
     auto telements = Tup(std::move(elements));
     writeArchive("bytecode", telements);
-    if (save_debug_info_in_bytecode) {
-      auto debug_info_telements = Tup(std::move(debug_info_elements));
+    if (save_mobile_debug_info) {
+      auto debug_info_telements = Tup(std::move(debug_info_elements.value()));
       writeArchive("mobile_debug", debug_info_telements);
     }
   }
@@ -440,14 +437,14 @@ void ExportModule(
     std::ostream& out,
     const ExtraFilesMap& extra_files,
     bool bytecode_format,
-    bool save_debug_info_in_bytecode) {
+    bool save_mobile_debug_info) {
   ScriptModuleSerializer serializer(
       [&](const void* buf, size_t nbytes) -> size_t {
         out.write(static_cast<const char*>(buf), nbytes);
         return !out ? 0 : nbytes;
       });
   serializer.serialize(
-      module, extra_files, bytecode_format, save_debug_info_in_bytecode);
+      module, extra_files, bytecode_format, save_mobile_debug_info);
 }
 
 void ExportModule(
@@ -455,10 +452,10 @@ void ExportModule(
     const std::string& filename,
     const ExtraFilesMap& extra_files,
     bool bytecode_format,
-    bool save_debug_info_in_bytecode) {
+    bool save_mobile_debug_info) {
   ScriptModuleSerializer serializer(filename);
   serializer.serialize(
-      module, extra_files, bytecode_format, save_debug_info_in_bytecode);
+      module, extra_files, bytecode_format, save_mobile_debug_info);
 }
 
 void ExportModule(
@@ -466,21 +463,18 @@ void ExportModule(
     const std::function<size_t(const void*, size_t)>& writer_func,
     const ExtraFilesMap& extra_files,
     bool bytecode_format,
-    bool save_debug_info_in_bytecode) {
+    bool save_mobile_debug_info) {
   ScriptModuleSerializer serializer(writer_func);
   serializer.serialize(
-      module, extra_files, bytecode_format, save_debug_info_in_bytecode);
+      module, extra_files, bytecode_format, save_mobile_debug_info);
 }
 
 namespace {
 void export_opnames(const script::Module& m, std::set<std::string>& opnames) {
   std::vector<c10::IValue> elements;
-  std::vector<c10::IValue> debug_info_elements;
+  debug_info_vector_type debug_info_elements;
   moduleMethodsTuple(
-      m,
-      elements,
-      debug_info_elements,
-      false /* save_debug_info_in_bytecode */);
+      m, elements, debug_info_elements, false /* save_mobile_debug_info */);
   for (const auto& element : elements) {
     auto table = element.toTuple()->elements()[1];
     auto row =

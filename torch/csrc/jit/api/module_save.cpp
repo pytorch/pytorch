@@ -16,25 +16,25 @@ void Module::save(const std::string& filename, const ExtraFilesMap& extra_files)
 void Module::_save_for_mobile(
     std::ostream& out,
     const ExtraFilesMap& extra_files,
-    bool save_debug_info_in_bytecode) const {
+    bool save_mobile_debug_info) const {
   ExportModule(
       *this,
       out,
       extra_files,
       true /* bytecode_format */,
-      save_debug_info_in_bytecode);
+      save_mobile_debug_info);
 }
 
 void Module::_save_for_mobile(
     const std::string& filename,
     const ExtraFilesMap& extra_files,
-    bool save_debug_info_in_bytecode) const {
+    bool save_mobile_debug_info) const {
   ExportModule(
       *this,
       filename,
       extra_files,
       true /* bytecode_format */,
-      save_debug_info_in_bytecode);
+      save_mobile_debug_info);
 }
 
 } // namespace jit
