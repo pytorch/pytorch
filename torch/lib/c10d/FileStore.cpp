@@ -156,7 +156,7 @@ class File {
       }
       std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
-    SYSASSERT(fd_, "open" + path + ")");
+    SYSASSERT(fd_, "open(" + path + ")");
   }
 
   ~File() {
