@@ -175,11 +175,7 @@ Reducer::Reducer(
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~
 // If DDP communication hook is not registered, the reducer reduces the buckets
 // by just calling allreduce. If registered, it calls the hook and uses future
-// work handle. If registered, reducer also skips dividing grads by world size.
-// The reason for this is that the communication hook is expected to completely
-// override how we perform communication and the user should have complete
-// control over how the grads are handled.
-//
+// work handle.
 // DDP communication hook is an enhancement that provides a hook which can be
 // used to override how DDP communicates gradients across ranks, this can be
 // used for algorithms like Gradient Compression/GossipGrad. This hook can be
@@ -355,17 +351,12 @@ void Reducer::mark_variable_ready_dense(VariableIndex index) {
             ", strides() = ",
             bucket_view.strides());
       }
-      // See Note [DDP Communication Hook]
-      if (comm_hook_ == nullptr) {
-        // imitates wrapped_scalar_tensor in ATen/native/BinaryOps.cpp
-        auto wrapped =
-            c10::scalar_to_tensor(double(1.) / process_group_->getSize());
-        wrapped.unsafeGetTensorImpl()->set_wrapped_number(true);
-        // Divides while copying into the bucket view.
-        at::native::mul_out(bucket_view, grad, wrapped);
-      } else {
-        bucket_view.copy_(grad);
-      }
+      // imitates wrapped_scalar_tensor in ATen/native/BinaryOps.cpp
+      auto wrapped =
+          c10::scalar_to_tensor(double(1.) / process_group_->getSize());
+      wrapped.unsafeGetTensorImpl()->set_wrapped_number(true);
+      // Divides while copying into the bucket view.
+      at::native::mul_out(bucket_view, grad, wrapped);
     } else {
       bucket_view.zero_();
     }
@@ -394,10 +385,7 @@ void Reducer::mark_variable_ready_sparse(VariableIndex index) {
     // struct are empty, and there is no pre-existing accumulation tensor.
     // Directly assign the sparse tensor to the `contents` field.
     replica.contents = grad;
-    // See Note [DDP Communication Hook]
-    if (comm_hook_ == nullptr) {
-      replica.contents.div_(process_group_->getSize());
-    }
+    replica.contents.div_(process_group_->getSize());
     // The grad is modified in place and needs to be written back.
     return true;
   });
@@ -980,15 +968,11 @@ void Reducer::finalize_backward() {
       auto future_result =
           comm_hook_->processFuture(bucket.future_work->value());
 
+      // Reinitialize bucket_views with the future_result by following
+      // the same logic in `inititalize_buckets`.
       for (size_t i = 0; i < future_result.size(); i++) {
-        if (bucket.expect_sparse_gradient) {
-          bucket.replicas[i].contents.copy_(future_result[i]);
-        } else {
-          // Reinitialize bucket_views with the future_result by following
-          // the same logic in `inititalize_buckets`.
-          bucket.replicas[i].bucket_views.clear();
-          initialize_bucketviews(bucket.replicas[i], future_result[i]);
-        }
+        bucket.replicas[i].bucket_views.clear();
+        initialize_bucketviews(bucket.replicas[i], future_result[i]);
       }
     }
     if (!bucket.expect_sparse_gradient) {

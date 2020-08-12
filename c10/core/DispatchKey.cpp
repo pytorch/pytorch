@@ -90,9 +90,6 @@ const char* toString(DispatchKey t) {
     case DispatchKey::Batched:
       return "Batched";
 
-    case DispatchKey::VmapMode:
-      return "VmapMode";
-
     case DispatchKey::TESTING_ONLY_GenericWrapper:
       return "TESTING_ONLY_GenericWrapper";
 

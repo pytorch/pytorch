@@ -1,8 +1,6 @@
 import unittest
 import os
 import sys
-import typing
-import typing_extensions
 from typing import List, Dict, Optional, Tuple
 
 import torch
@@ -159,44 +157,28 @@ class TestRecursiveScript(JitTestCase):
             # Make sure that no entries are left over from the previous failure
             FileCheck().check_count("is being compiled", 2).run(str(e))
 
-    @unittest.skipIf(sys.version_info[:2] < (3, 7), "Class annotations are a thing in > 3.5, need to fix for < 3.7")
+    @unittest.skipIf(True, "Class annotations are a thing in > 3.5, need to fix for < 3.7")
     def test_constants_with_final(self):
-        class M1(torch.nn.Module):
-            x : torch.jit.Final[int]
+        class M(torch.nn.Module):
+            # TODO: Use this (see below)
+            # x : torch.jit.Final[int]
 
             def __init__(self):
-                super().__init__()
+                super(M, self).__init__()
                 self.x = 2
 
             def forward(self, t):
                 return t + self.x
 
-        self.checkModule(M1(), (torch.randn(2, 2),))
 
-        class M2(torch.nn.Module):
-            x : typing_extensions.Final[int]
+        # TODO: Fix this test so that we can actually define the class like
+        #   class M(torch.nn.Module):
+        #       x : torch.jit.Final[int]
+        M.__annotations__ = {'x': torch.jit.Final[int]}
 
-            def __init__(self):
-                super().__init__()
-                self.x = 2
+        m = M()
 
-            def forward(self, t):
-                return t + self.x
-
-        self.checkModule(M2(), (torch.randn(2, 2),))
-
-        if sys.version_info[:2] >= (3, 8):
-            class M3(torch.nn.Module):
-                x : typing.Final[int]
-
-                def __init__(self):
-                    super().__init__()
-                    self.x = 2
-
-                def forward(self, t):
-                    return t + self.x
-
-            self.checkModule(M3(), (torch.randn(2, 2),))
+        self.checkModule(M(), (torch.randn(2, 2),))
 
     def test_ignore_class(self):
         @torch.jit.ignore

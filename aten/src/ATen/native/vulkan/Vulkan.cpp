@@ -1153,17 +1153,15 @@ void copy_image_to_buffer(
 void copy_buffer_to_buffer(
     const VBuffer& srcBuffer,
     VBuffer& dstBuffer,
-    VkDeviceSize size,
-    VkDeviceSize srcOffset,
-    VkDeviceSize dstOffset) {
+    VkDeviceSize size) {
   auto device = context().device();
   VkCommandBuffer commandBuffer{};
   allocateCommandBuffer(device, &commandBuffer);
   beginCommandBuffer(commandBuffer);
 
   VkBufferCopy copyRegion{};
-  copyRegion.srcOffset = srcOffset;
-  copyRegion.dstOffset = dstOffset;
+  copyRegion.srcOffset = 0;
+  copyRegion.dstOffset = 0;
   copyRegion.size = size;
   vkCmdCopyBuffer(
       commandBuffer,
