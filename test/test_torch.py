@@ -18630,7 +18630,7 @@ fn(*args)
 
     def _test_special_stacks(self, dim, torch_fn, np_fn, device, dtype):
         # Test error for non-tuple argument
-        with self.assertRaisesRegex(RuntimeError, "must be tuple of Tensors, not Tensor"):
+        with self.assertRaisesRegex(TypeError, "must be tuple of Tensors, not Tensor"):
             torch_fn(torch.randn(10))
 
         input_t = torch.tensor(random.uniform(0, 10), device=device, dtype=dtype)
