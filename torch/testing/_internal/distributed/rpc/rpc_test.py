@@ -3753,81 +3753,66 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
 
         self.assertFalse(rpc.api._is_current_rpc_agent_set())
 
-    @skip_if_lt_x_gpu(1)
+    @skip_if_lt_x_gpu(2)
     def test_device_maps_wrong_worker_name(self):
         options = self.rpc_backend_options
-        options.set_device_map("none_exist", {-1: 0})
+        options.set_device_map("none_exist", {0: 1})
         self._test_device_maps(options, "Wrong worker names")
 
+    @skip_if_lt_x_gpu(1)
     def test_device_maps_invalid_max_local_device(self):
         options = self.rpc_backend_options
         dst = worker_name((self.rank + 1) % self.world_size)
-        options.set_device_map(dst, {torch.cuda.device_count(): -1})
+        options.set_device_map(dst, {torch.cuda.device_count(): 0})
 
         self._test_device_maps(options)
 
     @skip_if_lt_x_gpu(1)
-    def test_device_maps_invalid_min_local_device(self):
-        options = self.rpc_backend_options
-        dst = worker_name((self.rank + 1) % self.world_size)
-        options.set_device_map(dst, {-2: 0})
-
-        self._test_device_maps(options)
-
-    @skip_if_lt_x_gpu(1)
-    def test_device_maps_invalid_min_remote_device(self):
-        options = self.rpc_backend_options
-        dst = worker_name((self.rank + 1) % self.world_size)
-        options.set_device_map(dst, {0: -2})
-
-        self._test_device_maps(options)
-
     def test_device_maps_invalid_max_remote_device(self):
         options = self.rpc_backend_options
         dst = worker_name((self.rank + 1) % self.world_size)
-        options.set_device_map(dst, {-1: torch.cuda.device_count()})
+        options.set_device_map(dst, {0: torch.cuda.device_count()})
 
         self._test_device_maps(options)
 
-    @skip_if_lt_x_gpu(1)
+    @skip_if_lt_x_gpu(2)
     def test_device_maps_many_to_one(self):
         options = self.rpc_backend_options
         dst = worker_name((self.rank + 1) % self.world_size)
-        options.set_device_map(dst, {-1: 0})
+        options.set_device_map(dst, {1: 0})
         options.set_device_map(dst, {0: 0})
 
         self._test_device_maps(options)
 
+    @skip_if_lt_x_gpu(2)
+    def test_device_maps_one_to_many(self):
+        if self.rank == 0:
+            options = self.rpc_backend_options
+            dst = worker_name((self.rank + 1) % self.world_size)
+            options.set_device_map(dst, {0: 1})
+            with self.assertRaisesRegex(
+                ValueError, "`set_device_map` only supports 1-to-1 mapping"
+            ):
+                options.set_device_map(dst, {0: 0})
+
     @skip_if_lt_x_gpu(1)
-    def test_device_maps_ambiguous_cpu(self):
+    def test_device_maps_invalid_min_device(self):
         options = self.rpc_backend_options
         dst = worker_name((self.rank + 1) % self.world_size)
-        options.set_device_map(dst, {0: -1})
+        with self.assertRaisesRegex(
+            RuntimeError, "Device index must not be negative"
+        ):
+            options.set_device_map(dst, {-1: 0})
 
-        self._test_device_maps(options, "device mapping for CPU.*ambiguous")
-
-    def test_device_maps_cpu(self):
-        options = self.rpc_backend_options
-        dst = worker_name((self.rank + 1) % self.world_size)
-        options.set_device_map(dst, {-1: -1})
-
-        rpc.init_rpc(
-            name=worker_name(self.rank),
-            backend=self.rpc_backend,
-            rank=self.rank,
-            world_size=self.world_size,
-            rpc_backend_options=options,
-        )
-
-        ret = rpc.rpc_sync(dst, torch.add, args=(torch.zeros(2), torch.ones(2)))
-        self.assertEqual(ret, torch.zeros(2) + torch.ones(2))
-
-        rpc.shutdown()
+        with self.assertRaisesRegex(
+            RuntimeError, "Device index must not be negative"
+        ):
+            options.set_device_map(dst, {0: -1})
 
     @staticmethod
     def _gpu_add(x, y):
-        if all([x.is_cuda, x.device.index == 0, y.is_cuda, y.device.index == 0]):
-            return (x + y).to(1)
+        if all([x.is_cuda, x.device.index == 1, y.is_cuda, y.device.index == 1]):
+            return (x + y).to(0)
         else:
             raise ValueError("Wrong device affinity")
 
@@ -3835,8 +3820,7 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
     def test_device_maps_gpu(self):
         options = self.rpc_backend_options
         dst = worker_name((self.rank + 1) % self.world_size)
-        options.set_device_map(dst, {-1: 0})
-        options.set_device_map(dst, {0: 1})
+        options.set_device_map(dst, {0: 1, 1:0})
 
         rpc.init_rpc(
             name=worker_name(self.rank),
@@ -3846,9 +3830,13 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
             rpc_backend_options=options,
         )
 
-        fn = TensorPipeAgentRpcTest._gpu_add
-        ret = rpc.rpc_sync(dst, fn, args=(torch.zeros(2), torch.ones(2)))
-        self.assertEqual(ret, (torch.zeros(2) + torch.ones(2)).to(0))
+        ret = rpc.rpc_sync(
+            dst,
+            TensorPipeAgentRpcTest._gpu_add,
+            args=(torch.zeros(2).to(0), torch.ones(2).to(0))
+        )
+        self.assertEqual(ret.device, torch.device(1))
+        self.assertEqual(ret, (torch.zeros(2) + torch.ones(2)).to(1))
         rpc.shutdown()
 
     @staticmethod
@@ -3862,7 +3850,7 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
     def test_device_maps_multi_gpu(self):
         options = self.rpc_backend_options
         dst = worker_name((self.rank + 1) % self.world_size)
-        options.set_device_map(dst, {-1: 0})
+        options.set_device_map(dst, {1: 0})
         options.set_device_map(dst, {0: 1})
 
         rpc.init_rpc(
@@ -3873,21 +3861,26 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
             rpc_backend_options=options,
         )
 
-        fn = TensorPipeAgentRpcTest._gpu_add_multi_gpu
-        ret = rpc.rpc_sync(dst, fn, args=(torch.zeros(2), torch.ones(2).to(0)))
-        self.assertEqual(ret[0], torch.zeros(2) + torch.ones(2))
-        self.assertEqual(ret[1], (torch.zeros(2) - torch.ones(2)).to(0))
+        rets = rpc.rpc_sync(
+            dst,
+            TensorPipeAgentRpcTest._gpu_add_multi_gpu,
+            args=(torch.zeros(2).to(1), torch.ones(2).to(0))
+        )
+        self.assertEqual(rets[0].device, torch.device(1))
+        self.assertEqual(rets[1].device, torch.device(0))
+        self.assertEqual(rets[0], (torch.zeros(2) + torch.ones(2)).to(1))
+        self.assertEqual(rets[1], (torch.zeros(2) - torch.ones(2)).to(0))
         rpc.shutdown()
 
     @staticmethod
-    def _gpu_add_default_cpu(x, y):
-        if all([x.device.type == 'cpu', y.is_cuda, y.device.index == 1]):
-            return x.to(1) + y
+    def _gpu_add_return_to_gpu(x, y):
+        if x.device.type == 'cpu' and y.device.type == 'cpu':
+            return (x + y).to(0), (x - y).to(1), (x * y).to(2), (x / y).to(3)
         else:
             raise ValueError("Wrong device affinity")
 
-    @skip_if_lt_x_gpu(2)
-    def test_device_maps_default_cpu(self):
+    @skip_if_lt_x_gpu(4)
+    def test_device_maps_return_to_gpu(self):
         options = self.rpc_backend_options
         dst = worker_name((self.rank + 1) % self.world_size)
         options.set_device_map(dst, {0: 1})
@@ -3901,8 +3894,17 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
         )
 
         fn = TensorPipeAgentRpcTest._gpu_add_default_cpu
-        ret = rpc.rpc_sync(dst, fn, args=(torch.zeros(2), torch.ones(2).to(0)))
-        self.assertEqual(ret, (torch.zeros(2) + torch.ones(2)).to(0))
+        rets = rpc.rpc_sync(
+            dst,
+            TensorPipeAgentRpcTest._gpu_add_return_to_gpu,
+            args=(torch.zeros(2), torch.ones(2))
+        )
+        for i in range(len(rets)):
+            self.assertEqual(rets[i].device, torch.device(i))
+        self.assertEqual(ret[0], (torch.zeros(2) + torch.ones(2)).to(0))
+        self.assertEqual(ret[1], (torch.zeros(2) - torch.ones(2)).to(1))
+        self.assertEqual(ret[2], (torch.zeros(2) * torch.ones(2)).to(2))
+        self.assertEqual(ret[3], (torch.zeros(2) / torch.ones(2)).to(3))
         rpc.shutdown()
 
     @staticmethod

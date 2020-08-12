@@ -31,7 +31,7 @@ const std::string kServerActiveAsyncCalls = "agent.server_active_async_calls";
 const std::string kRpcTimeoutErrorStr =
     "RPC ran for more than set timeout ({} ms) and will now be marked with an error";
 
-std::vector<c10::DeviceIndex> mapTensorDevices(
+std::vector<c10::DeviceIndex> getDevicesForTensors(
     const std::string& remoteName,
     const std::vector<torch::Tensor>& tensors,
     const std::unordered_map<
@@ -443,7 +443,7 @@ void TensorPipeAgent::pipeWrite(
       rpcMessage.isRequest() ? opts_.deviceMaps : reverseDeviceMaps_;
   std::tie(tpMessage, tpBuffers) = tensorpipeSerialize(
       std::move(rpcMessage),
-      mapTensorDevices(
+      getDevicesForTensors(
           pipe->getRemoteName(), rpcMessage.tensors(), deviceMaps));
 
   pipe->write(

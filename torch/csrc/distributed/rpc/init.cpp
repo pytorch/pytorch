@@ -458,7 +458,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
   // Base class: torch.distributed.rpc.RpcBackendOptions.
   py::class_<TensorPipeRpcBackendOptions>(
       module,
-      "TensorPipeRpcBackendOptions",
+      "_TensorPipeRpcBackendOptionsBase",
       rpcBackendOptions,
       R"(
           The backend options for
