@@ -1918,8 +1918,7 @@ class DistributedTest:
                 tmp_file.seek(0)
                 saved_model = torch.load(tmp_file)
             for k in model_DDP.state_dict():
-                self.assertEqual(model_DDP.state_dict()[k],
-                                saved_model.state_dict()[k])
+                self.assertEqual(model_DDP.state_dict()[k], saved_model.state_dict()[k])
 
         def _test_DistributedDataParallel(self, gpu_subset, rank, output_device=None):
             # Run a simple end to end DDP model, use result of single node model
@@ -1988,7 +1987,7 @@ class DistributedTest:
             self._barrier()
 
         @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
-                        "Only Nccl & Gloo backend support DistributedDataParallel")
+                         "Only Nccl & Gloo backend support DistributedDataParallel")
         def test_DistributedDataParallel_requires_grad(self):
             # a module without gradients shouldn't be accepted
             self.assertRaises(AssertionError, lambda: nn.parallel.DistributedDataParallel(nn.Module()))
@@ -2034,7 +2033,7 @@ class DistributedTest:
                     )
 
         @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
-                        "Only Nccl & Gloo backend support DistributedDataParallel")
+                         "Only Nccl & Gloo backend support DistributedDataParallel")
         @skip_if_no_gpu
         @skip_if_rocm
         def test_DistributedDataParallel(self):
@@ -2095,7 +2094,7 @@ class DistributedTest:
             self._barrier()
 
         @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
-                        "Only Nccl & Gloo backend support DistributedDataParallel")
+                         "Only Nccl & Gloo backend support DistributedDataParallel")
         @skip_if_no_gpu
         def test_DistributedDataParallel_SyncBatchNorm(self):
             group, group_id, rank = self._init_global_test()
@@ -2136,7 +2135,7 @@ class DistributedTest:
                 output_device=torch.device('cuda'))
 
         @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
-                        "Only Nccl & Gloo backend support DistributedDataParallel")
+                         "Only Nccl & Gloo backend support DistributedDataParallel")
         @skip_if_no_gpu
         def test_DistributedDataParallel_SyncBatchNorm_2D_Input(self):
             group, group_id, rank = self._init_global_test()
@@ -2183,7 +2182,7 @@ class DistributedTest:
                 self._barrier()
 
         @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
-                        "Only Nccl & Gloo backend support DistributedDataParallel")
+                         "Only Nccl & Gloo backend support DistributedDataParallel")
         @skip_if_no_gpu
         @require_world_size(2)
         @skip_if_rocm
@@ -2232,7 +2231,7 @@ class DistributedTest:
                 self._barrier()
 
         @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
-                        "Only Nccl & Gloo backend support DistributedDataParallel")
+                         "Only Nccl & Gloo backend support DistributedDataParallel")
         @skip_if_no_gpu
         def test_DistributedDataParallel_SyncBatchNorm_Diff_Input_Sizes_Running_Value(self):
             group, group_id, rank = self._init_global_test()
@@ -2261,7 +2260,7 @@ class DistributedTest:
             torch.testing.assert_allclose(running_var, all_input_var.var(1))
 
         @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
-                        "Only Nccl & Gloo backend support DistributedDataParallel")
+                         "Only Nccl & Gloo backend support DistributedDataParallel")
         @skip_if_no_gpu
         def test_DistributedDataParallel_SyncBatchNorm_Diff_Input_Sizes_gradient(self):
             group, group_id, rank = self._init_global_test()
