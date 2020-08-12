@@ -17,13 +17,13 @@ Expr* LoopNestGenerator::pushAlloc(TensorView* tv) {
         FusionGuard::getCurFusion()->hasOutput(tv)),
       "Tried to allocate an input or output tensor.");
 
-  auto alloc_point = loop_utils::getAllocPoint(tv, for_loops);
-  auto alloc_loop = alloc_point.first;
-  auto alloc_pos = alloc_point.second;
+  const auto alloc_point = loop_utils::getAllocPoint(tv, for_loops);
+  const auto alloc_loop = alloc_point.first;
+  const auto alloc_pos = alloc_point.second;
 
   // Grab the dimensions the allocation will be based on to compute a size
   std::vector<Val*> alloc_dims;
-  for (auto i = alloc_pos; i < tv->nDims(); i++) {
+  for (size_t i = alloc_pos; i < tv->nDims(); i++) {
     IterDomain* compute_at_dim = tv->getComputeAtAxis(i).first;
     IterDomain* local_dim = tv->axis(i);
     if (
@@ -47,7 +47,7 @@ Expr* LoopNestGenerator::pushAlloc(TensorView* tv) {
   // to get the total size
   Val* size = nullptr;
   if (alloc_dims.size() == 0) {
-    size = new Int(1);
+    size = new kir::Int(1);
   } else {
     size = kir::lowerValue(alloc_dims[0]);
     for (size_t i = 1; i < alloc_dims.size(); i++) {
@@ -112,7 +112,7 @@ void LoopNestGenerator::initReduction(
   // buffer. Index compute will ignore [block, grid]Dims depending on buffer
   // memory location
   std::vector<kir::IterDomain*> ids;
-  for (auto i = alloc_pos; i < tv->nDims(); i++) {
+  for (size_t i = alloc_pos; i < tv->nDims(); i++) {
     IterDomain* dim = tv->getComputeAtAxis(i).first;
     if (dim->isReduction())
       continue;

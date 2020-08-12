@@ -116,7 +116,7 @@ void IndexLowering::handle(TernaryOp* top) {
   const auto in2 = lowerOperand(top->in2(), top->out());
   const auto in3 = lowerOperand(top->in3(), top->out());
   const auto out = lowerOutput(top);
-  pushBack(new TernaryOp(top->getTernaryOpType(), out, in1, in2, in3));
+  pushBack(new kir::TernaryOp(top->getTernaryOpType(), out, in1, in2, in3));
 }
 
 namespace {
