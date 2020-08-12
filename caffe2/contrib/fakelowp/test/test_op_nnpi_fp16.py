@@ -23,7 +23,7 @@ kEpsilon = 1e-8
 
 class ArithmeticOpsTest(serial.SerializedTestCase):
     @given(seed=st.integers(0, 65534))
-    @settings(deadline=1000)
+    @settings(deadline=None)
     def _test_binary_op_graph(self, name, seed):
         np.random.seed(seed)
         workspace.ResetWorkspace()
@@ -104,15 +104,19 @@ class ArithmeticOpsTest(serial.SerializedTestCase):
                     "Y_glow": Y_glow, "Y_c2": Y_c2, "diff": diff})
                 assert(0)
 
+    @settings(deadline=None)
     def test_add_graph(self):
         self._test_binary_op_graph("Add")
 
+    @settings(deadline=None)
     def test_sub_graph(self):
         self._test_binary_op_graph("Sub")
 
+    @settings(deadline=None)
     def test_mul_graph(self):
         self._test_binary_op_graph("Mul")
 
+    @settings(deadline=None)
     def test_div_graph(self):
         self._test_binary_op_graph("Div")
 
@@ -193,6 +197,7 @@ class UnaryOpTest(serial.SerializedTestCase):
     # linear sweep and it is deterministic.
     # Once hypothesis.testing version is updated, we can re-enable
     # testing with different hypothesis examples.
+    @settings(deadline=None)
     def test_sigmoid(self):
         opname = "Sigmoid"
         regions = [[-8., -4.], [-4., -2.], [-2., -1.], [-1., -.5], [-.5, -.25],
@@ -204,6 +209,7 @@ class UnaryOpTest(serial.SerializedTestCase):
     # linear sweep and it is deterministic.
     # Once hypothesis.testing version is updated, we can re-enable
     # testing with different hypothesis examples.
+    @settings(deadline=None)
     def test_tanh(self):
         opname = "Tanh"
         regions = [[2.**(-9), 2.**(-8)], [2.**(-8), 2.**(-7)],
@@ -218,6 +224,7 @@ class UnaryOpTest(serial.SerializedTestCase):
     # Once hypothesis.testing version is updated, we can re-enable
     # testing with different hypothesis examples.
     # TODO: move atol to 1e-8 once we get a non-lowered swish implementation
+    @settings(deadline=None)
     def test_swish(self):
         opname = "Swish"
         regions = [[-20.5, -11.], [-11., -8.], [-8., -1.], [-1., -0.1],
@@ -228,6 +235,7 @@ class UnaryOpTest(serial.SerializedTestCase):
     # linear sweep and it is deterministic.
     # Once hypothesis.testing version is updated, we can re-enable
     # testing with different hypothesis examples.
+    @settings(deadline=None)
     def test_logit(self):
         workspace.ResetWorkspace()
         n = 1
@@ -292,7 +300,7 @@ class UnaryOpTest(serial.SerializedTestCase):
 
 class ReluTest(serial.SerializedTestCase):
     @given(seed=st.integers(0, 65534))
-    @settings(deadline=10000)
+    @settings(deadline=None)
     def relu_test(self, inputs, gc, dc, seed):
         np.random.seed(seed)
         inputs = np.random.rand(1).astype(np.float32)

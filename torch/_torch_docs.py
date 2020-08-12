@@ -8428,7 +8428,10 @@ It is recommended to set a large seed, i.e. a number that has a good balance of 
 and 1 bits. Avoid having many 0 bits in the seed.
 
 Arguments:
-    seed (int): The desired seed.
+    seed (int): The desired seed. Value must be within the inclusive range
+        `[-0x8000_0000_0000_0000, 0xffff_ffff_ffff_ffff]`. Otherwise, a RuntimeError
+        is raised. Negative inputs are remapped to positive values with the formula
+        `0xffff_ffff_ffff_ffff + seed`.
 
 Returns:
     Generator: An torch.Generator object.

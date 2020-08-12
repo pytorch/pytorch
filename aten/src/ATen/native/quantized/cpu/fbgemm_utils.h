@@ -210,12 +210,12 @@ struct CAFFE2_API PackedConvWeight : public ConvPackedParamsBase<kSpatialDim> {
 
 struct CAFFE2_API PackedEmbeddingWeight : public EmbeddingPackedParamsBase {
   PackedEmbeddingWeight(
-    at::Tensor packed_w,
-    std::vector<float> w_scale,
-    std::vector<float> w_zp,
-    int64_t bit_rate,
-    c10::QScheme q_scheme,
-    int64_t version)
+      at::Tensor packed_w,
+      std::vector<float> w_scale,
+      std::vector<float> w_zp,
+      int64_t bit_rate,
+      c10::QScheme q_scheme,
+      int64_t version)
     : packed_w(std::move(packed_w)),
       w_scale(std::move(w_scale)),
       w_zp(std::move(w_zp)),
