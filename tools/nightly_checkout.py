@@ -36,7 +36,7 @@ from typing import Dict, Optional, Iterator
 
 LOGGER = None
 URL_FORMAT = "{base_url}/{platform}/{dist_name}.tar.bz2"
-DATETIME_FORMAT = '%Y-%m-%d_%Hh%Mm%Ss'
+DATETIME_FORMAT = "%Y-%m-%d_%Hh%Mm%Ss"
 SHA1_RE = re.compile("([0-9a-fA-F]{40})")
 USERNAME_PASSWORD_RE = re.compile(r":\/\/(.*?)\@")
 LOG_DIRNAME_RE = re.compile(
@@ -539,8 +539,13 @@ def make_parser():
         default=None,
         metavar="PATH",
     )
-    p.add_argument('-v', '--verbose', help="Provide debugging info", dest="verbose",
-        default=False, action="store_true",
+    p.add_argument(
+        "-v",
+        "--verbose",
+        help="Provide debugging info",
+        dest="verbose",
+        default=False,
+        action="store_true",
     )
     return p
 
