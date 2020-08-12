@@ -5,20 +5,21 @@ from __future__ import unicode_literals
 
 from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
+from hypothesis import given, settings
 import caffe2.python.serialized_test.serialized_test_util as serial
-from hypothesis import assume, given
 import hypothesis.strategies as st
 import numpy as np
 import unittest
 
 
 class TestChannelBackpropStats(serial.SerializedTestCase):
-    @serial.given(
+    @given(
         size=st.integers(7, 10),
         inputChannels=st.integers(1, 10),
         batchSize=st.integers(1, 3),
         **hu.gcs
     )
+    @settings(deadline=10000)
     def testChannelBackpropStats(self, size, inputChannels, batchSize, gc, dc):
 
         op = core.CreateOperator(

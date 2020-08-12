@@ -64,7 +64,9 @@ Reducer::Reducer(
 
   // Initialize variable bucketing.
   // This can be reinitialized later after capturing runtime information.
+  std::unique_lock<std::mutex> lock(this->mutex_);
   initialize_buckets(std::move(bucket_indices));
+  lock.unlock();
 
   // All variables are expected to have their `grad_fn` set to the gradient
   // accumulation function (since they are leafs in the autograd graph).
@@ -175,7 +177,11 @@ Reducer::Reducer(
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~
 // If DDP communication hook is not registered, the reducer reduces the buckets
 // by just calling allreduce. If registered, it calls the hook and uses future
-// work handle.
+// work handle. If registered, reducer also skips dividing grads by world size.
+// The reason for this is that the communication hook is expected to completely
+// override how we perform communication and the user should have complete
+// control over how the grads are handled.
+//
 // DDP communication hook is an enhancement that provides a hook which can be
 // used to override how DDP communicates gradients across ranks, this can be
 // used for algorithms like Gradient Compression/GossipGrad. This hook can be
@@ -318,7 +324,7 @@ void Reducer::mark_variable_ready_dense(VariableIndex index) {
       // for saving memory and avoiding copies in subsquent iterations.
       // In most cases, the copy is needed only at first
       // iteration, there will be no copies in subsquent iterations.
-      // In rare cases, if users explicitly set grad to be none after every
+      // In rare cases, if users explicitly set grad to be None after every
       // iteration, then it needs to copy grad to bucket_view in every
       // iteration.
       if (!grad.is_alias_of(bucket_view)) {
@@ -351,24 +357,31 @@ void Reducer::mark_variable_ready_dense(VariableIndex index) {
               ", strides() = ",
               bucket_view.strides());
         }
-        // imitates wrapped_scalar_tensor in ATen/native/BinaryOps.cpp
-        auto wrapped =
-            c10::scalar_to_tensor(double(1.) / process_group_->getSize());
-        wrapped.unsafeGetTensorImpl()->set_wrapped_number(true);
-        // Divides while copying into the bucket view.
-        at::native::mul_out(bucket_view, grad, wrapped);
+        // See Note [DDP Communication Hook]
+        if (comm_hook_ == nullptr) {
+          // imitates wrapped_scalar_tensor in ATen/native/BinaryOps.cpp
+          auto wrapped =
+              c10::scalar_to_tensor(double(1.) / process_group_->getSize());
+          wrapped.unsafeGetTensorImpl()->set_wrapped_number(true);
+          // Divides while copying into the bucket view.
+          at::native::mul_out(bucket_view, grad, wrapped);
+        } else {
+          bucket_view.copy_(grad);
+        }
         // Let grad point to bucket_view buffer.
         grad = bucket_view;
         // The grad is modified and need to be written back.
         return true;
       } else {
         // If grad and bucket view point to the same storage, no need to copy
-        bucket_view.div_(process_group_->getSize());
+        if (comm_hook_ == nullptr) {
+          bucket_view.div_(process_group_->getSize());
+        }
       }
     } else {
       bucket_view.zero_();
     }
-    // The grad is not modified and dosesn't need to be written back.
+    // The grad is not modified and doesn't need to be written back.
     return false;
   });
 }
@@ -393,7 +406,10 @@ void Reducer::mark_variable_ready_sparse(VariableIndex index) {
     // struct are empty, and there is no pre-existing accumulation tensor.
     // Directly assign the sparse tensor to the `contents` field.
     replica.contents = grad;
-    replica.contents.div_(process_group_->getSize());
+    // See Note [DDP Communication Hook]
+    if (comm_hook_ == nullptr) {
+      replica.contents.div_(process_group_->getSize());
+    }
     // The grad is modified in place and needs to be written back.
     return true;
   });
@@ -599,7 +615,6 @@ void Reducer::mark_bucket_ready(size_t bucket_index) {
 
 void Reducer::initialize_buckets(
     std::vector<std::vector<size_t>> bucket_indices) {
-  std::lock_guard<std::mutex> lock(mutex_);
   // If initialize_buckets is called inside DDP constructor, then
   // it does not matter rpc context ptr is nullptr or not, as grad
   // will not be mutated.
@@ -777,7 +792,7 @@ void Reducer::initialize_bucketviews(
       bucket_view = contents.narrow(0, offset, length).view(v.sizes());
     }
     replica.bucket_views.push_back(bucket_view);
-    // There are two cases to handle:
+    // There are three cases to handle:
     // 1. initialize_bucketviews could be called inside communication hook,
     // bucket_view has the updated results in new tensor, just let grad point to
     // bucket_view.
@@ -802,6 +817,11 @@ void Reducer::initialize_bucketviews(
       return false;
     });
   }
+}
+
+void Reducer::prepare_forward() {
+  std::lock_guard<std::mutex> lock(mutex_);
+  rebuildBuckets();
 }
 
 // Traverse the autograd graph starting at the specified output.
@@ -1001,11 +1021,15 @@ void Reducer::finalize_backward() {
       auto future_result =
           comm_hook_->processFuture(bucket.future_work->value());
 
-      // Reinitialize bucket_views with the future_result by following
-      // the same logic in `inititalize_buckets`.
       for (size_t i = 0; i < future_result.size(); i++) {
-        bucket.replicas[i].bucket_views.clear();
-        initialize_bucketviews(bucket.replicas[i], future_result[i], false);
+        if (bucket.expect_sparse_gradient) {
+          bucket.replicas[i].contents.copy_(future_result[i]);
+        } else {
+          // Reinitialize bucket_views with the future_result by following
+          // the same logic in `inititalize_buckets`.
+          bucket.replicas[i].bucket_views.clear();
+          initialize_bucketviews(bucket.replicas[i], future_result[i], false);
+        }
       }
     }
     if (!bucket.expect_sparse_gradient) {
@@ -1169,6 +1193,11 @@ void Reducer::rebuildBuckets() {
 void Reducer::register_comm_hook(std::unique_ptr<CommHookInterface> iface) {
   TORCH_CHECK(
       comm_hook_ == nullptr, "register_comm_hook can only be called once.");
+  // TODO(@sinannasir): Single process multiple device mode support for DDP
+  // communication hook. Related to GH Issue #42542.
+  TORCH_CHECK(
+      replicas_.size() == 1,
+      "Communication hook does not support single process multiple device mode.");
 
   comm_hook_ = std::move(iface);
 }

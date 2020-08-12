@@ -34,22 +34,15 @@ class Reducer {
 
   ~Reducer() noexcept(false);
 
-  // To (re-)initialize bucket assignment, pass a list of buckets, each
-  // of which is specified by a list of indices in the variables list.
-  // This function performs validation that the variables within a bucket
-  // all live on the same device and have the same dimensionality.
-  void initialize_buckets(std::vector<std::vector<size_t>> bucket_indices);
-
-  // Rebuild buckets based on rebuilt_params_ and rebuilt_param_indices_
-  // TODO this function makes broadcast communication call and
-  // could be overlapped with next forward() call, thus
-  // it could be async. Will make it async when rebuilding buckets for
-  // find_unused_parameters = true case, as we could rebuild buckets more than
-  // once for find_unused_parameters = true case, where subgraphs are trained
-  // and parameter indices order may change more frequently.
-  // For find_unused_parameters = false case, buckets are only rebuilt once,
-  // the performance cost is negligible.
-  void rebuildBuckets();
+  // This funcation is called before forward compuation, e.g.
+  // rebuildBuckets and let grads point to bucket tensors. This
+  // can help saving peak memory usage and avoid copies btw grads and
+  // bucket tensors.
+  // It may allocate new buckets before deallocating old buckets
+  // inside rebuildBuckets. To save peak memory usage,
+  // call rebuildBuckets before the peak memory usage increases
+  // during forward computation.
+  void prepare_forward();
 
   // This function is called when the forward function has produced an output,
   // and the user wishes to reduce gradients in the backwards pass.
@@ -134,9 +127,26 @@ class Reducer {
 
   void finalize_backward();
 
+  // To (re-)initialize bucket assignment, pass a list of buckets, each
+  // of which is specified by a list of indices in the variables list.
+  // This function performs validation that the variables within a bucket
+  // all live on the same device and have the same dimensionality.
+  void initialize_buckets(std::vector<std::vector<size_t>> bucket_indices);
+
   // Broadcast rebuilt buckets from rank 0 to other ranks before initializing
   // the buckets
   void sync_bucket_indices(std::vector<std::vector<size_t>>& bucket_indices);
+
+  // Rebuild buckets based on rebuilt_params_ and rebuilt_param_indices_
+  // TODO this function makes broadcast communication call and
+  // could be overlapped with next forward() call, thus
+  // it could be async. Will make it async when rebuilding buckets for
+  // find_unused_parameters = true case, as we could rebuild buckets more than
+  // once for find_unused_parameters = true case, where subgraphs are trained
+  // and parameter indices order may change more frequently.
+  // For find_unused_parameters = false case, buckets are only rebuilt once,
+  // the performance cost is negligible.
+  void rebuildBuckets();
 
   using GradCallback =
       torch::distributed::autograd::DistAutogradContext::GradCallback;
