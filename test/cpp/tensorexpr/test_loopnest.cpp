@@ -1664,7 +1664,7 @@ void testNoUnroll() {
       LoopNest::unroll(loops[0], &unrolled), "non-constant loop");
 }
 
-void testUnrollWithVarMap() {
+void testUnrollWithLet() {
   KernelScope kernel_scope;
   const int kTotalSize = 3;
   BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kInt);
@@ -1676,9 +1676,9 @@ void testUnrollWithVarMap() {
       x,
       0,
       kTotalSize,
-      Block::make(
-          {{e.node(), new IntImm(7)}},
-          {Store::make(a_buf, {x}, e), Store::make(b_buf, {x}, e + 1)}));
+      Block::make({Let::make(e, 7),
+                   Store::make(a_buf, {x}, e),
+                   Store::make(b_buf, {x}, e + 1)}));
   Block::make({f});
   Stmt* unrolled = nullptr;
   LoopNest::unroll(f, &unrolled);
@@ -1695,6 +1695,15 @@ void testUnrollWithVarMap() {
 # CHECK: B[2] = e + 1;)IR";
 
   torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  std::vector<int> a_v(kTotalSize, 0);
+  std::vector<int> b_v(kTotalSize, 0);
+  SimpleIREvaluator eval(unrolled, a_buf, b_buf);
+  eval(a_v, b_v);
+  for (int i = 0; i < kTotalSize; ++i) {
+    ASSERT_EQ(a_v[i], 7);
+    ASSERT_EQ(b_v[i], 8);
+  }
 }
 
 } // namespace jit

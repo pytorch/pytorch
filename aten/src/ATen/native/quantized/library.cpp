@@ -8,14 +8,20 @@ torch::class_<LinearPackedParamsBase> register_linear_params();
 
 template <int kSpatialDim = 2>
 torch::class_<ConvPackedParamsBase<kSpatialDim>> register_conv_params();
+template <int kSpatialDim = 2>
+torch::class_<LegacyConvPackedParamsBase<kSpatialDim>> register_legacy_conv_params();
 
 extern template torch::class_<ConvPackedParamsBase<2>> register_conv_params<2>();
 extern template torch::class_<ConvPackedParamsBase<3>> register_conv_params<3>();
+extern template torch::class_<LegacyConvPackedParamsBase<2>> register_legacy_conv_params<2>();
+extern template torch::class_<LegacyConvPackedParamsBase<3>> register_legacy_conv_params<3>();
 
 TORCH_LIBRARY(quantized, m) {
   register_linear_params();
   register_conv_params<2>();
   register_conv_params<3>();
+  register_legacy_conv_params<2>();
+  register_legacy_conv_params<3>();
 
   m.def("add(Tensor qa, Tensor qb, float scale, int zero_point) -> Tensor qc");
   m.def("add_relu(Tensor qa, Tensor qb, float scale, int zero_point) -> Tensor qc");
