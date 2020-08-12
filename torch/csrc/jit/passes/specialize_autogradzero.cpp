@@ -122,7 +122,7 @@ private:
         }
         state[inp] = *pttp->undefined() ? State::Zero : State::Nonzero;
         auto check = g.insert(prim::AutogradAnyNonZero, {inp});
-        if (!*pttp->undefined()) {
+        if (*pttp->undefined()) {
           check = g.insert(aten::__not__, {check});
         }
         checks.push_back(check->node());
