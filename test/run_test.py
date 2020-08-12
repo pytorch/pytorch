@@ -304,7 +304,8 @@ def test_distributed(test_module, test_directory, options):
         for with_init_file in {True, False}:
             tmp_dir = tempfile.mkdtemp()
             if options.verbose:
-                with_init = ' with file init_method' if with_init_file else ''
+                init_str = "with {} init_method"
+                with_init = init_str.format("file" if with_init_file else "env")
                 print_to_stderr(
                     'Running distributed tests for the {} backend{}'.format(
                         backend, with_init))
