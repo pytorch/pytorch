@@ -4,8 +4,10 @@ import collections
 from datetime import timedelta
 import enum
 
+import torch
 import torch.distributed as dist
 
+from . import api
 from . import constants as rpc_constants
 
 
@@ -171,6 +173,67 @@ def _tensorpipe_construct_rpc_backend_options_handler(
     )
 
 
+# detect if any worker has invalid map_location configurations, and return
+# names of failed workers
+def _tensorpipe_check_device_maps(agent, map_locations):
+    if not map_locations:
+        return
+
+    def check_one_worker(name, map_locations, all_device_counts):
+        device_count = all_device_counts[name]
+        wrong_worker_names = set(map_locations) - set(all_device_counts)
+        if wrong_worker_names:
+            raise ValueError(f"Wrong worker names: {wrong_worker_names}")
+        for worker_name in all_device_counts:
+            remote_device_count = all_device_counts[worker_name]
+            if worker_name in map_locations:
+                map_location = map_locations[worker_name]
+                key_set = set(map_location.keys())
+                val_set = set(map_location.values())
+                if not all([
+                    len(map_location) == len(key_set),
+                    len(map_location) == len(val_set),  # check 1-to-1 mapping
+                    min(key_set) >= -1,
+                    max(key_set) < device_count,  # check local range
+                    min(val_set) >= -1,
+                    max(val_set) < remote_device_count  # check remote range
+                ]):
+                    raise ValueError(
+                        f"Invalid map_location configuration on {name}:\n"
+                        f"map_locations = {map_locations}"
+                    )
+
+                if -1 not in map_location and -1 in map_location.values():
+                    raise ValueError(
+                        f"Invalid map_location configuration on {name}. "
+                        "It maps a non-CPU device to CPU, when combined with "
+                        "the default CPU-CPU mapping, device mapping for CPU "
+                        "tensors is ambiguous:\n"
+                        f"map_locations = {map_locations}"
+                    )
+
+
+    gathered = api._all_gather([torch.cuda.device_count(), map_locations])
+    all_device_counts = {name: gathered[name][0] for name in gathered}
+    all_map_locations = {name: gathered[name][1] for name in gathered}
+    for worker_name in all_map_locations:
+        worker_map_locations = all_map_locations[worker_name]
+        check_one_worker(worker_name, worker_map_locations, all_device_counts)
+
+    # passed all checked, construct reverse mapping for return values
+    reverse_map_locations = {}
+    local_name = api.get_worker_info().name
+    for worker_name in all_map_locations:
+        remote_map_locations = all_map_locations[worker_name]
+        if local_name in remote_map_locations:
+            remote_map_location = remote_map_locations[local_name]
+            reverse_map_locations[worker_name] = {
+                remote_map_location[k]: k for k in remote_map_location
+            }
+
+    agent._set_reverse_map_locations(reverse_map_locations)
+
+
 def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_options):
     from . import TensorPipeRpcBackendOptions
     from . import TensorPipeAgent
@@ -194,9 +257,19 @@ def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_
     group = _init_process_group(store, rank, world_size)
 
     # TODO: add try-except and destroy _agent in all processes if any fails.
-    return TensorPipeAgent(
+    agent = TensorPipeAgent(
         store, name, rank, world_size, group, rpc_backend_options
     )
+
+    api._init_rpc_states(agent)
+
+    try:
+        _tensorpipe_check_device_maps(agent, rpc_backend_options.map_locations)
+    except Exception:
+        api.shutdown()
+        raise
+
+    return agent
 
 
 register_backend(

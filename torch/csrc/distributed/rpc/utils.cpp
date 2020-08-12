@@ -660,7 +660,7 @@ Message tensorpipeDeserialize(
         " tensors with ",
         buffers.deviceIndices.size(),
         " device indices.");
-    for (size_t i = {}; i < tensors.size(); ++i) {
+    for (size_t i = 0; i < tensors.size(); ++i) {
       tensors[i] = tensors[i].to(indexToDevice(buffers.deviceIndices[i]));
     }
   }

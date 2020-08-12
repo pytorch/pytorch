@@ -562,7 +562,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
           py::call_guard<py::gil_scoped_release>())
       .def(
           "_set_reverse_map_locations",
-          // intentionally not releasing GIL
+          // intentionally not releasing GIL to avoid unnecessary context switch
           &TensorPipeAgent::setReverseMapLocations);
 
   module.def("_is_current_rpc_agent_set", &RpcAgent::isCurrentRpcAgentSet);

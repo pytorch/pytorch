@@ -57,19 +57,22 @@ class SwishInt8NNPIOp final : public Operator<CPUContext> {
 
   bool RunOnDevice() override {
     const auto& X = Inputs()[0]->template Get<Int8TensorCPU>();
-    auto* Y = Output(0, X.t.sizes(), at::dtype<uint8_t>());
-    int32_t X_offset_ =
-      this->template GetSingleArgument<int>("X_zero_point", 0);
-    auto X_scale_ = this->template GetSingleArgument<float>("X_scale", 1);
+    auto* Y = Outputs()[0]->template GetMutable<Int8TensorCPU>();
+    Y->t.ResizeLike(X.t);
+
     int32_t Y_offset_ =
       this->template GetSingleArgument<int>("Y_zero_point", 0);
     auto Y_scale_ = this->template GetSingleArgument<float>("Y_scale", 1);
+
+    Y->scale = Y_scale_;
+    Y->zero_point = Y_offset_;
+
     SwishFakeInt8NNPI(
         X.t.data<uint8_t>(),
-        Y->mutable_data<uint8_t>(),
+        Y->t.mutable_data<uint8_t>(),
         X.t.numel(),
-        X_scale_,
-        X_offset_,
+        X.scale,
+        X.zero_point,
         Y_scale_,
         Y_offset_);
     return true;

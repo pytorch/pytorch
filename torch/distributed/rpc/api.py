@@ -3,12 +3,10 @@ import contextlib
 import functools
 import inspect
 import logging
-import numbers
 import threading
 from typing import Generic, TypeVar
 
 import torch
-import torch.distributed as dist
 
 from . import (
     PyRRef,
@@ -29,7 +27,6 @@ from . import (
     _is_current_rpc_agent_set,
     _reset_current_rpc_agent,
     _set_and_start_rpc_agent,
-    backend_registry,
 )
 
 from .internal import (
@@ -107,6 +104,16 @@ _ALL_WORKER_NAMES = None
 _all_gather_dict_lock = threading.RLock()
 _all_gather_sequence_id = 0
 _all_gather_sequence_id_to_states = collections.defaultdict(AllGatherStates)
+
+
+def _init_rpc_states(agent):
+    worker_infos = agent.get_worker_infos()
+    global _ALL_WORKER_NAMES
+    _ALL_WORKER_NAMES = {worker_info.name for worker_info in worker_infos}
+
+    # NB: backend implementation might have already set the rpc_agent.
+    if not _is_current_rpc_agent_set():
+        _set_and_start_rpc_agent(agent)
 
 
 def _gather_to_leader(sequence_id, worker_name, obj):
@@ -203,74 +210,6 @@ def _all_gather(obj):
     return states.gathered_objects
 
 
-# detect if any worker has invalid map_location configurations, and return
-# names of failed workers
-@_require_initialized
-def _setup_map_locations(map_locations):
-    agent = _get_current_rpc_agent()
-    if not map_locations:
-        return
-    elif not isinstance(agent, TensorPipeAgent):
-        raise ValueError(
-            "map_locations attribute only works with TensorPipe RPC Backend, "
-            f"but the current agent type is {type(agent)}"
-        )
-
-    def check_one_worker(name, map_locations, all_device_counts):
-        device_count = all_device_counts[name]
-        wrong_worker_names = set(map_locations) - set(all_device_counts)
-        if wrong_worker_names:
-            raise ValueError(f"Wrong worker names: {wrong_worker_names}")
-        for worker_name in all_device_counts:
-            remote_device_count = all_device_counts[worker_name]
-            if worker_name in map_locations:
-                map_location = map_locations[worker_name]
-                key_set = set(map_location.keys())
-                val_set = set(map_location.values())
-                if not all([
-                    len(map_location) == len(key_set),
-                    len(map_location) == len(val_set),  # check 1-to-1 mapping
-                    min(key_set) >= -1,
-                    max(key_set) < device_count,  # check local range
-                    min(val_set) >= -1,
-                    max(val_set) < remote_device_count  # check remote range
-                ]):
-                    raise ValueError(
-                        f"Invalid map_location configuration on {name}:\n"
-                        f"map_locations = {map_locations}"
-                    )
-
-                if -1 not in map_location and -1 in map_location.values():
-                    raise ValueError(
-                        f"Invalid map_location configuration on {name}. "
-                        "It maps a non-CPU device to CPU, when combined with "
-                        "the default CPU-CPU mapping, device mapping for CPU "
-                        "tensors is ambiguous:\n"
-                        f"map_locations = {map_locations}"
-                    )
-
-
-    gathered = _all_gather([torch.cuda.device_count(), map_locations])
-    all_device_counts = {name: gathered[name][0] for name in gathered}
-    all_map_locations = {name: gathered[name][1] for name in gathered}
-    for worker_name in all_map_locations:
-        worker_map_locations = all_map_locations[worker_name]
-        check_one_worker(worker_name, worker_map_locations, all_device_counts)
-
-    # passed all checked, construct reverse mapping for return values
-    reverse_map_locations = {}
-    local_name = get_worker_info().name
-    for worker_name in all_map_locations:
-        remote_map_locations = all_map_locations[worker_name]
-        if local_name in remote_map_locations:
-            remote_map_location = remote_map_locations[local_name]
-            reverse_map_locations[worker_name] = {
-                remote_map_location[k]: k for k in remote_map_location
-            }
-
-    agent._set_reverse_map_locations(reverse_map_locations)
-
-
 @_require_initialized
 def _wait_all_workers():
     r"""
@@ -356,38 +295,6 @@ def shutdown(graceful=True):
         _reset_current_rpc_agent()
 
 
-# TODO: add a context manager to wrap _init_rpc_backend and shutdown
-def _init_rpc_backend(
-    backend=backend_registry.BackendType.PROCESS_GROUP,
-    store=None,
-    name=None,
-    rank=-1,
-    world_size=-1,
-    rpc_backend_options=None,
-):
-
-    _validate_rpc_args(backend, store, name, rank, world_size, rpc_backend_options)
-
-    if _is_current_rpc_agent_set():
-        raise RuntimeError("RPC is already initialized")
-
-    # Initialize RPC.
-    rpc_agent = backend_registry.init_backend(
-        backend,
-        store=store,
-        name=name,
-        rank=rank,
-        world_size=world_size,
-        rpc_backend_options=rpc_backend_options,
-    )
-
-    worker_infos = rpc_agent.get_worker_infos()
-    global _ALL_WORKER_NAMES
-    _ALL_WORKER_NAMES = {worker_info.name for worker_info in worker_infos}
-
-    _set_and_start_rpc_agent(rpc_agent)
-
-
 @_require_initialized
 def get_worker_info(worker_name=None):
     r"""
@@ -417,24 +324,6 @@ def _to_worker_info(name_or_info):
         return get_worker_info(name_or_info)
     else:
         raise ValueError("Cannot get WorkerInfo from name {}".format(name_or_info))
-
-
-def _validate_rpc_args(backend, store, name, rank, world_size, rpc_backend_options):
-    type_mapping = {
-        backend: backend_registry.BackendType,
-        store: dist.Store,
-        name: str,
-        rank: numbers.Integral,
-        world_size: numbers.Integral,
-        rpc_backend_options: RpcBackendOptions,
-    }
-    for arg, arg_type in type_mapping.items():
-        if not isinstance(arg, arg_type):
-            raise RuntimeError(
-                "Argument {} must be of type {} but got type {}".format(
-                    arg, arg_type, type(arg)
-                )
-            )
 
 
 T = TypeVar("T")
