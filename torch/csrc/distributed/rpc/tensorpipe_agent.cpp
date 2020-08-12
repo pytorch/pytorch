@@ -31,6 +31,17 @@ const std::string kServerActiveAsyncCalls = "agent.server_active_async_calls";
 const std::string kRpcTimeoutErrorStr =
     "RPC ran for more than set timeout ({} ms) and will now be marked with an error";
 
+inline void checkCPUTensor(const torch::Tensor& tensor) {
+  TORCH_CHECK(
+      tensor.device() == at::kCPU,
+      "TensorPipeAgent only supports CPU tensors by default. Sending "
+      "GPU tensors using RPC requires explicitly configurations using "
+      "`set_device_map` on `TensorPipeRpcBackendOptions`. Got a tensor "
+      "with device ",
+      tensor.device(),
+      ", but no device map is specified.");
+}
+
 std::vector<c10::DeviceIndex> getDevicesForTensors(
     const std::string& remoteName,
     const std::vector<torch::Tensor>& tensors,
@@ -39,6 +50,9 @@ std::vector<c10::DeviceIndex> getDevicesForTensors(
         std::unordered_map<c10::DeviceIndex, c10::DeviceIndex>>& deviceMaps) {
   const auto workerIter = deviceMaps.find(remoteName);
   if (workerIter == deviceMaps.end()) {
+    for (const auto& tensor : tensors) {
+      checkCPUTensor(tensor);
+    }
     return {};
   } else {
     std::vector<c10::DeviceIndex> deviceIndices;
@@ -47,14 +61,7 @@ std::vector<c10::DeviceIndex> getDevicesForTensors(
     for (const auto& tensor : tensors) {
       const auto deviceIter = deviceMap.find(tensor.device().index());
       if (deviceIter == deviceMap.end()) {
-        TORCH_CHECK(
-            tensor.device() == at::kCPU,
-            "TensorPipeAgent only supports CPU tensors by default. Sending "
-            "GPU tensors using RPC requires explicitly calling "
-            "`set_device_map` on TensorPipeRpcBackendOptions. Got a tensor "
-            "with device ",
-            tensor.device(),
-            ", but no map location is specified.");
+        checkCPUTensor(tensor);
         deviceIndices.push_back(-1);
       } else {
         deviceIndices.push_back(deviceIter->second);

@@ -3930,9 +3930,8 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
     def _test_device_maps_missing_config(self, mode):
         dst = worker_name((self.rank + 1) % self.world_size)
         errMsg = (
-            "TensorPipe RPC backend only supports CPU tensors by default.*"
-            "please move your tensors to CPU before sending them over RPC.*"
-            "or call `set_device_map` on `TensorPipeRpcBackendOptions`"
+            "TensorPipeAgent only supports CPU tensors by default.*"
+            "`set_device_map` on `TensorPipeRpcBackendOptions`"
         )
 
         with self.assertRaisesRegex(RuntimeError, errMsg):
@@ -3942,6 +3941,14 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
                 rpc.remote(dst, torch.add, args=(torch.zeros(2).to(0), 1)).to_here()
             else:
                 raise ValueError(f"unexpected mode {mode}")
+
+        # make sure RPC is still functioning
+        ret = rpc.rpc_sync(dst, torch.add, args=(torch.ones(2), 1))
+        self.assertEqual(ret, torch.ones(2) + 1)
+
+    def _test_device_maps_missing_config_response(self, mode):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        errMsg = "Response device mapping is not available"
 
         with self.assertRaisesRegex(RuntimeError, errMsg):
             if mode == RPCExecMode.SYNC:
@@ -3959,6 +3966,10 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
             else:
                 raise ValueError(f"unexpected mode {mode}")
 
+        # make sure RPC is still functioning
+        ret = rpc.rpc_sync(dst, torch.add, args=(torch.ones(2), 1))
+        self.assertEqual(ret, torch.ones(2) + 1)
+
     @skip_if_lt_x_gpu(1)
     @dist_init
     def test_device_maps_missing_config(self):
@@ -3966,8 +3977,30 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
 
     @skip_if_lt_x_gpu(1)
     @dist_init
+    def test_device_maps_missing_config_loop(self):
+        for _ in range(self.rpc_backend_options.num_worker_threads + 5):
+            self._test_device_maps_missing_config(RPCExecMode.SYNC)
+
+    @skip_if_lt_x_gpu(1)
+    @dist_init
+    def test_device_maps_missing_config_response(self):
+        self._test_device_maps_missing_config_response(RPCExecMode.SYNC)
+
+    @skip_if_lt_x_gpu(1)
+    @dist_init
+    def test_device_maps_missing_config_response_loop(self):
+        for _ in range(self.rpc_backend_options.num_worker_threads + 5):
+            self._test_device_maps_missing_config_response(RPCExecMode.SYNC)
+
+    @skip_if_lt_x_gpu(1)
+    @dist_init
     def test_device_maps_missing_config_remote(self):
         self._test_device_maps_missing_config(RPCExecMode.REMOTE)
+
+    @skip_if_lt_x_gpu(1)
+    @dist_init
+    def test_device_maps_missing_config_remote_response(self):
+        self._test_device_maps_missing_config_response(RPCExecMode.REMOTE)
 
     @skip_if_lt_x_gpu(2)
     def test_device_maps_remote(self):
