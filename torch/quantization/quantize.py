@@ -42,8 +42,7 @@ def _propagate_qconfig_helper(module, qconfig_dict, white_list=None,
     module_qconfig = qconfig_dict.get(prefix, module_qconfig)
     module_qconfig = getattr(module, 'qconfig', module_qconfig)
 
-    if type(module) in white_list:
-        module.qconfig = module_qconfig
+    module.qconfig = module_qconfig
     for name, child in module.named_children():
         module_prefix = prefix + '.' + name if prefix else name
         _propagate_qconfig_helper(child, qconfig_dict, white_list,
@@ -85,7 +84,7 @@ def register_activation_post_process_hook(module):
         'Expect activation_post_process attribut already attached to the module'
     return module.register_forward_hook(_observer_forward_hook)
 
-def add_observer_(module, non_leaf_module_list=None, device=None, prehook=None):
+def add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=None, device=None, prehook=None):
     r"""Add observer for the leaf child of the module.
 
     This function insert observer module to all leaf child module that
@@ -99,6 +98,8 @@ def add_observer_(module, non_leaf_module_list=None, device=None, prehook=None):
     Return:
         None, module is modified inplace with added observer modules and forward_hooks
     """
+    if qconfig_propagation_list is None:
+        qconfig_propagation_list = DEFAULT_QCONFIG_PROPAGATE_WHITE_LIST
     # respect device affinity when adding observers
     if device is None:
         devices = get_unique_devices_(module)
@@ -125,12 +126,13 @@ def add_observer_(module, non_leaf_module_list=None, device=None, prehook=None):
                     child.add_module('activation_pre_process', prehook())
                     child.register_forward_pre_hook(_observer_forward_pre_hook)
         else:
-            add_observer_(child, non_leaf_module_list, device, prehook)
+            add_observer_(child, qconfig_propagation_list, non_leaf_module_list, device, prehook)
 
     # Insert observers only for leaf nodes, note that this observer is for
     # the output of the module, for input QuantStub will observe them
     if hasattr(module, 'qconfig') and module.qconfig is not None and \
-       len(module._modules) == 0 and not isinstance(module, torch.nn.Sequential):
+       len(module._modules) == 0 and not isinstance(module, torch.nn.Sequential) \
+       and type(module) in qconfig_propagation_list:
         # observer and hook will be gone after we swap the module
         activation = module.qconfig.activation()
         if device is not None:
@@ -172,7 +174,7 @@ def add_quant_dequant(module):
         module._modules[name] = add_quant_dequant(child)
     return module
 
-def prepare(model, inplace=False, white_list=DEFAULT_QCONFIG_PROPAGATE_WHITE_LIST,
+def prepare(model, inplace=False, white_list=None,
             observer_non_leaf_module_list=None, prehook=None):
     r"""Prepares a copy of the model for quantization calibration or quantization-aware training.
 
@@ -191,7 +193,10 @@ def prepare(model, inplace=False, white_list=DEFAULT_QCONFIG_PROPAGATE_WHITE_LIS
     """
     if not inplace:
         model = copy.deepcopy(model)
-    propagate_qconfig_(model, qconfig_dict=None, white_list=white_list)
+    propagate_qconfig_list = white_list
+    if propagate_qconfig_list is None:
+        propagate_qconfig_list = DEFAULT_QCONFIG_PROPAGATE_WHITE_LIST
+    propagate_qconfig_(model, qconfig_dict=None)
 
     # sanity check common API misusage
     if not any(hasattr(m, 'qconfig') and m.qconfig for m in model.modules()):
@@ -199,7 +204,7 @@ def prepare(model, inplace=False, white_list=DEFAULT_QCONFIG_PROPAGATE_WHITE_LIS
                       "passed correct configuration through `qconfig_dict` or "
                       "by assigning the `.qconfig` attribute directly on submodules")
 
-    add_observer_(model, observer_non_leaf_module_list, prehook=prehook)
+    add_observer_(model, propagate_qconfig_list, observer_non_leaf_module_list, prehook=prehook)
     return model
 
 def _remove_qconfig(module):

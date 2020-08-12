@@ -1571,6 +1571,18 @@ Stmt* TermExpander::mutate(const Free* v) {
   return new Free(buffer_var_new);
 }
 
+bool exprEquals(const Expr* A, const Expr* B) {
+  try {
+    const Expr* diff = IRSimplifier::simplify(new Sub(A, B));
+    if (!diff->isConstant()) {
+      return false;
+    }
+    return immediateEquals(diff, 0);
+  } catch (std::exception& e) {
+    return false;
+  }
+}
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch

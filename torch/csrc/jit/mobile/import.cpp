@@ -84,6 +84,7 @@ void print_unsupported_ops_and_throw(
 
 void parseMethods(
     const std::vector<IValue>& vals,
+    const std::vector<IValue>& debug_info_vals,
     mobile::CompilationUnit& mcu) {
   TORCH_CHECK(vals.size() > 0, "Bytecode has no elements. ");
   // Initialized with the version number when kProducedBytecodeVersion was
@@ -102,6 +103,13 @@ void parseMethods(
       caffe2::serialize::kProducedBytecodeVersion,
       " but the model version is ",
       model_version);
+
+  bool has_debug_info = debug_info_vals.size() > 0;
+  if (has_debug_info) {
+    TORCH_CHECK(
+        debug_info_vals.size() == vals.size(),
+        "The numbers of bytecode values and debug info values do not match.");
+  }
 
   for (size_t i = method_i_start; i < vals.size(); ++i) {
     const auto& element = vals[i];
@@ -131,20 +139,22 @@ void parseMethods(
             .toInt();
 
     std::vector<IValue> module_debug_info_list;
-    bool hasDebugInfo =
-        table.toTuple()->elements().size() > BYTECODE_INDEX_MODULE_DEBUG_INFO;
-    if (hasDebugInfo) {
+    if (has_debug_info) {
+      const auto& debug_info_element = debug_info_vals[i];
+      const auto& debug_info_m_tuple = debug_info_element.toTuple()->elements();
+      const std::string& debug_info_function_name = debug_info_m_tuple[0].toStringRef();
+      TORCH_CHECK(
+          debug_info_function_name == function_name,
+          "The function names in the bytecode table and the debug info table do not match.");
+      IValue debug_info_table = debug_info_m_tuple[1];
       module_debug_info_list =
           expect_field(
-              table, "module_debug_info", BYTECODE_INDEX_MODULE_DEBUG_INFO)
+              debug_info_table, "module_debug_info", BYTECODE_INDEX_MODULE_DEBUG_INFO)
               .toTuple()
               ->elements();
-      hasDebugInfo = module_debug_info_list.size() > 0;
-      if (hasDebugInfo) {
-        TORCH_CHECK(
-            module_debug_info_list.size() == ops_list.size(),
-            "The numbers of operators and module info strings do not match.");
-      }
+      TORCH_CHECK(
+          module_debug_info_list.size() == ops_list.size(),
+          "The numbers of operators and module info strings do not match.");
     }
 
     function->set_module_debug_info_list_size(ins_list.size());
@@ -159,7 +169,7 @@ void parseMethods(
       int N = ins_item[2].toInt();
       function->append_instruction(op_code, X, N);
       if (op_code == OP) {
-        std::string module_debug_info = (hasDebugInfo)
+        std::string module_debug_info = (has_debug_info)
             ? module_debug_info_list[X].toString()->string()
             : "";
         function->set_module_info(module_debug_info, i);
@@ -223,7 +233,12 @@ mobile::Module BytecodeDeserializer::deserialize(
   device_ = device;
   auto mcu = std::make_shared<mobile::CompilationUnit>();
   auto bvals = readArchive("bytecode", mcu).toTuple()->elements();
-  parseMethods(bvals, *mcu);
+
+  std::vector<IValue> debug_info_bvals;
+  if (reader_->hasRecord("mobile_debug.pkl")) {
+    debug_info_bvals = readArchive("mobile_debug", mcu).toTuple()->elements();
+  }
+  parseMethods(bvals, debug_info_bvals, *mcu);
 
   return mobile::Module(readArchive("data", mcu).toObject(), mcu);
 }
