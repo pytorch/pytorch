@@ -17253,63 +17253,54 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             (torch.version.cuda is not None)
             and ([int(x) for x in torch.version.cuda.split(".")] >= [10, 2]))
 
+        def test_case_info(fn_name, config):
+            return f'function "{fn_name}" with config "{"" if config is None else config}"'
+
         # Create processes to test each combination of test cases and config settings
         processes = []
         for fn_name, arg_sizes in test_cases:
             for config, is_config_deterministic in test_configs:
-                # Setting the config variable before creating the process will make the
-                # process's CUDA initialization honor the setting
+                env = os.environ.copy()
                 if config is None:
-                    if os.environ.get(cublas_var_name) is not None:
-                        del os.environ[cublas_var_name]
+                    if env.get(cublas_var_name) is not None:
+                        del env[cublas_var_name]
                 else:
-                    os.environ[cublas_var_name] = config
+                    env[cublas_var_name] = config
                 should_throw_error = is_cuda10_2_or_higher and not is_config_deterministic
-                script = """
+                script = f"""
 import torch
 torch.set_deterministic(True)
-fn = torch.{}
-arg_sizes = {}
-device = '{}'
+fn = torch.{fn_name}
+arg_sizes = {arg_sizes}
+device = '{device}'
+should_throw_error = {should_throw_error}
 args = []
 for arg_size in arg_sizes:
     args.append(torch.randn(*arg_size, device=device))
-fn(*args)
-""".format(fn_name, arg_sizes, device)
-                # It would have been preferable to use the `multiprocessing` module to avoid having
-                # to execute code from a string, but that caused issues in Windows
-                # https://github.com/pytorch/pytorch/pull/41377#issuecomment-666641223
-                p = subprocess.Popen(
-                    [sys.executable, '-c', script],
-                    stderr=subprocess.PIPE,
-                    stdout=subprocess.PIPE,
-                    # On Windows, opening the subprocess with the default CWD makes `import torch`
-                    # fail, so just set CWD to this script's directory
-                    cwd=os.path.dirname(os.path.realpath(__file__)))
-                processes.append((p, fn_name, config, should_throw_error))
+try:
+    fn(*args)
+except RuntimeError as e:
+    if not should_throw_error:
+        raise RuntimeError('Did not expect any error to be raised')
+    elif 'Deterministic behavior was enabled with either' not in str(e):
+        raise RuntimeError('Expected a CuBLAS nondeterministic error, but got a different error')
+else:
+    if should_throw_error:
+        raise RuntimeError('Expected a CuBLAS nondeterministic error, but it was not raised')
 
-        def test_case_info():
-            return 'function "%s", config "%s"' % (fn_name, '' if config is None else config)
-
-        # Wait for each process to finish and check for correct error behavior
-        for p, fn_name, config, should_throw_error in processes:
-            _, error = p.communicate()
-            if error:
-                error_message = error.decode("utf-8")
-                self.assertTrue(
-                    should_throw_error,
-                    msg="did not expect this error to be raised for case '%s':\n%s" % (
-                        test_case_info(), error_message))
-                expected_error_message = "RuntimeError: Deterministic behavior was enabled with either"
-                self.assertTrue(
-                    expected_error_message in error_message,
-                    msg=("expected error related to CuBLAS determinism for case "
-                         "'%s', but got a different error:\n%s" % (test_case_info(), error_message)))
-            else:
-                self.assertTrue(
-                    not should_throw_error,
-                    msg=("expected error related to CuBLAS determinism for case "
-                         "'%s', but did not get an error" % test_case_info()))
+"""
+                try:
+                    subprocess.check_output(
+                        [sys.executable, '-c', script],
+                        stderr=subprocess.STDOUT,
+                        # On Windows, opening the subprocess with the default CWD makes `import torch`
+                        # fail, so just set CWD to this script's directory
+                        cwd=os.path.dirname(os.path.realpath(__file__)),
+                        env=env)
+                except subprocess.CalledProcessError as e:
+                    self.fail(msg=(
+                        f'Subprocess exception while attempting to run {test_case_info(fn_name, config)}:\n'
+                        + e.output.decode("utf-8")))
 
     @onlyCPU
     @dtypes(*(torch.testing.get_all_complex_dtypes() + [torch.float, torch.double]))

@@ -92,7 +92,6 @@ Works only with Python3.\n A few examples:
 
     if args.cuda_fuser == "te":
         import torch
-
         torch._C._jit_set_profiling_executor(True)
         torch._C._jit_set_texpr_fuser_enabled(True)
         torch._C._jit_set_profiling_mode(True)
@@ -100,7 +99,7 @@ Works only with Python3.\n A few examples:
         import torch
         torch._C._jit_set_profiling_executor(False)
         torch._C._jit_set_texpr_fuser_enabled(False)
-        torch._C._jit_set_profiling_mode(False)
+        torch._C._jit_override_can_fuse_on_gpu(True)
 
 
     def set_global_threads(num_threads):
