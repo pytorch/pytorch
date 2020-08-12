@@ -44,7 +44,6 @@ class CPUCachingAllocator {
     // all public APIs we need a global mutex.
     static std::mutex mutex_;
     inline void* allocate_and_cache(const size_t bytes);
-    inline void* use_cached(const size_t bytes);
     void free_cached();
   public:
     static void record_free(void* ptr);
@@ -62,19 +61,8 @@ class CPUCachingAllocator {
 
 CPUCachingAllocator* GetDefaultCPUCachingAllocator();
 
-class C10_API CachingAllocatorInfo {
-  public:
-    void set_allocator(CPUCachingAllocator* allocator);
-    CPUCachingAllocator* get_allocator();
-    bool enabled();
-    void enable();
-    void disable();
-  private:
-    bool is_enabled_{false};
-    CPUCachingAllocator* allocator_{nullptr};
-};
-
-CachingAllocatorInfo& GetThreadLocalCachingAllocatorInfo();
+bool ThreadLocalCachingAllocatorEnabled();
+CPUCachingAllocator* GetThreadLocalCachingAllocator();
 
 /*
  * Usage pattern:
@@ -84,25 +72,14 @@ CachingAllocatorInfo& GetThreadLocalCachingAllocatorInfo();
  * WithCPUCachingAllocatorGuard(caching_allocator.get());
  * ...
  * }
- * // Selectively enabling/disabling.
- * {
- * // Also enables caching allocator by default.
- * WithCPUCachingAllocatorGuard(caching_allocator.get());
- * ...
- * // Disable.
- * GetThreadLocalCachingAllocatorInfo().disable();
- * ....
- * // Enable.
- * GetThreadLocalCachingAllocatorInfo.enable();
- * }
  */
 
 class C10_API WithCPUCachingAllocatorGuard {
   public:
-    WithCPUCachingAllocatorGuard(CPUCachingAllocator* allocator, bool enabled=true);
+    WithCPUCachingAllocatorGuard(CPUCachingAllocator* allocator);
     ~WithCPUCachingAllocatorGuard();
   private:
-    CachingAllocatorInfo prev_info_;
+    CPUCachingAllocator* prev_caching_allocator_ptr_{nullptr};
 };
 
 } // namespace c10
