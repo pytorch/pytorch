@@ -83,7 +83,6 @@ _(aten, _fft_with_size) \
 _(aten, _fill) \
 _(aten, _floor) \
 _(aten, _fused_dropout) \
-_(aten, _ger) \
 _(aten, _indexCopy) \
 _(aten, _indices) \
 _(aten, _linspace) \
@@ -99,6 +98,7 @@ _(aten, _masked_scale) \
 _(aten, _mm) \
 _(aten, _mv) \
 _(aten, _nnz) \
+_(aten, _nansum) \
 _(aten, _pack_padded_sequence) \
 _(aten, _pack_padded_sequence_backward) \
 _(aten, _pad_packed_sequence) \
@@ -289,7 +289,6 @@ _(aten, cumprod) \
 _(aten, cumsum) \
 _(aten, data_ptr) \
 _(aten, deg2rad) \
-_(aten, det) \
 _(aten, detach) \
 _(aten, diag) \
 _(aten, diag_embed) \
@@ -352,7 +351,6 @@ _(aten, ge) \
 _(aten, gelu) \
 _(aten, geometric) \
 _(aten, geqrf) \
-_(aten, ger) \
 _(aten, get_device) \
 _(aten, glu) \
 _(aten, glu_backward) \
@@ -509,6 +507,7 @@ _(aten, multilabel_margin_loss_forward) \
 _(aten, multinomial) \
 _(aten, mv) \
 _(aten, mvlgamma) \
+_(aten, nansum) \
 _(aten, narrow) \
 _(aten, narrow_copy) \
 _(aten, native_batch_norm) \
