@@ -261,6 +261,7 @@ Pointwise Ops
     bitwise_xor
     ceil
     clamp
+    clip
     conj
     cos
     cosh
@@ -328,6 +329,7 @@ Reduction Ops
     mode
     norm
     prod
+    quantile
     std
     std_mean
     sum
@@ -471,6 +473,7 @@ BLAS and LAPACK Operations
     mv
     orgqr
     ormqr
+    outer
     pinverse
     qr
     solve

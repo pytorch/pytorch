@@ -396,25 +396,15 @@ Tensor dot_cuda(const Tensor& self, const Tensor& other) {
     Tensor result = at::empty({}, self.options());
 
     auto handle = at::cuda::getCurrentCUDABlasHandle();
-    cublasPointerMode_t previous_mode = CUBLAS_POINTER_MODE_DEVICE;
-    TORCH_CUDABLAS_CHECK(cublasGetPointerMode(handle, &previous_mode));
-    TORCH_CUDABLAS_CHECK(
-        cublasSetPointerMode(handle, CUBLAS_POINTER_MODE_DEVICE));
-
-    try {
-      at::cuda::blas::dot<scalar_t>(
-          handle,
-          n,
-          self.data_ptr<scalar_t>(),
-          incx,
-          other.data_ptr<scalar_t>(),
-          incy,
-          result.data_ptr<scalar_t>());
-    } catch (...) {
-      TORCH_CUDABLAS_CHECK(cublasSetPointerMode(handle, previous_mode));
-      throw;
-    }
-    TORCH_CUDABLAS_CHECK(cublasSetPointerMode(handle, previous_mode));
+    at::cuda::blas::PointerModeGuard pointerModeGuard(handle, CUBLAS_POINTER_MODE_DEVICE);
+    at::cuda::blas::dot<scalar_t>(
+        handle,
+        n,
+        self.data_ptr<scalar_t>(),
+        incx,
+        other.data_ptr<scalar_t>(),
+        incy,
+        result.data_ptr<scalar_t>());
 
     return result;
   });

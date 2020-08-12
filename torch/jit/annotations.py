@@ -1,6 +1,7 @@
 import ast
 import enum
 import inspect
+import warnings
 import os
 import re
 import torch
@@ -43,7 +44,7 @@ class EvalEnv(object):
 
     def __init__(self, rcb):
         self.rcb = rcb
-        if torch.distributed.rpc.is_available():
+        if torch.distributed.is_available():
             from torch.distributed.rpc import RRef
             self.env['RRef'] = RRef
 
@@ -286,7 +287,7 @@ def try_ann_to_type(ann, loc):
             valid_type = try_ann_to_type(ann.__args__[1], loc)
         assert valid_type, "Unsupported annotation {} could not be resolved.".format(repr(ann))
         return OptionalType(valid_type)
-    if torch.distributed.rpc.is_available():
+    if torch.distributed.is_available():
         from torch.distributed.rpc import is_rref
         from torch._C import RRefType
         if is_rref(ann):
@@ -313,8 +314,9 @@ def try_ann_to_type(ann, loc):
         return IntType.get()  # dtype not yet bound in as its own type
     if inspect.isclass(ann) and issubclass(ann, enum.Enum):
         if not is_enum_support_enabled():
-            raise NotImplementedError(
-                "Enum support is work in progress, please do not use it now")
+            warnings.warn("Enum support is work in progress, enum class {}"
+                          " is not compiled".format(ann))
+            return None
         return EnumType(_qualified_name(ann), get_enum_value_type(ann, loc))
     if inspect.isclass(ann):
         if hasattr(ann, "__torch_script_class__"):
