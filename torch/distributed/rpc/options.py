@@ -11,10 +11,10 @@ class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
     def __init__(
         self,
         num_worker_threads: int = rpc_contants.DEFAULT_NUM_WORKER_THREADS,
-        _transports = None,
-        _channels = None,
-        rpc_timeout = rpc_contants.DEFAULT_RPC_TIMEOUT_SEC,
-        init_method = rpc_contants.DEFAULT_INIT_METHOD
+        _transports: List = None,
+        _channels: List = None,
+        rpc_timeout: float = rpc_contants.DEFAULT_RPC_TIMEOUT_SEC,
+        init_method: str = rpc_contants.DEFAULT_INIT_METHOD
     ):
         super().__init__(
             num_worker_threads,
@@ -44,4 +44,3 @@ class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
                 )
             device_index_map[k.index] = v.index
         super().set_device_map(to, device_index_map)
-

@@ -3820,7 +3820,7 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
     def test_device_maps_gpu(self):
         options = self.rpc_backend_options
         dst = worker_name((self.rank + 1) % self.world_size)
-        options.set_device_map(dst, {0: 1, 1:0})
+        options.set_device_map(dst, {0: 1, 1: 0})
 
         rpc.init_rpc(
             name=worker_name(self.rank),
@@ -3893,7 +3893,6 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
             rpc_backend_options=options,
         )
 
-        fn = TensorPipeAgentRpcTest._gpu_add_default_cpu
         rets = rpc.rpc_sync(
             dst,
             TensorPipeAgentRpcTest._gpu_add_return_to_gpu,
