@@ -1033,15 +1033,15 @@ Keyword args:
 Example::
 
     >>> a = torch.tensor([1, 2, 3])
-    >>> b = torch.tensor([2, 3, 4])
+    >>> b = torch.tensor([4, 5, 6])
     >>> torch.hstack((a,b))
-    tensor([1, 2, 3, 2, 3, 4])
+    tensor([1, 2, 3, 4, 5, 6])
     >>> a = torch.tensor([[1],[2],[3]])
-    >>> b = torch.tensor([[2],[3],[4]])
+    >>> b = torch.tensor([[4],[5],[6]])
     >>> torch.hstack((a,b))
-    tensor([[1, 2],
-            [2, 3],
-            [3, 4]])
+    tensor([[1, 4],
+            [2, 5],
+            [3, 6]])
 
 """.format(**common_args))
 
@@ -1062,19 +1062,19 @@ Keyword args:
 Example::
 
     >>> a = torch.tensor([1, 2, 3])
-    >>> b = torch.tensor([2, 3, 4])
+    >>> b = torch.tensor([4, 5, 6])
     >>> torch.vstack((a,b))
     tensor([[1, 2, 3],
-            [2, 3, 4]])
+            [4, 5, 6]])
     >>> a = torch.tensor([[1],[2],[3]])
-    >>> b = torch.tensor([[2],[3],[4]])
+    >>> b = torch.tensor([[4],[5],[6]])
     >>> torch.vstack((a,b))
     tensor([[1],
             [2],
             [3],
-            [2],
-            [3],
-            [4]])
+            [4],
+            [5],
+            [6]])
 
 
 """.format(**common_args))
@@ -1095,17 +1095,17 @@ Keyword args:
 
 Example::
     >>> a = torch.tensor([1, 2, 3])
-    >>> b = torch.tensor([2, 3, 4])
+    >>> b = torch.tensor([4, 5, 6])
     >>> torch.dstack((a,b))
-    tensor([[[1, 2],
-             [2, 3],
-             [3, 4]]])
+    tensor([[[1, 4],
+             [2, 5],
+             [3, 6]]])
     >>> a = torch.tensor([[1],[2],[3]])
-    >>> b = torch.tensor([[2],[3],[4]])
+    >>> b = torch.tensor([[4],[5],[6]])
     >>> torch.dstack((a,b))
-    tensor([[[1, 2]],
-            [[2, 3]],
-            [[3, 4]]])
+    tensor([[[1, 4]],
+            [[2, 5]],
+            [[3, 6]]])
 
 
 """.format(**common_args))

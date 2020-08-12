@@ -18628,34 +18628,89 @@ fn(*args)
         self._test_atleast_dim(torch.atleast_2d, np.atleast_2d, device, dtype)
         self._test_atleast_dim(torch.atleast_3d, np.atleast_3d, device, dtype)
 
-    def _test_special_stacks(self, torch_fn, np_fn, device, dtype):
-        for ndims in range(0, 5):
-            for i in range(5):
-                shape = self._rand_shape(ndims, min_size=1, max_size=5)
-                a = self._generate_input(shape, dtype, device, with_extremal=False)
-                torch_input = [a] * random.randint(1, 5)
-                np_input = [input.cpu().numpy() for input in torch_input]
-                actual = torch_fn(torch_input)
-                expected = np_fn(np_input)
-                self.assertEqual(actual, expected)
+    def _test_special_stacks(self, dim, torch_fn, np_fn, device, dtype):
+        # Test error for non-tuple argument
+        with self.assertRaisesRegex(RuntimeError, "must be tuple of Tensors, not Tensor"):
+            torch_fn(torch.randn(10))
+
+        input_t = torch.tensor(random.uniform(0, 10), device=device, dtype=dtype)
+        actual = torch_fn([input_t])
+        expected = np_fn([input_t.cpu().numpy()])
+        self.assertEqual(actual, expected)
+
+        for ndims in range(1, 5):
+            base_shape = list(self._rand_shape(ndims, min_size=1, max_size=5))
+            for i in range(ndims):
+                shape = list(base_shape)
+                num_tensors = random.randint(1, 5)
+                torch_input = []
+                # Create tensors with shape being different along one axis only
+                for param in range(num_tensors):
+                    shape[i] = random.randint(1, 5)
+                    torch_input.append(self._generate_input(tuple(shape), dtype, device, with_extremal=False))
+
+                # Special case needed since hstack works differently for 1-D inputs
+                if i == dim or (i == 0 and torch_fn is torch.hstack):
+                    # Valid dimension, test against numpy
+                    np_input = [input.cpu().numpy() for input in torch_input]
+                    actual = torch_fn(torch_input)
+                    expected = np_fn(np_input)
+                    self.assertEqual(actual, expected)
+                else:
+                    # Invalid dimensions, test for error
+                    with self.assertRaisesRegex(RuntimeError, "Sizes of tensors must match except in dimension"):
+                        torch_fn(torch_input)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False) +
               torch.testing.get_all_complex_dtypes()))
     def test_hstack(self, device, dtype):
-        self._test_special_stacks(torch.hstack, np.hstack, device, dtype)
+        self._test_special_stacks(1, torch.hstack, np.hstack, device, dtype)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False) +
               torch.testing.get_all_complex_dtypes()))
     def test_vstack(self, device, dtype):
-        self._test_special_stacks(torch.vstack, np.vstack, device, dtype)
+        self._test_special_stacks(0, torch.vstack, np.vstack, device, dtype)
+        for i in range(5):
+            # Test dimension change for 1D tensor of size (N) and 2D tensor of size (1, N)
+            n = random.randint(1, 10)
+            input_a = self._generate_input(tuple(n), dtype, device, with_extremal=False)
+            input_b = self._generate_input(tuple(1, n), dtype, device, with_extremal=False)
+            torch_input = [input_a, input_b]
+            np_input = [input.cpu().numpy() for input in torch_input]
+            actual = torch.vstack(torch_input)
+            expected = np.vstack(np_input)
+            self.assertEqual(actual, expected)
+
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False) +
               torch.testing.get_all_complex_dtypes()))
     def test_dstack(self, device, dtype):
-        self._test_special_stacks(torch.dstack, np.dstack, device, dtype)
+        self._test_special_stacks(2, torch.dstack, np.dstack, device, dtype)
+        for i in range(5):
+            # Test dimension change for 1D tensor of size (N), 2D tensor of size (1, N), and 3D tensor of size (1, N, 1)
+            n = random.randint(1, 10)
+            input_a = self._generate_input(tuple(n), dtype, device, with_extremal=False)
+            input_b = self._generate_input(tuple(1, n), dtype, device, with_extremal=False)
+            input_c = self._generate_input(tuple(1, n, 1), dtype, device, with_extremal=False)
+            torch_input = [input_a, input_b, input_c]
+            np_input = [input.cpu().numpy() for input in torch_input]
+            actual = torch.dstack(torch_input)
+            expected = np.dstack(np_input)
+            self.assertEqual(actual, expected)
+
+            # Test dimension change for 2D tensor of size (M, N) and 3D tensor of size (M, N, 1)
+            m = random.randint(1, 10)
+            n = random.randint(1, 10)
+            input_a = self._generate_input(tuple(m, n), dtype, device, with_extremal=False)
+            input_b = self._generate_input(tuple(m, n, 1), dtype, device, with_extremal=False)
+            torch_input = [input_a, input_b]
+            np_input = [input.cpu().numpy() for input in torch_input]
+            actual = torch.dstack(torch_input)
+            expected = np.dstack(np_input)
+            self.assertEqual(actual, expected)
 
 
 # NOTE [Linspace+Logspace precision override]
