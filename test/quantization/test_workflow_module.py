@@ -370,7 +370,7 @@ class TestObserver(QuantizationTestCase):
                 ref_zero_points = [math.floor(z / 2) for z in ref_zero_points]
             self.assertTrue(torch.allclose(qparams[0], torch.tensor(ref_scales, dtype=qparams[0].dtype), atol=0.0001))
             if qscheme == torch.per_channel_affine_float_qparams:
-                self.assertTrue(torch.allclose(qparams[1], torch.tensor(ref_zero_points, dtype=qparams[1].dtype), atol=0.1))
+                self.assertTrue(torch.allclose(qparams[1], torch.tensor(ref_zero_points, dtype=qparams[1].dtype), atol=1))
             else:
                 self.assertTrue(torch.allclose(qparams[1], torch.tensor(ref_zero_points, dtype=qparams[1].dtype)))
 
