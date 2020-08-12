@@ -170,6 +170,9 @@ bool canHandle(Node* node) {
     }
     return true;
   }
+  if (!allShapesAreKnown(node)) {
+    return false;
+  }
 
   // Don't include nodes whose inputs are tensor constants - we cannot handle
   // them at the moment.
@@ -205,24 +208,10 @@ class TensorExprFuser {
 
   void run() {
     aliasDb_ = torch::make_unique<AliasDb>(graph_);
-    constructTypeInfoMap();
-    createFusionGroups();
-    guardFusionGroups();
+    createFusionGroups(graph_->block());
   }
 
  private:
-  // Find prim::profile nodes in the graph, extract value -> type information
-  // from it, and in the end remove the nodes from the graph.
-  void constructTypeInfoMap() {
-    // TODO: Not implemented yet
-  }
-
-  // Merge fusible nodes into subgraphs in tensorexpr::Group nodes.
-  void createFusionGroups() {
-    auto block = graph_->block();
-    createFusionGroups(block);
-  }
-
   // Add unvisited input nodes to the queue for further merging into the fusion
   // group.
   void updateQueue(
@@ -269,6 +258,7 @@ class TensorExprFuser {
     return fusion_group;
   }
 
+  // Merge fusible nodes into subgraphs in tensorexpr::Group nodes.
   void createFusionGroups(Block* block) {
     std::vector<Node*> fusion_groups;
     auto reverse_iter = block->nodes().reverse();
@@ -327,15 +317,6 @@ class TensorExprFuser {
       return true;
     }
     return false;
-  }
-
-  // For all tensorexpr::Group nodes find what shape information needs to be
-  // checked (it should be shape info for the inputs to the fused subgraphs)
-  // and version the code correspondingly: insert the typecheck nodes, create
-  // an if-construct with optimized (fused) and non-optimized (original IR)
-  // branches.
-  void guardFusionGroups() {
-    // TODO: Not implemented yet
   }
 
   bool tryMerge(Node* fusion_group, Node* to_merge) {
