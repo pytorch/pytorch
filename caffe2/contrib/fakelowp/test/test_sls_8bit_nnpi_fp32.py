@@ -144,7 +144,7 @@ class SparseLengthsSum8BitFakeNNPIFp32Test(serial.SerializedTestCase):
 
 
     @given(seed=st.integers(0, 65535))
-    @settings(max_examples=100)
+    @settings(deadline=None, max_examples=100)
     def test_small_sls_acc32(self, seed):
         workspace.GlobalInit(
             [

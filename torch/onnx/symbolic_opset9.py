@@ -2099,7 +2099,11 @@ def argmin(g, input, dim, keepdim):
 
 @parse_args('v', 'i', 'v', 'v')
 def scatter(g, self, dim, index, src):
-    return g.op("Scatter", self, index, src, axis_i=dim)
+    src = sym_help._maybe_get_scalar(src)
+    if sym_help._is_value(src):
+        return g.op("Scatter", self, index, src, axis_i=dim)
+    else:
+        return g.op("Scatter", self, index, expand_as(g, src, index), axis_i=dim)
 
 
 @parse_args('v', 'i', 'v', 'v')
