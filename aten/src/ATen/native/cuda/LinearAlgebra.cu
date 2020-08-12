@@ -28,23 +28,25 @@ Tensor prepare_matrix_for_cublas(Tensor& tensor, bool& transpose_tensor) {
   return tensor_;
 }
 
-Tensor prepare_batch_matrix_for_cublas(Tensor& tensor, bool& transpose_tensor, bool transpose_result, int64_t& ld_tensor) {
+Tensor prepare_batch_matrix_for_cublas(Tensor& tensor, bool& transpose_tensor, int64_t& ld_tensor, bool transpose_result, int m, int n) {
   IntArrayRef tensor_strides = tensor.strides();
   Tensor tensor_;
 
   if (tensor_strides[transpose_result ? 2 : 1] == 1 &&
-    tensor_strides[transpose_result ? 1 : 2] != 0) {
-    tensor_ = tensor;
+    (tensor_strides[transpose_result ? 1 : 2] >= std::max<int64_t>(1, m))) {
     transpose_tensor = false;
-    ld_tensor = tensor_strides[transpose_result ? 1 : 2];
-  } else if (tensor_strides[transpose_result ? 1 : 2] == 1 &&
-    tensor_strides[transpose_result ? 2 : 1] != 0) {
     tensor_ = tensor;
+    ld_tensor = tensor_strides[transpose_result ? 1 : 2];
+  } else if ((tensor_strides[transpose_result ? 1 : 2] == 1) &&
+    (tensor_strides[transpose_result ? 2 : 1] >= std::max<int64_t>(1, n))) {
     transpose_tensor = true;
+    tensor_ = tensor;
     ld_tensor = tensor_strides[transpose_result ? 2 : 1];
   } else {
     transpose_tensor = !transpose_result;
-    if (!tensor.is_contiguous()) {
+    if (tensor.is_contiguous()) {
+      tensor_ = tensor;
+    } else {
       tensor_ = tensor.clone(at::MemoryFormat::Contiguous);
     }
     ld_tensor = tensor_strides[1];
@@ -150,7 +152,8 @@ Tensor& baddmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& b
 
   if (!result.is_same(self)) {
     at::native::resize_as_(result, self);
-    if (beta.to<double>() != 0.0) {
+    if ((beta.isComplex() && beta.to<c10::complex<double>>() != 0.0) ||
+        (beta.to<double>() != 0.0)) {
       at::native::copy_(result, self);
     }
   }
@@ -159,9 +162,14 @@ Tensor& baddmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& b
   bool transpose_batch1, transpose_batch2;
   int64_t lda, ldb, ldc;
   Tensor result_;
-  if (result.stride(1) == 1) {
+  IntArrayRef result_strides = result.strides();
+  IntArrayRef result_sizes = result.sizes();
+
+  if ((result_strides[1] == 1) &&
+      ((result_sizes[2] == 1) || (result_strides[2] >= std::max<int64_t>(1, result_sizes[0])))) {
     result_ = result;
-  } else if (result.stride(2) == 1) {
+  } else if ((result_strides[2] == 1) &&
+    (result_sizes[1] == 1 || (result_strides[1] >= std::max<int64_t>(1, result_sizes[2])))) {
     transpose_result = true;
     result_ = result;
   } else {
@@ -170,16 +178,20 @@ Tensor& baddmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& b
   }
 
   ldc = result_.stride(transpose_result ? 1 : 2);
+  int64_t m = result_sizes[transpose_result ? 2 : 1];
+  int64_t n = result_sizes[transpose_result ? 1 : 2];
+  int64_t k = batch1.size(transpose_result ? 1 : 2);
+
   Tensor batch1_ = transpose_result ? batch2 : batch1;
   Tensor batch2_ = transpose_result ? batch1 : batch2;
-  batch1_ = prepare_batch_matrix_for_cublas(batch1_, transpose_batch1, transpose_result, lda);
-  batch2_ = prepare_batch_matrix_for_cublas(batch2_, transpose_batch2, transpose_result, ldb);
+  batch1_ = prepare_batch_matrix_for_cublas(batch1_, transpose_batch1, lda, transpose_result, m, k);
+  batch2_ = prepare_batch_matrix_for_cublas(batch2_, transpose_batch2, ldb, transpose_result, k, n);
 
-  IntArrayRef result_sizes = result_.sizes();
-  int64_t m = result_sizes[transpose_result ? 2 : 1];
-  int64_t k = result_sizes[transpose_result ? 1 : 2];
-  int64_t n = batch1_.size(transpose_result ? 1 : 2);
-  int64_t num_batches = result_sizes[0];
+  IntArrayRef result__sizes = result.sizes();
+  m = result__sizes[transpose_result ? 2 : 1];
+  n = result__sizes[transpose_result ? 1 : 2];
+  k = batch1_.size(transpose_result ? 1 : 2);
+  int64_t num_batches = result__sizes[0];
 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "baddmm_cuda", [&] {
     scalar_t alpha_val = alpha.to<scalar_t>();
@@ -192,14 +204,14 @@ Tensor& baddmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& b
       transpose_batch2 ? 't' : 'n',
       m, n, k,
       alpha_val,
-      batch1_ptr, lda,
-      batch2_ptr, ldb,
+      batch1_ptr, lda, batch1_.stride(0),
+      batch2_ptr, ldb, batch2_.stride(0),
       beta_val,
-      result_ptr, ldc,
+      result_ptr, ldc, result_.stride(0),
       num_batches
     );
   });
-  if (result.data_ptr() != result_.data_ptr()) {
+  if (!result.is_same(result_)) {
     result.copy_(result_);
   }
   return result;
@@ -517,25 +529,15 @@ Tensor dot_cuda(const Tensor& self, const Tensor& other) {
     Tensor result = at::empty({}, self.options());
 
     auto handle = at::cuda::getCurrentCUDABlasHandle();
-    cublasPointerMode_t previous_mode = CUBLAS_POINTER_MODE_DEVICE;
-    TORCH_CUDABLAS_CHECK(cublasGetPointerMode(handle, &previous_mode));
-    TORCH_CUDABLAS_CHECK(
-        cublasSetPointerMode(handle, CUBLAS_POINTER_MODE_DEVICE));
-
-    try {
-      at::cuda::blas::dot<scalar_t>(
-          handle,
-          n,
-          self.data_ptr<scalar_t>(),
-          incx,
-          other.data_ptr<scalar_t>(),
-          incy,
-          result.data_ptr<scalar_t>());
-    } catch (...) {
-      TORCH_CUDABLAS_CHECK(cublasSetPointerMode(handle, previous_mode));
-      throw;
-    }
-    TORCH_CUDABLAS_CHECK(cublasSetPointerMode(handle, previous_mode));
+    at::cuda::blas::PointerModeGuard pointerModeGuard(handle, CUBLAS_POINTER_MODE_DEVICE);
+    at::cuda::blas::dot<scalar_t>(
+        handle,
+        n,
+        self.data_ptr<scalar_t>(),
+        incx,
+        other.data_ptr<scalar_t>(),
+        incy,
+        result.data_ptr<scalar_t>());
 
     return result;
   });

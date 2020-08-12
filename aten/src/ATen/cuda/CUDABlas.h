@@ -19,6 +19,25 @@ namespace at {
 namespace cuda {
 namespace blas {
 
+// RAII guard that sets the CuBLAS pointer mode and restores it to
+// its previous value when the guard is destroyed
+class PointerModeGuard {
+public:
+  PointerModeGuard(cublasHandle_t handle, cublasPointerMode_t mode) :
+      handle(handle) {
+    TORCH_CUDABLAS_CHECK(cublasGetPointerMode(handle, &previous_mode));
+    TORCH_CUDABLAS_CHECK(cublasSetPointerMode(handle, mode));
+  }
+
+  ~PointerModeGuard() {
+    cublasSetPointerMode(handle, previous_mode);
+  }
+
+private:
+  cublasHandle_t handle;
+  cublasPointerMode_t previous_mode;
+};
+
 /* LEVEL 3 BLAS FUNCTIONS */
 
 #define CUDABLAS_GEMM_ARGTYPES(Dtype)                                       \
@@ -52,8 +71,9 @@ void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16));
 
 #define CUDABLAS_BGEMM_ARGTYPES(Dtype)                                       \
   char transa, char transb, int64_t m, int64_t n, int64_t k, Dtype alpha,   \
-      const Dtype *a, int64_t lda, const Dtype *b, int64_t ldb, Dtype beta, \
-      Dtype *c, int64_t ldc, int64_t num_batches
+      const Dtype *a, int64_t lda, int64_t stridea, \
+      const Dtype *b, int64_t ldb, int64_t strideb, \
+      Dtype beta, Dtype *c, int64_t ldc, int64_t stridec, int64_t num_batches
 
 template <typename Dtype>
 inline void bgemm(CUDABLAS_BGEMM_ARGTYPES(Dtype)) {

@@ -150,9 +150,6 @@ void bgemm<double>(CUDABLAS_BGEMM_ARGTYPES(double)) {
   cublasOperation_t opb = _cublasOpFromChar(transb);
   _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
   GEMM_CHECK_ARGVALUES(double);
-  const int64_t stridea = (transa == 'N' || transa == 'n') ? lda*k : lda*n;
-  const int64_t strideb = (transb == 'N' || transb == 'n') ? ldb*n : ldb*k;
-  const int64_t stridec = ldc*n;
   TORCH_CUDABLAS_CHECK(cublasDgemmStridedBatched(
       handle, opa, opb, m, n, k, &alpha, a, lda, stridea, b, ldb, strideb, &beta, c, ldc, stridec, num_batches));
 }
@@ -164,9 +161,6 @@ void bgemm<float>(CUDABLAS_BGEMM_ARGTYPES(float)) {
   cublasOperation_t opb = _cublasOpFromChar(transb);
   _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
   GEMM_CHECK_ARGVALUES(float);
-  const int64_t stridea = (transa == 'N' || transa == 'n') ? lda*k : lda*n;
-  const int64_t strideb = (transb == 'N' || transb == 'n') ? ldb*n : ldb*k;
-  const int64_t stridec = ldc*n;
   TORCH_CUDABLAS_CHECK(cublasSgemmStridedBatched(
       handle, opa, opb, m, n, k, &alpha, a, lda, stridea, b, ldb, strideb, &beta, c, ldc, stridec, num_batches));
 }
@@ -179,9 +173,6 @@ void bgemm<float>(CUDABLAS_BGEMM_ARGTYPES(float)) {
     cublasOperation_t opb = _cublasOpFromChar(transb);
     _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
     GEMM_CHECK_ARGVALUES(c10::complex<double>);
-    const int64_t stridea = (transa == 'N' || transa == 'n') ? lda*k : lda*n;
-    const int64_t strideb = (transb == 'N' || transb == 'n') ? ldb*n : ldb*k;
-    const int64_t stridec = ldc*n;
     TORCH_CUDABLAS_CHECK(cublasZgemmStridedBatched(
         handle, opa, opb, m, n, k, reinterpret_cast<const cuDoubleComplex*>(&alpha), reinterpret_cast<const cuDoubleComplex*>(a),
         lda, stridea, reinterpret_cast<const cuDoubleComplex*>(b), ldb, strideb, reinterpret_cast<const cuDoubleComplex*>(&beta),
@@ -195,9 +186,6 @@ void bgemm<float>(CUDABLAS_BGEMM_ARGTYPES(float)) {
     cublasOperation_t opb = _cublasOpFromChar(transb);
     _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
     GEMM_CHECK_ARGVALUES(c10::complex<float>);
-    const int64_t stridea = (transa == 'N' || transa == 'n') ? lda*k : lda*n;
-    const int64_t strideb = (transb == 'N' || transb == 'n') ? ldb*n : ldb*k;
-    const int64_t stridec = ldc*n;
     TORCH_CUDABLAS_CHECK(cublasCgemm3mStridedBatched(
         handle, opa, opb, m, n, k, reinterpret_cast<const cuComplex*>(&alpha), reinterpret_cast<const cuComplex*>(a),
         lda, stridea, reinterpret_cast<const cuComplex*>(b), ldb, strideb, reinterpret_cast<const cuComplex*>(&beta),
@@ -212,9 +200,6 @@ void bgemm<at::Half>(CUDABLAS_BGEMM_ARGTYPES(at::Half)) {
   cublasOperation_t opb = _cublasOpFromChar(transb);
   _cublasAdjustLdLevel3(transa, transb, m, n, k, &lda, &ldb, &ldc);
   GEMM_CHECK_ARGVALUES(at::Half);
-  const int64_t stridea = (transa == 'N' || transa == 'n') ? lda*k : lda*n;
-  const int64_t strideb = (transb == 'N' || transb == 'n') ? ldb*n : ldb*k;
-  const int64_t stridec = ldc*n;
   float fAlpha = alpha;
   float fBeta = beta;
 #ifdef __HIP_PLATFORM_HCC__
@@ -231,9 +216,10 @@ void bgemm<at::Half>(CUDABLAS_BGEMM_ARGTYPES(at::Half)) {
   // manually to be able to use tensor cores for FP16. On CUDA 11, this is no longer required.
   TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_TENSOR_OP_MATH));
 #endif  // CUDA_VERSION < 11000
-  TORCH_CUDABLAS_CHECK(cublasHgemmStridedBatched(
-      handle, opa, opb, m, n, k, reinterpret_cast<const __half *>(&alpha), reinterpret_cast<const __half *>(a), lda, stridea,
-      reinterpret_cast<const __half *>(b), ldb, strideb, reinterpret_cast<const __half *>(&beta), reinterpret_cast<__half *>(c), ldc, stridec, num_batches));
+  TORCH_CUDABLAS_CHECK(cublasGemmStridedBatchedEx(
+      handle, opa, opb, m, n, k, (void*)(&alpha), a, CUDA_R_16F, lda, stridea,
+      b, CUDA_R_16F, ldb, strideb, (void*)(&beta), c, CUDA_R_16F, ldc, stridec, num_batches,
+      CUDA_R_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP));
 #if defined(CUDA_VERSION) && CUDA_VERSION < 11000
   // On CUDA versions prior to 11, users are required to set the math mode to CUBLAS_TENSOR_OP_MATH
   // manually to be able to use tensor cores for FP16. On CUDA 11, this is no longer required.

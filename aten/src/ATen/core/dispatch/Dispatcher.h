@@ -12,6 +12,8 @@
 #include <mutex>
 #include <list>
 
+#include <ATen/core/grad_mode.h>
+
 namespace c10 {
 
 class CAFFE2_API OperatorHandle;
@@ -350,11 +352,17 @@ inline Return Dispatcher::callWithDispatchKey(const TypedOperatorHandle<Return(A
   at::RecordFunction guard(at::RecordScope::FUNCTION);
   if (C10_UNLIKELY(guard.active)) {
     if (shouldRecord(dispatchKey) && op.operatorIterator_->op.isObserved()) {
+      int64_t seq_num = -1;
+      // Setting sequence number in the Autograd case to associate
+      // the forward range with the coresponding Autograd's node
+      if (dispatchKey == DispatchKey::Autograd && at::GradMode::is_enabled()) {
+        seq_num = at::sequence_number::peek();
+      }
       if (guard.needs_inputs) {
         torch::jit::Stack stack = impl::BoxedKernelWrapper<Return(Args...)>::boxArgs(args...);
-        guard.before(op.schema().name(), stack, at::sequence_number::peek());
+        guard.before(op.schema().name(), stack, seq_num);
       } else {
-        guard.before(op.schema().name(), at::sequence_number::peek());
+        guard.before(op.schema().name(), seq_num);
       }
     }
   }
@@ -397,10 +405,14 @@ inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const 
   at::RecordFunction guard(at::RecordScope::FUNCTION);
   if (C10_UNLIKELY(guard.active)) {
     if (shouldRecord(dispatchKey) && entry.isObserved()) {
+      int64_t seq_num = -1;
+      if (dispatchKey == DispatchKey::Autograd && at::GradMode::is_enabled()) {
+        seq_num = at::sequence_number::peek();
+      }
       if (guard.needs_inputs) {
-        guard.before(op.schema().name(), *stack, at::sequence_number::peek());
+        guard.before(op.schema().name(), *stack, seq_num);
       } else {
-        guard.before(op.schema().name(), at::sequence_number::peek());
+        guard.before(op.schema().name(), seq_num);
       }
     }
   }

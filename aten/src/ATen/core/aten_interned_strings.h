@@ -42,7 +42,6 @@ _(aten, _cast_Long) \
 _(aten, _cast_Short) \
 _(aten, _cat) \
 _(aten, _ceil) \
-_(aten, _clamp) \
 _(aten, _clamp_max) \
 _(aten, _clamp_min) \
 _(aten, _convolution) \
@@ -241,7 +240,6 @@ _(aten, cholesky) \
 _(aten, cholesky_inverse) \
 _(aten, cholesky_solve) \
 _(aten, chunk) \
-_(aten, clamp) \
 _(aten, clamp_max) \
 _(aten, clamp_min) \
 _(aten, clone) \
@@ -560,6 +558,7 @@ _(aten, prelu_backward) \
 _(aten, prod) \
 _(aten, put) \
 _(aten, qr) \
+_(aten, quantile) \
 _(aten, rad2deg) \
 _(aten, rand) \
 _(aten, rand_like) \
@@ -710,6 +709,9 @@ _(aten, type_as) \
 _(aten, unbind) \
 _(aten, unfold) \
 _(aten, uniform) \
+_(aten, unsafe_chunk) \
+_(aten, unsafe_split) \
+_(aten, unsafe_split_with_sizes) \
 _(aten, unsqueeze) \
 _(aten, upsample_bilinear2d) \
 _(aten, upsample_bilinear2d_backward) \

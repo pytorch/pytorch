@@ -1425,8 +1425,7 @@ Example::
             [-0.0889,  0.2122,  0.1412]])
 """)
 
-add_docstr(torch.clamp,
-           r"""
+add_docstr(torch.clamp, r"""
 clamp(input, min, max, out=None) -> Tensor
 
 Clamp all elements in :attr:`input` into the range `[` :attr:`min`, :attr:`max` `]` and return
@@ -1495,6 +1494,12 @@ Example::
     tensor([ 0.7753, -0.4702, -0.4599,  1.1899])
     >>> torch.clamp(a, max=0.5)
     tensor([ 0.5000, -0.4702, -0.4599,  0.5000])
+""".format(**common_args))
+
+add_docstr(torch.clip, r"""
+clip(input, min, max, *, out=None) -> Tensor
+
+Alias for :func:`torch.clamp`.
 """.format(**common_args))
 
 add_docstr(torch.conj,
@@ -4012,6 +4017,70 @@ Example::
             [ 1.0778, -1.9510,  0.7048,  0.4742, -0.7125]])
     >>> torch.median(a, 1)
     torch.return_types.median(values=tensor([-0.3982,  0.2270,  0.2488,  0.4742]), indices=tensor([1, 4, 4, 3]))
+""".format(**single_dim_common))
+
+add_docstr(torch.quantile,
+           r"""
+quantile(input, q) -> Tensor
+
+Returns the q-th quantiles of all elements in the :attr:`input` tensor, doing a linear 
+interpolation when the q-th quantile lies between two data.
+
+Args:
+    {input}
+    q (float or Tensor): a scalar or 1D tensor of quantile values in the range [0, 1]
+
+Example::
+
+    >>> a = torch.randn(1, 3)
+    >>> a
+    tensor([[ 0.0700, -0.5446,  0.9214]])
+    >>> q = torch.tensor([0, 0.5, 1])
+    >>> torch.quantile(a, q)
+    tensor([-0.5446,  0.0700,  0.9214])
+
+.. function:: quantile(input, q, dim=None, keepdim=False, *, out=None) -> Tensor
+
+Returns the q-th quantiles of each row of the :attr:`input` tensor along the dimension
+:attr:`dim`, doing a linear interpolation when the q-th quantile lies between two 
+data points. By default, :attr:`dim` is `None` resulting in the :attr:`input` tensor
+beign flattened before computation.
+
+If :attr:`q` is a 1D tensor, the first dimension of the result corresponds to the quantiles 
+and the remaining dimensions are what remains from the reduction of the :attr:`input` tensor.
+If :attr:`q` is a scalar or scalar tensor, the result is placed in the reduced dimension.
+
+If :attr:`keepdim` is ``True``, the remaining dimensions are of the same size as 
+:attr:`input` except in the dimension :attr:`dim` where it is size 1. Otherwise, 
+the dimension :attr:`dim` is squeezed (see :func:`torch.squeeze`).
+
+Args:
+    {input}
+    q (float or Tensor): a scalar or 1D tensor of quantile values in the range [0, 1]
+    {dim}
+    {keepdim}
+
+Keyword arguments:
+    {out}
+
+Example::
+
+    >>> a = torch.randn(2, 3)
+    >>> a
+    tensor([[ 0.0795, -1.2117,  0.9765],
+            [ 1.1707,  0.6706,  0.4884]])
+    >>> q = torch.tensor([0.25, 0.5, 0.75])
+    >>> torch.quantile(a, q, dim=1, keepdim=True)
+    tensor([[[-0.5661],
+            [ 0.5795]],
+
+            [[ 0.0795],
+            [ 0.6706]],
+
+            [[ 0.5280],
+            [ 0.9206]]])
+    >>> torch.quantile(a, q, dim=1, keepdim=True).shape
+    torch.Size([3, 2, 1])
 """.format(**single_dim_common))
 
 add_docstr(torch.min,
@@ -7512,8 +7581,7 @@ Example::
 .. _[2]: https://www.jstor.org/stable/2156365
 """)
 
-add_docstr(torch.fft,
-           r"""
+add_docstr(torch.fft, r"""
 fft(input, signal_ndim, normalized=False) -> Tensor
 
 Complex-to-complex Discrete Fourier Transform
@@ -7547,6 +7615,10 @@ The inverse of this function is :func:`~torch.ifft`.
     repeatedly running FFT methods on tensors of same geometry with same
     configuration. See :ref:`cufft-plan-cache` for more details on how to
     monitor and control the cache.
+
+.. warning::
+    If the torch.fft module is imported then "torch.fft" will refer to the
+    module and not this function. Use :meth:`torch.Tensor.fft` instead.
 
 .. warning::
     Due to limited dynamic range of half datatype, performing this operation in half
@@ -8356,7 +8428,10 @@ It is recommended to set a large seed, i.e. a number that has a good balance of 
 and 1 bits. Avoid having many 0 bits in the seed.
 
 Arguments:
-    seed (int): The desired seed.
+    seed (int): The desired seed. Value must be within the inclusive range
+        `[-0x8000_0000_0000_0000, 0xffff_ffff_ffff_ffff]`. Otherwise, a RuntimeError
+        is raised. Negative inputs are remapped to positive values with the formula
+        `0xffff_ffff_ffff_ffff + seed`.
 
 Returns:
     Generator: An torch.Generator object.
