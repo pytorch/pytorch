@@ -12,7 +12,7 @@ from .modules.utils import _single, _pair, _triple, _list_with_default
 from . import grad  # noqa: F401
 from torch import _VF
 from .._jit_internal import boolean_dispatch, List, Optional, _overload
-from .._overrides import has_torch_function, handle_torch_function
+from ..overrides import has_torch_function, handle_torch_function
 
 
 Tensor = torch.Tensor
@@ -1949,10 +1949,14 @@ def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
 
     if input.dim() == 2:
         if offsets is not None:
+            type_str = "<unknown>"
+            # TODO: Remove this once script supports type() calls
+            if not torch.jit.is_scripting():
+                type_str = str(type(offsets))
             raise ValueError("if input is 2D, then offsets has to be None"
                              ", as input is treated is a mini-batch of"
                              " fixed length sequences. However, found "
-                             "offsets of type {}".format(type(offsets)))
+                             "offsets of type {}".format(type_str))
         offsets = torch.arange(0, input.numel(), input.size(1),
                                dtype=torch.long, device=input.device)
 
@@ -2582,14 +2586,14 @@ def _pointwise_loss(lambd, lambd_optimized, input, target, reduction='mean'):
         return lambd_optimized(expanded_input, expanded_target, _Reduction.get_enum(reduction))
 
 
-def _smooth_l1_loss(input, target):
-    # type: (Tensor, Tensor) -> Tensor
+def _smooth_l1_loss(input, target, delta=1.):
+    # type: (Tensor, Tensor, float) -> Tensor
     t = torch.abs(input - target)
-    return torch.where(t < 1, 0.5 * t ** 2, t - 0.5)
+    return torch.where(t < delta, 0.5 * t ** 2, t * delta - (0.5 * delta ** 2))
 
 
-def smooth_l1_loss(input, target, size_average=None, reduce=None, reduction='mean'):
-    # type: (Tensor, Tensor, Optional[bool], Optional[bool], str) -> Tensor
+def smooth_l1_loss(input, target, size_average=None, reduce=None, reduction='mean', delta=1.):
+    # type: (Tensor, Tensor, Optional[bool], Optional[bool], str, float) -> Tensor
     r"""Function that uses a squared term if the absolute
     element-wise error falls below 1 and an L1 term otherwise.
 
@@ -2609,7 +2613,7 @@ def smooth_l1_loss(input, target, size_average=None, reduce=None, reduction='mea
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
     if target.requires_grad:
-        ret = _smooth_l1_loss(input, target)
+        ret = _smooth_l1_loss(input, target, delta=delta)
         if reduction != 'none':
             ret = torch.mean(ret) if reduction == 'mean' else torch.sum(ret)
     else:
@@ -3325,6 +3329,9 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros', align_corner
         When using the CUDA backend, this operation may induce nondeterministic
         behaviour in its backward pass that is not easily switched off.
         Please see the notes on :doc:`/notes/randomness` for background.
+
+    Note:
+        NaN values in :attr:`grid` would be interpreted as ``-1``.
 
     Args:
         input (Tensor): input of shape :math:`(N, C, H_\text{in}, W_\text{in})` (4-D case)

@@ -10,14 +10,35 @@ if [ -z "${image}" ]; then
   exit 1
 fi
 
-# TODO: Generalize
-OS="ubuntu"
-DOCKERFILE="${OS}/Dockerfile"
-if [[ "$image" == *-cuda* ]]; then
-  DOCKERFILE="${OS}-cuda/Dockerfile"
-elif [[ "$image" == *-rocm* ]]; then
-  DOCKERFILE="${OS}-rocm/Dockerfile"
-fi
+function extract_version_from_image_name() {
+  eval export $2=$(echo "${image}" | perl -n -e"/$1(\d+(\.\d+)?(\.\d+)?)/ && print \$1")
+  if [ "x${!2}" = x ]; then
+    echo "variable '$2' not correctly parsed from image='$image'"
+    exit 1
+  fi
+}
+
+function extract_all_from_image_name() {
+  # parts $image into array, splitting on '-'
+  keep_IFS="$IFS"
+  IFS="-"
+  declare -a parts=($image)
+  IFS="$keep_IFS"
+  unset keep_IFS
+
+  for part in "${parts[@]}"; do
+    name=$(echo "${part}" | perl -n -e"/([a-zA-Z]+)\d+(\.\d+)?(\.\d+)?/ && print \$1")
+    vername="${name^^}_VERSION"
+    # "py" is the odd one out, needs this special case
+    if [ "x${name}" = xpy ]; then
+      vername=ANACONDA_PYTHON_VERSION
+    fi
+    # skip non-conforming fields such as "pytorch", "linux" or "xenial" without version string
+    if [ -n "${name}" ]; then
+      extract_version_from_image_name "${name}" "${vername}"
+    fi
+  done
+}
 
 if [[ "$image" == *-trusty* ]]; then
   UBUNTU_VERSION=14.04
@@ -29,6 +50,26 @@ elif [[ "$image" == *-bionic* ]]; then
   UBUNTU_VERSION=18.04
 elif [[ "$image" == *-focal* ]]; then
   UBUNTU_VERSION=20.04
+elif [[ "$image" == *ubuntu* ]]; then
+  extract_version_from_image_name ubuntu UBUNTU_VERSION
+elif [[ "$image" == *centos* ]]; then
+  extract_version_from_image_name centos CENTOS_VERSION
+fi
+
+if [ -n "${UBUNTU_VERSION}" ]; then
+  OS="ubuntu"
+elif [ -n "${CENTOS_VERSION}" ]; then
+  OS="centos"
+else
+  echo "Unable to derive operating system base..."
+  exit 1
+fi
+
+DOCKERFILE="${OS}/Dockerfile"
+if [[ "$image" == *cuda* ]]; then
+  DOCKERFILE="${OS}-cuda/Dockerfile"
+elif [[ "$image" == *rocm* ]]; then
+  DOCKERFILE="${OS}-rocm/Dockerfile"
 fi
 
 TRAVIS_DL_URL_PREFIX="https://s3.amazonaws.com/travis-python-archives/binaries/ubuntu/14.04/x86_64"
@@ -240,14 +281,38 @@ case "$image" in
     VISION=yes
     ROCM_VERSION=3.5.1
     ;;
-  pytorch-linux-bionic-py3.7-conda)
-    ANACONDA_PYTHON_VERSION=3.7
+  *)
+    # Catch-all for builds that are not hardcoded.
     PROTOBUF=yes
     DB=yes
-    CONDA_COMPILER=yes
-    CUDA_VERSION=10.2
-    ;;
-
+    VISION=yes
+    echo "image '$image' did not match an existing build configuration"
+    if [[ "$image" == *py* ]]; then
+      extract_version_from_image_name py ANACONDA_PYTHON_VERSION
+    fi
+    if [[ "$image" == *cuda* ]]; then
+      extract_version_from_image_name cuda CUDA_VERSION
+      extract_version_from_image_name cudnn CUDNN_VERSION
+    fi
+    if [[ "$image" == *rocm* ]]; then
+      extract_version_from_image_name rocm ROCM_VERSION
+    fi
+    if [[ "$image" == *gcc* ]]; then
+      extract_version_from_image_name gcc GCC_VERSION
+    fi
+    if [[ "$image" == *clang* ]]; then
+      extract_version_from_image_name clang CLANG_VERSION
+    fi
+    if [[ "$image" == *devtoolset* ]]; then
+      extract_version_from_image_name devtoolset DEVTOOLSET_VERSION
+    fi
+    if [[ "$image" == *glibc* ]]; then
+      extract_version_from_image_name glibc GLIBC_VERSION
+    fi
+    if [[ "$image" == *cmake* ]]; then
+      extract_version_from_image_name cmake CMAKE_VERSION
+    fi
+  ;;
 esac
 
 # Set Jenkins UID and GID if running Jenkins
@@ -276,6 +341,9 @@ docker build \
        --build-arg "JENKINS_UID=${JENKINS_UID:-}" \
        --build-arg "JENKINS_GID=${JENKINS_GID:-}" \
        --build-arg "UBUNTU_VERSION=${UBUNTU_VERSION}" \
+       --build-arg "CENTOS_VERSION=${CENTOS_VERSION}" \
+       --build-arg "DEVTOOLSET_VERSION=${DEVTOOLSET_VERSION}" \
+       --build-arg "GLIBC_VERSION=${GLIBC_VERSION}" \
        --build-arg "CLANG_VERSION=${CLANG_VERSION}" \
        --build-arg "ANACONDA_PYTHON_VERSION=${ANACONDA_PYTHON_VERSION}" \
        --build-arg "TRAVIS_PYTHON_VERSION=${TRAVIS_PYTHON_VERSION}" \

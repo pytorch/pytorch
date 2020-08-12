@@ -15,6 +15,12 @@ from torch.quantization import (
     get_observer_dict,
     prepare,
 )
+
+from torch.quantization._learnable_fake_quantize import (
+    _LearnableFakeQuantizePerTensorOp,
+    _LearnableFakeQuantizePerChannelOp
+)
+
 import torch.nn as nn
 
 # Standard library
@@ -25,7 +31,7 @@ import math
 import numpy as np
 
 # Testing utils
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
@@ -33,7 +39,6 @@ from torch.testing._internal.common_cuda import TEST_MULTIGPU, TEST_CUDA
 from torch.testing._internal.common_utils import TestCase
 from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
-    ModelWithNoQconfigPropagation,
     AnnotatedSingleLayerLinearModel,
     test_only_eval_fn,
 )
@@ -90,8 +95,8 @@ def _fake_quantize_learnable_per_tensor_affine_grad_reference(dY, X, scale, zero
     grad_X = _fake_quantize_per_tensor_affine_grad_reference(
         dY, X, scale, zero_point, quant_min, quant_max).to(device)
 
-    grad_scale = (grad_scale * grad_X).sum().unsqueeze(dim=0)
-    grad_zp = (grad_zp * grad_X).sum().unsqueeze(dim=0)
+    grad_scale = (grad_scale * dY).sum().unsqueeze(dim=0)
+    grad_zp = (grad_zp * dY).sum().unsqueeze(dim=0)
     return grad_X, grad_scale, grad_zp
 
 # Helper function used to simulate per-channel fake-quant against any axis
@@ -142,22 +147,22 @@ def _fake_quantize_learnable_per_channel_affine_grad_reference(
     per_channel_scale = per_channel_scale.detach().type(torch.float)
     per_channel_zero_point = ((per_channel_zero_point.detach() + 0.5).clamp(quant_min, quant_max)).type(torch.int64)
 
-    Xq = torch.stack([
-        _quantize_per_tensor(
-            X_i, per_channel_scale[i], per_channel_zero_point[i], quant_min, quant_max) for i, X_i in
-        enumerate(torch.unbind(X, dim=axis), 0)
-    ], dim=axis)
-    Xfq = _fake_quantize_per_channel_affine_reference(
-        X, per_channel_scale, per_channel_zero_point, axis, quant_min, quant_max)
-
     grad_scale = torch.zeros([per_channel_scale.size(0)]).to(device)
     grad_zero_point = torch.zeros([per_channel_zero_point.size(0)]).to(device)
 
-    Xfq_flattened = torch.unbind(Xfq, dim=axis)
     X_flattened = torch.unbind(X, dim=axis)
-    grad_X_flattened = torch.unbind(grad_X, dim=axis)
+    dY_flattened = torch.unbind(dY, dim=axis)
 
-    for i, Xq_i in enumerate(torch.unbind(Xq, dim=axis), 0):
+    for i, X_i in enumerate(torch.unbind(X, dim=axis), 0):
+        scale_i = per_channel_scale[i]
+        zero_point_i = per_channel_zero_point[i]
+        X_i = X_flattened[i]
+        dY_i = dY_flattened[i]
+
+        Xq_i = _quantize_per_tensor(
+            X_i, scale_i, zero_point_i, quant_min, quant_max).to(device)
+        Xfq_i = (Xq_i - zero_point_i) * scale_i
+
         indicate_small_scale_i = (Xq_i == quant_min).float().to(device)
         indicate_big_scale_i = (Xq_i == quant_max).float().to(device)
         indicate_middle_scale_i = torch.ones(indicate_small_scale_i.shape).to(device) - \
@@ -167,12 +172,6 @@ def _fake_quantize_learnable_per_channel_affine_grad_reference(
                                   (Xq_i == quant_max).float()).to(device)
         indicate_unsaturate_zp_i = torch.ones(indicate_saturate_zp_i.shape).to(device) - \
             indicate_saturate_zp_i
-
-        scale_i = per_channel_scale[i]
-        zero_point_i = per_channel_zero_point[i]
-        Xfq_i = Xfq_flattened[i]
-        X_i = X_flattened[i]
-        grad_X_i = grad_X_flattened[i]
 
         grad_small_scale_i = quant_min - zero_point_i
         grad_big_scale_i = quant_max - zero_point_i
@@ -187,8 +186,8 @@ def _fake_quantize_learnable_per_channel_affine_grad_reference(
         grad_zp_i = indicate_saturate_zp_i * grad_saturate_zp_i + \
             indicate_unsaturate_zp_i * grad_unsaturate_zp_i
 
-        grad_scale_i = (grad_scale_i * grad_X_i).sum().unsqueeze(dim=0)
-        grad_zp_i = (grad_zp_i * grad_X_i).sum().unsqueeze(dim=0)
+        grad_scale_i = (grad_scale_i * dY_i).sum().unsqueeze(dim=0)
+        grad_zp_i = (grad_zp_i * dY_i).sum().unsqueeze(dim=0)
 
         grad_scale[i] = grad_scale_i
         grad_zero_point[i] = grad_zp_i
@@ -391,17 +390,143 @@ class TestObserver(QuantizationTestCase):
             loaded = torch.jit.load(buf)
             self.assertEqual(obs.calculate_qparams(), loaded.calculate_qparams())
 
-    # TODO: move this to test_quantize.py
-    def test_no_qconfig_propagation(self):
-        model = ModelWithNoQconfigPropagation()
-        model.qconfig = torch.quantization.default_qconfig
+# HistogramObserver that works like it does on master
+class _ReferenceHistogramObserver(HistogramObserver):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
 
-        model = prepare(model)
-        self.assertTrue(hasattr(model.fc1, 'qconfig'),
-                        "QConfig is expected to propagate")
-        self.assertFalse(hasattr(model.no_quant_module, 'qconfig'),
-                         "QConfig is expected to NOT propagate")
+    @torch.jit.ignore
+    def _non_linear_param_search(self):
+        r"""Non-linear parameter search.
 
+        An approximation for L2 error minimization for selecting min/max.
+        By selecting new min/max, we filter out outliers in input distribution.
+        This follows the implementation of NormMinimization::NonlinearQuantizationParamsSearch in
+        caffe2/quantization/server/norm_minimization.cc
+        """
+        def _get_norm(delta_begin, delta_end, density, norm_type):
+            r"""
+            Compute the norm of the values uniformaly distributed between
+            delta_begin and delta_end.
+
+            norm = density * (integral_{begin, end} x^2)
+                 = density * (end^3 - begin^3) / 3
+            """
+            assert norm_type == "L2", "Only L2 norms are currently supported"
+            norm = 0.0
+            if norm_type == "L2":
+                norm = (
+                    delta_end * delta_end * delta_end
+                    - delta_begin * delta_begin * delta_begin
+                ) / 3
+            return density * norm
+
+        def _compute_quantization_error(next_start_bin, next_end_bin, norm_type):
+            r"""
+            Compute the quantization error if we use start_bin to end_bin as the
+            min and max to do the quantization.
+            """
+            bin_width = (self.max_val.item() - self.min_val.item()) / self.bins
+
+            norm = 0.0
+            dst_bin_width = bin_width * (next_end_bin - next_start_bin + 1) / self.dst_nbins
+            if dst_bin_width == 0.0:
+                return 0.0
+            for src_bin in range(self.bins):
+                # distances from the beginning of first dst_bin to the beginning and
+                # end of src_bin
+                src_bin_begin = (src_bin - next_start_bin) * bin_width
+                src_bin_end = src_bin_begin + bin_width
+
+                # which dst_bins the beginning and end of src_bin belong to?
+                dst_bin_of_begin = min(
+                    self.dst_nbins - 1, max(0.0, math.floor(src_bin_begin / dst_bin_width))
+                )
+                dst_bin_of_end = min(
+                    self.dst_nbins - 1, max(0.0, math.floor(src_bin_end / dst_bin_width))
+                )
+                dst_bin_of_begin_center = (
+                    dst_bin_of_begin * dst_bin_width + dst_bin_width / 2
+                )
+
+                density = self.histogram[src_bin] / bin_width
+                if dst_bin_of_begin == dst_bin_of_end:
+                    # if src_bin is entirely within 1 dst_bin
+                    delta_begin = src_bin_begin - dst_bin_of_begin_center
+                    delta_end = src_bin_end - dst_bin_of_begin_center
+                    norm = norm + _get_norm(delta_begin, delta_end, density, norm_type)
+                else:
+                    delta_begin = src_bin_begin - dst_bin_of_begin_center
+                    delta_end = dst_bin_width / 2
+                    norm = norm + _get_norm(delta_begin, delta_end, density, norm_type)
+
+                    norm = norm + (dst_bin_of_end - dst_bin_of_begin - 1) * _get_norm(
+                        -dst_bin_width / 2, dst_bin_width / 2, density, norm_type
+                    )
+
+                    dst_bin_of_end_center = (
+                        dst_bin_of_end * dst_bin_width + dst_bin_width / 2
+                    )
+
+                    delta_begin = -dst_bin_width / 2
+                    delta_end = src_bin_end - dst_bin_of_end_center
+                    norm = norm + _get_norm(delta_begin, delta_end, density, norm_type)
+            return norm
+
+        assert self.histogram.size()[0] == self.bins, "bins mistmatch"
+        bin_width = (self.max_val - self.min_val) / self.bins
+
+        # cumulative sum
+        total = sum(self.histogram)
+        cSum = torch.cumsum(self.histogram, dim=0)
+
+        stepsize = 1e-5  # granularity
+        alpha = 0.0  # lower bound
+        beta = 1.0  # upper bound
+        start_bin = 0
+        end_bin = self.bins - 1
+        norm_min = float("inf")
+
+        while alpha < beta:
+            # Find the next step
+            next_alpha = alpha + stepsize
+            next_beta = beta - stepsize
+
+            # find the left and right bins between the quantile bounds
+            l = start_bin
+            r = end_bin
+            while l < end_bin and cSum[l] < next_alpha * total:
+                l = l + 1
+            while r > start_bin and cSum[r] > next_beta * total:
+                r = r - 1
+
+            # decide the next move
+            next_start_bin = start_bin
+            next_end_bin = end_bin
+            if (l - start_bin) > (end_bin - r):
+                # move the start bin
+                next_start_bin = l
+                alpha = next_alpha
+            else:
+                # move the end bin
+                next_end_bin = r
+                beta = next_beta
+
+            if next_start_bin == start_bin and next_end_bin == end_bin:
+                continue
+
+            # calculate the quantization error using next_start_bin and next_end_bin
+            norm = _compute_quantization_error(next_start_bin, next_end_bin, "L2")
+
+            if norm > norm_min:
+                break
+            norm_min = norm
+            start_bin = next_start_bin
+            end_bin = next_end_bin
+
+        new_min = self.min_val + bin_width * start_bin
+        new_max = self.min_val + bin_width * (end_bin + 1)
+        return new_min, new_max
 
 class TestRecordHistogramObserver(QuantizationTestCase):
     # TODO: move this to quantize.py
@@ -443,6 +568,7 @@ class TestRecordHistogramObserver(QuantizationTestCase):
     @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
            qscheme=st.sampled_from((torch.per_tensor_affine, torch.per_tensor_symmetric)),
            reduce_range=st.booleans())
+    @settings(max_examples=10)
     def test_histogram_observer(self, qdtype, qscheme, reduce_range):
         myobs = HistogramObserver(bins=3, dtype=qdtype, qscheme=qscheme, reduce_range=reduce_range)
         # Calculate qparams should work for empty observers
@@ -518,6 +644,27 @@ class TestRecordHistogramObserver(QuantizationTestCase):
         self.assertEqual(myobs.max_val, 8.0)
         self.assertEqual(myobs.histogram, [2., 3., 3.])
 
+    @given(N=st.sampled_from([10, 1000, 10**6]),
+           bins=st.sampled_from([256, 512, 1024, 2048]),
+           dtype=st.sampled_from([torch.qint8, torch.quint8]),
+           qscheme=st.sampled_from([torch.per_tensor_affine, torch.per_tensor_symmetric]),
+           reduce_range=st.booleans())
+    def test_histogram_observer_against_reference(self, N, bins, dtype, qscheme, reduce_range):
+
+        ref_obs = _ReferenceHistogramObserver(bins=bins, dtype=dtype, qscheme=qscheme, reduce_range=reduce_range)
+        my_obs = HistogramObserver(bins=bins, dtype=dtype, qscheme=qscheme, reduce_range=reduce_range)
+
+        for _ in range(10):
+            X = torch.randn(N)
+            my_obs(X)
+            ref_obs(X)
+
+        ref_qparams = ref_obs.calculate_qparams()
+        my_qparams = my_obs.calculate_qparams()
+
+        self.assertEqual(ref_qparams, my_qparams)
+
+
 class TestFakeQuantizePerTensor(TestCase):
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            X=hu.tensor(shapes=hu.array_shapes(1, 5,),
@@ -558,6 +705,72 @@ class TestFakeQuantizePerTensor(TestCase):
             dout, X, scale, zero_point, quant_min, quant_max)
         Y_prime.backward(dout)
         np.testing.assert_allclose(dX.cpu(), X.grad.cpu().detach().numpy(), rtol=tolerance, atol=tolerance)
+
+    @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
+           X=hu.tensor(shapes=hu.array_shapes(1, 5,),
+                       elements=hu.floats(-1e3, 1e3, allow_nan=False, allow_infinity=False),
+                       qparams=hu.qparams(dtypes=torch.quint8)))
+    def test_learnable_py_module_forward_per_tensor(self, device, X):
+        r"""Tests the forward path of the _LearnableFakeQuantize module per tensor op.
+        """
+        X, (scale, zero_point, torch_type) = X
+        scale = torch.tensor([scale]).to(device)
+        zero_point = torch.tensor([zero_point]).to(device)
+        quant_min = torch.iinfo(torch_type).min
+        quant_max = torch.iinfo(torch_type).max
+
+        X = to_tensor(X, device)
+        Y = _fake_quantize_per_tensor_affine_reference(
+            X, scale, zero_point, quant_min, quant_max).to(device)
+        Y_prime = _LearnableFakeQuantizePerTensorOp.apply(
+            X, scale, zero_point, quant_min, quant_max, 1.).to(device)
+        tolerance = 1e-2
+        self.assertTrue(
+            torch.allclose(Y, Y_prime, rtol=tolerance, atol=tolerance),
+            "Expected _LearnableFakeQuantizePerTensorOp to have results match the reference forward function")
+
+    @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
+           X=hu.tensor(shapes=hu.array_shapes(1, 5,),
+                       elements=hu.floats(-1e3, 1e3, allow_nan=False, allow_infinity=False),
+                       qparams=hu.qparams(dtypes=torch.quint8)))
+    def test_learnable_py_module_backward_per_tensor(self, device, X):
+        X, (scale, zero_point, torch_type) = X
+        scale = torch.tensor([scale]).float().to(device)
+        zero_point = torch.tensor([zero_point]).float().to(device)
+        quant_min = torch.iinfo(torch_type).min
+        quant_max = torch.iinfo(torch_type).max
+
+        X = to_tensor(X, device)
+        X.requires_grad_()
+        scale.requires_grad_()
+        zero_point.requires_grad_()
+        Y_prime = _LearnableFakeQuantizePerTensorOp.apply(
+            X, scale, zero_point, quant_min, quant_max, 1.)
+        dout = torch.rand(X.shape, dtype=torch.float).to(device)
+        dX, dScale, dZeroPoint = _fake_quantize_learnable_per_tensor_affine_grad_reference(
+            dout, X, scale, zero_point, quant_min, quant_max, device)
+        Y_prime.backward(dout)
+
+        expected_dX = dX.to(device).detach()
+        actual_dX = X.grad.to(device).detach()
+        expected_dScale = dScale.to(device).detach()
+        actual_dScale = scale.grad.to(device).detach()
+        expected_dZeroPoint = dZeroPoint.to(device).detach()
+        actual_dZeroPoint = zero_point.grad.to(device).detach()
+        tolerance = 1e-2
+
+        self.assertTrue(
+            torch.allclose(
+                expected_dX, actual_dX, rtol=tolerance, atol=tolerance),
+            "Expected dX to match X.grad")
+        self.assertTrue(
+            torch.allclose(
+                expected_dScale, actual_dScale, rtol=tolerance, atol=tolerance),
+            "Expected dScale to match scale.grad")
+        self.assertTrue(
+            torch.allclose(
+                expected_dZeroPoint, actual_dZeroPoint, rtol=tolerance, atol=tolerance),
+            "Expected dZeroPoint to match zero_point.grad")
 
     def _test_learnable_forward_per_tensor(self, X, device, scale_base, zero_point_base):
         X_base = torch.tensor(X).to(device)
@@ -937,7 +1150,7 @@ class TestFakeQuantizePerChannel(TestCase):
             dScale_actual = scale_curr.to(device).grad.detach()
             dZeroPoint_expected = dZeroPoint.to(device).detach()
             dZeroPoint_actual = zero_point_curr.to(device).grad.detach()
-            tolerance = 1e-3
+            tolerance = 1e-4
 
             self.assertTrue(
                 torch.allclose(dX_expected, dX_actual, rtol=tolerance, atol=tolerance),
@@ -949,7 +1162,7 @@ class TestFakeQuantizePerChannel(TestCase):
                 torch.allclose(dZeroPoint_expected, dZeroPoint_actual, rtol=tolerance, atol=tolerance),
                 "Expected dZeroPoint to match zero_point.grad")
 
-    @given(X=hu.per_channel_tensor(shapes=hu.array_shapes(1, 5,),
+    @given(X=hu.per_channel_tensor(shapes=hu.array_shapes(2, 5,),
                                    qparams=hu.qparams(dtypes=torch.quint8)))
     def test_learnable_backward_per_channel_cpu(self, X):
         torch.random.manual_seed(NP_RANDOM_SEED)
@@ -961,18 +1174,83 @@ class TestFakeQuantizePerChannel(TestCase):
         self._test_learnable_backward_per_channel(
             X_base, 'cpu', scale_base, zero_point_base, axis)
 
-    @given(X=hu.per_channel_tensor(shapes=hu.array_shapes(1, 5,),
+    @given(X=hu.per_channel_tensor(shapes=hu.array_shapes(2, 5,),
                                    qparams=hu.qparams(dtypes=torch.quint8)))
-    @unittest.skipIf(not TEST_CUDA, "No gpu is not available.")
+    @unittest.skip("temporarily disable the test")
     def test_learnable_backward_per_channel_cuda(self, X):
         torch.random.manual_seed(NP_RANDOM_SEED)
-        X, (_, _, axis, _) = X
+        X, (scale, zero_point, axis, torch_type) = X
         X_base = torch.tensor(X).to('cuda')
-        channel_size = X_base.size(axis)
-        scale_base = torch.normal(mean=0, std=1, size=(channel_size,)).clamp(1e-4, 100)
-        zero_point_base = torch.normal(mean=0, std=128, size=(channel_size,))
+        scale_base = to_tensor(scale, 'cuda')
+        zero_point_base = to_tensor(zero_point, 'cuda')
         self._test_learnable_backward_per_channel(
             X_base, 'cuda', scale_base, zero_point_base, axis)
+
+    @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
+           X=hu.per_channel_tensor(shapes=hu.array_shapes(2, 5,),
+                                   elements=hu.floats(-1e3, 1e3, allow_nan=False, allow_infinity=False),
+                                   qparams=hu.qparams(dtypes=torch.quint8)))
+    def test_learnable_py_module_forward_per_channel(self, device, X):
+        r"""Tests the forward path of the _LearnableFakeQuantizePerChannel op.
+        """
+        X, (scale, zero_point, axis, torch_type) = X
+        quant_min = torch.iinfo(torch_type).min
+        quant_max = torch.iinfo(torch_type).max
+
+        X = to_tensor(X, device)
+        scale = to_tensor(scale, device)
+        zero_point = torch.tensor(zero_point).to(dtype=torch.int64, device=device)
+        Y = _fake_quantize_per_channel_affine_reference(
+            X, scale, zero_point, axis, quant_min, quant_max).to(device)
+        Y_prime = _LearnableFakeQuantizePerChannelOp.apply(
+            X, scale, zero_point, axis, quant_min, quant_max, 1.).to(device)
+        tolerance = 1e-2
+        self.assertTrue(
+            torch.allclose(Y, Y_prime, rtol=tolerance, atol=tolerance),
+            "Expected _LearnableFakeQuantizePerChannelOp to have results match the reference forward function")
+
+    @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
+           X=hu.per_channel_tensor(shapes=hu.array_shapes(2, 5,),
+                                   elements=hu.floats(-1e3, 1e3, allow_nan=False, allow_infinity=False),
+                                   qparams=hu.qparams(dtypes=torch.quint8)))
+    def test_learnable_py_module_backward_per_channel(self, device, X):
+        r"""Tests the forward path of the _LearnableFakeQuantizePerChannel op.
+        """
+        X, (scale, zero_point, axis, torch_type) = X
+        quant_min = torch.iinfo(torch_type).min
+        quant_max = torch.iinfo(torch_type).max
+
+        X = to_tensor(X, device).float()
+        X.requires_grad_()
+        scale = to_tensor(scale, device).float()
+        scale.requires_grad_()
+        zero_point = torch.tensor(zero_point).to(device).float()
+        zero_point.requires_grad_()
+
+        Y_prime = _LearnableFakeQuantizePerChannelOp.apply(
+            X, scale, zero_point, axis, quant_min, quant_max, 1.).to(device)
+
+        dout = torch.rand(X.shape, dtype=torch.float).to(device)
+        dX, dScale, dZeroPoint = _fake_quantize_learnable_per_channel_affine_grad_reference(
+            dout, X, scale, zero_point, axis, quant_min, quant_max, device)
+        Y_prime.backward(dout)
+
+        dX_expected = dX.to(device).detach()
+        dX_actual = X.to(device).grad.detach()
+        dScale_expected = dScale.to(device).detach()
+        dScale_actual = scale.to(device).grad.detach()
+        dZeroPoint_expected = dZeroPoint.to(device).detach()
+        dZeroPoint_actual = zero_point.to(device).grad.detach()
+        tolerance = 1e-2
+        self.assertTrue(
+            torch.allclose(dX_expected, dX_actual, rtol=tolerance, atol=tolerance),
+            "Expected dX to match X.grad")
+        self.assertTrue(
+            torch.allclose(dScale_expected, dScale_actual, rtol=tolerance, atol=tolerance),
+            "Expected dScale to match scale.grad")
+        self.assertTrue(
+            torch.allclose(dZeroPoint_expected, dZeroPoint_actual, rtol=tolerance, atol=tolerance),
+            "Expected dZeroPoint to match zero_point.grad")
 
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
            X=hu.per_channel_tensor(shapes=hu.array_shapes(1, 5,),
@@ -1061,7 +1339,7 @@ class TestDistributed(QuantizationTestCase):
             torch.quantization.MovingAveragePerChannelMinMaxObserver.with_args(dtype=torch.qint8),
             torch.quantization.HistogramObserver.with_args(dtype=torch.qint8),
             torch.quantization.RecordingObserver.with_args(dtype=torch.qint8),
-            torch.quantization.NoopObserver.with_args(dtype=torch.float16),
+            torch.quantization.PlaceholderObserver.with_args(dtype=torch.float16),
         ]
 
         for observer_type in observer_types:
