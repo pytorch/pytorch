@@ -61,6 +61,7 @@ pip install -q https://s3.amazonaws.com/ossci-linux/wheels/tensorboard-1.14.0a0-
 pushd "$pt_checkout"
 git clone https://github.com/pytorch/vision
 pushd vision
+git checkout 78ed10cc51067f1a6bac9352831ef37a3f842784
 conda install -q pillow
 time python setup.py install
 popd
