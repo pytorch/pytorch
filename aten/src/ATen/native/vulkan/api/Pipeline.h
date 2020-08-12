@@ -10,6 +10,24 @@ namespace native {
 namespace vulkan {
 namespace api {
 
+//
+// This struct defines pipelines, and pipeline layout caches intended to minimize
+// redundant object reconstructions at the cost of extra memory consumption.
+//
+// A Vulkan pipeline contains the entirety of states, as one coherent bundle,
+// required to configure the GPU's execution pipeline.  This usage pattern
+// minimizes driver overhead, promotes state configuration up-front at application
+// initialization time, and is a departure from, and in direct contrast with,
+// OpenGL's individually confiurable state machine.
+//
+// A Vulkan pipeline layout represents a sequence of Vulkan descriptor sets each
+// having a specific layout, and deterimines the interface between all shader
+// stages and shader resources.
+//
+// This struct defines the facilities required to create, reuse, and destruct
+// these objects.
+//
+
 struct Pipeline final {
   //
   // Layout
@@ -62,7 +80,6 @@ struct Pipeline final {
     explicit Layout(const VkDevice device)
       : cache(Factory(device)) {
     }
-
   } layout;
 
   /*

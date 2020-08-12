@@ -8,6 +8,9 @@
   #pragma clang diagnostic ignored "-Wunused-variable"
 #endif
 
+// Do NOT include vk_mem_alloc.h directly.
+// Always include this file (Allocator.h) instead.
+
 #include <ATen/native/vulkan/api/vk_mem_alloc.h>
 
 #ifdef __clang__
