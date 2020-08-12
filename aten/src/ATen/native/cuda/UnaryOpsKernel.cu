@@ -173,35 +173,6 @@ void clamp_max_kernel_cuda(TensorIterator& iter, Scalar max_value) {
   });
 }
 
-void heaviside_tensor_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "heaviside_tensor_cuda", [&]() {
-    gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t self, scalar_t val) -> float {
-       if (self > 0) {
-         return 1.0;
-       } else if (self < 0) {
-         return 0.0;
-       } else {
-         return val;
-       }
-    });
-  });
-}
-
-void heaviside_scalar_kernel_cuda(TensorIterator& iter, Scalar val) {
-  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "heaviside_scalar_cuda", [&]() {
-    auto temp = val.to<float>();
-    gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t self) -> float {
-       if (self > 0) {
-         return 0.0;
-       } else if (self < 0) {
-         return 1.0;
-       } else {
-         return temp;
-       }
-    });
-  });
-}
-
 REGISTER_DISPATCH(bitwise_not_stub, &bitwise_not_kernel_cuda);
 REGISTER_DISPATCH(exp_stub, &exp_kernel_cuda);
 REGISTER_DISPATCH(expm1_stub, &expm1_kernel_cuda);
@@ -212,8 +183,6 @@ REGISTER_DISPATCH(logit_stub, &logit_kernel_cuda);
 REGISTER_DISPATCH(erf_stub, &erf_kernel_cuda);
 REGISTER_DISPATCH(erfc_stub, &erfc_kernel_cuda);
 REGISTER_DISPATCH(erfinv_stub, &erfinv_kernel_cuda);
-REGISTER_DISPATCH(heaviside_tensor_stub, &heaviside_tensor_kernel_cuda);
-REGISTER_DISPATCH(heaviside_scalar_stub, &heaviside_scalar_kernel_cuda);
 REGISTER_DISPATCH(clamp_stub, &clamp_kernel_cuda);
 REGISTER_DISPATCH(clamp_min_stub, &clamp_min_kernel_cuda);
 REGISTER_DISPATCH(clamp_max_stub, &clamp_max_kernel_cuda);

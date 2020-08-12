@@ -360,34 +360,6 @@ static void polygamma_kernel(TensorIterator& iter, int64_t n) {
   }
 }
 
-static void heaviside_tensor_kernel(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "heaviside_tensor_cpu", [&]() {
-    cpu_kernel(iter, [=](scalar_t self, scalar_t val) -> scalar_t {
-       if (self > 0) {
-         return 1.0;
-       } else if (self < 0) {
-         return 0.0;
-       } else {
-         return val;
-       }
-    });
-  });
-}
-
-static void heaviside_scalar_kernel(TensorIterator& iter, Scalar val) {
-  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "heaviside_scalar_cpu", [&]() {
-    cpu_kernel(iter, [=](scalar_t self) -> scalar_t {
-       if (self > 0) {
-         return 0.0;
-       } else if (self < 0) {
-         return 1.0;
-       } else {
-         return val.to<scalar_t>();
-       }
-    });
-  });
-}
-
 static void clamp_kernel(TensorIterator& iter, Scalar min_scalar, Scalar max_scalar) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, iter.dtype(), "clamp_cpu", [&]() {
     c10::scalar_value_type<scalar_t>::type (*zabs_)(scalar_t) = zabs;
@@ -654,8 +626,6 @@ REGISTER_DISPATCH(atanh_stub, &atanh_kernel);
 REGISTER_DISPATCH(digamma_stub, &digamma_kernel);
 REGISTER_DISPATCH(trigamma_stub, &trigamma_kernel);
 REGISTER_DISPATCH(polygamma_stub, &polygamma_kernel);
-REGISTER_DISPATCH(heaviside_tensor_stub, &heaviside_tensor_kernel);
-REGISTER_DISPATCH(heaviside_scalar_stub, &heaviside_scalar_kernel);
 REGISTER_DISPATCH(clamp_stub, &clamp_kernel);
 REGISTER_DISPATCH(clamp_max_stub, &clamp_max_kernel);
 REGISTER_DISPATCH(clamp_min_stub, &clamp_min_kernel);

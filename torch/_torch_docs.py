@@ -5593,10 +5593,9 @@ Example::
 
 add_docstr(torch.heaviside,
            r"""
-heaviside(input, val, out=None) -> Tensor
+heaviside(input, val, *, out=None) -> Tensor
 
-Returns a new tensor with each of the elements of :attr:`input`
-computed with Heaviside step function.
+Computes the Heaviside step function for each element in :attr:`input`.
 
 The Heaviside step function is defined as:
 

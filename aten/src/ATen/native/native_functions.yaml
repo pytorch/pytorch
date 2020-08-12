@@ -3611,12 +3611,10 @@
 - func: heaviside.Tensor(Tensor self, Tensor val) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
-  device_guard: False
 
 - func: heaviside.Scalar(Tensor self, Scalar val) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
-  device_guard: False
 
 - func: heaviside_.Tensor(Tensor(a!) self, Tensor val) -> Tensor(a!)
   variants: method

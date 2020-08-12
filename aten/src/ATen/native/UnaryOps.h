@@ -38,8 +38,6 @@ DECLARE_DISPATCH(unary_fn, exp_stub);
 DECLARE_DISPATCH(unary_fn, expm1_stub);
 DECLARE_DISPATCH(unary_fn, floor_stub);
 DECLARE_DISPATCH(unary_fn, frac_stub);
-DECLARE_DISPATCH(unary_fn, heaviside_tensor_stub);
-DECLARE_DISPATCH(unary_fn_with_scalar, heaviside_scalar_stub);
 DECLARE_DISPATCH(unary_fn, log_stub);
 DECLARE_DISPATCH(unary_fn, log10_stub);
 DECLARE_DISPATCH(unary_fn, log1p_stub);
