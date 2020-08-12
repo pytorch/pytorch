@@ -69,9 +69,7 @@ class DefaultDelegate:
 # Args:
 #   - root - the `nn.Module` instance to trace
 #   - delegate : An instance of a Delegate object
-def symbolic_trace(root : torch.nn.Module, delegate : Optional[DefaultDelegate] = None):
-    delegate = delegate if delegate else DefaultDelegate()
-
+def symbolic_trace(root : torch.nn.Module, delegate : Optional[DefaultDelegate] = DefaultDelegate()):
     def _use_parameter(graph, a):
         if isinstance(a, torch.nn.Parameter):
             for n, p in root.named_parameters():
