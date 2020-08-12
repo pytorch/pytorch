@@ -304,6 +304,7 @@ DimVector TensorIterator::apply_perm_and_mul(IntArrayRef input, int mul) const {
 
 void TensorIterator::allocate_or_resize_outputs() {
   for (int i = 0; i < num_outputs_; i++) {
+
     auto& op = operands_[i];
     if (!op.tensor.defined() || op.will_resize) {
       TORCH_INTERNAL_ASSERT(op.is_type_defined(), "no type for operand", i);
@@ -634,6 +635,9 @@ void TensorIterator::cast_outputs() {
   for (auto& op : operands_) {
     if (op.is_output && op.original_tensor.defined() &&
         op.original_tensor.scalar_type() != op.current_dtype) {
+      if (op.original_tensor.sizes() != op.tensor.sizes()){
+        op.original_tensor.resize_as_(op.tensor).as_strided_(op.tensor.sizes(), op.tensor.strides());
+      }
       op.original_tensor.copy_(op.tensor);
       op.tensor = op.original_tensor;
     }
