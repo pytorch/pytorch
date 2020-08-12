@@ -1,43 +1,16 @@
-import sys
-import os
-import contextlib
-import textwrap
 import re
-import pprint
-import dataclasses
+
 from dataclasses import dataclass, field
 from typing import List, Sequence, Dict, Optional, Iterator, Tuple, Set, NoReturn
 from enum import Enum
-import yaml
 
-# Reusing CodeTemplate from existing codegen
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from code_template import CodeTemplate
-
-try:
-    # use faster C loader if available
-    from yaml import CLoader as Loader
-except ImportError:
-    from yaml import Loader  # type: ignore
-
-# A little trick from https://github.com/python/mypy/issues/6366
-# for getting mypy to do exhaustiveness checking
-def _assert_never(x: NoReturn) -> NoReturn:
-    assert False, "Unhandled type: {}".format(type(x).__name__)
-
-# Welcome to the ATen code generator v2!  The ATen code generator is
-# responsible for parsing native_functions.yaml and then generating
-# various generated files (e.g., TypeDefault.cpp) based on the operators
-# defined in this file.  This means that the code generator knows how to
-# parse function schema, and then translate this into various C++ types
-# and boilerplate code.
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #
-# I went into this rewrite with some goals:
+#                           DATA MODEL
 #
-# - Completely excise all legacy TH handling.  Declarations.cwrap isn't
-#   a thing.  Preprocessing declarations isn't a thing.
-#   native_functions.yaml is the only place where we get information
-#   about operators.
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
+#
+# Some general principles for our data model.
 #
 # - Stop using C++ data types as the internal data representation
 #   format.  Instead, the internal data structures are centered
@@ -54,31 +27,18 @@ def _assert_never(x: NoReturn) -> NoReturn:
 #   form they were parsed from.  These structures are immutable
 #   and you're expected to populate information once during
 #   construction.
-#
-# - Strict mypy typechecking.  You can typecheck this file using
-#   `mypy -config mypy-strict.ini aten/src/ATen/gen_cpu.py` and
-#   this will enforce that everything is annotated.
-#
-# Some non-goals:
-#
-# - Change native_functions.yaml format.  One step at a time!
-#
-# The general structure:
-#
-# - We define a lot of dataclasses to represent all of the various
-#   semantic entities in native_functions.yaml (schema! types!)
-#   These classes come with parsing and pretty-printing functionality.
-#
-# - We parse native_functions.yaml into our dataclasses
-#
-# - We do code generation on it (under construction!)
-#
 
-# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
-#
-#                           DATA MODEL
-#
-# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
+# Represent a source location; used for better error reporting
+@dataclass(frozen=True)
+class Location:
+    file: str
+    line: int
+
+    def __str__(self) -> str:
+        return "{}:{}".format(self.file, self.line)
+
+# Valid values of the 'variants' field in native_functions.yaml
+Variant = Enum('Variant', ('function', 'method'))
 
 # The basic input to the code generation is native_functions.yaml.
 # The name "native", BTW, comes from the distinction between native
@@ -108,7 +68,7 @@ class NativeFunction:
 
     # If no variants are specified in native_functions.yaml, this is
     # assumed to be {'function'}.
-    variants: Set['Variant']
+    variants: Set[Variant]
 
     # Whether or not we should skip generating registrations for
     # this kernel.  This is a bit of a double-edged sword, as manual
@@ -265,7 +225,9 @@ class FunctionSchema:
     out_arguments: Sequence['Argument']  # these are also kwarg-only
 
     # TODO: Need to handle collisions with argument names at some point
-    returns: Sequence['Argument']
+    returns: Sequence['Return']
+
+    tensor_options_info: Optional['TensorOptionsInfo'] = field(init=False)
 
     @staticmethod
     def parse(func: str) -> 'FunctionSchema':
@@ -277,7 +239,7 @@ class FunctionSchema:
         args = args[:-1]
         name = OperatorName.parse(ops)
         arguments, kwarg_only_arguments, out_arguments = parse_arguments(args)
-        returns = parse_return_arguments(return_decl)
+        returns = parse_returns(return_decl)
         r = FunctionSchema(
             name=name,
             arguments=arguments,
@@ -300,6 +262,26 @@ class FunctionSchema:
             # TODO: fixme
             if str(self.name) not in ['_amp_non_finite_check_and_unscale_']:
                 assert len(self.returns) == 1
+
+        # compute some useful metadata about tensor options in
+        # kwarg_only_arguments
+        def find_topt(name: str, ty: Type) -> Optional[int]:
+            for i, a in enumerate(self.kwarg_only_arguments):
+                if a.name == name and a.type in [ty, OptionalType(ty)]:
+                    return i
+            return None
+
+        dtype: Optional[int] = find_topt('dtype', Type.parse('ScalarType'))
+        layout: Optional[int] = find_topt('layout', Type.parse('Layout'))
+        device: Optional[int] = find_topt('device', Type.parse('Device'))
+        pin_memory: Optional[int] = find_topt('pin_memory', Type.parse('bool'))
+
+        topt_info: Optional[TensorOptionsInfo] = None
+        if dtype is not None and layout is not None and device is not None and pin_memory is not None:
+            assert (dtype, dtype+1, dtype+2, dtype+3) == (dtype, layout, device, pin_memory)
+            topt_info = TensorOptionsInfo(start=dtype, end=pin_memory+1)
+
+        object.__setattr__(self, 'tensor_options_info', topt_info)
 
     def is_out_fn(self) -> bool:
         # Note [is_out_fn]
@@ -346,15 +328,22 @@ class FunctionSchema:
 
 # Here is the rest of the data model, described more briefly.
 
-# Valid values of the 'variants' field in native_functions.yaml
-Variant = Enum('Variant', ('function', 'method'))
+@dataclass(frozen=True)
+class TensorOptionsInfo:
+    # indices specifying where the start and end of the tensor
+    # options arguments are
+    start: int  # inclusive
+    end: int  # exclusive
+
+    def slice(self) -> slice:
+        return slice(self.start, self.end)
 
 # Simplified version for what actually shows up in built-ins.
 # Look at alias_info.h for expanded syntax.  If you need the structure,
 # you also need to make this structure recursive so it can be lined
 # up with the type components too.  For primitives this isn't really
 # necessary
-@dataclass
+@dataclass(frozen=True)
 class Annotation:
     # Typically only has one element.  Not actually a set so
     # we can conveniently assume it is canonically ordered
@@ -382,7 +371,7 @@ class Annotation:
 # (for example, there's no SingleElementType subclass anymore).
 # You never actually construct a Type; usually it's going to be one
 # of the subclasses.  If Python had ADTs this would be one!
-@dataclass
+@dataclass(frozen=True)
 class Type:
     @staticmethod
     def parse(t: str) -> 'Type':
@@ -406,6 +395,8 @@ class Type:
 
     def __str__(self) -> str:
         raise NotImplemented
+    def is_tensor_like(self) -> bool:
+        raise NotImplemented
 
 # Base types are simple, atomic types with no further structure
 BaseTy = Enum('BaseTy', (
@@ -426,18 +417,22 @@ BaseTy = Enum('BaseTy', (
     'ConstQuantizerPtr',  # TODO: rename
 ))
 
-@dataclass
+@dataclass(frozen=True)
 class BaseType(Type):
     name: BaseTy
     def __str__(self) -> str:
         return f'{self.name.name}'
+    def is_tensor_like(self) -> bool:
+        return self.name == BaseTy.Tensor
 
 # Optional types may be specified, or may also be validly given None
-@dataclass
+@dataclass(frozen=True)
 class OptionalType(Type):
     elem: Type
     def __str__(self) -> str:
         return f'{self.elem}?'
+    def is_tensor_like(self) -> bool:
+        return self.elem.is_tensor_like()
 
 # List types specify that we may have multiples of an element.  We
 # also support explicit sizes on list types, but these have
@@ -446,25 +441,23 @@ class OptionalType(Type):
 #
 # DANGER WILL ROBINSON: C++ elaboration depends on elem type; e.g.,
 # int[] elaborates differently than bool[3]!
-@dataclass
+@dataclass(frozen=True)
 class ListType(Type):
     elem: Type
     size: Optional[int]
     def __str__(self) -> str:
         size = f'{self.size}' if self.size else ''
         return f'{self.elem}[{size}]'
+    def is_tensor_like(self) -> bool:
+        return self.elem.is_tensor_like()
 
-# Arguments represent both input arguments, as well as return types from
-# a function (we support named returns, so the data structure works
-# in both caes.)
-@dataclass
+@dataclass(frozen=True)
 class Argument:
     # NB: I didn't put kwarg_only as a boolean field here, unlike
     # c10::Argument, so that printing works correctly
 
-    name: Optional[str]
+    name: str
     type: Type
-    # INVARIANT: if name is None, default is None
     default: Optional[str]
 
     # The semantics of the annotation field are a little strange.
@@ -490,19 +483,15 @@ class Argument:
 
     @staticmethod
     def parse(arg: str) -> 'Argument':
-        name: Optional[str]
+        name: str
         default: Optional[str]
-        if ' ' in arg:
-            type_and_annot, name_and_default = arg.rsplit(' ', 1)
-            if '=' in name_and_default:
-                name, default = name_and_default.split('=')
-            else:
-                name = name_and_default
-                default = None
+        type_and_annot, name_and_default = arg.rsplit(' ', 1)
+        if '=' in name_and_default:
+            name, default = name_and_default.split('=')
         else:
-            type_and_annot = arg
-            name = None
+            name = name_and_default
             default = None
+        # TODO: deduplicate annotation matching with Return
         match = re.match(r'Tensor\((.+)\)(.*)', type_and_annot)
         annotation: Optional[Annotation]
         if match:
@@ -539,6 +528,54 @@ class Argument:
             if self.default:
                 mb_default = f'={self.default}'
             return f"{type} {self.name}{mb_default}"
+
+
+@dataclass(frozen=True)
+class Return:
+    name: Optional[str]
+    type: Type
+    annotation: Optional[Annotation]
+
+    @staticmethod
+    def parse(arg: str) -> 'Return':
+        name: Optional[str]
+        if ' ' in arg:
+            type_and_annot, name = arg.rsplit(' ', 1)
+        else:
+            type_and_annot = arg
+            name = None
+        match = re.match(r'Tensor\((.+)\)(.*)', type_and_annot)
+        annotation: Optional[Annotation]
+        if match:
+            # If you update this, make sure the __str__ still works too
+            assert match.group(2) in ['', '?', '[]'], 'unrecognized alias analysis form with Tensor'
+            type_s = 'Tensor' + match.group(2)
+            annotation = Annotation.parse(match.group(1))
+        else:
+            type_s = type_and_annot
+            annotation = None
+        type = Type.parse(type_s)
+        r = Return(
+            name=name,
+            type=type,
+            annotation=annotation,
+        )
+        assert str(r) == arg, f'{str(r)} != {arg}'
+        return r
+
+    @property
+    def is_write(self) -> bool:
+        return self.annotation is not None and self.annotation.is_write
+
+    def __str__(self) -> str:
+        type = f'{self.type}'
+        if self.annotation:
+            assert type in ['Tensor', 'Tensor?', 'Tensor[]']
+            type = type.replace('Tensor', f'Tensor({self.annotation})')
+        if self.name is None:
+            return type
+        else:
+            return f"{type} {self.name}"
 
 
 # Names that validly are __iXXX__ indicating inplace operations.
@@ -627,7 +664,7 @@ class OperatorName:
 
 # Helper functions for parsing argument lists (both inputs and returns)
 
-def parse_return_arguments(return_decl: str) -> Sequence[Argument]:
+def parse_returns(return_decl: str) -> Sequence[Return]:
     """
     Input: '()'
     Output: []
@@ -638,7 +675,7 @@ def parse_return_arguments(return_decl: str) -> Sequence[Argument]:
         return_decl = return_decl[1:-1]
     returns = []
     for arg in return_decl.split(', '):
-        returns.append(Argument.parse(arg))
+        returns.append(Return.parse(arg))
     return returns
 
 def parse_arguments(args: str) -> Tuple[Sequence[Argument], Sequence[Argument], Sequence[Argument]]:
@@ -677,277 +714,3 @@ def parse_arguments(args: str) -> Tuple[Sequence[Argument], Sequence[Argument], 
         arguments_acc.append(parg)
 
     return arguments, kwarg_only_arguments, out_arguments
-
-# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
-#
-#                           PROCESSING
-#
-# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
-
-# Conveniently add error context to exceptions raised.  Lets us
-# easily say that an error occurred while processing a specific
-# context.
-@contextlib.contextmanager
-def context(msg: str) -> Iterator[None]:
-    try:
-        yield
-    except Exception as e:
-        # TODO: this does the wrong thing with KeyErorr
-        msg = textwrap.indent(msg, '  ')
-        msg = f'{e.args[0]}\n{msg}' if e.args else msg
-        e.args = (msg,) + e.args[1:]
-        raise
-
-# Represent a source location; used for better error reporting
-@dataclass
-class Location:
-    file: str
-    line: int
-
-    def __str__(self) -> str:
-        return "{}:{}".format(self.file, self.line)
-
-# A custom loader for YAML to let us also keep track of line numbers
-# of each entry in the YAML file
-class LineLoader(Loader):
-    def construct_mapping(self, node, deep=False):  # type: ignore
-        mapping = super().construct_mapping(node, deep=deep)  # type: ignore
-        # Add 1 so line numbering starts at 1
-        mapping['__line__'] = node.start_mark.line + 1
-        return mapping
-
-# Parse native_functions.yaml into a sequence of NativeFunctions
-def parse_native_yaml(path: str) -> List[NativeFunction]:
-    with open(path, 'r') as f:
-        es = yaml.load(f, Loader=LineLoader)
-    assert isinstance(es, list)
-    rs: List[NativeFunction] = []
-    for e in es:
-        assert isinstance(e.get('__line__'), int), e
-        loc = Location(path, e['__line__'])
-        funcs = e.get('func')
-        with context(f'in {loc}:\n  {funcs}'):
-            rs.append(NativeFunction.from_yaml(e, loc))
-    return rs
-
-native_functions = parse_native_yaml('aten/src/ATen/native/native_functions.yaml')
-# pprint.pprint([dataclasses.asdict(f) for f in native_functions])
-
-# TODO: TensorOptions argument detection
-# TODO: Extra enforcement of inplace functions having mutable self
-
-# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
-#
-#                           CODE GENERATION
-#
-# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
-
-# This is not fully constructed yet, but eventually this will actually
-# do the code generation
-
-TEMPLATE_PATH = "aten/src/ATen/templates"
-
-# When we interpret things as C++ types, there are a bunch of
-# different modalities we have to consider
-#
-# - Return versus argument type
-# - Mutable type (inplace, out argument)
-# - Public API versus internal calling convention versus legacy calling
-#   convention
-#
-# I'm not really sure how to structure this logic yet, but here is a
-# sketch.  This function is ONLY correct for CPUType.h at the moment;
-# I bet I am going to need another parameter before I'm done
-def cpp_type(t: Type, *, mutable: bool, argument: bool, legacy_optional: bool) -> str:
-    if isinstance(t, BaseType):
-        if t.name == BaseTy.Tensor:
-            if mutable:
-                return 'Tensor &'
-            else:
-                if argument:
-                    return 'const Tensor &'
-                else:
-                    return 'Tensor'
-        elif t.name == BaseTy.int:
-            return 'int64_t'
-        elif t.name == BaseTy.float:
-            return 'double'
-        elif t.name == BaseTy.str:
-            return 'std::string'
-        elif t.name in [BaseTy.bool, BaseTy.QScheme, BaseTy.Scalar,
-                BaseTy.ScalarType, BaseTy.Generator, BaseTy.Storage,
-                BaseTy.Layout, BaseTy.Device, BaseTy.MemoryFormat,
-                BaseTy.Dimname, BaseTy.ConstQuantizerPtr]:
-            # These C++ names coincidentally line up with their schema
-            # names
-            return t.name.name
-        else:
-            assert False, f"unsupported type: {t}"
-    elif isinstance(t, OptionalType):
-        # TODO: these arguments are smoothed over by the hacky wrapper
-        if argument and legacy_optional and str(t.elem) == 'Tensor':
-            if mutable:
-                return 'Tensor &'
-            else:
-                return 'const Tensor &'
-        if argument and str(t.elem) == 'Tensor':
-            if mutable:
-                return 'Tensor &'  # WUUUT
-            else:
-                return 'const c10::optional<Tensor>&'
-        elem = cpp_type(t.elem, mutable=mutable, argument=argument, legacy_optional=legacy_optional)
-        return f"c10::optional<{elem}>"
-    elif isinstance(t, ListType):
-        if str(t.elem) == 'bool':
-            assert t.size is not None
-            return f"std::array<bool,{t.size}>"
-        # TODO: remove this special case
-        if str(t.elem) == 'int' and argument:
-            return "IntArrayRef"
-        elif str(t.elem) == 'Tensor' and argument:
-            return "TensorList"
-        elif str(t.elem) == 'Tensor?' and argument and legacy_optional:
-            return "TensorList"
-        elif str(t.elem) == 'Dimname' and argument:
-            return "DimnameList"
-        elem = cpp_type(t.elem, mutable=mutable, argument=argument, legacy_optional=legacy_optional)
-        if argument:
-            # TODO: explicitly qualify namespace here
-            return f"ArrayRef<{elem}>"
-        else:
-            assert t.size is None, f"fixed size list returns not supported: {t}"
-            return f"std::vector<{elem}>"
-    else:
-        assert False
-
-def cpp_type_return(rs: Sequence[Argument]) -> str:
-    if len(rs) == 0:
-        return 'void'
-    elif len(rs) == 1:
-        return cpp_type(rs[0].type, mutable=rs[0].is_write, argument=False, legacy_optional=False)
-    else:
-        args = ','.join([cpp_type(r.type, mutable=r.is_write, argument=False, legacy_optional=False) for r in rs])
-        return f'std::tuple<{args}>'
-
-# Some simple code to exercise some of the functions we've been building
-def compute_type_derived_method_declarations(dispatch: str) -> List[str]:
-    type_derived_method_declarations: List[str] = []
-    for f in native_functions:
-        if f.dispatch is None or dispatch not in f.dispatch:
-            continue
-
-        name = str(f.func.name.name)
-        # TODO: delete this!
-        if f.func.is_out_fn():
-            name += '_out'
-        if f.func.name.overload_name:
-            name += f'_{f.func.name.overload_name}'
-
-        cpp_return = cpp_type_return(f.func.returns)
-
-        def format_arg(a: Argument) -> str:
-            return f"{cpp_type(a.type, mutable=a.is_write, argument=True, legacy_optional=True)} {a.name}"
-        cpp_args: List[str] = []
-        cpp_args.extend(map(format_arg, f.func.out_arguments))
-        cpp_args.extend(map(format_arg, f.func.arguments))
-
-        # Discover TensorOptions
-        topt_names = ['dtype', 'layout', 'device', 'pin_memory']
-        kwargs = list(f.func.kwarg_only_arguments)  # short name
-        i = 0
-        while i < len(kwargs):
-            if i <= len(kwargs) - len(topt_names) and all(kwargs[i+j].name == topt_names[j] for j in range(len(topt_names))):
-                cpp_args.append('const TensorOptions & options')
-                i += len(topt_names)
-            else:
-                cpp_args.append(format_arg(kwargs[i]))
-                i += 1
-
-        type_derived_method_declarations.append(f"{cpp_return} {name}({', '.join(cpp_args)});")
-    return type_derived_method_declarations
-
-def generated_comment(fn: str) -> str:
-    return "@" + f"generated by aten/src/ATen/gen.py from {fn}"
-
-
-fn = "TypeDerived.h"
-TYPE_DERIVED_H = CodeTemplate.from_file(os.path.join(TEMPLATE_PATH, fn))
-for dispatch in ["CPU", "CUDA"]:
-    with open(f'build/aten/src/ATen_new/{dispatch}Type.h', 'w') as f:
-        env = {
-            'generated_comment': generated_comment(fn),
-            'Type': f'{dispatch}Type',
-            'extra_cuda_headers': '',  # TODO: remove this
-            'type_derived_method_declarations': compute_type_derived_method_declarations(dispatch),
-        }
-        f.write(TYPE_DERIVED_H.substitute(env))
-
-JIT_TO_CPP_DEFAULT = {
-    'False': 'false',
-    'True': 'true',
-    'None': 'c10::nullopt',  # UGH this one is type directed
-    'Mean': 'at::Reduction::Mean',
-    '[]': '{}',
-    '[0,1]': '{0,1}', # TODO: stop special casing
-    'contiguous_format': 'MemoryFormat::Contiguous',
-}
-
-def cpp_default(d: str, t: Type) -> str:
-    if d == 'None' and str(t) == 'Tensor?':
-        return '{}'
-    return JIT_TO_CPP_DEFAULT.get(d, d)
-
-def compute_function_declarations() -> List[str]:
-    rs: List[str] = []
-    for f in native_functions:
-        with context(f'in {f.loc}:\n  {f.func}'):
-            if f.manual_kernel_registration:
-                continue
-            if Variant.function not in f.variants:
-                continue
-
-            # TODO: clear up naming
-            cpp_return = cpp_type_return(f.func.returns)
-            name = str(f.func.name.name)
-            if f.func.is_out_fn():
-                name += '_out'
-
-            # TODO: this was copy pasted
-            def format_arg(a: Argument) -> str:
-                # DEFAULTING IS NEW
-                default = f"={cpp_default(a.default, a.type)}" if a.default is not None else ""
-                # TODO: Always NO legacy optional
-                return f"{cpp_type(a.type, mutable=a.is_write, argument=True, legacy_optional=not f.use_c10_dispatcher_full)} {a.name}{default}"
-            cpp_args: List[str] = []
-            cpp_args.extend(map(format_arg, f.func.out_arguments))
-            cpp_args.extend(map(format_arg, f.func.arguments))
-
-            # Discover TensorOptions
-            topt_names = ['dtype', 'layout', 'device', 'pin_memory']
-            kwargs = list(f.func.kwarg_only_arguments)  # short name
-            i = 0
-            while i < len(kwargs):
-                if i <= len(kwargs) - len(topt_names) and all(kwargs[i+j].name == topt_names[j] for j in range(len(topt_names))):
-                    if str(f.func.name) in ["_cudnn_init_dropout_state", "sparse_coo_tensor.size", "_sparse_coo_tensor_with_dims", "_sparse_coo_tensor_with_dims_and_tensors"]:
-                        # I think this is a bug in the original
-                        cpp_args.append('const TensorOptions & options')
-                    elif str(f.func.name) in ["tril_indices", "triu_indices"]:
-                        cpp_args.append('const TensorOptions & options=at::kLong')
-                    else:
-                        cpp_args.append('const TensorOptions & options={}')  # MODIFIED
-                    i += len(topt_names)
-                else:
-                    cpp_args.append(format_arg(kwargs[i]))
-                    i += 1
-
-            rs.append(f"CAFFE2_API {cpp_return} {name}({', '.join(cpp_args)});")
-    return rs
-
-fn = "Functions.h"
-FUNCTIONS_H = CodeTemplate.from_file(os.path.join(TEMPLATE_PATH, fn))
-with open(f'build/aten/src/ATen_new/{fn}', 'w') as f:
-    env = {
-        'generated_comment': generated_comment(fn),
-        'function_declarations': compute_function_declarations(),
-    }
-    f.write(FUNCTIONS_H.substitute(env))

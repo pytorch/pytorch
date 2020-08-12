@@ -147,7 +147,6 @@ TENSOR_METHOD_DEFINITION = CodeTemplate("""\
 // ${schema_string}
 ${return_type} Tensor::${api_name}(${method_formals}) const {
 #ifdef USE_STATIC_DISPATCH
-    ${static_dispatch_method_body}
 #else
     static auto op = c10::Dispatcher::singleton()
         .findSchemaOrThrow("aten::${operator_name}", "${overload_name}")
@@ -173,7 +172,6 @@ FUNCTION_DEFINITION = CodeTemplate("""\
 // ${schema_string}
 ${return_type} ${api_name}(${formals}) {
 #ifdef USE_STATIC_DISPATCH
-    ${static_dispatch_function_body}
 #else
     static auto op = c10::Dispatcher::singleton()
         .findSchemaOrThrow("aten::${operator_name}", "${overload_name}")
