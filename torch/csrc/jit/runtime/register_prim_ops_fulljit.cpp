@@ -754,7 +754,7 @@ RegisterOperators reg2({
         listCopyAndSort<bool>,
         aliasAnalysisFromSchema()),
     Operator(
-        "aten::sorted.str(str[](a) input) -> (str[])",
+        "aten::sorted.str(str[](a) input) -> (bool[])",
         listCopyAndSort<std::string>,
         aliasAnalysisFromSchema()),
 

@@ -122,6 +122,10 @@ class TestVmapAPI(TestCase):
         with self.assertRaisesRegex(RuntimeError, "doesn't work on in-place or view ops"):
             vmap(torch.as_strided, (0, None, None))(tensor, [2, 3], [0, 0])
 
+        # We don't support multiple returns yet
+        with self.assertRaisesRegex(RuntimeError, 'multiple returns'):
+            vmap(torch.var_mean)(tensor)
+
         # The fallback doesn't support TensorList
         with self.assertRaisesRegex(RuntimeError, 'Batching rule not implemented'):
             vmap(lambda t: torch.stack([t]))(tensor)
@@ -438,13 +442,6 @@ class TestVmapAPI(TestCase):
         vmap(foo, in_dims=(0,))(torch.randn(2, 3))
         vmap(foo, in_dims=(1,))(torch.randn(2, 3))
 
-    def _assert_uses_vmap_fallback(self, vmap_args, inputs):
-        with warnings.catch_warnings(record=True) as wa:
-            result = vmap(*vmap_args)(*inputs)
-            self.assertEqual(len(wa), 2)
-            self.assertRegex(str(wa[-1].message),
-                             r'falling back to slow \(for loop and stack\) implementation')
-
     def test_fallback_sub(self):
         # NB: One day we will implement a batching rule for torch.sub.
         # If/when we do, this test should be replaced to test the fallback
@@ -452,7 +449,13 @@ class TestVmapAPI(TestCase):
         x = torch.randn(5, 7, 11)
         y = torch.randn(5, 7, 11)
 
-        self._assert_uses_vmap_fallback((torch.sub,), (x, y))
+        # Test the fallback path raises a warning
+        with warnings.catch_warnings(record=True) as wa:
+            result = vmap(torch.sub)(x, y)
+            self.assertEqual(len(wa), 2)
+            self.assertRegex(str(wa[-1].message),
+                             r'falling back to slow \(for loop and stack\) implementation')
+            self.assertEqual(result, x - y)
 
         # fallback on torch.sub
         x = torch.randn(7, 11, 5)
@@ -483,41 +486,17 @@ class TestVmapAPI(TestCase):
             index = torch.tensor([0, 4, 2])
             values = torch.randn(B0, 3, 13)
 
-            self._assert_uses_vmap_fallback((torch.index_add, (0, None, None, 0)), (x, dim, index, values))
-
-            result = vmap(torch.index_add, (0, None, None, 0))(x, dim, index, values)
-            expected = torch.index_add(
-                x, dim + 1, index, values.view(B0, 3, 1, 13))
-            self.assertEqual(result, expected)
+            with warnings.catch_warnings(record=True) as wa:
+                result = vmap(torch.index_add, (0, None, None, 0))(x, dim, index, values)
+                self.assertEqual(len(wa), 2)
+                self.assertRegex(str(wa[-1].message),
+                                 r'falling back to slow \(for loop and stack\) implementation')
+                expected = torch.index_add(
+                    x, dim + 1, index, values.view(B0, 3, 1, 13))
+                self.assertEqual(result, expected)
 
         run_test(batch_size=5)
         run_test(batch_size=1237)
-
-    def test_fallback_multiple_returns(self):
-        # NB: One day we will implement a batching rule for torch.var_mean
-        # If/when we do, this test should be replaced to test the fallback
-        # path on another operator to avoid bitrot.
-        B0, B1, B2 = 2, 3, 1237
-        tensor = torch.randn(B0, 10)
-
-        self._assert_uses_vmap_fallback((torch.var_mean,), (tensor,))
-
-        # fallback correctness on torch.var_mean
-        result = vmap(torch.var_mean)(tensor)
-        expected = torch.var_mean(tensor, dim=1)
-        self.assertEqual(result, expected)
-
-        # nested vmap
-        tensor = torch.randn(B0, B1, 10)
-        result = vmap(vmap(torch.var_mean))(tensor)
-        expected = torch.var_mean(tensor, dim=2)
-        self.assertEqual(result, expected)
-
-        # big batch size, nested vmap
-        tensor = torch.randn(B0, B1, B2, 10)
-        result = vmap(vmap(vmap(torch.var_mean)))(tensor)
-        expected = torch.var_mean(tensor, dim=3)
-        self.assertEqual(result, expected)
 
 
 def slice_inputs(inputs, bdims, i):
@@ -798,73 +777,6 @@ class TestVmapOperators(TestCase):
         test(vmap(vmap(op, in_dims=(0, None)), in_dims=(0, None)),
              (torch.rand(B1, B2, B0, 3, 2, 5), torch.rand(B0, 3 * 2 * 5)),
              in_dims=(2, 0))
-
-    def test_no_random_op_support(self):
-        B0 = 2
-
-        captured = torch.rand(3)
-
-        random_ops = [
-            # out-of-place on BatchedTensor
-            (torch.bernoulli, (torch.rand(B0, 1),)),
-            (lambda t: torch.bernoulli(t, p=0.5), (torch.rand(B0, 1),)),
-            (lambda t: torch.multinomial(t, 2), (torch.rand(B0, 3),)),
-            (torch.normal, (torch.randn(B0, 1), torch.randn(B0, 1))),
-            (lambda t: torch.normal(t, 1.), (torch.randn(B0, 1),)),
-            (lambda t: torch.normal(0., t), (torch.randn(B0, 1),)),
-            (torch.poisson, (torch.rand(B0, 1),)),
-            (torch.rand_like, (torch.rand(B0, 1),)),
-            (torch.randn_like, (torch.rand(B0, 1),)),
-            (lambda t: torch.randint_like(t, 2), (torch.rand(B0, 1),)),
-            (lambda t: torch.randint_like(t, 0, 2), (torch.rand(B0, 1),)),
-
-            # out-of-place on captured tensor
-            (lambda t: torch.bernoulli(captured), (torch.rand(B0),)),
-            (lambda t: torch.bernoulli(captured, p=0.5), (torch.rand(B0),)),
-            (lambda t: torch.multinomial(captured, 2), (torch.rand(B0),)),
-            (lambda t: torch.normal(captured, captured), (torch.randn(B0),)),
-            (lambda t: torch.normal(captured, 1.), (torch.randn(B0),)),
-            (lambda t: torch.normal(0., captured), (torch.randn(B0),)),
-            (lambda t: torch.poisson(captured), (torch.rand(B0),)),
-            (lambda t: torch.rand_like(captured), (torch.rand(B0),)),
-            (lambda t: torch.randn_like(captured) , (torch.rand(B0),)),
-            (lambda t: torch.randint_like(captured, 2), (torch.rand(B0),)),
-            (lambda t: torch.randint_like(captured, 0, 2), (torch.rand(B0),)),
-
-            # in-place on BatchedTensor
-            (lambda t: t.bernoulli_(), (torch.randn(B0, 1),)),
-            (lambda t: t.cauchy_(), (torch.randn(B0, 1),)),
-            (lambda t: t.exponential_(), (torch.randn(B0, 1),)),
-            (lambda t: t.geometric_(0.5), (torch.randn(B0, 1),)),
-            (lambda t: t.log_normal_(), (torch.randn(B0, 1),)),
-            (lambda t: t.normal_(), (torch.randn(B0, 1),)),
-            (lambda t: t.random_(), (torch.randn(B0, 1),)),
-            (lambda t: t.random_(0, 2), (torch.randn(B0, 1),)),
-            (lambda t: t.random_(2), (torch.randn(B0, 1),)),
-            (lambda t: t.uniform_(), (torch.randn(B0, 1),)),
-
-            # in-place on captured tensor
-            (lambda t: captured.bernoulli_(), (torch.randn(B0),)),
-            (lambda t: captured.cauchy_(), (torch.randn(B0),)),
-            (lambda t: captured.exponential_(), (torch.randn(B0),)),
-            (lambda t: captured.geometric_(0.5), (torch.randn(B0),)),
-            (lambda t: captured.log_normal_(), (torch.randn(B0),)),
-            (lambda t: captured.normal_(), (torch.randn(B0),)),
-            (lambda t: captured.random_(), (torch.randn(B0),)),
-            (lambda t: captured.random_(0, 2), (torch.randn(B0),)),
-            (lambda t: captured.random_(2), (torch.randn(B0),)),
-            (lambda t: captured.uniform_(), (torch.randn(B0),)),
-
-            # factory functions
-            (lambda t: torch.rand(1), (torch.randn(B0),)),
-            (lambda t: torch.randn(1), (torch.randn(B0),)),
-            (lambda t: torch.randint(5, [1]), (torch.randn(B0),)),
-            (lambda t: torch.randperm(5), (torch.randn(B0),)),
-        ]
-        for op, args in random_ops:
-            with self.assertRaisesRegex(RuntimeError,
-                                        'vmap: We do not yet support calling random operations'):
-                vmap(op)(*args)
 
 if __name__ == '__main__':
     run_tests()

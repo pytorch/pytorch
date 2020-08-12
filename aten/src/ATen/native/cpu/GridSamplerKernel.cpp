@@ -203,8 +203,7 @@ struct ComputeLocationBase<scalar_t, /*align_corners=*/true> {
   }
 
   inline Vec clip_coordinates(const Vec &in) const {
-    // Invert order of clamp_min operands in order to clamp Nans to zero
-    return clamp_max(Vec(max_val), clamp_min(Vec(0), in));
+    return minimum(Vec(max_val), maximum(in, Vec(0)));
   }
 
   // same as clip_coordinates but also returns the gradient multiplier
@@ -285,8 +284,7 @@ struct ComputeLocationBase<scalar_t, /*align_corners=*/false> {
   }
 
   inline Vec clip_coordinates(const Vec &in) const {
-    // Invert order of clamp_min operands in order to clamp Nans to zero
-    return clamp_max(Vec(max_val), clamp_min(Vec(0), in));
+    return minimum(Vec(max_val), maximum(in, Vec(0)));
   }
 
   // same as clip_coordinates but also returns the gradient multiplier

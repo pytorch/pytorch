@@ -4359,12 +4359,6 @@ a")
         def foo(strs: List[str]):
             return sorted(strs)
 
-        FileCheck() \
-            .check("graph") \
-            .check_next("str[] = aten::sorted") \
-            .check_next("return") \
-            .run(str(foo.graph))
-
         inputs = ["str3", "str2", "str1"]
         self.assertEqual(foo(inputs), sorted(inputs))
 

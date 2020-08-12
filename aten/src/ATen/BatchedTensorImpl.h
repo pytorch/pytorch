@@ -95,23 +95,21 @@ struct TORCH_API BatchedTensorImpl : public c10::TensorImpl {
   BatchDims bdims_;
 };
 
-// NB: We use the term "BatchedTensor" to mean a Tensor that is backed with a
-// BatchedTensorImpl.
-inline bool isBatchedTensor(const Tensor& tensor) {
+inline bool isBatched(const Tensor& tensor) {
   return tensor.unsafeGetTensorImpl()->key_set().has(DispatchKey::Batched);
 }
 
 // It is unsafe to call this on a Tensor that is not backed by a
-// BatchedTensorImpl. Please use `maybeGetBatchedImpl` whenever possible.
-inline BatchedTensorImpl* unsafeGetBatchedImpl(Tensor tensor) {
+// BatchedTensorImpl. Please use `maybeGetBatched` whenever possible.
+inline BatchedTensorImpl* unsafeGetBatched(Tensor tensor) {
   return static_cast<BatchedTensorImpl*>(tensor.unsafeGetTensorImpl());
 }
 
-inline BatchedTensorImpl* maybeGetBatchedImpl(Tensor tensor) {
-  if (!isBatchedTensor(tensor)) {
+inline BatchedTensorImpl* maybeGetBatched(Tensor tensor) {
+  if (!isBatched(tensor)) {
     return nullptr;
   }
-  return unsafeGetBatchedImpl(tensor);
+  return unsafeGetBatched(tensor);
 }
 
 // Returns a bitset. If bit i is set, then that means dim i is a batchdim.
