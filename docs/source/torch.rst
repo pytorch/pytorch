@@ -328,6 +328,7 @@ Reduction Ops
     median
     mode
     norm
+    nansum
     prod
     quantile
     std
@@ -473,6 +474,7 @@ BLAS and LAPACK Operations
     mv
     orgqr
     ormqr
+    outer
     pinverse
     qr
     solve
