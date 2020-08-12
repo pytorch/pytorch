@@ -1010,7 +1010,8 @@ template <typename T, std::enable_if_t<std::is_base_of<torch::CustomClassHolder,
 IValue::IValue(c10::intrusive_ptr<T> custom_class) {
   if (!c10::isCustomClassRegistered<c10::intrusive_ptr<T>>()) {
     throw c10::Error(
-        "Trying to instantiate a class that isn't a registered custom class.",
+        "Trying to instantiate a class that isn't a registered custom class: " +
+          std::string(c10::util::get_fully_qualified_type_name<T>()),
         "");
   }
   auto classType = c10::getCustomClassType<c10::intrusive_ptr<T>>();
@@ -1136,10 +1137,6 @@ IValue from_(T x, std::true_type) {
 }
 template <typename T>
 IValue from_(c10::intrusive_ptr<T> x, std::false_type) {
-  using inputType = c10::intrusive_ptr<T>;
-  if (!isCustomClassRegistered<inputType>()) {
-    throw c10::Error("Trying to return a class that we don't support and isn't a registered custom class.", "");
-  }
   return IValue(x);
 }
 template <typename T>

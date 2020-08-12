@@ -416,6 +416,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: mv
    .. automethod:: mvlgamma
    .. automethod:: mvlgamma_
+   .. automethod:: nansum
    .. automethod:: narrow
    .. automethod:: narrow_copy
    .. automethod:: ndimension
@@ -431,6 +432,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: numpy
    .. automethod:: orgqr
    .. automethod:: ormqr
+   .. automethod:: outer
    .. automethod:: permute
    .. automethod:: pin_memory
    .. automethod:: pinverse
@@ -442,6 +444,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: put_
    .. automethod:: qr
    .. automethod:: qscheme
+   .. automethod:: quantile
    .. automethod:: q_scale
    .. automethod:: q_zero_point
    .. automethod:: q_per_channel_scales
