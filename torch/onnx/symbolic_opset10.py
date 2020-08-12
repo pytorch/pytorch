@@ -160,6 +160,7 @@ def slice(g, self, *args):
     if len(args) == 4:
         # aten::slice(Tensor self, int dim, int start, int end, int step) -> Tensor
         dim, start, end, step = args
+        step = sym_help._parse_arg(step, 'i')
         if (start.node().kind() != 'onnx::Constant' or
            end.node().kind() != 'onnx::Constant' or dim.node().kind() != 'onnx::Constant'):
             dynamic_slice = True
