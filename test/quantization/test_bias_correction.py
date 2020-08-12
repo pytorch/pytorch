@@ -3,12 +3,11 @@ import torch.nn as nn
 from torch.testing._internal.common_quantization import QuantizationTestCase
 
 from torch.quantization import default_qconfig
-from torch.quantization import QuantStub, DeQuantStub, QuantWrapper
+from torch.quantization import QuantWrapper
 
 import torch.quantization._correct_bias as correct_bias
 from torch.quantization._correct_bias import _supported_modules, _supported_modules_quantized, bias_correction
 
-from torchvision.models.quantization import mobilenet_v2
 import copy
 
 
@@ -18,118 +17,59 @@ class TestBiasCorrection(QuantizationTestCase):
         Pn = torch.norm(x - y)
         return 20 * torch.log10(Ps / Pn)
 
-    def correct_artificial_bias(self, float_model, bias_correction, img_data):
+    def correct_artificial_bias_float(self, float_model, img_data):
         ''' Adding artificial bias and testing if bias persists after bias
-            correction
+            correction. This test case changes the bias of a floating point submodule
         '''
         artificial_model = copy.deepcopy(float_model)
-        artificial_model.qconfig = default_qconfig
-        torch.quantization.prepare(artificial_model, inplace=True)
-        artificial_model(img_data[0][0])
-        torch.quantization.convert(artificial_model, inplace=True)
 
         # manually changing bias
         for name, submodule in artificial_model.named_modules():
-            if type(submodule) in _supported_modules_quantized:
+            if type(submodule) in _supported_modules:
                 x = correct_bias.get_param(submodule, 'bias')
                 if x is not None:
                     x.data = x.data * 3
 
-        bias_correction(float_model, artificial_model, img_data)
+        bias_correction(float_model, artificial_model, img_data, white_list=_supported_modules)
 
-        print("bias")
         for name, artificial_submodule in artificial_model.named_modules():
-            if type(artificial_submodule) in correct_bias._supported_modules_quantized:
+            if type(artificial_submodule) in _supported_modules:
                 submodule = correct_bias.get_module(float_model, name)
                 float_bias = correct_bias.get_param(submodule, 'bias')
                 artificial_bias = correct_bias.get_param(artificial_submodule, 'bias')
 
-                if type(artificial_submodule) in _supported_modules_quantized:
-                    print(self.compute_sqnr(float_bias, artificial_bias))
-                    float_bias = correct_bias.get_param(submodule, 'weight')
-                    artificial_bias = correct_bias.get_param(artificial_submodule, 'weight').dequantize()
-                    print("change in weights: ", self.compute_sqnr(float_bias, artificial_bias))
-                    # print("executing")
-                    # self.assertTrue(self.compute_sqnr(float_bias, artificial_bias) > 35,
-                    #                 "Correcting quantized bias produced too much noise, sqnr score too low")
-        print("output")
-        results = []
-        for img in img_data:
-            float_output = float_model(img[0])
-            quantized_output = artificial_model(img[0])
-            results.append(self.compute_sqnr(float_output, quantized_output))
-        for result in results:
-            print(result)
-        print(sum(results)/len(results))
-            # self.assertTrue(self.compute_sqnr(float_output, quantized_output) > 20,
-            #                 "Bias correction produced too much noise to output")
+                self.assertTrue(self.compute_sqnr(float_bias, artificial_bias) > 30,
+                                "Correcting quantized bias produced too much noise, sqnr score too low")
 
-    # abuse 4 bit quantization, try accuracy on one layer or something?
-    # hard code some expected numbers
-    def four_bit_test(self, float_model, bias_correction, img_data):
-        pass
-
-    def test_pen_paper_1(self):
-        ''' Testing bias correction on a single Linear module, keeping the weights
-        constant, but manually changing the bias in the quantized module and verifying
-        with simple input data that the bias is being corrected
-        After manual bias change, but before bias correction:
-            Float module:       [1,1,1] -> [4,4,4,4]
-            Quantized module    [1,1,1] -> [6,6,6,6]
-
-        Expected after bias correction:
-            Float module:       [1,1,1] -> [4,4,4,4]
-            Quantized module    [1,1,1] -> [4,4,4,4]
+    def correct_artificial_bias_quantize(self, float_model, img_data):
+        ''' Adding artificial bias and testing if bias persists after bias
+            correction. This test case changes the bias of a quantized submodule
         '''
-        # Linear module that is filled with ones, makes math easier
-        float_model = nn.Linear(3,4)
-        float_model.weight.data = torch.ones(float_model.weight.size())
-        float_model.bias.data = torch.ones(float_model.bias.size())
-        float_model = QuantWrapper(float_model)
-
-        # Quantized module with bias manually changed
         artificial_model = copy.deepcopy(float_model)
         artificial_model.qconfig = default_qconfig
         torch.quantization.prepare(artificial_model, inplace=True)
+        for data in img_data:
+            artificial_model(data[0])
         torch.quantization.convert(artificial_model, inplace=True)
-        artificial_model.module.bias().data *= 3
 
-        # Bias correction
-        input = [(torch.ones(1,3), 0)]  # single batch with (1,3) tensor
-        bias_correction(float_model, artificial_model, input)
+        # manually changing bias
+        for name, submodule in artificial_model.named_modules():
+            if type(submodule) in _supported_modules:
+                x = correct_bias.get_param(submodule, 'bias')
+                weight = correct_bias.get_param(submodule, 'weight')
+                if x is not None:
+                    submodule.set_weight_bias(weight, x.data * 3)
 
-        self.assertTrue(torch.all(float_model(input[0][0]).eq(artificial_model(input[0][0]))))
+        bias_correction(float_model, artificial_model, img_data, white_list=_supported_modules_quantized)
 
-    def test_pen_paper_2(self):
-        ''' Testing bias correction on a single Conv module, keeping the weights
-        constant, but manually changing the bias in the quantized module and verifying
-        with simple input data that the bias is being corrected
-        After manual bias change, but before bias correction:
-            Float module:       [1,1,1] -> [4,4,4,4]
-            Quantized module    [1,1,1] -> [6,6,6,6]
+        for name, artificial_submodule in artificial_model.named_modules():
+            if type(artificial_submodule) in _supported_modules_quantized:
+                submodule = correct_bias.get_module(float_model, name)
+                float_bias = correct_bias.get_param(submodule, 'bias')
+                artificial_bias = correct_bias.get_param(artificial_submodule, 'bias')
 
-        Expected after bias correction:
-            Float module:       [1,1,1] -> [4,4,4,4]
-            Quantized module    [1,1,1] -> [4,4,4,4]
-        '''
-        # Linear module that is filled with ones, makes math easier
-        float_model = nn.Linear(3,4)
-        float_model.weight.data = torch.ones(float_model.weight.size())
-        float_model.bias.data = torch.ones(float_model.bias.size())
-        float_model = QuantWrapper(float_model)
-
-        # Quantized module with bias manually changed
-        artificial_model = copy.deepcopy(float_model)
-        artificial_model.qconfig = default_qconfig
-        torch.quantization.prepare(artificial_model, inplace=True)
-        torch.quantization.convert(artificial_model, inplace=True)
-        artificial_model.module.bias().data *= 3
-
-        # Bias correction
-        input = [(torch.ones(1,3), 0)]  # single batch with (1,3) tensor
-        bias_correction(float_model, artificial_model, input)
-
-        self.assertTrue(torch.all(float_model(input[0][0]).eq(artificial_model(input[0][0]))))
+                self.assertTrue(self.compute_sqnr(float_bias, artificial_bias) > 30,
+                                "Correcting quantized bias produced too much noise, sqnr score too low")
 
     def test_linear_chain(self):
         class LinearChain(nn.Module):
@@ -147,7 +87,8 @@ class TestBiasCorrection(QuantizationTestCase):
         float_model = QuantWrapper(LinearChain())
         img_data = [(torch.rand(10, 3, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long))
                     for _ in range(50)]
-        self.correct_artificial_bias(float_model, correct_bias.bias_correction, img_data)
+        self.correct_artificial_bias_float(float_model, img_data)
+        self.correct_artificial_bias_quantize(float_model, img_data)
 
     def test_conv_chain(self):
         class ConvChain(nn.Module):
@@ -165,12 +106,5 @@ class TestBiasCorrection(QuantizationTestCase):
         float_model = QuantWrapper(ConvChain())
         img_data = [(torch.rand(10, 3, 125, 125, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long))
                     for _ in range(50)]
-        self.correct_artificial_bias(float_model, correct_bias.bias_correction, img_data)
-
-    # def test_mobilenet(self):
-    #     float_model = mobilenet_v2(pretrained=True, quantize=False)
-    #     float_model.eval()
-    #     float_model.fuse_model()
-    #     img_data = [(torch.rand(10, 3, 224, 224, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long))
-    #                 for _ in range(50)]
-    #     self.correct_artificial_bias(float_model, correct_bias.bias_correction, img_data)
+        self.correct_artificial_bias_float(float_model, img_data)
+        self.correct_artificial_bias_quantize(float_model, img_data)
