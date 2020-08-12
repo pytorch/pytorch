@@ -471,6 +471,7 @@ import torch.sparse
 import torch.utils.backcompat
 import torch.onnx
 import torch.jit
+import torch.linalg
 import torch.hub
 import torch.random
 import torch.distributions
