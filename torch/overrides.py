@@ -301,6 +301,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.deg2rad: lambda input, out=None: -1,
         torch.dequantize: lambda input: -1,
         torch.det: lambda input: -1,
+        torch.linalg.det: lambda input: -1,  # alias for torch.det
         torch.detach: lambda input: -1,
         torch.diag: lambda input, diagonal=0, out=None: -1,
         torch.diag_embed: lambda input, diagonal=0, out=None: -1,
@@ -355,6 +356,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.gcd: lambda input, other, out=None: -1,
         torch.ge: lambda input, other, out=None: -1,
         torch.geqrf: lambda input, out=None: -1,
+        torch.outer: lambda input, vec2, out=None: -1,  # alias for torch.ger
         torch.ger: lambda input, vec2, out=None: -1,
         torch.grid_sampler: lambda input, grid, interpolation_mode, padding_mode, align_corners: -1,
         torch.grid_sampler_2d: lambda input, grid, interpolation_mode, padding_mode, align_corners: -1,
