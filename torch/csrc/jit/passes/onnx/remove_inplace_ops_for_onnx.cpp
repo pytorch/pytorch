@@ -417,24 +417,29 @@ static void PrepareListAppendAndInsertForONNX(Block* b) {
 // Remove Mutation pass does not handle mutation on block inputs.
 // To fix this, insert a clone node following the graph input:
 // Example for graph input node %0:
-//
-//  %2 : None = prim::Constant()
-//  %3 : Tensor = aten::clone(%0, %2)
-//  %5 : Tensor = aten::zero_(%3)
+// Before:
+// graph(%0 : Tensor):
+//   %5 : Tensor = aten::zero_(%0)
+//   ...
+// After:
+// graph(%0 : Tensor):
+//   %2 : None = prim::Constant()
+//   %3 : Tensor = aten::clone(%0, %2)
+//   %5 : Tensor = aten::zero_(%3)
+//   ...
 
-static void PrepareForRemoveMutations(
-    const std::shared_ptr<Graph>& graph,
+static void PrepareForRemoveMutations(MutationRemover& mr,
     Block* b) {
   for (auto it = b->nodes().begin(), end = b->nodes().end(); it != end; ++it) {
     for (auto* child_block : it->blocks()) {
-      PrepareForRemoveMutations(graph, child_block);
+      PrepareForRemoveMutations(mr, child_block);
     }
   }
 
   for (auto input : b->inputs()) {
     for (auto use : input->uses()) {
       Node* node = use.user;
-      if (!torch::jit::isInplaceOpVariant(graph, node)) {
+      if (!mr.inplaceOpVariant(node)) {
         continue;
       }
 
@@ -448,7 +453,7 @@ static void PrepareForRemoveMutations(
             << "This changes graph semantics." << std::endl;
 
         auto newNode = node->owningGraph()->create(aten::clone, 1);
-        newNode->copyMetadata(input->node());
+        newNode->output()->copyMetadata(input);
         newNode->addInput(input);
 
         auto* noneNode = node->owningGraph()->create(prim::Constant);
@@ -466,6 +471,7 @@ static void PrepareForRemoveMutations(
 
 } // namespace
 
+
 void PrepareInplaceOpsForONNX(const std::shared_ptr<Graph>& graph) {
   PrepareCopyForONNX(graph->block());
   PrepareIndexPutForONNX(graph->block());
@@ -474,7 +480,10 @@ void PrepareInplaceOpsForONNX(const std::shared_ptr<Graph>& graph) {
 }
 
 void RemoveInplaceOpsForONNX(const std::shared_ptr<Graph>& graph) {
-  PrepareForRemoveMutations(graph, graph->block());
+  std::cout << "g " << graph->toString();
+  MutationRemover mr(graph);
+  PrepareForRemoveMutations(mr, graph->block());
+  std::cout << "G " << graph->toString();
   RemoveTensorMutation(graph);
   RemoveListMutation(graph);
 }
