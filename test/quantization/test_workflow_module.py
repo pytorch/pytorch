@@ -39,7 +39,6 @@ from torch.testing._internal.common_cuda import TEST_MULTIGPU, TEST_CUDA
 from torch.testing._internal.common_utils import TestCase
 from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
-    ModelWithNoQconfigPropagation,
     AnnotatedSingleLayerLinearModel,
     test_only_eval_fn,
 )
@@ -391,18 +390,6 @@ class TestObserver(QuantizationTestCase):
             loaded = torch.jit.load(buf)
             self.assertEqual(obs.calculate_qparams(), loaded.calculate_qparams())
 
-    # TODO: move this to test_quantize.py
-    def test_no_qconfig_propagation(self):
-        model = ModelWithNoQconfigPropagation()
-        model.qconfig = torch.quantization.default_qconfig
-
-        model = prepare(model)
-        self.assertTrue(hasattr(model.fc1, 'qconfig'),
-                        "QConfig is expected to propagate")
-        self.assertFalse(hasattr(model.no_quant_module, 'qconfig'),
-                         "QConfig is expected to NOT propagate")
-
-
 # HistogramObserver that works like it does on master
 class _ReferenceHistogramObserver(HistogramObserver):
     def __init__(self, *args, **kwargs):
@@ -540,7 +527,6 @@ class _ReferenceHistogramObserver(HistogramObserver):
         new_min = self.min_val + bin_width * start_bin
         new_max = self.min_val + bin_width * (end_bin + 1)
         return new_min, new_max
-
 
 class TestRecordHistogramObserver(QuantizationTestCase):
     # TODO: move this to quantize.py
@@ -1164,7 +1150,7 @@ class TestFakeQuantizePerChannel(TestCase):
             dScale_actual = scale_curr.to(device).grad.detach()
             dZeroPoint_expected = dZeroPoint.to(device).detach()
             dZeroPoint_actual = zero_point_curr.to(device).grad.detach()
-            tolerance = 1e-3
+            tolerance = 1e-4
 
             self.assertTrue(
                 torch.allclose(dX_expected, dX_actual, rtol=tolerance, atol=tolerance),
@@ -1176,7 +1162,7 @@ class TestFakeQuantizePerChannel(TestCase):
                 torch.allclose(dZeroPoint_expected, dZeroPoint_actual, rtol=tolerance, atol=tolerance),
                 "Expected dZeroPoint to match zero_point.grad")
 
-    @given(X=hu.per_channel_tensor(shapes=hu.array_shapes(1, 5,),
+    @given(X=hu.per_channel_tensor(shapes=hu.array_shapes(2, 5,),
                                    qparams=hu.qparams(dtypes=torch.quint8)))
     def test_learnable_backward_per_channel_cpu(self, X):
         torch.random.manual_seed(NP_RANDOM_SEED)
@@ -1188,16 +1174,15 @@ class TestFakeQuantizePerChannel(TestCase):
         self._test_learnable_backward_per_channel(
             X_base, 'cpu', scale_base, zero_point_base, axis)
 
-    @given(X=hu.per_channel_tensor(shapes=hu.array_shapes(1, 5,),
+    @given(X=hu.per_channel_tensor(shapes=hu.array_shapes(2, 5,),
                                    qparams=hu.qparams(dtypes=torch.quint8)))
-    @unittest.skipIf(not TEST_CUDA, "No gpu is not available.")
+    @unittest.skip("temporarily disable the test")
     def test_learnable_backward_per_channel_cuda(self, X):
         torch.random.manual_seed(NP_RANDOM_SEED)
-        X, (_, _, axis, _) = X
+        X, (scale, zero_point, axis, torch_type) = X
         X_base = torch.tensor(X).to('cuda')
-        channel_size = X_base.size(axis)
-        scale_base = torch.normal(mean=0, std=1, size=(channel_size,)).clamp(1e-4, 100)
-        zero_point_base = torch.normal(mean=0, std=128, size=(channel_size,))
+        scale_base = to_tensor(scale, 'cuda')
+        zero_point_base = to_tensor(zero_point, 'cuda')
         self._test_learnable_backward_per_channel(
             X_base, 'cuda', scale_base, zero_point_base, axis)
 
