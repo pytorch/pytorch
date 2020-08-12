@@ -787,6 +787,18 @@ clamp_(min, max) -> Tensor
 In-place version of :meth:`~Tensor.clamp`
 """)
 
+add_docstr_all('clip', r"""
+clip(min, max) -> Tensor
+
+Alias for :meth:`~Tensor.clamp`.
+""")
+
+add_docstr_all('clip_', r"""
+clip_(min, max) -> Tensor
+
+Alias for :meth:`~Tensor.clamp_`.
+""")
+
 add_docstr_all('clone',
                r"""
 clone(memory_format=torch.preserve_format) -> Tensor
@@ -1374,6 +1386,12 @@ ger(vec2) -> Tensor
 See :func:`torch.ger`
 """)
 
+add_docstr_all('outer', r"""
+outer(vec2) -> Tensor
+
+See :func:`torch.outer`.
+""")
+
 add_docstr_all('indices',
                r"""
 indices() -> Tensor
@@ -1635,6 +1653,20 @@ add_docstr_all('isinf',
 isinf() -> Tensor
 
 See :func:`torch.isinf`
+""")
+
+add_docstr_all('isposinf',
+               r"""
+isposinf() -> Tensor
+
+See :func:`torch.isposinf`
+""")
+
+add_docstr_all('isneginf',
+               r"""
+isneginf() -> Tensor
+
+See :func:`torch.isneginf`
 """)
 
 add_docstr_all('isfinite',
@@ -2275,6 +2307,13 @@ qscheme() -> torch.qscheme
 Returns the quantization scheme of a given QTensor.
 """)
 
+add_docstr_all('quantile',
+               r"""
+quantile(q, dim=None, keepdim=False) -> Tensor
+
+See :func:`torch.quantile`
+""")
+
 add_docstr_all('q_scale',
                r"""
 q_scale() -> float
@@ -2818,6 +2857,13 @@ sign_() -> Tensor
 In-place version of :meth:`~Tensor.sign`
 """)
 
+add_docstr_all('signbit',
+               r"""
+signbit() -> Tensor
+
+See :func:`torch.signbit`
+""")
+
 add_docstr_all('sin',
                r"""
 sin() -> Tensor
@@ -3023,6 +3069,13 @@ add_docstr_all('sum',
 sum(dim=None, keepdim=False, dtype=None) -> Tensor
 
 See :func:`torch.sum`
+""")
+
+add_docstr_all('nansum',
+               r"""
+nansum(dim=None, keepdim=False, dtype=None) -> Tensor
+
+See :func:`torch.nansum`
 """)
 
 add_docstr_all('svd',
@@ -3699,8 +3752,7 @@ istft(n_fft, hop_length=None, win_length=None, window=None,
 See :func:`torch.istft`
 """)
 
-add_docstr_all('fft',
-               r"""
+add_docstr_all('fft', r"""
 fft(signal_ndim, normalized=False) -> Tensor
 
 See :func:`torch.fft`

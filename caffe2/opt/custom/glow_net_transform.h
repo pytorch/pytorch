@@ -14,12 +14,11 @@ C10_DECLARE_string(onnxifi_blacklist_ops);
 
 namespace caffe2 {
 namespace glow {
-
-// Onnxifi transformation on the net and workspace.  We also
-// needed the input data/shape to populate the shape. In addition, we take a \p
-// blacklist to control and mask what ops we want to consider in onnxifi
-// process. We can also set whether to use ONNX proto or C2 proto through
-// ONNXIFI interface.
+/// Onnxifi transformation on the net and workspace.  We also
+/// needed the input data/shape to populate the shape. In addition, we take a \p
+/// blacklist to control and mask what ops we want to consider in onnxifi
+/// process. We can also set whether to use ONNX proto or C2 proto through
+/// ONNXIFI interface.
 void onnxifi(
     NetDef* net,
     Workspace* ws,

@@ -3,6 +3,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import torch
 import torch.nn as nn
 from torch.nn.parameter import Parameter
+from .observer import _with_args
 
 
 def _quantize(x, scale, zp):
@@ -200,9 +201,10 @@ class _LearnableFakeQuantize(nn.Module):
     * :attr: `channel_len` defines the length of the channel when initializing scale and zero point
              for the per channel case.
 
-    * :attr: `grad_factor` defines a factor that will be multiplied to the gradients for scale
-             and zero point during the backward path for the learnable fake quantization operators.
-             By default, it is 1.
+    * :attr: `use_grad_scaling` defines the flag for whether the gradients for scale and zero point are
+              normalized by the constant, which is proportional to the square root of the number of
+              elements in the tensor. The related literature justifying the use of this particular constant
+              can be found here: https://openreview.net/pdf?id=rkgO66VKDS.
 
     * :attr: `fake_quant_enabled` defines the flag for enabling fake quantization on the output.
 
@@ -212,12 +214,12 @@ class _LearnableFakeQuantize(nn.Module):
     * attr: `learning_enabled` defines the flag for enabling backpropagation for scale and zero point.
     """
     def __init__(self, observer, quant_min=0, quant_max=255, scale=1., zero_point=0., channel_len=-1,
-                 grad_factor=1.):
+                 use_grad_scaling=False, **observer_kwargs):
         super(_LearnableFakeQuantize, self).__init__()
         assert quant_min < quant_max, 'quant_min must be strictly less than quant_max.'
         self.quant_min = quant_min
         self.quant_max = quant_max
-        self.grad_factor = grad_factor
+        self.use_grad_scaling = use_grad_scaling
 
         if channel_len == -1:
             self.scale = Parameter(torch.tensor([scale]))
@@ -227,7 +229,7 @@ class _LearnableFakeQuantize(nn.Module):
             self.scale = Parameter(torch.tensor([scale] * channel_len))
             self.zero_point = Parameter(torch.tensor([zero_point] * channel_len))
 
-        self.activation_post_process = observer
+        self.activation_post_process = observer(**observer_kwargs)
         assert torch.iinfo(self.activation_post_process.dtype).min <= quant_min, \
                'quant_min out of bound'
         assert quant_max <= torch.iinfo(self.activation_post_process.dtype).max, \
@@ -309,16 +311,19 @@ class _LearnableFakeQuantize(nn.Module):
 
         if self.fake_quant_enabled[0] == 1:
             if self.learning_enabled[0] == 1:
-                self.zero_point.clamp(self.quant_min, self.quant_max)
+                if self.use_grad_scaling:
+                    grad_factor = 1.0 / (self.weight.numel() * self.quant_max) ** 0.5
+                else:
+                    grad_factor = 1.0
                 if self.qscheme in (
                         torch.per_channel_symmetric, torch.per_channel_affine):
                     X = _LearnableFakeQuantizePerChannelOp.apply(
                         X, self.scale, self.zero_point, self.ch_axis,
-                        self.quant_min, self.quant_max, self.grad_factor)
+                        self.quant_min, self.quant_max, grad_factor)
                 else:
                     X = _LearnableFakeQuantizePerTensorOp.apply(
                         X, self.scale, self.zero_point,
-                        self.quant_min, self.quant_max, self.grad_factor)
+                        self.quant_min, self.quant_max, grad_factor)
             else:
                 if self.qscheme == torch.per_channel_symmetric or \
                         self.qscheme == torch.per_channel_affine:
@@ -354,3 +359,5 @@ class _LearnableFakeQuantize(nn.Module):
         super(_LearnableFakeQuantize, self)._load_from_state_dict(
             state_dict, prefix, local_metadata, strict, missing_keys,
             unexpected_keys, error_msgs)
+
+    with_args = classmethod(_with_args)
