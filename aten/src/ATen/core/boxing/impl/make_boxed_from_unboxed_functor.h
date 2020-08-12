@@ -67,14 +67,20 @@ namespace impl {
   template<class T, bool AllowDeprecatedTypes, class Enable = void>
   struct assert_is_valid_input_type {
     assert_is_valid_input_type() {
-      guts::if_constexpr<guts::typelist::contains<supported_primitive_arg_types, T>::value>([] {
-        /* everything is ok, this is a primitive type */
-      }, /* else */ [] {
-        /* otherwise this must be an instance of a valid custom class, since it can only
-           have been created via IValue(x), which ensures this. */
-      });
+      // a non-primitive must be an instance of a registered custom class.
+      // since these can only be created via IValue(x), this must have been checked already.
+      // still, it's worth a static check to catch inheritance errors at compile time.
+      static_assert(
+        guts::typelist::contains<supported_primitive_arg_types, T>::value ||
+          std::is_base_of<torch::CustomClassHolder, T>::value,
+        "Templated unboxing wrapper: non-primitive input types must subclass torch::CustomClassHolder."
+      );
     }
   };
+
+  template<class T, bool AllowDeprecatedTypes>
+  struct assert_is_valid_input_type<c10::intrusive_ptr<T>, AllowDeprecatedTypes>
+  : assert_is_valid_input_type<T, AllowDeprecatedTypes> {};
 
   template<class T, bool AllowDeprecatedTypes>
   struct assert_is_valid_input_type<c10::optional<T>, AllowDeprecatedTypes>
@@ -174,14 +180,20 @@ namespace impl {
   template<class T, bool AllowDeprecatedTypes, class Enable = void>
   struct assert_is_valid_output_type {
     assert_is_valid_output_type() {
-      guts::if_constexpr<guts::typelist::contains<supported_primitive_arg_types, T>::value>([] {
-        /* everything is ok, this is a primitive type */
-      }, /* else */ [] {
-        /* otherwise T is verified to be a registered custom class in the IValue
-          constructor, so no benefit in double-checking here */
-      });
+      // a non-primitive must be an instance of a registered custom class.
+      // this will be checked dynamically when we call the IValue constructor.
+      // still, it's worth a static check to catch inheritance errors at compile time.
+      static_assert(
+        guts::typelist::contains<supported_primitive_arg_types, T>::value ||
+          std::is_base_of<torch::CustomClassHolder, T>::value,
+        "Templated unboxing wrapper: non-primitive output types must subclass torch::CustomClassHolder."
+      );
     }
   };
+
+  template<class T, bool AllowDeprecatedTypes>
+  struct assert_is_valid_output_type<c10::intrusive_ptr<T>, AllowDeprecatedTypes>
+  : assert_is_valid_output_type<T, AllowDeprecatedTypes> {};
 
   template<class T, bool AllowDeprecatedTypes>
   struct assert_is_valid_output_type<c10::optional<T>, AllowDeprecatedTypes>
