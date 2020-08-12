@@ -202,6 +202,7 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(
   // if a profiling graph hasn't been created yet
   if (!pr_) {
     auto copy = graph->copy();
+    removeProfilingNodes(copy->block());
     runProfilingInsensitiveOptimizations(copy);
     // if (remaining_bailout_depth == getBailoutDepth()) {	
     //   PeelProfilingLoops(copy);	

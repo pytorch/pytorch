@@ -9,6 +9,7 @@
 #include "jit/jit_log.h"
 #include <torch/csrc/jit/passes/clear_undefinedness.h>
 #include "jit/passes/dead_code_elimination.h"
+#include "jit/api/function_impl.h"
 
 namespace torch {
 namespace jit {
@@ -90,8 +91,53 @@ private:
     // we will optimize true_block
     true_block->cloneFrom(g.block(), value_map);
     replaceBlockInputsWithGraph(&g, true_block);
-    false_block->cloneFrom(g.block(), value_map);
-    replaceBlockInputsWithGraph(&g, false_block);
+
+
+    auto cold_graph = std::make_shared<Graph>();
+    cold_graph->block()->cloneFrom(g.block(), value_map);
+
+    auto otypes = c10::fmap(cold_graph->return_node()->inputs(), [](Value* v) {return v->type(); });
+    auto tuple_type = TupleType::create(otypes);
+    auto return_tuple = cold_graph->createTuple(cold_graph->return_node()->inputs());
+
+    // {
+    //   WithInsertPoint wip(*cold_graph->block()->nodes().begin()); 
+    //   auto debug_print_cnst = cold_graph->insertConstant(IValue{std::string("cold_graph")});
+    //   auto print_stmt = cold_graph->insert(prim::Print, {debug_print_cnst});
+    // }
+    
+    cold_graph->appendNode(return_tuple);
+    for (int i = cold_graph->outputs().size() - 1; i >= 0; i--) {
+      cold_graph->eraseOutput(i);
+    }
+    cold_graph->registerOutput(return_tuple->output());
+    GRAPH_DUMP("cold_graph", cold_graph);
+    auto fp = new GraphFunction("<tensorexpr>", cold_graph, nullptr);
+    {
+      WithInsertPoint wip(false_block->return_node()); 
+      Value* fn_constant = g.insertNode(g.create(prim::Constant))
+        ->s_(attr::name, "tensorexpr")
+        ->output()
+        ->setType(FunctionType::create(fp));
+          std::vector<Value*> inputs = {fn_constant};
+        Value* result = g.insertNode(g.create(prim::CallFunction, inputs))
+                          ->output()
+                          ->setType(tuple_type);
+
+      for (auto inp: g.inputs()) {
+        result->node()->addInput(inp);
+      }
+      auto fun_unpack_tuple = g.insertNode(g.createTupleUnpack(result));
+      for (auto out : fun_unpack_tuple->outputs()) {
+        false_block->registerOutput(out);
+      }
+    }
+
+
+    
+    //replaceBlockInputsWithGraph(&g, false_block);
+
+    
 
     auto optimize = true;
     WithInsertPoint wip{*g.nodes().begin()};
@@ -127,6 +173,28 @@ private:
         }
         checks.push_back(check->node());
     }
+
+    // {
+    //   WithInsertPoint wip2{*false_block->nodes().begin()};
+    //   std::vector<Value*> print_inputs;
+    //   auto debug_print_cnst = g.insertConstant(IValue{std::string("autodiff check triggered")});
+    //   print_inputs.push_back(debug_print_cnst);
+    //   auto blank_cnst = g.insertConstant(IValue{std::string(" ")});
+      
+    //   for (auto check : checks) {
+    //     print_inputs.push_back(blank_cnst);
+    //     auto node_name_str =  g.insertConstant(IValue{std::string( getHeader(check))});
+    //     print_inputs.push_back(node_name_str);
+    //     print_inputs.push_back(blank_cnst);
+    //     print_inputs.push_back(check->output());
+    //   }
+    //   auto print_stmt = g.create(prim::Print, 0);
+    //   g.insertNode(print_stmt);
+    //   for (auto pv: print_inputs) {
+    //     //GRAPH_DEBUG("Adding %", pv->debugName(), " to print statement ", getHeader(print_stmt->node()));
+    //     print_stmt->addInput(pv);
+    //   }
+    // }
 
     //
     if (!optimize) {
