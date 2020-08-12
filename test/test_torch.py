@@ -15384,8 +15384,28 @@ class TestTorchDeviceType(TestCase):
     @dtypesIfCUDA(torch.half, torch.float)
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_minmax(self, device, dtype):
-        self._test_minmax_helper(lambda x: torch._min_max(x)[0], np.min, device, dtype, skip_indices=True)
-        self._test_minmax_helper(lambda x: torch._min_max(x)[1], np.max, device, dtype, skip_indices=True)
+
+        def _min_wrapper(x, dim=None, keepdims=False):
+            if dim is None:
+                return torch._min_max(x)[0]
+            else:
+                min_v, min_i, max_v, max_i = torch._min_max(x, dim, keepdims)
+                return (min_v, min_i)
+
+        def _max_wrapper(x, dim=None, keepdims=False):
+            if dim is None:
+                return torch._min_max(x)[1]
+            else:
+                min_v, min_i, max_v, max_i = torch._min_max(x, dim, keepdims)
+                return (max_v, max_i)
+
+        if self.device_type == "cuda":
+            # TODO: enable indices for cuda
+            self._test_minmax_helper(_min_wrapper, np.min, device, dtype, skip_indices=True)
+            self._test_minmax_helper(_max_wrapper, np.max, device, dtype, skip_indices=True)
+        else:
+            self._test_minmax_helper(_min_wrapper, np.min, device, dtype)
+            self._test_minmax_helper(_max_wrapper, np.max, device, dtype)
 
     def test_bincount(self, device):
         # negative input throws

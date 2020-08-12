@@ -1881,6 +1881,12 @@
   use_c10_dispatcher: full
   variants: function, method
 
+- func: _min_max.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor, Tensor, Tensor, Tensor)
+  use_c10_dispatcher: full
+  variants: function
+  dispatch:
+    CPU: _min_max
+
 - func: max.dim_max(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) max, Tensor(b!) max_values) -> (Tensor(a!) values, Tensor(b!) indices)
 
 - func: max_values(Tensor self, int[1] dim, bool keepdim=False) -> Tensor

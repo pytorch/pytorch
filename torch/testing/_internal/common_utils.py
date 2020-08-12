@@ -389,7 +389,7 @@ def skipIfRocm(fn):
 
 # This decorator can be used for API tests that call torch.set_deterministic().
 # When the test is finished, it will restore the previous deterministic flag
-# setting. Also, if CUDA >= 10.2, this will set the environment variable 
+# setting. Also, if CUDA >= 10.2, this will set the environment variable
 # CUBLAS_WORKSPACE_CONFIG=:4096:8 so that the error associated with that setting
 # is not thrown during the test unless the test changes that variable on purpose.
 # The previous CUBLAS_WORKSPACE_CONFIG setting will also be restored once the
@@ -922,6 +922,7 @@ class TestCase(expecttest.TestCase):
 
         np_result = np_fn(a)
         torch_result = torch_fn(t).cpu()
+        torch_result = torch_fn(t)
 
         # Converts arrays to tensors
         if isinstance(np_result, np.ndarray):
