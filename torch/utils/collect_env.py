@@ -20,6 +20,7 @@ SystemEnv = namedtuple('SystemEnv', [
     'is_debug_build',
     'cuda_compiled_version',
     'gcc_version',
+    'clang_version',
     'cmake_version',
     'os',
     'python_version',
@@ -83,6 +84,9 @@ def get_conda_packages(run_lambda):
 
 def get_gcc_version(run_lambda):
     return run_and_parse_first_match(run_lambda, 'gcc --version', r'gcc (.*)')
+
+def get_clang_version(run_lambda):
+    return run_and_parse_first_match(run_lambda, 'clang --version', r'clang version (.*)')
 
 
 def get_cmake_version(run_lambda):
@@ -195,6 +199,7 @@ def check_release_file(run_lambda):
 
 
 def get_os(run_lambda):
+    from platform import machine
     platform = get_platform()
 
     if platform == 'win32' or platform == 'cygwin':
@@ -204,7 +209,7 @@ def get_os(run_lambda):
         version = get_mac_version(run_lambda)
         if version is None:
             return None
-        return 'Mac OSX {}'.format(version)
+        return 'Mac OSX {} ({})'.format(version, machine())
 
     if platform == 'linux':
         # Ubuntu/Debian based
@@ -217,7 +222,7 @@ def get_os(run_lambda):
         if desc is not None:
             return desc
 
-        return platform
+        return '{} ({})'.format(platform, machine())
 
     # Unknown platform
     return platform
@@ -269,7 +274,7 @@ def get_env_info():
     return SystemEnv(
         torch_version=version_str,
         is_debug_build=debug_mode_str,
-        python_version='{}.{}'.format(sys.version_info[0], sys.version_info[1]),
+        python_version='{}.{} ({}-bit runtime)'.format(sys.version_info[0], sys.version_info[1], sys.maxsize.bit_length() + 1),
         is_cuda_available=cuda_available_str,
         cuda_compiled_version=cuda_version_str,
         cuda_runtime_version=get_running_cuda_version(run_lambda),
@@ -281,6 +286,7 @@ def get_env_info():
         conda_packages=get_conda_packages(run_lambda),
         os=get_os(run_lambda),
         gcc_version=get_gcc_version(run_lambda),
+        clang_version=get_clang_version(run_lambda),
         cmake_version=get_cmake_version(run_lambda),
     )
 
@@ -291,6 +297,7 @@ CUDA used to build PyTorch: {cuda_compiled_version}
 
 OS: {os}
 GCC version: {gcc_version}
+Clang version: {clang_version}
 CMake version: {cmake_version}
 
 Python version: {python_version}
