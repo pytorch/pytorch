@@ -1,5 +1,10 @@
 import torch
 from torch.fx import symbolic_trace
+from torch.fx.symbolic_trace import DefaultDelegate
+from torch.fx.graph import Graph
+from torch.fx.node import Node
+
+from typing import Any, Callable, Dict, Optional, Tuple, Union
 
 from torch.testing._internal.common_utils import TestCase, run_tests
 
@@ -74,11 +79,14 @@ class TestFX(TestCase):
         self.assertEqual(out, ref_out)
 
     def test_disallow_override(self):
-        # Validation function to disallow in-place tensor operations
-        def no_mutable_is_valid_call(target, args, kwargs):
-            name = target if isinstance(target, str) else torch.typename(target)
-            if name[-1] == '_':
-                raise RuntimeError('In-place operations are not supported')
+        # Custom delegate to disallow in-place tensor operations
+        class NoMutableCallDelegate(DefaultDelegate):
+            def create_node(self, graph : Graph, kind : str, target : Union[str, Callable],
+                            args : Tuple[Any], kwargs : Dict[str, Any], name : Optional[str] = None) -> Node:
+                name = target if isinstance(target, str) else torch.typename(target)
+                if name[-1] == '_':
+                    raise RuntimeError('In-place operations are not supported')
+                return super().create_node(kind, target, args, kwargs, name)
 
         # Test method
         class MyInplaceMod(torch.nn.Module):
@@ -89,7 +97,7 @@ class TestFX(TestCase):
         m = MyInplaceMod()
 
         with self.assertRaisesRegex(RuntimeError, 'In-place operations'):
-            symbolic_trace(m, is_valid_call=no_mutable_is_valid_call)
+            symbolic_trace(m, delegate=NoMutableCallDelegate())
 
         # Test free function
         class MyInplaceMod2(torch.nn.Module):
@@ -98,7 +106,7 @@ class TestFX(TestCase):
                 return x
         m2 = MyInplaceMod2()
         with self.assertRaisesRegex(RuntimeError, 'In-place operations'):
-            symbolic_trace(m2, is_valid_call=no_mutable_is_valid_call)
+            symbolic_trace(m2, delegate=NoMutableCallDelegate())
 
         # Test symbolic node as an arg
         class MyInplaceMod3(torch.nn.Module):
@@ -108,7 +116,27 @@ class TestFX(TestCase):
                 return x
         m3 = MyInplaceMod3()
         with self.assertRaisesRegex(RuntimeError, 'In-place operations'):
-            symbolic_trace(m3, is_valid_call=no_mutable_is_valid_call)
+            symbolic_trace(m3, delegate=NoMutableCallDelegate())
+
+    def test_leaf_module(self):
+        # Custom delegate to make it so that there are no leaf modules, everything
+        # should get traced through
+        class NoLeafModulesDelegate(DefaultDelegate):
+            def is_leaf_module(self, m):
+                return False
+
+        class MyReluMod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                return self.relu(x)
+
+        mrm = MyReluMod()
+        sym = symbolic_trace(mrm, delegate=NoLeafModulesDelegate())
+        for node in sym.graph.nodes:
+            self.assertNotEqual(node.op, 'call_module')
 
 if __name__ == '__main__':
     run_tests()
