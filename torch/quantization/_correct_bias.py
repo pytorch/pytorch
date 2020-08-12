@@ -53,30 +53,38 @@ class MeanShadowLogger(ns.Logger):
         if x.is_quantized:
             x = x.dequantize()
 
-        self.count += x.size(0)
+        self.count += 1
         if self.stats["quantized"] is None:
-            self.stats["quantized"] = torch.sum(x, 0)
-            self.quant_sum = torch.sum(x, 0)
+            self.stats["quantized"] = x
+            self.quant_sum = x
         else:
-            self.quant_sum += torch.sum(x, 0)
+            self.quant_sum += x
             self.stats["quantized"] = self.quant_sum / self.count
 
         if self.stats["float"] is None:
-            self.stats["float"] = torch.sum(y, 0)
-            self.float_sum = torch.sum(y, 0)
+            self.stats["float"] = y
+            self.float_sum = y
         else:
-            self.float_sum += torch.sum(y, 0)
+            self.float_sum += y
             self.stats["float"] = self.float_sum / self.count
 
-def bias_correction(float_model, quantized_model, img_data, neval_batches=30):
+def bias_correction(float_model, quantized_model, img_data, white_list=_supported_modules_quantized, neval_batches=None):
     ''' Using numeric suite shadow module, the expected output of the floating point and quantized modules
     is recorded. Using that data the bias of supported modules is shifted to compensate for the drift caused
     by quantization
     Paper reference: https://arxiv.org/pdf/1906.04721.pdf (Section 4.2)
+
+    Args:
+        float_model: a trained model that serves as a reference to what bias correction should aim for
+        quantized_model: quantized form of float_model that bias correction is to applied to
+        img_data: calibration data to estimate the expected output (used to find quantization error)
+        white_list: specifies what submodules in quantized_model need bias correction (can be extended to
+                unquantized submodules)
+        neval_batches: a cap to the number of batches you want to be used for estimating the expected output
     '''
     uncorrected_modules = {}
     for name, submodule in quantized_model.named_modules():
-        if type(submodule) in _supported_modules_quantized:
+        if type(submodule) in white_list:
             uncorrected_modules[name] = submodule
 
     for uncorrected_module in uncorrected_modules:
@@ -97,7 +105,8 @@ def bias_correction(float_model, quantized_model, img_data, neval_batches=30):
 
             # math for expected_error
             quantization_error = quant_data - float_data
-            dims = list(range(1, quantization_error.dim()))
+            dims = list(range(quantization_error.dim()))
+            dims.remove(1)
             expected_error = torch.mean(quantization_error, dims)
 
             updated_bias = bias.data - expected_error

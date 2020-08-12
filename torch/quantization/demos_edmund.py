@@ -15,7 +15,7 @@ torch.manual_seed(191009)
 def quantize_model(model, data_loader_test, per_tensor=True):
     print("starting quantization")
     criterion = nn.CrossEntropyLoss()
-    num_calibration_batches = 30
+    # num_calibration_batches = 30
     num_eval_batches = 10
 
     model = copy.deepcopy(model)
@@ -34,7 +34,7 @@ def quantize_model(model, data_loader_test, per_tensor=True):
 def adaround_demo(input_model, data_loader, data_loader_test):
     print("starting adaround")
     train_batch_size = 30
-    eval_batch_size = 30
+    eval_batch_size = 10
     num_eval_batches = 10
     criterion = nn.CrossEntropyLoss()
     model = copy.deepcopy(input_model)
@@ -44,18 +44,25 @@ def adaround_demo(input_model, data_loader, data_loader_test):
     model.fuse_model()
     print(model)
 
-    quantized_tensor_model = quantize_model(model, data_loader_test, True)
+    quantized_tensor_model = quantize_model(model, data_loader_test, False)
     results = []
+
+    top1, top5 = evaluate(model, criterion, data_loader_test, neval_batches=num_eval_batches)
+    results.append(str('Evaluation accuracy on %d images, %2.2f' % (num_eval_batches * eval_batch_size, top1.avg)))
+    results.append('Floating point results')
 
     top1, top5 = evaluate(quantized_tensor_model, criterion, data_loader_test, neval_batches=num_eval_batches)
     results.append(str('Evaluation accuracy on %d images, %2.2f' % (num_eval_batches * eval_batch_size, top1.avg)))
     results.append('Per tensor quantization accuracy results, no adaround')
 
-    _adaround.learn_adaround(model, data_loader_test)
+    for batch in range(1,4):
+        # model = copy.deepcopy(mo)
+        _adaround.learn_adaround(model, data_loader_test, batch)
 
-    top1, top5 = evaluate(model, criterion, data_loader_test, neval_batches=num_eval_batches)
-    results.append(str('Evaluation accuracy on %d images, %2.2f' % (num_eval_batches * eval_batch_size, top1.avg)))
-    results.append('Per tensor quantization accuracy results, with adaround')
+        top1, top5 = evaluate(model, criterion, data_loader_test, neval_batches=num_eval_batches)
+        results.append(str('Evaluation accuracy on %d images, %2.2f' % (num_eval_batches * eval_batch_size, top1.avg)))
+        results.append('Per tensor quantization accuracy results, with adaround')
+
 
     print("\n\n Results reiterated here")
     for result in results:
@@ -63,7 +70,7 @@ def adaround_demo(input_model, data_loader, data_loader_test):
 
 def correct_bias_demo(input_model, data_loader, data_loader_test):
     eval_batch_size = 30
-    num_eval_batches = 3
+    num_eval_batches = 3 * 10
     num_calibration_batches = 10
     criterion = nn.CrossEntropyLoss()
     model = copy.deepcopy(input_model)
