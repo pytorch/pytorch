@@ -432,9 +432,11 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
         script_module.__dict__[name] = script_method
 
 
+    # Make module properties available on the Python ScriptModule class.
     for property_stub in property_stubs:
         property_name = property_stub.def_.name().name
         fget = cpp_module._get_method(property_stub.def_.getter_name().name)
+        # Setter is optional, so it may not exist.
         setter_name = property_stub.def_.setter_name()
         fset = cpp_module._get_method(setter_name.name) if setter_name else None
         script_module.__dict__[property_name] = property(property_name, fget, fset)
