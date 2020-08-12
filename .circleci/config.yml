@@ -2037,7 +2037,7 @@ jobs:
           default: ""
       machine:
         image: ubuntu-1604:201903-01
-      resource_class: large
+      resource_class: 2xlarge
       environment:
         IMAGE_NAME: << parameters.image_name >>
         # Enable 'docker manifest'

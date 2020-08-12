@@ -1,3 +1,4 @@
+# type: ignore
 import dis
 import torch
 import inspect
