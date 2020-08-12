@@ -32,6 +32,7 @@
 #include <torch/csrc/jit/passes/onnx.h>
 #include <torch/csrc/jit/passes/onnx/cast_all_constant_to_floating.h>
 #include <torch/csrc/jit/passes/onnx/constant_fold.h>
+#include <torch/csrc/jit/passes/onnx/eliminate_unused_items.h>
 #include <torch/csrc/jit/passes/onnx/eval_peephole.h>
 #include <torch/csrc/jit/passes/onnx/fixup_onnx_controlflow.h>
 #include <torch/csrc/jit/passes/onnx/function_substitution.h>
@@ -165,6 +166,16 @@ void initJITBindings(PyObject* module) {
                 graph->block(),
                 paramsDict,
                 opset_version); // overload resolution
+            return paramsDict;
+          },
+          pybind11::return_value_policy::move)
+      .def(
+          "_jit_pass_onnx_eliminate_unused_items",
+          [](std::shared_ptr<Graph>& graph,
+             std::map<std::string, IValue>& paramsDict) {
+            EliminateUnusedItemsONNX(
+                graph->block(),
+                paramsDict); // overload resolution
             return paramsDict;
           },
           pybind11::return_value_policy::move)
