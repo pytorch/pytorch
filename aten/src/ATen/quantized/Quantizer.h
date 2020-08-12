@@ -163,7 +163,7 @@ struct CAFFE2_API PerChannelAffineQuantizer : public AffineQuantizer {
  * kPerChannelAffine.
  *
  * The quantize equation in this case looks like -
- * Xq = (Xf - zero_point) * inv_scale, where inv_scale = 1.0/scale
+ * Xq = Round(Xf * inv_scale + zero_point)
  *
  * Note: Usage of floating point zero point is useful in cases where 0 doesn't need to
  * be exactly represented in the quantized space. We can get additional precision by
