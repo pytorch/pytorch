@@ -1162,7 +1162,6 @@ Stmt* IRSimplifierBase::mutate(const For* v) {
 }
 
 Stmt* IRSimplifierBase::mutate(const Block* v) {
-  auto vars = v->varBindings();
   std::vector<Stmt*> stmts;
   for (Stmt* stmt : *v) {
     Stmt* stmt_new = stmt->accept_mutator(this);
@@ -1171,10 +1170,6 @@ Stmt* IRSimplifierBase::mutate(const Block* v) {
     }
 
     if (auto* subBlock = dynamic_cast<Block*>(stmt_new)) {
-      for (auto& pair : subBlock->varBindings()) {
-        vars.emplace_back(pair.first, pair.second);
-      }
-
       for (Block::iterator I = subBlock->begin(), E = subBlock->end();
            I != E;) {
         // Be careful to avoid invalidating the iterator.
@@ -1187,7 +1182,7 @@ Stmt* IRSimplifierBase::mutate(const Block* v) {
     }
   }
 
-  return new Block(vars, stmts);
+  return new Block(stmts);
 }
 
 // TermExpander
@@ -1574,6 +1569,18 @@ Stmt* TermExpander::mutate(const Free* v) {
   }
 
   return new Free(buffer_var_new);
+}
+
+bool exprEquals(const Expr* A, const Expr* B) {
+  try {
+    const Expr* diff = IRSimplifier::simplify(new Sub(A, B));
+    if (!diff->isConstant()) {
+      return false;
+    }
+    return immediateEquals(diff, 0);
+  } catch (std::exception& e) {
+    return false;
+  }
 }
 
 } // namespace tensorexpr
