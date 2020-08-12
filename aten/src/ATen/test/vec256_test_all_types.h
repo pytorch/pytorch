@@ -213,11 +213,12 @@ T safe_fpt_division(T f1, T f2)
 {
     //code was taken from boost
     // Avoid overflow.
-    if ((f2 < static_cast<T>(1)) && (f1 > f2 * std::numeric_limits<T>::max())) {
+    if( (f2 < static_cast<T>(1)) && (f1 > f2*std::numeric_limits<T>::max()) ){
         return std::numeric_limits<T>::max();
     }
     // Avoid underflow.
-    if ((f1 == static_cast<T>(0)) || (f2 > static_cast<T>(1)) && (f1 < f2 * std::numeric_limits<T>::min())) {
+    if( (f1 == static_cast<T>(0)) ||
+        ((f2 > static_cast<T>(1)) && (f1 < f2*std::numeric_limits<T>::min())) ){
         return static_cast<T>(0);
     }
     return f1 / f2;

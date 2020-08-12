@@ -456,7 +456,9 @@ namespace {
         constexpr size_t N = vec_type::size() * 2;
         CACHE_ALIGN VT vals[N];
         CACHE_ALIGN VT interleaved[N];
-        ValueGen<VT> generator;
+        auto seed = TestSeed();
+        std::cout << "Test Seed: " << seed << std::endl;        
+        ValueGen<VT> generator(seed);
         for (VT& v : vals) {
             v = generator.get();
         }
@@ -482,7 +484,9 @@ namespace {
         constexpr size_t N = vec_type::size() * 2;
         CACHE_ALIGN VT vals[N];
         CACHE_ALIGN VT interleaved[N];
-        ValueGen<VT> generator;
+        auto seed = TestSeed();
+        std::cout << "Test Seed: " << seed << std::endl;        
+        ValueGen<VT> generator(seed);
         for (VT& v : vals) {
             v = generator.get();
         }
@@ -844,14 +848,16 @@ namespace {
         CACHE_ALIGN float unit_float_vec[el_count];
         CACHE_ALIGN underlying expected_qint_vals[vec_type::size()];
         typename vec_type::float_vec_return_type  float_ret;
-        for (int i = 0; i < trials; i++) {
-            //zero point 
-            ValueGen<int> generator_zp(min_val, max_val);
-            //scale
-            ValueGen<float> generator_sc(1.f, 15.f);
-            //value
-            ValueGen<float> gen(min_val * 2.f, max_val * 2.f);
+        auto seed = TestSeed();
+        std::cout << "Test Seed: " << seed << std::endl;
+        //zero point 
+        ValueGen<int> generator_zp(min_val, max_val, seed.nextSeed());
+        //scale
+        ValueGen<float> generator_sc(1.f, 15.f, seed.nextSeed());
+        //value
+        ValueGen<float> gen(min_val * 2.f, max_val * 2.f, seed.nextSeed());
 
+        for (int i = 0; i < trials; i++) {
             float scale = generator_sc.get();
             float inv_scale = 1.0f / static_cast<float>(scale);
             auto zero_point_val = generator_zp.get();
@@ -896,11 +902,13 @@ namespace {
 #if  defined(CHECK_DEQUANT_WITH_LOW_PRECISION) 
         std::cout << "Dequant will be tested with relative error " << 1.e-3f << std::endl;
 #endif
-        for (int i = 0; i < trials; i++) {
+        auto seed = TestSeed();
+        std::cout << "Test Seed: " << seed << std::endl;
+        ValueGen<int> generator(min_val, max_val, seed.nextSeed());
+        //scale
+        ValueGen<float> generator_sc(1.f, 15.f, seed.nextSeed());
 
-            ValueGen<int> generator(min_val, max_val);
-            //scale
-            ValueGen<float> generator_sc(1.f, 15.f);
+        for (int i = 0; i < trials; i++) {
             float scale = generator_sc.get();
             int32_t zero_point_val = generator.get();
             float scale_zp_premul = -(scale * zero_point_val);
@@ -1087,3 +1095,4 @@ namespace {
 #error GTEST does not have TYPED_TEST
 #endif
 }  // namespace
+
