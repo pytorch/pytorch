@@ -262,6 +262,7 @@ class MultiProcessTestCase(TestCase):
     def setUp(self):
         super().setUp()
         self.skip_return_code_checks = []
+        self.processes = []
         self.rank = self.MAIN_PROCESS_RANK
         self.file_name = tempfile.NamedTemporaryFile(delete=False).name
 
@@ -280,7 +281,6 @@ class MultiProcessTestCase(TestCase):
         return self.id().split(".")[-1]
 
     def _start_processes(self, proc):
-        self.processes = []
         for rank in range(int(self.world_size)):
             process = proc(
                 target=self.__class__._run,
@@ -288,7 +288,6 @@ class MultiProcessTestCase(TestCase):
                 args=(rank, self._current_test_name(), self.file_name))
             process.start()
             self.processes.append(process)
-
 
     def _fork_processes(self):
         proc = torch.multiprocessing.get_context("fork").Process

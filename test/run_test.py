@@ -62,6 +62,7 @@ TESTS = [
     'test_torch',
     'test_type_info',
     'test_type_hints',
+    'test_unary_ufuncs',
     'test_utils',
     'test_namedtuple_return_api',
     'test_jit_profiling',
@@ -84,6 +85,7 @@ TESTS = [
     'test_jit_py3',
     'test_determination',
     'test_futures',
+    'test_fx',
 ]
 
 WINDOWS_BLOCKLIST = [
@@ -93,7 +95,6 @@ WINDOWS_BLOCKLIST = [
     'distributed/rpc/test_tensorpipe_agent',
     'distributed/test_distributed',
     'distributed/test_distributed_spawn',
-    'distributed/test_ddp_under_dist_autograd',
 ]
 
 ROCM_BLOCKLIST = [
@@ -140,13 +141,6 @@ SLOW_TESTS = [
     'distributed/rpc/test_process_group_agent',
     'distributed/rpc/test_tensorpipe_agent',
     'distributed/test_distributed_spawn',
-    'distributed/rpc/tensorpipe/test_dist_autograd_spawn',
-    'distributed/rpc/tensorpipe/test_dist_optimizer_spawn',
-    'distributed/rpc/tensorpipe/test_rpc_spawn',
-    'distributed/rpc/tensorpipe/test_ddp_under_dist_autograd',
-    'distributed/rpc/test_dist_autograd_spawn',
-    'distributed/rpc/test_rpc_spawn',
-    'distributed/test_ddp_under_dist_autograd',
     'test_cuda',
     'test_cuda_primary_ctx',
     'test_cpp_extensions_aot_ninja',

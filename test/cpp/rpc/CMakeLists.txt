@@ -6,6 +6,12 @@ set(TORCH_RPC_TEST_SOURCES
   ${TORCH_RPC_TEST_DIR}/test_e2e_process_group.cpp
 )
 
+if(USE_GLOO)
+  list(APPEND TORCH_RPC_TEST_SOURCES
+    ${TORCH_RPC_TEST_DIR}/test_e2e_process_group.cpp
+  )
+endif()
+
 add_executable(test_cpp_rpc ${TORCH_RPC_TEST_SOURCES})
 target_include_directories(
   test_cpp_rpc PRIVATE
