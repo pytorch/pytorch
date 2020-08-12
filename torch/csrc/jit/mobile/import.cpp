@@ -142,16 +142,18 @@ void parseMethods(
     if (has_debug_info) {
       const auto& debug_info_element = debug_info_vals[i];
       const auto& debug_info_m_tuple = debug_info_element.toTuple()->elements();
-      const std::string& debug_info_function_name = debug_info_m_tuple[0].toStringRef();
+      const std::string& debug_info_function_name =
+          debug_info_m_tuple[0].toStringRef();
       TORCH_CHECK(
           debug_info_function_name == function_name,
           "The function names in the bytecode table and the debug info table do not match.");
       IValue debug_info_table = debug_info_m_tuple[1];
-      module_debug_info_list =
-          expect_field(
-              debug_info_table, "module_debug_info", BYTECODE_INDEX_MODULE_DEBUG_INFO)
-              .toTuple()
-              ->elements();
+      module_debug_info_list = expect_field(
+                                   debug_info_table,
+                                   "module_debug_info",
+                                   BYTECODE_INDEX_MODULE_DEBUG_INFO)
+                                   .toTuple()
+                                   ->elements();
       TORCH_CHECK(
           module_debug_info_list.size() == ops_list.size(),
           "The numbers of operators and module info strings do not match.");

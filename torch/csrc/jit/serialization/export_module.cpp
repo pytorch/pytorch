@@ -194,12 +194,20 @@ void setstateTuple(
     Function& setstate = type->getMethod("__setstate__");
     if (setstate.isGraphFunction()) {
       getFunctionTuple(
-          module, setstate, elements, debug_info_elements, save_debug_info_in_bytecode);
+          module,
+          setstate,
+          elements,
+          debug_info_elements,
+          save_debug_info_in_bytecode);
     }
   } else {
     for (size_t i = 0, n = type->numAttributes(); i < n; ++i) {
       setstateTuple(
-          module, obj->getSlot(i), elements, debug_info_elements, save_debug_info_in_bytecode);
+          module,
+          obj->getSlot(i),
+          elements,
+          debug_info_elements,
+          save_debug_info_in_bytecode);
     }
   }
 }
@@ -214,12 +222,20 @@ void moduleMethodsTuple(
   // top level methods
   for (const auto& method : methods) {
     getFunctionTuple(
-        module, method.function(), elements, debug_info_elements, save_debug_info_in_bytecode);
+        module,
+        method.function(),
+        elements,
+        debug_info_elements,
+        save_debug_info_in_bytecode);
   }
 
   // __setstate__ of all components
   setstateTuple(
-      module, module._ivalue(), elements, debug_info_elements, save_debug_info_in_bytecode);
+      module,
+      module._ivalue(),
+      elements,
+      debug_info_elements,
+      save_debug_info_in_bytecode);
 }
 
 void SetExportModuleExtraFilesHook(ExportModuleExtraFilesHook hook) {
@@ -366,7 +382,7 @@ class ScriptModuleSerializer {
     std::vector<c10::IValue> debug_info_elements;
     if (save_debug_info_in_bytecode) {
       debug_info_elements.emplace_back(
-        static_cast<int64_t>(caffe2::serialize::kProducedBytecodeVersion));
+          static_cast<int64_t>(caffe2::serialize::kProducedBytecodeVersion));
     }
 
     moduleMethodsTuple(
@@ -461,7 +477,10 @@ void export_opnames(const script::Module& m, std::set<std::string>& opnames) {
   std::vector<c10::IValue> elements;
   std::vector<c10::IValue> debug_info_elements;
   moduleMethodsTuple(
-      m, elements, debug_info_elements, false /* save_debug_info_in_bytecode */);
+      m,
+      elements,
+      debug_info_elements,
+      false /* save_debug_info_in_bytecode */);
   for (const auto& element : elements) {
     auto table = element.toTuple()->elements()[1];
     auto row =
