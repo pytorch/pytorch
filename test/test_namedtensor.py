@@ -1087,7 +1087,8 @@ class TestNamedTensor(TestCase):
             torch.ones(2, 2, 2, names=('A', 'B1', 'B2'))))
 
         # test invalid args: namedtensor, str, sizes
-        self.assertRaises(TypeError, lambda: torch.tensor([1], names=('A',)).unflatten('A', (1, 1)))
+        with self.assertRaisesRegex(TypeError, r"received an invalid combination of arguments"):
+            torch.tensor([1], names=('A',)).unflatten('A', (1, 1))
 
         # test invalid args: namedtensor, int, sizes
         with self.assertRaisesRegex(RuntimeError, r"input is a named tensor but no names were given for unflattened sizes"):

@@ -2473,7 +2473,8 @@ class AbstractTestCases:
             self.assertEqual(torch.ones(2, 10).unflatten(1, (5, 2)), torch.ones(2, 5, 2))
 
             # test invalid args: tensor, str, sizes
-            self.assertRaises(TypeError, lambda: torch.tensor([1]).unflatten('A', (1, 1)))
+            with self.assertRaisesRegex(TypeError, r"received an invalid combination of arguments"):
+                torch.tensor([1]).unflatten('A', (1, 1))
 
             # test invalid args: tensor, str, namedshape
             with self.assertRaisesRegex(RuntimeError, r"Name 'A' not found in Tensor\[None\]."):
