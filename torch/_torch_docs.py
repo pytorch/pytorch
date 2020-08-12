@@ -5185,6 +5185,13 @@ Example::
 
 """.format(**common_args))
 
+add_docstr(torch.degrees,
+           r"""
+degrees(input, out=None) -> Tensor
+
+Alias for :func:`torch.rad2deg`.
+""".format(**common_args))
+
 add_docstr(torch.rand,
            r"""
 rand(*size, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor

@@ -130,6 +130,10 @@ Tensor& deg2rad_out(Tensor& result, const Tensor& self) {
 Tensor deg2rad(const Tensor& self) { return unary_op_impl(self, at::deg2rad_out); }
 Tensor& deg2rad_(Tensor& self) { return unary_op_impl_(self, at::deg2rad_out); }
 
+Tensor degrees(const Tensor& self) { return at::native::deg2rad(self); }
+Tensor& degrees_(Tensor& self) { return at::native::deg2rad_(self); }
+Tensor& degrees_out(Tensor& result, const Tensor& self) { return at::native::deg2rad_out(result, self); }
+
 Tensor& asin_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, asin_stub); }
 Tensor asin(const Tensor& self) { return unary_op_impl(self, at::asin_out); }
 Tensor& asin_(Tensor& self) { return unary_op_impl_(self, at::asin_out); }

@@ -256,6 +256,9 @@ view of a storage and defines numeric operations on it.
    .. automethod:: cumsum
    .. automethod:: data_ptr
    .. automethod:: deg2rad
+   .. automethod:: deg2rad_
+   .. automethod:: degrees
+   .. automethod:: degrees_
    .. automethod:: dequantize
    .. automethod:: det
    .. automethod:: dense_dim

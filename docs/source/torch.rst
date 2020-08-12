@@ -266,6 +266,7 @@ Pointwise Ops
     cos
     cosh
     deg2rad
+    degrees
     div
     digamma
     erf

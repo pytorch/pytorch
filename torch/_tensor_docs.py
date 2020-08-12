@@ -2391,11 +2391,18 @@ deg2rad() -> Tensor
 See :func:`torch.deg2rad`
 """)
 
-add_docstr_all('deg2rad_',
+add_docstr_all('degrees',
                r"""
-deg2rad_() -> Tensor
+degrees() -> Tensor
 
-In-place version of :meth:`~Tensor.deg2rad`
+Alias for :meth:`~Tensor.deg2rad`
+""")
+
+add_docstr_all('degrees_',
+               r"""
+degrees_() -> Tensor
+
+Alias for :meth:`~Tensor.deg2rad_`
 """)
 
 add_docstr_all('reciprocal',

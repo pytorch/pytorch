@@ -2338,6 +2338,18 @@
 - func: deg2rad.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
 
+- func: degrees(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+  supports_named_tensor: True
+
+- func: degrees_(Tensor(a!) self) -> Tensor(a!)
+  variants: function, method
+  supports_named_tensor: True
+
+- func: degrees.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  supports_named_tensor: True
+
 - func: scalar_tensor(Scalar s, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   use_c10_dispatcher: full
 

@@ -299,6 +299,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.cumsum: lambda input, dim, out=None, dtype=None: -1,
         torch.logcumsumexp: lambda input, dim, out=None: -1,
         torch.deg2rad: lambda input, out=None: -1,
+        torch.degrees: lambda input, out=None: -1,
         torch.dequantize: lambda input: -1,
         torch.det: lambda input: -1,
         torch.linalg.det: lambda input: -1,  # alias for torch.det

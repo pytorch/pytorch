@@ -289,6 +289,9 @@ _(aten, cumprod) \
 _(aten, cumsum) \
 _(aten, data_ptr) \
 _(aten, deg2rad) \
+_(aten, deg2rad_) \
+_(aten, degrees) \
+_(aten, degrees_) \
 _(aten, detach) \
 _(aten, diag) \
 _(aten, diag_embed) \
