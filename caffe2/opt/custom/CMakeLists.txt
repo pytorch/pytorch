@@ -1,5 +1,3 @@
-add_subdirectory(custom)
-
 # ---[ CPU files.
 file(GLOB tmp *.cc)
 set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS} ${tmp})
