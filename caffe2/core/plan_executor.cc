@@ -550,10 +550,6 @@ bool RunPlanOnWorkspace(
     LOG(INFO) << "Processing net '" << net_def.name() << "', type: '"
               << net_def.type() << "', #ops: " << net_def.op_size()
               << ", num_workers: " << net_def.num_workers();
-    for (int j = 0; j < net_def.op_size(); j++) {
-      auto op = net_def.op(j);
-      LOG(INFO) << op.type();
-    }
     CAFFE_ENFORCE(
         net_defs.count(net_def.name()) == 0,
         "Your plan contains networks of the same name \"",
