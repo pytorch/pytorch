@@ -21,7 +21,6 @@ class TestComplexTensor(TestCase):
         torch.set_default_dtype(default_dtype)
         self.assertEqual(x.dtype, torch.cdouble if dtype == torch.float64 else torch.cfloat)
 
-
 instantiate_device_type_tests(TestComplexTensor, globals())
 
 if __name__ == '__main__':

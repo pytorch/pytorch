@@ -330,12 +330,12 @@
   self: grad
 
 - name: complex(Tensor real, Tensor imag) -> Tensor
-  real: at::real(grad)
-  imag: at::imag(grad) * -1
+  real: not_implemented("complex real")
+  imag: not_implemented("complex imag")
 
 - name: polar(Tensor abs, Tensor angle) -> Tensor
-  abs: at::real(grad) * angle.cos()  - at::imag(grad) * angle.sin()
-  angle: (at::real(grad) * angle.cos()  + at::imag(grad) * angle.sin()) * abs * -1
+  abs: not_implemented("polar abs")
+  angle: not_implemented("polar angle")
 
 - name: conj(Tensor self) -> Tensor
   self: grad.conj()
