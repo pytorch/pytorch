@@ -7,6 +7,19 @@ namespace native {
 namespace vulkan {
 namespace api {
 
+//
+// A generic cache for all immutable Vulkan objects, of which there will not
+// be many instances required at runtime.  The previous sentence puts two
+// conditions on proper use of this cache: 1) First, the objects should
+// preferably be immutable otherwise extreme care is required to synchronize
+// their usage.  2) Second, this cache is only intended for objects, of which
+// we will not have many instances of during the entire execution of the
+// program, otherwise the cache must be _infrequently_ purged.  Proper usage
+// model for this cache is in direct contrast with Vulkan object pools, which
+// indeed are required to be _frequently_ purged.  That is an important
+// distinction.
+//
+
 template<typename Factory>
 class Cache final {
  public:
@@ -27,6 +40,12 @@ class Cache final {
   // to the cache.  Regardless, this function returns with the object in the cache.
 
   auto retrieve(const Descriptor& descriptor);
+
+  // Only call this function infrequently, if ever.  This cache is only intended
+  // for immutable Vulkan objects of which a small finite instances are required.
+  // A good place to call this function is between model loads.
+
+  void purge();
 
  private:
   struct Configuration final {
@@ -52,6 +71,11 @@ inline auto Cache<Factory>::retrieve(
   }
 
   return iterator->second.get();
+}
+
+template<typename Factory>
+inline void Cache<Factory>::purge() {
+  cache_.clear();
 }
 
 } // namespace api

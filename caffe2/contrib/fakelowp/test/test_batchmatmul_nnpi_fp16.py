@@ -20,7 +20,7 @@ core.GlobalInit(["caffe2", "--caffe2_log_level=-3", "--glow_global_fp16=1"])
 
 class TestBatchMatMul(serial.SerializedTestCase):
     @given(
-        #C=0, #st.integers(min_value=0, max_value=3),  # number of batch dims
+        # C=0, #st.integers(min_value=0, max_value=3),  # number of batch dims
         M=st.integers(min_value=1, max_value=10),
         K=st.integers(min_value=1, max_value=10),
         N=st.integers(min_value=1, max_value=10),
