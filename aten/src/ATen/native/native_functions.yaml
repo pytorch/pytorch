@@ -232,17 +232,19 @@
 # 2) Implement the corresponding functions and have them redispatch to the
 #      original function.
 # 3) Add entries for the alias (and original function, if needed) to
-#      aten/src/ATen/interned_strings.h
-# 4) Add docstrings to the new functions that reference the original function.
+#      aten/src/ATen/core/interned_strings.h
+#      (This may require removing an entry from ATen/core/aten_interned_strings.h.)
+# 4) Add docstrings to the new function that reference the original function,
+#      and document the method as usual (if it exists.)
+#    (See torch/_torch_docs.py and docs/source/torch.rst if adding a function,
+#     torch/_tensor_docs.py and docs/source/tensors.rst if adding a method,
+#     or module-specific doc bindings (like torch/linalg/__init__.py) if
+#     adding an alias in a namespace.)
 # 5) Update torch/overrides.py consistent with the original function.
 # 6) Update the alias_map in torch/csrc/jit/passes/normalize_ops.cpp.
-# 7) Update the op_alias_mappings in torch/testing/_internal/jit_utils.py.
-# 8) Add entries in
-#      torch/testing/_internal/common_method_invocations.py's method_tests
-#      for both the alias and the in-place version of the alias, with
-#      should_check_autodiff=False.
-# 9) Add a test validating the alias's behavior is the same as the original
-#      function's.
+# 8) Add entries to test/test_op_normalization.py's "alias_infos"
+# 9) Add a test or modify an existing test to validate that the alias's behavior
+#      is the same as the original function's.
 #
 # See torch.absolute, an alias for torch.abs, as an example.
 
@@ -1067,10 +1069,6 @@
     CPU: ctc_loss_backward_cpu
     CUDA: ctc_loss_backward_gpu
 
-- func: det(Tensor self) -> Tensor
-  use_c10_dispatcher: full
-  variants: function, method
-
 - func: diag_embed(Tensor self, int offset=0, int dim1=-2, int dim2=-1) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
@@ -1491,28 +1489,6 @@
 - func: hinge_embedding_loss(Tensor self, Tensor target, float margin=1.0, int reduction=Mean) -> Tensor
   use_c10_dispatcher: full
 
-# linalg namespace
-# Note [linalg namespace binding]
-# Functions in the linalg python module should have their names start with
-#   "linalg_" and be bound to the desired Python name in
-#   torch/linalg/__init__.py, and the desired C++ name in torch/csrc/api/include/torch/linalg.h.
-#
-# See linalg_outer as an example.
-
-- func: linalg_outer(Tensor self, Tensor vec2) -> Tensor
-  python_module: linalg
-  use_c10_dispatcher: full
-  variants: function
-
-- func: linalg_outer.out(Tensor self, Tensor vec2, *, Tensor(a!) out) -> Tensor(a!)
-  python_module: linalg
-
-- func: ger(Tensor self, Tensor vec2) -> Tensor
-  use_c10_dispatcher: full
-  variants: function, method
-
-- func: ger.out(Tensor self, Tensor vec2, *, Tensor(a!) out) -> Tensor(a!)
-
 - func: group_norm(Tensor input, int num_groups, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enabled=True) -> Tensor
   use_c10_dispatcher: full
 
@@ -1525,20 +1501,6 @@
   use_c10_dispatcher: full
   dispatch:
     CPU, CUDA: native_group_norm_backward
-
-# FFT
-# Note [FFT namespace binding]
-# Functions in the fft python module should have their names start with
-#   "fft_" underscore and be bound to the desired Python name in
-#   torch/fft/__init__.py, and the desired C++ name in torch/csrc/api/include/torch/fft.h.
-- func: fft_fft(Tensor self) -> Tensor
-  python_module: fft
-  use_c10_dispatcher: full
-  variants: function
-
-- func: fft(Tensor self, int signal_ndim, bool normalized=False) -> Tensor
-  use_c10_dispatcher: full
-  variants: function, method
 
 - func: ifft(Tensor self, int signal_ndim, bool normalized=False) -> Tensor
   use_c10_dispatcher: full
@@ -6996,7 +6958,59 @@
   use_c10_dispatcher: full
   variants: function
 
-# Note: this function is only for testing.
+## Functions related to the fast Fourier transform and the torch.fft namespace
+# Note [FFT namespace binding]
+# Functions in the fft python module should have their names start with
+#   "fft_" underscore and be bound to the desired Python name in
+#   torch/fft/__init__.py, and the desired C++ name in torch/csrc/api/include/torch/fft.h.
+#   The "fft_" names should be hidden from the user and not documented.
+#
+# See fft_fft as an example.
+
+# torch.fft.fft
+# NOTE: NOT an alias for torch.fft, which has different semantics
+- func: fft_fft(Tensor self) -> Tensor
+  python_module: fft
+  use_c10_dispatcher: full
+  variants: function
+
+- func: fft(Tensor self, int signal_ndim, bool normalized=False) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
+## Functions for linear algebra and the torch.linalg namespace
+# Note [linalg namespace binding]
+# Functions in the linalg python module should have their names start with
+#   "linalg_" and be bound to the desired Python name in
+#   torch/linalg/__init__.py, and the desired C++ name in torch/csrc/api/include/torch/linalg.h.
+#   The "linalg_" names should be hidden from the user and not documented.
+#
+# See linalg_det as an example.
+
+# torch.linalg.det, alias for torch.det
+- func: linalg_det(Tensor self) -> Tensor
+  python_module: linalg
+  use_c10_dispatcher: full
+  variants: function
+
+- func: det(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
+# torch.outer, alias for torch.ger
+- func: outer(Tensor self, Tensor vec2) -> Tensor
+  use_c10_dispatcher: full
+  variants: function. method
+
+- func: outer.out(Tensor self, Tensor vec2, *, Tensor(a!) out) -> Tensor(a!)
+
+- func: ger(Tensor self, Tensor vec2) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: ger.out(Tensor self, Tensor vec2, *, Tensor(a!) out) -> Tensor(a!)
+
+## Functions that are only for testing
 # It is undocumented and should not be used outside of tests.
 - func: _test_serialization_subcmul(Tensor self, Tensor other, Scalar alpha=1) -> Tensor
   use_c10_dispatcher: full

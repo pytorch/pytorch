@@ -83,7 +83,6 @@ _(aten, _fft_with_size) \
 _(aten, _fill) \
 _(aten, _floor) \
 _(aten, _fused_dropout) \
-_(aten, _ger) \
 _(aten, _indexCopy) \
 _(aten, _indices) \
 _(aten, _linspace) \
@@ -289,7 +288,6 @@ _(aten, cumprod) \
 _(aten, cumsum) \
 _(aten, data_ptr) \
 _(aten, deg2rad) \
-_(aten, det) \
 _(aten, detach) \
 _(aten, diag) \
 _(aten, diag_embed) \
@@ -352,7 +350,6 @@ _(aten, ge) \
 _(aten, gelu) \
 _(aten, geometric) \
 _(aten, geqrf) \
-_(aten, ger) \
 _(aten, get_device) \
 _(aten, glu) \
 _(aten, glu_backward) \
