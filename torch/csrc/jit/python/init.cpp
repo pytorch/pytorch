@@ -625,6 +625,12 @@ void initJITBindings(PyObject* module) {
                       "__torch__.torch.classes.quantized.Conv3dPackedParamsBase") ||
               i->type() ==
                   getCustomClass(
+                      "__torch__.torch.classes.quantized.LegacyConv2dPackedParamsBase") ||
+              i->type() ==
+                  getCustomClass(
+                      "__torch__.torch.classes.quantized.LegacyConv3dPackedParamsBase") ||
+              i->type() ==
+                  getCustomClass(
                       "__torch__.torch.classes.quantized.LinearPackedParamsBase")) {
             // Dummy CompleteTensorType to appease ONNX validator.
             i->setType(TensorType::create(
