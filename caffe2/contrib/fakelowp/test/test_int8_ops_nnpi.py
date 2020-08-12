@@ -227,7 +227,7 @@ class Int8OpsTest(serial.SerializedTestCase):
         n=st.integers(1, 4),
         rand_seed=st.integers(0, 65534)
     )
-    @settings(max_examples=100, deadline=1000)
+    @settings(max_examples=100, deadline=None)
     def test_int8_small_input(self, n, rand_seed):
         print("n={}, rand_seed={}".format(n, rand_seed))
         np.random.seed(rand_seed)
