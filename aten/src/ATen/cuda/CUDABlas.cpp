@@ -497,7 +497,7 @@ void dot<c10::complex<double>>(CUDABLAS_DOT_ARGTYPES(c10::complex<double>)) {
                                    incx, reinterpret_cast<const cuDoubleComplex*>(y), incy,
                                    reinterpret_cast<cuDoubleComplex*>(result)));
   #else
-  TORCH_CUDABLAS_CHECK(cublasCdotu(handle, n, reinterpret_cast<const rocblas_double_complex*>(x),
+  TORCH_CUDABLAS_CHECK(cublasZdotu(handle, n, reinterpret_cast<const rocblas_double_complex*>(x),
                                    incx, reinterpret_cast<const rocblas_double_complex*>(y), incy,
                                    reinterpret_cast<rocblas_double_complex*>(result)));
   #endif
@@ -510,7 +510,7 @@ void dot<c10::complex<float>>(CUDABLAS_DOT_ARGTYPES(c10::complex<float>)) {
                                    incx, reinterpret_cast<const cuComplex*>(y), incy,
                                    reinterpret_cast<cuComplex*>(result)));
   #else
-  TORCH_CUDABLAS_CHECK(cublasZdotu(handle, n, reinterpret_cast<const rocblas_float_complex*>(x),
+  TORCH_CUDABLAS_CHECK(cublasCdotu(handle, n, reinterpret_cast<const rocblas_float_complex*>(x),
                                    incx, reinterpret_cast<const rocblas_float_complex*>(y), incy,
                                    reinterpret_cast<rocblas_float_complex*>(result)));
   #endif
