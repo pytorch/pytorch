@@ -39,7 +39,6 @@ from torch.testing._internal.common_cuda import TEST_MULTIGPU, TEST_CUDA
 from torch.testing._internal.common_utils import TestCase
 from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
-    ModelWithNoQconfigPropagation,
     AnnotatedSingleLayerLinearModel,
     test_only_eval_fn,
 )
@@ -391,18 +390,6 @@ class TestObserver(QuantizationTestCase):
             loaded = torch.jit.load(buf)
             self.assertEqual(obs.calculate_qparams(), loaded.calculate_qparams())
 
-    # TODO: move this to test_quantize.py
-    def test_no_qconfig_propagation(self):
-        model = ModelWithNoQconfigPropagation()
-        model.qconfig = torch.quantization.default_qconfig
-
-        model = prepare(model)
-        self.assertTrue(hasattr(model.fc1, 'qconfig'),
-                        "QConfig is expected to propagate")
-        self.assertFalse(hasattr(model.no_quant_module, 'qconfig'),
-                         "QConfig is expected to NOT propagate")
-
-
 # HistogramObserver that works like it does on master
 class _ReferenceHistogramObserver(HistogramObserver):
     def __init__(self, *args, **kwargs):
@@ -540,7 +527,6 @@ class _ReferenceHistogramObserver(HistogramObserver):
         new_min = self.min_val + bin_width * start_bin
         new_max = self.min_val + bin_width * (end_bin + 1)
         return new_min, new_max
-
 
 class TestRecordHistogramObserver(QuantizationTestCase):
     # TODO: move this to quantize.py

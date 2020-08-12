@@ -611,8 +611,8 @@ class TestQuantizedOps(TestCase):
            b=hu.floats(-1e6, 1e6, allow_nan=False, allow_infinity=False))
     def test_qadd_scalar_relu(self, A, b):
         import copy
-        add_scalar = torch.ops.quantized.add_scalar
-        add_scalar_relu = torch.ops.quantized.add_scalar_relu
+        add_scalar = torch.ops.quantized.add
+        add_scalar_relu = torch.ops.quantized.add_relu
 
         A, (scale, zero_point, dtype) = A
         A = A.astype(np.float32)
@@ -640,8 +640,8 @@ class TestQuantizedOps(TestCase):
         for dtype in [torch.quint8, torch.qint8, torch.qint32]:
             add_relu = torch.ops.quantized.add_relu
             add = torch.ops.quantized.add
-            add_out = torch.ops.quantized.add_out
-            add_relu_out = torch.ops.quantized.add_relu_out
+            add_out = torch.ops.quantized.add
+            add_relu_out = torch.ops.quantized.add_relu
 
             # NB: This is a strange size so that we exercise both the vectorized
             # implementation (64-element chunks at at time) as well as the scalar
@@ -689,8 +689,8 @@ class TestQuantizedOps(TestCase):
         for dtype in [torch.quint8, torch.qint8, torch.qint32]:
             add_relu = torch.ops.quantized.add_relu
             add = torch.ops.quantized.add
-            add_out = torch.ops.quantized.add_out
-            add_relu_out = torch.ops.quantized.add_relu_out
+            add_out = torch.ops.quantized.add
+            add_relu_out = torch.ops.quantized.add_relu
 
             # NB: This is a strange size so that we exercise both the vectorized
             # implementation (64-element chunks at at time) as well as the scalar
@@ -743,8 +743,8 @@ class TestQuantizedOps(TestCase):
         for dtype in [torch.quint8, torch.qint8, torch.qint32]:
             mul_relu = torch.ops.quantized.mul_relu
             mul = torch.ops.quantized.mul
-            mul_out = torch.ops.quantized.mul_out
-            mul_relu_out = torch.ops.quantized.mul_relu_out
+            mul_out = torch.ops.quantized.mul
+            mul_relu_out = torch.ops.quantized.mul_relu
 
             A = torch.arange(-100, 100, dtype=torch.float)
             B = torch.arange(-100, 100, dtype=torch.float)
@@ -786,7 +786,7 @@ class TestQuantizedOps(TestCase):
             # Scalar multiplication
             for b in B:
                 C_ref = qA.dequantize().numpy() * b.item()
-                qC_hat = torch.ops.quantized.mul_scalar(qA, b.item())
+                qC_hat = torch.ops.quantized.mul(qA, b.item())
 
                 self.assertEqual(C_ref, qC_hat.dequantize())
 
@@ -794,7 +794,7 @@ class TestQuantizedOps(TestCase):
             for b in B:
                 C_ref = qA.dequantize().numpy() * b.item()
                 C_ref[C_ref < 0] = 0
-                qC_hat = torch.ops.quantized.mul_scalar_relu(qA, b.item())
+                qC_hat = torch.ops.quantized.mul_relu(qA, b.item())
 
                 self.assertEqual(C_ref, qC_hat.dequantize())
 
@@ -803,8 +803,8 @@ class TestQuantizedOps(TestCase):
         for dtype in [torch.quint8, torch.qint8, torch.qint32]:
             mul_relu = torch.ops.quantized.mul_relu
             mul = torch.ops.quantized.mul
-            mul_out = torch.ops.quantized.mul_out
-            mul_relu_out = torch.ops.quantized.mul_relu_out
+            mul_out = torch.ops.quantized.mul
+            mul_relu_out = torch.ops.quantized.mul_relu
 
             A = torch.arange(-100, 100, dtype=torch.float)
             B = torch.arange(-100, 100, dtype=torch.float)
@@ -853,8 +853,8 @@ class TestQuantizedOps(TestCase):
     def test_qmul_broadcast(self):
         mul_relu = torch.ops.quantized.mul_relu
         mul = torch.ops.quantized.mul
-        mul_out = torch.ops.quantized.mul_out
-        mul_relu_out = torch.ops.quantized.mul_relu_out
+        mul_out = torch.ops.quantized.mul
+        mul_relu_out = torch.ops.quantized.mul_relu
 
         # A = torch.arange(-25, 25, dtype=torch.float)
         # B = torch.arange(-25, 25, dtype=torch.float)
