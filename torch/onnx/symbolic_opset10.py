@@ -156,18 +156,29 @@ def _slice(g, input, axes, starts, ends, steps=None, dynamic_slice=False):
     return g.op("Slice", input, starts, ends, axes, steps)
 
 
-@parse_args('v', 'v', 'v', 'v', 'i')
-def slice(g, self, dim, start, end, step):
-    if (start.node().kind() != 'onnx::Constant' or
-       end.node().kind() != 'onnx::Constant' or dim.node().kind() != 'onnx::Constant'):
-        dynamic_slice = True
+def slice(g, self, *args):
+    if len(args) == 4:
+        # aten::slice(Tensor self, int dim, int start, int end, int step) -> Tensor
+        dim, start, end, step = args
+        if (start.node().kind() != 'onnx::Constant' or
+           end.node().kind() != 'onnx::Constant' or dim.node().kind() != 'onnx::Constant'):
+            dynamic_slice = True
+        else:
+            start = [sym_help._parse_arg(start, 'i')]
+            end = [sym_help._parse_arg(end, 'i')]
+            dim = [sym_help._parse_arg(dim, 'i')]
+            dynamic_slice = False
+        return sym_help._slice_helper(g, self, axes=dim, starts=start, ends=end, steps=[step], dynamic_slice=dynamic_slice)
+    elif len(args) == 3:
+        # aten::slice(t[] l, int start, int end, int step) -> t[]
+        start, end, step = args
+        dim = 0
+        start = sym_help._parse_arg(start, 'i')
+        end = sym_help._parse_arg(end, 'i')
+        step = sym_help._parse_arg(step, 'i')
+        return sym_help._slice_helper(g, self, axes=[dim], starts=[start], ends=[end], steps=[step])
     else:
-        start = [sym_help._parse_arg(start, 'i')]
-        end = [sym_help._parse_arg(end, 'i')]
-        dim = [sym_help._parse_arg(dim, 'i')]
-        dynamic_slice = False
-    return sym_help._slice_helper(g, self, axes=dim, starts=start, ends=end, steps=[step], dynamic_slice=dynamic_slice)
-
+        raise NotImplementedError("Unknown aten::slice signature")
 
 @parse_args('v', 'is')
 def flip(g, input, dims):

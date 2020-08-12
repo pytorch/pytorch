@@ -2638,6 +2638,16 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3, 4)
         self.run_test(Zero_(), x)
 
+    @enableScriptTest()
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_new_zero_script(self):
+        class Zero_(torch.nn.Module):
+            def forward(self, x):
+                return x.new_zeros(x.shape[2:])
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(Zero_(), x)
+
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_inplace_fill(self):
         class Fill_(torch.nn.Module):
