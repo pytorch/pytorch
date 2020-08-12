@@ -8,6 +8,18 @@
 
 #include <tuple>
 
+
+using LegacyConvSerializationType = std::tuple<
+  at::Tensor,
+  c10::optional<at::Tensor>,
+  // these are meant to be torch::List<int64_t> but
+  // it's not supported by onnx, so we'll use Tensor as
+  // a workaround
+  torch::List<at::Tensor>,
+  torch::List<at::Tensor>,
+  torch::List<at::Tensor>,
+  at::Tensor>;
+
 using SerializationType = std::tuple<
   std::string /*name of the op that is serialized*/,
   int64_t /*version*/,
@@ -161,4 +173,58 @@ TORCH_CHECK(
   false,
   "Didn't find engine for when deserializing ConvPackedParams: ",
   toString(ctx.qEngine()));
+}
+
+template <uint32_t kSpatialDim>
+c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> legacy_conv_deserialize(LegacyConvSerializationType state) {
+  at::Tensor weight;
+  c10::optional<at::Tensor> bias;
+  torch::List<at::Tensor> stride_tensor, padding_tensor,
+    dilation_tensor;
+  at::Tensor groups_tensor;
+  torch::List<int64_t> stride, padding, dilation;
+  int64_t groups;
+  std::tie(weight, bias, stride_tensor, padding_tensor, dilation_tensor, groups_tensor) = state;
+  for (at::Tensor s : stride_tensor) {
+    stride.emplace_back(s[0].item<int64_t>());
+  }
+  for (at::Tensor p : padding_tensor) {
+    padding.emplace_back(p[0].item<int64_t>());
+  }
+  for (at::Tensor d : dilation_tensor) {
+    dilation.emplace_back(d[0].item<int64_t>());
+  }
+  groups = groups_tensor[0].item<int64_t>();
+  auto& ctx = at::globalContext();
+
+#ifdef USE_FBGEMM
+  if (ctx.qEngine() == at::QEngine::FBGEMM) {
+    return PackedConvWeight<kSpatialDim>::prepack(
+        weight,
+        bias,
+        stride,
+        padding,
+        dilation,
+        groups);
+  }
+#endif // USE_FBGEMM
+#ifdef USE_PYTORCH_QNNPACK
+  if (ctx.qEngine() == at::QEngine::QNNPACK) {
+    TORCH_CHECK(
+        kSpatialDim == 2,
+        "prepack/__setstate__: QNNPACK only supports Conv2d "
+        "now.");
+    return PackedConvWeightsQnnp<kSpatialDim>::prepack(
+        weight,
+        bias,
+        stride,
+        padding,
+        dilation,
+        groups);
+  }
+#endif // USE_PYTORCH_QNNPACK
+  TORCH_CHECK(
+      false,
+      "Didn't find engine for when deserializing ConvPackedParams: ",
+      toString(ctx.qEngine()));
 }

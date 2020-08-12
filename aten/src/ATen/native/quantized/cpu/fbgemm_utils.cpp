@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <ATen/core/stack.h>
 #include <ATen/native/TensorFactories.h>
 
 #include <ATen/native/quantized/cpu/conv_packed_params.h>
@@ -211,6 +212,29 @@ Tensor ConvertToChannelsLast3dTensor(const Tensor& src) {
 
 #endif // USE_FBGEMM
 
+template <typename PackedParamsClass>
+std::function<void(torch::jit::Stack&)> legacy_conv_deserialize() {
+  return [](torch::jit::Stack& stack) {
+    auto state = torch::jit::pop(stack).to<SerializationType>();
+    auto self = torch::jit::pop(stack).toCustomClass<PackedParamsClass>();
+    auto ret = deserialize_conv<2>(state);
+    torch::jit::push(stack, ret);
+  };
+}
+
+c10::FunctionSchema legacy_conv_deserialize_schema() {
+  c10::Argument self("self", c10::AnyType::get());
+  c10::Argument state("state", c10::AnyTupleType::get());
+  c10::Argument result("result", c10::AnyClassType::get());
+
+  c10::FunctionSchema preprocessor_schema(
+      "__setstate__",
+      /*overload_name=*/"",
+      /*arguments=*/{self, state},
+      /*returns=*/{result});
+  return preprocessor_schema;
+}
+
 template <int kSpatialDim = 2>
 CAFFE2_API torch::class_<ConvPackedParamsBase<kSpatialDim>> register_conv_params() {
   static auto register_conv_params =
@@ -225,6 +249,9 @@ CAFFE2_API torch::class_<ConvPackedParamsBase<kSpatialDim>> register_conv_params
         -> c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> { // __setstate__
           return deserialize_conv<kSpatialDim>(state);
         })
+    ._def_unboxed("__setstate__",
+                  legacy_conv_deserialize<ConvPackedParamsBase<kSpatialDim>>(),
+                  legacy_conv_deserialize_schema())
     .def("weight", [](const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>& self) {
                      at::Tensor weight;
                      c10::optional<at::Tensor> bias;
