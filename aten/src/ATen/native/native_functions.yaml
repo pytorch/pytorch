@@ -1864,7 +1864,7 @@
   use_c10_dispatcher: full
   variants: function
   dispatch:
-    CPU: _min_max_val
+    CPU, CUDA: _min_max_val
 
 - func: max.dim_max(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) max, Tensor(b!) max_values) -> (Tensor(a!) values, Tensor(b!) indices)
 

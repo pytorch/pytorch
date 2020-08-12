@@ -15516,13 +15516,8 @@ class TestTorchDeviceType(TestCase):
                 _max_v, max_i = torch.max(x, dim, keepdims)
                 return (max_v, max_i)
 
-        if self.device_type == "cuda":
-            # TODO: enable indices for cuda
-            self._test_minmax_helper(_min_wrapper, np.min, device, dtype, skip_indices=True)
-            self._test_minmax_helper(_max_wrapper, np.max, device, dtype, skip_indices=True)
-        else:
-            self._test_minmax_helper(_min_wrapper, np.min, device, dtype)
-            self._test_minmax_helper(_max_wrapper, np.max, device, dtype)
+        self._test_minmax_helper(_min_wrapper, np.min, device, dtype)
+        self._test_minmax_helper(_max_wrapper, np.max, device, dtype)
 
     def test_bincount(self, device):
         # negative input throws
