@@ -46,6 +46,27 @@ class NodeFinder : public IRVisitor {
   std::vector<Node*> nodes;
 };
 
+class VarFinder : public IRVisitor {
+ public:
+  virtual void visit(const Var* v) override {
+    vars_.insert(v);
+    IRVisitor::visit(v);
+  }
+
+  static std::unordered_set<const Var*> find(Stmt* s) {
+    VarFinder nf;
+    s->accept(&nf);
+    return nf.vars();
+  }
+
+  const std::unordered_set<const Var*>& vars() {
+    return vars_;
+  }
+
+ private:
+  std::unordered_set<const Var*> vars_;
+};
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch
