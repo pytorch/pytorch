@@ -2164,6 +2164,32 @@ class AbstractTestCases:
             torch.manual_seed(2)
             y = torch.randn(100)
             self.assertEqual(x, y)
+
+            max_int64 = 0x7fff_ffff_ffff_ffff
+            min_int64 = -max_int64 - 1
+            max_uint64 = 0xffff_ffff_ffff_ffff
+            # Check all boundary cases of valid seed value inputs
+            test_cases = [
+                # (seed, expected_initial_seed)
+                # Positive seeds should be unchanged
+                (max_int64, max_int64),
+                (max_int64 + 1, max_int64 + 1),
+                (max_uint64, max_uint64),
+                (0, 0),
+                # Negative seeds wrap around starting from the largest seed value
+                (-1, max_uint64),
+                (min_int64, max_int64 + 1)
+            ]
+            for seed, expected_initial_seed in test_cases:
+                torch.manual_seed(seed)
+                actual_initial_seed = torch.initial_seed()
+                msg = "expected initial_seed() = %x after calling manual_seed(%x), but got %x instead" % (
+                    expected_initial_seed, seed, actual_initial_seed)
+                self.assertEqual(expected_initial_seed, actual_initial_seed, msg=msg)
+            for invalid_seed in [min_int64 - 1, max_uint64 + 1]:
+                with self.assertRaisesRegex(RuntimeError, r'Overflow when unpacking long'):
+                    torch.manual_seed(invalid_seed)
+
             torch.set_rng_state(rng_state)
 
         def test_numel(self):
