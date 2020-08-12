@@ -44,6 +44,9 @@ struct T {
   T broadcast_like(const T& other) {
     return T(call("broadcast", {vt_, other})[0]);
   }
+  T mm(const T& other) {
+    return T(call("matmul", {vt_, other})[0]);
+  }
   T grad(const T& param, const T& jacob) {
     return T(::grad(vt_, param, jacob));
   }
@@ -318,6 +321,68 @@ void testTrainBasic() {
     for (auto i = 0; i < W_.size(); ++i) {
       assert(std::abs(W_[i] - W_ref_[i]) < 0.01);
     }
+  }
+
+  // Higher dimensional operations
+  {
+    VGraph g;
+    auto X = T(g, {"M", "K"});
+    auto W = T(g, {"K", "N"});
+    auto Z = X.mm(W);
+    Stmt* s;
+    std::map<const VTensor*, Buffer> inputs;
+    std::map<const VTensor*, Tensor*> bindings;
+    std::map<std::string, VarHandle> vbindings;
+
+    KernelScope kernel_scope;
+    std::tie(s, inputs, bindings, vbindings) = to_tensorexpr(g, {Z});
+    SimpleIREvaluator cg(
+        s,
+        {inputs.at(X),
+         inputs.at(W),
+         bindings.at(Z),
+         vbindings.at("M"),
+         vbindings.at("N"),
+         vbindings.at("K")});
+    auto M = 16;
+    auto N = 16;
+    auto K = 16;
+    std::vector<float> X_vec(M * K, 2.0f);
+    std::vector<float> W_vec(K * N, 3.0f);
+    std::vector<float> Z_vec(M * N, 0.0f);
+    cg.call({X_vec.data(), W_vec.data(), Z_vec.data(), M, N, K});
+    assertAllEqual(Z_vec, 6.f * K);
+  }
+
+  // Transpose
+  {
+    VGraph g;
+    auto X = T(g, {"M", "K"});
+    auto W = T(g, {"N", "K"});
+    auto Z = X.mm(W);
+    Stmt* s;
+    std::map<const VTensor*, Buffer> inputs;
+    std::map<const VTensor*, Tensor*> bindings;
+    std::map<std::string, VarHandle> vbindings;
+
+    KernelScope kernel_scope;
+    std::tie(s, inputs, bindings, vbindings) = to_tensorexpr(g, {Z});
+    SimpleIREvaluator cg(
+        s,
+        {inputs.at(X),
+         inputs.at(W),
+         bindings.at(Z),
+         vbindings.at("M"),
+         vbindings.at("N"),
+         vbindings.at("K")});
+    auto M = 16;
+    auto N = 16;
+    auto K = 16;
+    std::vector<float> X_vec(M * K, 2.0f);
+    std::vector<float> W_vec(K * N, 3.0f);
+    std::vector<float> Z_vec(M * N, 0.0f);
+    cg.call({X_vec.data(), W_vec.data(), Z_vec.data(), M, N, K});
+    assertAllEqual(Z_vec, 6.f * K);
   }
 }
 } // namespace jit

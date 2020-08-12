@@ -388,6 +388,89 @@ REGISTER_METHOD(
       return {inputs[1]->shape};
     });
 
+REGISTER_METHOD(
+    matmul,
+    [](const std::vector<Tensor*>& inputs,
+       const std::vector<VTensor*>& vinputs,
+       const std::map<std::string, torch::jit::tensorexpr::VarHandle>&
+           vbindings) -> std::vector<Tensor*> {
+      TORCH_CHECK(inputs.size() == 2);
+      auto A_vars = get_vars(vinputs.at(0)->shape, vbindings);
+      auto B_vars = get_vars(vinputs.at(1)->shape, vbindings);
+      TORCH_CHECK(A_vars.size() == 2);
+      TORCH_CHECK(B_vars.size() == 2);
+
+      Tensor* o;
+      // standard matmul
+      if (vinputs.at(0)->shape[1] == vinputs.at(1)->shape[0]) {
+        std::vector<DimArg> C_vars = {A_vars[0], B_vars[1]};
+        o = Reduce(
+            "mm",
+            C_vars,
+            Sum(),
+            [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
+              return inputs.at(0)->call(m, k) * inputs.at(1)->call(k, n);
+            },
+            {A_vars[1]});
+        // B transposed
+      } else if (vinputs.at(0)->shape[1] == vinputs.at(1)->shape[1]) {
+        std::vector<DimArg> C_vars = {A_vars[0], B_vars[0]};
+        o = Reduce(
+            "mm",
+            C_vars,
+            Sum(),
+            [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
+              return inputs.at(0)->call(m, k) * inputs.at(1)->call(n, k);
+            },
+            {A_vars[1]});
+        // A transposed
+      } else if (vinputs.at(0)->shape[0] == vinputs.at(1)->shape[0]) {
+        std::vector<DimArg> C_vars = {A_vars[1], B_vars[1]};
+        o = Reduce(
+            "mm",
+            C_vars,
+            Sum(),
+            [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
+              return inputs.at(0)->call(k, m) * inputs.at(1)->call(k, n);
+            },
+            {A_vars[0]});
+        // both transposed
+      } else if (vinputs.at(0)->shape[0] == vinputs.at(1)->shape[1]) {
+        std::vector<DimArg> C_vars = {A_vars[1], B_vars[0]};
+        o = Reduce(
+            "mm",
+            C_vars,
+            Sum(),
+            [&](const VarHandle& m, const VarHandle& n, const VarHandle& k) {
+              return inputs.at(0)->call(k, m) * inputs.at(1)->call(n, k);
+            },
+            {A_vars[0]});
+      }
+      TORCH_CHECK(o, "Cannot handle shapes for this matmul");
+      return {o};
+    },
+    [](const std::vector<VTensor*>& inputs,
+       const std::vector<VTensor*>& ginputs) -> std::vector<VTensor*> {
+      return {call("matmul", {ginputs[0], inputs[1]})[0],
+              call("matmul", {ginputs[0], inputs[0]})[0]};
+    },
+    [](const std::vector<VTensor*>& inputs)
+        -> std::vector<std::vector<std::string>> {
+      // standard matmul
+      if (inputs.at(0)->shape[1] == inputs.at(1)->shape[0]) {
+        return {{inputs.at(0)->shape[0], inputs.at(1)->shape[1]}};
+        // B transposed
+      } else if (inputs.at(0)->shape[1] == inputs.at(1)->shape[1]) {
+        return {{inputs.at(0)->shape[0], inputs.at(1)->shape[0]}};
+        // A transposed
+      } else if (inputs.at(0)->shape[0] == inputs.at(1)->shape[0]) {
+        return {{inputs.at(0)->shape[1], inputs.at(1)->shape[1]}};
+      }
+      // both transposed
+      TORCH_CHECK(inputs.at(0)->shape[0] == inputs.at(1)->shape[1]);
+      return {{inputs.at(0)->shape[1], inputs.at(1)->shape[0]}};
+    });
+
 std::string dot(const VGraph& g) {
   std::stringstream ss;
   ss << "digraph {\n";
@@ -482,9 +565,15 @@ to_tensorexpr(const VGraph& graph, std::vector<VTensor*> outputs) {
         vars.emplace_back(IntImm::make(1));
       }
       Buffer inpB(BufHandle(get_name(id), exprs, kFloat));
-      auto inpT =
-          Compute("input" + get_name(id), vars, [&](const VarHandle& i) {
-            return Load::make(inpB, {i}, 1);
+      auto inpT = Compute(
+          "input" + get_name(id),
+          vars,
+          [&](const std::vector<VarHandle>& axes) {
+            std::vector<ExprHandle> expr_axes;
+            for (auto a : axes) {
+              expr_axes.emplace_back(a);
+            }
+            return Load::make(inpB, expr_axes, 1);
           });
       inputs.emplace(&t, inpB);
       bindings.emplace(&t, inpT);
