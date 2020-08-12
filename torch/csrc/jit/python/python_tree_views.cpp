@@ -169,10 +169,10 @@ void initTreeViewBindings(PyObject* module) {
           [](const Property& property) { return property.getter().name(); })
       .def("setter_name", [](const Property& property) {
         if (property.setter().present()) {
-          return property.setter().get().name();
+          return c10::optional<Ident>(property.setter().get().name());
         }
 
-        return Ident::create(property.range(), "");
+        return c10::optional<Ident>(c10::nullopt);
       });
 
   py::class_<ClassDef, TreeView>(m, "ClassDef")
