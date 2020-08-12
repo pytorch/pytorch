@@ -1,6 +1,6 @@
 #include <ATen/ATen.h>
-#include <torch/library.h>
 #include <ATen/Parallel.h>
+#include <torch/library.h>
 
 namespace at {
 namespace native {
@@ -145,14 +145,19 @@ Tensor qembeddingbag_4bit_prepack(const Tensor& weight) {
 // TODO: Extend this to support 4-bits once 4-bit qtensor support is added.
 Tensor qembeddingbag_prepack(at::Tensor qweight) {
   Tensor weight_contig = qweight.contiguous(qweight.suggest_memory_format());
+
+  TORCH_CHECK(
+      qweight.scalar_type() == c10::kQUInt8,
+      "qembedding_prepack weight type should be quint8");
+
   const uint8_t* weight_data =
       reinterpret_cast<uint8_t*>(weight_contig.data_ptr<c10::quint8>());
 
   int64_t embedding_rows = qweight.size(0);
   int64_t embedding_cols = qweight.size(1);
-  const auto qtype = qweight.qscheme();
+  const auto qscheme = qweight.qscheme();
   TORCH_CHECK(
-      qtype == c10::kPerChannelAffineFloatQParams,
+      qscheme == c10::kPerChannelAffineFloatQParams,
       "Expect embedding_bag weights to be quantized using kPerChannelAffineFloatQParams");
   std::vector<float> weight_bias(embedding_rows, 0);
   std::vector<float> weight_scales(embedding_rows, 1.0);
