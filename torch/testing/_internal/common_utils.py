@@ -922,7 +922,6 @@ class TestCase(expecttest.TestCase):
 
         np_result = np_fn(a)
         torch_result = torch_fn(t).cpu()
-        torch_result = torch_fn(t)
 
         # Converts arrays to tensors
         if isinstance(np_result, np.ndarray):
