@@ -13,6 +13,7 @@ set(TORCHPY_LIB_SOURCES
 set(TORCHPY_TEST_SOURCES
   ${TORCHPY_DIR}/test_main.cpp
   ${TORCHPY_DIR}/test_init.cpp
+  ${TORCHPY_DIR}/example/test_resnet.cpp
 )
 add_library(torchpy ${TORCHPY_LIB_SOURCES})
 target_include_directories(torchpy PRIVATE ${TORCHPY_DIR})
