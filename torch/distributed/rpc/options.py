@@ -3,7 +3,7 @@ from . import constants as rpc_contants
 
 import torch
 
-from typing import Dict
+from typing import Dict, List
 
 
 class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):

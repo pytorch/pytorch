@@ -3846,10 +3846,8 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
         else:
             raise ValueError("Wrong device affinity")
 
-    @skip_if_lt_x_gpu(2)
-    def test_device_maps_multi_gpu(self):
+    def _test_device_maps_multi_gpu(self, dst):
         options = self.rpc_backend_options
-        dst = worker_name((self.rank + 1) % self.world_size)
         options.set_device_map(dst, {1: 0})
         options.set_device_map(dst, {0: 1})
 
@@ -3872,6 +3870,16 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
         self.assertEqual(rets[1], (torch.zeros(2) - torch.ones(2)).to(0))
         rpc.shutdown()
 
+    @skip_if_lt_x_gpu(2)
+    def test_device_maps_multi_gpu(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        self._test_device_maps_multi_gpu(dst)
+
+    @skip_if_lt_x_gpu(2)
+    def test_device_maps_multi_gpu_self(self):
+        dst = worker_name(self.rank)
+        self._test_device_maps_multi_gpu(dst)
+
     @staticmethod
     def _gpu_add_return_to_gpu(x, y):
         if x.device.type == 'cpu' and y.device.type == 'cpu':
@@ -3879,10 +3887,9 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
         else:
             raise ValueError("Wrong device affinity")
 
-    @skip_if_lt_x_gpu(4)
-    def test_device_maps_return_to_gpu(self):
+    def _test_device_maps_return_to_gpu(self, dst):
         options = self.rpc_backend_options
-        dst = worker_name((self.rank + 1) % self.world_size)
+
         options.set_device_map(dst, {0: 1})
 
         rpc.init_rpc(
@@ -3905,6 +3912,16 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
         self.assertEqual(ret[2], (torch.zeros(2) * torch.ones(2)).to(2))
         self.assertEqual(ret[3], (torch.zeros(2) / torch.ones(2)).to(3))
         rpc.shutdown()
+
+    @skip_if_lt_x_gpu(4)
+    def test_device_maps_return_to_gpu(self):
+        dst = worker_name((self.rank + 1) % self.world_size)
+        self._test_device_maps_return_to_gpu(dst)
+
+    @skip_if_lt_x_gpu(4)
+    def test_device_maps_return_to_gpu_self(self):
+        dst = worker_name(self.rank)
+        self._test_device_maps_return_to_gpu(dst)
 
     @staticmethod
     def _add_to_gpu(x, y):
