@@ -1056,10 +1056,14 @@ def where(g, condition, self=None, other=None):
     # Assumes that torch.where's first argument takes only Bool and Byte tensors.
     if condition.type().scalarType() != 'Bool': 
         condition = g.op("Cast", condition, to_i=sym_help.cast_pytorch_to_onnx['Bool'])
-    if self is None:
-        condition = nonzero(g, condition)
-        return unbind(g, condition, g.op("Constant", value_t=torch.tensor(1)))
-    return g.op("Where", condition, self, other)
+    if len(args) == 1:  # first arg is internal input "_output". self=None and other=None
+        _output = args[0]
+        condition = torch.onnx.symbolic_opset9.nonzero(g, condition)
+        return unbind(g, condition, g.op("Constant", value_t=torch.tensor(1)), _output)
+    else:  # first arg is self, and second arg is other
+        self = args[0]
+        other = args[1]
+        return g.op("Where", condition, self, other)
 
 
 @parse_args('v', 'i', 'none')
