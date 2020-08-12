@@ -3,7 +3,7 @@
 namespace c10 {
 
 namespace {
-thread_local CachingAllocatorInfo caching_allocator_info;
+thread_local CPUCachingAllocator* caching_allocator_ptr{nullptr};
 } // namespace
 
 std::mutex CPUCachingAllocator::mutex_;
@@ -22,14 +22,8 @@ inline void* CPUCachingAllocator::allocate_and_cache(const size_t bytes) {
     // again.
     // Try again.
     ptr = c10::alloc_cpu(bytes);
-    TORCH_CHECK(ptr, "Memory allocation failed for ", bytes, " bytes.");
   }
   allocation_map_[ptr] = bytes;
-  return ptr;
-}
-
-inline void* CPUCachingAllocator::use_cached(const size_t bytes) {
-  void* ptr = available_map_[bytes].pop_back_val();
   return ptr;
 }
 
@@ -39,7 +33,7 @@ void* CPUCachingAllocator::allocate(const size_t bytes) {
   if (it == available_map_.end() || it->second.empty()) {
     return allocate_and_cache(bytes);
   }
-  return use_cached(bytes);
+  return it->second.pop_back_val();
 }
 
 void CPUCachingAllocator::free(void* ptr) {
@@ -53,11 +47,12 @@ void CPUCachingAllocator::free(void* ptr) {
   std::lock_guard<std::mutex> guard(mutex_);
   // If this allocation was done before caching allocator was enabled
   // then free regularly
-  if (allocation_map_.find(ptr) == allocation_map_.end()) {
+  const auto& it = allocation_map_.find(ptr);
+  if (it == allocation_map_.end()) {
     c10::free_cpu(ptr);
     return;
   }
-  const size_t alloc_size = allocation_map_[ptr];
+  const size_t alloc_size = it->second;
   available_map_[alloc_size].push_back(ptr);
 }
 
@@ -94,52 +89,17 @@ CPUCachingAllocator::~CPUCachingAllocator() {
   free_cached();
 }
 
-CachingAllocatorInfo& GetThreadLocalCachingAllocatorInfo() {
-  return caching_allocator_info;
-}
-
-bool CachingAllocatorInfo::enabled() {
-  return is_enabled_;
-}
-
-void CachingAllocatorInfo::enable() {
-  TORCH_CHECK(
-      allocator_ != nullptr,
-      "Enabling of caching allocator requires allocator "
-      "to be initialized via set_allocator");
-  is_enabled_ = true;
-}
-
-// Unfortunately get_allocator, cannot be inlined
-// because tis definition is removed, which result in
-// undefined ref.
-// Alternatively is to add allocate and free interface to
-// CachineAllocatorInfo, but that does not seem clean.
-CPUCachingAllocator* CachingAllocatorInfo::get_allocator() {
-  return allocator_;
-}
-
-void CachingAllocatorInfo::set_allocator(CPUCachingAllocator* allocator) {
-  allocator_ = allocator;
-}
-
-void CachingAllocatorInfo::disable() {
-  is_enabled_ = false;
+CPUCachingAllocator* GetThreadLocalCachingAllocator() {
+  return caching_allocator_ptr;
 }
 
 WithCPUCachingAllocatorGuard::WithCPUCachingAllocatorGuard(
-    CPUCachingAllocator* allocator, bool enable) {
-  prev_info_ = GetThreadLocalCachingAllocatorInfo();
-  GetThreadLocalCachingAllocatorInfo().set_allocator(allocator);
-  if (enable) {
-    GetThreadLocalCachingAllocatorInfo().enable();
-  } else {
-    GetThreadLocalCachingAllocatorInfo().disable();
-  }
+    CPUCachingAllocator* allocator) {
+  prev_caching_allocator_ptr_ = GetThreadLocalCachingAllocator();
 }
 
 WithCPUCachingAllocatorGuard::~WithCPUCachingAllocatorGuard() {
-  GetThreadLocalCachingAllocatorInfo() = prev_info_;
+  caching_allocator_ptr = prev_caching_allocator_ptr_;
 }
 
 } // namespace c10
