@@ -1615,6 +1615,11 @@ def slice(g, self, *args):
                 end_unsqueezed = g.op("Unsqueeze", end, axes_i=[0])
                 dim_unsqueezed = g.op("Unsqueeze", dim, axes_i=[0])
                 return g.op("DynamicSlice", self, start_unsqueezed, end_unsqueezed, dim_unsqueezed)
+        else:
+            start = _parse_arg(start, 'i')
+            end = _parse_arg(end, 'i')
+            dim = _parse_arg(dim, 'i')
+            return sym_help._slice_helper(g, self, axes=[dim], starts=[start], ends=[end])
     elif len(args) == 3:
         # aten::slice(t[] l, int start, int end, int step) -> t[]
         start, end, step = args
