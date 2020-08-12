@@ -11,8 +11,6 @@ import torch
 from . import (
     PyRRef,
     RemoteProfilerManager,
-    RpcBackendOptions,
-    TensorPipeAgent,
     WorkerInfo,
     _cleanup_python_rpc_handler,
     _delete_all_user_and_unforked_owner_rrefs,

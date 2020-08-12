@@ -674,7 +674,7 @@ class RpcTest(RpcAgentTestFixture):
                     self.init_method, rank=self.rank, world_size=self.world_size
                 )
             )
-            rpc.api._init_rpc_backend(
+            rpc._init_rpc_backend(
                 backend=self.rpc_backend,
                 store=store,
                 name="duplicate_name",

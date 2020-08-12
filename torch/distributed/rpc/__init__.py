@@ -1,6 +1,5 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
-import numbers
 import sys
 
 import torch
@@ -29,7 +28,6 @@ if is_available():
     from .server_process_global_profiler import (
         _server_process_global_profile,
     )
-    import torch.distributed as dist
     import torch.distributed.autograd as dist_autograd
 
     import numbers
