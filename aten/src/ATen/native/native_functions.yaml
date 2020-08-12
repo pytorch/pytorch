@@ -2803,6 +2803,16 @@
 
 - func: sum.DimnameList_out(Tensor self, Dimname[1] dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
 
+- func: nansum(Tensor self, *, ScalarType? dtype=None) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: nansum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: nansum.IntList_out(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+
 - func: sum_to_size(Tensor self, int[] size) -> Tensor
   use_c10_dispatcher: full
   variants: method

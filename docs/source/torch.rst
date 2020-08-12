@@ -328,6 +328,7 @@ Reduction Ops
     median
     mode
     norm
+    nansum
     prod
     quantile
     std

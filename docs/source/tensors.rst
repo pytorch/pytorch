@@ -416,6 +416,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: mv
    .. automethod:: mvlgamma
    .. automethod:: mvlgamma_
+   .. automethod:: nansum
    .. automethod:: narrow
    .. automethod:: narrow_copy
    .. automethod:: ndimension

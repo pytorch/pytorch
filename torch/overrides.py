@@ -689,6 +689,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
                      pad_mode='reflect', normalized=False, onesided=True: -1),
         torch.sub: lambda input, other, out=None: -1,
         torch.sum: lambda input, dim=None: -1,
+        torch.nansum: lambda input, dim=None: -1,
         torch.svd: lambda input, some=True, compute_uv=True, out=None: -1,
         torch.svd_lowrank: lambda input, q=6, niter=2, M=None: -1,
         torch.symeig: lambda input, eigenvectors=False, upper=True, out=None: -1,

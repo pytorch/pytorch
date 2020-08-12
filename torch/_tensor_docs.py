@@ -3071,6 +3071,13 @@ sum(dim=None, keepdim=False, dtype=None) -> Tensor
 See :func:`torch.sum`
 """)
 
+add_docstr_all('nansum',
+               r"""
+nansum(dim=None, keepdim=False, dtype=None) -> Tensor
+
+See :func:`torch.nansum`
+""")
+
 add_docstr_all('svd',
                r"""
 svd(some=True, compute_uv=True) -> (Tensor, Tensor, Tensor)
