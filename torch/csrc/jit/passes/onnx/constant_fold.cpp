@@ -43,15 +43,6 @@ std::unordered_map<int, at::ScalarType> onnxTypeToScalarTypeMap = {
     {ONNX_UINT32, at::kLong},
 };
 
-void eraseUnusedBlockInputs(Block* b) {
-  for (size_t i_1 = b->inputs().size(); i_1 > 0; --i_1) {
-    size_t i = i_1 - 1;
-    if (!b->inputs().at(i)->hasUses()) {
-      b->eraseInput(i);
-    }
-  }
-}
-
 void handleNegativeStartEndIndex(
     int64_t& start,
     int64_t& end,
