@@ -2884,6 +2884,7 @@ class TestQuantizedEmbeddingBag(TestCase):
 
 
     """ Tests the correctness of the embedding_bag_8bit quantized operator """
+    @skipIfNoFBGEMM
     @given(num_embeddings=st.integers(10, 100),
            embedding_dim=st.integers(5, 50).filter(lambda x: x % 4 == 0),
            num_offsets=st.integers(1, 20),

@@ -101,6 +101,7 @@ at::Tensor PackedEmbeddingWeight::embeddingbag_byte(
         });
   }
 #endif
+  // TODO add default (non-FBGEMM) implementation.
   return output;
 }
 

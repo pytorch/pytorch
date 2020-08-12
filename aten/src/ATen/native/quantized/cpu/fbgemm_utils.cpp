@@ -13,9 +13,8 @@
 
 #include <torch/custom_class.h>
 
-#include <ATen/native/quantized/cpu/packed_params.h>
-#include <ATen/native/quantized/cpu/qnnpack_utils.h>
 #include <ATen/native/quantized/cpu/embedding_packed_params.h>
+#include <ATen/native/quantized/cpu/packed_params.h>
 
 torch::class_<LinearPackedParamsBase> register_linear_params();
 torch::class_<EmbeddingPackedParamsBase> register_embedding_params();
