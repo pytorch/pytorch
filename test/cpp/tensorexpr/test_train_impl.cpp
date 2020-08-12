@@ -389,6 +389,29 @@ REGISTER_METHOD(
     });
 
 REGISTER_METHOD(
+    exp,
+    [](const std::vector<Tensor*>& inputs,
+       const std::vector<VTensor*>& vinputs,
+       const std::map<std::string, torch::jit::tensorexpr::VarHandle>&
+           vbindings) -> std::vector<Tensor*> {
+      TORCH_CHECK(inputs.size() == 1);
+      auto vars = get_vars(vinputs.at(0)->shape, vbindings);
+      Tensor* o = Compute("o", vars, [&](const VarHandle& i) {
+        return exp(inputs.at(0)->call(i));
+      });
+
+      return {o};
+    },
+    [](const std::vector<VTensor*>& inputs,
+       const std::vector<VTensor*>& ginputs) -> std::vector<VTensor*> {
+      return call("mul", {call("exp", {inputs[0]})[0], ginputs[0]});
+    },
+    [](const std::vector<VTensor*>& inputs)
+        -> std::vector<std::vector<std::string>> {
+      return {inputs[0]->shape};
+    });
+
+REGISTER_METHOD(
     matmul,
     [](const std::vector<Tensor*>& inputs,
        const std::vector<VTensor*>& vinputs,
@@ -470,6 +493,51 @@ REGISTER_METHOD(
       TORCH_CHECK(inputs.at(0)->shape[0] == inputs.at(1)->shape[1]);
       return {{inputs.at(0)->shape[1], inputs.at(1)->shape[0]}};
     });
+
+std::string expr_help(const VTensor* t, std::map<const VTensor*, int>& names) {
+  std::stringstream ss;
+  if (!names.count(t)) {
+    names[t] = names.size();
+  }
+  if (t->op) {
+    if (t->op->method->name == "mul") {
+      ss << "(" << expr_help(t->op->inputs.at(0), names);
+      ss << " * " << expr_help(t->op->inputs.at(1), names);
+      ss << ")";
+    } else if (t->op->method->name == "neg") {
+      ss << "-" << expr_help(t->op->inputs.at(0), names);
+    } else if (t->op->method->name == "sub") {
+      ss << "(" << expr_help(t->op->inputs.at(0), names);
+      ss << " - " << expr_help(t->op->inputs.at(1), names);
+      ss << ")";
+    } else if (t->op->method->name == "div") {
+      ss << "(" << expr_help(t->op->inputs.at(0), names);
+      ss << " / " << expr_help(t->op->inputs.at(1), names);
+      ss << ")";
+    } else if (t->op->method->name == "add") {
+      ss << "(" << expr_help(t->op->inputs.at(0), names);
+      ss << " + " << expr_help(t->op->inputs.at(1), names);
+      ss << ")";
+    } else {
+      ss << t->op->method->name << "(";
+      for (auto& inp : t->op->inputs) {
+        ss << expr_help(inp, names);
+        if (&inp != &t->op->inputs.back()) {
+          ss << ", ";
+        }
+      }
+      ss << ")";
+    }
+  } else {
+    ss << "%" << names.at(t);
+  }
+  return ss.str();
+}
+
+std::string expr(const VTensor* t) {
+  std::map<const VTensor*, int> tensor_names;
+  return expr_help(t, tensor_names);
+}
 
 std::string dot(const VGraph& g) {
   std::stringstream ss;

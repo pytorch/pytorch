@@ -38,6 +38,12 @@ struct T {
   T operator-(const T& other) {
     return T(call("sub", {vt_, other})[0]);
   }
+  T operator-() {
+    return T(call("neg", {vt_})[0]);
+  }
+  T exp() {
+    return T(call("exp", {vt_})[0]);
+  }
   T sum() {
     return T(call("sum", {vt_})[0]);
   }
@@ -245,6 +251,59 @@ void testTrainBasic() {
     std::vector<float> Z_vec(N, 0.0f);
     cg.call({X_vec.data(), Z_vec.data(), N});
     assertAllEqual(Z_vec, 2048.f);
+  }
+
+  {
+    VGraph g;
+    auto X = T(g, {"K"});
+    auto ones = T(g, {"K"});
+    auto sigmoid = ones / (ones + (-X).exp());
+    // swish
+    auto Y = X * sigmoid;
+    Stmt* s;
+    std::map<const VTensor*, Buffer> inputs;
+    std::map<const VTensor*, Tensor*> bindings;
+    std::map<std::string, VarHandle> vbindings;
+
+    KernelScope kernel_scope;
+    std::tie(s, inputs, bindings, vbindings) = to_tensorexpr(g, {Y});
+    SimpleIREvaluator cg(
+        s, {inputs.at(X), inputs.at(ones), bindings.at(Y), vbindings.at("K")});
+    auto N = 32;
+    std::vector<float> X_vec(N, 5.0f);
+    std::vector<float> ones_vec(N, 1.0f);
+    std::vector<float> Y_vec(N, 0.0f);
+    cg.call({X_vec.data(), ones_vec.data(), Y_vec.data(), N});
+    for (auto i = 0; i < N; ++i) {
+      ASSERT_LT(std::abs(Y_vec[i] - 4.96654), 0.001);
+    }
+  }
+
+  {
+    VGraph g;
+    auto X = T(g, {"K"});
+    auto ones = T(g, {"K"});
+    auto sigmoid = ones / (ones + (-X).exp());
+    auto swish = X * sigmoid;
+    auto Y = swish.grad(X, ones);
+    Stmt* s;
+    std::map<const VTensor*, Buffer> inputs;
+    std::map<const VTensor*, Tensor*> bindings;
+    std::map<std::string, VarHandle> vbindings;
+
+    KernelScope kernel_scope;
+    std::tie(s, inputs, bindings, vbindings) = to_tensorexpr(g, {Y});
+    SimpleIREvaluator cg(
+        s, {inputs.at(X), inputs.at(ones), bindings.at(Y), vbindings.at("K")});
+    auto N = 32;
+    std::vector<float> X_vec(N, 5.0f);
+    std::vector<float> ones_vec(N, 1.0f);
+    std::vector<float> Y_vec(N, 0.0f);
+    cg.call({X_vec.data(), ones_vec.data(), Y_vec.data(), N});
+    // from wolfram alpha
+    for (auto i = 0; i < N; ++i) {
+      ASSERT_FLOAT_EQ(Y_vec[i], 1.026547432f);
+    }
   }
 
   // Linear regression
