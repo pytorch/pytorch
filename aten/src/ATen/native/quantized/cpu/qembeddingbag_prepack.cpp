@@ -15,12 +15,15 @@ torch::class_<EmbeddingPackedParamsBase> register_embedding_params();
  * for each row along with the quantized weights.
  */
 // TODO: Extend this to support 4-bits once 4-bit qtensor support is added.
-c10::intrusive_ptr<EmbeddingPackedParamsBase> PackedEmbeddingWeight::prepack(
+c10::intrusive_ptr<EmbeddingPackedParamsBase> PackedEmbeddingBagWeight::prepack(
     at::Tensor qweight) {
   static constexpr int64_t version = 1;
   TORCH_CHECK(
       qweight.dim() == 2,
       "quantized::embedding_bag_prepack weight tensor rank should be 2");
+  TORCH_CHECK(
+      qweight.scalar_type() == c10::kQUInt8,
+      "qembedding_bag_prepack currently only supports quint8 weights");
 
   at::Tensor weight_contig =
       qweight.contiguous(qweight.suggest_memory_format());
@@ -73,7 +76,7 @@ c10::intrusive_ptr<EmbeddingPackedParamsBase> PackedEmbeddingWeight::prepack(
         }
       });
 
-  auto packed_ptr = c10::make_intrusive<PackedEmbeddingWeight>(
+  auto packed_ptr = c10::make_intrusive<PackedEmbeddingBagWeight>(
       output,
       weight_scales,
       weight_zero_points,
@@ -219,7 +222,7 @@ Tensor qembeddingbag_4bit_prepack(const Tensor& weight) {
 class QEmbeddingPackWeights final {
  public:
   static c10::intrusive_ptr<EmbeddingPackedParamsBase> run(at::Tensor weight) {
-    return PackedEmbeddingWeight::prepack(std::move(weight));
+    return PackedEmbeddingBagWeight::prepack(std::move(weight));
   }
 };
 

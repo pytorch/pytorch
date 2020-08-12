@@ -278,8 +278,8 @@ Tensor ConvertToChannelsLast3dTensor(const Tensor& src);
 
 #endif // USE_FBGEMM
 
-struct CAFFE2_API PackedEmbeddingWeight : public EmbeddingPackedParamsBase {
-  PackedEmbeddingWeight(
+struct CAFFE2_API PackedEmbeddingBagWeight : public EmbeddingPackedParamsBase {
+  PackedEmbeddingBagWeight(
       at::Tensor packed_w,
       std::vector<float> w_scale,
       std::vector<float> w_zp,

@@ -6,7 +6,7 @@
 
 torch::class_<EmbeddingPackedParamsBase> register_embedding_params();
 
-at::Tensor PackedEmbeddingWeight::unpack() {
+at::Tensor PackedEmbeddingBagWeight::unpack() {
   auto packed_weight = packed_w;
   at::Tensor weight_origin;
   if (bit_rate_ == 8) {

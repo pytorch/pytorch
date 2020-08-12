@@ -11,7 +11,7 @@
 
 torch::class_<EmbeddingPackedParamsBase> register_embedding_params();
 
-at::Tensor PackedEmbeddingWeight::embeddingbag_byte(
+at::Tensor PackedEmbeddingBagWeight::embeddingbag_byte(
     const at::Tensor& indices,
     const at::Tensor& offsets,
     bool sparse,
