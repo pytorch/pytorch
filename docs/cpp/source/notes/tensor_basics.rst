@@ -1,7 +1,7 @@
 Tensor Basics
 =============
 
-The ATen tensor library backing PyTorch is a simple tensor library thats exposes
+The ATen tensor library backing PyTorch is a simple tensor library that exposes
 the Tensor operations in Torch directly in C++14. ATen's API is auto-generated
 from the same declarations PyTorch uses so the two APIs will track each other
 over time.
@@ -113,7 +113,7 @@ you can view that memory as a ``Tensor`` in ATen:
   torch::Tensor f = torch::from_blob(data, {2, 3});
 
 These tensors cannot be resized because ATen does not own the memory, but
-otherwise behave as normal tensors.
+otherwise, behave as normal tensors.
 
 Scalars and zero-dimensional tensors
 ------------------------------------
@@ -142,7 +142,7 @@ will *always* return a Scalar value, like ``sum``.
   torch::Tensor r = torch::addmm(1.0, a, .5, b, c);
 
 In addition to ``Scalar``\s, ATen also allows ``Tensor`` objects to be
-zero-dimensional. These Tensors hold a single value and they can be references
+zero-dimensional. These Tensors hold a single value, and they can be references
 to a single element in a larger ``Tensor``. They can be used anywhere a
 ``Tensor`` is expected. They are normally created by operators like `select`
 which reduce the dimensions of a ``Tensor``.

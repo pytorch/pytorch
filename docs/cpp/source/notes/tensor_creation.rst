@@ -29,7 +29,7 @@ Picking a Factory Function
 **************************
 
 The following factory functions are available at the time of this writing (the
-hyperlinks lead to the corresponding Python functions, since they often have
+hyperlinks lead to the corresponding Python functions since they often have
 more eloquent documentation -- the options are the same in C++):
 
 - `arange <https://pytorch.org/docs/stable/torch.html#torch.arange>`_: Returns a tensor with a sequence of integers,
@@ -50,7 +50,7 @@ Specifying a Size
 
 Functions that do not require specific arguments by nature of how they fill the
 tensor can be invoked with just a size. For example, the following line creates
-a vector with 5 components, initially all set to 1:
+a vector with five components, initially all set to 1:
 
 .. code-block:: cpp
 
@@ -64,7 +64,7 @@ curly braces. For example, ``{2, 3}`` for a tensor (in this case matrix) with
 two rows and three columns, ``{3, 4, 5}`` for a three-dimensional tensor, and
 ``{2}`` for a one-dimensional tensor with two components. In the one
 dimensional case, you can omit the curly braces and just pass the single
-integer like we did above. Note that the squiggly braces are just one way of
+integer as we did above. Note that the squiggly braces are just one way of
 constructing an ``IntArrayRef``. You can also pass an ``std::vector<int64_t>`` and
 a few other types. Either way, this means we can construct a three-dimensional
 tensor filled with values from a unit normal distribution by writing:

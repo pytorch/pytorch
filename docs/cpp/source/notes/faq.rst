@@ -22,7 +22,7 @@ some C++ symbol from PyTorch or ATen is undefined. For example::
 the symbols from the PyTorch dynamic (shared) library that your extension
 depends on available, allowing them to be resolved once you import your extension.
 
-I created a tensor using a function from ``at::`` and get errors
+I created a tensor using a function from ``at::`` and get errors.
 ****************************************************************
 
 **Problem**: You created a tensor using e.g. ``at::ones`` or ``at::randn`` or
