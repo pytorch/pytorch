@@ -204,10 +204,11 @@ int main(int argc, char** argv) {
     std::cout << module.forward(inputs) << std::endl;
   }
 
-  std::unique_ptr<c10::CPUCachingAllocator> caching_allocator =
-    std::make_unique<c10::CPUCachingAllocator>();
-  c10::WithCPUCachingAllocatorGuard cachine_allocator_guard(
-      caching_allocator.get(), FLAGS_use_caching_allocator);
+  c10::CPUCachingAllocator caching_allocator;
+  c10::optional<c10::WithCPUCachingAllocatorGuard> caching_allocator_guard;
+  if (FLAGS_use_caching_allocator) {
+    caching_allocator_guard.emplace(&caching_allocator);
+  }
   std::cout << "Starting benchmark." << std::endl;
   std::cout << "Running warmup runs." << std::endl;
   CAFFE_ENFORCE(

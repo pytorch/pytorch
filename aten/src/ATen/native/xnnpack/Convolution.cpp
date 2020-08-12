@@ -200,16 +200,16 @@ Tensor run(
       MemoryFormat::ChannelsLast,
       padded_input_nhwc.names());
 
-  if (context.cached_input_ptr != padded_input_nhwc.data_ptr<float>() ||
-      context.cached_output_ptr != output.data_ptr<float>() ||
-      context.batch_size !=
-        padded_input_nhwc.size(Layout::Activation4D::batch) ||
-      context.input_channels !=
-        padded_input_nhwc.size(Layout::Activation4D::channels) ||
-      context.input_height !=
-        padded_input_nhwc.size(Layout::Activation4D::height) ||
-      context.input_width !=
-        padded_input_nhwc.size(Layout::Activation4D::width)
+  if ((context.cached_input_ptr != padded_input_nhwc.data_ptr<float>()) ||
+      (context.cached_output_ptr != output.data_ptr<float>()) ||
+      (padded_input_nhwc.size(Layout::Activation4D::batch) !=
+        context.batch_size) ||
+      (padded_input_nhwc.size(Layout::Activation4D::channels) !=
+        context.input_channels) ||
+      (padded_input_nhwc.size(Layout::Activation4D::height) !=
+        context.input_height) ||
+      (padded_input_nhwc.size(Layout::Activation4D::width) !=
+        context.input_width)
       ) {
     const xnn_status setup_status = xnn_setup_convolution2d_nhwc_f32(
         context.op.get(),                                      // operator
