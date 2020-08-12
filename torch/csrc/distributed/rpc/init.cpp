@@ -459,28 +459,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
   py::class_<TensorPipeRpcBackendOptions>(
       module,
       "_TensorPipeRpcBackendOptionsBase",
-      rpcBackendOptions,
-      R"(
-          The backend options for
-          :class:`~torch.distributed.rpc.TensorPipeAgent`, derived from
-          :class:`~torch.distributed.rpc.RpcBackendOptions`.
-
-          Arguments:
-              num_worker_threads (int, optional): The number of threads in the
-                  thread-pool used by
-                  :class:`~torch.distributed.rpc.TensorPipeAgent` to execute
-                  requests (default: 16).
-              rpc_timeout (float, optional): The default timeout, in seconds,
-                  for RPC requests (default: 60 seconds). If the RPC has not
-                  completed in this timeframe, an exception indicating so will
-                  be raised. Callers can override this timeout for individual
-                  RPCs in :meth:`~torch.distributed.rpc.rpc_sync` and
-                  :meth:`~torch.distributed.rpc.rpc_async` if necessary.
-              init_method (str, optional): The URL to initialize the distributed
-                  store used for rendezvous. It takes any value accepted for the
-                  same argument of :meth:`~torch.distributed.init_process_group`
-                  (default: ``env://``).
-      )")
+      rpcBackendOptions)
       .def(
           py::init<
               int,
@@ -507,17 +486,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
           R"(The device map locations.)")
       .def(
           "set_device_map",
-          &TensorPipeRpcBackendOptions::setDeviceMap,
-          R"(
-              Set device mapping between each RPC caller and callee pairs. This
-              function can be called multiple times to incrementally update
-              device placement configurations.
-
-              Arguments:
-                  worker_name (str): Callee name.
-                  device_map (Dict[int, int]): Device placment mappings from
-                  this worker to the callee. This map must be invertible.
-          )");
+          &TensorPipeRpcBackendOptions::setDeviceMap);
 
   module.attr("_DEFAULT_NUM_WORKER_THREADS") =
       py::cast(kDefaultNumWorkerThreads);

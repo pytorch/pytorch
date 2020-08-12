@@ -7,7 +7,27 @@ from typing import Dict, List
 
 
 class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
+    r"""
+    The backend options for
+    :class:`~torch.distributed.rpc.TensorPipeAgent`, derived from
+    :class:`~torch.distributed.rpc.RpcBackendOptions`.
 
+    Arguments:
+        num_worker_threads (int, optional): The number of threads in the
+            thread-pool used by
+            :class:`~torch.distributed.rpc.TensorPipeAgent` to execute
+            requests (default: 16).
+        rpc_timeout (float, optional): The default timeout, in seconds,
+            for RPC requests (default: 60 seconds). If the RPC has not
+            completed in this timeframe, an exception indicating so will
+            be raised. Callers can override this timeout for individual
+            RPCs in :meth:`~torch.distributed.rpc.rpc_sync` and
+            :meth:`~torch.distributed.rpc.rpc_async` if necessary.
+        init_method (str, optional): The URL to initialize the distributed
+            store used for rendezvous. It takes any value accepted for the
+            same argument of :meth:`~torch.distributed.init_process_group`
+            (default: ``env://``).
+    """
     def __init__(
         self,
         num_worker_threads: int = rpc_contants.DEFAULT_NUM_WORKER_THREADS,
@@ -25,6 +45,17 @@ class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
         )
 
     def set_device_map(self, to: str, device_map: Dict):
+        r"""
+        Set device mapping between each RPC caller and callee pair. This
+        function can be called multiple times to incrementally add
+        device placement configurations.
+
+        Arguments:
+            worker_name (str): Callee name.
+            device_map (Dict of int, str, or torch.device): Device placement
+                mappings from this worker to the callee. This map must be
+                invertible.
+        """
         device_index_map = {}
         curr_device_maps = super().device_maps
         for k in device_map:
