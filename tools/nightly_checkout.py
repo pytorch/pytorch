@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Much of the logging code here was forked from https://github.com/ezyang/ghstack
+# Copyright (c) Edward Z. Yang <ezyang@mit.edu>
 """Checks out the nightly development version of PyTorch and installs pre-built
 binaries into the repo.
 
@@ -19,25 +21,153 @@ import sys
 import json
 import glob
 import time
+import uuid
 import shutil
 import logging
+import datetime
 import tempfile
 import functools
 import contextlib
 import subprocess
 from ast import literal_eval
 from argparse import ArgumentParser
+from typing import Dict, Optional, Iterator
 
 
-LOGGER = logging.getLogger("conda-pytorch")
+LOGGER = None
 URL_FORMAT = "{base_url}/{platform}/{dist_name}.tar.bz2"
+DATETIME_FORMAT = '%Y-%m-%d_%Hh%Mm%Ss'
 SHA1_RE = re.compile("([0-9a-fA-F]{40})")
+USERNAME_PASSWORD_RE = re.compile(r":\/\/(.*?)\@")
+LOG_DIRNAME_RE = re.compile(
+    r"(\d{4}-\d\d-\d\d_\d\dh\d\dm\d\ds)_" r"[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}"
+)
 SPECS_TO_INSTALL = ("pytorch", "mypy", "pytest", "hypothesis", "ipython", "sphinx")
 
 
-def init_logging(level=logging.INFO):
-    """Start up the logger"""
-    logging.basicConfig(level=level)
+class Formatter(logging.Formatter):
+    redactions: Dict[str, str]
+
+    def __init__(self, fmt: Optional[str] = None, datefmt: Optional[str] = None):
+        super().__init__(fmt, datefmt)
+        self.redactions = {}
+
+    # Remove sensitive information from URLs
+    def _filter(self, s: str) -> str:
+        s = USERNAME_PASSWORD_RE.sub(r"://<USERNAME>:<PASSWORD>@", s)
+        for needle, replace in self.redactions.items():
+            s = s.replace(needle, replace)
+        return s
+
+    def formatMessage(self, record: logging.LogRecord) -> str:
+        if record.levelno == logging.INFO or record.levelno == logging.DEBUG:
+            # Log INFO/DEBUG without any adornment
+            return record.getMessage()
+        else:
+            # I'm not sure why, but formatMessage doesn't show up
+            # even though it's in the typeshed for Python >3
+            return super().formatMessage(record)  # type: ignore
+
+    def format(self, record: logging.LogRecord) -> str:
+        return self._filter(super().format(record))
+
+    def redact(self, needle: str, replace: str = "<REDACTED>") -> None:
+        """Redact specific strings; e.g., authorization tokens.  This won't
+        retroactively redact stuff you've already leaked, so make sure
+        you redact things as soon as possible.
+        """
+        # Don't redact empty strings; this will lead to something
+        # that looks like s<REDACTED>t<REDACTED>r<REDACTED>...
+        if needle == "":
+            return
+        self.redactions[needle] = replace
+
+
+@functools.lru_cache()
+def logging_base_dir() -> str:
+    meta_dir = os.getcwd()
+    base_dir = os.path.join(meta_dir, "nightly", "log")
+    os.makedirs(base_dir, exist_ok=True)
+    return base_dir
+
+
+@functools.lru_cache()
+def logging_run_dir() -> str:
+    cur_dir = os.path.join(
+        logging_base_dir(),
+        "{}_{}".format(datetime.datetime.now().strftime(DATETIME_FORMAT), uuid.uuid1()),
+    )
+    os.makedirs(cur_dir, exist_ok=True)
+    return cur_dir
+
+
+@functools.lru_cache()
+def logging_record_argv() -> None:
+    s = subprocess.list2cmdline(sys.argv)
+    with open(os.path.join(logging_run_dir(), "argv"), "w") as f:
+        f.write(s)
+
+
+def logging_record_exception(e: BaseException) -> None:
+    with open(os.path.join(logging_run_dir(), "exception"), "w") as f:
+        f.write(type(e).__name__)
+
+
+def logging_rotate() -> None:
+    log_base = logging_base_dir()
+    old_logs = os.listdir(log_base)
+    old_logs.sort(reverse=True)
+    for stale_log in old_logs[1000:]:
+        # Sanity check that it looks like a log
+        if LOG_DIRNAME_RE.fullmatch(stale_log) is not None:
+            shutil.rmtree(os.path.join(log_base, stale_log))
+
+
+@contextlib.contextmanager
+def logging_manager(*, debug: bool = False) -> Iterator[None]:
+    """Setup logging. If a failure starts here we won't
+    be able to save the user ina  reasonable way.
+
+    Logging structure: there is one logger (the root logger)
+    and in processes all events.  There are two handlers:
+    stderr (INFO) and file handler (DEBUG).
+    """
+    formatter = Formatter(fmt="%(levelname)s: %(message)s", datefmt="")
+    root_logger = logging.getLogger("conda-pytorch")
+    root_logger.setLevel(logging.DEBUG)
+
+    console_handler = logging.StreamHandler()
+    if debug:
+        console_handler.setLevel(logging.DEBUG)
+    else:
+        console_handler.setLevel(logging.INFO)
+    console_handler.setFormatter(formatter)
+    root_logger.addHandler(console_handler)
+
+    log_file = os.path.join(logging_run_dir(), "nightly.log")
+
+    file_handler = logging.FileHandler(log_file)
+    file_handler.setFormatter(formatter)
+    root_logger.addHandler(file_handler)
+    logging_record_argv()
+
+    try:
+        logging_rotate()
+        print(f"log file: {log_file}")
+        yield root_logger
+    except Exception as e:
+        logging.exception("Fatal exception")
+        logging_record_exception(e)
+        print(f"log file: {log_file}")
+        sys.exit(1)
+    except BaseException as e:
+        # You could logging.debug here to suppress the backtrace
+        # entirely, but there is no reason to hide it from technically
+        # savvy users.
+        logging.info("", exc_info=True)
+        logging_record_exception(e)
+        print(f"log file: {log_file}")
+        sys.exit(1)
 
 
 def check_in_repo():
@@ -81,6 +211,7 @@ def timed(prefix):
     def dec(f):
         @functools.wraps(f)
         def wrapper(*args, **kwargs):
+            global LOGGER
             LOGGER.info(prefix)
             with timer(LOGGER, prefix):
                 return f(*args, **kwargs)
@@ -361,8 +492,10 @@ def write_pth(env_opts, platform):
         f.write(s)
 
 
-def install(branch=None, name=None, prefix=None):
+def install(branch=None, name=None, prefix=None, logger=None):
     """Development install of PyTorch"""
+    global LOGGER
+    logger = logger or LOGGER
     deps, pytorch, platform, existing_env, env_opts = conda_solve(
         name=name, prefix=prefix
     )
@@ -374,7 +507,7 @@ def install(branch=None, name=None, prefix=None):
     move_nightly_files(spdir, platform)
     write_pth(env_opts, platform)
     pytdir.cleanup()
-    print(
+    logger.info(
         "-------\nPyTorch Development Environment set up!\nPlease activate to "
         f"enable this environment:\n  $ conda activate {env_opts[1]}"
     )
@@ -406,19 +539,24 @@ def make_parser():
         default=None,
         metavar="PATH",
     )
+    p.add_argument('-v', '--verbose', help="Provide debugging info", dest="verbose",
+        default=False, action="store_true",
+    )
     return p
 
 
 def main(args=None):
     """Main entry point"""
+    global LOGGER
     p = make_parser()
     ns = p.parse_args(args)
-    init_logging()
     status = check_in_repo()
     status = status or check_branch(ns.branch)
     if status:
         sys.exit(status)
-    install(branch=ns.branch, name=ns.name, prefix=ns.prefix)
+    with logging_manager(debug=ns.verbose) as logger:
+        LOGGER = logger
+        install(branch=ns.branch, name=ns.name, prefix=ns.prefix, logger=logger)
 
 
 if __name__ == "__main__":
