@@ -96,6 +96,7 @@ static void FuseWithListUnpack(Block* b) {
       case aten::unsafe_split_with_sizes:
       case aten::unbind:
       case aten::unsafe_chunk:
+      case aten::where:
         FuseWithListUnpack(*it);
         break;
       default:
