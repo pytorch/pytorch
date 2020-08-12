@@ -5,8 +5,6 @@ from torch.testing._internal.jit_utils import JitTestCase
 
 from torch.testing import FileCheck
 
-from torch.jit._recursive import wrap_cpp_module
-
 import io
 
 if __name__ == '__main__':
@@ -1028,55 +1026,3 @@ class TestFreezing(JitTestCase):
         fm = torch._C._freeze_module(m._c, ["modify_a"])
         FileCheck().check('prim::GetAttr[name="a"]').run(fm.forward.graph)
         FileCheck().check('prim::GetAttr[name="b"]').run(fm.modify_a.graph)
-
-    def test_module_with_shared_type_instances(self):
-        class Child(nn.Module):
-            def __init__(self):
-                super(Child, self).__init__()
-                self.conv1 = nn.Conv2d(1, 1, 1)
-
-            def forward(self, x):
-                x = self.conv1(x)
-                return x
-
-        class Parent(nn.Module):
-            def __init__(self):
-                super(Parent, self).__init__()
-                self.quant = torch.quantization.QuantStub()
-                self.conv1 = nn.Conv2d(1, 1, 1)
-                self.child = Child()
-                self.child2 = Child()
-                self.dequant = torch.quantization.DeQuantStub()
-
-            def forward(self, x):
-                x = self.quant(x)
-                x = self.conv1(x)
-                x = self.child(x)
-                x = self.child2(x)
-                x = self.dequant(x)
-                return x
-
-        def _static_quant(model):
-            model.qconfig = torch.quantization.get_default_qconfig('qnnpack')
-            torch.quantization.prepare(model, inplace=True)
-            model(torch.rand(4, 1, 4, 4))
-            model = torch.quantization.convert(model, inplace=False)
-            return model
-
-        current_dtype = torch.get_default_dtype()
-        torch.set_default_dtype(torch.float32)
-        data = torch.randn(4, 1, 4, 4)
-        m = Parent()
-        m = _static_quant(m)
-        m = torch.jit.script(m)
-        m.eval()
-        torch._C._jit_pass_inline(m.graph)
-        m_frozen = wrap_cpp_module(torch._C._freeze_module(m._c))
-        # Earlier bug resulted in _packed_params set to false.
-        FileCheck().check_not('_packed_params = False').run(m_frozen._c.dump_to_str(True, True, False))
-
-        m_res = m(data)
-        # It used to segfault while running frozen module.
-        m_frozen_res = m_frozen(data)
-        self.assertEqual(m_res, m_frozen_res)
-        torch.set_default_dtype(current_dtype)
