@@ -971,7 +971,6 @@ if(USE_DISTRIBUTED)
   # Pass USE_TENSORPIPE to torch_cpu as some parts of rpc/utils.cpp
   # can only be compiled with USE_TENSORPIPE is set.
   if(USE_TENSORPIPE)
-    message(FATAL_ERROR "Tensorpipe cannot be used on Windows caffe2.")
     target_compile_definitions(torch_cpu PRIVATE
       USE_TENSORPIPE
     )
