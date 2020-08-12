@@ -1,35 +1,44 @@
 import os
 import pickle
+import sys
 import types
 import zipfile
 
-class Loader:
-    def __init__(self, base, zf, globals):
+class Loader(types.ModuleType):
+    def __init__(self, base, zf, globals, name=""):
+        super().__init__(name)
         self.base = base
         self.zf = zf
         self.globals = globals.copy()
-        self.fresh = True
+        self.fresh_module = False
+        self.compiled = False
+        self.unmangle = ['_ResNet', '_Sequential', '_BasicBlock', '_Conv2d']
 
     def __getattr__(self, name):
-        if name[:7] == "_ResNet":
-            name = name[7:]
-        # if name == '_ResNet___torch_mangle_29':
-            # import ipdb; ipdb.set_trace()
-        print("{} -> {}".format(self.base, name))
+        for prefix in self.unmangle:
+            if name.find(prefix) == 0:
+                name = name[len(prefix):]
         dirname = os.path.join(self.base, name)
         filename = dirname + '.py'
-        if filename in self.zf.namelist():
-            # the Loader for 'module' is loading 'linear.py' which should define some stuff (Linear? others?).  
-            # We would like to eval it into a 'module' object and setattr the new module
-            # but we can't eval it bc it depends on itself for annotations 
-            # what if i can somehow eval into myself instead of this 'globals' thing?  i need Linear to exist inside 'linear'.
+        print("{} -> {}".format(self.base, name))
+
+        if name in self.globals:
+            # Stuff in the module by this name takes precedence, then subdirs
+            print("   Return existing globals for {}".format(name))
+            return self.globals[name]
+
+        if filename in self.zf.namelist() and not self.compiled:
+            # If the filename names a module, compile it
+            #   - the same name can also be a directory leading to other modules
             ldr = Loader(dirname, self.zf, self.globals)
-            setattr(self, name, ldr) # Temporary class to allow annotations to work
+            ldr.fresh_module = True
+            setattr(self, name, ldr)  # Temporary class to allow annotations to work
             self.globals[name] = ldr
             f = self.zf.read(filename)
             print("   Compile: ", name)
             exec(compile(f, name, 'exec'), ldr.globals)
-            ldr.fresh = False
+            ldr.fresh_module = False
+            ldr.compiled = True
             print("   Return finished loader for module {}".format(name))
             return ldr
 
@@ -39,28 +48,11 @@ class Loader:
             print("   Return loader for dir {}".format(name))
             return attr
 
+        if self.fresh_module:
+            print("   Return Dummy Class for {}".format(name))
+            return types.new_class("Dummy Class")
 
-        # Need to find a way to return a dummy that 
-        # - can be used recursively
-        #   - e.g. while compiling 'resnet' module, 
-        #          dummy 'resnet._Sequential___torch_mangle_13' gets returned
-        # .        and BasicBlock gets looked up on that dummy
-        # - could also be terminal
-        #   - I am replacing the terminal ones above, which will break the recursive part
-
-        # i'm looking up 'Sequential' class correctly from 'container.py' module
-        # but failing to treat '_ResNet___torch_mangle_29' as a module name in 'container' dir
-        # since container already exists as a .py module
-        # how do I make a correct distinction?
-        if self.fresh:
-            # return types.new_class("Dummy Class")
-            print("   Return sub- loader for {}".format(name))
-            return Loader(dirname, self.zf, self.globals)
-        else:
-            if name in self.globals:
-                print("   Return globals for {}".format(name))
-                return self.globals[name]
-            raise AttributeError("{} not found in {}".format(name, self.base))
+        raise AttributeError("{} not found in {}".format(name, self.base))
 
 
 class TorchUnpickler(pickle.Unpickler):
@@ -75,38 +67,30 @@ class TorchUnpickler(pickle.Unpickler):
                 mod = self.resolver
             else:
                 mod = getattr(mod, step)
-        
-        import ipdb; ipdb.set_trace()
-        print("foo")
+        return mod
 
 
 def load(filename):
 
     glob = {}
-    # glob['pickle'] = pickle
     exec(compile('from torch import Tensor', 'import tensor', 'exec'), glob)
-    with open('torchpy/module.py', 'r') as f:
-        exec(compile(f.read(), 'module.py', 'exec'), glob)
+    exec(compile("class Module:  pass", 'module.py', 'exec'), glob)
 
-
-    filename_no_ext = 'resnet'
+    filename_no_ext = os.path.splitext(os.path.split(filename)[-1])[0]
     with zipfile.ZipFile(filename, 'r') as f:
-        resolver = Loader('{}/code/__torch__'.format(filename_no_ext), f, glob) 
+        resolver = Loader('{}/code/__torch__'.format(filename_no_ext), f, glob, name="__torch__") 
         glob['__torch__'] = resolver
         glob['__torch__'].globals['__torch__'] = resolver
-        
-        # with open('/home/whc/local/pytorch/torchpy/example/resnet_extracted/resnet/code/__torch__/torch/nn/modules/linear.py', 'r') as f:
-            # exec(compile(f.read(), 'module.py', 'exec'), glob)
-        # with open('/home/whc/local/pytorch/torchpy/example/resnet_extracted/resnet/code/__torch__/torchvision/models/resnet.py', 'r') as f:
-            # exec(compile(f.read(), 'module.py', 'exec'), glob)
+        sys.modules['__torch__'] = resolver
 
-        for src in ['data.pkl']: #['constants.pkl', 'data.pkl']:
+        for src in ['data.pkl']:  # ['constants.pkl', 'data.pkl']:
             fname = os.path.join(filename_no_ext, src)
+            # pickle.load(f.open(fname)) # TypeError: 'Loader' object is not iterable assuming sys.modules[__torch__] points to resolver
             upk = TorchUnpickler(resolver, f.open(fname))
             upk.load()
             print("blah")
 
-    return None
+    return "model"
 
 
 if __name__ == "__main__":
