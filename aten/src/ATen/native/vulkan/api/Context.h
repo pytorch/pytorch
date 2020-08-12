@@ -11,6 +11,14 @@ namespace native {
 namespace vulkan {
 namespace api {
 
+//
+// Vulkan Context holds onto all relevant Vulkan state as it pertains to our
+// use of Vulkan in PyTorch.  The context is currently a global object, but
+// technically it does not need to be if we were to store this state as part
+// of the operators themselves.  This would have required custom op registration
+// for all operators which is not practical in eager mode PyTorch.
+//
+
 class Context final {
  public:
   explicit Context(bool enable_validation_layers);

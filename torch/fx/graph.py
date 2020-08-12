@@ -1,3 +1,4 @@
+# type: ignore
 from .node import Node, Attribute, magic_methods
 
 import builtins
@@ -163,7 +164,8 @@ class Graph:
                 continue
             elif node.op == 'call_method':
                 body.append(
-                    f'{node.name} = {_format_target(repr(node.args[0]), node.target)}({_format_args(node.args[1:], node.kwargs)})\n')
+                    f'{node.name} = {_format_target(repr(node.args[0]), node.target)}'
+                    f'({_format_args(node.args[1:], node.kwargs)})\n')
                 continue
             elif node.op == 'call_function':
                 # pretty print operators
