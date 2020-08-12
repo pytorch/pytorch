@@ -12,8 +12,7 @@ namespace native {
 // Use REGISTER_DISPATCH to run CPU and CUDA backend.
 DEFINE_DISPATCH(fake_quant_per_channel_stub);
 DEFINE_DISPATCH(fake_quant_grad_per_channel_stub);
-DEFINE_DISPATCH(fake_quant_grad_learnable_scale_channel_stub);
-DEFINE_DISPATCH(fake_quant_grad_learnable_zero_point_channel_stub);
+DEFINE_DISPATCH(fake_quant_grad_learnable_channel_stub);
 
 /* Per channel fake-quantizes the 'inputs' tensor.
 Args:
@@ -163,24 +162,6 @@ Tensor fake_quantize_per_channel_affine_backward(
   return dX;
 }
 
-TensorIterator _build_iterator(
-    const Tensor& dX,
-    const Tensor& X,
-    const Tensor& dY,
-    const Tensor& scale,
-    const Tensor& zero_point,
-    std::vector<int64_t> expected_shape) {
-  TensorIterator iter = TensorIteratorConfig()
-    .check_all_same_dtype(false)
-    .add_output(dX)
-    .add_input(X)
-    .add_input(dY)
-    .add_input(native::_unsafe_view(scale, expected_shape))
-    .add_input(native::_unsafe_view(zero_point, expected_shape))
-    .build();
-  return iter;
-}
-
 Tensor _get_rounded_zero_point(
     const Tensor& zero_point,
     int64_t quant_min,
@@ -189,44 +170,7 @@ Tensor _get_rounded_zero_point(
   for (int i = 0; i < zero_point.sizes()[0]; ++i) {
     zero_point[i] = static_cast<int64_t>(zero_point[i].item<float>() + 0.5);
   }
-  return zero_point.clamp(quant_min, quant_max).to(at::kLong);
-}
-
-std::tuple<Tensor, Tensor> _get_scale_zero_point_per_channel_iter_grads(
-    const Tensor& dY,
-    const Tensor& X,
-    const Tensor& scale,
-    const Tensor& zero_point,
-    int64_t axis,
-    int64_t quant_min,
-    int64_t quant_max) {
-
-  int64_t axis_size = X.size(axis);
-  std::vector<Tensor> X_flattened = at::unbind(X, axis);
-  std::vector<Tensor> dY_flattened = at::unbind(dY, axis);
-
-  Tensor dScale = at::zeros({scale.sizes()[0]});
-  Tensor dZeroPoint = at::zeros({zero_point.sizes()[0]});
-
-  for (int i = 0; i < X_flattened.size(); ++i) {
-    Tensor X_i = X_flattened[i];
-    Tensor dY_i = dY_flattened[i];
-    auto dScale_item_vec = at::empty_like(X_i, X_i.options(), MemoryFormat::Preserve);
-    auto dZeroPoint_item_vec = at::empty_like(X_i, X_i.options(), MemoryFormat::Preserve);
-
-    float scale_i = scale[i].item<float>();
-    int64_t zero_point_i = static_cast<int64_t>(std::min(std::max(zero_point[i].item<float>() + 0.5f, quant_min), quant_max));
-    fake_quant_grad_learnable_scale_channel_stub(
-      scale.device().type(), dScale_item_vec, X_i, dY_i, scale_i, zero_point_i, quant_min, quant_max);
-    fake_quant_grad_learnable_zero_point_channel_stub(
-      zero_point.device().type(), dZeroPoint_item_vec, X_i, dY_i, scale_i, zero_point_i, quant_min, quant_max);
-    float scale_item = dScale_item_vec.sum().unsqueeze(0).item<float>();
-    float zero_point_item = dZeroPoint_item_vec.sum().unsqueeze(0).item<float>();
-
-    dScale[i] = scale_item;
-    dZeroPoint[i] = zero_point_item;
-  }
-  return std::make_tuple(dScale, dZeroPoint);
+  return zero_point.clamp(quant_min, quant_max).to(at::kFloat);
 }
 
 Tensor _fake_quantize_learnable_per_channel_affine(
@@ -300,21 +244,50 @@ std::tuple<Tensor, Tensor, Tensor> _fake_quantize_learnable_per_channel_affine_b
 
   auto zero_point_rounded = _get_rounded_zero_point(zero_point, quant_min, quant_max);
   auto dX = at::empty_like(X, X.options(), MemoryFormat::Preserve);
+  auto dScale_vec = at::empty_like(X, X.options(), MemoryFormat::Preserve);
+  auto dZeroPoint_vec = at::empty_like(X, X.options(), MemoryFormat::Preserve);
+  int numDimensions = X.ndimension();
 
-  std::vector<int64_t> expected_shape_X(X.dim(), 1);
-  expected_shape_X[axis] = X.size(axis);
+  // Create an axis mask for vectorizing and reshaping the scale and zero point tensors
+  // into the same shapes as X along the channel axis.
+  int64_t* axis_mask = (int64_t *) calloc(numDimensions, sizeof(int64_t));
+  for (int i = 0; i < numDimensions; ++i) {
+    axis_mask[i] = (i == axis) ? X.size(axis) : 1;
+  }
+  auto X_shape = X.sizes();
+  auto scale_vectorized = scale.reshape(at::IntArrayRef(axis_mask, numDimensions)).expand(X_shape);
+  auto zero_point_vectorized = zero_point.reshape(at::IntArrayRef(axis_mask, numDimensions)).expand(X_shape);
 
-  TensorIterator iter_X = native::_build_iterator(
-    dX, X, dY, scale, zero_point_rounded, expected_shape_X);
+  auto iter = TensorIteratorConfig()
+    .add_output(dX)
+    .add_output(dScale_vec)
+    .add_output(dZeroPoint_vec)
+    .add_input(X)
+    .add_input(dY)
+    .add_input(scale_vectorized)
+    .add_input(zero_point_vectorized)
+    .build();
 
-  fake_quant_grad_per_channel_stub(iter_X.device_type(), iter_X, quant_min, quant_max);
+  fake_quant_grad_learnable_channel_stub(
+    X.device().type(), iter, quant_min, quant_max);
 
-  std::tuple<Tensor, Tensor> dScaleZeroPoints = native::_get_scale_zero_point_per_channel_iter_grads(
-    dY, X, scale, zero_point, axis, quant_min, quant_max);
+  auto numElements = X.ndimension() - 1;
 
-  Tensor dScale = std::get<0>(dScaleZeroPoints).to(scale.device());
-  Tensor dZeroPoint = std::get<1>(dScaleZeroPoints).to(zero_point.device());
+  // Create a collection of axes that include all but the channel axis for
+  // reduction when summing over the dScale and dZeroPoint tensors.
+  int64_t* axis_for_reduction = (int64_t*) calloc(numElements, sizeof(int64_t));
+  for (int i = 0; i < axis; ++i) {
+    axis_for_reduction[i] = i;
+  }
+  for (int i = axis; i < numElements; ++i) {
+    axis_for_reduction[i] = i + 1;
+  }
 
+  auto dScale = dScale_vec.sum(at::IntArrayRef(axis_for_reduction, numElements));
+  auto dZeroPoint = dZeroPoint_vec.sum(at::IntArrayRef(axis_for_reduction, numElements));
+
+  free(axis_mask);
+  free(axis_for_reduction);
   return std::make_tuple(dX, dScale, dZeroPoint);
 }
 } // namespace native
