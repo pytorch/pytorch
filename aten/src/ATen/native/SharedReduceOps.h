@@ -315,6 +315,31 @@ struct NormTwoOps {
 #endif
 };
 
+template <typename acc_t, typename data_t>
+struct NanSumOps {
+  inline C10_DEVICE acc_t reduce(acc_t a, data_t b, int64_t /*idx*/) const {
+    return a + (at::_isnan(b) ? acc_t{0.} : acc_t{b});
+  }
+
+  inline C10_DEVICE acc_t combine(acc_t a, acc_t b) const {
+    return  a + b;
+  }
+
+  inline C10_DEVICE data_t project(acc_t a) const {
+    return data_t{a};
+  }
+
+  static C10_DEVICE acc_t translate_idx(acc_t acc, int64_t /*base_idx*/) {
+    return acc;
+  }
+
+#if defined(__CUDACC__) || defined(__HIPCC__)
+  inline C10_DEVICE acc_t warp_shfl_down(acc_t data, int offset) const {
+    return WARP_SHFL_DOWN(data, offset);
+  }
+#endif
+};
+
 namespace detail {
 
 template <typename scalar_t>

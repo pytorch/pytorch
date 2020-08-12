@@ -266,14 +266,20 @@ void CudaPrinter::visit(const Intrinsics* v) {
 void CudaPrinter::visit(const Load* v) {
   // TODO: find a better metric in using ldg or not. Support different dtypes.
   if (v->dtype().scalar_type() == ScalarType::Half) {
-    os() << "__half2float(" << *v->base_handle() << "[" << *v->flat_index()
-         << "])";
+    if (v->indices().empty()) {
+      os() << "__half2float(" << *v->base_handle() << ")";
+    } else {
+      os() << "__half2float(" << *v->base_handle() << "[" << *v->flat_index()
+           << "])";
+    }
   } else {
     // Detects whether the load target is also a store target.
     // TODO: this is currently too wide. It detects whether a store-target
     // exists within the program. In fact, this check is only necessary within a
     // kernel.
-    if (!cuda_analysis_->is_buf_store_target(v->buf())) {
+    if (v->indices().empty()) {
+      os() << *v->base_handle();
+    } else if (!cuda_analysis_->is_buf_store_target(v->buf())) {
       // Cuda __ldg can only be applied on read-only buffers.
       os() << "__ldg(" << *v->base_handle() << " + " << *v->flat_index() << ")";
     } else {
@@ -312,6 +318,9 @@ static bool isAtomicAdd(const Store* v, const Expr** atomic_add_value) {
   if (v->base_handle() != load_v->base_handle()) {
     return false;
   }
+  if (v->indices().empty() && load_v->indices().empty()) {
+    return false;
+  }
   bool index_equal = CheckEqual(v->flat_index(), load_v->flat_index());
   if (index_equal) {
     *atomic_add_value = add_v->rhs();
@@ -333,7 +342,11 @@ class AtomicAddFuser : public IRMutator {
 
 void CudaPrinter::visit(const Store* v) {
   emitIndent();
-  os() << *v->base_handle() << "[" << *v->flat_index() << "] = ";
+  if (v->indices().empty()) {
+    os() << *v->base_handle() << " = ";
+  } else {
+    os() << *v->base_handle() << "[" << *v->flat_index() << "] = ";
+  }
   if (v->value()->dtype().scalar_type() == ScalarType::Half) {
     os() << "__float2half(" << *v->value() << ");";
   } else {

@@ -20,7 +20,7 @@ core.GlobalInit(["caffe2", "--caffe2_log_level=-3", "--glow_global_fp16=1"])
 
 class TestBatchMatMul(serial.SerializedTestCase):
     @given(
-        #C=0, #st.integers(min_value=0, max_value=3),  # number of batch dims
+        # C=0, #st.integers(min_value=0, max_value=3),  # number of batch dims
         M=st.integers(min_value=1, max_value=10),
         K=st.integers(min_value=1, max_value=10),
         N=st.integers(min_value=1, max_value=10),
@@ -29,6 +29,7 @@ class TestBatchMatMul(serial.SerializedTestCase):
         trans_b=st.booleans(),
         run_ints=st.booleans()
     )
+    @settings(deadline=10000)
     def test_batch_matmul(self, M, K, N, rand_seed, trans_a, trans_b, run_ints):
         np.random.seed(rand_seed)
         workspace.ResetWorkspace()
