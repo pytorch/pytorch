@@ -54,6 +54,11 @@ c10::optional<ParallelType> NamedScalar::getParallelIndex() const {
   return c10::nullopt;
 }
 
+IterDomain::IterDomain(Val* start, Val* extent)
+    : Val(ValType::KirIterDomain, DataType::Int, true, true),
+      start_(start),
+      extent_(extent) {}
+
 IterDomain::IterDomain(const fuser::IterDomain* iter_domain)
     : Val(iter_domain),
       start_(lowerValue(iter_domain->start())),
@@ -81,6 +86,12 @@ Val* IterDomain::extent() const {
     return NamedScalar::getParallelDim(getParallelType());
   }
   return extent_;
+}
+
+TensorDomain::TensorDomain(std::vector<IterDomain*> domain)
+    : Val(ValType::KirTensorDomain), root_domain_(std::move(domain)) {
+  domain_ = root_domain_;
+  resetDomains();
 }
 
 TensorDomain::TensorDomain(const fuser::TensorDomain* tensor_domain)
@@ -139,6 +150,31 @@ IterDomain* TensorDomain::axis(int i) const {
   TORCH_INTERNAL_ASSERT(i >= 0 && i < int(domain_.size()));
   return domain_[i];
 }
+
+std::vector<IterDomain*> TensorDomain::noReductions(
+    const std::vector<IterDomain*>& td) {
+  std::vector<IterDomain*> no_reduction_domains;
+  for (auto id : td) {
+    if (!id->isReduction()) {
+      no_reduction_domains.push_back(id);
+    }
+  }
+  return no_reduction_domains;
+}
+
+std::vector<IterDomain*> TensorDomain::noBroadcasts(
+    const std::vector<IterDomain*>& td) {
+  std::vector<IterDomain*> no_broadcast_domains;
+  for (auto id : td) {
+    if (!id->isBroadcast()) {
+      no_broadcast_domains.push_back(id);
+    }
+  }
+  return no_broadcast_domains;
+}
+
+TensorView::TensorView(TensorDomain* domain, DataType dtype)
+    : Val(ValType::KirTensorView, dtype, true, true), domain_(domain) {}
 
 TensorView::TensorView(const fuser::TensorView* tv) : Val(tv), fuser_tv_(tv) {
   domain_ = lowerValue(tv->domain())->as<TensorDomain>();
@@ -401,19 +437,15 @@ Allocate::Allocate(Val* buffer, MemoryType memory_type, Val* size)
   if (size_ != nullptr) {
     TORCH_INTERNAL_ASSERT(
         size_->isOneInt() ||
-            buffer_->getValType().value() == ValType::TensorView,
+            buffer_->getValType().value() == ValType::KirTensorView,
         "Cannot allocate a non-TensorView buffer with a size != 1, received buffer: ",
         buffer_);
   } else {
-    if (buffer_->getValType().value() == ValType::TensorView) {
-      const auto domain = buffer_->as<fuser::TensorView>()->domain();
-      size_ = domain->nDims() == 0 ? new Int(1) : domain->axis(0)->extent();
-      for (size_t i = 1; i < domain->nDims(); i++) {
-        auto result = new Int(c10::nullopt);
-        new BinaryOp(
-            BinaryOpType::Mul, result, size_, domain->axis(i)->extent());
-        size_ = result;
-      }
+    TORCH_CHECK(buffer_->getValType().value() == ValType::KirTensorView);
+    const auto domain = buffer_->as<TensorView>()->domain();
+    size_ = domain->nDims() == 0 ? new Int(1) : domain->axis(0)->extent();
+    for (size_t i = 1; i < domain->nDims(); i++) {
+      size_ = mulExpr(size_, domain->axis(i)->extent());
     }
   }
 

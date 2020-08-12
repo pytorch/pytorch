@@ -165,6 +165,8 @@ class TORCH_CUDA_API Int : public Val {
 
 class TORCH_CUDA_API IterDomain : public Val {
  public:
+  IterDomain(Val* start, Val* extent);
+
   explicit IterDomain(const fuser::IterDomain* iter_domain);
 
   IterDomain(const IterDomain* src, IrCloner* ir_cloner);
@@ -231,6 +233,8 @@ class TORCH_CUDA_API IterDomain : public Val {
 
 class TORCH_CUDA_API TensorDomain : public Val {
  public:
+  explicit TensorDomain(std::vector<IterDomain*> domain);
+
   explicit TensorDomain(const fuser::TensorDomain* tensor_domain);
 
   TensorDomain(const TensorDomain* src, IrCloner* ir_cloner);
@@ -284,16 +288,8 @@ class TORCH_CUDA_API TensorDomain : public Val {
 
   IterDomain* axis(int i) const;
 
-  size_t posOf(IterDomain* id) const;
-
   static std::vector<IterDomain*> noReductions(const std::vector<IterDomain*>&);
   static std::vector<IterDomain*> noBroadcasts(const std::vector<IterDomain*>&);
-
-  static bool hasBroadcast(const std::vector<IterDomain*>&);
-  static bool hasReduction(const std::vector<IterDomain*>&);
-
-  // pair is in order where second is the consumer of first
-  std::pair<TensorDomain*, TensorDomain*> rFactor(const std::vector<int>& axes);
 
  private:
   std::vector<IterDomain*> root_domain_;
@@ -306,6 +302,8 @@ class TORCH_CUDA_API TensorDomain : public Val {
 
 class TORCH_CUDA_API TensorView : public Val {
  public:
+  TensorView(TensorDomain* domain, DataType dtype);
+
   explicit TensorView(const fuser::TensorView* tv);
 
   TensorView(const TensorView* src, IrCloner* ir_cloner);
@@ -319,6 +317,7 @@ class TORCH_CUDA_API TensorView : public Val {
   }
 
   const fuser::TensorView* fuserTv() const {
+    TORCH_INTERNAL_ASSERT(fuser_tv_ != nullptr);
     return fuser_tv_;
   }
 

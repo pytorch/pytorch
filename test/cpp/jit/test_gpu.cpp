@@ -1174,17 +1174,17 @@ __global__ void CUDAGeneratedKernel(Tensor<float, 1> T0, Tensor<float, 1> T1, Te
     }
   }
   if ( ( ( ( ( ( blockIdx.x * 4 ) + ( 4 - 1 ) ) * 128 ) + threadIdx.x ) < T3.size[0] ) ) {
-    for(size_t i11 = 0; i11 < 4; ++i11 ) {
-      T3[ ( ( ( ( blockIdx.x * 4 ) + i11 ) * 128 ) + threadIdx.x ) ]
-         = T2[ i11 ]
-         * T0[ ( ( ( ( blockIdx.x * 4 ) + i11 ) * 128 ) + threadIdx.x ) ];
+    for(size_t i15 = 0; i15 < 4; ++i15 ) {
+      T3[ ( ( ( ( blockIdx.x * 4 ) + i15 ) * 128 ) + threadIdx.x ) ]
+         = T2[ i15 ]
+         * T0[ ( ( ( ( blockIdx.x * 4 ) + i15 ) * 128 ) + threadIdx.x ) ];
     }
   } else {
-    for(size_t i11 = 0; i11 < 4; ++i11 ) {
-      if ( ( ( ( ( ( blockIdx.x * 4 ) + i11 ) * 128 ) + threadIdx.x ) < T3.size[0] ) ) {
-        T3[ ( ( ( ( blockIdx.x * 4 ) + i11 ) * 128 ) + threadIdx.x ) ]
-           = T2[ i11 ]
-           * T0[ ( ( ( ( blockIdx.x * 4 ) + i11 ) * 128 ) + threadIdx.x ) ];
+    for(size_t i15 = 0; i15 < 4; ++i15 ) {
+      if ( ( ( ( ( ( blockIdx.x * 4 ) + i15 ) * 128 ) + threadIdx.x ) < T3.size[0] ) ) {
+        T3[ ( ( ( ( blockIdx.x * 4 ) + i15 ) * 128 ) + threadIdx.x ) ]
+           = T2[ i15 ]
+           * T0[ ( ( ( ( blockIdx.x * 4 ) + i15 ) * 128 ) + threadIdx.x ) ];
       }
     }
   }

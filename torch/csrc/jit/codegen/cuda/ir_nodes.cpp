@@ -446,7 +446,7 @@ TensorDomain::TensorDomain(
       " but needed one of size ",
       root_domain_.size());
 
-  domain_ = std::vector<IterDomain*>(root_domain_.begin(), root_domain_.end());
+  domain_ = root_domain_;
   resetDomains();
 }
 

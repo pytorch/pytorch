@@ -64,7 +64,7 @@ void FusionExecutor::compileFusion(Fusion* fusion, CompileOptions options) {
 namespace {
 
 at::Tensor inferAndAlloc(
-    TensorView* tv,
+    const TensorView* tv,
     EvaluationContext& ec,
     const CompileOptions& options,
     bool zero_init = false) {
@@ -92,6 +92,7 @@ at::Tensor inferAndAlloc(
     return at::empty(isizes, tensor_options);
   }
 }
+
 } // namespace
 
 LaunchParams FusionExecutor::computeLaunchParams(
@@ -182,18 +183,21 @@ std::vector<at::Tensor> FusionExecutor::allocGlobalVals(EvaluationContext& ec) {
   std::vector<at::Tensor> global_buffers;
   for (auto alloc : lowered.global_allocations()) {
     TORCH_INTERNAL_ASSERT(
-        alloc->buffer()->getValType() == ValType::TensorView,
+        alloc->buffer()->getValType() == ValType::KirTensorView,
         "Cannot allocate global buffers that are not tensors.");
-    global_buffers.push_back(
-        inferAndAlloc(alloc->buffer()->as<TensorView>(), ec, options_, false));
+    global_buffers.push_back(inferAndAlloc(
+        alloc->buffer()->as<kir::TensorView>()->fuserTv(),
+        ec,
+        options_,
+        false));
   }
 
   for (auto alloc : lowered.sync_allocations()) {
     TORCH_INTERNAL_ASSERT(
-        alloc->buffer()->getValType() == ValType::TensorView,
+        alloc->buffer()->getValType() == ValType::KirTensorView,
         "Cannot allocate global buffers that are not tensors.");
-    global_buffers.push_back(
-        inferAndAlloc(alloc->buffer()->as<TensorView>(), ec, options_, true));
+    global_buffers.push_back(inferAndAlloc(
+        alloc->buffer()->as<kir::TensorView>()->fuserTv(), ec, options_, true));
   }
 
   return global_buffers;

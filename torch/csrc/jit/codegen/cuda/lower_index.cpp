@@ -150,9 +150,8 @@ void IndexLowering::handle(ReductionOp* rop) {
 
   auto out_tv = ir_utils::asTV(rop->out());
 
-  bool is_block_reduce = out_tv->hasBlockReduction();
-
-  bool is_grid_reduce = out_tv->hasGridReduction();
+  const bool is_block_reduce = out_tv->hasBlockReduction();
+  const bool is_grid_reduce = out_tv->hasGridReduction();
 
   // If we do a grid reduction we can't have a reduction axis that is not bound
   // to a grid or block dim ()
@@ -170,14 +169,14 @@ void IndexLowering::handle(ReductionOp* rop) {
   const auto loops = scope_utils::getLoops(active_scope_expr);
 
   kir::TensorIndex* out = Index::getConsumerIndex(out_tv, loops);
-  Val* in = Index::getProducerIndex(
+  kir::TensorIndex* in = Index::getProducerIndex(
       ir_utils::asTV(rop->in()), ir_utils::asTV(rop->out()), loops);
 
-  kir::ReductionOp* block_reduction = nullptr;
+  kir::ReductionOp* block_reduction_op = nullptr;
   if (is_block_reduce) {
-    block_reduction = new kir::ReductionOp(
+    block_reduction_op = new kir::ReductionOp(
         rop->getReductionOpType(), kir::lowerValue(rop->init()), out, in);
-    pushBack(block_reduction);
+    pushBack(block_reduction_op);
   }
 
   if (is_grid_reduce) {
@@ -196,7 +195,7 @@ void IndexLowering::handle(ReductionOp* rop) {
         buffer_ids.end());
 
     Val* buffer_size =
-        buffer_ids.empty() ? new kir::Int(1) : buffer_ids[0]->rawExtent();
+        buffer_ids.empty() ? new Int(1) : buffer_ids[0]->rawExtent();
     for (size_t i = 1; i < buffer_ids.size(); i++) {
       buffer_size = mul(buffer_size, buffer_ids[i]->rawExtent());
     }
@@ -211,39 +210,38 @@ void IndexLowering::handle(ReductionOp* rop) {
             }),
         sync_ids.end());
 
-    Val* sync_size =
-        sync_ids.empty() ? new kir::Int(1) : sync_ids[0]->rawExtent();
+    Val* sync_size = sync_ids.empty() ? new Int(1) : sync_ids[0]->rawExtent();
     for (size_t i = 1; i < sync_ids.size(); i++) {
       sync_size = mul(sync_size, sync_ids[i]->rawExtent());
     }
 
-    IterDomain* buffer_id = new IterDomain(new kir::Int(0), buffer_size);
+    IterDomain* buffer_id = new IterDomain(new Int(0), buffer_size);
     TensorView* reduce_buffer_tv = new TensorView(
         new TensorDomain({buffer_id}), out->getDataType().value());
 
-    IterDomain* sync_id = new IterDomain(new kir::Int(0), sync_size);
+    IterDomain* sync_id = new IterDomain(new Int(0), sync_size);
     TensorView* reduce_sync_tv =
         new TensorView(new TensorDomain({sync_id}), DataType::Int);
 
-    auto reduce_buffer =
-        new kir::Allocate(reduce_buffer_tv, MemoryType::Global);
-    auto sync_buffer = new kir::Allocate(reduce_sync_tv, MemoryType::Global);
+    const auto reduce_buffer = new kir::Allocate(
+        kir::lowerValue(reduce_buffer_tv), MemoryType::Global);
+    const auto sync_buffer =
+        new kir::Allocate(kir::lowerValue(reduce_sync_tv), MemoryType::Global);
+
+    const auto grid_reduction_op = block_reduction_op == nullptr
+        ? new kir::ReductionOp(
+              rop->getReductionOpType(), kir::lowerValue(rop->init()), out, in)
+        : block_reduction_op;
+    const auto grid_reduction =
+        new kir::GridReduction(grid_reduction_op, reduce_buffer, sync_buffer);
 
     pushBack(reduce_buffer);
     pushBack(sync_buffer);
-    pushBack(new kir::GridReduction(
-        block_reduction == nullptr ? new kir::ReductionOp(
-                                         rop->getReductionOpType(),
-                                         kir::lowerValue(rop->init()),
-                                         out,
-                                         in)
-                                   : block_reduction,
-        reduce_buffer,
-        sync_buffer));
+    pushBack(grid_reduction);
   }
 
   if (!is_block_reduce && !is_grid_reduce) {
-    pushBack(new BinaryOp(rop->getReductionOpType(), out, out, in));
+    pushBack(new kir::BinaryOp(rop->getReductionOpType(), out, out, in));
   }
 }
 

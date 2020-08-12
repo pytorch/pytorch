@@ -360,10 +360,12 @@ class TORCH_CUDA_API Expr : public Statement {
 
  protected:
   void addInput(Val* input) {
+    TORCH_INTERNAL_ASSERT(input != nullptr);
     inputs_.push_back(input);
   }
 
   void addOutput(Val* output) {
+    TORCH_INTERNAL_ASSERT(output != nullptr);
     outputs_.push_back(output);
   }
 

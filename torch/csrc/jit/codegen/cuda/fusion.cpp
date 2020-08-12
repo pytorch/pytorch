@@ -425,7 +425,7 @@ void Fusion::printTransforms() {
 }
 
 StmtNameType Fusion::registerVal(Val* val) {
-  // TORCH_CHECK(!inKernelIr(val));
+  TORCH_CHECK(!inKernelIr(val));
 
   if (val->fusion()) {
     if (val->fusion() != this) {
@@ -435,13 +435,14 @@ StmtNameType Fusion::registerVal(Val* val) {
       return val->name();
     }
   }
+
   val_set_.emplace(val);
   val_deque_.push_back(val);
   return getValName(*(val->getValType()));
 }
 
 StmtNameType Fusion::registerExpr(Expr* expr) {
-  // TORCH_CHECK(!inKernelIr(expr));
+  TORCH_CHECK(!inKernelIr(expr));
 
   if (expr->fusion()) {
     if (expr->fusion() != this) {
