@@ -7,7 +7,11 @@ from torch.nn import functional as F
 from torch.jit.annotations import Dict
 from collections import OrderedDict
 
-from scipy.optimize import linear_sum_assignment
+try:
+    from scipy.optimize import linear_sum_assignment
+    scipy_available = True
+except:
+    scipy_available = False
 
 def conv3x3(in_planes, out_planes, stride=1, groups=1, dilation=1):
     """3x3 convolution with padding"""
@@ -792,5 +796,8 @@ class HungarianMatcher(nn.Module):
         C = C.view(bs, num_queries, -1).cpu()
 
         sizes = [len(v["boxes"]) for v in targets]
+        if not scipy_available:
+            raise RuntimeError("The 'detr' model requires scipy to run. Please make sure you have it installed"
+                               " if you enable the 'detr' model.")
         indices = [linear_sum_assignment(c[i]) for i, c in enumerate(C.split(sizes, -1))]
         return [(torch.as_tensor(i, dtype=torch.int64), torch.as_tensor(j, dtype=torch.int64)) for i, j in indices]

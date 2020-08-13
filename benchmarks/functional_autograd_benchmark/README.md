@@ -8,6 +8,38 @@ You can then use `compare.py` to get a markdown table comparing the two runs.
 
 The default arguments of `functional_autograd_benchmark.py` should be used in general. You can change them though to force a given device or force running even the (very) slow settings.
 
+### Sample usage
+
+```bash
+# Make sure you compile pytorch in release mode and with the same flags before/after
+export DEBUG=0
+# When running on CPU, it might be required to limit the number of cores to avoid oversubscription
+export OMP_NUM_THREADS=10
+
+# Compile pytorch with the base revision
+git checkout master
+python setup.py develop
+
+# Run the benchmark for the base
+# This will use the GPU if available.
+pushd benchmarks/functional_autograd_benchmark
+python functional_autograd_benchmark.py --output before.txt
+
+# Compile pytorch with your change
+popd
+git checkout you_feature_branch
+python setup.py develop
+
+# Run the benchmark for the new version
+pushd benchmarks/functional_autograd_benchmark
+python functional_autograd_benchmark.py --output after.txt
+
+# Get the markdown table that you can paste in your github PR
+python compare.py
+
+popd
+
+```
 
 ### Files in this folder:
 - `functional_autograd_benchmark.py` is the main entry point to run the benchmark.
