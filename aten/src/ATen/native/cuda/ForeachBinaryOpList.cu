@@ -6,8 +6,6 @@ namespace at { namespace native {
 
 template<template<class> class Op>
 std::vector<Tensor> foreach_tensor_list_op(TensorList tensors1, TensorList tensors2) {
-    verify_list(tensors1, tensors2);
-
     std::vector<std::vector<at::Tensor>> tensor_lists; 
     std::vector<at::Tensor> vec_res;
     for (const auto& t: tensors1) {
@@ -27,8 +25,6 @@ std::vector<Tensor> foreach_tensor_list_op(TensorList tensors1, TensorList tenso
 
 template<template<class> class Op>
 void foreach_tensor_list_op_(TensorList tensors1, TensorList tensors2) {
-    verify_list(tensors1, tensors2);
-
     std::vector<std::vector<at::Tensor>> tensor_lists; 
     tensor_lists.emplace_back(std::move(tensors1.vec()));
     tensor_lists.emplace_back(std::move(tensors2.vec()));
