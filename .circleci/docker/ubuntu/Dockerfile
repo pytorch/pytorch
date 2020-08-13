@@ -91,7 +91,7 @@ ADD ./common/install_vulkan_sdk.sh install_vulkan_sdk.sh
 RUN if [ -n "${VULKAN_SDK_VERSION}" ]; then bash ./install_vulkan_sdk.sh; fi
 RUN rm install_vulkan_sdk.sh
 
-# (optional) Install Vulkan SDK
+# (optional) Install swiftshader
 ARG SWIFTSHADER
 ADD ./common/install_swiftshader.sh install_swiftshader.sh
 RUN if [ -n "${SWIFTSHADER}" ]; then bash ./install_swiftshader.sh; fi
