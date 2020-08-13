@@ -113,7 +113,7 @@ class TestForeach(TestCase):
         res = torch._foreach_add(tensors, 1)
         self.assertEqual(res, expected)
 
-    def atest_add_scalar_with_different_tensor_dtypes(self, device):
+    def test_add_scalar_with_different_tensor_dtypes(self, device):
         tensors = [torch.tensor([1.1], dtype=torch.float, device=device), 
                    torch.tensor([1], dtype=torch.long, device=device)]
         self.assertRaises(RuntimeError, lambda: torch._foreach_add(tensors, 1))

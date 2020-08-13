@@ -8,8 +8,7 @@ std::vector<Tensor> foreach_tensor_add_scalar_kernel_slow(TensorList tensors, Sc
 
   std::vector<Tensor> result;
   for (const auto& t : tensors) {
-    auto temp = t.add(scalar);
-    result.emplace_back(temp);
+    result.emplace_back(t.add(scalar));
   }
   return result;
 }
