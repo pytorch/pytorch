@@ -4,6 +4,12 @@ from dataclasses import dataclass, field
 from typing import List, Sequence, Dict, Optional, Iterator, Tuple, Set, NoReturn
 from enum import Enum
 
+# A little trick from https://github.com/python/mypy/issues/6366
+# for getting mypy to do exhaustiveness checking
+# TODO: put this somewhere else, maybe
+def assert_never(x: NoReturn) -> NoReturn:
+    assert False, "Unhandled type: {}".format(type(x).__name__)
+
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #
 #                           DATA MODEL
