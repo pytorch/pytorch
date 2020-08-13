@@ -1306,7 +1306,7 @@ endif()
 
 if(USE_DISTRIBUTED AND USE_TENSORPIPE)
   if(MSVC)
-    message(FATAL_ERROR "Tensorpipe cannot be used on Windows.")
+    message(WARNING "Tensorpipe cannot be used on Windows.")
   else()
     set(TP_BUILD_LIBUV ON CACHE BOOL "" FORCE)
     set(TP_ENABLE_SHM OFF CACHE BOOL "" FORCE)

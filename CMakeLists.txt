@@ -226,6 +226,12 @@ option(USE_TBB "Use TBB" OFF)
 option(ONNX_ML "Enable traditional ONNX ML API." ON)
 option(HAVE_SOVERSION "Whether to add SOVERSION to the shared objects" OFF)
 
+# Since TensorPipe does not support Windows, set it to OFF when MSVC detected
+if(MSVC)
+  set(USE_TENSORPIPE OFF)
+  message(WARNING "Tensorpipe cannot be used on Windows. Set it to OFF")
+endif()
+
 # Linux distributions do not want too many embedded sources, in that sense we
 # need to be able to build pytorch with an (almost) empty third_party
 # directory.
