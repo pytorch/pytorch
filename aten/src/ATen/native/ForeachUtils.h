@@ -18,9 +18,9 @@ void verify_list(TensorList tensors) {
   }
 }
 
-// In order to go via 'fast' path, sevelar conditions must be satisfied 
+// To go via 'fast' path, several conditions must be satisfied
 // - All tensors must have strided layout
-// - All tensors must be non overlapping and dense
+// - All tensors must be non-overlapping and dense
 // - Resulting tensor must have the same dtype as the input one
 bool check_fast_route(TensorList tensors, Scalar scalar) {
   TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
