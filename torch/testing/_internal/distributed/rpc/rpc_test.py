@@ -3910,10 +3910,10 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
         )
         for i in range(len(rets)):
             self.assertEqual(rets[i].device, torch.device((3 + i) % 4))
-        self.assertEqual(ret[0], (torch.zeros(2) + torch.ones(2)).to(3))
-        self.assertEqual(ret[1], (torch.zeros(2) - torch.ones(2)).to(0))
-        self.assertEqual(ret[2], (torch.zeros(2) * torch.ones(2)).to(1))
-        self.assertEqual(ret[3], (torch.zeros(2) / torch.ones(2)).to(2))
+        self.assertEqual(rets[0], (torch.zeros(2) + torch.ones(2)).to(3))
+        self.assertEqual(rets[1], (torch.zeros(2) - torch.ones(2)).to(0))
+        self.assertEqual(rets[2], (torch.zeros(2) * torch.ones(2)).to(1))
+        self.assertEqual(rets[3], (torch.zeros(2) / torch.ones(2)).to(2))
         rpc.shutdown()
 
     @skip_if_lt_x_gpu(4)

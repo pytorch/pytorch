@@ -193,25 +193,15 @@ def _tensorpipe_check_device_maps(agent, device_maps):
                 if not all([
                     len(device_map) == len(key_set),
                     len(device_map) == len(val_set),  # check 1-to-1 mapping
-                    min(key_set) >= -1,
+                    min(key_set) >= 0,
                     max(key_set) < device_count,  # check local range
-                    min(val_set) >= -1,
+                    min(val_set) >= 0,
                     max(val_set) < remote_device_count  # check remote range
                 ]):
                     raise ValueError(
                         f"Invalid device_map configuration on {name}:\n"
                         f"device_maps = {device_maps}"
                     )
-
-                if -1 not in device_map and -1 in device_map.values():
-                    raise ValueError(
-                        f"Invalid device_map configuration on {name}. "
-                        "It maps a non-CPU device to CPU, when combined with "
-                        "the default CPU-CPU mapping, device mapping for CPU "
-                        "tensors is ambiguous:\n"
-                        f"device_maps = {device_maps}"
-                    )
-
 
     gathered = api._all_gather([torch.cuda.device_count(), device_maps])
     all_device_counts = {name: gathered[name][0] for name in gathered}

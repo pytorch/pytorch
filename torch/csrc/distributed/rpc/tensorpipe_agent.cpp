@@ -45,9 +45,7 @@ inline void checkCPUTensor(const torch::Tensor& tensor) {
 std::vector<c10::DeviceIndex> getDevicesForTensors(
     const std::string& remoteName,
     const std::vector<torch::Tensor>& tensors,
-    const std::unordered_map<
-        std::string,
-        std::unordered_map<c10::DeviceIndex, c10::DeviceIndex>>& deviceMaps) {
+    const std::unordered_map<std::string, tensorpipe::DeviceMap>& deviceMaps) {
   const auto workerIter = deviceMaps.find(remoteName);
   if (workerIter == deviceMaps.end()) {
     for (const auto& tensor : tensors) {

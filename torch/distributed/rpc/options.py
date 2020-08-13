@@ -27,6 +27,9 @@ class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
             store used for rendezvous. It takes any value accepted for the
             same argument of :meth:`~torch.distributed.init_process_group`
             (default: ``env://``).
+        device_maps (Dict[str, Dict]): Device placement mappings from this
+            worker to the callee. This map must be invertible.
+            (default: ``None``)
     """
     def __init__(
         self,
@@ -34,14 +37,16 @@ class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
         _transports: List = None,
         _channels: List = None,
         rpc_timeout: float = rpc_contants.DEFAULT_RPC_TIMEOUT_SEC,
-        init_method: str = rpc_contants.DEFAULT_INIT_METHOD
+        init_method: str = rpc_contants.DEFAULT_INIT_METHOD,
+        device_maps: Dict = None
     ):
         super().__init__(
             num_worker_threads,
             _transports,
             _channels,
             rpc_timeout,
-            init_method
+            init_method,
+            device_maps if device_maps else {}
         )
 
     def set_device_map(self, to: str, device_map: Dict):
@@ -69,9 +74,10 @@ class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
                 )
             if to in curr_device_maps and k.index in curr_device_maps[to]:
                 curr_v = super().device_maps[to][k.index]
-                raise ValueError(
-                    "`set_device_map` only supports 1-to-1 mapping, "
-                    f"trying to map {k} to {v} and {curr_v}"
-                )
+                if curr_v != v.index:
+                    raise ValueError(
+                        "`set_device_map` only supports 1-to-1 mapping, "
+                        f"trying to map {k} to {v} and {curr_v}"
+                    )
             device_index_map[k.index] = v.index
         super().set_device_map(to, device_index_map)

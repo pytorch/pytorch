@@ -466,12 +466,15 @@ PyObject* rpc_init(PyObject* /* unused */) {
               optional<std::vector<std::string>>,
               optional<std::vector<std::string>>,
               float,
-              std::string>(),
+              std::string,
+              std::unordered_map<std::string, tensorpipe::DeviceMap>>(),
           py::arg("num_worker_threads") = kDefaultNumWorkerThreads,
           py::arg("_transports") = optional<std::vector<std::string>>(),
           py::arg("_channels") = optional<std::vector<std::string>>(),
           py::arg("rpc_timeout") = kDefaultRpcTimeoutSeconds,
-          py::arg("init_method") = kDefaultInitMethod)
+          py::arg("init_method") = kDefaultInitMethod,
+          py::arg("device_maps") =
+              std::unordered_map<std::string, tensorpipe::DeviceMap>())
       .def_readwrite(
           "num_worker_threads",
           &TensorPipeRpcBackendOptions::numWorkerThreads,
