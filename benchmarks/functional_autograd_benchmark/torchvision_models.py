@@ -10,7 +10,7 @@ from collections import OrderedDict
 try:
     from scipy.optimize import linear_sum_assignment
     scipy_available = True
-except:
+except Exception:
     scipy_available = False
 
 def conv3x3(in_planes, out_planes, stride=1, groups=1, dilation=1):
