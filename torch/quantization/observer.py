@@ -343,11 +343,11 @@ class MinMaxObserver(_ObserverBase):
         min_val = self.min_val
         max_val = self.max_val
         if min_val.numel() == 0 or max_val.numel() == 0:
-            min_val = torch.min(x)
-            max_val = torch.max(x)
+            min_val, max_val = torch._min_max(x)
         else:
-            min_val = torch.min(torch.min(x), min_val)
-            max_val = torch.max(torch.max(x), max_val)
+            min_val_cur, max_val_cur = torch._min_max(x)
+            min_val = torch.min(min_val_cur, min_val)
+            max_val = torch.max(max_val_cur, max_val)
         self.min_val.resize_(min_val.shape)
         self.max_val.resize_(max_val.shape)
         self.min_val.copy_(min_val)
@@ -442,11 +442,11 @@ class MovingAverageMinMaxObserver(MinMaxObserver):
         min_val = self.min_val
         max_val = self.max_val
         if min_val.numel() == 0 or max_val.numel() == 0:
-            min_val = torch.min(x)
-            max_val = torch.max(x)
+            min_val, max_val = torch._min_max(x)
         else:
-            min_val = min_val + self.averaging_constant * (torch.min(x) - min_val)
-            max_val = max_val + self.averaging_constant * (torch.max(x) - max_val)
+            min_val_cur, max_val_cur = torch._min_max(x)
+            min_val = min_val + self.averaging_constant * (min_val_cur - min_val)
+            max_val = max_val + self.averaging_constant * (max_val_cur - max_val)
         self.min_val.resize_(min_val.shape)
         self.max_val.resize_(max_val.shape)
         self.min_val.copy_(min_val)
@@ -594,11 +594,11 @@ class PerChannelMinMaxObserver(_ObserverBase):
         y = y.to(self.min_vals.dtype)
         y = torch.flatten(y, start_dim=1)
         if min_vals.numel() == 0 or max_vals.numel() == 0:
-            min_vals = torch.min(y, 1)[0]
-            max_vals = torch.max(y, 1)[0]
+            min_vals, max_vals = torch._min_max_val(y, 1)
         else:
-            min_vals = torch.min(torch.min(y, 1)[0], min_vals)
-            max_vals = torch.max(torch.max(y, 1)[0], max_vals)
+            min_vals_cur, max_vals_cur = torch._min_max_val(y, 1)
+            min_vals = torch.min(min_vals_cur, min_vals)
+            max_vals = torch.max(max_vals_cur, max_vals)
         self.min_vals.resize_(min_vals.shape)
         self.max_vals.resize_(max_vals.shape)
         self.min_vals.copy_(min_vals)
@@ -679,11 +679,11 @@ class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
         y = x.permute(tuple(new_axis_list))
         y = torch.flatten(y, start_dim=1)
         if min_vals.numel() == 0 or max_vals.numel() == 0:
-            min_vals = torch.min(y, 1)[0]
-            max_vals = torch.max(y, 1)[0]
+            min_vals, max_vals = torch._min_max_val(y, 1)
         else:
-            min_vals = min_vals + self.averaging_constant * (torch.min(y, 1)[0] - min_vals)
-            max_vals = max_vals + self.averaging_constant * (torch.max(y, 1)[0] - max_vals)
+            min_vals_cur, max_vals_cur = torch._min_max_val(y, 1)
+            min_vals = min_vals + self.averaging_constant * (min_vals_cur - min_vals)
+            max_vals = max_vals + self.averaging_constant * (max_vals_cur - max_vals)
         self.min_vals.resize_(min_vals.shape)
         self.max_vals.resize_(max_vals.shape)
         self.min_vals.copy_(min_vals)
@@ -905,16 +905,14 @@ class HistogramObserver(_ObserverBase):
         if min_val.numel() > 0 and max_val.numel() > 0:
             same_values = min_val.item() == max_val.item()
         if min_val.numel() == 0 or max_val.numel() == 0 or same_values:
-            min_val = torch.min(x)
-            max_val = torch.max(x)
+            min_val, max_val = torch._min_max(x)
             self.min_val.resize_(min_val.shape)
             self.min_val.copy_(min_val)
             self.max_val.resize_(max_val.shape)
             self.max_val.copy_(max_val)
             torch.histc(x, self.bins, min=min_val, max=max_val, out=self.histogram)
         else:
-            new_min = torch.min(x)
-            new_max = torch.max(x)
+            new_min, new_max = torch._min_max(x)
             combined_min = torch.min(new_min, min_val)
             combined_max = torch.max(new_max, max_val)
             # combine the existing histogram and new histogram into 1 histogram
