@@ -34,7 +34,7 @@ __all__ = [
     'ShortStorage', 'CharStorage', 'ByteStorage', 'BoolStorage',
     'DoubleTensor', 'FloatTensor', 'LongTensor', 'IntTensor',
     'ShortTensor', 'CharTensor', 'ByteTensor', 'BoolTensor', 'Tensor',
-    'lobpcg', 'set_deterministic', 'is_deterministic'
+    'lobpcg', 'lobpcg2', 'set_deterministic', 'is_deterministic'
 ]
 
 ################################################################################
@@ -577,7 +577,7 @@ del register_after_fork
 
 # Import tools that require fully imported torch (for applying
 # torch.jit.script as a decorator, for instance):
-from ._lobpcg import lobpcg
+from ._lobpcg import lobpcg, lobpcg2
 
 from ._vmap_internals import vmap
 

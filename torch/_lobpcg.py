@@ -11,7 +11,327 @@ from . import _linalg_utils as _utils
 from .overrides import has_torch_function, handle_torch_function
 
 
-__all__ = ['lobpcg']
+__all__ = ['lobpcg', 'lobpcg2']
+
+def _symeig_backward_complete_eigenspace(D_grad, U_grad, A, D, U):
+    # compute F, such that F_ij = (d_j - d_i)^{-1} for i != j, F_ii = 0
+    F = D.unsqueeze(-2) - D.unsqueeze(-1)
+    F.diagonal(dim1=-2, dim2=-1).fill_(float('inf'))
+    F.pow_(-1)
+
+    # A.grad = U (D.grad + (U^T U.grad * F)) U^T
+    Ut = U.transpose(-1, -2).contiguous()
+    res = torch.matmul(
+        U,
+        torch.matmul(
+            torch.diag_embed(D_grad) + torch.matmul(Ut, U_grad) * F,
+            Ut
+        )
+    )
+
+    return res
+
+
+def _polynomial_coefficients_given_roots(roots):
+    """
+    Given `roots` of a polynomial, find the polynomial's coefficients.
+
+    If roots = (r_1, ..., r_n), then the method returns
+    coefficients (a_0, a_1, ..., a_n (== 1)) so that
+    p(x) = (x - r_1) * ... * (x - r_n)
+         = x^n + a_{n-1} * x^{n-1} + ... a_1 * x_1 + a_0
+
+    Note: for better performance requires writing a low-level kernel
+    """
+
+    poly_order = roots.shape[-1]
+    poly_coeffs_shape = list(roots.shape)
+    # we assume p(x) = x^n + a_{n-1} * x^{n-1} + ... + a_1 * x + a_0,
+    # so poly_coeffs = {a_0, ..., a_n, a_{n+1}(== 1)}
+    poly_coeffs_shape[-1] += 1
+    poly_coeffs = roots.new_zeros(poly_coeffs_shape)
+    poly_coeffs[..., -1] = 1
+
+    # perform the Horner's rule
+    for i in range(1, poly_order + 1):
+        for j in range(poly_order - i - 1, poly_order):
+            poly_coeffs[..., j] -= roots[..., i - 1] * poly_coeffs[..., j + 1]
+
+    return poly_coeffs
+
+def _polynomial_value(poly, x, zero_power, transition):
+    """
+    A generic method for computing poly(x) using the Horner's rule.
+
+    Arguments:
+      poly (Tensor): the (possibly batched) 1D Tensor representing
+                     polynomial coefficients such that
+                     poly[..., i] = (a_{i_0}, ..., a{i_n} (==1)), and
+                     poly(x) = poly[..., 0] * zero_power + ... + poly[..., n] * x^n
+
+      x (Tensor): the value (possible batched) to evalate the polynomial `poly` at.
+
+      zero_power (Tensor): the represenation of `x^0`. It is application-specific.
+
+      transition (Callable): the function that accepts some intermediate result `int_val`,
+                             the `x` and a specific polynomial coefficient
+                             `poly[..., k]` for some iteration `k`.
+                             It basically performs one iteration of the Horner's rule
+                             defined as `x * int_val + poly[..., k] * zero_power`.
+                             Note that `zero_power` is not a parameter,
+                             because the step `+ poly[..., k] * zero_power` depends on `x`,
+                             whether it is a vector, a matrix, or something else, so this
+                             functionality is delegated to the user.
+    """
+
+    res = zero_power.clone()
+    for k in range(poly.size(-1) - 2, -1, -1):
+        res = transition(res, x, poly[..., k])
+    return res
+
+def _matrix_polynomial_value(poly, x, zero_power=None):
+    """
+    Evaluates `poly(x)` for the (batched) matrix input `x`.
+    Check out `_polynomial_value` function for more details.
+    """
+
+    # matrix-aware Horner's rule iteration
+    def transition(curr_poly_val, x, poly_coeff):
+        res = x.matmul(curr_poly_val)
+        res.diagonal(dim1=-2, dim2=-1).add_(poly_coeff.unsqueeze(-1))
+        return res
+
+    if zero_power is None:
+        zero_power = torch.eye(x.size(-1), x.size(-1), dtype=x.dtype, device=x.device) \
+            .view(*([1] * len(list(x.shape[:-2]))), x.size(-1), x.size(-1))
+
+    return _polynomial_value(poly, x, zero_power, transition)
+
+def _vector_polynomial_value(poly, x, zero_power=None):
+    """
+    Evaluates `poly(x)` for the (batched) vector input `x`.
+    Check out `_polynomial_value` function for more details.
+    """
+
+    # vector-aware Horner's rule iteration
+    def transition(curr_poly_val, x, poly_coeff):
+        res = torch.addcmul(poly_coeff.unsqueeze(-1), x, curr_poly_val)
+        return res
+
+    if zero_power is None:
+        zero_power = x.new_ones(1).expand(x.shape)
+
+    return _polynomial_value(poly, x, zero_power, transition)
+
+def _symeig_backward_partial_eigenspace(D_grad, U_grad, A, D, U, largest):
+    # compute a projection operator onto an orthogonal subspace spanned by the
+    # columns of U defined as (I - UU^T)
+    Ut = U.transpose(-2, -1).contiguous()
+    proj_U_ortho = -U.matmul(Ut)
+    proj_U_ortho.diagonal(dim1=-2, dim2=-1).add_(1)
+
+    # compute U_ortho, a basis for the orthogonal complement to the span(U),
+    # by projecting a random [..., m, m-k] matrix onto the subspace spanned
+    # by the columns of U.
+    # fix seed for determinism
+    torch_curr_random_state = torch.get_rng_state()
+    torch.manual_seed(13)
+
+    U_ortho = proj_U_ortho.matmul(
+        torch.randn(
+            (*A.shape[:-1], A.size(-1) - D.size(-1)),
+            dtype=A.dtype,
+            device=A.device
+        )
+    )
+    U_ortho_t = U_ortho.transpose(-2, -1).contiguous()
+    # restore random state
+    torch.set_rng_state(torch_curr_random_state)
+
+    # compute the coefficients of the characteristic polynomial of the tensor D.
+    # Note that D is diagonal, so the diagonal elements are exactly the roots
+    # of the characteristic polynomial.
+    chr_poly_D = _polynomial_coefficients_given_roots(D)
+
+    # the code belows finds the explicit solution to the Sylvester equation
+    # U_ortho^T A U_ortho dX - dX D = -U_ortho^T A U
+    # and incorporates it into the whole gradient stored in the `res` variable.
+    #
+    # Equivalent to the following naive implementation:
+    # res = A.new_zeros(A.shape)
+    # p_res = A.new_zeros(*A.shape[:-1], D.size(-1))
+    # for k in range(1, chr_poly_D.size(-1)):
+    #     p_res.zero_()
+    #     for i in range(0, k):
+    #         p_res += (A.matrix_power(k - 1 - i) @ U_grad) * D.pow(i).unsqueeze(-2)
+    #     res -= chr_poly_D[k] * (U_ortho @ poly_D_at_A.inverse() @ U_ortho_t @  p_res @ U.t())
+    #
+    # Note that dX is a differential, so the gradient contribution comes from the backward sensitivity
+    # Tr(f(U_grad, D_grad, A, U, D)^T dX) = Tr(g(U_grad, A, U, D)^T dA) for some functions f and g,
+    # and we need to compute g(U_grad, A, U, D)
+    #
+    # The naive implementation is based on the paper
+    # Hu, Qingxi, and Daizhan Cheng.
+    # "The polynomial solution to the Sylvester matrix equation."
+    # Applied mathematics letters 19.9 (2006): 859-864.
+    #
+    # We can modify the computation of `p_res` from above in a more efficient way
+    # p_res =   U_grad * (chr_poly_D[1] * D.pow(0) + ... + chr_poly_D[k] * D.pow(k)).unsqueeze(-2)
+    #       + A U_grad * (chr_poly_D[2] * D.pow(0) + ... + chr_poly_D[k] * D.pow(k - 1)).unsqueeze(-2)
+    #       + ...
+    #       + A.matrix_power(k - 1) U_grad * chr_poly_D[k]
+    # Note that this saves us from redundant matrix products with A (elimination of matrix_power)
+    U_grad_projected = U_grad
+    series_acc = U_grad_projected.new_zeros(U_grad_projected.shape)
+    for k in range(1, chr_poly_D.size(-1)):
+        poly_D = _vector_polynomial_value(chr_poly_D[..., k:], D)
+        series_acc += U_grad_projected * poly_D.unsqueeze(-2)
+        U_grad_projected = A.matmul(U_grad_projected)
+
+    # compute chr_poly_D(A) which essentially is:
+    #
+    # chr_poly_D_at_A = A.new_zeros(A.shape)
+    # for k in range(chr_poly_D.size(-1)):
+    #     chr_poly_D_at_A += chr_poly_D[k] * A.matrix_power(k)
+    #
+    # Note, however, for better performance we use the Horner's rule
+    chr_poly_D_at_A = _matrix_polynomial_value(chr_poly_D, A)
+
+    # compute the action of `chr_poly_D_at_A` restricted to U_ortho
+    chr_poly_D_at_A_to_U_ortho = torch.matmul(
+        U_ortho_t,
+        torch.matmul(
+            chr_poly_D_at_A,
+            U_ortho
+        )
+    )
+    # we need to invert 'chr_poly_D_at_A_to_U_ortho`, for that we compute its
+    # Cholesky decomposition and then use `torch.cholesky_solve` for better stability.
+    # Note that `chr_poly_D_at_A_to_U_ortho` is positive-definite if
+    # 1. `largest` == False, or
+    # 2. `largest` == True and `k` is even
+    #
+    # check if `chr_poly_D_at_A_to_U_ortho` is positive-definite or negative-definite
+    chr_poly_D_at_A_to_U_ortho_sign = -1 if (largest and (k % 2 == 1)) else +1
+    chr_poly_D_at_A_to_U_ortho_L = torch.cholesky(
+        chr_poly_D_at_A_to_U_ortho_sign * chr_poly_D_at_A_to_U_ortho
+    )
+
+    # compute the gradient part in span(U)
+    res = _symeig_backward_complete_eigenspace(
+        D_grad, U_grad, A, D, U
+    )
+
+    # incorporate the Sylvester equation solution into the full gradient
+    # it resides in span(U_ortho)
+    res -= U_ortho.matmul(
+        chr_poly_D_at_A_to_U_ortho_sign * torch.cholesky_solve(
+            U_ortho_t,
+            chr_poly_D_at_A_to_U_ortho_L
+        )
+    ).matmul(series_acc.matmul(Ut))
+
+    return res
+
+def _symeig_backward(D_grad, U_grad, A, D, U, largest):
+    # if `U` is square, then the columns of `U` is a complete eigenspace
+    if U.size(-1) == U.size(-2):
+        return _symeig_backward_complete_eigenspace(
+            D_grad, U_grad, A, D, U
+        )
+    else:
+        return _symeig_backward_partial_eigenspace(
+            D_grad, U_grad, A, D, U, largest
+        )
+
+class LOBPCGAutogradFunction(torch.autograd.Function):
+
+    @staticmethod
+    def forward(ctx,
+                A,              # type: Tensor
+                k,              # type: Optional[int]
+                B,              # type: Optional[Tensor]
+                X,              # type: Optional[Tensor]
+                n,              # type: Optional[int]
+                iK,             # type: Optional[Tensor]
+                niter,          # type: Optional[int]
+                tol,            # type: Optional[float]
+                largest,        # type: Optional[bool]
+                method,         # type: Optional[str]
+                tracker,        # type: Optional[None]
+                ortho_iparams,  # type: Optional[Dict[str, int]]
+                ortho_fparams,  # type: Optional[Dict[str, float]]
+                ortho_bparams,  # type: Optional[Dict[str, bool]]
+                ):
+        # type: (...) -> Tuple[Tensor, Tensor]
+
+        # makes sure that input is contiguous for efficiency
+        A = A.contiguous()
+        if B is not None:
+            B = B.contiguous()
+
+        D, U = lobpcg(
+            A, k, B, X,
+            n, iK, niter, tol, largest, method, tracker,
+            ortho_iparams, ortho_fparams, ortho_bparams
+        )
+        #D, U = torch.symeig(A, eigenvectors=True, upper=True)
+        #D = D[..., -k:]
+        #U = U[..., :, -k:]
+
+        D = D.contiguous()
+        U = U.contiguous()
+        ctx.save_for_backward(A, B, D, U, largest)
+
+        return D, U
+
+    @staticmethod
+    def backward(ctx, D_grad, U_grad):
+        A_grad = B_grad = None
+        grads = [None] * 14
+
+        A, B, D, U, largest = ctx.saved_tensors
+
+        if largest is None:
+            largest = True
+
+        # symeig backward
+        if B is None:
+            A_grad = _symeig_backward(
+                D_grad, U_grad, A, D, U, largest
+            )
+
+        # A has index 0
+        grads[0] = A_grad
+        # B has index 2
+        grads[2] = B_grad
+        return tuple(grads)
+
+
+def lobpcg2(A,                   # type: Tensor
+            k=None,              # type: Optional[int]
+            B=None,              # type: Optional[Tensor]
+            X=None,              # type: Optional[Tensor]
+            n=None,              # type: Optional[int]
+            iK=None,             # type: Optional[Tensor]
+            niter=None,          # type: Optional[int]
+            tol=None,            # type: Optional[float]
+            largest=None,        # type: Optional[bool]
+            method=None,         # type: Optional[str]
+            tracker=None,        # type: Optional[None]
+            ortho_iparams=None,  # type: Optional[Dict[str, int]]
+            ortho_fparams=None,  # type: Optional[Dict[str, float]]
+            ortho_bparams=None,  # type: Optional[Dict[str, bool]]
+            ):
+    # type: (...) -> Tuple[Tensor, Tensor]
+
+    # While it is expected that `A` is symmetric,
+    # the `A_grad` might be not. Therefore we perform the trick below,
+    # so that `A_grad` becomes symmetric.
+    # The symmetrization is important for first-order optimization method,
+    # so that (A - alpha * A_grad) is still a symmetric matrix.
+    A_sym = (A + A.transpose(-2, -1)) / 2
+    return LOBPCGAutogradFunction.apply(A_sym, k, B, X, n, iK, niter, tol, largest, method, tracker, ortho_iparams, ortho_fparams, ortho_bparams)
 
 
 def lobpcg(A,                   # type: Tensor

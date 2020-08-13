@@ -425,6 +425,8 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.lgamma: lambda input, out=None: -1,
         torch.lobpcg: lambda input, k=None, B=None, X=None, n=None, iK=None, niter=None, tol=None, largest=None, method=None,
         tracker=None, ortho_iparams=None, ortho_fparams=None, ortho_bparams=None: -1,
+        torch.lobpcg2: lambda input, k=None, B=None, X=None, n=None, iK=None, niter=None, tol=None, largest=None, method=None,
+        tracker=None, ortho_iparams=None, ortho_fparams=None, ortho_bparams=None: -1,
         torch.log: lambda input, out=None: -1,
         torch.log_softmax: lambda input, dim, dtype=None: -1,
         torch.log10: lambda input, out=None: -1,
