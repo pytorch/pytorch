@@ -130,6 +130,40 @@ def _collect_all(futures: List[Future]) -> Future: ...
 def _jit_get_operation(op_name: str) -> Callable: ...
 def _jit_pass_optimize_for_mobile(module: 'torch.jit.ScriptModule') -> 'torch.jit.ScriptModule': ...
 
+# Defined in torch/csrc/jit/python/script_init.cpp
+def _jit_set_emit_hooks(ModuleHook: Optional[Callable], FunctionHook: Optional[Callable]) -> None: ...
+def _jit_get_emit_hooks() -> Tuple[Callable, Callable]: ...
+
+# Defined in torch/torch/csrc/jit/ir/ir.h
+class Graph:
+    ...
+
+# Defined in torch/aten/src/ATen/core/function_schema.h
+class FunctionSchema:
+    ...
+
+# Defined in torch/jit/api/module.h
+class ExtraFilesMap:
+    ...
+
+# Defined in torch/csrc/jit/python/script_init.cpp
+class ScriptFunction:
+    def __call__(self, *args, **kwargs) -> Tensor: ...
+    def save(self, filename: str, _extra_files: ExtraFilesMap) -> None: ...
+    def save_to_buffer(self, _extra_files = ExtraFilesMap) -> bytes: ...
+    def graph(self) -> Graph: ...
+    def inlined_graph(self) -> Graph: ...
+    def schema(self) -> FunctionSchema: ...
+    def code(self) -> str: ...
+    def name(self) -> str: ...
+    @property
+    def qualified_name(self) -> str: ...
+
+# Defined in torch/csrc/jit/python/python_ir.cpp
+class TensorType:
+    @classmethod
+    def get(cls) -> TensorType: ...
+
 # Defined in torch/csrc/Module.cpp
 def _initExtension(shm_manager_path: str) -> None: ...  # THPModule_initExtension
 def _autograd_init() -> _bool: ...  # THPAutograd_initExtension
@@ -173,6 +207,8 @@ def _get_qengine() -> _int: ...  # THPModule_qEngine
 def _set_qengine(qegine: _int) -> None: ...  # THPModule_setQEngine
 def _supported_qengines() -> List[_int]: ...  # THPModule_supportedQEngines
 def _is_xnnpack_enabled() -> _bool: ...  # THPModule_isEnabledXNNPACK
+def _vmapmode_increment_nesting() -> _int: ...  # THPModule_vmapmode_increment_nesting
+def _vmapmode_decrement_nesting() -> _int: ...  # THPModule_vmapmode_decrement_nesting
 
 has_openmp: _bool
 has_mkl: _bool
@@ -255,12 +291,13 @@ class _TensorBase(object):
     real: Tensor
     imag: Tensor
     T: Tensor
+    ndim: _int
     _version: _int
     _base: Optional[Tensor]
     grad_fn: Any
     ${tensor_method_hints}
 
-# Defined in torch/csrs/cuda/Module.cpp
+# Defined in torch/csrc/cuda/Module.cpp
 class _CudaDeviceProperties:
     name: str
     major: _int
@@ -295,3 +332,9 @@ class _CudaEventBase:
     def elapsed_time(self, other: _CudaEventBase) -> _float: ...
     def synchronize(self) -> None: ...
     def ipc_handle(self) -> bytes: ...
+
+# Defined in torch/csrc/DataLoader.cpp
+def _set_worker_signal_handlers(*arg: Any) -> None: ...  # THPModule_setWorkerSignalHandlers
+def _set_worker_pids(key: _int, child_pids: Tuple[_int, ...]) -> None: ...  # THPModule_setWorkerPIDs
+def _remove_worker_pids(loader_id: _int) -> None: ...  # THPModule_removeWorkerPIDs
+def _error_if_any_worker_fails() -> None: ...  # THPModule_errorIfAnyWorkerFails

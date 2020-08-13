@@ -31,7 +31,7 @@ import math
 import numpy as np
 
 # Testing utils
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
@@ -39,7 +39,6 @@ from torch.testing._internal.common_cuda import TEST_MULTIGPU, TEST_CUDA
 from torch.testing._internal.common_utils import TestCase
 from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
-    ModelWithNoQconfigPropagation,
     AnnotatedSingleLayerLinearModel,
     test_only_eval_fn,
 )
@@ -391,17 +390,143 @@ class TestObserver(QuantizationTestCase):
             loaded = torch.jit.load(buf)
             self.assertEqual(obs.calculate_qparams(), loaded.calculate_qparams())
 
-    # TODO: move this to test_quantize.py
-    def test_no_qconfig_propagation(self):
-        model = ModelWithNoQconfigPropagation()
-        model.qconfig = torch.quantization.default_qconfig
+# HistogramObserver that works like it does on master
+class _ReferenceHistogramObserver(HistogramObserver):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
 
-        model = prepare(model)
-        self.assertTrue(hasattr(model.fc1, 'qconfig'),
-                        "QConfig is expected to propagate")
-        self.assertFalse(hasattr(model.no_quant_module, 'qconfig'),
-                         "QConfig is expected to NOT propagate")
+    @torch.jit.ignore
+    def _non_linear_param_search(self):
+        r"""Non-linear parameter search.
 
+        An approximation for L2 error minimization for selecting min/max.
+        By selecting new min/max, we filter out outliers in input distribution.
+        This follows the implementation of NormMinimization::NonlinearQuantizationParamsSearch in
+        caffe2/quantization/server/norm_minimization.cc
+        """
+        def _get_norm(delta_begin, delta_end, density, norm_type):
+            r"""
+            Compute the norm of the values uniformaly distributed between
+            delta_begin and delta_end.
+
+            norm = density * (integral_{begin, end} x^2)
+                 = density * (end^3 - begin^3) / 3
+            """
+            assert norm_type == "L2", "Only L2 norms are currently supported"
+            norm = 0.0
+            if norm_type == "L2":
+                norm = (
+                    delta_end * delta_end * delta_end
+                    - delta_begin * delta_begin * delta_begin
+                ) / 3
+            return density * norm
+
+        def _compute_quantization_error(next_start_bin, next_end_bin, norm_type):
+            r"""
+            Compute the quantization error if we use start_bin to end_bin as the
+            min and max to do the quantization.
+            """
+            bin_width = (self.max_val.item() - self.min_val.item()) / self.bins
+
+            norm = 0.0
+            dst_bin_width = bin_width * (next_end_bin - next_start_bin + 1) / self.dst_nbins
+            if dst_bin_width == 0.0:
+                return 0.0
+            for src_bin in range(self.bins):
+                # distances from the beginning of first dst_bin to the beginning and
+                # end of src_bin
+                src_bin_begin = (src_bin - next_start_bin) * bin_width
+                src_bin_end = src_bin_begin + bin_width
+
+                # which dst_bins the beginning and end of src_bin belong to?
+                dst_bin_of_begin = min(
+                    self.dst_nbins - 1, max(0.0, math.floor(src_bin_begin / dst_bin_width))
+                )
+                dst_bin_of_end = min(
+                    self.dst_nbins - 1, max(0.0, math.floor(src_bin_end / dst_bin_width))
+                )
+                dst_bin_of_begin_center = (
+                    dst_bin_of_begin * dst_bin_width + dst_bin_width / 2
+                )
+
+                density = self.histogram[src_bin] / bin_width
+                if dst_bin_of_begin == dst_bin_of_end:
+                    # if src_bin is entirely within 1 dst_bin
+                    delta_begin = src_bin_begin - dst_bin_of_begin_center
+                    delta_end = src_bin_end - dst_bin_of_begin_center
+                    norm = norm + _get_norm(delta_begin, delta_end, density, norm_type)
+                else:
+                    delta_begin = src_bin_begin - dst_bin_of_begin_center
+                    delta_end = dst_bin_width / 2
+                    norm = norm + _get_norm(delta_begin, delta_end, density, norm_type)
+
+                    norm = norm + (dst_bin_of_end - dst_bin_of_begin - 1) * _get_norm(
+                        -dst_bin_width / 2, dst_bin_width / 2, density, norm_type
+                    )
+
+                    dst_bin_of_end_center = (
+                        dst_bin_of_end * dst_bin_width + dst_bin_width / 2
+                    )
+
+                    delta_begin = -dst_bin_width / 2
+                    delta_end = src_bin_end - dst_bin_of_end_center
+                    norm = norm + _get_norm(delta_begin, delta_end, density, norm_type)
+            return norm
+
+        assert self.histogram.size()[0] == self.bins, "bins mistmatch"
+        bin_width = (self.max_val - self.min_val) / self.bins
+
+        # cumulative sum
+        total = sum(self.histogram)
+        cSum = torch.cumsum(self.histogram, dim=0)
+
+        stepsize = 1e-5  # granularity
+        alpha = 0.0  # lower bound
+        beta = 1.0  # upper bound
+        start_bin = 0
+        end_bin = self.bins - 1
+        norm_min = float("inf")
+
+        while alpha < beta:
+            # Find the next step
+            next_alpha = alpha + stepsize
+            next_beta = beta - stepsize
+
+            # find the left and right bins between the quantile bounds
+            l = start_bin
+            r = end_bin
+            while l < end_bin and cSum[l] < next_alpha * total:
+                l = l + 1
+            while r > start_bin and cSum[r] > next_beta * total:
+                r = r - 1
+
+            # decide the next move
+            next_start_bin = start_bin
+            next_end_bin = end_bin
+            if (l - start_bin) > (end_bin - r):
+                # move the start bin
+                next_start_bin = l
+                alpha = next_alpha
+            else:
+                # move the end bin
+                next_end_bin = r
+                beta = next_beta
+
+            if next_start_bin == start_bin and next_end_bin == end_bin:
+                continue
+
+            # calculate the quantization error using next_start_bin and next_end_bin
+            norm = _compute_quantization_error(next_start_bin, next_end_bin, "L2")
+
+            if norm > norm_min:
+                break
+            norm_min = norm
+            start_bin = next_start_bin
+            end_bin = next_end_bin
+
+        new_min = self.min_val + bin_width * start_bin
+        new_max = self.min_val + bin_width * (end_bin + 1)
+        return new_min, new_max
 
 class TestRecordHistogramObserver(QuantizationTestCase):
     # TODO: move this to quantize.py
@@ -443,6 +568,7 @@ class TestRecordHistogramObserver(QuantizationTestCase):
     @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
            qscheme=st.sampled_from((torch.per_tensor_affine, torch.per_tensor_symmetric)),
            reduce_range=st.booleans())
+    @settings(max_examples=10)
     def test_histogram_observer(self, qdtype, qscheme, reduce_range):
         myobs = HistogramObserver(bins=3, dtype=qdtype, qscheme=qscheme, reduce_range=reduce_range)
         # Calculate qparams should work for empty observers
@@ -517,6 +643,27 @@ class TestRecordHistogramObserver(QuantizationTestCase):
         self.assertEqual(myobs.min_val, 2.0)
         self.assertEqual(myobs.max_val, 8.0)
         self.assertEqual(myobs.histogram, [2., 3., 3.])
+
+    @given(N=st.sampled_from([10, 1000, 10**6]),
+           bins=st.sampled_from([256, 512, 1024, 2048]),
+           dtype=st.sampled_from([torch.qint8, torch.quint8]),
+           qscheme=st.sampled_from([torch.per_tensor_affine, torch.per_tensor_symmetric]),
+           reduce_range=st.booleans())
+    def test_histogram_observer_against_reference(self, N, bins, dtype, qscheme, reduce_range):
+
+        ref_obs = _ReferenceHistogramObserver(bins=bins, dtype=dtype, qscheme=qscheme, reduce_range=reduce_range)
+        my_obs = HistogramObserver(bins=bins, dtype=dtype, qscheme=qscheme, reduce_range=reduce_range)
+
+        for _ in range(10):
+            X = torch.randn(N)
+            my_obs(X)
+            ref_obs(X)
+
+        ref_qparams = ref_obs.calculate_qparams()
+        my_qparams = my_obs.calculate_qparams()
+
+        self.assertEqual(ref_qparams, my_qparams)
+
 
 class TestFakeQuantizePerTensor(TestCase):
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),
@@ -1003,7 +1150,7 @@ class TestFakeQuantizePerChannel(TestCase):
             dScale_actual = scale_curr.to(device).grad.detach()
             dZeroPoint_expected = dZeroPoint.to(device).detach()
             dZeroPoint_actual = zero_point_curr.to(device).grad.detach()
-            tolerance = 1e-3
+            tolerance = 1e-4
 
             self.assertTrue(
                 torch.allclose(dX_expected, dX_actual, rtol=tolerance, atol=tolerance),
@@ -1015,7 +1162,7 @@ class TestFakeQuantizePerChannel(TestCase):
                 torch.allclose(dZeroPoint_expected, dZeroPoint_actual, rtol=tolerance, atol=tolerance),
                 "Expected dZeroPoint to match zero_point.grad")
 
-    @given(X=hu.per_channel_tensor(shapes=hu.array_shapes(1, 5,),
+    @given(X=hu.per_channel_tensor(shapes=hu.array_shapes(2, 5,),
                                    qparams=hu.qparams(dtypes=torch.quint8)))
     def test_learnable_backward_per_channel_cpu(self, X):
         torch.random.manual_seed(NP_RANDOM_SEED)
@@ -1027,16 +1174,15 @@ class TestFakeQuantizePerChannel(TestCase):
         self._test_learnable_backward_per_channel(
             X_base, 'cpu', scale_base, zero_point_base, axis)
 
-    @given(X=hu.per_channel_tensor(shapes=hu.array_shapes(1, 5,),
+    @given(X=hu.per_channel_tensor(shapes=hu.array_shapes(2, 5,),
                                    qparams=hu.qparams(dtypes=torch.quint8)))
-    @unittest.skipIf(not TEST_CUDA, "No gpu is not available.")
+    @unittest.skip("temporarily disable the test")
     def test_learnable_backward_per_channel_cuda(self, X):
         torch.random.manual_seed(NP_RANDOM_SEED)
-        X, (_, _, axis, _) = X
+        X, (scale, zero_point, axis, torch_type) = X
         X_base = torch.tensor(X).to('cuda')
-        channel_size = X_base.size(axis)
-        scale_base = torch.normal(mean=0, std=1, size=(channel_size,)).clamp(1e-4, 100)
-        zero_point_base = torch.normal(mean=0, std=128, size=(channel_size,))
+        scale_base = to_tensor(scale, 'cuda')
+        zero_point_base = to_tensor(zero_point, 'cuda')
         self._test_learnable_backward_per_channel(
             X_base, 'cuda', scale_base, zero_point_base, axis)
 
