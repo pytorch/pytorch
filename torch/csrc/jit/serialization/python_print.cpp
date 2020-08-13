@@ -1416,14 +1416,13 @@ struct PythonPrintImpl {
         }
       }
     } else if (auto enumType = type->cast<EnumType>()) {
-      // TODO all these information should come from the type.
-      body_ << "class Color(Enum):\n";
+      body_ << "class " << enumType->qualifiedClassName().name() <<"(Enum):\n";
       {
         auto guard = WithIndented();
-        indent();
-        body_ << "RED = 1\n";
-        indent();
-        body_ << "GREEN = 2\n";
+        for (const auto& name_value : enumType->enumNamesValues()) {
+          indent();
+          body_ << name_value.first << " = " << name_value.second;
+        }
       }
     } else {
       TORCH_INTERNAL_ASSERT(false, "Unhandled NamedType");
