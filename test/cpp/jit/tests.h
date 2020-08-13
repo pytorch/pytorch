@@ -97,6 +97,7 @@ namespace jit {
   _(LiteInterpreterSetState)           \
   _(TorchbindIValueAPI)                \
   _(LiteInterpreterDict)               \
+  _(LiteInterpreterRunMethodVariadic)  \
   _(MobileNamedParameters)             \
   _(MobileSaveLoadData)                \
   _(LiteSGD)                           \

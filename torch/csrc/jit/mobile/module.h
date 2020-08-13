@@ -27,6 +27,10 @@ class TORCH_API Module {
       : object_(object), cu_(std::move(cu)){};
   Module() {}
   c10::IValue run_method(const std::string& method_name, Stack stack);
+  template <typename... Types>
+  c10::IValue run_method(const std::string& method_name, Types&&... args) {
+    return run_method(method_name, {IValue(std::forward<Types>(args))...});
+  }
   c10::IValue forward(std::vector<c10::IValue> inputs) {
     return run_method("forward", std::move(inputs));
   }
