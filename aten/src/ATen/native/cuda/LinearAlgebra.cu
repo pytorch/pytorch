@@ -3,10 +3,6 @@
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/cuda/CUDABlas.h>
 
-#include <algorithm>
-#include <cfloat>
-#include <cmath>
-
 namespace at { namespace native {
 
 Tensor prepare_matrix_for_cublas(Tensor& tensor, bool& transpose_tensor) {
@@ -28,20 +24,22 @@ Tensor prepare_matrix_for_cublas(Tensor& tensor, bool& transpose_tensor) {
   return tensor_;
 }
 
-Tensor prepare_batch_matrix_for_cublas(Tensor& tensor, bool& transpose_tensor, int64_t& ld_tensor, bool transpose_result, int m, int n) {
+Tensor prepare_batch_matrix_for_cublas(Tensor& tensor, bool& transpose_tensor, int64_t& ld_tensor, bool transpose_result, int64_t m, int64_t n) {
   IntArrayRef tensor_strides = tensor.strides();
   Tensor tensor_;
+  int fast_dim = transpose_result ? 2 : 1;
+  int leading_dim = transpose_result ? 1 : 2;
 
-  if (tensor_strides[transpose_result ? 2 : 1] == 1 &&
-    (tensor_strides[transpose_result ? 1 : 2] >= std::max<int64_t>(1, m))) {
+  if (tensor_strides[fast_dim] == 1 &&
+    (tensor_strides[leading_dim] >= std::max<int64_t>(1, m))) {
     transpose_tensor = false;
     tensor_ = tensor;
-    ld_tensor = tensor_strides[transpose_result ? 1 : 2];
-  } else if ((tensor_strides[transpose_result ? 1 : 2] == 1) &&
-    (tensor_strides[transpose_result ? 2 : 1] >= std::max<int64_t>(1, n))) {
+    ld_tensor = tensor_strides[leading_dim];
+  } else if ((tensor_strides[leading_dim] == 1) &&
+    (tensor_strides[fast_dim] >= std::max<int64_t>(1, n))) {
     transpose_tensor = true;
     tensor_ = tensor;
-    ld_tensor = tensor_strides[transpose_result ? 2 : 1];
+    ld_tensor = tensor_strides[fast_dim];
   } else {
     transpose_tensor = !transpose_result;
     if (tensor.is_contiguous()) {
@@ -166,31 +164,30 @@ Tensor& baddmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& b
   IntArrayRef result_sizes = result.sizes();
 
   if ((result_strides[1] == 1) &&
-      ((result_sizes[2] == 1) || (result_strides[2] >= std::max<int64_t>(1, result_sizes[0])))) {
+      ((result_sizes[2] == 1) || (result_strides[2] >= std::max<int64_t>(1, result_sizes[1])))) {
     result_ = result;
   } else if ((result_strides[2] == 1) &&
     (result_sizes[1] == 1 || (result_strides[1] >= std::max<int64_t>(1, result_sizes[2])))) {
     transpose_result = true;
     result_ = result;
   } else {
-    auto result_ = result.transpose(1, 2).clone();
+    auto result_ = result.transpose(1, 2).clone(at::MemoryFormat::Contiguous);
     result_ = result_.transpose(1, 2);
   }
 
-  ldc = result_.stride(transpose_result ? 1 : 2);
-  int64_t m = result_sizes[transpose_result ? 2 : 1];
-  int64_t n = result_sizes[transpose_result ? 1 : 2];
-  int64_t k = batch1.size(transpose_result ? 1 : 2);
+  int leading_dim = transpose_result ? 1 : 2;
 
+  ldc = result_.stride(leading_dim);
   Tensor batch1_ = transpose_result ? batch2 : batch1;
   Tensor batch2_ = transpose_result ? batch1 : batch2;
+  int64_t m = result_sizes[transpose_result ? 2 : 1];
+  int64_t n = result_sizes[leading_dim];
+  int64_t k = batch1_.size(leading_dim);
+
   batch1_ = prepare_batch_matrix_for_cublas(batch1_, transpose_batch1, lda, transpose_result, m, k);
   batch2_ = prepare_batch_matrix_for_cublas(batch2_, transpose_batch2, ldb, transpose_result, k, n);
 
   IntArrayRef result__sizes = result.sizes();
-  m = result__sizes[transpose_result ? 2 : 1];
-  n = result__sizes[transpose_result ? 1 : 2];
-  k = batch1_.size(transpose_result ? 1 : 2);
   int64_t num_batches = result__sizes[0];
 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "baddmm_cuda", [&] {

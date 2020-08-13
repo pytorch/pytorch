@@ -89,8 +89,7 @@ void bgemm<float>(CUDABLAS_BGEMM_ARGTYPES(float));
   void bgemm<c10::complex<double>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<double>));
   template <>
   void bgemm<c10::complex<float>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<float>));
-#endif
-#ifdef __HIP_PLATFORM_HCC__
+#else
   template <>
   void bgemm<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16));
 #endif
@@ -113,14 +112,14 @@ void gemv<double>(CUDABLAS_GEMV_ARGTYPES(double));
 template <>
 void gemv<float>(CUDABLAS_GEMV_ARGTYPES(float));
 #ifndef __HIP_PLATFORM_HCC__
-  template <>
-  void gemv<c10::complex<double>>(CUDABLAS_GEMV_ARGTYPES(c10::complex<double>));
-  template <>
-  void gemv<c10::complex<float>>(CUDABLAS_GEMV_ARGTYPES(c10::complex<float>));
+template <>
+void gemv<c10::complex<double>>(CUDABLAS_GEMV_ARGTYPES(c10::complex<double>));
+template <>
+void gemv<c10::complex<float>>(CUDABLAS_GEMV_ARGTYPES(c10::complex<float>));
 #endif
 #ifdef __HIP_PLATFORM_HCC__
-  template <>
-  void gemv<at::BFloat16>(CUDABLAS_GEMV_ARGTYPES(at::BFloat16));
+template <>
+void gemv<at::BFloat16>(CUDABLAS_GEMV_ARGTYPES(at::BFloat16));
 #endif
 template <>
 void gemv<at::Half>(CUDABLAS_GEMV_ARGTYPES(at::Half));
