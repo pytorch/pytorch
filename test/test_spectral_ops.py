@@ -61,9 +61,9 @@ class TestFFT(TestCase):
             # dim
             (-1, 0),
             # norm
-            (None, "forward", "backward", "ortho")
+            ((None, "forward", "backward", "ortho")
              if LooseVersion(np.__version__) >= '1.20.0'
-             else (None, "ortho")
+             else (None, "ortho"))
         )
 
         fft_functions = ['fft', 'ifft', 'hfft', 'irfft']
