@@ -1,8 +1,10 @@
 import os
 import pickle
 import sys
+import torch
 import types
 import zipfile
+# https://github.com/pytorch/pytorch/blob/master/torch/csrc/jit/docs/serialization.md
 
 class Loader(types.ModuleType):
     def __init__(self, base, zf, globals, name=""):
@@ -20,11 +22,11 @@ class Loader(types.ModuleType):
                 name = name[len(prefix):]
         dirname = os.path.join(self.base, name)
         filename = dirname + '.py'
-        print("{} -> {}".format(self.base, name))
+        # print("{} -> {}".format(self.base, name))
 
         if name in self.globals:
             # Stuff in the module by this name takes precedence, then subdirs
-            print("   Return existing globals for {}".format(name))
+            # print("   Return existing globals for {}".format(name))
             return self.globals[name]
 
         if filename in self.zf.namelist() and not self.compiled:
@@ -35,40 +37,53 @@ class Loader(types.ModuleType):
             setattr(self, name, ldr)  # Temporary class to allow annotations to work
             self.globals[name] = ldr
             f = self.zf.read(filename)
-            print("   Compile: ", name)
+            # print("   Compile: ", name)
             exec(compile(f, name, 'exec'), ldr.globals)
             ldr.fresh_module = False
             ldr.compiled = True
-            print("   Return finished loader for module {}".format(name))
+            # print("   Return finished loader for module {}".format(name))
             return ldr
 
         if any([dirname in x for x in self.zf.namelist()]):
             attr = Loader(dirname, self.zf, self.globals)
             setattr(self, name, attr)
-            print("   Return loader for dir {}".format(name))
+            # print("   Return loader for dir {}".format(name))
             return attr
 
         if self.fresh_module:
-            print("   Return Dummy Class for {}".format(name))
+            # print("   Return Dummy Class for {}".format(name))
             return types.new_class("Dummy Class")
 
         raise AttributeError("{} not found in {}".format(name, self.base))
 
 
 class TorchUnpickler(pickle.Unpickler):
-    def __init__(self, resolver, *args, **kwargs):
+    def __init__(self, base_name, zipfile, resolver, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.resolver = resolver
+        self.zf = zipfile
+        self.base_name = base_name
+
+    def persistent_load(self, id):
+        if 'storage' == id[0]:
+            _, storage_cls, idx, device, elts = id
+            data = self.zf.read('{}/data/{}'.format(self.base_name, idx))
+            storage = storage_cls.from_buffer(data, 'little')
+            assert storage.device.type == device, "should handle cpu()/cuda()"
+            assert len(storage) == elts
+            return storage
+
+        raise pickle.UnpicklingError("unsupported persistent object")
 
     def find_class(self, module, name):
-        print("find_class {}:{}".format(module, name))
-        for step in module.split('.'):
-            if step == '__torch__':
-                mod = self.resolver
-            else:
-                mod = getattr(mod, step)
-        return mod
-
+        parts = module.split('.')
+        if parts[0] == "__torch__":
+            mod = self.resolver
+            for part in parts[1:]:
+                mod = getattr(mod, part)
+            return mod.globals[name]
+        else:
+            return super().find_class(module, name)
 
 def load(filename):
 
@@ -81,22 +96,28 @@ def load(filename):
         resolver = Loader('{}/code/__torch__'.format(filename_no_ext), f, glob, name="__torch__") 
         glob['__torch__'] = resolver
         glob['__torch__'].globals['__torch__'] = resolver
+        glob['torch'] = torch
         sys.modules['__torch__'] = resolver
 
-        for src in ['data.pkl']:  # ['constants.pkl', 'data.pkl']:
-            fname = os.path.join(filename_no_ext, src)
-            # pickle.load(f.open(fname)) # TypeError: 'Loader' object is not iterable assuming sys.modules[__torch__] points to resolver
-            upk = TorchUnpickler(resolver, f.open(fname))
-            upk.load()
-            print("blah")
+        # TODO where would constants be used? not in resnet aparently..
+        constants = pickle.load(f.open(os.path.join(filename_no_ext, 'constants.pkl')))
+        data_fname = os.path.join(filename_no_ext, 'data.pkl')
+        unpickler = TorchUnpickler(filename_no_ext, f, resolver, f.open(data_fname))
+        model = unpickler.load()
 
-    return "model"
+    return model
 
 
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("load_file", help="File to load model from")
+    parser.add_argument("--forward_with_shape", type=int, nargs="+", help="shape of empty tensor to create as input to forward")
     args = parser.parse_args()
 
     model = load(args.load_file)
+
+    if args.forward_with_shape:
+        input = torch.empty(args.forward_with_shape).uniform_()
+        out = model.forward(input)
+        print(out)
