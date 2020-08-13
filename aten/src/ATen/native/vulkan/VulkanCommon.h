@@ -61,7 +61,7 @@ inline constexpr To safe_downcast_internal(const From v) {
   constexpr Type min{static_cast<Type>(std::numeric_limits<To>::lowest())};
   const Type value{static_cast<Type>(v)};
   constexpr Type max{static_cast<Type>(std::numeric_limits<To>::max())};
-  TORCH_CHECK(min <= v && v <= max, "Cast failed: ", v, " out of range");
+  TORCH_CHECK(min <= v && v <= max, "Cast failed: out of range");
   return static_cast<To>(v);
 }
 
@@ -75,7 +75,7 @@ template <
     typename From,
     std::enable_if_t<is_signed_to_unsigned<To, From>(), bool> = true>
 inline constexpr To safe_downcast(const From v) {
-  TORCH_CHECK(v >= From{}, "Cast failed: negative ", v, " signed to unsigned");
+  TORCH_CHECK(v >= From{}, "Cast failed: negative signed to unsigned");
   return safe_downcast_internal<To, From>(v);
 }
 
