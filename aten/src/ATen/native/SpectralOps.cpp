@@ -28,9 +28,9 @@ ScalarType promote_type(ScalarType type, bool require_complex) {
   if (at::isComplexType(type)) {
     return type;
   }
-  // Promote integral to double
+  // Promote integral to default type
   if (!at::isFloatingType(type)) {
-    return require_complex ? kComplexDouble : kDouble;
+    type = c10::typeMetaToScalarType(c10::get_default_dtype());
   }
   // Promote half to float
   if (require_complex) {
@@ -62,6 +62,8 @@ fft_norm_mode norm_from_string(c10::optional<std::string> norm, bool forward) {
   TORCH_CHECK(false, "Invalid normalization mode: \"", *norm, "\"")
 }
 
+// Fixes the shape of x such that x.size(dims[i]) == sizes[i]
+// Either by zero-padding, or by slicing x starting from 0
 Tensor fix_shape(Tensor x, IntArrayRef dims, IntArrayRef sizes) {
   TORCH_INTERNAL_ASSERT(dims.size() == sizes.size());
   bool must_copy = false;
@@ -87,7 +89,7 @@ Tensor fix_shape(Tensor x, IntArrayRef dims, IntArrayRef sizes) {
   return must_copy ? at::constant_pad_nd(x, pad_amount) : x;
 }
 
-// Complex to real
+// Complex to real FFT
 Tensor fft_c2r(Tensor input, c10::optional<int64_t> n_opt,
                int64_t unwrapped_dim, c10::optional<std::string> norm_str,
                bool forward) {
@@ -118,7 +120,7 @@ Tensor fft_c2r(Tensor input, c10::optional<int64_t> n_opt,
   return out;
 }
 
-// Real to complex
+// Real to complex FFT
 Tensor fft_r2c(Tensor input, c10::optional<int64_t> n_opt,
                int64_t unwrapped_dim, c10::optional<std::string> norm_str,
                bool forward, bool onesided) {
@@ -150,7 +152,7 @@ Tensor fft_r2c(Tensor input, c10::optional<int64_t> n_opt,
   return out;
 }
 
-// Complex to complex
+// Complex to complex FFT
 Tensor fft_c2c(Tensor input, c10::optional<int64_t> n_opt,
                int64_t unwrapped_dim, c10::optional<std::string> norm_str,
                bool forward) {
@@ -328,6 +330,23 @@ static inline Tensor _fft(const Tensor &self, const int64_t signal_ndim,
     output = output.reshape(unflatten_output_shape);
   }
   return output;
+}
+
+// Wrapper to preserve torch-script back-compat
+Tensor _fft_with_size(const Tensor& input, int64_t signal_ndim,
+                      bool complex_input, bool complex_output,
+                      bool inverse, IntArrayRef checked_signal_sizes,
+                      bool normalized, bool onesided,
+                      IntArrayRef output_sizes) {
+  fft_norm_mode norm;
+  if (normalized) {
+    norm = fft_norm_mode::by_root_n;
+  } else {
+    norm = inverse ? fft_norm_mode::by_n : fft_norm_mode::none;
+  }
+  return at::_fft_with_size(
+      input, signal_ndim, complex_input, complex_output, inverse,
+      checked_signal_sizes, static_cast<int64_t>(norm), onesided, output_sizes);
 }
 
 // We call the following methods via CUDA hooks because they are really only

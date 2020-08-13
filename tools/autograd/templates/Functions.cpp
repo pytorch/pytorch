@@ -2264,7 +2264,7 @@ std::tuple<Tensor, Tensor> cholesky_solve_backward(
 Tensor fft_backward(const Tensor& self, const Tensor& grad, int64_t signal_ndim,
                     bool complex_input, bool complex_output,
                     bool inverse, IntArrayRef checked_signal_sizes,
-                    int normalization, bool onesided,
+                    int64_t normalization, bool onesided,
                     IntArrayRef output_sizes) {
   Tensor gI;
   if (!complex_input && complex_output) {

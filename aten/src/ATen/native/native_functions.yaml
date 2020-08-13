@@ -1574,6 +1574,10 @@
     CPU: _fft_mkl
     CUDA: _fft_cufft
 
+- func: _fft_with_size.bool_norm(Tensor self, int signal_ndim, bool complex_input, bool complex_output, bool inverse, int[] checked_signal_sizes, bool normalized, bool onesided, int[] output_sizes) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+
 - func: _cufft_get_plan_cache_size(int device_index) -> int
   use_c10_dispatcher: full
 

@@ -5,7 +5,7 @@ from contextlib import contextmanager
 from itertools import product
 
 from torch.testing._internal.common_utils import \
-    (TestCase, run_tests, TEST_NUMPY, TEST_LIBROSA)
+    (TestCase, run_tests, TEST_NUMPY, TEST_LIBROSA, _assertGradAndGradgradChecks)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, onlyOnCPUAndCUDA, precisionOverride,
      skipCPUIfNoMkl, skipCUDAIfRocm, deviceCountAtLeast, onlyCUDA)
@@ -144,7 +144,7 @@ class TestFFT(TestCase):
             t = torch.randint(-2, 2, (64,), device=device, dtype=dtype)
 
         PROMOTION_MAP = {
-            torch.int8: torch.complex128,
+            torch.int8: torch.complex64,
             torch.float: torch.complex64,
             torch.double: torch.complex128,
             torch.complex64: torch.complex64,
@@ -154,7 +154,7 @@ class TestFFT(TestCase):
         self.assertEqual(T.dtype, PROMOTION_MAP[dtype])
 
         PROMOTION_MAP_C2R = {
-            torch.int8: torch.double,
+            torch.int8: torch.float,
             torch.float: torch.float,
             torch.double: torch.double,
             torch.complex64: torch.float,
@@ -165,12 +165,46 @@ class TestFFT(TestCase):
 
         if not dtype.is_complex:
             PROMOTION_MAP_R2C = {
-                torch.int8: torch.complex128,
+                torch.int8: torch.complex64,
                 torch.float: torch.complex64,
                 torch.double: torch.complex128,
             }
             C = torch.fft.rfft(t)
             self.assertEqual(C.dtype, PROMOTION_MAP_R2C[dtype])
+
+
+    @skipCPUIfNoMkl
+    @skipCUDAIfRocm
+    @dtypes(torch.double, torch.complex128)  # gradcheck requires double
+    def test_fft_backward(self, device, dtype):
+        test_args = product(
+            # input
+            (torch.randn(67, device=device, dtype=dtype),
+             torch.randn(9, 6, 3, device=device, dtype=dtype)),
+            # n
+            (None, 6),
+            # dim
+            (-1, 0),
+            # norm
+            (None, "forward", "backward", "ortho")
+        )
+
+        fft_functions = ['fft', 'ifft', 'hfft', 'irfft']
+        # Real-only functions
+        if not dtype.is_complex:
+            fft_functions += ['rfft', 'ihfft']
+
+        for fname in fft_functions:
+            torch_fn = getattr(torch.fft, fname)
+
+            for iargs in test_args:
+                args = list(iargs)
+                input = args[0].clone().detach_().requires_grad_()
+                args = args[1:]
+
+                self.assertTrue(torch.autograd.gradcheck(
+                    lambda x: torch_fn(x, *args), (input,)))
+
 
     # Legacy fft tests
     def _test_fft_ifft_rfft_irfft(self, device, dtype):
