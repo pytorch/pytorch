@@ -1,4 +1,3 @@
-#define OBSOLETE_AT_ASSERTM  // This is an obsolete exemption guard. We have AT_ASSERTM in this file.
 #include <c10/cuda/CUDACachingAllocator.h>
 
 #include <c10/cuda/CUDAGuard.h>

@@ -1,4 +1,3 @@
-#define OBSOLETE_AT_ASSERTM  // This is an obsolete exemption guard. We have AT_ASSERTM in this file.
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/NativeFunctions.h>

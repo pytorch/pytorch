@@ -45,6 +45,7 @@ DEFINE_DISPATCH(logaddexp_stub);
 DEFINE_DISPATCH(logaddexp2_stub);
 DEFINE_DISPATCH(gcd_stub);
 DEFINE_DISPATCH(lcm_stub);
+DEFINE_DISPATCH(hypot_stub);
 
 Tensor& add_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar alpha) {
   auto iter = TensorIterator::binary_op(result, self, other,
@@ -166,19 +167,18 @@ Tensor& remainder_(Tensor& self, const Tensor& other) {
 }
 
 Tensor& true_divide_out(Tensor& result, const Tensor& self, const Tensor& divisor) {
-  // If both inputs have integral (or bool) types, creates
-  // temporary float copies as new inputs.
-  if (isIntegralType(self.scalar_type(), /*includeBool=*/ true)
-   && isIntegralType(divisor.scalar_type(), /*includeBool=*/ true)) {
-    const auto scalar_type = typeMetaToScalarType(c10::get_default_dtype());
-    auto iter = TensorIterator::binary_op(result,
-                                          self.to(scalar_type),
-                                          divisor.to(scalar_type),
-                                          /*check_mem_overlap=*/ true);
-    div_stub(iter.device_type(), iter);
-    return result;
-  }
-  auto iter = TensorIterator::binary_op(result, self, divisor, /*check_mem_overlap=*/ true);
+  TensorIterator iter = TensorIteratorConfig()
+     .set_check_mem_overlap(true)
+     .add_output(result)
+     .add_input(self)
+     .add_input(divisor)
+     .allow_cpu_scalars(true)
+     .promote_inputs_to_common_dtype(true)
+     .promote_integer_inputs_to_float(true)
+     .cast_common_dtype_to_outputs(true)
+     .enforce_safe_casting_to_output(true)
+     .build();
+
   div_stub(iter.device_type(), iter);
   return result;
 }
@@ -860,7 +860,7 @@ Tensor& gcd_out(Tensor& result, const Tensor& self, const Tensor& other) {
   return result;
 }
 
-Tensor gcd(const Tensor& self, const Tensor& other) {  
+Tensor gcd(const Tensor& self, const Tensor& other) {
   Tensor result = at::empty({0}, self.options());
   return at::gcd_out(result, self, other);
 }
@@ -875,13 +875,30 @@ Tensor& lcm_out(Tensor& result, const Tensor& self, const Tensor& other) {
   return result;
 }
 
-Tensor lcm(const Tensor& self, const Tensor& other) {  
+Tensor lcm(const Tensor& self, const Tensor& other) {
   Tensor result = at::empty({0}, self.options());
   return at::lcm_out(result, self, other);
 }
 
 Tensor& lcm_(Tensor& self, const Tensor& other) {
   return at::lcm_out(self, self, other);
+}
+
+Tensor& hypot_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  auto iter = TensorIterator::binary_op(result, self, other);
+  hypot_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor hypot(const Tensor& self, const Tensor& other) {
+  Tensor result;
+  auto iter = TensorIterator::binary_op(result, self, other);
+  hypot_stub(iter.device_type(), iter);
+  return iter.output();
+}
+
+Tensor& hypot_(Tensor& self, const Tensor& other) {
+  return at::hypot_out(self, self, other);
 }
 
 Tensor true_divide(const Tensor& self, Scalar divisor) {

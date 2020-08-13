@@ -433,6 +433,20 @@ inline void deprecated_AT_ASSERTM() {}
     C10_EXPAND_MSVC_WORKAROUND(TORCH_INTERNAL_ASSERT(__VA_ARGS__)); \
   } while (false)
 
+// Deprecated alias, like AT_ASSERT.  The new TORCH_INTERNAL_ASSERT macro supports
+// both 0-ary and variadic calls, so having a separate message-accepting macro
+// is not necessary.
+//
+// NB: we MUST include cond explicitly here, as MSVC will miscompile the macro
+// expansion, shunting all of __VA_ARGS__ to cond.  An alternate workaround
+// can be seen at
+// https://stackoverflow.com/questions/5134523/msvc-doesnt-expand-va-args-correctly
+#define AT_ASSERTM(cond, ...)                                                 \
+  do {                                                                        \
+    ::c10::detail::deprecated_AT_ASSERTM();                                   \
+    C10_EXPAND_MSVC_WORKAROUND(TORCH_INTERNAL_ASSERT(cond, __VA_ARGS__));     \
+  } while (false)
+
 // Deprecated alias; this alias was deprecated because it represents extra API
 // surface that makes it hard for people to understand what macro to use.
 // Use TORCH_CHECK(false, ...) or TORCH_INTERNAL_ASSERT(false, ...) to
@@ -444,19 +458,3 @@ inline void deprecated_AT_ASSERTM() {}
   } while (false)
 
 #endif // C10_UTIL_EXCEPTION_H_
-
-#ifdef OBSOLETE_AT_ASSERTM
-// Deprecated alias, like AT_ASSERT.  The new TORCH_INTERNAL_ASSERT macro
-// supports both 0-ary and variadic calls, so having a separate
-// message-accepting macro is not necessary.
-//
-// NB: we MUST include cond explicitly here, as MSVC will miscompile the macro
-// expansion, shunting all of __VA_ARGS__ to cond.  An alternate workaround
-// can be seen at
-// https://stackoverflow.com/questions/5134523/msvc-doesnt-expand-va-args-correctly
-#define AT_ASSERTM(cond, ...)                                             \
-  do {                                                                    \
-    ::c10::detail::deprecated_AT_ASSERTM();                               \
-    C10_EXPAND_MSVC_WORKAROUND(TORCH_INTERNAL_ASSERT(cond, __VA_ARGS__)); \
-  } while (false)
-#endif

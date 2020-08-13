@@ -1425,8 +1425,7 @@ Example::
             [-0.0889,  0.2122,  0.1412]])
 """)
 
-add_docstr(torch.clamp,
-           r"""
+add_docstr(torch.clamp, r"""
 clamp(input, min, max, out=None) -> Tensor
 
 Clamp all elements in :attr:`input` into the range `[` :attr:`min`, :attr:`max` `]` and return
@@ -1495,6 +1494,12 @@ Example::
     tensor([ 0.7753, -0.4702, -0.4599,  1.1899])
     >>> torch.clamp(a, max=0.5)
     tensor([ 0.5000, -0.4702, -0.4599,  0.5000])
+""".format(**common_args))
+
+add_docstr(torch.clip, r"""
+clip(input, min, max, *, out=None) -> Tensor
+
+Alias for :func:`torch.clamp`.
 """.format(**common_args))
 
 add_docstr(torch.conj,
@@ -2610,6 +2615,12 @@ Args:
 
 """)
 
+add_docstr(torch.outer, r"""
+outer(input, vec2, *, out=None) -> Tensor
+
+Alias of :func:`torch.ger`.
+""")
+
 add_docstr(torch.ger,
            r"""
 ger(input, vec2, out=None) -> Tensor
@@ -2776,6 +2787,32 @@ Example::
     tensor([ 0.,  2.,  1.,  0.])
 """.format(**common_args))
 
+add_docstr(torch.hypot,
+           r"""
+hypot(input, other, *, out=None) -> Tensor
+
+Given the legs of a right triangle, return its hypotenuse.
+
+.. math::
+    \text{out}_{i} = \sqrt{\text{input}_{i}^{2} + \text{other}_{i}^{2}}
+
+The shapes of ``input`` and ``other`` must be
+:ref:`broadcastable <broadcasting-semantics>`.
+""" + r"""
+Args:
+    input (Tensor): the first input tensor
+    other (Tensor): the second input tensor
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> a = torch.hypot(torch.tensor([4.0]), torch.tensor([3.0, 4.0, 5.0]))
+    tensor([5.0000, 5.6569, 6.4031])
+
+""".format(**common_args))
+
 add_docstr(torch.index_select,
            r"""
 index_select(input, dim, index, out=None) -> Tensor
@@ -2874,6 +2911,40 @@ Tests if each element of :attr:`input` is infinite
         >>> torch.isinf(torch.tensor([1, float('inf'), 2, float('-inf'), float('nan')]))
         tensor([False,  True,  False,  True,  False])
 """)
+
+add_docstr(torch.isposinf,
+           r"""
+isposinf(input, *, out=None) -> Tensor
+Tests if each element of :attr:`input` is positive infinity or not.
+
+Args:
+  {input}
+
+Keyword args:
+  {out}
+
+Example::
+    >>> a = torch.tensor([-float('inf'), float('inf'), 1.2])
+    >>> torch.isposinf(a)
+    tensor([False,  True, False])
+""".format(**common_args))
+
+add_docstr(torch.isneginf,
+           r"""
+isneginf(input, *, out=None) -> Tensor
+Tests if each element of :attr:`input` is negative infinity or not.
+
+Args:
+  {input}
+
+Keyword args:
+  {out}
+
+Example::
+    >>> a = torch.tensor([-float('inf'), float('inf'), 1.2])
+    >>> torch.isneginf(a)
+    tensor([ True, False, False])
+""".format(**common_args))
 
 add_docstr(torch.isclose, r"""
 isclose(input, other, rtol=1e-05, atol=1e-08, equal_nan=False) -> Tensor
@@ -3980,6 +4051,70 @@ Example::
     torch.return_types.median(values=tensor([-0.3982,  0.2270,  0.2488,  0.4742]), indices=tensor([1, 4, 4, 3]))
 """.format(**single_dim_common))
 
+add_docstr(torch.quantile,
+           r"""
+quantile(input, q) -> Tensor
+
+Returns the q-th quantiles of all elements in the :attr:`input` tensor, doing a linear 
+interpolation when the q-th quantile lies between two data.
+
+Args:
+    {input}
+    q (float or Tensor): a scalar or 1D tensor of quantile values in the range [0, 1]
+
+Example::
+
+    >>> a = torch.randn(1, 3)
+    >>> a
+    tensor([[ 0.0700, -0.5446,  0.9214]])
+    >>> q = torch.tensor([0, 0.5, 1])
+    >>> torch.quantile(a, q)
+    tensor([-0.5446,  0.0700,  0.9214])
+
+.. function:: quantile(input, q, dim=None, keepdim=False, *, out=None) -> Tensor
+
+Returns the q-th quantiles of each row of the :attr:`input` tensor along the dimension
+:attr:`dim`, doing a linear interpolation when the q-th quantile lies between two 
+data points. By default, :attr:`dim` is `None` resulting in the :attr:`input` tensor
+beign flattened before computation.
+
+If :attr:`q` is a 1D tensor, the first dimension of the result corresponds to the quantiles 
+and the remaining dimensions are what remains from the reduction of the :attr:`input` tensor.
+If :attr:`q` is a scalar or scalar tensor, the result is placed in the reduced dimension.
+
+If :attr:`keepdim` is ``True``, the remaining dimensions are of the same size as 
+:attr:`input` except in the dimension :attr:`dim` where it is size 1. Otherwise, 
+the dimension :attr:`dim` is squeezed (see :func:`torch.squeeze`).
+
+Args:
+    {input}
+    q (float or Tensor): a scalar or 1D tensor of quantile values in the range [0, 1]
+    {dim}
+    {keepdim}
+
+Keyword arguments:
+    {out}
+
+Example::
+
+    >>> a = torch.randn(2, 3)
+    >>> a
+    tensor([[ 0.0795, -1.2117,  0.9765],
+            [ 1.1707,  0.6706,  0.4884]])
+    >>> q = torch.tensor([0.25, 0.5, 0.75])
+    >>> torch.quantile(a, q, dim=1, keepdim=True)
+    tensor([[[-0.5661],
+            [ 0.5795]],
+
+            [[ 0.0795],
+            [ 0.6706]],
+
+            [[ 0.5280],
+            [ 0.9206]]])
+    >>> torch.quantile(a, q, dim=1, keepdim=True).shape
+    torch.Size([3, 2, 1])
+""".format(**single_dim_common))
+
 add_docstr(torch.min,
            r"""
 min(input) -> Tensor
@@ -4403,6 +4538,51 @@ Example::
     tensor([[0.3928, 0.4007, 0.7586],
             [1.0311, 0.3901, 0.5049]])
 """)
+
+add_docstr(torch.movedim,
+           r"""
+movedim(input, source, destination) -> Tensor
+
+Moves the dimension(s) of :attr:`input` at the position(s) in :attr:`source`
+to the position(s) in :attr:`destination`.
+
+Other dimensions of :attr:`input` that are not explicitly moved remain in
+their original order and appear at the positions not specified in :attr:`destination`.
+
+Args:
+    {input}
+    source (int or tuple of ints): Original positions of the dims to move. These must be unique.
+    destination (int or tuple of ints): Destination positions for each of the original dims. These must also be unique.
+
+Examples::
+
+    >>> t = torch.randn(3,2,1)
+    >>> t
+    tensor([[[-0.3362],
+            [-0.8437]],
+
+            [[-0.9627],
+            [ 0.1727]],
+
+            [[ 0.5173],
+            [-0.1398]]])
+    >>> torch.movedim(t, 1, 0).shape
+    torch.Size([2, 3, 1])
+    >>> torch.movedim(t, 1, 0)
+    tensor([[[-0.3362],
+            [-0.9627],
+            [ 0.5173]],
+
+            [[-0.8437],
+            [ 0.1727],
+            [-0.1398]]])
+    >>> torch.movedim(t, (1, 2), (0, 1)).shape
+    torch.Size([2, 1, 3])
+    >>> torch.movedim(t, (1, 2), (0, 1))
+    tensor([[[-0.3362, -0.9627,  0.5173]],
+
+            [[-0.8437,  0.1727, -0.1398]]])
+""".format(**common_args))
 
 add_docstr(torch.narrow,
            r"""
@@ -5625,6 +5805,25 @@ Example::
     tensor([ 1., -1.,  0.,  1.])
 """.format(**common_args))
 
+add_docstr(torch.signbit,
+           r"""
+signbit(input, *, out=None) -> Tensor
+
+Tests if each element of :attr:`input` has its sign bit set (is less than zero) or not.
+
+Args:
+  {input}
+
+Keyword args:
+  {out}
+
+Example::
+
+    >>> a = torch.tensor([0.7, -1.2, 0., 2.3])
+    >>> torch.signbit(a)
+    tensor([ False, True,  False,  False])
+""".format(**common_args))
+
 add_docstr(torch.sin,
            r"""
 sin(input, out=None) -> Tensor
@@ -6057,6 +6256,53 @@ Example::
     >>> b = torch.arange(4 * 5 * 6).view(4, 5, 6)
     >>> torch.sum(b, (2, 1))
     tensor([  435.,  1335.,  2235.,  3135.])
+""".format(**multi_dim_common))
+
+add_docstr(torch.nansum,
+           r"""
+nansum(input, dtype=None) -> Tensor
+
+Returns the sum of all elements, treating Not a Numbers (NaNs) as zero.
+
+Args:
+    {input}
+
+Keyword args:
+    {dtype}
+
+Example::
+
+    >>> a = torch.tensor([1., 2., float('nan'), 4.])
+    >>> torch.nansum(a)
+    tensor(7.)
+
+.. function:: nansum(input, dim, keepdim=False, dtype=None) -> Tensor
+
+Returns the sum of each row of the :attr:`input` tensor in the given
+dimension :attr:`dim`, treating Not a Numbers (NaNs) as zero.
+If :attr:`dim` is a list of dimensions, reduce over all of them.
+
+{keepdim_details}
+
+Args:
+    {input}
+    {dim}
+    {keepdim}
+
+Keyword args:
+    {dtype}
+
+Example::
+
+    >>> torch.nansum(torch.tensor([1., float("nan")]))
+    1.0
+    >>> a = torch.tensor([[1, 2], [3., float("nan")]])
+    >>> torch.nansum(a)
+    tensor(6.)
+    >>> torch.nansum(a, dim=0)
+    tensor([4., 2.])
+    >>> torch.nansum(a, dim=1)
+    tensor([3., 3.])
 """.format(**multi_dim_common))
 
 add_docstr(torch.svd,
@@ -7137,23 +7383,16 @@ Example::
     torch.Size([2, 3])
 """.format(**factory_common_args))
 
-add_docstr(torch.full,
-           r"""
-full(size, fill_value, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
+add_docstr(torch.full, r"""
+full(size, fill_value, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
-Returns a tensor of size :attr:`size` filled with :attr:`fill_value`.
-
-.. warning::
-    Providing a bool or integral :attr:`fill_value` without setting
-    the optional :attr:`dtype` or :attr:`out` arguments is currently unsupported.
-    In PyTorch 1.7, when :attr:`dtype` and :attr:`out` are not set
-    a bool :attr:`fill_value` will return a tensor of torch.bool dtype,
-    and an integral :attr:`fill_value` will return a tensor of torch.long dtype.
+Creates a tensor of size :attr:`size` filled with :attr:`fill_value`. The
+tensor's dtype is inferred from :attr:`fill_value`.
 
 Args:
     size (int...): a list, tuple, or :class:`torch.Size` of integers defining the
         shape of the output tensor.
-    fill_value: the number to fill the output tensor with.
+    fill_value (Scalar): the value to fill the output tensor with.
     {out}
     {dtype}
     {layout}
@@ -7165,7 +7404,6 @@ Example::
     >>> torch.full((2, 3), 3.141592)
     tensor([[ 3.1416,  3.1416,  3.1416],
             [ 3.1416,  3.1416,  3.1416]])
-
 """.format(**factory_common_args))
 
 add_docstr(torch.full_like,
@@ -7240,10 +7478,18 @@ The operation is defined as:
 .. note::
     The tensors :attr:`condition`, :attr:`x`, :attr:`y` must be :ref:`broadcastable <broadcasting-semantics>`.
 
+.. note::
+    Currently valid scalar and tensor combination are
+    1. Scalar of floating dtype and torch.double
+    2. Scalar of integral dtype and torch.long
+    3. Scalar of complex dtype and torch.complex128
+
 Arguments:
     condition (BoolTensor): When True (nonzero), yield x, otherwise yield y
-    x (Tensor): values selected at indices where :attr:`condition` is ``True``
-    y (Tensor): values selected at indices where :attr:`condition` is ``False``
+    x (Tensor or Scalar): value (if :attr:x is a scalar) or values selected at indices
+                          where :attr:`condition` is ``True``
+    y (Tensor or Scalar): value (if :attr:x is a scalar) or values selected at indices
+                          where :attr:`condition` is ``False``
 
 Returns:
     Tensor: A tensor of shape equal to the broadcasted shape of :attr:`condition`, :attr:`x`, :attr:`y`
@@ -7260,6 +7506,13 @@ Example::
     tensor([[ 1.0000,  0.3139],
             [ 0.3898,  1.0000],
             [ 0.0478,  1.0000]])
+    >>> x = torch.randn(2, 2, dtype=torch.double)
+    >>> x
+    tensor([[ 1.0779,  0.0383],
+            [-0.8785, -1.1089]], dtype=torch.float64)
+    >>> torch.where(x > 0, x, 0.)
+    tensor([[1.0779, 0.0383],
+            [0.0000, 0.0000]], dtype=torch.float64)
 
 .. function:: where(condition) -> tuple of LongTensor
 
@@ -7407,8 +7660,7 @@ Example::
 .. _[2]: https://www.jstor.org/stable/2156365
 """)
 
-add_docstr(torch.fft,
-           r"""
+add_docstr(torch.fft, r"""
 fft(input, signal_ndim, normalized=False) -> Tensor
 
 Complex-to-complex Discrete Fourier Transform
@@ -7442,6 +7694,10 @@ The inverse of this function is :func:`~torch.ifft`.
     repeatedly running FFT methods on tensors of same geometry with same
     configuration. See :ref:`cufft-plan-cache` for more details on how to
     monitor and control the cache.
+
+.. warning::
+    If the torch.fft module is imported then "torch.fft" will refer to the
+    module and not this function. Use :meth:`torch.Tensor.fft` instead.
 
 .. warning::
     Due to limited dynamic range of half datatype, performing this operation in half
@@ -8251,7 +8507,10 @@ It is recommended to set a large seed, i.e. a number that has a good balance of 
 and 1 bits. Avoid having many 0 bits in the seed.
 
 Arguments:
-    seed (int): The desired seed.
+    seed (int): The desired seed. Value must be within the inclusive range
+        `[-0x8000_0000_0000_0000, 0xffff_ffff_ffff_ffff]`. Otherwise, a RuntimeError
+        is raised. Negative inputs are remapped to positive values with the formula
+        `0xffff_ffff_ffff_ffff + seed`.
 
 Returns:
     Generator: An torch.Generator object.

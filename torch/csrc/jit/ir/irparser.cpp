@@ -1,4 +1,3 @@
-#define OBSOLETE_AT_ASSERTM  // This is an obsolete exemption guard. We have AT_ASSERTM in this file.
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/frontend/lexer.h>
 #include <torch/csrc/jit/frontend/parse_string_literal.h>

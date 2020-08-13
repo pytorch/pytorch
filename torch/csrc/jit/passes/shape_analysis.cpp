@@ -1,4 +1,3 @@
-#define OBSOLETE_AT_ASSERTM  // This is an obsolete exemption guard. We have AT_ASSERTM in this file.
 #include <torch/csrc/jit/passes/shape_analysis.h>
 
 #include <c10/util/Exception.h>
