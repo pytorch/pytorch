@@ -127,6 +127,16 @@ void dot<float>(CUDABLAS_DOT_ARGTYPES(float));
 template <>
 void dot<at::Half>(CUDABLAS_DOT_ARGTYPES(at::Half));
 
+template <typename Dtype>
+inline void vdot(CUDABLAS_DOT_ARGTYPES(Dtype)) {
+  AT_ERROR("at::cuda::blas::vdot: not implemented for ", typeid(Dtype).name());
+}
+
+template <>
+void vdot<c10::complex<float>>(CUDABLAS_DOT_ARGTYPES(c10::complex<float>));
+template <>
+void vdot<c10::complex<double>>(CUDABLAS_DOT_ARGTYPES(c10::complex<double>));
+
 } // namespace blas
 } // namespace cuda
 } // namespace at

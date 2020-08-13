@@ -519,6 +519,32 @@ void dot<at::Half>(CUDABLAS_DOT_ARGTYPES(at::Half)) {
 #endif
 }
 
+template <>
+void vdot<c10::complex<float>>(CUDABLAS_DOT_ARGTYPES(c10::complex<float>)) {
+  #ifndef __HIP_PLATFORM_HCC__
+  TORCH_CUDABLAS_CHECK(cublasCdotc(handle, n, reinterpret_cast<const cuComplex*>(x),
+                                   incx, reinterpret_cast<const cuComplex*>(y), incy,
+                                   reinterpret_cast<cuComplex*>(result)));
+  #else
+  TORCH_CUDABLAS_CHECK(cublasCdotc(handle, n, reinterpret_cast<const rocblas_float_complex*>(x),
+                                   incx, reinterpret_cast<const rocblas_float_complex*>(y), incy,
+                                   reinterpret_cast<rocblas_float_complex*>(result)));
+  #endif
+}
+
+template <>
+void vdot<c10::complex<double>>(CUDABLAS_DOT_ARGTYPES(c10::complex<double>)) {
+  #ifndef __HIP_PLATFORM_HCC__
+  TORCH_CUDABLAS_CHECK(cublasZdotc(handle, n, reinterpret_cast<const cuDoubleComplex*>(x),
+                                   incx, reinterpret_cast<const cuDoubleComplex*>(y), incy,
+                                   reinterpret_cast<cuDoubleComplex*>(result)));
+  #else
+  TORCH_CUDABLAS_CHECK(cublasZdotc(handle, n, reinterpret_cast<const rocblas_double_complex*>(x),
+                                   incx, reinterpret_cast<const rocblas_double_complex*>(y), incy,
+                                   reinterpret_cast<rocblas_double_complex*>(result)));
+  #endif
+}
+
 } // namespace blas
 } // namespace cuda
 } // namespace at
