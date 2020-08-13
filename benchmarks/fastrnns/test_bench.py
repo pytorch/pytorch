@@ -29,7 +29,6 @@ def set_fuser(fuser_name):
 
 def set_executor(executor_name):
     if executor_name == 'profiling':
-        print("Setting profiling executor")
         torch._C._jit_set_profiling_executor(True)
         torch._C._jit_set_profiling_mode(True)
         torch._C._jit_set_bailout_depth(20)
