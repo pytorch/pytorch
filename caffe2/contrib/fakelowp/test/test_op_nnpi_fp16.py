@@ -3,22 +3,17 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-import ctypes
 import numpy as np
-import os
 
 import caffe2.python.fakelowp.init_shared_libs  # noqa
-
 from hypothesis import given, settings
 from hypothesis import strategies as st
-
-
 from caffe2.proto import caffe2_pb2
-from caffe2.python import dyndep
 from caffe2.python import core
 from caffe2.python import workspace
 from caffe2.python.onnx.onnxifi import onnxifi_caffe2_net
 from caffe2.python.fakelowp.test_utils import print_test_debug_info
+from caffe2.python.oss.fakelowp.test_utils import compute_ulp_error
 import caffe2.python.serialized_test.serialized_test_util as serial
 
 core.GlobalInit(["caffe2", "--caffe2_log_level=-3", "--glow_global_fp16=1"])
@@ -28,6 +23,7 @@ kEpsilon = 1e-8
 
 class ArithmeticOpsTest(serial.SerializedTestCase):
     @given(seed=st.integers(0, 65534))
+    @settings(deadline=None)
     def _test_binary_op_graph(self, name, seed):
         np.random.seed(seed)
         workspace.ResetWorkspace()
@@ -97,34 +93,39 @@ class ArithmeticOpsTest(serial.SerializedTestCase):
             Y_glow[Y_glow == np.Inf] = np.finfo(np.float16).max
             Y_glow[Y_glow == np.NINF] = np.finfo(np.float16).min
 
+            # Ignore mismatches solely due to difference in precision
+            fp16_finite = np.isfinite(A.astype(np.float16) / B.astype(np.float16))
+
             # Results should be identical since we are comparing with the C2 emulation
-            if not np.allclose(Y_c2, Y_glow):
+            if not np.allclose(Y_c2[fp16_finite], Y_glow[fp16_finite]):
                 diff = np.abs((Y_glow - Y_c2) / (Y_c2 + kEpsilon))
                 print_test_debug_info(name, {
                     "dims": dims, "iter": _, "seed": seed, "A": A, "B": B,
                     "Y_glow": Y_glow, "Y_c2": Y_c2, "diff": diff})
                 assert(0)
 
+    @settings(deadline=None)
     def test_add_graph(self):
         self._test_binary_op_graph("Add")
 
+    @settings(deadline=None)
     def test_sub_graph(self):
         self._test_binary_op_graph("Sub")
 
+    @settings(deadline=None)
     def test_mul_graph(self):
         self._test_binary_op_graph("Mul")
 
+    @settings(deadline=None)
     def test_div_graph(self):
         self._test_binary_op_graph("Div")
 
 
 class UnaryOpTest(serial.SerializedTestCase):
-    def _test_unary_op(self, opname, value, rtol=1e-5, atol=1e-8):
+    @settings(deadline=1000)
+    def _test_unary_op(self, opname, X, rtol=1e-5, atol=1e-8):
         workspace.ResetWorkspace()
-        n = 1
-        m = 10001
 
-        X = np.linspace(-value, value, num=m, dtype=np.float32)
         pred_net = caffe2_pb2.NetDef()
         pred_net.name = "pred"
         pred_net.external_input.append("X")
@@ -147,7 +148,7 @@ class UnaryOpTest(serial.SerializedTestCase):
         )
         print("REF NET = {}".format(ref_net))
 
-        shape_hints = {"X": (n, m)}
+        shape_hints = {"X": X.shape}
         pred_net_onnxified = onnxifi_caffe2_net(pred_net,
                                                 shape_hints,
                                                 debug=True,
@@ -167,8 +168,6 @@ class UnaryOpTest(serial.SerializedTestCase):
         workspace.RunNet(ref_net.name)
         Y_c2 = workspace.FetchBlob('Y')
 
-
-
         if not np.allclose(Y_c2, Y_glow, rtol=atol, atol=atol):
             diff = np.abs(Y_c2 - Y_glow)
             np.save('/tmp/' + opname + 'diff', diff)
@@ -181,33 +180,63 @@ class UnaryOpTest(serial.SerializedTestCase):
             })
             assert(0)
 
-    # These tests doesn't need to run multiple times given that it is a
-    # linear sweep and it is deterministic.
-    # Once hypothesis.testing version is updated, we can re-enable
-    # testing with different hypothesis examples.
-    def test_sigmoid(self):
-        self._test_unary_op("Sigmoid", value=20)
+        return Y_glow
+
+    def _test_op_w_ulp_error(self, opname, regions, atol=0, err_threshold=2):
+        ulp_err = 0
+        for x0, x1 in regions:
+            X = np.linspace(x0, x1, num=1025, dtype=np.float16).astype(np.float32)
+            Y_glow = self._test_unary_op(opname, X, atol=atol)
+            region_err = compute_ulp_error(opname, X, Y_glow)
+            ulp_err = max(np.max(np.abs(region_err)), ulp_err)
+        if (ulp_err > err_threshold):
+            print(r'{} Op detected ulp_err={}'.format(opname, ulp_err))
+            assert(0)
 
     # These tests doesn't need to run multiple times given that it is a
     # linear sweep and it is deterministic.
     # Once hypothesis.testing version is updated, we can re-enable
     # testing with different hypothesis examples.
+    @settings(deadline=None)
+    def test_sigmoid(self):
+        opname = "Sigmoid"
+        regions = [[-8., -4.], [-4., -2.], [-2., -1.], [-1., -.5], [-.5, -.25],
+                   [-.25, .25], [.25, .5], [.5, 1.], [1., 2.], [2., 4.],
+                   [4., 8.]]
+        self._test_op_w_ulp_error(opname, regions, atol=0, err_threshold=2.5)
+
+    # These tests doesn't need to run multiple times given that it is a
+    # linear sweep and it is deterministic.
+    # Once hypothesis.testing version is updated, we can re-enable
+    # testing with different hypothesis examples.
+    @settings(deadline=None)
     def test_tanh(self):
-        self._test_unary_op("Tanh", value=20)
+        opname = "Tanh"
+        regions = [[2.**(-9), 2.**(-8)], [2.**(-8), 2.**(-7)],
+                   [2.**(-7), 2.**(-6)], [2.**(-6), 2.**(-5)],
+                   [2.**(-5), 2.**(-4)], [2.**(-4), 2.**(-3)],
+                   [2.**(-3), 2.**(-2)], [2.**(-2), 2.**(-1)],
+                   [2.**(-1), 1.], [1., 2.], [2., 4.], [4., 8.]]
+        self._test_op_w_ulp_error(opname, regions, atol=0, err_threshold=2)
 
     # These tests doesn't need to run multiple times given that it is a
     # linear sweep and it is deterministic.
     # Once hypothesis.testing version is updated, we can re-enable
     # testing with different hypothesis examples.
     # TODO: move atol to 1e-8 once we get a non-lowered swish implementation
+    @settings(deadline=None)
     def test_swish(self):
-        self._test_unary_op("Swish", value=20, atol=0.008)
+        opname = "Swish"
+        regions = [[-20.5, -11.], [-11., -8.], [-8., -1.], [-1., -0.1],
+                   [-1. / 8., 1. / 8.], [1. / 8, 5.], [5., 8.]]
+        self._test_op_w_ulp_error(opname, regions, atol=0.008, err_threshold=384)
 
     # These tests doesn't need to run multiple times given that it is a
     # linear sweep and it is deterministic.
     # Once hypothesis.testing version is updated, we can re-enable
     # testing with different hypothesis examples.
-    def test_logit(self):
+    @settings(deadline=None)
+    def Skip_test_logit(self):
         workspace.ResetWorkspace()
         n = 1
         m = 15361
@@ -271,6 +300,7 @@ class UnaryOpTest(serial.SerializedTestCase):
 
 class ReluTest(serial.SerializedTestCase):
     @given(seed=st.integers(0, 65534))
+    @settings(deadline=None)
     def relu_test(self, inputs, gc, dc, seed):
         np.random.seed(seed)
         inputs = np.random.rand(1).astype(np.float32)
@@ -328,6 +358,6 @@ class ReluTest(serial.SerializedTestCase):
         if not np.allclose(Y_c2, Y_glow):
             diff = np.abs((Y_glow - Y_c2) / (Y_c2 + kEpsilon))
             print_test_debug_info("Relu", {
-                "seed":seed, "X": X,
+                "seed": seed, "X": X,
                 "Y_glow": Y_glow, "Y_c2": Y_c2, "diff": diff})
             assert(0)

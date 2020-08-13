@@ -143,6 +143,12 @@ namespace c10 {
   _(aten, abs_)                      \
   _(aten, absolute)                  \
   _(aten, absolute_)                 \
+  _(aten, clamp)                     \
+  _(aten, clamp_)                    \
+  _(aten, clip)                      \
+  _(aten, clip_)                     \
+  _(aten, det)                       \
+  _(aten, linalg_det)                \
   _(aten, append)                    \
   _(aten, item)                      \
   _(aten, format)                    \
@@ -164,6 +170,9 @@ namespace c10 {
   _(aten, lerp_)                     \
   _(aten, lt_)                       \
   _(aten, ne_)                       \
+  _(aten, _ger)                      \
+  _(aten, ger)                       \
+  _(aten, outer)                     \
   _(aten, transpose_)                \
   _(aten, unsqueeze_)                \
   _(aten, __getitem__)               \

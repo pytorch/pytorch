@@ -69,6 +69,7 @@ void cleanupPyObj(py::object& obj) {
 } // namespace
 
 void PythonRpcHandler::init() {
+  std::lock_guard<std::mutex> guard(init_lock_);
   if (!initialized_) {
     PROFILE_GIL_SCOPED_ACQUIRE;
     py::object rpcInternal = py::module::import(kInternalModule);
@@ -96,6 +97,7 @@ void PythonRpcHandler::init() {
 PythonRpcHandler::PythonRpcHandler() : initialized_(false) {}
 
 void PythonRpcHandler::cleanup() {
+  std::lock_guard<std::mutex> guard(init_lock_);
   PROFILE_GIL_SCOPED_ACQUIRE;
   cleanupPyObj(pyRunFunction_);
   cleanupPyObj(pySerialize_);

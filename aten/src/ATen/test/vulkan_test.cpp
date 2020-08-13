@@ -95,6 +95,25 @@ TEST(VulkanTest, add_cpu_vulkan) {
   ASSERT_TRUE(almostEqual(t_out2, t_out_expected));
 }
 
+TEST(VulkanTest, add_) {
+  if (!at::is_vulkan_available())
+    return;
+  auto t_in0 = at::rand({1, 2, 2, 2}, at::device(at::kCPU).dtype(at::kFloat));
+  auto t_in1 = at::rand({1, 2, 2, 2}, at::device(at::kCPU).dtype(at::kFloat));
+  auto tv_in0 = t_in0.vulkan();
+  auto tv_in1 = t_in1.vulkan();
+
+  t_in0.add_(t_in1, 2);
+  tv_in0.add_(tv_in1, 2);
+  auto t_out = tv_in0.cpu();
+  bool check = almostEqual(t_out, t_in0);
+  if (!check) {
+    std::cout << "expected:\n" << t_in0 << std::endl;
+    std::cout << "got:\n" << t_out << std::endl;
+  }
+  ASSERT_TRUE(check);
+}
+
 TEST(VulkanTest, conv2d) {
   if (!at::is_vulkan_available())
     return;
@@ -135,7 +154,7 @@ TEST(VulkanTest, conv2dDWWeightsOnCPU) {
   int64_t KW = 2;
   auto t_in = at::rand({1, C, H, W}, at::device(at::kCPU).dtype(at::kFloat));
   auto t_w =
-      at::rand({groups, 1, 2, 2}, at::device(at::kCPU).dtype(at::kFloat));
+      at::rand({groups, 1, KH, KW}, at::device(at::kCPU).dtype(at::kFloat));
   auto t_b = at::zeros({groups}, at::device(at::kCPU).dtype(at::kFloat));
   auto stride = c10::IntArrayRef{1};
   auto padding = c10::IntArrayRef{0};
@@ -210,6 +229,24 @@ TEST(VulkanTest, hardtanh_) {
   auto t_out = tv_out.cpu();
 
   ASSERT_TRUE(almostEqual(t_out, t_out_expected));
+}
+
+TEST(VulkanTest, relu_) {
+  if (!at::is_vulkan_available())
+    return;
+  auto t = at::empty({1, 2, 2, 2}, at::device(at::kCPU).dtype(at::kFloat));
+  auto t_in = t.uniform_(-1, 1);
+  auto tv_in = t_in.vulkan();
+
+  t_in.relu_();
+  tv_in.relu_();
+  auto tv_out = tv_in.cpu();
+  bool check = almostEqual(t_in, tv_out);
+  if (!check) {
+    std::cout << "expected:\n" << t_in << std::endl;
+    std::cout << "got:\n" << tv_out << std::endl;
+  }
+  ASSERT_TRUE(check);
 }
 
 TEST(VulkanTest, mean) {
@@ -318,7 +355,6 @@ class OpsList {
     at::Tensor t = in;
     at::Tensor tv = vin;
     int i = 0;
-    auto size = ops.size();
     for (const auto& op : ops) {
       t = op->run(t);
       tv = op->run(tv);
@@ -337,7 +373,6 @@ class OpsList {
   auto run(at::Tensor& in) {
     at::Tensor t = in;
     int i = 0;
-    auto size = ops.size();
     for (const auto& op : ops) {
       t = op->run(t);
       i++;
@@ -636,6 +671,29 @@ TEST(VulkanTest, reshape2) {
 
   auto tv_in = t_in.vulkan();
   auto tv_out = at::reshape(tv_in, {2, 3, 1, 2});
+  auto t_out = tv_out.cpu();
+
+  const auto check = almostEqual(t_out, t_out_expected);
+  if (!check) {
+    std::cout << "expected:" << t_out_expected << std::endl;
+    std::cout << "got:" << t_out << std::endl;
+  }
+  ASSERT_TRUE(check);
+}
+
+TEST(VulkanTest, cat) {
+  if (!at::is_vulkan_available())
+    return;
+
+  auto t_in0 =
+      at::rand({1, 1, 3, 3}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+  auto t_in1 =
+      at::rand({1, 2, 3, 3}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+  auto t_in2 =
+      at::rand({1, 5, 3, 3}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
+
+  auto t_out_expected = at::cat({t_in0, t_in1, t_in2}, 1);
+  auto tv_out = at::cat({t_in0.vulkan(), t_in1.vulkan(), t_in2.vulkan()}, 1);
   auto t_out = tv_out.cpu();
 
   const auto check = almostEqual(t_out, t_out_expected);
