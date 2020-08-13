@@ -18753,8 +18753,8 @@ else:
             # Test dimension change for 2D tensor of size (M, N) and 3D tensor of size (M, N, 1)
             m = random.randint(1, 10)
             n = random.randint(1, 10)
-            input_a = self._generate_input(tuple(m, n), dtype, device, with_extremal=False)
-            input_b = self._generate_input(tuple(m, n, 1), dtype, device, with_extremal=False)
+            input_a = self._generate_input((m, n), dtype, device, with_extremal=False)
+            input_b = self._generate_input((m, n, 1), dtype, device, with_extremal=False)
             torch_input = [input_a, input_b]
             np_input = [input.cpu().numpy() for input in torch_input]
             actual = torch.dstack(torch_input)
