@@ -54,7 +54,7 @@ def set_rng_state(new_state: Tensor, device: Union[int, str, torch.device] = 'cu
     elif isinstance(device, int):
         device = torch.device('cuda', device)
 
-    def cb():
+    def cb() -> None:
         idx = cast(torch.device, device).index
         if idx is None:
             idx = current_device()
@@ -87,7 +87,7 @@ def manual_seed(seed: int) -> None:
     """
     seed = int(seed)
 
-    def cb():
+    def cb() -> None:
         idx = current_device()
         default_generator = torch.cuda.default_generators[idx]
         default_generator.manual_seed(seed)
@@ -105,7 +105,7 @@ def manual_seed_all(seed: int) -> None:
     """
     seed = int(seed)
 
-    def cb():
+    def cb() -> None:
         for i in range(device_count()):
             default_generator = torch.cuda.default_generators[i]
             default_generator.manual_seed(seed)

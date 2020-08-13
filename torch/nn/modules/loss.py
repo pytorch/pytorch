@@ -1232,7 +1232,7 @@ class TripletMarginLoss(_Loss):
     swap: bool
 
     def __init__(self, margin: float = 1.0, p: float = 2., eps: float = 1e-6, swap: bool = False, size_average=None,
-                 reduce=None, reduction: str = 'mean'):
+                 reduce=None, reduction: str = 'mean') -> None:
         super(TripletMarginLoss, self).__init__(size_average, reduce, reduction)
         self.margin = margin
         self.p = p
@@ -1363,7 +1363,7 @@ class CTCLoss(_Loss):
     blank: int
     zero_infinity: bool
 
-    def __init__(self, blank: int = 0, reduction: str = 'mean', zero_infinity: bool = False):
+    def __init__(self, blank: int = 0, reduction: str = 'mean', zero_infinity: bool = False) -> None:
         super(CTCLoss, self).__init__(reduction=reduction)
         self.blank = blank
         self.zero_infinity = zero_infinity

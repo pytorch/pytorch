@@ -7,7 +7,7 @@ from .fuse_modules import fuse_modules
 from .stubs import *
 from .quantize_jit import *
 
-def default_eval_fn(model, calib_data):
+def default_eval_fn(model, calib_data) -> None:
     r"""
     Default evaluation function takes a torch.utils.data.Dataset or a list of
     input Tensors and run the model on the dataset
