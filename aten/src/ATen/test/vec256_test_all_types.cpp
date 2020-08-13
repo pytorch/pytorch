@@ -71,10 +71,11 @@ namespace {
 
     template <typename T>
     class ComplexTests : public ::testing::Test {};
-
+    
     template <typename T>
+    
     class QuantizationTests : public ::testing::Test {};
-
+    
     using RealFloatTestedTypes = ::testing::Types<vfloat, vdouble>;
     using FloatTestedTypes = ::testing::Types<vfloat, vdouble, vcomplex, vcomplexDbl>;
     using ALLTestedTypes = ::testing::Types<vfloat, vdouble, vcomplex, vlong, vint, vshort, vqint8, vquint8, vqint>;
@@ -83,7 +84,7 @@ namespace {
     using FloatIntTestedTypes = ::testing::Types<vfloat, vdouble, vcomplex, vcomplexDbl, vlong, vint, vshort>;
     using SingleFloat = ::testing::Types<vfloat>;
     using ComplexTypes = ::testing::Types<vcomplex, vcomplexDbl>;
-
+    
     TYPED_TEST_CASE(Memory, ALLTestedTypes);
 
     TYPED_TEST_CASE(Arithmetics, FloatIntTestedTypes);
@@ -129,6 +130,7 @@ namespace {
     TYPED_TEST_CASE(BitwiseFloatsAdditional2, FloatTestedTypes);
 
     TYPED_TEST_CASE(QuantizationTests, QuantTestedTypes);
+    
 
     TYPED_TEST(Memory, UnAlignedLoadStore) {
         using vec_type = TypeParam;
@@ -136,11 +138,9 @@ namespace {
         constexpr size_t b_size = vec_type::size() * sizeof(VT);
         CACHE_ALIGN unsigned char ref_storage[128 * b_size];
         CACHE_ALIGN unsigned char storage[128 * b_size];
-        
         auto seed = TestSeed();
         std::cout << "Test Seed: " << seed << std::endl;
         ValueGen<unsigned char> generator(seed);
-
         for (auto& x : ref_storage) {
             x = generator.get();
         }
@@ -173,8 +173,6 @@ namespace {
         }
     }
 
-
-
     TYPED_TEST(SignManipulation, Absolute) {
         using vec_type = TypeParam;
         test_unary<vec_type>(
@@ -191,7 +189,6 @@ namespace {
             [](vec_type v) { return v.neg(); }, false,
             RESOLVE_OVERLOAD(filter_int_minimum), false);
     }
-
 
     TYPED_TEST(Rounding, Round) {
         using vec_type = TypeParam;
@@ -442,7 +439,6 @@ namespace {
             });
     }
 
-
     TYPED_TEST(Pow, Pow) {
         using vec_type = TypeParam;
         test_binary<vec_type>(
@@ -528,7 +524,6 @@ namespace {
             false, RESOLVE_OVERLOAD(filter_minus_overflow), false);
     }
 
-
     TYPED_TEST(Arithmetics, Multiplication) {
         using vec_type = TypeParam;
         using VT = ValueType<TypeParam>;
@@ -537,8 +532,6 @@ namespace {
             [](const vec_type& v0, const vec_type& v1) { return v0 * v1; },
             false, RESOLVE_OVERLOAD(filter_mult_overflow), true);
     }
-
-
 
     TYPED_TEST(Arithmetics, Division) {
         using vec_type = TypeParam;
@@ -558,7 +551,6 @@ namespace {
                 test_case, RESOLVE_OVERLOAD(filter_div_ub));
         }
         else {
-
             test_binary<vec_type>(
                 "division",
                 std::divides<VT>(),
@@ -566,8 +558,6 @@ namespace {
                 false, RESOLVE_OVERLOAD(filter_div_ub), false);
         }
     }
-
-
 
     TYPED_TEST(Bitwise, BitAnd) {
         using vec_type = TypeParam;
@@ -592,7 +582,6 @@ namespace {
             "bit_xor", local_xor<VT>,
             [](const vec_type& v0, const vec_type& v1) { return v0 ^ v1; }, true);
     }
-
 
     TYPED_TEST(Comparison, Equal) {
         using vec_type = TypeParam;
@@ -698,7 +687,6 @@ namespace {
             });
     }
 
-
     TYPED_TEST(MinMax, Clamp) {
         using vec_type = TypeParam;
         using VT = ValueType<TypeParam>;
@@ -709,7 +697,6 @@ namespace {
             },
             false, RESOLVE_OVERLOAD(filter_clamp));
     }
-
 
     TYPED_TEST(BitwiseFloatsAdditional, ZeroMask) {
         using vec_type = TypeParam;
@@ -728,12 +715,9 @@ namespace {
                     test_vals[i] = (VT)0.897;
                 }
             }
-
             int actual = vec_type::loadu(test_vals).zero_mask();
             ASSERT_EQ(expected, actual) << std::hex << actual << ";" << expected;
-
         } //
-
     }
 
     template<typename vec_type, typename VT, int64_t mask>
@@ -741,7 +725,7 @@ namespace {
         test_blend(VT expected_val[vec_type::size()], VT a[vec_type::size()], VT b[vec_type::size()])
     {
     }
-
+    
     template<typename vec_type, typename VT, int64_t mask>
     typename std::enable_if_t<(mask >= 0 && mask <= 255), void>
         test_blend(VT expected_val[vec_type::size()], VT a[vec_type::size()], VT b[vec_type::size()])
@@ -770,8 +754,7 @@ namespace {
         AssertVec256(expected, actual, detail);
         test_blend<vec_type, VT, mask - 1>(expected_val, a, b);
     }
-
-
+    
     template<typename T, int N>
     void blend_init(T(&a)[N], T(&b)[N]) {
         a[0] = (T)1.0;
@@ -781,7 +764,7 @@ namespace {
             b[i] = b[i - 1] + (T)(1.0);
         }
     }
-
+    
     template<>
     void blend_init<Complex<float>, 4>(Complex<float>(&a)[4], Complex<float>(&b)[4]) {
         auto add = Complex<float>(1., 100.);
@@ -792,7 +775,7 @@ namespace {
             b[i] = b[i - 1] + add;
         }
     }
-
+    
     template<>
     void blend_init<Complex<double>, 2>(Complex<double>(&a)[2], Complex<double>(&b)[2]) {
         auto add = Complex<double>(1.0, 100.0);
@@ -812,12 +795,8 @@ namespace {
         constexpr int64_t power_sets = 1 << (vec_type::size());
         test_blend<vec_type, VT, power_sets - 1>(expected_val, a, b);
     }
-
-
-
-
+    
     TEST(ComplexTests, TestComplexFloatImagRealConj) {
-        //vcomplex a = { Complex<float>(1,2),Complex<float>(3,4) ,Complex<float>(5,6) ,Complex<float>(6,7) };
         float aa[] = { 1.5488e-28,2.5488e-28,3.5488e-28,4.5488e-28,5.5488e-28,6.5488e-28,7.5488e-28,8.5488e-28 };
         float exp[] = { aa[0],0,aa[2],0,aa[4],0,aa[6],0 };
         float exp3[] = { aa[1],0,aa[3],0,aa[5],0,aa[7],0 };
@@ -837,7 +816,6 @@ namespace {
         AssertVec256(expected4, actual4);
     }
 
-
     TYPED_TEST(QuantizationTests, Quantize) {
         using vec_type = TypeParam;
         using underlying = ValueType<vec_type>;
@@ -856,7 +834,6 @@ namespace {
         ValueGen<float> generator_sc(1.f, 15.f, seed.nextSeed());
         //value
         ValueGen<float> gen(min_val * 2.f, max_val * 2.f, seed.nextSeed());
-
         for (int i = 0; i < trials; i++) {
             float scale = generator_sc.get();
             float inv_scale = 1.0f / static_cast<float>(scale);
@@ -873,10 +850,8 @@ namespace {
             }
             auto expected = vec_type::loadu(expected_qint_vals);
             auto actual = vec_type::quantize(float_ret, scale, zero_point_val, inv_scale);
-
             AssertVec256(expected, actual);
             if (::testing::Test::HasFailure()) {
-
                 std::cout << "quantization: {\nvec_exp:";
                 expected.dump();
                 std::cout << "vec_act:";
@@ -885,9 +860,7 @@ namespace {
                 return;
             }
         } //trials;
-
     }
-
 
     TYPED_TEST(QuantizationTests, DeQuantize) {
         using vec_type = TypeParam;
@@ -907,7 +880,6 @@ namespace {
         ValueGen<int> generator(min_val, max_val, seed.nextSeed());
         //scale
         ValueGen<float> generator_sc(1.f, 15.f, seed.nextSeed());
-
         for (int i = 0; i < trials; i++) {
             float scale = generator_sc.get();
             int32_t zero_point_val = generator.get();
@@ -929,7 +901,6 @@ namespace {
                 vfloat vf = vfloat::loadu(unit_exp_vals);
                 expected_float_ret[j] = vf;
             }
-
             auto qint_vec = vec_type::loadu(qint_vals);
             auto actual_float_ret = qint_vec.dequantize(vf_scale, vf_zp, vf_scale_zp);
             for (int j = 0; j < vec_type::float_num_vecs(); j++) {
@@ -938,7 +909,6 @@ namespace {
 #if  defined(CHECK_DEQUANT_WITH_LOW_PRECISION) 
                 AssertVec256(expected, actual, {}, false, true, 1.e-3f);
 #else
-
                 AssertVec256(expected, actual);
 #endif
                 if (::testing::Test::HasFailure()) {
@@ -948,7 +918,6 @@ namespace {
                 }
             }
         } //trials;
-
     }
 
     TYPED_TEST(QuantizationTests, ReQuantizeFromInt) {
@@ -961,19 +930,15 @@ namespace {
         CACHE_ALIGN c10::qint32 unit_int_vec[el_count];
         CACHE_ALIGN underlying expected_qint_vals[vec_type::size()];
         typename vec_type::int_vec_return_type  int_ret;
-
         auto seed = TestSeed();
         std::cout << "Test Seed: " << seed << std::endl;
-
         //zero point 
         ValueGen<int32_t> generator_zp(min_val, max_val, seed.nextSeed());
         //scale
         ValueGen<float> generator_sc(1.f, 15.f, seed.nextSeed());
         //value
         ValueGen<int32_t> gen(-65535, 65535, seed.nextSeed());
-
         for (int i = 0; i < trials; i++) {
-
             float multiplier = 1.f / (generator_sc.get());
             auto zero_point_val = generator_zp.get();
             int index = 0;
@@ -988,7 +953,6 @@ namespace {
             }
             auto expected = vec_type::loadu(expected_qint_vals);
             auto actual = vec_type::requantize_from_int(int_ret, multiplier, zero_point_val);
-
             AssertVec256(expected, actual);
             if (::testing::Test::HasFailure()) {
                 std::cout << "ReQuantizeFromInt: {\nvec_exp:" << expected << "\nvec_act:";
@@ -996,7 +960,6 @@ namespace {
                 return;
             }
         } //trials;
-
     }
 
     TYPED_TEST(QuantizationTests, WideningSubtract) {
@@ -1006,18 +969,14 @@ namespace {
         constexpr int trials = is_large ? 4000 : std::numeric_limits<underlying>::max() / 2;
         constexpr int min_val = std::numeric_limits<underlying>::min();
         constexpr int max_val = std::numeric_limits<underlying>::max();
-
         CACHE_ALIGN int32_t unit_exp_vals[vfloat::size()];
         CACHE_ALIGN underlying qint_vals[vec_type::size()];
         CACHE_ALIGN underlying qint_b[vec_type::size()];
         typename vec_type::int_vec_return_type  expected_int_ret;
-
         auto seed = TestSeed();
         std::cout << "Test Seed: " << seed << std::endl;
         ValueGen<underlying> generator(min_val, max_val, seed);
-
         for (int i = 0; i < trials; i++) {
-
             //generate vals
             for (int j = 0; j < vec_type::size(); j++) {
                 qint_vals[j] = generator.get();
@@ -1032,11 +991,9 @@ namespace {
                 }
                 expected_int_ret[j] = vqint::loadu(unit_exp_vals);
             }
-
             auto qint_vec = vec_type::loadu(qint_vals);
             auto qint_vec_b = vec_type::loadu(qint_b);
             auto actual_int_ret = qint_vec.widening_subtract(qint_vec_b);
-
             for (int j = 0; j < vec_type::float_num_vecs(); j++) {
                 const auto& expected = expected_int_ret[j];
                 const auto& actual = actual_int_ret[j];
@@ -1048,7 +1005,6 @@ namespace {
                 }
             }
         } //trials;
-
     }
 
     TYPED_TEST(QuantizationTests, Relu) {
@@ -1060,7 +1016,6 @@ namespace {
         auto test_case =
             TestingCase<vec_type>::getBuilder()
             .addDomain(CheckWithinDomains<VT>{ { DomainRange<VT>{min_val, max_val}, DomainRange<VT>{(VT)0, (VT)fake_zp}} });
-
         test_binary<vec_type>(
             "relu",
             RESOLVE_OVERLOAD(relu),
@@ -1083,16 +1038,14 @@ namespace {
                         DomainRange<VT>{(VT)0, (VT)fake_zp},
                         DomainRange<VT>{(VT)fake_zp, (VT)fake_qsix}
                 }});
-
         test_ternary<vec_type>(
             "relu6", RESOLVE_OVERLOAD(relu6),
             [](/*const*/ vec_type& v0, const vec_type& v1, const vec_type& v2) {
                 return  v0.relu6(v1, v2);
             }, test_case);
     }
-
 #else
+
 #error GTEST does not have TYPED_TEST
 #endif
 }  // namespace
-
