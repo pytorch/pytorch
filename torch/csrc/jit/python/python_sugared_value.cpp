@@ -404,7 +404,7 @@ std::shared_ptr<SugaredValue> SugaredDict::attr(
   TORCH_INTERNAL_ASSERT(false);
 }
 
-std::shared_ptr<SugaredEnumClass> SugaredEnumClass::create(
+std::shared_ptr<SugaredEnumClass> createSugaredEnumClassFromObj(
     const py::object& obj,
     Function& m,
     const SourceRange& loc) {
@@ -432,24 +432,6 @@ std::shared_ptr<SugaredEnumClass> SugaredEnumClass::create(
 
   return std::make_shared<SugaredEnumClass>(
       enum_values, enum_values_list_constant, enum_type);
-}
-
-std::shared_ptr<SugaredValue> SugaredEnumClass::attr(
-    const SourceRange& loc,
-    Function& /*m*/,
-    const std::string& field) {
-  auto it = enum_values_.find(field);
-  if (it == enum_values_.end()) {
-    throw ErrorReport(loc) << enum_type_->repr_str() << "'"
-                           << " has no attribute '" << field << "'";
-  }
-  return it->second;
-}
-
-SugaredValuePtr SugaredEnumClass::iter(
-    const SourceRange& /*loc*/,
-    Function& /*m*/) {
-  return enum_values_list_constant_;
 }
 
 // helper function for instantiating a SugaredValue from an IValue
@@ -929,7 +911,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   }
 
   if (isEnumClass(obj)) {
-    return SugaredEnumClass::create(obj, m, loc);
+    return createSugaredEnumClassFromObj(obj, m, loc);
   }
 
   auto enum_type = py::module::import("enum").attr("Enum");

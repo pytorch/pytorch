@@ -672,6 +672,8 @@ struct PythonPrintImpl {
       }
     } else if (const auto interfaceType = type->cast<InterfaceType>()) {
       registerDependency(interfaceType);
+    } else if (const auto enumType = type->cast<EnumType>()) {
+      registerDependency(enumType);
     }
     for (const auto& containedType : type->containedTypes()) {
       registerClassDependencies(containedType);
@@ -1412,6 +1414,16 @@ struct PythonPrintImpl {
           indent();
           body_ << "  pass\n";
         }
+      }
+    } else if (auto enumType = type->cast<EnumType>()) {
+      // TODO all these information should come from the type.
+      body_ << "class Color(Enum):\n";
+      {
+        auto guard = WithIndented();
+        indent();
+        body_ << "RED = 1\n";
+        indent();
+        body_ << "GREEN = 2\n";
       }
     } else {
       TORCH_INTERNAL_ASSERT(false, "Unhandled NamedType");

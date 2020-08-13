@@ -8,6 +8,7 @@
 #include <torch/custom_class.h>
 
 #include <regex>
+#include "jit/python/python_sugared_value.h"
 
 namespace torch {
 namespace jit {
@@ -256,6 +257,8 @@ struct SourceImporterImpl : public Resolver,
     } else if (superclass_name == "ModuleInterface") {
       cu_->define_interface(
           qualified_name, class_def, shared_from_this(), /*is_module=*/true);
+    } else if (superclass_name == "Enum") {
+      importEnum(qualified_name, class_def);
     } else {
       throw ErrorReport(class_def.range())
           << "Torchscript does not support class inheritance.";
@@ -475,6 +478,15 @@ struct SourceImporterImpl : public Resolver,
     cu_->define(qualified_classname, methods, resolvers, &self);
   }
 
+  void importEnum(
+      const QualifiedName& qualified_name,
+      const ClassDef& enum_def) {
+    // TODO(gmagogsfm): Implement parsing Enum class definition tree.
+    // BEFORE SUBMIT DELETE FOLLOWING EXPERIMENTAL CODE
+    auto enum_type = EnumType::create(qualified_name, IntType::get(), cu_);
+    cu_->register_type(enum_type);
+  }
+
   void importNamedTuple(
       const QualifiedName& qualified_name,
       const ClassDef& named_tuple_def) {
@@ -552,6 +564,23 @@ std::shared_ptr<SugaredValue> ClassNamespaceValue::attr(
       return std::make_shared<ClassValue>(classType);
     } else if (auto tupleType = serializable_type->cast<TupleType>()) {
       return std::make_shared<NamedTupleConstructor>(tupleType);
+    } else if (auto enumType = serializable_type->cast<EnumType>()) {
+      // TODO These info should come from the type
+      auto enum_holder_1 = c10::make_intrusive<ivalue::EnumHolder>(enumType, "RED", 1);
+      auto enum_holder_2 = c10::make_intrusive<ivalue::EnumHolder>(enumType, "GREEN", 2);
+      auto ivalue_1 = IValue(enum_holder_1);
+      auto ivalue_2 = IValue(enum_holder_2);
+      auto simple_enum_value_1 = std::make_shared<SimpleValue>(m.graph()->insertConstant(ivalue_1, loc));
+      auto simple_enum_value_2 = std::make_shared<SimpleValue>(m.graph()->insertConstant(ivalue_2, loc));
+      std::map<string, SugaredValuePtr> enum_values;
+      enum_values.insert(std::make_pair("RED", simple_enum_value_1)); 
+      enum_values.insert(std::make_pair("RED", simple_enum_value_2));
+
+      auto enum_values_list = c10::impl::GenericList(enumType);
+
+      auto enum_values_list_constant = std::make_shared<SimpleValue>(m.graph()->insertConstant(enum_values_list, loc));
+    
+      return std::make_shared<SugaredEnumClass>(enum_values, enum_values_list_constant, enumType);
     }
   }
 

@@ -1182,6 +1182,10 @@ struct CAFFE2_API EnumType : public NamedType {
     return name().value();
   }
 
+  at::ArrayRef<TypePtr> containedTypes() const override {
+    return value_type_;
+  }
+
  private:
   EnumType(c10::QualifiedName qualified_class_name, TypePtr value_type, std::weak_ptr<torch::jit::CompilationUnit> cu)
       : NamedType(TypeKind::EnumType, std::move(qualified_class_name)),

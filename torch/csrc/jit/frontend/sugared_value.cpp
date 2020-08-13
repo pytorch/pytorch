@@ -650,5 +650,23 @@ std::shared_ptr<BuiltinFunction> BuiltinFunction::tryCreate(
   return nullptr;
 }
 
+std::shared_ptr<SugaredValue> SugaredEnumClass::attr(
+    const SourceRange& loc,
+    Function& /*m*/,
+    const std::string& field) {
+  auto it = enum_values_.find(field);
+  if (it == enum_values_.end()) {
+    throw ErrorReport(loc) << enum_type_->repr_str() << "'"
+                           << " has no attribute '" << field << "'";
+  }
+  return it->second;
+}
+
+SugaredValuePtr SugaredEnumClass::iter(
+    const SourceRange& /*loc*/,
+    Function& /*m*/) {
+  return enum_values_list_constant_;
+}
+
 } // namespace jit
 } // namespace torch
