@@ -293,18 +293,8 @@ DimVector TensorIterator::invert_perm(IntArrayRef input) const {
   return res;
 }
 
-DimVector TensorIterator::apply_perm_and_mul(IntArrayRef input, int mul) const {
-  TORCH_INTERNAL_ASSERT(!has_coalesced_dimensions_);
-  auto res = DimVector(input.size(), 0);
-  for (size_t i = 0; i < input.size(); i++) {
-    res[i] = input[perm_[i]] * mul;
-  }
-  return res;
-}
-
 void TensorIterator::allocate_or_resize_outputs() {
   for (int i = 0; i < num_outputs_; i++) {
-
     auto& op = operands_[i];
     if (!op.tensor.defined() || op.will_resize) {
       TORCH_INTERNAL_ASSERT(op.is_type_defined(), "no type for operand", i);
@@ -312,20 +302,20 @@ void TensorIterator::allocate_or_resize_outputs() {
       op.stride_bytes = compatible_stride(element_size);
       // check if permutation is just an inverted order
       bool inverted = true;
-      for (int i = 1; i <= ndim(); i++) {
-        if (perm_[i - 1] != ndim() - i) {
+      for (int i = 0; i < ndim(); i++) {
+        if (perm_[i] != ndim() - i - 1) {
           inverted = false;
           break;
         }
       }
       auto tensor_shape = invert_perm(shape_);
       if (inverted) {
-        if (!op.tensor.defined())
-        // can just return contiguous output
-        // it is faster because it avoids allocating 0 size tensor and
-        // resizing and restriding it
+        if (!op.tensor.defined()) {
+          // can just return contiguous output
+          // it is faster because it avoids allocating 0 size tensor and
+          // resizing and restriding it
           op.tensor = at::empty(tensor_shape, op.options());
-        else {
+        } else {
           at::native::resize_output(op.tensor, tensor_shape);
         }
       } else {
