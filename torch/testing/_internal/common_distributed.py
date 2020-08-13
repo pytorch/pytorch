@@ -143,6 +143,12 @@ def skip_if_rocm(func):
 
     return wrapper
 
+def skip_if_win32():
+    return unittest.skipIf(
+        sys.platform == 'win32',
+        "This unit test case is not supportted on Windows platform",
+    )
+
 TIMEOUT_DEFAULT = 100
 TIMEOUT_OVERRIDE = {"test_ddp_uneven_inputs": 400}
 

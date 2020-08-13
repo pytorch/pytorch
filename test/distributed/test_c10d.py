@@ -29,7 +29,7 @@ from torch.nn.parallel import DistributedDataParallel
 from torch.testing._internal.common_distributed import MultiProcessTestCase, \
     requires_gloo, requires_nccl, requires_nccl_version, \
     skip_if_not_multigpu, skip_if_lt_x_gpu, get_timeout, skip_if_rocm, \
-    simple_sparse_reduce_tests
+    simple_sparse_reduce_tests, skip_if_win32
 
 from torch.testing._internal.common_utils import TestCase, load_tests, run_tests, \
     retry_on_connect_failures, ADDRESS_IN_USE, CONNECT_TIMEOUT, TEST_WITH_TSAN
@@ -45,6 +45,8 @@ if not c10d.is_available():
 
 if platform == 'darwin':
     LOOPBACK = 'lo0'
+elif platform == 'win32':
+    LOOPBACK = 'Ethernet'
 else:
     LOOPBACK = 'lo'
 
@@ -255,6 +257,7 @@ def create_tcp_store(addr):
     raise RuntimeError("Unable to find free port (tried %s)" % ", ".join(ports))
 
 
+@skip_if_win32()
 class TCPStoreTest(TestCase, StoreTestBase):
     def _create_store(self):
         store = create_tcp_store('localhost')
@@ -273,6 +276,7 @@ class TCPStoreTest(TestCase, StoreTestBase):
             store2 = c10d.TCPStore(addr, port, 1, True)  # noqa: F841
 
 
+@skip_if_win32()
 class PrefixTCPStoreTest(TestCase, StoreTestBase):
     def setUp(self):
         super(PrefixTCPStoreTest, self).setUp()
@@ -329,6 +333,7 @@ class RendezvousTest(TestCase):
             c10d.rendezvous('invalid://')
 
 
+@skip_if_win32()
 class RendezvousEnvTest(TestCase):
     @retry_on_connect_failures
     def test_common_errors(self):
@@ -455,7 +460,10 @@ class RendezvousFileTest(TestCase):
 
     def test_nominal(self):
         with tempfile.NamedTemporaryFile(delete=False) as file:
-            url = 'file://%s?world_size=%d' % (file.name, 2)
+            if sys.platform == 'win32':
+                url = 'file:///%s?world_size=%d' % (file.name.replace("\\", "/"), 2)
+            else:
+                url = 'file://%s?world_size=%d' % (file.name, 2)
             gen0 = c10d.rendezvous(url + "&rank=0")
             store0, rank0, size0 = next(gen0)
             self.assertEqual(0, rank0)
@@ -474,6 +482,7 @@ class RendezvousFileTest(TestCase):
             self.assertEqual(b"value1", store0.get("key1"))
 
 
+@skip_if_win32()
 class RendezvousTCPTest(TestCase):
 
     def create_tcp_url(self):
@@ -544,9 +553,13 @@ class TimeoutTest(TestCase):
 
     def _init_methods(self):
         f = tempfile.NamedTemporaryFile(delete=False)
-        yield "file://%s" % f.name
-        f.close()
-        yield "tcp://127.0.0.1:%d" % common.find_free_port()
+        if sys.platform == 'win32':
+            yield "file:///%s" % f.name.replace("\\", "/")
+            f.close()
+        else:
+            yield "file://%s" % f.name
+            f.close()
+            yield "tcp://127.0.0.1:%d" % common.find_free_port()
 
     def _test_default_store_timeout(self, backend):
         for init_method in self._init_methods():
@@ -584,7 +597,10 @@ class TimeoutTest(TestCase):
 class ProcessGroupGlooTest(MultiProcessTestCase):
     def setUp(self):
         super(ProcessGroupGlooTest, self).setUp()
-        self._fork_processes()
+        if sys.platform == 'win32':
+            self._spawn_processes()
+        else:
+            self._fork_processes()
 
     def opts(self, threads=2):
         opts = c10d.ProcessGroupGloo.Options()
@@ -1514,6 +1530,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         for i, tensor in enumerate(tensors):
             self.assertEqual(torch.full(size, float(i * self.world_size)), tensor)
 
+    @skip_if_win32()
     def test_round_robin(self):
         num_process_groups = 2
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -1531,6 +1548,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             pg.broadcast(tensor, root=0).wait()
             self.assertEqual(torch.full([100, 100], 0.), tensor)
 
+    @skip_if_win32()
     def test_round_robin_create_destroy(self):
         store = c10d.FileStore(self.file_name, self.world_size)
 
@@ -1959,7 +1977,10 @@ class SparseGradientModule(nn.Module):
 class DistributedDataParallelTest(MultiProcessTestCase):
     def setUp(self):
         super(DistributedDataParallelTest, self).setUp()
-        self._fork_processes()
+        if sys.platform == 'win32':
+            self._spawn_processes()
+        else:
+            self._fork_processes()
 
     def tearDown(self):
         # DistributedDataParallel test doesn't seem to call FileStore destructor
@@ -3947,7 +3968,10 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
 class CommTest(MultiProcessTestCase):
     def setUp(self):
         super(CommTest, self).setUp()
-        self._fork_processes()
+        if sys.platform == 'win32':
+            self._spawn_processes()
+        else:
+            self._fork_processes()
 
     def tearDown(self):
         super(CommTest, self).tearDown()
