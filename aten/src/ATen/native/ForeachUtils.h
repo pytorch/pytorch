@@ -47,9 +47,19 @@ bool check_fast_route(TensorList tensors, Scalar scalar) {
       return false;
     }
 
-    if ((at::isIntegralType(t.scalar_type(), true) && scalar.isFloatingPoint()) || 
-        t.scalar_type() == at::kBool) {
-     return false;
+    // complex scalar + integral or boolean tensor will result in complex tensor
+    if (scalar.isComplex() && at::isIntegralType(t.scalar_type(), /*includeBool*/ true)) {
+      return false;
+    }
+
+    // float scalar + integral or boolean tensor will result in float tensor
+    if (scalar.isFloatingPoint() && at::isIntegralType(t.scalar_type(), /*includeBool*/ true)) {
+      return false;
+    }
+
+    // integral scalar + boolean tensor will result in integral tensor 
+    if (scalar.isIntegral(/*includeBool*/ false) && t.dtype() == at::kBool) {
+      return false;
     }
   }
 
