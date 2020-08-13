@@ -8,7 +8,6 @@ import torch
 import torch.nn as nn
 import torch.nn.intrinsic as nni
 import torch.nn.quantized as nnq
-import torch.nn.intrinsic.qat as nniqat
 
 from .default_mappings import (DEFAULT_DYNAMIC_MODULE_MAPPING,
                                DEFAULT_MODULE_MAPPING,
@@ -336,12 +335,8 @@ def prepare_qat(model, mapping=None, inplace=False):
     """
     if mapping is None:
         mapping = DEFAULT_QAT_MODULE_MAPPING
-    if not inplace:
-        model = copy.deepcopy(model)
-
-    propagate_qconfig_(model, qconfig_dict=None)
+    model = prepare(model, inplace=inplace)
     _convert(model, mapping, inplace=True)
-    prepare(model, observer_non_leaf_module_list=set(mapping.values()), inplace=True)
     return model
 
 def quantize_qat(model, run_fn, run_args, inplace=False):
@@ -366,18 +361,18 @@ def quantize_qat(model, run_fn, run_args, inplace=False):
     return model
 
 def convert(module, mapping=None, inplace=False, remove_qconfig=True):
-    r"""Converts submodules in input module to a different module according to `mapping`
-    by calling `from_float` method on the target module class. And remove qconfig at the
-    end if remove_qconfig is set to True.
+    r"""Converts the float module with observers (where we can get quantization
+    parameters) to a quantized module. And remove qconfig at the end if remove_qconfig
+    is set to True.
 
     Args:
-        module: input module
-        mapping: a dictionary that maps from source module type to target
+        module: calibrated module with observers
+        mapping: a dictionary that maps from float module type to quantized
                  module type, can be overwritten to allow swapping user defined
                  Modules
         inplace: carry out model transformations in-place, the original module
                  is mutated
-
+        remove_qconfig: whether to remove qconfig after convert
     """
     if not inplace:
         module = copy.deepcopy(module)
@@ -387,12 +382,12 @@ def convert(module, mapping=None, inplace=False, remove_qconfig=True):
     return module
 
 def _convert(module, mapping=None, inplace=False):
-    r"""Converts submodules in input module to a different module according to `mapping`
-    by calling `from_float` method on the target module class
+    r"""Converts the float module with observers (where we can get quantization
+    parameters) to a quantized module.
 
     Args:
-        module: input module
-        mapping: a dictionary that maps from source module type to target
+        module: calibrated module with observers
+        mapping: a dictionary that maps from float module type to quantized
                  module type, can be overwritten to allow swapping user defined
                  Modules
         inplace: carry out model transformations in-place, the original module
@@ -416,9 +411,7 @@ def _convert(module, mapping=None, inplace=False):
                          nni.ConvReLU1d,
                          nni.ConvBnReLU1d,
                          nni.ConvReLU2d,
-                         nni.ConvReLU3d,
-                         nniqat.ConvBn2d,
-                         nniqat.ConvBnReLU2d)
+                         nni.ConvReLU3d)
 
     for name, mod in module.named_children():
         if type(mod) not in SWAPPABLE_MODULES:

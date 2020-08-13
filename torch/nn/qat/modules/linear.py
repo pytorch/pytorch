@@ -5,8 +5,8 @@ from torch.nn.intrinsic import LinearReLU
 
 class Linear(nn.Linear):
     r"""
-    A linear module attached with FakeQuantize modules for weight,
-    used for quantization aware training.
+    A linear module attached with FakeQuantize modules for both output
+    activation and weight, used for quantization aware training.
 
     We adopt the same interface as `torch.nn.Linear`, please see
     https://pytorch.org/docs/stable/nn.html#torch.nn.Linear
@@ -16,6 +16,7 @@ class Linear(nn.Linear):
     default.
 
     Attributes:
+        activation_post_process: fake quant module for output activation
         weight: fake quant module for weight
     """
     _FLOAT_MODULE = nn.Linear
@@ -25,10 +26,12 @@ class Linear(nn.Linear):
         super(Linear, self).__init__(in_features, out_features, bias)
         assert qconfig, 'qconfig must be provided for QAT module'
         self.qconfig = qconfig
+        self.activation_post_process = qconfig.activation()
         self.weight_fake_quant = qconfig.weight()
 
     def forward(self, input):
-        return F.linear(input, self.weight_fake_quant(self.weight), self.bias)
+        return self.activation_post_process(
+            F.linear(input, self.weight_fake_quant(self.weight), self.bias))
 
     @classmethod
     def from_float(cls, mod, qconfig=None):
