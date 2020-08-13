@@ -107,7 +107,7 @@ def main():
     parser.add_argument("--task-filter", type=str, default="", help="Only run the tasks in this filter")
     parser.add_argument("--num-threads", type=int, default=10,
                         help="Number of concurrent threads to use when running on cpu")
-    parse.add_argument("--seed", type=int, default=0, help="The random seed to use.")
+    parser.add_argument("--seed", type=int, default=0, help="The random seed to use.")
     args = parser.parse_args()
 
     results = defaultdict(defaultdict)
@@ -121,13 +121,13 @@ def main():
         args.gpu = 0 if torch.cuda.is_available() else -1
 
     for name, model_getter, recommended_tasks, unsupported_tasks in MODELS:
-        if args.model_filter and not name in args.model_filter:
+        if args.model_filter and name not in args.model_filter:
             continue
         tasks = ALL_TASKS if args.run_slow_tasks else recommended_tasks
         for task in tasks:
             if task in unsupported_tasks:
                 continue
-            if args.task_filter and not task in args.task_filter:
+            if args.task_filter and task not in args.task_filter:
                 continue
             runtimes = run_model(model_getter, args, task)
 
