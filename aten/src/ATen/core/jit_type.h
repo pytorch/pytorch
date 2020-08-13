@@ -1187,6 +1187,10 @@ struct CAFFE2_API EnumType : public NamedType {
     return value_type_;
   }
 
+  at::ArrayRef<EnumNameValue> enumNamesValues() const {
+    return enum_names_values_;
+  }
+
  private:
   EnumType(
       c10::QualifiedName qualified_class_name,
