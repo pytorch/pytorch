@@ -18669,9 +18669,11 @@ else:
         with self.assertRaisesRegex(TypeError, "must be tuple of Tensors, not Tensor"):
             torch_fn(torch.randn(10))
 
-        input_t = torch.tensor(random.uniform(0, 10), device=device, dtype=dtype)
-        actual = torch_fn([input_t])
-        expected = np_fn([input_t.cpu().numpy()])
+        # Test 0-D
+        num_tensors = random.randint(1, 5)
+        input_t = [torch.tensor(random.uniform(0, 10), device=device, dtype=dtype) for i in range(num_tensors)]
+        actual = torch_fn(input_t)
+        expected = np_fn([input.cpu().numpy() for input in input_t])
         self.assertEqual(actual, expected)
 
         for ndims in range(1, 5):
@@ -18722,8 +18724,8 @@ else:
         for i in range(5):
             # Test dimension change for 1D tensor of size (N) and 2D tensor of size (1, N)
             n = random.randint(1, 10)
-            input_a = self._generate_input(tuple(n), dtype, device, with_extremal=False)
-            input_b = self._generate_input(tuple(1, n), dtype, device, with_extremal=False)
+            input_a = self._generate_input((n,), dtype, device, with_extremal=False)
+            input_b = self._generate_input((1, n), dtype, device, with_extremal=False)
             torch_input = [input_a, input_b]
             np_input = [input.cpu().numpy() for input in torch_input]
             actual = torch.vstack(torch_input)
@@ -18739,9 +18741,9 @@ else:
         for i in range(5):
             # Test dimension change for 1D tensor of size (N), 2D tensor of size (1, N), and 3D tensor of size (1, N, 1)
             n = random.randint(1, 10)
-            input_a = self._generate_input(tuple(n), dtype, device, with_extremal=False)
-            input_b = self._generate_input(tuple(1, n), dtype, device, with_extremal=False)
-            input_c = self._generate_input(tuple(1, n, 1), dtype, device, with_extremal=False)
+            input_a = self._generate_input((n,), dtype, device, with_extremal=False)
+            input_b = self._generate_input((1, n), dtype, device, with_extremal=False)
+            input_c = self._generate_input((1, n, 1), dtype, device, with_extremal=False)
             torch_input = [input_a, input_b, input_c]
             np_input = [input.cpu().numpy() for input in torch_input]
             actual = torch.dstack(torch_input)
