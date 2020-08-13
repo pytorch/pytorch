@@ -16656,6 +16656,39 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         torch.dot(v1, v2, out=out)
         self.assertEqual(res1, out)
 
+    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    def test_vdot(self, device, dtype):
+        def compare_with_numpy_bin_op(torch_fn, np_fn, x, y, relaxed_tolerance=False):
+            if self.device_type == 'cuda':
+                y_np = y.cpu().numpy()
+            else:
+                y_np = y.numpy()
+
+            rtol, atol = None, None
+            if relaxed_tolerance:
+                rtol = 1e-5
+                atol = 1e-5
+
+            # `compare_with_numpy` takes care of moving `x` to correct device for calling np_fn.
+            self.compare_with_numpy(lambda inp: torch_fn(inp, y), lambda inp: np_fn(inp, y_np), x, rtol=rtol, atol=atol)
+
+        for _ in range(10):
+            numel = random.randint(10, 1000)
+            v1 = torch.randn(numel, dtype=dtype, device=device)
+            v2 = torch.randn(numel, dtype=dtype, device=device)
+            compare_with_numpy_bin_op(torch.vdot, np.vdot, v1, v2)
+
+            relaxed_tolerance = dtype == torch.cfloat
+
+            # Test 0-strided
+            v1 = torch.randn(1, dtype=dtype, device=device).expand(numel)
+            v2 = torch.randn(numel, dtype=dtype, device=device)
+            compare_with_numpy_bin_op(torch.vdot, np.vdot, v1, v2, relaxed_tolerance)
+
+            v1 = torch.randn(numel, dtype=dtype, device=device)
+            v2 = torch.randn(1, dtype=dtype, device=device).expand(numel)
+            compare_with_numpy_bin_op(torch.vdot, np.vdot, v1, v2, relaxed_tolerance)
+
     @onlyCPU
     @slowTest
     @dtypes(torch.float)
