@@ -31,6 +31,22 @@ def quantize_model(model, data_loader_test, per_tensor=True):
     print("ending quantization")
     return model
 
+def quantize_qat_model(model, data_loader_test):
+    print("starting quantization")
+    criterion = nn.CrossEntropyLoss()
+    # num_calibration_batches = 30
+    num_eval_batches = 10
+
+    model = copy.deepcopy(model)
+    model.qconfig = torch.quantization.default_qat_qconfig
+
+    model = torch.quantization.prepare_qat(model, inplace=False)
+    evaluate(model, criterion, data_loader_test, neval_batches=num_eval_batches)
+    model = torch.quantization.convert(model, inplace=False)
+
+    print("ending quantization")
+    return model
+
 def adaround_demo(input_model, data_loader, data_loader_test):
     print("starting adaround")
     train_batch_size = 30
@@ -44,24 +60,38 @@ def adaround_demo(input_model, data_loader, data_loader_test):
     model.fuse_model()
     print(model)
 
-    quantized_tensor_model = quantize_model(model, data_loader_test, False)
+    # quantized_qat_model = quantize_qat_model(model, data_loader_test)
     results = []
 
-    top1, top5 = evaluate(model, criterion, data_loader_test, neval_batches=num_eval_batches)
-    results.append(str('Evaluation accuracy on %d images, %2.2f' % (num_eval_batches * eval_batch_size, top1.avg)))
-    results.append('Floating point results')
+    # top1, top5 = evaluate(model, criterion, data_loader_test, neval_batches=num_eval_batches)
+    # results.append(str('Evaluation accuracy on %d images, %2.2f' % (num_eval_batches * eval_batch_size, top1.avg)))
+    # results.append('Floating point results')
 
-    top1, top5 = evaluate(quantized_tensor_model, criterion, data_loader_test, neval_batches=num_eval_batches)
-    results.append(str('Evaluation accuracy on %d images, %2.2f' % (num_eval_batches * eval_batch_size, top1.avg)))
-    results.append('Per tensor quantization accuracy results, no adaround')
+    # top1, top5 = evaluate(quantized_qat_model, criterion, data_loader_test, neval_batches=num_eval_batches)
+    # results.append(str('Evaluation accuracy on %d images, %2.2f' % (num_eval_batches * eval_batch_size, top1.avg)))
+    # results.append('qat quantization accuracy results, no adaround')
 
-    for batch in range(1,4):
+    with_adaround = copy.deepcopy(model)
+    without_adaround = copy.deepcopy(model)
+
+    for batch in range(1, 101):
         # model = copy.deepcopy(mo)
-        _adaround.learn_adaround(model, data_loader_test, batch)
+        _adaround.learn_adaround_sequential(with_adaround, data_loader_test, batch, with_adaround=True)
+        _adaround.learn_adaround_sequential(without_adaround, data_loader_test, batch, with_adaround=False)
 
-        top1, top5 = evaluate(model, criterion, data_loader_test, neval_batches=num_eval_batches)
+        top1, top5 = evaluate(with_adaround, criterion, data_loader_test, neval_batches=num_eval_batches)
         results.append(str('Evaluation accuracy on %d images, %2.2f' % (num_eval_batches * eval_batch_size, top1.avg)))
-        results.append('Per tensor quantization accuracy results, with adaround')
+        results.append('with adaround accuracy results')
+        top1, top5 = evaluate(without_adaround, criterion, data_loader_test, neval_batches=num_eval_batches)
+        results.append(str('Evaluation accuracy on %d images, %2.2f' % (num_eval_batches * eval_batch_size, top1.avg)))
+        results.append('just qat without adaround accuracy results')
+        results.append('')
+
+    # _adaround.learn_adaround_parallel(model, data_loader_test)
+
+    # top1, top5 = evaluate(model, criterion, data_loader_test, neval_batches=num_eval_batches)
+    # results.append(str('Evaluation accuracy on %d images, %2.2f' % (num_eval_batches * eval_batch_size, top1.avg)))
+    # results.append('with adaround PARALLEL accuracy results')
 
 
     print("\n\n Results reiterated here")

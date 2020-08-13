@@ -12,67 +12,6 @@ from torch.quantization import QuantStub, DeQuantStub
 import copy
 _supported_modules = {nn.Conv2d, nn.Linear}
 
-def clipped_sigmoid(continous_V):
-    sigmoid_applied = torch.sigmoid(continous_V)
-    scale_n_add = (sigmoid_applied * 1.2) - 0.1
-    clip = torch.clamp(scale_n_add, 0, 1)
-    return clip
-
-def modified_quantized(model, x):
-    weight = x
-    continous_V = model.continous_V
-    scale = model.scale
-
-    W_over_S = torch.div(weight, scale)
-    W_over_S = torch.floor(W_over_S)
-    W_plus_H = W_over_S + clipped_sigmoid(continous_V)
-
-    rtn = scale * torch.clamp(W_plus_H, model.quant_min, model.quant_max)
-    return rtn
-
-def loss_function_leaf(model, count):
-    high = 8
-    low = 2
-    beta = count / 10 * (high - low) + low
-    _lambda = .01
-
-    adaround_instance = model.wrapped_module.weight_fake_quant
-    float_weight = model.wrapped_module.weight
-
-    clipped_weight = modified_quantized(adaround_instance, float_weight)
-    quantized_weight = torch.fake_quantize_per_tensor_affine(clipped_weight, float(adaround_instance.scale),
-                                                             int(adaround_instance.zero_point), adaround_instance.quant_min,
-                                                             adaround_instance.quant_max)
-    Frobenius_norm = torch.norm(float_weight - quantized_weight)
-    print(Frobenius_norm.__dict__)
-    # Frobenius_norm = torch.norm(model.float_output - model.quantized_output)
-    # bring back x in expression
-
-    scale = adaround_instance.scale
-    continous_V = adaround_instance.continous_V
-    # print(continous_V)
-
-    clip_V = clipped_sigmoid(continous_V)
-    print("h(v): ", clip_V)
-    print("beta: ", beta)
-    # print("clip_V: ", clip_V)
-    spreading_range = torch.abs((2 * clip_V) - 1)
-    # print("spreading_range: ", spreading_range)
-    one_minus_beta = 1 - (spreading_range ** beta)  # torch.exp
-    regulization = torch.sum(one_minus_beta)
-    # print("regul data: ", regulization)
-
-    print("loss function break down: ", Frobenius_norm * 100, _lambda * regulization)
-    print("sqnr of float and quantized: ", computeSqnr(float_weight, quantized_weight))
-    return Frobenius_norm * 100 + _lambda * regulization
-
-def loss_function(model, count, white_list=(nnqat.Conv2d,)):
-    result = torch.Tensor([0])
-    for name, submodule in model.named_modules():
-        if isinstance(submodule, OuputWrapper):
-            result = result + loss_function_leaf(submodule, count)
-    return result
-
 def computeSqnr(x, y):
     Ps = torch.norm(x)
     Pn = torch.norm(x - y)
@@ -115,7 +54,6 @@ class adaround(FakeQuantize):
             self.zero_point = _zero_point
 
         if self.tuning:
-            assert X is not None
             X = modified_quantized(self, X)
 
         if self.fake_quant_enabled[0] == 1:
@@ -127,7 +65,6 @@ class adaround(FakeQuantize):
                                                           int(self.zero_point), self.quant_min,
                                                           self.quant_max)
         return X
-
 
 class ConvChain(nn.Module):
     def __init__(self):
@@ -154,6 +91,7 @@ class OuputWrapper(nn.Module):
 
     def forward(self, x):
         x = self.quant(x)
+        rtn = None
         if self.on:
             self.wrapped_module.activation_post_process.disable_fake_quant()
             self.wrapped_module.weight_fake_quant.disable_fake_quant()
@@ -163,9 +101,13 @@ class OuputWrapper(nn.Module):
             self.wrapped_module.weight_fake_quant.enable_fake_quant()
             self.quantized_output = self.wrapped_module(x)
 
-            return self.dequant(self.quantized_output)
+            print("norm in forward outputwrapper: ", torch.norm(self.float_output - self.quantized_output))
+
+            rtn = self.quantized_output
         else:
-            return self.dequant(self.wrapped_module(x))
+            rtn = self.wrapped_module(x)
+
+        return self.dequant(rtn)
 
 
 araround_fake_quant = adaround.with_args(observer=HistogramObserver, quant_min=-128, quant_max=127,
@@ -174,82 +116,87 @@ araround_fake_quant = adaround.with_args(observer=HistogramObserver, quant_min=-
 adaround_qconfig = QConfig(activation=default_fake_quant,
                            weight=araround_fake_quant)
 
-def add_wrapper_class(model, white_list=DEFAULT_QAT_MODULE_MAPPING.keys()):
+def clipped_sigmoid(continous_V):
+    ''' Function to create a non-vanishing gradient for V
+
+    Paper Reference: https://arxiv.org/pdf/2004.10568.pdf Eq. 23
+    '''
+    sigmoid_applied = torch.sigmoid(continous_V)
+    scale_n_add = (sigmoid_applied * 1.2) - 0.1
+    clip = torch.clamp(scale_n_add, 0, 1)
+    return clip
+
+def modified_quantized(model, x):
+    ''' Given a tensor x and variable V and scale from a model, the adaround logic for clipping
+    is applied
+
+    Paper Reference: https://arxiv.org/pdf/2004.10568.pdf Eq. 22
+    '''
+    weight = x
+    continous_V = model.continous_V
+    scale = model.scale
+
+    W_over_S = torch.div(weight, scale)
+    W_over_S = torch.floor(W_over_S)
+    W_plus_H = W_over_S + clipped_sigmoid(continous_V)
+
+    soft_quantized_weights = scale * torch.clamp(W_plus_H, model.quant_min, model.quant_max)
+    return soft_quantized_weights
+
+def loss_function_leaf(model, count):
+    ''' Calculates the loss function for a submodule
+
+    Paper Reference: https://arxiv.org/pdf/2004.10568.pdf Eq. 25
+    '''
+    high = 8
+    low = 2
+    beta = count / 100 * (high - low) + low
+    _lambda = .01
+
+    # Calculates the difference between floating point and quantized models
+    adaround_instance = model.wrapped_module.weight_fake_quant
+    float_weight = model.wrapped_module.weight
+    clipped_weight = modified_quantized(adaround_instance, float_weight)
+    quantized_weight = torch.fake_quantize_per_tensor_affine(clipped_weight, float(adaround_instance.scale),
+                                                             int(adaround_instance.zero_point), adaround_instance.quant_min,
+                                                             adaround_instance.quant_max)
+    # Frobenius_norm = torch.norm(float_weight - quantized_weight)  # norm(W - ~W)
+    Frobenius_norm = torch.norm(model.float_output - model.quantized_output)  # norm(Wx - ~Wx)
+
+    # calculating regularization factor -> forces values of continous_V to be 0 or 1
+    scale = adaround_instance.scale
+    continous_V = adaround_instance.continous_V
+    clip_V = clipped_sigmoid(continous_V)
+    spreading_range = torch.abs((2 * clip_V) - 1)
+    one_minus_beta = 1 - (spreading_range ** beta)  # torch.exp
+    regulization = torch.sum(one_minus_beta)
+
+    print("loss function break down: ", Frobenius_norm * 100, _lambda * regulization)
+    # print("sqnr of float and quantized: ", computeSqnr(float_weight, quantized_weight))
+    return Frobenius_norm * 100 + _lambda * regulization
+
+def loss_function(model, count, white_list=(nnqat.Conv2d,)):
+    ''' Given model, the loss function of all of its whitelisted leaf modules will
+    be added up and returned.
+    '''
+    result = torch.Tensor([0])
     for name, submodule in model.named_modules():
-        print(type(submodule))
+        if isinstance(submodule, OuputWrapper):
+            result = result + loss_function_leaf(submodule, count)
+    return result
+
+def add_wrapper_class(model, white_list=DEFAULT_QAT_MODULE_MAPPING.keys()):
+    ''' Throws on a wrapper class to collect the last output passed through it.
+    This information is used in computing the loss function.
+    '''
+    for name, submodule in model.named_modules():
+        print("type of submodule in add_wrapper_class: ", type(submodule))
         if type(submodule) in white_list:
             parent = get_parent_module(model, name)
             submodule_name = name.split('.')[-1]
             parent._modules[submodule_name] = OuputWrapper(submodule)
 
-def load_conv():
-    model = ConvChain()
-    copy_of_model = copy.deepcopy(model)
-    model.train()
-    img_data = [(torch.rand(10, 3, 125, 125, dtype=torch.float, requires_grad=True), torch.randint(0, 1, (2,), dtype=torch.long))
-                for _ in range(500)]
-    return model, img_data
-
-def quick_function(qat_model, dummy, data_loader_test):
-    # turning off observer and turning on tuning
-    for name, submodule in qat_model.named_modules():
-        if type(submodule) in _supported_modules:
-            submodule.weight_fake_quant.disable_observer()
-            # submodule.weight_fake_quant.enable_fake_quant()
-            submodule.weight_fake_quant.tuning = True
-
-
-    V_s = add_wrapper_class(qat_model)
-
-    def uniform_images():
-        for image, target in data_loader_test:
-            yield image
-    generator = uniform_images()
-
-    batch = 0
-    for name, submodule in qat_model.named_modules():
-        if isinstance(submodule, OuputWrapper):
-            submodule.wrapped_module.weight_fake_quant.enable_observer()
-            if batch < 3:
-                def dummy_generator():
-                    yield submodule.wrapped_module.weight_fake_quant.continous_V
-                optimizer = torch.optim.Adam(dummy_generator(), lr=.1)
-
-                for count in range(10):
-                    output = qat_model(next(generator))
-                    # loss = loss_function(qat_model, count)
-                    loss = loss_function_leaf(submodule, count)
-
-                    print("loss: ", loss)
-                    optimizer.zero_grad()
-                    loss.backward()
-                    optimizer.step()
-                    try:
-                        print(submodule.wrapped_module.weight_fake_quant.continous_V[0][0][:][:])
-                    except IndexError:
-                        print("ruh roh")
-
-                    print("running count during optimazation: ", count)
-            if batch == 3:
-                return qat_model
-            batch += 1
-            submodule.wrapped_module.weight_fake_quant.disable_observer()
-
-
-    # qat_model.eval()
-    # torch.quantization.convert(qat_model, inplace=True)
-    return qat_model
-
-def learn_adaround(float_model, data_loader_test, number_of_batches):
-    # generator to get uniform distribution of images, i.e. not always taking the front 300
-    def uniform_images():
-        while True:
-            for image, target in data_loader_test:
-                yield image
-    generator = uniform_images()
-
-
-
+def learn_adaround_sequential(float_model, data_loader_test, number_of_batches=1, with_adaround=True):
     def optimize_V(leaf_module):
         '''Takes in a leaf module with an adaround attached to its
         weight_fake_quant attribute'''
@@ -257,8 +204,6 @@ def learn_adaround(float_model, data_loader_test, number_of_batches):
             yield leaf_module.wrapped_module.weight_fake_quant.continous_V
         optimizer = torch.optim.Adam(dummy_generator(), lr=.1)
 
-        # for count in range(50):
-        #     output = float_model(next(generator))
         count = 0
         for data in data_loader_test:
             output = float_model(data[0])
@@ -270,15 +215,16 @@ def learn_adaround(float_model, data_loader_test, number_of_batches):
             loss.backward()
             optimizer.step()
             count += 1
-            if count == 10:
-                return
-            try:
-                pass
-                # print(leaf_module.wrapped_module.weight_fake_quant.continous_V[0][0][:][:])
-            except IndexError:
-                print("ruh roh")
             print("running count during optimazation: ", count)
+            if count == 100:
+                return
+            # try:  # try and accept here is because the classifier at the end of the mobilenet has different dims
+            #     pass
+            #     # print(leaf_module.wrapped_module.weight_fake_quant.continous_V[0][0][:][:])
+            # except IndexError:
+            #     print("ruh roh")
 
+    # initiallizing all the wrappers on the first layer updating V
     if number_of_batches == 1:
         V_s = add_wrapper_class(float_model, _supported_modules)
 
@@ -287,34 +233,97 @@ def learn_adaround(float_model, data_loader_test, number_of_batches):
         if isinstance(submodule, OuputWrapper):
             batch += 1
             if batch == number_of_batches:
+                # setting up submodule for standard qat training
+                if with_adaround:
+                    submodule.wrapped_module.qconfig = adaround_qconfig
+                else:
+                    submodule.wrapped_module.qconfig = torch.quantization.default_qat_qconfig
 
-                submodule.on = True
-                print("training submodule")
-                submodule.wrapped_module.qconfig = adaround_qconfig
+                # Calibrate the scale and offset parameters
                 torch.quantization.prepare_qat(submodule, inplace=True)
-                for count in range(10):
-                    float_model(next(generator))
-                # submodule.wrapped_module.weight_fake_quant.disable_observer()
+                count = 0
+                for data in data_loader_test:
+                    float_model(data[0])
+                    count += 1
+                    if count == 10:
+                        break
 
-                # try randomizing values for contin V
-                submodule.wrapped_module.weight_fake_quant.continous_V = \
-                    torch.nn.Parameter(torch.ones(submodule.wrapped_module.weight.size()) / 10)
+                if with_adaround:
+                    submodule.wrapped_module.weight_fake_quant.continous_V = \
+                        torch.nn.Parameter(torch.ones(submodule.wrapped_module.weight.size()) / 10)  # dummy input
+                    init.kaiming_uniform_(submodule.wrapped_module.weight_fake_quant.continous_V, a=math.sqrt(5))  # uniform distribution of vals
+                    submodule.on = True  # wrapper starts to collect outputs
+                    submodule.wrapped_module.tuning = True  # continous V is now being applied in the forward of the fakequant
+                    submodule.wrapped_module.weight_fake_quant.disable_observer()
 
-                init.kaiming_uniform_(submodule.wrapped_module.weight_fake_quant.continous_V, a=math.sqrt(5))
-                    #
-                print("quantized submodule")
-                optimize_V(submodule)
-                print("finished optimizing adaround instance")
-                # torch.quantization.convert(submodule, inplace=True)
-                submodule.on = False
+                    print("quantized submodule")
+                    optimize_V(submodule)
+                    print("finished optimizing adaround instance")
+                    submodule.on = False
             if batch == number_of_batches:
-                # torch.quantization.convert(float_model, inplace=True)
-                print(float_model)
                 return float_model
 
-    # torch.quantization.convert(float_model, inplace=True)
     return float_model
+
+def learn_adaround_parallel(float_model, data_loader_test):
+    # initializing V's and adding wrapper modules
+    V_s = add_wrapper_class(float_model, _supported_modules)
+
+    for name, submodule in float_model.named_modules():
+        if isinstance(submodule, OuputWrapper):
+            submodule.wrapped_module.qconfig = adaround_qconfig
+            torch.quantization.prepare_qat(submodule, inplace=True)
+
+            submodule.wrapped_module.weight_fake_quant.continous_V = \
+                torch.nn.Parameter(torch.ones(submodule.wrapped_module.weight.size()) / 10)  # dummy input
+            init.kaiming_uniform_(submodule.wrapped_module.weight_fake_quant.continous_V, a=math.sqrt(5))  # uniform distribution of vals
+
+    # calibrating the scale and offset parameters
+    count = 0
+    for data in data_loader_test:
+        float_model(data[0])
+        count += 1
+        if count == 100:
+            break
+
+    for name, submodule in float_model.named_modules():
+        if isinstance(submodule, OuputWrapper):
+            submodule.wrapped_module.tuning = True  # continous V is now being applied in the forward of the fakequant
+            submodule.on = True  # wrapper starts to collect outputs
+
+
+    def dummy_generator():
+        for name, submodule in float_model.named_modules():
+            if isinstance(submodule, OuputWrapper):
+                yield submodule.wrapped_module.weight_fake_quant.continous_V
+    optimizer = torch.optim.Adam(dummy_generator(), lr=.1)
+
+    # training all the continous V variables
+    count = 0
+    for data in data_loader_test:
+        output = float_model(data[0])
+        loss = loss_function(float_model, count)
+        # loss = loss_function_leaf(leaf_module, count)
+
+        print("loss: ", loss)
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+        count += 1
+        print("running count during optimazation: ", count)
+        if count == 100:
+            return
+
+
+
+def load_conv():
+    model = ConvChain()
+    copy_of_model = copy.deepcopy(model)
+    model.train()
+    img_data = [(torch.rand(10, 3, 125, 125, dtype=torch.float, requires_grad=True), torch.randint(0, 1, (2,), dtype=torch.long))
+                for _ in range(500)]
+    return model, img_data
 
 if __name__ == "__main__":
     # main()
-    learn_adaround(*load_conv())
+    learn_adaround_sequential(*load_conv())
