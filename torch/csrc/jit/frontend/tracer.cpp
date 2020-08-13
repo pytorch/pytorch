@@ -43,7 +43,7 @@ template <typename T>
 void genericAddOptionalInput(
     Node* n,
     const char* name,
-    const c10::optional<T> & value) {
+    const c10::optional<T>& value) {
   if (value) {
     jit::tracer::addInputs(n, name, *value);
   } else {
