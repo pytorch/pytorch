@@ -511,14 +511,12 @@ PyObject* rpc_init(PyObject* /* unused */) {
                       std::string selfName,
                       worker_id_t selfId,
                       int worldSize,
-                      std::shared_ptr<::c10d::ProcessGroup> processGroup,
                       TensorPipeRpcBackendOptions opts) {
             return std::make_shared<TensorPipeAgent>(
                 store,
                 std::move(selfName),
                 selfId,
                 worldSize,
-                std::move(processGroup),
                 std::move(opts),
                 std::make_unique<RequestCallbackImpl>());
           }),
@@ -526,7 +524,6 @@ PyObject* rpc_init(PyObject* /* unused */) {
           py::arg("name"),
           py::arg("rank"),
           py::arg("world_size"),
-          py::arg("process_group"),
           py::arg("rpc_backend_options"))
       .def(
           "join",

@@ -5,6 +5,7 @@
 #include <fmt/format.h>
 #include <tensorpipe/tensorpipe.h>
 
+#include <c10d/ProcessGroupGloo.hpp>
 #include <torch/csrc/distributed/rpc/utils.h>
 
 namespace torch {
@@ -225,7 +226,6 @@ TensorPipeAgent::TensorPipeAgent(
     std::string selfName,
     worker_id_t selfId,
     int worldSize,
-    std::shared_ptr<c10d::ProcessGroup> processGroup,
     TensorPipeRpcBackendOptions opts,
     std::unique_ptr<RequestCallback> cb)
     : RpcAgent(
@@ -239,12 +239,32 @@ TensorPipeAgent::TensorPipeAgent(
           tensorpipe::ContextOptions().name(workerInfo_.name_))),
       rankToNameStore_("names", store),
       nameToAddressStore_("addrs", store),
-      worldSize_(worldSize),
-      processGroup_(std::move(processGroup)) {
+      worldSize_(worldSize) {
   collectNames();
 
   // Initialize the time-series metrics tracking map
   timeSeriesMetrics_.emplace(kGilAverageWaitTime, TimeSeriesMetricsTracker());
+
+  // The agent's join method is required to behave like a barrier and perform
+  // collective operations, for which it relies on a Gloo process group, instead
+  // of re-implementing this on top of RPCs.
+
+  auto glooStore = std::make_shared<::c10d::PrefixStore>("gloo", store);
+  ::c10d::ProcessGroupGloo::Options glooOptions;
+
+  char* ifnameEnv = std::getenv(kSocketIfnameEnvVar.c_str());
+  if (ifnameEnv != nullptr) {
+    glooOptions.devices.push_back(
+        ::c10d::ProcessGroupGloo::createDeviceForInterface(ifnameEnv));
+  } else {
+    glooOptions.devices.push_back(
+        ::c10d::ProcessGroupGloo::createDefaultDevice());
+  }
+
+  glooOptions.timeout = std::chrono::milliseconds(int(opts.rpcTimeoutSeconds * 1000));
+  glooOptions.threads = glooOptions.devices.size() * 2;
+  processGroup_ = std::make_shared<::c10d::ProcessGroupGloo>(
+      glooStore, selfId, worldSize, glooOptions);
 }
 
 TensorPipeAgent::~TensorPipeAgent() {

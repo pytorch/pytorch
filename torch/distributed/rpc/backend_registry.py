@@ -187,15 +187,9 @@ def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_
             )
         )
 
-    # The agent's join method is required to behave like a barrier and perform
-    # collective operations, for which it relies on a process group, instead of
-    # re-implementing this on top of RPCs.
-
-    group = _init_process_group(store, rank, world_size)
-
     # TODO: add try-except and destroy _agent in all processes if any fails.
     return TensorPipeAgent(
-        store, name, rank, world_size, group, rpc_backend_options
+        store, name, rank, world_size, rpc_backend_options
     )
 
 

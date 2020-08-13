@@ -21,10 +21,6 @@ class TestE2ETensorPipe : public TestE2EBase {
         ::c10d::ProcessGroupGloo::createDeviceForHostname(serverAddress));
     float rpcTimeout = 30;
 
-    // Initialize server rpc agent.
-    auto pg =
-        std::make_shared<c10d::ProcessGroupGloo>(store, 0, numWorkers, options);
-
     TensorPipeRpcBackendOptions opts(
         /*numWorkerThreads=*/std::max(16U, std::thread::hardware_concurrency()),
         /*transports=*/nullopt,
@@ -37,7 +33,6 @@ class TestE2ETensorPipe : public TestE2EBase {
         "worker",
         0,
         numWorkers,
-        pg,
         opts,
         std::make_unique<RequestCallbackNoPython>());
   }
