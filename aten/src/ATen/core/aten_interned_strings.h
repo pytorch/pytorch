@@ -378,6 +378,7 @@ _(aten, hinge_embedding_loss) \
 _(aten, histc) \
 _(aten, hspmm) \
 _(aten, hstack) \
+_(aten, hypot) \
 _(aten, ifft) \
 _(aten, index) \
 _(aten, index_add) \

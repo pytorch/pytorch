@@ -24,7 +24,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_cpu(
     int64_t M,
     int64_t N,
     double eps) {
-  Tensor Y = at::native::empty_like(X, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  Tensor Y = at::native::empty_like(X, at::MemoryFormat::Contiguous);
   Tensor mean = at::empty({M}, X.options());
   Tensor rstd = at::empty({M}, X.options());
   if (M > 0) {
@@ -46,13 +46,13 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_cpu(
   Tensor dgamma;
   Tensor dbeta;
   if (grad_input_mask[0]) {
-    dX = at::native::empty_like(X, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    dX = at::native::empty_like(X, at::MemoryFormat::Contiguous);
   }
   if (grad_input_mask[1]) {
-    dgamma = M > 0 ? at::native::empty_like(gamma, LEGACY_CONTIGUOUS_MEMORY_FORMAT) : at::native::zeros_like(gamma, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    dgamma = M > 0 ? at::native::empty_like(gamma, at::MemoryFormat::Contiguous) : at::native::zeros_like(gamma, at::MemoryFormat::Contiguous);
   }
   if (grad_input_mask[2]) {
-    dbeta = M > 0 ? at::native::empty_like(gamma, LEGACY_CONTIGUOUS_MEMORY_FORMAT) : at::native::zeros_like(gamma, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    dbeta = M > 0 ? at::native::empty_like(gamma, at::MemoryFormat::Contiguous) : at::native::zeros_like(gamma, at::MemoryFormat::Contiguous);
   }
   if (M > 0) {
     LayerNormBackwardKernel(
