@@ -57,7 +57,7 @@ class TestSparse(TestCase):
 
         def sparse_empty_factory(*args, **kwargs):
             kwargs['dtype'] = kwargs.get('dtype', self.value_dtype)
-            kwargs['layout'] = kwargs.get('laytout', torch.sparse_coo)
+            kwargs['layout'] = kwargs.get('layout', torch.sparse_coo)
             kwargs['device'] = kwargs.get('device', self.device)
             return torch.empty(*args, **kwargs)
         self.sparse_empty = sparse_empty_factory

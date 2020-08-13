@@ -2043,50 +2043,51 @@ void fake_quantize_grad_tensor_kernel(
   });
 }
 
-void fake_quantize_learnable_scale_grad_tensor_kernel(
-    Tensor& input_grad,
-    const Tensor& input,
-    const Tensor& output_grad,
+void fake_quantize_learnable_tensor_grad_kernel_cpu(
+    TensorIterator& iter,
     float scale,
+    float inv_scale,
     int64_t zero_point,
     int64_t quant_min,
     int64_t quant_max) {
-  float inv_scale = 1.0f / scale;
-  float grad_small = quant_min - zero_point;
-  float grad_big = quant_max - zero_point;
-  auto iter_scale = TensorIterator::binary_op(input_grad, input, output_grad);
-  // TODO: Implement the vectorized per tensor version for the learnable backprop kernel on scale.
-  cpu_kernel(iter_scale, [&](float x, float dy) -> float {
-    int64_t xq = static_cast<int64_t>(zero_point + std::nearbyint(x * inv_scale));
-    xq = std::max(std::min(xq, quant_max), quant_min);
-    if (xq == quant_min) {
-      return dy * grad_small;
-    } else if (xq == quant_max) {
-      return dy * grad_big;
+  float dscale_small = quant_min - zero_point;
+  float dscale_big = quant_max - zero_point;
+  iter.for_each([&](char** data, const int64_t* strides, int64_t n) {
+    /*  When a for_each call is made on a TensorIterator with multiple inputs and outputs,
+        the order they are accessed follows the order they are built within the iterator.
+        For example, if an iterator is built in the following order:
+        auto iter = TensorIteratorConfig().
+          .add_output(firstOutput)
+          .add_output(secondOutput)
+          .add_input(firstInput)
+          .add_input(secondInput)
+          .build()
+        data will contain 4 pointers to pointers to values in the following order:
+        firstOutput, secondOutput, firstInput, secondInput.
+        Proper pointer referencing and dereferencing, along with the usage of strides
+        (to move onto different elements), can allow accessing of the input and assignment
+        to the right output.
+    */
+    for (int64_t i = 0; i < n; i++) {
+      float* dXOutput = (float*)(data[0] + i * strides[0]);
+      float* dScaleOutput = (float*)(data[1] + i * strides[1]);
+      float* dZeroPointOutput = (float*)(data[2] + i * strides[2]);
+      float* XInput = (float*)(data[3] + i * strides[3]);
+      float* dYInput = (float*)(data[4] + i * strides[4]);
+      // Calculate gradients for X.
+      int64_t xqi = std::nearbyint(zero_point + (*XInput) * inv_scale);
+      *dXOutput = (*dYInput) * (xqi >= quant_min && xqi <= quant_max);
+      // Calculate gradients for scale and zero point.
+      xqi = std::max(std::min(xqi, quant_max), quant_min);
+      float xfqi = static_cast<float>((xqi - zero_point) * scale);
+      if (xqi == quant_min || xqi == quant_max) {
+        *dZeroPointOutput = (*dYInput) * (-1) * scale;
+        *dScaleOutput = (xqi == quant_min) ? ((*dYInput) * dscale_small) : ((*dYInput) * dscale_big);
+      } else {
+        *dZeroPointOutput = 0;
+        *dScaleOutput = (*dYInput) * (xfqi - (*XInput)) * inv_scale;
+      }
     }
-    float x_fq = static_cast<float>((xq - zero_point) * scale);
-    return dy * (x_fq - x) * inv_scale;
-  });
-}
-
-void fake_quantize_learnable_zero_point_grad_tensor_kernel(
-    Tensor& input_grad,
-    const Tensor& input,
-    const Tensor& output_grad,
-    float scale,
-    int64_t zero_point,
-    int64_t quant_min,
-    int64_t quant_max) {
-  float inv_scale = 1.0f / scale;
-  auto iter_scale = TensorIterator::binary_op(input_grad, input, output_grad);
-  // TODO: Implement the vectorized per tensor version for the learnable backprop kernel on zero point.
-  cpu_kernel(iter_scale, [&](float x, float dy) -> float {
-    int64_t xq = static_cast<int64_t>(zero_point + std::nearbyint(x * inv_scale));
-    xq = std::max(std::min(xq, quant_max), quant_min);
-    if (xq == quant_min || xq == quant_max) {
-      return dy * (-1) * scale;
-    }
-    return 0;
   });
 }
 
@@ -2120,50 +2121,41 @@ void fake_quant_grad_per_channel_cpu(
       });
 }
 
-void fake_quantize_learnable_scale_grad_channel_kernel(
-    Tensor& input_grad,
-    const Tensor& input,
-    const Tensor& output_grad,
-    float scale,
-    int64_t zero_point,
+void fake_quantize_learnable_channel_grad_kernel_cpu(
+    TensorIterator& iter,
     int64_t quant_min,
     int64_t quant_max) {
-  float inv_scale = 1.0f / scale;
-  float grad_small = quant_min - zero_point;
-  float grad_big = quant_max - zero_point;
-  auto iter_scale = TensorIterator::binary_op(input_grad, input, output_grad);
-  // TODO: Implement the vectorized per channel version for the learnable backprop kernel on scale.
-  cpu_kernel(iter_scale, [&](float x, float dy) -> float {
-    int64_t xq = static_cast<int64_t>(zero_point + std::nearbyint(x * inv_scale));
-    xq = std::max(std::min(xq, quant_max), quant_min);
-    float x_fq = static_cast<float>((xq - zero_point) * scale);
-    if (xq == quant_min) {
-      return dy * grad_small;
-    } else if (xq == quant_max) {
-      return dy * grad_big;
-    }
-    return dy * (x_fq - x) * inv_scale;
-  });
-}
+  iter.for_each([&](char** data, const int64_t* strides, int64_t n) {
+    /*  To see how the input and outputs are referenced and assigned,
+        please see the implemenetation of
+        fake_quantize_learnable_tensor_grad_kernel_cpu.
+    */
+    for (int64_t i = 0; i < n; i++) {
+      float* dx_output = (float*)(data[0] + i * strides[0]);
+      float* dscale_output = (float*)(data[1] + i * strides[1]);
+      float* dzero_point_output = (float*)(data[2] + i * strides[2]);
+      float* x_input = (float*)(data[3] + i * strides[3]);
+      float* dy_input = (float*)(data[4] + i * strides[4]);
+      float* scale_input = (float*)(data[5] + i * strides[5]);
+      float* zero_point_input = (float*)(data[6] + i * strides[6]);
 
-void fake_quantize_learnable_zero_point_grad_channel_kernel(
-    Tensor& input_grad,
-    const Tensor& input,
-    const Tensor& output_grad,
-    float scale,
-    int64_t zero_point,
-    int64_t quant_min,
-    int64_t quant_max) {
-  float inv_scale = 1.0f / scale;
-  auto iter_zero_point = TensorIterator::binary_op(input_grad, input, output_grad);
-  // TODO: Implement the vectorized per channel version for the learnable backprop kernel on zero point.
-  cpu_kernel(iter_zero_point, [&](float x, float dy) -> float {
-    int64_t xq = static_cast<int64_t>(zero_point + std::nearbyint(x * inv_scale));
-    xq = std::max(std::min(xq, quant_max), quant_min);
-    if (xq == quant_min || xq == quant_max) {
-      return dy * (-1) * scale;
+      float inv_scale = 1.0f / (*scale_input);
+      float dscale_small = quant_min - (*zero_point_input);
+      float dscale_big = quant_max - (*zero_point_input);
+      // Calculate gradients for X.
+      int64_t xqi = std::nearbyint((*zero_point_input) + (*x_input) * inv_scale);
+      *dx_output = (*dy_input) * (xqi >= quant_min && xqi <= quant_max);
+      // Calculate gradients for scale and zero point.
+      xqi = std::max(std::min(xqi, quant_max), quant_min);
+      float xfqi = static_cast<float>((xqi - (*zero_point_input)) * (*scale_input));
+      if (xqi == quant_min || xqi == quant_max) {
+        *dzero_point_output = (*dy_input) * (-1) * (*scale_input);
+        *dscale_output = (xqi == quant_min) ? ((*dy_input) * dscale_small) : ((*dy_input) * dscale_big);
+      } else {
+        *dzero_point_output = 0;
+        *dscale_output = (*dy_input) * (xfqi - (*x_input)) * inv_scale;
+      }
     }
-    return 0;
   });
 }
 
@@ -2590,60 +2582,56 @@ void dequantize_tensor_per_channel_affine_cpu(
 
 } // namespace
 
-REGISTER_DISPATCH(qrelu_stub, &qrelu_kernel);
-REGISTER_DISPATCH(qrelu6_stub, &qrelu6_kernel);
-REGISTER_DISPATCH(qrelu_leaky_stub, &leaky_qrelu_out_kernel);
-REGISTER_DISPATCH(qsigmoid_stub, &qsigmoid_kernel);
-REGISTER_DISPATCH(qhardsigmoid_stub, &qhardsigmoid_kernel);
-REGISTER_DISPATCH(qclamp_stub, &qclamp_kernel);
-REGISTER_DISPATCH(qthreshold_stub, &qthreshold_kernel);
-REGISTER_DISPATCH(qtanh_stub, &qtanh_kernel);
-REGISTER_DISPATCH(qhardswish_stub, &qhardswish_kernel);
-REGISTER_DISPATCH(qelu_stub, &qelu_kernel);
+REGISTER_DISPATCH(dequantize_tensor_per_channel_affine_stub,
+                  &dequantize_tensor_per_channel_affine_cpu);
+REGISTER_DISPATCH(dequantize_tensor_per_tensor_affine_stub,
+                  &dequantize_tensor_per_tensor_affine_cpu);
+REGISTER_DISPATCH(fake_quant_grad_learnable_tensor_stub,
+                  &fake_quantize_learnable_tensor_grad_kernel_cpu);
+REGISTER_DISPATCH(fake_quant_grad_per_channel_stub,
+                  &fake_quant_grad_per_channel_cpu);
+REGISTER_DISPATCH(fake_quant_grad_tensor_stub,
+                  &fake_quantize_grad_tensor_kernel);
+REGISTER_DISPATCH(fake_quant_per_channel_stub, &fake_quant_per_channel_cpu);
+REGISTER_DISPATCH(fake_quant_tensor_stub, &fake_quantize_tensor_kernel);
+REGISTER_DISPATCH(qadaptive_avg_pool2d_nhwc_stub,
+                  &qadaptive_avg_pool2d_nhwc_kernel);
+REGISTER_DISPATCH(qadaptive_avg_pool3d_ndhwc_stub,
+                  &qadaptive_avg_pool3d_ndhwc_kernel);
 REGISTER_DISPATCH(qadd_relu_stub, &qadd_kernel<true>);
-REGISTER_DISPATCH(qadd_stub, &qadd_kernel<false>);
 REGISTER_DISPATCH(qadd_scalar_relu_stub, &qadd_scalar_kernel<true>);
 REGISTER_DISPATCH(qadd_scalar_stub, &qadd_scalar_kernel<false>);
-REGISTER_DISPATCH(qmul_relu_stub, &qmul_kernel<true>);
-REGISTER_DISPATCH(qmul_stub, &qmul_kernel<false>);
-REGISTER_DISPATCH(qmaxpool_2d_nhwc_stub, &qmaxpool_2d_nhwc_kernel);
-REGISTER_DISPATCH(
-    qadaptive_avg_pool2d_nhwc_stub,
-    &qadaptive_avg_pool2d_nhwc_kernel);
-REGISTER_DISPATCH(
-    qadaptive_avg_pool3d_ndhwc_stub,
-    &qadaptive_avg_pool3d_ndhwc_kernel);
+REGISTER_DISPATCH(qadd_stub, &qadd_kernel<false>);
 REGISTER_DISPATCH(qavg_pool2d_nhwc_stub, &qavg_pool2d_nhwc_kernel);
 REGISTER_DISPATCH(qavg_pool3d_nhwc_stub, &qavg_pool3d_nhwc_kernel);
-REGISTER_DISPATCH(
-    qupsample_bilinear2d_nhwc_stub,
-    &qupsample_bilinear2d_nhwc_kernel);
+REGISTER_DISPATCH(qbatch_norm_relu_stub, &q_batch_norm_kernel<true>);
+REGISTER_DISPATCH(qbatch_norm_stub, &q_batch_norm_kernel<false>);
 REGISTER_DISPATCH(qcat_nhwc_stub, &qcat_nhwc_kernel<false>);
 REGISTER_DISPATCH(qcat_relu_nhwc_stub, &qcat_nhwc_kernel<true>);
+REGISTER_DISPATCH(qclamp_stub, &qclamp_kernel);
+REGISTER_DISPATCH(qelu_stub, &qelu_kernel);
+REGISTER_DISPATCH(qhardsigmoid_stub, &qhardsigmoid_kernel);
+REGISTER_DISPATCH(qhardswish_stub, &qhardswish_kernel);
+REGISTER_DISPATCH(qmaxpool_2d_nhwc_stub, &qmaxpool_2d_nhwc_kernel);
+REGISTER_DISPATCH(qmul_relu_stub, &qmul_kernel<true>);
+REGISTER_DISPATCH(qmul_stub, &qmul_kernel<false>);
+REGISTER_DISPATCH(qrelu6_stub, &qrelu6_kernel);
+REGISTER_DISPATCH(qrelu_leaky_stub, &leaky_qrelu_out_kernel);
+REGISTER_DISPATCH(qrelu_stub, &qrelu_kernel);
+REGISTER_DISPATCH(qsigmoid_stub, &qsigmoid_kernel);
+REGISTER_DISPATCH(qtanh_stub, &qtanh_kernel);
+REGISTER_DISPATCH(qthreshold_stub, &qthreshold_kernel);
 REGISTER_DISPATCH(qtopk_stub, &qtopk_kernel);
-REGISTER_DISPATCH(qbatch_norm_stub, &q_batch_norm_kernel<false>);
-REGISTER_DISPATCH(qbatch_norm_relu_stub, &q_batch_norm_kernel<true>);
-REGISTER_DISPATCH(fake_quant_tensor_stub, &fake_quantize_tensor_kernel);
-REGISTER_DISPATCH(fake_quant_grad_tensor_stub, &fake_quantize_grad_tensor_kernel);
-REGISTER_DISPATCH(fake_quant_grad_learnable_scale_tensor_stub, &fake_quantize_learnable_scale_grad_tensor_kernel);
-REGISTER_DISPATCH(fake_quant_grad_learnable_zero_point_tensor_stub, &fake_quantize_learnable_zero_point_grad_tensor_kernel);
-REGISTER_DISPATCH(fake_quant_per_channel_stub, &fake_quant_per_channel_cpu);
-REGISTER_DISPATCH(fake_quant_grad_per_channel_stub, &fake_quant_grad_per_channel_cpu);
-REGISTER_DISPATCH(fake_quant_grad_learnable_scale_channel_stub, &fake_quantize_learnable_scale_grad_channel_kernel);
-REGISTER_DISPATCH(fake_quant_grad_learnable_zero_point_channel_stub, &fake_quantize_learnable_zero_point_grad_channel_kernel);
+REGISTER_DISPATCH(fake_quant_grad_learnable_channel_stub, &fake_quantize_learnable_channel_grad_kernel_cpu);
 REGISTER_DISPATCH(
     quantize_tensor_per_tensor_affine_stub,
     &quantize_tensor_per_tensor_affine_cpu);
 REGISTER_DISPATCH(
     quantize_tensor_per_channel_affine_stub,
     &quantize_tensor_per_channel_affine_cpu);
-REGISTER_DISPATCH(
-    dequantize_tensor_per_tensor_affine_stub,
-    &dequantize_tensor_per_tensor_affine_cpu);
-REGISTER_DISPATCH(
-    dequantize_tensor_per_channel_affine_stub,
-    &dequantize_tensor_per_channel_affine_cpu);
 REGISTER_DISPATCH(quantized_normalize_stub, &quantized_normalize_kernel);
+REGISTER_DISPATCH(qupsample_bilinear2d_nhwc_stub,
+                  &qupsample_bilinear2d_nhwc_kernel);
 
 } // namespace native
 } // namespace at
