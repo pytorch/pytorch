@@ -1,6 +1,6 @@
-#include <torch/csrc/jit/passes/onnx/preprocess_for_onnx.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
+#include <torch/csrc/jit/passes/onnx/preprocess_for_onnx.h>
 
 namespace torch {
 namespace jit {
@@ -67,7 +67,9 @@ void FuseWithListUnpack(Node* n) {
   //    is aware of the number of outputs.
   // 2. Add the exact number of outputs to n, copy metadata and replace uses of
   // listUnpack outputs.
-  n->i_(Symbol::fromQualString("attr::_outputs"), static_cast<int64_t>(listUnpack_node->outputs().size()));
+  n->i_(
+      Symbol::fromQualString("attr::_outputs"),
+      static_cast<int64_t>(listUnpack_node->outputs().size()));
 
   for (auto i = 0; i < listUnpack_node->outputs().size(); ++i) {
     auto new_output = n->addOutput();
