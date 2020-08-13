@@ -13,7 +13,7 @@ set(TORCHPY_LIB_SOURCES
 set(TORCHPY_TEST_SOURCES
   ${TORCHPY_DIR}/test_main.cpp
   ${TORCHPY_DIR}/test_init.cpp
-  ${TORCHPY_DIR}/example/test_resnet.cpp
+  ${TORCHPY_DIR}/example/test_models.cpp
 )
 add_library(torchpy ${TORCHPY_LIB_SOURCES})
 target_include_directories(torchpy PRIVATE ${TORCHPY_DIR})
@@ -22,6 +22,7 @@ target_link_libraries(torchpy PRIVATE torch -Wl,-rpath,/home/whc/local/pytorch-e
 add_executable(torchpy_test ${TORCHPY_TEST_SOURCES})
 target_include_directories(torchpy_test PRIVATE ${TORCHPY_DIR})
 target_link_libraries(torchpy_test PRIVATE torchpy gtest)
+target_link_libraries(torchpy_test PRIVATE torch -Wl,-rpath,/home/whc/local/pytorch-env/lib/ ${PYTHON_LIBRARIES})
 
 if(USE_CUDA)
   target_link_libraries(torchpy_test PRIVATE
