@@ -1100,6 +1100,12 @@ class TestDistributions(TestCase):
                         probs=torch.tensor(0.1).cuda()
                         ).sample(torch.Size((100000000,)))
         self.assertTrue((vals < 2).all())
+        vals = Binomial(total_count=torch.tensor(1.0).cuda(),
+                        probs=torch.tensor(0.5).cuda()
+                        ).sample(torch.Size((10000,)))
+        # vals should be roughly half zeroes, half ones
+        assert (vals == 0.0).sum() > 4000
+        assert (vals == 1.0).sum() > 4000
 
     def test_multinomial_1d(self):
         total_count = 10
