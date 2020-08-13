@@ -18687,12 +18687,17 @@ else:
 
                 # Determine if input tensors have valid dimensions.
                 valid_dim = True
-                for i in range(len(torch_input) - 1):
-                    for tdim in range(torch_input[i].dim()):
-                        if i != dim and torch_input[i].size()[tdim] != torch_input[i + 1].size()[tdim]:
+                for k in range(len(torch_input) - 1):
+                    for tdim in range(ndims):
+                        # Test whether all tensors have the same shape except in concatenating dimension
+                        # Unless the number of dimensions is less than the corresponding at_least function dimension
+                        # Since the original concatenating dimension would shift after applying at_least and would no
+                        # longer be the concatenating dimension
+                        if (ndims < at_least_dim or tdim != dim) and torch_input[k].size()[tdim] != torch_input[k + 1].size()[tdim]:
                             valid_dim = False
 
-                if valid_dim or ndims <= at_least_dim or (torch_fn is torch.hstack and ndims == 1):
+                # Special case for hstack is needed since hstack works differently when ndims is 1
+                if valid_dim or (torch_fn is torch.hstack and ndims == 1):
                     # Valid dimensions, test against numpy
                     np_input = [input.cpu().numpy() for input in torch_input]
                     actual = torch_fn(torch_input)
@@ -18707,13 +18712,13 @@ else:
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False) +
               torch.testing.get_all_complex_dtypes()))
     def test_hstack(self, device, dtype):
-        self._test_special_stacks(1, 0, torch.hstack, np.hstack, device, dtype)
+        self._test_special_stacks(1, 1, torch.hstack, np.hstack, device, dtype)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False) +
               torch.testing.get_all_complex_dtypes()))
     def test_vstack(self, device, dtype):
-        self._test_special_stacks(0, 1, torch.vstack, np.vstack, device, dtype)
+        self._test_special_stacks(0, 2, torch.vstack, np.vstack, device, dtype)
         for i in range(5):
             # Test dimension change for 1D tensor of size (N) and 2D tensor of size (1, N)
             n = random.randint(1, 10)
@@ -18730,7 +18735,7 @@ else:
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False) +
               torch.testing.get_all_complex_dtypes()))
     def test_dstack(self, device, dtype):
-        self._test_special_stacks(2, 2, torch.dstack, np.dstack, device, dtype)
+        self._test_special_stacks(2, 3, torch.dstack, np.dstack, device, dtype)
         for i in range(5):
             # Test dimension change for 1D tensor of size (N), 2D tensor of size (1, N), and 3D tensor of size (1, N, 1)
             n = random.randint(1, 10)
