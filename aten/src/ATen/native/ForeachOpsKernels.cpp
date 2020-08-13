@@ -8,8 +8,7 @@ std::vector<Tensor> foreach_tensor_exp_slow(TensorList tensors) {
 
   std::vector<Tensor> result;
   for (const auto& t : tensors) {
-    auto temp = t.exp();
-    result.emplace_back(temp);
+    result.emplace_back(t.exp());
   }
 
   return result;
@@ -28,8 +27,7 @@ std::vector<Tensor> foreach_tensor_sqrt_slow(TensorList tensors) {
 
   std::vector<Tensor> result;
   for (const auto& t : tensors) {
-    auto temp = t.sqrt();
-    result.emplace_back(temp);
+    result.emplace_back(t.sqrt());
   }
 
   return result;
@@ -48,8 +46,7 @@ std::vector<Tensor> foreach_tensor_add_scalar_kernel_slow(TensorList tensors, Sc
 
   std::vector<Tensor> result;
   for (const auto& t : tensors) {
-    auto temp = t.add(scalar);
-    result.emplace_back(temp);
+    result.emplace_back(t.add(scalar));
   }
 
   return result;
@@ -68,8 +65,7 @@ std::vector<Tensor> foreach_tensor_sub_scalar_kernel_slow(TensorList tensors, Sc
 
   std::vector<Tensor> result;
   for (const auto& t: tensors) {
-    auto temp = t.sub(scalar);
-    result.emplace_back(temp);
+    result.emplace_back(t.sub(scalar));
   }
 
   return result;
@@ -88,8 +84,7 @@ std::vector<Tensor> foreach_tensor_div_scalar_kernel_slow(TensorList tensors, Sc
 
   std::vector<Tensor> result;
   for (const auto& t: tensors) {
-    auto temp = t.div(scalar);
-    result.emplace_back(temp);
+    result.emplace_back(t.div(scalar));
   }
 
   return result;
@@ -108,8 +103,7 @@ std::vector<Tensor> foreach_tensor_mul_scalar_kernel_slow(TensorList tensors, Sc
 
   std::vector<Tensor> result;
   for (const auto& t: tensors) {
-    auto temp = t.mul(scalar);
-    result.emplace_back(temp);
+    result.emplace_back(t.mul(scalar));
   }
 
   return result;
@@ -128,8 +122,7 @@ std::vector<Tensor> foreach_tensor_add_list_kernel_slow(TensorList tensors1, Ten
 
   std::vector<Tensor> result;
   for (int i = 0; i < tensors1.size(); i++) {
-    auto temp = tensors1[i].add(tensors2[i]);
-    result.emplace_back(temp);
+    result.emplace_back(tensors1[i].add(tensors2[i]));
   }
 
   return result;
@@ -148,8 +141,7 @@ std::vector<Tensor> foreach_tensor_sub_list_kernel_slow(TensorList tensors1, Ten
 
   std::vector<Tensor> result;
   for (int i = 0; i < tensors1.size(); i++) {
-    auto temp = tensors1[i].sub(tensors2[i]);
-    result.emplace_back(temp);
+    result.emplace_back(tensors1[i].sub(tensors2[i]));
   }
 
   return result;
@@ -168,8 +160,7 @@ std::vector<Tensor> foreach_tensor_mul_list_kernel_slow(TensorList tensors1, Ten
 
   std::vector<Tensor> result;
   for (int i = 0; i < tensors1.size(); i++) {
-    auto temp = tensors1[i].mul(tensors2[i]);
-    result.emplace_back(temp);
+    result.emplace_back(tensors1[i].mul(tensors2[i]));
   }
 
   return result;
@@ -188,8 +179,7 @@ std::vector<Tensor> foreach_tensor_div_list_kernel_slow(TensorList tensors1, Ten
 
   std::vector<Tensor> result;
   for (int i = 0; i < tensors1.size(); i++) {
-    auto temp = tensors1[i].div(tensors2[i]);
-    result.emplace_back(temp);
+    result.emplace_back(tensors1[i].div(tensors2[i]));
   }
 
   return result;
