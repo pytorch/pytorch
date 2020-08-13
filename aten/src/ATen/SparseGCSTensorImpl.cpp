@@ -27,8 +27,8 @@ SparseGCSTensorImpl::SparseGCSTensorImpl(at::DispatchKeySet key_set, const caffe
       , Scalar()  ) {}
 
 SparseGCSTensorImpl::SparseGCSTensorImpl(at::DispatchKeySet key_set, const caffe2::TypeMeta& data_type,
-                                         at::Tensor pointers, at::Tensor indices, at::Tensor values, at::Tensor reduction,
-                                         Scalar fill_value)
+                                         at::Tensor pointers, at::Tensor indices, at::Tensor values,
+                                         at::Tensor reduction, Scalar fill_value)
   : TensorImpl(key_set, data_type, values.device()),
     pointers_(std::move(pointers)),
     indices_(std::move(indices)),
@@ -37,13 +37,15 @@ SparseGCSTensorImpl::SparseGCSTensorImpl(at::DispatchKeySet key_set, const caffe
     fill_value_(std::move(fill_value)) {}
 
   void SparseGCSTensorImpl::set_member_tensors_unsafe(const Tensor& pointers, const Tensor& indices,
-                                                      const Tensor& values, const Tensor& reduction) {
+                                                      const Tensor& values, const Tensor& reduction,
+                                                      const Scalar& fill_value) {
     // TODO: perform lots of error checking to check correct type and sizes of inputs. Check
     // SparseTensorImpl::set_indices_and_values_unsafe() for details
     pointers_ = pointers;
     indices_ = indices;
     values_ = values;
     reduction_ = reduction;
+    fill_value_ = fill_value;
 
     AT_ASSERT(device() == values_.device());    
     AT_ASSERT(indices_.device() == values_.device());

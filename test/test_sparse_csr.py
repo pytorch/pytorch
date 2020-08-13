@@ -14,6 +14,9 @@ import itertools
 import functools
 import random
 import unittest
+import operator
+import numpy as np
+from collections import defaultdict
 from torch.testing._internal.common_utils import TestCase, run_tests, load_tests
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
@@ -21,16 +24,15 @@ from torch.testing._internal.common_utils import TestCase, run_tests, load_tests
 load_tests = load_tests
 
 class TestSparseGCS(TestCase):    
-    def make_sparse_gcs(self, data, reduction=None, fill_value=-1):
-        import itertools
-        from collections import defaultdict
-
+    def make_sparse_gcs(self, data, reduction=None, fill_value=float('NaN')):
         def get_shape(data):
             if isinstance(data, (list, tuple)):
                 dims = len(data)
                 if dims == 0:
                     return (0,)
                 return (dims, ) + get_shape(data[0])
+            elif isinstance(data, np.ndarray):
+                return data.shape
             return ()
 
         def make_strides(shape, dims=None):
@@ -61,14 +63,14 @@ class TestSparseGCS(TestCase):
 
         strides1 = make_strides(dims1)
         strides2 = make_strides(dims2)
-        print(f'{shape} {strides1} {strides2} {dims1} {dims2}')
+        # print(f'{shape} {strides1} {strides2} {dims1} {dims2}')
         # <row>: <list of (colindex, value)>
         col_value = defaultdict(list)
         for index in itertools.product(*map(range, shape)):
             v = data
             for i in index:
                 v = v[i]
-            if v == fill_value:
+            if v == fill_value or np.isnan(v):
                 continue
             p1 = apply_reduction(index, strides1, dims1)
             p2 = apply_reduction(index, strides2, dims2)
@@ -84,10 +86,21 @@ class TestSparseGCS(TestCase):
             co.extend(c)
             values.extend(v)
 
-        print(f"{torch.tensor(ro)} {torch.tensor(co)} {torch.tensor(values)} {torch.tensor(reduction)} {shape}")
+        # print(f"{torch.tensor(ro)} {torch.tensor(co)} {torch.tensor(values)} {torch.tensor(reduction)} {shape}")
         return torch.sparse_gcs_tensor(torch.tensor(ro), torch.tensor(co), torch.tensor(values),
                                        torch.tensor(reduction), shape, fill_value)
 
+    def gen_sparse_gcs(self, shape, nnz, fill_value=float('NaN')):
+        total_values = functools.reduce(operator.mul, shape, 1)
+        dense = np.random.randn(total_values)
+        fills = random.sample(list(range(total_values)), total_values-nnz)
+
+        for f in fills:
+            dense[f] = fill_value
+        dense = dense.reshape(shape)
+
+        return self.make_sparse_gcs(dense, None, fill_value)
+    
     def setUp(self):
         # These parameters control the various ways we can run the test.
         # We will subclass and override this method to implement CUDA
@@ -107,6 +120,29 @@ class TestSparseGCS(TestCase):
         self.assertEqual(torch.tensor([0, 2, 4]), sp.pointers())
         self.assertEqual(torch.tensor([0, 1, 0, 1]), sp.indices())
         self.assertEqual(torch.tensor([1, 2, 3, 4]), sp.values())
+
+    def test_dense_convert(self):
+        rand = np.random.randn(100, 100)
+        sparse = self.make_sparse_gcs(rand)
+
+        self.assertEqual(sparse.to_dense(), rand)
+
+    def test_basic_ops(self):
+        x1 = self.gen_sparse_gcs((10, 3, 40, 5, 2), 100)
+        x2 = self.gen_sparse_gcs((10, 3, 40, 5, 2), 140)
+        y1 = x1 * x2
+        expected = x1.to_dense() * x2.to_dense()
+
+        self.assertEqual(y1.to_dense(), expected)
+
+        x1 = self.gen_sparse_gcs((10, 3, 40, 5, 2), 100)
+        y1 = x1 * 18.3
+        expected = x1.to_dense() * 18.3
+
+        self.assertEqual(y1.to_dense(), expected)
+        
+    def test_autograd(self):
+        pass
     
     def test_sparse_gcs_constructor(self):
         pass
