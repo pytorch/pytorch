@@ -96,36 +96,17 @@ class TestSparseGCS(TestCase):
         self.is_uncoalesced = False
         self.device = 'cpu'
         self.exact_dtype = True
-        self.value_dtype = torch.float64
-        self.index_tensor = lambda *args: torch.tensor(*args, dtype=torch.int64, device=self.device)
-        self.value_empty = lambda *args: torch.empty(*args, dtype=self.value_dtype, device=self.device)
-        self.value_tensor = lambda *args: torch.tensor(*args, dtype=self.value_dtype, device=self.device)
-
-        def sparse_tensor_factory(*args, **kwargs):
-            kwargs['dtype'] = kwargs.get('dtype', self.value_dtype)
-            kwargs['device'] = kwargs.get('device', self.device)
-            return torch.sparse_gcs_tensor(*args, **kwargs)
-            
-        self.sparse_tensor = sparse_tensor_factory
-        super(TestSparseGCS, self).setUp()
     
     def test_gcs_layout(self):
         self.assertEqual(str(torch.sparse_gcs), 'torch.sparse_gcs')
         self.assertEqual(type(torch.sparse_gcs), torch.layout)
 
-    def test_sparse_coo_const(self):
-        torch.sparse_coo_tensor(
-            torch.LongTensor([[0], [1], [2]]).transpose(1, 0).clone().detach(),
-            torch.FloatTensor([3, 4, 5]),
-            torch.Size([3]),
-            device=self.device)
-
     def test_sparse_gcs_from_dense(self):
         sp = self.make_sparse_gcs([[1, 2], [3, 4]])
-        
-        print(sp.pointers())
-        print(sp.indices())
-        print(sp.values())
+
+        self.assertEqual(torch.tensor([0, 2, 4]), sp.pointers())
+        self.assertEqual(torch.tensor([0, 1, 0, 1]), sp.indices())
+        self.assertEqual(torch.tensor([1, 2, 3, 4]), sp.values())
     
     def test_sparse_gcs_constructor(self):
         pass
