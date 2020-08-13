@@ -11,22 +11,7 @@ const char* toString(DispatchKey t) {
       return "CPU";
     case DispatchKey::CUDA:
       return "CUDA";
-    case DispatchKey::SparseCPU:
-      return "SparseCPU";
-    case DispatchKey::SparseCUDA:
-      return "SparseCUDA";
-    case DispatchKey::SparseGCS_CPU:
-      return "SparseGCS_CPU";
-    case DispatchKey::SparseGCS_CUDA:
-      return "SparseGCS_CUDA";
-    case DispatchKey::MKLDNN:
-      return "MKLDNN";
-    case DispatchKey::OpenGL:
-      return "OpenGL";
-    case DispatchKey::OpenCL:
-      return "OpenCL";
-    case DispatchKey::IDEEP:
-      return "IDEEP";
+
     case DispatchKey::HIP:
       return "HIP";
     case DispatchKey::FPGA:
@@ -66,6 +51,10 @@ const char* toString(DispatchKey t) {
       return "SparseCPU";
     case DispatchKey::SparseCUDA:
       return "SparseCUDA";
+    case DispatchKey::SparseGCS_CPU:
+      return "SparseGCS_CPU";
+    case DispatchKey::SparseGCS_CUDA:
+      return "SparseGCS_CUDA";
     case DispatchKey::SparseHIP:
       return "SparseHIP";
 
