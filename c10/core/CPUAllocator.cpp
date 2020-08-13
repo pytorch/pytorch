@@ -178,8 +178,8 @@ class DefaultMobileCPUAllocator final : public at::Allocator {
 
     auto alloc_size = PreGuardBytes + nbytes + PostGuardBytes;
     void* data;
-    if (auto allocator_ptr = GetThreadLocalCachingAllocator();
-        allocator_ptr != nullptr) {
+    auto allocator_ptr = GetThreadLocalCachingAllocator();
+    if (allocator_ptr != nullptr) {
       data = allocator_ptr->allocate(alloc_size);
     } else {
       data = c10::alloc_cpu(alloc_size);
