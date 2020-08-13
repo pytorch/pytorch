@@ -1,6 +1,6 @@
 ir_version: 6
 producer_name: "pytorch"
-producer_versionproducer_version: "CURRENT_VERSION"
+producer_version: "CURRENT_VERSION"
 graph {
   node {
     output: "1"
@@ -17,7 +17,7 @@ graph {
     }
   }
   node {
-    input: "12"
+    input: "11"
     output: "3"
     name: "ConstantOfShape_1"
     op_type: "ConstantOfShape"
@@ -85,35 +85,24 @@ graph {
   }
   node {
     input: "8"
-    output: "9"
-    name: "Cast_7"
-    op_type: "Cast"
-    attribute {
-      name: "to"
-      i: 9
-      type: INT
-    }
-  }
-  node {
-    input: "9"
     input: "3"
     input: "1"
-    output: "10"
-    name: "Where_8"
+    output: "9"
+    name: "Where_7"
     op_type: "Where"
   }
   node {
     input: "0"
-    input: "10"
-    output: "11"
-    name: "Expand_9"
+    input: "9"
+    output: "10"
+    name: "Expand_8"
     op_type: "Expand"
   }
   name: "torch-jit-export"
   initializer {
     dims: 1
     data_type: 7
-    name: "12"
+    name: "11"
     raw_data: "\003\000\000\000\000\000\000\000"
   }
   input {
@@ -133,7 +122,7 @@ graph {
     }
   }
   output {
-    name: "11"
+    name: "10"
     type {
       tensor_type {
         elem_type: 1
