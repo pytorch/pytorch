@@ -198,26 +198,6 @@ def gen_docs_configs(xenial_parent_config):
         )
     )
 
-    configs.append(
-        HiddenConf(
-            "pytorch_cpp_doc_build",
-            parent_build=xenial_parent_config
-        )
-    )
-    configs.append(
-        DocPushConf(
-            "pytorch_cpp_doc_push",
-            parent_build="pytorch_cpp_doc_build",
-            branch="master",
-        )
-    )
-
-    configs.append(
-        HiddenConf(
-            "pytorch_doc_test",
-            parent_build=xenial_parent_config
-        )
-    )
     return configs
 
 

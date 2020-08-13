@@ -2151,18 +2151,6 @@ workflows:
           name: pytorch_python_doc_push
           requires:
             - pytorch_python_doc_build
-      - pytorch_cpp_doc_build:
-          requires:
-            - pytorch_linux_xenial_py3_6_gcc5_4_build
-      - pytorch_doc_push:
-          branch: master
-          context: org-member
-          name: pytorch_cpp_doc_push
-          requires:
-            - pytorch_cpp_doc_build
-      - pytorch_doc_test:
-          requires:
-            - pytorch_linux_xenial_py3_6_gcc5_4_build
       - pytorch_linux_test:
           name: pytorch_linux_backward_compatibility_check_test
           requires:
