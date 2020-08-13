@@ -119,7 +119,7 @@ class TestForeach(TestCase):
     @dtypes(*torch.testing.get_all_dtypes())
     def test_complex_scalar(self, device, dtype):
         tensors = [torch.zeros(10, 10, device=device, dtype=dtype) for _ in range(10)]
-        complex_scalar = 3+5j
+        complex_scalar = 3 + 5j
 
         if dtype == torch.bfloat16:
             # bug: 42374
