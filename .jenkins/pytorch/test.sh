@@ -229,7 +229,7 @@ test_libtorch() {
 }
 
 test_vulkan() {
-  if [[ "$BUILD_ENVIRONMENT" == *vulkan* ]]; then
+  if [[ "$BUILD_ENVIRONMENT" == *vulkan-linux* ]]; then
     export VK_ICD_FILENAMES=/var/lib/jenkins/swiftshader/build/Linux/vk_swiftshader_icd.json
     mkdir -p test/test-reports/cpp-vulkan
     build/bin/vulkan_test --gtest_output=xml:test/test-reports/cpp-vulkan/vulkan_test.xml
@@ -395,7 +395,7 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 ]]; t
   test_custom_script_ops
   test_custom_backend
   test_torch_function_benchmark
-elif [[ "${BUILD_ENVIRONMENT}" == *vulkan* ]]; then
+elif [[ "${BUILD_ENVIRONMENT}" == *vulkan-linux* ]]; then
   test_vulkan
 elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   test_bazel

@@ -122,7 +122,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
   exec ./scripts/build_android.sh "${build_args[@]}" "$@"
 fi
 
-if [[ "$BUILD_ENVIRONMENT" != *android* && "$BUILD_ENVIRONMENT" == *vulkan* ]]; then
+if [[ "$BUILD_ENVIRONMENT" != *android* && "$BUILD_ENVIRONMENT" == *vulkan-linux* ]]; then
   export USE_VULKAN=1
   export USE_VULKAN_WRAPPER=1
   export VULKAN_SDK=/var/lib/jenkins/vulkansdk/
