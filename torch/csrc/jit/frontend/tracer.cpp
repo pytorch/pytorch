@@ -835,10 +835,6 @@ void addOutput(Node* node, const c10::List<at::Tensor>& outputs) {
   return addOutput(node, outputs.vec());
 }
 
-void addOutput(Node* node, const at::TensorList outputs) {
-  addOutput(node, outputs.vec());
-}
-
 void addOutput(
     Node* node,
     const c10::intrusive_ptr<c10::ivalue::Object>& output) {
@@ -881,12 +877,6 @@ autograd::Variable getSizeOf(const autograd::Variable& var, int64_t dim) {
       graph->insertNode(graph->createNumToTensor(node->output()))->output();
   setValueTrace(size_var, ten);
   return size_var;
-}
-
-void ensureUniqueIfOutOfPlaced(const char* name, const at::TensorList tensors) {
-  for (auto& t : tensors) {
-    ensureUniqueIfOutOfPlaced(name, t);
-  }
 }
 
 void ensureUniqueIfOutOfPlaced(const char* name, const at::Tensor& tensor) {
