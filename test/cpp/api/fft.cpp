@@ -12,11 +12,12 @@ torch::Tensor naive_dft(torch::Tensor x, bool forward=true) {
   auto out_tensor = torch::zeros_like(x);
   const int64_t len = x.size(0);
 
-  // Roots of unity, exp(2*pi*j*n/N) for n in [0, N), reversed for inverse transform
+  // Roots of unity, exp(-2*pi*j*n/N) for n in [0, N), reversed for inverse transform
   std::vector<c10::complex<double>> roots(len);
   const auto angle_base = (forward ? -2.0 : 2.0) * M_PI / len;
   for (int64_t i = 0; i < len; ++i) {
-    roots[i] = c10_complex_math::exp(c10::complex<double>(0.0, i * angle_base));
+    auto angle = i * angle_base;
+    roots[i] = c10::complex<double>(std::cos(angle), std::sin(angle));
   }
 
   const auto in = x.data_ptr<c10::complex<double>>();

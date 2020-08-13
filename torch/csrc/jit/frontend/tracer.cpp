@@ -43,7 +43,7 @@ template <typename T>
 void genericAddOptionalInput(
     Node* n,
     const char* name,
-    const c10::optional<T> & value) {
+    const c10::optional<T>& value) {
   if (value) {
     jit::tracer::addInputs(n, name, *value);
   } else {
@@ -585,7 +585,10 @@ void addInputs(
 void addInputs(Node* n, const char* name, const std::string& value) {
   detail::genericAddInput(n, value);
 }
-void addInputs(Node* n, const char* name, const c10::optional<std::string>& value) {
+void addInputs(
+    Node* n,
+    const char* name,
+    const c10::optional<std::string>& value) {
   detail::genericAddOptionalInput(n, name, value);
 }
 void addInputs(Node* n, const char* name, const at::Tensor& value) {
