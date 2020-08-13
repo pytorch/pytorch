@@ -3,7 +3,7 @@ import torch.nn as nn
 
 import torchaudio_models as models
 
-from utils import make_functional, load_weights
+from utils import extract_weights, load_weights
 
 def get_wav2letter(device):
     N = 10
@@ -12,7 +12,7 @@ def get_wav2letter(device):
     model = models.Wav2Letter(num_classes=vocab_size)
     criterion = torch.nn.NLLLoss()
     model.to(device)
-    params, names = make_functional(model)
+    params, names = extract_weights(model)
 
     inputs = torch.rand([N, 1, input_frames], device=device)
     labels = torch.rand(N, 3, device=device).mul(vocab_size).long()
@@ -27,11 +27,6 @@ def get_wav2letter(device):
     return forward, params
 
 def get_deepspeech(device):
-    supported_rnns = {
-        'lstm': nn.LSTM,
-        'rnn': nn.RNN,
-        'gru': nn.GRU
-    }
     sample_rate = 16000
     window_size = 0.02
     window = "hamming"
@@ -39,7 +34,6 @@ def get_deepspeech(device):
                       window_size=window_size,
                       window=window,
                       noise_dir=None)
-
 
     N = 10
     num_classes = 10
@@ -54,11 +48,11 @@ def get_deepspeech(device):
     targets = torch.rand(N, target_length, device=device)
     targets_sizes = torch.full((N,), target_length, dtype=torch.int, device=device)
 
-    model = models.DeepSpeech(rnn_type=supported_rnns["lstm"], labels=labels, rnn_hidden_size=1024, nb_layers=5,
+    model = models.DeepSpeech(rnn_type=nn.LSTM, labels=labels, rnn_hidden_size=1024, nb_layers=5,
                               audio_conf=audio_conf, bidirectional=True)
     model = model.to(device)
     criterion = nn.CTCLoss()
-    params, names = make_functional(model)
+    params, names = extract_weights(model)
 
     def forward(*new_params):
         load_weights(model, names, new_params)
@@ -71,14 +65,14 @@ def get_deepspeech(device):
     return forward, params
 
 def get_transformer(device):
-    # For most SOTA research, you would like to have embed to 712, nhead to 12, bsz to 64, tgt_len/src_len to 128.
+    # For most SOTA research, you would like to have embed to 720, nhead to 12, bsz to 64, tgt_len/src_len to 128.
     N = 64
     seq_length = 128
     ntoken = 50
     model = models.TransformerModel(ntoken=ntoken, ninp=720, nhead=12, nhid=2048, nlayers=2)
     model.to(device)
     criterion = nn.NLLLoss()
-    params, names = make_functional(model)
+    params, names = extract_weights(model)
 
     data = torch.rand(N, seq_length + 1, device=device).mul(ntoken).long()
     inputs = data.narrow(1, 0, seq_length)
@@ -105,7 +99,7 @@ def get_multiheadattn(device):
                                                models.ScaledDotProduct(),
                                                torch.nn.Linear(embed_dim, embed_dim, bias=False))
     model.to(device)
-    params, names = make_functional(model)
+    params, names = extract_weights(model)
 
     query = torch.rand((tgt_len, bsz, embed_dim), device=device)
     key = value = torch.rand((src_len, bsz, embed_dim), device=device)

@@ -1,7 +1,7 @@
 import argparse
 from collections import defaultdict
 
-from utils import get_str, read_str
+from utils import to_markdown_table, from_markdown_table
 
 def main():
     parser = argparse.ArgumentParser("Main script to compare results from the benchmarks")
@@ -12,29 +12,29 @@ def main():
 
     with open(args.before, "r") as f:
         content = f.read()
-    res1 = read_str(content)
+    res_before = from_markdown_table(content)
 
     with open(args.after, "r") as f:
         content = f.read()
-    res2 = read_str(content)
+    res_after = from_markdown_table(content)
 
     diff = defaultdict(defaultdict)
-    for model in res1:
-        for task in res1[model]:
-            mean1, var1 = res1[model][task]
-            if task not in res2[model]:
-                diff[model][task] = (-1, mean1, var1, -1, -1)
+    for model in res_before:
+        for task in res_before[model]:
+            mean_before, var_before = res_before[model][task]
+            if task not in res_after[model]:
+                diff[model][task] = (-1, mean_before, var_before, -1, -1)
             else:
-                mean2, var2 = res2[model][task]
-                diff[model][task] = (mean1 / mean2, mean1, var1, mean2, var2)
-    for model in res2:
-        for task in res2[model]:
-            if task not in res1[model]:
-                mean2, var2 = res2[model][task]
-                diff[model][task] = (-1, -1, -1, mean2, var2)
+                mean_after, var_after = res_after[model][task]
+                diff[model][task] = (mean_before / mean_after, mean_before, var_before, mean_after, var_after)
+    for model in res_after:
+        for task in res_after[model]:
+            if task not in res_before[model]:
+                mean_after, var_after = res_after[model][task]
+                diff[model][task] = (-1, -1, -1, mean_after, var_after)
 
     header = ("model", "task", "speedup", "mean (before)", "var (before)", "mean (after)", "var (after)")
-    out = get_str(diff, header=header)
+    out = to_markdown_table(diff, header=header)
 
     print(out)
     if args.output:

@@ -1,14 +1,14 @@
 import torch
 import torchvision_models as models
 
-from utils import make_functional, load_weights
+from utils import extract_weights, load_weights
 
 def get_resnet18(device):
     N = 32
     model = models.resnet18(pretrained=False)
     criterion = torch.nn.CrossEntropyLoss()
     model.to(device)
-    params, names = make_functional(model)
+    params, names = extract_weights(model)
 
     inputs = torch.rand([N, 3, 224, 224], device=device)
     labels = torch.rand(N, device=device).mul(10).long()
@@ -27,7 +27,7 @@ def get_fcn_resnet(device):
     criterion = torch.nn.MSELoss()
     model = models.fcn_resnet50(pretrained=False, pretrained_backbone=False)
     model.to(device)
-    params, names = make_functional(model)
+    params, names = extract_weights(model)
 
     inputs = torch.rand([N, 3, 480, 480], device=device)
     # Given model has 21 classes
@@ -64,7 +64,7 @@ def get_detr(device):
 
     model = model.to(device)
     criterion = criterion.to(device)
-    params, names = make_functional(model)
+    params, names = extract_weights(model)
 
     inputs = torch.rand(N, 3, 800, 1200, device=device)
     labels = []

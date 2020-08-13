@@ -1,23 +1,40 @@
 from collections import defaultdict
 
-# Utilities to make nn.Module functional
-def del_attr(obj, names):
+# Utilities to make nn.Module "functional"
+# In particular the goal is to be able to provide a function that takes as input
+# the parameters and evaluate the nn.Module using fixed inputs.
+def _del_nested_attr(obj, names):
+    """
+    Deletes the attribute specified by the given list of names.
+    """
     if len(names) == 1:
         delattr(obj, names[0])
     else:
-        del_attr(getattr(obj, names[0]), names[1:])
-def set_attr(obj, names, val):
+        _del_nested_attr(getattr(obj, names[0]), names[1:])
+
+def _set_nested_attr(obj, names, val):
+    """
+    Set the attribute specified by the given list of names to val.
+    """
     if len(names) == 1:
         setattr(obj, names[0], val)
     else:
-        set_attr(getattr(obj, names[0]), names[1:], val)
+        _set_nested_attr(getattr(obj, names[0]), names[1:], val)
 
-def make_functional(mod):
+def extract_weights(mod):
+    """
+    This function removes all the Parameters from the model and
+    return them as a tuple.
+    The weights must be re-loaded with `load_weights` before the model
+    can be used again.
+    Note that this function modifies the model in place and after this
+    call, mod.parameters() will be empty.
+    """
     orig_params = tuple(mod.parameters())
     # Remove all the parameters in the model
     names = []
     for name, p in list(mod.named_parameters()):
-        del_attr(mod, name.split("."))
+        _del_nested_attr(mod, name.split("."))
         names.append(name)
 
     # Make params regular Tensors instead of nn.Parameter
@@ -25,10 +42,16 @@ def make_functional(mod):
     return orig_params, names
 
 def load_weights(mod, names, params):
+    """
+    Reload a set of weights so that `mod` can be used again to perform a forward pass.
+    Note that the `params` are regular Tensors (that can have history) and so are left
+    as Tensors. This means that mod.parameters() will still be empty after this call.
+    """
     for name, p in zip(names, params):
-        set_attr(mod, name.split("."), p)
+        _set_nested_attr(mod, name.split("."), p)
 
-def get_str(res, header=None):
+# Utilities to read/write markdown table-like content.
+def to_markdown_table(res, header=None):
     if header is None:
         header = ("model", "task", "mean", "var")
     out = ""
@@ -46,7 +69,7 @@ def get_str(res, header=None):
 
     return out
 
-def read_str(out):
+def from_markdown_table(out):
     out = out.strip().split("\n")
     out = out[2:]  # Ignore the header lines
 
