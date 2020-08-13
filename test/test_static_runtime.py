@@ -17,6 +17,15 @@ class StaticRuntime:
     def __call__(self, *inps):
         return self.static_runtime.run(inps)
 
+def linear_shim(input, weight, bias=None):
+    # type: (Tensor, Tensor, Optional[Tensor]) -> Tensor
+    output = input.matmul(weight.t())
+    if bias is not None:
+        output += bias
+    ret = output
+    return ret
+torch.nn.functional.linear = linear_shim
+
 
 class MultiHeadAttentionLayer(nn.Module):
     def __init__(self, hid_dim, n_heads, dropout, device):
