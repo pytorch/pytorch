@@ -296,6 +296,7 @@ UNPACK_METHODS = {
     'bool': 'toBool',
     'double': 'toDouble',
     'std::string': 'string',
+    'c10::optional<std::string>': 'stringOptional',
 }
 
 UNPACK_WITH_SIZE_METHODS = {
