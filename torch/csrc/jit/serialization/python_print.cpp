@@ -1416,12 +1416,12 @@ struct PythonPrintImpl {
         }
       }
     } else if (auto enumType = type->cast<EnumType>()) {
-      body_ << "class " << enumType->qualifiedClassName().name() <<"(Enum):\n";
+      body_ << "class " << enumType->qualifiedClassName().name() << "(Enum):\n";
       {
         auto guard = WithIndented();
         for (const auto& name_value : enumType->enumNamesValues()) {
           indent();
-          body_ << name_value.first << " = " << name_value.second;
+          body_ << name_value.first << " = " << name_value.second << "\n";
         }
       }
     } else {

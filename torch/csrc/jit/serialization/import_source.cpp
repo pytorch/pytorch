@@ -481,10 +481,19 @@ struct SourceImporterImpl : public Resolver,
   void importEnum(
       const QualifiedName& qualified_name,
       const ClassDef& enum_def) {
-    ScriptTypeParser type_parser(shared_from_this());
     std::vector<std::pair<std::string, IValue>> names_values;
 
     TypePtr value_type = nullptr;
+    auto set_or_check_type = [&value_type](
+                                 const TypePtr& t, const SourceRange& loc) {
+      if (!value_type) {
+        value_type = t;
+      } else if (value_type != t) {
+        throw ErrorReport(loc)
+            << "Enum class with varying value types are not supported.";
+      }
+    };
+
     for (const auto& statement : enum_def.body()) {
       if (statement.kind() != TK_ASSIGN) {
         throw ErrorReport(statement.range())
@@ -494,30 +503,41 @@ struct SourceImporterImpl : public Resolver,
 
       const auto assign = Assign(statement);
       auto name = Var(assign.lhs()).name().name();
-      auto type = type_parser.parseTypeFromExpr(assign.type().get());
-      if (value_type != nullptr && value_type != type) {
-        throw ErrorReport(statement.range())
-            << "Enum class with varying value types are not supported.";
-      }
 
       IValue ivalue;
-      auto rhs = assign.rhs();
+      auto rhs = assign.rhs().get();
       switch (rhs.kind()) {
         case TK_STRINGLITERAL:
           ivalue = IValue(StringLiteral(rhs).text());
-        case TK_CONST:
+          set_or_check_type(StringType::get(), statement.range());
+          break;
+        case TK_CONST: {
           auto numeric_const = Const(rhs);
           if (numeric_const.isFloatingPoint()) {
             ivalue = IValue(numeric_const.asFloatingPoint());
+            set_or_check_type(FloatType::get(), statement.range());
           } else if (numeric_const.isIntegral()) {
             ivalue = IValue(numeric_const.asIntegral());
+            set_or_check_type(IntType::get(), statement.range());
           }
+          break;
+        }
+        default:
+          throw ErrorReport(rhs.range())
+              << "Unsupported enum value type: " << rhs.kind()
+              << ". Only Integers, Floats and Strings are supported.";
       }
 
       names_values.emplace_back(std::make_pair(name, ivalue));
     }
 
-    auto enum_type = EnumType::create(qualified_name, value_type, names_values, cu_);
+    if (!value_type) {
+      throw ErrorReport(enum_def.range())
+          << "No enum values defined for " << qualified_name.qualifiedName();
+    }
+
+    auto enum_type =
+        EnumType::create(qualified_name, value_type, names_values, cu_);
     cu_->register_type(enum_type);
   }
 

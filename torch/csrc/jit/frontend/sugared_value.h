@@ -779,6 +779,5 @@ struct TORCH_API SugaredEnumClass : public SugaredValue {
   EnumTypePtr enum_type_;
 };
 
-
 } // namespace jit
 } // namespace torch

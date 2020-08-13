@@ -796,7 +796,8 @@ void initPythonIRBindings(PyObject* module_) {
         for (const auto& enum_name_value : enum_names_values) {
           auto enum_name = py::cast<std::string>(enum_name_value.attr("name"));
           auto enum_value = toIValue(enum_name_value.attr("value"), value_type);
-          enum_names_values_pair.emplace_back(std::make_pair(enum_name, enum_value));
+          enum_names_values_pair.emplace_back(
+              std::make_pair(enum_name, enum_value));
         }
         return EnumType::create(
             c10::QualifiedName(qualified_name),
