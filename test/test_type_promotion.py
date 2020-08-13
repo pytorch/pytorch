@@ -369,7 +369,8 @@ class TestTypePromotion(TestCase):
         b_tensor = torch.tensor((1, 0), device=device, dtype=dtypes[1])
         b_single_tensor = torch.tensor(1, device=device, dtype=dtypes[1])
         b_scalar = b_single_tensor.item()
-        for a, b in ((a_tensor, b_tensor), (a_single_tensor, b_single_tensor), (a_scalar, b_scalar)):
+        combo = ((a_tensor, a_single_tensor, a_scalar), (b_tensor, b_single_tensor, b_scalar))
+        for a, b in itertools.product(*combo):
             dtype_a = _get_dtype(a)
             dtype_b = _get_dtype(b)
             try:
@@ -388,16 +389,20 @@ class TestTypePromotion(TestCase):
                     self.assertEqual(dtype_res, torch.result_type(a, b), f"a == {a}, b == {b}")
                 if a is a_scalar and b is b_scalar:  # Python internal type determination is good enough in this case
                     continue
-                self.assertEqual(dtype_res, torch.promote_types(dtype_a, dtype_b), f"a == {a}, b == {b}")
+                if any(a is a0 and b is b0 for a0, b0 in zip(*combo)):  # a and b belong to the same class
+                    self.assertEqual(dtype_res, torch.promote_types(dtype_a, dtype_b), f"a == {a}, b == {b}")
 
+    # Spot check some result type for tensor against scalar (including single-element tensor).
     @float_double_default_dtype
     def test_result_type_tensor_vs_scalar(self, device):
-        "Spot check some result type for tensor against scalar (including single-element tensor)."
-
         def _test_spot(a, b, res_dtype):
             self.assertEqual(torch.result_type(a, b), res_dtype)
             self.assertEqual(torch.result_type(b, a), res_dtype)
 
+        _test_spot(torch.tensor([1, 2], dtype=torch.half, device=device),
+                   torch.tensor(1, dtype=torch.long, device=device), torch.half)
+        _test_spot(torch.tensor(1, dtype=torch.float, device=device),
+                   torch.tensor([1, 2], dtype=torch.double, device=device), torch.double)
         _test_spot(torch.tensor(1, dtype=torch.int, device=device), 1, torch.int)
         _test_spot(torch.tensor(1, device=device), 1., torch.get_default_dtype())
         _test_spot(torch.tensor(1, dtype=torch.long, device=device),
@@ -405,6 +410,8 @@ class TestTypePromotion(TestCase):
         _test_spot(torch.tensor([1., 1.], dtype=torch.float, device=device), 1., torch.float)
         _test_spot(torch.tensor([1., 1.], dtype=torch.complex64, device=device),
                    torch.tensor(1., dtype=torch.complex128, device=device), torch.complex64)
+        _test_spot(torch.tensor([1., 1.], dtype=torch.complex128, device=device),
+                   torch.tensor(1., dtype=torch.complex64, device=device), torch.complex128)
         _test_spot(torch.tensor([1, 1], dtype=torch.bool, device=device), 1., torch.get_default_dtype())
 
     @float_double_default_dtype
