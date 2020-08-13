@@ -35,6 +35,7 @@ _swiftshader_root_dir=/var/lib/jenkins
 _swiftshader_dir="${_swiftshader_root_dir}"/swiftshader
 retry git clone https://github.com/google/swiftshader.git "${_swiftshader_dir}"
 pushd "${_swiftshader_dir}"
+git checkout abe07b9438553f741e776dedb59a2d4b502a9983
 git submodule sync && git submodule update -q --init --recursive
 popd
 
