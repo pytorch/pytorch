@@ -112,7 +112,7 @@ static void upsample_nearest3d_out_frame_nhwc(
   }
 }
 
-Tensor quantized_upsample_nearest3d_cpu(
+Tensor upsample_nearest3d_quantized_cpu(
     const Tensor& input,
     IntArrayRef output_size,
     c10::optional<double> scales_d,
@@ -199,7 +199,7 @@ Tensor quantized_upsample_nearest3d_cpu(
 using at::native::upsample::compute_output_size;
 using at::native::upsample::get_scale_value;
 
-Tensor quantized_upsample_nearest3d_cpu(
+Tensor upsample_nearest3d_quantized_cpu(
     const Tensor& input,
     c10::optional<IntArrayRef> output_size,
     c10::optional<ArrayRef<double>> scale_factors) {
@@ -207,7 +207,7 @@ Tensor quantized_upsample_nearest3d_cpu(
   auto scale_d = get_scale_value(scale_factors, 0);
   auto scale_h = get_scale_value(scale_factors, 1);
   auto scale_w = get_scale_value(scale_factors, 2);
-  return quantized_upsample_nearest3d_cpu(input, osize, scale_d, scale_h, scale_w);
+  return upsample_nearest3d_quantized_cpu(input, osize, scale_d, scale_h, scale_w);
 }
 
 } // namespace native

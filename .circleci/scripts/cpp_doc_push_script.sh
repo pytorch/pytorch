@@ -30,13 +30,7 @@ if [ "$version" == "master" ]; then
   is_master_doc=true
 fi
 
-# Argument 3: (optional) If present, we will NOT do any pushing. Used for testing.
-dry_run=false
-if [ "$3" != "" ]; then
-  dry_run=true
-fi
-
-echo "install_path: $install_path  version: $version  dry_run: $dry_run"
+echo "install_path: $install_path  version: $version"
 
 # ======================== Building PyTorch C++ API Docs ========================
 
@@ -100,22 +94,6 @@ git config user.name "pytorchbot"
 # If there aren't changes, don't make a commit; push is no-op
 git commit -m "Automatic sync on $(date)" || true
 git status
-
-if [ "$dry_run" = false ]; then
-  echo "Pushing to https://github.com/pytorch/cppdocs"
-  set +x
-/usr/bin/expect <<DONE
-  spawn git push -u origin master
-  expect "Username*"
-  send "pytorchbot\n"
-  expect "Password*"
-  send "$::env(GITHUB_PYTORCHBOT_TOKEN)\n"
-  expect eof
-DONE
-  set -x
-else
-  echo "Skipping push due to dry_run"
-fi
 
 popd
 # =================== The above code **should** be executed inside Docker container ===================

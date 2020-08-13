@@ -47,50 +47,47 @@ void _force_tls_local_dispatch_key_set(LocalDispatchKeySet key_set) {
 }
 
 // An RAII guard could snapshot and restore the entire state (entire DispatchKeySet) as
-// opposed to only snapshotting and restoring the state of its assigned DispatchKey.
+// opposed to only snapshotting and restoring the state of its assigned DispatchKeySet.
 // I'm not sure which is better.  If only the RAII API is used, the two choices are
 // not distinguishable.
 //
 // However, if the guard chooses to snapshot and restore the entire DispatchKeySet,
 // the interaction with the non-RAII API changes.  Consider this sequence of events:
-// - An RAII guard is declared for a particular DispatchKey, but snapshots the entire
+// - An RAII guard is declared for a particular DispatchKeySet, but snapshots the entire
 //   current DispatchKeySet.
-// - A call to the non-RAII API changes the state for a different DispatchKey.
+// - A call to the non-RAII API changes the state for DispatchKeys outside the assigned
+//   set.
 // - The RAII guard goes out of scope, restoring the entire DispatchKeySet it snapshotted
 //   (which restores the state for its own assigned DispatchKey and wipes out the state
-//   for the other DispatchKey set by the non-RAII API).
+//   for the other DispatchKeys set by the non-RAII API).
 
 // RAII API
 
-IncludeDispatchKeyGuard::IncludeDispatchKeyGuard(DispatchKey x)
+IncludeDispatchKeyGuard::IncludeDispatchKeyGuard(DispatchKeySet include)
   : tls_(&raw_local_dispatch_key_set)
-  , id_(x)
-  // NB: prev_state_ == true on Undefined makes the guard no-op
-  , prev_state_(x == DispatchKey::Undefined ? true : tls_->included().has(x)) {
-  if (!prev_state_) {
-    tls_->set_included(tls_->included().add(x));
+  , include_(include - tls_->included()) {
+  if (!include_.empty()) {
+    tls_->set_included(tls_->included() | include_);
   }
 }
 
 IncludeDispatchKeyGuard::~IncludeDispatchKeyGuard() {
-  if (!prev_state_) {
-    tls_->set_included(tls_->included().remove(id_));
+  if (!include_.empty()) {
+    tls_->set_included(tls_->included() - include_);
   }
 }
 
-ExcludeDispatchKeyGuard::ExcludeDispatchKeyGuard(DispatchKey x)
+ExcludeDispatchKeyGuard::ExcludeDispatchKeyGuard(DispatchKeySet exclude)
   : tls_(&raw_local_dispatch_key_set)
-  , id_(x)
-  // NB: prev_state_ == true on Undefined makes the guard no-op
-  , prev_state_(x == DispatchKey::Undefined ? true : tls_->excluded().has(x)) {
-  if (!prev_state_) {
-    tls_->set_excluded(tls_->excluded().add(x));
+  , exclude_(exclude - tls_->excluded()) {
+  if (!exclude_.empty()) {
+    tls_->set_excluded(tls_->excluded() | exclude_);
   }
 }
 
 ExcludeDispatchKeyGuard::~ExcludeDispatchKeyGuard() {
-  if (!prev_state_) {
-    tls_->set_excluded(tls_->excluded().remove(id_));
+  if (!exclude_.empty()) {
+    tls_->set_excluded(tls_->excluded() - exclude_);
   }
 }
 

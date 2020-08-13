@@ -4,7 +4,7 @@ from cimodel.lib.conf_tree import ConfigNode, X, XImportant
 CONFIG_TREE_DATA = [
     ("xenial", [
         ("rocm", [
-            ("3.3", [
+            ("3.5.1", [
                 X("3.6"),
             ]),
         ]),

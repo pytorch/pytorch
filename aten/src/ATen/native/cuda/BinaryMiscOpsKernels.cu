@@ -80,11 +80,18 @@ void lcm_kernel_cuda(TensorIterator& iter) {
   AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "lcm_cuda", [&]() {
     gpu_kernel(iter, [] GPU_LAMBDA (scalar_t a, scalar_t b) -> scalar_t {
       scalar_t g = calc_gcd(a, b);
-      return (g == 0) ? 0 : a / g * b;
+      return (g == 0) ? 0 : ::abs(a / g * b);
     });
   });
 }
 
+void hypot_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.common_dtype(), "hypot_cuda", [&]() {
+    gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+      return ::hypot(a, b);
+    });
+  });
+}
 
 REGISTER_DISPATCH(atan2_stub, &atan2_kernel_cuda);
 REGISTER_DISPATCH(smooth_l1_stub, &smooth_l1_kernel_cuda);
@@ -93,5 +100,6 @@ REGISTER_DISPATCH(logaddexp_stub, &logaddexp_kernel_cuda);
 REGISTER_DISPATCH(logaddexp2_stub, &logaddexp2_kernel_cuda);
 REGISTER_DISPATCH(gcd_stub, &gcd_kernel_cuda);
 REGISTER_DISPATCH(lcm_stub, &lcm_kernel_cuda);
+REGISTER_DISPATCH(hypot_stub, &hypot_kernel_cuda);
 
 }} // namespace at::native

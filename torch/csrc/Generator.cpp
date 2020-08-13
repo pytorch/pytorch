@@ -34,11 +34,14 @@ PyObject * THPGenerator_initDefaultGenerator(at::Generator cdata)
   return self.release();
 }
 
-static void THPGenerator_dealloc(THPGenerator* self)
+static void THPGenerator_dealloc(PyObject* _self)
 {
-  self->cdata.set_pyobj(nullptr);
-  self->cdata.~Generator();
-  Py_TYPE(self)->tp_free((PyObject*)self);
+  auto self = reinterpret_cast<THPGenerator*>(_self);
+  if (self->cdata.defined()) {
+    self->cdata.set_pyobj(nullptr);
+    self->cdata.~Generator();
+  }
+  Py_TYPE(_self)->tp_free(_self);
 }
 
 static PyObject * THPGenerator_pynew(PyTypeObject *type, PyObject *args, PyObject *kwargs)
@@ -125,7 +128,23 @@ static PyObject * THPGenerator_manualSeed(THPGenerator *self, PyObject *seed)
           "but got %s", THPUtils_typename(seed));
   // See Note [Acquire lock when using random generators]
   std::lock_guard<std::mutex> lock(generator.mutex());
-  generator.set_current_seed(THPUtils_unpackLong(seed));
+  uint64_t seed_unpacked;
+  try {
+    // First try to interpret as unsigned long
+    seed_unpacked = THPUtils_unpackUInt64(seed);
+  } catch(...) {
+    if (PyErr_ExceptionMatches(PyExc_OverflowError)) {
+      // If an overflow happened, then the seed could be negative,
+      // so try to interpret it as signed long
+      PyErr_Clear();
+      int64_t seed_unpacked_signed = THPUtils_unpackLong(seed);
+      seed_unpacked = *(reinterpret_cast<uint64_t*>(&seed_unpacked_signed));
+    } else {
+      // If any other type of exception happened, rethrow it
+      throw;
+    }
+  }
+  generator.set_current_seed(seed_unpacked);
   Py_INCREF(self);
   return (PyObject*)self;
   END_HANDLE_TH_ERRORS
@@ -178,7 +197,7 @@ PyTypeObject THPGeneratorType = {
   "torch._C.Generator",                   /* tp_name */
   sizeof(THPGenerator),                        /* tp_basicsize */
   0,                                           /* tp_itemsize */
-  (destructor)THPGenerator_dealloc,            /* tp_dealloc */
+  THPGenerator_dealloc,                        /* tp_dealloc */
   0,                                           /* tp_vectorcall_offset */
   nullptr,                                     /* tp_getattr */
   nullptr,                                     /* tp_setattr */
