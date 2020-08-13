@@ -2615,6 +2615,12 @@ Args:
 
 """)
 
+add_docstr(torch.outer, r"""
+outer(input, vec2, *, out=None) -> Tensor
+
+Alias of :func:`torch.ger`.
+""")
+
 add_docstr(torch.ger,
            r"""
 ger(input, vec2, out=None) -> Tensor
@@ -2779,6 +2785,32 @@ Example::
 
     >>> torch.histc(torch.tensor([1., 2, 1]), bins=4, min=0, max=3)
     tensor([ 0.,  2.,  1.,  0.])
+""".format(**common_args))
+
+add_docstr(torch.hypot,
+           r"""
+hypot(input, other, *, out=None) -> Tensor
+
+Given the legs of a right triangle, return its hypotenuse.
+
+.. math::
+    \text{out}_{i} = \sqrt{\text{input}_{i}^{2} + \text{other}_{i}^{2}}
+
+The shapes of ``input`` and ``other`` must be
+:ref:`broadcastable <broadcasting-semantics>`.
+""" + r"""
+Args:
+    input (Tensor): the first input tensor
+    other (Tensor): the second input tensor
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> a = torch.hypot(torch.tensor([4.0]), torch.tensor([3.0, 4.0, 5.0]))
+    tensor([5.0000, 5.6569, 6.4031])
+
 """.format(**common_args))
 
 add_docstr(torch.index_select,
@@ -6226,6 +6258,53 @@ Example::
     tensor([  435.,  1335.,  2235.,  3135.])
 """.format(**multi_dim_common))
 
+add_docstr(torch.nansum,
+           r"""
+nansum(input, dtype=None) -> Tensor
+
+Returns the sum of all elements, treating Not a Numbers (NaNs) as zero.
+
+Args:
+    {input}
+
+Keyword args:
+    {dtype}
+
+Example::
+
+    >>> a = torch.tensor([1., 2., float('nan'), 4.])
+    >>> torch.nansum(a)
+    tensor(7.)
+
+.. function:: nansum(input, dim, keepdim=False, dtype=None) -> Tensor
+
+Returns the sum of each row of the :attr:`input` tensor in the given
+dimension :attr:`dim`, treating Not a Numbers (NaNs) as zero.
+If :attr:`dim` is a list of dimensions, reduce over all of them.
+
+{keepdim_details}
+
+Args:
+    {input}
+    {dim}
+    {keepdim}
+
+Keyword args:
+    {dtype}
+
+Example::
+
+    >>> torch.nansum(torch.tensor([1., float("nan")]))
+    1.0
+    >>> a = torch.tensor([[1, 2], [3., float("nan")]])
+    >>> torch.nansum(a)
+    tensor(6.)
+    >>> torch.nansum(a, dim=0)
+    tensor([4., 2.])
+    >>> torch.nansum(a, dim=1)
+    tensor([3., 3.])
+""".format(**multi_dim_common))
+
 add_docstr(torch.svd,
            r"""
 svd(input, some=True, compute_uv=True, out=None) -> (Tensor, Tensor, Tensor)
@@ -8428,7 +8507,10 @@ It is recommended to set a large seed, i.e. a number that has a good balance of 
 and 1 bits. Avoid having many 0 bits in the seed.
 
 Arguments:
-    seed (int): The desired seed.
+    seed (int): The desired seed. Value must be within the inclusive range
+        `[-0x8000_0000_0000_0000, 0xffff_ffff_ffff_ffff]`. Otherwise, a RuntimeError
+        is raised. Negative inputs are remapped to positive values with the formula
+        `0xffff_ffff_ffff_ffff + seed`.
 
 Returns:
     Generator: An torch.Generator object.
