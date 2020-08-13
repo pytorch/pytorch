@@ -186,7 +186,10 @@ def get_jit_def(fn, def_name, self_name=None):
             # Replace potentially unsupported type annotations by "Any"
             arg.annotation = unused_fn_def.args.args[0].annotation
 
-    return build_def(ctx, fn_def, type_line, def_name, self_name=self_name)
+    # Get default arguments.
+    default_args = get_default_args(fn)
+
+    return build_def(ctx, fn_def, default_args, type_line, def_name, self_name=self_name)
 
 
 class Builder(object):
@@ -203,12 +206,12 @@ def build_class_def(ctx, py_def, methods, self_name):
     return ClassDef(Ident(r, self_name), [Stmt(method) for method in methods])
 
 
-def build_def(ctx, py_def, type_line, def_name, self_name=None):
+def build_def(ctx, py_def, default_args, type_line, def_name, self_name=None):
     body = py_def.body
     r = ctx.make_range(py_def.lineno + len(py_def.decorator_list),
                        py_def.col_offset,
                        py_def.col_offset + len("def"))
-    param_list = build_param_list(ctx, py_def.args, self_name)
+    param_list = build_param_list(ctx, py_def.args, default_args, self_name)
     return_type = None
     if getattr(py_def, 'returns', None) is not None:
         return_type = build_expr(ctx, py_def.returns)
@@ -227,7 +230,7 @@ _vararg_kwarg_err = ("Compiled functions can't take variable number of arguments
                      "or use keyword-only arguments with defaults")
 
 
-def build_param_list(ctx, py_args, self_name):
+def build_param_list(ctx, py_args, default_args, self_name):
     if py_args.kwarg is not None:
         expr = py_args.kwarg
         ctx_range = ctx.make_range(expr.lineno, expr.col_offset - 1, expr.col_offset + len(expr.arg))
@@ -243,12 +246,16 @@ def build_param_list(ctx, py_args, self_name):
             if arg is not None:
                 ctx_range = build_expr(ctx, arg).range()
                 raise NotSupportedError(ctx_range, _vararg_kwarg_err)
-    result = [build_param(ctx, arg, self_name, False) for arg in py_args.args]
-    result += [build_param(ctx, arg, self_name, True) for arg in py_args.kwonlyargs]
+
+    def get_default_arg(arg):
+        return default_args[arg.arg] if arg.arg in default_args else None
+
+    result = [build_param(ctx, arg, self_name, False, get_default_arg(arg)) for arg in py_args.args]
+    result += [build_param(ctx, arg, self_name, True, get_default_arg(arg)) for arg in py_args.kwonlyargs]
     return result
 
 
-def build_param(ctx, py_arg, self_name, kwarg_only):
+def build_param(ctx, py_arg, self_name, kwarg_only, default=None):
     # NB: In Python3 py_arg is a pair of (str arg, expr? annotation)
     name = py_arg.arg
     r = ctx.make_range(py_arg.lineno, py_arg.col_offset, py_arg.col_offset + len(name))
@@ -258,7 +265,23 @@ def build_param(ctx, py_arg, self_name, kwarg_only):
         annotation_expr = Var(Ident(r, self_name))
     else:
         annotation_expr = EmptyTypeAnnotation(r)
-    return Param(annotation_expr, Ident(r, name), kwarg_only)
+
+    # Create the appropriate TreeView for the default value if there is one.
+    if default:
+        if isinstance(default, list):
+            default_expr = ListLiteral(r, [Const(r, str(v)) for v in default])
+        elif isinstance(default, tuple):
+            default_expr = TupleLiteral(r, [Const(r, str(v)) for v in default])
+        elif isinstance(default, dict):
+            default_expr = DictLiteral(r, [Const(r, str(k)) for k in default.keys()], [Const(r, str(k)) for k in default.values()])
+        elif isinstance(default, str):
+            default_expr = StringLiteral(r, default)
+        elif isinstance(default, int) or isinstance(default, float):
+            default_expr = Const(r, str(default))
+
+        return Param(annotation_expr, default_expr, Ident(r, name), kwarg_only)
+    else:
+        return Param(annotation_expr, Ident(r, name), kwarg_only)
 
 
 def get_default_args(fn):

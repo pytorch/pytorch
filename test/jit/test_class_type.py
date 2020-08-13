@@ -14,7 +14,7 @@ sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import JitTestCase
 import torch.testing._internal.jit_utils
 from torch.testing._internal.common_utils import IS_SANDCASTLE
-from typing import List, Tuple, Iterable
+from typing import List, Tuple, Iterable, Dict
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
@@ -1012,6 +1012,66 @@ class TestClassType(JitTestCase):
             new_list : List[Tuple[float, int, int]] = [(1.0, 1, 1)]
             y.my_list = new_list
             return y
+
+    def test_default_args(self):
+        """
+        Test that methods on class types can have default arguments.
+        """
+        @torch.jit.script
+        class ClassWithDefaultArgs:
+            def __init__(self, a: int=1, b: List[int]=[1,2,3], c: Tuple[int, int, int]=(1,2,3), d: Dict[int, int]={1: 2}, e: str="str"):
+                self.a = a
+                self.b = b
+                self.c = c
+                self.d = d
+                self.e = e
+
+            def get_int(self) -> int:
+                return self.a
+
+            def get_list(self) -> List[int]:
+                return self.b
+
+            def get_tup(self) -> Tuple[int, int, int]:
+                return self.c
+
+            def get_dict(self) -> Dict[int, int]:
+                return self.d
+
+            def get_str(self) -> str:
+                return self.e
+
+            def add(self, b: int, scale: float=1.0) -> float:
+                return self.a * scale + b
+
+        def all_defaults() -> int:
+            a: ClassWithDefaultArgs = ClassWithDefaultArgs()
+            return a.get_int() + a.get_list()[2] + a.get_tup()[1]
+
+        def some_defaults() -> int:
+            a: ClassWithDefaultArgs = ClassWithDefaultArgs(b=[5, 6, 7])
+            return a.get_int() + a.get_list()[2] + a.get_dict()[1]
+
+        def override_defaults() -> int:
+            a: ClassWithDefaultArgs = ClassWithDefaultArgs(3, [9, 10, 11], (12, 13, 14))
+            s: int = a.get_int()
+
+            for x in a.get_list():
+                s += x
+
+            for y in a.get_tup():
+                s += y
+
+            return s
+
+        def method_defaults() -> float:
+            a: ClassWithDefaultArgs = ClassWithDefaultArgs()
+            return a.add(3) + a.add(3, 0.25)
+
+        self.checkScript(all_defaults, ())
+        self.checkScript(some_defaults, ())
+        self.checkScript(override_defaults, ())
+        self.checkScript(method_defaults, ())
 
     def test_staticmethod(self):
         """
