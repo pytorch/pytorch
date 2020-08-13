@@ -27,8 +27,13 @@
 //      ('operators', (('aten::Int', 'Tensor'),)),
 //      ('constants', ()),
 //      ('types', ()),
-//      ('register_size', 2)
-//      ('module_debug_info', (top(A).foo(B).forward)))))
+//      ('register_size', 2))))
+
+// In addition, the module debugging information can be saved
+// in mobile_debug.pkl. An example for it looks like:
+// (3,
+//   ('__torch__.m.forward',
+//     (('module_debug_info', (top(A).foo(B).forward)))))
 
 // Note that currently the backward compatibility is not supported by bytecode.
 // This format and process need to be revisted and redesigned if we want to
