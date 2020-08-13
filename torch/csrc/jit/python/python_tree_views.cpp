@@ -2,6 +2,7 @@
 
 #include <torch/csrc/jit/frontend/tree_views.h>
 
+#include <torch/csrc/utils/pybind.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
