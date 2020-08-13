@@ -168,6 +168,39 @@ class TestCudaFuser(JitTestCase):
         self.assertEqual(o, jit_o)
         self.assertGraphContains(t_jit3.graph_for(x, y, 2.0), FUSION_GROUP)
 
+    # Testing partition logic that is capable to avoid creating unsupported
+    # broadcasting semantics in CudaFusionGroup
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING and GRAPH_EXECUTOR !=
+                     ProfilingMode.LEGACY, "Requires fusion optimization pass to be effective")
+    def test_broadcasting_partition_logic(self):
+        torch._C._jit_set_bailout_depth(2)
+
+        def t(x: torch.Tensor, y: torch.Tensor, z: torch.Tensor):
+            x = x + 12.0
+            o1 = x + y
+            o2 = x + z
+            o = o1 + o2
+            return o
+        t_jit = torch.jit.script(t)
+        x = torch.randn(4, 8, 6, 8, dtype=torch.float32, device="cuda")
+        y = torch.randn(8, 6, 8, dtype=torch.float32, device="cuda")
+        z = torch.randn(6, 8, dtype=torch.float32, device="cuda")
+        jit_o = t_jit(x, y, z)
+        jit_o = t_jit(x, y, z)
+        o = t(x, y, z)
+        self.assertEqual(o, jit_o)
+        self.assertGraphContains(t_jit.graph_for(x, y, z), FUSION_GROUP)
+        t_jit2 = torch.jit.script(t)
+        x = torch.randn(8, 6, 8, dtype=torch.float32, device="cuda")
+        y = torch.randn(4, 8, 6, 8, dtype=torch.float32, device="cuda")
+        z = torch.randn(4, 1, 6, 8, dtype=torch.float32, device="cuda")
+        jit_o = t_jit2(x, y, z)
+        jit_o = t_jit2(x, y, z)
+        o = t(x, y, z)
+        self.assertEqual(o, jit_o)
+        self.assertGraphContains(t_jit2.graph_for(x, y, z), FUSION_GROUP)
+
     @unittest.skipIf(True, "Broadcast with different output not supported yet")
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING and GRAPH_EXECUTOR !=
