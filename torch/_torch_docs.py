@@ -1515,8 +1515,9 @@ Args:
         as :attr:`real`.
 
 Keyword args:
-    {out} If the inputs are ``torch.float32``, must be ``torch.complex64``. If
-        the inputs are ``torch.float64``, must be ``torch.complex128``.
+    out (Tensor): If the inputs are ``torch.float32``, must be
+        ``torch.complex64``. If the inputs are ``torch.float64``, must be
+        ``torch.complex128``.
 
 Example::
     >>> real = torch.tensor([1, 2], dtype=torch.float32)
@@ -1527,7 +1528,7 @@ Example::
     >>> z.dtype
     torch.complex64
 
-""".format(**common_args))
+""")
 
 add_docstr(torch.polar,
            r"""
@@ -1547,8 +1548,9 @@ Args:
         :attr:`abs`.
 
 Keyword args:
-    {out} If the inputs are ``torch.float32``, must be ``torch.complex64``. If
-        the inputs are ``torch.float64``, must be ``torch.complex128``.
+    out (Tensor): If the inputs are ``torch.float32``, must be
+        ``torch.complex64``. If the inputs are ``torch.float64``, must be
+        ``torch.complex128``.
 
 Example::
     >>> import numpy as np
@@ -1557,7 +1559,7 @@ Example::
     >>> z = torch.polar(abs, angle)
     >>> z
     tensor([(0.0000+1.0000j), (-1.4142-1.4142j)], dtype=torch.complex128)
-""".format(**common_args))
+""")
 
 add_docstr(torch.conj,
            r"""
