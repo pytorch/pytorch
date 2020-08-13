@@ -325,7 +325,6 @@ Node* insertEmbeddingBagOps(Node* observer, const std::string& op_name) {
   // Create and insert quantized embedding op.
   Value* none = g->insertConstant(IValue());
   Value* zero = g->insertConstant(IValue(0));
-  embedding_bag_inputs[3]->setType(TensorType::get());
 
   std::vector<Value*> qembedding_bag_inputs = {
       /* weight */ prepack->output(),

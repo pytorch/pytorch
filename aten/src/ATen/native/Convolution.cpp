@@ -438,7 +438,13 @@ static void check_shape_forward(const at::Tensor& input,
   auto dilation = params.dilation;
   bool transposed = params.transposed;
 
-  TORCH_CHECK(!params.is_padding_neg(), "negative padding is not supported");
+    std::stringstream ss;
+  if (params.is_padding_neg()) {
+    for (const auto& p : padding) {
+      ss << "XXX np:" << p;
+    }
+  }
+  TORCH_CHECK(!params.is_padding_neg(), "negative padding is not supported", ss.str());
   TORCH_CHECK(!params.is_output_padding_neg(), "negative output_padding is not supported");
   TORCH_CHECK(!params.is_stride_nonpos(), "non-positive stride is not supported");
 
@@ -610,6 +616,14 @@ at::Tensor _convolution(
   ConvParams params;
   params.stride = expand_param_if_needed(stride_, "stride", dim);
   params.padding = expand_param_if_needed(padding_, "padding", dim);
+
+  std::stringstream ssp;
+  ssp << "XXX input_padding:" << padding_ << " after expand:";
+  for (const auto& p : params.padding) {
+    ssp << p << " ";
+  }
+  std::cout << __FILE__ << __LINE__ << ssp.str() << std::endl;
+
   params.dilation = expand_param_if_needed(dilation_, "dilation", dim);
   params.transposed = transposed_;
   params.output_padding = expand_param_if_needed(output_padding_, "output_padding", dim);

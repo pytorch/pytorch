@@ -1,5 +1,5 @@
-#include <torch/csrc/jit/runtime/static/impl.h>
 #include <torch/csrc/jit/runtime/static/init.h>
+#include <torch/csrc/jit/runtime/static/impl.h>
 
 namespace torch {
 namespace jit {

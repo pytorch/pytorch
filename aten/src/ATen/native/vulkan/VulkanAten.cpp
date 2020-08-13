@@ -292,7 +292,10 @@ Tensor convolution(
     const IntArrayRef dilation,
     const bool transposed,
     const IntArrayRef output_padding,
-    const int64_t groups) {
+    const int64_t groups,
+    const bool benchmark,
+    const bool deterministic,
+    const bool cuddnn_enabled) {
   const vulkan::Conv2DParams params{
       input.sizes(), weight.sizes(), padding, stride, dilation, groups};
   TORCH_INTERNAL_ASSERT(
@@ -431,7 +434,7 @@ TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
   m.impl("reshape", TORCH_FN(at::native::vulkan::aten::reshape));
   m.impl("_cat", TORCH_FN(at::native::vulkan::aten::cat));
   m.impl_UNBOXED(
-      "convolution_overrideable", at::native::vulkan::aten::convolution);
+      "_convolution", at::native::vulkan::aten::convolution);
   m.impl_UNBOXED("hardtanh_", at::native::vulkan::aten::hardtanh_);
   m.impl_UNBOXED("relu_", at::native::vulkan::aten::relu_);
   m.impl_UNBOXED("add_.Tensor", at::native::vulkan::aten::add_);
