@@ -16,7 +16,7 @@ if(USE_GLOO)
   )
 endif()
 
-if (USE_TENSORPIPE)
+if(USE_TENSORPIPE)
   list(APPEND TORCH_RPC_TEST_SOURCES
     ${TORCH_RPC_TEST_DIR}/test_tensorpipe_serialization.cpp
   )
