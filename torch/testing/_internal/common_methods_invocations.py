@@ -4,14 +4,116 @@ from functools import reduce
 from operator import mul, itemgetter
 import collections
 from torch.autograd import Variable
-from torch.testing import make_non_contiguous
-from torch.testing._internal.common_device_type import (skipCUDAIfNoMagma, skipCPUIfNoLapack, expectedFailureCUDA,
-                                                        expectedAlertNondeterministic)
-from torch.testing._internal.common_utils import (prod_single_zero, random_square_matrix_of_rank,
-                                                  random_symmetric_matrix, random_symmetric_psd_matrix,
-                                                  random_symmetric_pd_matrix, make_nonzero_det,
-                                                  random_fullrank_matrix_distinct_singular_value, set_rng_seed)
 
+from torch.testing import \
+    (make_non_contiguous,
+     _dispatch_dtypes,
+     floating_types, floating_types_and,
+     floating_and_complex_types, floating_and_complex_types_and)
+from torch.testing._internal.common_device_type import \
+    (skipCUDAIfNoMagma, skipCPUIfNoLapack, expectedFailureCUDA,
+     expectedAlertNondeterministic)
+from torch.testing._internal.common_utils import \
+    (prod_single_zero, random_square_matrix_of_rank,
+     random_symmetric_matrix, random_symmetric_psd_matrix,
+     random_symmetric_pd_matrix, make_nonzero_det,
+     random_fullrank_matrix_distinct_singular_value, set_rng_seed)
+
+# Classes and methods for the operator database
+class OpInfo(object):
+    """Operator information and helper functions for acquiring it."""
+
+    def __init__(self,
+                 name,  # the string name of the function
+                 *,
+                 dtypes=floating_types(),  # dtypes this function is expected to work with
+                 dtypesIfCPU=None,  # dtypes this function is expected to work with on CPU
+                 dtypesIfCUDA=None,  # dtypes this function is expected to work with on CUDA
+                 dtypesIfROCM=None,  # dtypes this function is expected to work with on ROCM
+                 decorators=None):  # decorators to apply to generated tests
+        # Validates the dtypes are generated from the dispatch-related functions
+        for dtype_list in (dtypes, dtypesIfCPU, dtypesIfCUDA, dtypesIfROCM):
+            assert isinstance(dtype_list, _dispatch_dtypes)
+
+        self.name = name
+
+        self.dtypes = dtypes
+        self.dtypesIfCPU = dtypesIfCPU if dtypesIfCPU is not None else dtypes
+        self.dtypesIfCUDA = dtypesIfCUDA if dtypesIfCUDA is not None else dtypes
+        self.dtypesIfROCM = dtypesIfROCM if dtypesIfROCM is not None else dtypes
+
+        self.op = getattr(torch, self.name)
+        self.method_variant = getattr(torch.Tensor, name) if hasattr(torch.Tensor, name) else None
+        inplace_name = name + "_"
+        self.inplace_variant = getattr(torch.Tensor, inplace_name) if hasattr(torch.Tensor, name) else None
+        self.decorators = decorators
+
+    def __call__(self, *args, **kwargs):
+        """Calls the function variant of the operator."""
+        return self.op(*args, **kwargs)
+
+    def get_op(self):
+        """Returns the function variant of the operator, torch.<op_name>."""
+        return self.op
+
+    def get_method(self):
+        """Returns the method variant of the operator, torch.Tensor.<op_name>.
+        Returns None if the operator has no method variant.
+        """
+        return self.method_variant
+
+    def get_inplace(self):
+        """Returns the inplace variant of the operator, torch.Tensor.<op_name>_.
+        Returns None if the operator has no inplace variant.
+        """
+        return self.inplace_variant
+
+
+# Metadata class for unary "universal functions (ufuncs)" that accept a single
+# tensor and have common properties like:
+class UnaryUfuncInfo(OpInfo):
+    """Operator information for 'universal unary functions (unary ufuncs).'
+    These are functions of a single tensor with common properties like:
+      - they are elementwise functions
+      - the input shape is the output shape
+      - they typically have method and inplace variants
+      - they typically support the out kwarg
+      - they typically have NumPy or SciPy references
+
+    See NumPy's universal function documentation
+    (https://numpy.org/doc/1.18/reference/ufuncs.html) for more details
+    about the concept of ufuncs.
+    """
+
+    def __init__(self,
+                 name,  # the string name of the function
+                 *,
+                 dtypes=floating_types(),
+                 dtypesIfCPU=floating_and_complex_types_and(torch.bfloat16),
+                 dtypesIfCUDA=floating_and_complex_types_and(torch.half),
+                 dtypesIfROCM=floating_types_and(torch.half, torch.bfloat16),
+                 **kwargs):
+        super(UnaryUfuncInfo, self).__init__(name,
+                                             dtypes=dtypes,
+                                             dtypesIfCPU=dtypesIfCPU,
+                                             dtypesIfCUDA=dtypesIfCUDA,
+                                             dtypesIfROCM=dtypesIfROCM,
+                                             **kwargs)
+
+L = 20
+M = 10
+S = 5
+
+# Operator database
+op_db = [
+    UnaryUfuncInfo('cos',
+                   dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16)),
+    UnaryUfuncInfo('cosh',
+                   dtypesIfCPU=floating_and_complex_types()),
+]
+
+# Common operator groupings
+unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo)]
 
 def index_variable(shape, max_indices):
     if not isinstance(shape, tuple):
@@ -93,9 +195,6 @@ class NoArgsClass(object):
         return 0
 
 NO_ARGS = NoArgsClass()
-L = 20
-M = 10
-S = 5
 
 def ident(x):
     return x
@@ -267,8 +366,6 @@ def method_tests():
         ('cosh', (), NO_ARGS, 'scalar', (True,)),
         ('abs', (S, S, S), NO_ARGS, '', (True,)),
         ('abs', (), NO_ARGS, 'scalar', (True,)),
-        ('absolute', (S, S, S), NO_ARGS, '', (False,)),
-        ('absolute_', (S, S, S), NO_ARGS, '', (False,)),
         ('clamp', (S, S, S), (0, 1), '', (True,)),
         ('clamp', (S, S, S), (None, 0.5), 'min', (True,)),
         ('clamp', (S, S, S), (0.5, None), 'max', (True,)),
@@ -322,6 +419,7 @@ def method_tests():
         ('fmod', (), (non_differentiable(uniform_scalar(1.5)),), 'scalar_tensor'),
         ('fmod', (), (non_differentiable(torch.rand(S, S, S) + 1.5),), 'scalar_tensor_broadcast_lhs'),
         ('fmod', (S, S, S), (non_differentiable(uniform_scalar(1.5)),), 'scalar_tensor_broadcast_rhs'),
+        ('hypot', (S, S), ((S, S),)),
         ('remainder', (S, S, S), (1.5,), '', (True,)),
         ('remainder', (), (1.5,), 'scalar', (True,)),
         ('remainder', (S, S, S), (non_differentiable(torch.rand(S, S, S) + 1.5),), 'tensor'),
@@ -401,6 +499,14 @@ def method_tests():
         ('sum', (), (0, True,), 'scalar_keepdim_dim', (), [0]),
         ('sum', (S, S, S), ([1, 2],), 'multi_dim'),
         ('sum', (S, S, S), ([1, 2], True,), 'multi_dim_keepdim'),
+        ('nansum', (S, S, S), NO_ARGS),
+        ('nansum', (S, S, S), (1,), 'dim', (), [0]),
+        ('nansum', (S, S, S), (1, True,), 'keepdim_dim', (), [0]),
+        ('nansum', (), NO_ARGS, 'scalar'),
+        ('nansum', (), (0,), 'scalar_dim', (), [0]),
+        ('nansum', (), (0, True,), 'scalar_keepdim_dim', (), [0]),
+        ('nansum', (S, S, S), ([1, 2],), 'multi_dim'),
+        ('nansum', (S, S, S), ([1, 2], True,), 'multi_dim_keepdim'),
         ('prod', (S, S, S), NO_ARGS),
         ('prod', (S, S, S), (1,), 'dim', (), [0]),
         ('prod', (S, S, S), (1, True,), 'keepdim_dim', (), [0]),

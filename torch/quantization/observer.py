@@ -1,6 +1,5 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
-import math
 import warnings
 from abc import ABCMeta, abstractmethod
 from functools import partial
@@ -109,9 +108,10 @@ class _ObserverBase(ObserverBase):
             torch.per_tensor_symmetric,
             torch.per_channel_affine,
             torch.per_channel_symmetric,
+            torch.per_channel_affine_float_qparams,
         ), "Default Observer only works for per_tensor_affine, \
-                per_tensor_symmetric, per_channel_affine and \
-                per_channel_symmetric quantization scheme"
+                per_tensor_symmetric, per_channel_affine, \
+                per_channel_symmetric and per_channel_float_qparams quantization scheme"
         assert self.dtype in (
             torch.qint8,
             torch.quint8,
@@ -214,17 +214,16 @@ class _ObserverBase(ObserverBase):
             )
 
         qmin, qmax = self._calculate_qmin_qmax()
+        min_val_neg = torch.min(min_val, torch.zeros_like(min_val))
+        max_val_pos = torch.max(max_val, torch.zeros_like(max_val))
 
-        min_val = torch.min(min_val, torch.zeros_like(min_val))
-        max_val = torch.max(max_val, torch.zeros_like(max_val))
-
-        scale = torch.ones(min_val.size(), dtype=torch.float32)
-        zero_point = torch.zeros(min_val.size(), dtype=torch.int64)
-        device = 'cuda' if min_val.is_cuda else 'cpu'
+        scale = torch.ones(min_val_neg.size(), dtype=torch.float32)
+        zero_point = torch.zeros(min_val_neg.size(), dtype=torch.int64)
+        device = 'cuda' if min_val_neg.is_cuda else 'cpu'
 
         if self.qscheme == torch.per_tensor_symmetric or self.qscheme == torch.per_channel_symmetric:
-            max_val = torch.max(-min_val, max_val)
-            scale = max_val / (float(qmax - qmin) / 2)
+            max_val_pos = torch.max(-min_val_neg, max_val_pos)
+            scale = max_val_pos / (float(qmax - qmin) / 2)
             scale = torch.max(scale, torch.tensor(self.eps, device=device, dtype=scale.dtype))
             if self.dtype == torch.quint8:
                 if self.is_dynamic_qrange:
@@ -232,10 +231,18 @@ class _ObserverBase(ObserverBase):
                     zero_point = zero_point.new_full(zero_point.size(), (qmin + qmax) // 2)
                 else:
                     zero_point = zero_point.new_full(zero_point.size(), 128)
-        else:
+        elif self.qscheme == torch.per_channel_affine_float_qparams:
             scale = (max_val - min_val) / float(qmax - qmin)
+            scale = torch.where(scale > self.eps, scale, torch.ones_like(scale))
+            # We use the quantize function
+            # xq = Round(Xf * inv_scale + zero_point),
+            # setting zero_point to (-1 * min *inv_scale) we get
+            # Xq = Round((Xf - min) * inv_scale)
+            zero_point = -1 * min_val / scale
+        else:
+            scale = (max_val_pos - min_val_neg) / float(qmax - qmin)
             scale = torch.max(scale, torch.tensor(self.eps, device=device, dtype=scale.dtype))
-            zero_point = qmin - torch.round(min_val / scale)
+            zero_point = qmin - torch.round(min_val_neg / scale)
             zero_point = torch.max(zero_point, torch.tensor(qmin, device=device, dtype=zero_point.dtype))
             zero_point = torch.min(zero_point, torch.tensor(qmax, device=device, dtype=zero_point.dtype))
 
@@ -243,10 +250,13 @@ class _ObserverBase(ObserverBase):
         # consistent with default values in FakeQuantize.
         if len(scale.shape) == 0:
             # TODO: switch to scale.item() after adding JIT support
-            scale = torch.tensor([float(scale)], dtype=scale.dtype)
+            scale = torch.tensor([float(scale)], dtype=scale.dtype, device=device)
         if len(zero_point.shape) == 0:
             # TODO: switch to zero_point.item() after adding JIT support
-            zero_point = torch.tensor([int(zero_point)], dtype=zero_point.dtype)
+            zero_point = torch.tensor([int(zero_point)], dtype=zero_point.dtype, device=device)
+            if self.qscheme == torch.per_channel_affine_float_qparams:
+                zero_point = torch.tensor([float(zero_point)], dtype=zero_point.dtype, device=device)
+
 
         return scale, zero_point
 
@@ -762,50 +772,44 @@ class HistogramObserver(_ObserverBase):
             """
             bin_width = (self.max_val.item() - self.min_val.item()) / self.bins
 
-            norm = 0.0
             dst_bin_width = bin_width * (next_end_bin - next_start_bin + 1) / self.dst_nbins
             if dst_bin_width == 0.0:
                 return 0.0
-            for src_bin in range(self.bins):
-                # distances from the beginning of first dst_bin to the beginning and
-                # end of src_bin
-                src_bin_begin = (src_bin - next_start_bin) * bin_width
-                src_bin_end = src_bin_begin + bin_width
 
-                # which dst_bins the beginning and end of src_bin belong to?
-                dst_bin_of_begin = min(
-                    self.dst_nbins - 1, max(0.0, math.floor(src_bin_begin / dst_bin_width))
-                )
-                dst_bin_of_end = min(
-                    self.dst_nbins - 1, max(0.0, math.floor(src_bin_end / dst_bin_width))
-                )
-                dst_bin_of_begin_center = (
-                    dst_bin_of_begin * dst_bin_width + dst_bin_width / 2
-                )
+            src_bin = torch.arange(self.bins)
+            # distances from the beginning of first dst_bin to the beginning and
+            # end of src_bin
+            src_bin_begin = (src_bin - next_start_bin) * bin_width
+            src_bin_end = src_bin_begin + bin_width
 
-                density = self.histogram[src_bin] / bin_width
-                if dst_bin_of_begin == dst_bin_of_end:
-                    # if src_bin is entirely within 1 dst_bin
-                    delta_begin = src_bin_begin - dst_bin_of_begin_center
-                    delta_end = src_bin_end - dst_bin_of_begin_center
-                    norm = norm + _get_norm(delta_begin, delta_end, density, norm_type)
-                else:
-                    delta_begin = src_bin_begin - dst_bin_of_begin_center
-                    delta_end = dst_bin_width / 2
-                    norm = norm + _get_norm(delta_begin, delta_end, density, norm_type)
+            # which dst_bins the beginning and end of src_bin belong to?
+            dst_bin_of_begin = torch.clamp(src_bin_begin // dst_bin_width, 0, self.dst_nbins - 1)
+            dst_bin_of_begin_center = (dst_bin_of_begin + 0.5) * dst_bin_width
 
-                    norm = norm + (dst_bin_of_end - dst_bin_of_begin - 1) * _get_norm(
-                        -dst_bin_width / 2, dst_bin_width / 2, density, norm_type
-                    )
+            dst_bin_of_end = torch.clamp(src_bin_end // dst_bin_width, 0, self.dst_nbins - 1)
+            dst_bin_of_end_center = (dst_bin_of_end + 0.5) * dst_bin_width
 
-                    dst_bin_of_end_center = (
-                        dst_bin_of_end * dst_bin_width + dst_bin_width / 2
-                    )
+            density = self.histogram / bin_width
 
-                    delta_begin = -dst_bin_width / 2
-                    delta_end = src_bin_end - dst_bin_of_end_center
-                    norm = norm + _get_norm(delta_begin, delta_end, density, norm_type)
-            return norm
+            norm = torch.zeros(self.bins)
+
+            delta_begin = src_bin_begin - dst_bin_of_begin_center
+            delta_end = dst_bin_width / 2
+            norm += _get_norm(delta_begin, delta_end, density, norm_type)
+
+            norm += (dst_bin_of_end - dst_bin_of_begin - 1) * _get_norm(
+                -dst_bin_width / 2, dst_bin_width / 2, density, norm_type
+            )
+
+            dst_bin_of_end_center = (
+                dst_bin_of_end * dst_bin_width + dst_bin_width / 2
+            )
+
+            delta_begin = -dst_bin_width / 2
+            delta_end = src_bin_end - dst_bin_of_end_center
+            norm += _get_norm(delta_begin, delta_end, density, norm_type)
+
+            return norm.sum()
 
         assert self.histogram.size()[0] == self.bins, "bins mistmatch"
         bin_width = (self.max_val - self.min_val) / self.bins

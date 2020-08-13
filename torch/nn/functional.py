@@ -3330,6 +3330,9 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros', align_corner
         behaviour in its backward pass that is not easily switched off.
         Please see the notes on :doc:`/notes/randomness` for background.
 
+    Note:
+        NaN values in :attr:`grid` would be interpreted as ``-1``.
+
     Args:
         input (Tensor): input of shape :math:`(N, C, H_\text{in}, W_\text{in})` (4-D case)
                         or :math:`(N, C, D_\text{in}, H_\text{in}, W_\text{in})` (5-D case)

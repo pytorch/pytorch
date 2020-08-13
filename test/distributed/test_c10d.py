@@ -1556,6 +1556,10 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
 
 @requires_nccl()
+@unittest.skipIf(
+    TEST_WITH_TSAN,
+    "TSAN is not fork-safe since we're forking in a multi-threaded environment",
+)
 class ProcessGroupNCCLTest(TestCase):
     MAIN_PROCESS_RANK = 0
 
@@ -1673,14 +1677,20 @@ class ProcessGroupNCCLTest(TestCase):
         for i in range(self.num_gpus):
             self.assertEqual(torch.tensor([self.num_gpus]), tensors[i])
 
+        for op in (c10d.ReduceOp.BAND, c10d.ReduceOp.BOR, c10d.ReduceOp.BXOR):
+            with self.assertRaisesRegex(RuntimeError, "Cannot use " + str(op) + " with NCCL"):
+                allreduce(tensors, op)
+
     def test_reduce_ops(self):
         store = c10d.FileStore(self.file.name, self.world_size)
         pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
-        def reduce(xs, rootRank, rootTensor):
+        def reduce(xs, rootRank, rootTensor, op=None):
             opts = c10d.ReduceOptions()
             opts.rootRank = rootRank
             opts.rootTensor = rootTensor
+            if op:
+                opts.reduceOp = op
             work = pg.reduce(xs, opts)
             work.wait()
 
@@ -1696,6 +1706,10 @@ class ProcessGroupNCCLTest(TestCase):
             self.assertEqualIgnoreType(
                 torch.tensor([float(self.num_gpus * (self.num_gpus + 1) / 2)]),
                 tensors[rt])
+
+            for op in (c10d.ReduceOp.BAND, c10d.ReduceOp.BOR, c10d.ReduceOp.BXOR):
+                with self.assertRaisesRegex(RuntimeError, "Cannot use " + str(op) + " with NCCL"):
+                    reduce(tensors, self.rank, rt, op)
 
     def test_allgather_ops(self):
         store = c10d.FileStore(self.file.name, self.world_size)
@@ -1913,6 +1927,7 @@ class ConvNet(nn.Module):
         x = self.conv2(x).to(device=gpus[3], dtype=self.dtypes[3])
         return self.conv3(x)
 
+
 class Task(nn.Module):
     def __init__(self):
         super().__init__()
@@ -1921,6 +1936,7 @@ class Task(nn.Module):
     def forward(self, x):
         return self.p + x
 
+
 class TestDdpCommHook(nn.Module):
     def __init__(self):
         super().__init__()
@@ -1928,6 +1944,16 @@ class TestDdpCommHook(nn.Module):
 
     def forward(self, x, rank):
         return self.t0(x + rank)
+
+
+class SparseGradientModule(nn.Module):
+    def __init__(self):
+        super(SparseGradientModule, self).__init__()
+        self.embedding = nn.EmbeddingBag(10, 10, sparse=True)
+
+    def forward(self, x):
+        return F.softmax(self.embedding(x), dim=1)
+
 
 @unittest.skipIf(TEST_WITH_TSAN, "TSAN is not fork-safe since we're forking in a multi-threaded environment")
 class DistributedDataParallelTest(MultiProcessTestCase):
@@ -2809,28 +2835,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             loss = criterion(output, target)
             loss.backward()
 
-    @requires_gloo()
-    def test_sparse_gradients(self):
-        store = c10d.FileStore(self.file_name, self.world_size)
-        process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
-
-        class SparseGradientModule(nn.Module):
-            def __init__(self):
-                super(SparseGradientModule, self).__init__()
-                self.embedding = nn.EmbeddingBag(10, 10, sparse=True)
-
-            def forward(self, x):
-                return F.softmax(self.embedding(x), dim=1)
-
-        # Ensure initialized weights and inputs are identical across processes
-        torch.manual_seed(1337)
-
-        vanilla_model = SparseGradientModule()
-        ddp_model = DistributedDataParallel(
-            copy.deepcopy(vanilla_model),
-            process_group=process_group,
-        )
-
+    def _run_and_verify_sparse_gradients(self, vanilla_model, ddp_model):
         mult = 2
         batch_size = mult * self.world_size
         criterion = nn.CrossEntropyLoss()
@@ -2849,6 +2854,22 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         vanilla_parameter = next(vanilla_model.parameters())
         ddp_parameter = next(ddp_model.parameters())
         self.assertEqual(vanilla_parameter.grad, ddp_parameter.grad)
+
+    @requires_gloo()
+    def test_sparse_gradients(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
+
+        # Ensure initialized weights and inputs are identical across processes
+        torch.manual_seed(1337)
+
+        vanilla_model = SparseGradientModule()
+        ddp_model = DistributedDataParallel(
+            copy.deepcopy(vanilla_model),
+            process_group=process_group,
+        )
+
+        self._run_and_verify_sparse_gradients(vanilla_model, ddp_model)
 
     def _test_grad_layout(self, replica_devices, layer_devs, local_batch_size):
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -3008,37 +3029,42 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
         # Test on CPU
         cpu_model = DistributedDataParallel(
-            TestDdpCommHook().cpu(),
-            process_group=process_group
+            TestDdpCommHook().cpu(), process_group=process_group
         )
 
         # Register DDP Communication Hook
         cpu_model._register_comm_hook(None, self._simple_hook)
 
-        self._run_and_verify_simple_hook(cpu_model)
+        # check whether the grads are equal to what then callback returns.
+        # without the comm_hook, result would be 0.25 * torch.ones(2, 2).
+        self._run_and_verify_hook(cpu_model, 8, 2 * torch.ones(2, 2))
 
-    def _test_ddp_comm_hook_future_passing_gpu(self, c10d_process_group):
-        """
-        This unit test verifies whether the Future object is passed properly.
-        The callback function creates a Future object and sets a value to it.
-        """
-        store = c10d.FileStore(self.file_name, self.world_size)
-        process_group = c10d_process_group(store, self.rank, self.world_size)
-
-        # Test on GPU
+    def _gpu_model_with_ddp_comm_hook(self, process_group, hook=None):
         device_id = gpus_for_rank(self.world_size)[self.rank][0]
         gpu_model = DistributedDataParallel(
             TestDdpCommHook().to(device_id),
             device_ids=[device_id],
-            process_group=process_group
+            process_group=process_group,
         )
 
-        # Register DDP Communication Hook
-        gpu_model._register_comm_hook(None, self._simple_hook)
+        # Register DDP Communication Hook if defined
+        if hook is not None:
+            gpu_model._register_comm_hook(None, hook)
 
-        self._run_and_verify_simple_hook(gpu_model)
+        return gpu_model
 
-    def _simple_hook(self, state: object, bucket: dist.GradBucket) -> torch.futures.Future:
+    def _run_and_verify_hook(self, model, input, expected_grad):
+        # Run forward
+        output = model(input, self.rank)
+
+        # Run backward
+        output.mean().backward()
+
+        [self.assertEqual(p.grad, expected_grad) for p in model.parameters()]
+
+    def _simple_hook(
+        self, state: object, bucket: dist._GradBucket
+    ) -> torch.futures.Future:
         fut = torch.futures.Future()
         fut.set_result([torch.ones_like(t) for t in bucket.get_tensors()])
 
@@ -3048,32 +3074,96 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
         return fut.then(fut_then)
 
-    def _run_and_verify_simple_hook(self, model):
-        # Run forward
-        output = model(8, self.rank)
-
-        # Run backward
-        output.mean().backward()
-
-        # check whether the grads are equal to what then callback returns.
-        # without the comm_hook, result would be 0.25 * torch.ones(2, 2).
-        [self.assertEqual(p.grad, 2 * torch.ones(2, 2)) for p in model.parameters()]
-
     @requires_gloo()
     @skip_if_lt_x_gpu(2)
     def test_ddp_comm_hook_future_passing_gpu_gloo(self):
         """
-        This unit test executes _test_ddp_comm_hook_future_passing_gpu using gloo backend.
+        This unit test verifies whether the Future object is passed properly using gloo backend.
+        The hook callback function creates a Future object and sets a value to it.
         """
-        self._test_ddp_comm_hook_future_passing_gpu(c10d.ProcessGroupGloo)
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
+
+        # Get GPU model with simple_hook registered.
+        gpu_model = self._gpu_model_with_ddp_comm_hook(process_group, self._simple_hook)
+
+        # check whether the grads are equal to what simple_hook's then callback returns.
+        # without the comm_hook, result would be 0.25 * torch.ones(2, 2).
+        self._run_and_verify_hook(gpu_model, 8, 2 * torch.ones(2, 2))
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_ddp_comm_hook_future_passing_gpu_nccl(self):
         """
-        This unit test executes _test_ddp_comm_hook_future_passing_gpu using nccl backend.
+        This unit test verifies whether the Future object is passed properly using nccl backend.
+        The hook callback function creates a Future object and sets a value to it.
         """
-        self._test_ddp_comm_hook_future_passing_gpu(c10d.ProcessGroupNCCL)
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+
+        # Get GPU model with simple_hook registered.
+        gpu_model = self._gpu_model_with_ddp_comm_hook(process_group, self._simple_hook)
+
+        # check whether the grads are equal to what simple_hook's then callback returns.
+        # without the comm_hook, result would be 0.25 * torch.ones(2, 2).
+        self._run_and_verify_hook(gpu_model, 8, 2 * torch.ones(2, 2))
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_ddp_comm_hook_allreduce_hook_nccl(self):
+        """
+        This unit test verifies whether a DDP communication hook that just calls
+        allreduce gives the same result result with the case of no hook registered.
+        Without the then callback, the future_value in reducer is no longer
+        a PyObject, and this unit test verifies future_value is properly checked.
+        """
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+
+        def allreduce_hook(state: object, bucket: dist._GradBucket) -> torch._C.Future:
+            tensors = [t / self.world_size for t in bucket.get_tensors()]
+            return process_group.allreduce(tensors).get_future()
+
+        # Get GPU model with allreduce_hook registered.
+        gpu_model = self._gpu_model_with_ddp_comm_hook(process_group, allreduce_hook)
+
+        # check whether the grads are equal to what DDP without hook would return.
+        self._run_and_verify_hook(gpu_model, 8, 0.25 * torch.ones(2, 2))
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_ddp_comm_hook_allreduce_with_then_hook_nccl(self):
+        """
+        This unit test verifies whether a DDP communication hook that calls allreduce and then
+        multiplies the result by ten and divides by two gives the expected result.
+        """
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+
+        def allreduce_with_then_hook(
+            state: object, bucket: dist._GradBucket
+        ) -> torch.futures.Future:
+            tensors = [t / self.world_size for t in bucket.get_tensors()]
+            fut = process_group.allreduce(tensors).get_future()
+
+            def mult(fut):
+                # Multiply the result by 10.
+                return [10 * t for t in fut.wait()]
+
+            def div(fut):
+                # Divide the result by 2.
+                return [0.5 * t for t in fut.wait()]
+
+            return fut.then(mult).then(div)
+
+        # Get GPU model with allreduce_with_then_hook registered.
+        gpu_model = self._gpu_model_with_ddp_comm_hook(
+            process_group, allreduce_with_then_hook
+        )
+
+        # check whether the grads are equal to what allreduce returns multuplied by 5.
+        # without the comm_hook, result would be still 0.25 * torch.ones(2, 2).
+        self._run_and_verify_hook(gpu_model, 8, 1.25 * torch.ones(2, 2))
 
     @requires_gloo()
     def test_ddp_invalid_comm_hook_init(self):
@@ -3085,15 +3175,15 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
 
-        model = DistributedDataParallel(
-            TestDdpCommHook(),
-            process_group=process_group
-        )
+        model = DistributedDataParallel(TestDdpCommHook(), process_group=process_group)
 
-        with self.assertRaisesRegex(TypeError, 'Communication hook must be callable.'):
+        with self.assertRaisesRegex(TypeError, "Communication hook must be callable."):
             model._register_comm_hook(state=None, hook=1)
 
-        with self.assertRaisesRegex(ValueError, 'bucket annotation is not dist.GradBucket.'):
+        with self.assertRaisesRegex(
+            ValueError, "bucket annotation should be dist._GradBucket."
+        ):
+
             def comm_hook(state: object, bucket: int) -> torch.futures.Future:
                 return torch.futures.Future()
 
@@ -3109,19 +3199,24 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
 
-        model = DistributedDataParallel(
-            TestDdpCommHook(),
-            process_group=process_group
-        )
+        model = DistributedDataParallel(TestDdpCommHook(), process_group=process_group)
 
-        with self.assertRaisesRegex(ValueError, 'return annotation is not torch.futures.Future.'):
-            def comm_hook(state: object, bucket: dist.GradBucket) -> int:
+        with self.assertRaisesRegex(
+            ValueError,
+            "Communication hook: return annotation should be torch.futures.Future or torch._C.Future.",
+        ):
+
+            def comm_hook(state: object, bucket: dist._GradBucket) -> int:
                 return torch.futures.Future()
 
             model._register_comm_hook(state=None, hook=comm_hook)
 
-        with self.assertRaisesRegex(RuntimeError, 'callback must return a torch.futures.Future object, but got'):
-            def comm_hook(state: object, bucket: dist.GradBucket):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "callback must return a torch.futures.Future or torch._C.Future object, but got",
+        ):
+
+            def comm_hook(state: object, bucket: dist._GradBucket):
                 return 1
 
             model._register_comm_hook(state=None, hook=comm_hook)
@@ -3141,10 +3236,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
 
-        model = DistributedDataParallel(
-            TestDdpCommHook(),
-            process_group=process_group
-        )
+        model = DistributedDataParallel(TestDdpCommHook(), process_group=process_group)
 
         def dummy_hook(state, bucket):
             fut = torch.futures.Future()
@@ -3153,8 +3245,43 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
         model._register_comm_hook(None, dummy_hook)
 
-        with self.assertRaisesRegex(RuntimeError, "register_comm_hook can only be called once."):
+        with self.assertRaisesRegex(
+            RuntimeError, "register_comm_hook can only be called once."
+        ):
             model._register_comm_hook(None, dummy_hook)
+
+    @requires_gloo()
+    def test_ddp_comm_hook_sparse_gradients(self):
+        """
+        Runs "test_sparse_gradients" unit test with DDP communication hook. We define a
+        simple hook that does allreduce and works with gloo backend for this test.
+        """
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
+
+        # Ensure initialized weights and inputs are identical across processes
+        torch.manual_seed(1337)
+
+        vanilla_model = SparseGradientModule()
+        ddp_model = DistributedDataParallel(
+            copy.deepcopy(vanilla_model),
+            process_group=process_group,
+        )
+
+        # "get_future" API does not support gloo backend, see GH Issue #42048.
+        # Instead, we wait for an allreduce work, and write its result to a Future.
+        def allreduce_hook_gloo(state: object, bucket: dist._GradBucket) -> torch.futures.Future:
+            # Prepare allreduced grad bucket tensors by running an async work.
+            work = process_group.allreduce(bucket.get_tensors())
+            work.wait()
+
+            fut = torch.futures.Future()
+            fut.set_result([t / self.world_size for t in bucket.get_tensors()])
+            return fut
+
+        ddp_model._register_comm_hook(None, allreduce_hook_gloo)
+
+        self._run_and_verify_sparse_gradients(vanilla_model, ddp_model)
 
 
 class ReducerModule(nn.Module):
@@ -3291,6 +3418,27 @@ class ReducerTest(TestCase):
             reducer.prepare_for_backward(output)
             output.backward()
             optimizer.step()
+
+    def test_ddp_comm_hook_multiple_replica_check(self):
+        """
+        DDP communication hook does not support single process multiple device mode.
+        This unit test validates this condition is properly checked by reducer.
+        Related to GH Issue #42542.
+        """
+        num_replicas = 2
+        models = [self._create_mixed_precision_model() for _ in range(num_replicas)]
+        reducer = self._create_reducer_for_models(models)
+
+        def dummy_hook(state, bucket):
+            fut = torch.futures.Future()
+            fut.set_result(bucket.get_tensors())
+            return fut
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Communication hook does not support single process multiple device mode.",
+        ):
+            dist._register_comm_hook(reducer, None, dummy_hook)
 
 
 class ComputeBucketAssignmentTest(TestCase):

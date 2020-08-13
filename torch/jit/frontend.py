@@ -16,7 +16,7 @@ from torch._C._jit_tree_views import (
 )
 from torch._utils_internal import get_source_lines_and_file
 
-from torch._jit_internal import SourceContext, should_drop
+from torch._jit_internal import SourceContext, should_drop, is_static_fn
 import torch.jit.annotations
 
 # Borrowed from cPython implementation
@@ -132,8 +132,11 @@ def get_jit_class_def(cls, self_name):
     # Get defs for each method within the current class independently
     # TODO: proper overriding analysis when implementing class inheritance
     methods = inspect.getmembers(
-        cls, predicate=lambda m: (inspect.ismethod(m) or inspect.isfunction(m)) and m.__name__ in cls.__dict__)
-
+        cls,
+        predicate=lambda m: (inspect.ismethod(m) or inspect.isfunction(m))
+        and not is_static_fn(cls, m.__name__)
+        and m.__name__ in cls.__dict__
+    )
     method_defs = [get_jit_def(method[1],
                                method[0],
                                self_name=self_name) for method in methods]

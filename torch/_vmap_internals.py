@@ -142,9 +142,6 @@ def _check_out_dims_is_int_or_int_tuple(out_dims: out_dims_t, fn_name: str) -> N
             f'an int or a tuple of int representing where in the outputs the '
             f'vmapped dimension should appear.')
 
-# This is the global tracker for how many nested vmaps we are currently inside.
-VMAP_LEVEL: int = 0
-
 # vmap(func)(inputs) wraps all Tensor inputs to be batched in BatchedTensors,
 # sends those into func, and then unwraps the output BatchedTensors. Operations
 # on BatchedTensors perform the batched operations that the user is asking for.
@@ -194,13 +191,12 @@ def vmap(func: Callable, in_dims: in_dims_t = 0, out_dims: out_dims_t = 0) -> Ca
     def wrapped(*args):
         fn_name = func.__name__
         _check_out_dims_is_int_or_int_tuple(out_dims, fn_name)
-        global VMAP_LEVEL
-        VMAP_LEVEL += 1
+        vmap_level = torch._C._vmapmode_increment_nesting()
         try:
-            batched_inputs, batch_size = _create_batched_inputs(in_dims, args, VMAP_LEVEL, fn_name)
+            batched_inputs, batch_size = _create_batched_inputs(in_dims, args, vmap_level, fn_name)
             batched_outputs = func(*batched_inputs)
             _validate_outputs(batched_outputs, fn_name)
-            return _unwrap_batched(batched_outputs, out_dims, VMAP_LEVEL, batch_size, fn_name)
+            return _unwrap_batched(batched_outputs, out_dims, vmap_level, batch_size, fn_name)
         finally:
-            VMAP_LEVEL -= 1
+            torch._C._vmapmode_decrement_nesting()
     return wrapped

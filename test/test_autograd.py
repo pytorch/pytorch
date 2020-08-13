@@ -191,6 +191,35 @@ class TestAutograd(TestCase):
 
         self.assertIsNone(torch.autograd.grad(MyFunction.apply(x), x, allow_unused=True)[0])
 
+    def test_materialize_grads(self):
+        class MyFunction(Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x
+
+            @staticmethod
+            def backward(ctx, grad):
+                self.assertEqual(grad, torch.zeros(1))
+                return grad
+
+        x = torch.ones(1, requires_grad=True)
+        torch._C._functions.UndefinedGrad()(MyFunction.apply(x)).backward()
+
+    def test_dont_materialize_grads(self):
+        class MyFunction(Function):
+            @staticmethod
+            def forward(ctx, x):
+                ctx.set_materialize_grads(False)
+                return x
+
+            @staticmethod
+            def backward(ctx, grad):
+                self.assertIsNone(grad)
+                return grad
+
+        x = torch.ones(1, requires_grad=True)
+        torch._C._functions.UndefinedGrad()(MyFunction.apply(x)).backward()
+
     def test_legacy_function_deprecation_exception(self):
         # Trigger exception
         class MyFunction(Function):
@@ -2705,6 +2734,52 @@ class TestAutograd(TestCase):
                 last_end = info.cpu_interval.end
             self.assertEqual(info.name, expected_name)
 
+    def test_profiler_seq_nr(self):
+        with profile() as p:
+            x = torch.randn(10, 10, requires_grad=True)
+            y = torch.randn(10, 10, requires_grad=True)
+            z = x + y
+            s = z.sum()
+            s.backward()
+        # expecting aten::add, aten::sum to have the sequence numbers,
+        # expecting the corresponding backward nodes to have the same numbers
+        # as the forward ops
+        add_seq_nr = -1
+        sum_seq_nr = -1
+        found_add = found_sum = False
+        found_bwd_add = found_bwd_sum = False
+        found_empty = False
+        for e in p.function_events:
+            if e.name == "aten::add":
+                add_seq_nr = e.sequence_nr
+                self.assertFalse(found_add)
+                found_add = True
+            elif e.name == "aten::sum":
+                sum_seq_nr = e.sequence_nr
+                self.assertFalse(found_sum)
+                found_sum = True
+            elif "Add" in e.name and "Backward" in e.name:
+                self.assertEqual(e.sequence_nr, add_seq_nr)
+                self.assertFalse(found_bwd_add)
+                found_bwd_add = True
+            elif "Sum" in e.name and "Backward" in e.name:
+                self.assertEqual(e.sequence_nr, sum_seq_nr)
+                self.assertFalse(found_bwd_sum)
+                found_bwd_sum = True
+            # check that nested ops (e.g. empty) don't have
+            # sequence number
+            if e.name == "aten::empty":
+                self.assertEqual(e.sequence_nr, -1)
+                found_empty = True
+        self.assertGreaterEqual(add_seq_nr, 0)
+        self.assertGreaterEqual(sum_seq_nr, 0)
+        self.assertNotEqual(add_seq_nr, sum_seq_nr)
+        self.assertTrue(found_add)
+        self.assertTrue(found_sum)
+        self.assertTrue(found_bwd_add)
+        self.assertTrue(found_bwd_sum)
+        self.assertTrue(found_empty)
+
     def test_profiler_unboxed_only(self):
         x = torch.rand(3, 4)
 
@@ -4271,6 +4346,47 @@ for shape in [(1,), ()]:
         c = torch.sum(s**b)
         c.backward()
         self.assertEqual(b.grad, torch.tensor([-inf, 0., 0.]))
+
+    def test_nansum_with_nans(self):
+        a = torch.randn(2, 2, 2, 2)
+        with torch.no_grad():
+            a[a < 0.2] = float('nan')
+        a.requires_grad = True
+
+        # No args
+        gradcheck(lambda x: x.nansum(), a)
+        gradgradcheck(lambda x: x.nansum(), a)
+
+        # Single dim
+        gradcheck(lambda x: x.nansum((0)), a)
+        gradgradcheck(lambda x: x.nansum((0)), a)
+
+        # Multi dim
+        gradcheck(lambda x: x.nansum((0, 2)), a)
+        gradgradcheck(lambda x: x.nansum((0, 2)), a)
+
+        gradcheck(lambda x: x.nansum((0, -1)), a)
+        gradgradcheck(lambda x: x.nansum((0, -1)), a)
+
+        # With keep-dim
+        gradcheck(lambda x: x.nansum((0, -1), True), a)
+        gradgradcheck(lambda x: x.nansum((0, -1), True), a)
+
+    def test_nansum_dtype(self):
+        inp = torch.randn(2, 2, 2, 2)
+        with torch.no_grad():
+            inp[inp < 0.2] = float('nan')
+
+        def test(inp, inp_dtype, out_dtype):
+            with torch.no_grad():
+                a = inp.to(inp_dtype)
+            a.requires_grad = True
+            b = torch.sum(a, dtype=out_dtype)
+            b.backward()
+            self.assertEqual(a.dtype, a.grad.dtype)
+
+        test(inp, torch.float, torch.double)
+        test(inp, torch.double, torch.float)
 
     def test_custom_function_error(self):
         class BadFw(Function):

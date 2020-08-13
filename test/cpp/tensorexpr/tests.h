@@ -172,6 +172,22 @@ namespace jit {
   _(SimplifyEliminateEmptyFor)              \
   _(SimplifyFlattenBlock)                   \
   _(SimplifyEliminateZeroLengthAlloc)       \
+  _(RegisterizerSimple)                     \
+  _(RegisterizerLoop)                       \
+  _(RegisterizerLoopFixedLoad)              \
+  _(RegisterizerMultiVar)                   \
+  _(RegisterizerVariableLoad)               \
+  _(RegisterizerSymbolicIndices)            \
+  _(RegisterizerEarlyStop)                  \
+  _(RegisterizerMultiLoop)                  \
+  _(RegisterizerRepeated)                   \
+  _(RegisterizerNoLoads)                    \
+  _(RegisterizerNoRepeatedStores)           \
+  _(RegisterizerMultiVarOverlap)            \
+  _(RegisterizerAllocs)                     \
+  _(RegisterizerNoInitializer)              \
+  _(RegisterizerLoadThenStore)              \
+  _(RegisterizerParallelized)               \
   _(StmtClone)                              \
   _(BoundsInference_1)                      \
   _(BoundsInference_2)                      \
@@ -208,13 +224,14 @@ namespace jit {
   _(UnrollMultipleStatements)               \
   _(UnrollEmpty)                            \
   _(NoUnroll)                               \
-  _(UnrollWithVarMap)                       \
+  _(UnrollWithLet)                          \
   _(Kernel_1)                               \
   _(Kernel_2)                               \
   _(Kernel_3)                               \
   _(Kernel_4)                               \
   _(FuserPass_1)                            \
-  _(FuserPass_2)
+  _(FuserPass_2)                            \
+  _(TrainBasic)
 
 #define TH_FORALL_TENSOREXPR_TESTS_LLVM(_) \
   _(LLVMByteImmTest)                       \
