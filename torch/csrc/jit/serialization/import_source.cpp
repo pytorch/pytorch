@@ -481,9 +481,43 @@ struct SourceImporterImpl : public Resolver,
   void importEnum(
       const QualifiedName& qualified_name,
       const ClassDef& enum_def) {
-    // TODO(gmagogsfm): Implement parsing Enum class definition tree.
-    // BEFORE SUBMIT DELETE FOLLOWING EXPERIMENTAL CODE
-    auto enum_type = EnumType::create(qualified_name, IntType::get(), {}, cu_);
+    ScriptTypeParser type_parser(shared_from_this());
+    std::vector<std::pair<std::string, IValue>> names_values;
+
+    TypePtr value_type = nullptr;
+    for (const auto& statement : enum_def.body()) {
+      if (statement.kind() != TK_ASSIGN) {
+        throw ErrorReport(statement.range())
+            << "Unexpected statement in Enum class body: "
+               "only enum attribute definitions are currently supported.";
+      }
+
+      const auto assign = Assign(statement);
+      auto name = Var(assign.lhs()).name().name();
+      auto type = type_parser.parseTypeFromExpr(assign.type().get());
+      if (value_type != nullptr && value_type != type) {
+        throw ErrorReport(statement.range())
+            << "Enum class with varying value types are not supported.";
+      }
+
+      IValue ivalue;
+      auto rhs = assign.rhs();
+      switch (rhs.kind()) {
+        case TK_STRINGLITERAL:
+          ivalue = IValue(StringLiteral(rhs).text());
+        case TK_CONST:
+          auto numeric_const = Const(rhs);
+          if (numeric_const.isFloatingPoint()) {
+            ivalue = IValue(numeric_const.asFloatingPoint());
+          } else if (numeric_const.isIntegral()) {
+            ivalue = IValue(numeric_const.asIntegral());
+          }
+      }
+
+      names_values.emplace_back(std::make_pair(name, ivalue));
+    }
+
+    auto enum_type = EnumType::create(qualified_name, value_type, names_values, cu_);
     cu_->register_type(enum_type);
   }
 
