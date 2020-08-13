@@ -17,29 +17,29 @@ extern "C" void sgemv_(char *trans, int *m, int *n, float *alpha, float *a, int 
 # define ffloat float
 #endif
 
-extern "C" ffloat sdot_(int *n, float *x, int *incx, float *y, int *incy);
-extern "C" void cdotu_(std::complex<float> *res, int *n, std::complex<float> *x, int *incx, std::complex<float> *y, int *incy);
-extern "C" void zdotu_(std::complex<double> *res, int *n, std::complex<double> *x, int *incx, std::complex<double> *y, int *incy);
-
 #ifdef BLAS_USE_CBLAS_DOT
-extern "C" float cblas_sdot(const int n, const float *x, const int incx, const float *y, const int incy);
-extern "C" void cblas_cdotu_sub(const int n, const void *x, const int incx, const void *y, const int incy, void *dotu);
-extern "C" void cblas_zdotu_sub(const int n, const void *x, const int incx, const void *y, const int incy, void *dotu);
-#ifndef THBlas_cblas_dot_
-#define THBlas_cblas_dot_
-static inline ffloat sdot_(const int *n, const float *x, const int *incx, const float *y, const int *incy)
-{
-  return cblas_sdot(*n, x, *incx, y, *incy);
-}
-static inline void cdotu_(std::complex<float> *res, const int *n, const std::complex<float> *x, const int *incx,
- const std::complex<float> *y, const int *incy) {
-  cblas_cdotu_sub(*n, x, *incx, y, *incy, res);
-}
-static inline void zdotu_(std::complex<double> *res, const int *n, const std::complex<double> *x, const int *incx,
- const std::complex<double> *y, const int *incy) {
-  cblas_zdotu_sub(*n, x, *incx, y, *incy, res);
-}
-#endif // THBlas_cblas_dot_
+  extern "C" float cblas_sdot(const int n, const float *x, const int incx, const float *y, const int incy);
+  extern "C" void cblas_cdotu_sub(const int n, const void *x, const int incx, const void *y, const int incy, void *dotu);
+  extern "C" void cblas_zdotu_sub(const int n, const void *x, const int incx, const void *y, const int incy, void *dotu);
+  #ifndef THBlas_cblas_dot_
+  #define THBlas_cblas_dot_
+  static inline ffloat sdot_(const int *n, const float *x, const int *incx, const float *y, const int *incy)
+  {
+    return cblas_sdot(*n, x, *incx, y, *incy);
+  }
+  static inline void cdotu_(std::complex<float> *res, const int *n, const std::complex<float> *x, const int *incx,
+  const std::complex<float> *y, const int *incy) {
+    cblas_cdotu_sub(*n, x, *incx, y, *incy, res);
+  }
+  static inline void zdotu_(std::complex<double> *res, const int *n, const std::complex<double> *x, const int *incx,
+  const std::complex<double> *y, const int *incy) {
+    cblas_zdotu_sub(*n, x, *incx, y, *incy, res);
+  }
+  #endif // THBlas_cblas_dot_
+#else
+  extern "C" ffloat sdot_(int *n, float *x, int *incx, float *y, int *incy);
+  extern "C" void cdotu_(std::complex<float> *res, int *n, std::complex<float> *x, int *incx, std::complex<float> *y, int *incy);
+  extern "C" void zdotu_(std::complex<double> *res, int *n, std::complex<double> *x, int *incx, std::complex<double> *y, int *incy);
 #endif // BLAS_USE_CBLAS_DOT
 #endif // AT_BUILD_WITH_BLAS
 
