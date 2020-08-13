@@ -4,17 +4,35 @@ import sys
 import torch
 import types
 import zipfile
+
+from torch import Tensor  # noqa
+
 # https://github.com/pytorch/pytorch/blob/master/torch/csrc/jit/docs/serialization.md
 
+# Hack
+class Module:
+    pass
+
+
 class Loader(types.ModuleType):
-    def __init__(self, base, zf, globals, name=""):
+    def __init__(self, base, zf, globals_, name=""):
         super().__init__(name)
         self.base = base
         self.zf = zf
-        self.globals = globals.copy()
+        self.globals = globals_.copy() if globals_ is not None else globals()
         self.fresh_module = False
         self.compiled = False
         self.unmangle = ['_ResNet', '_Sequential', '_BasicBlock', '_Conv2d']
+
+        # special case for now
+        if name == "__torch__":
+            self.globals['__torch__'] = self
+            filename = self.base + '.py'
+            if filename in self.zf.namelist():
+                f = self.zf.read(filename)
+                self.fresh_module = True
+                exec(compile(f, name, 'exec'), self.globals) 
+                self.fresh_module = False
 
     def __getattr__(self, name):
         for prefix in self.unmangle:
@@ -24,7 +42,7 @@ class Loader(types.ModuleType):
         filename = dirname + '.py'
         # print("{} -> {}".format(self.base, name))
 
-        if name in self.globals:
+        if name in self.globals and name != 'torch':
             # Stuff in the module by this name takes precedence, then subdirs
             # print("   Return existing globals for {}".format(name))
             return self.globals[name]
@@ -81,22 +99,24 @@ class TorchUnpickler(pickle.Unpickler):
             mod = self.resolver
             for part in parts[1:]:
                 mod = getattr(mod, part)
-            return mod.globals[name]
+            return getattr(mod, name)
         else:
             return super().find_class(module, name)
 
 def load(filename):
 
-    glob = {}
-    exec(compile('from torch import Tensor', 'import tensor', 'exec'), glob)
-    exec(compile("class Module:  pass", 'module.py', 'exec'), glob)
+    # glob = {'torch': torch}
+    glob = None
+    # exec(compile('from torch import Tensor', 'import tensor', 'exec'), glob)
+    # exec(compile("class Module:  pass", 'module.py', 'exec'), glob)
 
     filename_no_ext = os.path.splitext(os.path.split(filename)[-1])[0]
     with zipfile.ZipFile(filename, 'r') as f:
         resolver = Loader('{}/code/__torch__'.format(filename_no_ext), f, glob, name="__torch__") 
-        glob['__torch__'] = resolver
-        glob['__torch__'].globals['__torch__'] = resolver
-        glob['torch'] = torch
+        # glob['__torch__'] = resolver
+        # glob['__torch__'].globals['__torch__'] = resolver
+        globals()['__torch__'] = resolver
+        # glob['torch'] = torch
         sys.modules['__torch__'] = resolver
 
         # TODO where would constants be used? not in resnet aparently..
@@ -119,5 +139,9 @@ if __name__ == "__main__":
 
     if args.forward_with_shape:
         input = torch.empty(args.forward_with_shape).uniform_()
+
+        # HACK, but still doesn't help bc gets called with shapes 1,3,17,17 and 1,3,56,56?
+        torch.add_ = torch.add
+
         out = model.forward(input)
         print(out)
