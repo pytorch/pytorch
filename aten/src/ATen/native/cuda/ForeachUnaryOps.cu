@@ -1,6 +1,6 @@
 #include <ATen/Dispatch.h>
-#include <ATen/native/cuda/ForeachUtils.cuh>
-#include <ATen/native/cuda/MultiTensorApply.cuh>
+#include <ATen/native/ForeachUtils.h>
+#include <ATen/native/cuda/ForeachFunctors.cuh>
 
 namespace at { namespace native {
 
@@ -22,14 +22,13 @@ std::vector<Tensor> foreach_unary_op(TensorList tensors) {
 }
 
 template <template<class> class Op>
-std::vector<Tensor> foreach_unary_op_(TensorList tensors) {
+void foreach_unary_op_(TensorList tensors) {
     std::vector<std::vector<at::Tensor>> tensor_lists; 
     tensor_lists.emplace_back(std::move(tensors.vec()));
 
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::Half, tensors[0].scalar_type(), "foreach_unary_op_cuda_", [&]() {
         multi_tensor_apply<1>(tensor_lists, UnaryOpFunctor_<scalar_t, Op>());
     });
-    return tensor_lists[0];
 }
 
 template<typename T>
@@ -46,41 +45,41 @@ std::vector<Tensor> foreach_tensor_exp_cuda(TensorList tensors) {
     verify_list(tensors);
 
     if (!check_fast_route(tensors)) {
-        return at::native::foreach_exp_fallback(tensors);
+        return at::native::foreach_tensor_exp_slow(tensors);
     }
     
     return foreach_unary_op<Exp>(tensors);
 }
 
-std::vector<Tensor> foreach_tensor_exp_cuda_(TensorList tensors) {
+void foreach_tensor_exp_cuda_(TensorList tensors) {
     verify_list(tensors);
 
     if (!check_fast_route(tensors)) {
-        return at::native::foreach_exp_fallback_(tensors);
+        return at::native::foreach_tensor_exp_slow_(tensors);
     }
 
-    return foreach_unary_op_<Exp>(tensors);
+    foreach_unary_op_<Exp>(tensors);
 }
 
 std::vector<Tensor> foreach_tensor_sqrt_cuda(TensorList tensors) {
     verify_list(tensors);
 
     if (!check_fast_route(tensors)) {
-        return at::native::foreach_sqrt_fallback(tensors);
+        return at::native::foreach_tensor_sqrt_slow(tensors);
     }
 
-    return foreach_unary_op_<Sqrt>(tensors);
+    return foreach_unary_op<Sqrt>(tensors);
 
 }
 
-std::vector<Tensor> foreach_tensor_sqrt_cuda_(TensorList tensors) {
+void foreach_tensor_sqrt_cuda_(TensorList tensors) {
     verify_list(tensors);
 
     if (!check_fast_route(tensors)) {
-        return at::native::foreach_sqrt_fallback_(tensors);
+        return at::native::foreach_tensor_sqrt_slow_(tensors);
     }
 
-    return foreach_unary_op_<Sqrt>(tensors);
+    foreach_unary_op_<Sqrt>(tensors);
 }
 
 }} // namespace at::native
