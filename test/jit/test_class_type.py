@@ -14,7 +14,7 @@ sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import JitTestCase
 import torch.testing._internal.jit_utils
 from torch.testing._internal.common_utils import IS_SANDCASTLE
-from typing import List, Tuple, Iterable, Dict
+from typing import List, Tuple, Iterable, Dict, Optional
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
@@ -1017,9 +1017,20 @@ class TestClassType(JitTestCase):
         """
         Test that methods on class types can have default arguments.
         """
+        default_b = [1, 2, 3]
+        default_c = (1, 2, 3)
+        default_d = {1: 2}
+
         @torch.jit.script
         class ClassWithDefaultArgs:
-            def __init__(self, a: int=1, b: List[int]=[1,2,3], c: Tuple[int, int, int]=(1,2,3), d: Dict[int, int]={1: 2}, e: str="str"):
+            def __init__(
+                self,
+                a: int = 1,
+                b: List[int] = default_b,
+                c: Tuple[int, int, int] = default_c,
+                d: Dict[int, int] = default_d,
+                e: Optional[str] = None,
+            ):
                 self.a = a
                 self.b = b
                 self.c = c
@@ -1038,10 +1049,10 @@ class TestClassType(JitTestCase):
             def get_dict(self) -> Dict[int, int]:
                 return self.d
 
-            def get_str(self) -> str:
+            def get_str(self) -> Optional[str]:
                 return self.e
 
-            def add(self, b: int, scale: float=1.0) -> float:
+            def add(self, b: int, scale: float = 1.0) -> float:
                 return self.a * scale + b
 
         def all_defaults() -> int:
@@ -1053,7 +1064,7 @@ class TestClassType(JitTestCase):
             return a.get_int() + a.get_list()[2] + a.get_dict()[1]
 
         def override_defaults() -> int:
-            a: ClassWithDefaultArgs = ClassWithDefaultArgs(3, [9, 10, 11], (12, 13, 14))
+            a: ClassWithDefaultArgs = ClassWithDefaultArgs(3, [9, 10, 11], (12, 13, 14), {3: 4}, "str")
             s: int = a.get_int()
 
             for x in a.get_list():
@@ -1061,6 +1072,12 @@ class TestClassType(JitTestCase):
 
             for y in a.get_tup():
                 s += y
+
+            s += a.get_dict()[3]
+
+            st = a.get_str()
+            if st is not None:
+                s += len(st)
 
             return s
 

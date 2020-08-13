@@ -187,8 +187,7 @@ def get_jit_def(fn, def_name, self_name=None):
             arg.annotation = unused_fn_def.args.args[0].annotation
 
     # Get default arguments.
-    default_args = get_default_args(fn)
-
+    default_args = inspect.signature(fn).parameters
     return build_def(ctx, fn_def, default_args, type_line, def_name, self_name=self_name)
 
 
@@ -248,14 +247,14 @@ def build_param_list(ctx, py_args, default_args, self_name):
                 raise NotSupportedError(ctx_range, _vararg_kwarg_err)
 
     def get_default_arg(arg):
-        return default_args[arg.arg] if arg.arg in default_args else None
+        return default_args[arg] if arg in default_args else None
 
-    result = [build_param(ctx, arg, self_name, False, get_default_arg(arg)) for arg in py_args.args]
-    result += [build_param(ctx, arg, self_name, True, get_default_arg(arg)) for arg in py_args.kwonlyargs]
+    result = [build_param(ctx, arg, self_name, False, get_default_arg(arg.arg)) for arg in py_args.args]
+    result += [build_param(ctx, arg, self_name, True, get_default_arg(arg.arg)) for arg in py_args.kwonlyargs]
     return result
 
 
-def build_param(ctx, py_arg, self_name, kwarg_only, default=None):
+def build_param(ctx, py_arg, self_name, kwarg_only, default_value):
     # NB: In Python3 py_arg is a pair of (str arg, expr? annotation)
     name = py_arg.arg
     r = ctx.make_range(py_arg.lineno, py_arg.col_offset, py_arg.col_offset + len(name))
@@ -267,21 +266,33 @@ def build_param(ctx, py_arg, self_name, kwarg_only, default=None):
         annotation_expr = EmptyTypeAnnotation(r)
 
     # Create the appropriate TreeView for the default value if there is one.
-    if default:
-        if isinstance(default, list):
-            default_expr = ListLiteral(r, [Const(r, str(v)) for v in default])
-        elif isinstance(default, tuple):
-            default_expr = TupleLiteral(r, [Const(r, str(v)) for v in default])
-        elif isinstance(default, dict):
-            default_expr = DictLiteral(r, [Const(r, str(k)) for k in default.keys()], [Const(r, str(k)) for k in default.values()])
-        elif isinstance(default, str):
-            default_expr = StringLiteral(r, default)
-        elif isinstance(default, int) or isinstance(default, float):
-            default_expr = Const(r, str(default))
+    if default_value:
+        default = default_value.default
+        if default is not inspect.Parameter.empty:
+            if default is None:
+                default_expr = NoneLiteral(r)
+            elif default is True:
+                default_expr = TrueLiteral(r)
+            elif default is False:
+                default_expr = FalseLiteral(r)
+            elif isinstance(default, list):
+                default_expr = ListLiteral(r, [Const(r, str(v)) for v in default])
+            elif isinstance(default, tuple):
+                default_expr = TupleLiteral(r, [Const(r, str(v)) for v in default])
+            elif isinstance(default, dict):
+                keys = [Const(r, str(k)) for k in default.keys()]
+                values = [Const(r, str(k)) for k in default.values()]
+                default_expr = DictLiteral(r, keys, values)
+            elif isinstance(default, str):
+                default_expr = StringLiteral(r, default)
+            elif isinstance(default, int) or isinstance(default, float):
+                default_expr = Const(r, str(default))
+            else:
+                raise NotSupportedError(r, f'default value of type {type(default)} is not supported')
 
-        return Param(annotation_expr, default_expr, Ident(r, name), kwarg_only)
-    else:
-        return Param(annotation_expr, Ident(r, name), kwarg_only)
+            return Param(annotation_expr, default_expr, Ident(r, name), kwarg_only)
+
+    return Param(annotation_expr, Ident(r, name), kwarg_only)
 
 
 def get_default_args(fn):
