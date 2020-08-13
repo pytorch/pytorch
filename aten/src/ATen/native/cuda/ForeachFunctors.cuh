@@ -128,7 +128,7 @@ struct BinaryOpListFunctor_ {
         TensorListMetadata<2>& tl) {
             int tensor_loc = tl.block_to_tensor[blockIdx.x];
             int chunk_idx = tl.block_to_chunk[blockIdx.x];
-            int n = tl.sizes[tensor_loc];\
+            int n = tl.sizes[tensor_loc];
 
             T* x = (T*)tl.addresses[0][tensor_loc];
             x += chunk_idx * chunk_size;
