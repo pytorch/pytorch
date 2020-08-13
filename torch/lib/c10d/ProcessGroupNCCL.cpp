@@ -778,8 +778,10 @@ c10::intrusive_ptr<c10::ivalue::Future> ProcessGroupNCCL::WorkNCCL::
       "WorkNCCL's getFuture API is only supported for single-process single-device mode.");
   // Create a new FutureNCCL object after checking for single-process
   // single-device mode.
+  std::shared_ptr<at::cuda::CUDAEvent> cudaEvent = {cudaEvents_,
+                                                    &(*cudaEvents_)[0]};
   return c10::make_intrusive<FutureNCCL>(
-      at::IValue(*outputs_), (*outputs_)[0].device().index(), cudaEvents_);
+      at::IValue(*outputs_), (*outputs_)[0].device().index(), cudaEvent);
 }
 
 template <typename Fn, typename PreProcess, typename PostProcess>

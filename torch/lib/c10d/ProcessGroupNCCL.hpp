@@ -154,30 +154,26 @@ class ProcessGroupNCCL : public ProcessGroup {
   // is equal to 1.
   //
   // If created by FutureNCCL's then callback, its value becomes the value of
-  // callback() and its cudaEvents will record the NCCL stream that guards that
+  // callback() and its cudaEvent will record the NCCL stream that runs that
   // callback.
   struct FutureNCCL : at::ivalue::Future {
    public:
     explicit FutureNCCL(
         at::IValue value,
         c10::DeviceIndex deviceIndex,
-        std::shared_ptr<std::vector<at::cuda::CUDAEvent>> cudaEvents)
+        std::shared_ptr<at::cuda::CUDAEvent> cudaEvent)
         : at::ivalue::Future(c10::ListType::create(c10::TensorType::get())),
           value_(value),
           deviceIndex_(deviceIndex),
-          cudaEvents_(cudaEvents) {
-      TORCH_INTERNAL_ASSERT(
-          cudaEvents_->size() == 1,
-          "FutureNCCL only supports single-process single-device mode.");
-    }
+          cudaEvent_(cudaEvent) {}
 
-    // Gets PyTorch's default device streams and synchronizes recorded streams
+    // Gets current stream of device and synchronizes recorded streams
     // with that. It will return after synchronizing the correct GPU streams to
     // ensure we can have async CUDA execution and it does not wait for the
     // entire operation to complete on GPU.
     void wait() override {
-      auto stream = at::cuda::getCurrentCUDAStream(deviceIndex_);
-      (*cudaEvents_)[0].block(stream);
+      auto currentStream = at::cuda::getCurrentCUDAStream(deviceIndex_);
+      (*cudaEvent_).block(currentStream);
     }
 
     // FutureNCCL's value is NCCL collective's outputs or callback() output with
@@ -197,18 +193,18 @@ class ProcessGroupNCCL : public ProcessGroup {
     }
 
     // Adds a callback to FutureNCCL. It invokes the callback inline after
-    // synchronizing FutureNCCL's own cudaEvents with the stream that guards
+    // synchronizing FutureNCCL's own cudaEvent with the stream that runs
     // this callback. FutureNCCL then will return a FutureNCCL if this callback
-    // is executed without any errors. This new FutureNCCL's cudaEvents will
+    // is executed without any errors. This new FutureNCCL's cudaEvent will
     // record the callback's stream.
     void addCallbackWithStream(
         std::function<void(void)> callback,
         const c10::cuda::CUDAStream stream,
-        std::shared_ptr<std::vector<at::cuda::CUDAEvent>> thenFutCudaEvents) {
-      (*cudaEvents_)[0].block(stream);
+        std::shared_ptr<at::cuda::CUDAEvent> thenFutCudaEvent) {
+      (*cudaEvent_).block(stream);
       c10::OptionalStreamGuard streamGuard{c10::Stream(stream)};
       callback();
-      (*thenFutCudaEvents)[0].record(stream);
+      (*thenFutCudaEvent).record(stream);
     }
 
     // We use addCallbackWithStream instead of addCallback.
@@ -219,8 +215,8 @@ class ProcessGroupNCCL : public ProcessGroup {
     }
 
     // Adds a callback to the futureNCCL, and returns another FutureNCCL to hold
-    // the return value of the callback and new cudaEvents that recorded the
-    // stream that guards this callback.
+    // the return value of the callback and new cudaEvent that recorded the
+    // stream that runs this callback.
     c10::intrusive_ptr<Future> then(
         std::function<at::IValue(void)> callback,
         at::TypePtr type) override {
@@ -229,13 +225,12 @@ class ProcessGroupNCCL : public ProcessGroup {
       // replaced by a FutureNCCL.
       auto fut = c10::make_intrusive<Future>(type);
 
-      // Get a new stream from pool that will guard the callback.
+      // Get a new stream from pool that will run the callback.
       const c10::cuda::CUDAStream stream =
           at::cuda::getStreamFromPool(deviceIndex_);
-      // Create a new cudaEvents object that will record callback's stream and
+      // Create a new cudaEvent object that will record callback's stream and
       // used by the new FutureNCCL.
-      auto thenFutCudaEvents =
-          std::make_shared<std::vector<at::cuda::CUDAEvent>>(1);
+      auto thenFutCudaEvent = std::make_shared<at::cuda::CUDAEvent>();
 
       // Cannot move capture std::function in lambda, because it cannot deduce
       // the template type for std::function. Hence use std::bind to explicitly
@@ -245,28 +240,22 @@ class ProcessGroupNCCL : public ProcessGroup {
               [&](std::function<at::IValue(void)> cb) {
                 try {
                   fut = c10::make_intrusive<FutureNCCL>(
-                      cb(), deviceIndex_, thenFutCudaEvents);
-                } catch (std::exception& e) {
+                      cb(), deviceIndex_, thenFutCudaEvent);
+                } catch (const std::exception& e) {
                   fut->setError(e.what());
                 }
               },
               std::move(callback)),
           stream,
-          thenFutCudaEvents);
+          thenFutCudaEvent);
       return fut;
     }
 
     // Checks cudaEventQuery with cudaEvents.
     bool completed() const override {
       // Checking the work's corresponding CUDA events' status
-      auto ret = cudaEventQuery((*cudaEvents_)[0]);
-      if (ret != cudaSuccess && ret != cudaErrorNotReady) {
-        AT_CUDA_CHECK(ret);
-      }
-      if (ret == cudaErrorNotReady) {
-        return false;
-      }
-      return true;
+      auto ret = cudaEventQuery(*cudaEvent_);
+      return ret != cudaErrorNotReady || ret == cudaSuccess;
     }
 
     // FutureNCCL has a value that was already set in its constructor.
@@ -277,7 +266,7 @@ class ProcessGroupNCCL : public ProcessGroup {
    private:
     at::IValue value_;
     c10::DeviceIndex deviceIndex_;
-    std::shared_ptr<std::vector<at::cuda::CUDAEvent>> cudaEvents_;
+    std::shared_ptr<at::cuda::CUDAEvent> cudaEvent_;
   };
 
   // If you wish to create multiple process groups, each with a potentially
