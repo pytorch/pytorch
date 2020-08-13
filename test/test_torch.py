@@ -18710,12 +18710,14 @@ else:
                     with self.assertRaisesRegex(RuntimeError, "Sizes of tensors must match except in dimension"):
                         torch_fn(torch_input)
 
+    @onlyOnCPUAndCUDA
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False) +
               torch.testing.get_all_complex_dtypes()))
     def test_hstack(self, device, dtype):
         self._test_special_stacks(1, 1, torch.hstack, np.hstack, device, dtype)
 
+    @onlyOnCPUAndCUDA
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False) +
               torch.testing.get_all_complex_dtypes()))
@@ -18732,7 +18734,7 @@ else:
             expected = np.vstack(np_input)
             self.assertEqual(actual, expected)
 
-
+    @onlyOnCPUAndCUDA
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False) +
               torch.testing.get_all_complex_dtypes()))
