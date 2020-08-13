@@ -5,12 +5,14 @@ import unittest
 import torch
 import torch.backends.xnnpack
 from torch.nn import functional as F
+from torch.utils.mobile_optimizer import optimize_for_mobile
 from torch.testing import FileCheck
 import torch.testing._internal.hypothesis_utils as hu
 from torch.testing._internal.common_utils import TestCase, run_tests
 from hypothesis import given, assume
 from hypothesis import strategies as st
 import io
+import itertools
 
 
 @unittest.skipUnless(torch.backends.xnnpack.enabled,
@@ -711,7 +713,8 @@ class TestXNNPACKConv1dTransformPass(TestCase):
     @staticmethod
     def validate_transform_conv1d_to_conv2d(
             self,
-            pattern_count_map,
+            pattern_count_transformed_map,
+            pattern_count_optimized_map,
             data_shape):
         module_instance = self
         scripted_model = torch.jit.script(module_instance)
@@ -719,63 +722,154 @@ class TestXNNPACKConv1dTransformPass(TestCase):
         input_data = torch.normal(1, 20, size=data_shape)
         ref_result = scripted_model(input_data)
         torch._C._jit_pass_transform_conv1d_to_conv2d(scripted_model._c)
+        optimized_scripted_model = optimize_for_mobile(scripted_model)
 
         buffer = io.BytesIO()
         torch.jit.save(scripted_model, buffer)
         buffer.seek(0)
         deserialized_scripted_model = torch.jit.load(buffer)
-        for pattern, v in pattern_count_map.items():
+
+        for pattern, v in pattern_count_transformed_map.items():
             if (v == 0):
                 FileCheck().check(pattern).run(deserialized_scripted_model.graph)
             elif (v == -1):
                 FileCheck().check_not(pattern).run(deserialized_scripted_model.graph)
             else:
                 FileCheck().check_count(pattern, v, exactly=True).run(deserialized_scripted_model.graph)
-        xnnpack_result = deserialized_scripted_model(input_data)
+        transformed_result = deserialized_scripted_model(input_data)
+        torch.testing.assert_allclose(ref_result, transformed_result, rtol=1e-2, atol=1e-3)
+
+        optimized_buffer = io.BytesIO()
+        torch.jit.save(optimized_scripted_model, optimized_buffer)
+        optimized_buffer.seek(0)
+        deserialized_optimized_scripted_model = torch.jit.load(optimized_buffer)
+
+        for pattern, v in pattern_count_optimized_map.items():
+            if (v == 0):
+                FileCheck().check(pattern).run(deserialized_optimized_scripted_model.graph)
+            elif (v == -1):
+                FileCheck().check_not(pattern).run(deserialized_optimized_scripted_model.graph)
+            else:
+                FileCheck().check_count(pattern, v, exactly=True).run(deserialized_optimized_scripted_model.graph)
+        xnnpack_result = deserialized_optimized_scripted_model(input_data)
         torch.testing.assert_allclose(ref_result, xnnpack_result, rtol=1e-2, atol=1e-3)
 
-    @given(batch_size=st.integers(0, 3),
-           input_channels_per_group=st.integers(1, 32),
-           height=st.integers(5, 64),
-           output_channels_per_group=st.integers(1, 32),
-           groups=st.integers(1, 16),
-           kernel=st.integers(1, 5),
-           strides=st.integers(1, 2),
-           paddings=st.integers(0, 2),
-           dilations=st.integers(1, 2))
-    def test_conv1d_basic(self,
-                          batch_size,
-                          input_channels_per_group,
-                          height,
-                          output_channels_per_group,
-                          groups,
-                          kernel,
-                          strides,
-                          paddings,
-                          dilations):
-        input_channels = input_channels_per_group * groups
-        output_channels = output_channels_per_group * groups
-        conv_weight_shape = (output_channels, input_channels_per_group, kernel)
-        conv_bias_shape = (output_channels)
+    def test_conv1d_basic(self):
+        batch_size_list = range(1, 3)
+        input_channels_per_group_list = range(10, 12)
+        width_list = range(10, 12)
+        output_channels_per_group_list = range(10, 12)
+        groups_list = range(1, 3)
+        kernel_list = range(1, 4)
+        stride_list = range(1, 3)
+        padding_list = range(0, 3)
+        dilation_list = range(1, 3)
 
-        class Conv1D(torch.nn.Module):
-            def __init__(self):
-                super(Conv1D, self).__init__()
-                self.weight = torch.nn.Parameter(torch.Tensor(torch.rand(conv_weight_shape)), requires_grad=False)
-                self.bias = torch.nn.Parameter(torch.Tensor(torch.rand(conv_bias_shape)), requires_grad=False)
-                self.strides = strides
-                self.paddings = paddings
-                self.dilations = dilations
-                self.groups = groups
+        for hparams in itertools.product(batch_size_list,
+                                         input_channels_per_group_list,
+                                         width_list,
+                                         output_channels_per_group_list,
+                                         groups_list,
+                                         kernel_list,
+                                         stride_list,
+                                         padding_list,
+                                         dilation_list):
+            batch_size, input_channels_per_group, width, output_channels_per_group, \
+                groups, kernel, stride, padding, dilation = hparams
 
-            def forward(self, x):
-                return F.conv1d(x, self.weight, self.bias,
-                                self.strides, self.paddings, self.dilations, self.groups)
+            input_channels = input_channels_per_group * groups
+            output_channels = output_channels_per_group * groups
+            conv_weight_shape = (output_channels, input_channels_per_group, kernel)
+            conv_bias_shape = (output_channels)
 
-        data_shape = (batch_size, input_channels, height)
-        pattern_count_map = {"Tensor = aten::conv1d": -1,
-                             "Tensor = aten::conv2d": 1}
-        TestXNNPACKConv1dTransformPass.validate_transform_conv1d_to_conv2d(Conv1D(), pattern_count_map, data_shape)
+            class Conv1D(torch.nn.Module):
+                def __init__(self):
+                    super(Conv1D, self).__init__()
+                    self.weight = torch.nn.Parameter(torch.Tensor(torch.rand(conv_weight_shape)), requires_grad=False)
+                    self.bias = torch.nn.Parameter(torch.Tensor(torch.rand(conv_bias_shape)), requires_grad=False)
+                    self.stride = stride
+                    self.padding = padding
+                    self.dilation = dilation
+                    self.groups = groups
+
+                def forward(self, x):
+                    return F.conv1d(x, self.weight, self.bias,
+                                    self.stride, self.padding, self.dilation, self.groups)
+
+            data_shape = (batch_size, input_channels, width)
+            pattern_count_transformed_map = {"Tensor = aten::conv1d": -1,
+                                            "Tensor = aten::conv2d": 1}
+            pattern_count_optimized_map = {"Tensor = aten::conv1d": -1,
+                                            "Tensor = aten::conv2d": -1}
+
+            TestXNNPACKConv1dTransformPass.validate_transform_conv1d_to_conv2d(Conv1D(),
+                                                                                pattern_count_transformed_map,
+                                                                                pattern_count_optimized_map,
+                                                                                data_shape)
+
+    def test_conv1d_with_relu_fc(self):
+        batch_size_list = range(1, 3)
+        input_channels_per_group_list = range(10, 12)
+        width_list = range(10, 12)
+        output_channels_per_group_list = range(10, 12)
+        groups_list = range(1, 3)
+        kernel_list = range(1, 4)
+        stride_list = range(1, 3)
+        padding_list = range(0, 3)
+        dilation_list = range(1, 3)
+        output_features_list = range(1, 3)
+
+        for hparams in itertools.product(batch_size_list,
+                                         input_channels_per_group_list,
+                                         width_list,
+                                         output_channels_per_group_list,
+                                         groups_list,
+                                         kernel_list,
+                                         stride_list,
+                                         padding_list,
+                                         dilation_list,
+                                         output_features_list):
+            batch_size, input_channels_per_group, width, output_channels_per_group, \
+                groups, kernel, stride, padding, dilation, output_features = hparams
+
+            input_channels = input_channels_per_group * groups
+            output_channels = output_channels_per_group * groups
+            conv_weight_shape = (output_channels, input_channels_per_group, kernel)
+            conv_bias_shape = (output_channels)
+            conv_output_width = int((width + 2 * padding - dilation * (kernel - 1) - 1) / stride) + 1
+            fc_weight_shape = (output_features, output_channels * conv_output_width)
+            fc_bias_shape = (output_features)
+
+            class Net(torch.nn.Module):
+                def __init__(self):
+                    super(Net, self).__init__()
+                    self.conv_weight = torch.nn.Parameter(torch.Tensor(torch.rand(conv_weight_shape)), requires_grad=False)
+                    self.conv_bias = torch.nn.Parameter(torch.Tensor(torch.rand(conv_bias_shape)), requires_grad=False)
+                    self.stride = stride
+                    self.padding = padding
+                    self.dilation = dilation
+                    self.groups = groups
+
+                    self.fc_weight = torch.nn.Parameter(torch.Tensor(torch.rand(fc_weight_shape)), requires_grad=False)
+                    self.fc_bias = torch.nn.Parameter(torch.Tensor(torch.rand(fc_bias_shape)), requires_grad=False)
+
+                def forward(self, x):
+                    x = F.conv1d(x, self.conv_weight, self.conv_bias,
+                                 self.stride, self.padding, self.dilation, self.groups)
+                    x = F.relu(x)
+                    x = x.view(x.size(0), -1)
+                    x = F.linear(x, self.fc_weight, self.fc_bias)
+                    return x
+
+            data_shape = (batch_size, input_channels, width)
+            pattern_count_transformed_map = {"Tensor = aten::conv1d": -1,
+                                            "Tensor = aten::conv2d": 1}
+            pattern_count_optimized_map = {"Tensor = aten::conv1d": -1,
+                                            "Tensor = aten::conv2d": -1}
+            TestXNNPACKConv1dTransformPass.validate_transform_conv1d_to_conv2d(Net(),
+                                                                               pattern_count_transformed_map,
+                                                                               pattern_count_optimized_map,
+                                                                               data_shape)
 
 if __name__ == "__main__":
     run_tests()
