@@ -1417,11 +1417,18 @@ struct PythonPrintImpl {
       }
     } else if (auto enumType = type->cast<EnumType>()) {
       body_ << "class " << enumType->qualifiedClassName().name() << "(Enum):\n";
+
+      std::string value_wrapper = "";
+      if (enumType->getValueType() == StringType::get()) {
+        value_wrapper = "\"";
+      }
+
       {
         auto guard = WithIndented();
         for (const auto& name_value : enumType->enumNamesValues()) {
           indent();
-          body_ << name_value.first << " = " << name_value.second << "\n";
+          body_ << name_value.first << " = " << value_wrapper
+                << name_value.second << value_wrapper << "\n";
         }
       }
     } else {
