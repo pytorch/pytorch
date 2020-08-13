@@ -230,6 +230,11 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
                         custom_opsets, enable_onnx_checker, use_external_data_format)
 
 
+def _diagnose_export(*args, **kwargs):
+    from torch.onnx import utils
+    result = utils._diagnose_export(*args, **kwargs)
+    return result
+
 def export_to_pretty_string(*args, **kwargs):
     from torch.onnx import utils
     return utils.export_to_pretty_string(*args, **kwargs)
