@@ -10,7 +10,8 @@ import torch
 import numpy as np
 
 from torch.testing._internal.common_utils import \
-    (TestCase, run_tests, torch_to_numpy_dtype_dict, suppress_warnings)
+    (TestCase, run_tests, torch_to_numpy_dtype_dict, suppress_warnings,
+     IS_WINDOWS)
 from torch.testing._internal.common_methods_invocations import \
     (unary_ufuncs)
 from torch.testing._internal.common_device_type import \
@@ -24,28 +25,31 @@ from torch.testing import \
 # Interesting values and extremal values for different dtypes
 _unsigned_int_vals = (0, 1, 55, 127)
 _int_vals = (0, -1, 1, -55, 55, -127, 127)
-_float_vals = (0.,
-               -.001, .001,
-               -.25, .25,
-               -1., 1.,
-               -math.pi / 2, math.pi / 2,
-               -math.pi + .00001, math.pi - .00001,
-               -math.pi, math.pi,
-               -math.pi - .00001, math.pi + .00001,
-               -501, 501,
-               -1001.2, 1001.2,
-               -13437.7, 13437.7,
-               -4988429.2, 4988429.2,
-               -1e20, 1e20)
+_small_float_vals = (0.,
+                     -.001, .001,
+                     -.25, .25,
+                     -1., 1.,
+                     -math.pi / 2, math.pi / 2,
+                     -math.pi + .00001, math.pi - .00001,
+                     -math.pi, math.pi,
+                     -math.pi - .00001, math.pi + .00001)
+_large_float_vals = (-501, 501,
+                     -1001.2, 1001.2,
+                     -13437.7, 13437.7,
+                     -4988429.2, 4988429.2,
+                     -1e20, 1e20)
 _float_extremals = (float('inf'), float('-inf'), float('nan'))
-_complex_vals = tuple(complex(x, y) for x, y in product(_float_vals, _float_vals))
-_complex_extremals = tuple(complex(x, y) for x, y in (product(_float_extremals + (0,), _float_extremals + (0,))))
 
 def _make_tensor(size, device, dtype, *, domain=None):
     if dtype is torch.bool:
         return torch.tensor((True, False), device=device)
 
-    t = torch.rand(size, device=device, dtype=dtype)
+    # Windows doesn't support torch.rand(bfloat16) on CUDA
+    if IS_WINDOWS and torch.device(device).type == 'cuda' and dtype is torch.bfloat16:
+        t = torch.rand(size, device=device, dtype=torch.float32).to(dtype)
+    else:
+        t = torch.rand(size, device=device, dtype=dtype)
+
     if domain is None:
         return t
 
@@ -142,8 +146,6 @@ def get_random_array_generator(torch_dtype, *, domain=None):
 
         return generator
 
-    assert False
-
 # Returns a list of pairs (torch.Tensor, numpy.ndarray) where the tensor
 # and array have identical values and the given dtype (except when the
 # dtype is bfloat16, in which case the array will be in float32). The Torch
@@ -153,13 +155,14 @@ def get_random_array_generator(torch_dtype, *, domain=None):
 # The tensors will "cover" the values in vals, and if vals is None then
 # dtype-specific values will be substituted.
 # The values, except for those specified in vals, will be in the domain
-# ([low, high)) specified.
+# [low, high), if specified.
 # If include_extremal_values is False, then the default values will not include
 # NaN, positive infinity, or negative infinity.
 def generate_numeric_tuples(device, dtype, *,
-                            vals=None, domain=None, include_extremal_values=True):
-    medium_length = 650
-    large_size = (1029, 754)
+                            vals=None, domain=None,
+                            include_large_values=True, include_extremal_values=True):
+    medium_length = 812
+    large_size = (1029, 917)
 
     # Special-cases bool
     if dtype is torch.bool:
@@ -176,14 +179,19 @@ def generate_numeric_tuples(device, dtype, *,
 
     # Acquires dtype-specific vals
     if vals is None:
-        if dtype.is_floating_point:
-            vals = _float_vals
-            if include_extremal_values:
-                vals += _float_extremals
-        elif dtype.is_complex:
-            vals = _complex_vals
-            if include_extremal_values:
-                vals += _complex_extremals
+        if dtype.is_floating_point or dtype.is_complex:
+            if include_large_values and include_extremal_values:
+                vals = _small_float_vals + _large_float_vals + _float_extremals
+            elif include_extremal_values:
+                vals = _small_float_vals + _float_extremals
+            elif include_large_values:
+                vals = _small_float_vals + _large_float_vals
+            else:
+                vals = _small_float_vals
+
+            # Converts float -> complex vals if dtype is complex
+            if dtype.is_complex:
+                vals = tuple(complex(x, y) for x, y in product(vals, vals))
         elif dtype is torch.uint8:
             vals = _unsigned_int_vals
         else:  # dtypes is a signed integer type
@@ -314,6 +322,7 @@ class TestUnaryUfuncs(TestCase):
 
         pairs = generate_numeric_tuples(device, dtype,
                                         domain=op.domain,
+                                        include_large_values=op.handles_large_floats,
                                         include_extremal_values=include_extremals)
         for t, a in pairs:
             actual = op(t)

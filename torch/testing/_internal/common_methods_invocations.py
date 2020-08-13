@@ -21,7 +21,7 @@ from torch.testing._internal.common_utils import \
      random_symmetric_matrix, random_symmetric_psd_matrix,
      random_symmetric_pd_matrix, make_nonzero_det,
      random_fullrank_matrix_distinct_singular_value, set_rng_seed,
-     TEST_WITH_ROCM)
+     TEST_WITH_ROCM, IS_WINDOWS)
 
 # Classes and methods for the operator database
 class OpInfo(object):
@@ -123,6 +123,7 @@ class UnaryUfuncInfo(OpInfo):
                  dtypesIfCUDA=floating_and_complex_types_and(torch.half),
                  dtypesIfROCM=floating_types_and(torch.half, torch.bfloat16),
                  domain=None,  # the [low, high) domain of the function
+                 handles_large_floats=True,  # whether the op correctly handles large float values (like 1e-20)
                  handles_extremals=True,  # whether the op correctly handles extremal values (like inf)
                  handles_complex_extremals=True,  # whether the op correct handles complex extremals (like inf -infj)
                  **kwargs):
@@ -134,12 +135,16 @@ class UnaryUfuncInfo(OpInfo):
                                              **kwargs)
         self.ref = ref
         self.domain = domain
+        self.handles_large_floats = handles_large_floats
         self.handles_extremals = handles_extremals
         self.handles_complex_extremals = handles_complex_extremals
 
 L = 20
 M = 10
 S = 5
+
+# Include in "tests_to_skip" to skip complex numerics tests on Windows
+_windows_skip = ('.*numerics.*complex.*',) if IS_WINDOWS else tuple()
 
 # Operator database
 op_db = [
@@ -150,19 +155,23 @@ op_db = [
                    handles_complex_extremals=False,
                    decorators=(precisionOverride({torch.bfloat16: 1e-1,
                                                   torch.complex64: 1e-2}),),
-                   tests_to_skip=('.*numerics.*cpu.*complex.*',)),
+                   tests_to_skip=('.*numerics.*cpu.*complex.*',) + _windows_skip),
     UnaryUfuncInfo('cos',
                    ref=np.cos,
                    dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
-                   decorators=(precisionOverride({torch.bfloat16: 1e-2}),)),
+                   handles_large_floats=False,
+                   decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
+                   tests_to_skip=_windows_skip),
     UnaryUfuncInfo('cosh',
                    ref=np.cosh,
-                   dtypesIfCPU=floating_and_complex_types()),
-
+                   dtypesIfCPU=floating_and_complex_types(),
+                   tests_to_skip=_windows_skip),
     UnaryUfuncInfo('sin',
                    ref=np.sin,
+                   handles_large_floats=False,
                    handles_complex_extremals=False,
-                   decorators=(precisionOverride({torch.bfloat16: 1e-2}),)),
+                   decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
+                   tests_to_skip=_windows_skip),
 ]
 
 # Common operator groupings
