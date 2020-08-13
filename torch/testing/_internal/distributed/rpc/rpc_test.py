@@ -3900,7 +3900,7 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
             rpc_backend_options=rpc.TensorPipeRpcBackendOptions(
                 init_method=options.init_method,
                 num_worker_threads=options.num_worker_threads,
-                device_maps={dst: {0:1, 1:0}}
+                device_maps={dst: {0: 1, 1: 0}}
             )
         )
 
