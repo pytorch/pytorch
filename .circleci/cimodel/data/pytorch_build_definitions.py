@@ -194,7 +194,7 @@ def gen_docs_configs(xenial_parent_config):
         DocPushConf(
             "pytorch_python_doc_push",
             parent_build="pytorch_python_doc_build",
-            branch="site",
+            branch="site-v1.6.0",
         )
     )
 

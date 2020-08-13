@@ -2146,7 +2146,7 @@ workflows:
           requires:
             - pytorch_linux_xenial_py3_6_gcc5_4_build
       - pytorch_doc_push:
-          branch: site
+          branch: site-v1.6.0
           context: org-member
           name: pytorch_python_doc_push
           requires:
