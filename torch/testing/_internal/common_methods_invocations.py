@@ -1,8 +1,11 @@
-import torch
-from torch._six import inf, istuple
+import re
 from functools import reduce
 from operator import mul, itemgetter
 import collections
+
+import torch
+import numpy as np
+from torch._six import inf, istuple
 from torch.autograd import Variable
 
 from torch.testing import \
@@ -12,12 +15,13 @@ from torch.testing import \
      floating_and_complex_types, floating_and_complex_types_and)
 from torch.testing._internal.common_device_type import \
     (skipCUDAIfNoMagma, skipCPUIfNoLapack, expectedFailureCUDA,
-     expectedAlertNondeterministic)
+     expectedAlertNondeterministic, precisionOverride)
 from torch.testing._internal.common_utils import \
     (prod_single_zero, random_square_matrix_of_rank,
      random_symmetric_matrix, random_symmetric_psd_matrix,
      random_symmetric_pd_matrix, make_nonzero_det,
-     random_fullrank_matrix_distinct_singular_value, set_rng_seed)
+     random_fullrank_matrix_distinct_singular_value, set_rng_seed,
+     TEST_WITH_ROCM)
 
 # Classes and methods for the operator database
 class OpInfo(object):
@@ -30,6 +34,7 @@ class OpInfo(object):
                  dtypesIfCPU=None,  # dtypes this function is expected to work with on CPU
                  dtypesIfCUDA=None,  # dtypes this function is expected to work with on CUDA
                  dtypesIfROCM=None,  # dtypes this function is expected to work with on ROCM
+                 tests_to_skip=None,  # regexes of tests to skip
                  decorators=None):  # decorators to apply to generated tests
         # Validates the dtypes are generated from the dispatch-related functions
         for dtype_list in (dtypes, dtypesIfCPU, dtypesIfCUDA, dtypesIfROCM):
@@ -46,6 +51,8 @@ class OpInfo(object):
         self.method_variant = getattr(torch.Tensor, name) if hasattr(torch.Tensor, name) else None
         inplace_name = name + "_"
         self.inplace_variant = getattr(torch.Tensor, inplace_name) if hasattr(torch.Tensor, name) else None
+
+        self.tests_to_skip = tests_to_skip
         self.decorators = decorators
 
     def __call__(self, *args, **kwargs):
@@ -68,6 +75,28 @@ class OpInfo(object):
         """
         return self.inplace_variant
 
+    # Returns True if the test should be skipped and False otherwise
+    def should_skip(self, test_name):
+        if self.tests_to_skip is None:
+            return False
+
+        for regex in self.tests_to_skip:
+            if re.match(regex, test_name):
+                return True
+
+        return False
+
+    def supports_dtype(self, dtype, device_type):
+        if device_type == 'cpu':
+            return dtype in self.dtypesIfCPU
+        if device_type == 'cuda':
+            if TEST_WITH_ROCM:
+                return dtype in self.dtypesIfROCM
+            return dtype in self.dtypesIfCUDA
+
+        return dtype in self.dtypes
+
+
 
 # Metadata class for unary "universal functions (ufuncs)" that accept a single
 # tensor and have common properties like:
@@ -88,10 +117,14 @@ class UnaryUfuncInfo(OpInfo):
     def __init__(self,
                  name,  # the string name of the function
                  *,
+                 ref,  # a reference function
                  dtypes=floating_types(),
                  dtypesIfCPU=floating_and_complex_types_and(torch.bfloat16),
                  dtypesIfCUDA=floating_and_complex_types_and(torch.half),
                  dtypesIfROCM=floating_types_and(torch.half, torch.bfloat16),
+                 domain=None,  # the [low, high) domain of the function
+                 handles_extremals=True,  # whether the op correctly handles extremal values (like inf)
+                 handles_complex_extremals=True,  # whether the op correct handles complex extremals (like inf -infj)
                  **kwargs):
         super(UnaryUfuncInfo, self).__init__(name,
                                              dtypes=dtypes,
@@ -99,6 +132,10 @@ class UnaryUfuncInfo(OpInfo):
                                              dtypesIfCUDA=dtypesIfCUDA,
                                              dtypesIfROCM=dtypesIfROCM,
                                              **kwargs)
+        self.ref = ref
+        self.domain = domain
+        self.handles_extremals = handles_extremals
+        self.handles_complex_extremals = handles_complex_extremals
 
 L = 20
 M = 10
@@ -106,10 +143,26 @@ S = 5
 
 # Operator database
 op_db = [
+    # NOTE: CPU complex acos produces incorrect outputs (https://github.com/pytorch/pytorch/issues/42952)
+    UnaryUfuncInfo('acos',
+                   ref=np.arccos,
+                   domain=(-1, 1),
+                   handles_complex_extremals=False,
+                   decorators=(precisionOverride({torch.bfloat16: 1e-1,
+                                                  torch.complex64: 1e-2}),),
+                   tests_to_skip=('.*numerics.*cpu.*complex.*',)),
     UnaryUfuncInfo('cos',
-                   dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16)),
+                   ref=np.cos,
+                   dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
+                   decorators=(precisionOverride({torch.bfloat16: 1e-2}),)),
     UnaryUfuncInfo('cosh',
+                   ref=np.cosh,
                    dtypesIfCPU=floating_and_complex_types()),
+
+    UnaryUfuncInfo('sin',
+                   ref=np.sin,
+                   handles_complex_extremals=False,
+                   decorators=(precisionOverride({torch.bfloat16: 1e-2}),)),
 ]
 
 # Common operator groupings
