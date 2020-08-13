@@ -998,16 +998,14 @@ class TestQuantizationAwareTraining(QuantizationTestCase):
         model = prepare_qat(model)
 
         def checkHooksIsPresent(model, before_convert=True):
-            forward_hooks = 1
             if before_convert:
                 self.assertEqual(len(model.quant._forward_hooks.values()), 1,
                                  "Quantization observer hook has disappeared")
-                forward_hooks = 2
             self.assertObjectIn(fw_pre_hook, model.fc._forward_pre_hooks.values())
             self.assertObjectIn(fw_hook, model.fc._forward_hooks.values())
             self.assertEqual(len(model.fc._forward_pre_hooks.values()), 1,
                              "Extra pre forward hooks have appeared on a layer")
-            self.assertEqual(len(model.fc._forward_hooks.values()), forward_hooks,
+            self.assertEqual(len(model.fc._forward_hooks.values()), 1,
                              "Extra post forward hooks have appeared on a layer")
 
         checkHooksIsPresent(model, True)

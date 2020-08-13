@@ -35,6 +35,7 @@ class _ConvBnNd(nn.modules.conv._ConvNd):
         self.qconfig = qconfig
         self.freeze_bn = freeze_bn if self.training else True
         self.bn = nn.BatchNorm2d(out_channels, eps, momentum, True, True)
+        self.activation_post_process = self.qconfig.activation()
         self.weight_fake_quant = self.qconfig.weight()
         if bias:
             self.bias = Parameter(torch.Tensor(out_channels))
@@ -95,7 +96,7 @@ class _ConvBnNd(nn.modules.conv._ConvNd):
         return super(_ConvBnNd, self).extra_repr()
 
     def forward(self, input):
-        return self._forward(input)
+        return self.activation_post_process(self._forward(input))
 
     def train(self, mode=True):
         """
@@ -185,7 +186,7 @@ class _ConvBnNd(nn.modules.conv._ConvNd):
 class ConvBn2d(_ConvBnNd, nn.Conv2d):
     r"""
     A ConvBn2d module is a module fused from Conv2d and BatchNorm2d,
-    attached with FakeQuantize modules for weight,
+    attached with FakeQuantize modules for both output activation and weight,
     used in quantization aware training.
 
     We combined the interface of :class:`torch.nn.Conv2d` and
@@ -198,6 +199,7 @@ class ConvBn2d(_ConvBnNd, nn.Conv2d):
 
     Attributes:
         freeze_bn:
+        activation_post_process: fake quant module for output activation
         weight_fake_quant: fake quant module for weight
 
     """
@@ -228,7 +230,7 @@ class ConvBn2d(_ConvBnNd, nn.Conv2d):
 class ConvBnReLU2d(ConvBn2d):
     r"""
     A ConvBnReLU2d module is a module fused from Conv2d, BatchNorm2d and ReLU,
-    attached with FakeQuantize modules for weight,
+    attached with FakeQuantize modules for both output activation and weight,
     used in quantization aware training.
 
     We combined the interface of :class:`torch.nn.Conv2d` and
@@ -240,6 +242,8 @@ class ConvBnReLU2d(ConvBn2d):
     default.
 
     Attributes:
+        observer: fake quant module for output activation, it's called observer
+            to align with post training flow
         weight_fake_quant: fake quant module for weight
 
     """
@@ -266,7 +270,7 @@ class ConvBnReLU2d(ConvBn2d):
                                            qconfig)
 
     def forward(self, input):
-        return F.relu(ConvBn2d._forward(self, input))
+        return self.activation_post_process(F.relu(ConvBn2d._forward(self, input)))
 
     @classmethod
     def from_float(cls, mod, qconfig=None):
@@ -275,13 +279,14 @@ class ConvBnReLU2d(ConvBn2d):
 class ConvReLU2d(nnqat.Conv2d):
     r"""
     A ConvReLU2d module is a fused module of Conv2d and ReLU, attached with
-    FakeQuantize modules for weight for
+    FakeQuantize modules for both output activation and weight for
     quantization aware training.
 
     We combined the interface of :class:`~torch.nn.Conv2d` and
     :class:`~torch.nn.BatchNorm2d`.
 
     Attributes:
+        activation_post_process: fake quant module for output activation
         weight_fake_quant: fake quant module for weight
 
     """
@@ -297,11 +302,12 @@ class ConvReLU2d(nnqat.Conv2d):
                                          qconfig=qconfig)
         assert qconfig, 'qconfig must be provided for QAT module'
         self.qconfig = qconfig
+        self.activation_post_process = self.qconfig.activation()
         self.weight_fake_quant = self.qconfig.weight()
 
     def forward(self, input):
-        return F.relu(
-            self._conv_forward(input, self.weight_fake_quant(self.weight)))
+        return self.activation_post_process(F.relu(
+            self._conv_forward(input, self.weight_fake_quant(self.weight))))
 
     @classmethod
     def from_float(cls, mod, qconfig=None):

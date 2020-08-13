@@ -808,8 +808,9 @@ type as :attr:`self`.
 
 .. note::
 
-    Unlike `copy_()`, this function is recorded in the computation graph. Gradients
-    propagating to the cloned tensor will propagate to the original tensor.
+    This function is differentiable and so gradients will flow back to the original
+    Tensor. If you want to get a Tensor that is independent from the point of view
+    of the autograd, see :meth:`~Tensor.detach`.
 
 Args:
     {memory_format}
