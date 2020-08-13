@@ -6,6 +6,7 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <torch/csrc/jit/codegen/cuda/type.h>
+#include <torch/csrc/jit/codegen/cuda/utils.h>
 
 #include <cstdint>
 #include <deque>
@@ -58,7 +59,7 @@ class IrCloner;
  * Basically beinng able to succienctly traverse down the inhereitance stack of
  * a Statment at runtime. This is currently implemented in dispatch.h
  */
-class TORCH_CUDA_API Statement {
+class TORCH_CUDA_API Statement : public NonCopyable, public PolymorphicBase {
   friend void swap(Fusion&, Fusion&) noexcept;
 
  public:
@@ -66,8 +67,6 @@ class TORCH_CUDA_API Statement {
 
   // Cloning constructor
   Statement(const Statement* src, IrCloner* ir_cloner);
-
-  virtual ~Statement() = default;
 
   // Dispatch functions, definitions in dispatch.cpp
   template <typename T>
@@ -103,29 +102,6 @@ class TORCH_CUDA_API Statement {
 
   // Make sure this is an Expr and return it as an Expr*
   Expr* asExpr();
-
-  // Replacement for static_cast<T*>(ptr): ptr->as<T>()
-  template <class T>
-  T* as() {
-#ifdef NDEBUG
-    auto downcast_ptr = static_cast<T*>(this);
-#else
-    auto downcast_ptr = dynamic_cast<T*>(this);
-    TORCH_INTERNAL_ASSERT(downcast_ptr != nullptr);
-#endif
-    return downcast_ptr;
-  }
-
-  template <class T>
-  const T* as() const {
-#ifdef NDEBUG
-    auto downcast_ptr = static_cast<const T*>(this);
-#else
-    auto downcast_ptr = dynamic_cast<const T*>(this);
-    TORCH_INTERNAL_ASSERT(downcast_ptr != nullptr);
-#endif
-    return downcast_ptr;
-  }
 
   // Return the fusion this statement belongs to
   Fusion* fusion() const {
