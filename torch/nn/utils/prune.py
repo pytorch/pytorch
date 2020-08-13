@@ -1179,7 +1179,7 @@ def _validate_pruning_amount_init(amount):
 
     if (isinstance(amount, numbers.Integral) and amount < 0) or (
         not isinstance(amount, numbers.Integral)  # so it's a float
-        and (amount > 1.0 or amount < 0.0)
+        and (float(amount) > 1.0 or float(amount) < 0.0)
     ):
         raise ValueError(
             "amount={} should either be a float in the "
