@@ -3,7 +3,7 @@
 
 namespace at { namespace native {
 
-std::vector<Tensor> foreach_add_scalar_kernel_fallback(TensorList tensors, Scalar scalar) {
+std::vector<Tensor> foreach_tensor_add_scalar_kernel_slow(TensorList tensors, Scalar scalar) {
   verify_list(tensors);
 
   std::vector<Tensor> result;
@@ -14,14 +14,12 @@ std::vector<Tensor> foreach_add_scalar_kernel_fallback(TensorList tensors, Scala
   return result;
 }
 
-std::vector<Tensor> foreach_add_scalar_kernel_fallback_(TensorList tensors, Scalar scalar) {
+void foreach_tensor_add_scalar_kernel_slow_(TensorList tensors, Scalar scalar) {
   verify_list(tensors);
 
   for (auto& t : tensors) {
     t.add_(scalar);
   }
-
-  return tensors.vec();
 }
 
 }} // namespace at::native
