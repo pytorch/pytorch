@@ -319,7 +319,11 @@ void DistEngine::execute_graph_task_until_ready_queue_empty(
   // different threads
   std::shared_ptr<ReadyQueue> cpu_ready_queue = std::make_shared<ReadyQueue>();
   auto graph_task = node_task.base_.lock();
-  TORCH_INTERNAL_ASSERT(graph_task);
+  if (graph_task == nullptr) {
+    LOG(ERROR) << "GraphTask has expired for NodeTask: "
+               << node_task.fn_->name() << ", skipping execution.";
+    return;
+  }
 
   cpu_ready_queue->push(std::move(node_task), incrementOutstandingTasks);
 
@@ -375,7 +379,7 @@ std::shared_ptr<rpc::FutureMessage> DistEngine::runEngineAndAccumulateGradients(
   auto graphTask = autogradContext->retrieveGraphTask();
   at::launch([this, graphTask, graphRoot, incrementOutstandingTasks]() {
     execute_graph_task_until_ready_queue_empty(
-        NodeTask(graphTask, graphRoot, InputBuffer(0)),
+        /*node_task*/ NodeTask(graphTask, graphRoot, InputBuffer(0)),
         /*incrementOutstandingTasks*/ incrementOutstandingTasks);
   });
   // Use a reference here to avoid refcount bump on futureGrads.
@@ -490,7 +494,7 @@ std::shared_ptr<rpc::FutureMessage> DistEngine::executeSendFunctionAsync(
     auto graphTask = autogradContext->retrieveGraphTask();
     at::launch([this, graphTask, sendFunction]() {
       execute_graph_task_until_ready_queue_empty(
-          NodeTask(graphTask, sendFunction, InputBuffer(0)),
+          /*node_task*/ NodeTask(graphTask, sendFunction, InputBuffer(0)),
           /*incrementOutstandingTasks*/ false);
     });
     return std::make_shared<rpc::FutureMessage>(rpc::Message());

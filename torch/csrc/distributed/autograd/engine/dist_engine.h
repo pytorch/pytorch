@@ -135,7 +135,8 @@ class TORCH_API DistEngine {
   void cleanupBackwardPass(const ContextPtr& autogradContext);
 
   // Global thread to execute CPU continuations.
-  void globalCpuThread(const std::shared_ptr<torch::autograd::ReadyQueue>& ready_queue);
+  void globalCpuThread(
+      const std::shared_ptr<torch::autograd::ReadyQueue>& ready_queue);
 
   // Set of autograd context_ids, which we have already initialized for
   // distributed autograd on this node (e.g.: already computed dependencies)

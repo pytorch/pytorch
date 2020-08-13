@@ -787,6 +787,18 @@ clamp_(min, max) -> Tensor
 In-place version of :meth:`~Tensor.clamp`
 """)
 
+add_docstr_all('clip', r"""
+clip(min, max) -> Tensor
+
+Alias for :meth:`~Tensor.clamp`.
+""")
+
+add_docstr_all('clip_', r"""
+clip_(min, max) -> Tensor
+
+Alias for :meth:`~Tensor.clamp_`.
+""")
+
 add_docstr_all('clone',
                r"""
 clone(memory_format=torch.preserve_format) -> Tensor
@@ -1372,6 +1384,26 @@ add_docstr_all('ger',
 ger(vec2) -> Tensor
 
 See :func:`torch.ger`
+""")
+
+add_docstr_all('outer', r"""
+outer(vec2) -> Tensor
+
+See :func:`torch.outer`.
+""")
+
+add_docstr_all('hypot',
+               r"""
+hypot(other) -> Tensor
+
+See :func:`torch.hypot`
+""")
+
+add_docstr_all('hypot_',
+               r"""
+hypot_(other) -> Tensor
+
+In-place version of :meth:`~Tensor.hypot`
 """)
 
 add_docstr_all('indices',
@@ -2289,6 +2321,13 @@ qscheme() -> torch.qscheme
 Returns the quantization scheme of a given QTensor.
 """)
 
+add_docstr_all('quantile',
+               r"""
+quantile(q, dim=None, keepdim=False) -> Tensor
+
+See :func:`torch.quantile`
+""")
+
 add_docstr_all('q_scale',
                r"""
 q_scale() -> float
@@ -3046,6 +3085,13 @@ sum(dim=None, keepdim=False, dtype=None) -> Tensor
 See :func:`torch.sum`
 """)
 
+add_docstr_all('nansum',
+               r"""
+nansum(dim=None, keepdim=False, dtype=None) -> Tensor
+
+See :func:`torch.nansum`
+""")
+
 add_docstr_all('svd',
                r"""
 svd(some=True, compute_uv=True) -> (Tensor, Tensor, Tensor)
@@ -3720,8 +3766,7 @@ istft(n_fft, hop_length=None, win_length=None, window=None,
 See :func:`torch.istft`
 """)
 
-add_docstr_all('fft',
-               r"""
+add_docstr_all('fft', r"""
 fft(signal_ndim, normalized=False) -> Tensor
 
 See :func:`torch.fft`

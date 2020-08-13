@@ -161,9 +161,6 @@
 - name: abs(Tensor self) -> Tensor
   self: grad * self.sign()
 
-- name: absolute(Tensor self) -> Tensor
-  self: grad * self.sign()
-
 - name: acos(Tensor self) -> Tensor
   self: grad * -((-self * self + 1).rsqrt())
 
@@ -498,6 +495,10 @@
 - name: grid_sampler_3d(Tensor input, Tensor grid, int interpolation_mode, int padding_mode, bool align_corners) -> Tensor
   input, grid: "grad.defined() ? grid_sampler_3d_backward(grad, input, grid, interpolation_mode, padding_mode, align_corners) : std::tuple<Tensor, Tensor>()"
 
+# See NOTE [ grid_sample CPU fallback ]
+- name: _grid_sampler_2d_cpu_fallback(Tensor input, Tensor grid, int interpolation_mode, int padding_mode, bool align_corners) -> Tensor
+  input, grid: "grad.defined() ? _grid_sampler_2d_cpu_fallback_backward(grad, input, grid, interpolation_mode, padding_mode, align_corners) : std::tuple<Tensor, Tensor>()"
+
 - name: gt_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   self: zeros_like(self)
 
@@ -513,6 +514,10 @@
 
 - name: hardswish(Tensor self) -> Tensor
   self: hardswish_backward(grad, self)
+
+- name: hypot(Tensor self, Tensor other) -> Tensor
+  self: grad * self / result
+  other: grad * other / result
 
 - name: index.Tensor(Tensor self, Tensor?[] indices) -> Tensor
   self: index_backward(zeros_like(self), indices, grad)
@@ -965,6 +970,12 @@
 
 - name: sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   self: sum_backward(grad, self.sizes(), dim, keepdim)
+
+- name: nansum(Tensor self, *, ScalarType? dtype=None) -> Tensor
+  self: grad.expand(self.sizes()).to(self.scalar_type()) * self.isnan().logical_not()
+
+- name: nansum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+  self: nansum_backward(grad.to(self.scalar_type()), self, dim, keepdim)
 
 - name: svd(Tensor self, bool some=True, bool compute_uv=True) -> (Tensor U, Tensor S, Tensor V)
   self: svd_backward(grads, self, some, compute_uv, U, S, V)

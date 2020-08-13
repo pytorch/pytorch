@@ -6,8 +6,8 @@ jobs:
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - checkout
+    - calculate_docker_image_tag
     - setup_linux_system_environment
-    - checkout
     - optional_merge_target_branch
     - setup_ci_environment
     - run:
@@ -15,10 +15,14 @@ jobs:
         no_output_timeout: "1h"
         command: |
           set -e
+          # TODO: Remove this after we figure out why rocm tests are failing
+          if [[ "${DOCKER_IMAGE}" == *rocm* ]]; then
+            export DOCKER_TAG="ab1632df-fa59-40e6-8c23-98e004f61148"
+          fi
           # Pull Docker image and run build
-          echo "DOCKER_IMAGE: "${DOCKER_IMAGE}
-          time docker pull ${DOCKER_IMAGE} >/dev/null
-          export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
+          echo "DOCKER_IMAGE: "${DOCKER_IMAGE}:${DOCKER_TAG}
+          time docker pull ${DOCKER_IMAGE}:${DOCKER_TAG} >/dev/null
+          export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${DOCKER_IMAGE}:${DOCKER_TAG})
 
           git submodule sync && git submodule update -q --init --recursive
 
@@ -41,7 +45,7 @@ jobs:
             # The xla build uses the same docker image as
             # pytorch-linux-trusty-py3.6-gcc5.4-build. In the push step, we have to
             # distinguish between them so the test can pick up the correct image.
-            output_image=${DOCKER_IMAGE}-${CIRCLE_SHA1}
+            output_image=${DOCKER_IMAGE}:${DOCKER_TAG}-${CIRCLE_SHA1}
             if [[ ${BUILD_ENVIRONMENT} == *"xla"* ]]; then
               export COMMIT_DOCKER_IMAGE=$output_image-xla
             elif [[ ${BUILD_ENVIRONMENT} == *"libtorch"* ]]; then
@@ -74,6 +78,7 @@ jobs:
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - checkout
+    - calculate_docker_image_tag
     - setup_linux_system_environment
     - setup_ci_environment
     - run:
@@ -82,8 +87,12 @@ jobs:
         command: |
           set -e
           export PYTHONUNBUFFERED=1
+          # TODO: Remove this after we figure out why rocm tests are failing
+          if [[ "${DOCKER_IMAGE}" == *rocm* ]]; then
+            export DOCKER_TAG="ab1632df-fa59-40e6-8c23-98e004f61148"
+          fi
           # See Note [Special build images]
-          output_image=${DOCKER_IMAGE}-${CIRCLE_SHA1}
+          output_image=${DOCKER_IMAGE}:${DOCKER_TAG}-${CIRCLE_SHA1}
           if [[ ${BUILD_ENVIRONMENT} == *"xla"* ]]; then
             export COMMIT_DOCKER_IMAGE=$output_image-xla
           elif [[ ${BUILD_ENVIRONMENT} == *"libtorch"* ]]; then
@@ -150,6 +159,7 @@ jobs:
           # =================== The following code will be executed inside Docker container ===================
           set -ex
           export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}
+          export SCRIBE_GRAPHQL_ACCESS_TOKEN="${SCRIBE_GRAPHQL_ACCESS_TOKEN}"
           ${PARALLEL_FLAGS}
           source ./workspace/env
           cd workspace
@@ -221,10 +231,7 @@ jobs:
           name: Install Cudnn
           command : |
             if [[ "${USE_CUDA}" == "1" ]]; then
-              cd c:/
-              curl --retry 3 -O https://ossci-windows.s3.amazonaws.com/cudnn-10.1-windows10-x64-v7.6.4.38.zip
-              7z x cudnn-10.1-windows10-x64-v7.6.4.38.zip -ocudnn
-              cp -r cudnn/cuda/* "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v10.1/"
+              .circleci/scripts/windows_cudnn_install.sh
             fi
       - run:
           name: Build
@@ -281,17 +288,19 @@ jobs:
           name: Install Cuda
           no_output_timeout: 30m
           command: |
-            if [[ "${CUDA_VERSION}" != "cpu" && "${JOB_EXECUTOR}" != "windows-with-nvidia-gpu" ]]; then
-              .circleci/scripts/windows_cuda_install.sh
+            if [[ "${CUDA_VERSION}" != "cpu" ]]; then
+              if [[ "${CUDA_VERSION}" != "10" || "${JOB_EXECUTOR}" != "windows-with-nvidia-gpu" ]]; then
+                .circleci/scripts/windows_cuda_install.sh
+              fi
+              if [[ "${CUDA_VERSION}" != "10" && "${JOB_EXECUTOR}" == "windows-with-nvidia-gpu" ]]; then
+                .circleci/scripts/driver_update.bat
+              fi
             fi
       - run:
           name: Install Cudnn
           command : |
-            if [[ "${CUDA_VERSION}" != "cpu" && "${JOB_EXECUTOR}" != "windows-with-nvidia-gpu" ]]; then
-              cd c:/
-              curl --retry 3 -O https://ossci-windows.s3.amazonaws.com/cudnn-10.1-windows10-x64-v7.6.4.38.zip
-              7z x cudnn-10.1-windows10-x64-v7.6.4.38.zip -ocudnn
-              cp -r cudnn/cuda/* "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v10.1/"
+            if [[ "${CUDA_VERSION}" != "cpu" ]]; then
+              .circleci/scripts/windows_cudnn_install.sh
             fi
       - run:
           name: Test

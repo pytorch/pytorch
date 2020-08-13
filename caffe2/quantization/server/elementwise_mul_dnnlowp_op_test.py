@@ -7,7 +7,7 @@ import hypothesis.strategies as st
 import numpy as np
 from caffe2.python import core, dyndep, workspace
 from caffe2.quantization.server.dnnlowp_test_utils import check_quantized_results_close
-from hypothesis import given
+from hypothesis import given, settings
 
 
 dyndep.InitOpsLibrary("//caffe2/caffe2/quantization/server:dnnlowp_ops")
@@ -23,6 +23,7 @@ class DNNLowPMulOpTest(hu.HypothesisTestCase):
         in_place=st.sampled_from([(False, False), (True, False), (False, True)]),
         **hu.gcs_cpu_only
     )
+    @settings(deadline=None)
     def test_dnnlowp_elementwise_mul_int(
         self, N, is_empty, in_quantized, out_quantized, in_place, gc, dc
     ):
@@ -99,6 +100,7 @@ class DNNLowPMulOpTest(hu.HypothesisTestCase):
         check_quantized_results_close(outputs)
 
     @given(**hu.gcs_cpu_only)
+    @settings(deadline=None)
     def test_dnnlowp_elementwise_mul_broadcast(self, gc, dc):
         # Set broadcast and no axis, i.e. broadcasting last dimensions.
         min_ = -100
@@ -138,6 +140,7 @@ class DNNLowPMulOpTest(hu.HypothesisTestCase):
         check_quantized_results_close(outputs)
 
     @given(**hu.gcs_cpu_only)
+    @settings(deadline=None)
     def test_dnnlowp_elementwise_mul_broadcast_axis(self, gc, dc):
         for bdim, axis in [
             ((3, 4), 1),  # broadcasting intermediate dimensions

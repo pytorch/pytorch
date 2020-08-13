@@ -189,8 +189,6 @@ enum class DispatchKey : uint8_t {
   // the bulk of this logic.
   Autograd,
 
-  Profiler,
-
   Tracer,
 
   // Pre-autograd dispatch keys allow backends to override the autograd behavior
@@ -224,6 +222,10 @@ enum class DispatchKey : uint8_t {
   // This is the dispatch key for BatchedTensorImpl, which is used to implement
   // batching rules for vmap.
   Batched,
+
+  // When we are inside a vmap, all tensors dispatch on this key.
+  // See Note: [DispatchKey::VmapMode usage] for more details.
+  VmapMode,
 
   // TESTING: This is intended to be a generic testing tensor type id.
   // Don't use it for anything real; its only acceptable use is within a single
