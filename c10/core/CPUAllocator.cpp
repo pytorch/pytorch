@@ -155,8 +155,8 @@ class DefaultMobileCPUAllocator final : public at::Allocator {
     }
     // TODO: enable with better TLS support on mobile
     // profiledCPUMemoryReporter().Delete(pointer);
-    if (auto allocator_ptr = GetThreadLocalCachingAllocator();
-        allocator_ptr != nullptr) {
+    auto allocator_ptr = GetThreadLocalCachingAllocator();
+    if (allocator_ptr != nullptr) {
       allocator_ptr->free(pointer);
     } else {
       c10::free_cpu(pointer);
