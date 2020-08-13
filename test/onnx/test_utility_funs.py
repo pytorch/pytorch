@@ -7,6 +7,8 @@ from torch.onnx import utils, OperatorExportTypes, TrainingMode
 from torch.onnx.symbolic_helper import _set_opset_version, _set_operator_export_type
 import torch.utils.cpp_extension
 from test_pytorch_common import skipIfUnsupportedMinOpsetVersion
+import caffe2.python.onnx.backend as backend
+from verify import verify
 
 import torchvision
 
@@ -635,6 +637,27 @@ class TestUtilityFuns(TestCase):
         iter = graph.nodes()
         assert next(iter).kind() == "prim::ListConstruct"
 
+    def test_custom_layer_tuple(self):
+        class CustomFunction(torch.autograd.Function):
+            @staticmethod
+            def symbolic(g, input):
+                return g.op('CustomNamespace::Custom', input, outputs=2)
+
+            @staticmethod
+            def forward(ctx, input):
+                return input, input
+
+        class Custom(torch.nn.Module):
+            def forward(self, input):
+                return CustomFunction.apply(input)
+
+        model = Custom()
+        batch = torch.FloatTensor(1, 3)
+
+        graph, _, _ = utils._model_to_graph(model, batch)
+        iter = graph.nodes()
+        assert next(iter).kind() == "CustomNamespace::Custom"
+
     @skipIfUnsupportedMinOpsetVersion(12)
     def test_dropout_training_zero(self):
         class MyModule(torch.nn.Module):
@@ -676,6 +699,39 @@ class TestUtilityFuns(TestCase):
         ratio_ort = np.sum(ort_mask) / nb_elements
 
         np.testing.assert_allclose(ratio_pytorch, ratio_ort, rtol=0.01, atol=0.01)
+
+    def test_unused_initializers(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super(Model, self).__init__()
+                self.conv2 = torch.nn.ConvTranspose2d(16, 33, (3, 5), stride=(2, 1), padding=(4, 2), dilation=(1, 1))
+                self.k_proj = torch.nn.Linear(5, 5, bias=True)
+
+            def forward(self, x):
+                x = self.conv2(x)
+                return x
+
+        x = torch.randn(20, 16, 50, 100)
+        _set_opset_version(self.opset_version)
+        _set_operator_export_type(OperatorExportTypes.ONNX)
+        _, params_dict, __ = utils._model_to_graph(Model(), (x, ), do_constant_folding=False,
+                                                   operator_export_type=OperatorExportTypes.ONNX)
+
+        assert len(params_dict) == 2
+
+    def test_modifying_params(self):
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super(MyModel, self).__init__()
+                self.param = torch.nn.Parameter(torch.tensor([2.0]))
+
+            def forward(self, x):
+                y = x * x
+                self.param.data.add_(1.0)
+                return y
+
+        x = torch.tensor([1, 2])
+        verify(MyModel(), x, backend, do_constant_folding=False)
 
     def test_fuse_conv_bn(self):
         class Fuse(torch.nn.Module):
@@ -780,6 +836,33 @@ class TestUtilityFuns(TestCase):
         ort_outs2 = ort_sess.run(None, ort_inputs)
         [np.testing.assert_allclose(ort_out1, ort_out2, atol=1e-7, rtol=0.001) for ort_out1, ort_out2 in zip(ort_outs1, ort_outs2)]
 
+    def test_onnx_function_substitution_pass(self):
+
+        @torch.jit.script
+        def f(x : torch.Tensor, y : torch.Tensor):
+            z = x - y
+            return x + z
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+
+            def forward(self, x, y):
+                return f(x, y)
+
+        model = MyModule()
+        input_1 = torch.tensor(11)
+        input_2 = torch.tensor(12)
+        _set_opset_version(self.opset_version)
+        _set_operator_export_type(OperatorExportTypes.ONNX)
+        graph, _, __ = utils._model_to_graph(MyModule(), (input_1, input_2), do_constant_folding=True,
+                                             operator_export_type=OperatorExportTypes.ONNX)
+        # Check that the prim::Constant node in the graph for representing the
+        # scripted function `f` is removed and the following prim::CallFunction
+        # is replced by inline graph, with onnx::Sub and onnx::Add nodes.
+        for node in graph.nodes():
+            assert node.kind() != "prim::Constant"
+        assert len(list(graph.nodes())) == 2  # onnx::Sub and onnx::Add nodes only.
 
 # opset 10 tests
 TestUtilityFuns_opset10 = type(str("TestUtilityFuns_opset10"),
@@ -797,11 +880,6 @@ TestUtilityFuns_opset12 = type(str("TestUtilityFuns_opset12"),
                                (TestCase,),
                                dict(TestUtilityFuns.__dict__, opset_version=12))
 
-
-# opset 12tests
-TestUtilityFuns_opset12 = type(str("TestUtilityFuns_opset12"),
-                               (TestCase,),
-                               dict(TestUtilityFuns.__dict__, opset_version=12))
 
 if __name__ == '__main__':
     run_tests()

@@ -54,7 +54,7 @@ static inline __host__ __device__ scalar_t calc_digamma(scalar_t in) {
 
   accscalar_t y = 0;
   if (x < 1.0e17) {
-    accscalar_t z = 1.0 / (x * x);
+    accscalar_t z = 1 / (x * x);
 
     accscalar_t polevl_result = 0;
     for (int i = 0; i <= 6; i++) {
@@ -63,7 +63,7 @@ static inline __host__ __device__ scalar_t calc_digamma(scalar_t in) {
     y = z * polevl_result;
   }
 
-  return static_cast<scalar_t>(::log(x) - (0.5 / x) - y + result);
+  return static_cast<scalar_t>(::log(x) - (static_cast<accscalar_t>(0.5) / x) - y + result);
 }
 
 template <typename scalar_t>

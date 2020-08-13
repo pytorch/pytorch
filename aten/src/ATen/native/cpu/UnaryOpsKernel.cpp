@@ -1,4 +1,3 @@
-#define OBSOLETE_AT_ASSERTM  // This is an obsolete exemption guard. We have AT_ASSERTM in this file.
 #include <ATen/native/UnaryOps.h>
 
 #include <cmath>
@@ -157,15 +156,6 @@ void logit_kernel(TensorIterator& iter, Scalar eps_scalar) {
       });
 }
 
-template<typename T>
-T abs_impl(T v) {
-  return std::abs(v);
-}
-template<>
-uint8_t abs_impl(uint8_t v) {
-  return v;
-}
-
 static void abs_kernel(TensorIterator& iter) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, iter.dtype(), "abs_cpu", [&]() {
     cpu_kernel_vec(
@@ -291,6 +281,12 @@ static void sign_kernel(TensorIterator& iter){
             });
     });
   }
+}
+
+static void signbit_kernel(TensorIterator& iter){
+  AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, ScalarType::Half, iter.input_dtype(), "signbit_cpu", [&]() {
+    cpu_kernel(iter, [](scalar_t a) -> bool { return a < 0; });
+  });
 }
 
 static void sinh_kernel(TensorIterator& iter) {
@@ -616,6 +612,7 @@ REGISTER_DISPATCH(frac_stub, &frac_kernel);
 REGISTER_DISPATCH(reciprocal_stub, &reciprocal_kernel);
 REGISTER_DISPATCH(neg_stub, &neg_kernel);
 REGISTER_DISPATCH(sign_stub, &sign_kernel);
+REGISTER_DISPATCH(signbit_stub, &signbit_kernel);
 REGISTER_DISPATCH(sinh_stub, &sinh_kernel);
 REGISTER_DISPATCH(cosh_stub, &cosh_kernel);
 REGISTER_DISPATCH(acosh_stub, &acosh_kernel);
