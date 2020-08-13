@@ -755,6 +755,8 @@ TensorIterator TensorIterator::reduce_op(Tensor& out1, Tensor& out2, const Tenso
       " and output2 has ", out2.dim());
   TORCH_CHECK(out1.sizes() == out2.sizes(), "reduce_op(): expected both outputs to have same sizes, but output1 has ", out1.sizes(),
       " and output2 has ", out2.sizes());
+  TORCH_CHECK(out1.strides() == out2.strides(), "reduce_op(): expected both outputs to have same strides, but output1 has ", out1.strides(),
+      " and output2 has ", out2.strides());
   return TensorIteratorConfig()
     .add_output(out1)
     .add_output(out2)

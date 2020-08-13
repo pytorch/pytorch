@@ -26,13 +26,9 @@
 namespace torch {
 namespace jit {
 
-using debug_info_vector_type = c10::optional<std::vector<c10::IValue>>;
-
 char const* toString(OpCode op);
 
 namespace {
-
-using func_tuple_type = std::pair<IValue, c10::optional<IValue>>;
 
 ExportModuleExtraFilesHook& GetExtraFilesHook() {
   static ExportModuleExtraFilesHook func = nullptr;
@@ -69,7 +65,7 @@ std::string getModulePath(Node* node) {
   return modulePath.substr(start, end - start);
 }
 
-func_tuple_type getFunctionTuple(
+std::pair<IValue, c10::optional<IValue>> getFunctionTuple(
     const Module& module,
     const Function& func,
     bool save_mobile_debug_info) {
@@ -188,7 +184,7 @@ void setstateTuple(
     const Module& module,
     const IValue& ivalue,
     std::vector<c10::IValue>& elements,
-    debug_info_vector_type& debug_info_elements,
+    c10::optional<std::vector<c10::IValue>>& debug_info_elements,
     bool save_mobile_debug_info) {
   if (!ivalue.isObject())
     return;
@@ -220,7 +216,7 @@ void setstateTuple(
 void moduleMethodsTuple(
     const Module& module,
     std::vector<c10::IValue>& elements,
-    debug_info_vector_type& debug_info_elements,
+    c10::optional<std::vector<c10::IValue>>& debug_info_elements,
     bool save_mobile_debug_info) {
   auto methods = module.get_methods();
   // top level methods
@@ -383,7 +379,7 @@ class ScriptModuleSerializer {
     std::vector<c10::IValue> elements;
     elements.emplace_back(
         static_cast<int64_t>(caffe2::serialize::kProducedBytecodeVersion));
-    debug_info_vector_type debug_info_elements;
+    c10::optional<std::vector<c10::IValue>> debug_info_elements;
     if (save_mobile_debug_info) {
       debug_info_elements = std::vector<c10::IValue>();
       debug_info_elements->emplace_back(
@@ -480,7 +476,7 @@ void ExportModule(
 namespace {
 void export_opnames(const script::Module& m, std::set<std::string>& opnames) {
   std::vector<c10::IValue> elements;
-  debug_info_vector_type debug_info_elements;
+  c10::optional<std::vector<c10::IValue>> debug_info_elements;
   moduleMethodsTuple(
       m, elements, debug_info_elements, false /* save_mobile_debug_info */);
   for (const auto& element : elements) {
