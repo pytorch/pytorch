@@ -49,6 +49,16 @@ class LegacyDispatcherExpr:
     expr: str
 
 @dataclass(frozen=True)
+class DispatcherArgument:
+    type: str
+    name: str
+    # dispatcher NEVER has defaults
+    argument: Argument
+
+    def __str__(self) -> str:
+        return f"{self.type} {self.name}"
+
+@dataclass(frozen=True)
 class LegacyDispatcherArgument:
     type: str
     name: str

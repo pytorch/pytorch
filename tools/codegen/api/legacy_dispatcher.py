@@ -3,7 +3,7 @@ from tools.codegen.model import *
 from tools.codegen.api.types import TensorOptionsArguments, LegacyDispatcherArgument
 import tools.codegen.api.cpp as cpp
 
-from typing import Union
+from typing import Union, Sequence
 
 # This file describes the translation of JIT schema to the legacy
 # dispatcher API.  This looks a lot like the C++ API (which

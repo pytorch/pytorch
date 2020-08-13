@@ -1,12 +1,12 @@
 from tools.codegen.model import *
 
-from tools.codegen.api.types import CppArgument, DispatcherExpr, TensorOptionsArguments
+from tools.codegen.api.types import CppArgument, DispatcherExpr, TensorOptionsArguments, DispatcherArgument
 import tools.codegen.api.cpp as cpp
 import tools.codegen.api.legacy_dispatcher as legacy_dispatcher
 import tools.codegen.local as local
 
 import itertools
-from typing import Sequence
+from typing import Sequence, Optional
 
 # This file describes the translation of JIT schema to the dispatcher
 # API, the *unboxed* calling convention by which invocations through
@@ -46,6 +46,16 @@ def argument_type(a: Argument) -> str:
 def returns_type(rs: Sequence[Return]) -> str:
     # At present, there is no difference. But there could be!
     return cpp.returns_type(rs)
+
+def argument(a: Argument) -> DispatcherArgument:
+    return DispatcherArgument(
+        type=argument_type(a),
+        name=a.name,
+        argument=a,
+    )
+
+def arguments(func: FunctionSchema) -> Sequence[DispatcherArgument]:
+    return list(map(argument, itertools.chain(func.out_arguments, func.arguments, func.kwarg_only_arguments)))
 
 # Given a set of CppArguments in scope, return a sequence of dispatcher
 # expressions that translate the cpp API into dispatcher API

@@ -72,6 +72,9 @@ class NativeFunction:
     # now you can have it in any color you like, as long as it's 'full'
     use_c10_dispatcher_full: bool
 
+    # Whether or not to omit automatic generation of a DeviceGuard
+    device_guard: bool
+
     # If no variants are specified in native_functions.yaml, this is
     # assumed to be {'function'}.
     variants: Set[Variant]
@@ -126,6 +129,9 @@ class NativeFunction:
         manual_kernel_registration = e.get('manual_kernel_registration', False)
         assert isinstance(manual_kernel_registration, bool), f'not a bool: {manual_kernel_registration}'
 
+        device_guard = e.get('device_guard', True)
+        assert isinstance(device_guard, bool), f'not a bool: {device_guard}'
+
         raw_dispatch = e.get('dispatch')
         assert raw_dispatch is None or isinstance(raw_dispatch, dict), e
         dispatch: Optional[Dict[str, str]] = None
@@ -145,6 +151,7 @@ class NativeFunction:
             variants=variants,
             manual_kernel_registration=manual_kernel_registration,
             dispatch=dispatch,
+            device_guard=device_guard,
             loc=loc,
         )
 
@@ -233,8 +240,6 @@ class FunctionSchema:
     # TODO: Need to handle collisions with argument names at some point
     returns: Sequence['Return']
 
-    tensor_options_info: Optional['TensorOptionsInfo'] = field(init=False)
-
     @staticmethod
     def parse(func: str) -> 'FunctionSchema':
         # We should probably get a proper parser here
@@ -268,26 +273,6 @@ class FunctionSchema:
             # TODO: fixme
             if str(self.name) not in ['_amp_non_finite_check_and_unscale_']:
                 assert len(self.returns) == 1
-
-        # compute some useful metadata about tensor options in
-        # kwarg_only_arguments
-        def find_topt(name: str, ty: Type) -> Optional[int]:
-            for i, a in enumerate(self.kwarg_only_arguments):
-                if a.name == name and a.type in [ty, OptionalType(ty)]:
-                    return i
-            return None
-
-        dtype: Optional[int] = find_topt('dtype', Type.parse('ScalarType'))
-        layout: Optional[int] = find_topt('layout', Type.parse('Layout'))
-        device: Optional[int] = find_topt('device', Type.parse('Device'))
-        pin_memory: Optional[int] = find_topt('pin_memory', Type.parse('bool'))
-
-        topt_info: Optional[TensorOptionsInfo] = None
-        if dtype is not None and layout is not None and device is not None and pin_memory is not None:
-            assert (dtype, dtype+1, dtype+2, dtype+3) == (dtype, layout, device, pin_memory)
-            topt_info = TensorOptionsInfo(start=dtype, end=pin_memory+1)
-
-        object.__setattr__(self, 'tensor_options_info', topt_info)
 
     def is_out_fn(self) -> bool:
         # Note [is_out_fn]
@@ -333,16 +318,6 @@ class FunctionSchema:
         return f'{self.name}({all_arguments_str}) -> {returns}'
 
 # Here is the rest of the data model, described more briefly.
-
-@dataclass(frozen=True)
-class TensorOptionsInfo:
-    # indices specifying where the start and end of the tensor
-    # options arguments are
-    start: int  # inclusive
-    end: int  # exclusive
-
-    def slice(self) -> slice:
-        return slice(self.start, self.end)
 
 # Simplified version for what actually shows up in built-ins.
 # Look at alias_info.h for expanded syntax.  If you need the structure,
