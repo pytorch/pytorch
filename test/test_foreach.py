@@ -11,7 +11,7 @@ class TestForeach(TestCase):
         torch._foreach_mul, 
         torch._foreach_mul_, 
         torch._foreach_div, 
-        torch._foreach_div_
+        torch._foreach_div_,
         ]
 
     @dtypes(*torch.testing.get_all_dtypes())
