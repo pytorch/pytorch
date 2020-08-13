@@ -6,6 +6,12 @@
 
 namespace at { namespace native {
 
+enum class fft_norm_mode {
+  none,
+  by_root_n,
+  by_n,
+};
+
 // NOTE [ Fourier Transform Conjugate Symmetry ]
 //
 // Real-to-complex Fourier transform satisfies the conjugate symmetry. That is,
