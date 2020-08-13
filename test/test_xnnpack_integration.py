@@ -798,14 +798,14 @@ class TestXNNPACKConv1dTransformPass(TestCase):
 
             data_shape = (batch_size, input_channels, width)
             pattern_count_transformed_map = {"Tensor = aten::conv1d": -1,
-                                            "Tensor = aten::conv2d": 1}
+                                             "Tensor = aten::conv2d": 1}
             pattern_count_optimized_map = {"Tensor = aten::conv1d": -1,
-                                            "Tensor = aten::conv2d": -1}
+                                           "Tensor = aten::conv2d": -1}
 
             TestXNNPACKConv1dTransformPass.validate_transform_conv1d_to_conv2d(Conv1D(),
-                                                                                pattern_count_transformed_map,
-                                                                                pattern_count_optimized_map,
-                                                                                data_shape)
+                                                                               pattern_count_transformed_map,
+                                                                               pattern_count_optimized_map,
+                                                                               data_shape)
 
     def test_conv1d_with_relu_fc(self):
         batch_size_list = range(1, 3)
@@ -863,9 +863,9 @@ class TestXNNPACKConv1dTransformPass(TestCase):
 
             data_shape = (batch_size, input_channels, width)
             pattern_count_transformed_map = {"Tensor = aten::conv1d": -1,
-                                            "Tensor = aten::conv2d": 1}
+                                             "Tensor = aten::conv2d": 1}
             pattern_count_optimized_map = {"Tensor = aten::conv1d": -1,
-                                            "Tensor = aten::conv2d": -1}
+                                           "Tensor = aten::conv2d": -1}
             TestXNNPACKConv1dTransformPass.validate_transform_conv1d_to_conv2d(Net(),
                                                                                pattern_count_transformed_map,
                                                                                pattern_count_optimized_map,
