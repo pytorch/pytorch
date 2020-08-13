@@ -58,7 +58,6 @@ def map_arg(a, fn):
     elif isinstance(a, Node):
         return fn(a)
     else:
-        assert "Proxy" not in str(type(a)) 
         return a
 
 class Graph:
