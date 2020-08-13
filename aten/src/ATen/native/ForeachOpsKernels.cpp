@@ -43,7 +43,7 @@ void foreach_tensor_sqrt_slow_(TensorList tensors) {
   }
 }
 
-std::vector<Tensor> foreach_add_scalar_kernel_fallback(TensorList tensors, Scalar scalar) {
+std::vector<Tensor> foreach_tensor_add_scalar_kernel_slow(TensorList tensors, Scalar scalar) {
   verify_list(tensors);
 
   std::vector<Tensor> result;
