@@ -483,7 +483,7 @@ struct SourceImporterImpl : public Resolver,
       const ClassDef& enum_def) {
     // TODO(gmagogsfm): Implement parsing Enum class definition tree.
     // BEFORE SUBMIT DELETE FOLLOWING EXPERIMENTAL CODE
-    auto enum_type = EnumType::create(qualified_name, IntType::get(), cu_);
+    auto enum_type = EnumType::create(qualified_name, IntType::get(), {}, cu_);
     cu_->register_type(enum_type);
   }
 
