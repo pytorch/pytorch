@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/serialization/import_source.h>
 
 #include <ATen/core/qualified_name.h>
+#include <aten/src/ATen/core/ivalue_inl.h>
 #include <torch/csrc/jit/frontend/parser.h>
 #include <torch/csrc/jit/frontend/resolver.h>
 #include <torch/csrc/jit/frontend/script_type_parser.h>
@@ -8,7 +9,6 @@
 #include <torch/custom_class.h>
 
 #include <regex>
-#include "jit/python/python_sugared_value.h"
 
 namespace torch {
 namespace jit {
@@ -619,10 +619,10 @@ std::shared_ptr<SugaredValue> ClassNamespaceValue::attr(
     } else if (auto tupleType = serializable_type->cast<TupleType>()) {
       return std::make_shared<NamedTupleConstructor>(tupleType);
     } else if (auto enumType = serializable_type->cast<EnumType>()) {
-      std::map<string, SugaredValuePtr> sugared_enum_values;
+      std::map<std::string, SugaredValuePtr> sugared_enum_values;
       auto sugared_enum_values_list = c10::impl::GenericList(enumType);
       for (const auto& name_value : enumType->enumNamesValues()) {
-        auto enum_holder = c10::make_intrusive<ivalue::EnumHolder>(
+        auto enum_holder = c10::make_intrusive<at::ivalue::EnumHolder>(
             enumType, name_value.first, name_value.second);
         auto simple_enum_value = std::make_shared<SimpleValue>(
             m.graph()->insertConstant(IValue(enum_holder), loc));
