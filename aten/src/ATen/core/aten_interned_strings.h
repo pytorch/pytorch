@@ -376,6 +376,7 @@ _(aten, hardtanh_forward) \
 _(aten, hinge_embedding_loss) \
 _(aten, histc) \
 _(aten, hspmm) \
+_(aten, hypot) \
 _(aten, ifft) \
 _(aten, index) \
 _(aten, index_add) \

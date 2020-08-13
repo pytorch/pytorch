@@ -56,8 +56,9 @@ allow_list = [
     ("aten::__rshift__", datetime.date(2020, 7, 30)),
     ("aten::__round_to_zero_floordiv", datetime.date(2020, 7, 30)),
     ("aten::gcd", datetime.date(2020, 7, 30)),
+    ("aten::unflatten", datetime.date(2020, 8, 14)),
     ("aten::linalg_outer", datetime.date(2020, 8, 30)),
-    ("aten::linalg_outer.out", datetime.date(2020, 8, 30))
+    ("aten::linalg_outer.out", datetime.date(2020, 8, 30)),
 ]
 
 
