@@ -1,4 +1,3 @@
-import torch
 from torch.testing._internal.common_utils import TestCase, run_tests
 from torch.testing._internal.common_utils import slowTest
 
