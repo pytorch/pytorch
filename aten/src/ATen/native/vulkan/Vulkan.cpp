@@ -1243,24 +1243,26 @@ class VulkanTensor::Impl final {
         can_be_image(),
         "Vulkan: Only Tensors with dim <= 4 can be represented as Vulkam Image");
     auto d = dim();
-    uint32_t wd = 1;
-    uint32_t hd = 1;
-    uint32_t dd = 1;
+    int64_t _wd = 1;
+    int64_t _hd = 1;
+    int64_t _dd = 1;
     if (d == 4) {
-      wd = sizes_[3];
-      hd = sizes_[2];
-      dd = sizes_[1] * sizes_[0];
+      _wd = sizes_[3];
+      _hd = sizes_[2];
+      _dd = sizes_[1] * sizes_[0];
     } else if (d == 3) {
-      wd = sizes_[2];
-      hd = sizes_[1];
-      dd = sizes_[0];
+      _wd = sizes_[2];
+      _hd = sizes_[1];
+      _dd = sizes_[0];
     } else if (d == 2) {
-      wd = sizes_[1];
-      hd = sizes_[0];
+      _wd = sizes_[1];
+      _hd = sizes_[0];
     } else if (d == 1) {
-      wd = sizes_[0];
+      _wd = sizes_[0];
     }
-
+    int32_t wd = safe_downcast<int64_t>(_wd);
+    int32_t hd = safe_downcast<int64_t>(_hd);
+    int32_t dd = safe_downcast<int64_t>(_dd);
     return {{wd, hd, UP_DIV(dd, 4)}, {wd, hd, dd}};
   }
 
