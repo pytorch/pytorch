@@ -291,6 +291,7 @@ Pointwise Ops
     logical_or
     logical_xor
     logit
+    hypot
     mul
     mvlgamma
     neg
@@ -328,7 +329,9 @@ Reduction Ops
     median
     mode
     norm
+    nansum
     prod
+    quantile
     std
     std_mean
     sum
@@ -472,6 +475,7 @@ BLAS and LAPACK Operations
     mv
     orgqr
     ormqr
+    outer
     pinverse
     qr
     solve
