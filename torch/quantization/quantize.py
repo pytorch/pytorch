@@ -340,14 +340,8 @@ def prepare_qat(model, mapping=None, inplace=False):
         model = copy.deepcopy(model)
 
     propagate_qconfig_(model, qconfig_dict=None)
-    devices = get_unique_devices_(model)
-    print('devices after propagate qconfig:', devices)
     convert(model, mapping=mapping, inplace=True, remove_qconfig=False)
-    devices = get_unique_devices_(model)
-    print('devices after convert:', devices)
     prepare(model, observer_non_leaf_module_list=set(mapping.values()), inplace=True)
-    devices = get_unique_devices_(model)
-    print('devices after prepare:', devices)
     return model
 
 def quantize_qat(model, run_fn, run_args, inplace=False):
