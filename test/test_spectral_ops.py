@@ -5,7 +5,7 @@ from contextlib import contextmanager
 from itertools import product
 
 from torch.testing._internal.common_utils import \
-    (TestCase, run_tests, TEST_NUMPY, TEST_LIBROSA, _assertGradAndGradgradChecks)
+    (TestCase, run_tests, TEST_NUMPY, TEST_LIBROSA)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, onlyOnCPUAndCUDA, precisionOverride,
      skipCPUIfNoMkl, skipCUDAIfRocm, deviceCountAtLeast, onlyCUDA)
@@ -172,7 +172,6 @@ class TestFFT(TestCase):
             C = torch.fft.rfft(t)
             self.assertEqual(C.dtype, PROMOTION_MAP_R2C[dtype])
 
-
     @skipCPUIfNoMkl
     @skipCUDAIfRocm
     @dtypes(torch.double, torch.complex128)  # gradcheck requires double
@@ -204,7 +203,6 @@ class TestFFT(TestCase):
 
                 self.assertTrue(torch.autograd.gradcheck(
                     lambda x: torch_fn(x, *args), (input,)))
-
 
     # Legacy fft tests
     def _test_fft_ifft_rfft_irfft(self, device, dtype):
