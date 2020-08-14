@@ -1531,6 +1531,48 @@ Tensor flatten(const Tensor& self, DimnameList dims, Dimname out_dim) {
   return native::flatten(self, *dims.begin(), *(dims.end() - 1), out_dim);
 }
 
+Tensor unflatten(const Tensor& self, int64_t dim, IntArrayRef sizes, c10::optional<DimnameList> names) {
+  dim = maybe_wrap_dim(dim, self.dim());
+
+  TORCH_CHECK(sizes.size() > 0, "unflatten: sizes must be non-empty");
+  TORCH_INTERNAL_ASSERT(!names || names->size() == sizes.size());
+
+  auto numel = std::accumulate(sizes.begin(), sizes.end(), 1, std::multiplies<int64_t>());
+  if (self.has_names()) {
+    TORCH_CHECK(numel == self.size(dim),
+      "unflatten: Provided sizes ", sizes, " don't multiply up to the size of dim ", 
+      dim, " (", self.names()[dim], ": ", self.size(dim), ") in Tensor", self.names());
+    TORCH_CHECK(names, "unflatten: input is a named tensor but no names were given for unflattened sizes");
+  } else {
+    TORCH_CHECK(numel == self.size(dim),
+      "unflatten: Provided sizes ", sizes, " don't multiply up to the size of dim ",
+      dim, " (", self.size(dim), ") in the input tensor");
+  }
+
+  DimVector shape(self.sizes().begin(), self.sizes().end());
+  shape.erase(shape.begin() + dim);
+  shape.insert(shape.begin() + dim, sizes.begin(), sizes.end());
+
+  Tensor result;
+  {
+    NoNamesGuard guard;
+    result = self.view(shape);
+  }
+
+  if (names) {
+    auto outnames = self.names().vec();
+    outnames.erase(outnames.begin() + dim);
+    outnames.insert(outnames.begin() + dim, names->begin(), names->end());
+    at::internal_set_names_inplace(result, outnames);
+  }
+
+  return result;
+}
+
+Tensor unflatten(const Tensor& self, Dimname dim, IntArrayRef sizes, DimnameList names) {
+  return native::unflatten(self, dimname_to_position(self, dim), sizes, names);
+}
+
 Tensor view_as(const Tensor& self, const Tensor& other) {
   return self.view(other.sizes());
 }
