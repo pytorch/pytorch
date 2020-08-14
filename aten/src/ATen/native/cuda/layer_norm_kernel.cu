@@ -336,20 +336,6 @@ void LayerNormBackwardKernelImplInternal(
   T* dX_data = dX->defined() ? dX->template data_ptr<T>() : nullptr;
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
 
-  if (M == 0) {
-    if (dgamma->defined()) {
-      T* dgamma_data = dgamma->data_ptr<T>();
-      AT_CUDA_CHECK(cudaMemsetAsync(
-          dgamma_data, 0, dgamma->numel() * sizeof(T), cuda_stream));
-    }
-    if (dbeta->defined()) {
-      T* dbeta_data = dbeta->data_ptr<T>();
-      AT_CUDA_CHECK(cudaMemsetAsync(
-          dbeta_data, 0, dbeta->numel() * sizeof(T), cuda_stream));
-    }
-    return;
-  }
-
   if (dX_data != nullptr) {
     const auto kAccType =
         (X.scalar_type() == kHalf || X.scalar_type() == kBFloat16)
