@@ -224,9 +224,14 @@ def gather(g, self, dim, index, sparse_grad=False):
 
 @parse_args('v', 'i', 'v', 'v')
 def scatter(g, self, dim, index, src):
+    from torch.onnx.symbolic_opset9 import expand_as
     if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
         return g.op("ATen", self, dim, index, src, operator_s="scatter")
-    return g.op("ScatterElements", self, index, src, axis_i=dim)
+    src = sym_help._maybe_get_scalar(src)
+    if sym_help._is_value(src):
+        return g.op("ScatterElements", self, index, src, axis_i=dim)
+    else:
+        return g.op("ScatterElements", self, index, expand_as(g, src, index), axis_i=dim)
 
 
 @parse_args('v', 'i', 'none')
