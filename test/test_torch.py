@@ -7165,6 +7165,78 @@ class TestTorchDeviceType(TestCase):
             with self.assertRaisesRegex(RuntimeError, error_msg):
                 inplace_op(m1)
 
+    @onlyOnCPUAndCUDA
+    @dtypes(torch.float32, torch.float64)
+    def test_torch_complex(self, device, dtype):
+        real = torch.tensor([1, 2], device=device, dtype=dtype)
+        imag = torch.tensor([3, 4], device=device, dtype=dtype)
+        z = torch.complex(real, imag)
+        complex_dtype = torch.complex64 if dtype == torch.float32 else torch.complex128
+        self.assertEqual(torch.tensor([1.0 + 3.0j, 2.0 + 4.0j], dtype=complex_dtype), z)
+
+    @onlyOnCPUAndCUDA
+    @dtypes(torch.float32, torch.float64)
+    def test_torch_polar(self, device, dtype):
+        abs = torch.tensor([1, 2, -3, -4.5, 1, 1], device=device, dtype=dtype)
+        angle = torch.tensor([math.pi / 2, 5 * math.pi / 4, 0, -11 * math.pi / 6, math.pi, -math.pi],
+                             device=device, dtype=dtype)
+        z = torch.polar(abs, angle)
+        complex_dtype = torch.complex64 if dtype == torch.float32 else torch.complex128
+        self.assertEqual(torch.tensor([1j, -1.41421356237 - 1.41421356237j, -3,
+                                       -3.89711431703 - 2.25j, -1, -1],
+                                      dtype=complex_dtype),
+                         z, atol=1e-5, rtol=1e-5)
+
+    @onlyOnCPUAndCUDA
+    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
+            torch.float16, torch.complex64, torch.complex128, torch.bool)
+    def test_torch_complex_floating_dtype_error(self, device, dtype):
+        for op in (torch.complex, torch.polar):
+            a = torch.tensor([1, 2], device=device, dtype=dtype)
+            b = torch.tensor([3, 4], device=device, dtype=dtype)
+            error = r"Expected both inputs to be Float or Double tensors but " \
+                    r"got [A-Za-z]+ and [A-Za-z]+"
+        with self.assertRaisesRegex(RuntimeError, error):
+            op(a, b)
+
+    @onlyOnCPUAndCUDA
+    @dtypes(torch.float32, torch.float64)
+    def test_torch_complex_same_dtype_error(self, device, dtype):
+
+        def dtype_name(dtype):
+            return 'Float' if dtype == torch.float32 else 'Double'
+
+        for op in (torch.complex, torch.polar):
+            other_dtype = torch.float64 if dtype == torch.float32 else torch.float32
+            a = torch.tensor([1, 2], device=device, dtype=dtype)
+            b = torch.tensor([3, 4], device=device, dtype=other_dtype)
+            error = "Expected object of scalar type {} but got scalar type " \
+                    "{} for second argument".format(dtype_name(dtype),
+                                                    dtype_name(other_dtype))
+            with self.assertRaisesRegex(RuntimeError, error):
+                op(a, b)
+
+    @onlyOnCPUAndCUDA
+    @dtypes(torch.float32, torch.float64)
+    def test_torch_complex_out_dtype_error(self, device, dtype):
+
+        def dtype_name(dtype):
+            return 'Float' if dtype == torch.float32 else 'Double'
+
+        def complex_dtype_name(dtype):
+            return 'ComplexFloat' if dtype == torch.complex64 else 'ComplexDouble'
+
+        for op in (torch.complex, torch.polar):
+            a = torch.tensor([1, 2], device=device, dtype=dtype)
+            b = torch.tensor([3, 4], device=device, dtype=dtype)
+            out = torch.zeros(2, device=device, dtype=dtype)
+            expected_dtype = torch.complex64 if dtype == torch.float32 else torch.complex128
+            error = "Expected object of scalar type {} but got scalar type " \
+                    "{} for argument 'out'".format(
+                        complex_dtype_name(expected_dtype), dtype_name(dtype))
+            with self.assertRaisesRegex(RuntimeError, error):
+                op(a, b, out=out)
+
     def test_cat_empty_legacy(self, device):
         # FIXME: this is legacy behavior and should be removed
         # when we support empty tensors with arbitrary sizes

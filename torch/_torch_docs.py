@@ -1502,6 +1502,65 @@ clip(input, min, max, *, out=None) -> Tensor
 Alias for :func:`torch.clamp`.
 """.format(**common_args))
 
+add_docstr(torch.complex,
+           r"""
+complex(real, imag, *, out=None) -> Tensor
+
+Constructs a complex tensor with its real part equal to :attr:`real` and its
+imaginary part equal to :attr:`imag`.
+
+Args:
+    real (Tensor): The real part of the complex tensor. Must be float or double.
+    imag (Tensor): The imaginary part of the complex tensor. Must be same dtype
+        as :attr:`real`.
+
+Keyword args:
+    out (Tensor): If the inputs are ``torch.float32``, must be
+        ``torch.complex64``. If the inputs are ``torch.float64``, must be
+        ``torch.complex128``.
+
+Example::
+    >>> real = torch.tensor([1, 2], dtype=torch.float32)
+    >>> imag = torch.tensor([3, 4], dtype=torch.float32)
+    >>> z = torch.complex(real, imag)
+    >>> z
+    tensor([(1.+3.j), (2.+4.j)])
+    >>> z.dtype
+    torch.complex64
+
+""")
+
+add_docstr(torch.polar,
+           r"""
+polar(abs, angle, *, out=None) -> Tensor
+
+Constructs a complex tensor whose elements are Cartesian coordinates
+corresponding to the polar coordinates with absolute value :attr:`abs` and angle
+:attr:`angle`.
+
+.. math::
+    \text{out} = \text{abs} \cdot \cos(\text{angle}) + \text{abs} \cdot \sin(\text{angle}) \cdot j
+""" + r"""
+Args:
+    abs (Tensor): The absolute value the complex tensor. Must be float or
+        double.
+    angle (Tensor): The angle of the complex tensor. Must be same dtype as
+        :attr:`abs`.
+
+Keyword args:
+    out (Tensor): If the inputs are ``torch.float32``, must be
+        ``torch.complex64``. If the inputs are ``torch.float64``, must be
+        ``torch.complex128``.
+
+Example::
+    >>> import numpy as np
+    >>> abs = torch.tensor([1, 2], dtype=torch.float64)
+    >>> angle = torch.tensor([np.pi / 2, 5 * np.pi / 4], dtype=torch.float64)
+    >>> z = torch.polar(abs, angle)
+    >>> z
+    tensor([(0.0000+1.0000j), (-1.4142-1.4142j)], dtype=torch.complex128)
+""")
+
 add_docstr(torch.conj,
            r"""
 conj(input, out=None) -> Tensor
