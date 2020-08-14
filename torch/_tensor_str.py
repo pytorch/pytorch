@@ -317,7 +317,8 @@ def _str_intern(self):
         if self.qscheme() == torch.per_tensor_affine or self.qscheme() == torch.per_tensor_symmetric:
             suffixes.append('scale=' + str(self.q_scale()))
             suffixes.append('zero_point=' + str(self.q_zero_point()))
-        elif self.qscheme() == torch.per_channel_affine or self.qscheme() == torch.per_channel_symmetric:
+        elif self.qscheme() == torch.per_channel_affine or self.qscheme() == torch.per_channel_symmetric \
+                or self.qscheme() == torch.per_channel_affine_float_qparams:
             suffixes.append('scale=' + str(self.q_per_channel_scales()))
             suffixes.append('zero_point=' + str(self.q_per_channel_zero_points()))
             suffixes.append('axis=' + str(self.q_per_channel_axis()))
