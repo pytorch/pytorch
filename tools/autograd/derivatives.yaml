@@ -329,6 +329,14 @@
 - name: coalesce(Tensor self) -> Tensor
   self: grad
 
+- name: complex(Tensor real, Tensor imag) -> Tensor
+  real: not_implemented("complex real")
+  imag: not_implemented("complex imag")
+
+- name: polar(Tensor abs, Tensor angle) -> Tensor
+  abs: not_implemented("polar abs")
+  angle: not_implemented("polar angle")
+
 - name: conj(Tensor self) -> Tensor
   self: grad.conj()
 
@@ -745,6 +753,10 @@
 
 - name: neg(Tensor self) -> Tensor
   self: grad.neg()
+
+- name: nextafter(Tensor self, Tensor other) -> Tensor
+  self: not_implemented("nextafter")
+  other: not_implemented("nextafter")
 
 - name: norm.Scalar(Tensor self, Scalar p=2) -> Tensor
   self: norm_backward(grad, self, p, result)
