@@ -5,6 +5,7 @@
 #include <torch/script.h>
 #include <torch/torch.h>
 #include <iostream>
+#include "torch/csrc/autograd/python_variable.h"
 
 namespace torchpy {
 
@@ -63,22 +64,21 @@ PyModule load(const std::string& filename) {
   return mod;
 }
 
-std::vector<at::Tensor> inputs(std::vector<int64_t> shape) {
-  std::vector<at::Tensor> inputs;
-  auto at_shape = at::IntArrayRef(shape);
-  inputs.push_back(torch::ones(at_shape));
-  return inputs;
-}
-
 at::Tensor PyModule::forward(std::vector<at::Tensor> inputs) {
   assert(NULL != _module);
-  PyObject* tensor =
-      PyRun_String("torch.ones(10,20)", Py_eval_input, _globals, _globals);
 
-  PyObject* output = PyObject_CallMethod(_module, "forward", "(O)", tensor);
-  assert(NULL != output);
-
-  return inputs.at(0);
+  std::vector<PyObject*> py_inputs;
+  for (at::Tensor& tensor : inputs) {
+    PyObject* py_tensor = THPVariable_Wrap(tensor);
+    assert(NULL != py_tensor);
+    py_inputs.push_back(py_tensor);
+  }
+  assert(py_inputs.size() == 1); // need to figure out variable arg input
+  PyObject* py_output =
+      PyObject_CallMethod(_module, "forward", "(O)", py_inputs[0]);
+  assert(NULL != py_output);
+  at::Tensor& output = THPVariable_Unpack(py_output);
+  return output;
 }
 
 } // namespace torchpy

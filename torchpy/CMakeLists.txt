@@ -17,7 +17,7 @@ set(TORCHPY_TEST_SOURCES
 )
 add_library(torchpy ${TORCHPY_LIB_SOURCES})
 target_include_directories(torchpy PRIVATE ${TORCHPY_DIR})
-target_link_libraries(torchpy PRIVATE torch -Wl,-rpath,/home/whc/local/pytorch-env/lib/ ${PYTHON_LIBRARIES})
+target_link_libraries(torchpy PRIVATE torch torch_python -Wl,-rpath,/home/whc/local/pytorch-env/lib/ ${PYTHON_LIBRARIES})
 
 add_executable(torchpy_test ${TORCHPY_TEST_SOURCES})
 target_include_directories(torchpy_test PRIVATE ${TORCHPY_DIR})

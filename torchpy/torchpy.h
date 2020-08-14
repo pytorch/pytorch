@@ -21,5 +21,4 @@ void init();
 void finalize();
 std::string hello();
 PyModule load(const std::string& filename);
-std::vector<at::Tensor> inputs(std::vector<int64_t> shape);
 }
