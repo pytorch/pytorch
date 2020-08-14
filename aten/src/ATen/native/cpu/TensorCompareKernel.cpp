@@ -40,7 +40,7 @@ static inline void compare_base_kernel(Tensor& result, Tensor& indices,
 
   auto iter = TensorIteratorConfig()
     .check_all_same_dtype(false)
-    .dont_resize_outputs()
+    .resize_outputs(false)
     .declare_static_shape(self.sizes(), /*squash_dim=*/dim)
     .add_output(result)
     .add_output(indices)
@@ -161,10 +161,24 @@ static void where_kernel_impl(TensorIterator &iter, ScalarType condition_type) {
   });
 }
 
+static void isposinf_kernel_impl(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.input_dtype(), "isposinf_cpu", [&]() {
+    cpu_kernel(iter, [](scalar_t a) -> bool { return a == std::numeric_limits<scalar_t>::infinity(); });
+  });
+}
+
+static void isneginf_kernel_impl(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.input_dtype(), "isneginf_cpu", [&]() {
+    cpu_kernel(iter, [](scalar_t a) -> bool { return a == -std::numeric_limits<scalar_t>::infinity(); });
+  });
+}
+
 } // anonymous namespace
 
 REGISTER_DISPATCH(max_stub, &max_kernel_impl);
 REGISTER_DISPATCH(min_stub, &min_kernel_impl);
 REGISTER_DISPATCH(where_kernel, &where_kernel_impl);
+REGISTER_DISPATCH(isposinf_stub, &isposinf_kernel_impl);
+REGISTER_DISPATCH(isneginf_stub, &isneginf_kernel_impl);
 
 }} // namespace at::native

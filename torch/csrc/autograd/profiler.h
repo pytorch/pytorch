@@ -20,7 +20,8 @@
 
 #include <ATen/record_function.h>
 
-typedef struct CUevent_st* CUDAEventStub;
+struct CUevent_st;
+typedef std::shared_ptr<CUevent_st> CUDAEventStub;
 
 namespace torch { namespace autograd {
 
@@ -32,7 +33,7 @@ struct TORCH_API CUDAStubs {
   virtual void record(int* device, CUDAEventStub* event, int64_t* cpu_ns) {
     fail();
   }
-  virtual float elapsed(CUDAEventStub event, CUDAEventStub event2) {
+  virtual float elapsed(const CUDAEventStub* event, const CUDAEventStub* event2) {
     fail();
     return 0.f;
   }
@@ -87,13 +88,7 @@ inline int64_t getTime() {
 #endif
 }
 
-// Old GCC versions generate warnings incorrectly
-// see https://stackoverflow.com/questions/2463113/g-c0x-enum-class-compiler-warnings
-#ifndef _MSC_VER
-#  pragma GCC diagnostic push
-#  pragma GCC diagnostic ignored "-Wattributes"
-#endif
-enum class TORCH_API ProfilerState {
+enum class C10_API_ENUM ProfilerState {
     Disabled,
     CPU, // CPU-only profiling
     CUDA, // CPU + CUDA events
@@ -122,15 +117,12 @@ struct TORCH_API ProfilerConfig {
 
 };
 
-enum class TORCH_API EventKind : uint16_t {
+enum class C10_API_ENUM EventKind : uint16_t {
   Mark,
   PushRange,
   PopRange,
   MemoryAlloc,
 };
-#ifndef _MSC_VER
-#  pragma GCC diagnostic pop
-#endif
 
 struct TORCH_API Event final {
   Event(
@@ -268,15 +260,27 @@ struct TORCH_API Event final {
     node_id_ = node_id;
   }
 
+  void setName(at::StringView newName_) {
+    name_ = std::move(newName_);
+  }
+
   bool isRemote() const {
     return is_remote_;
   }
 
   void setCudaUs(int64_t cuda_us) {
     cuda_us_ = cuda_us;
-}
+  }
 
-private:
+  void setSequenceNr(int64_t sequence_nr) {
+    sequence_nr_ = sequence_nr;
+  }
+
+  int64_t sequence_nr() const {
+    return sequence_nr_;
+  }
+
+ private:
   // signed to allow for negative intervals, initialized for safety.
   int64_t cpu_ns_ = 0;
   at::StringView name_;
@@ -287,10 +291,11 @@ private:
   int64_t cpu_memory_usage_ = 0;
   int64_t cuda_memory_usage_ = 0;
   int device_ = -1;
-  struct CUevent_st* cuda_event = nullptr;
+  CUDAEventStub cuda_event = nullptr;
   int node_id_ = 0;
   bool is_remote_ = false;
   int64_t cuda_us_ = -1;
+  int64_t sequence_nr_ = -1;
 };
 
 // a linked-list of fixed sized vectors, to avoid

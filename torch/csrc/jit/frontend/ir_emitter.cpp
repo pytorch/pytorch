@@ -494,6 +494,10 @@ struct Environment {
            std::make_shared<BuiltinFunction>(prim::rangelist, at::nullopt)},
           {"sorted",
            std::make_shared<BuiltinFunction>(aten::sorted, at::nullopt)},
+          // Only AssertionError is bound so that we can use it from emitAssert,
+          // all other exceptions should be resolved at the Python level
+          {"AssertionError",
+           std::make_shared<ExceptionValue>("AssertionError")},
       };
       auto it = globals.find(ident);
       if (it != globals.end()) {
@@ -1024,7 +1028,7 @@ struct to_ir {
           emitSugaredExpr(expr, 0);
         } break;
         case TK_RAISE:
-          emitRaise(Raise(stmt).range());
+          emitRaise(Raise(stmt));
           break;
         case TK_ASSERT:
           emitAssert(Assert(stmt));
@@ -1838,10 +1842,32 @@ struct to_ir {
   // raise a
   //
   // We ignore the expression following raise
-  void emitRaise(const SourceRange& loc) {
-    const std::string exception = "Exception";
-    auto string_input = insertConstant(*graph, exception, loc);
-    graph->insert(prim::RaiseException, {string_input}, {}, loc);
+  void emitRaise(const Raise& raise) {
+    auto sv = emitSugaredExpr(raise.expr(), 1);
+    Value* error_message = nullptr;
+
+    if (auto exception_instance =
+            std::dynamic_pointer_cast<ExceptionMessageValue>(sv)) {
+      // The typical case, an instance of the exception class was thrown:
+      //    raise RuntimeError("error")
+      error_message = exception_instance->getValue();
+    } else if (
+        auto exception_class = std::dynamic_pointer_cast<ExceptionValue>(sv)) {
+      // A bare exception was thrown so add an empty message. e.g.
+      //    raise RuntimeError
+      error_message = insertConstant(*graph, "", raise.range());
+    } else {
+      // The raise was not followed by an exception (i.e. it was something like
+      // `raise "error"` instead of `raise RuntimeError("error")`)
+      throw ErrorReport(raise.range())
+          << "exceptions must derive from BaseException";
+    }
+
+    if (!error_message->type()->isSubtypeOf(StringType::get())) {
+      error_message = graph->insert(aten::str, {error_message});
+    }
+
+    graph->insert(prim::RaiseException, {error_message}, {}, raise.range());
     exit_blocks.insert(environment_stack->block());
   }
 
@@ -1849,8 +1875,20 @@ struct to_ir {
   void emitAssert(const Assert& stmt) {
     CondValue cond_value = emitCondExpr(stmt.test());
     List<Stmt> true_branch = List<Stmt>::create(stmt.range(), {});
+    // Create an `AssertionError("the_message")` call
+    auto message = (stmt.msg().present())
+        ? stmt.msg().get()
+        : StringLiteral::create(stmt.range(), "");
+    auto callee = Var::create(
+        stmt.range(), Ident::create(stmt.range(), "AssertionError"));
+    auto apply = Apply::create(
+        stmt.range(),
+        callee,
+        List<Expr>::create(stmt.range(), {message}),
+        List<Attribute>::create(stmt.range(), {}));
+
     List<Stmt> false_branch =
-        List<Stmt>::create(stmt.range(), {Raise::create(stmt.range())});
+        List<Stmt>::create(stmt.range(), {Raise::create(stmt.range(), apply)});
     emitIfElseBlocks(stmt.range(), cond_value, true_branch, false_branch);
   }
 
@@ -2404,9 +2442,14 @@ struct to_ir {
     if (!stmt.rhs().present()) {
       throw ErrorReport(stmt.range()) << "Expected RHS for assignment";
     }
+
+    TypePtr type_hint = nullptr;
+    if (stmt.type().present()) {
+      type_hint = typeParser_.parseTypeFromExpr(stmt.type().get());
+    }
     const auto lhs = Select(stmt.lhs());
     auto lhsObject = emitSugaredExpr(lhs.value(), 1);
-    const auto rhsValue = emitSugaredExpr(stmt.rhs().get(), 1)
+    const auto rhsValue = emitSugaredExpr(stmt.rhs().get(), 1, type_hint)
                               ->asValue(stmt.rhs().range(), method);
     lhsObject->setAttr(stmt.range(), method, lhs.selector().name(), rhsValue);
   }
@@ -3626,8 +3669,31 @@ struct to_ir {
           range, sv->asValue(val_range, method), subscript_exprs));
     }
     if (subscript_exprs[0].kind() == TK_SLICE_EXPR) {
-      return std::make_shared<SimpleValue>(emitBasicSlice(
-          range, sv->asValue(val_range, method), subscript_exprs));
+      // TODO @wconstab refactor using Symbol instead of string compare
+      if (sv->kind() == "module") {
+        // Slicing isn't currently implemented for Sequential/ModuleList,
+        // but is implemented for Tuples, so a quick workaround is to
+        // convert to a tuple of Modules for slicing support.
+        auto s_tuple_val =
+            sv->asTupleValue(val_range, method)->asValue(val_range, method);
+        const SliceExpr& slice = SliceExpr(subscript_exprs[0]);
+        auto begin =
+            NamedValue(val_range, "begin", emitExpr(Expr(slice.startOr(0))));
+        if (slice.end().present()) {
+          auto end =
+              NamedValue(val_range, "end", emitExpr(Expr(slice.end().get())));
+          auto tupleSliceValue =
+              emitTupleSlice(val_range, s_tuple_val, begin, end);
+          return std::make_shared<SimpleValue>(tupleSliceValue);
+        } else {
+          auto tupleSliceValue =
+              emitTupleSlice(val_range, s_tuple_val, begin, c10::nullopt);
+          return std::make_shared<SimpleValue>(tupleSliceValue);
+        }
+      } else {
+        return std::make_shared<SimpleValue>(emitBasicSlice(
+            range, sv->asValue(val_range, method), subscript_exprs));
+      }
     } else {
       // Desugars gather syntactic sugar foo[i]
       Value* idx = emitExpr(subscript_exprs[0]);
@@ -3788,9 +3854,10 @@ void runCleanupPasses(std::shared_ptr<Graph>& to_clean) {
   if (getInlineEverythingMode()) {
     Inline(*to_clean);
   }
+
   // remove any uses of tuples that we inserted that are not needed
   LowerSimpleTuples(to_clean);
-  ConstantPooling(to_clean);
+
   // full constant propagation runs ops with mutable inputs if it can
   // prove that the inputs are not mutated anywhere in the graph.
   // if a mutating node is removed in the graph (e.g. constant prop inlined a
@@ -3799,6 +3866,11 @@ void runCleanupPasses(std::shared_ptr<Graph>& to_clean) {
   // (jitter) So we run only constant prop w immutable types here bc
   // successive runs of immutable constant prop does not change the graph
   ConstantPropagationImmutableTypes(to_clean);
+
+  // Constant Pooling pass must be after ConstantPropogation, which can create
+  // new constants that needs to be pooled.
+  ConstantPooling(to_clean);
+
   // For jitter
   CanonicalizeOutputs(to_clean);
 }

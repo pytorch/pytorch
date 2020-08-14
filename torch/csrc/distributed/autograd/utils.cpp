@@ -6,7 +6,9 @@
 #include <torch/csrc/distributed/autograd/functions/recvrpc_backward.h>
 #include <torch/csrc/distributed/autograd/functions/sendrpc_backward.h>
 #include <torch/csrc/distributed/autograd/utils.h>
+#include <torch/csrc/distributed/rpc/profiler/remote_profiler_manager.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
+#include <torch/csrc/distributed/rpc/types.h>
 
 namespace torch {
 namespace distributed {
@@ -78,8 +80,20 @@ Message getMessageWithProfiling(
     torch::distributed::rpc::Message&& wrappedRpcMessage,
     MessageType msgType,
     torch::autograd::profiler::ProfilerConfig&& profilerConfig) {
+  auto& remoteProfilerManager =
+      torch::distributed::rpc::RemoteProfilerManager::getInstance();
+
+  auto key = remoteProfilerManager.getCurrentProfilingKey();
+  // generate a globally unique Id
+  auto globallyUniqueProfilingId = remoteProfilerManager.getNextProfilerId();
+  // Save a mapping of ID -> RPC profiling key and unset the current TLS key.
+  remoteProfilerManager.saveRPCKey(globallyUniqueProfilingId, key);
+  remoteProfilerManager.unsetCurrentKey();
   auto wrappedProfilingMsg = RpcWithProfilingReq(
-      msgType, std::move(wrappedRpcMessage), std::move(profilerConfig));
+      msgType,
+      std::move(wrappedRpcMessage),
+      std::move(profilerConfig),
+      globallyUniqueProfilingId);
 
   return std::move(wrappedProfilingMsg).toMessage();
 }

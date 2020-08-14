@@ -149,7 +149,7 @@ They require JetPack 4.2 and above, and [@dusty-nv](https://github.com/dusty-nv)
 
 ### From Source
 
-If you are installing from source, you will need a C++14 compiler. Also, we highly recommend installing an [Anaconda](https://www.anaconda.com/distribution/#download-section) environment.
+If you are installing from source, you will need Python 3.6 or later and a C++14 compiler. Also, we highly recommend installing an [Anaconda](https://www.anaconda.com/distribution/#download-section) environment.
 You will get a high-quality BLAS library (MKL) and you get controlled dependency versions regardless of your Linux distro.
 
 Once you have [Anaconda](https://www.anaconda.com/distribution/#download-section) installed, here are the instructions.
@@ -168,8 +168,8 @@ If you are building for NVIDIA's Jetson platforms (Jetson Nano, TX1, TX2, AGX Xa
 #### Install Dependencies
 
 Common
-```
-conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi
+```bash
+conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing_extensions future six requests
 ```
 
 On Linux
@@ -210,18 +210,18 @@ Each CUDA version only supports one particular XCode version. The following comb
 
 On Windows
 
-At least Visual Studio 2017 Update 3 (version 15.3.3 with the toolset 14.11) and [NVTX](https://docs.nvidia.com/gameworks/content/gameworkslibrary/nvtx/nvidia_tools_extension_library_nvtx.htm) are needed.
+At least Visual Studio 2017 version 15.6 with the toolset 14.13 and [NVTX](https://docs.nvidia.com/gameworks/content/gameworkslibrary/nvtx/nvidia_tools_extension_library_nvtx.htm) are needed.
 
-If the version of Visual Studio 2017 is higher than 15.4.5, installing of "VC++ 2017 version 15.4 v14.11 toolset" is strongly recommended.
-<br/> If the version of Visual Studio 2017 is lesser than 15.3.3, please update Visual Studio 2017 to the latest version along with installing "VC++ 2017 version 15.4 v14.11 toolset".
-<br/> There is no guarantee of the correct building with VC++ 2017 toolsets, others than version 15.4 v14.11.
-<br/> "VC++ 2017 version 15.4 v14.11 toolset" might be installed onto already installed Visual Studio 2017 by running its installation once again and checking the corresponding checkbox under "Individual components"/"Compilers, build tools, and runtimes".
+If the version of Visual Studio 2017 is higher than 15.6, installing of "VC++ 2017 version 15.6 v14.13 toolset" is strongly recommended.
+<br/> If the version of Visual Studio 2017 is lesser than 15.6, please update Visual Studio 2017 to the latest version along with installing "VC++ 2017 version 15.6 v14.13 toolset".
+<br/> There is no guarantee of the correct building with VC++ 2017 toolsets, others than version 15.6 v14.13.
+<br/> "VC++ 2017 version 15.6 v14.13 toolset" might be installed onto already installed Visual Studio 2017 by running its installation once again and checking the corresponding checkbox under "Individual components"/"Compilers, build tools, and runtimes".
 
 NVTX is a part of CUDA distributive, where it is called "Nsight Compute". To install it onto already installed CUDA run CUDA installation once again and check the corresponding checkbox.
 Be sure that CUDA with Nsight Compute is installed after Visual Studio 2017.
 
 Currently VS 2017, VS 2019 and Ninja are supported as the generator of CMake. If `ninja.exe` is detected in `PATH`, then Ninja will be used as the default generator, otherwise it will use VS 2017.
-<br/> If Ninja is selected as the generator, the latest MSVC which is newer than VS 2015 (14.0) will get selected as the underlying toolchain if you have Python > 3.5, otherwise VS 2015 will be selected so you'll have to activate the environment. If you use CMake <= 3.14.2 and has VS 2019 installed, then even if you specify VS 2017 as the generator, VS 2019 will get selected as the generator.
+<br/> If Ninja is selected as the generator, the latest MSVC which is newer than VS 2015 (14.0) will get selected as the underlying toolchain. If you use CMake <= 3.14.2 and has VS 2019 installed, then even if you specify VS 2017 as the generator, VS 2019 will get selected as the generator.
 
 CUDA and MSVC have strong version dependencies, so even if you use VS 2017 / 2019, you will get build errors like `nvcc fatal : Host compiler targets unsupported OS`. For this kind of problem, please install the corresponding VS toolchain in the table below and then you can either specify the toolset during activation (recommended) or set `CUDAHOSTCXX` to override the cuda host compiler (not recommended if there are big version differences).
 
@@ -304,7 +304,7 @@ make -f docker.Makefile
 To build documentation in various formats, you will need [Sphinx](http://www.sphinx-doc.org) and the
 readthedocs theme.
 
-```
+```bash
 cd docs/
 pip install -r requirements.txt
 ```
@@ -323,6 +323,7 @@ Three pointers to get you started:
 - [Tutorials: get you started with understanding and using PyTorch](https://pytorch.org/tutorials/)
 - [Examples: easy to understand pytorch code across all domains](https://github.com/pytorch/examples)
 - [The API Reference](https://pytorch.org/docs/)
+- [Glossary](https://github.com/pytorch/pytorch/blob/master/GLOSSARY.md)
 
 ## Resources
 
@@ -352,6 +353,8 @@ We appreciate all contributions. If you are planning to contribute back bug-fixe
 
 If you plan to contribute new features, utility functions or extensions to the core, please first open an issue and discuss the feature with us.
 Sending a PR without discussion might end up resulting in a rejected PR, because we might be taking the core in a different direction than you might be aware of.
+
+To learn more about making a contribution to Pytorch, please see our [Contribution page](CONTRIBUTING.md).
 
 ## The Team
 

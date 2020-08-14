@@ -643,6 +643,8 @@ inline DeviceType computeDeviceType(DispatchKey tid) {
     return DeviceType::MSNPU;
   } else if (tid == DispatchKey::XLA) {
     return DeviceType::XLA;
+  } else if (tid == DispatchKey::XLAPreAutograd) {
+    return DeviceType::XLA;
   } else if (tid == DispatchKey::SparseCPU) {
     return DeviceType::CPU;
   } else if (tid == DispatchKey::SparseCUDA) {

@@ -64,6 +64,10 @@ Tensor unpack_opt(const Tensor & t, const char * name, int pos) {
   return unpack(t, name, pos);
 }
 
+c10::optional<Tensor> unpack_opt(const c10::optional<Tensor> & t, const char * name, int pos) {
+  return t;
+}
+
 std::vector<at::Tensor> unpack(at::TensorList tl, const char *name, int pos) {
   std::vector<at::Tensor> ret(tl.size());
   for (size_t i = 0; i < tl.size(); ++i) {
@@ -80,10 +84,13 @@ namespace {
 
 void backward(
     const Tensor& self,
-    const Tensor& gradient,
+    const c10::optional<Tensor>& gradient,
     c10::optional<bool> keep_graph,
     bool create_graph) {
-  torch::autograd::backward({self}, {gradient}, keep_graph, create_graph);
+  // TODO torch::autograd::backward should take the c10::optional<Tensor> gradient directly
+  // instead of us having to unwrap it to Tensor _gradient here.
+  Tensor _gradient = gradient.has_value() ? *gradient : Tensor();
+  torch::autograd::backward({self}, {_gradient}, std::move(keep_graph), create_graph);
 }
 
 void set_data(const Tensor & self, const Tensor & new_data) {
@@ -170,12 +177,12 @@ void retain_grad(const Tensor & self) {
       auto var = weak_self.lock();
       if (!var->grad().defined()) {
         if (grad.is_sparse()) {
-          var->grad() = grad.clone();
+          var->mutable_grad() = grad.clone();
         } else {
-          var->grad() = grad.clone(at::MemoryFormat::Contiguous);
+          var->mutable_grad() = grad.clone(at::MemoryFormat::Contiguous);
         }
       } else {
-        var->grad() = var->grad() + grad;
+        var->mutable_grad() = var->grad() + grad;
       }
     }
   });
@@ -187,27 +194,6 @@ void retain_grad(const Tensor & self) {
 // We don't have an outplace copy, so this can't be generated automatically
 Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
   jit::Value* output = nullptr;
-#if !defined(PYTORCH_DISABLE_TRACING)
-  if(torch::jit::tracer::isTracing()) {
-    const jit::tracer::TracingState& state = *jit::tracer::getTracingState();
-    auto& graph = state.graph;
-    if (state.force_outplace && self.storage().use_count() <= 1) {
-      // if you have no views of self, then an in place copy is equivalent to
-      // making sure we expand src to the same size as self
-      jit::Node* node = graph->create(jit::aten::expand_as, /*num_outputs=*/1);
-      jit::tracer::addInputs(node, "src", src);
-      jit::tracer::addInputs(node, "self", self);
-      graph->insertNode(node);
-      output = node->output();
-    } else {
-      output = graph->insert(
-          jit::aten::copy_,
-          {jit::tracer::getValueTrace(self), jit::tracer::getValueTrace(src)});
-      jit::tracer::recordSourceLocation(output->node());
-    }
-    jit::tracer::ensureUniqueIfOutOfPlaced("copy_ (possibly due to an assignment)", self);
-  }
-#endif
   // TODO: once copy is exposed in Declarations.yaml we may be able to bind
   // it automatically
   auto& self_ = unpack(self, "self", 0);
@@ -223,18 +209,11 @@ Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
     grad_fn->src_device = src.device();
   }
   {
-    // TODO: move tracing logic into TraceTypeManual.cpp
-    at::tracer::impl::NoTracerDispatchMode tracer_guard;
     at::AutoNonVariableTypeMode non_var_type_mode(true);
     self_.copy_(src_, non_blocking);
   }
   increment_version(self);
   rebase_history(self , std::move(grad_fn));
-#if !defined(PYTORCH_DISABLE_TRACING)
-  if(torch::jit::tracer::isTracing()) {
-    jit::tracer::setOutput(output, self);
-  }
-#endif
   return self;
 }
 
@@ -246,16 +225,7 @@ Tensor& resize_(
   if (self.requires_grad()) {
     AT_ERROR("cannot resize variables that require grad");
   }
-#if !defined(PYTORCH_DISABLE_TRACING)
-  if (torch::jit::tracer::isTracing()) {
-    jit::tracer::ArgumentStash::popIntArrayRef("size");
-    jit::tracer::warn("resize_", jit::tracer::WARN_RESIZE);
-    jit::tracer::delValueTrace(self);
-  }
-#endif
   {
-    // TODO: move tracing logic into TraceTypeManual.cpp
-    at::tracer::impl::NoTracerDispatchMode tracer_guard;
     at::AutoNonVariableTypeMode non_var_type_mode(true);
     self_.resize_(size, std::move(optional_memory_format));
   }
@@ -271,15 +241,7 @@ Tensor& resize_as_(
   if (self.requires_grad()) {
     AT_ERROR("cannot resize variables that require grad");
   }
-#if !defined(PYTORCH_DISABLE_TRACING)
-  if (torch::jit::tracer::isTracing()) {
-    jit::tracer::warn("resize_as_", jit::tracer::WARN_RESIZE);
-    jit::tracer::delValueTrace(self);
-  }
-#endif
   {
-    // TODO: move tracing logic into TraceTypeManual.cpp
-    at::tracer::impl::NoTracerDispatchMode tracer_guard;
     at::AutoNonVariableTypeMode non_var_type_mode(true);
     at::resize_as_(self_, the_template_, std::move(optional_memory_format));
   }
@@ -288,46 +250,27 @@ Tensor& resize_as_(
 
 Tensor detach(const Tensor & self) {
   RECORD_FUNCTION("detach", std::vector<c10::IValue>({self}));
-
-#if !defined(PYTORCH_DISABLE_TRACING)
-  torch::jit::Node* node = nullptr;
-  if (jit::tracer::isTracing()) {
-    auto& graph = jit::tracer::getTracingState()->graph;
-    node = graph->create(jit::aten::detach, /*num_outputs=*/0);
-    jit::tracer::recordSourceLocation(node);
-    jit::tracer::addInputs(node, "self", self);
-    graph->insertNode(node);
-  }
-#endif
-  // <NON_GENERATED_CODE>
   auto result = make_variable_non_differentiable_view(self, self, /*allow_tensor_metadata_change=*/false);
   namedinference::propagate_names(result, self);
-  // </NON_GENERATED_CODE>
- #if !defined(PYTORCH_DISABLE_TRACING)
-  if (jit::tracer::isTracing()) {
-    jit::tracer::addOutput(node, result);
-  }
-#endif
   return result;
 }
 
 Tensor & detach_(Tensor & self) {
   RECORD_FUNCTION("detach_", std::vector<c10::IValue>({self}));
-
-#if !defined(PYTORCH_DISABLE_TRACING)
-  torch::jit::Node* node = nullptr;
-  if (jit::tracer::isTracing()) {
-    auto& graph = jit::tracer::getTracingState()->graph;
-    node = graph->create(jit::aten::detach, /*num_outputs=*/0);
-    jit::tracer::recordSourceLocation(node);
-    jit::tracer::addInputs(node, "self", self);
-    graph->insertNode(node);
-    jit::tracer::ensureUniqueIfOutOfPlaced("detach_", self);
-  }
-#endif
-  // <NON_GENERATED_CODE>
   if (self.is_view()) {
-    AT_ERROR("Can't detach views in-place. Use detach() instead");
+    // NB: is_view() ==> get_autograd_meta()
+    auto diff_view_meta = static_cast<torch::autograd::DifferentiableViewMeta*>(torch::autograd::impl::get_autograd_meta(self));
+    // See NOTE [ View + Inplace detection ]
+    if (diff_view_meta->creation_meta == CreationMeta::MULTI_OUTPUT_SAFE) {
+        TORCH_WARN("This view is an output of a function that "
+                   "returns multiple views. Detaching such views inplace "
+                   "is being deprecated and will be forbidden "
+                   "starting from version 1.8. Consider using detach() instead "
+                   "of detach_(). Alternatively, create this view with an "
+                   "`unsafe_` version of the function that produced it.");
+    } else {
+      AT_ERROR("Can't detach views in-place. Use detach() instead");
+    }
   }
   // I think the choice here is conservative.  In principle, doing
   // an in-place detach should give us the ability to just clear
@@ -339,12 +282,6 @@ Tensor & detach_(Tensor & self) {
   autograd_meta->set_requires_grad(false, self.unsafeGetTensorImpl());
   autograd_meta->grad_fn_.reset();
   autograd_meta->output_nr_ = 0;
-  // </NON_GENERATED_CODE>
-#if !defined(PYTORCH_DISABLE_TRACING)
-  if (jit::tracer::isTracing()) {
-    jit::tracer::addOutput(node, self);
-  }
-#endif
   return self;
 }
 
@@ -357,27 +294,31 @@ Tensor & detach_(Tensor & self) {
 // Unfortunately, this setup doesn't work in NonVariableTypeMode because that will
 // skip past variable kernels. So for ops that we want to use in NonVariableTypeMode
 // (and that don't use dispatch), we register them as catch-all kernels instead.
+// Invariant:
+// - Ops registered to catchAll below must match `MANUAL_CATCHALL` set in tools/autograd/gen_variable_type.py.
+//   and they have manual_kernel_registration=True in native_functions.yaml.
+// - Ops registered to DispatchKey::Autograd below must be included in `MANUAL_AUTOGRAD` in tools/autograd/gen_variable_type.py
 static auto registry = torch::RegisterOperators()
   .op(torch::RegisterOperators::options()
     .schema("aten::resize_(Tensor(a!) self, int[] size, *, MemoryFormat? memory_format=None) -> Tensor(a!)")
     .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-    .impl_unboxedOnlyKernel<decltype(VariableType::resize_), &VariableType::resize_>(DispatchKey::Autograd))
+    .kernel<decltype(VariableType::resize_), &VariableType::resize_>(DispatchKey::Autograd))
   .op(torch::RegisterOperators::options()
     .schema("aten::resize_as_(Tensor(a!) self, Tensor the_template, *, MemoryFormat? memory_format=None) -> Tensor(a!)")
     .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-    .impl_unboxedOnlyKernel<decltype(VariableType::resize_as_), &VariableType::resize_as_>(DispatchKey::Autograd))
+    .kernel<decltype(VariableType::resize_as_), &VariableType::resize_as_>(DispatchKey::Autograd))
   .op(torch::RegisterOperators::options()
-    .schema("aten::detach(Tensor self) -> Tensor")
+    .schema("aten::detach(Tensor(a) self) -> Tensor(a)")
     .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
     .kernel<decltype(VariableType::detach), &VariableType::detach>(DispatchKey::Autograd))
   .op(torch::RegisterOperators::options()
     .schema("aten::detach_(Tensor(a!) self) -> Tensor(a!)")
     .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-    .impl_unboxedOnlyKernel<decltype(VariableType::detach_), &VariableType::detach_>(DispatchKey::Autograd))
+    .kernel<decltype(VariableType::detach_), &VariableType::detach_>(DispatchKey::Autograd))
   .op(torch::RegisterOperators::options()
     .schema("aten::copy_(Tensor(a!) self, Tensor src, bool non_blocking=False) -> Tensor(a!)")
     .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-    .impl_unboxedOnlyKernel<decltype(VariableType::copy_), &VariableType::copy_>(DispatchKey::Autograd))
+    .kernel<decltype(VariableType::copy_), &VariableType::copy_>(DispatchKey::Autograd))
   .op(torch::RegisterOperators::options()
     .schema("aten::backward(Tensor self, Tensor? gradient=None, bool? retain_graph=None, bool create_graph=False) -> ()")
     .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
@@ -387,8 +328,8 @@ static auto registry = torch::RegisterOperators()
     // tensor argument.
     // TODO Once callBoxed() supports optional tensor arguments, we can enable `use_c10_dispatcher: full` for backward()
     //      and remove the backend Autograd kernel here, only leaving the catch-all kernel.
-    .impl_unboxedOnlyKernel<decltype(VariableType::backward), &VariableType::backward>(DispatchKey::Autograd)
-    .impl_unboxedOnlyCatchAllKernel<decltype(VariableType::backward), &VariableType::backward>())
+    .kernel<decltype(VariableType::backward), &VariableType::backward>(DispatchKey::Autograd)
+    .catchAllKernel<decltype(VariableType::backward), &VariableType::backward>())
   .op(torch::RegisterOperators::options()
     .schema("aten::set_data(Tensor(a!) self, Tensor new_data) -> ()")
     .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
@@ -418,8 +359,8 @@ static auto registry = torch::RegisterOperators()
     // tensor argument.
     // TODO Once callBoxed() supports mutable tensor arguments, we can enable `use_c10_dispatcher: full` for requires_grad_()
     //      and remove the backend Autograd kernel here, only leaving the catch-all kernel.
-    .impl_unboxedOnlyKernel<decltype(VariableType::requires_grad_), &VariableType::requires_grad_>(DispatchKey::Autograd)
-    .impl_unboxedOnlyCatchAllKernel<decltype(VariableType::requires_grad_), &VariableType::requires_grad_>())
+    .kernel<decltype(VariableType::requires_grad_), &VariableType::requires_grad_>(DispatchKey::Autograd)
+    .catchAllKernel<decltype(VariableType::requires_grad_), &VariableType::requires_grad_>())
   .op(torch::RegisterOperators::options()
     .schema("aten::retain_grad(Tensor(a!) self) -> ()")
     .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)

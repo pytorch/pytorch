@@ -1,9 +1,12 @@
 #include <torch/csrc/distributed/rpc/tensorpipe_agent.h>
 
+#ifdef USE_TENSORPIPE
+
 #include <limits>
 
 #include <fmt/format.h>
-#include <torch/csrc/distributed/rpc/request_callback_impl.h>
+#include <tensorpipe/tensorpipe.h>
+
 #include <torch/csrc/distributed/rpc/utils.h>
 
 namespace torch {
@@ -69,7 +72,8 @@ constexpr int64_t kShmTransportPriority = 100;
 // The UV transport just uses TCP and should work everywhere, thus keep it last.
 constexpr int64_t kUvTransportPriority = 0;
 
-constexpr int64_t kCmaChannelPriority = 100;
+constexpr int64_t kCmaChannelPriority = 200;
+constexpr int64_t kMultiplexedUvChannelPriority = 100;
 // The basic channel reuses a transport as a channel, and is thus our fallback.
 constexpr int64_t kBasicChannelPriority = 0;
 
@@ -84,11 +88,22 @@ std::unique_ptr<TransportRegistration> makeUvTransport() {
 // libuv (https://github.com/libuv/libuv) in order to be cross-platform.
 C10_REGISTER_CREATOR(TensorPipeTransportRegistry, uv, makeUvTransport);
 
-#ifdef TP_ENABLE_SHM
+#if TENSORPIPE_HAS_SHM_TRANSPORT
+
+std::string createUniqueShmAddr() {
+  thread_local uint32_t threadLocalId = 0;
+  return c10::str(
+      "shm://tensorpipe_rpc_agent_",
+      std::this_thread::get_id(),
+      "_",
+      ::getpid(),
+      "_",
+      threadLocalId++);
+}
 
 std::unique_ptr<TransportRegistration> makeShmTransport() {
   auto context = std::make_shared<tensorpipe::transport::shm::Context>();
-  std::string address = TensorPipeAgent::createUniqueShmAddr();
+  std::string address = createUniqueShmAddr();
   return std::make_unique<TransportRegistration>(TransportRegistration{
       std::move(context), kShmTransportPriority, std::move(address)});
 }
@@ -111,7 +126,7 @@ std::unique_ptr<ChannelRegistration> makeBasicChannel() {
 // transport to be used as a channel.
 C10_REGISTER_CREATOR(TensorPipeChannelRegistry, basic, makeBasicChannel);
 
-#ifdef TP_ENABLE_CMA
+#if TENSORPIPE_HAS_CMA_CHANNEL
 
 std::unique_ptr<ChannelRegistration> makeCmaChannel() {
   auto context = std::make_shared<tensorpipe::channel::cma::Context>();
@@ -127,6 +142,34 @@ std::unique_ptr<ChannelRegistration> makeCmaChannel() {
 C10_REGISTER_CREATOR(TensorPipeChannelRegistry, cma, makeCmaChannel);
 
 #endif
+
+constexpr static int kNumUvThreads = 16;
+
+std::unique_ptr<ChannelRegistration> makeMultiplexedUvChannel() {
+  std::vector<std::shared_ptr<tensorpipe::transport::Context>> contexts;
+  std::vector<std::shared_ptr<tensorpipe::transport::Listener>> listeners;
+  for (int laneIdx = 0; laneIdx < kNumUvThreads; ++laneIdx) {
+    auto context = std::make_shared<tensorpipe::transport::uv::Context>();
+    std::string address = TensorPipeAgent::guessUvAddress(*context);
+    contexts.push_back(std::move(context));
+    listeners.push_back(contexts.back()->listen(address));
+  }
+  auto context = std::make_shared<tensorpipe::channel::mpt::Context>(
+      std::move(contexts), std::move(listeners));
+  return std::make_unique<ChannelRegistration>(
+      ChannelRegistration{std::move(context), kMultiplexedUvChannelPriority});
+}
+
+// The multiplexed UV channel encapsulates multiple UV transports (each with its
+// own event loop thread). Each channel will, in turn, contain multiple UV
+// connections, one for each of those contexts. When sending a tensor, its data
+// is split in equal chunks and each chunks is sent on a different connection
+// and thus driven by a different thread. This is needed to reach very high
+// bandwidths.
+C10_REGISTER_CREATOR(
+    TensorPipeChannelRegistry,
+    mpt_uv,
+    makeMultiplexedUvChannel);
 
 } // namespace
 
@@ -185,10 +228,11 @@ TensorPipeAgent::TensorPipeAgent(
     worker_id_t selfId,
     int worldSize,
     std::shared_ptr<c10d::ProcessGroup> processGroup,
-    TensorPipeRpcBackendOptions opts)
+    TensorPipeRpcBackendOptions opts,
+    std::unique_ptr<RequestCallback> cb)
     : RpcAgent(
           WorkerInfo(std::move(selfName), selfId),
-          std::make_unique<RequestCallbackImpl>(),
+          std::move(cb),
           std::chrono::milliseconds(
               (long)(opts.rpcTimeoutSeconds * kToMilliseconds))),
       opts_(std::move(opts)),
@@ -863,19 +907,6 @@ const std::string& TensorPipeAgent::findWorkerURL(
   return it->second;
 }
 
-#ifdef TP_ENABLE_SHM
-std::string TensorPipeAgent::createUniqueShmAddr() {
-  thread_local uint32_t threadLocalId = 0;
-  return c10::str(
-      "shm://tensorpipe_rpc_agent_",
-      std::this_thread::get_id(),
-      "_",
-      ::getpid(),
-      "_",
-      threadLocalId++);
-}
-#endif
-
 std::unordered_map<std::string, std::string> TensorPipeAgent::getMetrics() {
   std::unordered_map<std::string, std::string> metrics;
   metrics[kThreadPoolSize] = c10::to_string(threadPool_.size());
@@ -996,3 +1027,5 @@ void TensorPipeAgent::markFutureWithError(
 } // namespace rpc
 } // namespace distributed
 } // namespace torch
+
+#endif // USE_TENSORPIPE

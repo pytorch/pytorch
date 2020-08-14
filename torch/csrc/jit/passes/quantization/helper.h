@@ -44,7 +44,18 @@ TORCH_API bool isScalar(Value* v);
 // Check if value is the input of the graph
 TORCH_API bool hitGraphInput(Value* value);
 
+// Converts a mangled name, such as
+//   __torch__.torch.nn.quantized.modules.conv.___torch_mangle_7.Conv2d
+// into an unmangled name, such as
+//   __torch__.torch.nn.quantized.modules.conv.Conv2d
+TORCH_API std::string removeTorchMangle(const std::string& orig_name);
+
+// Return the module name that corresponds to the value.
+TORCH_API c10::optional<std::string> getModuleName(Value* value);
+
 // =========== helper functions for Node =========
+TORCH_API bool isSingleInputGeneralShapeAtenFunction(Node* n);
+
 TORCH_API bool isSingleInputGeneralValueAtenFunction(Node* n);
 
 TORCH_API bool isSingleInputGeneralCallFunction(Node* n);
@@ -65,7 +76,12 @@ TORCH_API bool isPropagateQuantBinaryOp(Node* n);
 
 // Check if this is the node that we'll quantize or not quantize depending on
 // whether the input of the node is quantized, example: aten::cat
-TORCH_API bool isPropagateQuantNode(Node* n);
+TORCH_API bool isPropagateQuantOp(Node* n);
+
+// Check if the node is a binary op like aten::add and aten::mul and
+// if the input 1 is a scalar, these ops will be quantized to
+// quantized::{op}_scalar
+TORCH_API bool isBinaryOpWithScalarInput(Node* n);
 
 TORCH_API c10::optional<std::tuple<c10::QScheme, QParamVector>> getFixedQParams(
     Node* n);
@@ -89,6 +105,13 @@ TORCH_API bool useQuantizable(const Use& use, QuantType quant_type);
 // Given a CallFunction node, extract the graph of the called function
 TORCH_API std::shared_ptr<Graph> getCallFunctionGraph(Node* n);
 
+// Check if `use` is a CallFunction of name `func_name` and if value
+// `v` is the nth argument (if provided) of the function
+bool matchCallFuncToUse(
+    const Use& use,
+    const std::string& func_name,
+    c10::optional<int> nth_arg);
+
 // =========== helper functions for Block =========
 // checks if a block will always raise an Exception
 TORCH_API bool alwaysRaisesException(Block* block);
@@ -104,9 +127,25 @@ findChildModule(const Module& module, const std::vector<std::string>& path);
 
 // Given an CallMethod node, get the module instance corresponding
 // to the instance Value
+// TODO: refactor all current uses of this function to the Opt one
 TORCH_API Module getInvokedModule(Module& module, Node* n, Value* self);
 
+// Given an CallMethod node, get the module instance corresponding
+// to the instance Value if the instance is a module, otherwise return
+// c10::nullopt
+c10::optional<Module> getInvokedModuleOpt(
+    const Module& module,
+    Node* n,
+    Value* self);
+
 // ==================== filter functions for matches ==============
+// filter to check Value `vname` is a constant of int value `value`
+bool is_int_constant(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap,
+    const std::string& vname,
+    int value);
+
 // filter to check if the %alpha argument of aten::add is constant 1
 bool aten_add_alpha_is_one(
     const Match& match,
@@ -119,6 +158,14 @@ bool is_functional_relu(
 
 // filter to check if the module is torch.nn.ReLU
 bool is_relu_module(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap);
+
+bool is_functional_linear(
+    const Match& match,
+    const std::unordered_map<std::string, Value*>& vmap);
+
+bool is_linear_module(
     const Match& match,
     const std::unordered_map<std::string, Value*>& vmap);
 

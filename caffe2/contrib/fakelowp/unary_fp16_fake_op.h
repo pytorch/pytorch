@@ -4,12 +4,13 @@
 
 #include <fbgemm/FbgemmConvert.h>
 #include "caffe2/operators/elementwise_ops.h"
+#include "caffe2/utils/eigen_utils.h"
 #include "caffe2/utils/math.h"
 
 C10_DECLARE_bool(caffe2_fbgemm_fake_fp16_clamp);
 
 namespace caffe2 {
-
+using namespace std;
 template <class Context>
 struct ReluFakeFp16Functor {
   template <typename T>

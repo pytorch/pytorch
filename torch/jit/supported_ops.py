@@ -1,4 +1,5 @@
 import torch.jit
+from torch.jit._builtins import _find_builtin
 import inspect
 import textwrap
 # this file is for generating documentation using sphinx autodoc
@@ -92,7 +93,7 @@ def _get_nn_functional_ops():
     for mod in torch.jit._builtins._modules_containing_builtins:
         name = mod.__name__
         for elem in dir(mod):
-            builtin = torch.jit._find_builtin(getattr(mod, elem))
+            builtin = _find_builtin(getattr(mod, elem))
             if builtin is not None:
                 schemas = torch._C._jit_get_schemas_for_operator(builtin)
                 for schema in schemas:
@@ -133,7 +134,7 @@ def _get_torchscript_builtins():
     # Iterate over the specially added builtins
     for fn, _builtin_name in builtins:
         mod = inspect.getmodule(fn)
-        builtin = torch.jit._find_builtin(fn)
+        builtin = _find_builtin(fn)
         if builtin is not None:
             schemas = torch._C._jit_get_schemas_for_operator(builtin)
             for schema in schemas:
@@ -150,7 +151,7 @@ def _get_math_builtins():
     # Iterate over the specially added builtins
     for fn, _builtin_name in builtins:
         mod = inspect.getmodule(fn)
-        builtin = torch.jit._find_builtin(fn)
+        builtin = _find_builtin(fn)
         if builtin is not None:
             schemas = torch._C._jit_get_schemas_for_operator(builtin)
             for schema in schemas:
@@ -230,7 +231,7 @@ def _get_global_builtins():
 
     magic_methods_rows = []
     for fn, magic_method in magic_methods:
-        magic_methods_rows.append('":any:`{}`", "``{}``"'.format(fn, magic_method))
+        magic_methods_rows.append('"{}", "``{}``"'.format(fn, magic_method))
 
     schematized_ops = []
     schemaless_ops = []
@@ -269,7 +270,7 @@ The following functions will use the corresponding magic method on :any:`TorchSc
 
 {}
 
-These built-in functions do have a schema
+These built-in functions use the schema
 
 .. rst-class:: codeblock-height-limiter
 

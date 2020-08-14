@@ -177,7 +177,7 @@ class RNNBase(torch.nn.Module):
         # type: (Tensor, Tuple[int, int, int], str) -> None
         if hx.size() != expected_hidden_size:
             raise RuntimeError(msg.format(
-                expected_hidden_size, tuple(hx.size())))
+                expected_hidden_size, list(hx.size())))
 
     def check_forward_args(self, input, hidden, batch_sizes):
         # type: (Tensor, Tensor, Optional[Tensor]) -> None
@@ -285,8 +285,48 @@ class RNNBase(torch.nn.Module):
         return qRNNBase
 
 
-class LSTM(RNNBase):
+    def _weight_bias(self):
+        # Returns a dict of weights and biases
+        weight_bias_dict = {'weight' : {}, 'bias' : {}}
+        count = 0
+        num_directions = 2 if self.bidirectional else 1
+        for layer in range(self.num_layers):
+            for direction in range(num_directions):
+                suffix = '_reverse' if direction == 1 else ''
+                key_name1 = 'weight_ih_l{layer_idx}{suffix}'.format(layer_idx=layer, suffix=suffix)
+                key_name2 = 'weight_hh_l{layer_idx}{suffix}'.format(layer_idx=layer, suffix=suffix)
+                # packed weights are part of torchbind class, CellParamsSerializationType
+                # Within the packed weight class, the weight and bias are accessible as Tensors
+                packed_weight_bias = self._all_weight_values[count].param.__getstate__()[0][4]
+                weight_bias_dict['weight'][key_name1] = packed_weight_bias[0].__getstate__()[0][0]
+                weight_bias_dict['weight'][key_name2] = packed_weight_bias[1].__getstate__()[0][0]
+                key_name1 = 'bias_ih_l{layer_idx}{suffix}'.format(layer_idx=layer, suffix=suffix)
+                key_name2 = 'bias_hh_l{layer_idx}{suffix}'.format(layer_idx=layer, suffix=suffix)
+                weight_bias_dict['bias'][key_name1] = packed_weight_bias[0].__getstate__()[0][1]
+                weight_bias_dict['bias'][key_name2] = packed_weight_bias[1].__getstate__()[0][1]
+                count = count + 1
+        return weight_bias_dict
 
+    def get_weight(self):
+        return self._weight_bias()['weight']
+
+    def get_bias(self):
+        return self._weight_bias()['bias']
+
+class LSTM(RNNBase):
+    r"""
+    A dynamic quantized LSTM module with floating point tensor as inputs and outputs.
+    We adopt the same interface as `torch.nn.LSTM`, please see
+    https://pytorch.org/docs/stable/nn.html#torch.nn.LSTM for documentation.
+
+    Examples::
+
+        >>> rnn = nn.LSTM(10, 20, 2)
+        >>> input = torch.randn(5, 3, 10)
+        >>> h0 = torch.randn(2, 3, 20)
+        >>> c0 = torch.randn(2, 3, 20)
+        >>> output, (hn, cn) = rnn(input, (h0, c0))
+    """
     _FLOAT_MODULE = nn.LSTM
 
     __overloads__ = {'forward': ['forward_packed', 'forward_tensor']}
@@ -519,53 +559,41 @@ class RNNCellBase(torch.nn.Module):
         qRNNCellBase._packed_weight_hh = process_weights(mod.weight_hh, mod.bias_hh, dtype)
         return qRNNCellBase
 
+    def _weight_bias(self):
+        # Returns a dict of weights and biases
+        weight_bias_dict = {'weight' : {}, 'bias' : {}}
+        w1, b1 = self._packed_weight_ih.__getstate__()[0]
+        w2, b2 = self._packed_weight_hh.__getstate__()[0]
+        weight_bias_dict['weight']['weight_ih'] = w1
+        weight_bias_dict['weight']['weight_hh'] = w2
+        weight_bias_dict['bias']['bias_ih'] = b1
+        weight_bias_dict['bias']['bias_hh'] = b2
+        return weight_bias_dict
+
+    def get_weight(self):
+        return self._weight_bias()['weight']
+
+    def get_bias(self):
+        return self._weight_bias()['bias']
+
+    def _save_to_state_dict(self, destination, prefix, keep_vars):
+        super(RNNCellBase, self)._save_to_state_dict(destination, prefix, keep_vars)
+        destination[prefix + '_packed_weight_ih'] = self._packed_weight_ih
+        destination[prefix + '_packed_weight_hh'] = self._packed_weight_hh
+
+
+    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
+                              missing_keys, unexpected_keys, error_msgs):
+        self._packed_weight_ih = state_dict.pop(prefix + '_packed_weight_ih')
+        self._packed_weight_hh = state_dict.pop(prefix + '_packed_weight_hh')
+        super(RNNCellBase, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
+                                                       missing_keys, unexpected_keys, error_msgs)
 
 class RNNCell(RNNCellBase):
     r"""An Elman RNN cell with tanh or ReLU non-linearity.
-
-    .. math::
-
-        h' = \tanh(W_{ih} x + b_{ih}  +  W_{hh} h + b_{hh})
-
-    If :attr:`nonlinearity` is `'relu'`, then ReLU is used in place of tanh.
-
-    Args:
-        input_size: The number of expected features in the input `x`
-        hidden_size: The number of features in the hidden state `h`
-        bias: If ``False``, then the layer does not use bias weights `b_ih` and `b_hh`.
-            Default: ``True``
-        nonlinearity: The non-linearity to use. Can be either ``'tanh'`` or ``'relu'``. Default: ``'tanh'``
-
-    Inputs: input, hidden
-        - **input** of shape `(batch, input_size)`: tensor containing input features
-        - **hidden** of shape `(batch, hidden_size)`: tensor containing the initial hidden
-          state for each element in the batch.
-          Defaults to zero if not provided.
-
-    Outputs: h'
-        - **h'** of shape `(batch, hidden_size)`: tensor containing the next hidden state
-          for each element in the batch
-
-    Shape:
-        - Input1: :math:`(N, H_{in})` tensor containing input features where
-          :math:`H_{in}` = `input_size`
-        - Input2: :math:`(N, H_{out})` tensor containing the initial hidden
-          state for each element in the batch where :math:`H_{out}` = `hidden_size`
-          Defaults to zero if not provided.
-        - Output: :math:`(N, H_{out})` tensor containing the next hidden state
-          for each element in the batch
-
-    Attributes:
-        weight_ih: the learnable input-hidden weights, of shape
-            `(hidden_size, input_size)`
-        weight_hh: the learnable hidden-hidden weights, of shape
-            `(hidden_size, hidden_size)`
-        bias_ih: the learnable input-hidden bias, of shape `(hidden_size)`
-        bias_hh: the learnable hidden-hidden bias, of shape `(hidden_size)`
-
-    .. note::
-        All the weights and biases are initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`
-        where :math:`k = \frac{1}{\text{hidden\_size}}`
+    A dynamic quantized RNNCell module with floating point tensor as inputs and outputs.
+    Weights are quantized to 8 bits. We adopt the same interface as `torch.nn.RNNCell`,
+    please see https://pytorch.org/docs/stable/nn.html#torch.nn.RNNCell for documentation.
 
     Examples::
 
@@ -616,51 +644,9 @@ class RNNCell(RNNCellBase):
 class LSTMCell(RNNCellBase):
     r"""A long short-term memory (LSTM) cell.
 
-    .. math::
-
-        \begin{array}{ll}
-        i = \sigma(W_{ii} x + b_{ii} + W_{hi} h + b_{hi}) \\
-        f = \sigma(W_{if} x + b_{if} + W_{hf} h + b_{hf}) \\
-        g = \tanh(W_{ig} x + b_{ig} + W_{hg} h + b_{hg}) \\
-        o = \sigma(W_{io} x + b_{io} + W_{ho} h + b_{ho}) \\
-        c' = f * c + i * g \\
-        h' = o * \tanh(c') \\
-        \end{array}
-
-    where :math:`\sigma` is the sigmoid function, and :math:`*` is the Hadamard product.
-
-    Args:
-        input_size: The number of expected features in the input `x`
-        hidden_size: The number of features in the hidden state `h`
-        bias: If ``False``, then the layer does not use bias weights `b_ih` and
-            `b_hh`. Default: ``True``
-
-    Inputs: input, (h_0, c_0)
-        - **input** of shape `(batch, input_size)`: tensor containing input features
-        - **h_0** of shape `(batch, hidden_size)`: tensor containing the initial hidden
-          state for each element in the batch.
-        - **c_0** of shape `(batch, hidden_size)`: tensor containing the initial cell state
-          for each element in the batch.
-
-          If `(h_0, c_0)` is not provided, both **h_0** and **c_0** default to zero.
-
-    Outputs: (h_1, c_1)
-        - **h_1** of shape `(batch, hidden_size)`: tensor containing the next hidden state
-          for each element in the batch
-        - **c_1** of shape `(batch, hidden_size)`: tensor containing the next cell state
-          for each element in the batch
-
-    Attributes:
-        weight_ih: the learnable input-hidden weights, of shape
-            `(4*hidden_size, input_size)`
-        weight_hh: the learnable hidden-hidden weights, of shape
-            `(4*hidden_size, hidden_size)`
-        bias_ih: the learnable input-hidden bias, of shape `(4*hidden_size)`
-        bias_hh: the learnable hidden-hidden bias, of shape `(4*hidden_size)`
-
-    .. note::
-        All the weights and biases are initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`
-        where :math:`k = \frac{1}{\text{hidden\_size}}`
+    A dynamic quantized LSTMCell module with floating point tensor as inputs and outputs.
+    Weights are quantized to 8 bits. We adopt the same interface as `torch.nn.LSTMCell`,
+    please see https://pytorch.org/docs/stable/nn.html#torch.nn.LSTMCell for documentation.
 
     Examples::
 
@@ -700,53 +686,9 @@ class LSTMCell(RNNCellBase):
 class GRUCell(RNNCellBase):
     r"""A gated recurrent unit (GRU) cell
 
-    .. math::
-
-        \begin{array}{ll}
-        r = \sigma(W_{ir} x + b_{ir} + W_{hr} h + b_{hr}) \\
-        z = \sigma(W_{iz} x + b_{iz} + W_{hz} h + b_{hz}) \\
-        n = \tanh(W_{in} x + b_{in} + r * (W_{hn} h + b_{hn})) \\
-        h' = (1 - z) * n + z * h
-        \end{array}
-
-    where :math:`\sigma` is the sigmoid function, and :math:`*` is the Hadamard product.
-
-    Args:
-        input_size: The number of expected features in the input `x`
-        hidden_size: The number of features in the hidden state `h`
-        bias: If ``False``, then the layer does not use bias weights `b_ih` and
-            `b_hh`. Default: ``True``
-
-    Inputs: input, hidden
-        - **input** of shape `(batch, input_size)`: tensor containing input features
-        - **hidden** of shape `(batch, hidden_size)`: tensor containing the initial hidden
-          state for each element in the batch.
-          Defaults to zero if not provided.
-
-    Outputs: h'
-        - **h'** of shape `(batch, hidden_size)`: tensor containing the next hidden state
-          for each element in the batch
-
-    Shape:
-        - Input1: :math:`(N, H_{in})` tensor containing input features where
-          :math:`H_{in}` = `input_size`
-        - Input2: :math:`(N, H_{out})` tensor containing the initial hidden
-          state for each element in the batch where :math:`H_{out}` = `hidden_size`
-          Defaults to zero if not provided.
-        - Output: :math:`(N, H_{out})` tensor containing the next hidden state
-          for each element in the batch
-
-    Attributes:
-        weight_ih: the learnable input-hidden weights, of shape
-            `(3*hidden_size, input_size)`
-        weight_hh: the learnable hidden-hidden weights, of shape
-            `(3*hidden_size, hidden_size)`
-        bias_ih: the learnable input-hidden bias, of shape `(3*hidden_size)`
-        bias_hh: the learnable hidden-hidden bias, of shape `(3*hidden_size)`
-
-    .. note::
-        All the weights and biases are initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`
-        where :math:`k = \frac{1}{\text{hidden\_size}}`
+    A dynamic quantized GRUCell module with floating point tensor as inputs and outputs.
+    Weights are quantized to 8 bits. We adopt the same interface as `torch.nn.GRUCell`,
+    please see https://pytorch.org/docs/stable/nn.html#torch.nn.GRUCell for documentation.
 
     Examples::
 

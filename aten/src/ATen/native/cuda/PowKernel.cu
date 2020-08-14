@@ -32,6 +32,10 @@ namespace {
 static inline __host__ __device__ at::Half pow_(at::Half base, at::Half exp) {
   return static_cast<at::Half>(std::pow(static_cast<float>(base), static_cast<float>(exp)));
 }
+// pow for at::BFloat16
+static inline __host__ __device__ at::BFloat16 pow_(at::BFloat16 base, at::BFloat16 exp) {
+  return static_cast<at::BFloat16>(std::pow(static_cast<float>(base), static_cast<float>(exp)));
+}
 // pow (floating, floating/int)
 template <typename Base_type, typename Exp_type>
 static inline __host__ __device__ typename std::enable_if<std::is_floating_point<Base_type>::value && (std::is_same<Base_type, Exp_type>::value || std::is_same<Exp_type, int>::value), Base_type>::type
@@ -105,9 +109,11 @@ void pow_tensor_tensor_kernel(TensorIterator& iter) {
       });
     });
   } else if (isFloatingType(iter.dtype())) {
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "pow_cuda", [&]() {
-      gpu_kernel(iter, []GPU_LAMBDA(scalar_t base, scalar_t exp) -> scalar_t {
-        return pow_(base, exp);
+    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "pow_cuda", [&]() {
+      AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "pow_cuda", [&] {
+        gpu_kernel(iter, []GPU_LAMBDA(scalar_t base, scalar_t exp) -> scalar_t {
+          return pow_(base, exp);
+        });
       });
     });
   } else {
@@ -163,9 +169,11 @@ void pow_tensor_scalar_kernel(TensorIterator& iter, Scalar exp_scalar) {
       });
     });
   } else if (isFloatingType(iter.dtype()) || exp_scalar.isIntegral(false)) {
-    AT_DISPATCH_ALL_TYPES_AND(kHalf, iter.dtype(), "pow_cuda", [&]() {
-      const auto exp = exp_scalar.to<scalar_t>();
-      pow_tensor_scalar_kernel_impl<scalar_t>(iter, exp);
+    AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "pow_cuda", [&]() {
+      AT_SKIP_BFLOAT16_IF_NOT_ROCM(scalar_t, "pow_cuda", [&] {
+        const auto exp = exp_scalar.to<scalar_t>();
+        pow_tensor_scalar_kernel_impl<scalar_t>(iter, exp);
+      });
     });
   } else {
     const auto exp = exp_scalar.to<float>();

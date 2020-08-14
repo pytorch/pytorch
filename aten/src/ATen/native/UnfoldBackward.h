@@ -93,7 +93,7 @@ static TensorIterator _make_unfold_backward_iter_over_grad_out(
 
   auto iter = TensorIteratorConfig()
     .check_all_same_dtype(false)
-    .dont_resize_outputs()
+    .resize_outputs(false)
     .add_output(grad_out_restrided)
     .add_input(grad_in_restrided)
     .add_input(idx_dim_restrided)
@@ -164,7 +164,7 @@ static TensorIterator _make_unfold_backward_iter_over_grad_in(
 
   auto iter = TensorIteratorConfig()
     .check_all_same_dtype(false)
-    .dont_resize_outputs()
+    .resize_outputs(false)
     .add_output(grad_out_restrided)
     .add_input(grad_in)
     .add_input(idx_dim_restrided)

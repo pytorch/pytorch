@@ -219,6 +219,7 @@ class LayerModelHelper(model_helper.ModelHelper):
         self.global_constants = {}
         self.global_constant_initializers = {}
         self.add_global_constant('ONE', 1.0)
+        self.add_global_constant('NAN', float("NaN"))
         self.add_global_constant('ZERO', 0.0)
         self.add_global_constant('ZERO_RANGE', [0, 0], dtype='int32')
 

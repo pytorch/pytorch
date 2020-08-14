@@ -42,7 +42,6 @@ _(aten, _cast_Long) \
 _(aten, _cast_Short) \
 _(aten, _cat) \
 _(aten, _ceil) \
-_(aten, _clamp) \
 _(aten, _clamp_max) \
 _(aten, _clamp_min) \
 _(aten, _convolution) \
@@ -84,7 +83,6 @@ _(aten, _fft_with_size) \
 _(aten, _fill) \
 _(aten, _floor) \
 _(aten, _fused_dropout) \
-_(aten, _ger) \
 _(aten, _indexCopy) \
 _(aten, _indices) \
 _(aten, _linspace) \
@@ -100,6 +98,7 @@ _(aten, _masked_scale) \
 _(aten, _mm) \
 _(aten, _mv) \
 _(aten, _nnz) \
+_(aten, _nansum) \
 _(aten, _pack_padded_sequence) \
 _(aten, _pack_padded_sequence_backward) \
 _(aten, _pad_packed_sequence) \
@@ -162,6 +161,7 @@ _(aten, _trunc) \
 _(aten, _unique) \
 _(aten, _unique_dim) \
 _(aten, _unsafe_view) \
+_(aten, _validate_sparse_coo_tensor_args) \
 _(aten, _values) \
 _(aten, _weight_norm) \
 _(aten, _weight_norm_cuda_interface) \
@@ -206,6 +206,9 @@ _(aten, as_tensor) \
 _(aten, asin) \
 _(aten, atan) \
 _(aten, atan2) \
+_(aten, atleast_1d) \
+_(aten, atleast_2d) \
+_(aten, atleast_3d) \
 _(aten, avg_pool1d) \
 _(aten, avg_pool2d) \
 _(aten, avg_pool2d_backward) \
@@ -239,12 +242,13 @@ _(aten, cholesky) \
 _(aten, cholesky_inverse) \
 _(aten, cholesky_solve) \
 _(aten, chunk) \
-_(aten, clamp) \
 _(aten, clamp_max) \
 _(aten, clamp_min) \
 _(aten, clone) \
 _(aten, coalesce) \
 _(aten, combinations) \
+_(aten, complex) \
+_(aten, polar) \
 _(aten, constant_pad_nd) \
 _(aten, contiguous) \
 _(aten, conv1d) \
@@ -259,6 +263,7 @@ _(aten, cos) \
 _(aten, cosh) \
 _(aten, cosine_embedding_loss) \
 _(aten, cosine_similarity) \
+_(aten, count_nonzero) \
 _(aten, cross) \
 _(aten, std_mean) \
 _(aten, var_mean) \
@@ -286,7 +291,6 @@ _(aten, cumprod) \
 _(aten, cumsum) \
 _(aten, data_ptr) \
 _(aten, deg2rad) \
-_(aten, det) \
 _(aten, detach) \
 _(aten, diag) \
 _(aten, diag_embed) \
@@ -344,11 +348,11 @@ _(aten, frobenius_norm) \
 _(aten, full) \
 _(aten, full_like) \
 _(aten, gather) \
+_(aten, gcd) \
 _(aten, ge) \
 _(aten, gelu) \
 _(aten, geometric) \
 _(aten, geqrf) \
-_(aten, ger) \
 _(aten, get_device) \
 _(aten, glu) \
 _(aten, glu_backward) \
@@ -374,6 +378,7 @@ _(aten, hardtanh_forward) \
 _(aten, hinge_embedding_loss) \
 _(aten, histc) \
 _(aten, hspmm) \
+_(aten, hypot) \
 _(aten, ifft) \
 _(aten, index) \
 _(aten, index_add) \
@@ -397,7 +402,10 @@ _(aten, is_set_to) \
 _(aten, is_signed) \
 _(aten, is_sparse) \
 _(aten, isclose) \
+_(aten, isreal) \
 _(aten, istft) \
+_(aten, isposinf) \
+_(aten, isneginf) \
 _(aten, kl_div) \
 _(aten, kl_div_backward) \
 _(aten, kthvalue) \
@@ -405,6 +413,7 @@ _(aten, l1_loss) \
 _(aten, l1_loss_backward) \
 _(aten, l1_loss_forward) \
 _(aten, layer_norm) \
+_(aten, lcm) \
 _(aten, le) \
 _(aten, leaky_relu) \
 _(aten, leaky_relu_backward) \
@@ -426,6 +435,7 @@ _(aten, _log_softmax) \
 _(aten, _log_softmax_backward_data) \
 _(aten, logcumsumexp) \
 _(aten, logdet) \
+_(aten, logit) \
 _(aten, logspace) \
 _(aten, logsumexp) \
 _(aten, lstm) \
@@ -500,6 +510,7 @@ _(aten, multilabel_margin_loss_forward) \
 _(aten, multinomial) \
 _(aten, mv) \
 _(aten, mvlgamma) \
+_(aten, nansum) \
 _(aten, narrow) \
 _(aten, narrow_copy) \
 _(aten, native_batch_norm) \
@@ -513,6 +524,7 @@ _(aten, native_tensor) \
 _(aten, native_zero) \
 _(aten, ne) \
 _(aten, neg) \
+_(aten, nextafter) \
 _(aten, bitwise_and) \
 _(aten, bitwise_not) \
 _(aten, bitwise_or) \
@@ -539,6 +551,7 @@ _(aten, _euclidean_dist) \
 _(aten, pdist) \
 _(aten, cdist) \
 _(aten, permute) \
+_(aten, movedim) \
 _(aten, pin_memory) \
 _(aten, pinverse) \
 _(aten, pixel_shuffle) \
@@ -550,6 +563,7 @@ _(aten, prelu_backward) \
 _(aten, prod) \
 _(aten, put) \
 _(aten, qr) \
+_(aten, quantile) \
 _(aten, rad2deg) \
 _(aten, rand) \
 _(aten, rand_like) \
@@ -605,6 +619,8 @@ _(aten, selu) \
 _(aten, set) \
 _(aten, sigmoid) \
 _(aten, sign) \
+_(aten, signbit) \
+_(aten, silu) \
 _(aten, sin) \
 _(aten, sinh) \
 _(aten, size) \
@@ -699,6 +715,9 @@ _(aten, type_as) \
 _(aten, unbind) \
 _(aten, unfold) \
 _(aten, uniform) \
+_(aten, unsafe_chunk) \
+_(aten, unsafe_split) \
+_(aten, unsafe_split_with_sizes) \
 _(aten, unsqueeze) \
 _(aten, upsample_bilinear2d) \
 _(aten, upsample_bilinear2d_backward) \
@@ -730,6 +749,10 @@ _(aten, where) \
 _(aten, zero) \
 _(aten, zeros) \
 _(aten, zeros_like) \
+_(aten, real) \
+_(aten, imag) \
+_(aten, view_as_real) \
+_(aten, view_as_complex) \
 /* nothing */
 
 #define FORALL_ATTR_BASE_SYMBOLS(_) \

@@ -8,6 +8,7 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/NamedTensor.h>
 #include <ATen/core/LegacyTypeDispatch.h>
+#include <ATen/core/op_registration/hacky_wrapper_for_legacy_signatures.h>
 #include <ATen/quantized/Quantizer.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
@@ -21,11 +22,6 @@
 #endif
 
 namespace at {
-
-// This is temporary typedef to enable Quantizer in aten native function API
-// we'll remove them when we are actually exposing Quantizer class
-// to frontend
-using ConstQuantizerPtr = const c10::intrusive_ptr<Quantizer>&;
 
 Tensor Tensor::cpu() const {
   return to(options().device(DeviceType::CPU), /*non_blocking*/ false, /*copy*/ false);
@@ -147,6 +143,10 @@ bool is_vulkan(Tensor self) {
 bool Tensor::is_quantized() const {
   // NB: this is not a native function to avoid dispatching overhead.
   return impl_->is_quantized();
+}
+
+bool Tensor::is_meta() const {
+  return impl_->is_meta();
 }
 
 bool is_quantized(Tensor self) {

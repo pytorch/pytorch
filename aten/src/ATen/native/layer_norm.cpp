@@ -24,12 +24,12 @@ std::tuple<Tensor, Tensor, Tensor> native_layer_norm(
     int64_t M,
     int64_t N,
     double eps) {
-  Tensor Y = at::native::empty_like(X, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  Tensor Y = at::native::empty_like(X, at::MemoryFormat::Contiguous);
   Tensor mean = at::empty({M}, X.options());
   Tensor rstd = at::empty({M}, X.options());
   LayerNormKernel(
       X.device().type(), X, gamma, beta, M, N, eps, &Y, &mean, &rstd);
-  return std::make_tuple(std::move(Y), std::move(mean), std::move(rstd));
+  return std::forward_as_tuple(Y, mean, rstd);
 }
 
 std::tuple<Tensor, Tensor, Tensor> native_layer_norm_backward(
@@ -45,17 +45,32 @@ std::tuple<Tensor, Tensor, Tensor> native_layer_norm_backward(
   Tensor dgamma;
   Tensor dbeta;
   if (grad_input_mask[0]) {
-    dX = at::native::empty_like(X, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    dX = at::native::empty_like(X, at::MemoryFormat::Contiguous);
   }
   if (grad_input_mask[1]) {
-    dgamma = at::native::empty_like(gamma, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    dgamma = M > 0
+        ? at::native::empty_like(gamma, at::MemoryFormat::Contiguous)
+        : at::native::zeros_like(gamma, at::MemoryFormat::Contiguous);
   }
   if (grad_input_mask[2]) {
-    dbeta = at::native::empty_like(gamma, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    dbeta = M > 0 ? at::native::empty_like(gamma, at::MemoryFormat::Contiguous)
+                  : at::native::zeros_like(gamma, at::MemoryFormat::Contiguous);
   }
-  LayerNormBackwardKernel(
-      X.device().type(), dY, X, mean, rstd, gamma, M, N, &dX, &dgamma, &dbeta);
-  return std::make_tuple(std::move(dX), std::move(dgamma), std::move(dbeta));
+  if (M > 0) {
+    LayerNormBackwardKernel(
+        X.device().type(),
+        dY,
+        X,
+        mean,
+        rstd,
+        gamma,
+        M,
+        N,
+        &dX,
+        &dgamma,
+        &dbeta);
+  }
+  return std::forward_as_tuple(dX, dgamma, dbeta);
 }
 
 Tensor layer_norm(
@@ -65,14 +80,13 @@ Tensor layer_norm(
     const Tensor& bias /* optional */,
     double eps,
     bool /* cudnn_enable, deprecated */) {
-  auto inputs =
+  Tensor X;
+  Tensor gamma;
+  Tensor beta;
+  int64_t M;
+  int64_t N;
+  std::tie(X, gamma, beta, M, N) =
       _prepare_layer_norm_inputs(input, normalized_shape, weight, bias);
-  auto X = std::get<0>(inputs);
-  auto gamma = std::get<1>(inputs);
-  auto beta = std::get<2>(inputs);
-  auto M = std::get<3>(inputs);
-  auto N = std::get<4>(inputs);
-
   return std::get<0>(at::native_layer_norm(X, gamma, beta, M, N, eps));
 }
 

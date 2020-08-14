@@ -15,6 +15,7 @@ BatchedTensorImpl::BatchedTensorImpl(Tensor value, BatchDims bdims)
   , bdims_(std::move(bdims))
 {
   TORCH_INTERNAL_ASSERT(value_.defined());
+  checkInvariants();
 
   const auto public_dims = value_.dim() - bdims_.size();
   const auto value_sizes = value_.sizes();
@@ -61,6 +62,14 @@ int64_t BatchedTensorImpl::actualDim(int64_t dim, bool wrap_dim) const {
   TORCH_INTERNAL_ASSERT(false);
 }
 
+void BatchedTensorImpl::checkInvariants() const {
+  int64_t prev_level = -1;
+  for (const auto& bdim : bdims_) {
+    TORCH_INTERNAL_ASSERT(bdim.level() > prev_level);
+    prev_level = bdim.level();
+  }
+}
+
 // The following are publically exposed as methods of Tensor
 IntArrayRef BatchedTensorImpl::strides() const {
   TORCH_CHECK(false, "NYI: Getting tensor strides inside of vmap");
@@ -94,7 +103,7 @@ bool BatchedTensorImpl::has_storage() const {
 }
 
 Tensor makeBatched(const Tensor& tensor, BatchDims bdims) {
-  TORCH_INTERNAL_ASSERT(!isBatched(tensor));
+  TORCH_INTERNAL_ASSERT(!isBatchedTensor(tensor));
   auto tensor_dim = tensor.dim();
   TORCH_CHECK(
       tensor_dim <= kVmapMaxTensorDims,
@@ -108,7 +117,7 @@ Tensor makeBatched(const Tensor& tensor, BatchDims bdims) {
 }
 
 Tensor addBatchDim(const Tensor& tensor, int64_t level, int64_t dim) {
-  const auto* batched = maybeGetBatched(tensor);
+  const auto* batched = maybeGetBatchedImpl(tensor);
   if (!batched) {
     BatchDims bdims;
     bdims.emplace_back(level, dim);

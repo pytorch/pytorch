@@ -25,7 +25,12 @@ DEFAULT_NUMERIC_SUITE_COMPARE_MODEL_OUTPUT_WHITE_LIST = (
     | _INCLUDE_QCONFIG_PROPAGATE_LIST
 ) - _EXCLUDE_QCONFIG_PROPAGATE_LIST
 
-NON_LEAF_MODULE_TO_ADD_OBSERVER_WHITE_LIST = {nnqd.Linear, nnq.Linear}
+NON_LEAF_MODULE_TO_ADD_OBSERVER_WHITE_LIST = {
+    nnqd.Linear,
+    nnq.Linear,
+    nnqd.LSTM,
+    nn.LSTM,
+}
 
 
 def _find_match(str_list, key_str, postfix):
@@ -93,16 +98,33 @@ def compare_weights(float_dict, quantized_dict):
             weight_dict[key]["float"] = float_dict[match_key]
             weight_dict[key]["quantized"] = quantized_dict[key][0]
 
+        # For LSTM
+        split_str = key.split(".")
+        if split_str[-1] == "param" and split_str[-3] == "_all_weight_values":
+            layer = split_str[-2]
+            module_name = ".".join(split_str[:-3])
+            float_weight_ih_key = module_name + ".weight_ih_l" + layer
+            float_weight_hh_key = module_name + ".weight_hh_l" + layer
+            if float_weight_ih_key in float_dict and float_weight_hh_key in float_dict:
+                weight_dict[key] = {}
+                weight_dict[key]["float"] = float_dict[float_weight_ih_key]
+                weight_dict[key]["quantized"] = (
+                    quantized_dict[key].__getstate__()[0][4][0].__getstate__()[0][0]
+                )
+                weight_dict[key]["float"] = float_dict[float_weight_hh_key]
+                weight_dict[key]["quantized"] = (
+                    quantized_dict[key].__getstate__()[0][4][1].__getstate__()[0][0]
+                )
+
     return weight_dict
 
 
-def _get_logger_dict_helper(mod, target_dict, Logger, prefix=""):
+def _get_logger_dict_helper(mod, target_dict, prefix=""):
     r"""This is the helper function for get_logger_dict
 
     Args:
         mod: module we want to save all logger stats
         prefix: prefix for the current module
-        Logger: type of logger we want to get
         target_dict: the dictionary used to save all logger stats
     """
 
@@ -116,10 +138,10 @@ def _get_logger_dict_helper(mod, target_dict, Logger, prefix=""):
 
     for name, child in mod.named_children():
         module_prefix = get_prefix(prefix) + name if prefix else name
-        _get_logger_dict_helper(child, target_dict, Logger, module_prefix)
+        _get_logger_dict_helper(child, target_dict, module_prefix)
 
 
-def get_logger_dict(mod, Logger, prefix=""):
+def get_logger_dict(mod, prefix=""):
     r"""Traverse the modules and save all logger stats into target dict.
     This is mainly used for quantization accuracy debug.
 
@@ -131,14 +153,13 @@ def get_logger_dict(mod, Logger, prefix=""):
     Args:
         mod: module we want to save all logger stats
         prefix: prefix for the current module
-        Logger: type of logger we want to get
 
     Return:
         target_dict: the dictionary used to save all logger stats
     """
 
     target_dict = {}
-    _get_logger_dict_helper(mod, target_dict, Logger, prefix)
+    _get_logger_dict_helper(mod, target_dict, prefix)
     return target_dict
 
 
@@ -165,6 +186,10 @@ class ShadowLogger(Logger):
         self.stats["quantized"] = None
 
     def forward(self, x, y):
+        if len(x) > 1:
+            x = x[0]
+        if len(y) > 1:
+            y = y[0]
         if self.stats["quantized"] is None:
             self.stats["quantized"] = x.detach()
         else:
@@ -192,6 +217,20 @@ class OutputLogger(Logger):
         return x
 
 
+def _convert_tuple_to_list(t):
+    return list(_convert_tuple_to_list(x) for x in t) if type(t) is tuple else t
+
+
+def _dequantize_tensor_list(t):
+    return (
+        list(_dequantize_tensor_list(x) for x in t)
+        if type(t) is list
+        else t.dequantize()
+        if t.is_quantized
+        else t
+    )
+
+
 class Shadow(nn.Module):
     r"""Shadow module attaches the float module to its matching quantized module
     as the shadow. Then it uses Logger module to process the outputs of both
@@ -211,11 +250,11 @@ class Shadow(nn.Module):
         self.dequant = nnq.DeQuantize()
         self.logger = Logger()
 
-    def forward(self, x):
-        output = self.orig_module(x)
-        if x.is_quantized:
-            x = x.dequantize()
-        shadow_output = self.shadow_module(x)
+    def forward(self, *x):
+        xl = _convert_tuple_to_list(x)
+        output = self.orig_module(*xl)
+        xl_float = _dequantize_tensor_list(xl)
+        shadow_output = self.shadow_module(*xl_float)
         self.logger(output, shadow_output)
         return output
 
@@ -272,7 +311,7 @@ def prepare_model_with_stubs(float_module, q_module, module_swap_list, Logger):
     Example usage:
         prepare_model_with_stubs(float_model, q_model, module_swap_list, Logger)
         q_model(data)
-        ob_dict = get_logger_dict(q_model, Logger)
+        ob_dict = get_logger_dict(q_model)
 
     Args:
         float_module: float module used to generate the q_module
@@ -304,7 +343,7 @@ def prepare_model_with_stubs(float_module, q_module, module_swap_list, Logger):
 
 
 def compare_model_stub(
-    float_model, q_model, module_swap_list, data, Logger=ShadowLogger
+    float_model, q_model, module_swap_list, *data, Logger=ShadowLogger
 ):
     r"""Compare quantized module in a model with its floating point counterpart,
     feeding both of them the same input. Return a dict with key corresponding to
@@ -330,33 +369,32 @@ def compare_model_stub(
     Args:
         float_model: float model used to generate the q_model
         q_model: model quantized from float_model
-        data: input data used to run the prepared q_model
         module_swap_list: list of float module types at which shadow modules will
             be attached.
+        data: input data used to run the prepared q_model
         Logger: type of logger to be used in shadow module to process the outputs of
             quantized module and its float shadow module
     """
     prepare_model_with_stubs(float_model, q_model, module_swap_list, Logger)
-    q_model(data)
-    ob_dict = get_logger_dict(q_model, Logger)
+    q_model(*data)
+    ob_dict = get_logger_dict(q_model)
     return ob_dict
 
 
-def get_matching_activations(float_module, q_module, Logger):
+def get_matching_activations(float_module, q_module):
     r"""Find the matching activation between float and quantized modules.
 
     Args:
         float_module: float module used to generate the q_module
         q_module: module quantized from float_module
-        Logger: type of logger used to prepare float_module and q_module
 
     Return:
         act_dict: dict with key corresponding to quantized module names and each
         entry being a dictionary with two keys 'float' and 'quantized', containing
         the matching float and quantized activations
     """
-    float_dict = get_logger_dict(float_module, Logger)
-    quantized_dict = get_logger_dict(q_module, Logger)
+    float_dict = get_logger_dict(float_module)
+    quantized_dict = get_logger_dict(q_module)
     act_dict = {}
     for key in quantized_dict:
         match_key = _find_match(sorted(float_dict, reverse=True), key, "stats")
@@ -397,7 +435,7 @@ def prepare_model_outputs(
 def compare_model_outputs(
     float_model,
     q_model,
-    data,
+    *data,
     Logger=OutputLogger,
     white_list=DEFAULT_NUMERIC_SUITE_COMPARE_MODEL_OUTPUT_WHITE_LIST,
 ):
@@ -426,7 +464,7 @@ def compare_model_outputs(
         containing the matching float and quantized activations
     """
     prepare_model_outputs(float_model, q_model, Logger, white_list)
-    float_model(data)
-    q_model(data)
-    act_compare_dict = get_matching_activations(float_model, q_model, Logger)
+    float_model(*data)
+    q_model(*data)
+    act_compare_dict = get_matching_activations(float_model, q_model)
     return act_compare_dict
