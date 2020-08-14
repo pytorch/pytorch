@@ -1,5 +1,6 @@
 import bisect
 import warnings
+from functools import lru_cache
 
 from torch._utils import _accumulate
 from torch import randperm
@@ -171,6 +172,33 @@ class TensorDataset(Dataset[Tuple[Tensor, ...]]):
 
     def __len__(self):
         return self.tensors[0].size(0)
+
+
+class CachingDataset(Dataset[T_co]):
+    r"""A caching Dataset.
+
+    The first time an item is called by index, it will be loaded into
+    an LRU cache (the max size of which is up to the user). This class
+    is useful for faster retrieval of data from the second batch onwards.
+
+    All subclasses should overwrite :meth:`get_item`, which supports fetching
+    a data sample by index.
+
+    Arguments:
+        max_size (int): Maximum size for the LRU cache
+    """
+    def __init__(self, max_size: int) -> None:
+        self.max_size = max_size
+        self.cached_get_item = lru_cache(maxsize=max_size)(self.get_item)
+
+    def __getitem__(self, index: int):
+        return self.cached_get_item(index)
+
+    def get_item(self, index: int):
+        raise NotImplementedError
+
+    def __len__(self):
+        return self.cached_get_item.cache_info().currsize
 
 
 class ConcatDataset(Dataset[T_co]):

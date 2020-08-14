@@ -12,7 +12,7 @@ import itertools
 import warnings
 import tempfile
 from torch import multiprocessing as mp
-from torch.utils.data import _utils, Dataset, IterableDataset, TensorDataset, DataLoader, ConcatDataset, ChainDataset
+from torch.utils.data import _utils, Dataset, IterableDataset, TensorDataset, CachingDataset, DataLoader, ConcatDataset, ChainDataset
 from torch.utils.data._utils import MP_STATUS_CHECK_INTERVAL
 from torch.utils.data.dataset import random_split
 from torch._utils import ExceptionWrapper
@@ -199,6 +199,29 @@ class CountingIterableDataset(IterableDataset):
 
     def __len__(self):
         return self.n
+
+
+class SampleCachingDataset(CachingDataset):
+    def __init__(self, max_size):
+        super(SampleCachingDataset, self).__init__(max_size)
+        self.data = list(range(10))
+        self.length = 10
+
+    def get_item(self, index):
+        return self.data[index]
+
+class TestCachingDataset(TestCase):
+    dataset = SampleCachingDataset(max_size=32)
+
+    def test_cache(self):
+        tmp = []
+        for index in range(self.dataset.length):
+            before_size = len(self.dataset)
+            tmp.append(self.dataset[index])
+            after_size = len(self.dataset)
+            self.assertEqual(before_size + 1, after_size)
+
+        self.assertEqual(len(self.dataset), self.dataset.length)
 
 
 @unittest.skipIf(
