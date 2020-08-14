@@ -170,9 +170,6 @@ bool canHandle(Node* node) {
     }
     return true;
   }
-  if (node->kind() == prim::Loop) {
-    return false; // TODO
-  }
   if (!allShapesAreKnown(node)) {
     return false;
   }
