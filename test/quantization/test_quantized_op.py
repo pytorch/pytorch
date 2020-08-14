@@ -2734,7 +2734,11 @@ class TestQuantizedEmbeddingBag(TestCase):
             # Quantize the weights to 8bits
             qweight = torch.quantize_per_channel(weights, qparams[0], qparams[1], axis=0, dtype=torch.quint8)
             real_packed_weight = torch.ops.quantized.embedding_bag_prepack(qweight)
-            np.testing.assert_array_almost_equal(w_packed.numpy(), real_packed_weight.numpy(), decimal=0)
+            self.assertEqual(isinstance(real_packed_weight, torch._C.ScriptObject), True)
+            unpacked_weight = torch.ops.quantized.embedding_bag_unpack(real_packed_weight)
+            self.assertEqual(unpacked_weight.int_repr().numpy(), qweight.int_repr().numpy())
+            self.assertEqual(unpacked_weight.q_per_channel_scales(), qweight.q_per_channel_scales())
+            self.assertEqual(unpacked_weight.q_per_channel_zero_points(), qweight.q_per_channel_zero_points())
 
         # compare against C2 to ensure numerical equivalency.
         from caffe2.python import core, workspace
@@ -2862,7 +2866,25 @@ class TestQuantizedEmbeddingBag(TestCase):
         torch.testing.assert_allclose(reference_result, result, atol=atol,
                                       rtol=rtol)
 
+        if bit_rate == 8:
+            # Test operator that accepts TorchBind packed weights.
+            from torch.quantization import PerChannelMinMaxObserver
+            obs = PerChannelMinMaxObserver(dtype=torch.quint8, qscheme=torch.per_channel_affine_float_qparams, ch_axis=0)
+            obs(weights)
+            # Get the scale and zero point for the weight tensor
+            qparams = obs.calculate_qparams()
+
+            # Quantize the weights to 8bits
+            qweight = torch.quantize_per_channel(weights, qparams[0], qparams[1], axis=0, dtype=torch.quint8)
+            packed_weight = torch.ops.quantized.embedding_bag_prepack(qweight)
+            result = torch.ops.quantized.embedding_bag_byte(packed_weight, indices, offsets, mode=0,
+                                                            per_sample_weights=per_sample_weights,
+                                                            include_last_offset=include_last_offset)
+            torch.testing.assert_allclose(reference_result, result, atol=atol, rtol=rtol)
+
+
     """ Tests the correctness of the embedding_bag_8bit quantized operator """
+    @skipIfNoFBGEMM
     @given(num_embeddings=st.integers(10, 100),
            embedding_dim=st.integers(5, 50).filter(lambda x: x % 4 == 0),
            num_offsets=st.integers(1, 20),
