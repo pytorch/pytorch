@@ -62,7 +62,8 @@ class Proxy:
         if torch.overrides.is_tensor_method_or_property(orig_method):
             return _create_proxy(self.delegate, 'call_method', orig_method.__name__, args, kwargs)
         else:
-            return _create_proxy(self.delegate, 'call_function', orig_method, args, kwargs, name=self.delegate.graph._name(orig_method.__name__))
+            return _create_proxy(self.delegate, 'call_function', orig_method, args, kwargs,
+                                 name=self.delegate.graph._name(orig_method.__name__))
 
 class Attribute(Proxy):
     def __init__(self, root, attr):

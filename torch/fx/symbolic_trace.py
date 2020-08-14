@@ -120,7 +120,7 @@ def _proxy_placeholder(name, delegate):
 #   - delegate : An instance of a Delegate object
 def symbolic_trace(root : torch.nn.Module, delegate_class=DefaultDelegate):
     graph = Graph()
-    graph.delegate = delegate = delegate_class(root, graph)
+    delegate = delegate_class(root, graph)
 
     fn = type(root).forward
 
