@@ -465,10 +465,10 @@ def ignore(drop=False, **kwargs):
 
     if isinstance(drop, property):
         prop = drop
-        prop.fget._torchscript_modifier = FunctionModifiers.IGNORE
+        setattr(prop.fget, "_torchscript_modifier", FunctionModifiers.IGNORE)
 
         if prop.fset:
-            prop.fset._torchscript_modifier = FunctionModifiers.IGNORE
+            setattr(prop.fset, "_torchscript_modifier", FunctionModifiers.IGNORE)
 
         return prop
 
