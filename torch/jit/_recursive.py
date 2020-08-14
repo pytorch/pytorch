@@ -31,21 +31,6 @@ ignored_attributes = [
     "dump_patches",
 ]
 
-# A list of (cls, [ignored_attribute_names]) that helps exclude
-# unscriptable properties from JIT compilation.
-ignored_properties = [
-    (torch.nn.Module, [
-        "original_name",
-        "graph",
-        "inlined_graph",
-        "code",
-        "code_with_constants",
-    ]),
-    (torch.nn.RNNBase, [
-        "all_weights",
-    ]),
-]
-
 def make_stub(func, name):
     rcb = _jit_internal.createResolutionCallbackFromClosure(func)
     ast = get_jit_def(func, name, self_name="RecursiveScriptModule")
@@ -385,8 +370,6 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
                 unbound_setter = getattr(type(nn_module), item.fset.__name__) if item.fset else None
                 bound_setter = unbound_setter.__get__(script_module) if unbound_setter else None
                 setattr(script_moudle, name, property(name, bound_getter, bound_setter))
-            else:
-                pass
 
         # For convenience, attach the concrete type to the new ScriptModule
         script_module._concrete_type = concrete_type
@@ -581,21 +564,6 @@ def infer_methods_to_compile(nn_module):
     return overload_stubs + stubs
 
 
-def should_compile_property(cls, property_name):
-    """
-    Returns True if the given property on the given class should be included
-    in JIT compilation. This is used primarily to exclude properties in
-    core modules that are not yet scriptable.
-    """
-    # If the property appears in the ignore list of *any* of its superclasses,
-    # do not compile it.
-    for base, ignored in ignored_properties:
-        if issubclass(cls, base) and property_name in ignored:
-            return False
-
-    return True
-
-
 def get_property_stubs(nn_module):
     """
     Create property stubs for the properties of the module by creating method
@@ -607,17 +575,13 @@ def get_property_stubs(nn_module):
 
     for name in dir(module_ty):
         item = getattr(module_ty, name, None)
-        if isinstance(item, property) and should_compile_property(module_ty, name):
+        if isinstance(item, property):
             if not item.fget:
                 raise RuntimeError(f'Property {name} of {nn_module.__name__} must have a getter')
 
             rcbs[name] = _jit_internal.createResolutionCallbackFromClosure(item.fget)
 
-    stubs = []
-    for ast in properties_asts:
-        if should_compile_property(module_ty, ast.name().name):
-            stubs.append(PropertyStub(rcbs[ast.name().name], ast))
-
+    stubs = [PropertyStub(rcbs[ast.name().name], ast) for ast in properties_asts]
     return stubs
 
 

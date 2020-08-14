@@ -427,6 +427,7 @@ if _enabled:
             }
             self.__dict__["_initializing"] = False
 
+        @_jit_internal.ignore
         @property
         def graph(self):
             r"""
@@ -435,6 +436,7 @@ if _enabled:
             """
             return self.forward.graph
 
+        @_jit_internal.ignore
         @property
         def inlined_graph(self):
             r"""
@@ -444,6 +446,7 @@ if _enabled:
             """
             return self.forward.inlined_graph
 
+        @_jit_internal.ignore
         @property
         def code(self):
             r"""
@@ -453,6 +456,7 @@ if _enabled:
             """
             return self.forward.code
 
+        @_jit_internal.ignore
         @property
         def code_with_constants(self):
             r"""
@@ -505,6 +509,7 @@ if _enabled:
         def graph_for(self, *args, **kwargs):
             return self.forward.graph_for(*args, **kwargs)
 
+        @_jit_internal.ignore
         @property
         def original_name(self):
             if type(self) == str(self._c._type().name()):

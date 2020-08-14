@@ -11,6 +11,8 @@ from ..utils.rnn import PackedSequence
 from .. import init
 from ... import _VF
 
+from torch._jit_internal import ignore
+
 _rnn_impls = {
     'RNN_TANH': _VF.rnn_tanh,
     'RNN_RELU': _VF.rnn_relu,
@@ -280,6 +282,7 @@ class RNNBase(Module):
                     self._flat_weights_names.extend(weights[:2])
         self._flat_weights = [(lambda wn: getattr(self, wn) if hasattr(self, wn) else None)(wn) for wn in self._flat_weights_names]
 
+    @ignore
     @property
     def all_weights(self) -> List[Parameter]:
         return [[getattr(self, weight) for weight in weights] for weights in self._all_weights]
