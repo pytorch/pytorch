@@ -702,6 +702,8 @@ class TestVmapOperators(TestCase):
             (torch.sin, get_rand),
             (torch.sinh, get_rand),
             (torch.sqrt, get_rand),
+            (torch.tan, get_rand),
+            (torch.tanh, get_rand),
             (torch.trunc, get_randn),
         ]
         test = self._vmap_test
