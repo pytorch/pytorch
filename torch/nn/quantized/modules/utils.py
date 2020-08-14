@@ -21,7 +21,7 @@ def _ntuple_from_first(n):
     """Converts the argument to a tuple of size n
     with the first element repeated."""
     def parse(x):
-        while isinstance(x, container_abcs.Iterable):
+        while isinstance(x, container_abcs.Sequence):
             if len(x) == n:
                 break
             x = x[0]

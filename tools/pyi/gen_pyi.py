@@ -386,8 +386,11 @@ def gen_nn_functional(out):
     from_c = [
         'avg_pool2d',
         'avg_pool3d',
+        'hardtanh',
         'hardtanh_',
+        'hardsigmoid',
         'elu_',
+        'leaky_relu',
         'leaky_relu_',
         'logsigmoid',
         'softplus',

@@ -6,6 +6,7 @@ from torch._jit_internal import Optional  # noqa: F401
 import torch.nn as nn
 import torch.nn.intrinsic as nni
 from torch.nn.quantized.modules.utils import _quantize_weight
+from torch.nn.modules.module import _addindent
 
 class LinearPackedParams(torch.nn.Module):
     _version = 3

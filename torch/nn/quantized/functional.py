@@ -4,12 +4,14 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+import warnings
 from typing import List, Optional
 
 import torch
 from torch import Tensor
 from torch.nn.modules.utils import _pair, _triple
 from torch.nn.quantized.modules.utils import _pair_from_first
+from torch.jit.annotations import BroadcastingList2
 
 # Although some of the functions and docstrings are mirrored from the torch.nn,
 # we want to have them here for future changes.

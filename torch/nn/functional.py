@@ -1162,7 +1162,7 @@ def glu(input, dim=-1):
     return torch._C._nn.glu(input, dim)
 
 
-def hardtanh(input, min_val=-1., max_val=1., inplace=False):
+def hardtanh(input: Tensor, min_val: float = -1., max_val: float = 1., inplace: bool = False):
     # type: (Tensor, float, float, bool) -> Tensor
     r"""
     hardtanh(input, min_val=-1., max_val=1., inplace=False) -> Tensor
@@ -1282,7 +1282,7 @@ In-place version of :func:`~celu`.
 """)
 
 
-def leaky_relu(input, negative_slope=0.01, inplace=False):
+def leaky_relu(input: Tensor, negative_slope: float = 0.01, inplace: bool = False):
     # type: (Tensor, float, bool) -> Tensor
     r"""
     leaky_relu(input, negative_slope=0.01, inplace=False) -> Tensor
