@@ -309,6 +309,8 @@ class Hardsigmoid(Module):
             x / 6 + 1 / 2 & \text{otherwise}
         \end{cases}
 
+    Args:
+        inplace: can optionally do the operation in-place. Default: ``False``
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
@@ -321,9 +323,16 @@ class Hardsigmoid(Module):
         >>> input = torch.randn(2)
         >>> output = m(input)
     """
+    __constants__ = ['inplace']
+
+    inplace: bool
+
+    def __init__(self, inplace : bool = False) -> None:
+        super(Hardsigmoid, self).__init__()
+        self.inplace = inplace
 
     def forward(self, input: Tensor) -> Tensor:
-        return F.hardsigmoid(input)
+        return F.hardsigmoid(input, self.inplace)
 
 
 class Tanh(Module):
@@ -400,6 +409,9 @@ class Hardswish(Module):
             x \cdot (x + 3) /6 & \text{otherwise}
         \end{cases}
 
+    Args:
+        inplace: can optionally do the operation in-place. Default: ``False``
+
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
           dimensions
@@ -414,9 +426,16 @@ class Hardswish(Module):
     .. _`Searching for MobileNetV3`:
         https://arxiv.org/abs/1905.02244
     """
+    __constants__ = ['inplace']
+
+    inplace: bool
+
+    def __init__(self, inplace : bool = False) -> None:
+        super(Hardswish, self).__init__()
+        self.inplace = inplace
 
     def forward(self, input: Tensor) -> Tensor:
-        return F.hardswish(input)
+        return F.hardswish(input, self.inplace)
 
 
 class ELU(Module):
