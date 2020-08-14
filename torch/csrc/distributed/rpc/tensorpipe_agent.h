@@ -1,5 +1,7 @@
 #pragma once
 
+#ifdef USE_TENSORPIPE
+
 #include <atomic>
 #include <thread>
 
@@ -141,7 +143,8 @@ class TensorPipeAgent : public RpcAgent {
       worker_id_t selfId,
       int worldSize,
       std::shared_ptr<c10d::ProcessGroup> processGroup,
-      TensorPipeRpcBackendOptions opts);
+      TensorPipeRpcBackendOptions opts,
+      std::unique_ptr<RequestCallback> cb);
 
   TensorPipeAgent(const TensorPipeAgent&) = delete;
   TensorPipeAgent& operator=(const TensorPipeAgent&) = delete;
@@ -364,3 +367,5 @@ class TensorPipeAgent : public RpcAgent {
 } // namespace rpc
 } // namespace distributed
 } // namespace torch
+
+#endif // USE_TENSORPIPE

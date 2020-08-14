@@ -1,11 +1,12 @@
 #include <torch/csrc/distributed/rpc/tensorpipe_agent.h>
 
+#ifdef USE_TENSORPIPE
+
 #include <limits>
 
 #include <fmt/format.h>
 #include <tensorpipe/tensorpipe.h>
 
-#include <torch/csrc/distributed/rpc/request_callback_impl.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
 namespace torch {
@@ -265,10 +266,11 @@ TensorPipeAgent::TensorPipeAgent(
     worker_id_t selfId,
     int worldSize,
     std::shared_ptr<c10d::ProcessGroup> processGroup,
-    TensorPipeRpcBackendOptions opts)
+    TensorPipeRpcBackendOptions opts,
+    std::unique_ptr<RequestCallback> cb)
     : RpcAgent(
           WorkerInfo(std::move(selfName), selfId),
-          std::make_unique<RequestCallbackImpl>(),
+          std::move(cb),
           std::chrono::milliseconds(
               (long)(opts.rpcTimeoutSeconds * kToMilliseconds))),
       opts_(std::move(opts)),
@@ -1087,3 +1089,5 @@ void TensorPipeAgent::markFutureWithError(
 } // namespace rpc
 } // namespace distributed
 } // namespace torch
+
+#endif // USE_TENSORPIPE

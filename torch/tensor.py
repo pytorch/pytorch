@@ -807,30 +807,45 @@ class Tensor(torch._C._TensorBase):
             [name for name in names if not is_ellipsis(name)],
             ellipsis_idx)
 
-    def unflatten(self, dim, namedshape):
-        r"""Unflattens the named dimension :attr:`dim`, viewing it in the shape
-        specified by :attr:`namedshape`.
+    def unflatten(self, dim, sizes):
+        r"""Expands the dimension :attr:`dim` of the :attr:`self` tensor over multiple dimensions
+        of sizes given by :attr:`sizes`.
+
+        * :attr:`sizes` is the new shape of the unflattened dimension and it can be a `Tuple[int]` as well
+          as `torch.Size` if :attr:`self` is a `Tensor`, or `namedshape` (Tuple[(name: str, size: int)])
+          if :attr:`self` is a `NamedTensor`. The total number of elements in sizes must match the number
+          of elements in the original dim being unflattened.
 
         Arguments:
-            namedshape: (iterable of ``(name, size)`` tuples).
+            dim (Union[int, str]): Dimension to unflatten
+            sizes (Union[Tuple[int] or torch.Size, Tuple[Tuple[str, int]]]): New shape of the unflattened dimension
 
-        Examples::
+        Examples:
+            >>> torch.randn(3, 4, 1).unflatten(1, (2, 2)).shape
+            torch.Size([3, 2, 2, 1])
+            >>> torch.randn(2, 4, names=('A', 'B')).unflatten('B', (('B1', 2), ('B2', 2)))
+            tensor([[[-1.1772,  0.0180],
+                    [ 0.2412,  0.1431]],
 
-            >>> flat_imgs = torch.rand(32, 3 * 128 * 128, names=('N', 'features'))
-            >>> imgs = flat_imgs.unflatten('features', (('C', 3), ('H', 128), ('W', 128)))
-            >>> imgs.names, imgs.shape
-            (('N', 'C', 'H', 'W'), torch.Size([32, 3, 128, 128]))
+                    [[-1.1819, -0.8899],
+                    [ 1.5813,  0.2274]]], names=('A', 'B1', 'B2'))
 
         .. warning::
             The named tensor API is experimental and subject to change.
-
         """
         relevant_args = (self,)
         from torch.overrides import has_torch_function, handle_torch_function
         if type(self) is not Tensor and has_torch_function(relevant_args):
             return handle_torch_function(Tensor.unflatten, relevant_args, self, dim, namedshape)
-        names, sizes = unzip_namedshape(namedshape)
+
+        if not sizes:
+            raise RuntimeError("unflatten: sizes must be non-empty")
+
+        names = None
+        if isinstance(sizes, OrderedDict) or (isinstance(sizes, (tuple, list)) and isinstance(sizes[0], (tuple, list))):
+            names, sizes = unzip_namedshape(sizes)
         return super(Tensor, self).unflatten(dim, sizes, names)
+
 
     def rename_(self, *names, **rename_map):
         """In-place version of :meth:`~Tensor.rename`."""

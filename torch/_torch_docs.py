@@ -1502,6 +1502,65 @@ clip(input, min, max, *, out=None) -> Tensor
 Alias for :func:`torch.clamp`.
 """.format(**common_args))
 
+add_docstr(torch.complex,
+           r"""
+complex(real, imag, *, out=None) -> Tensor
+
+Constructs a complex tensor with its real part equal to :attr:`real` and its
+imaginary part equal to :attr:`imag`.
+
+Args:
+    real (Tensor): The real part of the complex tensor. Must be float or double.
+    imag (Tensor): The imaginary part of the complex tensor. Must be same dtype
+        as :attr:`real`.
+
+Keyword args:
+    out (Tensor): If the inputs are ``torch.float32``, must be
+        ``torch.complex64``. If the inputs are ``torch.float64``, must be
+        ``torch.complex128``.
+
+Example::
+    >>> real = torch.tensor([1, 2], dtype=torch.float32)
+    >>> imag = torch.tensor([3, 4], dtype=torch.float32)
+    >>> z = torch.complex(real, imag)
+    >>> z
+    tensor([(1.+3.j), (2.+4.j)])
+    >>> z.dtype
+    torch.complex64
+
+""")
+
+add_docstr(torch.polar,
+           r"""
+polar(abs, angle, *, out=None) -> Tensor
+
+Constructs a complex tensor whose elements are Cartesian coordinates
+corresponding to the polar coordinates with absolute value :attr:`abs` and angle
+:attr:`angle`.
+
+.. math::
+    \text{out} = \text{abs} \cdot \cos(\text{angle}) + \text{abs} \cdot \sin(\text{angle}) \cdot j
+""" + r"""
+Args:
+    abs (Tensor): The absolute value the complex tensor. Must be float or
+        double.
+    angle (Tensor): The angle of the complex tensor. Must be same dtype as
+        :attr:`abs`.
+
+Keyword args:
+    out (Tensor): If the inputs are ``torch.float32``, must be
+        ``torch.complex64``. If the inputs are ``torch.float64``, must be
+        ``torch.complex128``.
+
+Example::
+    >>> import numpy as np
+    >>> abs = torch.tensor([1, 2], dtype=torch.float64)
+    >>> angle = torch.tensor([np.pi / 2, 5 * np.pi / 4], dtype=torch.float64)
+    >>> z = torch.polar(abs, angle)
+    >>> z
+    tensor([(0.0000+1.0000j), (-1.4142-1.4142j)], dtype=torch.complex128)
+""")
+
 add_docstr(torch.conj,
            r"""
 conj(input, out=None) -> Tensor
@@ -2615,6 +2674,12 @@ Args:
 
 """)
 
+add_docstr(torch.outer, r"""
+outer(input, vec2, *, out=None) -> Tensor
+
+Alias of :func:`torch.ger`.
+""")
+
 add_docstr(torch.ger,
            r"""
 ger(input, vec2, out=None) -> Tensor
@@ -2779,6 +2844,32 @@ Example::
 
     >>> torch.histc(torch.tensor([1., 2, 1]), bins=4, min=0, max=3)
     tensor([ 0.,  2.,  1.,  0.])
+""".format(**common_args))
+
+add_docstr(torch.hypot,
+           r"""
+hypot(input, other, *, out=None) -> Tensor
+
+Given the legs of a right triangle, return its hypotenuse.
+
+.. math::
+    \text{out}_{i} = \sqrt{\text{input}_{i}^{2} + \text{other}_{i}^{2}}
+
+The shapes of ``input`` and ``other`` must be
+:ref:`broadcastable <broadcasting-semantics>`.
+""" + r"""
+Args:
+    input (Tensor): the first input tensor
+    other (Tensor): the second input tensor
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> a = torch.hypot(torch.tensor([4.0]), torch.tensor([3.0, 4.0, 5.0]))
+    tensor([5.0000, 5.6569, 6.4031])
+
 """.format(**common_args))
 
 add_docstr(torch.index_select,
@@ -4625,6 +4716,28 @@ Example::
     tensor([-0.0090,  0.2262,  0.0682,  0.2866, -0.3940])
 """.format(**common_args))
 
+add_docstr(torch.nextafter,
+           r"""
+nextafter(input, other, *, out=None) -> Tensor
+
+Return the next floating-point value after :attr:`input` towards :attr:`other`, elementwise.
+
+The shapes of ``input`` and ``other`` must be
+:ref:`broadcastable <broadcasting-semantics>`.
+
+Args:
+    input (Tensor): the first input tensor
+    other (Tensor): the second input tensor
+Keyword args:
+    {out}
+
+Example::
+    >>> eps = torch.finfo(torch.float32).eps
+    >>> torch.nextafter(torch.Tensor([1, 2]), torch.Tensor([2, 1])) == torch.Tensor([eps + 1, 2 - eps])
+    tensor([True, True])
+
+""".format(**common_args))
+
 add_docstr(torch.nonzero,
            r"""
 nonzero(input, *, out=None, as_tuple=False) -> LongTensor or tuple of LongTensors
@@ -6224,6 +6337,53 @@ Example::
     >>> b = torch.arange(4 * 5 * 6).view(4, 5, 6)
     >>> torch.sum(b, (2, 1))
     tensor([  435.,  1335.,  2235.,  3135.])
+""".format(**multi_dim_common))
+
+add_docstr(torch.nansum,
+           r"""
+nansum(input, dtype=None) -> Tensor
+
+Returns the sum of all elements, treating Not a Numbers (NaNs) as zero.
+
+Args:
+    {input}
+
+Keyword args:
+    {dtype}
+
+Example::
+
+    >>> a = torch.tensor([1., 2., float('nan'), 4.])
+    >>> torch.nansum(a)
+    tensor(7.)
+
+.. function:: nansum(input, dim, keepdim=False, dtype=None) -> Tensor
+
+Returns the sum of each row of the :attr:`input` tensor in the given
+dimension :attr:`dim`, treating Not a Numbers (NaNs) as zero.
+If :attr:`dim` is a list of dimensions, reduce over all of them.
+
+{keepdim_details}
+
+Args:
+    {input}
+    {dim}
+    {keepdim}
+
+Keyword args:
+    {dtype}
+
+Example::
+
+    >>> torch.nansum(torch.tensor([1., float("nan")]))
+    1.0
+    >>> a = torch.tensor([[1, 2], [3., float("nan")]])
+    >>> torch.nansum(a)
+    tensor(6.)
+    >>> torch.nansum(a, dim=0)
+    tensor([4., 2.])
+    >>> torch.nansum(a, dim=1)
+    tensor([3., 3.])
 """.format(**multi_dim_common))
 
 add_docstr(torch.svd,
