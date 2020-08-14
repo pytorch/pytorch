@@ -16,7 +16,7 @@ from torch._C._jit_tree_views import (
 )
 from torch._utils_internal import get_source_lines_and_file
 
-from torch._jit_internal import SourceContext, should_drop, is_static_fn
+from torch._jit_internal import SourceContext, should_drop, is_ignored_fn, is_static_fn
 import torch.jit.annotations
 
 # Borrowed from cPython implementation
@@ -145,9 +145,10 @@ def get_class_properties(cls, self_name):
     # Create Property TreeView objects from inspected property objects.
     properties = []
     for prop in props:
-        getter = get_jit_def(prop[1].fget, f"__{prop[0]}_getter", self_name=self_name)
-        setter = get_jit_def(prop[1].fset, f"__{prop[0]}_setter", self_name=self_name) if prop[1].fset else None
-        properties.append(Property(getter.range(), Ident(getter.range(), prop[0]), getter, setter))
+        if not is_ignored_fn(prop[1].fget):
+            getter = get_jit_def(prop[1].fget, f"__{prop[0]}_getter", self_name=self_name)
+            setter = get_jit_def(prop[1].fset, f"__{prop[0]}_setter", self_name=self_name) if prop[1].fset else None
+            properties.append(Property(getter.range(), Ident(getter.range(), prop[0]), getter, setter))
 
     return properties
 

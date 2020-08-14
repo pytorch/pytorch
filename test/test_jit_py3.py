@@ -547,6 +547,11 @@ class TestScriptPy3(JitTestCase):
             def attr(self):
                 return self.a
 
+            @torch.jit.ignore
+            @property
+            def ignored_attr(self):
+                return sum([self.a])
+
             @attr.setter
             def attr(self, a: int):
                 if a > 0:
@@ -570,6 +575,11 @@ class TestScriptPy3(JitTestCase):
         self.checkModule(ModuleWithProperties(5), (-5, -6,))
         self.checkModule(ModuleWithNoSetter(5), (5, 6,))
         self.checkModule(ModuleWithNoSetter(5), (-5, -6,))
+
+        mod = ModuleWithProperties(3)
+        scripted_mod = torch.jit.script(mod)
+        self.assertEqual(mod.ignored_attr, 3)
+
 
     def test_export_opnames_interface(self):
         global OneTwoModule
