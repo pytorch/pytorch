@@ -190,11 +190,17 @@ Node* getOrCreateTensorExprSubgraph(Node* n) {
   if (n->hasAttribute(attr::Subgraph) && n->kind() == getTensorExprSymbol()) {
     return n;
   }
+  GRAPH_UPDATE("Creating a tensorexpr::Group node from: ", *n);
   auto te_group =
       SubgraphUtils::createSingletonSubgraph(n, getTensorExprSymbol());
-  GRAPH_UPDATE("getOrCreateTensorExprSubgraph: ", *te_group);
   return te_group;
 }
+
+struct nodesComparator {
+  bool operator()(Node* a, Node* b) const {
+    return a->isAfter(b);
+  }
+};
 
 class TensorExprFuser {
  public:
@@ -202,106 +208,161 @@ class TensorExprFuser {
 
   void run() {
     aliasDb_ = torch::make_unique<AliasDb>(graph_);
-    createFusionGroups();
+    createFusionGroups(graph_->block());
   }
 
  private:
+  // Add unvisited input nodes to the queue for further merging into the fusion
+  // group.
+  void updateQueue(
+      Node* fusion_group,
+      std::set<Node*, nodesComparator>& queue,
+      const std::unordered_set<Node*>& visited) {
+    for (auto input : fusion_group->inputs()) {
+      if (!visited.count(input->node())) {
+        queue.insert(input->node());
+      }
+    }
+  }
+
+  // Create a fusion group starting from the node N.
+  // We then try to pull inputs into the fusion group and repeat that process
+  // until there is nothing we can pull in.
+  Node* createFusionGroup(Node* n) {
+    // Queue of the nodes we should consider for merging into the fusion groups
+    // (those nodes are usually inputs of the fusion group).
+    // We use an ordered set here to visit them in the right order: the fusion
+    // group is closer to the end of the block and we are trying to pull later
+    // nodes first.
+    // NB: the order in the list in theory could stale if we move nodes around.
+    // However, this should only happen to the nodes we could not fuse, and
+    // hence it should not be a problem.
+    std::set<Node*, nodesComparator> queue;
+    std::unordered_set<Node*> visited_nodes;
+
+    Node* fusion_group = n;
+    if (minSubgraphSize_ == 1) {
+      fusion_group = getOrCreateTensorExprSubgraph(n);
+    }
+
+    updateQueue(fusion_group, queue, visited_nodes);
+
+    GRAPH_DEBUG("Iteratively pull input nodes into the fusion group...\n");
+    while (!queue.empty()) {
+      GRAPH_DEBUG("Current fusion group: ", *fusion_group);
+      GRAPH_DEBUG(queue.size(), " nodes are in the queue.\n");
+
+      Node* input_node = *queue.begin();
+      queue.erase(queue.begin());
+
+      GRAPH_DEBUG("Trying to merge: ", *input_node);
+      fusion_group = tryMerge(fusion_group, input_node);
+      visited_nodes.insert(input_node);
+      updateQueue(fusion_group, queue, visited_nodes);
+    }
+
+    return fusion_group;
+  }
+
   // Merge fusible nodes into subgraphs in tensorexpr::Group nodes.
-  void createFusionGroups() {
-    auto block = graph_->block();
+  void createFusionGroups(Block* block) {
+    std::vector<Node*> fusion_groups;
+    auto reverse_iter = block->nodes().reverse();
+    for (auto it = reverse_iter.begin(); it != reverse_iter.end();) {
+      Node* n = *it;
 
-    std::vector<std::pair<graph_node_list_iterator, graph_node_list_iterator>>
-        worklist;
-    std::unordered_set<torch::jit::Block*> visited_blocks;
-
-    bool any_changed = true;
-    while (any_changed) {
-      any_changed = false;
-      worklist.push_back({block->nodes().rbegin(), block->nodes().rend()});
-
-      while (worklist.size()) {
-        auto& it = worklist.back().first;
-        auto end = worklist.back().second;
-
-        if (it->blocks().size()) {
-          Node* n = *it;
-          ++it;
-
-          if (it == end) {
-            worklist.pop_back();
-          }
-
-          for (auto b : n->blocks()) {
-            if (!visited_blocks.count(b)) {
-              worklist.push_back({b->nodes().rbegin(), b->nodes().rend()});
-              visited_blocks.insert(b);
-            }
-          }
-        } else {
-          bool changed;
-          std::tie(it, changed) = scanNode(*it);
-          any_changed |= changed;
-          if (it == end) {
-            worklist.pop_back();
-          }
-        }
+      for (auto b : n->blocks()) {
+        createFusionGroups(b);
       }
+
+      if (!canHandle(n)) {
+        it++;
+        continue;
+      }
+      // There are some nodes that we can support, but we don't want to start a
+      // fusion group from - skip them.
+      if (n->kind() == prim::ListConstruct || n->kind() == aten::slice ||
+          n->kind() == aten::unsqueeze || n->kind() == prim::ConstantChunk ||
+          n->kind() == prim::Constant) {
+        it++;
+        continue;
+      }
+
+      Node* fusion_group = createFusionGroup(n);
+      fusion_groups.push_back(fusion_group);
+      it = fusion_group->reverseIterator();
+      it++;
+    }
+
+    for (auto n : fusion_groups) {
+      inlineIfTooSmall(n);
     }
   }
 
-  std::pair<graph_node_list::iterator, bool> scanNode(Node* consumer) {
-    auto inputs =
-        sortReverseTopological(consumer->inputs(), consumer->owningBlock());
-
-    // Grab the iterator below consumer.  We'll use that to determine
-    // where to resume iteration, even if consumer gets relocated within
-    // the block.
-    auto iter = --consumer->reverseIterator();
-    for (auto input : inputs) {
-      if (auto group = tryMerge(consumer, input->node())) {
-        // Resume iteration from where consumer is/used to be.
-        return {++iter, true};
+  size_t blockSize(Block* block) {
+    size_t num = 0;
+    for (Node* n : block->nodes()) {
+      // Don't count prim::Constants and prim::ListConstructs as these are nodes
+      // we only pull in along with another, "main", node. E.g. the
+      // ListConstruct nodes would also be pulled into a fusion group if they
+      // are inputs of an aten::cat node.
+      if (n->kind() == prim::Constant || n->kind() == prim::ListConstruct) {
+        continue;
       }
+      for (Block* b : n->blocks()) {
+        num += blockSize(b);
+      }
+      num++;
     }
-
-    // We know consumer didn't move, so skip over it.
-    return {++(++iter), false};
+    return num;
   }
 
-  c10::optional<Node*> tryMerge(Node* consumer, Node* producer) {
-    GRAPH_DEBUG(
-        "Trying producer ",
-        getHeader(producer),
-        " and consumer ",
-        getHeader(consumer),
-        ":\n");
+  bool inlineIfTooSmall(Node* n) {
+    if (n->kind() != getTensorExprSymbol()) {
+      return false;
+    }
+    auto subgraph = SubgraphUtils::getSubgraph(n);
+    size_t num_modes = blockSize(subgraph->block());
+    if (num_modes < minSubgraphSize_) {
+      GRAPH_UPDATE("Fusion group is too small, unmerging: ", *n);
+      SubgraphUtils::unmergeSubgraph(n);
+      return true;
+    }
+    return false;
+  }
 
-    if (!canMerge(consumer, producer)) {
-      return c10::nullopt;
+  Node* tryMerge(Node* fusion_group, Node* to_merge) {
+    if (!canMerge(fusion_group, to_merge)) {
+      return fusion_group;
     }
 
-    consumer = getOrCreateTensorExprSubgraph(consumer);
+    std::vector<Node*> nodes_to_merge = {to_merge};
 
-    if (producer->kind() == aten::cat) {
-      Node* listconstruct = producer->inputs()[0]->node();
-
-      aliasDb_->moveBeforeTopologicallyValid(producer, consumer);
-      GRAPH_UPDATE(
-          "Merging ", getHeader(producer), " into ", getHeader(consumer));
-      SubgraphUtils::mergeNodeIntoSubgraph(producer, consumer);
-
-      aliasDb_->moveBeforeTopologicallyValid(listconstruct, consumer);
-      GRAPH_UPDATE(
-          "Merging ", getHeader(listconstruct), " into ", getHeader(consumer));
-      SubgraphUtils::mergeNodeIntoSubgraph(listconstruct, consumer);
-    } else {
-      aliasDb_->moveBeforeTopologicallyValid(producer, consumer);
-      GRAPH_UPDATE(
-          "Merging ", getHeader(producer), " into ", getHeader(consumer));
-      SubgraphUtils::mergeNodeIntoSubgraph(producer, consumer);
+    if (to_merge->kind() == aten::cat) {
+      Node* listconstruct = to_merge->input(0)->node();
+      nodes_to_merge.push_back(listconstruct);
     }
 
-    return consumer;
+    // First, try to move all the nodes we want to fuse next to the fusion
+    // group.
+    Node* move_point = fusion_group;
+    for (auto n : nodes_to_merge) {
+      GRAPH_UPDATE("Trying to move node next to fusion group: ", getHeader(n));
+      if (!aliasDb_->moveBeforeTopologicallyValid(n, move_point)) {
+        GRAPH_UPDATE("Failed to move because of AliasDB checks!");
+        return fusion_group;
+      }
+      move_point = n;
+    }
+
+    // Now all the nodes that we're going to fuse are moved next to the fusion
+    // group, so we can safely merge them into the fusion group subgraph.
+    fusion_group = getOrCreateTensorExprSubgraph(fusion_group);
+    for (auto n : nodes_to_merge) {
+      GRAPH_UPDATE("Merging ", getHeader(n));
+      SubgraphUtils::mergeNodeIntoSubgraph(n, fusion_group);
+    }
+    return fusion_group;
   }
 
 #define REQ(cond)                           \
@@ -363,6 +424,7 @@ class TensorExprFuser {
 
   std::shared_ptr<Graph> graph_;
   std::unique_ptr<AliasDb> aliasDb_ = nullptr;
+  size_t minSubgraphSize_ = 2;
 };
 
 void FuseTensorExprs(std::shared_ptr<Graph>& graph) {
