@@ -1,6 +1,6 @@
-#include "caffe2/opt/custom/fakefp16_transform.h"
+#include "caffe2/opt/fakefp16_transform.h"
 
-#include "caffe2/opt/custom/glow_net_transform.h"
+#include "caffe2/opt/glow_net_transform.h"
 #include "caffe2/utils/proto_utils.h"
 
 C10_DEFINE_bool(

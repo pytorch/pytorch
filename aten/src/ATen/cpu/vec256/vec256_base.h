@@ -390,6 +390,13 @@ public:
     // promotion
     return map([](T x) -> T { return -x; });
   }
+  Vec256<T> nextafter(const Vec256<T> &b) const {
+    Vec256<T> ret;
+    for (int64_t i = 0; i < size(); i++) {
+      ret[i] = std::nextafter(values[i], b[i]);
+    }
+    return ret;
+  }
   Vec256<T> round() const {
     // We do not use std::round because we would like to round midway numbers to the nearest even integer.
     return map(at::native::round_impl);
