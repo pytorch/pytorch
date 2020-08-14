@@ -18833,11 +18833,16 @@ class TestDevicePrecision(TestCase):
         cpu_tensor = torch.randn(10, 10, 10, dtype=dtype)
         device_tensor = cpu_tensor.to(device)
         zeros = torch.zeros(10, 10, 10, dtype=dtype)
-        for n in [0, 1]:
+        for n in [0, 1, 2, 3, 4, 5]:
             cpu_out = cpu_tensor.polygamma(n)
             device_out = device_tensor.polygamma(n)
             norm_errors = (device_out - cpu_out.to(device)) / device_out
             self.assertEqual(norm_errors, zeros)
+
+        cpu_tensor.requires_grad = True
+        for n in [0, 1, 2, 3, 4, 5]:
+            torch.autograd.gradcheck(lambda x: x.polygamma(n),
+                                     cpu_tensor)
 
     # Note: fails when using float tensors
     @dtypes(torch.double)
@@ -20300,6 +20305,9 @@ torch_op_tests = [_TorchMathTestMeta('sin'),
                                      ref_backend='scipy'),
                   _TorchMathTestMeta('polygamma', args=[1], substr='_1', reffn='polygamma',
                                      refargs=lambda x: (1, x.numpy()), input_fn=_generate_gamma_input, inputargs=[False],
+                                     ref_backend='scipy', rtol=0.0008, atol=1e-5),
+                  _TorchMathTestMeta('polygamma', args=[2], substr='_2', reffn='polygamma',
+                                     refargs=lambda x: (2, x.numpy()), input_fn=_generate_gamma_input, inputargs=[False],
                                      ref_backend='scipy', rtol=0.0008, atol=1e-5),
                   _TorchMathTestMeta('digamma',
                                      input_fn=_generate_gamma_input, inputargs=[True], ref_backend='scipy',
