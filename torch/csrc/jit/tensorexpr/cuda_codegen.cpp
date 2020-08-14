@@ -868,15 +868,24 @@ void CudaCodeGen::call(const std::vector<CallArg>& args) {
 
   std::vector<int> gpu_block_extents_v(3, 1);
   std::vector<int> gpu_thread_extents_v(3, 1);
+
   // evaluate all the block/thread extents into values
   // TODO: eventually, codegen these calculations and make them part of the
   // module.
   for (size_t i = 0; i < gpu_block_extents.size(); i++) {
+    if (gpu_block_extents[i]->isConstant()) {
+      gpu_block_extents_v[i] = immediateAs<int>(gpu_block_extents[i]);
+      continue;
+    }
     ExprEval<SimpleIREvaluator> eval(
         ExprHandle(gpu_block_extents[i]), buffer_args());
     gpu_block_extents_v[i] = eval.value<int>(args);
   }
   for (size_t i = 0; i < gpu_thread_extents.size(); i++) {
+    if (gpu_thread_extents[i]->isConstant()) {
+      gpu_thread_extents_v[i] = immediateAs<int>(gpu_thread_extents[i]);
+      continue;
+    }
     ExprEval<SimpleIREvaluator> eval(
         ExprHandle(gpu_thread_extents[i]), buffer_args());
     gpu_thread_extents_v[i] = eval.value<int>(args);

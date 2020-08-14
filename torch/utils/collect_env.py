@@ -215,12 +215,12 @@ def get_os(run_lambda):
         # Ubuntu/Debian based
         desc = get_lsb_version(run_lambda)
         if desc is not None:
-            return desc
+            return '{} ({})'.format(desc, machine())
 
         # Try reading /etc/*-release
         desc = check_release_file(run_lambda)
         if desc is not None:
-            return desc
+            return '{} ({})'.forat(desc, machine())
 
         return '{} ({})'.format(platform, machine())
 
