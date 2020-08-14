@@ -4134,11 +4134,13 @@ def multi_head_attention_forward(query,                           # type: Tensor
     attn_output_weights = softmax(
         attn_output_weights, dim=-1)
 
-    # mask NaNs with zero
-    if attn_mask is not None and key_padding_mask is not None and attn_mask.dtype == torch.bool:
-        # NaNs will only occur with bucketing
-        # Check for masked first src index (limited context) and masked last src index (padding)
-        if attn_mask[0, 0, :].any() and key_padding_mask[:, 0, 0, -1].any():
+    # Mask NaNs with zero.
+    # Check for:
+    #   - NaNs from shifted bucketing: masking of entire src for any of the tgts
+    #   - NaNs from padding: masked first src index (limited context) and masked last src index (padding)
+    if attn_mask is not None and attn_mask.dtype == torch.bool:
+        if (key_padding_mask is not None and attn_mask[0, 0, :].any() and key_padding_mask[:, 0, 0,-1].any()) or \
+                attn_mask.all(2).any():
             attn_output_weights = attn_output_weights.view(bsz, num_heads, tgt_len, src_len)
             attn_mask = attn_mask.view(1, 1, tgt_len, src_len)
             attn_output_weights = attn_output_weights.masked_fill(key_padding_mask + attn_mask, 0)
