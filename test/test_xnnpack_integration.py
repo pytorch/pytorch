@@ -800,7 +800,9 @@ class TestXNNPACKConv1dTransformPass(TestCase):
             pattern_count_transformed_map = {"Tensor = aten::conv1d": -1,
                                              "Tensor = aten::conv2d": 1}
             pattern_count_optimized_map = {"Tensor = aten::conv1d": -1,
-                                           "Tensor = aten::conv2d": -1}
+                                           "Tensor = aten::conv2d": -1,
+                                           "prepacked::conv2d_clamp_prepack" : -1,
+                                           "prepacked::conv2d_clamp_run": 1}
 
             TestXNNPACKConv1dTransformPass.validate_transform_conv1d_to_conv2d(Conv1D(),
                                                                                pattern_count_transformed_map,
@@ -865,7 +867,9 @@ class TestXNNPACKConv1dTransformPass(TestCase):
             pattern_count_transformed_map = {"Tensor = aten::conv1d": -1,
                                              "Tensor = aten::conv2d": 1}
             pattern_count_optimized_map = {"Tensor = aten::conv1d": -1,
-                                           "Tensor = aten::conv2d": -1}
+                                           "Tensor = aten::conv2d": -1,
+                                           "prepacked::conv2d_clamp_prepack" : -1,
+                                           "prepacked::conv2d_clamp_run": 1}
             TestXNNPACKConv1dTransformPass.validate_transform_conv1d_to_conv2d(Net(),
                                                                                pattern_count_transformed_map,
                                                                                pattern_count_optimized_map,
