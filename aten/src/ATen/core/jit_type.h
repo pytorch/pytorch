@@ -1130,7 +1130,7 @@ struct CAFFE2_API TupleType : public NamedType {
 
 struct EnumType;
 using EnumTypePtr = std::shared_ptr<EnumType>;
-using EnumNameValue = std::pair<std::string, IValue>;
+using EnumNameValue = std::pair<const std::string, const IValue>;
 struct CAFFE2_API EnumType : public NamedType {
   friend struct Type;
   static const TypeKind Kind = TypeKind::EnumType;
@@ -1187,7 +1187,7 @@ struct CAFFE2_API EnumType : public NamedType {
     return value_type_;
   }
 
-  at::ArrayRef<EnumNameValue> enumNamesValues() const {
+  const at::ArrayRef<EnumNameValue> enumNamesValues() const {
     return enum_names_values_;
   }
 

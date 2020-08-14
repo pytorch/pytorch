@@ -481,7 +481,7 @@ struct SourceImporterImpl : public Resolver,
   void importEnum(
       const QualifiedName& qualified_name,
       const ClassDef& enum_def) {
-    std::vector<std::pair<std::string, IValue>> names_values;
+    std::vector<at::EnumNameValue> names_values;
 
     TypePtr value_type = nullptr;
     auto set_or_check_type = [&value_type](
@@ -502,7 +502,7 @@ struct SourceImporterImpl : public Resolver,
       }
 
       const auto assign = Assign(statement);
-      auto name = Var(assign.lhs()).name().name();
+      const auto name = Var(assign.lhs()).name().name();
 
       IValue ivalue;
       auto rhs = assign.rhs().get();
@@ -537,7 +537,7 @@ struct SourceImporterImpl : public Resolver,
     }
 
     auto enum_type =
-        EnumType::create(qualified_name, value_type, names_values, cu_);
+        EnumType::create(qualified_name, std::move(value_type), std::move(names_values), cu_);
     cu_->register_type(enum_type);
   }
 

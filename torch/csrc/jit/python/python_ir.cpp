@@ -791,7 +791,7 @@ void initPythonIRBindings(PyObject* module_) {
       .def(py::init([](const std::string& qualified_name,
                        TypePtr value_type,
                        const std::vector<py::object>& enum_names_values) {
-        std::vector<std::pair<std::string, IValue>> enum_names_values_pair;
+        std::vector<EnumNameValue> enum_names_values_pair;
         enum_names_values_pair.reserve(enum_names_values.size());
         for (const auto& enum_name_value : enum_names_values) {
           auto enum_name = py::cast<std::string>(enum_name_value.attr("name"));
