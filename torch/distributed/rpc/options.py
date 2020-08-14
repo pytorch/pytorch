@@ -28,17 +28,20 @@ class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
             same argument of :meth:`~torch.distributed.init_process_group`
             (default: ``env://``).
         device_maps (Dict[str, Dict]): Device placement mappings from this
-            worker to the callee. This map must be invertible.
-            (default: ``None``)
+            worker to the callee. Key is the callee worker name and value the
+            dictionary (``Dict`` of ``int``, ``str``, or ``torch.device``) that
+            maps this worker's device to the callee worker's device to the
+            callee worker's device. (default: ``None``)
     """
     def __init__(
         self,
+        *,
         num_worker_threads: int = rpc_contants.DEFAULT_NUM_WORKER_THREADS,
-        _transports: List = None,
-        _channels: List = None,
         rpc_timeout: float = rpc_contants.DEFAULT_RPC_TIMEOUT_SEC,
         init_method: str = rpc_contants.DEFAULT_INIT_METHOD,
-        device_maps: Dict = None
+        device_maps: Dict = None,
+        _transports: List = None,
+        _channels: List = None,
     ):
         super().__init__(
             num_worker_threads,
@@ -60,6 +63,38 @@ class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
             device_map (Dict of int, str, or torch.device): Device placement
                 mappings from this worker to the callee. This map must be
                 invertible.
+
+        Example::
+            >>> # both workers
+            >>> def add(x, y):
+            >>>     print(x)  # tensor([1., 1.], device='cuda:1')
+            >>>     return x + y, (x + y).to(2)
+            >>>
+            >>> # on worker 0
+            >>> options = TensorPipeRpcBackendOptions(
+            >>>     num_worker_threads=8,
+            >>>     device_maps={"worker1": {0, 1}}
+            >>>     # maps worker0's cuda:0 to worker1's cuda:1
+            >>> )
+            >>> options.set_device_map("worker1", {1, 2})
+            >>> # maps worker0's cuda:1 to worker1's cuda:2
+            >>>
+            >>> rpc.init_rpc(
+            >>>     "worker0",
+            >>>     rank=0,
+            >>>     world_size=2
+            >>>     backend=rpc.BackendType.TENSORPIPE,
+            >>>     rpc_backend_options=options
+            >>> )
+            >>>
+            >>> x = torch.ones(2)
+            >>> rets = rpc.rpc_sync("worker1", add, args=(x.to(0), 1))
+            >>> # The first argument will be moved to cuda:1 on worker1. When
+            >>> # sending the return value back, it will follow the invert of
+            >>> # the device map, and hence will be moved back to cuda:0 and
+            >>> # cuda:1 on worker0
+            >>> print(rets[0])  # tensor([2., 2.], device='cuda:0')
+            >>> print(rets[0])  # tensor([2., 2.], device='cuda:1')
         """
         device_index_map = {}
         curr_device_maps = super().device_maps
