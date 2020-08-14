@@ -2489,6 +2489,31 @@ class AbstractTestCases:
                 with self.assertRaisesRegex(RuntimeError, 'start_dim cannot come after end_dim'):
                     src.flatten(2, 0)
 
+        def test_unflatten(self):
+            # test args: tensor, int, sizes
+            self.assertEqual(torch.tensor([]).unflatten(0, (0, 1)), torch.empty(0, 1))
+            self.assertEqual(torch.tensor([1]).unflatten(0, (1, 1)), torch.tensor([[1]]))
+            self.assertEqual(torch.tensor([1, 2, 3, 4]).unflatten(0, (2, 2)), torch.tensor([[1, 2], [3, 4]]))
+            self.assertEqual(torch.tensor([1, 2, 3, 4]).unflatten(0, [2, 2]), torch.tensor([[1, 2], [3, 4]]))
+            self.assertEqual(torch.tensor([1, 2, 3, 4]).unflatten(0, torch.Size([2, 2])), torch.tensor([[1, 2], [3, 4]]))
+            self.assertEqual(torch.ones(2, 10).unflatten(1, (5, 2)), torch.ones(2, 5, 2))
+
+            # test invalid args: tensor, str, sizes
+            with self.assertRaisesRegex(TypeError, r"received an invalid combination of arguments"):
+                torch.tensor([1]).unflatten('A', (1, 1))
+
+            # test invalid args: tensor, str, namedshape
+            with self.assertRaisesRegex(RuntimeError, r"Name 'A' not found in Tensor\[None\]."):
+                torch.ones(4).unflatten('A', (('A', 2), ('B', 2)))
+
+            # test other invalid arguments
+            with self.assertRaisesRegex(RuntimeError, r"sizes must be non-empty"):
+                torch.tensor([1]).unflatten(0, [])
+            with self.assertRaisesRegex(RuntimeError, r"Provided sizes \[2, 2\] don't multiply up to the size of dim 0 \(1\)"):
+                torch.tensor([1]).unflatten(0, [2, 2])
+            with self.assertRaisesRegex(IndexError, r"dimension specified as 0 but tensor has no dimensions"):
+                torch.tensor(1).unflatten(0, [0])
+
         @staticmethod
         def _test_gather(self, cast, test_bounds=True):
             m, n, o = random.randint(10, 20), random.randint(10, 20), random.randint(10, 20)
@@ -15012,6 +15037,8 @@ class TestTorchDeviceType(TestCase):
                 lambda x, y: x.floor_(),
                 # lambda x, y: x.fmod(2), # https://github.com/pytorch/pytorch/issues/24565
                 lambda x, y: x.frac(),
+                lambda x, y: x.hypot(y),
+                lambda x, y: x.hypot_(y),
                 # lambda x, y: x.lerp(y, 0.5), #  Need to update Lerp.cu with TensorIterator
                 lambda x, y: x.log(),
                 lambda x, y: x.log_(),
@@ -17015,6 +17042,24 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                     self.assertTrue(c[0] == d[0])   # remainder is same as fmod
                 else:
                     self.assertTrue(abs(c[0] - d[0]) == abs(b[0]))  # differ by one divisor
+
+    @dtypesIfCPU(torch.bfloat16, torch.float32, torch.float64)
+    @dtypes(torch.float32, torch.float64)
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_hypot(self, device, dtype):
+        inputs = [
+            (torch.randn(10, device=device).to(dtype), torch.randn(10, device=device).to(dtype)),
+            (torch.randn((3, 3, 3), device=device).to(dtype), torch.randn((3, 3, 3), device=device).to(dtype)),
+            (torch.randn((10, 1), device=device).to(dtype), torch.randn((10, 1), device=device).to(dtype).transpose(0, 1)),
+            (torch.randint(100, (10, ), device=device, dtype=torch.long), torch.randn(10, device=device).to(dtype))
+        ]
+        for input in inputs:
+            actual = torch.hypot(input[0], input[1])
+            if dtype == torch.bfloat16:
+                expected = torch.sqrt(input[0] * input[0] + input[1] * input[1])
+            else:
+                expected = np.hypot(input[0].cpu().numpy(), input[1].cpu().numpy())
+            self.assertEqual(actual, expected)
 
     @dtypes(torch.int64, torch.float64)
     def test_remainder_edge_cases(self, device, dtype):
