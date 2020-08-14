@@ -86,6 +86,7 @@ TORCH_LIBRARY(quantized, m) {
   m.def("conv3d_dilation(__torch__.torch.classes.quantized.Conv3dPackedParamsBase packed_weights) -> int[]");
   m.def("conv3d_groups(__torch__.torch.classes.quantized.Conv3dPackedParamsBase packed_weights) -> int");
   m.def("elu(Tensor self, float output_scale, int output_zero_point, Scalar alpha=1, Scalar scale=1, Scalar input_scale=1) -> Tensor");
+  m.def("embedding_bag_prepack(Tensor weight) -> Tensor");
   m.def("embedding_bag_byte_prepack(Tensor weight) -> Tensor");
   m.def("embedding_bag_byte_unpack(Tensor weight) -> Tensor");
   m.def("embedding_bag_4bit_prepack(Tensor weight) -> Tensor");
