@@ -1,8 +1,10 @@
 PyTorch Contribution Guide
 ==========================
 
-PyTorch is a GPU-accelerated Python tensor computation package for
-building deep neural networks built on tape-based autograd systems.
+
+PyTorch is a GPU-accelerated Python written tensor computation package for
+developing deep neural networks built on tape-based autograd systems.
+
 
 The PyTorch Contribution Process
 --------------------------------
@@ -10,10 +12,10 @@ The PyTorch Contribution Process
 The PyTorch organization is governed by :doc:`PyTorch
 Governance <governance>`.
 
-The PyTorch development process involves a healthy amount of open
+The PyTorch development process and environment involves a healthy amount of open
 discussions between the core development team and the community.
 
-PyTorch operates similar to most open source projects on GitHub.
+PyTorch operates similar to the most open source projects on GitHub.
 However, if you've never contributed to an open source project before,
 here is the basic process.
 
@@ -29,8 +31,8 @@ here is the basic process.
       confirmed by other contributors tend to be better to investigate.
       We also maintain some labels for issues which are likely to be
       good for new people, e.g., **bootcamp** and **1hr**, although
-      these labels are less well maintained.
-   -  Join us on Slack and let us know you're interested in getting to
+      these labels are not much well maintained.
+   -  Join us on Slack and let us know if you're interested in getting to
       know PyTorch. We're very happy to help out researchers and
       partners get up to speed with the codebase.
 
