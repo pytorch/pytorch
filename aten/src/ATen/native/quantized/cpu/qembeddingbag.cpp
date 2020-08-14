@@ -22,7 +22,9 @@ Tensor embedding_bag_byte_rowwise_offsets(
     bool include_last_offset) {
   TORCH_CHECK(weight.scalar_type() == at::kByte);
   TORCH_CHECK(weight.ndimension() == 2);
-  TORCH_CHECK(offsets_in.has_value(), "embedding_bag_byte_rowwise_offsets expects offsets to be set");
+  TORCH_CHECK(
+      offsets_in.has_value(),
+      "embedding_bag_byte_rowwise_offsets expects offsets to be set");
 
   auto offsets = offsets_in.value();
   auto offsets_data = offsets.data_ptr<int64_t>();
@@ -122,7 +124,9 @@ Tensor embedding_bag_4bit_rowwise_offsets(
     const c10::optional<Tensor>& per_sample_weights_,
     const c10::optional<Tensor>& compressed_indices_mapping,
     bool include_last_offset) {
-  TORCH_CHECK(offsets_in.has_value(), "embedding_bag_4bit_rowwise_offsets expects offsets to be set");
+  TORCH_CHECK(
+      offsets_in.has_value(),
+      "embedding_bag_4bit_rowwise_offsets expects offsets to be set");
 
   TORCH_CHECK(weight.ndimension() == 2);
   TORCH_CHECK(indices.ndimension() == 1);
