@@ -122,7 +122,7 @@ class ArithmeticOpsTest(serial.SerializedTestCase):
 
 
 class UnaryOpTest(serial.SerializedTestCase):
-    @settings(deadline=1000)
+    @settings(deadline=None)
     def _test_unary_op(self, opname, X, rtol=1e-5, atol=1e-8):
         workspace.ResetWorkspace()
 

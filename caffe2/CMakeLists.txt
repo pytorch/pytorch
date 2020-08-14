@@ -278,6 +278,10 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     add_library(process_group_agent "${TORCH_SRC_DIR}/csrc/distributed/rpc/process_group_agent.cpp" "${TORCH_SRC_DIR}/csrc/distributed/rpc/process_group_agent.h")
     target_link_libraries(process_group_agent PRIVATE torch c10d fmt::fmt-header-only)
     add_dependencies(process_group_agent torch c10d)
+
+    add_library(tensorpipe_agent "${TORCH_SRC_DIR}/csrc/distributed/rpc/tensorpipe_agent.cpp" "${TORCH_SRC_DIR}/csrc/distributed/rpc/tensorpipe_agent.h")
+    target_link_libraries(tensorpipe_agent PRIVATE torch c10d tensorpipe fmt::fmt-header-only)
+    add_dependencies(tensorpipe_agent torch c10d tensorpipe)
   endif()
 
   set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
