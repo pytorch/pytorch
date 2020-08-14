@@ -110,16 +110,19 @@ def add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=No
         )
         device = next(iter(devices)) if len(devices) > 0 else None
 
+    def get_activation_post_process(qconfig, device):
+        activation = qconfig.activation()
+        if device is not None:
+            activation.to(device)
+        return activation
+
     for child in module.children():
         if type(child) == nnq.FloatFunctional or type(child) == nnq.QFunctional:
             if hasattr(child, 'qconfig') and child.qconfig is not None:
-                activation = child.qconfig.activation()
-                if device is not None:
-                    activation.to(device)
-                child.activation_post_process = activation
+                child.activation_post_process = get_activation_post_process(child.qconfig, device)
         elif non_leaf_module_list is not None and type(child) in non_leaf_module_list:
             if hasattr(child, 'qconfig') and child.qconfig is not None:
-                child.add_module('activation_post_process', child.qconfig.activation())
+                child.add_module('activation_post_process', get_activation_post_process(child.qconfig, device))
                 register_activation_post_process_hook(child)
 
                 # Attaching prehook
@@ -135,10 +138,7 @@ def add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=No
        len(module._modules) == 0 and not isinstance(module, torch.nn.Sequential) \
        and type(module) in qconfig_propagation_list:
         # observer and hook will be gone after we swap the module
-        activation = module.qconfig.activation()
-        if device is not None:
-            activation.to(device)
-        module.add_module('activation_post_process', activation)
+        module.add_module('activation_post_process', get_activation_post_process(module.qconfig, device))
         # Register observer as the first entry in the hook list
         # All post forward hooks are preserved and will be executed after the observer before convert
         handle = register_activation_post_process_hook(module)
@@ -340,7 +340,7 @@ def prepare_qat(model, mapping=None, inplace=False):
         model = copy.deepcopy(model)
 
     propagate_qconfig_(model, qconfig_dict=None)
-    _convert(model, mapping, inplace=True)
+    convert(model, mapping=mapping, inplace=True, remove_qconfig=False)
     prepare(model, observer_non_leaf_module_list=set(mapping.values()), inplace=True)
     return model
 
