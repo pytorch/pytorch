@@ -16,6 +16,7 @@ using ::c10::IValue;
 // Protocol 2 is the highest that can be decoded by Python 2
 // See https://docs.python.org/3/library/pickle.html#data-stream-format
 constexpr static uint8_t PROTOCOL_VERSION = 2;
+constexpr static uint32_t kUndefinedIndex = 0xffffffff;
 
 Pickler::~Pickler() {
   flush();
@@ -147,13 +148,16 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
 void Pickler::pushDevice(const IValue& ivalue) {
   auto device = ivalue.toDevice();
   auto deviceStr = device.str();
-  auto it = memoized_devices_map_.find(deviceStr);
-  if (it == memoized_devices_map_.end()) {
+  decltype(memoized_devices_map_)::iterator it;
+  bool inserted;
+  std::tie(it, inserted) =
+      memoized_devices_map_.insert({deviceStr, kUndefinedIndex});
+  if (inserted) {
     pushGlobal("torch", "device");
     pushString(deviceStr);
     push<PickleOpCode>(PickleOpCode::TUPLE1);
     push<PickleOpCode>(PickleOpCode::REDUCE);
-    memoized_devices_map_[deviceStr] = pushNextBinPut();
+    it->second = pushNextBinPut();
   } else {
     pushBinGet(it->second);
   }
@@ -258,10 +262,13 @@ void Pickler::pushStringImpl(const std::string& string) {
 }
 
 void Pickler::pushString(const std::string& string) {
-  auto it = memoized_strings_map_.find(string);
-  if (it == memoized_strings_map_.end()) {
+  decltype(memoized_strings_map_)::iterator it;
+  bool inserted;
+  std::tie(it, inserted) =
+      memoized_strings_map_.insert({string, kUndefinedIndex});
+  if (inserted) {
     pushStringImpl(string);
-    memoized_strings_map_[string] = pushNextBinPut();
+    it->second = pushNextBinPut();
   } else {
     pushBinGet(it->second);
   }
@@ -319,13 +326,16 @@ void Pickler::pushGlobal(
   std::string key;
   key.reserve(module_name.size() + class_name.size() + 2);
   key.append(module_name).append("\n").append(class_name).append("\n");
-  auto memo_entry = memoized_globals_map_.find(key);
-  if (memo_entry == memoized_globals_map_.end()) {
+  decltype(memoized_globals_map_)::iterator memo_entry;
+  bool inserted;
+  std::tie(memo_entry, inserted) =
+      memoized_globals_map_.insert({key, kUndefinedIndex});
+  if (inserted) {
     push<PickleOpCode>(PickleOpCode::GLOBAL);
     pushBytes(key);
     // Push BINPUT without adding anything to the memoized_ivalues_
     size_t memo_id = pushNextBinPut();
-    memoized_globals_map_.insert({key, memo_id});
+    memo_entry->second = memo_id;
   } else {
     pushBinGet(memo_entry->second);
   }
