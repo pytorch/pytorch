@@ -10,19 +10,26 @@ namespace vulkan {
 namespace api {
 
 //
-// This struct defines shader, and shader layout caches intended to minimize
+// This struct defines shader, and shader layout, caches intended to minimize
 // redundant object reconstructions at the cost of extra memory consumption.
 //
 // A shader is a small, typically simple, program that runs on a GPU. The
-// layout defines the interface between that program and the outside world,
-// namely what the host (CPU) sees as configurable parameters of said shader.
+// shader layout defines the interface between that program and the outside
+// world, namely what the host (CPU) sees as configurable parameters of the
+// said shader per dispatch.  If the shader was a regular function, the shader
+// layout would have been its function prototype declaring the number and
+// type of its arguments.
 //
-// Shader layouts, or as Vulkan calls them descriptor set layouts, are used
-// in creation of Vulkan pipeline layouts.  Shaders are used in creation of
-// Vulkan pipelines.
+// Furthermore, shader layouts, or as Vulkan calls them descriptor set layouts,
+// define the blueprint out of which descriptor sets are instantiated.  Descriptor
+// sets themselves, bundle the input to and output from a shader and contain
+// pointers to GPU, and GPU accessible system, memory locations where the actual
+// resources reside.  Shader layouts are also used in creation of Vulkan pipeline
+// layouts, while multiple shaders are bundled together to form a portion of the
+// the monolithic state objects that are Vulkan pipelines.
 //
 // This struct defines the facilities required to create, compile, reuse,
-// and destruct these objects.
+// and destruct the aforementioned Vulkan objects.
 //
 
 struct Shader final {
