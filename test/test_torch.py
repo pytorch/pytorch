@@ -18709,6 +18709,9 @@ else:
                     # Invalid dimensions, test for error
                     with self.assertRaisesRegex(RuntimeError, "Sizes of tensors must match except in dimension"):
                         torch_fn(torch_input)
+                    with self.assertRaises(ValueError):
+                        np_input = [input.cpu().numpy() for input in torch_input]
+                        np_fn(np_input)
 
     @onlyOnCPUAndCUDA
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
