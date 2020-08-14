@@ -1,11 +1,11 @@
 import torch
-import torch.nn as nn
+from torch import nn, Tensor
 
 import torchaudio_models as models
 
-from utils import extract_weights, load_weights
+from utils import extract_weights, load_weights, GetterReturnType
 
-def get_wav2letter(device):
+def get_wav2letter(device: torch.device) -> GetterReturnType:
     N = 10
     input_frames = 700
     vocab_size = 28
@@ -17,7 +17,7 @@ def get_wav2letter(device):
     inputs = torch.rand([N, 1, input_frames], device=device)
     labels = torch.rand(N, 3, device=device).mul(vocab_size).long()
 
-    def forward(*new_params):
+    def forward(*new_params: Tensor) -> Tensor:
         load_weights(model, names, new_params)
         out = model(inputs)
 
@@ -26,7 +26,7 @@ def get_wav2letter(device):
 
     return forward, params
 
-def get_deepspeech(device):
+def get_deepspeech(device: torch.device) -> GetterReturnType:
     sample_rate = 16000
     window_size = 0.02
     window = "hamming"
@@ -54,7 +54,7 @@ def get_deepspeech(device):
     criterion = nn.CTCLoss()
     params, names = extract_weights(model)
 
-    def forward(*new_params):
+    def forward(*new_params: Tensor) -> Tensor:
         load_weights(model, names, new_params)
         out, out_sizes = model(inputs, inputs_sizes)
         out = out.transpose(0, 1)  # For ctc loss
@@ -64,7 +64,7 @@ def get_deepspeech(device):
 
     return forward, params
 
-def get_transformer(device):
+def get_transformer(device: torch.device) -> GetterReturnType:
     # For most SOTA research, you would like to have embed to 720, nhead to 12, bsz to 64, tgt_len/src_len to 128.
     N = 64
     seq_length = 128
@@ -78,7 +78,7 @@ def get_transformer(device):
     inputs = data.narrow(1, 0, seq_length)
     targets = data.narrow(1, 1, seq_length)
 
-    def forward(*new_params):
+    def forward(*new_params: Tensor) -> Tensor:
         load_weights(model, names, new_params)
         out = model(inputs)
 
@@ -87,7 +87,7 @@ def get_transformer(device):
 
     return forward, params
 
-def get_multiheadattn(device):
+def get_multiheadattn(device: torch.device) -> GetterReturnType:
     # From https://github.com/pytorch/text/blob/master/test/data/test_modules.py#L10
     embed_dim, nhead, tgt_len, src_len, bsz = 10, 5, 6, 10, 64
     # Build torchtext MultiheadAttention module
@@ -110,7 +110,7 @@ def get_multiheadattn(device):
     bias_k = bias_k.repeat(1, bsz, 1).reshape(1, bsz * nhead, -1)
     bias_v = bias_v.repeat(1, bsz, 1).reshape(1, bsz * nhead, -1)
 
-    def forward(*new_params):
+    def forward(*new_params: Tensor) -> Tensor:
         load_weights(model, names, new_params)
         mha_output, attn_weights = model(query, key, value, attn_mask=attn_mask, bias_k=bias_k, bias_v=bias_v)
 

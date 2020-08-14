@@ -1,9 +1,12 @@
 import torch
+from torch import Tensor
 import torchvision_models as models
 
-from utils import extract_weights, load_weights
+from utils import extract_weights, load_weights, GetterReturnType
 
-def get_resnet18(device):
+from typing import cast
+
+def get_resnet18(device: torch.device) -> GetterReturnType:
     N = 32
     model = models.resnet18(pretrained=False)
     criterion = torch.nn.CrossEntropyLoss()
@@ -13,7 +16,7 @@ def get_resnet18(device):
     inputs = torch.rand([N, 3, 224, 224], device=device)
     labels = torch.rand(N, device=device).mul(10).long()
 
-    def forward(*new_params):
+    def forward(*new_params: Tensor) -> Tensor:
         load_weights(model, names, new_params)
         out = model(inputs)
 
@@ -22,7 +25,7 @@ def get_resnet18(device):
 
     return forward, params
 
-def get_fcn_resnet(device):
+def get_fcn_resnet(device: torch.device) -> GetterReturnType:
     N = 8
     criterion = torch.nn.MSELoss()
     model = models.fcn_resnet50(pretrained=False, pretrained_backbone=False)
@@ -33,7 +36,7 @@ def get_fcn_resnet(device):
     # Given model has 21 classes
     labels = torch.rand([N, 21, 480, 480], device=device)
 
-    def forward(*new_params):
+    def forward(*new_params: Tensor) -> Tensor:
         load_weights(model, names, new_params)
         out = model(inputs)['out']
 
@@ -42,7 +45,7 @@ def get_fcn_resnet(device):
 
     return forward, params
 
-def get_detr(device):
+def get_detr(device: torch.device) -> GetterReturnType:
     # All values below are from CLI defaults in @fmassa's repo
     N = 2
     num_classes = 91
@@ -70,7 +73,7 @@ def get_detr(device):
     labels = []
     for idx in range(N):
         targets = {}
-        n_targets = torch.randint(5, 10, size=tuple()).item()
+        n_targets: int = int(torch.randint(5, 10, size=tuple()).item())
         label = torch.randint(5, 10, size=(n_targets,))
         targets["labels"] = label
         boxes = torch.randint(100, 800, size=(n_targets, 4))
@@ -82,13 +85,13 @@ def get_detr(device):
         targets["boxes"] = boxes.float()
         labels.append(targets)
 
-    def forward(*new_params):
+    def forward(*new_params: Tensor) -> Tensor:
         load_weights(model, names, new_params)
         out = model(inputs)
 
         loss = criterion(out, labels)
         weight_dict = criterion.weight_dict
-        final_loss = sum(loss[k] * weight_dict[k] for k in loss.keys() if k in weight_dict)
+        final_loss = cast(Tensor, sum(loss[k] * weight_dict[k] for k in loss.keys() if k in weight_dict))
         return final_loss
 
     return forward, params

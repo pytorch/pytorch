@@ -1,15 +1,18 @@
 import torch
+from torch import Tensor
+from torch import nn
 from torch.autograd import functional
 
 import time
-import argparse
-from collections import namedtuple, defaultdict
+from argparse import ArgumentParser
+from collections import defaultdict
+from typing import NamedTuple, Callable, List, Any
 
 import ppl_models
 import vision_models
 import audio_text_models
 
-from utils import to_markdown_table
+from utils import to_markdown_table, TimingResultType, InpType, GetterType, VType
 
 # Listing of the different tasks
 FAST_TASKS_NO_DOUBLE_BACK = [
@@ -36,7 +39,11 @@ DOUBLE_BACKWARD_TASKS = ["jvp", "hvp", "vhp", "hessian"]
 #     input for the forward function. Note that the forward must *not* have any side effect.
 # - tasks: the list of recommended tasks that can run in a reasonable amount of time with this model.
 # - unsupported: the list of tasks that this model cannot run.
-ModelDef = namedtuple("ModelDef", ["name", "getter", "tasks", "unsupported"])
+class ModelDef(NamedTuple):
+    name: str
+    getter: GetterType
+    tasks: List[str]
+    unsupported: List[str]
 
 MODELS = [
     ModelDef("resnet18", vision_models.get_resnet18, FAST_TASKS, []),
@@ -50,7 +57,9 @@ MODELS = [
     ModelDef("multiheadattn", audio_text_models.get_multiheadattn, FAST_TASKS, []),
 ]
 
-def get_v_for(model, inp, task):
+def get_v_for(model: Callable, inp: InpType, task: str) -> VType:
+    v: VType
+
     if task in ["vjp"]:
         out = model(*inp)
         v = torch.rand_like(out)
@@ -62,7 +71,9 @@ def get_v_for(model, inp, task):
     else:
         v = None
 
-def run_once(model, inp, task, v):
+    return v
+
+def run_once(model: Callable, inp: InpType, task: str, v: VType) -> None:
     func = getattr(functional, task)
 
     if v is not None:
@@ -70,15 +81,15 @@ def run_once(model, inp, task, v):
     else:
         res = func(model, inp, strict=True)
 
-def run_model(model_getter, args, task):
+def run_model(model_getter: GetterType, args: Any, task: str) -> List[float]:
     if args.gpu == -1:
-        device = "cpu"
+        device = torch.device("cpu")
 
         def noop():
             pass
         do_sync = noop
     else:
-        device = "cuda:{}".format(args.gpu)
+        device = torch.device("cuda:{}".format(args.gpu))
         do_sync = torch.cuda.synchronize
 
     model, inp = model_getter(device)
@@ -98,7 +109,7 @@ def run_model(model_getter, args, task):
     return elapsed
 
 def main():
-    parser = argparse.ArgumentParser("Main script to benchmark functional API of the autograd.")
+    parser = ArgumentParser("Main script to benchmark functional API of the autograd.")
     parser.add_argument("--output", type=str, default="", help="Text file where to write the output")
     parser.add_argument("--num-iters", type=int, default=10)
     parser.add_argument("--gpu", type=int, default=-2, help="GPU to use, -1 for CPU and -2 for auto-detect")
@@ -110,7 +121,7 @@ def main():
     parser.add_argument("--seed", type=int, default=0, help="The random seed to use.")
     args = parser.parse_args()
 
-    results = defaultdict(defaultdict)
+    results: TimingResultType = defaultdict(defaultdict)
     torch.set_num_threads(args.num_threads)
     torch.set_num_interop_threads(args.num_threads)
 
