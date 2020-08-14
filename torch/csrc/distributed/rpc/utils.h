@@ -90,7 +90,7 @@ struct TensorpipeReadBuffers {
 TORCH_API std::tuple<tensorpipe::Message, TensorpipeWriteBuffers>
 tensorpipeSerialize(
     Message&& rpcMessage,
-    const std::vector<c10::DeviceIndex> devices = {});
+    std::vector<c10::DeviceIndex> devices = {});
 
 // Allocate the buffers that will hold the incoming data. They will be managed
 // by the returned holder, which must be kept alive until the asynchronous read

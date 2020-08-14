@@ -446,10 +446,10 @@ void TensorPipeAgent::pipeWrite(
 
   const auto& deviceMaps =
       rpcMessage.isRequest() ? opts_.deviceMaps : reverseDeviceMaps_;
+  auto devices = getDevicesForTensors(
+      pipe->getRemoteName(), rpcMessage.tensors(), deviceMaps);
   std::tie(tpMessage, tpBuffers) = tensorpipeSerialize(
-      std::move(rpcMessage),
-      getDevicesForTensors(
-          pipe->getRemoteName(), rpcMessage.tensors(), deviceMaps));
+      std::move(rpcMessage), std::move(devices));
 
   pipe->write(
       std::move(tpMessage),

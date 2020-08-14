@@ -163,10 +163,10 @@ class TensorPipeAgent : public RpcAgent {
   const WorkerInfo& getWorkerInfo(const std::string& workerName) const override;
   const WorkerInfo& getWorkerInfo(worker_id_t workerId) const override;
   std::vector<WorkerInfo> getWorkerInfos() const override;
-  inline void setReverseDeviceMaps(
+  void setReverseDeviceMaps(
       const std::unordered_map<std::string, tensorpipe::DeviceMap>&
           reverseDeviceMaps) {
-    reverseDeviceMaps_ = std::move(reverseDeviceMaps);
+    reverseDeviceMaps_ = reverseDeviceMaps;
   }
 
   std::unordered_map<std::string, std::string> getMetrics() override;
