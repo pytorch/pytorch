@@ -3,11 +3,6 @@
 namespace torch {
 namespace jit {
 
-MutationRemover::MutationRemover(const std::shared_ptr<Graph>& graph)
-    : aliasDb_(nullptr), graph_(graph) {
-  aliasDb_ = torch::make_unique<AliasDb>(graph_);
-}
-
 void MutationRemover::removeListMutation() {
   RemoveListMutation(graph_->block());
 }
