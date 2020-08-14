@@ -7,7 +7,7 @@ class Adam(Optimizer):
     r"""Implements Adam algorithm.
 
     It has been proposed in `Adam: A Method for Stochastic Optimization`_.
-    The implementation of the L2 penalty follows changes proposed in
+    The implementation of the L2 penalty follows the proposal in
     `Decoupled Weight Decay Regularization`_.
 
     Arguments:
