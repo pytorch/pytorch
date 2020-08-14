@@ -324,6 +324,7 @@
   dispatch:
     CPU, CUDA: add_
     SparseCPU, SparseCUDA: add_sparse_
+    SparseGCS_CPU: add_sparse_gcs_
     MkldnnCPU: mkldnn_add_
 
 - func: add.out(Tensor self, Tensor other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
@@ -331,6 +332,7 @@
     CPU, CUDA: add_out
     SparseCPU: add_out_sparse_cpu
     SparseCUDA: add_out_sparse_cuda
+    SparseGCS_CPU: add_out_sparse_gcs_cpu
     MkldnnCPU: mkldnn_add_out
 
 - func: add_relu.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
@@ -3710,7 +3712,7 @@
   use_c10_dispatcher: full
   variants: method
   dispatch:
-    SparseCPU, SparseCUDA: sparse_to_dense
+    SparseCPU, SparseCUDA, SparseGCS_CPU, SparseGCS_CUDA: sparse_to_dense
     MkldnnCPU: mkldnn_to_dense
 
 - func: to_dense_backward(Tensor grad, Tensor input) -> Tensor
@@ -3779,6 +3781,7 @@
   variants: method
   dispatch:
     SparseCPU, SparseCUDA: _values_sparse
+    SparseGCS_CPU: _values_sparse_gcs
   device_guard: False
 
 # This method doesn't do any check but only directly sets the flag. So it can be

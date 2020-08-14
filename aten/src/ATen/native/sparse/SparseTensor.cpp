@@ -171,9 +171,15 @@ Tensor sparse_gcs_tensor(const Tensor& pointers, const Tensor& indices, const Te
   
   get_sparse_impl<SparseGCSTensorImpl>(self)->resize_and_clear_(nnz_size, ptr_size, redux_size);
   get_sparse_impl<SparseGCSTensorImpl>(self)->set_member_tensors_unsafe(pointers,
-                                                                        indices, values, reduction);
+                                                                        indices, values, reduction,
+                                                                        fill_value);
     
   return self;
+}
+
+// TODO: Just copying COO, not sure whether this is necessary.
+Tensor _values_sparse_gcs(const Tensor& self) {
+  return get_sparse_impl<SparseGCSTensorImpl>(self)->values();      
 }
 
 Tensor values_sparse_gcs(const Tensor& self) {
