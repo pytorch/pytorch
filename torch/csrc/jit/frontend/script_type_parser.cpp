@@ -236,9 +236,10 @@ void checkMutableFunctionDefaults(
     const std::vector<IValue>& defaults) {
   for (auto& def : defaults) {
     if (checkMutableFunctionDefault(def)) {
-        throw ErrorReport(range) << "Mutable default parameters are not supported because Python binds them to the function"
-        << " and they persist across function calls.\n As a workaround, make the default None and instantiate"
-        << " the default parameter within the body of the function.";
+      throw ErrorReport(range)
+          << "Mutable default parameters are not supported because Python binds them to the function"
+          << " and they persist across function calls.\n As a workaround, make the default None and instantiate"
+          << " the default parameter within the body of the function.";
     }
   }
 }
