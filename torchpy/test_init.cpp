@@ -2,11 +2,14 @@
 
 #include <torchpy.h>
 
-TEST(TorchpyTest, Init) {
+TEST(TorchpyTest, InitFinalize) {
   torchpy::init();
+  torchpy::finalize();
 }
 
 TEST(TorchpyTest, HelloPy) {
+  torchpy::init();
   auto h = torchpy::hello();
   GTEST_ASSERT_EQ(h, "Hello Py");
+  torchpy::finalize();
 }

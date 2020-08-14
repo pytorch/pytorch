@@ -2,24 +2,22 @@
 #include <Python.h>
 #include <assert.h>
 #include <stdio.h>
-#include <torch/csrc/jit/api/module.h>
 #include <torch/script.h>
 #include <torch/torch.h>
 #include <iostream>
 
-void torchpy::init() {
+namespace torchpy {
+
+void init() {
   Py_Initialize();
-  PyRun_SimpleString(
-      "from time import time,ctime\n"
-      "print('Today is',ctime(time()))\n");
-  Py_Finalize();
 }
 
+void finalize() {
+  Py_Finalize();
+}
 // https://docs.python.org/3/extending/extending.html
 // https://docs.python.org/3/c-api/
-std::string torchpy::hello() {
-  Py_Initialize();
-
+std::string hello() {
   PyObject* globals = PyDict_New();
   assert(PyDict_Check(globals) == true);
   PyObject* builtins = PyEval_GetBuiltins();
@@ -41,14 +39,12 @@ std::string torchpy::hello() {
   assert(NULL != c_str);
   auto result = std::string(c_str);
 
-  Py_Finalize();
   return result;
 }
 
-torchpy::PyModule torchpy::load(const std::string& filename) {
-  Py_Initialize();
-
+PyModule load(const std::string& filename) {
   PyObject* globals = PyDict_New();
+
   assert(PyDict_Check(globals) == true);
   PyObject* builtins = PyEval_GetBuiltins();
   assert(NULL != builtins);
@@ -67,19 +63,20 @@ torchpy::PyModule torchpy::load(const std::string& filename) {
   // assert(NULL != c_str);
   // auto result = std::string(c_str);
 
-  Py_Finalize();
   // return result;
   auto mod = PyModule();
   return mod;
 }
 
-std::vector<at::Tensor> torchpy::inputs(std::vector<int64_t> shape) {
+std::vector<at::Tensor> inputs(std::vector<int64_t> shape) {
   std::vector<at::Tensor> inputs;
   auto at_shape = at::IntArrayRef(shape);
   inputs.push_back(torch::ones(at_shape));
   return inputs;
 }
 
-at::Tensor torchpy::PyModule::forward(std::vector<at::Tensor> inputs) {
+at::Tensor PyModule::forward(std::vector<at::Tensor> inputs) {
   return inputs.at(0);
 }
+
+} // namespace torchpy
