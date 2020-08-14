@@ -1,9 +1,21 @@
+import torch
+
 from collections import defaultdict
+
+from torch import nn, Tensor
+from typing import List, Tuple, Dict, Union, Callable
+
+# Type helpers
+InpType = Union[Tensor, Tuple[Tensor, ...]]
+GetterReturnType = Tuple[Callable[..., Tensor], InpType]
+GetterType = Callable[[torch.device], GetterReturnType]
+VType = Union[None, Tensor, Tuple[Tensor, ...]]
+TimingResultType = Dict[str, Dict[str, Tuple[float, ...]]]
 
 # Utilities to make nn.Module "functional"
 # In particular the goal is to be able to provide a function that takes as input
 # the parameters and evaluate the nn.Module using fixed inputs.
-def _del_nested_attr(obj, names):
+def _del_nested_attr(obj: nn.Module, names: List[str]) -> None:
     """
     Deletes the attribute specified by the given list of names.
     """
@@ -12,7 +24,7 @@ def _del_nested_attr(obj, names):
     else:
         _del_nested_attr(getattr(obj, names[0]), names[1:])
 
-def _set_nested_attr(obj, names, val):
+def _set_nested_attr(obj: nn.Module, names: List[str], val: Tensor) -> None:
     """
     Set the attribute specified by the given list of names to val.
     """
@@ -21,7 +33,7 @@ def _set_nested_attr(obj, names, val):
     else:
         _set_nested_attr(getattr(obj, names[0]), names[1:], val)
 
-def extract_weights(mod):
+def extract_weights(mod: nn.Module) -> Tuple[Tuple[Tensor, ...], List[str]]:
     """
     This function removes all the Parameters from the model and
     return them as a tuple.
@@ -38,10 +50,10 @@ def extract_weights(mod):
         names.append(name)
 
     # Make params regular Tensors instead of nn.Parameter
-    orig_params = tuple(p.detach().requires_grad_() for p in orig_params)
-    return orig_params, names
+    params = tuple(p.detach().requires_grad_() for p in orig_params)
+    return params, names
 
-def load_weights(mod, names, params):
+def load_weights(mod: nn.Module, names: List[str], params: Tuple[Tensor, ...]) -> None:
     """
     Reload a set of weights so that `mod` can be used again to perform a forward pass.
     Note that the `params` are regular Tensors (that can have history) and so are left
@@ -51,7 +63,7 @@ def load_weights(mod, names, params):
         _set_nested_attr(mod, name.split("."), p)
 
 # Utilities to read/write markdown table-like content.
-def to_markdown_table(res, header=None):
+def to_markdown_table(res: TimingResultType, header: Tuple[str, ...] = None) -> str:
     if header is None:
         header = ("model", "task", "mean", "var")
     out = ""
@@ -69,10 +81,11 @@ def to_markdown_table(res, header=None):
 
     return out
 
-def from_markdown_table(out):
-    out = out.strip().split("\n")
+def from_markdown_table(data: str) -> TimingResultType:
+    out = data.strip().split("\n")
     out = out[2:]  # Ignore the header lines
 
+    res: TimingResultType
     res = defaultdict(defaultdict)
 
     for line in out:

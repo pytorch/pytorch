@@ -1,7 +1,10 @@
 import torch
+from torch import Tensor
 import torch.distributions as dist
 
-def get_simple_regression(device):
+from utils import GetterReturnType
+
+def get_simple_regression(device: torch.device) -> GetterReturnType:
     N = 10
     K = 10
 
@@ -17,7 +20,7 @@ def get_simple_regression(device):
     beta_value = beta_prior.sample((K + 1, 1))
     beta_value.requires_grad_(True)
 
-    def forward(beta_value):
+    def forward(beta_value: Tensor) -> Tensor:
         mu = X.mm(beta_value)
 
         # We need to compute the first and second gradient of this score with respect
@@ -28,7 +31,7 @@ def get_simple_regression(device):
     return forward, (beta_value.to(device),)
 
 
-def get_robust_regression(device):
+def get_robust_regression(device: torch.device) -> GetterReturnType:
     N = 10
     K = 10
 
@@ -60,7 +63,7 @@ def get_robust_regression(device):
     beta_value = beta.sample()
     beta_value.requires_grad_(True)
 
-    def forward(nu_value, sigma_unconstrained_value, beta_value):
+    def forward(nu_value: Tensor, sigma_unconstrained_value: Tensor, beta_value: Tensor) -> Tensor:
         sigma_constrained_value = sigma_unconstrained_value.exp()
         mu = X.mm(beta_value)
 
