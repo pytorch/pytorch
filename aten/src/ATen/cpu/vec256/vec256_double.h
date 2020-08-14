@@ -149,6 +149,9 @@ public:
   Vec256<double> fmod(const Vec256<double>& q) const {
     return Vec256<double>(Sleef_fmodd4(values, q));
   }
+  Vec256<double> hypot(const Vec256<double> &b) const {
+    return Vec256<double>(Sleef_hypotd4_u05(values, b));
+  }
   Vec256<double> log() const {
     return Vec256<double>(Sleef_logd4_u10(values));
   }
