@@ -168,6 +168,7 @@ core_sources_full = [
     "torch/csrc/jit/passes/erase_number_types.cpp",
     "torch/csrc/jit/passes/fixup_trace_scope_blocks.cpp",
     "torch/csrc/jit/passes/freeze_module.cpp",
+    "torch/csrc/jit/passes/reconstruct_scopes.cpp",
     "torch/csrc/jit/passes/fuse_linear.cpp",
     "torch/csrc/jit/passes/fuse_relu.cpp",
     "torch/csrc/jit/passes/graph_fuser.cpp",
