@@ -291,6 +291,7 @@ class _TensorBase(object):
     real: Tensor
     imag: Tensor
     T: Tensor
+    ndim: _int
     _version: _int
     _base: Optional[Tensor]
     grad_fn: Any

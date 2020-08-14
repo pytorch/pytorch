@@ -519,6 +519,63 @@ class TestVmapAPI(TestCase):
         expected = torch.var_mean(tensor, dim=3)
         self.assertEqual(result, expected)
 
+    def test_backward_unsupported_interaction(self):
+        x = torch.randn(3, requires_grad=True)
+        y = torch.randn(5)
+        grad = torch.randn_like(x)
+        err_msg = r'backward\(\) called inside torch.vmap'
+
+        def backward_on_vmapped_tensor(x):
+            x.sum().backward()
+
+        with self.assertRaisesRegex(RuntimeError, err_msg):
+            vmap(backward_on_vmapped_tensor)(x)
+
+        def backward_with_vmapped_grad(x, grad):
+            x.backward(grad)
+
+        with self.assertRaisesRegex(RuntimeError, err_msg):
+            vmap(backward_with_vmapped_grad)(x, grad)
+
+        def completely_unrelated_backward(y):
+            x.sum().backward()
+
+        with self.assertRaisesRegex(RuntimeError, err_msg):
+            vmap(completely_unrelated_backward)(y)
+
+    def test_grad_unsupported_interaction(self):
+        input_tensor = torch.randn(3, requires_grad=True)
+        err_msg = 'autograd.grad.* called inside torch.vmap'
+
+        captured = torch.randn(3, requires_grad=True)
+
+        def output_to_grad_is_vmapped(input_tensor):
+            output = (captured * input_tensor).sum()
+            return torch.autograd.grad([output], [captured])[0]
+
+        with self.assertRaisesRegex(RuntimeError, err_msg):
+            vmap(output_to_grad_is_vmapped)(input_tensor)
+
+        output = (input_tensor ** 2).sum()
+
+        def input_to_grad_is_vmapped(input_tensor):
+            return torch.autograd.grad([output], [input_tensor])[0]
+
+        with self.assertRaisesRegex(RuntimeError, err_msg):
+            vmap(input_to_grad_is_vmapped)(input_tensor)
+
+    def test_batched_gradient_basic(self):
+        N = 3
+        x = torch.randn(N, requires_grad=True)
+        y = torch.randn(N)
+
+        def vjp_mul(v):
+            return torch.autograd.grad([x * y], [x], grad_outputs=[v])[0]
+
+        batched_v = torch.eye(N)
+        jacobian = vmap(vjp_mul)(batched_v)
+        self.assertEqual(jacobian, torch.diagflat(y))
+
 
 def slice_inputs(inputs, bdims, i):
     result = []

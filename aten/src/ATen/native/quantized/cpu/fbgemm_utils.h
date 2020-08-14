@@ -311,11 +311,10 @@ struct CAFFE2_API PackedEmbeddingBagWeight : public EmbeddingPackedParamsBase {
     return version_;
   }
 
-  private:
-    at::Tensor embeddingbag_byte(
-      const at::Tensor& indices,
-      const at::Tensor& offsets,
-      bool sparse,
-      const c10::optional<at::Tensor>& per_sample_weights_,
-      bool include_last_offset);
+  at::Tensor embeddingbag_byte(
+    const at::Tensor& indices,
+    const at::Tensor& offsets,
+    bool sparse,
+    const c10::optional<at::Tensor>& per_sample_weights_,
+    bool include_last_offset) override;
 };

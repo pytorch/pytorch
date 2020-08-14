@@ -112,7 +112,7 @@ namespace {
 Tensor embedding_bag_byte_rowwise_offsets(
     const Tensor& weight,
     const Tensor& indices,
-    const Tensor& offsets,
+    const c10::optional<Tensor>& offsets_in,
     const bool /* scale_grad_by_freq */,
     const int64_t /* mode */,
     bool /* sparse */,
@@ -120,6 +120,9 @@ Tensor embedding_bag_byte_rowwise_offsets(
     bool include_last_offset) {
   TORCH_CHECK(weight.scalar_type() == at::kByte);
   TORCH_CHECK(weight.ndimension() == 2);
+  TORCH_CHECK(offsets_in.has_value(), "embedding_bag_byte_rowwise_offsets expects offsets to be set");
+
+  auto offsets = offsets_in.value();
   auto offsets_data = offsets.data_ptr<int64_t>();
   const auto weight_data = weight.data_ptr<uint8_t>();
   const auto indices_data = indices.data_ptr<int64_t>();
@@ -208,15 +211,19 @@ Tensor embedding_bag_byte_rowwise_offsets(
 Tensor embedding_bag_4bit_rowwise_offsets(
     const Tensor& weight,
     const Tensor& indices,
-    const Tensor& offsets,
+    const c10::optional<Tensor>& offsets_in,
     const bool /* scale_grad_by_freq */,
     const int64_t /* mode */,
     bool sparse,
     const c10::optional<Tensor>& per_sample_weights_,
     const c10::optional<Tensor>& compressed_indices_mapping,
     bool include_last_offset) {
+  TORCH_CHECK(offsets_in.has_value(), "embedding_bag_4bit_rowwise_offsets expects offsets to be set");
+
   TORCH_CHECK(weight.ndimension() == 2);
   TORCH_CHECK(indices.ndimension() == 1);
+
+  auto offsets = offsets_in.value();
   TORCH_CHECK(offsets.ndimension() == 1);
 
   // FBGEMM expects the offsets to be of int type.
