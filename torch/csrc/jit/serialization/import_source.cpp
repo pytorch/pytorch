@@ -536,8 +536,8 @@ struct SourceImporterImpl : public Resolver,
           << "No enum values defined for " << qualified_name.qualifiedName();
     }
 
-    auto enum_type =
-        EnumType::create(qualified_name, std::move(value_type), std::move(names_values), cu_);
+    auto enum_type = EnumType::create(
+        qualified_name, std::move(value_type), std::move(names_values), cu_);
     cu_->register_type(enum_type);
   }
 
