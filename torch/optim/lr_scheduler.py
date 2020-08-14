@@ -6,6 +6,7 @@ import warnings
 import weakref
 from collections import Counter
 from bisect import bisect_right
+from typing import Iterable, Any, Optional, Callable, Union, List
 
 from .optimizer import Optimizer
 
@@ -23,8 +24,8 @@ SAVE_STATE_WARNING = "Please also save or load the state of the optimizer when s
 
 class _LRScheduler(object):
 
-    def __init__(self, optimizer, last_epoch=-1, verbose=False):
-
+    def __init__(self, optimizer: Optimizer, last_epoch: int = -1,
+                 verbose : bool = False) -> None:
         # Attach optimizer
         if not isinstance(optimizer, Optimizer):
             raise TypeError('{} is not an Optimizer'.format(
@@ -78,7 +79,7 @@ class _LRScheduler(object):
 
         self.step()
 
-    def state_dict(self):
+    def state_dict(self) -> dict:
         """Returns the state of the scheduler as a :class:`dict`.
 
         It contains an entry for every variable in self.__dict__ which
@@ -86,7 +87,7 @@ class _LRScheduler(object):
         """
         return {key: value for key, value in self.__dict__.items() if key != 'optimizer'}
 
-    def load_state_dict(self, state_dict):
+    def load_state_dict(self, state_dict: dict) -> None:
         """Loads the schedulers state.
 
         Arguments:
@@ -95,12 +96,12 @@ class _LRScheduler(object):
         """
         self.__dict__.update(state_dict)
 
-    def get_last_lr(self):
+    def get_last_lr(self) -> List[float]:
         """ Return last computed learning rate by current scheduler.
         """
         return self._last_lr
 
-    def get_lr(self):
+    def get_lr(self) -> float:
         # Compute learning rate using chainable form of the scheduler
         raise NotImplementedError
 
@@ -116,7 +117,7 @@ class _LRScheduler(object):
                       ' of group {} to {:.4e}.'.format(epoch, group, lr))
 
 
-    def step(self, epoch=None):
+    def step(self, epoch: Optional[int] = None) -> None:
         # Raise a warning if old pattern is detected
         # https://github.com/pytorch/pytorch/issues/20124
         if self._step_count == 1:
@@ -192,7 +193,10 @@ class LambdaLR(_LRScheduler):
         >>>     scheduler.step()
     """
 
-    def __init__(self, optimizer, lr_lambda, last_epoch=-1, verbose=False):
+    def __init__(self, optimizer: Optimizer,
+                 lr_lambda: Union[Callable[[int], float], List[Callable[[int], float]]],
+                 last_epoch: int = -1,
+                 verbose: bool = False) -> None:
         self.optimizer = optimizer
 
         if not isinstance(lr_lambda, list) and not isinstance(lr_lambda, tuple):
@@ -274,7 +278,10 @@ class MultiplicativeLR(_LRScheduler):
         >>>     scheduler.step()
     """
 
-    def __init__(self, optimizer, lr_lambda, last_epoch=-1, verbose=False):
+    def __init__(self, optimizer: Optimizer,
+                 lr_lambda: Union[Callable[[int], float], List[Callable[[int], float]]],
+                 last_epoch: int = -1,
+                 verbose: bool = False) -> None:
         self.optimizer = optimizer
 
         if not isinstance(lr_lambda, list) and not isinstance(lr_lambda, tuple):
@@ -361,7 +368,9 @@ class StepLR(_LRScheduler):
         >>>     scheduler.step()
     """
 
-    def __init__(self, optimizer, step_size, gamma=0.1, last_epoch=-1, verbose=False):
+    def __init__(self, optimizer: Optimizer, step_size: int,
+                 gamma: float = 0.1, last_epoch: int = -1,
+                 verbose: bool = False) -> None:
         self.step_size = step_size
         self.gamma = gamma
         super(StepLR, self).__init__(optimizer, last_epoch, verbose)
@@ -408,7 +417,9 @@ class MultiStepLR(_LRScheduler):
         >>>     scheduler.step()
     """
 
-    def __init__(self, optimizer, milestones, gamma=0.1, last_epoch=-1, verbose=False):
+    def __init__(self, optimizer: Optimizer, milestones: Iterable[int],
+                 gamma: float = 0.1, last_epoch: int = -1,
+                 verbose: bool = False) -> None:
         self.milestones = Counter(milestones)
         self.gamma = gamma
         super(MultiStepLR, self).__init__(optimizer, last_epoch, verbose)
@@ -441,7 +452,8 @@ class ExponentialLR(_LRScheduler):
             each update. Default: ``False``.
     """
 
-    def __init__(self, optimizer, gamma, last_epoch=-1, verbose=False):
+    def __init__(self, optimizer: Optimizer, gamma: float,
+                 last_epoch: int = -1, verbose: bool = False) -> None:
         self.gamma = gamma
         super(ExponentialLR, self).__init__(optimizer, last_epoch, verbose)
 
@@ -500,7 +512,8 @@ class CosineAnnealingLR(_LRScheduler):
         https://arxiv.org/abs/1608.03983
     """
 
-    def __init__(self, optimizer, T_max, eta_min=0, last_epoch=-1, verbose=False):
+    def __init__(self, optimizer: Optimizer, T_max: int, eta_min: float = 0.,
+                 last_epoch: int = -1, verbose: bool = False) -> None:
         self.T_max = T_max
         self.eta_min = eta_min
         super(CosineAnnealingLR, self).__init__(optimizer, last_epoch, verbose)
@@ -577,10 +590,13 @@ class ReduceLROnPlateau(object):
         >>>     scheduler.step(val_loss)
     """
 
-    def __init__(self, optimizer, mode='min', factor=0.1, patience=10,
-                 threshold=1e-4, threshold_mode='rel', cooldown=0,
-                 min_lr=0, eps=1e-8, verbose=False):
+    in_cooldown: bool
 
+    def __init__(self, optimizer: Optimizer, mode: str = 'min',
+                 factor: float = 0.1, patience: int = 10,
+                 threshold: float = 1e-4, threshold_mode: str = 'rel',
+                 cooldown: int = 0, min_lr: float = 0., eps: float = 1e-8,
+                 verbose: bool = False) -> None:
         if factor >= 1.0:
             raise ValueError('Factor should be < 1.0.')
         self.factor = factor
@@ -621,7 +637,7 @@ class ReduceLROnPlateau(object):
         self.cooldown_counter = 0
         self.num_bad_epochs = 0
 
-    def step(self, metrics, epoch=None):
+    def step(self, metrics: Any, epoch: Optional[int] = None) -> None:
         # convert `metrics` to float, in case it's a zero-dim Tensor
         current = float(metrics)
         if epoch is None:
@@ -691,10 +707,10 @@ class ReduceLROnPlateau(object):
         self.threshold = threshold
         self.threshold_mode = threshold_mode
 
-    def state_dict(self):
+    def state_dict(self) -> dict:
         return {key: value for key, value in self.__dict__.items() if key != 'optimizer'}
 
-    def load_state_dict(self, state_dict):
+    def load_state_dict(self, state_dict: dict):
         self.__dict__.update(state_dict)
         self._init_is_better(mode=self.mode, threshold=self.threshold, threshold_mode=self.threshold_mode)
 
@@ -794,20 +810,20 @@ class CyclicLR(_LRScheduler):
     """
 
     def __init__(self,
-                 optimizer,
-                 base_lr,
-                 max_lr,
-                 step_size_up=2000,
-                 step_size_down=None,
-                 mode='triangular',
-                 gamma=1.,
-                 scale_fn=None,
-                 scale_mode='cycle',
-                 cycle_momentum=True,
-                 base_momentum=0.8,
-                 max_momentum=0.9,
-                 last_epoch=-1,
-                 verbose=False):
+                 optimizer: Optimizer,
+                 base_lr: float,
+                 max_lr: float,
+                 step_size_up: int = 2000,
+                 step_size_down: int = None,
+                 mode: str = 'triangular',
+                 gamma: float = 1.,
+                 scale_fn: Optional[Callable[[float], float]] = None,
+                 scale_mode: str = 'cycle',
+                 cycle_momentum: bool = True,
+                 base_momentum: float = 0.8,
+                 max_momentum: float = 0.9,
+                 last_epoch: int = -1,
+                 verbose: bool = False):
 
         # Attach optimizer
         if not isinstance(optimizer, Optimizer):
@@ -954,7 +970,9 @@ class CosineAnnealingWarmRestarts(_LRScheduler):
         https://arxiv.org/abs/1608.03983
     """
 
-    def __init__(self, optimizer, T_0, T_mult=1, eta_min=0, last_epoch=-1, verbose=False):
+    def __init__(self, optimizer: Optimizer, T_0: int, T_mult: int = 1,
+                 eta_min: int = 0, last_epoch: int = -1,
+                 verbose: bool=False) -> None:
         if T_0 <= 0 or not isinstance(T_0, int):
             raise ValueError("Expected positive integer T_0, but got {}".format(T_0))
         if T_mult < 1 or not isinstance(T_mult, int):
@@ -976,7 +994,7 @@ class CosineAnnealingWarmRestarts(_LRScheduler):
         return [self.eta_min + (base_lr - self.eta_min) * (1 + math.cos(math.pi * self.T_cur / self.T_i)) / 2
                 for base_lr in self.base_lrs]
 
-    def step(self, epoch=None):
+    def step(self, epoch: Optional[int] = None) -> None:
         """Step could be called after every batch update
 
         Example:
@@ -1141,20 +1159,20 @@ class OneCycleLR(_LRScheduler):
         https://arxiv.org/abs/1708.07120
     """
     def __init__(self,
-                 optimizer,
-                 max_lr,
-                 total_steps=None,
-                 epochs=None,
-                 steps_per_epoch=None,
-                 pct_start=0.3,
-                 anneal_strategy='cos',
-                 cycle_momentum=True,
-                 base_momentum=0.85,
-                 max_momentum=0.95,
-                 div_factor=25.,
-                 final_div_factor=1e4,
-                 last_epoch=-1,
-                 verbose=False):
+                 optimizer: Optimizer,
+                 max_lr: Union[float, List[float]],
+                 total_steps: int = None,
+                 epochs: int = None,
+                 steps_per_epoch: int = None,
+                 pct_start: float = 0.3,
+                 anneal_strategy: str = 'cos',
+                 cycle_momentum: bool = True,
+                 base_momentum: Union[float, List[float]] = 0.85,
+                 max_momentum: Union[float, List[float]] = 0.95,
+                 div_factor: float = 25.,
+                 final_div_factor: float = 1e4,
+                 last_epoch: int = -1,
+                 verbose: bool = False) -> None:
 
         # Validate optimizer
         if not isinstance(optimizer, Optimizer):
