@@ -297,6 +297,7 @@ Pointwise Ops
     mul
     mvlgamma
     neg
+    nextafter
     polygamma
     pow
     rad2deg
