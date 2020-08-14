@@ -218,7 +218,7 @@ TypePtr ScriptTypeParser::parseType(const std::string& str) {
 }
 
 bool checkMutableFunctionDefault(const IValue& def) {
-  if (def.isList() && def.isGenericDict()) {
+  if (def.isList() || def.isGenericDict()) {
     return true;
   }
 

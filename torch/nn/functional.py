@@ -1716,11 +1716,11 @@ def silu(input, inplace=False):
         \text{silu}(x) = x * \sigma(x), \text{where } \sigma(x) \text{ is the logistic sigmoid.}
 
     .. note::
-        See `Gaussian Error Linear Units (GELUs) <https://arxiv.org/abs/1606.08415>`_
-        where the SiLU (Sigmoid Linear Unit) was originally coined, and see
-        `Sigmoid-Weighted Linear Units for Neural Network Function Approximation
-        in Reinforcement Learning <https://arxiv.org/abs/1702.03118>`_ and `Swish:
-        a Self-Gated Activation Function <https://arxiv.org/abs/1710.05941v1>`_
+        See `Gaussian Error Linear Units (GELUs) <https://arxiv.org/abs/1606.08415>`_ 
+        where the SiLU (Sigmoid Linear Unit) was originally coined, and see 
+        `Sigmoid-Weighted Linear Units for Neural Network Function Approximation 
+        in Reinforcement Learning <https://arxiv.org/abs/1702.03118>`_ and `Swish: 
+        a Self-Gated Activation Function <https://arxiv.org/abs/1710.05941v1>`_ 
         where the SiLU was experimented with later.
 
     See :class:`~torch.nn.SiLU` for more details.
@@ -3496,7 +3496,7 @@ def affine_grid(theta, size, align_corners=None):
     return torch.affine_grid_generator(theta, size, align_corners)
 
 
-def _pad(input, pad, mode='constant', value=0e0):
+def _pad(input, pad, mode='constant', value=0):
     # type: (Tensor, List[int], str, float) -> Tensor
     r"""Pads tensor.
 
