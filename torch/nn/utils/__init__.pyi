@@ -3,4 +3,3 @@ from .convert_parameters import parameters_to_vector as parameters_to_vector, \
     vector_to_parameters as vector_to_parameters
 from .spectral_norm import remove_spectral_norm as remove_spectral_norm, spectral_norm as spectral_norm
 from .weight_norm import remove_weight_norm as remove_weight_norm, weight_norm as weight_norm
-from .fusion import fuse_conv_bn_eval as fuse_conv_bn_eval, fuse_conv_bn_weights as fuse_conv_bn_weights
