@@ -2121,50 +2121,41 @@ void fake_quant_grad_per_channel_cpu(
       });
 }
 
-void fake_quantize_learnable_scale_grad_channel_kernel(
-    Tensor& input_grad,
-    const Tensor& input,
-    const Tensor& output_grad,
-    float scale,
-    int64_t zero_point,
+void fake_quantize_learnable_channel_grad_kernel_cpu(
+    TensorIterator& iter,
     int64_t quant_min,
     int64_t quant_max) {
-  float inv_scale = 1.0f / scale;
-  float grad_small = quant_min - zero_point;
-  float grad_big = quant_max - zero_point;
-  auto iter_scale = TensorIterator::binary_op(input_grad, input, output_grad);
-  // TODO: Implement the vectorized per channel version for the learnable backprop kernel on scale.
-  cpu_kernel(iter_scale, [&](float x, float dy) -> float {
-    int64_t xq = static_cast<int64_t>(zero_point + std::nearbyint(x * inv_scale));
-    xq = std::max(std::min(xq, quant_max), quant_min);
-    float x_fq = static_cast<float>((xq - zero_point) * scale);
-    if (xq == quant_min) {
-      return dy * grad_small;
-    } else if (xq == quant_max) {
-      return dy * grad_big;
-    }
-    return dy * (x_fq - x) * inv_scale;
-  });
-}
+  iter.for_each([&](char** data, const int64_t* strides, int64_t n) {
+    /*  To see how the input and outputs are referenced and assigned,
+        please see the implemenetation of
+        fake_quantize_learnable_tensor_grad_kernel_cpu.
+    */
+    for (int64_t i = 0; i < n; i++) {
+      float* dx_output = (float*)(data[0] + i * strides[0]);
+      float* dscale_output = (float*)(data[1] + i * strides[1]);
+      float* dzero_point_output = (float*)(data[2] + i * strides[2]);
+      float* x_input = (float*)(data[3] + i * strides[3]);
+      float* dy_input = (float*)(data[4] + i * strides[4]);
+      float* scale_input = (float*)(data[5] + i * strides[5]);
+      float* zero_point_input = (float*)(data[6] + i * strides[6]);
 
-void fake_quantize_learnable_zero_point_grad_channel_kernel(
-    Tensor& input_grad,
-    const Tensor& input,
-    const Tensor& output_grad,
-    float scale,
-    int64_t zero_point,
-    int64_t quant_min,
-    int64_t quant_max) {
-  float inv_scale = 1.0f / scale;
-  auto iter_zero_point = TensorIterator::binary_op(input_grad, input, output_grad);
-  // TODO: Implement the vectorized per channel version for the learnable backprop kernel on zero point.
-  cpu_kernel(iter_zero_point, [&](float x, float dy) -> float {
-    int64_t xq = static_cast<int64_t>(zero_point + std::nearbyint(x * inv_scale));
-    xq = std::max(std::min(xq, quant_max), quant_min);
-    if (xq == quant_min || xq == quant_max) {
-      return dy * (-1) * scale;
+      float inv_scale = 1.0f / (*scale_input);
+      float dscale_small = quant_min - (*zero_point_input);
+      float dscale_big = quant_max - (*zero_point_input);
+      // Calculate gradients for X.
+      int64_t xqi = std::nearbyint((*zero_point_input) + (*x_input) * inv_scale);
+      *dx_output = (*dy_input) * (xqi >= quant_min && xqi <= quant_max);
+      // Calculate gradients for scale and zero point.
+      xqi = std::max(std::min(xqi, quant_max), quant_min);
+      float xfqi = static_cast<float>((xqi - (*zero_point_input)) * (*scale_input));
+      if (xqi == quant_min || xqi == quant_max) {
+        *dzero_point_output = (*dy_input) * (-1) * (*scale_input);
+        *dscale_output = (xqi == quant_min) ? ((*dy_input) * dscale_small) : ((*dy_input) * dscale_big);
+      } else {
+        *dzero_point_output = 0;
+        *dscale_output = (*dy_input) * (xfqi - (*x_input)) * inv_scale;
+      }
     }
-    return 0;
   });
 }
 
@@ -2558,6 +2549,37 @@ void quantize_tensor_per_channel_affine_cpu(
       });
 }
 
+template<typename T, typename N, typename Q>
+void dequantize_per_channel_affine_kernel(
+      Tensor qtensor,
+      Tensor rtensor,
+      Tensor scales,
+      Tensor zero_points,
+      int64_t axis) {
+
+    int64_t batches = size_to_dim_(axis, rtensor.sizes());
+    int64_t elements_per_channel =
+        size_from_dim_(axis + 1, rtensor.sizes());
+    int64_t channel = rtensor.size(axis);
+    auto scales_data = scales.data_ptr<T>();
+    auto zero_points_data = zero_points.data_ptr<N>();
+    const auto* qd = qtensor.data_ptr<Q>();
+    float* rd = rtensor.data_ptr<float>();
+    // TODO: use parallel_for
+    for (auto b = 0; b < batches; ++b) {
+      for (auto c = 0; c < channel; ++c) {
+        for (auto e = 0; e < elements_per_channel; ++e) {
+          auto i = b * channel * elements_per_channel +
+              c * elements_per_channel + e;
+          // We need to convert the qint8 value to float to ensure the
+          // subtraction subexpression returns a float
+          rd[i] = (static_cast<float>(qd[i].val_) - zero_points_data[c]) *
+              scales_data[c];
+        }
+      }
+    }
+}
+
 void dequantize_tensor_per_channel_affine_cpu(
     Tensor qtensor,
     Tensor rtensor,
@@ -2566,71 +2588,97 @@ void dequantize_tensor_per_channel_affine_cpu(
     int64_t axis) {
   AT_DISPATCH_QINT_TYPES(
       qtensor.scalar_type(), "dequantize_tensor_per_channel_affine_cpu", [&]() {
+        dequantize_per_channel_affine_kernel<double, int64_t, scalar_t>(qtensor, rtensor, scales, zero_points, axis);
+      });
+}
+
+// quantize stubs for floating point scale and zero_point.
+void quantize_tensor_per_channel_float_qparams_cpu(
+    Tensor rtensor,
+    Tensor qtensor,
+    Tensor scales,
+    Tensor zero_points,
+    int64_t axis) {
+  AT_DISPATCH_QINT_TYPES(
+      qtensor.scalar_type(), "quantize_tensor_per_channel_float_qparams_cpu", [&]() {
         int64_t batches = size_to_dim_(axis, rtensor.sizes());
         int64_t elements_per_channel =
             size_from_dim_(axis + 1, rtensor.sizes());
         int64_t channel = rtensor.size(axis);
-        auto scales_data = scales.data_ptr<double>();
-        auto zero_points_data = zero_points.data_ptr<int64_t>();
-        const auto* qd = qtensor.data_ptr<scalar_t>();
-        float* rd = rtensor.data_ptr<float>();
+        auto scales_data = scales.data_ptr<float>();
+        auto zero_points_data = zero_points.data_ptr<float>();
+        const float* rdata = rtensor.data_ptr<float>();
+        auto qdata = qtensor.data_ptr<scalar_t>();
         for (auto b = 0; b < batches; ++b) {
           for (auto c = 0; c < channel; ++c) {
             for (auto e = 0; e < elements_per_channel; ++e) {
               auto i = b * channel * elements_per_channel +
                   c * elements_per_channel + e;
-              // We need to convert the qint8 value to float to ensure the
-              // subtraction subexpression returns a float
-              rd[i] = (static_cast<float>(qd[i].val_) - zero_points_data[c]) *
-                  scales_data[c];
+              qdata[i] = quantize_val_float_qparams<scalar_t>(
+                  scales_data[c], zero_points_data[c], rdata[i]);
             }
           }
         }
       });
 }
 
+void dequantize_tensor_per_channel_float_qparams_cpu(
+    Tensor qtensor,
+    Tensor rtensor,
+    Tensor scales,
+    Tensor zero_points,
+    int64_t axis) {
+  AT_DISPATCH_QINT_TYPES(
+      qtensor.scalar_type(), "dequantize_tensor_per_channel_float_qparams_cpu", [&]() {
+        dequantize_per_channel_affine_kernel<float, float, scalar_t>(qtensor, rtensor, scales, zero_points, axis);
+      });
+}
+
 } // namespace
 
-REGISTER_DISPATCH(qrelu_stub, &qrelu_kernel);
-REGISTER_DISPATCH(qrelu6_stub, &qrelu6_kernel);
-REGISTER_DISPATCH(qrelu_leaky_stub, &leaky_qrelu_out_kernel);
-REGISTER_DISPATCH(qsigmoid_stub, &qsigmoid_kernel);
-REGISTER_DISPATCH(qhardsigmoid_stub, &qhardsigmoid_kernel);
-REGISTER_DISPATCH(qclamp_stub, &qclamp_kernel);
-REGISTER_DISPATCH(qthreshold_stub, &qthreshold_kernel);
-REGISTER_DISPATCH(qtanh_stub, &qtanh_kernel);
-REGISTER_DISPATCH(qhardswish_stub, &qhardswish_kernel);
-REGISTER_DISPATCH(qelu_stub, &qelu_kernel);
+REGISTER_DISPATCH(dequantize_tensor_per_channel_affine_stub,
+                  &dequantize_tensor_per_channel_affine_cpu);
+REGISTER_DISPATCH(dequantize_tensor_per_tensor_affine_stub,
+                  &dequantize_tensor_per_tensor_affine_cpu);
+REGISTER_DISPATCH(dequantize_tensor_per_channel_float_qparams_stub,
+                  &dequantize_tensor_per_channel_float_qparams_cpu);
+REGISTER_DISPATCH(fake_quant_grad_learnable_tensor_stub,
+                  &fake_quantize_learnable_tensor_grad_kernel_cpu);
+REGISTER_DISPATCH(fake_quant_grad_per_channel_stub,
+                  &fake_quant_grad_per_channel_cpu);
+REGISTER_DISPATCH(fake_quant_grad_tensor_stub,
+                  &fake_quantize_grad_tensor_kernel);
+REGISTER_DISPATCH(fake_quant_per_channel_stub, &fake_quant_per_channel_cpu);
+REGISTER_DISPATCH(fake_quant_tensor_stub, &fake_quantize_tensor_kernel);
+REGISTER_DISPATCH(qadaptive_avg_pool2d_nhwc_stub,
+                  &qadaptive_avg_pool2d_nhwc_kernel);
+REGISTER_DISPATCH(qadaptive_avg_pool3d_ndhwc_stub,
+                  &qadaptive_avg_pool3d_ndhwc_kernel);
 REGISTER_DISPATCH(qadd_relu_stub, &qadd_kernel<true>);
-REGISTER_DISPATCH(qadd_stub, &qadd_kernel<false>);
 REGISTER_DISPATCH(qadd_scalar_relu_stub, &qadd_scalar_kernel<true>);
 REGISTER_DISPATCH(qadd_scalar_stub, &qadd_scalar_kernel<false>);
-REGISTER_DISPATCH(qmul_relu_stub, &qmul_kernel<true>);
-REGISTER_DISPATCH(qmul_stub, &qmul_kernel<false>);
-REGISTER_DISPATCH(qmaxpool_2d_nhwc_stub, &qmaxpool_2d_nhwc_kernel);
-REGISTER_DISPATCH(
-    qadaptive_avg_pool2d_nhwc_stub,
-    &qadaptive_avg_pool2d_nhwc_kernel);
-REGISTER_DISPATCH(
-    qadaptive_avg_pool3d_ndhwc_stub,
-    &qadaptive_avg_pool3d_ndhwc_kernel);
+REGISTER_DISPATCH(qadd_stub, &qadd_kernel<false>);
 REGISTER_DISPATCH(qavg_pool2d_nhwc_stub, &qavg_pool2d_nhwc_kernel);
 REGISTER_DISPATCH(qavg_pool3d_nhwc_stub, &qavg_pool3d_nhwc_kernel);
-REGISTER_DISPATCH(
-    qupsample_bilinear2d_nhwc_stub,
-    &qupsample_bilinear2d_nhwc_kernel);
+REGISTER_DISPATCH(qbatch_norm_relu_stub, &q_batch_norm_kernel<true>);
+REGISTER_DISPATCH(qbatch_norm_stub, &q_batch_norm_kernel<false>);
 REGISTER_DISPATCH(qcat_nhwc_stub, &qcat_nhwc_kernel<false>);
 REGISTER_DISPATCH(qcat_relu_nhwc_stub, &qcat_nhwc_kernel<true>);
+REGISTER_DISPATCH(qclamp_stub, &qclamp_kernel);
+REGISTER_DISPATCH(qelu_stub, &qelu_kernel);
+REGISTER_DISPATCH(qhardsigmoid_stub, &qhardsigmoid_kernel);
+REGISTER_DISPATCH(qhardswish_stub, &qhardswish_kernel);
+REGISTER_DISPATCH(qmaxpool_2d_nhwc_stub, &qmaxpool_2d_nhwc_kernel);
+REGISTER_DISPATCH(qmul_relu_stub, &qmul_kernel<true>);
+REGISTER_DISPATCH(qmul_stub, &qmul_kernel<false>);
+REGISTER_DISPATCH(qrelu6_stub, &qrelu6_kernel);
+REGISTER_DISPATCH(qrelu_leaky_stub, &leaky_qrelu_out_kernel);
+REGISTER_DISPATCH(qrelu_stub, &qrelu_kernel);
+REGISTER_DISPATCH(qsigmoid_stub, &qsigmoid_kernel);
+REGISTER_DISPATCH(qtanh_stub, &qtanh_kernel);
+REGISTER_DISPATCH(qthreshold_stub, &qthreshold_kernel);
 REGISTER_DISPATCH(qtopk_stub, &qtopk_kernel);
-REGISTER_DISPATCH(qbatch_norm_stub, &q_batch_norm_kernel<false>);
-REGISTER_DISPATCH(qbatch_norm_relu_stub, &q_batch_norm_kernel<true>);
-REGISTER_DISPATCH(fake_quant_tensor_stub, &fake_quantize_tensor_kernel);
-REGISTER_DISPATCH(fake_quant_grad_tensor_stub, &fake_quantize_grad_tensor_kernel);
-REGISTER_DISPATCH(fake_quant_grad_learnable_tensor_stub, &fake_quantize_learnable_tensor_grad_kernel_cpu);
-REGISTER_DISPATCH(fake_quant_per_channel_stub, &fake_quant_per_channel_cpu);
-REGISTER_DISPATCH(fake_quant_grad_per_channel_stub, &fake_quant_grad_per_channel_cpu);
-REGISTER_DISPATCH(fake_quant_grad_learnable_scale_channel_stub, &fake_quantize_learnable_scale_grad_channel_kernel);
-REGISTER_DISPATCH(fake_quant_grad_learnable_zero_point_channel_stub, &fake_quantize_learnable_zero_point_grad_channel_kernel);
+REGISTER_DISPATCH(fake_quant_grad_learnable_channel_stub, &fake_quantize_learnable_channel_grad_kernel_cpu);
 REGISTER_DISPATCH(
     quantize_tensor_per_tensor_affine_stub,
     &quantize_tensor_per_tensor_affine_cpu);
@@ -2638,12 +2686,11 @@ REGISTER_DISPATCH(
     quantize_tensor_per_channel_affine_stub,
     &quantize_tensor_per_channel_affine_cpu);
 REGISTER_DISPATCH(
-    dequantize_tensor_per_tensor_affine_stub,
-    &dequantize_tensor_per_tensor_affine_cpu);
-REGISTER_DISPATCH(
-    dequantize_tensor_per_channel_affine_stub,
-    &dequantize_tensor_per_channel_affine_cpu);
+    quantize_tensor_per_channel_float_qparams_stub,
+    &quantize_tensor_per_channel_float_qparams_cpu);
 REGISTER_DISPATCH(quantized_normalize_stub, &quantized_normalize_kernel);
+REGISTER_DISPATCH(qupsample_bilinear2d_nhwc_stub,
+                  &qupsample_bilinear2d_nhwc_kernel);
 
 } // namespace native
 } // namespace at
