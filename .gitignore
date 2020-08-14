@@ -49,7 +49,6 @@ test/test-reports/
 third_party/build/
 tools/shared/_utils_internal.py
 torch.egg-info/
-torch/__init__.pyi
 torch/_C/__init__.pyi
 torch/_C/_nn.pyi
 torch/_C/_VariableFunctions.pyi
