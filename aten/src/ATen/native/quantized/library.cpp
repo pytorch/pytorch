@@ -90,8 +90,8 @@ TORCH_LIBRARY(quantized, m) {
   m.def("embedding_bag_byte_unpack(Tensor weight) -> Tensor");
   m.def("embedding_bag_4bit_prepack(Tensor weight) -> Tensor");
   m.def("embedding_bag_4bit_unpack(Tensor weight) -> Tensor");
-  m.def("embedding_bag_byte_rowwise_offsets(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq=False, int mode=0, bool sparse=False, Tensor? per_sample_weights=None, bool include_last_offset=False) -> Tensor");
-  m.def("embedding_bag_4bit_rowwise_offsets(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq=False, int mode=0, bool sparse=False, Tensor? per_sample_weights=None, Tensor? compressed_indices_mapping=None, bool include_last_offset=False) -> Tensor");
+  m.def("embedding_bag_byte_rowwise_offsets(Tensor weight, Tensor indices, Tensor? offsets=None, bool scale_grad_by_freq=False, int mode=0, bool sparse=False, Tensor? per_sample_weights=None, bool include_last_offset=False) -> Tensor");
+  m.def("embedding_bag_4bit_rowwise_offsets(Tensor weight, Tensor indices, Tensor? offsets=None, bool scale_grad_by_freq=False, int mode=0, bool sparse=False, Tensor? per_sample_weights=None, Tensor? compressed_indices_mapping=None, bool include_last_offset=False) -> Tensor");
   m.def("celu(Tensor self, float output_scale, int output_zero_point, Scalar alpha=1) -> Tensor");
   m.def("hardswish(Tensor input, float output_scale, int output_zero_point) -> Tensor");
   m.def("group_norm(Tensor input, int num_groups, Tensor? weight, Tensor? bias, float eps, float output_scale, int output_zero_point) -> Tensor");
