@@ -6,12 +6,15 @@ namespace torchpy {
 
 class PyModule {
  public:
-  PyModule() {}
+  PyModule(PyObject* globals, PyObject* module)
+      : _globals(globals), _module(module) {}
   ~PyModule() {}
 
   at::Tensor forward(std::vector<at::Tensor> inputs);
 
  private:
+  PyObject* _globals;
+  PyObject* _module;
 };
 
 void init();
