@@ -7,21 +7,22 @@ if TYPE_CHECKING:
 
 
 BaseArgumentTypes = Union[str, int, float, bool, torch.dtype, torch.Tensor]
-base_types = BaseArgumentTypes.__args__ # type: ignore
+base_types = BaseArgumentTypes.__args__  # type: ignore
 
 Target = Union[Callable[..., Any], str]
 
 Argument = Optional[Union[
-    Tuple[Any, ...], # actually Argument, but mypy can't represent recursive types
+    Tuple[Any, ...],  # actually Argument, but mypy can't represent recursive types
     List[Any],  # actually Argument
-    Dict[str, Any], # actually Argument
-    slice, # Slice[Argument, Argument, Argument], but slice is not a templated type in typing
+    Dict[str, Any],  # actually Argument
+    slice,  # Slice[Argument, Argument, Argument], but slice is not a templated type in typing
     'Node',
     BaseArgumentTypes
 ]]
 
 class Node:
-    def __init__(self, graph: 'Graph', name: str, op: str, target: Target, args: Tuple[Argument, ...], kwargs: Dict[str, Argument]) -> None:
+    def __init__(self, graph: 'Graph', name: str, op: str, target: Target, 
+                 args: Tuple[Argument, ...], kwargs: Dict[str, Argument]) -> None:
         self.graph = graph
         self.name = name  # unique name of value being created
         self.op = op  # the kind of operation = placeholder|call_method|call_module|call_function|getattr

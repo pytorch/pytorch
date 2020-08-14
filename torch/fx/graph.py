@@ -1,6 +1,6 @@
 from .node import Node, Argument, Target
 
-from typing import Callable, Any, TypeVar, List, Dict, Optional, Tuple
+from typing import Callable, Any, List, Dict, Optional, Tuple
 import builtins
 import torch
 
@@ -71,7 +71,10 @@ class Graph:
             return n
         map_arg(a, add_use)
 
-    def create_node(self, op: str, target: Target, args: Optional[Tuple[Argument,...]]=None, kwargs: Optional[Dict[str, Argument]]=None, name: Optional[str]=None):
+    def create_node(self, op: str, target: Target, 
+                    args: Optional[Tuple[Argument, ...]] = None, 
+                    kwargs: Optional[Dict[str, Argument]] = None, 
+                    name: Optional[str] = None):
         assert op in ('call_function', 'call_method', 'get_param', 'call_module', 'placeholder')
         args = () if args is None else args
         kwargs = {} if kwargs is None else kwargs
@@ -81,7 +84,7 @@ class Graph:
         self.nodes.append(n)
         return n
 
-    def node_copy(self, node: Node, arg_transform: Callable[[Node], Argument]=lambda x: x) -> Node:
+    def node_copy(self, node: Node, arg_transform: Callable[[Node], Argument] = lambda x: x) -> Node:
         """ copy a node from one graph into another. arg_transform needs to transform arguments from the graph of node
             to the graph of self"""
         args = map_arg(node.args, arg_transform)
@@ -142,7 +145,10 @@ class Graph:
                     body.append(f'{node.name} = {magic_methods[node.target.__name__].format(*(repr(a) for a in node.args))}\n')
                     continue
                 qualified_name = _qualified_name(node.target)
-                if qualified_name == 'getattr' and isinstance(node.args, tuple) and isinstance(node.args[1], str) and node.args[1].isidentifier():
+                if qualified_name == 'getattr' and \
+                   isinstance(node.args, tuple) and \
+                   isinstance(node.args[1], str) and \
+                   node.args[1].isidentifier():
                     # pretty print attribute access
                     body.append(f'{node.name} = {_format_target(repr(node.args[0]), node.args[1])}\n')
                     continue

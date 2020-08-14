@@ -4,8 +4,8 @@ import inspect
 import operator
 
 from .graph import magic_methods, reflectable_magic_methods
-from typing import TYPE_CHECKING, Union, Tuple, Dict, Optional, Iterable, NoReturn, Any
-from .node import Target, Argument, Node
+from typing import TYPE_CHECKING, Tuple, Dict, Optional, Iterable, NoReturn, Any
+from .node import Target, Node
 
 if TYPE_CHECKING:
     from .symbolic_trace import DelegateBase
@@ -29,7 +29,7 @@ def _create_proxy(delegate: 'DelegateBase', op: str, target: Target, args_: Tupl
     return Proxy(rn, delegate)
 
 class Proxy:
-    def __init__(self, node: Node, delegate: 'Optional[DelegateBase]'=None):
+    def __init__(self, node: Node, delegate: 'Optional[DelegateBase]' = None):
         if delegate is None:
             # this allows you to create a proxy object around a raw node
             # so that if you are doing graph transforms you can use the overloaded operators
@@ -57,7 +57,7 @@ class Proxy:
         assert calling_frame is not None
         inst = list(dis.get_instructions(calling_frame.f_code))[calling_frame.f_lasti // 2]
         if inst.opname == 'UNPACK_SEQUENCE':
-            return (self[i] for i in range(inst.argval)) # type: ignore
+            return (self[i] for i in range(inst.argval))  # type: ignore
         self._no_control_flow()
 
     def _no_control_flow(self) -> NoReturn:
@@ -105,14 +105,14 @@ for method in magic_methods:
     scope(method)
 
 def _define_reflectable(orig_method_name):
-        method_name = f'__r{orig_method_name}__'
+    method_name = f'__r{orig_method_name}__'
 
-        def impl(self, rhs):
-            target = getattr(operator, orig_method_name)
-            return _create_proxy(self.delegate, 'call_function', target, (rhs, self), {})
-        impl.__name__ = method_name
-        impl.__qualname__ = method_name
-        setattr(Proxy, method_name, impl)
-    
+    def impl(self, rhs):
+        target = getattr(operator, orig_method_name)
+        return _create_proxy(self.delegate, 'call_function', target, (rhs, self), {})
+    impl.__name__ = method_name
+    impl.__qualname__ = method_name
+    setattr(Proxy, method_name, impl)
+
 for orig_method_name in reflectable_magic_methods:
     _define_reflectable(orig_method_name)

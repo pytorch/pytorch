@@ -1,6 +1,6 @@
 import inspect
 from types import CodeType, FunctionType
-from typing import Any, Callable, Dict, Optional, Tuple, Union, List, Type
+from typing import Any, Callable, Dict, Optional, Tuple, Union, List
 import torch
 
 from .node import Node, base_types, Argument
@@ -36,7 +36,7 @@ def _patch_function(fn: FunctionType, nargs: int) -> FunctionType:
             co.co_names, co.co_varnames, co.co_filename,
             co.co_name, co.co_firstlineno, co.co_lnotab,
             co.co_freevars, co.co_cellvars)
-    new_code = CodeType(*co_args) # type: ignore
+    new_code = CodeType(*co_args)  # type: ignore
     return FunctionType(new_code, fn.__globals__, fn.__name__, fn.__defaults__, fn.__closure__)
 
     # we need to insert placeholder nodes for *args, and **kwargs,
