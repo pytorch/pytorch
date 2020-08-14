@@ -4347,6 +4347,47 @@ for shape in [(1,), ()]:
         c.backward()
         self.assertEqual(b.grad, torch.tensor([-inf, 0., 0.]))
 
+    def test_nansum_with_nans(self):
+        a = torch.randn(2, 2, 2, 2)
+        with torch.no_grad():
+            a[a < 0.2] = float('nan')
+        a.requires_grad = True
+
+        # No args
+        gradcheck(lambda x: x.nansum(), a)
+        gradgradcheck(lambda x: x.nansum(), a)
+
+        # Single dim
+        gradcheck(lambda x: x.nansum((0)), a)
+        gradgradcheck(lambda x: x.nansum((0)), a)
+
+        # Multi dim
+        gradcheck(lambda x: x.nansum((0, 2)), a)
+        gradgradcheck(lambda x: x.nansum((0, 2)), a)
+
+        gradcheck(lambda x: x.nansum((0, -1)), a)
+        gradgradcheck(lambda x: x.nansum((0, -1)), a)
+
+        # With keep-dim
+        gradcheck(lambda x: x.nansum((0, -1), True), a)
+        gradgradcheck(lambda x: x.nansum((0, -1), True), a)
+
+    def test_nansum_dtype(self):
+        inp = torch.randn(2, 2, 2, 2)
+        with torch.no_grad():
+            inp[inp < 0.2] = float('nan')
+
+        def test(inp, inp_dtype, out_dtype):
+            with torch.no_grad():
+                a = inp.to(inp_dtype)
+            a.requires_grad = True
+            b = torch.sum(a, dtype=out_dtype)
+            b.backward()
+            self.assertEqual(a.dtype, a.grad.dtype)
+
+        test(inp, torch.float, torch.double)
+        test(inp, torch.double, torch.float)
+
     def test_custom_function_error(self):
         class BadFw(Function):
             @staticmethod
