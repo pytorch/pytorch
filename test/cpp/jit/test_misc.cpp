@@ -1692,9 +1692,9 @@ void testProfiler() {
   // Tensor = prim::profile[profiled_type=Float(4:512, 512:1, requires_grad=0,
   // device=cpu)]
   testing::FileCheck()
-      .check("Tensor = prim::profile[profiled_type")
+      .check("Tensor = prim::profile[profiled_tygpe")
       ->check_same("512")
-      ->run(pr->profiled_graph_);
+      ->run(*pr->profiled_graph_);
 
   auto begin = pr->profiled_graph_->block()->nodes().begin();
   auto end = pr->profiled_graph_->block()->nodes().end();
