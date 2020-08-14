@@ -39,11 +39,11 @@ def run(command):
     """Returns (return-code, stdout, stderr)"""
     p = subprocess.Popen(command, stdout=subprocess.PIPE,
                          stderr=subprocess.PIPE, shell=True)
-    output, err = p.communicate()
+    raw_output, raw_err = p.communicate()
     rc = p.returncode
     enc = locale.getpreferredencoding()
-    output = output.decode(enc)
-    err = err.decode(enc)
+    output = raw_output.decode(enc)
+    err = raw_err.decode(enc)
     return rc, output.strip(), err.strip()
 
 
@@ -142,15 +142,15 @@ def get_cudnn_version(run_lambda):
         if l is not None and os.path.isfile(l):
             return os.path.realpath(l)
         return None
-    files = set()
+    files_set = set()
     for fn in out.split('\n'):
         fn = os.path.realpath(fn)  # eliminate symbolic links
         if os.path.isfile(fn):
-            files.add(fn)
-    if not files:
+            files_set.add(fn)
+    if not files_set:
         return None
     # Alphabetize the result because the order is non-deterministic otherwise
-    files = list(sorted(files))
+    files = list(sorted(files_set))
     if len(files) == 1:
         return files[0]
     result = '\n'.join(files)
@@ -265,8 +265,8 @@ def get_env_info():
 
     if TORCH_AVAILABLE:
         version_str = torch.__version__
-        debug_mode_str = torch.version.debug
-        cuda_available_str = torch.cuda.is_available()
+        debug_mode_str = str(torch.version.debug)
+        cuda_available_str = str(torch.cuda.is_available())
         cuda_version_str = torch.version.cuda
     else:
         version_str = debug_mode_str = cuda_available_str = cuda_version_str = 'N/A'
