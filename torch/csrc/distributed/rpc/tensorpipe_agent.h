@@ -1,5 +1,7 @@
 #pragma once
 
+#ifdef USE_TENSORPIPE
+
 #include <atomic>
 #include <thread>
 
@@ -341,3 +343,5 @@ class TensorPipeAgent : public RpcAgent {
 } // namespace rpc
 } // namespace distributed
 } // namespace torch
+
+#endif // USE_TENSORPIPE

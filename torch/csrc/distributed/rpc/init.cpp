@@ -455,6 +455,8 @@ PyObject* rpc_init(PyObject* /* unused */) {
           &ProcessGroupAgent::sync,
           py::call_guard<py::gil_scoped_release>());
 
+#ifdef USE_TENSORPIPE
+
   // Base class: torch.distributed.rpc.RpcBackendOptions.
   py::class_<TensorPipeRpcBackendOptions>(
       module,
@@ -551,6 +553,8 @@ PyObject* rpc_init(PyObject* /* unused */) {
           (std::vector<WorkerInfo>(TensorPipeAgent::*)() const) &
               TensorPipeAgent::getWorkerInfos,
           py::call_guard<py::gil_scoped_release>());
+
+#endif // USE_TENSORPIPE
 
   module.def("_is_current_rpc_agent_set", &RpcAgent::isCurrentRpcAgentSet);
 
