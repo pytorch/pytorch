@@ -13,14 +13,14 @@ class SpectralNorm:
     # NB: At initialization, this invariant is not enforced
 
     _version: int = 1
-    name: str
-    dim: int
-    n_power_iterations: int
-    eps: float
     # At version 1:
     #   made  `W` not a buffer,
     #   added `v` as a buffer, and
     #   made eval mode use `W = u @ W_orig @ v` rather than the stored `W`.
+    name: str
+    dim: int
+    n_power_iterations: int
+    eps: float
 
     def __init__(self, name: str = 'weight', n_power_iterations: int = 1, dim: int = 0, eps: float = 1e-12) -> None:
         self.name = name
@@ -210,7 +210,11 @@ class SpectralNormStateDictHook:
 
 T_module = TypeVar('T_module', bound=Module)
 
-def spectral_norm(module: T_module, name: str = 'weight', n_power_iterations: int = 1, eps: float = 1e-12, dim: Optional[int] = None) -> T_module:
+def spectral_norm(module: T_module,
+                  name: str = 'weight',
+                  n_power_iterations: int = 1,
+                  eps: float = 1e-12,
+                  dim: Optional[int] = None) -> T_module:
     r"""Applies spectral normalization to a parameter in the given module.
 
     .. math::

@@ -10,6 +10,7 @@ from ..modules import Module
 class WeightNorm(object):
     name: str
     dim: int
+
     def __init__(self, name: str, dim: int) -> None:
         if dim is None:
             dim = -1
