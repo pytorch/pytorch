@@ -751,8 +751,7 @@ They are used in specifying strategies for reduction collectives, e.g.,
                 will return another ``FutureNCCL`` that holds the return value of the callback and the
                 stream that runs the callback.
 
-                Note that ``fut.done()`` returns if work's NCCL streams were synchronized with PyTorch's
-                default device streams.
+                Note that ``fut.done()`` returns if the enire operation is completed on the GPU.
            )");
 
   module.def(
