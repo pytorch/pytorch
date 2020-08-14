@@ -81,9 +81,6 @@ class TORCH_CUDA_API IRPrinter : public OptInConstDispatch {
   // Track the indentation size for pretty printing
   int indent_size = 0;
 
-  // Handle value mapping
-  bool follow_val_map = true;
-
   // Indent the generated code
   void indent() {
     for (int i = 0; i < indent_size; i++)

@@ -67,7 +67,6 @@ void swap(Fusion& a, Fusion& b) noexcept {
 
   swap(a.origin_, b.origin_);
   swap(a.uses_, b.uses_);
-  swap(a.values_map_, b.values_map_);
 
   swap(a.inputs_, b.inputs_);
   swap(a.outputs_, b.outputs_);
@@ -91,7 +90,6 @@ void swap(Fusion& a, Fusion& b) noexcept {
   // Lowered IR nodes
   swap(a.lowered_val_set_, b.lowered_val_set_);
   swap(a.lowered_expr_set_, b.lowered_expr_set_);
-  swap(a.kir_map_, b.kir_map_);
 
   for (auto val : a.lowered_val_set_) {
     val->fusion_ = &a;
@@ -140,12 +138,6 @@ Fusion::Fusion(const Fusion& other) {
     uses_.insert({val, std::move(val_uses)});
   }
 
-  for (const auto& kv : other.values_map_) {
-    auto from_val = ir_cloner.clone(kv.first);
-    auto to_val = ir_cloner.clone(kv.second);
-    values_map_.insert({from_val, to_val});
-  }
-
   inputs_ = ir_cloner.clone(other.inputs_);
   outputs_ = ir_cloner.clone(other.outputs_);
 
@@ -156,12 +148,6 @@ Fusion::Fusion(const Fusion& other) {
 
   for (auto expr : other.lowered_expr_set_) {
     lowered_expr_set_.insert(ir_cloner.clone(expr));
-  }
-
-  for (const auto& kv : other.kir_map_) {
-    auto from_node = ir_cloner.clone(kv.first);
-    auto to_node = ir_cloner.clone(kv.second);
-    kir_map_.insert({from_node, to_node});
   }
 }
 
@@ -209,7 +195,6 @@ void Fusion::clear() noexcept {
 
   origin_.clear();
   uses_.clear();
-  values_map_.clear();
 
   inputs_.clear();
   outputs_.clear();
@@ -223,7 +208,6 @@ void Fusion::clear() noexcept {
   }
   lowered_val_set_.clear();
   lowered_expr_set_.clear();
-  kir_map_.clear();
 }
 
 void Fusion::removeExpr(Expr* expr) {
@@ -392,23 +376,8 @@ void Fusion::print() {
   std::cout << "}\n";
 }
 
-void Fusion::printValuesMap() {
-  IRPrinter ir_printer(std::cout);
-  ir_printer.follow_val_map = false;
-  std::cout << "\nValues map\n";
-  std::cout << "--------------------\n";
-  for (const auto& kv : values_map_) {
-    ir_printer.handle(kv.first);
-    std::cout << " -> ";
-    ir_printer.handle(kv.second);
-    std::cout << "\n";
-  }
-  std::cout << "--------------------\n\n";
-}
-
 void Fusion::printKernel() {
-  FusionGuard fg(this);
-  GPULower lower(this);
+  GpuLower lower(this);
   lower.printKernel(std::cout);
 }
 
@@ -649,128 +618,6 @@ std::vector<Val*> Fusion::getTerminatingOutputs() {
     terminating_outputs.push_back(out);
   }
   return terminating_outputs;
-}
-
-// Maps Fusion IR nodes to the Kernel IR counterparts
-// (this is a interim solution for easing the Kernel IR splitting)
-class TORCH_CUDA_API Fusion::KernelIrMapper : private OptInConstDispatch {
- public:
-  explicit KernelIrMapper(Fusion* fusion) : fusion_(fusion) {}
-
-  Val* lower(const Val* value) {
-    const auto it = fusion_->kir_map_.find(value);
-    if (it != fusion_->kir_map_.end()) {
-      return it->second;
-    } else {
-      handle(value);
-      const auto lowered_node = fusion_->kir_map_[value];
-      TORCH_CHECK(lowered_node != nullptr);
-      TORCH_CHECK(kir::isLoweredVal(lowered_node));
-
-      // Lower the arithmetic expression defining the value, if any
-      if (value->isScalar()) {
-        if (auto def = fusion_->origin(value)) {
-          lowerDefinition(lowered_node, def);
-        }
-      }
-
-      return lowered_node;
-    }
-  }
-
- private:
-  // TODO(kir): rewrite this
-  void lowerDefinition(Val* lowered_value, const Expr* def) {
-    switch (def->type()) {
-      case ExprType::UnaryOp: {
-        const auto op = def->as<fuser::UnaryOp>();
-        new kir::UnaryOp(op->getUnaryOpType(), lowered_value, lower(op->in()));
-        break;
-      }
-      case ExprType::BinaryOp: {
-        const auto op = def->as<fuser::BinaryOp>();
-        new kir::BinaryOp(
-            op->getBinaryOpType(),
-            lowered_value,
-            lower(op->lhs()),
-            lower(op->rhs()));
-        break;
-      }
-      case ExprType::TernaryOp: {
-        const auto op = def->as<fuser::TernaryOp>();
-        new kir::TernaryOp(
-            op->getTernaryOpType(),
-            lowered_value,
-            lower(op->in1()),
-            lower(op->in2()),
-            lower(op->in3()));
-        break;
-      }
-      default:
-        TORCH_CHECK(false, "Unexpected expression type");
-    }
-  }
-
-  void handle(const Statement* node) override {
-    OptInConstDispatch::handle(node);
-  }
-
-  void handle(const Val* node) override {
-    OptInConstDispatch::handle(node);
-  }
-
-  void handle(const Expr* node) override {
-    OptInConstDispatch::handle(node);
-  }
-
-  void handle(const TensorDomain* node) override {
-    const auto lowered_node = new kir::TensorDomain(node);
-    TORCH_CHECK(fusion_->kir_map_.insert({node, lowered_node}).second);
-  }
-
-  void handle(const IterDomain* node) override {
-    const auto lowered_node = new kir::IterDomain(node);
-    TORCH_CHECK(fusion_->kir_map_.insert({node, lowered_node}).second);
-  }
-
-  void handle(const TensorView* node) override {
-    const auto lowered_node = new kir::TensorView(node);
-    TORCH_CHECK(fusion_->kir_map_.insert({node, lowered_node}).second);
-  }
-
-  void handle(const Bool* node) override {
-    const auto lowered_node = new kir::Bool(node);
-    TORCH_CHECK(fusion_->kir_map_.insert({node, lowered_node}).second);
-  }
-
-  void handle(const Float* node) override {
-    const auto lowered_node = new kir::Float(node);
-    TORCH_CHECK(fusion_->kir_map_.insert({node, lowered_node}).second);
-  }
-
-  void handle(const Half* node) override {
-    const auto lowered_node = new kir::Half(node);
-    TORCH_CHECK(fusion_->kir_map_.insert({node, lowered_node}).second);
-  }
-
-  void handle(const Int* node) override {
-    const auto lowered_node = new kir::Int(node, false);
-    TORCH_CHECK(fusion_->kir_map_.insert({node, lowered_node}).second);
-  }
-
-  void handle(const NamedScalar* node) override {
-    const auto lowered_node =
-        new kir::NamedScalar(node->name(), node->getDataType().value());
-    TORCH_CHECK(fusion_->kir_map_.insert({node, lowered_node}).second);
-  }
-
- private:
-  Fusion* fusion_ = nullptr;
-};
-
-Val* Fusion::lowerValue(const Val* val) {
-  KernelIrMapper kir_mapper(this);
-  return kir_mapper.lower(val);
 }
 
 } // namespace fuser

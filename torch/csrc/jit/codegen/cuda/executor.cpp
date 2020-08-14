@@ -16,7 +16,7 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-int FusionExecutor::fusion_id_counter = 0;
+int FusionExecutor::fusion_id_counter_ = 0;
 
 std::string FusionExecutor::getStructuredCode(const std::string& kernel) {
   // generating cuda code;
@@ -39,25 +39,26 @@ void FusionExecutor::compileFusion(Fusion* fusion, CompileOptions options) {
   TORCH_INTERNAL_ASSERT(
       !fusion->outputs().empty(), "No output found for this kernel, aborting.");
 
-  for (auto out : fusion->outputs())
+  for (auto out : fusion->outputs()) {
     TORCH_INTERNAL_ASSERT(
         out->getValType() == ValType::TensorView,
         "Output types from fusions that are not tensors are not supported at this point.");
+  }
 
   fusion_ = *fusion;
   FusionGuard fg(&fusion_);
   options_ = options;
 
-  fusion_id = ++fusion_id_counter;
-  has_random = fusion->hasRNG();
-  lowered = GPULower(&fusion_);
-  const auto kernel = lowered.getKernel(kernelName());
+  fusion_id_ = ++fusion_id_counter_;
+  has_random_ = fusion->hasRNG();
+  lowered_ = GpuLower(&fusion_);
+  const auto kernel = lowered_.getKernel(kernelName());
   const auto structured_code = getStructuredCode(kernel);
 
-  compiled_kernel = executor_utils::nvrtcCompile(
+  compiled_kernel_ = executor_utils::nvrtcCompile(
       structured_code,
       (kernelNamespace() + "::" + kernelName()).c_str(),
-      fusion_id);
+      fusion_id_);
   compiled_ = true;
 }
 
@@ -181,7 +182,7 @@ LaunchParams FusionExecutor::computeLaunchParams(
 
 std::vector<at::Tensor> FusionExecutor::allocGlobalVals(EvaluationContext& ec) {
   std::vector<at::Tensor> global_buffers;
-  for (auto alloc : lowered.global_allocations()) {
+  for (auto alloc : lowered_.global_allocations()) {
     TORCH_INTERNAL_ASSERT(
         alloc->buffer()->getValType() == ValType::KirTensorView,
         "Cannot allocate global buffers that are not tensors.");
@@ -192,7 +193,7 @@ std::vector<at::Tensor> FusionExecutor::allocGlobalVals(EvaluationContext& ec) {
         false));
   }
 
-  for (auto alloc : lowered.sync_allocations()) {
+  for (auto alloc : lowered_.sync_allocations()) {
     TORCH_INTERNAL_ASSERT(
         alloc->buffer()->getValType() == ValType::KirTensorView,
         "Cannot allocate global buffers that are not tensors.");
@@ -220,7 +221,7 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
     const std::vector<at::Tensor>& outputs,
     const LaunchParams& launch_constraints) {
   TORCH_INTERNAL_ASSERT(
-      fusion_id > 0, "Cannot run fusion, it was not compiled.");
+      fusion_id_ > 0, "Cannot run fusion, it was not compiled.");
 
   FusionGuard fg(&fusion_);
 
@@ -250,7 +251,7 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
   auto buffers = allocGlobalVals(evaluation_context);
   kernel_arguments.push(buffers);
 
-  if (has_random) {
+  if (has_random_) {
     const auto rand_offset = 4 *
         (std::ceil(
              alloced_outputs[0].numel() / (4.0 * 128 * launch_params.gdimx())) +
@@ -259,7 +260,7 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
   }
 
   AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuLaunchKernel(
-      compiled_kernel.function,
+      compiled_kernel_.function,
       launch_params.gdimx(),
       launch_params.gdimy(),
       launch_params.gdimz(),

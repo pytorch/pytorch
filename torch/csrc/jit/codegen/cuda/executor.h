@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/codegen/cuda/ir_cloner.h>
 #include <torch/csrc/jit/codegen/cuda/ir_printer.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
+#include <torch/csrc/jit/codegen/cuda/utils.h>
 
 #include <c10/core/DeviceType.h>
 
@@ -20,7 +21,7 @@ struct TORCH_CUDA_API CompileOptions {
   c10::Device device = c10::Device(c10::DeviceType::CUDA, 0);
 };
 
-class TORCH_CUDA_API FusionExecutor {
+class TORCH_CUDA_API FusionExecutor : public NonCopyable {
  public:
   void compileFusion(Fusion* fusion, CompileOptions options = CompileOptions());
 
@@ -44,7 +45,7 @@ class TORCH_CUDA_API FusionExecutor {
  private:
   std::string kernelName() const {
     std::stringstream ss;
-    ss << "kernel" << fusion_id;
+    ss << "kernel" << fusion_id_;
     return ss.str();
   }
 
@@ -71,16 +72,16 @@ class TORCH_CUDA_API FusionExecutor {
 
   CompileOptions options_;
 
-  executor_utils::NvrtcFunction compiled_kernel;
+  executor_utils::NvrtcFunction compiled_kernel_;
 
   // State of the fusion that's important
-  bool has_random = false;
+  bool has_random_ = false;
 
   // Counter to be used for kernel name.
-  int fusion_id = -1;
-  static int fusion_id_counter;
+  int fusion_id_ = -1;
+  static int fusion_id_counter_;
 
-  GPULower lowered;
+  GpuLower lowered_;
 };
 
 } // namespace cuda

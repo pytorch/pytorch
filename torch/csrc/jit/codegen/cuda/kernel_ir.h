@@ -336,6 +336,7 @@ class TORCH_CUDA_API UnaryOp : public Expr {
   Val* out() const {
     return out_;
   }
+
   Val* in() const {
     return in_;
   }
@@ -359,9 +360,11 @@ class TORCH_CUDA_API BinaryOp : public Expr {
   Val* out() const {
     return out_;
   }
+
   Val* lhs() const {
     return lhs_;
   }
+
   Val* rhs() const {
     return rhs_;
   }
@@ -390,9 +393,11 @@ class TORCH_CUDA_API TernaryOp : public Expr {
   Val* in1() const {
     return in1_;
   }
+
   Val* in2() const {
     return in2_;
   }
+
   Val* in3() const {
     return in3_;
   }
@@ -418,9 +423,11 @@ class TORCH_CUDA_API ReductionOp : public Expr {
   Val* out() const {
     return out_;
   }
+
   Val* in() const {
     return in_;
   }
+
   Val* init() const {
     return init_;
   }
@@ -478,6 +485,7 @@ class TORCH_CUDA_API BroadcastOp : public Expr {
   Val* out() const {
     return out_;
   }
+
   Val* in() const {
     return in_;
   }

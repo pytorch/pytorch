@@ -43,7 +43,6 @@ EvaluationContext bindInputs(
     Fusion* fusion);
 
 struct NvrtcFunction {
- public:
   CUmodule module = CUmodule();
   CUfunction function = CUfunction();
 };

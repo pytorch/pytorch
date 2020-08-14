@@ -30,11 +30,6 @@ void IRPrinter::handle(const Statement* s) {
 }
 
 void IRPrinter::handle(const Val* v) {
-  if (follow_val_map) {
-    // Follow a single maping (permutation chains are not expected)
-    v = FusionGuard::getCurFusion()->loweredVal(v);
-    TORCH_INTERNAL_ASSERT(v == FusionGuard::getCurFusion()->loweredVal(v));
-  }
   OptInConstDispatch::handle(v);
 }
 
@@ -250,11 +245,6 @@ void IRPrinter::handle(const Half* h) {
 }
 
 void IRPrinter::handle(const Int* i) {
-  // Make sure we didn't bypass the value mapping
-  // (for example calling IRPrinter::handle() with a Int*)
-  TORCH_CHECK(
-      !follow_val_map || i == FusionGuard::getCurFusion()->loweredVal(i));
-
   if (print_inline_) {
     if (auto def = FusionGuard::getCurFusion()->origin(i)) {
       os << "( ";
@@ -324,11 +314,6 @@ void IRPrinter::handle(const kir::Half* h) {
 }
 
 void IRPrinter::handle(const kir::Int* i) {
-  // Make sure we didn't bypass the value mapping
-  // (for example calling IRPrinter::handle() with a Int*)
-  TORCH_CHECK(
-      !follow_val_map || i == FusionGuard::getCurFusion()->loweredVal(i));
-
   if (print_inline_) {
     if (auto def = FusionGuard::getCurFusion()->origin(i)) {
       os << "( ";

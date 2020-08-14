@@ -101,8 +101,6 @@ class InputsOf : public IterVisitor {
  * The Fusion owns the whole IR graph (Vals and Exprs)
  */
 class TORCH_CUDA_API Fusion final {
-  class KernelIrMapper;
-
  public:
   Fusion() = default;
 
@@ -159,9 +157,6 @@ class TORCH_CUDA_API Fusion final {
   // Print this fusion to cout.
   void print();
 
-  // Print value mapping
-  void printValuesMap();
-
   // Print Arith exprs used in outputs
   void printMath();
 
@@ -216,20 +211,6 @@ class TORCH_CUDA_API Fusion final {
   bool hasGridReduction();
   size_t gridReductionTempBufferSize();
 
-  void setValuesMap(std::unordered_map<Val*, Val*> values_map) {
-    values_map_ = std::move(values_map);
-  }
-
-  Val* loweredVal(Val* value) const {
-    auto it = values_map_.find(value);
-    return it != values_map_.end() ? it->second : value;
-  }
-
-  const Val* loweredVal(const Val* value) const {
-    auto it = values_map_.find(const_cast<Val*>(value));
-    return it != values_map_.end() ? it->second : value;
-  }
-
   const auto& inputs() const {
     return inputs_;
   }
@@ -245,9 +226,6 @@ class TORCH_CUDA_API Fusion final {
 
   void replaceInput(Val* replace, Val* with);
   void replaceOutput(Val* replace, Val* with);
-
-  // Converts a Fusion IR value into the Kernel IR equivalent
-  Val* lowerValue(const Val* val);
 
  private:
   // Return an int that monotonically increases for each val/expr, some are
@@ -272,9 +250,6 @@ class TORCH_CUDA_API Fusion final {
   std::unordered_map<Val*, Expr*> origin_;
   std::unordered_map<Val*, std::unordered_set<Expr*>> uses_;
 
-  // Map a subset of values to the lowered equivalent (ex. sizes)
-  std::unordered_map<Val*, Val*> values_map_;
-
   // Fusion inputs and outputs
   std::vector<Val*> inputs_;
   std::vector<Val*> outputs_;
@@ -282,9 +257,6 @@ class TORCH_CUDA_API Fusion final {
   // Lowered IR
   std::unordered_set<Val*> lowered_val_set_;
   std::unordered_set<Expr*> lowered_expr_set_;
-
-  // Fusion IR node to Kernel IR node mapping
-  std::unordered_map<const Val*, Val*> kir_map_;
 };
 
 } // namespace fuser

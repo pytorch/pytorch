@@ -295,7 +295,7 @@ NvrtcFunction nvrtcCompile(
   AT_CUDA_NVRTC_CHECK(
       at::globalContext().getNVRTC().nvrtcGetPTX(program, ptx.data()));
 
-  NvrtcFunction compiled_kernel;
+  NvrtcFunction compiled_kernel_;
 
   // TODO: We do go through different code path, should investigate whether this
   // has an impact on generated binary.
@@ -343,18 +343,18 @@ NvrtcFunction nvrtcCompile(
     }
     // load compiled cubin
     AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuModuleLoadData(
-        &(compiled_kernel.module), cubin));
+        &(compiled_kernel_.module), cubin));
   } else {
     // load ptx directly
     AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuModuleLoadData(
-        &(compiled_kernel.module), ptx.data()));
+        &(compiled_kernel_.module), ptx.data()));
   }
   AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuModuleGetFunction(
-      &(compiled_kernel.function),
-      compiled_kernel.module,
+      &(compiled_kernel_.function),
+      compiled_kernel_.module,
       lowered_kernel_name));
 
-  return compiled_kernel;
+  return compiled_kernel_;
 }
 
 } // namespace executor_utils
