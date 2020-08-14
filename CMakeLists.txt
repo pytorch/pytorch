@@ -195,6 +195,7 @@ option(USE_TENSORRT "Using Nvidia TensorRT library" OFF)
 option(USE_VULKAN "Use Vulkan GPU backend" OFF)
 option(USE_VULKAN_WRAPPER "Use Vulkan wrapper" ON)
 option(USE_VULKAN_SHADERC_RUNTIME "Use Vulkan Shader compilation runtime(Needs shaderc lib)" OFF)
+option(USE_VULKAN_RELAXED_PRECISION "Use Vulklan relaxed precision(mediump)" OFF)
 option(USE_XNNPACK "Use XNNPACK" ON)
 option(USE_ZMQ "Use ZMQ" OFF)
 option(USE_ZSTD "Use ZSTD" OFF)
@@ -497,6 +498,10 @@ endif()
 
 if(USE_VULKAN_SHADERC_RUNTIME)
   string(APPEND CMAKE_CXX_FLAGS " -DUSE_VULKAN_SHADERC_RUNTIME")
+endif()
+
+if(USE_VULKAN_RELAXED_PRECISION)
+  string(APPEND CMAKE_CXX_FLAGS " -DUSE_VULKAN_RELAXED_PRECISION")
 endif()
 
 # ---[ Allowlist file if allowlist is specified

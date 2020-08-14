@@ -4,14 +4,27 @@ if(NOT USE_VULKAN)
 endif()
 
 set(VULKAN_GEN_OUTPUT_PATH "${CMAKE_BINARY_DIR}/vulkan/ATen/native/vulkan")
+set(VULKAN_GEN_ARG_ENV "")
+
+message(STATUS "XXX0 USE_VULKAN:${USE_VULKAN}")
+message(STATUS "XXX0 USE_VULKAN_RELAXED_PRECISION:${USE_VULKAN_RELAXED_PRECISION}")
+
+if(USE_VULKAN_RELAXED_PRECISION)
+  message(STATUS "XXX IF RELAXED")
+  string(APPEND VULKAN_GEN_ARG_ENV "precision=mediump")
+endif()
+
+message(STATUS "XXX ENV=${VULKAN_GEN_ARG_ENV}")
 
 if(USE_VULKAN_SHADERC_RUNTIME)
   execute_process(
     COMMAND
     "${PYTHON_EXECUTABLE}"
-    ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/vulkan/gen_glsl.py
+    ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/gen_vulkan_glsl.py
     --glsl-path ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/vulkan/glsl
     --output-path ${VULKAN_GEN_OUTPUT_PATH}
+    --tmp-dir-path=${CMAKE_BINARY_DIR}/vulkan/glsl
+    --env ${VULKAN_GEN_ARG_ENV}
     RESULT_VARIABLE error_code)
 
   if(error_code)
@@ -49,11 +62,12 @@ if(NOT USE_VULKAN_SHADERC_RUNTIME)
   execute_process(
     COMMAND
     "${PYTHON_EXECUTABLE}"
-    ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/vulkan/gen_spv.py
+    ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/gen_vulkan_spv.py
     --glsl-path ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/vulkan/glsl
     --output-path ${VULKAN_GEN_OUTPUT_PATH}
     --glslc-path=${GLSLC_PATH}
-    --tmp-spv-path=${CMAKE_BINARY_DIR}/vulkan/spv
+    --tmp-dir-path=${CMAKE_BINARY_DIR}/vulkan/spv
+    --env ${VULKAN_GEN_ARG_ENV}
     RESULT_VARIABLE error_code)
 
     if(error_code)

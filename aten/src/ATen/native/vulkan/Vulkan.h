@@ -455,9 +455,9 @@ class ComputeUnit final {
 #ifdef USE_VULKAN_SHADERC_RUNTIME
   void createComputePipelineCompile(
       const std::string& glslSrc,
-      VkPipelineCache pipelineCache,
-      VkDescriptorSetLayout descrSetLayout,
-      WorkGroupSize workGroupSize);
+      const VkPipelineCache pipelineCache,
+      const VkDescriptorSetLayout& descrSetLayout,
+      const WorkGroupSize workGroupSize);
 #endif
 
   void createCommandBuffer(VkDescriptorSet& descriptorSet);

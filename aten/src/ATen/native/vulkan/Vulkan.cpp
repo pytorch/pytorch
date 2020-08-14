@@ -832,8 +832,10 @@ void ComputeUnit::createComputePipelineCompile(
     const VkDescriptorSetLayout& descrSetLayout,
     const WorkGroupSize workGroupSize) {
   shaderc::Compiler compiler{};
-  shaderc::CompileOptions options[];
+  shaderc::CompileOptions options;
+#ifdef DEBUG
   options.SetGenerateDebugInfo();
+#endif
   options.SetTargetEnvironment(
       shaderc_target_env_vulkan, shaderc_env_version_vulkan_1_0);
   options.SetForcedVersionProfile(450, shaderc_profile_core);
