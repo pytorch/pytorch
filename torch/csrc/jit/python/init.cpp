@@ -73,6 +73,7 @@
 #include <torch/csrc/jit/runtime/jit_exception.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/print_handler.h>
+#include <torch/csrc/jit/runtime/static/init.h>
 #include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/tensorexpr/execution_counter.h>
@@ -1091,6 +1092,7 @@ void initJITBindings(PyObject* module) {
   initTreeViewBindings(module);
   initJitScriptBindings(module);
   initJitBackendBindings(module);
+  initStaticRuntimeBindings(module);
 
   setPrintHandler([](const std::string& str) {
     py::gil_scoped_acquire acquire;
