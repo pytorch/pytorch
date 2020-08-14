@@ -3866,35 +3866,10 @@ Example::
     >>> torch.max(a, 1)
     torch.return_types.max(values=tensor([0.8475, 1.1949, 1.5717, 1.0036]), indices=tensor([3, 0, 0, 1]))
 
-.. function:: max(input, other, out=None) -> Tensor
+.. function:: max(input, other, *, out=None) -> Tensor
 
-Each element of the tensor ``input`` is compared with the corresponding
-element of the tensor ``other`` and an element-wise maximum is taken.
+See :func:`torch.maximum`.
 
-The shapes of ``input`` and ``other`` don't need to match,
-but they must be :ref:`broadcastable <broadcasting-semantics>`.
-
-.. math::
-    \text{{out}}_i = \max(\text{{tensor}}_i, \text{{other}}_i)
-
-.. note:: When the shapes do not match, the shape of the returned output tensor
-          follows the :ref:`broadcasting rules <broadcasting-semantics>`.
-
-Args:
-    {input}
-    other (Tensor): the second input tensor
-    {out}
-
-Example::
-
-    >>> a = torch.randn(4)
-    >>> a
-    tensor([ 0.2942, -0.7416,  0.2653, -0.1584])
-    >>> b = torch.randn(4)
-    >>> b
-    tensor([ 0.8722, -1.7421, -0.4141, -0.5055])
-    >>> torch.max(a, b)
-    tensor([ 0.8722, -0.7416,  0.2653, -0.1584])
 """.format(**single_dim_common))
 
 add_docstr(torch.maximum, r"""
@@ -3915,9 +3890,10 @@ Keyword args:
 
 Example::
 
-    >>> torch.maximum(torch.tensor([[2.1, 1], [float('inf'), 6]]), torch.tensor([[1.2, 2], [4, float('nan')]]))
-    tensor([[2.1000, 2.0000],
-            [   inf,    nan]])
+    >>> a = torch.tensor((1, 2, -1))
+    >>> b = torch.tensor((3, 0, 4))
+    >>> torch.maximum(a, b)
+    tensor([3, 2, 4])
 """.format(**common_args))
 
 add_docstr(torch.argmax,
@@ -4078,7 +4054,7 @@ add_docstr(torch.quantile,
            r"""
 quantile(input, q) -> Tensor
 
-Returns the q-th quantiles of all elements in the :attr:`input` tensor, doing a linear 
+Returns the q-th quantiles of all elements in the :attr:`input` tensor, doing a linear
 interpolation when the q-th quantile lies between two data.
 
 Args:
@@ -4097,16 +4073,16 @@ Example::
 .. function:: quantile(input, q, dim=None, keepdim=False, *, out=None) -> Tensor
 
 Returns the q-th quantiles of each row of the :attr:`input` tensor along the dimension
-:attr:`dim`, doing a linear interpolation when the q-th quantile lies between two 
+:attr:`dim`, doing a linear interpolation when the q-th quantile lies between two
 data points. By default, :attr:`dim` is `None` resulting in the :attr:`input` tensor
 beign flattened before computation.
 
-If :attr:`q` is a 1D tensor, the first dimension of the result corresponds to the quantiles 
+If :attr:`q` is a 1D tensor, the first dimension of the result corresponds to the quantiles
 and the remaining dimensions are what remains from the reduction of the :attr:`input` tensor.
 If :attr:`q` is a scalar or scalar tensor, the result is placed in the reduced dimension.
 
-If :attr:`keepdim` is ``True``, the remaining dimensions are of the same size as 
-:attr:`input` except in the dimension :attr:`dim` where it is size 1. Otherwise, 
+If :attr:`keepdim` is ``True``, the remaining dimensions are of the same size as
+:attr:`input` except in the dimension :attr:`dim` where it is size 1. Otherwise,
 the dimension :attr:`dim` is squeezed (see :func:`torch.squeeze`).
 
 Args:
@@ -4194,36 +4170,9 @@ Example::
     >>> torch.min(a, 1)
     torch.return_types.min(values=tensor([-1.1899, -1.4644,  0.0384, -0.1153]), indices=tensor([2, 0, 1, 0]))
 
-.. function:: min(input, other, out=None) -> Tensor
+.. function:: min(input, other, *, out=None) -> Tensor
 
-Each element of the tensor :attr:`input` is compared with the corresponding
-element of the tensor :attr:`other` and an element-wise minimum is taken.
-The resulting tensor is returned.
-
-The shapes of :attr:`input` and :attr:`other` don't need to match,
-but they must be :ref:`broadcastable <broadcasting-semantics>`.
-
-.. math::
-    \text{{out}}_i = \min(\text{{tensor}}_i, \text{{other}}_i)
-
-.. note:: When the shapes do not match, the shape of the returned output tensor
-          follows the :ref:`broadcasting rules <broadcasting-semantics>`.
-
-Args:
-    {input}
-    other (Tensor): the second input tensor
-    {out}
-
-Example::
-
-    >>> a = torch.randn(4)
-    >>> a
-    tensor([ 0.8137, -1.1740, -0.6460,  0.6308])
-    >>> b = torch.randn(4)
-    >>> b
-    tensor([-0.1369,  0.1555,  0.4019, -0.1929])
-    >>> torch.min(a, b)
-    tensor([-0.1369, -1.1740, -0.6460, -0.1929])
+See :func:`torch.minimum`.
 """.format(**single_dim_common))
 
 add_docstr(torch.minimum, r"""
@@ -4244,9 +4193,10 @@ Keyword args:
 
 Example::
 
-    >>> torch.minimum(torch.tensor([[2.1, 1], [-float('inf'), 6]]), torch.tensor([[1.2, 2], [4, float('nan')]]))
-    tensor([[1.2000, 1.0000],
-            [  -inf,    nan]])
+    >>> a = torch.tensor((1, 2, -1))
+    >>> b = torch.tensor((3, 0, 4))
+    >>> torch.minimum(a, b)
+    tensor([1, 0, -1])
 """.format(**common_args))
 
 add_docstr(torch.argmin,

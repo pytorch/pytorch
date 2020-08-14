@@ -661,7 +661,7 @@
 - name: max(Tensor self) -> Tensor
   self: select_first_equal_backward(grad, self, result)
 
-- name: max.other(Tensor self, Tensor other) -> Tensor
+- name: maximum(Tensor self, Tensor other) -> Tensor
   self: grad.clone().masked_fill_(self <= other, 0)
   other: grad.clone().masked_fill_(self > other, 0)
 
@@ -697,7 +697,7 @@
 - name: min(Tensor self) -> Tensor
   self: select_first_equal_backward(grad, self, result)
 
-- name: min.other(Tensor self, Tensor other) -> Tensor
+- name: minimum(Tensor self, Tensor other) -> Tensor
   self: grad.clone().masked_fill_(self >= other, 0)
   other: grad.clone().masked_fill_(self < other, 0)
 
@@ -1091,16 +1091,6 @@
   condition: non_differentiable
   self: where(condition, grad, zeros_like(grad, at::MemoryFormat::Preserve))
   other: where(condition, zeros_like(grad, at::MemoryFormat::Preserve), grad)
-
-- name: maximum(Tensor self, Tensor other) -> Tensor
-  condition: non_differentiable
-  self: where((self != self) | ((other == other) & (self >= other)), grad, zeros_like(grad, at::MemoryFormat::Preserve))
-  other: where((self != self) | ((other == other) & (self >= other)), zeros_like(grad, at::MemoryFormat::Preserve), grad)
-
-- name: minimum(Tensor self, Tensor other) -> Tensor
-  condition: non_differentiable
-  self: where((self != self) | ((other == other) & (self < other)), grad, zeros_like(grad, at::MemoryFormat::Preserve))
-  other: where((self != self) | ((other == other) & (self < other)), zeros_like(grad, at::MemoryFormat::Preserve), grad)
 
 # weight_norm_cuda_interface_backward does not have an explicitly defined derivative, so if we do happen
 # to be running backward with create_graph=True, fall back to a backward function that uses
