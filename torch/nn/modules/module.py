@@ -157,11 +157,16 @@ def register_module_backward_hook(
     _global_backward_hooks[handle.id] = hook
     return handle
 
-
-# Trick mypy into not applying contravariance rules to inputs by defining
-# forward as a value, rather than a function.  See also
-# https://github.com/python/mypy/issues/8795
 def _forward_unimplemented(self, *input: Any) -> None:
+    r"""Defines the computation performed at every call.
+
+        Should be overridden by all subclasses.
+
+        .. note:
+            Trick mypy into not applying contravariance rules to inputs
+            by defining forward as a value, rather than a function.  See also
+            https://github.com/python/mypy/issues/8795
+    """
     raise NotImplementedError
 
 
