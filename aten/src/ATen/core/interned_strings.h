@@ -147,8 +147,12 @@ namespace c10 {
   _(aten, clamp_)                    \
   _(aten, clip)                      \
   _(aten, clip_)                     \
+  _(aten, degrees)                   \
+  _(aten, degrees_)                  \
   _(aten, det)                       \
   _(aten, linalg_det)                \
+  _(aten, rad2deg)                   \
+  _(aten, rad2deg_)                  \
   _(aten, append)                    \
   _(aten, item)                      \
   _(aten, format)                    \

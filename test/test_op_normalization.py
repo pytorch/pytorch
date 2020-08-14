@@ -40,7 +40,9 @@ alias_infos = (
     AliasInfo('linalg.det', torch.linalg.det, 'det',
               torch.randn(10, 10), decorators=(skipCPUIfNoLapack, skipCUDAIfNoMagma)),
     AliasInfo('outer', torch.outer, 'ger',
-              torch.randn(20), args=(torch.randn(20),))
+              torch.randn(20), args=(torch.randn(20),)),
+    AliasInfo('degrees', torch.degrees, 'rad2deg', torch.randn(20)),
+    AliasInfo('degrees_', torch.Tensor.degrees_, 'rad2deg_', torch.randn(20)),
 )
 
 # Placeholder test class for validating that aliases are correctly

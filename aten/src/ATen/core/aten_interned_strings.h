@@ -290,8 +290,6 @@ _(aten, cumsum) \
 _(aten, data_ptr) \
 _(aten, deg2rad) \
 _(aten, deg2rad_) \
-_(aten, degrees) \
-_(aten, degrees_) \
 _(aten, detach) \
 _(aten, diag) \
 _(aten, diag_embed) \
@@ -563,8 +561,6 @@ _(aten, prod) \
 _(aten, put) \
 _(aten, qr) \
 _(aten, quantile) \
-_(aten, rad2deg) \
-_(aten, rad2deg_) \
 _(aten, rand) \
 _(aten, rand_like) \
 _(aten, randint) \

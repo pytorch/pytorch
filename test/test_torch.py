@@ -19964,7 +19964,7 @@ tensor_op_tests = [
         lambda t, d: [], 1e-2, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
     ('rad2deg', '', _small_3d, lambda t, d: [], 1e-1, 1e-0, 1e-5, _float_types2, [torch.bfloat16]),
     ('deg2rad', '', _small_3d, lambda t, d: [], 1e-1, 1e-1, 1e-5, _float_types2, [torch.bfloat16]),
-    ('degrees', '', _small_3d, lambda t, d: [], 1e-1, 1e-1, 1e-5, _float_types2, [torch.bfloat16]),
+    ('degrees', '', _small_3d, lambda t, d: [], 1e-1, 1e-0, 1e-5, _float_types2, [torch.bfloat16]),
     ('reciprocal', '', _small_3d, lambda t, d: [], 1e-1, 1e-1, 1e-5, _float_types2, [torch.bfloat16]),
     ('floor', '', _small_3d, lambda t, d: [], 1e-5, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
     ('frac', '', _small_3d, lambda t, d: [], 1e-5, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
