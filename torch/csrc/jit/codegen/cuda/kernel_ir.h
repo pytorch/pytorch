@@ -302,8 +302,6 @@ class TORCH_CUDA_API TensorDomain : public Val {
 
 class TORCH_CUDA_API TensorView : public Val {
  public:
-  TensorView(TensorDomain* domain, DataType dtype);
-
   explicit TensorView(const fuser::TensorView* tv);
 
   TensorView(const TensorView* src, IrCloner* ir_cloner);

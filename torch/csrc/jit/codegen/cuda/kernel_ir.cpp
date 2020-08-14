@@ -173,9 +173,6 @@ std::vector<IterDomain*> TensorDomain::noBroadcasts(
   return no_broadcast_domains;
 }
 
-TensorView::TensorView(TensorDomain* domain, DataType dtype)
-    : Val(ValType::KirTensorView, dtype, true, true), domain_(domain) {}
-
 TensorView::TensorView(const fuser::TensorView* tv) : Val(tv), fuser_tv_(tv) {
   domain_ = lowerValue(tv->domain())->as<TensorDomain>();
   memory_type_ = tv->getMemoryType();
@@ -184,7 +181,8 @@ TensorView::TensorView(const fuser::TensorView* tv) : Val(tv), fuser_tv_(tv) {
 TensorView::TensorView(const TensorView* src, IrCloner* ir_cloner)
     : Val(src, ir_cloner),
       domain_(ir_cloner->clone(src->domain_)),
-      memory_type_(src->memory_type_) {}
+      memory_type_(src->memory_type_),
+      fuser_tv_(src->fuser_tv_) {}
 
 UnaryOp::UnaryOp(UnaryOpType type, Val* out, Val* in)
     : Expr(ExprType::KirUnaryOp), unary_op_type_{type}, out_{out}, in_{in} {

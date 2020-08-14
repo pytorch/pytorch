@@ -107,6 +107,16 @@ static const char* expr_type2string(ExprType t) {
       return "Split";
     case ExprType::Merge:
       return "Merge";
+    case ExprType::KirUnaryOp:
+      return "KirUnaryOp";
+    case ExprType::KirBinaryOp:
+      return "KirBinaryOp";
+    case ExprType::KirTernaryOp:
+      return "KirTernaryOp";
+    case ExprType::KirReductionOp:
+      return "KirReductionOp";
+    case ExprType::KirBroadcastOp:
+      return "KirBroadcastOp";
     default:
       break;
   }
