@@ -496,6 +496,13 @@ def script_rpc_sync_call(
     res = rpc.rpc_sync(dst_worker_name, two_args_two_kwargs, args, kwargs)
     return res
 
+@torch.jit.script
+def script_rpc_remote_call(
+    dst_worker_name: str, args: Tuple[Tensor, Tensor], kwargs: Dict[str, Tensor]
+):
+    rref_res = rpc.remote(dst_worker_name, two_args_two_kwargs, args, kwargs)
+    return rref_res.to_here()
+
 class JitRpcOpTest:
     # Call functions remotely from Script.
     @dist_init
@@ -508,7 +515,7 @@ class JitRpcOpTest:
         args = (torch.tensor([1, 1]), torch.tensor([2, 2]))
         kwargs = {}
 
-        for script_op in [script_rpc_async_call, script_rpc_sync_call]:
+        for script_op in [script_rpc_async_call, script_rpc_sync_call, script_rpc_remote_call]:
             ret = script_op(
                 dst_worker_name, args, kwargs
             )
