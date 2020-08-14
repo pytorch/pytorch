@@ -2435,7 +2435,6 @@ class RpcTest(RpcAgentTestFixture):
             self.assertTrue(_thread_local_var.future_list == [])
             dst = worker_name((self.rank + 1) % self.world_size)
             fut = rpc.rpc_async(dst, torch.add, (torch.ones(2, 2), 1))
-            self.assertFalse(fut.done())
             self.assertTrue(len(_thread_local_var.future_list) == 1)
             self.assertTrue(isinstance(_thread_local_var.future_list[0], torch._C.Future))
         self.assertTrue(fut.done())

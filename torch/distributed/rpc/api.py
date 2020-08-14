@@ -145,7 +145,7 @@ _thread_local_var = threading.local()
 @contextlib.contextmanager
 def wait_all():
     r"""
-    A context manager that collects all futures returned by rpc_async and
+    A context manager that collects all futures returned by ``rpc_async`` and
     waits them on the context manager's exit; relieving the user of needing
     to explicitly call wait.
 
