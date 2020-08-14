@@ -856,7 +856,7 @@ class JitRpcTest(
     RRefAPITest,
     RRefTypingTest,
     LocalRRefTest,
-    JitRpcAsyncOpTest,
+    JitRpcOpTest,
     FutureTypingTest,
     RpcAgentTestFixture,
 ):

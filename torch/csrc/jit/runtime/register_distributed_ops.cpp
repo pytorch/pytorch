@@ -126,15 +126,14 @@ void prepare_and_call_rpc_op(
   // Get RPC timeout, if specified by user.
   const auto rpcTimeout = timeoutIValue.toDouble();
 
-  if (rpc_op == "rpc_async" || rpc_op == "rpc_sync") {
+  if (rpc_op == "rpc_async") {
     // Send RPC request.
     auto futureIValuePtr = dist_rpc::rpcTorchscript(
         dstWorkerNameStr,
         qualifiedName,
         functionSchema,
         userCallableStack,
-        rpcTimeout,
-        /*isAsyncExecution=*/true);
+        rpcTimeout);
     // Push output to the stack.
     drop(stack, num_inputs);
     stack->emplace_back(std::move(futureIValuePtr));
@@ -145,8 +144,7 @@ void prepare_and_call_rpc_op(
         qualifiedName,
         functionSchema,
         userCallableStack,
-        rpcTimeout,
-        /*isAsyncExecution=*/false);
+        rpcTimeout);
     futureIValuePtr->wait();
     auto res = futureIValuePtr->value();
     // Push output to the stack.
