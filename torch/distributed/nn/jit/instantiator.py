@@ -41,10 +41,7 @@ def get_arg_return_types_from_interface(module_interface):
         arg_str_list.append(argument.name)
 
         if argument.has_default_value():
-            if isinstance(argument.default_value, str):
-                default_value_str = " = \"{}\"".format(argument.default_value)
-            else:
-                default_value_str = " = {}".format(argument.default_value)
+            default_value_str = " = {}".format(argument.default)
         else:
             default_value_str = ""
         arg_type_str = "{name}: {type}{default_value}".format(

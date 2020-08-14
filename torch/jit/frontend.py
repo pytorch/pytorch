@@ -128,7 +128,7 @@ def build_stmts(ctx, stmts):
     return list(filter(None, stmts))
 
 
-def get_jit_class_def(cls, self_name):
+def get_jit_class_def(cls, self_name, parse_defaults=False):
     # Get defs for each method within the current class independently
     # TODO: proper overriding analysis when implementing class inheritance
     methods = inspect.getmembers(
@@ -140,7 +140,7 @@ def get_jit_class_def(cls, self_name):
     method_defs = [get_jit_def(method[1],
                                method[0],
                                self_name=self_name,
-                               parse_defaults=True) for method in methods]
+                               parse_defaults=parse_defaults) for method in methods]
 
     sourcelines, file_lineno, filename = get_source_lines_and_file(cls, torch._C.ErrorReport.call_stack())
     source = ''.join(sourcelines)
