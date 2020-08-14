@@ -2615,8 +2615,6 @@ void dequantize_per_channel_affine_kernel(
     int64_t channel = rtensor.size(axis);
     auto scales_data = scales.data_ptr<T>();
     auto zero_points_data = zero_points.data_ptr<N>();
-    const auto* qd = qtensor.data_ptr<Q>();
-    float* rd = rtensor.data_ptr<float>();
     TORCH_CHECK(
         qtensor.is_contiguous(qtensor.suggest_memory_format()),
         "Quantized tensor should be contiguous");
@@ -2624,7 +2622,7 @@ void dequantize_per_channel_affine_kernel(
         rtensor.is_contiguous(qtensor.suggest_memory_format()),
         "Float tensor should be contiguous "
         "in same memory format as quantizd tensor");
-    const auto* qd = qtensor.data_ptr<scalar_t>();
+    const auto* qd = qtensor.data_ptr<Q>();
     float* rd = rtensor.data_ptr<float>();
     if (rtensor.is_contiguous(MemoryFormat::ChannelsLast) ||
         rtensor.is_contiguous(MemoryFormat::ChannelsLast3d)) {

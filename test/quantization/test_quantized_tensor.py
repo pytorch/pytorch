@@ -20,6 +20,19 @@ class Foo(torch.nn.Module):
         super(Foo, self).__init__()
         self.qscheme = torch.per_tensor_symmetric
 
+def _quantize_per_channel_ref_nd(data, scales, zero_points):
+    dims = data.size()
+    data = data.view(-1, dims[1], np.prod(dims[2:]))
+    res = torch.empty_like(data)
+    quant_min, quant_max = 0, 255
+    for i in range(res.size()[0]):
+        for j in range(res.size()[1]):
+            for k in range(res.size()[2]):
+                res[i][j][k] = \
+                    np.clip(np.round(data[i][j][k] / scales[j]) + zero_points[j], quant_min, quant_max)
+    res = res.view(*dims)
+    return res
+
 def _calculate_dynamic_qparams(X, dtype, reduce_range=False):
     """Calculate the dynamic quantization parameters (scale, zero_point)
     according to the min and max element of the tensor"""
@@ -244,19 +257,6 @@ class TestQuantizedTensor(TestCase):
         self.assertTrue(np.allclose(qr.int_repr(), quantize_c(r, scales, zero_points)))
         self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / np.min(scales.numpy())))
 
-        def quantize_c_nd(data, scales, zero_points):
-            dims = data.size()
-            data = data.view(-1, dims[1], np.prod(dims[2:]))
-            res = torch.empty_like(data)
-            quant_min, quant_max = 0, 255
-            for i in range(res.size()[0]):
-                for j in range(res.size()[1]):
-                    for k in range(res.size()[2]):
-                        res[i][j][k] = \
-                            np.clip(np.round(data[i][j][k] / scales[j]) + zero_points[j], quant_min, quant_max)
-            res = res.view(*dims)
-            return res
-
         # Check 4D tensor with 2 different memory formats.
         r = torch.rand(3, 2, 4, 5, dtype=torch.float) * 4 - 2
         scales = torch.tensor([0.2, 0.03], dtype=torch.double)
@@ -264,7 +264,7 @@ class TestQuantizedTensor(TestCase):
         axis = 1
 
         for memory_format in [torch.contiguous_format, torch.channels_last]:
-            ref_res = quantize_c_nd(r, scales, zero_points)
+            ref_res = _quantize_per_channel_ref_nd(r, scales, zero_points)
             r = r.contiguous(memory_format=memory_format)
             qr = torch.quantize_per_channel(r, scales, zero_points, axis, torch.quint8)
             rqr = qr.dequantize()
@@ -278,7 +278,7 @@ class TestQuantizedTensor(TestCase):
         axis = 1
 
         for memory_format in [torch.contiguous_format, torch.channels_last_3d]:
-            ref_res = quantize_c_nd(r, scales, zero_points)
+            ref_res = _quantize_per_channel_ref_nd(r, scales, zero_points)
             r = r.contiguous(memory_format=memory_format)
             qr = torch.quantize_per_channel(r, scales, zero_points, axis, torch.quint8)
             rqr = qr.dequantize()
@@ -306,6 +306,28 @@ class TestQuantizedTensor(TestCase):
         ref = quantize_ref(r, scales, zero_points)
         self.assertTrue(np.allclose(qr.int_repr(), ref))
         self.assertTrue(np.allclose(r.numpy(), dequant_tensor.numpy(), atol=1))
+
+        # Check 4D tensor with 2 different memory formats.
+        r = torch.rand(3, 2, 4, 5, dtype=torch.float) * 4 - 2
+
+        for memory_format in [torch.contiguous_format, torch.channels_last]:
+            ref_res = _quantize_per_channel_ref_nd(r, scales, zero_points)
+            r = r.contiguous(memory_format=memory_format)
+            qr = torch.quantize_per_channel(r, scales, zero_points, axis, torch.quint8)
+            rqr = qr.dequantize()
+            self.assertTrue(np.allclose(qr.int_repr(), ref_res))
+            self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / np.min(scales.numpy())))
+
+        # Check 5D tensor.
+        r = torch.rand(3, 2, 4, 5, 7, dtype=torch.float) * 4 - 2
+
+        for memory_format in [torch.contiguous_format, torch.channels_last_3d]:
+            ref_res = _quantize_per_channel_ref_nd(r, scales, zero_points)
+            r = r.contiguous(memory_format=memory_format)
+            qr = torch.quantize_per_channel(r, scales, zero_points, axis, torch.quint8)
+            rqr = qr.dequantize()
+            self.assertTrue(np.allclose(qr.int_repr(), ref_res))
+            self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / np.min(scales.numpy())))
 
     def test_qtensor_permute(self):
         scale = 0.02

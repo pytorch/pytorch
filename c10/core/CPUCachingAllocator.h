@@ -12,7 +12,7 @@
 
 namespace c10 {
 
-class CPUCachingAllocator {
+class C10_API CPUCachingAllocator {
   /*
    * What it does:
    * Caches all the allocations carried out by this allocator.
@@ -47,7 +47,6 @@ class CPUCachingAllocator {
     void free_cached();
   public:
     static void record_free(void* ptr);
-    CPUCachingAllocator() = default;
     // Checks the cache to see if allocation of size bytes can be found.
     // If so return cached memory, else
     // allocates memory, records it for caching and returns.
