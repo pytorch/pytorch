@@ -457,9 +457,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
 
   // Base class: torch.distributed.rpc.RpcBackendOptions.
   py::class_<TensorPipeRpcBackendOptions>(
-      module,
-      "_TensorPipeRpcBackendOptionsBase",
-      rpcBackendOptions)
+      module, "_TensorPipeRpcBackendOptionsBase", rpcBackendOptions)
       .def(
           py::init<
               int,
@@ -487,9 +485,7 @@ PyObject* rpc_init(PyObject* /* unused */) {
           "device_maps",
           &TensorPipeRpcBackendOptions::deviceMaps,
           R"(The device map locations.)")
-      .def(
-          "set_device_map",
-          &TensorPipeRpcBackendOptions::setDeviceMap);
+      .def("set_device_map", &TensorPipeRpcBackendOptions::setDeviceMap);
 
   module.attr("_DEFAULT_NUM_WORKER_THREADS") =
       py::cast(kDefaultNumWorkerThreads);

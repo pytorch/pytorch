@@ -42,7 +42,6 @@ namespace rpc {
 using steady_clock_time_point =
     std::chrono::time_point<std::chrono::steady_clock>;
 
-
 struct TransportRegistration {
   std::shared_ptr<tensorpipe::transport::Context> transport;
   int64_t priority;
@@ -98,7 +97,8 @@ struct TensorPipeRpcBackendOptions : public RpcBackendOptions {
   }
 
   void setDeviceMap(
-      const std::string& workerName, const tensorpipe::DeviceMap& deviceMap) {
+      const std::string& workerName,
+      const tensorpipe::DeviceMap& deviceMap) {
     auto iter = deviceMaps.find(workerName);
     if (iter == deviceMaps.end()) {
       deviceMaps[workerName] = deviceMap;
