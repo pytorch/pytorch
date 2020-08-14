@@ -1,10 +1,21 @@
 #pragma once
-#include <torch/csrc/jit/api/module.h>
+#include <ATen/ATen.h>
 #include <iostream>
 #include <vector>
 namespace torchpy {
+
+class PyModule {
+ public:
+  PyModule() {}
+  ~PyModule() {}
+
+  at::Tensor forward(std::vector<at::Tensor> inputs);
+
+ private:
+};
+
 void init();
 std::string hello();
-torch::jit::Module load(const std::string& filename);
-std::vector<torch::jit::IValue> inputs(std::vector<int64_t> shape);
+PyModule load(const std::string& filename);
+std::vector<at::Tensor> inputs(std::vector<int64_t> shape);
 }

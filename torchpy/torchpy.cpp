@@ -1,6 +1,7 @@
 #include <torchpy.h>
 #include <Python.h>
 #include <assert.h>
+#include <stdio.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/script.h>
 #include <torch/torch.h>
@@ -44,13 +45,41 @@ std::string torchpy::hello() {
   return result;
 }
 
-torch::jit::Module torchpy::load(const std::string& filename) {
-  return torch::jit::load(filename);
+torchpy::PyModule torchpy::load(const std::string& filename) {
+  Py_Initialize();
+
+  PyObject* globals = PyDict_New();
+  assert(PyDict_Check(globals) == true);
+  PyObject* builtins = PyEval_GetBuiltins();
+  assert(NULL != builtins);
+  PyDict_SetItemString(globals, "__builtins__", builtins);
+  FILE* fp = fopen("torchpy/loader.py", "r");
+  // const char *filename = "loader.py";
+  PyRun_File(fp, "loader.py", Py_file_input, globals, globals);
+
+  PyObject* load = PyDict_GetItemString(globals, "load");
+  assert(PyFunction_Check(load) == true);
+
+  PyObject* args = Py_BuildValue("(s)", filename.c_str());
+  PyObject* pyresult = PyObject_CallObject(load, args);
+  assert(NULL != pyresult);
+  // auto c_str = PyUnicode_AsUTF8(pyresult);
+  // assert(NULL != c_str);
+  // auto result = std::string(c_str);
+
+  Py_Finalize();
+  // return result;
+  auto mod = PyModule();
+  return mod;
 }
 
-std::vector<torch::jit::IValue> torchpy::inputs(std::vector<int64_t> shape) {
-  std::vector<torch::jit::IValue> inputs;
+std::vector<at::Tensor> torchpy::inputs(std::vector<int64_t> shape) {
+  std::vector<at::Tensor> inputs;
   auto at_shape = at::IntArrayRef(shape);
   inputs.push_back(torch::ones(at_shape));
   return inputs;
+}
+
+at::Tensor torchpy::PyModule::forward(std::vector<at::Tensor> inputs) {
+  return inputs.at(0);
 }
