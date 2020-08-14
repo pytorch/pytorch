@@ -17,7 +17,7 @@ def exec_with_source(src, globals):
 
 # patch linecache so that any code we exec using exec_with_source
 # works with inspect
-_eval_cache : Dict[str, List[str]]= {}
+_eval_cache : Dict[str, List[str]] = {}
 _orig_getlines = linecache.getlines
 def patched_getline(*args, **kwargs):
     if args[0] in _eval_cache:
@@ -33,7 +33,7 @@ class GraphModule(torch.nn.Module):
         # it is a subclass of the user-defined class, the only difference
         # is an extra layer to install the forward method
 
-        class GraphModuleImpl(cls): # type: ignore
+        class GraphModuleImpl(cls):  # type: ignore
             pass
         return super().__new__(GraphModuleImpl)
 

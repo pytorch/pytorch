@@ -48,7 +48,7 @@ class Proxy:
         assert calling_frame is not None
         inst = list(dis.get_instructions(calling_frame.f_code))[calling_frame.f_lasti // 2]
         if inst.opname == 'UNPACK_SEQUENCE':
-            return (self[i] for i in range(inst.argval)) # type: ignore
+            return (self[i] for i in range(inst.argval))  # type: ignore
         self._no_control_flow()
 
     def _no_control_flow(self):
@@ -96,14 +96,14 @@ for method in magic_methods:
     scope(method)
 
 def _define_reflectable(orig_method_name):
-        method_name = f'__r{orig_method_name}__'
+    method_name = f'__r{orig_method_name}__'
 
-        def impl(self, rhs):
-            target = getattr(operator, orig_method_name)
-            return _create_proxy(self.delegate, 'call_function', target, [rhs, self], {})
-        impl.__name__ = method_name
-        impl.__qualname__ = method_name
-        setattr(Proxy, method_name, impl)
-    
+    def impl(self, rhs):
+        target = getattr(operator, orig_method_name)
+        return _create_proxy(self.delegate, 'call_function', target, [rhs, self], {})
+    impl.__name__ = method_name
+    impl.__qualname__ = method_name
+    setattr(Proxy, method_name, impl)
+
 for orig_method_name in reflectable_magic_methods:
     _define_reflectable(orig_method_name)
