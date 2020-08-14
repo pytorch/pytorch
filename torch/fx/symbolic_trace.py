@@ -79,12 +79,7 @@ class DelegateBase:
         elif isinstance(a, slice):
             return slice(self.create_arg(a.start), self.create_arg(a.stop), self.create_arg(a.step))
 
-        if isinstance(a, torch.nn.Parameter):
-            for n, p in self.root.named_parameters():
-                if a is p:
-                    return self.graph.get_param(n)
-            raise NameError('parameter is not a member of this module')
-        elif isinstance(a, Proxy):
+        if isinstance(a, Proxy):
             # base case: we unwrap the Proxy object
             return a.node
         elif isinstance(a, (str, int, float, bool, torch.dtype, torch.Tensor)) or a is None:
@@ -98,7 +93,11 @@ class DefaultDelegate(DelegateBase):
         super().__init__(graph)
         self.root = root
 
-    def create_arg(self, a):        
+    def create_arg(self, a):
+        # The base delegate is used to construct Graphs when there is no associated
+        # module hierarchy, so it can never create parameter references.
+        # The default delegate adds the ability to refer to parameters when
+        # tracing modules.
         if isinstance(a, torch.nn.Parameter):
             for n, p in self.root.named_parameters():
                 if a is p:

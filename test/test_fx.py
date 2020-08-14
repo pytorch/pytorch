@@ -146,7 +146,6 @@ class TestFX(TestCase):
         g.output((t + t).node)
         gm = GraphModule(m, g)
         self.assertEqual(gm(3, 4), 14)
-        
 
 
 if __name__ == '__main__':
