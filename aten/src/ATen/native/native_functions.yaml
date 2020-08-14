@@ -848,6 +848,18 @@
   use_c10_dispatcher: full
   device_guard: False
 
+- func: complex(Tensor real, Tensor imag) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+
+- func: complex.out(Tensor real, Tensor imag, *, Tensor(a!) out) -> Tensor(a!)
+
+- func: polar(Tensor abs, Tensor angle) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+
+- func: polar.out(Tensor abs, Tensor angle, *, Tensor(a!) out) -> Tensor(a!)
+
 - func: constant_pad_nd(Tensor self, int[] pad, Scalar value=0) -> Tensor
   use_c10_dispatcher: full
   variants: function

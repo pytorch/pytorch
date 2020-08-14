@@ -73,6 +73,8 @@ Creation Ops
     quantize_per_tensor
     quantize_per_channel
     dequantize
+    complex
+    polar
 
 Indexing, Slicing, Joining, Mutating Ops
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

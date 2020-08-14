@@ -329,6 +329,14 @@
 - name: coalesce(Tensor self) -> Tensor
   self: grad
 
+- name: complex(Tensor real, Tensor imag) -> Tensor
+  real: not_implemented("complex real")
+  imag: not_implemented("complex imag")
+
+- name: polar(Tensor abs, Tensor angle) -> Tensor
+  abs: not_implemented("polar abs")
+  angle: not_implemented("polar angle")
+
 - name: conj(Tensor self) -> Tensor
   self: grad.conj()
 
