@@ -40,7 +40,7 @@ class Proxy:
         return Attribute(self, k)
 
     def __call__(self, *args, **kwargs):
-        return _create_proxy(delegate, 'call_method', '__call__', [self] + args, kwargs)
+        return _create_proxy(self.delegate, 'call_method', '__call__', [self] + args, kwargs)
 
     def __iter__(self):
         frame = inspect.currentframe()
