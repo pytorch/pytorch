@@ -1017,18 +1017,14 @@ class TestClassType(JitTestCase):
         """
         Test that methods on class types can have default arguments.
         """
-        default_b = [1, 2, 3]
-        default_c = (1, 2, 3)
-        default_d = {1: 2}
-
         @torch.jit.script
         class ClassWithDefaultArgs:
             def __init__(
                 self,
                 a: int = 1,
-                b: List[int] = default_b,
-                c: Tuple[int, int, int] = default_c,
-                d: Dict[int, int] = default_d,
+                b: List[int] = [1, 2, 3],
+                c: Tuple[int, int, int] = (1, 2, 3),
+                d: Dict[int, int] = {1: 2},
                 e: Optional[str] = None,
             ):
                 self.a = a

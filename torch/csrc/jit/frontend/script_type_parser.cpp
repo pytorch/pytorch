@@ -217,6 +217,32 @@ TypePtr ScriptTypeParser::parseType(const std::string& str) {
   return parseTypeFromExpr(p.parseExp());
 }
 
+bool checkMutableFunctionDefault(const IValue& def) {
+  if (def.isList() && def.isGenericDict()) {
+    return true;
+  }
+
+  if (def.isTuple()) {
+    for (auto& elem : def.toTuple()->elements()) {
+      return checkMutableFunctionDefault(elem);
+    }
+  }
+
+  return false;
+}
+
+void checkMutableFunctionDefaults(
+    const SourceRange& range,
+    const std::vector<IValue>& defaults) {
+  for (auto& def : defaults) {
+    if (checkMutableFunctionDefault(def)) {
+        throw ErrorReport(range) << "Mutable default parameters are not supported because Python binds them to the function"
+        << " and they persist across function calls.\n As a workaround, make the default None and instantiate"
+        << " the default parameter within the body of the function.";
+    }
+  }
+}
+
 std::vector<IValue> ScriptTypeParser::evaluateDefaults(
     const SourceRange& r,
     const std::vector<Expr>& default_types,
@@ -254,7 +280,9 @@ std::vector<IValue> ScriptTypeParser::evaluateDefaults(
   // recursively initialize stuff in DecomposeOps.
   GraphOptimizerEnabledGuard guard(false);
   cu.get_function(def.name().name()).run(stack);
-  return stack.at(0).toTuple()->elements();
+  auto defaults = stack.at(0).toTuple()->elements();
+  checkMutableFunctionDefaults(r, defaults);
+  return defaults;
 }
 
 std::vector<Argument> ScriptTypeParser::parseArgsFromDecl(
