@@ -149,10 +149,20 @@ IValue ScriptModuleDeserializer::readArchive(const std::string& archive_name) {
     size_t n = cls->numAttributes();
     if (checkHasValidSetGetState(cls)) {
       auto obj = c10::ivalue::Object::create(type, n);
+
+      // not for land, just debugging at this point
+      IValue inputToUse = input;
+      if (cls->hasMethod("convertLegacyFormat")) {
+        Function& convertLegacyFormat = cls->getMethod("convertLegacyFormat");
+        auto convertedInput = convertLegacyFormat({input});
+        inputToUse = convertedInput;
+      }
+
       // XXX: Do not optimize __setstate__, so that we don't try to
       // specialize the class before it is initialized.
       GraphOptimizerEnabledGuard guard(false);
       Function& set_state = cls->getMethod("__setstate__");
+      // Function& set_state = cls->getMethod(setStateName);
       // since we are in the middle of unpickling we might still have lists and
       // dicts that do not have accurate tags (e.g. they report they are
       // List[Any]). But we need to run __setstate__ which will check the input
@@ -161,8 +171,10 @@ IValue ScriptModuleDeserializer::readArchive(const std::string& archive_name) {
       // to the state object being passed.
       // TODO: Remove once [serialization type tags] is landed
       restoreAccurateTypeTags(
-          input, set_state.getSchema().arguments().at(1).type());
-      set_state({obj, input});
+          // input, set_state.getSchema().arguments().at(1).type());
+          inputToUse, set_state.getSchema().arguments().at(1).type());
+      // set_state({obj, input});
+      set_state({obj, inputToUse});
       postSetStateValidate(obj);
       return obj;
     } else {
