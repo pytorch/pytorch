@@ -1386,6 +1386,26 @@ ger(vec2) -> Tensor
 See :func:`torch.ger`
 """)
 
+add_docstr_all('outer', r"""
+outer(vec2) -> Tensor
+
+See :func:`torch.outer`.
+""")
+
+add_docstr_all('hypot',
+               r"""
+hypot(other) -> Tensor
+
+See :func:`torch.hypot`
+""")
+
+add_docstr_all('hypot_',
+               r"""
+hypot_(other) -> Tensor
+
+In-place version of :meth:`~Tensor.hypot`
+""")
+
 add_docstr_all('indices',
                r"""
 indices() -> Tensor
@@ -2301,6 +2321,13 @@ qscheme() -> torch.qscheme
 Returns the quantization scheme of a given QTensor.
 """)
 
+add_docstr_all('quantile',
+               r"""
+quantile(q, dim=None, keepdim=False) -> Tensor
+
+See :func:`torch.quantile`
+""")
+
 add_docstr_all('q_scale',
                r"""
 q_scale() -> float
@@ -3056,6 +3083,13 @@ add_docstr_all('sum',
 sum(dim=None, keepdim=False, dtype=None) -> Tensor
 
 See :func:`torch.sum`
+""")
+
+add_docstr_all('nansum',
+               r"""
+nansum(dim=None, keepdim=False, dtype=None) -> Tensor
+
+See :func:`torch.nansum`
 """)
 
 add_docstr_all('svd',
