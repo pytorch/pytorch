@@ -1689,11 +1689,11 @@ void testProfiler() {
   is.run(stack);
 
   // profiled types are stored as attributes and show up in the dump, e.g.
-  // Tensor = prim::profile[profiled_type=Float(4:512, 512:1, requires_grad=0,
-  // device=cpu)]
+  // Tensor = prim::profile[profiled_type=Double(4:256, 256:1, requires_grad=0,
+  // device=cpu)
   testing::FileCheck()
       .check("Tensor = prim::profile[profiled_type")
-      ->check_same("512")
+      ->check_same("256")
       ->run(*pr->profiled_graph_);
 
   auto begin = pr->profiled_graph_->block()->nodes().begin();
