@@ -1,5 +1,5 @@
 import torch
-from .optimizer import Optimizer
+from .optimizer import Optimizer, _params_t
 
 
 class Adagrad(Optimizer):
@@ -21,7 +21,10 @@ class Adagrad(Optimizer):
         Optimization: http://jmlr.org/papers/v12/duchi11a.html
     """
 
-    def __init__(self, params, lr=1e-2, lr_decay=0, weight_decay=0, initial_accumulator_value=0, eps=1e-10):
+    def __init__(self, params: _params_t, lr: float = 1e-2,
+                 lr_decay: float = 0., weight_decay: float = 0.,
+                 initial_accumulator_value: float = 0.,
+                 eps: float = 1e-10) -> None:
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= lr_decay:

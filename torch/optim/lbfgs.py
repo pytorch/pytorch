@@ -1,6 +1,8 @@
 import torch
 from functools import reduce
-from .optimizer import Optimizer
+from typing import Tuple, Optional
+
+from .optimizer import Optimizer, _params_t
 
 
 def _cubic_interpolate(x1, f1, g1, x2, f2, g2, bounds=None):
@@ -212,14 +214,14 @@ class LBFGS(Optimizer):
     """
 
     def __init__(self,
-                 params,
-                 lr=1,
-                 max_iter=20,
-                 max_eval=None,
-                 tolerance_grad=1e-7,
-                 tolerance_change=1e-9,
-                 history_size=100,
-                 line_search_fn=None):
+                 params: _params_t,
+                 lr: float = 1,
+                 max_iter: int = 20,
+                 max_eval: Optional[int]=None,
+                 tolerance_grad: float = 1e-7,
+                 tolerance_change: float = 1e-9,
+                 history_size: int = 100,
+                 line_search_fn: Optional[str] = None) -> None:
         if max_eval is None:
             max_eval = max_iter * 5 // 4
         defaults = dict(

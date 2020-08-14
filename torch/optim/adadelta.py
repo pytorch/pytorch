@@ -1,6 +1,5 @@
 import torch
-
-from .optimizer import Optimizer
+from .optimizer import Optimizer, _params_t
 
 
 class Adadelta(Optimizer):
@@ -22,7 +21,8 @@ class Adadelta(Optimizer):
     __ https://arxiv.org/abs/1212.5701
     """
 
-    def __init__(self, params, lr=1.0, rho=0.9, eps=1e-6, weight_decay=0):
+    def __init__(self, params: _params_t, lr: float = 1.0, rho: float = 0.9,
+                 eps: float = 1e-6, weight_decay: float = 0.) -> None:
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= rho <= 1.0:

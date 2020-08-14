@@ -1,6 +1,6 @@
 import math
 import torch
-from .optimizer import Optimizer
+from .optimizer import Optimizer, _params_t
 
 
 class ASGD(Optimizer):
@@ -22,7 +22,9 @@ class ASGD(Optimizer):
         https://dl.acm.org/citation.cfm?id=131098
     """
 
-    def __init__(self, params, lr=1e-2, lambd=1e-4, alpha=0.75, t0=1e6, weight_decay=0):
+    def __init__(self, params: _params_t, lr: float = 1e-2, lambd: float = 1e-4,
+                 alpha: float = 0.75, t0: float =1e6,
+                 weight_decay: float = 0.) -> None:
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= weight_decay:

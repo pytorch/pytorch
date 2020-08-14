@@ -20,6 +20,12 @@ from .lbfgs import LBFGS
 from . import lr_scheduler
 from . import swa_utils
 
+
+__all__ = ['ASGD', 'Adadelta', 'Adagrad', 'Adam', 'AdamW', 'Adamax',
+           'LBFGS', 'Optimizer', 'RMSprop', 'Rprop', 'SGD', 'SparseAdam',
+           'lr_scheduler', 'swa_utils']
+
+
 del adadelta
 del adagrad
 del adam

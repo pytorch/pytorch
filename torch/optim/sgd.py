@@ -1,5 +1,5 @@
 import torch
-from .optimizer import Optimizer, required
+from .optimizer import Optimizer, required, _params_t
 
 
 class SGD(Optimizer):
@@ -37,7 +37,7 @@ class SGD(Optimizer):
                 p_{t+1} & = p_{t} - \text{lr} * v_{t+1},
             \end{aligned}
 
-        where :math:`p`, :math:`g`, :math:`v` and :math:`\mu` denote the 
+        where :math:`p`, :math:`g`, :math:`v` and :math:`\mu` denote the
         parameters, gradient, velocity, and momentum respectively.
 
         This is in contrast to Sutskever et. al. and
@@ -52,8 +52,9 @@ class SGD(Optimizer):
         The Nesterov version is analogously modified.
     """
 
-    def __init__(self, params, lr=required, momentum=0, dampening=0,
-                 weight_decay=0, nesterov=False):
+    def __init__(self, params: _params_t, lr: float = required,
+                 momentum: float = 0., dampening: float = 0.,
+                 weight_decay: float = 0., nesterov: bool = False) -> None:
         if lr is not required and lr < 0.0:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if momentum < 0.0:
