@@ -1,3 +1,4 @@
+# type: ignore
 from .node import Node, Attribute, magic_methods
 
 import builtins
@@ -66,9 +67,10 @@ def map_arg(a, fn):
         return a
 
 class Graph:
-    def __init__(self, arg_handler=None):
+    def __init__(self, delegate, arg_handler=None):
         self.nodes = []
         self._used_names = {}  # base name -> number
+        self.delegate = delegate
         self.arg_handler = arg_handler
 
     def _create_node(self, op, target=None, args=None, kwargs=None, name=None):
@@ -76,7 +78,7 @@ class Graph:
         kwargs = {} if kwargs is None else kwargs
         args = self._create_args(args)
         kwargs = self._create_args(kwargs)
-        n = Node(self, name if name is not None else self._name(target or op), op, target, args, kwargs)
+        n = Node(self, name if name is not None else self._name(target or op), op, target, args, kwargs, self.delegate)
         self.nodes.append(n)
         return n
 
@@ -163,7 +165,8 @@ class Graph:
                 continue
             elif node.op == 'call_method':
                 body.append(
-                    f'{node.name} = {_format_target(repr(node.args[0]), node.target)}({_format_args(node.args[1:], node.kwargs)})\n')
+                    f'{node.name} = {_format_target(repr(node.args[0]), node.target)}'
+                    f'({_format_args(node.args[1:], node.kwargs)})\n')
                 continue
             elif node.op == 'call_function':
                 # pretty print operators
