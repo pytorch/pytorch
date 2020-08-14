@@ -738,6 +738,19 @@ void lcm_kernel(TensorIterator& iter) {
     });
 }
 
+void hypot_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), "hypot_cpu", [&]() {
+    cpu_kernel_vec(
+        iter,
+        [=](scalar_t a, scalar_t b) -> scalar_t {
+            return std::hypot(a, b);
+        },
+        [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
+            return a.hypot(b);
+        });
+  });
+}
+
 } // namespace
 
 REGISTER_DISPATCH(add_stub, &add_kernel);
@@ -774,6 +787,7 @@ REGISTER_DISPATCH(logaddexp_stub, &logaddexp_kernel);
 REGISTER_DISPATCH(logaddexp2_stub, &logaddexp2_kernel);
 REGISTER_DISPATCH(gcd_stub, &gcd_kernel);
 REGISTER_DISPATCH(lcm_stub, &lcm_kernel);
+REGISTER_DISPATCH(hypot_stub, &hypot_kernel);
 
 } // namespace native
 } // namespace at
