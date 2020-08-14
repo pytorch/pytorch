@@ -158,7 +158,7 @@ def register_module_backward_hook(
     return handle
 
 def _forward_unimplemented(self, *input: Any) -> None:
-    r"""Defines the computation performed at every call.
+    r"""Forward defines the computation performed at every call.
 
         Should be overridden by all subclasses.
 
