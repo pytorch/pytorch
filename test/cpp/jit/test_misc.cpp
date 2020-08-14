@@ -1693,7 +1693,8 @@ void testProfiler() {
   // device=cpu)]
   testing::FileCheck()
       .check("Tensor = prim::profile[profiled_type")
-      ->check_same("512")->run(pr->profiled_graph_);
+      ->check_same("512")
+      ->run(pr->profiled_graph_);
 
   auto begin = pr->profiled_graph_->block()->nodes().begin();
   auto end = pr->profiled_graph_->block()->nodes().end();
