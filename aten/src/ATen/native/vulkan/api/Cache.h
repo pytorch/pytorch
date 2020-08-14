@@ -8,11 +8,11 @@ namespace vulkan {
 namespace api {
 
 //
-// A generic cache for all immutable Vulkan objects, of which there will not
-// be many instances required at runtime.  The previous sentence puts two
-// conditions on proper use of this cache: 1) First, the objects should
-// preferably be immutable otherwise extreme care is required to synchronize
-// their usage.  2) Second, this cache is only intended for objects, of which
+// A generic cache for immutable Vulkan objects, when there will not be many
+// instances of those objects required at runtime.  The previous sentence puts
+// two constraints on proper use of this cache: 1) First, the objects should
+// preferably be immutable otherwise much care is required to synchronize
+// their usage.  2) Second, this cache is only intended for objects that
 // we will not have many instances of during the entire execution of the
 // program, otherwise the cache must be _infrequently_ purged.  Proper usage
 // model for this cache is in direct contrast with Vulkan object pools, which
