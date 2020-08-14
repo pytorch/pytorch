@@ -1,6 +1,6 @@
 from tools.codegen.model import *
 
-from tools.codegen.api.types import TensorOptionsArguments, LegacyDispatcherArgument
+from tools.codegen.api.types import TensorOptionsArguments, LegacyDispatcherArgument, ThisArgument
 import tools.codegen.api.cpp as cpp
 
 from typing import Union, Sequence
@@ -38,17 +38,33 @@ def returns_type(rs: Sequence[Return]) -> str:
 def argument_type(a: Argument) -> str:
     return argumenttype_type(a.type, mutable=a.is_write)
 
-def argument(a: Union[Argument, TensorOptionsArguments]) -> LegacyDispatcherArgument:
+def argument(a: Union[Argument, ThisArgument, TensorOptionsArguments]) -> LegacyDispatcherArgument:
     if isinstance(a, Argument):
         return LegacyDispatcherArgument(
             type=argument_type(a),
             name=a.name,
+            default=cpp.default_expr(a.default, a.type),
             argument=a,
         )
+    elif isinstance(a, ThisArgument):
+        # Erase ThisArgument from the distinction
+        return LegacyDispatcherArgument(
+            type=argument_type(a.argument),
+            name=a.argument.name,
+            default=None,
+            argument=a.argument,
+        )
     elif isinstance(a, TensorOptionsArguments):
+        # TODO: expunge this logic entirely
+        default = None
+        if all(x.default == "None" for x in a.all()):
+            default = '{}'
+        elif a.dtype.default == "long":
+            default = 'at::kLong'  # TODO: this is wrong
         return LegacyDispatcherArgument(
             type='const TensorOptions &',
             name='options',
+            default=default,
             argument=a,
         )
     else:

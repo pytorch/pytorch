@@ -1,6 +1,6 @@
 from tools.codegen.model import *
 
-from tools.codegen.api.types import CppArgument, DispatcherExpr, TensorOptionsArguments, DispatcherArgument
+from tools.codegen.api.types import CppArgument, DispatcherExpr, TensorOptionsArguments, DispatcherArgument, ThisArgument, LegacyDispatcherArgument
 import tools.codegen.api.cpp as cpp
 import tools.codegen.api.legacy_dispatcher as legacy_dispatcher
 import tools.codegen.local as local
@@ -48,14 +48,20 @@ def returns_type(rs: Sequence[Return]) -> str:
     return cpp.returns_type(rs)
 
 def argument(a: Argument) -> DispatcherArgument:
-    return DispatcherArgument(
-        type=argument_type(a),
-        name=a.name,
-        argument=a,
-    )
+    if local.use_c10_dispatcher_full():
+        return DispatcherArgument(
+            type=argument_type(a),
+            name=a.name,
+            argument=a,
+        )
+    else:
+        return legacy_dispatcher.argument(a)
 
 def arguments(func: FunctionSchema) -> Sequence[DispatcherArgument]:
-    return list(map(argument, itertools.chain(func.out_arguments, func.arguments, func.kwarg_only_arguments)))
+    if local.use_c10_dispatcher_full():
+        return list(map(argument, itertools.chain(func.out_arguments, func.arguments, func.kwarg_only_arguments)))
+    else:
+        return legacy_dispatcher.arguments(func)
 
 # Given a set of CppArguments in scope, return a sequence of dispatcher
 # expressions that translate the cpp API into dispatcher API
@@ -76,9 +82,16 @@ def cppargument_exprs(a: CppArgument, *, tensor_options: Optional[CppArgument]) 
             return [DispatcherExpr(type=argument_type(a.argument), expr=f'c10::impl::check_tensor_options_and_extract_memory_format({tensor_options.name}, {a.name})')]
         else:
             return [DispatcherExpr(type=argument_type(a.argument), expr=a.name)]
+    elif isinstance(a.argument, ThisArgument):
+        return [DispatcherExpr(type=argument_type(a.argument.argument), expr=a.name)]
     else:
         assert_never(a.argument)
 
 def cpparguments_exprs(args: Sequence[CppArgument]) -> Sequence[DispatcherExpr]:
     tensor_options = next((a for a in args if isinstance(a.argument, TensorOptionsArguments)), None)
     return [r for a in args for r in cppargument_exprs(a, tensor_options=tensor_options)]
+
+# I don't think this is entirely sound, but it should be reasonably
+# close
+def legacydispatcherarguments_exprs(args: Sequence[LegacyDispatcherArgument]) -> Sequence[DispatcherExpr]:
+    return cpparguments_exprs([CppArgument(type=a.type, name=a.name, default=None, argument=a.argument) for a in args])

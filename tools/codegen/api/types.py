@@ -2,6 +2,11 @@ from tools.codegen.model import *
 from dataclasses import dataclass
 from typing import Optional, Union, Sequence
 
+# Represents the implicit *this argument for method calls in C++ API
+@dataclass(frozen=True)
+class ThisArgument:
+    argument: Argument
+
 # Bundle of arguments that represent a TensorOptions in the C++ API.
 @dataclass(frozen=True)
 class TensorOptionsArguments:
@@ -24,7 +29,8 @@ class CppArgument:
     default: Optional[str]
     # The JIT argument(s) this formal was derived from.  May
     # correspond to multiple arguments if this is TensorOptions!
-    argument: Union[Argument, TensorOptionsArguments]
+    # May also correspond to the implicit *this argument!
+    argument: Union[Argument, TensorOptionsArguments, ThisArgument]
 
     # Default string representation prints the most elaborated form
     # of the formal
@@ -37,6 +43,11 @@ class CppArgument:
     # However, you might also find the version with no default useful
     def str_no_default(self) -> str:
         return f"{self.type} {self.name}"
+
+@dataclass(frozen=True)
+class CppExpr:
+    type: str
+    expr: str
 
 @dataclass(frozen=True)
 class DispatcherExpr:
@@ -62,8 +73,17 @@ class DispatcherArgument:
 class LegacyDispatcherArgument:
     type: str
     name: str
-    # legacy dispatcher NEVER has defaults
+    # has defaults, smh
+    default: Optional[str]
     argument: Union[Argument, TensorOptionsArguments]
 
+    # Convention here is swapped because arguably legacy
+    # dispatcher shouldn't have defaults...
     def __str__(self) -> str:
         return f"{self.type} {self.name}"
+
+    def str_with_default(self) -> str:
+        mb_default = ""
+        if self.default is not None:
+            mb_default = f"={self.default}"
+        return f"{self.type} {self.name}{mb_default}"

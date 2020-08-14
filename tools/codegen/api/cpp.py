@@ -1,5 +1,5 @@
 from tools.codegen.model import *
-from tools.codegen.api.types import TensorOptionsArguments, CppArgument
+from tools.codegen.api.types import TensorOptionsArguments, CppArgument, ThisArgument
 import tools.codegen.local as local
 from typing import Optional, Sequence, Union, Callable, List
 from dataclasses import dataclass
@@ -158,18 +158,27 @@ JIT_TO_CPP_DEFAULT = {
 }
 
 # Convert a JIT default into C++ expression representing the default
-def default_expr(d: str, t: Type) -> str:
+def default_expr(d: Optional[str], t: Type) -> Optional[str]:
+    if d is None:
+        return None
     if d == 'None' and str(t) == 'Tensor?':
         return '{}'
     return JIT_TO_CPP_DEFAULT.get(d, d)
 
 # Convert an argument into its C++ API form
-def argument(a: Union[Argument, TensorOptionsArguments]) -> CppArgument:
+def argument(a: Union[Argument, TensorOptionsArguments, ThisArgument]) -> CppArgument:
     if isinstance(a, Argument):
         return CppArgument(
             type=argument_type(a),
             name=a.name,
-            default=default_expr(a.default, a.type) if a.default is not None else None,
+            default=default_expr(a.default, a.type),
+            argument=a,
+        )
+    elif isinstance(a, ThisArgument):
+        return CppArgument(
+            type=argument_type(a.argument),
+            name="const_cast<Tensor&>(*this)",  # this is an abuse but it's convenient
+            default=None,
             argument=a,
         )
     elif isinstance(a, TensorOptionsArguments):
@@ -187,11 +196,12 @@ def argument(a: Union[Argument, TensorOptionsArguments]) -> CppArgument:
     else:
         assert_never(a)
 
-def group_arguments(func: FunctionSchema, *, exclude_self: bool = False) -> Sequence[Union[Argument, TensorOptionsArguments]]:
-    args: List[Union[Argument, TensorOptionsArguments]] = []
+def group_arguments(func: FunctionSchema, *, method: bool = False) -> Sequence[Union[Argument, TensorOptionsArguments, ThisArgument]]:
+    args: List[Union[Argument, ThisArgument, TensorOptionsArguments]] = []
     args.extend(func.out_arguments)
-    if exclude_self:
-        args.extend(a for a in func.arguments if a.name != 'self')
+
+    if method:
+        args.extend(ThisArgument(a) if a.name == "self" else a for a in func.arguments)
     else:
         args.extend(func.arguments)
 
@@ -227,5 +237,5 @@ def group_arguments(func: FunctionSchema, *, exclude_self: bool = False) -> Sequ
     return args
 
 # Convert arguments to C++ API form
-def arguments(func: FunctionSchema, *, exclude_self: bool = False) -> Sequence[CppArgument]:
-    return list(map(argument, group_arguments(func, exclude_self=exclude_self)))
+def arguments(func: FunctionSchema, *, method: bool = False) -> Sequence[CppArgument]:
+    return list(map(argument, group_arguments(func, method=method)))
