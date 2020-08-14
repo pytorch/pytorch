@@ -1692,7 +1692,7 @@ void testProfiler() {
   // Tensor = prim::profile[profiled_type=Float(4:512, 512:1, requires_grad=0,
   // device=cpu)]
   testing::FileCheck()
-      .check("Tensor = prim::profile[profiled_tygpe")
+      .check("Tensor = prim::profile[profiled_type")
       ->check_same("512")
       ->run(*pr->profiled_graph_);
 
