@@ -6,7 +6,7 @@ import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
 import numpy as np
 from caffe2.python import core, dyndep, workspace
-from caffe2.quantization.server import utils as dnnlowp_utils
+from caffe2.quantization.server import dnnlowp_pybind11, utils as dnnlowp_utils
 from caffe2.quantization.server.dnnlowp_test_utils import (
     avoid_vpmaddubsw_overflow_fc,
     check_quantized_results_close,
@@ -176,8 +176,7 @@ class DNNLowPFullyConnectedOpTest(hu.HypothesisTestCase):
                         if do_prepack_weight
                         else ("W_q" if do_quantize_weight else "W"),
                         "b_q" if do_quantize_weight else "b",
-                        "scale",
-                        "zero_point",
+                        "quant_param",
                     ],
                     ["Y_q" if do_dequantize else "Y"],
                     dequantize_output=not do_dequantize,
@@ -226,6 +225,7 @@ class DNNLowPFullyConnectedOpTest(hu.HypothesisTestCase):
                 ref_output = outputs[0][0]
                 ref_output_min = 0 if ref_output.size == 0 else ref_output.min()
                 ref_output_max = 0 if ref_output.size == 0 else ref_output.max()
+
                 q_param = dnnlowp_utils.choose_quantization_params(
                     ref_output_min, ref_output_max, preserve_activation_sparsity
                 )
@@ -241,8 +241,8 @@ class DNNLowPFullyConnectedOpTest(hu.HypothesisTestCase):
                     None,
                     gc,
                     outputs,
-                    np.array([q_param.scale]).astype(np.float32),
-                    np.array([q_param.zero_point]).astype(np.int32),
+                    q_param.scale,
+                    q_param.zero_point,
                 )
             else:
                 run_conv_or_fc(
@@ -257,4 +257,24 @@ class DNNLowPFullyConnectedOpTest(hu.HypothesisTestCase):
                     )
                 np.testing.assert_equal(bias_int32[0].dtype, np.int32)
 
+            shapes, types = workspace.InferShapesAndTypes(
+                [init_net, net],
+                blob_dimensions={
+                    "X": [batch_size, input_channels],
+                    "W": [output_channels, input_channels],
+                    "b": [output_channels],
+                    "quant_param": [1],
+                },
+                blob_types={
+                    "X": core.DataType.FLOAT,
+                    "W": core.DataType.FLOAT,
+                    "b": core.DataType.FLOAT,
+                    "quant_param": core.DataType.FLOAT,
+                },
+            )
+            assert (
+                "Y" in shapes and "Y" in types
+            ), "Failed to infer the shape or type of Y"
+            self.assertEqual(shapes["Y"], [batch_size, output_channels])
+            self.assertEqual(types["Y"], core.DataType.FLOAT)
         check_quantized_results_close(outputs, symmetric=preserve_activation_sparsity)

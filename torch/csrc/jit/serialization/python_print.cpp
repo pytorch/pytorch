@@ -4,10 +4,13 @@
 #include <c10/util/StringUtil.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/frontend/error_report.h>
+#include <torch/csrc/jit/frontend/versioned_symbols.h>
 #include <torch/csrc/jit/ir/attributes.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/resource_guard.h>
+
+#include <algorithm>
 
 using c10::QualifiedName;
 
@@ -292,19 +295,25 @@ struct PythonPrintImpl {
     }
   }
 
-  size_t getOrAddTensorConstant(at::Tensor t) {
+  size_t getOrAddConstant(at::IValue val) {
     // XXX - N^2 warning. This code does the exact same thing as
     // ConstantPool, which is also N^2 in the size of the constants,
     // because it doesn't hash any information about the tensors.
     // We will probably need to optimize this at some point using hashing.
-    for (size_t i = 0; i < tensor_table_.size(); ++i) {
-      if (t.options().type_equal(tensor_table_[i].options()) &&
-          t.equal(tensor_table_[i])) {
-        return i;
+    if (val.isTensor()) {
+      auto t = val.toTensor();
+      for (size_t i = 0; i < constant_table_.size(); ++i) {
+        if (!constant_table_[i].isTensor()) {
+          continue;
+        }
+        auto t2 = constant_table_[i].toTensor();
+        if (t.options().type_equal(t2.options()) && t.equal(t2)) {
+          return i;
+        }
       }
     }
-    tensor_table_.emplace_back(std::move(t));
-    return tensor_table_.size() - 1;
+    constant_table_.emplace_back(std::move(val));
+    return constant_table_.size() - 1;
   }
 
   std::unordered_set<Node*> seen_constants;
@@ -694,9 +703,15 @@ struct PythonPrintImpl {
     }
   }
 
+  void checkVersion(const Node* const node) {
+    min_version_ =
+        std::max(min_version_, get_min_version_for_kind(node->kind()));
+  }
+
   void printNode(Node* node, bool print_const) {
     WithSourceRange guard(&source_range_stack_, node);
     scanTypeDependencies(node);
+    checkVersion(node);
     if (!print_const && node->kind() == prim::Constant)
       return;
     switch (node->kind()) {
@@ -818,12 +833,32 @@ struct PythonPrintImpl {
     }
   }
 
+  static bool containsNonASCIIString(const IValue& val) {
+    bool hasNonASCII = false;
+    auto checkSubvalue = [&hasNonASCII](const IValue& val) {
+      if (val.isString()) {
+        const auto maxASCII = 0x7fu;
+        for (auto& c : val.toStringRef()) {
+          if (c > maxASCII) {
+            hasNonASCII = true;
+            return true;
+          }
+        }
+      }
+      return false;
+    };
+
+    val.visit(checkSubvalue);
+    return hasNonASCII;
+  }
+
   void printConstant(TaggedStringStream& stmt, const IValue& v) {
     const auto customFormatter = [&](std::ostream& ss, const IValue& v) {
-      if (v.isTensor()) {
-        ss << "CONSTANTS.c" << getOrAddTensorConstant(v.toTensor());
+      if (v.isTensor() || containsNonASCIIString(v)) {
+        ss << "CONSTANTS.c" << getOrAddConstant(v);
         return true;
       }
+
       if (v.isTuple() && v.type()->expect<TupleType>()->schema()) {
         // print the namedtuple constructor and let rest of tuple printing
         // continue
@@ -869,7 +904,7 @@ struct PythonPrintImpl {
           throw ErrorReport(node->sourceRange())
               << "Could not export Python function call '" << value->name()
               << "'. Remove calls to Python functions before export. "
-              << "Did you forget add @script or @script_method annotation? "
+              << "Did you forget to add @script or @script_method annotation? "
               << "If this is a nn.ModuleList, add it to __constants__";
         }
         std::stringstream scalars_stream;
@@ -1220,12 +1255,12 @@ struct PythonPrintImpl {
   }
 
   PythonPrintImpl(
-      std::vector<at::Tensor>& tensor_table,
+      std::vector<at::IValue>& constant_table,
       std::vector<c10::NamedTypePtr>& deps_table,
       c10::TypePrinter type_printer,
       bool enforce_importable)
       : body_(&source_range_stack_),
-        tensor_table_(tensor_table),
+        constant_table_(constant_table),
         deps_table_(deps_table),
         type_printer_(type_printer),
         enforce_importable_(enforce_importable) {}
@@ -1402,7 +1437,7 @@ struct PythonPrintImpl {
 
   // constants are written to this table, and given then named CONSTANTS.cN
   // where N is the index into this table.
-  std::vector<at::Tensor>& tensor_table_;
+  std::vector<at::IValue>& constant_table_;
 
   // Any NamedTypes (classes, functions, NamedTuples) used are written to this
   // table.
@@ -1415,15 +1450,18 @@ struct PythonPrintImpl {
   // when we print this, should we error if the resulting output would
   // not be able to be reparsed?
   bool enforce_importable_;
+
+  // The least version that supports all printed ops
+  uint64_t min_version_ = 0;
 };
 
 PythonPrint::PythonPrint(
-    std::vector<at::Tensor>& tensor_table,
+    std::vector<at::IValue>& constant_table,
     std::vector<c10::NamedTypePtr>& deps_table,
     c10::TypePrinter type_printer,
     bool enforce_importable)
     : pImpl(std::make_shared<PythonPrintImpl>(
-          tensor_table,
+          constant_table,
           deps_table,
           type_printer,
           enforce_importable)) {}
@@ -1446,6 +1484,10 @@ std::string PythonPrint::str() const {
 
 const SourceRangeRecords& PythonPrint::ranges() const {
   return pImpl->body_.ranges();
+}
+
+uint64_t PythonPrint::minVersion() const {
+  return pImpl->min_version_;
 }
 
 PythonPrint::~PythonPrint() = default;

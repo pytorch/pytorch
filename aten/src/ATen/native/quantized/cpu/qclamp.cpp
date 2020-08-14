@@ -7,7 +7,7 @@
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
 #include <ATen/quantized/Quantizer.h>
-#include <caffe2/utils/threadpool/ThreadPoolMobile.h>
+#include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 
 #include <algorithm>
 
@@ -64,7 +64,7 @@ Tensor qnnpack_clamp(Tensor input, Scalar min, Scalar max) {
   TORCH_INTERNAL_ASSERT(setupStatus == pytorch_qnnp_status_success,
                         "failed to setup QNNPACK Clamp operator");
 
-  pthreadpool_t threadpool = caffe2::mobile_pthreadpool();
+  pthreadpool_t threadpool = caffe2::pthreadpool_();
 
   const pytorch_qnnp_status runStatus =
     pytorch_qnnp_run_operator(clamp_op, threadpool);
@@ -98,7 +98,7 @@ Tensor quantized_clamp_impl(
 } // namespace
 
 // at::native functions for the native_functions.yaml
-Tensor quantized_clamp(
+Tensor clamp_quantized_cpu(
     const Tensor& qx,
     optional<Scalar> min,
     optional<Scalar> max) {
@@ -110,7 +110,7 @@ Tensor quantized_clamp(
 }
 
 // hardtanh is clamp with default min==-1.0f and default max==1.0f
-Tensor quantized_hardtanh(
+Tensor hardtanh_quantized_cpu(
     const Tensor& qx,
     Scalar min,
     Scalar max) {
@@ -119,7 +119,7 @@ Tensor quantized_hardtanh(
   return qy;
 }
 
-Tensor& quantized_hardtanh_out(
+Tensor& hardtanh_out_quantized_cpu(
     Tensor& result,
     const Tensor& qx,
     Scalar min,
@@ -128,7 +128,7 @@ Tensor& quantized_hardtanh_out(
   return result;
 }
 
-Tensor& quantized_hardtanh_(
+Tensor& hardtanh_quantized_cpu_(
     Tensor& self,
     Scalar min,
     Scalar max) {
@@ -140,7 +140,7 @@ Tensor& quantized_hardtanh_(
 }
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
-  m.impl("clamp", TORCH_FN(quantized_clamp));
+  m.impl("clamp", TORCH_FN(clamp_quantized_cpu));
 }
 
 } // namespace native

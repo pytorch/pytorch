@@ -70,7 +70,6 @@ set(TORCH_PYTHON_INCLUDE_DIRECTORIES
 
     ${TORCH_ROOT}/third_party/gloo
     ${TORCH_ROOT}/third_party/onnx
-    ${TORCH_ROOT}/third_party/tensorpipe
     ${pybind11_INCLUDE_DIRS}
 
     ${TORCH_SRC_DIR}/csrc
@@ -88,6 +87,8 @@ set(TORCH_PYTHON_LINK_LIBRARIES
 
 set(TORCH_PYTHON_COMPILE_DEFINITIONS)
 
+set(TORCH_PYTHON_PUBLIC_COMPILE_DEFINITIONS)
+
 set(TORCH_PYTHON_COMPILE_OPTIONS)
 
 set(TORCH_PYTHON_LINK_FLAGS "")
@@ -98,7 +99,7 @@ if(MSVC)
     if(BUILD_TEST)
       list(APPEND TORCH_PYTHON_LINK_LIBRARIES onnx_library)
     endif(BUILD_TEST)
-    if(NOT ${CMAKE_BUILD_TYPE} MATCHES "Release")
+    if(NOT CMAKE_BUILD_TYPE MATCHES "Release")
       string(APPEND TORCH_PYTHON_LINK_FLAGS " /DEBUG:FULL")
     endif()
 elseif(APPLE)
@@ -111,19 +112,13 @@ else()
 endif()
 
 if(USE_CUDA)
-    list(APPEND TORCH_PYTHON_SRCS
-      ${TORCH_SRC_DIR}/csrc/cuda/Module.cpp
-      ${TORCH_SRC_DIR}/csrc/cuda/Storage.cpp
-      ${TORCH_SRC_DIR}/csrc/cuda/Stream.cpp
-      ${TORCH_SRC_DIR}/csrc/cuda/Event.cpp
-      ${TORCH_SRC_DIR}/csrc/cuda/utils.cpp
-      ${TORCH_SRC_DIR}/csrc/cuda/python_comm.cpp
-      ${TORCH_SRC_DIR}/csrc/cuda/serialization.cpp
-      ${TORCH_SRC_DIR}/csrc/cuda/shared/cudart.cpp
-      ${TORCH_SRC_DIR}/csrc/cuda/shared/nvtx.cpp
-      ${GENERATED_THNN_CXX_CUDA}
-      )
+    append_filelist("libtorch_python_cuda_core_sources" TORCH_PYTHON_SRCS)
+    list(APPEND TORCH_PYTHON_SRCS ${GENERATED_THNN_CXX_CUDA})
+
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_CUDA)
+    if(USE_CUDNN)
+        list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_CUDNN)
+    endif()
 
     if(MSVC)
       list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${NVTOOLEXT_HOME}/lib/x64/nvToolsExt64_1.lib)
@@ -137,32 +132,9 @@ if(USE_CUDA)
 
 endif()
 
-if(USE_CUDNN)
-    list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_CUDNN)
-
-    list(APPEND TORCH_PYTHON_SRCS
-      ${TORCH_SRC_DIR}/csrc/cuda/shared/cudnn.cpp
-      )
-endif()
-
-if(USE_NUMPY)
-    list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_NUMPY)
-endif()
-
 if(USE_ROCM)
-    list(APPEND TORCH_PYTHON_SRCS
-      ${TORCH_SRC_DIR}/csrc/cuda/Module.cpp
-      ${TORCH_SRC_DIR}/csrc/cuda/Storage.cpp
-      ${TORCH_SRC_DIR}/csrc/cuda/Stream.cpp
-      ${TORCH_SRC_DIR}/csrc/cuda/Event.cpp
-      ${TORCH_SRC_DIR}/csrc/cuda/utils.cpp
-      ${TORCH_SRC_DIR}/csrc/cuda/python_comm.cpp
-      ${TORCH_SRC_DIR}/csrc/cuda/serialization.cpp
-      ${TORCH_SRC_DIR}/csrc/cuda/shared/cudart.cpp
-      ${TORCH_SRC_DIR}/csrc/cuda/shared/cudnn.cpp
-      ${TORCH_SRC_DIR}/csrc/cuda/shared/nvtx.cpp
-      ${GENERATED_THNN_CXX_CUDA}
-      )
+    append_filelist("libtorch_python_cuda_core_sources" TORCH_PYTHON_SRCS)
+    list(APPEND TORCH_PYTHON_SRCS ${GENERATED_THNN_CXX_CUDA})
 
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS
       USE_ROCM
@@ -170,6 +142,16 @@ if(USE_ROCM)
       )
     list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${ROCM_ROCTX_LIB})
     list(APPEND TORCH_PYTHON_INCLUDE_DIRECTORIES ${roctracer_INCLUDE_DIRS})
+endif()
+
+if(USE_CUDNN OR USE_ROCM)
+    list(APPEND TORCH_PYTHON_SRCS
+      ${TORCH_SRC_DIR}/csrc/cuda/shared/cudnn.cpp
+      )
+endif()
+
+if(USE_NUMPY)
+    list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_NUMPY)
 endif()
 
 if(USE_DISTRIBUTED)
@@ -185,6 +167,10 @@ if(USE_DISTRIBUTED)
       endif()
       list(APPEND TORCH_PYTHON_LINK_LIBRARIES c10d)
       list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_C10D)
+      if(USE_TENSORPIPE)
+        list(APPEND TORCH_PYTHON_LINK_LIBRARIES tensorpipe)
+        list(APPEND TORCH_PYTHON_PUBLIC_COMPILE_DEFINITIONS USE_TENSORPIPE)
+      endif()
     endif()
 endif()
 
@@ -269,11 +255,19 @@ if(CMAKE_COMPILER_IS_GNUCXX AND (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 9.0.
   set_source_files_properties(${TORCH_SRC_DIR}/csrc/autograd/python_variable.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
 endif()
 
+# Preserve CUDA_GENCODE flags
+if(USE_CUDA)
+  torch_cuda_get_nvcc_gencode_flag(_ARCH_FLAGS)
+  set_source_files_properties(${TORCH_SRC_DIR}/csrc/cuda/Module.cpp PROPERTIES COMPILE_FLAGS "-DCUDA_ARCH_FLAGS=\"${_ARCH_FLAGS_readable}\"")
+endif()
+
 target_compile_definitions(torch_python PRIVATE "-DTHP_BUILD_MAIN_LIB")
 
 target_link_libraries(torch_python ${TORCH_PYTHON_LINK_LIBRARIES})
 
 target_compile_definitions(torch_python PRIVATE ${TORCH_PYTHON_COMPILE_DEFINITIONS})
+
+target_compile_definitions(torch_python PUBLIC ${TORCH_PYTHON_PUBLIC_COMPILE_DEFINITIONS})
 
 target_compile_options(torch_python PRIVATE ${TORCH_PYTHON_COMPILE_OPTIONS})
 

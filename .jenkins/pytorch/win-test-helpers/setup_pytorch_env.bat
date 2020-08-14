@@ -22,7 +22,7 @@ call %CONDA_PARENT_DIR%\Miniconda3\Scripts\activate.bat %CONDA_PARENT_DIR%\Minic
 if NOT "%BUILD_ENVIRONMENT%"=="" (
     :: We have to pin Python version to 3.6.7, until mkl supports Python 3.7
     :: Numba is pinned to 0.44.0 to avoid https://github.com/numba/numba/issues/4352
-    call conda install -y -q python=3.6.7 numpy mkl cffi pyyaml boto3 protobuf numba==0.44.0
+    call conda install -y -q python=3.6.7 numpy mkl cffi pyyaml boto3 protobuf numba==0.44.0 scipy==1.5.0 typing_extensions
     if %errorlevel% neq 0 ( exit /b %errorlevel% )
     call conda install -y -q -c conda-forge cmake
     if %errorlevel% neq 0 ( exit /b %errorlevel% )
@@ -39,7 +39,7 @@ if %errorlevel% neq 0 ( exit /b %errorlevel% )
 popd
 
 :: The version is fixed to avoid flakiness: https://github.com/pytorch/pytorch/issues/31136
-pip install "ninja==1.9.0" future "hypothesis==4.53.2" "librosa>=0.6.2" psutil pillow unittest-xml-reporting
+pip install "ninja==1.10.0.post1" future "hypothesis==4.53.2" "librosa>=0.6.2" psutil pillow unittest-xml-reporting
 if %errorlevel% neq 0 ( exit /b %errorlevel% )
 :: No need to install faulthandler since we only test Python >= 3.6 on Windows
 :: faulthandler is builtin since Python 3.3
@@ -48,6 +48,7 @@ set DISTUTILS_USE_SDK=1
 
 if "%CUDA_VERSION%" == "9" goto cuda_build_9
 if "%CUDA_VERSION%" == "10" goto cuda_build_10
+if "%CUDA_VERSION%" == "11" goto cuda_build_11
 goto cuda_build_end
 
 :cuda_build_9
@@ -61,6 +62,13 @@ goto cuda_build_common
 
 set CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v10.1
 set CUDA_PATH_V10_1=%CUDA_PATH%
+
+goto cuda_build_common
+
+:cuda_build_11
+
+set CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.0
+set CUDA_PATH_V11_0=%CUDA_PATH%
 
 goto cuda_build_common
 

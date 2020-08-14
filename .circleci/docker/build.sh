@@ -10,14 +10,35 @@ if [ -z "${image}" ]; then
   exit 1
 fi
 
-# TODO: Generalize
-OS="ubuntu"
-DOCKERFILE="${OS}/Dockerfile"
-if [[ "$image" == *-cuda* ]]; then
-  DOCKERFILE="${OS}-cuda/Dockerfile"
-elif [[ "$image" == *-rocm* ]]; then
-  DOCKERFILE="${OS}-rocm/Dockerfile"
-fi
+function extract_version_from_image_name() {
+  eval export $2=$(echo "${image}" | perl -n -e"/$1(\d+(\.\d+)?(\.\d+)?)/ && print \$1")
+  if [ "x${!2}" = x ]; then
+    echo "variable '$2' not correctly parsed from image='$image'"
+    exit 1
+  fi
+}
+
+function extract_all_from_image_name() {
+  # parts $image into array, splitting on '-'
+  keep_IFS="$IFS"
+  IFS="-"
+  declare -a parts=($image)
+  IFS="$keep_IFS"
+  unset keep_IFS
+
+  for part in "${parts[@]}"; do
+    name=$(echo "${part}" | perl -n -e"/([a-zA-Z]+)\d+(\.\d+)?(\.\d+)?/ && print \$1")
+    vername="${name^^}_VERSION"
+    # "py" is the odd one out, needs this special case
+    if [ "x${name}" = xpy ]; then
+      vername=ANACONDA_PYTHON_VERSION
+    fi
+    # skip non-conforming fields such as "pytorch", "linux" or "xenial" without version string
+    if [ -n "${name}" ]; then
+      extract_version_from_image_name "${name}" "${vername}"
+    fi
+  done
+}
 
 if [[ "$image" == *-trusty* ]]; then
   UBUNTU_VERSION=14.04
@@ -29,6 +50,26 @@ elif [[ "$image" == *-bionic* ]]; then
   UBUNTU_VERSION=18.04
 elif [[ "$image" == *-focal* ]]; then
   UBUNTU_VERSION=20.04
+elif [[ "$image" == *ubuntu* ]]; then
+  extract_version_from_image_name ubuntu UBUNTU_VERSION
+elif [[ "$image" == *centos* ]]; then
+  extract_version_from_image_name centos CENTOS_VERSION
+fi
+
+if [ -n "${UBUNTU_VERSION}" ]; then
+  OS="ubuntu"
+elif [ -n "${CENTOS_VERSION}" ]; then
+  OS="centos"
+else
+  echo "Unable to derive operating system base..."
+  exit 1
+fi
+
+DOCKERFILE="${OS}/Dockerfile"
+if [[ "$image" == *cuda* ]]; then
+  DOCKERFILE="${OS}-cuda/Dockerfile"
+elif [[ "$image" == *rocm* ]]; then
+  DOCKERFILE="${OS}-rocm/Dockerfile"
 fi
 
 TRAVIS_DL_URL_PREFIX="https://s3.amazonaws.com/travis-python-archives/binaries/ubuntu/14.04/x86_64"
@@ -66,13 +107,6 @@ case "$image" in
     ;;
   pytorch-linux-xenial-py3.6-gcc7)
     ANACONDA_PYTHON_VERSION=3.6
-    GCC_VERSION=7
-    PROTOBUF=yes
-    DB=yes
-    VISION=yes
-    ;;
-  pytorch-linux-xenial-pynightly)
-    TRAVIS_PYTHON_VERSION=nightly
     GCC_VERSION=7
     PROTOBUF=yes
     DB=yes
@@ -118,6 +152,17 @@ case "$image" in
   pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7)
     CUDA_VERSION=10.2
     CUDNN_VERSION=7
+    ANACONDA_PYTHON_VERSION=3.6
+    GCC_VERSION=7
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    KATEX=yes
+    ;;
+  pytorch-linux-xenial-cuda11.0-cudnn8-py3-gcc7)
+    UBUNTU_VERSION=16.04-rc
+    CUDA_VERSION=11.0
+    CUDNN_VERSION=8
     ANACONDA_PYTHON_VERSION=3.6
     GCC_VERSION=7
     PROTOBUF=yes
@@ -182,6 +227,28 @@ case "$image" in
     DB=yes
     VISION=yes
     ;;
+  pytorch-linux-bionic-cuda11.0-cudnn8-py3.6-gcc9)
+    UBUNTU_VERSION=18.04-rc
+    CUDA_VERSION=11.0
+    CUDNN_VERSION=8
+    ANACONDA_PYTHON_VERSION=3.6
+    GCC_VERSION=9
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    KATEX=yes
+    ;;
+  pytorch-linux-bionic-cuda11.0-cudnn8-py3.8-gcc9)
+    UBUNTU_VERSION=18.04-rc
+    CUDA_VERSION=11.0
+    CUDNN_VERSION=8
+    ANACONDA_PYTHON_VERSION=3.8
+    GCC_VERSION=9
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    KATEX=yes
+    ;;
   pytorch-linux-xenial-rocm3.3-py3.6)
     ANACONDA_PYTHON_VERSION=3.6
     PROTOBUF=yes
@@ -198,6 +265,54 @@ case "$image" in
     VISION=yes
     ROCM_VERSION=3.3
     ;;
+  pytorch-linux-xenial-rocm3.5.1-py3.6)
+    ANACONDA_PYTHON_VERSION=3.6
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    ROCM_VERSION=3.5.1
+    # newer cmake version required
+    CMAKE_VERSION=3.6.3
+    ;;
+  pytorch-linux-bionic-rocm3.5.1-py3.6)
+    ANACONDA_PYTHON_VERSION=3.6
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    ROCM_VERSION=3.5.1
+    ;;
+  *)
+    # Catch-all for builds that are not hardcoded.
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    echo "image '$image' did not match an existing build configuration"
+    if [[ "$image" == *py* ]]; then
+      extract_version_from_image_name py ANACONDA_PYTHON_VERSION
+    fi
+    if [[ "$image" == *cuda* ]]; then
+      extract_version_from_image_name cuda CUDA_VERSION
+      extract_version_from_image_name cudnn CUDNN_VERSION
+    fi
+    if [[ "$image" == *rocm* ]]; then
+      extract_version_from_image_name rocm ROCM_VERSION
+    fi
+    if [[ "$image" == *gcc* ]]; then
+      extract_version_from_image_name gcc GCC_VERSION
+    fi
+    if [[ "$image" == *clang* ]]; then
+      extract_version_from_image_name clang CLANG_VERSION
+    fi
+    if [[ "$image" == *devtoolset* ]]; then
+      extract_version_from_image_name devtoolset DEVTOOLSET_VERSION
+    fi
+    if [[ "$image" == *glibc* ]]; then
+      extract_version_from_image_name glibc GLIBC_VERSION
+    fi
+    if [[ "$image" == *cmake* ]]; then
+      extract_version_from_image_name cmake CMAKE_VERSION
+    fi
+  ;;
 esac
 
 # Set Jenkins UID and GID if running Jenkins
@@ -226,6 +341,9 @@ docker build \
        --build-arg "JENKINS_UID=${JENKINS_UID:-}" \
        --build-arg "JENKINS_GID=${JENKINS_GID:-}" \
        --build-arg "UBUNTU_VERSION=${UBUNTU_VERSION}" \
+       --build-arg "CENTOS_VERSION=${CENTOS_VERSION}" \
+       --build-arg "DEVTOOLSET_VERSION=${DEVTOOLSET_VERSION}" \
+       --build-arg "GLIBC_VERSION=${GLIBC_VERSION}" \
        --build-arg "CLANG_VERSION=${CLANG_VERSION}" \
        --build-arg "ANACONDA_PYTHON_VERSION=${ANACONDA_PYTHON_VERSION}" \
        --build-arg "TRAVIS_PYTHON_VERSION=${TRAVIS_PYTHON_VERSION}" \
@@ -243,6 +361,14 @@ docker build \
        -t "$tmp_tag" \
        "$@" \
        .
+
+# NVIDIA dockers for RC releases use tag names like `11.0-cudnn8-devel-ubuntu18.04-rc`,
+# for this case we will set UBUNTU_VERSION to `18.04-rc` so that the Dockerfile could
+# find the correct image. As a result, here we have to replace the
+#   "$UBUNTU_VERSION" == "18.04-rc"
+# with
+#   "$UBUNTU_VERSION" == "18.04"
+UBUNTU_VERSION=$(echo ${UBUNTU_VERSION} | sed 's/-rc$//')
 
 function drun() {
   docker run --rm "$tmp_tag" $*

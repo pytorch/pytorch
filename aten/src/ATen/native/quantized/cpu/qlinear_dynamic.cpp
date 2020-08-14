@@ -5,7 +5,7 @@
 #include <ATen/native/quantized/cpu/packed_params.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
 #include <ATen/native/quantized/cpu/quant_utils.h>
-#include <caffe2/utils/threadpool/ThreadPoolMobile.h>
+#include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 #include <torch/library.h>
 
 #include <torch/custom_class.h>
@@ -13,7 +13,7 @@
 #include <algorithm>
 #include <string>
 
-torch::jit::class_<LinearPackedParamsBase> register_linear_params();
+torch::class_<LinearPackedParamsBase> register_linear_params();
 
 #ifdef USE_FBGEMM
 template <bool ReluFused>
@@ -241,8 +241,17 @@ at::Tensor PackedLinearWeightsQnnp::apply_dynamic_impl(at::Tensor input) {
 
   // Calculate statistics for quantization of input Tensor
   // TODO: optimized kernel
-  float x_min = input_contig.min().item<float>();
-  float x_max = input_contig.max().item<float>();
+  float x_min;
+  float x_max;
+  if (input.numel() > 0) {
+    x_min = input_contig.min().item<float>();
+    x_max = input_contig.max().item<float>();
+  } else {
+    // On empty input, no output data will be generated,
+    // so use arbitrary qparams.
+    x_min = 0;
+    x_max = 0;
+  }
 
   auto q_params = quant_utils::ChooseQuantizationParams(
       /*min=*/x_min,
@@ -327,7 +336,7 @@ at::Tensor PackedLinearWeightsQnnp::apply_dynamic_impl(at::Tensor input) {
       bias_ptr,
       output.data_ptr<float>(),
       rows_w /* output_stride */,
-      caffe2::mobile_pthreadpool() /* threadpool */);
+      caffe2::pthreadpool_() /* threadpool */);
 
   TORCH_INTERNAL_ASSERT(
       runStatus == pytorch_qnnp_status_success,

@@ -160,7 +160,8 @@ struct CAFFE2_API TensorIterator {
     bool check_mem_overlap = false);
   static TensorIterator unary_op(Tensor& out, const Tensor& a,
     bool check_mem_overlap = false);
-  static TensorIterator nullary_op(Tensor& out);
+  static TensorIterator nullary_op(Tensor& out,
+    bool check_mem_overlap = false);
   static TensorIterator reduce_op(Tensor& out, const Tensor& a);
   static TensorIterator reduce_op(Tensor& out1, Tensor& out2, const Tensor& a);
 
@@ -300,7 +301,6 @@ protected:
 
   // Mutable reference as it moves tensors out of TensorIteratorConfig
   void populate_operands(TensorIteratorConfig&);
-  void analyze_memory_format();
   void mark_outputs();
   void compute_mem_overlaps(const TensorIteratorConfig&);
   void compute_shape(const TensorIteratorConfig&);
@@ -313,8 +313,14 @@ protected:
   bool fast_set_up(const TensorIteratorConfig&);
   FastSetupType compute_fast_setup_type(const TensorIteratorConfig&);
   void compute_names(const TensorIteratorConfig&);
+  void resize_outputs(const TensorIteratorConfig&);
   void propagate_names_to_outputs();
   void coalesce_dimensions();
+
+  template <int dim, MemoryFormat memory_format> bool requires_channels_last_nd_output();
+  bool requires_channels_last_2d_output();
+  bool requires_channels_last_3d_output();
+
 
 protected:
 
@@ -397,10 +403,6 @@ protected:
   bool accumulate_ = false;
   bool final_output_ = true;
 
-  /// Set by analyze_memory_format(), specifies the memory layout of the output.
-  bool requires_channels_last_output_ = false;
-  bool requires_channels_last_3d_output_ = false;
-
   // From TensorIteratorConfig
   bool is_reduction_ = false;
 };
@@ -474,6 +476,16 @@ public:
     return *this;
   }
 
+  // Sets the promote_integer_inputs_to_float_ flag, which is false by default
+  // NOTE: If set to true, the promote_inputs_to_common_dtype_ must also be true.
+  // If true, if the iterator's "common dtype" is an integral type (including bool)
+  //   then it is changed to the default float scalar type.
+  TensorIteratorConfig& promote_integer_inputs_to_float(const bool _promote_integer_inputs_to_float) {
+    promote_integer_inputs_to_float_ = _promote_integer_inputs_to_float;
+    TORCH_INTERNAL_ASSERT(!promote_integer_inputs_to_float_ || promote_inputs_to_common_dtype_);
+    return *this;
+  }
+
   TensorIteratorConfig& is_reduction(const bool _is_reduction) {
     is_reduction_ = _is_reduction;
     return *this;
@@ -499,8 +511,8 @@ public:
     return *this;
   }
 
-  TensorIteratorConfig& dont_resize_outputs() {
-    resize_outputs_ = false;
+  TensorIteratorConfig& resize_outputs(bool resize_outputs) {
+    resize_outputs_ = resize_outputs;
     return *this;
   }
 
@@ -515,7 +527,7 @@ public:
     // WARNING:
     //   This will bypass all shape checking in the TensorIterator. Kernels which call this method
     //   are expected to check shapes before calling `add_input` or `add_output`.
-    TORCH_CHECK(!resize_outputs_, "dont_resize_outputs() must be called before declare_static_shape(...)")
+    TORCH_CHECK(!resize_outputs_, "resize_outputs() must be called before declare_static_shape(...)")
     static_shape_ = c10::make_optional(DimVector(shape));
     return *this;
   }
@@ -550,6 +562,7 @@ private:
   bool check_all_same_device_ = true;
   bool enforce_safe_casting_to_output_ = false;
   bool promote_inputs_to_common_dtype_ = false;
+  bool promote_integer_inputs_to_float_ = false;
   bool cast_common_dtype_to_outputs_ = false;
 };
 

@@ -43,8 +43,11 @@ class WindowsJob:
         if base_phase == "test":
             prerequisite_jobs.append("_".join(base_name_parts + ["build"]))
 
+        if self.cuda_version:
+            self.cudnn_version = 8 if self.cuda_version.major == 11 else 7
+
         arch_env_elements = (
-            ["cuda" + str(self.cuda_version.major), "cudnn7"]
+            ["cuda" + str(self.cuda_version.major), "cudnn" + str(self.cudnn_version)]
             if self.cuda_version
             else ["cpu"]
         )
@@ -119,22 +122,19 @@ def TruePred(_):
     return True
 
 WORKFLOW_DATA = [
-    # VS2017 CUDA-10.1
-    WindowsJob(None, VcSpec(2017, ["14", "11"]), CudaVersion(10, 1), master_only_pred=FalsePred),
-    WindowsJob(1, VcSpec(2017, ["14", "11"]), CudaVersion(10, 1)),
-    # VS2017 no-CUDA (builds only)
-    WindowsJob(None, VcSpec(2017, ["14", "16"]), CudaVersion(10, 1)),
-    WindowsJob(None, VcSpec(2017, ["14", "16"]), None),
     # VS2019 CUDA-10.1
     WindowsJob(None, VcSpec(2019), CudaVersion(10, 1)),
     WindowsJob(1, VcSpec(2019), CudaVersion(10, 1)),
     WindowsJob(2, VcSpec(2019), CudaVersion(10, 1)),
+    # VS2019 CUDA-11.0
+    WindowsJob(None, VcSpec(2019), CudaVersion(11, 0)),
+    WindowsJob(1, VcSpec(2019), CudaVersion(11, 0)),
+    WindowsJob(2, VcSpec(2019), CudaVersion(11, 0)),
     # VS2019 CPU-only
     WindowsJob(None, VcSpec(2019), None),
-    WindowsJob(1, VcSpec(2019), None),
+    WindowsJob(1, VcSpec(2019), None, master_only_pred=TruePred),
     WindowsJob(2, VcSpec(2019), None, master_only_pred=TruePred),
-    WindowsJob(1, VcSpec(2019), CudaVersion(10, 1), force_on_cpu=True),
-    WindowsJob(2, VcSpec(2019), CudaVersion(10, 1), force_on_cpu=True, master_only_pred=TruePred),
+    WindowsJob(1, VcSpec(2019), CudaVersion(10, 1), force_on_cpu=True, master_only_pred=TruePred),
 ]
 
 

@@ -1,11 +1,13 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
 import numbers
-import sys
 
 import torch
 import torch.distributed as dist
+import threading
 
+_init_counter = 0
+_init_counter_lock = threading.Lock()
 
 def is_available():
     return hasattr(torch._C, "_rpc_init")
@@ -17,6 +19,10 @@ if is_available() and not torch._C._rpc_init():
 
 if is_available():
     from . import api, backend_registry, functions, _set_profiler_node_id
+    from . import (
+        _enable_jit_rref_pickle,
+        _disable_jit_rref_pickle,
+    )  # noqa: F401
     from .api import *  # noqa: F401
     from .backend_registry import BackendType
     from .server_process_global_profiler import (
@@ -76,6 +82,12 @@ if is_available():
             rpc_backend_options.init_method, rank=rank, world_size=world_size
         )
         store, _, _ = next(rendezvous_iterator)
+
+        # Use a PrefixStore to distinguish multiple invocations.
+        with _init_counter_lock:
+            global _init_counter
+            store = dist.PrefixStore(str('rpc_prefix_{}'.format(_init_counter)), store)
+            _init_counter += 1
 
         # Initialize autograd before RPC since _init_rpc_backend guarantees all
         # processes sync via the store. If we initialize autograd after RPC,

@@ -12,8 +12,9 @@ import time
 import unittest
 from datetime import timedelta
 from sys import platform
+from contextlib import contextmanager
 
-from itertools import groupby
+from itertools import groupby, product
 from functools import reduce
 import operator
 
@@ -39,7 +40,7 @@ from torch.testing._internal.common_utils import TestCase, load_tests, run_tests
 load_tests = load_tests
 
 if not c10d.is_available():
-    print('c10d not available, skipping tests')
+    print('c10d not available, skipping tests', file=sys.stderr)
     sys.exit(0)
 
 
@@ -1367,7 +1368,6 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                                     "Invalid function argument.*output_tensor_lists"):
             c10d.all_gather_coalesced(dummy_output_lists, dummy_input, pg)
 
-
     def test_reduce_checks(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
@@ -1528,9 +1528,9 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
         # Run a few collectives so that we have called each process group
         for _ in range(num_process_groups + 1):
-            tensor = torch.full([100, 100], self.rank)
+            tensor = torch.full([100, 100], float(self.rank))
             pg.broadcast(tensor, root=0).wait()
-            self.assertEqual(torch.full([100, 100], 0), tensor)
+            self.assertEqual(torch.full([100, 100], 0.), tensor)
 
     def test_round_robin_create_destroy(self):
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -1551,11 +1551,15 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             for _ in range(3):
                 tensor = torch.ones([10, 10])
                 pg.allreduce(tensor).wait()
-                self.assertEqual(torch.full([10, 10], self.world_size), tensor)
+                self.assertEqual(torch.full([10, 10], float(self.world_size)), tensor)
             del pg
 
 
 @requires_nccl()
+@unittest.skipIf(
+    TEST_WITH_TSAN,
+    "TSAN is not fork-safe since we're forking in a multi-threaded environment",
+)
 class ProcessGroupNCCLTest(TestCase):
     MAIN_PROCESS_RANK = 0
 
@@ -1673,14 +1677,20 @@ class ProcessGroupNCCLTest(TestCase):
         for i in range(self.num_gpus):
             self.assertEqual(torch.tensor([self.num_gpus]), tensors[i])
 
+        for op in (c10d.ReduceOp.BAND, c10d.ReduceOp.BOR, c10d.ReduceOp.BXOR):
+            with self.assertRaisesRegex(RuntimeError, "Cannot use " + str(op) + " with NCCL"):
+                allreduce(tensors, op)
+
     def test_reduce_ops(self):
         store = c10d.FileStore(self.file.name, self.world_size)
         pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
-        def reduce(xs, rootRank, rootTensor):
+        def reduce(xs, rootRank, rootTensor, op=None):
             opts = c10d.ReduceOptions()
             opts.rootRank = rootRank
             opts.rootTensor = rootTensor
+            if op:
+                opts.reduceOp = op
             work = pg.reduce(xs, opts)
             work.wait()
 
@@ -1696,6 +1706,10 @@ class ProcessGroupNCCLTest(TestCase):
             self.assertEqualIgnoreType(
                 torch.tensor([float(self.num_gpus * (self.num_gpus + 1) / 2)]),
                 tensors[rt])
+
+            for op in (c10d.ReduceOp.BAND, c10d.ReduceOp.BOR, c10d.ReduceOp.BXOR):
+                with self.assertRaisesRegex(RuntimeError, "Cannot use " + str(op) + " with NCCL"):
+                    reduce(tensors, self.rank, rt, op)
 
     def test_allgather_ops(self):
         store = c10d.FileStore(self.file.name, self.world_size)
@@ -1886,6 +1900,59 @@ class QuadraGpuNet(nn.Module):
         x = self.relu(self.fc3(x.to(dev2)))
         x = self.fc4(x.to(dev3))
         return F.softmax(x, dim=1).to(dev0)
+
+
+class ConvNet(nn.Module):
+    def __init__(self, gpus, layouts, dtypes):
+        super(ConvNet, self).__init__()
+        self.dtypes = dtypes
+        if isinstance(gpus, list):
+            self.layer_gpus = gpus
+        else:
+            gpus = [gpus] * 4
+        self.conv0 = torch.nn.Conv2d(8, 16, (2, 2)).to(device=gpus[0], memory_format=layouts[0], dtype=dtypes[0])
+        self.conv1 = torch.nn.Conv2d(16, 32, (2, 2)).to(device=gpus[1], memory_format=layouts[1], dtype=dtypes[1])
+        self.conv2 = torch.nn.Conv2d(32, 16, (2, 2)).to(device=gpus[2], memory_format=layouts[2], dtype=dtypes[2])
+        self.conv3 = torch.nn.Conv2d(16, 8, (2, 2)).to(device=gpus[3], memory_format=layouts[3], dtype=dtypes[3])
+
+    def forward(self, x):
+        x = x.to(self.dtypes[0])
+        # Could say
+        # x = self.conv0(x).to(device=self.conv1.weight.device, dtype=self.dtypes[1])
+        # etc.  But I don't want to appeal to the weights' devices directly, because part of this test's purpose
+        # is to verify weights are where expected if the model gets replicated.
+        gpus = self.layer_gpus if hasattr(self, "layer_gpus") else [x.device] * 4
+        x = self.conv0(x).to(device=gpus[1], dtype=self.dtypes[1])
+        x = self.conv1(x).to(device=gpus[2], dtype=self.dtypes[2])
+        x = self.conv2(x).to(device=gpus[3], dtype=self.dtypes[3])
+        return self.conv3(x)
+
+
+class Task(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.p = nn.Parameter(torch.ones(2, 2))
+
+    def forward(self, x):
+        return self.p + x
+
+
+class TestDdpCommHook(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.t0 = Task()
+
+    def forward(self, x, rank):
+        return self.t0(x + rank)
+
+
+class SparseGradientModule(nn.Module):
+    def __init__(self):
+        super(SparseGradientModule, self).__init__()
+        self.embedding = nn.EmbeddingBag(10, 10, sparse=True)
+
+    def forward(self, x):
+        return F.softmax(self.embedding(x), dim=1)
 
 
 @unittest.skipIf(TEST_WITH_TSAN, "TSAN is not fork-safe since we're forking in a multi-threaded environment")
@@ -2080,20 +2147,20 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         gpus = gpus[:2]
         model = DoubleGpuNet(gpus)
 
-        with self.assertRaisesRegex(AssertionError, "output_device .* single-device CUDA"):
+        with self.assertRaisesRegex(AssertionError, "output_device .* single-device GPU"):
             ddp_model = DistributedDataParallel(
                 model, output_device=gpus[1], process_group=process_group)
 
-        with self.assertRaisesRegex(AssertionError, "device_ids .* single-device CUDA"):
+        with self.assertRaisesRegex(AssertionError, "device_ids .* single-device GPU"):
             ddp_model = DistributedDataParallel(
                 model, device_ids=gpus, process_group=process_group)
 
-        with self.assertRaisesRegex(AssertionError, "only works with CUDA devices"):
+        with self.assertRaisesRegex(AssertionError, "input module must be on the same type of devices"):
             model.fc1 = model.fc1.cpu()
             ddp_model = DistributedDataParallel(model, process_group=process_group)
 
         model = model.cpu()
-        with self.assertRaisesRegex(AssertionError, "device_ids .* single-device CUDA"):
+        with self.assertRaisesRegex(AssertionError, "device_ids .* single-device GPU"):
             ddp_model = DistributedDataParallel(
                 model, device_ids=gpus, process_group=process_group)
 
@@ -2303,19 +2370,11 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         2) DDP does update the grad of locally unused parameters.
         """
         class GlobalLocalUnusedParamModule(nn.Module):
-            class Task(nn.Module):
-                def __init__(self):
-                    super(GlobalLocalUnusedParamModule.Task, self).__init__()
-                    self.p = nn.Parameter(torch.ones(2, 2))
-
-                def forward(self, x):
-                    return self.p + x
-
             def __init__(self):
                 super(GlobalLocalUnusedParamModule, self).__init__()
-                self.t0 = self.Task()
-                self.t1 = self.Task()
-                self.task_unused = self.Task()
+                self.t0 = Task()
+                self.t1 = Task()
+                self.task_unused = Task()
 
             def task_parameters(self):
                 return (self.t0.p, self.t1.p, self.task_unused.p)
@@ -2342,7 +2401,6 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             self.assertIsNotNone(t1_p.grad)
             self.assertIsNone(task_unused_p.grad)
 
-
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
 
@@ -2358,6 +2416,62 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         device_id = gpus_for_rank(self.world_size)[self.rank][0]
         gpu_model = DistributedDataParallel(
             GlobalLocalUnusedParamModule().to(device_id),
+            device_ids=[device_id],
+            process_group=process_group,
+            find_unused_parameters=True,
+        )
+        run_and_verify_grad(gpu_model)
+
+    @requires_gloo()
+    @skip_if_lt_x_gpu(2)
+    def test_find_unused_parameters_when_unused_parameters_empty(self):
+        """
+        An empty unused_parameters array does not imply find_unused_parameters =
+        false. This test makes sure that DDP allreduces unused parameters
+        accordingly where the forward pass in some process uses all parameters.
+        This unit test creates a module that uses all parameters in rank = 0, and
+        has unused parameters in other ranks.
+        """
+        class FindUnusedParamModule(nn.Module):
+            def __init__(self):
+                super(FindUnusedParamModule, self).__init__()
+                self.t0 = Task()
+                self.t1 = Task()
+
+            def task_parameters(self):
+                return (self.t0.p, self.t1.p)
+
+            def forward(self, x, rank):
+                return self.t1(self.t0(x)) if rank == 0 else self.t1(x)
+
+        def run_and_verify_grad(model):
+            # Run forward
+            output = model(8, self.rank)
+
+            # The grads of all parameters should be None at this point.
+            [self.assertIsNone(t_p.grad) for t_p in model.module.task_parameters()]
+
+            # Run backward
+            output.mean().backward()
+
+            # Now locally unused parameter should have grad updated on all ranks.
+            [self.assertIsNotNone(t_p.grad) for t_p in model.module.task_parameters()]
+
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
+
+        # Test on CPU
+        cpu_model = DistributedDataParallel(
+            FindUnusedParamModule().cpu(),
+            process_group=process_group,
+            find_unused_parameters=True,
+        )
+        run_and_verify_grad(cpu_model)
+
+        # Test on GPU
+        device_id = gpus_for_rank(self.world_size)[self.rank][0]
+        gpu_model = DistributedDataParallel(
+            FindUnusedParamModule().to(device_id),
             device_ids=[device_id],
             process_group=process_group,
             find_unused_parameters=True,
@@ -2552,15 +2666,15 @@ class DistributedDataParallelTest(MultiProcessTestCase):
                 # Skip gradients sync without calling prepare_for_backward
                 step_model(
                     ddp_model.module,
-                    input[self.rank : (self.rank + 1)],
-                    target[self.rank : (self.rank + 1)])
+                    input[self.rank:(self.rank + 1)],
+                    target[self.rank:(self.rank + 1)])
                 for i, j in zip(model.parameters(), ddp_model.parameters()):
                     self.assertNotEqual(i.grad, j.grad)
             else:
                 step_model(
                     ddp_model,
-                    input[self.rank : (self.rank + 1)],
-                    target[self.rank : (self.rank + 1)])
+                    input[self.rank:(self.rank + 1)],
+                    target[self.rank:(self.rank + 1)])
                 for i, j in zip(model.parameters(), ddp_model.parameters()):
                     # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
                     self.assertEqualIgnoreType(i.grad, j.grad)
@@ -2721,28 +2835,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             loss = criterion(output, target)
             loss.backward()
 
-    @requires_gloo()
-    def test_sparse_gradients(self):
-        store = c10d.FileStore(self.file_name, self.world_size)
-        process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
-
-        class SparseGradientModule(nn.Module):
-            def __init__(self):
-                super(SparseGradientModule, self).__init__()
-                self.embedding = nn.EmbeddingBag(10, 10, sparse=True)
-
-            def forward(self, x):
-                return F.softmax(self.embedding(x), dim=1)
-
-        # Ensure initialized weights and inputs are identical across processes
-        torch.manual_seed(1337)
-
-        vanilla_model = SparseGradientModule()
-        ddp_model = DistributedDataParallel(
-            copy.deepcopy(vanilla_model),
-            process_group=process_group,
-        )
-
+    def _run_and_verify_sparse_gradients(self, vanilla_model, ddp_model):
         mult = 2
         batch_size = mult * self.world_size
         criterion = nn.CrossEntropyLoss()
@@ -2761,6 +2854,434 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         vanilla_parameter = next(vanilla_model.parameters())
         ddp_parameter = next(ddp_model.parameters())
         self.assertEqual(vanilla_parameter.grad, ddp_parameter.grad)
+
+    @requires_gloo()
+    def test_sparse_gradients(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
+
+        # Ensure initialized weights and inputs are identical across processes
+        torch.manual_seed(1337)
+
+        vanilla_model = SparseGradientModule()
+        ddp_model = DistributedDataParallel(
+            copy.deepcopy(vanilla_model),
+            process_group=process_group,
+        )
+
+        self._run_and_verify_sparse_gradients(vanilla_model, ddp_model)
+
+    def _test_grad_layout(self, replica_devices, layer_devs, local_batch_size):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+
+        global_batch_size = local_batch_size * self.world_size
+
+        # Carry out some trials with small buckets and some with big buckets.
+        bucketsizes = (0.000001, 25)
+        # Tuples of lists.  Each list describes per-layer characteristics for one trial.
+        layer_formats = ([torch.contiguous_format] * 4,
+                         [torch.channels_last] * 2 + [torch.contiguous_format] * 2,
+                         [torch.channels_last] * 4)
+        layer_dtypes = ([torch.float] * 4,
+                        [torch.float] * 2 + [torch.half] * 2,
+                        [torch.half] * 4)
+
+        input_dev = layer_devs[0] if isinstance(layer_devs, list) else layer_devs
+        target_dev = layer_devs[-1] if isinstance(layer_devs, list) else layer_devs
+        input = torch.randn((global_batch_size, 8, 8, 8), device=input_dev, dtype=torch.float)
+        target = torch.randn((global_batch_size, 8, 4, 4), device=target_dev, dtype=torch.float)
+        local_batch_start = self.rank * local_batch_size
+        local_batch_end = (self.rank + 1) * local_batch_size
+
+        # Reducer.cpp sneakily creates one "initial bucket" that ignores the "bucket_cap_mb"
+        # argument.  The following makes sure the initial bucket also complies.
+        @contextmanager
+        def first_bucket_size(ddp_bucket_mb):
+            old_DEFAULT_FIRST_BUCKET_BYTES = dist._DEFAULT_FIRST_BUCKET_BYTES
+            dist._DEFAULT_FIRST_BUCKET_BYTES = int(ddp_bucket_mb * 1.e6)
+            try:
+                yield
+            finally:
+                dist._DEFAULT_FIRST_BUCKET_BYTES = old_DEFAULT_FIRST_BUCKET_BYTES
+
+        with torch.backends.cudnn.flags(enabled=True, deterministic=True, benchmark=False):
+            for formats, dtypes, bucketsize in product(layer_formats, layer_dtypes, bucketsizes):
+                with first_bucket_size(bucketsize):
+                    model_msg = "rank = {} formats = {} dtypes = {} bucketsize = {} ".format(self.rank, formats,
+                                                                                             dtypes, bucketsize)
+                    try:
+                        m = ConvNet(layer_devs, formats, dtypes)
+                        m_ddp = DistributedDataParallel(copy.deepcopy(m),
+                                                        device_ids=replica_devices,
+                                                        process_group=process_group,
+                                                        bucket_cap_mb=bucketsize)
+                        opt = torch.optim.SGD(m.parameters(), lr=0.1)
+                        opt_ddp = torch.optim.SGD(m_ddp.parameters(), lr=0.1)
+                        has_half = any(p.dtype is torch.half for p in m.parameters())
+                        tol = 1.e-3 if has_half else 1.e-5
+                    except BaseException:
+                        # Prints case-specific debugging info to narrow down failing case.
+                        print("Caught exception during model creation for " + model_msg, flush=True)
+                        raise
+                    # 3 iters:  First iter creates grads, second iter retests after rebucketing,
+                    # third iter tries zeroed grads.
+                    for it in range(3):
+                        iter_msg = "iter = {} ".format(it) + model_msg
+                        named_msg = iter_msg
+                        try:
+                            F.mse_loss(m(input).float(), target).backward()
+                            F.mse_loss(m_ddp(input[local_batch_start: local_batch_end]).float(),
+                                       target[local_batch_start: local_batch_end]).backward()
+                            for i, ((layer_name, m_child), m_ddp_child) in enumerate(zip(m.named_children(),
+                                                                                         m_ddp.module.children())):
+                                named_msg = layer_name + ".weight" + " " + iter_msg
+                                self.assertTrue(m_child.weight.grad.is_contiguous(memory_format=formats[i]),
+                                                named_msg)
+                                self.assertTrue(m_ddp_child.weight.grad.is_contiguous(memory_format=formats[i]),
+                                                named_msg)
+                                for j, ((param_name, p), p_ddp) in enumerate(zip(m_child.named_parameters(),
+                                                                                 m_ddp_child.parameters())):
+                                    named_msg = layer_name + "." + param_name + " " + iter_msg
+                                    self.assertEqual(p.grad, p_ddp.grad, rtol=tol, atol=tol)
+                            opt.step()
+                            opt_ddp.step()
+                            if it == 0:
+                                for p, p_ddp in zip(m.parameters(), m_ddp.parameters()):
+                                    p.grad = None
+                                    p_ddp.grad = None
+                            else:
+                                m.zero_grad()
+                                m_ddp.zero_grad()
+                        except BaseException:
+                            # Makes sure we still get info if an error occurred somewhere other than the asserts.
+                            print("Caught exception during iterations at " + named_msg, flush=True)
+                            raise
+
+    @requires_nccl()
+    @skip_if_not_multigpu
+    @skip_if_rocm
+    def test_grad_layout_1devicemodule_1replicaperprocess(self):
+        dev0 = torch.device("cuda:" + str(gpus_for_rank(self.world_size)[self.rank][0]))
+        # Tells DDP to use just one device.
+        replica_devices = [dev0]
+        # Tells _test_grad_layout to construct ConvNet with all layers on this process's first assigned device.
+        layer_devs = dev0
+        local_batch_size = 8
+        self._test_grad_layout(replica_devices, layer_devs, local_batch_size)
+
+    @unittest.skipIf(True, "Reenable when DDP with multiple GPUs per process is confirmed to work")
+    @requires_nccl()
+    @skip_if_lt_x_gpu(4)
+    @skip_if_rocm
+    def test_grad_layout_1devicemodule_2replicaperprocess(self):
+        int_devices = gpus_for_rank(self.world_size)[self.rank][:2]
+        dev0 = torch.device("cuda:" + str(int_devices[0]))
+        dev1 = torch.device("cuda:" + str(int_devices[1]))
+        # Tells DDP to replicate the model to both of this process's devices.
+        replica_devices = [dev0, dev1]
+        # Tells _test_grad_layout to construct ConvNet with all layers on this process's first assigned device.
+        layer_devs = dev0
+        local_batch_size = 16
+        self._test_grad_layout(replica_devices, layer_devs, local_batch_size)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(4)
+    @skip_if_rocm
+    def test_grad_layout_2devicemodule(self):
+        int_devices = gpus_for_rank(self.world_size)[self.rank][:2]
+        dev0 = torch.device("cuda:" + str(int_devices[0]))
+        dev1 = torch.device("cuda:" + str(int_devices[1]))
+        # DDP's default behavior for a multi-device module is "don't replicate."
+        replica_devices = None
+        # Tells _test_grad_layout to constructs this process's ConvNet on 2 devices, with 2 layers on each device.
+        layer_devs = [dev0] * 2 + [dev1] * 2
+        local_batch_size = 8
+        self._test_grad_layout(replica_devices, layer_devs, local_batch_size)
+
+    @requires_nccl()
+    @skip_if_not_multigpu
+    @skip_if_rocm
+    def test_param_layout_mismatch_error(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+
+        dev0 = torch.device("cuda:" + str(gpus_for_rank(self.world_size)[self.rank][0]))
+        layer_devs = dev0
+        layer_formats = [torch.contiguous_format] * 4 if self.rank == 0 else [torch.channels_last] * 4
+        layer_dtypes = [torch.float] * 4
+
+        m = ConvNet(layer_devs, layer_formats, layer_dtypes)
+        if self.rank == 0:
+            m_ddp = DistributedDataParallel(m, device_ids=[dev0], process_group=process_group)
+        else:
+            with self.assertRaisesRegex(RuntimeError, ".* appears not to match strides of the same param in process 0"):
+                m_ddp = DistributedDataParallel(m, device_ids=[dev0], process_group=process_group)
+
+    @requires_gloo()
+    def test_ddp_comm_hook_future_passing_cpu(self):
+        """
+        This unit test verifies whether the Future object is passed properly.
+        The callback function creates a Future object and sets a value to it.
+        """
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
+
+        # Test on CPU
+        cpu_model = DistributedDataParallel(
+            TestDdpCommHook().cpu(), process_group=process_group
+        )
+
+        # Register DDP Communication Hook
+        cpu_model._register_comm_hook(None, self._simple_hook)
+
+        # check whether the grads are equal to what then callback returns.
+        # without the comm_hook, result would be 0.25 * torch.ones(2, 2).
+        self._run_and_verify_hook(cpu_model, 8, 2 * torch.ones(2, 2))
+
+    def _gpu_model_with_ddp_comm_hook(self, process_group, hook=None):
+        device_id = gpus_for_rank(self.world_size)[self.rank][0]
+        gpu_model = DistributedDataParallel(
+            TestDdpCommHook().to(device_id),
+            device_ids=[device_id],
+            process_group=process_group,
+        )
+
+        # Register DDP Communication Hook if defined
+        if hook is not None:
+            gpu_model._register_comm_hook(None, hook)
+
+        return gpu_model
+
+    def _run_and_verify_hook(self, model, input, expected_grad):
+        # Run forward
+        output = model(input, self.rank)
+
+        # Run backward
+        output.mean().backward()
+
+        [self.assertEqual(p.grad, expected_grad) for p in model.parameters()]
+
+    def _simple_hook(
+        self, state: object, bucket: dist._GradBucket
+    ) -> torch.futures.Future:
+        fut = torch.futures.Future()
+        fut.set_result([torch.ones_like(t) for t in bucket.get_tensors()])
+
+        def fut_then(fut):
+            # Add ones to fut's result.
+            return [t + torch.ones_like(t) for t in fut.wait()]
+
+        return fut.then(fut_then)
+
+    @requires_gloo()
+    @skip_if_lt_x_gpu(2)
+    def test_ddp_comm_hook_future_passing_gpu_gloo(self):
+        """
+        This unit test verifies whether the Future object is passed properly using gloo backend.
+        The hook callback function creates a Future object and sets a value to it.
+        """
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
+
+        # Get GPU model with simple_hook registered.
+        gpu_model = self._gpu_model_with_ddp_comm_hook(process_group, self._simple_hook)
+
+        # check whether the grads are equal to what simple_hook's then callback returns.
+        # without the comm_hook, result would be 0.25 * torch.ones(2, 2).
+        self._run_and_verify_hook(gpu_model, 8, 2 * torch.ones(2, 2))
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_ddp_comm_hook_future_passing_gpu_nccl(self):
+        """
+        This unit test verifies whether the Future object is passed properly using nccl backend.
+        The hook callback function creates a Future object and sets a value to it.
+        """
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+
+        # Get GPU model with simple_hook registered.
+        gpu_model = self._gpu_model_with_ddp_comm_hook(process_group, self._simple_hook)
+
+        # check whether the grads are equal to what simple_hook's then callback returns.
+        # without the comm_hook, result would be 0.25 * torch.ones(2, 2).
+        self._run_and_verify_hook(gpu_model, 8, 2 * torch.ones(2, 2))
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_ddp_comm_hook_allreduce_hook_nccl(self):
+        """
+        This unit test verifies whether a DDP communication hook that just calls
+        allreduce gives the same result result with the case of no hook registered.
+        Without the then callback, the future_value in reducer is no longer
+        a PyObject, and this unit test verifies future_value is properly checked.
+        """
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+
+        def allreduce_hook(state: object, bucket: dist._GradBucket) -> torch._C.Future:
+            tensors = [t / self.world_size for t in bucket.get_tensors()]
+            return process_group.allreduce(tensors).get_future()
+
+        # Get GPU model with allreduce_hook registered.
+        gpu_model = self._gpu_model_with_ddp_comm_hook(process_group, allreduce_hook)
+
+        # check whether the grads are equal to what DDP without hook would return.
+        self._run_and_verify_hook(gpu_model, 8, 0.25 * torch.ones(2, 2))
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_ddp_comm_hook_allreduce_with_then_hook_nccl(self):
+        """
+        This unit test verifies whether a DDP communication hook that calls allreduce and then
+        multiplies the result by ten and divides by two gives the expected result.
+        """
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+
+        def allreduce_with_then_hook(
+            state: object, bucket: dist._GradBucket
+        ) -> torch.futures.Future:
+            tensors = [t / self.world_size for t in bucket.get_tensors()]
+            fut = process_group.allreduce(tensors).get_future()
+
+            def mult(fut):
+                # Multiply the result by 10.
+                return [10 * t for t in fut.wait()]
+
+            def div(fut):
+                # Divide the result by 2.
+                return [0.5 * t for t in fut.wait()]
+
+            return fut.then(mult).then(div)
+
+        # Get GPU model with allreduce_with_then_hook registered.
+        gpu_model = self._gpu_model_with_ddp_comm_hook(
+            process_group, allreduce_with_then_hook
+        )
+
+        # check whether the grads are equal to what allreduce returns multuplied by 5.
+        # without the comm_hook, result would be still 0.25 * torch.ones(2, 2).
+        self._run_and_verify_hook(gpu_model, 8, 1.25 * torch.ones(2, 2))
+
+    @requires_gloo()
+    def test_ddp_invalid_comm_hook_init(self):
+        """
+        This unit test makes sure that register_comm_hook properly checks the format
+        of hook defined by user. The Python hook must be callable. This test also
+        checks whether bucket annotation checked properly if defined.
+        """
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
+
+        model = DistributedDataParallel(TestDdpCommHook(), process_group=process_group)
+
+        with self.assertRaisesRegex(TypeError, "Communication hook must be callable."):
+            model._register_comm_hook(state=None, hook=1)
+
+        with self.assertRaisesRegex(
+            ValueError, "bucket annotation should be dist._GradBucket."
+        ):
+
+            def comm_hook(state: object, bucket: int) -> torch.futures.Future:
+                return torch.futures.Future()
+
+            model._register_comm_hook(state=None, hook=comm_hook)
+
+    @requires_gloo()
+    def test_ddp_invalid_comm_hook_return_type(self):
+        """
+        This test checks whether return annotation checked properly if defined. It also
+        checks whether an internal error is thrown if return type is incorrect and user
+        hasn't specified any return type annotation.
+        """
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
+
+        model = DistributedDataParallel(TestDdpCommHook(), process_group=process_group)
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "Communication hook: return annotation should be torch.futures.Future or torch._C.Future.",
+        ):
+
+            def comm_hook(state: object, bucket: dist._GradBucket) -> int:
+                return torch.futures.Future()
+
+            model._register_comm_hook(state=None, hook=comm_hook)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "callback must return a torch.futures.Future or torch._C.Future object, but got",
+        ):
+
+            def comm_hook(state: object, bucket: dist._GradBucket):
+                return 1
+
+            model._register_comm_hook(state=None, hook=comm_hook)
+
+            # Run forward
+            output = model(8, self.rank)
+
+            # Run backward
+            output.mean().backward()
+
+    @requires_gloo()
+    def test_ddp_comm_hook_register_just_once(self):
+        """
+        DDP communication hook can only be registered once. This test validates whether
+        the error is thrown properly when register_comm_hook is called more than once.
+        """
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
+
+        model = DistributedDataParallel(TestDdpCommHook(), process_group=process_group)
+
+        def dummy_hook(state, bucket):
+            fut = torch.futures.Future()
+            fut.set_result(bucket.get_tensors())
+            return fut
+
+        model._register_comm_hook(None, dummy_hook)
+
+        with self.assertRaisesRegex(
+            RuntimeError, "register_comm_hook can only be called once."
+        ):
+            model._register_comm_hook(None, dummy_hook)
+
+    @requires_gloo()
+    def test_ddp_comm_hook_sparse_gradients(self):
+        """
+        Runs "test_sparse_gradients" unit test with DDP communication hook. We define a
+        simple hook that does allreduce and works with gloo backend for this test.
+        """
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
+
+        # Ensure initialized weights and inputs are identical across processes
+        torch.manual_seed(1337)
+
+        vanilla_model = SparseGradientModule()
+        ddp_model = DistributedDataParallel(
+            copy.deepcopy(vanilla_model),
+            process_group=process_group,
+        )
+
+        # "get_future" API does not support gloo backend, see GH Issue #42048.
+        # Instead, we wait for an allreduce work, and write its result to a Future.
+        def allreduce_hook_gloo(state: object, bucket: dist._GradBucket) -> torch.futures.Future:
+            # Prepare allreduced grad bucket tensors by running an async work.
+            work = process_group.allreduce(bucket.get_tensors())
+            work.wait()
+
+            fut = torch.futures.Future()
+            fut.set_result([t / self.world_size for t in bucket.get_tensors()])
+            return fut
+
+        ddp_model._register_comm_hook(None, allreduce_hook_gloo)
+
+        self._run_and_verify_sparse_gradients(vanilla_model, ddp_model)
 
 
 class ReducerModule(nn.Module):
@@ -2817,13 +3338,14 @@ class ReducerTest(TestCase):
         buckets = [list(indices) for _, indices in group_by_dtype]
         dist.Reducer(parameters, buckets, self.process_group)
 
-    def _create_reducer_for_models(self, models):
+    def _create_reducer_for_models(self, models, find_unused_parameters=False):
         parameters = [list(model.parameters()) for model in models]
         group_by_dtype = groupby(
             range(len(parameters[0])),
             key=lambda i: parameters[0][i].dtype)
         buckets = [list(indices) for _, indices in group_by_dtype]
-        return dist.Reducer(parameters, buckets, self.process_group)
+        return dist.Reducer(parameters, buckets, self.process_group,
+                            find_unused_parameters=find_unused_parameters)
 
     def test_forward_backward_single_replica(self):
         batch_size = 10
@@ -2858,7 +3380,7 @@ class ReducerTest(TestCase):
     def test_forward_backward_unused_parameters(self):
         batch_size = 10
         model = self._create_mixed_precision_model()
-        reducer = self._create_reducer_for_models([model])
+        reducer = self._create_reducer_for_models([model], find_unused_parameters=True)
         loss = nn.CrossEntropyLoss()
         input = torch.rand([batch_size, 2], dtype=torch.double)
         target = torch.LongTensor([random.randrange(4) for _ in range(batch_size)])
@@ -2879,7 +3401,7 @@ class ReducerTest(TestCase):
     def test_forward_backward_optimizer(self):
         batch_size = 10
         model = self._create_mixed_precision_model()
-        reducer = self._create_reducer_for_models([model])
+        reducer = self._create_reducer_for_models([model], find_unused_parameters=True)
         loss = nn.CrossEntropyLoss()
         optimizer = torch.optim.Adam(model.parameters())
         for i in range(3):
@@ -2896,6 +3418,27 @@ class ReducerTest(TestCase):
             reducer.prepare_for_backward(output)
             output.backward()
             optimizer.step()
+
+    def test_ddp_comm_hook_multiple_replica_check(self):
+        """
+        DDP communication hook does not support single process multiple device mode.
+        This unit test validates this condition is properly checked by reducer.
+        Related to GH Issue #42542.
+        """
+        num_replicas = 2
+        models = [self._create_mixed_precision_model() for _ in range(num_replicas)]
+        reducer = self._create_reducer_for_models(models)
+
+        def dummy_hook(state, bucket):
+            fut = torch.futures.Future()
+            fut.set_result(bucket.get_tensors())
+            return fut
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Communication hook does not support single process multiple device mode.",
+        ):
+            dist._register_comm_hook(reducer, None, dummy_hook)
 
 
 class ComputeBucketAssignmentTest(TestCase):
@@ -2942,6 +3485,7 @@ class ComputeBucketAssignmentTest(TestCase):
         ]
         result = dist._compute_bucket_assignment_by_size(tensors, [200, 400])
         self.assertEqual([[0], [1], [2, 4], [3, 5]], result)
+
 
 @skip_if_rocm
 @unittest.skipIf(TEST_WITH_TSAN, "TSAN is not fork-safe since we're forking in a multi-threaded environment")
@@ -3017,6 +3561,8 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
             # aborting nccl communicators before throwing Operation timed out
             a = torch.rand(10).cuda(self.rank)
         elif self.rank == 1:
+            # Clean up structures (ex: files for FileStore before going down)
+            del process_group
             func()
         else:
             # Wait for timeout
@@ -3029,31 +3575,31 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
     @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(3)
     def test_nccl_errors_blocking_clean_exit(self):
-        self._test_nccl_errors_blocking(lambda : sys.exit(0))
+        self._test_nccl_errors_blocking(lambda: sys.exit(0))
 
     @requires_nccl()
     @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(3)
     def test_nccl_errors_blocking_nonzero_exit(self):
-        self._test_nccl_errors_blocking(lambda : sys.exit(1))
+        self._test_nccl_errors_blocking(lambda: sys.exit(1))
 
     @requires_nccl()
     @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(3)
     def test_nccl_errors_blocking_abort(self):
-        self._test_nccl_errors_blocking(lambda : os.abort())
+        self._test_nccl_errors_blocking(lambda: os.abort())
 
     @requires_nccl()
     @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(3)
     def test_nccl_errors_blocking_sigkill(self):
-        self._test_nccl_errors_blocking(lambda : os.kill(os.getpid(), signal.SIGKILL))
+        self._test_nccl_errors_blocking(lambda: os.kill(os.getpid(), signal.SIGKILL))
 
     @requires_nccl()
     @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(3)
     def test_nccl_errors_blocking_sigterm(self):
-        self._test_nccl_errors_blocking(lambda : os.kill(os.getpid(), signal.SIGTERM))
+        self._test_nccl_errors_blocking(lambda: os.kill(os.getpid(), signal.SIGTERM))
 
     @requires_nccl()
     @requires_nccl_version(2400, "Need NCCL 2.4+ for error checking")
@@ -3071,7 +3617,6 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
             with self.assertRaisesRegex(RuntimeError, "Operation timed out!"):
                 # This should timeout
                 process_group.barrier().wait()
-
 
     def _run_invalid_nccl_blocking_wait_env(self, val):
         os.environ["NCCL_BLOCKING_WAIT"] = val
@@ -3099,7 +3644,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
                     return
                 else:
                     raise e
-            time.sleep(1)
+            time.sleep(0.1)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(3)

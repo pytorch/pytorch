@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/passes/fuse_linear.h>
 #include <torch/csrc/jit/passes/graph_rewrite_helper.h>
 #include <torch/csrc/jit/passes/quantization/helper.h>
+#include <torch/csrc/jit/passes/remove_mutation.h>
 
 #include <regex>
 #include <stack>
@@ -34,7 +35,6 @@ using QConfigTypePtrMap =
 using NameModuleVector = std::vector<std::pair<std::string, Module>>;
 using OptionalModuleVector = std::vector<c10::optional<Module>>;
 using ModuleMethodVector = std::vector<std::pair<Module, std::string>>;
-using graph_rewrite_helper::MatchFilter;
 using graph_rewrite_helper::PatternInfo;
 using graph_rewrite_helper::replaceConvolutionWithAtenConv;
 
@@ -124,11 +124,24 @@ class ModuleCloneHelper {
     size_t N = type->numAttributes();
     for (size_t i = 0; i < N; ++i) {
       IValue s = module._ivalue()->getSlot(i);
-      if (type->getAttribute(i)->is_module()) {
+      std::string attr_name = type->getAttributeName(i);
+      TypePtr attr_type = type->getAttribute(i);
+      if (attr_type->is_module()) {
         const Module& orig = Module(s.toObject());
         Module cloned =
             clone_impl(orig, module_qconfig_map, type_remap, inplace, memo);
-        r.register_module(type->getAttributeName(i), cloned);
+
+        // NOTE: why do we need to manually setattr on object instead of using
+        // register_module here? because the attr can be a module interface
+        // type and hold a Module object still. register_module will not let us
+        // correctly set up the type for this attr, so we had to do this
+        // manually. In the case it's an interface type, the type will be shared
+        // by the new cloned instance in the same compilation unit bc it only
+        // contains a list of functionSchema
+        r.type()->addOrCheckAttribute(
+            attr_name,
+            attr_type->cast<ClassType>() ? cloned.type() : attr_type);
+        r._ivalue()->setAttr(attr_name, cloned._ivalue());
       } else {
         // we'll deepcopy the IValue in non inplace option
         r.register_attribute(
@@ -176,10 +189,11 @@ class ModuleCloneHelper {
       // remapping type for module instance
       if (node->kind() == prim::CallMethod) {
         Value* instance = node->inputs()[0];
-        auto path = getModuleAccessPath(instance, self);
-        auto child = findChildModule(source, path);
-        auto qconfig = module_qconfig_map.at(child._ivalue());
-        instance->setType(type_remap_fn(instance->type(), qconfig));
+        auto child_opt = getInvokedModuleOpt(source, node, self);
+        if (child_opt.has_value()) {
+          auto qconfig = module_qconfig_map.at(child_opt->_ivalue());
+          instance->setType(type_remap_fn(instance->type(), qconfig));
+        }
       }
       // We don't remap output and the remapping of module type
       // will be done in CallMethod, we don't support type remapping
@@ -242,19 +256,26 @@ class ModuleCloneHelper {
     remapTypes(graph.get(), source, target, module_qconfig_map, type_remap_fn);
     // remap self
     graph->inputs()[0]->setType(target.type());
+    // we only support %self being Module in the arguments of function
+    auto schema_type_remap_fn = [&](TypePtr type_ptr) {
+      return type_remap_fn(type_ptr, module_qconfig_map.at(source._ivalue()));
+    };
+    auto schema =
+        method.getSchema().cloneWithRemappedTypes(schema_type_remap_fn);
     const auto this_method_name =
         c10::QualifiedName(*target.type()->name(), method.name());
     auto copied = target._ivalue()->compilation_unit()->create_function(
         this_method_name, graph);
     target.type()->addMethod(copied);
-    // we'll use default schema for cloned method
+    copied->setSchema(std::move(schema));
   }
 };
 
 class InsertObserversHelper {
  public:
   explicit InsertObserversHelper(
-      const ModuleQConfigMap& map, QuantType quant_type)
+      const ModuleQConfigMap& map,
+      QuantType quant_type)
       : module_qconfig_map_(map), quant_type_(quant_type) {}
 
   // TODO: replace (module, method_name) with graph?
@@ -265,7 +286,6 @@ class InsertObserversHelper {
   // of called graph, this is used to navigate through the graph
   // to find the observer for a given value
   void fillBoundaryValueMap(Module& module, const std::string& method_name);
-
 
   // analyze the graph and record necessary information that can
   // be used in insert observers
@@ -330,7 +350,7 @@ class InsertObserversHelper {
       Module& module,
       const std::string& method_name);
 
-  bool valueNeedsToBeQuantized(Value* v);
+  bool valueNeedsToBeQuantized(Value* v, const QConfig& qconfig);
 
   bool isObserved(
       Value* v,
@@ -472,6 +492,113 @@ class InsertObserversHelper {
   // These are the IR patterns we match to skip inserting observers.
   // They are compiled once on construction and used repeatedly within
   // the pass.
+
+  // nn.Linear + nn.ReLU
+  const PatternInfo nn_linear_nn_relu = PatternInfo::parse_from_str(
+      R"(
+graph(%input, %linear, %relu):
+    %first_output = prim::CallMethod[name="forward"](%linear, %input)
+    %second_output = prim::CallMethod[name="forward\\d*"](%relu, %first_output)
+    return (%second_output) )",
+      {is_linear_module, is_relu_module});
+
+  // nn.Linear + F.relu
+  const PatternInfo nn_linear_f_relu = PatternInfo::parse_from_str(
+      R"(
+graph(%input, %linear, %relu, %inplace):
+    %first_output = prim::CallMethod[name="forward"](%linear, %input)
+    %second_output = prim::CallFunction(%relu, %first_output, %inplace)
+    return (%second_output) )",
+      {is_linear_module, is_functional_relu});
+
+  // nn.Linear + aten::relu
+  const PatternInfo nn_linear_aten_relu = PatternInfo::parse_from_str(
+      R"(
+graph(%input, %linear, %relu):
+    %first_output = prim::CallMethod[name="forward"](%linear, %input)
+    %second_output = aten::relu(%first_output)
+    return (%second_output) )",
+      {is_linear_module});
+
+  // nn.Linear + aten::relu_
+  const PatternInfo nn_linear_aten_relu_ = PatternInfo::parse_from_str(
+      R"(
+graph(%input, %linear, %relu):
+    %first_output = prim::CallMethod[name="forward"](%linear, %input)
+    %second_output = aten::relu_(%first_output)
+    return (%second_output) )",
+      {is_linear_module});
+
+  // F.linear + nn.ReLU
+  const PatternInfo f_linear_nn_relu = PatternInfo::parse_from_str(
+      R"(
+graph(%input, %weight, %bias, %linear, %relu):
+    %first_output = prim::CallFunction(%linear, %input, %weight, %bias)
+    %second_output = prim::CallMethod[name="forward\\d*"](%relu, %first_output)
+    return (%second_output) )",
+      {is_functional_linear, is_relu_module});
+
+  // F.linear + F.relu
+  const PatternInfo f_linear_f_relu = PatternInfo::parse_from_str(
+      R"(
+graph(%input, %weight, %bias, %linear, %relu, %inplace):
+    %first_output = prim::CallFunction(%linear, %input, %weight, %bias)
+    %second_output = prim::CallFunction(%relu, %first_output, %inplace)
+    return (%second_output) )",
+      {is_functional_linear, is_functional_relu});
+
+  // F.linear + aten::relu
+  const PatternInfo f_linear_aten_relu = PatternInfo::parse_from_str(
+      R"(
+graph(%input, %weight, %bias, %linear, %relu):
+    %first_output = prim::CallFunction(%linear, %input, %weight, %bias)
+    %second_output = aten::relu(%first_output)
+    return (%second_output) )",
+      {is_functional_linear});
+
+  // F.linear + aten::relu_
+  const PatternInfo f_linear_aten_relu_ = PatternInfo::parse_from_str(
+      R"(
+graph(%input, %weight, %bias, %linear, %relu):
+    %first_output = prim::CallFunction(%linear, %input, %weight, %bias)
+    %second_output = aten::relu_(%first_output)
+    return (%second_output) )",
+      {is_functional_linear});
+
+  // aten::linear + nn.ReLU
+  const PatternInfo aten_linear_nn_relu = PatternInfo::parse_from_str(
+      R"(
+graph(%input, %weight, %bias, %relu):
+    %first_output = aten::linear(%input, %weight, %bias)
+    %second_output = prim::CallMethod[name="forward\\d*"](%relu, %first_output)
+    return (%second_output) )",
+      {is_relu_module});
+
+  // aten::linear + F.relu
+  const PatternInfo aten_linear_f_relu = PatternInfo::parse_from_str(
+      R"(
+graph(%input, %weight, %bias, %relu, %inplace):
+    %first_output = aten::linear(%input, %weight, %bias)
+    %second_output = prim::CallFunction(%relu, %first_output, %inplace)
+    return (%second_output) )",
+      {is_functional_relu});
+
+  // aten::linear + aten::relu
+  const PatternInfo aten_linear_aten_relu = PatternInfo::parse_from_str(
+      R"(
+graph(%input, %weight, %bias):
+    %first_output = aten::linear(%input, %weight, %bias)
+    %second_output = aten::relu(%first_output)
+    return (%second_output) )");
+
+  // aten::linear + aten::relu_
+  const PatternInfo aten_linear_aten_relu_ = PatternInfo::parse_from_str(
+      R"(
+graph(%input, %weight, %bias):
+    %first_output = aten::linear(%input, %weight, %bias)
+    %second_output = aten::relu_(%first_output)
+    return (%second_output) )");
+
   const PatternInfo nn_conv1d_f_relu = PatternInfo::parse_from_str(
       R"(
 graph(%self, %input, %conv, %relu, %inplace):
@@ -746,20 +873,30 @@ graph(%self, %a, %b):
 
   const std::vector<std::reference_wrapper<const PatternInfo>> delay_patterns =
       {
+          nn_linear_f_relu,      nn_linear_nn_relu,
+          nn_linear_aten_relu,   nn_linear_aten_relu_,
+          f_linear_f_relu,       f_linear_nn_relu,
+          f_linear_aten_relu,    f_linear_aten_relu_,
+          aten_linear_f_relu,    aten_linear_nn_relu,
+          aten_linear_aten_relu, aten_linear_aten_relu_,
+
           nn_conv1d_f_relu,      nn_conv1d_nn_relu,
           nn_conv1d_aten_relu,   nn_conv1d_aten_relu_,
           nn_conv2d_f_relu,      nn_conv2d_nn_relu,
           nn_conv2d_aten_relu,   nn_conv2d_aten_relu_,
           nn_conv3d_f_relu,      nn_conv3d_nn_relu,
           nn_conv3d_aten_relu,   nn_conv3d_aten_relu_,
+
           add_nn_relu,           add_f_relu,
           inplace_add_nn_relu,   inplace_add_f_relu,
           add_aten_relu,         add_aten_relu_,
           inplace_add_aten_relu, inplace_add_aten_relu_,
+
           nn_bn2d_nn_relu,       nn_bn2d_f_relu,
           nn_bn2d_aten_relu,     nn_bn2d_aten_relu_,
           nn_bn3d_nn_relu,       nn_bn3d_f_relu,
           nn_bn3d_aten_relu,     nn_bn3d_aten_relu_,
+
           mul_nn_relu,           mul_f_relu,
           inplace_mul_nn_relu,   inplace_mul_f_relu,
           mul_aten_relu,         mul_aten_relu_,
@@ -785,8 +922,10 @@ ModuleMethodVector InsertObserversHelper::getInvokedMethods(
         continue;
       }
       if (n->kind() == prim::CallMethod) {
-        invoked_methods.push_back(std::make_pair(
-            getInvokedModule(module, n, graph->inputs()[0]), n->s(attr::name)));
+        auto m_opt = getInvokedModuleOpt(module, n, graph->inputs()[0]);
+        if (m_opt.has_value()) {
+          invoked_methods.push_back(std::make_pair(*m_opt, n->s(attr::name)));
+        }
       }
 
       for (Block* subblock : n->blocks()) {
@@ -927,7 +1066,11 @@ void InsertObserversHelper::fillBoundaryValueMap(
         // for CallFunction start with actual input
         size_t input_offset;
         if (n->kind() == prim::CallMethod) {
-          auto m = getInvokedModule(module, n, self);
+          auto m_opt = getInvokedModuleOpt(module, n, self);
+          if (!m_opt.has_value()) {
+            continue;
+          }
+          auto m = *m_opt;
           g = m.get_method(n->s(attr::name)).graph();
           input_offset = 0;
         } else {
@@ -937,16 +1080,22 @@ void InsertObserversHelper::fillBoundaryValueMap(
         // add mapping from callsite value to value in called graph
         for (auto i = 0U; i < g->outputs().size(); ++i) {
           auto* return_val = g->outputs()[i];
-          GRAPH_DEBUG("Boundary Map[return]:", n->output(i)->debugName(),
-                      " -> ", return_val->debugName());
+          GRAPH_DEBUG(
+              "Boundary Map[return]:",
+              n->output(i)->debugName(),
+              " -> ",
+              return_val->debugName());
           boundary_value_map_[n->output(i)].insert(return_val);
         }
         for (auto i = 0U; i < g->inputs().size(); ++i) {
           auto caller_input_index = i + input_offset;
           auto* caller_input = n->input(caller_input_index);
           auto* input_val = g->inputs()[i];
-          GRAPH_DEBUG("Boundary Map[input]:", caller_input->debugName(),
-                      " -> ", input_val->debugName());
+          GRAPH_DEBUG(
+              "Boundary Map[input]:",
+              caller_input->debugName(),
+              " -> ",
+              input_val->debugName());
           boundary_value_map_[caller_input].insert(input_val);
         }
       } else if (n->kind() == prim::If) {
@@ -954,8 +1103,11 @@ void InsertObserversHelper::fillBoundaryValueMap(
           blocks_to_visit.push(subblock);
           for (Value* v : n->outputs()) {
             Value* subblock_output = subblock->outputs()[v->offset()];
-            GRAPH_DEBUG("Boundary Map[if_output]:", v->debugName(),
-                        " -> ", subblock_output->debugName());
+            GRAPH_DEBUG(
+                "Boundary Map[if_output]:",
+                v->debugName(),
+                " -> ",
+                subblock_output->debugName());
             boundary_value_map_[v].insert(subblock_output);
           }
         }
@@ -981,15 +1133,10 @@ void InsertObserversHelper::preprocess(
 
   Method method = module.get_method(method_name);
   auto graph = method.graph();
-  // TODO: remove constant prop, add separate graph
-  // cleanup step before insert observers
-  // To cleanup traced graph
-  ConstantPooling(graph);
-  ConstantPropagation(graph);
-  // must do constant propagation first before replacement
-  replaceConvolutionWithAtenConv(graph);
   // fuse decomposed linear into aten::linear
   FuseLinear(graph);
+  replaceConvolutionWithAtenConv(graph);
+  RemoveListMutation(graph);
 }
 
 void InsertObserversHelper::analyze(
@@ -1010,7 +1157,9 @@ void InsertObserversHelper::analyze(
   fillPassThroughValueMap(graph);
 }
 
-bool InsertObserversHelper::valueNeedsToBeQuantized(Value* v) {
+bool InsertObserversHelper::valueNeedsToBeQuantized(
+    Value* v,
+    const QConfig& qconfig) {
   if (isBiasOfConvOrLinear(v) ||
       !(v->type()->isSubtypeOf(TensorType::get()) ||
         v->type()->isSubtypeOf(ListType::ofTensors()))) {
@@ -1020,8 +1169,18 @@ bool InsertObserversHelper::valueNeedsToBeQuantized(Value* v) {
   // of the quantizable function.
   if (quant_type_ == QuantType::STATIC) {
     // Check whether producer is quantizable
-    if (nodeQuantizable(v->node()) || isPropagateQuantNode(v->node())) {
+    if (nodeQuantizable(v->node()) || isPropagateQuantOp(v->node())) {
       return true;
+    }
+  }
+  if (quant_type_ == QuantType::DYNAMIC) {
+    // Check the dtype of the observer module.
+    Module observer_module = getObserverModuleFor(v, qconfig);
+    auto scalar_type = observer_module.attr("dtype");
+    // For inputs with Fp16 type that are not-weights we don't observer them for
+    // dynamic quantization.
+    if (scalar_type == at::ScalarType::Half && !isWeight(v)) {
+      return false;
     }
   }
   // Check whether node input value is quantizable
@@ -1051,7 +1210,7 @@ void InsertObserversHelper::fillValueObserverMap(
   }
   auto qconfig = *qconfig_opt;
   for (auto* v : graph->inputs()) {
-    if (valueNeedsToBeQuantized(v)) {
+    if (valueNeedsToBeQuantized(v, qconfig)) {
       GRAPH_DEBUG("Recording observer for ", v->debugName());
       GRAPH_DUMP("In graph:", v->owningGraph());
       observer_for_value_[v] = getObserverModuleFor(v, qconfig);
@@ -1064,7 +1223,7 @@ void InsertObserversHelper::fillValueObserverMap(
     blocks_to_visit.pop();
     for (Node* n : b->nodes()) {
       for (Value* v : n->outputs()) {
-        if (valueNeedsToBeQuantized(v)) {
+        if (valueNeedsToBeQuantized(v, qconfig)) {
           GRAPH_DEBUG("Recording observer for ", v->debugName());
           GRAPH_DUMP("In graph:", v->owningGraph());
           observer_for_value_[v] = getObserverModuleFor(v, qconfig);
@@ -1087,8 +1246,11 @@ c10::optional<Module> InsertObserversHelper::getObserverFor(Value* v) {
   c10::optional<Module> result;
   if (boundary_value_map_.count(v)) {
     for (Value* next : boundary_value_map_.at(v)) {
-      GRAPH_DEBUG("Going through boundary map:", v->debugName(), " --> ",
-                  next->debugName());
+      GRAPH_DEBUG(
+          "Going through boundary map:",
+          v->debugName(),
+          " --> ",
+          next->debugName());
       GRAPH_DUMP("From graph:", v->owningGraph());
       GRAPH_DUMP("To graph:", next->owningGraph());
       auto observer_opt = getObserverFor(next);
@@ -1105,8 +1267,8 @@ c10::optional<Module> InsertObserversHelper::getObserverFor(Value* v) {
       }
     }
   }
-  GRAPH_DEBUG("Observer module config for ", v->debugName(), ":",
-              result.has_value());
+  GRAPH_DEBUG(
+      "Observer module config for ", v->debugName(), ":", result.has_value());
   return result;
 }
 
@@ -1235,7 +1397,11 @@ InsertObserversHelper::insertObserversFor(
         size_t input_offset;
         bool is_udf_for_subblock = is_user_defined_function;
         if (n->kind() == prim::CallMethod) {
-          m = getInvokedModule(module, n, self);
+          auto m_opt = getInvokedModuleOpt(module, n, self);
+          if (!m_opt.has_value()) {
+            continue;
+          }
+          m = *m_opt;
           g = m.get_method(n->s(attr::name)).graph();
           input_offset = 0;
         } else { // CallFunction
@@ -1324,7 +1490,8 @@ InsertObserversHelper::insertObserversFor(
                 aggregated_output_observe_state ==
                     subblock_output_observe_state,
                 "branches for `if` should return values that are observed "
-                "consistently");
+                "consistently, if node:",
+                *n);
           } else {
             aggregated_output_observe_state = subblock_output_observe_state;
           }
@@ -1336,9 +1503,10 @@ InsertObserversHelper::insertObserversFor(
           }
         }
       } else if (n->kind() == prim::Loop) {
-        TORCH_WARN_ONCE("prim::Loop is not yet supported in quantization, "
-                        "please make sure nothing needs to be quantized in the "
-                        "loop");
+        TORCH_WARN_ONCE(
+            "prim::Loop is not yet supported in quantization, "
+            "please make sure nothing needs to be quantized in the "
+            "loop");
       }
       for (Value* v : n->outputs()) {
         propagateObservedProperty(v, block_observed_values);
@@ -1390,6 +1558,7 @@ void InsertObserversHelper::propagateObservedProperty(
           observed_values_.count(v) || block_observed_values.count(v);
     }
     if (all_observed) {
+      GRAPH_DEBUG("Pass through observed property in node:", *output->node());
       // This is to propagate observed property through
       // all ops that doesn't require observation
       block_observed_values.insert(output);

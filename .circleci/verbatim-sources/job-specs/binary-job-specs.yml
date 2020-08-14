@@ -1,8 +1,8 @@
   binary_linux_build:
     <<: *binary_linux_build_params
     steps:
-    # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - checkout
+    - calculate_docker_image_tag
     - run:
         <<: *binary_checkout
     - run:
@@ -42,6 +42,11 @@
         command: |
             source "/pytorch/.circleci/scripts/binary_linux_build.sh"
     - run:
+        name: Output binary sizes
+        no_output_timeout: "1m"
+        command: |
+            ls -lah /final_pkgs
+    - run:
         name: save binary size
         no_output_timeout: "5m"
         command: |
@@ -55,6 +60,9 @@
         root: /
         paths: final_pkgs
 
+    - store_artifacts:
+        path: /final_pkgs
+
     # This should really just be another step of the binary_linux_build job above.
     # This isn't possible right now b/c the build job uses the docker executor
     # (otherwise they'd be really really slow) but this one uses the macine
@@ -67,7 +75,6 @@
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - checkout
-    # TODO: We shouldn't attach the workspace multiple times
     - attach_workspace:
         at: /home/circleci/project
     - setup_linux_system_environment
@@ -90,6 +97,7 @@
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - checkout
+    - calculate_docker_image_tag
     - setup_linux_system_environment
     - setup_ci_environment
     - attach_workspace:
@@ -114,6 +122,7 @@
       image: ubuntu-1604:201903-01
     steps:
     - checkout
+    - calculate_docker_image_tag
     - setup_linux_system_environment
     - setup_ci_environment
     - run:
@@ -276,7 +285,7 @@
         default: ""
       executor:
         type: string
-        default: "windows-cpu-with-nvidia-cuda"
+        default: "windows-xlarge-cpu-with-nvidia-cuda"
     executor: <<parameters.executor>>
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
@@ -305,7 +314,7 @@
         default: ""
       executor:
         type: string
-        default: "windows-cpu-with-nvidia-cuda"
+        default: "windows-medium-cpu-with-nvidia-cuda"
     executor: <<parameters.executor>>
     steps:
     - checkout
@@ -354,7 +363,7 @@
         default: ""
       executor:
         type: string
-        default: "windows-cpu-with-nvidia-cuda"
+        default: "windows-medium-cpu-with-nvidia-cuda"
     executor: <<parameters.executor>>
     steps:
     - checkout

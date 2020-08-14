@@ -11,8 +11,8 @@ import torch.quantization.observer as obs
 qobserver_short_configs_dict = {
     'attr_names': ('C', 'M', 'N', 'dtype', 'device'),
     'attrs': (
-        (3, 512, 512, torch.quint8, torch.device('cpu')),
-        (3, 512, 512, torch.quint8, torch.device('cuda')),
+        (3, 512, 512, torch.quint8, 'cpu'),
+        (3, 512, 512, torch.quint8, 'cuda'),
     ),
     'tags': ('short',),
 }
@@ -70,6 +70,13 @@ qobserver_per_channel_list = op_bench.op_list(
     ]
 )
 
+qobserver_calculate_qparams_list = op_bench.op_list(
+    attr_names=['op_name', 'op_func'],
+    attrs=[
+        ['HistogramObserverCalculateQparams', obs.HistogramObserver],
+    ]
+)
+
 
 class QObserverBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, C, M, N, dtype, qscheme, op_func, device):
@@ -78,6 +85,15 @@ class QObserverBenchmark(op_bench.TorchBenchmarkBase):
 
     def forward(self):
         return self.op_func(self.f_input)
+
+class QObserverBenchmarkCalculateQparams(op_bench.TorchBenchmarkBase):
+    def init(self, C, M, N, dtype, qscheme, op_func, device):
+        self.f_input = torch.rand(C, M, N, device=device)
+        self.q_observer = op_func(dtype=dtype, qscheme=qscheme).to(device)
+        self.q_observer(self.f_input)
+
+    def forward(self):
+        return self.q_observer.calculate_qparams()
 
 
 op_bench.generate_pt_tests_from_op_list(
@@ -89,6 +105,11 @@ op_bench.generate_pt_tests_from_op_list(
     qobserver_per_channel_list,
     qobserver_per_channel_configs_short + qobserver_per_channel_configs_long,
     QObserverBenchmark)
+
+op_bench.generate_pt_tests_from_op_list(
+    qobserver_calculate_qparams_list,
+    qobserver_per_tensor_configs_short + qobserver_per_tensor_configs_long,
+    QObserverBenchmarkCalculateQparams)
 
 
 if __name__ == "__main__":
