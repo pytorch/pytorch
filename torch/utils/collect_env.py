@@ -220,7 +220,7 @@ def get_os(run_lambda):
         # Try reading /etc/*-release
         desc = check_release_file(run_lambda)
         if desc is not None:
-            return '{} ({})'.forat(desc, machine())
+            return '{} ({})'.format(desc, machine())
 
         return '{} ({})'.format(platform, machine())
 
