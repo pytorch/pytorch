@@ -201,7 +201,8 @@ class UnaryOpTest(serial.SerializedTestCase):
     def test_sigmoid(self):
         opname = "Sigmoid"
         regions = [[-8., -4.], [-4., -2.], [-2., -1.], [-1., -.5], [-.5, -.25],
-                   [-.25, .25], [.25, .5], [.5, 1.], [1., 2.], [2., 4.],
+                   [-.25, -.125], [-.125, .125], [.125, .25], [.25, .5], [.5, 1.],
+                   [1., 2.], [2., 4.],
                    [4., 8.]]
         self._test_op_w_ulp_error(opname, regions, atol=0, err_threshold=2.5)
 
