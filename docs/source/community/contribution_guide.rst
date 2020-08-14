@@ -1,10 +1,8 @@
 PyTorch Contribution Guide
 ==========================
 
-
 PyTorch is a GPU-accelerated Python written tensor computation package for
 developing deep neural networks built on tape-based autograd systems.
-
 
 The PyTorch Contribution Process
 --------------------------------
@@ -23,7 +21,7 @@ here is the basic process.
    source contributions come from people scratching their own itches.
    However, if you don't know what you want to work on, or are just
    looking to get more acquainted with the project, here are some tips
-   for how to find appropriate tasks:
+   on finding appropriate tasks:
 
    -  Look through the `issue
       tracker <https://github.com/pytorch/pytorch/issues/>`__ and see if
@@ -72,7 +70,7 @@ here is the basic process.
 -  **Open a pull request.**
 
    -  If you are not ready for the pull request to be reviewed, tag it
-      with [WIP]. We will ignore it when doing review passes. If you are
+      with [WIP]. We will ignore it while doing review passes. If you are
       working on a complex change, it's good to start things off as WIP,
       because you will need to spend time looking at CI results to see
       if things worked out or not.
