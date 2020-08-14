@@ -89,12 +89,6 @@ void checkSameSize(const std::string& fn_name, Tensor qt, Tensor rt) {
       " only works with Tensors with the same shape");
 }
 
-void commonTensorChecks(const std::string& fn_name, Tensor qtensor, Tensor rtensor) {
-  checkFloatTensor(fn_name, rtensor);
-  checkSameDevice(fn_name, rtensor, qtensor);
-  checkSameSize(fn_name, qtensor, rtensor);
-}
-
 } // anonymous namespace
 
 Tensor quantize_tensor_per_tensor_affine(
@@ -105,7 +99,9 @@ Tensor quantize_tensor_per_tensor_affine(
   static const auto fn_name = "quantize_tensor_per_tensor_affine";
 
   checkRoundingMode(fn_name);
-  commonTensorChecks(fn_name, qtensor, rtensor);
+  checkFloatTensor(fn_name, rtensor);
+  checkSameDevice(fn_name, rtensor, qtensor);
+  checkSameSize(fn_name, qtensor, rtensor);
 
   AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(), fn_name, [&]() {
     checkQuantizedTensor<scalar_t>(fn_name, qtensor);
@@ -126,8 +122,10 @@ Tensor quantize_tensor_per_channel_affine(
   static const auto fn_name = "quantize_tensor_per_channel_affine";
 
   checkRoundingMode(fn_name);
+  checkFloatTensor(fn_name, rtensor);
   checkCPUTensor(fn_name, rtensor);
-  commonTensorChecks(fn_name, qtensor, rtensor);
+  checkSameDevice(fn_name, rtensor, qtensor);
+  checkSameSize(fn_name, qtensor, rtensor);
 
   AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(), fn_name, [&]() {
     checkQuantizedTensor<scalar_t>(fn_name, qtensor);
@@ -160,8 +158,10 @@ Tensor quantize_tensor_per_channel_float_qparams(
   static const auto fn_name = "quantize_tensor_per_channel_float_qparams";
 
   checkRoundingMode(fn_name);
+  checkFloatTensor(fn_name, rtensor);
   checkCPUTensor(fn_name, rtensor);
-  commonTensorChecks(fn_name, qtensor, rtensor);
+  checkSameDevice(fn_name, rtensor, qtensor);
+  checkSameSize(fn_name, qtensor, rtensor);
 
   AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(), fn_name, [&]() {
     checkQuantizedTensor<scalar_t>(fn_name, qtensor);
@@ -191,8 +191,9 @@ Tensor dequantize_tensor_per_tensor_affine(
     double scale,
     int64_t zero_point) {
   static const auto fn_name = "dequantize_tensor_per_tensor_affine";
-  commonTensorChecks(fn_name, qtensor, rtensor);
-
+  checkFloatTensor(fn_name, rtensor);
+  checkSameDevice(fn_name, rtensor, qtensor);
+  checkSameSize(fn_name, qtensor, rtensor);
 
   AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(), fn_name, [&]() {
     checkQuantizedTensor<scalar_t>(fn_name, qtensor);
@@ -212,8 +213,10 @@ Tensor dequantize_tensor_per_channel_affine(
     int64_t axis) {
   static const auto fn_name = "dequantize_tensor_per_channel_affine";
 
+  checkFloatTensor(fn_name, rtensor);
   checkCPUTensor(fn_name, rtensor);
-  commonTensorChecks(fn_name, qtensor, rtensor);
+  checkSameDevice(fn_name, rtensor, qtensor);
+  checkSameSize(fn_name, qtensor, rtensor);
 
   AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(), fn_name, [&]() {
     checkQuantizedTensor<scalar_t>(fn_name, qtensor);
@@ -245,8 +248,10 @@ Tensor dequantize_tensor_per_channel_float_qparams(
     int64_t axis) {
   static const auto fn_name = "dequantize_tensor_per_channel_affine";
 
+  checkFloatTensor(fn_name, rtensor);
   checkCPUTensor(fn_name, rtensor);
-  commonTensorChecks(fn_name, qtensor, rtensor);
+  checkSameDevice(fn_name, rtensor, qtensor);
+  checkSameSize(fn_name, qtensor, rtensor);
 
   AT_DISPATCH_QINT_TYPES(qtensor.scalar_type(), fn_name, [&]() {
     checkQuantizedTensor<scalar_t>(fn_name, qtensor);
