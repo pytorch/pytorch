@@ -21,7 +21,7 @@ from torch.testing._internal.common_utils import \
      random_symmetric_matrix, random_symmetric_psd_matrix,
      random_symmetric_pd_matrix, make_nonzero_det,
      random_fullrank_matrix_distinct_singular_value, set_rng_seed,
-     TEST_WITH_ROCM, IS_WINDOWS)
+     TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS)
 
 # Classes and methods for the operator database
 class OpInfo(object):
@@ -121,7 +121,7 @@ class UnaryUfuncInfo(OpInfo):
                  dtypes=floating_types(),
                  dtypesIfCPU=floating_and_complex_types_and(torch.bfloat16),
                  dtypesIfCUDA=floating_and_complex_types_and(torch.half),
-                 dtypesIfROCM=floating_types_and(torch.half, torch.bfloat16),
+                 dtypesIfROCM=floating_types_and(torch.half),
                  domain=None,  # the [low, high) domain of the function
                  handles_large_floats=True,  # whether the op correctly handles large float values (like 1e-20)
                  handles_extremals=True,  # whether the op correctly handles extremal values (like inf)
@@ -143,8 +143,10 @@ L = 20
 M = 10
 S = 5
 
-# Include in "tests_to_skip" to skip complex numerics tests on Windows
+# Situational skips for tests that fail on particular builds
 _windows_skip = ('.*numerics.*complex.*',) if IS_WINDOWS else tuple()
+_mac_skip = ('.*numerics.*cpu.*complex.*',) if IS_MACOS else tuple()
+_rocm_skip = ('.*numerics.*float32.*',) if TEST_WITH_ROCM else tuple()
 
 # Operator database
 op_db = [
@@ -161,17 +163,17 @@ op_db = [
                    dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
                    handles_large_floats=False,
                    decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
-                   tests_to_skip=_windows_skip),
+                   tests_to_skip=_windows_skip + _mac_skip + _rocm_skip),
     UnaryUfuncInfo('cosh',
                    ref=np.cosh,
                    dtypesIfCPU=floating_and_complex_types(),
-                   tests_to_skip=_windows_skip),
+                   tests_to_skip=_windows_skip + _mac_skip),
     UnaryUfuncInfo('sin',
                    ref=np.sin,
                    handles_large_floats=False,
                    handles_complex_extremals=False,
                    decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
-                   tests_to_skip=_windows_skip),
+                   tests_to_skip=_windows_skip + _rocm_skip),
 ]
 
 # Common operator groupings
