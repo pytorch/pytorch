@@ -1,5 +1,7 @@
 #include <torch/csrc/distributed/rpc/tensorpipe_agent.h>
 
+#ifdef USE_TENSORPIPE
+
 #include <limits>
 
 #include <fmt/format.h>
@@ -1025,3 +1027,5 @@ void TensorPipeAgent::markFutureWithError(
 } // namespace rpc
 } // namespace distributed
 } // namespace torch
+
+#endif // USE_TENSORPIPE
