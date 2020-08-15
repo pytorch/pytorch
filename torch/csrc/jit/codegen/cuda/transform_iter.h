@@ -52,7 +52,6 @@ class TORCH_CUDA_API ReplayTransformations : public IterVisitor {
   // Transform dispatch
   void handle(Expr* e) override;
 
-  // TODO: HANDLE RFACTOR DOMAINS
   // We're going to replay this split operation on the corresponding ID
   void handle(Split* s) override;
 
@@ -158,7 +157,8 @@ class TORCH_CUDA_API BestEffortReplay {
   BestEffortReplay(
       const std::vector<IterDomain*>& replay_domain,
       const std::vector<IterDomain*>& target_domain,
-      std::unordered_map<IterDomain*, IterDomain*> replay_map);
+      std::unordered_map<IterDomain*, IterDomain*> replay_map,
+      bool forward_bcast_mismatch = false);
 
   // Return iter domain map from target_domain IDs to their "replayed"
   // replay_domain IDs. If not in map, was not replayed.

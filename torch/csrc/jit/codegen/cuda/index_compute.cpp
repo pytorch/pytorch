@@ -79,7 +79,10 @@ class ContigIDs : public OptInDispatch {
     if (!(std::all_of(
             ordered_inputs.begin(),
             ordered_inputs.end(),
-            [this](IterDomain* id) { return is_contig_root.at(id); }))) {
+            [this](IterDomain* id) {
+              return is_contig_root.at(id) && !id->isBroadcast() &&
+                  !id->isReduction();
+            }))) {
       return;
     }
 
@@ -294,13 +297,11 @@ void IndexCompute::handle(Merge* merge) {
     index_map_[inner_id] = zero;
 
     extent_map_[outer_id] = getExtent(out_id);
-
   } else if (outer_id->isBroadcast() && outer_extent->isOneInt()) {
     index_map_[outer_id] = zero;
-
     index_map_[inner_id] = out_ind;
-    extent_map_[inner_id] = getExtent(out_id);
 
+    extent_map_[inner_id] = getExtent(out_id);
   } else if (hasZeroMerged(out_id)) {
     index_map_[inner_id] = out_ind;
     extent_map_[inner_id] = getExtent(out_id);
@@ -310,7 +311,6 @@ void IndexCompute::handle(Merge* merge) {
 
     zero_merged_in_.emplace(inner_id);
     zero_merged_in_.emplace(outer_id);
-
   } else {
     Val* I = inner_extent;
 
@@ -404,7 +404,9 @@ IndexCompute IndexCompute::updateIndexCompute(
       updated_index_map[new_id] = index_map_.at(prev_id);
     }
 
-    updated_extent_map[new_id] = getExtent(prev_id);
+    if (extent_map_.find(prev_id) != extent_map_.end()) {
+      updated_extent_map[new_id] = extent_map_.at(prev_id);
+    }
 
     if (zero_merged_in_.find(prev_id) != zero_merged_in_.end()) {
       updated_zero_merged_in.emplace(new_id);
@@ -501,17 +503,29 @@ std::pair<
     std::unordered_map<kir::IterDomain*, Val*>,
     std::unordered_map<kir::IterDomain*, Val*>>
 generateIndexAndExtentMap(
-    std::deque<TensorView*> tv_stack,
+    std::deque<TensorView*> c2p_tv_stack,
     std::deque<kir::ForLoop*> loops,
     const std::unordered_map<kir::ForLoop*, Val*>& loop_to_ind_map,
     const std::vector<bool>& last_tv_root_contiguity) {
+  if (c2p_tv_stack.empty())
+    return std::make_pair(
+        std::unordered_map<kir::IterDomain*, Val*>(),
+        std::unordered_map<kir::IterDomain*, Val*>());
+
   // Go through our stack, and map the intermediate IterDomains from common
   // transformations from consumer to producer
-  std::deque<std::unordered_map<IterDomain*, IterDomain*>> ID_maps_c2p;
+  std::deque<std::unordered_map<IterDomain*, IterDomain*>> c2p_ID_maps;
+  std::deque<std::unordered_map<IterDomain*, IterDomain*>> p2c_ID_maps;
 
-  for (size_t i = 0; i + 1 < tv_stack.size(); i++) {
-    auto c_tv = tv_stack[i];
-    auto p_tv = tv_stack[i + 1];
+  // c2p_tv_stack comes in as consumer -> producer
+  // Realized we may want to actually do a pass from producer->consumer first to
+  // propagate iterators outside the compute at position back into consumers, so
+  // we can repropagate back to producer. The need for this was exposed in
+  // https://github.com/csarofeen/pytorch/issues/286
+
+  for (size_t i = 0; i + 1 < c2p_tv_stack.size(); i++) {
+    auto c_tv = c2p_tv_stack[i];
+    auto p_tv = c2p_tv_stack[i + 1];
 
     // Map root ID's from consumer to producer
     auto c2p_root_map =
@@ -522,23 +536,48 @@ generateIndexAndExtentMap(
         p_tv->domain()->domain(), c_tv->domain()->domain(), c2p_root_map);
 
     // and grab the intermediate IterDomain map.
-    ID_maps_c2p.push_back(replay.getReplay());
+    c2p_ID_maps.push_back(replay.getReplay());
+
+    // Something wasn't symmetric when using:
+    //
+    // auto p2c_root_map = TensorDomain::mapRootPtoC(p_tv->domain(),
+    // c_tv->domain());
+    //
+    // replay = BestEffortReplay(
+    //     c_tv->domain()->domain(), p_tv->domain()->domain(), p2c_root_map,
+    //     true);
+
+    BestEffortReplay replay_p2c(
+        p_tv->domain()->domain(), c_tv->domain()->domain(), c2p_root_map, true);
+
+    std::unordered_map<IterDomain*, IterDomain*> p2c_id_map;
+
+    for (auto ent : replay_p2c.getReplay()) {
+      p2c_id_map[ent.second] = ent.first;
+    }
+
+    // and grab the intermediate IterDomain map.
+    p2c_ID_maps.push_front(p2c_id_map);
   }
 
-  if (tv_stack.empty())
-    return std::make_pair(
-        std::unordered_map<kir::IterDomain*, Val*>(),
-        std::unordered_map<kir::IterDomain*, Val*>());
+  // Maps to be used in the c2p propagation
+  std::unordered_map<TensorView*, std::unordered_map<kir::IterDomain*, Val*>>
+      p2c_index_maps;
+
+  // PROPAGATE PRODUCER -> CONSUMER START
+
+  std::deque<TensorView*> p2c_tv_stack(
+      c2p_tv_stack.rbegin(), c2p_tv_stack.rend());
 
   // Setup initial IndexCompute:
-  auto tv = tv_stack.front();
-  tv_stack.pop_front();
+  auto tv = p2c_tv_stack.front();
+  p2c_tv_stack.pop_front();
   auto td = tv->domain()->domain();
 
-  std::vector<kir::IterDomain*> k_td;
+  std::vector<kir::IterDomain*> kir_td;
 
   std::transform(
-      td.begin(), td.end(), std::back_inserter(k_td), [](IterDomain* id) {
+      td.begin(), td.end(), std::back_inserter(kir_td), [](IterDomain* id) {
         return kir::lowerValue(id)->as<kir::IterDomain>();
       });
 
@@ -549,14 +588,15 @@ generateIndexAndExtentMap(
   // Match loops to this TV if the loop matchis this TV's ID (could reduce
   // complexity here)
 
-  while (!loops.empty() &&
-         std::find(k_td.begin(), k_td.end(), loops.front()->iter_domain()) !=
-             k_td.end()) {
+  while (
+      !loops.empty() &&
+      std::find(kir_td.rbegin(), kir_td.rend(), loops.back()->iter_domain()) !=
+          kir_td.rend()) {
     TORCH_INTERNAL_ASSERT(
-        loop_to_ind_map.find(loops.front()) != loop_to_ind_map.end());
-    initial_index_map[loops.front()->iter_domain()] =
-        loop_to_ind_map.at(loops.front());
-    loops.pop_front();
+        loop_to_ind_map.find(loops.back()) != loop_to_ind_map.end());
+    initial_index_map[loops.back()->iter_domain()] =
+        loop_to_ind_map.at(loops.back());
+    loops.pop_back();
   }
 
   IndexCompute index_compute(
@@ -564,48 +604,107 @@ generateIndexAndExtentMap(
       initial_index_map,
       std::unordered_map<kir::IterDomain*, Val*>(),
       std::unordered_set<kir::IterDomain*>(),
-      tv_stack.empty() ? last_tv_root_contiguity
-                       : std::vector<bool>(tv->getRootDomain().size(), false));
+      std::vector<bool>(tv->getRootDomain().size(), false));
+
+  p2c_index_maps[tv] = index_compute.indexMap();
 
   // Go through the tv entire stack
-  while (!tv_stack.empty()) {
+  while (!p2c_tv_stack.empty()) {
     // Grab the TV
-    tv = tv_stack.front();
-    tv_stack.pop_front();
+    tv = p2c_tv_stack.front();
+    p2c_tv_stack.pop_front();
     td = tv->domain()->domain();
-
-    std::unordered_map<kir::IterDomain*, Val*> new_indices;
-
-    // Match loops to this TV if the loop matchis this TV's ID (could reduce
-    // complexity here)
-    k_td.clear();
-
+    kir_td.clear();
     std::transform(
-        td.begin(), td.end(), std::back_inserter(k_td), [](IterDomain* id) {
+        td.begin(), td.end(), std::back_inserter(kir_td), [](IterDomain* id) {
           return kir::lowerValue(id)->as<kir::IterDomain>();
         });
 
+    // Match loops to this TV if the loop matchis this TV's ID (could reduce
+    // complexity here)
+
+    // Map from all IterDomain's to corresponding index as we process each tv in
+    // the stack
+    std::unordered_map<kir::IterDomain*, Val*> new_indices;
+
     while (!loops.empty() &&
-           std::find(k_td.begin(), k_td.end(), loops.front()->iter_domain()) !=
-               k_td.end()) {
+           std::find(
+               kir_td.rbegin(), kir_td.rend(), loops.back()->iter_domain()) !=
+               kir_td.rend()) {
       TORCH_INTERNAL_ASSERT(
-          loop_to_ind_map.find(loops.front()) != loop_to_ind_map.end());
-      new_indices[loops.front()->iter_domain()] =
-          loop_to_ind_map.at(loops.front());
-      loops.pop_front();
+          loop_to_ind_map.find(loops.back()) != loop_to_ind_map.end());
+      new_indices[loops.back()->iter_domain()] =
+          loop_to_ind_map.at(loops.back());
+      loops.pop_back();
     }
 
-    if (!ID_maps_c2p.empty()) {
+    if (!p2c_ID_maps.empty()) {
       index_compute = index_compute.updateIndexCompute(
           tv->domain(),
-          ID_maps_c2p.front(),
+          p2c_ID_maps.front(),
           new_indices,
-          tv_stack.empty()
-              ? last_tv_root_contiguity
-              : std::vector<bool>(tv->getRootDomain().size(), false));
-      ID_maps_c2p.pop_front();
+          std::vector<bool>(tv->getRootDomain().size(), false));
+
+      p2c_index_maps[tv] = index_compute.indexMap();
+
+      p2c_ID_maps.pop_front();
     }
   }
+
+  // PROPAGATE PRODUCER -> CONSUMER END
+
+  // PROPAGATE CONSUMER -> PRODUCER START
+
+  // Setup initial IndexCompute:
+  tv = c2p_tv_stack.front();
+  c2p_tv_stack.pop_front();
+
+  // Map from all IterDomain's to corresponding index as we process each tv in
+  // the stack
+  initial_index_map = p2c_index_maps.at(tv);
+
+  std::unordered_map<kir::IterDomain*, Val*> initial_extent_map;
+  if (!c2p_ID_maps.empty()) {
+    auto first_id_map = c2p_ID_maps.front();
+    for (auto id_entry : first_id_map) {
+      kir::IterDomain* this_id =
+          kir::lowerValue(id_entry.first)->as<kir::IterDomain>();
+      if (initial_extent_map.find(this_id) == initial_extent_map.end()) {
+        initial_extent_map[this_id] = this_id->extent();
+      }
+    }
+  }
+
+  index_compute = IndexCompute(
+      tv->domain(),
+      initial_index_map,
+      initial_extent_map,
+      std::unordered_set<kir::IterDomain*>(),
+      c2p_tv_stack.empty()
+          ? last_tv_root_contiguity
+          : std::vector<bool>(tv->getRootDomain().size(), false));
+
+  // Go through the tv entire stack
+  while (!c2p_tv_stack.empty()) {
+    // Grab the TV
+    tv = c2p_tv_stack.front();
+    c2p_tv_stack.pop_front();
+
+    if (!c2p_ID_maps.empty()) {
+      index_compute = index_compute.updateIndexCompute(
+          tv->domain(),
+          c2p_ID_maps.front(),
+          p2c_index_maps.at(tv),
+          c2p_tv_stack.empty()
+              ? last_tv_root_contiguity
+              : std::vector<bool>(tv->getRootDomain().size(), false));
+
+      c2p_ID_maps.pop_front();
+    }
+  }
+
+  // PROPAGATE CONSUMER -> PRODUCER END
+
   return std::make_pair(index_compute.indexMap(), index_compute.extentMap());
 }
 
@@ -670,7 +769,7 @@ kir::TensorIndex* Index::getGlobalProducerIndex(
     TORCH_INTERNAL_ASSERT(
         index_map.find(kir_root_dom_i) != index_map.end(),
         "Couldn't find root mapping for TV",
-        consumer_tv->name(),
+        producer_tv->name(),
         " dim: ",
         i,
         " id: ",
@@ -784,7 +883,7 @@ kir::TensorIndex* Index::getProducerIndex_impl(
     TORCH_INTERNAL_ASSERT(
         index_map.find(kir_root_dom_i) != index_map.end(),
         "Couldn't find root mapping for TV",
-        consumer_tv->name(),
+        producer_tv->name(),
         " dim: ",
         i,
         " id: ",
