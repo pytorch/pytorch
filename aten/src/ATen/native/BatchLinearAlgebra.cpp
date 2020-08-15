@@ -4,6 +4,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/ExpandUtils.h>
 
+#include <ATen/native/BatchLinearAlgebra.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/cpu/zmath.h>
@@ -77,6 +78,10 @@ extern "C" void zheevd_(char *jobz, char *uplo, int *n, std::complex<double> *a,
 extern "C" void cheevd_(char *jobz, char *uplo, int *n, std::complex<float> *a, int *lda, float *w, std::complex<float> *work, int *lwork, float *rwork, int *lrwork, int *iwork, int *liwork, int *info);
 extern "C" void dsyevd_(char *jobz, char *uplo, int *n, double *a, int *lda, double *w, double *work, int *lwork, int *iwork, int *liwork, int *info);
 extern "C" void ssyevd_(char *jobz, char *uplo, int *n, float *a, int *lda, float *w, float *work, int *lwork, int *iwork, int *liwork, int *info);
+
+// geev
+extern "C" void dgeev_(char *jobvl, char *jobvr, int *n, double *a, int *lda, double *wr, double *wi, double* vl, int *ldvl, double *vr, int *ldvr, double *work, int *lwork, int *info);
+extern "C" void sgeev_(char *jobvl, char *jobvr, int *n, float *a, int *lda, float *wr, float *wi, float* vl, int *ldvl, float *vr, int *ldvr, float *work, int *lwork, int *info);
 
 // gesdd
 extern "C" void zgesdd_(char *jobz, int *m, int *n, std::complex<double> *a, int *lda,
@@ -303,6 +308,14 @@ template<> void lapackSyevd<float>(char jobz, char uplo, int n, float *a, int ld
   (void)rwork;  // unused
   (void)lrwork;  // unused
   ssyevd_(&jobz, &uplo, &n, a, &lda, w, work, &lwork, iwork, &liwork, info);
+}
+
+template<> void lapackEig<double>(char jobvl, char jobvr, int n, double *a, int lda, double *wr, double *wi, double* vl, int ldvl, double *vr, int ldvr, double *work, int lwork, int *info) {
+  dgeev_(&jobvl, &jobvr, &n, a, &lda, wr, wi, vl, &ldvl, vr, &ldvr, work, &lwork, info);
+}
+
+template<> void lapackEig<float>(char jobvl, char jobvr, int n, float *a, int lda, float *wr, float *wi, float* vl, int ldvl, float *vr, int ldvr, float *work, int lwork, int *info) {
+  sgeev_(&jobvl, &jobvr, &n, a, &lda, wr, wi, vl, &ldvl, vr, &ldvr, work, &lwork, info);
 }
 
 template<> void lapackSvd<c10::complex<double>, double>(char jobz, int m, int n, c10::complex<double> *a, int lda,
@@ -1153,6 +1166,46 @@ std::tuple<Tensor&, Tensor&> symeig_out(Tensor& vals, Tensor& vecs, const Tensor
   vals.resize_as_(vals_tmp).copy_(vals_tmp);
   vecs.resize_as_(vecs_tmp).copy_(vecs_tmp);
   return std::tuple<Tensor&, Tensor&>(vals, vecs);
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ eig ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+DEFINE_DISPATCH(eig_stub);
+
+std::tuple<Tensor&, Tensor&> eig_out(Tensor& e, Tensor& v, const Tensor& self, bool eigenvectors) {
+  TORCH_CHECK(self.dim() == 2, "input should be 2 dimensional");
+  TORCH_CHECK(self.size(0) == self.size(1), "input should be square");
+  TORCH_CHECK(self.isfinite().all().item<bool>(), "input should not contain infs or NaNs");
+  TORCH_CHECK(e.dtype() == self.dtype(), "Expected 'e' to have dtype ", self.dtype(), " but got ", e.dtype());
+  if (eigenvectors)
+      TORCH_CHECK(v.dtype() == self.dtype(), "Expected 'v' to have dtype ", self.dtype(), " but got ", v.dtype());
+  int64_t n = self.size(-1);
+
+  at::native::resize_output(e, {n, 2});
+  if (eigenvectors) {
+      at::native::resize_output(v, self.sizes());
+  }
+
+  // optimization: if self is empty, we can immediately return the empty
+  // tensors, instead of getting empty tensors from eig_helper
+  if (self.numel() == 0) {
+      return std::tuple<Tensor&, Tensor&>(e, v);
+  }
+
+  Tensor vals_, vecs_;
+  std::tie(vals_, vecs_) = eig_stub(self.device().type(), self, eigenvectors);
+  e.copy_(vals_);
+  if (eigenvectors) {
+    v.copy_(vecs_);
+  }
+  return std::tuple<Tensor&, Tensor&>(e, v);
+}
+
+std::tuple<Tensor,Tensor> eig(const Tensor& self, bool eigenvectors) {
+  Tensor e = at::empty({0}, self.options());
+  Tensor v = at::empty({0}, self.options());
+  at::eig_out(e, v, self, eigenvectors);
+  return std::tuple<Tensor, Tensor>(e, v);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ svd ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
