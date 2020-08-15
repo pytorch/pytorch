@@ -556,6 +556,13 @@ Tensor& dot_out(Tensor& result, const Tensor& self, const Tensor& tensor) {
   return result.fill_(self.dot(tensor));
 }
 
+Tensor& vdot_out(Tensor& result, const Tensor& self, const Tensor& tensor) {
+  result.resize_({});
+  TORCH_CHECK(result.scalar_type() == self.scalar_type(),
+           "result dtype ", result.scalar_type(), " does not match self dtype ", self.scalar_type());
+  return result.fill_(self.vdot(tensor));
+}
+
 /*
 Matrix product of two Tensors.
 The behavior depends on the dimensionality of the Tensors as follows:
