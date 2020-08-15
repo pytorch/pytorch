@@ -1268,8 +1268,10 @@ class TestTensorExprFuser(BaseTestClass):
 
     def test_mask(self):
         devices = ["cuda", "cpu"] if torch.cuda.is_available() else ["cpu"]
+
         def test(x):
             return x.unsqueeze(1) == 0
+
         for d in devices:
             x = torch.rand(4, device=d) > 0.5
             scripted = torch.jit.script(test)
