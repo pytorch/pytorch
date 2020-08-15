@@ -40,7 +40,11 @@ alias_infos = (
     AliasInfo('linalg.det', torch.linalg.det, 'det',
               torch.randn(10, 10), decorators=(skipCPUIfNoLapack, skipCUDAIfNoMagma)),
     AliasInfo('outer', torch.outer, 'ger',
-              torch.randn(20), args=(torch.randn(20),))
+              torch.randn(20), args=(torch.randn(20),)),
+    AliasInfo('arccosh', torch.arccosh, 'acosh',
+              torch.randn(20)),
+    AliasInfo('arccosh_', torch.Tensor.arccosh_, 'acosh_',
+              torch.randn(20)),
 )
 
 # Placeholder test class for validating that aliases are correctly

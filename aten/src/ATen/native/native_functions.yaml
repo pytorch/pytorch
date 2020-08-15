@@ -471,6 +471,20 @@
 - func: acosh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
 
+# arcosh, alias for acosh
+- func: arccosh(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  supports_named_tensor: True
+  variants: function, method
+
+- func: arccosh_(Tensor(a!) self) -> Tensor(a!)
+  use_c10_dispatcher: full
+  supports_named_tensor: True
+  variants: function, method
+
+- func: arccosh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  supports_named_tensor: True
+
 - func: asinh(Tensor self) -> Tensor
   use_c10_dispatcher: full
   supports_named_tensor: True
