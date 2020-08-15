@@ -29,7 +29,7 @@ class TestBatchMatMul(serial.SerializedTestCase):
         trans_b=st.booleans(),
         run_ints=st.booleans()
     )
-    @settings(deadline=10000)
+    @settings(deadline=None)
     def test_batch_matmul(self, M, K, N, rand_seed, trans_a, trans_b, run_ints):
         np.random.seed(rand_seed)
         workspace.ResetWorkspace()

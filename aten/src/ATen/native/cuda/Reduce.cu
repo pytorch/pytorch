@@ -19,7 +19,7 @@ std::ostream& operator<<(std::ostream& out, const ReduceConfig& config) {
   out << "ReduceConfig(";
   out << "element_size_bytes=" << config.element_size_bytes << ", ";
   out << "num_inputs=" << config.num_inputs << ", ";
-  out << "num_output_elements=" << config.num_output_elements << ", ";
+  out << "num_outputs=" << config.num_outputs << ", ";
   out << "step_input=" << config.step_input << ", ";
   out << "step_output=" << config.step_output << ", ";
   out << "ctas_per_output=" << config.ctas_per_output << ", ";

@@ -15,7 +15,6 @@ import types
 import pickle
 import textwrap
 import operator
-import itertools
 import os
 import subprocess
 from torch.utils.dlpack import from_dlpack, to_dlpack
@@ -7165,6 +7164,78 @@ class TestTorchDeviceType(TestCase):
                 method_op(m1)
             with self.assertRaisesRegex(RuntimeError, error_msg):
                 inplace_op(m1)
+
+    @onlyOnCPUAndCUDA
+    @dtypes(torch.float32, torch.float64)
+    def test_torch_complex(self, device, dtype):
+        real = torch.tensor([1, 2], device=device, dtype=dtype)
+        imag = torch.tensor([3, 4], device=device, dtype=dtype)
+        z = torch.complex(real, imag)
+        complex_dtype = torch.complex64 if dtype == torch.float32 else torch.complex128
+        self.assertEqual(torch.tensor([1.0 + 3.0j, 2.0 + 4.0j], dtype=complex_dtype), z)
+
+    @onlyOnCPUAndCUDA
+    @dtypes(torch.float32, torch.float64)
+    def test_torch_polar(self, device, dtype):
+        abs = torch.tensor([1, 2, -3, -4.5, 1, 1], device=device, dtype=dtype)
+        angle = torch.tensor([math.pi / 2, 5 * math.pi / 4, 0, -11 * math.pi / 6, math.pi, -math.pi],
+                             device=device, dtype=dtype)
+        z = torch.polar(abs, angle)
+        complex_dtype = torch.complex64 if dtype == torch.float32 else torch.complex128
+        self.assertEqual(torch.tensor([1j, -1.41421356237 - 1.41421356237j, -3,
+                                       -3.89711431703 - 2.25j, -1, -1],
+                                      dtype=complex_dtype),
+                         z, atol=1e-5, rtol=1e-5)
+
+    @onlyOnCPUAndCUDA
+    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
+            torch.float16, torch.complex64, torch.complex128, torch.bool)
+    def test_torch_complex_floating_dtype_error(self, device, dtype):
+        for op in (torch.complex, torch.polar):
+            a = torch.tensor([1, 2], device=device, dtype=dtype)
+            b = torch.tensor([3, 4], device=device, dtype=dtype)
+            error = r"Expected both inputs to be Float or Double tensors but " \
+                    r"got [A-Za-z]+ and [A-Za-z]+"
+        with self.assertRaisesRegex(RuntimeError, error):
+            op(a, b)
+
+    @onlyOnCPUAndCUDA
+    @dtypes(torch.float32, torch.float64)
+    def test_torch_complex_same_dtype_error(self, device, dtype):
+
+        def dtype_name(dtype):
+            return 'Float' if dtype == torch.float32 else 'Double'
+
+        for op in (torch.complex, torch.polar):
+            other_dtype = torch.float64 if dtype == torch.float32 else torch.float32
+            a = torch.tensor([1, 2], device=device, dtype=dtype)
+            b = torch.tensor([3, 4], device=device, dtype=other_dtype)
+            error = "Expected object of scalar type {} but got scalar type " \
+                    "{} for second argument".format(dtype_name(dtype),
+                                                    dtype_name(other_dtype))
+            with self.assertRaisesRegex(RuntimeError, error):
+                op(a, b)
+
+    @onlyOnCPUAndCUDA
+    @dtypes(torch.float32, torch.float64)
+    def test_torch_complex_out_dtype_error(self, device, dtype):
+
+        def dtype_name(dtype):
+            return 'Float' if dtype == torch.float32 else 'Double'
+
+        def complex_dtype_name(dtype):
+            return 'ComplexFloat' if dtype == torch.complex64 else 'ComplexDouble'
+
+        for op in (torch.complex, torch.polar):
+            a = torch.tensor([1, 2], device=device, dtype=dtype)
+            b = torch.tensor([3, 4], device=device, dtype=dtype)
+            out = torch.zeros(2, device=device, dtype=dtype)
+            expected_dtype = torch.complex64 if dtype == torch.float32 else torch.complex128
+            error = "Expected object of scalar type {} but got scalar type " \
+                    "{} for argument 'out'".format(
+                        complex_dtype_name(expected_dtype), dtype_name(dtype))
+            with self.assertRaisesRegex(RuntimeError, error):
+                op(a, b, out=out)
 
     def test_cat_empty_legacy(self, device):
         # FIXME: this is legacy behavior and should be removed
@@ -15518,25 +15589,6 @@ class TestTorchDeviceType(TestCase):
     def test_min(self, device, dtype):
         self._test_minmax_helper(torch.min, np.amin, device, dtype)
 
-    @dtypes(torch.float)
-    def test_min_out_different_memory_format(self, device, dtype):
-        permutations = itertools.permutations([0, 1, 2, 3])
-
-        def rev_perm(perm):
-            r = {j: i for i, j in enumerate(perm)}
-            return tuple(r[i] for i, _ in enumerate(perm))
-
-        for perm1 in permutations:
-            for perm2 in permutations:
-                for perm3 in permutations:
-                    input_ = torch.randn(10, 10, 10, 1, dtype=dtype, device=device).expand(10, 10, 10, 10).permute(*perm1)
-                    expect1, expect2 = input_.min(dim=0, keepdim=True)
-                    out1 = torch.empty_like(expect1.permute(perm2), memory_format=torch.contiguous_format).permute(rev_perm(perm2))
-                    out2 = torch.empty_like(expect2.permute(perm3), memory_format=torch.contiguous_format).permute(rev_perm(perm3))
-                    torch.min(input_, dim=0, keepdim=True, out=(out1, out2))
-                    self.assertEqual(out1, expect1)
-                    self.assertEqual(out2, expect2)
-
     @onlyOnCPUAndCUDA
     @dtypesIfCPU(torch.float, torch.double)
     @dtypesIfCUDA(torch.half, torch.float)
@@ -17167,6 +17219,31 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         expected = np.lcm(a.cpu().numpy(), b.cpu().numpy())
         self.assertEqual(actual, expected)
 
+    @onlyOnCPUAndCUDA
+    @dtypes(torch.float32, torch.float64)
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_nextafter(self, device, dtype):
+        # Test special cases
+        t1 = torch.tensor([0, 0, 10], device=device, dtype=dtype)
+        t2 = torch.tensor([inf, -inf, 10], device=device, dtype=dtype)
+        actual = torch.nextafter(t1, t2)
+        expected = np.nextafter(t1.cpu().numpy(), t2.cpu().numpy())
+        self.assertEqual(actual, expected, atol=0, rtol=0)
+
+        actual = torch.nextafter(t2, t1)
+        expected = np.nextafter(t2.cpu().numpy(), t1.cpu().numpy())
+        self.assertEqual(actual, expected, atol=0, rtol=0)
+
+        t1 = torch.tensor([0, nan], device=device, dtype=dtype)
+        t2 = torch.tensor([nan, 0], device=device, dtype=dtype)
+        self.assertTrue(torch.nextafter(t1, t2).isnan().all())
+
+        a = torch.randn(100, device=device, dtype=dtype)
+        b = torch.randn(100, device=device, dtype=dtype)
+        actual = torch.nextafter(a, b)
+        expected = np.nextafter(a.cpu().numpy(), b.cpu().numpy())
+        self.assertEqual(actual, expected, atol=0, rtol=0)
+
     @slowTest
     @onlyOnCPUAndCUDA
     @dtypes(torch.float32, torch.float64, torch.bfloat16, torch.int32, torch.int64, torch.cfloat, torch.cdouble)
@@ -18756,11 +18833,16 @@ class TestDevicePrecision(TestCase):
         cpu_tensor = torch.randn(10, 10, 10, dtype=dtype)
         device_tensor = cpu_tensor.to(device)
         zeros = torch.zeros(10, 10, 10, dtype=dtype)
-        for n in [0, 1]:
+        for n in [0, 1, 2, 3, 4, 5]:
             cpu_out = cpu_tensor.polygamma(n)
             device_out = device_tensor.polygamma(n)
             norm_errors = (device_out - cpu_out.to(device)) / device_out
             self.assertEqual(norm_errors, zeros)
+
+        cpu_tensor.requires_grad = True
+        for n in [0, 1, 2, 3, 4, 5]:
+            torch.autograd.gradcheck(lambda x: x.polygamma(n),
+                                     cpu_tensor)
 
     # Note: fails when using float tensors
     @dtypes(torch.double)
@@ -20223,6 +20305,9 @@ torch_op_tests = [_TorchMathTestMeta('sin'),
                                      ref_backend='scipy'),
                   _TorchMathTestMeta('polygamma', args=[1], substr='_1', reffn='polygamma',
                                      refargs=lambda x: (1, x.numpy()), input_fn=_generate_gamma_input, inputargs=[False],
+                                     ref_backend='scipy', rtol=0.0008, atol=1e-5),
+                  _TorchMathTestMeta('polygamma', args=[2], substr='_2', reffn='polygamma',
+                                     refargs=lambda x: (2, x.numpy()), input_fn=_generate_gamma_input, inputargs=[False],
                                      ref_backend='scipy', rtol=0.0008, atol=1e-5),
                   _TorchMathTestMeta('digamma',
                                      input_fn=_generate_gamma_input, inputargs=[True], ref_backend='scipy',
