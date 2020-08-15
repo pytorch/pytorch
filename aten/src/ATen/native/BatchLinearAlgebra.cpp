@@ -69,6 +69,10 @@ extern "C" void sorgqr_(int *m, int *n, int *k, float *a, int *lda, float *tau, 
 extern "C" void dsyev_(char *jobz, char *uplo, int *n, double *a, int *lda, double *w, double *work, int *lwork, int *info);
 extern "C" void ssyev_(char *jobz, char *uplo, int *n, float *a, int *lda, float *w, float *work, int *lwork, int *info);
 
+// geev
+extern "C" void dgeev_(char *jobvl, char *jobvr, int *n, double *a, int *lda, double *wr, double *wi, double* vl, int *ldvl, double *vr, int *ldvr, double *work, int *lwork, int *info);
+extern "C" void sgeev_(char *jobvl, char *jobvr, int *n, float *a, int *lda, float *wr, float *wi, float* vl, int *ldvl, float *vr, int *ldvr, float *work, int *lwork, int *info);
+
 // gesdd
 extern "C" void zgesdd_(char *jobz, int *m, int *n, std::complex<double> *a, int *lda,
                         double *s, std::complex<double> *u, int *ldu, std::complex<double> *vt, int *ldvt, std::complex<double> *work, int *lwork, int *rwork, int *iwork, int *info);
@@ -118,6 +122,9 @@ void lapackOrgqr(int m, int n, int k, scalar_t *a, int lda, scalar_t *tau, scala
 
 template<class scalar_t>
 void lapackSymeig(char jobz, char uplo, int n, scalar_t *a, int lda, scalar_t *w, scalar_t *work, int lwork, int *info);
+
+template<class scalar_t>
+void lapackEig(char jobvl, char jobvr, int n, scalar_t *a, int lda, scalar_t *wr, scalar_t *wi, scalar_t* vl, int ldvl, scalar_t *vr, int ldvr, scalar_t *work, int lwork, int *info);
 
 template<class scalar_t, class value_t=scalar_t>
 void lapackSvd(char jobz, int m, int n, scalar_t *a, int lda,
@@ -262,6 +269,15 @@ template<> void lapackSymeig<double>(char jobz, char uplo, int n, double *a, int
 template<> void lapackSymeig<float>(char jobz, char uplo, int n, float *a, int lda, float *w, float *work, int lwork, int *info) {
   ssyev_(&jobz, &uplo, &n, a, &lda, w, work, &lwork, info);
 }
+
+template<> void lapackEig<double>(char jobvl, char jobvr, int n, double *a, int lda, double *wr, double *wi, double* vl, int ldvl, double *vr, int ldvr, double *work, int lwork, int *info) {
+  dgeev_(&jobvl, &jobvr, &n, a, &lda, wr, wi, vl, &ldvl, vr, &ldvr, work, &lwork, info);
+}
+
+template<> void lapackEig<float>(char jobvl, char jobvr, int n, float *a, int lda, float *wr, float *wi, float* vl, int ldvl, float *vr, int ldvr, float *work, int lwork, int *info) {
+  sgeev_(&jobvl, &jobvr, &n, a, &lda, wr, wi, vl, &ldvl, vr, &ldvr, work, &lwork, info);
+}
+
 
 template<> void lapackSvd<c10::complex<double>, double>(char jobz, int m, int n, c10::complex<double> *a, int lda,
                                   double *s, c10::complex<double> *u, int ldu, c10::complex<double> *vt, int ldvt, c10::complex<double> *work, int lwork, int *rwork, int *iwork, int *info) {
@@ -926,6 +942,74 @@ std::tuple<Tensor&, Tensor&> symeig_out(Tensor& vals, Tensor& vecs, const Tensor
   vals.resize_as_(vals_tmp).copy_(vals_tmp);
   vecs.resize_as_(vecs_tmp).copy_(vecs_tmp);
   return std::tuple<Tensor&, Tensor&>(vals, vecs);
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ eig ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+template <typename scalar_t>
+static void apply_eig(Tensor& vals_, Tensor& vecs_, const Tensor& self, bool eigenvectors) {
+#ifndef USE_LAPACK
+  AT_ERROR("symeig: LAPACK library not found in compilation");
+#else
+  int n = self.size(0);
+  Tensor wi = at::empty({n}, self.dtype());
+  Tensor wr = at::empty({n}, self.dtype());
+  char jobvr = eigenvectors ? 'V' : 'N';
+  int lda = n;
+  int info;
+  if (n > 0) {
+    scalar_t wkopt;
+    scalar_t* vecs_data = eigenvectors ? vecs_.data<scalar_t>() : nullptr;
+    int ldvr = eigenvectors ? n : 1;
+
+    lapackEig<scalar_t>('N', jobvr, n, self.data<scalar_t>(), lda, wr.data<scalar_t>(), wi.data<scalar_t>(),
+      nullptr, 1, vecs_data, ldvr, &wkopt, -1, &info);
+    int lwork = (int)wkopt;
+    Tensor work = at::empty({lwork}, self.dtype());
+    lapackEig<scalar_t>('N', jobvr, n, self.data<scalar_t>(), lda, wr.data<scalar_t>(), wi.data<scalar_t>(),
+      nullptr, 1, vecs_data, ldvr, work.data<scalar_t>(), lwork, &info);
+  }
+
+  scalar_t* vals_data = vals_.data<scalar_t>();
+  scalar_t* wi_data = wi.data<scalar_t>();
+  scalar_t* wr_data = wr.data<scalar_t>();
+  for (int i = 0; i < n; i++) {
+    vals_data[2 * i] = wr_data[i];
+    vals_data[2 * i + 1] = wi_data[i];
+  }
+#endif
+}
+
+std::tuple<Tensor&, Tensor&> eig_out_cpu(Tensor& vals, Tensor& vecs, const Tensor& self, bool eigenvectors) {
+  TORCH_CHECK(self.dim() == 2, "input must be 2-D");
+  TORCH_CHECK(self.size(0) == self.size(1), "input must be square");
+  TORCH_CHECK(self.isfinite().all().item<bool>(), "input cannot contain infs or NaNs");
+
+  int n = self.size(0);
+
+  Tensor vecs_;
+  if (eigenvectors) {
+    vecs_ = at::empty({n, n}, self.dtype());
+  }
+  Tensor vals_ = at::empty({n, 2}, self.dtype());
+
+  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "eig_cpu", [&]{
+    apply_eig<scalar_t>(vals_, vecs_, self, eigenvectors);
+  });
+
+  if (eigenvectors) {
+    vecs.resize_as_(vecs_);
+    vecs.copy_(vecs_);
+  }
+  vals.resize_as_(vals_);
+  vals.copy_(vals_);
+  return std::tuple<Tensor&, Tensor&>(vals, vecs);
+}
+
+std::tuple<Tensor, Tensor> eig_cpu(const Tensor& self, bool eigenvectors) {
+  Tensor vals = at::empty({0}, self.dtype());
+  Tensor vecs = at::empty({0}, self.dtype());
+  return eig_out_cpu(vals, vecs, self, eigenvectors);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ svd ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
