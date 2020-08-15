@@ -1502,6 +1502,65 @@ clip(input, min, max, *, out=None) -> Tensor
 Alias for :func:`torch.clamp`.
 """.format(**common_args))
 
+add_docstr(torch.complex,
+           r"""
+complex(real, imag, *, out=None) -> Tensor
+
+Constructs a complex tensor with its real part equal to :attr:`real` and its
+imaginary part equal to :attr:`imag`.
+
+Args:
+    real (Tensor): The real part of the complex tensor. Must be float or double.
+    imag (Tensor): The imaginary part of the complex tensor. Must be same dtype
+        as :attr:`real`.
+
+Keyword args:
+    out (Tensor): If the inputs are ``torch.float32``, must be
+        ``torch.complex64``. If the inputs are ``torch.float64``, must be
+        ``torch.complex128``.
+
+Example::
+    >>> real = torch.tensor([1, 2], dtype=torch.float32)
+    >>> imag = torch.tensor([3, 4], dtype=torch.float32)
+    >>> z = torch.complex(real, imag)
+    >>> z
+    tensor([(1.+3.j), (2.+4.j)])
+    >>> z.dtype
+    torch.complex64
+
+""")
+
+add_docstr(torch.polar,
+           r"""
+polar(abs, angle, *, out=None) -> Tensor
+
+Constructs a complex tensor whose elements are Cartesian coordinates
+corresponding to the polar coordinates with absolute value :attr:`abs` and angle
+:attr:`angle`.
+
+.. math::
+    \text{out} = \text{abs} \cdot \cos(\text{angle}) + \text{abs} \cdot \sin(\text{angle}) \cdot j
+""" + r"""
+Args:
+    abs (Tensor): The absolute value the complex tensor. Must be float or
+        double.
+    angle (Tensor): The angle of the complex tensor. Must be same dtype as
+        :attr:`abs`.
+
+Keyword args:
+    out (Tensor): If the inputs are ``torch.float32``, must be
+        ``torch.complex64``. If the inputs are ``torch.float64``, must be
+        ``torch.complex128``.
+
+Example::
+    >>> import numpy as np
+    >>> abs = torch.tensor([1, 2], dtype=torch.float64)
+    >>> angle = torch.tensor([np.pi / 2, 5 * np.pi / 4], dtype=torch.float64)
+    >>> z = torch.polar(abs, angle)
+    >>> z
+    tensor([(0.0000+1.0000j), (-1.4142-1.4142j)], dtype=torch.complex128)
+""")
+
 add_docstr(torch.conj,
            r"""
 conj(input, out=None) -> Tensor
@@ -4055,7 +4114,7 @@ add_docstr(torch.quantile,
            r"""
 quantile(input, q) -> Tensor
 
-Returns the q-th quantiles of all elements in the :attr:`input` tensor, doing a linear 
+Returns the q-th quantiles of all elements in the :attr:`input` tensor, doing a linear
 interpolation when the q-th quantile lies between two data.
 
 Args:
@@ -4074,16 +4133,16 @@ Example::
 .. function:: quantile(input, q, dim=None, keepdim=False, *, out=None) -> Tensor
 
 Returns the q-th quantiles of each row of the :attr:`input` tensor along the dimension
-:attr:`dim`, doing a linear interpolation when the q-th quantile lies between two 
+:attr:`dim`, doing a linear interpolation when the q-th quantile lies between two
 data points. By default, :attr:`dim` is `None` resulting in the :attr:`input` tensor
 beign flattened before computation.
 
-If :attr:`q` is a 1D tensor, the first dimension of the result corresponds to the quantiles 
+If :attr:`q` is a 1D tensor, the first dimension of the result corresponds to the quantiles
 and the remaining dimensions are what remains from the reduction of the :attr:`input` tensor.
 If :attr:`q` is a scalar or scalar tensor, the result is placed in the reduced dimension.
 
-If :attr:`keepdim` is ``True``, the remaining dimensions are of the same size as 
-:attr:`input` except in the dimension :attr:`dim` where it is size 1. Otherwise, 
+If :attr:`keepdim` is ``True``, the remaining dimensions are of the same size as
+:attr:`input` except in the dimension :attr:`dim` where it is size 1. Otherwise,
 the dimension :attr:`dim` is squeezed (see :func:`torch.squeeze`).
 
 Args:
@@ -4657,6 +4716,28 @@ Example::
     tensor([-0.0090,  0.2262,  0.0682,  0.2866, -0.3940])
 """.format(**common_args))
 
+add_docstr(torch.nextafter,
+           r"""
+nextafter(input, other, *, out=None) -> Tensor
+
+Return the next floating-point value after :attr:`input` towards :attr:`other`, elementwise.
+
+The shapes of ``input`` and ``other`` must be
+:ref:`broadcastable <broadcasting-semantics>`.
+
+Args:
+    input (Tensor): the first input tensor
+    other (Tensor): the second input tensor
+Keyword args:
+    {out}
+
+Example::
+    >>> eps = torch.finfo(torch.float32).eps
+    >>> torch.nextafter(torch.Tensor([1, 2]), torch.Tensor([2, 1])) == torch.Tensor([eps + 1, 2 - eps])
+    tensor([True, True])
+
+""".format(**common_args))
+
 add_docstr(torch.nonzero,
            r"""
 nonzero(input, *, out=None, as_tuple=False) -> LongTensor or tuple of LongTensors
@@ -4962,7 +5043,7 @@ Computes the :math:`n^{th}` derivative of the digamma function on :attr:`input`.
     \psi^{(n)}(x) = \frac{d^{(n)}}{dx^{(n)}} \psi(x)
 
 .. note::
-    This function is not implemented for :math:`n \geq 2`.
+    This function is implemented only for nonnegative integers :math:`n \geq 0`.
 """ + """
 Args:
     n (int): the order of the polygamma function
@@ -4973,6 +5054,12 @@ Example::
     >>> a = torch.tensor([1, 0.5])
     >>> torch.polygamma(1, a)
     tensor([1.64493, 4.9348])
+    >>> torch.polygamma(2, a)
+    tensor([ -2.4041, -16.8288])
+    >>> torch.polygamma(3, a)
+    tensor([ 6.4939, 97.4091])
+    >>> torch.polygamma(4, a)
+    tensor([ -24.8863, -771.4742])
 """.format(**common_args))
 
 add_docstr(torch.pow,
