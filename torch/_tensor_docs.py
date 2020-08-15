@@ -808,8 +808,9 @@ type as :attr:`self`.
 
 .. note::
 
-    Unlike `copy_()`, this function is recorded in the computation graph. Gradients
-    propagating to the cloned tensor will propagate to the original tensor.
+    This function is differentiable and so gradients will flow back to the original
+    Tensor. If you want to get a Tensor that is independent from the point of view
+    of the autograd, see :meth:`~Tensor.detach`.
 
 Args:
     {memory_format}
@@ -2174,6 +2175,18 @@ add_docstr_all('nelement',
 nelement() -> int
 
 Alias for :meth:`~Tensor.numel`
+""")
+
+add_docstr_all('nextafter',
+               r"""
+nextafter(other) -> Tensor
+See :func:`torch.nextafter`
+""")
+
+add_docstr_all('nextafter_',
+               r"""
+nextafter_(other) -> Tensor
+In-place version of :meth:`~Tensor.nextafter`
 """)
 
 add_docstr_all('nonzero',
