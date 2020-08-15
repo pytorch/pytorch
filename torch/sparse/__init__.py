@@ -1,5 +1,5 @@
 # The Tensor classes are added to this module by python_tensor.cpp
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List, Union
 
 import torch
 from torch import Tensor
@@ -7,11 +7,9 @@ from torch import Tensor
 # A workaround to support both TorchScript and MyPy:
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-    from torch import dtype as DType
+    from torch.types import _dtype as DType
 else:
     DType = int
-# TODO: replace the above with
-# from torch.types import _dtype as DType
 
 
 __all__ = [
@@ -23,8 +21,8 @@ __all__ = [
 ]
 
 
-def addmm(mat, mat1, mat2, beta=1, alpha=1):
-    # type: (Tensor, Tensor, Tensor, float, float) -> Tensor
+def addmm(mat: Tensor, mat1: Tensor, mat2: Tensor,
+          beta: float = 1., alpha: float = 1.) -> Tensor:
     r"""
     This function does exact same thing as :func:`torch.addmm` in the forward,
     except that it supports backward for sparse matrix :attr:`mat1`. :attr:`mat1`
@@ -41,7 +39,7 @@ def addmm(mat, mat1, mat2, beta=1, alpha=1):
     return torch._sparse_addmm(mat, mat1, mat2, beta=beta, alpha=alpha)
 
 
-def mm(mat1, mat2):
+def mm(mat1: Tensor, mat2: Tensor) -> Tensor:
     r"""
     Performs a matrix multiplication of the sparse matrix :attr:`mat1`
     and dense matrix :attr:`mat2`. Similar to :func:`torch.mm`, If :attr:`mat1` is a
@@ -83,8 +81,8 @@ def mm(mat1, mat2):
     return torch._sparse_mm(mat1, mat2)
 
 
-def sum(input, dim=None, dtype=None):
-    # type: (Tensor, Optional[Tuple[int]], Optional[int]) -> Tensor
+def sum(input: Tensor, dim: Optional[Union[int, Tuple[int], List[int]]] = None,
+        dtype: Optional[DType] = None) -> Tensor:
     r"""
     Returns the sum of each row of SparseTensor :attr:`input` in the given
     dimensions :attr:`dim`. If :attr:`dim` is a list of dimensions,
