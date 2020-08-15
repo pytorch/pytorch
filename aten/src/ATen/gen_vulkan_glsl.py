@@ -3,7 +3,10 @@
 import argparse
 import sys
 import os
-from code_template import CodeTemplate
+try:
+    from code_template import CodeTemplate
+except ImportError:
+    from .code_template import CodeTemplate
 
 H_NAME = "glsl.h"
 CPP_NAME = "glsl.cpp"

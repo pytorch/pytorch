@@ -5,7 +5,10 @@ import array
 import os
 import sys
 import subprocess
-from code_template import CodeTemplate
+try:
+    from code_template import CodeTemplate
+except ImportError:
+    from .code_template import CodeTemplate
 
 H_NAME = "spv.h"
 CPP_NAME = "spv.cpp"
