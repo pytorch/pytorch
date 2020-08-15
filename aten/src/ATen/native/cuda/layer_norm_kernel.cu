@@ -272,6 +272,9 @@ void LayerNormKernelImplInternal(
   TORCH_CHECK(X.numel() == M * N);
   TORCH_CHECK(!gamma.defined() || gamma.numel() == N);
   TORCH_CHECK(!beta.defined() || beta.numel() == N);
+  if (M == 0) {
+    return;
+  }
   const T* X_data = X.data_ptr<T>();
   const T* gamma_data = gamma.defined() ? gamma.data_ptr<T>() : nullptr;
   const T* beta_data = beta.defined() ? beta.data_ptr<T>() : nullptr;
@@ -328,6 +331,11 @@ void LayerNormBackwardKernelImplInternal(
   TORCH_CHECK(mean.numel() == M);
   TORCH_CHECK(rstd.numel() == M);
   TORCH_CHECK(!gamma.defined() || gamma.numel() == N);
+
+  if (M == 0) {
+    return;
+  }
+
   const T* dY_data = dY.data_ptr<T>();
   const T* X_data = X.data_ptr<T>();
   const T* mean_data = mean.data_ptr<T>();
