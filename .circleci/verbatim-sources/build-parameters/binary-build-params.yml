@@ -1,0 +1,66 @@
+binary_linux_build_params: &binary_linux_build_params
+  parameters:
+    build_environment:
+      type: string
+      default: ""
+    docker_image:
+      type: string
+      default: ""
+    libtorch_variant:
+      type: string
+      default: ""
+    resource_class:
+      type: string
+      default: "2xlarge+"
+  environment:
+    BUILD_ENVIRONMENT: << parameters.build_environment >>
+    LIBTORCH_VARIANT: << parameters.libtorch_variant >>
+    ANACONDA_USER: pytorch
+  resource_class: << parameters.resource_class >>
+  docker:
+    - image: << parameters.docker_image >>
+
+binary_linux_test_upload_params: &binary_linux_test_upload_params
+  parameters:
+    build_environment:
+      type: string
+      default: ""
+    docker_image:
+      type: string
+      default: ""
+    libtorch_variant:
+      type: string
+      default: ""
+    resource_class:
+      type: string
+      default: "medium"
+    use_cuda_docker_runtime:
+      type: string
+      default: ""
+  environment:
+    BUILD_ENVIRONMENT: << parameters.build_environment >>
+    DOCKER_IMAGE: << parameters.docker_image >>
+    USE_CUDA_DOCKER_RUNTIME: << parameters.use_cuda_docker_runtime >>
+    LIBTORCH_VARIANT: << parameters.libtorch_variant >>
+  resource_class: << parameters.resource_class >>
+
+binary_mac_params: &binary_mac_params
+  parameters:
+    build_environment:
+      type: string
+      default: ""
+  environment:
+    BUILD_ENVIRONMENT: << parameters.build_environment >>
+
+binary_windows_params: &binary_windows_params
+  parameters:
+    build_environment:
+      type: string
+      default: ""
+    executor:
+      type: string
+      default: "windows-xlarge-cpu-with-nvidia-cuda"
+  environment:
+    BUILD_ENVIRONMENT: << parameters.build_environment >>
+    BUILD_FOR_SYSTEM: windows
+    JOB_EXECUTOR: <<parameters.executor>>

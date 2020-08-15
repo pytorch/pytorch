@@ -17,39 +17,75 @@ PyTorch is an optimized tensor library for deep learning using GPUs and CPUs.
 
    notes/*
 
+.. toctree::
+   :maxdepth: 1
+   :caption: Language Bindings
+
+   cpp_index
+   Javadoc <https://pytorch.org/javadoc/>
 
 .. toctree::
    :maxdepth: 1
-   :caption: Package Reference
+   :caption: Python API
 
    torch
-   tensors
-   storage
    nn
-   optim
+   nn.functional
+   tensors
+   tensor_attributes
+   tensor_view
    torch.autograd <autograd>
-   torch.multiprocessing <multiprocessing>
-   torch.legacy <legacy>
    cuda
-   ffi
-   data
-   model_zoo
+   torch.cuda.amp <amp>
+   torch.distributed <distributed>
+   torch.distributions <distributions>
+   torch.fft <fft>
+   futures
+   torch.hub <hub>
+   torch.jit <jit>
+   torch.linalg <linalg>
+   nn.init
+   onnx
+   optim
+   complex_numbers
+   quantization
+   rpc
+   torch.random <random>
+   sparse
+   storage
+   torch.utils.bottleneck <bottleneck>
+   torch.utils.checkpoint <checkpoint>
+   torch.utils.cpp_extension <cpp_extension>
+   torch.utils.data <data>
+   torch.utils.dlpack <dlpack>
+   torch.utils.mobile_optimizer <mobile_optimizer>
+   torch.utils.model_zoo <model_zoo>
+   torch.utils.tensorboard <tensorboard>
+   type_info
+   named_tensor
+   name_inference
+   torch.__config__ <__config__>
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Libraries
+
+   torchaudio <https://pytorch.org/audio>
+   torchtext <https://pytorch.org/text>
+   torchvision <https://pytorch.org/vision>
+   TorchElastic <https://pytorch.org/elastic/>
+   TorchServe <https://pytorch.org/serve>
+   PyTorch on XLA Devices <http://pytorch.org/xla/>
 
 .. toctree::
    :glob:
    :maxdepth: 1
-   :caption: torchvision Reference
+   :caption: Community
 
-   torchvision/torchvision
-   torchvision/datasets
-   torchvision/models
-   torchvision/transforms
-   torchvision/utils
-
+   community/*
 
 Indices and tables
 ==================
 
 * :ref:`genindex`
 * :ref:`modindex`
-* :ref:`search`

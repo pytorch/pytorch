@@ -1,0 +1,80 @@
+ir_version: 6
+producer_name: "pytorch"
+producer_version: "CURRENT_VERSION"
+graph {
+  node {
+    input: "0"
+    input: "1"
+    output: "2"
+    name: "Add_0"
+    op_type: "Add"
+  }
+  node {
+    input: "0"
+    input: "2"
+    output: "3"
+    name: "Mul_1"
+    op_type: "Mul"
+  }
+  node {
+    input: "3"
+    output: "4"
+    name: "Tanh_2"
+    op_type: "Tanh"
+  }
+  node {
+    input: "4"
+    output: "5"
+    name: "Sigmoid_3"
+    op_type: "Sigmoid"
+  }
+  node {
+    input: "5"
+    output: "6"
+    name: "Neg_4"
+    op_type: "Neg"
+  }
+  name: "torch-jit-export"
+  input {
+    name: "0"
+    type {
+      tensor_type {
+        elem_type: 1
+        shape {
+          dim {
+            dim_value: 1
+          }
+        }
+      }
+    }
+  }
+  input {
+    name: "1"
+    type {
+      tensor_type {
+        elem_type: 1
+        shape {
+          dim {
+            dim_value: 1
+          }
+        }
+      }
+    }
+  }
+  output {
+    name: "6"
+    type {
+      tensor_type {
+        elem_type: 1
+        shape {
+          dim {
+            dim_value: 1
+          }
+        }
+      }
+    }
+  }
+}
+opset_import {
+  version: 9
+}

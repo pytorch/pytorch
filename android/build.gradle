@@ -1,0 +1,43 @@
+allprojects {
+    buildscript {
+        ext {
+            minSdkVersion = 21
+            targetSdkVersion = 28
+            compileSdkVersion = 28
+            buildToolsVersion = '28.0.3'
+
+            coreVersion = "1.2.0"
+            extJUnitVersion = "1.1.1"
+            runnerVersion = "1.2.0"
+            rulesVersion = "1.2.0"
+            junitVersion = "4.12"
+
+            androidSupportAppCompatV7Version = "28.0.0"
+            fbjniJavaOnlyVersion = "0.0.3"
+            soLoaderNativeLoaderVersion = "0.8.0"
+        }
+
+        repositories {
+            google()
+            mavenLocal()
+            mavenCentral()
+            jcenter()
+        }
+
+        dependencies {
+            classpath 'com.android.tools.build:gradle:3.3.2'
+            classpath "com.jfrog.bintray.gradle:gradle-bintray-plugin:${GRADLE_BINTRAY_PLUGIN_VERSION}"
+            classpath "com.github.dcendents:android-maven-gradle-plugin:${ANDROID_MAVEN_GRADLE_PLUGIN_VERSION}"
+            classpath "org.jfrog.buildinfo:build-info-extractor-gradle:4.9.8"
+        }
+    }
+
+    repositories {
+        google()
+        jcenter()
+    }
+}
+
+ext.deps = [
+        jsr305: 'com.google.code.findbugs:jsr305:3.0.1',
+]

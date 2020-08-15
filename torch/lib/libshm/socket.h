@@ -1,3 +1,5 @@
+#pragma once
+
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -9,8 +11,8 @@
 #include <iostream>
 #include <cstring>
 
-#include "err.h"
-#include "alloc_info.h"
+#include <libshm/err.h>
+#include <libshm/alloc_info.h>
 
 class Socket {
 public:
@@ -18,12 +20,11 @@ public:
 
 protected:
   Socket() {
-    SYSCHECK(socket_fd = socket(AF_UNIX, SOCK_STREAM, 0));
+    SYSCHECK_ERR_RETURN_NEG1(socket_fd = socket(AF_UNIX, SOCK_STREAM, 0));
   }
   Socket(const Socket& other) = delete;
-  Socket(Socket&& other): socket_fd(other.socket_fd) { other.socket_fd = -1; };
-
-  Socket(int fd): socket_fd(fd) {}
+  Socket(Socket&& other) noexcept : socket_fd(other.socket_fd) { other.socket_fd = -1; };
+  explicit Socket(int fd) : socket_fd(fd) {}
 
   virtual ~Socket() {
     if (socket_fd != -1)
@@ -43,21 +44,21 @@ protected:
 
   void recv(void *_buffer, size_t num_bytes) {
     char *buffer = (char*)_buffer;
-    size_t bytes_recieved = 0;
-    ssize_t step_recieved;
+    size_t bytes_received = 0;
+    ssize_t step_received;
     struct pollfd pfd = {0};
     pfd.fd = socket_fd;
     pfd.events = POLLIN;
-    while (bytes_recieved < num_bytes) {
-      SYSCHECK(poll(&pfd, 1, 1000));
+    while (bytes_received < num_bytes) {
+      SYSCHECK_ERR_RETURN_NEG1(poll(&pfd, 1, 1000));
       if (pfd.revents & POLLIN) {
-        SYSCHECK(step_recieved = ::read(socket_fd, buffer, num_bytes - bytes_recieved));
-        if (step_recieved == 0)
+        SYSCHECK_ERR_RETURN_NEG1(step_received = ::read(socket_fd, buffer, num_bytes - bytes_received));
+        if (step_received == 0)
           throw std::runtime_error("Other end has closed the connection");
-        bytes_recieved += step_recieved;
-        buffer += step_recieved;
+        bytes_received += step_received;
+        buffer += step_received;
       } else if (pfd.revents & (POLLERR | POLLHUP)) {
-        throw std::runtime_error("An error occured while waiting for the data");
+        throw std::runtime_error("An error occurred while waiting for the data");
       } else {
         throw std::runtime_error("Shared memory manager connection has timed out");
       }
@@ -69,7 +70,7 @@ protected:
     size_t bytes_sent = 0;
     ssize_t step_sent;
     while (bytes_sent < num_bytes) {
-      SYSCHECK(step_sent = ::write(socket_fd, buffer, num_bytes));
+      SYSCHECK_ERR_RETURN_NEG1(step_sent = ::write(socket_fd, buffer, num_bytes));
       bytes_sent += step_sent;
       buffer += step_sent;
     }
@@ -80,9 +81,9 @@ protected:
 
 class ManagerSocket: public Socket {
 public:
-  ManagerSocket(int fd): Socket(fd) {}
+  explicit ManagerSocket(int fd): Socket(fd) {}
 
-  AllocInfo recieve() {
+  AllocInfo receive() {
     AllocInfo info;
     recv(&info, sizeof(info));
     return info;
@@ -97,15 +98,15 @@ public:
 
 class ManagerServerSocket: public Socket {
 public:
-  ManagerServerSocket(const std::string &path) {
+  explicit ManagerServerSocket(const std::string &path) {
     socket_path = path;
     try {
       struct sockaddr_un address = prepare_address(path.c_str());
       size_t len = address_length(address);
-      SYSCHECK(bind(socket_fd, (struct sockaddr *)&address, len));
-      SYSCHECK(listen(socket_fd, 10));
+      SYSCHECK_ERR_RETURN_NEG1(bind(socket_fd, (struct sockaddr *)&address, len));
+      SYSCHECK_ERR_RETURN_NEG1(listen(socket_fd, 10));
     } catch(std::exception &e) {
-      close(socket_fd);
+      SYSCHECK_ERR_RETURN_NEG1(close(socket_fd));
       throw;
     }
   }
@@ -118,7 +119,7 @@ public:
     int client_fd;
     struct sockaddr_un addr;
     socklen_t addr_len = sizeof(addr);
-    SYSCHECK(client_fd = ::accept(socket_fd, (struct sockaddr *)&addr, &addr_len));
+    SYSCHECK_ERR_RETURN_NEG1(client_fd = ::accept(socket_fd, (struct sockaddr *)&addr, &addr_len));
     return ManagerSocket(client_fd);
   }
 
@@ -127,20 +128,19 @@ public:
 
 class ClientSocket: public Socket {
 public:
-  ClientSocket(const std::string &path) {
+  explicit ClientSocket(const std::string &path) {
     try {
       struct sockaddr_un address = prepare_address(path.c_str());
       size_t len = address_length(address);
-      SYSCHECK(connect(socket_fd, (struct sockaddr *)&address, len));
+      SYSCHECK_ERR_RETURN_NEG1(connect(socket_fd, (struct sockaddr *)&address, len));
     } catch(std::exception &e) {
-      close(socket_fd);
+      SYSCHECK_ERR_RETURN_NEG1(close(socket_fd));
       throw;
     }
   }
 
   void register_allocation(AllocInfo &info) {
     char buffer[3] = {0, 0, 0};
-    ssize_t bytes_read;
     send(&info, sizeof(info));
     recv(buffer, 2);
     if (strcmp(buffer, "OK") != 0)

@@ -1,0 +1,77 @@
+ir_version: 6
+producer_name: "pytorch"
+producer_version: "CURRENT_VERSION"
+graph {
+  node {
+    input: "x"
+    input: "x"
+    output: "1"
+    name: "Mul_0"
+    op_type: "Mul"
+  }
+  node {
+    input: "1"
+    output: "2"
+    name: "ReduceSum_1"
+    op_type: "ReduceSum"
+    attribute {
+      name: "axes"
+      ints: 0
+      ints: 1
+      type: INTS
+    }
+    attribute {
+      name: "keepdims"
+      i: 1
+      type: INT
+    }
+  }
+  node {
+    input: "2"
+    output: "3"
+    name: "Sqrt_2"
+    op_type: "Sqrt"
+  }
+  name: "torch-jit-export"
+  input {
+    name: "x"
+    type {
+      tensor_type {
+        elem_type: 1
+        shape {
+          dim {
+            dim_value: 2
+          }
+          dim {
+            dim_value: 3
+          }
+          dim {
+            dim_value: 4
+          }
+        }
+      }
+    }
+  }
+  output {
+    name: "3"
+    type {
+      tensor_type {
+        elem_type: 1
+        shape {
+          dim {
+            dim_value: 1
+          }
+          dim {
+            dim_value: 1
+          }
+          dim {
+            dim_value: 4
+          }
+        }
+      }
+    }
+  }
+}
+opset_import {
+  version: 9
+}

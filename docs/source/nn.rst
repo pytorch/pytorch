@@ -1,241 +1,364 @@
+.. role:: hidden
+    :class: hidden-section
+
 torch.nn
 ===================================
 
-.. automodule:: torch.nn
+These are the basic building block for graphs
+
+.. contents:: torch.nn
+    :depth: 2
+    :local:
+    :backlinks: top
+    
+
 .. currentmodule:: torch.nn
+
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
+
+    ~parameter.Parameter
 
 Containers
 ----------------------------------
 
-.. autoclass:: Module
-    :members:
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
+
+    Module
+    Sequential
+    ModuleList
+    ModuleDict
+    ParameterList
+    ParameterDict
+
+.. currentmodule:: torch
 
 Convolution Layers
 ----------------------------------
 
-.. autoclass:: Conv1d
-    :members:
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
 
-.. autoclass:: Conv2d
-    :members:
+    nn.Conv1d
+    nn.Conv2d
+    nn.Conv3d
+    nn.ConvTranspose1d
+    nn.ConvTranspose2d
+    nn.ConvTranspose3d
+    nn.Unfold
+    nn.Fold
 
-.. autoclass:: Conv3d
-    :members:
-
-.. autoclass:: ConvTranspose1d
-    :members:
-
-.. autoclass:: ConvTranspose2d
-    :members:
-
-.. autoclass:: ConvTranspose3d
-    :members:
-
-
-Pooling Layers
+Pooling layers
 ----------------------------------
 
-.. autoclass:: MaxPool1d
-    :members:
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
 
-.. autoclass:: MaxPool2d
-    :members:
+    nn.MaxPool1d
+    nn.MaxPool2d
+    nn.MaxPool3d
+    nn.MaxUnpool1d
+    nn.MaxUnpool2d
+    nn.MaxUnpool3d
+    nn.AvgPool1d
+    nn.AvgPool2d
+    nn.AvgPool3d
+    nn.FractionalMaxPool2d
+    nn.LPPool1d
+    nn.LPPool2d
+    nn.AdaptiveMaxPool1d
+    nn.AdaptiveMaxPool2d
+    nn.AdaptiveMaxPool3d
+    nn.AdaptiveAvgPool1d
+    nn.AdaptiveAvgPool2d
+    nn.AdaptiveAvgPool3d
 
-.. autoclass:: MaxPool3d
-    :members:
+Padding Layers
+--------------
 
-.. autoclass:: MaxUnpool1d
-    :members:
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
 
-.. autoclass:: MaxUnpool2d
-    :members:
+    nn.ReflectionPad1d
+    nn.ReflectionPad2d
+    nn.ReplicationPad1d
+    nn.ReplicationPad2d
+    nn.ReplicationPad3d
+    nn.ZeroPad2d
+    nn.ConstantPad1d
+    nn.ConstantPad2d
+    nn.ConstantPad3d
 
-.. autoclass:: MaxUnpool3d
-    :members:
+Non-linear Activations (weighted sum, nonlinearity)
+---------------------------------------------------
 
-.. autoclass:: AvgPool1d
-    :members:
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
 
-.. autoclass:: AvgPool2d
-    :members:
+    nn.ELU
+    nn.Hardshrink
+    nn.Hardsigmoid
+    nn.Hardtanh
+    nn.Hardswish
+    nn.LeakyReLU
+    nn.LogSigmoid
+    nn.MultiheadAttention
+    nn.PReLU
+    nn.ReLU
+    nn.ReLU6
+    nn.RReLU
+    nn.SELU
+    nn.CELU
+    nn.GELU
+    nn.Sigmoid
+    nn.SiLU
+    nn.Softplus
+    nn.Softshrink
+    nn.Softsign
+    nn.Tanh
+    nn.Tanhshrink
+    nn.Threshold
 
-.. autoclass:: AvgPool3d
-    :members:
+Non-linear Activations (other)
+------------------------------
 
-.. autoclass:: FractionalMaxPool2d
-    :members:
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
 
-.. autoclass:: LPPool2d
-    :members:
+    nn.Softmin
+    nn.Softmax
+    nn.Softmax2d
+    nn.LogSoftmax
+    nn.AdaptiveLogSoftmaxWithLoss
 
-Non-linear Activations
+Normalization Layers
 ----------------------------------
 
-.. autoclass:: ReLU
-    :members:
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
 
-.. autoclass:: ReLU6
-    :members:
+    nn.BatchNorm1d
+    nn.BatchNorm2d
+    nn.BatchNorm3d
+    nn.GroupNorm
+    nn.SyncBatchNorm
+    nn.InstanceNorm1d
+    nn.InstanceNorm2d
+    nn.InstanceNorm3d
+    nn.LayerNorm
+    nn.LocalResponseNorm
 
-.. autoclass:: ELU
-    :members:
-
-.. autoclass:: PReLU
-    :members:
-
-.. autoclass:: LeakyReLU
-    :members:
-
-.. autoclass:: Threshold
-    :members:
-
-.. autoclass:: Hardtanh
-    :members:
-
-.. autoclass:: Sigmoid
-    :members:
-
-.. autoclass:: Tanh
-    :members:
-
-.. autoclass:: LogSigmoid
-    :members:
-
-.. autoclass:: Softplus
-    :members:
-
-.. autoclass:: Softshrink
-    :members:
-
-.. autoclass:: Softsign
-    :members:
-
-.. autoclass:: Tanhshrink
-    :members:
-
-.. autoclass:: Softmin
-    :members:
-
-.. autoclass:: Softmax
-    :members:
-
-.. autoclass:: LogSoftmax
-    :members:
-
-
-Normalization layers
-----------------------------------
-
-.. autoclass:: BatchNorm1d
-    :members:
-
-.. autoclass:: BatchNorm2d
-    :members:
-
-.. autoclass:: BatchNorm3d
-    :members:
-
-
-Recurrent layers
-----------------------------------
-
-.. autoclass:: RNN
-    :members:
-
-.. autoclass:: LSTM
-    :members:
-
-.. autoclass:: GRU
-    :members:
-
-.. autoclass:: RNNCell
-    :members:
-
-.. autoclass:: LSTMCell
-    :members:
-
-.. autoclass:: GRUCell
-    :members:
-
-Linear layers
-----------------------------------
-
-.. autoclass:: Linear
-    :members:
-
-
-Dropout layers
-----------------------------------
-
-.. autoclass:: Dropout
-    :members:
-
-.. autoclass:: Dropout2d
-    :members:
-
-.. autoclass:: Dropout3d
-    :members:
-
-
-Sparse layers
-----------------------------------
-
-.. autoclass:: Embedding
-    :members:
-
-
-Loss functions
-----------------------------------
-
-.. autoclass:: L1Loss
-    :members:
-
-.. autoclass:: MSELoss
-    :members:
-
-.. autoclass:: CrossEntropyLoss
-    :members:
-
-.. autoclass:: NLLLoss
-    :members:
-
-.. autoclass:: KLDivLoss
-    :members:
-
-.. autoclass:: BCELoss
-    :members:
-
-.. autoclass:: MarginRankingLoss
-    :members:
-
-.. autoclass:: HingeEmbeddingLoss
-    :members:
-
-.. autoclass:: MultiLabelMarginLoss
-    :members:
-
-.. autoclass:: SmoothL1Loss
-    :members:
-
-.. autoclass:: SoftMarginLoss
-    :members:
-
-.. autoclass:: MultiLabelSoftMarginLoss
-    :members:
-
-.. autoclass:: CosineEmbeddingLoss
-    :members:
-
-.. autoclass:: MultiMarginLoss
-    :members:
-
-
-Vision layers
+Recurrent Layers
 ----------------
-.. autoclass:: PixelShuffle
-    :members:
 
-Multi-GPU layers
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
+
+    nn.RNNBase
+    nn.RNN
+    nn.LSTM
+    nn.GRU
+    nn.RNNCell
+    nn.LSTMCell
+    nn.GRUCell
+
+Transformer Layers
+----------------------------------
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
+
+    nn.Transformer
+    nn.TransformerEncoder
+    nn.TransformerDecoder
+    nn.TransformerEncoderLayer
+    nn.TransformerDecoderLayer
+
+Linear Layers
+----------------------------------
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
+
+    nn.Identity
+    nn.Linear
+    nn.Bilinear
+
+Dropout Layers
+--------------
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
+
+    nn.Dropout
+    nn.Dropout2d
+    nn.Dropout3d
+    nn.AlphaDropout
+
+Sparse Layers
+-------------
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
+
+    nn.Embedding
+    nn.EmbeddingBag
+
+Distance Functions
+------------------
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
+
+    nn.CosineSimilarity
+    nn.PairwiseDistance
+
+Loss Functions
+--------------
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
+
+    nn.L1Loss
+    nn.MSELoss
+    nn.CrossEntropyLoss
+    nn.CTCLoss
+    nn.NLLLoss
+    nn.PoissonNLLLoss
+    nn.KLDivLoss
+    nn.BCELoss
+    nn.BCEWithLogitsLoss
+    nn.MarginRankingLoss
+    nn.HingeEmbeddingLoss
+    nn.MultiLabelMarginLoss
+    nn.SmoothL1Loss
+    nn.SoftMarginLoss
+    nn.MultiLabelSoftMarginLoss
+    nn.CosineEmbeddingLoss
+    nn.MultiMarginLoss
+    nn.TripletMarginLoss
+
+Vision Layers
 ----------------
-.. autoclass:: DataParallel
-    :members:
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
+
+    nn.PixelShuffle
+    nn.Upsample
+    nn.UpsamplingNearest2d
+    nn.UpsamplingBilinear2d
+
+DataParallel Layers (multi-GPU, distributed)
+--------------------------------------------
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
+
+    nn.DataParallel
+    nn.parallel.DistributedDataParallel
+
+Utilities
+---------
+
+From the ``torch.nn.utils`` module
+
+.. currentmodule:: torch.nn.utils
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    clip_grad_norm_
+    clip_grad_value_
+    parameters_to_vector
+    vector_to_parameters
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
+
+    prune.BasePruningMethod
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    prune.PruningContainer
+    prune.Identity
+    prune.RandomUnstructured
+    prune.L1Unstructured
+    prune.RandomStructured
+    prune.LnStructured
+    prune.CustomFromMask
+    prune.identity
+    prune.random_unstructured
+    prune.l1_unstructured
+    prune.random_structured
+    prune.ln_structured
+    prune.global_unstructured
+    prune.custom_from_mask
+    prune.remove
+    prune.is_pruned
+    weight_norm
+    remove_weight_norm
+    spectral_norm
+    remove_spectral_norm
+
+Utility functions in other modules
+
+.. currentmodule:: torch
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    nn.utils.rnn.PackedSequence
+    nn.utils.rnn.pack_padded_sequence
+    nn.utils.rnn.pad_packed_sequence
+    nn.utils.rnn.pad_sequence
+    nn.utils.rnn.pack_sequence
+
+    nn.Flatten
+    nn.Unflatten
+
+Quantized Functions
+--------------------
+
+Quantization refers to techniques for performing computations and storing tensors at lower bitwidths than
+floating point precision. PyTorch supports both per tensor and per channel asymmetric linear quantization. To learn more how to use quantized functions in PyTorch, please refer to the :ref:`quantization-doc` documentation.

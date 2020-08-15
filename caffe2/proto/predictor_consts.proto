@@ -1,0 +1,35 @@
+syntax = "proto2";
+
+package caffe2;
+
+message PredictorConsts {
+  // Important - to ensure ordered traversal of the DB, these must be
+  // set in the given (lexicographic) order in the input DBReader.
+  optional string META_NET_DEF = 1 [ default = "!!META_NET_DEF" ];
+
+  // The key the Predictor sets in the global workspace for DBReader
+  // consumed by the LoadOp in GLOBAL_INIT_NET.
+
+  optional string PREDICTOR_DBREADER = 2 [ default = "!!PREDICTOR_DBREADER" ];
+
+  // Blob types used in MetaNetDef blobs
+  optional string PARAMETERS_BLOB_TYPE = 3 [ default = "PARAMETERS_BLOB_TYPE" ];
+  optional string INPUTS_BLOB_TYPE = 4 [ default = "INPUTS_BLOB_TYPE" ];
+  optional string OUTPUTS_BLOB_TYPE = 5 [ default = "OUTPUTS_BLOB_TYPE" ];
+
+  // Net types used in MetaNetDef nets
+  optional string GLOBAL_INIT_NET_TYPE = 6 [ default = "GLOBAL_INIT_NET_TYPE" ];
+  optional string PREDICT_INIT_NET_TYPE = 7
+      [ default = "PREDICT_INIT_NET_TYPE" ];
+  optional string PREDICT_NET_TYPE = 8 [ default = "PREDICT_NET_TYPE" ];
+  optional string SINGLE_PREDICTOR = 9 [ default = "SINGLE_PREDICTOR" ];
+  optional string MULTI_PREDICTOR = 10 [ default = "MULTI_PREDICTOR" ];
+  optional string TRAIN_INIT_PLAN_TYPE = 11
+      [ default = "TRAIN_INIT_PLAN_TYPE" ];
+  optional string TRAIN_PLAN_TYPE = 12 [ default = "TRAIN_PLAN_TYPE" ];
+
+  // Shape info blob name
+  optional string SHAPE_INFO_BLOB = 13 [ default = "SHAPE_INFO_BLOB" ];
+  // Sequential blob reader name
+  optional string DEFERRED_BLOB_READER = 14 [ default = "__DEFERRED_BLOB_READER__" ];
+}

@@ -1,19 +1,22 @@
+import io
+
 import torch
-from ._utils import _type, _cuda, _range
+from ._utils import _type, _cuda
 
 
 class _StorageBase(object):
     is_cuda = False
+    is_sparse = False
 
     def __str__(self):
-        content = ' ' + '\n '.join(str(self[i]) for i in _range(len(self)))
+        content = ' ' + '\n '.join(str(self[i]) for i in range(len(self)))
         return content + '\n[{} of size {}]'.format(torch.typename(self), len(self))
 
     def __repr__(self):
         return str(self)
 
     def __iter__(self):
-        return iter(map(lambda i: self[i], _range(self.size())))
+        return iter(map(lambda i: self[i], range(self.size())))
 
     def __copy__(self):
         return self.clone()
@@ -27,15 +30,22 @@ class _StorageBase(object):
         return new_storage
 
     def __reduce__(self):
-        return type(self), (self.tolist(),)
+        b = io.BytesIO()
+        torch.save(self, b, _use_new_zipfile_serialization=False)
+        return (_load_from_bytes, (b.getvalue(),))
+
+    def __sizeof__(self):
+        return super(_StorageBase, self).__sizeof__() + self.element_size() * self.size()
 
     def clone(self):
         """Returns a copy of this storage"""
-        return type(self)(self.size()).copy_(self)
+        device = self.get_device() if self.is_cuda else -1
+        with torch.cuda.device(device):
+            return type(self)(self.size()).copy_(self)
 
     def tolist(self):
         """Returns a list containing the elements of this storage"""
-        return [v for v in self]
+        return list(self)
 
     def cpu(self):
         """Returns a CPU copy of this storage if it's not already on the CPU"""
@@ -73,6 +83,22 @@ class _StorageBase(object):
         """Casts this storage to byte type"""
         return self.type(type(self).__module__ + '.ByteStorage')
 
+    def bool(self):
+        """Casts this storage to bool type"""
+        return self.type(type(self).__module__ + '.BoolStorage')
+
+    def bfloat16(self):
+        """Casts this storage to bfloat16 type"""
+        return self.type(type(self).__module__ + '.BFloat16Storage')
+
+    def complex_double(self):
+        """Casts this storage to complex double type"""
+        return self.type(type(self).__module__ + '.ComplexDoubleStorage')
+
+    def complex_float(self):
+        """Casts this storage to complex float type"""
+        return self.type(type(self).__module__ + '.ComplexFloatStorage')
+
     def pin_memory(self):
         """Copies the storage to pinned memory, if it's not already pinned."""
         if self.is_cuda:
@@ -99,6 +125,21 @@ class _StorageBase(object):
         else:
             self._share_fd_()
         return self
+
+    @classmethod
+    def _new_shared(cls, size):
+        """Creates a new storage in shared memory with the same data type"""
+        from torch.multiprocessing import get_sharing_strategy
+        if cls.is_cuda:
+            return cls(size)
+        elif get_sharing_strategy() == 'file_system':
+            return cls._new_using_filename(size)
+        else:
+            return cls._new_using_fd(size)
+
+
+def _load_from_bytes(b):
+    return torch.load(io.BytesIO(b))
 
 
 _StorageBase.type = _type

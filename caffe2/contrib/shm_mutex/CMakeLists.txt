@@ -1,0 +1,7 @@
+if(USE_SHM_MUTEX)
+  set(Caffe2_CONTRIB_SHMMUTEX_CPU_SRC
+    "${CMAKE_CURRENT_SOURCE_DIR}/shm_mutex.cc"
+    )
+
+  set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS} ${Caffe2_CONTRIB_SHMMUTEX_CPU_SRC} PARENT_SCOPE)
+endif()

@@ -1,22 +1,18 @@
 #ifndef THCP_H
 #define THCP_H
 
+#include <torch/csrc/python_headers.h>
 #include <TH/TH.h>
 #include <THC/THC.h>
-#include <THC/THCHalf.h>
+#include <TH/THHalf.h>
+#include <THC/THCTensor.hpp>
 
-#include <THS/THS.h>
-#include <THCS/THCS.h>
-
-#include "torch/csrc/THP.h"
-#include "serialization.h"
-#include "AutoGPU.h"
-#include "Module.h"
-#include "Storage.h"
-#include "Tensor.h"
-#include "Stream.h"
-#ifdef _THP_CORE
-#include "utils.h"
-#endif
+#include <torch/csrc/THP.h>
+#include <torch/csrc/cuda/serialization.h>
+#include <torch/csrc/cuda/Module.h>
+#include <torch/csrc/cuda/Storage.h>
+#include <torch/csrc/cuda/Stream.h>
+#include <torch/csrc/cuda/Event.h>
+#include <torch/csrc/cuda/utils.h>
 
 #endif

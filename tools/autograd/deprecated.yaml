@@ -1,0 +1,92 @@
+# Deprecated function signatures. These are exposed in Python, but not included
+# in the error message suggestions.
+
+- name: add(Tensor self, Scalar alpha, Tensor other)
+  aten: add(self, other, alpha)
+
+- name: add(Tensor self, Scalar alpha, Tensor other, *, Tensor out)
+  aten: add_out(out, self, other, alpha)
+
+- name: addbmm(Scalar beta, Tensor self, Scalar alpha, Tensor batch1, Tensor batch2)
+  aten: addbmm(self, batch1, batch2, beta, alpha)
+
+- name: addbmm(Scalar beta, Tensor self, Scalar alpha, Tensor batch1, Tensor batch2, *, Tensor out)
+  aten: addbmm_out(out, self, batch1, batch2, beta, alpha)
+
+- name: addbmm(Scalar beta, Tensor self, Tensor batch1, Tensor batch2)
+  aten: addbmm(self, batch1, batch2, beta, 1)
+
+- name: addbmm(Scalar beta, Tensor self, Tensor batch1, Tensor batch2, *, Tensor out)
+  aten: addbmm_out(out, self, batch1, batch2, beta, 1)
+
+- name: addcdiv(Tensor self, Scalar value, Tensor tensor1, Tensor tensor2)
+  aten: addcdiv(self, tensor1, tensor2, value)
+
+- name: addcdiv(Tensor self, Scalar value, Tensor tensor1, Tensor tensor2, *, Tensor out)
+  aten: addcdiv_out(out, self, tensor1, tensor2, value)
+
+- name: addcmul(Tensor self, Scalar value, Tensor tensor1, Tensor tensor2)
+  aten: addcmul(self, tensor1, tensor2, value)
+
+- name: addcmul(Tensor self, Scalar value, Tensor tensor1, Tensor tensor2, *, Tensor out)
+  aten: addcmul_out(out, self, tensor1, tensor2, value)
+
+- name: addmm(Scalar beta, Tensor self, Scalar alpha, Tensor mat1, Tensor mat2)
+  aten: addmm(self, mat1, mat2, beta, alpha)
+
+- name: addmm(Scalar beta, Tensor self, Scalar alpha, Tensor mat1, Tensor mat2, *, Tensor out)
+  aten: addmm_out(out, self, mat1, mat2, beta, alpha)
+
+- name: addmm(Scalar beta, Tensor self, Tensor mat1, Tensor mat2)
+  aten: addmm(self, mat1, mat2, beta, 1)
+
+- name: addmm(Scalar beta, Tensor self, Tensor mat1, Tensor mat2, *, Tensor out)
+  aten: addmm_out(out, self, mat1, mat2, beta, 1)
+
+- name: sspaddmm(Scalar beta, Tensor self, Scalar alpha, Tensor mat1, Tensor mat2)
+  aten: sspaddmm(self, mat1, mat2, beta, alpha)
+
+- name: sspaddmm(Scalar beta, Tensor self, Tensor mat1, Tensor mat2)
+  aten: sspaddmm(self, mat1, mat2, beta, 1)
+
+- name: addmv(Scalar beta, Tensor self, Scalar alpha, Tensor mat, Tensor vec)
+  aten: addmv(self, mat, vec, beta, alpha)
+
+- name: addmv(Scalar beta, Tensor self, Scalar alpha, Tensor mat, Tensor vec, *, Tensor out)
+  aten: addmv_out(out, self, mat, vec, beta, alpha)
+
+- name: addmv(Scalar beta, Tensor self, Tensor mat, Tensor vec)
+  aten: addmv(self, mat, vec, beta, 1)
+
+- name: addmv(Scalar beta, Tensor self, Tensor mat, Tensor vec, *, Tensor out)
+  aten: addmv_out(out, self, mat, vec, beta, 1)
+
+- name: addr(Scalar beta, Tensor self, Scalar alpha, Tensor vec1, Tensor vec2)
+  aten: addr(self, vec1, vec2, beta, alpha)
+
+- name: addr(Scalar beta, Tensor self, Scalar alpha, Tensor vec1, Tensor vec2, *, Tensor out)
+  aten: addr_out(out, self, vec1, vec2, beta, alpha)
+
+- name: addr(Scalar beta, Tensor self, Tensor vec1, Tensor vec2)
+  aten: addr(self, vec1, vec2, beta, 1)
+
+- name: addr(Scalar beta, Tensor self, Tensor vec1, Tensor vec2, *, Tensor out)
+  aten: addr_out(out, self, vec1, vec2, beta, 1)
+
+- name: baddbmm(Scalar beta, Tensor self, Scalar alpha, Tensor batch1, Tensor batch2)
+  aten: baddbmm(self, batch1, batch2, beta, alpha)
+
+- name: baddbmm(Scalar beta, Tensor self, Scalar alpha, Tensor batch1, Tensor batch2, *, Tensor out)
+  aten: baddbmm_out(out, self, batch1, batch2, beta, alpha)
+
+- name: baddbmm(Scalar beta, Tensor self, Tensor batch1, Tensor batch2)
+  aten: baddbmm(self, batch1, batch2, beta, 1)
+
+- name: baddbmm(Scalar beta, Tensor self, Tensor batch1, Tensor batch2, *, Tensor out)
+  aten: baddbmm_out(out, self, batch1, batch2, beta, 1)
+
+- name: sub(Tensor self, Scalar alpha, Tensor other)
+  aten: sub(self, other, alpha)
+
+- name: sub(Tensor self, Scalar alpha, Tensor other, *, Tensor out)
+  aten: sub_out(out, self, other, alpha)

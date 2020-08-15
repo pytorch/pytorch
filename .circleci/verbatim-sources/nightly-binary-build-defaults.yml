@@ -1,0 +1,50 @@
+
+##############################################################################
+# Binary build (nightlies nightly build) defaults
+# The binary builds use the docker executor b/c at time of writing the machine
+# executor is limited to only two cores and is painfully slow (4.5+ hours per
+# GPU build). But the docker executor cannot be run with --runtime=nvidia, and
+# so the binary test/upload jobs must run on a machine executor. The package
+# built in the build job is persisted to the workspace, which the test jobs
+# expect. The test jobs just run a few quick smoke tests (very similar to the
+# second-round-user-facing smoke tests above) and then upload the binaries to
+# their final locations. The upload part requires credentials that should only
+# be available to org-members.
+#
+# binary_checkout MUST be run before other commands here. This is because the
+# other commands are written in .circleci/scripts/*.sh , so the pytorch source
+# code must be downloaded on the machine before they can be run. We cannot
+# inline all the code into this file, since that would cause the yaml size to
+# explode past 4 MB (all the code in the command section is just copy-pasted to
+# everywhere in the .circleci/config.yml file where it appears).
+##############################################################################
+
+# Checks out the Pytorch and Builder repos (always both of them), and places
+# them in the right place depending on what executor we're running on. We curl
+# our .sh file from the interweb to avoid yaml size bloat. Note that many jobs
+# do not need both the pytorch and builder repos, so this is a little wasteful
+# (smoke tests and upload jobs do not need the pytorch repo).
+binary_checkout: &binary_checkout
+  name: Checkout pytorch/builder repo
+  command: .circleci/scripts/binary_checkout.sh
+
+# Parses circleci arguments in a consistent way, essentially routing to the
+# correct pythonXgccXcudaXos build we want
+binary_populate_env: &binary_populate_env
+  name: Set up binary env variables
+  command: .circleci/scripts/binary_populate_env.sh
+
+binary_install_miniconda: &binary_install_miniconda
+  name: Install miniconda
+  no_output_timeout: "1h"
+  command: .circleci/scripts/binary_install_miniconda.sh
+
+# This section is used in the binary_test and smoke_test jobs. It expects
+# 'binary_populate_env' to have populated /home/circleci/project/env and it
+# expects another section to populate /home/circleci/project/ci_test_script.sh
+# with the code to run in the docker
+binary_run_in_docker: &binary_run_in_docker
+  name: Run in docker
+  # This step only runs on circleci linux machine executors that themselves
+  # need to start docker images
+  command: .circleci/scripts/binary_run_in_docker.sh

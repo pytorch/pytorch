@@ -1,3 +1,5 @@
+.. _multiprocessing-best-practices:
+
 Multiprocessing best practices
 ==============================
 
@@ -9,29 +11,39 @@ memory and will only send a handle to another process.
 
 .. note::
 
-    When a :class:`~torch.autograd.Variable` is sent to another process, both
-    the :attr:`Variable.data` and :attr:`Variable.grad.data` are going to be
-    shared.
+    When a :class:`~torch.Tensor` is sent to another process, the
+    :class:`~torch.Tensor` data is shared. If :attr:`torch.Tensor.grad` is
+    not ``None``, it is also shared. After a :class:`~torch.Tensor` without
+    a :attr:`torch.Tensor.grad` field is sent to the other process, it
+    creates a standard process-specific ``.grad`` :class:`~torch.Tensor` that
+    is not automatically shared across all processes, unlike how the
+    :class:`~torch.Tensor`'s data has been shared.
 
 This allows to implement various training methods, like Hogwild, A3C, or any
 others that require asynchronous operation.
 
-Sharing CUDA tensors
---------------------
+.. _multiprocessing-cuda-note:
 
-Sharing CUDA tensors between processes is supported only in Python 3, using
-a ``spawn`` or ``forkserver`` start methods. :mod:`python:multiprocessing` in
-Python 2 can only create subprocesses using ``fork``, and it's not supported
-by the CUDA runtime.
+CUDA in multiprocessing
+-----------------------
 
-.. warning::
+The CUDA runtime does not support the ``fork`` start method; either the ``spawn`` or ``forkserver`` start method are
+required to use CUDA in subprocesses.
 
-    CUDA API requires that the allocation exported to other processes remains
-    valid as long as it's used by them. You should be careful and ensure that
-    CUDA tensors you shared don't go out of scope as long as it's necessary.
-    This shouldn't be a problem for sharing model parameters, but passing other
-    kinds of data should be done with care. Note that this restriction doesn't
-    apply to shared CPU memory.
+.. note::
+  The start method can be set via either creating a context with
+  ``multiprocessing.get_context(...)`` or directly using
+  ``multiprocessing.set_start_method(...)``.
+
+Unlike CPU tensors, the sending process is required to keep the original tensor
+as long as the receiving process retains a copy of the tensor. It is implemented
+under the hood but requires users to follow the best practices for the program
+to run correctly. For example, the sending process must stay alive as long as
+the consumer process has references to the tensor, and the refcounting can not
+save you if the consumer process exits abnormally via a fatal signal. See
+:ref:`this section <multiprocessing-cuda-sharing-details>`.
+
+See also: :ref:`cuda-nn-ddp-instead`
 
 
 Best practices and tips
@@ -100,11 +112,6 @@ example below as well::
     from model import MyModel
 
     def train(model):
-        # This for loop will break sharing of gradient buffers. It's not
-        # necessary but it reduces the contention, and has a small memory cost
-        # (equal to the total size of parameters).
-        for param in model.parameters():
-            param.grad.data = param.grad.data.clone()
         # Construct data_loader, optimizer, etc.
         for data, labels in data_loader:
             optimizer.zero_grad()
@@ -122,6 +129,6 @@ example below as well::
             p.start()
             processes.append(p)
         for p in processes:
-          p.join()
+            p.join()
 
 .. __: https://github.com/pytorch/examples/tree/master/mnist_hogwild

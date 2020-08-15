@@ -1,7 +1,6 @@
 import math
 import torch
-from functools import reduce
-from ._utils import _range
+from torch._six import inf
 
 
 class __PrinterOptions(object):
@@ -9,10 +8,10 @@ class __PrinterOptions(object):
     threshold = 1000
     edgeitems = 3
     linewidth = 80
+    sci_mode = None
 
 
 PRINT_OPTS = __PrinterOptions()
-SCALE_FORMAT = '{:.5e} *\n'
 
 
 # We could use **kwargs, but this will give better docs
@@ -22,21 +21,26 @@ def set_printoptions(
         edgeitems=None,
         linewidth=None,
         profile=None,
-        ):
-    """Set options for printing. Items shamelessly taken from Numpy
+        sci_mode=None
+):
+    r"""Set options for printing. Items shamelessly taken from NumPy
 
     Args:
         precision: Number of digits of precision for floating point output
-            (default 8).
+            (default = 4).
         threshold: Total number of array elements which trigger summarization
-            rather than full repr (default 1000).
+            rather than full `repr` (default = 1000).
         edgeitems: Number of array items in summary at beginning and end of
-            each dimension (default 3).
+            each dimension (default = 3).
         linewidth: The number of characters per line for the purpose of
-            inserting line breaks (default 80). Thresholded matricies will
+            inserting line breaks (default = 80). Thresholded matrices will
             ignore this parameter.
         profile: Sane defaults for pretty printing. Can override with any of
-            the above options. (default, short, full)
+            the above options. (any one of `default`, `short`, `full`)
+        sci_mode: Enable (True) or disable (False) scientific notation. If
+            None (default) is specified, the value is defined by
+            `torch._tensor_str._Formatter`. This value is automatically chosen
+            by the framework.
     """
     if profile is not None:
         if profile == "default":
@@ -51,7 +55,7 @@ def set_printoptions(
             PRINT_OPTS.linewidth = 80
         elif profile == "full":
             PRINT_OPTS.precision = 4
-            PRINT_OPTS.threshold = float('inf')
+            PRINT_OPTS.threshold = inf
             PRINT_OPTS.edgeitems = 3
             PRINT_OPTS.linewidth = 80
 
@@ -63,236 +67,306 @@ def set_printoptions(
         PRINT_OPTS.edgeitems = edgeitems
     if linewidth is not None:
         PRINT_OPTS.linewidth = linewidth
+    PRINT_OPTS.sci_mode = sci_mode
 
 
-def _number_format(tensor, min_sz=-1):
-    min_sz = max(min_sz, 2)
-    tensor = torch.DoubleTensor(tensor.nelement()).copy_(tensor).abs_()
+class _Formatter(object):
+    def __init__(self, tensor):
+        self.floating_dtype = tensor.dtype.is_floating_point
+        self.int_mode = True
+        self.sci_mode = False
+        self.max_width = 1
 
-    pos_inf_mask = tensor.eq(float('inf'))
-    neg_inf_mask = tensor.eq(float('-inf'))
-    nan_mask = tensor.ne(tensor)
-    invalid_value_mask = pos_inf_mask + neg_inf_mask + nan_mask
-    if invalid_value_mask.all():
-        example_value = 0
-    else:
-        example_value = tensor[invalid_value_mask.eq(0)][0]
-    tensor[invalid_value_mask] = example_value
-    if invalid_value_mask.any():
-        min_sz = max(min_sz, 3)
+        with torch.no_grad():
+            tensor_view = tensor.reshape(-1)
 
-    int_mode = True
-    # TODO: use fmod?
-    for value in tensor:
-        if value != math.ceil(value):
-            int_mode = False
-            break
+        if not self.floating_dtype:
+            for value in tensor_view:
+                value_str = '{}'.format(value)
+                self.max_width = max(self.max_width, len(value_str))
 
-    exp_min = tensor.min()
-    if exp_min != 0:
-        exp_min = math.floor(math.log10(exp_min)) + 1
-    else:
-        exp_min = 1
-    exp_max = tensor.max()
-    if exp_max != 0:
-        exp_max = math.floor(math.log10(exp_max)) + 1
-    else:
-        exp_max = 1
-
-    scale = 1
-    exp_max = int(exp_max)
-    prec = PRINT_OPTS.precision
-    if int_mode:
-        if exp_max > prec + 1:
-            format = '{{:11.{}e}}'.format(prec)
-            sz = max(min_sz, 7 + prec)
         else:
-            sz = max(min_sz, exp_max + 1)
-            format = '{:' + str(sz) + '.0f}'
-    else:
-        if exp_max - exp_min > prec:
-            sz = 7 + prec
-            if abs(exp_max) > 99 or abs(exp_min) > 99:
-                sz = sz + 1
-            sz = max(min_sz, sz)
-            format = '{{:{}.{}e}}'.format(sz, prec)
-        else:
-            if exp_max > prec + 1 or exp_max < 0:
-                sz = max(min_sz, 7)
-                scale = math.pow(10, exp_max-1)
-            else:
-                if exp_max == 0:
-                    sz = 7
+            nonzero_finite_vals = torch.masked_select(tensor_view, torch.isfinite(tensor_view) & tensor_view.ne(0))
+
+            if nonzero_finite_vals.numel() == 0:
+                # no valid number, do nothing
+                return
+
+            # Convert to double for easy calculation. HalfTensor overflows with 1e8, and there's no div() on CPU.
+            nonzero_finite_abs = nonzero_finite_vals.abs().double()
+            nonzero_finite_min = nonzero_finite_abs.min().double()
+            nonzero_finite_max = nonzero_finite_abs.max().double()
+
+            for value in nonzero_finite_vals:
+                if value != torch.ceil(value):
+                    self.int_mode = False
+                    break
+
+            if self.int_mode:
+                # in int_mode for floats, all numbers are integers, and we append a decimal to nonfinites
+                # to indicate that the tensor is of floating type. add 1 to the len to account for this.
+                if nonzero_finite_max / nonzero_finite_min > 1000. or nonzero_finite_max > 1.e8:
+                    self.sci_mode = True
+                    for value in nonzero_finite_vals:
+                        value_str = ('{{:.{}e}}').format(PRINT_OPTS.precision).format(value)
+                        self.max_width = max(self.max_width, len(value_str))
                 else:
-                    sz = exp_max + 6
-                sz = max(min_sz, sz)
-            format = '{{:{}.{}f}}'.format(sz, prec)
-    return format, scale, sz
-
-
-def _tensor_str(self):
-    n = PRINT_OPTS.edgeitems
-    has_hdots = self.size()[-1] > 2*n
-    has_vdots = self.size()[-2] > 2*n
-    print_full_mat = not has_hdots and not has_vdots
-    formatter = _number_format(self, min_sz=3 if not print_full_mat else 0)
-    print_dots = self.numel() >= PRINT_OPTS.threshold
-
-    dim_sz = max(2, max(len(str(x)) for x in self.size()))
-    dim_fmt = "{:^" + str(dim_sz) + "}"
-    dot_fmt = u"{:^" + str(dim_sz+1) + "}"
-
-    counter_dim = self.ndimension() - 2
-    counter = torch.LongStorage(counter_dim).fill_(0)
-    counter[counter.size()-1] = -1
-    finished = False
-    strt = ''
-    while True:
-        nrestarted = [False for i in counter]
-        nskipped = [False for i in counter]
-        for i in _range(counter_dim - 1, -1, -1):
-            counter[i] += 1
-            if print_dots and counter[i] == n and self.size(i) > 2*n:
-                counter[i] = self.size(i) - n
-                nskipped[i] = True
-            if counter[i] == self.size(i):
-                if i == 0:
-                    finished = True
-                counter[i] = 0
-                nrestarted[i] = True
+                    for value in nonzero_finite_vals:
+                        value_str = ('{:.0f}').format(value)
+                        self.max_width = max(self.max_width, len(value_str) + 1)
             else:
-                break
-        if finished:
-            break
-        elif print_dots:
-            if any(nskipped):
-                for hdot in nskipped:
-                    strt += dot_fmt.format('...') if hdot \
-                        else dot_fmt.format('')
-                strt += '\n'
-            if any(nrestarted):
-                strt += ' '
-                for vdot in nrestarted:
-                    strt += dot_fmt.format(u'\u22EE' if vdot else '')
-                strt += '\n'
-        if strt != '':
-            strt += '\n'
-        strt += '({},.,.) = \n'.format(
-            ','.join(dim_fmt.format(i) for i in counter))
-        submatrix = reduce(lambda t, i: t.select(0, i), counter, self)
-        strt += _matrix_str(submatrix, ' ', formatter, print_dots)
-    return strt
+                # Check if scientific representation should be used.
+                if nonzero_finite_max / nonzero_finite_min > 1000.\
+                        or nonzero_finite_max > 1.e8\
+                        or nonzero_finite_min < 1.e-4:
+                    self.sci_mode = True
+                    for value in nonzero_finite_vals:
+                        value_str = ('{{:.{}e}}').format(PRINT_OPTS.precision).format(value)
+                        self.max_width = max(self.max_width, len(value_str))
+                else:
+                    for value in nonzero_finite_vals:
+                        value_str = ('{{:.{}f}}').format(PRINT_OPTS.precision).format(value)
+                        self.max_width = max(self.max_width, len(value_str))
 
+        if PRINT_OPTS.sci_mode is not None:
+            self.sci_mode = PRINT_OPTS.sci_mode
 
-def __repr_row(row, indent, fmt, scale, sz, truncate=None):
-    if truncate is not None:
-        dotfmt = " {:^5} "
-        return (indent +
-                ' '.join(fmt.format(val/scale) for val in row[:truncate]) +
-                dotfmt.format('...') +
-                ' '.join(fmt.format(val/scale) for val in row[-truncate:]) +
-                '\n')
-    else:
-        return indent + ' '.join(fmt.format(val/scale) for val in row) + '\n'
+    def width(self):
+        return self.max_width
 
-
-def _matrix_str(self, indent='', formatter=None, force_truncate=False):
-    n = PRINT_OPTS.edgeitems
-    has_hdots = self.size(1) > 2*n
-    has_vdots = self.size(0) > 2*n
-    print_full_mat = not has_hdots and not has_vdots
-
-    if formatter is None:
-        fmt, scale, sz = _number_format(self,
-                                        min_sz=5 if not print_full_mat else 0)
-    else:
-        fmt, scale, sz = formatter
-    nColumnPerLine = int(math.floor((PRINT_OPTS.linewidth-len(indent))/(sz+1)))
-    strt = ''
-    firstColumn = 0
-
-    if not force_truncate and \
-       (self.numel() < PRINT_OPTS.threshold or print_full_mat):
-        while firstColumn < self.size(1):
-            lastColumn = min(firstColumn + nColumnPerLine - 1, self.size(1)-1)
-            if nColumnPerLine < self.size(1):
-                strt += '\n' if firstColumn != 1 else ''
-                strt += 'Columns {} to {} \n{}'.format(
-                    firstColumn, lastColumn, indent)
-            if scale != 1:
-                strt += SCALE_FORMAT.format(scale)
-            for l in _range(self.size(0)):
-                strt += indent + (' ' if scale != 1 else '')
-                row_slice = self[l, firstColumn:lastColumn+1]
-                strt += ' '.join(fmt.format(val/scale) for val in row_slice)
-                strt += '\n'
-            firstColumn = lastColumn + 1
-    else:
-        if scale != 1:
-            strt += SCALE_FORMAT.format(scale)
-        if has_vdots and has_hdots:
-            vdotfmt = "{:^" + str((sz+1)*n-1) + "}"
-            ddotfmt = u"{:^5}"
-            for row in self[:n]:
-                strt += __repr_row(row, indent, fmt, scale, sz, n)
-            strt += indent + ' '.join([vdotfmt.format('...'),
-                                       ddotfmt.format(u'\u22F1'),
-                                       vdotfmt.format('...')]) + "\n"
-            for row in self[-n:]:
-                strt += __repr_row(row, indent, fmt, scale, sz, n)
-        elif not has_vdots and has_hdots:
-            for row in self:
-                strt += __repr_row(row, indent, fmt, scale, sz, n)
-        elif has_vdots and not has_hdots:
-            vdotfmt = u"{:^" + \
-                    str(len(__repr_row(self[0], '', fmt, scale, sz))) + \
-                    "}\n"
-            for row in self[:n]:
-                strt += __repr_row(row, indent, fmt, scale, sz)
-            strt += vdotfmt.format(u'\u22EE')
-            for row in self[-n:]:
-                strt += __repr_row(row, indent, fmt, scale, sz)
+    def format(self, value):
+        if self.floating_dtype:
+            if self.sci_mode:
+                ret = ('{{:{}.{}e}}').format(self.max_width, PRINT_OPTS.precision).format(value)
+            elif self.int_mode:
+                ret = '{:.0f}'.format(value)
+                if not (math.isinf(value) or math.isnan(value)):
+                    ret += '.'
+            else:
+                ret = ('{{:.{}f}}').format(PRINT_OPTS.precision).format(value)
         else:
-            for row in self:
-                strt += __repr_row(row, indent, fmt, scale, sz)
-    return strt
+            ret = '{}'.format(value)
+        return (self.max_width - len(ret)) * ' ' + ret
 
 
-def _vector_str(self):
-    fmt, scale, sz = _number_format(self)
-    strt = ''
-    ident = ''
-    n = PRINT_OPTS.edgeitems
-    dotfmt = u"{:^" + str(sz) + "}\n"
-    if scale != 1:
-        strt += SCALE_FORMAT.format(scale)
-        ident = ' '
-    if self.numel() < PRINT_OPTS.threshold:
-        return (strt +
-                '\n'.join(ident + fmt.format(val/scale) for val in self) +
-                '\n')
+def _scalar_str(self, formatter1, formatter2=None):
+    if formatter2 is not None:
+        real_str = _scalar_str(self.real, formatter1)
+        imag_str = _scalar_str(self.imag, formatter2) + "j"
+        if self.imag < 0:
+            return real_str + imag_str.lstrip()
+        else:
+            return real_str + "+" + imag_str.lstrip()
     else:
-        return (strt +
-                '\n'.join(ident + fmt.format(val/scale) for val in self[:n]) +
-                '\n' + (ident + dotfmt.format(u"\u22EE")) +
-                '\n'.join(ident + fmt.format(val/scale) for val in self[-n:]) +
-                '\n')
+        return formatter1.format(self.item())
 
+def _vector_str(self, indent, summarize, formatter1, formatter2=None):
+    # length includes spaces and comma between elements
+    element_length = formatter1.width() + 2
+    if formatter2 is not None:
+        # width for imag_formatter + an extra j for complex
+        element_length += formatter2.width() + 1
+
+    elements_per_line = max(1, int(math.floor((PRINT_OPTS.linewidth - indent) / (element_length))))
+    char_per_line = element_length * elements_per_line
+
+    def _val_formatter(val, formatter1=formatter1, formatter2=formatter2):
+        if formatter2 is not None:
+            real_str = formatter1.format(val.real)
+            imag_str = formatter2.format(val.imag) + "j"
+            if val.imag < 0:
+                return real_str + imag_str.lstrip()
+            else:
+                return real_str + "+" + imag_str.lstrip()
+        else:
+            return formatter1.format(val)
+
+    if summarize and self.size(0) > 2 * PRINT_OPTS.edgeitems:
+        data = ([_val_formatter(val) for val in self[:PRINT_OPTS.edgeitems].tolist()] +
+                [' ...'] +
+                [_val_formatter(val) for val in self[-PRINT_OPTS.edgeitems:].tolist()])
+    else:
+        data = [_val_formatter(val) for val in self.tolist()]
+
+    data_lines = [data[i:i + elements_per_line] for i in range(0, len(data), elements_per_line)]
+    lines = [', '.join(line) for line in data_lines]
+    return '[' + (',' + '\n' + ' ' * (indent + 1)).join(lines) + ']'
+
+# formatter2 is only used for printing complex tensors.
+# For complex tensors, formatter1 and formatter2 are the formatters for tensor.real
+# and tensor.imag respesectively
+def _tensor_str_with_formatter(self, indent, summarize, formatter1, formatter2=None):
+    dim = self.dim()
+
+    if dim == 0:
+        return _scalar_str(self, formatter1, formatter2)
+
+    if dim == 1:
+        return _vector_str(self, indent, summarize, formatter1, formatter2)
+
+    if summarize and self.size(0) > 2 * PRINT_OPTS.edgeitems:
+        slices = ([_tensor_str_with_formatter(self[i], indent + 1, summarize, formatter1, formatter2)
+                   for i in range(0, PRINT_OPTS.edgeitems)] +
+                  ['...'] +
+                  [_tensor_str_with_formatter(self[i], indent + 1, summarize, formatter1, formatter2)
+                   for i in range(len(self) - PRINT_OPTS.edgeitems, len(self))])
+    else:
+        slices = [_tensor_str_with_formatter(self[i], indent + 1, summarize, formatter1, formatter2)
+                  for i in range(0, self.size(0))]
+
+    tensor_str = (',' + '\n' * (dim - 1) + ' ' * (indent + 1)).join(slices)
+    return '[' + tensor_str + ']'
+
+def _tensor_str(self, indent):
+    if self.numel() == 0:
+        return '[]'
+
+    if self.has_names():
+        # There are two main codepaths (possibly more) that tensor printing goes through:
+        # - tensor data can fit comfortably on screen
+        # - tensor data needs to be summarized
+        # Some of the codepaths don't fully support named tensors, so we send in
+        # an unnamed tensor to the formatting code as a workaround.
+        self = self.rename(None)
+
+    summarize = self.numel() > PRINT_OPTS.threshold
+    if self.dtype is torch.float16 or self.dtype is torch.bfloat16:
+        self = self.float()
+
+    if self.dtype.is_complex:
+        real_formatter = _Formatter(get_summarized_data(self.real) if summarize else self.real)
+        imag_formatter = _Formatter(get_summarized_data(self.imag) if summarize else self.imag)
+        return _tensor_str_with_formatter(self, indent, summarize, real_formatter, imag_formatter)
+    else:
+        formatter = _Formatter(get_summarized_data(self) if summarize else self)
+        return _tensor_str_with_formatter(self, indent, summarize, formatter)
+
+def _add_suffixes(tensor_str, suffixes, indent, force_newline):
+    tensor_strs = [tensor_str]
+    last_line_len = len(tensor_str) - tensor_str.rfind('\n') + 1
+    for suffix in suffixes:
+        suffix_len = len(suffix)
+        if force_newline or last_line_len + suffix_len + 2 > PRINT_OPTS.linewidth:
+            tensor_strs.append(',\n' + ' ' * indent + suffix)
+            last_line_len = indent + suffix_len
+            force_newline = False
+        else:
+            tensor_strs.append(', ' + suffix)
+            last_line_len += suffix_len + 2
+    tensor_strs.append(')')
+    return ''.join(tensor_strs)
+
+
+def get_summarized_data(self):
+    dim = self.dim()
+    if dim == 0:
+        return self
+    if dim == 1:
+        if self.size(0) > 2 * PRINT_OPTS.edgeitems:
+            return torch.cat((self[:PRINT_OPTS.edgeitems], self[-PRINT_OPTS.edgeitems:]))
+        else:
+            return self
+    if self.size(0) > 2 * PRINT_OPTS.edgeitems:
+        start = [self[i] for i in range(0, PRINT_OPTS.edgeitems)]
+        end = ([self[i]
+               for i in range(len(self) - PRINT_OPTS.edgeitems, len(self))])
+        return torch.stack([get_summarized_data(x) for x in (start + end)])
+    else:
+        return torch.stack([get_summarized_data(x) for x in self])
+
+def _str_intern(self):
+    prefix = 'tensor('
+    indent = len(prefix)
+    suffixes = []
+
+    # Note [Print tensor device]:
+    # A general logic here is we only print device when it doesn't match
+    # the device specified in default tensor type.
+    # Currently torch.set_default_tensor_type() only supports CPU/CUDA, thus
+    # torch._C._get_default_device() only returns either cpu or cuda.
+    # In other cases, we don't have a way to set them as default yet,
+    # and we should always print out device for them.
+    if self.device.type != torch._C._get_default_device()\
+            or (self.device.type == 'cuda' and torch.cuda.current_device() != self.device.index):
+        suffixes.append('device=\'' + str(self.device) + '\'')
+
+    # TODO: add an API to map real -> complex dtypes
+    _default_complex_dtype = torch.cdouble if torch.get_default_dtype() == torch.double else torch.cfloat
+    has_default_dtype = self.dtype in (torch.get_default_dtype(), _default_complex_dtype, torch.int64, torch.bool)
+    if self.is_sparse:
+        suffixes.append('size=' + str(tuple(self.shape)))
+        suffixes.append('nnz=' + str(self._nnz()))
+        if not has_default_dtype:
+            suffixes.append('dtype=' + str(self.dtype))
+        indices_prefix = 'indices=tensor('
+        indices = self._indices().detach()
+        indices_str = _tensor_str(indices, indent + len(indices_prefix))
+        if indices.numel() == 0:
+            indices_str += ', size=' + str(tuple(indices.shape))
+        values_prefix = 'values=tensor('
+        values = self._values().detach()
+        values_str = _tensor_str(values, indent + len(values_prefix))
+        if values.numel() == 0:
+            values_str += ', size=' + str(tuple(values.shape))
+        tensor_str = indices_prefix + indices_str + '),\n' + ' ' * indent + values_prefix + values_str + ')'
+    elif self.is_quantized:
+        suffixes.append('size=' + str(tuple(self.shape)))
+        if not has_default_dtype:
+            suffixes.append('dtype=' + str(self.dtype))
+        suffixes.append('quantization_scheme=' + str(self.qscheme()))
+        if self.qscheme() == torch.per_tensor_affine or self.qscheme() == torch.per_tensor_symmetric:
+            suffixes.append('scale=' + str(self.q_scale()))
+            suffixes.append('zero_point=' + str(self.q_zero_point()))
+        elif self.qscheme() == torch.per_channel_affine or self.qscheme() == torch.per_channel_symmetric \
+                or self.qscheme() == torch.per_channel_affine_float_qparams:
+            suffixes.append('scale=' + str(self.q_per_channel_scales()))
+            suffixes.append('zero_point=' + str(self.q_per_channel_zero_points()))
+            suffixes.append('axis=' + str(self.q_per_channel_axis()))
+        tensor_str = _tensor_str(self.dequantize(), indent)
+    else:
+        if self.is_meta:
+            suffixes.append('size=' + str(tuple(self.shape)))
+            if self.dtype != torch.get_default_dtype():
+                suffixes.append('dtype=' + str(self.dtype))
+            # TODO: This implies that ellipses is valid syntax for allocating
+            # a meta tensor, which it could be, but it isn't right now
+            tensor_str = '...'
+        else:
+            if self.numel() == 0 and not self.is_sparse:
+                # Explicitly print the shape if it is not (0,), to match NumPy behavior
+                if self.dim() != 1:
+                    suffixes.append('size=' + str(tuple(self.shape)))
+
+                # In an empty tensor, there are no elements to infer if the dtype
+                # should be int64, so it must be shown explicitly.
+                if self.dtype != torch.get_default_dtype():
+                    suffixes.append('dtype=' + str(self.dtype))
+                tensor_str = '[]'
+            else:
+                if not has_default_dtype:
+                    suffixes.append('dtype=' + str(self.dtype))
+
+                if self.layout != torch.strided:
+                    tensor_str = _tensor_str(self.to_dense(), indent)
+                else:
+                    tensor_str = _tensor_str(self, indent)
+
+    if self.layout != torch.strided:
+        suffixes.append('layout=' + str(self.layout))
+
+    if self.grad_fn is not None:
+        name = type(self.grad_fn).__name__
+        if name == 'CppFunction':
+            name = self.grad_fn.name().rsplit('::', 1)[-1]
+        suffixes.append('grad_fn=<{}>'.format(name))
+    elif self.requires_grad:
+        suffixes.append('requires_grad=True')
+
+    if self.has_names():
+        suffixes.append('names={}'.format(self.names))
+
+    return _add_suffixes(prefix + tensor_str, suffixes, indent, force_newline=self.is_sparse)
 
 def _str(self):
-    if self.ndimension() == 0:
-        return '[{} with no dimension]\n'.format(torch.typename(self))
-    elif self.ndimension() == 1:
-        strt = _vector_str(self)
-    elif self.ndimension() == 2:
-        strt = _matrix_str(self)
-    else:
-        strt = _tensor_str(self)
-
-    size_str = 'x'.join(str(size) for size in self.size())
-    device_str = '' if not self.is_cuda else \
-        ' (GPU {})'.format(self.get_device())
-    strt += '[{} of size {}{}]\n'.format(torch.typename(self),
-                                         size_str, device_str)
-    return '\n' + strt
-
+    with torch.no_grad():
+        return _str_intern(self)

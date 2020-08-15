@@ -1,276 +1,491 @@
-#include <Python.h>
-#include <structmember.h>
+#include <torch/csrc/autograd/variable.h>
 
-#include "THP.h"
+#include <torch/csrc/autograd/autograd.h>
+#include <torch/csrc/autograd/edge.h>
+#include <torch/csrc/autograd/engine.h>
+#include <torch/csrc/autograd/function.h>
+#include <torch/csrc/autograd/functions/accumulate_grad.h>
+#include <torch/csrc/autograd/functions/tensor.h>
+#include <torch/csrc/autograd/generated/Functions.h>
 
-PyObject *THPVariableClass = NULL;
+#include <ATen/core/VariableHooksInterface.h>
 
-constexpr size_t CACHE_SIZE = 100000;
-static THPVariable *cached_variables[CACHE_SIZE];
-static size_t num_cached;
+#include <ATen/ATen.h>
+#include <c10/util/Exception.h>
 
-// This helper steals a reference to data and creator
-static inline THPVariable * pop_cache(PyObject *data, PyObject *creator, char requires_grad)
-{
-  THPVariable *self = cached_variables[--num_cached];
-  PyObject_Init((PyObject*)self, Py_TYPE(self));
-  PyObject_GC_Track(self);
+#include <list>
+#include <memory>
+#include <mutex>
+#include <stdexcept>
+#include <string>
+#include <vector>
+#include <typeinfo>
 
-  self->is_volatile = 0;
-  self->version_counter = new THPVariableVersion();
-  self->grad = NULL;
-  self->backward_hooks = NULL;
-  self->requires_grad = requires_grad;
+namespace torch {
+namespace autograd {
 
-  self->data = data;
-  self->creator = creator;
-  return self;
+
+DifferentiableViewMeta::DifferentiableViewMeta(at::TensorImpl* self_impl, Variable base,
+  c10::optional<std::function<at::Tensor(const at::Tensor&)>> view_fn,
+  CreationMeta creation_meta)
+    : AutogradMeta(self_impl), creation_meta(creation_meta) {
+  base_ = std::move(base);
+  view_fn_ = std::move(view_fn);
+  TORCH_CHECK(base_.defined(), "base is undefined");
+  if (base_.is_view()) {
+    base_ = base_._base();
+  }
+  is_view_ = true;
+  self_impl->set_version_counter(impl::version_counter(base_));
+  attr_version = self_impl->version_counter().current_version();
 }
 
-// This function DOES NOT steal a reference to data
-PyObject * THPVariable_NewVolatile(PyObject *data)
-{
-  THPVariable *variable;
-  if (num_cached > 0) {
-    Py_INCREF(data);
-    variable = pop_cache(data, NULL, 0);
+DifferentiableViewMeta::~DifferentiableViewMeta() {
+  base_.reset();
+}
+
+namespace {
+
+at::Tensor singleton_undefined_tensor;
+
+struct ConcreteAutogradMetaFactory : public c10::impl::AutogradMetaFactory {
+  std::unique_ptr<c10::AutogradMetaInterface> make() const override {
+    return std::make_unique<AutogradMeta>();
+  }
+  const at::Tensor& undefined_tensor() const override {
+    return singleton_undefined_tensor;
+  }
+};
+
+ConcreteAutogradMetaFactory meta_factory;
+
+static c10::impl::AutogradMetaFactoryRegisterer meta_factory_registerer(&meta_factory);
+
+}
+
+namespace impl {
+
+  AutogradMeta* materialize_autograd_meta(const Variable& self) {
+    TORCH_CHECK(self.defined(), "cannot call materialize_autograd_meta() on undefined tensor");
+    auto p = self.unsafeGetTensorImpl();
+    if (!p->autograd_meta()) {
+      p->set_autograd_meta(std::make_unique<AutogradMeta>());
+    }
+    return get_autograd_meta(self);
+  }
+
+  void rebase_history(const Variable& self, Edge gradient_edge) {
+    TORCH_INTERNAL_ASSERT(gradient_edge.function != nullptr);
+    if (self.is_view()) {
+      // NB: is_view() ==> get_autograd_meta()
+      auto diff_view_meta = static_cast<DifferentiableViewMeta*>(get_autograd_meta(self));
+
+      // See NOTE [ View + Inplace detection ]
+      if (diff_view_meta->creation_meta != CreationMeta::MULTI_OUTPUT_SAFE) {
+        // Do not use handle_view_on_rebase here as check_inplace should have been called before this
+        // and either throw an error or clear the warning
+        TORCH_INTERNAL_ASSERT(diff_view_meta->creation_meta == CreationMeta::DEFAULT);
+        TORCH_INTERNAL_ASSERT(gradient_edge.input_nr == 0);
+        TORCH_INTERNAL_ASSERT(gradient_edge.function);
+        TORCH_CHECK(
+            gradient_edge.function->num_inputs() == 1,
+            "Functions which modify views in-place must return a single Variable");
+        diff_view_meta->output_nr_ = gradient_edge.input_nr;
+        auto copy_slices = std::make_shared<CopySlices>(
+            diff_view_meta->base_, at::TensorGeometry(self), diff_view_meta->view_fn_, std::move(gradient_edge.function));
+        set_gradient_edge(diff_view_meta->base_, {std::move(copy_slices), 0});
+        self.grad_fn(); // trigger an update to the view's grad_fn
+        return;
+      }
+    }
+
+    set_gradient_edge(self, std::move(gradient_edge));
+  }
+
+  void create_cpp_hook(const Variable& self) {
+    auto &list = materialize_autograd_meta(self)->cpp_hooks_list;
+    list.reset(new hooks_list());
+    std::unique_ptr<FunctionPreHook> hook_ptr(new CppFunctionPreHook(list, self.output_nr()));
+    clear_hooks(self);
+    add_hook(self, std::make_shared<CppFunctionPreHook>(list, 0));
+    auto fn = self.grad_fn();
+    if (fn) {
+      fn->add_pre_hook(std::move(hook_ptr));
+    }
+  }
+
+  void set_grad_accumulator(const Variable& self,
+      std::weak_ptr<Node> grad_accumulator) {
+    materialize_autograd_meta(self)->grad_accumulator_ = std::move(grad_accumulator);
+  }
+
+  std::shared_ptr<Node> try_get_grad_accumulator(const Variable& self) {
+    if (get_autograd_meta(self)) {
+      return get_autograd_meta(self)->grad_accumulator_.lock();
+    } else {
+      return nullptr;
+    }
+  }
+
+  std::shared_ptr<Node> grad_accumulator(const Variable& self) {
+    auto autograd_meta = get_autograd_meta(self);
+    if (!autograd_meta) {
+      return nullptr;
+    }
+    if (autograd_meta->grad_fn_) {
+      throw std::logic_error(
+          "grad_accumulator() should be only called on leaf Variables");
+    }
+    if (!autograd_meta->requires_grad_) {
+      return nullptr;
+    }
+
+    std::lock_guard<std::mutex> lock(autograd_meta->mutex_);
+
+    auto result = autograd_meta->grad_accumulator_.lock();
+    if (result)
+      return result;
+
+    c10::raw::intrusive_ptr::incref(self.unsafeGetTensorImpl());
+    auto intrusive_from_this = c10::intrusive_ptr<at::TensorImpl>::reclaim(self.unsafeGetTensorImpl());
+    result = std::make_shared<AccumulateGrad>(Variable(std::move(intrusive_from_this)));
+    autograd_meta->grad_accumulator_ = result;
+    return result;
+  }
+
+  Edge gradient_edge(const Variable& self) {
+    // If grad_fn is null (as is the case for a leaf node), we instead
+    // interpret the gradient function to be a gradient accumulator, which will
+    // accumulate its inputs into the grad property of the variable. These
+    // nodes get suppressed in some situations, see "suppress gradient
+    // accumulation" below. Note that only variables which have `requires_grad =
+    // True` can have gradient accumulators.
+    if (const auto& gradient = self.grad_fn()) {
+      return Edge(gradient, self.output_nr());
+    } else {
+      return Edge(grad_accumulator(self), 0);
+    }
+  }
+
+  void set_gradient_edge(const Variable& self, Edge edge) {
+    auto* meta = materialize_autograd_meta(self);
+    meta->grad_fn_ = std::move(edge.function);
+    meta->output_nr_ = edge.input_nr;
+    // For views, make sure this new grad_fn_ is not overwritten unless it is necessary
+    // in the VariableHooks::grad_fn below.
+    // This logic is only relevant for custom autograd Functions for which multiple
+    // operations can happen on a given Tensor before its gradient edge is set when
+    // exiting the custom Function.
+    if (self.is_view()) {
+      // NB: is_view() ==> get_autograd_meta()
+      auto diff_view_meta = static_cast<torch::autograd::DifferentiableViewMeta*>(meta);
+      diff_view_meta->attr_version = self._version();
+    }
+  }
+
+  Node* grad_fn_unsafe(const Variable& self) {
+    if (get_autograd_meta(self)) {
+      return get_autograd_meta(self)->grad_fn_.get();
+    } else {
+      return nullptr;
+    }
+  }
+
+  // Versions
+  //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+  void set_version_counter(
+      const Variable& self,
+      const c10::VariableVersion& version_counter) {
+    TORCH_CHECK(self.defined(), "cannot call set_version_counter() on undefined tensor");
+    self.unsafeGetTensorImpl()->set_version_counter(version_counter);
+  }
+
+  void bump_version(const Variable& self) {
+    TORCH_CHECK(self.defined(), "cannot call bump_version() on undefined tensor");
+    self.unsafeGetTensorImpl()->bump_version();
+  }
+
+  const c10::VariableVersion& version_counter(const Variable& self) {
+    TORCH_CHECK(self.defined(), "cannot call version_counter() on undefined tensor");
+    return self.unsafeGetTensorImpl()->version_counter();
+  }
+
+  // Hooks
+  //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+  void add_hook(const Variable& self, std::shared_ptr<FunctionPreHook> hook) {
+    materialize_autograd_meta(self)->hooks_.push_back(std::move(hook));
+  }
+
+  namespace {
+    std::vector<std::shared_ptr<FunctionPreHook>> empty_singleton;
+  }
+
+  // TODO: Return an ArrayRef instead (and delete the singleton while you're at
+  // it
+  const std::vector<std::shared_ptr<FunctionPreHook>>& hooks(const Variable& self)
+      {
+    if (get_autograd_meta(self)) {
+      return get_autograd_meta(self)->hooks_;
+    } else {
+      return empty_singleton;
+    }
+  }
+
+  void clear_hooks(const Variable& self) {
+    // This is a little goofy, but usually this should be a no oop
+    materialize_autograd_meta(self)->hooks_.clear();
+  }
+
+  void set_name(const Variable& self, const std::string& name) {
+    materialize_autograd_meta(self)->name_ = name;
+  }
+
+  // Miscellaneous
+  //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+  void set_pyobj(const Variable& self, PyObject* pyobj) {
+    TORCH_CHECK(self.defined(), "cannot call set_pyobj() on undefined tensor");
+    self.unsafeGetTensorImpl()->set_pyobj(pyobj);
+  }
+
+  PyObject* pyobj(const Variable& self) {
+    TORCH_CHECK(self.defined(), "cannot call pyobj() on undefined tensor");
+    return self.unsafeGetTensorImpl()->pyobj();
+  }
+
+  AutogradMeta* get_autograd_meta(const Variable& self) {
+    // NB: could return null
+    TORCH_CHECK(self.defined(), "cannot call get_autograd_meta() on undefined tensor");
+    return static_cast<AutogradMeta*>(self.unsafeGetTensorImpl()->autograd_meta());
+  }
+
+} // namespace impl
+
+using at::Tensor;
+
+struct VariableHooks final : at::impl::VariableHooksInterface {
+  Tensor tensor_data(const Tensor&) const override;
+  Tensor variable_data(const Tensor&) const override;
+  const std::shared_ptr<torch::autograd::Node>& grad_fn(const Tensor&) const override;
+  unsigned _register_hook(const Tensor&, std::function<Tensor(const Tensor&)> hook) const override;
+  void remove_hook(const Tensor&, unsigned pos) const override;
+  bool is_view(const Tensor&) const override;
+  const Tensor& base(const Tensor&) const override;
+  const std::string& name(const Tensor&) const override;
+};
+
+VariableHooks variableHooks;
+at::impl::VariableHooksRegisterer registerVariableHooks(&variableHooks);
+
+Tensor VariableHooks::variable_data(const Tensor& self) const {
+  TORCH_CHECK(self.defined(), "cannot call variable_data() on undefined tensor");
+  auto self_impl_copy = self.unsafeGetTensorImpl()->shallow_copy_and_detach(
+    /*version_counter=*/0,
+    /*allow_tensor_metadata_change=*/false);
+  self_impl_copy->set_autograd_meta(nullptr);
+  return at::Tensor(self_impl_copy);
+}
+
+Tensor VariableHooks::tensor_data(const Tensor& self) const {
+  TORCH_CHECK(self.defined(), "cannot call tensor_data() on undefined tensor");
+  auto self_impl_copy = self.unsafeGetTensorImpl()->shallow_copy_and_detach(
+    /*version_counter=*/self.unsafeGetTensorImpl()->version_counter(),
+    /*allow_tensor_metadata_change=*/self.unsafeGetTensorImpl()->allow_tensor_metadata_change());
+  return at::Tensor(self_impl_copy);
+}
+
+// View Variables
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+bool VariableHooks::is_view(const Tensor& self) const {
+  if (torch::autograd::impl::get_autograd_meta(self)) {
+    return torch::autograd::impl::get_autograd_meta(self)->is_view_;
   } else {
-    variable = (THPVariable*)PyObject_CallFunctionObjArgs(THPVariableClass, data, NULL);
-  }
-  ((THPVariable*)variable)->is_volatile = 1;
-  return (PyObject*)variable;
-}
-
-// This function DOES NOT steal a reference to data and creator
-// To create a leaf Variable pass NULL as creator.
-PyObject * THPVariable_New(PyObject *data, PyObject *creator, char requires_grad)
-{
-  if (num_cached > 0) {
-    Py_INCREF(data);
-    Py_XINCREF(creator);
-    return (PyObject*)pop_cache(data, creator, requires_grad);
-  }
-  // We can't pass a NULL creator to this Python call, because Py_BuildValue
-  // will raise an error (it tries to be overly smart by setting its own error
-  // if there's no flag set at the moment and we're giving NULL to some
-  // function).
-  creator = creator ? creator : Py_None;
-  return PyObject_CallFunction(THPVariableClass, "OObb", data, creator, (char)0, requires_grad);
-}
-
-static int THPVariable_traverse(THPVariable *self, visitproc visit, void *arg)
-{
-  Py_VISIT(self->creator);
-  Py_VISIT(self->data);
-  Py_VISIT(self->grad);
-  Py_VISIT(self->backward_hooks);
-  return 0;
-}
-
-static int THPVariable_clear(THPVariable *self)
-{
-  Py_CLEAR(self->creator);
-  Py_CLEAR(self->data);
-  Py_CLEAR(self->grad);
-  Py_CLEAR(self->backward_hooks);
-  return 0;
-}
-
-static void THPVariable_dealloc(THPVariable* self)
-{
-  PyObject_GC_UnTrack(self);
-  Py_XDECREF(self->creator);
-  Py_XDECREF(self->data);
-  Py_XDECREF(self->grad);
-  Py_XDECREF(self->backward_hooks);
-  delete self->version_counter;
-  self->version_counter = nullptr;
-
-  // We don't want to cache any subclasses
-  if ((PyObject*)Py_TYPE(self) == THPVariableClass && num_cached < CACHE_SIZE) {
-    cached_variables[num_cached++] = self;
-    // Variable class is defined in Python code, and as such has a
-    // Py_TPFLAGS_HEAPTYPE flag set, so python DECREFs the class at each
-    // object dealloc.
-    Py_INCREF(Py_TYPE(self));
-  } else {
-    Py_TYPE(self)->tp_free((PyObject*)self);
-  }
-}
-
-PyObject *THPVariable_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
-{
-  THPVariable *self;
-  if ((PyObject*)type != THPVariableClass || num_cached == 0) {
-    self = (THPVariable*)type->tp_alloc(type, 0);
-    if (!self) return NULL;
-    self->version_counter = new THPVariableVersion();
-  } else {
-    self = pop_cache(NULL, NULL, 0);
-  }
-  return (PyObject*)self;
-}
-
-int THPVariable_init(THPVariable *self, PyObject *args, PyObject *kwargs)
-{
-  const char *accepted_args[] = {"data", "creator", "volatile", "requires_grad", NULL};
-  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O|Obb", (char**)accepted_args,
-      &self->data, &self->creator, &self->is_volatile,
-      &self->requires_grad))
-    return -1;
-  Py_INCREF(self->data);
-  if (self->creator == Py_None)
-    self->creator = NULL;
-  Py_XINCREF(self->creator);
-  THPUtils_assertRet(-1, !(self->is_volatile && self->requires_grad),
-          "Variable can't be volatile and require_grad at the same time!");
-  THPUtils_assertRet(-1, !self->creator || THPFunction_Check(self->creator),
-          "Variable creator has to be a Function object or None, but got %s",
-          THPUtils_typename(self->creator));
-  THPUtils_assertRet(-1, THPModule_isTensor(self->data), "Variable data has to "
-          "be a tensor, but got %s", THPUtils_typename(self->data));
-  return 0;
-}
-
-PyObject * THPVariable_getstate(THPVariable *self)
-{
-  THPUtils_assert(!self->creator, "serialization of non-leaf variables is not "
-      "implemented yet");
-  THPObjectPtr state = PyTuple_New(5);
-  if (!state)
-    return NULL;
-
-  Py_INCREF(self->data);
-  PyTuple_SET_ITEM(state.get(), 0, self->data);
-
-  PyObject *grad = self->grad ? self->grad : Py_None;
-  Py_INCREF(grad);
-  PyTuple_SET_ITEM(state.get(), 1, grad);
-
-  PyObject *backward_hooks = self->backward_hooks ? self->backward_hooks : Py_None;
-  Py_INCREF(backward_hooks);
-  PyTuple_SET_ITEM(state.get(), 2, backward_hooks);
-
-  PyTuple_SET_ITEM(state.get(), 3, PyBool_FromLong(self->requires_grad));
-  PyTuple_SET_ITEM(state.get(), 4, PyBool_FromLong(self->is_volatile));
-
-  return state.release();
-}
-
-PyObject * THPVariable_setstate(THPVariable *self, PyObject *state)
-{
-  THPUtils_assert(!self->creator, "__setstate__ can be only called on leaf "
-      "variables");
-  THPUtils_assert(PyTuple_Check(state), "__setstate__ expects state to be a "
-      "tuple");
-  Py_ssize_t size = PyTuple_GET_SIZE(state);
-  THPUtils_assert(size == 5, "__setstate__ expects state tuple to have 5 "
-      "elements, but it has %d", size);
-
-#define LOAD(NAME, IDX)                                                        \
-  Py_XDECREF(self->NAME);                                                      \
-  self->NAME = PyTuple_GET_ITEM(state, IDX) == Py_None ? NULL : PyTuple_GET_ITEM(state, IDX); \
-  Py_XINCREF(self->NAME);
-  THPUtils_assert(THPModule_isTensor(PyTuple_GET_ITEM(state, 0)), "first "
-          "element of variable state tuple has to be a tensor");
-  LOAD(data, 0);
-
-  LOAD(grad, 1);
-  LOAD(backward_hooks, 2);
-#undef LOAD
-
-  PyObject *requires_grad_obj = PyTuple_GET_ITEM(state, 3);
-  PyObject *is_volatile_obj = PyTuple_GET_ITEM(state, 4);
-  THPUtils_assert(PyBool_Check(requires_grad_obj), "requires_grad "
-      "found in state was expected to be a bool, but got %s",
-      THPUtils_typename(requires_grad_obj));
-  THPUtils_assert(PyBool_Check(is_volatile_obj), "is_volatile "
-      "found in state was expected to be a bool, but got %s",
-      THPUtils_typename(is_volatile_obj));
-  self->requires_grad= requires_grad_obj == Py_True ? 1 : 0;
-  self->is_volatile = is_volatile_obj == Py_True ? 1 : 0;
-
-  Py_RETURN_NONE;
-}
-
-typedef PyObject *(*getter)(PyObject *, void *);
-typedef int (*setter)(PyObject *, PyObject *, void *);
-
-PyObject *THPVariable_get_version(THPVariable *self)
-{
-  return PyInt_FromLong(**self->version_counter);
-}
-
-static struct PyGetSetDef THPVariable_properties[] = {
-  {"_version", (getter)THPVariable_get_version, NULL, NULL, NULL},
-  {NULL}
-};
-
-static struct PyMemberDef THPVariable_members[] = {
-  {(char*)"creator",        T_OBJECT,   offsetof(THPVariable, creator), 0, NULL},
-  {(char*)"data",           T_OBJECT,   offsetof(THPVariable, data), 0, NULL},
-  {(char*)"_grad",          T_OBJECT,   offsetof(THPVariable, grad), 0, NULL},
-  {(char*)"volatile",       T_BOOL,     offsetof(THPVariable, is_volatile), 0, NULL},
-  {(char*)"output_nr",      T_INT,      offsetof(THPVariable, output_nr), 0, NULL},
-  {(char*)"_backward_hooks",T_OBJECT,   offsetof(THPVariable, backward_hooks), 0, NULL},
-  {(char*)"_requires_grad", T_BOOL,     offsetof(THPVariable, requires_grad), 0, NULL},
-  {NULL}
-};
-
-static struct PyMethodDef THPVariable_methods[] = {
-  {"__getstate__", (PyCFunction)THPVariable_getstate, METH_NOARGS, NULL},
-  {"__setstate__", (PyCFunction)THPVariable_setstate, METH_O, NULL},
-  {NULL}
-};
-
-
-PyTypeObject THPVariableType = {
-  PyVarObject_HEAD_INIT(NULL, 0)
-  "torch._C._VariableBase",              /* tp_name */
-  sizeof(THPVariable),                   /* tp_basicsize */
-  0,                                     /* tp_itemsize */
-  (destructor)THPVariable_dealloc,       /* tp_dealloc */
-  0,                                     /* tp_print */
-  0,                                     /* tp_getattr */
-  0,                                     /* tp_setattr */
-  0,                                     /* tp_reserved */
-  0,                                     /* tp_repr */
-  0,                                     /* tp_as_number */
-  0,                                     /* tp_as_sequence */
-  0,                                     /* tp_as_mapping */
-  0,                                     /* tp_hash  */
-  0,                                     /* tp_call */
-  0,                                     /* tp_str */
-  0,                                     /* tp_getattro */
-  0,                                     /* tp_setattro */
-  0,                                     /* tp_as_buffer */
-  Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE | Py_TPFLAGS_HAVE_GC, /* tp_flags */
-  NULL,                                  /* tp_doc */
-  (traverseproc)THPVariable_traverse,    /* tp_traverse */
-  (inquiry)THPVariable_clear,            /* tp_clear */
-  0,                                     /* tp_richcompare */
-  0,                                     /* tp_weaklistoffset */
-  0,                                     /* tp_iter */
-  0,                                     /* tp_iternext */
-  THPVariable_methods,                   /* tp_methods */
-  THPVariable_members,                   /* tp_members */
-  THPVariable_properties,                /* tp_getset */
-  0,                                     /* tp_base */
-  0,                                     /* tp_dict */
-  0,                                     /* tp_descr_get */
-  0,                                     /* tp_descr_set */
-  0,                                     /* tp_dictoffset */
-  (initproc)THPVariable_init,            /* tp_init */
-  0,                                     /* tp_alloc */
-  THPVariable_new                        /* tp_new */
-};
-
-
-bool THPVariable_initModule(PyObject *module)
-{
-  if (PyType_Ready(&THPVariableType) < 0)
     return false;
-  Py_INCREF(&THPVariableType);
-  PyModule_AddObject(module, "_VariableBase", (PyObject *)&THPVariableType);
-  return true;
+  }
 }
+
+const Tensor& VariableHooks::base(const Tensor& self) const {
+  if (self.is_view()) {
+    // is_view() implies get_autograd_meta()
+    auto diff_view_meta = static_cast<torch::autograd::DifferentiableViewMeta*>(torch::autograd::impl::get_autograd_meta(self));
+    return diff_view_meta->base_;
+  } else {
+    throw std::runtime_error("Can't get base of non-view Variable");
+  }
+}
+
+namespace {
+  std::string singleton_string;
+}
+
+const std::string& VariableHooks::name(const Tensor& self) const {
+  TORCH_CHECK(self.defined(), "cannot call variable_data() on undefined tensor");
+  if (torch::autograd::impl::get_autograd_meta(self)) {
+    return torch::autograd::impl::get_autograd_meta(self)->name_;
+  } else {
+    return singleton_string;
+  }
+}
+
+namespace {
+  std::shared_ptr<torch::autograd::Node> singleton_shared_ptr;
+}
+
+const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(const Tensor& self) const {
+  if (self.is_view()) {
+    // NB: is_view() ==> get_autograd_meta()
+    auto diff_view_meta = static_cast<torch::autograd::DifferentiableViewMeta*>(torch::autograd::impl::get_autograd_meta(self));
+
+    // See NOTE [ View + Inplace detection ]
+    if (diff_view_meta->creation_meta != CreationMeta::MULTI_OUTPUT_SAFE) {
+      std::lock_guard<std::mutex> lock(diff_view_meta->mutex_);
+      if (!diff_view_meta->grad_fn_ && !diff_view_meta->base_.requires_grad()) {
+        return diff_view_meta->grad_fn_;
+      }
+      auto current_version = self._version();
+      if (diff_view_meta->attr_version != current_version) {
+        // This is an indirect rebase_history due to another view or the base being modified inplace
+        handle_view_on_rebase(diff_view_meta, /* indirect */ true);
+        TORCH_INTERNAL_ASSERT(diff_view_meta->output_nr_ == 0);
+        // Note [View + Inplace update for view tensor]
+        // An inplace update happened on Tensor `self` (which is a view).
+        // For example:
+        //   view_1 = view_op_1(diff_view_meta->base_)
+        //   view_2 = view_op_2(view_1)
+        //   ...
+        //   self = view_op_n(view_n-1)
+        //   self = inplace_op(self)
+        //
+        // For CPU/CUDA backends, we employ one AsStridedBackward Node to represent the chain of
+        // view backward ops for effienciency.
+        //
+        // However in XLA backend we don't have full support of AsStridedBackward, we instead run a full
+        // forward pass with a tensor that requires gradient to get proper grad_fn setup,
+        // then save it to DifferentiableViewMeta for future use.
+        // This is fairly cheap for XLA lazy tensor approach (but would be really expensive for CPU/CUDA).
+        // XLA Tensor only run thorugh VariableType dispatch and lower the forward pass to a XLA HLO graph,
+        // then we take grad_fn and never materialize the tensor content.
+        // So we only construct the graph but not execute it, which is a fairly cheap operation to do.
+        //
+        // See Note [View + Inplace update for base tensor] for what we do to base tensor when
+        // an in-place operation happens.
+        //
+        // TODO: Potentially the following logic can be replaced by special logic in VariableType_x.cpp
+        //       that would provide a way to recreate the grad_fn chain.
+        if (diff_view_meta->has_view_fn()) {
+          auto view_fn = diff_view_meta->view_fn();
+          auto diff_view = view_fn(diff_view_meta->base_);
+          diff_view_meta->grad_fn_ = diff_view.grad_fn();
+        } else {
+          auto fn = std::make_shared<torch::autograd::generated::AsStridedBackward>();
+          fn->self_geometry = at::TensorGeometry(diff_view_meta->base_);
+          fn->size = self.sizes().vec();
+          fn->stride = self.strides().vec();
+          fn->storage_offset = self.storage_offset();
+          fn->set_next_edges(torch::autograd::collect_next_edges(diff_view_meta->base_));
+          fn->add_input_metadata(
+            diff_view_meta->base_.options(),
+            self.sizes(), // Note: sizes(), not base_.sizes(), is intentional
+            diff_view_meta->base_.device());
+          diff_view_meta->grad_fn_ = std::move(fn);
+        }
+        diff_view_meta->attr_version = current_version;
+      }
+      return diff_view_meta->grad_fn_;
+    }
+  }
+  
+  if (torch::autograd::impl::get_autograd_meta(self)) {
+    return torch::autograd::impl::get_autograd_meta(self)->grad_fn_;
+  } else {
+    return singleton_shared_ptr;
+  }
+}
+
+void VariableHooks::remove_hook(const Tensor& self, unsigned pos) const {
+  auto &list = torch::autograd::impl::materialize_autograd_meta(self)->cpp_hooks_list;
+  TORCH_CHECK(list && pos < list->size() , "Invalid index, no hook at position ", pos);
+  // Hook will be ignored
+  (*list)[pos] = nullptr;
+}
+
+unsigned VariableHooks::_register_hook(const Tensor& self, std::function<Tensor(const Tensor&)> hook) const {
+  TORCH_CHECK(self.requires_grad(), "cannot register a hook on a variable that "
+                           "doesn't require gradient");
+  // NB: materialize_autograd_meta unnecessary due to requires grad check
+  auto &list = torch::autograd::impl::get_autograd_meta(self)->cpp_hooks_list;
+  if(!list) {
+    torch::autograd::impl::create_cpp_hook(self);
+  }
+  unsigned idx = list->size();
+  list->push_back(hook);
+  return idx;
+}
+
+void handle_view_on_rebase(DifferentiableViewMeta* diff_view_meta, bool indirect) {
+  /// See NOTE [ View + Inplace detection ] for justification of the logic below
+  if (diff_view_meta->creation_meta != CreationMeta::DEFAULT) {
+    auto grad_fn = diff_view_meta->grad_fn_.get();
+    std::string msg;
+    std::string modified_obj;
+    // Create the header for the error message.
+    if (indirect) {
+      modified_obj = "its base or another view of its base has been";
+    } else {
+      modified_obj = "is being";
+    }
+    if (grad_fn) {
+      msg = c10::str("Output ", diff_view_meta->output_nr_, " of ", grad_fn->name(), " is a view and ",
+                     modified_obj, " modified inplace.");
+    } else {
+      msg = c10::str("A view was created in no_grad mode and ", modified_obj, " modified inplace with grad mode enabled.");
+    }
+
+    if (diff_view_meta->creation_meta == CreationMeta::MULTI_OUTPUT_NODE) {
+      TORCH_CHECK(false, msg, " This view is the output of a function that returns multiple views. Such functions do not"
+                         " allow the output views to be modified inplace. You should replace the inplace operation by an"
+                         " out-of-place one.");
+    } else {
+      if (diff_view_meta->creation_meta == CreationMeta::NO_GRAD_MODE) {
+        TORCH_INTERNAL_ASSERT(!grad_fn);
+        msg = c10::str(msg, " Given that this use case is ambiguous and error-prone, it is deprecated and will be forbidden"
+                       "  starting 1.6 (see https://github.com/pytorch/pytorch/pull/32839 for more details about this). You"
+                       " can clarify your code and remove this warning by moving both the view and the inplace either both"
+                       " inside the no_grad block (if you don't want the inplace to be tracked) or both outside (if you want"
+                       " the inplace to be tracked).");
+      } else if (diff_view_meta->creation_meta == CreationMeta::IN_CUSTOM_FUNCTION) {
+        msg = c10::str(msg, " This view was created inside a custom Function (or because an input was returned as-is) and the"
+                       " autograd logic to handle view+inplace would override the custom backward associated with the custom"
+                       " Function, leading to incorrect gradients. This behavior is deprecated and will be forbidden starting"
+                       " version 1.6. You can remove this warning by cloning the output of the custom Function.");
+      } else if (diff_view_meta->creation_meta == CreationMeta::MULTI_OUTPUT_SAFE) {
+        msg = c10::str(msg, " This view is an output of a function that "
+                       "returns multiple views. Inplace operators on such "
+                       "views are being deprecated and will be forbidden "
+                       "starting from version 1.8. Consider using `unsafe_` "
+                       "version of the function that produced this view or "
+                       "don't modify this view inplace.");
+      } else {
+        TORCH_INTERNAL_ASSERT(false, "Invalid CreationMeta state");
+      }
+
+      if (!indirect && !grad_fn) {
+        // This view is (wrongly) detected as a leaf that requires grad and would raise the surprising: "a leaf Variable that
+        // requires grad is being used in an in-place operation." after the warning. So we make the warning an error directly.
+        TORCH_CHECK(false, msg);
+      } else {
+        TORCH_WARN(msg);
+      }
+    }
+
+    // We warn only once per view
+    // Note that if a Tensor is modified inplace from two threads at the same time, this is not thread safe and can warn
+    // multiple time. This is ok as it should be a rare event.
+    diff_view_meta->creation_meta = CreationMeta::DEFAULT;
+  }
+}
+
+}} // namespace torch::autograd

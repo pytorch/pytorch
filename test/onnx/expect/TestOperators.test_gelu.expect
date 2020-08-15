@@ -1,0 +1,126 @@
+ir_version: 6
+producer_name: "pytorch"
+producer_version: "CURRENT_VERSION"
+graph {
+  node {
+    output: "1"
+    name: "Constant_0"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        data_type: 1
+        raw_data: "\363\004\265?"
+      }
+      type: TENSOR
+    }
+  }
+  node {
+    input: "x"
+    input: "1"
+    output: "2"
+    name: "Div_1"
+    op_type: "Div"
+  }
+  node {
+    input: "2"
+    output: "3"
+    name: "Erf_2"
+    op_type: "Erf"
+  }
+  node {
+    output: "4"
+    name: "Constant_3"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        data_type: 1
+        raw_data: "\000\000\200?"
+      }
+      type: TENSOR
+    }
+  }
+  node {
+    input: "3"
+    input: "4"
+    output: "5"
+    name: "Add_4"
+    op_type: "Add"
+  }
+  node {
+    input: "x"
+    input: "5"
+    output: "6"
+    name: "Mul_5"
+    op_type: "Mul"
+  }
+  node {
+    output: "7"
+    name: "Constant_6"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        data_type: 1
+        raw_data: "\000\000\000?"
+      }
+      type: TENSOR
+    }
+  }
+  node {
+    input: "6"
+    input: "7"
+    output: "8"
+    name: "Mul_7"
+    op_type: "Mul"
+  }
+  name: "torch-jit-export"
+  input {
+    name: "x"
+    type {
+      tensor_type {
+        elem_type: 1
+        shape {
+          dim {
+            dim_value: 2
+          }
+          dim {
+            dim_value: 3
+          }
+          dim {
+            dim_value: 4
+          }
+          dim {
+            dim_value: 5
+          }
+        }
+      }
+    }
+  }
+  output {
+    name: "8"
+    type {
+      tensor_type {
+        elem_type: 1
+        shape {
+          dim {
+            dim_value: 2
+          }
+          dim {
+            dim_value: 3
+          }
+          dim {
+            dim_value: 4
+          }
+          dim {
+            dim_value: 5
+          }
+        }
+      }
+    }
+  }
+}
+opset_import {
+  version: 9
+}
