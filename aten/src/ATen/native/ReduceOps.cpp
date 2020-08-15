@@ -657,6 +657,14 @@ Tensor max_values(const Tensor& self, IntArrayRef dims, bool keepdim) {
   }
 }
 
+Tensor amin(const Tensor& self, IntArrayRef dims, bool keepdim) {
+  return at::min_values(self, dims, keepdim);
+}
+
+Tensor amax(const Tensor& self, IntArrayRef dims, bool keepdim) {
+  return at::max_values(self, dims, keepdim);
+}
+
 Tensor min_values(const Tensor& self, DimnameList dims, bool keepdim) {
   TORCH_CHECK(false, "NYI: min_values with names");
   return at::min_values(self, dimnames_to_positions(self, dims), keepdim);
@@ -665,6 +673,14 @@ Tensor min_values(const Tensor& self, DimnameList dims, bool keepdim) {
 Tensor max_values(const Tensor& self, DimnameList dims, bool keepdim) {
   TORCH_CHECK(false, "NYI: max_values with names");
   return at::max_values(self, dimnames_to_positions(self, dims), keepdim);
+}
+
+Tensor amin(const Tensor& self, DimnameList dims, bool keepdim) {
+  return at::min_values(self, dims, keepdim);
+}
+
+Tensor amax(const Tensor& self, DimnameList dims, bool keepdim) {
+  return at::max_values(self, dims, keepdim);
 }
 
 Tensor& argmax_out(Tensor& result, const Tensor& self, c10::optional<int64_t> dim, bool keepdim) {
