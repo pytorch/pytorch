@@ -1,6 +1,6 @@
 import torch
 from functools import reduce
-from typing import Tuple, Optional
+from typing import Optional
 
 from .optimizer import Optimizer, _params_t
 
@@ -217,7 +217,7 @@ class LBFGS(Optimizer):
                  params: _params_t,
                  lr: float = 1,
                  max_iter: int = 20,
-                 max_eval: Optional[int]=None,
+                 max_eval: Optional[int] = None,
                  tolerance_grad: float = 1e-7,
                  tolerance_change: float = 1e-9,
                  history_size: int = 100,
