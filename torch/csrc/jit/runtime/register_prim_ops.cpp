@@ -1140,6 +1140,7 @@ void dictConstructFromList(Stack* stack) {
 RegisterOperators reg_dict_ops({
     CREATE_DICT_OPS("str"),
     CREATE_DICT_OPS("int"),
+    CREATE_DICT_OPS("bool"),
     CREATE_DICT_OPS("float"),
     CREATE_DICT_OPS("Tensor"),
 });

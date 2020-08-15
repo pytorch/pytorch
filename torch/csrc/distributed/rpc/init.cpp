@@ -455,6 +455,8 @@ PyObject* rpc_init(PyObject* /* unused */) {
           &ProcessGroupAgent::sync,
           py::call_guard<py::gil_scoped_release>());
 
+#ifdef USE_TENSORPIPE
+
   // Base class: torch.distributed.rpc.RpcBackendOptions.
   py::class_<TensorPipeRpcBackendOptions>(
       module,
@@ -507,13 +509,21 @@ PyObject* rpc_init(PyObject* /* unused */) {
 
   shared_ptr_class_<TensorPipeAgent>(module, "TensorPipeAgent", rpcAgent)
       .def(
-          py::init<
-              const std::shared_ptr<::c10d::Store>& /* store */,
-              std::string /* selfName */,
-              worker_id_t /* selfId */,
-              int /* worldSize */,
-              std::shared_ptr<::c10d::ProcessGroup> /* processGroup */,
-              TensorPipeRpcBackendOptions /* TensorPipeBackendOptions */>(),
+          py::init([](const std::shared_ptr<::c10d::Store>& store,
+                      std::string selfName,
+                      worker_id_t selfId,
+                      int worldSize,
+                      std::shared_ptr<::c10d::ProcessGroup> processGroup,
+                      TensorPipeRpcBackendOptions opts) {
+            return std::make_shared<TensorPipeAgent>(
+                store,
+                std::move(selfName),
+                selfId,
+                worldSize,
+                std::move(processGroup),
+                std::move(opts),
+                std::make_unique<RequestCallbackImpl>());
+          }),
           py::arg("store"),
           py::arg("name"),
           py::arg("rank"),
@@ -543,6 +553,8 @@ PyObject* rpc_init(PyObject* /* unused */) {
           (std::vector<WorkerInfo>(TensorPipeAgent::*)() const) &
               TensorPipeAgent::getWorkerInfos,
           py::call_guard<py::gil_scoped_release>());
+
+#endif // USE_TENSORPIPE
 
   module.def("_is_current_rpc_agent_set", &RpcAgent::isCurrentRpcAgentSet);
 
