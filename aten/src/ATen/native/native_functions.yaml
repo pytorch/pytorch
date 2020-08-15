@@ -848,6 +848,18 @@
   use_c10_dispatcher: full
   device_guard: False
 
+- func: complex(Tensor real, Tensor imag) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+
+- func: complex.out(Tensor real, Tensor imag, *, Tensor(a!) out) -> Tensor(a!)
+
+- func: polar(Tensor abs, Tensor angle) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+
+- func: polar.out(Tensor abs, Tensor angle, *, Tensor(a!) out) -> Tensor(a!)
+
 - func: constant_pad_nd(Tensor self, int[] pad, Scalar value=0) -> Tensor
   use_c10_dispatcher: full
   variants: function
@@ -5345,6 +5357,15 @@
   variants: method, function
 
 - func: hypot_(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  variants: method
+
+- func: nextafter.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+
+- func: nextafter(Tensor self, Tensor other) -> Tensor
+  use_c10_dispatcher: full
+  variants: method, function
+
+- func: nextafter_(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
 
 - func: remainder.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)

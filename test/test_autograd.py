@@ -4434,6 +4434,20 @@ for shape in [(1,), ()]:
         self.assertFalse(out.dtype.is_floating_point)
         self.assertFalse(out.requires_grad)
 
+        out = inp.argmin()
+        self.assertFalse(out.dtype.is_floating_point)
+        self.assertFalse(out.requires_grad)
+
+        out = inp.argsort()
+        self.assertFalse(out.dtype.is_floating_point)
+        self.assertFalse(out.requires_grad)
+
+        val = torch.rand((), requires_grad=True)
+
+        out = torch.searchsorted(inp, val)
+        self.assertFalse(out.dtype.is_floating_point)
+        self.assertFalse(out.requires_grad)
+
 
 def index_variable(shape, max_indices):
     if not isinstance(shape, tuple):
