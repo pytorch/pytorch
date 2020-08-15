@@ -1,8 +1,5 @@
 import torch
-from torch.fx import symbolic_trace
-from torch.fx.symbolic_trace import DefaultDelegate
-from torch.fx.graph import Graph
-from torch.fx.node import Node
+from torch.fx import symbolic_trace, Proxy, Node, GraphModule, DefaultDelegate
 
 from typing import Any, Callable, Dict, Optional, Tuple, Union
 
@@ -81,7 +78,7 @@ class TestFX(TestCase):
     def test_disallow_override(self):
         # Custom delegate to disallow in-place tensor operations
         class NoMutableCallDelegate(DefaultDelegate):
-            def create_node(self, graph : Graph, kind : str, target : Union[str, Callable],
+            def create_node(self, kind : str, target : Union[str, Callable],
                             args : Tuple[Any], kwargs : Dict[str, Any], name : Optional[str] = None) -> Node:
                 name = target if isinstance(target, str) else torch.typename(target)
                 if name[-1] == '_':
@@ -97,7 +94,7 @@ class TestFX(TestCase):
         m = MyInplaceMod()
 
         with self.assertRaisesRegex(RuntimeError, 'In-place operations'):
-            symbolic_trace(m, delegate=NoMutableCallDelegate())
+            symbolic_trace(m, delegate_class=NoMutableCallDelegate)
 
         # Test free function
         class MyInplaceMod2(torch.nn.Module):
@@ -106,7 +103,7 @@ class TestFX(TestCase):
                 return x
         m2 = MyInplaceMod2()
         with self.assertRaisesRegex(RuntimeError, 'In-place operations'):
-            symbolic_trace(m2, delegate=NoMutableCallDelegate())
+            symbolic_trace(m2, delegate_class=NoMutableCallDelegate)
 
         # Test symbolic node as an arg
         class MyInplaceMod3(torch.nn.Module):
@@ -116,7 +113,7 @@ class TestFX(TestCase):
                 return x
         m3 = MyInplaceMod3()
         with self.assertRaisesRegex(RuntimeError, 'In-place operations'):
-            symbolic_trace(m3, delegate=NoMutableCallDelegate())
+            symbolic_trace(m3, delegate_class=NoMutableCallDelegate)
 
     def test_leaf_module(self):
         # Custom delegate to make it so that there are no leaf modules, everything
@@ -134,9 +131,22 @@ class TestFX(TestCase):
                 return self.relu(x)
 
         mrm = MyReluMod()
-        sym = symbolic_trace(mrm, delegate=NoLeafModulesDelegate())
+        sym = symbolic_trace(mrm, delegate_class=NoLeafModulesDelegate)
         for node in sym.graph.nodes:
             self.assertNotEqual(node.op, 'call_module')
+
+    def test_graph_edit_with_proxy(self):
+        class M(torch.nn.Module):
+            def forward(self, a, b):
+                return a + b
+        m = M()
+        g = symbolic_trace(m).graph
+        t = Proxy(g.result) 
+        # test that we can use proxy objects to generate more graph code later for things that do not need to work with modules.
+        g.output((t + t).node)
+        gm = GraphModule(m, g)
+        self.assertEqual(gm(3, 4), 14)
+
 
 if __name__ == '__main__':
     run_tests()
