@@ -578,8 +578,9 @@ class TestScriptPy3(JitTestCase):
 
         mod = ModuleWithProperties(3)
         scripted_mod = torch.jit.script(mod)
-        self.assertEqual(mod.ignored_attr, 3)
 
+        with self.assertRaisesRegex(torch.nn.modules.module.ModuleAttributeError, "has no attribute"):
+            scripted_mod.ignored_attr
 
     def test_export_opnames_interface(self):
         global OneTwoModule

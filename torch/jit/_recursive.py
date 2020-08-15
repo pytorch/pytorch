@@ -364,12 +364,6 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
                 unbound_function = getattr(type(nn_module), name)
                 bound_method = unbound_function.__get__(script_module)
                 setattr(script_module, name, bound_method)
-            elif isinstance(item, property) and _jit_internal.is_ignored_fn(item.fget):
-                unbound_getter = getattr(type(nn_module), item.fget.__name__)
-                bound_getter = unbound_getter.__get__(script_module)
-                unbound_setter = getattr(type(nn_module), item.fset.__name__) if item.fset else None
-                bound_setter = unbound_setter.__get__(script_module) if unbound_setter else None
-                setattr(script_moudle, name, property(name, bound_getter, bound_setter))
 
         # For convenience, attach the concrete type to the new ScriptModule
         script_module._concrete_type = concrete_type
