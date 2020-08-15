@@ -1096,13 +1096,13 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOpViaOnnx(
 bool OnnxifiTransformer::supportOpOnnx(
     const caffe2::OperatorDef& op,
     onnx::OnnxExporter* exporter,
-    const std::unordered_set<int>& blocklisted_ops,
+    const std::unordered_set<int>& skiplisted_ops,
     onnxBackendID backend_id) const {
   try {
     int pos =
         ArgumentHelper::GetSingleArgument<OperatorDef, int>(op, kNetPos, -1);
-    if (blocklisted_ops.count(pos)) {
-      LOG(INFO) << "Skipping blocklisted op " << op.type() << " at pos " << pos;
+    if (skiplisted_ops.count(pos)) {
+      LOG(INFO) << "Skipping skiplisted op " << op.type() << " at pos " << pos;
       return false;
     }
     const OpSchema* schema = OpSchemaRegistry::Schema(op.type());
@@ -1197,13 +1197,13 @@ bool OnnxifiTransformer::supportOpC2(
     const caffe2::OperatorDef& op,
     const ShapeInfoMap& shape_hints,
     const std::unordered_set<std::string>& weights,
-    const std::unordered_set<int>& blocklisted_ops,
+    const std::unordered_set<int>& skiplisted_ops,
     onnxBackendID backend_id) const {
   try {
     int pos =
         ArgumentHelper::GetSingleArgument<OperatorDef, int>(op, kNetPos, -1);
-    if (blocklisted_ops.count(pos)) {
-      LOG(INFO) << "Skipping blocklisted op " << op.type() << " at pos " << pos;
+    if (skiplisted_ops.count(pos)) {
+      LOG(INFO) << "Skipping skiplisted op " << op.type() << " at pos " << pos;
       return false;
     }
 
@@ -1309,7 +1309,7 @@ void OnnxifiTransformer::tieGatherAndSparseLengthsWeightedSumOps(
     const NetDef& net,
     const ShapeInfoMap& shape_hints,
     const std::unordered_set<std::string>& weights,
-    std::unordered_set<int>* blocklisted_ops) const {
+    std::unordered_set<int>* skiplisted_ops) const {
   std::unordered_map<std::string, int> output_pos;
   onnx::OnnxExporter exporter(nullptr);
   onnxBackendID backend_id = backend_ids_[idx_];
@@ -1324,8 +1324,8 @@ void OnnxifiTransformer::tieGatherAndSparseLengthsWeightedSumOps(
       }
     } else if (StartsWith(op.type(), "SparseLengthsWeighted")) {
       auto supported = opts_.use_onnx
-          ? supportOpOnnx(op, &exporter, *blocklisted_ops, backend_id)
-          : supportOpC2(op, shape_hints, weights, *blocklisted_ops, backend_id);
+          ? supportOpOnnx(op, &exporter, *skiplisted_ops, backend_id)
+          : supportOpC2(op, shape_hints, weights, *skiplisted_ops, backend_id);
       if (!supported && op.input_size() > 1) {
         check = op.input(1);
       }
@@ -1338,18 +1338,18 @@ void OnnxifiTransformer::tieGatherAndSparseLengthsWeightedSumOps(
       if (it == output_pos.end()) {
         continue;
       }
-      blocklisted_ops->emplace(it->second);
+      skiplisted_ops->emplace(it->second);
       // We know that current op is not going to be supported. Might as well
-      // blocklist it too
-      blocklisted_ops->emplace(
+      // skiplist it too
+      skiplisted_ops->emplace(
           ArgumentHelper::GetSingleArgument<OperatorDef, int>(op, kNetPos, -1));
     }
   }
 }
 
-void OnnxifiTransformer::blocklistCpuPartition(
+void OnnxifiTransformer::skiplistCpuPartition(
     const NetDef& net,
-    std::unordered_set<int>* blocklisted_ops) const {
+    std::unordered_set<int>* skiplisted_ops) const {
   std::unordered_set<std::string> cpu_partitions;
   for (const auto& p : partition_infos_) {
     if (p.device_id_size() == 0) {
@@ -1359,7 +1359,7 @@ void OnnxifiTransformer::blocklistCpuPartition(
   for (const auto& op : net.op()) {
     const auto& pname = op.device_option().node_name();
     if (cpu_partitions.count(pname)) {
-      blocklisted_ops->emplace(
+      skiplisted_ops->emplace(
           ArgumentHelper::GetSingleArgument<OperatorDef, int>(op, kNetPos, -1));
     }
   }
@@ -1369,10 +1369,10 @@ void OnnxifiTransformer::applyFilteringRules(
     const NetDef& net,
     const ShapeInfoMap& shape_hints,
     const std::unordered_set<std::string>& weights,
-    std::unordered_set<int>* blocklisted_ops) const {
+    std::unordered_set<int>* skiplisted_ops) const {
   tieGatherAndSparseLengthsWeightedSumOps(
-      net, shape_hints, weights, blocklisted_ops);
-  blocklistCpuPartition(net, blocklisted_ops);
+      net, shape_hints, weights, skiplisted_ops);
+  skiplistCpuPartition(net, skiplisted_ops);
 }
 
 void OnnxifiTransformer::getBackendId() {
@@ -1399,16 +1399,16 @@ void OnnxifiTransformer::getBackendId() {
 NetDef OnnxifiTransformer::TransformViaC2(
     NetDef* pred_net,
     const std::unordered_set<std::string>& weights,
-    const std::unordered_set<int>& blocklisted_ops,
+    const std::unordered_set<int>& skiplisted_ops,
     const ShapeInfoMap& shape_hints) {
   onnxBackendID backend_id = backend_ids_[idx_];
 
   auto c2_supports = [this,
                       &shape_hints,
-                      &blocklisted_ops,
+                      &skiplisted_ops,
                       backend_id,
                       &weights](const caffe2::OperatorDef& op) {
-    return supportOpC2(op, shape_hints, weights, blocklisted_ops, backend_id);
+    return supportOpC2(op, shape_hints, weights, skiplisted_ops, backend_id);
   };
 
   auto c2_converter =
@@ -1424,15 +1424,15 @@ NetDef OnnxifiTransformer::TransformViaOnnx(
     Workspace* ws,
     NetDef* pred_net,
     const std::unordered_set<std::string>& weights,
-    const std::unordered_set<int>& blocklisted_ops,
+    const std::unordered_set<int>& skiplisted_ops,
     ShapeInfoMap* shape_hints) {
   onnxBackendID backend_id = backend_ids_[idx_];
 
   // function to tell whether the ONNXIFI backend supports a given C2 op or not
   onnx::OnnxExporter exporter(nullptr);
-  auto onnx_supports = [this, &exporter, &blocklisted_ops, backend_id](
+  auto onnx_supports = [this, &exporter, &skiplisted_ops, backend_id](
                            const caffe2::OperatorDef& op) {
-    return supportOpOnnx(op, &exporter, blocklisted_ops, backend_id);
+    return supportOpOnnx(op, &exporter, skiplisted_ops, backend_id);
   };
 
   // function to convert runnable subgraph into an onnxifi op. We need to keep
@@ -1462,7 +1462,7 @@ void OnnxifiTransformer::transform(
     NetDef* pred_net,
     const std::vector<std::string>& weight_names,
     const ShapeInfoMap& input_shape_hints,
-    const std::unordered_set<int>& blocklisted_ops) {
+    const std::unordered_set<int>& skiplisted_ops) {
   CAFFE_ENFORCE(ws);
   CAFFE_ENFORCE(pred_net, "Predict net cannot be nullptr");
 
@@ -1530,15 +1530,15 @@ void OnnxifiTransformer::transform(
   getBackendId();
 
   // Apply some filtering rules
-  std::unordered_set<int> new_blocklisted_ops(
-      blocklisted_ops.begin(), blocklisted_ops.end());
-  applyFilteringRules(*pred_net, shape_hints, weights, &new_blocklisted_ops);
+  std::unordered_set<int> new_skiplisted_ops(
+      skiplisted_ops.begin(), skiplisted_ops.end());
+  applyFilteringRules(*pred_net, shape_hints, weights, &new_skiplisted_ops);
 
   // Transform the net
   NetDef net_opt = opts_.use_onnx
       ? TransformViaOnnx(
-            ws, pred_net, weights, new_blocklisted_ops, &shape_hints)
-      : TransformViaC2(pred_net, weights, new_blocklisted_ops, shape_hints);
+            ws, pred_net, weights, new_skiplisted_ops, &shape_hints)
+      : TransformViaC2(pred_net, weights, new_skiplisted_ops, shape_hints);
 
   // Need to figure out a proper place to handle device option
   net_opt.mutable_device_option()->CopyFrom(pred_net->device_option());
