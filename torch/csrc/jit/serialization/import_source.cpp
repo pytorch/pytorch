@@ -195,7 +195,13 @@ struct SourceImporterImpl : public Resolver,
       definitions.emplace_back(def);
       resolvers.emplace_back(shared_from_this());
     }
-    cu_->define(prefix, definitions, resolvers, &self);
+    cu_->define(
+        prefix,
+        /*properties=*/{},
+        /*propResolvers=*/{},
+        definitions,
+        resolvers,
+        &self);
   }
 
   std::shared_ptr<SugaredValue> resolveValue(
@@ -231,7 +237,13 @@ struct SourceImporterImpl : public Resolver,
   void importFunction(const std::string& qualifier, const Def& def) {
     std::vector<Def> definitions{def};
     std::vector<ResolverPtr> resolvers{shared_from_this()};
-    cu_->define(qualifier, definitions, resolvers, nullptr);
+    cu_->define(
+        qualifier,
+        /*properties=*/{},
+        /*propResolvers=*/{},
+        definitions,
+        resolvers,
+        nullptr);
   }
 
   void importNamedType(
@@ -472,7 +484,13 @@ struct SourceImporterImpl : public Resolver,
 
     cu_->register_type(class_type);
     const auto self = SimpleSelf(class_type);
-    cu_->define(qualified_classname, methods, resolvers, &self);
+    cu_->define(
+        qualified_classname,
+        /*properties=*/{},
+        /*propResolvers=*/{},
+        methods,
+        resolvers,
+        &self);
   }
 
   void importNamedTuple(
