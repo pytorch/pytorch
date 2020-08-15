@@ -58,6 +58,7 @@ TESTS = [
     'test_spectral_ops',
     'test_serialization',
     'test_show_pickle',
+    'test_tensor_creation_ops',
     'test_torch',
     'test_type_info',
     'test_type_hints',
