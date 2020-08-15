@@ -158,7 +158,9 @@ class ProcessGroupNCCL : public ProcessGroup {
   // callback. Before invoking the callback, FutureNCCL will synchronize its
   // own cudaEvents with the stream that runs the callback. This design
   // enables synchronizing the appropriate streams and avoids stalling PyTorch's
-  // default stream while running the callback.
+  // default stream while running the callback. In case of multiple then
+  // callbacks, the design will work like a chain such that FutureNCCL n will
+  // wait on the cudaEvents from FutureNCCL n - 1.
   struct FutureNCCL : at::ivalue::Future {
    public:
     explicit FutureNCCL(
@@ -229,8 +231,8 @@ class ProcessGroupNCCL : public ProcessGroup {
 
     // Adds a callback to FutureNCCL. It invokes the callback inline after
     // synchronizing FutureNCCL's own cudaEvents with the stream that runs
-    // this callback. This new FutureNCCL's cudaEvents will record the callback's
-    // stream and will have the result value of the callback.
+    // this callback. This new FutureNCCL's cudaEvents will record the
+    // callback's stream and will have the result value of the callback.
     void addCallbackWithStream(
         std::function<void(void)> callback,
         const c10::cuda::CUDAStream& stream,
