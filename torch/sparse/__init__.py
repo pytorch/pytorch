@@ -8,8 +8,11 @@ from torch import Tensor
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from torch.types import _dtype as DType
+    DimOrDims = Optional[Union[int, Tuple[int], List[int]]]
 else:
+    # The JIT doesn't understand Union, nor torch.dtype here
     DType = int
+    DimOrDims = Optional[Tuple[int]]
 
 
 __all__ = [
@@ -81,7 +84,7 @@ def mm(mat1: Tensor, mat2: Tensor) -> Tensor:
     return torch._sparse_mm(mat1, mat2)
 
 
-def sum(input: Tensor, dim: Optional[Union[int, Tuple[int], List[int]]] = None,
+def sum(input: Tensor, dim: DimOrDims = None,
         dtype: Optional[DType] = None) -> Tensor:
     r"""
     Returns the sum of each row of SparseTensor :attr:`input` in the given
