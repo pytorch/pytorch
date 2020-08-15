@@ -4114,7 +4114,7 @@ add_docstr(torch.quantile,
            r"""
 quantile(input, q) -> Tensor
 
-Returns the q-th quantiles of all elements in the :attr:`input` tensor, doing a linear 
+Returns the q-th quantiles of all elements in the :attr:`input` tensor, doing a linear
 interpolation when the q-th quantile lies between two data.
 
 Args:
@@ -4133,16 +4133,16 @@ Example::
 .. function:: quantile(input, q, dim=None, keepdim=False, *, out=None) -> Tensor
 
 Returns the q-th quantiles of each row of the :attr:`input` tensor along the dimension
-:attr:`dim`, doing a linear interpolation when the q-th quantile lies between two 
+:attr:`dim`, doing a linear interpolation when the q-th quantile lies between two
 data points. By default, :attr:`dim` is `None` resulting in the :attr:`input` tensor
 beign flattened before computation.
 
-If :attr:`q` is a 1D tensor, the first dimension of the result corresponds to the quantiles 
+If :attr:`q` is a 1D tensor, the first dimension of the result corresponds to the quantiles
 and the remaining dimensions are what remains from the reduction of the :attr:`input` tensor.
 If :attr:`q` is a scalar or scalar tensor, the result is placed in the reduced dimension.
 
-If :attr:`keepdim` is ``True``, the remaining dimensions are of the same size as 
-:attr:`input` except in the dimension :attr:`dim` where it is size 1. Otherwise, 
+If :attr:`keepdim` is ``True``, the remaining dimensions are of the same size as
+:attr:`input` except in the dimension :attr:`dim` where it is size 1. Otherwise,
 the dimension :attr:`dim` is squeezed (see :func:`torch.squeeze`).
 
 Args:
@@ -5043,7 +5043,7 @@ Computes the :math:`n^{th}` derivative of the digamma function on :attr:`input`.
     \psi^{(n)}(x) = \frac{d^{(n)}}{dx^{(n)}} \psi(x)
 
 .. note::
-    This function is not implemented for :math:`n \geq 2`.
+    This function is implemented only for nonnegative integers :math:`n \geq 0`.
 """ + """
 Args:
     n (int): the order of the polygamma function
@@ -5054,6 +5054,12 @@ Example::
     >>> a = torch.tensor([1, 0.5])
     >>> torch.polygamma(1, a)
     tensor([1.64493, 4.9348])
+    >>> torch.polygamma(2, a)
+    tensor([ -2.4041, -16.8288])
+    >>> torch.polygamma(3, a)
+    tensor([ 6.4939, 97.4091])
+    >>> torch.polygamma(4, a)
+    tensor([ -24.8863, -771.4742])
 """.format(**common_args))
 
 add_docstr(torch.pow,
