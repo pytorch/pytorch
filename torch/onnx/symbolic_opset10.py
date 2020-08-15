@@ -137,7 +137,6 @@ def __interpolate(g, input, size, scale_factor, mode , align_corners, recompute_
 
 def _slice(g, input, axes, starts, ends, steps=None, dynamic_slice=False):
     if dynamic_slice:
-        print("start, end", starts, ends)
         starts = g.op("Unsqueeze", starts, axes_i=[0])
         ends = g.op("Unsqueeze", ends, axes_i=[0])
         if isinstance(axes, int):

@@ -1603,7 +1603,7 @@ def slice(g, self, *args):
         # aten::slice(Tensor self, int dim, int start, int end, int step) -> Tensor
         dim, start, end, step = args
         if step != 1:
-            _unimplemented("slice", "step!=1 is currently not supported")
+            raise RuntimeError("step!=1 is currently not supported")
         if start.node().kind() != 'onnx::Constant' or \
                 end.node().kind() != 'onnx::Constant' or dim.node().kind() != 'onnx::Constant':
             if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX:

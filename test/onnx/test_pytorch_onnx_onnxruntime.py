@@ -907,10 +907,10 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.rand(1, 2)
         self.run_test(DynamicSliceModel(), x)
 
+    @enableScriptTest()
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_slice_dynamic_shape_script(self):
-        class DynamicSliceModel(torch.jit.ScriptModule):
-            @torch.jit.script_method
+        class DynamicSliceModel(torch.nn.Module):
             def forward(self, x):
                 return x.new_zeros(x.shape[1:x.size(2)])
 
