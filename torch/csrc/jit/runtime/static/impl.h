@@ -12,16 +12,20 @@ namespace jit {
 
 class TORCH_API StaticRuntime {
  public:
-  StaticRuntime(std::shared_ptr<torch::jit::Graph> g) : graph_(std::move(g)) {}
-  StaticRuntime(
-      const torch::jit::Module& m,
-      std::shared_ptr<torch::jit::Graph> g);
+  explicit StaticRuntime(std::shared_ptr<torch::jit::Graph> g)
+      : graph_(std::move(g)) {}
+
+  explicit StaticRuntime(const torch::jit::Module& m);
 
   std::vector<at::Tensor> run(const std::vector<at::Tensor>& inps) const;
 
  private:
-  std::shared_ptr<torch::jit::Graph> graph_;
   torch::jit::Module module_;
+  std::shared_ptr<torch::jit::Graph> graph_;
+
+  // Jit interpreter state
+  std::unique_ptr<torch::jit::Code> code_;
+  std::unique_ptr<torch::jit::InterpreterState> interp_;
 };
 
 } // namespace jit
