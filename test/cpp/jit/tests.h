@@ -102,7 +102,7 @@ namespace jit {
   _(LiteInterpreterSequentialModuleInfo)          \
   _(LiteInterpreterHierarchyModuleInfo)           \
   _(LiteInterpreterDuplicatedClassTypeModuleInfo) \
-  _(LiteInterpreterEval)                           \
+  _(LiteInterpreterEval)                          \
   _(TorchbindIValueAPI)                           \
   _(LiteInterpreterDict)                          \
   _(MobileNamedParameters)                        \
