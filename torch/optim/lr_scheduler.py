@@ -22,10 +22,11 @@ EPOCH_DEPRECATION_WARNING = (
 
 SAVE_STATE_WARNING = "Please also save or load the state of the optimizer when saving or loading the scheduler."
 
+
 class _LRScheduler(object):
 
     def __init__(self, optimizer: Optimizer, last_epoch: int = -1,
-                 verbose : bool = False) -> None:
+                 verbose: bool = False) -> None:
         # Attach optimizer
         if not isinstance(optimizer, Optimizer):
             raise TypeError('{} is not an Optimizer'.format(
@@ -115,7 +116,6 @@ class _LRScheduler(object):
             else:
                 print('Epoch {:5d}: adjusting learning rate'
                       ' of group {} to {:.4e}.'.format(epoch, group, lr))
-
 
     def step(self, epoch: Optional[int] = None) -> None:
         # Raise a warning if old pattern is detected
@@ -972,7 +972,7 @@ class CosineAnnealingWarmRestarts(_LRScheduler):
 
     def __init__(self, optimizer: Optimizer, T_0: int, T_mult: int = 1,
                  eta_min: int = 0, last_epoch: int = -1,
-                 verbose: bool=False) -> None:
+                 verbose: bool = False) -> None:
         if T_0 <= 0 or not isinstance(T_0, int):
             raise ValueError("Expected positive integer T_0, but got {}".format(T_0))
         if T_mult < 1 or not isinstance(T_mult, int):

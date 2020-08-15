@@ -1,6 +1,6 @@
 import math
 from copy import deepcopy
-from typing import Iterable, Any, Optional, Callable, Union, List
+from typing import Iterable, Optional, Callable, Union
 
 import torch
 from torch.nn import Module

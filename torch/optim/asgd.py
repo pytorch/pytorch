@@ -23,7 +23,7 @@ class ASGD(Optimizer):
     """
 
     def __init__(self, params: _params_t, lr: float = 1e-2, lambd: float = 1e-4,
-                 alpha: float = 0.75, t0: float =1e6,
+                 alpha: float = 0.75, t0: float = 1e6,
                  weight_decay: float = 0.) -> None:
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))

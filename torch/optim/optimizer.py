@@ -17,6 +17,7 @@ class _RequiredParameter(object):
     def __repr__(self):
         return "<required parameter>"
 
+
 required = _RequiredParameter()
 
 
