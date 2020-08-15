@@ -2164,7 +2164,7 @@ Example::
 
 add_docstr(torch.vdot,
            r"""
-vdot(x, y) -> Tensor
+vdot(input, other) -> Tensor
 
 Computes the dot product (inner product) of two tensors.
 
@@ -2178,14 +2178,12 @@ Example::
 
     >>> torch.vdot(torch.tensor([2, 3]), torch.tensor([2, 1]))
     tensor(7)
-    >>> a = torch.randn(2, dtype=torch.complex64)
-    >>> b = torch.randn(2, dtype=torch.complex64)
-    >>> a
-    tensor([-0.8810+0.2144j,  0.1118-0.1552j])
-    >>> b
-    tensor([-0.9062-0.3356j,  0.3103-0.7633j])
+    >>> a = torch.tensor((1 +2j, 3 - 1j))
+    >>> b = torch.tensor((2 +1j, 4 - 0j))
     >>> torch.vdot(a, b)
-    tensor(0.8796+0.4529j)
+    tensor([16.+1.j])
+    >>> torch.vdot(b, a)
+    tensor([16.-1.j])
 """)
 
 add_docstr(torch.eig,
