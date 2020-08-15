@@ -267,7 +267,14 @@ Tensor qadd_scalar_tensor_out(Tensor qa, Tensor b, Tensor out) {
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
   m.impl("add",                 TORCH_FN(qadd</*ReLUFused=*/false>));
+  m.impl("add.out",             TORCH_FN(qadd_out</*ReLUFused=*/false>));
+  m.impl("add.Scalar",          TORCH_FN(qadd_scalar</*ReLUFused=*/false>));
+  m.impl("add.Scalar_out",      TORCH_FN(qadd_scalar_out</*ReLUFused=*/false>));
   m.impl("add_relu",            TORCH_FN(qadd</*ReLUFused=*/true>));
+  m.impl("add_relu.out",        TORCH_FN(qadd_out</*ReLUFused=*/true>));
+  m.impl("add_relu.Scalar",     TORCH_FN(qadd_scalar</*ReLUFused=*/true>));
+  m.impl("add_relu.Scalar_out", TORCH_FN(qadd_scalar_out</*ReLUFused=*/true>));
+  // deprecated functions, kept for backward compatibility
   m.impl("add_out",             TORCH_FN(qadd_out</*ReLUFused=*/false>));
   m.impl("add_relu_out",        TORCH_FN(qadd_out</*ReLUFused=*/true>));
   m.impl("add_scalar",          TORCH_FN(qadd_scalar</*ReLUFused=*/false>));
