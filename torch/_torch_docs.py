@@ -1432,9 +1432,9 @@ Returns a copy of :attr:`input`.
 
 .. note::
 
-    This function is differentiable and so gradients will flow back to the original
-    Tensor. If you want to get a Tensor that is independent from the point of view
-    of the autograd, see :meth:`~Tensor.detach`.
+    This function is differentiable, so gradients will flow back from the
+    result of this operation to :attr:`input`. To create a tensor without an
+    autograd relationship to :attr:`input` see :meth:`~Tensor.detach`.
 
 Args:
     {input}
