@@ -33,6 +33,9 @@ class Quantize(torch.nn.Module):
                 [ 1., -1.]], size=(2, 2), dtype=torch.qint8, scale=1.0, zero_point=2)
     """
 
+    scale: torch.Tensor
+    zero_point: torch.Tensor
+
     def __init__(self, scale, zero_point, dtype):
         super(Quantize, self).__init__()
         self.register_buffer('scale', torch.tensor([scale]))
