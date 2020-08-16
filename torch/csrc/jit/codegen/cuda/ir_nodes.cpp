@@ -189,26 +189,53 @@ bool TernaryOp::sameAs(const TernaryOp* other) const {
 
 BroadcastOp::BroadcastOp(Val* _out, Val* _in)
     : Expr(ExprType::BroadcastOp), out_(_out), in_(_in) {
-  TORCH_CHECK(_out->getValType().value() == ValType::TensorView);
-  TORCH_CHECK(_in->getValType().value() == ValType::TensorView);
+  auto out_type = _out->getValType().value();
+  auto in_type = _in->getValType().value();
 
-  int ndims = 0;
-  for (auto dom : out()->as<TensorView>()->getRootDomain()) {
-    if (!dom->isBroadcast()) {
-      ndims++;
+  TORCH_INTERNAL_ASSERT(
+      out_type == ValType::TensorView && in_type == ValType::TensorView,
+      "Cannot braodcast a non-tensor object.");
+
+  // This is a generic check that root dims of a consumer and producer match.
+  // Maybe we shouldn't relegate it to this constructor.
+  const auto c_tv = out()->as<TensorView>();
+  const auto p_tv = in()->as<TensorView>();
+
+  const auto& c_root = c_tv->getRootDomain();
+  const auto& p_root = p_tv->getMaybeRFactorDomain();
+
+  const auto root_p2c = TensorDomain::mapDomainPandC(p_root, c_root);
+
+  std::vector<bool> c_mapped(c_root.size(), false);
+  std::vector<bool> p_mapped(p_root.size(), false);
+
+  for (auto pair_entry : root_p2c) {
+    auto p_i = pair_entry.first;
+    p_mapped[p_i] = true;
+    auto c_i = pair_entry.second;
+    c_mapped[c_i] = true;
+  }
+
+  bool bad_mismatch = false;
+
+  for (size_t i = 0; i < c_root.size(); i++) {
+    if (!c_mapped[i]) {
+      if (!c_root[i]->isBroadcast()) {
+        bad_mismatch = true;
+      }
     }
   }
-  for (auto dom : in()->as<TensorView>()->getRootDomain()) {
-    if (dom->isBroadcast()) {
-      ndims++;
+
+  for (size_t i = 0; i < p_root.size(); i++) {
+    if (!p_mapped[i]) {
+      if (!p_root[i]->isReduction()) {
+        bad_mismatch = true;
+      }
     }
   }
 
   TORCH_INTERNAL_ASSERT(
-      ndims ==
-          (int)TensorDomain::noReductions(
-              in_->as<TensorView>()->getRootDomain())
-              .size(),
+      !bad_mismatch,
       "Invalid broadcast op. Non-broadcasted dims don't match from input to output.");
 
   addOutput(_out);
