@@ -55,6 +55,7 @@ namespace at { namespace native {
 
 template <typename func_t>
 void gpu_kernel(TensorIterator& iter, const func_t& f) {
+  ASSERT_HOST_DEVICE_LAMBDA(func_t);
 
   for (int arg = 0; arg < iter.ntensors(); arg++) {
     TORCH_INTERNAL_ASSERT(iter.device(arg).is_cuda());
@@ -74,36 +75,6 @@ void gpu_kernel(TensorIterator& iter, const func_t& f) {
   gpu_kernel_impl(iter, f);
 }
 
-template<typename func_t>
-struct AUnaryFunctor {
-  using traits = function_traits<func_t>;
-  using arg1_t = typename traits::template arg<0>::type;
-  using arg2_t = typename traits::template arg<1>::type;
-  using return_t = typename traits::result_type;
-  __device__ return_t operator()(arg2_t b) const {
-    return f(a, b);
-  }
-  AUnaryFunctor(func_t f_, arg1_t a_): f(f_), a(a_) {}
-  private:
-    func_t f;
-    arg1_t a;
-};
-
-template<typename func_t>
-struct BUnaryFunctor {
-  using traits = function_traits<func_t>;
-  using arg1_t = typename traits::template arg<0>::type;
-  using arg2_t = typename traits::template arg<1>::type;
-  using return_t = typename traits::result_type;
-  __device__ return_t operator()(arg1_t a) const {
-    return f(a, b);
-  }
-  BUnaryFunctor(func_t f_, arg2_t b_): f(f_), b(b_) {}
-  private:
-    func_t f;
-    arg2_t b;
-};
-
 template <typename func_t>
 void gpu_kernel_with_scalars(TensorIterator& iter, const func_t& f) {
   ASSERT_HOST_DEVICE_LAMBDA(func_t);
@@ -114,17 +85,23 @@ void gpu_kernel_with_scalars(TensorIterator& iter, const func_t& f) {
       traits::arity == 2,
       "gpu_kernel_with_scalars only supports two input arguments");
 
-  using arg1_t = typename traits::template arg<0>::type;
-  using arg2_t = typename traits::template arg<1>::type;
   if (iter.is_cpu_scalar(1)) {
-    AUnaryFunctor<func_t> af(f, iter.scalar_value<arg1_t>(1));
+    using arg1_t = typename traits::template arg<0>::type;
+    using arg2_t = typename traits::template arg<1>::type;
+    auto a = iter.scalar_value<arg1_t>(1);
     iter.remove_operand(1);
     const OptionalDeviceGuard device_guard(device_of(iter.tensor(1)));
-    gpu_kernel(iter, af);
+    gpu_kernel(iter, [=]GPU_LAMBDA(arg2_t b) {
+      return f(a, b);
+    });
   } else if (iter.is_cpu_scalar(2)) {
-    BUnaryFunctor<func_t> bf(f, iter.scalar_value<arg2_t>(2));
+    using arg1_t = typename traits::template arg<0>::type;
+    using arg2_t = typename traits::template arg<1>::type;
+    auto b = iter.scalar_value<arg2_t>(2);
     iter.remove_operand(2);
-    gpu_kernel(iter, bf);
+    gpu_kernel(iter, [=]GPU_LAMBDA(arg1_t a) {
+      return f(a, b);
+    });
   } else {
     gpu_kernel(iter, f);
   }
