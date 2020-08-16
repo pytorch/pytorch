@@ -42,6 +42,7 @@ class TORCH_API Module {
   }
   const std::vector<at::Tensor> parameters() const;
   const std::map<std::string, at::Tensor> named_parameters() const;
+  std::string get_forward_method_debug_info(size_t pc) const;
 
  private:
   c10::intrusive_ptr<c10::ivalue::Object> object_;

@@ -848,6 +848,18 @@
   use_c10_dispatcher: full
   device_guard: False
 
+- func: complex(Tensor real, Tensor imag) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+
+- func: complex.out(Tensor real, Tensor imag, *, Tensor(a!) out) -> Tensor(a!)
+
+- func: polar(Tensor abs, Tensor angle) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+
+- func: polar.out(Tensor abs, Tensor angle, *, Tensor(a!) out) -> Tensor(a!)
+
 - func: constant_pad_nd(Tensor self, int[] pad, Scalar value=0) -> Tensor
   use_c10_dispatcher: full
   variants: function
@@ -2842,6 +2854,21 @@
   use_c10_dispatcher: full
 
 - func: stack.out(Tensor[] tensors, int dim=0, *, Tensor(a!) out) -> Tensor(a!)
+
+- func: hstack(Tensor[] tensors) -> Tensor
+  use_c10_dispatcher: full
+
+- func: hstack.out(Tensor[] tensors, *, Tensor(a!) out) -> Tensor(a!)
+
+- func: vstack(Tensor[] tensors) -> Tensor
+  use_c10_dispatcher: full
+
+- func: vstack.out(Tensor[] tensors, *, Tensor(a!) out) -> Tensor(a!)
+
+- func: dstack(Tensor[] tensors) -> Tensor
+  use_c10_dispatcher: full
+
+- func: dstack.out(Tensor[] tensors, *, Tensor(a!) out) -> Tensor(a!)
 
 # The signature is designed to be consistent with librosa except that it is
 # missing the `pad_mode` and `center` arguments, which are taken care of at
@@ -5336,6 +5363,15 @@
   variants: method, function
 
 - func: hypot_(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  variants: method
+
+- func: nextafter.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+
+- func: nextafter(Tensor self, Tensor other) -> Tensor
+  use_c10_dispatcher: full
+  variants: method, function
+
+- func: nextafter_(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
 
 - func: remainder.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
