@@ -211,7 +211,7 @@ class TestUnaryUfuncs(TestCase):
             lambda: - torch.tensor([False, True], device=device))
 
     @dtypes(*floating_types_and(torch.bfloat16, torch.half))
-    @ops((_fn for _fn in unary_ufuncs if _fn.domain is not (None, None)))
+    @ops((_fn for _fn in unary_ufuncs if _fn.domain != (None, None)))
     def test_float_domains(self, device, dtype, op):
         if not op.supports_dtype(dtype, torch.device(device).type):
             raise unittest.SkipTest('unsupported dtype')
