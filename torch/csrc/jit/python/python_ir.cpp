@@ -425,9 +425,6 @@ void initPythonIRBindings(PyObject* module_) {
       .VS(copyMetadata)
       .VS(isCompleteTensor)
       .VS(requires_grad)
-      .def(
-          "requiresGrad",
-          [](Value& n) { n.type()->expect<TensorType>()->requiresGrad(); })
       .def("toIValue", [](Value& n) { return toIValue(&n); })
       .def("type", [](Value& v) { return v.type(); });
 #undef VS

@@ -6861,16 +6861,6 @@ a")
         with set_default_dtype(torch.half):
             self.assertEqual(scripted_foo(1.), foo(1.), exact_dtype=True)
 
-    def test_shape_analysis_grad_property(self):
-        @torch.jit.script
-        def foo(x):
-            return torch.sub(x, torch.tanh(x))
-
-        torch._C._jit_pass_complete_shape_analysis(foo.graph, (torch.tensor([0.39]),), False)
-
-        # requires_grad property shouldn't be accidentally set by shape analysis
-        self.assertTrue(foo.graph.findNode("aten::sub").output().requiresGrad() is None)
-
     def test_empty_like_memory_format_bc(self):
         def f(x):
             # type: (Tensor) -> Tensor
