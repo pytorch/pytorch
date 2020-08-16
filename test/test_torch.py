@@ -6439,7 +6439,7 @@ class TestTorchDeviceType(TestCase):
     @dtypesIfCUDA(torch.int32, torch.int64, torch.half, torch.float, torch.double)
     @dtypes(torch.int32, torch.int64, torch.complex64, torch.float, torch.double)
     def test_nanprod(self, device, dtype):
-        x = (torch.randn(3, 3), device=device, dtype=dtype)
+        x = torch.randn(3, 3, device=device, dtype=dtype)
         if dtype.is_floating_point:
             x[x < 0.2] = float('nan')
  
