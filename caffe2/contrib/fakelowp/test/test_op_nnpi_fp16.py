@@ -236,7 +236,7 @@ class UnaryOpTest(serial.SerializedTestCase):
     # Once hypothesis.testing version is updated, we can re-enable
     # testing with different hypothesis examples.
     @settings(deadline=None)
-    def Skip_test_logit(self):
+    def test_logit(self):
         workspace.ResetWorkspace()
         n = 1
         m = 15361
@@ -251,7 +251,7 @@ class UnaryOpTest(serial.SerializedTestCase):
                 'Logit',
                 ['X'],
                 ['Y'],
-                eps=1e-8)
+                eps=1e-6)
         )
         ref_net = caffe2_pb2.NetDef()
         ref_net.name = "ref"
@@ -262,7 +262,7 @@ class UnaryOpTest(serial.SerializedTestCase):
                 'LogitFakeFp16NNPI',
                 ['X'],
                 ['Y'],
-                eps=1e-8)
+                eps=1e-6)
         )
         print("REF NET = {}".format(ref_net))
 

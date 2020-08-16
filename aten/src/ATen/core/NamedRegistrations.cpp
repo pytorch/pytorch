@@ -321,6 +321,9 @@ TORCH_LIBRARY_IMPL(aten, Named, m) {
   m.impl("neg", CppFunction::makeFallthrough());
   m.impl("neg.out", CppFunction::makeFallthrough());
   m.impl("neg_", CppFunction::makeFallthrough());
+  m.impl("nextafter", CppFunction::makeFallthrough());
+  m.impl("nextafter.out", CppFunction::makeFallthrough());
+  m.impl("nextafter_", CppFunction::makeFallthrough());
   m.impl("normal_", CppFunction::makeFallthrough());
   m.impl("ones_like", CppFunction::makeFallthrough());
   m.impl("output_nr", CppFunction::makeFallthrough());
