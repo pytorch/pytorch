@@ -270,6 +270,14 @@ public:
     auto o2 = Sleef_hypotf8_u05(hi, b2);
     return cvtfp32_bf16(o1, o2);
   }
+  Vec256<BFloat16> i0() const {
+    __at_align32__ int16_t tmp[size()];
+    store(tmp);
+    for (int64_t i = 0; i < size(); i++) {
+      tmp[i] = calc_i0((float)tmp[i]);
+    }
+    return loadu(tmp);
+  }
   Vec256<BFloat16> log() const {
     return map(Sleef_logf8_u10);
   }
