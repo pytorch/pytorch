@@ -619,21 +619,7 @@ std::shared_ptr<SugaredValue> ClassNamespaceValue::attr(
     } else if (auto tupleType = serializable_type->cast<TupleType>()) {
       return std::make_shared<NamedTupleConstructor>(tupleType);
     } else if (auto enumType = serializable_type->cast<EnumType>()) {
-      std::map<std::string, SugaredValuePtr> sugared_enum_values;
-      auto sugared_enum_values_list = c10::impl::GenericList(enumType);
-      for (const auto& name_value : enumType->enumNamesValues()) {
-        auto enum_holder = c10::make_intrusive<at::ivalue::EnumHolder>(
-            enumType, name_value.first, name_value.second);
-        auto simple_enum_value = std::make_shared<SimpleValue>(
-            m.graph()->insertConstant(IValue(enum_holder), loc));
-        sugared_enum_values.insert(
-            std::make_pair(name_value.first, simple_enum_value));
-        sugared_enum_values_list.push_back(name_value.second);
-      }
-      auto enum_values_list_constant = std::make_shared<SimpleValue>(
-          m.graph()->insertConstant(sugared_enum_values_list, loc));
-      return std::make_shared<SugaredEnumClass>(
-          sugared_enum_values, enum_values_list_constant, enumType);
+      return std::make_shared<SugaredEnumClass>(enumType);
     }
   }
 

@@ -791,18 +791,17 @@ void initPythonIRBindings(PyObject* module_) {
       .def(py::init([](const std::string& qualified_name,
                        TypePtr value_type,
                        const std::vector<py::object>& enum_names_values) {
-        std::vector<EnumNameValue> enum_names_values_pair;
-        enum_names_values_pair.reserve(enum_names_values.size());
+        std::vector<EnumNameValue> names_values;
+        names_values.reserve(enum_names_values.size());
         for (const auto& enum_name_value : enum_names_values) {
           auto enum_name = py::cast<std::string>(enum_name_value.attr("name"));
           auto enum_value = toIValue(enum_name_value.attr("value"), value_type);
-          enum_names_values_pair.emplace_back(
-              std::make_pair(enum_name, enum_value));
+          names_values.emplace_back(std::make_pair(enum_name, enum_value));
         }
         return EnumType::create(
             c10::QualifiedName(qualified_name),
             std::move(value_type),
-            std::move(enum_names_values_pair),
+            std::move(names_values),
             get_python_cu());
       }));
   py::class_<InterfaceType, Type, std::shared_ptr<InterfaceType>>(

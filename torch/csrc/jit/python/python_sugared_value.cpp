@@ -413,25 +413,7 @@ std::shared_ptr<SugaredEnumClass> createSugaredEnumClassFromObj(
   TORCH_INTERNAL_ASSERT(!annotation_type.is_none());
   auto type = py::cast<TypePtr>(annotation_type);
   auto enum_type = type->expect<EnumType>();
-
-  std::map<std::string, SugaredValuePtr> enum_values;
-  auto enum_values_list = py::cast<py::list>(obj);
-
-  auto enum_value_ivalues = c10::impl::GenericList(enum_type);
-  for (auto enum_value : enum_values_list) {
-    auto enum_name = enum_value.attr("name").cast<std::string>();
-    auto enum_sugared_value =
-        toSugaredValue(py::reinterpret_steal<py::object>(enum_value), m, loc);
-    enum_values.insert(std::make_pair(enum_name, enum_sugared_value));
-    enum_value_ivalues.push_back(toIValue(enum_value, enum_type));
-  }
-
-  IValue enum_value_list_ivalues(enum_value_ivalues);
-  auto enum_values_list_constant = std::make_shared<SimpleValue>(
-      m.graph()->insertConstant(enum_value_list_ivalues, loc));
-
-  return std::make_shared<SugaredEnumClass>(
-      enum_values, enum_values_list_constant, enum_type);
+  return std::make_shared<SugaredEnumClass>(enum_type);
 }
 
 // helper function for instantiating a SugaredValue from an IValue
