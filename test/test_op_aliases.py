@@ -33,9 +33,9 @@ class AliasInfo(object):
 
 alias_infos = (
     AliasInfo('absolute', torch.absolute, 'abs', torch.abs,
-              lambda d: torch.randn(20, device=d) - .5),
+              lambda d: torch.randn(20, device=d)),
     AliasInfo('absolute_', torch.Tensor.absolute_, 'abs_', torch.Tensor.abs_,
-              lambda d: torch.randn(20, device=d) - .5),
+              lambda d: torch.randn(20, device=d)),
     AliasInfo('clip', torch.clip, 'clamp', torch.clamp,
               lambda d: torch.randn(20, device=d), get_args=lambda d: (.4, .6)),
     AliasInfo('clip_', torch.Tensor.clip_, 'clamp_', torch.Tensor.clamp_,
@@ -49,9 +49,9 @@ alias_infos = (
               lambda d: torch.randn(20, device=d), get_args=lambda d: (torch.randn(20, device=d),),
               decorators=(onlyCPU,)),
     AliasInfo('arccosh', torch.arccosh, 'acosh', torch.acosh,
-              lambda d: torch.randn(20, device=d)),
+              lambda d: torch.randn(20, device=d) + 2),
     AliasInfo('arccosh_', torch.Tensor.arccosh_, 'acosh_', torch.Tensor.acosh_,
-              lambda d: torch.randn(20, device=d)),
+              lambda d: torch.randn(20, device=d) + 2),
 )
 
 # Placeholder test class for validating that aliases are correctly
@@ -127,7 +127,7 @@ def create_alias_tests(cls):
             alias_result = alias_op(inp.clone(), *args)
             original_result = alias_op(inp.clone(), *args)
 
-            self.assertEqual(alias_result, original_result)
+            self.assertEqual(alias_result, original_result, atol=0, rtol=0)
 
         # Applies decorators
         for decorator in info.decorators:
