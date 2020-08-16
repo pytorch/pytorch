@@ -381,12 +381,13 @@ def compare_model_stub(
     return ob_dict
 
 
-def get_matching_activations(float_module, q_module):
+def get_matching_activations(float_module, q_module, Logger):
     r"""Find the matching activation between float and quantized modules.
 
     Args:
         float_module: float module used to generate the q_module
         q_module: module quantized from float_module
+        Logger: type of logger used to prepare float_module and q_module
 
     Return:
         act_dict: dict with key corresponding to quantized module names and each
@@ -466,5 +467,5 @@ def compare_model_outputs(
     prepare_model_outputs(float_model, q_model, Logger, white_list)
     float_model(*data)
     q_model(*data)
-    act_compare_dict = get_matching_activations(float_model, q_model)
+    act_compare_dict = get_matching_activations(float_model, q_model, Logger)
     return act_compare_dict
