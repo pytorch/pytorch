@@ -984,6 +984,34 @@ Tensor hann_window(
       window_length, periodic, /*alpha=*/0.5, /*beta=*/0.5, options);
 }
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~ kaiser_window ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Tensor kaiser_window(int64_t window_length, double beta, const TensorOptions& options) {
+  return native::kaiser_window(window_length, beta, /*periodic=*/true, options);
+}
+
+Tensor kaiser_window(
+    int64_t window_length,
+    double beta,
+    bool periodic,
+    const TensorOptions& options) {
+  window_function_checks("kaiser_window", options, window_length);
+  if (window_length == 0) {
+    return at::empty({0}, options);
+  }
+  if (window_length == 1) {
+    return native::ones({1}, options);
+  }
+  if (periodic) {
+    window_length += 1;
+  }
+  auto window = native::arange(window_length, options);
+  auto alpha = (window_length - 1) / 2.0;
+  auto denom = native::full(window_length, beta, options);
+  window.sub_(alpha).div_(alpha).pow_(2.0).mul_(-1.0).add_(1.0).sqrt_().mul_(beta).i0_().div_(denom.i0_());
+  return periodic ? window.narrow(0, 0, window_length - 1) : window;
+}
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~ vandermonde_matrix ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 

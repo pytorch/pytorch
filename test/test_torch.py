@@ -8427,7 +8427,7 @@ class TestTorchDeviceType(TestCase):
             self.assertTrue(torch_method(3, requires_grad=True).requires_grad)
             self.assertFalse(torch_method(3).requires_grad)
 
-        for window in ['hann', 'hamming', 'bartlett', 'blackman']:
+        for window in ['hann', 'hamming', 'bartlett', 'blackman', 'kaiser']:
             test(window)
 
     def test_broadcast(self, device):
@@ -12698,6 +12698,7 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual((0,), torch.randperm(0, device=device).shape)
         self.assertEqual((0,), torch.bartlett_window(0, device=device).shape)
         self.assertEqual((0,), torch.bartlett_window(0, periodic=False, device=device).shape)
+        self.assertEqual((0,), torch.kaiser_window(0, device=device).shape)
         self.assertEqual((0,), torch.hamming_window(0, device=device).shape)
         self.assertEqual((0,), torch.hann_window(0, device=device).shape)
         self.assertEqual((1, 1, 0), torch.tensor([[[]]], device=device).shape)
