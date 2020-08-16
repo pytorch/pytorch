@@ -744,8 +744,6 @@ kir::TensorIndex* Index::getGlobalProducerIndex(
 
   // Indices should now be mapped onto IterDomains in producer, so just grab
   // and use them.
-  auto zero = new kir::Int(0);
-
   auto root_dom = producer_tv->getMaybeRFactorDomain();
 
   bool inner_most_dim_contig =
@@ -867,8 +865,6 @@ kir::TensorIndex* Index::getProducerIndex_impl(
 
   // Indices should now be mapped onto IterDomains in producer, so just grab
   // and use them.
-  auto zero = new kir::Int(0);
-
   auto root_dom = producer_tv->getMaybeRFactorDomain();
 
   std::vector<Val*> strided_inds;
@@ -964,8 +960,6 @@ kir::TensorIndex* Index::getGlobalConsumerIndex(
 
   // Indices should now be mapped onto IterDomains in consumer, so just grab
   // and use them.
-  auto zero = new kir::Int(0);
-
   auto root_dom = consumer_tv->getMaybeRFactorDomain();
 
   bool inner_most_dim_contig =
@@ -1034,8 +1028,6 @@ kir::TensorIndex* Index::getConsumerIndex_impl(
 
   // Indices should now be mapped onto IterDomains in producer, so just grab
   // and use them.
-  auto zero = new kir::Int(0);
-
   auto root_dom = consumer_tv->getMaybeRFactorDomain();
 
   std::vector<Val*> strided_inds;
@@ -1201,12 +1193,7 @@ std::pair<std::vector<Val*>, bool> Index::getConsumerRootPredIndices(
   auto root_dom = use_rfactor ? consumer_tv->getMaybeRFactorDomain()
                               : consumer_tv->getRootDomain();
 
-  bool inner_most_dim_contig =
-      root_dom[root_dom.size() - 1]->getIterType() == IterType::Iteration &&
-      root_contiguity[root_dom.size() - 1];
-
-  auto zero = new kir::Int(0);
-  std::vector<Val*> root_inds(root_dom.size(), zero);
+  std::vector<Val*> root_inds(root_dom.size(), new kir::Int(0));
   for (size_t i = 0; i < root_dom.size(); i++) {
     if (root_dom[i]->isBroadcast()) {
       continue;

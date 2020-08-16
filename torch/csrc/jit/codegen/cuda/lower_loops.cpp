@@ -428,7 +428,7 @@ void sanityCheck(
       [](int acc, const std::pair<TensorView*, ExprListT>& p) {
         return acc + p.second.size();
       });
-  TORCH_INTERNAL_ASSERT(num_computed_exprs == target_map.size());
+  TORCH_INTERNAL_ASSERT(num_computed_exprs == (int)target_map.size());
 }
 
 // Arrange exprs into loop-nest groups. Loop-nest groups are

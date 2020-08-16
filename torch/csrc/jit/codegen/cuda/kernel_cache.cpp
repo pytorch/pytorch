@@ -157,9 +157,9 @@ at::DimVector inversePermutation(
     for (const auto& dim : permuted) {
       int adjusted_offset = 0;
       for (const auto& red_dim : reduction_axes) {
-        if (red_dim < dim) {
+        if (red_dim < (const unsigned long)dim) {
           adjusted_offset++; // 1.b
-        } else if (red_dim == dim) {
+        } else if (red_dim == (const unsigned long)dim) {
           adjusted_offset = -1; // 1.a
           break;
         }
@@ -297,7 +297,7 @@ GraphCache::InputsRequirement::InputsRequirement(
 bool GraphCache::InputsRequirement::requiresPermutation() {
   const size_t input_rank = input_permutation_.size();
   for (size_t i = 0; i < input_rank; i++) {
-    if (input_permutation_[i] != i) {
+    if (input_permutation_[i] != (long)i) {
       return true;
     }
   }
@@ -305,7 +305,7 @@ bool GraphCache::InputsRequirement::requiresPermutation() {
   const size_t output_rank = output_permutation_.size();
   for (size_t i = 0; i < output_rank; i++) {
     TORCH_INTERNAL_ASSERT(
-        output_permutation_[i] == i,
+        output_permutation_[i] == (long)i,
         "permutation of output and input is not consistent");
   }
   return false;
@@ -422,9 +422,9 @@ FusionExecutorCache* GraphCache::createFusionExecutorCache(
         if (vec_optional_stride[i].has_value()) {
           c10::optional<size_t> index = vec_optional_stride[i]->stride_index_;
           if (index.has_value()) {
-            for (size_t j = 0; j < rank; j++) {
+            for (int j = 0; j < rank; j++) {
               // follow the permutation to resolve the new stride_index;
-              if (input_permutation[j] == index.value()) {
+              if (input_permutation[j] == (long)index.value()) {
                 index = j;
                 break;
               }

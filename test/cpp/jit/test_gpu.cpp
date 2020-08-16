@@ -58,7 +58,7 @@ TensorView* makeConcreteTensor(
   // We can uncomment the below statement to test all tests with contiguous
   // tensors. return makeContigTensor(nDims, dtype);
   std::vector<IterDomain*> dom;
-  for (int i = 0; i < sizes.size(); i++)
+  for (size_t i = 0; i < sizes.size(); i++)
     dom.push_back(new IterDomain(new Int(0), new Int(sizes[i])));
   return new TensorView(new TensorDomain(dom), dtype);
 }
@@ -788,7 +788,7 @@ void testGPU_FusionTensor() {
     auto tensor = at::randn({2, 3, 4, 5}, options);
     auto tensor_type = TensorType::create(tensor);
     auto fuser_tensor = new TensorView(tensor_type);
-    TORCH_CHECK(fuser_tensor->nDims() == tensor.dim());
+    TORCH_CHECK((int64_t)fuser_tensor->nDims() == tensor.dim());
     TORCH_CHECK(fuser_tensor->getDataType().value() == DataType::Float);
     TORCH_CHECK(fuser_tensor->domain() != nullptr);
     for (int i = 0; i < static_cast<int>(fuser_tensor->nDims()); i++) {
@@ -804,7 +804,7 @@ void testGPU_FusionTensor() {
     auto tensor = at::randn({2, 1, 4}, options);
     auto tensor_type = TensorType::create(tensor);
     auto fuser_tensor = new TensorView(tensor_type);
-    TORCH_CHECK(fuser_tensor->nDims() == tensor.dim());
+    TORCH_CHECK((int64_t)fuser_tensor->nDims() == tensor.dim());
     TORCH_CHECK(fuser_tensor->getDataType().value() == DataType::Float);
     TORCH_CHECK(fuser_tensor->domain() != nullptr);
     for (int i = 0; i < static_cast<int>(fuser_tensor->nDims()); i++) {
@@ -825,7 +825,7 @@ void testGPU_FusionTensor() {
     auto tensor = at::randn({2, 3, 1}, options);
     auto tensor_type = TensorType::create(tensor);
     auto fuser_tensor = new TensorView(tensor_type);
-    TORCH_CHECK(fuser_tensor->nDims() == tensor.dim());
+    TORCH_CHECK((int64_t)fuser_tensor->nDims() == tensor.dim());
     TORCH_CHECK(fuser_tensor->getDataType().value() == DataType::Float);
     TORCH_CHECK(fuser_tensor->domain() != nullptr);
     for (int i = 0; i < static_cast<int>(fuser_tensor->nDims()); i++) {
@@ -853,7 +853,7 @@ void testGPU_FusionTensor() {
 
     auto tensor_type = TensorType::create(sliced_tensor);
     auto fuser_tensor = new TensorView(tensor_type);
-    TORCH_CHECK(fuser_tensor->nDims() == tensor.dim());
+    TORCH_CHECK((int64_t)fuser_tensor->nDims() == tensor.dim());
     TORCH_CHECK(fuser_tensor->getDataType().value() == DataType::Float);
     TORCH_CHECK(fuser_tensor->domain() != nullptr);
     for (int i = 0; i < static_cast<int>(fuser_tensor->nDims()); i++) {
@@ -870,7 +870,7 @@ void testGPU_FusionTensor() {
     auto permuted_tensor = tensor.permute({0, 3, 1, 2});
     auto tensor_type = TensorType::create(permuted_tensor);
     auto fuser_tensor = new TensorView(tensor_type);
-    TORCH_CHECK(fuser_tensor->nDims() == tensor.dim());
+    TORCH_CHECK((int64_t)fuser_tensor->nDims() == tensor.dim());
     TORCH_CHECK(fuser_tensor->getDataType().value() == DataType::Float);
     TORCH_CHECK(fuser_tensor->domain() != nullptr);
     for (int i = 0; i < static_cast<int>(fuser_tensor->nDims()); i++) {
@@ -916,9 +916,10 @@ void testGPU_FusionFilterVals() {
   TORCH_CHECK(ints[0] == scalar1);
   TORCH_CHECK(ints[1] == scalar2);
 
-  for (auto ptr : ir_utils::filterByType<Expr>(vals)) {
-    TORCH_CHECK(false, "Not expecting any results");
-  }
+  TORCH_CHECK(
+      ir_utils::filterByType<Expr>(vals).begin() ==
+          ir_utils::filterByType<Expr>(vals).end(),
+      "Not expecting any results");
 }
 
 void testGPU_FusionTVSplit() {
@@ -1883,8 +1884,6 @@ void testGPU_FusionLoopUnroll() {
   tv3->axis(-1)->parallelize(ParallelType::TIDx);
   tv3->axis(0)->parallelize(ParallelType::BIDx);
 
-  int inp_size = 129 * 13 * 3;
-
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
 
   at::Tensor input0 = at::rand({129, 13, 3}, options);
@@ -2578,8 +2577,6 @@ void testGPU_FusionReduction2() {
     int tidy = 8;
     int unroll_factor = 4;
 
-    int bidx = bind_tidy ? ceilDiv_(numel_x, tidy) : numel_x;
-
     tv1->split(1, tidx);
     // tv1[I0, R1o, R1i{tidx}] = tv0[I0, I1]
 
@@ -2730,7 +2727,6 @@ void testGPU_FusionReduction3() {
 
     int numel_x = 1025;
     int numel_y = 129;
-    int bidx = numel_x;
 
     auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
     at::Tensor t0 = at::rand({numel_x, numel_y}, options);
@@ -3355,7 +3351,6 @@ void testGPU_FusionAdvancedIndexing() {
     FusionGuard fg(&fusion);
 
     int w = 3, x = 4, y = 7, z = 8;
-    DataType dtype = DataType::Float;
     auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
 
     auto tv0 = makeDummyTensor(3);
@@ -3408,7 +3403,6 @@ void testGPU_FusionAdvancedIndexing() {
     FusionGuard fg(&fusion);
 
     int w = 3, x = 4, y = 7, z = 8;
-    DataType dtype = DataType::Float;
     auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
 
     auto tv0 = makeDummyTensor(3);
@@ -3460,7 +3454,6 @@ void testGPU_FusionAdvancedIndexing() {
     FusionGuard fg(&fusion);
 
     int w = 3, x = 4, y = 7, z = 8;
-    DataType dtype = DataType::Float;
     auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
 
     at::Tensor t0 = at::randn({x, y, z}, options);
@@ -4891,7 +4884,7 @@ void testGPU_FusionCacheBefore() {
   tv0->computeAt(tv2, -1);
 
   // cache_before automatically applies ComputeAt to the cache TensorView
-  TensorView* tv3 = tv2->cache_before();
+  tv2->cache_before();
 
   // Thread and Block binding
   tv2->axis(0)->parallelize(ParallelType::BIDx);
@@ -4932,7 +4925,7 @@ void testGPU_FusionCacheAfter() {
   tv0->computeAt(tv2, -1);
 
   // cache_after automatically applies ComputeAt to the cache TensorView
-  TensorView* tv3 = tv0->cache_after();
+  tv0->cache_after();
 
   // Thread and Block binding
   tv2->axis(0)->parallelize(ParallelType::BIDx);
@@ -4977,8 +4970,8 @@ void testGPU_FusionCacheIndirect() {
   tv6->split(-1, BSX);
   tv2->computeAt(tv6, -1);
 
-  TensorView* tv7 = tv5->cache_after();
-  TensorView* tv8 = tv5->cache_before();
+  tv5->cache_after();
+  tv5->cache_before();
 
   // Thread and Block binding
   tv6->axis(0)->parallelize(ParallelType::BIDx);
@@ -5027,13 +5020,13 @@ void testGPU_FusionCacheBcast() {
   // 0, 1 | 2, 3, 4
 
   // Case 1
-  TensorView* tv5 = tv0->cache_after();
+  tv0->cache_after();
 
   // Case 2
-  TensorView* tv6 = tv1->cache_before();
+  tv1->cache_before();
 
   // Case 3
-  TensorView* tv7 = tv1->cache_after();
+  tv1->cache_after();
 
   // Case 4
   TensorView* tv8 = tv4->cache_before();
@@ -5089,7 +5082,7 @@ void testGPU_FusionCacheComplex() {
   tv1->computeAt(tv5, 2);
   // 0, 1 | 2, 3, 4
 
-  TensorView* tv6 = tv2->cache_after();
+  tv2->cache_after();
   TensorView* tv7 = tv5->cache_before();
 
   tv5->axis(0)->parallelize(ParallelType::BIDx);

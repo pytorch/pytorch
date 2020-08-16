@@ -28,8 +28,6 @@ kir::Bool* UnrollPass::getThreadPredicate(TensorView* tv) {
 void UnrollPass::handle(Expr* expr) {
   // If tv op, predciate it.
   if (ir_utils::isTVOp(expr)) {
-    TensorView* out = ir_utils::asTV(ir_utils::asExpr(expr)->outputs()[0]);
-
     TORCH_INTERNAL_ASSERT(for_loops.size() != 0);
 
     auto pred = PredicateCompute::getInlinePredicate(

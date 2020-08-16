@@ -72,7 +72,7 @@ void ComputeAtData::validateNewComputeAt() const {
   auto mismatch = BestEffortReplay::findFirstMismatchedID(
       tv_ref_->domain(), original_domain_);
   TORCH_CHECK(
-      mismatch >= original_compute_at_position,
+      mismatch >= (int)original_compute_at_position,
       "Invalid computeAt detected. This computeAt call would invalidate the set computeAt on ",
       tv_ref_,
       " as the previous set computeAt was on the domain ",
@@ -374,7 +374,7 @@ void ComputeAt::runPass() {
   TORCH_INTERNAL_ASSERT(
       BestEffortReplay::findFirstMismatchedID(
           consumer_->domain(), tv_data.at(consumer_).getOriginalDomain()) ==
-          consumer_->domain()->nDims(),
+          (int)consumer_->domain()->nDims(),
       "ComputeAt logic changed the consumer domain which should not happen. Domain was ",
       tv_data.at(consumer_).getOriginalDomain(),
       " but is now: ",

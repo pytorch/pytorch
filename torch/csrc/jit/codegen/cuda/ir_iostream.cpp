@@ -649,9 +649,6 @@ void IRPrinter::handle(const kir::ReductionOp* rop) {
   bool tidx = par_domains.find(ParallelType::TIDx) != par_domains.end();
   bool tidy = par_domains.find(ParallelType::TIDy) != par_domains.end();
   bool tidz = par_domains.find(ParallelType::TIDz) != par_domains.end();
-  bool bidx = par_domains.find(ParallelType::BIDx) != par_domains.end();
-  bool bidy = par_domains.find(ParallelType::BIDy) != par_domains.end();
-  bool bidz = par_domains.find(ParallelType::BIDz) != par_domains.end();
 
   auto d_type = rop->out()->getDataType().value();
   auto op_type = rop->getReductionOpType();

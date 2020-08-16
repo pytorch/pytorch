@@ -120,7 +120,6 @@ class IrParser {
     // with eager mode
     bool disable_unroll = false;
     bool has_reduction = false;
-    bool fcd_reduction = false;
     // compose nodes in topo order;
     for (const JitOp* node : block->nodes()) {
       processJitNode(node);

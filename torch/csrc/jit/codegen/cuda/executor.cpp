@@ -227,7 +227,6 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
 
   executor_utils::validateKernelInputs(&fusion_, inputs, options_.device);
 
-  const auto prior_device = at::cuda::current_device();
   c10::DeviceGuard dg(options_.device);
   auto stream = at::cuda::getCurrentCUDAStream();
 
