@@ -1,6 +1,6 @@
 import re
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import List, Sequence, Dict, Optional, Iterator, Tuple, Set, NoReturn
 from enum import Enum
 import itertools
@@ -398,11 +398,13 @@ class Type:
             raise RuntimeError(f"unrecognized type {t}")
 
     def __str__(self) -> str:
-        raise NotImplemented
+        raise NotImplementedError
+
     def is_tensor_like(self) -> bool:
-        raise NotImplemented
+        raise NotImplementedError
+
     def is_nullable(self) -> bool:
-        raise NotImplemented
+        raise NotImplementedError
 
 # Base types are simple, atomic types with no further structure
 BaseTy = Enum('BaseTy', (
@@ -426,10 +428,13 @@ BaseTy = Enum('BaseTy', (
 @dataclass(frozen=True)
 class BaseType(Type):
     name: BaseTy
+
     def __str__(self) -> str:
         return f'{self.name.name}'
+
     def is_tensor_like(self) -> bool:
         return self.name == BaseTy.Tensor
+
     def is_nullable(self) -> bool:
         return False
 
@@ -437,10 +442,13 @@ class BaseType(Type):
 @dataclass(frozen=True)
 class OptionalType(Type):
     elem: Type
+
     def __str__(self) -> str:
         return f'{self.elem}?'
+
     def is_tensor_like(self) -> bool:
         return self.elem.is_tensor_like()
+
     def is_nullable(self) -> bool:
         return True
 
@@ -455,11 +463,14 @@ class OptionalType(Type):
 class ListType(Type):
     elem: Type
     size: Optional[int]
+
     def __str__(self) -> str:
         size = f'{self.size}' if self.size else ''
         return f'{self.elem}[{size}]'
+
     def is_tensor_like(self) -> bool:
         return self.elem.is_tensor_like()
+
     def is_nullable(self) -> bool:
         return self.elem.is_nullable()
 

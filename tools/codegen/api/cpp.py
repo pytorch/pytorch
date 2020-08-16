@@ -2,7 +2,6 @@ from tools.codegen.model import *
 from tools.codegen.api.types import TensorOptionsArguments, CppArgument, ThisArgument
 import tools.codegen.local as local
 from typing import Optional, Sequence, Union, Callable, List
-from dataclasses import dataclass
 
 # This file describes the translation of JIT schema to the public C++
 # API, which is what people use when they call functions like at::add.
@@ -44,9 +43,9 @@ def valuetype_type(t: Type) -> Optional[str]:
         elif t.name == BaseTy.str:
             return 'std::string'
         elif t.name in [BaseTy.bool, BaseTy.QScheme, BaseTy.Scalar,
-                BaseTy.ScalarType, BaseTy.Generator, BaseTy.Storage,
-                BaseTy.Layout, BaseTy.Device, BaseTy.MemoryFormat,
-                BaseTy.Dimname, BaseTy.ConstQuantizerPtr]:
+                        BaseTy.ScalarType, BaseTy.Generator, BaseTy.Storage,
+                        BaseTy.Layout, BaseTy.Device, BaseTy.MemoryFormat,
+                        BaseTy.Dimname, BaseTy.ConstQuantizerPtr]:
             # These C++ names line up with their schema names
             return t.name.name
         else:
@@ -222,13 +221,13 @@ def group_arguments(func: FunctionSchema, *, method: bool = False) -> Sequence[U
         # If there is enough space...
         if i <= len(func.kwarg_only_arguments) - len(predicates):
             # And the next len(predicates) arguments look like TensorOptions arguments
-            if all(p(a) for p, a in zip(predicates, func.kwarg_only_arguments[i:i+len(predicates)])):
+            if all(p(a) for p, a in zip(predicates, func.kwarg_only_arguments[i : i + len(predicates)])):
                 # Group them together as one argument
                 args.append(TensorOptionsArguments(
                     dtype=func.kwarg_only_arguments[i],
-                    layout=func.kwarg_only_arguments[i+1],
-                    device=func.kwarg_only_arguments[i+2],
-                    pin_memory=func.kwarg_only_arguments[i+3],
+                    layout=func.kwarg_only_arguments[i + 1],
+                    device=func.kwarg_only_arguments[i + 2],
+                    pin_memory=func.kwarg_only_arguments[i + 3],
                 ))
                 i += len(predicates)
                 continue

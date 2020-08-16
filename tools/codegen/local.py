@@ -1,7 +1,6 @@
 import threading
 from contextlib import contextmanager
 from typing import Optional, Iterator
-from tools.codegen.model import OperatorName
 
 # Simple dynamic scoping implementation.  The name "parametrize" comes
 # from Racket.

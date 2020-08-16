@@ -2,7 +2,6 @@ from tools.codegen.model import *
 
 from tools.codegen.api.types import TensorOptionsArguments, LegacyDispatcherArgument, ThisArgument
 import tools.codegen.api.cpp as cpp
-import tools.codegen.local as local
 
 from typing import Union, Sequence
 
@@ -30,7 +29,7 @@ def argumenttype_type(t: Type, *, mutable: bool) -> str:
         else:
             return 'const Tensor &'
     elif str(t) == 'Tensor?[]':
-            return 'TensorList'
+        return 'TensorList'
     return cpp.argumenttype_type(t, mutable=mutable)
 
 def returns_type(rs: Sequence[Return]) -> str:
