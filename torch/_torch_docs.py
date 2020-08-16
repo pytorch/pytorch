@@ -31,6 +31,8 @@ common_args = parse_kwargs("""
     input (Tensor): the input tensor.
     generator (:class:`torch.Generator`, optional): a pseudorandom number generator for sampling
     out (Tensor, optional): the output tensor.
+    memory_format (:class:`torch.memory_format`, optional): the desired memory format of
+        returned tensor. Default: ``torch.preserve_format``.
 """)
 
 reduceops_common_args = merge_dicts(common_args, parse_kwargs("""
@@ -1518,6 +1520,24 @@ Example::
             [ 1.2251,  2.4439,  0.2122],
             [-0.0889,  0.2122,  0.1412]])
 """)
+
+add_docstr(torch.clone, r"""
+clone(input, *, memory_format=torch.preserve_format) -> Tensor
+
+Returns a copy of :attr:`input`.
+
+.. note::
+
+    This function is differentiable, so gradients will flow back from the
+    result of this operation to :attr:`input`. To create a tensor without an
+    autograd relationship to :attr:`input` see :meth:`~Tensor.detach`.
+
+Args:
+    {input}
+
+Keyword args:
+    {memory_format}
+""".format(**common_args))
 
 add_docstr(torch.clamp, r"""
 clamp(input, min, max, out=None) -> Tensor
