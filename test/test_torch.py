@@ -13975,6 +13975,8 @@ class TestTorchDeviceType(TestCase):
             ("floor", doubles, True, True, 'cuda'),
             ("frac", doubles, True, True, 'cpu'),
             ("frac", doubles, True, True, 'cuda'),
+            ("i0", doubles, True, True, 'cpu'),
+            ("i0", doubles, True, True, 'cuda'),
             ("log", positives, True, True, 'cpu'),
             ("log", positives, True, True, 'cuda'),
             ("log10", positives, True, True, 'cpu'),
@@ -15112,6 +15114,8 @@ class TestTorchDeviceType(TestCase):
                 lambda x, y: x.frac(),
                 lambda x, y: x.hypot(y),
                 lambda x, y: x.hypot_(y),
+                lambda x, y: x.i0(),
+                lambda x, y: x.i0_(),
                 # lambda x, y: x.lerp(y, 0.5), #  Need to update Lerp.cu with TensorIterator
                 lambda x, y: x.log(),
                 lambda x, y: x.log_(),
@@ -17244,6 +17248,26 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         actual = torch.nextafter(a, b)
         expected = np.nextafter(a.cpu().numpy(), b.cpu().numpy())
         self.assertEqual(actual, expected, atol=0, rtol=0)
+
+    @dtypesIfCUDA(torch.float16, torch.float32, torch.float64)
+    @dtypesIfCPU(torch.bfloat16, torch.float32, torch.float64)
+    @dtypes(torch.float32, torch.float64)
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_i0(self, device, dtype):
+        a = torch.randn(100, device=device, dtype=dtype)
+        actual = torch.i0(a)
+        expected = np.i0(a.cpu().numpy())
+        self.assertEqual(actual, expected)
+
+        a = torch.randn(100, device=device, dtype=dtype) * 10
+        actual = torch.i0(a)
+        expected = np.i0(a.cpu().numpy())
+        self.assertEqual(actual, expected)
+
+        a = torch.randn(100, device=device, dtype=dtype) * 100
+        actual = torch.i0(a)
+        expected = np.i0(a.cpu().numpy())
+        self.assertEqual(actual, expected)
 
     @slowTest
     @onlyOnCPUAndCUDA
