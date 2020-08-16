@@ -959,6 +959,13 @@ Tensor infinitely_differentiable_gelu_backward(
   return cdf.addcmul_(self, pdf, kAlpha).mul_(grad);
 }
 
+Tensor infinitely_differentiable_silu_backward(
+    const Tensor& grad_output,
+    const Tensor& input) {
+  const Tensor sigmoid = input.sigmoid();
+  return grad_output * sigmoid * (1.0 + input * (1.0 - sigmoid));
+}
+
 Tensor infinitely_differentiable_logit_backward(
     const Tensor& grad,
     const Tensor& self,
