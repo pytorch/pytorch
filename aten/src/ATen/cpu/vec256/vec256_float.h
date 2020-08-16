@@ -193,6 +193,9 @@ public:
   Vec256<float> neg() const {
     return _mm256_xor_ps(_mm256_set1_ps(-0.f), values);
   }
+  Vec256<float> nextafter(const Vec256<float> &b) const {
+    return Vec256<float>(Sleef_nextafterf8(values, b));
+  }
   Vec256<float> round() const {
     return _mm256_round_ps(values, (_MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
   }
