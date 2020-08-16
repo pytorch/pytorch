@@ -1,5 +1,5 @@
 # type: ignore
-from .node import Node, Attribute, magic_methods
+from .node import Node
 
 import builtins
 import torch
@@ -9,12 +9,6 @@ def _is_magic(x):
 
 def snake_case(s):
     return ''.join(['_' + i.lower() if i.isupper() else i for i in s]).lstrip('_')
-
-def _reference_is_in(x, l):
-    for elem in l:
-        if x is elem:
-            return True
-    return False
 
 def _qualified_name(func):
     # things like getattr just appear in builtins
@@ -67,65 +61,36 @@ def map_arg(a, fn):
         return a
 
 class Graph:
-    def __init__(self, delegate, arg_handler=None):
+    def __init__(self):
         self.nodes = []
         self._used_names = {}  # base name -> number
-        self.delegate = delegate
-        self.arg_handler = arg_handler
 
-    def _create_node(self, op, target=None, args=None, kwargs=None, name=None):
+    def _mark_uses(self, a):
+        def add_use(n: Node):
+            n.uses += 1
+            return n
+        map_arg(a, add_use)
+
+    def create_node(self, op, target=None, args=None, kwargs=None, name=None):
+        assert op in ('call_function', 'call_method', 'get_param', 'call_module', 'placeholder')
         args = () if args is None else args
         kwargs = {} if kwargs is None else kwargs
-        args = self._create_args(args)
-        kwargs = self._create_args(kwargs)
-        n = Node(self, name if name is not None else self._name(target or op), op, target, args, kwargs, self.delegate)
+        self._mark_uses(args)
+        self._mark_uses(kwargs)
+        n = Node(self, name if name is not None else self._name(target or op), op, target, args, kwargs)
         self.nodes.append(n)
         return n
-
-    def _create_args(self, a):
-        # aggregates
-        if isinstance(a, (tuple, list)):
-            return type(a)(self._create_args(elem) for elem in a)
-        elif isinstance(a, dict):
-            r = {}
-            for k, v in a.items():
-                if not isinstance(k, str):
-                    raise NotImplementedError(f"dictionaries with non-string keys: {a}")
-                r[k] = self._create_args(v)
-            return r
-        elif isinstance(a, slice):
-            return slice(self._create_args(a.start), self._create_args(a.stop), self._create_args(a.step))
-
-        # individual elements
-        r = NotImplemented
-        if self.arg_handler is not None:
-            r = self.arg_handler(self, a)
-
-        if r is NotImplemented:
-            if isinstance(a, Attribute):
-                if not _reference_is_in(a, self.nodes):
-                    self.nodes.append(a)
-                r = a
-            elif isinstance(a, (str, int, float, bool, Node, torch.dtype, torch.Tensor)) or a is None:
-                r = a
-
-        if r is NotImplemented:
-            raise NotImplementedError(f"argument of type: {type(a)}")
-
-        if isinstance(r, Node):
-            assert r.graph is self
-            r.uses += 1
-        return r
 
     def node_copy(self, node, arg_transform=lambda x: x):
         """ copy a node from one graph into another. arg_transform needs to transform arguments from the graph of node
             to the graph of self"""
-        return self._create_node(
+        return self.create_node(
             node.op, node.target, map_arg(node.args, arg_transform), map_arg(node.kwargs, arg_transform),
             self._name(node.name))
 
     def output(self, result):
         self.result = result
+        self._mark_uses(result)
 
 
     def _name(self, op):
@@ -145,16 +110,10 @@ class Graph:
         return f'{op}_{i}'
 
     def get_param(self, target):
-        return self._create_node('get_param', target)
+        return self.create_node('get_param', target)
 
     def placeholder(self, name):
-        return self._create_node('placeholder', target=name, name=name.replace('*', ''))
-
-    def call_module(self, target, args, kwargs):
-        return self._create_node('call_module', target, args, kwargs)
-
-    def call_function(self, target, args, kwargs):
-        return self._create_node('call_function', target, args, kwargs)
+        return self.create_node('placeholder', target=name, name=name.replace('*', ''))
 
     def python_code(self, root_module):
         free_vars = []
@@ -190,3 +149,31 @@ class Graph:
 
         src = ''.join(body)
         return src, str(self.result), free_vars
+
+reflectable_magic_methods = {
+    'add': '{} + {}',
+    'sub': '{} - {}',
+    'mul': '{} * {}',
+    'floordiv': '{} // {}',
+    'truediv': '{} / {}',
+    'div': '{} / {}',
+    'mod': '{} % {}',
+    'pow': '{} ** {}',
+    'lshift': '{} << {}',
+    'rshift': '{} >> {}',
+    'and': '{} & {}',
+    'or': '{} | {}',
+    'xor': '{} ^ {}',
+    'getitem': '{}[{}]'
+}
+
+magic_methods = dict({
+    'eq': '{} == {}',
+    'ne': '{} != {}',
+    'lt': '{} < {}',
+    'gt': '{} > {}',
+    'le': '{} <= {}',
+    'ge': '{} >= {}',
+    'pos': '+{}',
+    'neg': '-{}',
+    'invert': '~{}'}, **reflectable_magic_methods)
