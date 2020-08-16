@@ -29,17 +29,14 @@ void pushBack(Expr* scope, Expr* expr);
 // Insert expr in scope before ref
 void insertBefore(Expr* scope, Expr* ref, Expr* expr);
 
+// Returns if expr is in scope, does not check nested scopes
+bool exprInScope(Expr* scope, Expr* expr);
+
 // Return the parent of the active scope
 Expr* getParent(Expr* scope);
 
 // Open a new inner most for loop
 kir::ForLoop* openFor(Expr* scope, IterDomain*);
-
-// Close the inner most for loop
-Expr* closeScope(Expr* scope);
-
-// Clear all expressions from the scope
-Expr* clearScope(Expr* scope);
 
 // Provide a new for loop matching the one provided, sets parent_scope as
 // parent_scope, but does not insert into parent scope.

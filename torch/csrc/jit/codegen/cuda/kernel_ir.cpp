@@ -1,6 +1,7 @@
 
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
+#include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 #include <torch/csrc/jit/codegen/cuda/type.h>
 
 // TODO(kir): remove
@@ -397,6 +398,13 @@ ForLoop::ForLoop(const ForLoop* src, IrCloner* ir_cloner)
       body_(&src->body_, ir_cloner),
       parent_scope_(ir_cloner->clone(src->parent_scope_)) {}
 
+void ForLoop::setParentScope(Expr* scope) {
+  TORCH_INTERNAL_ASSERT(
+      !scope_utils::exprInScope(parentScope(), this),
+      "Cannot change parent scope if not already removed from previous parent.");
+  parent_scope_ = scope;
+}
+
 IfThenElse::IfThenElse(
     Bool* cond,
     const std::vector<Expr*>& if_body,
@@ -418,6 +426,13 @@ IfThenElse::IfThenElse(const IfThenElse* src, IrCloner* ir_cloner)
       body_(&src->body_, ir_cloner),
       else_body_(&src->else_body_, ir_cloner),
       parent_scope_(ir_cloner->clone(src->parent_scope_)) {}
+
+void IfThenElse::setParentScope(Expr* scope) {
+  TORCH_INTERNAL_ASSERT(
+      !scope_utils::exprInScope(parentScope(), this),
+      "Cannot change parent scope if not already removed from previous parent.");
+  parent_scope_ = scope;
+}
 
 Val* TensorIndex::index(int i) const {
   TORCH_INTERNAL_ASSERT(

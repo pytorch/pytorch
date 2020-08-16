@@ -74,6 +74,10 @@ class TORCH_CUDA_API UnrollPass : public OptOutDispatch {
   // keep track if we're within an unrolled loop
   bool look_for_unroll = true;
 
+  // As we generate inline predicates check if we actually generated a
+  // non-trivial one.
+  bool non_trivial_pred_found = false;
+
   // Custom dispatch for Expr, want to find out of it's a TV op
   void handle(Expr*) final;
 

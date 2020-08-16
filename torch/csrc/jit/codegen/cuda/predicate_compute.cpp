@@ -3,6 +3,8 @@
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/index_compute.h>
+#include <torch/csrc/jit/codegen/cuda/ir_utils.h>
+#include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 #include <torch/csrc/jit/codegen/cuda/transform_iter.h>
 
 namespace torch {
@@ -103,10 +105,24 @@ kir::Bool* PredicateCompute::getInlinePredicate(
   auto pred_inds =
       Index::getConsumerRootPredIndices(out_tv, loops, pred_contiguity);
   auto root_indices = pred_inds.first;
-  bool use_rfactor = pred_inds.second;
+  bool use_maybe_rfactor = pred_inds.second;
 
-  auto all_preds =
-      PredicateCompute::computePredicates(out_tv, root_indices, use_rfactor);
+  if (out_tv->getMemoryType() == MemoryType::Local && out_tv->hasReduction() &&
+      !use_maybe_rfactor) {
+    auto tv_filter_inp_view =
+        ir_utils::filterByType<TensorView>(expr->inputs());
+    auto has_tv_inputs = tv_filter_inp_view.begin() != tv_filter_inp_view.end();
+    // If predicates doesn't need maybe_rfactor, but it has reduction axes, and
+    // expr has no inputs, we're pretty confident we're intializing a reduction
+    // buffer. If we're initing a reduction buffer don't generate an inline
+    // predicate.
+    if (!has_tv_inputs) {
+      return new kir::Bool(true);
+    }
+  }
+
+  auto all_preds = PredicateCompute::computePredicates(
+      out_tv, root_indices, use_maybe_rfactor);
 
   // If we have thread predicates, add those
   if (thread_pred != nullptr) {

@@ -40,32 +40,6 @@ class Loops : private OptInDispatch {
   }
 };
 
-class forLoopCount : private OptInDispatch {
- private:
-  unsigned int count_ = 0;
-
-  void handle(kir::ForLoop* fl) final {
-    count_++;
-  }
-
-  void handle(kir::IfThenElse* ite) final {}
-
-  void handle(Expr* expr) final {
-    OptInDispatch::handle(expr);
-  }
-
- public:
-  static unsigned int get(Expr* scope) {
-    forLoopCount flc;
-    Expr* it = scope;
-    while (it != nullptr) {
-      flc.handle(it);
-      it = scope_utils::getParent(it);
-    }
-    return flc.count_;
-  }
-};
-
 class scopePushBack : private OptInDispatch {
  private:
   Expr* expr_;
@@ -121,6 +95,40 @@ class scopeInsertBefore : private OptInDispatch {
   }
 };
 
+class ExprInScope : private OptInDispatch {
+ private:
+  Expr* expr_;
+  bool contains_ = false;
+
+  void handle(kir::ForLoop* fl) final {
+    if (fl->body().contains(expr_)) {
+      contains_ = true;
+    }
+  }
+
+  void handle(kir::IfThenElse* ite) final {
+    if (ite->body().contains(expr_)) {
+      contains_ = true;
+    }
+  }
+
+  void handle(Expr* expr) final {
+    OptInDispatch::handle(expr);
+  }
+
+  ExprInScope(Expr* expr) : expr_(expr) {}
+
+ public:
+  static bool find(Expr* scope, Expr* expr) {
+    ExprInScope eis(expr);
+    TORCH_INTERNAL_ASSERT(
+        expr != nullptr && scope != nullptr,
+        "Cannot push back, scope or expr is a nullptr.");
+    eis.handle(scope);
+    return eis.contains_;
+  }
+};
+
 class parentScope : private OptInDispatch {
  private:
   Expr* parent_ = nullptr;
@@ -142,29 +150,6 @@ class parentScope : private OptInDispatch {
     parentScope sp;
     sp.handle(scope);
     return sp.parent_;
-  }
-};
-
-class scopeClearExprs : private OptInDispatch {
- private:
-  void handle(kir::ForLoop* fl) final {
-    fl->body().clear();
-  }
-
-  void handle(kir::IfThenElse* ite) final {
-    ite->body().clear();
-  }
-
-  void handle(Expr* expr) final {
-    OptInDispatch::handle(expr);
-  }
-
- public:
-  static void clear(Expr* scope) {
-    scopeClearExprs sce;
-    TORCH_INTERNAL_ASSERT(
-        scope != nullptr, "Cannot clear scope, scope is a nullptr.");
-    sce.handle(scope);
   }
 };
 
@@ -310,14 +295,6 @@ std::vector<kir::ForLoop*> getLoops(Expr* scope) {
   return Loops::getLoops(scope);
 }
 
-// Track how far our for loop scope is
-unsigned int computeForDepth(Expr* scope) {
-  if (scope == nullptr)
-    return 0;
-  assertScope(scope);
-  return forLoopCount::get(scope);
-}
-
 // Push back an expr to scope
 void pushBack(Expr* scope, Expr* expr) {
   TORCH_INTERNAL_ASSERT(
@@ -329,6 +306,10 @@ void pushBack(Expr* scope, Expr* expr) {
 // Insert expr in scope before ref
 void insertBefore(Expr* scope, Expr* ref, Expr* expr) {
   scopeInsertBefore::insert(scope, ref, expr);
+}
+
+bool exprInScope(Expr* scope, Expr* expr) {
+  return ExprInScope::find(scope, expr);
 }
 
 // Return the parent of the active scope
@@ -355,22 +336,6 @@ kir::ForLoop* openFor(Expr* scope, IterDomain* id) {
   if (scope != nullptr)
     pushBack(scope, new_scope);
   return new_scope;
-}
-
-// Close the inner most for loop
-Expr* closeScope(Expr* scope) {
-  TORCH_INTERNAL_ASSERT(
-      scope != nullptr, "Tried to close a scope but got a nullptr.");
-  return getParent(scope);
-}
-
-// Clear all expressions from the scope
-Expr* clearScope(Expr* scope) {
-  TORCH_INTERNAL_ASSERT(
-      scope != nullptr, "Tried to clear a scope but got a nullptr.");
-  assertScope(scope);
-  scopeClearExprs::clear(scope);
-  return scope;
 }
 
 kir::ForLoop* cloneLoopNest(kir::ForLoop* to_clone, Expr* parent_scope) {
@@ -676,9 +641,16 @@ std::pair<kir::ForLoop*, int64_t> getAllocPoint(
               loop->iter_domain()->getParallelType() == ParallelType::Unroll;
         });
 
+    if (loops_it == loops.end()) {
+      for (auto loop : loops) {
+        std::cout << loop->iter_domain() << "  ";
+      }
+      std::cout << std::endl;
+    }
     TORCH_INTERNAL_ASSERT(
         loops_it != loops.end(),
-        "Could not find all required axes for indexing.");
+        "Could not find all required axes for indexing when trying to index into ",
+        tv);
 
     if (kir_ca_id->getParallelType() == ParallelType::Unroll) {
       return {alloc_loop, tv_i};
