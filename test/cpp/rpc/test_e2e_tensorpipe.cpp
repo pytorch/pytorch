@@ -13,6 +13,8 @@ namespace rpc {
 
 using namespace torch::distributed::autograd;
 
+#ifdef USE_TENSORPIPE
+
 class TestE2ETensorPipe : public TestE2EBase {
  protected:
   void buildRpcAgent() override {
@@ -49,6 +51,8 @@ class TestE2ETensorPipe : public TestE2EBase {
 TEST_F(TestE2ETensorPipe, TestTrainingLoop) {
   runTrainingLoop();
 }
+
+#endif
 
 } // namespace rpc
 } // namespace distributed

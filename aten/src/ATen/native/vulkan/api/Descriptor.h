@@ -81,44 +81,6 @@ struct Descriptor final {
       }
     };
 
-    /*
-      Factory
-    */
-
-    class Factory final {
-     public:
-      explicit Factory(VkDevice device);
-
-      typedef Pool::Descriptor Descriptor;
-      typedef VK_DELETER(DescriptorPool) Deleter;
-      typedef Handle<VkDescriptorPool, Deleter> Handle;
-
-      struct Hasher {
-        inline size_t operator()(const Descriptor& descriptor) const {
-          size_t hash = c10::get_hash(descriptor.capacity);
-
-          for (const Descriptor::Size& size : descriptor.sizes) {
-            hash = c10::hash_combine(hash, size.hash());
-          }
-
-          return hash;
-        }
-      };
-
-      Handle operator()(const Descriptor& descriptor) const;
-
-     private:
-      VkDevice device_;
-    };
-
-    /*
-      Cache
-    */
-
-    typedef api::Cache<Factory> Cache;
-    Cache cache;
-
-    // Default Configuration
     static constexpr Descriptor kDefault{
       1024u,
       {
@@ -158,18 +120,55 @@ struct Descriptor final {
       },
     };
 
+    /*
+      Factory
+    */
+
+    class Factory final {
+     public:
+      explicit Factory(VkDevice device);
+
+      typedef Pool::Descriptor Descriptor;
+      typedef VK_DELETER(DescriptorPool) Deleter;
+      typedef Handle<VkDescriptorPool, Deleter> Handle;
+
+      struct Hasher {
+        inline size_t operator()(const Descriptor& descriptor) const {
+          size_t hash = c10::get_hash(descriptor.capacity);
+
+          for (const Descriptor::Size& size : descriptor.sizes) {
+            hash = c10::hash_combine(hash, size.hash());
+          }
+
+          return hash;
+        }
+      };
+
+      Handle operator()(const Descriptor& descriptor) const;
+
+     private:
+      VkDevice device_;
+    };
+
+    /*
+      Cache
+    */
+
+    typedef api::Cache<Factory> Cache;
+    Cache cache;
+
     explicit Pool(const VkDevice device)
       : cache(Factory(device)) {
     }
   } pool;
 
   /*
-    Cache
+    Factory
   */
 
-  class Cache final {
+  class Factory final {
    public:
-    Cache(VkDevice device, VkDescriptorPool descriptor_pool);
+    Factory(VkDevice device, VkDescriptorPool descriptor_pool);
 
     VkDescriptorSet allocate(VkDescriptorSetLayout descriptor_set_layout);
     void purge();
@@ -177,11 +176,11 @@ struct Descriptor final {
    private:
     VkDevice device_;
     VkDescriptorPool descriptor_pool_;
-  } cache;
+  } factory;
 
   explicit Descriptor(const VkDevice device)
     : pool(device),
-      cache(device, pool.cache.retrieve(Pool::kDefault)) {
+      factory(device, pool.cache.retrieve(Pool::kDefault)) {
   }
 };
 

@@ -35,12 +35,12 @@ typename Descriptor::Pool::Factory::Handle Descriptor::Pool::Factory::operator()
   };
 }
 
-Descriptor::Cache::Cache(const VkDevice device, const VkDescriptorPool descriptor_pool)
+Descriptor::Factory::Factory(const VkDevice device, const VkDescriptorPool descriptor_pool)
   : device_(device),
     descriptor_pool_(descriptor_pool) {
 }
 
-VkDescriptorSet Descriptor::Cache::allocate(
+VkDescriptorSet Descriptor::Factory::allocate(
     const VkDescriptorSetLayout descriptor_set_layout) {
   const VkDescriptorSetAllocateInfo descriptor_set_allocate_info{
     VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
@@ -57,7 +57,7 @@ VkDescriptorSet Descriptor::Cache::allocate(
   return descriptor_set;
 }
 
-void Descriptor::Cache::purge() {
+void Descriptor::Factory::purge() {
   VK_CHECK(vkResetDescriptorPool(device_, descriptor_pool_, 0u));
 }
 
