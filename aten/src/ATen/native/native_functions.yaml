@@ -2855,6 +2855,21 @@
 
 - func: stack.out(Tensor[] tensors, int dim=0, *, Tensor(a!) out) -> Tensor(a!)
 
+- func: hstack(Tensor[] tensors) -> Tensor
+  use_c10_dispatcher: full
+
+- func: hstack.out(Tensor[] tensors, *, Tensor(a!) out) -> Tensor(a!)
+
+- func: vstack(Tensor[] tensors) -> Tensor
+  use_c10_dispatcher: full
+
+- func: vstack.out(Tensor[] tensors, *, Tensor(a!) out) -> Tensor(a!)
+
+- func: dstack(Tensor[] tensors) -> Tensor
+  use_c10_dispatcher: full
+
+- func: dstack.out(Tensor[] tensors, *, Tensor(a!) out) -> Tensor(a!)
+
 # The signature is designed to be consistent with librosa except that it is
 # missing the `pad_mode` and `center` arguments, which are taken care of at
 # `torch.functional.py`. They shall be moved here once we have mapping between
