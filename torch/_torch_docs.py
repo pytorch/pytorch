@@ -1427,7 +1427,7 @@ Example::
             [-0.0889,  0.2122,  0.1412]])
 """)
 
-add_docstr(torch.clone, r""")
+add_docstr(torch.clone, r"""
 clone(input, *, memory_format=torch.preserve_format) -> Tensor
 
 Returns a copy of :attr:`input`.
