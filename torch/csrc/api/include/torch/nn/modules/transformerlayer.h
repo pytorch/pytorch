@@ -34,7 +34,7 @@ class TORCH_API TransformerEncoderLayerImpl : public Cloneable<TransformerEncode
 
   public:
     TransformerEncoderLayerImpl(int64_t d_model, int64_t nhead)
-      :TransformerEncoderLayerImpl(TransformerEncoderLayerOptions(int64_t d_model, int64_t nhead)) {}
+     : TransformerEncoderLayerImpl(TransformerEncoderLayerOptions(d_model, nhead)) {}
     explicit TransformerEncoderLayerImpl(const TransformerEncoderLayerOptions& options_);
 
     Tensor forward(
