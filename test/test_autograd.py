@@ -4422,7 +4422,7 @@ for shape in [(1,), ()]:
 
         test(inp, torch.float, torch.double)
         test(inp, torch.double, torch.float)
-    
+
     def test_nansum_with_nans(self):
         a = torch.randn(2, 2, 2, 2)
         with torch.no_grad():
