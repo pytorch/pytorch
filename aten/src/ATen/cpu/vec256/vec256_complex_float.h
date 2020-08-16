@@ -284,6 +284,9 @@ public:
     auto zero = _mm256_setzero_ps();
     return _mm256_sub_ps(zero, values);
   }
+  Vec256<c10::complex<float>> nextafter(const Vec256<c10::complex<float>> &b) const {
+    AT_ERROR("not supported for complex numbers");
+  }
   Vec256<c10::complex<float>> round() const {
     return _mm256_round_ps(values, (_MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
   }

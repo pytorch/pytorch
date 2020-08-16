@@ -799,21 +799,10 @@ clip_(min, max) -> Tensor
 Alias for :meth:`~Tensor.clamp_`.
 """)
 
-add_docstr_all('clone',
-               r"""
-clone(memory_format=torch.preserve_format) -> Tensor
+add_docstr_all('clone', r"""
+clone(*, memory_format=torch.preserve_format) -> Tensor
 
-Returns a copy of the :attr:`self` tensor. The copy has the same size and data
-type as :attr:`self`.
-
-.. note::
-
-    This function is differentiable and so gradients will flow back to the original
-    Tensor. If you want to get a Tensor that is independent from the point of view
-    of the autograd, see :meth:`~Tensor.detach`.
-
-Args:
-    {memory_format}
+See :func:`torch.clone`
 """.format(**common_args))
 
 add_docstr_all('contiguous',
@@ -2175,6 +2164,18 @@ add_docstr_all('nelement',
 nelement() -> int
 
 Alias for :meth:`~Tensor.numel`
+""")
+
+add_docstr_all('nextafter',
+               r"""
+nextafter(other) -> Tensor
+See :func:`torch.nextafter`
+""")
+
+add_docstr_all('nextafter_',
+               r"""
+nextafter_(other) -> Tensor
+In-place version of :meth:`~Tensor.nextafter`
 """)
 
 add_docstr_all('nonzero',
