@@ -360,7 +360,7 @@ void testLiteInterpreterBuiltinFunction() {
 
 namespace {
 static auto reg =
-    torch::class_<TorchBindLiteInterpreterTestStruct>(
+    torch::jit::class_<TorchBindLiteInterpreterTestStruct>(
         "_TorchScriptTesting",
         "_LiteInterpreterTest")
         .def("get", &TorchBindLiteInterpreterTestStruct::get)

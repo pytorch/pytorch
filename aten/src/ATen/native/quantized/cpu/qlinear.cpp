@@ -11,7 +11,7 @@
 #include <algorithm>
 #include <string>
 
-torch::class_<LinearPackedParamsBase> register_linear_params();
+torch::jit::class_<LinearPackedParamsBase> register_linear_params();
 
 #ifdef USE_FBGEMM
 template <bool ReluFused>
