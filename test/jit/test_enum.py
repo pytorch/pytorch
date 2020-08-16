@@ -162,7 +162,7 @@ class TestEnum(JitTestCase):
         self.assertEqual(scripted_enum_value(Color.GREEN), Color.GREEN.value)
 
     def test_enum_as_const(self):
-        global ColorConst
+        global Color
 
         class Color(Enum):
             RED = 1
