@@ -138,7 +138,7 @@ option(BUILD_JNI "Build JNI bindings" OFF)
 cmake_dependent_option(
     INSTALL_TEST "Install test binaries if BUILD_TEST is on" ON
     "BUILD_TEST" OFF)
-option(CLANG_CODE_COVERAGE "Compile C/C++ with clang code coverage flags" OFF)
+option(CODE_COVERAGE "Compile C/C++ with code coverage flags" OFF)
 option(COLORIZE_OUTPUT "Colorize output during compilation" ON)
 option(USE_ASAN "Use Address Sanitizer" OFF)
 option(USE_TSAN "Use Thread Sanitizer" OFF)
@@ -596,10 +596,18 @@ if(USE_ASAN)
     string(APPEND CMAKE_LINKER_FLAGS_DEBUG " -fsanitize=address")
 endif()
 
-# invoke clang code coverage flags
-if(CLANG_CODE_COVERAGE)
-  string(APPEND CMAKE_C_FLAGS  " -fprofile-instr-generate -fcoverage-mapping")
-  string(APPEND CMAKE_CXX_FLAGS " -fprofile-instr-generate -fcoverage-mapping")
+# Add code coverage flags to supported compilers
+if(CODE_COVERAGE)
+  if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
+    string(APPEND CMAKE_C_FLAGS  " --coverage -fprofile-abs-path")
+    string(APPEND CMAKE_CXX_FLAGS  " --coverage -fprofile-abs-path")
+  elseif("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
+    string(APPEND CMAKE_C_FLAGS  " -fprofile-instr-generate -fcoverage-mapping")
+    string(APPEND CMAKE_CXX_FLAGS " -fprofile-instr-generate -fcoverage-mapping")
+  else()
+    message(ERROR "Code coverage for compiler ${CMAKE_CXX_COMPILER_ID} is unsupported")
+  endif()
+
 endif()
 
 if(APPLE)
