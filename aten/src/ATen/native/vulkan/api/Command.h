@@ -11,25 +11,71 @@ namespace api {
 
 struct Command final {
   //
+  // Pool
+  //
+
+  struct Pool final {
+    /*
+      Descriptor
+    */
+
+    struct Descriptor final {
+      uint32_t queue_family_index;
+
+      inline bool operator==(const Descriptor& descriptor) const {
+        return queue_family_index == descriptor.queue_family_index;
+      }
+    };
+
+    /*
+      Factory
+    */
+
+    class Factory final {
+     public:
+      explicit Factory(VkDevice device);
+
+      typedef Pool::Descriptor Descriptor;
+      typedef VK_DELETER(CommandPool) Deleter;
+      typedef Handle<VkCommandPool, Deleter> Handle;
+
+      struct Hasher {
+        inline size_t operator()(const Descriptor& descriptor) const {
+          return c10::get_hash(descriptor.queue_family_index);
+        }
+      };
+
+      Handle operator()(const Descriptor& descriptor) const;
+
+     private:
+      VkDevice device_;
+    };
+
+    /*
+      Cache
+    */
+
+    typedef api::Cache<Factory> Cache;
+    Cache cache;
+  } pool;
+
+  //
   // Buffer
   //
 
   class Buffer final {
    public:
+    Buffer(VkDevice device, VkCommandPool command_pool);
+
+    void begin();
+    void end();
+
+    void bind(VkPipeline pipeline);
+    void bind(VkPipelineLayout pipeline_layout, VkDescriptorSet descriptor_set);
+    void dispatch();
 
    private:
     VkCommandBuffer command_buffer_;
-  };
-
-  //
-  // Pool
-  //
-
-  class Pool final {
-   public:
-
-   private:
-    VkCommandPool command_pool_;
   };
 };
 
