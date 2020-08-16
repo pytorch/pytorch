@@ -294,6 +294,7 @@ Pointwise Ops
     logical_xor
     logit
     hypot
+    i0
     mul
     mvlgamma
     neg
@@ -389,6 +390,7 @@ Spectral Ops
     blackman_window
     hamming_window
     hann_window
+    kaiser_window
 
 
 Other Operations
