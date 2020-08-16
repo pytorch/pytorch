@@ -2000,18 +2000,18 @@ new_module_tests = [
     ),
     dict(
         module_name='Conv3d',
-        constructor_args=(2, 3, (2, 3, 2)),
-        cpp_constructor_args='torch::nn::Conv3dOptions(2, 3, {2, 3, 2})',
-        input_size=(1, 2, 4, 5, 4),
+        constructor_args=(3, 4, (2, 3, 4)),
+        cpp_constructor_args='torch::nn::Conv3dOptions(3, 4, {2, 3, 4})',
+        input_size=(2, 3, 3, 4, 5),
         cudnn=True,
         check_with_long_tensor=True,
     ),
     dict(
         module_name='Conv3d',
-        constructor_args=(2, 3, (2, 3, 4), 1, 0, 1, 1, False),
-        cpp_constructor_args='''torch::nn::Conv3dOptions(2, 3, {2, 3, 4})
+        constructor_args=(3, 4, (2, 3, 4), 1, 0, 1, 1, False),
+        cpp_constructor_args='''torch::nn::Conv3dOptions(3, 4, {2, 3, 4})
                                 .stride(1).padding(0).dilation(1).groups(1).bias(false)''',
-        input_size=(1, 2, 3, 4, 5),
+        input_size=(2, 3, 3, 4, 5),
         cudnn=True,
         desc='no_bias',
         check_with_long_tensor=True,
@@ -2046,9 +2046,9 @@ new_module_tests = [
     ),
     dict(
         fullname='Conv3d_groups',
-        constructor=lambda: nn.Conv3d(2, 4, kernel_size=3, groups=2),
+        constructor=lambda: nn.Conv3d(4, 6, kernel_size=3, groups=2),
         cpp_constructor_args='torch::nn::Conv3dOptions(4, 6, 3).groups(2)',
-        input_size=(1, 2, 3, 3, 3),
+        input_size=(2, 4, 4, 5, 4),
         cudnn=True,
         check_with_long_tensor=True,
     ),
@@ -2199,9 +2199,9 @@ new_module_tests = [
     ),
     dict(
         module_name='ReplicationPad3d',
-        constructor_args=((1, 2, 3, 3, 2, 1),),
-        cpp_constructor_args='torch::nn::ReplicationPad3dOptions({1, 2, 3, 3, 2, 1})',
-        input_size=(2, 3, 2, 2, 2),
+        constructor_args=((1, 2, 3, 4, 5, 6),),
+        cpp_constructor_args='torch::nn::ReplicationPad3dOptions({1, 2, 3, 4, 5, 6})',
+        input_size=(2, 3, 5, 5, 5),
     ),
     dict(
         module_name='Embedding',
@@ -4662,9 +4662,8 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
         self.skip_double = kwargs.get('skip_double', False)
 
     def _do_test(self, test_case, module, input):
-        num_threads = torch.get_num_threads()
-        torch.set_num_threads(1)
         test_case.check_jacobian(module, input, self.jacobian_input)
+
         if self.check_gradgrad:
             # could probably unify check_jacobian above with this.
             params = tuple(x for x in module.parameters())
@@ -4797,7 +4796,6 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
                 for p in module.parameters():
                     test_case.assertIsInstance(p, torch.cuda.HalfTensor)
                     test_case.assertEqual(p.get_device(), 0)
-        torch.set_num_threads(num_threads)
 
     def _get_target(self):
         return self._get_arg('target', False)
