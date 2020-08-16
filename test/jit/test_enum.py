@@ -333,7 +333,7 @@ class TestEnum(JitTestCase):
         class Color(Enum):
             RED = 1
             GREEN = 2
-            PURPLE = 3
+            BLUE = 3
 
         def iterate_enum(x: Color):
             res: List[int] = []
@@ -342,26 +342,18 @@ class TestEnum(JitTestCase):
                     res.append(e.value)
             return res
 
-        # TODO(gmagogsfm): Re-enable hooks when serialization/deserialization
-        # stability issue is resolved.
-        # First save:
-        #   _0 = [__torch__.jit.test_enum.Color.RED, __torch__.jit.test_enum.Color.GREEN, __torch__.jit.test_enum.Color.PURPLE]
-        # Second save:
-        #   _0 = __torch__.jit.test_enum.Color.PURPLE
-        #   _1 = [__torch__.jit.test_enum.Color.RED, __torch__.jit.test_enum.Color.GREEN, _0]
-        with torch._jit_internal._disable_emit_hooks():
-            scripted = torch.jit.script(iterate_enum)
+        scripted = torch.jit.script(iterate_enum)
 
         FileCheck() \
             .check("Enum<__torch__.jit.test_enum.Color>[]") \
             .check_same("Color.RED") \
             .check_same("Color.GREEN") \
-            .check_same("Color.PURPLE") \
+            .check_same("Color.BLUE") \
             .run(str(scripted.graph))
 
         # PURPLE always appear last because we follow Python's Enum definition order.
-        self.assertEqual(scripted(Color.RED), [Color.GREEN.value, Color.PURPLE.value])
-        self.assertEqual(scripted(Color.GREEN), [Color.RED.value, Color.PURPLE.value])
+        self.assertEqual(scripted(Color.RED), [Color.GREEN.value, Color.BLUE.value])
+        self.assertEqual(scripted(Color.GREEN), [Color.RED.value, Color.BLUE.value])
 
 
 # Tests that Enum support features are properly guarded before they are mature.
