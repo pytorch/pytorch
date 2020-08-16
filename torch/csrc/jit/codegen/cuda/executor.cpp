@@ -9,7 +9,7 @@
 #include <ATen/cuda/Exceptions.h>
 #include <c10/core/DeviceGuard.h>
 #include <c10/cuda/CUDAFunctions.h>
-#include <c10/cuda/CUDAStream.cpp>
+#include <c10/cuda/CUDAStream.h>
 
 namespace torch {
 namespace jit {
