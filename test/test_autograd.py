@@ -4409,6 +4409,19 @@ for shape in [(1,), ()]:
 
     def test_nanprod_dtype(self):
         inp = torch.randn(2, 2, requires_grad=True)
+        with torch.no_grad():
+            inp[inp < 0.2] = float('nan')
+
+        def test(inp, inp_dtype, out_dtype):
+            with torch.no_grad():
+                a = inp.to(inp_dtype)
+            a.requires_grad = True
+            b = torch.nanprod(a, dtype=out_dtype)
+            b.backward()
+            self.assertEqual(a.dtype, a.grad.dtype)
+
+        test(inp, torch.float, torch.double)
+        test(inp, torch.double, torch.float)
     
     def test_nansum_with_nans(self):
         a = torch.randn(2, 2, 2, 2)
