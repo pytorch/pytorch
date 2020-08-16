@@ -71,7 +71,7 @@ def forward(self, {', '.join(free_variables)}):
 # def patched_cat(*args, **kwargs):
 #     tensors = args[0]
 #     for t in tensors:
-#         if isinstance(t, Node):
+#         if isinstance(t, Proxy):
 #             return t.__torch_function__(patched_cat, (), args, kwargs)
 #     return orig_cat(*args, **kwargs)
 # patched_cat.__module__ = 'torch'

@@ -113,7 +113,9 @@ class QObserverBenchmark(op_bench.TorchBenchmarkBase):
         self.op_func = op_func(dtype=dtype, qscheme=qscheme).to(device)
 
     def forward(self):
-        return self.op_func(self.f_input)
+        self.op_func(self.f_input)
+        self.op_func.calculate_qparams()
+        return
 
 class QObserverBenchmarkCalculateQparams(op_bench.TorchBenchmarkBase):
     def init(self, C, M, N, dtype, qscheme, op_func, device):
