@@ -283,7 +283,6 @@ class DeviceTypeTestBase(TestCase):
                 # Inverts dtypes if the function wants unsupported dtypes
                 if test.unsupported_dtypes_only is True:
                     dtypes = [d for d in get_all_dtypes() if d not in dtypes]
-
                 dtypes = dtypes if dtypes is not None else (None,)
                 for dtype in dtypes:
                     instantiate_test_helper(cls,

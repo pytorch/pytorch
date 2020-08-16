@@ -6739,44 +6739,6 @@ class TestTorchDeviceType(TestCase):
             torch.pow(m1, 1, out=out)
             self.assertEqual(out, m1)
 
-
-    def test_neg(self, device):
-        int_types = [torch.int, torch.short, torch.int8, torch.uint8]
-        float_types = [torch.float, torch.double, torch.long]
-
-        # Tests bool tensor negation raises the correct error
-        self.assertRaisesRegex(
-            RuntimeError,
-            r"Negation, the `\-` operator, on a bool tensor is not supported. "
-            r"If you are trying to invert a mask, use the `\~` or `logical_not\(\)` operator instead.",
-            lambda: - torch.tensor([False, True], device=device))
-
-        for dtype in float_types + int_types:
-            if dtype in float_types:
-                a = torch.randn(100, 90).to(device=device, dtype=dtype)
-            if dtype == torch.uint8:
-                a = torch.randint(0, 256, (100, 90), dtype=dtype, device=device)
-            else:
-                a = torch.randint(-128, 128, (100, 90), dtype=dtype, device=device)
-            zeros = torch.zeros_like(a, device=device, dtype=dtype)
-
-            if dtype == torch.uint8:
-                res_add = torch.add(zeros, a, alpha=255)
-            else:
-                res_add = torch.add(zeros, a, alpha=-1)
-
-            res_neg = a.clone()
-            res_neg.neg_()
-            self.assertEqual(res_neg, res_add)
-
-            # test out of place as well
-            res_neg_out_place = a.clone().neg()
-            self.assertEqual(res_neg_out_place, res_add)
-
-            # test via __neg__ operator
-            res_neg_op = -a.clone()
-            self.assertEqual(res_neg_op, res_add)
-
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     def test_inverse(self, device):
@@ -20203,7 +20165,6 @@ tensor_op_tests = [
     ('reciprocal', '', _small_3d, lambda t, d: [], 1e-1, 1e-1, 1e-5, _float_types2, [torch.bfloat16]),
     ('floor', '', _small_3d, lambda t, d: [], 1e-5, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
     ('frac', '', _small_3d, lambda t, d: [], 1e-5, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
-    ('neg', '', _small_3d, lambda t, d: [], 1e-5, 1e-2, 1e-5, _float_types2, [torch.bfloat16]),
     ('round', '', _small_3d, lambda t, d: [], 1e-5, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
     ('trunc', '', _small_3d, lambda t, d: [], 1e-5, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
     ('ceil', '', _small_3d, lambda t, d: [], 1e-5, 1e-2, 1e-5, _float_types, [torch.bfloat16]),

@@ -12,7 +12,8 @@ from torch.testing import \
     (make_non_contiguous,
      _dispatch_dtypes,
      floating_types, floating_types_and,
-     floating_and_complex_types, floating_and_complex_types_and)
+     floating_and_complex_types, floating_and_complex_types_and,
+     all_types_and_complex_and)
 from torch.testing._internal.common_device_type import \
     (skipCUDAIfNoMagma, skipCPUIfNoLapack, expectedFailureCUDA,
      expectedAlertNondeterministic, precisionOverride)
@@ -122,7 +123,7 @@ class UnaryUfuncInfo(OpInfo):
                  dtypesIfCPU=floating_and_complex_types_and(torch.bfloat16),
                  dtypesIfCUDA=floating_and_complex_types_and(torch.half),
                  dtypesIfROCM=floating_types_and(torch.half),
-                 domain=None,  # the [low, high) domain of the function
+                 domain=(None, None),  # the [low, high) domain of the function
                  handles_large_floats=True,  # whether the op correctly handles large float values (like 1e-20)
                  handles_extremals=True,  # whether the op correctly handles extremal values (like inf)
                  handles_complex_extremals=True,  # whether the op correct handles complex extremals (like inf -infj)
@@ -174,6 +175,11 @@ op_db = [
                    handles_complex_extremals=False,
                    decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
                    tests_to_skip=_windows_skip + _rocm_skip),
+    UnaryUfuncInfo('neg',
+                   ref=np.negative,
+                   dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
+                   dtypesIfCPU=all_types_and_complex_and(torch.half, torch.bfloat16),
+                   dtypesIfCUDA=all_types_and_complex_and(torch.half)),
 ]
 
 # Common operator groupings
