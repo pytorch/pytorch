@@ -17259,12 +17259,12 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         expected = np.i0(a.cpu().numpy())
         self.assertEqual(actual, expected)
 
-        a = torch.randn(100, device=device, dtype=dtype) * 10
+        a = torch.randn(100, device=device, dtype=dtype) * 8
         actual = torch.i0(a)
         expected = np.i0(a.cpu().numpy())
         self.assertEqual(actual, expected)
 
-        a = torch.randn(100, device=device, dtype=dtype) * 100
+        a = torch.randn(100, device=device, dtype=dtype) * 20
         actual = torch.i0(a)
         expected = np.i0(a.cpu().numpy())
         self.assertEqual(actual, expected)
