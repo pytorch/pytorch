@@ -190,6 +190,9 @@ TORCH_LIBRARY_IMPL(aten, Named, m) {
   m.impl("gt.Scalar_out", CppFunction::makeFallthrough());
   m.impl("gt.Tensor", CppFunction::makeFallthrough());
   m.impl("gt.Tensor_out", CppFunction::makeFallthrough());
+  m.impl("hypot", CppFunction::makeFallthrough());
+  m.impl("hypot.out", CppFunction::makeFallthrough());
+  m.impl("hypot_", CppFunction::makeFallthrough());
   m.impl("imag", CppFunction::makeFallthrough());
   m.impl("index_fill.Dimname_Scalar", CppFunction::makeFallthrough());
   m.impl("index_fill.Dimname_Tensor", CppFunction::makeFallthrough());
@@ -318,6 +321,9 @@ TORCH_LIBRARY_IMPL(aten, Named, m) {
   m.impl("neg", CppFunction::makeFallthrough());
   m.impl("neg.out", CppFunction::makeFallthrough());
   m.impl("neg_", CppFunction::makeFallthrough());
+  m.impl("nextafter", CppFunction::makeFallthrough());
+  m.impl("nextafter.out", CppFunction::makeFallthrough());
+  m.impl("nextafter_", CppFunction::makeFallthrough());
   m.impl("normal_", CppFunction::makeFallthrough());
   m.impl("ones_like", CppFunction::makeFallthrough());
   m.impl("output_nr", CppFunction::makeFallthrough());

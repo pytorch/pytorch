@@ -166,15 +166,14 @@ void testLLVMLetTest01() {
   std::vector<float> v = {1, 0};
   std::vector<void*> args({v.data()});
   VarHandle x("x", kFloat);
-  auto block = Block::make(
-      {{x.node(), new FloatImm(3.f)}},
-      {
-          Store::make(
-              a,
-              {IntImm::make(0)},
-              ExprHandle(2.f) + (x * ExprHandle(3.f) + ExprHandle(4.f)),
-              IntImm::make(1)),
-      });
+  auto block = Block::make({
+      Let::make(x, 3.f),
+      Store::make(
+          a,
+          {IntImm::make(0)},
+          ExprHandle(2.f) + (x * ExprHandle(3.f) + ExprHandle(4.f)),
+          IntImm::make(1)),
+  });
 
   LLVMCodeGen cg(block, {a});
   ASSERT_EQ(cg.value<int>(args), 0);
@@ -189,15 +188,15 @@ void testLLVMLetTest02() {
   std::vector<void*> args({v.data()});
   VarHandle x("x", kFloat);
   VarHandle y("y", kFloat);
-  auto block = Block::make(
-      {{x.node(), new FloatImm(3.f)}, {y.node(), new FloatImm(6.f)}},
-      {
-          Store::make(
-              a,
-              {IntImm::make(0)},
-              ExprHandle(2.f) + (x * ExprHandle(3.f) + y * ExprHandle(4.f)),
-              IntImm::make(1)),
-      });
+  auto block = Block::make({
+      Let::make(x, 3.f),
+      Let::make(y, 6.f),
+      Store::make(
+          a,
+          {IntImm::make(0)},
+          ExprHandle(2.f) + (x * ExprHandle(3.f) + y * ExprHandle(4.f)),
+          IntImm::make(1)),
+  });
 
   LLVMCodeGen cg(block, {a});
   ASSERT_EQ(cg.value<int>(args), 0);
@@ -212,18 +211,17 @@ void testLLVMLetTestMultitype() {
   std::vector<void*> args({v.data()});
   VarHandle x("x", kByte);
   VarHandle y("y", kHalf);
-  auto block = Block::make(
-      {{x.node(), new ByteImm(3)}, {y.node(), new HalfImm(6.f)}},
-      {
-          Store::make(
-              a,
-              {IntImm::make(0)},
-              Cast::make(
-                  kDouble,
-                  ExprHandle(2.f) +
-                      (x * ExprHandle(3.f) + y * ExprHandle(4.f))),
-              IntImm::make(1)),
-      });
+  auto block = Block::make({
+      Let::make(x, 3),
+      Let::make(y, 6.f),
+      Store::make(
+          a,
+          {IntImm::make(0)},
+          Cast::make(
+              kDouble,
+              ExprHandle(2.f) + (x * ExprHandle(3.f) + y * ExprHandle(4.f))),
+          IntImm::make(1)),
+  });
 
   LLVMCodeGen cg(block, {a});
   ASSERT_EQ(cg.value<int>(args), 0);

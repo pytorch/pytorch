@@ -250,6 +250,20 @@ Tensor sum_backward(const Tensor & grad, IntArrayRef sizes, IntArrayRef dims, bo
   }
 }
 
+Tensor nansum_backward(const Tensor & grad, const Tensor & self, IntArrayRef dims, bool keepdim) {
+  auto sizes = self.sizes();
+  if (!keepdim && sizes.size() > 0) {
+    if (dims.size()==1) {
+      return grad.unsqueeze(dims[0]).expand(sizes) * self.isnan().logical_not();
+    } else {
+      Tensor res = unsqueeze_multiple(grad, dims, sizes.size());
+      return res.expand(sizes) * self.isnan().logical_not();
+    }
+  } else {
+    return grad.expand(sizes) * self.isnan().logical_not();
+  }
+}
+
 std::vector<int64_t> reverse_list(const IntArrayRef list) {
   auto result = std::vector<int64_t>();
   result.reserve(list.size());

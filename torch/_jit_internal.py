@@ -11,6 +11,7 @@ import inspect
 import weakref
 import warnings
 import torch
+import sys
 # This is needed. `torch._jit_internal` is imported before `torch.distributed.__init__`.
 # Explicitly ask to import `torch.distributed.__init__` first.
 # Otherwise, "AttributeError: module 'torch' has no attribute 'distributed'" is raised.
@@ -18,11 +19,16 @@ import torch.distributed.rpc
 from torch._six import builtins
 from torch._utils_internal import get_source_lines_and_file
 from torch.futures import Future
-from typing import Tuple, List, Dict, Optional, Union, Any, TypeVar, Generic  # noqa: F401
+from typing import Tuple, List, Dict, Optional, Union, Any, TypeVar, Generic, Callable  # noqa: F401
+
+if sys.version_info[:2] > (3, 7):
+    from typing import Final
+else:
+    from typing_extensions import Final
 
 # Wrapper functions that can call either of 2 functions depending on a boolean
 # argument
-boolean_dispatched = weakref.WeakKeyDictionary()  # noqa: T484
+boolean_dispatched: 'weakref.WeakKeyDictionary[Callable, Dict[str, Callable]]' = weakref.WeakKeyDictionary()  # noqa: T484
 
 
 def createResolutionCallbackFromEnv(lookup_base):
@@ -114,9 +120,11 @@ def createResolutionCallbackFromFrame(frames_up=0):
     frame = inspect.currentframe()
     i = 0
     while i < frames_up + 1:
+        assert frame is not None
         frame = frame.f_back
         i += 1
 
+    assert frame is not None
     f_locals = frame.f_locals
     f_globals = frame.f_globals
 
@@ -504,7 +512,7 @@ def is_ignored_fn(fn):
 
 
 def is_static_fn(cls, fn):
-    return isinstance(inspect.getattr_static(cls, fn), staticmethod)
+    return isinstance(inspect.getattr_static(cls, fn, default=None), staticmethod)
 
 def get_static_fn(cls, fn):
     return inspect.getattr_static(cls, fn).__func__
@@ -528,7 +536,7 @@ def copy_torchscript_modifier(orig, new):
 # so that they can be imported in nn/functional.py without an import cycle
 
 # qualified_name => list[overload_functions]
-_overloaded_fns = {}  # noqa: T484
+_overloaded_fns : Dict[str, List[Callable]] = {}  # noqa: T484
 
 def _overload(func):
     qual_name = _qualified_name(func)
@@ -551,7 +559,10 @@ def get_class_name_lineno(method):
 
     # one for the get_class_name call, one for _overload_method call
     for i in range(2):
+        assert current_frame is not None  # assert current frame is not an Optional[FrameType]
         current_frame = current_frame.f_back
+
+    assert current_frame is not None  # same here
     class_name = current_frame.f_code.co_name
     line_no = current_frame.f_code.co_firstlineno
     return class_name, line_no
@@ -566,7 +577,7 @@ def get_class_name_lineno(method):
 # when modules of the same name are in the same file
 
 # qualified_name => class name => list[overload_functions]
-_overloaded_methods = {}  # noqa: T484
+_overloaded_methods : Dict[str, Dict[str, List[Callable]]] = {}  # noqa: T484
 
 
 # (qualified_name, class name) => class_fileno
@@ -683,29 +694,9 @@ if torch.distributed.rpc.is_available():
             )
         return getattr(ann, "__origin__", None) is RRef
 
-try:
-    import typing_extensions
-    from typing_extensions import Final
-
-    def is_final(ann):
-        return ann.__module__ == 'typing_extensions' and \
-            (getattr(ann, '__origin__', None) is typing_extensions.Final)
-except ImportError:
-    # Same as above, this polyfill is only for `typing_extensions`
-    class FinalInstance(object):
-        __slots__ = ['__args__']
-
-        def __init__(self, types):
-            self.__args__ = types
-
-    class FinalCls(object):
-        def __getitem__(self, types):
-            return FinalInstance(types)
-
-    Final = FinalCls()  # noqa: T484
-
-    def is_final(ann):
-        return isinstance(ann, FinalInstance)
+def is_final(ann):
+    return ann.__module__ in {'typing', 'typing_extensions'} and \
+        (getattr(ann, '__origin__', None) is Final)
 
 # allows BroadcastingList instance to be subscriptable
 class BroadcastingListCls(object):
@@ -808,8 +799,9 @@ def _get_named_tuple_properties(obj):
     return type(obj).__name__, fields, annotations
 
 
-def _create_named_tuple(t, unqual_name, field_names):
-    TupleType = collections.namedtuple(unqual_name, field_names)
+def _create_named_tuple(t, unqual_name: str, field_names: List[str]):
+    # mypy: namedtuple() expects a string literal as the first argument
+    TupleType = collections.namedtuple(unqual_name, field_names)  # type: ignore
     return TupleType(*t)
 
 
