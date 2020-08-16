@@ -475,7 +475,7 @@ void listSetItem(Stack* stack);
 
 #define DEFINE_INT_OP(aten_op, op)                          \
   Operator(                                                 \
-      #aten_op "(int a, int b) -> int",                     \
+      #aten_op ".int(int a, int b) -> int",                 \
       [](Stack* stack) {                                    \
         int64_t a, b;                                       \
         pop(stack, a, b);                                   \
@@ -525,6 +525,36 @@ void listSetItem(Stack* stack);
           }                                                        \
         }                                                          \
       },                                                           \
+      aliasAnalysisFromSchema())
+
+#define DEFINE_SCALAR_SCALAR_BINARY_OP(aten_op, int_op, float_op, result) \
+  Operator(                                                               \
+      #aten_op ".Scalar_Scalar(Scalar a, Scalar b) -> " #result,          \
+      [](Stack* stack) {                                                  \
+        IValue x, y;                                                      \
+        pop(stack, x, y);                                                 \
+        if (x.isDouble()) {                                               \
+          if (y.isDouble()) {                                             \
+            double a = x.toDouble();                                      \
+            double b = y.toDouble();                                      \
+            push(stack, float_op);                                        \
+          } else {                                                        \
+            double a = x.toDouble();                                      \
+            int64_t b = y.toInt();                                        \
+            push(stack, float_op);                                        \
+          }                                                               \
+        } else {                                                          \
+          if (y.isDouble()) {                                             \
+            int64_t a = x.toInt();                                        \
+            double b = y.toDouble();                                      \
+            push(stack, float_op);                                        \
+          } else {                                                        \
+            int64_t a = x.toInt();                                        \
+            int64_t b = y.toInt();                                        \
+            push(stack, int_op);                                          \
+          }                                                               \
+        }                                                                 \
+      },                                                                  \
       aliasAnalysisFromSchema())
 
 #define DEFINE_BINARY_OP(aten_op, op)             \
@@ -589,6 +619,14 @@ void listSetItem(Stack* stack);
         push(stack, op);                        \
       },                                        \
       aliasAnalysisFromSchema())
-
+#define DEFINE_STRING_OP(op_name, string_op, result) \
+  Operator(                                          \
+      #op_name ".str(str a, str b) ->" #result,      \
+      [](Stack* stack) {                             \
+        auto b = pop(stack).toStringRef();           \
+        auto a = pop(stack).toStringRef();           \
+        push(stack, string_op);                      \
+      },                                             \
+      aliasAnalysisFromSchema())
 } // namespace jit
 } // namespace torch

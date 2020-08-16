@@ -55,6 +55,8 @@ def type_argument_translations(arg):
     # Enables int[] by translating to legacy IntArrayRef.
     elif t == 'int[]':
         t = 'IntArrayRef'
+    elif t == 'int[]?':
+        t = 'IntArrayRef?'
     # Enables int by translating to legacy int64_t.
     elif t == 'int':
         t = 'int64_t'
@@ -76,6 +78,10 @@ def type_argument_translations(arg):
         t = 'double'
     elif t == 'float?':
         t = 'double?'
+    elif t == 'float[]':
+        t = 'ArrayRef<double>'
+    elif t == 'float[]?':
+        t = 'ArrayRef<double>?'
     # Enables str by translating to legacy std::string.
     elif t == 'str':
         t = 'std::string'
@@ -235,6 +241,18 @@ def process_arguments(arguments, func_variants, declaration, func_return):
              'default': 'c10::nullopt', 'is_nullable': True},
         ]
     )
+    supported_topt_arguments.append(
+        [
+            {'name': 'dtype', 'type': 'ScalarType', 'annotation': None, 'kwarg_only': True,
+             'default': 'c10::nullopt', 'is_nullable': True},
+            {'name': 'layout', 'type': 'Layout', 'annotation': None, 'kwarg_only': True,
+             'default': 'c10::nullopt', 'is_nullable': True},
+            {'name': 'device', 'type': 'Device', 'annotation': None, 'kwarg_only': True,
+             'default': 'c10::nullopt', 'is_nullable': True},
+            {'name': 'pin_memory', 'type': 'bool', 'annotation': None, 'kwarg_only': True,
+             'default': False, 'is_nullable': True},
+        ]
+    )
 
     corresponding_topts = [
         {'type': 'TensorOptions', 'name': 'options', 'is_nullable': False, 'annotation': None},
@@ -246,6 +264,9 @@ def process_arguments(arguments, func_variants, declaration, func_return):
     corresponding_topts.append(
         {'type': 'TensorOptions', 'name': 'options', 'is_nullable': False, 'annotation': None,
          'kwarg_only': True, 'default': 'at::kLong'})
+    corresponding_topts.append(
+        {'type': 'TensorOptions', 'name': 'options', 'is_nullable': False, 'annotation': None,
+         'kwarg_only': True})
 
     def check_topt_representation(topt_representation):
         for idx, supported_topt in enumerate(supported_topt_arguments):
@@ -392,9 +413,6 @@ def propagate_field_names(output_arguments, return_arguments):
         for i, r in enumerate(return_arguments):
             if 'field_name' in r:
                 output_arguments[i]['field_name'] = r['field_name']
-
-def is_named_tensor_only(declaration):
-    return any(['Dimname' in arg['type'] for arg in declaration['arguments']])
 
 
 def run(paths):

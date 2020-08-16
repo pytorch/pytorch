@@ -16,6 +16,11 @@ Function::Function(c10::QualifiedName name)
 
 void Function::append_instruction(OpCode op, int X, int N) {
   TORCH_CHECK(
+      op != CREATE_OBJECT,
+      "CREATE_OBJECT is not supported in mobile module. ",
+      "Workaround: instead of using arbitrary class type (class Foo()), ",
+      "define a pytorch class (class Foo(torch.nn.Module)).");
+  TORCH_CHECK(
       isOpSupportedInMobile(op),
       toString(op),
       " is not supported in mobile module.");
@@ -48,6 +53,20 @@ bool Function::append_operator(
   return true;
 }
 
+void Function::set_module_debug_info_list_size(size_t size) {
+  pc_to_module_debug_info_.resize(size);
+  for (size_t i = 0; i < size; ++i) {
+    pc_to_module_debug_info_[i] = "<no module info>";
+  }
+}
+
+void Function::set_module_info(const std::string& module_info, size_t pc) {
+  TORCH_CHECK(
+      pc < pc_to_module_debug_info_.size(),
+      "Module debug info index out of boundary.");
+  pc_to_module_debug_info_[pc] = module_info;
+}
+
 void Function::append_constant(const c10::IValue& constant) {
   code_->constants_.push_back(constant);
 }
@@ -60,10 +79,18 @@ void Function::set_register_size(size_t size) {
   code_->register_size_ = size;
 }
 
+std::string Function::get_module_debug_info(size_t pc) const {
+  TORCH_CHECK(
+      pc < pc_to_module_debug_info_.size(),
+      "Module debug info index out of boundary.");
+  return pc_to_module_debug_info_[pc];
+}
+
 bool Function::run(Stack& stack) const {
   InterpreterState interp_state(code_);
   return interp_state.run(stack);
 }
+
 } // namespace mobile
 } // namespace jit
 } // namespace torch

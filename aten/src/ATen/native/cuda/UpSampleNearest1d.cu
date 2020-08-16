@@ -235,5 +235,32 @@ Tensor upsample_nearest1d_backward_cuda(
   return grad_input;
 }
 
+using at::native::upsample::compute_output_size;
+using at::native::upsample_cuda::get_scale_value;
+
+Tensor upsample_nearest1d_cuda(
+    const Tensor& input,
+    c10::optional<IntArrayRef> output_size,
+    c10::optional<ArrayRef<double>> scale_factors) {
+  auto output = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  auto osize = compute_output_size(input.sizes(), output_size, scale_factors);
+  auto scale_w = get_scale_value(scale_factors, 0);
+  upsample_nearest1d_out_cuda_template(output, input, osize, scale_w);
+  return output;
+}
+
+Tensor upsample_nearest1d_backward_cuda(
+    const Tensor& grad_output,
+    c10::optional<IntArrayRef> output_size,
+    IntArrayRef input_size,
+    c10::optional<ArrayRef<double>> scale_factors) {
+  auto osize = compute_output_size(input_size, output_size, scale_factors);
+  auto scale_w = get_scale_value(scale_factors, 0);
+  auto grad_input = at::empty_like(grad_output, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  upsample_nearest1d_backward_out_cuda_template(
+      grad_input, grad_output, osize, input_size, scale_w);
+  return grad_input;
+}
+
 } // namespace native
 } // namespace at

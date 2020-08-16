@@ -48,7 +48,7 @@ void initPythonCustomClassBindings(PyObject* module) {
             named_type,
             fmt::format(
                 "Tried to instantiate class '{}.{}', but it does not exist! "
-                "Ensure that it is registered via torch::jit::class_",
+                "Ensure that it is registered via torch::class_",
                 ns,
                 qualname));
         c10::ClassTypePtr class_type = named_type->cast<ClassType>();

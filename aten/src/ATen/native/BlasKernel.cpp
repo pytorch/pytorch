@@ -2,10 +2,10 @@
 #include <algorithm>
 #include <ATen/ATen.h>
 #include <ATen/Config.h>
+#include <TH/THGeneral.h>
 
 #if AT_BUILD_WITH_BLAS()
 extern "C" double ddot_(int *n, double *x, int *incx, double *y, int *incy);
-extern "C" float sdot_(int *n, float *x, int *incx, float *y, int *incy);
 extern "C" void dscal_(int *n, double *a, double *x, int *incx);
 extern "C" void sscal_(int *n, float *a, float *x, int *incx);
 extern "C" void dgemv_(char *trans, int *m, int *n, double *alpha, double *a, int *lda, double *x, int *incx, double *beta, double *y, int *incy);
@@ -17,6 +17,8 @@ extern "C" void sgemv_(char *trans, int *m, int *n, float *alpha, float *a, int 
 # define ffloat float
 #endif
 
+extern "C" ffloat sdot_(int *n, float *x, int *incx, float *y, int *incy);
+
 #ifdef BLAS_USE_CBLAS_DOT
 extern "C" float cblas_sdot(const int n, const float *x, const int incx, const float *y, const int incy);
 #ifndef THBlas_C_sdot_
@@ -25,11 +27,8 @@ static inline ffloat sdot_(const int *n, const float *x, const int *incx, const 
 {
   return cblas_sdot(*n, x, *incx, y, *incy);
 }
-#endif
-#else
-extern "C" ffloat sdot_(int *n, float *x, int *incx, float *y, int *incy);
-#endif
-
+#endif // THBlas_C_sdot_
+#endif // BLAS_USE_CBLAS_DOT
 #endif // AT_BUILD_WITH_BLAS
 
 namespace at { namespace native {

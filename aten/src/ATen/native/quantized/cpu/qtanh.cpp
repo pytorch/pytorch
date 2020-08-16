@@ -76,7 +76,7 @@ Tensor qnnpack_tanh(Tensor input) {
 }
 #endif  // USE_PYTORCH_QNNPACK
 
-Tensor quantized_tanh(const Tensor& qx) {
+Tensor tanh_quantized_cpu(const Tensor& qx) {
 #ifdef USE_PYTORCH_QNNPACK
   if (at::globalContext().qEngine() == at::QEngine::QNNPACK &&
       qx.scalar_type() == kQUInt8) {
