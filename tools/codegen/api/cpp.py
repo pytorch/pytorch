@@ -74,6 +74,9 @@ def argumenttype_type(t: Type, *, mutable: bool) -> str:
     if r is not None:
         return r
 
+    if str(t) == 'Tensor' and mutable and local.hack_const_mutable_self():
+        return 'const Tensor &'
+
     if isinstance(t, BaseType):
         if t.name == BaseTy.Tensor:
             if mutable:
@@ -158,9 +161,7 @@ JIT_TO_CPP_DEFAULT = {
 }
 
 # Convert a JIT default into C++ expression representing the default
-def default_expr(d: Optional[str], t: Type) -> Optional[str]:
-    if d is None:
-        return None
+def default_expr(d: str, t: Type) -> str:
     if d == 'None' and str(t) == 'Tensor?':
         return '{}'
     return JIT_TO_CPP_DEFAULT.get(d, d)
@@ -171,7 +172,7 @@ def argument(a: Union[Argument, TensorOptionsArguments, ThisArgument]) -> CppArg
         return CppArgument(
             type=argument_type(a),
             name=a.name,
-            default=default_expr(a.default, a.type),
+            default=default_expr(a.default, a.type) if a.default is not None else None,
             argument=a,
         )
     elif isinstance(a, ThisArgument):

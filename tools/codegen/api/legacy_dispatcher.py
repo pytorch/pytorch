@@ -2,6 +2,7 @@ from tools.codegen.model import *
 
 from tools.codegen.api.types import TensorOptionsArguments, LegacyDispatcherArgument, ThisArgument
 import tools.codegen.api.cpp as cpp
+import tools.codegen.local as local
 
 from typing import Union, Sequence
 
@@ -43,7 +44,7 @@ def argument(a: Union[Argument, ThisArgument, TensorOptionsArguments]) -> Legacy
         return LegacyDispatcherArgument(
             type=argument_type(a),
             name=a.name,
-            default=cpp.default_expr(a.default, a.type),
+            default=cpp.default_expr(a.default, a.type) if a.default is not None else None,
             argument=a,
         )
     elif isinstance(a, ThisArgument):

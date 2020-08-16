@@ -3,6 +3,7 @@ import re
 from dataclasses import dataclass, field
 from typing import List, Sequence, Dict, Optional, Iterator, Tuple, Set, NoReturn
 from enum import Enum
+import itertools
 
 # A little trick from https://github.com/python/mypy/issues/6366
 # for getting mypy to do exhaustiveness checking
@@ -75,6 +76,12 @@ class NativeFunction:
     # Whether or not to omit automatic generation of a DeviceGuard
     device_guard: bool
 
+    # What python module to put the function in
+    python_module: Optional[str]
+
+    # TODO: figure out what this does
+    category_override: Optional[str]
+
     # If no variants are specified in native_functions.yaml, this is
     # assumed to be {'function'}.
     variants: Set[Variant]
@@ -101,21 +108,23 @@ class NativeFunction:
     # to explicitly write it out.
 
     @staticmethod
-    def from_yaml(e: Dict[str, object], loc: 'Location') -> 'NativeFunction':
+    def from_yaml(ei: Dict[str, object], loc: 'Location') -> 'NativeFunction':
         """
         Parse a NativeFunction from a dictionary as directly parsed
         from native_functions.yaml
         """
-        funcs = e.get('func')
+        e = ei.copy()
+
+        funcs = e.pop('func')
         assert isinstance(funcs, str), f'not a str: {funcs}'
         func = FunctionSchema.parse(funcs)
 
-        use_c10_dispatcher = e.get('use_c10_dispatcher')
+        use_c10_dispatcher = e.pop('use_c10_dispatcher', None)
         assert use_c10_dispatcher is None or use_c10_dispatcher == 'full', \
             f'use_c10_dispatcher must be unset or set to full, got {use_c10_dispatcher}'
         use_c10_dispatcher_full = use_c10_dispatcher == 'full'
 
-        variants_s = e.get('variants', 'function')
+        variants_s = e.pop('variants', 'function')
         assert isinstance(variants_s, str)
         variants: Set[Variant] = set()
         for v in variants_s.split(', '):
@@ -126,13 +135,19 @@ class NativeFunction:
             else:
                 assert False, f'illegal variant {v}'
 
-        manual_kernel_registration = e.get('manual_kernel_registration', False)
+        manual_kernel_registration = e.pop('manual_kernel_registration', False)
         assert isinstance(manual_kernel_registration, bool), f'not a bool: {manual_kernel_registration}'
 
-        device_guard = e.get('device_guard', True)
+        device_guard = e.pop('device_guard', True)
         assert isinstance(device_guard, bool), f'not a bool: {device_guard}'
 
-        raw_dispatch = e.get('dispatch')
+        python_module = e.pop('python_module', None)
+        assert python_module is None or isinstance(python_module, str), f'not a str: {python_module}'
+
+        category_override = e.pop('category_override', None)
+        assert category_override is None or isinstance(category_override, str), f'not a str: {category_override}'
+
+        raw_dispatch = e.pop('dispatch', None)
         assert raw_dispatch is None or isinstance(raw_dispatch, dict), e
         dispatch: Optional[Dict[str, str]] = None
         if raw_dispatch is not None:
@@ -145,11 +160,16 @@ class NativeFunction:
                 for k in ks.split(","):
                     dispatch[k.strip()] = v
 
+        e.pop('__line__')
+        assert not e, f"leftover entries: {e}"
+
         return NativeFunction(
             func=func,
             use_c10_dispatcher_full=use_c10_dispatcher_full,
             variants=variants,
             manual_kernel_registration=manual_kernel_registration,
+            python_module=python_module,
+            category_override=category_override,
             dispatch=dispatch,
             device_guard=device_guard,
             loc=loc,
@@ -239,6 +259,9 @@ class FunctionSchema:
 
     # TODO: Need to handle collisions with argument names at some point
     returns: Sequence['Return']
+
+    def schema_order_arguments(self) -> Iterator['Argument']:
+        return itertools.chain(self.arguments, self.kwarg_only_arguments, self.out_arguments)
 
     @staticmethod
     def parse(func: str) -> 'FunctionSchema':
@@ -378,6 +401,8 @@ class Type:
         raise NotImplemented
     def is_tensor_like(self) -> bool:
         raise NotImplemented
+    def is_nullable(self) -> bool:
+        raise NotImplemented
 
 # Base types are simple, atomic types with no further structure
 BaseTy = Enum('BaseTy', (
@@ -405,6 +430,8 @@ class BaseType(Type):
         return f'{self.name.name}'
     def is_tensor_like(self) -> bool:
         return self.name == BaseTy.Tensor
+    def is_nullable(self) -> bool:
+        return False
 
 # Optional types may be specified, or may also be validly given None
 @dataclass(frozen=True)
@@ -414,6 +441,8 @@ class OptionalType(Type):
         return f'{self.elem}?'
     def is_tensor_like(self) -> bool:
         return self.elem.is_tensor_like()
+    def is_nullable(self) -> bool:
+        return True
 
 # List types specify that we may have multiples of an element.  We
 # also support explicit sizes on list types, but these have
@@ -431,6 +460,8 @@ class ListType(Type):
         return f'{self.elem}[{size}]'
     def is_tensor_like(self) -> bool:
         return self.elem.is_tensor_like()
+    def is_nullable(self) -> bool:
+        return self.elem.is_nullable()
 
 @dataclass(frozen=True)
 class Argument:

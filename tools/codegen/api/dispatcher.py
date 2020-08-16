@@ -55,13 +55,21 @@ def argument(a: Argument) -> DispatcherArgument:
             argument=a,
         )
     else:
-        return legacy_dispatcher.argument(a)
+        la = legacy_dispatcher.argument(a)
+        return DispatcherArgument(
+            type=la.type,
+            name=la.name,
+            argument=la.argument,
+        )
 
 def arguments(func: FunctionSchema) -> Sequence[DispatcherArgument]:
     if local.use_c10_dispatcher_full():
         return list(map(argument, itertools.chain(func.out_arguments, func.arguments, func.kwarg_only_arguments)))
     else:
-        return legacy_dispatcher.arguments(func)
+        return [
+            DispatcherArgument(type=la.type, name=la.name, argument=la.argument)
+            for la in legacy_dispatcher.arguments(func)
+        ]
 
 # Given a set of CppArguments in scope, return a sequence of dispatcher
 # expressions that translate the cpp API into dispatcher API

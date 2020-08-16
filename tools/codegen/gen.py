@@ -5,10 +5,11 @@ import textwrap
 import re
 import pprint
 import itertools
-from typing import List, Sequence, Dict, Optional, Iterator, Tuple, Set, NoReturn, Callable, Union
+from typing import List, Sequence, Dict, Optional, Iterator, Tuple, Set, NoReturn, Callable, Union, Any
 import yaml
 from dataclasses import dataclass
 from enum import Enum
+from collections import OrderedDict
 
 # Reusing CodeTemplate from existing codegen
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../aten/src/ATen"))
@@ -112,7 +113,10 @@ def map_native_functions(func: Callable[[NativeFunction], Union[Optional[str], S
     rs: List[str] = []
     for f in native_functions:
         with context(f'in {f.loc}:\n  {f.func}'):
-            with local.parametrize(use_c10_dispatcher_full=f.use_c10_dispatcher_full):
+            with local.parametrize(
+                use_c10_dispatcher_full=f.use_c10_dispatcher_full,
+                hack_const_mutable_self=str(f.func.name) in ["set_data", "retain_grad"],
+            ):
                 r = func(f)
             if r is None:
                 continue
@@ -180,17 +184,17 @@ def compute_type_method(dispatch: Optional[str], *, target: Target) -> Callable[
                     cuda_guard = f"""\
     const DeviceGuard device_guard(options.device());
 """
+                elif f.device_guard and dispatch is not None and 'CUDA' in dispatch and has_tensor_options:
+                    cuda_guard = f"""\
+    globalContext().lazyInitCUDA();
+    const DeviceGuard device_guard(options.device());
+"""
                 elif f.device_guard and device_of is not None:
                     cuda_guard = f"""\
     const OptionalDeviceGuard device_guard(device_of({device_of}));
 """
                     if dispatch is not None:
                         cuda_guard = f"\n{cuda_guard}"
-                elif f.device_guard and dispatch is not None and 'CUDA' in dispatch and has_tensor_options:
-                    cuda_guard = f"""\
-    globalContext().lazyInitCUDA();
-    const DeviceGuard device_guard(options.device());
-"""
                 else:
                     cuda_guard = """\
     // DeviceGuard omitted
@@ -482,3 +486,181 @@ write_file('BackendSelectRegister.cpp', {
     'backend_select_method_definitions': map_native_functions(compute_backend_select(target=Target.DEFINITION)),
     'backend_select_function_registrations': map_native_functions(compute_backend_select(target=Target.REGISTRATION)),
 })
+
+
+def dict_representer(dumper: Any, data: Any) -> Any:
+    return dumper.represent_dict(data.items())
+
+def format_yaml(data: object) -> str:
+    noalias_dumper = yaml.dumper.SafeDumper
+    noalias_dumper.ignore_aliases = lambda self, data: True  # type: ignore
+    # Support serializing OrderedDict
+    noalias_dumper.add_representer(OrderedDict, dict_representer)  # type: ignore
+    # Some yaml parsers (e.g. Haskell's) don't understand line breaks.
+    # width=float('Inf') turns off optional line breaks and improves
+    # the portability of the outputted yaml.
+    return yaml.dump(data, default_flow_style=False, Dumper=noalias_dumper, width=float('Inf'))  # type: ignore
+
+# this makes no fucking sense
+def pythonify_default(s: str) -> object:
+    if s == 'true':
+        return True
+    elif s == 'false':
+        return False
+
+    try:
+        return int(s)
+    except ValueError:
+        try:
+            return float(s)
+        except ValueError:
+            return s
+
+def dynamic_type(t: Type) -> str:
+    if isinstance(t, OptionalType):
+        return dynamic_type(t.elem)
+    if str(t) == 'Tensor':
+        return 'Tensor'
+    return cpp.argumenttype_type(t, mutable=False)
+
+def compute_declarations_yaml() -> object:
+    rs: List[object] = []
+    for f in native_functions:
+        with context(f'in {f.loc}:\n  {f.func}'):
+            with local.parametrize(
+                use_c10_dispatcher_full=f.use_c10_dispatcher_full,
+                hack_const_mutable_self=str(f.func.name) in ["set_data", "retain_grad"],
+            ):
+                dispatcher_args = dispatcher.arguments(f.func)
+                dispatcher_returns = dispatcher.returns_type(f.func.returns)
+                cpp_args = cpp.arguments(f.func)
+
+                kwarg_only_set = set(a.name for a in f.func.kwarg_only_arguments)
+                out_arg_set = set(a.name for a in f.func.out_arguments)
+                args_set = set(a.name for a in f.func.schema_order_arguments())
+
+                field_name_prop_set: Dict[str, str] = {}
+                if f.func.name.name.inplace:
+                    if len(f.func.returns) == 1:
+                        returns = [
+                            {
+                                'dynamic_type': 'Tensor',
+                                'name': 'self',
+                                'type': 'Tensor &',
+                            }
+                        ]
+                    else:
+                        assert len(f.func.returns) == 0
+                        returns = []
+                else:
+                    result = 'result'
+                    if f.func.is_out_fn():
+                        result = 'out'
+                    returns = []
+                    for i, r in enumerate(f.func.returns):
+                        if f.func.is_out_fn():
+                            name = f.func.out_arguments[i].name
+                        elif r.name:
+                            # Yes I can't make this up
+                            if (r.name in args_set or r.name in str(f.func.name) or any(r.name in x for x in args_set)) and not f.func.is_out_fn():
+                                name = f'{r.name}_return'
+                            else:
+                                name = r.name
+                        else:
+                            name = result if len(f.func.returns) == 1 else f'{result}{i}'
+                        ret = {
+                            'dynamic_type': dynamic_type(r.type),
+                            'name': name,
+                            'type': cpp.return_type(r),
+                        }
+                        if r.name:
+                            ret['field_name'] = r.name
+                            if r.annotation is not None:
+                                field_name_prop_set[str(r.annotation)] = r.name
+                        returns.append(ret)
+
+                def make_argument(a: Argument, *, schema_order: bool) -> object:
+                    arg: Dict[str, object] = {
+                        'annotation': str(a.annotation) if a.annotation else None,
+                        'dynamic_type': dynamic_type(a.type),
+                        'is_nullable': a.type.is_nullable(),
+                        'name': a.name,
+                        'type': cpp.argument_type(a),
+                    }
+                    # TODO: type confusion
+                    if a.default is not None:
+                        arg['default'] = pythonify_default(cpp.default_expr(a.default, a.type))
+                    if a.name in kwarg_only_set:
+                        arg['kwarg_only'] = True
+                    elif a.name in out_arg_set:
+                        arg['kwarg_only'] = False  # LOL
+                    if a.name in out_arg_set:
+                        arg['output'] = True
+                        if not schema_order:
+                            arg['allocate'] = True
+                        if a.annotation is not None and str(a.annotation) in field_name_prop_set:
+                            arg['field_name'] = field_name_prop_set[str(a.annotation)]
+                    if isinstance(a.type, ListType) and a.type.size is not None and str(a.type.elem) != 'bool':
+                        arg['size'] = a.type.size
+                    return arg
+
+                arguments = []
+                for cpp_a in cpp_args:
+                    assert not isinstance(cpp_a.argument, ThisArgument)
+                    if isinstance(cpp_a.argument, Argument):
+                        arguments.append(make_argument(cpp_a.argument, schema_order=False))
+                    else:
+                        arg: Dict[str, object] = {
+                            'annotation': None,
+                            'dynamic_type': 'TensorOptions',
+                            'is_nullable': False,
+                            'name': cpp_a.name,
+                            'type': cpp_a.type,
+                            'kwarg_only': True,
+                        }
+                        if cpp_a.default is not None:
+                            arg['default'] = cpp_a.default
+                        arguments.append(arg)
+
+                buggy_schema_order_args = list(itertools.chain(f.func.arguments, f.func.out_arguments, f.func.kwarg_only_arguments))
+                schema_order_arguments = []
+                # NB: NOT actually schema order LOLOLOL
+                # for a in f.func.schema_order_arguments():
+                for a in buggy_schema_order_args:
+                    schema_order_arguments.append(make_argument(a, schema_order=True))
+                schema_order_args = [cpp.argument(a) for a in buggy_schema_order_args]
+                schema_order_cpp_signature = f"{dispatcher_returns} ({', '.join(a.type for a in schema_order_args)})"
+
+                method_of = ['Type']
+                if Variant.method in f.variants:
+                    method_of.append('Tensor')
+                if Variant.function in f.variants:
+                    method_of.append('namespace')
+
+                rs.append(OrderedDict([
+                    ('name', cpp.name(f.func)),
+                    ('operator_name', str(f.func.name.name)),
+                    ('overload_name', str(f.func.name.overload_name)),
+                    ('use_c10_dispatcher', 'full' if f.use_c10_dispatcher_full else 'with_codegenerated_unboxing_wrapper'),
+                    ('manual_kernel_registration', f.manual_kernel_registration),
+                    ('category_override', f.category_override if f.category_override is not None else ''),
+                    ('matches_jit_signature', True),
+                    ('schema_string', f'aten::{f.func}'),
+                    ('arguments', arguments),
+                    ('schema_order_cpp_signature', schema_order_cpp_signature),
+                    ('schema_order_arguments', schema_order_arguments),
+                    ('method_of', method_of),
+                    ('mode', 'native'),
+                    ('python_module', '' if f.python_module is None else f.python_module),
+                    ('returns', returns),
+                    ('inplace', f.func.name.name.inplace),
+                    ('is_factory_method', any(isinstance(a.argument, TensorOptionsArguments) for a in cpp_args) and Variant.method not in f.variants),
+                    ('abstract', f.dispatch is not None),
+                    ('device_guard', f.device_guard),
+                    ('with_gil', False),
+                    ('deprecated', False),
+                ]))
+    return rs
+
+with open('build/aten/src/ATen_new/Declarations.yaml', 'w') as f:
+    f.write(format_yaml(compute_declarations_yaml()))

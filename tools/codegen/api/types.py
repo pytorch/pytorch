@@ -64,7 +64,8 @@ class DispatcherArgument:
     type: str
     name: str
     # dispatcher NEVER has defaults
-    argument: Argument
+    argument: Union[Argument, TensorOptionsArguments]
+    # TensorOptionsArguments can occur when not using full c10 dispatch
 
     def __str__(self) -> str:
         return f"{self.type} {self.name}"
