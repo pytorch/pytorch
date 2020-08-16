@@ -4761,16 +4761,13 @@ void testGPU_FusionReductionSchedulerMultiDimFastest() {
       at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor input = at::rand(tensor_dims_in, options);
 
-  // Apply reduction heuristic
-  const at::ArrayRef<c10::IValue> inputs({input});
-
   TORCH_CHECK(
-      cuda::scheduleReduction(&fusion, inputs, tv1),
+      cuda::scheduleReduction(&fusion, {input}, tv1),
       "Reduction schedule was not generated!");
 
   torch::jit::fuser::cuda::FusionExecutor fe;
   fe.compileFusion(&fusion);
-  auto outputs = fe.runFusion(inputs);
+  auto outputs = fe.runFusion({input});
 
   auto aten_output = input.sum(red_dims64);
 
