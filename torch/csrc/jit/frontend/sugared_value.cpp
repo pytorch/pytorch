@@ -157,6 +157,12 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
       auto n = g.insertNode(g.createGetAttr(value_, field));
       return std::make_shared<SimpleValue>(n->output());
     }
+    // Check and see if it's a getter attribute.
+    auto prop = classType->getProperty(field);
+    if (prop) {
+      return MethodValue(value_, prop->getter->name())
+          .call(loc, m, {}, {}, /*n_binders=*/1);
+    }
   } else if (auto iface = value_->type()->cast<InterfaceType>()) {
     // accessing methods of interfaces
     if (auto schema = iface->getMethod(field)) {
@@ -284,6 +290,14 @@ void SimpleValue::setAttr(
             << "Initialize the field at the top level first";
       }
     } else {
+      // Check and see if it's a setter attribute.
+      auto prop = classType->getProperty(field);
+      if (prop && prop->setter) {
+        MethodValue(value_, prop->setter->name())
+            .call(loc, m, {newValue}, {}, /*n_binders=*/1);
+        return;
+      }
+
       throw ErrorReport(loc)
           << "Tried to set nonexistent attribute: " << field
           << ". Did you forget to initialize it in __init__()?";

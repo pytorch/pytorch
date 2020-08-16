@@ -1012,7 +1012,8 @@ template <typename T, std::enable_if_t<std::is_base_of<torch::CustomClassHolder,
 IValue::IValue(c10::intrusive_ptr<T> custom_class) {
   if (!c10::isCustomClassRegistered<c10::intrusive_ptr<T>>()) {
     throw c10::Error(
-        "Trying to instantiate a class that isn't a registered custom class.",
+        "Trying to instantiate a class that isn't a registered custom class: " +
+          std::string(c10::util::get_fully_qualified_type_name<T>()),
         "");
   }
   auto classType = c10::getCustomClassType<c10::intrusive_ptr<T>>();
@@ -1119,18 +1120,6 @@ inline bool IValue::isSameIdentity(const IValue& rhs) const {
 
 namespace ivalue {
 namespace detail {
-// This code allows us to template on a function based on whether IValue has a
-// constructor for it. Specifically, has_constructor<T>{} inherits from std::true_type if
-// IValue(T) compiles, and inherits from std::false_type if IValue(T) doesn't.
-// We use it for calling the IValue constructor for `from` if it exists, and otherwise
-// attempt to use our custom class code.
-template<class> struct type_sink { typedef void type; };
-template<class T> using type_sink_t = typename type_sink<T>::type;
-template<class T, class=void> struct has_constructor : std::false_type {}; \
-template<class T> struct has_constructor<
-  T,
-  type_sink_t< decltype( IValue(std::declval<T>())) >
->: std::true_type {};
 
 template <typename T>
 IValue from_(T x, std::true_type) {
@@ -1138,10 +1127,6 @@ IValue from_(T x, std::true_type) {
 }
 template <typename T>
 IValue from_(c10::intrusive_ptr<T> x, std::false_type) {
-  using inputType = c10::intrusive_ptr<T>;
-  if (!isCustomClassRegistered<inputType>()) {
-    throw c10::Error("Trying to return a class that we don't support and isn't a registered custom class.", "");
-  }
   return IValue(x);
 }
 template <typename T>
@@ -1153,7 +1138,7 @@ IValue from_(T x, std::false_type) {
 
 template <typename T>
 IValue from(T x) {
-  return detail::from_(std::move(x), detail::has_constructor<T>{});
+  return detail::from_(std::move(x), typename std::is_constructible<IValue, T>::type{});
 }
 
 }
