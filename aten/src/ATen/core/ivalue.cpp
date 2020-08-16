@@ -59,7 +59,7 @@ bool operator==(const ivalue::EnumHolder& lhs, const ivalue::EnumHolder& rhs) {
 }
 
 const std::string ivalue::EnumHolder::qualifiedClassName() const {
-  return type_->qualifiedClassName().name();
+  return type_->qualifiedClassName().qualifiedName();
 }
 
 } // namespace ivalue

@@ -559,7 +559,7 @@ struct ivalue::EnumHolder : c10::intrusive_ptr_target {
       std::ostream& out,
       const EnumHolder& v);
 
-  const std::string qualifiedClassName() const;
+  CAFFE2_API const std::string qualifiedClassName() const;
 
   const std::string& name() const {
     return name_;
