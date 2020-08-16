@@ -247,6 +247,8 @@ _(aten, clamp_min) \
 _(aten, clone) \
 _(aten, coalesce) \
 _(aten, combinations) \
+_(aten, complex) \
+_(aten, polar) \
 _(aten, constant_pad_nd) \
 _(aten, contiguous) \
 _(aten, conv1d) \
@@ -302,6 +304,7 @@ _(aten, div) \
 _(aten, div_) \
 _(aten, dot) \
 _(aten, dropout) \
+_(aten, dstack) \
 _(aten, eig) \
 _(aten, einsum) \
 _(aten, elu) \
@@ -376,6 +379,8 @@ _(aten, hardtanh_forward) \
 _(aten, hinge_embedding_loss) \
 _(aten, histc) \
 _(aten, hspmm) \
+_(aten, hstack) \
+_(aten, hypot) \
 _(aten, ifft) \
 _(aten, index) \
 _(aten, index_add) \
@@ -521,6 +526,7 @@ _(aten, native_tensor) \
 _(aten, native_zero) \
 _(aten, ne) \
 _(aten, neg) \
+_(aten, nextafter) \
 _(aten, bitwise_and) \
 _(aten, bitwise_not) \
 _(aten, bitwise_or) \
@@ -741,6 +747,7 @@ _(aten, vander) \
 _(aten, var) \
 _(aten, view) \
 _(aten, view_as) \
+_(aten, vstack) \
 _(aten, where) \
 _(aten, zero) \
 _(aten, zeros) \

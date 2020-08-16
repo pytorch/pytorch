@@ -799,20 +799,10 @@ clip_(min, max) -> Tensor
 Alias for :meth:`~Tensor.clamp_`.
 """)
 
-add_docstr_all('clone',
-               r"""
-clone(memory_format=torch.preserve_format) -> Tensor
+add_docstr_all('clone', r"""
+clone(*, memory_format=torch.preserve_format) -> Tensor
 
-Returns a copy of the :attr:`self` tensor. The copy has the same size and data
-type as :attr:`self`.
-
-.. note::
-
-    Unlike `copy_()`, this function is recorded in the computation graph. Gradients
-    propagating to the cloned tensor will propagate to the original tensor.
-
-Args:
-    {memory_format}
+See :func:`torch.clone`
 """.format(**common_args))
 
 add_docstr_all('contiguous',
@@ -1390,6 +1380,20 @@ add_docstr_all('outer', r"""
 outer(vec2) -> Tensor
 
 See :func:`torch.outer`.
+""")
+
+add_docstr_all('hypot',
+               r"""
+hypot(other) -> Tensor
+
+See :func:`torch.hypot`
+""")
+
+add_docstr_all('hypot_',
+               r"""
+hypot_(other) -> Tensor
+
+In-place version of :meth:`~Tensor.hypot`
 """)
 
 add_docstr_all('indices',
@@ -2160,6 +2164,18 @@ add_docstr_all('nelement',
 nelement() -> int
 
 Alias for :meth:`~Tensor.numel`
+""")
+
+add_docstr_all('nextafter',
+               r"""
+nextafter(other) -> Tensor
+See :func:`torch.nextafter`
+""")
+
+add_docstr_all('nextafter_',
+               r"""
+nextafter_(other) -> Tensor
+In-place version of :meth:`~Tensor.nextafter`
 """)
 
 add_docstr_all('nonzero',
