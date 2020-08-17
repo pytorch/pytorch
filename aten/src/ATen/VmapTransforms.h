@@ -97,7 +97,7 @@ struct TORCH_API BroadcastingVmapTransform {
 struct TORCH_API VmapPhysicalView {
   VmapPhysicalView(Tensor&& tensor, std::bitset<kVmapNumLevels> levels)
       : levels_(levels), tensor_(tensor) {
-    TORCH_INTERNAL_ASSERT(!isBatched(tensor));
+    TORCH_INTERNAL_ASSERT(!isBatchedTensor(tensor));
   }
 
   Tensor& tensor() { return tensor_; }
@@ -124,6 +124,14 @@ struct TORCH_API VmapPhysicalView {
   // Assumes that all of the "batch dimensions" are at the front
   // of the physical tensor.
   Tensor newLogicalFromPhysical(const Tensor& physical) const;
+
+  // Given a vector of physical tensors,
+  // 1. maps each tensor to a new logical tensor using the mapping info stored
+  //    in this VmapPhysicalView. Assumes that all of the "batch dimensions"
+  //    are at the front of the physical tensors.
+  // 2. stores the new logical tensors back into the passed-in vector. This is
+  //    to avoid additional dynamic allocations.
+  void makeLogicalFromPhysicalListInplace(std::vector<Tensor>& physical_tensors) const;
 
   int64_t numBatchDims() const;
 
