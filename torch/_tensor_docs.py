@@ -216,6 +216,18 @@ acosh_() -> Tensor
 In-place version of :meth:`~Tensor.acosh`
 """)
 
+add_docstr_all('arccosh', r"""
+acosh() -> Tensor
+
+See :func:`torch.arccosh`
+""")
+
+add_docstr_all('arccosh_', r"""
+acosh_() -> Tensor
+
+In-place version of :meth:`~Tensor.arccosh`
+""")
+
 add_docstr_all('add',
                r"""
 add(other, *, alpha=1) -> Tensor
