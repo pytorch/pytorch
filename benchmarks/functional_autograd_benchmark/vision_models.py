@@ -46,7 +46,7 @@ def get_fcn_resnet(device: torch.device) -> GetterReturnType:
     return forward, params
 
 def get_detr(device: torch.device) -> GetterReturnType:
-    # All values below are from CLI defaults in @fmassa's repo
+    # All values below are from CLI defaults in https://github.com/facebookresearch/detr
     N = 2
     num_classes = 91
     hidden_dim = 256
