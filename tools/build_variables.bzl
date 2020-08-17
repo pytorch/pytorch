@@ -312,7 +312,7 @@ libtorch_extra_sources = libtorch_core_jit_sources + [
     "torch/csrc/autograd/VariableTypeManual.cpp",
     "torch/csrc/jit/api/module_save.cpp",
     "torch/csrc/jit/codegen/fuser/cpu/fused_kernel.cpp",
-    "torch/csrc/jit/mobile/export.cpp",
+    "torch/csrc/jit/mobile/export_data.cpp",
     "torch/csrc/jit/mobile/function.cpp",
     "torch/csrc/jit/mobile/import.cpp",
     "torch/csrc/jit/mobile/import_data.cpp",
