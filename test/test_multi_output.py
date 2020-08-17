@@ -12,6 +12,7 @@ class TestMultiOutput(TestCase):
     # multiple outputs and those outputs have unique strides
     def test_multi_output_different_strides(self, device):
         FnExecution = namedtuple('FnExecution', 'fn, args, kwargs')
+
         def get_ops(device):
             return [
                 FnExecution(fn=torch.max, args=(torch.randn(2, 3, 4, device=device), 0), kwargs=dict()),
