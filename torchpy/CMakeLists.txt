@@ -9,20 +9,26 @@ set(TORCHPY_DIR "${TORCH_ROOT}/torchpy")
 set(TORCHPY_LIB_SOURCES
   ${TORCHPY_DIR}/torchpy.cpp
 )
+add_library(torchpy ${TORCHPY_LIB_SOURCES})
+target_include_directories(torchpy PRIVATE ${TORCHPY_DIR})
+target_link_libraries(torchpy PRIVATE torch torch_python -Wl,-rpath,/home/whc/local/pytorch-env/lib/ ${PYTHON_LIBRARIES})
 
 set(TORCHPY_TEST_SOURCES
   ${TORCHPY_DIR}/test_main.cpp
   ${TORCHPY_DIR}/test_init.cpp
   ${TORCHPY_DIR}/example/test_models.cpp
 )
-add_library(torchpy ${TORCHPY_LIB_SOURCES})
-target_include_directories(torchpy PRIVATE ${TORCHPY_DIR})
-target_link_libraries(torchpy PRIVATE torch torch_python -Wl,-rpath,/home/whc/local/pytorch-env/lib/ ${PYTHON_LIBRARIES})
-
 add_executable(torchpy_test ${TORCHPY_TEST_SOURCES})
 target_include_directories(torchpy_test PRIVATE ${TORCHPY_DIR})
-target_link_libraries(torchpy_test PRIVATE torchpy gtest)
-target_link_libraries(torchpy_test PRIVATE torch -Wl,-rpath,/home/whc/local/pytorch-env/lib/ ${PYTHON_LIBRARIES})
+target_link_libraries(torchpy_test PRIVATE torchpy torch -Wl,-rpath,/home/whc/local/pytorch-env/lib/ ${PYTHON_LIBRARIES})
+target_link_libraries(torchpy_test PUBLIC gtest)
+
+set(TORCHPY_THREADS_SOURCES
+  ${TORCHPY_DIR}/threads_main.cpp
+)
+add_executable(torchpy_threads ${TORCHPY_THREADS_SOURCES})
+target_include_directories(torchpy_threads  PRIVATE ${TORCHPY_DIR})
+target_link_libraries(torchpy_threads PRIVATE torchpy torch -Wl,-rpath,/home/whc/local/pytorch-env/lib/ ${PYTHON_LIBRARIES})
 
 if(USE_CUDA)
   target_link_libraries(torchpy_test PRIVATE
