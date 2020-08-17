@@ -408,8 +408,6 @@ def method_tests():
         ('rad2deg_', (S, S, S), NO_ARGS),
         ('deg2rad', (S, S, S), NO_ARGS),
         ('deg2rad_', (S, S, S), NO_ARGS),
-        ('degrees', dont_convert((S, S, S)), NO_ARGS),
-        ('degrees_', dont_convert((S, S, S)), NO_ARGS),
         ('rsqrt', torch.rand(S, S, S) + 1e-2, NO_ARGS, '', (True,)),
         ('rsqrt', uniform_scalar(1e-2, requires_grad=True), NO_ARGS, 'scalar', (True,)),
         ('frac', (S, S, S), NO_ARGS, '', (True,)),
