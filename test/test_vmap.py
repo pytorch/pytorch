@@ -1,6 +1,7 @@
 from torch.testing._internal.common_utils import TestCase, run_tests
 import torch
 from torch import vmap
+import functools
 import warnings
 
 class TestVmapAPI(TestCase):
@@ -575,6 +576,18 @@ class TestVmapAPI(TestCase):
         batched_v = torch.eye(N)
         jacobian = vmap(vjp_mul)(batched_v)
         self.assertEqual(jacobian, torch.diagflat(y))
+
+    def test_functools_partial(self):
+        x = torch.randn(3)
+        y = torch.randn(2, 3)
+        result = vmap(functools.partial(torch.mul, x))(y)
+        self.assertEqual(result, x * y)
+
+    def test_nn_module(self):
+        tensor = torch.randn(2, 3)
+        model = torch.nn.Linear(3, 3, bias=False)
+        result = vmap(model)(tensor)
+        self.assertEqual(result, model(tensor))
 
 
 def slice_inputs(inputs, bdims, i):
