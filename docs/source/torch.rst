@@ -251,6 +251,7 @@ Pointwise Ops
     absolute
     acos
     acosh
+    arccosh
     add
     addcdiv
     addcmul
@@ -410,6 +411,7 @@ Other Operations
     bucketize
     cartesian_prod
     cdist
+    clone
     combinations
     cross
     cummax
