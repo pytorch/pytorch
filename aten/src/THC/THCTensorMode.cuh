@@ -273,9 +273,10 @@ __global__ void computeMode(
   if (tidx == 0) {
     int64_t index = match.val;
 
-    unsigned int outputOffset = IndexToOffset<T, unsigned int, -1>::get(blockId, values);
-    values.data[outputOffset] = mode;
-    indices.data[outputOffset] = index;
+    unsigned int valuesOutputOffset = IndexToOffset<T, unsigned int, -1>::get(blockId, values);
+    unsigned int indicesOutputOffset = IndexToOffset<int64_t, unsigned int, -1>::get(blockId, indices);
+    values.data[valuesOutputOffset] = mode;
+    indices.data[indicesOutputOffset] = index;
   }
 }
 
