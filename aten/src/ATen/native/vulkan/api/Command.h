@@ -89,7 +89,7 @@ struct Command final {
 // Impl
 //
 
-inline bool Command::Pool::operator==(
+inline bool Command::Pool::Descriptor::operator==(
     const Descriptor& descriptor) const {
   return queue_family_index == descriptor.queue_family_index;
 }
