@@ -714,7 +714,7 @@ namespace intrusive_ptr {
     return wptr.release();
   }
 
-  inline uint32_t use_count(intrusive_ptr_target* self) {
+  inline size_t use_count(intrusive_ptr_target* self) {
     auto ptr = c10::intrusive_ptr<intrusive_ptr_target>::reclaim(self);
     auto r = ptr.use_count();
     ptr.release();
@@ -745,7 +745,7 @@ namespace weak_intrusive_ptr {
   }
 
   // This gives the STRONG refcount of a WEAK pointer
-  inline uint32_t use_count(weak_intrusive_ptr_target* self) {
+  inline size_t use_count(weak_intrusive_ptr_target* self) {
     auto wptr = c10::weak_intrusive_ptr<intrusive_ptr_target>::reclaim(self);
     auto r = wptr.use_count();
     wptr.release();

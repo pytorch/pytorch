@@ -161,9 +161,6 @@
 - name: abs(Tensor self) -> Tensor
   self: grad * self.sign()
 
-- name: absolute(Tensor self) -> Tensor
-  self: grad * self.sign()
-
 - name: acos(Tensor self) -> Tensor
   self: grad * -((-self * self + 1).rsqrt())
 
@@ -332,6 +329,14 @@
 - name: coalesce(Tensor self) -> Tensor
   self: grad
 
+- name: complex(Tensor real, Tensor imag) -> Tensor
+  real: not_implemented("complex real")
+  imag: not_implemented("complex imag")
+
+- name: polar(Tensor abs, Tensor angle) -> Tensor
+  abs: not_implemented("polar abs")
+  angle: not_implemented("polar angle")
+
 - name: conj(Tensor self) -> Tensor
   self: grad.conj()
 
@@ -498,6 +503,10 @@
 - name: grid_sampler_3d(Tensor input, Tensor grid, int interpolation_mode, int padding_mode, bool align_corners) -> Tensor
   input, grid: "grad.defined() ? grid_sampler_3d_backward(grad, input, grid, interpolation_mode, padding_mode, align_corners) : std::tuple<Tensor, Tensor>()"
 
+# See NOTE [ grid_sample CPU fallback ]
+- name: _grid_sampler_2d_cpu_fallback(Tensor input, Tensor grid, int interpolation_mode, int padding_mode, bool align_corners) -> Tensor
+  input, grid: "grad.defined() ? _grid_sampler_2d_cpu_fallback_backward(grad, input, grid, interpolation_mode, padding_mode, align_corners) : std::tuple<Tensor, Tensor>()"
+
 - name: gt_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   self: zeros_like(self)
 
@@ -513,6 +522,10 @@
 
 - name: hardswish(Tensor self) -> Tensor
   self: hardswish_backward(grad, self)
+
+- name: hypot(Tensor self, Tensor other) -> Tensor
+  self: grad * self / result
+  other: grad * other / result
 
 - name: index.Tensor(Tensor self, Tensor?[] indices) -> Tensor
   self: index_backward(zeros_like(self), indices, grad)
@@ -741,6 +754,10 @@
 - name: neg(Tensor self) -> Tensor
   self: grad.neg()
 
+- name: nextafter(Tensor self, Tensor other) -> Tensor
+  self: not_implemented("nextafter")
+  other: not_implemented("nextafter")
+
 - name: norm.Scalar(Tensor self, Scalar p=2) -> Tensor
   self: norm_backward(grad, self, p, result)
 
@@ -916,7 +933,13 @@
 - name: split.Tensor(Tensor(a) self, int split_size, int dim=0) -> Tensor(a)[]
   self: split_backward(grads, split_size, dim, self.sizes(), self.options())
 
-- name: split_with_sizes(Tensor self, int[] split_sizes, int dim=0) -> Tensor[]
+- name: unsafe_split.Tensor(Tensor self, int split_size, int dim=0) -> Tensor[]
+  self: split_backward(grads, split_size, dim, self.sizes(), self.options())
+
+- name: split_with_sizes(Tensor(a) self, int[] split_sizes, int dim=0) -> Tensor(a)[]
+  self: split_with_sizes_backward(grads, split_sizes, dim, self.sizes(), self.options())
+
+- name: unsafe_split_with_sizes(Tensor self, int[] split_sizes, int dim=0) -> Tensor[]
   self: split_with_sizes_backward(grads, split_sizes, dim, self.sizes(), self.options())
 
 - name: sqrt(Tensor self) -> Tensor
@@ -959,6 +982,12 @@
 
 - name: sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   self: sum_backward(grad, self.sizes(), dim, keepdim)
+
+- name: nansum(Tensor self, *, ScalarType? dtype=None) -> Tensor
+  self: grad.expand(self.sizes()).to(self.scalar_type()) * self.isnan().logical_not()
+
+- name: nansum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+  self: nansum_backward(grad.to(self.scalar_type()), self, dim, keepdim)
 
 - name: svd(Tensor self, bool some=True, bool compute_uv=True) -> (Tensor U, Tensor S, Tensor V)
   self: svd_backward(grads, self, some, compute_uv, U, S, V)
@@ -1191,10 +1220,7 @@
   self: threshold_backward(grad, result, 0)
 
 - name: silu(Tensor self) -> Tensor
-  self: silu_backward(grad, self)
-
-- name: silu_(Tensor(a!) self) -> Tensor(a!)
-  self: not_implemented("silu_ cannot compute gradient of inplace version, use silu instead")
+  self: "GradMode::is_enabled() ? infinitely_differentiable_silu_backward(grad, self) : silu_backward(grad, self)"
 
 - name: elu(Tensor self, Scalar alpha=1, Scalar scale=1, Scalar input_scale=1) -> Tensor
   self: elu_backward(grad, alpha, scale, input_scale, result)

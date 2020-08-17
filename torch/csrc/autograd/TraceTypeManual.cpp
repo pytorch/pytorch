@@ -121,12 +121,14 @@ Tensor & detach_(Tensor & self) {
   return self;
 }
 
+// Invariant:
+// - Ops registered to DispatchKey::Tracer below must be included in `MANUAL_TRACER` in tools/autograd/gen_variable_type.py
 TORCH_LIBRARY_IMPL(aten, Tracer, m) {
-  m.impl_UNBOXED("resize_", resize_);
-  m.impl_UNBOXED("resize_as_", resize_as_);
+  m.impl("resize_", resize_);
+  m.impl("resize_as_", resize_as_);
   m.impl("detach", TORCH_FN(detach));
-  m.impl_UNBOXED("detach_", detach_);
-  m.impl_UNBOXED("copy_", copy_);
+  m.impl("detach_", detach_);
+  m.impl("copy_", copy_);
 
   // Skip tracing for the following ops by registering fallthrough kernel explicitly.
   m.impl("backward", CppFunction::makeFallthrough());
