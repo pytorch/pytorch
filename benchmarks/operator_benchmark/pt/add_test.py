@@ -17,10 +17,10 @@ def make_fuzzed_config(
     seed: int = 0,
     cross_product_configs=None,
     tags=None,
-    checksum=None):
-
+    checksum=None
+):
     fuzzer = binary.BinaryOpFuzzer(seed=seed, scale=scale)
-    attr_names=["x_size", "y_size"]
+    attr_names = [binary.X_SIZE, binary.Y_SIZE]
     attrs = []
     for i in range(n):
         params = fuzzer.structure_params(fuzzer.params[i])

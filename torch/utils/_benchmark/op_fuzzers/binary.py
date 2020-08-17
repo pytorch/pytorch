@@ -7,6 +7,9 @@ SMALL = "small"
 MEDIUM = "medium"
 LARGE = "large"
 
+X_SIZE = "x_size"
+Y_SIZE = "y_size"
+
 _MIN_DIM_SIZE = 8
 _MAX_DIM_SIZE = {
     SMALL: 128,
@@ -29,6 +32,7 @@ _MIN_ELEMENTS = {
 
 class BinaryOpFuzzer(Fuzzer):
     def __init__(self, seed, dtype=torch.float32, cuda=False, scale=LARGE):
+        assert scale in (SMALL, MEDIUM, LARGE)
         super().__init__(
             parameters=[
                 # Dimensionality of x and y. (e.g. 1D, 2D, or 3D.)
@@ -128,8 +132,8 @@ class BinaryOpFuzzer(Fuzzer):
             if k.startswith("k_any") or k.startswith("k_pow2"):
                 params.pop(k)
         dim = params.pop("dim")
-        params["x_size"] = tuple(params.pop(i) for i in ("k0", "k1", "k2"))[:dim]
+        params[X_SIZE] = tuple(params.pop(i) for i in ("k0", "k1", "k2"))[:dim]
         params["x_steps"] = tuple(params.pop(i) for i in ("x_step_0", "x_step_1", "x_step_2"))[:dim]
-        params["y_size"] = tuple(params.pop(i) for i in ("y_k0", "y_k1", "y_k2"))[:dim]
+        params[Y_SIZE] = tuple(params.pop(i) for i in ("y_k0", "y_k1", "y_k2"))[:dim]
         params["y_steps"] = tuple(params.pop(i) for i in ("y_step_0", "y_step_1", "y_step_2"))[:dim]
         return params

@@ -351,7 +351,7 @@ class ParamsIndexer(object):
         self._fuzzer = fuzzer
 
     def __getitem__(self, index: int):
-        params, _  = self._fuzzer._generate(index)
+        params, _ = self._fuzzer._generate(index)
         return params
 
 
