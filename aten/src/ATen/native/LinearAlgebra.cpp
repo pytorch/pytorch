@@ -1172,7 +1172,7 @@ Tensor mexp(const Tensor& a, bool compute_highest_degree_approx = false) {
 // Based on:
 //
 // Mathias, Roy. 
-// “A Chain Rule for Matrix Functions and Applications.”
+// A Chain Rule for Matrix Functions and Applications.
 // SIAM J. Matrix Anal. Appl. 17 (1996): 610-620.
 //
 template <typename func_t>
