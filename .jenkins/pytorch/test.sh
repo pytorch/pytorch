@@ -38,12 +38,6 @@ fi
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # Print GPU info
   rocminfo | egrep 'Name:.*\sgfx|Marketing'
-  ID=$(grep -oP '(?<=^ID=).+' /etc/os-release | tr -d '"')
-  if [[ "$ID" == ubuntu ]]; then
-    # TODO: Move this to Docker
-    sudo apt-get -qq update
-    sudo apt-get -qq install --no-install-recommends libsndfile1
-  fi
 
   # TODO: Remove this once ROCm CI images are >= ROCm 3.5
   # ROCm 3.5 required a backwards-incompatible change; the kernel and thunk must match.
