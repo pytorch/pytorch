@@ -16794,10 +16794,12 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                                         'expected all tensors to be on the same device'):
                 torch_fn(x_cpu, y.to(x.dtype))
 
+    @onlyOnCPUAndCUDA
     def test_vdot_invalid_args(self, device):
         self._test_dot_vdot_invalid_args(device, torch.vdot)
         self._test_dot_vdot_invalid_args(device, torch.vdot, complex_dtypes=True)
 
+    @onlyOnCPUAndCUDA
     def test_dot_invalid_args(self, device):
         self._test_dot_vdot_invalid_args(device, torch.dot)
 
