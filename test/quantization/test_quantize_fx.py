@@ -1,19 +1,25 @@
+import torch
 import torch.nn.functional as F
+
+# symbolic trace
 from torch.fx import symbolic_trace
+
+# graph mode quantization based on fx
 from torch.quantization._quantize_fx import (
     Quantizer,
     fuse,
 )
-import torch
-import torch.nn.functional as Fx
-from torch.jit._recursive import wrap_cpp_module
+
+# eager mode quantization
 from torch.quantization import default_qconfig, propagate_qconfig_, default_qat_qconfig
 from torch.quantization import prepare, prepare_qat, convert
 
+# test utils
 from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
 )
 
+# sys libs
 import copy
 import itertools
 
