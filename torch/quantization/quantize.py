@@ -15,7 +15,8 @@ from .default_mappings import (DEFAULT_DYNAMIC_MODULE_MAPPING,
                                DEFAULT_QAT_MODULE_MAPPING,
                                DEFAULT_QCONFIG_PROPAGATE_WHITE_LIST)
 from .stubs import DeQuantStub, QuantWrapper
-from .qconfig import default_dynamic_qconfig, float16_dynamic_qconfig
+from .qconfig import default_dynamic_qconfig, float16_dynamic_qconfig, QConfigDynamic
+from .observer import default_dynamic_quant_observer, PerChannelMinMaxObserver
 
 def _propagate_qconfig_helper(module, qconfig_dict, white_list=None,
                               qconfig_parent=None, prefix=''):
@@ -296,6 +297,14 @@ def quantize_dynamic(model, qconfig_spec=None, dtype=torch.qint8,
                 nn.LSTMCell : float16_dynamic_qconfig,
                 nn.RNNCell : float16_dynamic_qconfig,
                 nn.GRUCell : float16_dynamic_qconfig,
+            }
+        elif dtype == torch.quint8:
+            qconfig_spec = {
+                nn.EmbeddingBag : QConfigDynamic(activation=default_dynamic_quant_observer,
+                                                 weight=PerChannelMinMaxObserver.with_args(
+                                                     dtype=torch.quint8,
+                                                     qscheme=torch.per_channel_affine_float_qparams,
+                                                     ch_axis=0)),
             }
         else:
             raise ValueError(
