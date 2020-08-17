@@ -1,4 +1,3 @@
-import sys
 from datetime import timedelta
 
 from . import (
@@ -8,8 +7,14 @@ from . import (
     _UNSET_RPC_TIMEOUT,
 )
 
+try:
+    from . import TensorPipeAgent, TensorPipeRpcBackendOptions
+    _USE_TENSORPIPE = True
+except ImportError:
+    _USE_TENSORPIPE = False
+
 # For TensorPipeAgent.
-if sys.platform != 'win32':
+if _USE_TENSORPIPE:
     from . import _DEFAULT_NUM_WORKER_THREADS
     DEFAULT_NUM_WORKER_THREADS = _DEFAULT_NUM_WORKER_THREADS
 
