@@ -526,3 +526,10 @@ from ._vmap_internals import vmap
 # class usage. We add these lines here to preserve backward compatbility.
 quantized_lstm = torch.ops.aten.quantized_lstm
 quantized_gru = torch.ops.aten.quantized_gru
+
+# Set torch default device
+torch._default_device = 'cuda' if torch.cuda.is_available() else 'cpu'
+def to_device(self, *args, **kwargs):
+    return self.to(torch._default_device, *args, **kwargs)
+torch.Tensor.to_device = to_device
+torch.nn.Module.to_device = to_device
