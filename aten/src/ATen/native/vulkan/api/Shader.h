@@ -13,12 +13,12 @@ namespace api {
 // This struct defines shader, and shader layout, caches intended to minimize
 // redundant object reconstructions at the cost of extra memory consumption.
 //
-// A shader is a small, typically simple, program that runs on a GPU. The
-// shader layout defines the interface between that program and the outside
-// world, namely what the host (CPU) sees as configurable parameters of the
-// said shader per dispatch.  If the shader was a regular function, the shader
-// layout would have been its function prototype declaring the number and
-// type of its arguments.
+// A shader is a small, usually simple, program that typically runs on a GPU as
+// part of the graphics or compute pipelines.  The shader layout defines the
+// interface between that program and the outside world, namely what the host
+// (i.e. CPU) sees as configurable parameters of the said shader per dispatch.
+// If the shader was a regular function, the shader layout would have been its
+// function prototype declaring the number and type of its arguments.
 //
 // Furthermore, shader layouts, or as Vulkan calls them descriptor set layouts,
 // define the blueprint out of which descriptor sets are instantiated.  Descriptor
