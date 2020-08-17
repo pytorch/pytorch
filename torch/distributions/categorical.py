@@ -47,7 +47,7 @@ class Categorical(Distribution):
         if probs is not None:
             if probs.dim() < 1:
                 raise ValueError("`probs` parameter must be at least one-dimensional.")
-            self.probs = probs / probs.sum(-1, keepdim=True)
+            self.probs = probs.true_divide(probs.sum(-1, keepdim=True))
         else:
             if logits.dim() < 1:
                 raise ValueError("`logits` parameter must be at least one-dimensional.")
