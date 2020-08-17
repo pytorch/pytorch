@@ -73,6 +73,8 @@ Creation Ops
     quantize_per_tensor
     quantize_per_channel
     dequantize
+    complex
+    polar
 
 Indexing, Slicing, Joining, Mutating Ops
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -82,7 +84,9 @@ Indexing, Slicing, Joining, Mutating Ops
 
     cat
     chunk
+    dstack
     gather
+    hstack
     index_select
     masked_select
     narrow
@@ -96,6 +100,7 @@ Indexing, Slicing, Joining, Mutating Ops
     transpose
     unbind
     unsqueeze
+    vstack
     where
 
 .. _generators:
@@ -291,9 +296,11 @@ Pointwise Ops
     logical_or
     logical_xor
     logit
+    hypot
     mul
     mvlgamma
     neg
+    nextafter
     polygamma
     pow
     rad2deg
@@ -403,6 +410,7 @@ Other Operations
     bucketize
     cartesian_prod
     cdist
+    clone
     combinations
     cross
     cummax

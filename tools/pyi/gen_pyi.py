@@ -198,7 +198,7 @@ binary_ops = ('add', 'sub', 'mul', 'div', 'pow', 'lshift', 'rshift', 'mod', 'tru
               'radd', 'rsub', 'rmul', 'rtruediv', 'rfloordiv', 'rpow',          # reverse arithmetic
               'and', 'or', 'xor',                   # logic
               'iadd', 'iand', 'idiv', 'ilshift', 'imul',
-              'ior', 'irshift', 'isub', 'itruediv', 'ixor',  # inplace ops
+              'ior', 'irshift', 'isub', 'ixor',  # inplace ops
               )
 comparison_ops = ('eq', 'ne', 'ge', 'gt', 'lt', 'le')
 unary_ops = ('neg', 'abs', 'invert')
@@ -547,6 +547,7 @@ def gen_pyi(declarations_path, out):
         'requires_grad_': ['def requires_grad_(self, mode: _bool=True) -> Tensor: ...'],
         'element_size': ['def element_size(self) -> _int: ...'],
         'dim': ['def dim(self) -> _int: ...'],
+        'nonzero': ['def nonzero(self, *, as_tuple: _bool=...) -> Tensor: ...'],
         'numel': ['def numel(self) -> _int: ...'],
         'ndimension': ['def ndimension(self) -> _int: ...'],
         'nelement': ['def nelement(self) -> _int: ...'],
