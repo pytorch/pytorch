@@ -22,7 +22,7 @@ class TestFunctionalAutogradBenchmark(TestCase):
             res = subprocess.run(cmd)
 
             self.assertTrue(res.returncode == 0)
-            # Check that somethink was writen to the file
+            # Check that something was written to the file
             out_file.seek(0, os.SEEK_END)
             self.assertTrue(out_file.tell() > 0)
 
@@ -37,7 +37,7 @@ class TestFunctionalAutogradBenchmark(TestCase):
     @slowTest
     def test_slow_tasks(self):
         slow_tasks = ['fcn_resnet', 'detr']
-        # deepspeech is volontarily excluded as it takes too long to run without
+        # deepspeech is voluntarily excluded as it takes too long to run without
         # proper tuning of the number of threads it should use.
 
         for task in slow_tasks:

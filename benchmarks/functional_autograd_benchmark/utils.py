@@ -6,10 +6,14 @@ from torch import nn, Tensor
 from typing import List, Tuple, Dict, Union, Callable
 
 # Type helpers
-InpType = Union[Tensor, Tuple[Tensor, ...]]
-GetterReturnType = Tuple[Callable[..., Tensor], InpType]
+InputsType = Union[Tensor, Tuple[Tensor, ...]]
+# A Getter takes in a device and returns a callable and the inputs to that callable
+GetterReturnType = Tuple[Callable[..., Tensor], InputsType]
 GetterType = Callable[[torch.device], GetterReturnType]
+# V here refers to the v in either vjp, jvp, vhp or hvp
 VType = Union[None, Tensor, Tuple[Tensor, ...]]
+# Type used to store timing results. The first key is the model name, the second key
+# is the task name, the result is a Tuple of: speedup, mean_before, var_before, mean_after, var_after.
 TimingResultType = Dict[str, Dict[str, Tuple[float, ...]]]
 
 # Utilities to make nn.Module "functional"
@@ -18,25 +22,29 @@ TimingResultType = Dict[str, Dict[str, Tuple[float, ...]]]
 def _del_nested_attr(obj: nn.Module, names: List[str]) -> None:
     """
     Deletes the attribute specified by the given list of names.
+    For example, to delete the attribute obj.conv.weight,
+    use _del_nested_attr(obj, ['conv', 'weight'])
     """
     if len(names) == 1:
         delattr(obj, names[0])
     else:
         _del_nested_attr(getattr(obj, names[0]), names[1:])
 
-def _set_nested_attr(obj: nn.Module, names: List[str], val: Tensor) -> None:
+def _set_nested_attr(obj: nn.Module, names: List[str], value: Tensor) -> None:
     """
-    Set the attribute specified by the given list of names to val.
+    Set the attribute specified by the given list of names to value.
+    For example, to set the attribute obj.conv.weight,
+    use _del_nested_attr(obj, ['conv', 'weight'], value)
     """
     if len(names) == 1:
-        setattr(obj, names[0], val)
+        setattr(obj, names[0], value)
     else:
-        _set_nested_attr(getattr(obj, names[0]), names[1:], val)
+        _set_nested_attr(getattr(obj, names[0]), names[1:], value)
 
 def extract_weights(mod: nn.Module) -> Tuple[Tuple[Tensor, ...], List[str]]:
     """
     This function removes all the Parameters from the model and
-    return them as a tuple.
+    return them as a tuple as well as their original attribute names.
     The weights must be re-loaded with `load_weights` before the model
     can be used again.
     Note that this function modifies the model in place and after this

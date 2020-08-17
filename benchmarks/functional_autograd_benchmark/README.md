@@ -27,7 +27,7 @@ python functional_autograd_benchmark.py --output before.txt
 
 # Compile pytorch with your change
 popd
-git checkout you_feature_branch
+git checkout your_feature_branch
 python setup.py develop
 
 # Run the benchmark for the new version

@@ -23,7 +23,7 @@ def main():
         for task in res_before[model]:
             mean_before, var_before = res_before[model][task]
             if task not in res_after[model]:
-                diff[model][task] = (-1, mean_before, var_before, -1, -1)
+                diff[model][task] = (None, mean_before, var_before, None, None)
             else:
                 mean_after, var_after = res_after[model][task]
                 diff[model][task] = (mean_before / mean_after, mean_before, var_before, mean_after, var_after)
@@ -31,7 +31,7 @@ def main():
         for task in res_after[model]:
             if task not in res_before[model]:
                 mean_after, var_after = res_after[model][task]
-                diff[model][task] = (-1, -1, -1, mean_after, var_after)
+                diff[model][task] = (None, None, None, mean_after, var_after)
 
     header = ("model", "task", "speedup", "mean (before)", "var (before)", "mean (after)", "var (after)")
     out = to_markdown_table(diff, header=header)

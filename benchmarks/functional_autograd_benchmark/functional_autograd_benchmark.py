@@ -1,6 +1,4 @@
 import torch
-from torch import Tensor
-from torch import nn
 from torch.autograd import functional
 
 import time
@@ -12,7 +10,7 @@ import ppl_models
 import vision_models
 import audio_text_models
 
-from utils import to_markdown_table, TimingResultType, InpType, GetterType, VType
+from utils import to_markdown_table, TimingResultType, InputsType, GetterType, VType
 
 # Listing of the different tasks
 FAST_TASKS_NO_DOUBLE_BACK = [
@@ -57,7 +55,7 @@ MODELS = [
     ModelDef("multiheadattn", audio_text_models.get_multiheadattn, FAST_TASKS, []),
 ]
 
-def get_v_for(model: Callable, inp: InpType, task: str) -> VType:
+def get_v_for(model: Callable, inp: InputsType, task: str) -> VType:
     v: VType
 
     if task in ["vjp"]:
@@ -73,7 +71,7 @@ def get_v_for(model: Callable, inp: InpType, task: str) -> VType:
 
     return v
 
-def run_once(model: Callable, inp: InpType, task: str, v: VType) -> None:
+def run_once(model: Callable, inp: InputsType, task: str, v: VType) -> None:
     func = getattr(functional, task)
 
     if v is not None:
