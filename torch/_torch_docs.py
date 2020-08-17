@@ -156,9 +156,8 @@ Example::
     tensor([ 1.2294,  2.2004,  1.3690,  1.7298])
 """.format(**common_args))
 
-add_docstr(torch.acosh,
-           r"""
-acosh(input, out=None) -> Tensor
+add_docstr(torch.acosh, r"""
+acosh(input, *, out=None) -> Tensor
 
 Returns a new tensor with the inverse hyperbolic cosine of the elements of :attr:`input`.
 
@@ -184,8 +183,13 @@ Example::
     tensor([ 0.7791, 1.3120, 1.2979, 1.1341 ])
 """.format(**common_args))
 
-add_docstr(torch.add,
-           r"""
+add_docstr(torch.arccosh, r"""
+arccosh(input, *, out=None) -> Tensor
+
+Alias for :func:`torch.acosh`.
+""".format(**common_args))
+
+add_docstr(torch.add, r"""
 add(input, other, out=None)
 
 Adds the scalar :attr:`other` to each element of the input :attr:`input`

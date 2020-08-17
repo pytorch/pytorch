@@ -2,7 +2,7 @@
 
 #include <torch/nn/cloneable.h>
 #include <torch/nn/module.h>
-#include <torch/nn/options/transformer.h>
+#include <torch/nn/options/transformerlayer.h>
 #include <torch/nn/pimpl.h>
 #include <torch/nn/modules/linear.h>
 #include <torch/nn/modules/dropout.h>
