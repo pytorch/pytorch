@@ -245,9 +245,7 @@
 #     adding an alias in a namespace.)
 # 5) Update torch/overrides.py consistent with the original function.
 # 6) Update the alias_map in torch/csrc/jit/passes/normalize_ops.cpp.
-# 8) Add entries to test/test_op_normalization.py's "alias_infos"
-# 9) Add a test or modify an existing test to validate that the alias's behavior
-#      is the same as the original function's.
+# 8) Add entries to test/test_op_aliases.py's "alias_infos"
 #
 # See torch.absolute, an alias for torch.abs, as an example.
 
@@ -469,6 +467,20 @@
   variants: function, method
 
 - func: acosh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  supports_named_tensor: True
+
+# arcosh, alias for acosh
+- func: arccosh(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  supports_named_tensor: True
+  variants: function, method
+
+- func: arccosh_(Tensor(a!) self) -> Tensor(a!)
+  use_c10_dispatcher: full
+  supports_named_tensor: True
+  variants: function, method
+
+- func: arccosh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
 
 - func: asinh(Tensor self) -> Tensor
@@ -2863,6 +2875,21 @@
   use_c10_dispatcher: full
 
 - func: stack.out(Tensor[] tensors, int dim=0, *, Tensor(a!) out) -> Tensor(a!)
+
+- func: hstack(Tensor[] tensors) -> Tensor
+  use_c10_dispatcher: full
+
+- func: hstack.out(Tensor[] tensors, *, Tensor(a!) out) -> Tensor(a!)
+
+- func: vstack(Tensor[] tensors) -> Tensor
+  use_c10_dispatcher: full
+
+- func: vstack.out(Tensor[] tensors, *, Tensor(a!) out) -> Tensor(a!)
+
+- func: dstack(Tensor[] tensors) -> Tensor
+  use_c10_dispatcher: full
+
+- func: dstack.out(Tensor[] tensors, *, Tensor(a!) out) -> Tensor(a!)
 
 # The signature is designed to be consistent with librosa except that it is
 # missing the `pad_mode` and `center` arguments, which are taken care of at
