@@ -2894,7 +2894,7 @@ class TestAutograd(TestCase):
         rnn = torch.nn.LSTM(10, 20, 2)
         total_time_s = 0
         with profile(record_shapes=True) as prof:
-            for i in range(5):
+            for i in range(20):
                 input = torch.randn(5, 3, 10)
                 h = torch.randn(2, 3, 20)
                 c = torch.randn(2, 3, 20)
@@ -2908,9 +2908,9 @@ class TestAutograd(TestCase):
         print(prof.key_averages(group_by_input_shape=True).table(
             sort_by="self_cpu_time_total", row_limit=10))
         print(prof.table(
-            sort_by="self_cpu_time_total", row_limit=10, header="TEST", top_level_ops_only=True))
+            sort_by="self_cpu_time_total", row_limit=10, header="TEST", top_level_events_only=True))
         print(prof.key_averages(group_by_input_shape=True).table(
-            sort_by="self_cpu_time_total", row_limit=10, top_level_ops_only=True))
+            sort_by="self_cpu_time_total", row_limit=10, top_level_events_only=True))
 
         total_time_us = total_time_s * 1000.0 * 1000.0  # make it us which is profiler default
         print(

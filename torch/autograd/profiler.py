@@ -93,7 +93,7 @@ class EventList(list):
                         parent.append_cpu_child(event)
                         assert (
                             event.cpu_parent is None
-                        ), "There is already an CPU parent event for {}".format(
+                        ), "There is already a CPU parent event for {}".format(
                             event.key
                         )
                         event.set_cpu_parent(parent)
@@ -111,7 +111,7 @@ class EventList(list):
     def cpu_children_populated(self):
         return self._cpu_children_populated
 
-    def table(self, sort_by=None, row_limit=100, header=None, top_level_ops_only=False):
+    def table(self, sort_by=None, row_limit=100, header=None, top_level_events_only=False):
         """Prints an EventList as a nicely formatted table.
 
         Arguments:
@@ -120,6 +120,12 @@ class EventList(list):
                 Valid keys include: ``cpu_time``, ``cuda_time``, ``cpu_time_total``,
                 ``cuda_time_total``, ``cpu_memory_usage``, ``cuda_memory_usage``,
                 ``self_cpu_memory_usage``, ``self_cuda_memory_usage``, ``count``.
+            top_level_events_only(bool, optional): Boolean flag to determine the
+                selection of events to display. If true, the profiler will only
+                display events at top level like top-level invocation of python
+                `lstm`, python `add` or other functions, nested events like cpu/cuda
+                ops events like `EmbeddingBagBackward`, `_embedding_bag_backward` are
+                omitted for profiler result readability.
 
         Returns:
             A string containing the table.
@@ -131,7 +137,7 @@ class EventList(list):
             header=header,
             use_cuda=self._use_cuda,
             profile_memory=self._profile_memory,
-            top_level_ops_only=top_level_ops_only)
+            top_level_events_only=top_level_events_only)
 
     def export_chrome_trace(self, path):
         """Exports an EventList as a Chrome tracing tools file.
@@ -238,14 +244,12 @@ class EventList(list):
         total_stat.key = 'Total'
         return total_stat
 
-    def remove_nested_events(self):
-        """Returns a new EventList object where all nested events have been
-        deleted. This is useful to avoid clutterring of the results with
-        a bunch of nested functions
-
-        Note that self_cpu_time_total still works correctly after the removal.
-        Because we don't remove the child links. And they keep children alive
-        even if original EventList was discarded"""
+    def without_nested_events(self):
+        """
+        Returns:
+            A new EventList object where all nested events have been
+        deleted.
+        """
         result = set(self)
         for event in self:
             for child in event.cpu_children:
@@ -368,18 +372,18 @@ class profile(object):
             raise RuntimeError("can't export a trace that didn't finish running")
         self.function_events.populate_cpu_children()
 
-    def table(self, sort_by=None, row_limit=100, header=None, top_level_ops_only=False):
+    def table(self, sort_by=None, row_limit=100, header=None, top_level_events_only=False):
         self._check_finish()
         return self.function_events.table(
             sort_by=sort_by, row_limit=row_limit, header=header,
-            top_level_ops_only=top_level_ops_only
+            top_level_events_only=top_level_events_only
         )
     table.__doc__ = EventList.table.__doc__
 
-    def remove_nested_events(self):
+    def without_nested_events(self):
         self._check_finish()
-        return self.function_events.remove_nested_events()
-    table.__doc__ = EventList.remove_nested_events.__doc__
+        return self.function_events.without_nested_events()
+    table.__doc__ = EventList.without_nested_events.__doc__
 
     def export_chrome_trace(self, path):
         self._check_finish()
@@ -1084,7 +1088,7 @@ def build_table(
         row_limit=100,
         use_cuda=True,
         profile_memory=False,
-        top_level_ops_only=False):
+        top_level_events_only=False):
     """Prints a summary of events (which can be a list of FunctionEvent or FunctionEventAvg)."""
     if len(events) == 0:
         return ""
@@ -1169,7 +1173,7 @@ def build_table(
     if header is not None:
         append('=' * line_length)
         append(header)
-    if top_level_ops_only:
+    if top_level_events_only:
         append('=' * line_length)
         append('This report only display top-level ops statistics')
     append(header_sep)
@@ -1178,12 +1182,10 @@ def build_table(
     append(header_sep)
 
     event_limit = 0
-    if row_limit > 0:
-        events = events[:row_limit]
     for evt in events:
         if event_limit == row_limit:
             break
-        if top_level_ops_only and evt.cpu_parent is not None:
+        if top_level_events_only and evt.cpu_parent is not None:
             continue
         else:
             event_limit += 1
