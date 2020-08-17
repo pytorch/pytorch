@@ -701,6 +701,34 @@ struct CodeImpl {
     return r;
   }
 
+  void emitNumInputsOperand(int numInputs) {
+    int result = constant_table_.size();
+    auto ival = IValue(numInputs);
+    // value_to_reg_[ival] = result;
+    constant_table_.emplace_back(std::move(ival));
+    insertInstruction(LOADC, result);
+  }
+
+  void emitTypeCheck(Node* node) {
+    auto num_inputs = node->inputs().size();
+
+    // Check that TypeCheck has at least one input.
+    TORCH_INTERNAL_ASSERT(
+        num_inputs && num_inputs + 1 == node->outputs().size());
+    emitLoadInputs(node->inputs());
+
+    // Since TypeCheck is variadic. Insert an instruction to push number of
+    // input operands into the stack.
+    emitNumInputsOperand(num_inputs);
+
+    // Emit the expected type.
+    size_t types_start = type_table_.size();
+    for (size_t i = 0; i < num_inputs; i++) {
+      emitType(node->outputs()[i]->type());
+    }
+    insertInstruction(TYPECHECK, types_start, num_inputs);
+  }
+
   size_t emitGuard(Node* node) {
     // unoptimized graph is at index 0
     // guarded input is at index 1
@@ -879,6 +907,9 @@ struct CodeImpl {
         } else {
           emitInterfaceCall(node->s(attr::name), node->inputs());
         }
+        break;
+      case prim::TypeCheck:
+        emitTypeCheck(node);
         break;
       case prim::BailOut:
         emitBailOut(node);
@@ -1342,6 +1373,38 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                 "Bailout ", inst.X, " triggered via bailout_requests_!");
             af.instructions[af.pc].op = GUARD;
             push(stack, false);
+            ++af.pc;
+            break;
+          }
+          case TYPECHECK: {
+            int num_inputs = stack.back().toInt(), i = 0;
+            pop(stack);
+            TORCH_INTERNAL_ASSERT(stack.size() >= num_inputs);
+            if (num_inputs == 0) {
+              push(stack, true);
+              break;
+            }
+            // Check every input's shape against profiled (expected) shape.
+            for (i = 0; i < num_inputs; i++) {
+              auto& input = peek(stack, i, num_inputs);
+              TORCH_INTERNAL_ASSERT(input.isTensor());
+              auto t = input.toTensor();
+              const TypePtr& expected = af.types[inst.X + i];
+              auto expected_type = expected->cast<TensorType>();
+              if (t.defined() &&
+                  !frames.back().symbols2dims.bindSymbolicShapes(
+                      t.sizes(), expected_type->symbolic_sizes()) &&
+                  !expected_type->matchTensor(t)) {
+                GRAPH_DEBUG(
+                    "TypeCheck operand ", i, " mismatch profiled shape!");
+                push(stack, false);
+                break;
+              }
+            }
+            if (i == num_inputs) {
+              GRAPH_DEBUG("TypeCheck yields TRUE\n");
+              push(stack, true);
+            }
             ++af.pc;
             break;
           }
