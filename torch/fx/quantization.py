@@ -2,7 +2,7 @@ r'''
 **This file is EXPERIMENTAL and is mostly used for testing purposes! Do not
 rely on it for anything!**
 '''
-from torch.fx import Graph, Node, GraphModule
+from torch.fx import Graph, GraphModule
 from torch.fx.graph import map_arg
 from torch.fx.proxy import _create_proxy
 from torch.fx.symbolic_trace import DelegateBase
@@ -47,6 +47,7 @@ class MinMaxObserver:
 class NoObserver:
     def __init__(self, quantizer, node):
         pass
+
     def observe(self, node, env):
         pass
 
@@ -64,12 +65,13 @@ class Add(MinMaxObserver):
         if not self.all_tensors:
             return NotImplemented
         scale, zeropoint = self.scale_zeropoint()
-        return _create_proxy(quantizer.delegate, 'call_function', torch.ops.quantized.add, load_arg(node.args), {'scale': scale, 'zero_point': zeropoint})
+        return _create_proxy(quantizer.delegate, 'call_function', torch.ops.quantized.add, load_arg(node.args),
+                             {'scale': scale, 'zero_point': zeropoint})
 
 
 class Relu(NoObserver):
     def quantize(self, quantizer, node, load_arg):
-        return torch.relu(load_arg(node.args[0])) # torch.relu works directly on quantized tensors?
+        return torch.relu(load_arg(node.args[0]))  # torch.relu works directly on quantized tensors?
 
 # these ops have quantized equivalents that do not need any extra information
 @register_pattern(torch.nn.ReLU)
@@ -90,7 +92,7 @@ class IdentityModule(torch.nn.Module):
 @register_pattern((torch.nn.modules.batchnorm.BatchNorm2d, torch.nn.modules.conv.Conv2d))
 @register_pattern((torch.nn.ReLU, (torch.nn.modules.batchnorm.BatchNorm2d, torch.nn.modules.conv.Conv2d)))
 class ConvNormRelu(MinMaxObserver):
-     def __init__(self, quantizer, node):
+    def __init__(self, quantizer, node):
         super().__init__(quantizer, node)
         self.relu_node, self.bn_node = None, None
         if isinstance(quantizer.modules[node.target], torch.nn.ReLU):
@@ -104,15 +106,14 @@ class ConvNormRelu(MinMaxObserver):
         self.conv_node = node
         self.conv = quantizer.modules[self.conv_node.target]
 
-     def quantize(self, quantizer, node, load_arg):
-
+    def quantize(self, quantizer, node, load_arg):
         mod = self.conv
         weight, bias = mod.weight, mod.bias
 
         if self.bn_node is not None:
             weight, bias = fuse_conv_bn_weights(
-                    weight, bias, self.bn.running_mean, self.bn.running_var,
-                    self.bn.eps, self.bn.weight, self.bn.bias)
+                weight, bias, self.bn.running_mean, self.bn.running_var,
+                self.bn.eps, self.bn.weight, self.bn.bias)
 
         min_val, max_val = float(weight.min()), float(weight.max())
 
@@ -134,10 +135,12 @@ class ConvNormRelu(MinMaxObserver):
         setattr(quantizer.modules[parent_name], name, qconv)
         if self.bn_node is not None:
             parent_bn, bn_name = _parent_name(self.bn_node.target)
-            setattr(quantizer.modules[parent_name], bn_name, IdentityModule()) # we can't just delete this because submodules's forwards (which are not longer use)
-                                                                            # try to call it, so replace with something that does nothing.
+            # we can't just delete this because submodules's forwards (which are not longer use)
+            # try to call it, so replace with something that does nothing.
+            setattr(quantizer.modules[parent_name], bn_name, IdentityModule())
 
-        return _create_proxy(quantizer.delegate, 'call_module', self.conv_node.target, (load_arg(self.conv_node.args[0]),), {})
+        return _create_proxy(quantizer.delegate, 'call_module', self.conv_node.target,
+                             (load_arg(self.conv_node.args[0]),), {})
 
 
 # turn foo.bar -> ['foo', 'bar']
@@ -290,7 +293,7 @@ class Quantizer:
 
     def _find_matches(self, patterns):
         modules = dict(self.root.named_modules())
-        match_map = {} # node name -> (root_node, match_value?)
+        match_map = {}  # node name -> (root_node, match_value?)
 
         def apply_match(pattern, node, match):
             if isinstance(pattern, tuple):
@@ -311,6 +314,7 @@ class Quantizer:
 
     def _find_quants(self, quant_ctor):
         quants = {}
+
         def visit_arg(n):
             # note: we have to measure quantization information
             # even for nodes where we might not use it because it is already

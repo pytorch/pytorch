@@ -176,8 +176,8 @@ class TestFX(TestCase):
         d = qgraph(ip)
         e = qgraph_script(ip)
 
-        print((a-d).abs().max())
-        assert (a-d).abs().max() < 2
+        print((a - d).abs().max())
+        assert (a - d).abs().max() < 2
         assert torch.allclose(d, e)
 
 
