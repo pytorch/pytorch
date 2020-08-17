@@ -3,22 +3,28 @@ Weight Normalization from https://arxiv.org/abs/1602.07868
 """
 from torch.nn.parameter import Parameter
 from torch import _weight_norm, norm_except_dim
+from typing import Any, TypeVar
+from ..modules import Module
 
 
 class WeightNorm(object):
-    def __init__(self, name, dim):
+    name: str
+    dim: int
+
+    def __init__(self, name: str, dim: int) -> None:
         if dim is None:
             dim = -1
         self.name = name
         self.dim = dim
 
-    def compute_weight(self, module):
+    # TODO Make return type more specific
+    def compute_weight(self, module: Module) -> Any:
         g = getattr(module, self.name + '_g')
         v = getattr(module, self.name + '_v')
         return _weight_norm(v, g, self.dim)
 
     @staticmethod
-    def apply(module, name, dim):
+    def apply(module, name: str, dim: int) -> 'WeightNorm':
         for k, hook in module._forward_pre_hooks.items():
             if isinstance(hook, WeightNorm) and hook.name == name:
                 raise RuntimeError("Cannot register two weight_norm hooks on "
@@ -44,18 +50,20 @@ class WeightNorm(object):
 
         return fn
 
-    def remove(self, module):
+    def remove(self, module: Module) -> None:
         weight = self.compute_weight(module)
         delattr(module, self.name)
         del module._parameters[self.name + '_g']
         del module._parameters[self.name + '_v']
         setattr(module, self.name, Parameter(weight.data))
 
-    def __call__(self, module, inputs):
+    def __call__(self, module: Module, inputs: Any) -> None:
         setattr(module, self.name, self.compute_weight(module))
 
 
-def weight_norm(module, name='weight', dim=0):
+T_module = TypeVar('T_module', bound=Module)
+
+def weight_norm(module: T_module, name: str = 'weight', dim: int = 0) -> T_module:
     r"""Applies weight normalization to a parameter in the given module.
 
     .. math::
@@ -98,7 +106,7 @@ def weight_norm(module, name='weight', dim=0):
     return module
 
 
-def remove_weight_norm(module, name='weight'):
+def remove_weight_norm(module: T_module, name: str = 'weight') -> T_module:
     r"""Removes the weight normalization reparameterization from a module.
 
     Args:
