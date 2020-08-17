@@ -11,6 +11,25 @@ namespace torch {
 namespace jit {
 
 namespace {
+ModulePtr getModulePtrForGetAttrNode(
+    const Node* node,
+    const std::shared_ptr<Graph>& graph,
+    const Module& graph_input_module) {
+  std::vector<std::string> names;
+  names.clear();
+  while (!(node->outputs()[0]->type() == graph->inputs()[0]->type())) {
+    TORCH_INTERNAL_ASSERT(
+        node->kind() == prim::GetAttr, "Expected prim::GetAttr nodes");
+    names.insert(names.begin(), node->s(attr::name));
+    node = node->inputs()[0]->node();
+  }
+  // Copy/paste from quantization/helper.h
+  Module m = graph_input_module;
+  for (const auto& p : names) {
+    m = m.attr(p).toModule();
+  }
+  return m._ivalue();
+}
 
 class AttributePropagator {
  public:
@@ -433,17 +452,12 @@ class AttributePropagator {
         }
         if (n->kind() == prim::GetAttr) {
           auto& name = n->s(attr::name);
-          for (auto& mptr : modules) {
-            auto module = Module(mptr);
-            if (module.type() == n->inputs()[0]->type() &&
-                module.hasattr(name)) {
-              auto attr = module.attr(name);
-              insertMutableAttr(name, attr, mptr);
-              if (attr.isModule()) {
-                modules.insert(attr.toModule()._ivalue());
-              }
-              break;
-            }
+          auto mptr =
+              getModulePtrForGetAttrNode(n->input(0)->node(), graph, module_);
+          auto module = Module(mptr);
+          if (module.type() == n->inputs()[0]->type() && module.hasattr(name)) {
+            auto attr = module.attr(name);
+            insertMutableAttr(name, attr, mptr);
           }
         } else if (n->kind() == prim::fork) {
           applyToForkSubgraph(
