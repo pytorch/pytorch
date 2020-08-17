@@ -50,7 +50,7 @@ void expm1_kernel_cuda(TensorIterator& iter) {
 void i0_kernel_cuda(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.dtype(), "i0_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-      return ::cyl_bessel_i0(a);
+      return c10::cuda::compat::cyl_bessel_i0(a);
     });
   });
 }
