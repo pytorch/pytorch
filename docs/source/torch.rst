@@ -251,6 +251,7 @@ Pointwise Ops
     absolute
     acos
     acosh
+    arccosh
     add
     addcdiv
     addcmul

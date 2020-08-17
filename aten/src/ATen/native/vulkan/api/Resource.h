@@ -54,9 +54,7 @@ struct Resource final {
     VkBuffer handle;
     Memory memory;
 
-    inline operator bool() const {
-      return VK_NULL_HANDLE != handle;
-    }
+    operator bool() const;
   };
 
   /*
@@ -88,9 +86,7 @@ struct Resource final {
     VkImageView view;
     Memory memory;
 
-    inline operator bool() const {
-      return VK_NULL_HANDLE != handle;
-    }
+    operator bool() const;
   };
 
   /*
@@ -165,6 +161,14 @@ inline Resource::Memory::Data<Pointer> Resource::Memory::map() {
     reinterpret_cast<Pointer>(map(*this)),
     Scope(allocator, allocation, Scope::Access::Write),
   };
+}
+
+inline Resource::Buffer::operator bool() const {
+  return VK_NULL_HANDLE != handle;
+}
+
+inline Resource::Image::operator bool() const {
+  return VK_NULL_HANDLE != handle;
 }
 
 } // namespace api
