@@ -4,7 +4,7 @@ rely on it for anything!**
 '''
 from torch.fx import Graph, GraphModule
 from torch.fx.graph import map_arg
-from torch.fx.proxy import _create_proxy
+from torch.fx.proxy import Proxy
 from torch.fx.symbolic_trace import DelegateBase
 import sys
 import torch
@@ -65,8 +65,7 @@ class Add(MinMaxObserver):
         if not self.all_tensors:
             return NotImplemented
         scale, zeropoint = self.scale_zeropoint()
-        return _create_proxy(quantizer.delegate, 'call_function', torch.ops.quantized.add, load_arg(node.args),
-                             {'scale': scale, 'zero_point': zeropoint})
+        return quantizer.quantized_graph.create_node('call_function', torch.ops.quantized.add, load_arg(node.args), {'scale': scale, 'zero_point': zeropoint})
 
 
 class Relu(NoObserver):
@@ -80,7 +79,7 @@ class Relu(NoObserver):
 @register_pattern(torch.nn.AdaptiveAvgPool2d)
 class CopyNode(NoObserver):
     def quantize(self, quantizer, node, load_arg):
-        return _create_proxy(quantizer.delegate, node.op, node.target, map_arg(node.args, load_arg), map_arg(node.kwargs, load_arg))
+        return quantizer.quantized_graph.node_copy(node, load_arg)
 
 class IdentityModule(torch.nn.Module):
     def forward(self, x):
@@ -139,8 +138,7 @@ class ConvNormRelu(MinMaxObserver):
             # try to call it, so replace with something that does nothing.
             setattr(quantizer.modules[parent_name], bn_name, IdentityModule())
 
-        return _create_proxy(quantizer.delegate, 'call_module', self.conv_node.target,
-                             (load_arg(self.conv_node.args[0]),), {})
+        return quantizer.quantized_graph.create_node('call_module', self.conv_node.target, (load_arg(self.conv_node.args[0]),), {})
 
 
 # turn foo.bar -> ['foo', 'bar']
@@ -157,7 +155,7 @@ class DefaultQuant(MinMaxObserver):
     def quantize(self, input):
         assert self.all_tensors
         scale, zeropoint = self.scale_zeropoint()
-        return torch.quantize_per_tensor(input, scale, zeropoint, torch.quint8)
+        return torch.quantize_per_tensor(Proxy(input), scale, zeropoint, torch.quint8).node
 
 def matches(modules, node, pattern, max_uses=sys.maxsize):
     if isinstance(pattern, tuple):
@@ -254,7 +252,7 @@ class Quantizer:
         def load_arg(n, quantized):
             if not quantized:
                 if n.name not in env and n.name in quant_env:
-                    env[n.name] = quant_env[n.name].dequantize()
+                    env[n.name] = Proxy(quant_env[n.name]).dequantize().node
                 return env[n.name]
             else:
                 if n.name not in quant_env and n.name in env:
@@ -267,18 +265,14 @@ class Quantizer:
                     return load_arg(n, quantized=False)
                 else:
                     return copy_recusive(n)
-            r = env[node.name] = _create_proxy(self.delegate, node.op, node.target,
-                                               map_arg(node.args, lambda n: load_arg(n, quantized=False)),
-                                               map_arg(node.kwargs, lambda n: load_arg(n, quantized=False)))
+            r = env[node.name] = self.quantized_graph.node_copy(node, lambda n: load_arg(n, quantized=False) )
             return r
 
         for node in self.graph.nodes:
             root_node, obj = self.matches.get(node.name, (None, None))
             if root_node is None:
                 # not quantized just copy it
-                env[node.name] = _create_proxy(
-                    self.delegate, node.op, node.target, map_arg(node.args, lambda n: load_arg(n, quantized=False)),
-                    map_arg(node.kwargs, lambda n: load_arg(n, quantized=False)))
+                env[node.name] = self.quantized_graph.node_copy(node, lambda n: load_arg(n, quantized=False))
 
             elif root_node is node:
                 r = obj.quantize(self, node, lambda a: map_arg(a, lambda n: load_arg(n, quantized=True)))
@@ -288,7 +282,7 @@ class Quantizer:
                 else:
                     quant_env[node.name] = r
 
-        self.quantized_graph.output(load_arg(self.graph.result, quantized=False).node)
+        self.quantized_graph.output(load_arg(self.graph.result, quantized=False))
         return GraphModule(self.root, self.quantized_graph)
 
     def _find_matches(self, patterns):

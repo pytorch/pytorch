@@ -1,11 +1,10 @@
 import torch
 from torch.fx import symbolic_trace, Proxy, Node, GraphModule, DefaultDelegate
-from torch.fx.quantization import Quantizer
+
+from fx.quantization import Quantizer
 
 from typing import Any, Callable, Dict, Optional, Tuple, Union
-
 from torch.testing._internal.common_utils import TestCase, run_tests
-
 from torchvision.models import resnet18
 
 class TestFX(TestCase):
@@ -176,7 +175,6 @@ class TestFX(TestCase):
         d = qgraph(ip)
         e = qgraph_script(ip)
 
-        print((a - d).abs().max())
         assert (a - d).abs().max() < 2
         assert torch.allclose(d, e)
 
