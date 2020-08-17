@@ -103,7 +103,7 @@
     docker:
       - image: continuumio/miniconda3
     environment:
-      - DRY_RUN: disabled
+      - DRY_RUN: enabled
       - PACKAGE_TYPE: "<< parameters.package_type >>"
       - UPLOAD_SUBFOLDER: "<< parameters.upload_subfolder >>"
     steps:

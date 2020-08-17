@@ -129,7 +129,7 @@ class Conf(object):
                     nightly=True
                 )],
                 "filters": branch_filters.gen_filter_dict(
-                    branches_list=["nightly"],
+                    branches_list=r"/.*/",
                     tags_list=[branch_filters.RC_PATTERN],
                 ),
                 "package_type": self.pydistro,
