@@ -440,9 +440,11 @@ class TestVmapAPI(TestCase):
         vmap(foo, in_dims=(1,))(torch.randn(2, 3))
 
     def _assert_uses_vmap_fallback(self, vmap_args, inputs):
-        regex = r'falling back to slow \(for loop and stack\) implementation'
-        with self.assertWarnsRegex(RuntimeWarning, regex):
+        with warnings.catch_warnings(record=True) as wa:
             result = vmap(*vmap_args)(*inputs)
+            self.assertEqual(len(wa), 2)
+            self.assertRegex(str(wa[-1].message),
+                             r'falling back to slow \(for loop and stack\) implementation')
 
     def test_fallback_sub(self):
         # NB: One day we will implement a batching rule for torch.sub.
