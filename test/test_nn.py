@@ -229,7 +229,7 @@ class TestAvgPool(TestCase):
 
     def test_avg_pool2d_with_zero_divisor(self):
         self.assertRaisesRegex(RuntimeError, "divisor must be not zero",
-                               lambda: torch.nn.functional.avg_pool2d(torch.zeros(3, 3, 3), (2, 2), divisor_override=0))
+                               lambda: F.avg_pool2d(torch.zeros(3, 3, 3), (2, 2), divisor_override=0))
 
     def test_doubletensor_avg_pool2d_with_divisor(self):
         n, m = 3, 3
@@ -237,7 +237,7 @@ class TestAvgPool(TestCase):
         for i in range(1, n + 1):
             for j in range(1, m + 1):
                 for divisor in [1, 7, i * j]:
-                    actual = torch.nn.functional.avg_pool2d(input[0], (i, j), divisor_override=divisor)
+                    actual = F.avg_pool2d(input[0], (i, j), divisor_override=divisor)
                     actual = actual.view(1, actual.numel())
                     expected = self._sum_pool2d(input, (i, j)) / divisor
                     self.assertTrue(torch.allclose(actual, expected, rtol=0, atol=1e-5))
@@ -267,7 +267,7 @@ class TestAvgPool(TestCase):
 
     def test_avg_pool3d_with_zero_divisor(self):
         self.assertRaisesRegex(RuntimeError, "divisor must be not zero",
-                               lambda: torch.nn.functional.avg_pool3d(torch.zeros(3, 3, 3, 3), (2, 2, 2), divisor_override=0))
+                               lambda: F.avg_pool3d(torch.zeros(3, 3, 3, 3), (2, 2, 2), divisor_override=0))
 
     def test_avg_pool1d_ceil_mode(self):
         # Regression test for gh-36977
@@ -9901,6 +9901,12 @@ class TestNNDeviceType(NNTestCase):
         fn = fn_wrapper(device)
         _assertGradAndGradgradChecks(self, fn, (weight, ))
 
+    def test_embedding_scalar_weight_error(self, device):
+        indices = torch.rand(2, 2, device=device).long()
+        weight = torch.tensor(1.0, device=device)
+        with self.assertRaisesRegex(RuntimeError, "'weight' must be at least 1-D"):
+            torch.nn.functional.embedding(indices, weight)
+
     @dtypesIfCUDA(torch.float16, torch.float64)
     @dtypes(torch.float64)
     def test_embedding_backward(self, device, dtype):
@@ -10583,6 +10589,15 @@ class TestNNDeviceType(NNTestCase):
         assert grad.is_contiguous()
 
         y.backward(grad)
+
+    def test_pooling_size_empty(self, device):
+        t = torch.rand([1, 2, 3, 4], device=device)
+        self.assertRaises(RuntimeError, lambda: F.adaptive_avg_pool1d(t, []))
+        self.assertRaises(RuntimeError, lambda: F.adaptive_avg_pool2d(t, []))
+        self.assertRaises(RuntimeError, lambda: F.adaptive_avg_pool3d(t, []))
+        self.assertRaises(RuntimeError, lambda: F.adaptive_max_pool1d(t, []))
+        self.assertRaises(RuntimeError, lambda: F.adaptive_max_pool2d(t, []))
+        self.assertRaises(RuntimeError, lambda: F.adaptive_max_pool3d(t, []))
 
     def test_embedding_bag_empty_input(self, device):
         m = 4

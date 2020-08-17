@@ -186,11 +186,11 @@ ncclResult_t ncclAlltoall(
 
 ncclResult_t ncclAlltoallv(
     void* sendbuff,
-    const int* sendcounts,
-    const int* senddispls,
+    const size_t* sendcounts,
+    const size_t* senddispls,
     void* recvbuff,
-    const int* recvcounts,
-    const int* recvdispls,
+    const size_t* recvcounts,
+    const size_t* recvdispls,
     size_t size,
     ncclDataType_t type,
     ncclComm_t comm,
@@ -1098,8 +1098,8 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall_base(
               stream.stream());
         });
   } else {
-    ProcessGroup::checkSplitSizes(inputSplitSizes, inputTensor, size_);
-    ProcessGroup::checkSplitSizes(outputSplitSizes, outputTensor, size_);
+    c10d::checkSplitSizes(inputSplitSizes, inputTensor, size_);
+    c10d::checkSplitSizes(outputSplitSizes, outputTensor, size_);
     std::vector<at::Tensor> inputTensors = {inputTensor};
     std::vector<at::Tensor> outputTensors = {outputTensor};
     return collective(
@@ -1109,13 +1109,13 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall_base(
             at::Tensor& output,
             ncclComm_t comm,
             at::cuda::CUDAStream& stream) {
-          std::vector<int> send_lengths(size_);
-          std::vector<int> recv_lengths(size_);
-          std::vector<int> send_offsets(size_);
-          std::vector<int> recv_offsets(size_);
-          ProcessGroup::computeLengthsAndOffsets(
+          std::vector<size_t> send_lengths(size_);
+          std::vector<size_t> recv_lengths(size_);
+          std::vector<size_t> send_offsets(size_);
+          std::vector<size_t> recv_offsets(size_);
+          c10d::computeLengthsAndOffsets(
               inputSplitSizes, input, &send_lengths, &send_offsets);
-          ProcessGroup::computeLengthsAndOffsets(
+          c10d::computeLengthsAndOffsets(
               outputSplitSizes, output, &recv_lengths, &recv_offsets);
           return ncclAlltoallv(
               input.data_ptr(),
