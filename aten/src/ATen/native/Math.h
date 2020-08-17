@@ -400,7 +400,7 @@ chbevl(T x, T array[], size_t len) {
   b0 = array[0];
   b1 = T(0.0);
 
-  for (size_t i = 1; i < len; ++i){
+  for (size_t i = 1; i < len; ++i)  {
     b2 = b1;
     b1 = b0;
     b0 = x * b1 - b2 + array[i];
@@ -490,13 +490,13 @@ calc_i0(T x) {
   };
 
   if (x < 0) {
-	  x = -x;
-	}
+    x = -x;
+  }
   if (x <= 8.0) {
-	  T y = (x / 2.0) - 2.0;
-	  return (std::exp(x) * chbevl(y, A, 30));
+    T y = (x / 2.0) - 2.0;
+    return (std::exp(x) * chbevl(y, A, 30));
   }
 
-    return (std::exp(x) * chbevl(T(32.0 / x - 2.0), B, 25) / std::sqrt(x));
+  return (std::exp(x) * chbevl(T(32.0 / x - 2.0), B, 25) / std::sqrt(x));
 }
 inline c10::BFloat16 calc_i0(c10::BFloat16 a) { return calc_i0(float(a)); }
