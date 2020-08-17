@@ -7037,11 +7037,6 @@ class TestTorchDeviceType(TestCase):
                     getattr(a, op)(b)
                 return
 
-        if dtypes[0].is_complex or dtypes[1].is_complex:
-            with self.assertRaises(RuntimeError):
-                getattr(a, op)(b)
-            return
-
         # new tensor
         self.assertEqual(expected_res.bool(), getattr(a, op)(b))
         # out
@@ -7052,12 +7047,6 @@ class TestTorchDeviceType(TestCase):
         # in-place
         # TODO: remove when different dtypes as operands are supported
         if dtypes[0] != dtypes[1]:
-            with self.assertRaises(RuntimeError):
-                getattr(a, op + '_')(b)
-            return
-
-        # TODO: remove when complex ops are supported
-        if dtypes[0].is_complex:
             with self.assertRaises(RuntimeError):
                 getattr(a, op + '_')(b)
             return
