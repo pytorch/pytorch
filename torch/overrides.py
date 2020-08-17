@@ -206,6 +206,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.adaptive_max_pool1d: lambda inputs, output_size: -1,
         torch.acos: lambda input, out=None: -1,
         torch.acosh: lambda input, out=None: -1,
+        torch.arccosh: lambda input, out=None: -1,
         torch.add_relu: lambda input, other, out=None: -1,
         torch.add: lambda input, other, out=None: -1,
         torch.addbmm: lambda input, batch1, batch2, alpha=1, beta=1, out=None: -1,
