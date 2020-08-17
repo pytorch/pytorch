@@ -57,6 +57,10 @@ struct Command final {
 
     typedef api::Cache<Factory> Cache;
     Cache cache;
+
+    explicit Pool(const VkDevice device)
+      : cache(Factory(device)) {
+    }
   } pool;
 
   //
@@ -77,6 +81,10 @@ struct Command final {
    private:
     VkCommandBuffer command_buffer_;
   };
+
+  explicit Command(const VkDevice device)
+    : pool(device) {
+  }
 };
 
 } // namespace api

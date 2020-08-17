@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/native/vulkan/api/Common.h>
+#include <ATen/native/vulkan/api/Command.h>
 #include <ATen/native/vulkan/api/Descriptor.h>
 #include <ATen/native/vulkan/api/Pipeline.h>
 #include <ATen/native/vulkan/api/Resource.h>
@@ -14,9 +15,8 @@ namespace api {
 //
 // Vulkan Context holds onto all relevant Vulkan state as it pertains to our
 // use of Vulkan in PyTorch.  The context is currently a global object, but
-// technically it does not need to be if we were to store this state as part
-// of the operators themselves.  This would have required custom op registration
-// for all operators which is not practical in eager mode PyTorch.
+// technically it does not need to be if we were to make it explicit to the
+// user.
 //
 
 class Context final {
@@ -44,6 +44,10 @@ class Context final {
     return queue_;
   }
 
+  inline Command& command() {
+    return command_;
+  }
+
   inline Shader& shader() {
     return shader_;
   }
@@ -68,6 +72,7 @@ class Context final {
   uint32_t compute_queue_family_index_;
   Handle<VkDevice, decltype(&VK_DELETER(Device))> device_;
   VkQueue queue_;
+  Command command_;
   Shader shader_;
   Pipeline pipeline_;
   Descriptor descriptor_;
