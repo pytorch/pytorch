@@ -23,10 +23,10 @@ namespace api {
 // To accelerate creation of the descriptor sets, modern graphics APIs allocate
 // them from a pool, more elaborately referred to as descriptor pools, which do
 // need to be purged frequently _after_ none of the descriptors the pools contain
-// is in use by the GPU, or else the pool will run out of storage.  Care must be
-// taken that descriptors are not freed while they are in use by the pipeline,
-// which considering the asynchronous nature of CPU-GPU interactions, can be
-// anytime after the command is issued until it is fully executed by the GPU.
+// is in use by the GPU.  Care must be taken that descriptors are not freed while
+// they are in use by the pipeline, which considering the asynchronous nature of
+// CPU-GPU interactions, can be anytime after the command is issued until it is
+// fully executed by the GPU.
 //
 // As you can imagine, it is possible to have multiple descriptor pools, each of
 // which configured to house different types of descriptor sets with different
