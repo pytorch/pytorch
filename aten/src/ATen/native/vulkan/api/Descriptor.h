@@ -38,10 +38,10 @@ namespace api {
 // lifetime of the program.
 //
 // Descriptor sets though, on the other hand, are allocated from pools which
-// indeed does mean that the pools must be purged on a regular basis or else they
-// will run out of free items.  Again, this is in line with/ our usage of the
-// term 'pool' in this implementation which we use to refer to a container of
-// objects that is allocated out of and is required to be frequently purged.
+// indeed does mean that the pools must be purged on a regular basis or else
+// they will run out of free items.  Again, this is in line with our usage of
+// the term 'pool' in this implementation which we use to refer to a container
+// of objects that is allocated out of and is required to be frequently purged.
 //
 // It is important to point out that for performance reasons, we intentionally
 // do not free the descriptor sets individually, and instead opt to purge the
