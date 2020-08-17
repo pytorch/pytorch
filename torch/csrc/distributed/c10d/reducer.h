@@ -17,6 +17,7 @@ namespace c10d {
 
 constexpr int kDefaultFirstBucketBytes = int(1024 * 1024);
 constexpr int kDefaultBucketBytesCap = int(25 * 1024 * 1024);
+constexpr int kUnsetDivFactor = -1;
 
 class Reducer {
  public:
@@ -59,11 +60,8 @@ class Reducer {
   // be called once before calling backward.
   void register_comm_hook(std::unique_ptr<CommHookInterface> iface);
 
-  // Return number of buckets in the reducer.
-  size_t getNumBuckets() const;
-
-  // Returns tensors contained in the ith bucket.
-  std::vector<at::Tensor> getTensorsForBucket(int i) const;
+  // Returns a vector of tensors in each bucket in sequential order.
+  std::vector<std::vector<at::Tensor>> getBucketTensors() const;
 
   // Rebuild buckets according to when tensors received gradients in the
   // backward pass.
@@ -138,9 +136,9 @@ class Reducer {
 
   void verify_replica0_across_processes();
 
-  void mark_variable_ready_dense(VariableIndex index, int divFactor);
+  void mark_variable_ready_dense(VariableIndex index);
 
-  void mark_variable_ready_sparse(VariableIndex index, int divFactor);
+  void mark_variable_ready_sparse(VariableIndex index);
 
   void mark_variable_ready(VariableIndex index);
 
@@ -288,14 +286,15 @@ class Reducer {
   // A struct containing work handle and tensor for allreduce scheduled in
   // forward pass, if applicable.
   struct ForwardPassAllreduceWork {
-    std::shared_ptr<c10d::ProcessGroup::Work> workHandle_;
-    at::Tensor resultTensor_;
+    std::shared_ptr<c10d::ProcessGroup::Work> workHandle;
+    at::Tensor resultTensor;
   };
 
   // Handle for the currently scheduled allreduce in the forward pass, if
   // applicable.
   ForwardPassAllreduceWork forwardPassWorkHandle_;
-
+  // Division factor for reduction of gradients.
+  int divFactor_{kUnsetDivFactor};
  private:
   // comm_hook_ is used to access the DDP communication hook if registered.
   std::unique_ptr<CommHookInterface> comm_hook_;

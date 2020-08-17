@@ -175,7 +175,11 @@ Reducer::Reducer(
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~
 // If DDP communication hook is not registered, the reducer reduces the buckets
 // by just calling allreduce. If registered, it calls the hook and uses future
-// work handle.
+// work handle. If registered, reducer also skips dividing grads by world size.
+// The reason for this is that the communication hook is expected to completely
+// override how we perform communication and the user should have complete
+// control over how the grads are handled.
+//
 // DDP communication hook is an enhancement that provides a hook which can be
 // used to override how DDP communicates gradients across ranks, this can be
 // used for algorithms like Gradient Compression/GossipGrad. This hook can be
@@ -300,7 +304,7 @@ void Reducer::verify_replica0_across_processes() {
   }
 }
 
-void Reducer::mark_variable_ready_dense(VariableIndex index, int divFactor) {
+void Reducer::mark_variable_ready_dense(VariableIndex index) {
   const auto replica_index = index.replica_index;
   const auto variable_index = index.variable_index;
   const auto& bucket_index = variable_locators_[variable_index];
@@ -351,11 +355,17 @@ void Reducer::mark_variable_ready_dense(VariableIndex index, int divFactor) {
             ", strides() = ",
             bucket_view.strides());
       }
-      // imitates wrapped_scalar_tensor in ATen/native/BinaryOps.cpp
-      auto wrapped = c10::scalar_to_tensor(double(1.) / divFactor);
-      wrapped.unsafeGetTensorImpl()->set_wrapped_number(true);
-      // Divides while copying into the bucket view.
-      at::native::mul_out(bucket_view, grad, wrapped);
+      // See Note [DDP Communication Hook]
+      if (comm_hook_ == nullptr) {
+        // imitates wrapped_scalar_tensor in ATen/native/BinaryOps.cpp
+        auto wrapped =
+            c10::scalar_to_tensor(double(1.) / divFactor_);
+        wrapped.unsafeGetTensorImpl()->set_wrapped_number(true);
+        // Divides while copying into the bucket view.
+        at::native::mul_out(bucket_view, grad, wrapped);
+      } else {
+        bucket_view.copy_(grad);
+      }
     } else {
       bucket_view.zero_();
     }
@@ -364,7 +374,7 @@ void Reducer::mark_variable_ready_dense(VariableIndex index, int divFactor) {
   });
 }
 
-void Reducer::mark_variable_ready_sparse(VariableIndex index, int divFactor) {
+void Reducer::mark_variable_ready_sparse(VariableIndex index) {
   const auto replica_index = index.replica_index;
   const auto variable_index = index.variable_index;
   const auto& bucket_index = variable_locators_[variable_index];
@@ -384,37 +394,31 @@ void Reducer::mark_variable_ready_sparse(VariableIndex index, int divFactor) {
     // struct are empty, and there is no pre-existing accumulation tensor.
     // Directly assign the sparse tensor to the `contents` field.
     replica.contents = grad;
-    replica.contents.div_(divFactor);
+    // See Note [DDP Communication Hook]
+    if (comm_hook_ == nullptr) {
+      replica.contents.div_(divFactor_);
+    }
     // The grad is modified in place and needs to be written back.
     return true;
   });
 }
 
-size_t Reducer::getNumBuckets() const {
-  return buckets_.size();
-}
-
-std::vector<at::Tensor> Reducer::getTensorsForBucket(int i) const {
-  std::lock_guard<std::mutex> lock(mutex_);
-  TORCH_CHECK(
-      i < buckets_.size(),
-      c10::str(
-          "Attempt to access bucket index ",
-          i,
-          " but only have ",
-          buckets_.size(),
-          " buckets."))
-  auto& bucket = buckets_[i];
+std::vector<std::vector<at::Tensor>> Reducer::getBucketTensors() const {
+ std::lock_guard<std::mutex> lock(mutex_);
+ std::vector<std::vector<at::Tensor>> bucketTensors;
+ for (size_t i = 0; i < buckets_.size(); ++i) {
+   auto& bucket = buckets_[i];
   std::vector<at::Tensor> tensors;
   tensors.reserve(bucket.replicas.size());
   for (const auto& rep : bucket.replicas) {
     tensors.push_back(rep.contents);
   }
-  return tensors;
+  bucketTensors.push_back(std::move(tensors));
+ }
+ return bucketTensors;
 }
 
 bool Reducer::shouldRebuildBuckets() const {
-  std::lock_guard<std::mutex> lock(mutex_);
   // if find_unused_parameters_, we do not rebuild buckets.
   return !find_unused_parameters_ && !has_rebuilt_bucket_;
 }
@@ -426,11 +430,11 @@ void Reducer::setForwardPassWorkHandle(
   // If there was a previous handle, it should have already completed. This is
   // because we await this handle in the backward pass, and only reinstall in
   // the next forward pass.
-  if (forwardPassWorkHandle_.workHandle_) {
-    TORCH_INTERNAL_ASSERT(forwardPassWorkHandle_.workHandle_->isCompleted());
+  if (forwardPassWorkHandle_.workHandle) {
+    TORCH_INTERNAL_ASSERT(forwardPassWorkHandle_.workHandle->isCompleted());
   }
-  forwardPassWorkHandle_.workHandle_ = std::move(forwardPassWorkHandle);
-  forwardPassWorkHandle_.resultTensor_ = tensor;
+  forwardPassWorkHandle_.workHandle = std::move(forwardPassWorkHandle);
+  forwardPassWorkHandle_.resultTensor = tensor;
 }
 
 std::vector<at::Tensor> Reducer::getLocalUsedMapsOnDevice() const {
@@ -440,6 +444,9 @@ std::vector<at::Tensor> Reducer::getLocalUsedMapsOnDevice() const {
 
 void Reducer::pushRebuiltParamsForAllIndices() {
   std::lock_guard<std::mutex> lock(mutex_);
+  if (!shouldRebuildBuckets()) {
+    return;
+  }
   const auto replica_count = replicas_.size();
   for (size_t replica_index = 0; replica_index < replica_count;
        ++replica_index) {
@@ -568,20 +575,20 @@ void Reducer::mark_variable_ready(VariableIndex index) {
 
   // If it was scheduled, wait on allreduce in forward pass that tells us
   // division factor based on no. of currently participating processes.
-  int divFactor;
-  auto& workHandle = forwardPassWorkHandle_.workHandle_;
-  if (workHandle) {
-    workHandle->wait();
-    at::Tensor& res = forwardPassWorkHandle_.resultTensor_;
-    divFactor = res.item().to<int>();
-  } else {
-    divFactor = process_group_->getSize();
+  if (divFactor_ == kUnsetDivFactor) {
+    divFactor_ = process_group_->getSize();
+    auto& workHandle = forwardPassWorkHandle_.workHandle;
+    if (workHandle) {
+      workHandle->wait();
+      at::Tensor& res = forwardPassWorkHandle_.resultTensor;
+      divFactor_ = res.item().to<int>();
+    }
   }
 
   if (bucket.expect_sparse_gradient) {
-    mark_variable_ready_sparse(index, divFactor);
+    mark_variable_ready_sparse(index);
   } else {
-    mark_variable_ready_dense(index, divFactor);
+    mark_variable_ready_dense(index);
   }
 
   // TODO(@pietern): Make this work for both CPU/CUDA tensors.
@@ -624,18 +631,13 @@ void Reducer::mark_variable_ready(VariableIndex index) {
       // Run callback with the current stream
       c10::OptionalStreamGuard currentStreamGuard{currentStream};
       this->finalize_backward();
-      // Rebuild bucket if this is the first time to rebuild
-      if (!has_rebuilt_bucket_ && !find_unused_parameters_) {
-        TORCH_CHECK(!rebuilt_params_.empty());
-        // Unlock before rebuildBuckets() since both rebuildBuckets() and
-        // initialize_buckets() grab the lock.
-        lock.unlock();
-        auto rebuilt_bucket_indices = rebuildBuckets();
-        // Unlock before initialize_buckets() as initialize_buckets() requires a
-        // lock, it could result in self deadlock without unlocking here.
+      lock.unlock();
+      // We rebuild buckets only if this is the first time to rebuild. Future
+      // calls will return an empty vector of bucket indices. Unlock since both
+      // rebuildBuckets() and initialize_bucket_indices() grab the lock.
+      auto rebuilt_bucket_indices = rebuildBuckets();
+      if (rebuilt_bucket_indices.size() > 0) {
         initialize_buckets(std::move(rebuilt_bucket_indices));
-      } else {
-        lock.unlock();
       }
     });
   }
@@ -1029,6 +1031,10 @@ void Reducer::finalize_backward() {
   TORCH_INTERNAL_ASSERT(require_finalize_);
   require_finalize_ = false;
 
+  // Unset allreduce division factor, as it may change in next backwards pass
+  // when running with DDP join mode.
+  divFactor_ = kUnsetDivFactor;
+
   // Check that all buckets were completed and had their work kicked off.
   TORCH_INTERNAL_ASSERT(next_bucket_ == buckets_.size());
 
@@ -1051,11 +1057,15 @@ void Reducer::finalize_backward() {
       auto future_result =
           comm_hook_->processFuture(bucket.future_work->value());
 
-      // Reinitialize bucket_views with the future_result by following
-      // the same logic in `inititalize_buckets`.
       for (size_t i = 0; i < future_result.size(); i++) {
-        bucket.replicas[i].bucket_views.clear();
-        initialize_bucketviews(bucket.replicas[i], future_result[i]);
+        if (bucket.expect_sparse_gradient) {
+          bucket.replicas[i].contents.copy_(future_result[i]);
+        } else {
+          // Reinitialize bucket_views with the future_result by following
+          // the same logic in `inititalize_buckets`.
+          bucket.replicas[i].bucket_views.clear();
+          initialize_bucketviews(bucket.replicas[i], future_result[i]);
+        }
       }
     }
     if (!bucket.expect_sparse_gradient) {
@@ -1184,6 +1194,10 @@ void Reducer::sync_bucket_indices(
 
 std::vector<std::vector<size_t>> Reducer::rebuildBuckets() {
   std::lock_guard<std::mutex> lock(mutex_);
+  if(!shouldRebuildBuckets()) {
+    return {};
+  }
+  TORCH_INTERNAL_ASSERT(!rebuilt_params_.empty(), "No rebuilt parameters.");
   TORCH_INTERNAL_ASSERT(
       !has_rebuilt_bucket_, "Expected to rebuild buckets at most once.");
   TORCH_INTERNAL_ASSERT(

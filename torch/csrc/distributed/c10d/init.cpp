@@ -181,18 +181,20 @@ PyObject* c10d_init(PyObject* _unused) {
               -> void { reducer.prepare_for_backward({output}); },
           py::call_guard<py::gil_scoped_release>())
       .def("get_backward_stats", &::c10d::Reducer::get_backward_stats)
-      .def("get_num_buckets", &::c10d::Reducer::getNumBuckets)
       .def(
-          "get_tensors_for_bucket_idx",
-          &::c10d::Reducer::getTensorsForBucket,
-          py::call_guard<py::gil_scoped_release>())
+          "get_bucket_tensors",
+          &::c10d::Reducer::getBucketTensors,
+          py::call_guard<py::gil_scoped_release>()
+      )
       .def(
           "_rebuild_buckets",
           [](::c10d::Reducer& reducer) {
             // Rebuild and re-init buckets.
             std::vector<std::vector<size_t>> bucketIndices =
                 reducer.rebuildBuckets();
-            reducer.initialize_buckets(std::move(bucketIndices));
+            if (bucketIndices.size() > 0) {
+                reducer.initialize_buckets(std::move(bucketIndices));
+            }
           },
           py::call_guard<py::gil_scoped_release>())
       .def("_should_rebuild_buckets", &::c10d::Reducer::shouldRebuildBuckets)
@@ -209,6 +211,9 @@ PyObject* c10d_init(PyObject* _unused) {
   py::enum_<::c10d::ReduceOp>(module, "ReduceOp", R"(
 An enum-like class for available reduction operations: ``SUM``, ``PRODUCT``,
 ``MIN``, ``MAX``, ``BAND``, ``BOR``, and ``BXOR``.
+
+Note that ``BAND``, ``BOR``, and ``BXOR`` reductions are not available when
+using the ``NCCL`` backend.
 
 The values of this class can be accessed as attributes, e.g., ``ReduceOp.SUM``.
 They are used in specifying strategies for reduction collectives, e.g.,
@@ -751,7 +756,8 @@ They are used in specifying strategies for reduction collectives, e.g.,
                 ``allreduce`` work.
 
                 >>> def allreduce(state: object, bucket: dist._GradBucket): -> torch._C.Future
-                >>>     work = process_group.allreduce(bucket.get_tensors())
+                >>>     tensors = [t / process_group.world_size for t in bucket.get_tensors()]
+                >>>     work = process_group.allreduce(tensors)
                 >>>     return work.get_future()
 
                 >>> ddp_model._register_comm_hook(state = None, hook = allreduce)
