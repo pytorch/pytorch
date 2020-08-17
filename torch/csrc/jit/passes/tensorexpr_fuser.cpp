@@ -17,6 +17,7 @@
 #include "c10/util/Exception.h"
 #include "jit/api/function_impl.h"
 #include "jit/ir/ir.h"
+#include <torch/csrc/jit/runtime/profiling_graph_executor_impl.h>
 
 namespace torch {
 namespace jit {
@@ -595,39 +596,9 @@ void insertGuards(
 
     
     auto graph = b->owningGraph();
-    auto copy_fusion_group = fusion_group->g(attr::Subgraph)->copy();
-    auto otypes = c10::fmap(copy_fusion_group->return_node()->inputs(), [](Value* v) {return v->type(); });
-    auto tuple_type = TupleType::create(otypes);
-    auto return_tuple = copy_fusion_group->createTuple(copy_fusion_group->return_node()->inputs());
-    copy_fusion_group->appendNode(return_tuple);
-    for (int i = copy_fusion_group->outputs().size() - 1; i >= 0; i--) {
-      copy_fusion_group->eraseOutput(i);
-    }
-    copy_fusion_group->registerOutput(return_tuple->output());
-    GRAPH_DUMP("copy_fusion_group", copy_fusion_group);
-    auto fp = new GraphFunction("<tensorexpr>", copy_fusion_group, nullptr);
-    Value* fn_constant = graph->insertNode(graph->create(prim::Constant))
-                           ->s_(attr::name, "tensorexpr")
-                           ->output()
-                           ->setType(FunctionType::create(fp));
-    std::vector<Value*> inputs = {fn_constant};
-    Value* result = graph->insertNode(graph->create(prim::CallFunction, inputs))
-                      ->output()
-                      ->setType(tuple_type);
-
-
-    for (size_t i = 0; i < fusion_group->inputs().size(); ++i) {
-      Value* inp = fusion_group->input(i);
-      if (value_types.count(inp) && value_types.at(inp)->isComplete()) {
-        result->node()->addInput(checked_values.at(fusion_group->input(i)));
-      }
-      else {
-        result->node()->addInput(inp);
-      }
-    }
-
-    auto fun_unpack_tuple = graph->insertNode(graph->createTupleUnpack(result));
-
+    auto fp = createFallbackPathFunction(fusion_group->g(attr::Subgraph)->block(), "te_coldpath_function");
+    auto fun_unpack_tuple = insertFallbackFunctionCall(graph, fp, fusion_group->inputs());
+    
     for (size_t i = 0; i < fusion_group->outputs().size(); ++i) {
       true_block->registerOutput(fusion_group->output(i));
       false_block->registerOutput(fun_unpack_tuple->output(i));

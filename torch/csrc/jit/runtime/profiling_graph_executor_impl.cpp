@@ -25,6 +25,7 @@
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include "jit/passes/inliner.h"
+#include <aten/src/ATen/core/jit_type.h>
 
 C10_DECLARE_bool();
 
@@ -195,6 +196,7 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(
     auto copy = graph->copy();
     runProfilingInsensitiveOptimizations(copy);
     GRAPH_DUMP("Optimized SimpleExecutor Graph : ", copy);
+    registerFallbackFunctions(copy->block());
     optimized_plan_ = ExecutionPlan(copy, function_name_);
     return *optimized_plan_;
   }
@@ -216,7 +218,9 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(
 
   // profile until a graph is ready
   if (!pr_->ready()) {
-    return *profiling_plan_;
+        auto pr_copy = pr_->graph()->copy();
+    GRAPH_DUMP("Profiled Graph: ", pr_copy);
+    return ExecutionPlan(pr_copy, function_name_);
   }
 
   auto copy = pr_->graph()->copy();
@@ -234,6 +238,63 @@ GraphExecutorState ProfilingGraphExecutorImpl::getDebugState() {
   auto opt_plan = *optimized_plan_;
   state.execution_plans.emplace(ArgumentSpec{0, 0}, opt_plan);
   return state;
+}
+
+void ProfilingGraphExecutorImpl::registerFallbackFunctions(Block* b) {
+  for (auto n : b->nodes()) {
+    if (n->kind() == prim::Constant && n->hasAttribute(Symbol::attr("fallback"))) {
+      if (auto ftype = n->output()->type()->cast<FunctionType>()) {
+        Stack s;
+        ftype->function()->get_executor().getPlanFor(s, bailout_depth - 1);
+        fallback_functions_.emplace_back(ftype->function());
+      }
+    } else {
+      for (auto ib: n->blocks()) {
+        registerFallbackFunctions(ib);
+      }
+    }
+  }
+}
+
+Function* createFallbackPathFunction(Block* b, const std::string& function_name) {
+    auto value_map = [](Value* v) { return v; };
+    auto graph = std::make_shared<Graph>();
+    graph->block()->cloneFrom(b, value_map);
+
+    auto otypes = c10::fmap(graph->return_node()->inputs(), [](Value* v) {return v->type(); });
+    auto tuple_type = TupleType::create(otypes);
+    auto return_tuple = graph->createTuple(graph->return_node()->inputs());
+
+    // {
+    //   WithInsertPoint wip(*graph->block()->nodes().begin()); 
+    //   auto debug_print_cnst = graph->insertConstant(IValue{std::string("graph")});
+    //   auto print_stmt = graph->insert(prim::Print, {debug_print_cnst});
+    // }
+    
+    graph->appendNode(return_tuple);
+    for (int i = graph->outputs().size() - 1; i >= 0; i--) {
+      graph->eraseOutput(i);
+    }
+    graph->registerOutput(return_tuple->output());
+    //GRAPH_DUMP("graph", graph);
+    return new GraphFunction(function_name, graph, nullptr);
+}
+
+Node* insertFallbackFunctionCall(Graph* graph, Function* func, ArrayRef<Value*> inputs) {
+    auto tuple_type = func->graph()->return_node()->input(0)->type();
+    Value* fn_constant = graph->insertNode(graph->create(prim::Constant))
+                           ->s_(attr::name, func->name())
+                           ->i_(Symbol::attr("fallback"), 1)
+                           ->output()
+                           ->setType(FunctionType::create(func));
+    std::vector<Value*> func_call_inputs = {fn_constant};
+    func_call_inputs.insert(func_call_inputs.end(), inputs.begin(), inputs.end());
+    Value* result = graph->insertNode(graph->create(prim::CallFunction, func_call_inputs))
+                      ->output()
+                      ->setType(tuple_type);
+
+    auto fun_unpack_tuple = graph->insertNode(graph->createTupleUnpack(result));
+    return fun_unpack_tuple;
 }
 
 } // namespace jit

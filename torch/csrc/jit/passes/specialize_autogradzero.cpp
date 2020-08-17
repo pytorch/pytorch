@@ -10,6 +10,7 @@
 #include <torch/csrc/jit/passes/clear_undefinedness.h>
 #include "jit/passes/dead_code_elimination.h"
 #include "jit/api/function_impl.h"
+#include <torch/csrc/jit/runtime/profiling_graph_executor_impl.h>
 
 namespace torch {
 namespace jit {
@@ -92,52 +93,14 @@ private:
     true_block->cloneFrom(g.block(), value_map);
     replaceBlockInputsWithGraph(&g, true_block);
 
-
-    auto cold_graph = std::make_shared<Graph>();
-    cold_graph->block()->cloneFrom(g.block(), value_map);
-
-    auto otypes = c10::fmap(cold_graph->return_node()->inputs(), [](Value* v) {return v->type(); });
-    auto tuple_type = TupleType::create(otypes);
-    auto return_tuple = cold_graph->createTuple(cold_graph->return_node()->inputs());
-
-    // {
-    //   WithInsertPoint wip(*cold_graph->block()->nodes().begin()); 
-    //   auto debug_print_cnst = cold_graph->insertConstant(IValue{std::string("cold_graph")});
-    //   auto print_stmt = cold_graph->insert(prim::Print, {debug_print_cnst});
-    // }
-    
-    cold_graph->appendNode(return_tuple);
-    for (int i = cold_graph->outputs().size() - 1; i >= 0; i--) {
-      cold_graph->eraseOutput(i);
-    }
-    cold_graph->registerOutput(return_tuple->output());
-    GRAPH_DUMP("cold_graph", cold_graph);
-    auto fp = new GraphFunction("<tensorexpr>", cold_graph, nullptr);
     {
-      WithInsertPoint wip(false_block->return_node()); 
-      Value* fn_constant = g.insertNode(g.create(prim::Constant))
-        ->s_(attr::name, "tensorexpr")
-        ->output()
-        ->setType(FunctionType::create(fp));
-          std::vector<Value*> inputs = {fn_constant};
-        Value* result = g.insertNode(g.create(prim::CallFunction, inputs))
-                          ->output()
-                          ->setType(tuple_type);
-
-      for (auto inp: g.inputs()) {
-        result->node()->addInput(inp);
-      }
-      auto fun_unpack_tuple = g.insertNode(g.createTupleUnpack(result));
+      WithInsertPoint wip{*false_block->nodes().begin()};
+      auto fp = createFallbackPathFunction(g.block(), "te_coldpath_function");
+      auto fun_unpack_tuple = insertFallbackFunctionCall(&g, fp, g.inputs());
       for (auto out : fun_unpack_tuple->outputs()) {
         false_block->registerOutput(out);
       }
     }
-
-
-    
-    //replaceBlockInputsWithGraph(&g, false_block);
-
-    
 
     auto optimize = true;
     WithInsertPoint wip{*g.nodes().begin()};
