@@ -7,15 +7,21 @@ class StaticRuntime:
     def __init__(self, scripted):
         # this is an nn.Module
         if hasattr(scripted, "_c"):
-            scripted._c = torch._C._freeze_module(scripted._c)
-            self.static_runtime = torch._C._jit_to_static_runtime(
-                scripted._c, scripted._c._get_method("forward").graph
-            )
+            self.static_runtime = torch._C._jit_to_static_runtime(scripted._c)
         else:
             self.static_runtime = torch._C._jit_to_static_runtime(scripted.graph)
 
     def __call__(self, *inps):
         return self.static_runtime.run(inps)
+
+def linear_shim(input, weight, bias=None):
+    # type: (Tensor, Tensor, Optional[Tensor]) -> Tensor
+    output = input.matmul(weight.t())
+    if bias is not None:
+        output += bias
+    ret = output
+    return ret
+torch.nn.functional.linear = linear_shim
 
 
 class MultiHeadAttentionLayer(nn.Module):
