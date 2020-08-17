@@ -35,6 +35,12 @@ typename Descriptor::Pool::Factory::Handle Descriptor::Pool::Factory::operator()
   };
 }
 
+void Descriptor::Pool::purge(
+    const VkDevice device,
+    const VkDescriptorPool descriptor_pool) {
+  VK_CHECK(vkResetDescriptorPool(device, descriptor_pool, 0u));
+}
+
 Descriptor::Factory::Factory(const VkDevice device, const VkDescriptorPool descriptor_pool)
   : device_(device),
     descriptor_pool_(descriptor_pool) {
@@ -58,7 +64,7 @@ VkDescriptorSet Descriptor::Factory::allocate(
 }
 
 void Descriptor::Factory::purge() {
-  VK_CHECK(vkResetDescriptorPool(device_, descriptor_pool_, 0u));
+  Pool::purge(device_, descriptor_pool_);
 }
 
 } // namespace api

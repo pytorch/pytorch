@@ -64,35 +64,26 @@ struct Descriptor final {
         VkDescriptorType type;
         uint32_t count;
 
-        inline bool operator==(const Size& size) const {
-          return (type == size.type) &&
-                 (count == size.count);
-        }
-
-        inline size_t hash() const {
-          return c10::get_hash(type, count);
-        }
+        bool operator==(const Size& size) const;
+        size_t hash() const;
       };
 
       uint32_t capacity;
       std::array<Size, 16u> sizes;
 
-      inline bool operator==(const Descriptor& descriptor) const {
-        return (capacity == descriptor.capacity) &&
-               (sizes == descriptor.sizes);
-      }
+      bool operator==(const Descriptor& descriptor) const;
     };
 
     static constexpr Descriptor kDefault{
       1024u,
       {
+        // Note: It is OK for the sum of descriptors per type, below, to exceed
+        // the max total figure above, but be concenious of memory consumption.
+        // Considering how the descriptor pool must be frequently purged anyway
+        // as a result of the impracticality of having enormous pools that
+        // persist through the execution of the program, there is diminishing
+        // return in increasing max counts.
         {
-          // Note: It is OK for the sum of descriptors per type, below, to
-          // exceed the max total figure above, but be concenious of memory
-          // consumption.  The cache must be purged frequently anyway so
-          // having enormous descriptor caches that will persist through the
-          // entirety of the application's lifetime is not practical.
-
           /*
             Buffers
           */
@@ -135,15 +126,7 @@ struct Descriptor final {
       typedef Handle<VkDescriptorPool, Deleter> Handle;
 
       struct Hasher {
-        inline size_t operator()(const Descriptor& descriptor) const {
-          size_t hash = c10::get_hash(descriptor.capacity);
-
-          for (const Descriptor::Size& size : descriptor.sizes) {
-            hash = c10::hash_combine(hash, size.hash());
-          }
-
-          return hash;
-        }
+        size_t operator()(const Descriptor& descriptor) const;
       };
 
       Handle operator()(const Descriptor& descriptor) const;
@@ -162,6 +145,8 @@ struct Descriptor final {
     explicit Pool(const VkDevice device)
       : cache(Factory(device)) {
     }
+
+    static void purge(VkDevice device, VkDescriptorPool descriptor_pool);
   } pool;
 
   /*
@@ -185,6 +170,37 @@ struct Descriptor final {
       factory(device, pool.cache.retrieve(Pool::kDefault)) {
   }
 };
+
+//
+// Impl
+//
+
+inline bool Descriptor::Pool::Descriptor::Size::operator==(
+    const Size& size) const {
+  return (type == size.type) &&
+         (count == size.count);
+}
+
+inline size_t Descriptor::Pool::Descriptor::Size::hash() const {
+  return c10::get_hash(type, count);
+}
+
+inline bool Descriptor::Pool::Descriptor::operator==(
+    const Descriptor& descriptor) const {
+  return (capacity == descriptor.capacity) &&
+         (sizes == descriptor.sizes);
+}
+
+inline size_t Descriptor::Pool::Factory::Hasher::operator()(
+    const Descriptor& descriptor) const {
+  size_t hash = c10::get_hash(descriptor.capacity);
+
+  for (const Descriptor::Size& size : descriptor.sizes) {
+    hash = c10::hash_combine(hash, size.hash());
+  }
+
+  return hash;
+}
 
 } // namespace api
 } // namespace vulkan

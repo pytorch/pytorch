@@ -42,9 +42,7 @@ struct Pipeline final {
     struct Descriptor final {
       VkDescriptorSetLayout descriptor_set_layout;
 
-      inline bool operator==(const Descriptor& descriptor) const{
-        return (descriptor_set_layout == descriptor.descriptor_set_layout);
-      }
+      bool operator==(const Descriptor& descriptor) const;
     };
 
     /*
@@ -60,9 +58,7 @@ struct Pipeline final {
       typedef Handle<VkPipelineLayout, Deleter> Handle;
 
       struct Hasher {
-        inline size_t operator()(const Descriptor& descriptor) const {
-          return c10::get_hash(descriptor.descriptor_set_layout);
-        }
+        size_t operator()(const Descriptor& descriptor) const;
       };
 
       Handle operator()(const Descriptor& descriptor) const;
@@ -92,11 +88,7 @@ struct Pipeline final {
     VkShaderModule shader_module;
     Shader::WorkGroup work_group;
 
-    inline bool operator==(const Descriptor& descriptor) const {
-      return (pipeline_layout == descriptor.pipeline_layout) &&
-             (shader_module == descriptor.shader_module) &&
-             (work_group == descriptor.work_group);
-    }
+    bool operator==(const Descriptor& descriptor) const;
   };
 
   /*
@@ -112,14 +104,7 @@ struct Pipeline final {
     typedef Handle<VkPipeline, Deleter> Handle;
 
     struct Hasher {
-      inline size_t operator()(const Descriptor& descriptor) const {
-        return c10::get_hash(
-            descriptor.pipeline_layout,
-            descriptor.shader_module,
-            descriptor.work_group.x,
-            descriptor.work_group.y,
-            descriptor.work_group.z);
-      }
+      size_t operator()(const Descriptor& descriptor) const;
     };
 
     Handle operator()(const Descriptor& descriptor) const;
@@ -141,6 +126,37 @@ struct Pipeline final {
       cache(Factory(device)) {
   }
 };
+
+//
+// Impl
+//
+
+inline bool Pipeline::Layout::Descriptor::operator==(
+    const Descriptor& descriptor) const {
+  return (descriptor_set_layout == descriptor.descriptor_set_layout);
+}
+
+inline size_t Pipeline::Layout::Factory::Hasher::operator()(
+    const Descriptor& descriptor) const {
+  return c10::get_hash(descriptor.descriptor_set_layout);
+}
+
+inline bool Pipeline::Descriptor::operator==(
+    const Descriptor& descriptor) const {
+  return (pipeline_layout == descriptor.pipeline_layout) &&
+         (shader_module == descriptor.shader_module) &&
+         (work_group == descriptor.work_group);
+}
+
+inline size_t Pipeline::Factory::Hasher::operator()(
+    const Descriptor& descriptor) const {
+  return c10::get_hash(
+      descriptor.pipeline_layout,
+      descriptor.shader_module,
+      descriptor.work_group.x,
+      descriptor.work_group.y,
+      descriptor.work_group.z);
+}
 
 } // namespace api
 } // namespace vulkan

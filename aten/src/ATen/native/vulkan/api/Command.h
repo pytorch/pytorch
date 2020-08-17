@@ -22,9 +22,7 @@ struct Command final {
     struct Descriptor final {
       uint32_t queue_family_index;
 
-      inline bool operator==(const Descriptor& descriptor) const {
-        return queue_family_index == descriptor.queue_family_index;
-      }
+      bool operator==(const Descriptor& descriptor) const;
     };
 
     /*
@@ -40,9 +38,7 @@ struct Command final {
       typedef Handle<VkCommandPool, Deleter> Handle;
 
       struct Hasher {
-        inline size_t operator()(const Descriptor& descriptor) const {
-          return c10::get_hash(descriptor.queue_family_index);
-        }
+        size_t operator()(const Descriptor& descriptor) const;
       };
 
       Handle operator()(const Descriptor& descriptor) const;
@@ -61,6 +57,8 @@ struct Command final {
     explicit Pool(const VkDevice device)
       : cache(Factory(device)) {
     }
+
+    static void purge(VkDevice device, VkCommandPool command_pool);
   } pool;
 
   //
@@ -86,6 +84,20 @@ struct Command final {
     : pool(device) {
   }
 };
+
+//
+// Impl
+//
+
+inline bool Command::Pool::operator==(
+    const Descriptor& descriptor) const {
+  return queue_family_index == descriptor.queue_family_index;
+}
+
+inline size_t Command::Pool::Factory::Hasher::operator()(
+    const Descriptor& descriptor) const {
+  return c10::get_hash(descriptor.queue_family_index);
+}
 
 } // namespace api
 } // namespace vulkan
