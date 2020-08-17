@@ -8,13 +8,13 @@ from torch.nn.quantized.modules.utils import hide_packed_params_repr
 class EmbeddingPackedParams(torch.nn.Module):
     _version = 1
 
-    def __init__(self, dtype=torch.quint8):
+    def __init__(self, num_embeddings, embedding_dim, dtype=torch.quint8):
         super(EmbeddingPackedParams, self).__init__()
         self.dtype = dtype
         if self.dtype == torch.quint8:
-            scales = torch.ones(1, dtype=torch.float)
-            zero_points = torch.ones(1, dtype=torch.float)
-            wq = torch._empty_per_channel_affine_quantized([1, 1], scales=scales,
+            scales = torch.ones(num_embeddings, dtype=torch.float)
+            zero_points = torch.ones(num_embeddings, dtype=torch.float)
+            wq = torch._empty_per_channel_affine_quantized([num_embeddings, embedding_dim], scales=scales,
                                                            zero_points=zero_points,
                                                            axis=0, dtype=torch.quint8)
             self.set_weight(wq)
@@ -113,7 +113,7 @@ class EmbeddingBag(torch.nn.Module):
                 'Shape of weight does not match num_embeddings and embedding_dim'
             self.qweight = _weight
 
-        self._packed_params = EmbeddingPackedParams(dtype)
+        self._packed_params = EmbeddingPackedParams(num_embeddings, embedding_dim, dtype)
         self._packed_params.set_weight(self.qweight)
 
     def forward(self, indices: Tensor, offsets: Tensor, per_sample_weights: Optional[Tensor] = None,
