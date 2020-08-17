@@ -186,6 +186,9 @@ public:
   Vec256<double> neg() const {
     return _mm256_xor_pd(_mm256_set1_pd(-0.), values);
   }
+  Vec256<double> nextafter(const Vec256<double> &b) const {
+    return Vec256<double>(Sleef_nextafterd4(values, b));
+  }
   Vec256<double> round() const {
     return _mm256_round_pd(values, (_MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
   }
