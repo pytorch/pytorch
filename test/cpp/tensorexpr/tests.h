@@ -152,6 +152,7 @@ namespace jit {
   _(SimplifyFoldComplexDifference)          \
   _(SimplifyIfComponents)                   \
   _(SimplifyOpaqueTerms)                    \
+  _(SimplifySymbolicMinMax)                 \
   _(SimplifyWontReorderFloat)               \
   _(SimplifyRoundModPattern)                \
   _(SimplifyRoundModPatternFactorization)   \
@@ -175,6 +176,14 @@ namespace jit {
   _(BoundsInference_4)                      \
   _(BoundsInference_5)                      \
   _(BoundsInference_6)                      \
+  _(BoundsInferenceNonOverlapping)          \
+  _(BoundsInferenceAdjacent)                \
+  _(MergeInferredBounds)                    \
+  _(MergeInferredLoadStoreDiff)             \
+  _(MergeInferred2DBounds)                  \
+  _(MergeAdjacentBounds)                    \
+  _(MergeSymbolicBounds)                    \
+  _(MergeSymbolicAdjacent)                  \
   _(LoopNestComputeAt_1)                    \
   _(LoopNestComputeAt_2)                    \
   _(LoopNestComputeAt_3)                    \
@@ -193,6 +202,7 @@ namespace jit {
   _(Kernel_1)                               \
   _(Kernel_2)                               \
   _(Kernel_3)                               \
+  _(Kernel_4)                               \
   _(FuserPass_1)                            \
   _(FuserPass_2)
 
