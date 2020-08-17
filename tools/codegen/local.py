@@ -19,7 +19,7 @@ def hack_const_mutable_self() -> bool:
     return _locals.hack_const_mutable_self
 
 @contextmanager
-def parametrize(*, use_c10_dispatcher_full: bool, hack_const_mutable_self: bool = False) -> Iterator[None]:
+def parametrize(*, use_c10_dispatcher_full: bool, hack_const_mutable_self: bool) -> Iterator[None]:
     old_use_c10_dispatcher_full = _locals.use_c10_dispatcher_full
     old_hack_const_mutable_self = _locals.hack_const_mutable_self
     try:

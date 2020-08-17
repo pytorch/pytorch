@@ -761,6 +761,7 @@ extra_cuda_headers = '''\
 def write_file(fn: str, env_arg: Dict[str, Union[str, Sequence[str]]]) -> None:
     env = env_arg.copy()
     derived = ['Vulkan', 'CPU', 'CUDA', 'QuantizedCPU', 'QuantizedCUDA', 'MkldnnCPU']
+    # TODO: get rid of this
     sparse_derived = ['SparseCPU', 'SparseCUDA']
     if fn in [f'{x}Type.h' for x in itertools.chain(derived, sparse_derived)]:
         template_fn = 'TypeDerived.h'
@@ -781,7 +782,7 @@ def write_file(fn: str, env_arg: Dict[str, Union[str, Sequence[str]]]) -> None:
 
 backends = ["CPU", "SparseCPU", "MkldnnCPU", "CUDA", "SparseCUDA", "QuantizedCPU", "QuantizedCUDA"]
 if options.vulkan:
-    backend.append("Vulkan")
+    backends.append("Vulkan")
 if options.backend_whitelist:
     backends = [b for b in backends if b in options.backend_whitelist]
 
@@ -799,7 +800,7 @@ for dispatch in backends:
         'legacy_th_headers': f'#include <ATen/LegacyTHFunctions{dispatch}.h>' if dispatch in ["CPU", "CUDA"] else "",
         'Backend': dispatch,
         'type_derived_method_definitions': concatmap_nf(compute_type_method(dispatch, target=Target.DEFINITION, op_registration_whitelist=op_registration_whitelist), native_functions),
-        'function_registrations': concatmap_nf(compute_type_method(dispatch, target=Target.REGISTRATION, op_registration_whitelist=op_registration_whitelist), native_functions) if options.per_op_registration is None else [],
+        'function_registrations': concatmap_nf(compute_type_method(dispatch, target=Target.REGISTRATION, op_registration_whitelist=op_registration_whitelist), native_functions) if not options.per_op_registration else [],
     })
 
 write_file('TypeDefault.h', {
@@ -807,7 +808,7 @@ write_file('TypeDefault.h', {
 })
 write_file('TypeDefault.cpp', {
     'type_method_definitions': concatmap_nf(compute_type_method(None, target=Target.DEFINITION, op_registration_whitelist=op_registration_whitelist), native_functions),
-    'function_registrations': concatmap_nf(compute_type_method(None, target=Target.REGISTRATION, op_registration_whitelist=op_registration_whitelist), native_functions) if options.per_op_registration is None else [],
+    'function_registrations': concatmap_nf(compute_type_method(None, target=Target.REGISTRATION, op_registration_whitelist=op_registration_whitelist), native_functions) if not options.per_op_registration else [],
 })
 write_file('Functions.h', {
     'function_declarations': concatmap_nf(compute_function(target=Target.DECLARATION), native_functions),
@@ -858,11 +859,14 @@ if options.per_op_registration:
     for name in op_registration_whitelist:
         fs = grouped_functions[name]
         registrations = []
-        for dispatch in itertools.chain([None], backends):
+        for mb_dispatch in itertools.chain([None], backends):
             # or you could pass in op_registration_whitelist, it doesn't
             # matter!
-            # NB: Use of compute_type_method here is kind of an abuse
-            registrations.extend(concatmap_nf(compute_type_method(dispatch, target=Target.REGISTRATION, op_registration_whitelist=None), fs))
+            # NB: Use of compute_type_method here is kind of an abuse;
+            # this is why we have to unconditionally write in
+            # torch::dispatch in the registration when it should be
+            # contextually clear
+            registrations.extend(concatmap_nf(compute_type_method(mb_dispatch, target=Target.REGISTRATION, op_registration_whitelist=None), fs))
         fn = gen_per_op_registration_filename(name)
         with open(os.path.join('build/aten/src/ATen_new', fn), 'w') as fil:
             fil.write(template.substitute({
