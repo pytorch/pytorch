@@ -2776,6 +2776,60 @@ class _DistTestBase(object):
                 net.zero_grad()
                 torch.cuda.synchronize(device=self.rank)
 
+    @require_backend({"gloo", "nccl"})
+    @require_backends_available({"gloo", "nccl"})
+    @skip_if_lt_x_gpu(2)
+    @skip_if_rocm
+    def test_ddp_join_model_equivalence(self):
+        # Verifies equivalence with model training locally and with DDP under
+        # the join context manager.
+        batch = 3
+        dim = 10
+        learning_rate = 0.03
+        model = nn.Linear(dim, dim, bias=False)
+        inp = torch.randn(batch, dim, device=self.rank)
+        local_model = copy.deepcopy(model)
+        local_model = local_model.cuda(self.rank)
+        rank_to_iter_mapping = {rank : 2 * rank for rank in range(dist.get_world_size())}
+        # run local model
+        local_iters = max(rank_to_iter_mapping.values())
+
+        for _ in range(local_iters):
+            out = local_model(inp)
+            loss = out.sum()
+            loss.backward()
+            for param in local_model.parameters():
+                if param.grad is not None:
+                    with torch.no_grad():
+                        param.add_(param.grad, alpha=learning_rate)
+                        param.grad.detach_()
+                        param.grad.zero_()
+
+        # run DDP model with join API
+        num_iters = rank_to_iter_mapping[self.rank]
+        net = torch.nn.parallel.DistributedDataParallel(
+            model.cuda(self.rank), device_ids=[self.rank]
+        )
+
+        with net.join():
+            for _ in range(num_iters):
+                out = net(inp)
+                loss = out.sum()
+                loss.backward()
+                torch.cuda.synchronize()
+                for param in net.module.parameters():
+                    if param.grad is not None:
+                        with torch.no_grad():
+                            param.add_(param.grad, alpha=learning_rate)
+                            param.grad.detach_()
+                            param.grad.zero_()
+
+        # Validate model state dicts are equal
+        for local_tensor, dist_tensor in zip(
+            local_model.state_dict(), net.module.state_dict()
+        ):
+            self.assertEqual(local_tensor, dist_tensor)
+
     def _run_uneven_inputs_test(
         self, test_case, iteration_mapping, find_unused_params,
     ):
