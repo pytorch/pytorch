@@ -16795,22 +16795,35 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                          torch.tensor(expectedOutput, dtype=dtype, device=device),
                          atol=precision_4dps, rtol=0)
 
+    @skipIfNoSciPy
     @dtypes(torch.float, torch.double)
     def test_silu(self, device, dtype):
-        inputValues = [-1000, -1, 0, 0.5, 1, 2, 1000]
-        expectedOutput = [0.0000, -0.2689, 0, 0.3112, 0.7312, 1.7616, 1000]
-        precision_4dps = 0.0002
+        input_np = np.random.randn(5, 8)
+        special_input = [[-1000, -1, -0.1, 0, 0.5, 1, 2, 1000]]
+        input_np = np.concatenate((input_np, special_input), axis=0).astype(
+            torch_to_numpy_dtype_dict[dtype])
+        expected_output_np = input_np * scipy.special.expit(input_np)
 
-        input_tensor = torch.tensor(inputValues, dtype=dtype, device=device)
-        expected_output_tensor = torch.tensor(expectedOutput, dtype=dtype, device=device)
+        expected_output = torch.from_numpy(expected_output_np).to(device)
+        expected_output_noncontig = expected_output.transpose(0, 1)
 
-        self.assertEqual(torch.nn.functional.silu(input_tensor),
-                         expected_output_tensor,
-                         atol=precision_4dps, rtol=0)
+        atol = 1e-6
+        rtol = 1e-6
 
-        self.assertEqual(torch.nn.functional.silu(input_tensor, inplace=True),
-                         expected_output_tensor,
-                         atol=precision_4dps, rtol=0)
+        input = torch.from_numpy(input_np).clone().contiguous().to(device)
+        self.assertEqual(torch.nn.functional.silu(input), expected_output,
+                         atol=atol, rtol=rtol)
+        self.assertEqual(torch.nn.functional.silu(input, inplace=True),
+                         expected_output, atol=atol, rtol=rtol)
+
+        input = torch.from_numpy(input_np).clone().to(device)
+        input_noncontig = input.transpose(0, 1)
+        self.assertEqual(torch.nn.functional.silu(input_noncontig),
+                         expected_output_noncontig, atol=atol, rtol=rtol)
+        self.assertEqual(torch.nn.functional.silu(
+            input_noncontig, inplace=True), expected_output_noncontig,
+            atol=atol, rtol=rtol)
+
 
     @onlyCPU
     @dtypes(torch.float)
@@ -18761,6 +18774,108 @@ else:
         self._test_atleast_dim(torch.atleast_2d, np.atleast_2d, device, dtype)
         self._test_atleast_dim(torch.atleast_3d, np.atleast_3d, device, dtype)
 
+    def _test_special_stacks(self, dim, at_least_dim, torch_fn, np_fn, device, dtype):
+        # Test error for non-tuple argument
+        with self.assertRaisesRegex(TypeError, "must be tuple of Tensors, not Tensor"):
+            torch_fn(torch.randn(10))
+
+        # Test 0-D
+        num_tensors = random.randint(1, 5)
+        input_t = [torch.tensor(random.uniform(0, 10), device=device, dtype=dtype) for i in range(num_tensors)]
+        actual = torch_fn(input_t)
+        expected = np_fn([input.cpu().numpy() for input in input_t])
+        self.assertEqual(actual, expected)
+
+        for ndims in range(1, 5):
+            base_shape = list(self._rand_shape(ndims, min_size=1, max_size=5))
+            for i in range(ndims):
+                shape = list(base_shape)
+                num_tensors = random.randint(1, 5)
+                torch_input = []
+                # Create tensors with shape being different along one axis only
+                for param in range(num_tensors):
+                    shape[i] = random.randint(1, 5)
+                    torch_input.append(self._generate_input(tuple(shape), dtype, device, with_extremal=False))
+
+                # Determine if input tensors have valid dimensions.
+                valid_dim = True
+                for k in range(len(torch_input) - 1):
+                    for tdim in range(ndims):
+                        # Test whether all tensors have the same shape except in concatenating dimension
+                        # Unless the number of dimensions is less than the corresponding at_least function dimension
+                        # Since the original concatenating dimension would shift after applying at_least and would no
+                        # longer be the concatenating dimension
+                        if (ndims < at_least_dim or tdim != dim) and torch_input[k].size()[tdim] != torch_input[k + 1].size()[tdim]:
+                            valid_dim = False
+
+                # Special case for hstack is needed since hstack works differently when ndims is 1
+                if valid_dim or (torch_fn is torch.hstack and ndims == 1):
+                    # Valid dimensions, test against numpy
+                    np_input = [input.cpu().numpy() for input in torch_input]
+                    actual = torch_fn(torch_input)
+                    expected = np_fn(np_input)
+                    self.assertEqual(actual, expected)
+                else:
+                    # Invalid dimensions, test for error
+                    with self.assertRaisesRegex(RuntimeError, "Sizes of tensors must match except in dimension"):
+                        torch_fn(torch_input)
+                    with self.assertRaises(ValueError):
+                        np_input = [input.cpu().numpy() for input in torch_input]
+                        np_fn(np_input)
+
+    @onlyOnCPUAndCUDA
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False) +
+              torch.testing.get_all_complex_dtypes()))
+    def test_hstack(self, device, dtype):
+        self._test_special_stacks(1, 1, torch.hstack, np.hstack, device, dtype)
+
+    @onlyOnCPUAndCUDA
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False) +
+              torch.testing.get_all_complex_dtypes()))
+    def test_vstack(self, device, dtype):
+        self._test_special_stacks(0, 2, torch.vstack, np.vstack, device, dtype)
+        for i in range(5):
+            # Test dimension change for 1D tensor of size (N) and 2D tensor of size (1, N)
+            n = random.randint(1, 10)
+            input_a = self._generate_input((n,), dtype, device, with_extremal=False)
+            input_b = self._generate_input((1, n), dtype, device, with_extremal=False)
+            torch_input = [input_a, input_b]
+            np_input = [input.cpu().numpy() for input in torch_input]
+            actual = torch.vstack(torch_input)
+            expected = np.vstack(np_input)
+            self.assertEqual(actual, expected)
+
+    @onlyOnCPUAndCUDA
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False) +
+              torch.testing.get_all_complex_dtypes()))
+    def test_dstack(self, device, dtype):
+        self._test_special_stacks(2, 3, torch.dstack, np.dstack, device, dtype)
+        for i in range(5):
+            # Test dimension change for 1D tensor of size (N), 2D tensor of size (1, N), and 3D tensor of size (1, N, 1)
+            n = random.randint(1, 10)
+            input_a = self._generate_input((n,), dtype, device, with_extremal=False)
+            input_b = self._generate_input((1, n), dtype, device, with_extremal=False)
+            input_c = self._generate_input((1, n, 1), dtype, device, with_extremal=False)
+            torch_input = [input_a, input_b, input_c]
+            np_input = [input.cpu().numpy() for input in torch_input]
+            actual = torch.dstack(torch_input)
+            expected = np.dstack(np_input)
+            self.assertEqual(actual, expected)
+
+            # Test dimension change for 2D tensor of size (M, N) and 3D tensor of size (M, N, 1)
+            m = random.randint(1, 10)
+            n = random.randint(1, 10)
+            input_a = self._generate_input((m, n), dtype, device, with_extremal=False)
+            input_b = self._generate_input((m, n, 1), dtype, device, with_extremal=False)
+            torch_input = [input_a, input_b]
+            np_input = [input.cpu().numpy() for input in torch_input]
+            actual = torch.dstack(torch_input)
+            expected = np.dstack(np_input)
+            self.assertEqual(actual, expected)
+
 
 # NOTE [Linspace+Logspace precision override]
 # Our Linspace and logspace torch.half CUDA kernels are not very precise.
@@ -18833,11 +18948,16 @@ class TestDevicePrecision(TestCase):
         cpu_tensor = torch.randn(10, 10, 10, dtype=dtype)
         device_tensor = cpu_tensor.to(device)
         zeros = torch.zeros(10, 10, 10, dtype=dtype)
-        for n in [0, 1]:
+        for n in [0, 1, 2, 3, 4, 5]:
             cpu_out = cpu_tensor.polygamma(n)
             device_out = device_tensor.polygamma(n)
             norm_errors = (device_out - cpu_out.to(device)) / device_out
             self.assertEqual(norm_errors, zeros)
+
+        cpu_tensor.requires_grad = True
+        for n in [0, 1, 2, 3, 4, 5]:
+            torch.autograd.gradcheck(lambda x: x.polygamma(n),
+                                     cpu_tensor)
 
     # Note: fails when using float tensors
     @dtypes(torch.double)
@@ -20300,6 +20420,9 @@ torch_op_tests = [_TorchMathTestMeta('sin'),
                                      ref_backend='scipy'),
                   _TorchMathTestMeta('polygamma', args=[1], substr='_1', reffn='polygamma',
                                      refargs=lambda x: (1, x.numpy()), input_fn=_generate_gamma_input, inputargs=[False],
+                                     ref_backend='scipy', rtol=0.0008, atol=1e-5),
+                  _TorchMathTestMeta('polygamma', args=[2], substr='_2', reffn='polygamma',
+                                     refargs=lambda x: (2, x.numpy()), input_fn=_generate_gamma_input, inputargs=[False],
                                      ref_backend='scipy', rtol=0.0008, atol=1e-5),
                   _TorchMathTestMeta('digamma',
                                      input_fn=_generate_gamma_input, inputargs=[True], ref_backend='scipy',
