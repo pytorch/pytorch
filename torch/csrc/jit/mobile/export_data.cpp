@@ -49,7 +49,8 @@ class ScriptModuleSerializer {
     data_pickle.protocol();
     if (value.isGenericDict()) {
       data_pickle.pushDict(value);
-    } else {data_pickle.pushIValue(value);
+    } else {
+      data_pickle.pushIValue(value);
     }
     data_pickle.stop();
     size_t i = 0;
