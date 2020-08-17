@@ -10,6 +10,8 @@
 
 #include <torch/csrc/jit/codegen/cuda/executor_utils.h>
 
+#include <fstream>
+
 namespace torch {
 namespace jit {
 namespace fuser {
