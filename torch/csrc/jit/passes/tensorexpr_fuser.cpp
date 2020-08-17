@@ -121,71 +121,6 @@ const Symbol& getTensorExprSymbol() {
   return s;
 }
 
-value_list sortReverseTopological(
-    ArrayRef<torch::jit::Value*> inputs,
-    torch::jit::Block* block) {
-  value_list result;
-  for (auto i : inputs) {
-    if (i->node()->owningBlock() == block) {
-      result.push_back(i);
-    }
-  }
-  // Sort in reverse topological order
-  std::sort(
-      result.begin(),
-      result.end(),
-      [&](torch::jit::Value* a, torch::jit::Value* b) {
-        return a->node()->isAfter(b->node());
-      });
-  return result;
-}
-
-bool allShapesAreKnown(Value* v) {
-  if (!v->type()->cast<TensorType>()) {
-    return true;
-  }
-  return v->isCompleteTensor();
-}
-
-bool allShapesAreKnown(Node* node) {
-  // TODO: Relax the checks to support dynamic shapes
-  for (torch::jit::Value* output : node->outputs()) {
-    if (!allShapesAreKnown(output)) {
-      return false;
-    }
-  }
-  for (torch::jit::Value* input : node->inputs()) {
-    if (!allShapesAreKnown(input)) {
-      return false;
-    }
-  }
-  return true;
-}
-
-bool canHandle(Node* node) {
-  if (node->kind() == prim::Constant) {
-    if (node->output()->type()->cast<TensorType>()) {
-      // TODO: add support for tensor constants.
-      return false;
-    }
-    return true;
-  }
-  if (!allShapesAreKnown(node)) {
-    return false;
-  }
-
-  // Don't include nodes whose inputs are tensor constants - we cannot handle
-  // them at the moment.
-  // TODO: actually support tensor constants and remove this.
-  for (torch::jit::Value* input : node->inputs()) {
-    if (input->node()->kind() == prim::Constant &&
-        input->type()->cast<TensorType>()) {
-      return false;
-    }
-  }
-  return tensorexpr::isSupported(node);
-}
-
 Node* getOrCreateTensorExprSubgraph(Node* n) {
   if (n->hasAttribute(attr::Subgraph) && n->kind() == getTensorExprSymbol()) {
     return n;
@@ -365,6 +300,52 @@ class TensorExprFuser {
     return fusion_group;
   }
 
+  bool allShapesAreKnown(Value* v) {
+    if (!v->type()->cast<TensorType>()) {
+      return true;
+    }
+    return v->isCompleteTensor();
+  }
+
+  bool allShapesAreKnown(Node* node) {
+    // TODO: Relax the checks to support dynamic shapes
+    for (Value* output : node->outputs()) {
+      if (!allShapesAreKnown(output)) {
+        return false;
+      }
+    }
+    for (Value* input : node->inputs()) {
+      if (!allShapesAreKnown(input)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  bool canHandle(Node* node) {
+    if (node->kind() == prim::Constant) {
+      if (node->output()->type()->cast<TensorType>()) {
+        // TODO: add support for tensor constants.
+        return false;
+      }
+      return true;
+    }
+    if (!allShapesAreKnown(node)) {
+      return false;
+    }
+
+    // Don't include nodes whose inputs are tensor constants - we cannot handle
+    // them at the moment.
+    // TODO: actually support tensor constants and remove this.
+    for (Value* input : node->inputs()) {
+      if (input->node()->kind() == prim::Constant &&
+          input->type()->cast<TensorType>()) {
+        return false;
+      }
+    }
+    return tensorexpr::isSupported(node);
+  }
+
 #define REQ(cond)                           \
   if (!(cond)) {                            \
     GRAPH_DEBUG("Failed cond " #cond "\n"); \
@@ -373,7 +354,7 @@ class TensorExprFuser {
 
   bool canMerge(Node* consumer, Node* producer) {
     // Only handle complete tensor types
-    for (torch::jit::Value* output : consumer->outputs()) {
+    for (Value* output : consumer->outputs()) {
       REQ(output->isCompleteTensor());
     }
 
