@@ -220,11 +220,13 @@ class ProcessGroupNCCL : public ProcessGroup {
 
     // Just returns FutureNCCL's value after wait returns.
     at::IValue value() override {
+      TORCH_INTERNAL_ASSERT(hasValue(), "FutureNCCL's value is None.")
       wait();
       return value_;
     }
 
     const at::IValue& constValue() override {
+      TORCH_INTERNAL_ASSERT(hasValue(), "FutureNCCL's value is None.")
       wait();
       return value_;
     }
