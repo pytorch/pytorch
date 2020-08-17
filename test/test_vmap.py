@@ -654,6 +654,79 @@ class TestVmapOperators(TestCase):
     def _vmap_view_test(self, *args, **kwargs):
         self._vmap_test(*args, **kwargs, check_view=True)
 
+    def _assert_doesnt_use_vmap_fallback(self, vmap_args, inputs):
+        regex = r'falling back to slow \(for loop and stack\) implementation'
+        with warnings.catch_warnings(record=True) as wa:
+            result = vmap(*vmap_args)(*inputs)
+            for captured_warning in wa:
+                self.assertNotRegex(str(captured_warning.message), regex)
+
+    def test_assert_doesnt_use_vmap_fallback(self):
+        with self.assertRaises(AssertionError):
+            # One day we'll implement a batching rule for torch.var_mean.
+            # When that happens, please change the example to use an
+            # operator that doesn't have a batching rule implemented.
+            self._assert_doesnt_use_vmap_fallback([torch.var_mean], [torch.rand(3)])
+
+    def test_unary_pointwise_ops(self):
+        def get_rand(size, device):
+            return [torch.rand(size, device=device)]
+
+        def get_randp1(size, device):
+            return [torch.rand(size, device=device) + 1]
+
+        def get_randn(size, device):
+            return [torch.randn(size, device=device)]
+
+        cases = [
+            (torch.abs, get_randn),
+            (torch.acos, get_rand),
+            (torch.asin, get_rand),
+            (torch.atan, get_rand),
+            (torch.ceil, get_randn),
+            (torch.cos, get_rand),
+            (torch.cosh, get_rand),
+            (torch.digamma, get_rand),
+            (torch.exp, get_randn),
+            (torch.expm1, get_randn),
+            (torch.floor, get_randn),
+            (torch.frac, get_randn),
+            (torch.lgamma, get_rand),
+            (torch.log, get_randp1),
+            (torch.log10, get_randp1),
+            (torch.log1p, get_randp1),
+            (torch.log2, get_randp1),
+            (torch.neg, get_randn),
+            (torch.reciprocal, get_randp1),
+            (torch.relu, get_randn),
+            (torch.round, get_randn),
+            (torch.rsqrt, get_randp1),
+            (torch.sigmoid, get_randn),
+            (torch.sign, get_randn),
+            (torch.sin, get_rand),
+            (torch.sinh, get_rand),
+            (torch.sqrt, get_rand),
+            (torch.tan, get_rand),
+            (torch.tanh, get_rand),
+            (torch.trunc, get_randn),
+        ]
+        test = self._vmap_test
+        B0, B1 = 7, 11
+        for op, getter in cases:
+            device = 'cpu'
+
+            self._assert_doesnt_use_vmap_fallback([op], getter([B0], device))
+
+            # Single vmap, various in_dims / out_dims
+            test(op, getter([B0, 3], device))
+            test(op, getter([2, 5, B0, 3], device), in_dims=2)
+            test(op, getter([2, 5, B0, 3], device), in_dims=2, out_dims=2)
+
+            # Doubly nested vmap
+            test(vmap(op), getter([B0, B1], device))
+            test(vmap(op), getter([B1, 2, 5, B0, 3], device), in_dims=2)
+            test(vmap(op, in_dims=2), getter([2, 5, B0, B1, 3], device), in_dims=2, out_dims=2)
+
     def test_chunk(self):
         test = self._vmap_view_test
         op = torch.chunk
