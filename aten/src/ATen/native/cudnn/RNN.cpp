@@ -577,25 +577,27 @@ namespace {
     }
   }
 
-  cudnnRNNAlgo_t get_algo(const RNNDescriptorParams& rnn, const TensorDescriptorListParams& tensors, const Tensor input){
-      cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
-      const int64_t bsize = tensors.mini_batch;
-      //excluding Turing from using persistent rnn.
-      if (prop->major == 7 && prop->minor != 5 && getCudnnDataType(input) == CUDNN_DATA_HALF && !tensors.is_input_packed()) {
-          if (rnn.num_layers == 1 && rnn.hidden_size <= 1024 && rnn.num_directions() == 1 &&
-                  rnn.hidden_size % 128 == 0 && tensors.input_size % 128 == 0){
-              //technically, batch size should be multiple of 8, but there are quite a few multiple-of-8 batchsizes that give bad perf,
-              //weed them out
-              if ((bsize % 16 == 0 && bsize != 80 && bsize !=112) || bsize == 8){
-                  if ((tensors.seq_length >=40 && bsize <=128) ||
-                     (tensors.seq_length >=20 && bsize <=96) ||
-                     (tensors.seq_length >=10 && bsize <=32)) {
-                     return CUDNN_RNN_ALGO_PERSIST_STATIC;
-                  }
-              }
+  cudnnRNNAlgo_t get_algo(const RNNDescriptorParams& rnn, const TensorDescriptorListParams& tensors, const Tensor input) {
+    cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+    const int64_t bsize = tensors.mini_batch;
+    // excluding Turing from using persistent rnn.
+    if (prop->major >= 7 && !(prop->major == 7 && prop->minor == 5) &&
+        getCudnnDataType(input) == CUDNN_DATA_HALF &&
+        !tensors.is_input_packed()) {
+      if (rnn.num_layers == 1 && rnn.hidden_size <= 1024 && rnn.num_directions() == 1 &&
+          rnn.hidden_size % 128 == 0 && tensors.input_size % 128 == 0) {
+        // technically, batch size should be multiple of 8, but there are quite a few multiple-of-8 batchsizes that give bad perf,
+        // weed them out
+        if ((bsize % 16 == 0 && bsize != 80 && bsize !=112) || bsize == 8) {
+          if ((tensors.seq_length >=40 && bsize <=128) ||
+              (tensors.seq_length >=20 && bsize <=96) ||
+              (tensors.seq_length >=10 && bsize <=32)) {
+            return CUDNN_RNN_ALGO_PERSIST_STATIC;
           }
+        }
       }
-      return CUDNN_RNN_ALGO_STANDARD;
+    }
+    return CUDNN_RNN_ALGO_STANDARD;
   }
 
   cudnnDataType_t promote_rnn_math_type(cudnnDataType_t dtype) {
