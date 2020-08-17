@@ -1528,5 +1528,183 @@ void testOuterLoopVectorization() {
   ASSERT_EQ(dynamic_cast<For*>(for_body->front()), nullptr);
 }
 
+namespace {
+
+std::string constantUpperBoundLoopIR(int upper_bound_val) {
+  KernelScope kernel_scope;
+  ExprHandle upper_bound(upper_bound_val);
+  Tensor* A = Compute(
+      "A", {{upper_bound, "x"}}, [&](const VarHandle& x) { return x * 2; });
+  LoopNest l({A});
+  std::vector<For*> loops = l.getLoopStmtsFor(A);
+  Stmt* unrolled = nullptr;
+  LoopNest::unroll(loops[0], &unrolled);
+  std::ostringstream oss;
+  oss << *unrolled;
+  return oss.str();
+}
+
+} // namespace
+
+void testUnroll() {
+  const std::string actual = constantUpperBoundLoopIR(3);
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: A[0] = 0;
+# CHECK: A[1] = 2;
+# CHECK: A[2] = 4)IR";
+
+  torch::jit::testing::FileCheck().run(verification_pattern, actual);
+}
+
+void testUnrollOuter() {
+  KernelScope kernel_scope;
+  ExprHandle outer_bound(3);
+  ExprHandle inner_bound(4);
+  Tensor* A = Compute(
+      "A",
+      {{outer_bound, "x"}, {inner_bound, "y"}},
+      [&](const VarHandle& x, const VarHandle& y) { return x + y; });
+  LoopNest l({A});
+  std::vector<For*> loops = l.getLoopStmtsFor(A);
+  Stmt* unrolled = nullptr;
+  LoopNest::unroll(loops[0], &unrolled);
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int y = 0; y < 4; y++) {
+# CHECK: A[0, y] = y;
+# CHECK: }
+# CHECK: for (int y = 0; y < 4; y++) {
+# CHECK: A[1, y] = y + 1;
+# CHECK: }
+# CHECK: for (int y = 0; y < 4; y++) {
+# CHECK: A[2, y] = y + 2;
+# CHECK: })IR";
+
+  std::ostringstream oss;
+  oss << *unrolled;
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
+void testUnrollInner() {
+  KernelScope kernel_scope;
+  ExprHandle outer_bound(3);
+  ExprHandle inner_bound(4);
+  Tensor* A = Compute(
+      "A",
+      {{outer_bound, "x"}, {inner_bound, "y"}},
+      [&](const VarHandle& x, const VarHandle& y) { return x + y; });
+  LoopNest l({A});
+  std::vector<For*> loops = l.getLoopStmtsFor(A);
+  Stmt* unrolled = nullptr;
+  LoopNest::unroll(
+      static_cast<For*>(loops[0]->body()->stmts().front()), &unrolled);
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int x = 0; x < 3; x++) {
+# CHECK: A[x, 0] = x;
+# CHECK: A[x, 1] = x + 1;
+# CHECK: A[x, 2] = x + 2;
+# CHECK: A[x, 3] = x + 3;
+# CHECK: })IR";
+
+  std::ostringstream oss;
+  oss << *loops[0];
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
+void testUnrollMultipleStatements() {
+  KernelScope kernel_scope;
+  const int kTotalSize = 3;
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kInt);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kInt);
+
+  VarHandle x("x", kInt);
+  auto f = For::make(
+      x,
+      0,
+      kTotalSize,
+      Block::make({Store::make(a_buf, {x}, x * 2),
+                   Store::make(b_buf, {x}, Load::make(a_buf, {x}, 1))}));
+  Block::make({f});
+  Stmt* unrolled = nullptr;
+  LoopNest::unroll(f, &unrolled);
+  std::ostringstream oss;
+  oss << *unrolled;
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: A[0] = 0;
+# CHECK: B[0] = A[0];
+# CHECK: A[1] = 2;
+# CHECK: B[1] = A[1];
+# CHECK: A[2] = 4
+# CHECK: B[2] = A[2];)IR";
+
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
+void testUnrollEmpty() {
+  const std::string actual = constantUpperBoundLoopIR(0);
+  const std::string& verification_pattern = R"IR(
+# CHECK-NOT: A[
+  )IR";
+
+  torch::jit::testing::FileCheck().run(verification_pattern, actual);
+}
+
+void testNoUnroll() {
+  KernelScope kernel_scope;
+  VarHandle upper_bound("N", kInt);
+  Tensor* A = Compute(
+      "A", {{upper_bound, "x"}}, [&](const VarHandle& x) { return x * 2; });
+  LoopNest l({A});
+  std::vector<For*> loops = l.getLoopStmtsFor(A);
+  Stmt* unrolled = nullptr;
+  ASSERT_THROWS_WITH(
+      LoopNest::unroll(loops[0], &unrolled), "non-constant loop");
+}
+
+void testUnrollWithLet() {
+  KernelScope kernel_scope;
+  const int kTotalSize = 3;
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kInt);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kInt);
+
+  VarHandle e("e", kInt);
+  VarHandle x("x", kInt);
+  auto f = For::make(
+      x,
+      0,
+      kTotalSize,
+      Block::make({Let::make(e, 7),
+                   Store::make(a_buf, {x}, e),
+                   Store::make(b_buf, {x}, e + 1)}));
+  Block::make({f});
+  Stmt* unrolled = nullptr;
+  LoopNest::unroll(f, &unrolled);
+  std::ostringstream oss;
+  oss << *unrolled;
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: int e = 7;
+# CHECK: A[0] = e;
+# CHECK: B[0] = e + 1;
+# CHECK: A[1] = e;
+# CHECK: B[1] = e + 1;
+# CHECK: A[2] = e;
+# CHECK: B[2] = e + 1;)IR";
+
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  std::vector<int> a_v(kTotalSize, 0);
+  std::vector<int> b_v(kTotalSize, 0);
+  SimpleIREvaluator eval(unrolled, a_buf, b_buf);
+  eval(a_v, b_v);
+  for (int i = 0; i < kTotalSize; ++i) {
+    ASSERT_EQ(a_v[i], 7);
+    ASSERT_EQ(b_v[i], 8);
+  }
+}
+
 } // namespace jit
 } // namespace torch

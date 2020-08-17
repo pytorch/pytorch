@@ -392,15 +392,11 @@ Tensor dot_cuda(const Tensor& self, const Tensor& other) {
     incy = 1;
   }
 
-  return AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "dot", [&] {
+  return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::Half, self.scalar_type(), "dot", [&] {
     Tensor result = at::empty({}, self.options());
 
     auto handle = at::cuda::getCurrentCUDABlasHandle();
-    cublasPointerMode_t previous_mode = CUBLAS_POINTER_MODE_DEVICE;
-    TORCH_CUDABLAS_CHECK(cublasGetPointerMode(handle, &previous_mode));
-    TORCH_CUDABLAS_CHECK(
-        cublasSetPointerMode(handle, CUBLAS_POINTER_MODE_DEVICE));
-
+    at::cuda::blas::PointerModeGuard pointerModeGuard(handle, CUBLAS_POINTER_MODE_DEVICE);
     at::cuda::blas::dot<scalar_t>(
         handle,
         n,
@@ -409,8 +405,6 @@ Tensor dot_cuda(const Tensor& self, const Tensor& other) {
         other.data_ptr<scalar_t>(),
         incy,
         result.data_ptr<scalar_t>());
-
-    TORCH_CUDABLAS_CHECK(cublasSetPointerMode(handle, previous_mode));
 
     return result;
   });

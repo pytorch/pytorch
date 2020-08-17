@@ -337,7 +337,7 @@ VBuffer::~VBuffer() {
 }
 
 void VBuffer::copy_from_device_to_host(
-    void* const outputData, const int64_t size) {
+    void* const outputData, const int64_t size) const {
   auto mm = map();
   TORCH_INTERNAL_ASSERT(mm.ptr(), "Vulkan: Failed to map Vulkan Buffer memory");
   ::memcpy(outputData, mm.ptr(), size);
@@ -593,6 +593,11 @@ void VImage::addImageMemoryBarrier(
     barrier.srcAccessMask = 0;
     barrier.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
     srcStageMask = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+  } else if (
+      oldLayout == VK_IMAGE_LAYOUT_UNDEFINED &&
+      newLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
+    barrier.srcAccessMask = 0;
+    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
   } else if (
       oldLayout == VK_IMAGE_LAYOUT_GENERAL &&
       newLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
@@ -1037,8 +1042,7 @@ void copy_buffer_to_image(const VBuffer& buffer, VImage& image) {
     int32_t h;
   };
   const ConstBlock constBlock{image.w(), image.h()};
-  VBuffer constBuffer =
-      makeUniformConstBuffer(&constBlock, sizeof(constBlock));
+  VBuffer constBuffer = makeUniformConstBuffer(&constBlock, sizeof(constBlock));
 
   VkDescriptorSetLayout descrSetLayout{};
   VkDescriptorSetLayoutBinding bindings[] = {
@@ -1098,8 +1102,7 @@ void copy_image_to_buffer(
     int32_t h;
   };
   const ConstBlock constBlock{image.w(), image.h()};
-  VBuffer constBuffer =
-      makeUniformConstBuffer(&constBlock, sizeof(constBlock));
+  VBuffer constBuffer = makeUniformConstBuffer(&constBlock, sizeof(constBlock));
 
   VkDescriptorSetLayout descrSetLayout{};
   const VkDescriptorSetLayoutBinding bindings[] = {
@@ -1150,15 +1153,17 @@ void copy_image_to_buffer(
 void copy_buffer_to_buffer(
     const VBuffer& srcBuffer,
     VBuffer& dstBuffer,
-    VkDeviceSize size) {
+    VkDeviceSize size,
+    VkDeviceSize srcOffset,
+    VkDeviceSize dstOffset) {
   auto device = context().device();
   VkCommandBuffer commandBuffer{};
   allocateCommandBuffer(device, &commandBuffer);
   beginCommandBuffer(commandBuffer);
 
   VkBufferCopy copyRegion{};
-  copyRegion.srcOffset = 0;
-  copyRegion.dstOffset = 0;
+  copyRegion.srcOffset = srcOffset;
+  copyRegion.dstOffset = dstOffset;
   copyRegion.size = size;
   vkCmdCopyBuffer(
       commandBuffer,
@@ -1208,10 +1213,16 @@ class VulkanTensor::Impl final {
   }
 
   inline VBuffer* buffer() {
+    if (!has_buffer()) {
+      buffer_ = std::make_unique<VBuffer>(buffer_size_for_sizes(sizes_));
+    }
     return buffer_.get();
   }
 
   const VBuffer* buffer() const {
+    if (!has_buffer()) {
+      buffer_ = std::make_unique<VBuffer>(buffer_size_for_sizes(sizes_));
+    }
     return buffer_.get();
   }
 
@@ -1232,24 +1243,26 @@ class VulkanTensor::Impl final {
         can_be_image(),
         "Vulkan: Only Tensors with dim <= 4 can be represented as Vulkam Image");
     auto d = dim();
-    uint32_t wd = 1;
-    uint32_t hd = 1;
-    uint32_t dd = 1;
+    int64_t _wd = 1;
+    int64_t _hd = 1;
+    int64_t _dd = 1;
     if (d == 4) {
-      wd = sizes_[3];
-      hd = sizes_[2];
-      dd = sizes_[1] * sizes_[0];
+      _wd = sizes_[3];
+      _hd = sizes_[2];
+      _dd = sizes_[1] * sizes_[0];
     } else if (d == 3) {
-      wd = sizes_[2];
-      hd = sizes_[1];
-      dd = sizes_[0];
+      _wd = sizes_[2];
+      _hd = sizes_[1];
+      _dd = sizes_[0];
     } else if (d == 2) {
-      wd = sizes_[1];
-      hd = sizes_[0];
+      _wd = sizes_[1];
+      _hd = sizes_[0];
     } else if (d == 1) {
-      wd = sizes_[0];
+      _wd = sizes_[0];
     }
-
+    int32_t wd = safe_downcast<int64_t>(_wd);
+    int32_t hd = safe_downcast<int64_t>(_hd);
+    int32_t dd = safe_downcast<int64_t>(_dd);
     return {{wd, hd, UP_DIV(dd, 4)}, {wd, hd, dd}};
   }
 
@@ -1275,7 +1288,7 @@ class VulkanTensor::Impl final {
     return const_cast<VulkanTensor::Impl*>(this)->image(imageSizes);
   }
 
-  VkDeviceSize buffer_size_for_sizes(std::vector<int64_t> sizes) {
+  VkDeviceSize buffer_size_for_sizes(std::vector<int64_t> sizes) const {
     const auto d = sizes.size();
     const auto numel = std::accumulate(
         std::begin(sizes), std::end(sizes), 1, std::multiplies<int64_t>());
@@ -1299,16 +1312,13 @@ class VulkanTensor::Impl final {
   }
 
   void set_data_from_host(const float* const inputData) {
-    if (!has_storage()) {
-      allocate_storage();
-    }
-    buffer_->copy_from_host_to_device(
+    buffer()->copy_from_host_to_device(
         (const void*)inputData, sizeof(float) * numel_);
   }
 
   void copy_data_to_host(float* const outputData) const {
     sync_image_to_buffer();
-    buffer_->copy_from_device_to_host(outputData, sizeof(float) * numel_);
+    buffer()->copy_from_device_to_host(outputData, sizeof(float) * numel_);
   }
 
   void sync_image_to_buffer() const {
@@ -1324,7 +1334,7 @@ class VulkanTensor::Impl final {
   std::vector<int64_t> sizes_;
   std::vector<int64_t> strides_;
   int64_t numel_;
-  std::unique_ptr<VBuffer> buffer_;
+  mutable std::unique_ptr<VBuffer> buffer_;
   std::unique_ptr<VImage> image_;
 };
 

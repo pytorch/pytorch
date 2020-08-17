@@ -278,7 +278,19 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     add_library(process_group_agent "${TORCH_SRC_DIR}/csrc/distributed/rpc/process_group_agent.cpp" "${TORCH_SRC_DIR}/csrc/distributed/rpc/process_group_agent.h")
     target_link_libraries(process_group_agent PRIVATE torch c10d fmt::fmt-header-only)
     add_dependencies(process_group_agent torch c10d)
-    target_include_directories(process_group_agent PRIVATE ${TORCH_ROOT}/third_party/tensorpipe)
+
+    # Define this target even if we're building without TensorPipe, to make life
+    # easier to other targets that depend on this. However, in that case, by not
+    # setting the USE_TENSORPIPE compile definition, this target will just end
+    # up being empty. Downstream targets should also add a #ifdef guard.
+    add_library(tensorpipe_agent "${TORCH_SRC_DIR}/csrc/distributed/rpc/tensorpipe_agent.cpp" "${TORCH_SRC_DIR}/csrc/distributed/rpc/tensorpipe_agent.h")
+    target_link_libraries(tensorpipe_agent PRIVATE torch c10d tensorpipe fmt::fmt-header-only)
+    add_dependencies(tensorpipe_agent torch c10d)
+    if(USE_TENSORPIPE)
+      target_compile_definitions(tensorpipe_agent PUBLIC USE_TENSORPIPE)
+      target_link_libraries(tensorpipe_agent PRIVATE tensorpipe)
+      add_dependencies(tensorpipe_agent tensorpipe)
+    endif()
   endif()
 
   set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
@@ -309,11 +321,6 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_2.cpp"
       "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_3.cpp"
       "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_4.cpp"
-      "${TORCH_SRC_DIR}/csrc/autograd/generated/ProfiledType_0.cpp"
-      "${TORCH_SRC_DIR}/csrc/autograd/generated/ProfiledType_1.cpp"
-      "${TORCH_SRC_DIR}/csrc/autograd/generated/ProfiledType_2.cpp"
-      "${TORCH_SRC_DIR}/csrc/autograd/generated/ProfiledType_3.cpp"
-      "${TORCH_SRC_DIR}/csrc/autograd/generated/ProfiledType_4.cpp"
       "${TORCH_SRC_DIR}/csrc/autograd/generated/TraceType_0.cpp"
       "${TORCH_SRC_DIR}/csrc/autograd/generated/TraceType_1.cpp"
       "${TORCH_SRC_DIR}/csrc/autograd/generated/TraceType_2.cpp"
@@ -338,6 +345,8 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_variable_methods.cpp"
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_torch_functions.cpp"
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_nn_functions.cpp"
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_fft_functions.cpp"
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_linalg_functions.cpp"
     )
 
   set(GENERATED_H_PYTHON
@@ -370,7 +379,6 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
     "${TOOLS_PATH}/autograd/templates/VariableType.h"
     "${TOOLS_PATH}/autograd/templates/VariableType.cpp"
-    "${TOOLS_PATH}/autograd/templates/ProfiledType.cpp"
     "${TOOLS_PATH}/autograd/templates/TraceType.cpp"
     "${TOOLS_PATH}/autograd/templates/Functions.h"
     "${TOOLS_PATH}/autograd/templates/Functions.cpp"
@@ -379,6 +387,8 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${TOOLS_PATH}/autograd/templates/python_variable_methods.cpp"
     "${TOOLS_PATH}/autograd/templates/python_torch_functions.cpp"
     "${TOOLS_PATH}/autograd/templates/python_nn_functions.cpp"
+    "${TOOLS_PATH}/autograd/templates/python_fft_functions.cpp"
+    "${TOOLS_PATH}/autograd/templates/python_linalg_functions.cpp"
     "${TOOLS_PATH}/autograd/templates/variable_factories.h"
     "${TOOLS_PATH}/autograd/templates/annotated_fn_args.py"
     "${TOOLS_PATH}/autograd/deprecated.yaml"
@@ -564,6 +574,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/pooling.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/rnn.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/upsampling.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/transformer.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/container/functional.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/activation.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/adaptive.cpp
@@ -578,6 +589,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/pooling.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/rnn.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/vision.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/nn/options/transformer.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/optim/adagrad.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/optim/adam.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/optim/adamw.cpp

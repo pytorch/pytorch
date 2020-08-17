@@ -349,6 +349,16 @@ public:
     }
     return loadu(tmp);
   }
+  Vec256<float> hypot(const Vec256<float> &b) const {
+    __at_align32__ float tmp[size()];
+    __at_align32__ float tmp_b[size()];
+    store(tmp);
+    b.store(tmp_b);
+    for (int64_t i = 0; i < size(); i++) {
+      tmp[i] = std::hypot(tmp[i], tmp_b[i]);
+    }
+    return loadu(tmp);
+  }
   Vec256<float> log() const {
     return map(std::log);
   }
@@ -360,6 +370,16 @@ public:
   }
   Vec256<float> log2() const {
     return map(std::log2);
+  }
+  Vec256<float> nextafter(const Vec256<float> &b) const {
+    __at_align32__ float tmp[size()];
+    __at_align32__ float tmp_b[size()];
+    store(tmp);
+    b.store(tmp_b);
+    for (int64_t i = 0; i < size(); i++) {
+      tmp[i] = std::nextafter(tmp[i], tmp_b[i]);
+    }
+    return loadu(tmp);
   }
   Vec256<float> frac() const;
   Vec256<float> sin() const {
