@@ -14,9 +14,9 @@ namespace {
 
 void _compute_linear_combination_cpu_kernel(
   TensorIterator& iter,
-  int32_t in_stride,
-  int32_t coeff_stride,
-  int32_t num_summations
+  int64_t in_stride,
+  int64_t coeff_stride,
+  int64_t num_summations
 ) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
     at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,

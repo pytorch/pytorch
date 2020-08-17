@@ -9,9 +9,9 @@ namespace at { namespace native {
 
 using _compute_linear_combination_fn = void(*)(
   TensorIterator& iter,
-  int32_t in_stride,
-  int32_t coeff_stride,
-  int32_t num_summations
+  int64_t in_stride,
+  int64_t coeff_stride,
+  int64_t num_summations
 );
 
 DECLARE_DISPATCH(_compute_linear_combination_fn, _compute_linear_combination_stub);
