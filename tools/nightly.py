@@ -221,8 +221,20 @@ def timed(prefix):
     return dec
 
 
+def _make_channel_args(channels=("pytorch-nightly",), override_channels=False):
+    args = []
+    for channel in channels:
+        args.append("--channel")
+        args.append(channel)
+    if override_channels:
+        args.append("--override-channels")
+    return args
+
+
 @timed("Solving conda environment")
-def conda_solve(name=None, prefix=None):
+def conda_solve(
+    name=None, prefix=None, channels=("pytorch-nightly",), override_channels=False
+):
     """Performs the conda solve and splits the deps from the package."""
     # compute what environment to use
     if prefix is not None:
@@ -243,8 +255,6 @@ def conda_solve(name=None, prefix=None):
             "--yes",
             "--dry-run",
             "--json",
-            "-c",
-            "pytorch-nightly",
         ]
         cmd.extend(env_opts)
     else:
@@ -256,9 +266,11 @@ def conda_solve(name=None, prefix=None):
             "--json",
             "--name",
             "__pytorch__",
-            "-c",
-            "pytorch-nightly",
         ]
+    channel_args = _make_channel_args(
+        channels=channels, override_channels=override_channels
+    )
+    cmd.extend(channel_args)
     cmd.extend(SPECS_TO_INSTALL)
     p = subprocess.run(cmd, capture_output=True, check=True)
     # parse solution
@@ -492,12 +504,19 @@ def write_pth(env_opts, platform):
         f.write(s)
 
 
-def install(branch=None, name=None, prefix=None, logger=None):
+def install(
+    branch=None,
+    name=None,
+    prefix=None,
+    channels=("pytorch-nightly",),
+    override_channels=False,
+    logger=None,
+):
     """Development install of PyTorch"""
     global LOGGER
     logger = logger or LOGGER
     deps, pytorch, platform, existing_env, env_opts = conda_solve(
-        name=name, prefix=prefix
+        name=name, prefix=prefix, channels=channels, override_channels=override_channels
     )
     if deps:
         deps_install(deps, existing_env, env_opts)
@@ -547,6 +566,21 @@ def make_parser():
         default=False,
         action="store_true",
     )
+    p.add_argument(
+        "--override-channels",
+        help="Do not search default or .condarc channels.",
+        dest="override_channels",
+        default=False,
+        action="store_true",
+    )
+    p.add_argument(
+        "-c",
+        "--channel",
+        help="Additional channel to search for packages. 'pytorch-nightly' will always be prepended to this list.",
+        dest="channels",
+        action="append",
+        metavar="CHANNEL",
+    )
     return p
 
 
@@ -559,9 +593,19 @@ def main(args=None):
     status = status or check_branch(ns.branch)
     if status:
         sys.exit(status)
+    channels = ["pytorch-nightly"]
+    if ns.channels:
+        channels.extend(ns.channels)
     with logging_manager(debug=ns.verbose) as logger:
         LOGGER = logger
-        install(branch=ns.branch, name=ns.name, prefix=ns.prefix, logger=logger)
+        install(
+            branch=ns.branch,
+            name=ns.name,
+            prefix=ns.prefix,
+            logger=logger,
+            channels=channels,
+            override_channels=ns.override_channels,
+        )
 
 
 if __name__ == "__main__":
