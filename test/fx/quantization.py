@@ -65,7 +65,8 @@ class Add(MinMaxObserver):
         if not self.all_tensors:
             return NotImplemented
         scale, zeropoint = self.scale_zeropoint()
-        return quantizer.quantized_graph.create_node('call_function', torch.ops.quantized.add, load_arg(node.args), {'scale': scale, 'zero_point': zeropoint})
+        return quantizer.quantized_graph.create_node(
+            'call_function', torch.ops.quantized.add, load_arg(node.args), {'scale': scale, 'zero_point': zeropoint})
 
 
 class Relu(NoObserver):
