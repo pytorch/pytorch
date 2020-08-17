@@ -430,6 +430,13 @@ class Fuzzer(object):
         return self._rejections / self._total_generated
 
     def _generate(self, index: int):
+        # By using both the seed provided at init and the index, we
+        # gain several nice properties:
+        #  1) The fuzzer not only provides a deterministic series of fuzzed
+        #     parameters, but we can also start the sequence mid-way through.
+        #  2) If a particular sample breaks determinism (for instance due to
+        #     a user defined function), this behavior will not leak across
+        #     samples.
         state = np.random.RandomState([self._seed, index])
         torch.manual_seed(state.randint(low=0, high=2 ** 63))
 
