@@ -15,7 +15,9 @@ static const std::unordered_map<Symbol, Symbol> alias_map = {
     {aten::linalg_det, aten::det},
     {aten::outer, aten::ger},
     {aten::degrees, aten::rad2deg},
-    {aten::degrees_, aten::rad2deg_}};
+    {aten::degrees_, aten::rad2deg_},
+    {aten::arccosh, aten::acosh},
+    {aten::arccosh_, aten::acosh_}};
 
 void replaceNodeWithNewSymbol(Node* node, Symbol new_symbol) {
   WithInsertPoint insert_guard{node};

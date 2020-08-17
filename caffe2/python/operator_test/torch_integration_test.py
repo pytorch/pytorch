@@ -8,7 +8,7 @@ import torch
 import unittest
 
 from caffe2.python import core, workspace
-from hypothesis import given
+from hypothesis import given, settings
 from scipy.stats import norm
 
 
@@ -874,6 +874,35 @@ class TorchIntegration(hu.HypothesisTestCase):
             torch.tensor(data), torch.Tensor(lengths).int(), torch.Tensor(boundaries)
         )
         torch.testing.assert_allclose(expected_output, actual_output.cpu())
+
+    @given(lengths_0=st.integers(1, 10), lengths_1=st.integers(1, 10))
+    @settings(deadline=1000)
+    def test_merge_id_lists(self, lengths_0, lengths_1):
+        def _merge_id_lists(lengths, values):
+            ref_op = core.CreateOperator(
+                'MergeIdLists',
+                ["lengths_0", "values_0", "lengths_1", "values_1"],
+                ["merged_lengths", "merged_values"]
+            )
+            workspace.FeedBlob("lengths_0", lengths[0])
+            workspace.FeedBlob("values_0", values[0])
+            workspace.FeedBlob("lengths_1", lengths[1])
+            workspace.FeedBlob("values_1", values[1])
+            workspace.RunOperatorOnce(ref_op)
+            return workspace.FetchBlob("merged_lengths"), workspace.FetchBlob("merged_values")
+
+        lengths = [np.array([lengths_0]).astype(np.int32), np.array([lengths_1]).astype(np.int32)]
+        values = [
+            np.random.choice(np.arange(0, 10), size=lengths_0, replace=False).astype(np.int32),
+            np.random.choice(np.arange(10, 20), size=lengths_1, replace=False).astype(np.int32)
+        ]
+
+        expected_merged_lengths, expected_merged_values = _merge_id_lists(lengths, values)
+        output_merged_lengths, output_merged_values = torch.ops._caffe2.MergeIdLists(
+            [torch.tensor(lengths[0]), torch.tensor(values[0]), torch.tensor(lengths[1]), torch.tensor(values[1])]
+        )
+        torch.testing.assert_allclose(expected_merged_lengths, output_merged_lengths)
+        torch.testing.assert_allclose(expected_merged_values, output_merged_values)
 
 
 if __name__ == '__main__':

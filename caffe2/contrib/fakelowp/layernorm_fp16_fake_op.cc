@@ -23,7 +23,7 @@ void LayerNormFakeFp16Op<CPUContext>::calcY(
   std::vector<float> normalized(N);
   for (int i = 0; i < M; ++i) {
     float normFactor = float(1.0f / std_arr[i]);
-    fp16_wrap(&normFactor);
+    fbgemm::RoundToFloat16(&normFactor, &normFactor, 1, FLAGS_caffe2_fbgemm_fake_fp16_clamp);
 
     for (int j = 0; j < N; ++j) {
       normalized[j] = X_arr.col(i)[j] - mean[i];
@@ -82,7 +82,7 @@ void LayerNormFakeFp16Op<CPUContext>::calcMeanStd(
   std::vector<float> sqr(M, 0.0f);
   std::vector<float> var(M, 0.0f);
   float inv_N_val = 1.0f / N;
-  fp16_wrap(&inv_N_val);
+  fbgemm::RoundToFloat16(&inv_N_val, &inv_N_val, 1, FLAGS_caffe2_fbgemm_fake_fp16_clamp);
 
   constexpr int VEC_SIZE = 32;
   std::vector<float> inv_N_vec(VEC_SIZE, inv_N_val);
@@ -158,7 +158,7 @@ void LayerNormFakeFp16Op<CPUContext>::calcMeanStd(
 
   float teps = eps;
   std::vector<float> tmpVec(M, 0.0f);
-  fp16_wrap(&teps);
+  fbgemm::RoundToFloat16(&teps, &teps, 1, FLAGS_caffe2_fbgemm_fake_fp16_clamp);
   int i = 0;
   for (auto& v: var) {
     if (v < 0.0) {
