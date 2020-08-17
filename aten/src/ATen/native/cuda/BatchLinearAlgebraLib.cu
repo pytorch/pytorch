@@ -7,6 +7,8 @@
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/CUDASolver.h>
 #include <ATen/cuda/CUDABlas.h>
+#include <ATen/cuda/CUDAEvent.h>
+#include <c10/cuda/CUDAStream.h>
 
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/cuda/MiscUtils.h>
@@ -27,7 +29,7 @@ static void apply_batched_inverse_lib(Tensor& self, Tensor& self_inv, Tensor& in
   const bool use_loop_launch_ = use_loop_launch(batch_size, n);
 
   if (use_loop_launch_) {
-    self_inv = at::eye({n}, self.options()).expand_as(self).clone();
+    self_inv = at::eye({n}, self.options()).expand_as(self).contiguous();
     self_inv.unsafeGetTensorImpl()->set_stride(self.dim()-2, 1); // These two lines set self_inv to column-major
     self_inv.unsafeGetTensorImpl()->set_stride(self.dim()-1, n);
   }
@@ -37,32 +39,49 @@ static void apply_batched_inverse_lib(Tensor& self, Tensor& self_inv, Tensor& in
   auto self_inv_data = self_inv.data_ptr<scalar_t>();
   auto self_inv_mat_stride = matrixStride(self_inv);
 
-  scalar_t** self_array;
-  scalar_t** self_inv_array;
-
-  ALLOCATE_ARRAY(self_array, scalar_t*, batch_size);
-  ALLOCATE_ARRAY(self_inv_array, scalar_t*, batch_size);
+  Tensor self_array = at::empty({batch_size}, at::device(at::kCPU).dtype(at::kLong));
+  Tensor self_inv_array = at::empty({batch_size}, at::device(at::kCPU).dtype(at::kLong));
+  scalar_t** p_self_array = reinterpret_cast<scalar_t**>(self_array.data_ptr());
+  scalar_t** p_self_inv_array = reinterpret_cast<scalar_t**>(self_inv_array.data_ptr());
 
   // Set up the created arrays
   for (int64_t i = 0; i < batch_size; i++) {
-    self_array[i] = &self_data[i * self_mat_stride];
-    self_inv_array[i] = &self_inv_data[i * self_inv_mat_stride];
+    p_self_array[i] = &self_data[i * self_mat_stride];
+    p_self_inv_array[i] = &self_inv_data[i * self_inv_mat_stride];
   }
 
-  Tensor ipiv_array = at::zeros({batch_size * n}, self.options().dtype(at::kInt));
+  auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
 
   if (use_loop_launch_) {
-    int* p_ipiv_array = ipiv_array.data_ptr<int>();
     int* p_infos = infos.data_ptr<int>();
+
+    auto main_stream = at::cuda::getCurrentCUDAStream();
+
     for (int64_t i = 0; i < batch_size; i++) {
-      _apply_single_inverse_helper<scalar_t>(self_array[i], self_inv_array[i], p_ipiv_array + i * n, p_infos + i, n);
+      auto stream = at::cuda::getStreamFromPool();
+      at::cuda::CUDAStreamGuard guard(stream);
+
+      at::cuda::CUDAEvent can_start;
+      can_start.record(main_stream);
+      can_start.block(main_stream);
+
+      int* pivot = reinterpret_cast<int*>(allocator.allocate(sizeof(int) * n).get());
+      _apply_single_inverse_helper<scalar_t>(p_self_array[i], p_self_inv_array[i], pivot, p_infos + i, n);
+
+      at::cuda::CUDAEvent finished;
+      finished.record(stream);
+      finished.block(main_stream);
     }
   } else {
-    at::cuda::blas::getrfBatched<scalar_t>(n, n, self_array, n,
-      ipiv_array.data_ptr<int>(), infos.data_ptr<int>(), batch_size);
+    self_array = self_array.cuda();
+    self_inv_array = self_inv_array.cuda();
+    int* ipiv_array = reinterpret_cast<int*>(allocator.allocate(sizeof(int)*batch_size*n).get());
 
-    at::cuda::blas::getriBatched<scalar_t>(n, n, self_array, n,
-      ipiv_array.data_ptr<int>(), infos.data_ptr<int>(), batch_size, self_inv_array);
+    at::cuda::blas::getrfBatched<scalar_t>(n, n, reinterpret_cast<scalar_t**>(self_array.data_ptr()), n,
+      ipiv_array, infos.data_ptr<int>(), batch_size);
+
+    at::cuda::blas::getriBatched<scalar_t>(n, n, reinterpret_cast<scalar_t**>(self_array.data_ptr()), n,
+      ipiv_array, infos.data_ptr<int>(), batch_size, reinterpret_cast<scalar_t**>(self_inv_array.data_ptr()));
   }
 }
 
@@ -85,8 +104,10 @@ static void apply_single_inverse_lib(const Tensor& self, Tensor& self_inv, int64
 template <typename scalar_t>
 inline static void _apply_single_inverse_helper(scalar_t* self_ptr, scalar_t* self_inv_ptr, int* ipiv_ptr, int* info_ptr, int n) {
   // self_inv_ptr should already be an identity matrix
-  at::cuda::solver::getrf<scalar_t>(n, n, self_ptr, n, ipiv_ptr, info_ptr);
-  at::cuda::solver::getrs<scalar_t>(n, n, self_ptr, n, ipiv_ptr, self_inv_ptr, n, info_ptr);
+
+  auto handle = at::cuda::getCurrentCUDASolverDnHandle();
+  at::cuda::solver::getrf<scalar_t>(handle, n, n, self_ptr, n, ipiv_ptr, info_ptr);
+  at::cuda::solver::getrs<scalar_t>(handle, n, n, self_ptr, n, ipiv_ptr, self_inv_ptr, n, info_ptr);
 }
 
 Tensor _inverse_helper_cuda_lib(const Tensor& self) {
@@ -114,5 +135,3 @@ Tensor _inverse_helper_cuda_lib(const Tensor& self) {
 }} // namespace at::native
 
 #endif  // USE_CUSOLVER
-
-#undef ALLOCATE_ARRAY

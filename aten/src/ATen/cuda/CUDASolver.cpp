@@ -11,8 +11,7 @@ namespace solver {
 
 template <>
 void getrf<double>(
-    int m, int n, double* dA, int ldda, int* ipiv, int* info) {
-  auto handle = at::cuda::getCurrentCUDASolverDnHandle();
+    cusolverDnHandle_t handle, int m, int n, double* dA, int ldda, int* ipiv, int* info) {
   int lwork;
   TORCH_CUSOLVER_CHECK(
       cusolverDnDgetrf_bufferSize(handle, m, n, dA, ldda, &lwork));
@@ -24,8 +23,7 @@ void getrf<double>(
 
 template <>
 void getrf<float>(
-    int m, int n, float* dA, int ldda, int* ipiv, int* info) {
-  auto handle = at::cuda::getCurrentCUDASolverDnHandle();
+    cusolverDnHandle_t handle, int m, int n, float* dA, int ldda, int* ipiv, int* info) {
   int lwork;
   TORCH_CUSOLVER_CHECK(
       cusolverDnSgetrf_bufferSize(handle, m, n, dA, ldda, &lwork));
@@ -37,18 +35,16 @@ void getrf<float>(
 
 template <>
 void getrs<double>(
-    int n, int nrhs, double* dA, int lda, int* ipiv, double* ret, int ldb, int* info) {
+    cusolverDnHandle_t handle, int n, int nrhs, double* dA, int lda, int* ipiv, double* ret, int ldb, int* info) {
   TORCH_CUSOLVER_CHECK(cusolverDnDgetrs(
-      at::cuda::getCurrentCUDASolverDnHandle(),
-      CUBLAS_OP_N, n, nrhs, dA, lda, ipiv, ret, ldb, info));
+    handle, CUBLAS_OP_N, n, nrhs, dA, lda, ipiv, ret, ldb, info));
 }
 
 template <>
 void getrs<float>(
-    int n, int nrhs, float* dA, int lda, int* ipiv, float* ret, int ldb, int* info) {
+    cusolverDnHandle_t handle, int n, int nrhs, float* dA, int lda, int* ipiv, float* ret, int ldb, int* info) {
   TORCH_CUSOLVER_CHECK(cusolverDnSgetrs(
-      at::cuda::getCurrentCUDASolverDnHandle(),
-      CUBLAS_OP_N, n, nrhs, dA, lda, ipiv, ret, ldb, info));
+    handle, CUBLAS_OP_N, n, nrhs, dA, lda, ipiv, ret, ldb, info));
 }
 
 } // namespace solver

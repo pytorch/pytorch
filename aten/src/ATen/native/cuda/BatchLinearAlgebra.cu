@@ -525,6 +525,10 @@ void magmaLuSolveBatched<float>(
 }
 #endif
 
+#define ALLOCATE_ARRAY(name, type, size)            \
+  auto storage_##name = pin_memory<type>(size);     \
+  name = static_cast<type*>(storage_##name.data());
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template <typename scalar_t>

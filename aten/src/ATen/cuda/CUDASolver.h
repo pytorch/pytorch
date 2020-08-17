@@ -9,7 +9,7 @@ namespace cuda {
 namespace solver {
 
 #define CUDASOLVER_GETRF_ARGTYPES(Dtype)  \
-    int m, int n, Dtype* dA, int ldda, int* ipiv, int* info
+    cusolverDnHandle_t handle, int m, int n, Dtype* dA, int ldda, int* ipiv, int* info
 
 template<class Dtype>
 void getrf(CUDASOLVER_GETRF_ARGTYPES(Dtype)) {
@@ -22,7 +22,7 @@ void getrf<double>(CUDASOLVER_GETRF_ARGTYPES(double));
 
 
 #define CUDASOLVER_GETRS_ARGTYPES(Dtype)  \
-    int n, int nrhs, Dtype* dA, int lda, int* ipiv, Dtype* ret, int ldb, int* info
+    cusolverDnHandle_t handle, int n, int nrhs, Dtype* dA, int lda, int* ipiv, Dtype* ret, int ldb, int* info
 
 template<class Dtype>
 void getrs(CUDASOLVER_GETRS_ARGTYPES(Dtype)) {
