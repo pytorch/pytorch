@@ -42,8 +42,8 @@ class Cache final {
   auto retrieve(const Descriptor& descriptor);
 
   // Only call this function infrequently, if ever.  This cache is only intended
-  // for immutable Vulkan objects of which a small finite instances are required.
-  // A good place to call this function is between model loads.
+  // for immutable Vulkan objects of which a small finite instances are required
+  // at runtime.  A good place to call this function is between model loads.
 
   void purge();
 
