@@ -4589,7 +4589,7 @@ void testGPU_FusionBCastAfterReduce() {
 
   tv5->axis(0)->parallelize(ParallelType::BIDx);
 
-  size_t x = 63, y = 200;
+  int x = 63, y = 200;
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
 
