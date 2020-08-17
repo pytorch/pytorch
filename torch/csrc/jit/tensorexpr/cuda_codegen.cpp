@@ -283,6 +283,7 @@ void CudaPrinter::visit(const Load* v) {
     return;
   }
   if (v->dtype().scalar_type() == ScalarType::Bool) {
+    // There's no __ldg overload for bool.
     os() << *v->base_handle() << "[" << *v->flat_index() << "]";
     return;
   }
