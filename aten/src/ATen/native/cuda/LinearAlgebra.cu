@@ -392,7 +392,7 @@ Tensor dot_cuda(const Tensor& self, const Tensor& other) {
     incy = 1;
   }
 
-  return AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "dot", [&] {
+  return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::Half, self.scalar_type(), "dot", [&] {
     Tensor result = at::empty({}, self.options());
 
     auto handle = at::cuda::getCurrentCUDABlasHandle();
