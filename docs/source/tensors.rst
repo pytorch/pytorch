@@ -414,6 +414,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: min
    .. automethod:: mm
    .. automethod:: mode
+   .. automethod:: movedim
    .. automethod:: mul
    .. automethod:: mul_
    .. automethod:: multinomial

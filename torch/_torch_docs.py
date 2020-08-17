@@ -1057,7 +1057,7 @@ vstack(tensors, *, out=None) -> Tensor
 
 Stack tensors in sequence vertically (row wise).
 
-This is equivalent to concatenation along the first axis after all 1-D tensors have been reshaped by :func:`torch.atleast_2d`. 
+This is equivalent to concatenation along the first axis after all 1-D tensors have been reshaped by :func:`torch.atleast_2d`.
 
 Args:
     tensors (sequence of Tensors): sequence of tensors to concatenate
@@ -1091,7 +1091,7 @@ dstack(tensors, *, out=None) -> Tensor
 
 Stack tensors in sequence depthwise (along third axis).
 
-This is equivalent to concatenation along the third axis after 1-D and 2-D tensors have been reshaped by :func:`torch.atleast_3d`. 
+This is equivalent to concatenation along the third axis after 1-D and 2-D tensors have been reshaped by :func:`torch.atleast_3d`.
 
 Args:
     tensors (sequence of Tensors): sequence of tensors to concatenate
@@ -4716,8 +4716,7 @@ Example::
             [1.0311, 0.3901, 0.5049]])
 """)
 
-add_docstr(torch.movedim,
-           r"""
+add_docstr(torch.movedim, r"""
 movedim(input, source, destination) -> Tensor
 
 Moves the dimension(s) of :attr:`input` at the position(s) in :attr:`source`
