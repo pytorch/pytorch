@@ -22,9 +22,6 @@ const bool use_cusolver_ = false;
 namespace at {
 namespace native {
 
-template<class scalar_t>
-static void _apply_single_inverse_helper(scalar_t* self_ptr, scalar_t* self_inv_ptr, int* ipiv_ptr, int* info_ptr, int n);
-
 Tensor _inverse_helper_cuda_lib(const Tensor& self);
 
 }}  // namespace at::native

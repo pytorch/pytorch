@@ -18,16 +18,27 @@
 namespace at {
 namespace native {
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ inverse ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+inline static Tensor column_major_identity_matrix_like(const Tensor& self) {
+  int n = cuda_int_cast(self.size(-2), "self.size(-2)");
+  Tensor self_inv = at::eye({n}, self.options()).expand_as(self).contiguous();
+  self_inv.unsafeGetTensorImpl()->set_stride(self.dim()-2, 1); // These two lines set self_inv to column-major
+  self_inv.unsafeGetTensorImpl()->set_stride(self.dim()-1, n);
+  return self_inv;
+}
+
+template <typename scalar_t>
+inline static void _apply_single_inverse_helper(scalar_t* self_ptr, scalar_t* self_inv_ptr, int* ipiv_ptr, int* info_ptr, int n) {
+  // self_inv_ptr should already be an identity matrix
+
+  auto handle = at::cuda::getCurrentCUDASolverDnHandle();
+  at::cuda::solver::getrf<scalar_t>(handle, n, n, self_ptr, n, ipiv_ptr, info_ptr);
+  at::cuda::solver::getrs<scalar_t>(handle, n, n, self_ptr, n, ipiv_ptr, self_inv_ptr, n, info_ptr);
+}
 
 template <typename scalar_t>
 static void apply_batched_inverse_lib(Tensor& self, Tensor& self_inv, Tensor& infos) {
   const int batch_size = cuda_int_cast(batchCount(self), "batchCount");
   const int n = cuda_int_cast(self.size(-2), "self.size(-2)");
-
-  self_inv = at::eye({n}, self.options()).expand_as(self).contiguous();
-  self_inv.unsafeGetTensorImpl()->set_stride(self.dim()-2, 1); // These two lines set self_inv to column-major
-  self_inv.unsafeGetTensorImpl()->set_stride(self.dim()-1, n);
 
   auto self_data = self.data_ptr<scalar_t>();
   auto self_mat_stride = matrixStride(self);
@@ -67,46 +78,34 @@ static void apply_single_inverse_lib(const Tensor& self, Tensor& self_inv, int64
   int n = cuda_int_cast(self.size(-2), "self.size(-2)");
 
   Tensor ipiv = at::empty({n}, self.options().dtype(at::kInt));
-  self_inv = at::eye(n, self.options());
-  self_inv.unsafeGetTensorImpl()->set_stride(0, 1); // These two lines set self_inv to column-major
-  self_inv.unsafeGetTensorImpl()->set_stride(1, n);
-
   Tensor info_tmp = at::zeros({1}, self.options().dtype(at::kInt));
+
   _apply_single_inverse_helper<scalar_t>(
-    self.data_ptr<scalar_t>(), self_inv.data_ptr<scalar_t>(),
-    ipiv.data_ptr<int>(), info_tmp.data_ptr<int>(), n);
+    self.data_ptr<scalar_t>(), self_inv.data_ptr<scalar_t>(), ipiv.data_ptr<int>(), info_tmp.data_ptr<int>(), n);
+
   info = info_tmp.item<int>();
 }
 
-template <typename scalar_t>
-inline static void _apply_single_inverse_helper(scalar_t* self_ptr, scalar_t* self_inv_ptr, int* ipiv_ptr, int* info_ptr, int n) {
-  // self_inv_ptr should already be an identity matrix
-
-  auto handle = at::cuda::getCurrentCUDASolverDnHandle();
-  at::cuda::solver::getrf<scalar_t>(handle, n, n, self_ptr, n, ipiv_ptr, info_ptr);
-  at::cuda::solver::getrs<scalar_t>(handle, n, n, self_ptr, n, ipiv_ptr, self_inv_ptr, n, info_ptr);
-}
-
 Tensor _inverse_helper_cuda_lib(const Tensor& self) {
-  auto self_working_copy = cloneBatchedColumnMajor(self);
+  Tensor self_working_copy = cloneBatchedColumnMajor(self);
+  Tensor self_inv_working_copy = column_major_identity_matrix_like(self_working_copy);
+
   if (self.dim() > 2) {
-    auto self_inv_working_copy = at::empty_like(self_working_copy);
     Tensor infos = at::zeros({batchCount(self)}, self.options().dtype(kInt));
     AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "inverse_cuda", [&]{
       apply_batched_inverse_lib<scalar_t>(
         self_working_copy, self_inv_working_copy, infos);
     });
     batchCheckErrors(infos, "inverse_cuda");
-    return self_inv_working_copy;
   } else {
-    Tensor self_inv;
     int64_t info = 0;
     AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "inverse_cuda", [&]{
-      apply_single_inverse_lib<scalar_t>(self_working_copy, self_inv, info);
+      apply_single_inverse_lib<scalar_t>(self_working_copy, self_inv_working_copy, info);
     });
     singleCheckErrors(info, "inverse_cuda");
-    return self_inv;
   }
+
+  return self_inv_working_copy;
 }
 
 }} // namespace at::native
