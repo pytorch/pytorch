@@ -103,13 +103,12 @@ class FuzzedParameter(object):
 
     def _loguniform(self, state):
         output = int(2 ** state.uniform(
-            low=np.log2(self._minval),
-            high=np.log2(self._maxval)
+            low=np.log2(self._minval) if self._minval is not None else None,
+            high=np.log2(self._maxval) if self._maxval is not None else None,
         ))
-        # `or 0` is to appease MyPy
-        if output < (self._minval or 0.0):
+        if self._minval is not None and output < self._minval:
             return self._minval
-        if output > (self._maxval or 0.0):
+        if self._maxval is not None and output > self._maxval:
             return self._maxval
         return output
 

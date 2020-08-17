@@ -34,11 +34,12 @@ Tensor bmm_cuda(const Tensor& self, const Tensor& mat2) {
 Tensor prepare_matrix_for_cublas(Tensor& tensor, bool& transpose_tensor) {
   Tensor tensor_;
   IntArrayRef tensor_strides = tensor.strides();
+  IntArrayRef tensor_sizes = tensor.sizes();
 
-  if ((tensor_strides[0] == 1) && (tensor_strides[1] != 0)) {
+  if ((tensor_strides[0] == 1) && (tensor_strides[1] >= std::max<int64_t>(1, tensor_sizes[0]))) {
     tensor_ = tensor;
     transpose_tensor = false;
-  } else if ((tensor_strides[1] == 1) && (tensor_strides[0] != 0)) {
+  } else if ((tensor_strides[1] == 1) && (tensor_strides[0] >= std::max<int64_t>(1, tensor_sizes[1]))) {
     tensor_ = tensor;
     transpose_tensor = true;
   } else {
@@ -395,11 +396,7 @@ Tensor dot_cuda(const Tensor& self, const Tensor& other) {
     Tensor result = at::empty({}, self.options());
 
     auto handle = at::cuda::getCurrentCUDABlasHandle();
-    cublasPointerMode_t previous_mode = CUBLAS_POINTER_MODE_DEVICE;
-    TORCH_CUDABLAS_CHECK(cublasGetPointerMode(handle, &previous_mode));
-    TORCH_CUDABLAS_CHECK(
-        cublasSetPointerMode(handle, CUBLAS_POINTER_MODE_DEVICE));
-
+    at::cuda::blas::PointerModeGuard pointerModeGuard(handle, CUBLAS_POINTER_MODE_DEVICE);
     at::cuda::blas::dot<scalar_t>(
         handle,
         n,
@@ -408,8 +405,6 @@ Tensor dot_cuda(const Tensor& self, const Tensor& other) {
         other.data_ptr<scalar_t>(),
         incy,
         result.data_ptr<scalar_t>());
-
-    TORCH_CUDABLAS_CHECK(cublasSetPointerMode(handle, previous_mode));
 
     return result;
   });
