@@ -520,9 +520,7 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::SetAttr:
       return analyzeSetAttr(node);
     case prim::profile:
-      if (node->inputs().size() > 0) {
-        makePointerTo(node->output(), node->inputs().at(0));
-      }
+      makePointerTo(node->output(), node->inputs().at(0));
       return;
     case prim::BailOut:
       TORCH_INTERNAL_ASSERT(

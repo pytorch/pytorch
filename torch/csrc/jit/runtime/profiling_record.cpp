@@ -191,6 +191,17 @@ bool needsProfiledOutput(Node* n) {
   }
 }
 
+static void removeProfileCounter(Block* b) {
+  for (auto it = b->nodes().rbegin(); it != b->nodes().rend();) {
+    auto n = *it;
+    if (n->kind() == prim::profile && n->inputs().size() == 0) {
+      it.destroyCurrent();
+    } else {
+      it++;
+    }
+  }
+}
+
 void ProfilingRecord::instrumentBlock(Block* block) {
   for (auto it = block->nodes().begin(); it != block->nodes().end(); ++it) {
     auto n = *it;
