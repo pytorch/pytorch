@@ -235,7 +235,7 @@ class _ObserverBase(ObserverBase):
                 min_val, max_val
             )
         else:
-            assert torch.sum(min_val <= max_val) == len(min_val), "min {} should be less than max {}".format(
+            assert torch.all(min_val <= max_val), "min {} should be less than max {}".format(
                 min_val, max_val
             )
 
