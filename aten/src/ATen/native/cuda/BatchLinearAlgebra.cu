@@ -735,11 +735,13 @@ Tensor _inverse_helper_cuda_legacy(const Tensor& self) {
 }
 
 Tensor _inverse_helper_cuda(const Tensor& self) {
-#ifdef USE_CUSOLVER
-  return _inverse_helper_cuda_lib(self);
-#else
-  return _inverse_helper_cuda_legacy(self);
-#endif
+  if (use_cusolver_ && \
+    ((self.dim() == 2) || (/* self.dim() > 2 && */ batchCount(self) <= 2))
+  ) {
+    return _inverse_helper_cuda_lib(self);    // cusolver or cublas
+  } else {
+    return _inverse_helper_cuda_legacy(self); // magma-cuda
+  }
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ cholesky_solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
