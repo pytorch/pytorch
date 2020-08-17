@@ -500,7 +500,7 @@ def _diagnose_export(model, args, f, verbose=False, training=TrainingMode.EVAL,
     _set_opset_version(opset_version)
     # operator_export_type is set ro ONNX_FALLTHROUGH by default so that if an op is not supported
     # in ONNX, fall through will occur and export the operator as is, as a custom ONNX op.
-    operator_export_type=OperatorExportTypes.ONNX_FALLTHROUGH
+    operator_export_type = OperatorExportTypes.ONNX_FALLTHROUGH
     with select_model_mode_for_export(model, training):
         graph, params_dict, torch_out = _model_to_graph(model, args, verbose, input_names,
                                                         output_names, operator_export_type)
