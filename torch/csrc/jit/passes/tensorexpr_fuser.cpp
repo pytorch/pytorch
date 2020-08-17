@@ -143,6 +143,10 @@ class TensorExprFuser {
 
   void run() {
     aliasDb_ = torch::make_unique<AliasDb>(graph_);
+    fillTypeInfoMap(graph_->block());
+    printTypeInfoMap();
+    removeProfilingNodes(graph_->block());
+    GRAPH_DUMP("After removing profiling nodes: ", graph_);
     createFusionGroups(graph_->block());
   }
 
@@ -205,6 +209,7 @@ class TensorExprFuser {
     auto reverse_iter = block->nodes().reverse();
     for (auto it = reverse_iter.begin(); it != reverse_iter.end();) {
       Node* n = *it;
+      GRAPH_DEBUG("Considering node:", *n)
 
       for (auto b : n->blocks()) {
         createFusionGroups(b);
@@ -304,6 +309,9 @@ class TensorExprFuser {
     if (!v->type()->cast<TensorType>()) {
       return true;
     }
+    if (typeinfo_map_.count(v)) {
+      return typeinfo_map_.at(v)->isComplete();
+    }
     return v->isCompleteTensor();
   }
 
@@ -392,6 +400,48 @@ class TensorExprFuser {
     return true;
   }
 #undef REQ
+
+  void fillTypeInfoMap(Block* block) {
+    for (auto it = block->nodes().rbegin(); it != block->nodes().rend();) {
+      Node* n = *it++;
+      if (n->kind() == prim::profile && n->outputs().size() == 1) {
+        if (auto tensor_ty = n->ty(attr::profiled_type)->cast<TensorType>()) {
+          GRAPH_DEBUG("Fill type info: ", *n);
+          GRAPH_DEBUG("%", n->input()->debugName(), " --> ", *tensor_ty);
+          typeinfo_map_[n->input()] = tensor_ty;
+        }
+      }
+
+      for (Block* b : n->blocks()) {
+        fillTypeInfoMap(b);
+      }
+    }
+  }
+  void printTypeInfoMap() {
+    for (const auto& kv : typeinfo_map_) {
+      GRAPH_DEBUG("%", kv.first->debugName(), " --> ", *kv.second);
+    }
+  }
+
+  void removeProfilingNodes(Block* b) {
+    for (auto it = b->nodes().begin(); it != b->nodes().end(); it++) {
+      if (it->kind() == prim::profile) {
+        for (auto o : it->outputs()) {
+          typeinfo_map_.erase(o);
+        }
+        if (it->outputs().size()) {
+          it->output()->replaceAllUsesWith(it->input());
+        }
+        it.destroyCurrent();
+      } else {
+        for (Block* ib : it->blocks()) {
+          removeProfilingNodes(ib);
+        }
+      }
+    }
+  }
+
+  std::unordered_map<Value*, TensorTypePtr> typeinfo_map_;
 
   std::shared_ptr<Graph> graph_;
   std::unique_ptr<AliasDb> aliasDb_ = nullptr;
