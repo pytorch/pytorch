@@ -13,7 +13,13 @@ endif()
 if(INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE)
   set(ATEN_THREADING "NATIVE" CACHE STRING "ATen parallel backend")
 else()
-  set(ATEN_THREADING "OMP" CACHE STRING "ATen parallel backend")
+  if(USE_OPENMP)
+    set(ATEN_THREADING "OMP" CACHE STRING "ATen parallel backend")
+  elseif(USE_TBB)
+    set(ATEN_THREADING "TBB" CACHE STRING "ATen parallel backend")
+  else()
+    set(ATEN_THREADING "NATIVE" CACHE STRING "ATen parallel backend")
+  endif()
 endif()
 
 set(AT_PARALLEL_OPENMP 0)
@@ -372,7 +378,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${PYTHON_EXECUTABLE}" tools/setup_helpers/generate_code.py
       --declarations-path "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
       --nn-path "aten/src"
-      $<$NOT:$<BOOL:${BUILD_MOBILE_AUTOGRAD}>>:--disable-autograd>
+      $<$<NOT:$<BOOL:${BUILD_MOBILE_AUTOGRAD}>>:--disable-autograd>
       $<$<BOOL:${SELECTED_OP_LIST}>:--selected-op-list-path="${SELECTED_OP_LIST}">
       --force_schema_registration
     DEPENDS
