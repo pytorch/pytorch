@@ -70,6 +70,7 @@ TESTS = [
     'test_tensorboard',
     'test_namedtensor',
     'test_type_promotion',
+    'test_multi_output',
     'test_jit_disabled',
     'test_function_schema',
     'test_op_aliases.py',
