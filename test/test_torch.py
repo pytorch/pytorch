@@ -6855,6 +6855,16 @@ class TestTorchDeviceType(TestCase):
         with self.assertRaisesRegex(RuntimeError, "must be batches of square matrices"):
             torch.inverse(torch.randn(2, 3, 4, 3))
 
+        # test for zero-sized tensor
+        def test_inverse_helper_zero_size(size):
+            data = torch.zeros(*size, device=device)
+            out = torch.inverse(data)
+            self.assertTrue(out.size() == data.size())
+
+        test_inverse_helper_zero_size([0, 0])
+        test_inverse_helper_zero_size([3, 0, 0])
+        test_inverse_helper_zero_size([0, 3, 3])
+
         # non-contiguous inputs
         if not TEST_NUMPY:
             return
