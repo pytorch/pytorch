@@ -29,7 +29,7 @@ namespace api {
 // fully executed by the GPU.
 //
 // As you can imagine, it is possible to have multiple descriptor pools, each of
-// which configured to house different types of descriptor sets with different
+// which is configured to house different types of descriptor sets with different
 // allocation strategies. These descriptor pools themselves are fairly stable
 // objects in that they theymself should not be created and destroyed frequently.
 // That is the reason why we store them in a cache, which according to our usage
