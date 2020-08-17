@@ -265,7 +265,7 @@ class Quantizer:
                     return load_arg(n, quantized=False)
                 else:
                     return copy_recusive(n)
-            r = env[node.name] = self.quantized_graph.node_copy(node, lambda n: load_arg(n, quantized=False) )
+            r = env[node.name] = self.quantized_graph.node_copy(node, lambda n: load_arg(n, quantized=False))
             return r
 
         for node in self.graph.nodes:
