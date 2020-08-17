@@ -80,6 +80,31 @@ void _save_parameters(const Module& module, const std::string& filename) {
   serializer.serialize(module._ivalue());
 }
 
+void _save_parameter_map(const Module& module, std::ostream& out) {
+  ScriptModuleSerializer serializer(
+      [&](const void* buf, size_t nbytes) -> size_t {
+        out.write(static_cast<const char*>(buf), nbytes);
+        return !out ? 0 : nbytes;
+      });
+  auto params = module.named_parameters();
+  c10::Dict<std::string, at::Tensor> dict;
+  for (auto& param : params) {
+    dict.insert(param.first, param.second);
+  }
+  c10::IValue ivalue(dict);
+  serializer.serialize(ivalue);
+}
+
+void _save_parameter_map(const Module& module, const std::string& filename) {
+  ScriptModuleSerializer serializer(filename);
+  auto params = module.named_parameters();
+  c10::Dict<std::string, at::Tensor> dict;
+  for (auto& param : params) {
+    dict.insert(param.first, param.second);
+  }
+  c10::IValue ivalue(dict);
+  serializer.serialize(ivalue);
+}
 } // namespace mobile
 } // namespace jit
 } // namespace torch

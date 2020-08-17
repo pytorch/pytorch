@@ -117,6 +117,8 @@ void testMobileSaveLoadData() {
   m._save_for_mobile(ss);
   mobile::Module bc = _load_for_mobile(ss);
 
+  _save_parameter_map(bc, "/Users/myuan/temp/param_map.zip");
+
   _save_parameters(bc, ss_data);
   auto mobile_params = _load_parameters(ss_data);
   AT_ASSERT(full_params.size() == mobile_params.size());

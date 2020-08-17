@@ -12,6 +12,7 @@ TORCH_API void _save_parameters(
     const Module& module,
     const std::string& filename);
 
+TORCH_API void _save_parameter_map(const Module& module, const std::string& filename);
 } // namespace mobile
 } // namespace jit
 } // namespace torch
