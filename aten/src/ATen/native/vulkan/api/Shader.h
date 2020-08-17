@@ -46,29 +46,13 @@ struct Shader final {
       struct Slot final {
         VkDescriptorSetLayoutBinding binding;
 
-        inline bool operator==(const Slot& slot) const {
-          return (binding.binding == slot.binding.binding) &&
-                 (binding.descriptorType == slot.binding.descriptorType) &&
-                 (binding.descriptorCount == slot.binding.descriptorCount) &&
-                 (binding.stageFlags == slot.binding.stageFlags) &&
-                 (binding.pImmutableSamplers == slot.binding.pImmutableSamplers);
-        }
-
-        inline size_t hash() const {
-          return c10::get_hash(
-              binding.binding,
-              binding.descriptorType,
-              binding.descriptorCount,
-              binding.stageFlags,
-              binding.pImmutableSamplers);
-        }
+        bool operator==(const Slot& slot) const;
+        size_t hash() const;
       };
 
       std::array<Slot, 8u> slots;
 
-      inline bool operator==(const Descriptor& descriptor) const {
-        return (slots == descriptor.slots);
-      }
+      bool operator==(const Descriptor& descriptor) const;
     };
 
     /*
@@ -84,15 +68,7 @@ struct Shader final {
       typedef Handle<VkDescriptorSetLayout, Deleter> Handle;
 
       struct Hasher {
-        inline size_t operator()(const Descriptor& descriptor) const {
-          size_t hash = 0u;
-
-          for (const Descriptor::Slot& slot : descriptor.slots) {
-            hash = c10::hash_combine(hash, slot.hash());
-          }
-
-          return hash;
-        }
+        size_t operator()(const Descriptor& descriptor) const;
       };
 
       Handle operator()(const Descriptor& descriptor) const;
@@ -122,11 +98,7 @@ struct Shader final {
     uint32_t y;
     uint32_t z;
 
-    inline bool operator==(const WorkGroup& work_group) const {
-      return (x == work_group.x) &&
-             (y == work_group.y) &&
-             (z == work_group.z);
-    }
+    bool operator==(const WorkGroup& work_group) const;
   };
 
   /*
@@ -154,15 +126,7 @@ struct Shader final {
     Descriptor(const char* glsl);
     Descriptor(const uint32_t* spirv, uint32_t bytes);
 
-    inline bool operator==(const Descriptor& descriptor) const {
-      static_assert(
-          sizeof(descriptor.shader.source) == sizeof(descriptor.shader.binary),
-          "This implementation requires sizeof(Source) to be equal to sizeof(Binary).");
-
-      return (type == descriptor.type) &&
-             (shader.binary.spirv == descriptor.shader.binary.spirv) &&
-             (shader.binary.size == descriptor.shader.binary.size);
-    }
+    bool operator==(const Descriptor& descriptor) const;
   };
 
   /*
@@ -183,16 +147,7 @@ struct Shader final {
     typedef Handle<VkShaderModule, Deleter> Handle;
 
     struct Hasher {
-      inline size_t operator()(const Descriptor& descriptor) const {
-        static_assert(
-            sizeof(descriptor.shader.source) == sizeof(descriptor.shader.binary),
-            "This implementation requires sizeof(Source) to be equal to sizeof(Binary).");
-
-        return c10::get_hash(
-            descriptor.type,
-            descriptor.shader.binary.spirv,
-            descriptor.shader.binary.size);
-      }
+      size_t operator()(const Descriptor& descriptor) const;
     };
 
     Handle operator()(const Descriptor& descriptor) const;
@@ -215,6 +170,74 @@ struct Shader final {
       cache(Factory(device)) {
   }
 };
+
+//
+// Impl
+//
+
+inline bool Shader::Layout::Descriptor::Slot::operator==(
+    const Slot& slot) const {
+  return (binding.binding == slot.binding.binding) &&
+         (binding.descriptorType == slot.binding.descriptorType) &&
+         (binding.descriptorCount == slot.binding.descriptorCount) &&
+         (binding.stageFlags == slot.binding.stageFlags) &&
+         (binding.pImmutableSamplers == slot.binding.pImmutableSamplers);
+}
+
+inline size_t Shader::Layout::Descriptor::Slot::hash() const {
+  return c10::get_hash(
+      binding.binding,
+      binding.descriptorType,
+      binding.descriptorCount,
+      binding.stageFlags,
+      binding.pImmutableSamplers);
+}
+
+inline bool Shader::Layout::Descriptor::operator==(
+    const Descriptor& descriptor) const {
+  return (slots == descriptor.slots);
+}
+
+inline size_t Shader::Layout::Factory::Hasher::operator()(
+    const Descriptor& descriptor) const {
+  size_t hash = 0u;
+
+  for (const Descriptor::Slot& slot : descriptor.slots) {
+    hash = c10::hash_combine(hash, slot.hash());
+  }
+
+  return hash;
+}
+
+inline bool Shader::WorkGroup::operator==(
+    const WorkGroup& work_group) const {
+  return (x == work_group.x) &&
+         (y == work_group.y) &&
+         (z == work_group.z);
+}
+
+inline bool Shader::Descriptor::operator==(
+    const Descriptor& descriptor) const {
+  static_assert(
+      sizeof(descriptor.shader.source) == sizeof(descriptor.shader.binary),
+      "This implementation requires sizeof(Source) to be equal to sizeof(Binary).");
+
+  return (type == descriptor.type) &&
+         (shader.binary.spirv == descriptor.shader.binary.spirv) &&
+         (shader.binary.size == descriptor.shader.binary.size);
+}
+
+inline size_t Shader::Factory::Hasher::operator()(
+    const Descriptor& descriptor) const {
+  static_assert(
+      sizeof(descriptor.shader.source) == sizeof(descriptor.shader.binary),
+      "This implementation requires sizeof(Source) to be equal to sizeof(Binary).");
+
+  return c10::get_hash(
+      descriptor.type,
+      descriptor.shader.binary.spirv,
+      descriptor.shader.binary.size);
+}
 
 } // namespace api
 } // namespace vulkan
