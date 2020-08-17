@@ -97,7 +97,7 @@ struct TORCH_API BroadcastingVmapTransform {
 struct TORCH_API VmapPhysicalView {
   VmapPhysicalView(Tensor&& tensor, std::bitset<kVmapNumLevels> levels)
       : levels_(levels), tensor_(tensor) {
-    TORCH_INTERNAL_ASSERT(!isBatched(tensor));
+    TORCH_INTERNAL_ASSERT(!isBatchedTensor(tensor));
   }
 
   Tensor& tensor() { return tensor_; }

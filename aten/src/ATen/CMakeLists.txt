@@ -2,10 +2,10 @@ cmake_minimum_required(VERSION 3.0 FATAL_ERROR)
 set(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake ${CMAKE_MODULE_PATH})
 
 if(NOT MSVC)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-ignored-qualifiers")
-  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-ignored-qualifiers")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-absolute-value")
-  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-absolute-value")
+  string(APPEND CMAKE_CXX_FLAGS " -Wno-ignored-qualifiers")
+  string(APPEND CMAKE_C_FLAGS " -Wno-ignored-qualifiers")
+  string(APPEND CMAKE_CXX_FLAGS " -Wno-absolute-value")
+  string(APPEND CMAKE_C_FLAGS " -Wno-absolute-value")
 endif(NOT MSVC)
 
 # Can be compiled standalone
