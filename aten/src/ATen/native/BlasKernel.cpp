@@ -17,17 +17,29 @@ extern "C" void sgemv_(char *trans, int *m, int *n, float *alpha, float *a, int 
 # define ffloat float
 #endif
 
-extern "C" ffloat sdot_(int *n, float *x, int *incx, float *y, int *incy);
-
 #ifdef BLAS_USE_CBLAS_DOT
-extern "C" float cblas_sdot(const int n, const float *x, const int incx, const float *y, const int incy);
-#ifndef THBlas_C_sdot_
-#define THBlas_C_sdot_
-static inline ffloat sdot_(const int *n, const float *x, const int *incx, const float *y, const int *incy)
-{
-  return cblas_sdot(*n, x, *incx, y, *incy);
-}
-#endif // THBlas_C_sdot_
+  extern "C" float cblas_sdot(const int n, const float *x, const int incx, const float *y, const int incy);
+  extern "C" void cblas_cdotu_sub(const int n, const void *x, const int incx, const void *y, const int incy, void *dotu);
+  extern "C" void cblas_zdotu_sub(const int n, const void *x, const int incx, const void *y, const int incy, void *dotu);
+  #ifndef THBlas_cblas_dot_
+  #define THBlas_cblas_dot_
+  static inline ffloat sdot_(const int *n, const float *x, const int *incx, const float *y, const int *incy)
+  {
+    return cblas_sdot(*n, x, *incx, y, *incy);
+  }
+  static inline void cdotu_(std::complex<float> *res, const int *n, const std::complex<float> *x, const int *incx,
+  const std::complex<float> *y, const int *incy) {
+    cblas_cdotu_sub(*n, x, *incx, y, *incy, res);
+  }
+  static inline void zdotu_(std::complex<double> *res, const int *n, const std::complex<double> *x, const int *incx,
+  const std::complex<double> *y, const int *incy) {
+    cblas_zdotu_sub(*n, x, *incx, y, *incy, res);
+  }
+  #endif // THBlas_cblas_dot_
+#else
+  extern "C" ffloat sdot_(int *n, float *x, int *incx, float *y, int *incy);
+  extern "C" void cdotu_(std::complex<float> *res, int *n, std::complex<float> *x, int *incx, std::complex<float> *y, int *incy);
+  extern "C" void zdotu_(std::complex<double> *res, int *n, std::complex<double> *x, int *incx, std::complex<double> *y, int *incy);
 #endif // BLAS_USE_CBLAS_DOT
 #endif // AT_BUILD_WITH_BLAS
 
@@ -196,6 +208,18 @@ float dot_fast_path(int n, float* x, int incx, float* y, int incy) {
 double dot_fast_path(int n, double* x, int incx, double* y, int incy) {
   return ddot_(&n, x, &incx, y, &incy);
 }
+
+c10::complex<double> dot_fast_path(int n, c10::complex<double>* x, int incx, c10::complex<double>* y, int incy) {
+  c10::complex<double> result;
+  zdotu_(reinterpret_cast<std::complex<double>* >(&result), &n, reinterpret_cast<std::complex<double>*>(x), &incx, reinterpret_cast<std::complex<double>*>(y), &incy);
+  return result;
+}
+
+c10::complex<float> dot_fast_path(int n, c10::complex<float>* x, int incx, c10::complex<float>* y, int incy) {
+  c10::complex<float> result;
+  cdotu_(reinterpret_cast<std::complex<float>* >(&result), &n, reinterpret_cast<std::complex<float>*>(x), &incx, reinterpret_cast<std::complex<float>*>(y), &incy);
+  return result;
+}
 #endif
 
 template <typename scalar_t>
@@ -249,6 +273,16 @@ float dot_impl(int64_t n, float* x, int64_t incx, float* y, int64_t incy) {
 
 template <>
 double dot_impl(int64_t n, double* x, int64_t incx, double* y, int64_t incy) {
+  return dot_impl_floating(n, x, incx, y, incy);
+}
+
+template <>
+c10::complex<double> dot_impl(int64_t n, c10::complex<double>* x, int64_t incx, c10::complex<double>* y, int64_t incy) {
+  return dot_impl_floating(n, x, incx, y, incy);
+}
+
+template <>
+c10::complex<float> dot_impl(int64_t n, c10::complex<float>* x, int64_t incx, c10::complex<float>* y, int64_t incy) {
   return dot_impl_floating(n, x, incx, y, incy);
 }
 

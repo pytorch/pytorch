@@ -18,7 +18,12 @@ from torch.testing._internal.common_utils import TestCase
 from torch.quantization import QuantWrapper, QuantStub, DeQuantStub, \
     default_qconfig, default_dynamic_qconfig, default_per_channel_qconfig, QConfig, default_observer, default_weight_observer, \
     propagate_qconfig_, convert, get_default_qconfig, quantize_dynamic_jit, quantize_jit
-from torch.quantization.default_mappings import DEFAULT_DYNAMIC_MODULE_MAPPING
+from torch.quantization.default_mappings import (
+    DEFAULT_DYNAMIC_MODULE_MAPPING,
+    DEFAULT_QCONFIG_PROPAGATE_WHITE_LIST,
+    DEFAULT_QAT_MODULE_MAPPING,
+)
+
 import unittest
 from torch.testing import FileCheck
 
@@ -182,16 +187,22 @@ class QuantizationTestCase(TestCase):
         self.assertTrue(hasattr(module, 'quant'))
         self.assertTrue(hasattr(module, 'dequant'))
 
-    def checkObservers(self, module):
+    def checkObservers(self, module, propagate_qconfig_list=None):
         r"""Checks the module or module's leaf descendants
             have observers in preperation for quantization
         """
+        if propagate_qconfig_list is None:
+            propagate_qconfig_list = DEFAULT_QCONFIG_PROPAGATE_WHITE_LIST
         if hasattr(module, 'qconfig') and module.qconfig is not None and \
-           len(module._modules) == 0 and not isinstance(module, torch.nn.Sequential):
+           len(module._modules) == 0 and not isinstance(module, torch.nn.Sequential) \
+           and type(module) in propagate_qconfig_list:
             self.assertTrue(hasattr(module, 'activation_post_process'),
                             'module: ' + str(type(module)) + ' do not have observer')
-        for child in module.children():
-            self.checkObservers(child)
+        # we don't need to check observers for child modules of the
+        # qat modules
+        if type(module) not in DEFAULT_QAT_MODULE_MAPPING.values():
+            for child in module.children():
+                self.checkObservers(child)
 
     def checkQuantDequant(self, mod):
         r"""Checks that mod has nn.Quantize and
@@ -303,7 +314,8 @@ class QuantizationTestCase(TestCase):
             self.assertEqual(scripted_output, ref_output)
 
 
-    def checkGraphModeOp(self, module, inputs, quantized_op, tracing=False, debug=False, check=True, eval_mode=True, dynamic=False):
+    def checkGraphModeOp(self, module, inputs, quantized_op, tracing=False, debug=False,
+                         check=True, eval_mode=True, dynamic=False, qconfig=None):
         if debug:
             print('Testing:', str(module))
         qconfig_dict = {'': get_default_qconfig(torch.backends.quantized.engine)}
@@ -311,7 +323,7 @@ class QuantizationTestCase(TestCase):
         if eval_mode:
             module = module.eval()
         if dynamic:
-            qconfig_dict = {'': default_dynamic_qconfig}
+            qconfig_dict = {'': default_dynamic_qconfig if qconfig is None else qconfig}
         model = get_script_module(module, tracing, inputs[0]).eval()
         if debug:
             print('input graph:', model.graph)
@@ -997,28 +1009,3 @@ class ModelMultipleOpsNoAvgPool(torch.nn.Module):
         out = out.view(-1, 3 * 2 * 2)
         out = self.fc(out)
         return out
-
-"""Model to make sure that the observers are not inserted into custom modules.
-"""
-class ModelWithNoQconfigPropagation(nn.Module):
-    class ListOutModule(nn.Module):
-        def __init__(self):
-            super().__init__()
-
-        def forward(self, x):
-            # returns a list of tensors, not supported by observers
-            return [x]
-
-    def __init__(self):
-        super().__init__()
-        self.fc1 = nn.Linear(5, 5).to(dtype=torch.float)
-        self.quant = QuantStub()
-        self.dequant = DeQuantStub()
-        self.no_quant_module = self.ListOutModule()
-
-    def forward(self, x):
-        x = self.quant(x)
-        x = self.fc1(x)
-        x = self.dequant(x)
-        x = self.no_quant_module(x)
-        return x
