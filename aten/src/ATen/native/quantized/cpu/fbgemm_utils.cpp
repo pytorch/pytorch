@@ -14,10 +14,11 @@
 
 #include <torch/custom_class.h>
 
+#include <ATen/native/quantized/cpu/embedding_packed_params.h>
 #include <ATen/native/quantized/cpu/packed_params.h>
-#include <ATen/native/quantized/cpu/qnnpack_utils.h>
 
 torch::class_<LinearPackedParamsBase> register_linear_params();
+torch::class_<EmbeddingPackedParamsBase> register_embedding_params();
 
 #ifdef USE_FBGEMM
 
@@ -225,20 +226,17 @@ CAFFE2_API torch::class_<ConvPackedParamsBase<kSpatialDim>> register_conv_params
         -> c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> { // __setstate__
           return deserialize_conv<kSpatialDim>(state);
         })
-    // TODO: write a good docblock
+    // TODO before land: write a good docblock
     .def("convertLegacyFormat",
         [](const c10::IValue v) -> c10::IValue {
 
         // determine the version based on IValue contents
         int version = -1;
         if (v.isTuple()) {
-          // ivalue::Tuple
-          auto vTuple = v.toTuple();
-          auto elements = vTuple->elements();
+          auto elements = v.toTuple()->elements();
           if (elements.size() > 0) {
-            // ivalue
             auto firstElement = elements[0];
-            // TODO: stronger checks
+            // TODO before land: stronger checks
             if (firstElement.isTensor()) {
               version = 1;
             } else if (firstElement.isString()) {
@@ -246,17 +244,15 @@ CAFFE2_API torch::class_<ConvPackedParamsBase<kSpatialDim>> register_conv_params
             }
           }
         }
+        TORCH_INTERNAL_ASSERT(version != -1, "Unable to parse serialization version");
 
-        // TODO: assert version was found
         if (version == 1) {
-
-          auto vTuple = v.toTuple();
-          auto elements = vTuple->elements();
-
           // version 1 - convert to version 2 manually
-          c10::IValue v2;
-          // TODO: test optional bias
+
+          auto elements = v.toTuple()->elements();
+
           at::Tensor weight = elements[0].toTensor();
+          // TODO before land: test optional bias
           c10::optional<at::Tensor> bias = elements[1].toTensor();
           torch::List<at::Tensor> stride_x_kSpatialDim = elements[2].toTensorList();
           torch::List<at::Tensor> padding_x_kSpatialDim = elements[3].toTensorList();
@@ -264,7 +260,7 @@ CAFFE2_API torch::class_<ConvPackedParamsBase<kSpatialDim>> register_conv_params
           at::Tensor groups = elements[5].toTensor();
 
           // create a v2 object with data from v1
-          // TODO: clean up everything (this is just the first version which worked)
+          // TODO before land: clean up everything (this is just the first version which worked)
           std::string name_v2 = "conv";
           int64_t version_v2 = 2;
           std::vector<at::Tensor> required_tensors_v2;
@@ -273,7 +269,6 @@ CAFFE2_API torch::class_<ConvPackedParamsBase<kSpatialDim>> register_conv_params
           optional_tensors_v2.push_back(bias);
           std::vector<double> doubles_v2;
           std::vector<int64_t> ints_v2;
-          // populate the ints
           int64_t spatialDim = stride_x_kSpatialDim.size();
           ints_v2.push_back(spatialDim);
           for (int i = 0; i < stride_x_kSpatialDim.size(); i++) {
@@ -289,7 +284,7 @@ CAFFE2_API torch::class_<ConvPackedParamsBase<kSpatialDim>> register_conv_params
             ints_v2.push_back(dilation[0].item<int64_t>());
           }
 
-          // TODO: check numerical equivalency
+          // TODO before land: check numerical equivalency
           auto res_tuple = std::make_tuple(name_v2, version_v2, required_tensors_v2, optional_tensors_v2,
               doubles_v2, ints_v2);
           c10::IValue res_ivalue(res_tuple);
@@ -381,10 +376,66 @@ torch::class_<LinearPackedParamsBase> register_linear_params() {
   return register_linear_params;
 }
 
+
+torch::class_<EmbeddingPackedParamsBase> register_embedding_params() {
+  // Type for __getstate__/__setstate__ serialization
+  //
+  // Element 0 is the version of the PackedParam structure
+  // Element 1 is the Tensors contained in the Param instance
+  // Element 2 is the double values (if any) contained in the Param instance
+  // Element 3 is the int values (if any) contained in the Param instance
+
+  using EmbeddingParamsSerializationType = std::tuple<
+    int64_t, // version
+    std::vector<at::Tensor>,
+    std::vector<double>,
+    std::vector<int64_t>>;
+
+  static auto register_embedding_params =
+    torch::class_<EmbeddingPackedParamsBase>(
+      "quantized", "EmbeddingPackedParamsBase")
+      .def_pickle(
+          [](const c10::intrusive_ptr<EmbeddingPackedParamsBase>& params)
+              -> EmbeddingParamsSerializationType { // __getstate__ call
+            at::Tensor weight = params->unpack();
+            std::vector<at::Tensor> tensors_to_serialize = {weight};
+            std::vector<double> doubles_to_serialize = {};
+            int64_t bit_rate = params->bit_rate();
+            int64_t version = params->version();
+            std::vector<int64_t> longs_to_serialize = {bit_rate};
+            return EmbeddingParamsSerializationType(
+              version,
+              std::move(tensors_to_serialize),
+              std::move(doubles_to_serialize),
+              std::move(longs_to_serialize));
+          },
+          [](EmbeddingParamsSerializationType state)
+              -> c10::intrusive_ptr<EmbeddingPackedParamsBase> { // __setstate__ call
+
+            std::vector<at::Tensor> tensors;
+            std::vector<double> doubles;
+            std::vector<int64_t> longs;
+            int64_t version;
+            std::tie(version, tensors, doubles, longs) = std::move(state);
+
+            TORCH_INTERNAL_ASSERT(tensors.size() == 1, "EmbeddingPackedParams: Expected weight tensor to be serialized");
+            TORCH_INTERNAL_ASSERT(longs.size() == 1, "EmbeddingPackedParams: Expected bit_rate to be serialized");
+            TORCH_CHECK(version == 1, "EmbeddingPackedParams: Currently only version 1 supported.");
+
+            at::Tensor weight = std::move(tensors[0]);
+            return PackedEmbeddingBagWeight::prepack(weight);
+          })
+      .def("bit_rate", &EmbeddingPackedParamsBase::bit_rate)
+      .def("version", &EmbeddingPackedParamsBase::version);
+
+  return register_embedding_params;
+}
+
 namespace {
 
 static auto conv2d_params = register_conv_params<2>();
 static auto conv3d_params = register_conv_params<3>();
 static auto linear_params = register_linear_params();
+static auto embedding_params = register_embedding_params();
 
 } // namespace

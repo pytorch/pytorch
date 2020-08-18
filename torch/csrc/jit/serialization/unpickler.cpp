@@ -391,9 +391,7 @@ PickleOpCode Unpickler::readInstruction() {
       size_t idx = stack_.back().toInt();
       stack_.pop_back();
       // stack is: <functor_arg>
-
       globals_.at(idx)();
-      // fails on line above
     } break;
     case PickleOpCode::BINPERSID: {
       auto args = pop(stack_).toTuple()->elements();
@@ -598,8 +596,6 @@ void Unpickler::readGlobal(
     globals_.emplace_back([this, type] {
       auto val = stack_.back();
       stack_.pop_back();
-        // DEBUG ONLY - fails here
-        // TODO before land: remove
       auto obj = obj_loader_(type, val);
       stack_.emplace_back(std::move(obj));
     });
