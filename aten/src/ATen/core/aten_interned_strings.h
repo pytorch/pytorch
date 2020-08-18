@@ -24,7 +24,6 @@ _(aten, _acos) \
 _(aten, _addmv) \
 _(aten, _addr) \
 _(aten, _arange) \
-_(aten, _acosh) \
 _(aten, _asinh) \
 _(aten, _atanh) \
 _(aten, _argmax) \
@@ -304,6 +303,7 @@ _(aten, div) \
 _(aten, div_) \
 _(aten, dot) \
 _(aten, dropout) \
+_(aten, dstack) \
 _(aten, eig) \
 _(aten, einsum) \
 _(aten, elu) \
@@ -378,6 +378,7 @@ _(aten, hardtanh_forward) \
 _(aten, hinge_embedding_loss) \
 _(aten, histc) \
 _(aten, hspmm) \
+_(aten, hstack) \
 _(aten, hypot) \
 _(aten, i0) \
 _(aten, ifft) \
@@ -747,6 +748,7 @@ _(aten, vander) \
 _(aten, var) \
 _(aten, view) \
 _(aten, view_as) \
+_(aten, vstack) \
 _(aten, where) \
 _(aten, zero) \
 _(aten, zeros) \
