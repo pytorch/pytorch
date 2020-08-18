@@ -39,7 +39,7 @@ allow_list = [
     ("aten::__upsample_bilinear", datetime.date(2020, 7, 30)),
     ("aten::hash", datetime.date(2020, 7, 30)),
     ("aten::divmod", datetime.date(2020, 7, 30)),
-    ("aten::sorted", datetime.date(2020, 7, 30)),
+    ("aten::sorted", datetime.date(2020, 8, 30)),
     ("aten::__contains__", datetime.date(2020, 7, 30)),
     ("aten::ne", datetime.date(2020, 7, 30)),
     ("aten::index", datetime.date(2020, 7, 30)),
@@ -56,6 +56,9 @@ allow_list = [
     ("aten::__rshift__", datetime.date(2020, 7, 30)),
     ("aten::__round_to_zero_floordiv", datetime.date(2020, 7, 30)),
     ("aten::gcd", datetime.date(2020, 7, 30)),
+    ("aten::unflatten", datetime.date(2020, 8, 14)),
+    ("aten::linalg_outer", datetime.date(2020, 8, 30)),
+    ("aten::linalg_outer.out", datetime.date(2020, 8, 30)),
 ]
 
 

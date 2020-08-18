@@ -261,11 +261,6 @@ class class_ {
 ///     IValue custom_class_iv = torch::make_custom_class<MyClass>(3, "foobarbaz");
 template <typename CurClass, typename... CtorArgs>
 c10::IValue make_custom_class(CtorArgs&&... args) {
-  if (!c10::isCustomClassRegistered<c10::intrusive_ptr<CurClass>>()) {
-    throw c10::Error(
-        "Trying to instantiate a class that isn't a registered custom class.",
-        "");
-  }
   auto userClassInstance = c10::make_intrusive<CurClass>(std::forward<CtorArgs>(args)...);
   return c10::IValue(std::move(userClassInstance));
 }
