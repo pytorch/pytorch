@@ -182,7 +182,7 @@ if(INTERN_BUILD_ATEN_OPS)
   endif()
 
   set(GEN_COMMAND
-      "${PYTHON_EXECUTABLE}" ${CMAKE_CURRENT_LIST_DIR}/../tools/codegen/gen.py
+      "${PYTHON_EXECUTABLE}" -m tools.codegen.gen
       --source-path ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen
       --install_dir ${CMAKE_BINARY_DIR}/aten/src/ATen
       ${GEN_ROCM_FLAG}
@@ -194,6 +194,7 @@ if(INTERN_BUILD_ATEN_OPS)
       COMMAND ${GEN_COMMAND}
         --output-dependencies ${CMAKE_BINARY_DIR}/aten/src/ATen/generated_cpp.txt
       RESULT_VARIABLE RETURN_VALUE
+      WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/..
   )
   if(NOT RETURN_VALUE EQUAL 0)
       message(STATUS ${generated_cpp})
@@ -213,6 +214,7 @@ if(INTERN_BUILD_ATEN_OPS)
     COMMAND ${GEN_COMMAND}
     DEPENDS ${all_python} ${all_templates}
       ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/native_functions.yaml
+    WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/..
     )
 
   # Generated headers used from a CUDA (.cu) file are

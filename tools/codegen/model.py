@@ -9,7 +9,7 @@ import itertools
 # for getting mypy to do exhaustiveness checking
 # TODO: put this somewhere else, maybe
 def assert_never(x: NoReturn) -> NoReturn:
-    assert False, "Unhandled type: {}".format(type(x).__name__)
+    raise AssertionError("Unhandled type: {}".format(type(x).__name__))
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #
@@ -133,7 +133,7 @@ class NativeFunction:
             elif v == 'method':
                 variants.add(Variant.method)
             else:
-                assert False, f'illegal variant {v}'
+                raise AssertionError(f'illegal variant {v}')
 
         manual_kernel_registration = e.pop('manual_kernel_registration', False)
         assert isinstance(manual_kernel_registration, bool), f'not a bool: {manual_kernel_registration}'

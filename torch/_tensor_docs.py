@@ -2065,6 +2065,12 @@ mode(dim=None, keepdim=False) -> (Tensor, LongTensor)
 See :func:`torch.mode`
 """)
 
+add_docstr_all('movedim', r"""
+movedim(source, destination) -> Tensor
+
+See :func:`torch.movedim`
+""")
+
 add_docstr_all('mul',
                r"""
 mul(value) -> Tensor
@@ -2241,7 +2247,6 @@ ormqr(input2, input3, left=True, transpose=False) -> Tensor
 
 See :func:`torch.ormqr`
 """)
-
 
 add_docstr_all('permute',
                r"""

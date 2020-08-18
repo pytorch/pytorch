@@ -49,7 +49,7 @@ def valuetype_type(t: Type) -> Optional[str]:
             # These C++ names line up with their schema names
             return t.name.name
         else:
-            assert False, f"unsupported type: {t}"
+            raise AssertionError(f"unsupported type: {t}")
     elif isinstance(t, OptionalType):
         elem = valuetype_type(t.elem)
         if elem is None:
@@ -62,7 +62,7 @@ def valuetype_type(t: Type) -> Optional[str]:
         else:
             return None
     else:
-        assert False, f"unrecognized type {repr(t)}"
+        raise AssertionError(f"unrecognized type {repr(t)}")
 
 # Translation of types occuring in JIT arguments to a C++ argument type.
 # TODO: remove use_c10_dispatcher_full kwarg from this function; type
@@ -83,7 +83,7 @@ def argumenttype_type(t: Type, *, mutable: bool) -> str:
             else:
                 return 'const Tensor &'
         else:
-            assert False, f"base type should have been value type {t}"
+            raise AssertionError(f"base type should have been value type {t}")
     elif isinstance(t, OptionalType):
         if str(t.elem) == 'Tensor':
             if mutable:
@@ -110,7 +110,7 @@ def argumenttype_type(t: Type, *, mutable: bool) -> str:
         # TODO: explicitly qualify namespace here
         return f"ArrayRef<{elem}>"
     else:
-        assert False, f"unrecognized type {repr(t)}"
+        raise AssertionError(f"unrecognized type {repr(t)}")
 
 # Translate a JIT argument into its C++ type
 def argument_type(a: Argument) -> str:
@@ -133,7 +133,7 @@ def returntype_type(t: Type, *, mutable: bool) -> str:
         assert t.size is None, f"fixed size list returns not supported: {t}"
         return f"std::vector<{elem}>"
 
-    assert False, f"unrecognized return type {t}"
+    raise AssertionError(f"unrecognized return type {t}")
 
 # Translation of a single return to its C++ type
 def return_type(r: Return) -> str:
@@ -196,7 +196,9 @@ def argument(a: Union[Argument, TensorOptionsArguments, ThisArgument]) -> CppArg
     else:
         assert_never(a)
 
-def group_arguments(func: FunctionSchema, *, method: bool = False) -> Sequence[Union[Argument, TensorOptionsArguments, ThisArgument]]:
+def group_arguments(
+    func: FunctionSchema, *, method: bool = False
+) -> Sequence[Union[Argument, TensorOptionsArguments, ThisArgument]]:
     args: List[Union[Argument, ThisArgument, TensorOptionsArguments]] = []
     args.extend(func.out_arguments)
 

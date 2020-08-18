@@ -2,7 +2,7 @@ import os
 import contextlib
 import textwrap
 import itertools
-from typing import List, Sequence, Dict, Optional, Iterator, Tuple, Set, Callable, Any, TypeVar, DefaultDict, Union
+from typing import List, Dict, Optional, Iterator, Tuple, Set, Callable, Any, TypeVar, DefaultDict, Union, Sequence
 import yaml
 from enum import Enum
 from collections import OrderedDict
@@ -98,26 +98,38 @@ def parse_native_yaml(path: str) -> List[NativeFunction]:
     return rs
 
 T = TypeVar('T')
+S = TypeVar('S')
 
-# Map a function over native functions entries, concatenating
-# the returned lists into a final returned list.  Unlike a generic
-# concatmap, this function also sets up error reporting context and
-# some dynamically scoped variables which are used within code
-# generator.
-#
-# NB about type: accepting Sequence is modestly more flexible but then
-# runs afoul of https://github.com/python/mypy/issues/5090
-def concatmap_nf(func: Callable[[NativeFunction], List[T]], native_functions: Sequence[NativeFunction]) -> List[T]:
-    rs: List[T] = []
-    for f in native_functions:
+# Given a function that operates on NativeFunction, wrap it into a new function
+# that sets some appropriate context managers for that native function.
+# YOU MUST WRAP FUNCTIONS IN THIS for calls to cpp to be sound.
+def with_native_function(func: Callable[[NativeFunction], T]) -> Callable[[NativeFunction], T]:
+    @functools.wraps(func)
+    def wrapper(f: NativeFunction) -> T:
         with context(f'in {f.loc}:\n  {f.func}'):
             with local.parametrize(
                 use_c10_dispatcher_full=f.use_c10_dispatcher_full,
                 # See Note [Byte-for-byte compatibility]
                 hack_const_mutable_self=str(f.func.name) in ["set_data", "retain_grad"],
             ):
-                rs.extend(func(f))
-    return rs
+                return func(f)
+    return wrapper
+
+# These two functions purposely return generators in analogy to map()
+# so that you don't mix up when you need to list() them
+
+# Map over function that may return None; omit Nones from output sequence
+def mapMaybe(func: Callable[[T], Optional[S]], xs: Sequence[T]) -> Iterator[S]:
+    for x in xs:
+        r = func(x)
+        if r is not None:
+            yield r
+
+# Map over function that returns sequences and cat them all together
+def concatMap(func: Callable[[T], Sequence[S]], xs: Sequence[T]) -> Iterator[S]:
+    for x in xs:
+        for r in func(x):
+            yield r
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #
@@ -125,26 +137,31 @@ def concatmap_nf(func: Callable[[NativeFunction], List[T]], native_functions: Se
 #
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
+# Many of these functions share logic for defining both the definition
+# and declaration (for example, the function signature is the same), so
+# we organize them into one function that takes a Target to say which
+# code we want.
 Target = Enum('Target', ('DEFINITION', 'DECLARATION', 'REGISTRATION'))
 
 def compute_type_method(
     dispatch: Optional[str], *,
     target: Target, op_registration_whitelist: Optional[Set[str]], def_only: bool = False
-) -> Callable[[NativeFunction], List[str]]:
+) -> Callable[[NativeFunction], Optional[str]]:
     if def_only:
         assert target is Target.REGISTRATION
 
-    def func(f: NativeFunction) -> List[str]:
+    @with_native_function
+    def func(f: NativeFunction) -> Optional[str]:
         if dispatch is not None:
             if f.dispatch is None or dispatch not in f.dispatch:
-                return []
+                return None
         else:
             if f.dispatch is not None and target is not Target.REGISTRATION:
-                return []
+                return None
 
         if op_registration_whitelist is not None and \
                 f"aten::{f.func.name.name}" not in op_registration_whitelist and target is Target.REGISTRATION:
-            return []
+            return None
 
         name = legacy_dispatcher.name(f.func)
         returns_type = legacy_dispatcher.returns_type(f.func.returns)
@@ -152,7 +169,7 @@ def compute_type_method(
         args_str = ', '.join(map(str, args))
 
         if target is Target.DECLARATION:
-            return [f"{returns_type} {name}({args_str});"]
+            return f"{returns_type} {name}({args_str});"
         elif target is Target.DEFINITION:
             if f.dispatch is None:
                 cpp_name = cpp.name(f.func)
@@ -219,11 +236,11 @@ def compute_type_method(
                     if dispatch is not None:
                         cuda_guard = f"\n{cuda_guard}"
 
-            return [f"""\
+            return f"""\
 {returns_type} {name}({args_str}) {{
 {cuda_guard}{return_kw}{impl_name}({args_exprs_str});
 }}
-"""]
+"""
 
         elif target is Target.REGISTRATION:
             assert returns_type == dispatcher.returns_type(f.func.returns)
@@ -261,18 +278,19 @@ def compute_type_method(
 
                 impl_registration = f'm.impl("{f.func.name}",\n{payload});\n'
 
-            return [f"{def_registration}{impl_registration}"]
+            return f"{def_registration}{impl_registration}"
         else:
             assert_never(target)
 
     return func
 
-def compute_function(*, target: Target) -> Callable[[NativeFunction], List[str]]:
-    def go(f: NativeFunction) -> List[str]:
+def compute_function(*, target: Target) -> Callable[[NativeFunction], Optional[str]]:
+    @with_native_function
+    def go(f: NativeFunction) -> Optional[str]:
         if f.manual_kernel_registration:
-            return []
+            return None
         if Variant.function not in f.variants:
-            return []
+            return None
 
         name = cpp.name(f.func)
 
@@ -281,7 +299,7 @@ def compute_function(*, target: Target) -> Callable[[NativeFunction], List[str]]
         cpp_args_str = ', '.join(map(str, cpp_args))
 
         if target is Target.DECLARATION:
-            return [f"CAFFE2_API {cpp_returns_type} {name}({cpp_args_str});"]
+            return f"CAFFE2_API {cpp_returns_type} {name}({cpp_args_str});"
 
         assert target is Target.DEFINITION
 
@@ -291,7 +309,7 @@ def compute_function(*, target: Target) -> Callable[[NativeFunction], List[str]]
         dispatcher_types_str = ', '.join(map(lambda a: a.type, dispatcher_exprs))
         dispatcher_exprs_str = ', '.join(map(lambda a: a.expr, dispatcher_exprs))
 
-        return [f"""
+        return f"""
 // aten::{f.func}
 {cpp_returns_type} {name}({cpp_args_str_no_default}) {{
 #ifdef USE_STATIC_DISPATCH
@@ -302,13 +320,14 @@ def compute_function(*, target: Target) -> Callable[[NativeFunction], List[str]]
     return op.call({dispatcher_exprs_str});
 #endif
 }}
-"""]
+"""
     return go
 
-def compute_tensor_method(*, target: Target) -> Callable[[NativeFunction], List[str]]:
-    def go(f: NativeFunction) -> List[str]:
+def compute_tensor_method(*, target: Target) -> Callable[[NativeFunction], Optional[str]]:
+    @with_native_function
+    def go(f: NativeFunction) -> Optional[str]:
         if Variant.method not in f.variants:
-            return []
+            return None
 
         assert not f.func.is_out_fn()
         assert len(f.func.arguments) > 0
@@ -321,7 +340,7 @@ def compute_tensor_method(*, target: Target) -> Callable[[NativeFunction], List[
         cpp_args_exclude_this_str = ', '.join(str(a) for a in cpp_args_exclude_this)
 
         if target is Target.DECLARATION:
-            return [f"{cpp_returns_type} {name}({cpp_args_exclude_this_str}) const;"]
+            return f"{cpp_returns_type} {name}({cpp_args_exclude_this_str}) const;"
 
         assert target is Target.DEFINITION
 
@@ -331,7 +350,7 @@ def compute_tensor_method(*, target: Target) -> Callable[[NativeFunction], List[
         dispatcher_types_str = ', '.join(map(lambda a: a.type, dispatcher_exprs))
         dispatcher_exprs_str = ', '.join(map(lambda a: a.expr, dispatcher_exprs))
 
-        return [f"""
+        return f"""
 // aten::{f.func}
 {cpp_returns_type} Tensor::{name}({cpp_args_exclude_this_str_no_default}) const {{
 #ifdef USE_STATIC_DISPATCH
@@ -342,13 +361,15 @@ def compute_tensor_method(*, target: Target) -> Callable[[NativeFunction], List[
     return op.call({dispatcher_exprs_str});
 #endif
 }}
-"""]
+"""
 
     return go
 
-def compute_aten_op(f: NativeFunction) -> List[str]:
-    return [f'{{"aten::{f.func.name.name}", "{f.func.name.overload_name}"}},']
+@with_native_function
+def compute_aten_op(f: NativeFunction) -> str:
+    return f'{{"aten::{f.func.name.name}", "{f.func.name.overload_name}"}},'
 
+@with_native_function
 def compute_native_function_declaration(f: NativeFunction) -> List[str]:
     if f.dispatch is None:
         ns = [cpp.name(f.func)]
@@ -371,17 +392,18 @@ def compute_native_function_declaration(f: NativeFunction) -> List[str]:
 
     return rs
 
-def compute_backend_select(*, target: Target) -> Callable[[NativeFunction], List[str]]:
-    def go(f: NativeFunction) -> List[str]:
+def compute_backend_select(*, target: Target) -> Callable[[NativeFunction], Optional[str]]:
+    @with_native_function
+    def go(f: NativeFunction) -> Optional[str]:
         if str(f.func.name.name).endswith('_like') or str(f.func.name.name).startswith('new_'):
-            return []
+            return None
 
         name = legacy_dispatcher.name(f.func)
         legacy_dispatcher_returns_type = legacy_dispatcher.returns_type(f.func.returns)
         legacy_dispatcher_args = legacy_dispatcher.arguments(f.func)
 
         if not any(isinstance(a.argument, TensorOptionsArguments) for a in legacy_dispatcher_args):
-            return []
+            return None
 
         legacy_dispatcher_tensor_args = [
             a for a in legacy_dispatcher_args
@@ -404,7 +426,7 @@ DispatchKeySet _dk_set = DispatchKeySet(options.computeDispatchKey()) | c10::det
   DispatchKey _dk = c10::impl::dispatchTypeId(_dk_set, _dk_mask);"""
             else:
                 compute_dk = "DispatchKey _dk = options.computeDispatchKey();"
-            return [f"""\
+            return f"""\
 // aten::{f.func}
 {legacy_dispatcher_returns_type} {name}({', '.join(a.str_with_default() for a in legacy_dispatcher_args)}) {{
   static auto op = c10::Dispatcher::singleton()
@@ -413,14 +435,14 @@ DispatchKeySet _dk_set = DispatchKeySet(options.computeDispatchKey()) | c10::det
   {compute_dk}
   return op.callWithDispatchKey(_dk, {', '.join(a.expr for a in dispatcher_exprs)});
 }}
-"""]
+"""
         elif target is Target.REGISTRATION:
             if local.use_c10_dispatcher_full():
-                return [f"""m.impl("aten::{f.func.name}",
+                return f"""m.impl("aten::{f.func.name}",
           c10::impl::hacky_wrapper_for_legacy_signatures<{dispatcher_returns_type} ({', '.join(a.type for a in dispatcher_args)})>(
-            TORCH_FN({name})));"""]
+            TORCH_FN({name})));"""
             else:
-                return [f"""m.impl_UNBOXED("aten::{f.func.name}", {name});"""]
+                return f"""m.impl_UNBOXED("aten::{f.func.name}", {name});"""
         elif target is Target.DECLARATION:
             raise AssertionError()
         else:
@@ -647,7 +669,8 @@ def compute_argument_yaml(a: Argument, *, schema_order: bool, kwarg_only_set: Se
         arg['size'] = a.type.size
     return arg
 
-def compute_declaration_yaml(f: NativeFunction) -> List[object]:
+@with_native_function
+def compute_declaration_yaml(f: NativeFunction) -> object:
     returns, name_to_field_name = compute_returns_yaml(f)
 
     # These sets are used to conveniently test if an argument is a
@@ -681,7 +704,7 @@ def compute_declaration_yaml(f: NativeFunction) -> List[object]:
     is_factory_method = any(isinstance(a.argument, TensorOptionsArguments) for a in cpp_args) \
         and Variant.method not in f.variants
 
-    return [OrderedDict([
+    return OrderedDict([
         ('name', cpp.name(f.func)),
         ('operator_name', str(f.func.name.name)),
         ('overload_name', str(f.func.name.overload_name)),
@@ -703,7 +726,7 @@ def compute_declaration_yaml(f: NativeFunction) -> List[object]:
         ('device_guard', f.device_guard),
         ('with_gil', False),
         ('deprecated', False),
-    ])]
+    ])
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #
@@ -868,10 +891,10 @@ def main() -> None:
         fm.write_with_template(f'{dispatch}Type.h', h_template, lambda: {
             'Type': f'{dispatch}Type',
             'extra_cuda_headers': extra_cuda_headers if 'CUDA' in dispatch else '',  # TODO: remove this
-            'type_derived_method_declarations': concatmap_nf(
+            'type_derived_method_declarations': list(mapMaybe(
                 compute_type_method(dispatch, target=Target.DECLARATION, op_registration_whitelist=op_registration_whitelist),
                 native_functions
-            ),
+            )),
         })
         fm.write_with_template(f'{dispatch}Type.cpp', cpp_template, lambda: {
             'Type': f'{dispatch}Type',
@@ -886,59 +909,61 @@ def main() -> None:
                 '#include <ATen/cuda/LegacyTHFunctionsCUDA.h>' if dispatch == "CUDA" else
                 '',
             'Backend': dispatch,
-            'type_derived_method_definitions': concatmap_nf(
+            'type_derived_method_definitions': list(mapMaybe(
                 compute_type_method(dispatch, target=Target.DEFINITION, op_registration_whitelist=op_registration_whitelist),
                 native_functions
-            ),
-            'function_registrations': concatmap_nf(
+            )),
+            'function_registrations': list(mapMaybe(
                 compute_type_method(
                     dispatch, target=Target.REGISTRATION, op_registration_whitelist=op_registration_whitelist),
                 native_functions
-            ) if not options.per_op_registration else [],
+            )) if not options.per_op_registration else [],
         })
         del fm
 
     cpu_fm.write('TypeDefault.h', lambda: {
-        'type_method_declarations': concatmap_nf(
+        'type_method_declarations': list(mapMaybe(
             compute_type_method(None, target=Target.DECLARATION, op_registration_whitelist=op_registration_whitelist),
-            native_functions),
+            native_functions)),
     })
     cpu_fm.write('TypeDefault.cpp', lambda: {
-        'type_method_definitions': concatmap_nf(
+        'type_method_definitions': list(mapMaybe(
             compute_type_method(None, target=Target.DEFINITION, op_registration_whitelist=op_registration_whitelist),
-            native_functions),
-        'function_registrations': concatmap_nf(
+            native_functions)),
+        'function_registrations': list(mapMaybe(
             compute_type_method(None, target=Target.REGISTRATION, op_registration_whitelist=op_registration_whitelist),
-            native_functions) if not options.per_op_registration else [],
+            native_functions)) if not options.per_op_registration else [],
     })
     cpu_fm.write('Functions.h', lambda: {
-        'function_declarations': concatmap_nf(compute_function(target=Target.DECLARATION), native_functions),
+        'function_declarations': list(mapMaybe(compute_function(target=Target.DECLARATION), native_functions)),
     })
     cpu_fm.write('Functions.cpp', lambda: {
-        'function_definitions': concatmap_nf(compute_function(target=Target.DEFINITION), native_functions),
+        'function_definitions': list(mapMaybe(compute_function(target=Target.DEFINITION), native_functions)),
     })
     core_fm.write('TensorBody.h', lambda: {
-        'tensor_method_declarations': concatmap_nf(compute_tensor_method(target=Target.DECLARATION), native_functions),
+        'tensor_method_declarations': list(mapMaybe(compute_tensor_method(target=Target.DECLARATION), native_functions)),
     })
     core_fm.write('TensorMethods.cpp', lambda: {
-        'tensor_method_definitions': concatmap_nf(compute_tensor_method(target=Target.DEFINITION), native_functions),
+        'tensor_method_definitions': list(mapMaybe(compute_tensor_method(target=Target.DEFINITION), native_functions)),
     })
     core_fm.write('ATenOpList.cpp', lambda: {
-        'aten_ops': concatmap_nf(compute_aten_op, native_functions),
+        'aten_ops': list(mapMaybe(compute_aten_op, native_functions)),
     })
     cpu_fm.write('NativeFunctions.h', lambda: {
-        'native_function_declarations': concatmap_nf(compute_native_function_declaration, native_functions),
+        'native_function_declarations': list(concatMap(compute_native_function_declaration, native_functions)),
     })
     cpu_fm.write('BackendSelectRegister.cpp', lambda: {
-        'backend_select_method_definitions': concatmap_nf(compute_backend_select(target=Target.DEFINITION), native_functions),
-        'backend_select_function_registrations': concatmap_nf(compute_backend_select(target=Target.REGISTRATION), native_functions),
+        'backend_select_method_definitions':
+            list(mapMaybe(compute_backend_select(target=Target.DEFINITION), native_functions)),
+        'backend_select_function_registrations':
+            list(mapMaybe(compute_backend_select(target=Target.REGISTRATION), native_functions)),
     })
 
     if options.force_schema_registration:
         def computeSchemaRegister() -> Dict[str, object]:
-            schema_registrations = concatmap_nf(
+            schema_registrations = list(mapMaybe(
                 compute_type_method(None, target=Target.REGISTRATION, op_registration_whitelist=None, def_only=True),
-                native_functions)
+                native_functions))
             # See Note [Byte-for-byte compatibility]
             schema_registrations.sort()
             return {
@@ -965,7 +990,7 @@ def main() -> None:
         for name in op_registration_whitelist:
             def computePerOpRegistration() -> Dict[str, object]:
                 fs = grouped_functions[name]
-                registrations = []
+                registrations: List[str] = []
                 for mb_dispatch in itertools.chain([None], backends):
                     # or you could pass in op_registration_whitelist, it doesn't
                     # matter!
@@ -974,7 +999,7 @@ def main() -> None:
                     # torch::dispatch in the registration when it should be
                     # contextually clear
                     registrations.extend(
-                        concatmap_nf(
+                        mapMaybe(
                             compute_type_method(mb_dispatch, target=Target.REGISTRATION, op_registration_whitelist=None),
                             fs))
                 return {
@@ -985,7 +1010,7 @@ def main() -> None:
             cpu_fm.write_with_template(
                 gen_per_op_registration_filename(name), 'PerOpRegistration.cpp', computePerOpRegistration)
 
-    cpu_fm.write('Declarations.yaml', lambda: format_yaml(concatmap_nf(compute_declaration_yaml, native_functions)))
+    cpu_fm.write('Declarations.yaml', lambda: format_yaml(list(map(compute_declaration_yaml, native_functions))))
 
     if options.output_dependencies:
         cpu_fm.write_outputs(options.output_dependencies)

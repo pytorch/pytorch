@@ -1,6 +1,7 @@
 from tools.codegen.model import *
 
-from tools.codegen.api.types import CppArgument, DispatcherExpr, TensorOptionsArguments, DispatcherArgument, ThisArgument, LegacyDispatcherArgument
+from tools.codegen.api.types import CppArgument, DispatcherExpr, TensorOptionsArguments, \
+    DispatcherArgument, ThisArgument, LegacyDispatcherArgument
 import tools.codegen.api.cpp as cpp
 import tools.codegen.api.legacy_dispatcher as legacy_dispatcher
 import tools.codegen.local as local
@@ -87,7 +88,10 @@ def cppargument_exprs(a: CppArgument, *, tensor_options: Optional[CppArgument]) 
             return [DispatcherExpr(type='const TensorOptions &', expr=a.name)]
     elif isinstance(a.argument, Argument):
         if a.name == 'memory_format' and tensor_options is not None and local.use_c10_dispatcher_full():
-            return [DispatcherExpr(type=argument_type(a.argument), expr=f'c10::impl::check_tensor_options_and_extract_memory_format({tensor_options.name}, {a.name})')]
+            return [DispatcherExpr(
+                type=argument_type(a.argument),
+                expr=f'c10::impl::check_tensor_options_and_extract_memory_format({tensor_options.name}, {a.name})')
+            ]
         else:
             return [DispatcherExpr(type=argument_type(a.argument), expr=a.name)]
     elif isinstance(a.argument, ThisArgument):
