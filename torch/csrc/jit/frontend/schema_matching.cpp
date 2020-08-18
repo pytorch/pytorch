@@ -56,11 +56,12 @@ Value* tryConvertToType(
     const TypePtr& concrete_type,
     Value* value,
     bool allow_conversions) {
-
   // treat conversion to Optional[T] as conversions to T
   if (OptionalTypePtr op = concrete_type->cast<OptionalType>()) {
-    if (value->type()->kind() != OptionalType::Kind && !value->type()->isSubtypeOf(NoneType::get())) {
-      return tryConvertToType(loc, graph, op->getElementType(), value, allow_conversions);
+    if (value->type()->kind() != OptionalType::Kind &&
+        !value->type()->isSubtypeOf(NoneType::get())) {
+      return tryConvertToType(
+          loc, graph, op->getElementType(), value, allow_conversions);
     }
   }
 
