@@ -1,8 +1,8 @@
 $VS_INSTALLER = "C:\Program Files (x86)\Microsoft Visual Studio\Installer\vs_installer.exe"
 $COLLECT_DOWNLOAD_LINK = "https://aka.ms/vscollect.exe"
-$VS_INSTALL_ARGS = @("modify", "--nocache","--quiet","--wait",
-                                                     "--installPath ""C:\Program Files (x86)\Microsoft Visual Studio\2019\Community""",
-                                                     "--add Microsoft.VisualStudio.Component.VC.14.26.x86.x64")
+$VS_INSTALL_ARGS = @("modify", "--nocache","--quiet",
+                                           "--installPath ""C:\Program Files (x86)\Microsoft Visual Studio\2019\Community""",
+                                           "--add Microsoft.VisualStudio.Component.VC.14.26.x86.x64")
 
 $process = Start-Process "$VS_INSTALLER" -ArgumentList $VS_INSTALL_ARGS -NoNewWindow -Wait -PassThru
 $exitCode = $process.ExitCode
