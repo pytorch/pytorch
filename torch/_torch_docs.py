@@ -5393,6 +5393,13 @@ Example::
 
 """.format(**common_args))
 
+add_docstr(torch.degrees,
+           r"""
+degrees(input, *, out=None) -> Tensor
+
+Alias for :func:`torch.rad2deg`.
+""".format(**common_args))
+
 add_docstr(torch.deg2rad,
            r"""
 deg2rad(input, out=None) -> Tensor
@@ -5414,13 +5421,6 @@ Example::
             [ 6.2832, -6.2832],
             [ 1.5708, -1.5708]])
 
-""".format(**common_args))
-
-add_docstr(torch.degrees,
-           r"""
-degrees(input, out=None) -> Tensor
-
-Alias for :func:`torch.rad2deg`.
 """.format(**common_args))
 
 add_docstr(torch.rand,

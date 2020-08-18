@@ -122,6 +122,11 @@ Tensor& rad2deg_out(Tensor& result, const Tensor& self) {
 Tensor rad2deg(const Tensor& self) { return unary_op_impl(self, at::rad2deg_out); }
 Tensor& rad2deg_(Tensor& self) { return unary_op_impl_(self, at::rad2deg_out); }
 
+// Alias for rad2deg.
+Tensor degrees(const Tensor& self) { return at::native::rad2deg(self); }
+Tensor& degrees_(Tensor& self) { return at::native::rad2deg_(self); }
+Tensor& degrees_out(Tensor& result, const Tensor& self) { return at::native::rad2deg_out(result, self); }
+
 Tensor& deg2rad_out(Tensor& result, const Tensor& self) {
   TORCH_CHECK(!self.is_complex(), "deg2rad is not supported for complex tensors.");
   constexpr double M_PI_180 = 0.017453292519943295769236907684886127134428718885417;
@@ -129,10 +134,6 @@ Tensor& deg2rad_out(Tensor& result, const Tensor& self) {
 }
 Tensor deg2rad(const Tensor& self) { return unary_op_impl(self, at::deg2rad_out); }
 Tensor& deg2rad_(Tensor& self) { return unary_op_impl_(self, at::deg2rad_out); }
-
-Tensor degrees(const Tensor& self) { return at::native::rad2deg(self); }
-Tensor& degrees_(Tensor& self) { return at::native::rad2deg_(self); }
-Tensor& degrees_out(Tensor& result, const Tensor& self) { return at::native::rad2deg_out(result, self); }
 
 Tensor& asin_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, asin_stub); }
 Tensor asin(const Tensor& self) { return unary_op_impl(self, at::asin_out); }
@@ -146,7 +147,7 @@ Tensor& atan_(Tensor& self) { return unary_op_impl_(self, at::atan_out); }
 // Complex inputs to abs and angle return float results by default.
 // abs and angle, in both NumPy and C++, returns a float result when given a
 // complex input. This makes sense mathematically since the absolute value
-// and angle of a complex number has no imaginary part.d
+// and angle of a complex number has no imaginary part.
 Tensor& abs_out(Tensor& result, const Tensor& self) {
   return unary_op_impl_with_complex_to_float_out(result, self, abs_stub);
 }
