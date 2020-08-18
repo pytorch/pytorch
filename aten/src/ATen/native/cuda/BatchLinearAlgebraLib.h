@@ -10,11 +10,6 @@
 #if defined(CUDART_VERSION) && CUDART_VERSION >= 10000
 // some cusolver functions doesn't work well on cuda 9.2, cusolver is used on cuda >= 10.0
 #define USE_CUSOLVER
-const bool use_cusolver_ = true;
-
-#else
-const bool use_cusolver_ = false;
-
 #endif
 
 #ifdef USE_CUSOLVER
