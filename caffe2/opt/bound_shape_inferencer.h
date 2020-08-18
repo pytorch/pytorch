@@ -105,7 +105,9 @@ class CAFFE2_API BoundShapeInferencer : public BoundShapeInferencerBase {
       std::vector<int64_t> bound_dims,
       TensorProto::DataType type,
       bool is_quantized,
-      bool allow_existing_shape = false);
+      bool allow_existing_shape = false,
+      float scale = 1,
+      int offset = 0);
 
   TensorShape& SetTensorBoundShapeIfNotExist(
       const std::string& name,

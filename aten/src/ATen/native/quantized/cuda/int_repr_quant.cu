@@ -4,9 +4,9 @@
 namespace at {
 namespace native {
 
-Tensor int_repr_quant_cuda(const Tensor& self) {
+Tensor int_repr_quantized_cuda(const Tensor& self) {
   Tensor dst;
-  AT_DISPATCH_QINT_TYPES(self.scalar_type(), "int_repr_quant_cuda", [&]() {
+  AT_DISPATCH_QINT_TYPES(self.scalar_type(), "int_repr_quantized_cuda", [&]() {
     dst = at::empty(
         self.sizes(),
         self.options().dtype(UNDERLYING_TYPE),

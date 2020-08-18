@@ -4,6 +4,7 @@
 #include <ATen/core/jit_type.h>
 #include <ATen/core/stack.h>
 #include <pybind11/pybind11.h>
+#include <pybind11/pytypes.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/Layout.h>
@@ -73,6 +74,10 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
 
   explicit PythonFutureWrapper(const PythonFutureWrapper&) = delete;
   PythonFutureWrapper& operator=(const PythonFutureWrapper&) = delete;
+
+  bool done() {
+    return fut->completed();
+  }
 
   py::object wait() {
     fut->wait();
@@ -177,7 +182,7 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
 // locations in libtorch code rather than user code.
 
 inline std::shared_ptr<CompilationUnit> get_python_cu() {
-  return py::module::import("torch.jit")
+  return py::module::import("torch.jit._state")
       .attr("_python_cu")
       .cast<std::shared_ptr<CompilationUnit>>();
 }
@@ -282,12 +287,22 @@ inline InferredType tryToInferType(py::handle input) {
     return InferredType(IntType::get());
   }
 
+  auto enum_type = py::module::import("enum").attr("Enum");
+  py::bool_ isEnumValue = py::isinstance(input, enum_type);
+  if (py::cast<bool>(isEnumValue)) {
+    auto enum_class = input.attr("__class__");
+    auto enum_type =
+        py::cast<TypePtr>(py::module::import("torch.jit.annotations")
+                              .attr("try_ann_to_type")(enum_class, py::none()));
+    return InferredType(enum_type);
+  }
+
   py::bool_ isClass =
       py::module::import("inspect").attr("isclass")(input.get_type());
   if (py::cast<bool>(isClass)) {
-    py::str qualifiedName = py::module::import("torch.jit")
+    py::str qualifiedName = py::module::import("torch._jit_internal")
                                 .attr("_qualified_name")(input.get_type());
-    auto pyClass = py::module::import("torch.jit")
+    auto pyClass = py::module::import("torch.jit._state")
                        .attr("_get_script_class")(qualifiedName);
     if (!pyClass.is_none()) {
       auto cu = get_python_cu();
@@ -648,7 +663,7 @@ inline IValue toIValue(
       } else {
         // We inspect the value to found the compiled TorchScript class
         // and then create a ivalue::Object from that class type.
-        py::str qualified_name = py::module::import("torch.jit")
+        py::str qualified_name = py::module::import("torch._jit_internal")
                                      .attr("_qualified_name")(obj.get_type());
         auto pyCu = get_python_cu();
         classType = pyCu->get_class(c10::QualifiedName(qualified_name));
@@ -718,12 +733,22 @@ inline IValue toIValue(
       return toTypeInferredIValue(obj);
     case TypeKind::FunctionType:
     case TypeKind::GeneratorType:
+    case TypeKind::QuantizerType:
     case TypeKind::VarType:
     case TypeKind::QSchemeType:
     case TypeKind::AnyListType:
     case TypeKind::AnyTupleType:
     case TypeKind::AnyClassType:
+    case TypeKind::AnyEnumType:
       break;
+    case TypeKind::EnumType:
+      EnumTypePtr enum_type = type->expect<EnumType>();
+      py::object py_obj = py::reinterpret_borrow<py::object>(obj);
+      std::string name = py::cast<std::string>(obj.attr("name"));
+      IValue value = toIValue(obj.attr("value"), enum_type->getValueType(), {});
+      auto enum_holder =
+          c10::make_intrusive<c10::ivalue::EnumHolder>(enum_type, name, value);
+      return IValue(enum_holder);
   }
   throw py::cast_error(c10::str(
       "toIValue() cannot handle converting to type: ", type->repr_str()));
@@ -839,7 +864,7 @@ inline py::object toPyObject(IValue ivalue) {
       auto fieldNames = fmap(
           tuple->type()->schema()->arguments(),
           [](const Argument& arg) { return arg.name(); });
-      return py::module::import("torch.jit")
+      return py::module::import("torch._jit_internal")
           .attr("_create_named_tuple")(t, unqualName, fieldNames);
     } else {
       return std::move(t);
@@ -875,8 +900,8 @@ inline py::object toPyObject(IValue ivalue) {
     }
     const auto classType = pyCu->get_class(c10::QualifiedName(obj->name()));
     AT_ASSERT(classType);
-    auto pyClass =
-        py::module::import("torch.jit").attr("_get_script_class")(obj->name());
+    auto pyClass = py::module::import("torch.jit._state")
+                       .attr("_get_script_class")(obj->name());
     if (pyClass.is_none()) {
       std::stringstream err;
       err << "Unknown reference to ScriptClass ";
@@ -1142,6 +1167,8 @@ inline py::object invokeOperatorFromPython(
     // Create a stack full of the arguments and keyword arguments.
     stack = createStackForSchema(
         op.schema(), std::move(args), std::move(kwargs), c10::nullopt);
+
+    pybind11::gil_scoped_release no_gil_guard;
     op.getOperation()(&stack);
   } else {
     std::vector<schema_match_error> errors;
@@ -1163,6 +1190,8 @@ inline py::object invokeOperatorFromPython(
       }
       throw std::runtime_error(ss.str());
     }
+
+    pybind11::gil_scoped_release no_gil_guard;
     found_op->getOperation()(&stack);
   }
 

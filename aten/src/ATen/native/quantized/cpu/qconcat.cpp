@@ -108,7 +108,7 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
   m.impl("cat_relu_out", TORCH_FN(qcat_out<true>));
 }
 
-Tensor quantized_cat(TensorList qxs, int64_t dim) {
+Tensor cat_quantized_cpu(TensorList qxs, int64_t dim) {
   TORCH_CHECK(is_valid_quantization_scheme(qxs[0]),
               "Only per-tensor quantization is supported in 'cat'!")
   double _scale = qxs[0].q_scale();
@@ -116,7 +116,7 @@ Tensor quantized_cat(TensorList qxs, int64_t dim) {
   return quantized_cat_impl<false>(c10::List<Tensor>(qxs), dim, _scale, _zero_point);
 }
 
-Tensor& quantized_cat_out(Tensor& out, TensorList qxs, int64_t dim) {
+Tensor& cat_out_quantized_cpu(Tensor& out, TensorList qxs, int64_t dim) {
   TORCH_CHECK(is_valid_quantization_scheme(qxs[0]),
               "Only per-tensor quantization is supported in 'cat'!")
   TORCH_CHECK(is_valid_quantization_scheme(out),

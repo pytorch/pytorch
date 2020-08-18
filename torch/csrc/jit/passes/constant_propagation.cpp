@@ -55,6 +55,14 @@ c10::optional<std::vector<IValue>> runNodeIfInputsAreConstant(const Node* n) {
       isinstance(stack, n->tys(attr::types));
     } break;
     default: {
+      const auto& the_operator = n->getOperator();
+      if (the_operator.schema().is_vararg()) {
+        // vararg schemas require the number of inputs at the top of the stack
+        // but this is broken in other places in constant prop, so disable it
+        // for now
+        return c10::nullopt;
+      }
+
       auto op = n->getOperation();
       try {
         op(&stack);

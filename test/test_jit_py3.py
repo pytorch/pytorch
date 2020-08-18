@@ -34,7 +34,7 @@ class TestScriptPy3(JitTestCase):
         with self.capture_stdout() as captured_script:
             out_script = func(x)
 
-        self.assertAlmostEqual(out, out_script)
+        self.assertEqual(out, out_script)
         self.assertEqual(captured, captured_script)
 
     @unittest.skipIf(sys.version_info[:2] < (3, 7), "`dataclasses` module not present on < 3.7")

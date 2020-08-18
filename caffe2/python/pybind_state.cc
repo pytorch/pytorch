@@ -6,7 +6,8 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
-#include "caffe2/core/asan.h"
+#include <c10/macros/Macros.h>
+
 #include "caffe2/core/blob_serialization.h"
 #include "caffe2/core/blob_stats.h"
 #include "caffe2/core/db.h"
@@ -19,6 +20,7 @@
 #include "caffe2/observers/time_observer.h"
 #include "caffe2/onnx/backend.h"
 #include "caffe2/onnx/helper.h"
+#include "caffe2/onnx/offline_tensor.h"
 #include "caffe2/onnx/onnx_exporter.h"
 #include "caffe2/opt/converter.h"
 #include "caffe2/opt/fusion.h"
@@ -27,6 +29,7 @@
 #include "caffe2/opt/optimize_ideep.h"
 #include "caffe2/opt/passes.h"
 #include "caffe2/opt/shape_info.h"
+#include "caffe2/opt/fakefp16_transform.h"
 #include "caffe2/predictor/emulator/data_filler.h"
 #include "caffe2/predictor/predictor.h"
 #include "caffe2/python/pybind_state_registry.h"
@@ -1013,7 +1016,7 @@ void addObjectMethods(py::module& m) {
 }
 
 void addGlobalMethods(py::module& m) {
-  m.attr("is_asan") = py::bool_(CAFFE2_ASAN_ENABLED);
+  m.attr("is_asan") = py::bool_(C10_ASAN_ENABLED);
   m.def("get_build_options", []() { return GetBuildOptions(); });
 
   // The old mkl backend has been removed permanently, but we
@@ -1729,10 +1732,25 @@ void addGlobalMethods(py::module& m) {
     return py::bytes(out);
   });
   m.def(
+      "create_offline_tensor",
+      [](const std::string& name,
+         const std::vector<int>& dims,
+         int datatype) -> bool {
+        Workspace* curr_ws = GetCurrentWorkspace();
+        auto* b = curr_ws->CreateBlob(name);
+        auto* offline = b->GetMutable<OfflineTensor>();
+        CAFFE_ENFORCE(offline);
+        offline->setShapeAndType(
+            dims,
+            CPU,
+            DataTypeToTypeMeta(static_cast<TensorProto::DataType>(datatype)));
+        return true;
+      });
+  m.def(
       "onnxifi",
       [](const py::bytes& pred_net_str,
-         const std::unordered_map<std::string, std::vector<int>>& shapes,
-         const std::vector<int>& black_list,
+         const py::bytes& shapes_str,
+         const std::vector<int>& block_list,
          const std::vector<std::string>& weight_names,
          int max_batch_size,
          int max_seq_size,
@@ -1740,6 +1758,7 @@ void addGlobalMethods(py::module& m) {
          bool adjust_batch,
          bool debug_builder,
          bool merge_fp32_inputs_into_fp16,
+         bool net_ssa_rewritten,
          bool use_onnx) -> py::bytes {
         caffe2::NetDef pred_net;
         CAFFE_ENFORCE(
@@ -1749,13 +1768,12 @@ void addGlobalMethods(py::module& m) {
         Workspace* curr_ws = GetCurrentWorkspace();
         CAFFE_ENFORCE(curr_ws);
         splitSparseLengthsSumSparse(&pred_net, *curr_ws);
-        ShapeInfoMap shape_map;
-        for (const auto& it : shapes) {
-          shape_map.emplace(
-              it.first,
-              constructShapeInfoWithDefaultDimType(
-                  CreateTensorShape(it.second, TensorProto::FLOAT)));
-        }
+        caffe2::TensorBoundShapes tbs;
+        CAFFE_ENFORCE(
+            ParseProtoFromLargeString(shapes_str.cast<std::string>(), &tbs),
+            "broken TensorBoundShapes protobuf");
+        ShapeInfoMap shape_map = caffe2::extractShapeInfoFromTensorBoundShapes(
+            tbs, max_batch_size, max_seq_size);
         OnnxifiTransformerOptions opts;
         opts.bound_shape_spec.max_batch_size = max_batch_size;
         opts.bound_shape_spec.max_seq_size = max_seq_size;
@@ -1763,10 +1781,11 @@ void addGlobalMethods(py::module& m) {
         opts.adjust_batch = adjust_batch;
         opts.debug = debug_builder;
         opts.merge_fp32_inputs_into_fp16 = merge_fp32_inputs_into_fp16;
+        opts.predictor_net_ssa_rewritten = net_ssa_rewritten;
         opts.use_onnx = use_onnx;
         OnnxifiTransformer ts(opts);
-        std::unordered_set<int> blacklist_set(
-            black_list.begin(), black_list.end());
+        std::unordered_set<int> blocklist_set(
+            block_list.begin(), block_list.end());
         std::vector<std::string> weight_names_overwrite{};
         if (weight_names.size() == 0) {
           weight_names_overwrite = curr_ws->Blobs();
@@ -1778,7 +1797,7 @@ void addGlobalMethods(py::module& m) {
             &pred_net,
             weight_names_overwrite,
             shape_map,
-            blacklist_set);
+            blocklist_set);
         std::string pred_net_str2;
         pred_net.SerializeToString(&pred_net_str2);
         return py::bytes(pred_net_str2);
@@ -1802,6 +1821,17 @@ void addGlobalMethods(py::module& m) {
         new_proto.SerializeToString(&out);
         return py::bytes(out);
       });
+  m.def("fakeFp16FuseOps", [](const py::bytes& net_str) {
+    caffe2::NetDef netDef;
+    CAFFE_ENFORCE(
+        ParseProtoFromLargeString(
+            net_str.cast<std::string>(), &netDef),
+        "broken pred_net protobuf");
+    opt::fakeFp16FuseOps(&netDef);
+    std::string out_net;
+    netDef.SerializeToString(&out_net);
+    return py::bytes(out_net);
+  });
 
   // Transformations are exposed as functions here and wrapped
   // into a python interface in transformations.py
