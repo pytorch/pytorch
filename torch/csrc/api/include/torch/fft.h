@@ -7,7 +7,7 @@ namespace fft {
 
 /// Computes the 1 dimensional fast fourier transform over a given axis
 ///
-/// /see https://pytorch.org/docs/master/fft.html#torch.fft.fft
+/// \see https://pytorch.org/docs/master/fft.html#torch.fft.fft
 ///
 /// Example:
 /// ```
@@ -23,7 +23,7 @@ inline Tensor fft(const Tensor& self,
 
 /// Computes the 1 dimensional inverse fast fourier transform over a given axis
 ///
-/// /see https://pytorch.org/docs/master/fft.html#torch.fft.ifft
+/// \see https://pytorch.org/docs/master/fft.html#torch.fft.ifft
 ///
 /// Example:
 /// ```
@@ -39,7 +39,7 @@ inline Tensor ifft(const Tensor& self,
 
 /// Computes the 1 dimensional FFT of real input with half-complex output
 ///
-/// /see https://pytorch.org/docs/master/fft.html#torch.fft.rfft
+/// \see https://pytorch.org/docs/master/fft.html#torch.fft.rfft
 ///
 /// Example:
 /// ```
@@ -58,7 +58,7 @@ inline Tensor rfft(const Tensor& self,
 ///
 /// The input is a half-complex fourier domain signal, with purely real output.
 ///
-/// /see https://pytorch.org/docs/master/fft.html#torch.fft.irfft
+/// \see https://pytorch.org/docs/master/fft.html#torch.fft.irfft
 ///
 /// Example:
 /// ```
@@ -79,7 +79,7 @@ inline Tensor irfft(const Tensor& self,
 /// The returned fourier domain representation of such a signal is a purely
 /// real.
 ///
-/// /see https://pytorch.org/docs/master/fft.html#torch.fft.hfft
+/// \see https://pytorch.org/docs/master/fft.html#torch.fft.hfft
 ///
 /// Example:
 /// ```
@@ -99,7 +99,7 @@ inline Tensor hfft(const Tensor& self,
 /// The output is a half-complex representation of the full hermitian symmetric
 /// time domain signal.
 ///
-/// /see https://pytorch.org/docs/master/fft.html#torch.fft.ihfft
+/// \see https://pytorch.org/docs/master/fft.html#torch.fft.ihfft
 ///
 /// Example:
 /// ```
