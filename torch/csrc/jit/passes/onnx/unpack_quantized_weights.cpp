@@ -176,6 +176,8 @@ void unpackQuantizedWeightsHelper(
       unpacked_weight = ser_tup->elements()[0].toTensor();
       bias = ser_tup->elements()[1].toOptional<at::Tensor>();
       // conv only parameters
+      // The serialization tuple is defined here:
+      // - aten/src/ATen/native/quantized/cpu/serialization_versions.h
       if (ser_tup->elements().size() > 2) {
         auto stride_ivalue = ser_tup->elements()[stride_idx].toListRef();
         auto padding_ivalue = ser_tup->elements()[padding_idx].toListRef();
