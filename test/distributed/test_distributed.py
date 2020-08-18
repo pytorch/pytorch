@@ -2983,8 +2983,8 @@ class _DistTestBase(object):
                         rank: baseline_iter for rank in range(0, num_early_join_ranks)
                     }
                     # if num_early_join_ranks > 1, ranks > 0 that will join early
-                    # iterate offset//2 more times than rank 0, to test nodes depleting inputs
-                    # at different times.
+                    # iterate offset//2 more times than rank 0, to test nodes
+                    # depleting inputs at different times.
                     if num_early_join_ranks > 1:
                         for rank in mapping.keys():
                             if rank > 0:

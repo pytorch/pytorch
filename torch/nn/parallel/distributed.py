@@ -378,7 +378,6 @@ class DistributedDataParallel(Module):
         self.require_backward_grad_sync = True
         self.require_forward_param_sync = True
         self.ddp_join_enabled = False
-        self.rank = dist.get_rank(self.process_group)
 
         if check_reduction:
             # This argument is no longer used since the reducer
@@ -640,7 +639,8 @@ class DistributedDataParallel(Module):
     # the models have buffers that should be synchronized in the forward pass.
     def _check_and_sync_module_buffers(self):
         if self.will_sync_module_buffers():
-            rank_to_use = self._find_common_rank(self.rank, False)
+            my_rank = dist.get_rank(self.process_group)
+            rank_to_use = self._find_common_rank(my_rank, False)
             self._distributed_broadcast_coalesced(
                 self.modules_buffers[0], self.broadcast_bucket_size, rank_to_use
             )
@@ -651,7 +651,8 @@ class DistributedDataParallel(Module):
         # Agree upon the process that will be the authoritative model copy.
         # The current rank is a candidate for being the authoritative copy if
         # is_last_joiner=True. We break ties via picking the larger rank.
-        self.authoritative_rank = self._find_common_rank(self.rank, is_last_joiner)
+        my_rank = dist.get_rank(self.process_group)
+        self.authoritative_rank = self._find_common_rank(my_rank, is_last_joiner)
         self._sync_params_and_buffers(authoritative_rank=self.authoritative_rank)
 
     # Schedule allreduce ops to match those scheduled in the reducer's backward
