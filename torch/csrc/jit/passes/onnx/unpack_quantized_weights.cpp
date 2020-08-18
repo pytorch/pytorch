@@ -162,86 +162,43 @@ void unpackQuantizedWeightsHelper(
     }
     at::Tensor unpacked_weight;
     c10::optional<at::Tensor> bias;
+    const int64_t stride_idx = 2;
+    const int64_t padding_idx = 3;
+    const int64_t dilation_idx = 4;
+    const int64_t groups_idx = 5;
     c10::optional<torch::List<int64_t>> stride, padding, dilation;
     c10::optional<int64_t> groups;
-
-    constexpr int64_t stride_idx = 2;
-    constexpr int64_t padding_idx = 3;
-    constexpr int64_t dilation_idx = 4;
-    constexpr int64_t groups_idx = 5;
-
-    torch::List<int64_t> stride_int, padding_int, dilation_int;
-    int64_t groups_int;
 
     if (itr->second.isTuple()) {
       // Pre-unpacked weights. Comes from Conv/Linear weights which are
       // stored as bound C++ classes.
       auto ser_tup = itr->second.toTuple();
-      if (ser_tup->elements()[0].isString()) {
-        // SerializationType as defined in
-        // aten/src/ATen/native/quantized/cpu/serialization_versions.h
-        auto name = ser_tup->elements()[0].toString()->string();
-        auto version = ser_tup->elements()[1].toInt();
-        auto non_optional = ser_tup->elements()[2].toTensorVector();
-        auto optional = ser_tup->elements()[3].toTensorVector();
-        auto doubles = ser_tup->elements()[4].toDoubleVector();
-        auto longs = ser_tup->elements()[5].toIntVector();
-
-        // Versions below 2 should not be here -- should be in the legacy path.
-        TORCH_CHECK(version >= 2, "Incorrect version");
-        if (name == "conv") {
-          if (version == 2) {
-            unpacked_weight = non_optional[0];
-            bias = optional[0];
-
-            const int64_t kSpatialDim = longs[0];
-            int idx = 0;
-            for (; idx < kSpatialDim; ++idx) {
-              stride_int.emplace_back(longs[idx]);
-            }
-            for (; idx < 2 * kSpatialDim; ++idx) {
-              padding_int.emplace_back(longs[idx]);
-            }
-            for (; idx < 3 * kSpatialDim; ++idx) {
-              dilation_int.emplace_back(longs[idx]);
-            }
-            groups_int = longs[idx];
-
-            stride = stride_int;
-            padding = padding_int;
-            dilation = dilation_int;
-            groups = groups_int;
-          } else {
-            TORCH_CHECK(false, "Unsupported serialization version ", version);
-          }
-        } else {
-          TORCH_CHECK(false, "Unsupported serialization type ", name);
+      unpacked_weight = ser_tup->elements()[0].toTensor();
+      bias = ser_tup->elements()[1].toOptional<at::Tensor>();
+      // conv only parameters
+      // The serialization tuple is defined here:
+      // - aten/src/ATen/native/quantized/cpu/serialization_versions.h
+      if (ser_tup->elements().size() > 2) {
+        auto stride_ivalue = ser_tup->elements()[stride_idx].toListRef();
+        auto padding_ivalue = ser_tup->elements()[padding_idx].toListRef();
+        auto dilation_ivalue = ser_tup->elements()[dilation_idx].toListRef();
+        auto groups_ivalue = ser_tup->elements()[groups_idx];
+        torch::List<int64_t> stride_int, padding_int, dilation_int;
+        int64_t groups_int;
+        for (const auto& s : stride_ivalue) {
+          stride_int.emplace_back(s.toTensor()[0].item<int64_t>());
         }
-      } else {  // Legacy
-        unpacked_weight = ser_tup->elements()[0].toTensor();
-        bias = ser_tup->elements()[1].toOptional<at::Tensor>();
-        // conv only parameters
-        if (ser_tup->elements().size() > 2) {
-          auto stride_ivalue = ser_tup->elements()[stride_idx].toListRef();
-          auto padding_ivalue = ser_tup->elements()[padding_idx].toListRef();
-          auto dilation_ivalue = ser_tup->elements()[dilation_idx].toListRef();
-          auto groups_ivalue = ser_tup->elements()[groups_idx];
-
-          for (const auto& s : stride_ivalue) {
-            stride_int.emplace_back(s.toTensor()[0].item<int64_t>());
-          }
-          for (const auto& p : padding_ivalue) {
-            padding_int.emplace_back(p.toTensor()[0].item<int64_t>());
-          }
-          for (const auto& d : dilation_ivalue) {
-            dilation_int.emplace_back(d.toTensor()[0].item<int64_t>());
-          }
-          groups_int = groups_ivalue.toTensor()[0].item<int64_t>();
-          stride = stride_int;
-          padding = padding_int;
-          dilation = dilation_int;
-          groups = groups_int;
+        for (const auto& p : padding_ivalue) {
+          padding_int.emplace_back(p.toTensor()[0].item<int64_t>());
         }
+        for (const auto& d : dilation_ivalue) {
+          dilation_int.emplace_back(d.toTensor()[0].item<int64_t>());
+        }
+        groups_int = groups_ivalue.toTensor()[0].item<int64_t>();
+        stride = stride_int;
+        padding = padding_int;
+        dilation = dilation_int;
+        groups = groups_int;
       }
     } else {
       TORCH_INTERNAL_ASSERT(itr->second.isTensor());
@@ -325,7 +282,7 @@ void unpackQuantizedWeightsHelper(
     c2_bias->insertBefore(qlinear_node);
     qlinear_node->insertInput(2, c2_bias->output());
 
-    // add conv arguments: stride, padding, dilation, groups
+    // add conv arguemnts: stride, padding, dilation, groups
     if (stride.has_value() && padding.has_value() && dilation.has_value() &&
         groups.has_value()) {
       std::vector<c10::optional<torch::List<int64_t>>> conv_ints_args;

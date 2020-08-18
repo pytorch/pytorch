@@ -1,11 +1,13 @@
 #include <ATen/ATen.h>
-#include <ATen/native/TensorFactories.h>
 
 #include <ATen/native/quantized/cpu/conv_packed_params.h>
+#include <ATen/native/quantized/cpu/embedding_packed_params.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/packed_params.h>
-#include <ATen/native/quantized/cpu/serialization_versions.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
+#include <ATen/native/quantized/cpu/serialization_versions.h>
+#include <ATen/native/TensorFactories.h>
+
 #include <ATen/quantized/QTensorImpl.h>
 #include <ATen/quantized/Quantizer.h>
 
@@ -13,11 +15,10 @@
 #include <c10/core/TensorOptions.h>
 
 #include <torch/custom_class.h>
-
-#include <ATen/native/quantized/cpu/packed_params.h>
-#include <ATen/native/quantized/cpu/qnnpack_utils.h>
+#include <torch/custom_class.h>
 
 torch::class_<LinearPackedParamsBase> register_linear_params();
+torch::class_<EmbeddingPackedParamsBase> register_embedding_params();
 
 #ifdef USE_FBGEMM
 
@@ -212,54 +213,18 @@ Tensor ConvertToChannelsLast3dTensor(const Tensor& src) {
 #endif // USE_FBGEMM
 
 template <int kSpatialDim = 2>
-CAFFE2_API torch::class_<LegacyConvPackedParamsBase<kSpatialDim>> register_legacy_conv_params() {
-  TORCH_WARN("DEBUG legacy!");
-  static auto register_legacy_conv_params =
-    torch::class_<LegacyConvPackedParamsBase<kSpatialDim>>(
-        "quantized", "LegacyConv" + c10::to_string(kSpatialDim) + "dPackedParamsBase")
-    .def_pickle(
-        [](const c10::intrusive_ptr<LegacyConvPackedParamsBase<kSpatialDim>>& params)
-        -> LegacyConvSerializationType { // __getstate__
-          return serialize_legacy_conv<kSpatialDim>(params);
-        },
-        [](LegacyConvSerializationType state)
-        -> c10::intrusive_ptr<LegacyConvPackedParamsBase<kSpatialDim>> { // __setstate__
-          return deserialize_legacy_conv<kSpatialDim>(state);
-        })
-    .def("weight", [](const c10::intrusive_ptr<LegacyConvPackedParamsBase<kSpatialDim>>& self) {
-                     at::Tensor weight;
-                     c10::optional<at::Tensor> bias;
-                     std::tie(weight, bias) = self->unpack();
-                     return weight;
-                   })
-    .def("bias", [](const c10::intrusive_ptr<LegacyConvPackedParamsBase<kSpatialDim>>& self) {
-                   at::Tensor weight;
-                   c10::optional<at::Tensor> bias;
-                   std::tie(weight, bias) = self->unpack();
-                   return bias;
-                 })
-    .def("unpack", &LegacyConvPackedParamsBase<kSpatialDim>::unpack)
-    .def("stride", &LegacyConvPackedParamsBase<kSpatialDim>::stride)
-    .def("padding", &LegacyConvPackedParamsBase<kSpatialDim>::padding)
-    .def("dilation", &LegacyConvPackedParamsBase<kSpatialDim>::dilation)
-    .def("groups", &LegacyConvPackedParamsBase<kSpatialDim>::groups);
-  return register_legacy_conv_params;
-}
-
-template <int kSpatialDim = 2>
 CAFFE2_API torch::class_<ConvPackedParamsBase<kSpatialDim>> register_conv_params() {
-  TORCH_WARN("DEBUG!");
   static auto register_conv_params =
     torch::class_<ConvPackedParamsBase<kSpatialDim>>(
         "quantized", "Conv" + c10::to_string(kSpatialDim) + "dPackedParamsBase")
     .def_pickle(
         [](const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>& params)
-        -> SerializationType { // __getstate__
-          return serialize_conv<kSpatialDim>(params);
+        -> at::native::serialization::ConvPackedParamsSerializationType { // __getstate__
+          return at::native::serialization::conv_packed_params<kSpatialDim>(params);
         },
-        [](SerializationType state)
+        [](at::native::serialization::ConvPackedParamsSerializationType state)
         -> c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> { // __setstate__
-          return deserialize_conv<kSpatialDim>(state);
+          return at::native::serialization::conv_packed_params<kSpatialDim>(state);
         })
     .def("weight", [](const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>& self) {
                      at::Tensor weight;
@@ -285,10 +250,6 @@ template
 CAFFE2_API torch::class_<ConvPackedParamsBase<2>> register_conv_params<2>();
 template
 CAFFE2_API torch::class_<ConvPackedParamsBase<3>> register_conv_params<3>();
-template
-CAFFE2_API torch::class_<LegacyConvPackedParamsBase<2>> register_legacy_conv_params<2>();
-template
-CAFFE2_API torch::class_<LegacyConvPackedParamsBase<3>> register_legacy_conv_params<3>();
 
 torch::class_<LinearPackedParamsBase> register_linear_params() {
   using SerializationType = std::tuple<at::Tensor, c10::optional<at::Tensor>>;
@@ -344,12 +305,66 @@ torch::class_<LinearPackedParamsBase> register_linear_params() {
   return register_linear_params;
 }
 
+
+torch::class_<EmbeddingPackedParamsBase> register_embedding_params() {
+  // Type for __getstate__/__setstate__ serialization
+  //
+  // Element 0 is the version of the PackedParam structure
+  // Element 1 is the Tensors contained in the Param instance
+  // Element 2 is the double values (if any) contained in the Param instance
+  // Element 3 is the int values (if any) contained in the Param instance
+
+  using EmbeddingParamsSerializationType = std::tuple<
+    int64_t, // version
+    std::vector<at::Tensor>,
+    std::vector<double>,
+    std::vector<int64_t>>;
+
+  static auto register_embedding_params =
+    torch::class_<EmbeddingPackedParamsBase>(
+      "quantized", "EmbeddingPackedParamsBase")
+      .def_pickle(
+          [](const c10::intrusive_ptr<EmbeddingPackedParamsBase>& params)
+              -> EmbeddingParamsSerializationType { // __getstate__ call
+            at::Tensor weight = params->unpack();
+            std::vector<at::Tensor> tensors_to_serialize = {weight};
+            std::vector<double> doubles_to_serialize = {};
+            int64_t bit_rate = params->bit_rate();
+            int64_t version = params->version();
+            std::vector<int64_t> longs_to_serialize = {bit_rate};
+            return EmbeddingParamsSerializationType(
+              version,
+              std::move(tensors_to_serialize),
+              std::move(doubles_to_serialize),
+              std::move(longs_to_serialize));
+          },
+          [](EmbeddingParamsSerializationType state)
+              -> c10::intrusive_ptr<EmbeddingPackedParamsBase> { // __setstate__ call
+
+            std::vector<at::Tensor> tensors;
+            std::vector<double> doubles;
+            std::vector<int64_t> longs;
+            int64_t version;
+            std::tie(version, tensors, doubles, longs) = std::move(state);
+
+            TORCH_INTERNAL_ASSERT(tensors.size() == 1, "EmbeddingPackedParams: Expected weight tensor to be serialized");
+            TORCH_INTERNAL_ASSERT(longs.size() == 1, "EmbeddingPackedParams: Expected bit_rate to be serialized");
+            TORCH_CHECK(version == 1, "EmbeddingPackedParams: Currently only version 1 supported.");
+
+            at::Tensor weight = std::move(tensors[0]);
+            return PackedEmbeddingBagWeight::prepack(weight);
+          })
+      .def("bit_rate", &EmbeddingPackedParamsBase::bit_rate)
+      .def("version", &EmbeddingPackedParamsBase::version);
+
+  return register_embedding_params;
+}
+
 namespace {
-// Why does the order matter?
-static auto legacy_conv2d_params = register_legacy_conv_params<2>();
-static auto legacy_conv3d_params = register_legacy_conv_params<3>();
+
 static auto conv2d_params = register_conv_params<2>();
 static auto conv3d_params = register_conv_params<3>();
 static auto linear_params = register_linear_params();
+static auto embedding_params = register_embedding_params();
 
 } // namespace
