@@ -243,6 +243,19 @@ std::string OperatorEntry::listAllDispatchKeys() const {
   return str.str();
 }
 
+void OperatorEntry::assert_signature_is_correct_impl(const CppSignature& sig) {
+  TORCH_INTERNAL_ASSERT(!cpp_signature_.has_value() || (sig == *cpp_signature_),
+    "Tried to access operator ", name_, " with a wrong signature. Accessed with ",
+    sig.name(),
+    " but the operator was registered with ",
+    cpp_signature_->name(),
+    " (",
+    (schema_.has_value() ? schema_->debug : "unknown debug info"),
+    ") This likely happened in a call to OperatorHandle::typed<Return (Args...)>(). ",
+    "Please make sure that the function signature matches the signature in the operator registration call."
+  );
+}
+
 void OperatorEntry::reportError(DispatchKey dispatchKey) const {
   // If there is an invariant problem, report it now.
   checkInvariants();

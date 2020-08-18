@@ -154,17 +154,10 @@ public:
   void setManuallyBoxedKernel_(const c10::Dispatcher& dispatcher, KernelFunction::InternalBoxedKernelFunction* func);
 
   // Asserts that the given FuncType is correct for calling this operator in an unboxed way.
+  void assert_signature_is_correct_impl(const CppSignature& sig);
   template<class FuncType>
   void assertSignatureIsCorrect() {
-    TORCH_INTERNAL_ASSERT(!cpp_signature_.has_value() || (CppSignature::make<FuncType>() == *cpp_signature_),
-        "Tried to access operator ", name_, " with a wrong signature. Accessed with ",
-        CppSignature::make<FuncType>().name(),
-        " but the operator was registered with ",
-        cpp_signature_->name(),
-        " (",
-        (schema_.has_value() ? schema_->debug : "unknown debug info"),
-        ") This likely happened in a call to OperatorHandle::typed<Return (Args...)>(). Please make sure that the function signature matches the signature in the operator registration call."
-    );
+    assert_signature_is_correct_impl(CppSignature::make<FuncType>());
   }
 
   [[noreturn]] void reportError(DispatchKey dispatchKey) const;
