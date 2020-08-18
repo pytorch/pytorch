@@ -16,6 +16,7 @@ target_link_libraries(torchpy PRIVATE torch torch_python -Wl,-rpath,/home/whc/lo
 set(TORCHPY_TEST_SOURCES
   ${TORCHPY_DIR}/test_main.cpp
   ${TORCHPY_DIR}/test_init.cpp
+  ${TORCHPY_DIR}/example/test_threads.cpp
   ${TORCHPY_DIR}/example/test_models.cpp
 )
 add_executable(torchpy_test ${TORCHPY_TEST_SOURCES})

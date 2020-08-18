@@ -43,8 +43,8 @@ std::string hello() {
   return result;
 }
 
-// TODO decref the python thigns
-PyModule load(const std::string& filename) {
+void test_get_load() {
+  std::cout << "test_get_load()" << std::endl;
   PyObject* globals = PyDict_New();
 
   assert(PyDict_Check(globals) == true);
@@ -52,16 +52,68 @@ PyModule load(const std::string& filename) {
   assert(NULL != builtins);
   PyDict_SetItemString(globals, "__builtins__", builtins);
   FILE* fp = fopen("torchpy/loader.py", "r");
-  PyRun_File(fp, "loader.py", Py_file_input, globals, globals);
+  assert(NULL != fp);
+  PyObject* run_res =
+      PyRun_File(fp, "loader.py", Py_file_input, globals, globals);
+  Py_DECREF(run_res);
+  fclose(fp);
 
   PyObject* load = PyDict_GetItemString(globals, "load");
   assert(PyFunction_Check(load) == true);
 
-  PyObject* args = Py_BuildValue("(s)", filename.c_str());
+  PyObject* args = Py_BuildValue("(s)", "torchpy/example/simple.pt");
   PyObject* module = PyObject_CallObject(load, args);
+  if (NULL == module) {
+    PyErr_Print();
+  }
   assert(NULL != module);
   auto mod = PyModule(globals, module);
+
+  Py_DECREF(load);
+  Py_DECREF(args);
+}
+
+PyModule load(const std::string& filename) {
+  std::cout << "load()" << std::endl;
+  PyObject* globals = PyDict_New();
+
+  assert(PyDict_Check(globals) == true);
+  PyObject* builtins = PyEval_GetBuiltins();
+  assert(NULL != builtins);
+  PyDict_SetItemString(globals, "__builtins__", builtins);
+  FILE* fp = fopen("torchpy/loader.py", "r");
+  assert(NULL != fp);
+  std::cout << "runfile - loader.py" << std::endl;
+  PyObject* run_res =
+      PyRun_File(fp, "loader.py", Py_file_input, globals, globals);
+  if (NULL == run_res) {
+    PyErr_Print();
+  }
+  assert(NULL != run_res);
+  Py_DECREF(run_res);
+  fclose(fp);
+
+  std::cout << "getitem load" << std::endl;
+  PyObject* load = PyDict_GetItemString(globals, "load");
+  if (NULL == load) {
+    PyErr_Print();
+  }
+  assert(PyFunction_Check(load) == true);
+
+  PyObject* args = Py_BuildValue("(s)", filename.c_str());
+  std::cout << "callobject load" << std::endl;
+  PyObject* module = PyObject_CallObject(load, args);
+  Py_DECREF(load);
+  Py_DECREF(args);
+  assert(NULL != module);
+  std::cout << "PyModule" << std::endl;
+  auto mod = PyModule(globals, module);
   return mod;
+}
+
+PyModule::~PyModule() {
+  Py_DECREF(_module);
+  Py_DECREF(_globals);
 }
 
 at::Tensor PyModule::forward(std::vector<at::Tensor> inputs) {
@@ -78,6 +130,7 @@ at::Tensor PyModule::forward(std::vector<at::Tensor> inputs) {
       PyObject_CallMethod(_module, "forward", "(O)", py_inputs[0]);
   assert(NULL != py_output);
   at::Tensor& output = THPVariable_Unpack(py_output);
+  // Py_DECREF(py_output);
   return output;
 }
 

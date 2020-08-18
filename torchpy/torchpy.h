@@ -8,7 +8,7 @@ class PyModule {
  public:
   PyModule(PyObject* globals, PyObject* module)
       : _globals(globals), _module(module) {}
-  ~PyModule() {}
+  ~PyModule();
 
   at::Tensor forward(std::vector<at::Tensor> inputs);
 
@@ -19,6 +19,7 @@ class PyModule {
 
 void init();
 void finalize();
+void test_get_load();
 std::string hello();
 PyModule load(const std::string& filename);
 }
