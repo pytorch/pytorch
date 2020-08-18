@@ -21,9 +21,9 @@ void Int8DequantizeNNPI(
     const int64_t N,
     const float X_scale,
     const int32_t X_offset) {
-  float X_scale_fp16 = 1.0f / X_scale;
+  float X_scale_fp32 = 1.0f / X_scale;
   for (auto i = 0; i < N; ++i) {
-    out[i] = (float)(static_cast<int32_t>(in[i]) + X_offset) / X_scale_fp16;
+    out[i] = (float)(static_cast<int32_t>(in[i]) - X_offset) / X_scale_fp32;
   }
   fbgemm::RoundToFloat16(out, out, N, FLAGS_caffe2_fbgemm_fake_fp16_clamp);
 } // namespace
@@ -46,8 +46,10 @@ class Int8DequantizeNNPIOp final : public Operator<CPUContext> {
         X.t.numel(),
         X_scale,
         X_offset);
+        // UsingOneOverScale_);
     return true;
   }
+
 };
 
 } // namespace int8

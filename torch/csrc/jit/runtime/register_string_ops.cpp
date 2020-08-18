@@ -20,28 +20,6 @@ int64_t normalizeIndex(int64_t idx, int64_t list_size) {
   return idx;
 }
 
-std::string stringSlice(
-    std::string string,
-    int64_t start,
-    int64_t end,
-    int64_t step) {
-  TORCH_CHECK(step == 1, "Slicing a string only supports step=1");
-
-  const int64_t size = string.size();
-
-  // Clamp start and end to the bounds of the list
-  start = std::max(int64_t(0), normalizeIndex(start, size));
-  end = std::min(size, normalizeIndex(end, size));
-
-  if (end <= start) {
-    // Slice is empty
-    return std::string("");
-  }
-
-  std::string result(string.begin() + start, string.begin() + end);
-  return result;
-}
-
 int64_t stringFindImpl(
     std::string string,
     std::string substr,
@@ -116,7 +94,6 @@ RegisterOperators reg_str_ops({
       aliasAnalysisFromSchema())
 
     DEFINE_STRING_CHAR_MAP_OP(aten::upper, ::toupper),
-    DEFINE_STRING_CHAR_MAP_OP(aten::lower, ::tolower),
     DEFINE_STRING_CHAR_MAP_OP(aten::swapcase, ([](char c) {
                                 if (c == static_cast<char>(::toupper(c))) {
                                   return static_cast<char>(::tolower(c));
@@ -126,33 +103,6 @@ RegisterOperators reg_str_ops({
                               }))
 
 });
-
-// consecutive whitespace are regarded as a single separator,
-// the result will contain no empty strings at the start or end
-// if the string has leading or trailing whitespace.
-c10::List<std::string> splitNoneSeparator(const std::string& string) {
-  c10::List<std::string> splits;
-  // whitespaces includes tab, space and
-  // the delimiters defined in the implementation of splitlines
-  std::string whitespaces =
-      " \t\n\r\r\n\v\x0b\f\x0c\x1c\x1d\x1e\x85\u2028\u2029";
-  std::string::size_type prev_pos = 0;
-  std::string::size_type pos = 0;
-
-  while ((pos = string.find_first_of(whitespaces, pos)) != std::string::npos) {
-    auto substr = string.substr(prev_pos, pos - prev_pos);
-    // skip the whitespaces as the Python split() method
-    if (!substr.empty()) {
-      splits.emplace_back(substr);
-    }
-    pos++;
-    prev_pos = pos;
-  }
-  if (prev_pos != string.size()) {
-    splits.emplace_back(string.substr(prev_pos));
-  }
-  return splits;
-}
 
 // String Ops
 // Implementations located in torch/csrc/jit/runtime/register_string_ops.cpp
@@ -177,8 +127,6 @@ TORCH_LIBRARY_IMPL(aten, CatchAll, m) {
 
     return splits;
   });
-
-  m.impl("slice.str", TORCH_FN(stringSlice));
 
   // upper and lower require there to be at least one alpha character,
   // and ignore all other characters
@@ -504,22 +452,6 @@ TORCH_LIBRARY_IMPL(aten, CatchAll, m) {
     return string;
   });
 
-  m.impl("strip", [](std::string string, std::string chars) {
-    auto rindex = string.find_last_not_of(chars);
-    if (rindex != std::string::npos) {
-      string = string.substr(0, rindex + 1);
-    } else {
-      string = "";
-    }
-    auto lindex = string.find_first_not_of(chars);
-    if (lindex != std::string::npos) {
-      string = string.substr(lindex, string.size());
-    } else {
-      string = "";
-    }
-    return string;
-  });
-
   m.impl(
       "replace",
       [](std::string string,
@@ -569,41 +501,6 @@ TORCH_LIBRARY_IMPL(aten, CatchAll, m) {
 
     return std::make_tuple(pre_partition, separator, post_partition);
   });
-
-  m.impl(
-      "split.str",
-      [](const std::string& string,
-         c10::optional<std::string> separator,
-         int64_t max) {
-        if (!separator.has_value()) {
-          // if separator is not specified,
-          // a different splitting algorithm is applied as Python
-          return splitNoneSeparator(string);
-          ;
-        }
-        if (separator.value().empty()) {
-          throw std::runtime_error("ValueError: empty separator");
-        }
-
-        std::string::size_type prev_pos = 0;
-        std::string::size_type pos = 0;
-        c10::List<std::string> splits;
-        auto count = 0;
-
-        while ((pos = string.find(separator.value(), pos)) !=
-               std::string::npos) {
-          count++;
-          if (max >= 0 && count > max) {
-            break;
-          } else {
-            splits.emplace_back(string.substr(prev_pos, pos - prev_pos));
-          }
-          pos += separator.value().size();
-          prev_pos = pos;
-        }
-        splits.emplace_back(string.substr(prev_pos, string.size() - prev_pos));
-        return splits;
-      });
 
   m.impl("rsplit", [](std::string string, std::string separator, int64_t max) {
     std::reverse(separator.begin(), separator.end());

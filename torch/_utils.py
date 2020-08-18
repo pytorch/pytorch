@@ -1,4 +1,6 @@
 import torch
+import torch._six
+from typing import Optional
 import warnings
 from collections import defaultdict
 import sys
@@ -416,3 +418,68 @@ class ExceptionWrapper(object):
             # (https://bugs.python.org/issue2651), so we work around it.
             msg = KeyErrorMessage(msg)
         raise self.exc_type(msg)
+
+
+def _get_available_device_type():
+    if torch.cuda.is_available():
+        return "cuda"
+    # add more available device types here
+    return None
+
+
+def _get_device_attr(get_member):
+    device_type = _get_available_device_type()
+    if device_type.lower() == "cuda":
+        return get_member(torch.cuda)
+    # add more available device types here
+    return None
+
+
+def _get_current_device_index():
+    # current device index
+    return _get_device_attr(lambda m: m.current_device())
+
+
+def _get_all_device_indices():
+    # all device index
+    return _get_device_attr(lambda m: list(range(m.device_count())))
+
+
+def _get_devices_properties(device_ids):
+    # all device properties
+    return [_get_device_attr(lambda m: m.get_device_properties(i)) for i in device_ids]
+
+
+def _get_device_index(device, optional=False, allow_cpu=False) -> int:
+    r"""Gets the device index from :attr:`device`, which can be a torch.device
+    object, a Python integer, or ``None``.
+
+    If :attr:`device` is a torch.device object, returns the device index if it
+    has index. Note that for a device without a specified index,
+    i.e., ``torch.device('xxx')``, this will return the current default
+    device of that type if :attr:`optional` is ``True``. If :attr:`allow_cpu` is ``True``,
+    CPU devices will be accepted and ``-1`` will be returned in this case.
+
+    If :attr:`device` is a Python integer, it is returned as is.
+
+    If :attr:`device` is ``None``, this will return the current default
+    device of the supported runtime platform if :attr:`optional` is ``True``.
+    i.e., the current default CUDA device will be returned if CUDA runtime is supported.
+    """
+    if isinstance(device, str):
+        device = torch.device(device)
+    device_idx: Optional[int]
+    device_idx = None
+    if isinstance(device, torch.device):
+        if not allow_cpu and device.type == 'cpu':
+            raise ValueError('Expected a non cpu device, but got: {}'.format(device))
+        device_idx = -1 if device.type == 'cpu' else device.index
+    if isinstance(device, int):
+        device_idx = device
+    if device_idx is None:
+        if optional:
+            device_idx = _get_current_device_index()
+        else:
+            raise ValueError('Expected a torch.device with a specified index '
+                             'or an integer, but got:{}'.format(device))
+    return device_idx

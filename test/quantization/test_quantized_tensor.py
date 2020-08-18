@@ -12,6 +12,7 @@ import torch.testing._internal.hypothesis_utils as hu
 
 hu.assert_deadline_disabled()
 
+import itertools
 import tempfile
 
 class Foo(torch.nn.Module):
@@ -153,8 +154,9 @@ class TestQuantizedTensor(TestCase):
         numel = 10
         ch_axis = 0
         scales = torch.rand(numel)
-        zero_points = torch.randint(0, 10, size=(numel,))
-        for dtype in [torch.qint8, torch.quint8]:
+        zero_points_int = torch.randint(0, 10, size=(numel,))
+        zero_points_float = torch.randn(numel)
+        for dtype, zero_points in itertools.product([torch.qint8, torch.quint8], [zero_points_float, zero_points_int]):
             q = torch._empty_per_channel_affine_quantized(
                 [numel], scales=scales, zero_points=zero_points, axis=ch_axis, dtype=dtype)
             # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
@@ -163,13 +165,14 @@ class TestQuantizedTensor(TestCase):
             self.assertEqual(ch_axis, q.q_per_channel_axis())
 
         # create Tensor from uint8_t Tensor, scales and zero_points
-        int_tensor = torch.randint(0, 100, size=(numel,), dtype=torch.uint8)
-        q = torch._make_per_channel_quantized_tensor(int_tensor, scales, zero_points, ch_axis)
-        self.assertEqual(int_tensor, q.int_repr())
-        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        self.assertEqualIgnoreType(scales, q.q_per_channel_scales())
-        self.assertEqual(zero_points, q.q_per_channel_zero_points())
-        self.assertEqual(ch_axis, q.q_per_channel_axis())
+        for zero_points in [zero_points_float, zero_points_int]:
+            int_tensor = torch.randint(0, 100, size=(numel,), dtype=torch.uint8)
+            q = torch._make_per_channel_quantized_tensor(int_tensor, scales, zero_points, ch_axis)
+            self.assertEqual(int_tensor, q.int_repr())
+            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+            self.assertEqualIgnoreType(scales, q.q_per_channel_scales())
+            self.assertEqual(zero_points, q.q_per_channel_zero_points())
+            self.assertEqual(ch_axis, q.q_per_channel_axis())
 
     def test_qtensor_creation(self):
         scale = 0.5
@@ -231,6 +234,29 @@ class TestQuantizedTensor(TestCase):
         rqr = qr.dequantize()
         self.assertTrue(np.allclose(qr.int_repr(), quantize_c(r, scales, zero_points)))
         self.assertTrue(np.allclose(r.numpy(), rqr.numpy(), atol=2 / np.min(scales.numpy())))
+
+    def test_quantize_per_channel_float_qparams(self):
+        r = torch.rand(3, 2, dtype=torch.float) * 4
+        scales = torch.tensor([0.2, 0.03], dtype=torch.float)
+        zero_points = torch.tensor([0.1, 0.2], dtype=torch.float)
+        axis = 1
+
+        # Reference quantize function with FP zero_point.
+        def quantize_ref(data, scales, zero_points):
+            res = torch.empty((3, 2))
+            quant_min, quant_max = 0, 255
+            for i in range(3):
+                for j in range(2):
+                    inv_scale = 1.0 / scales[j]
+                    res[i][j] = np.clip(np.round(data[i][j] * inv_scale + zero_points[j]), quant_min, quant_max)
+            return res
+
+        qr = torch.quantize_per_channel(r, scales, zero_points, axis, torch.quint8)
+        dequant_tensor = qr.dequantize()
+        ref = quantize_ref(r, scales, zero_points)
+        self.assertTrue(np.allclose(qr.int_repr(), ref))
+        self.assertTrue(np.allclose(r.numpy(), dequant_tensor.numpy(), atol=1))
+
 
     def test_qtensor_permute(self):
         scale = 0.02
@@ -572,3 +598,25 @@ class TestQuantizedTensor(TestCase):
             # dequantized values must be the same
             r_cpu, r_cuda = qr_cpu.dequantize().numpy(), qr_cuda.dequantize().cpu().numpy()
             np.testing.assert_almost_equal(r_cuda, r_cpu, decimal=5)
+
+    @unittest.skipIf(not torch.cuda.is_available() or TEST_WITH_ROCM, 'CUDA is not available')
+    def test_cuda_quantization_does_not_pin_memory(self):
+        # Context - https://github.com/pytorch/pytorch/issues/41115
+        x = torch.randn(3)
+        self.assertEqual(x.is_pinned(), False)
+
+        q_int = torch.randint(0, 100, [1, 2, 3], device="cuda", dtype=torch.uint8)
+        q = torch._make_per_tensor_quantized_tensor(q_int, scale=0.1, zero_point=0)
+
+        x = torch.randn(3)
+        self.assertEqual(x.is_pinned(), False)
+
+
+    def test_fp16_saturate_op(self):
+        x = torch.ones(5, 5, dtype=torch.float32) * 65532
+        x[0] = torch.ones(5) * -65532
+        # range of fp16 value is [-65504, + 65504]
+        ref = torch.ones(5, 5) * 65504
+        ref[0] = torch.ones(5) * -65504
+        y = torch._saturate_weight_to_fp16(x)
+        self.assertEqual(y, ref)

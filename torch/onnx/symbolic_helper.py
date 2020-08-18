@@ -185,6 +185,10 @@ def _onnx_opset_unsupported(op_name, current_opset, supported_opset):
     raise RuntimeError('Unsupported: ONNX export of {} in '
                        'opset {}. Please try opset version {}.'.format(op_name, current_opset, supported_opset))
 
+def _onnx_opset_unsupported_detailed(op_name, current_opset, supported_opset, reason):
+    raise RuntimeError('Unsupported: ONNX export of {} in '
+                       'opset {}. {}. Please try opset version {}.'.format(op_name, current_opset, reason, supported_opset))
+
 
 def _black_list_in_opset(name):
     def symbolic_fn(*args, **kwargs):
@@ -436,6 +440,25 @@ def assert_training_mode(op_mode, op_name):
                       " mode, but operator " + op_name + " is set to " +
                       op_mode + " mode. The model will be exported in " +
                       training_mode + ", as specified by the export mode.")
+
+def _flatten_helper(g, input, start_dim, end_dim, dim):
+    input_size = g.op("Shape", input)
+    slice1 = _slice_helper(g, input_size, axes=[0], starts=[0], ends=[start_dim])
+    slices = [slice1, g.op("Constant", value_t=torch.tensor([-1], dtype=torch.long))]
+    if end_dim < dim - 1:
+        slice3 = _slice_helper(g, input_size, axes=[0], starts=[end_dim + 1], ends=[dim])
+        slices = [slice1, g.op("Constant", value_t=torch.tensor([-1], dtype=torch.long)), slice3]
+
+    final_shape = g.op("Concat", *slices, axis_i=0)
+    from torch.onnx.symbolic_opset9 import _reshape_from_tensor
+    return _reshape_from_tensor(g, input, final_shape)
+
+def _is_split_static(split_size_or_sizes, _outputs):
+    if _outputs is None:
+        return False
+    if _is_value(split_size_or_sizes) and split_size_or_sizes.node().kind() != 'onnx::Constant':
+        return False
+    return True
 
 # ---------------------------------------------------------------------
 # ONNX operator version

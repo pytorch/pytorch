@@ -37,19 +37,33 @@ inline void KernelFunction::callBoxed(const OperatorHandle& opHandle, Stack* sta
 }
 
 template<class Return, class... Args>
+inline Return callUnboxedKernelFunction(void* unboxed_kernel_func, OperatorKernel* functor, Args&&... args) {
+    using ActualSignature = Return (OperatorKernel*, Args...);
+    ActualSignature* func = reinterpret_cast<ActualSignature*>(unboxed_kernel_func);
+    return (*func)(functor, std::forward<Args>(args)...);
+}
+
+template<class Return, class... Args>
 inline Return KernelFunction::call(const OperatorHandle& opHandle, Args... args) const {
     // note: Args above is intentionally not Args&&. We don't want perfect
     // forwarding, which would require Args to be deduced, but instead we
     // want callers to explicitly specify the Args.
 
     if (C10_LIKELY(unboxed_kernel_func_ != nullptr)) {
-        using ActualSignature = Return (OperatorKernel*, Args...);
-        ActualSignature* func = reinterpret_cast<ActualSignature*>(unboxed_kernel_func_);
-        return (*func)(functor_.get(), std::forward<Args>(args)...);
+        return callUnboxedKernelFunction<Return, Args...>(unboxed_kernel_func_, functor_.get(), std::forward<Args>(args)...);
     }
 
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(boxed_kernel_func_ != nullptr, "Tried to call KernelFunction::call() on an uninitialized KernelFunction.");
-    return impl::boxAndCallBoxedFunc<Return, Args...>(boxed_kernel_func_, functor_.get(), opHandle, std::forward<Args>(args)...);
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+        boxed_kernel_func_ != nullptr,
+        "Tried to call KernelFunction::call() on an uninitialized KernelFunction."
+    );
+
+    return impl::BoxedKernelWrapper<Return(Args...)>::call(
+        boxed_kernel_func_,
+        functor_.get(),
+        opHandle,
+        std::forward<Args>(args)...
+    );
 }
 
 template<KernelFunction::BoxedKernelFunction* func>

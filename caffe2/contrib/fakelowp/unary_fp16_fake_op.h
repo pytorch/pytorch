@@ -62,20 +62,4 @@ struct TanhFakeIdealFp16Functor {
   }
 };
 
-struct LogitFakeIdealFp16Functor {
-  template <typename T>
-  bool operator()(const int N, const T* X, T* Y, CPUContext* /* unused */)
-      const {
-    std::vector<float> X_fp16(N);
-    fbgemm::RoundToFloat16(
-        X, X_fp16.data(), N, FLAGS_caffe2_fbgemm_fake_fp16_clamp);
-    EigenVectorMap<T> X_vec(X_fp16.data(), N);
-    EigenVectorMap<T> Y_vec(Y, N);
-    Y_vec = (X_vec.array() / (T(1) - X_vec.array())).log();
-    fbgemm::RoundToFloat16(
-        Y_vec.data(), Y, N, FLAGS_caffe2_fbgemm_fake_fp16_clamp);
-    return true;
-  }
-};
-
 } // namespace caffe2

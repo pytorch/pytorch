@@ -309,6 +309,8 @@ class Hardsigmoid(Module):
             x / 6 + 1 / 2 & \text{otherwise}
         \end{cases}
 
+    Args:
+        inplace: can optionally do the operation in-place. Default: ``False``
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
@@ -321,9 +323,16 @@ class Hardsigmoid(Module):
         >>> input = torch.randn(2)
         >>> output = m(input)
     """
+    __constants__ = ['inplace']
+
+    inplace: bool
+
+    def __init__(self, inplace : bool = False) -> None:
+        super(Hardsigmoid, self).__init__()
+        self.inplace = inplace
 
     def forward(self, input: Tensor) -> Tensor:
-        return F.hardsigmoid(input)
+        return F.hardsigmoid(input, self.inplace)
 
 
 class Tanh(Module):
@@ -349,6 +358,44 @@ class Tanh(Module):
     def forward(self, input: Tensor) -> Tensor:
         return torch.tanh(input)
 
+class SiLU(Module):
+    r"""Applies the silu function, element-wise.
+
+    .. math::
+        \text{silu}(x) = x * \sigma(x), \text{where } \sigma(x) \text{ is the logistic sigmoid.}
+
+    .. note::
+        See `Gaussian Error Linear Units (GELUs) <https://arxiv.org/abs/1606.08415>`_ 
+        where the SiLU (Sigmoid Linear Unit) was originally coined, and see 
+        `Sigmoid-Weighted Linear Units for Neural Network Function Approximation 
+        in Reinforcement Learning <https://arxiv.org/abs/1702.03118>`_ and `Swish: 
+        a Self-Gated Activation Function <https://arxiv.org/abs/1710.05941v1>`_ 
+        where the SiLU was experimented with later.
+
+    Shape:
+        - Input: :math:`(N, *)` where `*` means, any number of additional
+          dimensions
+        - Output: :math:`(N, *)`, same shape as the input
+
+    Examples::
+
+        >>> m = nn.SiLU()
+        >>> input = torch.randn(2)
+        >>> output = m(input)
+    """
+    __constants__ = ['inplace']
+    inplace: bool
+
+    def __init__(self, inplace: bool = False):
+        super(SiLU, self).__init__()
+        self.inplace = inplace
+
+    def forward(self, input: Tensor) -> Tensor:
+        return F.silu(input, inplace=self.inplace)
+
+    def extra_repr(self) -> str:
+        inplace_str = 'inplace=True' if self.inplace else ''
+        return inplace_str
 
 class Hardswish(Module):
     r"""Applies the hardswish function, element-wise, as described in the paper:
@@ -361,6 +408,9 @@ class Hardswish(Module):
             x & \text{if~} x \ge +3, \\
             x \cdot (x + 3) /6 & \text{otherwise}
         \end{cases}
+
+    Args:
+        inplace: can optionally do the operation in-place. Default: ``False``
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
@@ -376,9 +426,16 @@ class Hardswish(Module):
     .. _`Searching for MobileNetV3`:
         https://arxiv.org/abs/1905.02244
     """
+    __constants__ = ['inplace']
+
+    inplace: bool
+
+    def __init__(self, inplace : bool = False) -> None:
+        super(Hardswish, self).__init__()
+        self.inplace = inplace
 
     def forward(self, input: Tensor) -> Tensor:
-        return F.hardswish(input)
+        return F.hardswish(input, self.inplace)
 
 
 class ELU(Module):

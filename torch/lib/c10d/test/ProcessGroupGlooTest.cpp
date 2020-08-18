@@ -18,6 +18,9 @@
 
 using namespace c10d::test;
 
+constexpr auto kSendDelay = std::chrono::milliseconds(100);
+constexpr auto kWaitTimeout = std::chrono::milliseconds(1);
+
 class SignalTest {
  public:
   SignalTest(const std::string& path) : path_(path) {}
@@ -90,11 +93,30 @@ std::shared_ptr<::c10d::ProcessGroup::Work> testSignal(
   return test.run(0, 2);
 }
 
+class ProcessGroupGlooDelayed : public ::c10d::ProcessGroupGloo {
+ public:
+  ProcessGroupGlooDelayed(
+      const std::shared_ptr<::c10d::Store>& store,
+      int rank,
+      int size,
+      Options options)
+      : ProcessGroupGloo(store, rank, size, options) {}
+
+  std::shared_ptr<::c10d::ProcessGroup::Work> send(
+      std::vector<at::Tensor>& tensors,
+      int dstRank,
+      int tag) override {
+    std::this_thread::sleep_for(kSendDelay);
+    return ::c10d::ProcessGroupGloo::send(tensors, dstRank, tag);
+  }
+};
+
 class CollectiveTest {
  public:
   static std::vector<CollectiveTest> initialize(
       const std::string& path,
-      int num) {
+      int num,
+      bool delayed = false) {
     std::vector<CollectiveTest> tests;
     for (auto i = 0; i < num; i++) {
       tests.push_back(CollectiveTest(path));
@@ -102,8 +124,8 @@ class CollectiveTest {
 
     std::vector<std::thread> threads;
     for (auto i = 0; i < num; i++) {
-      threads.push_back(
-          std::thread([i, &tests] { tests[i].start(i, tests.size()); }));
+      threads.push_back(std::thread(
+          [i, &tests, delayed] { tests[i].start(i, tests.size(), delayed); }));
     }
     for (auto& thread : threads) {
       thread.join();
@@ -123,7 +145,7 @@ class CollectiveTest {
     return *pg_;
   }
 
-  void start(int rank, int size) {
+  void start(int rank, int size, bool delayed) {
     auto store = std::make_shared<::c10d::FileStore>(path_, size);
 
     // Set a timeout that is small enough to make this test run fast, but also
@@ -133,8 +155,13 @@ class CollectiveTest {
     options.devices.push_back(
         ::c10d::ProcessGroupGloo::createDeviceForHostname("127.0.0.1"));
 
-    pg_ = std::unique_ptr<::c10d::ProcessGroupGloo>(
-        new ::c10d::ProcessGroupGloo(store, rank, size, options));
+    if (!delayed) {
+      pg_ = std::unique_ptr<::c10d::ProcessGroupGloo>(
+          new ::c10d::ProcessGroupGloo(store, rank, size, options));
+    } else {
+      pg_ = std::unique_ptr<ProcessGroupGlooDelayed>(
+          new ProcessGroupGlooDelayed(store, rank, size, options));
+    }
   }
 
  protected:
@@ -197,7 +224,7 @@ void testBroadcast(const std::string& path, const at::DeviceType b) {
 
   std::vector<std::vector<at::Tensor>> inputs(size);
 
-  // Try every permutation of root rank and root tensoro
+  // Try every permutation of root rank and root tensor
   for (auto i = 0; i < size; i++) {
     for (auto j = 0; j < stride; j++) {
       // Initialize inputs
@@ -244,6 +271,74 @@ void testBroadcast(const std::string& path, const at::DeviceType b) {
   }
 }
 
+void testAlltoall(const std::string& path, const at::DeviceType b) {
+  const auto size = 4;
+  auto tests = CollectiveTest::initialize(path, size);
+
+  // Generate inputs
+  std::vector<at::Tensor> inputs(size);
+  std::vector<std::vector<int32_t>> blobs = {
+      {0, 1, 2, 3, 4, 5},
+      {10, 11, 12, 13, 14, 15, 16, 17, 18},
+      {20, 21, 22, 23, 24},
+      {30, 31, 32, 33, 34, 35, 36},
+  };
+  for (auto rank = 0; rank < size; rank++) {
+    const std::vector<int32_t>& blob = blobs[rank];
+    inputs[rank] = at::from_blob((int32_t*)(blob.data()), blob.size()).to(b);
+  }
+
+  // Allocate outputs
+  std::vector<at::Tensor> outputs(size);
+  std::vector<int> outputLengths = {9, 7, 6, 5};
+  for (auto rank = 0; rank < size; rank++) {
+    outputs[rank] =
+        at::empty(outputLengths[rank], c10::TensorOptions(at::kInt).device(b));
+  }
+
+  // Generate splits
+  std::vector<std::vector<int64_t>> inputSplits = {
+      {2, 2, 1, 1},
+      {3, 2, 2, 2},
+      {2, 1, 1, 1},
+      {2, 2, 2, 1},
+  };
+  std::vector<std::vector<int64_t>> outputSplits = {
+      {2, 3, 2, 2},
+      {2, 2, 1, 2},
+      {1, 2, 1, 2},
+      {1, 2, 1, 1},
+  };
+
+  // Kick off work
+  std::vector<std::shared_ptr<::c10d::ProcessGroup::Work>> work(size);
+  for (auto rank = 0; rank < size; rank++) {
+    work[rank] = tests[rank].getProcessGroup().alltoall_base(
+        outputs[rank], inputs[rank], outputSplits[rank], inputSplits[rank]);
+  }
+
+  // Wait for work to complete
+  for (auto i = 0; i < size; i++) {
+    work[i]->wait();
+  }
+
+  // Verify outputs
+  std::vector<std::vector<int32_t>> expected = {
+      {0, 1, 10, 11, 12, 20, 21, 30, 31},
+      {2, 3, 13, 14, 22, 32, 33},
+      {4, 15, 16, 23, 34, 35},
+      {5, 17, 18, 24, 36},
+  };
+  for (auto rank = 0; rank < size; rank++) {
+    at::Tensor tensor = outputs[rank].cpu();
+    EXPECT_EQ(tensor.numel(), expected[rank].size());
+    auto data = tensor.data_ptr<int32_t>();
+    for (auto j = 0; j < tensor.numel(); j++) {
+      EXPECT_EQ(data[j], expected[rank][j]);
+    }
+  }
+}
+
 void testBarrier(const std::string& path) {
   const auto size = 2;
   auto tests = CollectiveTest::initialize(path, size);
@@ -258,6 +353,22 @@ void testBarrier(const std::string& path) {
   for (auto i = 0; i < size; i++) {
     work[i]->wait();
   }
+}
+
+void testWaitDelay(const std::string& path) {
+  const auto size = 2;
+  auto tests = CollectiveTest::initialize(path, size, /* delay */ true);
+
+  constexpr uint64_t tag = 0x1337;
+  // test that waiting for work to be sent can be aborted successfully.
+  auto selfRank = 0;
+  auto dstRank = 1;
+  std::vector<at::Tensor> tensors = {
+      at::ones({16, 16}),
+  };
+  auto& pg = tests[selfRank].getProcessGroup();
+  auto sendWork = pg.send(tensors, dstRank, tag);
+  EXPECT_THROW(sendWork->wait(kWaitTimeout), std::exception);
 }
 
 void testSend(const std::string& path) {
@@ -389,6 +500,13 @@ TEST(ProcessGroupGlooTest, testBroadcastCPU) {
   }
 }
 
+TEST(ProcessGroupGlooTest, testAllToAllCPU) {
+  {
+    TemporaryFile file;
+    testAlltoall(file.path, at::DeviceType::CPU);
+  }
+}
+
 TEST(ProcessGroupGlooTest, testBarrier) {
   {
     TemporaryFile file;
@@ -410,6 +528,13 @@ TEST(ProcessGroupGlooTest, testRecv) {
   }
 }
 
+TEST(ProcessGroupGlooTest, testWaitDelay) {
+  {
+    TemporaryFile file;
+    testWaitDelay(file.path);
+  }
+}
+
 #ifdef USE_CUDA
 // CUDA-only tests
 TEST(ProcessGroupGlooTest, testAllReduceCUDA) {
@@ -423,9 +548,18 @@ TEST(ProcessGroupGlooTest, testAllReduceCUDA) {
 
 TEST(ProcessGroupGlooTest, testBroadcastCUDA) {
   {
-    if (torch::cuda::is_available()) {
+    if (torch::cuda::device_count() > 1) {
       TemporaryFile file;
       testBroadcast(file.path, at::DeviceType::CUDA);
+    }
+  }
+}
+
+TEST(ProcessGroupGlooTest, testAlltoallCUDA) {
+  {
+    if (torch::cuda::is_available()) {
+      TemporaryFile file;
+      testAlltoall(file.path, at::DeviceType::CUDA);
     }
   }
 }

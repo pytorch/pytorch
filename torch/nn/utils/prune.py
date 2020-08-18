@@ -233,7 +233,8 @@ class BasePruningMethod(ABC):
         weight = self.apply_mask(module)  # masked weights
 
         # delete and reset
-        delattr(module, self._tensor_name)
+        if hasattr(module, self._tensor_name):
+            delattr(module, self._tensor_name)
         orig = module._parameters[self._tensor_name + "_orig"]
         orig.data = weight.data
         del module._parameters[self._tensor_name + "_orig"]
@@ -301,13 +302,14 @@ class PruningContainer(BasePruningMethod):
         that were not zeroed out by the ``default_mask``.
         Which portions of the tensor ``t`` the new mask will be calculated from
         depends on the ``PRUNING_TYPE`` (handled by the type handler):
-            * for 'unstructured', the mask will be computed from the raveled
-            list of nonmasked entries;
 
-            * for 'structured', the mask will be computed from the nonmasked
-            channels in the tensor;
+        * for 'unstructured', the mask will be computed from the raveled
+          list of nonmasked entries;
 
-            * for 'global', the mask will be computed across all entries.
+        * for 'structured', the mask will be computed from the nonmasked
+          channels in the tensor;
+
+        * for 'global', the mask will be computed across all entries.
 
         Args:
             t (torch.Tensor): tensor representing the parameter to prune

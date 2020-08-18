@@ -40,6 +40,7 @@ static inline T pooling_output_shape_pad_lr(
 template<typename T>
 static inline T pooling_output_shape(
       T inputSize, T kernelSize, T pad, T stride, T dilation, bool ceil_mode) {
+    TORCH_CHECK(stride != 0, "stride should not be zero");
     return pooling_output_shape_pad_lr(
         inputSize, kernelSize, pad, pad, stride, dilation, ceil_mode);
 }
