@@ -93,6 +93,10 @@ class ProcessGroupNCCL : public ProcessGroup {
     // It actually returns a FutureNCCL object which is a sub class Future.
     c10::intrusive_ptr<c10::ivalue::Future> getFuture() override;
 
+    // Checks for completion of the WorkNCCL object, and if complete, handles
+    // any caught errors or exceptions. Returns true if the work is completed.
+    bool isCompletedAndThrowException();
+
     // Helper function that sets an exception_ptr on the WorkNCCL object.
     void setException(std::exception_ptr exception_ptr);
 
