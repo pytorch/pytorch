@@ -24,6 +24,15 @@ target_include_directories(torchpy_test PRIVATE ${TORCHPY_DIR})
 target_link_libraries(torchpy_test PRIVATE torchpy torch -Wl,-rpath,/home/whc/local/pytorch-env/lib/ ${PYTHON_LIBRARIES})
 target_link_libraries(torchpy_test PUBLIC gtest)
 
+# Just a debug helper
+set(PYBIND_TEST_SOURCES
+  ${TORCHPY_DIR}/test_pybind.cpp
+)
+add_executable(pybind_test ${PYBIND_TEST_SOURCES})
+target_include_directories(pybind_test PRIVATE ${TORCHPY_DIR})
+target_link_libraries(pybind_test PRIVATE torchpy torch torch_python -Wl,-rpath,/home/whc/local/pytorch-env/lib/ ${PYTHON_LIBRARIES})
+target_link_libraries(pybind_test PUBLIC gtest)
+
 set(TORCHPY_THREADS_SOURCES
   ${TORCHPY_DIR}/threads_main.cpp
 )
