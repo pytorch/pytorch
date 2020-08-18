@@ -1,47 +1,57 @@
 #include <gtest/gtest.h>
+#include <pybind11/embed.h>
+#include <pybind11/pybind11.h>
+#include <torch/csrc/jit/python/pybind_utils.h>
+#include <torch/python.h>
 #include <torch/script.h>
 #include <torch/torch.h>
 #include <torchpy.h>
 
-void compare_torchpy_jit(
-    const char* model_filename,
-    std::vector<at::Tensor> inputs) {
+void compare_torchpy_jit(const char* model_filename, at::Tensor input) {
   // Test
   auto model = torchpy::load(model_filename);
-  at::Tensor output = model.forward(inputs);
+  at::Tensor output = model.forward(input);
 
   // Reference
   auto ref_model = torch::jit::load(model_filename);
   std::vector<torch::jit::IValue> ref_inputs;
-  for (at::Tensor& input : inputs) {
-    ref_inputs.push_back(torch::jit::IValue(input));
-  }
+  ref_inputs.push_back(torch::jit::IValue(input));
   at::Tensor ref_output = ref_model.forward(ref_inputs).toTensor();
 
   ASSERT_TRUE(ref_output.equal(output));
 }
 
+TEST(TorchpyTest, SimpleTest) {
+  at::Tensor input = torch::ones(at::IntArrayRef({10, 20}));
+  torchpy::init();
+  {
+    auto model = torchpy::load("torchpy/example/simple.pt");
+    at::Tensor output = model.forward(input);
+  }
+  torchpy::finalize();
+}
+
 TEST(TorchpyTest, SimpleModel) {
   torchpy::init();
-
-  compare_torchpy_jit(
-      "torchpy/example/simple.pt", {torch::ones(at::IntArrayRef({10, 20}))});
-
+  {
+    compare_torchpy_jit(
+        "torchpy/example/simple.pt", torch::ones(at::IntArrayRef({10, 20})));
+  }
   torchpy::finalize();
   torchpy::init();
-
-  compare_torchpy_jit(
-      "torchpy/example/simple.pt", {torch::ones(at::IntArrayRef({10, 20}))});
-
+  {
+    compare_torchpy_jit(
+        "torchpy/example/simple.pt", torch::ones(at::IntArrayRef({10, 20})));
+  }
   torchpy::finalize();
 }
 
 TEST(TorchpyTest, ResNet) {
   torchpy::init();
-
-  compare_torchpy_jit(
-      "torchpy/example/resnet.pt",
-      {torch::ones(at::IntArrayRef({1, 3, 224, 224}))});
-
+  {
+    compare_torchpy_jit(
+        "torchpy/example/resnet.pt",
+        torch::ones(at::IntArrayRef({1, 3, 224, 224})));
+  }
   torchpy::finalize();
 }

@@ -1,24 +1,39 @@
 #pragma once
 #include <ATen/ATen.h>
+#include <pybind11/pybind11.h>
 #include <iostream>
 #include <vector>
+namespace py = pybind11;
+
+// TODO this should come from cmake
+#define DEBUG 1
+
+#if (DEBUG == 1)
+#define PYOBJ_ASSERT(obj) \
+  if (NULL == obj) {      \
+    PyErr_Print();        \
+  }                       \
+  assert(NULL != obj);
+#elif (DEBUG == 0)
+#define PYOBJ_ASSERT(obj) assert(NULL != obj);
+#endif
+
 namespace torchpy {
 
+// TODO fix symbol visibility issue
+// https://stackoverflow.com/questions/2828738/c-warning-declared-with-greater-visibility-than-the-type-of-its-field
 class PyModule {
  public:
-  PyModule(PyObject* globals, PyObject* module);
+  PyModule(py::object model);
   ~PyModule();
 
-  at::Tensor forward(std::vector<at::Tensor> inputs);
+  at::Tensor forward(at::Tensor input);
 
  private:
-  PyObject* _globals;
-  PyObject* _module;
+  py::object _model;
 };
 
 void init();
 void finalize();
-void test_get_load();
-std::string hello();
-PyModule load(const std::string& filename);
+const PyModule load(const char* filename);
 }
