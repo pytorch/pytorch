@@ -23,6 +23,15 @@ from torch.quantization.default_mappings import (
     DEFAULT_QCONFIG_PROPAGATE_WHITE_LIST,
     DEFAULT_QAT_MODULE_MAPPING,
 )
+# symbolic trace
+from torch.fx import symbolic_trace
+
+# graph mode quantization based on fx
+from torch.quantization._quantize_fx import (
+    Quantizer,
+    QuantType,
+    fuse,
+)
 
 import unittest
 from torch.testing import FileCheck
@@ -372,31 +381,38 @@ class QuantizationTestCase(TestCase):
             ' and call module are supported right now'
         modules = dict(graph_module.root.named_modules())
         for node in graph_module.graph.nodes:
+            print('node:', node.op, ' target:', node.target)
+            if node.op == 'call_module':
+                print('type:', type(modules[node.target]))
             if node.op == 'call_function' and node.op == target_node[0] and node.target == target_node[1]:
                 return
             elif node.op == 'call_module' and node.op == target_node[0] and type(modules[node.target]) == target_node[1]:
                 return
 
-        assert False, 'node:' + str(node) + ' not found in the graph module'
+        assert False, 'node:' + str(target_node) + ' not found in the graph module'
 
-    def checkGraphModeFxOp(self, model, inputs, quantized_op):
+    def checkGraphModeFxOp(self, model, inputs, quantized_node, quant_type=QuantType.STATIC):
         """ Quantizes model with graph mode quantization on fx and check if the
-        quantized model contains the quantized_op
+        quantized model contains the quantized_node
 
         Args:
             model: floating point torch.nn.Module
             inputs: one positional sample input arguments for model
-            quantized_op: a tuple of 2 elements, first element is
+            quantized_node: a tuple of 2 elements, first element is
                 the op type for GraphModule node, second element
                 is the target function for call_function and
                 type of the module for call_module
         """
+        if quant_type == QuantType.QAT:
+            model.train()
+        else:
+            model.eval()
         graph = symbolic_trace(model)
         graph = fuse(graph)
 
         quantizer = Quantizer()
         qconfig_dict = {'': get_default_qconfig(torch.backends.quantized.engine)}
-        if is_dynamic:
+        if quant_type == QuantType.DYNAMIC:
             prepared = quantizer.prepare_dynamic(graph, qconfig_dict)
         else:
             prepared = quantizer.prepare(graph, qconfig_dict)

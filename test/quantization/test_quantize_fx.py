@@ -7,11 +7,14 @@ from torch.fx import symbolic_trace
 # graph mode quantization based on fx
 from torch.quantization._quantize_fx import (
     Quantizer,
+    QuantType,
     fuse,
 )
 
 import torch.nn.quantized as nnq
-import torch.nn.intrinsic.quantized as nni
+import torch.nn.quantized.dynamic as nnqd
+import torch.nn.qat as nnqat
+import torch.nn.intrinsic.quantized as nniq
 
 # eager mode quantization
 from torch.quantization import default_qconfig
@@ -20,6 +23,8 @@ from torch.quantization import default_qconfig
 from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
 )
+
+import itertools
 
 class TestQuantizeFx(QuantizationTestCase):
     """ Unit tests for functionalities
@@ -148,14 +153,29 @@ class TestQuantizeFxOps(QuantizationTestCase):
             def forward(self, x):
                 return self.relu(F.linear(x, self.w, self.b))
 
-        data = [[torch.rand((1, 30), dtype=torch.float)]]
-        for model, quantized_op in [
-                (ModuleLinear(has_relu=False), ('call_module', nnq.Linear))
-                (FuncLinear(has_relu=False), ('call_function', torch.ops.quantized.linear))]:
-            self.checkGraphModeFxOp(model, data, quantized_op)
+        data = [torch.rand((1, 30), dtype=torch.float)]
+        options = itertools.product([(ModuleLinear(has_relu=False), True), (FuncLinear(has_relu=False), False)], [QuantType.DYNAMIC, QuantType.STATIC, QuantType.QAT])
+        quantized_ops = {
+            # is_module
+            True: {
+                # quant_type:
+                QuantType.DYNAMIC: ('call_module', nnqd.Linear),
+                QuantType.STATIC: ('call_module', nnq.Linear),
+                # note that we are checking the final result
+                QuantType.QAT: ('call_module', nnq.Linear),
+            },
+            False: {
+                # quant_type:
+                QuantType.DYNAMIC: ('call_function', torch.ops.quantized.linear_dynamic),
+                QuantType.STATIC: ('call_function', torch.ops.quantized.linear),
+                QuantType.QAT: ('call_function', torch.ops.quantized.linear),
+            }
+        }
+        for (model, is_module), quant_type in options:
+            self.checkGraphModeFxOp(model, data, quantized_ops[is_module][quant_type], quant_type=quant_type)
 
-        for f_relu in [True, False]:
+        for f_relu, quant_type in itertools.product([True, False], [QuantType.STATIC, QuantType.QAT]):
             for model in [
-                    (ModuleLinear(has_relu=True, f_relu=f_relu), ('call_module', nni.LinearRelu))]:
+                    (ModuleLinear(has_relu=True, f_relu=f_relu), ('call_module', nniq.LinearRelu))]:
                 # TODO: (FuncLinear(has_relu=True, f_relu=f_relu), ('call_function', torch.ops.quantized.linear_relu))]:
-                self.checkGraphModeFxOp(model, data, quantized_op)
+                self.checkGraphModeFxOp(model, data, quantized_op, quant_type=quant_type)
