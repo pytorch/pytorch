@@ -655,6 +655,8 @@ def method_tests():
          NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
         ('matrix_power', lambda: random_fullrank_matrix_distinct_singular_value(S, S), [-2], "n=-2", (),
          NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
+        ('matrix_exp', (S, S), NO_ARGS, "single_matrix"),
+        ('matrix_exp', (S, S, S), NO_ARGS, "batch_of_matrices"),
         ('mvlgamma', torch.empty(S,).uniform_(0.5, 1), [1], "p=1"),
         ('mvlgamma', torch.empty(S,).uniform_(1, 2), [2], "p=2"),
         ('mvlgamma', torch.empty(S, S).uniform_(1.5, 3), [3], "p=3"),
