@@ -141,11 +141,11 @@ void transformer_encoder_layer_test_helper(bool is_cuda) {
   ASSERT_TRUE(torch::allclose(result, ref_output, 1e-7, 1e-5, /*equal_nan=*/true));
 }
 
-TEST_F(TransformerTest, TestTransformerEncoderLayer) {
+TEST_F(TransformerTest, TransformerEncoderLayer) {
   transformer_encoder_layer_test_helper(false);
 }
 
-TEST_F(TransformerTest, TestTransformerEncoderLayer_CUDA) {
+TEST_F(TransformerTest, TransformerEncoderLayer_CUDA) {
   transformer_encoder_layer_test_helper(true);
 }
 

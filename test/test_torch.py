@@ -16732,7 +16732,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                     self.assertEqual(res1, res2)
 
     @onlyCPU
-    @dtypes(torch.float, torch.double)
+    @dtypes(*(torch.testing.get_all_complex_dtypes() + [torch.float, torch.double]))
     def test_dot(self, device, dtype):
         v1 = torch.randn(100, dtype=dtype, device=device)
         v2 = torch.randn(100, dtype=dtype, device=device)
@@ -16824,22 +16824,35 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                          torch.tensor(expectedOutput, dtype=dtype, device=device),
                          atol=precision_4dps, rtol=0)
 
+    @skipIfNoSciPy
     @dtypes(torch.float, torch.double)
     def test_silu(self, device, dtype):
-        inputValues = [-1000, -1, 0, 0.5, 1, 2, 1000]
-        expectedOutput = [0.0000, -0.2689, 0, 0.3112, 0.7312, 1.7616, 1000]
-        precision_4dps = 0.0002
+        input_np = np.random.randn(5, 8)
+        special_input = [[-1000, -1, -0.1, 0, 0.5, 1, 2, 1000]]
+        input_np = np.concatenate((input_np, special_input), axis=0).astype(
+            torch_to_numpy_dtype_dict[dtype])
+        expected_output_np = input_np * scipy.special.expit(input_np)
 
-        input_tensor = torch.tensor(inputValues, dtype=dtype, device=device)
-        expected_output_tensor = torch.tensor(expectedOutput, dtype=dtype, device=device)
+        expected_output = torch.from_numpy(expected_output_np).to(device)
+        expected_output_noncontig = expected_output.transpose(0, 1)
 
-        self.assertEqual(torch.nn.functional.silu(input_tensor),
-                         expected_output_tensor,
-                         atol=precision_4dps, rtol=0)
+        atol = 1e-6
+        rtol = 1e-6
 
-        self.assertEqual(torch.nn.functional.silu(input_tensor, inplace=True),
-                         expected_output_tensor,
-                         atol=precision_4dps, rtol=0)
+        input = torch.from_numpy(input_np).clone().contiguous().to(device)
+        self.assertEqual(torch.nn.functional.silu(input), expected_output,
+                         atol=atol, rtol=rtol)
+        self.assertEqual(torch.nn.functional.silu(input, inplace=True),
+                         expected_output, atol=atol, rtol=rtol)
+
+        input = torch.from_numpy(input_np).clone().to(device)
+        input_noncontig = input.transpose(0, 1)
+        self.assertEqual(torch.nn.functional.silu(input_noncontig),
+                         expected_output_noncontig, atol=atol, rtol=rtol)
+        self.assertEqual(torch.nn.functional.silu(
+            input_noncontig, inplace=True), expected_output_noncontig,
+            atol=atol, rtol=rtol)
+
 
     @onlyCPU
     @dtypes(torch.float)
@@ -20017,7 +20030,7 @@ tensor_op_tests = [
     ('dist', '2_5_norm', _small_2d, lambda t, d: [_small_2d(t, d), 2.5],
         1e-2, 1e-5, 1e-5, _float_types, _cpu_types, False),
     ('dot', '', _medium_1d, lambda t, d: [_medium_1d(t, d)],
-        1e-2, 1e-5, 1e-5, _float_types, _cpu_types, False),
+        1e-2, 1e-5, 1e-5, _float_types + _complex_types, _cpu_types, False),
     ('element_size', '', _medium_1d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _float_types_no_half, _cpu_types, False),
     ('eq', '', _small_3d_ones, lambda t, d: [_small_3d(t, d)], 1e-5, 1e-5, 1e-5, _types2),
     ('eq', 'equal', _small_3d_ones, lambda t, d: [_small_3d_ones(t, d)], 1e-5, 1e-5, 1e-5, _types2),

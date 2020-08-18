@@ -31,6 +31,8 @@ common_args = parse_kwargs("""
     input (Tensor): the input tensor.
     generator (:class:`torch.Generator`, optional): a pseudorandom number generator for sampling
     out (Tensor, optional): the output tensor.
+    memory_format (:class:`torch.memory_format`, optional): the desired memory format of
+        returned tensor. Default: ``torch.preserve_format``.
 """)
 
 reduceops_common_args = merge_dicts(common_args, parse_kwargs("""
@@ -154,9 +156,8 @@ Example::
     tensor([ 1.2294,  2.2004,  1.3690,  1.7298])
 """.format(**common_args))
 
-add_docstr(torch.acosh,
-           r"""
-acosh(input, out=None) -> Tensor
+add_docstr(torch.acosh, r"""
+acosh(input, *, out=None) -> Tensor
 
 Returns a new tensor with the inverse hyperbolic cosine of the elements of :attr:`input`.
 
@@ -182,8 +183,13 @@ Example::
     tensor([ 0.7791, 1.3120, 1.2979, 1.1341 ])
 """.format(**common_args))
 
-add_docstr(torch.add,
-           r"""
+add_docstr(torch.arccosh, r"""
+arccosh(input, *, out=None) -> Tensor
+
+Alias for :func:`torch.acosh`.
+""".format(**common_args))
+
+add_docstr(torch.add, r"""
 add(input, other, out=None)
 
 Adds the scalar :attr:`other` to each element of the input :attr:`input`
@@ -1051,7 +1057,7 @@ vstack(tensors, *, out=None) -> Tensor
 
 Stack tensors in sequence vertically (row wise).
 
-This is equivalent to concatenation along the first axis after all 1-D tensors have been reshaped by :func:`torch.atleast_2d`. 
+This is equivalent to concatenation along the first axis after all 1-D tensors have been reshaped by :func:`torch.atleast_2d`.
 
 Args:
     tensors (sequence of Tensors): sequence of tensors to concatenate
@@ -1085,7 +1091,7 @@ dstack(tensors, *, out=None) -> Tensor
 
 Stack tensors in sequence depthwise (along third axis).
 
-This is equivalent to concatenation along the third axis after 1-D and 2-D tensors have been reshaped by :func:`torch.atleast_3d`. 
+This is equivalent to concatenation along the third axis after 1-D and 2-D tensors have been reshaped by :func:`torch.atleast_3d`.
 
 Args:
     tensors (sequence of Tensors): sequence of tensors to concatenate
@@ -1518,6 +1524,24 @@ Example::
             [ 1.2251,  2.4439,  0.2122],
             [-0.0889,  0.2122,  0.1412]])
 """)
+
+add_docstr(torch.clone, r"""
+clone(input, *, memory_format=torch.preserve_format) -> Tensor
+
+Returns a copy of :attr:`input`.
+
+.. note::
+
+    This function is differentiable, so gradients will flow back from the
+    result of this operation to :attr:`input`. To create a tensor without an
+    autograd relationship to :attr:`input` see :meth:`~Tensor.detach`.
+
+Args:
+    {input}
+
+Keyword args:
+    {memory_format}
+""".format(**common_args))
 
 add_docstr(torch.clamp, r"""
 clamp(input, min, max, out=None) -> Tensor
@@ -4692,8 +4716,7 @@ Example::
             [1.0311, 0.3901, 0.5049]])
 """)
 
-add_docstr(torch.movedim,
-           r"""
+add_docstr(torch.movedim, r"""
 movedim(input, source, destination) -> Tensor
 
 Moves the dimension(s) of :attr:`input` at the position(s) in :attr:`source`
