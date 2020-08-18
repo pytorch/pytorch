@@ -273,6 +273,14 @@ def compute_type_method(
                     payload = f"torch::CppFunction::makeUnboxedOnly(&{type_name})"
 
                 # Annotate it with dispatch information if necessary
+                #
+                # NB: In the ordinary, TypeDerived code generation work flow, specification
+                # of the backend is handled by the enclosing block, so the torch::dispatch
+                # invocation here is strictly unnecessary.  However, in the fbcode mobile
+                # only workflow using per-op registration, these registrations will get dumped
+                # in a TORCH_LIBRARY_FRAGMENT that does not have an ambient backend.  So
+                # the torch::dispatch specification here is important!  See
+                # Note [Redundancy in registration code is OK] for how we handle redundant info.
                 if dispatch is not None:
                     payload = f"torch::dispatch(DispatchKey::{dispatch},\n{payload})\n"
 
@@ -722,6 +730,21 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
         ('returns', returns),
         ('inplace', f.func.name.name.inplace),
         ('is_factory_method', is_factory_method),
+        # Note [Abstract ATen methods]
+        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        # An abstract ATen method is one whose dispatch differs between
+        # types.  These are implemented in derived types (with a
+        # standard (throwing) definition in Type).  A concrete ATen
+        # method is one which has the same dispatch for all types;
+        # we just implement it in the base Type.  This is exposed
+        # in Declarations.yaml via a field named 'abstract'.
+        #
+        # Although this is what we have historically exposed, it is
+        # actually not all that useful for end users, who are also interested
+        # whether or not there is an explicit entry in derivatives.yaml
+        # for the entry or not (as this affects whether or not the operation is
+        # overrideable or not.)  Once this all gets cleaned up, this
+        # property will be obsolete.
         ('abstract', f.dispatch is not None),
         ('device_guard', f.device_guard),
         ('with_gil', False),

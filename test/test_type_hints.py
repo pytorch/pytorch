@@ -215,7 +215,7 @@ class TestTypeHints(TestCase):
         finally:
             os.chdir(cwd)
         if result != 0:
-            self.fail("mypy failed: {}".format(stdout))
+            self.fail("mypy failed: {} {}".format(stdout, stderr))
 
     @unittest.skipIf(not HAVE_MYPY, "need mypy")
     def test_run_mypy_strict(self):
@@ -237,7 +237,7 @@ class TestTypeHints(TestCase):
         finally:
             os.chdir(cwd)
         if result != 0:
-            self.fail("mypy failed: {}".format(stdout))
+            self.fail("mypy failed: {} {}".format(stdout, stderr))
 
 if __name__ == '__main__':
     run_tests()
