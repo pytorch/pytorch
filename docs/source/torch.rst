@@ -89,6 +89,7 @@ Indexing, Slicing, Joining, Mutating Ops
     hstack
     index_select
     masked_select
+    movedim
     narrow
     nonzero
     reshape
