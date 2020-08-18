@@ -273,8 +273,23 @@ static inline __device__ void atomicAddNoReturn(double *address, double val) { g
 
 /* Special case fp32 atomic. */
 #ifdef __HIP_PLATFORM_HCC__
+#ifdef __gfx908__
+static inline __device__ bool __hip_is_shared(const __attribute__((address_space(0))) void*) asm("llvm.amdgcn.is.shared");
+static inline __device__ void atomicAddNoRet_impl(__attribute__((address_space(1))) float*, float) asm("llvm.amdgcn.global.atomic.fadd.p1f32.f32");
+static inline __device__ void gpuAtomicAddNoReturn(float* address, float val) {
+    using FP = __attribute__((address_space(0))) float*;
+    using GP = __attribute__((address_space(1))) float*;
+    using LP = __attribute__((address_space(3))) float*;
+    if (!__hip_is_shared((FP)address))
+        atomicAddNoRet_impl((GP)address, val);
+    else
+        __builtin_amdgcn_ds_faddf((LP)address, val, 0, 0, false);
+}
+static inline __device__ void atomicAddNoReturn(float *address, float val) { gpuAtomicAddNoReturn(address, val); }
+#else
 static inline __device__ void gpuAtomicAddNoReturn(float *address, float val) { atomicAddNoRet(address, val); }
 static inline __device__ void atomicAddNoReturn(float *address, float val) { atomicAddNoRet(address, val); }
+#endif
 #else
 static inline __device__ void gpuAtomicAddNoReturn(float *address, float val) { gpuAtomicAdd(address, val); }
 static inline __device__ void atomicAddNoReturn(float *address, float val) { gpuAtomicAdd(address, val); }
