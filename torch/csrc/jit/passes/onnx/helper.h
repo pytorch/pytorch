@@ -26,6 +26,7 @@ void eraseUnusedBlockInputs(Block* b);
 void buildParamsMapFromValueToParamsMap(
     const ValueToParamPairMap& valsToParamsMap,
     ParamMap& paramsDict);
+Node* addNodeToBlock(Block* block, Value* input, Symbol kind);
 
 } // namespace jit
 } // namespace torch
