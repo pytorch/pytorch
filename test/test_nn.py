@@ -44,7 +44,7 @@ from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, NewCrit
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes, \
     dtypesIfCUDA, skipCUDAIfNoCudnn, skipCUDAIfCudnnVersionLessThan, onlyCUDA, \
     skipCUDAIfRocm, skipCUDAIf, skipCUDAIfNotRocm, largeCUDATensorTest, onlyOnCPUAndCUDA, \
-    deviceCountAtLeast, expectedAlertNondeterministic
+    deviceCountAtLeast, expectedAlertNondeterministic, largeTensorTest
 from torch.nn import MultiheadAttention
 
 from hypothesis import given
@@ -229,7 +229,7 @@ class TestAvgPool(TestCase):
 
     def test_avg_pool2d_with_zero_divisor(self):
         self.assertRaisesRegex(RuntimeError, "divisor must be not zero",
-                               lambda: torch.nn.functional.avg_pool2d(torch.zeros(3, 3, 3), (2, 2), divisor_override=0))
+                               lambda: F.avg_pool2d(torch.zeros(3, 3, 3), (2, 2), divisor_override=0))
 
     def test_doubletensor_avg_pool2d_with_divisor(self):
         n, m = 3, 3
@@ -237,7 +237,7 @@ class TestAvgPool(TestCase):
         for i in range(1, n + 1):
             for j in range(1, m + 1):
                 for divisor in [1, 7, i * j]:
-                    actual = torch.nn.functional.avg_pool2d(input[0], (i, j), divisor_override=divisor)
+                    actual = F.avg_pool2d(input[0], (i, j), divisor_override=divisor)
                     actual = actual.view(1, actual.numel())
                     expected = self._sum_pool2d(input, (i, j)) / divisor
                     self.assertTrue(torch.allclose(actual, expected, rtol=0, atol=1e-5))
@@ -267,7 +267,7 @@ class TestAvgPool(TestCase):
 
     def test_avg_pool3d_with_zero_divisor(self):
         self.assertRaisesRegex(RuntimeError, "divisor must be not zero",
-                               lambda: torch.nn.functional.avg_pool3d(torch.zeros(3, 3, 3, 3), (2, 2, 2), divisor_override=0))
+                               lambda: F.avg_pool3d(torch.zeros(3, 3, 3, 3), (2, 2, 2), divisor_override=0))
 
     def test_avg_pool1d_ceil_mode(self):
         # Regression test for gh-36977
@@ -6725,6 +6725,28 @@ class TestNN(NNTestCase):
                     gradients = torch.randn_like(out_cpu)
                     out_cpu.backward(gradients)
 
+
+                    # Compare against unvectorized CPU fallback
+
+                    # NOTE [ grid_sample CPU fallback ]
+                    # grid_sample uses AVX for 2d images, but that requires 32-bit indexing for
+                    # 32-bit floats. So we also have a fallback that is used only for float tensors
+                    # requiring 64-bit indexing. That requires too much memory to run on CI, so we
+                    # also export the fallback and test it here to ensure feature parity with
+                    # the vectorized version.
+                    input_fallback = input_cpu.float().detach_().requires_grad_()
+                    grid_fallback = grid_cpu.float().detach_().requires_grad_()
+                    out_fallback = torch._grid_sampler_2d_cpu_fallback(
+                        input_fallback, grid_fallback,
+                        F.GRID_SAMPLE_INTERPOLATION_MODES[mode],
+                        F.GRID_SAMPLE_PADDING_MODES[padding_mode],
+                        align_corners)
+                    self.assertEqual(out_fallback, out_cpu.float(), atol=1e-5, rtol=5e-5)
+
+                    out_fallback.backward(gradients.float())
+                    self.assertEqual(input_fallback.grad, input_cpu.grad.float(), atol=1e-5, rtol=5e-5)
+                    self.assertEqual(grid_fallback.grad, grid_cpu.grad.float(), atol=1e-5, rtol=5e-5)
+
                     if TEST_CUDA:
                         input_cuda = input_cpu.detach().transpose(0, 1).cuda().transpose(0, 1).requires_grad_()
                         grid_cuda = get_grid('cuda', grid_cpu.detach()).requires_grad_()
@@ -6807,8 +6829,8 @@ class TestNN(NNTestCase):
                     # test known input on CPU
                     input = torch.arange(1., 11).view(1, 1, 2, 5)
                     grid = torch.tensor(
-                        [[[-0.9, -4.1], [0, 0.2000], [1, -1], [-0.333, 1e-10], [0.5, 1.0]],
-                         [[-1.0, -0.5], [0, 0.3333], [1, -1], [-0.200, 1e-10], [1.5, 0.5]]]).view(1, 2, 5, 2)
+                        [[[-0.9, -4.1], [0, 0.2000], [1, -1], [-0.333, 1e-6], [0.5, 1.0]],
+                         [[-1.0, -0.5], [0, 0.3333], [1, -1], [-0.200, 1e-6], [1.5, 0.5]]]).view(1, 2, 5, 2)
                     if mode == 'bilinear':
                         if padding_mode == 'zeros':
                             if align_corners:
@@ -6877,6 +6899,14 @@ class TestNN(NNTestCase):
                                      msg="groundtruth comparison failed for mode={}, "
                                      "padding_mode={}".format(mode, padding_mode))
 
+                    # See NOTE [ grid_sample CPU fallback ]
+                    output = torch._grid_sampler_2d_cpu_fallback(
+                        input.float(), grid.float(),
+                        F.GRID_SAMPLE_INTERPOLATION_MODES[mode],
+                        F.GRID_SAMPLE_PADDING_MODES[padding_mode],
+                        align_corners)
+                    self.assertEqual(output, groundtruth.float(), atol=1e-5, rtol=0)
+
                     # explicit check for gradient edge cases
                     input = torch.arange(0., 5).expand((1, 1, 5, 5)).requires_grad_()
                     grid = torch.tensor(
@@ -6923,6 +6953,15 @@ class TestNN(NNTestCase):
                     self.assertEqual(grid.grad, groundtruth,
                                      msg="gradient groundtruth comparison failed for mode={}, "
                                      "padding_mode={}".format(mode, padding_mode))
+
+                    # See NOTE [ grid_sample CPU fallback ]
+                    grid.grad.zero_()
+                    torch._grid_sampler_2d_cpu_fallback(
+                        input.float(), grid.float(),
+                        F.GRID_SAMPLE_INTERPOLATION_MODES[mode],
+                        F.GRID_SAMPLE_PADDING_MODES[padding_mode],
+                        align_corners).sum().backward()
+                    self.assertEqual(grid.grad, groundtruth)
 
                     # do gradcheck
                     N = random.randint(2, 8)
@@ -9862,6 +9901,12 @@ class TestNNDeviceType(NNTestCase):
         fn = fn_wrapper(device)
         _assertGradAndGradgradChecks(self, fn, (weight, ))
 
+    def test_embedding_scalar_weight_error(self, device):
+        indices = torch.rand(2, 2, device=device).long()
+        weight = torch.tensor(1.0, device=device)
+        with self.assertRaisesRegex(RuntimeError, "'weight' must be at least 1-D"):
+            torch.nn.functional.embedding(indices, weight)
+
     @dtypesIfCUDA(torch.float16, torch.float64)
     @dtypes(torch.float64)
     def test_embedding_backward(self, device, dtype):
@@ -10115,6 +10160,94 @@ class TestNNDeviceType(NNTestCase):
         input.requires_grad = True
         output = F.grid_sample(input, grid, align_corners=False)
         output.sum().backward()
+
+    @dtypes(torch.float, torch.double)
+    @largeTensorTest(lambda self, device, dtype:
+                     # Compute sum of the large tensor sizes:
+                     # (im.numel() + small_image.numel() + small_image.grad.numel() +
+                     #   large_view.grad.numel()) * sizeof(dtype)
+                     32769 * (65536 + 3 * 65536 / 128) *
+                     torch.tensor([], dtype=dtype).element_size())
+    def test_grid_sample_large_index_2d(self, device, dtype):
+        # Test 64-bit indexing with grid_sample (gh-41656)
+        # Try accessing the corners, there should be no segfault
+        coords = torch.tensor([[[-1., -1.],
+                                [+1., -1.]],
+
+                               [[-1., +1.],
+                                [+1., +1.]]], device=device, dtype=dtype)
+        coords = coords.expand(1, 2, 2, 2)
+        im = torch.zeros([1, 1, 32769, 65536], device=device, dtype=dtype)
+
+        # Compare sampling with large strides to the same op on a contiguous tensor
+        coords = torch.rand(1, 4, 4, 2, device=device, dtype=dtype)
+        large_view = im[..., 127::128]
+        small_image = torch.rand_like(large_view)
+        large_view[...] = small_image
+        large_view.requires_grad, small_image.requires_grad = True, True
+        self.assertTrue(
+            sum(i * s for i, s in zip(large_view.size(), large_view.stride())) >= 2 ** 31,
+            msg="View must use 64-bit indexing")
+        for mode, padding_mode, align_corners in itertools.product(
+                ('nearest', 'bilinear'), ('zeros', 'border', 'reflection'), (True, False)):
+            a = F.grid_sample(
+                small_image, coords, mode=mode,
+                padding_mode=padding_mode, align_corners=align_corners)
+            a.sum().backward()
+
+            b = F.grid_sample(
+                large_view, coords, mode=mode,
+                padding_mode=padding_mode, align_corners=align_corners)
+            b.sum().backward()
+
+            self.assertEqual(a, b)
+            self.assertEqual(small_image.grad, large_view.grad)
+
+            small_image.grad.zero_()
+            large_view.grad.zero_()
+
+    @dtypes(torch.float, torch.double)
+    @largeTensorTest(lambda self, device, dtype:
+                     # Compute sum of the large tensor sizes:
+                     # (im.numel() + small_image.numel() + small_image.grad.numel() +
+                     #   large_view.grad.numel()) * sizeof(dtype)
+                     2 * 32769 * (32768 + 3 * 32768 / 128) *
+                     torch.tensor([], dtype=dtype).element_size())
+    def test_grid_sample_large_index_3d(self, device, dtype):
+        # Test 64-bit indexing with grid_sample (gh-41656)
+        # Try accessing the corners, there should be no segfault
+        coords = torch.full((1, 2, 2, 2, 3), 1., device=device, dtype=dtype)
+        im = torch.zeros([1, 1, 2, 32769, 32768], device=device, dtype=dtype)
+
+        result = F.grid_sample(im, coords, align_corners=False)
+        self.assertEqual(result, torch.zeros((1, 1, 2, 2, 2), device=device, dtype=dtype))
+
+        # Compare sampling with large strides to the same op on a contiguous tensor
+        coords = torch.rand(1, 1, 4, 4, 3, device=device, dtype=dtype)
+        large_view = im[..., 127::128]
+        small_image = torch.rand_like(large_view)
+        large_view[...] = small_image
+        small_image.requires_grad, large_view.requires_grad = True, True
+        self.assertTrue(
+            sum(i * s for i, s in zip(large_view.size(), large_view.stride())) >= 2 ** 31,
+            msg="View must use 64-bit indexing")
+        for mode, padding_mode, align_corners in itertools.product(
+                ('nearest', 'bilinear'), ('zeros', 'border', 'reflection'), (True, False)):
+            a = F.grid_sample(
+                small_image, coords, mode=mode,
+                padding_mode=padding_mode, align_corners=align_corners)
+            a.sum().backward()
+
+            b = F.grid_sample(
+                large_view, coords, mode=mode,
+                padding_mode=padding_mode, align_corners=align_corners)
+            b.sum().backward()
+
+            self.assertEqual(a, b)
+            self.assertEqual(small_image.grad, large_view.grad)
+
+            small_image.grad.zero_()
+            large_view.grad.zero_()
 
     @largeCUDATensorTest('12GB')
     def test_conv_transposed_large(self, device):
@@ -10456,6 +10589,15 @@ class TestNNDeviceType(NNTestCase):
         assert grad.is_contiguous()
 
         y.backward(grad)
+
+    def test_pooling_size_empty(self, device):
+        t = torch.rand([1, 2, 3, 4], device=device)
+        self.assertRaises(RuntimeError, lambda: F.adaptive_avg_pool1d(t, []))
+        self.assertRaises(RuntimeError, lambda: F.adaptive_avg_pool2d(t, []))
+        self.assertRaises(RuntimeError, lambda: F.adaptive_avg_pool3d(t, []))
+        self.assertRaises(RuntimeError, lambda: F.adaptive_max_pool1d(t, []))
+        self.assertRaises(RuntimeError, lambda: F.adaptive_max_pool2d(t, []))
+        self.assertRaises(RuntimeError, lambda: F.adaptive_max_pool3d(t, []))
 
     def test_embedding_bag_empty_input(self, device):
         m = 4
@@ -11195,6 +11337,17 @@ class TestNNDeviceType(NNTestCase):
                 res2 = fn(x2, 1 if adaptive else 3)
                 res2.backward(torch.randn_like(res2))
                 self.assertTrue(math.isinf(res2.item()))
+
+    @onlyOnCPUAndCUDA
+    @dtypes(torch.float, torch.double)
+    def test_grid_sample_nan_inf(self, device, dtype):
+        input = torch.zeros([1, 1, 3, 3], device=device, dtype=dtype)
+        grid = torch.tensor([[[[nan, 0], [0, inf]]]], device=device, dtype=dtype)
+        for padding_mode in ('reflection', 'border', 'zeros'):
+            sample = torch.nn.functional.grid_sample(input=input, grid=grid, mode='nearest',
+                                                     padding_mode=padding_mode, align_corners=False)
+            self.assertEqual(sample, torch.zeros([1, 1, 1, 2], device=device, dtype=dtype))
+
 
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypes(torch.float)

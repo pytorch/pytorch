@@ -46,35 +46,15 @@ default_generators: Tuple[torch._C.Generator] = ()
 
 def is_available() -> bool:
     r"""Returns a bool indicating if CUDA is currently available."""
-    if (not hasattr(torch._C, '_cuda_isDriverSufficient') or
-            not torch._C._cuda_isDriverSufficient()):
+    if not hasattr(torch._C, '_cuda_getDeviceCount'):
         return False
+    # This function never throws and returns 0 if driver is missing or can't
+    # be initialized
     return torch._C._cuda_getDeviceCount() > 0
 
 
 def _sleep(cycles):
     torch._C._cuda_sleep(cycles)
-
-
-def _check_driver():
-    if not hasattr(torch._C, '_cuda_isDriverSufficient'):
-        raise AssertionError("Torch not compiled with CUDA enabled")
-    if not torch._C._cuda_isDriverSufficient():
-        if torch._C._cuda_getDriverVersion() == 0:
-            # found no NVIDIA driver on the system
-            raise AssertionError("""
-Found no NVIDIA driver on your system. Please check that you
-have an NVIDIA GPU and installed a driver from
-http://www.nvidia.com/Download/index.aspx""")
-        else:
-            # TODO: directly link to the alternative bin that needs install
-            raise AssertionError("""
-The NVIDIA driver on your system is too old (found version {}).
-Please update your GPU driver by downloading and installing a new
-version from the URL: http://www.nvidia.com/Download/index.aspx
-Alternatively, go to: https://pytorch.org to install
-a PyTorch version that has been compiled with your version
-of the CUDA driver.""".format(str(torch._C._cuda_getDriverVersion())))
 
 
 def _check_capability():
@@ -149,7 +129,7 @@ def init():
     r"""Initialize PyTorch's CUDA state.  You may need to call
     this explicitly if you are interacting with PyTorch via
     its C API, as Python bindings for CUDA functionality will not
-    be until this initialization takes place.  Ordinary users
+    be available until this initialization takes place.  Ordinary users
     should not need this, as all of PyTorch's CUDA methods
     automatically initialize CUDA state on-demand.
 
@@ -183,10 +163,13 @@ def _lazy_init():
                        "'spawn' start method")
             raise RuntimeError(
                 "Cannot re-initialize CUDA in forked subprocess. " + msg)
-        _check_driver()
+        if not hasattr(torch._C, '_cuda_getDeviceCount'):
+            raise AssertionError("Torch not compiled with CUDA enabled")
         if _cudart is None:
             raise AssertionError(
                 "libcudart functions unavailable. It looks like you have a broken build?")
+        # This function throws if there's a driver initialization error, no GPUs
+        # are found or any other error occurs
         torch._C._cuda_init()
         # Some of the queued calls may reentrantly call _lazy_init();
         # we need to just return without initializing in that case.

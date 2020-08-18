@@ -12,7 +12,7 @@ from collections import OrderedDict
 
 _builtin_table = None
 
-_modules_containing_builtins = (torch, torch._C._nn)
+_modules_containing_builtins = (torch, torch._C._nn, torch._C._fft, torch._C._linalg)
 
 _builtin_ops = [
     # Pairs of (function, op_name)
@@ -115,7 +115,7 @@ def _get_builtin_table():
     def register_all(mod):
         for name in dir(mod):
             v = getattr(mod, name)
-            if callable(v) and not _is_special_functional_bound_op(v) and "no_grad" not in name:
+            if callable(v) and not _is_special_functional_bound_op(v) and v is not torch.no_grad:
                 _builtin_ops.append((v, "aten::" + name))
     for mod in _modules_containing_builtins:
         register_all(mod)
