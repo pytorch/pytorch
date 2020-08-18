@@ -43,7 +43,7 @@ performance differences. Grouping and layout is based on metadata passed to
 table will be generated per unique label.
 
 * `sub_label`: This is the label for a given configuration. Multiple statements
-may be logically equivilent differ in implementation. Assigning separate
+may be logically equivalent differ in implementation. Assigning separate
 sub_labels will result in a row per sub_label. If a sublabel is not provided,
 `stmt` is used instead. Statistics (such as computing the fastest
 implementation) are use all sub_labels.
@@ -54,7 +54,7 @@ own `description`, which allows them to appear in separate columns.
 Statistics do not mix values of different descriptions, since comparing the
 run time of drastically different inputs is generally not meaningful.
 
-* `env`: An optional descripton of the torch environment. (e.g. `master` or
+* `env`: An optional description of the torch environment. (e.g. `master` or
 `my_branch`). Like sub_labels, statistics are calculated across envs. (Since
 comparing a branch to master or a stable release is a common use case.)
 However `Compare` will visually group rows which are run with the same `env`.
