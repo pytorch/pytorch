@@ -4,12 +4,9 @@ from torch.testing._internal.common_quantization import QuantizationTestCase
 from torch.quantization import QuantStub, DeQuantStub
 from torch.quantization._adaround import _supported_modules
 from torchvision.models.quantization import mobilenet_v2
+import torch.quantization._adaround as _adaround
 import copy
-from torch.quantization import (
-    default_eval_fn,
-    default_qconfig,
-    quantize,
-)
+
 
 class TestAdaround(QuantizationTestCase):
     def single_layer_adaround(self, model, adaround_func, img_data):
@@ -56,13 +53,5 @@ class TestAdaround(QuantizationTestCase):
                 return x
         float_model = ConvChain()
         img_data = [(torch.rand(10, 3, 125, 125, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long))
-                    for _ in range(50)]
-        self.single_layer_adaround(float_model, _adaround.learn_adaround, img_data)
-
-    def test_mobilenet(self):
-        float_model = mobilenet_v2(pretrained=True, quantize=False)
-        float_model.eval()
-        float_model.fuse_model()
-        img_data = [(torch.rand(10, 3, 224, 224, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long))
                     for _ in range(50)]
         self.single_layer_adaround(float_model, _adaround.learn_adaround, img_data)
