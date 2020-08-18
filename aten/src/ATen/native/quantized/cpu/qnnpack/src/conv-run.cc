@@ -1,5 +1,4 @@
 #include <conv_utils.h>
-#include <conv_utils.h>
 #include <qnnpack/indirection.h>
 #include <qnnpack/pack.h>
 #include <qnnpack_func.h>
