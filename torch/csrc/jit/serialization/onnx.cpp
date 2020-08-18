@@ -167,8 +167,9 @@ void dump(const onnx::GraphProto& graph, std::ostream& stream, size_t indent) {
   stream << "]" << nlidt(indent + 1) << "nodes: [" << nlidt(indent + 2);
   for (int i = 0; i < graph.node_size(); ++i) {
     dump(graph.node(i), stream, indent + 2);
-    if (i != graph.node_size() - 1)
+    if (i != graph.node_size() - 1) {
       stream << "," << nlidt(indent + 2);
+    }
   }
   stream << nlidt(indent + 1) << "]\n" << idt(indent) << "}\n";
 }
