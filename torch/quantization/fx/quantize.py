@@ -73,13 +73,17 @@ WEIGHT_INDEX_DICT = {
 # decorators are applied in the reverse order we see. Also when we match the nodes in the graph with these patterns,
 # we'll start from the last node of the graph and traverse back.
 
-# Base Pattern
-class QuantizerPattern(ABC):
+# Base Pattern Handler
+class QuantizeHandler(ABC):
+    """ Base handler class for the quantizer patterns
+    """
     def __init__(self, quantizer, node):
-        """this is an indicator of whether all the inputs are Node or not
-        since some op might be quantized differently depending on whether
-        all inputs are tensors or not, e.g. add/mul
+        """ Records pattern information in __init__, which will be used
+        in convert
         """
+        # this is an indicator of whether all the inputs are Node or not
+        # since some op might be quantized differently depending on whether
+        # all inputs are tensors or not, e.g. add/mul
         self.all_nodes = True
 
     @abstractmethod
@@ -92,7 +96,7 @@ class QuantizerPattern(ABC):
 @register_quant_pattern(operator.add)
 @register_quant_pattern((torch.nn.ReLU, operator.add))
 @register_quant_pattern((torch.nn.functional.relu, operator.add))
-class Add(QuantizerPattern):
+class Add(QuantizeHandler):
     def __init__(self, quantizer, node):
         super().__init__(quantizer, node)
         self.relu_node = None
@@ -128,7 +132,7 @@ class Add(QuantizerPattern):
 @register_quant_pattern(operator.mul)
 @register_quant_pattern((torch.nn.ReLU, operator.mul))
 @register_quant_pattern((torch.nn.functional.relu, operator.mul))
-class Mul(QuantizerPattern):
+class Mul(QuantizeHandler):
     def __init__(self, quantizer, node):
         super().__init__(quantizer, node)
         self.relu_node = None
@@ -162,7 +166,7 @@ class Mul(QuantizerPattern):
             return quantizer.quantized_graph.call_function(op, load_arg(quantized=True)(self.mul_node.args), kwargs)
 
 @register_quant_pattern(torch.cat)
-class Cat(QuantizerPattern):
+class Cat(QuantizeHandler):
     def convert(self, quantizer, node, load_arg, debug=False):
         if not self.all_nodes:
             return NotImplemented
@@ -188,7 +192,7 @@ class Cat(QuantizerPattern):
 # just for error checks
 @register_quant_pattern((torch.nn.ReLU, torch.nn.Conv2d))
 @register_quant_pattern((torch.nn.functional.relu, torch.nn.Conv2d))
-class ConvRelu(QuantizerPattern):
+class ConvRelu(QuantizeHandler):
      def __init__(self, quantizer, node):
          super().__init__(quantizer, node)
          self.relu_node = None
@@ -266,7 +270,7 @@ class ConvRelu(QuantizerPattern):
 # for error checks
 @register_quant_pattern((torch.nn.ReLU, torch.nn.Linear))
 @register_quant_pattern((torch.nn.functional.relu, torch.nn.Linear))
-class LinearReLU(QuantizerPattern):
+class LinearReLU(QuantizeHandler):
     def __init__(self, quantizer, node):
         super().__init__(quantizer, node)
         self.relu_node = None
@@ -362,11 +366,11 @@ class LinearReLU(QuantizerPattern):
 @register_quant_pattern('shape')
 @register_quant_pattern('size')
 @register_quant_pattern('view')
-class CopyNode(QuantizerPattern):
+class CopyNode(QuantizeHandler):
     def convert(self, quantizer, node, load_arg, debug=False):
         return quantizer.quantized_graph.node_copy(node, load_arg(quantized=None))
 
-class DefaultQuant(QuantizerPattern):
+class DefaultQuant(QuantizeHandler):
     def convert(self, quantizer, node):
         assert self.all_nodes
         return quantize(quantizer, node)
@@ -374,7 +378,7 @@ class DefaultQuant(QuantizerPattern):
 # 2. Post Training Dynamic Quantizatoin Patterns
 @register_dynamic_pattern(torch.nn.Linear)
 @register_dynamic_pattern(torch.nn.functional.linear)
-class DynamicLinear(QuantizerPattern):
+class DynamicLinear(QuantizeHandler):
     def __init__(self, quantizer, node):
         super().__init__(quantizer, node)
         self.linear_node = node
