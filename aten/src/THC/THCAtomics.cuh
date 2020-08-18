@@ -247,4 +247,37 @@ static inline __device__ void atomicAdd(bool *address, bool val) {
   gpuAtomicAdd(address, val);
 }
 
+/* Provide explicitly non-returning atomics. */
+template<typename T>
+static inline __device__ void gpuAtomicAddNoReturn(c10::complex<T> *address, c10::complex<T> val) { gpuAtomicAdd(address, val); }
+static inline __device__ void gpuAtomicAddNoReturn(uint8_t *address, uint8_t val) { gpuAtomicAdd(address, val); }
+static inline __device__ void gpuAtomicAddNoReturn(int8_t *address, int8_t val) { gpuAtomicAdd(address, val); }
+static inline __device__ void gpuAtomicAddNoReturn(int16_t *address, int16_t val) { gpuAtomicAdd(address, val); }
+static inline __device__ void gpuAtomicAddNoReturn(int32_t *address, int32_t val) { gpuAtomicAdd(address, val); }
+static inline __device__ void gpuAtomicAddNoReturn(int64_t *address, int64_t val) { gpuAtomicAdd(address, val); }
+static inline __device__ void gpuAtomicAddNoReturn(bool *address, bool val) { gpuAtomicAdd(address, val); }
+static inline __device__ void gpuAtomicAddNoReturn(at::Half *address, at::Half val) { gpuAtomicAdd(address, val); }
+static inline __device__ void gpuAtomicAddNoReturn(at::BFloat16 *address, at::BFloat16 val) { gpuAtomicAdd(address, val); }
+static inline __device__ void gpuAtomicAddNoReturn(double *address, double val) { gpuAtomicAdd(address, val); }
+template<typename T>
+static inline __device__ void atomicAddNoReturn(c10::complex<T> *address, c10::complex<T> val) { gpuAtomicAdd(address, val); }
+static inline __device__ void atomicAddNoReturn(uint8_t *address, uint8_t val) { gpuAtomicAdd(address, val); }
+static inline __device__ void atomicAddNoReturn(int8_t *address, int8_t val) { gpuAtomicAdd(address, val); }
+static inline __device__ void atomicAddNoReturn(int16_t *address, int16_t val) { gpuAtomicAdd(address, val); }
+static inline __device__ void atomicAddNoReturn(int32_t *address, int32_t val) { gpuAtomicAdd(address, val); }
+static inline __device__ void atomicAddNoReturn(int64_t *address, int64_t val) { gpuAtomicAdd(address, val); }
+static inline __device__ void atomicAddNoReturn(bool *address, bool val) { gpuAtomicAdd(address, val); }
+static inline __device__ void atomicAddNoReturn(at::Half *address, at::Half val) { gpuAtomicAdd(address, val); }
+static inline __device__ void atomicAddNoReturn(at::BFloat16 *address, at::BFloat16 val) { gpuAtomicAdd(address, val); }
+static inline __device__ void atomicAddNoReturn(double *address, double val) { gpuAtomicAdd(address, val); }
+
+/* Special case fp32 atomic. */
+#ifdef __HIP_PLATFORM_HCC__
+static inline __device__ void gpuAtomicAddNoReturn(float *address, float val) { atomicAddNoRet(address, val); }
+static inline __device__ void atomicAddNoReturn(float *address, float val) { atomicAddNoRet(address, val); }
+#else
+static inline __device__ void gpuAtomicAddNoReturn(float *address, float val) { gpuAtomicAdd(address, val); }
+static inline __device__ void atomicAddNoReturn(float *address, float val) { gpuAtomicAdd(address, val); }
+#endif
+
 #endif // THC_ATOMICS_INC
