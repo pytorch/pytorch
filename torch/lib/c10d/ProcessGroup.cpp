@@ -2,8 +2,23 @@
 
 #include <c10/util/Logging.h>
 #include <sys/types.h>
+#include <torch/custom_class.h>
 
 namespace c10d {
+
+
+// Torchbind the ProcessGroup to make it available in TorchScript
+static auto processGroupWork =
+  torch::class_<::c10d::ProcessGroup::Work>("dist_c10d", "Work")
+    .def(torch::init<>())
+    .def("is_completed", &::c10d::ProcessGroup::Work::isCompleted)
+    .def("is_success", &::c10d::ProcessGroup::Work::isSuccess)
+    .def("source_rank", &::c10d::ProcessGroup::Work::sourceRank)
+    .def("synchronize", &::c10d::ProcessGroup::Work::synchronize);
+
+static auto processGroup =
+  torch::class_<::c10d::ProcessGroup>("dist_c10d", "ProcessGroup");
+
 
 ProcessGroup::Work::~Work() {}
 

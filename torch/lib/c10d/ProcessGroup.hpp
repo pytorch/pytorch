@@ -37,9 +37,9 @@ namespace c10d {
 // process group to find each other (referred to as rendezvous from
 // hereon)
 //
-class ProcessGroup : torch::CustomClassHolder{
+class ProcessGroup : public torch::CustomClassHolder{
  public:
-  class Work : torch::CustomClassHolder{
+  class Work : public torch::CustomClassHolder{
    public:
     virtual ~Work();
 

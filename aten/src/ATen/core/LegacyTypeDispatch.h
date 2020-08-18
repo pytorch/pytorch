@@ -46,7 +46,7 @@ namespace at {
 // TODO centralize this as part of dispatch key revamp
 static DispatchKeySet autograd_dispatch_keys{
   DispatchKey::Autograd,
-  DispatchKey::XLAPreAutograd,
+  DispatchKey::AutogradXLA,
   DispatchKey::PrivateUse1_PreAutograd,
   DispatchKey::PrivateUse2_PreAutograd,
   DispatchKey::PrivateUse3_PreAutograd,

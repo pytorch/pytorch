@@ -122,29 +122,6 @@ void _register_comm_hook(
 };
 
 
-TORCH_LIBRARY(dist_c10d, m) {
-  m.class_<::c10d::ProcessGroup::Work>("Work")
-    .def("is_completed", &::c10d::ProcessGroup::Work::isCompleted)
-    .def("is_success", &::c10d::ProcessGroup::Work::isSuccess)
-    .def("exception", &::c10d::ProcessGroup::Work::exception)
-    .def("source_rank", &::c10d::ProcessGroup::Work::sourceRank)
-    .def(
-        "result",
-        [](::c10d::ProcessGroup::Work& work) -> std::vector<at::Tensor> {
-        return work.result();
-        })
-    .def("synchronize", &::c10d::ProcessGroup::Work::synchronize)
-    .def("wait", &::c10d::ProcessGroup::Work::wait)
-    .def(
-        "get_future",
-        [](::c10d::ProcessGroup::Work& work)
-            -> std::shared_ptr<jit::PythonFutureWrapper> {
-        return std::make_shared<jit::PythonFutureWrapper>(work.getFuture());
-        }
-        );
-}
-
-
 PyObject* c10d_init(PyObject* _unused) {
   C10_LOG_API_USAGE_ONCE("c10d.python.import");
   auto c10d_module = THPObjectPtr(PyImport_ImportModule("torch.distributed"));
@@ -209,6 +186,9 @@ PyObject* c10d_init(PyObject* _unused) {
   py::enum_<::c10d::ReduceOp>(module, "ReduceOp", R"(
 An enum-like class for available reduction operations: ``SUM``, ``PRODUCT``,
 ``MIN``, ``MAX``, ``BAND``, ``BOR``, and ``BXOR``.
+
+Note that ``BAND``, ``BOR``, and ``BXOR`` reductions are not available when
+using the ``NCCL`` backend.
 
 The values of this class can be accessed as attributes, e.g., ``ReduceOp.SUM``.
 They are used in specifying strategies for reduction collectives, e.g.,
@@ -717,63 +697,63 @@ They are used in specifying strategies for reduction collectives, e.g.,
   });
 #endif
 
-//   shared_ptr_class_<::c10d::ProcessGroup::Work>(module, "Work")
-//       .def("is_completed", &::c10d::ProcessGroup::Work::isCompleted)
-//       .def("is_success", &::c10d::ProcessGroup::Work::isSuccess)
-//       .def("exception", &::c10d::ProcessGroup::Work::exception)
-//       .def("source_rank", &::c10d::ProcessGroup::Work::sourceRank)
-//       .def(
-//           "result",
-//           [](::c10d::ProcessGroup::Work& work) -> std::vector<at::Tensor> {
-//             return work.result();
-//           })
-//       .def("synchronize", &::c10d::ProcessGroup::Work::synchronize)
-//       .def(
-//           "wait",
-//           &::c10d::ProcessGroup::Work::wait,
-//           py::arg("timeout") = kNoTimeout,
-//           py::call_guard<py::gil_scoped_release>())
-//       .def(
-//           "get_future",
-//           [](::c10d::ProcessGroup::Work& work)
-//               -> std::shared_ptr<jit::PythonFutureWrapper> {
-//             return std::make_shared<jit::PythonFutureWrapper>(work.getFuture());
-//           },
-//           R"(
-//             Returns:
-//                 A ``torch._C.Future`` object which is associated with the completion of
-//                 the ``ProcessGroup::Work``. As an example, a future object can be retrieved
-//                 by ``fut = process_group.allreduce(tensors).get_future()``.
+  shared_ptr_class_<::c10d::ProcessGroup::Work>(module, "Work")
+      .def("is_completed", &::c10d::ProcessGroup::Work::isCompleted)
+      .def("is_success", &::c10d::ProcessGroup::Work::isSuccess)
+      .def("exception", &::c10d::ProcessGroup::Work::exception)
+      .def("source_rank", &::c10d::ProcessGroup::Work::sourceRank)
+      .def(
+          "result",
+          [](::c10d::ProcessGroup::Work& work) -> std::vector<at::Tensor> {
+            return work.result();
+          })
+      .def("synchronize", &::c10d::ProcessGroup::Work::synchronize)
+      .def(
+          "wait",
+          &::c10d::ProcessGroup::Work::wait,
+          py::arg("timeout") = kNoTimeout,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "get_future",
+          [](::c10d::ProcessGroup::Work& work)
+              -> std::shared_ptr<jit::PythonFutureWrapper> {
+            return std::make_shared<jit::PythonFutureWrapper>(work.getFuture());
+          },
+          R"(
+            Returns:
+                A ``torch._C.Future`` object which is associated with the completion of
+                the ``ProcessGroup::Work``. As an example, a future object can be retrieved
+                by ``fut = process_group.allreduce(tensors).get_future()``.
 
-//             Example::
-//                 Below is an example of a simple allreduce DDP communication hook that uses
-//                 ``get_future` API to retrieve a Future associated with the completion of
-//                 ``allreduce`` work.
+            Example::
+                Below is an example of a simple allreduce DDP communication hook that uses
+                ``get_future` API to retrieve a Future associated with the completion of
+                ``allreduce`` work.
 
-//                 >>> def allreduce(state: object, bucket: dist._GradBucket): -> torch._C.Future
-//                 >>>     tensors = [t / process_group.world_size for t in bucket.get_tensors()]
-//                 >>>     work = process_group.allreduce(tensors)
-//                 >>>     return work.get_future()
+                >>> def allreduce(state: object, bucket: dist._GradBucket): -> torch._C.Future
+                >>>     tensors = [t / process_group.world_size for t in bucket.get_tensors()]
+                >>>     work = process_group.allreduce(tensors)
+                >>>     return work.get_future()
 
-//                 >>> ddp_model._register_comm_hook(state = None, hook = allreduce)
+                >>> ddp_model._register_comm_hook(state = None, hook = allreduce)
 
-//             .. warning ::
-//                 ``get_future`` API supports only NCCL backend. The ``torch._C.Future`` object
-//                 returned by this API can be used in ``DistributedDataParallel._register_comm_hook``,
-//                 but it is subject to some subtle differences compared to ``torch.futures.Future``
-//                 due to compromises made for performance reasons.
+            .. warning ::
+                ``get_future`` API supports only NCCL backend. The ``torch._C.Future`` object
+                returned by this API can be used in ``DistributedDataParallel._register_comm_hook``,
+                but it is subject to some subtle differences compared to ``torch.futures.Future``
+                due to compromises made for performance reasons.
 
-//                 In the example above, ``allreduce`` work will be done on GPU using NCCL backend,
-//                 ``fut.wait()`` will return after synchronizing the appropriate NCCL streams
-//                 with PyTorch's default device streams to ensure we can have asynchronous CUDA
-//                 execution and it does not wait for the entire operation to complete on GPU.
-//                 If ``NCCL_BLOCKING_WAIT`` is enabled, in that case, it would wait for the entire
-//                 operation to complete before returning. In addition, if a callback function was
-//                 added by ``fut.then()``, it will wait until WorkNCCL's wait returns and invoke
-//                 the callback inline.
+                In the example above, ``allreduce`` work will be done on GPU using NCCL backend,
+                ``fut.wait()`` will return after synchronizing the appropriate NCCL streams
+                with PyTorch's default device streams to ensure we can have asynchronous CUDA
+                execution and it does not wait for the entire operation to complete on GPU.
+                If ``NCCL_BLOCKING_WAIT`` is enabled, in that case, it would wait for the entire
+                operation to complete before returning. In addition, if a callback function was
+                added by ``fut.then()``, it will wait until WorkNCCL's wait returns and invoke
+                the callback inline.
 
-//                 Note that ``fut.done()`` returns if the work was completed on the GPU.
-//            )");
+                Note that ``fut.done()`` returns if the work was completed on the GPU.
+           )");
 
   module.def(
       "_compute_bucket_assignment_by_size",
