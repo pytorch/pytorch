@@ -6,6 +6,10 @@ import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
 import torch.quantization
 
+from torch.quantization import (
+    float_qparams_dynamic_qconfig,
+    default_float_qparams_observer
+)
 from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
     prepare_dynamic,
@@ -940,8 +944,7 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
         offsets = torch.cat((offsets, torch.tensor([indices.size(0)], dtype=torch.long)), 0)
         weights = torch.from_numpy((np.random.random_sample((num_embeddings, embedding_dim)) + 1).astype(np.float32))
 
-        from torch.quantization import PerChannelMinMaxObserver, QConfigDynamic, default_dynamic_quant_observer
-        obs = PerChannelMinMaxObserver(dtype=torch.quint8, qscheme=torch.per_channel_affine_float_qparams, ch_axis=0)
+        obs = default_float_qparams_observer()
         obs(weights)
         # Get the scale and zero point for the weight tensor
         qparams = obs.calculate_qparams()
@@ -994,11 +997,8 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
         float_embedding = torch.nn.EmbeddingBag(num_embeddings=num_embeddings, embedding_dim=embedding_dim,
                                                 include_last_offset=True, scale_grad_by_freq=False, mode='sum')
         if set_qconfig:
-            float_embedding.qconfig = QConfigDynamic(activation=default_dynamic_quant_observer,
-                                                     weight=PerChannelMinMaxObserver.with_args(
-                                                         dtype=torch.quint8,
-                                                         qscheme=torch.per_channel_affine_float_qparams,
-                                                         ch_axis=0))
+            float_embedding.qconfig = float_qparams_dynamic_qconfig
+
         prepare_dynamic(float_embedding)
 
         float_embedding(indices, offsets)
