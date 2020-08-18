@@ -16,6 +16,9 @@ clang --version
 # symbolize=1: Gives us much better errors when things go wrong
 export ASAN_OPTIONS=detect_leaks=0:symbolize=1:detect_odr_violation=0
 
+# TODO: remove me
+pip install dataclasses
+
 # FIXME: Remove the hardcoded "-pthread" option.
 # With asan build, the cmake thread CMAKE_HAVE_LIBC_CREATE[1] checking will
 # succeed because "pthread_create" is in libasan.so. However, libasan doesn't
