@@ -64,7 +64,7 @@ fft_norm_mode norm_from_string(c10::optional<std::string> norm, bool forward) {
 
 // Fixes the shape of x such that x.size(dims[i]) == sizes[i]
 // Either by zero-padding, or by slicing x starting from 0
-Tensor fix_shape(Tensor x, IntArrayRef dims, IntArrayRef sizes) {
+Tensor resize_fft_input(Tensor x, IntArrayRef dims, IntArrayRef sizes) {
   TORCH_INTERNAL_ASSERT(dims.size() == sizes.size());
   bool must_copy = false;
   auto x_sizes = x.sizes();
@@ -99,7 +99,7 @@ Tensor fft_c2r(Tensor input, c10::optional<int64_t> n_opt,
   const auto n = n_opt.value_or(input.sizes()[dim] * 2 - 1);
   TORCH_CHECK(n >= 1, "Invalid number of data points (", n, ") specified");
   if (n_opt) {
-    input = fix_shape(input, dim, n/2 + 1);
+    input = resize_fft_input(input, dim, n/2 + 1);
   }
   const bool must_transpose = (dim != input_dim - 1);
   if (must_transpose) {
@@ -131,7 +131,7 @@ Tensor fft_r2c(Tensor input, c10::optional<int64_t> n_opt,
   const auto n = n_opt.value_or(input.sizes()[dim]);
   TORCH_CHECK(n >= 1, "Invalid number of data points (", n, ") specified");
   if (n_opt) {
-    input = fix_shape(input, dim, n);
+    input = resize_fft_input(input, dim, n);
   }
   const bool must_transpose = (dim != input_dim - 1);
   if (must_transpose) {
@@ -162,7 +162,7 @@ Tensor fft_c2c(Tensor input, c10::optional<int64_t> n_opt,
   const auto n = n_opt.value_or(input.sizes()[dim]);
   TORCH_CHECK(n >= 1, "Invalid number of data points (", n, ") specified");
   if (n_opt) {
-    input = fix_shape(input, dim, n);
+    input = resize_fft_input(input, dim, n);
   }
   const bool must_transpose = (dim != input_dim - 1);
   if (must_transpose) {

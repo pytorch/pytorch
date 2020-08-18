@@ -1059,6 +1059,12 @@ def method_tests():
         ('__getitem__', torch.randn(S, S, S), (dont_convert([[0, 2, 3], [1, 3, 3],
                                                              torch.LongTensor([0, 0, 2])]),), 'adv_index_var'),
         ('to_sparse', (S, S), (), '', (), (), [], lambda x: x.to_dense()),
+        ('fft.fft', (S, S), NO_ARGS),
+        ('fft.ifft', (S, S), NO_ARGS),
+        ('fft.rfft', (S, S), NO_ARGS),
+        ('fft.irfft', (S, S), NO_ARGS),
+        ('fft.hfft', (S, S), NO_ARGS),
+        ('fft.ihfft', (S, S), NO_ARGS),
     ]
 
 def create_input(call_args, requires_grad=True, non_contiguous=False, call_kwargs=None, dtype=torch.double, device=None):
@@ -1274,6 +1280,12 @@ EXCLUDE_FUNCTIONAL = {
 EXCLUDE_GRADCHECK = {
 }
 EXCLUDE_GRADGRADCHECK = {
+    'fft.fft',
+    'fft.ifft',
+    'fft.rfft',
+    'fft.irfft',
+    'fft.hfft',
+    'fft.ihfft',
 }
 EXCLUDE_GRADGRADCHECK_BY_TEST_NAME = {
     # *det methods uses svd in backward when matrix is not invertible. However,
@@ -1349,5 +1361,7 @@ def exclude_tensor_method(name, test_name):
     is_magic_method = name[:2] == '__' and name[-2:] == '__'
     is_inplace = name[-1] == "_" and not is_magic_method
     if not is_inplace and name in exclude_outplace_tensor_method:
+        return True
+    if 'fft.' in name:
         return True
     return False

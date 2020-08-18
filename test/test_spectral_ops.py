@@ -99,6 +99,47 @@ class TestFFT(TestCase):
                     actual = fn(input, *args)
                     self.assertEqual(actual, expected, exact_dtype=exact_dtype)
 
+    @skipCUDAIfRocm
+    @skipCPUIfNoMkl
+    @onlyOnCPUAndCUDA
+    @dtypes(torch.float, torch.double, torch.complex64, torch.complex128)
+    def test_fft_round_trip(self, device, dtype):
+        # Test that round trip through ifft(fft(x)) is the identity
+        test_args = product(
+            # input
+            (torch.randn(67, device=device, dtype=dtype),
+             torch.randn(80, device=device, dtype=dtype),
+             torch.randn(12, 14, device=device, dtype=dtype),
+             torch.randn(9, 6, 3, device=device, dtype=dtype)),
+            # dim
+            (-1, 0),
+            # norm
+            (None, "forward", "backward", "ortho")
+        )
+
+        fft_functions = [(torch.fft.fft, torch.fft.ifft)]
+        # Real-only functions
+        if not dtype.is_complex:
+            # NOTE: Using ihfft as "forward" transform to avoid needing to
+            # generate true half-complex input
+            fft_functions += [(torch.fft.rfft, torch.fft.irfft),
+                              (torch.fft.ihfft, torch.fft.hfft)]
+
+        for forward, backward in fft_functions:
+            for x, dim, norm in test_args:
+                kwargs = {
+                    'n': x.size(dim),
+                    'dim': dim,
+                    'norm': norm,
+                }
+
+                y = backward(forward(x, **kwargs), **kwargs)
+                # For real input, ifft(fft(x)) will convert to complex
+                self.assertEqual(x, y, exact_dtype=(
+                    forward != torch.fft.fft or x.is_complex()))
+
+
+
     # Note: NumPy will throw a ValueError for an empty input
     @skipCUDAIfRocm
     @skipCPUIfNoMkl
@@ -107,22 +148,15 @@ class TestFFT(TestCase):
     def test_empty_fft(self, device, dtype):
         t = torch.empty(0, device=device, dtype=dtype)
         match = r"Invalid number of data points \([-\d]*\) specified"
+        fft_functions = [torch.fft.fft, torch.fft.ifft, torch.fft.hfft,
+                         torch.fft.irfft]
+        # Real-only functions
+        if not dtype.is_complex:
+            fft_functions += [torch.fft.rfft, torch.fft.ihfft]
 
-        with self.assertRaisesRegex(RuntimeError, match):
-            torch.fft.fft(t)
-        with self.assertRaisesRegex(RuntimeError, match):
-            torch.fft.ifft(t)
-
-        with self.assertRaisesRegex(RuntimeError, match):
-            torch.fft.irfft(t)
-        with self.assertRaisesRegex(RuntimeError, match):
-            torch.fft.hfft(t)
-
-        if not t.is_complex():
+        for fn in fft_functions:
             with self.assertRaisesRegex(RuntimeError, match):
-                torch.fft.rfft(t)
-            with self.assertRaisesRegex(RuntimeError, match):
-                torch.fft.ihfft(t)
+                fn(t)
 
     def test_fft_invalid_dtypes(self, device):
         t = torch.randn(64, device=device, dtype=torch.complex128)

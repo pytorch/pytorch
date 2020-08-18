@@ -34,21 +34,21 @@ torch::Tensor naive_dft(torch::Tensor x, bool forward=true) {
 //   as of August 2020
 
 TEST(FFTTest, fft) {
-  auto t = torch::randn(128, torch::dtype(torch::kComplexDouble));
+  auto t = torch::randn(128, torch::kComplexDouble);
   auto actual = torch::fft::fft(t);
   auto expect = naive_dft(t);
   ASSERT_TRUE(torch::allclose(actual, expect));
 }
 
 TEST(FFTTest, fft_real) {
-  auto t = torch::randn(128, torch::dtype(torch::kDouble));
+  auto t = torch::randn(128, torch::kDouble);
   auto actual = torch::fft::fft(t);
   auto expect = torch::fft::fft(t.to(torch::kComplexDouble));
   ASSERT_TRUE(torch::allclose(actual, expect));
 }
 
 TEST(FFTTest, fft_pad) {
-  auto t = torch::randn(128, torch::dtype(torch::kComplexDouble));
+  auto t = torch::randn(128, torch::kComplexDouble);
   auto actual = torch::fft::fft(t, 200);
   auto expect = torch::fft::fft(torch::constant_pad_nd(t, {0, 72}));
   ASSERT_TRUE(torch::allclose(actual, expect));
@@ -59,7 +59,7 @@ TEST(FFTTest, fft_pad) {
 }
 
 TEST(FFTTest, fft_norm) {
-  auto t = torch::randn(128, torch::dtype(torch::kComplexDouble));
+  auto t = torch::randn(128, torch::kComplexDouble);
   auto unnorm = torch::fft::fft(t, /*n=*/{}, /*axis=*/-1, /*norm=*/{});
   auto norm = torch::fft::fft(t, /*n=*/{}, /*axis=*/-1, /*norm=*/"forward");
   ASSERT_TRUE(torch::allclose(unnorm / 128, norm));
@@ -69,14 +69,14 @@ TEST(FFTTest, fft_norm) {
 }
 
 TEST(FFTTest, ifft) {
-  auto T = torch::randn(128, torch::dtype(torch::kComplexDouble));
+  auto T = torch::randn(128, torch::kComplexDouble);
   auto actual = torch::fft::ifft(T);
   auto expect = naive_dft(T, /*forward=*/false) / 128;
   ASSERT_TRUE(torch::allclose(actual, expect));
 }
 
 TEST(FFTTest, fft_ifft) {
-  auto t = torch::randn(77, torch::dtype(torch::kComplexDouble));
+  auto t = torch::randn(77, torch::kComplexDouble);
   auto T = torch::fft::fft(t);
   ASSERT_EQ(T.size(0), 77);
   ASSERT_EQ(T.scalar_type(), torch::kComplexDouble);
@@ -88,14 +88,14 @@ TEST(FFTTest, fft_ifft) {
 }
 
 TEST(FFTTest, rfft) {
-  auto t = torch::randn(129, torch::dtype(torch::kDouble));
+  auto t = torch::randn(129, torch::kDouble);
   auto actual = torch::fft::rfft(t);
   auto expect = torch::fft::fft(t.to(torch::kComplexDouble)).slice(0, 0, 65);
   ASSERT_TRUE(torch::allclose(actual, expect));
 }
 
 TEST(FFTTest, rfft_irfft) {
-  auto t = torch::randn(127, torch::dtype(torch::kDouble));
+  auto t = torch::randn(127, torch::kDouble);
   auto T = torch::fft::rfft(t);
   ASSERT_EQ(T.size(0), 64);
   ASSERT_EQ(T.scalar_type(), torch::kComplexDouble);
@@ -107,14 +107,14 @@ TEST(FFTTest, rfft_irfft) {
 }
 
 TEST(FFTTest, ihfft) {
-  auto T = torch::randn(129, torch::dtype(torch::kDouble));
+  auto T = torch::randn(129, torch::kDouble);
   auto actual = torch::fft::ihfft(T);
   auto expect = torch::fft::ifft(T.to(torch::kComplexDouble)).slice(0, 0, 65);
   ASSERT_TRUE(torch::allclose(actual, expect));
 }
 
 TEST(FFTTest, hfft_ihfft) {
-  auto t = torch::randn(64, torch::dtype(torch::kComplexDouble));
+  auto t = torch::randn(64, torch::kComplexDouble);
   t[0] = .5; // Must be purely real to satisfy hermitian symmetry
   auto T = torch::fft::hfft(t);
   ASSERT_EQ(T.size(0), 127);
