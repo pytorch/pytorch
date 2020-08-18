@@ -1,7 +1,18 @@
 import torch
-from torch.fx import symbolic_trace
+import unittest
+from torch.fx import symbolic_trace, Proxy, Node, GraphModule, DefaultDelegate
 
+from fx.quantization import Quantizer
+
+from typing import Any, Callable, Dict, Optional, Tuple, Union
 from torch.testing._internal.common_utils import TestCase, run_tests
+
+try:
+    from torchvision.models import resnet18
+    HAS_TORCHVISION = True
+except ImportError:
+    HAS_TORCHVISION = False
+skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 class TestFX(TestCase):
     def test_graph_module(self):
@@ -72,6 +83,109 @@ class TestFX(TestCase):
         out = gm(input_dict)
 
         self.assertEqual(out, ref_out)
+
+    def test_disallow_override(self):
+        # Custom delegate to disallow in-place tensor operations
+        class NoMutableCallDelegate(DefaultDelegate):
+            def create_node(self, kind : str, target : Union[str, Callable],
+                            args : Tuple[Any], kwargs : Dict[str, Any], name : Optional[str] = None) -> Node:
+                name = target if isinstance(target, str) else torch.typename(target)
+                if name[-1] == '_':
+                    raise RuntimeError('In-place operations are not supported')
+                return super().create_node(kind, target, args, kwargs, name)
+
+        # Test method
+        class MyInplaceMod(torch.nn.Module):
+            def forward(self, x):
+                x.add_(3.0)
+                return x
+
+        m = MyInplaceMod()
+
+        with self.assertRaisesRegex(RuntimeError, 'In-place operations'):
+            symbolic_trace(m, delegate_class=NoMutableCallDelegate)
+
+        # Test free function
+        class MyInplaceMod2(torch.nn.Module):
+            def forward(self, x):
+                torch.log_(x)
+                return x
+        m2 = MyInplaceMod2()
+        with self.assertRaisesRegex(RuntimeError, 'In-place operations'):
+            symbolic_trace(m2, delegate_class=NoMutableCallDelegate)
+
+        # Test symbolic node as an arg
+        class MyInplaceMod3(torch.nn.Module):
+            def forward(self, x):
+                y = torch.ones(3, 4)
+                y.add_(x)
+                return x
+        m3 = MyInplaceMod3()
+        with self.assertRaisesRegex(RuntimeError, 'In-place operations'):
+            symbolic_trace(m3, delegate_class=NoMutableCallDelegate)
+
+    def test_leaf_module(self):
+        # Custom delegate to make it so that there are no leaf modules, everything
+        # should get traced through
+        class NoLeafModulesDelegate(DefaultDelegate):
+            def is_leaf_module(self, m):
+                return False
+
+        class MyReluMod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                return self.relu(x)
+
+        mrm = MyReluMod()
+        sym = symbolic_trace(mrm, delegate_class=NoLeafModulesDelegate)
+        for node in sym.graph.nodes:
+            self.assertNotEqual(node.op, 'call_module')
+
+    def test_graph_edit_with_proxy(self):
+        class M(torch.nn.Module):
+            def forward(self, a, b):
+                return a + b
+        m = M()
+        g = symbolic_trace(m).graph
+        t = Proxy(g.result)
+        # test that we can use proxy objects to generate more graph code later for things that do not need to work with modules.
+        g.output((t + t).node)
+        gm = GraphModule(m, g)
+        self.assertEqual(gm(3, 4), 14)
+
+    @skipIfNoTorchVision
+    def test_resnet(self):
+        resnet = resnet18()
+        resnet.train()
+
+        res_graph = symbolic_trace(resnet)
+        res_script = torch.jit.script(res_graph)
+
+        ip = torch.rand(1, 3, 224, 224)
+
+        a = resnet(ip)
+        b = res_graph(ip)
+        c = res_script(ip)
+        assert torch.allclose(a, b)
+        assert torch.allclose(a, c)
+
+        quantizer = Quantizer(res_graph)
+
+        for i in range(10):
+            quantizer.observe((torch.rand(1, 3, 224, 224),))
+
+        qgraph = quantizer.quantize()
+        qgraph_script = torch.jit.script(qgraph)
+
+        d = qgraph(ip)
+        e = qgraph_script(ip)
+
+        assert (a - d).abs().max() < 2
+        assert torch.allclose(d, e)
+
 
 if __name__ == '__main__':
     run_tests()
