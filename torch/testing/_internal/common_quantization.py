@@ -358,6 +358,60 @@ class QuantizationTestCase(TestCase):
 
         return models[False]
 
+    def checkGraphModuleHasNode(self, graph_module, target_node):
+        """ Check if GraphModule contains the target node
+        Args:
+            graph_module: the GraphModule instance we want to check
+            target_op: a tuple of 2 elements, first element is
+                the op type for GraphModule node, second element
+                is the target function for call_function and
+                type of the module for call_module,
+                only thse two types are supported currently
+        """
+        assert target_node[0] in ['call_function', 'call_module'], 'Only call function' \
+            ' and call module are supported right now'
+        modules = dict(graph_module.root.named_modules())
+        for node in graph_module.graph.nodes:
+            if node.op == 'call_function' and node.op == target_node[0] and node.target == target_node[1]:
+                return
+            elif node.op == 'call_module' and node.op == target_node[0] and type(modules[node.target]) == target_node[1]:
+                return
+
+        assert False, 'node:' + str(node) + ' not found in the graph module'
+
+    def checkGraphModeFxOp(self, model, inputs, quantized_op):
+        """ Quantizes model with graph mode quantization on fx and check if the
+        quantized model contains the quantized_op
+
+        Args:
+            model: floating point torch.nn.Module
+            inputs: one positional sample input arguments for model
+            quantized_op: a tuple of 2 elements, first element is
+                the op type for GraphModule node, second element
+                is the target function for call_function and
+                type of the module for call_module
+        """
+        graph = symbolic_trace(model)
+        graph = fuse(graph)
+
+        quantizer = Quantizer()
+        qconfig_dict = {'': get_default_qconfig(torch.backends.quantized.engine)}
+        if is_dynamic:
+            prepared = quantizer.prepare_dynamic(graph, qconfig_dict)
+        else:
+            prepared = quantizer.prepare(graph, qconfig_dict)
+
+        prepared(*inputs)
+        qgraph = quantizer.convert(prepared)
+        qgraph_debug = quantizer.convert(prepared, debug=True)
+
+        result = qgraph(*inputs)
+        result_debug = qgraph_debug(*inputs)
+
+        assert (result - result_debug).abs().max() == 0, \
+            'Expecting debug and non-debug option to produce identical result'
+
+        self.checkGraphModuleHasNode(qgraph, quantized_node)
 
 # Below are a series of neural net models to use in testing quantization
 # Single layer models

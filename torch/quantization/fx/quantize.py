@@ -558,6 +558,8 @@ class Quantizer:
 
     def convert(self, observed, inplace=False, debug=False):
         assert self.activation_post_process_map is not None
+        # move to cpu since we only have quantized cpu kernels
+        observed.eval().cpu()
         observed_root = observed.root
         observed_graph = observed.graph
         if not inplace:
