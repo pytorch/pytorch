@@ -2,7 +2,7 @@
 #include <test/cpp/jit/test_base.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/jit/api/module.h>
-#include <torch/csrc/jit/mobile/export.h>
+#include <torch/csrc/jit/mobile/export_data.h>
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/import_data.h>
 #include <torch/csrc/jit/mobile/module.h>
@@ -117,8 +117,8 @@ void testMobileSaveLoadData() {
   m._save_for_mobile(ss);
   mobile::Module bc = _load_for_mobile(ss);
 
-  _save_parameters(bc, ss_data);
-  auto mobile_params = _load_parameters(ss_data);
+  mobile::_save_data(bc, ss_data);
+  auto mobile_params = mobile::_load_data(ss_data).named_parameters();
   AT_ASSERT(full_params.size() == mobile_params.size());
   for (const auto& e : full_params) {
     AT_ASSERT(e.value.item<int>() == mobile_params[e.name].item<int>());
