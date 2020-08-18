@@ -2265,7 +2265,6 @@ void quantized_normalize_kernel(
               auto dqXVec = qXVec.dequantize(x_fake_scale_vec, x_zp_vec,
                   x_fake_scale_zp_neg_premul_vec);
               for (int dqXVecIdx = 0; dqXVecIdx < dqXVec.size(); dqXVecIdx++) {
-                int64_t vecVecStartIdx = vecStartIdx + dqXVecIdx * kFloatVLen;
                 dqXVec[dqXVecIdx] =
                   (dqXVec[dqXVecIdx] - layer_mean_div_scale_xVec) *
                     gamma_p_vec + beta_vec;
