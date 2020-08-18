@@ -179,8 +179,8 @@ ConvPackedParamsBasePtr<kSpatialDim> conv_packed_params(
   int64_t version = 1;
   if (field_6.size(0) > 1) {
     version = field_6[0].item<int64_t>();
+    TORCH_CHECK(version > 1, "The explicit version should be > 1");
   }
-  TORCH_CHECK(version > 1, "The explicit version should be > 1");
 
   switch (version) {
     case 1: return conv_packed_params_v1<kSpatialDim>(
