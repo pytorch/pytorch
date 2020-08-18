@@ -32,7 +32,7 @@ namespace nn {
 class TORCH_API TransformerEncoderImpl : public Cloneable<TransformerEncoderImpl> {
 
   public:
-    explicit TransformerEncoderImpl(const TransformerEncoderOptions& options_);
+    explicit TransformerEncoderImpl(TransformerEncoderOptions options_);
 
     Tensor forward(
       const Tensor& src,

@@ -225,9 +225,9 @@ Tensor TransformerDecoderLayerImpl::activation(const Tensor& input){
 }
 
 
-// ========================TransformerDecoderLayerImpl=========================
+// ========================TransformerEncoderImpl=========================
 TransformerEncoderImpl::TransformerEncoderImpl(
-  const TransformerEncoderOptions& options_) : options(options_) {
+  TransformerEncoderOptions options_) : options(std::move(options_)) {
   reset();
 }
 
@@ -248,7 +248,8 @@ void TransformerEncoderImpl::reset_parameters() {
     layers->size() == options.num_layers(),
     "TransformerEncoder should have", options.num_layers(), " encoder layers, but got ", layers->size());
 
-  for (size_t i = 0; i < layers->size(); ++i) {
+  size_t num_layers = layers->size();
+  for (size_t i = 0; i < num_layers; ++i) {
     layers->at<TransformerEncoderLayerImpl>(i).reset_parameters();
   }
   // a. No way to know whether module in AnyModule has api to reset_parameters, so replace instead

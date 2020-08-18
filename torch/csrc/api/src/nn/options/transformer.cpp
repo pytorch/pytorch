@@ -13,13 +13,13 @@ TransformerDecoderLayerOptions::TransformerDecoderLayerOptions(int64_t d_model, 
 
 
 TransformerEncoderOptions::TransformerEncoderOptions(
-  const TransformerEncoderLayer& encoder_layer, int64_t num_layers) :
-  encoder_layer_(encoder_layer), num_layers_(num_layers) {}
+  TransformerEncoderLayer encoder_layer, int64_t num_layers) :
+  encoder_layer_(std::move(encoder_layer)), num_layers_(num_layers) {}
 
 
 TransformerEncoderOptions::TransformerEncoderOptions(
-  const TransformerEncoderLayerOptions& encoder_layer_options, int64_t num_layers) :
-  encoder_layer_(encoder_layer_options), num_layers_(num_layers) {}
+  TransformerEncoderLayerOptions encoder_layer_options, int64_t num_layers) :
+  encoder_layer_(std::move(encoder_layer_options)), num_layers_(num_layers) {}
 
 } // namespace nn
 } // namespace torch

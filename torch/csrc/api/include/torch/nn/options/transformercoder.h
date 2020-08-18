@@ -20,9 +20,9 @@ namespace nn {
   /// ```
   struct TORCH_API TransformerEncoderOptions {
     // This constructor will keep the a ref of passed in encoder_layer, so it keeps all the data in encoder_layer.
-    TransformerEncoderOptions(const TransformerEncoderLayer& encoder_layer, int64_t num_layers);
+    TransformerEncoderOptions(TransformerEncoderLayer encoder_layer, int64_t num_layers);
     // This constructor will create a new TransformerEncoderLayer obj based on passed in encoder_layer_options.
-    TransformerEncoderOptions(const TransformerEncoderLayerOptions& encoder_layer_options, int64_t num_layers);
+    TransformerEncoderOptions(TransformerEncoderLayerOptions encoder_layer_options, int64_t num_layers);
 
     /// transformer Encoder Layer
     TORCH_ARG(TransformerEncoderLayer, encoder_layer) = nullptr;
