@@ -5,6 +5,7 @@ from torch import Tensor  # noqa: F401
 from torch._jit_internal import Optional, List  # noqa: F401
 from torch.nn.quantized.modules.utils import hide_packed_params_repr
 from torch.nn.quantized.modules.utils import _quantize_weight
+from torch.quantization.observer import PerChannelMinMaxObserver
 
 class EmbeddingPackedParams(torch.nn.Module):
     _version = 1
@@ -157,7 +158,6 @@ class EmbeddingBag(torch.nn.Module):
         if mod.qconfig is not None and mod.qconfig.weight is not None:
             weight_observer = mod.qconfig.weight()
         else:
-            from torch.quantization import PerChannelMinMaxObserver
             weight_observer = PerChannelMinMaxObserver(dtype=torch.quint8,
                                                        qscheme=torch.per_channel_affine_float_qparams,
                                                        ch_axis=0)
