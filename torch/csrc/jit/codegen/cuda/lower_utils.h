@@ -125,7 +125,7 @@ class ParallelTypeBitmap {
  private:
   ParallelTypeBitmap(const std::bitset<num_p_type>& bs) : bitset_(bs) {}
   std::bitset<num_p_type> bitset_;
-  const static std::unordered_map<ParallelType, int> pt_to_offset_;
+  const static std::unordered_map<ParallelType, int, TypeHash> pt_to_offset_;
   const static std::unordered_map<int, ParallelType> offset_to_pt_;
 };
 
