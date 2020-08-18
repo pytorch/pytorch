@@ -59,7 +59,9 @@ Value* tryConvertToType(
 
   // treat conversion to Optional[T] as conversions to T
   if (OptionalTypePtr op = concrete_type->cast<OptionalType>()) {
-    return tryConvertToType(loc, graph, op->getElementType(), value, allow_conversions);
+    if (value->type()->kind() != OptionalType::Kind && !value->type()->isSubtypeOf(NoneType::get())) {
+      return tryConvertToType(loc, graph, op->getElementType(), value, allow_conversions);
+    }
   }
 
   if (auto value_tuple = value->type()->cast<TupleType>()) {
