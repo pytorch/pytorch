@@ -188,16 +188,16 @@ class Cat(QuantizeHandler):
 @register_quant_pattern((torch.nn.ReLU, torch.nn.Conv2d))
 @register_quant_pattern((torch.nn.functional.relu, torch.nn.Conv2d))
 class ConvRelu(QuantizeHandler):
-     def __init__(self, quantizer, node):
-         super().__init__(quantizer, node)
-         self.relu_node = None
-         if (node.op == 'call_function' and node.target is torch.nn.functional.relu) or \
-            (node.op == 'call_module' and isinstance(quantizer.modules[node.target], torch.nn.ReLU)):
+    def __init__(self, quantizer, node):
+        super().__init__(quantizer, node)
+        self.relu_node = None
+        if (node.op == 'call_function' and node.target is torch.nn.functional.relu) or \
+           (node.op == 'call_module' and isinstance(quantizer.modules[node.target], torch.nn.ReLU)):
             self.relu_node = node
             node = node.args[0]
             self.conv_node = node
-         if node.op == 'call_module':
-             self.conv = quantizer.modules[self.conv_node.target]
+        if node.op == 'call_module':
+            self.conv = quantizer.modules[self.conv_node.target]
 
     def convert(self, quantizer, node, load_arg, debug=False):
         # TODO: debug option for conv module
