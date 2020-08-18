@@ -7,7 +7,10 @@
 #include <torch/csrc/jit/passes/fold_conv_bn.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/fuse_linear.h>
+#include <torch/csrc/jit/passes/fuse_relu.h>
 #include <torch/csrc/jit/passes/graph_rewrite_helper.h>
+#include <torch/csrc/jit/passes/hoist_conv_packed_params.h>
+#include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/prepack_folding.h>
 #include <torch/csrc/jit/passes/remove_dropout.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
@@ -276,16 +279,16 @@ void FoldPrePackingOps(script::Module& m) {
 
 script::Module optimizeForMobile(
     const script::Module& m,
-    const std::set<MobileOptimizerType>& optimization_blacklist,
+    const std::set<MobileOptimizerType>& optimization_blocklist,
     const std::vector<std::string>& preserved_methods) {
   auto cloned_module = m.clone();
   cloned_module.eval();
 
-  if (!optimization_blacklist.count(MobileOptimizerType::CONV_BN_FUSION)) {
+  if (!optimization_blocklist.count(MobileOptimizerType::CONV_BN_FUSION)) {
     cloned_module = FoldConvBatchNorm(cloned_module);
   }
 
-  if (!optimization_blacklist.count(
+  if (!optimization_blocklist.count(
           MobileOptimizerType::INSERT_FOLD_PREPACK_OPS)) {
     insertPrePackedOps(cloned_module);
     cloned_module = freeze_module(cloned_module, preserved_methods);
@@ -293,13 +296,26 @@ script::Module optimizeForMobile(
     FoldPrePackingOps(cloned_module);
   }
 
+  if (!optimization_blocklist.count(
+          MobileOptimizerType::HOIST_CONV_PACKED_PARAMS)) {
+    // freeze again in case it was not done in previous optional passes
+    cloned_module = freeze_module(cloned_module, preserved_methods);
+    HoistConvPackedParams(cloned_module);
+    // and freeze yet again to remove the empty QuantizedConv modules
+    cloned_module = freeze_module(cloned_module, preserved_methods);
+  }
+
   // Run canonical optimizations post freezing
   // since freezing inlines the graph. Otherwise we
   // will have to explicitly call Inlining pass.
   runCanonicalOptimizations(cloned_module);
 
-  if (!optimization_blacklist.count(MobileOptimizerType::REMOVE_DROPOUT)) {
+  if (!optimization_blocklist.count(MobileOptimizerType::REMOVE_DROPOUT)) {
     removeDropout(cloned_module);
+  }
+
+  if (!optimization_blocklist.count(MobileOptimizerType::FUSE_ADD_RELU)) {
+    FuseAddRelu(cloned_module);
   }
 
   return cloned_module;
@@ -329,7 +345,7 @@ void FoldPrePackingOps(script::Module& m) {
 
 script::Module optimizeForMobile(
     const script::Module& module,
-    const std::set<MobileOptimizerType>& blacklist,
+    const std::set<MobileOptimizerType>& blocklist,
     const std::vector<std::string>& preserved_methods) {
   TORCH_INTERNAL_ASSERT(
       "Mobile optimizaiton only available with XNNPACK at the moment. "

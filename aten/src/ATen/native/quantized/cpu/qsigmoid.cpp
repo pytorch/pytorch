@@ -78,7 +78,7 @@ Tensor qnnpack_sigmoid(Tensor input) {
 }
 #endif  // USE_PYTORCH_QNNPACK
 
-Tensor quantized_sigmoid(const Tensor& qx) {
+Tensor sigmoid_quantized_cpu(const Tensor& qx) {
 #ifdef USE_PYTORCH_QNNPACK
   if (at::globalContext().qEngine() == at::QEngine::QNNPACK &&
       qx.scalar_type() == kQUInt8) {

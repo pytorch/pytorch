@@ -18,7 +18,12 @@ from torch.testing._internal.common_utils import TestCase
 from torch.quantization import QuantWrapper, QuantStub, DeQuantStub, \
     default_qconfig, default_dynamic_qconfig, default_per_channel_qconfig, QConfig, default_observer, default_weight_observer, \
     propagate_qconfig_, convert, get_default_qconfig, quantize_dynamic_jit, quantize_jit
-from torch.quantization.default_mappings import DEFAULT_DYNAMIC_MODULE_MAPPING
+from torch.quantization.default_mappings import (
+    DEFAULT_DYNAMIC_MODULE_MAPPING,
+    DEFAULT_QCONFIG_PROPAGATE_WHITE_LIST,
+    DEFAULT_QAT_MODULE_MAPPING,
+)
+
 import unittest
 from torch.testing import FileCheck
 
@@ -27,13 +32,8 @@ def test_only_eval_fn(model, calib_data):
     Default evaluation function takes a torch.utils.data.Dataset or a list of
     input Tensors and run the model on the dataset
     """
-    total, correct = 0, 0
-    for *data, target in calib_data:
-        output = model(*data)
-        _, predicted = torch.max(output, 1)
-        total += target.size(0)
-        correct += (predicted == target).sum().item()
-    return correct / total
+    for inp in calib_data:
+        output = model(*inp)
 
 _default_loss_fn = torch.nn.CrossEntropyLoss()
 def test_only_train_fn(model, train_data, loss_fn=_default_loss_fn):
@@ -140,20 +140,26 @@ def get_script_module(model, tracing, data):
 class QuantizationTestCase(TestCase):
     def setUp(self):
         super().setUp()
-        self.calib_data = [(torch.rand(2, 5, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long)) for _ in range(2)]
-        self.train_data = [(torch.rand(2, 5, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long)) for _ in range(2)]
-        # TODO: reame to img_data2d
-        self.img_data = [(torch.rand(1, 3, 10, 10, dtype=torch.float),
-                          torch.randint(0, 1, (1,), dtype=torch.long))
-                         for _ in range(2)]
-        self.img_data_1d = [(torch.rand(2, 3, 10, dtype=torch.float),
-                             torch.randint(0, 1, (1,), dtype=torch.long))
+        self.calib_data = [[torch.rand(2, 5, dtype=torch.float)] for _ in range(2)]
+        self.train_data = [[torch.rand(2, 5, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long)] for _ in range(2)]
+        self.img_data_1d = [[torch.rand(2, 3, 10, dtype=torch.float)]
                             for _ in range(2)]
-        self.img_data_3d = [(torch.rand(1, 3, 5, 5, 5, dtype=torch.float),
-                             torch.randint(0, 1, (1,), dtype=torch.long))
+        self.img_data_2d = [[torch.rand(1, 3, 10, 10, dtype=torch.float)]
                             for _ in range(2)]
+        self.img_data_3d = [[torch.rand(1, 3, 5, 5, 5, dtype=torch.float)]
+                            for _ in range(2)]
+        self.img_data_1d_train = [[torch.rand(2, 3, 10, dtype=torch.float),
+                                   torch.randint(0, 1, (1,), dtype=torch.long)]
+                                  for _ in range(2)]
+        self.img_data_2d_train = [[torch.rand(1, 3, 10, 10, dtype=torch.float),
+                                   torch.randint(0, 1, (1,), dtype=torch.long)]
+                                  for _ in range(2)]
+        self.img_data_3d_train = [[torch.rand(1, 3, 5, 5, 5, dtype=torch.float),
+                                   torch.randint(0, 1, (1,), dtype=torch.long)]
+                                  for _ in range(2)]
+
         self.img_data_dict = {1 : self.img_data_1d,
-                              2 : self.img_data,
+                              2 : self.img_data_2d,
                               3 : self.img_data_3d}
 
     def checkNoPrepModules(self, module):
@@ -164,6 +170,14 @@ class QuantizationTestCase(TestCase):
         self.assertFalse(hasattr(module, 'quant'))
         self.assertFalse(hasattr(module, 'dequant'))
 
+    def checkNoQconfig(self, module):
+        r"""Checks the module does not contain qconfig
+        """
+        self.assertFalse(hasattr(module, 'qconfig'))
+
+        for child in module.children():
+            self.checkNoQconfig(child)
+
     def checkHasPrepModules(self, module):
         r"""Checks the module contains child
             modules for quantization prepration, e.g.
@@ -173,16 +187,22 @@ class QuantizationTestCase(TestCase):
         self.assertTrue(hasattr(module, 'quant'))
         self.assertTrue(hasattr(module, 'dequant'))
 
-    def checkObservers(self, module):
+    def checkObservers(self, module, propagate_qconfig_list=None):
         r"""Checks the module or module's leaf descendants
             have observers in preperation for quantization
         """
+        if propagate_qconfig_list is None:
+            propagate_qconfig_list = DEFAULT_QCONFIG_PROPAGATE_WHITE_LIST
         if hasattr(module, 'qconfig') and module.qconfig is not None and \
-           len(module._modules) == 0 and not isinstance(module, torch.nn.Sequential):
+           len(module._modules) == 0 and not isinstance(module, torch.nn.Sequential) \
+           and type(module) in propagate_qconfig_list:
             self.assertTrue(hasattr(module, 'activation_post_process'),
                             'module: ' + str(type(module)) + ' do not have observer')
-        for child in module.children():
-            self.checkObservers(child)
+        # we don't need to check observers for child modules of the
+        # qat modules
+        if type(module) not in DEFAULT_QAT_MODULE_MAPPING.values():
+            for child in module.children():
+                self.checkObservers(child)
 
     def checkQuantDequant(self, mod):
         r"""Checks that mod has nn.Quantize and
@@ -288,13 +308,14 @@ class QuantizationTestCase(TestCase):
             self._checkModuleCorrectnessAgainstOrig(orig_mod, loaded_mod, calib_data)
 
     def _checkModuleCorrectnessAgainstOrig(self, orig_mod, test_mod, calib_data):
-        for (inp, _) in calib_data:
-            ref_output = orig_mod(inp)
-            scripted_output = test_mod(inp)
+        for inp in calib_data:
+            ref_output = orig_mod(*inp)
+            scripted_output = test_mod(*inp)
             self.assertEqual(scripted_output, ref_output)
 
 
-    def checkGraphModeOp(self, module, data, quantized_op, tracing=False, debug=False, check=True, eval_mode=True, dynamic=False):
+    def checkGraphModeOp(self, module, inputs, quantized_op, tracing=False, debug=False,
+                         check=True, eval_mode=True, dynamic=False, qconfig=None):
         if debug:
             print('Testing:', str(module))
         qconfig_dict = {'': get_default_qconfig(torch.backends.quantized.engine)}
@@ -302,17 +323,13 @@ class QuantizationTestCase(TestCase):
         if eval_mode:
             module = module.eval()
         if dynamic:
-            qconfig_dict = {'': default_dynamic_qconfig}
-            inputs = data
-        else:
-            *inputs, target = data[0]
-        model = get_script_module(module, tracing, inputs).eval()
+            qconfig_dict = {'': default_dynamic_qconfig if qconfig is None else qconfig}
+        model = get_script_module(module, tracing, inputs[0]).eval()
         if debug:
             print('input graph:', model.graph)
         models = {}
         outputs = {}
         for d in [True, False]:
-            # TODO: _test_only_eval_fn --> default_eval_fn
             if dynamic:
                 models[d] = quantize_dynamic_jit(model, qconfig_dict, debug=d)
                 # make sure it runs
@@ -320,12 +337,12 @@ class QuantizationTestCase(TestCase):
             else:
                 # module under test can contain in-place ops, and we depend on
                 # input data staying constant for comparisons
-                data_copy = copy.deepcopy(data)
+                inputs_copy = copy.deepcopy(inputs)
                 models[d] = quantize_jit(
-                    model, qconfig_dict, test_only_eval_fn, [data_copy], inplace=False,
+                    model, qconfig_dict, test_only_eval_fn, [inputs_copy], inplace=False,
                     debug=d)
                 # make sure it runs
-                outputs[d] = models[d](*inputs)
+                outputs[d] = models[d](*inputs[0])
 
         if debug:
             print('debug graph:', models[True].graph)
@@ -992,28 +1009,3 @@ class ModelMultipleOpsNoAvgPool(torch.nn.Module):
         out = out.view(-1, 3 * 2 * 2)
         out = self.fc(out)
         return out
-
-"""Model to make sure that the observers are not inserted into custom modules.
-"""
-class ModelWithNoQconfigPropagation(nn.Module):
-    class ListOutModule(nn.Module):
-        def __init__(self):
-            super().__init__()
-
-        def forward(self, x):
-            # returns a list of tensors, not supported by observers
-            return [x]
-
-    def __init__(self):
-        super().__init__()
-        self.fc1 = nn.Linear(5, 5).to(dtype=torch.float)
-        self.quant = QuantStub()
-        self.dequant = DeQuantStub()
-        self.no_quant_module = self.ListOutModule()
-
-    def forward(self, x):
-        x = self.quant(x)
-        x = self.fc1(x)
-        x = self.dequant(x)
-        x = self.no_quant_module(x)
-        return x
