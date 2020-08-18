@@ -246,6 +246,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: count_nonzero
    .. automethod:: acosh
    .. automethod:: acosh_
+   .. automethod:: arccosh
+   .. automethod:: arccosh_
    .. automethod:: cpu
    .. automethod:: cross
    .. automethod:: cuda
@@ -427,6 +429,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: neg
    .. automethod:: neg_
    .. automethod:: nelement
+   .. automethod:: nextafter
+   .. automethod:: nextafter_
    .. automethod:: nonzero
    .. automethod:: norm
    .. automethod:: normal_

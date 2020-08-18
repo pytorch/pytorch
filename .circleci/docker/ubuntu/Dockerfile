@@ -111,9 +111,8 @@ RUN bash ./install_jni.sh && rm install_jni.sh
 ARG BUILD_ENVIRONMENT
 ENV BUILD_ENVIRONMENT ${BUILD_ENVIRONMENT}
 
-# Install LLVM dev version
-ADD ./common/install_llvm.sh install_llvm.sh
-RUN bash ./install_llvm.sh
+# Install LLVM dev version (Defined in the pytorch/builder github repository)
+COPY --from=pytorch/llvm:9.0.1 /opt/llvm /opt/llvm
 
 USER jenkins
 CMD ["bash"]
