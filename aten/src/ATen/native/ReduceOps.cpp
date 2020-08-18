@@ -631,6 +631,32 @@ Tensor &any_out(Tensor &result, const Tensor &self, int64_t dim, bool keepdim) {
   }
 }
 
+Tensor &amin_out(Tensor& result, const Tensor& self, IntArrayRef dims, bool keepdim) {
+  ScalarType dtype = get_dtype(result, self, {}, true);
+  auto iter = make_reduction("min_values", result, self, dims, keepdim, dtype);
+  TORCH_CHECK(iter.numel() > 0, "min_values on a tensor with no elements is not defined.");
+  min_values_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor amin(const Tensor& self, IntArrayRef dims, bool keepdim) {
+  Tensor result = at::empty({0}, self.options());
+  return at::amin_out(result, self, dims, keepdim);
+}
+
+Tensor &amax_out(Tensor& result, const Tensor& self, IntArrayRef dims, bool keepdim) {
+  ScalarType dtype = get_dtype(result, self, {}, true);
+  auto iter = make_reduction("max_values", result, self, dims, keepdim, dtype);
+  TORCH_CHECK(iter.numel() > 0, "max_values on a tensor with no elements is not defined.");
+  max_values_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor amax(const Tensor& self, IntArrayRef dims, bool keepdim) {
+  Tensor result = at::empty({0}, self.options());
+  return at::amax_out(result, self, dims, keepdim);
+}
+
 Tensor min_values(const Tensor& self, IntArrayRef dims, bool keepdim) {
   if (dims.size() == 1) {
     return std::get<0>(self.min(dims[0], keepdim));
@@ -655,14 +681,6 @@ Tensor max_values(const Tensor& self, IntArrayRef dims, bool keepdim) {
     max_values_stub(iter.device_type(), iter);
     return result;
   }
-}
-
-Tensor amin(const Tensor& self, IntArrayRef dims, bool keepdim) {
-  return at::min_values(self, dims, keepdim);
-}
-
-Tensor amax(const Tensor& self, IntArrayRef dims, bool keepdim) {
-  return at::max_values(self, dims, keepdim);
 }
 
 Tensor min_values(const Tensor& self, DimnameList dims, bool keepdim) {

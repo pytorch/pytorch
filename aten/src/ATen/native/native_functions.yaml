@@ -1946,10 +1946,6 @@
   use_c10_dispatcher: full
   variants: function, method
 
-- func: amax(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor
-  use_c10_dispatcher: full
-  variants: function, method
-
 - func: max.names_dim(Tensor self, Dimname dim, bool keepdim=False) -> (Tensor values, Tensor indices)
   variants: function, method
 
@@ -1957,6 +1953,12 @@
 
 - func: max_values.names(Tensor self, Dimname[1] dim, bool keepdim=False) -> Tensor
   variants: function, method
+
+- func: amax(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: amax.out(Tensor self, int[1] dim=[], bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
 
 # Return: (Tensor output, Tensor indices)
 - func: max_pool1d_with_indices(Tensor self, int[1] kernel_size, int[1] stride=[], int[1] padding=0, int[1] dilation=1, bool ceil_mode=False) -> (Tensor, Tensor)
@@ -2033,10 +2035,6 @@
   use_c10_dispatcher: full
   variants: function, method
 
-- func: amin(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor
-  use_c10_dispatcher: full
-  variants: function, method
-
 - func: min.names_dim(Tensor self, Dimname dim, bool keepdim=False) -> (Tensor values, Tensor indices)
   variants: function, method
 
@@ -2044,6 +2042,12 @@
 
 - func: min_values.names(Tensor self, Dimname[1] dim, bool keepdim=False) -> Tensor
   variants: function, method
+
+- func: amin(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: amin.out(Tensor self, int[1] dim=[], bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
 
 - func: mkldnn_convolution(Tensor self, Tensor weight, Tensor? bias, int[] padding, int[] stride, int[] dilation, int groups) -> Tensor
   use_c10_dispatcher: full
