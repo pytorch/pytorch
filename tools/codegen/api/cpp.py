@@ -1,6 +1,6 @@
-from tools.codegen.model import *
-from tools.codegen.api.types import TensorOptionsArguments, CppArgument, ThisArgument
-import tools.codegen.local as local
+from ..model import *
+from .types import TensorOptionsArguments, CppArgument, ThisArgument
+from .. import local
 from typing import Optional, Sequence, Union, Callable, List
 
 # This file describes the translation of JIT schema to the public C++

@@ -1,10 +1,9 @@
-from tools.codegen.model import *
+from ..model import *
 
-from tools.codegen.api.types import CppArgument, DispatcherExpr, TensorOptionsArguments, \
+from .types import CppArgument, DispatcherExpr, TensorOptionsArguments, \
     DispatcherArgument, ThisArgument, LegacyDispatcherArgument
-import tools.codegen.api.cpp as cpp
-import tools.codegen.api.legacy_dispatcher as legacy_dispatcher
-import tools.codegen.local as local
+from . import cpp, legacy_dispatcher
+from .. import local
 
 import itertools
 from typing import Sequence, Optional

@@ -210,6 +210,9 @@ else
 
   if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
 
+    # Temporary
+    pip install dataclasses
+
     # ppc64le build fails when WERROR=1
     # set only when building other architectures
     # only use for "python setup.py install" line

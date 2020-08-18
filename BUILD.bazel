@@ -108,9 +108,14 @@ cc_test(
     ],
 )
 
+# TODO: refactor this into its own library (but how to make
+# a binary based off of a module in a library?)
 py_binary(
     name = "gen",
-    srcs = ["tools/codegen/gen.py"],
+    srcs = ["tools/setup_helpers/gen.py"],
+    deps = [
+        ":tools_codegen"
+    ],
 )
 
 genrule(
@@ -143,9 +148,8 @@ genrule(
 )
 
 py_library(
-    name = "code_template",
-    srcs = ["tools/codegen/code_template.py"],
-    imports = ["."],
+    name = "tools_codegen",
+    srcs = glob(["tools/codegen/**/*.py"]),
 )
 
 py_library(
@@ -155,7 +159,7 @@ py_library(
         "tools/autograd/*.yaml",
         "tools/autograd/templates/*",
     ]),
-    deps = [":code_template"],
+    deps = [":tools_codegen"],
 )
 
 py_library(
