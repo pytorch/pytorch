@@ -21,23 +21,7 @@ void compare_torchpy_jit(const char* model_filename, at::Tensor input) {
   ASSERT_TRUE(ref_output.equal(output));
 }
 
-TEST(TorchpyTest, SimpleTest) {
-  at::Tensor input = torch::ones(at::IntArrayRef({10, 20}));
-  torchpy::init();
-  {
-    auto model = torchpy::load("torchpy/example/simple.pt");
-    at::Tensor output = model.forward(input);
-  }
-  torchpy::finalize();
-}
-
 TEST(TorchpyTest, SimpleModel) {
-  torchpy::init();
-  {
-    compare_torchpy_jit(
-        "torchpy/example/simple.pt", torch::ones(at::IntArrayRef({10, 20})));
-  }
-  torchpy::finalize();
   torchpy::init();
   {
     compare_torchpy_jit(
