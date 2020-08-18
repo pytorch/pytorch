@@ -2,7 +2,7 @@
 
 #include <torch/nn/cloneable.h>
 #include <torch/nn/module.h>
-#include <torch/nn/options/transformer.h>
+#include <torch/nn/options/transformerlayer.h>
 #include <torch/nn/pimpl.h>
 #include <torch/nn/modules/linear.h>
 #include <torch/nn/modules/dropout.h>
@@ -33,6 +33,8 @@ namespace nn {
 class TORCH_API TransformerEncoderLayerImpl : public Cloneable<TransformerEncoderLayerImpl> {
 
   public:
+    TransformerEncoderLayerImpl(int64_t d_model, int64_t nhead)
+     : TransformerEncoderLayerImpl(TransformerEncoderLayerOptions(d_model, nhead)) {}
     explicit TransformerEncoderLayerImpl(const TransformerEncoderLayerOptions& options_);
 
     Tensor forward(
