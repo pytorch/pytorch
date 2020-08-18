@@ -138,8 +138,6 @@ class TestFFT(TestCase):
                 self.assertEqual(x, y, exact_dtype=(
                     forward != torch.fft.fft or x.is_complex()))
 
-
-
     # Note: NumPy will throw a ValueError for an empty input
     @skipCUDAIfRocm
     @skipCPUIfNoMkl
