@@ -119,6 +119,58 @@ SparseTensor& log1p_sparse_(SparseTensor& t) {
 }
 
 // --------------------------------------------------------------------
+// abs(SparseTensor)
+// --------------------------------------------------------------------
+
+// TODO: add in-place variant
+
+SparseTensor& abs_out_sparse(SparseTensor& r, const SparseTensor& t) {
+  AT_ASSERT(r.is_sparse());
+  AT_ASSERT(t.is_sparse());
+
+  if (is_same_tensor(r, t)) {
+    // don't have in-place abs for uncoalesced input because coalesce() is not in-place
+    TORCH_CHECK(r.is_coalesced(), "abs: in-place on uncoalesced tensors is not supported yet!");
+  }
+  else {
+    copy_sparse_to_sparse_(r, t.coalesce());
+  }
+  r._values().abs_();
+  return r;
+}
+
+SparseTensor& abs_sparse_(SparseTensor& t) {
+  TORCH_CHECK(t.is_coalesced(), "abs: in-place on uncoalesced tensors is not supported yet!");
+  return abs_out_sparse(t, t);
+}
+
+// --------------------------------------------------------------------
+// sign(SparseTensor)
+// --------------------------------------------------------------------
+
+// TODO: add in-place variant
+
+SparseTensor& sign_out_sparse(SparseTensor& r, const SparseTensor& t) {
+  AT_ASSERT(r.is_sparse());
+  AT_ASSERT(t.is_sparse());
+
+  if (is_same_tensor(r, t)) {
+    // don't have in-place abs for uncoalesced input because coalesce() is not in-place
+    TORCH_CHECK(r.is_coalesced(), "sign: in-place on uncoalesced tensors is not supported yet!");
+  }
+  else {
+    copy_sparse_to_sparse_(r, t.coalesce());
+  }
+  r._values().sign_();
+  return r;
+}
+
+SparseTensor& sign_sparse_(SparseTensor& t) {
+  TORCH_CHECK(t.is_coalesced(), "sign: in-place on uncoalesced tensors is not supported yet!");
+  return sign_out_sparse(t, t);
+}
+
+// --------------------------------------------------------------------
 // pow(SparseTensor, Scalar)
 // --------------------------------------------------------------------
 

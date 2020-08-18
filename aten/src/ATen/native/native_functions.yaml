@@ -224,8 +224,14 @@
 - func: abs_(Tensor(a!) self) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: function, method
+  dispatch:
+    CPU, CUDA: abs_
+    SparseCPU, SparseCUDA: abs_sparse_
 
 - func: abs.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: abs_out
+    SparseCPU, SparseCUDA: abs_out_sparse
 
 # Note [Adding an alias]
 # To add an alias do the following:
@@ -5326,10 +5332,14 @@
 - func: sign_(Tensor(a!) self) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: method
+  dispatch:
+    CPU, CUDA: sign_
+    SparseCPU, SparseCUDA: sign_sparse_
 
 - func: sign.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA: sign_out
+    SparseCPU, SparseCUDA: sign_out_sparse
 
 - func: signbit(Tensor self) -> Tensor
   use_c10_dispatcher: full
