@@ -11,17 +11,12 @@ from torch.quantization._quantize_fx import (
 )
 
 # eager mode quantization
-from torch.quantization import default_qconfig, propagate_qconfig_, default_qat_qconfig
-from torch.quantization import prepare, prepare_qat, convert
+from torch.quantization import default_qconfig
 
 # test utils
 from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
 )
-
-# sys libs
-import copy
-import itertools
 
 class TestQuantizeFx(QuantizationTestCase):
     def test_functional(self):
@@ -79,8 +74,8 @@ class TestQuantizeFx(QuantizationTestCase):
             a = m(*inputs)
             b = graph(*inputs)
             c = script(*inputs)
-            assert (a-b).abs().max() == 0
-            assert (a-c).abs().max() == 0
+            assert (a - b).abs().max() == 0
+            assert (a - c).abs().max() == 0
             assert torch.allclose(a, b)
             assert torch.allclose(a, c)
 

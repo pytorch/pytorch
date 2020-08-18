@@ -25,7 +25,6 @@ from .pattern_utils import (
 
 from .utils import _parent_name
 
-from collections import OrderedDict
 import copy
 
 # Fusion Patterns
@@ -132,7 +131,7 @@ class Fuser:
 
     def _find_matches(self, root, graph, patterns):
         modules = dict(root.named_modules())
-        match_map = {} # node name -> (root_node, match_value?)
+        match_map = {}  # node name -> (root_node, match_value?)
 
         def apply_match(pattern, node, match):
             if isinstance(pattern, tuple):
