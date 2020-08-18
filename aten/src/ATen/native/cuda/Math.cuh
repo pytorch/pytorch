@@ -205,7 +205,7 @@ static inline C10_HOST_DEVICE scalar_t calc_gcd(scalar_t a_in, scalar_t b_in) {
  * Direct inquiries to 30 Frost Street, Cambridge, MA 02140
  */
 template <typename scalar_t>
-static inline C10_HOST_DEVICE scalar_t chbevl(scalar_t _x, scalar_t array[], size_t len) {
+static inline C10_HOST_DEVICE scalar_t chbevl(scalar_t _x, const scalar_t array[], size_t len) {
   using accscalar_t = at::acc_type<scalar_t, true>;
   accscalar_t x = static_cast<accscalar_t>(_x);
   accscalar_t b0, b1, b2;
@@ -229,15 +229,13 @@ static inline C10_HOST_DEVICE scalar_t chbevl(scalar_t _x, scalar_t array[], siz
  * Copyright 1984, 1987, 2000 by Stephen L. Moshier
  */
 template <typename scalar_t>
-static inline C10_HOST_DEVICE scalar_t calc_i0(scalar_t _x) {
-  using accscalar_t = at::acc_type<scalar_t, true>;
-  accscalar_t x = static_cast<accscalar_t>(_x);
+static inline C10_HOST_DEVICE scalar_t calc_i0(scalar_t x) {
   /* Chebyshev coefficients for exp(-x) I0(x)
    * in the interval [0,8].
    *
    * lim(x->0){ exp(-x) I0(x) } = 1.
    */
-  const accscalar_t A[] = {
+  const scalar_t A[] = {
     -4.41534164647933937950E-18,
     3.33079451882223809783E-17,
     -2.43127984654795469359E-16,
@@ -275,7 +273,7 @@ static inline C10_HOST_DEVICE scalar_t calc_i0(scalar_t _x) {
    *
    * lim(x->inf){ exp(-x) sqrt(x) I0(x) } = 1/sqrt(2pi).
    */
-  const accscalar_t B[] = {
+  const scalar_t B[] = {
     -7.23318048787475395456E-18,
     -4.83050448594418207126E-18,
     4.46562142029675999901E-17,
@@ -307,11 +305,11 @@ static inline C10_HOST_DEVICE scalar_t calc_i0(scalar_t _x) {
     x = -x;
   }
   if (x <= 8.0) {
-    accscalar_t y = (x / 2.0) - 2.0;
-    return static_cast<scalar_t>(::exp(x) * chbevl(y, A, 30));
+    scalar_t y = (x / 2.0) - 2.0;
+    return (::exp(x) * chbevl(y, A, 30));
   }
 
-  return static_cast<scalar_t>(::exp(x) * static_cast<accscalar_t>(chbevl((32.0 / x - 2.0)), B, 25) / ::sqrt(x));
+  return (::exp(x) * chbevl(static_cast<scalar_t>(32.0 / x - 2.0), B, 25) / ::sqrt(x));
 }
 
 }
