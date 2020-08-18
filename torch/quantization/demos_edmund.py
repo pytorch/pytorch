@@ -71,21 +71,34 @@ def adaround_demo(input_model, data_loader, data_loader_test):
     # results.append(str('Evaluation accuracy on %d images, %2.2f' % (num_eval_batches * eval_batch_size, top1.avg)))
     # results.append('qat quantization accuracy results, no adaround')
 
+    # model.qconfig = _adaround.adaround_qconfig
+    names = _adaround.prepare_adaround(model, data_loader_test)
+    # also does the training, so will need to rename this
     with_adaround = copy.deepcopy(model)
-    without_adaround = copy.deepcopy(model)
+    without_adaround = copy.deepcopy(with_adaround)
 
-    for batch in range(1, 4):
-        # model = copy.deepcopy(mo)
-        _adaround.learn_adaround_sequential(with_adaround, data_loader_test, batch, with_adaround=True)
-        _adaround.learn_adaround_sequential(without_adaround, data_loader_test, batch, with_adaround=False)
+    top1, top5 = evaluate(without_adaround, criterion, data_loader_test, neval_batches=num_eval_batches)
+    results.append(str('Evaluation accuracy on %d images, %2.2f' % (num_eval_batches * eval_batch_size, top1.avg)))
+    results.append('just qat accuracy results')
+    results.append('')
+
+    names = []
+    count = 0
+    for name, submodule in with_adaround.named_modules():
+        names.append(name)
+        count += 1
+        if count == 3:
+            break
+
+    for name in names:
+        _adaround.learn_adaround(with_adaround, data_loader_test, name)
 
         top1, top5 = evaluate(with_adaround, criterion, data_loader_test, neval_batches=num_eval_batches)
         results.append(str('Evaluation accuracy on %d images, %2.2f' % (num_eval_batches * eval_batch_size, top1.avg)))
+        results.append(name)
         results.append('with adaround accuracy results')
-        top1, top5 = evaluate(without_adaround, criterion, data_loader_test, neval_batches=num_eval_batches)
-        results.append(str('Evaluation accuracy on %d images, %2.2f' % (num_eval_batches * eval_batch_size, top1.avg)))
-        results.append('just qat without adaround accuracy results')
-        results.append('')
+
+
 
     # _adaround.learn_adaround_parallel(model, data_loader_test)
 
@@ -204,5 +217,5 @@ def equalize_accuracy_demo(input_model, data_loader, data_loader_test):
 if __name__ == "__main__":
     # equalize_accuracy_demo(*imagenet_download())
     # correct_bias_demo(*imagenet_download())
-    # adaround_demo(*imagenet_download())
-    _adaround.learn_adaround_sequential(*load_conv())
+    adaround_demo(*imagenet_download())
+    # _adaround.quantize_adaround(*load_conv())

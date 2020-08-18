@@ -15,11 +15,11 @@ _supported_modules = {nn.Conv2d, nn.Linear}
 # Hyper parameters for loss function
 beta_high = 8
 beta_low = 2
-norm_scaling = 100
-regularization_scaling = .01
+norm_scaling = 10
+regularization_scaling = .1
 
-#
-number_of_epochs = 100
+# Adaround training parameters
+number_of_epochs = 10
 number_of_calibration_batches = 10
 learning_rate = .1
 
@@ -170,7 +170,7 @@ def loss_function(model, count):
     for name, submodule in model.named_modules():
         if isinstance(submodule, OuputWrapper):
             result = result + loss_function_leaf(submodule, count)
-            result = result * .95
+            result = result * .90
     return result
 
 def add_wrapper_class(model, white_list=DEFAULT_QAT_MODULE_MAPPING.keys()):
@@ -178,7 +178,6 @@ def add_wrapper_class(model, white_list=DEFAULT_QAT_MODULE_MAPPING.keys()):
     This information is used in computing the loss function.
     '''
     for name, submodule in model.named_modules():
-        print("type of submodule in add_wrapper_class: ", type(submodule))
         if type(submodule) in white_list:
             parent_name, child_name = parent_child_names(name)
             parent_module = get_module(model, parent_name)
@@ -186,16 +185,37 @@ def add_wrapper_class(model, white_list=DEFAULT_QAT_MODULE_MAPPING.keys()):
             submodule.qconfig = adaround_qconfig
 
 
-
-def learn_adaround_sequential(float_model, data_loader_test, target_layers=None, with_adaround=True):
-    ''' Convert number of batches to a dict? that tells you names of layer you want adaround applied to
+def prepare_adaround(float_model, dataset, white_list=_supported_modules):
+    ''' Given a floating point model, the model goes through qat quantization (without the convert step)
     '''
-    if target_layers is None:
-        target_layers = []
-        for name, submodule in float_model.named_modules():
-            if type(submodule) in _supported_modules:
-                target_layers.append(name)
+    # initiallizing all the wrappers
+    add_wrapper_class(float_model, white_list)
+    float_model.qconfig = torch.quantization.default_qat_qconfig
+    torch.quantization.prepare_qat(float_model, inplace=True)
 
+    count = 0
+    for data in dataset:
+        float_model(data[0])
+        count += 1
+        if count == number_of_calibration_batches:
+            break
+
+    names_for_adaround = []
+    for name, submodule in float_model.named_modules():
+        if isinstance(submodule, OuputWrapper):
+            names_for_adaround.append(name)
+    return names_for_adaround
+
+def quantize_adaround(float_model, dataset, white_list=_supported_modules):
+    ''' does the qat preparation and training then learns the adaround parameters
+    '''
+    names = prepare_adaround(float_model, dataset, white_list)
+    learn_adaround(float_model, dataset, names)
+
+def learn_adaround(float_model, tuning_dataset, target_layers=None):
+    ''' Implements the learning procedure for tuning the rounding scheme of the layers specified
+    for the given model
+    '''
     def optimize_V(leaf_module):
         '''Takes in a leaf module with an adaround attached to its
         weight_fake_quant attribute'''
@@ -204,7 +224,7 @@ def learn_adaround_sequential(float_model, data_loader_test, target_layers=None,
         optimizer = torch.optim.Adam(dummy_generator(), lr=learning_rate)
 
         count = 0
-        for data in data_loader_test:
+        for data in tuning_dataset:
             output = float_model(data[0])
             loss = loss_function(float_model, count)
             # loss = loss_function_leaf(leaf_module, count)
@@ -218,22 +238,16 @@ def learn_adaround_sequential(float_model, data_loader_test, target_layers=None,
             if count == number_of_epochs:
                 return
 
-    # initiallizing all the wrappers
-    V_s = add_wrapper_class(float_model, _supported_modules)
-    float_model.qconfig = torch.quantization.default_qat_qconfig
-    torch.quantization.prepare_qat(float_model, inplace=True)
-
-    count = 0
-    for data in data_loader_test:
-        print(float_model)
-        float_model(data[0])
-        count += 1
-        if count == number_of_calibration_batches:
-            break
+    if target_layers is None:
+        target_layers = []
+        for name, submodule in float_model.named_modules():
+            if type(submodule) in _supported_modules:
+                target_layers.append(name)
 
     for layer_name in target_layers:
-        print(target_layers)
         layer = get_module(float_model, layer_name)
+        print(layer)
+        print(layer_name)
         print("quantized submodule")
         optimize_V(layer)
         print("finished optimizing adaround instance")
@@ -241,47 +255,6 @@ def learn_adaround_sequential(float_model, data_loader_test, target_layers=None,
 
     return float_model
 
-def learn_adaround_parallel(float_model, data_loader_test):
-    # initializing V's and adding wrapper modules
-    V_s = add_wrapper_class(float_model, _supported_modules)
-
-    for name, submodule in float_model.named_modules():
-        if isinstance(submodule, OuputWrapper):
-            submodule.wrapped_module.qconfig = adaround_qconfig
-            torch.quantization.prepare_qat(submodule, inplace=True)
-
-    # calibrating the scale and offset parameters
-    count = 0
-    for data in data_loader_test:
-        float_model(data[0])
-        count += 1
-        if count == number_of_calibration_batches:
-            break
-
-    def dummy_generator():
-        for name, submodule in float_model.named_modules():
-            if isinstance(submodule, OuputWrapper):
-                yield submodule.wrapped_module.weight_fake_quant.continous_V
-    optimizer = torch.optim.Adam(dummy_generator(), lr=.1)
-
-    # training all the continous V variables
-    count = 0
-    for data in data_loader_test:
-        output = float_model(data[0])
-        loss = loss_function(float_model, count)
-        # loss = loss_function_leaf(leaf_module, count)
-
-        print("loss: ", loss)
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-        count += 1
-        print("running count during optimazation: ", count)
-        if count == number_of_epochs:
-            return
-
-
-
 if __name__ == "__main__":
     # main()
-    learn_adaround_sequential(*load_conv())
+    learn_adaround(*load_conv())
