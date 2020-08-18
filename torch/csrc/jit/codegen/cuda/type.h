@@ -196,6 +196,7 @@ enum class LaunchConfigType {
 } // namespace jit
 } // namespace torch
 
+#if defined(__GNUC__) && __GNUC__ < 6
 namespace std {
 
 // https://stackoverflow.com/questions/18837857/cant-use-enum-class-as-unordered-map-key
@@ -222,3 +223,4 @@ HASH_ENUM_CLASS(LaunchConfigType)
 #undef HASH_ENUM_CLASS
 
 } // namespace std
+#endif
