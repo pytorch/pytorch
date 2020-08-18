@@ -184,7 +184,7 @@ def _rebuild_qtensor(storage, storage_offset, size, stride, quantizer_params, re
     if qscheme == torch.per_tensor_affine:
         _, scale, zero_point = quantizer_params
         tensor = torch._empty_affine_quantized(size, scale=scale, zero_point=zero_point, dtype=storage.dtype)
-    elif qscheme == torch.per_channel_affine or qscheme == torch.per_channel_affine_float_qparams:
+    elif qscheme in (torch.per_channel_affine, torch.per_channel_affine_float_qparams):
         _, scales, zero_points, axis = quantizer_params
         if type(scales) is list and type(zero_points) is list:
             if qscheme == torch.per_channel_affine:
