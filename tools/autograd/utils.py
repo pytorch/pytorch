@@ -9,11 +9,7 @@ __all__ = [
     'split_name_params', 'write',
 ]
 
-try:
-    from src.ATen.code_template import CodeTemplate
-except ImportError:
-    from tools.shared.module_loader import import_module
-    CodeTemplate = import_module('code_template', 'aten/src/ATen/code_template.py').CodeTemplate
+from tools.codegen.code_template import CodeTemplate
 
 # You should use these lines, rather than doing it manually.
 # Especially if you see this error!

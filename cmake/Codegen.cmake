@@ -144,13 +144,7 @@ if(INTERN_BUILD_ATEN_OPS)
   endforeach()
   list(APPEND ATen_CPU_SRCS ${cpu_kernel_cpp})
 
-  set(cwrap_files
-    ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/Declarations.cwrap
-    ${CMAKE_CURRENT_LIST_DIR}/../aten/src/THCUNN/generic/THCUNN.h
-    ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/nn.yaml
-    ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/native_functions.yaml)
-
-  file(GLOB all_python "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/*.py")
+  file(GLOB all_python "${CMAKE_CURRENT_LIST_DIR}/../tools/codegen/*.py")
 
   set(GEN_ROCM_FLAG)
   if(USE_ROCM)
@@ -188,11 +182,10 @@ if(INTERN_BUILD_ATEN_OPS)
   endif()
 
   set(GEN_COMMAND
-      "${PYTHON_EXECUTABLE}" ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/gen.py
+      "${PYTHON_EXECUTABLE}" ${CMAKE_CURRENT_LIST_DIR}/../tools/codegen/gen.py
       --source-path ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen
       --install_dir ${CMAKE_BINARY_DIR}/aten/src/ATen
       ${GEN_ROCM_FLAG}
-      ${cwrap_files}
       ${CUSTOM_BUILD_FLAGS}
       ${GEN_VULKAN_FLAGS}
   )
@@ -218,7 +211,9 @@ if(INTERN_BUILD_ATEN_OPS)
 
   add_custom_command(OUTPUT ${generated_cpp} ${cuda_generated_cpp} ${core_generated_cpp}
     COMMAND ${GEN_COMMAND}
-    DEPENDS ${all_python} ${all_templates} ${cwrap_files})
+    DEPENDS ${all_python} ${all_templates}
+      ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/native_functions.yaml
+    )
 
   # Generated headers used from a CUDA (.cu) file are
   # not tracked correctly in CMake. We make the libATen.so depend explicitly

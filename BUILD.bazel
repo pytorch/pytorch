@@ -110,15 +110,12 @@ cc_test(
 
 py_binary(
     name = "gen",
-    srcs = ["aten/src/ATen/gen.py"],
+    srcs = ["tools/codegen/gen.py"],
 )
 
 genrule(
     name = "generated_cpp",
     srcs = [
-        "aten/src/ATen/Declarations.cwrap",
-        "aten/src/THCUNN/generic/THCUNN.h",
-        "aten/src/ATen/nn.yaml",
         "aten/src/ATen/native/native_functions.yaml",
     ] + glob(["aten/src/ATen/templates/**"]),
     outs = [
@@ -143,14 +140,14 @@ genrule(
         "aten/src/ATen/core/TensorMethods.cpp",
         "aten/src/ATen/core/ATenOpList.cpp",
     ],
-    cmd = "$(location :gen) --source-path aten/src/ATen --install_dir `dirname $(location aten/src/ATen/Declarations.yaml)` aten/src/ATen/Declarations.cwrap aten/src/THCUNN/generic/THCUNN.h aten/src/ATen/nn.yaml aten/src/ATen/native/native_functions.yaml",
+    cmd = "$(location :gen) --source-path aten/src/ATen --install_dir `dirname $(location aten/src/ATen/Declarations.yaml)`",
     tools = [":gen"],
 )
 
 py_library(
     name = "code_template",
-    srcs = ["aten/src/ATen/code_template.py"],
-    imports = ["aten"],
+    srcs = ["tools/codegen/code_template.py"],
+    imports = ["."],
 )
 
 py_library(

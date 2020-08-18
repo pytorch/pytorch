@@ -304,10 +304,6 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   # Generate files
   set(TOOLS_PATH "${TORCH_ROOT}/tools")
 
-  configure_file("${TORCH_ROOT}/aten/src/ATen/common_with_cwrap.py"
-    "${TOOLS_PATH}/shared/cwrap_common.py"
-    COPYONLY)
-
   configure_file("${TORCH_SRC_DIR}/_utils_internal.py"
     "${TOOLS_PATH}/shared/_utils_internal.py"
     COPYONLY)

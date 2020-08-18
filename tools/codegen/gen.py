@@ -1,18 +1,16 @@
-import sys
 import os
 import contextlib
 import textwrap
 import itertools
-from typing import List, Sequence, Dict, Optional, Iterator, Tuple, Set, Callable, Union, Any, TypeVar, DefaultDict
+from typing import List, Sequence, Dict, Optional, Iterator, Tuple, Set, Callable, Any, TypeVar, DefaultDict, Union
 import yaml
 from enum import Enum
-from collections import OrderedDict, defaultdict
+from collections import OrderedDict
 import argparse
+import pathlib
+import functools
 
-# Reusing CodeTemplate from existing codegen
-sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../aten/src/ATen"))
-from code_template import CodeTemplate
-
+from tools.codegen.code_template import CodeTemplate
 from tools.codegen.model import *
 from tools.codegen.api.types import *
 import tools.codegen.api.cpp as cpp
@@ -129,9 +127,13 @@ def concatmap_nf(func: Callable[[NativeFunction], List[T]], native_functions: Se
 
 Target = Enum('Target', ('DEFINITION', 'DECLARATION', 'REGISTRATION'))
 
-def compute_type_method(dispatch: Optional[str], *, target: Target, op_registration_whitelist: Optional[Set[str]], def_only: bool = False) -> Callable[[NativeFunction], List[str]]:
+def compute_type_method(
+    dispatch: Optional[str], *,
+    target: Target, op_registration_whitelist: Optional[Set[str]], def_only: bool = False
+) -> Callable[[NativeFunction], List[str]]:
     if def_only:
         assert target is Target.REGISTRATION
+
     def func(f: NativeFunction) -> List[str]:
         if dispatch is not None:
             if f.dispatch is None or dispatch not in f.dispatch:
@@ -140,7 +142,8 @@ def compute_type_method(dispatch: Optional[str], *, target: Target, op_registrat
             if f.dispatch is not None and target is not Target.REGISTRATION:
                 return []
 
-        if op_registration_whitelist is not None and f"aten::{f.func.name.name}" not in op_registration_whitelist and target is Target.REGISTRATION:
+        if op_registration_whitelist is not None and \
+                f"aten::{f.func.name.name}" not in op_registration_whitelist and target is Target.REGISTRATION:
             return []
 
         name = legacy_dispatcher.name(f.func)
@@ -246,7 +249,8 @@ def compute_type_method(dispatch: Optional[str], *, target: Target, op_registrat
                     else:
                         nl = ""
 
-                    payload = f"c10::impl::hacky_wrapper_for_legacy_signatures<{returns_type} ({dispatcher_args_types_str})>({nl}TORCH_FN({type_name}))"
+                    payload = "c10::impl::hacky_wrapper_for_legacy_signatures<" \
+                        f"{returns_type} ({dispatcher_args_types_str})>({nl}TORCH_FN({type_name}))"
 
                 else:
                     payload = f"torch::CppFunction::makeUnboxedOnly(&{type_name})"
@@ -393,8 +397,9 @@ def compute_backend_select(*, target: Target) -> Callable[[NativeFunction], List
             # I don't think there's actually a good reason to generate
             # these two cases differently
             if legacy_dispatcher_tensor_args:
+                tensor_args = ', '.join(a.name for a in legacy_dispatcher_tensor_args)
                 compute_dk = f"""\
-DispatchKeySet _dk_set = DispatchKeySet(options.computeDispatchKey()) | c10::detail::multi_dispatch_key_set({', '.join(a.name for a in legacy_dispatcher_tensor_args)});
+DispatchKeySet _dk_set = DispatchKeySet(options.computeDispatchKey()) | c10::detail::multi_dispatch_key_set({tensor_args});
   DispatchKeySet _dk_mask = c10::DispatchKeySet(DispatchKeySet::FULL_AFTER, DispatchKey::BackendSelect);
   DispatchKey _dk = c10::impl::dispatchTypeId(_dk_set, _dk_mask);"""
             else:
@@ -417,7 +422,7 @@ DispatchKeySet _dk_set = DispatchKeySet(options.computeDispatchKey()) | c10::det
             else:
                 return [f"""m.impl_UNBOXED("aten::{f.func.name}", {name});"""]
         elif target is Target.DECLARATION:
-            assert False
+            raise AssertionError()
         else:
             assert_never(target)
     return go
@@ -600,9 +605,11 @@ def compute_cpp_argument_yaml(cpp_a: CppArgument, *, schema_order: bool, kwarg_o
             arg['default'] = cpp_a.default
         return arg
     elif isinstance(cpp_a.argument, ThisArgument):
-        assert False
+        raise AssertionError()
     elif isinstance(cpp_a.argument, Argument):
-        return compute_argument_yaml(cpp_a.argument, schema_order=schema_order, kwarg_only_set=kwarg_only_set, out_arg_set=out_arg_set, name_to_field_name=name_to_field_name)
+        return compute_argument_yaml(
+            cpp_a.argument, schema_order=schema_order,
+            kwarg_only_set=kwarg_only_set, out_arg_set=out_arg_set, name_to_field_name=name_to_field_name)
 
 def compute_argument_yaml(a: Argument, *, schema_order: bool, kwarg_only_set: Set[str],
                           out_arg_set: Set[str], name_to_field_name: Dict[str, str]) -> object:
@@ -649,13 +656,23 @@ def compute_declaration_yaml(f: NativeFunction) -> List[object]:
     out_arg_set = set(a.name for a in f.func.out_arguments)
 
     cpp_args = cpp.arguments(f.func)
-    arguments = [compute_cpp_argument_yaml(cpp_a, schema_order=False, kwarg_only_set=kwarg_only_set, out_arg_set=out_arg_set, name_to_field_name=name_to_field_name) for cpp_a in cpp_args]
+    arguments = [
+        compute_cpp_argument_yaml(
+            cpp_a, schema_order=False,
+            kwarg_only_set=kwarg_only_set, out_arg_set=out_arg_set, name_to_field_name=name_to_field_name)
+        for cpp_a in cpp_args
+    ]
 
     # See Note [Byte-for-byte compatibility]
     # NB: NOT actually schema order.  This is almost certainly a BUG.
     schema_order_jit_arguments = list(itertools.chain(f.func.arguments, f.func.out_arguments, f.func.kwarg_only_arguments))
 
-    schema_order_arguments = [compute_argument_yaml(a, schema_order=True, kwarg_only_set=kwarg_only_set, out_arg_set=out_arg_set, name_to_field_name=name_to_field_name) for a in schema_order_jit_arguments]
+    schema_order_arguments = [
+        compute_argument_yaml(
+            a, schema_order=True,
+            kwarg_only_set=kwarg_only_set, out_arg_set=out_arg_set, name_to_field_name=name_to_field_name)
+        for a in schema_order_jit_arguments
+    ]
 
     cpp_schema_order_types = [cpp.argument(a).type for a in schema_order_jit_arguments]
     cpp_returns = cpp.returns_type(f.func.returns)
@@ -694,186 +711,286 @@ def compute_declaration_yaml(f: NativeFunction) -> List[object]:
 #
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
-parser = argparse.ArgumentParser(description='Generate ATen source files')
-parser.add_argument(
-    '-s',
-    '--source-path',
-    help='path to source directory for ATen',
-    default='.')
-parser.add_argument(
-    '-o',
-    '--output-dependencies',
-    help='output a list of dependencies into the given file and exit')
-parser.add_argument(
-    '-d', '--install_dir', help='output directory', default='ATen')
-# TODO: remove this, it does nothing
-parser.add_argument(
-    '--rocm',
-    action='store_true',
-    help='reinterpret CUDA as ROCm/HIP and adjust filepaths accordingly')
-# TODO: remove this, we should just unconditionally generate Vulkan
-parser.add_argument(
-    '--vulkan',
-    action='store_true',
-    help='Generate Vulkan backend functions')
-parser.add_argument(
-    '--op_registration_whitelist',
-    nargs='*',
-    help='filter op registrations by the whitelist (if set); '
-         'each item is `namespace`::`operator name` without overload name; '
-         'e.g.: aten::empty aten::conv2d ...')
-parser.add_argument(
-    '--backend_whitelist',
-    nargs='*',
-    help='filter dispatch backend by the whitelist (if set), '
-         'e.g.: CPU CUDA QuantizedCPU ...')
-parser.add_argument(
-    '--per_op_registration',
-    action='store_true',
-    help='group function registrations by op name and write to separate files; '
-         'must also set --op_registration_whitelist param')
-parser.add_argument(
-    '--force_schema_registration',
-    action='store_true',
-    help='force it to generate schema-only registrations for all ops, including'
-         'those that are not listed on --op_registration_whitelist')
-options = parser.parse_args()
+@functools.lru_cache(maxsize=None)
+def _read_template(template_fn: str) -> CodeTemplate:
+    return CodeTemplate.from_file(template_fn)
 
-op_registration_whitelist: Optional[Set[str]]
-if options.op_registration_whitelist is not None:
-    op_registration_whitelist = set(options.op_registration_whitelist)
-else:
-    op_registration_whitelist = None
+class FileManager:
+    install_dir: str
+    template_dir: str
+    dry_run: bool
+    filenames: Set[str]
 
-native_functions = parse_native_yaml('aten/src/ATen/native/native_functions.yaml')
+    def __init__(self, install_dir: str, template_dir: str, dry_run: bool) -> None:
+        self.install_dir = install_dir
+        self.template_dir = template_dir
+        self.filenames = set()
+        self.dry_run = dry_run
 
-TEMPLATE_PATH = "aten/src/ATen/templates"
+    def _write_if_changed(self, filename: str, contents: str) -> None:
+        old_contents: Optional[str]
+        try:
+            with open(filename, 'r') as f:
+                old_contents = f.read()
+        except IOError:
+            old_contents = None
+        if contents != old_contents:
+            with open(filename, 'w') as f:
+                f.write(contents)
 
-def generated_comment(fn: str) -> str:
-    return "@" + f"generated by aten/src/ATen/gen.py from {fn}"
+    def write_with_template(self, filename: str, template_fn: str,
+                            env_callable: Callable[[], Union[str, Dict[str, object]]]) -> None:
+        filename = '{}/{}'.format(self.install_dir, filename)
+        assert filename not in self.filenames, "duplicate file write {filename}"
+        self.filenames.add(filename)
+        if not self.dry_run:
+            env = env_callable()
+            if isinstance(env, dict):
+                comment = "@" + "generated by aten/src/ATen/gen.py"
+                comment += " from {}".format(os.path.basename(filename))
+                env['generated_comment'] = comment
+                template = _read_template(os.path.join(self.template_dir, template_fn))
+                self._write_if_changed(filename, template.substitute(env))
+            elif isinstance(env, str):
+                self._write_if_changed(filename, env)
+            else:
+                assert_never(env)
 
-extra_cuda_headers = '''\
-#include <ATen/DeviceGuard.h>
-#include <ATen/cuda/ATenCUDAGeneral.h>
-#include <ATen/cuda/CUDADevice.h>
-#include <ATen/cuda/CUDAContext.h>'''
 
-def write_file(fn: str, env_arg: Dict[str, Union[str, Sequence[str]]]) -> None:
-    env = env_arg.copy()
-    derived = ['Vulkan', 'CPU', 'CUDA', 'QuantizedCPU', 'QuantizedCUDA', 'MkldnnCPU']
-    # TODO: get rid of this
-    sparse_derived = ['SparseCPU', 'SparseCUDA']
-    if fn in [f'{x}Type.h' for x in itertools.chain(derived, sparse_derived)]:
-        template_fn = 'TypeDerived.h'
-    elif fn in [f'{x}Type.cpp' for x in derived]:
-        template_fn = 'TypeDerived.cpp'
-    elif fn in [f'{x}Type.cpp' for x in sparse_derived]:
-        template_fn = 'SparseTypeDerived.cpp'
+    def write(self, filename: str, env_callable: Callable[[], Union[str, Union[str, Dict[str, object]]]]) -> None:
+        self.write_with_template(filename, filename, env_callable)
+
+    def write_outputs(self, filename: str) -> None:
+        """Write a file containing the list of all outputs which are
+        generated by this script."""
+        self._write_if_changed(
+            filename,
+            ''.join(name + ";" for name in sorted(self.filenames)))
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description='Generate ATen source files')
+    parser.add_argument(
+        '-s',
+        '--source-path',
+        help='path to source directory for ATen',
+        default='aten/src/ATen')
+    parser.add_argument(
+        '-o',
+        '--output-dependencies',
+        help='output a list of dependencies into the given file and exit')
+    parser.add_argument(
+        '-d', '--install_dir', help='output directory',
+        default='build/aten/src/ATen')
+    # TODO: remove this, it does nothing
+    parser.add_argument(
+        '--rocm',
+        action='store_true',
+        help='reinterpret CUDA as ROCm/HIP and adjust filepaths accordingly')
+    # TODO: remove this, we should just unconditionally generate Vulkan
+    parser.add_argument(
+        '--vulkan',
+        action='store_true',
+        help='Generate Vulkan backend functions')
+    parser.add_argument(
+        '--op_registration_whitelist',
+        nargs='*',
+        help='filter op registrations by the whitelist (if set); '
+             'each item is `namespace`::`operator name` without overload name; '
+             'e.g.: aten::empty aten::conv2d ...')
+    parser.add_argument(
+        '--backend_whitelist',
+        nargs='*',
+        help='filter dispatch backend by the whitelist (if set), '
+             'e.g.: CPU CUDA QuantizedCPU ...')
+    parser.add_argument(
+        '--per_op_registration',
+        action='store_true',
+        help='group function registrations by op name and write to separate files; '
+             'must also set --op_registration_whitelist param')
+    parser.add_argument(
+        '--force_schema_registration',
+        action='store_true',
+        help='force it to generate schema-only registrations for all ops, including'
+             'those that are not listed on --op_registration_whitelist')
+    options = parser.parse_args()
+
+    op_registration_whitelist: Optional[Set[str]]
+    if options.op_registration_whitelist is not None:
+        op_registration_whitelist = set(options.op_registration_whitelist)
     else:
-        template_fn = fn
-    env['generated_comment'] = generated_comment(template_fn)
-    template = CodeTemplate.from_file(os.path.join(TEMPLATE_PATH, template_fn))
-    if fn in ['TensorBody.h', 'ATenOpList.cpp', 'TensorMethods.cpp']:
-        out_path = f'build/aten/src/ATen_new/core/{fn}'
-    else:
-        out_path = f'build/aten/src/ATen_new/{fn}'
-    with open(out_path, 'w') as f:
-        f.write(template.substitute(env))
+        op_registration_whitelist = None
 
-backends = ["CPU", "SparseCPU", "MkldnnCPU", "CUDA", "SparseCUDA", "QuantizedCPU", "QuantizedCUDA"]
-if options.vulkan:
-    backends.append("Vulkan")
-if options.backend_whitelist:
-    backends = [b for b in backends if b in options.backend_whitelist]
+    native_functions = parse_native_yaml(os.path.join(options.source_path, 'native/native_functions.yaml'))
 
-for dispatch in backends:
-    write_file(f'{dispatch}Type.h', {
-        'Type': f'{dispatch}Type',
-        'extra_cuda_headers': extra_cuda_headers if 'CUDA' in dispatch else '',  # TODO: remove this
-        'type_derived_method_declarations': concatmap_nf(compute_type_method(dispatch, target=Target.DECLARATION, op_registration_whitelist=op_registration_whitelist), native_functions),
+    template_dir = os.path.join(options.source_path, "templates")
+
+    # NB: It is mandatory to NOT use os.path.join here, as the install directory
+    # will eventually be ingested by cmake, which does not respect Windows style
+    # path slashes.  If you switch this to use os.path.join, you'll get an error
+    # like:
+    #
+    #   Syntax error in cmake code when parsing string
+    #
+    #     C:/Jenkins/workspace/pytorch-builds/pytorch-win-ws2016-cuda9-cudnn7-py3-build/build/aten/src/ATen\core/TensorMethods.h
+    #
+    #   Invalid character escape '\c'.
+    core_install_dir = f'{options.install_dir}/core'
+    pathlib.Path(core_install_dir).mkdir(parents=True, exist_ok=True)
+
+    def make_file_manager(install_dir: str) -> FileManager:
+        return FileManager(install_dir=install_dir, template_dir=template_dir, dry_run=options.output_dependencies)
+
+    core_fm = make_file_manager(core_install_dir)
+    cpu_fm = make_file_manager(options.install_dir)
+    cuda_fm = make_file_manager(options.install_dir)
+
+    extra_cuda_headers = '''\
+    #include <ATen/DeviceGuard.h>
+    #include <ATen/cuda/ATenCUDAGeneral.h>
+    #include <ATen/cuda/CUDADevice.h>
+    #include <ATen/cuda/CUDAContext.h>'''
+
+    backends = ["CPU", "SparseCPU", "MkldnnCPU", "CUDA", "SparseCUDA", "QuantizedCPU", "QuantizedCUDA"]
+    if options.vulkan:
+        backends.append("Vulkan")
+    if options.backend_whitelist:
+        backends = [b for b in backends if b in options.backend_whitelist]
+
+    for dispatch in backends:
+        h_template = 'TypeDerived.h'
+        cpp_template = 'TypeDerived.cpp'
+        # TODO: delete this special case
+        if 'Sparse' in dispatch:
+            cpp_template = 'SparseTypeDerived.cpp'
+
+        fm = cuda_fm if 'CUDA' in dispatch else cpu_fm
+
+        fm.write_with_template(f'{dispatch}Type.h', h_template, lambda: {
+            'Type': f'{dispatch}Type',
+            'extra_cuda_headers': extra_cuda_headers if 'CUDA' in dispatch else '',  # TODO: remove this
+            'type_derived_method_declarations': concatmap_nf(
+                compute_type_method(dispatch, target=Target.DECLARATION, op_registration_whitelist=op_registration_whitelist),
+                native_functions
+            ),
+        })
+        fm.write_with_template(f'{dispatch}Type.cpp', cpp_template, lambda: {
+            'Type': f'{dispatch}Type',
+            # TODO: remove this
+            'extra_cuda_headers': extra_cuda_headers if 'CUDA' in dispatch else '',
+            # TODO: remove this
+            'storage_tensor_headers': '#include <c10/core/TensorImpl.h>',
+            # TODO: remove this
+            'Generator': 'CUDAGeneratorImpl' if 'CUDA' in dispatch else 'CPUGeneratorImpl',
+            'legacy_th_headers':
+                '#include <ATen/LegacyTHFunctionsCPU.h>' if dispatch == "CPU" else
+                '#include <ATen/cuda/LegacyTHFunctionsCUDA.h>' if dispatch == "CUDA" else
+                '',
+            'Backend': dispatch,
+            'type_derived_method_definitions': concatmap_nf(
+                compute_type_method(dispatch, target=Target.DEFINITION, op_registration_whitelist=op_registration_whitelist),
+                native_functions
+            ),
+            'function_registrations': concatmap_nf(
+                compute_type_method(
+                    dispatch, target=Target.REGISTRATION, op_registration_whitelist=op_registration_whitelist),
+                native_functions
+            ) if not options.per_op_registration else [],
+        })
+        del fm
+
+    cpu_fm.write('TypeDefault.h', lambda: {
+        'type_method_declarations': concatmap_nf(
+            compute_type_method(None, target=Target.DECLARATION, op_registration_whitelist=op_registration_whitelist),
+            native_functions),
     })
-    write_file(f'{dispatch}Type.cpp', {
-        'Type': f'{dispatch}Type',
-        'extra_cuda_headers': extra_cuda_headers if 'CUDA' in dispatch else '',  # TODO: remove this
-        'storage_tensor_headers': '#include <c10/core/TensorImpl.h>',  # TODO: remove this
-        'Generator': f'{dispatch.replace("Quantized", "").replace("Sparse", "").replace("Mkldnn", "")}GeneratorImpl' if dispatch != 'Vulkan' else 'CPUGeneratorImpl',  # TODO: remove this
-        'legacy_th_headers': f'#include <ATen/LegacyTHFunctions{dispatch}.h>' if dispatch in ["CPU", "CUDA"] else "",
-        'Backend': dispatch,
-        'type_derived_method_definitions': concatmap_nf(compute_type_method(dispatch, target=Target.DEFINITION, op_registration_whitelist=op_registration_whitelist), native_functions),
-        'function_registrations': concatmap_nf(compute_type_method(dispatch, target=Target.REGISTRATION, op_registration_whitelist=op_registration_whitelist), native_functions) if not options.per_op_registration else [],
+    cpu_fm.write('TypeDefault.cpp', lambda: {
+        'type_method_definitions': concatmap_nf(
+            compute_type_method(None, target=Target.DEFINITION, op_registration_whitelist=op_registration_whitelist),
+            native_functions),
+        'function_registrations': concatmap_nf(
+            compute_type_method(None, target=Target.REGISTRATION, op_registration_whitelist=op_registration_whitelist),
+            native_functions) if not options.per_op_registration else [],
+    })
+    cpu_fm.write('Functions.h', lambda: {
+        'function_declarations': concatmap_nf(compute_function(target=Target.DECLARATION), native_functions),
+    })
+    cpu_fm.write('Functions.cpp', lambda: {
+        'function_definitions': concatmap_nf(compute_function(target=Target.DEFINITION), native_functions),
+    })
+    core_fm.write('TensorBody.h', lambda: {
+        'tensor_method_declarations': concatmap_nf(compute_tensor_method(target=Target.DECLARATION), native_functions),
+    })
+    core_fm.write('TensorMethods.cpp', lambda: {
+        'tensor_method_definitions': concatmap_nf(compute_tensor_method(target=Target.DEFINITION), native_functions),
+    })
+    core_fm.write('ATenOpList.cpp', lambda: {
+        'aten_ops': concatmap_nf(compute_aten_op, native_functions),
+    })
+    cpu_fm.write('NativeFunctions.h', lambda: {
+        'native_function_declarations': concatmap_nf(compute_native_function_declaration, native_functions),
+    })
+    cpu_fm.write('BackendSelectRegister.cpp', lambda: {
+        'backend_select_method_definitions': concatmap_nf(compute_backend_select(target=Target.DEFINITION), native_functions),
+        'backend_select_function_registrations': concatmap_nf(compute_backend_select(target=Target.REGISTRATION), native_functions),
     })
 
-write_file('TypeDefault.h', {
-    'type_method_declarations': concatmap_nf(compute_type_method(None, target=Target.DECLARATION, op_registration_whitelist=op_registration_whitelist), native_functions),
-})
-write_file('TypeDefault.cpp', {
-    'type_method_definitions': concatmap_nf(compute_type_method(None, target=Target.DEFINITION, op_registration_whitelist=op_registration_whitelist), native_functions),
-    'function_registrations': concatmap_nf(compute_type_method(None, target=Target.REGISTRATION, op_registration_whitelist=op_registration_whitelist), native_functions) if not options.per_op_registration else [],
-})
-write_file('Functions.h', {
-    'function_declarations': concatmap_nf(compute_function(target=Target.DECLARATION), native_functions),
-})
-write_file('Functions.cpp', {
-    'function_definitions': concatmap_nf(compute_function(target=Target.DEFINITION), native_functions),
-})
-write_file('TensorBody.h', {
-    'tensor_method_declarations': concatmap_nf(compute_tensor_method(target=Target.DECLARATION), native_functions),
-})
-write_file('TensorMethods.cpp', {
-    'tensor_method_definitions': concatmap_nf(compute_tensor_method(target=Target.DEFINITION), native_functions),
-})
-write_file('ATenOpList.cpp', {
-    'aten_ops': concatmap_nf(compute_aten_op, native_functions),
-})
-write_file('NativeFunctions.h', {
-    'native_function_declarations': concatmap_nf(compute_native_function_declaration, native_functions),
-})
-write_file('BackendSelectRegister.cpp', {
-    'backend_select_method_definitions': concatmap_nf(compute_backend_select(target=Target.DEFINITION), native_functions),
-    'backend_select_function_registrations': concatmap_nf(compute_backend_select(target=Target.REGISTRATION), native_functions),
-})
+    if options.force_schema_registration:
+        def computeSchemaRegister() -> Dict[str, object]:
+            schema_registrations = concatmap_nf(
+                compute_type_method(None, target=Target.REGISTRATION, op_registration_whitelist=None, def_only=True),
+                native_functions)
+            # See Note [Byte-for-byte compatibility]
+            schema_registrations.sort()
+            return {
+                'schema_registrations': schema_registrations,
+            }
+        cpu_fm.write('SchemaRegister.cpp', computeSchemaRegister)
 
-if options.force_schema_registration:
-    schema_registrations = concatmap_nf(compute_type_method(None, target=Target.REGISTRATION, op_registration_whitelist=None, def_only=True), native_functions)
-    # See Note [Byte-for-byte compatibility]
-    schema_registrations.sort()
-    write_file('SchemaRegister.cpp', {
-        'schema_registrations': schema_registrations,
-    })
+    if options.per_op_registration:
+        def gen_per_op_registration_filename(opname: str) -> str:
+            return 'pt_op_register_{}.cpp'.format(opname.replace(':', '-'))
 
-def gen_per_op_registration_filename(opname: str) -> str:
-    return 'pt_op_register_{}.cpp'.format(opname.replace(':', '-'))
-if options.per_op_registration:
-    if op_registration_whitelist is None:
-        raise Exception("Must set --op_registration_whitelist for per-op registration.")
-    base_fn = 'PerOpRegistration.cpp'
-    template = CodeTemplate.from_file(os.path.join(TEMPLATE_PATH, base_fn))
-    # First, group all native functions by unoverloaded operator name
-    grouped_functions : DefaultDict[str, List[NativeFunction]] = DefaultDict(list)
-    for f in native_functions:
-        grouped_functions[f"aten::{f.func.name.name}"].append(f)
-    extra_headers = []
-    for b in backends:
-        extra_headers.append(f'#include <ATen/{b}Type.h>')
-    # Next, generate registration for each one
-    for name in op_registration_whitelist:
-        fs = grouped_functions[name]
-        registrations = []
-        for mb_dispatch in itertools.chain([None], backends):
-            # or you could pass in op_registration_whitelist, it doesn't
-            # matter!
-            # NB: Use of compute_type_method here is kind of an abuse;
-            # this is why we have to unconditionally write in
-            # torch::dispatch in the registration when it should be
-            # contextually clear
-            registrations.extend(concatmap_nf(compute_type_method(mb_dispatch, target=Target.REGISTRATION, op_registration_whitelist=None), fs))
-        fn = gen_per_op_registration_filename(name)
-        with open(os.path.join('build/aten/src/ATen_new', fn), 'w') as fil:
-            fil.write(template.substitute({
-                'generated_comment': generated_comment(base_fn),
-                'extra_headers': extra_headers,
-                'function_registrations': registrations,
-            }))
+        if op_registration_whitelist is None:
+            raise Exception("Must set --op_registration_whitelist for per-op registration.")
 
-with open('build/aten/src/ATen_new/Declarations.yaml', 'w') as fil:
-    fil.write(format_yaml(concatmap_nf(compute_declaration_yaml, native_functions)))
+        # First, group all native functions by unoverloaded operator name
+        grouped_functions : DefaultDict[str, List[NativeFunction]] = DefaultDict(list)
+        for f in native_functions:
+            grouped_functions[f"aten::{f.func.name.name}"].append(f)
+        extra_headers = []
+        for b in backends:
+            extra_headers.append(f'#include <ATen/{b}Type.h>')
+
+        # Next, generate registration for each one
+        for name in op_registration_whitelist:
+            def computePerOpRegistration() -> Dict[str, object]:
+                fs = grouped_functions[name]
+                registrations = []
+                for mb_dispatch in itertools.chain([None], backends):
+                    # or you could pass in op_registration_whitelist, it doesn't
+                    # matter!
+                    # NB: Use of compute_type_method here is kind of an abuse;
+                    # this is why we have to unconditionally write in
+                    # torch::dispatch in the registration when it should be
+                    # contextually clear
+                    registrations.extend(
+                        concatmap_nf(
+                            compute_type_method(mb_dispatch, target=Target.REGISTRATION, op_registration_whitelist=None),
+                            fs))
+                return {
+                    'extra_headers': extra_headers,
+                    'function_registrations': registrations,
+                }
+
+            cpu_fm.write_with_template(
+                gen_per_op_registration_filename(name), 'PerOpRegistration.cpp', computePerOpRegistration)
+
+    cpu_fm.write('Declarations.yaml', lambda: format_yaml(concatmap_nf(compute_declaration_yaml, native_functions)))
+
+    if options.output_dependencies:
+        cpu_fm.write_outputs(options.output_dependencies)
+        core_fm.write_outputs(f"{options.output_dependencies}-core")
+        cuda_fm.write_outputs(f"{options.output_dependencies}-cuda")
+
+if __name__ == '__main__':
+    main()

@@ -56,7 +56,6 @@ time python aten/src/ATen/gen.py \
   aten/src/ATen/native/native_functions.yaml
 
 # Copy some required files
-cp aten/src/ATen/common_with_cwrap.py tools/shared/cwrap_common.py
 cp torch/_utils_internal.py tools/shared
 
 # Generate PyTorch files

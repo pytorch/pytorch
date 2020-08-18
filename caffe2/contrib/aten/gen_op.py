@@ -36,10 +36,10 @@ if args.aten_root:
     if not os.path.exists(args.aten_root):
         raise ValueError('aten_root ({}) does not exist'.format(
             args.aten_root))
-    sys.path.append(os.path.join(args.aten_root, 'src', 'ATen'))
-    from code_template import CodeTemplate as CT
+    sys.path.append(os.path.join(args.aten_root, '..'))  # TODO: fix this
+    from tools.codegen.code_template import CodeTemplate as CT
 else:
-    from src.ATen.code_template import CodeTemplate as CT  # type: ignore[import,no-redef]
+    from tools.codegen.code_template import CodeTemplate as CT  # type: ignore[import,no-redef]
 
 OP_TEMPLATE = CT.from_file(
     os.path.join(args.template_dir, 'aten_op_template.h'))
