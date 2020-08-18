@@ -155,6 +155,29 @@ void testMobileSaveLoadParameters() {
   }
 }
 
+void testMobileSaveLoadParametersEmpty() {
+  Module m("m");
+  m.define(R"(
+    def add_it(self, x):
+      b = 4
+      return x + b
+  )");
+  Module child("m2");
+  m.register_module("child1", child);
+  m.register_module("child2", child.clone());
+  std::stringstream ss;
+  std::stringstream ss_data;
+  m._save_for_mobile(ss);
+
+  // load mobile module, save mobile named parameters
+  mobile::Module bc = _load_for_mobile(ss);
+  _save_parameters(bc.named_parameters(), ss_data);
+
+  // load back the named parameters, test is empty
+  auto mobile_params = _load_parameters(ss_data);
+  AT_ASSERT(mobile_params.size() == 0);
+}
+
 void testLiteSGD() {
   Module m("m");
   m.register_parameter("foo", torch::ones({1}, at::requires_grad()), false);
