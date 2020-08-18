@@ -55,7 +55,6 @@ def default_collate(batch):
         return torch.stack(batch, 0, out=out)
     elif elem_type.__module__ == 'numpy' and elem_type.__name__ != 'str_' \
             and elem_type.__name__ != 'string_':
-        elem = batch[0]
         if elem_type.__name__ == 'ndarray' or elem_type.__name__ == 'memmap':
             # array of string classes and object
             if np_str_obj_array_pattern.search(elem.dtype.str) is not None:

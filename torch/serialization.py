@@ -334,7 +334,7 @@ def save(obj, f: Union[str, os.PathLike, BinaryIO],
          pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL, _use_new_zipfile_serialization=True) -> None:
     """Saves an object to a disk file.
 
-    See also: :ref:`recommend-saving-models`
+    See also: `saving-loading-tensors`
 
     Args:
         obj: saved object
@@ -347,8 +347,8 @@ def save(obj, f: Union[str, os.PathLike, BinaryIO],
         A common PyTorch convention is to save tensors using .pt file extension.
 
     .. note::
-        PyTorch preserves storage sharing across serialization. See :ref:`preserve-storage-sharing`
-        for more details.
+        PyTorch preserves storage sharing across serialization. See
+        `preserve-storage-sharing` for more details.
 
     .. note::
         The 1.6 release of PyTorch switched ``torch.save`` to use a new

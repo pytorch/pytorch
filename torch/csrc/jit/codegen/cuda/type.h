@@ -26,6 +26,7 @@ enum class ValType {
 enum class DataType { Bool, Float, Half, Int, Null };
 
 enum class ExprType {
+  Invalid,
   UnaryOp,
   BinaryOp,
   TernaryOp,
@@ -93,7 +94,7 @@ enum class BinaryOpType {
   // TypeAs,
 
   // Logical Ops
-  // Int operations, leave position oif Mod we depend on its location of first
+  // Int operations, leave position of Mod we depend on its location of first
   Mod,
   CeilDiv,
   And,
@@ -136,12 +137,15 @@ TORCH_CUDA_API std::ostream& operator<<(std::ostream&, const TernaryOpType);
 TORCH_CUDA_API std::ostream& operator<<(std::ostream&, const ParallelType);
 
 std::string stringifyThreadSize(const ParallelType);
+std::string stringifyThread(const ParallelType);
 
 TORCH_CUDA_API c10::optional<std::string> inline_op_str(const UnaryOpType);
 TORCH_CUDA_API c10::optional<std::string> inline_op_str(const BinaryOpType);
 
 TORCH_CUDA_API c10::optional<std::string> cast_func_str(
     const std::pair<DataType, DataType>&);
+
+size_t dataTypeSize(DataType type);
 
 } // namespace fuser
 } // namespace jit

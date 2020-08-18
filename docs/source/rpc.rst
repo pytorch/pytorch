@@ -12,6 +12,9 @@ machines.
      APIs in the RPC package are stable. There are multiple ongoing work items
      to improve performance and error handling, which will ship in future releases.
 
+.. note ::
+    Please refer to `PyTorch Distributed Overview <https://pytorch.org/tutorials/beginner/dist_overview.html>`__
+    for a brief introduction to all features related to distributed training.
 
 Basics
 ------
@@ -200,12 +203,8 @@ The TensorPipe backend has been introduced in PyTorch v1.6 and is being actively
 developed. At the moment, it only supports CPU tensors, with GPU support coming
 soon. It comes with a TCP-based transport, just like Gloo. It is also able to
 automatically chunk and multiplex large tensors over multiple sockets and
-threads in order to achieve very high bandwidths. In addition to that, it packs
-two Linux-specific transports for communication between processes on a same
-machine (one based on ringbuffers stored in shared memory, the other on the
-cross-memory attach syscalls) which can achieve lower latencies than TCP.
-The agent will be able to pick the best transport on its own, with no
-intervention required.
+threads in order to achieve very high bandwidths. The agent will be able to pick
+the best transport on its own, with no intervention required.
 
 Example::
 
@@ -298,3 +297,4 @@ The RPC tutorial introduces users to the RPC framework and provides two example 
 
 -  `Getting started with Distributed RPC Framework <https://pytorch.org/tutorials/intermediate/rpc_tutorial.html>`__
 -  `Implementing a Parameter Server using Distributed RPC Framework <https://pytorch.org/tutorials/intermediate/rpc_param_server_tutorial.html>`__
+-  `Combining Distributed DataParallel with Distributed RPC Framework <https://pytorch.org/tutorials/advanced/rpc_ddp_tutorial.html>`__

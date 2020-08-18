@@ -54,7 +54,8 @@ constexpr const char* NCCL_BLOCKING_WAIT = "NCCL_BLOCKING_WAIT";
 //   // Now continue on other work in the current stream.
 class ProcessGroupNCCL : public ProcessGroup {
  public:
-  class WorkNCCL : public ProcessGroup::Work {
+  class WorkNCCL : public ProcessGroup::Work,
+                   public std::enable_shared_from_this<WorkNCCL> {
    public:
     // Constructor takes a list of CUDA devices
     WorkNCCL(const std::vector<at::Device>& devices);
@@ -68,7 +69,7 @@ class ProcessGroupNCCL : public ProcessGroup {
     bool isSuccess() const override;
 
     // Same as calling synchronize() for NCCL work.
-    bool wait() override;
+    bool wait(std::chrono::milliseconds timeout = kNoTimeout) override;
 
     void abort() override;
 
@@ -77,6 +78,9 @@ class ProcessGroupNCCL : public ProcessGroup {
     // completion.
     void synchronize() override;
 
+    // Synchronize streams by blocking each on the NCCL stream
+    void synchronizeStreams();
+
     // Helper function used in CUDA Stream callbacks to complete WorkNCCL
     // objects and throw exceptions when neeeded.
     void handleNCCLGuard();
@@ -84,6 +88,10 @@ class ProcessGroupNCCL : public ProcessGroup {
     // Helper function that checks if the NCCL kernels have finished
     // execution on the GPUs
     bool finishedGPUExecution();
+
+    // Get a Future object that will be marked as completed internally.
+    // It actually returns a FutureNCCL object which is a sub class Future.
+    c10::intrusive_ptr<c10::ivalue::Future> getFuture() override;
 
     // Helper function that sets an exception_ptr on the WorkNCCL object.
     void setException(std::exception_ptr exception_ptr);
@@ -116,6 +124,8 @@ class ProcessGroupNCCL : public ProcessGroup {
         const std::vector<std::shared_ptr<NCCLComm>>& ncclComms) const;
 
    private:
+    // Helper function for synchronize
+    void synchronizeInternal(std::chrono::milliseconds timeout);
     // Checks for NCCL errors and sets an appropriate exception_ptr.
     void checkAndSetException();
 
@@ -130,7 +140,76 @@ class ProcessGroupNCCL : public ProcessGroup {
     // to the store.
     std::shared_ptr<Store> store_;
 
+    // Store a reference to NCCL collective's outputs to be used by getFuture.
+    std::shared_ptr<std::vector<at::Tensor>> outputs_;
+
     friend class ProcessGroupNCCL;
+  };
+
+  // FutureNCCL is a subclass of ivalue's Future. The goal is to use
+  // this class in getFuture API of WorkNCCL. This Future is mostly a
+  // wrapper to synchronize streams appropriately and it mostly enables
+  // the async programming model of CUDA while trying to adhere to the
+  // Future interface.
+  //
+  // FutureNCCL has a reference to WorkNCCL and NCCL collective's outputs.
+  // Its value is NCCL collective's outputs.
+  struct FutureNCCL : at::ivalue::Future {
+   public:
+    explicit FutureNCCL(
+        std::shared_ptr<ProcessGroupNCCL::WorkNCCL> work,
+        std::shared_ptr<std::vector<at::Tensor>> outputs)
+        : at::ivalue::Future(c10::ListType::create(c10::TensorType::get())),
+          work_(work),
+          outputs_(*outputs) {}
+
+    // Simply calls WorkNCCL's wait(). It will return after synchronizing
+    // the correct GPU streams to ensure we can have async CUDA execution
+    // and it does not wait for the entire operation to complete on GPU.
+    // If NCCL_BLOCKING_WAIT is enabled, in that case, it will wait for the
+    // entire operation to complete before returning.
+    void wait() override {
+      work_->wait();
+    }
+
+    // FutureNCCL's value is NCCL collective's outputs and callbacks were
+    // invoked inline by addCallback(), so markCompleted is not needed.
+    void markCompleted(at::IValue /* unused */) override {
+      C10_THROW_ERROR(Error, "FutureNCCL::markCompleted is not supported.");
+    }
+
+    // Just returns NCCL collective's outputs after WorkNCCL's wait returns.
+    at::IValue value() override {
+      work_->wait();
+      return outputs_;
+    }
+
+    const at::IValue& constValue() override {
+      work_->wait();
+      return outputs_;
+    }
+
+    // Add a callback to FutureNCCL. It invokes the callback inline after
+    // WorkNCCL's wait(). workCallbacks return a Future (not FutureNCCL).
+    void addCallback(std::function<void(void)> callback) override {
+      work_->wait();
+      callback();
+    }
+
+    // Checks whether NCCL work is completed.
+    bool completed() const override {
+      return work_->isCompleted();
+    }
+
+    // FutureNCCL has a value that was set in its constructor as NCCL
+    // collective's outputs.
+    bool hasValue() const override {
+      return true;
+    }
+
+   private:
+    std::shared_ptr<ProcessGroupNCCL::WorkNCCL> work_;
+    at::IValue outputs_;
   };
 
   // If you wish to create multiple process groups, each with a potentially
@@ -207,6 +286,18 @@ class ProcessGroupNCCL : public ProcessGroup {
 
   std::shared_ptr<ProcessGroup::Work> barrier(
       const BarrierOptions& opts = BarrierOptions()) override;
+
+  std::shared_ptr<ProcessGroup::Work> alltoall_base(
+      at::Tensor& outputTensor,
+      at::Tensor& inputTensor,
+      std::vector<int64_t>& outputSplitSizes,
+      std::vector<int64_t>& inputSplitSizes,
+      const AllToAllOptions& opts = AllToAllOptions()) override;
+
+  std::shared_ptr<ProcessGroup::Work> alltoall(
+      std::vector<at::Tensor>& outputTensors,
+      std::vector<at::Tensor>& inputTensors,
+      const AllToAllOptions& opts = AllToAllOptions()) override;
 
   // Unsupported Ops
   std::shared_ptr<ProcessGroup::Work> gather(
@@ -289,6 +380,10 @@ class ProcessGroupNCCL : public ProcessGroup {
   void ncclCommWatchdog();
 
   void ncclCommWatchdogInternal();
+
+  // Reads the NCCL_BLOCKING_WAIT environment variable and sets blockingWait_
+  // accordingly.
+  void parseNcclBlockingWait();
 
   void workCleanupLoop();
 

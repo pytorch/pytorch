@@ -59,13 +59,15 @@ void replaceConvBiasWithGetAttr(Module& module) {
 
 void addBiasForConvIfNone(Module& module, const std::string& pattern_name) {
   auto t = module.type()->expect<ClassType>();
-  auto real_typename = t->name()->qualifiedName();
-  if (real_typename.size() >= pattern_name.size() &&
-      (0 ==
-       real_typename.compare(
-           real_typename.size() - pattern_name.size(),
-           pattern_name.size(),
-           pattern_name))) {
+
+  const std::string real_typename = t->name()->qualifiedName();
+  const std::string demangled_typename = removeTorchMangle(real_typename);
+  bool is_floating_point_conv =
+      ((demangled_typename == "__torch__.torch.nn.modules.conv.Conv1d") ||
+       (demangled_typename == "__torch__.torch.nn.modules.conv.Conv2d") ||
+       (demangled_typename == "__torch__.torch.nn.modules.conv.Conv3d"));
+
+  if (is_floating_point_conv) {
     if (!t->hasAttribute("bias")) {
       auto optional_tensor_type = OptionalType::create(TensorType::get());
       t->addAttribute("bias", optional_tensor_type, true);
@@ -239,7 +241,6 @@ void FoldConvBatchNormHelper::analyze(
   const auto& vmap = pattern.vmap;
   Value* pattern_conv_out = vmap.at("conv_out");
   Value* pattern_bn_out = vmap.at("bn_out");
-  Value* pattern_conv_submodule = vmap.at("conv");
   Value* pattern_bn_submodule = vmap.at("batchnorm");
   Node* pattern_conv = pattern_conv_out->node();
   Node* pattern_bn = pattern_bn_out->node();

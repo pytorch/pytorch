@@ -4,6 +4,7 @@ set(JIT_TEST_SRCS
   ${JIT_TEST_ROOT}/test_alias_analysis.cpp
   ${JIT_TEST_ROOT}/test_argument_spec.cpp
   ${JIT_TEST_ROOT}/test_autodiff.cpp
+  ${JIT_TEST_ROOT}/test_backend.cpp
   ${JIT_TEST_ROOT}/test_base.cpp
   ${JIT_TEST_ROOT}/test_base.h
   ${JIT_TEST_ROOT}/test_class_import.cpp
@@ -11,6 +12,7 @@ set(JIT_TEST_SRCS
   ${JIT_TEST_ROOT}/test_class_type.cpp
   ${JIT_TEST_ROOT}/test_code_template.cpp
   ${JIT_TEST_ROOT}/test_constant_pooling.cpp
+  ${JIT_TEST_ROOT}/test_cleanup_passes.cpp
   ${JIT_TEST_ROOT}/test_create_autodiff_subgraphs.cpp
   ${JIT_TEST_ROOT}/test_custom_class.cpp
   ${JIT_TEST_ROOT}/test_custom_operators.cpp
@@ -24,6 +26,7 @@ set(JIT_TEST_SRCS
   ${JIT_TEST_ROOT}/test_irparser.cpp
   ${JIT_TEST_ROOT}/test_jit_type.cpp
   ${JIT_TEST_ROOT}/test_lite_interpreter.cpp
+  ${JIT_TEST_ROOT}/test_lite_trainer.cpp
   ${JIT_TEST_ROOT}/test_misc.cpp
   ${JIT_TEST_ROOT}/test_mobile_type_parser.cpp
   ${JIT_TEST_ROOT}/test_module_api.cpp

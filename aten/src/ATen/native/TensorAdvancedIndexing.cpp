@@ -391,11 +391,14 @@ Tensor& index_add_cpu_(Tensor & self, int64_t dim, const Tensor & index, const T
     AT_DISPATCH_ALL_TYPES(self.scalar_type(), "index_add_", [&] {
       auto self_stride = self.dim() == 0 ? 1 : self.stride(dim);
       auto source_stride = source.dim() == 0 ? 1 : source.stride(dim);
+      // TODO: Maybe TensorAccessor can beused here?
+      auto* self_ptr = self.data_ptr<scalar_t>();
+      auto* source_ptr = source.data_ptr<scalar_t>();
       for (auto i = 0; i < numel; i++) {
         auto self_i = index_data[i];
         TORCH_CHECK_INDEX((self_i >= 0) && (self_i < self.numel()), "index out of range in self");
-        scalar_t *self_ip = self.data<scalar_t>() + self_i * self_stride;
-        *self_ip += *(source.data<scalar_t>() + i * source_stride);
+        scalar_t *self_ip = self_ptr + self_i * self_stride;
+        *self_ip += *(source_ptr + i * source_stride);
       }
     });
   }
@@ -564,7 +567,7 @@ SCATTER_GATHER_OP get_operator_enum(const std::string& reduce) {
   else {
     TORCH_CHECK(false,
                 "reduce argument must be either of add, subtract, multiply or divide.");
-  } 
+  }
 }
 
 Tensor& scatter_cpu_scalar_reduce_(Tensor& self, const int64_t dim, const Tensor& index,
@@ -703,10 +706,16 @@ static Tensor & masked_select_out_impl_cpu(Tensor & result, const Tensor & self,
 
   // Create strided view of result before feeding into TensorIterator
   auto strides = DimVector(shape.size(), 0);
+  auto orig_stride = result.strides()[0];
   auto result_strided = result.as_strided(shape, strides);
 
   // serial kernel
-  bool use_serial_kernel = self.numel() < at::internal::GRAIN_SIZE || at::get_num_threads() == 1;
+  // serial kernel requires that src is traversed in its logical order. However, TensorIterator might
+  // have reordered dimensions so that src would be traversed in its physical order, producing wrong
+  // answers. A sufficient condition that no reorder happened is that both _self and _mask is contiguous.
+  // If it is not satisfied, use parallel kernel that handles permutations correctly
+  bool use_serial_kernel = (self.numel() < at::internal::GRAIN_SIZE || at::get_num_threads() == 1 ) &&
+  _self.is_contiguous() && _mask.is_contiguous();
   if (use_serial_kernel) {
     auto iter = TensorIteratorConfig()
       .check_all_same_dtype(false)
@@ -716,7 +725,7 @@ static Tensor & masked_select_out_impl_cpu(Tensor & result, const Tensor & self,
       .add_input(_mask)
       .build();
 
-    masked_select_serial_stub(iter.device_type(), iter);
+    masked_select_serial_stub(iter.device_type(), iter, orig_stride);
     return result;
   }
 
@@ -740,7 +749,7 @@ static Tensor & masked_select_out_impl_cpu(Tensor & result, const Tensor & self,
     .add_input(mask_prefix_sum)
     .build();
 
-  masked_select_stub(iter.device_type(), iter);
+  masked_select_stub(iter.device_type(), iter, orig_stride);
   return result;
 }
 

@@ -85,7 +85,7 @@ endmacro()
 # coded BUILD_CUSTOM_PROTOBUF, we will hard code the use of custom protobuf
 # in the submodule.
 if(ANDROID OR IOS)
-  if(NOT ${BUILD_CUSTOM_PROTOBUF})
+  if(NOT BUILD_CUSTOM_PROTOBUF)
     message(WARNING
         "For Android and iOS cross compilation, I am automatically using "
         "custom protobuf under third party. Note that this behavior may "
