@@ -1,7 +1,7 @@
-from ..model import *
+from tools.codegen.model import *
 
-from .types import TensorOptionsArguments, LegacyDispatcherArgument, ThisArgument
-from . import cpp
+from tools.codegen.api.types import TensorOptionsArguments, LegacyDispatcherArgument, ThisArgument
+import tools.codegen.api.cpp as cpp
 
 from typing import Union, Sequence
 

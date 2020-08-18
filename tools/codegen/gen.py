@@ -10,11 +10,13 @@ import argparse
 import pathlib
 import functools
 
-from .code_template import CodeTemplate
-from .model import *
-from .api.types import *
-from .api import cpp, dispatcher, legacy_dispatcher
-from . import local
+from tools.codegen.code_template import CodeTemplate
+from tools.codegen.model import *
+from tools.codegen.api.types import *
+import tools.codegen.api.cpp as cpp
+import tools.codegen.api.dispatcher as dispatcher
+import tools.codegen.api.legacy_dispatcher as legacy_dispatcher
+import tools.codegen.local as local
 
 try:
     # use faster C loader if available

@@ -1,4 +1,4 @@
-from ..model import *
+from tools.codegen.model import *
 from dataclasses import dataclass
 from typing import Optional, Union, Sequence
 
