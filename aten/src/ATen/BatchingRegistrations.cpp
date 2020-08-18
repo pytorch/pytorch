@@ -56,7 +56,36 @@ Tensor sum_batching_rule(const Tensor& self, IntArrayRef dims, bool keepdim, opt
 }
 
 Tensor mul_batching_rule(const Tensor& self, const Tensor& other) {
-  auto physical_args = BroadcastingVmapTransform::logicalToPhysical({self, other});
+  if (self.dim() > 0 && other.dim() > 0) {
+    // Fast path: any type promotion is handled inside at::mul
+    auto physical_args = BroadcastingVmapTransform::logicalToPhysical({self, other});
+    auto result = at::mul(physical_args[0].tensor(), physical_args[1].tensor());
+    return physical_args[0].newLogicalFromPhysical(result);
+  }
+
+  // Handle type promotion of logically scalar tensors.
+  // Normally TensorIterator would handle type promotion for us. However,
+  // some of the vmapped tensors may be logically scalar (have a logical dim
+  // equal to 0) but have a physical view that isn't scalar, so we need to
+  // manually handle that here. For example,
+  // >>> vmap(torch.mul)(torch.randn(3, 10), torch.randn(3, dtype=torch.double))
+  // should return a FloatTensor, not a DoubleTensor, because the second argument
+  // is logically a scalar tensor inside vmap.
+  //
+  // NB: This isn't completely correct; it lacks the ability to handle
+  // cross-device Scalars, e.g.,
+  // >>> vmap(torch.mul)(torch.randn(3, 10, device='cuda'), torch.randn(3))
+  // but we don't want to support that because of potential performance cliffs.
+  auto logical_self = self;
+  auto logical_other = other;
+  auto result_type = at::native::result_type(logical_self, logical_other);
+  if (logical_self.scalar_type() != result_type) {
+    logical_self = logical_self.to(result_type);
+  }
+  if (logical_other.scalar_type() != result_type) {
+    logical_other = logical_other.to(result_type);
+  }
+  auto physical_args = BroadcastingVmapTransform::logicalToPhysical({logical_self, logical_other});
   auto result = at::mul(physical_args[0].tensor(), physical_args[1].tensor());
   return physical_args[0].newLogicalFromPhysical(result);
 }
