@@ -409,8 +409,7 @@ void Reducer::mark_variable_ready_sparse(VariableIndex index) {
 std::vector<std::vector<at::Tensor>> Reducer::getBucketTensors() const {
  std::lock_guard<std::mutex> lock(mutex_);
  std::vector<std::vector<at::Tensor>> bucketTensors;
- for (size_t i = 0; i < buckets_.size(); ++i) {
-   auto& bucket = buckets_[i];
+ for (const auto& bucket : buckets_) {
   std::vector<at::Tensor> tensors;
   tensors.reserve(bucket.replicas.size());
   for (const auto& rep : bucket.replicas) {
