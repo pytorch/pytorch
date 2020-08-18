@@ -56,6 +56,7 @@ Value* tryConvertToType(
     const TypePtr& concrete_type,
     Value* value,
     bool allow_conversions) {
+
   if (auto value_tuple = value->type()->cast<TupleType>()) {
     // Allow homogeneous tuples to be casted implicitly to lists of appropriate
     // types
@@ -111,7 +112,7 @@ Value* tryConvertToType(
 
     // Convert strings to device
     if (value->type()->isSubtypeOf(StringType::get()) &&
-        DeviceObjType::get()->isSubtypeOf(concrete_type)) {
+        concrete_type->isSubtypeOf(DeviceObjType::get())) {
       return graph.insert(aten::device, {value}, {}, loc);
     }
   }
