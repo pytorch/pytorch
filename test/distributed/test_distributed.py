@@ -2927,9 +2927,7 @@ class _DistTestBase(object):
         models_to_test = [
             # Network with batchnorm
             DDPUnevenTestInput(
-                name="batch_norm_net",
-                model=bn_net,
-                inp=torch.ones(batch, 2).to(rank),
+                name="batch_norm_net", model=bn_net, inp=torch.ones(batch, 2).to(rank)
             ),
             DDPUnevenTestInput(
                 name="large_conv_model",
@@ -2963,7 +2961,7 @@ class _DistTestBase(object):
                     name="resnet_model",
                     model=resnet_model,
                     inp=torch.ones(1, 3, 1000, 1000),
-                ),
+                )
             )
 
         # 0 iteration tests for when one process does not train model at all, so
@@ -2981,7 +2979,9 @@ class _DistTestBase(object):
         for num_early_join_ranks in num_uneven_ranks:
             for baseline_iter in baseline_num_iters:
                 for offset in iteration_offsets:
-                    mapping = {rank: baseline_iter for rank in range(0, num_early_join_ranks)}
+                    mapping = {
+                        rank: baseline_iter for rank in range(0, num_early_join_ranks)
+                    }
                     # if num_early_join_ranks > 1, ranks > 0 that will join early
                     # iterate offset//2 more times than rank 0, to test nodes depleting inputs
                     # at different times.
@@ -2989,11 +2989,19 @@ class _DistTestBase(object):
                         for rank in mapping.keys():
                             if rank > 0:
                                 mapping[rank] += offset // 2
-                    mapping.update({rank: baseline_iter + offset for rank in range(num_early_join_ranks, dist.get_world_size())})
+                    mapping.update(
+                        {
+                            rank: baseline_iter + offset
+                            for rank in range(
+                                num_early_join_ranks, dist.get_world_size()
+                            )
+                        }
+                    )
                     iteration_mappings.append(mapping)
 
-        print(f"-- mappings: {iteration_mappings}")
-        for (test_case, iteration_mapping) in itertools.product(models_to_test, iteration_mappings):
+        for (test_case, iteration_mapping) in itertools.product(
+            models_to_test, iteration_mappings
+        ):
             print(
                 f"Running test: {test_case.name} with iteration mapping {iteration_mapping}"
             )

@@ -22,6 +22,8 @@ inline int64_t current_time_in_nanos() {
   return torch::autograd::profiler::getTime();
 }
 
+constexpr int kUnsetDivFactor = - 1;
+
 } // namespace
 
 Reducer::Reducer(
@@ -43,6 +45,7 @@ Reducer::Reducer(
       backward_stats_base_(0),
       has_rebuilt_bucket_(false),
       bucket_bytes_cap_(bucket_bytes_cap),
+      divFactor_(kUnsetDivFactor),
       comm_hook_(nullptr) {
   C10_LOG_API_USAGE_ONCE("torch.distributed.ddp.reducer");
   TORCH_CHECK(replicas_.size() >= 1, "Expected at least one model replica.");

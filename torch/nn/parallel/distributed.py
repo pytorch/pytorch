@@ -892,8 +892,11 @@ class DistributedDataParallel(Module):
         )
 
     def _find_common_rank(self, input_rank, rank_cond):
-        rank_to_use = torch.tensor([input_rank if rank_cond else -1]).to(
-            self.device_ids[0] if self.device_type != "cpu" else "cpu"
+        # -1 indicates that this rank is not under consideration to be the
+        # common_rank
+        rank_to_use = torch.tensor(
+            [input_rank if rank_cond else -1],
+            device=self.device_ids[0] if self.device_type != "cpu" else "cpu",
         )
         dist.all_reduce(rank_to_use, op=ReduceOp.MAX, group=self.process_group)
         if rank_to_use.item() == -1:

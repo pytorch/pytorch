@@ -197,7 +197,6 @@ PyObject* c10d_init(PyObject* _unused) {
             }
           },
           py::call_guard<py::gil_scoped_release>())
-      .def("_should_rebuild_buckets", &::c10d::Reducer::shouldRebuildBuckets)
       .def(
           "_push_all_rebuilt_params",
           &::c10d::Reducer::pushRebuiltParamsForAllIndices,

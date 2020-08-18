@@ -17,7 +17,6 @@ namespace c10d {
 
 constexpr int kDefaultFirstBucketBytes = int(1024 * 1024);
 constexpr int kDefaultBucketBytesCap = int(25 * 1024 * 1024);
-constexpr int kUnsetDivFactor = -1;
 
 class Reducer {
  public:
@@ -63,8 +62,16 @@ class Reducer {
   // Returns a vector of tensors in each bucket in sequential order.
   std::vector<std::vector<at::Tensor>> getBucketTensors() const;
 
-  // Rebuild buckets according to when tensors received gradients in the
-  // backward pass.
+  // Rebuild buckets based on rebuilt_params_ and rebuilt_param_indices_ according
+  // to when tensors received grads in the backward pass.
+  // TODO this function makes broadcast communication call and
+  // could be overlapped with next forward() call, thus
+  // it could be async. Will make it async when rebuilding buckets for
+  // find_unused_parameters = true case, as we could rebuild buckets more than
+  // once for find_unused_parameters = true case, where subgraphs are trained
+  // and parameter indices order may change more frequently.
+  // For find_unused_parameters = false case, buckets are only rebuilt once,
+  // the performance cost is negligible.
   std::vector<std::vector<size_t>> rebuildBuckets();
 
   // Returns true if we should rebuild buckets, else false. We only rebuild
@@ -153,15 +160,6 @@ class Reducer {
   // Broadcast rebuilt buckets from rank 0 to other ranks before initializing
   // the buckets
   void sync_bucket_indices(std::vector<std::vector<size_t>>& bucket_indices);
-  // Rebuild buckets based on rebuilt_params_ and rebuilt_param_indices_
-  // TODO this function makes broadcast communication call and
-  // could be overlapped with next forward() call, thus
-  // it could be async. Will make it async when rebuilding buckets for
-  // find_unused_parameters = true case, as we could rebuild buckets more than
-  // once for find_unused_parameters = true case, where subgraphs are trained
-  // and parameter indices order may change more frequently.
-  // For find_unused_parameters = false case, buckets are only rebuilt once,
-  // the performance cost is negligible.
 
   using GradCallback =
       torch::distributed::autograd::DistAutogradContext::GradCallback;
@@ -294,7 +292,7 @@ class Reducer {
   // applicable.
   ForwardPassAllreduceWork forwardPassWorkHandle_;
   // Division factor for reduction of gradients.
-  int divFactor_{kUnsetDivFactor};
+  int divFactor_;
  private:
   // comm_hook_ is used to access the DDP communication hook if registered.
   std::unique_ptr<CommHookInterface> comm_hook_;
