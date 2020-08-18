@@ -100,9 +100,6 @@ void ONNXShapeTypeInference(Node* n, int opset_version) {
     return;
   }
 
-  auto node_kind = n->kind();
-  auto g = n->owningGraph();
-
   // Create a Graph containing only the single node n.
   // This graph is later converted to ONNX to run shape inference.
   auto n_graph = std::make_shared<Graph>();
