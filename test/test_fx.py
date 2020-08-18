@@ -1,11 +1,17 @@
-import torch
+import torch, unittest
 from torch.fx import symbolic_trace, Proxy, Node, GraphModule, DefaultDelegate
 
 from fx.quantization import Quantizer
 
 from typing import Any, Callable, Dict, Optional, Tuple, Union
 from torch.testing._internal.common_utils import TestCase, run_tests
-from torchvision.models import resnet18
+
+try:
+    from torchvision.models import resnet18
+    HAS_TORCHVISION = True
+except ImportError:
+    HAS_TORCHVISION = False
+skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 class TestFX(TestCase):
     def test_graph_module(self):
@@ -149,6 +155,7 @@ class TestFX(TestCase):
         gm = GraphModule(m, g)
         self.assertEqual(gm(3, 4), 14)
 
+    @skipIfNoTorchVision
     def test_resnet(self):
         resnet = resnet18()
         resnet.train()
