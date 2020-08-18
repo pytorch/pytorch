@@ -7,16 +7,13 @@ from torch.quantization import (
 
 from torch.fx import (
     GraphModule,
+    Proxy,
 )
 
 from torch.fx.graph import (
     Graph,
     Node,
     map_arg,
-)
-
-from torch.fx.symbolic_trace import (
-    DefaultDelegate,
 )
 
 from .pattern_utils import (
@@ -110,7 +107,7 @@ class Add(QuantizeHandler):
                 op = torch.ops.quantized.add_relu
             else:
                 op = torch.ops.quantized.add
-            return quantizer.quantized_graph.call_function(op, load_arg(quantized=[0])(self.add_node.args), self.add_node.kwargs)
+            return quantizer.quantized_graph.create_node('call_function', op, load_arg(quantized=[0])(self.add_node.args), self.add_node.kwargs)
         else:
             activation_post_process = quantizer.activation_post_process_map[node.name]
             scale, zero_point = activation_post_process.calculate_qparams()
@@ -122,7 +119,7 @@ class Add(QuantizeHandler):
                 op = torch.ops.quantized.add
             kwargs = self.add_node.kwargs
             kwargs.update({'scale': scale, 'zero_point': zero_point})
-            return quantizer.quantized_graph.call_function(op, load_arg(quantized=True)(self.add_node.args), kwargs)
+            return quantizer.quantized_graph.create_node('call_function', op, load_arg(quantized=True)(self.add_node.args), kwargs)
 
 @register_quant_pattern(operator.mul)
 @register_quant_pattern((torch.nn.ReLU, operator.mul))
@@ -146,7 +143,7 @@ class Mul(QuantizeHandler):
                 op = torch.ops.quantized.mul_relu
             else:
                 op = torch.ops.quantized.mul
-            return quantizer.quantized_graph.call_function(op, load_arg(quantized=[0])(self.mul_node.args), self.mul_node.kwargs)
+            return quantizer.quantized_graph.create_node('call_function', op, load_arg(quantized=[0])(self.mul_node.args), self.mul_node.kwargs)
         else:
             activation_post_process = quantizer.activation_post_process_map[node.name]
             scale, zero_point = activation_post_process.calculate_qparams()
@@ -158,7 +155,7 @@ class Mul(QuantizeHandler):
                 op = torch.ops.quantized.mul
             kwargs = self.mul_node.kwargs
             kwargs.update({'scale': scale, 'zero_point': zero_point})
-            return quantizer.quantized_graph.call_function(op, load_arg(quantized=True)(self.mul_node.args), kwargs)
+            return quantizer.quantized_graph.create_node('call_function', op, load_arg(quantized=True)(self.mul_node.args), kwargs)
 
 @register_quant_pattern(torch.cat)
 class Cat(QuantizeHandler):
@@ -171,7 +168,7 @@ class Cat(QuantizeHandler):
         zero_point = int(zero_point)
         kwargs = load_arg(quantized=False)(node.kwargs)
         kwargs.update({'scale': scale, 'zero_point': zero_point})
-        return quantizer.quantized_graph.call_function(torch.ops.quantized.cat, load_arg(quantized=[0])(node.args), kwargs)
+        return quantizer.quantized_graph.create_node('call_function', torch.ops.quantized.cat, load_arg(quantized=[0])(node.args), kwargs)
 
 # handle conv, maybe followed by relu
 # NB: matching order is reversed, that is we match from the bottom of this list to the beginning
@@ -195,7 +192,7 @@ class ConvRelu(QuantizeHandler):
            (node.op == 'call_module' and isinstance(quantizer.modules[node.target], torch.nn.ReLU)):
             self.relu_node = node
             node = node.args[0]
-            self.conv_node = node
+        self.conv_node = node
         if node.op == 'call_module':
             self.conv = quantizer.modules[self.conv_node.target]
 
@@ -224,7 +221,8 @@ class ConvRelu(QuantizeHandler):
             quantized = qconv.from_float(self.conv)
             parent_name, name = _parent_name(self.conv_node.target)
             setattr(quantizer.modules[parent_name], name, quantized)
-            return quantizer.quantized_graph.call_module(
+            return quantizer.quantized_graph.create_node(
+                'call_module',
                 self.conv_node.target,
                 (load_arg(quantized=True)(self.conv_node.args[0]),),
                 {})
@@ -235,7 +233,7 @@ class ConvRelu(QuantizeHandler):
                 args = load_arg(quantized=[0, 1])(self.conv_node.args)
                 args = load_arg(quantized=False)(self.conv_node.args)
                 kwargs = load_arg(quantized=False)(self.conv_node.kwargs)
-                conv_out = quantizer.quantized_graph.call_function(
+                conv_out = quantizer.quantized_graph.create_node('call_function',
                     torch.nn.functional.conv2d, args, kwargs)
                 return quantize_node(
                     conv_out, quantizer.activation_post_process_map[self.conv_node.name])
@@ -247,7 +245,7 @@ class ConvRelu(QuantizeHandler):
                 weight = load_arg(quantized=True)(self.conv_node.args[1])
                 other_args = load_arg(quantized=False)(self.conv_node.args[2:])
                 prepack_args = [weight] + list(other_args)
-                packed_weight = quantizer.quantized_graph.call_function(
+                packed_weight = quantizer.quantized_graph.create_node('call_function',
                     torch.ops.quantized.conv2d_prepack, prepack_args, {})
                 # construct conv input
                 conv_input = load_arg(quantized=True)(self.conv_node.args[0])
@@ -255,7 +253,7 @@ class ConvRelu(QuantizeHandler):
                 scale, zero_point, _ = get_qparams(activation_post_process)
                 qconv_args = [conv_input, packed_weight, scale, zero_point]
                 kwargs = load_arg(quantized=False)(self.conv_node.kwargs)
-                return quantizer.quantized_graph.call_function(
+                return quantizer.quantized_graph.create_node('call_function',
                     torch.ops.quantized.conv2d, qconv_args, kwargs)
 
 # handle linear, maybe followed by relu
@@ -301,14 +299,15 @@ class LinearReLU(QuantizeHandler):
             quantized = qlinear.from_float(self.linear)
             parent_name, name = _parent_name(self.linear_node.target)
             setattr(quantizer.modules[parent_name], name, quantized)
-            return quantizer.quantized_graph.call_module(
+            return quantizer.quantized_graph.create_node(
+                'call_module',
                 self.linear_node.target, (load_arg(quantized=True)(self.linear_node.args[0]),), {})
         elif self.linear_node.op == 'call_function':
             if debug:
                 args = load_arg(quantized=[0, 1])(self.linear_node.args)
                 args = load_arg(quantized=False)(self.linear_node.args)
                 kwargs = load_arg(quantized=False)(self.linear_node.kwargs)
-                linear_out = quantizer.quantized_graph.call_function(
+                linear_out = quantizer.quantized_graph.create_node('call_function',
                     torch.nn.functional.linear, args, kwargs)
                 return quantize_node(
                     linear_out,
@@ -329,7 +328,7 @@ class LinearReLU(QuantizeHandler):
                     bias = kwargs['bias']
                     kwargs.pop('bias')
                 prepack_args = [weight, bias]
-                packed_weight = quantizer.quantized_graph.call_function(
+                packed_weight = quantizer.quantized_graph.create_node('call_function',
                     torch.ops.quantized.linear_prepack, prepack_args, {})
                 # construct linear input
                 linear_input = load_arg(quantized=True)(self.linear_node.args[0])
@@ -337,7 +336,7 @@ class LinearReLU(QuantizeHandler):
                     quantizer.activation_post_process_map[self.linear_node.name]
                 scale, zero_point, _ = get_qparams(activation_post_process)
                 qlinear_args = [linear_input, packed_weight, scale, zero_point]
-                return quantizer.quantized_graph.call_function(
+                return quantizer.quantized_graph.create_node('call_function',
                     torch.ops.quantized.linear, qlinear_args, kwargs)
 
 # these ops have quantized equivalents that do not need any extra information
@@ -389,7 +388,8 @@ class DynamicLinear(QuantizeHandler):
             quantized = torch.nn.quantized.dynamic.Linear.from_float(self.linear)
             parent_name, name = _parent_name(self.linear_node.target)
             setattr(quantizer.modules[parent_name], name, quantized)
-            return quantizer.quantized_graph.call_module(
+            return quantizer.quantized_graph.create_node(
+                'call_module',
                 self.linear_node.target,
                 (load_arg(quantized=False)(self.linear_node.args[0]),),
                 {})
@@ -399,7 +399,7 @@ class DynamicLinear(QuantizeHandler):
                 args = load_arg(quantized=[1])(self.linear_node.args)
                 args = load_arg(quantized=False)(self.linear_node.args)
                 kwargs = load_arg(quantized=False)(self.linear_node.kwargs)
-                return quantizer.quantized_graph.call_function(torch.nn.functional.linear, args, kwargs)
+                return quantizer.quantized_graph.create_node('call_function', torch.nn.functional.linear, args, kwargs)
             else:
                 # quantize and dequantize weight
                 args = load_arg(quantized=[1])(self.linear_node.args)
@@ -417,11 +417,11 @@ class DynamicLinear(QuantizeHandler):
                     bias = kwargs['bias']
                     kwargs.pop('bias')
                 prepack_args = [weight, bias]
-                packed_weight = quantizer.quantized_graph.call_function(torch.ops.quantized.linear_prepack, prepack_args, {})
+                packed_weight = quantizer.quantized_graph.create_node('call_function', torch.ops.quantized.linear_prepack, prepack_args, {})
                 # construct dynamic linear input
                 linear_input = load_arg(quantized=False)(self.linear_node.args[0])
                 qdynamic_linear_args = [linear_input, packed_weight]
-                return quantizer.quantized_graph.call_function(torch.ops.quantized.linear_dynamic, qdynamic_linear_args, kwargs)
+                return quantizer.quantized_graph.create_node('call_function', torch.ops.quantized.linear_dynamic, qdynamic_linear_args, kwargs)
 
 class Quantizer:
     def __init__(self):
@@ -483,7 +483,7 @@ class Quantizer:
         self.activation_post_process_map = dict()
 
         env = {}
-        observed_graph = Graph(delegate=DefaultDelegate())
+        observed_graph = Graph()
         observed = set()
 
         def load_arg(a):
@@ -513,7 +513,7 @@ class Quantizer:
                     observer_name = get_new_observer_name(input_root)
                     setattr(input_root, observer_name, observer)
                     self.activation_post_process_map[node.name] = observer
-                    env[node.name] = observed_graph.call_module(observer_name, [load_arg(node)], {})
+                    env[node.name] = observed_graph.create_node('call_module', observer_name, [load_arg(node)], {})
                     observed.add(node.name)
 
                 # don't need to insert observer for output in dynamic quantization
@@ -544,7 +544,7 @@ class Quantizer:
                 if qconfig is not None:
                     self.activation_post_process_map[node.name] = qconfig.weight() if is_weight else qconfig.activation()
                     setattr(input_root, observer_name, self.activation_post_process_map[node.name])
-                    env[node.name] = observed_graph.call_module(observer_name, [load_arg(node)], {})
+                    env[node.name] = observed_graph.create_node('call_module', observer_name, [load_arg(node)], {})
                     observed.add(node.name)
         observed_graph.output(load_arg(input_graph.result))
 
@@ -566,7 +566,7 @@ class Quantizer:
 
         matches = self._find_matches(observed.graph, self.modules, self.patterns)
         quants = self._find_quants(observed.graph, matches)
-        self.quantized_graph = Graph(delegate=DefaultDelegate())
+        self.quantized_graph = Graph()
         env = {}
         quant_env = {}
 
@@ -575,7 +575,7 @@ class Quantizer:
                 assert n.name in quant_env, \
                     'trying to load float node but did not find node:' + n.name + \
                     ' in quantized environment:' + str(quant_env)
-                env[n.name] = quant_env[n.name].dequantize()
+                env[n.name] = Proxy(quant_env[n.name]).dequantize().node
             return env[n.name]
 
         def load_quantized(n):
@@ -696,7 +696,7 @@ class Quantizer:
                         if parent_name:
                             qparam_full_path = parent_name + '.' + qparam_full_path
                         inputs.append(self.quantized_graph.get_param(qparam_full_path))
-                    quant_env[node.name] = self.quantized_graph.call_function(torch.quantize_per_tensor, inputs, {})
+                    quant_env[node.name] = self.quantized_graph.create_node('call_function', torch.quantize_per_tensor, inputs, {})
                     continue
             # dequantize inputs for the node that are not quantized
             env[node.name] = self.quantized_graph.node_copy(node, load_non_quantized)

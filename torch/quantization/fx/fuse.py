@@ -13,10 +13,6 @@ from torch.fx.graph import (
     map_arg,
 )
 
-from torch.fx.symbolic_trace import (
-    DefaultDelegate,
-)
-
 from .pattern_utils import (
     matches,
     register_fusion_pattern,
@@ -112,7 +108,7 @@ class Fuser:
         fusion_patterns = get_fusion_patterns()
         # find conv-bn pairs
         conv_bn_pairs = self._find_matches(input_root, input_graph, fusion_patterns)
-        self.fused_graph = Graph(delegate=DefaultDelegate())
+        self.fused_graph = Graph()
         env = {}
 
         def load_arg(a):
