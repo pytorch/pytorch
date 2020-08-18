@@ -13,7 +13,13 @@ endif()
 if(INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE)
   set(ATEN_THREADING "NATIVE" CACHE STRING "ATen parallel backend")
 else()
-  set(ATEN_THREADING "OMP" CACHE STRING "ATen parallel backend")
+  if(USE_OPENMP)
+    set(ATEN_THREADING "OMP" CACHE STRING "ATen parallel backend")
+  elseif(USE_TBB)
+    set(ATEN_THREADING "TBB" CACHE STRING "ATen parallel backend")
+  else()
+    set(ATEN_THREADING "NATIVE" CACHE STRING "ATen parallel backend")
+  endif()
 endif()
 
 set(AT_PARALLEL_OPENMP 0)
@@ -278,6 +284,19 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     add_library(process_group_agent "${TORCH_SRC_DIR}/csrc/distributed/rpc/process_group_agent.cpp" "${TORCH_SRC_DIR}/csrc/distributed/rpc/process_group_agent.h")
     target_link_libraries(process_group_agent PRIVATE torch c10d fmt::fmt-header-only)
     add_dependencies(process_group_agent torch c10d)
+
+    # Define this target even if we're building without TensorPipe, to make life
+    # easier to other targets that depend on this. However, in that case, by not
+    # setting the USE_TENSORPIPE compile definition, this target will just end
+    # up being empty. Downstream targets should also add a #ifdef guard.
+    add_library(tensorpipe_agent "${TORCH_SRC_DIR}/csrc/distributed/rpc/tensorpipe_agent.cpp" "${TORCH_SRC_DIR}/csrc/distributed/rpc/tensorpipe_agent.h")
+    target_link_libraries(tensorpipe_agent PRIVATE torch c10d tensorpipe fmt::fmt-header-only)
+    add_dependencies(tensorpipe_agent torch c10d)
+    if(USE_TENSORPIPE)
+      target_compile_definitions(tensorpipe_agent PUBLIC USE_TENSORPIPE)
+      target_link_libraries(tensorpipe_agent PRIVATE tensorpipe)
+      add_dependencies(tensorpipe_agent tensorpipe)
+    endif()
   endif()
 
   set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)

@@ -3,17 +3,14 @@ import contextlib
 import functools
 import inspect
 import logging
-import numbers
 import threading
 from typing import Generic, TypeVar
 
 import torch
-import torch.distributed as dist
 
 from . import (
     PyRRef,
     RemoteProfilerManager,
-    RpcBackendOptions,
     WorkerInfo,
     _cleanup_python_rpc_handler,
     _delete_all_user_and_unforked_owner_rrefs,
@@ -28,7 +25,6 @@ from . import (
     _is_current_rpc_agent_set,
     _reset_current_rpc_agent,
     _set_and_start_rpc_agent,
-    backend_registry,
 )
 
 from .internal import (
@@ -106,6 +102,16 @@ _ALL_WORKER_NAMES = None
 _all_gather_dict_lock = threading.RLock()
 _all_gather_sequence_id = 0
 _all_gather_sequence_id_to_states = collections.defaultdict(AllGatherStates)
+
+
+def _init_rpc_states(agent):
+    worker_infos = agent.get_worker_infos()
+    global _ALL_WORKER_NAMES
+    _ALL_WORKER_NAMES = {worker_info.name for worker_info in worker_infos}
+
+    # NB: backend implementation might have already set the rpc_agent.
+    if not _is_current_rpc_agent_set():
+        _set_and_start_rpc_agent(agent)
 
 
 def _gather_to_leader(sequence_id, worker_name, obj):
@@ -287,38 +293,6 @@ def shutdown(graceful=True):
         _reset_current_rpc_agent()
 
 
-# TODO: add a context manager to wrap _init_rpc_backend and shutdown
-def _init_rpc_backend(
-    backend=backend_registry.BackendType.PROCESS_GROUP,
-    store=None,
-    name=None,
-    rank=-1,
-    world_size=-1,
-    rpc_backend_options=None,
-):
-
-    _validate_rpc_args(backend, store, name, rank, world_size, rpc_backend_options)
-
-    if _is_current_rpc_agent_set():
-        raise RuntimeError("RPC is already initialized")
-
-    # Initialize RPC.
-    rpc_agent = backend_registry.init_backend(
-        backend,
-        store=store,
-        name=name,
-        rank=rank,
-        world_size=world_size,
-        rpc_backend_options=rpc_backend_options,
-    )
-
-    worker_infos = rpc_agent.get_worker_infos()
-    global _ALL_WORKER_NAMES
-    _ALL_WORKER_NAMES = {worker_info.name for worker_info in worker_infos}
-
-    _set_and_start_rpc_agent(rpc_agent)
-
-
 @_require_initialized
 def get_worker_info(worker_name=None):
     r"""
@@ -348,24 +322,6 @@ def _to_worker_info(name_or_info):
         return get_worker_info(name_or_info)
     else:
         raise ValueError("Cannot get WorkerInfo from name {}".format(name_or_info))
-
-
-def _validate_rpc_args(backend, store, name, rank, world_size, rpc_backend_options):
-    type_mapping = {
-        backend: backend_registry.BackendType,
-        store: dist.Store,
-        name: str,
-        rank: numbers.Integral,
-        world_size: numbers.Integral,
-        rpc_backend_options: RpcBackendOptions,
-    }
-    for arg, arg_type in type_mapping.items():
-        if not isinstance(arg, arg_type):
-            raise RuntimeError(
-                "Argument {} must be of type {} but got type {}".format(
-                    arg, arg_type, type(arg)
-                )
-            )
 
 
 T = TypeVar("T")
