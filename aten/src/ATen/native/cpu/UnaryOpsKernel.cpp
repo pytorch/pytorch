@@ -156,15 +156,6 @@ void logit_kernel(TensorIterator& iter, Scalar eps_scalar) {
       });
 }
 
-template<typename T>
-T abs_impl(T v) {
-  return std::abs(v);
-}
-template<>
-uint8_t abs_impl(uint8_t v) {
-  return v;
-}
-
 static void abs_kernel(TensorIterator& iter) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, iter.dtype(), "abs_cpu", [&]() {
     cpu_kernel_vec(
@@ -357,10 +348,15 @@ static void trigamma_kernel(TensorIterator& iter) {
 }
 
 static void polygamma_kernel(TensorIterator& iter, int64_t n) {
-  switch (n) {
-    case 0: digamma_kernel(iter); break;
-    case 1: trigamma_kernel(iter); break;
-    default: TORCH_CHECK(false, "polygamma(n,x) is not implemented for n>=2, but was ", n);
+  if (n == 0) {
+    digamma_kernel(iter);
+  } else if (n == 1) {
+    trigamma_kernel(iter);
+  } else {
+    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "polygamma", [&]() {
+      cpu_kernel(
+          iter, [=](scalar_t a) -> scalar_t { return calc_polygamma(n, a); });
+    });
   }
 }
 

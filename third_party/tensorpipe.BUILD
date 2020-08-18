@@ -78,8 +78,8 @@ template_rule(
     src = "tensorpipe/tensorpipe.h.in",
     out = "tensorpipe/tensorpipe.h",
     substitutions = {
-        "cmakedefine01 TENSORPIPE_HAS_SHM_TRANSPORT": "define TENSORPIPE_HAS_SHM_TRANSPORT 1",
-        "cmakedefine01 TENSORPIPE_HAS_CMA_CHANNEL": "define TENSORPIPE_HAS_CMA_CHANNEL 1",
+        "cmakedefine01 TENSORPIPE_HAS_SHM_TRANSPORT": "define TENSORPIPE_HAS_SHM_TRANSPORT 0",
+        "cmakedefine01 TENSORPIPE_HAS_CMA_CHANNEL": "define TENSORPIPE_HAS_CMA_CHANNEL 0",
     },
 )
 

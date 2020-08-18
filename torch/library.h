@@ -484,9 +484,9 @@ public:
   /// ```
   /// // Example:
   ///
-  /// TORCH_LIBRARY_IMPL(_, XLAPreAutograd, m) {
+  /// TORCH_LIBRARY_IMPL(_, AutogradXLA, m) {
   ///   // If there is not a kernel explicitly registered
-  ///   // for XLAPreAutograd, fallthrough to the next
+  ///   // for AutogradXLA, fallthrough to the next
   ///   // available kernel
   ///   m.fallback(torch::CppFunction::makeFallthrough());
   /// }

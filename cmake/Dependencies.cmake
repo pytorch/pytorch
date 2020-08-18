@@ -1307,16 +1307,12 @@ if(USE_DISTRIBUTED AND USE_TENSORPIPE)
   if(MSVC)
     message(WARNING "Tensorpipe cannot be used on Windows.")
   else()
-    set(__BUILD_TESTING ${BUILD_TESTING})
-    set(BUILD_TESTING OFF)
-    set(TP_BUILD_PYTHON OFF)
-    set(TP_BUILD_LIBUV ON)
+    set(TP_BUILD_LIBUV ON CACHE BOOL "" FORCE)
     set(TP_ENABLE_SHM OFF CACHE BOOL "" FORCE)
     set(TP_ENABLE_CMA OFF CACHE BOOL "" FORCE)
+    set(TP_STATIC_OR_SHARED STATIC CACHE STRING "" FORCE)
 
     add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/tensorpipe)
-
-    set(BUILD_TESING ${__BUILD_TESTING})
 
     list(APPEND Caffe2_DEPENDENCY_LIBS tensorpipe)
   endif()
