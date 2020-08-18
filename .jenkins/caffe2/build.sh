@@ -248,7 +248,7 @@ else
     export MAX_JOBS=`expr $(nproc) - 1`
   fi
 
-  pip install dataclasses
+  pip install --user dataclasses
 
   $PYTHON setup.py install --user
 
