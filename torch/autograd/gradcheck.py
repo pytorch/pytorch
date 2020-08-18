@@ -74,10 +74,10 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
 
     contains_complex_input = imag_j_tensors is not None
 
-    def compute_gradient(x_tensor, x_idx, _mkldnn=False, imag_delta=False):
+    def compute_gradient(x_tensor, x_idx, is_mkldnn=False, imag_delta=False):
 
-        def fn_out(_mkldnn=False):
-            if not _mkldnn:
+        def fn_out(is_mkldnn=False):
+            if not is_mkldnn:
                 return fn(input).clone()
             else:
                 return fn([x_tensor.to_mkldnn()])
@@ -88,10 +88,10 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
             delta = eps
         orig = x_tensor[x_idx].item()
         x_tensor[x_idx] = orig - eps
-        outa = fn_out(_mkldnn)
+        outa = fn_out(is_mkldnn)
         x_tensor[x_idx] = orig + eps
-        outb = fn_out(_mkldnn)
-        if not _mkldnn:
+        outb = fn_out(is_mkldnn)
+        if not is_mkldnn:
             x_tensor[x_idx] = orig
         r = (outb - outa) / (2 * eps)
         return r.detach().reshape(-1)
@@ -137,9 +137,9 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
                 # this is really inefficient, but without indexing implemented, there's
                 # not really a better way than converting back and forth
                 x_tensor_dense = x_tensor.to_dense()
-                real_d_tensor[d_idx] = compute_gradient(x_tensor_dense, x_idx, _mkldnn=True)
+                real_d_tensor[d_idx] = compute_gradient(x_tensor_dense, x_idx, is_mkldnn=True)
                 if update_imag_d_tensor:
-                        imag_d_tensor[d_idx] = compute_gradient(x_tensor_dense, x_idx, imag_delta=True)
+                        imag_d_tensor[d_idx] = compute_gradient(x_tensor_dense, x_idx, imag_delta=True, is_mkldnn=True)
         else:
             # Use .data here to get around the version check
             x_tensor = x_tensor.data
