@@ -57,6 +57,11 @@ Value* tryConvertToType(
     Value* value,
     bool allow_conversions) {
 
+  // treat conversion to Optional[T] as conversions to T
+  if (OptionalTypePtr op = concrete_type->cast<OptionalType>()) {
+    return tryConvertToType(loc, graph, op->getElementType(), value, allow_conversions);
+  }
+
   if (auto value_tuple = value->type()->cast<TupleType>()) {
     // Allow homogeneous tuples to be casted implicitly to lists of appropriate
     // types
