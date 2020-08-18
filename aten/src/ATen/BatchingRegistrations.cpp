@@ -226,6 +226,14 @@ Tensor view_batching_rule(const Tensor& self, IntArrayRef size) {
   return self_physical.newLogicalFromPhysical(result);
 }
 
+template <Tensor (*Op)(const Tensor&)>
+Tensor unary_pointwise_batching_rule(const Tensor& input) {
+  auto* input_batched = unsafeGetBatchedImpl(input);
+  auto output_physical = Op(input_batched->value());
+  auto old_bdims = input_batched->bdims();
+  return makeBatched(output_physical, BatchDims(old_bdims.begin(), old_bdims.end()));
+}
+
 TORCH_LIBRARY_IMPL(_, Batched, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&batchedTensorForLoopFallback>());
 }
@@ -268,6 +276,40 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("unsqueeze", unsqueeze_batching_rule);
   m.impl("view", view_batching_rule);
   m.impl("view_as", native::view_as); // composite wrt autograd
+
+  // unary pointwise, out-of-place, no additional arguments.
+#define UNARY_POINTWISE(op) m.impl(#op, unary_pointwise_batching_rule<at::op>);
+  UNARY_POINTWISE(abs);
+  UNARY_POINTWISE(acos);
+  UNARY_POINTWISE(asin);
+  UNARY_POINTWISE(atan);
+  UNARY_POINTWISE(ceil);
+  UNARY_POINTWISE(cos);
+  UNARY_POINTWISE(cosh);
+  UNARY_POINTWISE(digamma);
+  UNARY_POINTWISE(exp);
+  UNARY_POINTWISE(expm1);
+  UNARY_POINTWISE(floor);
+  UNARY_POINTWISE(frac);
+  UNARY_POINTWISE(lgamma);
+  UNARY_POINTWISE(log);
+  UNARY_POINTWISE(log10);
+  UNARY_POINTWISE(log1p);
+  UNARY_POINTWISE(log2);
+  UNARY_POINTWISE(neg);
+  UNARY_POINTWISE(reciprocal);
+  UNARY_POINTWISE(relu);
+  UNARY_POINTWISE(round);
+  UNARY_POINTWISE(rsqrt);
+  UNARY_POINTWISE(sigmoid);
+  UNARY_POINTWISE(sign);
+  UNARY_POINTWISE(sin);
+  UNARY_POINTWISE(sinh);
+  UNARY_POINTWISE(sqrt);
+  UNARY_POINTWISE(tan);
+  UNARY_POINTWISE(tanh);
+  UNARY_POINTWISE(trunc);
+#undef UNARY_POINTWISE
 }
 
 } // namespace at

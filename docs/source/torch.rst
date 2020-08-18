@@ -84,9 +84,12 @@ Indexing, Slicing, Joining, Mutating Ops
 
     cat
     chunk
+    dstack
     gather
+    hstack
     index_select
     masked_select
+    movedim
     narrow
     nonzero
     reshape
@@ -98,6 +101,7 @@ Indexing, Slicing, Joining, Mutating Ops
     transpose
     unbind
     unsqueeze
+    vstack
     where
 
 .. _generators:
@@ -248,6 +252,7 @@ Pointwise Ops
     absolute
     acos
     acosh
+    arccosh
     add
     addcdiv
     addcmul
@@ -407,6 +412,7 @@ Other Operations
     bucketize
     cartesian_prod
     cdist
+    clone
     combinations
     cross
     cummax
