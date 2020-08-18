@@ -96,6 +96,15 @@ class _ObserverBase(ObserverBase):
         - ``torch.per_channel_affine``
         - ``torch.per_channel_symmetric``
     """
+
+    # Version 1/None
+    #   self
+    #
+    # Version 2
+    #   self
+    #   |--- eps : Tensor
+    _version = 2
+
     def __init__(self, dtype=torch.quint8, qscheme=torch.per_tensor_affine,
                  reduce_range=False, quant_min=None, quant_max=None):
         super(_ObserverBase, self).__init__(dtype=dtype)
@@ -106,7 +115,7 @@ class _ObserverBase(ObserverBase):
                     reduce_range will be deprecated in a future release of PyTorch."
             )
         self.reduce_range = reduce_range
-        self.eps = torch.finfo(torch.float32).eps
+        self.register_buffer('eps', torch.tensor([torch.finfo(torch.float32).eps]))
         assert self.qscheme in (
             torch.per_tensor_affine,
             torch.per_tensor_symmetric,
@@ -125,6 +134,19 @@ class _ObserverBase(ObserverBase):
             self._validate_qmin_qmax(quant_min, quant_max)
         self.quant_min = quant_min
         self.quant_max = quant_max
+
+    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
+                              missing_keys, unexpected_keys, error_msgs):
+
+        version = local_metadata.get('version', None)
+
+        if version is None or version == 1:
+            # eps was moved to a buffer in version 2
+            eps = torch.tensor([torch.finfo(torch.float32).eps])
+            state_dict[prefix + 'eps'] = eps
+
+        super(ObserverBase, self)._load_from_state_dict(state_dict, prefix, local_metadata, strict,
+                                                        missing_keys, unexpected_keys, error_msgs)
 
     @torch.jit.export
     def _validate_qmin_qmax(self, quant_min, quant_max):
@@ -228,7 +250,7 @@ class _ObserverBase(ObserverBase):
         if self.qscheme == torch.per_tensor_symmetric or self.qscheme == torch.per_channel_symmetric:
             max_val_pos = torch.max(-min_val_neg, max_val_pos)
             scale = max_val_pos / (float(quant_max - quant_min) / 2)
-            scale = torch.max(scale, torch.tensor(self.eps, device=device, dtype=scale.dtype))
+            scale = torch.max(scale, self.eps)
             if self.dtype == torch.quint8:
                 if self.has_customized_qrange:
                     # When customized quantization range is used, down-rounded midpoint of the range is chosen.
@@ -245,7 +267,7 @@ class _ObserverBase(ObserverBase):
             zero_point = -1 * min_val / scale
         else:
             scale = (max_val_pos - min_val_neg) / float(quant_max - quant_min)
-            scale = torch.max(scale, torch.tensor(self.eps, device=device, dtype=scale.dtype))
+            scale = torch.max(scale, self.eps)
             zero_point = quant_min - torch.round(min_val_neg / scale)
             zero_point = torch.max(zero_point, torch.tensor(quant_min, device=device, dtype=zero_point.dtype))
             zero_point = torch.min(zero_point, torch.tensor(quant_max, device=device, dtype=zero_point.dtype))
