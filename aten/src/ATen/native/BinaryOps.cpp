@@ -46,6 +46,7 @@ DEFINE_DISPATCH(logaddexp2_stub);
 DEFINE_DISPATCH(gcd_stub);
 DEFINE_DISPATCH(lcm_stub);
 DEFINE_DISPATCH(hypot_stub);
+DEFINE_DISPATCH(nextafter_stub);
 
 Tensor& add_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar alpha) {
   auto iter = TensorIterator::binary_op(result, self, other,
@@ -899,6 +900,23 @@ Tensor hypot(const Tensor& self, const Tensor& other) {
 
 Tensor& hypot_(Tensor& self, const Tensor& other) {
   return at::hypot_out(self, self, other);
+}
+
+Tensor& nextafter_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  auto iter = TensorIterator::binary_op(result, self, other);
+  nextafter_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor nextafter(const Tensor& self, const Tensor& other) {
+  Tensor result;
+  auto iter = TensorIterator::binary_op(result, self, other);
+  nextafter_stub(iter.device_type(), iter);
+  return iter.output();
+}
+
+Tensor& nextafter_(Tensor& self, const Tensor& other) {
+  return at::nextafter_out(self, self, other);
 }
 
 Tensor true_divide(const Tensor& self, Scalar divisor) {
