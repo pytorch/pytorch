@@ -2694,7 +2694,7 @@ class _DistTestBase(object):
         # Check that all tensors in module's state_dict() are equal.
         for t in net_module_states:
             tensor_list = [
-                torch.zeros_like(t).to(self.rank) for _ in range(dist.get_world_size())
+                torch.zeros_like(t) for _ in range(dist.get_world_size())
             ]
             dist.all_gather(tensor_list, t)
             for tensor in tensor_list:
@@ -2722,7 +2722,7 @@ class _DistTestBase(object):
         net_module_states = list(net.module.state_dict().values())
         for t in net_module_states:
             tensor_list = [
-                torch.zeros_like(t).to(self.rank) for _ in range(dist.get_world_size())
+                torch.zeros_like(t) for _ in range(dist.get_world_size())
             ]
             dist.all_gather(tensor_list, t)
             for i, tensor in enumerate(tensor_list):
@@ -2755,7 +2755,7 @@ class _DistTestBase(object):
         grad_scale = 50
         rank = self.rank
         model = nn.Linear(dim, dim, bias=False)
-        inp = torch.ones(batch, dim).to(self.rank) * grad_scale
+        inp = torch.ones(batch, dim, device=self.rank) * grad_scale
         net = torch.nn.parallel.DistributedDataParallel(
             model.cuda(rank), device_ids=[self.rank], bucket_cap_mb=1
         )
@@ -2769,7 +2769,7 @@ class _DistTestBase(object):
                 # of currently active processes and inactive processes contribute
                 # zero gradient. If we kept dividing by static initial world
                 # size as processes leave, the grad would be smaller.
-                expected_grad = torch.ones(dim, dim).to(self.rank) * grad_scale
+                expected_grad = torch.ones(dim, dim, device=self.rank) * grad_scale
                 param = list(net.parameters())[0]
                 self.assertEqual(expected_grad, param.grad)
                 # Avoid accumulating grads so that it's the same every iteration
@@ -2867,9 +2867,9 @@ class _DistTestBase(object):
         torch.cuda.synchronize(device=rank)
         self.assertTrue(net.authoritative_rank)
         # All ranks should have agreed on the same authoritative_rank!
-        final_rank_tensor = torch.tensor([net.authoritative_rank]).to(self.rank)
+        final_rank_tensor = torch.tensor([net.authoritative_rank], device=self.rank)
         tensor_list = [
-            torch.zeros_like(final_rank_tensor).to(self.rank)
+            torch.zeros_like(final_rank_tensor)
             for _ in range(dist.get_world_size())
         ]
         dist.all_gather(tensor_list, final_rank_tensor)
@@ -2927,29 +2927,29 @@ class _DistTestBase(object):
         models_to_test = [
             # Network with batchnorm
             DDPUnevenTestInput(
-                name="batch_norm_net", model=bn_net, inp=torch.ones(batch, 2).to(rank)
+                name="batch_norm_net", model=bn_net, inp=torch.ones(batch, 2, device=rank)
             ),
             DDPUnevenTestInput(
                 name="large_conv_model",
                 model=large_model,
-                inp=torch.ones(batch, batch, dim, dim).to(rank),
+                inp=torch.ones(batch, batch, dim, dim, device=rank),
             ),
             DDPUnevenTestInput(
                 name="small_model",
                 model=small_model,
-                inp=torch.ones(batch, dim).to(rank),
+                inp=torch.ones(batch, dim, device=rank),
             ),
             # Unused parameter test where rank that does not join early has unused params
             DDPUnevenTestInput(
                 name="unjoined_rank_with_unused_params_model",
                 model=unjoined_rank_with_unused_params_model,
-                inp=(torch.ones(batch, 2).to(rank), rank),
+                inp=(torch.ones(batch, 2, device=rank), rank),
             ),
             # Unused parameter test where rank that does join early has unused params
             DDPUnevenTestInput(
                 name="joined_rank_with_unused_params_model",
                 model=joined_rank_with_unused_params_model,
-                inp=(torch.ones(batch, 2).to(rank), rank),
+                inp=(torch.ones(batch, 2, device=rank), rank),
             ),
         ]
 
