@@ -16702,32 +16702,6 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                                 res2[i, j] += m1[i, l] * m2[l, j]
                     self.assertEqual(res1, res2)
 
-    @onlyCPU
-    @dtypes(*(torch.testing.get_all_complex_dtypes() + [torch.float, torch.double]))
-    def test_dot(self, device, dtype):
-        v1 = torch.randn(100, dtype=dtype, device=device)
-        v2 = torch.randn(100, dtype=dtype, device=device)
-        res1 = torch.dot(v1, v2)
-        res2 = 0
-        for i, j in zip(v1, v2):
-            res2 += i * j
-        self.assertEqual(res1, res2)
-        out = torch.randn((), dtype=dtype, device=device)
-        torch.dot(v1, v2, out=out)
-        self.assertEqual(res1, out)
-
-        # Test 0-strided
-        v1 = torch.randn(1, dtype=dtype, device=device).expand(100)
-        v2 = torch.randn(100, dtype=dtype, device=device)
-        res1 = torch.dot(v1, v2)
-        res2 = 0
-        for i, j in zip(v1, v2):
-            res2 += i * j
-        self.assertEqual(res1, res2)
-        out = torch.randn((), dtype=dtype, device=device)
-        torch.dot(v1, v2, out=out)
-        self.assertEqual(res1, out)
-
     def _test_dot_vdot_vs_numpy(self, device, dtype, torch_fn, np_fn):
         def compare_with_numpy_bin_op(torch_fn, np_fn, x, y):
             y_np = y.cpu().numpy()
