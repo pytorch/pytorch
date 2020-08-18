@@ -6,11 +6,9 @@ namespace torch {
 namespace jit {
 namespace mobile {
 
-TORCH_API void _save_parameters(const Module& module, std::ostream& out);
+TORCH_API void _save_data(const Module& module, std::ostream& out);
 
-TORCH_API void _save_parameters(
-    const Module& module,
-    const std::string& filename);
+TORCH_API void _save_data(const Module& module, const std::string& filename);
 
 } // namespace mobile
 } // namespace jit
