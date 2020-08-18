@@ -70,6 +70,19 @@ using can_unbox =
     guts::negation<std::is_lvalue_reference<T>>
   >;
 
+// type-invariant BoxedKernelWrapper helpers
+//
+struct BoxedKernelWrapperHelpers {
+
+  static torch::jit::Stack getStack(size_t size) {
+    // TODO Reuse stack vector instead of allocating?
+    torch::jit::Stack stack;
+    stack.reserve(size);
+    return stack;
+  }
+
+};
+
 //
 // BoxedKernelWrapper
 //
@@ -152,11 +165,9 @@ struct BoxedKernelWrapper<
     can_box_all<Args...>::value && can_unbox<Result>::value && !is_tuple_of_mutable_tensor_refs<Result>::value,
     void
   >
-> {
+> : BoxedKernelWrapperHelpers {
   static torch::jit::Stack boxArgs(Args... args) {
-    // TODO Reuse stack vector instead of allocating?
-    torch::jit::Stack stack;
-    stack.reserve(sizeof...(Args));
+    torch::jit::Stack stack = getStack(sizeof...(Args));
     torch::jit::push(stack, std::forward<Args>(args)...);
     return stack;
   }
@@ -200,11 +211,9 @@ template <class... OtherArgs>
 struct BoxedKernelWrapper<
   at::Tensor&(at::Tensor&, OtherArgs...),
   std::enable_if_t<can_box_all<OtherArgs...>::value, void>
-> {
+> : BoxedKernelWrapperHelpers {
   static torch::jit::Stack boxArgs(at::Tensor& outArg, OtherArgs... otherArgs) {
-    // TODO Reuse stack vector instead of allocating?
-    torch::jit::Stack stack;
-    stack.reserve(1 + sizeof...(OtherArgs));
+    torch::jit::Stack stack = getStack(1 + sizeof...(OtherArgs));
     torch::jit::push_one(stack, outArg);
     torch::jit::push(stack, std::forward<OtherArgs>(otherArgs)...);
     return stack;
@@ -245,11 +254,9 @@ struct BoxedKernelWrapper<
     can_box_all<Args...>::value && is_tuple_of_mutable_tensor_refs<Result>::value,
     void
   >
-> {
+> : BoxedKernelWrapperHelpers {
   static torch::jit::Stack boxArgs(Args... args) {
-    // TODO Reuse stack vector instead of allocating?
-    torch::jit::Stack stack;
-    stack.reserve(sizeof...(Args));
+    torch::jit::Stack stack = getStack(sizeof...(Args));
     torch::jit::push(stack, std::forward<Args>(args)...);
     return stack;
   }
