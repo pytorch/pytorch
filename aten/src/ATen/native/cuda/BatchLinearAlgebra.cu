@@ -15,6 +15,11 @@
 #ifdef USE_MAGMA
 #include <magma.h>
 #include <magma_types.h>
+
+const bool use_magma_ = true;
+#else
+const bool use_magma_ = false;
+
 #endif
 
 namespace at {
@@ -736,7 +741,7 @@ Tensor _inverse_helper_cuda_legacy(const Tensor& self) {
 
 Tensor _inverse_helper_cuda(const Tensor& self) {
 #ifdef USE_CUSOLVER
-  if ((self.dim() == 2) || (/* self.dim() > 2 && */ batchCount(self) <= 2)) {
+  if ((self.dim() == 2) || (/* self.dim() > 2 && */ batchCount(self) <= 2) || !use_magma_) {
     return _inverse_helper_cuda_lib(self);    // cusolver or cublas
   } else {
     return _inverse_helper_cuda_legacy(self); // magma-cuda

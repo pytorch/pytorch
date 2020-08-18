@@ -6,6 +6,7 @@
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/CUDASolver.h>
+#include <ATen/cuda/CUDABlas.h>
 #include <ATen/cuda/CUDAEvent.h>
 #include <c10/cuda/CUDAStream.h>
 
@@ -45,31 +46,49 @@ static void apply_batched_inverse_lib(Tensor& self, Tensor& self_inv, Tensor& in
   auto self_inv_data = self_inv.data_ptr<scalar_t>();
   auto self_inv_mat_stride = matrixStride(self_inv);
 
-  auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
-  int* p_infos = infos.data_ptr<int>();
-  auto main_stream = at::cuda::getCurrentCUDAStream();
+  Tensor self_array = at::empty({batch_size}, at::device(at::kCPU).dtype(at::kLong));
+  Tensor self_inv_array = at::empty({batch_size}, at::device(at::kCPU).dtype(at::kLong));
+  scalar_t** p_self_array = reinterpret_cast<scalar_t**>(self_array.data_ptr());
+  scalar_t** p_self_inv_array = reinterpret_cast<scalar_t**>(self_inv_array.data_ptr());
 
-  // for-loop launch does not work well when batch size > 32, use cublas_X_batched kernels
-  // TODO: wait for cublas_X_batched library performance fix
+  // Set up the created arrays
   for (int64_t i = 0; i < batch_size; i++) {
-    auto stream = at::cuda::getStreamFromPool();
-    at::cuda::CUDAStreamGuard guard(stream);
+    p_self_array[i] = &self_data[i * self_mat_stride];
+    p_self_inv_array[i] = &self_inv_data[i * self_inv_mat_stride];
+  }
 
-    at::cuda::CUDAEvent can_start;
-    can_start.record(main_stream);
-    can_start.block(main_stream);
+  auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
 
-    int* pivot = reinterpret_cast<int*>(allocator.allocate(sizeof(int) * n).get());
-    _apply_single_inverse_helper<scalar_t>(
-      &self_data[i * self_mat_stride],
-      &self_inv_data[i * self_inv_mat_stride],
-      pivot,
-      p_infos + i,
-      n);
+  if (use_loop_launch(batch_size, n)) {
+    int* p_infos = infos.data_ptr<int>();
+    auto main_stream = at::cuda::getCurrentCUDAStream();
 
-    at::cuda::CUDAEvent finished;
-    finished.record(stream);
-    finished.block(main_stream);
+    for (int64_t i = 0; i < batch_size; i++) {
+      auto stream = at::cuda::getStreamFromPool();
+      at::cuda::CUDAStreamGuard guard(stream);
+
+      at::cuda::CUDAEvent can_start;
+      can_start.record(main_stream);
+      can_start.block(main_stream);
+
+      int* pivot = reinterpret_cast<int*>(allocator.allocate(sizeof(int) * n).get());
+      _apply_single_inverse_helper<scalar_t>(
+        p_self_array[i], p_self_inv_array[i], pivot, p_infos + i, n);
+
+      at::cuda::CUDAEvent finished;
+      finished.record(stream);
+      finished.block(main_stream);
+    }
+  } else {
+    self_array = self_array.cuda();
+    self_inv_array = self_inv_array.cuda();
+    int* ipiv_array = reinterpret_cast<int*>(allocator.allocate(sizeof(int)*batch_size*n).get());
+
+    at::cuda::blas::getrfBatched<scalar_t>(n, n, reinterpret_cast<scalar_t**>(self_array.data_ptr()), n,
+      ipiv_array, infos.data_ptr<int>(), batch_size);
+
+    at::cuda::blas::getriBatched<scalar_t>(n, n, reinterpret_cast<scalar_t**>(self_array.data_ptr()), n,
+      ipiv_array, infos.data_ptr<int>(), batch_size, reinterpret_cast<scalar_t**>(self_inv_array.data_ptr()));
   }
 }
 
