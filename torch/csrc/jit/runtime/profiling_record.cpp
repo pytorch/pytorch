@@ -191,11 +191,13 @@ bool needsProfiledOutput(Node* n) {
   }
 }
 
-static void removeProfileCounter(Block* b) {
+void removeProfileCounter(Block* b) {
   for (auto it = b->nodes().rbegin(); it != b->nodes().rend();) {
     auto n = *it;
     if (n->kind() == prim::profile && n->inputs().size() == 0) {
       it.destroyCurrent();
+      // there is only one counter node
+      return;
     } else {
       it++;
     }
