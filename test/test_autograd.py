@@ -1574,6 +1574,49 @@ class TestAutograd(TestCase):
         self.assertEqual(y.grad, grad[1])
         self.assertEqual(z.grad, grad[2])
 
+    def test_hstack(self):
+        x = torch.randn(10, 10, requires_grad=True)
+        y = torch.randn(10, 10, requires_grad=True)
+        z = torch.randn(10, 10, requires_grad=True)
+        stacked = torch.hstack([x, y, z])
+        grad = torch.randn(10, 30)
+        stacked.backward(grad)
+        self.assertEqual(x.grad, grad[:, 0:10])
+        self.assertEqual(y.grad, grad[:, 10:20])
+        self.assertEqual(z.grad, grad[:, 20:30])
+
+        x = torch.randn(10, requires_grad=True)
+        y = torch.randn(10, requires_grad=True)
+        z = torch.randn(10, requires_grad=True)
+        stacked = torch.hstack([x, y, z])
+        grad = torch.randn(30)
+        stacked.backward(grad)
+        self.assertEqual(x.grad, grad[0:10])
+        self.assertEqual(y.grad, grad[10:20])
+        self.assertEqual(z.grad, grad[20:30])
+
+    def test_vstack(self):
+        x = torch.randn(10, 10, requires_grad=True)
+        y = torch.randn(10, 10, requires_grad=True)
+        z = torch.randn(10, 10, requires_grad=True)
+        stacked = torch.vstack([x, y, z])
+        grad = torch.randn(30, 10)
+        stacked.backward(grad)
+        self.assertEqual(x.grad, grad[0:10])
+        self.assertEqual(y.grad, grad[10:20])
+        self.assertEqual(z.grad, grad[20:30])
+
+    def test_dstack(self):
+        x = torch.randn(10, 10, requires_grad=True)
+        y = torch.randn(10, 10, requires_grad=True)
+        z = torch.randn(10, 10, requires_grad=True)
+        stacked = torch.dstack([x, y, z])
+        grad = torch.randn(10, 10, 3)
+        stacked.backward(grad)
+        self.assertEqual(x.grad, grad[:, :, 0])
+        self.assertEqual(y.grad, grad[:, :, 1])
+        self.assertEqual(z.grad, grad[:, :, 2])
+
     def test_unbind(self):
         stacked = torch.randn(3, 10, 10, requires_grad=True)
         x, y, z = stacked.unbind()
@@ -4431,6 +4474,20 @@ for shape in [(1,), ()]:
         inp = torch.rand(4, requires_grad=True)
 
         out = inp.argmax()
+        self.assertFalse(out.dtype.is_floating_point)
+        self.assertFalse(out.requires_grad)
+
+        out = inp.argmin()
+        self.assertFalse(out.dtype.is_floating_point)
+        self.assertFalse(out.requires_grad)
+
+        out = inp.argsort()
+        self.assertFalse(out.dtype.is_floating_point)
+        self.assertFalse(out.requires_grad)
+
+        val = torch.rand((), requires_grad=True)
+
+        out = torch.searchsorted(inp, val)
         self.assertFalse(out.dtype.is_floating_point)
         self.assertFalse(out.requires_grad)
 

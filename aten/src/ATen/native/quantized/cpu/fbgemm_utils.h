@@ -1,15 +1,15 @@
 #pragma once
 
+#include <ATen/Tensor.h>
+#include <ATen/native/quantized/cpu/conv_packed_params.h>
+#include <ATen/native/quantized/cpu/packed_params.h>
+#include <ATen/native/quantized/cpu/embedding_packed_params.h>
+#include <c10/core/QScheme.h>
+
 #ifdef USE_FBGEMM
 #include <fbgemm/Fbgemm.h>
 #include <fbgemm/FbgemmFP16.h>
 #include <fbgemm/QuantUtils.h>
-
-#include <ATen/Tensor.h>
-#include <ATen/native/quantized/cpu/conv_packed_params.h>
-#include <ATen/native/quantized/cpu/packed_params.h>
-#include <c10/core/QScheme.h>
-
 
 // The struct for the packed weight matrix (PackBMatrix) and the corresponding
 // column offsets used for the fully connect layer, which are both prepared in
@@ -277,3 +277,44 @@ Tensor ConvertToChannelsLast3dTensor(const Tensor& src);
 } // namespace at
 
 #endif // USE_FBGEMM
+
+struct CAFFE2_API PackedEmbeddingBagWeight : public EmbeddingPackedParamsBase {
+  PackedEmbeddingBagWeight(
+      at::Tensor packed_w,
+      std::vector<float> w_scale,
+      std::vector<float> w_zp,
+      int64_t bit_rate,
+      c10::QScheme q_scheme,
+      int64_t version)
+    : packed_w(std::move(packed_w)),
+      w_scale(std::move(w_scale)),
+      w_zp(std::move(w_zp)),
+      bit_rate_(bit_rate),
+      q_scheme(q_scheme),
+      version_(version) {}
+
+  at::Tensor packed_w;
+  std::vector<float> w_scale;
+  std::vector<float> w_zp;
+  int64_t bit_rate_;
+  c10::QScheme q_scheme;
+  int64_t version_;
+
+  at::Tensor unpack() override;
+  static c10::intrusive_ptr<EmbeddingPackedParamsBase> prepack(at::Tensor weight);
+
+  int64_t bit_rate() const override {
+    return bit_rate_;
+  }
+
+  int64_t version() const override {
+    return version_;
+  }
+
+  at::Tensor embeddingbag_byte(
+    const at::Tensor& indices,
+    const at::Tensor& offsets,
+    bool sparse,
+    const c10::optional<at::Tensor>& per_sample_weights_,
+    bool include_last_offset) override;
+};
