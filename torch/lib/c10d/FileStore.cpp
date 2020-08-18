@@ -139,7 +139,7 @@ class File {
     const auto start = std::chrono::steady_clock::now();
     while (true) {
 #ifdef _WIN32
-      fd_ = syscall(std::bind(::open, path.c_str(), flags, _S_IREAD | _S_IWRITE));
+      fd_ = syscall(std::bind(::open, path.c_str(), flags | _O_BINARY, _S_IREAD | _S_IWRITE));
 #else
       fd_ = syscall(std::bind(::open, path.c_str(), flags, 0644));
 #endif
@@ -290,11 +290,7 @@ FileStore::~FileStore() {
 void FileStore::set(const std::string& key, const std::vector<uint8_t>& value) {
   std::string regKey = regularPrefix_ + key;
   std::unique_lock<std::mutex> l(activeFileOpLock_);
-#ifdef _WIN32
-  File file(path_, O_RDWR | O_CREAT | _O_BINARY, timeout_);
-#else
   File file(path_, O_RDWR | O_CREAT, timeout_);
-#endif
   auto lock = file.lockExclusive();
   file.seek(0, SEEK_END);
   file.write(regKey);
@@ -306,11 +302,7 @@ std::vector<uint8_t> FileStore::get(const std::string& key) {
   const auto start = std::chrono::steady_clock::now();
   while (true) {
     std::unique_lock<std::mutex> l(activeFileOpLock_);
-#ifdef _WIN32
-    File file(path_, O_RDONLY | _O_BINARY, timeout_);
-#else
     File file(path_, O_RDONLY, timeout_);
-#endif
     auto lock = file.lockShared();
     auto size = file.size();
     if (cache_.count(regKey) == 0 && size == pos_) {
@@ -336,11 +328,7 @@ std::vector<uint8_t> FileStore::get(const std::string& key) {
 
 int64_t FileStore::addHelper(const std::string& key, int64_t i) {
   std::unique_lock<std::mutex> l(activeFileOpLock_);
-#ifdef _WIN32
-  File file(path_, O_RDWR | O_CREAT | _O_BINARY, timeout_);
-#else
   File file(path_, O_RDWR | O_CREAT, timeout_);
-#endif
   auto lock = file.lockExclusive();
   pos_ = refresh(file, pos_, cache_);
 
@@ -367,11 +355,7 @@ int64_t FileStore::add(const std::string& key, int64_t value) {
 
 bool FileStore::check(const std::vector<std::string>& keys) {
   std::unique_lock<std::mutex> l(activeFileOpLock_);
-#ifdef _WIN32
-  File file(path_, O_RDONLY | _O_BINARY, timeout_);
-#else
   File file(path_, O_RDONLY, timeout_);
-#endif
   auto lock = file.lockShared();
   pos_ = refresh(file, pos_, cache_);
 
