@@ -23,19 +23,19 @@ executors:
   windows-with-nvidia-gpu:
     machine:
       resource_class: windows.gpu.nvidia.medium
-      image: windows-server-2019-nvidia:stable
+      image: windows-server-2019-nvidia:canary
       shell: bash.exe
 
   windows-xlarge-cpu-with-nvidia-cuda:
     machine:
       resource_class: windows.xlarge
-      image: windows-server-2019-vs2019:stable
+      image: windows-server-2019-vs2019:canary
       shell: bash.exe
 
   windows-medium-cpu-with-nvidia-cuda:
     machine:
       resource_class: windows.medium
-      image: windows-server-2019-vs2019:stable
+      image: windows-server-2019-vs2019:canary
       shell: bash.exe
 commands:
 
@@ -673,13 +673,6 @@ jobs:
     steps:
       - checkout
       - run:
-          name: Install VS 14.26 toolchain
-          no_output_timeout: 30m
-          command: |
-            if [[ "${VC_VERSION}" == "14.26" ]]; then
-              powershell .circleci/scripts/windows_vs_14_26_install.ps1
-            fi
-      - run:
           name: Install Cuda
           no_output_timeout: 30m
           command: |
@@ -743,13 +736,6 @@ jobs:
       - checkout
       - attach_workspace:
           at: c:/users/circleci/workspace
-      - run:
-          name: Install VS 14.26 toolchain
-          no_output_timeout: 30m
-          command: |
-            if [[ "${VC_VERSION}" == "14.26" ]]; then
-              powershell .circleci/scripts/windows_vs_14_26_install.ps1
-            fi
       - run:
           name: Install Cuda
           no_output_timeout: 30m
