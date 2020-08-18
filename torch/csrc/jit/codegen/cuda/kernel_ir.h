@@ -436,8 +436,8 @@ class TORCH_CUDA_API ReductionOp : public Expr {
     return reduction_op_type_;
   }
 
-  std::unordered_map<ParallelType, IterDomain*, TypeHash>
-  getParallelReductionDomains() const;
+  std::unordered_map<ParallelType, IterDomain*> getParallelReductionDomains()
+      const;
 
  private:
   std::vector<IterDomain*> getReductionDomains() const;

@@ -195,3 +195,30 @@ enum class LaunchConfigType {
 } // namespace fuser
 } // namespace jit
 } // namespace torch
+
+namespace std {
+
+// https://stackoverflow.com/questions/18837857/cant-use-enum-class-as-unordered-map-key
+// patching gcc 5.4 hash for enum class
+#define HASH_ENUM_CLASS(enum_class)                              \
+  template <>                                                    \
+  struct hash<torch::jit::fuser::enum_class> {                   \
+    size_t operator()(torch::jit::fuser::enum_class key) const { \
+      return std::hash<uint32_t>()(static_cast<uint32_t>(key));  \
+    }                                                            \
+  };
+
+HASH_ENUM_CLASS(ValType)
+HASH_ENUM_CLASS(DataType)
+HASH_ENUM_CLASS(ExprType)
+HASH_ENUM_CLASS(UnaryOpType)
+HASH_ENUM_CLASS(BinaryOpType)
+HASH_ENUM_CLASS(TernaryOpType)
+HASH_ENUM_CLASS(ParallelType)
+HASH_ENUM_CLASS(MemoryType)
+HASH_ENUM_CLASS(IterType)
+HASH_ENUM_CLASS(LaunchConfigType)
+
+#undef HASH_ENUM_CLASS
+
+} // namespace std

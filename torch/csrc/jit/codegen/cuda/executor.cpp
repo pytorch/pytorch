@@ -107,7 +107,7 @@ LaunchParams FusionExecutor::computeLaunchParams(
       {fusion_.inputs().begin(), fusion_.inputs().end()}, fusion_.outputs());
 
   // Lets collect all IterDomains that are bound to a thread binding
-  std::unordered_map<ParallelType, std::vector<IterDomain*>, TypeHash>
+  std::unordered_map<ParallelType, std::vector<IterDomain*>>
       parallel_iter_domains;
 
   for (auto val : unordered_vals) {

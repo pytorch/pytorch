@@ -14,14 +14,6 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
-// https://stackoverflow.com/questions/18837857/cant-use-enum-class-as-unordered-map-key
-struct TypeHash {
-  template <typename T>
-  std::size_t operator()(T t) const {
-    return static_cast<std::size_t>(t);
-  }
-};
-
 /*
  * Usage: FusionGuard and Fusion are required user interfaces for any operation
  * underlying the code generator. In order to create values, expressions, and
@@ -241,7 +233,7 @@ class TORCH_CUDA_API Fusion final {
   std::unordered_set<Expr*> expr_set_;
 
   // Values names counters
-  std::unordered_map<ValType, StmtNameType, TypeHash> val_type_name_map_;
+  std::unordered_map<ValType, StmtNameType> val_type_name_map_;
 
   // Expression names counter
   StmtNameType expr_name_counter_ = 0;
