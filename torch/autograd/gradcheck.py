@@ -61,20 +61,21 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
     x_tensors = iter_tensors(target, True)
     j_tensors = iter_tensors(jacobian)
 
-    def compute_gradient(x_tensor, x_idx, to_mkldnn=False):
+    def compute_gradient(x_tensor, x_idx, _mkldnn=False):
 
-        def fn_out(to_mkldnn=False):
-            if not to_mkldnn:
+        def fn_out(_mkldnn=False):
+            if not _mkldnn:
                 return fn(input).clone()
             else:
-                return fn(input.to_mkldnn())
+                return fn([x_tensor.to_mkldnn()])
 
         orig = x_tensor[x_idx].item()
         x_tensor[x_idx] = orig - eps
-        outa = fn_out(to_mkldnn)
+        outa = fn_out(_mkldnn)
         x_tensor[x_idx] = orig + eps
-        outb = fn_out(to_mkldnn)
-        x_tensor[x_idx] = orig
+        outb = fn_out(_mkldnn)
+        if not _mkldnn:
+            x_tensor[x_idx] = orig
         r = (outb - outa) / (2 * eps)
         return r.detach().reshape(-1)
 
@@ -107,7 +108,7 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
                 for x_idx in product(*[range(m) for m in x_values.size()[1:]]):
                     indices = x_indices[i].tolist() + list(x_idx)
                     d_idx = sum(indices[k] * x_stride[k] for k in range(len(x_size)))
-                    d_tensor[d_idx] = compute_gradient(x_tensor, x_idx)
+                    d_tensor[d_idx] = compute_gradient(x_value, x_idx)
         elif x_tensor.layout == torch._mkldnn:
             # Use .data here to get around the version check
             x_tensor = x_tensor.data
@@ -118,7 +119,7 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
                 # this is really inefficient, but without indexing implemented, there's
                 # not really a better way than converting back and forth
                 x_tensor_dense = x_tensor.to_dense()
-                d_tensor[d_idx] = compute_gradient(x_tensor, x_idx, to_mkldnn=True)
+                d_tensor[d_idx] = compute_gradient(x_tensor_dense, x_idx, _mkldnn=True)
         else:
             # Use .data here to get around the version check
             x_tensor = x_tensor.data
