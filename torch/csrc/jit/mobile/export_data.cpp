@@ -81,5 +81,32 @@ void _save_data(const Module& module, const std::string& filename) {
 }
 
 } // namespace mobile
+
+void _save_parameters(
+    const std::map<std::string, at::Tensor>& map,
+    std::ostream& out) {
+  mobile::ScriptModuleSerializer serializer(
+      [&](const void* buf, size_t nbytes) -> size_t {
+        out.write(static_cast<const char*>(buf), nbytes);
+        return !out ? 0 : nbytes;
+      });
+  c10::Dict<std::string, at::Tensor> dict;
+  for (const auto& e : map) {
+    dict.insert(e.first, e.second);
+  }
+  serializer.serialize(dict);
+}
+
+void _save_parameters(
+    const std::map<std::string, at::Tensor>& map,
+    const std::string& filename) {
+  mobile::ScriptModuleSerializer serializer(filename);
+  c10::Dict<std::string, at::Tensor> dict;
+  for (const auto& e : map) {
+    dict.insert(e.first, e.second);
+  }
+  serializer.serialize(dict);
+}
+
 } // namespace jit
 } // namespace torch

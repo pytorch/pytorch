@@ -125,6 +125,59 @@ void testMobileSaveLoadData() {
   }
 }
 
+void testMobileSaveLoadParameters() {
+  Module m("m");
+  m.register_parameter("foo", torch::ones({}), false);
+  m.define(R"(
+    def add_it(self, x):
+      b = 4
+      return self.foo + x + b
+  )");
+  Module child("m2");
+  child.register_parameter("foo", 4 * torch::ones({}), false);
+  child.register_parameter("bar", 3 * torch::ones({}), false);
+  m.register_module("child1", child);
+  m.register_module("child2", child.clone());
+  auto full_params = m.named_parameters();
+  std::stringstream ss;
+  std::stringstream ss_data;
+  m._save_for_mobile(ss);
+
+  // load mobile module, save mobile named parameters
+  mobile::Module bc = _load_for_mobile(ss);
+  _save_parameters(bc.named_parameters(), ss_data);
+
+  // load back the named parameters, compare to full-jit Module's
+  auto mobile_params = _load_parameters(ss_data);
+  AT_ASSERT(full_params.size() == mobile_params.size());
+  for (const auto& e : full_params) {
+    AT_ASSERT(e.value.item<int>() == mobile_params[e.name].item<int>());
+  }
+}
+
+void testMobileSaveLoadParametersEmpty() {
+  Module m("m");
+  m.define(R"(
+    def add_it(self, x):
+      b = 4
+      return x + b
+  )");
+  Module child("m2");
+  m.register_module("child1", child);
+  m.register_module("child2", child.clone());
+  std::stringstream ss;
+  std::stringstream ss_data;
+  m._save_for_mobile(ss);
+
+  // load mobile module, save mobile named parameters
+  mobile::Module bc = _load_for_mobile(ss);
+  _save_parameters(bc.named_parameters(), ss_data);
+
+  // load back the named parameters, test is empty
+  auto mobile_params = _load_parameters(ss_data);
+  AT_ASSERT(mobile_params.size() == 0);
+}
+
 void testLiteSGD() {
   Module m("m");
   m.register_parameter("foo", torch::ones({1}, at::requires_grad()), false);

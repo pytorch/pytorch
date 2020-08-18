@@ -200,5 +200,35 @@ mobile::Module _load_data(
 }
 
 } // namespace mobile
+
+std::map<std::string, at::Tensor> _load_parameters(
+    std::istream& in,
+    c10::optional<at::Device> device) {
+  std::unique_ptr<IStreamAdapter> rai = std::make_unique<IStreamAdapter>(&in);
+  return _load_parameters(std::move(rai), std::move(device));
+}
+
+std::map<std::string, at::Tensor> _load_parameters(
+    const std::string& filename,
+    c10::optional<at::Device> device) {
+  std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
+  return _load_parameters(std::move(rai), std::move(device));
+}
+
+std::map<std::string, at::Tensor> _load_parameters(
+    std::unique_ptr<ReadAdapterInterface> rai,
+    c10::optional<c10::Device> device) {
+  auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
+  BytecodeDeserializer deserializer(std::move(reader));
+  auto result = deserializer.deserialize(std::move(device)).toGenericDict();
+  std::map<std::string, at::Tensor> map;
+  for (const auto& e : result) {
+    auto key = e.key().toString()->string();
+    auto value = e.value().toTensor().tensor_data();
+    map[key] = value;
+  }
+  return map;
+}
+
 } // namespace jit
 } // namespace torch
