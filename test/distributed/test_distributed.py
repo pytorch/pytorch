@@ -33,6 +33,7 @@ from torch.testing._internal.common_distributed import (
     skip_if_small_worldsize,
     skip_if_lt_x_gpu,
     skip_if_no_gpu,
+    require_n_gpus_for_nccl_backend,
 )
 
 try:
@@ -40,6 +41,13 @@ try:
     HAS_TORCHVISION = True
 except ImportError:
     HAS_TORCHVISION = False
+
+class Foo:
+    def __init__(self, x):
+        self.x = x
+
+    def __eq__(self, other):
+        return self.__dict__ == other.__dict__
 
 
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
@@ -1506,17 +1514,35 @@ class _DistTestBase(object):
         self._barrier()
 
     # AllToAll
-    def _test_all_to_all_single_equal_split_helper(self, group, group_id, rank):
+    def _test_all_to_all_single_equal_split_helper(
+        self,
+        group,
+        group_id,
+        rank,
+        cuda=False,
+        rank_to_GPU=None,
+    ):
         if group_id is not None:
             size = len(group)
             in_tensor = torch.ones([size, size]) * rank
             expected_tensor = torch.cat([torch.ones([1, size]) * i for i in group])
             out_tensor = torch.ones([size, size]) * -1
+            if cuda:
+                in_tensor = in_tensor.cuda(rank_to_GPU[rank][0])
+                expected_tensor = expected_tensor.cuda(rank_to_GPU[rank][0])
+                out_tensor = out_tensor.cuda(rank_to_GPU[rank][0])
             dist.all_to_all_single(out_tensor, in_tensor, group=group_id)
             self.assertEqual(out_tensor, expected_tensor)
         self._barrier()
 
-    def _test_all_to_all_single_unequal_split_helper(self, group, group_id, rank):
+    def _test_all_to_all_single_unequal_split_helper(
+        self,
+        group,
+        group_id,
+        rank,
+        cuda=False,
+        rank_to_GPU=None,
+    ):
         if group_id is not None:
             size = len(group)
             in_splits = [i + 1 for i in group]
@@ -1524,6 +1550,10 @@ class _DistTestBase(object):
             in_tensor = torch.ones([sum(in_splits), size]) * rank
             out_tensor = torch.ones([(rank + 1) * size, size])
             expected_tensor = torch.cat([torch.ones([rank + 1, size]) * i for i in group])
+            if cuda:
+                in_tensor = in_tensor.cuda(rank_to_GPU[rank][0])
+                expected_tensor = expected_tensor.cuda(rank_to_GPU[rank][0])
+                out_tensor = out_tensor.cuda(rank_to_GPU[rank][0])
             dist.all_to_all_single(
                 out_tensor, in_tensor, out_splits, in_splits, group=group_id)
             self.assertEqual(out_tensor, expected_tensor)
@@ -1543,32 +1573,110 @@ class _DistTestBase(object):
                 self.assertEqual(t1, t2)
         self._barrier()
 
-    @unittest.skipIf(BACKEND != "mpi", "Only MPI supports all_to_all_single")
+    @unittest.skipIf(
+        BACKEND != "mpi", "Only MPI supports CPU all_to_all_single"
+    )
     def test_all_to_all_single_equal_split(self):
         group, group_id, rank = self._init_global_test()
         self._test_all_to_all_single_equal_split_helper(group, group_id, rank)
 
-    @unittest.skipIf(BACKEND != "mpi", "Only MPI supports all_to_all_single")
+    @unittest.skip("NCCL A2A is not enabled for OSS builds")
+    @unittest.skipIf(
+        BACKEND != "nccl", "Only Nccl supports CUDA all_to_all_single"
+    )
+    @skip_if_no_gpu
+    @skip_if_rocm
+    def test_all_to_all_single_equal_split_cuda(self):
+        group, group_id, rank = self._init_global_test()
+        rank_to_GPU = self._init_multigpu_helper()
+        self._test_all_to_all_single_equal_split_helper(
+            group,
+            group_id,
+            rank,
+            True,
+            rank_to_GPU,
+        )
+
+    @unittest.skipIf(
+        BACKEND != "mpi", "Only MPI supports CPU all_to_all_single"
+    )
     def test_all_to_all_single_unequal_split(self):
         group, group_id, rank = self._init_global_test()
         self._test_all_to_all_single_unequal_split_helper(group, group_id, rank)
+
+    @unittest.skip("NCCL A2A is not enabled for OSS builds")
+    @unittest.skipIf(
+        BACKEND != "nccl", "Only Nccl supports CUDA all_to_all_single"
+    )
+    @skip_if_no_gpu
+    @skip_if_rocm
+    def test_all_to_all_single_unequal_split_cuda(self):
+        group, group_id, rank = self._init_global_test()
+        rank_to_GPU = self._init_multigpu_helper()
+        self._test_all_to_all_single_unequal_split_helper(
+            group,
+            group_id,
+            rank,
+            True,
+            rank_to_GPU,
+        )
 
     @unittest.skipIf(BACKEND != "mpi", "Only MPI supports all_to_all")
     def test_all_to_all(self):
         group, group_id, rank = self._init_global_test()
         self._test_all_to_all_helper(group, group_id, rank)
 
-    @unittest.skipIf(BACKEND != "mpi", "Only MPI supports all_to_all_single")
+    @unittest.skipIf(
+        BACKEND != "mpi", "Only MPI supports CPU all_to_all_single"
+    )
     @skip_if_small_worldsize
     def test_all_to_all_single_equal_split_group(self):
         group, group_id, rank = self._init_group_test()
         self._test_all_to_all_single_equal_split_helper(group, group_id, rank)
 
-    @unittest.skipIf(BACKEND != "mpi", "Only MPI supports all_to_all_single")
+    @unittest.skip("NCCL A2A is not enabled for OSS builds")
+    @unittest.skipIf(
+        BACKEND != "nccl", "Only Nccl supports CUDA all_to_all_single"
+    )
+    @skip_if_no_gpu
+    @skip_if_rocm
+    @skip_if_small_worldsize
+    def test_all_to_all_single_equal_split_group_cuda(self):
+        group, group_id, rank = self._init_group_test()
+        rank_to_GPU = self._init_multigpu_helper()
+        self._test_all_to_all_single_equal_split_helper(
+            group,
+            group_id,
+            rank,
+            True,
+            rank_to_GPU,
+        )
+
+    @unittest.skipIf(
+        BACKEND != "mpi", "Only MPI supports CPU all_to_all_single"
+    )
     @skip_if_small_worldsize
     def test_all_to_all_single_unequal_split_group(self):
         group, group_id, rank = self._init_group_test()
         self._test_all_to_all_single_unequal_split_helper(group, group_id, rank)
+
+    @unittest.skip("NCCL A2A is not enabled for OSS builds")
+    @unittest.skipIf(
+        BACKEND != "nccl", "Only Nccl supports CUDA all_to_all_single"
+    )
+    @skip_if_no_gpu
+    @skip_if_rocm
+    @skip_if_small_worldsize
+    def test_all_to_all_single_unequal_split_group_cuda(self):
+        group, group_id, rank = self._init_global_test()
+        rank_to_GPU = self._init_multigpu_helper()
+        self._test_all_to_all_single_unequal_split_helper(
+            group,
+            group_id,
+            rank,
+            True,
+            rank_to_GPU,
+        )
 
     @unittest.skipIf(BACKEND != "mpi", "Only MPI supports all_to_all")
     @skip_if_small_worldsize
@@ -1576,15 +1684,53 @@ class _DistTestBase(object):
         group, group_id, rank = self._init_group_test()
         self._test_all_to_all_helper(group, group_id, rank)
 
-    @unittest.skipIf(BACKEND != "mpi", "Only MPI supports all_to_all_single")
+    @unittest.skipIf(
+        BACKEND != "mpi", "Only MPI supports CPU all_to_all_single"
+    )
     def test_all_to_all_single_equal_split_full_group(self):
         group, group_id, rank = self._init_full_group_test()
         self._test_all_to_all_single_equal_split_helper(group, group_id, rank)
 
-    @unittest.skipIf(BACKEND != "mpi", "Only MPI supports all_to_all_single")
+    @unittest.skip("NCCL A2A is not enabled for OSS builds")
+    @unittest.skipIf(
+        BACKEND != "nccl", "Only Nccl supports CUDA all_to_all_single"
+    )
+    @skip_if_no_gpu
+    @skip_if_rocm
+    def test_all_to_all_single_equal_split_full_group_cuda(self):
+        group, group_id, rank = self._init_full_group_test()
+        rank_to_GPU = self._init_multigpu_helper()
+        self._test_all_to_all_single_equal_split_helper(
+            group,
+            group_id,
+            rank,
+            True,
+            rank_to_GPU,
+        )
+
+    @unittest.skipIf(
+        BACKEND != "mpi", "Only MPI supports CPU all_to_all_single"
+    )
     def test_all_to_all_single_unequal_split_full_group(self):
         group, group_id, rank = self._init_full_group_test()
         self._test_all_to_all_single_unequal_split_helper(group, group_id, rank)
+
+    @unittest.skip("NCCL A2A is not enabled for OSS builds")
+    @unittest.skipIf(
+        BACKEND != "nccl", "Only Nccl supports CUDA all_to_all_single"
+    )
+    @skip_if_no_gpu
+    @skip_if_rocm
+    def test_all_to_all_single_unequal_split_full_group_cuda(self):
+        group, group_id, rank = self._init_full_group_test()
+        rank_to_GPU = self._init_multigpu_helper()
+        self._test_all_to_all_single_unequal_split_helper(
+            group,
+            group_id,
+            rank,
+            True,
+            rank_to_GPU,
+        )
 
     @unittest.skipIf(BACKEND != "mpi", "Only MPI supports all_to_all")
     def test_all_to_all_full_group(self):
@@ -2436,6 +2582,101 @@ class _DistTestBase(object):
 
         # Ensure that each rank processes the same number of samples.
         validate_global_samples(local_num_samples)
+
+    @require_backend({"nccl", "gloo"})
+    @require_n_gpus_for_nccl_backend(int(os.environ["WORLD_SIZE"]), os.environ["BACKEND"])
+    def test_allgather_object(self):
+        # Ensure stateful objects can be allgathered
+        f = Foo(10)
+        f.bar = 1
+        gather_objects = [
+            {"key1": 3, "key2": 4, "key3": {"nested": True}},
+            f,
+            "foo",
+            [1, 2, True, "string", [4, 5, "nested"]],
+        ]
+
+        output_gathered = [None for _ in range(dist.get_world_size())]
+        dist.all_gather_object(
+            output_gathered, gather_objects[self.rank % len(gather_objects)]
+        )
+
+        for i, val in enumerate(output_gathered):
+            expected = gather_objects[i % len(gather_objects)]
+            self.assertEqual(val, expected)
+
+        # Validate errors when objects can't be pickled.
+        class Bar:
+            pass
+
+        b = Bar()
+        gather_objects = [b for _ in range(dist.get_world_size())]
+        with self.assertRaisesRegex(AttributeError, "Can't pickle local object"):
+            dist.all_gather_object(
+                [None for _ in range(dist.get_world_size())], gather_objects[self.rank]
+            )
+
+    @require_backend({"gloo"})
+    @unittest.skipIf(BACKEND == "nccl", "NCCL does not support gather")
+    def test_gather_object(self):
+        # Ensure stateful objects can be gathered
+        f = Foo(10)
+        f.bar = 1
+        gather_objects = [
+            {"key1": 3, "key2": 4, "key3": {"nested": True}},
+            f,
+            "example_string",
+            [1, 2, True, "string", [4, 5, "nested"]],
+        ]
+        output_gathered = [None for _ in range(dist.get_world_size())]
+        gather_on_rank = 0
+        my_rank = dist.get_rank()
+        dist.gather_object(
+            gather_objects[self.rank % len(gather_objects)],
+            object_gather_list=output_gathered if my_rank == gather_on_rank else None,
+            dst=gather_on_rank,
+        )
+        if my_rank != gather_on_rank:
+            self.assertEqual(
+                output_gathered, [None for _ in range(dist.get_world_size())]
+            )
+        else:
+            for i, val in enumerate(output_gathered):
+                expected = gather_objects[i % len(gather_objects)]
+                self.assertEqual(val, expected)
+
+        # Validate errors when objects can't be pickled.
+        class Bar:
+            pass
+
+        b = Bar()
+        gather_objects = [b for _ in range(dist.get_world_size())]
+        with self.assertRaisesRegex(AttributeError, "Can't pickle local object"):
+            dist.gather_object(
+                gather_objects[0],
+                object_gather_list=gather_objects
+                if my_rank == gather_on_rank
+                else None,
+                dst=gather_on_rank,
+            )
+
+    @require_backend({"nccl"})
+    @require_backends_available({"nccl"})
+    @skip_if_lt_x_gpu(2)
+    def test_nccl_gather_object_err(self):
+        output_gathered = [None for _ in range(dist.get_world_size())]
+        gather_on_rank = 0
+        my_rank = dist.get_rank()
+        with self.assertRaisesRegex(
+            RuntimeError, "ProcessGroupNCCL does not support gather"
+        ):
+            dist.gather_object(
+                "foo",
+                object_gather_list=output_gathered
+                if my_rank == gather_on_rank
+                else None,
+                dst=gather_on_rank,
+            )
 
 
 if BACKEND == "gloo" or BACKEND == "nccl":
