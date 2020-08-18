@@ -111,6 +111,11 @@ PyModule load(const std::string& filename) {
   return mod;
 }
 
+PyModule::PyModule(PyObject* globals, PyObject* module)
+    : _globals(globals), _module(module) {
+  Py_INCREF(_module);
+  Py_INCREF(_globals);
+}
 PyModule::~PyModule() {
   Py_DECREF(_module);
   Py_DECREF(_globals);
