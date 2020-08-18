@@ -5,7 +5,6 @@ $VS_INSTALL_ARGS = @("modify", "--nocache","--quiet","--wait",
                                                      "--add Microsoft.VisualStudio.Component.VC.14.26.x86.x64")
 
 $process = Start-Process "$VS_INSTALLER" -ArgumentList $VS_INSTALL_ARGS -NoNewWindow -Wait -PassThru
-Remove-Item -Path vs_installer.exe -Force
 $exitCode = $process.ExitCode
 if (($exitCode -ne 0) -and ($exitCode -ne 3010)) {
     echo "VS 2019 installer exited with code $exitCode, which should be one of [0, 3010]."
