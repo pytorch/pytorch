@@ -238,10 +238,10 @@ class TestQuantizedTensor(TestCase):
                     for k in range(res.size()[2]):
                         if float_params:
                             inv_scale = 1.0 / scales[j]
-                            res[i][j][k] = np.clip( \
+                            res[i][j][k] = np.clip(
                                 np.round(data[i][j][k] * inv_scale + zero_points[j]), quant_min, quant_max)
                         else:
-                            res[i][j][k] = np.clip( \
+                            res[i][j][k] = np.clip(
                                 np.round(data[i][j][k] / scales[j]) + zero_points[j], quant_min, quant_max)
             res = res.view(*dims)
             return res
