@@ -24,7 +24,7 @@ static inline Tensor _fft(
 
 namespace {
 
-ScalarType promote_type(ScalarType type, bool require_complex) {
+ScalarType promote_type_fft(ScalarType type, bool require_complex) {
   if (at::isComplexType(type)) {
     return type;
   }
@@ -40,9 +40,9 @@ ScalarType promote_type(ScalarType type, bool require_complex) {
   }
 }
 
-Tensor promote_tensor(const Tensor& t, bool require_complex=false) {
+Tensor promote_tensor_fft(const Tensor& t, bool require_complex=false) {
   auto cur_type = t.scalar_type();
-  auto new_type = promote_type(cur_type, require_complex);
+  auto new_type = promote_type_fft(cur_type, require_complex);
   return (cur_type == new_type) ? t : t.to(new_type);
 }
 
@@ -93,7 +93,7 @@ Tensor resize_fft_input(Tensor x, IntArrayRef dims, IntArrayRef sizes) {
 Tensor fft_c2r(Tensor input, c10::optional<int64_t> n_opt,
                int64_t unwrapped_dim, c10::optional<std::string> norm_str,
                bool forward) {
-  input = promote_tensor(input, /*require_complex=*/true);
+  input = promote_tensor_fft(input, /*require_complex=*/true);
   const auto input_dim = input.dim();
   const auto dim = maybe_wrap_dim(unwrapped_dim, input_dim);
   const auto n = n_opt.value_or(input.sizes()[dim] * 2 - 1);
@@ -125,7 +125,7 @@ Tensor fft_r2c(Tensor input, c10::optional<int64_t> n_opt,
                int64_t unwrapped_dim, c10::optional<std::string> norm_str,
                bool forward, bool onesided) {
   TORCH_CHECK(!input.is_complex(), "Expected a real input tensor to FFT");
-  input = promote_tensor(input);
+  input = promote_tensor_fft(input);
   const auto input_dim = input.dim();
   const auto dim = maybe_wrap_dim(unwrapped_dim, input_dim);
   const auto n = n_opt.value_or(input.sizes()[dim]);
