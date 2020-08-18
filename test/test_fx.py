@@ -1,4 +1,5 @@
-import torch, unittest
+import torch
+import unittest
 from torch.fx import symbolic_trace, Proxy, Node, GraphModule, DefaultDelegate
 
 from fx.quantization import Quantizer
