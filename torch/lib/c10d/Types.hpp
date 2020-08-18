@@ -2,10 +2,11 @@
 
 #include <chrono>
 #include <cstdint>
+#include "ATen/core/ivalue.h"
 
 namespace c10d {
 
-enum class ReduceOp : std::uint8_t {
+enum class ReduceOp : public std::uint8_t, public: torch::CustomClassHolder {
   SUM = 0,
   PRODUCT,
   MIN,
