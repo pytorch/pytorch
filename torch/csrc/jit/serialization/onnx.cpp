@@ -90,19 +90,22 @@ void dump(
     dump(attr.t(), stream);
   } else if (attr.floats_size()) {
     stream << "floats, values: [";
-    for (int i = 0; i < attr.floats_size(); ++i)
+    for (int i = 0; i < attr.floats_size(); ++i) {
       stream << attr.floats(i) << (i == attr.floats_size() - 1 ? "" : " ");
+    }
     stream << "]";
   } else if (attr.ints_size()) {
     stream << "ints, values: [";
-    for (int i = 0; i < attr.ints_size(); ++i)
+    for (int i = 0; i < attr.ints_size(); ++i) {
       stream << attr.ints(i) << (i == attr.ints_size() - 1 ? "" : " ");
+    }
     stream << "]";
   } else if (attr.strings_size()) {
     stream << "strings, values: [";
-    for (int i = 0; i < attr.strings_size(); ++i)
+    for (int i = 0; i < attr.strings_size(); ++i) {
       stream << "'" << attr.strings(i) << "'"
              << (i == attr.strings_size() - 1 ? "" : " ");
+    }
     stream << "]";
   } else if (attr.tensors_size()) {
     stream << "tensors, values: [";
