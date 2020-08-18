@@ -13,6 +13,14 @@ bool getAllowJitRRefPickle() {
   return allowJitRRefPickle;
 }
 
+void enableJitRRefPickle() {
+  allowJitRRefPickle = true;
+}
+
+void disableJitRRefPickle() {
+  allowJitRRefPickle = false;
+}
+
 static_assert(
     std::numeric_limits<local_id_t>::max() <=
         std::numeric_limits<int64_t>::max(),

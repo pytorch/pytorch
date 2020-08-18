@@ -31,6 +31,17 @@ class IrNodeLabel : private OptInConstDispatch {
 
   ~IrNodeLabel() override = default;
 
+  void handle(const Bool* b) override {
+    if (b->isSymbolic()) {
+      label_ << "b" << b->name();
+    } else {
+      if (detail_level_ >= DetailLevel::Explicit) {
+        label_ << "b" << b->name() << "=";
+      }
+      label_ << *b->value();
+    }
+  }
+
   void handle(const Float* f) override {
     if (f->isSymbolic()) {
       label_ << "f" << f->name();
@@ -39,6 +50,17 @@ class IrNodeLabel : private OptInConstDispatch {
         label_ << "f" << f->name() << "=";
       }
       label_ << std::fixed << std::setprecision(2) << *f->value();
+    }
+  }
+
+  void handle(const Half* h) override {
+    if (h->isSymbolic()) {
+      label_ << "h" << h->name();
+    } else {
+      if (detail_level_ >= DetailLevel::Explicit) {
+        label_ << "h" << h->name() << "=";
+      }
+      label_ << *h->value();
     }
   }
 
@@ -90,13 +112,11 @@ class IrNodeLabel : private OptInConstDispatch {
   }
 
   void handle(const Split* split) override {
-    label_ << "Split(IterDomain=" << split->in()
-           << ", factor=" << IrNodeLabel::gen(split->factor()) << ")";
+    label_ << "Split(factor=" << IrNodeLabel::gen(split->factor()) << ")";
   }
 
   void handle(const Merge* merge) override {
-    label_ << "Merge(IterDomainOuter=" << merge->outer()
-           << ", IterDomainInner=" << merge->inner() << ")";
+    label_ << "Merge";
   }
 
  private:
@@ -286,7 +306,7 @@ void IrGraphGenerator::generateScheduleGraph() {
 
 void IrGraphGenerator::handle(const Statement* s) {
   OptInConstDispatch::handle(s);
-};
+}
 
 void IrGraphGenerator::handle(const Val* v) {
   if (!visited(v)) {
@@ -296,14 +316,14 @@ void IrGraphGenerator::handle(const Val* v) {
     }
     OptInConstDispatch::handle(v);
   }
-};
+}
 
 void IrGraphGenerator::handle(const Expr* e) {
   if (!visited(e)) {
     visited_.insert(e);
     OptInConstDispatch::handle(e);
   }
-};
+}
 
 void IrGraphGenerator::handle(const TensorDomain* td) {
   graph_def_ << "    " << getid(td) << " [label=\"TensorDomain\", "
@@ -341,8 +361,16 @@ void IrGraphGenerator::handle(const TensorIndex* ti) {
   }
 }
 
+void IrGraphGenerator::handle(const Bool* b) {
+  printValue(b, IrNodeLabel::gen(b, detail_level_));
+}
+
 void IrGraphGenerator::handle(const Float* f) {
   printValue(f, IrNodeLabel::gen(f, detail_level_));
+}
+
+void IrGraphGenerator::handle(const Half* h) {
+  printValue(h, IrNodeLabel::gen(h, detail_level_));
 }
 
 void IrGraphGenerator::handle(const Int* i) {
@@ -394,7 +422,7 @@ void IrGraphGenerator::handle(const UnaryOp* uop) {
   label << uop->getUnaryOpType();
   printExpr(uop, label.str());
 
-  // UnaryOp inputs & outputs
+  // inputs & outputs
   addArc(uop->in(), uop);
   addArc(uop, uop->out());
 }
@@ -405,10 +433,41 @@ void IrGraphGenerator::handle(const BinaryOp* bop) {
   label << bop->getBinaryOpType();
   printExpr(bop, label.str());
 
-  // BinaryOp inputs & outputs
+  // inputs & outputs
   addArc(bop->lhs(), bop);
   addArc(bop->rhs(), bop, "[color=blue]");
   addArc(bop, bop->out());
+}
+
+void IrGraphGenerator::handle(const TernaryOp* op) {
+  // node
+  std::stringstream label;
+  label << op->getTernaryOpType();
+  printExpr(op, label.str());
+
+  // inputs & outputs
+  addArc(op->in1(), op);
+  addArc(op->in2(), op, "[color=blue]");
+  addArc(op->in3(), op, "[color=brown]");
+  addArc(op, op->out());
+}
+
+void IrGraphGenerator::handle(const BroadcastOp* op) {
+  printExpr(op, "Broadcast");
+  addArc(op->in(), op);
+  addArc(op, op->out());
+}
+
+void IrGraphGenerator::handle(const ReductionOp* op) {
+  // node
+  std::stringstream label;
+  label << "Reduction(" << op->getReductionOpType() << ")";
+  printExpr(op, label.str());
+
+  // inputs & outputs
+  addArc(op->in(), op);
+  addArc(op->init(), op, "[color=blue]");
+  addArc(op, op->out());
 }
 
 void IrGraphGenerator::handle(const ForLoop* for_loop) {

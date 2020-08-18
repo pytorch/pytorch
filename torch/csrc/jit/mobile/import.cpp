@@ -16,21 +16,24 @@
 
 // The import process to serialize the bytecode package.
 // An example for bytecode.pkl of a small mobile_module looks like:
-//  (('__torch__.m.add_it',
-//    (('instructions',
-//      (('STOREN', 1, 2),
-//       ('MOVE', 1, 0),
-//       ('GET_ATTR', 0, 0),
-//       ('MOVE', 2, 0),
-//       ('LOADC', 0, 0),
-//       ('OP', 0, 0),
-//       ('LOADC', 1, 0),
-//       ('LOADC', 0, 0),
-//       ('OP', 1, 0),
-//       ('RET', 0, 0))),
-//     ('operators', (('_aten::add', 'Tensor'), ('_aten::add', 'Scalar'))),
-//     ('constants', (1, 4)),
-//     ('register_size', 2))),)
+// (3,
+//   ('__torch__.m.forward',
+//     (('instructions',
+//       (('STOREN', 1, 2),
+//        ('DROPR', 1, 0),
+//        ('MOVE', 2, 0),
+//        ('OP', 0, 0),
+//        ('RET', 0, 0))),
+//      ('operators', (('aten::Int', 'Tensor'),)),
+//      ('constants', ()),
+//      ('types', ()),
+//      ('register_size', 2))))
+
+// In addition, the module debugging information can be saved
+// in mobile_debug.pkl. An example for it looks like:
+// (3,
+//   ('__torch__.m.forward',
+//     (('module_debug_info', (top(A).foo(B).forward)))))
 
 // Note that currently the backward compatibility is not supported by bytecode.
 // This format and process need to be revisted and redesigned if we want to
@@ -86,8 +89,35 @@ void print_unsupported_ops_and_throw(
 
 void parseMethods(
     const std::vector<IValue>& vals,
+    const c10::optional<std::vector<IValue>>& debug_info_vals,
     mobile::CompilationUnit& mcu) {
-  for (const auto& element : vals) {
+  TORCH_CHECK(vals.size() > 0, "Bytecode has no elements. ");
+  // Initialized with the version number when kProducedBytecodeVersion was
+  // introduced. The old models (some of them already in production) without
+  // version number don't have to be re-generated.
+  int64_t model_version = 0x3L;
+  size_t method_i_start = 0;
+  if (vals[0].isInt()) {
+    model_version = vals[0].toInt();
+    method_i_start = 1;
+  }
+  TORCH_CHECK(
+      model_version == caffe2::serialize::kProducedBytecodeVersion,
+      "Lite Interpreter verson number does not match. ",
+      "The code version is ",
+      caffe2::serialize::kProducedBytecodeVersion,
+      " but the model version is ",
+      model_version);
+
+  bool has_debug_info = debug_info_vals.has_value();
+  if (has_debug_info) {
+    TORCH_CHECK(
+        debug_info_vals->size() == vals.size(),
+        "The numbers of bytecode values and debug info values do not match.");
+  }
+
+  for (size_t i = method_i_start; i < vals.size(); ++i) {
+    const auto& element = vals[i];
     const auto& m_tuple = element.toTuple()->elements();
     const std::string& function_name = m_tuple[0].toStringRef();
     IValue table = m_tuple[1];
@@ -109,10 +139,34 @@ void parseMethods(
             ->elements();
     const auto& types_list =
         expect_field(table, "types", BYTECODE_INDEX_TYPE).toTuple()->elements();
-    const auto& register_size = expect_field(table, "register_size", 4).toInt();
+    const auto& register_size =
+        expect_field(table, "register_size", BYTECODE_INDEX_REGISTER_SIZE)
+            .toInt();
 
-    for (const auto& ins : ins_list) {
-      auto ins_item = ins.toTuple()->elements();
+    std::vector<IValue> module_debug_info_list;
+    if (has_debug_info) {
+      const auto& debug_info_element = (*debug_info_vals)[i];
+      const auto& debug_info_m_tuple = debug_info_element.toTuple()->elements();
+      const std::string& debug_info_function_name =
+          debug_info_m_tuple[0].toStringRef();
+      TORCH_CHECK(
+          debug_info_function_name == function_name,
+          "The function names in the bytecode table and the debug info table do not match.");
+      IValue debug_info_table = debug_info_m_tuple[1];
+      module_debug_info_list = expect_field(
+                                   debug_info_table,
+                                   "module_debug_info",
+                                   BYTECODE_INDEX_MODULE_DEBUG_INFO)
+                                   .toTuple()
+                                   ->elements();
+      TORCH_CHECK(
+          module_debug_info_list.size() == ops_list.size(),
+          "The numbers of operators and module info strings do not match.");
+    }
+
+    function->set_module_debug_info_list_size(ins_list.size());
+    for (size_t i = 0; i < ins_list.size(); ++i) {
+      auto ins_item = ins_list[i].toTuple()->elements();
       TORCH_CHECK(
           ins_item.size() == 3,
           "There should be three parts in an instruction. The function name is ",
@@ -121,6 +175,12 @@ void parseMethods(
       int X = ins_item[1].toInt();
       int N = ins_item[2].toInt();
       function->append_instruction(op_code, X, N);
+      if (op_code == OP) {
+        std::string module_debug_info = (has_debug_info)
+            ? module_debug_info_list[X].toString()->string()
+            : "";
+        function->set_module_info(module_debug_info, i);
+      }
     }
 
     std::unordered_set<std::string> unsupported_op_names;
@@ -136,7 +196,6 @@ void parseMethods(
             op_item[0].toString()->string(), op_item[1].toString()->string()));
       }
     }
-
     if (!unsupported_op_names.empty()) {
       print_unsupported_ops_and_throw(unsupported_op_names);
     };
@@ -181,7 +240,12 @@ mobile::Module BytecodeDeserializer::deserialize(
   device_ = device;
   auto mcu = std::make_shared<mobile::CompilationUnit>();
   auto bvals = readArchive("bytecode", mcu).toTuple()->elements();
-  parseMethods(bvals, *mcu);
+
+  c10::optional<std::vector<IValue>> debug_info_bvals;
+  if (reader_->hasRecord("mobile_debug.pkl")) {
+    debug_info_bvals = readArchive("mobile_debug", mcu).toTuple()->elements();
+  }
+  parseMethods(bvals, debug_info_bvals, *mcu);
 
   return mobile::Module(readArchive("data", mcu).toObject(), mcu);
 }
@@ -257,6 +321,9 @@ c10::IValue BytecodeDeserializer::readArchive(
       auto obj = c10::ivalue::Object::create(type, ndict);
       auto it = dict.begin();
       for (size_t i = 0; i < ndict; ++i) {
+        std::stringstream name;
+        name << it->key();
+        cls->addOrCheckAttribute(name.str(), it->key().type());
         obj->setSlot(i, it->value());
         ++it;
       }

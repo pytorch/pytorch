@@ -121,9 +121,9 @@ class _server_process_global_profile(profile):
     def __exit__(self, exc_type, exc_val, exc_tb):
         """
         Turn off server-side process-global profiling.
-        Aggregrate all profiling events recorded by RPC threads.
+        Aggregate all profiling events recorded by RPC threads.
 
-        These attribuets are assigned on exiting context.
+        These attributes are assigned on exiting context.
 
         Attributes:
             function_events (torch.autograd.profiler.EventList).  It's a list that has helper

@@ -11,12 +11,13 @@ import torch
 
 import os
 import contextlib
+import functools
 import warnings
 import inspect
 import re
 
 from torch.jit._state import _python_cu, _enabled
-from torch.jit._script import ScriptModule, _CachedForward
+from torch.jit._script import ScriptModule, _CachedForward, script
 from torch._jit_internal import _qualified_name
 from torch.autograd import function
 from torch import _jit_internal
@@ -631,14 +632,15 @@ def trace(
             tensors. When a module is passed `torch.jit.trace`, only the
             ``forward`` method is run and traced (see :func:`torch.jit.trace
             <torch.jit.trace_module>` for details).
-        example_inputs (tuple):  A tuple of example inputs that will be passed
-            to the function while tracing. The resulting trace can be run with
-            inputs of different types and shapes assuming the traced operations
-            support those types and shapes. `example_inputs` may also be a
-            single Tensor in which case it is automatically wrapped in a tuple.
+        example_inputs (tuple or torch.Tensor):  A tuple of example inputs that
+            will be passed to the function while tracing. The resulting trace
+            can be run with inputs of different types and shapes assuming the
+            traced operations support those types and shapes. `example_inputs`
+            may also be a single Tensor in which case it is automatically
+            wrapped in a tuple.
 
     Keyword arguments:
-        check_trace (bool, optional): Check if the same inputs run through
+        check_trace (``bool``, optional): Check if the same inputs run through
             traced code produce the same outputs. Default: ``True``. You might want
             to disable this if, for example, your network contains non-
             deterministic ops or if you are sure that the network is correct despite
@@ -655,10 +657,10 @@ def trace(
             to use in the checker procedure.  This can be used to relax the
             checker strictness in the event that results diverge numerically
             for a known reason, such as operator fusion.
-        strict (bool, optional): run the tracer in a strict mode or not
+        strict (``bool``, optional): run the tracer in a strict mode or not
             (default: ``True``). Only turn this off when you want the tracer to
             record your mutable container types (currently ``list``/``dict``)
-            and you are sure that the containuer you are using in your
+            and you are sure that the container you are using in your
             problem is a ``constant`` structure and does not get used as
             control flow (if, for) conditions.
 
@@ -823,7 +825,7 @@ def trace_module(
     Trace a module and return an executable :class:`ScriptModule` that will be optimized
     using just-in-time compilation. When a module is passed to :func:`torch.jit.trace <torch.jit.trace>`, only
     the ``forward`` method is run and traced. With ``trace_module``, you can specify a dictionary of
-    method names to example inputs to trace (see the ``example_inputs``) argument below.
+    method names to example inputs to trace (see the ``inputs``) argument below.
 
     See :func:`torch.jit.trace <torch.jit.trace>` for more information on tracing.
 
@@ -845,10 +847,10 @@ def trace_module(
         check_inputs (list of dicts, optional): A list of dicts of input arguments that should be used
                                                  to check the trace against what is expected. Each tuple
                                                  is equivalent to a set of input arguments that would
-                                                 be specified in ``example_inputs``. For best results, pass in a
+                                                 be specified in ``inputs``. For best results, pass in a
                                                  set of checking inputs representative of the space of
                                                  shapes and types of inputs you expect the network to see.
-                                                 If not specified, the original ``example_inputs`` are used for checking
+                                                 If not specified, the original ``inputs`` are used for checking
         check_tolerance (float, optional): Floating-point comparison tolerance to use in the checker procedure.
                                            This can be used to relax the checker strictness in the event that
                                            results diverge numerically for a known reason, such as operator fusion.
@@ -972,7 +974,7 @@ def is_tracing():
     Returns ``True`` in tracing (if a function is called during the tracing of
     code with ``torch.jit.trace``) and ``False`` otherwise.
     """
-    return torch._C._is_tracing
+    return torch._C._is_tracing()
 
 
 class TracedModule(ScriptModule):
@@ -1076,3 +1078,70 @@ class TopLevelTracedModule(TracedModule):
             cpp_module: The C++ module that this TopLevelTracedModule will be rebuilt around.
         """
         self.__dict__["_actual_script_module"]._reconstruct(cpp_module)
+
+
+def _script_if_tracing(fn):
+    """
+    Compiles ``fn`` when it is first called during tracing. ``torch.jit.script``
+    has a non-negligible start up time when it is first called due to
+    lazy-initializations of many compiler builtins. Therefore you should not use
+    it in library code. However, you may want to have parts of your library work
+    in tracing even if they use control flow. In these cases, you should use
+    ``@torch.jit._script_if_tracing`` to substitute for
+    ``torch.jit.script``.
+    """
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not is_tracing():
+            # Not tracing, don't do anything
+            return fn(*args, **kwargs)
+
+        compiled_fn = script(wrapper.__original_fn)
+        return compiled_fn(*args, **kwargs)
+
+    wrapper.__original_fn = fn
+    wrapper.__script_if_tracing_wrapper = True
+
+    return wrapper
+
+
+def _get_trace_graph(f, args=(), kwargs=None, strict=True, _force_outplace=False,
+                     return_inputs=False, _return_inputs_states=False):
+    """
+    .. warning::
+        This function is internal-only and should only be used by the ONNX
+        exporter. If you are trying to get a graph through tracing, please go
+        through the public API instead::
+
+            trace = torch.jit.trace(nn.LSTMCell(), (input, hidden))
+            trace_graph = trace.graph
+
+    Trace a function or model, returning a tuple consisting of the both the
+    *trace* of an execution, as well as the original return value. If return_inputs,
+    also returns the trace inputs as part of the tuple
+
+    Tracing is guaranteed not to change the semantics of the function/module
+    that is traced.
+
+    Arguments:
+        f (torch.nn.Module or function): the function or module
+            to be traced.
+        args (tuple or Tensor): the positional arguments to pass to the
+            function/module to be traced.  A non-tuple is assumed to
+            be a single positional argument to be passed to the model.
+        kwargs (dict): the keyword arguments to pass to the function/module
+            to be traced.
+
+    Example (trace a cell):
+
+    .. testcode::
+
+        trace = torch.jit.trace(nn.LSTMCell(), (input, hidden))
+    """
+    if kwargs is None:
+        kwargs = {}
+    if not isinstance(args, tuple):
+        args = (args,)
+    outs = ONNXTracedModule(f, strict, _force_outplace, return_inputs, _return_inputs_states)(*args, **kwargs)
+    return outs

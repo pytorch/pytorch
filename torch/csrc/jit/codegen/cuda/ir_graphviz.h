@@ -68,12 +68,17 @@ class TORCH_CUDA_API IrGraphGenerator : private OptInConstDispatch {
   void handle(const IterDomain*) override;
   void handle(const TensorIndex*) override;
 
+  void handle(const Bool*) override;
   void handle(const Float*) override;
+  void handle(const Half*) override;
   void handle(const Int*) override;
   void handle(const NamedScalar*) override;
 
   void handle(const UnaryOp*) override;
   void handle(const BinaryOp*) override;
+  void handle(const TernaryOp*) override;
+  void handle(const BroadcastOp*) override;
+  void handle(const ReductionOp*) override;
 
   void handle(const ForLoop*) override;
   void handle(const IfThenElse*) override;

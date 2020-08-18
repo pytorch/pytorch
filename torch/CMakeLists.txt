@@ -70,7 +70,6 @@ set(TORCH_PYTHON_INCLUDE_DIRECTORIES
 
     ${TORCH_ROOT}/third_party/gloo
     ${TORCH_ROOT}/third_party/onnx
-    ${TORCH_ROOT}/third_party/tensorpipe
     ${pybind11_INCLUDE_DIRS}
 
     ${TORCH_SRC_DIR}/csrc
@@ -88,6 +87,8 @@ set(TORCH_PYTHON_LINK_LIBRARIES
 
 set(TORCH_PYTHON_COMPILE_DEFINITIONS)
 
+set(TORCH_PYTHON_PUBLIC_COMPILE_DEFINITIONS)
+
 set(TORCH_PYTHON_COMPILE_OPTIONS)
 
 set(TORCH_PYTHON_LINK_FLAGS "")
@@ -98,7 +99,7 @@ if(MSVC)
     if(BUILD_TEST)
       list(APPEND TORCH_PYTHON_LINK_LIBRARIES onnx_library)
     endif(BUILD_TEST)
-    if(NOT ${CMAKE_BUILD_TYPE} MATCHES "Release")
+    if(NOT CMAKE_BUILD_TYPE MATCHES "Release")
       string(APPEND TORCH_PYTHON_LINK_FLAGS " /DEBUG:FULL")
     endif()
 elseif(APPLE)
@@ -166,6 +167,10 @@ if(USE_DISTRIBUTED)
       endif()
       list(APPEND TORCH_PYTHON_LINK_LIBRARIES c10d)
       list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_C10D)
+      if(USE_TENSORPIPE)
+        list(APPEND TORCH_PYTHON_LINK_LIBRARIES tensorpipe)
+        list(APPEND TORCH_PYTHON_PUBLIC_COMPILE_DEFINITIONS USE_TENSORPIPE)
+      endif()
     endif()
 endif()
 
@@ -250,11 +255,19 @@ if(CMAKE_COMPILER_IS_GNUCXX AND (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 9.0.
   set_source_files_properties(${TORCH_SRC_DIR}/csrc/autograd/python_variable.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
 endif()
 
+# Preserve CUDA_GENCODE flags
+if(USE_CUDA)
+  torch_cuda_get_nvcc_gencode_flag(_ARCH_FLAGS)
+  set_source_files_properties(${TORCH_SRC_DIR}/csrc/cuda/Module.cpp PROPERTIES COMPILE_FLAGS "-DCUDA_ARCH_FLAGS=\"${_ARCH_FLAGS_readable}\"")
+endif()
+
 target_compile_definitions(torch_python PRIVATE "-DTHP_BUILD_MAIN_LIB")
 
 target_link_libraries(torch_python ${TORCH_PYTHON_LINK_LIBRARIES})
 
 target_compile_definitions(torch_python PRIVATE ${TORCH_PYTHON_COMPILE_DEFINITIONS})
+
+target_compile_definitions(torch_python PUBLIC ${TORCH_PYTHON_PUBLIC_COMPILE_DEFINITIONS})
 
 target_compile_options(torch_python PRIVATE ${TORCH_PYTHON_COMPILE_OPTIONS})
 

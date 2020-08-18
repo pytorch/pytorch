@@ -32,7 +32,8 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
-struct PredicateCompute {
+class PredicateCompute {
+ public:
   // Return if there are any predicates
   static bool hasPredicates(const TensorIndex*);
 
