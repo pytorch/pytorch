@@ -18,8 +18,8 @@ TransformerEncoderOptions::TransformerEncoderOptions(
 
 
 TransformerEncoderOptions::TransformerEncoderOptions(
-  TransformerEncoderLayerOptions encoder_layer_options, int64_t num_layers) :
-  encoder_layer_(std::move(encoder_layer_options)), num_layers_(num_layers) {}
+  const TransformerEncoderLayerOptions& encoder_layer_options, int64_t num_layers) :
+  encoder_layer_(encoder_layer_options), num_layers_(num_layers) {}
 
 } // namespace nn
 } // namespace torch
