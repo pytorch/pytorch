@@ -196,8 +196,8 @@ class ConvRelu(QuantizeHandler):
             self.relu_node = node
             node = node.args[0]
             self.conv_node = node
-        if node.op == 'call_module':
-            self.conv = quantizer.modules[self.conv_node.target]
+         if node.op == 'call_module':
+             self.conv = quantizer.modules[self.conv_node.target]
 
     def convert(self, quantizer, node, load_arg, debug=False):
         # TODO: debug option for conv module
