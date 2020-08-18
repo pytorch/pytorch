@@ -6457,6 +6457,7 @@ class TestTorchDeviceType(TestCase):
             self.compare_with_numpy(torch_fn, np_fn, x, device, dtype)
 
     @dtypes(*(torch.testing.get_all_complex_dtypes()))
+    @onlyCUDA
     def test_nanprod_complex(self, device, dtype):
         x = torch.randn((3, 3, 3), device=device, dtype=dtype)
         with self.assertRaisesRegex(RuntimeError, "nanprod does not support complex inputs"):
