@@ -14,7 +14,7 @@ namespace at {
 namespace native {
 namespace serialization {
 
-constexpr int64_t kConvPackedParamsCurrentVersion = 1;
+constexpr int64_t kConvPackedParamsCurrentVersion = 2;
 
 namespace {
 template <uint32_t kSpatialDim>
@@ -188,7 +188,7 @@ ConvPackedParamsSerializationType conv_packed_params_v2(
   // version, groups, transposed
   at::Tensor params_tensor = torch::tensor({kConvPackedParamsCurrentVersion,
                                             params->groups(),
-                                            params->transpose()});
+                                            int64_t(params->transpose())});
   auto strides = at::empty({kSpatialDim},
     at::TensorOptions(weight.device()).dtype(kLong).requires_grad(false));
   auto padding = at::empty_like(strides);
@@ -267,7 +267,6 @@ ConvPackedParamsSerializationType conv_packed_params(
 template <uint32_t kSpatialDim>
 ConvPackedParamsBasePtr<kSpatialDim> conv_packed_params(
     const ConvPackedParamsSerializationType& state) {
-  // Detect the version
   at::Tensor field_1;
   c10::optional<at::Tensor> field_2;
   torch::List<at::Tensor> field_3, field_4, field_5;
