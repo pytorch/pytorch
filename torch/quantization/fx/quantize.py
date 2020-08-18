@@ -76,10 +76,17 @@ WEIGHT_INDEX_DICT = {
 # Base Pattern
 class QuantizerPattern(ABC):
     def __init__(self, quantizer, node):
-        self.all_tensors = True
+        """this is an indicator of whether all the inputs are Node or not
+        since some op might be quantized differently depending on whether
+        all inputs are tensors or not, e.g. add/mul
+        """
+        self.all_nodes = True
 
     @abstractmethod
     def convert(self, quantizer, node, load_arg, debug=False):
+        """ Convert the given node to a quantized node and insert
+        it to the quantized graph
+        """
         return NotImplemented
 
 @register_quant_pattern(operator.add)
@@ -95,10 +102,10 @@ class Add(QuantizerPattern):
             node = node.args[0]
         assert node.op == 'call_function' and node.target == operator.add
         self.add_node = node
-        self.all_tensors = all([isinstance(a, Node) for a in self.add_node.args[:2]])
+        self.all_nodes = all([isinstance(a, Node) for a in self.add_node.args[:2]])
 
     def convert(self, quantizer, node, load_arg, debug=False):
-        if not self.all_tensors:
+        if not self.all_nodes:
             # add scalar
             if self.relu_node is not None:
                 op = torch.ops.quantized.add_relu
@@ -131,10 +138,10 @@ class Mul(QuantizerPattern):
             node = node.args[0]
         assert node.op == 'call_function' and node.target == operator.mul
         self.mul_node = node
-        self.all_tensors = all([isinstance(a, Node) for a in self.mul_node.args[:2]])
+        self.all_nodes = all([isinstance(a, Node) for a in self.mul_node.args[:2]])
 
     def convert(self, quantizer, node, load_arg, debug=False):
-        if not self.all_tensors:
+        if not self.all_nodes:
             # mul scalar
             if self.relu_node is not None:
                 op = torch.ops.quantized.mul_relu
@@ -157,7 +164,7 @@ class Mul(QuantizerPattern):
 @register_quant_pattern(torch.cat)
 class Cat(QuantizerPattern):
     def convert(self, quantizer, node, load_arg, debug=False):
-        if not self.all_tensors:
+        if not self.all_nodes:
             return NotImplemented
         activation_post_process = quantizer.activation_post_process_map[node.name]
         scale, zero_point = activation_post_process.calculate_qparams()
@@ -361,7 +368,7 @@ class CopyNode(QuantizerPattern):
 
 class DefaultQuant(QuantizerPattern):
     def convert(self, quantizer, node):
-        assert self.all_tensors
+        assert self.all_nodes
         return quantize(quantizer, node)
 
 # 2. Post Training Dynamic Quantizatoin Patterns
@@ -520,10 +527,10 @@ class Quantizer:
                     # propagate observed property from input
                     if node.args[0].name in observed:
                         observed.add(node.name)
-                elif (isinstance(obj, Add) or isinstance(obj, Mul)) and not obj.all_tensors:
+                elif (isinstance(obj, Add) or isinstance(obj, Mul)) and not obj.all_nodes:
                     if node.args[0].name in observed:
                         observed.add(node.name)
-                elif qconfig is not None and obj.all_tensors:
+                elif qconfig is not None and obj.all_nodes:
                     # observer for outputs
                     insert_observer(node, qconfig.activation())
             else:
