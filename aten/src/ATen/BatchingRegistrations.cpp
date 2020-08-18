@@ -322,7 +322,7 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   { \
     using to_type = Tensor(Tensor::*)(__VA_ARGS__) const; \
     m.impl(name, unary_pointwise_method_batching_rule< \
-        to_type, static_cast<to_type>(&Tensor::to), __VA_ARGS__>);\
+        to_type, &Tensor::to, __VA_ARGS__>);\
   }
   TO_BATCHING_RULE("to.device", Device, ScalarType, bool, bool, optional<MemoryFormat>)
   TO_BATCHING_RULE("to.dtype", ScalarType, bool, bool, optional<MemoryFormat>)
