@@ -235,17 +235,20 @@ class ConvRelu(QuantizeHandler):
                 args = load_arg(quantized=[0, 1])(self.conv_node.args)
                 args = load_arg(quantized=False)(self.conv_node.args)
                 kwargs = load_arg(quantized=False)(self.conv_node.kwargs)
-                conv_out = quantizer.quantized_graph.call_function(torch.nn.functional.conv2d, args, kwargs)
-                return quantize_node(conv_out, quantizer.activation_post_process_map[self.conv_node.name])
+                conv_out = quantizer.quantized_graph.call_function(
+                    torch.nn.functional.conv2d, args, kwargs)
+                return quantize_node(
+                    conv_out, quantizer.activation_post_process_map[self.conv_node.name])
             else:
-                assert len(self.conv_node.args) == 7,
-                'only conv2d calls with all arguments specified is support right now in debug=False option'
+                assert len(self.conv_node.args) == 7, \
+                    'only conv2d calls with all arguments specified is support right now in debug=False option'
                 args = load_arg(quantized=[0, 1])(self.conv_node.args)
                 # pack weight
                 weight = load_arg(quantized=True)(self.conv_node.args[1])
                 other_args = load_arg(quantized=False)(self.conv_node.args[2:])
                 prepack_args = [weight] + list(other_args)
-                packed_weight = quantizer.quantized_graph.call_function(torch.ops.quantized.conv2d_prepack, prepack_args, {})
+                packed_weight = quantizer.quantized_graph.call_function(
+                    torch.ops.quantized.conv2d_prepack, prepack_args, {})
                 # construct conv input
                 conv_input = load_arg(quantized=True)(self.conv_node.args[0])
                 activation_post_process = quantizer.activation_post_process_map[self.conv_node.name]
@@ -319,7 +322,7 @@ class LinearReLU(QuantizeHandler):
                 other_args = load_arg(quantized=False)(self.linear_node.args[1:])
                 if len(self.linear_node.args) > 2:
                     bias = load_arg(quantized=False)(self.linear_node.args[2])
-                    other_args = other_args[1:] # remove the bias argument
+                    other_args = other_args[1:]  # remove the bias argument
                 else:
                     assert 'bias' in kwargs, \
                         'expect bias provided as a keyword argument when it is not a positional argument'
@@ -521,8 +524,8 @@ class Quantizer:
                     assert node.op in [
                         'call_module',
                         'call_function',
-                        'call_method'],
-                    'CopyNode of type ' + node.op + ' is not handled'
+                        'call_method'], \
+                        'CopyNode of type ' + node.op + ' is not handled'
                     # propagate observed property from input
                     if node.args[0].name in observed:
                         observed.add(node.name)
@@ -569,25 +572,25 @@ class Quantizer:
 
         def load_non_quantized(n):
             if n.name not in env:
-                assert n.name in quant_env,
-                'trying to load float node but did not find node:' + n.name +
-                ' in quantized environment:' + str(quant_env)
+                assert n.name in quant_env, \
+                    'trying to load float node but did not find node:' + n.name + \
+                    ' in quantized environment:' + str(quant_env)
                 env[n.name] = quant_env[n.name].dequantize()
             return env[n.name]
 
         def load_quantized(n):
             if n.name not in quant_env:
-                assert n.name in env,
-                'trying to load quantized node but did not find node:' + n.name +
-                ' in float environment:' + str(env)
+                assert n.name in env, \
+                    'trying to load quantized node but did not find node:' + n.name + \
+                    ' in float environment:' + str(env)
                 assert n.name in quants, 'did not find quant object for node:' + n.name
                 quant = quants[n.name][0]
                 quant_env[n.name] = quant.convert(self, env[n.name])
             return quant_env[n.name]
 
         def load_x(n):
-            assert n.name in env or n.name in quant_env,
-            'node ' + n.name + ' does not exist in either of the environment'
+            assert n.name in env or n.name in quant_env, \
+                'node ' + n.name + ' does not exist in either of the environment'
             if n.name in quant_env:
                 return quant_env[n.name]
             else:
@@ -638,8 +641,8 @@ class Quantizer:
                     assert node.op in [
                         'call_module',
                         'call_function',
-                        'call_method'],
-                    'CopyNode of type ' + node.op + ' is not handled'
+                        'call_method'], \
+                        'CopyNode of type ' + node.op + ' is not handled'
                     quantized = is_quantized(node.args[0])
 
                 if self.quant_type == QuantType.DYNAMIC:
