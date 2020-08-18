@@ -21,14 +21,19 @@ class Function {
   bool append_operator(
       const std::string& name,
       const std::string& overload_name);
+  void set_module_debug_info_list_size(size_t size);
+  void set_module_info(const std::string& module_info, size_t pc);
   void append_constant(const c10::IValue& constant);
   void append_type(const c10::TypePtr& type);
 
   void set_register_size(size_t size);
 
+  std::string get_module_debug_info(size_t pc) const;
+
  private:
   c10::QualifiedName name_;
   std::shared_ptr<Code> code_;
+  std::vector<std::string> pc_to_module_debug_info_;
 };
 
 } // namespace mobile
