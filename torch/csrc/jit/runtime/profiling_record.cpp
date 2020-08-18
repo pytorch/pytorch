@@ -197,13 +197,6 @@ void ProfilingRecord::instrumentBlock(Block* block) {
     auto n = *it;
     for (size_t offset = 0; offset < n->inputs().size(); offset++) {
       auto i = n->input(offset);
-      // n can have multiple uses, if we already
-      // processed `n` we also inserted `prim::profile`s
-      // let's check for this case otherwise we will
-      // be `prim::profile` `prim::profile`
-      if (i->node()->kind() == prim::profile) {
-        continue;
-      }
       if (i->type()->kind() == c10::TypeKind::TensorType &&
           (needsProfiledInputs(n) || needsProfiledOutput(i->node()))) {
         insertShapeProfile(n, offset);
