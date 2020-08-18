@@ -6441,8 +6441,7 @@ class TestTorchDeviceType(TestCase):
     def test_nanprod(self, device, dtype):
         x = (torch.randn(3, 3))
         if dtype.is_floating_point:
-            x[x < 0.2] = float('nan') 
-
+            x[x < 0.2] = float('nan')
         # Randomly scale the values
         x = (x * random.randint(10, 100)).tolist()
 
