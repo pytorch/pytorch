@@ -68,11 +68,6 @@ WEIGHT_INDEX_DICT = {
 
 # 1. Post Training Static Quantization and Quantization Aware Training Patterns
 
-# Note: The order of patterns is important! match function will take whatever is matched first, so we'll
-# need to put the fusion patterns before single patterns. For example, add_relu should be registered come before relu.
-# decorators are applied in the reverse order we see. Also when we match the nodes in the graph with these patterns,
-# we'll start from the last node of the graph and traverse back.
-
 # Base Pattern Handler
 class QuantizeHandler(ABC):
     """ Base handler class for the quantizer patterns

@@ -35,7 +35,21 @@ def register_dynamic_pattern(pattern):
 def get_dynamic_quant_patterns():
     return DYNAMIC_QUANTIZATION_PATTERNS
 
+# Example use of register pattern function:
+# @register_fusion_pattern(torch.nn.ReLU, (torch.nn.BatchNorm2d, torch.nn.Conv2d)))
+# class ConvBNReLUFusion():
+#     def __init__(...):
+#         ...
+#
+# Note: The order of patterns is important! match function will take whatever is matched first, so we'll
+# need to put the fusion patterns before single patterns. For example, add_relu should be registered come before relu.
+# decorators are applied in the reverse order we see. Also when we match the nodes in the graph with these patterns,
+# we'll start from the last node of the graph and traverse back.
+
+
 def matches(modules, node, pattern, max_uses=sys.maxsize):
+    """ Matches a node in fx against a pattern
+    """
     if isinstance(pattern, tuple):
         self_match, *arg_matches = pattern
         if self_match is getattr:
