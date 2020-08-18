@@ -134,6 +134,7 @@ class _ObserverBase(ObserverBase):
             self._validate_qmin_qmax(quant_min, quant_max)
         self.quant_min = quant_min
         self.quant_max = quant_max
+        self.scale_zp_cache = None
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
@@ -147,6 +148,9 @@ class _ObserverBase(ObserverBase):
 
         super(ObserverBase, self)._load_from_state_dict(state_dict, prefix, local_metadata, strict,
                                                         missing_keys, unexpected_keys, error_msgs)
+
+    def _should_recompute_scale_zp(self, min_vals, max_vals):
+        return True
 
     @torch.jit.export
     def _validate_qmin_qmax(self, quant_min, quant_max):
@@ -223,6 +227,12 @@ class _ObserverBase(ObserverBase):
             scales: Scales tensor of shape (#channels,)
             zero_points: Zero points tensor of shape (#channels,)
         """
+
+        # Use the cache if it is available
+        if self.scale_zp_cache is not None:
+            scale, zero_point = self.scale_zp_cache
+            return scale.to(self.eps.device), zero_point.to(self.eps.device)
+
         if min_val.numel() == 0 or max_val.numel() == 0:
             warnings.warn(
                 "must run observer before calling calculate_qparams.\
@@ -282,7 +292,8 @@ class _ObserverBase(ObserverBase):
             if self.qscheme == torch.per_channel_affine_float_qparams:
                 zero_point = torch.tensor([float(zero_point)], dtype=zero_point.dtype, device=device)
 
-
+        # Cache the result
+        self.scale_zp_cache = (scale, zero_point)
         return scale, zero_point
 
 
@@ -381,9 +392,14 @@ class MinMaxObserver(_ObserverBase):
         if min_val.numel() == 0 or max_val.numel() == 0:
             min_val = torch.min(x)
             max_val = torch.max(x)
+            self.scale_zp_cache = None
         else:
-            min_val = torch.min(torch.min(x), min_val)
-            max_val = torch.max(torch.max(x), max_val)
+            new_min = torch.min(x)
+            new_max = torch.max(x)
+            if self._should_recompute_scale_zp(new_min, new_max):
+                self.scale_zp_cache = None
+            min_val = torch.min(new_min, min_val)
+            max_val = torch.max(new_max, max_val)
         self.min_val.resize_(min_val.shape)
         self.max_val.resize_(max_val.shape)
         self.min_val.copy_(min_val)
@@ -398,6 +414,10 @@ class MinMaxObserver(_ObserverBase):
     @torch.jit.export
     def extra_repr(self):
         return "min_val={}, max_val={}".format(self.min_val, self.max_val)
+
+    def _should_recompute_scale_zp(self, min_vals, max_vals):
+        return not (torch.equal(min_vals, self.min_val) and
+                    torch.equal(max_vals, self.max_val))
 
     def _save_to_state_dict(self, destination, prefix, keep_vars):
         super(MinMaxObserver, self)._save_to_state_dict(destination, prefix, keep_vars)
@@ -481,6 +501,7 @@ class MovingAverageMinMaxObserver(MinMaxObserver):
             min_val = torch.min(x)
             max_val = torch.max(x)
         else:
+            # TODO(before land): add caching support
             min_val = min_val + self.averaging_constant * (torch.min(x) - min_val)
             max_val = max_val + self.averaging_constant * (torch.max(x) - max_val)
         self.min_val.resize_(min_val.shape)
@@ -616,6 +637,7 @@ class PerChannelMinMaxObserver(_ObserverBase):
 
     @torch.jit.ignore
     def _forward(self, x_orig):
+        # TODO(before land): add caching support
         x = x_orig.detach()  # avoid keeping autograd tape
         min_vals = self.min_vals
         max_vals = self.max_vals
@@ -702,6 +724,7 @@ class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
         self.averaging_constant = averaging_constant
 
     def forward(self, x_orig):
+        # TODO(before land): add caching support
         x = x_orig.detach()  # avoid keeping autograd tape
         x = x.to(self.min_vals.dtype)
         min_vals = self.min_vals
