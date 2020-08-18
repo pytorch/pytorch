@@ -12,7 +12,7 @@ _supported_modules_quantized = {nnq.Linear, nnq.Conv2d}
 def get_module(model, name):
     ''' Given name of submodule, this function grabs the submodule from given model
     '''
-    return {name: submodule for name, submodule in model.named_modules()}[name]
+    return dict(model.named_modules())[name]
 
 def parent_child_names(name):
     '''Splits full name of submodule into parent submodule's full name and submodule's name
@@ -68,6 +68,13 @@ class MeanShadowLogger(ns.Logger):
             self.float_sum += y
             self.stats["float"] = self.float_sum / self.count
 
+    def clear(self):
+        self.stats["float"] = None
+        self.stats["quantized"] = None
+        self.count = 0
+        self.float_sum = None
+        self.quant_sum = None
+
 def bias_correction(float_model, quantized_model, img_data, white_list=_supported_modules_quantized, neval_batches=None):
     ''' Using numeric suite shadow module, the expected output of the floating point and quantized modules
     is recorded. Using that data the bias of supported modules is shifted to compensate for the drift caused
@@ -82,6 +89,8 @@ def bias_correction(float_model, quantized_model, img_data, white_list=_supporte
                 unquantized submodules)
         neval_batches: a cap to the number of batches you want to be used for estimating the expected output
     '''
+    ns.prepare_model_with_stubs(float_model, quantized_model, _supported_modules, MeanShadowLogger)
+
     uncorrected_modules = {}
     for name, submodule in quantized_model.named_modules():
         if type(submodule) in white_list:
@@ -91,7 +100,7 @@ def bias_correction(float_model, quantized_model, img_data, white_list=_supporte
         quantized_submodule = get_module(quantized_model, uncorrected_module)
         bias = get_param(quantized_submodule, 'bias')
         if bias is not None:
-            ns.prepare_model_with_stubs(float_model, quantized_model, _supported_modules, MeanShadowLogger)
+
             count = 0
             for data in img_data:
                 quantized_model(data[0])
@@ -99,13 +108,15 @@ def bias_correction(float_model, quantized_model, img_data, white_list=_supporte
                 if count == neval_batches:
                     break
             ob_dict = ns.get_logger_dict(quantized_model)
+            parent_name, _ = parent_child_names(uncorrected_module)
 
-            float_data = ob_dict[uncorrected_module + '.stats']['float']
-            quant_data = ob_dict[uncorrected_module + '.stats']['quantized']
+            float_data = ob_dict[parent_name + '.stats']['float']
+            quant_data = ob_dict[parent_name + '.stats']['quantized']
 
             # math for expected_error
             quantization_error = quant_data - float_data
             dims = list(range(quantization_error.dim()))
+            # Note: we don't want to take the mean over the output channel dimension
             dims.remove(1)
             expected_error = torch.mean(quantization_error, dims)
 
@@ -113,9 +124,7 @@ def bias_correction(float_model, quantized_model, img_data, white_list=_supporte
 
             bias.data = updated_bias
 
-            # Removing shadows from model, needed to prevent nesting of shadow modules
+            # Resets the data contained in the loggers
             for name, submodule in quantized_model.named_modules():
-                if isinstance(submodule, ns.Shadow):
-                    parent_name, child_name = parent_child_names(name)
-                    parent = get_module(quantized_model, parent_name)
-                    parent._modules[child_name] = submodule.orig_module
+                if isinstance(submodule, MeanShadowLogger):
+                    submodule.clear()

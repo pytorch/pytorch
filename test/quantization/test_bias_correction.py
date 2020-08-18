@@ -3,10 +3,17 @@ import torch.nn as nn
 from torch.testing._internal.common_quantization import QuantizationTestCase
 
 from torch.quantization import default_qconfig
-from torch.quantization import QuantWrapper
+from torch.quantization import QuantStub, DeQuantStub, QuantWrapper
+import torch.quantization._numeric_suite as ns
 
-import torch.quantization._correct_bias as correct_bias
-from torch.quantization._correct_bias import _supported_modules, _supported_modules_quantized, bias_correction
+from torch.quantization._correct_bias import (
+    _supported_modules,
+    _supported_modules_quantized,
+    bias_correction,
+    get_module,
+    get_param,
+    parent_child_names
+)
 
 import copy
 
@@ -26,17 +33,23 @@ class TestBiasCorrection(QuantizationTestCase):
         # manually changing bias
         for name, submodule in artificial_model.named_modules():
             if type(submodule) in _supported_modules:
-                x = correct_bias.get_param(submodule, 'bias')
+                x = get_param(submodule, 'bias')
                 if x is not None:
                     x.data = x.data * 3
 
         bias_correction(float_model, artificial_model, img_data, white_list=_supported_modules)
 
+        for name, submodule in artificial_model.named_modules():
+            if isinstance(submodule, ns.Shadow):
+                parent_name, child_name = parent_child_names(name)
+                parent = get_module(artificial_model, parent_name)
+                parent._modules[child_name] = submodule.orig_module
+
         for name, artificial_submodule in artificial_model.named_modules():
             if type(artificial_submodule) in _supported_modules:
-                submodule = correct_bias.get_module(float_model, name)
-                float_bias = correct_bias.get_param(submodule, 'bias')
-                artificial_bias = correct_bias.get_param(artificial_submodule, 'bias')
+                submodule = get_module(float_model, name)
+                float_bias = get_param(submodule, 'bias')
+                artificial_bias = get_param(artificial_submodule, 'bias')
 
                 self.assertTrue(self.compute_sqnr(float_bias, artificial_bias) > 30,
                                 "Correcting quantized bias produced too much noise, sqnr score too low")
@@ -55,18 +68,25 @@ class TestBiasCorrection(QuantizationTestCase):
         # manually changing bias
         for name, submodule in artificial_model.named_modules():
             if type(submodule) in _supported_modules:
-                x = correct_bias.get_param(submodule, 'bias')
-                weight = correct_bias.get_param(submodule, 'weight')
+                x = get_param(submodule, 'bias')
+                weight = get_param(submodule, 'weight')
                 if x is not None:
                     submodule.set_weight_bias(weight, x.data * 3)
 
         bias_correction(float_model, artificial_model, img_data, white_list=_supported_modules_quantized)
 
+        # Trims off the shadow module,
+        for name, submodule in artificial_model.named_modules():
+            if isinstance(submodule, ns.Shadow):
+                parent_name, child_name = parent_child_names(name)
+                parent = get_module(artificial_model, parent_name)
+                parent._modules[child_name] = submodule.orig_module
+
         for name, artificial_submodule in artificial_model.named_modules():
             if type(artificial_submodule) in _supported_modules_quantized:
-                submodule = correct_bias.get_module(float_model, name)
-                float_bias = correct_bias.get_param(submodule, 'bias')
-                artificial_bias = correct_bias.get_param(artificial_submodule, 'bias')
+                submodule = get_module(float_model, name)
+                float_bias = get_param(submodule, 'bias')
+                artificial_bias = get_param(artificial_submodule, 'bias')
 
                 self.assertTrue(self.compute_sqnr(float_bias, artificial_bias) > 30,
                                 "Correcting quantized bias produced too much noise, sqnr score too low")
