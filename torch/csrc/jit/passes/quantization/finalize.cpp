@@ -65,10 +65,13 @@ void InsertPrepackUnpack(Module& module) {
 void FoldQuantizedPrepackingOps(Module& module) {
   auto filter_fn = [](const Node* n) -> bool {
     return (
-        (n->kind() == Symbol::fromQualString("quantized::linear_prepack")) ||
+        n->kind() == Symbol::fromQualString("quantized::linear_prepack") ||
         n->kind() == Symbol::fromQualString("quantized::conv1d_prepack") ||
         n->kind() == Symbol::fromQualString("quantized::conv2d_prepack") ||
-        n->kind() == Symbol::fromQualString("quantized::conv3d_prepack"));
+        n->kind() == Symbol::fromQualString("quantized::conv3d_prepack") ||
+        n->kind() == Symbol::fromQualString("quantized::conv_transpose1d_prepack") ||
+        n->kind() == Symbol::fromQualString("quantized::conv_transpose2d_prepack")
+    );
   };
   PrePackingOpsFolder(module, filter_fn, "quantized");
 }
