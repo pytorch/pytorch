@@ -3,7 +3,7 @@ import torch.nn as nn
 from torch.testing._internal.common_quantization import QuantizationTestCase
 
 from torch.quantization import default_qconfig
-from torch.quantization import QuantStub, DeQuantStub, QuantWrapper
+from torch.quantization import QuantWrapper
 import torch.quantization._numeric_suite as ns
 
 from torch.quantization._correct_bias import (
