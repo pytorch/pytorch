@@ -10,7 +10,7 @@ namespace torch {
 namespace jit {
 
 struct MutationRemover {
-  MutationRemover::MutationRemover(const std::shared_ptr<Graph>& graph)
+  MutationRemover(const std::shared_ptr<Graph>& graph)
       : aliasDb_(nullptr), graph_(graph) {
     aliasDb_ = torch::make_unique<AliasDb>(graph_);
   }
@@ -19,7 +19,11 @@ struct MutationRemover {
 
   void removeTensorMutation();
 
-  bool isSpecialMappedOp(Node* n);
+  bool isSpecialMappedOp(Node* n) {
+    return n->matches("aten::zero_(Tensor(a!) self) -> Tensor(a!)") ||
+        n->matches(
+            "aten::fill_.Scalar(Tensor(a!) self, Scalar value) -> Tensor(a!)");
+  }
 
   bool inplaceOpVariant(Node* n) {
     if (!n->kind().is_aten()) {

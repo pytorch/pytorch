@@ -11,12 +11,6 @@ void MutationRemover::removeTensorMutation() {
   RemoveTensorMutation(graph_->block());
 }
 
-bool MutationRemover::isSpecialMappedOp(Node* n) {
-  return n->matches("aten::zero_(Tensor(a!) self) -> Tensor(a!)") ||
-      n->matches(
-          "aten::fill_.Scalar(Tensor(a!) self, Scalar value) -> Tensor(a!)");
-}
-
 bool MutationRemover::newMemoryLocation(Value* v) {
   // bail on nodes with side effects, blocks, or graph / graph inputs
   Node* n = v->node();
