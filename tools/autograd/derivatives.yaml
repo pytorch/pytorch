@@ -329,6 +329,14 @@
 - name: coalesce(Tensor self) -> Tensor
   self: grad
 
+- name: complex(Tensor real, Tensor imag) -> Tensor
+  real: not_implemented("complex real")
+  imag: not_implemented("complex imag")
+
+- name: polar(Tensor abs, Tensor angle) -> Tensor
+  abs: not_implemented("polar abs")
+  angle: not_implemented("polar angle")
+
 - name: conj(Tensor self) -> Tensor
   self: grad.conj()
 
@@ -745,6 +753,10 @@
 
 - name: neg(Tensor self) -> Tensor
   self: grad.neg()
+
+- name: nextafter(Tensor self, Tensor other) -> Tensor
+  self: not_implemented("nextafter")
+  other: not_implemented("nextafter")
 
 - name: norm.Scalar(Tensor self, Scalar p=2) -> Tensor
   self: norm_backward(grad, self, p, result)
@@ -1208,10 +1220,7 @@
   self: threshold_backward(grad, result, 0)
 
 - name: silu(Tensor self) -> Tensor
-  self: silu_backward(grad, self)
-
-- name: silu_(Tensor(a!) self) -> Tensor(a!)
-  self: not_implemented("silu_ cannot compute gradient of inplace version, use silu instead")
+  self: "GradMode::is_enabled() ? infinitely_differentiable_silu_backward(grad, self) : silu_backward(grad, self)"
 
 - name: elu(Tensor self, Scalar alpha=1, Scalar scale=1, Scalar input_scale=1) -> Tensor
   self: elu_backward(grad, alpha, scale, input_scale, result)
@@ -1751,7 +1760,7 @@
   grad_output, self, weight: _convolution_double_backward(grads[0], grads[1], grads[2], grad_output, weight, self, stride, padding, dilation, false, std::vector<int64_t>(padding.size(), 0), groups, false, false, false, grad_input_mask)
 
 # fft
-- name: _fft_with_size(Tensor self, int signal_ndim, bool complex_input, bool complex_output, bool inverse, int[] checked_signal_sizes, int normalization, bool onesided, int[] output_sizes) -> Tensor
+- name: _fft_with_size.norm_modes(Tensor self, int signal_ndim, bool complex_input, bool complex_output, bool inverse, int[] checked_signal_sizes, int normalization, bool onesided, int[] output_sizes) -> Tensor
   self: fft_backward(self, grad, signal_ndim, complex_input, complex_output, inverse, checked_signal_sizes, normalization, onesided, output_sizes)
 
 - name: unbind.int(Tensor(a) self, int dim=0) -> Tensor(a)[]

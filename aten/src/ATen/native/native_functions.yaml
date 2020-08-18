@@ -245,9 +245,7 @@
 #     adding an alias in a namespace.)
 # 5) Update torch/overrides.py consistent with the original function.
 # 6) Update the alias_map in torch/csrc/jit/passes/normalize_ops.cpp.
-# 8) Add entries to test/test_op_normalization.py's "alias_infos"
-# 9) Add a test or modify an existing test to validate that the alias's behavior
-#      is the same as the original function's.
+# 8) Add entries to test/test_op_aliases.py's "alias_infos"
 #
 # See torch.absolute, an alias for torch.abs, as an example.
 
@@ -469,6 +467,20 @@
   variants: function, method
 
 - func: acosh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  supports_named_tensor: True
+
+# arcosh, alias for acosh
+- func: arccosh(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  supports_named_tensor: True
+  variants: function, method
+
+- func: arccosh_(Tensor(a!) self) -> Tensor(a!)
+  use_c10_dispatcher: full
+  supports_named_tensor: True
+  variants: function, method
+
+- func: arccosh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   supports_named_tensor: True
 
 - func: asinh(Tensor self) -> Tensor
@@ -847,6 +859,18 @@
 - func: cudnn_is_acceptable(Tensor self) -> bool
   use_c10_dispatcher: full
   device_guard: False
+
+- func: complex(Tensor real, Tensor imag) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+
+- func: complex.out(Tensor real, Tensor imag, *, Tensor(a!) out) -> Tensor(a!)
+
+- func: polar(Tensor abs, Tensor angle) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+
+- func: polar.out(Tensor abs, Tensor angle, *, Tensor(a!) out) -> Tensor(a!)
 
 - func: constant_pad_nd(Tensor self, int[] pad, Scalar value=0) -> Tensor
   use_c10_dispatcher: full
@@ -1567,16 +1591,16 @@
   use_c10_dispatcher: full
   variants: function, method
 
-- func: _fft_with_size(Tensor self, int signal_ndim, bool complex_input, bool complex_output, bool inverse, int[] checked_signal_sizes, int normalization, bool onesided, int[] output_sizes) -> Tensor
+- func: _fft_with_size(Tensor self, int signal_ndim, bool complex_input, bool complex_output, bool inverse, int[] checked_signal_sizes, bool normalized, bool onesided, int[] output_sizes) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+
+- func: _fft_with_size.norm_modes(Tensor self, int signal_ndim, bool complex_input, bool complex_output, bool inverse, int[] checked_signal_sizes, int normalization, bool onesided, int[] output_sizes) -> Tensor
   use_c10_dispatcher: full
   variants: function
   dispatch:
     CPU: _fft_mkl
     CUDA: _fft_cufft
-
-- func: _fft_with_size.bool_norm(Tensor self, int signal_ndim, bool complex_input, bool complex_output, bool inverse, int[] checked_signal_sizes, bool normalized, bool onesided, int[] output_sizes) -> Tensor
-  use_c10_dispatcher: full
-  variants: function
 
 - func: _cufft_get_plan_cache_size(int device_index) -> int
   use_c10_dispatcher: full
@@ -2846,6 +2870,21 @@
   use_c10_dispatcher: full
 
 - func: stack.out(Tensor[] tensors, int dim=0, *, Tensor(a!) out) -> Tensor(a!)
+
+- func: hstack(Tensor[] tensors) -> Tensor
+  use_c10_dispatcher: full
+
+- func: hstack.out(Tensor[] tensors, *, Tensor(a!) out) -> Tensor(a!)
+
+- func: vstack(Tensor[] tensors) -> Tensor
+  use_c10_dispatcher: full
+
+- func: vstack.out(Tensor[] tensors, *, Tensor(a!) out) -> Tensor(a!)
+
+- func: dstack(Tensor[] tensors) -> Tensor
+  use_c10_dispatcher: full
+
+- func: dstack.out(Tensor[] tensors, *, Tensor(a!) out) -> Tensor(a!)
 
 # The signature is designed to be consistent with librosa except that it is
 # missing the `pad_mode` and `center` arguments, which are taken care of at
@@ -5340,6 +5379,15 @@
   variants: method, function
 
 - func: hypot_(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  variants: method
+
+- func: nextafter.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+
+- func: nextafter(Tensor self, Tensor other) -> Tensor
+  use_c10_dispatcher: full
+  variants: method, function
+
+- func: nextafter_(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: method
 
 - func: remainder.Scalar_out(Tensor self, Scalar other, *, Tensor(a!) out) -> Tensor(a!)
