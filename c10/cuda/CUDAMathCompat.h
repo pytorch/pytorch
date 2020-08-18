@@ -127,13 +127,6 @@ __MATH_FUNCTIONS_DECL__ double normcdf(double x) {
   return ::normcdf(x);
 }
 
-__MATH_FUNCTIONS_DECL__ float cyl_bessel_i0(float x) {
-  return ::cyl_bessel_i0f(x);
-}
-__MATH_FUNCTIONS_DECL__ double cyl_bessel_i0(double x) {
-  return ::cyl_bessel_i0(x);
-}
-
 } // namespace compat
 } // namespace cuda
 } // namespace c10
