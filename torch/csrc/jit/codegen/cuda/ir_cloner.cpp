@@ -29,6 +29,7 @@ Statement* IrCloner::clone(const Statement* statement) {
     // that something went horribly wrong.
     TORCH_INTERNAL_ASSERT(new_node != nullptr);
     TORCH_INTERNAL_ASSERT(clones_map_[statement] == new_node);
+    TORCH_INTERNAL_ASSERT(new_node->fusion() == fusion_);
 
     return new_node;
   }
@@ -37,6 +38,7 @@ Statement* IrCloner::clone(const Statement* statement) {
 void IrCloner::registerClone(const Statement* src, Statement* clone) {
   TORCH_CHECK(src != nullptr);
   TORCH_CHECK(clone != nullptr);
+  TORCH_CHECK(clone->fusion() == fusion_);
   TORCH_CHECK(clones_map_.insert({src, clone}).second);
 }
 
@@ -58,10 +60,6 @@ void IrCloner::handle(const TensorDomain* td) {
 
 void IrCloner::handle(const IterDomain* id) {
   clone_ = new IterDomain(id, this);
-}
-
-void IrCloner::handle(const TensorIndex* ti) {
-  clone_ = new TensorIndex(ti, this);
 }
 
 void IrCloner::handle(const Bool* b) {
@@ -108,24 +106,88 @@ void IrCloner::handle(const ReductionOp* op) {
   clone_ = new ReductionOp(op, this);
 }
 
-void IrCloner::handle(const ForLoop* for_loop) {
-  clone_ = new ForLoop(for_loop, this);
-}
-
-void IrCloner::handle(const IfThenElse* if_then_else) {
-  clone_ = new IfThenElse(if_then_else, this);
-}
-
-void IrCloner::handle(const Allocate* allocate) {
-  clone_ = new Allocate(allocate, this);
-}
-
 void IrCloner::handle(const Split* split) {
   clone_ = new Split(split, this);
 }
 
 void IrCloner::handle(const Merge* merge) {
   clone_ = new Merge(merge, this);
+}
+
+void IrCloner::handle(const kir::Bool* node) {
+  clone_ = new kir::Bool(node, this);
+}
+
+void IrCloner::handle(const kir::Float* node) {
+  clone_ = new kir::Float(node, this);
+}
+
+void IrCloner::handle(const kir::Half* node) {
+  clone_ = new kir::Half(node, this);
+}
+
+void IrCloner::handle(const kir::Int* node) {
+  clone_ = new kir::Int(node, this);
+}
+
+void IrCloner::handle(const kir::NamedScalar* node) {
+  clone_ = new kir::NamedScalar(node, this);
+}
+
+void IrCloner::handle(const kir::IterDomain* node) {
+  clone_ = new kir::IterDomain(node, this);
+}
+
+void IrCloner::handle(const kir::TensorDomain* node) {
+  clone_ = new kir::TensorDomain(node, this);
+}
+
+void IrCloner::handle(const kir::TensorView* node) {
+  clone_ = new kir::TensorView(node, this);
+}
+
+void IrCloner::handle(const kir::UnaryOp* node) {
+  clone_ = new kir::UnaryOp(node, this);
+}
+
+void IrCloner::handle(const kir::BinaryOp* node) {
+  clone_ = new kir::BinaryOp(node, this);
+}
+
+void IrCloner::handle(const kir::TernaryOp* node) {
+  clone_ = new kir::TernaryOp(node, this);
+}
+
+void IrCloner::handle(const kir::ReductionOp* node) {
+  clone_ = new kir::ReductionOp(node, this);
+}
+
+void IrCloner::handle(const kir::BroadcastOp* node) {
+  clone_ = new kir::BroadcastOp(node, this);
+}
+
+void IrCloner::handle(const kir::TensorIndex* node) {
+  clone_ = new kir::TensorIndex(node, this);
+}
+
+void IrCloner::handle(const kir::Allocate* node) {
+  clone_ = new kir::Allocate(node, this);
+}
+
+void IrCloner::handle(const kir::Sync* node) {
+  clone_ = new kir::Sync(node, this);
+}
+
+void IrCloner::handle(const kir::ForLoop* node) {
+  clone_ = new kir::ForLoop(node, this);
+}
+
+void IrCloner::handle(const kir::IfThenElse* node) {
+  clone_ = new kir::IfThenElse(node, this);
+}
+
+void IrCloner::handle(const kir::GridReduction* node) {
+  clone_ = new kir::GridReduction(node, this);
 }
 
 } // namespace fuser
