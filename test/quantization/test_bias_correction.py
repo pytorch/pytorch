@@ -52,7 +52,7 @@ class TestBiasCorrection(QuantizationTestCase):
                 submodule = get_module(float_model, name)
                 float_bias = get_param(submodule, 'bias')
                 artificial_bias = get_param(artificial_submodule, 'bias')
-                print(name)
+
                 self.assertTrue(self.compute_sqnr(float_bias, artificial_bias) > 30,
                                 "Correcting quantized bias produced too much noise, sqnr score too low")
 

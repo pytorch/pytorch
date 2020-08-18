@@ -2,7 +2,7 @@ from __future__ import print_function, division, absolute_import
 import torch
 import torch.nn as nn
 import torch.quantization
-from torch.quantization.boiler_code import evaluate, imagenet_download
+from torch.quantization.boiler_code import evaluate, imagenet_download, load_conv
 
 import _equalize
 import _correct_bias
@@ -74,7 +74,7 @@ def adaround_demo(input_model, data_loader, data_loader_test):
     with_adaround = copy.deepcopy(model)
     without_adaround = copy.deepcopy(model)
 
-    for batch in range(1, 101):
+    for batch in range(1, 4):
         # model = copy.deepcopy(mo)
         _adaround.learn_adaround_sequential(with_adaround, data_loader_test, batch, with_adaround=True)
         _adaround.learn_adaround_sequential(without_adaround, data_loader_test, batch, with_adaround=False)
@@ -203,5 +203,6 @@ def equalize_accuracy_demo(input_model, data_loader, data_loader_test):
 
 if __name__ == "__main__":
     # equalize_accuracy_demo(*imagenet_download())
-    correct_bias_demo(*imagenet_download())
+    # correct_bias_demo(*imagenet_download())
     # adaround_demo(*imagenet_download())
+    _adaround.learn_adaround_sequential(*load_conv())

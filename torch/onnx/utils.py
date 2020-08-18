@@ -424,6 +424,8 @@ def _model_to_graph(model, args, verbose=False,
                                                             _export_onnx_opset_version)
         torch._C._jit_pass_dce_allow_deleting_nodes_with_side_effects(graph)
 
+    params_dict = torch._C._jit_pass_onnx_eliminate_unused_items(graph, params_dict)
+
     # For ONNX opset < 9, constants only have three data types: float16, float, double.
     # In this pass transform constants of other data types to float/double + cast operator.
     if _export_onnx_opset_version < 9:
@@ -983,6 +985,12 @@ def _validate_dynamic_axes(dynamic_axes, model, input_names, output_names):
                 else:
                     value_dict[x] = str(key) + '_dynamic_axes_' + str(i + 1)
             dynamic_axes[key] = value_dict
+
+def _add_block(node, input_node, op_name, **kwargs):
+    new_block = node.addBlock()
+    new_node = new_block.addNode(input_node, op_name)
+    for k, v in kwargs.items():
+        _add_attribute(new_node, k, v, False)
 
 torch._C.Graph.op = _graph_op
 torch._C.Graph.at = _graph_at

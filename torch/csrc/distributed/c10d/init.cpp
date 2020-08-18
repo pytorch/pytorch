@@ -186,6 +186,9 @@ PyObject* c10d_init(PyObject* _unused) {
 An enum-like class for available reduction operations: ``SUM``, ``PRODUCT``,
 ``MIN``, ``MAX``, ``BAND``, ``BOR``, and ``BXOR``.
 
+Note that ``BAND``, ``BOR``, and ``BXOR`` reductions are not available when
+using the ``NCCL`` backend.
+
 The values of this class can be accessed as attributes, e.g., ``ReduceOp.SUM``.
 They are used in specifying strategies for reduction collectives, e.g.,
 :func:`reduce`, :func:`all_reduce_multigpu`, etc.)")
@@ -727,7 +730,8 @@ They are used in specifying strategies for reduction collectives, e.g.,
                 ``allreduce`` work.
 
                 >>> def allreduce(state: object, bucket: dist._GradBucket): -> torch._C.Future
-                >>>     work = process_group.allreduce(bucket.get_tensors())
+                >>>     tensors = [t / process_group.world_size for t in bucket.get_tensors()]
+                >>>     work = process_group.allreduce(tensors)
                 >>>     return work.get_future()
 
                 >>> ddp_model._register_comm_hook(state = None, hook = allreduce)

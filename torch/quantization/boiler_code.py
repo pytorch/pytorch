@@ -7,6 +7,7 @@ import torchvision.transforms as transforms
 from torchvision.models.quantization import mobilenet_v2
 import os
 import requests
+import copy
 
 class AverageMeter(object):
     """Computes and stores the average and current value"""
@@ -122,6 +123,27 @@ def imagenet_download():
     model = torchvision.models.quantization.mobilenet_v2(pretrained=True, quantize=False)
     print("done loading")
     return model, data_loader, data_loader_test
+class ConvChain(nn.Module):
+    def __init__(self):
+        super(ConvChain, self).__init__()
+        self.conv2d1 = nn.Conv2d(3, 4, 5, 5)
+        self.conv2d2 = nn.Conv2d(4, 5, 5, 5)
+        self.conv2d3 = nn.Conv2d(5, 6, 5, 5)
+
+    def forward(self, x):
+        x1 = self.conv2d1(x)
+        x2 = self.conv2d2(x1)
+        x3 = self.conv2d3(x2)
+        return x3
+
+
+def load_conv():
+    model = ConvChain()
+    copy_of_model = copy.deepcopy(model)
+    model.train()
+    img_data = [(torch.rand(10, 3, 125, 125, dtype=torch.float, requires_grad=True), torch.randint(0, 1, (2,), dtype=torch.long))
+                for _ in range(500)]
+    return model, img_data
 
 def downloading_models():
     url = 'https://s3.amazonaws.com/pytorch-tutorial-assets/imagenet_1k.zip'

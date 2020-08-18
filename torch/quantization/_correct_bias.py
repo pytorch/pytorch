@@ -96,10 +96,6 @@ def bias_correction(float_model, quantized_model, img_data, white_list=_supporte
         if type(submodule) in white_list:
             uncorrected_modules[name] = submodule
 
-
-    print("help")
-    print(uncorrected_modules)
-
     for uncorrected_module in uncorrected_modules:
         quantized_submodule = get_module(quantized_model, uncorrected_module)
         bias = get_param(quantized_submodule, 'bias')
@@ -112,8 +108,6 @@ def bias_correction(float_model, quantized_model, img_data, white_list=_supporte
                 if count == neval_batches:
                     break
             ob_dict = ns.get_logger_dict(quantized_model)
-            print(ob_dict.keys())
-            print(uncorrected_module + '.stats')
             parent_name, _ = parent_child_names(uncorrected_module)
 
             float_data = ob_dict[parent_name + '.stats']['float']
@@ -122,6 +116,7 @@ def bias_correction(float_model, quantized_model, img_data, white_list=_supporte
             # math for expected_error
             quantization_error = quant_data - float_data
             dims = list(range(quantization_error.dim()))
+            # Note: we don't want to take the mean over the output channel dimension
             dims.remove(1)
             expected_error = torch.mean(quantization_error, dims)
 
@@ -133,4 +128,3 @@ def bias_correction(float_model, quantized_model, img_data, white_list=_supporte
             for name, submodule in quantized_model.named_modules():
                 if isinstance(submodule, MeanShadowLogger):
                     submodule.clear()
-            print(quantized_model, "bruh")
