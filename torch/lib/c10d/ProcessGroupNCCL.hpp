@@ -8,7 +8,6 @@
 #include <c10d/ProcessGroup.hpp>
 #include <c10d/Store.hpp>
 
-#include <ATen/Parallel.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAEvent.h>
 
@@ -55,7 +54,8 @@ constexpr const char* NCCL_BLOCKING_WAIT = "NCCL_BLOCKING_WAIT";
 //   // Now continue on other work in the current stream.
 class ProcessGroupNCCL : public ProcessGroup {
  public:
-  class WorkNCCL : public ProcessGroup::Work {
+  class WorkNCCL : public ProcessGroup::Work,
+                   public std::enable_shared_from_this<WorkNCCL> {
    public:
     // Constructor takes a list of CUDA devices
     WorkNCCL(const std::vector<at::Device>& devices);
@@ -86,6 +86,7 @@ class ProcessGroupNCCL : public ProcessGroup {
     bool finishedGPUExecution();
 
     // Get a Future object that will be marked as completed internally.
+    // It actually returns a FutureNCCL object which is a sub class Future.
     c10::intrusive_ptr<c10::ivalue::Future> getFuture() override;
 
    protected:
@@ -132,68 +133,76 @@ class ProcessGroupNCCL : public ProcessGroup {
     // to the store.
     std::shared_ptr<Store> store_;
 
-    // Store a Future work associated with WorkNCCL.
-    c10::intrusive_ptr<c10::ivalue::Future> futureWork_;
+    // Store a reference to NCCL collective's outputs to be used by getFuture.
+    std::shared_ptr<std::vector<at::Tensor>> outputs_;
 
     friend class ProcessGroupNCCL;
   };
 
-  // CheckFutureWork is used by a cudaStremCallback function called
-  // ncclKernelCompletionCallback. The purpose of CheckFutureWork is to mark
-  // workNCCL's Future work when, all NCCL streams created in collective
-  // operation are finished. We use enable_shared_from_this to safely call
-  // shared_ptr<CheckFutureWork> (this) to remove its pointer from
-  // ProcessGroupNCCL's checkFutObjs after at::launch operation of
-  // markFutureCompleted is done. markFutureCompleted increments streamCounter
-  // by one and once it is called by number of replicas times, it marks Future
-  // work completed by setting outputs vector as its value.
-  struct CheckFutureWork : std::enable_shared_from_this<CheckFutureWork> {
+  // FutureNCCL is a subclass of ivalue's Future. The goal is to use
+  // this class in getFuture API of WorkNCCL. This Future is mostly a
+  // wrapper to synchronize streams appropriately and it mostly enables
+  // the async programming model of CUDA while trying to adhere to the
+  // Future interface.
+  //
+  // FutureNCCL has a reference to WorkNCCL and NCCL collective's outputs.
+  // Its value is NCCL collective's outputs.
+  struct FutureNCCL : at::ivalue::Future {
    public:
-    CheckFutureWork(
+    explicit FutureNCCL(
         std::shared_ptr<ProcessGroupNCCL::WorkNCCL> work,
-        std::vector<at::Tensor>& outputs,
-        std::shared_ptr<std::unordered_set<std::shared_ptr<CheckFutureWork>>>
-            checkFutObjs,
-        std::mutex& checkFutObjMutex_)
-        : work_(work),
-          outputs_(std::make_shared<std::vector<at::Tensor>>(outputs)),
-          streamCounter_(0),
-          checkFutObjs_(checkFutObjs),
-          checkFutObjMutex_(checkFutObjMutex_) {}
+        std::shared_ptr<std::vector<at::Tensor>> outputs)
+        : at::ivalue::Future(c10::ListType::create(c10::TensorType::get())),
+          work_(work),
+          outputs_(*outputs) {}
 
-    std::shared_ptr<CheckFutureWork> getPtr() {
-      return shared_from_this();
+    // Simply calls WorkNCCL's wait(). It will return after synchronizing
+    // the correct GPU streams to ensure we can have async CUDA execution
+    // and it does not wait for the entire operation to complete on GPU.
+    // If NCCL_BLOCKING_WAIT is enabled, in that case, it will wait for the
+    // entire operation to complete before returning.
+    void wait() override {
+      work_->wait();
     }
 
-    void markFutureCompleted() {
-      // Passing `this` here as the capture is fine because we store a
-      // `shared_ptr` to `this` in ProcessGroupNCCL's `checkFutObjs_` to
-      // ensure that the object is alive when the lambda function is called.
-      at::launch(([this]() {
-        if (++streamCounter_ == (*outputs_).size()) {
-          // Need to synchronize before passing outputs to Future because
-          // operations using the outputs might be running on different streams
-          work_->synchronizeStreams();
+    // FutureNCCL's value is NCCL collective's outputs and callbacks were
+    // invoked inline by addCallback(), so markCompleted is not needed.
+    void markCompleted(at::IValue /* unused */) override {
+      C10_THROW_ERROR(Error, "FutureNCCL::markCompleted is not supported.");
+    }
 
-          TORCH_CHECK(
-              !work_->getFuture()->completed(),
-              "Future work of workNCCL can only be marked as "
-              "completed by ncclKernelCompletionCallback.")
-          work_->getFuture()->markCompleted(at::IValue(*outputs_));
+    // Just returns NCCL collective's outputs after WorkNCCL's wait returns.
+    at::IValue value() override {
+      work_->wait();
+      return outputs_;
+    }
 
-          std::unique_lock<std::mutex> lock(checkFutObjMutex_);
-          checkFutObjs_->erase(getPtr());
-        }
-      }));
+    const at::IValue& constValue() override {
+      work_->wait();
+      return outputs_;
+    }
+
+    // Add a callback to FutureNCCL. It invokes the callback inline after
+    // WorkNCCL's wait(). workCallbacks return a Future (not FutureNCCL).
+    void addCallback(std::function<void(void)> callback) override {
+      work_->wait();
+      callback();
+    }
+
+    // Checks whether NCCL work is completed.
+    bool completed() const override {
+      return work_->isCompleted();
+    }
+
+    // FutureNCCL has a value that was set in its constructor as NCCL
+    // collective's outputs.
+    bool hasValue() const override {
+      return true;
     }
 
    private:
     std::shared_ptr<ProcessGroupNCCL::WorkNCCL> work_;
-    std::shared_ptr<std::vector<at::Tensor>> outputs_;
-    std::atomic<int> streamCounter_;
-    std::shared_ptr<std::unordered_set<std::shared_ptr<CheckFutureWork>>>
-        checkFutObjs_;
-    std::mutex& checkFutObjMutex_;
+    at::IValue outputs_;
   };
 
   // If you wish to create multiple process groups, each with a potentially
@@ -270,6 +279,18 @@ class ProcessGroupNCCL : public ProcessGroup {
 
   std::shared_ptr<ProcessGroup::Work> barrier(
       const BarrierOptions& opts = BarrierOptions()) override;
+
+  std::shared_ptr<ProcessGroup::Work> alltoall_base(
+      at::Tensor& outputTensor,
+      at::Tensor& inputTensor,
+      std::vector<int64_t>& outputSplitSizes,
+      std::vector<int64_t>& inputSplitSizes,
+      const AllToAllOptions& opts = AllToAllOptions()) override;
+
+  std::shared_ptr<ProcessGroup::Work> alltoall(
+      std::vector<at::Tensor>& outputTensors,
+      std::vector<at::Tensor>& inputTensors,
+      const AllToAllOptions& opts = AllToAllOptions()) override;
 
   // Unsupported Ops
   std::shared_ptr<ProcessGroup::Work> gather(
@@ -451,15 +472,6 @@ class ProcessGroupNCCL : public ProcessGroup {
   // for this map since only the watchdog thread accesses this set. The
   // set contains the string representation of ncclUniqueId.
   std::unordered_set<std::string> abortedComms_;
-
-  // The set of CheckFutureWork pointers ensures that the CheckFutureWork object
-  // is not deleted before the at::launch operation inside CheckFutureWork's
-  // markFutureCompleted called by cudaStremCallback function.
-  std::shared_ptr<std::unordered_set<std::shared_ptr<CheckFutureWork>>>
-      checkFutObjs_;
-
-  // Mutex to guard the unordered set checkFutObjs_.
-  mutable std::mutex checkFutObjMutex_;
 };
 
 } // namespace c10d

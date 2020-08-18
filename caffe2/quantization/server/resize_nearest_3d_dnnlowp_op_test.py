@@ -4,7 +4,7 @@ import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
 import numpy as np
 from caffe2.python import core, dyndep, workspace
-from hypothesis import given
+from hypothesis import given, settings
 
 
 dyndep.InitOpsLibrary("//caffe2/caffe2/quantization/server:dnnlowp_ops")
@@ -23,6 +23,7 @@ class DNNLowPResizeNearest3DOpTest(hu.HypothesisTestCase):
         scale_h=st.floats(0.25, 4.0) | st.just(2.0),
         **hu.gcs_cpu_only
     )
+    @settings(max_examples=5, deadline=None)
     def test_resize_nearest(self, N, T, H, W, C, scale_t, scale_w, scale_h, gc, dc):
         X = np.round(np.random.rand(N, T, H, W, C) * 255).astype(np.float32)
 
