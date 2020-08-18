@@ -86,12 +86,8 @@ class IrParser {
     MergeQueryFuncPtr merge_f_;
   };
 
- private:
-  static const int unroll_factor = 4;
-
  public:
-  IrParser(std::shared_ptr<Graph> graph, CudaKernel* cuda_kernel)
-      : graph_(std::move(graph)), cuda_kernel_(cuda_kernel) {
+  IrParser(std::shared_ptr<Graph> graph) : graph_(std::move(graph)) {
     if (init_registry_) {
       registerJitOperator();
       init_registry_ = false;
@@ -99,50 +95,17 @@ class IrParser {
   }
 
   // Fuses pointwise ops with loop unrolling (factor = 4).
-  void parse() {
-    FusionGuard fg(cuda_kernel_->fusion_.get());
+  std::unique_ptr<Fusion> parse() {
+    auto fusion = std::make_unique<Fusion>();
+    FusionGuard fg(fusion.get());
     auto block = graph_->block();
 
-    // [ Note - broadcast support in integration ]
-    //
-    // in case of broadcast, we don't support explicit broadcast,
-    // 1. for point-wise fusion, so we need to convert/expand all inputs
-    // tensors to comply to the broadcasted size. This supports very limited
-    // case, which we try to accomodate in graph partition, that we only merge
-    // nodes with identical output shapes.
-    // 2. in case of reduction-at-end fusion, right now we only support single
-    // reduction operation in fusion, hence we can use the same logig for PW
-    // fusion and conver/expand all inputs to the input tensor to reduction op.
-
-    // TODO: proper broadcast support in integration
-    int broadcast_dim = -1;
-    // broadcast support hack is disabled to reduction.
-    if (hasReductionNode(graph_->block())) {
-      // reduction-at-end fusion, broadcast all inputs to tensor before
-      // reduction
-      // TODO: Not perfectly safe! We could have intermediate output that is not
-      // part of outputs of reduction operations. But we have similar limitation
-      // for broadcast support in PW fusion. We should properly fix this after
-      // broadcast integration.
-      broadcast_dim = block->outputs()[0]
-                          ->node()
-                          ->inputs()[0]
-                          ->type()
-                          ->cast<TensorType>()
-                          ->dim()
-                          .value();
-    } else {
-      // point-wise fusion, broadcast all inputs to output size.
-      broadcast_dim =
-          block->outputs()[0]->type()->cast<TensorType>()->dim().value();
-    }
-
     // register all inputs;
-    // shape propagation during parsing is effctively done in parsing rules, as
-    // we only explicitly register inputs in the graph.
     for (auto val : block->inputs()) {
-      TORCH_INTERNAL_ASSERT(registerValue(val, broadcast_dim));
-      cuda_kernel_->fusion_->addInput(value_map_[val->unique()]);
+      TORCH_INTERNAL_ASSERT(
+          registerValue(val),
+          "Error trying to register value with code generation.");
+      fusion->addInput(value_map_[val->unique()]);
 
       auto opt_dtype = value_map_[val->unique()]->getDataType();
       // computation promotion, we cast fp16 inputs to fp32 and use promoted
@@ -157,7 +120,6 @@ class IrParser {
     // with eager mode
     bool disable_unroll = false;
     bool has_reduction = false;
-    bool fcd_reduction = false;
     // compose nodes in topo order;
     for (const JitOp* node : block->nodes()) {
       processJitNode(node);
@@ -171,145 +133,18 @@ class IrParser {
 
     // mark output;
     for (auto jit_output : block->outputs()) {
-      TensorView* out =
-          static_cast<TensorView*>(value_map_[jit_output->unique()]);
-
+      TensorView* out = value_map_[jit_output->unique()]->as<TensorView>();
       // demote output dtype to be match PyTorch JIT graph.
       auto tensor_type = jit_output->type()->cast<TensorType>();
       TORCH_INTERNAL_ASSERT(
           tensor_type, "output of fusion group is not TensorType.");
       if (tensor_type->scalarType() == at::ScalarType::Half) {
         // No need to update value_map_ after this point.
-        out = static_cast<TensorView*>(castOp(DataType::Half, out));
+        out = castOp(DataType::Half, out)->as<TensorView>();
       }
-
-      cuda_kernel_->fusion_->addOutput(out);
-
-      // TODO: has_reduction for scheudling should be done on a per output
-      //       tensor basis.
-      if (has_reduction) {
-        // TODO: this scheduling only works for a single reduction operation in
-        //       the fusion, in this case we can coalesc all reduction axes and
-        //       merge them together. (same applies to iteration axes)
-        // TODO: does this work for multiple outputs?
-
-        // query if fastest changing dimension (FCD) is a reduction
-        fcd_reduction = out->axis((int)out->nDims() - 1)->isReduction();
-
-        // TODO: could really use evaluation here. Launch configuration is
-        //       imposed by transformation and the information should be
-        //       embedded in codegen IR.
-        cuda_kernel_->reduction_axes_ = reductionAxes(out);
-
-        // We coalesc all reduction axes to the right;
-        size_t num_reduction_axes = coalescReduction(out);
-
-        // Merge all iteration dimensions
-        while (out->nDims() > num_reduction_axes + 1) {
-          out->merge(0, 1);
-        }
-        // Merge all reduction dimensions
-        while (out->nDims() > 2) {
-          out->merge(1, 2);
-        }
-
-      } else {
-        // Merge all dimensions because we're only supporting pointwise
-        while (out->nDims() > 1)
-          out->merge(0, 1);
-        // Split into 128 which will be bockDim.x
-        out->split(0, kPwThreadX);
-        // Split by another 4 which will be our unroll factor
-        auto ur_factor = disable_unroll ? 1 : unroll_factor;
-        if (!disable_unroll) {
-          out->split(0, ur_factor);
-          cuda_kernel_->unroll_factor_ = ur_factor;
-        }
-      }
+      fusion->addOutput(out);
     }
-
-    if (has_reduction) {
-      // Run through outputs, grab all inputs of outputs
-      // squeeze with computeAt to set overall structure.
-      for (auto output : cuda_kernel_->fusion_->outputs()) {
-        if (output->getValType() != ValType::TensorView)
-          continue;
-        TensorView* out_tv = static_cast<TensorView*>(output);
-
-        // fcd_reduction could be queried later via
-        // cuda_kernel_->reduction_axes_, which would ensure we have proper
-        // launch configuratoin.
-        TensorView* intermediate;
-        if (fcd_reduction) {
-          out_tv->split(-1, kFcdReductionThreadX);
-          // necessary to avoid dynamic allocation on intermediates;
-          intermediate = out_tv->rFactor({-2});
-        } else {
-          // TODO: we don't need a full warp here, this should be determined by
-          //       element data type
-          out_tv->split(0, kNonFcdReductionThreadX);
-          out_tv->split(
-              -1, kNonFcdReductionThreadY); // necessary to avoid dynamic
-                                            // allocation on intermediates;
-          intermediate = out_tv->rFactor({-2});
-        }
-        for (Val* inp : cuda_kernel_->fusion_->inputsOf(output)) {
-          // scheduling of inputs shouldn't change with different fcd_reduction
-          if (inp->getValType().value() == ValType::TensorView) {
-            static_cast<TensorView*>(inp)->computeAt(intermediate, -1);
-          }
-        }
-        // scheduling of inputs shouldn't change with different fcd_reduction
-        intermediate->computeAt(out_tv, -2);
-        if (fcd_reduction) {
-          out_tv->axis(0)->parallelize(ParallelType::BIDx);
-        } else {
-          out_tv->axis(0)->parallelize(ParallelType::BIDx);
-          out_tv->axis(1)->parallelize(ParallelType::TIDx);
-        }
-      }
-      // Run through all values, unroll, and bind their axes
-      for (auto val : cuda_kernel_->fusion_->vals()) {
-        if (val->getValType().value() != ValType::TensorView)
-          continue;
-        TensorView* tv = static_cast<TensorView*>(val);
-        if (fcd_reduction) {
-          tv->axis(-1)->parallelize(ParallelType::TIDx);
-        } else {
-          tv->axis(-1)->parallelize(ParallelType::TIDy);
-        }
-      }
-    } else {
-      // Run through outputs, grab all inputs of outputs
-      // squeeze with computeAt to set overall structure.
-      for (auto output : cuda_kernel_->fusion_->outputs()) {
-        if (output->getValType() != ValType::TensorView)
-          continue;
-        TensorView* out_tv = static_cast<TensorView*>(output);
-        for (Val* inp : cuda_kernel_->fusion_->inputsOf(output)) {
-          if (inp->getValType().value() == ValType::TensorView)
-            static_cast<TensorView*>(inp)->computeAt(out_tv, 1);
-        }
-        out_tv->axis(0)->parallelize(ParallelType::BIDx);
-      }
-
-      // Run through all values, unroll, and bind their axes
-      for (auto val : cuda_kernel_->fusion_->vals()) {
-        if (val->getValType().value() != ValType::TensorView)
-          continue;
-        TensorView* tv = static_cast<TensorView*>(val);
-
-        // Should be true for all intermediates, but if one isn't hooked
-        // up right, skip it and hope for the best for now
-        if (!disable_unroll && tv->nDims() == 3) {
-          tv->axis(-2)->parallelize(ParallelType::Unroll);
-          tv->axis(-1)->parallelize(ParallelType::TIDx);
-        } else {
-          if (tv->nDims() == 2)
-            tv->axis(-1)->parallelize(ParallelType::TIDx);
-        }
-      }
-    }
+    return fusion;
   }
 
   static bool canParseNode(const Node* node) {
@@ -721,8 +556,8 @@ class IrParser {
     }
   }
 
-  bool registerValue(const JitValue* val, int broadcast_dim = -1) {
-    return registerTensor(val, broadcast_dim) || registerScalar(val);
+  bool registerValue(const JitValue* val) {
+    return registerTensor(val) || registerScalar(val);
   }
 
   bool registerScalar(const JitValue* val) {
@@ -768,17 +603,9 @@ class IrParser {
     return false;
   }
 
-  bool registerTensor(const JitValue* val, int broadcast_dim = -1) {
+  bool registerTensor(const JitValue* val) {
     CgValue cg_val;
     if (auto tensor_type = val->type()->cast<TensorType>()) {
-      // TODO: make this a static function in Tensor class;
-      // create tensor;
-      if (broadcast_dim >= 0) {
-        TORCH_INTERNAL_ASSERT(
-            broadcast_dim >= (int)*tensor_type->dim(),
-            "attempt to broadcast a tensor to shrinked dimension is invalid");
-        tensor_type = tensor_type->withDim(broadcast_dim);
-      }
       // TODO: make this a static function in Tensor class;
       // create tensor;
       cg_val = new TensorView(tensor_type);
@@ -789,7 +616,6 @@ class IrParser {
   }
 
   std::shared_ptr<Graph> graph_;
-  CudaKernel* cuda_kernel_;
 
   // maps from JitValue::unique() to fusion Val;
   std::unordered_map<size_t, CgValue> value_map_;
@@ -834,9 +660,9 @@ bool isNodeParsible(const Node* node) {
   return IrParser::canParseNode(node);
 }
 
-void parseJitIR(std::shared_ptr<Graph>& graph, CudaKernel* cuda_kernel) {
-  IrParser parser(graph, cuda_kernel);
-  parser.parse();
+std::unique_ptr<Fusion> parseJitIR(std::shared_ptr<Graph>& graph) {
+  IrParser parser(graph);
+  return parser.parse();
 }
 
 } // namespace cuda
