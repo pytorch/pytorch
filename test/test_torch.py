@@ -19454,6 +19454,21 @@ def _generate_gamma_input(dtype, device, test_poles=True):
                       -0.000000111, 0, -2, -329])
     return torch.tensor(input, dtype=dtype, device=device)
 
+def _add_complex_input(dtype, device):
+    base = _generate_reference_input(dtype, device)
+    input = []
+    input.append([x + 10j for x in range(-5, 5)])
+    input.append([x * 1e10 + 1e20j for x in range(-5, 5)])
+    input.append([x * 1e10 - 1e20j for x in range(-5, 5)])
+    if dtype == torch.float32:
+        complex_examplars = torch.tensor(input, dtype=torch.complex64, device=device)
+        return torch.cat((base, complex_examplars), dim=0)
+    elif dtype == torch.float64:
+        complex_examplars = torch.tensor(input, dtype=torch.complex128, device=device)
+        return torch.cat((base, complex_examplars), dim=0)
+    else:
+        return base
+
 # this class contains information needed to generate tests for torch math functions
 # the generated tests compare torch implementation with the reference numpy/scipy implementation,
 # and also check proper behavior for contiguous/discontiguous/inplace outputs.
@@ -19493,9 +19508,13 @@ class _TorchMathTestMeta(object):
         self.dtypes = dtypes
         self.replace_inf_with_nan = replace_inf_with_nan
 
-torch_op_tests = [_TorchMathTestMeta('asin', reffn='arcsin'),
+torch_op_tests = [_TorchMathTestMeta('asin', reffn='arcsin',
+                                     input_fn=_add_complex_input,
+                                     rtol=1e-7, atol=1e-7),
                   _TorchMathTestMeta('asinh', reffn='arcsinh'),
                   _TorchMathTestMeta('sinh'),
+                  _TorchMathTestMeta('acos', reffn='arccos', input_fn=_add_complex_input,
+                                     rtol=1e-7, atol=1e-7),
                   _TorchMathTestMeta('acosh', reffn='arccosh'),
                   _TorchMathTestMeta('tan'),
                   _TorchMathTestMeta('atan', reffn='arctan'),
