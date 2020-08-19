@@ -27,9 +27,10 @@ Value* ConvertSliceToIndex(Node* slice, Value* size, Node* insertBefore) {
   const int64_t int_max = std::numeric_limits<int>::max();
   auto graph = slice->owningGraph();
   WithInsertPoint guard(insertBefore);
-  auto start = slice->get(attr::start) ? slice->get(attr::start) : 0;
-  auto end = slice->get(attr::end) ? slice->get(attr::end) : int_max;
-  auto step = slice->get(attr::step);
+  TORCH_INTERNAL_ASSERT((slice->inputs()).size() == 5);
+  auto start = slice->inputs()[2];
+  auto end = slice->inputs()[3];
+  auto step = slice->inputs()[4];
   auto index =
       graph->insert(aten::arange, {size}, {NamedValue("dtype", c10::kLong)});
   auto sliced_index =
