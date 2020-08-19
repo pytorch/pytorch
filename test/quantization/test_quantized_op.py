@@ -2743,8 +2743,13 @@ class TestQuantizedEmbeddingBag(TestCase):
         # compare against C2 to ensure numerical equivalency.
         from caffe2.python import core, workspace
         conversion_op = "FloatToFused8BitRowwiseQuantized"
+        reverse_conversion_op = None
         if bit_rate == 4:
             conversion_op = "FloatToFused4BitRowwiseQuantized"
+            reverse_conversion_op = "Fused4BitRowwiseQuantizedToFloat"
+        elif bit_rate == 2:
+            conversion_op = "FloatToFused2BitRowwiseQuantized"
+            reverse_conversion_op = "Fused2BitRowwiseQuantizedToFloat"
 
         def get_c2_weights(weights):
             workspace.ResetWorkspace()
@@ -2756,10 +2761,10 @@ class TestQuantizedEmbeddingBag(TestCase):
                 )
             )
             emb_q = workspace.FetchBlob("quantized_weights")
-            if bit_rate == 4:
+            if bit_rate == 4 or bit_rate == 2:
                 workspace.RunOperatorOnce(
                     core.CreateOperator(
-                        "Fused4BitRowwiseQuantizedToFloat", ["quantized_weights"], ["dequantized_weights"]
+                        reverse_conversion_op, ["quantized_weights"], ["dequantized_weights"]
                     )
                 )
                 dequantized_data = torch.from_numpy(workspace.FetchBlob("dequantized_weights"))
@@ -2793,6 +2798,15 @@ class TestQuantizedEmbeddingBag(TestCase):
         unpack_fn = torch.ops.quantized.embedding_bag_4bit_unpack
 
         self._test_embedding_bag_unpack_fn(pack_fn, unpack_fn, num_embeddings, embedding_dim, bit_rate=4)
+
+    """ Tests the correctness of the embedding_bag_2bit pack/unpack op against C2 """
+    @given(num_embeddings=st.integers(10, 100),
+           embedding_dim=st.integers(5, 50).filter(lambda x: x % 8 == 0),)
+    def test_embedding_bag_2bit_unpack(self, num_embeddings, embedding_dim):
+        pack_fn = torch.ops.quantized.embedding_bag_2bit_prepack
+        unpack_fn = torch.ops.quantized.embedding_bag_2bit_unpack
+
+        self._test_embedding_bag_unpack_fn(pack_fn, unpack_fn, num_embeddings, embedding_dim, bit_rate=2)
 
     def embedding_bag_rowwise_offsets_run(
             self, bit_rate, num_embeddings,
