@@ -221,13 +221,6 @@ jobs:
     steps:
       - checkout
       - run:
-          name: Install VS 14.26 toolchain
-          no_output_timeout: 30m
-          command: |
-            if [[ "${VC_VERSION}" == "14.26" ]]; then
-              powershell .circleci/scripts/windows_vs_14_26_install.ps1
-            fi
-      - run:
           name: Install Cuda
           no_output_timeout: 30m
           command: |
@@ -291,13 +284,6 @@ jobs:
       - checkout
       - attach_workspace:
           at: c:/users/circleci/workspace
-      - run:
-          name: Install VS 14.26 toolchain
-          no_output_timeout: 30m
-          command: |
-            if [[ "${VC_VERSION}" == "14.26" ]]; then
-              powershell .circleci/scripts/windows_vs_14_26_install.ps1
-            fi
       - run:
           name: Install Cuda
           no_output_timeout: 30m
