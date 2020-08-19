@@ -332,9 +332,7 @@ def _ensure_commit(git_sha1):
     p = subprocess.run(cmd, check=True)
 
 
-@timed("Checking out nightly PyTorch")
-def checkout_nightly_version(branch, spdir):
-    """Get's the nightly version and then checks it out."""
+def _nightly_version(spdir):
     # first get the git version from the installed module
     version_fname = os.path.join(spdir, "torch", "version.py")
     with open(version_fname) as f:
@@ -360,7 +358,22 @@ def checkout_nightly_version(branch, spdir):
     print(f"Found nightly release version {nightly_version}")
     # now checkout nightly version
     _ensure_commit(nightly_version)
+    return nightly_version
+
+
+@timed("Checking out nightly PyTorch")
+def checkout_nightly_version(branch, spdir):
+    """Get's the nightly version and then checks it out."""
+    nightly_version = _nightly_version(spdir)
     cmd = ["git", "checkout", "-b", branch, nightly_version]
+    p = subprocess.run(cmd, check=True)
+
+
+@timed("Pulling nightly PyTorch")
+def pull_nightly_version(spdir):
+    """Fetches the nightly version and then merges it ."""
+    nightly_version = _nightly_version(spdir)
+    cmd = ["git", "merge", nightly_version]
     p = subprocess.run(cmd, check=True)
 
 
@@ -507,6 +520,7 @@ def write_pth(env_opts, platform):
 
 
 def install(
+    subcommand="checkout",
     branch=None,
     name=None,
     prefix=None,
@@ -524,7 +538,12 @@ def install(
         deps_install(deps, existing_env, env_opts)
     pytdir = pytorch_install(pytorch)
     spdir = _site_packages(pytdir.name, platform)
-    checkout_nightly_version(branch, spdir)
+    if subcommand == "checkout":
+        checkout_nightly_version(branch, spdir)
+    elif subcommand == "pull":
+        pull_nightly_version(spdir)
+    else:
+        raise ValueError(f"Subcommand {subcommand} must be one of: checkout, pull.")
     move_nightly_files(spdir, platform)
     write_pth(env_opts, platform)
     pytdir.cleanup()
@@ -547,8 +566,11 @@ def make_parser():
         default=None,
         metavar="NAME",
     )
+    pull = subcmd.add_parser(
+        "pull", help="pulls the nightly commits into the current branch"
+    )
     # general arguments
-    subps = [co]
+    subps = [co, pull]
     for subp in subps:
         subp.add_argument(
             "-n",
@@ -597,6 +619,7 @@ def main(args=None):
     global LOGGER
     p = make_parser()
     ns = p.parse_args(args)
+    ns.branch = getattr(ns, "branch", None)
     status = check_in_repo()
     status = status or check_branch(ns.subcmd, ns.branch)
     if status:
@@ -607,6 +630,7 @@ def main(args=None):
     with logging_manager(debug=ns.verbose) as logger:
         LOGGER = logger
         install(
+            subcommand=ns.subcmd,
             branch=ns.branch,
             name=ns.name,
             prefix=ns.prefix,
