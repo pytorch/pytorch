@@ -1,9 +1,18 @@
 import torch
+import unittest
 from torch.fx import symbolic_trace, Proxy, Node, GraphModule, DefaultDelegate
 
-from typing import Any, Callable, Dict, Optional, Tuple, Union
+from fx.quantization import Quantizer
 
+from typing import Any, Callable, Dict, Optional, Tuple, Union
 from torch.testing._internal.common_utils import TestCase, run_tests
+
+try:
+    from torchvision.models import resnet18
+    HAS_TORCHVISION = True
+except ImportError:
+    HAS_TORCHVISION = False
+skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 class TestFX(TestCase):
     def test_graph_module(self):
@@ -141,11 +150,41 @@ class TestFX(TestCase):
                 return a + b
         m = M()
         g = symbolic_trace(m).graph
-        t = Proxy(g.result) 
+        t = Proxy(g.result)
         # test that we can use proxy objects to generate more graph code later for things that do not need to work with modules.
         g.output((t + t).node)
         gm = GraphModule(m, g)
         self.assertEqual(gm(3, 4), 14)
+
+    @skipIfNoTorchVision
+    def test_resnet(self):
+        resnet = resnet18()
+        resnet.train()
+
+        res_graph = symbolic_trace(resnet)
+        res_script = torch.jit.script(res_graph)
+
+        ip = torch.rand(1, 3, 224, 224)
+
+        a = resnet(ip)
+        b = res_graph(ip)
+        c = res_script(ip)
+        assert torch.allclose(a, b)
+        assert torch.allclose(a, c)
+
+        quantizer = Quantizer(res_graph)
+
+        for i in range(10):
+            quantizer.observe((torch.rand(1, 3, 224, 224),))
+
+        qgraph = quantizer.quantize()
+        qgraph_script = torch.jit.script(qgraph)
+
+        d = qgraph(ip)
+        e = qgraph_script(ip)
+
+        assert (a - d).abs().max() < 2
+        assert torch.allclose(d, e)
 
 
 if __name__ == '__main__':
