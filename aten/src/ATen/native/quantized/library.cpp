@@ -95,6 +95,8 @@ TORCH_LIBRARY(quantized, m) {
   m.def("embedding_bag_byte_unpack(Tensor weight) -> Tensor");
   m.def("embedding_bag_4bit_prepack(Tensor weight) -> Tensor");
   m.def("embedding_bag_4bit_unpack(Tensor weight) -> Tensor");
+  m.def("embedding_bag_2bit_prepack(Tensor weight) -> Tensor");
+  m.def("embedding_bag_2bit_unpack(Tensor weight) -> Tensor");
   m.def("embedding_bag_byte_rowwise_offsets(Tensor weight, Tensor indices, Tensor? offsets=None, bool scale_grad_by_freq=False, int mode=0, bool sparse=False, Tensor? per_sample_weights=None, bool include_last_offset=False) -> Tensor");
   m.def("embedding_bag_4bit_rowwise_offsets(Tensor weight, Tensor indices, Tensor? offsets=None, bool scale_grad_by_freq=False, int mode=0, bool sparse=False, Tensor? per_sample_weights=None, Tensor? compressed_indices_mapping=None, bool include_last_offset=False) -> Tensor");
   m.def("embedding_bag_byte(__torch__.torch.classes.quantized.EmbeddingPackedParamsBase weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq=False, int mode=0, bool sparse=False, Tensor? per_sample_weights=None, Tensor? compressed_indices_mapping=None, bool include_last_offset=False) -> Tensor");
