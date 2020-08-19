@@ -10,7 +10,7 @@ import caffe2.python.hypothesis_test_util as hu
 from caffe2.python.model_helper import ModelHelper
 import caffe2.python.serialized_test.serialized_test_util as serial
 
-from hypothesis import given, assume
+from hypothesis import given, assume, settings
 import hypothesis.strategies as st
 import numpy as np
 import unittest
@@ -161,7 +161,7 @@ class TestSpatialBN(serial.SerializedTestCase):
                                    reference_spatialbn_test)
         self.assertDeviceChecks(dc, op, [X, scale, bias, mean, var], [0])
 
-    @given(size=st.integers(7, 10),
+    @given(size=st.integers(1, 10),
            input_channels=st.integers(1, 10),
            batch_size=st.integers(0, 3),
            seed=st.integers(0, 65535),
@@ -178,6 +178,8 @@ class TestSpatialBN(serial.SerializedTestCase):
         if hiputl.run_in_hip(gc, dc):
             assume(order == "NCHW")
 
+        assume(batch_size == 0 or batch_size * size * size > 1)
+
         op = core.CreateOperator(
             "SpatialBN",
             ["X", "scale", "bias", "running_mean", "running_var"],
@@ -190,16 +192,52 @@ class TestSpatialBN(serial.SerializedTestCase):
             engine=engine,
         )
         np.random.seed(1701)
-        scale = np.random.rand(input_channels).astype(np.float32) + 0.5
+        scale = np.random.randn(input_channels).astype(np.float32)
         bias = np.random.rand(input_channels).astype(np.float32) - 0.5
         mean = np.random.randn(input_channels).astype(np.float32)
         var = np.random.rand(input_channels).astype(np.float32) + 0.5
-        X = np.random.rand(
-            batch_size, input_channels, size, size).astype(np.float32) - 0.5
+        X = np.random.randn(
+            batch_size, input_channels, size, size).astype(np.float32)
 
         if order == "NHWC":
-            X = X.swapaxes(1, 2).swapaxes(2, 3)
+            X = np.transpose(X, (0, 2, 3, 1))
 
+        def batch_norm_ref(X, scale, bias, running_mean, running_var):
+            if batch_size == 0:
+                Y = np.zeros(X.shape)
+                saved_mean = np.zeros(running_mean.shape)
+                saved_var = np.zeros(running_var.shape)
+                return (Y, running_mean, running_var, saved_mean, saved_var)
+
+            if order == "NHWC":
+                X = np.transpose(X, (0, 3, 1, 2))
+
+            C = X.shape[1]
+            reduce_size = batch_size * size * size
+            saved_mean = np.mean(X, (0, 2, 3))
+            saved_var = np.var(X, (0, 2, 3))
+            if reduce_size == 1:
+                unbias_scale = float('inf')
+            else:
+                unbias_scale = reduce_size / (reduce_size - 1)
+            running_mean = momentum * running_mean + (
+                1.0 - momentum) * saved_mean
+            running_var = momentum * running_var + (
+                1.0 - momentum) * unbias_scale * saved_var
+            std = np.sqrt(saved_var + epsilon)
+            broadcast_shape = (1, C, 1, 1)
+            Y = (X - np.reshape(saved_mean, broadcast_shape)) / np.reshape(
+                std, broadcast_shape) * np.reshape(
+                    scale, broadcast_shape) + np.reshape(bias, broadcast_shape)
+
+            if order == "NHWC":
+                Y = np.transpose(Y, (0, 2, 3, 1))
+
+            return (Y, running_mean, running_var, saved_mean, 1.0 / std)
+
+
+        self.assertReferenceChecks(gc, op, [X, scale, bias, mean, var],
+                                   batch_norm_ref)
         self.assertDeviceChecks(dc, op, [X, scale, bias, mean, var],
                                 [0, 1, 2, 3, 4])
 
@@ -212,6 +250,7 @@ class TestSpatialBN(serial.SerializedTestCase):
            momentum=st.floats(0.5, 0.9),
            engine=st.sampled_from(["", "CUDNN"]),
            **hu.gcs)
+    @settings(deadline=None, max_examples=50)
     def test_spatialbn_train_mode_gradient_check(
             self, size, input_channels, batch_size, seed, order, epsilon,
             momentum, engine, gc, dc):
@@ -252,6 +291,7 @@ class TestSpatialBN(serial.SerializedTestCase):
            momentum=st.floats(min_value=0.5, max_value=0.9),
            engine=st.sampled_from(["", "CUDNN"]),
            **hu.gcs)
+    @settings(deadline=10000)
     def test_spatialbn_train_mode_gradient_check_1d(
             self, size, input_channels, batch_size, seed, order, epsilon,
             momentum, engine, gc, dc):
@@ -333,7 +373,8 @@ class TestSpatialBN(serial.SerializedTestCase):
                 batch_mean /= size
                 batch_var = batch_var / size - np.square(batch_mean)
                 mean = momentum * mean + (1.0 - momentum) * batch_mean
-                var = momentum * var + (1.0 - momentum) * batch_var
+                var = momentum * var + (1.0 - momentum) * (
+                    size / (size - 1)) * batch_var
                 batch_var = 1.0 / np.sqrt(batch_var + epsilon)
             if order == "NCHW":
                 scale = np.reshape(scale, (C, 1, 1))
@@ -364,6 +405,7 @@ class TestSpatialBN(serial.SerializedTestCase):
            in_place=st.booleans(),
            engine=st.sampled_from(["", "CUDNN"]),
            **hu.gcs)
+    @settings(deadline=1000)
     def test_spatial_bn_multi_batch_grad(
             self, N, C, H, W, epsilon, order, num_batches, in_place, engine,
             gc, dc):

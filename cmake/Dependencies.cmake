@@ -46,7 +46,7 @@ endif()
 # 3. If MSVC_Z7_OVERRIDE is ON, then /Zi and /ZI will be replaced with /Z7
 #    for Debug and RelWithDebInfo builds
 if(MSVC)
-  foreach(flag_var 
+  foreach(flag_var
       CMAKE_C_FLAGS CMAKE_C_FLAGS_RELEASE CMAKE_C_FLAGS_MINSIZEREL
       CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_RELEASE CMAKE_CXX_FLAGS_MINSIZEREL)
     if(${flag_var} MATCHES "/Z[iI7]")
@@ -1307,17 +1307,12 @@ if(USE_DISTRIBUTED AND USE_TENSORPIPE)
   if(MSVC)
     message(WARNING "Tensorpipe cannot be used on Windows.")
   else()
-    set(__PYTORCH_BUILD ${PYTORCH_BUILD})
-    set(PYTORCH_BUILD ON)
-    set(__BUILD_TESTING ${BUILD_TESTING})
-    set(BUILD_TESTING OFF)
-    set(TP_BUILD_PYTHON OFF)
-    set(TP_BUILD_LIBUV ON)
+    set(TP_BUILD_LIBUV ON CACHE BOOL "" FORCE)
+    set(TP_ENABLE_SHM OFF CACHE BOOL "" FORCE)
+    set(TP_ENABLE_CMA OFF CACHE BOOL "" FORCE)
+    set(TP_STATIC_OR_SHARED STATIC CACHE STRING "" FORCE)
 
     add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/tensorpipe)
-
-    set(PYTORCH_BUILD ${__PYTORCH_BUILD})
-    set(BUILD_TESING ${__BUILD_TESTING})
 
     list(APPEND Caffe2_DEPENDENCY_LIBS tensorpipe)
   endif()

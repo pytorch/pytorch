@@ -25,6 +25,7 @@
 aten/build/
 aten/src/ATen/Config.h
 aten/src/ATen/cuda/CUDAConfig.h
+benchmarks/.data
 caffe2/cpp_test/
 dist/
 docs/cpp/src
@@ -48,12 +49,10 @@ test/test-reports/
 third_party/build/
 tools/shared/_utils_internal.py
 torch.egg-info/
-torch/__init__.pyi
 torch/_C/__init__.pyi
 torch/_C/_nn.pyi
 torch/_C/_VariableFunctions.pyi
 torch/nn/functional.pyi
-torch/nn/modules/*.pyi
 torch/csrc/autograd/generated/*
 # Listed manually because some files in this directory are not generated
 torch/testing/_internal/generated/annotated_fn_args.py
