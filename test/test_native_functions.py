@@ -153,8 +153,8 @@ class TestNativeFunctions(TestCase):
         return torch.jit.trace(wrapper, torch.tensor([1, 2], dtype=torch.int))
 
     def test_optional_filled_intlist(self):
-        self.do_test_optional_intlist_with_module(FilledIntListWrapperModule())
-        self.do_test_optional_intlist_with_module(torch.jit.script(FilledIntListWrapperModule()))
+        self.do_test_optional_filled_intlist_with_module(FilledIntListWrapperModule())
+        self.do_test_optional_filled_intlist_with_module(torch.jit.script(FilledIntListWrapperModule()))
 
         traced_none = self.trace_optional_filled_intlist(None)
         traced_int = self.trace_optional_filled_intlist(10)
