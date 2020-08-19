@@ -21,14 +21,15 @@ from torch.quantization import default_qconfig
 # test utils
 from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
+    skipIfNoFBGEMM,
 )
 
 import itertools
-import unittest
 
 class TestQuantizeFx(QuantizationTestCase):
     """ Unit tests for functionalities
     """
+    @skipIfNoFBGEMM
     def test_functional(self):
         """ Test quantizing functional conv and linear
         """
@@ -75,53 +76,13 @@ class TestQuantizeFx(QuantizationTestCase):
         ]
 
         for is_dynamic, M, inputs, quantized_node in tests:
-            m = M().eval()
-            qconfig = default_qconfig
-
-            graph = symbolic_trace(m)
-            script = torch.jit.script(graph)
-
-            a = m(*inputs)
-            b = graph(*inputs)
-            c = script(*inputs)
-            assert (a - b).abs().max() == 0
-            assert (a - c).abs().max() == 0
-            assert torch.allclose(a, b)
-            assert torch.allclose(a, c)
-
-
-            graph = fuse(graph)
-
-            quantizer = Quantizer()
-            qconfig_dict = {'': qconfig}
-            if is_dynamic:
-                prepared = quantizer.prepare_dynamic(graph, qconfig_dict)
-            else:
-                prepared = quantizer.prepare(graph, qconfig_dict)
-
-            prepared(*inputs)
-
-            qgraph = quantizer.convert(prepared)
-            qgraph_debug = quantizer.convert(prepared, debug=True)
-            qgraph.eval()
-            qgraph_debug.eval()
-            qgraph_script = torch.jit.script(qgraph)
-
-            d = qgraph(*inputs)
-            d_debug = qgraph_debug(*inputs)
-            e = qgraph_script(*inputs)
-            e_debug = qgraph_debug(*inputs)
-
-            self.checkGraphModuleHasNode(qgraph, quantized_node)
-            assert torch.allclose(d, e)
-            assert (d - d_debug).abs().max() == 0
-            assert (e - e_debug).abs().max() == 0
-
+            quant_type = QuantType.DYNAMIC if is_dynamic else QuantType.STATIC
+            self.checkGraphModeFxOp(M(), inputs, quantized_node, quant_type=quant_type)
 
 class TestQuantizeFxOps(QuantizationTestCase):
     """Unit tests for individual ops
     """
-    @unittest.skip("Enable after tensor is supported in fx")
+    @skipIfNoFBGEMM
     def test_linear(self):
         class ModuleLinear(torch.nn.Module):
             def __init__(self, has_relu=False, f_relu=False):
@@ -154,12 +115,13 @@ class TestQuantizeFxOps(QuantizationTestCase):
             def forward(self, x):
                 return self.relu(F.linear(x, self.w, self.b))
 
-        data = [torch.rand((1, 30), dtype=torch.float)]
+        data = (torch.rand((1, 30), dtype=torch.float),)
         options = itertools.product(
-            [(ModuleLinear(has_relu=False), True),
-             (FuncLinear(has_relu=False), False)],
+            [(ModuleLinear(has_relu=False), True)],
+            # TODO: enable after raw `tensor` is supported in fx
+            # (FuncLinear(has_relu=False), False)],
             [QuantType.DYNAMIC, QuantType.STATIC, QuantType.QAT])
-        quantized_ops = {
+        quantized_nodes = {
             # is_module
             True: {
                 # quant_type:
@@ -176,10 +138,11 @@ class TestQuantizeFxOps(QuantizationTestCase):
             }
         }
         for (model, is_module), quant_type in options:
-            self.checkGraphModeFxOp(model, data, quantized_ops[is_module][quant_type], quant_type=quant_type)
+            self.checkGraphModeFxOp(model, data, quantized_nodes[is_module][quant_type], quant_type=quant_type)
 
         for f_relu, quant_type in itertools.product([True, False], [QuantType.STATIC, QuantType.QAT]):
-            for model in [
-                    (ModuleLinear(has_relu=True, f_relu=f_relu), ('call_module', nniq.LinearRelu))]:
-                # TODO: (FuncLinear(has_relu=True, f_relu=f_relu), ('call_function', torch.ops.quantized.linear_relu))]:
-                self.checkGraphModeFxOp(model, data, quantized_op, quant_type=quant_type)
+            for model, quantized_node in [
+                    (ModuleLinear(has_relu=True, f_relu=f_relu), ('call_module', nniq.LinearReLU))]:
+                # TODO: support functional linear + relu fusion
+                # (FuncLinear(has_relu=True, f_relu=f_relu), ('call_function', torch.ops.quantized.linear_relu))]:
+                self.checkGraphModeFxOp(model, data, quantized_node, quant_type=quant_type)

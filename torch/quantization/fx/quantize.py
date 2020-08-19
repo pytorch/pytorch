@@ -260,6 +260,7 @@ class ConvRelu(QuantizeHandler):
 @register_quant_pattern(torch.nn.Linear)
 @register_quant_pattern(torch.nn.functional.linear)
 @register_quant_pattern(torch.nn.qat.Linear)
+@register_quant_pattern(torch.nn.intrinsic.LinearReLU)
 @register_quant_pattern(torch.nn.intrinsic.qat.LinearReLU)
 @register_quant_pattern((torch.nn.functional.relu, torch.nn.functional.linear))
 @register_quant_pattern((torch.nn.ReLU, torch.nn.functional.linear))
@@ -671,6 +672,7 @@ class Quantizer:
                     parent_name = ''
 
                     scale, zero_point = observer_module.calculate_qparams()
+                    # TODO: per channel
                     scale = float(scale)
                     zero_point = int(zero_point)
                     dtype = observer_module.dtype

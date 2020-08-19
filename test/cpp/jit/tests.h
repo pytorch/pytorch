@@ -107,6 +107,8 @@ namespace jit {
   _(LiteInterpreterDict)                          \
   _(MobileNamedParameters)                        \
   _(MobileSaveLoadData)                           \
+  _(MobileSaveLoadParameters)                     \
+  _(MobileSaveLoadParametersEmpty)                \
   _(LiteSGD)                                      \
   _(FusionAliasing)
 
