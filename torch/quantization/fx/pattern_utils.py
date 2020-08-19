@@ -1,3 +1,4 @@
+
 import torch
 import sys
 from collections import OrderedDict
@@ -54,10 +55,10 @@ def matches(modules, node, pattern, max_uses=sys.maxsize):
         self_match, *arg_matches = pattern
         if self_match is getattr:
             assert len(pattern) == 2, 'Expecting getattr pattern to have two elements'
-            arg_matches = None
+            arg_matches = []
     else:
         self_match = pattern
-        arg_matches = None
+        arg_matches = []
 
     if node.uses > max_uses:
         return False
