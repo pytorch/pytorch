@@ -1,9 +1,9 @@
-#include <torch/csrc/jit/passes/peephole.h>
 #include <ATen/core/jit_type.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/passes/peephole_list_idioms.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/utils/memory.h>
@@ -302,6 +302,15 @@ struct PeepholeOptimizeImpl {
               " with a is_cuda constant ",
               output->debugName());
           node->output()->replaceAllUsesWith(output);
+        }
+      } else if (node->kind() == prim::profile) {
+        auto inp = node->input(0)->node();
+        // we remove back-to-back prim::profiles if a consumer
+        // immediately follows a producer and their profiled types are equal
+        if (inp->kind() == prim::profile && node->prev() == inp &&
+            inp->ty(attr::profiled_type) == node->ty(attr::profiled_type)) {
+          node->output()->replaceAllUsesWith(inp->output());
+          it.destroyCurrent();
         }
       }
 
