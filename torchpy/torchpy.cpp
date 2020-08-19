@@ -1,11 +1,12 @@
 #include <torchpy.h>
 #include <assert.h>
-#include <mutex>
-#include <iostream>
+#include <pybind11/embed.h>
 #include <stdio.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
-#include <thread>  
-#include <pybind11/embed.h>
+#include <torch/csrc/autograd/generated/variable_factories.h>
+#include <iostream>
+#include <mutex>
+#include <thread>
 
 namespace torchpy {
 
@@ -30,7 +31,7 @@ void init() {
     )");
 
   // Enable other threads to use the interpreter
-  assert (PyGILState_Check() == 1);
+  assert(PyGILState_Check() == 1);
   assert(PyEval_ThreadsInitialized() != 0);
   mainThreadState = PyEval_SaveThread(); // save our state, release GIL
 }
@@ -42,7 +43,7 @@ void finalize() {
 const PyModule load(const char* filename) {
   std::cout << "load()" << std::endl;
   PyEval_RestoreThread(mainThreadState); // Acquire GIL, resume our state
-  assert (PyGILState_Check() == 1);
+  assert(PyGILState_Check() == 1);
 
   auto loader = py::module::import("loader");
   auto load = loader.attr("load");
@@ -68,8 +69,9 @@ at::Tensor PyModule::forward(at::Tensor input) {
   mtx.lock();
   std::thread::id this_id = std::this_thread::get_id();
   std::cout << "forward: thread id " << this_id << std::endl;
-  PyInterpreterState * mainInterpreterState = mainThreadState->interp;
-  PyThreadState * myThreadState = PyThreadState_New(mainInterpreterState); // GIL not needed
+  PyInterpreterState* mainInterpreterState = mainThreadState->interp;
+  PyThreadState* myThreadState =
+      PyThreadState_New(mainInterpreterState); // GIL not needed
   PyEval_RestoreThread(myThreadState);
   {
     py::object forward = _model.attr("forward");
@@ -81,8 +83,12 @@ at::Tensor PyModule::forward(at::Tensor input) {
   }
   PyEval_ReleaseThread(myThreadState); // Releases GIL
   PyThreadState_Delete(myThreadState); // GIL not needed
+  std::cout << "sanitizing output" << std::endl;
+  at::Tensor new_output = torch::ones_like(output); 
+  // new_output.copy_(output.value());
+  // at::Tensor new_output = output.clone();
   std::cout << "returning output" << std::endl;
   mtx.unlock();
-  return output;
+  return new_output;
 }
 } // namespace torchpy
