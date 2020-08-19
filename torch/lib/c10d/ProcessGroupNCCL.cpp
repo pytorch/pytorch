@@ -811,8 +811,7 @@ void ProcessGroupNCCL::enqueue(
     std::shared_ptr<ProcessGroupNCCL::WorkNCCL> work) {
   {
     std::lock_guard<std::mutex> lock(workVectorMutex_);
-    auto it = workVector_.end();
-    workVector_.emplace(it, std::move(work));
+    workVector_.emplace_back(std::move(work));
   }
   workVectorCV_.notify_one();
 }
