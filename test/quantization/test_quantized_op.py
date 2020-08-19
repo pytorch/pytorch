@@ -2718,14 +2718,38 @@ class TestQuantizedEmbeddingBag(TestCase):
     def _test_embedding_bag_unpack_fn(self, pack_fn, unpack_fn, num_embeddings, embedding_dim, bit_rate):
         weights = torch.from_numpy((np.random.random_sample((
             num_embeddings, embedding_dim)) + 1).astype(np.float32))
+
         w_packed = pack_fn(weights)
         w_unpacked = unpack_fn(w_packed)
+
+        if bit_rate == 8:
+            # Check numerics of prepack function that accepts qtensor as input.
+            # We use min-max observer to mimic the quantization performed in the original function.
+            from torch.quantization import PerChannelMinMaxObserver
+            obs = PerChannelMinMaxObserver(dtype=torch.quint8, qscheme=torch.per_channel_affine_float_qparams, ch_axis=0)
+            obs(weights)
+            # Get the scale and zero point for the weight tensor
+            qparams = obs.calculate_qparams()
+
+            # Quantize the weights to 8bits
+            qweight = torch.quantize_per_channel(weights, qparams[0], qparams[1], axis=0, dtype=torch.quint8)
+            real_packed_weight = torch.ops.quantized.embedding_bag_prepack(qweight)
+            self.assertEqual(isinstance(real_packed_weight, torch._C.ScriptObject), True)
+            unpacked_weight = torch.ops.quantized.embedding_bag_unpack(real_packed_weight)
+            self.assertEqual(unpacked_weight.int_repr().numpy(), qweight.int_repr().numpy())
+            self.assertEqual(unpacked_weight.q_per_channel_scales(), qweight.q_per_channel_scales())
+            self.assertEqual(unpacked_weight.q_per_channel_zero_points(), qweight.q_per_channel_zero_points())
 
         # compare against C2 to ensure numerical equivalency.
         from caffe2.python import core, workspace
         conversion_op = "FloatToFused8BitRowwiseQuantized"
+        reverse_conversion_op = None
         if bit_rate == 4:
             conversion_op = "FloatToFused4BitRowwiseQuantized"
+            reverse_conversion_op = "Fused4BitRowwiseQuantizedToFloat"
+        elif bit_rate == 2:
+            conversion_op = "FloatToFused2BitRowwiseQuantized"
+            reverse_conversion_op = "Fused2BitRowwiseQuantizedToFloat"
 
         def get_c2_weights(weights):
             workspace.ResetWorkspace()
@@ -2737,10 +2761,10 @@ class TestQuantizedEmbeddingBag(TestCase):
                 )
             )
             emb_q = workspace.FetchBlob("quantized_weights")
-            if bit_rate == 4:
+            if bit_rate == 4 or bit_rate == 2:
                 workspace.RunOperatorOnce(
                     core.CreateOperator(
-                        "Fused4BitRowwiseQuantizedToFloat", ["quantized_weights"], ["dequantized_weights"]
+                        reverse_conversion_op, ["quantized_weights"], ["dequantized_weights"]
                     )
                 )
                 dequantized_data = torch.from_numpy(workspace.FetchBlob("dequantized_weights"))
@@ -2774,6 +2798,15 @@ class TestQuantizedEmbeddingBag(TestCase):
         unpack_fn = torch.ops.quantized.embedding_bag_4bit_unpack
 
         self._test_embedding_bag_unpack_fn(pack_fn, unpack_fn, num_embeddings, embedding_dim, bit_rate=4)
+
+    """ Tests the correctness of the embedding_bag_2bit pack/unpack op against C2 """
+    @given(num_embeddings=st.integers(10, 100),
+           embedding_dim=st.integers(5, 50).filter(lambda x: x % 8 == 0),)
+    def test_embedding_bag_2bit_unpack(self, num_embeddings, embedding_dim):
+        pack_fn = torch.ops.quantized.embedding_bag_2bit_prepack
+        unpack_fn = torch.ops.quantized.embedding_bag_2bit_unpack
+
+        self._test_embedding_bag_unpack_fn(pack_fn, unpack_fn, num_embeddings, embedding_dim, bit_rate=2)
 
     def embedding_bag_rowwise_offsets_run(
             self, bit_rate, num_embeddings,
@@ -2847,7 +2880,25 @@ class TestQuantizedEmbeddingBag(TestCase):
         torch.testing.assert_allclose(reference_result, result, atol=atol,
                                       rtol=rtol)
 
+        if bit_rate == 8:
+            # Test operator that accepts TorchBind packed weights.
+            from torch.quantization import PerChannelMinMaxObserver
+            obs = PerChannelMinMaxObserver(dtype=torch.quint8, qscheme=torch.per_channel_affine_float_qparams, ch_axis=0)
+            obs(weights)
+            # Get the scale and zero point for the weight tensor
+            qparams = obs.calculate_qparams()
+
+            # Quantize the weights to 8bits
+            qweight = torch.quantize_per_channel(weights, qparams[0], qparams[1], axis=0, dtype=torch.quint8)
+            packed_weight = torch.ops.quantized.embedding_bag_prepack(qweight)
+            result = torch.ops.quantized.embedding_bag_byte(packed_weight, indices, offsets, mode=0,
+                                                            per_sample_weights=per_sample_weights,
+                                                            include_last_offset=include_last_offset)
+            torch.testing.assert_allclose(reference_result, result, atol=atol, rtol=rtol)
+
+
     """ Tests the correctness of the embedding_bag_8bit quantized operator """
+    @skipIfNoFBGEMM
     @given(num_embeddings=st.integers(10, 100),
            embedding_dim=st.integers(5, 50).filter(lambda x: x % 4 == 0),
            num_offsets=st.integers(1, 20),
