@@ -2454,7 +2454,7 @@
 - func: silu(Tensor self) -> Tensor
   use_c10_dispatcher: full
   python_module: nn
-  
+
 - func: silu_(Tensor(a!) self) -> Tensor(a!)
   python_module: nn
 
@@ -4703,14 +4703,14 @@
 - func: eig.e(Tensor self, bool eigenvectors=False, *, Tensor(a!) e, Tensor(b!) v) -> (Tensor(a!) eigenvalues, Tensor(b!) eigenvectors)
   dispatch:
     CPU: legacy::cpu::_th_eig_out
-    CUDA: legacy::cuda::_th_eig_out
+    CUDA: eig_cuda_out
 
 - func: eig(Tensor self, bool eigenvectors=False) -> (Tensor eigenvalues, Tensor eigenvectors)
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
     CPU: legacy::cpu::_th_eig
-    CUDA: legacy::cuda::_th_eig
+    CUDA: eig_cuda
 
 - func: svd.U(Tensor self, bool some=True, bool compute_uv=True, *, Tensor(a!) U, Tensor(b!) S, Tensor(c!) V) -> (Tensor(a!) U, Tensor(b!) S, Tensor(c!) V)
 

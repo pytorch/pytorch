@@ -115,9 +115,12 @@ void THCTensor_(gels)(THCState *state, THCTensor *rb_, THCTensor *ra_, THCTensor
 #endif
 }
 
+/*
+ * XXXX KILL ME
 void THCTensor_(geev)(THCState *state, THCTensor *re_, THCTensor *rv_, THCTensor *a_, bool eigenvectors)
 {
 #ifdef USE_MAGMA
+
   char jobvrs = eigenvectors ? 'V' : 'N';
   THArgCheck(a_->dim() == 2, 3, "A should be 2 dimensional");
   THArgCheck(a_->size(0) == a_->size(1), 3, "A should be square");
@@ -193,6 +196,7 @@ void THCTensor_(geev)(THCState *state, THCTensor *re_, THCTensor *rv_, THCTensor
   THError(NoMagma(geev));
 #endif
 }
+*/
 
 __global__ void THCTensor_(copyUpperSymmetric)(scalar_t *input, int n, int len)
 {

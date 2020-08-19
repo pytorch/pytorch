@@ -1464,6 +1464,16 @@ Tensor _lu_solve_helper_cuda(const Tensor& self, const Tensor& LU_data, const Te
   return self_working_copy;
 }
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ eig ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+std::tuple<Tensor &,Tensor &> eig_cuda_out(Tensor & e, Tensor & v, const Tensor & self, bool eigenvectors) {
+  TORCH_CHECK(0, "eig_cuda_out: hello world ", -1);
+}
+
+std::tuple<Tensor,Tensor> eig_cuda(const Tensor & self, bool eigenvectors) {
+  TORCH_CHECK(0, "eig_cuda: hello world ", -1);
+}
+
 }}  // namespace at::native
 
 #undef ALLOCATE_ARRAY
