@@ -50,7 +50,7 @@ class AdaRoundFakeQuantize(FakeQuantize):
         weights_w_adaround_rounding = self.scale * torch.clamp(weights_clipped, self.quant_min, self.quant_max)
         return weights_w_adaround_rounding
 
-    def loss_function_leaf(self, count, float_weight, custom_norm=False):
+    def layer_loss_function(self, count, float_weight, custom_norm=False):
         ''' Calculates the loss function for a submodule
         note: setting custom_norm to true gives the client ability to change the expression
             for norm part in the loss function, by default this expression is the norm of the
