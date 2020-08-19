@@ -91,6 +91,7 @@ class TestBiasCorrection(QuantizationTestCase):
                 self.assertTrue(self.compute_sqnr(float_bias, artificial_bias) > 30,
                                 "Correcting quantized bias produced too much noise, sqnr score too low")
 
+    @override_qengines
     def test_linear_chain(self):
         class LinearChain(nn.Module):
             def __init__(self):
@@ -110,6 +111,7 @@ class TestBiasCorrection(QuantizationTestCase):
         self.correct_artificial_bias_float(float_model, img_data)
         self.correct_artificial_bias_quantize(float_model, img_data)
 
+    @override_qengines
     def test_conv_chain(self):
         class ConvChain(nn.Module):
             def __init__(self):
