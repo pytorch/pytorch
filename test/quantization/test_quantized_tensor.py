@@ -230,7 +230,7 @@ class TestQuantizedTensor(TestCase):
 
         def _quantize_per_channel_ref_nd(data, scales, zero_points, float_params):
             dims = data.size()
-            data = data.view(-1, dims[axis], np.prod(dims[axis+1:]))
+            data = data.view(-1, dims[axis], np.prod(dims[axis + 1:]))
             res = torch.empty_like(data)
             quant_min, quant_max = 0, 255
             for i in range(res.size()[0]):
