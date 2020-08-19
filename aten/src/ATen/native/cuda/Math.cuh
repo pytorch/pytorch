@@ -229,13 +229,16 @@ static inline C10_HOST_DEVICE scalar_t chbevl(scalar_t _x, const scalar_t array[
  * Copyright 1984, 1987, 2000 by Stephen L. Moshier
  */
 template <typename scalar_t>
-static inline C10_HOST_DEVICE scalar_t calc_i0(scalar_t x) {
+static inline C10_HOST_DEVICE scalar_t calc_i0(scalar_t _x) {
+  using accdouble_t = at::acc_type<double, true>;
+  double x = static_cast<accdouble_t>(_x);
+
   /* Chebyshev coefficients for exp(-x) I0(x)
    * in the interval [0,8].
    *
    * lim(x->0){ exp(-x) I0(x) } = 1.
    */
-  const scalar_t A[] = {
+  const accdouble_t A[] = {
     -4.41534164647933937950E-18,
     3.33079451882223809783E-17,
     -2.43127984654795469359E-16,
@@ -273,7 +276,7 @@ static inline C10_HOST_DEVICE scalar_t calc_i0(scalar_t x) {
    *
    * lim(x->inf){ exp(-x) sqrt(x) I0(x) } = 1/sqrt(2pi).
    */
-  const scalar_t B[] = {
+  const accdouble_t B[] = {
     -7.23318048787475395456E-18,
     -4.83050448594418207126E-18,
     4.46562142029675999901E-17,
@@ -305,11 +308,11 @@ static inline C10_HOST_DEVICE scalar_t calc_i0(scalar_t x) {
     x = -x;
   }
   if (x <= 8.0) {
-    scalar_t y = (x / 2.0) - 2.0;
-    return (::exp(x) * chbevl(y, A, 30));
+    accdouble_t y = static_cast<accdouble_t>((x / 2.0) - 2.0);
+    return static_cast<T>(::exp(x) * chbevl(y, A, 30));
   }
 
-  return (::exp(x) * chbevl(static_cast<scalar_t>(32.0 / x - 2.0), B, 25) / ::sqrt(x));
+  return static_cast<T>(::exp(x) * chbevl(static_cast<accdouble_t>(32.0 / x - 2.0), B, 25) / ::sqrt(x));
 }
 
 }
