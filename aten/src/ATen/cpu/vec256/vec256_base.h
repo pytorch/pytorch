@@ -312,10 +312,10 @@ public:
     return ret;
   }
   Vec256<T> erf() const {
-    return map(std::erf);
+    return map([](T x) -> T { return std::erf(x); });
   }
   Vec256<T> erfc() const {
-    return map(std::erfc);
+    return map([](T x) -> T { return std::erfc(x); });
   }
   Vec256<T> erfinv() const {
     return map(calc_erfinv);
@@ -324,7 +324,7 @@ public:
     return map(std::exp);
   }
   Vec256<T> expm1() const {
-    return map(std::expm1);
+    return map([](T x) -> T { return std::expm1(x); });
   }
   Vec256<T> frac() const {
     return *this - this->trunc();
@@ -348,7 +348,7 @@ public:
     return map(std::log10);
   }
   Vec256<T> log1p() const {
-    return map(std::log1p);
+    return map([](T x) -> T { return std::log1p(x); });
   }
   template <typename other_t_log2 = T,
             typename std::enable_if<!c10::is_complex_t<other_t_log2>::value, int>::type = 0>
@@ -417,7 +417,7 @@ public:
     return map(at::native::trunc_impl);
   }
   Vec256<T> lgamma() const {
-    return map(std::lgamma);
+    return map([](T x) -> T { return std::lgamma(x); });
   }
   Vec256<T> sqrt() const {
     return map(std::sqrt);
