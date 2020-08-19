@@ -389,7 +389,8 @@ class QuantizationTestCase(TestCase):
             elif node.op == 'call_module' and node.op == target_node[0] and type(modules[node.target]) == target_node[1]:
                 return
 
-        assert False, 'node:' + str(target_node) + ' not found in the graph module'
+        self.assertTrue(False, 'node:' + str(target_node) + \
+                        ' not found in the graph module')
 
     def checkGraphModeFxOp(self, model, inputs, quantized_node, quant_type=QuantType.STATIC):
         """ Quantizes model with graph mode quantization on fx and check if the

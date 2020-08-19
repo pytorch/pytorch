@@ -13,7 +13,6 @@ from torch.quantization._quantize_fx import (
 
 import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
-import torch.nn.qat as nnqat
 import torch.nn.intrinsic.quantized as nniq
 
 # eager mode quantization
@@ -25,6 +24,7 @@ from torch.testing._internal.common_quantization import (
 )
 
 import itertools
+import unittest
 
 class TestQuantizeFx(QuantizationTestCase):
     """ Unit tests for functionalities
@@ -121,6 +121,7 @@ class TestQuantizeFx(QuantizationTestCase):
 class TestQuantizeFxOps(QuantizationTestCase):
     """Unit tests for individual ops
     """
+    @unittest.skip("Enable after tensor is supported in fx")
     def test_linear(self):
         class ModuleLinear(torch.nn.Module):
             def __init__(self, has_relu=False, f_relu=False):
@@ -154,7 +155,10 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 return self.relu(F.linear(x, self.w, self.b))
 
         data = [torch.rand((1, 30), dtype=torch.float)]
-        options = itertools.product([(ModuleLinear(has_relu=False), True), (FuncLinear(has_relu=False), False)], [QuantType.DYNAMIC, QuantType.STATIC, QuantType.QAT])
+        options = itertools.product(
+            [(ModuleLinear(has_relu=False), True),
+             (FuncLinear(has_relu=False), False)],
+            [QuantType.DYNAMIC, QuantType.STATIC, QuantType.QAT])
         quantized_ops = {
             # is_module
             True: {
