@@ -2,6 +2,8 @@
 #include <ATen/ATen.h>
 #include <pybind11/pybind11.h>
 #include <iostream>
+#include <map>
+#include <thread>
 #include <vector>
 namespace py = pybind11;
 
@@ -27,13 +29,17 @@ class PyModule {
   PyModule(py::object model);
   ~PyModule();
 
+  void thread_begin();
+  void thread_end();
   at::Tensor forward(at::Tensor input);
 
  private:
   py::object _model;
+  std::map<std::thread::id, PyThreadState*> _thread_states;
 };
 
 void init();
 void finalize();
+
 const PyModule load(const char* filename);
 }

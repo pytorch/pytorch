@@ -2,8 +2,8 @@
 #include <assert.h>
 #include <pybind11/embed.h>
 #include <stdio.h>
-#include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
+#include <torch/csrc/jit/python/pybind_utils.h>
 #include <iostream>
 #include <mutex>
 #include <thread>
@@ -11,7 +11,6 @@
 namespace torchpy {
 
 PyThreadState* mainThreadState = NULL;
-std::mutex mtx;
 
 void init() {
   std::thread::id this_id = std::this_thread::get_id();
@@ -58,37 +57,46 @@ const PyModule load(const char* filename) {
 }
 
 PyModule::PyModule(py::object model) : _model(model) {}
-// make sure not to destroy python objects in here as
-// py finalize may have happened before these modules
-// get destroyed.
+
 PyModule::~PyModule() {
+  assert(_thread_states.empty());
+}
+
+void PyModule::thread_begin() {
+  std::thread::id this_id = std::this_thread::get_id();
+  PyInterpreterState* mainInterpreterState = mainThreadState->interp;
+  PyThreadState* myThreadState =
+      PyThreadState_New(mainInterpreterState); // GIL not needed
+  PyEval_RestoreThread(myThreadState); // Acquires GIL
+  _thread_states[this_id] = myThreadState;
+}
+
+void PyModule::thread_end() {
+  std::thread::id this_id = std::this_thread::get_id();
+  PyThreadState* myThreadState = _thread_states[this_id];
+  _thread_states.erase(this_id);
+  PyThreadState_Clear(myThreadState); // GIL needed
+  PyEval_ReleaseThread(myThreadState); // Releases GIL
+  PyThreadState_Delete(myThreadState); // GIL not needed
 }
 
 at::Tensor PyModule::forward(at::Tensor input) {
   at::Tensor output;
-  mtx.lock();
   std::thread::id this_id = std::this_thread::get_id();
   std::cout << "forward: thread id " << this_id << std::endl;
-  PyInterpreterState* mainInterpreterState = mainThreadState->interp;
-  PyThreadState* myThreadState =
-      PyThreadState_New(mainInterpreterState); // GIL not needed
-  PyEval_RestoreThread(myThreadState);
-  {
-    py::object forward = _model.attr("forward");
-    std::cout << "  called forward" << std::endl;
-    py::object py_output = forward(input);
-    std::cout << "  casting output" << std::endl;
-    output = std::move(py::cast<at::Tensor>(py_output));
-    PyThreadState_Clear(myThreadState); // GIL needed
-  }
-  PyEval_ReleaseThread(myThreadState); // Releases GIL
-  PyThreadState_Delete(myThreadState); // GIL not needed
+  PyGILState_STATE gil_state = PyGILState_Ensure();
+  py::object forward = _model.attr("forward");
+  std::cout << "  called forward" << std::endl;
+  py::object py_output = forward(input);
+  std::cout << "  casting output" << std::endl;
+  output = std::move(py::cast<at::Tensor>(py_output));
+  PyGILState_Release(gil_state);
+
   std::cout << "sanitizing output" << std::endl;
-  at::Tensor new_output = torch::ones_like(output); 
+  at::Tensor new_output = torch::ones_like(output);
   // new_output.copy_(output.value());
   // at::Tensor new_output = output.clone();
   std::cout << "returning output" << std::endl;
-  mtx.unlock();
   return new_output;
 }
 } // namespace torchpy
