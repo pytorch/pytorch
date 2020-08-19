@@ -63,11 +63,11 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
 
     def compute_gradient(x, idx, is_mkldnn=False):
 
-        def fn_out(is_mkldnn=False):
+        def fn_out():
             if not is_mkldnn:
                 return fn(input).clone()
             else:
-                # convert the dense vector back to have mkldnn layout
+                # convert the dense tensor back to have mkldnn layout
                 return fn([x.to_mkldnn()])
 
         orig = x[idx].item()
