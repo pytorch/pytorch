@@ -261,8 +261,21 @@ static void neg_kernel(TensorIterator& iter) {
 }
 
 static void sign_kernel(TensorIterator& iter){
-  if(iter.dtype() == ScalarType::Bool){
+  if(iter.dtype() == ScalarType::Bool) {
       cpu_kernel(iter, [=](bool x) -> bool { return x; });
+  } else if (isComplexType(iter.dtype())) {
+    AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "sign_cpu", [&]() {
+      cpu_kernel(iter,
+                 [](scalar_t a) -> scalar_t {
+                   if (std::isnan(a.real()) || std::isnan(a.imag())) {
+                     return scalar_t(std::nan(""), 0);
+                   } else if (a.real() != 0) {
+                     return (0 < a.real()) - (a.real() < 0);
+                   } else {
+                     return (0 < a.imag()) - (a.imag() < 0);
+                   }
+                 });
+    });
   } else {
     AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, ScalarType::Half, iter.dtype(), "sign_cpu", [&]() {
         auto zero_vec = Vec256<scalar_t>(static_cast<scalar_t>(0));

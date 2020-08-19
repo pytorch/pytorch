@@ -11898,10 +11898,22 @@ class TestTorchDeviceType(TestCase):
     def test_sign(self, device):
         for dtype in torch.testing.get_all_math_dtypes(device):
             if dtype.is_complex:
-                continue
-
+                a = torch.tensor([complex(float('nan'), 1),
+                                  complex(1, float('nan')),
+                                  0,
+                                  complex(71, -1),
+                                  complex(-71, 10),
+                                  complex(0, 21),
+                                  complex(0, -3)], device=device, dtype=dtype)
+                a_target = torch.tensor([complex(float('nan'), 0),
+                                         complex(float('nan'), 0),
+                                         0,
+                                         1,
+                                         -1,
+                                         1,
+                                         -1], device=device, dtype=dtype)
             # Include NaN for floating point numbers
-            if dtype.is_floating_point:
+            elif dtype.is_floating_point:
                 dt_info = torch.finfo(dtype)
 
                 # Create tensor (with NaN checking)

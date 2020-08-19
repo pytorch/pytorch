@@ -32,8 +32,21 @@ void neg_kernel_cuda(TensorIterator& iter) {
 
 void sign_kernel_cuda(TensorIterator& iter){
   if (iter.dtype() == ScalarType::Bool) {
-    gpu_kernel(iter, []GPU_LAMBDA(bool a){
+    gpu_kernel(iter, []GPU_LAMBDA(bool a) {
       return a;
+    });
+  } else if (isComplexType(iter.dtype())) {
+    AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "sign_cuda", [&]() {
+      gpu_kernel(iter,
+                 [](scalar_t a) -> scalar_t {
+                   if (::isnan(a.real()) || ::isnan(a.imag())) {
+                     return scalar_t(::nan(""), 0);
+                   } else if (a.real() != 0) {
+                     return (0 < a.real()) - (a.real() < 0);
+                   } else {
+                     return (0 < a.imag()) - (a.imag() < 0);
+                   }
+                 });
     });
   } else {
     AT_DISPATCH_ALL_TYPES_AND(ScalarType::Half, iter.dtype(), "sign_cuda", [&]() {
