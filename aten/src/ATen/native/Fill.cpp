@@ -24,10 +24,18 @@ Tensor& fill_out(Tensor& self, Scalar value) {
   // Ideally this fast pass should be implemented in TensorIterator,
   // but we also want to skip compute_types which in not avoidable
   // in TensorIterator for now.
-  if (self.device() == at::kCPU && self.numel() == 1 && !self.is_complex() && !value.isComplex()) {
+  if (self.device() == at::kCPU && self.numel() == 1 && !self.is_complex()
+      && !value.isComplex() && !self.is_quantized()) {
      AT_DISPATCH_ALL_TYPES_AND3(kHalf, kBool, kBFloat16, self.scalar_type(), "fill_out", [&]() {
         fill_fast<scalar_t>(self, value);});
      return self;
+  }
+  if (self.is_quantized()) {
+    at::Tensor out = at::quantize_per_tensor(
+      at::ones(self.sizes()).to(kFloat) * value,
+      self.q_scale(), self.q_zero_point(), self.scalar_type());
+    self.copy_(out);
+    return self;
   }
   auto iter = TensorIterator::nullary_op(self);
   fill_stub(iter.device_type(), iter, value);
