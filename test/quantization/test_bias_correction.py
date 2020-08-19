@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 from torch.testing._internal.common_quantization import QuantizationTestCase
+from torch.testing._internal.common_quantization import skipIfNoFBGEMM
 
 from torch.quantization import default_qconfig
 from torch.quantization import QuantWrapper
@@ -91,7 +92,7 @@ class TestBiasCorrection(QuantizationTestCase):
                 self.assertTrue(self.compute_sqnr(float_bias, artificial_bias) > 30,
                                 "Correcting quantized bias produced too much noise, sqnr score too low")
 
-    @override_qengines
+    @skipIfNoFBGEMM
     def test_linear_chain(self):
         class LinearChain(nn.Module):
             def __init__(self):
@@ -111,7 +112,7 @@ class TestBiasCorrection(QuantizationTestCase):
         self.correct_artificial_bias_float(float_model, img_data)
         self.correct_artificial_bias_quantize(float_model, img_data)
 
-    @override_qengines
+    @skipIfNoFBGEMM
     def test_conv_chain(self):
         class ConvChain(nn.Module):
             def __init__(self):
