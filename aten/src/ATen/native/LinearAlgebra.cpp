@@ -4,6 +4,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/LinearAlgebraUtils.h>
+#include <ATen/native/Resize.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Parallel.h>
 #include <ATen/LegacyTHFunctionsCPU.h>
@@ -556,11 +557,11 @@ Tensor& dot_out(Tensor& result, const Tensor& self, const Tensor& tensor) {
   return result.fill_(self.dot(tensor));
 }
 
-Tensor& vdot_out(Tensor& result, const Tensor& self, const Tensor& tensor) {
-  result.resize_({});
+Tensor& vdot_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  at::native::resize_output(result, {});
   TORCH_CHECK(result.scalar_type() == self.scalar_type(),
            "result dtype ", result.scalar_type(), " does not match self dtype ", self.scalar_type());
-  return result.fill_(self.vdot(tensor));
+  return result.fill_(self.vdot(other));
 }
 
 /*
