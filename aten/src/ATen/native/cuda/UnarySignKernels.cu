@@ -38,7 +38,7 @@ void sign_kernel_cuda(TensorIterator& iter){
   } else if (isComplexType(iter.dtype())) {
     AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "sign_cuda", [&]() {
       gpu_kernel(iter,
-                 [](scalar_t a) -> scalar_t {
+                 []GPU_LAMBDA(scalar_t a) -> scalar_t {
                    if (::isnan(a.real()) || ::isnan(a.imag())) {
                      return scalar_t(::nan(""), 0);
                    } else if (a.real() != 0) {
