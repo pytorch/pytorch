@@ -19311,7 +19311,7 @@ class TestViewOps(TestCase):
             return x.transpose(dim0, dim1)
 
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes()))
-    def test_contiguous_self(self, device, dtype):
+    def test_conj_self(self, device, dtype):
         t = torch.ones(5, 5, device=device)
         s = t.conj()
         self.assertTrue(s is t)
