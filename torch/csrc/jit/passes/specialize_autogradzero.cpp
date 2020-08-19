@@ -95,9 +95,13 @@ private:
 
     {
       WithInsertPoint wip{*false_block->nodes().begin()};
-      auto fp = createFallbackPathFunction(g.block(), "te_coldpath_function");
-      auto fun_unpack_tuple = insertFallbackFunctionCall(&g, fp, g.inputs());
-      for (auto out : fun_unpack_tuple->outputs()) {
+      // auto fp = createFallbackPathFunction(g.block(), "te_coldpath_function");
+      // auto fun_unpack_tuple = insertFallbackFunctionCall(&g, fp, g.inputs());
+
+      auto fallback = createFallbackGraph(g.block(), g.inputs(), &g);
+      g.insertNode(fallback);
+
+      for (auto out : fallback->outputs()) {
         false_block->registerOutput(out);
       }
     }

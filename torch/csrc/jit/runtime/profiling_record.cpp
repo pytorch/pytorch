@@ -203,6 +203,7 @@ void ProfilingRecord::instrumentBlock(Block* block) {
       // let's check for this case otherwise we will
       // be `prim::profile` `prim::profile`
       if (i->node()->kind() == prim::profile) {
+        TORCH_INTERNAL_ASSERT(false);
         continue;
       }
       if (i->type()->kind() == c10::TypeKind::TensorType &&

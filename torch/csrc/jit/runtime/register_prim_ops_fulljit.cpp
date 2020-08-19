@@ -47,6 +47,15 @@ RegisterOperators reg(
          },
          aliasAnalysisSpecialCase()),
      Operator(
+         prim::FallbackGraph,
+         [](const Node* node) -> Operation {
+           return [](Stack* stack) {
+            AT_ERROR(
+              "Must be lowered to Interpreter's PROFILE instruction"); // NOLINT
+           };
+         },
+         aliasAnalysisSpecialCase()),
+     Operator(
          "prim::Guard(Tensor(a) t) -> Tensor(a)",
          [](Stack* stack) { AT_ERROR("Should be replaced by prim::BailOut"); },
          aliasAnalysisFromSchema()),

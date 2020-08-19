@@ -4,8 +4,9 @@
 namespace torch {
 namespace jit {
 
-Function* createFallbackPathFunction(Block* b, const std::string& function_name);
+TORCH_API Function* createFallbackPathFunction(Block* b, const std::string& function_name);
 TORCH_API Node* insertFallbackFunctionCall(Graph* graph, Function* func, ArrayRef<Value*> values);
+TORCH_API Node* createFallbackGraph(Block* b, ArrayRef<Value*> inputs, Graph* g);
 
 struct ProfilingGraphExecutorImpl : public GraphExecutorImplBase {
   ProfilingGraphExecutorImpl(
@@ -21,6 +22,7 @@ struct ProfilingGraphExecutorImpl : public GraphExecutorImplBase {
   void runProfilingInsensitiveOptimizations(std::shared_ptr<Graph>& graph);
   void runProfilingOptimizations(std::shared_ptr<Graph>& graph);
   void registerFallbackFunctions(Block* b);
+  void replaceFallbackGraphWithFallbackFunction(Block* b);
   std::unique_ptr<ProfilingRecord> pr_;
   c10::optional<ExecutionPlan>
       profiling_plan_; // plan to run in order to profiling the code

@@ -596,12 +596,15 @@ void insertGuards(
 
     
     auto graph = b->owningGraph();
-    auto fp = createFallbackPathFunction(fusion_group->g(attr::Subgraph)->block(), "te_coldpath_function");
-    auto fun_unpack_tuple = insertFallbackFunctionCall(graph, fp, fusion_group->inputs());
+    // auto fp = createFallbackPathFunction(fusion_group->g(attr::Subgraph)->block(), "te_coldpath_function");
+    // auto fun_unpack_tuple = insertFallbackFunctionCall(graph, fp, fusion_group->inputs());
+    
+    auto fallback = createFallbackGraph(fusion_group->g(attr::Subgraph)->block(), fusion_group->inputs(), graph);
+    graph->insertNode(fallback);
     
     for (size_t i = 0; i < fusion_group->outputs().size(); ++i) {
       true_block->registerOutput(fusion_group->output(i));
-      false_block->registerOutput(fun_unpack_tuple->output(i));
+      false_block->registerOutput(fallback->output(i));
       if (value_types.count(fusion_group->output(i))) {
         value_types[versioning_if->output(i)] =
             value_types.at(fusion_group->output(i));

@@ -425,6 +425,7 @@ struct CodeImpl {
   std::vector<Function*> function_table_;
   std::vector<std::unique_ptr<GraphFunction>> forked_functions_;
   std::vector<TypePtr> type_table_;
+  std::vector<std::string> node_names_;
   std::vector<std::function<void(std::vector<IValue>&)>>
       profile_function_table_;
 
@@ -478,6 +479,7 @@ struct CodeImpl {
     }
     n_inputs = graph_->inputs().size();
     // std::cout << *graph_ << "\n";
+    GRAPH_DUMP("interpreter graph: ", graph_);
     emitCodeForBlock(graph_->block());
     insertInstruction(RET);
     // we deferred the emission of bailout blocks so they appear at the end
@@ -704,7 +706,9 @@ struct CodeImpl {
   void emitTypeCheck(Node* node) {
     // guarded input is at index 0
     emitLoadInputs(node->inputs());
-    insertInstruction(TYPECHECK, emitType(node->output(0)->type()));
+    size_t ind = node_names_.size();
+    node_names_.push_back(getHeader(node));
+    insertInstruction(TYPECHECK, emitType(node->output(0)->type()), ind);
   }
 
   size_t emitGuard(Node* node) {
@@ -1380,9 +1384,14 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
                 } else {
                   //                 push(stack, expected_type->matchTensor(t));
                   bool res = expected_type->matchTensor(t);
-                  if (!res) {
-                    std::cout << "failing a typecheck\n";
-                  }
+                  
+                  // if (!res) {
+                    
+                  //   std::cerr << "failing a typecheck for " 
+                  //   << frames.back().function->node_names_[inst.N] 
+                  //   << " t type = " << *TensorType::create(t) << std::endl;
+                  // }
+
                   // std::cout << "TypeCheck yields " << (res ? "TRUE" :
                   // "FALSE") << "\n";
                   push(stack, res);
