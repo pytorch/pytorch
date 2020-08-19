@@ -57,7 +57,7 @@ class LastOutputLogger(ns.Logger):
         self.stats["quantized"] = x
         self.stats["float"] = y
 
-def loss_function(model, count, target_layers, norm_output):
+def loss_function(model, count, target_layers, norm_output, logs=None):
     ''' Given model, the loss function of all of its whitelisted leaf modules will
     be added up and returned.
     '''
@@ -65,8 +65,9 @@ def loss_function(model, count, target_layers, norm_output):
     for name, submodule in model.named_modules():
         if name in target_layers:
             if norm_output:
-                # TODO: collect output from logger
-                pass
+                # grab norm of outputs
+                norm = ??? somthing from ns loggs
+                result = result + layer_loss_function(submodule, count, norm)
             else:
                 result = result + layer_loss_function(submodule, count, get_param(submodule, 'weight'))
             result = result * .90
@@ -90,10 +91,10 @@ def optimize_V(leaf_module, target_layers, number_of_epochs, norm_output):
     for data in tuning_dataset:
         output = float_model(data[0])
         # ob_dict = ns.get_logger_dict(quantized_model)
-        #     parent_name, _ = parent_child_names(uncorrected_module)
+        # parent_name, _ = parent_child_names(uncorrected_module)
 
-        #     float_data = ob_dict[parent_name + '.stats']['float']
-        #     quant_data = ob_dict[parent_name + '.stats']['quantized']
+        # float_data = ob_dict[parent_name + '.stats']['float']
+        # quant_data = ob_dict[parent_name + '.stats']['quantized']
         loss = loss_function(float_model, count, target_layers, norm_output)
         # loss = loss_function_leaf(leaf_module, count)
 
