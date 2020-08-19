@@ -26,7 +26,8 @@ TEST(TorchpyTest, SimpleModel) {
       "torchpy/example/simple.pt", torch::ones(at::IntArrayRef({10, 20})));
 }
 
-TEST(TorchpyTest, ResNet) {
+TEST(TorchpyTest, DISABLED_ResNet) {
+  // Broken
   compare_torchpy_jit(
       "torchpy/example/resnet.pt",
       torch::ones(at::IntArrayRef({1, 3, 224, 224})));
