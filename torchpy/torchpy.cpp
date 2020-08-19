@@ -13,9 +13,6 @@ namespace torchpy {
 PyThreadState* mainThreadState = NULL;
 
 void init() {
-  std::thread::id this_id = std::this_thread::get_id();
-  std::cout << "init: thread id " << this_id << std::endl;
-
   Py_Initialize();
   // Make sure torch is loaded before anything else
   py::module::import("torch");
@@ -40,27 +37,25 @@ void finalize() {
   Py_Finalize();
 }
 const PyModule load(const char* filename) {
-  std::cout << "load()" << std::endl;
   PyEval_RestoreThread(mainThreadState); // Acquire GIL, resume our state
   assert(PyGILState_Check() == 1);
 
   auto loader = py::module::import("loader");
   auto load = loader.attr("load");
 
-  std::cout << "  callobject load" << std::endl;
   auto model = load(filename);
-  auto mod = PyModule(model);
+  auto forward = model.attr("forward");
+  auto pymodule = PyModule(forward);
 
   mainThreadState = PyEval_SaveThread(); // save our state, release GIL
-  std::cout << "load return" << std::endl;
-  return mod;
+  return pymodule;
 }
 
-PyModule::PyModule(py::object model) : _model(model) {}
+PyModule::PyModule(py::object model_forward) : _model_forward(model_forward) {}
 
 PyModule::~PyModule() {
   PyGILState_STATE gil_state = PyGILState_Ensure();
-  { _model.dec_ref(); }
+  { _model_forward.dec_ref(); }
   PyGILState_Release(gil_state);
   assert(_thread_states.empty());
 }
@@ -85,21 +80,17 @@ void PyModule::thread_end() {
 
 at::Tensor PyModule::forward(at::Tensor input) {
   at::Tensor output;
-  std::thread::id this_id = std::this_thread::get_id();
-  std::cout << "forward: thread id " << this_id << std::endl;
   PyGILState_STATE gil_state = PyGILState_Ensure();
   {
-    py::object forward = _model.attr("forward");
-    py::object py_output = forward(input);
-    std::cout << "  casting output" << std::endl;
-    output = std::move(py::cast<at::Tensor>(py_output));
+    py::object py_output = _model_forward(input);
+    // TODO is this going to leak?
+    // added it to prevent crash wehn using 'output' tensor in callee of
+    // forward()
+    py_output.inc_ref();
+    output = py::cast<at::Tensor>(py_output);
   }
   PyGILState_Release(gil_state);
 
-  std::cout << "sanitizing output" << std::endl;
-  at::Tensor new_output = torch::empty_like(output);
-  new_output.copy_(output);
-  std::cout << "returning output" << std::endl;
-  return new_output;
+  return output;
 }
 } // namespace torchpy

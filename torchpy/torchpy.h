@@ -34,7 +34,7 @@ class PyModule {
   at::Tensor forward(at::Tensor input);
 
  private:
-  py::object _model;
+  py::object _model_forward;
   std::map<std::thread::id, PyThreadState*> _thread_states;
 };
 
