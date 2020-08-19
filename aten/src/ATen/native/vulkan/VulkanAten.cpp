@@ -207,6 +207,42 @@ Tensor reshape(at::Tensor const& input, IntArrayRef shape) {
       input.options());
 }
 
+Tensor cat(TensorList tensors, int64_t dim) {
+  TORCH_INTERNAL_ASSERT(
+      dim == 0 || dim == 1,
+      "Vulkan cat is implemented only for batch and channels dimensions");
+  at::Tensor tensor = tensors[0];
+  int64_t cat_dim_size = 0;
+
+  std::vector<VulkanTensor> vTensors{};
+  for (int i = 0; i < tensors.size(); ++i) {
+    const auto& t = tensors[i];
+    TORCH_INTERNAL_ASSERT(
+        t.dim() == 4, "Vulkan cat expects 4 dimensional inputs");
+    TORCH_INTERNAL_ASSERT(t.is_vulkan(), "Vulkan cat expects Vulkan inputs");
+
+    for (int d = 0; d < 4; ++d) {
+      if (d == dim) {
+        continue;
+      }
+      TORCH_INTERNAL_ASSERT(
+          t.size(d) == tensor.size(d),
+          "Vulkan cat inputs must have matching sizes except concatenated dimension");
+    }
+    vTensors.push_back(vtensor_from_vulkan(t));
+    cat_dim_size += t.size(dim);
+  }
+
+  auto result_size = tensor.sizes().vec();
+  result_size[dim] = cat_dim_size;
+
+  VulkanTensor output{result_size};
+  output.allocate_storage();
+
+  vulkan::detail::cat(output, vTensors, dim);
+  return new_with_vtensor_vulkan(std::move(output), tensor.options());
+}
+
 Tensor add(const Tensor& self, const Tensor& other, const Scalar alpha) {
   auto xt = self.is_vulkan() ? self : self.vulkan();
   const auto& x = vtensor_from_vulkan(xt);
@@ -393,6 +429,7 @@ TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
       TORCH_FN(at::native::vulkan::aten::adaptive_avg_pool2d));
   m.impl("max_pool2d", TORCH_FN(at::native::vulkan::aten::max_pool2d));
   m.impl("reshape", TORCH_FN(at::native::vulkan::aten::reshape));
+  m.impl("_cat", TORCH_FN(at::native::vulkan::aten::cat));
   m.impl_UNBOXED(
       "convolution_overrideable", at::native::vulkan::aten::convolution);
   m.impl_UNBOXED("hardtanh_", at::native::vulkan::aten::hardtanh_);
