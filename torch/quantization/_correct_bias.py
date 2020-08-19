@@ -32,7 +32,6 @@ def get_param(module, attr):
         return param()
     else:
         return param
-    return None
 
 class MeanShadowLogger(ns.Logger):
     r"""A logger for a Shadow module whose purpose is to record the rolling mean
@@ -75,7 +74,7 @@ class MeanShadowLogger(ns.Logger):
         self.float_sum = None
         self.quant_sum = None
 
-def bias_correction(float_model, quantized_model, img_data, white_list=_supported_modules_quantized, neval_batches=None):
+def bias_correction(float_model, quantized_model, img_data, target_modules=_supported_modules_quantized, neval_batches=None):
     ''' Using numeric suite shadow module, the expected output of the floating point and quantized modules
     is recorded. Using that data the bias of supported modules is shifted to compensate for the drift caused
     by quantization
@@ -85,7 +84,7 @@ def bias_correction(float_model, quantized_model, img_data, white_list=_supporte
         float_model: a trained model that serves as a reference to what bias correction should aim for
         quantized_model: quantized form of float_model that bias correction is to applied to
         img_data: calibration data to estimate the expected output (used to find quantization error)
-        white_list: specifies what submodules in quantized_model need bias correction (can be extended to
+        supported_list: specifies what submodules in quantized_model need bias correction (can be extended to
                 unquantized submodules)
         neval_batches: a cap to the number of batches you want to be used for estimating the expected output
     '''
@@ -93,7 +92,7 @@ def bias_correction(float_model, quantized_model, img_data, white_list=_supporte
 
     uncorrected_modules = {}
     for name, submodule in quantized_model.named_modules():
-        if type(submodule) in white_list:
+        if type(submodule) in supported_list:
             uncorrected_modules[name] = submodule
 
     for uncorrected_module in uncorrected_modules:

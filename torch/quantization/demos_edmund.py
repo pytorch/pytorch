@@ -49,8 +49,8 @@ def quantize_qat_model(model, data_loader_test):
 
 def adaround_demo(input_model, data_loader, data_loader_test):
     print("starting adaround")
-    train_batch_size = 30
-    eval_batch_size = 10
+    # train_batch_size = 30
+    eval_batch_size = 30
     num_eval_batches = 10
     criterion = nn.CrossEntropyLoss()
     model = copy.deepcopy(input_model)
@@ -60,43 +60,49 @@ def adaround_demo(input_model, data_loader, data_loader_test):
     model.fuse_model()
     print(model)
 
-    # quantized_qat_model = quantize_qat_model(model, data_loader_test)
+    quantized_qat_model = quantize_qat_model(model, data_loader)
     results = []
 
     # top1, top5 = evaluate(model, criterion, data_loader_test, neval_batches=num_eval_batches)
     # results.append(str('Evaluation accuracy on %d images, %2.2f' % (num_eval_batches * eval_batch_size, top1.avg)))
     # results.append('Floating point results')
 
-    # top1, top5 = evaluate(quantized_qat_model, criterion, data_loader_test, neval_batches=num_eval_batches)
-    # results.append(str('Evaluation accuracy on %d images, %2.2f' % (num_eval_batches * eval_batch_size, top1.avg)))
-    # results.append('qat quantization accuracy results, no adaround')
+    top1, top5 = evaluate(quantized_qat_model, criterion, data_loader_test, neval_batches=num_eval_batches)
+    results.append(str('Evaluation accuracy on %d images, %2.2f' % (num_eval_batches * eval_batch_size, top1.avg)))
+    results.append('qat quantization accuracy results, no adaround')
 
     # model.qconfig = _adaround.adaround_qconfig
-    names = _adaround.prepare_adaround(model, data_loader_test)
+    print("starting adaround prep")
+    names = _adaround.prepare_adaround(model, data_loader)
     # also does the training, so will need to rename this
     with_adaround = copy.deepcopy(model)
     without_adaround = copy.deepcopy(with_adaround)
+    print("finished adaround prep")
 
     top1, top5 = evaluate(without_adaround, criterion, data_loader_test, neval_batches=num_eval_batches)
     results.append(str('Evaluation accuracy on %d images, %2.2f' % (num_eval_batches * eval_batch_size, top1.avg)))
     results.append('just qat accuracy results')
     results.append('')
+    print(results)
 
     names = []
     count = 0
     for name, submodule in with_adaround.named_modules():
-        names.append(name)
-        count += 1
-        if count == 3:
-            break
+        if isinstance(submodule, _adaround.OutputWrapper):
+            names.append(name)
+            count += 1
+            if count == 3:
+                break
 
     for name in names:
-        _adaround.learn_adaround(with_adaround, data_loader_test, name)
+        print(names)
+        _adaround.learn_adaround(with_adaround, data_loader, name)
 
         top1, top5 = evaluate(with_adaround, criterion, data_loader_test, neval_batches=num_eval_batches)
         results.append(str('Evaluation accuracy on %d images, %2.2f' % (num_eval_batches * eval_batch_size, top1.avg)))
         results.append(name)
         results.append('with adaround accuracy results')
+        print(results)
 
 
 

@@ -123,6 +123,7 @@ def imagenet_download():
     model = torchvision.models.quantization.mobilenet_v2(pretrained=True, quantize=False)
     print("done loading")
     return model, data_loader, data_loader_test
+
 class ConvChain(nn.Module):
     def __init__(self):
         super(ConvChain, self).__init__()
@@ -135,7 +136,6 @@ class ConvChain(nn.Module):
         x2 = self.conv2d2(x1)
         x3 = self.conv2d3(x2)
         return x3
-
 
 def load_conv():
     model = ConvChain()
