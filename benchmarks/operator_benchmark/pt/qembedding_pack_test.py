@@ -17,12 +17,6 @@ conversion_ops = op_bench.op_list(
     ),
     attr_names=('op_name', 'op_func'),
 )
-prepack_ops = op_bench.op_list(
-    attrs=(
-        ('embedding_bag_prepack', torch.ops.quantized.embedding_bag_prepack),
-    ),
-    attr_names=('op_name', 'op_func'),
-)
 
 unpack_ops = op_bench.op_list(
     attrs=(
