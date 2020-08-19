@@ -381,15 +381,12 @@ class QuantizationTestCase(TestCase):
             ' and call module are supported right now'
         modules = dict(graph_module.root.named_modules())
         for node in graph_module.graph.nodes:
-            print('node:', node.op, ' target:', node.target)
-            if node.op == 'call_module':
-                print('type:', type(modules[node.target]))
             if node.op == 'call_function' and node.op == target_node[0] and node.target == target_node[1]:
                 return
             elif node.op == 'call_module' and node.op == target_node[0] and type(modules[node.target]) == target_node[1]:
                 return
 
-        self.assertTrue(False, 'node:' + str(target_node) + \
+        self.assertTrue(False, 'node:' + str(target_node) +
                         ' not found in the graph module')
 
     def checkGraphModeFxOp(self, model, inputs, quantized_node, quant_type=QuantType.STATIC):
