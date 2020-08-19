@@ -89,6 +89,7 @@ Indexing, Slicing, Joining, Mutating Ops
     hstack
     index_select
     masked_select
+    movedim
     narrow
     nonzero
     reshape
@@ -479,6 +480,7 @@ BLAS and LAPACK Operations
     matmul
     matrix_power
     matrix_rank
+    matrix_exp
     mm
     mv
     orgqr
