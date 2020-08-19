@@ -8,7 +8,7 @@ sudo rm -f /etc/apt/openjdk-r-ubuntu-ppa-xenial.list
 sudo rm -f /etc/apt/partner.list
 
 retry () {
-    $*  || $* || $* || $* || $*
+  $*  || $* || $* || $* || $*
 }
 
 # Method adapted from here: https://askubuntu.com/questions/875213/apt-get-to-retry-downloading
@@ -31,6 +31,19 @@ if [ -n "${USE_CUDA_DOCKER_RUNTIME:-}" ]; then
   wget "https://s3.amazonaws.com/ossci-linux/nvidia_driver/$DRIVER_FN"
   sudo /bin/bash "$DRIVER_FN" -s --no-drm || (sudo cat /var/log/nvidia-installer.log && false)
   nvidia-smi
+
+  # Taken directly from https://github.com/NVIDIA/nvidia-docker
+  # Add the package repositories
+  distribution=$(. /etc/os-release;echo "$ID$VERSION_ID")
+  curl -s -L https://nvidia.github.io/nvidia-docker/gpgkey | sudo apt-key add -
+  curl -s -L "https://nvidia.github.io/nvidia-docker/${distribution}/nvidia-docker.list" | sudo tee /etc/apt/sources.list.d/nvidia-docker.list
+
+  sudo apt-get update -qq
+  # Necessary to get the `--gpus` flag to function within docker
+  sudo apt-get install -y nvidia-container-toolkit
+else
+  # Explicitly remove nvidia docker apt repositories if not building for cuda
+  sudo rm -rf /etc/apt/sources.list.d/nvidia-docker.list
 fi
 
 if [[ "${BUILD_ENVIRONMENT}" == *-build ]]; then
