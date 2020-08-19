@@ -225,12 +225,6 @@ ncclResult_t ncclAlltoallv(
 }
 #endif
 
-void CUDART_CB
-errorGuard(cudaStream_t /* unused */, cudaError_t /* unused */, void* data) {
-  ProcessGroupNCCL::WorkNCCL* work = (ProcessGroupNCCL::WorkNCCL*)data;
-  work->handleNCCLGuard();
-}
-
 } // namespace
 
 const int64_t ProcessGroupNCCL::kWatchdogThreadSleepMillis = 10000;
@@ -327,19 +321,8 @@ void ProcessGroupNCCL::WorkNCCL::synchronize() {
 void ProcessGroupNCCL::WorkNCCL::synchronizeStreams() {
   for (size_t i = 0; i < devices_.size(); ++i) {
     auto currentStream = at::cuda::getCurrentCUDAStream(devices_[i].index());
-
     // Block the current stream on the NCCL stream
     cudaEvents_[i].block(currentStream);
-    // Enqueue guard function as a callback on the current stream to throw
-    // user-stream exception upon error.
-    if (!blockingWait_) {
-      cudaStreamAddCallback(currentStream, errorGuard, this, 0);
-    }
-    // If we use the work to do barrier, we should block here
-    if (!barrierTensors_.empty()) {
-      at::cuda::CUDAGuard gpuGuard(devices_[i]);
-      AT_CUDA_CHECK(cudaDeviceSynchronize());
-    }
   }
 }
 
@@ -626,7 +609,9 @@ void ProcessGroupNCCL::workCleanupLoop() {
          /* no increment*/) {
       auto& work = *it;
       if (work->isCompleted()) {
-        // Remove all Completed WorkNCCL Objects from the Vector
+        // Handle Exceptions on failed GPU operations and remove completed
+        // workNCCL objects from work vector.
+        work->handleNCCLGuard();
         it = workVector_.erase(it);
       } else {
         // Increment the iterator if the current WorkNCCL object is not
@@ -873,8 +858,7 @@ void ProcessGroupNCCL::enqueue(
     std::shared_ptr<ProcessGroupNCCL::WorkNCCL> work) {
   {
     std::lock_guard<std::mutex> lock(workVectorMutex_);
-    auto it = workVector_.end();
-    workVector_.emplace(it, std::move(work));
+    workVector_.emplace_back(std::move(work));
   }
   workVectorCV_.notify_one();
 }

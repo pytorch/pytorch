@@ -7659,6 +7659,300 @@ class TestTorchDeviceType(TestCase):
         M = random_fullrank_matrix_distinct_singular_value(3, 2, 3, dtype=dtype, device=device)
         run_test(M, sign=-1)
 
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float, torch.complex64)
+    def test_matrix_exp_utils(self, device, dtype):
+        # test linear combination
+        def run_test(coeff_shape, data_shape):
+            coeffs = torch.rand(*coeff_shape, device=device, dtype=torch.float)
+            x = torch.rand(coeff_shape[1], *data_shape, device=device, dtype=dtype)
+
+            res1 = torch._compute_linear_combination(x, coeffs)
+            res2 = (x.unsqueeze(0) * coeffs.view(*coeff_shape, *([1] * len(data_shape)))).sum(1)
+            self.assertEqual(res1, res2, atol=1e-5, rtol=0.0)
+
+            # check `out=` version
+            res3 = torch.zeros(coeff_shape[0], *data_shape, device=device, dtype=dtype)
+            torch._compute_linear_combination(x, coeffs, out=res3)
+            self.assertEqual(res1, res3, atol=1e-5, rtol=0.0)
+
+            res4 = torch.ones(coeff_shape[0], *data_shape, device=device, dtype=dtype)
+            torch._compute_linear_combination(x, coeffs, out=res4)
+            self.assertEqual(res1, res4 - 1.0, atol=1e-5, rtol=0.0)
+
+            res5 = torch.ones(coeff_shape[0], *data_shape, device=device, dtype=dtype)
+            res5_clone = res5.clone()
+            torch._compute_linear_combination(x, coeffs, out=res5)
+            self.assertEqual(res1, res5 - res5_clone, atol=1e-5, rtol=0.0)
+
+        run_test([1, 3], [2, 2])
+        run_test([3, 1], [2, 2])
+        run_test([1, 10], [10, 10])
+        run_test([10, 1], [10, 10])
+        run_test([5, 3], [2, 2])
+        run_test([5, 3], [100, 100])
+        run_test([3, 4], [3, 3, 3])
+        run_test([3, 4], [3, 3, 3, 3])
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float, torch.double, torch.complex64, torch.complex128)
+    def test_matrix_exp_boundary_cases(self, device, dtype):
+
+        with self.assertRaisesRegex(RuntimeError, "expected a tensor of floating or complex types"):
+            torch.randn(3, 3).type(torch.int).matrix_exp()
+
+        with self.assertRaisesRegex(RuntimeError, "with dim at least 2"):
+            torch.randn(3).matrix_exp()
+
+        with self.assertRaisesRegex(RuntimeError, "expected a tensor of squared matrices"):
+            torch.randn(3, 2, 1).matrix_exp()
+
+        # check 1x1 matrices
+        x = torch.randn(3, 3, 1, 1)
+        mexp = x.matrix_exp()
+        self.assertEqual(mexp, x.exp())
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float, torch.double)
+    def test_matrix_exp_analytic(self, device, dtype):
+        # check zero matrix
+        x = torch.zeros(20, 20, dtype=dtype, device=device)
+        self.assertTrue((x.matrix_exp() == torch.eye(20, 20, dtype=dtype, device=device)).all().item())
+
+        def normalize_to_1_operator_norm(sample, desired_norm):
+            sample_norm, _ = sample.abs().sum(-2).max(-1)
+            sample_to_1_norm = sample / sample_norm.unsqueeze(-1).unsqueeze(-1)
+            return sample_to_1_norm * desired_norm
+
+        def gen_good_cond_number_matrices(*n):
+            """
+            Generates a diagonally-domimant matrix
+            with the eigenvalues centered at 1
+            and the radii at most (n[-1] - 1) / (n[-2] ** 2)
+            """
+            identity = torch.eye(n[-2], n[-1], dtype=dtype, device=device).expand(*n)
+            x = torch.rand(*n, dtype=dtype, device=device) / (n[-1] ** 2)
+            x = (x - x * identity) + identity
+            return x
+
+        def run_test(*n):
+            if dtype == torch.float:
+                thetas = [
+                    1.192092800768788e-07,  # deg 1
+                    5.978858893805233e-04,  # deg 2
+                    5.116619363445086e-02,  # deg 4
+                    5.800524627688768e-01,  # deg 8
+                    1.461661507209034e+00,  # deg 12
+                    3.010066362817634e+00   # deg 18
+                ]
+            else:  # if torch.double
+                thetas = [
+                    2.220446049250313e-16,  # deg 1
+                    2.580956802971767e-08,  # deg 2
+                    3.397168839976962e-04,  # deg 4
+                    4.991228871115323e-02,  # deg 8
+                    2.996158913811580e-01,  # deg 12
+                    1.090863719290036e+00   # deg 18
+                ]
+
+            # generate input
+            q = gen_good_cond_number_matrices(*n)
+            qinv = torch.inverse(q)
+            d = torch.randn(n[:-1], dtype=dtype, device=device)
+            x = torch.matmul(q, torch.matmul(torch.diag_embed(d), qinv))
+            x_norm, _ = x.abs().sum(-2).max(-1)
+
+            # test simple analytic whatever norm generated
+            mexp = x.matrix_exp()
+            mexp_analytic = torch.matmul(
+                q,
+                torch.matmul(
+                    torch.diag_embed(d.exp()),
+                    qinv
+                )
+            )
+            self.assertEqual(mexp, mexp_analytic, atol=1e-3, rtol=0.0)
+
+            # generate norms to test different degree expansions
+            sample_norms = []
+            for i in range(len(thetas) - 1):
+                sample_norms.append(0.5 * (thetas[i] + thetas[i + 1]))
+            sample_norms = [thetas[0] / 2] + sample_norms + [thetas[-1] * 2]
+
+            # matrices to equal norm
+            for sample_norm in sample_norms:
+                x_normalized = normalize_to_1_operator_norm(x, sample_norm)
+
+                mexp = x_normalized.matrix_exp()
+                mexp_analytic = torch.matmul(
+                    q,
+                    torch.matmul(
+                        torch.diag_embed((d / x_norm.unsqueeze(-1) * sample_norm).exp()),
+                        qinv
+                    )
+                )
+                self.assertEqual(mexp, mexp_analytic, atol=1e-3, rtol=0.0)
+
+        # single matrix
+        run_test(2, 2)
+        run_test(3, 3)
+        run_test(4, 4)
+        run_test(5, 5)
+        run_test(100, 100)
+        run_test(200, 200)
+
+        # small batch of matrices
+        run_test(3, 2, 2)
+        run_test(3, 3, 3)
+        run_test(3, 4, 4)
+        run_test(3, 5, 5)
+        run_test(3, 100, 100)
+        run_test(3, 200, 200)
+
+        # large batch of matrices
+        run_test(3, 3, 2, 2)
+        run_test(3, 3, 3, 3)
+        run_test(3, 3, 4, 4)
+        run_test(3, 3, 5, 5)
+        run_test(3, 3, 100, 100)
+        run_test(3, 3, 200, 200)
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float, torch.double)
+    def test_matrix_exp_batch(self, device, dtype):
+
+        def run_test(*n):
+            tensors_batch = torch.zeros(n, dtype=dtype, device=device)
+            tensors_batch = tensors_batch.view(-1, n[-2], n[-1])
+
+            num_matrices = tensors_batch.size(0)
+            tensors_list = []
+            for i in range(num_matrices):
+                tensors_list.append(torch.randn(n[-2], n[-1], dtype=dtype, device=device))
+
+            for i in range(num_matrices):
+                tensors_batch[i, ...] = tensors_list[i]
+
+            tensors_exp_map = map(lambda x: x.matrix_exp(), tensors_list)
+            tensors_exp_batch = tensors_batch.matrix_exp()
+
+            for i, tensor_exp in enumerate(tensors_exp_map):
+                self.assertEqual(tensors_exp_batch[i, ...], tensor_exp)
+
+        # small batch of matrices
+        run_test(3, 2, 2)
+        run_test(3, 3, 3)
+        run_test(3, 4, 4)
+        run_test(3, 5, 5)
+
+        # large batch of matrices
+        run_test(3, 3, 2, 2)
+        run_test(3, 3, 3, 3)
+        run_test(3, 3, 4, 4)
+        run_test(3, 3, 5, 5)
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float, torch.double)
+    def test_matrix_exp_compare_with_taylor(self, device, dtype):
+
+        def normalize_to_1_operator_norm(sample, desired_norm):
+            sample_norm, _ = sample.abs().sum(-2).max(-1)
+            sample_to_1_norm = sample / sample_norm.unsqueeze(-1).unsqueeze(-1)
+            return sample_to_1_norm * desired_norm
+
+        def gen_good_cond_number_matrices(*n):
+            """
+            Generates a diagonally-domimant matrix
+            with the eigenvalues centered at 1
+            and the radii at most (n[-1] - 1) / (n[-2] ** 2)
+            """
+            identity = torch.eye(n[-2], n[-1], dtype=dtype, device=device).expand(*n)
+            x = torch.rand(*n, dtype=dtype, device=device) / (n[-1] ** 2)
+            x = (x - x * identity) + identity
+            return x
+
+        def get_taylor_approximation(a, deg):
+            identity = torch.eye(a.size(-2), a.size(-1), dtype=dtype, device=device).expand_as(a)
+            res = identity
+            taylor_term = identity
+
+            for i in range(1, deg + 1):
+                taylor_term = torch.matmul(a, taylor_term) / i
+                res = res + taylor_term
+
+            return res
+
+        def scale_square(a, deg):
+            if a.norm() < 1.0:
+                return get_taylor_approximation(a, 12)
+            else:
+                s = int(torch.log2(a.norm()).ceil().item())
+                b = a / (2 ** s)
+                b = get_taylor_approximation(b, 18)
+                for _ in range(s):
+                    b = torch.matmul(b, b)
+                return b
+
+        def run_test(*n):
+            degs = [1, 2, 4, 8, 12, 18]
+            if dtype == torch.float:
+                thetas = [
+                    1.192092800768788e-07,  # deg 1
+                    5.978858893805233e-04,  # deg 2
+                    5.116619363445086e-02,  # deg 4
+                    5.800524627688768e-01,  # deg 8
+                    1.461661507209034e+00,  # deg 12
+                    3.010066362817634e+00   # deg 18
+                ]
+            else:  # if torch.double
+                thetas = [
+                    2.220446049250313e-16,  # deg 1
+                    2.580956802971767e-08,  # deg 2
+                    3.397168839976962e-04,  # deg 4
+                    4.991228871115323e-02,  # deg 8
+                    2.996158913811580e-01,  # deg 12
+                    1.090863719290036e+00   # deg 18
+                ]
+
+            # generate norms to test different degree expansions
+            sample_norms = []
+            for i in range(len(thetas) - 1):
+                sample_norms.append(0.5 * (thetas[i] + thetas[i + 1]))
+            sample_norms = [thetas[0] / 2] + sample_norms + [thetas[-1] * 2]
+            degs = [degs[0]] + degs
+
+            for sample_norm, deg in zip(sample_norms, degs):
+                x = gen_good_cond_number_matrices(*n)
+                x = normalize_to_1_operator_norm(x, sample_norm)
+
+                mexp = x.matrix_exp()
+                mexp_taylor = scale_square(x, deg)
+
+                self.assertEqual(mexp, mexp_taylor, atol=1e-2, rtol=0.0)
+
+        # single matrix
+        run_test(2, 2)
+        run_test(3, 3)
+        run_test(4, 4)
+        run_test(5, 5)
+
+        # small batch of matrices
+        run_test(3, 2, 2)
+        run_test(3, 3, 3)
+        run_test(3, 4, 4)
+        run_test(3, 5, 5)
+
+        # large batch of matrices
+        run_test(3, 3, 2, 2)
+        run_test(3, 3, 3, 3)
+        run_test(3, 3, 4, 4)
+        run_test(3, 3, 5, 5)
+
     @dtypes(torch.double)
     def test_chain_matmul(self, device, dtype):
         def product(matrices):
