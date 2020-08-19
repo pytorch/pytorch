@@ -336,20 +336,17 @@
   variants: function
   dispatch:
     CPU: add_relu
-  supports_named_tensor: True
 
 - func: add_relu_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: function
   dispatch:
     CPU: add_relu_
-  supports_named_tensor: True
 
 - func: add_relu.out(Tensor self, Tensor other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
   variants: function
   dispatch:
     CPU: add_relu_out
-  supports_named_tensor: True
 
 # For C++ only, until we have conversion from C++ numbers to Tensor
 - func: add.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
@@ -458,56 +455,44 @@
 
 - func: acosh(Tensor self) -> Tensor
   use_c10_dispatcher: full
-  supports_named_tensor: True
   variants: function, method
 
 - func: acosh_(Tensor(a!) self) -> Tensor(a!)
   use_c10_dispatcher: full
-  supports_named_tensor: True
   variants: function, method
 
 - func: acosh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  supports_named_tensor: True
 
 # arcosh, alias for acosh
 - func: arccosh(Tensor self) -> Tensor
   use_c10_dispatcher: full
-  supports_named_tensor: True
   variants: function, method
 
 - func: arccosh_(Tensor(a!) self) -> Tensor(a!)
   use_c10_dispatcher: full
-  supports_named_tensor: True
   variants: function, method
 
 - func: arccosh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  supports_named_tensor: True
 
 - func: asinh(Tensor self) -> Tensor
   use_c10_dispatcher: full
-  supports_named_tensor: True
   variants: function, method
 
 - func: asinh_(Tensor(a!) self) -> Tensor(a!)
   use_c10_dispatcher: full
-  supports_named_tensor: True
   variants: function, method
 
 - func: asinh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  supports_named_tensor: True
 
 - func: atanh(Tensor self) -> Tensor
   use_c10_dispatcher: full
-  supports_named_tensor: True
   variants: function, method
 
 - func: atanh_(Tensor(a!) self) -> Tensor(a!)
   use_c10_dispatcher: full
-  supports_named_tensor: True
   variants: function, method
 
 - func: atanh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  supports_named_tensor: True
 
 - func: as_strided(Tensor(a) self, int[] size, int[] stride, int? storage_offset=None) -> Tensor(a)
   use_c10_dispatcher: full
@@ -806,7 +791,6 @@
   use_c10_dispatcher: full
   variants: function, method
   device_guard: False
-  supports_named_tensor: True
 
 - func: chunk(Tensor(a) self, int chunks, int dim=0) -> Tensor(a)[]
   use_c10_dispatcher: full
@@ -2415,28 +2399,22 @@
 - func: rad2deg(Tensor self) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
-  supports_named_tensor: True
 
 - func: rad2deg_(Tensor(a!) self) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: function, method
-  supports_named_tensor: True
 
 - func: rad2deg.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  supports_named_tensor: True
 
 - func: deg2rad(Tensor self) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
-  supports_named_tensor: True
 
 - func: deg2rad_(Tensor(a!) self) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: function, method
-  supports_named_tensor: True
 
 - func: deg2rad.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  supports_named_tensor: True
 
 - func: scalar_tensor(Scalar s, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   use_c10_dispatcher: full
@@ -2820,7 +2798,6 @@
   use_c10_dispatcher: full
   variants: function, method
   device_guard: False
-  supports_named_tensor: True
 
 - func: split.Tensor(Tensor(a) self, int split_size, int dim=0) -> Tensor(a)[]
   use_c10_dispatcher: full
@@ -2831,7 +2808,6 @@
   use_c10_dispatcher: full
   variants: function, method
   device_guard: False
-  supports_named_tensor: True
 
 - func: split_with_sizes(Tensor(a) self, int[] split_sizes, int dim=0) -> Tensor(a)[]
   use_c10_dispatcher: full
@@ -7251,7 +7227,7 @@
 # torch.outer, alias for torch.ger
 - func: outer(Tensor self, Tensor vec2) -> Tensor
   use_c10_dispatcher: full
-  variants: function. method
+  variants: function, method
 
 - func: outer.out(Tensor self, Tensor vec2, *, Tensor(a!) out) -> Tensor(a!)
 
