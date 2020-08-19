@@ -5,6 +5,7 @@ from xml.dom import minidom
 from glob import glob
 import json
 import os
+import time
 
 import datetime
 import requests
@@ -86,6 +87,7 @@ def build_message(test_suite):
             "test_name": test_suite.name,
         },
         "int": {
+            "time": int(time.time()),
             "test_total_count": len(test_suite.test_cases),
             "test_total_time": int(test_suite.total_time * 1000),
             "test_failed_count": test_suite.failed_count,
