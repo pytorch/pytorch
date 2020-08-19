@@ -308,7 +308,7 @@ void scatter_add_cuda_kernel(Tensor& self, int64_t dim, const Tensor& index, con
   cuda_scatter_gather_base_kernel</*is_scatter_like=*/true, /*cast_to_opaque=*/false>()(
     self, dim, index, src,
     "scatter_add_cuda_", []C10_DEVICE(auto* lhs, const auto* rhs) {
-      gpuAtomicAdd(lhs, *rhs);
+      gpuAtomicAddNoReturn(lhs, *rhs);
     }
   );
 }
