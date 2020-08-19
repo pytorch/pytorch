@@ -887,8 +887,8 @@ class TestONNXRuntime(unittest.TestCase):
                 x[:y.size(0), 0, :] = y
                 return x
 
-        x = torch.zeros((56,6,256))
-        y = torch.rand((22,256))
+        x = torch.zeros((56, 6, 256))
+        y = torch.rand((22, 256))
         self.run_test(InputIndexSlice(), (x, y))
 
     @skipIfUnsupportedMinOpsetVersion(10)
