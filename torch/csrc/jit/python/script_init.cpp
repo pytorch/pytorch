@@ -1522,9 +1522,7 @@ void initJitScriptBindings(PyObject* module) {
           "add_constant",
           [](ConcreteModuleTypeBuilder& self,
              std::string name,
-             py::object value) {
-            self.addConstant(name, value);
-          })
+             py::object value) { self.addConstant(name, value); })
       .def("add_attribute", &ConcreteModuleTypeBuilder::addAttribute)
       .def(
           "add_function_attribute",

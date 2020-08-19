@@ -10,7 +10,6 @@
 #include <string>
 #include <tuple>
 #include <vector>
-#include "jit/frontend/concrete_module_type.h"
 
 #include <Python.h>
 
