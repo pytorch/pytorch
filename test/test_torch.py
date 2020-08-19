@@ -6299,10 +6299,10 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual([(), ()], [x.shape for x in torch.max(one_d, dim=0, keepdim=False)])
 
         # amax
-        self.assertEqual([(), ()], [x.shape for x in torch.amax(zero_d, dim=0, keepdim=True)])
-        self.assertEqual([(), ()], [x.shape for x in torch.amax(zero_d, dim=0, keepdim=False)])
-        self.assertEqual([(1,), (1,)], [x.shape for x in torch.amax(one_d, dim=0, keepdim=True)])
-        self.assertEqual([(), ()], [x.shape for x in torch.amax(one_d, dim=0, keepdim=False)])
+        self.assertEqual((), torch.amax(zero_d, dim=0, keepdim=True).shape)
+        self.assertEqual((), torch.amax(zero_d, dim=0, keepdim=False).shape)
+        self.assertEqual((1,), torch.amax(one_d, dim=0, keepdim=True).shape)
+        self.assertEqual((), torch.amax(one_d, dim=0, keepdim=False).shape)
 
         # min
         self.assertEqual([(), ()], [x.shape for x in torch.min(zero_d, dim=0, keepdim=True)])
@@ -6311,10 +6311,10 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual([(), ()], [x.shape for x in torch.min(one_d, dim=0, keepdim=False)])
 
         # amin
-        self.assertEqual([(), ()], [x.shape for x in torch.amin(zero_d, dim=0, keepdim=True)])
-        self.assertEqual([(), ()], [x.shape for x in torch.amin(zero_d, dim=0, keepdim=False)])
-        self.assertEqual([(1,), (1,)], [x.shape for x in torch.amin(one_d, dim=0, keepdim=True)])
-        self.assertEqual([(), ()], [x.shape for x in torch.amin(one_d, dim=0, keepdim=False)])
+        self.assertEqual((), torch.amin(zero_d, dim=0, keepdim=True).shape)
+        self.assertEqual((), torch.amin(zero_d, dim=0, keepdim=False).shape)
+        self.assertEqual((1,), torch.amin(one_d, dim=0, keepdim=True).shape)
+        self.assertEqual((), torch.amin(one_d, dim=0, keepdim=False).shape)
 
         # set_
         zero_d_clone = zero_d.clone()
@@ -18256,10 +18256,6 @@ else:
             t.amin()
         with self.assertRaises(RuntimeError):
             torch.amin(t, dim=0)
-        with self.assertRaises(RuntimeError):
-            torch.amin(t, t)
-        with self.assertRaises(RuntimeError):
-            torch.amin(t, t, out=t)
 
         with self.assertRaises(RuntimeError):
             torch.amax(t)
@@ -18267,10 +18263,6 @@ else:
             t.amax()
         with self.assertRaises(RuntimeError):
             torch.amax(t, dim=0)
-        with self.assertRaises(RuntimeError):
-            torch.amax(t, t)
-        with self.assertRaises(RuntimeError):
-            torch.amax(t, t, out=t)
 
         # Tests clamp variants with complex inputs
         # Note: whether PyTorch should support clamp on complex

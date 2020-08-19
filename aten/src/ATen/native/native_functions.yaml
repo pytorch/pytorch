@@ -1942,17 +1942,10 @@
 
 - func: max.dim_max(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) max, Tensor(b!) max_values) -> (Tensor(a!) values, Tensor(b!) indices)
 
-- func: max_values(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor
-  use_c10_dispatcher: full
-  variants: function, method
-
 - func: max.names_dim(Tensor self, Dimname dim, bool keepdim=False) -> (Tensor values, Tensor indices)
   variants: function, method
 
 - func: max.names_dim_max(Tensor self, Dimname dim, bool keepdim=False, *, Tensor(a!) max, Tensor(b!) max_values) -> (Tensor(a!) values, Tensor(b!) indices)
-
-- func: max_values.names(Tensor self, Dimname[1] dim, bool keepdim=False) -> Tensor
-  variants: function, method
 
 - func: amax(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor
   use_c10_dispatcher: full
@@ -2031,17 +2024,10 @@
 
 - func: min.dim_min(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) min, Tensor(b!) min_indices) -> (Tensor(a!) values, Tensor(b!) indices)
 
-- func: min_values(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor
-  use_c10_dispatcher: full
-  variants: function, method
-
 - func: min.names_dim(Tensor self, Dimname dim, bool keepdim=False) -> (Tensor values, Tensor indices)
   variants: function, method
 
 - func: min.names_dim_min(Tensor self, Dimname dim, bool keepdim=False, *, Tensor(a!) min, Tensor(b!) min_indices) -> (Tensor(a!) values, Tensor(b!) indices)
-
-- func: min_values.names(Tensor self, Dimname[1] dim, bool keepdim=False) -> Tensor
-  variants: function, method
 
 - func: amin(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor
   use_c10_dispatcher: full
