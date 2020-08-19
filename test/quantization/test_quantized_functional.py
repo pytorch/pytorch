@@ -50,6 +50,11 @@ class TestQuantizedFunctional(QuantizationTestCase):
             X_q, W_q, b, stride, padding, dilation, groups,
             padding_mode="zeros", scale=Y_scale, zero_point=Y_zero_point)
 
+        print("--- reference output---")
+        print(Y_exp)
+        print("--- actual output---")
+        print(Y_act)
+
         # Make sure the results match
         # assert_array_almost_equal compares using the following formula:
         #     abs(desired-actual) < 1.5 * 10**(-decimal)
