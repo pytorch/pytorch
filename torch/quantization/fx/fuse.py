@@ -1,8 +1,4 @@
 import torch
-from torch.quantization.fuse_modules import (
-    fuse_conv_bn,
-    fuse_conv_bn_relu,
-)
 
 from torch.fx import (
     GraphModule,

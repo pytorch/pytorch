@@ -1,6 +1,5 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
-import torch
 import copy
 
 import torch.nn.intrinsic.modules.fused as torch_fused
