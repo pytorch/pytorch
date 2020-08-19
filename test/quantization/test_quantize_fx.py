@@ -16,9 +16,11 @@ from torch.quantization import default_qconfig
 # test utils
 from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
+    skipIfNoFBGEMM
 )
 
 class TestQuantizeFx(QuantizationTestCase):
+    @skipIfNoFBGEMM
     def test_functional(self):
         """ Test quantizing functional conv and linear
         """
