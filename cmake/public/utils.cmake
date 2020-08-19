@@ -51,8 +51,9 @@ macro(caffe2_interface_library SRC DST)
           ${DST} INTERFACE -Wl,-force_load,\"$<TARGET_FILE:${SRC}>\")
     elseif(MSVC)
       # In MSVC, we will add whole archive in default.
+	  # VS LINK settings support whitespace in the file path, so no quote is needed.
       target_link_libraries(
-          ${DST} INTERFACE -WHOLEARCHIVE:\"$<TARGET_FILE:${SRC}>\")
+          ${DST} INTERFACE -WHOLEARCHIVE:$<TARGET_FILE:${SRC}>)
     else()
       # Assume everything else is like gcc
       target_link_libraries(${DST} INTERFACE
