@@ -28,6 +28,15 @@ typename Command::Pool::Factory::Handle Command::Pool::Factory::operator()(
   };
 }
 
+void Command::Pool::purge(
+    const VkDevice device,
+    const VkCommandPool command_pool) {
+  TORCH_INTERNAL_ASSERT(device, "Invalid Vulkan device!");
+  TORCH_INTERNAL_ASSERT(command_pool, "Invalid Vulkan command pool!");
+
+  VK_CHECK(vkResetCommandPool(device, command_pool, 0u));
+}
+
 namespace {
 
 VkCommandBuffer allocate_command_buffer(
