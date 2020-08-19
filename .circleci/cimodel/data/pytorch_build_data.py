@@ -45,13 +45,13 @@ CONFIG_TREE_DATA = [
             ("10.2", [
                 ("3.6", [
                     ("important", [X(True)]),
-                    ("libtorch", [XImportant(True)]),
+                    ("libtorch", [X(True)]),
                 ]),
             ]),
             ("11.0", [
                 ("3.8", [
                     X(True),
-                    ("libtorch", [X(True)])
+                    ("libtorch", [XImportant(True)])
                 ]),
             ]),
         ]),
