@@ -39,7 +39,22 @@ RegisterOperators reg(
          prim::FusionGroup,
          [](const Node* node) -> Operation {
            const auto key = registerFusion(node);
-           return [key](Stack* stack) {
+           return [key, node](Stack* stack) {
+             std::cerr << "Fusion group executed:\n";
+             node->dump();
+             std::shared_ptr<Graph> g = node->g(attr::Subgraph);
+             g->dump();
+             for (size_t idx = 0; idx < g->inputs().size(); idx++) {
+               auto iv = stack->at(stack->size() - g->inputs().size() + idx);
+               std::cerr << "Input " << idx << " sizes: ";
+               if (iv.isTensor()) {
+                 auto t = iv.toTensor();
+                 for (auto s : t.sizes()) {
+                   std::cerr << s << ", ";
+                 }
+                 std::cerr << "\n";
+               }
+             }
              RECORD_FUNCTION("FusionGroup", std::vector<c10::IValue>());
              runFusion(key, *stack);
            };
