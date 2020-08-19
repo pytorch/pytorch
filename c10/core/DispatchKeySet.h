@@ -136,7 +136,7 @@ static inline DispatchKey legacyExtractDispatchKey(DispatchKeySet s) {
 // (I don't want to fix this in XLA right now because there might be
 // more renaming coming in the future.)
 static inline DispatchKeySet XLA() {
-  return DispatchKeySet{DispatchKey::XLA, DispatchKey::XLAPreAutograd};
+  return DispatchKeySet{DispatchKey::XLA, DispatchKey::AutogradXLA};
 }
 
 }

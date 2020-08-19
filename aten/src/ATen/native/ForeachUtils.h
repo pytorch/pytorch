@@ -8,10 +8,8 @@ void verify_list(TensorList tensors) {
   TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
   auto expected_dtype = tensors[0].dtype();
   auto expected_device = tensors[0].device();
-  auto expected_sizes = tensors[0].sizes();
 
   for (auto t : tensors) {
-    TORCH_CHECK(t.sizes() == expected_sizes, "All tensors in the tensor list must have the same size.");
     TORCH_CHECK(t.dtype() == expected_dtype, "All tensors in the tensor list must have the same dtype.");
     TORCH_CHECK(t.device() == expected_device, "All tensors in the tensor list must have the same device.");
   }

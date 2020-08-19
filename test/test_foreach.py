@@ -88,8 +88,13 @@ class TestForeach(TestCase):
 
     @dtypes(*torch.testing.get_all_dtypes())
     def test_add_scalar_with_different_size_tensors(self, device, dtype):
+        if dtype == torch.bool:
+            return
+
         tensors = [torch.zeros(10 + n, 10 + n, device=device, dtype=dtype) for n in range(10)]
-        self.assertRaises(RuntimeError, lambda: torch._foreach_add(tensors, 1))
+        expected = [torch.ones(10 + n, 10 + n, device=device, dtype=dtype) for n in range(10)]
+        torch._foreach_add_(tensors, 1)
+        self.assertEqual(expected, tensors)
 
     @dtypes(*torch.testing.get_all_dtypes())
     def test_add_scalar_with_empty_list_and_empty_tensor(self, device, dtype):
