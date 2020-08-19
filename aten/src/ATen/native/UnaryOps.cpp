@@ -189,13 +189,13 @@ Tensor imag(const Tensor& self) {
 
 Tensor& conj_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, conj_stub); }
 
-Tensor _conj(const Tensor& self) { return unary_op_impl(self, at::conj_out); }
+Tensor conj(const Tensor& self) { return unary_op_impl(self, at::conj_out); }
 
-Tensor conj(const Tensor& self) {
+Tensor fast_conj(const Tensor& self) {
   if (!self.is_complex()) {
     return self;
   }
-  return at::_conj(self);
+  return at::conj(self);
 }
 
 Tensor& bitwise_not_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, bitwise_not_stub); }

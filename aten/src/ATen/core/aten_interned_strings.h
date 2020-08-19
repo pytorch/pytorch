@@ -166,7 +166,6 @@ _(aten, _weight_norm) \
 _(aten, _weight_norm_cuda_interface) \
 _(aten, _weight_norm_cuda_interface_backward) \
 _(aten, _weight_norm_differentiable_backward) \
-_(aten, _conj) \
 _(aten, abs) \
 _(aten, acos) \
 _(aten, adaptive_avg_pool1d) \
@@ -247,6 +246,7 @@ _(aten, clamp_min) \
 _(aten, clone) \
 _(aten, coalesce) \
 _(aten, combinations) \
+_(aten, fast_conj) \
 _(aten, conj) \
 _(aten, complex) \
 _(aten, polar) \
