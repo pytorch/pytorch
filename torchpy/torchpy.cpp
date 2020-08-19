@@ -97,9 +97,8 @@ at::Tensor PyModule::forward(at::Tensor input) {
   PyGILState_Release(gil_state);
 
   std::cout << "sanitizing output" << std::endl;
-  at::Tensor new_output = torch::ones_like(output);
-  // new_output.copy_(output.value());
-  // at::Tensor new_output = output.clone();
+  at::Tensor new_output = torch::empty_like(output);
+  new_output.copy_(output);
   std::cout << "returning output" << std::endl;
   return new_output;
 }

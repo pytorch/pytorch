@@ -11,7 +11,6 @@ void compare_torchpy_jit(const char* model_filename, at::Tensor input) {
   // Test
   auto model = torchpy::load(model_filename);
   at::Tensor output = model.forward(input);
-  std::cout << "output:" << output << std::endl;
 
   // Reference
   auto ref_model = torch::jit::load(model_filename);
