@@ -28,21 +28,21 @@ CONFIG_TREE_DATA = [
         ]),
         ("cuda", [
             ("9.2", [
-                X("3.6"),
                 ("3.6", [
-                    ("cuda_gcc_override", [X("gcc5.4")])
+                    X(True),
+                    ("cuda_gcc_override", [X("gcc5.4")]),
                 ])
             ]),
             ("10.1", [X("3.6")]),
             ("10.2", [
-                XImportant("3.6"),
                 ("3.6", [
-                    ("libtorch", [XImportant(True)])
+                    ("important", [X(True)]),
+                    ("libtorch", [XImportant(True)]),
                 ]),
             ]),
             ("11.0", [
-                X("3.8"),
                 ("3.8", [
+                    X(True),
                     ("libtorch", [X(True)])
                 ]),
             ]),
