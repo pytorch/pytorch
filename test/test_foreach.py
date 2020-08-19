@@ -163,10 +163,14 @@ class TestForeach(TestCase):
         self.assertEqual(res, tensors)
 
     @dtypes(*torch.testing.get_all_dtypes())
-    def test_bin_op_scalar_with_different_size_tensors(self, device, dtype):
+    def test_add_with_different_size_tensors(self, device, dtype):
+        if dtype == torch.bool: 
+            return
         tensors = [torch.zeros(10 + n, 10 + n, device=device, dtype=dtype) for n in range(10)]
-        for bin_op in self.bin_ops: 
-            self.assertRaises(RuntimeError, lambda: bin_op(tensors, 1))
+        expected = [torch.ones(10 + n, 10 + n, device=device, dtype=dtype) for n in range(10)]
+
+        torch._foreach_add_(tensors, 1)
+        self.assertEqual(expected, tensors)
 
     @dtypes(*torch.testing.get_all_dtypes())
     def test_add_scalar_with_empty_list_and_empty_tensor(self, device, dtype):
@@ -229,7 +233,7 @@ class TestForeach(TestCase):
         # div
         torch._foreach_add_(tensors1, 4)
         torch._foreach_add_(tensors2, 1)
-        if dtype in [torch.int8, torch.int16, torch.int32, torch.int64, torch.uint8]:
+        if device != 'cuda:0' and dtype in [torch.int8, torch.int16, torch.int32, torch.int64, torch.uint8]:
             # Integer division of tensors using div or / is no longer supported
             self.assertRaises(RuntimeError, lambda: torch._foreach_div(tensors1, tensors2))
             self.assertRaises(RuntimeError, lambda: torch._foreach_div_(tensors1, tensors2))
