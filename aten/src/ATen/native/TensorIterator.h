@@ -316,14 +316,8 @@ protected:
   bool fast_set_up(const TensorIteratorConfig&);
   FastSetupType compute_fast_setup_type(const TensorIteratorConfig&);
   void compute_names(const TensorIteratorConfig&);
-  void resize_outputs(const TensorIteratorConfig&);
   void propagate_names_to_outputs();
   void coalesce_dimensions();
-
-  template <int dim, MemoryFormat memory_format> bool requires_channels_last_nd_output();
-  bool requires_channels_last_2d_output();
-  bool requires_channels_last_3d_output();
-
 
 protected:
 

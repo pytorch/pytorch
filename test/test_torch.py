@@ -15205,32 +15205,21 @@ class TestTorchDeviceType(TestCase):
                 self.assertEqual(sdiv, s2)
 
             dim = x.dim()
-            div = x.stride(dim - 1)
+            # we produce memory dense outputs, so when input is strided on the last dimension
+            # we need to divide by that dimension stride to compare input and result strides
+            div = x.stride(-1)
             for p in permutations(range(dim)):
                 xp = x.permute(p)
-                y = torch.randn(xp.size(dim - 1), device=x.device, dtype=x.dtype)
                 if not unary:
-                    res = op(xp, xp)
-                    compare_strides(xp.stride(), res.stride(), div)
-                    self.assertEqual(xp.size(), res.size())
-                    res = op(xp, y)
-                    compare_strides(xp.stride(), res.stride(), div)
-                    self.assertEqual(xp.size(), res.size())
-                    res = op(y, xp)
-                    compare_strides(xp.stride(), res.stride(), div)
-                    self.assertEqual(xp.size(), res.size())
-                    out = torch.empty(0, device=xp.device, dtype=res.dtype)
-                    res = op(xp, xp, out=out)
-                    compare_strides(xp.stride(), res.stride(), div)
-                    self.assertEqual(xp.size(), res.size())
-                    out = torch.empty(0, device=xp.device, dtype=res.dtype)
-                    res = op(xp, y, out=out)
-                    compare_strides(xp.stride(), res.stride(), div)
-                    self.assertEqual(xp.size(), res.size())
-                    out = torch.empty(0, device=xp.device, dtype=res.dtype)
-                    res = op(y, xp, out=out)
-                    compare_strides(xp.stride(), res.stride(), div)
-                    self.assertEqual(xp.size(), res.size())
+                    y = torch.randn(xp.size(-1), device=x.device, dtype=x.dtype)
+                    for inputs in ((xp,xp), (xp,y), (y, xp)):
+                        res = op(*inputs)
+                        compare_strides(xp.stride(), res.stride(), div)
+                        self.assertEqual(xp.size(), res.size())
+                        out = torch.empty(0, device=xp.device, dtype=res.dtype)
+                        res = op(*inputs, out=out)
+                        compare_strides(xp.stride(), res.stride(), div)
+                        self.assertEqual(xp.size(), res.size())
                 else:
                     res = op(xp)
                     compare_strides(xp.stride(), res.stride(), div)
@@ -15243,8 +15232,9 @@ class TestTorchDeviceType(TestCase):
         # torch.eq by default calls TensorIterator with defined output, torch.add with undefined
         binary_ops = (torch.eq, torch.add)
         unary_ops = (torch.exp,)
-        # memory dense and sliced
-        xs = (torch.randn(2, 3, 4, device=device), torch.randn(2, 3, 8, device=device)[:, :, ::2])
+        # memory dense, sliced and ambiguous sliced (ambiguous dense loses permutation information)
+        xs = (torch.randn(2, 3, 4, device=device), torch.randn(2, 3, 8, device=device)[:,:,::2],
+              torch.randn(1, 1, 4, 12, device=device)[:,:,:,::2])
         for op in binary_ops:
             for x in xs:
                 _test_helper(x, op)

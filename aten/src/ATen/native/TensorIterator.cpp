@@ -15,10 +15,49 @@ using loop_t = TensorIterator::loop_t;
 using loop2d_t = TensorIterator::loop2d_t;
 using StrideVector = TensorIterator::StrideVector;
 
+// NOTE: [Computing output strides]
+// We use the following algorithm to compute output strides
+// If correctly sized output is provided, we respect its stides and don't change them
+// Otherwise, if provided output is of incorrect size or no output is provided,
+// we try to recover permutation that was applied to the inputs
+// by sorting the strides of the inputs. Precedence is given to the inputs in the order they were added,
+// and to permutations involving non-broadcasted dimensions
+// 1. we loop over inputs starting from the first
+// 2. for all inputs strides of broadcasted dimensions are set to 0, and 0 compares equal to anything. If one
+// of the dimensions being compared has a stride of 0, we move on to the next tensor to determine if
+// these dimensions need to be swapped.
+// 3. strides of dimensions equal to 1 participate in sorting
+// 4. if 2 strides are equal and neither is 0, we try to break the tie by looking at the corresponding dimensions
+// of the tensor. Dimensions were permuted if, when iterating from the end, dimensions corresponding to the
+// same strides are increasing. If dimensions are non-increasing, we move on to the next input to break the tie.
+//
+// Instead of applying rule 4 for tie breaking, we could move on to the next tensor directly. This would result in possibly
+// losing the correct permuation of the first tensor if there are permuted trivial dimensions, but could potentially
+// improve traversal order of the second tensor. We chose the former option to better propagate channels last layout
+// for example for a tensor with the sizes N1H1
+// These rules result in the intuitive behavior that in most cases recovers permutation of either the first argument (if all
+// arguments are of the same size) or the argument that is not broadcasted, regardless of its position.
+// As a bonus, it also result in reasonably well-behaved traversal order of the inputs and outputs - in the kernels
+// output is traversed linearly, and since it closely follows input layouts, inputs are traversed linearly as well
+//
+// Examples:
+// full size tensor + broadcasted tensor with 0 or 1 non-trivial dimensions => strides of output are same
+// as strides of full size input regardless of the order
+// 2 tensors of same size but different strides => output strides are the same as first argument
+//
+// We also have fast path for memory-dense inputs with the same strides (or, trivially, single memory-dense input)
+// that outputs a tensor with the same strides as inputs. The only difference in result with the algorithm described
+// above is for strides for trivial (1) dimensions, where in ambiguous cases for performance reasons we default to
+// contiguous strides.
+// Example: tensor with sizes NC11 and strides C1CC will produce output with strides C111 (note differences are only
+// in the strides of trivial dimensions, so physical layout is unaffected but permutation information is lost)
+// We might change this behavior in future once performance considerations are resolved
+
 void TensorIterator::reorder_dimensions(const TensorIteratorConfig& config) {
   // Sort the dimensions based on strides in ascending order with reduced dims
   // at the front. NOTE: that this inverts the order of C-contiguous tensors.
   // strides[0] is the fastest moving dimension instead of strides[ndim - 1].
+  // See NOTE: [Computing output strides] and inline  comments for more detailed description
 
   perm_.resize(ndim());
   if (ndim() == 1) {
@@ -34,6 +73,7 @@ void TensorIterator::reorder_dimensions(const TensorIteratorConfig& config) {
   auto should_swap = [&](size_t dim0, size_t dim1) {
     int ret = 0;
     for (int arg = 0; arg < ntensors(); arg++) {
+      // ignore undefined or incorrectly sized tensors
       if (operands_[arg].stride_bytes.empty() || operands_[arg].will_resize) {
         continue;
       }
@@ -41,16 +81,28 @@ void TensorIterator::reorder_dimensions(const TensorIteratorConfig& config) {
       int64_t stride1 = operands_[arg].stride_bytes[dim1];
       if (is_reduction_ && operands_[arg].is_output) {
         // move reduced dimensions to the front
+        // strides of reduced dimensions are always set to 0 by review_reduce_result
         if ((stride0 == 0) != (stride1 == 0)) {
           return stride1 == 0 ? 1 : -1;
         }
       }
+      //move on to the next input if one of the dimensions is broadcasted
       if (stride0 == 0 || stride1 == 0) {
         continue;
+      // it is important to return here only with strict comparisons, for equal strides we try to break the tie later
+      // by comparing corresponding dimensions or if that does not work, moving on to the next tensor
       } else if (stride0 < stride1) {
         return -1;
       } else  if (stride0 > stride1) {
         return 1;
+      } else { //equal strides, use dimensions themselves as the tie-breaker.
+        //at this point, with zero strides out of the way, we are guaranteed that operand dimensions are equal to shape_
+         auto t_dim0 = shape_[dim0];
+         auto t_dim1 = shape_[dim1];
+         //return only if dimensions should be swapped, otherwise move on to the next tensor
+         if (t_dim0 > t_dim1) {
+             return 1;
+         }
       }
     }
     return ret;
@@ -775,6 +827,10 @@ void TensorIterator::mark_outputs() {
 }
 
 void TensorIterator::mark_resize_outputs(const TensorIteratorConfig& config) {
+  // Outputs cannot be broadcasted. Check that the shape of the outputs matches
+  // the inferred shape. There's an exception for write-only tensors to support
+  // our legacy behavior that functions with `out=` arguments resize their
+  // outputs.
   if (config.static_shape_.has_value()) {
     return;
   }
@@ -785,6 +841,7 @@ void TensorIterator::mark_resize_outputs(const TensorIteratorConfig& config) {
         operands_[i].will_resize = true;
         continue;
       }
+      // for reduction, output size does not match shape_, as output is reduced size, and shape_ is size of the input
       TORCH_CHECK(is_reduction_,  "output with shape ", output.sizes(), " doesn't match the broadcast shape ",
                  shape_);
     }
@@ -854,6 +911,7 @@ void TensorIterator::compute_strides(const TensorIteratorConfig& config) {
       else
           op.stride_bytes.resize(ndim());
       for (size_t i = 0; i < original_shape.size(); i++) {
+        // see NOTE: [Computing output strides]
         if (original_shape[i] == 1 && shape_[offset + i] !=1) {
           op.stride_bytes[offset + i] = 0;
         } else {
