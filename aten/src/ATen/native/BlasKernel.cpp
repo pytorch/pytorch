@@ -151,7 +151,7 @@ inline void scal(int64_t n, scalar_t a, scalar_t *x, int64_t incx)
 }
 
 template<typename scalar_t>
-bool gemv(char trans, int64_t m, int64_t n, scalar_t alpha, scalar_t *a, int64_t lda, scalar_t *x, int64_t incx, scalar_t beta, scalar_t *y, int64_t incy) {
+void gemv(char trans, int64_t m, int64_t n, scalar_t alpha, scalar_t *a, int64_t lda, scalar_t *x, int64_t incx, scalar_t beta, scalar_t *y, int64_t incy) {
   if(n == 1) lda = m;
 
   if (blas_impl::gemv_use_fast_path<scalar_t>(m, n, lda, incx, incy)) {
@@ -162,7 +162,7 @@ bool gemv(char trans, int64_t m, int64_t n, scalar_t alpha, scalar_t *a, int64_t
     int i_incx = (int)incx;
     int i_incy = (int)incy;
     blas_impl::gemv_fast_path<scalar_t>(&trans, &i_m, &i_n, &alpha, a, &i_lda, x, &i_incx, &beta, y, &i_incy);
-    return true;
+    return;
   }
 
   if ((trans == 'T') || (trans == 't')) {
@@ -190,11 +190,11 @@ bool gemv(char trans, int64_t m, int64_t n, scalar_t alpha, scalar_t *a, int64_t
       }
     }
   }
-  return false;
+  return;
 }
 
 #define INSTANTIATE(scalar_t, _) \
-template bool gemv<scalar_t>(char trans, int64_t m, int64_t n, scalar_t alpha, scalar_t *a, int64_t lda, scalar_t *x, int64_t incx, scalar_t beta, scalar_t *y, int64_t incy);
+template void gemv<scalar_t>(char trans, int64_t m, int64_t n, scalar_t alpha, scalar_t *a, int64_t lda, scalar_t *x, int64_t incx, scalar_t beta, scalar_t *y, int64_t incy);
 AT_FORALL_SCALAR_TYPES_AND(BFloat16, INSTANTIATE);
 AT_FORALL_COMPLEX_TYPES(INSTANTIATE);
 #undef INSTANTIATE
