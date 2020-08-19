@@ -257,7 +257,7 @@ class ProcessGroupNCCL : public ProcessGroup {
     // stream that runs this callback.
     c10::intrusive_ptr<Future> then(
         std::function<at::IValue(void)> callback,
-        at::TypePtr type) override {
+        at::TypePtr /* unused */) override {
       // Get a new stream from pool that will run the callback.
       const c10::cuda::CUDAStream stream =
           at::cuda::getStreamFromPool(deviceIndex_);
