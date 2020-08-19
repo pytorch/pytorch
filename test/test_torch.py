@@ -5985,7 +5985,9 @@ class TestTorchDeviceType(TestCase):
                 self.assertRaises(RuntimeError,
                                   lambda: zeros.index_add(0, torch.arange(0, size[0], dtype=torch.long, device=device), tensor))
 
-            self.assertRaises(RuntimeError, lambda: torch.sign(torch.tensor([4j], device=device, dtype=dtype)))
+            with self.assertRaisesRegex(RuntimeError,
+                                        r'Unlike NumPy, torch.sign is not intended to support complex numbers\.'):
+                torch.sign(torch.tensor([4j], device=device, dtype=dtype))
 
             a = torch.rand((2, 2), dtype=dtype, device=device)
             b = torch.rand((2, 2), dtype=dtype, device=device)
