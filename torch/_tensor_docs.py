@@ -2009,6 +2009,13 @@ matrix_power(n) -> Tensor
 See :func:`torch.matrix_power`
 """)
 
+add_docstr_all('matrix_exp',
+               r"""
+matrix_exp() -> Tensor
+
+See :func:`torch.matrix_exp`
+""")
+
 add_docstr_all('max',
                r"""
 max(dim=None, keepdim=False) -> Tensor or (Tensor, Tensor)
