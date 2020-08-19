@@ -361,6 +361,7 @@ static inline float calc_polygamma(int64_t n, float x) {
 }
 
 inline c10::BFloat16 calc_erfinv(c10::BFloat16 a) { return calc_erfinv(float(a)); }
+inline c10::Half calc_erfinv(c10::Half a) { return calc_erfinv(float(a)); }
 
 template <typename T>
 static T abs_impl(T v) {
