@@ -639,7 +639,7 @@ void splitSparseLengthsSumSparse(NetDef* net, const Workspace& ws) {
       {"SparseLengthsSum4BitRowwiseSparse", "SparseLengthsSumFused4BitRowwise"},
       {"SparseLengthsWeightedSum4BitRowwiseSparse",
        "SparseLengthsWeightedSumFused4BitRowwise"},
-      {"SparseLengthsSum8BitRowwiseSparse", "SparseLengthsSum8FusedBitRowwise"},
+      {"SparseLengthsSum8BitRowwiseSparse", "SparseLengthsSumFused8BitRowwise"},
       {"SparseLengthsWeightedSum8BitRowwiseSparse",
        "SparseLengthsWeightedSumFused8BitRowwise"},
       {"SparseLengthsSum2BitRowwiseSparse", "SparseLengthsSumFused2BitRowwise"},

@@ -784,6 +784,14 @@ class TestVmapOperators(TestCase):
             test(op, (getter([B0, 2], device), getter([B0], device, torch.double)))
             test(op, (getter([B0], device, torch.double), getter([B0, 2], device)))
 
+            if not torch.cuda.is_available():
+                return
+
+            # Test cross-device scalars
+            number = get_number(getter)
+            self._test_unary(lambda t: op(t, number), getter, device='cuda')
+            self._test_unary(lambda t: op(t, torch.tensor(number)), getter, device='cuda')
+
     def test_chunk(self):
         test = self._vmap_view_test
         op = torch.chunk
