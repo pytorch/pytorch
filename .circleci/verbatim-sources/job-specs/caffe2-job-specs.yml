@@ -1,7 +1,7 @@
   caffe2_linux_build:
     <<: *caffe2_params
     machine:
-      image: ubuntu-1604:201903-01
+      image: ubuntu-1604:202007-01
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - checkout
@@ -61,7 +61,7 @@
   caffe2_linux_test:
     <<: *caffe2_params
     machine:
-      image: ubuntu-1604:201903-01
+      image: ubuntu-1604:202007-01
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - checkout
