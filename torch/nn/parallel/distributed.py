@@ -216,6 +216,15 @@ class DistributedDataParallel(Module):
         unexpected behaviors can happen, since some parameters' gradient
         reduction functions might not get called.
 
+    .. warning::
+        Please noted that gradients are views of buffer tensors maintained by
+        DistributedDataParallel reducer since PyTorch 1.7. This can help save
+        one extra copy of grad tensors and reduce peak memory usage when using
+        DistributedDataParallel. Due to this change, detach_() cannot be called
+        on these gradients. If you hit error related to detach_() these gradients,
+        please refer to the Optimizer.zero_grad() function in
+        torch/optim/optimizer.py as the solution.
+
     .. note::
         Parameters are never broadcast between processes. The module performs
         an all-reduce step on gradients and assumes that they will be modified
