@@ -22,20 +22,12 @@ void compare_torchpy_jit(const char* model_filename, at::Tensor input) {
 }
 
 TEST(TorchpyTest, SimpleModel) {
-  torchpy::init();
-  {
-    compare_torchpy_jit(
-        "torchpy/example/simple.pt", torch::ones(at::IntArrayRef({10, 20})));
-  }
-  torchpy::finalize();
+  compare_torchpy_jit(
+      "torchpy/example/simple.pt", torch::ones(at::IntArrayRef({10, 20})));
 }
 
 TEST(TorchpyTest, ResNet) {
-  torchpy::init();
-  {
-    compare_torchpy_jit(
-        "torchpy/example/resnet.pt",
-        torch::ones(at::IntArrayRef({1, 3, 224, 224})));
-  }
-  torchpy::finalize();
+  compare_torchpy_jit(
+      "torchpy/example/resnet.pt",
+      torch::ones(at::IntArrayRef({1, 3, 224, 224})));
 }

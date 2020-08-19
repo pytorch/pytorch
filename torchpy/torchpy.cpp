@@ -12,12 +12,32 @@
 
 namespace torchpy {
 
+PyThreadState* mainThreadState = NULL;
+
+/*
+//in main thread
+
+Py_Initialize();
+PyEval_InitThreads();
+mainThreadState = PyThreadState_Get();
+PyEval_ReleaseLock();
+
+//in threaded thread
+PyEval_AcquireLock();
+PyInterpreterState * mainInterpreterState = mainThreadState->interp;
+PyThreadState * myThreadState = PyThreadState_New(mainInterpreterState);
+PyEval_ReleaseLock();
+
+ * embeded python part
+ * PyEval_CallObject() for example
+ */
+
 void init() {
-  py::initialize_interpreter();
+  Py_Initialize();
+  // py::initialize_interpreter();
   // Make sure torch is loaded before anything else
   py::module::import("torch");
 
-  // Tensor is used directly in the loaded pt code
   // Why does importing it here not obviate the need to import it in loader.py?
   // py::exec("from torch import Tensor");
 
@@ -26,21 +46,28 @@ void init() {
         import sys
         sys.path.append('torchpy')
     )");
+
+  // Enable other threads to use the interpreter
+  assert(PyEval_ThreadsInitialized() != 0);
 }
 
 void finalize() {
-  py::finalize_interpreter();
+  Py_Finalize();
+  // py::finalize_interpreter();
 }
 const PyModule load(const char* filename) {
   std::cout << "load()" << std::endl;
 
-  // auto simple_loader = py::module::import("simple_loader");
   auto loader = py::module::import("loader");
   auto load = loader.attr("load");
 
   std::cout << "callobject load" << std::endl;
   auto model = load(filename);
   auto mod = PyModule(model);
+
+  mainThreadState = PyEval_SaveThread();
+  std::cout << "load return" << std::endl;
+
   return mod;
 }
 
@@ -52,9 +79,16 @@ PyModule::~PyModule() {
 }
 
 at::Tensor PyModule::forward(at::Tensor input) {
+  std::cout << "forward" << std::endl;
+  PyEval_RestoreThread(mainThreadState);
+
+  std::cout << "restored" << std::endl;
   py::object forward = _model.attr("forward");
+  std::cout << "called forward" << std::endl;
   py::object py_output = forward(input);
+  std::cout << "casting output" << std::endl;
   at::Tensor output = py::cast<at::Tensor>(py_output);
+  std::cout << "returning output" << std::endl;
   return output;
 }
 } // namespace torchpy
