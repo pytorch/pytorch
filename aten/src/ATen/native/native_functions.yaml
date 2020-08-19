@@ -1931,7 +1931,7 @@
   dispatch:
     CPU, CUDA: _compute_linear_combination
 
-- func: _compute_linear_combination.out(Tensor input, Tensor coefficients, Tensor(a!) out) -> Tensor(a!)
+- func: _compute_linear_combination.out(Tensor input, Tensor coefficients, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA: _compute_linear_combination_out
 
