@@ -58,6 +58,7 @@ class ConcreteModuleType;
 class VISIBILITY_HIDDEN ConcreteModuleTypeBuilder {
  public:
   explicit ConcreteModuleTypeBuilder(py::object pyClass) {
+    TORCH_INTERNAL_ASSERT(pyClass);
     pyClass_ = std::move(pyClass);
   }
   void addConstant(std::string name, py::object value);
@@ -192,7 +193,7 @@ class VISIBILITY_HIDDEN ConcreteModuleType {
   static std::shared_ptr<ConcreteModuleType> fromJitType(TypePtr type);
 
   TypePtr getJitType() const;
-  py::object getPyClass() const;
+  c10::optional<py::object> getPyClass() const;
   IterableModuleKind getIterableModuleKind() const;
   c10::optional<std::vector<std::string>> findOverloads(
       const std::string& name) const;
