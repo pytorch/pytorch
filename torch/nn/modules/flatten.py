@@ -8,20 +8,24 @@ from torch import Size
 class Flatten(Module):
     r"""
     Flattens a contiguous range of dims into a tensor. For use with :class:`~nn.Sequential`.
-    Args:
-        start_dim: first dim to flatten (default = 1).
-        end_dim: last dim to flatten (default = -1).
 
     Shape:
         - Input: :math:`(N, *dims)`
         - Output: :math:`(N, \prod *dims)` (for the default case).
 
+    Args:
+        start_dim: first dim to flatten (default = 1).
+        end_dim: last dim to flatten (default = -1).
 
     Examples::
+        >>> input = torch.randn(32, 1, 5, 5)
         >>> m = nn.Sequential(
         >>>     nn.Conv2d(1, 32, 5, 1, 1),
         >>>     nn.Flatten()
         >>> )
+        >>> output = m(input)
+        >>> output.size()
+        torch.Size([32, 288])
     """
     __constants__ = ['start_dim', 'end_dim']
     start_dim: int
@@ -46,15 +50,15 @@ class Unflatten(Module):
     Unflattens a tensor into another tensor of a desired shape. For use with :class:`~nn.Sequential`.
 
     * :attr:`dim` specifies the dimension of the input tensor to be flattened, and it can 
-    be either `str` or `int` when `NamedTensor` or `Tensor` is used, respectively.
+      be either `str` or `int` when `NamedTensor` or `Tensor` is used, respectively.
 
     * :attr:`unflattened_size` is the size of the unflattened dimension of the tensor and it can be a
-    `namedshape` (`tuple` of tuples) if :attr:`dim` is `str` or a `tuple` of ints as well as `torch.Size` if
-    :attr:`dim` is an `int`.
+      `namedshape` (`tuple` of tuples) if :attr:`dim` is `str` or a `tuple` of ints as well as `torch.Size` if
+      :attr:`dim` is an `int`.
 
     Shape:
         - Input: :math:`(N, *dims)`
-        - Output: :math:`(N, C_out, H_out, W_out)`
+        - Output: :math:`(N, C_{\text{out}}, H_{\text{out}}, W_{\text{out}})`
 
     Args:
         dim (Union[int, str]): Dimension to be flattened

@@ -2875,6 +2875,40 @@ Tests if each element of :attr:`input` is infinite
         tensor([False,  True,  False,  True,  False])
 """)
 
+add_docstr(torch.isposinf,
+           r"""
+isposinf(input, *, out=None) -> Tensor
+Tests if each element of :attr:`input` is positive infinity or not.
+
+Args:
+  {input}
+
+Keyword args:
+  {out}
+
+Example::
+    >>> a = torch.tensor([-float('inf'), float('inf'), 1.2])
+    >>> torch.isposinf(a)
+    tensor([False,  True, False])
+""".format(**common_args))
+
+add_docstr(torch.isneginf,
+           r"""
+isneginf(input, *, out=None) -> Tensor
+Tests if each element of :attr:`input` is negative infinity or not.
+
+Args:
+  {input}
+
+Keyword args:
+  {out}
+
+Example::
+    >>> a = torch.tensor([-float('inf'), float('inf'), 1.2])
+    >>> torch.isneginf(a)
+    tensor([ True, False, False])
+""".format(**common_args))
+
 add_docstr(torch.isclose, r"""
 isclose(input, other, rtol=1e-05, atol=1e-08, equal_nan=False) -> Tensor
 
@@ -4404,6 +4438,51 @@ Example::
             [1.0311, 0.3901, 0.5049]])
 """)
 
+add_docstr(torch.movedim,
+           r"""
+movedim(input, source, destination) -> Tensor
+
+Moves the dimension(s) of :attr:`input` at the position(s) in :attr:`source`
+to the position(s) in :attr:`destination`.
+
+Other dimensions of :attr:`input` that are not explicitly moved remain in
+their original order and appear at the positions not specified in :attr:`destination`.
+
+Args:
+    {input}
+    source (int or tuple of ints): Original positions of the dims to move. These must be unique.
+    destination (int or tuple of ints): Destination positions for each of the original dims. These must also be unique.
+
+Examples::
+
+    >>> t = torch.randn(3,2,1)
+    >>> t
+    tensor([[[-0.3362],
+            [-0.8437]],
+
+            [[-0.9627],
+            [ 0.1727]],
+
+            [[ 0.5173],
+            [-0.1398]]])
+    >>> torch.movedim(t, 1, 0).shape
+    torch.Size([2, 3, 1])
+    >>> torch.movedim(t, 1, 0)
+    tensor([[[-0.3362],
+            [-0.9627],
+            [ 0.5173]],
+
+            [[-0.8437],
+            [ 0.1727],
+            [-0.1398]]])
+    >>> torch.movedim(t, (1, 2), (0, 1)).shape
+    torch.Size([2, 1, 3])
+    >>> torch.movedim(t, (1, 2), (0, 1))
+    tensor([[[-0.3362, -0.9627,  0.5173]],
+
+            [[-0.8437,  0.1727, -0.1398]]])
+""".format(**common_args))
+
 add_docstr(torch.narrow,
            r"""
 narrow(input, dim, start, length) -> Tensor
@@ -5623,6 +5702,25 @@ Example::
     tensor([ 0.7000, -1.2000,  0.0000,  2.3000])
     >>> torch.sign(a)
     tensor([ 1., -1.,  0.,  1.])
+""".format(**common_args))
+
+add_docstr(torch.signbit,
+           r"""
+signbit(input, *, out=None) -> Tensor
+
+Tests if each element of :attr:`input` has its sign bit set (is less than zero) or not.
+
+Args:
+  {input}
+
+Keyword args:
+  {out}
+
+Example::
+
+    >>> a = torch.tensor([0.7, -1.2, 0., 2.3])
+    >>> torch.signbit(a)
+    tensor([ False, True,  False,  False])
 """.format(**common_args))
 
 add_docstr(torch.sin,
@@ -7137,23 +7235,16 @@ Example::
     torch.Size([2, 3])
 """.format(**factory_common_args))
 
-add_docstr(torch.full,
-           r"""
-full(size, fill_value, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
+add_docstr(torch.full, r"""
+full(size, fill_value, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
-Returns a tensor of size :attr:`size` filled with :attr:`fill_value`.
-
-.. warning::
-    Providing a bool or integral :attr:`fill_value` without setting
-    the optional :attr:`dtype` or :attr:`out` arguments is currently unsupported.
-    In PyTorch 1.7, when :attr:`dtype` and :attr:`out` are not set
-    a bool :attr:`fill_value` will return a tensor of torch.bool dtype,
-    and an integral :attr:`fill_value` will return a tensor of torch.long dtype.
+Creates a tensor of size :attr:`size` filled with :attr:`fill_value`. The
+tensor's dtype is inferred from :attr:`fill_value`.
 
 Args:
     size (int...): a list, tuple, or :class:`torch.Size` of integers defining the
         shape of the output tensor.
-    fill_value: the number to fill the output tensor with.
+    fill_value (Scalar): the value to fill the output tensor with.
     {out}
     {dtype}
     {layout}
@@ -7165,7 +7256,6 @@ Example::
     >>> torch.full((2, 3), 3.141592)
     tensor([[ 3.1416,  3.1416,  3.1416],
             [ 3.1416,  3.1416,  3.1416]])
-
 """.format(**factory_common_args))
 
 add_docstr(torch.full_like,
@@ -7240,10 +7330,18 @@ The operation is defined as:
 .. note::
     The tensors :attr:`condition`, :attr:`x`, :attr:`y` must be :ref:`broadcastable <broadcasting-semantics>`.
 
+.. note::
+    Currently valid scalar and tensor combination are
+    1. Scalar of floating dtype and torch.double
+    2. Scalar of integral dtype and torch.long
+    3. Scalar of complex dtype and torch.complex128
+
 Arguments:
     condition (BoolTensor): When True (nonzero), yield x, otherwise yield y
-    x (Tensor): values selected at indices where :attr:`condition` is ``True``
-    y (Tensor): values selected at indices where :attr:`condition` is ``False``
+    x (Tensor or Scalar): value (if :attr:x is a scalar) or values selected at indices
+                          where :attr:`condition` is ``True``
+    y (Tensor or Scalar): value (if :attr:x is a scalar) or values selected at indices
+                          where :attr:`condition` is ``False``
 
 Returns:
     Tensor: A tensor of shape equal to the broadcasted shape of :attr:`condition`, :attr:`x`, :attr:`y`
@@ -7260,6 +7358,13 @@ Example::
     tensor([[ 1.0000,  0.3139],
             [ 0.3898,  1.0000],
             [ 0.0478,  1.0000]])
+    >>> x = torch.randn(2, 2, dtype=torch.double)
+    >>> x
+    tensor([[ 1.0779,  0.0383],
+            [-0.8785, -1.1089]], dtype=torch.float64)
+    >>> torch.where(x > 0, x, 0.)
+    tensor([[1.0779, 0.0383],
+            [0.0000, 0.0000]], dtype=torch.float64)
 
 .. function:: where(condition) -> tuple of LongTensor
 
