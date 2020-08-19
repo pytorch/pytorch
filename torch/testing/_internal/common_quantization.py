@@ -171,6 +171,11 @@ class QuantizationTestCase(TestCase):
                               2 : self.img_data_2d,
                               3 : self.img_data_3d}
 
+        # quant types that produce statically quantized ops
+        self.static_quant_types = [QuantType.STATIC, QuantType.QAT]
+        # All quant types for (fx based) graph mode quantization
+        self.all_quant_types = [QuantType.DYNAMIC, QuantType.STATIC, QuantType.QAT]
+
     def checkNoPrepModules(self, module):
         r"""Checks the module does not contain child
             modules for quantization prepration, e.g.
@@ -408,6 +413,9 @@ class QuantizationTestCase(TestCase):
                 is the target function for call_function and
                 type of the module for call_module
         """
+        # TODO: make img_data a single example instead of a list
+        if type(inputs) == list:
+            inputs = inputs[0]
         if quant_type == QuantType.QAT:
             model.train()
         else:
