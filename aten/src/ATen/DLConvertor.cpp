@@ -212,7 +212,7 @@ Tensor fromDLPack(const DLManagedTensor* src) {
   Device device = getATenDevice(src->dl_tensor.ctx);
   ScalarType stype = toScalarType(src->dl_tensor.dtype);
   auto deleter = [src](void* self) {
-    src->deleter(const_cast<DLManagedTensor*>(src));
+    if (src->deleter) src->deleter(const_cast<DLManagedTensor*>(src));
   };
   if (!src->dl_tensor.strides) {
     return at::from_blob(src->dl_tensor.data,
