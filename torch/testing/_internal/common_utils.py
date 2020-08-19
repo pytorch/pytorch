@@ -387,6 +387,44 @@ def skipIfRocm(fn):
             fn(*args, **kwargs)
     return wrapper
 
+# This decorator can be used for API tests that call torch.set_deterministic().
+# When the test is finished, it will restore the previous deterministic flag
+# setting. Also, if CUDA >= 10.2, this will set the environment variable 
+# CUBLAS_WORKSPACE_CONFIG=:4096:8 so that the error associated with that setting
+# is not thrown during the test unless the test changes that variable on purpose.
+# The previous CUBLAS_WORKSPACE_CONFIG setting will also be restored once the
+# test is finished.
+def wrapDeterministicFlagAPITest(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        deterministic_restore = torch.is_deterministic()
+
+        is_cuda10_2_or_higher = (
+            (torch.version.cuda is not None)
+            and ([int(x) for x in torch.version.cuda.split(".")] >= [10, 2]))
+
+        if is_cuda10_2_or_higher:
+            cublas_var_name = 'CUBLAS_WORKSPACE_CONFIG'
+            cublas_config_restore = os.environ.get(cublas_var_name)
+            os.environ[cublas_var_name] = ':4096:8'
+
+        def restore():
+            torch.set_deterministic(deterministic_restore)
+            if is_cuda10_2_or_higher:
+                cur_cublas_config = os.environ.get(cublas_var_name)
+                if cublas_config_restore is None:
+                    if cur_cublas_config is not None:
+                        del os.environ[cublas_var_name]
+                else:
+                    os.environ[cublas_var_name] = cublas_config_restore
+        try:
+            fn(*args, **kwargs)
+        except RuntimeError:
+            restore()
+            raise
+        else:
+            restore()
+    return wrapper
 
 def skipIfCompiledWithoutNumpy(fn):
     # Even if the numpy module is present, if `USE_NUMPY=0` is used during the
@@ -868,7 +906,8 @@ class TestCase(expecttest.TestCase):
     #   arguments then wrap the function in a lambda or pass a partial function.
     # TODO: support bfloat16 comparisons
     # TODO: add args/kwargs for passing to assertEqual (e.g. rtol, atol)
-    def compare_with_numpy(self, torch_fn, np_fn, tensor_like, device=None, dtype=None):
+    def compare_with_numpy(self, torch_fn, np_fn, tensor_like,
+                           device=None, dtype=None, **kwargs):
         assert TEST_NUMPY
         assert dtype is not torch.bfloat16
 
@@ -893,7 +932,7 @@ class TestCase(expecttest.TestCase):
                 #   for example, the array has negative strides.
                 np_result = torch.from_numpy(np_result.copy())
 
-        self.assertEqual(np_result, torch_result)
+        self.assertEqual(np_result, torch_result, **kwargs)
 
     # Some analysis of tolerance by logging tests from test_torch.py can be found
     # in https://github.com/pytorch/pytorch/pull/32538.
