@@ -16,6 +16,15 @@ static auto processGroupWork =
     .def("source_rank", &::c10d::ProcessGroup::Work::sourceRank)
     .def("synchronize", &::c10d::ProcessGroup::Work::synchronize);
 
+// Torchbind AllToAllOptions to make it available in TorchScript
+// NOTE: we only exposed the constructor, and didn't expose the
+// attributs to Python/TS yet because of TorchBind limitation
+// TODO: remove pybind and universally use TorchBind when TorchBind
+// could handle std::chrono like pybind
+static auto allToAllOptions =
+  torch::class_<::c10d::AllToAllOptions>("dist_c10d", "AllToAllOption")
+    .def(torch::init<>());
+
 static auto processGroup =
   torch::class_<::c10d::ProcessGroup>("dist_c10d", "ProcessGroup");
 

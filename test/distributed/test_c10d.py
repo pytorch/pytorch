@@ -616,6 +616,12 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         pg.broadcast(xs).wait()
         self.assertEqual(0, xs[0].numel())
 
+        # @torch.jit.script
+        # def test_process_group_script(pg: torch.classes.dist_c10d.ProcessGroup) -> torch.classes.dist_c10d.ProcessGroup:
+        #     return pg
+
+        # test_process_group_script(pg)
+
     def test_broadcast_checks(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
