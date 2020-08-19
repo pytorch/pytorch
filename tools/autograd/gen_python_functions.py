@@ -38,7 +38,7 @@ from .utils import write, is_tensor_method
 from tools.codegen.code_template import CodeTemplate
 
 #
-# declarations blacklist
+# declarations blocklist
 # We skip codegen for these functions, for various reasons.
 # Future PRs will categorize this list and eliminate or hoist
 # them out of eager-only codegen.
