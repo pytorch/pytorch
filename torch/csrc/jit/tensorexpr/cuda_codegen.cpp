@@ -266,20 +266,33 @@ void CudaPrinter::visit(const Intrinsics* v) {
 void CudaPrinter::visit(const Load* v) {
   // TODO: find a better metric in using ldg or not. Support different dtypes.
   if (v->dtype().scalar_type() == ScalarType::Half) {
-    os() << "__half2float(" << *v->base_handle() << "[" << *v->flat_index()
-         << "])";
-  } else {
-    // Detects whether the load target is also a store target.
-    // TODO: this is currently too wide. It detects whether a store-target
-    // exists within the program. In fact, this check is only necessary within a
-    // kernel.
-    if (!cuda_analysis_->is_buf_store_target(v->buf())) {
-      // Cuda __ldg can only be applied on read-only buffers.
-      os() << "__ldg(" << *v->base_handle() << " + " << *v->flat_index() << ")";
+    if (v->indices().empty()) {
+      os() << "__half2float(" << *v->base_handle() << ")";
     } else {
-      os() << *v->base_handle() << "[" << *v->flat_index() << "]";
+      os() << "__half2float(" << *v->base_handle() << "[" << *v->flat_index()
+           << "])";
     }
+    return;
   }
+  // Detects whether the load target is also a store target.
+  // TODO: this is currently too wide. It detects whether a store-target
+  // exists within the program. In fact, this check is only necessary within a
+  // kernel.
+  if (v->indices().empty()) {
+    os() << *v->base_handle();
+    return;
+  }
+  if (v->dtype().scalar_type() == ScalarType::Bool) {
+    // There's no __ldg overload for bool.
+    os() << *v->base_handle() << "[" << *v->flat_index() << "]";
+    return;
+  }
+  if (cuda_analysis_->is_buf_store_target(v->buf())) {
+    // Cuda __ldg can only be applied on read-only buffers.
+    os() << *v->base_handle() << "[" << *v->flat_index() << "]";
+    return;
+  }
+  os() << "__ldg(" << *v->base_handle() << " + " << *v->flat_index() << ")";
 }
 
 // TODO: maybe this should be a more shared location?
@@ -312,6 +325,9 @@ static bool isAtomicAdd(const Store* v, const Expr** atomic_add_value) {
   if (v->base_handle() != load_v->base_handle()) {
     return false;
   }
+  if (v->indices().empty() && load_v->indices().empty()) {
+    return false;
+  }
   bool index_equal = CheckEqual(v->flat_index(), load_v->flat_index());
   if (index_equal) {
     *atomic_add_value = add_v->rhs();
@@ -333,7 +349,11 @@ class AtomicAddFuser : public IRMutator {
 
 void CudaPrinter::visit(const Store* v) {
   emitIndent();
-  os() << *v->base_handle() << "[" << *v->flat_index() << "] = ";
+  if (v->indices().empty()) {
+    os() << *v->base_handle() << " = ";
+  } else {
+    os() << *v->base_handle() << "[" << *v->flat_index() << "] = ";
+  }
   if (v->value()->dtype().scalar_type() == ScalarType::Half) {
     os() << "__float2half(" << *v->value() << ");";
   } else {
@@ -855,15 +875,24 @@ void CudaCodeGen::call(const std::vector<CallArg>& args) {
 
   std::vector<int> gpu_block_extents_v(3, 1);
   std::vector<int> gpu_thread_extents_v(3, 1);
+
   // evaluate all the block/thread extents into values
   // TODO: eventually, codegen these calculations and make them part of the
   // module.
   for (size_t i = 0; i < gpu_block_extents.size(); i++) {
+    if (gpu_block_extents[i]->isConstant()) {
+      gpu_block_extents_v[i] = immediateAs<int>(gpu_block_extents[i]);
+      continue;
+    }
     ExprEval<SimpleIREvaluator> eval(
         ExprHandle(gpu_block_extents[i]), buffer_args());
     gpu_block_extents_v[i] = eval.value<int>(args);
   }
   for (size_t i = 0; i < gpu_thread_extents.size(); i++) {
+    if (gpu_thread_extents[i]->isConstant()) {
+      gpu_thread_extents_v[i] = immediateAs<int>(gpu_thread_extents[i]);
+      continue;
+    }
     ExprEval<SimpleIREvaluator> eval(
         ExprHandle(gpu_thread_extents[i]), buffer_args());
     gpu_thread_extents_v[i] = eval.value<int>(args);

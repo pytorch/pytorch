@@ -9,10 +9,8 @@ void verify_list(TensorList tensors) {
   TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
   auto expected_dtype = tensors[0].dtype();
   auto expected_device = tensors[0].device();
-  auto expected_sizes = tensors[0].sizes();
 
   for (const auto& t : tensors) {
-    TORCH_CHECK(t.sizes() == expected_sizes, "All tensors in the tensor list must have the same size.");
     TORCH_CHECK(t.dtype() == expected_dtype, "All tensors in the tensor list must have the same dtype.");
     TORCH_CHECK(t.device() == expected_device, "All tensors in the tensor list must have the same device.");
   }
@@ -60,15 +58,15 @@ void verify_list(TensorList tensors1, TensorList tensors2) {
 
   auto expected_dtype = tensors1[0].dtype();
   auto expected_device = tensors1[0].device();
-  auto expected_sizes = tensors1[0].sizes();
 
   for (int i = 0; i < tensors1.size(); i++) {
-    TORCH_CHECK(tensors1[i].sizes() == expected_sizes, "All tensors in the tensor list must have the same size.");
     TORCH_CHECK(tensors1[i].dtype() == expected_dtype, "All tensors in the tensor list must have the same dtype.");
     TORCH_CHECK(tensors1[i].device() == expected_device, "All tensors in the tensor list must have the same device.");
-    TORCH_CHECK(tensors2[i].sizes() == expected_sizes, "All tensors in the tensor list must have the same size.");
+    
     TORCH_CHECK(tensors2[i].dtype() == expected_dtype, "All tensors in the tensor list must have the same dtype.");
     TORCH_CHECK(tensors2[i].device() == expected_device, "All tensors in the tensor list must have the same device.");
+
+    TORCH_CHECK(tensors1[i].sizes() == tensors2[i].sizes(), "Corresponding tensors in lists must have the same size.");
   }
 }
 
