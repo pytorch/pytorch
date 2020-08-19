@@ -340,7 +340,7 @@ Tensor index_copy(const Tensor & self, int64_t dim, const Tensor & index, const 
 }
 
 
-Tensor& index_add_cpu_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
+Tensor& index_add_cpu_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source, Scalar alpha) {
   dim = maybe_wrap_dim(dim, self.dim());
 
   auto numel = index.numel();
@@ -405,7 +405,7 @@ Tensor& index_add_cpu_(Tensor & self, int64_t dim, const Tensor & index, const T
   return self;
 }
 
-Tensor index_add(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
+Tensor index_add(const Tensor & self, int64_t dim, const Tensor & index, const Tensor & source, Scalar alpha) {
   return self.clone(at::MemoryFormat::Preserve).index_add_(dim, index, source);
 }
 

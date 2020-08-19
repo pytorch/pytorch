@@ -523,7 +523,7 @@
   self: index_backward(zeros_like(self), indices, grad)
   indices: TensorList()
 
-- name: index_add_(Tensor(a!) self, int dim, Tensor index, Tensor source) -> Tensor(a!)
+- name: index_add_(Tensor(a!) self, int dim, Tensor index, Tensor source, Scalar alpha=1) -> Tensor(a!)
   self: grad
   source: grad.index_select(dim, index).expand_as(source)
   index: non_differentiable
