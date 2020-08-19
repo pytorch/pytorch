@@ -33,7 +33,11 @@ CONFIG_TREE_DATA = [
                     ("cuda_gcc_override", [X("gcc5.4")]),
                 ])
             ]),
-            ("10.1", [X("3.6")]),
+            ("10.1", [
+                ("3.6", [
+                    ('build_only', [X(True)]),
+                ]),
+            ]),
             ("10.2", [
                 ("3.6", [
                     ("important", [X(True)]),
