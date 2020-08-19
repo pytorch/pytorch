@@ -455,9 +455,63 @@ void transformer_encoder_test_helper(bool is_cuda) {
   ASSERT_TRUE(torch::allclose(result, ref_output, 1e-7, 1e-5, /*equal_nan=*/true));
 
   // test case 2, multiple layers no norm
-  model = TransformerEncoder(TransformerEncoderOptions(encoder_layer, 3));
+  model = TransformerEncoder(TransformerEncoderOptions(encoder_layer, 2));
+  if (is_cuda) {
+    model->to(torch::kCUDA);
+  }
+  result = model(encoder_input, /*src_mask=*/torch::Tensor{}, /*src_key_padding_mask=*/mask).detach();
+  ref_output = torch::tensor({
+    {{2.419051, 0.017446, -0.608738, -0.085003}, {2.419102, 0.017452, -0.608703, -0.085026}},
+    {{2.419043, 0.017445, -0.608744, -0.084999}, {2.419052, 0.017446, -0.608738, -0.085004}},
+    {{2.419067, 0.017448, -0.608727, -0.085010}, {2.419098, 0.017452, -0.608706, -0.085024}},
+    {{2.419072, 0.017449, -0.608724, -0.085012}, {2.419119, 0.017455, -0.608691, -0.085034}},
+    {{2.419019, 0.017442, -0.608761, -0.084989}, {2.419075, 0.017449, -0.608722, -0.085014}}}, tensor_options);
+  ASSERT_EQ(result.sizes(), ref_output.sizes());
+  ASSERT_TRUE(torch::allclose(result, ref_output, 1e-7, 1e-5, /*equal_nan=*/true));
 
+  model = TransformerEncoder(TransformerEncoderOptions(encoder_layer, 6));
+  if (is_cuda) {
+    model->to(torch::kCUDA);
+  }
+  result = model(encoder_input, /*src_mask=*/torch::Tensor{}, /*src_key_padding_mask=*/mask).detach();
+  ref_output = torch::tensor({
+    {{2.419101, 0.017453, -0.608703, -0.085025}, {2.419101, 0.017453, -0.608704, -0.085025}},
+    {{2.419101, 0.017453, -0.608703, -0.085025}, {2.419101, 0.017453, -0.608704, -0.085025}},
+    {{2.419101, 0.017453, -0.608703, -0.085025}, {2.419101, 0.017453, -0.608704, -0.085025}},
+    {{2.419101, 0.017453, -0.608703, -0.085025}, {2.419101, 0.017453, -0.608704, -0.085025}},
+    {{2.419101, 0.017453, -0.608703, -0.085025}, {2.419101, 0.017453, -0.608704, -0.085025}}}, tensor_options);
+  ASSERT_EQ(result.sizes(), ref_output.sizes());
+  ASSERT_TRUE(torch::allclose(result, ref_output, 1e-7, 1e-5, /*equal_nan=*/true));
 
+  // test case 3, multiple layers with norm
+  LayerNorm norm(LayerNormOptions({encoder_layer.get()->options.d_model()}));
+  model = TransformerEncoder(TransformerEncoderOptions(encoder_layer, 2).norm(AnyModule(norm)));
+  if (is_cuda) {
+    model->to(torch::kCUDA);
+  }
+  result = model(encoder_input, /*src_mask=*/torch::Tensor{}, /*src_key_padding_mask=*/mask).detach();
+  ref_output = torch::tensor({
+    {{1.695949, -0.357635, -0.893077, -0.445238}, {1.695955, -0.357639, -0.893050, -0.445266}},
+    {{1.695948, -0.357634, -0.893082, -0.445233}, {1.695950, -0.357635, -0.893077, -0.445238}},
+    {{1.695951, -0.357636, -0.893069, -0.445246}, {1.695955, -0.357639, -0.893052, -0.445264}},
+    {{1.695952, -0.357636, -0.893066, -0.445249}, {1.695957, -0.357641, -0.893041, -0.445276}},
+    {{1.695946, -0.357632, -0.893095, -0.445220}, {1.695952, -0.357637, -0.893065, -0.445251}}}, tensor_options);
+  ASSERT_EQ(result.sizes(), ref_output.sizes());
+  ASSERT_TRUE(torch::allclose(result, ref_output, 1e-7, 1e-5, /*equal_nan=*/true));
+
+  model = TransformerEncoder(TransformerEncoderOptions(encoder_layer, 6).norm(AnyModule(norm)));
+  if (is_cuda) {
+    model->to(torch::kCUDA);
+  }
+  result = model(encoder_input, /*src_mask=*/torch::Tensor{}, /*src_key_padding_mask=*/mask).detach();
+  ref_output = torch::tensor({
+    {{1.695955, -0.357639, -0.893051, -0.445265}, {1.695955, -0.357639, -0.893051, -0.445265}},
+    {{1.695955, -0.357639, -0.893051, -0.445265}, {1.695955, -0.357639, -0.893051, -0.445265}},
+    {{1.695955, -0.357639, -0.893051, -0.445265}, {1.695955, -0.357639, -0.893051, -0.445265}},
+    {{1.695955, -0.357639, -0.893051, -0.445265}, {1.695955, -0.357639, -0.893051, -0.445265}},
+    {{1.695955, -0.357639, -0.893051, -0.445265}, {1.695955, -0.357639, -0.893051, -0.445265}}}, tensor_options);
+  ASSERT_EQ(result.sizes(), ref_output.sizes());
+  ASSERT_TRUE(torch::allclose(result, ref_output, 1e-7, 1e-5, /*equal_nan=*/true));
 }
 
 TEST_F(TransformerTest, TransformerEncoder) {

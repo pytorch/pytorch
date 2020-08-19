@@ -275,7 +275,7 @@ Tensor TransformerEncoderImpl::forward(
     output = layers->at<TransformerEncoderLayerImpl>(0).forward(src, src_mask, src_key_padding_mask);
   }
   for (size_t i = 1; i < num_layers; ++i) {
-    output = layers->at<TransformerEncoderLayerImpl>(i).forward(src, src_mask, src_key_padding_mask);
+    output = layers->at<TransformerEncoderLayerImpl>(i).forward(output, src_mask, src_key_padding_mask);
   }
 
   if (!norm.is_empty()) {
