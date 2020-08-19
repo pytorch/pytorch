@@ -320,7 +320,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${TORCH_SRC_DIR}/csrc/jit/generated/generated_unboxing_wrappers_2.cpp"
     )
 
-  if(BUILD_MOBILE_AUTOGRAD)
+  if(NOT INTERN_DISABLE_AUTOGRAD)
     list(APPEND GENERATED_CXX_TORCH
       "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_0.cpp"
       "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_1.cpp"
@@ -340,7 +340,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${TORCH_SRC_DIR}/csrc/autograd/generated/variable_factories.h"
     )
 
-  if(BUILD_MOBILE_AUTOGRAD)
+  if(NOT INTERN_DISABLE_AUTOGRAD)
     list(APPEND GENERATED_H_TORCH
       "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType.h"
     )
@@ -378,7 +378,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${PYTHON_EXECUTABLE}" tools/setup_helpers/generate_code.py
       --declarations-path "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
       --nn-path "aten/src"
-      $<$<NOT:$<BOOL:${BUILD_MOBILE_AUTOGRAD}>>:--disable-autograd>
+      $<$<BOOL:${INTERN_DISABLE_AUTOGRAD}>:--disable-autograd>
       $<$<BOOL:${SELECTED_OP_LIST}>:--selected-op-list-path="${SELECTED_OP_LIST}">
       --force_schema_registration
     DEPENDS
@@ -442,13 +442,13 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
        ${TORCH_SRC_DIR}/csrc/jit/mobile/module.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/observer.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/interpreter.cpp
-       ${TORCH_SRC_DIR}/csrc/jit/mobile/export.cpp
+       ${TORCH_SRC_DIR}/csrc/jit/mobile/export_data.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/optim/sgd.cpp
        )
     list(APPEND TORCH_SRCS ${MOBILE_SRCS})
   endif()
 
-  if(BUILD_MOBILE_AUTOGRAD)
+  if(NOT INTERN_DISABLE_AUTOGRAD)
     list(APPEND TORCH_SRCS
       ${TORCH_SRC_DIR}/csrc/autograd/TraceTypeManual.cpp
       ${TORCH_SRC_DIR}/csrc/autograd/VariableTypeManual.cpp
@@ -480,6 +480,10 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/compute_at.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/dispatch.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/expr_evaluator.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/executor.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/executor_kernel_arg.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/executor_launch_params.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/executor_utils.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/fusion.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/graph_fuser.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/index_compute.cpp
@@ -491,9 +495,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/iter_visitor.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/kernel.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/kernel_cache.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/manager.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/shape_inference.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/mutator.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/kernel_ir.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower_index.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower_loops.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower_thread_predicate.cpp
@@ -501,16 +503,19 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower_utils.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower_validation.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower2device.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/manager.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/mutator.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/parser.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/partition.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/predicate_compute.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/register_interface.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/scheduler.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/shape_inference.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/tensor_view.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/transform_iter.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/transform_replay.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/transform_rfactor.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/type.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/utils.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/register_interface.cpp
       ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/cuda_codegen.cpp
     )
     add_library(caffe2_nvrtc SHARED ${ATen_NVRTC_STUB_SRCS})
