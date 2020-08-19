@@ -10,6 +10,7 @@
 #include <string>
 #include <tuple>
 #include <vector>
+#include "jit/frontend/concrete_module_type.h"
 
 #include <Python.h>
 
@@ -487,10 +488,15 @@ std::shared_ptr<SugaredValue> ModuleValue::tryGetAttr(
   if (selfType->hasAttribute(field) &&
       selfType->getAttribute(field)->is_module()) {
     // ...if it's a submodule, return it as a new ModuleValue.
-    const auto submoduleConcreteType =
-        concreteType_->findSubmoduleConcreteType(field);
+    if (const auto submoduleConcreteType =
+            concreteType_->findSubmoduleConcreteType(field)) {
+      return std::make_shared<ModuleValue>(
+          m.graph()->insertGetAttr(self_, field), submoduleConcreteType);
+    }
+
     return std::make_shared<ModuleValue>(
-        m.graph()->insertGetAttr(self_, field), submoduleConcreteType);
+        m.graph()->insertGetAttr(self_, field),
+        ConcreteModuleType::fromJitType(selfType->getAttribute(field)));
   } else if (selfType->hasAttribute(field) || selfType->findMethod(field)) {
     // ...otherwise, methods, parameters, attributes, and buffers are all
     // first class so they get returned as SimpleValues

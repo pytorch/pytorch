@@ -15182,6 +15182,38 @@ a")
         with self.assertRaisesRegex(RuntimeError, 'has no attribute'):
             torch.jit.script(wrapped)
 
+    def test_rescripting_loaded_modules(self):
+        class InnerSubmod(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("foo", torch.ones(1))
+
+            def forward(self, x):
+                return x + x
+
+        class Inner(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.submod = InnerSubmod()
+
+            def forward(self, x):
+                return self.submod(x)
+
+        class Wrapper(nn.Module):
+            def __init__(self, inner):
+                super().__init__()
+                self.inner = inner
+
+            def forward(self, x):
+                # access inn eelem
+                return self.inner.submod(x) + self.inner.submod.foo
+
+        inner_module = torch.jit.script(Inner())
+        inner_module = self.getExportImportCopy(inner_module)
+        wrapped = Wrapper(inner_module)
+        self.checkModule(wrapped, torch.ones(1))
+
+
 
 # known to be failing in tracer
 EXCLUDE_TRACED = {
