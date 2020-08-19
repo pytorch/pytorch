@@ -38,7 +38,7 @@ class TestBiasCorrection(QuantizationTestCase):
                 if x is not None:
                     x.data = x.data * 3
 
-        bias_correction(float_model, artificial_model, img_data, white_list=_supported_modules)
+        bias_correction(float_model, artificial_model, img_data, target_modules=_supported_modules)
 
         for name, submodule in artificial_model.named_modules():
             if isinstance(submodule, ns.Shadow):
@@ -74,7 +74,7 @@ class TestBiasCorrection(QuantizationTestCase):
                 if x is not None:
                     submodule.set_weight_bias(weight, x.data * 3)
 
-        bias_correction(float_model, artificial_model, img_data, white_list=_supported_modules_quantized)
+        bias_correction(float_model, artificial_model, img_data, target_modules=_supported_modules_quantized)
 
         # Trims off the shadow module,
         for name, submodule in artificial_model.named_modules():
