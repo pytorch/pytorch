@@ -479,13 +479,13 @@ bool isUnrolledFor(const Expr* expr) {
       ParallelType::Unroll;
 }
 
-const std::unordered_map<ParallelType, int> ParallelTypeBitmap::pt_to_offset_{
-    {ParallelType::BIDx, 0},
-    {ParallelType::BIDy, 1},
-    {ParallelType::BIDz, 2},
-    {ParallelType::TIDx, 3},
-    {ParallelType::TIDy, 4},
-    {ParallelType::TIDz, 5}};
+const std::unordered_map<ParallelType, int, TypeHash>
+    ParallelTypeBitmap::pt_to_offset_{{ParallelType::BIDx, 0},
+                                      {ParallelType::BIDy, 1},
+                                      {ParallelType::BIDz, 2},
+                                      {ParallelType::TIDx, 3},
+                                      {ParallelType::TIDy, 4},
+                                      {ParallelType::TIDz, 5}};
 
 const std::unordered_map<int, ParallelType> ParallelTypeBitmap::offset_to_pt_ =
     {{0, ParallelType::BIDx},
@@ -554,7 +554,7 @@ bool ParallelTypeBitmap::operator[](size_t pos) const {
 std::map<ParallelType, bool> ParallelTypeBitmap::getMap() const {
   std::map<ParallelType, bool> map;
   for (const auto& pt_offset : pt_to_offset_) {
-    map.emplace(std::make_pair(pt_offset.first, bitset_[pt_offset.second]));
+    map.emplace(pt_offset.first, bitset_[pt_offset.second]);
   }
   return map;
 }
