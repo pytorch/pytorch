@@ -67,6 +67,7 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
             if not is_mkldnn:
                 return fn(input).clone()
             else:
+                # convert the dense vector back to have mkldnn layout
                 return fn([x.to_mkldnn()])
 
         orig = x[idx].item()
@@ -74,8 +75,7 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
         outa = fn_out(is_mkldnn)
         x[idx] = orig + eps
         outb = fn_out(is_mkldnn)
-        if not is_mkldnn:
-            x[idx] = orig
+        x[idx] = orig
         r = (outb - outa) / (2 * eps)
         return r.detach().reshape(-1)
 
