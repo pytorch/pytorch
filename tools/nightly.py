@@ -180,8 +180,10 @@ def check_in_repo():
         return "Not in PyTorch repo, 'PyTorch' not found in setup.py"
 
 
-def check_branch(branch):
+def check_branch(subcommand, branch):
     """Checks that the branch name can be checked out."""
+    if subcommand != "checkout":
+        return
     # first make sure actual branch name was given
     if branch is None:
         return "Branch name to checkout must be supplied with '-b' option"
@@ -533,8 +535,11 @@ def install(
 
 
 def make_parser():
-    p = ArgumentParser("nightly-checkout")
-    p.add_argument(
+    p = ArgumentParser("nightly")
+    # subcommands
+    subcmd = p.add_subparsers(dest="subcmd", help="subcommand to execute")
+    co = subcmd.add_parser("checkout", help="checkout a new branch")
+    co.add_argument(
         "-b",
         "--branch",
         help="Branch name to checkout",
@@ -542,45 +547,48 @@ def make_parser():
         default=None,
         metavar="NAME",
     )
-    p.add_argument(
-        "-n",
-        "--name",
-        help="Name of environment",
-        dest="name",
-        default=None,
-        metavar="ENVIRONMENT",
-    )
-    p.add_argument(
-        "-p",
-        "--prefix",
-        help="Full path to environment location (i.e. prefix)",
-        dest="prefix",
-        default=None,
-        metavar="PATH",
-    )
-    p.add_argument(
-        "-v",
-        "--verbose",
-        help="Provide debugging info",
-        dest="verbose",
-        default=False,
-        action="store_true",
-    )
-    p.add_argument(
-        "--override-channels",
-        help="Do not search default or .condarc channels.",
-        dest="override_channels",
-        default=False,
-        action="store_true",
-    )
-    p.add_argument(
-        "-c",
-        "--channel",
-        help="Additional channel to search for packages. 'pytorch-nightly' will always be prepended to this list.",
-        dest="channels",
-        action="append",
-        metavar="CHANNEL",
-    )
+    # general arguments
+    subps = [co]
+    for subp in subps:
+        subp.add_argument(
+            "-n",
+            "--name",
+            help="Name of environment",
+            dest="name",
+            default=None,
+            metavar="ENVIRONMENT",
+        )
+        subp.add_argument(
+            "-p",
+            "--prefix",
+            help="Full path to environment location (i.e. prefix)",
+            dest="prefix",
+            default=None,
+            metavar="PATH",
+        )
+        subp.add_argument(
+            "-v",
+            "--verbose",
+            help="Provide debugging info",
+            dest="verbose",
+            default=False,
+            action="store_true",
+        )
+        subp.add_argument(
+            "--override-channels",
+            help="Do not search default or .condarc channels.",
+            dest="override_channels",
+            default=False,
+            action="store_true",
+        )
+        subp.add_argument(
+            "-c",
+            "--channel",
+            help="Additional channel to search for packages. 'pytorch-nightly' will always be prepended to this list.",
+            dest="channels",
+            action="append",
+            metavar="CHANNEL",
+        )
     return p
 
 
@@ -590,7 +598,7 @@ def main(args=None):
     p = make_parser()
     ns = p.parse_args(args)
     status = check_in_repo()
-    status = status or check_branch(ns.branch)
+    status = status or check_branch(ns.subcmd, ns.branch)
     if status:
         sys.exit(status)
     channels = ["pytorch-nightly"]
