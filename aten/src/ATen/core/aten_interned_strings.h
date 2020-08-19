@@ -451,6 +451,7 @@ _(aten, masked_select) \
 _(aten, matmul) \
 _(aten, matrix_power) \
 _(aten, matrix_rank) \
+_(aten, matrix_exp) \
 _(aten, max) \
 _(aten, max_pool1d) \
 _(aten, max_pool1d_with_indices) \
