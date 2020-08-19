@@ -74,8 +74,8 @@ const char* toString(DispatchKey t) {
     case DispatchKey::Tracer:
       return "Tracer";
 
-    case DispatchKey::XLAPreAutograd:
-      return "XLAPreAutograd";
+    case DispatchKey::AutogradXLA:
+      return "AutogradXLA";
 
     case DispatchKey::Autocast:
       return "Autocast";
