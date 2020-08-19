@@ -59,6 +59,9 @@ const PyModule load(const char* filename) {
 PyModule::PyModule(py::object model) : _model(model) {}
 
 PyModule::~PyModule() {
+  PyGILState_STATE gil_state = PyGILState_Ensure();
+  { _model.dec_ref(); }
+  PyGILState_Release(gil_state);
   assert(_thread_states.empty());
 }
 
@@ -85,11 +88,12 @@ at::Tensor PyModule::forward(at::Tensor input) {
   std::thread::id this_id = std::this_thread::get_id();
   std::cout << "forward: thread id " << this_id << std::endl;
   PyGILState_STATE gil_state = PyGILState_Ensure();
-  py::object forward = _model.attr("forward");
-  std::cout << "  called forward" << std::endl;
-  py::object py_output = forward(input);
-  std::cout << "  casting output" << std::endl;
-  output = std::move(py::cast<at::Tensor>(py_output));
+  {
+    py::object forward = _model.attr("forward");
+    py::object py_output = forward(input);
+    std::cout << "  casting output" << std::endl;
+    output = std::move(py::cast<at::Tensor>(py_output));
+  }
   PyGILState_Release(gil_state);
 
   std::cout << "sanitizing output" << std::endl;
