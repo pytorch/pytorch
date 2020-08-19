@@ -15,10 +15,10 @@ using c10::either;
 using c10::FunctionSchema;
 using c10::IValue;
 using c10::ListType;
-using c10::OptionalType;
 using c10::make_left;
 using c10::make_right;
 using c10::OperatorName;
+using c10::OptionalType;
 
 namespace torch {
 namespace jit {
