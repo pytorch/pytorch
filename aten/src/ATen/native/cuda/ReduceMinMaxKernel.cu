@@ -30,23 +30,15 @@ void min_values_kernel_cuda_impl(TensorIterator& iter) {
 }
 
 void max_values_kernel_cuda(TensorIterator& iter) {
-  if (iter.dtype(1) == kHalf) {
-    max_values_kernel_cuda_impl<at::Half, float>(iter);
-  } else {
-    AT_DISPATCH_ALL_TYPES(iter.dtype(), "max_values_cuda", [&]() {
-      max_values_kernel_cuda_impl<scalar_t>(iter);
-    });
-  }
+  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.dtype(), "max_values_cuda", [&]() {
+    max_values_kernel_cuda_impl<scalar_t>(iter);
+  });
 }
 
 void min_values_kernel_cuda(TensorIterator& iter) {
-  if (iter.dtype(1) == kHalf) {
-    min_values_kernel_cuda_impl<at::Half, float>(iter);
-  } else {
-    AT_DISPATCH_ALL_TYPES(iter.dtype(), "min_values_cuda", [&]() {
-      min_values_kernel_cuda_impl<scalar_t>(iter);
-    });
-  }
+  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBool, iter.dtype(), "min_values_cuda", [&]() {
+    min_values_kernel_cuda_impl<scalar_t>(iter);
+  });
 }
 
 template <typename scalar_t, typename acc_t=scalar_t>
