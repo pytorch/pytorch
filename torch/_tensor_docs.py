@@ -216,6 +216,18 @@ acosh_() -> Tensor
 In-place version of :meth:`~Tensor.acosh`
 """)
 
+add_docstr_all('arccosh', r"""
+acosh() -> Tensor
+
+See :func:`torch.arccosh`
+""")
+
+add_docstr_all('arccosh_', r"""
+acosh_() -> Tensor
+
+In-place version of :meth:`~Tensor.arccosh`
+""")
+
 add_docstr_all('add',
                r"""
 add(other, *, alpha=1) -> Tensor
@@ -799,21 +811,10 @@ clip_(min, max) -> Tensor
 Alias for :meth:`~Tensor.clamp_`.
 """)
 
-add_docstr_all('clone',
-               r"""
-clone(memory_format=torch.preserve_format) -> Tensor
+add_docstr_all('clone', r"""
+clone(*, memory_format=torch.preserve_format) -> Tensor
 
-Returns a copy of the :attr:`self` tensor. The copy has the same size and data
-type as :attr:`self`.
-
-.. note::
-
-    This function is differentiable and so gradients will flow back to the original
-    Tensor. If you want to get a Tensor that is independent from the point of view
-    of the autograd, see :meth:`~Tensor.detach`.
-
-Args:
-    {memory_format}
+See :func:`torch.clone`
 """.format(**common_args))
 
 add_docstr_all('contiguous',
@@ -2008,6 +2009,13 @@ matrix_power(n) -> Tensor
 See :func:`torch.matrix_power`
 """)
 
+add_docstr_all('matrix_exp',
+               r"""
+matrix_exp() -> Tensor
+
+See :func:`torch.matrix_exp`
+""")
+
 add_docstr_all('max',
                r"""
 max(dim=None, keepdim=False) -> Tensor or (Tensor, Tensor)
@@ -2062,6 +2070,12 @@ add_docstr_all('mode',
 mode(dim=None, keepdim=False) -> (Tensor, LongTensor)
 
 See :func:`torch.mode`
+""")
+
+add_docstr_all('movedim', r"""
+movedim(source, destination) -> Tensor
+
+See :func:`torch.movedim`
 """)
 
 add_docstr_all('mul',
@@ -2177,6 +2191,18 @@ nelement() -> int
 Alias for :meth:`~Tensor.numel`
 """)
 
+add_docstr_all('nextafter',
+               r"""
+nextafter(other) -> Tensor
+See :func:`torch.nextafter`
+""")
+
+add_docstr_all('nextafter_',
+               r"""
+nextafter_(other) -> Tensor
+In-place version of :meth:`~Tensor.nextafter`
+""")
+
 add_docstr_all('nonzero',
                r"""
 nonzero() -> LongTensor
@@ -2228,7 +2254,6 @@ ormqr(input2, input3, left=True, transpose=False) -> Tensor
 
 See :func:`torch.ormqr`
 """)
-
 
 add_docstr_all('permute',
                r"""
