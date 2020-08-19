@@ -230,7 +230,7 @@ class TestQuantizedTensor(TestCase):
 
         def _quantize_per_channel_ref_nd(data, scales, zero_points, float_params):
             dims = data.size()
-            data = data.view(-1, dims[1], np.prod(dims[2:]))
+            data = data.view(-1, dims[axis], np.prod(dims[axis+1:]))
             res = torch.empty_like(data)
             quant_min, quant_max = 0, 255
             for i in range(res.size()[0]):
@@ -277,17 +277,21 @@ class TestQuantizedTensor(TestCase):
         r = torch.rand(3, 2, 4, 5, dtype=torch.float) * 4 - 2
         scales = torch.tensor([0.2, 0.03], dtype=torch.double)
         zero_points = torch.tensor([5, 10], dtype=torch.long)
-        axis = 1
+        self._test_quantize_per_channel(r, scales, zero_points, 1 , False)
 
-        self._test_quantize_per_channel(r, scales, zero_points, axis, False)
+        scales = torch.tensor([0.2, 0.03, 0.5], dtype=torch.double)
+        zero_points = torch.tensor([5, 10, 7], dtype=torch.long)
+        self._test_quantize_per_channel(r, scales, zero_points, 0, False)
 
         # Check 5D tensor.
         r = torch.rand(3, 2, 4, 5, 7, dtype=torch.float) * 4 - 2
         scales = torch.tensor([0.2, 0.03], dtype=torch.double)
         zero_points = torch.tensor([5, 10], dtype=torch.long)
-        axis = 1
+        self._test_quantize_per_channel(r, scales, zero_points, 1, False)
 
-        self._test_quantize_per_channel(r, scales, zero_points, axis, False)
+        scales = torch.tensor([0.2, 0.03, 0.5], dtype=torch.double)
+        zero_points = torch.tensor([5, 10, 7], dtype=torch.long)
+        self._test_quantize_per_channel(r, scales, zero_points, 0, False)
 
     def test_quantize_per_channel_float_qparams(self):
         r = torch.rand(3, 2, dtype=torch.float) * 4
@@ -313,11 +317,23 @@ class TestQuantizedTensor(TestCase):
 
         # Check 4D tensor with 2 different memory formats.
         r = torch.rand(3, 2, 4, 5, dtype=torch.float) * 4
-        self._test_quantize_per_channel(r, scales, zero_points, axis, True)
+        scales = torch.tensor([0.2, 0.03], dtype=torch.float)
+        zero_points = torch.tensor([0.1, 0.2], dtype=torch.float)
+        self._test_quantize_per_channel(r, scales, zero_points, 1, True)
+
+        scales = torch.tensor([0.2, 0.03, 0.5], dtype=torch.float)
+        zero_points = torch.tensor([0.1, 0.2, 1.], dtype=torch.float)
+        self._test_quantize_per_channel(r, scales, zero_points, 0, True)
 
         # Check 5D tensor.
         r = torch.rand(3, 2, 4, 5, 7, dtype=torch.float) * 4 - 2
-        self._test_quantize_per_channel(r, scales, zero_points, axis, True)
+        scales = torch.tensor([0.2, 0.03], dtype=torch.float)
+        zero_points = torch.tensor([0.1, 0.2], dtype=torch.float)
+        self._test_quantize_per_channel(r, scales, zero_points, 1, True)
+
+        scales = torch.tensor([0.2, 0.03, 0.5], dtype=torch.float)
+        zero_points = torch.tensor([0.1, 0.2, 1.], dtype=torch.float)
+        self._test_quantize_per_channel(r, scales, zero_points, 0, True)
 
     def test_qtensor_permute(self):
         scale = 0.02
