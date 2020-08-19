@@ -981,14 +981,7 @@ void Reducer::finalize_backward() {
           comm_hook_->processFuture(bucket.future_work->value());
 
       for (size_t i = 0; i < future_result.size(); i++) {
-        if (bucket.expect_sparse_gradient) {
-          bucket.replicas[i].contents.copy_(future_result[i]);
-        } else {
-          // Reinitialize bucket_views with the future_result by following
-          // the same logic in `inititalize_buckets`.
-          bucket.replicas[i].bucket_views.clear();
-          initialize_bucketviews(bucket.replicas[i], future_result[i]);
-        }
+        bucket.replicas[i].contents.copy_(future_result[i]);
       }
     }
     if (!bucket.expect_sparse_gradient) {
