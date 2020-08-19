@@ -522,6 +522,60 @@ TEST_F(TransformerTest, TransformerEncoder_CUDA) {
   transformer_encoder_test_helper(true);
 }
 
+TEST_F(TransformerTest, PrettyPrintTransformerEncoderLayer) {
+  ASSERT_EQ(
+      c10::str(TransformerEncoderLayer(4, 2)),
+      "torch::nn::TransformerEncoderLayerImpl(\n"
+      "  (self_attn): torch::nn::MultiheadAttention(\n"
+      "    (out_proj): torch::nn::Linear(in_features=4, out_features=4, bias=true)\n"
+      "  )\n"
+      "  (linear1): torch::nn::Linear(in_features=4, out_features=2048, bias=true)\n"
+      "  (dropout): torch::nn::Dropout(p=0.1, inplace=false)\n"
+      "  (linear2): torch::nn::Linear(in_features=2048, out_features=4, bias=true)\n"
+      "  (norm1): torch::nn::LayerNorm([4], eps=1e-05, elementwise_affine=true)\n"
+      "  (norm2): torch::nn::LayerNorm([4], eps=1e-05, elementwise_affine=true)\n"
+      "  (dropout1): torch::nn::Dropout(p=0.1, inplace=false)\n"
+      "  (dropout2): torch::nn::Dropout(p=0.1, inplace=false)\n"
+      ")");
+}
+
+TEST_F(TransformerTest, PrettyPrintTransformerEncoder) {
+  LayerNorm norm = LayerNorm(LayerNormOptions({4}));
+  TransformerEncoderOptions options(
+    TransformerEncoderOptions(TransformerEncoderLayerOptions(4, 2),2).norm(AnyModule(norm)));
+  ASSERT_EQ(
+      c10::str(TransformerEncoder(options)),
+      "torch::nn::TransformerEncoderImpl(\n"
+      "  (layers): torch::nn::ModuleList(\n"
+      "    (0): torch::nn::TransformerEncoderLayerImpl(\n"
+      "      (self_attn): torch::nn::MultiheadAttention(\n"
+      "        (out_proj): torch::nn::Linear(in_features=4, out_features=4, bias=true)\n"
+      "      )\n"
+      "      (linear1): torch::nn::Linear(in_features=4, out_features=2048, bias=true)\n"
+      "      (dropout): torch::nn::Dropout(p=0.1, inplace=false)\n"
+      "      (linear2): torch::nn::Linear(in_features=2048, out_features=4, bias=true)\n"
+      "      (norm1): torch::nn::LayerNorm([4], eps=1e-05, elementwise_affine=true)\n"
+      "      (norm2): torch::nn::LayerNorm([4], eps=1e-05, elementwise_affine=true)\n"
+      "      (dropout1): torch::nn::Dropout(p=0.1, inplace=false)\n"
+      "      (dropout2): torch::nn::Dropout(p=0.1, inplace=false)\n"
+      "    )\n"
+      "    (1): torch::nn::TransformerEncoderLayerImpl(\n"
+      "      (self_attn): torch::nn::MultiheadAttention(\n"
+      "        (out_proj): torch::nn::Linear(in_features=4, out_features=4, bias=true)\n"
+      "      )\n"
+      "      (linear1): torch::nn::Linear(in_features=4, out_features=2048, bias=true)\n"
+      "      (dropout): torch::nn::Dropout(p=0.1, inplace=false)\n"
+      "      (linear2): torch::nn::Linear(in_features=2048, out_features=4, bias=true)\n"
+      "      (norm1): torch::nn::LayerNorm([4], eps=1e-05, elementwise_affine=true)\n"
+      "      (norm2): torch::nn::LayerNorm([4], eps=1e-05, elementwise_affine=true)\n"
+      "      (dropout1): torch::nn::Dropout(p=0.1, inplace=false)\n"
+      "      (dropout2): torch::nn::Dropout(p=0.1, inplace=false)\n"
+      "    )\n"
+      "  )\n"
+      "  (norm): torch::nn::LayerNorm([4], eps=1e-05, elementwise_affine=true)\n"
+      ")");
+}
+
 TEST_F(TransformerTest, PrettyPrintTransformerDecoderLayer) {
   ASSERT_EQ(
       c10::str(TransformerDecoderLayer(4, 2)),
