@@ -61,9 +61,9 @@ if [[ "${BUILD_ENVIRONMENT}" == *-build ]]; then
   add_to_env_file "SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2"
   add_to_env_file "CIRCLE_PULL_REQUEST=${CIRCLE_PULL_REQUEST}"
 
-  SCCACHE_MAX_JOBS=$(( "$(nproc)" - 1 ))
+  SCCACHE_MAX_JOBS=$(( $(nproc) - 1 ))
   MEMORY_LIMIT_MAX_JOBS=8  # the "large" resource class on CircleCI has 32 CPU cores, if we use all of them we'll OOM
-  MAX_JOBS=$(( "${SCCACHE_MAX_JOBS}" > "${MEMORY_LIMIT_MAX_JOBS}" ? "${MEMORY_LIMIT_MAX_JOBS}" : "${SCCACHE_MAX_JOBS}" ))
+  MAX_JOBS=$(( ${SCCACHE_MAX_JOBS} > ${MEMORY_LIMIT_MAX_JOBS} ? ${MEMORY_LIMIT_MAX_JOBS} : ${SCCACHE_MAX_JOBS} ))
   add_to_env_file "MAX_JOBS=${MAX_JOBS}"
 
   if [ -n "${USE_CUDA_DOCKER_RUNTIME:-}" ]; then
