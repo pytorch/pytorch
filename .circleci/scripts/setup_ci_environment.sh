@@ -16,9 +16,13 @@ retry () {
 # This is better than retrying the whole apt-get command
 echo "APT::Acquire::Retries \"3\";" | sudo tee /etc/apt/apt.conf.d/80-retries
 
+retry sudo apt-get update -qq
 retry sudo apt-get -y install \
   moreutils \
   expect-dev
+
+echo "== DOCKER VERSION =="
+docker version
 
 retry sudo pip -q install awscli==1.16.35
 
