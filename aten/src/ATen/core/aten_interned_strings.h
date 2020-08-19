@@ -24,7 +24,6 @@ _(aten, _acos) \
 _(aten, _addmv) \
 _(aten, _addr) \
 _(aten, _arange) \
-_(aten, _acosh) \
 _(aten, _asinh) \
 _(aten, _atanh) \
 _(aten, _argmax) \
@@ -452,6 +451,7 @@ _(aten, masked_select) \
 _(aten, matmul) \
 _(aten, matrix_power) \
 _(aten, matrix_rank) \
+_(aten, matrix_exp) \
 _(aten, max) \
 _(aten, max_pool1d) \
 _(aten, max_pool1d_with_indices) \
