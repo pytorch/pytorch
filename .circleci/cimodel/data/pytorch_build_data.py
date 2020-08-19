@@ -30,7 +30,11 @@ CONFIG_TREE_DATA = [
             ("9.2", [
                 ("3.6", [
                     X(True),
-                    ("cuda_gcc_override", [X("gcc5.4")]),
+                    ("cuda_gcc_override", [
+                        ("gcc5.4", [
+                            ('build_only', [XImportant(True)]),
+                        ]),
+                    ]),
                 ])
             ]),
             ("10.1", [
@@ -204,7 +208,7 @@ class CudaGccOverrideConfigNode(TreeConfigNode):
         self.props["cuda_gcc_override"] = node_name
 
     def child_constructor(self):
-        return ImportantConfigNode
+        return ExperimentalFeatureConfigNode
 
 class BuildOnlyConfigNode(TreeConfigNode):
 
@@ -212,7 +216,7 @@ class BuildOnlyConfigNode(TreeConfigNode):
         self.props["build_only"] = node_name
 
     def child_constructor(self):
-        return ImportantConfigNode
+        return ExperimentalFeatureConfigNode
 
 
 class ImportantConfigNode(TreeConfigNode):
