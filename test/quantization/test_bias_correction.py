@@ -1,12 +1,12 @@
 import torch
 import torch.nn as nn
 from torch.testing._internal.common_quantization import QuantizationTestCase
+from torch.testing._internal.common_quantization import skipIfNoFBGEMM
 
 from torch.quantization import default_qconfig
-from torch.quantization import QuantStub, DeQuantStub, QuantWrapper
+from torch.quantization import QuantWrapper
 import torch.quantization._numeric_suite as ns
 
-# import torch.quantization._correct_bias as correct_bias
 from torch.quantization._correct_bias import (
     _supported_modules,
     _supported_modules_quantized,
@@ -16,7 +16,6 @@ from torch.quantization._correct_bias import (
     parent_child_names
 )
 
-from torchvision.models.quantization import mobilenet_v2
 import copy
 
 
@@ -93,68 +92,7 @@ class TestBiasCorrection(QuantizationTestCase):
                 self.assertTrue(self.compute_sqnr(float_bias, artificial_bias) > 30,
                                 "Correcting quantized bias produced too much noise, sqnr score too low")
 
-    # def test_pen_paper_1(self):
-    #     ''' Testing bias correction on a single Linear module, keeping the weights
-    #     constant, but manually changing the bias in the quantized module and verifying
-    #     with simple input data that the bias is being corrected
-    #     After manual bias change, but before bias correction:
-    #         Float module:       [1,1,1] -> [4,4,4,4]
-    #         Quantized module    [1,1,1] -> [6,6,6,6]
-
-    #     Expected after bias correction:
-    #         Float module:       [1,1,1] -> [4,4,4,4]
-    #         Quantized module    [1,1,1] -> [4,4,4,4]
-    #     '''
-    #     # Linear module that is filled with ones, makes math easier
-    #     float_model = nn.Linear(3,4)
-    #     float_model.weight.data = torch.ones(float_model.weight.size())
-    #     float_model.bias.data = torch.ones(float_model.bias.size())
-    #     float_model = QuantWrapper(float_model)
-
-    #     # Quantized module with bias manually changed
-    #     artificial_model = copy.deepcopy(float_model)
-    #     artificial_model.qconfig = default_qconfig
-    #     torch.quantization.prepare(artificial_model, inplace=True)
-    #     torch.quantization.convert(artificial_model, inplace=True)
-    #     artificial_model.module.bias().data *= 3
-
-    #     # Bias correction
-    #     input = [(torch.ones(1,3), 0)]  # single batch with (1,3) tensor
-    #     bias_correction(float_model, artificial_model, input)
-
-    #     self.assertTrue(torch.all(float_model(input[0][0]).eq(artificial_model(input[0][0]))))
-
-    # def test_pen_paper_2(self):
-    #     ''' Testing bias correction on a single Conv module, keeping the weights
-    #     constant, but manually changing the bias in the quantized module and verifying
-    #     with simple input data that the bias is being corrected
-    #     After manual bias change, but before bias correction:
-    #         Float module:       [1,1,1] -> [4,4,4,4]
-    #         Quantized module    [1,1,1] -> [13,13,13,13]
-
-    #     Expected after bias correction:
-    #         Float module:       [1,1,1] -> [4,4,4,4]
-    #         Quantized module    [1,1,1] -> [4,4,4,4]
-    #     '''
-    #     # Conv module that is filled with ones, makes math easier
-    #     float_model = nn.Conv2d(3,4,2,2)
-    #     float_model.weight.data = torch.ones(float_model.weight.size())
-    #     float_model.bias.data = torch.ones(float_model.bias.size())
-    #     float_model = QuantWrapper(float_model)
-
-    #     # Quantized module with bias manually changed
-    #     artificial_model = copy.deepcopy(float_model)
-    #     artificial_model.qconfig = default_qconfig
-    #     torch.quantization.prepare(artificial_model, inplace=True)
-    #     torch.quantization.convert(artificial_model, inplace=True)
-    #     artificial_model.module.bias().data *= 3
-
-    #     # Bias correction
-    #     input = [(torch.ones(1,3,2,2), 0)]  # single batch with (1,3) tensor
-    #     bias_correction(float_model, artificial_model, input)
-
-    #     self.assertTrue(torch.all(float_model(input[0][0]).eq(artificial_model(input[0][0]))))
-
+    @skipIfNoFBGEMM
     def test_linear_chain(self):
         class LinearChain(nn.Module):
             def __init__(self):
@@ -174,6 +112,7 @@ class TestBiasCorrection(QuantizationTestCase):
         self.correct_artificial_bias_float(float_model, img_data)
         self.correct_artificial_bias_quantize(float_model, img_data)
 
+    @skipIfNoFBGEMM
     def test_conv_chain(self):
         class ConvChain(nn.Module):
             def __init__(self):

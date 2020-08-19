@@ -84,7 +84,7 @@ def bias_correction(float_model, quantized_model, img_data, target_modules=_supp
         float_model: a trained model that serves as a reference to what bias correction should aim for
         quantized_model: quantized form of float_model that bias correction is to applied to
         img_data: calibration data to estimate the expected output (used to find quantization error)
-        supported_list: specifies what submodules in quantized_model need bias correction (can be extended to
+        target_modules: specifies what submodules in quantized_model need bias correction (can be extended to
                 unquantized submodules)
         neval_batches: a cap to the number of batches you want to be used for estimating the expected output
     '''
@@ -92,7 +92,7 @@ def bias_correction(float_model, quantized_model, img_data, target_modules=_supp
 
     uncorrected_modules = {}
     for name, submodule in quantized_model.named_modules():
-        if type(submodule) in supported_list:
+        if type(submodule) in target_modules:
             uncorrected_modules[name] = submodule
 
     for uncorrected_module in uncorrected_modules:
