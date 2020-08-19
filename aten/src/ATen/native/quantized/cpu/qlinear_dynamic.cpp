@@ -5,7 +5,6 @@
 #include <ATen/native/quantized/cpu/packed_params.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
 #include <ATen/native/quantized/cpu/quant_utils.h>
-#include <ATen/native/xnnpack/Factory.h>
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 #include <torch/library.h>
 
@@ -233,10 +232,11 @@ at::Tensor PackedLinearWeightsQnnp::apply_dynamic_impl(at::Tensor input) {
   size_t rows_w = bias_.size(0);
   size_t cols_w = input_contig.size(input_contig.dim() - 1);
 
-  TORCH_CHECK(bias_.dim() == 1, "bias should be a vector (1D Tensor)");
+  at::Tensor bias_vec = bias_;
 
-  auto bias_contig = at::native::xnnpack::internal::allocate_padded_contiguous_if_needed(
-      bias_, bias_.suggest_memory_format());
+  TORCH_CHECK(bias_vec.dim() == 1, "bias should be a vector (1D Tensor)");
+
+  auto bias_contig = bias_vec.contiguous();
   const float* bias_ptr = bias_contig.data_ptr<float>();
 
   // Calculate statistics for quantization of input Tensor

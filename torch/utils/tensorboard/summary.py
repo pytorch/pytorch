@@ -6,6 +6,7 @@ import json
 import logging
 import numpy as np
 import os
+from typing import Optional
 
 # pylint: disable=unused-import
 from six.moves import range
@@ -128,7 +129,7 @@ def hparams(hparam_dict=None, metric_dict=None, hparam_domain_discrete=None):
             ssi.hparams[k].number_value = v
 
             if k in hparam_domain_discrete:
-                domain_discrete = struct_pb2.ListValue(
+                domain_discrete: Optional[struct_pb2.ListValue] = struct_pb2.ListValue(
                     values=[
                         struct_pb2.Value(number_value=d)
                         for d in hparam_domain_discrete[k]

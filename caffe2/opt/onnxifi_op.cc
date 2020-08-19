@@ -235,14 +235,14 @@ TensorInfo::TensorInfo(const QTensorProto& t)
 } // namespace details
 
 template <>
-std::vector<onnxTensorDescriptorV1> OnnxifiOp<CPUContext>::
-    buildInitializationList(
-        Workspace* ws,
-        const std::vector<std::string>& initializers,
-        std::vector<std::string>* weight_names,
-        std::vector<std::vector<uint64_t>>* weight_shapes,
-        std::vector<std::vector<float>>* all_scales,
-        std::vector<std::vector<int32_t>>* all_offsets) const {
+std::vector<onnxTensorDescriptorV1>
+OnnxifiOp<CPUContext>::buildInitializationList(
+    Workspace* ws,
+    const std::vector<std::string>& initializers,
+    std::vector<std::string>* weight_names,
+    std::vector<std::vector<uint64_t>>* weight_shapes,
+    std::vector<std::vector<float>>* all_scales,
+    std::vector<std::vector<int32_t>>* all_offsets) const {
   std::unordered_set<std::string> initialization_list(
       initializers.begin(), initializers.end());
   const std::vector<string>& ws_blobs = ws->Blobs();
@@ -395,7 +395,7 @@ int OnnxifiOp<CPUContext>::extractOutputBatchSizes() {
           real_shape.dims(j),
           ")");
       begin_ptr[j] = 0;
-      if (max_shape[j] > real_shape.dims(j)) {
+      if (max_shape[j] >= real_shape.dims(j)) {
         end_ptr[j] = real_shape.dims(j);
         mismatch += j;
       } else {
@@ -539,8 +539,8 @@ bool OnnxifiOp<CPUContext>::RunOnDevice() {
     ext_supported = true;
     output_fence.tag = ONNXIFI_TAG_MEMORY_FENCE_V1;
     output_fence.type = ONNXIFI_SYNCHRONIZATION_EVENT;
+    traces_.reset();
     if (enable_tracing_) {
-      traces_.reset();
       traces_ = std::shared_ptr<onnxTraceEventList>(
           new onnxTraceEventList(), [this](onnxTraceEventList* p) {
             if (p && onnxReleaseTraceEventsPointer_) {
@@ -564,9 +564,18 @@ bool OnnxifiOp<CPUContext>::RunOnDevice() {
     current_batch_size = extractOutputBatchSizes();
     onnxEventState eventState;
     onnxStatus eventStatus;
+    std::string message;
+    size_t messageLength = 512;
+    message.resize(messageLength);
+
     CAFFE_ENFORCE_EQ(
         (*onnxWaitEventForPointer_)(
-            output_fence.event, timeout_, &eventState, &eventStatus),
+            output_fence.event,
+            timeout_,
+            &eventState,
+            &eventStatus,
+            const_cast<char*>(message.data()),
+            &messageLength),
         ONNXIFI_STATUS_SUCCESS);
     CAFFE_ENFORCE_EQ(
         eventState,
@@ -574,7 +583,13 @@ bool OnnxifiOp<CPUContext>::RunOnDevice() {
         "Onnxifi run timeouted out after ",
         timeout_,
         " ms.");
-    CAFFE_ENFORCE_EQ(eventStatus, ONNXIFI_STATUS_SUCCESS);
+    if (eventStatus != ONNXIFI_STATUS_SUCCESS) {
+      if (messageLength == 0) {
+        CAFFE_THROW("onnxifi internal error");
+      } else {
+        CAFFE_THROW(message);
+      }
+    }
     CAFFE_ENFORCE_EQ(
         lib_->onnxReleaseEvent(output_fence.event), ONNXIFI_STATUS_SUCCESS);
   }

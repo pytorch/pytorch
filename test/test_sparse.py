@@ -36,6 +36,9 @@ def cuda_only(inner):
         inner(self, *args, **kwargs)
     return outer
 
+def _get_torch_cuda_version():
+    return [int(x) for x in torch.version.cuda.split(".")] if torch.version.cuda else [0, 0]
+
 
 class TestSparse(TestCase):
 
@@ -54,7 +57,7 @@ class TestSparse(TestCase):
 
         def sparse_empty_factory(*args, **kwargs):
             kwargs['dtype'] = kwargs.get('dtype', self.value_dtype)
-            kwargs['layout'] = kwargs.get('laytout', torch.sparse_coo)
+            kwargs['layout'] = kwargs.get('layout', torch.sparse_coo)
             kwargs['device'] = kwargs.get('device', self.device)
             return torch.empty(*args, **kwargs)
         self.sparse_empty = sparse_empty_factory
@@ -928,9 +931,7 @@ class TestSparse(TestCase):
         "bmm sparse-dense CUDA is not yet supported in Windows, at least up to CUDA 10.1"
     )
     @unittest.skipIf(
-        TEST_CUDA and (
-            not torch.version.cuda
-            or [int(x) for x in torch.version.cuda.split(".")] < [10, 1]),
+        TEST_CUDA and _get_torch_cuda_version() < [10, 1],
         "bmm sparse-dense requires CUDA 10.1 or greater"
     )
     def test_bmm(self):
@@ -994,8 +995,7 @@ class TestSparse(TestCase):
         "bmm sparse-dense CUDA is not yet supported in Windows, at least up to CUDA 10.1"
     )
     @unittest.skipIf(
-        (not torch.version.cuda
-            or [int(x) for x in torch.version.cuda.split(".")] < [10, 1]),
+        _get_torch_cuda_version() < [10, 1],
         "bmm sparse-dense requires CUDA 10.1 or greater"
     )
     def test_bmm_deterministic(self):
@@ -1030,22 +1030,21 @@ class TestSparse(TestCase):
 
     @cuda_only
     @unittest.skipIf(
-        not IS_WINDOWS,
-        "this test ensures bmm sparse-dense CUDA gives an error when run on Windows"
+        not IS_WINDOWS or _get_torch_cuda_version() >= [11, 0],
+        "this test ensures bmm sparse-dense CUDA gives an error when run on Windows with CUDA < 11.0"
     )
     def test_bmm_windows_error(self):
         a = torch.rand(2, 2, 2).to_sparse().cuda()
         b = torch.rand(2, 2, 2).cuda()
         with self.assertRaisesRegex(
                 RuntimeError,
-                "bmm sparse-dense CUDA is not supported on Windows"):
+                "bmm sparse-dense CUDA is not supported on Windows with cuda before 11.0"):
             ab = a.bmm(b)
 
     @cuda_only
     @skipIfRocm
     @unittest.skipIf(
-        (torch.version.cuda
-            and [int(x) for x in torch.version.cuda.split(".")] >= [10, 1]),
+        _get_torch_cuda_version() >= [10, 1],
         "this test ensures bmm gives error if CUDA version is less than 10.1"
     )
     def test_bmm_cuda_version_error(self):
@@ -1247,6 +1246,23 @@ class TestSparse(TestCase):
         test_shape(3, 10, 100)
         test_shape(4, 10, [100, 100, 100, 5, 5, 5, 0])
         test_shape(4, 0, [0, 0, 100, 5, 5, 5, 0])
+
+        # Unsupported arguments should error
+        kwarg_error_pairs = [
+            ({'keepdim': True},
+             RuntimeError, r'norm_sparse currently does not support keepdim=True'),
+            ({'dim': 0},
+             RuntimeError, r'norm_sparse currently only supports full reductions'),
+            ({'dtype': torch.double, 'p': 'fro'},
+             ValueError, r'dtype argument is not supported in frobenius norm'),
+            ({'dtype': torch.double, 'p': 0},
+             RuntimeError, r"norm_sparse currently does not support 'dtype' argument") 
+        ]
+        x = self._gen_sparse(3, 10, 100)[0]
+        for kwargs, err, msg in kwarg_error_pairs:
+            with self.assertRaisesRegex(err, msg):
+                x.norm(**kwargs)
+
 
     @skipIfRocm
     def test_sparse_sum(self):
@@ -1973,21 +1989,28 @@ class TestSparse(TestCase):
     @cuda_only
     def test_factory_device_type_inference(self):
         # both indices/values are CUDA
-        shape = (1, 3)
-        for indices_device in ['cuda', 'cpu']:
-            for values_device in ['cuda', 'cpu']:
-                for sparse_device in ['cuda', 'cpu', None]:
-                    for test_empty_tensor in [True, False]:
-                        if test_empty_tensor:
-                            t = torch.sparse_coo_tensor(torch.tensor(([0], [2]), device=indices_device),
-                                                        self.value_empty(1, 0).to(values_device),
-                                                        (1, 3, 0), device=sparse_device)
-                        else:
-                            t = torch.sparse_coo_tensor(torch.tensor(([0], [2]), device=indices_device),
-                                                        torch.tensor([1.], device=values_device),
-                                                        (1, 3), device=sparse_device)
-                        should_be_cuda = sparse_device == 'cuda' or (sparse_device is None and values_device == 'cuda')
-                        self.assertEqual(should_be_cuda, t.is_cuda)
+
+        cpu_cuda = ('cpu', 'cuda')
+        cpu_cuda_none = cpu_cuda + (None,)
+        for indices_device, values_device, device in itertools.product(cpu_cuda,
+                                                                       cpu_cuda,
+                                                                       cpu_cuda_none):
+            indices = torch.tensor(([0], [2]), device=indices_device)
+            values = torch.tensor([1.], device=values_device)
+            empty_values = self.value_empty(1, 0).to(values_device)
+            shape = (1, 3)
+            empty_shape = (1, 3, 0)
+            if device is None and indices_device != values_device:
+                with self.assertRaises(RuntimeError):
+                    torch.sparse_coo_tensor(indices, values, shape, device=device)
+                with self.assertRaises(RuntimeError):
+                    torch.sparse_coo_tensor(indices, empty_values, empty_shape, device=device)
+            else:
+                t = torch.sparse_coo_tensor(indices, values, shape, device=device)
+                t_empty = torch.sparse_coo_tensor(indices, empty_values, empty_shape, device=device)
+                should_be_cuda = (device == 'cuda' or (device is None and values_device == 'cuda'))
+                self.assertEqual(should_be_cuda, t.is_cuda)
+                self.assertEqual(t.is_cuda, t_empty.is_cuda)
 
     @cpu_only
     def test_factory_copy(self):

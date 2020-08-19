@@ -5,7 +5,7 @@ import unittest
 # Must happen before importing caffe2.python.*
 import caffe2.python.fakelowp.init_shared_libs  # noqa
 import numpy as np
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace
@@ -99,6 +99,7 @@ class SparseLengthsSum8BitFakeNNPIFp16Test(serial.SerializedTestCase):
             assert 0
 
     @given(seed=st.integers(0, 65535))
+    @settings(deadline=None)
     def test_slws_fused_8bit_rowwise_all_same(self, seed):
         # Comment out for predictable debugging
         np.random.seed(seed)
@@ -206,6 +207,7 @@ class SparseLengthsSum8BitFakeNNPIFp16Test(serial.SerializedTestCase):
         batch_size=st.integers(1, 5),
         max_weight=st.integers(0, 100),
     )
+    @settings(deadline=None)
     def test_slws_fused_8bit_rowwise(self, seed, num_rows, embedding_dim, batch_size, max_weight):
         np.random.seed(seed)
         workspace.ResetWorkspace()
@@ -302,6 +304,7 @@ class SparseLengthsSum8BitFakeNNPIFp16Test(serial.SerializedTestCase):
     # Simple test to aid debugging order of operations
     # Minimize the case to an SLS that adds two rows
     @given(seed=st.integers(0, 65535))
+    @settings(deadline=None)
     def test_small_sls(self, seed):
         np.random.seed(seed)
         workspace.ResetWorkspace()

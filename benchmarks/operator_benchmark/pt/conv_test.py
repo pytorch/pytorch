@@ -8,38 +8,11 @@ import operator_benchmark as op_bench
 import torch
 import torch.nn as nn
 
+from . import configs
 
 """
 Microbenchmarks for Conv1d and ConvTranspose1d operators.
 """
-
-
-# Configs for conv-1d ops
-conv_1d_configs_short = op_bench.config_list(
-    attr_names=[
-        'IC', 'OC', 'kernel', 'stride', 'N', 'L'
-    ],
-    attrs=[
-        [128, 256, 3, 1, 1, 64],
-        [256, 256, 3, 2, 4, 64],
-    ],
-    cross_product_configs={
-        'device': ['cpu', 'cuda'],
-    },
-    tags=['short']
-)
-
-conv_1d_configs_long = op_bench.cross_product_configs(
-    IC=[128, 512],
-    OC=[128, 512],
-    kernel=[3],
-    stride=[1, 2],
-    N=[8],
-    L=[128],
-    device=['cpu', 'cuda'],
-    tags=["long"]
-)
-
 
 class Conv1dBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, IC, OC, kernel, stride, N, L, device):
@@ -61,44 +34,15 @@ class ConvTranspose1dBenchmark(op_bench.TorchBenchmarkBase):
         return self.convtranspose1d(self.input)
 
 
-op_bench.generate_pt_test(conv_1d_configs_short + conv_1d_configs_long,
+op_bench.generate_pt_test(configs.conv_1d_configs_short + configs.conv_1d_configs_long,
                           Conv1dBenchmark)
-op_bench.generate_pt_test(conv_1d_configs_short + conv_1d_configs_long,
+op_bench.generate_pt_test(configs.conv_1d_configs_short + configs.conv_1d_configs_long,
                           ConvTranspose1dBenchmark)
 
 
 """
 Microbenchmarks for Conv2d and ConvTranspose2d operators.
 """
-
-
-# Configs for Conv2d and ConvTranspose1d
-conv_2d_configs_short = op_bench.config_list(
-    attr_names=[
-        'IC', 'OC', 'kernel', 'stride', 'N', 'H', 'W', 'G', 'pad',
-    ],
-    attrs=[
-        [256, 256, 3, 1, 1, 16, 16, 1, 0],
-    ],
-    cross_product_configs={
-        'device': ['cpu', 'cuda'],
-    },
-    tags=['short']
-)
-
-conv_2d_configs_long = op_bench.cross_product_configs(
-    IC=[128, 256],
-    OC=[128, 256],
-    kernel=[3],
-    stride=[1, 2],
-    N=[4],
-    H=[32],
-    W=[32],
-    G=[1],
-    pad=[0],
-    device=['cpu', 'cuda'],
-    tags=["long"]
-)
 
 
 class Conv2dBenchmark(op_bench.TorchBenchmarkBase):
@@ -123,30 +67,15 @@ class ConvTranspose2dBenchmark(op_bench.TorchBenchmarkBase):
         return self.convtranspose2d(self.input)
 
 
-op_bench.generate_pt_test(conv_2d_configs_short + conv_2d_configs_long,
+op_bench.generate_pt_test(configs.conv_2d_configs_short + configs.conv_2d_configs_long,
                           Conv2dBenchmark)
-op_bench.generate_pt_test(conv_2d_configs_short + conv_2d_configs_long,
+op_bench.generate_pt_test(configs.conv_2d_configs_short + configs.conv_2d_configs_long,
                           ConvTranspose2dBenchmark)
 
 
 """
 Microbenchmarks for Conv3d and ConvTranspose3d operators.
 """
-
-# Configs for Conv3d and ConvTranspose3d
-conv_3d_configs_short = op_bench.config_list(
-    attr_names=[
-        'IC', 'OC', 'kernel', 'stride', 'N', 'D', 'H', 'W'
-    ],
-    attrs=[
-        [64, 64, 3, 1, 8, 4, 16, 16],
-    ],
-    cross_product_configs={
-        'device': ['cpu', 'cuda'],
-    },
-    tags=['short']
-)
-
 
 class Conv3dBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, IC, OC, kernel, stride, N, D, H, W, device):
@@ -168,8 +97,8 @@ class ConvTranspose3dBenchmark(op_bench.TorchBenchmarkBase):
         return self.convtranspose3d(self.input)
 
 
-op_bench.generate_pt_test(conv_3d_configs_short, Conv3dBenchmark)
-op_bench.generate_pt_test(conv_3d_configs_short,
+op_bench.generate_pt_test(configs.conv_3d_configs_short, Conv3dBenchmark)
+op_bench.generate_pt_test(configs.conv_3d_configs_short,
                           ConvTranspose3dBenchmark)
 
 
