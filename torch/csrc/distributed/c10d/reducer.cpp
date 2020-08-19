@@ -619,7 +619,7 @@ void Reducer::initialize_buckets(
   // it does not matter rpc context ptr is nullptr or not, as grad
   // will not be mutated.
   // If initialize_buckets is called during training loop, e.g, inside
-  // rebuildBuckets(), since grad could be mutated and be pointed to
+  // rebuild_buckets(), since grad could be mutated and be pointed to
   // bucket_view, then it needs to check rpc context ptr is nullptr or not,
   // If rpc context ptr is nullptr, mutate variable.grad(); otherwise,
   // mutate grad in rpc context.
@@ -745,7 +745,7 @@ void Reducer::initialize_buckets(
         // metadata.  Checking just once won't catch if someone messes with
         // param layouts over time, but not messing with params after DDP
         // construction is already a documented constraint.
-        initialize_bucketviews(replica, replica.contents, true);
+        initialize_bucket_views(replica, replica.contents, true);
       }
 
       // Add bucket replica to enclosing bucket.
@@ -771,7 +771,7 @@ void Reducer::initialize_buckets(
 }
 
 // (see Note:  "Gradient Layout Contract" in initialize_buckets).
-void Reducer::initialize_bucketviews(
+void Reducer::initialize_bucket_views(
     Reducer::BucketReplica& replica,
     at::Tensor& contents,
     bool copy_to_bucket_view) {
@@ -793,17 +793,19 @@ void Reducer::initialize_bucketviews(
     }
     replica.bucket_views.push_back(bucket_view);
     // There are three cases to handle:
-    // 1. initialize_bucketviews could be called inside communication hook,
+    // 1. initialize_bucket_views could be called inside communication hook,
     // bucket_view has the updated results in new tensor, just let grad point to
-    // bucket_view.
-    // 2. initialize_bucketviews could be called inside initialize_bucket when
-    // rebuildBuckets, if grad has already been defined/calculated in previous
+    // bucket_view, copy_to_bucket_view is false in this case.
+    // 2. initialize_bucket_views could be called inside initialize_buckets when
+    // rebuild_buckets, if grad has already been defined/calculated in previous
     // iteration, old grad needs to be copied into new bucket_view
-    // and let grad point to the new bucket_view;
-    // 3. initialize_bucketviews could be called inside initialize_bucket
-    // during construction. When grad is not defined, do not let it point to
-    // bucket_view, because grads should be kept as being undefined for globally
-    // unused parameters.
+    // and let grad point to the new bucket_view,
+    // copy_to_bucket_view is true in this case.
+    // 3. initialize_bucket_views could be called inside initialize_buckets
+    // during construction. copy_to_bucket_view is true in this case. But mostly
+    // grads are not defined during construction time, when grad is not defined,
+    // do not let grad point to bucket_view, because grads should be kept as
+    // being undefined for globally unused parameters.
     runGradCallbackForVariable(v, [&](auto& grad) {
       if (grad.defined() && !grad.is_alias_of(bucket_view)) {
         if (copy_to_bucket_view) {
@@ -821,7 +823,7 @@ void Reducer::initialize_bucketviews(
 
 void Reducer::prepare_forward() {
   std::lock_guard<std::mutex> lock(mutex_);
-  rebuildBuckets();
+  rebuild_buckets();
 }
 
 // Traverse the autograd graph starting at the specified output.
@@ -1028,7 +1030,7 @@ void Reducer::finalize_backward() {
           // Reinitialize bucket_views with the future_result by following
           // the same logic in `inititalize_buckets`.
           bucket.replicas[i].bucket_views.clear();
-          initialize_bucketviews(bucket.replicas[i], future_result[i], false);
+          initialize_bucket_views(bucket.replicas[i], future_result[i], false);
         }
       }
     }
@@ -1156,7 +1158,7 @@ void Reducer::sync_bucket_indices(
   }
 }
 
-void Reducer::rebuildBuckets() {
+void Reducer::rebuild_buckets() {
   if (rebuilt_params_.empty()) {
     return;
   }

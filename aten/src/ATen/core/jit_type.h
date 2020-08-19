@@ -1894,6 +1894,14 @@ using ::torch::jit::CompilationUnit;
 
 // This represents a class in TorchScript.
 struct CAFFE2_API ClassType : public NamedType {
+  // This represents an attribute of a class; a name associated with an attribute, and a
+  // getter and (optional) setter for that attribute.
+  struct Property {
+    std::string name;
+    const torch::jit::Function* getter;
+    const torch::jit::Function* setter;
+  };
+
   // Create a class type with name `name` and its methods stored in `cu`.
   static ClassTypePtr create(
       c10::optional<QualifiedName> qualifiedName,
@@ -2038,6 +2046,11 @@ struct CAFFE2_API ClassType : public NamedType {
       "'");
     return *slot_idx;
   }
+
+  // Get the property with the given \p name, if it exists on the class.
+  c10::optional<ClassType::Property> getProperty(const std::string& name);
+  // Add a property named \p name with \p getter and \p setter as its getter and setter.
+  void addProperty(const std::string& name, torch::jit::Function* getter, torch::jit::Function* setter);
 
   bool hasConstant(const std::string& name) const {
     return std::find_if(
@@ -2205,6 +2218,9 @@ struct CAFFE2_API ClassType : public NamedType {
 
   // List of methods associated with this class.
   std::vector<torch::jit::Function*> methods_;
+
+  // List of properties exposed by this class.
+  std::vector<Property> properties_;
 
   bool isModule_ = false;
 };
