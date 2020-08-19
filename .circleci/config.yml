@@ -481,9 +481,10 @@ jobs:
             export DOCKER_TAG="ab1632df-fa59-40e6-8c23-98e004f61148"
           fi
           if [[ ${BUILD_ENVIRONMENT} == *"paralleltbb"* ]]; then
-            echo 'export ATEN_THREADING=TBB USE_TBB=1' >> "${BASH_ENV}"
+            echo 'ATEN_THREADING=TBB' >> "${BASH_ENV}"
+            echo 'USE_TBB=1' >> "${BASH_ENV}"
           elif [[ ${BUILD_ENVIRONMENT} == *"parallelnative"* ]]; then
-            echo 'export ATEN_THREADING=NATIVE' >> "${BASH_ENV}"
+            echo 'ATEN_THREADING=NATIVE' >> "${BASH_ENV}"
           fi
           echo "Parallel backend flags: "${PARALLEL_FLAGS}
           # Pull Docker image and run build
@@ -567,9 +568,10 @@ jobs:
           echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
 
           if [[ ${BUILD_ENVIRONMENT} == *"paralleltbb"* ]]; then
-            echo 'export ATEN_THREADING=TBB USE_TBB=1' >> "${BASH_ENV}"
+            echo 'ATEN_THREADING=TBB' >> "${BASH_ENV}"
+            echo 'USE_TBB=1' >> "${BASH_ENV}"
           elif [[ ${BUILD_ENVIRONMENT} == *"parallelnative"* ]]; then
-            echo 'export ATEN_THREADING=NATIVE' >> "${BASH_ENV}"
+            echo 'ATEN_THREADING=NATIVE' >> "${BASH_ENV}"
           fi
           echo "Parallel backend flags: "${PARALLEL_FLAGS}
 
