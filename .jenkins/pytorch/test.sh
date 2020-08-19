@@ -64,8 +64,9 @@ fi
 if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]] && [[ "$BUILD_ENVIRONMENT" != *-bazel-* ]] ; then
   # JIT C++ extensions require ninja.
   pip_install --user ninja
-  # ninja is installed in /var/lib/jenkins/.local/bin
-  export PATH="/var/lib/jenkins/.local/bin:$PATH"
+  # ninja is installed in $HOME/.local/bin, e.g., /var/lib/jenkins/.local/bin for CI user jenkins
+  # but this script should be runnable by any user, including root
+  export PATH="$HOME/.local/bin:$PATH"
 
   # TODO: Please move this to Docker
   # The version is fixed to avoid flakiness: https://github.com/pytorch/pytorch/issues/31136
