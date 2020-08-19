@@ -7,7 +7,7 @@
 TEST(TorchpyTest, ThreadedSimpleModel) {
   auto model_filename = "torchpy/example/simple.pt";
   auto input = torch::ones(at::IntArrayRef({10, 20}));
-  size_t nthreads = 2;
+  size_t nthreads = 10;
   std::vector<at::Tensor> outputs;
 
   // Shared model
