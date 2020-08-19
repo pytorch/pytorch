@@ -202,7 +202,7 @@ enum class DispatchKey : uint8_t {
   // operator, which you're trying to skip).  In PreAutograd implementations,
   // you are responsible for handling autograd yourself, or deferring to other
   // operators which support autograd.
-  XLAPreAutograd,
+  AutogradXLA,
 
   // Autocasting precedes VariableTypeId, to ensure casts are autograd-exposed
   // and inputs are saved for backward in the post-autocast type.
