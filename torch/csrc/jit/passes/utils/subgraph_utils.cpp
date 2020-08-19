@@ -251,13 +251,21 @@ void mergeNodeIntoSubgraph(Node* toMerge, Node* subgraphNode) {
   mergeNodeIntoSubgraph(toMerge, subgraphNode, vmap);
 }
 
-Node* createSingletonSubgraph(Node* n, Symbol subgraphKind) {
+Node* createSingletonSubgraph(
+    Node* n,
+    Symbol subgraphKind,
+    std::unordered_map<Value*, Value*>& vmap) {
   auto graph = n->owningGraph();
   auto subgraph = graph->create(subgraphKind, 0);
   subgraph->g_(attr::Subgraph, std::make_shared<Graph>(graph->current_scope()));
   subgraph->insertBefore(n);
-  mergeNodeIntoSubgraph(n, subgraph);
+  mergeNodeIntoSubgraph(n, subgraph, vmap);
   return subgraph;
+}
+
+Node* createSingletonSubgraph(Node* n, Symbol subgraphKind) {
+  std::unordered_map<Value*, Value*> vmap;
+  return createSingletonSubgraph(n, subgraphKind, vmap);
 }
 
 } // namespace SubgraphUtils
