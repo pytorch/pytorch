@@ -334,7 +334,6 @@ void ProcessGroupNCCL::WorkNCCL::synchronize() {
 void ProcessGroupNCCL::WorkNCCL::synchronizeStreams() {
   for (size_t i = 0; i < devices_.size(); ++i) {
     auto currentStream = at::cuda::getCurrentCUDAStream(devices_[i].index());
-
     // Block the current stream on the NCCL stream
     cudaEvents_[i].block(currentStream);
   }
@@ -627,10 +626,9 @@ void ProcessGroupNCCL::workCleanupLoop() {
     for (auto it = workVector_.begin(); it != workVector_.end();
          /* no increment*/) {
       auto& work = *it;
-      if (work->isCompleted()) {
+      if (work->isCompletedAndThrowException()) {
         // Handle Exceptions on failed GPU operations and remove completed
         // workNCCL objects from work vector.
-        work->handleNCCLGuard();
         it = workVector_.erase(it);
       } else {
         // Increment the iterator if the current WorkNCCL object is not
@@ -883,8 +881,7 @@ void ProcessGroupNCCL::enqueue(
     std::shared_ptr<ProcessGroupNCCL::WorkNCCL> work) {
   {
     std::lock_guard<std::mutex> lock(workVectorMutex_);
-    auto it = workVector_.end();
-    workVector_.emplace(it, std::move(work));
+    workVector_.emplace_back(std::move(work));
   }
   workVectorCV_.notify_one();
 }
