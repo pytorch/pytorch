@@ -337,7 +337,7 @@
   abs: not_implemented("polar abs")
   angle: not_implemented("polar angle")
 
-- name: conj(Tensor self) -> Tensor
+- name: _conj(Tensor self) -> Tensor
   self: grad.conj()
 
 - name: cos(Tensor self) -> Tensor
