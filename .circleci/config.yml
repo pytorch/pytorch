@@ -23,19 +23,19 @@ executors:
   windows-with-nvidia-gpu:
     machine:
       resource_class: windows.gpu.nvidia.medium
-      image: windows-server-2019-nvidia:stable
+      image: windows-server-2019-nvidia:canary
       shell: bash.exe
 
   windows-xlarge-cpu-with-nvidia-cuda:
     machine:
       resource_class: windows.xlarge
-      image: windows-server-2019-vs2019:stable
+      image: windows-server-2019-vs2019:canary
       shell: bash.exe
 
   windows-medium-cpu-with-nvidia-cuda:
     machine:
       resource_class: windows.medium
-      image: windows-server-2019-vs2019:stable
+      image: windows-server-2019-vs2019:canary
       shell: bash.exe
 commands:
 
@@ -673,13 +673,6 @@ jobs:
     steps:
       - checkout
       - run:
-          name: Install VS 14.26 toolchain
-          no_output_timeout: 30m
-          command: |
-            if [[ "${VC_VERSION}" == "14.26" ]]; then
-              powershell .circleci/scripts/windows_vs_14_26_install.ps1
-            fi
-      - run:
           name: Install Cuda
           no_output_timeout: 30m
           command: |
@@ -743,13 +736,6 @@ jobs:
       - checkout
       - attach_workspace:
           at: c:/users/circleci/workspace
-      - run:
-          name: Install VS 14.26 toolchain
-          no_output_timeout: 30m
-          command: |
-            if [[ "${VC_VERSION}" == "14.26" ]]; then
-              powershell .circleci/scripts/windows_vs_14_26_install.ps1
-            fi
       - run:
           name: Install Cuda
           no_output_timeout: 30m
@@ -5721,28 +5707,8 @@ workflows:
           name: pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc5_4_build
           requires:
             - "docker-pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc5.4"
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
           build_environment: "pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc5.4-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc5.4"
-      - pytorch_linux_test:
-          name: pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc5_4_test
-          requires:
-            - pytorch_linux_xenial_cuda9_2_cudnn7_py3_gcc5_4_build
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
-          build_environment: "pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc5.4-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc5.4"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
       - pytorch_linux_build:
           name: pytorch_linux_xenial_cuda10_1_cudnn7_py3_gcc7_build
           requires:
@@ -5755,20 +5721,6 @@ workflows:
                 - /release\/.*/
           build_environment: "pytorch-linux-xenial-cuda10.1-cudnn7-py3-gcc7-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.1-cudnn7-py3-gcc7"
-      - pytorch_linux_test:
-          name: pytorch_linux_xenial_cuda10_1_cudnn7_py3_gcc7_test
-          requires:
-            - pytorch_linux_xenial_cuda10_1_cudnn7_py3_gcc7_build
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
-          build_environment: "pytorch-linux-xenial-cuda10.1-cudnn7-py3-gcc7-test"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.1-cudnn7-py3-gcc7"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
       - pytorch_linux_test:
           name: pytorch_linux_xenial_cuda10_1_cudnn7_py3_multigpu_test
           requires:
@@ -5841,12 +5793,24 @@ workflows:
           name: pytorch_libtorch_linux_xenial_cuda10_2_cudnn7_py3_gcc7_build
           requires:
             - "docker-pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7"
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
+                - /release\/.*/
           build_environment: "pytorch-libtorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7"
       - pytorch_linux_test:
           name: pytorch_libtorch_linux_xenial_cuda10_2_cudnn7_py3_gcc7_test
           requires:
             - pytorch_libtorch_linux_xenial_cuda10_2_cudnn7_py3_gcc7_build
+          filters:
+            branches:
+              only:
+                - master
+                - /ci-all\/.*/
+                - /release\/.*/
           build_environment: "pytorch-libtorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7-test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7"
           use_cuda_docker_runtime: "1"
@@ -5881,24 +5845,12 @@ workflows:
           name: pytorch_libtorch_linux_xenial_cuda11_0_cudnn8_py3_gcc7_build
           requires:
             - "docker-pytorch-linux-xenial-cuda11.0-cudnn8-py3-gcc7"
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
           build_environment: "pytorch-libtorch-linux-xenial-cuda11.0-cudnn8-py3-gcc7-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda11.0-cudnn8-py3-gcc7"
       - pytorch_linux_test:
           name: pytorch_libtorch_linux_xenial_cuda11_0_cudnn8_py3_gcc7_test
           requires:
             - pytorch_libtorch_linux_xenial_cuda11_0_cudnn8_py3_gcc7_build
-          filters:
-            branches:
-              only:
-                - master
-                - /ci-all\/.*/
-                - /release\/.*/
           build_environment: "pytorch-libtorch-linux-xenial-cuda11.0-cudnn8-py3-gcc7-test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda11.0-cudnn8-py3-gcc7"
           use_cuda_docker_runtime: "1"
