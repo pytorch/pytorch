@@ -7552,6 +7552,8 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
                 HIP_UNSUPPORTED,
             ),
         ),
+        ("cuComplex", ("rocblas_float_complex", CONV_TYPE, API_RUNTIME)),
+        ("cuDoubleComplex", ("rocblas_double_complex", CONV_TYPE, API_RUNTIME)),
         ("cufftResult_t", ("hipfftResult_t", CONV_TYPE, API_FFT)),
         ("cufftResult", ("hipfftResult", CONV_TYPE, API_FFT)),
         ("CUFFT_SUCCESS", ("HIPFFT_SUCCESS", CONV_NUMERIC_LITERAL, API_FFT)),
