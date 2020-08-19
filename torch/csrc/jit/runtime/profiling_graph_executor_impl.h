@@ -4,6 +4,11 @@
 namespace torch {
 namespace jit {
 
+TORCH_API Node* createFallbackGraph(
+    Block* b,
+    ArrayRef<Value*> inputs,
+    Graph* g);
+
 struct ProfilingGraphExecutorImpl : public GraphExecutorImplBase {
   ProfilingGraphExecutorImpl(
       const std::shared_ptr<Graph>& graph,
@@ -17,10 +22,12 @@ struct ProfilingGraphExecutorImpl : public GraphExecutorImplBase {
  private:
   void runProfilingInsensitiveOptimizations(std::shared_ptr<Graph>& graph);
   void runProfilingOptimizations(std::shared_ptr<Graph>& graph);
+  void replaceFallbackGraphWithFallbackFunction(Block* b);
   std::unique_ptr<ProfilingRecord> pr_;
   c10::optional<ExecutionPlan>
       profiling_plan_; // plan to run in order to profiling the code
   c10::optional<ExecutionPlan> optimized_plan_;
+  std::vector<std::unique_ptr<Function>> fallback_functions_;
 };
 
 } // namespace jit

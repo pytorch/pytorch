@@ -302,6 +302,8 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
       GRAPH_DUMP("Forward graph:", gradient.f);
       GRAPH_DUMP("Backward graph:", gradient.df);
       runDiffGraphPasses(gradient.f);
+      // replaces fallback graphs inserted by TE Fuser
+      replaceFallbackGraphWithFallbackFunction(gradient.f->block());
       packGradient(gradient, dnode);
       GRAPH_DEBUG("Finished optimizing diff node ", idx++);
     }
@@ -417,6 +419,9 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(
   auto copy = pr_->graph()->copy();
   ProfilingRecord::removeProfileCounter(copy->block());
   runProfilingOptimizations(copy);
+  // replaces a fallback graph inserted by
+  // if specialize_autogradzero one exists
+  replaceFallbackGraphWithFallbackFunction(copy->block());
   // cache
   optimized_plan_ =
       ExecutionPlan(copy, function_name_, remaining_bailout_depth);
@@ -429,6 +434,86 @@ GraphExecutorState ProfilingGraphExecutorImpl::getDebugState() {
   auto opt_plan = *optimized_plan_;
   state.execution_plans.emplace(ArgumentSpec{0, 0}, opt_plan);
   return state;
+}
+
+Node* createFallbackGraph(Block* b, ArrayRef<Value*> inputs, Graph* g) {
+  auto graph = std::make_shared<Graph>();
+  auto value_map = [](Value* v) { return v; };
+  graph->block()->cloneFrom(b, value_map);
+
+  auto fallback = g->create(prim::FallbackGraph, inputs, b->outputs().size());
+  fallback->g_(attr::Subgraph, graph);
+
+  for (size_t i = 0; i < b->outputs().size(); i++) {
+    fallback->output(i)->setType(b->outputs()[i]->type());
+    fallback->output(i)->copyMetadata(b->outputs()[i]);
+  }
+  return fallback;
+}
+
+static Function* createFallbackPathFunction(
+    Block* b,
+    const std::string& function_name) {
+  auto value_map = [](Value* v) { return v; };
+  auto graph = std::make_shared<Graph>();
+  graph->block()->cloneFrom(b, value_map);
+
+  auto otypes = c10::fmap(
+      graph->return_node()->inputs(), [](Value* v) { return v->type(); });
+  auto tuple_type = TupleType::create(otypes);
+  auto return_tuple = graph->createTuple(graph->return_node()->inputs());
+  graph->appendNode(return_tuple);
+  for (int i = graph->outputs().size() - 1; i >= 0; i--) {
+    graph->eraseOutput(i);
+  }
+  graph->registerOutput(return_tuple->output());
+  return new GraphFunction(function_name, graph, nullptr);
+}
+
+Node* insertFallbackFunctionCall(
+    Graph* graph,
+    Function* func,
+    ArrayRef<Value*> inputs) {
+  auto tuple_type = func->graph()->return_node()->input(0)->type();
+  Value* fn_constant = graph->insertNode(graph->create(prim::Constant))
+                           ->s_(attr::name, func->name())
+                           ->i_(Symbol::attr("fallback"), 1)
+                           ->output()
+                           ->setType(FunctionType::create(func));
+  std::vector<Value*> func_call_inputs = {fn_constant};
+  func_call_inputs.insert(func_call_inputs.end(), inputs.begin(), inputs.end());
+  Value* result =
+      graph->insertNode(graph->create(prim::CallFunction, func_call_inputs))
+          ->output()
+          ->setType(tuple_type);
+
+  auto fun_unpack_tuple = graph->insertNode(graph->createTupleUnpack(result));
+  return fun_unpack_tuple;
+}
+
+void ProfilingGraphExecutorImpl::replaceFallbackGraphWithFallbackFunction(
+    Block* b) {
+  Stack s;
+  for (auto it = b->nodes().begin(); it != b->nodes().end();) {
+    if (it->kind() == prim::FallbackGraph) {
+      auto fallback_func = createFallbackPathFunction(
+          it->g(attr::Subgraph)->block(), "fallback_function");
+      fallback_func->get_executor().getPlanFor(s, bailout_depth - 1);
+      fallback_functions_.emplace_back(fallback_func);
+      WithInsertPoint wip{*it};
+      auto function_call = insertFallbackFunctionCall(
+          b->owningGraph(), fallback_func, it->inputs());
+      for (size_t i = 0; i < function_call->outputs().size(); i++) {
+        it->output(i)->replaceAllUsesWith(function_call->output(i));
+      }
+      it.destroyCurrent();
+    } else {
+      for (Block* ib : it->blocks()) {
+        replaceFallbackGraphWithFallbackFunction(ib);
+      }
+      it++;
+    }
+  }
 }
 
 } // namespace jit

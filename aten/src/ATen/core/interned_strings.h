@@ -95,6 +95,7 @@ namespace c10 {
   _(prim, Guard)                     \
   _(prim, BailOut)                   \
   _(prim, TypeCheck)                 \
+  _(prim, FallbackGraph)             \
   _(prim, FusedConcat)               \
   _(prim, ConstantChunk)             \
   _(prim, MMTreeReduce)              \
