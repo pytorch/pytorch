@@ -556,6 +556,14 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
+         "aten::ne.enum(AnyEnumType a, AnyEnumType b) -> bool",
+         [](Stack* stack) {
+           IValue x = pop(stack);
+           IValue y = pop(stack);
+           push(stack, x != y);
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
          "aten::dequantize.tensor(Tensor qtensor) -> Tensor",
          [](Stack* stack) {
            at::Tensor qtensor;
@@ -1132,6 +1140,7 @@ void dictConstructFromList(Stack* stack) {
 RegisterOperators reg_dict_ops({
     CREATE_DICT_OPS("str"),
     CREATE_DICT_OPS("int"),
+    CREATE_DICT_OPS("bool"),
     CREATE_DICT_OPS("float"),
     CREATE_DICT_OPS("Tensor"),
 });

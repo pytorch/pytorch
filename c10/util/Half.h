@@ -372,9 +372,9 @@ struct alignas(4) complex<Half> {
   Half imag() const {
     return imag_;
   }
-  inline complex(std::complex<float> value)
+  inline complex(c10::complex<float> value)
       : real_(value.real()), imag_(value.imag()) {}
-  inline operator std::complex<float>() const {
+  inline operator c10::complex<float>() const {
     return {real_, imag_};
   }
 };
