@@ -30,3 +30,15 @@ TEST(TestDlconvertor, TestDlconvertorNoStrides) {
 
   ASSERT_TRUE(a.equal(b));
 }
+
+TEST(TestDlconvertor, TestDlconvertorNullDeleter) {
+  manual_seed(123);
+
+  Tensor a = rand({3, 4});
+  DLManagedTensor* dlMTensor = toDLPack(a);
+  dlMTensor->deleter = nullptr;
+
+  Tensor b = fromDLPack(dlMTensor);
+
+  ASSERT_TRUE(a.equal(b));
+}
