@@ -15506,7 +15506,7 @@ class TestTorchDeviceType(TestCase):
                 xp = x.permute(p)
                 if not unary:
                     y = torch.randn(xp.size(-1), device=x.device, dtype=x.dtype)
-                    for inputs in ((xp,xp), (xp,y), (y, xp)):
+                    for inputs in ((xp, xp), (xp, y), (y, xp)):
                         res = op(*inputs)
                         compare_strides(xp.stride(), res.stride(), div)
                         self.assertEqual(xp.size(), res.size())
@@ -15527,8 +15527,8 @@ class TestTorchDeviceType(TestCase):
         binary_ops = (torch.eq, torch.add)
         unary_ops = (torch.exp,)
         # memory dense, sliced and ambiguous sliced (ambiguous dense loses permutation information)
-        xs = (torch.randn(2, 3, 4, device=device), torch.randn(2, 3, 8, device=device)[:,:,::2],
-              torch.randn(1, 1, 4, 12, device=device)[:,:,:,::2])
+        xs = (torch.randn(2, 3, 4, device=device), torch.randn(2, 3, 8, device=device)[:, :, ::2],
+              torch.randn(1, 1, 4, 12, device=device)[:, :, :, ::2])
         for op in binary_ops:
             for x in xs:
                 _test_helper(x, op)
