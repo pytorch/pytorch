@@ -248,8 +248,6 @@ else
     export MAX_JOBS=`expr $(nproc) - 1`
   fi
 
-  pip install --user dataclasses
-
   $PYTHON setup.py install --user
 
   report_compile_cache_stats

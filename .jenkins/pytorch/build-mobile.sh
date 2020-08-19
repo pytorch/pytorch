@@ -20,9 +20,6 @@ retry pip install --pre torch torchvision \
   -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html \
   --progress-bar off
 
-# TODO: remove this
-retry pip install dataclasses
-
 # Run end-to-end process of building mobile library, linking into the predictor
 # binary, and running forward pass with a real model.
 if [[ "$BUILD_ENVIRONMENT" == *-mobile-custom-build-static* ]]; then
