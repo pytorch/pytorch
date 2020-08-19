@@ -74,25 +74,25 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
 
     contains_complex_input = imag_j_tensors is not None
 
-    def compute_gradient(x_tensor, x_idx, is_mkldnn=False, imag_delta=False):
+    def compute_gradient(x, idx, is_mkldnn=False, imag_delta=False):
 
         def fn_out(is_mkldnn=False):
             if not is_mkldnn:
                 return fn(input).clone()
             else:
-                return fn([x_tensor.to_mkldnn()])
+                # convert the dense vector back to have mkldnn layout
+                return fn([x.to_mkldnn()])
 
         if imag_delta:
             delta = eps * 1j
         else:
             delta = eps
-        orig = x_tensor[x_idx].item()
-        x_tensor[x_idx] = orig - eps
+        orig = x[idx].item()
+        x[idx] = orig - eps
         outa = fn_out(is_mkldnn)
-        x_tensor[x_idx] = orig + eps
+        x[idx] = orig + eps
         outb = fn_out(is_mkldnn)
-        if not is_mkldnn:
-            x_tensor[x_idx] = orig
+        x[idx] = orig
         r = (outb - outa) / (2 * eps)
         return r.detach().reshape(-1)
 
