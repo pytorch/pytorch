@@ -22,8 +22,10 @@ namespace fuser {
  */
 class TORCH_CUDA_API ThreadPredicateMap {
  public:
-  using SourceMapType =
-      std::unordered_map<ParallelType, std::unordered_set<const TensorView*>>;
+  using SourceMapType = std::unordered_map<
+      ParallelType,
+      std::unordered_set<const TensorView*>,
+      TypeHash>;
   using MapType = std::unordered_map<
       const TensorView*,
       std::pair<ir_utils::ParallelTypeBitmap, SourceMapType>>;
