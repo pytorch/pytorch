@@ -4,7 +4,7 @@ import operator_benchmark as op_bench
 import torch
 import numpy as np
 
-embeddingbag_prepack_configs = op_bench.cross_product_configs(
+embeddingbag_conversion_configs = op_bench.cross_product_configs(
     num_embeddings=(100, 80, 120, 1000),
     embedding_dim=(16, 4, 16, 64, 128),
     tags=('short',)
@@ -51,8 +51,8 @@ class EmbeddingBagFusedToFloatBase(op_bench.TorchBenchmarkBase):
         return self.op_func(self.packed_weight)
 
 
-op_bench.generate_pt_tests_from_op_list(conversion_ops, embeddingbag_prepack_configs, EmbeddingBagFloatToFusedBase)
-op_bench.generate_pt_tests_from_op_list(unpack_ops, embeddingbag_prepack_configs, EmbeddingBagFusedToFloatBase)
+op_bench.generate_pt_tests_from_op_list(conversion_ops, embeddingbag_conversion_configs, EmbeddingBagFloatToFusedBase)
+op_bench.generate_pt_tests_from_op_list(unpack_ops, embeddingbag_conversion_configs, EmbeddingBagFusedToFloatBase)
 
 if __name__ == "__main__":
     op_bench.benchmark_runner.main()
