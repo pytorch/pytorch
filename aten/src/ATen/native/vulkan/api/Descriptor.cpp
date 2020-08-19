@@ -5,6 +5,8 @@ namespace native {
 namespace vulkan {
 namespace api {
 
+constexpr Descriptor::Pool::Descriptor Descriptor::Pool::kDefault;
+
 Descriptor::Pool::Factory::Factory(const VkDevice device)
   : device_(device) {
 }
