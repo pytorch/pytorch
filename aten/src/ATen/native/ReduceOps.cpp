@@ -632,6 +632,7 @@ Tensor &any_out(Tensor &result, const Tensor &self, int64_t dim, bool keepdim) {
 }
 
 Tensor &amin_out(Tensor& result, const Tensor& self, IntArrayRef dim, bool keepdim) {
+  TORCH_CHECK(self.scalar_type() == result.scalar_type(), "Illegal dtype for self, and out:", self.scalar_type(), result.scalar_type());
   ScalarType dtype = get_dtype(result, self, {}, true);
   auto iter = make_reduction("min_values", result, self, dim, keepdim, dtype);
   TORCH_CHECK(iter.numel() > 0, "min_values on a tensor with no elements is not defined.");
@@ -645,6 +646,7 @@ Tensor amin(const Tensor& self, IntArrayRef dim, bool keepdim) {
 }
 
 Tensor &amax_out(Tensor& result, const Tensor& self, IntArrayRef dim, bool keepdim) {
+  TORCH_CHECK(self.scalar_type() == result.scalar_type(), "Illegal dtype for self, and out:", self.scalar_type(), result.scalar_type());
   ScalarType dtype = get_dtype(result, self, {}, true);
   auto iter = make_reduction("max_values", result, self, dim, keepdim, dtype);
   TORCH_CHECK(iter.numel() > 0, "max_values on a tensor with no elements is not defined.");

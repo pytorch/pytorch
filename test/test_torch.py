@@ -12455,11 +12455,14 @@ class TestTorchDeviceType(TestCase):
             dim_list = list(combinations(list(range(dims)), r=num_of_dims))
             for dim in dim_list:
                 for keepdim in [False, True]:
+                    print(dim)
                     amin1 = torch.amin(x, dim=dim, keepdim=keepdim)
-                    amax1 = torch.amin(x, dim=dim, keepdim=keepdim)
+                    amax1 = torch.amax(x, dim=dim, keepdim=keepdim)
                     amin2 = x
                     amax2 = x
-                    for d in dim:
+                    for i, d in enumerate(dim):
+                        if not keepdim:
+                            d -= i
                         amin2 = torch.amin(amin2, dim=d, keepdim=keepdim)
                         amax2 = torch.amax(amax2, dim=d, keepdim=keepdim)
                     self.assertEqual(amin1, amin2)
