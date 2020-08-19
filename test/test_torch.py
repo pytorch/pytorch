@@ -10018,7 +10018,7 @@ class TestTorchDeviceType(TestCase):
             expected = fn(y, 1, keepdim=False)
             self.assertEqual(x[:, 1], expected, msg='{} with out= kwarg'.format(fn_name))
 
-    @largeCUDATensorTest('10GB')
+    @largeCUDATensorTest('15GB')
     def test_reduction_split(self, device):
         # Test reduction when there is a 32bit-indexing split
         # https://github.com/pytorch/pytorch/issues/37583
