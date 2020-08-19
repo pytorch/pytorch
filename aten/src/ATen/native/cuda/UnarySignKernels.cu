@@ -46,7 +46,7 @@ void sign_kernel_cuda(TensorIterator& iter){
                    } else {
                      return (0 < a.imag()) - (a.imag() < 0);
                    }
-                 });
+      });
     });
   } else {
     AT_DISPATCH_ALL_TYPES_AND(ScalarType::Half, iter.dtype(), "sign_cuda", [&]() {

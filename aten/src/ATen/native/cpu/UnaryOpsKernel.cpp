@@ -274,7 +274,7 @@ static void sign_kernel(TensorIterator& iter){
                    } else {
                      return (0 < a.imag()) - (a.imag() < 0);
                    }
-                 });
+      });
     });
   } else {
     AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, ScalarType::Half, iter.dtype(), "sign_cpu", [&]() {
