@@ -21,9 +21,9 @@ core.GlobalInit(["caffe2", "--caffe2_log_level=-3", "--glow_global_fp16=1"])
 class TestBatchMatMul(serial.SerializedTestCase):
     @given(
         # C=0, #st.integers(min_value=0, max_value=3),  # number of batch dims
-        M=st.integers(min_value=1, max_value=10),
-        K=st.integers(min_value=1, max_value=10),
-        N=st.integers(min_value=1, max_value=10),
+        M=st.integers(min_value=1, max_value=50),
+        K=st.integers(min_value=1, max_value=50),
+        N=st.integers(min_value=1, max_value=50),
         rand_seed=st.integers(0, 65534),
         trans_a=st.booleans(),
         trans_b=st.booleans(),
@@ -65,7 +65,9 @@ class TestBatchMatMul(serial.SerializedTestCase):
         )
 
         pred_net_ref = core.Net("pred_net_ref")
-        pred_net_ref.BatchMatMulFP16Acc16Fake(
+
+        # Reference updated to fp16 with fp32 accumulation
+        pred_net_ref.BatchMatMulFP16Acc32Fake(
             ["X", "Y"], ['out'], trans_a=trans_a, trans_b=trans_b)
 
         print("dims", batch_dims, X.shape, Y.shape)
@@ -98,7 +100,10 @@ class TestBatchMatMul(serial.SerializedTestCase):
             print_test_debug_info("bmm", {
                 "seed": rand_seed,
                 "m": M, "k": K,
-                "n": N, "X": X, "Y": Y,
+                "n": N, "X": X.shape, "Y": Y.shape,
+                "trans_a": trans_a,
+                "trans_b": trans_b,
+                "run_ints": run_ints,
                 "out_glow": out_glow,
                 "out_c2_fakefp16": out_c2_fakefp16,
                 "diff": diff
