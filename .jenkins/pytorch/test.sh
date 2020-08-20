@@ -227,9 +227,11 @@ test_distributed() {
 }
 
 test_rpc() {
+  if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
     echo "Testing RPC C++ tests"
     mkdir -p test/test-reports/cpp-rpc
     build/bin/test_cpp_rpc --gtest_output=xml:test/test-reports/cpp-rpc/test_cpp_rpc.xml
+  fi
 }
 
 test_custom_backend() {
