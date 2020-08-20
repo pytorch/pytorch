@@ -11,6 +11,7 @@ from torch.jit._builtins import _find_builtin
 from torch.nn import Module
 from torch._six import get_function_from_type, bind_method
 
+from torch._C import TupleType, ListType
 
 ScriptMethodStub = collections.namedtuple('ScriptMethodStub', ('resolution_callback', 'def_', 'original_method'))
 
@@ -102,6 +103,46 @@ def infer_concrete_type_builder(nn_module):
         else:
             attr_type = torch._C._jit_try_infer_type(item)
         return attr_type
+
+    # Try to infer the type of item if it is a module container (e.g. list, tuple, or dict of modules).
+    # If item is a module container, it returns the JIT type of said container.
+    def infer_module_container_type(item):
+        inferred_type = None
+
+        if isinstance(item, list):
+            # Check that all list elements have the same concrete type. Heterogenous lists
+            # are not supported; even if it is a list of modules, all modules must have the same
+            # concrete/JIT type.
+            list_concrete_type = None
+            for elem in item:
+                if not isinstance(elem, torch.nn.Module):
+                    return None
+
+                elem_concrete_type = concrete_type_store.get_or_create_concrete_type(elem)
+
+                if list_concrete_type:
+                    assert list_concrete_type == elem_concrete_type
+                else:
+                    list_concrete_type = elem_concrete_type
+
+            # Create a ListType with the JIT type of each element.
+            inferred_type = ListType(list_concrete_type.jit_type) if len(item) > 0 else None
+        elif isinstance(item, tuple):
+            tuple_elem_types = []
+
+            # Gather all list elements' JIT types.
+            for elem in item:
+                if not isinstance(elem, torch.nn.Module):
+                    return None
+
+                tuple_elem_types.append(concrete_type_store.get_or_create_concrete_type(elem).jit_type)
+
+            # Create the TupleType.
+            inferred_type = TupleType(tuple_elem_types)
+        else:
+            warnings.warn("Unsupported container type {}".format(type(item).__name__))
+
+        return inferred_type
 
     added_names = set()
 
@@ -232,12 +273,19 @@ def infer_concrete_type_builder(nn_module):
         if attr_type is not None:
             concrete_type_builder.add_attribute(name, attr_type, False, False)
         else:
-            # TODO: could add more detail here. For example, what the user should do
-            # when the pytype is `list` or `NoneType`
-            hint = ("(This attribute exists on the Python module, "
-                    "but we failed to convert Python type: '{}' "
-                    "to a TorchScript type.)").format(torch.typename(type(value)))
-            concrete_type_builder.add_failed_attribute(name, hint)
+            # If type inference failed, this might be a module container (list, dict or tuple of modules).
+            module_container_attr_type = infer_module_container_type(value)
+
+            # If it is, add the type of the module container to the concrete type of the owning module.
+            if module_container_attr_type:
+                concrete_type_builder.add_attribute(name, module_container_attr_type, False, False)
+            else:
+                # TODO: could add more detail here. For example, what the user should do
+                # when the pytype is `list` or `NoneType`
+                hint = ("(This attribute exists on the Python module, "
+                        "but we failed to convert Python type: '{}' "
+                        "to a TorchScript type.)").format(torch.typename(type(value)))
+                concrete_type_builder.add_failed_attribute(name, hint)
 
     # Add @property methods as failed attributes, to give a better error message.
     for name, value in type(nn_module).__dict__.items():
@@ -314,9 +362,31 @@ def create_script_module(nn_module, stubs_fn, share_types=True):
         concrete_type_builder = infer_concrete_type_builder(nn_module)
         concrete_type_builder.set_poisoned()
         concrete_type = concrete_type_builder.build()
-    return create_script_module_impl(nn_module, concrete_type, stubs_fn)
 
-def create_script_module_impl(nn_module, concrete_type, stubs_fn):
+    memo = {}
+    return create_script_module_impl(nn_module, concrete_type, stubs_fn, memo)
+
+def is_module_container(obj):
+    """
+    Determine whether an object is a module container (a list, tuple, or dict)
+    containing only nn.Modules.
+
+    Arguments:
+        obj: The object to examine.
+
+    Returns:
+        True if obj is a module container, False if not.
+    """
+    if isinstance(obj, list) or isinstance(obj, tuple):
+        for elem in obj:
+            if not isinstance(elem, torch.nn.Module):
+                return False
+
+        return True
+
+    return False
+
+def create_script_module_impl(nn_module, concrete_type, stubs_fn, memo, _nil=[]):  # noqaB006
     """
     Convert an nn.Module to a RecursiveScriptModule.
 
@@ -324,23 +394,30 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
         nn_module:  The original Python nn.Module that we are creating a ScriptModule for.
         concrete_type:  The fully initialized ConcreteType of the module.
         stubs_fn:  Lambda that takes an nn.Module and generates a list of ScriptMethodStubs to compile.
+        memo: table of id() => obj that helps us correctly re-use modules if they appear more than
+            once in the module hierarchy. Example:
+                self.submod1 = my_module
+                self.submod2 = my_module  # <- we should reuse the scripted `self.submod1` here
     """
+    # Check if nn_module has already been compiled before and if so, return the memoized result.
+    d = id(nn_module)
+    attr = memo.get(d, _nil)
+    if attr is not _nil:
+        return attr
+
     cpp_module = torch._C._create_module_with_type(concrete_type.jit_type)
     stubs = stubs_fn(nn_module)
 
     def init_fn(script_module):
-        # Initialize the ScriptModule:
-        # 1. Copy the attributes/parameters/buffers from the original `nn_module` to the new ScriptModule.
-        for name, (attr_type, is_param) in concrete_type.get_attributes().items():
-            orig_value = getattr(nn_module, name)
-            orig_value = orig_value.value if isinstance(orig_value, torch.jit.Attribute) else orig_value
-            cpp_module.setattr(name, orig_value)
-
-        # 2. Copy the submodules from the original `nn_module` to the new ScriptModule,
-        #    recursively scripting them.
+        # 1. Copy the submodules from the original `nn_module` to the new ScriptModule,
+        #    recursively scripting them. This must be done first in case any attributes
+        #    refer back to these submodules.
+        submodule_to_concrete_type = {}
         for name, sub_concrete_type in concrete_type.get_modules():
             orig_value = getattr(nn_module, name)
             assert isinstance(orig_value, Module), "Expected Module but got {}".format(type(orig_value))
+
+            submodule_to_concrete_type[nn_module] = sub_concrete_type
             module_type = sub_concrete_type.jit_type
             if isinstance(module_type, torch._C.InterfaceType):
                 # use the interface inference rule to compile the module
@@ -349,10 +426,43 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
                 scripted = orig_value
             else:
                 # use the default recursive rule to compile the module
-                scripted = create_script_module_impl(orig_value, sub_concrete_type, infer_methods_to_compile)
+                scripted = create_script_module_impl(orig_value, sub_concrete_type, infer_methods_to_compile, memo)
 
             cpp_module.setattr(name, scripted)
             script_module._modules[name] = scripted
+
+        # Initialize the ScriptModule:
+        # 2. Copy the attributes/parameters/buffers from the original `nn_module` to the new ScriptModule.
+        for name, (attr_type, is_param) in concrete_type.get_attributes().items():
+            orig_value = getattr(nn_module, name)
+            orig_value = orig_value.value if isinstance(orig_value, torch.jit.Attribute) else orig_value
+
+            # If any attributes are module containers, each reference to an nn.Module instance contained in them must be
+            # replaced with a reference to the corresponding ScriptModule.
+            if is_module_container(orig_value):
+                for elem in orig_value:
+                    # It could be the case that a module has a list attribute containing submodules that are not assigned to
+                    # their own attributes or added using add_module(name, module). In this case, those modules will not have
+                    # been compiled, so an error must be thrown.
+                    if elem not in submodule_to_concrete_type:
+                        msg = "Module attribute '{}' contains reference to another module that is not an attribute".format(name)
+                        raise RuntimeError(msg)
+
+                # Replace List[Module] with List[RecursiveScriptModule] and Tuple[Module] with
+                # Tuple[RecursiveScriptModule] as appropriate.
+                submodule_concrete_type = submodule_to_concrete_type[elem]
+                orig_value = [
+                    create_script_module_impl(elem, submodule_concrete_type, infer_methods_to_compile, memo)
+                    for elem in orig_value
+                ]
+                if isinstance(orig_value, tuple):
+                    orig_value = tuple(orig_value)
+
+                # The list or tuple needs to be set on the wrapper too because cpp_module cannot hold any attributes
+                # of type or that contain the type RecursiveScriptModule.
+                setattr(script_module, name, orig_value)
+
+            cpp_module.setattr(name, orig_value)
 
         # 3. Copy @ignored/@unused methods from the original `nn_module` to the new ScriptModule.
         #    This ensures we can access these Python methods on the ScriptModule.
@@ -422,6 +532,9 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
         if _jit_internal.get_torchscript_modifier(item) is _jit_internal.FunctionModifiers.COPY_TO_SCRIPT_WRAPPER:
             add_python_attr_to_scripted_model(script_module, nn_module, name)
 
+    # Memoize the compiled module so that it can be retrieved in other compilations
+    # within the same module hierarchy.
+    memo[d] = script_module
     return script_module
 
 

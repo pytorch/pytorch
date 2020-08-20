@@ -8640,7 +8640,7 @@ a")
                     print(1)
                 return 4
 
-        with self.assertRaisesRegex(RuntimeError, "has no attribute 'mods'"):
+        with self.assertRaisesRegex(RuntimeError, "attribute 'mods' contains reference to another module that is not an attribute"):
             M()
 
     class DerivedStateModule(torch.jit.ScriptModule):

@@ -700,3 +700,70 @@ class TestRecursiveScript(JitTestCase):
         self.checkModule(mod, (torch.rand(2, 2),))
         mod.foo = None
         self.checkModule(mod, (torch.rand(2, 2),))
+
+    def test_aliased_submodule(self):
+        class A(torch.nn.Module):
+            def __init__(self, submod1, submod2):
+                super().__init__()
+                self.submod1 = submod1
+                self.submod2 = submod2
+
+            def forward(self, x):
+                return x
+
+        class B(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return x
+
+        b = B()
+        a = A(b, b)
+        self.checkModule(a, (torch.rand(2, 2),))
+        a_scripted = torch.jit.script(a)
+        # scripting should preserve aliasing relationships between modules
+        self.assertTrue(a_scripted.submod1 is a_scripted.submod2)
+
+    def test_aliased_submodule_mutation(self):
+        class SubModule(nn.Module):
+            def __init__(self):
+                super(SubModule, self).__init__()
+                self.a = 1.1
+                self.b = 2.2
+
+            def forward(self, x):
+                return self.a + self.b
+
+            @torch.jit.export
+            def modify_a(self, x):
+                self.a = 10.0
+                return self. b
+
+            @torch.jit.export
+            def modify_b(self, x):
+                self.b = 20.0
+                return self.a
+
+        Sub = SubModule()
+
+        class SubModule2(nn.Module):
+            def __init__(self):
+                super(SubModule2, self).__init__()
+                self.sub = Sub  # aliasing
+
+            def forward(self, x):
+                return self.sub.a
+
+        class TestModule(nn.Module):
+            def __init__(self):
+                super(TestModule, self).__init__()
+                self.sub1 = Sub  # aliasing
+                self.sub2 = SubModule2()
+
+            def forward(self, x):
+                z = self.sub1.modify_a(x)
+                return self.sub2(x) + z
+
+        m = TestModule()
+        self.checkModule(m, (torch.randn(2, 2),))

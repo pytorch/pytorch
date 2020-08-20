@@ -10,6 +10,7 @@ from torch.testing._internal.common_quantization import skipIfNoFBGEMM
 from torch.jit._recursive import wrap_cpp_module
 
 import io
+import unittest
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
@@ -424,8 +425,7 @@ class TestFreezing(JitTestCase):
         output_f = mf.forward(input)
         self.assertEqual(output_s, output_f)
 
-    # FIXME: JIT is not honoring aliasing. 'Sub' module is copied. As a result
-    # Eager and Script modules produce different output.
+    @unittest.skip("Module aliasing has been fixed")
     def test_freeze_module_with_nestedaliasingscalar(self):
         class SubModule(nn.Module):
             def __init__(self):
@@ -478,7 +478,7 @@ class TestFreezing(JitTestCase):
         output_s = ms.forward(input)
         output_f = mf.forward(input)
         # Should be equal
-        self.assertNotEqual(output, output_s)
+        self.assertEqual(output, output_s)
         self.assertEqual(output_s, output_f)
 
 
