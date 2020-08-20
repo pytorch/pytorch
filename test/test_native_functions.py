@@ -15,13 +15,6 @@ class IntListWrapperModule(torch.nn.Module):
         return torch._C._nn._test_optional_intlist(values, incr)
 
 
-class FilledIntListWrapperModule(torch.nn.Module):
-    # note: incr is annotated with true param type for scripting,
-    # but we trigger fill behavior by calling with bare int
-    def forward(self, values, incr: Optional[List[int]]):
-        return torch._C._nn._test_optional_intlist(values, incr)
-
-
 class TestNativeFunctions(TestCase):
 
     #
@@ -153,9 +146,22 @@ class TestNativeFunctions(TestCase):
         return torch.jit.trace(wrapper, torch.tensor([1, 2], dtype=torch.int))
 
     def test_optional_filled_intlist(self):
-        self.do_test_optional_filled_intlist_with_module(FilledIntListWrapperModule())
-        self.do_test_optional_filled_intlist_with_module(torch.jit.script(FilledIntListWrapperModule()))
 
+        def f(n: int):
+            x = torch._C._nn._test_optional_intlist(torch.tensor([1, 1], dtype=torch.int), (n, n))
+            y = torch._C._nn._test_optional_intlist(torch.tensor([1, 1], dtype=torch.int), n)
+            return x, y
+
+        # eager
+        returned = f(10)
+        self.assertEqual(returned[0], returned[1])
+
+        # scripted
+        s = torch.jit.script(f)
+        returned = s(10)
+        self.assertEqual(returned[0], returned[1])
+
+        # traced
         traced_none = self.trace_optional_filled_intlist(None)
         traced_int = self.trace_optional_filled_intlist(10)
 

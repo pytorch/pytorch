@@ -110,7 +110,6 @@ struct SchemaParser {
   }
 
   Argument parseArgument(size_t idx, bool is_return, bool kwarg_only) {
-    Argument result;
     auto p = type_parser.parseType();
     auto type = std::move(p.first);
     auto alias_info = std::move(p.second);
