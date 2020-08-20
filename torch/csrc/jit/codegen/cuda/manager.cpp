@@ -1,38 +1,69 @@
-#include <torch/csrc/jit/codegen/cuda/manager.h>
+#include <torch/csrc/jit/codegen/cuda/executor.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
+#include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_cache.h>
 #include <torch/csrc/jit/codegen/cuda/parser.h>
+#include <torch/csrc/jit/codegen/cuda/scheduler.h>
 #include <torch/csrc/jit/codegen/cuda/shape_inference.h>
-#include <torch/csrc/jit/codegen/cuda/utils.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
+#include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
 
 #include <unordered_map>
+
+#include <ATen/DimVector.h>
+#include <c10/core/DeviceType.h>
+
+#include <torch/csrc/jit/codegen/cuda/manager.h>
 
 namespace torch {
 namespace jit {
 namespace fuser {
 namespace cuda {
 
+// [ Note -- cache entry indexing ]
+//
+// CudaFusionManager holds the cache and handles interfacing to CudaFusionGroup
+// node, including selection, construction and execution of FusionExecutors.
+//
+// CudaFusionManager bridges PyTorch IR node CudaFusionGroup to GraphCache.
+// Therefore, we want to cache on stringified graph. But it is expensive to
+// stringify and hash on a computational graph, we cache the hash of a
+// stringified graph on node via cache_id.
+//
+// CudaFusionGroup node stores:
+//     i.  a PyTorch IR in `attr::Subgraph`
+//     ii. an int in `attr::cache_id`, (a cached hash value of `attr::Subgraph`)
+//
+// We have 2 unordered_map at CudaFusionGroup:
+//   std::unordered_map<std::string, int32_t> graph_cache_ids_;
+//   std::unordered_map<int64_t, std::unique_ptr<GraphCache>> graph_cache_;
+//
+// Mapping from std::string to graph_cache_id ensures that we assign the same
+// cache_id to CudaFusionGroup with identical computational grah, allowing
+// kernel reuse; Direct mapping from cache_id to GraphCache allows efficient
+// graph_cache indexing;
+
 namespace {
-std::unique_ptr<KernelArgsReq> makePWKernelSupport(
-    const at::ArrayRef<IValue>& inputs) {
-  auto req_ptr = std::make_unique<NaivePWKernelArgsReq>();
+
+c10::Device getDevice(const at::ArrayRef<IValue>& inputs) {
+  // find device in inputs.
   for (const auto& input : inputs) {
-    req_ptr->dims_.push_back(input.isTensor() ? input.toTensor().dim() : -1);
+    if (input.isTensor()) {
+      auto dev = input.toTensor().device();
+      TORCH_INTERNAL_ASSERT(
+          dev.is_cuda(), "Could only fuser operations on cuda device");
+      return dev;
+    }
   }
-  return req_ptr;
+  TORCH_INTERNAL_ASSERT(
+      false, "Could not detect device of inputs to a fusion.");
 }
 
-// CudaFusionManager holds compiled `CudaKernel` and handles all interfacing
-// including compilation and execution.
-//
-// We cache two maps here:
-//   a. string of graph -> kernel_id
-//   b. kernel_id -> CudaKernel
-//
-// This allows CudaKernel reuse across nodes;
+// CudaFusionManager is not thread safe!
+// TODO: we should make the tradeoff here to use thread_local instead of global
+// singleton;
 class CudaFusionManager {
  public:
   static CudaFusionManager& getManager() {
@@ -49,77 +80,119 @@ class CudaFusionManager {
     std::lock_guard<std::mutex> guard(mutex_);
 
     // prepare graph for lowering;
-    // TODO: this is needed. Otherwise caching on tensor size would not work, as
-    //       different tensor size would result in unique string representation.
-    EraseShapeInformation(graph);
+    // We should not call `EraseShapeInformation(graph);`, graph representation
+    // does not incorporate static sizes, but just rank of input tensors, which
+    // is exactly what we wanted.
     Canonicalize(graph, false);
     auto repr = graph->toString(false);
 
-    // create new graph_cache_ entry;
-    if (graph_cache_.count(repr) == 0) {
+    // create new graph_cache_ids_ entry if none existed yet;
+    if (graph_cache_ids_.count(repr) == 0) {
       int32_t kernel_id = getNextUniqueID();
-
-      graph_cache_[repr] = kernel_id;
-
-      // create entry for cached kernel;
-      // Note: use make_pair instead of uniform initialization list here since
-      //       it doesn't work under some env that we still support.
-      //       eg. cuda9.2 + gcc5.4
-      kernel_cache_.insert(std::make_pair(kernel_id, CudaKernelCache()));
-
-      // TODO: we should compile here using profiled information:
-      //       size (range) / stride (contiguity)
+      graph_cache_ids_[repr] = kernel_id;
+      TORCH_CHECK(
+          graph_cache_.emplace(kernel_id, std::make_unique<GraphCache>(graph))
+              .second);
     }
-
-    return graph_cache_[repr];
+    return graph_cache_ids_[repr];
   };
 
-  void runFusionNode(
+  std::vector<at::Tensor> runFusionNode(
       int32_t kernel_id,
       std::shared_ptr<Graph>& graph,
-      const at::ArrayRef<IValue> inputs,
-      const std::vector<at::Tensor>& outputs,
-      const std::vector<int64_t>& broadcasted_shape) {
+      const at::ArrayRef<IValue> inputs) {
     std::lock_guard<std::mutex> guard(mutex_);
-    TORCH_CHECK(
-        kernel_cache_.count(kernel_id) != 0, "kernel id not recognized");
+    return graph_cache_[kernel_id]->runGraphWithInputs(inputs);
+  }
 
-    // TODO: temporary hack
-    auto cuda_kernel = kernel_cache_[kernel_id].getKernelPtr(inputs);
-    if (cuda_kernel) {
-      // TODO: update launch config for specific sizes;
-      //       maybe we should store it in CudaKernel and compute it later
-      runKernel(*cuda_kernel, inputs, outputs, broadcasted_shape);
-    } else {
-      // TODO: this should somehow be done after kernel compilation.
-      //       we will want compileKernel to return a heuristic
-      cuda_kernel = kernel_cache_[kernel_id].allocateKernelInCache(
-          makePWKernelSupport(inputs));
+ private:
+  // TODO: Dimension collapsing should be abstracted out and integrated into
+  // graph caching.
 
-      // lower torch::jit::Graph to torch::jit::fuser::cuda::fusion
-      // TODO: pass contiguity infor as well as size req, so we can apply proper
-      //       transform to computation
-      // we should propagate more information back:
-      //   1. device;
-      //   2. launch config;
-      parseJitIR(graph, cuda_kernel.value());
+  // Dimension collapsing only applicable to profiling executor at this moment
+  bool graphHasReduction(const std::shared_ptr<Graph>& graph) {
+    for (const auto& n : graph->nodes()) {
+      if (isReductionNode(n)) {
+        return true;
+      }
+    }
+    return false;
+  }
 
-      // find device in inputs.
-      for (const auto& input : inputs) {
-        if (input.isTensor()) {
-          const auto& device = input.toTensor().device();
-          TORCH_INTERNAL_ASSERT(
-              device.is_cuda(), "Could only fuser operations on cuda device");
-          cuda_kernel.value()->device_ = device.index();
-          break;
+  TensorTypePtr mergeInputTensorType(const std::shared_ptr<Graph>& graph) {
+    // run over inputs to extract common types;
+    TensorTypePtr acc_type = TensorType::get();
+    for (const auto& input : graph->inputs()) {
+      // only check tensor types;
+      if (auto input_type = input->type()->cast<TensorType>()) {
+        if (!input_type->dim().has_value()) {
+          // early termination when detecting undefined tensor;
+          return TensorType::get()->withUndefined();
+        }
+        if (acc_type->dim().has_value()) {
+          // TODO: I think merge cannot handle broadcast - Go verify it later;
+          // TODO: Since we are only handling permutation here, we should just
+          //       merge the stride_index_;
+          acc_type = acc_type->merge(input_type);
+        } else {
+          acc_type = input_type;
         }
       }
-
-      // NVRTC compile kernel
-      compileKernel(cuda_kernel.value());
-
-      runKernel(*cuda_kernel, inputs, outputs, broadcasted_shape);
     }
+    return acc_type;
+  }
+
+  // return a permutation order that would undo `permuted`
+  at::DimVector restorePermutation(at::DimVector permuted) {
+    int rank = static_cast<int>(permuted.size());
+    at::DimVector permutation(rank, -1);
+    for (int i = 0; i < rank; i++) {
+      permutation[permuted[i]] = i;
+    }
+    return permutation;
+  }
+
+  at::DimVector getSortStrideScheme(const TensorTypePtr& type) {
+    // `permute_seq` is the returned permutation to achieve sorted stride;
+    at::DimVector permute_seq;
+
+    auto stride_properties = type->stride_properties().sizes();
+
+    TORCH_INTERNAL_ASSERT(
+        stride_properties.has_value(),
+        "unknown sizes or stride_properties, collapsing shouldn't happen");
+
+    // TODO: reuse this;
+    const int rank = static_cast<int>(stride_properties->size());
+
+    // stores axes with stride_index;
+    std::set<int> ordered_axes;
+
+    // TODO: this does not support broadcast yet;
+    for (int i = 0; i < rank; i++) {
+      if ((*stride_properties)[i].has_value() &&
+          (*stride_properties)[i]->stride_index_.has_value()) {
+        ordered_axes.insert((*stride_properties)[i]->stride_index_.value());
+      }
+    }
+
+    int unallocated_axis = 0;
+    // we push from slowest to fastest
+    for (int i = rank - 1; i >= 0; i--) {
+      if ((*stride_properties)[i].has_value() &&
+          (*stride_properties)[i]->stride_index_.has_value()) {
+        permute_seq.emplace_back(
+            (*stride_properties)[i]->stride_index_.value());
+      } else {
+        // no designated axis for this slot, so we push an axis w/o designated
+        // order;
+        while (ordered_axes.count(unallocated_axis) != 0) {
+          ++unallocated_axis;
+        }
+        permute_seq.emplace_back(unallocated_axis++);
+      }
+    }
+    return permute_seq;
   }
 
  private:
@@ -134,8 +207,8 @@ class CudaFusionManager {
     return next_unique_id_++;
   };
 
-  std::unordered_map<std::string, int32_t> graph_cache_;
-  std::unordered_map<int64_t, CudaKernelCache> kernel_cache_;
+  std::unordered_map<std::string, int32_t> graph_cache_ids_;
+  std::unordered_map<int64_t, std::unique_ptr<GraphCache>> graph_cache_;
 
   int32_t next_unique_id_ = 0;
 };
@@ -173,71 +246,26 @@ void runCudaFusionGroup(const Node* fusion_node, Stack& stack) {
     const auto nInputs = graph->inputs().size();
     at::ArrayRef<IValue> inputs = last(stack, nInputs);
 
-    // shape inference in graph
-    // update shape information per the new inputs;
-    EraseShapeInformation(graph);
-    for (size_t i = 0; i < nInputs; i++) {
-      graph->inputs()[i]->setType(inputs[i].type());
-    }
-    // shape inference
-    ShapeTypePropagate(graph);
-
-    // TODO: temporary WAR that allows us to handle fusion with uniform output
-    // shape and consistent broadcast scheme. The difinition is loose and the
-    // implementation is risky. We'll do this properly when we integrate proper
-    // broadcast support.
-    std::vector<int64_t> broadcasted_shape;
-
-    // we need to construct outputs;
-    std::vector<at::Tensor> outputs;
-    for (const auto* output : graph->outputs()) {
-      const auto type = output->type()->expect<TensorType>();
-      // Expect output to be tensor;
-      TORCH_CHECK(
-          type && type->isComplete(),
-          "Complete TensorType for output is expected.");
-
-      const auto device = *(type->device());
-      const auto scalar_type = *(type->scalarType());
-
-      auto options = at::TensorOptions()
-                         .dtype(scalar_type)
-                         .layout(at::kStrided)
-                         .device(device)
-                         .requires_grad(type->requires_grad());
-
-      // TODO: We should infer output shape from `inputs`
-      const auto sizes = extractSizes(type);
-      const auto strides = extractStrides(type);
-
-      const auto tensor = at::empty_strided(sizes, strides, options);
-      outputs.push_back(tensor);
-
-      // TODO: unsafe broadcast assumption. We assume all output from fusion has
-      //       identical size when broadcasting.
-      if (broadcasted_shape.empty()) {
-        if (!hasReductionNode(graph->block())) {
-          broadcasted_shape = sizes;
-        } else if (isReductionNode(output->node())) {
-          auto i_type =
-              output->node()->inputs()[0]->type()->expect<TensorType>();
-          TORCH_CHECK(
-              i_type && i_type->sizes().isComplete(),
-              "Complete TensorType for output is expected.");
-          broadcasted_shape = extractSizes(i_type);
-        } else {
-          // TODO: this assert is not fool proof. We could have ignored
-          // pre-reduction tensor marked as output after we first encountered
-          // reduction output tensor.
-          TORCH_INTERNAL_ASSERT(
-              false,
-              "pre-reduction tensor output for reduction fusion is nor properly supported yet.");
-        }
+    // TODO: we would/could want an extra layer of graph cache in order to
+    //       handle varying contiguity/broadcast;
+    // Only needed if we are doing codegen
+    // if no shape information available, we feed current shape into the kernel;
+    // This is needed because our current broadcast on size-1 dimension
+    if (!IsNewExecutorEnabled()) {
+      EraseShapeInformation(graph);
+      for (size_t i = 0; i < nInputs; i++) {
+        graph->inputs()[i]->setType(inputs[i].type());
       }
+      // Type propagation that's here just to cover corner case, incase type
+      // propagation failed in the original subgraph. We currently need output
+      // types in order to support fp16, where we cast input to fp32 and output
+      // back to fp16.
+      TypePropagate(graph);
     }
 
-    CudaFusionManager::getManager().runFusionNode(
-        kernel_id, graph, inputs, outputs, broadcasted_shape);
+    auto outputs =
+        CudaFusionManager::getManager().runFusionNode(kernel_id, graph, inputs);
+
     drop(stack, inputs.size());
     stack.insert(
         stack.end(),
