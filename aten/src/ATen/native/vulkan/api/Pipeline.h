@@ -162,4 +162,3 @@ inline size_t Pipeline::Factory::Hasher::operator()(
 } // namespace vulkan
 } // namespace native
 } // namespace at
-
