@@ -8,7 +8,7 @@ from . import (
 )
 
 try:
-    from . import TensorPipeAgent, TensorPipeRpcBackendOptions
+    from . import TensorPipeAgent, _TensorPipeRpcBackendOptionsBase
     _USE_TENSORPIPE = True
 except ImportError:
     _USE_TENSORPIPE = False
