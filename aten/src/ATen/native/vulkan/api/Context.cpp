@@ -60,12 +60,8 @@ VkInstance create_instance(const bool enable_validation_layers) {
         &instance_layers_count,
         instance_layer_properties.data()));
 
-    constexpr std::array<const char*, 6> requested_instance_layers{
-        "VK_LAYER_GOOGLE_unique_objects",
-        "VK_LAYER_GOOGLE_threading",
-        "VK_LAYER_LUNARG_object_tracker",
-        "VK_LAYER_LUNARG_core_validation",
-        "VK_LAYER_LUNARG_parameter_validation",
+    constexpr const char* const requested_instance_layers[]{
+        // "VK_LAYER_LUNARG_api_dump",
         "VK_LAYER_KHRONOS_validation",
     };
 
@@ -88,7 +84,7 @@ VkInstance create_instance(const bool enable_validation_layers) {
     VK_CHECK(vkEnumerateInstanceExtensionProperties(
         nullptr, &instance_extension_count, instance_extension_properties.data()));
 
-    constexpr std::array<const char*, 1> requested_instance_extensions{
+    constexpr const char* const requested_instance_extensions[]{
       VK_EXT_DEBUG_REPORT_EXTENSION_NAME,
     };
 
@@ -126,42 +122,50 @@ VkInstance create_instance(const bool enable_validation_layers) {
   VkInstance instance{};
   VK_CHECK(vkCreateInstance(&instance_create_info, nullptr, &instance));
 
-  if (enable_validation_layers) {
-    const VkDebugReportCallbackCreateInfoEXT debugReportCallbackCreateInfo{
-      VK_STRUCTURE_TYPE_DEBUG_REPORT_CALLBACK_CREATE_INFO_EXT,
-      nullptr,
-      VK_DEBUG_REPORT_INFORMATION_BIT_EXT |
-        VK_DEBUG_REPORT_WARNING_BIT_EXT |
-        VK_DEBUG_REPORT_PERFORMANCE_WARNING_BIT_EXT |
-        VK_DEBUG_REPORT_ERROR_BIT_EXT |
-        VK_DEBUG_REPORT_DEBUG_BIT_EXT,
-      debug_report_callback_fn,
-      nullptr,
-    };
+  return instance;
+}
 
-    const auto vkCreateDebugReportCallbackEXT =
-        (PFN_vkCreateDebugReportCallbackEXT)vkGetInstanceProcAddr(
-            instance, "vkCreateDebugReportCallbackEXT");
-
-    TORCH_CHECK(
-        vkCreateDebugReportCallbackEXT,
-        "Could not load vkCreateDebugReportCallbackEXT");
-
-    VkDebugReportCallbackEXT debug_report_callback{};
-    VK_CHECK(vkCreateDebugReportCallbackEXT(
-        instance,
-        &debugReportCallbackCreateInfo,
-        nullptr,
-        &debug_report_callback));
+VkDebugReportCallbackEXT create_debug_report_callback(
+    const VkInstance instance,
+    const bool enable_validation_layers) {
+  if (!enable_validation_layers) {
+    return VkDebugReportCallbackEXT{};
   }
 
-  return instance;
+  const VkDebugReportCallbackCreateInfoEXT debugReportCallbackCreateInfo{
+    VK_STRUCTURE_TYPE_DEBUG_REPORT_CALLBACK_CREATE_INFO_EXT,
+    nullptr,
+    VK_DEBUG_REPORT_INFORMATION_BIT_EXT |
+      VK_DEBUG_REPORT_WARNING_BIT_EXT |
+      VK_DEBUG_REPORT_PERFORMANCE_WARNING_BIT_EXT |
+      VK_DEBUG_REPORT_ERROR_BIT_EXT |
+      VK_DEBUG_REPORT_DEBUG_BIT_EXT,
+    debug_report_callback_fn,
+    nullptr,
+  };
+
+  const auto vkCreateDebugReportCallbackEXT =
+      (PFN_vkCreateDebugReportCallbackEXT)vkGetInstanceProcAddr(
+          instance, "vkCreateDebugReportCallbackEXT");
+
+  TORCH_CHECK(
+      vkCreateDebugReportCallbackEXT,
+      "Could not load vkCreateDebugReportCallbackEXT");
+
+  VkDebugReportCallbackEXT debug_report_callback{};
+  VK_CHECK(vkCreateDebugReportCallbackEXT(
+      instance,
+      &debugReportCallbackCreateInfo,
+      nullptr,
+      &debug_report_callback));
+
+  return debug_report_callback;
 }
 
 VkPhysicalDevice acquire_physical_device(const VkInstance instance) {
   uint32_t device_count = 0;
   VK_CHECK(vkEnumeratePhysicalDevices(instance, &device_count, nullptr));
-  TORCH_CHECK(device_count > 0, "Vulkan: Could not find a device with vulkan support!");
+  TORCH_CHECK(device_count > 0, "Vulkan: Could not find a device with Vulkan support!");
 
   std::vector<VkPhysicalDevice> devices(device_count);
   VK_CHECK(vkEnumeratePhysicalDevices(instance, &device_count, devices.data()));
@@ -199,7 +203,8 @@ uint32_t query_compute_queue_family_index(const VkPhysicalDevice physical_device
   }
 
   TORCH_CHECK(
-      false, "Vulkan: Could not find a queue family that supports operations!");
+      false,
+      "Vulkan: Could not find a queue family that supports compute operations!");
 }
 
 VkDevice create_device(
@@ -245,6 +250,9 @@ VkQueue acquire_queue(
 
 Context::Context(const bool enable_validation_layers)
     : instance_(create_instance(enable_validation_layers), &VK_DELETER(Instance)),
+      debug_report_callback_(
+          create_debug_report_callback(instance(), enable_validation_layers),
+          Debug(instance())),
       physical_device_(acquire_physical_device(instance())),
       physical_device_limits_(query_physical_device_physical_device_limits(physical_device())),
       compute_queue_family_index_(query_compute_queue_family_index(physical_device())),
@@ -253,16 +261,41 @@ Context::Context(const bool enable_validation_layers)
       shader_(device()) {
 }
 
+Context::Debug::Debug(const VkInstance instance)
+  : instance_(instance) {
+}
+
+void Context::Debug::operator()(
+    const VkDebugReportCallbackEXT debug_report_callback) const {
+  if (debug_report_callback) {
+    const auto vkDestroyDebugReportCallbackEXT =
+      (PFN_vkDestroyDebugReportCallbackEXT)vkGetInstanceProcAddr(
+          instance_, "vkDestroyDebugReportCallbackEXT");
+
+      TORCH_CHECK(
+        vkDestroyDebugReportCallbackEXT,
+        "Could not load vkDestroyDebugReportCallbackEXT");
+
+      vkDestroyDebugReportCallbackEXT(
+          instance_, debug_report_callback, nullptr);
+  }
+}
+
 Context* initialize() {
   static const std::unique_ptr<Context> context([]() -> Context* {
 #ifdef USE_VULKAN_WRAPPER
     if (!InitVulkan()) {
-      TORCH_WARN("Vulkan Wrapper Failed to InitVulkan");
+      TORCH_WARN("Vulkan: Wrapper Failed to InitVulkan");
       return nullptr;
     }
 #endif
 
-    return new Context(Configuration::kEnableValidationLayers);
+    try {
+      return new Context(Configuration::kEnableValidationLayers);
+    }
+    catch (...) {
+      return nullptr;
+    }
   }());
 
   return context.get();
@@ -273,7 +306,10 @@ bool available() {
 }
 
 Context& context() {
-  return *initialize();
+  Context* const context = initialize();
+  TORCH_CHECK(context, "Vulkan: Backend not available on this platform!");
+
+  return *context;
 }
 
 } // namespace api
