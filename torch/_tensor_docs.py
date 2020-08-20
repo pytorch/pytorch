@@ -1748,8 +1748,8 @@ add_docstr_all('is_set_to',
                r"""
 is_set_to(tensor) -> bool
 
-Returns True if this object refers to the same ``THTensor`` object from the
-Torch C API as the given tensor.
+Returns True if both tensors are pointing to the exact same memory (same
+storage, offset, size and stride).
 """)
 
 add_docstr_all('item', r"""
