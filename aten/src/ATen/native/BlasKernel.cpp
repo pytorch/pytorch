@@ -23,8 +23,7 @@ extern "C" void sgemv_(char *trans, int *m, int *n, float *alpha, float *a, int 
   extern "C" void cblas_zdotu_sub(const int n, const void *x, const int incx, const void *y, const int incy, void *dotu);
   extern "C" void cblas_cdotc_sub(const int n, const void *x, const int incx, const void *y, const int incy, void *dotc);
   extern "C" void cblas_zdotc_sub(const int n, const void *x, const int incx, const void *y, const int incy, void *dotc);
-  #ifndef THBlas_cblas_dot_
-  #define THBlas_cblas_dot_
+
   static inline ffloat sdot_(const int *n, const float *x, const int *incx, const float *y, const int *incy)
   {
     return cblas_sdot(*n, x, *incx, y, *incy);
@@ -45,7 +44,7 @@ extern "C" void sgemv_(char *trans, int *m, int *n, float *alpha, float *a, int 
   const std::complex<double> *y, const int *incy) {
     cblas_zdotc_sub(*n, x, *incx, y, *incy, res);
   }
-  #endif // THBlas_cblas_dot_
+
 #else
   extern "C" ffloat sdot_(int *n, float *x, int *incx, float *y, int *incy);
   extern "C" void cdotu_(std::complex<float> *res, int *n, std::complex<float> *x, int *incx, std::complex<float> *y, int *incy);
