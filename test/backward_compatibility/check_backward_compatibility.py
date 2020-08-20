@@ -59,6 +59,7 @@ allow_list = [
     ("aten::unflatten", datetime.date(2020, 8, 14)),
     ("aten::linalg_outer", datetime.date(2020, 8, 30)),
     ("aten::linalg_outer.out", datetime.date(2020, 8, 30)),
+    ("aten::_compute_linear_combination.out", datetime.date(2020, 9, 1)),
 ]
 
 
