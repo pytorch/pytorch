@@ -44,7 +44,7 @@ static std::shared_ptr<::gloo::transport::Device> makeTCPDevice(
       "can't be empty");
 
   ::gloo::transport::tcp::attr attr;
-  if (!interface.empty()) {
+  if (!interface_name.empty()) {
     attr.iface = interface_name;
   } else {
     attr.hostname = hostname;
