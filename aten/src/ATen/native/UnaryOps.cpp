@@ -290,6 +290,11 @@ Tensor& acosh_out(Tensor& result, const Tensor& self) { return unary_op_impl_out
 Tensor acosh(const Tensor& self) { return unary_op_impl(self, at::acosh_out); }
 Tensor& acosh_(Tensor& self) { return unary_op_impl_(self, at::acosh_out); }
 
+// arccosh, alias for acosh
+Tensor& arccosh_out(Tensor& result, const Tensor& self) { return at::acosh_out(result, self); }
+Tensor arccosh(const Tensor& self) { return at::acosh(self); }
+Tensor& arccosh_(Tensor& self) { return at::acosh_(self); }
+
 Tensor& asinh_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, asinh_stub); }
 Tensor asinh(const Tensor& self) { return unary_op_impl(self, at::asinh_out); }
 Tensor& asinh_(Tensor& self) { return unary_op_impl_(self, at::asinh_out); }
@@ -464,6 +469,19 @@ Tensor clamp_min(const Tensor& self, Scalar min) {
 
 Tensor& clamp_min_(Tensor& self, Scalar min) {
   return at::clamp_min_out(self, self, min);
+}
+
+// Implements the "clip" alias for clamp
+Tensor& clip_out(Tensor& result, const Tensor& self, optional<Scalar> min, optional<Scalar> max) {
+  return at::clamp_out(result, self, min, max);
+}
+
+Tensor clip(const Tensor& self, optional<Scalar> min, optional<Scalar> max) {
+  return at::clamp(self, min, max);
+}
+
+Tensor& clip_(Tensor& self, optional<Scalar> min, optional<Scalar> max) {
+  return at::clamp_(self, min, max);
 }
 
 Tensor polygamma(int64_t n, const Tensor& self) {

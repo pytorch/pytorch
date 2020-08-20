@@ -124,6 +124,18 @@ static void logcumsumexp_cpu_kernel(Tensor& result, const Tensor& self, int64_t 
   });
 }
 
+// TODO: Implement `nansum` similar to the stable `sum`
+// implementation in cpu/SumKernel.cpp
+static void nansum_kernel_impl(TensorIterator& iter) {
+  if (iter.dtype() == ScalarType::Half){
+    binary_kernel_reduce(iter, NanSumOps<float, c10::Half>{}, float{0});
+  } else {
+    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "nansum_cpu", [&] {
+    binary_kernel_reduce(iter, NanSumOps<scalar_t, scalar_t>{}, scalar_t{0});
+  });
+  }
+}
+
 static void mean_kernel_impl(TensorIterator& iter) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX(iter.dtype(), "mean_cpu", [&] {
     scalar_t factor = scalar_t(iter.num_output_elements()) / scalar_t(iter.numel());
@@ -295,6 +307,7 @@ static void argmin_kernel_impl(TensorIterator &iter) {
 
 }  // anonymous namespace
 
+REGISTER_DISPATCH(nansum_stub, &nansum_kernel_impl);
 REGISTER_DISPATCH(std_var_stub, &std_var_kernel_impl);
 REGISTER_DISPATCH(prod_stub, &prod_kernel_impl);
 REGISTER_DISPATCH(mean_stub, &mean_kernel_impl);
