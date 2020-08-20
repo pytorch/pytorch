@@ -24,6 +24,10 @@ template<typename Factory>
 class Cache final {
  public:
   explicit Cache(Factory factory);
+  Cache(const Cache&) = delete;
+  Cache& operator=(const Cache&) = delete;
+  Cache(Cache&&) = default;
+  Cache& operator=(Cache&&) = default;
   ~Cache() = default;
 
   // Factory must have the following symbols defined.

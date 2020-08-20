@@ -14,10 +14,14 @@
     TORCH_CHECK(result == VK_SUCCESS, "VkResult:", result); \
   }
 
-#define VK_DELETER(Handle) at::native::vulkan::api::destroy_##Handle
-#define VK_DELETER_DISPATCHABLE_DECLARE(Handle) void destroy_##Handle(const Vk##Handle handle)
+#define VK_DELETER(Handle) \
+    at::native::vulkan::api::destroy_##Handle
+
+#define VK_DELETER_DISPATCHABLE_DECLARE(Handle) \
+    C10_EXPORT void destroy_##Handle(const Vk##Handle handle)
+
 #define VK_DELETER_NON_DISPATCHABLE_DECLARE(Handle)   \
-  class destroy_##Handle final {                      \
+  class C10_EXPORT destroy_##Handle final {           \
    public:                                            \
     explicit destroy_##Handle(const VkDevice device); \
     void operator()(const Vk##Handle handle) const;   \
