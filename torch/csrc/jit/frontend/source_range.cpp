@@ -74,7 +74,6 @@ C10_EXPORT void SourceRange::print_with_context(
     out << str;
     return;
   }
-
   // determine CONTEXT line range
   size_t begin_line = start(); // beginning of lines to highlight
   size_t end_line = end(); // end of lines to highlight
@@ -152,14 +151,19 @@ C10_EXPORT void SourceRange::print_with_context(
         }
       }
       highlight_space = highlight_end - hightlight_begin - empty_space;
-      if (highlight_space == 0) {
-        ++highlight_space;
-        --empty_space;
+      if (highlight_space > 0) {
+        // some ranges are off and include empty white space on new lines which
+        // don't need to be printed
+        bool more_lines = false;
+        for (size_t i = line_end; i <= end(); i++) {
+          if (str[i] != '\n' && str[i] != ' ') {
+            more_lines = true;
+          }
+        }
+        out << std::string(empty_space, ' ');
+        out << std::string(highlight_space, '~');
+        out << (more_lines ? "\n" : " <--- HERE\n");
       }
-      // print out highlight
-      out << std::string(empty_space, ' ');
-      out << std::string(highlight_space, '~');
-      out << (line_end + 1 < end() ? "\n" : " <--- HERE\n");
       ++line_end;
       line_start = line_end;
     }
