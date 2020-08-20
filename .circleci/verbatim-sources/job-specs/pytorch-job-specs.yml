@@ -180,7 +180,22 @@ jobs:
         command: |
           set -e
           docker stats --all --no-stream
-          echo "cd workspace; python test/print_test_stats.py test" | docker exec -u jenkins -i "$id" bash
+
+          cat >docker_commands.sh \<<EOL
+          # =================== The following code will be executed inside Docker container ===================
+          set -ex
+          export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}
+          export SCRIBE_GRAPHQL_ACCESS_TOKEN="${SCRIBE_GRAPHQL_ACCESS_TOKEN}"
+          export CIRCLE_TAG="${CIRCLE_TAG:-}"
+          export CIRCLE_SHA1="$CIRCLE_SHA1"
+          export CIRCLE_PR_NUMBER="${CIRCLE_PR_NUMBER:-}"
+          export CIRCLE_BRANCH="$CIRCLE_BRANCH"
+          cd workspace
+          python test/print_test_stats.py test
+          EOL
+          echo "(cat docker_commands.sh | docker exec -u jenkins -i "$id" bash) 2>&1" > command.sh
+          unbuffer bash command.sh | ts
+
           echo "Retrieving test reports"
           docker cp $id:/var/lib/jenkins/workspace/test/test-reports ./ || echo 'No test reports found!'
         when: always
