@@ -63,7 +63,7 @@ build_torch_mobile() {
   BUILD_ROOT="${TORCH_BUILD_ROOT}" "${SRC_ROOT}/scripts/build_mobile.sh" \
     -DCMAKE_CXX_FLAGS="-S -emit-llvm -DSTRIP_ERROR_MESSAGES" \
     -DUSE_STATIC_DISPATCH=OFF \
-    "${MOBILE_BUILD_FLAGS}"
+    ${MOBILE_BUILD_FLAGS}
 }
 
 build_test_project() {
