@@ -37,7 +37,7 @@ if is_available():
 
     def init_rpc(
         name,
-        backend=BackendType.PROCESS_GROUP,
+        backend=BackendType.TENSORPIPE,
         rank=-1,
         world_size=None,
         rpc_backend_options=None,
@@ -50,8 +50,8 @@ if is_available():
         Arguments:
             backend (BackendType, optional): The type of RPC backend
                 implementation. Supported values include
-                ``BackendType.PROCESS_GROUP`` (the default) and
-                ``BackendType.TENSORPIPE``. See :ref:`rpc-backends` for more
+                ``BackendType.TENSORPIPE`` (the default) and
+                ``BackendType.PROCESS_GROUP``. See :ref:`rpc-backends` for more
                 information.
             name (str): a globally unique name of this node. (e.g.,
                 ``Trainer3``, ``ParameterServer2``, ``Master``, ``Worker1``)
@@ -126,7 +126,7 @@ if is_available():
 
 
     def _init_rpc_backend(
-        backend=backend_registry.BackendType.PROCESS_GROUP,
+        backend=backend_registry.BackendType.TENSORPIPE,
         store=None,
         name=None,
         rank=-1,

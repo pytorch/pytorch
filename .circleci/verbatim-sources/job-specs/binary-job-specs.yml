@@ -71,7 +71,7 @@
   binary_linux_test:
     <<: *binary_linux_test_upload_params
     machine:
-        image: ubuntu-1604:201903-01
+        image: ubuntu-1604:202007-01
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - checkout
@@ -134,7 +134,7 @@
   smoke_linux_test:
     <<: *binary_linux_test_upload_params
     machine:
-      image: ubuntu-1604:201903-01
+      image: ubuntu-1604:202007-01
     steps:
     - checkout
     - calculate_docker_image_tag
