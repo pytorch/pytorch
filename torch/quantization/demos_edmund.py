@@ -54,7 +54,7 @@ def setup_adaround(model, data_loader_test):
     num_eval_batches = 10
     for name, submodule in model.named_modules():
         if type(submodule) in _adaround._supported_modules:
-            submodule.qconfig = _adaround.adaround_qconfig
+            submodule.qconfig = adaround_qconfig
     model.qconfig = torch.quantization.default_qat_qconfig
     model = torch.quantization.prepare_qat(model, inplace=True)
     evaluate(model, criterion, data_loader_test, neval_batches=num_eval_batches)

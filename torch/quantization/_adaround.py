@@ -2,11 +2,6 @@ import torch
 import torch.nn as nn
 import torch.nn.qat as nnqat
 
-import torch.quantization._numeric_suite as ns
-import copy
-from torch.quantization.boiler_code import load_conv
-from torch.quantization.adaround_fake_quantize import *
-
 _supported_modules = {nn.Conv2d, nn.Linear}
 _supported_modules_qat = {nnqat.Conv2d, nnqat.Linear}
 
@@ -39,22 +34,8 @@ def get_param(module, attr):
     else:
         return param
 
-class LastOutputLogger(ns.Logger):
-    r"""A logger for recording the last piece of data passed through. Different from the numeric suite
-    OutputLogger that records all pieces of data that are passed through (loss function for adaround only
-    needs last output)
-    """
-    def __init__(self):
-        super(LastOutputLogger, self).__init__()
-        self.stats["tensor_val"] = None
-
-    def forward(self, x):
-        if x.is_quantized:
-            x = x.dequantize()
-        self.stats["tensor_val"] = x
-
 def learn_adaround(quantized_model, tuning_dataset, target_layers=None,
-                    number_of_epochs=25, learning_rate=.25):
+                    number_of_epochs=15, learning_rate=.25):
     ''' Inplace learning procedure for tuning the rounding scheme of the layers specified
     for the given model
 
@@ -65,6 +46,7 @@ def learn_adaround(quantized_model, tuning_dataset, target_layers=None,
         number_of_epochs: number of batches each layer is trained on
         learning_rate: learning rate of the training
     '''
+
     def optimize_V(leaf_module):
         '''Takes in a leaf module with an adaround attached to its
         weight_fake_quant attribute and runs an adam optimizer on the continous_V
@@ -78,7 +60,8 @@ def learn_adaround(quantized_model, tuning_dataset, target_layers=None,
         count = 0
         for data in tuning_dataset:
             output = quantized_model(data[0])
-            loss = leaf_module.weight_fake_quant.layer_loss_function(count / number_of_epochs, leaf_module.weight)
+            loss = leaf_module.weight_fake_quant.layer_loss_function(count / number_of_epochs,
+                                                                     leaf_module.weight)
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
