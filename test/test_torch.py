@@ -8420,11 +8420,11 @@ class TestTorchDeviceType(TestCase):
                     ref = torch.from_numpy(signal.get_window((name, *args), size, fftbins=periodic))
                     self.assertEqual(res, ref, exact_dtype=False)
             with self.assertRaisesRegex(RuntimeError, r'not implemented for sparse types'):
-                torch_method(3, layout=torch.sparse_coo)
+                torch_method(3, *args, layout=torch.sparse_coo)
             with self.assertRaisesRegex(RuntimeError, r'floating point'):
-                torch_method(3, dtype=torch.long)
-            self.assertTrue(torch_method(3, requires_grad=True).requires_grad)
-            self.assertFalse(torch_method(3).requires_grad)
+                torch_method(3, *args, dtype=torch.long)
+            self.assertTrue(torch_method(3, *args, requires_grad=True).requires_grad)
+            self.assertFalse(torch_method(3, *args).requires_grad)
 
         for window in ['hann', 'hamming', 'bartlett', 'blackman']:
             test(window)
@@ -17271,17 +17271,29 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     def test_i0(self, device, dtype):
         a = torch.randn(100, device=device).to(dtype)
         actual = torch.i0(a)
+        if dtype is torch.bfloat16:
+            a = a.to(torch.float32)
         expected = scipy.special.i0(a.cpu().numpy())
+        if dtype is torch.bfloat16:
+            expected = torch.from_numpy(expected).to(torch.bfloat16)
         self.assertEqual(actual, expected)
 
         a = torch.randn(100, device=device).to(dtype) * 8
         actual = torch.i0(a)
+        if dtype is torch.bfloat16:
+            a = a.to(torch.float32)
         expected = scipy.special.i0(a.cpu().numpy())
+        if dtype is torch.bfloat16:
+            expected = torch.from_numpy(expected).to(torch.bfloat16)
         self.assertEqual(actual, expected)
 
         a = torch.randn(100, device=device).to(dtype) * 20
         actual = torch.i0(a)
+        if dtype is torch.bfloat16:
+            a = a.to(torch.float32)
         expected = scipy.special.i0(a.cpu().numpy())
+        if dtype is torch.bfloat16:
+            expected = torch.from_numpy(expected).to(torch.bfloat16)
         self.assertEqual(actual, expected)
 
     @slowTest
