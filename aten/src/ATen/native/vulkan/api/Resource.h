@@ -8,7 +8,7 @@ namespace native {
 namespace vulkan {
 namespace api {
 
-struct Resource final {
+struct C10_EXPORT Resource final {
   /*
     Memory
   */
