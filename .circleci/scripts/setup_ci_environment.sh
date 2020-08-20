@@ -54,12 +54,14 @@ add_to_env_file() {
   echo "${content}" >> "${BASH_ENV:-/tmp/env}"
 }
 
+add_to_env_file "IN_CIRCLECI=1"
+add_to_env_file "COMMIT_SOURCE=${CIRCLE_BRANCH:-}"
+add_to_env_file "BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}"
+add_to_env_file "CIRCLE_PULL_REQUEST=${CIRCLE_PULL_REQUEST}"
+
+
 if [[ "${BUILD_ENVIRONMENT}" == *-build ]]; then
-  add_to_env_file "IN_CIRCLECI=1"
-  add_to_env_file "BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}"
-  add_to_env_file "COMMIT_SOURCE=${CIRCLE_BRANCH:-}"
   add_to_env_file "SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2"
-  add_to_env_file "CIRCLE_PULL_REQUEST=${CIRCLE_PULL_REQUEST}"
 
   SCCACHE_MAX_JOBS=$(( $(nproc) - 1 ))
   MEMORY_LIMIT_MAX_JOBS=8  # the "large" resource class on CircleCI has 32 CPU cores, if we use all of them we'll OOM
