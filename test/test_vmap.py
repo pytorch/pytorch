@@ -626,7 +626,8 @@ def reference_vmap(op, inputs, in_dims=0, out_dims=0):
 
 
 class TestVmapOperators(TestCase):
-    def _vmap_test(self, op, inputs, in_dims=0, out_dims=0, check_view=False):
+    def _vmap_test(self, op, inputs, in_dims=0, out_dims=0,
+                   check_view=False, check_propagates_grad=True):
         result = vmap(op, in_dims, out_dims)(*inputs)
         reference_result = reference_vmap(op, inputs, in_dims, out_dims)
         self.assertEqual(result, reference_result)
@@ -639,6 +640,8 @@ class TestVmapOperators(TestCase):
                                  inputs[0].data_ptr(),
                                  msg="result was not a view of the first input!")
 
+        if not check_propagates_grad:
+            return
         # Assuming input[0] is a floating-point tensor. Check if the vmap
         # operation propagates the requires_grad flag to the zeroth output.
         # Some vmap operators are implemented in a way that assumes that
@@ -881,6 +884,24 @@ class TestVmapOperators(TestCase):
         test(vmap(op), (torch.rand(B1, 2, B0, 5),), in_dims=2)
         test(vmap(op), (torch.rand(B1, 2, B0, 3, 5),), in_dims=2)
         test(vmap(vmap(op, in_dims=2)), (torch.rand(B1, 2, B0, 3, B2, 5),), in_dims=2)
+
+    def test_to(self):
+        test = self._vmap_test
+        B0, B1 = 7, 11
+
+        test(lambda t: t.to('cpu'), (torch.rand(B0),))
+        test(lambda t: t.to(torch.double), (torch.rand(B0),))
+        test(lambda t, o: t.to(o), (torch.rand(B0), torch.randn(B0, dtype=torch.float64)))
+        test(lambda t, o: t.to(o),
+             (torch.rand(B0), torch.randn(B0, dtype=torch.float64)),
+             in_dims=(0, None))
+        test(vmap(lambda t: t.to(torch.double)), (torch.rand(B0, B1, 3),))
+
+        # also test some casting methods
+        test(lambda t: t.double(), (torch.rand(B0),))
+        test(lambda t: t.float(), (torch.rand(B0),))
+        test(lambda t: t.int(), (torch.rand(B0),), check_propagates_grad=False)
+        test(lambda t: t.long(), (torch.rand(B0),), check_propagates_grad=False)
 
     def test_unfold(self):
         op = torch.Tensor.unfold
