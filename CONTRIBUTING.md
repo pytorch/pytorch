@@ -2,6 +2,7 @@
 
 - [Contributing to PyTorch](#contributing-to-pytorch)
 - [Developing PyTorch](#developing-pytorch)
+  - [Nightly Checkout](#nightly-checkout)
 - [Codebase structure](#codebase-structure)
 - [Unit testing](#unit-testing)
   - [Better local unit tests with pytest](#better-local-unit-tests-with-pytest)
@@ -120,6 +121,39 @@ You do not need to repeatedly install after modifying Python files.
 
 In case you want to reinstall, make sure that you uninstall PyTorch first by running `pip uninstall torch`
 and `python setup.py clean`. Then you can install in `develop` mode again.
+
+## Nightly Checkout & Pull
+
+The `tools/nightly_checkout.py` script is provided to ease pure Python development of
+PyTorch. This uses conda and git to check out the nightly development version of PyTorch
+and installs pre-built binaries into the current repository. This is like a development
+or editable install, but without needing the ability to compile any C++ code.
+
+You can use this script to check out a new nightly branch with the following::
+
+```sh
+$ ./tools/nightly.py checkout -b my-nightly-branch
+$ conda activate pytorch-deps
+```
+
+Or if you would like to re-use an existing conda environment, you can pass in
+the regular environment parameters (--name or --prefix)::
+
+```sh
+$ ./tools/nightly.py checkout -b my-nightly-branch -n my-env
+$ conda activate my-env
+```
+
+You can also use this tool to pull the nightly commits into the current branch as
+well. This can be done with
+
+```sh
+$ ./tools/nightly.py pull -n my-env
+$ conda activate my-env
+```
+
+Pulling will reinstalle the conda dependencies as well as the nightly binaries into
+the repo directory.
 
 ## Codebase structure
 

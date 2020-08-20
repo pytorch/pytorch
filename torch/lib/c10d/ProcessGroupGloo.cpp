@@ -2297,11 +2297,20 @@ class AsyncAlltoallWork : public ProcessGroupGloo::AsyncWork {
       gloo::alltoall(opts);
     } else {
       // Gloo alltoallv
+      c10d::checkSplitSizes(inputCounts, inputTensor, context->size);
+      c10d::checkSplitSizes(outputCounts, outputTensor, context->size);
+      std::vector<int64_t> sendCounts(context->size);
+      std::vector<int64_t> recvCounts(context->size);
+      std::vector<int64_t> sendOffsets(context->size);
+      std::vector<int64_t> recvOffsets(context->size);
+      c10d::computeLengthsAndOffsets(
+          inputCounts, inputTensor, &sendCounts, &sendOffsets);
+      c10d::computeLengthsAndOffsets(
+          outputCounts, outputTensor, &recvCounts, &recvOffsets);
       gloo::AlltoallvOptions opts(context);
       opts.setTag(tag);
-      GENERATE_ALL_TYPES(scalarType, setInput, opts, inputTensor, inputCounts);
-      GENERATE_ALL_TYPES(
-          scalarType, setOutput, opts, outputTensor, outputCounts);
+      GENERATE_ALL_TYPES(scalarType, setInput, opts, inputTensor, sendCounts);
+      GENERATE_ALL_TYPES(scalarType, setOutput, opts, outputTensor, recvCounts);
       gloo::alltoallv(opts);
     }
   }
