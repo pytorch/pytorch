@@ -705,7 +705,19 @@ generateIndexAndExtentMap(
 
   // PROPAGATE CONSUMER -> PRODUCER END
 
-  return std::make_pair(index_compute.indexMap(), index_compute.extentMap());
+  // Fill in extent map as some mapped indices may not have their extent filled
+  // in it, but consumers of this function expect it to be there
+
+  std::unordered_map<kir::IterDomain*, Val*> extent_map(
+      index_compute.extentMap());
+  for (auto ind_entry : index_compute.indexMap()) {
+    auto id = ind_entry.first;
+    if (extent_map.find(id) == extent_map.end()) {
+      extent_map[id] = id->extent();
+    }
+  }
+
+  return std::make_pair(index_compute.indexMap(), extent_map);
 }
 
 } // namespace
@@ -1011,7 +1023,7 @@ kir::TensorIndex* Index::getGlobalConsumerIndex(
 kir::TensorIndex* Index::getConsumerIndex_impl(
     TensorView* consumer_tv,
     const std::vector<kir::ForLoop*>& loops) {
-  // grab all tensor views from producer_tv <- computeAtRoot
+  // grab all tensor views from consumer_tv <- computeAtRoot
   std::deque<TensorView*> tv_stack = getComputeAtTVStackFrom(consumer_tv);
 
   std::unordered_map<kir::ForLoop*, Val*> loop_to_ind_map =
@@ -1026,9 +1038,9 @@ kir::TensorIndex* Index::getConsumerIndex_impl(
   auto index_map = index_and_extent_map.first;
   auto extent_map = index_and_extent_map.second;
 
-  // Indices should now be mapped onto IterDomains in producer, so just grab
+  // Indices should now be mapped onto IterDomains in consumer, so just grab
   // and use them.
-  auto root_dom = consumer_tv->getMaybeRFactorDomain();
+  auto root_dom = consumer_tv->getRootDomain();
 
   std::vector<Val*> strided_inds;
   for (size_t i = 0; i < root_dom.size(); i++) {
