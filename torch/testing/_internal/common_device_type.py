@@ -239,8 +239,8 @@ class DeviceTypeTestBase(TestCase):
 
             # Constructs the test
             @wraps(test)
-            def instantiated_test(self, test_name=test_name, test=test, dtype=dtype, op=op):
-                if op is not None and op.should_skip(test_name):
+            def instantiated_test(self, name=name, test=test, dtype=dtype, op=op):
+                if op is not None and op.should_skip(name, self.device_type, dtype):
                     self.skipTest("Skipped!")
 
                 device_arg = cls.get_primary_device()

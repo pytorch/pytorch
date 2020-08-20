@@ -1,7 +1,8 @@
-import re
 from functools import reduce
 from operator import mul, itemgetter
 import collections
+from dataclasses import dataclass
+from typing import List
 
 import torch
 import numpy as np
@@ -24,6 +25,13 @@ from torch.testing._internal.common_utils import \
      random_fullrank_matrix_distinct_singular_value, set_rng_seed,
      TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS)
 
+@dataclass
+class SkipInfo:
+    test_name: str = None
+    device_type: str = None
+    dtypes: List[torch.dtype] = None
+    active_if: bool = True
+
 # Classes and methods for the operator database
 class OpInfo(object):
     """Operator information and helper functions for acquiring it."""
@@ -35,7 +43,7 @@ class OpInfo(object):
                  dtypesIfCPU=None,  # dtypes this function is expected to work with on CPU
                  dtypesIfCUDA=None,  # dtypes this function is expected to work with on CUDA
                  dtypesIfROCM=None,  # dtypes this function is expected to work with on ROCM
-                 tests_to_skip=None,  # regexes of tests to skip
+                 skips=tuple(),  # information about which tests to skip
                  decorators=None):  # decorators to apply to generated tests
         # Validates the dtypes are generated from the dispatch-related functions
         for dtype_list in (dtypes, dtypesIfCPU, dtypesIfCUDA, dtypesIfROCM):
@@ -53,7 +61,7 @@ class OpInfo(object):
         inplace_name = name + "_"
         self.inplace_variant = getattr(torch.Tensor, inplace_name) if hasattr(torch.Tensor, name) else None
 
-        self.tests_to_skip = tests_to_skip
+        self.skips = skips
         self.decorators = decorators
 
     def __call__(self, *args, **kwargs):
@@ -77,12 +85,15 @@ class OpInfo(object):
         return self.inplace_variant
 
     # Returns True if the test should be skipped and False otherwise
-    def should_skip(self, test_name):
-        if self.tests_to_skip is None:
-            return False
+    def should_skip(self, test_name, device_type, dtype):
+        for si in self.skips:
+            if not si.active_if:
+                continue
 
-        for regex in self.tests_to_skip:
-            if re.match(regex, test_name):
+            name_match = si.test_name is None or test_name == si.test_name
+            device_type_match = si.device_type is None or device_type == si.device_type
+            dtype_match = si.dtypes is None or dtype in si.dtypes
+            if name_match and device_type_match and dtype_match:
                 return True
 
         return False
@@ -124,7 +135,7 @@ class UnaryUfuncInfo(OpInfo):
                  dtypesIfCUDA=floating_and_complex_types_and(torch.half),
                  dtypesIfROCM=floating_types_and(torch.half),
                  domain=(None, None),  # the [low, high) domain of the function
-                 handles_large_floats=True,  # whether the op correctly handles large float values (like 1e-20)
+                 handles_large_floats=True,  # whether the op correctly handles large float values (like 1e20)
                  handles_extremals=True,  # whether the op correctly handles extremal values (like inf)
                  handles_complex_extremals=True,  # whether the op correct handles complex extremals (like inf -infj)
                  **kwargs):
@@ -158,23 +169,36 @@ op_db = [
                    handles_complex_extremals=False,
                    decorators=(precisionOverride({torch.bfloat16: 1e-1,
                                                   torch.complex64: 1e-2}),),
-                   tests_to_skip=('.*numerics.*cpu.*complex.*',) + _windows_skip),
+                   skips=(
+                       SkipInfo('test_reference_numerics', device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
+                       SkipInfo('test_reference_numerics', dtypes=[torch.cfloat, torch.cdouble], active_if=IS_WINDOWS),
+                   )),
     UnaryUfuncInfo('cos',
                    ref=np.cos,
                    dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
                    handles_large_floats=False,
                    decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
-                   tests_to_skip=_windows_skip + _mac_skip + _rocm_skip),
+                   skips=(
+                       SkipInfo('test_reference_numerics', dtypes=[torch.cfloat, torch.cdouble], active_if=IS_WINDOWS),
+                       SkipInfo('test_reference_numerics', device_type='cpu', dtypes=[torch.cfloat, torch.cdouble], active_if=IS_MACOS),
+                       SkipInfo('test_reference_numerics', dtypes=[torch.float], active_if=TEST_WITH_ROCM),
+                   )),
     UnaryUfuncInfo('cosh',
                    ref=np.cosh,
                    dtypesIfCPU=floating_and_complex_types(),
-                   tests_to_skip=_windows_skip + _mac_skip),
+                   skips=(
+                       SkipInfo('test_reference_numerics', dtypes=[torch.cfloat, torch.cdouble], active_if=IS_WINDOWS),
+                       SkipInfo('test_reference_numerics', device_type='cpu', dtypes=[torch.cfloat, torch.cdouble], active_if=IS_MACOS),
+                   )),
     UnaryUfuncInfo('sin',
                    ref=np.sin,
                    handles_large_floats=False,
                    handles_complex_extremals=False,
                    decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
-                   tests_to_skip=_windows_skip + _rocm_skip),
+                   skips=(
+                       SkipInfo('test_reference_numerics', dtypes=[torch.cfloat, torch.cdouble], active_if=IS_WINDOWS),
+                       SkipInfo('test_reference_numerics', dtypes=[torch.float], active_if=TEST_WITH_ROCM),
+                   )),
     UnaryUfuncInfo('neg',
                    ref=np.negative,
                    dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),

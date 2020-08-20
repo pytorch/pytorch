@@ -42,7 +42,7 @@ _large_float_vals = (-501, 501,
 _float_extremals = (float('inf'), float('-inf'), float('nan'))
 
 
-def _make_tensor(size, device, dtype, *, low, high):
+def _make_tensor(size, device: torch.device, dtype: torch.dtype, *, low, high) -> torch.Tensor:
     if dtype is torch.bool:
         return torch.randint(0, 2, size, device=device, dtype=dtype)
 
@@ -55,39 +55,45 @@ def _make_tensor(size, device, dtype, *, low, high):
 
     if dtype is torch.uint8:
         t = torch.randint(0, 10, size, device=device, dtype=dtype)
-        return _maybe_clamp(t, 0, low, 10, high)
+        return _maybe_clamp(t, 0, low, 9, high)
     elif dtype in integral_types():
         t = torch.randint(-9, 10, size, device=device, dtype=dtype)
-        return _maybe_clamp(t, -9, low, 10, high)
+        return _maybe_clamp(t, -9, low, 9, high)
     elif dtype in floating_types_and(torch.half, torch.bfloat16):
         # Windows doesn't support torch.rand(bfloat16) on CUDA
         if IS_WINDOWS and torch.device(device).type == 'cuda' and dtype is torch.bfloat16:
             t = (torch.rand(size, device=device, dtype=torch.float32) * 18 - 9).to(torch.bfloat16)
         else:
             t = torch.rand(size, device=device, dtype=dtype) * 18 - 9
-        return _maybe_clamp(t, -9, low, 10, high)
+        return _maybe_clamp(t, -9, low, 9, high)
     else:
         assert dtype in complex_types()
         float_dtype = torch.float if dtype is torch.cfloat else torch.double
         real = torch.rand(size, device=device, dtype=float_dtype) * 18 - 9
-        real = _maybe_clamp(real, -9, low, 10, high)
+        real = _maybe_clamp(real, -9, low, 9, high)
         imag = torch.rand(size, device=device, dtype=float_dtype) * 18 - 9
-        imag = _maybe_clamp(imag, -9, low, 10, high)
+        imag = _maybe_clamp(imag, -9, low, 9, high)
         return torch.complex(real, imag)
 
 
 # Returns an iterable of contiguous tensors with the same storage on the requested
-#   device and with the requested dtype. The iterable will include an empty
-#   tensor, scalar (0-dim) tensors, small 1D tensors, a medium 1D tensor, and
-#   a larger 2D tensor. The tensors will "cover" the values in vals, and if
-#   vals is None then dtype-specific values will be substituted.
-#   The tensors' elements, except for those specified in vals, will be in the
-#   domain [low, high), if specified.
-#   If include_large_values is False then larger values, like 500+, then the
-#     default values will not include larger values, like 500+.
-#   If include_extremal_values is False, then the default values will not include
-#     NaN, positive infinity, or negative infinity.
+#   device and with the requested dtype.
 #
+# This function is intended to test the non-vectorized and vectorized code
+#   paths of unary functions, as well as their handling of odd tensor
+#   sizes (like zero-dim tensors and tensors with zero elements).
+#
+# The iterable will include an empty tensor, tensors with no elements,
+#   zero dim (scalar) tensors, small 1D tensors, a medium 1D tensor, and
+#   a large 2D tensor.
+#
+# These tensors will include interesting values. If include_large_values
+#   is true they will include larger values (>500), too, and if
+#   include_extremal_values is true they will include extremal values
+#   like -inf, inf, and nan.
+#
+# The randomly generated values can be constracted by the domain
+#   argument.
 def generate_numeric_tensors(device, dtype, *,
                              domain=(None, None),
                              include_large_values=True,
@@ -142,10 +148,11 @@ def generate_numeric_tensors(device, dtype, *,
     # Constructs scalar tensors
     scalar_tensors = (t.squeeze() for t in torch.split(medium_tensor, 1))
 
-    # Empty tensor
-    empty_tensor = torch.empty(0, device=device, dtype=dtype)
+    # Tensors with no elements
+    empty_sizes = ((0,), (0, 3, 3), (1, 0, 5), (6, 0, 0, 0), (3, 0, 1, 0))
+    empty_tensors = (torch.empty(size, device=device, dtype=dtype) for size in empty_sizes)
 
-    return chain(empty_tensor, scalar_tensors, small_tensors, (medium_tensor,), (large_tensor,))
+    return chain(empty_tensors, scalar_tensors, small_tensors, (medium_tensor,), (large_tensor,))
 
 # Tests for unary "universal functions (ufuncs)" that accept a single
 # tensor and have common properties like:
@@ -204,11 +211,14 @@ class TestUnaryUfuncs(TestCase):
 
     # Tests bool tensor negation raises the correct error
     def test_neg_error_message(self, device):
-        self.assertRaisesRegex(
-            RuntimeError,
-            r"Negation, the `\-` operator, on a bool tensor is not supported. "
-            r"If you are trying to invert a mask, use the `\~` or `logical_not\(\)` operator instead.",
-            lambda: - torch.tensor([False, True], device=device))
+        msg = ("Negation, the `\\-` operator, on a bool tensor is not supported."
+               " If you are trying to invert a mask, use the `\\~` or"
+               " `logical_not\\(\\)` operator instead.")
+
+        t = torch.tensor((False, True), device=device)
+
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.neg(t)
 
     @dtypes(*floating_types_and(torch.bfloat16, torch.half))
     @ops((_fn for _fn in unary_ufuncs if _fn.domain != (None, None)))
@@ -216,30 +226,46 @@ class TestUnaryUfuncs(TestCase):
         if not op.supports_dtype(dtype, torch.device(device).type):
             raise unittest.SkipTest('unsupported dtype')
 
-        eps = (1e-1, 1, 2, 10, 20, 50, 100)
+        eps = (1e-5, 1e-3, 1e-1, 1, 2, 10, 20, 50, 100)
 
-        # Adds smaller values except on bfloat16, since these small differences
-        #   are often too small to represent in bfloat16
-        if dtype is not torch.bfloat16:
-            eps = eps + (1e-5, 1e-3)
-
-        if op.domain[0] is not None:
-            low = op.domain[0]
+        low, high = op.domain
+        # NOTE: the following two loops are separated for readability
+        if low is not None:
+            low_tensor = torch.tensor(low, device=device, dtype=dtype)
             for epsilon in eps:
-                t = torch.tensor(low - epsilon, device=device, dtype=dtype)
-                result = op(t)
-                self.assertEqual(result.item(), float('nan'),
-                                 msg="input:{0}".format(t.item()))
+                lower_tensor = low_tensor - epsilon
 
-        if op.domain[1] is not None:
-            high = op.domain[1]
-            for epsilon in eps:
-                t = torch.tensor(high + epsilon, device=device, dtype=dtype)
-                result = op(t)
+                # Skips the test if the difference is not representable,
+                #   which can occur if, for example, the difference is small
+                #   and the dtype is imprecise (like bfloat16 is)
+                if lower_tensor.item() == low_tensor.item():
+                    continue
+
+                result = op(lower_tensor)
                 self.assertEqual(result.item(), float('nan'),
-                                 msg="input:{0}".format(t.item()))
+                                 msg=("input of {0} outside lower domain boundary"
+                                      " {1} produced {2}, not nan!").format(lower_tensor.item(),
+                                                                            low,
+                                                                            result.item()))
+
+        if high is not None:
+            high_tensor = torch.tensor(high, device=device, dtype=dtype)
+            for epsilon in eps:
+                higher_tensor = high_tensor + epsilon
+
+                # See above comment
+                if higher_tensor.item() == high_tensor.item():
+                    continue
+
+                result = op(higher_tensor)
+                self.assertEqual(result.item(), float('nan'),
+                                 msg=("input of {0} outside upper domain boundary"
+                                      " {1} produced {2}, not nan!").format(higher_tensor.item(),
+                                                                            high,
+                                                                            result.item()))
 
     # Tests that fn == method == inplace == jit on a simple single tensor input
+    # TODO: should this jitting the method and inplace variants, too?
     @ops(unary_ufuncs)
     def test_variant_consistency(self, device, dtype, op):
         def _fn(t):
@@ -254,7 +280,7 @@ class TestUnaryUfuncs(TestCase):
                     alt(t.clone())
 
             actual = alt(t.clone())
-            self.assertEqual(actual, expected)
+            self.assertEqual(actual, expected, rtol=0, atol=0)
 
     # Tests that the function and its (array-accepting) reference produce the same
     #   values on a range of tensors, including empty tensors, scalar tensors,
@@ -279,7 +305,16 @@ class TestUnaryUfuncs(TestCase):
 
             actual = op(t)
             expected = op.ref(a)
-            self.assertEqualHelper(actual, expected, dtype=dtype)
+
+            # Crafts a custom error message for smaller, printable tensors
+            if t.numel() < 10:
+                msg = ("Failed to produce expected results! Input tensor was"
+                       " {0}, torch result is {1}, and reference result is"
+                       " {2}.").format(t, actual, expected)
+            else:
+                msg = None
+
+            self.assertEqualHelper(actual, expected, dtype=dtype, msg=msg)
 
     # Tests for testing (dis)contiguity consistency
 
