@@ -2,7 +2,7 @@
 
 #define VK_DELETER_DISPATCHABLE_DEFINE(Handle)  \
   VK_DELETER_DISPATCHABLE_DECLARE(Handle) {     \
-    if (C10_LIKELY(handle)) {                   \
+    if (C10_LIKELY(VK_NULL_HANDLE != handle)) { \
       vkDestroy##Handle(handle, nullptr);       \
     }                                           \
   }
