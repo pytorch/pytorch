@@ -77,11 +77,14 @@ constexpr bool schema_whitelist_check(string_view schema) {
 }
 
 // Returns true iff the given dispatch key is on the whitelist
-// and should be registered.  Right now, the list of valid
-// mobile dispatch keys is hard coded.
+// and should be registered.  When we turn this on, the list of valid
+// mobile dispatch keys is hard coded (but you need to make sure
+// that you have the correct set of dispatch keys for this).
 constexpr bool dispatch_key_whitelist_check(DispatchKey k) {
 #ifdef C10_MOBILE
-  return k == DispatchKey::CPU || k == DispatchKey::Vulkan || k == DispatchKey::QuantizedCPU || k == DispatchKey::BackendSelect || k == DispatchKey::CatchAll;
+  return true;
+  // Disabled for now: to be enabled later!
+  // return k == DispatchKey::CPU || k == DispatchKey::Vulkan || k == DispatchKey::QuantizedCPU || k == DispatchKey::BackendSelect || k == DispatchKey::CatchAll;
 #else
   return true;
 #endif
