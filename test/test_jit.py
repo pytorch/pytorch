@@ -8475,7 +8475,7 @@ a")
 
         with self.assertRaisesRegex(
                 TypeError,
-                "Linear' object for attribute 'invalid' is not a valid constant"):
+                "Linear' object in attribute 'Foo.invalid' is not a valid constant"):
             Foo()
 
         class Foo2(torch.jit.ScriptModule):

@@ -701,14 +701,6 @@ struct CodeImpl {
     return r;
   }
 
-  void emitNumInputsOperand(int numInputs) {
-    int result = constant_table_.size();
-    auto ival = IValue(numInputs);
-    // value_to_reg_[ival] = result;
-    constant_table_.emplace_back(std::move(ival));
-    insertInstruction(LOADC, result);
-  }
-
   void emitTypeCheck(Node* node) {
     auto num_inputs = node->inputs().size();
 
@@ -716,10 +708,6 @@ struct CodeImpl {
     TORCH_INTERNAL_ASSERT(
         num_inputs && num_inputs + 1 == node->outputs().size());
     emitLoadInputs(node->inputs());
-
-    // Since TypeCheck is variadic. Insert an instruction to push number of
-    // input operands into the stack.
-    emitNumInputsOperand(num_inputs);
 
     // Emit the expected type.
     size_t types_start = type_table_.size();
@@ -1377,13 +1365,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             break;
           }
           case TYPECHECK: {
-            int num_inputs = stack.back().toInt(), i = 0;
-            pop(stack);
-            TORCH_INTERNAL_ASSERT(stack.size() >= num_inputs);
-            if (num_inputs == 0) {
-              push(stack, true);
-              break;
-            }
+            int num_inputs = inst.N, i = 0;
+            TORCH_INTERNAL_ASSERT(stack.size() >= num_inputs && num_inputs > 0);
             // Check every input's shape against profiled (expected) shape.
             for (i = 0; i < num_inputs; i++) {
               auto& input = peek(stack, i, num_inputs);
@@ -1392,17 +1375,14 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
               const TypePtr& expected = af.types[inst.X + i];
               auto expected_type = expected->cast<TensorType>();
               if (t.defined() &&
-                  !frames.back().symbols2dims.bindSymbolicShapes(
-                      t.sizes(), expected_type->symbolic_sizes()) &&
-                  !expected_type->matchTensor(t)) {
-                GRAPH_DEBUG(
-                    "TypeCheck operand ", i, " mismatch profiled shape!");
+                  (!frames.back().symbols2dims.bindSymbolicShapes(
+                       t.sizes(), expected_type->symbolic_sizes()) ||
+                   !expected_type->matchTensor(t))) {
                 push(stack, false);
                 break;
               }
             }
             if (i == num_inputs) {
-              GRAPH_DEBUG("TypeCheck yields TRUE\n");
               push(stack, true);
             }
             ++af.pc;

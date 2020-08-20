@@ -220,6 +220,7 @@ void mergeNodeIntoSubgraph(
       size_t p = it - inputs.begin();
       subgraphNode->removeInput(p);
       subgraph->inputs()[p]->replaceAllUsesWith(mergedNode->outputs()[i]);
+      vmap[subgraph->inputs()[p]] = mergedNode->output(i);
       subgraph->eraseInput(p);
     }
   }
