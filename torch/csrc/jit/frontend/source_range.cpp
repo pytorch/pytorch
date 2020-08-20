@@ -120,12 +120,13 @@ C10_EXPORT void SourceRange::print_with_context(
   }
   // print out inital context
   out << str.substr(begin_context, start() - begin_context);
+  size_t line_start = start();
+  size_t line_end = end();
   if (highlight) {
-    size_t line_start = start();
-    size_t line_end = start();
+    line_end = start();
     while (line_start < end()) {
       // move line_end to end of line
-      while (str[line_end] != '\n' && line_end < end()) {
+      while (str[line_end] != '\n' && line_end < str.size()) {
         ++line_end;
       }
       // print line of code
@@ -134,7 +135,7 @@ C10_EXPORT void SourceRange::print_with_context(
       size_t empty_space = 0;
       size_t highlight_space = 0;
       size_t hightlight_begin = line_start;
-      size_t highlight_end = line_end - 1;
+      size_t highlight_end = line_start;
       // determine length of line which is being highlighted
       while (hightlight_begin > 0 && str[hightlight_begin - 1] != '\n')
         --hightlight_begin;
@@ -144,7 +145,7 @@ C10_EXPORT void SourceRange::print_with_context(
       AT_ASSERT(highlight_end == end() || str[highlight_end] == '\n');
       // determine amount of empty space vs highlighted space
       for (size_t i = hightlight_begin; i < highlight_end; i++) {
-        if (str[i] == ' ' || i <= start()) {
+        if (str[i] == ' ' || i < start()) {
           empty_space++;
         } else {
           break;
@@ -158,7 +159,7 @@ C10_EXPORT void SourceRange::print_with_context(
       // print out highlight
       out << std::string(empty_space, ' ');
       out << std::string(highlight_space, '~');
-      out << (line_end + 1 < end() ? "\n" : " <--- HERE");
+      out << (line_end + 1 < end() ? "\n" : " <--- HERE\n");
       ++line_end;
       line_start = line_end;
     }
@@ -167,7 +168,7 @@ C10_EXPORT void SourceRange::print_with_context(
     out << str.substr(start(), (end() - start()) + 1);
   }
   // print out ending context
-  auto line_substr = str.substr(end(), end_context - end());
+  auto line_substr = str.substr(line_end, end_context - line_end);
   out << line_substr;
   if (!line_substr.empty() && line_substr.back() != '\n')
     out << "\n";
