@@ -251,6 +251,7 @@ Pointwise Ops
     abs
     absolute
     acos
+    arccos
     acosh
     arccosh
     add
@@ -258,8 +259,10 @@ Pointwise Ops
     addcmul
     angle
     asin
+    arcsin
     asinh
     atan
+    arctan
     atanh
     atan2
     bitwise_not

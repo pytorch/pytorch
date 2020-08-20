@@ -107,6 +107,11 @@ Tensor& acos_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(
 Tensor acos(const Tensor& self) { return unary_op_impl(self, at::acos_out); }
 Tensor& acos_(Tensor& self) { return unary_op_impl_(self, at::acos_out); }
 
+// arccos, alias for acos
+Tensor& arccos_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, acos_stub); }
+Tensor arccos(const Tensor& self) { return unary_op_impl(self, at::acos_out); }
+Tensor& arccos_(Tensor& self) { return unary_op_impl_(self, at::acos_out); }
+
 static Tensor wrapped_scalar_tensor(Scalar scalar) {
   auto tensor = scalar_to_tensor(scalar);
   tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
@@ -134,9 +139,19 @@ Tensor& asin_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(
 Tensor asin(const Tensor& self) { return unary_op_impl(self, at::asin_out); }
 Tensor& asin_(Tensor& self) { return unary_op_impl_(self, at::asin_out); }
 
+// arcsin, alias of asin
+Tensor& arcsin_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, asin_stub); }
+Tensor arcsin(const Tensor& self) { return unary_op_impl(self, at::asin_out); }
+Tensor& arcsin_(Tensor& self) { return unary_op_impl_(self, at::asin_out); }
+
 Tensor& atan_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, atan_stub); }
 Tensor atan(const Tensor& self) { return unary_op_impl(self, at::atan_out); }
 Tensor& atan_(Tensor& self) { return unary_op_impl_(self, at::atan_out); }
+
+// arctan, alias of atan
+Tensor& arctan_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, atan_stub); }
+Tensor arctan(const Tensor& self) { return unary_op_impl(self, at::atan_out); }
+Tensor& arctan_(Tensor& self) { return unary_op_impl_(self, at::atan_out); }
 
 // Note [Complex abs and angle]
 // Complex inputs to abs and angle return float results by default.

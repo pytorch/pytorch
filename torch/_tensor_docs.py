@@ -202,6 +202,18 @@ acos_() -> Tensor
 In-place version of :meth:`~Tensor.acos`
 """)
 
+add_docstr_all('arccos', r"""
+arccos() -> Tensor
+
+See :func:`torch.arccos`
+""")
+
+add_docstr_all('arccos_', r"""
+arccos_() -> Tensor
+
+In-place version of :meth:`~Tensor.arccos`
+""")
+
 add_docstr_all('acosh',
                r"""
 acosh() -> Tensor
@@ -507,6 +519,18 @@ asin_() -> Tensor
 In-place version of :meth:`~Tensor.asin`
 """)
 
+add_docstr_all('arcsin', r"""
+arcsin() -> Tensor
+
+See :func:`torch.arcsin`
+""")
+
+add_docstr_all('arcsin_', r"""
+arcsin_() -> Tensor
+
+In-place version of :meth:`~Tensor.arcsin`
+""")
+
 add_docstr_all('asinh', r"""
 asinh() -> Tensor
 
@@ -526,11 +550,28 @@ as_strided(size, stride, storage_offset=0) -> Tensor
 See :func:`torch.as_strided`
 """)
 
-add_docstr_all('atan',
-               r"""
+add_docstr_all('atan', r"""
 atan() -> Tensor
 
 See :func:`torch.atan`
+""")
+
+add_docstr_all('atan_', r"""
+atan_() -> Tensor
+
+In-place version of :meth:`~Tensor.atan`
+""")
+
+add_docstr_all('arctan', r"""
+arctan() -> Tensor
+
+See :func:`torch.arctan`
+""")
+
+add_docstr_all('arctan_', r"""
+arctan_() -> Tensor
+
+In-place version of :meth:`~Tensor.arctan`
 """)
 
 add_docstr_all('atan2',
@@ -545,13 +586,6 @@ add_docstr_all('atan2_',
 atan2_(other) -> Tensor
 
 In-place version of :meth:`~Tensor.atan2`
-""")
-
-add_docstr_all('atan_',
-               r"""
-atan_() -> Tensor
-
-In-place version of :meth:`~Tensor.atan`
 """)
 
 add_docstr_all('atanh',

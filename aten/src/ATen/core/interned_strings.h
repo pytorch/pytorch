@@ -143,10 +143,22 @@ namespace c10 {
   _(aten, abs_)                      \
   _(aten, absolute)                  \
   _(aten, absolute_)                 \
+  _(aten, acos)                      \
+  _(aten, acos_)                     \
+  _(aten, arccos)                    \
+  _(aten, arccos_)                   \
   _(aten, acosh)                     \
   _(aten, acosh_)                    \
   _(aten, arccosh)                   \
   _(aten, arccosh_)                  \
+  _(aten, asin)                      \
+  _(aten, asin_)                     \
+  _(aten, arcsin)                    \
+  _(aten, arcsin_)                   \
+  _(aten, atan)                      \
+  _(aten, atan_)                     \
+  _(aten, arctan)                    \
+  _(aten, arctan_)                   \
   _(aten, clamp)                     \
   _(aten, clamp_)                    \
   _(aten, clip)                      \
