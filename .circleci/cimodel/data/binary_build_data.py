@@ -51,13 +51,16 @@ CONFIG_TREE_DATA = OrderedDict(
         ],
     )),
     # Skip CUDA-9.2 builds on Windows
-    windows=([v for v in dimensions.CUDA_VERSIONS if v != '92'], OrderedDict(
-        wheel=dimensions.STANDARD_PYTHON_VERSIONS,
-        conda=dimensions.STANDARD_PYTHON_VERSIONS,
-        libtorch=[
-            "3.7",
-        ],
-    )),
+    windows=(
+        [v for v in dimensions.CUDA_VERSIONS if v not in ['92', '110']],
+        OrderedDict(
+            wheel=dimensions.STANDARD_PYTHON_VERSIONS,
+            conda=dimensions.STANDARD_PYTHON_VERSIONS,
+            libtorch=[
+                "3.7",
+            ],
+        )
+    ),
 )
 
 # GCC config variants:
