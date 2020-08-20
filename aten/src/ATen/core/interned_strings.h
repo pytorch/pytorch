@@ -145,6 +145,10 @@ namespace c10 {
   _(aten, abs_)                      \
   _(aten, absolute)                  \
   _(aten, absolute_)                 \
+  _(aten, acosh)                     \
+  _(aten, acosh_)                    \
+  _(aten, arccosh)                   \
+  _(aten, arccosh_)                  \
   _(aten, clamp)                     \
   _(aten, clamp_)                    \
   _(aten, clip)                      \
@@ -273,6 +277,7 @@ namespace c10 {
   _(attr, perm)                      \
   _(attr, sizes)                     \
   _(attr, starts)                    \
+  _(attr, profiled_type)             \
   _(attr, transA)                    \
   _(attr, transB)                    \
   _(attr, name)                      \
