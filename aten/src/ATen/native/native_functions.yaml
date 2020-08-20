@@ -7243,7 +7243,14 @@
   use_c10_dispatcher: full
 
 # Note: this function is only for testing.
-- func: _test_optional_intlist(Tensor values, int[2]? addends) -> Tensor
+- func: _test_optional_intlist(Tensor values, int[]? addends) -> Tensor
+  use_c10_dispatcher: full
+  python_module: nn
+  dispatch:
+    CPU: _test_optional_intlist
+
+# Note: this function is only for testing.
+- func: _test_optional_filled_intlist(Tensor values, int[2]? addends) -> Tensor
   use_c10_dispatcher: full
   python_module: nn
   dispatch:

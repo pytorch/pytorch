@@ -142,14 +142,14 @@ class TestNativeFunctions(TestCase):
 
     def trace_optional_filled_intlist(self, const):
         def wrapper(values):
-            return torch._C._nn._test_optional_intlist(values, const)
+            return torch._C._nn._test_optional_filled_intlist(values, const)
         return torch.jit.trace(wrapper, torch.tensor([1, 2], dtype=torch.int))
 
     def test_optional_filled_intlist(self):
 
         def f(n: int):
-            x = torch._C._nn._test_optional_intlist(torch.tensor([1, 1], dtype=torch.int), (n, n))
-            y = torch._C._nn._test_optional_intlist(torch.tensor([1, 1], dtype=torch.int), n)
+            x = torch._C._nn._test_optional_filled_intlist(torch.tensor([1, 1], dtype=torch.int), (n, n))
+            y = torch._C._nn._test_optional_filled_intlist(torch.tensor([1, 1], dtype=torch.int), n)
             return x, y
 
         # eager
