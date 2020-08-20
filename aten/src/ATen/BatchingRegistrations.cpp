@@ -234,6 +234,14 @@ Tensor unary_pointwise_batching_rule(const Tensor& input) {
   return makeBatched(output_physical, BatchDims(old_bdims.begin(), old_bdims.end()));
 }
 
+template <typename F, F Func, typename... ExtraArgs>
+Tensor unary_pointwise_method_batching_rule(const Tensor& input, ExtraArgs... extra_args) {
+  auto* input_batched = unsafeGetBatchedImpl(input);
+  auto output_physical = (input_batched->value().*Func)(extra_args...);
+  auto old_bdims = input_batched->bdims();
+  return makeBatched(output_physical, BatchDims(old_bdims.begin(), old_bdims.end()));
+}
+
 TORCH_LIBRARY_IMPL(_, Batched, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&batchedTensorForLoopFallback>());
 }
@@ -310,6 +318,16 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   UNARY_POINTWISE(tanh);
   UNARY_POINTWISE(trunc);
 #undef UNARY_POINTWISE
+#define TO_BATCHING_RULE(name, ...) \
+  { \
+    using to_type = Tensor(Tensor::*)(__VA_ARGS__) const; \
+    m.impl(name, unary_pointwise_method_batching_rule< \
+        to_type, &Tensor::to, __VA_ARGS__>);\
+  }
+  TO_BATCHING_RULE("to.device", Device, ScalarType, bool, bool, optional<MemoryFormat>)
+  TO_BATCHING_RULE("to.dtype", ScalarType, bool, bool, optional<MemoryFormat>)
+  TO_BATCHING_RULE("to.other", const Tensor&, bool, bool, optional<MemoryFormat>)
+#undef TO_BATCHING_RULE
 }
 
 } // namespace at
