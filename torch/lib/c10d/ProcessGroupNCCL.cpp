@@ -228,6 +228,7 @@ ncclResult_t ncclAlltoallv(
 } // namespace
 
 const int64_t ProcessGroupNCCL::kWatchdogThreadSleepMillis = 10000;
+const int64_t ProcessGroupNCCL::kWorkCleanupThreadSleepMillis = 1000;
 constexpr int64_t kWaitForAbortCommStoreKey = 1000;
 constexpr int64_t kSynchronizeBusyWaitMillis = 10;
 const int64_t ProcessGroupNCCL::kProcessGroupNCCLOpTimeoutMillis = 10 * 1000;
@@ -237,7 +238,8 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(const std::vector<at::Device>& devices)
   // Creates the CUDA event wrappers
   // Note: The actual events are lazily created when first recorded to with
   // DEFAULT_FLAGS = cudaEventDisableTiming.
-  cudaEvents_.resize(devices.size());
+  cudaEvents_ =
+      std::make_shared<std::vector<at::cuda::CUDAEvent>>(devices.size());
   ncclComms_.resize(devices.size());
 }
 
@@ -277,7 +279,7 @@ bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecution() {
 bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecutionInternal() const {
   for (size_t i = 0; i < devices_.size(); ++i) {
     // Checking the work's corresponding CUDA events' status
-    auto ret = cudaEventQuery(cudaEvents_[i]);
+    auto ret = cudaEventQuery((*cudaEvents_)[i]);
     if (ret != cudaSuccess && ret != cudaErrorNotReady) {
       AT_CUDA_CHECK(ret);
     }
@@ -308,7 +310,7 @@ void ProcessGroupNCCL::WorkNCCL::synchronizeStreams() {
   for (size_t i = 0; i < devices_.size(); ++i) {
     auto currentStream = at::cuda::getCurrentCUDAStream(devices_[i].index());
     // Block the current stream on the NCCL stream
-    cudaEvents_[i].block(currentStream);
+    (*cudaEvents_)[i].block(currentStream);
   }
 }
 
@@ -557,7 +559,7 @@ void ProcessGroupNCCL::workCleanupLoop() {
     // milliseconds as long as the atomic is True.
     workVectorCV_.wait_for(
         lock,
-        std::chrono::milliseconds(kWatchdogThreadSleepMillis),
+        std::chrono::milliseconds(kWorkCleanupThreadSleepMillis),
         [&]() -> bool { return terminateProcessGroup_.load(); });
 
     for (auto it = workVector_.begin(); it != workVector_.end();
@@ -801,10 +803,13 @@ std::shared_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
 
 c10::intrusive_ptr<c10::ivalue::Future> ProcessGroupNCCL::WorkNCCL::
     getFuture() {
-  // FutureNCCL has a reference to WorkNCCL. Therefore, we don't store a
-  // FutureNCCL reference inside WorkNCCL and we create a new object here
-  // to avoid circular reference between WorkNCCL and FutureNCCL.
-  return c10::make_intrusive<FutureNCCL>(shared_from_this(), outputs_);
+  TORCH_INTERNAL_ASSERT(
+      outputs_->size() == 1,
+      "WorkNCCL's getFuture API is only supported for single-process single-device mode.");
+  // Create a new FutureNCCL object after checking for single-process
+  // single-device mode.
+  return c10::make_intrusive<FutureNCCL>(
+      at::IValue(*outputs_), (*outputs_)[0].device().index(), cudaEvents_);
 }
 
 void ProcessGroupNCCL::enqueue(
@@ -871,7 +876,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
   // Event should only be recorded after the ncclGroupEnd()
   for (size_t i = 0; i < inputs.size(); ++i) {
     at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
-    work->cudaEvents_[i].record(ncclStream);
+    (*work->cudaEvents_)[i].record(ncclStream);
     work->ncclComms_[i] = ncclComms[i];
     work->blockingWait_ = blockingWait_;
     work->opTimeout_ = opTimeout_;
