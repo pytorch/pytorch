@@ -1209,7 +1209,7 @@ except RuntimeError as e:
         dl_common_args = dict(num_workers=3, batch_size=3, pin_memory=(not TEST_CUDA))
         for ctx in supported_multiprocessing_contexts:
             if ctx in ['spawn', 'forkserver'] and TEST_CUDA and not IS_WINDOWS:  # windows doesn't support sharing cuda tensor
-                dl_cls = CUDACountingDataset
+                ds_cls = CUDACountingDataset
             else:
                 ds_cls = CountingDataset
             self.assertEqual(
