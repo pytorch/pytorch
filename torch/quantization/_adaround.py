@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 import torch.nn.qat as nnqat
-# import torch.nn.init as init
 
 import torch.quantization._numeric_suite as ns
 import copy
@@ -41,46 +40,36 @@ def get_param(module, attr):
         return param
 
 class LastOutputLogger(ns.Logger):
-    r"""A logger for a Shadow module whose purpose is to record the last data point
-    passed to the floating point and quantized models and is used to compute the norm
-    of the difference between the two models. To be passed to AdaRoundFakeQuantize's
-    layer_loss_function
+    r"""A logger for recording the last piece of data passed through. Different from the numeric suite
+    OutputLogger that records all pieces of data that are passed through (loss function for adaround only
+    needs last output)
     """
     def __init__(self):
         super(LastOutputLogger, self).__init__()
         self.stats["tensor_val"] = None
-        # self.stats["quantized"] = None
 
     def forward(self, x):
-        ''' The inputs x,y are output data from the quantized and floating-point modules.
-        x is for the quantized module, y is for the floating point module
-        '''
         if x.is_quantized:
             x = x.dequantize()
-
         self.stats["tensor_val"] = x
-        # self.stats["float"] = y
 
-def learn_adaround(float_model, quantized_model, tuning_dataset, target_layers=None, norm_output=False,
-                    number_of_epochs=15, learning_rate=.5):
-    ''' Implements the learning procedure for tuning the rounding scheme of the layers specified
+def learn_adaround(quantized_model, tuning_dataset, target_layers=None,
+                    number_of_epochs=25, learning_rate=.25):
+    ''' Inplace learning procedure for tuning the rounding scheme of the layers specified
     for the given model
 
     Args:
-        float_model:
-        quantized_model:
-        tuning_dataset:
-        target_layers:
-        norm_output:
-        number_of_epochs:
-        learning_rate:
+        quantized_model: a model with AdaRoundFakeQuantize modules attached to it
+        tuning_dataset: a training/tuning dataset for the continous_V attribute in the fake_quants
+        target_layers: the names of the layers that have an AdaRoundFakeQuantize module to train
+        number_of_epochs: number of batches each layer is trained on
+        learning_rate: learning rate of the training
     '''
     def optimize_V(leaf_module):
         '''Takes in a leaf module with an adaround attached to its
         weight_fake_quant attribute and runs an adam optimizer on the continous_V
         attribute on the adaround module
         '''
-        print(leaf_module)
         leaf_module.weight_fake_quant.tuning = True
         def dummy_generator():
             yield leaf_module.weight_fake_quant.continous_V
@@ -88,57 +77,21 @@ def learn_adaround(float_model, quantized_model, tuning_dataset, target_layers=N
 
         count = 0
         for data in tuning_dataset:
-            # output = float_model(data[0])
             output = quantized_model(data[0])
-            # act_compare_dict = ns.get_matching_activations(float_model, quantized_model)
-            # wt_compare_dict = ns.compare_weights(float_model.state_dict(), quantized_model.state_dict())
-            # print(quantized_model)
-            # print(wt_compare_dict.keys())
-            # ob_dict = ns.get_logger_dict(quantized_model)
-            # ob_dict2 = ns.get_logger_dict(leaf_module)
-            # print("dict 1: ", ob_dict)
-            # print("dict 2: ", ob_dict2)
-            # parent_name, _ = parent_child_names(uncorrected_module)
-
-            # float_data = ob_dict[parent_name + '.stats']['float']
-            # quant_data = ob_dict[parent_name + '.stats']['quantized']
-            # need to handle more norm_output stuff
             loss = leaf_module.weight_fake_quant.layer_loss_function(count / number_of_epochs, leaf_module.weight)
-
-            print("loss: ", loss)
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
             count += 1
-            print("running count during optimazation: ", count)
             if count == number_of_epochs:
                 return
-    # this might be wrong setup, idt shadow module is needed?
-    # if norm_output:
-    #     # ns.prepare_model_with_stubs(float_model, quantized_model, _supported_modules, LastOutputLogger)
-    #     ns.prepare_model_outputs(float_model, quantized_model, LastOutputLogger)
 
     if target_layers is None:
         target_layers = []
-        for name, submodule in float_model.named_modules():
-            if type(submodule) in _supported_modules:
+        for name, submodule in quantized_model.named_modules():
+            if type(submodule) in _supported_modules_qat:
                 target_layers.append(name)
 
     for layer_name in target_layers:
         layer = get_module(quantized_model, layer_name)
-        print("quantized submodule")
         optimize_V(layer)
-        print("finished optimizing adaround instance")
-
-
-    return float_model
-
-if __name__ == "__main__":
-    # main()
-    x,y = load_conv()
-    z = copy.deepcopy(x)
-    z.qconfig = adaround_qconfig
-    torch.quantization.prepare_qat(z, inplace=True)
-    print(z)
-    z(y[0][0])
-    learn_adaround(x, z, y, norm_output=False)
