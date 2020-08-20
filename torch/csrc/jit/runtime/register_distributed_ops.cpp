@@ -11,6 +11,7 @@
 #include <torch/library.h>
 
 #include <fmt/format.h>
+#include <stdexcept>
 
 using at::Scalar;
 using at::Tensor;
@@ -146,10 +147,15 @@ void prepare_and_call_rpc_op(
         userCallableStack,
         rpcTimeout);
     futureIValuePtr->wait();
-    auto res = futureIValuePtr->value();
-    // Push output to the stack.
-    drop(stack, num_inputs);
-    stack->emplace_back(std::move(res));
+    if (futureIValuePtr->hasError()) {
+      // throw error if future hasError
+      throw std::runtime_error(futureIValuePtr->error()->what());
+    } else {
+      auto res = futureIValuePtr->value();
+      // Push output to the stack.
+      drop(stack, num_inputs);
+      stack->emplace_back(std::move(res));
+    }
   } else {
     throw std::runtime_error(
         c10::str(rpc_op, "() is not supported in TorchScript!'"));
