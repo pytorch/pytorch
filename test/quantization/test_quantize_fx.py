@@ -5,6 +5,8 @@ import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
 import torch.nn.intrinsic.quantized as nniq
 
+from torch.quantization.fx import QuantType
+
 # test utils
 from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
