@@ -36,6 +36,50 @@ def conv1d(  # noqa: F811
         padding: Optional[BroadcastingList1[int]] = None,
         dilation: BroadcastingList1[int] = 1,
         groups: int = 1) -> Tensor:
+    r"""
+    conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1) -> Tensor
+
+    Applies a 1D convolution over an input signal composed of several input
+    planes.
+
+    See :class:`~torch.nn.Conv1d` for details and output shape.
+
+    Note:
+        In some circumstances when using the CUDA backend with CuDNN, this operator
+        may select a nondeterministic algorithm to increase performance. If this is
+        undesirable, you can try to make the operation deterministic (potentially at
+        a performance cost) by setting ``torch.backends.cudnn.deterministic =
+        True``.
+        Please see the notes on :doc:`/notes/randomness` for background.
+
+        Padding mode 'valid' is the same as no padding. 'same' pads the input so
+        the output has shape ``ceil(in_shape / stride)`` in each dimension.
+        For the default ``stride = 1``, the output is the same size as the input.
+
+        .. warning::
+            For ``padding='same'``, if the ``weight`` is even-length and
+            ``dilation`` is odd in any dimension, a full :func:`pad` operation
+            may be needed internally. Lowering performance.
+
+    Args:
+        input: input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iW)`
+        weight: filters of shape :math:`(\text{out\_channels} , \frac{\text{in\_channels}}{\text{groups}} , kW)`
+        bias: optional bias of shape :math:`(\text{out\_channels})`. Default: ``None``
+        stride: the stride of the convolving kernel. Can be a single number or
+        a one-element tuple `(sW,)`. Default: 1
+        padding: implicit paddings on both sides of the input. Can be a mode {'valid', 'same'},
+        single number or a one-element tuple `(padW,)`. Default: 0
+        dilation: the spacing between kernel elements. Can be a single number or
+        a one-element tuple `(dW,)`. Default: 1
+        groups: split input into groups, :math:`\text{in\_channels}` should be divisible by
+        the number of groups. Default: 1
+
+    Examples::
+
+        >>> filters = torch.randn(33, 16, 3)
+        >>> inputs = torch.randn(20, 16, 50)
+        >>> F.conv1d(inputs, filters)
+    """
     if not torch.jit.is_scripting():
         if ((type(input) is not Tensor or type(weight) is not Tensor) and
                 has_torch_function((input, weight))):
@@ -64,6 +108,51 @@ def conv2d(  # noqa: F811
         padding: Optional[BroadcastingList2[int]] = None,
         dilation: BroadcastingList2[int] = 1,
         groups: int = 1) -> Tensor:
+    r"""
+    conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1) -> Tensor
+
+    Applies a 2D convolution over an input image composed of several input
+    planes.
+
+    See :class:`~torch.nn.Conv2d` for details and output shape.
+
+    Note:
+        In some circumstances when using the CUDA backend with CuDNN, this operator
+        may select a nondeterministic algorithm to increase performance. If this is
+        undesirable, you can try to make the operation deterministic (potentially at
+        a performance cost) by setting ``torch.backends.cudnn.deterministic =
+        True``.
+        Please see the notes on :doc:`/notes/randomness` for background.
+
+        Padding mode 'valid' is the same as no padding. 'same' pads the input so
+        the output has shape ``ceil(in_shape / stride)`` in each dimension.
+        For the default ``stride = 1``, the output is the same size as the input.
+
+        .. warning::
+            For ``padding='same'``, if the ``weight`` is even-length and
+            ``dilation`` is odd in any dimension, a full :func:`pad` operation
+            may be needed internally. Lowering performance.
+
+    Args:
+        input: input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iH , iW)`
+        weight: filters of shape :math:`(\text{out\_channels} , \frac{\text{in\_channels}}{\text{groups}} , kH , kW)`
+        bias: optional bias tensor of shape :math:`(\text{out\_channels})`. Default: ``None``
+        stride: the stride of the convolving kernel. Can be a single number or a
+        tuple `(sH, sW)`. Default: 1
+        padding: implicit paddings on both sides of the input. Can be a mode {'valid', 'same'},
+        single number or a tuple `(padH, padW)`. Default: 0
+        dilation: the spacing between kernel elements. Can be a single number or
+        a tuple `(dH, dW)`. Default: 1
+        groups: split input into groups, :math:`\text{in\_channels}` should be divisible by the
+        number of groups. Default: 1
+
+    Examples::
+
+        >>> # With square kernels and equal stride
+        >>> filters = torch.randn(8,4,3,3)
+        >>> inputs = torch.randn(1,4,5,5)
+        >>> F.conv2d(inputs, filters, padding=1)
+    """
     if not torch.jit.is_scripting():
         if ((type(input) is not Tensor or type(weight) is not Tensor) and
                 has_torch_function((input, weight))):
@@ -92,6 +181,50 @@ def conv3d(  # noqa: F811
         padding: Optional[BroadcastingList3[int]] = None,
         dilation: BroadcastingList3[int] = 1,
         groups: int = 1) -> Tensor:
+    r"""
+    conv3d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1) -> Tensor
+
+    Applies a 3D convolution over an input image composed of several input
+    planes.
+
+    See :class:`~torch.nn.Conv3d` for details and output shape.
+
+    Note:
+        In some circumstances when using the CUDA backend with CuDNN, this operator
+        may select a nondeterministic algorithm to increase performance. If this is
+        undesirable, you can try to make the operation deterministic (potentially at
+        a performance cost) by setting ``torch.backends.cudnn.deterministic =
+        True``.
+        Please see the notes on :doc:`/notes/randomness` for background.
+
+        Padding mode 'valid' is the same as no padding. 'same' pads the input so
+        the output has shape ``ceil(in_shape / stride)`` in each dimension.
+        For the default ``stride = 1``, the output is the same size as the input.
+
+        .. warning::
+            For ``padding='same'``, if the ``weight`` is even-length and
+            ``dilation`` is odd in any dimension, a full :func:`pad` operation
+            may be needed internally. Lowering performance.
+
+    Args:
+        input: input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iT , iH , iW)`
+        weight: filters of shape :math:`(\text{out\_channels} , \frac{\text{in\_channels}}{\text{groups}} , kT , kH , kW)`
+        bias: optional bias tensor of shape :math:`(\text{out\_channels})`. Default: None
+        stride: the stride of the convolving kernel. Can be a single number or a
+        tuple `(sT, sH, sW)`. Default: 1
+        padding: implicit paddings on both sides of the input. Can be a mode {'valid', 'same'},
+        single number or a tuple `(padT, padH, padW)`. Default: 0
+        dilation: the spacing between kernel elements. Can be a single number or
+        a tuple `(dT, dH, dW)`. Default: 1
+        groups: split input into groups, :math:`\text{in\_channels}` should be divisible by
+        the number of groups. Default: 1
+
+    Examples::
+
+        >>> filters = torch.randn(33, 16, 3, 3, 3)
+        >>> inputs = torch.randn(20, 16, 50, 10, 20)
+        >>> F.conv3d(inputs, filters)
+    """
     if not torch.jit.is_scripting():
         if ((type(input) is not Tensor or type(weight) is not Tensor) and
                 has_torch_function((input, weight))):
@@ -106,142 +239,6 @@ def conv3d(  # noqa: F811
     return _VF.conv3d(
         input, weight, bias, stride, padding, dilation, groups)
 
-
-conv1d = _add_docstr(conv1d, r"""
-conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1) -> Tensor
-
-Applies a 1D convolution over an input signal composed of several input
-planes.
-
-See :class:`~torch.nn.Conv1d` for details and output shape.
-
-Note:
-    In some circumstances when using the CUDA backend with CuDNN, this operator
-    may select a nondeterministic algorithm to increase performance. If this is
-    undesirable, you can try to make the operation deterministic (potentially at
-    a performance cost) by setting ``torch.backends.cudnn.deterministic =
-    True``.
-    Please see the notes on :doc:`/notes/randomness` for background.
-
-    Padding mode 'valid' is the same as no padding. 'same' pads the input so
-    the output has shape ``ceil(in_shape / stride)`` in each dimension.
-    For the default ``stride = 1``, the output is the same size as the input.
-
-    .. warning::
-        For ``padding='same'``, if the ``weight`` is even-length and
-        ``dilation`` is odd in any dimension, a full :func:`pad` operation
-        may be needed internally. Lowering performance.
-
-Args:
-    input: input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iW)`
-    weight: filters of shape :math:`(\text{out\_channels} , \frac{\text{in\_channels}}{\text{groups}} , kW)`
-    bias: optional bias of shape :math:`(\text{out\_channels})`. Default: ``None``
-    stride: the stride of the convolving kernel. Can be a single number or
-      a one-element tuple `(sW,)`. Default: 1
-    padding: implicit paddings on both sides of the input. Can be a mode {'valid', 'same'},
-      single number or a one-element tuple `(padW,)`. Default: 0
-    dilation: the spacing between kernel elements. Can be a single number or
-      a one-element tuple `(dW,)`. Default: 1
-    groups: split input into groups, :math:`\text{in\_channels}` should be divisible by
-      the number of groups. Default: 1
-
-Examples::
-
-    >>> filters = torch.randn(33, 16, 3)
-    >>> inputs = torch.randn(20, 16, 50)
-    >>> F.conv1d(inputs, filters)
-""")  # noqa: E501
-
-conv2d = _add_docstr(conv2d, r"""
-conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1) -> Tensor
-
-Applies a 2D convolution over an input image composed of several input
-planes.
-
-See :class:`~torch.nn.Conv2d` for details and output shape.
-
-Note:
-    In some circumstances when using the CUDA backend with CuDNN, this operator
-    may select a nondeterministic algorithm to increase performance. If this is
-    undesirable, you can try to make the operation deterministic (potentially at
-    a performance cost) by setting ``torch.backends.cudnn.deterministic =
-    True``.
-    Please see the notes on :doc:`/notes/randomness` for background.
-
-    Padding mode 'valid' is the same as no padding. 'same' pads the input so
-    the output has shape ``ceil(in_shape / stride)`` in each dimension.
-    For the default ``stride = 1``, the output is the same size as the input.
-
-    .. warning::
-        For ``padding='same'``, if the ``weight`` is even-length and
-        ``dilation`` is odd in any dimension, a full :func:`pad` operation
-        may be needed internally. Lowering performance.
-
-Args:
-    input: input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iH , iW)`
-    weight: filters of shape :math:`(\text{out\_channels} , \frac{\text{in\_channels}}{\text{groups}} , kH , kW)`
-    bias: optional bias tensor of shape :math:`(\text{out\_channels})`. Default: ``None``
-    stride: the stride of the convolving kernel. Can be a single number or a
-      tuple `(sH, sW)`. Default: 1
-    padding: implicit paddings on both sides of the input. Can be a mode {'valid', 'same'},
-      single number or a tuple `(padH, padW)`. Default: 0
-    dilation: the spacing between kernel elements. Can be a single number or
-      a tuple `(dH, dW)`. Default: 1
-    groups: split input into groups, :math:`\text{in\_channels}` should be divisible by the
-      number of groups. Default: 1
-
-Examples::
-
-    >>> # With square kernels and equal stride
-    >>> filters = torch.randn(8,4,3,3)
-    >>> inputs = torch.randn(1,4,5,5)
-    >>> F.conv2d(inputs, filters, padding=1)
-""")  # noqa: E501
-
-conv3d = _add_docstr(conv3d, r"""
-conv3d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1) -> Tensor
-
-Applies a 3D convolution over an input image composed of several input
-planes.
-
-See :class:`~torch.nn.Conv3d` for details and output shape.
-
-Note:
-    In some circumstances when using the CUDA backend with CuDNN, this operator
-    may select a nondeterministic algorithm to increase performance. If this is
-    undesirable, you can try to make the operation deterministic (potentially at
-    a performance cost) by setting ``torch.backends.cudnn.deterministic =
-    True``.
-    Please see the notes on :doc:`/notes/randomness` for background.
-
-    Padding mode 'valid' is the same as no padding. 'same' pads the input so
-    the output has shape ``ceil(in_shape / stride)`` in each dimension.
-    For the default ``stride = 1``, the output is the same size as the input.
-
-    .. warning::
-        For ``padding='same'``, if the ``weight`` is even-length and
-        ``dilation`` is odd in any dimension, a full :func:`pad` operation
-        may be needed internally. Lowering performance.
-
-Args:
-    input: input tensor of shape :math:`(\text{minibatch} , \text{in\_channels} , iT , iH , iW)`
-    weight: filters of shape :math:`(\text{out\_channels} , \frac{\text{in\_channels}}{\text{groups}} , kT , kH , kW)`
-    bias: optional bias tensor of shape :math:`(\text{out\_channels})`. Default: None
-    stride: the stride of the convolving kernel. Can be a single number or a
-      tuple `(sT, sH, sW)`. Default: 1
-    padding: implicit paddings on both sides of the input. Can be a mode {'valid', 'same'},
-      single number or a tuple `(padT, padH, padW)`. Default: 0
-    dilation: the spacing between kernel elements. Can be a single number or
-      a tuple `(dT, dH, dW)`. Default: 1
-    groups: split input into groups, :math:`\text{in\_channels}` should be divisible by
-      the number of groups. Default: 1
-
-Examples::
-
-    >>> filters = torch.randn(33, 16, 3, 3, 3)
-    >>> inputs = torch.randn(20, 16, 50, 10, 20)
-    >>> F.conv3d(inputs, filters)
-""")  # noqa: E501
 
 conv_transpose1d = _add_docstr(torch.conv_transpose1d, r"""
 conv_transpose1d(input, weight, bias=None, stride=1, padding=0, output_padding=0, groups=1, dilation=1) -> Tensor
