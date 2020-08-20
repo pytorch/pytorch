@@ -6,6 +6,7 @@ import signal
 import sys
 import time
 import unittest
+import multiprocessing as python_mp
 
 from torch.testing._internal.common_utils import (TestCase, run_tests, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN)
 import torch.multiprocessing as mp
@@ -76,6 +77,28 @@ def test_nested(i, pids_queue, nested_child_sleep, start_method):
 
     # Kill self. This should take down the child processes as well.
     os.kill(os.getpid(), signal.SIGTERM)
+
+
+def _infinite_signal_handler(signum, frame):
+    while True:
+        pass
+
+
+def run_with_signal_handler(idx):
+    if idx == 0:
+        signal.signal(signal.SIGTERM, _infinite_signal_handler)
+    else:
+        time.sleep(2)  # sleep for 2 seconds and raise exception.
+        raise Exception(f"Error from child process: {idx} pid: {os.getpid()}")
+
+
+def _run_pytorch_spawn():
+    # noinspection PyBroadException
+    try:
+        mp.spawn(fn=run_with_signal_handler, nprocs=3, join=True)
+    except Exception:
+        pass
+
 
 class _TestMultiProcessing(object):
     start_method = None
@@ -179,11 +202,31 @@ class _TestMultiProcessing(object):
             self.assertLess(time.time() - start, nested_child_sleep / 2)
             time.sleep(0.1)
 
+
 @unittest.skipIf(
     NO_MULTIPROCESSING_SPAWN,
     "Disabled for environments that don't support the spawn start method")
 class SpawnTest(TestCase, _TestMultiProcessing):
     start_method = 'spawn'
+
+    def test_spawn_with_deadlock_child(self):
+        timeout = 60  # if test runs more than 40 seconds we consider it failed.
+        mp_ctx = python_mp.get_context("spawn")
+        process = mp_ctx.Process(
+            target=_run_pytorch_spawn,
+            args=(),
+            daemon=False,
+        )
+        process.start()
+        process.join(timeout)
+        # Since we test join termination behavior in case of exception, we need
+        # to launch it in another process in order to make sure that the main process
+        # will not deadlock.
+        if process.is_alive():
+            process.kill()
+            process.join()
+            self.assertFail("Child process hang.")
+
 
 @unittest.skipIf(
     IS_WINDOWS,
@@ -191,6 +234,7 @@ class SpawnTest(TestCase, _TestMultiProcessing):
 )
 class ForkTest(TestCase, _TestMultiProcessing):
     start_method = 'fork'
+
 
 if __name__ == '__main__':
     run_tests()

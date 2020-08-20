@@ -94,9 +94,7 @@ class ProcessContext:
 
         # Assume failure. Terminate processes that are still alive.
         for process in self.processes:
-            if process.is_alive():
-                process.terminate()
-            process.join()
+            self._terminate_process(process)
 
         # There won't be an error on the queue if the process crashed.
         if self.error_queues[error_index].empty():
@@ -117,6 +115,35 @@ class ProcessContext:
         msg = "\n\n-- Process %d terminated with the following error:\n" % error_index
         msg += original_trace
         raise Exception(msg)
+
+    # noinspection PyMethodMayBeStatic
+    def _terminate_process(self, process, timeout=None):
+        r"""
+        The method terminates the process. The method will use SIGTERM
+        to terminate the process. It will wait at least 30 seconds to
+        give time to the child process to terminate gracefully. When time expires
+        and the process is still alive the method will send SIGKILL since
+        at that point we assume that the process termination logic is stuck.
+
+        Arguments:
+            process: The process to terminate.
+            timeout (float): The time to wait for termination handler to finish its job.
+        """
+        # The termination logic should not perform heavy duty and
+        # usually if it takes more than 30 seconds it means that
+        # the process stuck on waiting for some external resources.
+        minimal_termination_timeout = 30  # seconds
+        termination_timeout = (
+            minimal_termination_timeout
+            if timeout is None or timeout < minimal_termination_timeout
+            else timeout
+        )
+        if process.is_alive():
+            process.terminate()
+        process.join(termination_timeout)
+        if process.is_alive():
+            process.kill()
+            process.join(termination_timeout)
 
 
 class SpawnContext(ProcessContext):
