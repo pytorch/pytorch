@@ -15,15 +15,16 @@
 #include <tuple>
 #include "ATen/Parallel.h"
 #include "Functions.h"
+#include "c10/core/DeviceType.h"
 
 namespace at { namespace native {
 
 namespace {
 
 template <typename scalar_t>
-static void max_pool2d_out_impl(
-    const scalar_t* __restrict IP,
-    scalar_t* __restrict OP,
+void max_pool2d_out_impl(
+    const scalar_t* IP,
+    scalar_t* const OP,
     const int64_t NB,
     const int64_t NC,
     const int64_t IH,
@@ -39,63 +40,54 @@ static void max_pool2d_out_impl(
     const int64_t DI,
     const int64_t DJ) {
   // Value to fill the padded region with
-  constexpr auto FILL = std::numeric_limits<scalar_t>::lowest();
+  constexpr scalar_t FILL = std::numeric_limits<scalar_t>::lowest();
 
-  // Because of padding, the kernel index may be off bounds. This computes the
-  // offset to place the kernel index in bounds.
-  const auto ker_offset = [&](const int64_t excess) {
-    return std::max(static_cast<int64_t>(std::ceil(excess / (DI * -1.0))), 0L);
-  };
-
-  // For each output row
+  /*
+   * For each row of the output tensor, first compute a row-wise max of the
+   * input rows accessed by the current kernel window. Then, compute the max for
+   * each cell of the current output row using the row-reduced buffer.
+   *
+   * This algorithm makes better use of the cache, reduces duplicate comparisons
+   * in the case of overlapping kernel windows and facilitates vectorization.
+   * The downsides are that it uses an extra buffer and will compute row-wise
+   * max of every column even if it will be skipped over when striding.
+   */
   at::parallel_for(
       0, NB * NC * OH, 0, [&](const int64_t begin, const int64_t end) {
         for (int64_t it = begin; it < end; ++it) {
-          const auto tensor_idx = it / OH;
-          const auto oi = it % OH;
+          // Buffer for storing row-wise max
+          std::vector<scalar_t> buffer(IW, FILL);
 
-          // Compute kernel first and last rows within input bounds
-          const auto kis = ker_offset(oi * SI - PI);
-          const auto kie =
-              KH - ker_offset(((IH - 1) - (oi * SI + (KH - 1) * DI - PI)));
-
-          // Input tensor offset pointing at first element of current frame
-          const auto in_offset = tensor_idx * IH * IW;
-
-          // Allocate a buffer for the current input row to apply max
-          // column-wise
-          std::vector<scalar_t> buffer(IW + (PJ << 1), FILL);
-
-          // Copy first valid (non-padded) row to skip one loop iteration
-          const auto copy_offset = in_offset + (oi * SI + kis * DI - PI) * IW;
-          std::copy(
-              IP + copy_offset, IP + copy_offset + IW, buffer.begin() + PJ);
-
-          // Compute max column-wise for current output row
-          for (int64_t ki = kis + 1; ki < kie; ++ki) {
-            const auto ii = oi * SI + ki * DI - PI;
+          // Compute row-wise max of rows used for current output row
+          for (int64_t ki = 0; ki < KH; ++ki) {
+            const int64_t ii = (it % OH) * SI + ki * DI - PI;
+            if (ii < 0 || ii >= IH) {
+              continue;
+            }
             for (int64_t ij = 0; ij < IW; ++ij) {
-              const auto val = IP[in_offset + ii * IW + ij];
-              buffer[ij + PJ] =
-                  std::isnan(val) ? val : std::max(buffer[ij + PJ], val);
+              const scalar_t val = IP[((it / OH) * IH + ii) * IW + ij];
+              buffer[ij] = std::isnan(val) ? val : std::max(buffer[ij], val);
             }
           }
 
-          // Compute max for each cell in the current output row
-          const auto out_offset = (tensor_idx * OH + oi) * OW;
+          // Compute each output for the current row
           for (int64_t oj = 0; oj < OW; ++oj) {
-            auto max_val = buffer[oj * SJ];
-            for (int64_t kj = 1; kj < KW; ++kj) {
-              const auto val = buffer[oj * SJ + kj * DJ];
+            scalar_t max_val = FILL;
+            for (int64_t kj = 0; kj < KW; ++kj) {
+              const int64_t ij = oj * SJ + kj * DJ - PJ;
+              if (ij < 0 || ij >= IW) {
+                continue;
+              }
+              const scalar_t val = buffer[ij];
               max_val = std::isnan(val) ? val : std::max(max_val, val);
             }
-            OP[out_offset + oj] = max_val;
+            OP[it * OW + oj] = max_val;
           }
         }
       });
 }
 
-static Tensor max_pool2d_impl(
+Tensor max_pool2d_impl(
     const Tensor& input,
     IntArrayRef kernel_size,
     IntArrayRef stride,
@@ -120,29 +112,23 @@ static Tensor max_pool2d_impl(
       dilation.size() == 1 || dilation.size() == 2,
       "max_pool2d: dilation must be either a single int, or a tuple of two ints");
 
-  const auto NB = input.dim() == 4 ? input.size(-4) : 1;
-  const auto NC = input.size(-3);
-  const auto IH = input.size(-2);
-  const auto IW = input.size(-1);
-  const auto KH = kernel_size[0];
-  const auto KW = kernel_size.size() == 1 ? KH : kernel_size[1];
-  const auto SI = stride.empty() ? KH : stride[0];
-  const auto SJ = stride.empty() ? KW : stride.size() == 1 ? SI : stride[1];
-  const auto PI = padding[0];
-  const auto PJ = padding.size() == 1 ? PI : padding[1];
-  const auto DI = dilation[0];
-  const auto DJ = dilation.size() == 1 ? DI : dilation[1];
-
-  // const auto OH =
-  //     std::ceil((IH + 2 * PI - DI * (KH - 1)) / static_cast<double>(SI));
-  // const auto OW =
-  //     std::ceil((IW + 2 * PJ - DJ * (KW - 1)) / static_cast<double>(SJ));
-
-  const auto OH = pooling_output_shape<int64_t>(IH, KH, PI, SI, DI, ceil_mode);
-  const auto OW = pooling_output_shape<int64_t>(IW, KW, PJ, SJ, DJ, ceil_mode);
+  const int64_t NB = input.dim() == 4 ? input.size(-4) : 1;
+  const int64_t NC = input.size(-3);
+  const int64_t IH = input.size(-2);
+  const int64_t IW = input.size(-1);
+  const int64_t KH = kernel_size[0];
+  const int64_t KW = kernel_size.size() == 1 ? KH : kernel_size[1];
+  const int64_t SI = stride.empty() ? KH : stride[0];
+  const int64_t SJ = stride.empty() ? KW : stride.size() == 1 ? SI : stride[1];
+  const int64_t PI = padding[0];
+  const int64_t PJ = padding.size() == 1 ? PI : padding[1];
+  const int64_t DI = dilation[0];
+  const int64_t DJ = dilation.size() == 1 ? DI : dilation[1];
+  const int64_t OH = pooling_output_shape<int64_t>(IH, KH, PI, SI, DI, ceil_mode);
+  const int64_t OW = pooling_output_shape<int64_t>(IW, KW, PJ, SJ, DJ, ceil_mode);
 
   pool2d_shape_check(input, KH, KW, SI, SJ, PI, PJ, DI, DJ, NC, IH, IW, OH, OW);
-  auto output = at::empty({NB, NC, OH, OW}, input.options());
+  Tensor output = at::empty({NB, NC, OH, OW}, input.options());
 
   AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "max_pool2d_impl", [&] {
     max_pool2d_out_impl(
@@ -163,6 +149,10 @@ static Tensor max_pool2d_impl(
         DI,
         DJ);
   });
+
+  if (input.dim() == 3) {
+    output.squeeze_(0);
+  }
 
   guard.reset();
   namedinference::propagate_names(output, input);
@@ -302,7 +292,7 @@ Tensor max_pool2d(
         self, kernel_size, padding, stride, dilation, ceil_mode);
   }
 #endif
-  if (self.requires_grad()) {
+  if (self.requires_grad() || self.device() != at::kCPU) {
     return std::get<0>(at::max_pool2d_with_indices(
         self, kernel_size, stride, padding, dilation, ceil_mode));
   }

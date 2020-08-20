@@ -9810,10 +9810,9 @@ class TestNNDeviceType(NNTestCase):
         helper(10, 512, 31, 31, 3, stride=2)
         helper(1, 129, 8, 8, 3, stride=2)
 
-    @onlyCUDA
     def test_max_pool2d(self, device):
-        def helper(n, c, h, w, ks):
-            x = torch.randn(n, c, h, w, device='cuda', dtype=torch.float, requires_grad=True)
+        def helper(n, c, h, w, ks, requires_grad):
+            x = torch.randn(n, c, h, w, device=device, dtype=torch.float, requires_grad=requires_grad)
             ref_x = x.detach().clone().cpu().requires_grad_()
 
             pool = torch.nn.MaxPool2d(kernel_size=ks)
@@ -9821,15 +9820,17 @@ class TestNNDeviceType(NNTestCase):
             y = pool(x)
             ref_y = pool(ref_x)
 
-            y.sum().backward()
-            ref_y.sum().backward()
-
             self.assertEqual(y, ref_y)
-            self.assertEqual(x.grad, ref_x.grad)
 
-        helper(2, 8, 4, 4, ks=2)
-        helper(1, 100000, 32, 32, ks=4)
-        helper(1, 100000, 1, 4, ks=(1, 4))  # test for max_pool1d
+            if requires_grad:
+                y.sum().backward()
+                ref_y.sum().backward()
+                self.assertEqual(x.grad, ref_x.grad)
+
+        for requires_grad in (True, False):
+            helper(2, 8, 4, 4, 2, requires_grad)
+            helper(1, 100000, 32, 32, 4, requires_grad)
+            helper(1, 100000, 1, 4, (1, 4), requires_grad)  # test for max_pool1d
 
     @onlyCUDA
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
