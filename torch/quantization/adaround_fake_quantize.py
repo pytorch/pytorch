@@ -1,5 +1,6 @@
 import torch
 import torch.nn.init as init
+import math
 from torch.quantization.fake_quantize import FakeQuantize
 from torch.quantization.observer import HistogramObserver, MovingAverageMinMaxObserver
 from torch.quantization.qconfig import *
@@ -7,25 +8,37 @@ from torch.quantization.fake_quantize import *
 
 
 class AdaRoundFakeQuantize(FakeQuantize):
-    ''' TODO: what is this class for, what does it do?
+    ''' This class is an extension of the FakeQuantize module and is used similarly.
+    The difference between the two is that you can use the continous_V attribute to alter the
+    default rounding scheme during quantization. The defualt is to round to the nearest number,
+    but applying an optimizer on this attribute can yield a better rounding scheme and improve
+    quantization results.
     '''
-    adaround_specific_attributes = ('continous_V', 'beta_high', 'beta_low', 'norm_scaling', 'regularization_scaling')
+    adaround_default_attribute_settings = {'continous_V': None, 'beta_high': 8, 'beta_low': 2, 'norm_scaling': 10, 'regularization_scaling': .1}
+
     def __init__(self, *args, **keywords):
-        for attribute in AdaRoundFakeQuantize.adaround_specific_attributes:
-            if attribute in keywords:
+        settings = AdaRoundFakeQuantize.adaround_default_attribute_settings
+
+        for attribute in settings:
+            if attribute in settings:
                 setattr(self, attribute, keywords[attribute])
                 del keywords[attribute]
+            else:
+                setattr(self, attribute, settings[attribute])
+
+        self.tuning = False
         super(AdaRoundFakeQuantize, self).__init__(*args, **keywords)
 
     def forward(self, X):
         if self.continous_V is None:
             # Small values for initializing V makes the rounding scheme close to nearest integer
-            self.continous_V = torch.nn.Parameter(torch.ones(X.size()) / 10000)
-        return super().forward(self.adaround_rounding(X))
+            self.continous_V = torch.nn.Parameter(torch.zeros(X.size()))
+            init.kaiming_uniform_(self.continous_V, a=math.sqrt(5))
 
-    def randomize(self):
-        # uniform distribution of vals
-        init.kaiming_uniform_(self.continous_V, a=math.sqrt(5))
+        if self.tuning:
+            X = self.adaround_rounding(X)
+
+        return super().forward(X)
 
     @staticmethod
     def clipped_sigmoid(continous_V):
@@ -50,36 +63,29 @@ class AdaRoundFakeQuantize(FakeQuantize):
         weights_w_adaround_rounding = self.scale * torch.clamp(weights_clipped, self.quant_min, self.quant_max)
         return weights_w_adaround_rounding
 
-    def layer_loss_function(self, count, float_weight, custom_norm=False):
+    def layer_loss_function(self, rate, float_weight):
         ''' Calculates the loss function for a submodule
-        note: setting custom_norm to true gives the client ability to change the expression
-            for norm part in the loss function, by default this expression is the norm of the
-            difference between the float_weight given and its adaround rounded counterpart
 
         Paper Reference: https://arxiv.org/pdf/2004.10568.pdf Eq. 25
+        Note: Table 6 of the paper suggested similar results using the norm of the weights
+            as opposed to the norm of the outputs and is what is used here.
         '''
-        beta = count / number_of_epochs * (beta_high - beta_low) + beta_low
+        # rate=0 -> beta=beta_low, rate=1 -> beta=beta_high
+        beta = rate * (self.beta_high - self.beta_low) + self.beta_low
 
-        if not custom_norm:
-            clipped_weight = self.adaround_rounding(float_weight)
-            quantized_weight = torch.fake_quantize_per_tensor_affine(clipped_weight, float(self.scale),
-                                                                    int(self.zero_point), self.quant_min,
-                                                                    self.quant_max)
-            Frobenius_norm = torch.norm(float_weight - quantized_weight)  # norm(W - ~W)
-        else:
-            Frobenius_norm = float_weight  # norm(Wx - ~Wx)
+        clipped_weight = self.adaround_rounding(float_weight)
+        quantized_weight = torch.fake_quantize_per_tensor_affine(clipped_weight, float(self.scale),
+                                                                int(self.zero_point), self.quant_min,
+                                                                self.quant_max)
+        Frobenius_norm = torch.norm(float_weight - quantized_weight)
 
-        # calculating regularization factor -> forces values of continous_V to be 0 or 1
-        scale = self.scale
-        continous_V = self.continous_V
-        clip_V = clipped_sigmoid(continous_V)
+
+        clip_V = self.clipped_sigmoid(self.continous_V)
         spreading_range = torch.abs((2 * clip_V) - 1)
         one_minus_beta = 1 - (spreading_range ** beta)
         regulization = torch.sum(one_minus_beta)
 
-        print("loss function break down: ", Frobenius_norm * norm_scaling, regularization_scaling * regulization)
-        # print("sqnr of float and quantized: ", computeSqnr(float_weight, quantized_weight))
-        return Frobenius_norm * norm_scaling + regularization_scaling * regulization
+        return Frobenius_norm * self.norm_scaling + self.regularization_scaling * regulization
 
 default_araround_fake_quant = AdaRoundFakeQuantize.with_args(observer=MovingAverageMinMaxObserver, quant_min=-128, quant_max=127,
                                          dtype=torch.qint8, qscheme=torch.per_tensor_symmetric, reduce_range=False,
