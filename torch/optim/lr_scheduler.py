@@ -102,7 +102,7 @@ class _LRScheduler(object):
         """
         return self._last_lr
 
-    def get_lr(self) -> float:
+    def get_lr(self) -> List[float]:
         # Compute learning rate using chainable form of the scheduler
         raise NotImplementedError
 
