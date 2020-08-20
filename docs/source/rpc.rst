@@ -176,7 +176,6 @@ Example::
     >>>     "worker1",
     >>>     rank=0,
     >>>     world_size=2,
-    >>>     backend=rpc.BackendType.TENSORPIPE,
     >>>     rpc_backend_options=rpc.TensorPipeRpcBackendOptions(
     >>>         num_worker_threads=8,
     >>>         rpc_timeout=20 # 20 second timeout
@@ -217,6 +216,7 @@ Example::
     >>>     "worker1",
     >>>     rank=0,
     >>>     world_size=2,
+    >>>     backend=rpc.BackendType.PROCESS_GROUP,
     >>>     rpc_backend_options=rpc.ProcessGroupRpcBackendOptions(
     >>>         num_send_recv_threads=16,
     >>>         rpc_timeout=20 # 20 second timeout
