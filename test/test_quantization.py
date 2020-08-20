@@ -60,6 +60,9 @@ from quantization.test_quantize_jit import TestQuantizeJitOps  # noqa: F401
 from quantization.test_quantize_jit import TestQuantizeDynamicJitPasses  # noqa: F401
 from quantization.test_quantize_jit import TestQuantizeDynamicJitOps  # noqaa: F401
 
+# 3. GraphModule based graph mode quantization
+from quantization.test_quantize_fx import TestQuantizeFx  # noqa: F401
+
 # Tooling: numric_suite
 from quantization.test_numeric_suite import TestEagerModeNumericSuite  # noqa: F401
 
