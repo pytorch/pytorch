@@ -357,6 +357,10 @@ if(MSVC)
   list(APPEND CUDA_NVCC_FLAGS "-Xcompiler /w -w")
 endif(MSVC)
 
+list(APPEND CUDA_NVCC_FLAGS "-Xfatbin" "-compress-all")
+list(APPEND CUDA_NVCC_FLAGS_DEBUG "-Xfatbin" "-compress-all")
+list(APPEND CUDA_NVCC_FLAGS_RELWITHDEBINFO "-Xfatbin" "-compress-all")
+
 if(NOT MSVC)
   list(APPEND CUDA_NVCC_FLAGS_DEBUG "-g" "-lineinfo" "--source-in-ptx")
   list(APPEND CUDA_NVCC_FLAGS_RELWITHDEBINFO "-g" "-lineinfo" "--source-in-ptx")

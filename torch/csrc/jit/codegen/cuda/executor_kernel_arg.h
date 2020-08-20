@@ -1,6 +1,8 @@
 #pragma once
 
-#include <c10/core/ScalarType.h>
+#include <ATen/core/ivalue.h>
+#include <c10/util/Exception.h>
+#include <torch/csrc/jit/ir/ir.h>
 
 namespace torch {
 namespace jit {
@@ -103,26 +105,26 @@ struct TensorArg : public TensorArgAbstract {
 };
 
 template <typename T>
-TensorArgAbstract* getTensorArg(int nDims) {
+std::unique_ptr<TensorArgAbstract> getTensorArg(int nDims) {
   switch (nDims) {
     case (0):
-      return new TensorArg<TensorArgCodegen<T, 0>>();
+      return std::make_unique<TensorArg<TensorArgCodegen<T, 0>>>();
     case (1):
-      return new TensorArg<TensorArgCodegen<T, 1>>();
+      return std::make_unique<TensorArg<TensorArgCodegen<T, 1>>>();
     case (2):
-      return new TensorArg<TensorArgCodegen<T, 2>>();
+      return std::make_unique<TensorArg<TensorArgCodegen<T, 2>>>();
     case (3):
-      return new TensorArg<TensorArgCodegen<T, 3>>();
+      return std::make_unique<TensorArg<TensorArgCodegen<T, 3>>>();
     case (4):
-      return new TensorArg<TensorArgCodegen<T, 4>>();
+      return std::make_unique<TensorArg<TensorArgCodegen<T, 4>>>();
     case (5):
-      return new TensorArg<TensorArgCodegen<T, 5>>();
+      return std::make_unique<TensorArg<TensorArgCodegen<T, 5>>>();
     case (6):
-      return new TensorArg<TensorArgCodegen<T, 6>>();
+      return std::make_unique<TensorArg<TensorArgCodegen<T, 6>>>();
     case (7):
-      return new TensorArg<TensorArgCodegen<T, 7>>();
+      return std::make_unique<TensorArg<TensorArgCodegen<T, 7>>>();
     case (8):
-      return new TensorArg<TensorArgCodegen<T, 8>>();
+      return std::make_unique<TensorArg<TensorArgCodegen<T, 8>>>();
     default:
       TORCH_INTERNAL_ASSERT(
           false,
@@ -132,22 +134,35 @@ TensorArgAbstract* getTensorArg(int nDims) {
   }
 }
 
-TensorArgAbstract* getTensorArg(c10::ScalarType dtype, int nDims) {
-  switch (dtype) {
-    case (at::kFloat):
-      return getTensorArg<float>(nDims);
-    case (at::kHalf):
-      return getTensorArg<at::Half>(nDims);
-    case (at::kBool):
-      return getTensorArg<bool>(nDims);
-    default:
-      TORCH_CHECK(
-          false,
-          "Dtype: ",
-          dtype,
-          " not currently supported in code generated kernels.");
-  }
-}
+std::unique_ptr<TensorArgAbstract> getTensorArg(
+    c10::ScalarType dtype,
+    int nDims);
+
+class KernelArgumentHolder {
+ public:
+  // Push a tensor to the arguments
+  void push(const at::Tensor& tensor);
+
+  // Push a scalar or integer to the arguments
+  void push(const IValue& val);
+
+  void push(const uint64_t& val);
+
+  // Create buffer, flatten arguments into it, align by 8 Bytes, return pointers
+  // in the buffer
+  void** getBuffer();
+
+  void push(const c10::ArrayRef<c10::IValue>& args);
+
+  void push(const std::vector<at::Tensor>& tensors);
+
+  void appendPhiloxRNGSeed(uint64_t rand_offset);
+
+ private:
+  std::vector<std::unique_ptr<ArgAbstract>> arguments_;
+  std::vector<void*> void_ptrs_;
+  bool changed_ = true;
+};
 
 } // namespace cuda
 } // namespace fuser

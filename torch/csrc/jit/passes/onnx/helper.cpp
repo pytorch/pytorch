@@ -49,5 +49,15 @@ void buildParamsMapFromValueToParamsMap(
     paramsDict.insert(nameTensorParamPair.second);
   }
 }
+
+Node* addNodeToBlock(Block* block, Value* input, Symbol kind) {
+  auto new_node = block->appendNode(block->owningGraph()->create(kind));
+  auto new_input = new_node->addInput(input);
+  for (size_t i = 0; i < new_node->outputs().size(); i++) {
+    auto output = new_node->outputs()[i];
+    block->registerOutput(output);
+  }
+  return new_node;
+}
 } // namespace jit
 } // namespace torch
