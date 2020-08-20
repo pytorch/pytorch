@@ -79,6 +79,17 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
     return fut->completed();
   }
 
+  py::object value() {
+    // acquiring GIL as toPyObject creates new py::object
+    // without grabbing the GIL.
+    py::gil_scoped_acquire acquire;
+    py::object py_obj = toPyObject(fut->value());
+    if (unwrap_func) {
+      (*unwrap_func)(py_obj);
+    }
+    return py_obj;
+  }
+
   py::object wait() {
     fut->wait();
     if (jit::tracer::isTracing()) {
@@ -88,16 +99,7 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
       auto output = graph->insert(aten::wait, {fut_val});
       jit::tracer::setValueTrace(fut->value(), output);
     }
-    {
-      // acquiring GIL as toPyObject creates new py::object
-      // without grabbing the GIL.
-      py::gil_scoped_acquire acquire;
-      py::object py_obj = toPyObject(fut->value());
-      if (unwrap_func) {
-        (*unwrap_func)(py_obj);
-      }
-      return py_obj;
-    }
+    return value();
   }
 
   // The py::function cb arg must take a std::shared_ptr<PythonFutureWrapper>
