@@ -973,6 +973,10 @@ void initJITBindings(PyObject* module) {
           // Intentionally not releasing GIL
           &PythonFutureWrapper::done)
       .def(
+          "value",
+          &PythonFutureWrapper::value,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
           "wait",
           &PythonFutureWrapper::wait,
           py::call_guard<py::gil_scoped_release>())
