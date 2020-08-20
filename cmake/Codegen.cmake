@@ -157,6 +157,15 @@ if(INTERN_BUILD_ATEN_OPS)
     set(GEN_ROCM_FLAG --rocm)
   endif()
 
+  set(CUSTOM_BUILD_FLAGS)
+  if(INTERN_BUILD_MOBILE)
+    if(USE_VULKAN)
+      list(APPEND CUSTOM_BUILD_FLAGS --backend_whitelist CPU QuantizedCPU Vulkan)
+    else()
+      list(APPEND CUSTOM_BUILD_FLAGS --backend_whitelist CPU QuantizedCPU)
+    endif()
+  endif()
+
   if(SELECTED_OP_LIST)
     if(NOT USE_STATIC_DISPATCH AND NOT OP_DEPENDENCY)
       message(FATAL_ERROR "Must provide op dependency graph .yaml file for custom build with dynamic dispatch!")
@@ -167,11 +176,12 @@ if(INTERN_BUILD_ATEN_OPS)
       --op-dependency "${OP_DEPENDENCY}"
       --root-ops "${SELECTED_OP_LIST}"
       OUTPUT_VARIABLE OP_REGISTRATION_WHITELIST
-      OUTPUT_STRIP_TRAILING_WHITESPACE
     )
-    message(STATUS "Custom build with op registration whitelist: ${OP_REGISTRATION_WHITELIST}")
     separate_arguments(OP_REGISTRATION_WHITELIST)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DTORCH_OPERATOR_WHITELIST=\"${OP_REGISTRATION_WHITELIST}\" -DTORCH_FORCE_SCHEMA_REGISTRATION")
+    message(STATUS "Custom build with op registration whitelist: ${OP_REGISTRATION_WHITELIST}")
+    list(APPEND CUSTOM_BUILD_FLAGS
+      --force_schema_registration
+      --op_registration_whitelist ${OP_REGISTRATION_WHITELIST})
   endif()
   if(USE_VULKAN)
     set(GEN_VULKAN_FLAGS --vulkan)
@@ -183,6 +193,7 @@ if(INTERN_BUILD_ATEN_OPS)
       --install_dir ${CMAKE_BINARY_DIR}/aten/src/ATen
       ${GEN_ROCM_FLAG}
       ${cwrap_files}
+      ${CUSTOM_BUILD_FLAGS}
       ${GEN_VULKAN_FLAGS}
   )
 
