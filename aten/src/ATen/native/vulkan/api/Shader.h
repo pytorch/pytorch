@@ -32,7 +32,7 @@ namespace api {
 // and destruct the aforementioned Vulkan objects.
 //
 
-struct Shader final {
+struct C10_EXPORT Shader final {
   //
   // Layout
   //
