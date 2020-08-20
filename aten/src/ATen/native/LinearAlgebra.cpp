@@ -551,7 +551,7 @@ Tensor& bmm_out_cpu(Tensor &result, const Tensor& batch1, const Tensor& batch2) 
 }
 
 Tensor& dot_out(Tensor& result, const Tensor& self, const Tensor& tensor) {
-  result.resize_({});
+  at::native::resize_output(result, {});
   TORCH_CHECK(result.scalar_type() == self.scalar_type(),
            "result dtype ", result.scalar_type(), " does not match self dtype ", self.scalar_type());
   return result.fill_(self.dot(tensor));
