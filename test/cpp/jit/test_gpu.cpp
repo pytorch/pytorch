@@ -800,48 +800,6 @@ void testGPU_FusionTensor() {
     }
   }
 
-  {
-    auto tensor = at::randn({2, 1, 4}, options);
-    auto tensor_type = TensorType::create(tensor);
-    auto fuser_tensor = new TensorView(tensor_type);
-    TORCH_CHECK((int64_t)fuser_tensor->nDims() == tensor.dim());
-    TORCH_CHECK(fuser_tensor->getDataType().value() == DataType::Float);
-    TORCH_CHECK(fuser_tensor->domain() != nullptr);
-    for (int i = 0; i < static_cast<int>(fuser_tensor->nDims()); i++) {
-      // size 1 dimension are makred as broadcast
-      TORCH_CHECK(
-          fuser_tensor->axis(i)->isBroadcast() == (tensor.sizes()[i] == 1));
-    }
-    TORCH_CHECK(fuser_tensor->domain()->contiguity()[2]);
-
-    // temporary WAR to disable contig & bcast; issue # 230
-    // TODO: insert the check where broadcast & contiguous cannot be marked
-    // together
-    TORCH_CHECK(!fuser_tensor->domain()->contiguity()[0]);
-    TORCH_CHECK(!fuser_tensor->domain()->contiguity()[1]);
-  }
-
-  {
-    auto tensor = at::randn({2, 3, 1}, options);
-    auto tensor_type = TensorType::create(tensor);
-    auto fuser_tensor = new TensorView(tensor_type);
-    TORCH_CHECK((int64_t)fuser_tensor->nDims() == tensor.dim());
-    TORCH_CHECK(fuser_tensor->getDataType().value() == DataType::Float);
-    TORCH_CHECK(fuser_tensor->domain() != nullptr);
-    for (int i = 0; i < static_cast<int>(fuser_tensor->nDims()); i++) {
-      // size 1 dimension are makred as broadcast
-      TORCH_CHECK(
-          fuser_tensor->axis(i)->isBroadcast() == (tensor.sizes()[i] == 1));
-    }
-    TORCH_CHECK(fuser_tensor->domain()->contiguity()[0]);
-
-    // temporary WAR to disable contig & bcast; issue # 230
-    // TODO: insert the check where broadcast & contiguous cannot be marked
-    // together
-    TORCH_CHECK(!fuser_tensor->domain()->contiguity()[1]);
-    TORCH_CHECK(!fuser_tensor->domain()->contiguity()[2]);
-  }
-
   // TensorType::create fills stride_properties, which helps us to mark
   // IterDomain properly
   // Note: implementation could change, depending on how much we want to invest

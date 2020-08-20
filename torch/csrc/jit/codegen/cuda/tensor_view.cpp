@@ -67,11 +67,6 @@ TensorView::TensorView(const std::shared_ptr<c10::TensorType>& tensor_type)
         stride_property_i->contiguous_.has_value() &&
         stride_property_i->contiguous_.value() == true) {
       const size_t index = stride_property_i->stride_index_.value();
-      // TODO: this is a temporary WAR to avoid contiguous_ flag on broadcasted
-      //       dim, which results in wrong indexing math. issue #230
-      if (sizes[index]->isBroadcast()) {
-        continue;
-      }
       if (i == 0) {
         // mark fastest changing dimension collapsible only when it's the last
         // dim;
@@ -81,10 +76,6 @@ TensorView::TensorView(const std::shared_ptr<c10::TensorType>& tensor_type)
         if (auto left_index_opt =
                 tensor_type->stride_properties()[static_cast<int>(i) - 1]
                     ->stride_index_) {
-          // TODO: `isBroadcast` -> issue #230
-          if (sizes[left_index_opt.value()]->isBroadcast()) {
-            continue;
-          }
           // collapse if two axes are neighboring in both sizes & stride_index;
           contig_info[index] = (left_index_opt.value() == (index + 1));
         }
