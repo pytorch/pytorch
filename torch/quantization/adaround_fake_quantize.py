@@ -92,9 +92,9 @@ class AdaRoundFakeQuantize(FakeQuantize):
 
         return Frobenius_norm * self.norm_scaling + self.regularization_scaling * regulization
 
-parameters = {observer=MovingAverageMinMaxObserver, quant_min=-128, quant_max=127, dtype=torch.qint8,
-              qscheme=torch.per_tensor_symmetric, reduce_range=False, beta_high=8, beta_low=2,
-              norm_scaling=10, regularization_scaling=.1, continous_V=None}
+parameters = {'observer': MovingAverageMinMaxObserver, 'quant_min': -128, 'quant_max': 127, 'dtype': torch.qint8,
+              'qscheme': torch.per_tensor_symmetric, 'reduce_range': False, 'beta_high': 8, 'beta_low': 2,
+              'norm_scaling': 10, 'regularization_scaling': .1, 'continous_V': None}
 
 default_araround_fake_quant = AdaRoundFakeQuantize.with_args(**parameters)
 
