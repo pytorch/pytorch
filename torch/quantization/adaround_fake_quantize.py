@@ -2,7 +2,7 @@ import torch
 import torch.nn.init as init
 import math
 from torch.quantization.fake_quantize import FakeQuantize
-from torch.quantization.observer import HistogramObserver, MovingAverageMinMaxObserver
+from torch.quantization.observer import MovingAverageMinMaxObserver
 from torch.quantization.qconfig import *
 from torch.quantization.fake_quantize import *
 
@@ -15,7 +15,11 @@ class AdaRoundFakeQuantize(FakeQuantize):
     quantization results.
 
     '''
-    adaround_default_attribute_settings = {'continous_V': None, 'beta_high': 8, 'beta_low': 2, 'norm_scaling': 10, 'regularization_scaling': .1}
+    adaround_default_attribute_settings = {'continous_V': None,
+                                            'beta_high': 8,
+                                            'beta_low': 2,
+                                            'norm_scaling': 10,
+                                            'regularization_scaling': .1}
 
     def __init__(self, *args, **keywords):
         settings = AdaRoundFakeQuantize.adaround_default_attribute_settings
@@ -76,8 +80,8 @@ class AdaRoundFakeQuantize(FakeQuantize):
 
         clipped_weight = self.adaround_rounding(float_weight)
         quantized_weight = torch.fake_quantize_per_tensor_affine(clipped_weight, float(self.scale),
-                                                                int(self.zero_point), self.quant_min,
-                                                                self.quant_max)
+                                                                 int(self.zero_point), self.quant_min,
+                                                                 self.quant_max)
         Frobenius_norm = torch.norm(float_weight - quantized_weight)
 
 
@@ -89,8 +93,9 @@ class AdaRoundFakeQuantize(FakeQuantize):
         return Frobenius_norm * self.norm_scaling + self.regularization_scaling * regulization
 
 default_araround_fake_quant = AdaRoundFakeQuantize.with_args(observer=MovingAverageMinMaxObserver, quant_min=-128, quant_max=127,
-                                         dtype=torch.qint8, qscheme=torch.per_tensor_symmetric, reduce_range=False,
-                                         beta_high=8, beta_low=2, norm_scaling=10, regularization_scaling=.1, continous_V=None)
+                                                             dtype=torch.qint8, qscheme=torch.per_tensor_symmetric, reduce_range=False,
+                                                             beta_high=8, beta_low=2, norm_scaling=10, regularization_scaling=.1,
+                                                             continous_V=None)
 
 adaround_qconfig = QConfig(activation=default_fake_quant,
                            weight=default_araround_fake_quant)

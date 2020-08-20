@@ -2,10 +2,7 @@ import torch
 import torch.nn as nn
 from torch.testing._internal.common_quantization import QuantizationTestCase
 from torch.quantization import QuantStub, DeQuantStub
-from torch.quantization._adaround import _supported_modules
-from torchvision.models.quantization import mobilenet_v2
 import torch.quantization._adaround as _adaround
-import copy
 
 
 class TestAdaround(QuantizationTestCase):
