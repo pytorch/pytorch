@@ -3454,10 +3454,6 @@ void testGPU_FusionAdvancedIndexing() {
     FusionGuard fg(&fusion);
 
     int w = 3, x = 4, y = 7, z = 8;
-    auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
-
-    at::Tensor t0 = at::randn({x, y, z}, options);
-    at::Tensor t1 = at::randn({w, x, y, z}, options);
 
     auto tv0 = makeDummyTensor(3);
     auto tv1 = makeDummyTensor(4);
@@ -3466,10 +3462,42 @@ void testGPU_FusionAdvancedIndexing() {
 
     auto tv2 = add(tv0, new Float(1.0));
     auto tv3 = add(tv2, tv1);
-
     fusion.addOutput(tv3);
 
+    auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+    at::Tensor t0 = at::randn({x, y, z}, options);
+    at::Tensor t1 = at::randn({w, x, y, z}, options);
+
     fuser::cuda::scheduleFusion(&fusion, {t0, t1});
+
+    torch::jit::fuser::cuda::FusionExecutor fe;
+    fe.compileFusion(&fusion);
+    auto outputs = fe.runFusion({t0, t1});
+
+    auto t2 = t0.add(1.0);
+    auto t3 = t2.add(t1);
+
+    TORCH_CHECK(t3.allclose(outputs[0]));
+  }
+
+  {
+    Fusion fusion;
+    FusionGuard fg(&fusion);
+
+    // Set up your input tensor views
+    TensorView* tv0 = makeConcreteTensor({10, 20});
+    fusion.addInput(tv0);
+    TensorView* tv1 = makeConcreteTensor({10, 10, 20});
+    fusion.addInput(tv1);
+
+    TensorView* tv2 = add(tv0, new Float(1));
+    TensorView* tv3 = broadcast(tv2, {true, false, false});
+    TensorView* tv4 = add(tv3, tv1);
+    fusion.addOutput(tv4);
+
+    auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+    at::Tensor t0 = at::randn({10, 20}, options);
+    at::Tensor t1 = at::randn({10, 10, 20}, options);
 
     torch::jit::fuser::cuda::FusionExecutor fe;
     fe.compileFusion(&fusion);
@@ -5318,7 +5346,6 @@ void testGPU_FusionSmemBlockGemm() {
 }
 
 void testGPU_FusionSmemBlockGemmCache() {
-#if 0
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -5401,7 +5428,6 @@ void testGPU_FusionSmemBlockGemmCache() {
       aten_output.allclose(outputs[0], 1e-5, 1e-5),
       "Error of: ",
       aten_output.sub(outputs[0]).abs().max());
-#endif
 }
 
 void testGPU_FusionConstCheck() {
