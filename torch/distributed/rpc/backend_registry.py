@@ -188,6 +188,7 @@ if rpc_constants._USE_TENSORPIPE:
 
     # detect if any worker has invalid device_map configurations, and return
     # names of failed workers
+
     def _tensorpipe_check_device_maps(agent, device_maps):
         if device_maps is None:
             device_maps = {}

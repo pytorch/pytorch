@@ -7,16 +7,13 @@ from . import (
     _UNSET_RPC_TIMEOUT,
 )
 
+# For TensorPipeAgent.
 try:
-    from . import TensorPipeAgent, _TensorPipeRpcBackendOptionsBase
+    from . import _DEFAULT_NUM_WORKER_THREADS
+    DEFAULT_NUM_WORKER_THREADS = _DEFAULT_NUM_WORKER_THREADS
     _USE_TENSORPIPE = True
 except ImportError:
     _USE_TENSORPIPE = False
-
-# For TensorPipeAgent.
-if _USE_TENSORPIPE:
-    from . import _DEFAULT_NUM_WORKER_THREADS
-    DEFAULT_NUM_WORKER_THREADS = _DEFAULT_NUM_WORKER_THREADS
 
 # For any RpcAgent.
 DEFAULT_RPC_TIMEOUT_SEC = _DEFAULT_RPC_TIMEOUT_SEC
