@@ -194,7 +194,7 @@ Process Group Backend
 
 The Process Group agent instantiates a process group from
 the :mod:`~torch.distributed` module and utilizes its point-to-point
-communication capabilities to send RPC messages across. Internally, the process
+communication capabilities to send RPC messages. Internally, the process
 group uses `the Gloo library <https://github.com/facebookincubator/gloo/>`_.
 
 Gloo has been hardened by years of extensive use in PyTorch and is thus very
