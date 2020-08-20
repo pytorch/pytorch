@@ -410,20 +410,5 @@ std::string canonicalSchemaString(const FunctionSchema& schema) {
   return out.str();
 }
 
-c10::optional<Operator> operatorGenerator(
-    std::string schema,
-    Operation op,
-    c10::AliasAnalysisKind alias_analysis) {
-//  std::cout << parseName(schema).;
-  return c10::optional<Operator>();
-}
-
-c10::optional<Operator> operatorGenerator(
-    std::string schema,
-    std::function<int(Stack&)> op,
-    c10::AliasAnalysisKind alias_analysis) {
-  return c10::optional<Operator>();
-}
-
 } // namespace jit
 } // namespace torch

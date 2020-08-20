@@ -128,7 +128,7 @@ TORCH_LIBRARY_IMPL(aten, CatchAll, m) {
 }
 
 RegisterOperators reg(
-    {operatorGenerator(
+    {Operator(
          "aten::list(str t) -> str[]",
          [](Stack& stack) {
            auto str = pop(stack).toStringRef();
@@ -142,7 +142,7 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      // only used internally in range() translation
-     operatorGenerator(
+     Operator(
          "aten::__range_length(int lo, int hi, int step) -> int",
          [](Stack& stack) {
            int64_t lo, hi, step;
@@ -161,7 +161,7 @@ RegisterOperators reg(
            return 0;
          },
          aliasAnalysisFromSchema()),
-     operatorGenerator(
+     Operator(
          "aten::__derive_index(int index, int start, int step) -> int",
          [](Stack& stack) {
            int64_t index, start, step;
@@ -170,15 +170,15 @@ RegisterOperators reg(
            return 0;
          },
          aliasAnalysisFromSchema()),
-     operatorGenerator(
+     Operator(
          "prim::TupleUnpack(Any tup) -> ...",
          [](Stack* stack) { tupleUnpack(*stack); },
          aliasAnalysisSpecialCase()),
-     operatorGenerator(
+     Operator(
          "prim::unchecked_cast(t x) -> t",
          noop,
          aliasAnalysisSpecialCase()),
-     operatorGenerator(
+     Operator(
          "aten::IntImplicit(Tensor a) -> int",
          [](Stack* stack) {
            at::Tensor a;
@@ -187,7 +187,7 @@ RegisterOperators reg(
            push(stack, a.item<int64_t>());
          },
          aliasAnalysisFromSchema()),
-     operatorGenerator(
+     Operator(
          "aten::FloatImplicit(Tensor a) -> float",
          [](Stack* stack) {
            at::Tensor a;
@@ -196,7 +196,7 @@ RegisterOperators reg(
            push(stack, a.item<double>());
          },
          aliasAnalysisFromSchema()),
-     operatorGenerator(
+     Operator(
          "aten::ScalarImplicit(Tensor a) -> Scalar",
          [](Stack* stack) {
            at::Tensor a;
@@ -205,7 +205,7 @@ RegisterOperators reg(
            push(stack, a.item());
          },
          aliasAnalysisFromSchema()),
-     operatorGenerator(
+     Operator(
          "aten::Bool.Tensor(Tensor a) -> bool",
          [](Stack* stack) {
            at::Tensor a;
@@ -213,7 +213,7 @@ RegisterOperators reg(
            push(stack, a.is_nonzero());
          },
          aliasAnalysisFromSchema()),
-     operatorGenerator(
+     Operator(
          "aten::Bool.int(int a) -> bool",
          [](Stack* stack) {
            int64_t i;
@@ -221,7 +221,7 @@ RegisterOperators reg(
            push(stack, (bool)i);
          },
          aliasAnalysisFromSchema()),
-     operatorGenerator(
+     Operator(
          "aten::Bool.float(float a) -> bool",
          [](Stack* stack) {
            double d;
@@ -229,7 +229,7 @@ RegisterOperators reg(
            push(stack, (bool)d);
          },
          aliasAnalysisFromSchema()),
-     operatorGenerator(
+     Operator(
          "aten::Float.Tensor(Tensor a) -> float",
          [](Stack* stack) {
            at::Tensor a;
@@ -237,7 +237,7 @@ RegisterOperators reg(
            push(stack, a.item<double>());
          },
          aliasAnalysisFromSchema()),
-     operatorGenerator(
+     Operator(
          "aten::Float.Scalar(Scalar a) -> float",
          [](Stack* stack) {
            IValue scalar;
@@ -249,7 +249,7 @@ RegisterOperators reg(
            }
          },
          aliasAnalysisFromSchema()),
-     operatorGenerator(
+     Operator(
          "aten::Float.int(int a) -> float",
          [](Stack* stack) {
            int64_t i;
@@ -257,7 +257,7 @@ RegisterOperators reg(
            push(stack, (float)i);
          },
          aliasAnalysisFromSchema()),
-     operatorGenerator(
+     Operator(
          "aten::Float.bool(bool a) -> float",
          [](Stack* stack) {
            bool b;
@@ -265,7 +265,7 @@ RegisterOperators reg(
            push(stack, (float)b);
          },
          aliasAnalysisFromSchema()),
-     operatorGenerator(
+     Operator(
          "aten::Float.str(str a) -> float",
          [](Stack* stack) {
            auto s = pop(stack).toString();
@@ -281,14 +281,14 @@ RegisterOperators reg(
            }
          },
          aliasAnalysisFromSchema()),
-     operatorGenerator(
+     Operator(
          "aten::format(str self, ...) -> str",
          [](Stack* stack) {
            size_t num_inputs = pop(stack).toInt();
            format(*stack, num_inputs);
          },
          aliasAnalysisFromSchema()),
-     operatorGenerator(
+     Operator(
          "prim::NumToTensor.Scalar(Scalar a) -> Tensor",
          [](Stack* stack) {
            at::Scalar s;
@@ -296,50 +296,50 @@ RegisterOperators reg(
            push(stack, at::scalar_to_tensor(s));
          },
          aliasAnalysisFromSchema()),
-     operatorGenerator(
+     Operator(
          "prim::RaiseException(str msg) -> ()",
          [](Stack* stack) { throw JITException(pop(stack).toStringRef()); },
          aliasAnalysisFromSchema()),
-     operatorGenerator(
+     Operator(
          "aten::Size(int[] sizes) -> int[]",
          [](Stack* stack) {},
          aliasAnalysisFromSchema()),
-     operatorGenerator(
+     Operator(
          "aten::size(Tensor self) -> int[]",
          [](Stack* stack) {
            auto t = std::move(pop(stack)).toTensor();
            pack(stack, t.sizes().vec());
          },
          aliasAnalysisFromSchema()),
-     operatorGenerator(
+     Operator(
          "prim::EnumName(AnyEnumType enum) -> str",
          [](Stack* stack) {
            IValue e = pop(stack);
            push(stack, e.toEnumHolder()->name());
          },
          aliasAnalysisFromSchema()),
-     operatorGenerator(
+     Operator(
          "prim::EnumValue.int(AnyEnumType enum) -> int",
          [](Stack* stack) {
            IValue e = pop(stack);
            push(stack, e.toEnumHolder()->value());
          },
          aliasAnalysisFromSchema()),
-     operatorGenerator(
+     Operator(
          "prim::EnumValue.float(AnyEnumType enum) -> float",
          [](Stack* stack) {
            IValue e = pop(stack);
            push(stack, e.toEnumHolder()->value());
          },
          aliasAnalysisFromSchema()),
-     operatorGenerator(
+     Operator(
          "prim::EnumValue.str(AnyEnumType enum) -> str",
          [](Stack* stack) {
            IValue e = pop(stack);
            push(stack, e.toEnumHolder()->value());
          },
          aliasAnalysisFromSchema()),
-     operatorGenerator(
+     Operator(
          // note the compiler knows to type TupleIndex more accurately than it
          // is listed here.
          "prim::TupleIndex(Any tup, int i) -> Any",
@@ -354,19 +354,19 @@ RegisterOperators reg(
            stack->emplace_back(tuple->elements()[norm_index]);
          },
          aliasAnalysisSpecialCase()),
-     operatorGenerator(
+     Operator(
          "aten::ne.int_list(int[] a, int[] b) -> bool",
          listNe<int64_t>,
          aliasAnalysisFromSchema()),
-     operatorGenerator(
+     Operator(
          "prim::unchecked_unwrap_optional(t(a)? optional) -> t(a)",
          noop,
          aliasAnalysisFromSchema()),
-     operatorGenerator(
+     Operator(
          "prim::device(Tensor a) -> Device",
          [](Stack* stack) { push(stack, pop(stack).toTensor().device()); },
          aliasAnalysisFromSchema()),
-     operatorGenerator(
+     Operator(
          "prim::dtype(Tensor a) -> int",
          [](Stack* stack) {
            at::Tensor a;
@@ -374,11 +374,11 @@ RegisterOperators reg(
            push(stack, static_cast<int64_t>(a.scalar_type()));
          },
          aliasAnalysisFromSchema()),
-     operatorGenerator(
+     Operator(
          "aten::__not__(bool self) -> bool",
          [](Stack* stack) { push(stack, !pop(stack).toBool()); },
          aliasAnalysisFromSchema()),
-     operatorGenerator(
+     Operator(
          "aten::__is__(t1 self, t2 obj) -> bool",
          [](Stack* stack) {
            IValue self, obj;
@@ -386,7 +386,7 @@ RegisterOperators reg(
            push(stack, self.is(obj));
          },
          aliasAnalysisFromSchema()),
-     operatorGenerator(
+     Operator(
          "aten::__isnot__(t1 self, t2 obj) -> bool",
          [](Stack* stack) {
            IValue self, obj;
@@ -394,28 +394,28 @@ RegisterOperators reg(
            push(stack, !self.is(obj));
          },
          aliasAnalysisFromSchema()),
-     operatorGenerator(
+     Operator(
          "aten::element_size(Tensor self) -> int",
          [](Stack* stack) {
            at::Tensor arg = pop(stack).toTensor();
            push(stack, arg.element_size());
          },
          aliasAnalysisFromSchema()),
-     operatorGenerator(
+     Operator(
          "aten::numel(Tensor self) -> int",
          [](Stack* stack) {
            at::Tensor arg = pop(stack).toTensor();
            push(stack, arg.numel());
          },
          aliasAnalysisFromSchema()),
-     operatorGenerator(
+     Operator(
          "aten::dim(Tensor self) -> int",
          [](Stack* stack) {
            at::Tensor arg = pop(stack).toTensor();
            push(stack, arg.dim());
          },
          aliasAnalysisFromSchema()),
-     operatorGenerator(
+     Operator(
          "aten::get_device(Tensor self) -> int",
          [](Stack* stack) {
            RECORD_FUNCTION("get_device", std::vector<c10::IValue>());
@@ -425,7 +425,7 @@ RegisterOperators reg(
            pack(stack, result);
          },
          aliasAnalysisFromSchema()),
-     operatorGenerator(
+     Operator(
          "aten::storage_offset(Tensor self) -> int",
          [](Stack* stack) {
            RECORD_FUNCTION("storage_offset", std::vector<c10::IValue>());
@@ -435,7 +435,7 @@ RegisterOperators reg(
            pack(stack, result);
          },
          aliasAnalysisFromSchema()),
-     operatorGenerator(
+     Operator(
          "aten::is_contiguous(Tensor self) -> bool",
          [](Stack* stack) {
            RECORD_FUNCTION("is_contiguous", std::vector<c10::IValue>());
@@ -447,88 +447,88 @@ RegisterOperators reg(
          aliasAnalysisFromSchema()),
      // these ops are generic over the list element type.
      // CREATING GENERIC_LIST_OPS
-     operatorGenerator(
+     Operator(
          "aten::select.t(t[](a) list, int idx) -> t(*)",
          listSelect,
          aliasAnalysisFromSchema()),
-     operatorGenerator(
+     Operator(
          "aten::__getitem__.t(t[](a) list, int idx) -> t(*)",
          listSelect,
          aliasAnalysisFromSchema()),
-     operatorGenerator(
+     Operator(
          "aten::append.t(t[](a!) self, t(c -> *) el) -> t[](a!)",
          listAppend,
          aliasAnalysisFromSchema()),
-     operatorGenerator(
+     Operator(
          "aten::reverse.t(t[](a!) self) -> ()",
          listReverse,
          aliasAnalysisFromSchema()),
-     operatorGenerator(
+     Operator(
          "aten::extend.t(t[](a!) self, t[] other) -> ()",
          listExtend,
          aliasAnalysisFromSchema()),
-     operatorGenerator(
+     Operator(
          "aten::copy.t(t[](a) self) -> t[]",
          listCopy,
          aliasAnalysisFromSchema()),
-     operatorGenerator(
+     Operator(
          "aten::_set_item.t(t [](a!) l, int idx, t(b -> *) el) -> t[](a!)",
          listSetItem,
          aliasAnalysisFromSchema()),
-     operatorGenerator(
+     Operator(
          "aten::clear.t(t[](a!) self) -> ()",
          listClear,
          aliasAnalysisFromSchema()),
-     operatorGenerator(
+     Operator(
          "aten::Delete.t(t[](a!) self, int idx) -> ()",
          listDelete,
          aliasAnalysisFromSchema()),
-     operatorGenerator(
+     Operator(
          "aten::insert.t(t[](a!) self, int idx, t(b -> *) el) -> ()",
          listInsert,
          aliasAnalysisFromSchema()),
-     operatorGenerator(
+     Operator(
          "aten::pop.t(t[](a!) self, int idx=-1) -> t(*)",
          listPop,
          aliasAnalysisFromSchema()),
-     operatorGenerator(
+     Operator(
          "aten::add.t(t[] a, t[] b) -> t[]",
          listAdd,
          aliasAnalysisFromSchema()),
-     operatorGenerator(
+     Operator(
          "aten::add_.t(t[](a!) self, t[] b) -> t[]",
          listInplaceAdd,
          aliasAnalysisFromSchema()),
-     operatorGenerator(
+     Operator(
          "aten::slice.t(t[] l, int start, int end=9223372036854775807, int step=1) -> t[]",
          listSlice,
          aliasAnalysisFromSchema()),
-     operatorGenerator(
+     Operator(
          "aten::list.t(t[] l) -> t[]",
          listList,
          aliasAnalysisFromSchema()),
-     operatorGenerator(
+     Operator(
          "aten::mul.left_t(t[] l, int n) -> t[]",
          listMulIntLeft,
          aliasAnalysisFromSchema()),
-     operatorGenerator(
+     Operator(
          "aten::mul.right_(int n, t[] l) -> t[]",
          listMulIntRight,
          aliasAnalysisFromSchema()),
-     operatorGenerator(
+     Operator(
          "aten::mul_.t(t[](a!) l, int n) -> t[](a!)",
          listMulIntLeftInPlace,
          aliasAnalysisFromSchema()),
-     operatorGenerator("aten::len.t(t[] a) -> int", listLen, aliasAnalysisFromSchema()),
-     operatorGenerator(
+     Operator("aten::len.t(t[] a) -> int", listLen, aliasAnalysisFromSchema()),
+     Operator(
          "aten::eq.int_list(int[] a, int[] b) -> bool",
          listEq<int64_t>,
          aliasAnalysisFromSchema()),
-     operatorGenerator(
+     Operator(
          "prim::Uninitialized() -> Any",
          [](Stack* stack) { push(stack, IValue::uninitialized()); },
          aliasAnalysisSpecialCase()),
-     operatorGenerator(
+     Operator(
          "prim::Print(...) -> ()",
          [](Stack* stack) {
            auto num_inputs = pop(stack).toInt();
@@ -547,7 +547,7 @@ RegisterOperators reg(
            handler(ss.str());
          },
          aliasAnalysisSpecialCase()),
-     operatorGenerator(
+     Operator(
          "aten::eq.enum(AnyEnumType a, AnyEnumType b) -> bool",
          [](Stack* stack) {
            IValue x = pop(stack);
@@ -555,7 +555,7 @@ RegisterOperators reg(
            push(stack, x == y);
          },
          aliasAnalysisFromSchema()),
-     operatorGenerator(
+     Operator(
          "aten::ne.enum(AnyEnumType a, AnyEnumType b) -> bool",
          [](Stack* stack) {
            IValue x = pop(stack);
@@ -563,7 +563,7 @@ RegisterOperators reg(
            push(stack, x != y);
          },
          aliasAnalysisFromSchema()),
-     operatorGenerator(
+     Operator(
          "aten::dequantize.tensor(Tensor qtensor) -> Tensor",
          [](Stack* stack) {
            at::Tensor qtensor;
@@ -571,7 +571,7 @@ RegisterOperators reg(
            push(stack, at::dequantize(qtensor));
          },
          aliasAnalysisFromSchema()),
-     operatorGenerator(
+     Operator(
          "aten::dequantize.any(Any tensors) -> Any",
          [](Stack* stack) { dequantize(*stack); },
          aliasAnalysisFromSchema()),
@@ -646,7 +646,7 @@ RegisterOperators reg(
          static_cast<double>(pow(a, b)),
          static_cast<double>(pow(a, b)),
          float),
-     operatorGenerator(
+     Operator(
          "aten::pow.int_to_int(int a, int b) -> int",
          [](Stack* stack) {
            int64_t a, b;
@@ -658,7 +658,7 @@ RegisterOperators reg(
      // the python builtin 'min' and 'torch.min'
      DEFINE_BINARY_OP(prim::min, a < b ? a : b),
      DEFINE_BINARY_OP(prim::max, a > b ? a : b),
-     operatorGenerator(
+     Operator(
          "prim::type(Device self) -> str",
          [](Stack* stack) {
            auto d = pop(stack);
@@ -668,7 +668,7 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      // tensor length op (size of 1st dimension)
-     operatorGenerator(
+     Operator(
          "aten::len.Tensor(Tensor t) -> int",
          [](Stack* stack) {
            at::Tensor t = pop(stack).toTensor();
@@ -678,7 +678,7 @@ RegisterOperators reg(
            push(stack, t.sizes()[0]);
          },
          aliasAnalysisFromSchema()),
-     operatorGenerator(
+     Operator(
          "aten::ord(str string) -> int",
          [](Stack& stack) {
            auto string = pop(stack).toStringRef();
@@ -691,7 +691,7 @@ RegisterOperators reg(
            return 0;
          },
          aliasAnalysisFromSchema()),
-     operatorGenerator(
+     Operator(
          "aten::lower(str self) -> str",
          [](Stack& stack) {
            auto string = pop(stack).toStringRef();
@@ -703,11 +703,11 @@ RegisterOperators reg(
            return 0;
          },
          aliasAnalysisFromSchema()),
-     operatorGenerator(
+     Operator(
          "aten::__contains__.str_list(str[] l, str item) -> bool",
          listContains<std::string>,
          aliasAnalysisFromSchema()),
-     operatorGenerator(
+     Operator(
          "aten::len.str(str s) -> int",
          [](Stack& stack) {
            auto string = pop(stack).toStringRef();
@@ -715,7 +715,7 @@ RegisterOperators reg(
            return 0;
          },
          aliasAnalysisFromSchema()),
-     operatorGenerator(
+     Operator(
          "aten::__getitem__.str(str s, int index) -> str",
          [](Stack& stack) {
            auto index = pop(stack).toInt();
@@ -727,7 +727,7 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
 #define CREATE_COPY_OP(other_type, c_type)                               \
-  operatorGenerator(                                                              \
+  Operator(                                                              \
       "aten::copy_." #other_type "(Tensor(a!) self, " #other_type        \
       " other) -> Tensor(a!)",                                           \
       [](Stack* stack) {                                                 \
@@ -743,7 +743,7 @@ RegisterOperators reg(
      CREATE_COPY_OP(int, int64_t),
      CREATE_COPY_OP(float, double),
 #undef CREATE_COPY_OP
-     operatorGenerator(
+     Operator(
          "aten::backward(Tensor self, Tensor? gradient=None, bool? retain_graph=None, bool create_graph=False) -> ()",
          [](Stack* stack) {
            bool create_graph = pop(stack).toBool();
@@ -762,7 +762,7 @@ RegisterOperators reg(
      // and nullability scrubbed from TensorList arg types
      // TOOD find out why this exists and how to do it without the hack
      //
-     operatorGenerator(
+     Operator(
          "aten::index.Tensor_hacked_twin(Tensor self, Tensor[] indices) -> Tensor",
          [](Stack* stack) {
            auto indices = pop(stack).toTensorVector();
@@ -771,7 +771,7 @@ RegisterOperators reg(
            push(stack, std::move(result));
          },
          aliasAnalysisFromSchema()),
-     operatorGenerator(
+     Operator(
          "aten::_index_put_impl_.hacked_twin(Tensor(a!) self, Tensor[] indices, Tensor values, bool accumulate=False, bool unsafe=False) -> Tensor(a!)",
          [](Stack* stack) {
            auto unsafe = pop(stack).toBool();
@@ -784,7 +784,7 @@ RegisterOperators reg(
            push(stack, std::move(result));
          },
          aliasAnalysisFromSchema()),
-     operatorGenerator(
+     Operator(
          "aten::index_put_.hacked_twin(Tensor(a!) self, Tensor[] indices, Tensor values, bool accumulate=False) -> Tensor(a!)",
          [](Stack* stack) {
            auto accumulate = pop(stack).toBool();
@@ -795,7 +795,7 @@ RegisterOperators reg(
            push(stack, std::move(result));
          },
          aliasAnalysisFromSchema()),
-     operatorGenerator(
+     Operator(
          "aten::index_put.hacked_twin(Tensor self, Tensor[] indices, Tensor values, bool accumulate=False) -> Tensor",
          [](Stack* stack) {
            auto accumulate = pop(stack).toBool();
@@ -807,7 +807,7 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      // reference function parse_to_conversion in python_arg_parsing.h
-     operatorGenerator(
+     Operator(
          "aten::to.prim_Device(Tensor(a) self, Device? device, int? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor(a|b)",
          [](Stack* stack) {
            bool non_blocking;
@@ -823,7 +823,7 @@ RegisterOperators reg(
                to_dispatch(self, device, scalarType, non_blocking, copy));
          },
          aliasAnalysisFromSchema()),
-     operatorGenerator(
+     Operator(
          "aten::to.prim_dtype(Tensor(a) self, int? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor(a|b)",
          [](Stack* stack) {
            bool non_blocking;
@@ -838,7 +838,7 @@ RegisterOperators reg(
                to_dispatch(self, device, scalarType, non_blocking, copy));
          },
          aliasAnalysisFromSchema()),
-     operatorGenerator(
+     Operator(
          "prim::is_cuda(Tensor a) -> bool",
          [](Stack* stack) {
            at::Tensor a;
@@ -846,7 +846,7 @@ RegisterOperators reg(
            push(stack, a.is_cuda());
          },
          aliasAnalysisFromSchema()),
-     operatorGenerator(
+     Operator(
          "prim::data(Tensor(a) a) -> Tensor(a)",
          [](Stack* stack) {
            at::Tensor a;
@@ -856,21 +856,21 @@ RegisterOperators reg(
          aliasAnalysisFromSchema()),
 // these ops are not defined for Tensor
 #define CREATE_COMPARATOR_LIST_OPS_SPECIALIZED(decl_type, value_type)         \
-  operatorGenerator(                                                                   \
+  Operator(                                                                   \
       "prim::min." decl_type "_list(" decl_type "[] l, " decl_type            \
       "[] r) -> " decl_type "[]",                                             \
       minList<value_type>,                                                    \
       aliasAnalysisFromSchema()),                                             \
-      operatorGenerator(                                                               \
+      Operator(                                                               \
           "prim::max." decl_type "_list(" decl_type "[] l, " decl_type        \
           "[] r) -> " decl_type "[]",                                         \
           maxList<value_type>,                                                \
           aliasAnalysisFromSchema()),                                         \
-      operatorGenerator(                                                               \
+      Operator(                                                               \
           "prim::min.self_" decl_type "(" decl_type "[] self) -> " decl_type, \
           listMin<value_type>,                                                \
           aliasAnalysisFromSchema()),                                         \
-      operatorGenerator(                                                               \
+      Operator(                                                               \
           "prim::max.self_" decl_type "(" decl_type "[] self) -> " decl_type, \
           listMax<value_type>,                                                \
           aliasAnalysisFromSchema()),
@@ -1048,90 +1048,90 @@ void dictConstructFromList(Stack* stack) {
 }
 
 #define CREATE_DICT_OPS(key_type)                                            \
-  operatorGenerator(                                                                  \
+  Operator(                                                                  \
       "aten::len.Dict_" key_type "(Dict(" key_type ", t) self) -> int",      \
       dictLen,                                                               \
       aliasAnalysisFromSchema()),                                            \
-      operatorGenerator(                                                              \
+      Operator(                                                              \
           "aten::keys." key_type "(Dict(" key_type ", t) self) -> " key_type \
           "[](*)",                                                           \
           dictKeys,                                                          \
           aliasAnalysisFromSchema()),                                        \
-      operatorGenerator(                                                              \
+      Operator(                                                              \
           "aten::values." key_type "(Dict(" key_type ", t) self) -> t[](*)", \
           dictValues,                                                        \
           aliasAnalysisFromSchema()),                                        \
-      operatorGenerator(                                                              \
+      Operator(                                                              \
           "aten::__getitem__.Dict_" key_type "(Dict(" key_type               \
           ", t) self, " key_type " key) -> t(*)",                            \
           dictIndex,                                                         \
           aliasAnalysisFromSchema()),                                        \
-      operatorGenerator(                                                              \
+      Operator(                                                              \
           "aten::get." key_type "(Dict(" key_type ", t) self, " key_type     \
           " key) -> t(*)?",                                                  \
           dictGet<false>,                                                    \
           aliasAnalysisFromSchema()),                                        \
-      operatorGenerator(                                                              \
+      Operator(                                                              \
           "aten::get.default_" key_type "(Dict(" key_type                    \
           ", t) self, " key_type " key, t default_value) -> t(*)",           \
           dictGet<true>,                                                     \
           aliasAnalysisFromSchema()),                                        \
-      operatorGenerator(                                                              \
+      Operator(                                                              \
           "aten::setdefault." key_type "(Dict(" key_type                     \
           ", t)(a!) self, " key_type                                         \
           "(b -> *) key, t(c -> *) default_value) -> t(*)",                  \
           dictSetDefault,                                                    \
           aliasAnalysisFromSchema()),                                        \
-      operatorGenerator(                                                              \
+      Operator(                                                              \
           "aten::Delete.Dict_" key_type "(Dict(" key_type                    \
           ", t)(a!) self, " key_type " key) -> ()",                          \
           dictDelete,                                                        \
           aliasAnalysisFromSchema()),                                        \
-      operatorGenerator(                                                              \
+      Operator(                                                              \
           "aten::pop.Dict_" key_type "(Dict(" key_type                       \
           ", t)(a!) self, " key_type " key) -> t(*)",                        \
           dictPop<false>,                                                    \
           aliasAnalysisFromSchema()),                                        \
-      operatorGenerator(                                                              \
+      Operator(                                                              \
           "aten::pop.Dict_default_" key_type "(Dict(" key_type               \
           ", t)(a!) self, " key_type " key, t default_value) -> t(*)",       \
           dictPop<true>,                                                     \
           aliasAnalysisFromSchema()),                                        \
-      operatorGenerator(                                                              \
+      Operator(                                                              \
           "aten::popitem." key_type "(Dict(" key_type                        \
           ", t)(a!) self) -> ((" key_type ", t))",                           \
           dictPopItem,                                                       \
           aliasAnalysisFromSchema()),                                        \
-      operatorGenerator(                                                              \
+      Operator(                                                              \
           "aten::clear." key_type "(Dict(" key_type ", t)(a!) self) -> ()",  \
           dictClear,                                                         \
           aliasAnalysisFromSchema()),                                        \
-      operatorGenerator(                                                              \
+      Operator(                                                              \
           "aten::update." key_type "(Dict(" key_type                         \
           ", t)(a!) self, Dict(" key_type ", t)(a!) to_add) -> ()",          \
           dictUpdate,                                                        \
           aliasAnalysisFromSchema()),                                        \
-      operatorGenerator(                                                              \
+      Operator(                                                              \
           "aten::items." key_type "(Dict(" key_type                          \
           ", t) self) -> ((" key_type ", t)[])",                             \
           dictItems,                                                         \
           aliasAnalysisFromSchema()),                                        \
-      operatorGenerator(                                                              \
+      Operator(                                                              \
           "aten::copy.Dict_" key_type "(Dict(" key_type                      \
           ", t)(a) self) -> Dict(" key_type ", t)",                          \
           dictCopy,                                                          \
           aliasAnalysisFromSchema()),                                        \
-      operatorGenerator(                                                              \
+      Operator(                                                              \
           "aten::__contains__." key_type "(Dict(" key_type                   \
           ", t) dict, " key_type " key) -> bool",                            \
           dictContains,                                                      \
           aliasAnalysisFromSchema()),                                        \
-      operatorGenerator(                                                              \
+      Operator(                                                              \
           "aten::_set_item." key_type "(Dict(" key_type                      \
           ", t)(a!) l, " key_type "(b -> *) idx, t(c -> *) v) -> ()",        \
           dictSetItem,                                                       \
           aliasAnalysisFromSchema()),                                        \
-      operatorGenerator(                                                              \
+      Operator(                                                              \
           "aten::dict." key_type "((" key_type                               \
           ", tVal)[] inputs) -> Dict(" key_type ", tVal)",                   \
           dictConstructFromList,                                             \
