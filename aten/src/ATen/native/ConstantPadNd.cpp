@@ -59,7 +59,10 @@ Tensor constant_pad_nd(const Tensor& self, IntArrayRef pad, Scalar value) {
         const auto qscheme = self.qscheme();
         TORCH_CHECK(qscheme == kPerTensorAffine || qscheme == kPerTensorSymmetric,
                     "Only per-tensor padding is supported.");
-        output = at::_empty_affine_quantized(new_shape, self.options());
+        const auto memory_format = self.suggest_memory_format();
+        output = at::_empty_affine_quantized(
+            new_shape, self.options().memory_format(memory_format),
+            self.q_scale(), self.q_zero_point(), c10::nullopt);
     } else {
         output = at::empty(new_shape, self.options());
     }
