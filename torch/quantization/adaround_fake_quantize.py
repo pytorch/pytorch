@@ -15,6 +15,9 @@ class AdaRoundFakeQuantize(FakeQuantize):
             if attribute in keywords:
                 setattr(self, attribute, keywords[attribute])
                 del keywords[attribute]
+            else:
+                setattr()
+                # add default dict for loss variables
         super(AdaRoundFakeQuantize, self).__init__(*args, **keywords)
 
     def forward(self, X):

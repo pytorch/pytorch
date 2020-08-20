@@ -94,8 +94,10 @@ def optimize_V(leaf_module, target_layers, number_of_epochs, norm_output):
 
         #     float_data = ob_dict[parent_name + '.stats']['float']
         #     quant_data = ob_dict[parent_name + '.stats']['quantized']
-        loss = loss_function(float_model, count, target_layers, norm_output)
-        # loss = loss_function_leaf(leaf_module, count)
+        # loss = loss_function(float_model, count, target_layers, norm_output)
+
+        # only work if one layer's loss for each training
+        loss = loss_function_leaf(leaf_module, count, norm_output)
 
         print("loss: ", loss)
         optimizer.zero_grad()
