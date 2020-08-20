@@ -17,7 +17,7 @@ namespace api {
 // user.
 //
 
-class Context final {
+class C10_EXPORT Context final {
  public:
   explicit Context(bool enable_validation_layers);
   ~Context() = default;
@@ -55,8 +55,19 @@ class Context final {
   }
 
  private:
+  class Debug final {
+   public:
+    explicit Debug(VkInstance instance);
+    void operator()(VkDebugReportCallbackEXT debug_report_callback) const;
+
+   private:
+    VkInstance instance_;
+  };
+
+ private:
   // Construction and destruction order matters.  Do not move members around.
   Handle<VkInstance, decltype(&VK_DELETER(Instance))> instance_;
+  Handle<VkDebugReportCallbackEXT, Debug> debug_report_callback_;
   VkPhysicalDevice physical_device_;
   VkPhysicalDeviceLimits physical_device_limits_;
   uint32_t compute_queue_family_index_;
@@ -67,8 +78,8 @@ class Context final {
   Descriptor descriptor_;
 };
 
-bool available();
-Context& context();
+C10_EXPORT bool available();
+C10_EXPORT Context& context();
 
 } // namespace api
 } // namespace vulkan
