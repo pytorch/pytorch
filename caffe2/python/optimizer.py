@@ -520,7 +520,9 @@ class AdagradOptimizer(Optimizer):
                  sparse_dedup_aggregator=None, rowWise=False, engine='',
                  lars=None, output_effective_lr=False,
                  output_effective_lr_and_update=False,
-                 pruning_options=None, swa_options=None, weight_scale=None, **kwargs):
+                 pruning_options=None, swa_options=None, weight_scale=None,
+                 counter_halflife=-1,
+                 **kwargs):
         for k, v in locals().items():
             logger.info('AdagradOptimizer: input arguments: {}: {}'.format(k, v))
 
@@ -536,6 +538,7 @@ class AdagradOptimizer(Optimizer):
         self.lars = lars
         self.output_effective_lr = output_effective_lr
         self.output_effective_lr_and_update = output_effective_lr_and_update
+        self.counter_halflife = counter_halflife
         self.init_kwargs = kwargs
         self.weight_scale = weight_scale
 
@@ -628,6 +631,9 @@ class AdagradOptimizer(Optimizer):
             policy=self.policy,
             **(self.init_kwargs)
         )
+        iteration = lr_iteration
+        if self.counter_halflife > 0:
+            self._aux_params.shared.append(iteration)
 
         if self.rowWise:
             logger.info(
@@ -730,6 +736,46 @@ class AdagradOptimizer(Optimizer):
                                           "a delay iter needs to be provided")
 
         self._aux_params.local.append(param_squared_sum)
+        if self.counter_halflife > 0:
+            shapes, types = workspace.InferShapesAndTypes([param_init_net])
+            if str(param) not in shapes:
+                shape = param_init_net.Shape(param, str(param) + "_shape")
+                num_rows = param_init_net.Slice(
+                    [shape],
+                    str(shape) + "_numrows",
+                    starts=[0], ends=[1]
+                )
+                update_counter = param_init_net.ConstantFill(
+                    num_rows,
+                    str(param) + "_update_counter",
+                    input_as_shape=1,
+                    value=0.0,
+                    dtype=core.DataType.DOUBLE,
+                )
+                prev_update_iter = param_init_net.ConstantFill(
+                    num_rows,
+                    str(param) + "_prev_update_iter",
+                    input_as_shape=1,
+                    value=0,
+                    dtype=core.DataType.INT64,
+                )
+            else:
+                update_counter = param_init_net.ConstantFill(
+                    [],
+                    str(param) + "_update_counter",
+                    shape=[shapes[str(param)][0]],
+                    value=0.0,
+                    dtype=core.DataType.DOUBLE,
+                )
+                prev_update_iter = param_init_net.ConstantFill(
+                    [],
+                    str(param) + "_prev_update_iter",
+                    shape=[shapes[str(param)][0]],
+                    value=0,
+                    dtype=core.DataType.INT64,
+                )
+            self._aux_params.local.append(update_counter)
+            self._aux_params.local.append(prev_update_iter)
 
         if self.rowWise:
             assert isinstance(grad, core.GradientSlice),\
@@ -743,16 +789,17 @@ class AdagradOptimizer(Optimizer):
         weight_decay = 0.
         if isinstance(grad, core.GradientSlice):
             if len(param_shape) == 1:
-                logger.warn("APPLYING weight decay on 1d sparse param: {}.shape is {}".format(
+                weight_decay = 0.
+                logger.warn("SKIPPING weight decay on 1d sparse param: {}.shape is {}".format(
                     str(param), param_shape))
-            weight_decay = self.weight_decay
+            else:
+                weight_decay = self.weight_decay
         else:
             # Skip weight decay for 1d parameters
             if len(param_shape) == 1:
                 weight_decay = 0.
                 logger.warn("SKIPPING weight decay on 1d dense param: {}.shape is {}".format(
                     str(param), param_shape))
-
             else:
                 weight_decay = self.weight_decay
         logger.info("weight_decay for {} (shape:{}): {}".format(
@@ -799,6 +846,12 @@ class AdagradOptimizer(Optimizer):
                     output_args,
                     epsilon=self.epsilon,
                     engine=self.engine,
+                )
+            if self.counter_halflife > 0:
+                net.RowWiseCounter(
+                    [prev_update_iter, update_counter, grad.indices, iteration],
+                    [prev_update_iter, update_counter],
+                    counter_halflife=self.counter_halflife,
                 )
         else:
             input_args = [param, param_squared_sum, grad, lr]

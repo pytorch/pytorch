@@ -1,3 +1,5 @@
+#pragma once
+
 #include <ATen/native/vulkan/Vulkan.h>
 #include <ATen/native/vulkan/VulkanConvolution.h>
 #include <c10/util/Optional.h>
@@ -19,6 +21,43 @@ void upsample_nearest2d(
     float scaleH,
     float scaleW);
 
+void adaptive_avg_pool2d(
+    VulkanTensor& output,
+    const VulkanTensor& input,
+    const int64_t IH,
+    const int64_t IW,
+    const int64_t OH,
+    const int64_t OW,
+    const int64_t IN,
+    const int64_t IC);
+
+void max_pool2d(
+    VulkanTensor& output,
+    const VulkanTensor& input,
+    const int iH,
+    const int iW,
+    const int oH,
+    const int oW,
+    const int _n,
+    const int _c,
+    const int kH,
+    const int kW,
+    const int dH,
+    const int dW,
+    const int padH,
+    const int padW,
+    const int dilationH,
+    const int dilationW);
+
+VulkanTensor reshape_copy(
+    const VulkanTensor& input,
+    std::vector<int64_t> shape);
+
+VulkanTensor cat(
+    VulkanTensor& output,
+    ArrayRef<VulkanTensor> inputs,
+    int64_t dim);
+
 void add(
     VulkanTensor& output,
     const VulkanTensor& input0,
@@ -37,22 +76,28 @@ void conv2d(
     VulkanTensor& output,
     const VulkanTensor& input,
     const float* weight,
-    const c10::optional<float*> bias,
-    const Conv2DParams params);
+    const c10::optional<const float*> bias,
+    const Conv2DParams params,
+    c10::optional<float> output_min = c10::nullopt,
+    c10::optional<float> output_max = c10::nullopt);
 
 void conv2d(
     VulkanTensor& output,
     const VulkanTensor& input,
     const VulkanTensor& weight_prepacked,
-    const c10::optional<float*> bias,
-    const Conv2DParams params);
+    const c10::optional<const float*> bias,
+    const Conv2DParams params,
+    c10::optional<float> output_min = c10::nullopt,
+    c10::optional<float> output_max = c10::nullopt);
 
 void conv2d(
     VulkanTensor& output,
     const VulkanTensor& input,
     const VulkanTensor& weight_prepacked,
     const VulkanTensor& bias,
-    const Conv2DParams params);
+    const Conv2DParams params,
+    c10::optional<float> output_min = c10::nullopt,
+    c10::optional<float> output_max = c10::nullopt);
 
 void clamp(
     VulkanTensor& output,
@@ -62,7 +107,7 @@ void clamp(
 
 void addmm(
     VulkanTensor& output,
-    const VulkanTensor& t,
+    c10::optional<const VulkanTensor> t,
     const VulkanTensor& m1,
     const VulkanTensor& m2,
     float beta,

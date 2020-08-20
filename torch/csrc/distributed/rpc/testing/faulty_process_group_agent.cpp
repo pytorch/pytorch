@@ -1,4 +1,5 @@
 #include <torch/csrc/distributed/rpc/testing/faulty_process_group_agent.h>
+#include <torch/csrc/distributed/rpc/request_callback_impl.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 
 namespace torch {
@@ -25,7 +26,8 @@ FaultyProcessGroupAgent::FaultyProcessGroupAgent(
           std::move(workerName),
           std::move(pg),
           numSendRecvThreads,
-          rpcTimeout),
+          rpcTimeout,
+          std::make_unique<RequestCallbackImpl>()),
       failNumSends_(failNumSends),
       messageTypesToFail_(parseMessagesToFailInput(messagesToFail)),
       messageTypesToDelay_(parseMessagesToDelay(messageTypesToDelay)) {}

@@ -465,6 +465,22 @@ class TestTensorBoardSummary(BaseTestCase):
         mt = {'accuracy': 0.1}
         self.assertTrue(compare_proto(summary.hparams(hp, mt), self))
 
+    def test_hparams_domain_discrete(self):
+        hp = {"lr": 0.1, "bool_var": True, "string_var": "hi"}
+        mt = {"accuracy": 0.1}
+        hp_domain = {"lr": [0.1], "bool_var": [True], "string_var": ["hi"]}
+
+        # hparam_domain_discrete keys needs to be subset of hparam_dict keys
+        with self.assertRaises(TypeError):
+            summary.hparams(hp, mt, hparam_domain_discrete={"wrong_key": []})
+
+        # hparam_domain_discrete values needs to be same type as hparam_dict values
+        with self.assertRaises(TypeError):
+            summary.hparams(hp, mt, hparam_domain_discrete={"lr": [True]})
+
+        # only smoke test. Because protobuf map serialization is nondeterministic.
+        summary.hparams(hp, mt, hparam_domain_discrete=hp_domain)
+
     def test_mesh(self):
         v = np.array([[[1, 1, 1], [-1, -1, 1], [1, -1, -1], [-1, 1, -1]]], dtype=float)
         c = np.array([[[255, 0, 0], [0, 255, 0], [0, 0, 255], [255, 0, 255]]], dtype=int)
@@ -623,7 +639,10 @@ class TestTensorBoardFigure(BaseTestCase):
         self.assertTrue(plt.fignum_exists(figure.number))
 
         writer.add_figure("add_figure/figure", figure, 1)
-        self.assertFalse(plt.fignum_exists(figure.number))
+        if matplotlib.__version__ != '3.3.0':
+            self.assertFalse(plt.fignum_exists(figure.number))
+        else:
+            print("Skipping fignum_exists, see https://github.com/matplotlib/matplotlib/issues/18163")
 
         writer.close()
 
@@ -645,7 +664,10 @@ class TestTensorBoardFigure(BaseTestCase):
         self.assertTrue(all([plt.fignum_exists(figure.number) is True for figure in figures]))  # noqa F812
 
         writer.add_figure("add_figure/figure_list", figures, 1)
-        self.assertTrue(all([plt.fignum_exists(figure.number) is False for figure in figures]))  # noqa F812
+        if matplotlib.__version__ != '3.3.0':
+            self.assertTrue(all([plt.fignum_exists(figure.number) is False for figure in figures]))  # noqa F812
+        else:
+            print("Skipping fignum_exists, see https://github.com/matplotlib/matplotlib/issues/18163")
 
         writer.close()
 

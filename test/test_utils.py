@@ -11,10 +11,11 @@ import torch.nn as nn
 import torch.utils.data
 import torch.cuda
 from torch.utils.checkpoint import checkpoint, checkpoint_sequential
+import torch.utils._benchmark as benchmark_utils
 import torch.hub as hub
 from torch.autograd._functions.utils import check_onnx_broadcast
 from torch.onnx.symbolic_opset9 import _prepare_onnx_paddings
-from torch.testing._internal.common_utils import load_tests, retry, IS_SANDCASTLE
+from torch.testing._internal.common_utils import load_tests, retry, IS_SANDCASTLE, IS_WINDOWS
 from urllib.error import URLError
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
@@ -123,8 +124,7 @@ class TestCheckpoint(TestCase):
         chunks = 2
         modules = list(model.children())
         out = checkpoint_sequential(modules, chunks, input_var)
-        # python_error in case of py2_7_9.
-        with self.assertRaisesRegex(RuntimeError, "(Checkpointing is not compatible)|(python_error)"):
+        with self.assertRaisesRegex(RuntimeError, "Checkpointing is not compatible"):
             torch.autograd.grad(
                 outputs=[out], grad_outputs=[torch.ones(1, 5)], inputs=[input_var], create_graph=True
             )
@@ -576,10 +576,57 @@ class TestHub(TestCase):
             torch.hub.set_dir(dirname)
             self.assertEqual(torch.hub.get_dir(), dirname)
 
+    @retry(URLError, tries=3, skip_after_retries=True)
+    def test_load_state_dict_from_url_with_name(self):
+        with tempfile.TemporaryDirectory('hub_dir') as dirname:
+            torch.hub.set_dir(dirname)
+            file_name = 'test_file'
+            loaded_state = hub.load_state_dict_from_url(TORCHHUB_EXAMPLE_RELEASE_URL, file_name=file_name)
+            self.assertTrue(os.path.exists(os.path.join(dirname, 'checkpoints', file_name)))
+            self.assertEqual(sum_of_state_dict(loaded_state),
+                             SUM_OF_HUB_EXAMPLE)
 
 class TestHipify(TestCase):
     def test_import_hipify(self):
         from torch.utils.hipify import hipify_python # noqa
+
+
+class TestBenchmarkUtils(TestCase):
+    def test_timer(self):
+        timer = benchmark_utils.Timer(
+            stmt="torch.ones(())",
+        )
+        median = timer.blocked_autorange(min_run_time=0.1).median
+        self.assertIsInstance(median, float)
+
+    def test_compare(self):
+        compare = benchmark_utils.Compare([
+            benchmark_utils.Timer(
+                "torch.ones((n,))", globals={"n": n},
+                description="ones", label=str(n)).timeit(3)
+            for n in range(3)
+        ])
+        compare.print()
+
+    @unittest.skipIf(IS_WINDOWS and os.getenv("VC_YEAR") == "2019", "Random seed only accepts int32")
+    def test_fuzzer(self):
+        fuzzer = benchmark_utils.Fuzzer(
+            parameters=[
+                benchmark_utils.FuzzedParameter(
+                    "n", minval=1, maxval=16, distribution="loguniform")],
+            tensors=[benchmark_utils.FuzzedTensor("x", size=("n",))],
+            seed=0,
+        )
+
+        expected_results = [
+            (0.7821, 0.0536, 0.9888, 0.1949, 0.5242, 0.1987, 0.5094),
+            (0.7166, 0.5961, 0.8303, 0.005),
+        ]
+
+        for i, (tensors, _, _) in enumerate(fuzzer.take(2)):
+            x = tensors["x"]
+            self.assertEqual(
+                x, torch.Tensor(expected_results[i]), rtol=1e-3, atol=1e-3)
 
 
 if __name__ == '__main__':

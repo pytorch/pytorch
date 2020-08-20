@@ -3,6 +3,7 @@ import argparse
 import os
 
 import yaml
+from collections import defaultdict
 from collections import OrderedDict
 
 import sys
@@ -48,6 +49,27 @@ parser.add_argument(
     '--vulkan',
     action='store_true',
     help='Generate Vulkan backend functions')
+parser.add_argument(
+    '--op_registration_whitelist',
+    nargs='*',
+    help='filter op registrations by the whitelist (if set); '
+         'each item is `namespace`::`operator name` without overload name; '
+         'e.g.: aten::empty aten::conv2d ...')
+parser.add_argument(
+    '--backend_whitelist',
+    nargs='*',
+    help='filter dispatch backend by the whitelist (if set), '
+         'e.g.: CPU CUDA QuantizedCPU ...')
+parser.add_argument(
+    '--per_op_registration',
+    action='store_true',
+    help='group function registrations by op name and write to separate files; '
+         'must also set --op_registration_whitelist param')
+parser.add_argument(
+    '--force_schema_registration',
+    action='store_true',
+    help='force it to generate schema-only registrations for all ops, including'
+         'those that are not listed on --op_registration_whitelist')
 options = parser.parse_args()
 
 # NB: It is mandatory to NOT use os.path.join here, as the install directory
@@ -134,6 +156,7 @@ TYPE_DEFAULT_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeDefault.h")
 TYPE_DEFAULT_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/TypeDefault.cpp")
 OPS_ALREADY_MOVED_TO_C10_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/ATenOpList.cpp")
 BACKEND_SELECT_REGISTER_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/BackendSelectRegister.cpp")
+SCHEMA_REGISTER_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/SchemaRegister.cpp")
 TENSOR_H = CodeTemplate.from_file(TEMPLATE_PATH + "/TensorBody.h")
 TENSOR_METHODS_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/TensorMethods.cpp")
 
@@ -144,6 +167,8 @@ LEGACY_TH_FUNCTIONS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/LegacyTHFunctio
 LEGACY_TH_FUNCTIONS_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/LegacyTHFunctions.cpp")
 
 NATIVE_FUNCTIONS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/NativeFunctions.h")
+
+PER_OP_REGISTRATION_CPP = CodeTemplate.from_file(TEMPLATE_PATH + "/PerOpRegistration.cpp")
 
 core_file_manager = FileManager(core_install_dir)
 file_manager = FileManager()
@@ -168,6 +193,11 @@ quantized_scalar_types = [
     ('QInt32', 'qint32', 'QInt32AccrealNotDefined', 'Qint32IsFloatingTypeNotDefined'),
 ]
 
+# whitelist used to filter op registrations for custom build
+if options.op_registration_whitelist is not None:
+    op_registration_whitelist = set(options.op_registration_whitelist)
+else:
+    op_registration_whitelist = None
 
 # shared environment for non-derived base classes TensorBody.h Storage.h
 top_env = {
@@ -185,6 +215,9 @@ top_env = {
     'native_function_declarations': [],
 }
 
+
+def is_whitelisted_backend(backend):
+    return options.backend_whitelist is None or backend in options.backend_whitelist
 
 def is_cuda_backend(backend):
     return backend in ("QuantizedCUDA", "CUDA")
@@ -232,13 +265,35 @@ def format_yaml(data):
     return yaml.dump(data, default_flow_style=False, Dumper=noalias_dumper, width=float('Inf'))
 
 
-def generate_storage_type_and_tensor(backend, density, declarations):
+def add_op_registrations(per_type_registrations, per_op_registrations, schema_registrations, op_registrations):
+    for op_registration in op_registrations:
+        opname = op_registration.operator_name
+        registration = op_registration.registration_code
+
+        # collect schema registration for all ops (whitelisted or not)
+        if schema_registrations is not None:
+            schema_registrations.append(op_registration.schema_registration_code)
+
+        # apply whitelist
+        if op_registration_whitelist is not None and opname not in op_registration_whitelist:
+            continue
+        if options.per_op_registration:
+            # per op registration
+            per_op_registrations[opname].append(registration)
+        else:
+            # per type registration
+            per_type_registrations.append(registration)
+
+
+def generate_storage_type_and_tensor(backend, density, declarations, per_op_registrations, schema_registrations):
     env = {}
     density_tag = density if density != 'Dense' else ''
     env['Density'] = density
     env['Type'] = "{}{}Type".format(density_tag, backend)
     env['DeviceType'] = backend_to_devicetype(backend)
     env['Backend'] = density_tag + backend
+    if not is_whitelisted_backend(env['Backend']):
+        return
     env['storage_tensor_headers'] = []
     if density != 'Sparse':
         env['storage_tensor_headers'] = ['#include <c10/core/TensorImpl.h>']
@@ -291,13 +346,14 @@ def generate_storage_type_and_tensor(backend, density, declarations):
         env['Generator'] = 'CPUGeneratorImpl'
         env['allocator'] = 'getCPUAllocator()'
 
-    declarations, definitions, registrations, th_declarations, th_definitions = function_wrapper.create_derived(
+    declarations, definitions, op_registrations, th_declarations, th_definitions = function_wrapper.create_derived(
         env, declarations)
     env['type_derived_method_declarations'] = declarations
     env['type_derived_method_definitions'] = definitions
-    env['function_registrations'] = registrations
     env['legacy_th_declarations'] = th_declarations
     env['legacy_th_definitions'] = th_definitions
+    env['function_registrations'] = []
+    add_op_registrations(env['function_registrations'], per_op_registrations, schema_registrations, op_registrations)
 
     fm = file_manager
     if env['DeviceType'] == 'CUDA':
@@ -338,6 +394,10 @@ def iterate_types():
         yield('Vulkan', 'Dense')
 
 
+def gen_per_op_registration_filename(opname):
+    return 'pt_op_register_{}.cpp'.format(opname.replace(':', '-'))
+
+
 ###################
 # declare what files will be output _before_ we do any work
 # so that the script runs quickly when we are just querying the
@@ -352,6 +412,8 @@ def declare_outputs():
         file_manager.will_write(f)
     for backend, density in iterate_types():
         full_backend = backend if density == "Dense" else density + backend
+        if not is_whitelisted_backend(full_backend):
+            continue
         fm = file_manager
         if is_cuda_backend(backend):
             fm = cuda_file_manager
@@ -365,6 +427,16 @@ def declare_outputs():
             fm.will_write("LegacyTHFunctions{}.h".format(backend))
             fm.will_write("LegacyTHFunctions{}.cpp".format(backend))
 
+    if options.per_op_registration:
+        if op_registration_whitelist is None:
+            raise Exception("Must set --op_registration_whitelist for per-op registration.")
+        for whitelisted_op in op_registration_whitelist:
+            fname = gen_per_op_registration_filename(whitelisted_op)
+            file_manager.will_write(fname)
+
+    if options.force_schema_registration:
+        file_manager.will_write('SchemaRegister.cpp')
+
 
 def filter_by_extension(files, *extensions):
     filtered_files = []
@@ -373,6 +445,39 @@ def filter_by_extension(files, *extensions):
             if file.endswith(extension):
                 filtered_files.append(file)
     return filtered_files
+
+
+def generate_per_op_registration(per_op_registrations):
+    if not options.per_op_registration:
+        return
+
+    # Ensure all whitelisted operators have a corresponding registration file.
+    # Generate an empty placeholder file for nonexistent operators, which might
+    # be registered manually instead of via codegen.
+    # This can simplify the custom BUCK build which consumes the output of this
+    # script, since it can uniformly create per-op build targets and dependencies
+    # without having to know the subtle difference about op registration.
+    # Manually registered operators might call codegen registered operators thus
+    # we cannot simply ignore them when calculating transitive dependencies for
+    # custom build.
+    for whitelisted_op in op_registration_whitelist:
+        if whitelisted_op not in per_op_registrations:
+            per_op_registrations[whitelisted_op] = []
+
+    for opname, function_registrations in per_op_registrations.items():
+        fname = gen_per_op_registration_filename(opname)
+        file_manager.write(fname, PER_OP_REGISTRATION_CPP, {
+            'extra_headers': top_env['cpu_type_headers'] + top_env['cuda_type_headers'],
+            'function_registrations': function_registrations,
+        })
+
+
+def generate_schema_registration(schema_registrations):
+    if not options.force_schema_registration:
+        return
+    file_manager.write('SchemaRegister.cpp', SCHEMA_REGISTER_CPP, {
+        'schema_registrations': sorted(set(schema_registrations)),
+    })
 
 
 def generate_outputs():
@@ -388,17 +493,25 @@ def generate_outputs():
     declarations += native_parse.run(native_files)
     declarations = preprocess_declarations.run(declarations)
 
+    per_op_registrations = defaultdict(list) if options.per_op_registration else None
+    schema_registrations = [] if options.force_schema_registration else None
+
     # note: this will fill in top_env['type/tensor_method_declarations/definitions']
     # and modify the declarations to include any information that will all_backends
     # be used by function_wrapper.create_derived
-    output_declarations = function_wrapper.create_generic(top_env, declarations)
+    output_declarations, op_registrations = function_wrapper.create_generic(
+        top_env, declarations)
     output_declarations = postprocess_output_declarations(output_declarations)
     file_manager.write("Declarations.yaml", format_yaml(output_declarations))
 
     gen_backend_select_register.register_backend_select_methods(declarations, BACKEND_SELECT_REGISTER_CPP, file_manager)
 
+    add_op_registrations(
+        top_env['function_registrations'], per_op_registrations, schema_registrations, op_registrations)
+
     for backend, density in iterate_types():
-        generate_storage_type_and_tensor(backend, density, declarations)
+        generate_storage_type_and_tensor(
+            backend, density, declarations, per_op_registrations, schema_registrations)
 
     core_files = {
         'TensorBody.h': TENSOR_H,
@@ -416,6 +529,9 @@ def generate_outputs():
     file_manager.write('Functions.cpp', FUNCTIONS_CPP, top_env)
 
     file_manager.write('NativeFunctions.h', NATIVE_FUNCTIONS_H, top_env)
+
+    generate_per_op_registration(per_op_registrations)
+    generate_schema_registration(schema_registrations)
 
     file_manager.check_all_files_written()
     cuda_file_manager.check_all_files_written()

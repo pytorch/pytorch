@@ -74,7 +74,7 @@ if(CUDA_FOUND)
     message(FATAL_ERROR "Caffe2: Couldn't determine version from header: " ${output_var})
   endif()
   message(STATUS "Caffe2: Header version is: " ${cuda_version_from_header})
-  if(NOT ${cuda_version_from_header} STREQUAL ${CUDA_VERSION_STRING})
+  if(NOT cuda_version_from_header STREQUAL ${CUDA_VERSION_STRING})
     # Force CUDA to be processed for again next time
     # TODO: I'm not sure if this counts as an implementation detail of
     # FindCUDA
@@ -267,6 +267,17 @@ if(CAFFE2_USE_CUDNN)
     set_property(
         TARGET caffe2::cudnn PROPERTY INTERFACE_LINK_LIBRARIES
         "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a" dl)
+    # Lines below use target_link_libraries because we support cmake 3.5+.
+    # For cmake 3.13+, target_link_options to set INTERFACE_LINK_OPTIONS would be better.
+    # https://cmake.org/cmake/help/v3.5/command/target_link_libraries.html warns
+    # "Item names starting with -, but not -l or -framework, are treated as linker flags.
+    #  Note that such flags will be treated like any other library link item for purposes
+    #  of transitive dependencies, so they are generally safe to specify only as private
+    #  link items that will not propagate to dependents."
+    # Propagating to a dependent (torch_cuda) is exactly what we want here, so we are
+    # flouting the warning, but I can't think of a better (3.5+ compatible) way.
+    target_link_libraries(caffe2::cudnn INTERFACE
+        "-Wl,--exclude-libs,libcudnn_static.a")
   endif()
 endif()
 
@@ -404,15 +415,15 @@ if((CUDA_VERSION VERSION_EQUAL   9.0) OR
   endif()
 elseif(CUDA_VERSION VERSION_EQUAL   9.2)
   if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC" AND
-      NOT CMAKE_CXX_COMPILER_VERSION VERSION_LESS 19.13 AND
+      NOT CMAKE_CXX_COMPILER_VERSION VERSION_LESS 19.14 AND
       NOT DEFINED ENV{CUDAHOSTCXX})
     message(FATAL_ERROR
       "CUDA ${CUDA_VERSION} is not compatible with MSVC toolchain version "
-      ">= 19.13. (a.k.a Visual Studio 2017 Update 7, VS 15.7) "
+      ">= 19.14. (a.k.a Visual Studio 2017 Update 7, VS 15.7) "
       "Please upgrade to CUDA >= 10.0 or set the following environment "
       "variable to use another version (for example): \n"
       "  set \"CUDAHOSTCXX=C:\\Program Files (x86)\\Microsoft Visual Studio"
-      "\\2017\\Enterprise\\VC\\Tools\\MSVC\\14.12.25827\\bin\\HostX64\\x64\\cl.exe\"\n")
+      "\\2017\\Enterprise\\VC\\Tools\\MSVC\\14.13.26132\\bin\\HostX64\\x64\\cl.exe\"\n")
   endif()
 elseif(CUDA_VERSION VERSION_EQUAL   10.0)
   if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC" AND
@@ -493,6 +504,9 @@ if(MSVC)
     list(APPEND CUDA_NVCC_FLAGS "-Xcompiler" "-MT$<$<CONFIG:Debug>:d>")
   else()
     list(APPEND CUDA_NVCC_FLAGS "-Xcompiler" "-MD$<$<CONFIG:Debug>:d>")
+  endif()
+  if(CUDA_NVCC_FLAGS MATCHES "Zi")
+    list(APPEND CUDA_NVCC_FLAGS "-Xcompiler" "-FS")
   endif()
 elseif(CUDA_DEVICE_DEBUG)
   list(APPEND CUDA_NVCC_FLAGS "-g" "-G")  # -G enables device code debugging symbols

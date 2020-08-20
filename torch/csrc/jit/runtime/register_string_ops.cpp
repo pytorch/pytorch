@@ -20,28 +20,6 @@ int64_t normalizeIndex(int64_t idx, int64_t list_size) {
   return idx;
 }
 
-std::string stringSlice(
-    std::string string,
-    int64_t start,
-    int64_t end,
-    int64_t step) {
-  TORCH_CHECK(step == 1, "Slicing a string only supports step=1");
-
-  const int64_t size = string.size();
-
-  // Clamp start and end to the bounds of the list
-  start = std::max(int64_t(0), normalizeIndex(start, size));
-  end = std::min(size, normalizeIndex(end, size));
-
-  if (end <= start) {
-    // Slice is empty
-    return std::string("");
-  }
-
-  std::string result(string.begin() + start, string.begin() + end);
-  return result;
-}
-
 int64_t stringFindImpl(
     std::string string,
     std::string substr,
@@ -84,7 +62,7 @@ RegisterOperators reg_str_ops({
 #define DEFINE_STRING_IS_OP(op_name, char_op)                          \
   Operator(                                                            \
       #op_name "(str self) -> bool",                                   \
-      [](Stack& stack) {                                               \
+      [](Stack* stack) {                                               \
         auto string = pop(stack).toStringRef();                        \
         push(                                                          \
             stack,                                                     \
@@ -92,7 +70,6 @@ RegisterOperators reg_str_ops({
                 std::all_of(string.begin(), string.end(), [](char c) { \
                   return char_op(c);                                   \
                 }));                                                   \
-        return 0;                                                      \
       },                                                               \
       aliasAnalysisFromSchema())
 
@@ -106,19 +83,17 @@ RegisterOperators reg_str_ops({
 #define DEFINE_STRING_CHAR_MAP_OP(op_name, char_op) \
   Operator(                                         \
       #op_name "(str self) -> str",                 \
-      [](Stack& stack) {                            \
+      [](Stack* stack) {                            \
         auto string = pop(stack).toStringRef();     \
         std::stringstream ss;                       \
         for (char c : string) {                     \
           ss << static_cast<char>(char_op(c));      \
         }                                           \
         push(stack, ss.str());                      \
-        return 0;                                   \
       },                                            \
       aliasAnalysisFromSchema())
 
     DEFINE_STRING_CHAR_MAP_OP(aten::upper, ::toupper),
-    DEFINE_STRING_CHAR_MAP_OP(aten::lower, ::tolower),
     DEFINE_STRING_CHAR_MAP_OP(aten::swapcase, ([](char c) {
                                 if (c == static_cast<char>(::toupper(c))) {
                                   return static_cast<char>(::tolower(c));
@@ -152,8 +127,6 @@ TORCH_LIBRARY_IMPL(aten, CatchAll, m) {
 
     return splits;
   });
-
-  m.impl("slice.str", stringSlice);
 
   // upper and lower require there to be at least one alpha character,
   // and ignore all other characters
@@ -479,22 +452,6 @@ TORCH_LIBRARY_IMPL(aten, CatchAll, m) {
     return string;
   });
 
-  m.impl("strip", [](std::string string, std::string chars) {
-    auto rindex = string.find_last_not_of(chars);
-    if (rindex != std::string::npos) {
-      string = string.substr(0, rindex + 1);
-    } else {
-      string = "";
-    }
-    auto lindex = string.find_first_not_of(chars);
-    if (lindex != std::string::npos) {
-      string = string.substr(lindex, string.size());
-    } else {
-      string = "";
-    }
-    return string;
-  });
-
   m.impl(
       "replace",
       [](std::string string,
@@ -544,26 +501,6 @@ TORCH_LIBRARY_IMPL(aten, CatchAll, m) {
 
     return std::make_tuple(pre_partition, separator, post_partition);
   });
-
-  m.impl(
-      "split.str", [](std::string string, std::string separator, int64_t max) {
-        std::string::size_type prev_pos = 0;
-        std::string::size_type pos = 0;
-        c10::List<std::string> splits;
-        auto count = 0;
-        while ((pos = string.find(separator, pos)) != std::string::npos) {
-          count++;
-          if (max >= 0 && count > max) {
-            break;
-          } else {
-            splits.emplace_back(string.substr(prev_pos, pos - prev_pos));
-          }
-          pos += separator.size();
-          prev_pos = pos;
-        }
-        splits.emplace_back(string.substr(prev_pos, string.size() - prev_pos));
-        return splits;
-      });
 
   m.impl("rsplit", [](std::string string, std::string separator, int64_t max) {
     std::reverse(separator.begin(), separator.end());

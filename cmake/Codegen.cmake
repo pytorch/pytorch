@@ -113,6 +113,8 @@ if(INTERN_BUILD_ATEN_OPS)
   list(LENGTH CPU_CAPABILITY_NAMES NUM_CPU_CAPABILITY_NAMES)
   math(EXPR NUM_CPU_CAPABILITY_NAMES "${NUM_CPU_CAPABILITY_NAMES}-1")
 
+  # The sources list might get reordered later based on the capabilites.
+  # See NOTE [ Linking AVX and non-AVX files ]
   foreach(i RANGE ${NUM_CPU_CAPABILITY_NAMES})
     foreach(IMPL ${cpu_kernel_cpp_in})
       string(REPLACE "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/" "" NAME ${IMPL})
@@ -222,11 +224,11 @@ function(append_filelist name outputvar)
   set(_rootdir "${${CMAKE_PROJECT_NAME}_SOURCE_DIR}/")
   # configure_file adds its input to the list of CMAKE_RERUN dependencies
   configure_file(
-      ${CMAKE_SOURCE_DIR}/tools/build_variables.bzl
-      ${CMAKE_BINARY_DIR}/caffe2/build_variables.bzl)
+      ${PROJECT_SOURCE_DIR}/tools/build_variables.bzl
+      ${PROJECT_BINARY_DIR}/caffe2/build_variables.bzl)
   execute_process(
     COMMAND "${PYTHON_EXECUTABLE}" -c
-            "exec(open('tools/build_variables.bzl').read());print(';'.join(['${_rootdir}' + x for x in ${name}]))"
+            "exec(open('${PROJECT_SOURCE_DIR}/tools/build_variables.bzl').read());print(';'.join(['${_rootdir}' + x for x in ${name}]))"
     WORKING_DIRECTORY "${_rootdir}"
     RESULT_VARIABLE _retval
     OUTPUT_VARIABLE _tempvar)

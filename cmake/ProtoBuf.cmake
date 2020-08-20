@@ -39,15 +39,20 @@ macro(custom_protobuf_find)
   set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
   if(MSVC)
+    foreach(flag_var 
+        CMAKE_C_FLAGS CMAKE_C_FLAGS_RELEASE CMAKE_C_FLAGS_MINSIZEREL
+        CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_RELEASE CMAKE_CXX_FLAGS_MINSIZEREL)
+      if(${flag_var} MATCHES "/Z[iI7]")
+        string(REGEX REPLACE "/Z[iI7]" "" ${flag_var} "${${flag_var}}")
+      endif()
+    endforeach(flag_var)
     if(MSVC_Z7_OVERRIDE)
       foreach(flag_var
-          CMAKE_C_FLAGS CMAKE_C_FLAGS_DEBUG CMAKE_C_FLAGS_RELEASE
-          CMAKE_C_FLAGS_MINSIZEREL CMAKE_C_FLAGS_RELWITHDEBINFO
-          CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELEASE
-          CMAKE_CXX_FLAGS_MINSIZEREL CMAKE_CXX_FLAGS_RELWITHDEBINFO)
+          CMAKE_C_FLAGS_DEBUG CMAKE_C_FLAGS_RELWITHDEBINFO
+          CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELWITHDEBINFO)
         if(${flag_var} MATCHES "/Z[iI]")
           string(REGEX REPLACE "/Z[iI]" "/Z7" ${flag_var} "${${flag_var}}")
-        endif(${flag_var} MATCHES "/Z[iI]")
+        endif()
       endforeach(flag_var)
     endif(MSVC_Z7_OVERRIDE)
   endif(MSVC)
@@ -80,7 +85,7 @@ endmacro()
 # coded BUILD_CUSTOM_PROTOBUF, we will hard code the use of custom protobuf
 # in the submodule.
 if(ANDROID OR IOS)
-  if(NOT ${BUILD_CUSTOM_PROTOBUF})
+  if(NOT BUILD_CUSTOM_PROTOBUF)
     message(WARNING
         "For Android and iOS cross compilation, I am automatically using "
         "custom protobuf under third party. Note that this behavior may "

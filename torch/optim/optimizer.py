@@ -4,6 +4,7 @@ from torch._six import container_abcs
 import torch
 from copy import deepcopy
 from itertools import chain
+import warnings
 
 
 class _RequiredParameter(object):
@@ -125,8 +126,8 @@ class Optimizer(object):
 
         # Update the state
         id_map = {old_id: p for old_id, p in
-                  zip(chain(*(g['params'] for g in saved_groups)),
-                      chain(*(g['params'] for g in groups)))}
+                  zip(chain.from_iterable((g['params'] for g in saved_groups)),
+                      chain.from_iterable((g['params'] for g in groups)))}
 
         def cast(param, value):
             r"""Make a deep copy of value, casting all tensors to device of param."""
@@ -168,7 +169,10 @@ class Optimizer(object):
         for group in self.param_groups:
             for p in group['params']:
                 if p.grad is not None:
-                    p.grad.detach_()
+                    if p.grad.grad_fn is not None:
+                        p.grad.detach_()
+                    else:
+                        p.grad.requires_grad_(False)
                     p.grad.zero_()
 
     def step(self, closure):
@@ -218,6 +222,12 @@ class Optimizer(object):
                                  name)
             else:
                 param_group.setdefault(name, default)
+
+        params = param_group['params']
+        if len(params) != len(set(params)):
+            warnings.warn("optimizer contains a parameter group with duplicate parameters; "
+                          "in future, this will cause an error; "
+                          "see github.com/pytorch/pytorch/issues/40967 for more information", stacklevel=3)
 
         param_set = set()
         for group in self.param_groups:

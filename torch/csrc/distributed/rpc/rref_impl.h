@@ -207,6 +207,11 @@ class TORCH_API RRef : public RRefInterface {
     return RpcAgent::getCurrentRpcAgent()->getWorkerInfo(ownerId_).name_;
   }
 
+  // returns the worker info of the owner
+  inline WorkerInfo ownerWorkerInfo() const {
+    return RpcAgent::getCurrentRpcAgent()->getWorkerInfo(ownerId_);
+  }
+
   // Returns the globally unique RRefId of this RRef
   inline const RRefId& rrefId() const {
     return rrefId_;
@@ -391,6 +396,8 @@ class TORCH_API OwnerRRef final : public RRef {
 
   std::shared_ptr<JitFuture> future_;
 };
+
+TORCH_API std::ostream& operator<<(std::ostream& os, const RRef& rref);
 
 } // namespace rpc
 } // namespace distributed

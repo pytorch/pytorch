@@ -2,7 +2,9 @@
 # "what has to be done to add a Operation ..." first!
 
 import re
+import copy
 from code_template import CodeTemplate
+
 
 from typing import Any, Dict, List, Optional, Set, Tuple, NamedTuple
 
@@ -58,24 +60,24 @@ case ScalarType::${ScalarName}: {
 # In this case, it will be called for all backends, but can be overwritten on a
 # per backend basis.
 NATIVE_DISPATCH_DECLARATION = CodeTemplate("""\
-${return_type} ${type_wrapper_name}(${formals});
+${return_type} ${type_wrapper_name}(${native_formals});
 """)
 
 NATIVE_DISPATCH_DEFINITION_DEFAULT = CodeTemplate("""\
-${return_type} ${type_wrapper_name}(${formals}) {
+${return_type} ${type_wrapper_name}(${native_formals}) {
     ${device_guard_declaration}
     ${return_call} at::native::${native_type_method_dispatch}(${actuals});
 }
 """)
 
 NATIVE_DISPATCH_DEFINITION_CPU_BACKEND = CodeTemplate("""\
-${return_type} ${type_wrapper_name}(${formals}) {
+${return_type} ${type_wrapper_name}(${native_formals}) {
     ${return_call} at::native::${native_type_method_dispatch}(${actuals});
 }
 """)
 
 NATIVE_DISPATCH_DEFINITION_GENERIC_BACKEND = CodeTemplate("""\
-${return_type} ${type_wrapper_name}(${formals}) {
+${return_type} ${type_wrapper_name}(${native_formals}) {
     ${device_init}
     ${device_guard_declaration}
     ${return_call} at::native::${native_type_method_dispatch}(${actuals});
@@ -91,16 +93,25 @@ SCHEMA_REGISTRATION = CodeTemplate("""\
 m.def("${unqual_schema_string}");
 """)
 
+# NOTE[UnboxedOnly] Many of our codegen templates currently exist twice, once
+# in an _UNBOXEDONLY_ variant and once without _UNBOXEDONLY_. This is because
+# ops that are `use_c10_dispatcher: full` need different c++ code than ops
+# that aren't `use_c10_dispatcher: full` yet. The _UNBOXEDONLY_ variants
+# are for ops that aren't `use_c10_dispatcher: full` yet and those code templates
+# can be deleted once all ops are `use_c10_dispatcher: full`.
+# If you update one of the templates, you likely also have to update the other.
+
 # NB: Specifiction of the namespace is handled by the enclosing
 # TORCH_LIBRARY macro invocation
+# See NOTE[UnboxedOnly]
 DEFAULT_UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
-m.impl(TORCH_SELECTIVE_NAME("${operator_name_with_overload}"),
-       torch::CppFunction::makeUnboxedOnly(TypeDefault::${type_wrapper_name}));
+m.impl("${unqual_operator_name_with_overload}",
+       torch::CppFunction::makeUnboxedOnly(&TypeDefault::${type_wrapper_name}));
 """)
 
 DEFAULT_FUNCTION_REGISTRATION = CodeTemplate("""\
-m.impl(TORCH_SELECTIVE_NAME("${operator_name_with_overload}"),
-       &TypeDefault::${type_wrapper_name});
+m.impl("${unqual_operator_name_with_overload}",
+       c10::impl::hacky_wrapper_for_legacy_signatures<${schema_order_cpp_signature}>(TORCH_FN(TypeDefault::${type_wrapper_name})));
 """)
 
 # NB: In the ordinary, TypeDerived code generation work flow, specification
@@ -111,16 +122,17 @@ m.impl(TORCH_SELECTIVE_NAME("${operator_name_with_overload}"),
 # the torch::dispatch specification here is important!  See
 # Note [Redundancy in registration code is OK] for how we handle redundant info.
 BACKEND_UNBOXEDONLY_FUNCTION_REGISTRATION = CodeTemplate("""\
-m.impl(TORCH_SELECTIVE_NAME("${operator_name_with_overload}"),
+m.impl("${unqual_operator_name_with_overload}",
        torch::dispatch(DispatchKey::${Backend},
-                       torch::CppFunction::makeUnboxedOnly(${Type}::${type_wrapper_name}))
+                       torch::CppFunction::makeUnboxedOnly(&${Type}::${type_wrapper_name}))
 );
 """)
 
 BACKEND_FUNCTION_REGISTRATION = CodeTemplate("""\
-m.impl(TORCH_SELECTIVE_NAME("${operator_name_with_overload}"),
+m.impl("${unqual_operator_name_with_overload}",
        torch::dispatch(DispatchKey::${Backend},
-                       &${Type}::${type_wrapper_name})
+                       c10::impl::hacky_wrapper_for_legacy_signatures<${schema_order_cpp_signature}>(
+                           TORCH_FN(${Type}::${type_wrapper_name})))
 );
 """)
 
@@ -130,15 +142,17 @@ ${return_type} ${api_name}(${method_formals_with_defaults}) const;
 """)
 
 # add non-virtual declaration to Tensor.cpp
-C10_TENSOR_METHOD_DEFINITION = CodeTemplate("""\
+TENSOR_METHOD_DEFINITION = CodeTemplate("""\
 
 // ${schema_string}
 ${return_type} Tensor::${api_name}(${method_formals}) const {
 #ifdef USE_STATIC_DISPATCH
     ${static_dispatch_method_body}
 #else
-    static c10::OperatorHandle op = c10::Dispatcher::singleton().findSchemaOrThrow("aten::${operator_name}", "${overload_name}");
-    return op.call<${formals_types_with_return}>(${method_actuals});
+    static auto op = c10::Dispatcher::singleton()
+        .findSchemaOrThrow("aten::${operator_name}", "${overload_name}")
+        .typed<${tensor_method_cpp_signature}>();
+    return op.call(${tensor_method_actuals});
 #endif
 }
 """)
@@ -154,16 +168,17 @@ C10_DEPRECATED CAFFE2_API ${return_type} ${api_name}(${formals_with_defaults});
 """)
 
 # add method definition in Functions.h
-C10_FUNCTION_DEFINITION = CodeTemplate("""\
+FUNCTION_DEFINITION = CodeTemplate("""\
 
 // ${schema_string}
 ${return_type} ${api_name}(${formals}) {
 #ifdef USE_STATIC_DISPATCH
     ${static_dispatch_function_body}
 #else
-    static c10::OperatorHandle op = c10::Dispatcher::singleton()
-        .findSchemaOrThrow("aten::${operator_name}", "${overload_name}");
-    return op.call<${formals_types_with_return}>(${actuals});
+    static auto op = c10::Dispatcher::singleton()
+        .findSchemaOrThrow("aten::${operator_name}", "${overload_name}")
+        .typed<${function_cpp_signature}>();
+    return op.call(${function_actuals});
 #endif
 }
 """)
@@ -204,12 +219,14 @@ ${content}
 
 # add a native declaration for a native function
 NATIVE_DECLARATION = CodeTemplate("""\
-CAFFE2_API ${return_type} ${native_type_method_dispatch}(${formals_with_defaults});
+CAFFE2_API ${return_type} ${native_type_method_dispatch}(${native_formals_with_defaults});
 """)
 
 CALL_TEMPLATE = CodeTemplate("${cname}(${actuals})")
 
-OPERATOR_NAME = CodeTemplate("""\
+OPERATOR_NAME = CodeTemplate("aten::${operator_name}")
+
+OPERATOR_NAME_FULL = CodeTemplate("""\
     {"aten::${operator_name}", "${overload_name}"},
 """)
 
@@ -451,6 +468,7 @@ NNBuffer = TypedDict('NNBuffer', {
 
 FunctionOption = TypedDict('FunctionOption', {
     'actuals': List[str],
+    'schema_order_actuals': List[str],
     'api_name': str,
     # Like api_name, but it is the name of the internal
     # CPUType/CUDAType/TypeDefault function that wraps
@@ -458,6 +476,11 @@ FunctionOption = TypedDict('FunctionOption', {
     # visible and is mangled with the overload name
     'type_wrapper_name': str,
     'arguments': List[THFormal],
+    # 'schema_order_arguments' is like 'arguments' but keeps them in the
+    # order they are defined in the JIT function schema while
+    # 'arguments' does some modifications (e.g. reorders out arguments
+    # and packs TensorOptions)
+    'schema_order_arguments': List[THFormal],
     'backend_types': Dict[str, List[str]],
     'backends': List[str],
     'buffers': List[NNBuffer],
@@ -483,15 +506,23 @@ FunctionOption = TypedDict('FunctionOption', {
     'field_name': str,
     'formals_list': List[AtFormal],
     'formals_with_defaults': List[str],
+    'native_formals_with_defaults': List[str],
     'formals': List[str],
+    'native_formals': List[str],
     'formals_types': List[str],
-    'formals_types_with_return': List[str],
+    'cpp_signature': str,
+    # 'schema_order_cpp_signature' is like 'cpp_signature' but keeps them in the
+    # order they are defined in the JIT function schema while
+    # 'cpp_signature' does some modifications (e.g. reorders out arguments
+    # and packs TensorOptions)
+    'schema_order_cpp_signature': str,
     'inplace': bool,
     'matches_jit_signature': bool,
     # This controls whether or not we generate the interface in Type or
     # TypeExtendedInterface
     'extended_method': bool,
     'method_actuals': List[str],
+    'schema_order_method_actuals': List[str],
     'method_formals_with_defaults': List[str],
     'method_formals': List[str],
     'mode': str,
@@ -503,7 +534,6 @@ FunctionOption = TypedDict('FunctionOption', {
     # options should be List[FunctionOption]
     'options': Any,
     'schema_string': str,
-    'requires_tensor': bool,
     'return_call': str,
     'return_type': str,
     'return': ReturnDecl,
@@ -524,6 +554,12 @@ OutputDeclaration = NamedTuple('OutputDeclaration', [
     ('matches_jit_signature', bool),
     ('schema_string', str),
     ('arguments', List[AtFormal]),
+    ('schema_order_cpp_signature', str),
+    # 'schema_order_arguments' is like 'arguments' but keeps them in the
+    # order they are defined in the JIT function schema while
+    # 'arguments' does some modifications (e.g. reorders out arguments
+    # and packs TensorOptions)
+    ('schema_order_arguments', List[AtFormal]),
     ('method_of', List[str]),
     ('mode', str),
     ('python_module', str),
@@ -532,7 +568,6 @@ OutputDeclaration = NamedTuple('OutputDeclaration', [
     ('inplace', bool),
     ('is_factory_method', bool),
     ('abstract', bool),
-    ('requires_tensor', bool),
     ('device_guard', bool),
     ('with_gil', bool),
     ('deprecated', bool),
@@ -541,6 +576,12 @@ OutputDeclaration = NamedTuple('OutputDeclaration', [
 FunctionCode = NamedTuple('FunctionCode', [
     ('definition', str),
     ('declaration', str),
+])
+
+OpRegistration = NamedTuple('OpRegistration', [
+    ('operator_name', str),
+    ('registration_code', str),
+    ('schema_registration_code', str),
 ])
 
 
@@ -730,8 +771,26 @@ def gen_device_init(option, backend_type_env):
             return ['globalContext().lazyInit{}();'.format(device_type)]
     return []
 
+# TODO The maybe_unwrap_optional_tensors is only needed because our at::native::xxx functions
+# still take "Tensor" instead of "optional<Tensor>", so we need CPUType, TypeDefault, ...
+# to do the same. Once at::native::xxx are converted, we can remove use_optional_tensor
+# and use the use_optional_tensor=True behavior always.
+def maybe_unwrap_optional_tensors(option, formals, args):
+    assert len(formals) == len(args), \
+        "Assert we didn't screw up with method_args removing self but forgetting to remove it from formals"
+    if option['use_c10_dispatcher'] == 'full':
+        def maybe_unwrap_optional_tensor(formal, arg):
+            if formal['dynamic_type'] == 'Tensor' and formal['is_nullable']:
+                return "{}.has_value() ? *{} : at::Tensor()".format(arg, arg)
+            else:
+                return arg
+        return [maybe_unwrap_optional_tensor(formal, arg) for (formal, arg) in zip(formals, args)]
+    else:
+        assert option['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
+        return args
+
 def create_generic(top_env, declarations):
-    # type: (TopEnvironment, List[FunctionOption]) -> List[OutputDeclaration]
+    # type: (TopEnvironment, List[FunctionOption]) -> Tuple[List[OutputDeclaration], List[OpRegistration]]
     # translates defaults from cwrap types to C++ values
     def translate_default(argument, type_str, default):
         # type: (THFormal, str, Any) -> Any
@@ -777,8 +836,8 @@ def create_generic(top_env, declarations):
             translated['is_nullable'] = argument['is_nullable']
         return translated
 
-    def get_formals(option, include_constants=False):
-        # type: (FunctionOption, bool) -> List[AtFormal]
+    def get_formals(option, schema_order, include_constants=False):
+        # type: (FunctionOption, bool, bool) -> List[AtFormal]
         seen = set()  # type: Set[str]
         pos_args = []  # type: List[THFormal]
         kwd_args = []  # type: List[THFormal]
@@ -794,16 +853,20 @@ def create_generic(top_env, declarations):
             # type: (THFormal) -> bool
             return argument.get('allocate', False) and argument.get('mask', False)
 
-        for argument in option['arguments']:
+        if schema_order:
+            arguments = copy.deepcopy(option['schema_order_arguments'])
+        else:
+            arguments = copy.deepcopy(option['arguments'])
+        for argument in arguments:
             if argument.get('output') and not argument.get('allocate', False):
                 insert(argument)
-        for argument in option['arguments']:
+        for argument in arguments:
             if include_constants and argument['type'] == 'CONSTANT':
                 insert(argument)
             elif is_real_argument_to_wrapper(argument):
                 insert(argument)
-        if any(has_output_mask(arg) for arg in option['arguments']):
-            mask_size = sum(has_output_mask(arg) for arg in option['arguments'])
+        if any(has_output_mask(arg) for arg in arguments):
+            mask_size = sum(has_output_mask(arg) for arg in arguments)
             insert({
                 'name': 'output_mask',
                 # NB: Lack of space in comma works around parsing
@@ -842,6 +905,20 @@ def create_generic(top_env, declarations):
             return return_types[0]['type']
         return "std::tuple<{}>".format(','.join(r['type'] for r in return_types))
 
+    def process_schema_order_actual(schema_order_actual):
+        if schema_order_actual == 'dtype':
+            return 'optTypeMetaToScalarType(options.dtype_opt())'
+        elif schema_order_actual == 'layout':
+            return 'options.layout_opt()'
+        elif schema_order_actual == 'device':
+            return 'options.device_opt()'
+        elif schema_order_actual == 'pin_memory':
+            return 'options.pinned_memory_opt()'
+        elif schema_order_actual == 'memory_format':
+            return 'c10::impl::check_tensor_options_and_extract_memory_format(options, memory_format)'
+        else:
+            return schema_order_actual
+
     def process_legacy_th_option(option):
         # type: (FunctionOption) -> None
         # Mutably populate option with derived values computed from values
@@ -850,7 +927,8 @@ def create_generic(top_env, declarations):
             '(^__i|[^_]_$)', option['api_name']) is not None
 
         # print(yaml.dump(option))
-        formals = get_formals(option)
+        formals = get_formals(option, False)
+        schema_order_formals = get_formals(option, True)
         option['formals_list'] = formals
         option['formals'] = [format_formal(f) for f in formals]
         option['formals_with_defaults'] = [formal_with_default(f) for f in formals]
@@ -881,8 +959,14 @@ def create_generic(top_env, declarations):
 
         assert option['extended_method'], 'Expected legacy operator to be an extended method'
 
-    def native_get_formals(option, include_constants=False):
-        # type: (FunctionOption, bool) -> List[AtFormal]
+    def native_get_formals(option, schema_order, use_optional_tensor, include_constants=False):
+        # type: (FunctionOption, bool, bool, bool) -> List[AtFormal]
+
+        # TODO The use_optional_tensor argument is only needed because our at::native::xxx functions
+        # still take "Tensor" instead of "optional<Tensor>", so we need CPUType, TypeDefault, ...
+        # to do the same. Once at::native::xxx are converted, we can remove use_optional_tensor
+        # and use the use_optional_tensor=True behavior always.
+
         seen = set()  # type: Set[str]
         pos_args = []
         kwd_args = []
@@ -896,7 +980,11 @@ def create_generic(top_env, declarations):
                 else:
                     pos_args.append(argument)
 
-        for argument in option['arguments']:
+        if schema_order:
+            arguments = option['schema_order_arguments']
+        else:
+            arguments = option['arguments']
+        for argument in arguments:
             insert(argument)
 
         # not clear we need dynamic_type translation as we can specify the correct type
@@ -912,6 +1000,8 @@ def create_generic(top_env, declarations):
         # ensure we get reference-type formals when appropriate
         def native_translate_formals(argument, option):
             # type: (AtFormal, FunctionOption) -> AtFormal
+            argument = copy.deepcopy(argument)
+
             def translate_map(const):
                 # type: (bool) -> Dict[str, str]
                 return {
@@ -923,6 +1013,9 @@ def create_generic(top_env, declarations):
 
             if argument.get('is_nullable') and argument['type'] not in translate_map(False).keys():
                 argument['type'] = "c10::optional<{}>".format(argument['type'])
+            elif use_optional_tensor and argument.get('is_nullable') and argument['type'] == 'Tensor':
+                argument['type'] = "const c10::optional<Tensor>&"
+
 
             # Note: the 'self' trap is here only to preserve the const arg 0 for set_data.
             # I.e., the signature of the cpp implementation currently fits the code
@@ -984,23 +1077,32 @@ def create_generic(top_env, declarations):
 
     def process_native(option):
         # type: (FunctionOption) -> Optional[OutputDeclaration]
-        assert option['python_module'] == '' or option['python_module'] == 'nn', \
-            "Found python_module of {} for decl {}, but only \'\' string or \'nn\' are supported".format(
+        valid_modules = {'nn', 'fft', 'linalg'}
+        assert (option['python_module'] == '' or
+                option['python_module'] in valid_modules), \
+            "Found python_module of {} for decl {}, but only \'\' string, \'nn\' and \'fft\' are supported".format(
                 option['python_module'], option['name'])
-        formals = native_get_formals(option)
+        use_optional_tensors_in_cpp_frontend = option['use_c10_dispatcher'] == 'full'
+        formals = native_get_formals(option, False, use_optional_tensors_in_cpp_frontend)
+        native_formals = native_get_formals(option, False, False)
+        schema_order_formals = native_get_formals(option, True, use_optional_tensors_in_cpp_frontend)
         option['formals_list'] = formals
         option['formals'] = [format_formal(f) for f in formals]
+        option['native_formals'] = [format_formal(f) for f in native_formals]
         option['formals_with_defaults'] = [formal_with_default(f) for f in formals]
+        option['native_formals_with_defaults'] = [formal_with_default(f) for f in native_formals]
         option['returns'] = native_get_return_types(option)
         option['return_type'] = format_return_type(option['returns'])
         option['return_call'] = 'return ' if option['return_type'] != 'void' else ''
         option['actuals'] = [f['name'] for f in formals]
+        option['schema_order_actuals'] = [f['name'] for f in schema_order_formals]
 
         option['formals_types'] = [f['type'] for f in option['formals_list']]
 
-        option['formals_types_with_return'] = [option['return_type']]
-        if len(option['formals_types']) > 0:
-            option['formals_types_with_return'].extend(option['formals_types'])
+        option['cpp_signature'] = "{} ({})".format(option['return_type'], ", ".join(option['formals_types']))
+        option['schema_order_cpp_signature'] = "{} ({})".format(
+            option['return_type'],
+            ", ".join([f['type'] for f in schema_order_formals]))
 
         option['method_formals'] = [format_formal(f) for f in formals
                                     if f['name'] != 'self']
@@ -1010,6 +1112,14 @@ def create_generic(top_env, declarations):
         # be const_casted to be accepted as native function's non-const argument
         option['method_actuals'] = [
             f['name'] if f['name'] != 'self' else 'const_cast<Tensor&>(*this)' for f in formals]
+        option['schema_order_method_actuals'] = [
+            f['name'] if f['name'] != 'self' else 'const_cast<Tensor&>(*this)' for f in schema_order_formals]
+
+        if find_formal_by_type('TensorOptions', formals) is not None:
+            option['schema_order_actuals'] = [
+                process_schema_order_actual(actual) for actual in option['schema_order_actuals']]
+            option['schema_order_method_actuals'] = [
+                process_schema_order_actual(actual) for actual in option['schema_order_method_actuals']]
 
         def gen_tensor_method(option, formals):
             # type: (Any, List[AtFormal]) -> FunctionCode
@@ -1023,6 +1133,8 @@ def create_generic(top_env, declarations):
 
             dispatch_key_var_name = '_dk'
             dispatch_key_init = gen_dispatch_key_init(dispatch_key_var_name, [swizzle_self(f) for f in formals])
+
+            method_actuals = maybe_unwrap_optional_tensors(option, formals, option['method_actuals'])
 
             if isinstance(type_method_dispatch, dict):
                 static_dispatch_function_cases = []
@@ -1044,7 +1156,7 @@ def create_generic(top_env, declarations):
                             option,
                             backend=backend,
                             backend_function=type_method_dispatch[backend],
-                            actuals=option['method_actuals'])
+                            actuals=method_actuals)
                         if (backend in static_dispatch_backends_ifdef_guard):
                             static_dispatch_function_cases.append(IFDEF_BLOCK.substitute(
                                 option,
@@ -1060,14 +1172,26 @@ def create_generic(top_env, declarations):
                     static_dispatch_function_cases=static_dispatch_function_cases)
             else:
                 static_dispatch_method_body = STATIC_DISPATCH_FUNCTION_DEFAULT_BODY.substitute(
-                    option, actuals=option['method_actuals'])
+                    option, actuals=method_actuals)
 
-            method_definition = C10_TENSOR_METHOD_DEFINITION
+            # See NOTE[UnboxedOnly]
+            if option['use_c10_dispatcher'] == 'full':
+                tensor_method_actuals = option['schema_order_method_actuals']
+                tensor_method_cpp_signature = option['schema_order_cpp_signature']
+            else:
+                assert option['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
+                tensor_method_actuals = option['method_actuals']
+                tensor_method_cpp_signature = option['cpp_signature']
+
+            method_definition = TENSOR_METHOD_DEFINITION.substitute(
+                option, static_dispatch_method_body=static_dispatch_method_body,
+                tensor_method_actuals=tensor_method_actuals,
+                tensor_method_cpp_signature=tensor_method_cpp_signature
+            )
             return FunctionCode(
                 declaration=TENSOR_METHOD_DECLARATION.substitute(
                     option, static_dispatch_method_body=static_dispatch_method_body),
-                definition=method_definition.substitute(
-                    option, static_dispatch_method_body=static_dispatch_method_body))
+                definition=method_definition)
 
         def gen_namespace_function(option, multidispatch_formals):
             # type: (Any, List[AtFormal]) -> FunctionCode
@@ -1078,6 +1202,8 @@ def create_generic(top_env, declarations):
             declaration = DEPRECATED_FUNCTION_DECLARATION if option['deprecated'] else FUNCTION_DECLARATION
             fn_declaration = declaration.substitute(option)
 
+            actuals = maybe_unwrap_optional_tensors(option, formals, option['actuals'])
+
             if isinstance(type_method_dispatch, dict):
                 static_dispatch_function_cases = []
                 for backend in static_dispatch_backends:
@@ -1086,7 +1212,7 @@ def create_generic(top_env, declarations):
                             option,
                             backend=backend,
                             backend_function=type_method_dispatch[backend],
-                            actuals=option['actuals'])
+                            actuals=actuals)
                         if (backend in static_dispatch_backends_ifdef_guard):
                             static_dispatch_function_cases.append(IFDEF_BLOCK.substitute(
                                 option,
@@ -1101,10 +1227,21 @@ def create_generic(top_env, declarations):
                     static_dispatch_function_cases=static_dispatch_function_cases)
             else:
                 static_dispatch_function_body = STATIC_DISPATCH_FUNCTION_DEFAULT_BODY.substitute(
-                    option, actuals=option['actuals'])
+                    option, actuals=actuals)
 
-            fn_definition = C10_FUNCTION_DEFINITION.substitute(
-                option, static_dispatch_function_body=static_dispatch_function_body)
+            # See NOTE[UnboxedOnly]
+            if option['use_c10_dispatcher'] == 'full':
+                function_actuals = option['schema_order_actuals']
+                function_cpp_signature = option['schema_order_cpp_signature']
+            else:
+                assert option['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
+                function_actuals = option['actuals']
+                function_cpp_signature = option['cpp_signature']
+
+            fn_definition = FUNCTION_DEFINITION.substitute(
+                option, static_dispatch_function_body=static_dispatch_function_body,
+                function_actuals=function_actuals,
+                function_cpp_signature=function_cpp_signature)
 
             return FunctionCode(definition=fn_definition, declaration=fn_declaration)
 
@@ -1132,7 +1269,7 @@ def create_generic(top_env, declarations):
         option['device_guard_declaration'] = device_guard(option, dispatch_options, guard_tensor)
         option['dispatch_scalar_type_declaration'] = dispatch_scalar_type(option, dispatch_options, guard_tensor)
 
-        top_env['aten_ops'].append(OPERATOR_NAME.substitute(option))
+        top_env['aten_ops'].append(OPERATOR_NAME_FULL.substitute(option))
 
         option['native_type_method_dispatch'] = type_method_dispatch
 
@@ -1145,7 +1282,10 @@ def create_generic(top_env, declarations):
         # we just implement it in the base Type.  This is exposed
         # in Declarations.yaml via a field named 'abstract'.
         abstract = False
-        top_env['function_registrations'].append(SCHEMA_REGISTRATION.substitute(option))
+        op_registrations.append(OpRegistration(
+            operator_name=OPERATOR_NAME.substitute(option),
+            registration_code=SCHEMA_REGISTRATION.substitute(option),
+            schema_registration_code=SCHEMA_REGISTRATION.substitute(option)))
         if isinstance(type_method_dispatch, dict):
             abstract = True
             # Having manual_kernel_registration for an abstract method doesn't make sense.
@@ -1154,11 +1294,18 @@ def create_generic(top_env, declarations):
             top_env['type_method_declarations'].append(NATIVE_DISPATCH_DECLARATION.substitute(option))
             top_env['type_method_definitions'].append(NATIVE_DISPATCH_DEFINITION_DEFAULT.substitute(option))
             if not option['manual_kernel_registration']:
+                # See NOTE[UnboxedOnly]
                 if option['use_c10_dispatcher'] == 'full':
-                    top_env['function_registrations'].append(DEFAULT_FUNCTION_REGISTRATION.substitute(option))
+                    op_registrations.append(OpRegistration(
+                        operator_name=OPERATOR_NAME.substitute(option),
+                        registration_code=DEFAULT_FUNCTION_REGISTRATION.substitute(option),
+                        schema_registration_code=SCHEMA_REGISTRATION.substitute(option)))
                 else:
                     assert option['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
-                    top_env['function_registrations'].append(DEFAULT_UNBOXEDONLY_FUNCTION_REGISTRATION.substitute(option))
+                    op_registrations.append(OpRegistration(
+                        operator_name=OPERATOR_NAME.substitute(option),
+                        registration_code=DEFAULT_UNBOXEDONLY_FUNCTION_REGISTRATION.substitute(option),
+                        schema_registration_code=SCHEMA_REGISTRATION.substitute(option)))
 
         # generate the at::native function declarations (i.e. what the user will implement)
         if isinstance(type_method_dispatch, dict):
@@ -1194,10 +1341,12 @@ def create_generic(top_env, declarations):
             overload_name=option['overload_name'],
             use_c10_dispatcher=option['use_c10_dispatcher'],
             manual_kernel_registration=option['manual_kernel_registration'],
+            schema_order_cpp_signature=option['schema_order_cpp_signature'],
             category_override=option['category_override'],
             matches_jit_signature=option["matches_jit_signature"],
             schema_string=option["schema_string"],
             arguments=formals,
+            schema_order_arguments=schema_order_formals,
             method_of=method_of,
             mode=option['mode'],
             python_module=option['python_module'],
@@ -1207,13 +1356,13 @@ def create_generic(top_env, declarations):
             is_factory_method=is_factory_method,
             # See Note [Abstract ATen methods]
             abstract=abstract,
-            requires_tensor=option.get('requires_tensor', False),
             device_guard=option.get('device_guard', True),
             with_gil=option.get('with_gil', False),
             deprecated=option['deprecated'],
         )
 
     output_declarations = []  # type: List[OutputDeclaration]
+    op_registrations = []  # type: List[OpRegistration]
     for declaration in declarations:
         output_options = []  # type: List[OutputDeclaration]
         for option in declaration['options']:
@@ -1231,14 +1380,14 @@ def create_generic(top_env, declarations):
                 option['skip'] = True
         output_declarations.extend(output_options)
 
-    return output_declarations
+    return output_declarations, op_registrations
 
 
 def create_derived(backend_type_env, declarations):
-    # type: (Environment, List[FunctionOption]) -> Tuple[List[str], List[str], List[str], List[str], List[str]]
+    # type: (Environment, List[FunctionOption]) -> Tuple[List[str], List[str], List[OpRegistration], List[str], List[str]]
     type_object_declarations = []  # type: List[str]
     type_object_definitions = []  # type: List[str]
-    function_registrations = []  # type: List[str]
+    op_registrations = []  # type: List[OpRegistration]
     legacy_th_declarations = []  # type: List[str]
     legacy_th_definitions = []  # type: List[str]
     is_cuda = 'CUDA' in backend_type_env['Backend']
@@ -1431,10 +1580,15 @@ def create_derived(backend_type_env, declarations):
             env = nested_dict(option, backend_type_env)
             body = emit_body(env, option, option['backend_types'][backend])  # type: ignore
             option['type_definition_body'] = body
+            # These type ignores arise from the fact that a nested_dict
+            # technically isn't a Mapping, as it doesn't implement
+            # enough methods.  I could fix this with a Protocol but
+            # then I need typing_extensions which isn't currently
+            # a build dep.
             legacy_th_declarations.append(
-                LEGACY_TH_DECLARATION.substitute(env))
+                LEGACY_TH_DECLARATION.substitute(env))  # type: ignore
             legacy_th_definitions.append(
-                LEGACY_TH_DEFINITION.substitute(env))
+                LEGACY_TH_DEFINITION.substitute(env))  # type: ignore
 
     def process_native(option):
         # type: (FunctionOption) -> None
@@ -1445,7 +1599,6 @@ def create_derived(backend_type_env, declarations):
             # If we're here, then our native_functions.yaml entry has dispatch configuration.
             # Having manual kernel registration doesn't make sense.
             assert not option['manual_kernel_registration']
-
             backend = backend_type_env['Backend']
             if backend in option['backend_types']:
 
@@ -1466,13 +1619,18 @@ def create_derived(backend_type_env, declarations):
                 type_object_definitions.append(def_backend.substitute(env))
 
                 if native_dispatch:
+                    # See NOTE[UnboxedOnly]
                     if option['use_c10_dispatcher'] == 'full':
-                        function_registrations.append(
-                            BACKEND_FUNCTION_REGISTRATION.substitute(env))
+                        op_registrations.append(OpRegistration(
+                            operator_name=OPERATOR_NAME.substitute(option),
+                            registration_code=BACKEND_FUNCTION_REGISTRATION.substitute(env),
+                            schema_registration_code=SCHEMA_REGISTRATION.substitute(option)))
                     else:
                         assert option['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
-                        function_registrations.append(
-                            BACKEND_UNBOXEDONLY_FUNCTION_REGISTRATION.substitute(env))
+                        op_registrations.append(OpRegistration(
+                            operator_name=OPERATOR_NAME.substitute(option),
+                            registration_code=BACKEND_UNBOXEDONLY_FUNCTION_REGISTRATION.substitute(env),
+                            schema_registration_code=SCHEMA_REGISTRATION.substitute(option)))
 
     for declaration in declarations:
         for option in declaration['options']:
@@ -1486,5 +1644,5 @@ def create_derived(backend_type_env, declarations):
                         process_native(option)
                 except NYIError:
                     pass
-    return (type_object_declarations, type_object_definitions, function_registrations,
+    return (type_object_declarations, type_object_definitions, op_registrations,
             legacy_th_declarations, legacy_th_definitions)

@@ -1,6 +1,8 @@
 import io
 import os
 import sys
+import copy
+
 import torch
 from typing import Optional
 
@@ -187,8 +189,24 @@ class TestTorchbind(JitTestCase):
 
         inst = FooBar4321()
         scripted = torch.jit.script(inst)
-        copied = scripted._c.deepcopy()
+        copied = copy.deepcopy(scripted)
         assert copied.forward() == 7
+        for expected in [7, 3, 3, 1]:
+            assert copied.f.pop() == expected
+
+    @skipIfRocm
+    def test_torchbind_python_deepcopy(self):
+        class FooBar4321(torch.nn.Module):
+            def __init__(self):
+                super(FooBar4321, self).__init__()
+                self.f = torch.classes._TorchScriptTesting._PickleTester([3, 4])
+
+            def forward(self):
+                return self.f.top()
+
+        inst = FooBar4321()
+        copied = copy.deepcopy(inst)
+        assert copied() == 7
         for expected in [7, 3, 3, 1]:
             assert copied.f.pop() == expected
 

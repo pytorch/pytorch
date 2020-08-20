@@ -1,11 +1,16 @@
 #include <torch/csrc/distributed/rpc/utils.h>
 
+#include <fmt/format.h>
+#include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_req.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/cleanup_autograd_context_resp.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/propagate_gradients_req.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/propagate_gradients_resp.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_autograd.h>
+#include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_profiling_req.h>
+#include <torch/csrc/distributed/autograd/rpc_messages/rpc_with_profiling_resp.h>
 #include <torch/csrc/distributed/autograd/utils.h>
+#include <torch/csrc/distributed/rpc/profiler/remote_profiler_manager.h>
 #include <torch/csrc/distributed/rpc/python_call.h>
 #include <torch/csrc/distributed/rpc/python_remote_call.h>
 #include <torch/csrc/distributed/rpc/python_resp.h>
@@ -16,11 +21,50 @@
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <torch/csrc/jit/serialization/unpickler.h>
 
-#include <fmt/format.h>
+#ifdef USE_TENSORPIPE
+#include <tensorpipe/core/message.h>
+#endif
 
 namespace torch {
 namespace distributed {
 namespace rpc {
+namespace {
+void processRemoteProfiledEvents(
+    autograd::RpcWithProfilingResp& rpcWithProfilingResp) {
+  // Check if the profiler is enabled
+  auto enabled = torch::autograd::profiler::profilerEnabled();
+  TORCH_CHECK(
+      enabled,
+      "Profiler was expected to be enabled. This can happen in callback "
+      " continutations that run in different threads, and the TLS of the "
+      " profiler was not propagated.");
+  std::vector<torch::autograd::profiler::Event> events =
+      rpcWithProfilingResp.getProfiledEvents();
+  const auto& profilingId = rpcWithProfilingResp.getProfilingId();
+  auto& remoteProfilerManager = RemoteProfilerManager::getInstance();
+  auto key = remoteProfilerManager.retrieveRPCProfilingKey(profilingId);
+  remoteProfilerManager.eraseKey(profilingId);
+  auto keyPrefixStr = key + rpc::REMOTE_PROFILING_KEY_PREFIX;
+  std::for_each(
+      events.begin(),
+      events.end(),
+      [&keyPrefixStr](torch::autograd::profiler::Event& event) {
+        std::string name = keyPrefixStr + std::string(event.name());
+        event.setName(at::StringView(name));
+      });
+  // Add event list to the thread local profiler.
+  torch::autograd::profiler::addEventList(std::move(events));
+}
+
+inline c10::Device indexToDevice(c10::DeviceIndex index) {
+  if (index == -1) {
+    return c10::Device(at::kCPU);
+  } else {
+    return c10::Device(at::kCUDA, index);
+  }
+}
+
+} // namespace
 
 const std::string kRPCErrorPrefix = std::string("RPCErr");
 
@@ -99,6 +143,9 @@ std::unique_ptr<RpcCommandBase> deserializeRequest(const Message& request) {
     case MessageType::CLEANUP_AUTOGRAD_CONTEXT_REQ: {
       return autograd::CleanupAutogradContextReq::fromMessage(request);
     }
+    case MessageType::RUN_WITH_PROFILING_REQ: {
+      return autograd::RpcWithProfilingReq::fromMessage(request);
+    }
     default: {
       TORCH_INTERNAL_ASSERT(
           false, "Request type ", request.type(), " not supported.");
@@ -149,6 +196,19 @@ std::unique_ptr<RpcCommandBase> deserializeResponse(
     }
     case MessageType::CLEANUP_AUTOGRAD_CONTEXT_RESP: {
       return autograd::CleanupAutogradContextResp::fromMessage(response);
+    }
+    case MessageType::RUN_WITH_PROFILING_RESP: {
+      std::unique_ptr<RpcCommandBase> rpcPtr =
+          autograd::RpcWithProfilingResp::fromMessage(response);
+      RpcCommandBase& rpc = *rpcPtr;
+      auto& rpcWithProfilingResp =
+          static_cast<autograd::RpcWithProfilingResp&>(rpc);
+      // Process remotely profiled events.
+      processRemoteProfiledEvents(rpcWithProfilingResp);
+
+      wrappedMsgType = rpcWithProfilingResp.wrappedMessageType();
+      auto wrappedRPC = std::move(rpcWithProfilingResp).moveWrappedRpc();
+      return wrappedRPC;
     }
     default: {
       TORCH_INTERNAL_ASSERT(
@@ -401,6 +461,7 @@ std::pair<std::vector<char>, std::vector<at::Tensor>> wireDeserialize(
   return {std::move(payload), std::move(tensors)};
 }
 
+#ifdef USE_TENSORPIPE
 namespace {
 
 // The TensorPipe agent splits the RPC message's information across multiple
@@ -413,22 +474,27 @@ constexpr int kTpMessageTypeIdx = 0;
 constexpr int kTpMessageIdIdx = 1;
 // Then comes the rpc::Message::payload();
 constexpr int kTpMessagePayloadIdx = 2;
+// Then comes the destination device indices for all tensors in the message.
+constexpr int kTpMessageDevicesIdx = 3;
 // Last comes the pickle of rpc::Message::tensors() (with the tensors themselves
 // stored as, well, tensors in the tensorpipe::Message).
-constexpr int kTpMessagePickleIdx = 3;
+constexpr int kTpMessagePickleIdx = 4;
 
 } // namespace
 
 std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
-    Message&& rpcMessage) {
+    Message&& rpcMessage,
+    std::vector<c10::DeviceIndex> deviceIndices) {
   tensorpipe::Message tpMessage;
   TensorpipeWriteBuffers buffers;
 
   // Metadata
   buffers.type = std::make_unique<MessageType>(rpcMessage.type());
   buffers.id = std::make_unique<int64_t>(rpcMessage.id());
+  // kTpMessageTypeIdx = 0
   tpMessage.payloads.push_back(
       tensorpipe::Message::Payload{buffers.type.get(), sizeof(MessageType)});
+  // kTpMessageIdIdx = 1
   tpMessage.payloads.push_back(
       tensorpipe::Message::Payload{buffers.id.get(), sizeof(int64_t)});
 
@@ -438,11 +504,30 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
   // it uses non-const pointers even though it doesn't modify them when writing.
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   char* payloadPtr = const_cast<char*>(buffers.payload.data());
+  // kTpMessagePayloadIdx = 2
   tpMessage.payloads.push_back(
       tensorpipe::Message::Payload{payloadPtr, buffers.payload.size()});
 
+  // Device indices
+  buffers.deviceIndices = std::move(deviceIndices);
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+  auto indicesPtr = const_cast<c10::DeviceIndex*>(buffers.deviceIndices.data());
+  auto size = buffers.deviceIndices.size() * sizeof(c10::DeviceIndex);
+  // kTpMessageDevicesIdx = 3
+  tpMessage.payloads.push_back(tensorpipe::Message::Payload{indicesPtr, size});
+
   // Tensors
-  buffers.tensors = cloneSparseTensors(rpcMessage.tensors()).vec();
+  if (buffers.deviceIndices.empty()) {
+    buffers.tensors = cloneSparseTensors(rpcMessage.tensors()).vec();
+  } else {
+    std::vector<torch::Tensor> tensors;
+    tensors.reserve(rpcMessage.tensors().size());
+    for (const auto& tensor : rpcMessage.tensors()) {
+      tensors.emplace_back(tensor.cpu());
+    }
+    buffers.tensors = cloneSparseTensors(tensors).vec();
+  }
+
   torch::jit::Pickler pickler([&](const void* buf, size_t sz) -> size_t {
     buffers.pickle.insert(
         buffers.pickle.end(),
@@ -453,6 +538,7 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
   pickler.protocol();
   pickler.pushIValue(buffers.tensors);
   pickler.stop();
+  // kTpMessagePickleIdx = 4
   tpMessage.payloads.push_back(tensorpipe::Message::Payload{
       buffers.pickle.data(), buffers.pickle.size()});
   for (const auto& tensor : pickler.tensorData()) {
@@ -482,8 +568,8 @@ TensorpipeReadBuffers tensorpipeAllocate(tensorpipe::Message& tpMessage) {
   TensorpipeReadBuffers buffers;
 
   TORCH_INTERNAL_ASSERT(
-      tpMessage.payloads.size() == 4,
-      "message expected to contain 4 payloads, whereas it contained ",
+      tpMessage.payloads.size() == 5,
+      "message expected to contain 5 payloads, whereas it contained ",
       tpMessage.payloads.size(),
       " payloads");
 
@@ -511,6 +597,17 @@ TensorpipeReadBuffers tensorpipeAllocate(tensorpipe::Message& tpMessage) {
 
   buffers.payload.resize(tpMessage.payloads[kTpMessagePayloadIdx].length);
   tpMessage.payloads[kTpMessagePayloadIdx].data = buffers.payload.data();
+
+  auto deviceIndexSize = sizeof(c10::DeviceIndex);
+  TORCH_INTERNAL_ASSERT(
+      tpMessage.payloads[kTpMessageDevicesIdx].length % deviceIndexSize == 0,
+      "Invalid number of bytes for device index payload, total bytes: ",
+      tpMessage.payloads[kTpMessageDevicesIdx].length,
+      ", device index size: ",
+      deviceIndexSize);
+  buffers.deviceIndices.resize(
+      tpMessage.payloads[kTpMessageDevicesIdx].length / deviceIndexSize);
+  tpMessage.payloads[kTpMessageDevicesIdx].data = buffers.deviceIndices.data();
 
   buffers.pickle.resize(tpMessage.payloads[kTpMessagePickleIdx].length);
   tpMessage.payloads[kTpMessagePickleIdx].data = buffers.pickle.data();
@@ -554,13 +651,83 @@ Message tensorpipeDeserialize(
     tensors.emplace_back(std::move(t));
   }
 
+  if (!buffers.deviceIndices.empty()) {
+    TORCH_INTERNAL_ASSERT(
+        buffers.deviceIndices.size() == tensors.size(),
+        "Number of device indices must match the number of tensors in the "
+        "RPC message. But got ",
+        tensors.size(),
+        " tensors with ",
+        buffers.deviceIndices.size(),
+        " device indices.");
+    for (size_t i = 0; i < tensors.size(); ++i) {
+      auto index = buffers.deviceIndices[i];
+      if (tensors[i].device().index() != index) {
+        tensors[i] = tensors[i].to(indexToDevice(index));
+      }
+    }
+  }
+
   return Message(
       std::move(buffers.payload),
       std::move(tensors),
       *buffers.type,
       *buffers.id);
 }
+#endif /* USE_TENSORPIPE */
 
+void writeWrappedPayload(
+    std::vector<char>& originalPayload,
+    std::vector<char>& additionalPayload) {
+  originalPayload.insert(
+      originalPayload.end(),
+      additionalPayload.begin(),
+      additionalPayload.end());
+
+  // Add size of the additional payload
+  int64_t indexToWrite = originalPayload.size();
+  originalPayload.resize(originalPayload.size() + sizeof(int64_t));
+  const int64_t additionalPayloadSize = additionalPayload.size();
+  torch::utils::THP_encodeInt64Buffer(
+      reinterpret_cast<uint8_t*>(originalPayload.data()) + indexToWrite,
+      &additionalPayloadSize,
+      torch::utils::THPByteOrder::THP_BIG_ENDIAN,
+      1);
+}
+
+std::vector<at::IValue> readWrappedPayload(
+    std::vector<char>& payload,
+    const rpc::Message& message) {
+  // Read the additional payload remove it from the payload.
+  int64_t additionalPayloadSize;
+  size_t indexToRead = payload.size() - sizeof(int64_t);
+  TORCH_INTERNAL_ASSERT(indexToRead >= 0);
+  torch::utils::THP_decodeInt64Buffer(
+      &additionalPayloadSize,
+      reinterpret_cast<uint8_t*>(payload.data()) + indexToRead,
+      torch::utils::THPByteOrder::THP_BIG_ENDIAN,
+      1);
+  payload.resize(indexToRead);
+
+  TORCH_INTERNAL_ASSERT(
+      payload.size() > additionalPayloadSize,
+      "Wrong payload sizes: payload.size() is ",
+      payload.size(),
+      " but additional payload size is ",
+      additionalPayloadSize);
+  auto wrappedPayloadBegin =
+      static_cast<const char*>(message.payload().data()) + payload.size() -
+      additionalPayloadSize;
+  std::vector<torch::Tensor> tensorTable;
+  IValue tuple = jit::unpickle(
+      wrappedPayloadBegin,
+      additionalPayloadSize,
+      *rpc::RpcAgent::getCurrentRpcAgent()->getTypeResolver(),
+      &tensorTable);
+  std::vector<at::IValue> tupleElements = tuple.toTuple()->elements();
+  payload.resize(payload.size() - additionalPayloadSize);
+  return tupleElements;
+}
 } // namespace rpc
 } // namespace distributed
 } // namespace torch

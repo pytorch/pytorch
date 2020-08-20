@@ -28,6 +28,7 @@
 #include <atomic>
 #include <climits>
 #include <set>
+#include <stack>
 
 namespace torch {
 namespace jit {
@@ -374,9 +375,9 @@ struct Environment {
       if (!as_simple_value->type()->isSubtypeOfExt(parent_type, &why_not)) {
         auto error = ErrorReport(loc);
         error << "Variable '" << name << "' previously has type "
-              << simple_parent->type()->python_str()
+              << simple_parent->type()->repr_str()
               << " but is now being assigned to a value of type "
-              << as_simple_value->type()->python_str();
+              << as_simple_value->type()->repr_str();
 
         // Special-cased error msg if we're trying to assign to a tensor list.
         if (simple_parent->type()->kind() == TypeKind::ListType &&
@@ -397,9 +398,9 @@ struct Environment {
       if (!as_simple_value->type()->isSubtypeOf(annotated_type)) {
         throw ErrorReport(loc)
             << "Variable '" << name << "' is annotated with type "
-            << annotated_type->python_str()
+            << annotated_type->repr_str()
             << " but is being assigned to a value of type "
-            << as_simple_value->type()->python_str();
+            << as_simple_value->type()->repr_str();
       }
       insertStore(name, loc, std::move(as_simple_value), annotated_type);
     } else {
@@ -493,6 +494,10 @@ struct Environment {
            std::make_shared<BuiltinFunction>(prim::rangelist, at::nullopt)},
           {"sorted",
            std::make_shared<BuiltinFunction>(aten::sorted, at::nullopt)},
+          // Only AssertionError is bound so that we can use it from emitAssert,
+          // all other exceptions should be resolved at the Python level
+          {"AssertionError",
+           std::make_shared<ExceptionValue>("AssertionError")},
       };
       auto it = globals.find(ident);
       if (it != globals.end()) {
@@ -972,8 +977,8 @@ struct to_ir {
       if (!result->type()->isSubtypeOf(result_type)) {
         throw ErrorReport(stmt.range())
             << "Return value was annotated as having type "
-            << result_type->python_str() << " but is actually of type "
-            << result->type()->python_str();
+            << result_type->repr_str() << " but is actually of type "
+            << result->type()->repr_str();
       }
     } else {
       result_type = def_stack_.back().merged_return_type_;
@@ -984,9 +989,9 @@ struct to_ir {
       if (!merged_result_type) {
         throw ErrorReport(stmt.range())
             << "Previous return statement returned a value of type "
-            << result_type->python_str()
+            << result_type->repr_str()
             << " but this return statement returns a value of type "
-            << result->type()->python_str();
+            << result->type()->repr_str();
       }
       result_type = merged_result_type.value();
     }
@@ -1023,7 +1028,7 @@ struct to_ir {
           emitSugaredExpr(expr, 0);
         } break;
         case TK_RAISE:
-          emitRaise(Raise(stmt).range());
+          emitRaise(Raise(stmt));
           break;
         case TK_ASSERT:
           emitAssert(Assert(stmt));
@@ -1045,6 +1050,9 @@ struct to_ir {
           break;
         case TK_DELETE:
           emitDelete(Delete(stmt));
+          break;
+        case TK_WITH:
+          emitWith(With(stmt));
           break;
         default:
           throw ErrorReport(stmt)
@@ -1208,7 +1216,7 @@ struct to_ir {
         throw ErrorReport(loc)
             << "Expected list type annotation for list comprehension"
                ", found "
-            << type_hint->python_str();
+            << type_hint->repr_str();
       }
       list_value->setType(type_hint);
       type_set = true;
@@ -1326,8 +1334,8 @@ struct to_ir {
     auto unified = unifyTypes(true_type, false_type);
     if (!unified) {
       throw ErrorReport(range)
-          << "if-expression's true branch has type " << true_type->python_str()
-          << " but false branch has type " << false_type->python_str();
+          << "if-expression's true branch has type " << true_type->repr_str()
+          << " but false branch has type " << false_type->repr_str();
     }
 
     // Add op outputs
@@ -1342,13 +1350,13 @@ struct to_ir {
       out = asSimple(bool_cast->call(loc, method, {v}, {}, 0));
     } catch (...) {
       throw ErrorReport(loc) << "Could not cast value of type "
-                             << v->type()->python_str() << " to bool";
+                             << v->type()->repr_str() << " to bool";
     }
     // cast value not response for checking output type
     if (!out->type()->isSubtypeOf(BoolType::get())) {
       throw ErrorReport(loc)
           << "expected a bool expression for condition but found "
-          << out->type()->python_str();
+          << out->type()->repr_str();
     }
     return out;
   }
@@ -1507,8 +1515,8 @@ struct to_ir {
       if (!unified) {
         ErrorReport error(loc);
         error << "Type mismatch: " << x << " is set to type "
-              << tv->type()->python_str() << " in the true branch"
-              << " and type " << fv->type()->python_str()
+              << tv->type()->repr_str() << " in the true branch"
+              << " and type " << fv->type()->repr_str()
               << " in the false branch";
         if (save_true->findInParentFrame(x) ||
             save_false->findInParentFrame(x)) {
@@ -1753,15 +1761,113 @@ struct to_ir {
     emitLoopCommon(stmt.range(), emit_body, nullptr, {}, cond);
   }
 
+  void emitWith(const With& stmt) {
+    auto targets = stmt.targets();
+    // Keep a stack of entered objects so they can be exited
+    // in the right order.
+    std::stack<Value*> entered;
+
+    for (const auto& target : targets) {
+      Expr e = target.target();
+
+      auto* rhs = emitExpr(e);
+      auto* n = graph->insertNode(graph->create(prim::Enter, {rhs}));
+      entered.push(rhs);
+      auto rhsClass = rhs->type()->expect<ClassType>();
+
+      if (!rhsClass) {
+        throw ErrorReport(e.range())
+            << "With item expression does not return a class type";
+      }
+
+      auto* enterMethod = rhsClass->findMethod("__enter__");
+      auto* exitMethod = rhsClass->findMethod("__exit__");
+
+      if (!enterMethod || !exitMethod) {
+        throw ErrorReport(e.range())
+            << "Object returned by with item expression does not define __enter__ and __exit__ methods";
+      }
+
+      // Check the schema of __enter__.
+      auto& enterSchema = enterMethod->getSchema();
+      if (enterSchema.arguments().size() != 1) {
+        throw ErrorReport(e.range())
+            << "__enter__ must have only one argument and one return value";
+      }
+
+      // Check the schema of __exit__.
+      auto& exitSchema = exitMethod->getSchema();
+      if (exitSchema.arguments().size() != 4) {
+        throw ErrorReport(e.range())
+            << "__exit__ must have four arguments and no return value";
+      } else {
+        if (exitSchema.returns().at(0).type() != NoneType::get()) {
+          throw ErrorReport(e.range()) << "__exit__ must have no return value";
+        }
+
+        for (unsigned i = 1; i < 4; ++i) {
+          if (exitSchema.arguments().at(i).type() != AnyType::get()) {
+            throw ErrorReport(e.range())
+                << "argument " << i
+                << " of __exit__ must have Any type; TorchScript does not currently support passing exception type, value, or traceback to the __exit__ function.";
+          }
+        }
+      }
+
+      // Set the output of the enter node to be the return type of __enter__.
+      n->output(0)->setType(enterSchema.returns().at(0).type());
+
+      // Set i = e.__enter__() so that references to i in the body of the with
+      // will resolve correctly.
+      if (target.var().present()) {
+        Var i = target.var().get();
+        environment_stack->setVar(i.range(), i.name().name(), n->output(0));
+      }
+    }
+
+    emitStatements(stmt.body());
+
+    // Insert all the corresponding prim::Exit nodes.
+    while (!entered.empty()) {
+      auto* input = entered.top();
+      entered.pop();
+      auto* n = graph->create(prim::Exit);
+      graph->insertNode(n);
+      n->addInput(input);
+    }
+  }
+
   // Currently we do not support assigning exceptions to variables,
   // a = Exception("hi")
   // raise a
   //
   // We ignore the expression following raise
-  void emitRaise(const SourceRange& loc) {
-    const std::string exception = "Exception";
-    auto string_input = insertConstant(*graph, exception, loc);
-    graph->insert(prim::RaiseException, {string_input}, {}, loc);
+  void emitRaise(const Raise& raise) {
+    auto sv = emitSugaredExpr(raise.expr(), 1);
+    Value* error_message = nullptr;
+
+    if (auto exception_instance =
+            std::dynamic_pointer_cast<ExceptionMessageValue>(sv)) {
+      // The typical case, an instance of the exception class was thrown:
+      //    raise RuntimeError("error")
+      error_message = exception_instance->getValue();
+    } else if (
+        auto exception_class = std::dynamic_pointer_cast<ExceptionValue>(sv)) {
+      // A bare exception was thrown so add an empty message. e.g.
+      //    raise RuntimeError
+      error_message = insertConstant(*graph, "", raise.range());
+    } else {
+      // The raise was not followed by an exception (i.e. it was something like
+      // `raise "error"` instead of `raise RuntimeError("error")`)
+      throw ErrorReport(raise.range())
+          << "exceptions must derive from BaseException";
+    }
+
+    if (!error_message->type()->isSubtypeOf(StringType::get())) {
+      error_message = graph->insert(aten::str, {error_message});
+    }
+
+    graph->insert(prim::RaiseException, {error_message}, {}, raise.range());
     exit_blocks.insert(environment_stack->block());
   }
 
@@ -1769,8 +1875,20 @@ struct to_ir {
   void emitAssert(const Assert& stmt) {
     CondValue cond_value = emitCondExpr(stmt.test());
     List<Stmt> true_branch = List<Stmt>::create(stmt.range(), {});
+    // Create an `AssertionError("the_message")` call
+    auto message = (stmt.msg().present())
+        ? stmt.msg().get()
+        : StringLiteral::create(stmt.range(), "");
+    auto callee = Var::create(
+        stmt.range(), Ident::create(stmt.range(), "AssertionError"));
+    auto apply = Apply::create(
+        stmt.range(),
+        callee,
+        List<Expr>::create(stmt.range(), {message}),
+        List<Attribute>::create(stmt.range(), {}));
+
     List<Stmt> false_branch =
-        List<Stmt>::create(stmt.range(), {Raise::create(stmt.range())});
+        List<Stmt>::create(stmt.range(), {Raise::create(stmt.range(), apply)});
     emitIfElseBlocks(stmt.range(), cond_value, true_branch, false_branch);
   }
 
@@ -1922,7 +2040,7 @@ struct to_ir {
         magic_method_name = out_of_place_method_name;
       } else {
         throw ErrorReport(stmt.range())
-            << "Cannot emit inplace op on " << type->python_str()
+            << "Cannot emit inplace op on " << type->repr_str()
             << " since it does not define an " << in_place_method_name << " or "
             << out_of_place_method_name << " method";
       }
@@ -1954,7 +2072,7 @@ struct to_ir {
     const TypePtr type = sliceable->type();
     if (subscriptExprs.size() != 1) {
       throw ErrorReport(subscriptExprs)
-          << "Sliced expression not yet supported for " << type->python_str()
+          << "Sliced expression not yet supported for " << type->repr_str()
           << " augmented assignment. "
           << "File a bug if you want this";
     }
@@ -1968,7 +2086,7 @@ struct to_ir {
 
     if (elemType == nullptr) {
       throw ErrorReport(lhs)
-          << type->python_str() << " does not support augmented assignment.";
+          << type->repr_str() << " does not support augmented assignment.";
     }
     const auto idxValue = emitExpr(subscriptExprs[0]);
     const auto containerArg =
@@ -2324,9 +2442,14 @@ struct to_ir {
     if (!stmt.rhs().present()) {
       throw ErrorReport(stmt.range()) << "Expected RHS for assignment";
     }
+
+    TypePtr type_hint = nullptr;
+    if (stmt.type().present()) {
+      type_hint = typeParser_.parseTypeFromExpr(stmt.type().get());
+    }
     const auto lhs = Select(stmt.lhs());
     auto lhsObject = emitSugaredExpr(lhs.value(), 1);
-    const auto rhsValue = emitSugaredExpr(stmt.rhs().get(), 1)
+    const auto rhsValue = emitSugaredExpr(stmt.rhs().get(), 1, type_hint)
                               ->asValue(stmt.rhs().range(), method);
     lhsObject->setAttr(stmt.range(), method, lhs.selector().name(), rhsValue);
   }
@@ -2541,8 +2664,8 @@ struct to_ir {
         std::stringstream why_not;
         if (!expr->type()->isSubtypeOfExt(type, &why_not)) {
           throw ErrorReport(apply.inputs())
-              << "expected an expression of type " << type->python_str()
-              << " but found " << expr->type()->python_str() << "\n"
+              << "expected an expression of type " << type->repr_str()
+              << " but found " << expr->type()->repr_str() << "\n"
               << why_not.str();
         }
 
@@ -3050,7 +3173,7 @@ struct to_ir {
             // If the type hint was not a List[T] throw an error
             throw ErrorReport(tree)
                 << "Expected a List type hint but instead got "
-                << type_hint->python_str();
+                << type_hint->repr_str();
           }
         } else if (!values.empty()) {
           std::stringstream ss;
@@ -3068,8 +3191,8 @@ struct to_ir {
           if (!v->type()->isSubtypeOfExt(elem_type, &ss)) {
             throw ErrorReport(tree)
                 << "Lists must contain only a single type, expected: "
-                << elem_type->python_str() << " but found "
-                << v->type()->python_str() << " instead.\n"
+                << elem_type->repr_str() << " but found "
+                << v->type()->repr_str() << " instead.\n"
                 << ss.str();
           }
         }
@@ -3120,8 +3243,8 @@ struct to_ir {
               throw ErrorReport(trees[i])
                   << "Dict " << what
                   << " must contain only a single type, expected: "
-                  << type->python_str() << " but found "
-                  << values[i]->type()->python_str() << " instead.\n"
+                  << type->repr_str() << " but found "
+                  << values[i]->type()->repr_str() << " instead.\n"
                   << ss.str();
             }
           }
@@ -3329,7 +3452,7 @@ struct to_ir {
       } else {
         throw ErrorReport(loc)
             << "Unsupported operation: indexing tensor with unsupported index type '"
-            << index->type()->python_str()
+            << index->type()->repr_str()
             << "'. Only ints, slices, lists and tensors are supported";
       }
     };
@@ -3485,7 +3608,7 @@ struct to_ir {
       if (elems.size() == 0 ||
           !convertibleToList(tuple_typ, ListType::create(elems[0]))) {
         throw ErrorReport(loc)
-            << "Cannot index into a " << tuple_typ->python_str()
+            << "Cannot index into a " << tuple_typ->repr_str()
             << " with a non-integer literal because we cannot resolve the output type";
       }
       output_type = elems[0];
@@ -3546,8 +3669,31 @@ struct to_ir {
           range, sv->asValue(val_range, method), subscript_exprs));
     }
     if (subscript_exprs[0].kind() == TK_SLICE_EXPR) {
-      return std::make_shared<SimpleValue>(emitBasicSlice(
-          range, sv->asValue(val_range, method), subscript_exprs));
+      // TODO @wconstab refactor using Symbol instead of string compare
+      if (sv->kind() == "module") {
+        // Slicing isn't currently implemented for Sequential/ModuleList,
+        // but is implemented for Tuples, so a quick workaround is to
+        // convert to a tuple of Modules for slicing support.
+        auto s_tuple_val =
+            sv->asTupleValue(val_range, method)->asValue(val_range, method);
+        const SliceExpr& slice = SliceExpr(subscript_exprs[0]);
+        auto begin =
+            NamedValue(val_range, "begin", emitExpr(Expr(slice.startOr(0))));
+        if (slice.end().present()) {
+          auto end =
+              NamedValue(val_range, "end", emitExpr(Expr(slice.end().get())));
+          auto tupleSliceValue =
+              emitTupleSlice(val_range, s_tuple_val, begin, end);
+          return std::make_shared<SimpleValue>(tupleSliceValue);
+        } else {
+          auto tupleSliceValue =
+              emitTupleSlice(val_range, s_tuple_val, begin, c10::nullopt);
+          return std::make_shared<SimpleValue>(tupleSliceValue);
+        }
+      } else {
+        return std::make_shared<SimpleValue>(emitBasicSlice(
+            range, sv->asValue(val_range, method), subscript_exprs));
+      }
     } else {
       // Desugars gather syntactic sugar foo[i]
       Value* idx = emitExpr(subscript_exprs[0]);
@@ -3600,6 +3746,61 @@ CompilationUnit::CompilationUnit(const std::string& source)
   define(c10::nullopt, source, nativeResolver(), nullptr);
 }
 
+// This pair represents a pair of functions (getter and setter) obtained from
+// compiling a Property.
+struct CompilationUnit::PropertyPair
+    : public std::pair<std::unique_ptr<Function>, std::unique_ptr<Function>> {
+  PropertyPair(
+      std::unique_ptr<Function> getter,
+      std::unique_ptr<Function> setter) {
+    TORCH_INTERNAL_ASSERT(getter, "Property pair must have defined getter")
+    this->first = std::move(getter);
+    this->second = std::move(setter);
+  }
+
+  std::unique_ptr<Function>& getGetter() {
+    return this->first;
+  }
+
+  std::unique_ptr<Function>& getSetter() {
+    return this->second;
+  }
+};
+
+CompilationUnit::PropertyPair CompilationUnit::define_property(
+    const c10::optional<c10::QualifiedName>& prefix,
+    const Property& prop,
+    const ResolverPtr& resolver,
+    const Self* self,
+    const std::unordered_map<std::string, Function*>& function_table,
+    bool shouldMangle) const {
+  // self must be defined because properties are features of classes and
+  // modules.
+  TORCH_INTERNAL_ASSERT(self);
+
+  // Compile the getter function.
+  std::unique_ptr<Function> getter_fn = define(
+      prefix, prop.getter(), resolver, self, function_table, shouldMangle);
+
+  // Compile the setter function if it exists.
+  std::unique_ptr<Function> setter_fn = nullptr;
+  if (prop.setter().present()) {
+    setter_fn = define(
+        prefix,
+        prop.setter().get(),
+        resolver,
+        self,
+        function_table,
+        shouldMangle);
+  }
+
+  // Add the property to the class type definition.
+  self->getClassType()->addProperty(
+      prop.name().name(), getter_fn.get(), setter_fn.get());
+
+  return PropertyPair(std::move(getter_fn), std::move(setter_fn));
+}
+
 std::unique_ptr<Function> CompilationUnit::define(
     const c10::optional<QualifiedName>& prefix,
     const Def& def,
@@ -3648,41 +3849,70 @@ std::unique_ptr<Function> CompilationUnit::define(
 }
 
 std::vector<Function*> CompilationUnit::define(
-    const c10::optional<QualifiedName>& prefix,
+    const c10::optional<c10::QualifiedName>& prefix,
+    const std::vector<Property>& properties,
+    const std::vector<ResolverPtr>& propResolvers,
     const std::vector<Def>& definitions,
-    const std::vector<ResolverPtr>& resolvers,
+    const std::vector<ResolverPtr>& defResolvers,
     const Self* self,
     bool shouldMangle) {
-  TORCH_INTERNAL_ASSERT(definitions.size() == resolvers.size());
+  TORCH_INTERNAL_ASSERT(definitions.size() == defResolvers.size());
+  TORCH_INTERNAL_ASSERT(properties.size() == propResolvers.size());
   std::vector<Function*> functions;
   std::unordered_map<std::string, Function*> function_table;
+
+  // Records fn in function_table, functions and with register_function.
+  // This is done several times below, so this lambda helps avoid repeating
+  // code.
+  auto record_function = [&](std::unique_ptr<Function> fn) {
+    function_table[fn->name()] = fn.get();
+    functions.emplace_back(fn.get());
+    this->register_function(std::move(fn));
+  };
+
+  for (size_t i = 0; i < properties.size(); i++) {
+    PropertyPair property_fns = define_property(
+        prefix,
+        properties[i],
+        propResolvers[i],
+        self,
+        function_table,
+        shouldMangle);
+
+    auto& getter_fn = property_fns.getGetter();
+    auto& setter_fn = property_fns.getSetter();
+
+    record_function(std::move(getter_fn));
+
+    if (setter_fn) {
+      record_function(std::move(setter_fn));
+    }
+  }
 
   for (size_t i = 0; i < definitions.size(); i++) {
     auto fn = define(
         prefix,
         definitions[i],
-        resolvers[i],
+        defResolvers[i],
         self,
         function_table,
         shouldMangle);
-    const auto& name = fn->name();
-    function_table[name] = fn.get();
-    functions.push_back(fn.get());
-    register_function(std::move(fn));
+
+    record_function(std::move(fn));
   }
 
   // We need to compile `__init__` first, since it can determine what attributes
   // are available to other methods. So reorder the definitions accordingly.
-  for (size_t i = 0; i < definitions.size(); i++) {
-    const auto& def = definitions[i];
-    if (def.name().name() == "__init__") {
-      functions[i]->ensure_defined();
+  for (auto& kv : function_table) {
+    if (kv.first == "__init__") {
+      kv.second->ensure_defined();
     }
   }
 
   for (Function* function : functions) {
     function->ensure_defined();
   }
+
   return functions;
 }
 
@@ -3699,7 +3929,13 @@ std::vector<Function*> CompilationUnit::define(
     definitions.push_back(def);
     resolvers.push_back(resolver);
   }
-  return define(prefix, definitions, resolvers, self);
+  return define(
+      prefix,
+      /*properties=*/{},
+      /*propResolvers=*/{},
+      definitions,
+      resolvers,
+      self);
 }
 
 void runCleanupPasses(std::shared_ptr<Graph>& to_clean) {
@@ -3708,9 +3944,10 @@ void runCleanupPasses(std::shared_ptr<Graph>& to_clean) {
   if (getInlineEverythingMode()) {
     Inline(*to_clean);
   }
+
   // remove any uses of tuples that we inserted that are not needed
   LowerSimpleTuples(to_clean);
-  ConstantPooling(to_clean);
+
   // full constant propagation runs ops with mutable inputs if it can
   // prove that the inputs are not mutated anywhere in the graph.
   // if a mutating node is removed in the graph (e.g. constant prop inlined a
@@ -3719,6 +3956,11 @@ void runCleanupPasses(std::shared_ptr<Graph>& to_clean) {
   // (jitter) So we run only constant prop w immutable types here bc
   // successive runs of immutable constant prop does not change the graph
   ConstantPropagationImmutableTypes(to_clean);
+
+  // Constant Pooling pass must be after ConstantPropogation, which can create
+  // new constants that needs to be pooled.
+  ConstantPooling(to_clean);
+
   // For jitter
   CanonicalizeOutputs(to_clean);
 }

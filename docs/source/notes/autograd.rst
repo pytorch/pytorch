@@ -11,7 +11,7 @@ programs, and can aid you in debugging.
 .. _excluding-subgraphs:
 
 Excluding subgraphs from backward
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+---------------------------------
 
 Every Tensor has a flag: :attr:`requires_grad` that allows for fine grained
 exclusion of subgraphs from gradient computation and can increase efficiency.
@@ -19,7 +19,7 @@ exclusion of subgraphs from gradient computation and can increase efficiency.
 .. _excluding-requires_grad:
 
 ``requires_grad``
-~~~~~~~~~~~~~~~~~
+^^^^^^^^^^^^^^^^^
 
 If there's a single input to an operation that requires gradient, its output
 will also require gradient. Conversely, only if all inputs don't require
@@ -61,7 +61,7 @@ will also require them.
 .. _how-autograd-encodes-history:
 
 How autograd encodes the history
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+--------------------------------
 
 Autograd is reverse automatic differentiation system.  Conceptually,
 autograd records a graph recording all of the operations that created
@@ -87,7 +87,7 @@ every iteration. You don't have to encode all possible paths before you
 launch the training - what you run is what you differentiate.
 
 In-place operations with autograd
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+---------------------------------
 
 Supporting in-place operations in autograd is a hard matter, and we discourage
 their use in most cases. Autograd's aggressive buffer freeing and reuse makes
@@ -120,9 +120,9 @@ an error is raised. This ensures that if you're using in-place
 functions and not seeing any errors, you can be sure that the computed
 gradients are correct.
 
-
 Multithreaded Autograd
-^^^^^^^^^^^^^^^^^^^^^^^^^^^
+----------------------
+
 The autograd engine is responsible for running all the backward operations
 necessary to compute the backward pass. This section will describe all the details
 that can help you make the best use of it in a multithreaded environment.(this is
@@ -142,7 +142,7 @@ does not block on the concurrent backward computations, example code could be:
         y.sum().backward()
         # potential optimizer update
 
-    
+
     # User write their own threading code to drive the train_fn
     threads = []
     for _ in range(10):
@@ -157,7 +157,7 @@ does not block on the concurrent backward computations, example code could be:
 Note that some behaviors that user should be aware of:
 
 Concurrency on CPU
-------------------
+^^^^^^^^^^^^^^^^^^
 
 When you run ``backward()`` or ``grad()`` via python or C++ API in multiple
 threads on CPU, you are expecting to see extra concurrency instead of
@@ -165,7 +165,7 @@ serializing all the backward calls in a specific order during execution
 (behavior before PyTorch 1.6).
 
 Non-determinism
-------------------
+^^^^^^^^^^^^^^^
 
 If you are calling ``backward()`` on multiple thread concurrently but with
 shared inputs (i.e. Hogwild CPU training). Since parameters are automatically
@@ -181,7 +181,7 @@ to happen. User could use the functional API :func:`torch.autograd.grad` to
 calculate the gradients instead of ``backward()`` to avoid non-determinism.
 
 Graph retaining
-------------------
+^^^^^^^^^^^^^^^
 
 If part of the autograd graph is shared between threads, i.e. run first
 part of forward single thread, then run second part in multiple threads,
@@ -193,7 +193,7 @@ crash in this case. Autograd will error out to the user similar to what call
 they should use ``retain_graph=True``.
 
 Thread Safety on Autograd Node
-------------------------------
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Since Autograd allows the caller thread to drive its backward execution for
 potential parallelism, it's important that we ensure thread safety on CPU with
@@ -205,8 +205,89 @@ for built-in C++ Autograd Nodes(e.g. AccumulateGrad, CopySlices) and custom
 thread safety on autograd Nodes that might have state write/read.
 
 No thread safety on C++ hooks
-------------------------------
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Autograd relies on the user to write thread safe C++ hooks. If you want the hook
 to be correctly applied in multithreading environment, you will need to write
 proper thread locking code to ensure the hooks are thread safe.
+
+.. _complex_autograd-doc:
+
+Autograd for Complex Numbers
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+**What notion of complex derivative does PyTorch use?**
+*******************************************************
+
+PyTorch follows `JAX's <https://jax.readthedocs.io/en/latest/notebooks/autodiff_cookbook.html#Complex-numbers-and-differentiation>`_
+convention for autograd for Complex Numbers.
+
+Suppose we have a function :math:`F: ℂ → ℂ` which we can decompose into functions u and v
+which compute the real and imaginary parts of the function:
+
+    .. code::
+
+        def F(z):
+            x, y = real(z), imag(z)
+            return u(x, y) + v(x, y) * 1j
+
+where :math:`1j` is a unit imaginary number.
+
+We define the :math:`JVP` for function :math:`F` at :math:`(x, y)` applied to a tangent
+vector :math:`c+dj \in C` as:
+
+    .. math:: \begin{bmatrix} 1 & 1j \end{bmatrix} * J * \begin{bmatrix} c \\ d \end{bmatrix}
+
+where
+
+    .. math::
+        J = \begin{bmatrix}
+            \frac{\partial u(x, y)}{\partial x} & \frac{\partial u(x, y)}{\partial y}\\
+            \frac{\partial v(x, y)}{\partial x} & \frac{\partial v(x, y)}{\partial y} \end{bmatrix} \\
+
+This is similar to the definition of the JVP for a function defined from :math:`R^2 → R^2`, and the multiplication
+with :math:`[1, 1j]^T` is used to identify the result as a complex number.
+
+We define the :math:`VJP` of :math:`F` at :math:`(x, y)` for a cotangent vector :math:`c+dj \in C` as:
+
+    .. math:: \begin{bmatrix} c & -d \end{bmatrix} * J * \begin{bmatrix} 1 \\ -1j \end{bmatrix}
+
+In PyTorch, the `VJP` is mostly what we care about, as it is the computation performed when we do backward
+mode automatic differentiation. Notice that d and :math:`1j` are negated in the formula above. Please look at
+the `JAX docs <https://jax.readthedocs.io/en/latest/notebooks/autodiff_cookbook.html#Complex-numbers-and-differentiation>`_
+to get explanation for the negative signs in the formula.
+
+**What happens if I call backward() on a complex scalar?**
+*******************************************************************************
+
+The gradient for a complex function is computed assuming the input function is a holomorphic function.
+This is because for general :math:`ℂ → ℂ` functions, the Jacobian has 4 real-valued degrees of freedom
+(as in the `2x2` Jacobian matrix above), so we can’t hope to represent all of them with in a complex number.
+However, for holomorphic functions, the gradient can be fully represented with complex numbers due to the
+Cauchy-Riemann equations that ensure that `2x2` Jacobians have the special form of a scale-and-rotate
+matrix in the complex plane, i.e. the action of a single complex number under multiplication. And so, we can
+obtain that gradient using backward which is just a call to `vjp` with covector `1.0`.
+
+The net effect of this assumption is that the partial derivatives of the imaginary part of the function
+(:math:`v(x, y)` above) are discarded for :func:`torch.autograd.backward` on a complex scalar
+(e.g., this is equivalent to dropping the imaginary part of the loss before performing a backwards).
+
+For any other desired behavior, you can specify the covector `grad_output` in :func:`torch.autograd.backward` call accordingly.
+
+**How are the JVP and VJP defined for cross-domain functions?**
+***************************************************************
+
+Based on formulas above and the behavior we expect to see (going from :math:`ℂ → ℝ^2 → ℂ` should be an identity),
+we use the formula given below for cross-domain functions.
+
+The :math:`JVP` and :math:`VJP` for a :math:`f1: ℂ → ℝ^2` are defined as:
+
+    .. math:: JVP = J * \begin{bmatrix} c \\ d \end{bmatrix}
+
+    .. math:: VJP = \begin{bmatrix} c & d \end{bmatrix} * J * \begin{bmatrix} 1 \\ -1j \end{bmatrix}
+
+The :math:`JVP` and :math:`VJP` for a :math:`f1: ℝ^2 → ℂ` are defined as:
+
+    .. math:: JVP = \begin{bmatrix} 1 & 1j \end{bmatrix} * J * \begin{bmatrix} c \\ d \end{bmatrix} \\ \\
+
+    .. math:: VJP = \begin{bmatrix} c & -d \end{bmatrix} * J

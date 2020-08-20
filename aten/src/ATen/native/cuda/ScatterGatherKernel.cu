@@ -136,17 +136,17 @@ struct cuda_scatter_gather_base_kernel {
     auto self_restrided = is_scatter_like ?
         restride_dim(self, dim, index_sizes)
       : self.as_strided(index_sizes, self_strides);
-    auto src_restrided = is_scatter_like ? 
+    auto src_restrided = is_scatter_like ?
         src.as_strided(index_sizes, src_strides)
       : restride_dim(src, dim, index_sizes);
 
-    auto iter = TensorIterator();
-    iter.dont_compute_common_dtype();
-    iter.dont_resize_outputs();
-    iter.add_output(self_restrided);
-    iter.add_input(src_restrided, src.device(), src.scalar_type());
-    iter.add_input(index);
-    iter.build();
+    auto iter = TensorIteratorConfig()
+      .check_all_same_dtype(false)
+      .resize_outputs(false)
+      .add_output(self_restrided)
+      .add_input(src_restrided)
+      .add_input(index)
+      .build();
 
     auto self_dim_stride = ensure_nonempty_stride(self, dim);
     auto self_dim_size = ensure_nonempty_size(self, dim);
@@ -246,12 +246,12 @@ struct cuda_scatter_fill_base_kernel {
     // self.stride[dim] = 0
     auto self_restrided = restride_dim(self, dim, index_sizes);
 
-    auto iter = TensorIterator();
-    iter.dont_compute_common_dtype();
-    iter.dont_resize_outputs();
-    iter.add_output(self_restrided, self.device(), self.scalar_type());
-    iter.add_input(index);
-    iter.build();
+    auto iter = TensorIteratorConfig()
+      .check_all_same_dtype(false)
+      .resize_outputs(false)
+      .add_output(self_restrided)
+      .add_input(index)
+      .build();
 
     auto index_size = ensure_nonempty_size(self, dim);
     auto index_stride = ensure_nonempty_stride(self, dim);
@@ -303,6 +303,8 @@ void scatter_fill_cuda_kernel(Tensor& self, int64_t dim, const Tensor& index, Sc
 }
 
 void scatter_add_cuda_kernel(Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
+  // Nondeterministic because of atomicAdd usage
+  globalContext().alertNotDeterministic("scatter_add_cuda_kernel");
   cuda_scatter_gather_base_kernel</*is_scatter_like=*/true, /*cast_to_opaque=*/false>()(
     self, dim, index, src,
     "scatter_add_cuda_", []C10_DEVICE(auto* lhs, const auto* rhs) {

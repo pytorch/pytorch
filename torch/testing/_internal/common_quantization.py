@@ -7,6 +7,7 @@ r"""Importing this file includes common utility methods and base clases for
 checking quantization api and properties of resulting modules.
 """
 
+import copy
 import io
 import functools
 import torch
@@ -15,23 +16,24 @@ import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
 from torch.testing._internal.common_utils import TestCase
 from torch.quantization import QuantWrapper, QuantStub, DeQuantStub, \
-    default_qconfig, default_per_channel_qconfig, QConfig, default_observer, default_weight_observer, \
-    propagate_qconfig_, convert
-from torch.quantization.default_mappings import DEFAULT_DYNAMIC_MODULE_MAPPING
+    default_qconfig, default_dynamic_qconfig, default_per_channel_qconfig, QConfig, default_observer, default_weight_observer, \
+    propagate_qconfig_, convert, get_default_qconfig, quantize_dynamic_jit, quantize_jit
+from torch.quantization.default_mappings import (
+    DEFAULT_DYNAMIC_MODULE_MAPPING,
+    DEFAULT_QCONFIG_PROPAGATE_WHITE_LIST,
+    DEFAULT_QAT_MODULE_MAPPING,
+)
+
 import unittest
+from torch.testing import FileCheck
 
 def test_only_eval_fn(model, calib_data):
     r"""
     Default evaluation function takes a torch.utils.data.Dataset or a list of
     input Tensors and run the model on the dataset
     """
-    total, correct = 0, 0
-    for *data, target in calib_data:
-        output = model(*data)
-        _, predicted = torch.max(output, 1)
-        total += target.size(0)
-        correct += (predicted == target).sum().item()
-    return correct / total
+    for inp in calib_data:
+        output = model(*inp)
 
 _default_loss_fn = torch.nn.CrossEntropyLoss()
 def test_only_train_fn(model, train_data, loss_fn=_default_loss_fn):
@@ -130,17 +132,35 @@ def skipIfNoFBGEMM(fn):
             fn(*args, **kwargs)
     return wrapper
 
+def get_script_module(model, tracing, data):
+    return torch.jit.trace(model, data) if tracing else torch.jit.script(model)
+
 
 # QuantizationTestCase used as a base class for testing quantization on modules
 class QuantizationTestCase(TestCase):
     def setUp(self):
         super().setUp()
-        self.calib_data = [(torch.rand(2, 5, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long)) for _ in range(2)]
-        self.train_data = [(torch.rand(2, 5, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long)) for _ in range(2)]
-        self.img_data = [(torch.rand(1, 3, 10, 10, dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long))
-                         for _ in range(2)]
-        self.img_data_1d = [(torch.rand(2, 3, 10, dtype=torch.float), torch.randint(0, 1, (1,), dtype=torch.long))
+        self.calib_data = [[torch.rand(2, 5, dtype=torch.float)] for _ in range(2)]
+        self.train_data = [[torch.rand(2, 5, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long)] for _ in range(2)]
+        self.img_data_1d = [[torch.rand(2, 3, 10, dtype=torch.float)]
                             for _ in range(2)]
+        self.img_data_2d = [[torch.rand(1, 3, 10, 10, dtype=torch.float)]
+                            for _ in range(2)]
+        self.img_data_3d = [[torch.rand(1, 3, 5, 5, 5, dtype=torch.float)]
+                            for _ in range(2)]
+        self.img_data_1d_train = [[torch.rand(2, 3, 10, dtype=torch.float),
+                                   torch.randint(0, 1, (1,), dtype=torch.long)]
+                                  for _ in range(2)]
+        self.img_data_2d_train = [[torch.rand(1, 3, 10, 10, dtype=torch.float),
+                                   torch.randint(0, 1, (1,), dtype=torch.long)]
+                                  for _ in range(2)]
+        self.img_data_3d_train = [[torch.rand(1, 3, 5, 5, 5, dtype=torch.float),
+                                   torch.randint(0, 1, (1,), dtype=torch.long)]
+                                  for _ in range(2)]
+
+        self.img_data_dict = {1 : self.img_data_1d,
+                              2 : self.img_data_2d,
+                              3 : self.img_data_3d}
 
     def checkNoPrepModules(self, module):
         r"""Checks the module does not contain child
@@ -149,6 +169,14 @@ class QuantizationTestCase(TestCase):
         """
         self.assertFalse(hasattr(module, 'quant'))
         self.assertFalse(hasattr(module, 'dequant'))
+
+    def checkNoQconfig(self, module):
+        r"""Checks the module does not contain qconfig
+        """
+        self.assertFalse(hasattr(module, 'qconfig'))
+
+        for child in module.children():
+            self.checkNoQconfig(child)
 
     def checkHasPrepModules(self, module):
         r"""Checks the module contains child
@@ -159,16 +187,22 @@ class QuantizationTestCase(TestCase):
         self.assertTrue(hasattr(module, 'quant'))
         self.assertTrue(hasattr(module, 'dequant'))
 
-    def checkObservers(self, module):
+    def checkObservers(self, module, propagate_qconfig_list=None):
         r"""Checks the module or module's leaf descendants
             have observers in preperation for quantization
         """
+        if propagate_qconfig_list is None:
+            propagate_qconfig_list = DEFAULT_QCONFIG_PROPAGATE_WHITE_LIST
         if hasattr(module, 'qconfig') and module.qconfig is not None and \
-           len(module._modules) == 0 and not isinstance(module, torch.nn.Sequential):
+           len(module._modules) == 0 and not isinstance(module, torch.nn.Sequential) \
+           and type(module) in propagate_qconfig_list:
             self.assertTrue(hasattr(module, 'activation_post_process'),
                             'module: ' + str(type(module)) + ' do not have observer')
-        for child in module.children():
-            self.checkObservers(child)
+        # we don't need to check observers for child modules of the
+        # qat modules
+        if type(module) not in DEFAULT_QAT_MODULE_MAPPING.values():
+            for child in module.children():
+                self.checkObservers(child)
 
     def checkQuantDequant(self, mod):
         r"""Checks that mod has nn.Quantize and
@@ -195,11 +229,61 @@ class QuantizationTestCase(TestCase):
         self.assertEqual(type(mod), nnqd.Linear)
         self.assertEqual(mod._packed_params.dtype, dtype)
 
+    def check_eager_serialization(self, ref_model, loaded_model, x):
+        # Check state dict serialization and torch.save APIs
+        model_dict = ref_model.state_dict()
+        b = io.BytesIO()
+        torch.save(model_dict, b)
+        b.seek(0)
+        loaded_dict = torch.load(b)
+        loaded_model.load_state_dict(loaded_dict)
+        ref_out = ref_model(x)
+        load_out = loaded_model(x)
+
+        def check_outputs(ref_out, load_out):
+            self.assertEqual(ref_out[0], load_out[0])
+            if isinstance(ref_out[1], tuple):
+                self.assertEqual(ref_out[1][0], load_out[1][0])
+                self.assertEqual(ref_out[1][1], load_out[1][1])
+            else:
+                self.assertEqual(ref_out[1], load_out[1])
+
+        check_outputs(ref_out, load_out)
+        b = io.BytesIO()
+        torch.save(ref_model, b)
+        b.seek(0)
+        loaded = torch.load(b)
+        load_out = loaded(x)
+        check_outputs(ref_out, load_out)
+
+    def check_weight_bias_api(self, ref_model, weight_keys, bias_keys):
+        weight = ref_model.get_weight()
+        bias = ref_model.get_bias()
+        self.assertEqual(weight_keys ^ weight.keys(), set())
+        self.assertEqual(bias_keys ^ bias.keys(), set())
+
+    def checkDynamicQuantizedLSTM(self, mod, reference_module_type, dtype):
+        r"""Checks that mod has been swapped for an nnqd.LSTM type
+            module, the bias is float.
+        """
+        wt_dtype_map = {torch.qint8: 'quantized_dynamic', torch.float16: 'quantized_fp16'}
+        self.assertEqual(type(mod), reference_module_type)
+        for packed_params in mod._all_weight_values:
+            self.assertEqual(packed_params.param.__getstate__()[0][0], wt_dtype_map[dtype])
+
     def checkLinear(self, mod):
         self.assertEqual(type(mod), torch.nn.Linear)
 
-    # calib_data follows the same schema as calib_data for
-    # test_only_eval_fn, i.e. (input iterable, output iterable)
+    def checkDynamicQuantizedModule(self, mod, reference_module_type, dtype):
+        r"""Checks that mod has been swapped for an nnqd.Linear
+            module, the bias is float.
+        """
+        wt_dtype_map = {torch.qint8: 'quantized_dynamic', torch.float16: 'quantized_fp16'}
+        self.assertEqual(type(mod), reference_module_type)
+        if hasattr(mod, '_all_weight_values'):
+            for packed_params in mod._all_weight_values:
+                self.assertEqual(packed_params.param.__getstate__()[0][0], wt_dtype_map[dtype])
+
     def checkScriptable(self, orig_mod, calib_data, check_save_load=False):
         scripted = torch.jit.script(orig_mod)
         self._checkScriptable(orig_mod, scripted, calib_data, check_save_load)
@@ -218,17 +302,62 @@ class QuantizationTestCase(TestCase):
 
         buffer.seek(0)
         loaded_mod = torch.jit.load(buffer)
-
         # Pending __get_state_ and __set_state__ support
         # See tracking task https://github.com/pytorch/pytorch/issues/23984
         if check_save_load:
             self._checkModuleCorrectnessAgainstOrig(orig_mod, loaded_mod, calib_data)
 
     def _checkModuleCorrectnessAgainstOrig(self, orig_mod, test_mod, calib_data):
-        for (inp, _) in calib_data:
-            ref_output = orig_mod(inp)
-            scripted_output = test_mod(inp)
+        for inp in calib_data:
+            ref_output = orig_mod(*inp)
+            scripted_output = test_mod(*inp)
             self.assertEqual(scripted_output, ref_output)
+
+
+    def checkGraphModeOp(self, module, inputs, quantized_op, tracing=False, debug=False,
+                         check=True, eval_mode=True, dynamic=False, qconfig=None):
+        if debug:
+            print('Testing:', str(module))
+        qconfig_dict = {'': get_default_qconfig(torch.backends.quantized.engine)}
+
+        if eval_mode:
+            module = module.eval()
+        if dynamic:
+            qconfig_dict = {'': default_dynamic_qconfig if qconfig is None else qconfig}
+        model = get_script_module(module, tracing, inputs[0]).eval()
+        if debug:
+            print('input graph:', model.graph)
+        models = {}
+        outputs = {}
+        for d in [True, False]:
+            if dynamic:
+                models[d] = quantize_dynamic_jit(model, qconfig_dict, debug=d)
+                # make sure it runs
+                outputs[d] = models[d](inputs)
+            else:
+                # module under test can contain in-place ops, and we depend on
+                # input data staying constant for comparisons
+                inputs_copy = copy.deepcopy(inputs)
+                models[d] = quantize_jit(
+                    model, qconfig_dict, test_only_eval_fn, [inputs_copy], inplace=False,
+                    debug=d)
+                # make sure it runs
+                outputs[d] = models[d](*inputs[0])
+
+        if debug:
+            print('debug graph:', models[True].graph)
+            print('non debug graph:', models[False].graph)
+
+        if check:
+            # debug and non-debug option should have the same numerics
+            self.assertEqual(outputs[True], outputs[False])
+
+            # non debug graph should produce quantized op
+            FileCheck().check(quantized_op) \
+                       .run(models[False].graph)
+
+        return models[False]
+
 
 # Below are a series of neural net models to use in testing quantization
 # Single layer models
@@ -252,24 +381,54 @@ class AnnotatedSingleLayerLinearModel(torch.nn.Module):
         return x
 
 class SingleLayerLinearDynamicModel(torch.nn.Module):
-    def __init__(self):
+    def __init__(self, qengine='fbgemm'):
         super().__init__()
-        self.qconfig = default_qconfig
+        self.qconfig = torch.quantization.get_default_qconfig(qengine)
         self.fc1 = torch.nn.Linear(5, 5).to(dtype=torch.float)
 
     def forward(self, x):
         x = self.fc1(x)
         return x
 
-class LSTMDynamicModel(torch.nn.Module):
-    def __init__(self):
+class RNNDynamicModel(torch.nn.Module):
+    def __init__(self, mod_type):
         super().__init__()
-        self.qconfig = default_qconfig
-        self.lstm = torch.nn.LSTM(2, 2).to(dtype=torch.float)
+        self.qconfig = default_dynamic_qconfig
+        if mod_type == 'GRU':
+            self.mod = torch.nn.GRU(2, 2).to(dtype=torch.float)
+        if mod_type == 'LSTM':
+            self.mod = torch.nn.LSTM(2, 2).to(dtype=torch.float)
 
     def forward(self, x):
-        x = self.lstm(x)
+        x = self.mod(x)
         return x
+
+class RNNCellDynamicModel(torch.nn.Module):
+    def __init__(self, mod_type):
+        super().__init__()
+        self.qconfig = default_dynamic_qconfig
+        if mod_type == 'GRUCell':
+            self.mod = torch.nn.GRUCell(2, 2).to(dtype=torch.float)
+        if mod_type == 'LSTMCell':
+            self.mod = torch.nn.LSTMCell(2, 2).to(dtype=torch.float)
+        if mod_type == 'RNNReLU':
+            self.mod = torch.nn.RNNCell(2, 2, nonlinearity='relu').to(dtype=torch.float)
+        if mod_type == 'RNNTanh':
+            self.mod = torch.nn.RNNCell(2, 2, nonlinearity='tanh').to(dtype=torch.float)
+
+    def forward(self, x):
+        x = self.mod(x)
+        return x
+
+class LSTMwithHiddenDynamicModel(torch.nn.Module):
+    def __init__(self, qengine='fbgemm'):
+        super().__init__()
+        self.qconfig = torch.quantization.get_default_qconfig(qengine)
+        self.lstm = torch.nn.LSTM(2, 2).to(dtype=torch.float)
+
+    def forward(self, x, hid):
+        x, hid = self.lstm(x, hid)
+        return x, hid
 
 class ConvModel(torch.nn.Module):
     def __init__(self):
@@ -371,24 +530,14 @@ class ActivationsTestModel(torch.nn.Module):
         self.qconfig = torch.quantization.get_default_qconfig("fbgemm")
         self.quant = torch.quantization.QuantStub()
         self.hardswish = torch.nn.Hardswish().to(dtype=torch.float)
+        self.elu = torch.nn.ELU().to(dtype=torch.float)
+        self.dequant = torch.quantization.DeQuantStub()
 
     def forward(self, x):
         x = self.quant(x)
         x = self.hardswish(x)
-        return x
-
-class ActivationsQATTestModel(torch.nn.Module):
-    def __init__(self, qengine):
-        super().__init__()
-        self.qconfig = torch.quantization.get_default_qconfig(qengine)
-        self.quant = torch.quantization.QuantStub()
-        self.fc1 = torch.nn.Linear(5, 8).to(dtype=torch.float)
-        self.hardswish = torch.nn.Hardswish().to(dtype=torch.float)
-
-    def forward(self, x):
-        x = self.quant(x)
-        x = self.fc1(x)
-        x = self.hardswish(x)
+        x = self.elu(x)
+        x = self.dequant(x)
         return x
 
 class LinearReluModel(torch.nn.Module):
@@ -408,10 +557,9 @@ class NormalizationTestModel(torch.nn.Module):
         self.fc1 = torch.nn.Linear(5, 8).to(dtype=torch.float)
         self.layer_norm = torch.nn.LayerNorm((8))
         self.group_norm = torch.nn.GroupNorm(2, 8)
-        # TODO: add handling for affine=False (future PR)
-        self.instance_norm1d = torch.nn.InstanceNorm1d(8, affine=True)
-        self.instance_norm2d = torch.nn.InstanceNorm2d(8, affine=True)
-        self.instance_norm3d = torch.nn.InstanceNorm3d(8, affine=True)
+        self.instance_norm1d = torch.nn.InstanceNorm1d(8)
+        self.instance_norm2d = torch.nn.InstanceNorm2d(8)
+        self.instance_norm3d = torch.nn.InstanceNorm3d(8)
 
     def forward(self, x):
         x = self.quant(x)
@@ -421,30 +569,6 @@ class NormalizationTestModel(torch.nn.Module):
         x = self.instance_norm1d(x)
         x = self.instance_norm2d(x.unsqueeze(-1))
         x = self.instance_norm3d(x.unsqueeze(-1))
-        return x
-
-class NormalizationQATTestModel(torch.nn.Module):
-    def __init__(self, qengine):
-        super().__init__()
-        self.qconfig = torch.quantization.get_default_qconfig(qengine)
-        self.quant = torch.quantization.QuantStub()
-        self.fc1 = torch.nn.Linear(5, 8).to(dtype=torch.float)
-        self.layer_norm = torch.nn.LayerNorm((8))
-        self.group_norm = torch.nn.GroupNorm(2, 8)
-        self.instance_norm1d = torch.nn.InstanceNorm1d(4, affine=True)
-        self.instance_norm2d = torch.nn.InstanceNorm2d(4, affine=True)
-        self.instance_norm3d = torch.nn.InstanceNorm3d(4, affine=True)
-        self.fc2 = torch.nn.Linear(8, 2)
-
-    def forward(self, x):
-        x = self.quant(x)
-        x = self.fc1(x)
-        x = self.layer_norm(x)
-        x = self.group_norm(x.unsqueeze(-1))
-        x = self.instance_norm1d(x.reshape((2, 4, 2)))
-        x = self.instance_norm2d(x.unsqueeze(-1))
-        x = self.instance_norm3d(x.unsqueeze(-1))
-        x = self.fc2(x.reshape((2, 8)))
         return x
 
 class NestedModel(torch.nn.Module):
@@ -546,6 +670,18 @@ class InnerModule(torch.nn.Module):
     def forward(self, x):
         return self.relu2(self.fc2(self.relu1(self.fc1(x))))
 
+    def fuse_modules(self):
+        fusable_layers = []
+        named_children = list(self.named_children())
+        for idx, (current_name, layer) in enumerate(named_children):
+            if isinstance(layer, torch.nn.Linear):
+                if idx >= len(named_children) - 1:
+                    break
+                if isinstance(named_children[idx + 1][1], torch.nn.ReLU):
+                    fusable_layers.append([current_name,
+                                           named_children[idx + 1][0]])
+        torch.quantization.fuse_modules(self, fusable_layers, inplace=True)
+
 class SkipQuantModel(torch.nn.Module):
     r"""We can skip quantization by explicitly
     setting qconfig of a submodule to None
@@ -557,6 +693,9 @@ class SkipQuantModel(torch.nn.Module):
 
     def forward(self, x):
         return self.fc(self.sub(x))
+
+    def fuse_modules(self):
+        self.sub.fuse_modules()
 
 class AnnotatedSkipQuantModel(torch.nn.Module):
     r"""We can skip quantization by explicitly
@@ -572,6 +711,9 @@ class AnnotatedSkipQuantModel(torch.nn.Module):
 
     def forward(self, x):
         return self.fc(self.sub(x))
+
+    def fuse_modules(self):
+        self.sub.module.fuse_modules()
 
 class QuantStubModel(torch.nn.Module):
     r"""A Module with manually inserted `QuantStub` and `DeQuantStub`
@@ -867,28 +1009,3 @@ class ModelMultipleOpsNoAvgPool(torch.nn.Module):
         out = out.view(-1, 3 * 2 * 2)
         out = self.fc(out)
         return out
-
-"""Model to make sure that the observers are not inserted into custom modules.
-"""
-class ModelWithNoQconfigPropagation(nn.Module):
-    class ListOutModule(nn.Module):
-        def __init__(self):
-            super().__init__()
-
-        def forward(self, x):
-            # returns a list of tensors, not supported by observers
-            return [x]
-
-    def __init__(self):
-        super().__init__()
-        self.fc1 = nn.Linear(5, 5).to(dtype=torch.float)
-        self.quant = QuantStub()
-        self.dequant = DeQuantStub()
-        self.no_quant_module = self.ListOutModule()
-
-    def forward(self, x):
-        x = self.quant(x)
-        x = self.fc1(x)
-        x = self.dequant(x)
-        x = self.no_quant_module(x)
-        return x

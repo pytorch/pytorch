@@ -1,7 +1,13 @@
 #pragma once
 
-#include <tensorpipe/core/message.h>
+#include <c10/core/Device.h>
 #include <torch/csrc/distributed/rpc/rpc_command_base.h>
+#include <torch/csrc/jit/serialization/pickle.h>
+#include <torch/csrc/utils/byte_order.h>
+
+namespace tensorpipe {
+class Message;
+} // namespace tensorpipe
 
 namespace torch {
 namespace distributed {
@@ -58,6 +64,7 @@ struct TensorpipeWriteBuffers {
   std::unique_ptr<MessageType> type;
   std::unique_ptr<int64_t> id;
   std::vector<char> payload;
+  std::vector<c10::DeviceIndex> deviceIndices;
   std::vector<char> pickle;
   // This contains the original tensors and the clones of the sparse tensors.
   std::vector<torch::Tensor> tensors;
@@ -73,6 +80,7 @@ struct TensorpipeReadBuffers {
   std::unique_ptr<MessageType> type;
   std::unique_ptr<int64_t> id;
   std::vector<char> payload;
+  std::vector<c10::DeviceIndex> deviceIndices;
   std::vector<char> pickle;
   std::vector<c10::DataPtr> tensors;
 };
@@ -80,7 +88,9 @@ struct TensorpipeReadBuffers {
 // Convert an RPC message into a TensorPipe message, plus a holder to all the
 // data that must be kept alive while the write is performed asynchronously.
 TORCH_API std::tuple<tensorpipe::Message, TensorpipeWriteBuffers>
-tensorpipeSerialize(Message&& rpcMessage);
+tensorpipeSerialize(
+    Message&& rpcMessage,
+    std::vector<c10::DeviceIndex> devices = {});
 
 // Allocate the buffers that will hold the incoming data. They will be managed
 // by the returned holder, which must be kept alive until the asynchronous read
@@ -103,6 +113,19 @@ TORCH_API Message tensorpipeDeserialize(
 // we'd save at least half the data, and over a minimum hurdle.
 TORCH_API c10::List<at::Tensor> cloneSparseTensors(
     const std::vector<at::Tensor>& tensors);
+
+// Combines an original payload and wrapped payload into the original payload.
+// Used to generate the overall payload for the wrapped RPC.
+TORCH_API void writeWrappedPayload(
+    std::vector<char>& originalPayload,
+    std::vector<char>& additionalPayload);
+
+// Reads the additional, wrapped payload from a wrapped RPC off of the input
+// payload. After this, payload will contain the payload of the original,
+// un-wrapped RPC.
+TORCH_API std::vector<at::IValue> readWrappedPayload(
+    std::vector<char>& payload,
+    const rpc::Message& message);
 
 } // namespace rpc
 } // namespace distributed

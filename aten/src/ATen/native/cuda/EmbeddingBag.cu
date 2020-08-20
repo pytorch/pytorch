@@ -35,7 +35,7 @@ template <typename scalar_t>
 __global__ void EmbeddingBag_updateOutputKernel(
     int64_t *input, int64_t *offsets, scalar_t *weight, scalar_t *output,
     int64_t *offset2bag, int64_t numIndices, int64_t numBags,
-    int64_t featureSize, int64_t weight_stide0, int64_t weight_stride1,
+    int64_t featureSize, int64_t weight_stride0, int64_t weight_stride1,
     int mode, int64_t *bag_size, int64_t *max_indices,
     scalar_t* per_sample_weights, int64_t per_sample_weights_stride) {
 
@@ -62,7 +62,7 @@ __global__ void EmbeddingBag_updateOutputKernel(
       int64_t bag_size_ = 0;
       int64_t maxWord = -1;
       for (int64_t emb = begin; emb < end; emb++) {
-        const int64_t weightRow = input[emb] * weight_stide0;
+        const int64_t weightRow = input[emb] * weight_stride0;
         scalar_t weightValue = weightFeat[weightRow];
 
         if (mode == MODE_MAX) {
@@ -250,6 +250,25 @@ Tensor embedding_bag_backward_cuda_max(const Tensor &grad,
 // Assumes all input tensors are contiguous.
 // See NOTE [ embedding_bag Native Functions ] in native_functions.yaml for details
 std::tuple<Tensor, Tensor, Tensor, Tensor>
+_embedding_bag_forward_only_cuda(const Tensor &weight, const Tensor &indices,
+                   const Tensor &offsets, const bool scale_grad_by_freq,
+                   const int64_t mode, bool sparse,
+                   const Tensor& per_sample_weights,
+                   bool include_last_offset) {
+  return _embedding_bag_cuda(
+      weight,
+      indices,
+      offsets,
+      scale_grad_by_freq,
+      mode,
+      sparse,
+      per_sample_weights,
+      include_last_offset);
+}
+
+// Assumes all input tensors are contiguous.
+// See NOTE [ embedding_bag Native Functions ] in native_functions.yaml for details
+std::tuple<Tensor, Tensor, Tensor, Tensor>
 _embedding_bag_cuda(const Tensor &weight, const Tensor &indices,
                    const Tensor &offsets, const bool scale_grad_by_freq,
                    const int64_t mode, bool sparse,
@@ -324,6 +343,9 @@ Tensor _embedding_bag_dense_backward_cuda(const Tensor &grad_, const Tensor &ind
                                    int64_t num_weights,
                                    bool scale_grad_by_freq, int64_t mode,
                                    const Tensor& per_sample_weights) {
+  // Nondeterministic because of atomicAdd usage
+  globalContext().alertNotDeterministic("_embedding_bag_dense_backward_cuda");
+
   // indices, offsets and offset2bag are assumed having correct dtypes and
   // contiguous here due to the checks in _embedding_bag_backward in
   // EmbeddingBag.cpp.

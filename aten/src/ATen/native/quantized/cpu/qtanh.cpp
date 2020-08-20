@@ -7,7 +7,7 @@
 #include <ATen/native/quantized/cpu/quantized_ops.h>
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
-#include <caffe2/utils/threadpool/ThreadPoolMobile.h>
+#include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 
 #include <algorithm>
 
@@ -64,7 +64,7 @@ Tensor qnnpack_tanh(Tensor input) {
   TORCH_INTERNAL_ASSERT(setupStatus == pytorch_qnnp_status_success,
                         "failed to setup QNNPACK TanH operator");
 
-  pthreadpool_t threadpool = caffe2::mobile_pthreadpool();
+  pthreadpool_t threadpool = caffe2::pthreadpool_();
 
   const pytorch_qnnp_status runStatus =
     pytorch_qnnp_run_operator(tanh_op, threadpool);
@@ -76,7 +76,7 @@ Tensor qnnpack_tanh(Tensor input) {
 }
 #endif  // USE_PYTORCH_QNNPACK
 
-Tensor quantized_tanh(const Tensor& qx) {
+Tensor tanh_quantized_cpu(const Tensor& qx) {
 #ifdef USE_PYTORCH_QNNPACK
   if (at::globalContext().qEngine() == at::QEngine::QNNPACK &&
       qx.scalar_type() == kQUInt8) {

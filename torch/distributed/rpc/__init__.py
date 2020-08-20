@@ -1,11 +1,11 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
-import numbers
-import sys
-
 import torch
 import torch.distributed as dist
+import threading
 
+_init_counter = 0
+_init_counter_lock = threading.Lock()
 
 def is_available():
     return hasattr(torch._C, "_rpc_init")
@@ -15,52 +15,61 @@ if is_available() and not torch._C._rpc_init():
     raise RuntimeError("Failed to initialize torch.distributed.rpc")
 
 
+
+
 if is_available():
-    from . import api, backend_registry, functions
+    from . import api, backend_registry, functions, _set_profiler_node_id
+    from . import (
+        _disable_jit_rref_pickle,
+        _enable_jit_rref_pickle,
+        _set_and_start_rpc_agent,
+    )  # noqa: F401
     from .api import *  # noqa: F401
+    from .options import TensorPipeRpcBackendOptions  # noqa: F401
+    from .backend_registry import BackendType
     from .server_process_global_profiler import (
         _server_process_global_profile,
     )
     import torch.distributed.autograd as dist_autograd
 
+    import numbers
+
+
     def init_rpc(
         name,
-        backend=backend_registry.BackendType.PROCESS_GROUP,
+        backend=BackendType.PROCESS_GROUP,
         rank=-1,
         world_size=None,
         rpc_backend_options=None,
     ):
         r"""
         Initializes RPC primitives such as the local RPC agent
-        and distributed autograd.
-
-        Initializes the local RPC agent which immediately makes the current
-        process ready to send and receive RPCs. This method also properly
-        initializes a default process group backend that uses Gloo for
-        communication.
+        and distributed autograd, which immediately makes the current
+        process ready to send and receive RPCs.
 
         Arguments:
-            backend (Enum): type of RPC backend implementation. Currently,
-                process group backend is the only available backend
-                implementation. (default: ``RpcBackend.PROCESS_GROUP``).
+            backend (BackendType, optional): The type of RPC backend
+                implementation. Supported values include
+                ``BackendType.PROCESS_GROUP`` (the default) and
+                ``BackendType.TENSORPIPE``. See :ref:`rpc-backends` for more
+                information.
             name (str): a globally unique name of this node. (e.g.,
                 ``Trainer3``, ``ParameterServer2``, ``Master``, ``Worker1``)
-                Name can only contain number, alphabet, underscore, and/or dash,
-                and must be shorter than 128 characters.
+                Name can only contain number, alphabet, underscore, colon,
+                and/or dash, and must be shorter than 128 characters.
             rank (int): a globally unique id/rank of this node.
             world_size (int): The number of workers in the group.
-            rpc_backend_options (RpcBackendOptions): The options passed to
-                RpcAgent constructor. It contains RpcAgent specific
-                initialization configurations. By default, it contains
-                ``rpc_timeout = timedelta(seconds=60)``,
-                ``init_method = "env://"``, ``num_send_recv_threads = 4`` for
-                process group agent. If using the default
-                ``rpc_backend_options``, RPC would initialize the underlying
-                process group backend using ``init_method = "env://"``,
-                meaning that environment variables ``MASTER_ADDRESS`` and
-                ``MASTER_PORT`` needs to be set properly. See
-                :class:`~torch.distributed.rpc.ProcessGroupRpcBackendOptions`
-                for examples.
+            rpc_backend_options (RpcBackendOptions, optional): The options
+                passed to the RpcAgent constructor. It must be an agent-specific
+                subclass of :class:`~torch.distributed.rpc.RpcBackendOptions`
+                and contains agent-specific initialization configurations. By
+                default, for all agents, it sets the default timeout to 60
+                seconds and performs the rendezvous with an underlying process
+                group initialized using ``init_method = "env://"``,
+                meaning that environment variables ``MASTER_ADDR`` and
+                ``MASTER_PORT`` need to be set properly. See
+                :ref:`rpc-backends` for more information and find which options
+                are available.
         """
 
         if not rpc_backend_options:
@@ -79,6 +88,12 @@ if is_available():
         )
         store, _, _ = next(rendezvous_iterator)
 
+        # Use a PrefixStore to distinguish multiple invocations.
+        with _init_counter_lock:
+            global _init_counter
+            store = dist.PrefixStore(str('rpc_prefix_{}'.format(_init_counter)), store)
+            _init_counter += 1
+
         # Initialize autograd before RPC since _init_rpc_backend guarantees all
         # processes sync via the store. If we initialize autograd after RPC,
         # there could be a race where some nodes might have initialized autograd
@@ -87,8 +102,54 @@ if is_available():
         # other nodes might not have been initialized.
         dist_autograd._init(rank)
 
+        _set_profiler_node_id(rank)
         # Initialize RPC.
-        api._init_rpc_backend(backend, store, name, rank, world_size, rpc_backend_options)
+        _init_rpc_backend(backend, store, name, rank, world_size, rpc_backend_options)
+
+
+    def _validate_rpc_args(backend, store, name, rank, world_size, rpc_backend_options):
+        type_mapping = {
+            backend: backend_registry.BackendType,
+            store: dist.Store,
+            name: str,
+            rank: numbers.Integral,
+            world_size: numbers.Integral,
+            rpc_backend_options: RpcBackendOptions,
+        }
+        for arg, arg_type in type_mapping.items():
+            if not isinstance(arg, arg_type):
+                raise RuntimeError(
+                    "Argument {} must be of type {} but got type {}".format(
+                        arg, arg_type, type(arg)
+                    )
+                )
+
+
+    def _init_rpc_backend(
+        backend=backend_registry.BackendType.PROCESS_GROUP,
+        store=None,
+        name=None,
+        rank=-1,
+        world_size=-1,
+        rpc_backend_options=None,
+    ):
+
+        _validate_rpc_args(backend, store, name, rank, world_size, rpc_backend_options)
+
+        if _is_current_rpc_agent_set():
+            raise RuntimeError("RPC is already initialized")
+
+        # Initialize RPC.
+        rpc_agent = backend_registry.init_backend(
+            backend,
+            store=store,
+            name=name,
+            rank=rank,
+            world_size=world_size,
+            rpc_backend_options=rpc_backend_options,
+        )
+
+        api._init_rpc_states(rpc_agent)
 
 
     @api._require_initialized

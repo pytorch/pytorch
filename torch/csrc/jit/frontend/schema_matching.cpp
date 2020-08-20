@@ -56,6 +56,15 @@ Value* tryConvertToType(
     const TypePtr& concrete_type,
     Value* value,
     bool allow_conversions) {
+  // treat conversion to Optional[T] as conversions to T
+  if (OptionalTypePtr op = concrete_type->cast<OptionalType>()) {
+    if (value->type()->kind() != OptionalType::Kind &&
+        !value->type()->isSubtypeOf(NoneType::get())) {
+      return tryConvertToType(
+          loc, graph, op->getElementType(), value, allow_conversions);
+    }
+  }
+
   if (auto value_tuple = value->type()->cast<TupleType>()) {
     // Allow homogeneous tuples to be casted implicitly to lists of appropriate
     // types
@@ -111,7 +120,7 @@ Value* tryConvertToType(
 
     // Convert strings to device
     if (value->type()->isSubtypeOf(StringType::get()) &&
-        DeviceObjType::get()->isSubtypeOf(concrete_type)) {
+        concrete_type->isSubtypeOf(DeviceObjType::get())) {
       return graph.insert(aten::device, {value}, {}, loc);
     }
   }
@@ -148,8 +157,8 @@ static Value* tryMatchArgument(
       matchTypeVariables(arg.type(), value->type(), type_env);
   if (!matched.success()) {
     if (failure_messages) {
-      err() << "Could not match type " << value->type()->python_str() << " to "
-            << arg.type()->python_str() << " in argument '" << arg.name()
+      err() << "Could not match type " << value->type()->repr_str() << " to "
+            << arg.type()->repr_str() << " in argument '" << arg.name()
             << "': " << matched.reason() << ".\n";
     }
     return nullptr;
@@ -157,9 +166,9 @@ static Value* tryMatchArgument(
   const auto concrete_type = tryEvalTypeVariables(arg.type(), type_env);
   if (!concrete_type) {
     if (failure_messages) {
-      err() << "Type variables in type " << arg.type()->python_str()
+      err() << "Type variables in type " << arg.type()->repr_str()
             << " could not be inferred from actual type "
-            << value->type()->python_str();
+            << value->type()->repr_str();
     }
     return nullptr;
   }
@@ -172,7 +181,7 @@ static Value* tryMatchArgument(
           concrete_type, /*why_not=*/(failure_messages) ? &ss : nullptr)) {
     if (failure_messages) {
       auto& ostream = err()
-          << arg.formatTypeMismatchMsg(value->type()->python_str());
+          << arg.formatTypeMismatchMsg(value->type()->repr_str());
 
       if (auto pt = value->type()->cast<TensorType>()) {
         if (pt->isInferredType()) {
@@ -414,7 +423,7 @@ static c10::optional<MatchedSchema> tryMatchSchema(
   auto return_types = fmap(returns, [&](const Argument& r) {
     TypePtr result = tryEvalTypeVariables(r.type(), type_env);
     TORCH_INTERNAL_ASSERT(
-        result, r.type()->python_str(), " has unbound type variables.");
+        result, r.type()->repr_str(), " has unbound type variables.");
     return result;
   });
   // Codegen does not support return of namedtuples with undefined field names.

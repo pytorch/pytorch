@@ -4,8 +4,8 @@
 
 #include <ATen/native/xnnpack/Common.h>
 #include <ATen/native/ConvUtils.h>
+#include <ATen/native/utils/Factory.h>
 #include <ATen/native/utils/ParamUtils.h>
-#include <ATen/native/xnnpack/Factory.h>
 #include <ATen/native/xnnpack/Convolution.h>
 
 namespace at {
@@ -182,7 +182,7 @@ Tensor run(
     const Tensor& input) {
   using namespace internal;
 
-  const Tensor padded_input_nhwc = allocate_padded_contiguous_if_needed(
+  const Tensor padded_input_nhwc = mobile::allocate_padded_contiguous_if_needed(
       input, MemoryFormat::ChannelsLast);
 
   TORCH_CHECK(
@@ -190,7 +190,7 @@ Tensor run(
       "XNNPACK Convolution not usable! "
       "Reason: The provided input tensor is either invalid or unsupported by XNNPACK.");
 
-  Tensor output = empty_with_tail_padding(
+  Tensor output = mobile::empty_with_tail_padding(
       conv_output_size(
           padded_input_nhwc.sizes(),
           context.weight_size_,
@@ -208,15 +208,15 @@ Tensor run(
       padded_input_nhwc.size(Layout::Activation4D::width),   // input_width
       padded_input_nhwc.data_ptr<float>(),                   // input
       output.data_ptr<float>(),                              // output
-      caffe2::xnnpack_threadpool());                         // threadpool
+      caffe2::pthreadpool_());                               // threadpool
 
   TORCH_CHECK(
       xnn_status_success == setup_status,
       "xnn_setup_convolution2d_nhwc_f32 failed!");
 
   const xnn_status run_status = xnn_run_operator(
-      context.op.get(),               // operator
-      caffe2::xnnpack_threadpool());  // threadpool
+      context.op.get(),         // operator
+      caffe2::pthreadpool_());  // threadpool
 
   TORCH_INTERNAL_ASSERT(
       xnn_status_success == run_status,

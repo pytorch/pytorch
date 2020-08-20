@@ -47,9 +47,11 @@ class OnnxifiOp final : public Operator<Context> {
   explicit OnnxifiOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         use_onnx_(this->template GetSingleArgument<int>("use_onnx", 0)),
+        use_glow_aot_(this->template GetSingleArgument<int>("use_glow_aot", 0)),
         max_batch_size_(
             this->template GetSingleArgument<int>("max_batch_size", 0)),
         max_seq_size_(this->template GetSingleArgument<int>("max_seq_size", 0)),
+        timeout_(this->template GetSingleArgument<int>("timeout", 0)),
         nominal_batch_idx_(
             this->template GetSingleArgument<int>("nominal_batch_idx", 0)),
         adjust_quantized_offset_(this->template GetSingleArgument<int>(
@@ -61,7 +63,11 @@ class OnnxifiOp final : public Operator<Context> {
     auto onnx_model_str =
         this->template GetSingleArgument<std::string>("onnx_model", "");
     CAFFE_ENFORCE(!onnx_model_str.empty(), "onnx_model cannot be empty");
-    if (!use_onnx_) {
+    if (use_glow_aot_) {
+      auto netdef_str =
+        this->template GetSingleArgument<std::string>("netdef_str", "");
+      CAFFE_ENFORCE(ParseProtoFromLargeString(netdef_str, &netdef_));
+    } else if (!use_onnx_) {
       CAFFE_ENFORCE(ParseProtoFromLargeString(onnx_model_str, &netdef_));
     }
 
@@ -180,7 +186,13 @@ class OnnxifiOp final : public Operator<Context> {
     auto initializers =
         this->template GetRepeatedArgument<std::string>("initializers");
     // Build the Onnxifi engine
-    auto backend_index = this->template GetSingleArgument<int>("backend_id", 0);
+    auto backend_index =
+      this->template GetSingleArgument<int>("backend_id", use_onnx_ ? 1 : 0);
+    // If using Glow AOT, override the backend_id to 1, since it uses a custom
+    // ONNX format, and that's the id we use for the ONNX backend.
+    if (use_glow_aot_) {
+      backend_index = 1;
+    }
     auto creator = [this,
                     ws,
                     property_pointers,
@@ -285,6 +297,7 @@ class OnnxifiOp final : public Operator<Context> {
       onnxExtensionFunctionPointer p;
       decltype(onnxSetIOAndRunGraphPointer_) set;
       decltype(onnxReleaseTraceEventsPointer_) release;
+      decltype(onnxWaitEventForPointer_) waitfor;
     } u;
     if (lib_->onnxGetExtensionFunctionAddress(
             backend_id_, "onnxSetIOAndRunGraphFunction", &u.p) !=
@@ -299,6 +312,13 @@ class OnnxifiOp final : public Operator<Context> {
       onnxReleaseTraceEventsPointer_ = nullptr;
     } else {
       onnxReleaseTraceEventsPointer_ = u.release;
+    }
+    if (lib_->onnxGetExtensionFunctionAddress(
+            backend_id_, "onnxWaitEventForFunction", &u.p) !=
+        ONNXIFI_STATUS_SUCCESS) {
+      onnxWaitEventForPointer_ = nullptr;
+    } else {
+      onnxWaitEventForPointer_ = u.waitfor;
     }
 #endif
   }
@@ -358,6 +378,13 @@ class OnnxifiOp final : public Operator<Context> {
       onnxTraceEventList*);
 
   onnxStatus (*onnxReleaseTraceEventsPointer_)(onnxTraceEventList*);
+  onnxStatus (*onnxWaitEventForPointer_)(
+      onnxEvent event,
+      uint32_t timeoutMs,
+      onnxEventState* eventState,
+      onnxStatus* eventStatus,
+      char* message,
+      size_t* messageLength);
 
   std::shared_ptr<onnxTraceEventList> traces_{nullptr};
 #endif
@@ -365,11 +392,17 @@ class OnnxifiOp final : public Operator<Context> {
   // ONNX model or not
   bool use_onnx_{false};
 
+  // Glow AOT model or not
+  bool use_glow_aot_{false};
+
   // max batch size
   int max_batch_size_;
 
   // max sequence lookup size
   int max_seq_size_;
+
+  // Inference timeout limits. Default 0 means no timeout.
+  int timeout_;
 
   // index of the input whose first dimension represents the batch size
   int nominal_batch_idx_{0};
@@ -412,6 +445,7 @@ class OnnxifiOp final : public Operator<Context> {
   // Whether we enable tracing in one run of inference
   bool enable_tracing_{false};
 
+  // Adjust the quantized offset to compensate mismatch of certain backend
   uint8_t adjust_quantized_offset_{0};
 };
 
