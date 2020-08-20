@@ -203,7 +203,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.abs: lambda input, out=None: -1,
         torch.absolute: lambda input, out=None: -1,
         torch.adaptive_avg_pool1d: lambda input, output_size: -1,
-        torch.adaptive_max_pool1d: lambda inputs, output_size: -1,g
+        torch.adaptive_max_pool1d: lambda inputs, output_size: -1,
         torch.acos: lambda input, out=None: -1,
         torch.arccos: lambda input, out=None: -1,
         torch.acosh: lambda input, out=None: -1,
