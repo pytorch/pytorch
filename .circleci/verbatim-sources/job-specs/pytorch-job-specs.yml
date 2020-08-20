@@ -125,6 +125,7 @@ jobs:
           else
             export id=$(docker run --env-file "${BASH_ENV}" --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
           fi
+          echo "id=${id}" >> "${BASH_ENV}"
 
     - run:
         name: Check for no AVX instruction by default
