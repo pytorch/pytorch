@@ -1,8 +1,6 @@
 from functools import reduce
 from operator import mul, itemgetter
 import collections
-from dataclasses import dataclass
-from typing import List
 
 import torch
 import numpy as np
@@ -25,12 +23,19 @@ from torch.testing._internal.common_utils import \
      random_fullrank_matrix_distinct_singular_value, set_rng_seed,
      TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS)
 
-@dataclass
-class SkipInfo:
-    test_name: str = None
-    device_type: str = None
-    dtypes: List[torch.dtype] = None
-    active_if: bool = True
+# Class for holding information about which tests should skip testing
+#   an operator.
+# Any test which matches all non-None fields will be skipped.
+# The skip will only be checked if the active_if argument is True.
+class SkipInfo(object):
+    __slots__ = ['test_name', 'device_type', 'dtypes', 'active_if']
+
+    def __init__(self, test_name=None, *, device_type=None, dtypes=None, active_if=True):
+        self.test_name = test_name
+        self.device_type = device_type
+        self.dtypes = dtypes
+        self.active_if = active_if
+
 
 # Classes and methods for the operator database
 class OpInfo(object):
