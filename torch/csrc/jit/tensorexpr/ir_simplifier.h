@@ -481,6 +481,9 @@ class TORCH_API IRSimplifier {
   }
 };
 
+// Returns true if expressions A and B can be simplified to an equal expression.
+TORCH_API bool exprEquals(const Expr* A, const Expr* B);
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch

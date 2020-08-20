@@ -10,6 +10,7 @@
 
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAEvent.h>
+#include <c10/core/StreamGuard.h>
 
 namespace c10d {
 
@@ -54,7 +55,8 @@ constexpr const char* NCCL_BLOCKING_WAIT = "NCCL_BLOCKING_WAIT";
 //   // Now continue on other work in the current stream.
 class ProcessGroupNCCL : public ProcessGroup {
  public:
-  class WorkNCCL : public ProcessGroup::Work {
+  class WorkNCCL : public ProcessGroup::Work,
+                   public std::enable_shared_from_this<WorkNCCL> {
    public:
     // Constructor takes a list of CUDA devices
     WorkNCCL(const std::vector<at::Device>& devices);
@@ -77,16 +79,23 @@ class ProcessGroupNCCL : public ProcessGroup {
     // completion.
     void synchronize() override;
 
+    // Synchronize streams by blocking each on the NCCL stream
+    void synchronizeStreams();
+
     // Helper function that checks if the NCCL kernels have finished
     // execution on the GPUs
     bool finishedGPUExecution();
+
+    // Get a Future object that will be marked as completed internally.
+    // It actually returns a FutureNCCL object which is a sub class Future.
+    c10::intrusive_ptr<c10::ivalue::Future> getFuture() override;
 
    protected:
     // The cached list of CUDA devices to operate on
     std::vector<at::Device> devices_;
 
     // The CUDA events tracking this work item on multiple CUDA devices
-    std::vector<at::cuda::CUDAEvent> cudaEvents_;
+    std::shared_ptr<std::vector<at::cuda::CUDAEvent>> cudaEvents_;
 
     // The NCCL communicators used for this work item.
     std::vector<std::shared_ptr<NCCLComm>> ncclComms_;
@@ -125,7 +134,179 @@ class ProcessGroupNCCL : public ProcessGroup {
     // to the store.
     std::shared_ptr<Store> store_;
 
+    // Store a reference to NCCL collective's outputs to be used by getFuture.
+    std::shared_ptr<std::vector<at::Tensor>> outputs_;
+
     friend class ProcessGroupNCCL;
+  };
+
+  // FutureNCCL is a subclass of ivalue's Future. The goal is to use
+  // this class in getFuture API of WorkNCCL. This Future is mostly a
+  // wrapper to synchronize streams appropriately and it mostly enables
+  // the async programming model of CUDA while trying to adhere to the
+  // Future interface. FutureNCCL does not support NCCL_BLOCKING_WAIT flag
+  // or NCCL's barrier().
+  //
+  // If created by WorkNCCL's getFuture API, FutureNCCL has a reference to
+  // WorkNCCL's cudaEvents, NCCL collective's outputs, and device index of
+  // outputs' device. Its value is NCCL collective's outputs. FutureNCCL
+  // only supports single-process single-device mode where the size of outputs
+  // is equal to 1.
+  //
+  // If created by FutureNCCL's then callback, its value becomes the value of
+  // callback() and its cudaEvents will record the NCCL stream that runs that
+  // callback. Before invoking the callback, FutureNCCL will synchronize its
+  // own cudaEvents with the stream that runs the callback. This design
+  // enables synchronizing the appropriate streams and avoids stalling PyTorch's
+  // default stream while running the callback. In case of multiple then
+  // callbacks, the design will work like a chain such that FutureNCCL n will
+  // wait on the cudaEvents from FutureNCCL n - 1.
+  struct FutureNCCL : at::ivalue::Future {
+   public:
+    explicit FutureNCCL(
+        at::IValue value,
+        c10::DeviceIndex deviceIndex,
+        std::shared_ptr<std::vector<at::cuda::CUDAEvent>> cudaEvents)
+        : at::ivalue::Future(c10::ListType::create(c10::TensorType::get())),
+          value_(std::move(value)),
+          deviceIndex_(deviceIndex),
+          cudaEvents_(cudaEvents) {
+      TORCH_INTERNAL_ASSERT(
+          cudaEvents_->size() == 1,
+          "FutureNCCL only supports single-process single-device mode.");
+    }
+
+    // This constructor is used by then callback, it skips setting the value at
+    // the beginning. Later, the value will be set using markCompleted with the
+    // return value of callback.
+    explicit FutureNCCL(
+        c10::DeviceIndex deviceIndex,
+        std::shared_ptr<std::vector<at::cuda::CUDAEvent>> cudaEvents)
+        : at::ivalue::Future(c10::ListType::create(c10::TensorType::get())),
+          deviceIndex_(deviceIndex),
+          cudaEvents_(cudaEvents) {
+      TORCH_INTERNAL_ASSERT(
+          cudaEvents_->size() == 1,
+          "FutureNCCL only supports single-process single-device mode.");
+    }
+
+    // Gets the current stream of the device and synchronizes recorded streams
+    // with that. It will return after synchronizing the correct GPU streams to
+    // ensure we can have async CUDA execution and it does not wait for the
+    // entire operation to complete on GPU.
+    void wait() override {
+      if (error_) {
+        throw *error_;
+      }
+      auto stream = at::cuda::getCurrentCUDAStream(deviceIndex_);
+      (*cudaEvents_)[0].block(stream);
+    }
+
+    // If FutureNCCL was created by FutureNCCL::then, its value would be empty
+    // initially. FutureNCCL::then will later use this method to set its value
+    // to the return value of the callback.
+    void markCompleted(at::IValue value) override {
+      TORCH_INTERNAL_ASSERT(
+          value_.isNone(),
+          "Attempting to set value of a FutureNCCL which has a value."
+          "FutureNCCL's value was internally set to NCCL collective's "
+          "outputs or the return value of the callback.");
+      value_ = std::move(value);
+    }
+
+    void setError(std::string err) override {
+      error_ = FutureError(std::move(err));
+    }
+
+    // Just returns FutureNCCL's value after wait returns.
+    at::IValue value() override {
+      TORCH_INTERNAL_ASSERT(hasValue(), "FutureNCCL's value is None.")
+      wait();
+      return value_;
+    }
+
+    const at::IValue& constValue() override {
+      TORCH_INTERNAL_ASSERT(hasValue(), "FutureNCCL's value is None.")
+      wait();
+      return value_;
+    }
+
+    // Adds a callback to FutureNCCL. It invokes the callback inline after
+    // synchronizing FutureNCCL's own cudaEvents with the stream that runs
+    // this callback. This new FutureNCCL's cudaEvents will record the
+    // callback's stream and will have the result value of the callback.
+    void addCallbackWithStream(
+        std::function<void(void)> callback,
+        const c10::cuda::CUDAStream& stream,
+        std::shared_ptr<std::vector<at::cuda::CUDAEvent>> thenFutCudaEvents) {
+      (*cudaEvents_)[0].block(stream);
+      c10::OptionalStreamGuard streamGuard{c10::Stream(stream)};
+      callback();
+      (*thenFutCudaEvents)[0].record(stream);
+    }
+
+    // We use addCallbackWithStream instead of addCallback.
+    void addCallback(std::function<void(void)> /* unused */) override {
+      C10_THROW_ERROR(
+          Error,
+          "FutureNCCL uses addCallbackWithStream instead of addCallback.");
+    }
+
+    // Adds a callback to FutureNCCL, and returns another FutureNCCL to hold
+    // the return value of the callback and new cudaEvents that recorded the
+    // stream that runs this callback.
+    c10::intrusive_ptr<Future> then(
+        std::function<at::IValue(void)> callback,
+        at::TypePtr /* unused */) override {
+      // Get a new stream from pool that will run the callback.
+      const c10::cuda::CUDAStream stream =
+          at::cuda::getStreamFromPool(deviceIndex_);
+      // Create a new cudaEvents object of size 1 that will record callback's
+      // stream and will be used by the new FutureNCCL.
+      auto thenFutCudaEvents =
+          std::make_shared<std::vector<at::cuda::CUDAEvent>>(1);
+      // Create a FutureNCCL without setting a value.
+      auto fut =
+          c10::make_intrusive<FutureNCCL>(deviceIndex_, thenFutCudaEvents);
+
+      // Cannot move capture std::function in lambda, because it cannot deduce
+      // the template type for std::function. Hence use std::bind to explicitly
+      // specify types.
+      addCallbackWithStream(
+          std::bind(
+              [&](std::function<at::IValue(void)> cb) {
+                try {
+                  fut->markCompleted(at::IValue(cb()));
+                } catch (const std::exception& e) {
+                  fut->setError(e.what());
+                }
+              },
+              std::move(callback)),
+          stream,
+          thenFutCudaEvents);
+      return fut;
+    }
+
+    // Checks cudaEventQuery with cudaEvents. Returns true if a FutureError was
+    // recorded or the entire operation is completed on the GPU.
+    bool completed() const override {
+      if (error_) {
+        return true;
+      }
+      // Checking the work's corresponding CUDA events' status
+      auto ret = cudaEventQuery((*cudaEvents_)[0]);
+      return ret != cudaErrorNotReady || ret == cudaSuccess;
+    }
+
+    bool hasValue() const override {
+      return !value_.isNone();
+    }
+
+   private:
+    at::IValue value_;
+    c10::DeviceIndex deviceIndex_;
+    std::shared_ptr<std::vector<at::cuda::CUDAEvent>> cudaEvents_;
+    c10::optional<FutureError> error_;
   };
 
   // If you wish to create multiple process groups, each with a potentially

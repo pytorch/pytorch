@@ -5,7 +5,7 @@ from __future__ import unicode_literals
 import numpy as np
 
 from caffe2.python import core, workspace
-from hypothesis import given
+from hypothesis import given, settings
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
 import hypothesis.strategies as st
@@ -61,6 +61,7 @@ class TestGatherOps(serial.SerializedTestCase):
     @given(rows_num=st.integers(0, 10000),
            index_num=st.integers(0, 5000),
            **hu.gcs)
+    @settings(deadline=10000)
     def test_gather_ops(self, rows_num, index_num, gc, dc):
         data = np.random.random((rows_num, 10, 20)).astype(np.float32)
 
@@ -101,6 +102,7 @@ class TestGatherOps(serial.SerializedTestCase):
            rows_num=st.integers(1, 6),
            index_num=st.integers(1, 20),
            **hu.gcs_cpu_only)
+    @settings(deadline=10000)
     def test_gather_ops_match_outer(self, batch_num, rows_num, index_num, gc, dc):
         data = np.random.random((batch_num, rows_num, 5)).astype(np.float32)
         ind = np.random.randint(rows_num, size=(batch_num, index_num)).astype('int32')
@@ -122,6 +124,7 @@ class TestGatherOps(serial.SerializedTestCase):
            rows_num=st.integers(1, 6),
            index_num=st.integers(1, 20),
            **hu.gcs_cpu_only)
+    @settings(deadline=10000)
     def test_batch_gather_op_match_outer(self, batch_num, rows_num, index_num, gc, dc):
         data = np.random.random((batch_num, rows_num, 5)).astype(np.float32)
         ind = np.random.randint(rows_num, size=(batch_num, index_num)).astype('int32')
@@ -148,6 +151,7 @@ class TestGatherOps(serial.SerializedTestCase):
            index_num2=st.integers(1, 10),
            axis2_num=st.integers(1, 10),
            **hu.gcs_cpu_only)
+    @settings(deadline=None, max_examples=50)
     def test_gather_op_match_outer_axis2_data4D_ind4D(
         self, batch_num, rows_num, axis2_num, index_num, index_num2, gc, dc
     ):
@@ -189,6 +193,7 @@ def _inputs(draw):
 class TestBatchGatherOps(hu.HypothesisTestCase):
     @given(inputs=_inputs(),
            **hu.gcs)
+    @settings(deadline=10000)
     def test_batch_gather_ops(self, inputs, gc, dc):
         data, ind = inputs
         op = core.CreateOperator(
@@ -204,6 +209,7 @@ class TestGatherFused8BitRowwise(hu.HypothesisTestCase):
            cols_num=st.integers(1, 128),
            index_num=st.integers(0, 5000),
            **hu.gcs)
+    @settings(deadline=1000)
     def test_batch_gather_ops(self, rows_num, cols_num, index_num, gc, dc):
         data = np.random.random((rows_num, cols_num)).astype(np.float32)
         ind = np.random.randint(rows_num, size=(index_num, )).astype('int32')

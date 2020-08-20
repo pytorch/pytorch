@@ -35,7 +35,7 @@ template <typename scalar_t>
 __global__ void EmbeddingBag_updateOutputKernel(
     int64_t *input, int64_t *offsets, scalar_t *weight, scalar_t *output,
     int64_t *offset2bag, int64_t numIndices, int64_t numBags,
-    int64_t featureSize, int64_t weight_stide0, int64_t weight_stride1,
+    int64_t featureSize, int64_t weight_stride0, int64_t weight_stride1,
     int mode, int64_t *bag_size, int64_t *max_indices,
     scalar_t* per_sample_weights, int64_t per_sample_weights_stride) {
 
@@ -62,7 +62,7 @@ __global__ void EmbeddingBag_updateOutputKernel(
       int64_t bag_size_ = 0;
       int64_t maxWord = -1;
       for (int64_t emb = begin; emb < end; emb++) {
-        const int64_t weightRow = input[emb] * weight_stide0;
+        const int64_t weightRow = input[emb] * weight_stride0;
         scalar_t weightValue = weightFeat[weightRow];
 
         if (mode == MODE_MAX) {

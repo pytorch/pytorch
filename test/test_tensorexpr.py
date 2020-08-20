@@ -5,7 +5,7 @@ import unittest
 
 from torch.testing._internal.common_utils import suppress_warnings, num_profiled_runs
 
-from te_utils import CudaCodeGenCreated, CudaCodeGenExecuted, \
+from torch.testing._internal.te_utils import CudaCodeGenCreated, CudaCodeGenExecuted, \
     LLVMCodeGenExecuted, SimpleIREvalExecuted
 
 class BaseTestClass(unittest.TestCase):
@@ -1265,6 +1265,18 @@ class TestTensorExprFuser(BaseTestClass):
         cx = CudaCodeGenExecuted()
         assert torch.allclose(scripted(a), 2 * a)
         assert cx.elapsed_value() == 1
+
+    def test_mask(self):
+        devices = ["cuda", "cpu"] if torch.cuda.is_available() else ["cpu"]
+
+        def test(x):
+            return x.unsqueeze(1) == 0
+
+        for d in devices:
+            x = torch.rand(4, device=d) > 0.5
+            scripted = torch.jit.script(test)
+            scripted(x)
+            assert torch.equal(scripted(x), test(x))
 
 if __name__ == '__main__':
     unittest.main()
