@@ -532,7 +532,7 @@ class JitRpcOpTest:
         kwargs = {"first_kwarg": torch.tensor([2, 2])}
 
         for script_op in [script_rpc_async_call, script_rpc_sync_call]:
-            ret = script_rpc_async_call(
+            ret = script_op(
                 dst_worker_name, args, kwargs
             )
             self.assertEqual(ret, torch.tensor([9, 9]))
@@ -550,7 +550,7 @@ class JitRpcOpTest:
             "second_kwarg": torch.tensor([3, 3]),
         }
         for script_op in [script_rpc_async_call, script_rpc_sync_call]:
-            ret = script_rpc_async_call(
+            ret = script_op(
                 dst_worker_name, args, kwargs
             )
             self.assertEqual(ret, torch.tensor([8, 8]))

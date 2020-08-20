@@ -146,7 +146,7 @@ __device__  __inline__ float uniform(unsigned int x) {
 
 // Helper functions for Operations
 static auto code_helper_funcs = R"(
-__device__ int ceilDiv(const int a, const int b) {
+__device__ constexpr int ceilDiv(const int a, const int b) {
   return (a + b - 1) / b;
 }
 __device__ float clamp(const float x, const float minv, const float maxv) {
@@ -478,10 +478,6 @@ __device__ void gridReduceLastBlock(T& out, const T *in, const size_t in_size,
   }
 }
 
-__device__ unsigned atomic_inc(unsigned* sync_flag, unsigned max_val) {
-  return atomicInc(sync_flag, max_val - 1);
-}
-
 /** Reduces per-thread values across thread blocks.
 
 Function parameters:
@@ -491,6 +487,8 @@ Function parameters:
 - work_buf: Temporary buffer for cross-block reductions
 - sync_flags: A vector of integers for synchronizations
 - shared_buf: Shared memory buffer for intra-block reduction
+
+Return true when the thread block has the valid result.
 
 Template parameters:
 - X/Y/Z_BLOCK: When true, reduces across thread blocks along the X/Y/Z
@@ -526,9 +524,9 @@ final results.
 template <bool X_BLOCK, bool Y_BLOCK, bool Z_BLOCK,
           bool X_THREAD, bool Y_THREAD, bool Z_THREAD,
           typename T, typename Func>
-__device__ void gridReduce(T& out, T inp_val, Func reduction_op,
+__device__ bool gridReduce(T& out, T inp_val, Func reduction_op,
                            volatile T* work_buf,
-                           unsigned* sync_flags,
+                           Tensor<int64_t, 1> sync_flags,
                            T* shared_buf) {
   const auto seg_size =
       size_of_reduction_segment<X_BLOCK, Y_BLOCK, Z_BLOCK>(gridDim);
@@ -555,8 +553,8 @@ __device__ void gridReduce(T& out, T inp_val, Func reduction_op,
   __shared__ bool last_block;
   if (threadIdx.x == 0 && threadIdx.y == 0 && threadIdx.z == 0) {
     __threadfence();
-    auto old = atomic_inc(&sync_flags[seg_idx], seg_size);
-    last_block = old == seg_size - 1;
+    auto old = atomicAdd(  (unsigned long long*) &sync_flags[seg_idx], 1);
+    last_block = old + 1 == seg_size;
   }
   __syncthreads();
 
@@ -565,9 +563,59 @@ __device__ void gridReduce(T& out, T inp_val, Func reduction_op,
     gridReduceLastBlock<X_THREAD, Y_THREAD, Z_THREAD>(
         out, (T*)work_buf, seg_size * rblock_size,
         reduction_op, shared_buf);
+    return true;
+  } else {
+    return false;
   }
 }
 } // namespace reduction
+)";
+
+static auto code_template_block_broadcast = R"(
+namespace broadcast {
+
+template <bool X_THREAD, bool Y_THREAD, bool Z_THREAD>
+__host__ __device__ unsigned offset_of_source(const dim3& block_dim, const dim3& thread_idx) {
+  unsigned offset = 0;
+  if (!Z_THREAD)
+    offset = offset * block_dim.z + thread_idx.z;
+  if (!Y_THREAD)
+    offset = offset * block_dim.y + thread_idx.y;
+  if (!X_THREAD)
+    offset = offset * block_dim.x + thread_idx.x;
+  return offset;
+}
+
+/** Broadcasts within partitioned groups of threads.
+
+    X_THREAD: Broadcast from threadIdx.x == 0 if true
+    Y_THREAD: Broadcast from threadIdx.y == 0 if true
+    Z_THREAD: Broadcast from threadIdx.z == 0 if true
+    inp_val: Per-thread source value. Only valid when the thread is a source.
+    out: Per-thread output location
+ */
+template <bool X_THREAD, bool Y_THREAD, bool Z_THREAD, typename T>
+__device__ void blockBroadcast(T& out, T inp_val) {
+
+  // Use worst case for memory.
+  __shared__ T shared_mem[1024];
+
+  const bool has_valid_data =
+      (!X_THREAD || threadIdx.x == 0) &&
+      (!Y_THREAD || threadIdx.y == 0) &&
+      (!Z_THREAD || threadIdx.z == 0);
+
+  const auto shared_offset = offset_of_source<X_THREAD, Y_THREAD, Z_THREAD>(blockDim, threadIdx);
+
+  if (has_valid_data)
+    shared_mem[shared_offset] = inp_val;
+
+  __syncthreads();
+
+  out = shared_mem[shared_offset];
+}
+
+} // namespace broadcast
 )";
 
 } // namespace cuda
