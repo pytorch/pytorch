@@ -9,6 +9,7 @@ import sys
 import tempfile
 import threading
 import time
+import traceback
 import unittest
 from datetime import timedelta
 from sys import platform
@@ -69,5 +70,8 @@ class ProcessGroupGlooJitTest(MultiProcessTestCase):
             return pg
 
         print(test_process_group_script.graph)
-        test_process_group_script(pg)
+        try:
+            test_process_group_script(pg)
+        except Exception as e:
+            traceback.print_exc()
 
