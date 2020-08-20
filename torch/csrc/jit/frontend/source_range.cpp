@@ -85,7 +85,8 @@ C10_EXPORT void SourceRange::print_with_context(
   AT_ASSERT(begin_line == 0 || str[begin_line - 1] == '\n');
   AT_ASSERT(end_line == str.size() || str[end_line] == '\n');
 
-  size_t begin_context = begin_line; // beginning of context, CONTEXT lines before the highlight lines
+  size_t begin_context = begin_line; // beginning of context, CONTEXT lines
+                                     // before the highlight lines
   for (size_t i = 0; begin_context > 0; --begin_context) {
     if (str[begin_context - 1] == '\n')
       ++i;
@@ -95,7 +96,8 @@ C10_EXPORT void SourceRange::print_with_context(
   }
   AT_ASSERT(begin_context == 0 || str[begin_context - 1] == '\n');
 
-  size_t end_context = end_line; // end of context, CONTEXT lines after the highlight lines
+  size_t end_context =
+      end_line; // end of context, CONTEXT lines after the highlight lines
   for (size_t i = 0; end_context < str.size(); ++end_context) {
     if (str[end_context] == '\n')
       ++i;
@@ -121,9 +123,9 @@ C10_EXPORT void SourceRange::print_with_context(
   if (highlight) {
     size_t line_start = start();
     size_t line_end = start();
-    while (line_start < end()){
+    while (line_start < end()) {
       // move line_end to end of line
-      while(str[line_end] != '\n' && line_end < end()) {
+      while (str[line_end] != '\n' && line_end < end()) {
         ++line_end;
       }
       // print line of code
@@ -135,13 +137,13 @@ C10_EXPORT void SourceRange::print_with_context(
       size_t highlight_end = line_end - 1;
       // determine length of line which is being highlighted
       while (hightlight_begin > 0 && str[hightlight_begin - 1] != '\n')
-          --hightlight_begin;
+        --hightlight_begin;
       while (highlight_end < end() && str[highlight_end] != '\n')
-          ++highlight_end;
+        ++highlight_end;
       AT_ASSERT(hightlight_begin == 0 || str[hightlight_begin - 1] == '\n');
       AT_ASSERT(highlight_end == end() || str[highlight_end] == '\n');
       // determine amount of empty space vs highlighted space
-      for(size_t i = hightlight_begin; i < highlight_end; i++) {
+      for (size_t i = hightlight_begin; i < highlight_end; i++) {
         if (str[i] == ' ' || i <= start()) {
           empty_space++;
         } else {
