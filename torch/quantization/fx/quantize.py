@@ -172,7 +172,8 @@ class Cat(QuantizeHandler):
         zero_point = int(zero_point)
         kwargs = load_arg(quantized=False)(node.kwargs)
         kwargs.update({'scale': scale, 'zero_point': zero_point})
-        return quantizer.quantized_graph.create_node('call_function', torch.ops.quantized.cat, load_arg(quantized=[0])(node.args), kwargs)
+        return quantizer.quantized_graph.create_node(
+            'call_function', torch.ops.quantized.cat, load_arg(quantized=[0])(node.args), kwargs)
 
 # handle conv, maybe followed by relu
 # NB: matching order is reversed, that is we match from the bottom of this list to the beginning
