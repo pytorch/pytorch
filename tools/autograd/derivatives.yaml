@@ -713,10 +713,10 @@
   other: grad.clone().masked_fill_(self < other, 0)
 
 - name: amax(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor
-  self: (restore_reduced_dims(result, dim, keepdim) == self).to(grad.scalar_type()).sum(dim, true).pow(-1) * grad
+  self: (restore_reduced_dims(result, dim, keepdim) == self) * restore_reduced_dims(grad, dim, keepdim)
 
 - name: amin(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor
-  self: (restore_reduced_dims(result, dim, keepdim) == self).to(grad.scalar_type()).sum(dim, true).pow(-1) * grad
+  self: (restore_reduced_dims(result, dim, keepdim) == self) * restore_reduced_dims(grad, dim, keepdim)
 
 - name: mm(Tensor self, Tensor mat2) -> Tensor
   self: mm_mat1_backward(grad, mat2, self, 1)

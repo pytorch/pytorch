@@ -110,13 +110,17 @@ static Tensor restore_reduced_dims(const Tensor &output, IntArrayRef dims, bool 
   if (keepdim) {
     return output;
   }
-  std::vector<int64_t> target_shape(output.dim() + dims.size(), 0);
+  int64_t total_dims = output.dim() + dims.size();
+  std::vector<int64_t> target_shape(total_dims, 0);
   for (int64_t i : dims) {
+    if (i < 0) {
+      i = total_dims + i;
+    }
     target_shape[i] = 1;
   }
   int64_t j = 0;
   for (int64_t i : output.sizes()) {
-    while (target_shape[j]) j++;
+    while (target_shape[j] > 0) j++;
     target_shape[j++] = i;
   }
   return output.reshape(target_shape);
