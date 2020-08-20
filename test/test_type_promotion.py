@@ -174,38 +174,27 @@ class TestTypePromotion(TestCase):
             self.assertEqual((bf + scalar).dtype, torch.bfloat16)
             self.assertEqual((scalar + bf).dtype, torch.bfloat16)
             self.assertEqual(scalar + bf, bf + scalar)
-        with self.assertRaises(RuntimeError):
-            bf + complex(1.0, 0.0)
-        with self.assertRaises(RuntimeError):
-            complex(1.0, 0.0) + bf
 
         # with tensor
         for dtype in torch.testing.get_all_dtypes():
             t = torch.tensor(1, dtype=dtype, device=device)
-            if dtype.is_complex or dtype == torch.float16:
-                with self.assertRaises(RuntimeError):
-                    bf + t
-                with self.assertRaises(RuntimeError):
-                    t + bf
-                with self.assertRaises(RuntimeError):
-                    torch.promote_types(dtype, torch.bfloat16)
-                with self.assertRaises(RuntimeError):
-                    torch.promote_types(torch.bfloat16, dtype)
+            self.assertEqual(bf + t, t + bf)
+            if dtype in (torch.float16, torch.float32, torch.float64, torch.cfloat, torch.cdouble):
+                # Handles bfloat16 x float16 -> float32 promotion
+                expected_dtype = dtype if dtype != torch.half else torch.float32
+
+                self.assertEqual(torch.promote_types(dtype, torch.bfloat16), expected_dtype)
+                self.assertEqual(torch.promote_types(torch.bfloat16, dtype), expected_dtype)
+                self.assertEqual((bf + t).dtype, expected_dtype)
+                self.assertEqual((t + bf).dtype, expected_dtype)
+            elif dtype in (torch.bool,
+                           torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64, torch.bfloat16):
+                self.assertEqual(torch.promote_types(dtype, torch.bfloat16), torch.bfloat16)
+                self.assertEqual(torch.promote_types(torch.bfloat16, dtype), torch.bfloat16)
+                self.assertEqual((bf + t).dtype, torch.bfloat16)
+                self.assertEqual((t + bf).dtype, torch.bfloat16)
             else:
-                self.assertEqual(bf + t, t + bf)
-                if dtype in (torch.float32, torch.float64):
-                    self.assertEqual(torch.promote_types(dtype, torch.bfloat16), dtype)
-                    self.assertEqual(torch.promote_types(torch.bfloat16, dtype), dtype)
-                    self.assertEqual((bf + t).dtype, dtype)
-                    self.assertEqual((t + bf).dtype, dtype)
-                elif dtype in (torch.bool,
-                               torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64, torch.bfloat16):
-                    self.assertEqual(torch.promote_types(dtype, torch.bfloat16), torch.bfloat16)
-                    self.assertEqual(torch.promote_types(torch.bfloat16, dtype), torch.bfloat16)
-                    self.assertEqual((bf + t).dtype, torch.bfloat16)
-                    self.assertEqual((t + bf).dtype, torch.bfloat16)
-                else:
-                    raise AssertionError(f'Missing dtype {dtype} not tested.')
+                raise AssertionError(f'Missing dtype {dtype} not tested.')
 
     @float_double_default_dtype
     def test_alternate_result(self, device):
