@@ -68,37 +68,82 @@ VK_DELETER_NON_DISPATCHABLE_DECLARE(CommandPool);
 template<typename Type, typename Deleter>
 class Handle final {
  public:
-  Handle(Type payload, Deleter&& deleter);
+  Handle(Type payload, Deleter deleter);
   Handle(const Handle&) = delete;
   Handle& operator=(const Handle&) = delete;
-  Handle(Handle&&) = default;
-  Handle& operator=(Handle&&) = default;
+  Handle(Handle&&);
+  Handle& operator=(Handle&&);
   ~Handle();
 
+  operator bool() const;
   Type get() const;
+  Type release();
+  void reset(Type payload = kNull);
+
+ private:
+  static constexpr Type kNull{};
 
  private:
   Type payload_;
   Deleter deleter_;
 };
 
+//
+// Impl
+//
+
 template<typename Type, typename Deleter>
-inline Handle<Type, Deleter>::Handle(
-    const Type payload, Deleter&& deleter)
+inline Handle<Type, Deleter>::Handle(const Type payload, Deleter deleter)
   : payload_(payload),
-    deleter_(deleter) {
+    deleter_(std::move(deleter)) {
+}
+
+template<typename Type, typename Deleter>
+inline Handle<Type, Deleter>::Handle(Handle&& handle)
+  : payload_(handle.release()),
+    deleter_(std::move(handle.deleter_)) {
+}
+
+template<typename Type, typename Deleter>
+inline Handle<Type, Deleter>&
+Handle<Type, Deleter>::operator=(Handle&& handle)
+{
+  reset(handle.release());
+  deleter_ = std::move(handle.deleter_);
+  return *this;
 }
 
 template<typename Type, typename Deleter>
 inline Handle<Type, Deleter>::~Handle() {
-  if (payload_) {
-    deleter_(payload_);
-  }
+  reset();
+}
+
+template<typename Type, typename Deleter>
+inline Handle<Type, Deleter>::operator bool() const {
+  return get();
 }
 
 template<typename Type, typename Deleter>
 inline Type Handle<Type, Deleter>::get() const {
   return payload_;
+}
+
+template<typename Type, typename Deleter>
+inline Type Handle<Type, Deleter>::release() {
+  const Type payload = payload_;
+  payload_ = kNull;
+
+  return payload;
+}
+
+template<typename Type, typename Deleter>
+inline void Handle<Type, Deleter>::reset(Type payload) {
+  using std::swap;
+  swap(payload_, payload);
+
+  if (kNull != payload) {
+    deleter_(payload);
+  }
 }
 
 } // namespace api
