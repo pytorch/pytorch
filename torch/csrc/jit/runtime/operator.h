@@ -197,7 +197,7 @@ struct TORCH_API Operator {
 
 template <bool enabled, typename Func>
 __attribute__((always_inline))
-c10::optional<Operator> operatorGenerator(
+c10::optional<Operator> OperatorGenerator(
     std::string&& schema_str,
     Func&& op,
     AliasAnalysisKind alias_analysis) {
