@@ -47,8 +47,8 @@ RegisterOperators reg(
          aliasAnalysisSpecialCase()),
      Operator(
          prim::TypeCheck /* (...)  -> (..., bool) */,
-         [](const Node* node) -> Operation {
-           return [](Stack* stach) {
+         [](const Node * /* node */) -> Operation {
+           return [](Stack* /* stack */) {
              AT_ERROR("prim::TypeCheck not yet implemented"); // NOLINT
            };
          },

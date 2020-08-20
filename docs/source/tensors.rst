@@ -408,12 +408,14 @@ view of a storage and defines numeric operations on it.
    .. automethod:: masked_select
    .. automethod:: matmul
    .. automethod:: matrix_power
+   .. automethod:: matrix_exp
    .. automethod:: max
    .. automethod:: mean
    .. automethod:: median
    .. automethod:: min
    .. automethod:: mm
    .. automethod:: mode
+   .. automethod:: movedim
    .. automethod:: mul
    .. automethod:: mul_
    .. automethod:: multinomial

@@ -69,7 +69,6 @@ bool isSupported(Node* node) {
     case aten::reciprocal:
     case aten::expm1:
     case aten::lgamma:
-    case aten::slice:
     case aten::unsqueeze:
     case aten::frac:
     // TODO: uncomment once we can handle rand+broadcasts
@@ -94,6 +93,9 @@ bool isSupported(Node* node) {
         return false;
       }
       return true;
+    case aten::slice:
+      // TODO: Shape inference is not implemented for this op yet
+      return false;
     default:
       return false;
   }
@@ -139,6 +141,29 @@ struct nodesComparator {
   }
 };
 
+class TypeMap {
+ public:
+  TypeMap(Block* block) {}
+  void dump() const {}
+  void set(Value* v, TensorTypePtr ty) {
+    typeinfo_map_[v] = ty;
+  }
+  TensorTypePtr get(Value* v) const {
+    return typeinfo_map_.at(v);
+  }
+  void replaceValue(Value* oldval, Value* newval) {}
+  void erase(Value* v) {
+    typeinfo_map_.erase(v);
+  }
+
+  size_t count(Value* v) const {
+    return typeinfo_map_.count(v);
+  };
+
+ private:
+  std::unordered_map<Value*, TensorTypePtr> typeinfo_map_;
+};
+
 class TensorExprFuser {
  public:
   TensorExprFuser(std::shared_ptr<Graph> graph) : graph_(std::move(graph)) {}
@@ -152,8 +177,8 @@ class TensorExprFuser {
     GRAPH_DUMP("After removing profiling nodes: ", graph_);
     createFusionGroups(graph_->block());
     printTypeInfoMap();
+    GRAPH_DUMP("After creating fusion groups: ", graph_);
     guardFusionGroups(graph_->block());
-    GRAPH_DUMP("After inserting guards: ", graph_);
   }
 
  private:
@@ -197,6 +222,9 @@ class TensorExprFuser {
     GRAPH_DEBUG("Iteratively pull input nodes into the fusion group...\n");
     while (!queue.empty()) {
       GRAPH_DEBUG("Current fusion group: ", *fusion_group);
+      if (fusion_group->kind() == getTensorExprSymbol()) {
+        GRAPH_DEBUG(*fusion_group->g(attr::Subgraph));
+      }
       GRAPH_DEBUG(queue.size(), " nodes are in the queue.\n");
 
       Node* input_node = *queue.begin();
@@ -347,6 +375,9 @@ class TensorExprFuser {
     // group, so we can safely merge them into the fusion group subgraph.
     std::unordered_map<Value*, Value*> vmap;
     fusion_group = getOrCreateTensorExprSubgraph(fusion_group, vmap);
+    updateTypeinfoMapWithVmap(vmap);
+    vmap.clear();
+
     for (auto n : nodes_to_merge) {
       GRAPH_UPDATE("Merging ", getHeader(n));
       SubgraphUtils::mergeNodeIntoSubgraph(n, fusion_group, vmap);
@@ -377,11 +408,8 @@ class TensorExprFuser {
 
   bool canHandle(Node* node) {
     if (node->kind() == prim::Constant) {
-      if (node->output()->type()->cast<TensorType>()) {
-        // TODO: add support for tensor constants.
-        return false;
-      }
-      return true;
+      // TODO: add support for tensor constants.
+      return false;
     }
     if (!allShapesAreKnown(node)) {
       return false;
@@ -492,6 +520,7 @@ class TensorExprFuser {
     }
   }
   void guardFusionGroup(Node* n) {
+    GRAPH_DEBUG("Inserting a typecheck guard for a node", *n);
     auto subgraph = SubgraphUtils::getSubgraph(n);
 
     // Fixup types of the subgraph inputs
@@ -532,6 +561,7 @@ class TensorExprFuser {
             ->create(prim::If, {typecheck_result}, n->outputs().size())
             ->insertAfter(typecheck_node);
     for (size_t idx = 0; idx < n->outputs().size(); ++idx) {
+      versioning_if->output(idx)->setType(n->output(idx)->type());
       n->output(idx)->replaceAllUsesWith(versioning_if->output(idx));
     }
     auto true_block = versioning_if->addBlock();

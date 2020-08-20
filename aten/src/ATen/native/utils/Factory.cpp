@@ -1,13 +1,10 @@
-#ifdef USE_XNNPACK
-
 #include <ATen/NamedTensorUtils.h>
-#include <ATen/native/xnnpack/Factory.h>
+#include <ATen/native/utils/Factory.h>
 #include <c10/core/CPUAllocator.h>
 
 namespace at {
 namespace native {
-namespace xnnpack {
-namespace internal {
+namespace mobile {
 
 Tensor empty_with_tail_padding(
     const IntArrayRef size,
@@ -62,9 +59,6 @@ Tensor allocate_padded_contiguous_if_needed(
   return padded_input.copy_(input);
 }
 
-} // namespace internal
-} // namespace xnnpack
+} // namespace mobile
 } // namespace native
 } // namespace at
-
-#endif /* USE_XNNPACK */

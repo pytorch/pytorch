@@ -13,71 +13,67 @@ void testTypeCheck() {
         R"IR(
 graph(%a.1 : Tensor,
       %b.1 : Tensor):
-  %t : Float(2:2, 2:1, device=cuda, requires_grad=1), %t0 : Float(3:3, 3:1), %type_matched : bool = prim::TypeCheck(%a.1, %b.1)
-  %14 : Tensor = prim::If(%type_matched)
-    block0():
-      -> (%a.1)
-    block1():
-      -> (%b.1)
-  return (%14)
+  %t0 : Float(2:2, 2:1, device=cpu, requires_grad=1), %t1 : Float(3:3, 3:1), %type_matched : bool = prim::TypeCheck(%a.1, %b.1)
+  return (%t0, %t1, %type_matched)
   )IR",
         &*graph,
         vmap);
 
-    Code print_function(graph, "");
-
-    auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 1);
-    auto a = at::zeros({2, 2}, options);
-    auto b = at::ones({3, 3});
-    auto a2 = at::ones({2, 2});
-    auto a3 = at::ones({2, 2}); //.idtype(at::kInt);
-    a3 = a3.to(at::kInt);
-
-    a.set_requires_grad(true);
-    a2.set_requires_grad(false);
-
+    Code function(graph, "");
+    InterpreterState interp(function);
     {
-      // TypeCheck yields to true! Tensor a is returned
-      InterpreterState print_interp(print_function);
-      std::vector<IValue> stack({a, b});
-      print_interp.run(stack);
-      ASSERT_TRUE(exactlyEqual(stack[0].toTensor(), a));
-    }
-    {
-      // TypeCheck yields to false because of size mismatch expected tensor
-      // size (3,3) got (2,2). Tensor a2 is returned
-      InterpreterState print_interp(print_function);
-      std::vector<IValue> stack({a, a2});
-      print_interp.run(stack);
-      ASSERT_TRUE(exactlyEqual(stack[0].toTensor(), a2));
-    }
-    {
-      // TypeCheck yields to false because of requires_grad mismatch.
-      //  Tensor b is returned
-      // FIXME: gradient is not checked! a2 is returned instead of b
-      InterpreterState print_interp(print_function);
-      std::vector<IValue> stack({a2, b});
-      print_interp.run(stack);
-      ASSERT_TRUE(exactlyEqual(stack[0].toTensor(), a2));
-    }
-    {
-      // TypeCheck yields to false because of type mismatch: got
-      // Int expected Float. Tensor b is returned
-      // FIXME: type is not checked! a3 is returned instead of b
-      InterpreterState print_interp(print_function);
-      std::vector<IValue> stack({a3, b});
-      print_interp.run(stack);
-      ASSERT_TRUE(exactlyEqual(stack[0].toTensor(), a3));
-    }
-    {
-      // TypeCheck yields to false because of device mismatch.
-      // Tensor b is returned
-      // FIXME: device is not checked! a is returned instead of b
-      InterpreterState print_interp(print_function);
+      // TypeCheck yields to true! Shape, grad and device matches.
+      auto a = at::zeros({2, 2});
+      auto b = at::ones({3, 3});
+      a.set_requires_grad(true);
       a = a.to(at::kCPU);
       std::vector<IValue> stack({a, b});
-      print_interp.run(stack);
+      interp.run(stack);
+      bool ret = stack[2].toBool();
       ASSERT_TRUE(exactlyEqual(stack[0].toTensor(), a));
+      ASSERT_TRUE(exactlyEqual(stack[1].toTensor(), b));
+      ASSERT_TRUE(ret);
+    }
+    {
+      auto a = at::zeros({2, 2});
+      auto b = at::ones({2, 2}); // Size mismatch
+      a.set_requires_grad(true);
+      a = a.to(at::kCPU);
+      std::vector<IValue> stack({a, b});
+      interp.run(stack);
+      bool ret2 = stack[2].toBool();
+      ASSERT_FALSE(ret2);
+    }
+    {
+      auto a = at::zeros({2, 2});
+      auto b = at::ones({3, 3});
+      a = a.to(at::kCPU);
+      a.set_requires_grad(false); // Gradient mismatch
+      std::vector<IValue> stack({a, b});
+      interp.run(stack);
+      bool ret3 = stack[2].toBool();
+      ASSERT_FALSE(ret3);
+    }
+    {
+      auto a = at::zeros({2, 2});
+      auto b = at::ones({3, 3});
+      a = a.to(at::kCPU);
+      a.set_requires_grad(true);
+      a = a.to(at::kInt); // Scalar type mismatch
+      std::vector<IValue> stack({a, b});
+      interp.run(stack);
+      bool ret4 = stack[2].toBool();
+      ASSERT_FALSE(ret4);
+    }
+    {
+      auto a = at::zeros({2, 2});
+      auto b = at::ones({3, 3});
+      a.set_requires_grad(true);
+      a = a.to(at::kCUDA); // device mismatch
+      std::vector<IValue> stack({a, b});
+      interp.run(stack);
+      bool ret5 = stack[2].toBool();
+      ASSERT_FALSE(ret5);
     }
   }
 
@@ -89,22 +85,25 @@ graph(%a.1 : Tensor,
 graph(%a.1 : Tensor,
       %b.1 : Tensor):
   %type_matched : bool = prim::TypeCheck()
-  %14 : Tensor = prim::If(%type_matched)
-    block0():
-      -> (%a.1)
-    block1():
-      -> (%b.1)
-  return (%14)
+  return (%type_matched)
   )IR",
         &*graph,
         vmap);
-    Code print_function(graph, "");
-    auto a = at::zeros({2, 2});
-    auto b = at::ones({3, 3});
-
-    InterpreterState print_interp(print_function);
-    std::vector<IValue> stack({a, b});
-    print_interp.run(stack);
+    ASSERT_TRUE(false);
+  } catch (const std::exception& e) {
+  }
+  try { // Test for assertion if num_inputs + 1 != num_outputs
+    auto graph = std::make_shared<Graph>();
+    std::unordered_map<std::string, Value*> vmap;
+    parseIR(
+        R"IR(
+graph(%a.1 : Tensor,
+      %b.1 : Tensor):
+  %type_matched : bool = prim::TypeCheck(%a.1)
+  return (%type_matched)
+  )IR",
+        &*graph,
+        vmap);
     ASSERT_TRUE(false);
   } catch (const std::exception& e) {
   }
