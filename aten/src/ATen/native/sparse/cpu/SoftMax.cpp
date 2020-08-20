@@ -4,6 +4,7 @@
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/Parallel.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/native/sparse/cpu/ParamUtils.h>
 #include <map>
 
 namespace at {
@@ -505,34 +506,34 @@ void cpu_sparse_coo_softmax_backward(Tensor& grad_input, const Tensor& grad, con
 
 } // namespace
 
-Tensor softmax_sparse_cpu(const Tensor& input_, const int64_t dim_, const bool half_to_float) {
-  TORCH_INTERNAL_ASSERT(input_.is_sparse());
-  TORCH_CHECK(!half_to_float, "softmax with half to float conversion is not supported on CPU");
-  auto input = input_.coalesce();
-  Tensor output = at::native::empty_like(input);
+Tensor softmax_sparse_cpu(
+    const Tensor& input_,
+    const int64_t dim,
+    const bool half_to_float) {
+  Tensor input, output;
+  std::tie(input, output) = apply::softmax_sparse_check_invariants(
+      input_, dim, half_to_float, "softmax");
   if (input.numel() == 0) {
     return output;
   }
-  TORCH_CHECK(dim_ >= 0 && dim_ < input.dim(),
-              "dim must be non-negative and less than input dimensions");
   AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "softmax", [&] {
-      cpu_sparse_coo_softmax<scalar_t, false>(output, input, dim_);
+    cpu_sparse_coo_softmax<scalar_t, false>(output, input, dim);
   });
   return output;
 }
 
-Tensor log_softmax_sparse_cpu(const Tensor& input_, const int64_t dim_, const bool half_to_float) {
-  TORCH_INTERNAL_ASSERT(input_.is_sparse());
-  TORCH_CHECK(!half_to_float, "log_softmax with half to float conversion is not supported on CPU");
-  auto input = input_.coalesce();
-  Tensor output = at::native::empty_like(input);
+Tensor log_softmax_sparse_cpu(
+    const Tensor& input_,
+    const int64_t dim,
+    const bool half_to_float) {
+  Tensor input, output;
+  std::tie(input, output) = apply::softmax_sparse_check_invariants(
+      input_, dim, half_to_float, "log_softmax");
   if (input.numel() == 0) {
     return output;
   }
-  TORCH_CHECK(dim_ >= 0 && dim_ < input.dim(),
-              "dim must be non-negative and less than input dimensions");
   AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "log_softmax", [&] {
-      cpu_sparse_coo_softmax<scalar_t, true>(output, input, dim_);
+    cpu_sparse_coo_softmax<scalar_t, true>(output, input, dim);
   });
   return output;
 }
@@ -542,26 +543,16 @@ Tensor softmax_backward_sparse_cpu(
     const Tensor& output_,
     int64_t dim_,
     const Tensor& input_) {
-  TensorArg grad_arg{grad_, "grad", 1}, output_arg{output_, "output", 2};
-  checkSameSize("softmax_backward", grad_arg, output_arg);
-
-  int64_t dim = maybe_wrap_dim(dim_, grad_.dim());
-
-  auto grad = grad_.coalesce();
-  auto output = output_.coalesce();
-
-  Tensor grad_input = at::native::empty_like(output);
+  Tensor grad_input, grad, output;
+  std::tie(grad_input, grad, output) =
+      apply::softmax_backward_sparse_check_invariants(
+          grad_, output_, dim_, input_, "softmax_backward");
   if (output.numel() == 0) {
     return grad_input;
   }
-  TORCH_CHECK(
-      dim >= 0 && dim < grad.dim(),
-      "dim must be non-negative and less than input dimensions");
-  TORCH_CHECK(
-              grad.sparse_dim() == output.sparse_dim(),
-      "grad and output sparse dimensions must be equal");
   AT_DISPATCH_FLOATING_TYPES(grad.scalar_type(), "softmax_backward", [&] {
-      cpu_sparse_coo_softmax_backward<scalar_t, false>(grad_input, grad, output, dim);
+    cpu_sparse_coo_softmax_backward<scalar_t, false>(
+        grad_input, grad, output, dim_);
   });
   return grad_input;
 }
@@ -571,26 +562,16 @@ Tensor log_softmax_backward_sparse_cpu(
     const Tensor& output_,
     int64_t dim_,
     const Tensor& input_) {
-  TensorArg grad_arg{grad_, "grad", 1}, output_arg{output_, "output", 2};
-  checkSameSize("log_softmax_backward", grad_arg, output_arg);
-
-  int64_t dim = maybe_wrap_dim(dim_, grad_.dim());
-
-  auto grad = grad_.coalesce();
-  auto output = output_.coalesce();
-
-  Tensor grad_input = at::native::empty_like(output);
+  Tensor grad_input, grad, output;
+  std::tie(grad_input, grad, output) =
+      apply::softmax_backward_sparse_check_invariants(
+          grad_, output_, dim_, input_, "log_softmax_backward");
   if (output.numel() == 0) {
     return grad_input;
   }
-  TORCH_CHECK(
-      dim >= 0 && dim < grad.dim(),
-      "dim must be non-negative and less than input dimensions");
-  TORCH_CHECK(
-              grad.sparse_dim() == output.sparse_dim(),
-      "grad and output sparse dimensions must be equal");
-  AT_DISPATCH_FLOATING_TYPES(grad.scalar_type(), "softmax_backward", [&] {
-      cpu_sparse_coo_softmax_backward<scalar_t, true>(grad_input, grad, output, dim);
+  AT_DISPATCH_FLOATING_TYPES(grad.scalar_type(), "log_softmax_backward", [&] {
+    cpu_sparse_coo_softmax_backward<scalar_t, true>(
+        grad_input, grad, output, dim_);
   });
   return grad_input;
 }
