@@ -8,6 +8,7 @@
 #include <mutex>
 #include <thread>
 #include <vector>
+#include <chrono>
 
 #include <pybind11/chrono.h>
 
@@ -31,7 +32,7 @@ class ProcessGroupTest : public ProcessGroup {
     virtual ~WorkTest();
     bool isCompleted() override;
     bool isSuccess() const override;
-    bool wait() override;
+    bool wait(std::chrono::milliseconds timeout) override;
 
    protected:
     friend class ProcessGroupTest;

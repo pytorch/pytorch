@@ -1,5 +1,5 @@
 #include <torch/csrc/distributed/rpc/python_functions.h>
-
+#include <ATen/ThreadLocalState.h>
 #include <c10/util/C++17.h>
 #include <torch/csrc/distributed/autograd/context/container.h>
 #include <torch/csrc/distributed/autograd/utils.h>
@@ -15,6 +15,7 @@
 #include <torch/csrc/distributed/rpc/script_resp.h>
 #include <torch/csrc/distributed/rpc/torchscript_functions.h>
 #include <torch/csrc/distributed/rpc/utils.h>
+#include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/utils/python_compat.h>
 
 namespace torch {
@@ -60,6 +61,8 @@ std::shared_ptr<Operator> matchBuiltinOp(
     const py::kwargs& kwargs,
     Stack& stack) {
   Symbol symbol = Symbol::fromQualString(opName);
+  std::vector<std::shared_ptr<jit::Operator>> candidates;
+
   if (symbol.is_aten()) {
     for (const auto& op : torch::jit::getAllOperatorsFor(symbol)) {
       try {
@@ -74,13 +77,20 @@ std::shared_ptr<Operator> matchBuiltinOp(
         continue;
       }
 
-      // Found the right op!
-      return op;
+      // Prefer C10 ops so that they go through C10 dispatch. We expect the
+      // total # of possible overloaded ops to be small (i.e. it is 10 for
+      // torch.add) so a worst-case linear search should not incur significant
+      // extra overhead.
+      if (op->isC10Op()) {
+        return op;
+      }
+      candidates.emplace_back(op);
     }
   }
 
+  // Ensure that we generated some candidates.
   TORCH_CHECK(
-      false,
+      !candidates.empty(),
       "Failed to match operator name ",
       opName,
       " and arguments "
@@ -89,6 +99,7 @@ std::shared_ptr<Operator> matchBuiltinOp(
       ", kwargs: ",
       kwargs,
       ") to a builtin operator");
+  return candidates[0];
 }
 
 std::shared_ptr<FutureMessage> sendPythonRemoteCall(
@@ -122,30 +133,32 @@ c10::intrusive_ptr<JitFuture> wrapFutureMessageInJitFuture(
   if (hasValue) {
     c10::intrusive_ptr<JitFuture> jitFuture =
         c10::make_intrusive<JitFuture>(PyObjectType::get());
-
+    std::weak_ptr<FutureMessage> wp = futureResponseMessage;
     futureResponseMessage->addCallback(
-        [jitFuture](const FutureMessage& futureResponseMessage) {
-          if (futureResponseMessage.hasError()) {
-            jitFuture->setError(futureResponseMessage.error()->what());
+        at::wrapPropagateTLSState<void>([jitFuture, wp]() {
+          auto futureResponseMessage = wp.lock();
+          if (futureResponseMessage->hasError()) {
+            jitFuture->setError(futureResponseMessage->error()->what());
           } else {
             jitFuture->markCompleted(
-                toIValue(futureResponseMessage.constValue()));
+                toIValue(futureResponseMessage->constValue()));
           }
-        });
+        }));
 
     return jitFuture;
   } else {
     c10::intrusive_ptr<JitFuture> jitFuture =
         c10::make_intrusive<JitFuture>(NoneType::get());
-
+    std::weak_ptr<FutureMessage> wp = futureResponseMessage;
     futureResponseMessage->addCallback(
-        [jitFuture](const FutureMessage& futureResponseMessage) {
-          if (futureResponseMessage.hasError()) {
-            jitFuture->setError(futureResponseMessage.error()->what());
+        at::wrapPropagateTLSState<void>([wp, jitFuture]() {
+          auto futureResponseMessage = wp.lock();
+          if (futureResponseMessage->hasError()) {
+            jitFuture->setError(futureResponseMessage->error()->what());
           } else {
             jitFuture->markCompleted(IValue());
           }
-        });
+        }));
 
     return jitFuture;
   }
@@ -262,9 +275,12 @@ PyRRef pyRemoteBuiltin(
 
     userRRef->registerOwnerCreationFuture(fm);
     ctx.addPendingUser(userRRef->forkId(), userRRef);
-    fm->addCallback([forkId{userRRef->forkId()}](const FutureMessage& fm) {
-      callback::confirmPendingUser(fm, forkId);
-    });
+    std::weak_ptr<FutureMessage> wp = fm;
+    fm->addCallback(
+        at::wrapPropagateTLSState<void>([wp, forkId{userRRef->forkId()}]() {
+          auto fm = wp.lock();
+          callback::confirmPendingUser(*fm, forkId);
+        }));
     return PyRRef(userRRef);
   } else {
     auto ownerRRef = ctx.createOwnerRRef(returnType);
@@ -284,10 +300,12 @@ PyRRef pyRemoteBuiltin(
 
     // Builtin operators does not return py::object, and hence does not require
     // GIL for destructing the potentially deleted OwerRRef.
-    fm->addCallback(
-        [ownerRRefId = ownerRRef->rrefId()](const FutureMessage& fm) {
-          callback::finishCreatingOwnerRRef(fm, ownerRRefId);
-        });
+    std::weak_ptr<FutureMessage> wp = fm;
+    fm->addCallback(at::wrapPropagateTLSState<void>(
+        [wp, ownerRRefId = ownerRRef->rrefId()]() {
+          auto fm = wp.lock();
+          callback::finishCreatingOwnerRRef(*fm, ownerRRefId);
+        }));
     return PyRRef(ownerRRef);
   }
 }
@@ -302,6 +320,7 @@ PyRRef pyRemotePythonUdf(
   auto& ctx = RRefContext::getInstance();
   auto serializedPyObj =
       SerializedPyObj(std::move(pickledPythonUDF), std::move(tensors));
+
   if (ctx.getWorkerId() != dst.id_) {
     auto userRRef = ctx.createUserRRef(dst.id_, PyObjectType::get());
     auto fm = sendPythonRemoteCall(
@@ -315,11 +334,15 @@ PyRRef pyRemotePythonUdf(
     userRRef->registerOwnerCreationFuture(fm);
 
     ctx.addPendingUser(userRRef->forkId(), userRRef);
-    fm->addCallback([forkId{userRRef->forkId()}](const FutureMessage& fm) {
-      callback::confirmPendingUser(fm, forkId);
-    });
+    std::weak_ptr<FutureMessage> wp = fm;
+    fm->addCallback(
+        at::wrapPropagateTLSState<void>([wp, forkId{userRRef->forkId()}]() {
+          auto fm = wp.lock();
+          callback::confirmPendingUser(*fm, forkId);
+        }));
     return PyRRef(userRRef);
   } else {
+    // Sending remote message to self
     auto ownerRRef = ctx.createOwnerRRef(PyObjectType::get());
     // prevent this owner RRef being deleted due to other forks
     ctx.addSelfAsFork(ownerRRef);
@@ -332,15 +355,17 @@ PyRRef pyRemotePythonUdf(
         isAsyncExecution);
 
     ownerRRef->registerOwnerCreationFuture(fm);
-
-    fm->addCallback(
-        [ownerRRefId = ownerRRef->rrefId()](const FutureMessage& fm) {
-          auto deletedRRef = callback::finishCreatingOwnerRRef(fm, ownerRRefId);
+    std::weak_ptr<FutureMessage> wp = fm;
+    fm->addCallback(at::wrapPropagateTLSState<void>(
+        [wp, ownerRRefId = ownerRRef->rrefId()]() {
+          auto fm = wp.lock();
+          auto deletedRRef =
+              callback::finishCreatingOwnerRRef(*fm, ownerRRefId);
           if (deletedRRef && deletedRRef->isPyObj()) {
             py::gil_scoped_acquire ag;
             deletedRRef.reset();
           }
-        });
+        }));
     return PyRRef(ownerRRef);
   }
 }
@@ -349,6 +374,7 @@ PyRRef pyRemoteTorchscript(
     const std::string& dstWorkerName,
     const std::string& qualifiedNameStr,
     const float rpcTimeoutSeconds,
+    const bool isAsyncExecution,
     const py::args& args,
     const py::kwargs& kwargs) {
   DCHECK(!PyGILState_Check());
@@ -366,7 +392,12 @@ PyRRef pyRemoteTorchscript(
   }
   DCHECK(!PyGILState_Check());
   auto rrefPtr = remoteTorchscript(
-      dstWorkerName, qualifiedName, functionSchema, stack, rpcTimeoutSeconds);
+      dstWorkerName,
+      qualifiedName,
+      functionSchema,
+      stack,
+      rpcTimeoutSeconds,
+      isAsyncExecution);
   return PyRRef(rrefPtr);
 }
 

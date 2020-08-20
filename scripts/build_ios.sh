@@ -62,11 +62,8 @@ fi
 
 # IOS_PLATFORM controls type of iOS platform (see ios-cmake)
 if [ -n "${IOS_PLATFORM:-}" ]; then
-  CMAKE_ARGS+=("-DIOS_PLATFORM=${IOS_PLATFORM}")
-  if [ "${IOS_PLATFORM}" == "SIMULATOR" ]; then
-      # iOS Simulator build is not supported by NNPACK
-      CMAKE_ARGS+=("-DUSE_NNPACK=OFF")
-  elif [ "${IOS_PLATFORM}" == "WATCHOS" ]; then
+  CMAKE_ARGS+=("-DIOS_PLATFORM=${IOS_PLATFORM}")    
+  if [ "${IOS_PLATFORM}" == "WATCHOS" ]; then
       # enable bitcode by default for watchos
       CMAKE_ARGS+=("-DCMAKE_C_FLAGS=-fembed-bitcode")
       CMAKE_ARGS+=("-DCMAKE_CXX_FLAGS=-fembed-bitcode")
@@ -95,6 +92,7 @@ CMAKE_ARGS+=("-DUSE_LMDB=OFF")
 CMAKE_ARGS+=("-DUSE_LEVELDB=OFF")
 CMAKE_ARGS+=("-DUSE_MPI=OFF")
 CMAKE_ARGS+=("-DUSE_NUMPY=OFF")
+CMAKE_ARGS+=("-DUSE_NNPACK=OFF")
 
 # pthreads
 CMAKE_ARGS+=("-DCMAKE_THREAD_LIBS_INIT=-lpthread")

@@ -70,7 +70,7 @@ bool SimpleValue::hasAttr(
   auto class_type = value_->type()->cast<ClassType>();
   if (!class_type) {
     throw ErrorReport(loc) << "hasattr's first argument must be an object, got "
-                           << value_->type()->python_str() << " instead";
+                           << value_->type()->repr_str() << " instead";
   }
 
   return class_type->hasMethod(field) || class_type->hasAttribute(field) ||
@@ -109,6 +109,7 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
            {"is_sparse", "prim"},
            {"is_mkldnn", "prim"},
            {"is_quantized", "prim"},
+           {"is_meta", "prim"},
            {"is_leaf", "aten"},
            {"requires_grad", "prim"},
            {"layout", "prim"},
@@ -156,10 +157,29 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
       auto n = g.insertNode(g.createGetAttr(value_, field));
       return std::make_shared<SimpleValue>(n->output());
     }
+    // Check and see if it's a getter attribute.
+    auto prop = classType->getProperty(field);
+    if (prop) {
+      return MethodValue(value_, prop->getter->name())
+          .call(loc, m, {}, {}, /*n_binders=*/1);
+    }
   } else if (auto iface = value_->type()->cast<InterfaceType>()) {
     // accessing methods of interfaces
     if (auto schema = iface->getMethod(field)) {
       return std::make_shared<MethodValue>(getValue(), field);
+    }
+  } else if (auto enum_type = value_->type()->cast<EnumType>()) {
+    // Handle access to Enum's `name` and `value` attribute.
+    auto& g = *m.graph();
+
+    if (field == "name") {
+      auto n = g.insertNode(g.createEnumName(value_));
+      return std::make_shared<SimpleValue>(n->output());
+    }
+
+    if (field == "value") {
+      auto n = g.insertNode(g.createEnumValue(value_));
+      return std::make_shared<SimpleValue>(n->output());
     }
   }
 
@@ -176,7 +196,7 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
 
   ErrorReport report(loc);
   report << "Tried to access nonexistent attribute or method '" << field
-         << "' of type '" << value_->type()->python_str() << "'.";
+         << "' of type '" << value_->type()->repr_str() << "'.";
   if (value_->type()->kind() == ClassType::Kind) {
     report << " Did you forget to initialize an attribute in __init__()?";
   }
@@ -205,7 +225,7 @@ std::vector<std::shared_ptr<SugaredValue>> SimpleValue::asTuple(
         graph->insertNode(graph->createListUnpack(value_, *size_hint));
     return fmap(unpack->outputs(), make_simple_value);
   }
-  throw ErrorReport(loc) << value_->type()->python_str()
+  throw ErrorReport(loc) << value_->type()->repr_str()
                          << " cannot be used as a tuple";
 }
 
@@ -232,8 +252,7 @@ void SimpleValue::setAttr(
   const auto classType = value_->type()->cast<ClassType>();
   if (!classType) {
     throw ErrorReport(loc) << "Tried to set an attribute: " << field
-                           << " on a non-class: "
-                           << value_->type()->python_str();
+                           << " on a non-class: " << value_->type()->repr_str();
   }
   auto expectedType = classType->findAttribute(field);
   if (!expectedType) {
@@ -255,7 +274,7 @@ void SimpleValue::setAttr(
         throw ErrorReport(loc)
             << "Assignment to attribute '" << field
             << "' cannot be of a type that contains class "
-            << "'" << classType->python_str() << "'.\n"
+            << "'" << classType->repr_str() << "'.\n"
             << "Classes that recursively contain instances of themselves"
             << " are not yet supported";
       }
@@ -271,6 +290,14 @@ void SimpleValue::setAttr(
             << "Initialize the field at the top level first";
       }
     } else {
+      // Check and see if it's a setter attribute.
+      auto prop = classType->getProperty(field);
+      if (prop && prop->setter) {
+        MethodValue(value_, prop->setter->name())
+            .call(loc, m, {newValue}, {}, /*n_binders=*/1);
+        return;
+      }
+
       throw ErrorReport(loc)
           << "Tried to set nonexistent attribute: " << field
           << ". Did you forget to initialize it in __init__()?";
@@ -283,8 +310,8 @@ void SimpleValue::setAttr(
   const auto newType = newValue->type();
   if (!newType->isSubtypeOf(expectedType)) {
     throw ErrorReport(loc) << "Wrong type for attribute assignment. Expected "
-                           << expectedType->python_str() << " but got "
-                           << newType->python_str();
+                           << expectedType->repr_str() << " but got "
+                           << newType->repr_str();
   }
 
   auto& g = *m.graph();
@@ -341,7 +368,7 @@ Value* SimpleValue::len(const SourceRange& loc, Function& m) {
       val_type->isSubtypeOf(TensorType::get())) {
     return g.insert(aten::len, {val}, {}, loc);
   } else {
-    throw ErrorReport(loc) << "'" << val_type->python_str() << "'"
+    throw ErrorReport(loc) << "'" << val_type->repr_str() << "'"
                            << " object is not iterable";
   }
 }
@@ -367,7 +394,7 @@ SugaredValuePtr SimpleValue::getitem(
   } else if (auto class_type = val_type->cast<ClassType>()) {
     return attr(loc, m, "__getitem__")->call(loc, m, {idx}, {}, 1);
   } else {
-    throw ErrorReport(loc) << "'" << val_type->python_str() << "'"
+    throw ErrorReport(loc) << "'" << val_type->repr_str() << "'"
                            << " object is not subscriptable";
   }
 }
@@ -393,7 +420,7 @@ SugaredValuePtr SimpleValue::iter(const SourceRange& loc, Function& m) {
     }
     return std::make_shared<SugaredTupleValue>(tup_sugared);
   } else {
-    throw ErrorReport(loc) << "'" << type->python_str() << "'"
+    throw ErrorReport(loc) << "'" << type->repr_str() << "'"
                            << " object is not iterable";
   }
 }
@@ -407,7 +434,7 @@ RangeValue::RangeValue(
     auto typ = inputs[i]->type();
     if (!typ->cast<IntType>()) {
       throw ErrorReport(loc)
-          << "all inputs of range must be ints, found " << typ->python_str()
+          << "all inputs of range must be ints, found " << typ->repr_str()
           << " in argument " << c10::guts::to_string(i);
     }
   }
@@ -584,7 +611,8 @@ std::shared_ptr<SugaredValue> ClassValue::attr(
     Function& m,
     const std::string& field) {
   if (field != "__new__") {
-    throw ErrorReport(loc) << "Tried to lookup unknown attribute on class";
+    throw ErrorReport(loc) << "Tried to lookup unknown attribute on class "
+                           << type_->annotation_str();
   }
   return SpecialFormValue::create(prim::CreateObject);
 }

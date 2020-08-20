@@ -40,7 +40,7 @@ REGISTER_CPU_OPERATOR(RangeFill, RangeFillOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(LengthsRangeFill, LengthsRangeFillOp<CPUContext>);
 
 OPERATOR_SCHEMA(ConstantFill)
-    .NumInputs(0, 1)
+    .NumInputs(0, 2)
     .NumOutputs(1)
     .AllowInplace({{0, 0}})
     .TensorInferenceFunction(FillerTensorInference<>)
@@ -64,6 +64,8 @@ provided, a shape argument should not be set)
 - If `input_as_shape` is set to True, the input should be a 1D tensor
 containing the desired output shape (the dimensions specified in `extra_shape`
 will also be appended)
+
+- If a second input V is passed, fill the output with the first element of V
 
 When specifying `dtype` argument, use the integer keys from the *DataType* enum
 in TensorProto:

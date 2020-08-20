@@ -20,10 +20,10 @@
 //
 // Example:
 //
-//   auto iter = TensorIterator();
-//   iter.add_output(output);
-//   iter.add_input(input);
-//   iter.build()
+//   auto iter = TensorIteratorConfig()
+//     .add_output(output)
+//     .add_input(input)
+//     .build()
 //
 // [MyKernel.cpp / MyKernel.cu]
 //   cpu_kernel(iter, [](float a, float b) {
@@ -34,24 +34,18 @@
 //     return a + b;
 //   });
 //
-// Note [Result type computation]
+// Note [Common Dtype Computation]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-// TensorIterator handles limited mixed-type operations. The result type is
-// computed using promoteTypes on the scalar types of the operands with the
-// following precedence:
+// Some operations have a natural notion of a "common dtype" or
+//   "computation dtype" where all inputs are cast to one dtype, the
+//   operation is performed, and then the results are cast to all outputs.
 //
-// 1) Tensors with dim 1 or higher
-// 2) Tensors with dim 0 that aren't wrapped numbers (e.g. `tensor(5)`)
-// 3) Tensors with dim 0 that are wrapped numbers (e.g. `5`)
+// TensorIterator infers a common dtype if all inputs have the same dtype,
+//   and it computes one using type promotion rules on its inputs if
+//   promote_inputs_to_common_dtype_ is true. Attempting to query
+//   a common dtype otherwise will throw an exception.
 //
-// So if there are any tensors of dim 1 or higher, then 0-dim tensors do not
-// affect the result type. This behavior was chosen to preserve backwards
-// compatibility and is *likely to change* in the near future.
-// (See https://github.com/pytorch/pytorch/issues/9515)
-//
-// Note that TensorIterator currently supports type conversions on 0-dim
-// tensors and arithmetic operators. Other type conversions will raise an
-// exception.
+// Note that the outputs are not considered when computing a common dtype.
 
 namespace at {
 
@@ -71,16 +65,12 @@ struct DimCounter {
 struct CAFFE2_API OperandInfo {
   using StrideVector = SmallVector<int64_t, 6>;
   OperandInfo() {}
-  explicit OperandInfo(const Tensor& t) : tensor(t) {
-    if (t.defined()) {
-      device = t.device();
-      target_dtype = t.scalar_type();
+  explicit OperandInfo(Tensor t) : tensor(std::move(t)) {
+    if (tensor.defined()) {
+      device = tensor.device();
+      target_dtype = tensor.scalar_type();
       current_dtype = target_dtype;
     }
-    validate();
-  }
-  OperandInfo(const Tensor& t, Device device, ScalarType dtype)
-    : tensor(t), device(device), target_dtype(dtype), current_dtype(t.scalar_type()) {
     validate();
   }
 
@@ -138,19 +128,14 @@ enum class FastSetupType : uint8_t {
   NON_OVERLAPPING_DENSE
 };
 
-enum class CommonDTypeStrategy : uint8_t {
-  NONE, // Do not compute a common dtype
-  CHECK, // Compute and validate a common dtype but don't promote.
-  PROMOTE_INPUTS, // Promote common dtype but only validate inputs (comparison ops have boolean output)
-  PROMOTE // Promote to common dtype.
-};
+class TensorIteratorConfig;
 
 struct CAFFE2_API TensorIterator {
   using DimMask = std::bitset<64>;
   using PtrVector = SmallVector<char*, 4>;
   using StrideVector = SmallVector<int64_t, 6>;
 
-  TensorIterator() {}
+  TensorIterator(TensorIteratorConfig&);
 
   // The inner-loop function operates on the fastest moving dimension. It
   // implements element-wise operations in terms of 1-d strided tensors.
@@ -175,9 +160,10 @@ struct CAFFE2_API TensorIterator {
     bool check_mem_overlap = false);
   static TensorIterator unary_op(Tensor& out, const Tensor& a,
     bool check_mem_overlap = false);
-  static TensorIterator nullary_op(Tensor& out);
+  static TensorIterator nullary_op(Tensor& out,
+    bool check_mem_overlap = false);
   static TensorIterator reduce_op(Tensor& out, const Tensor& a);
-  static TensorIterator reduce_op(Tensor& out1, Tensor& out2, const Tensor& a, bool promote=true);
+  static TensorIterator reduce_op(Tensor& out1, Tensor& out2, const Tensor& a);
 
   int ndim() const { return shape_.size(); }
   IntArrayRef shape() const { return shape_; }
@@ -204,7 +190,10 @@ struct CAFFE2_API TensorIterator {
   IntArrayRef strides(int arg) const { return operands_[arg].stride_bytes; }
   void* data_ptr(int arg) const;
   ScalarType dtype(int arg=0) const { return operands_[arg].current_dtype; }
-  ScalarType common_dtype() const { return common_dtype_; }
+  ScalarType common_dtype() const {
+    TORCH_INTERNAL_ASSERT(common_dtype_ != ScalarType::Undefined, "Queried for invalid common dtype!");
+    return common_dtype_;
+  }
   ScalarType input_dtype(int arg=0) const { return operands_[num_outputs_ + arg].current_dtype; }
   Device device(int arg=0) const { return operands_[arg].device; }
   DeviceType device_type(int arg=0) const { return device(arg).type(); }
@@ -220,16 +209,9 @@ struct CAFFE2_API TensorIterator {
     return operands_[arg].tensor;
   }
 
-  void cast_outputs() {
-    if (common_dtype_strategy_ == CommonDTypeStrategy::PROMOTE) {
-      for(int i=0; i < noutputs(); i++) {
-        if (operands_[i].original_tensor.defined() && dtype(i) != operands_[i].original_tensor.scalar_type()) {
-          operands_[i].original_tensor.copy_(operands_[i].tensor);
-          operands_[i].tensor = operands_[i].original_tensor;
-        }
-      }
-    }
-  }
+  // Copies from temporary outputs back to the original outputs
+  // NOTE: only used on CPU
+  void cast_outputs();
 
   Tensor input(int arg=0) const {
     AT_ASSERT(arg >= 0 && arg < ntensors() - num_outputs_);
@@ -238,8 +220,6 @@ struct CAFFE2_API TensorIterator {
 
   /// Removes an operand from this iterator
   void remove_operand(int arg);
-  /// Removes a dimension from this iterator
-  void remove_dimension(int dim);
   /// Shrinks an iterated dimension
   void narrow(int dim, int64_t start, int64_t size);
   /// Narrows every dim after and including `start_dim` to size one.
@@ -316,104 +296,278 @@ struct CAFFE2_API TensorIterator {
     return true;
   }
 
-  void set_check_mem_overlap(bool check_mem_overlap) {
-    check_mem_overlap_ = check_mem_overlap;
-  }
+protected:
+  void build(TensorIteratorConfig&);
+
+  // Mutable reference as it moves tensors out of TensorIteratorConfig
+  void populate_operands(TensorIteratorConfig&);
+  void mark_outputs();
+  void compute_mem_overlaps(const TensorIteratorConfig&);
+  void compute_shape(const TensorIteratorConfig&);
+  void compute_strides(const TensorIteratorConfig&);
+  void reorder_dimensions(const TensorIteratorConfig&);
+  void permute_dimensions(IntArrayRef perm);
+  void compute_types(const TensorIteratorConfig&);
+  ScalarType compute_common_dtype();
+  void allocate_outputs();
+  bool fast_set_up(const TensorIteratorConfig&);
+  FastSetupType compute_fast_setup_type(const TensorIteratorConfig&);
+  void compute_names(const TensorIteratorConfig&);
+  void resize_outputs(const TensorIteratorConfig&);
+  void propagate_names_to_outputs();
+  void coalesce_dimensions();
+
+  template <int dim, MemoryFormat memory_format> bool requires_channels_last_nd_output();
+  bool requires_channels_last_2d_output();
+  bool requires_channels_last_3d_output();
+
+
+protected:
+
+  /// Records the "computation" shape of the output tensor.  The computation
+  /// shape is different from the regular shape in a few ways:
+  ///
+  ///   - The shape may be permuted (via permute_dimensions) so that we
+  ///     process the dimensions in the most computationally efficient order
+  ///     (rather than the logical order given to us by the users.)
+  ///   - The shape may have adjacent dimensions collapsed (via
+  ///     coalesce_dimensions) so that we minimize the number of
+  ///     dimensions we have to explicitly iterate over.  For example,
+  ///     a pointwise operation on a contiguous tensor "computationally"
+  ///     consists of only a single dimension.
+  ///
+  /// In other words, the computation shape is the output shape as it
+  /// actually matters for implementing the kernel, but not necessarily the
+  /// output shape that the user will see in the end.
+  ///
+  /// The lifecycle of mutations to shape_ in TensorIterator:
+  ///   - declare_static_shape() sets an initial shape explicitly
+  ///     provided by user, otherwise
+  ///   - compute_shape() computes the true (non-computational) shape
+  ///     specified by the user.
+  ///   - reorder_dimensions() reorders dimensions to improve coalescing.
+  ///   - coalesce_dimensions() then coalesces adjacent dimensions when
+  ///     possible.
+  ///
+  /// The shape may also be further modified if we create sub-TensorIterators,
+  /// e.g., via narrow or select_all_keeping_dim.
+  DimVector shape_;
+
+  /// Temporarily records the permutation computed by reorder_dimensions.
+  /// This permutation maps the computation output dimension (dim) to
+  /// the original true output dimension (perm_[dim]).  It is used by
+  /// invert_perm to undo the permutation.  After coalesce_dimensions is
+  /// called, the permutation is no longer valid (as, in general, there
+  /// is no permutation that will make computation dimensions to
+  /// output dimensions); methods that manipulate perm_ are obligated
+  /// to test that !has_coalesced_dimensions
+  DimVector perm_;
+
+  /// Has coalesce_dimensions() (or any moral equivalent, e.g., fast_build())
+  /// been called?  This is SOLELY used to check validity of perm_.
+  bool has_coalesced_dimensions_ = false;
+
+  /// The index offsets into the original tensors for each dimension.
+  /// This is only non-zero when you narrow() a TensorIterator (e.g.,
+  /// when you make sub-TensorIterators).
+  DimVector view_offsets_;
+
+  /// The computed names of the output tensor.  Computed by compute_names()
+  NameVector names_;
+
+  /// The operands of the TensorIterator: both the inputs and outputs.  The
+  /// outputs MUST come first in the operands_ list.  There is always an
+  /// operand for each output of the TensorIterator, even if TensorIterator
+  /// will ultimately be responsible for allocating the output; in those
+  /// cases, tensor is simply undefined (and will be populated later
+  /// during build()).
+  ///
+  /// This list is initially populated prior to build(), but build() mutates
+  /// OperandInfo to populate more information.
+  SmallVector<OperandInfo, 4> operands_;
+
+  /// Number of outputs in operands_ (the length of the outputs prefix
+  /// in operands_).
+  int num_outputs_ = 0;
+
+  /// Whether or not all operands have the same shape.  Having all the same
+  /// shape affects whether or not the iterator is eligible for fast setup.
+  bool all_ops_same_shape_ = false;
+
+  /// The "computation" dtype of TensorIterator, specifying what the dtype
+  /// we will do the internal computation in TensorIterator.  Typically,
+  /// this matches the dtype of the output tensors, but not always!
+  ScalarType common_dtype_ = ScalarType::Undefined;
+
+  /// Set by split(), see should_accumulate() and is_final_output()
+  bool accumulate_ = false;
+  bool final_output_ = true;
+
+  // From TensorIteratorConfig
+  bool is_reduction_ = false;
+};
+
+class CAFFE2_API TensorIteratorConfig final {
+public:
+  friend struct TensorIterator;
+
+  TensorIteratorConfig() {}
+
+  C10_DISABLE_COPY_AND_ASSIGN(TensorIteratorConfig);
 
   /// Construction
-  void add_output(const Tensor& output) {
-    operands_.emplace_back(output);
+  TensorIteratorConfig& add_output(const Tensor& output) {
+    TORCH_INTERNAL_ASSERT(num_inputs_ == 0);
+    tensors_.emplace_back(output);
     num_outputs_++;
+    return *this;
   }
 
-  void add_output(const Tensor& input, Device device, ScalarType dtype) {
-    operands_.emplace_back(input, device, dtype);
-    num_outputs_++;
+  TensorIteratorConfig& add_input(const Tensor& input) {
+    tensors_.emplace_back(input);
+    num_inputs_++;
+    return *this;
   }
 
-  void add_input(const Tensor& input) {
-    operands_.emplace_back(input);
+  TensorIteratorConfig& set_check_mem_overlap(bool check_mem_overlap) {
+    check_mem_overlap_ = check_mem_overlap;
+    return *this;
   }
 
-  void add_input(const Tensor& input, Device device, ScalarType dtype) {
-    operands_.emplace_back(input, device, dtype);
+  // Sets the check_all_same_dtype_ flag, which is true by default
+  // If true, checks that all inputs and defined outputs have the same dtype
+  // Setting either of promote_inputs_to_common_dtype_
+  //   or cast_common_dtype_to_outputs_ to true will set
+  //   check_all_same_dtype_ to false.
+  TensorIteratorConfig& check_all_same_dtype(const bool _check_all_same_dtype) {
+    check_all_same_dtype_ = _check_all_same_dtype;
+    return *this;
   }
 
-  void promote_common_dtype() {
-    common_dtype_strategy_ = CommonDTypeStrategy::PROMOTE;
+  // Sets the check_all_same_device_ flag, which is true by default
+  // If true, all operands must be on the same device, with the possible
+  //   exception of CPU scalars, which can be passed to some CUDA kernels
+  //   as kernel arguments.
+  TensorIteratorConfig& check_all_same_device(const bool _check_all_same_device) {
+    check_all_same_device_ = _check_all_same_device;
+    return *this;
   }
 
-  void dont_compute_common_dtype() {
-    common_dtype_strategy_ = CommonDTypeStrategy::NONE;
+  // Sets the enforce_safe_casting_to_output_ flag, which is false by default
+  // If true, the iterator's "common dtype" must be computable
+  //   (see the [Common Dtype Computation] note) and
+  //   canCast(common dtype, output dtype) must be true for all outputs.
+  TensorIteratorConfig& enforce_safe_casting_to_output(const bool _enforce_safe_casting_to_output) {
+    enforce_safe_casting_to_output_ = _enforce_safe_casting_to_output;
+    return *this;
   }
 
-  void compute_common_dtype_only_for_inputs() {
-    common_dtype_strategy_ = CommonDTypeStrategy::PROMOTE_INPUTS;
+  // Sets the promote_inputs_to_common_dtype_ flag, which is false by default
+  // If true, the iterator's "common dtype" is always computed (see the
+  //   [Common Dtype Computation] note) and, on the CPU, temporary copies of
+  //   the inputs in the common dtype are passed as the actual inputs to
+  //   the operation.
+  // Setting this flag to true sets check_all_same_dtype_ to false.
+  TensorIteratorConfig& promote_inputs_to_common_dtype(const bool _promote_inputs_to_common_dtype) {
+    promote_inputs_to_common_dtype_ = _promote_inputs_to_common_dtype;
+    if (_promote_inputs_to_common_dtype) {
+      check_all_same_dtype_ = false;
+    }
+    return *this;
   }
 
-  void dont_resize_outputs() {
-    resize_outputs_ = false;
+  // Sets the promote_integer_inputs_to_float_ flag, which is false by default
+  // NOTE: If set to true, the promote_inputs_to_common_dtype_ must also be true.
+  // If true, if the iterator's "common dtype" is an integral type (including bool)
+  //   then it is changed to the default float scalar type.
+  TensorIteratorConfig& promote_integer_inputs_to_float(const bool _promote_integer_inputs_to_float) {
+    promote_integer_inputs_to_float_ = _promote_integer_inputs_to_float;
+    TORCH_INTERNAL_ASSERT(!promote_integer_inputs_to_float_ || promote_inputs_to_common_dtype_);
+    return *this;
   }
 
-  void declare_static_shape(IntArrayRef shape) {
+  TensorIteratorConfig& is_reduction(const bool _is_reduction) {
+    is_reduction_ = _is_reduction;
+    return *this;
+  }
+
+  TensorIteratorConfig& allow_cpu_scalars(const bool _allow_cpu_scalars) {
+    allow_cpu_scalars_ = _allow_cpu_scalars;
+    return *this;
+  }
+
+  // Sets the cast_common_dtype_to_outputs_ flag, which is false by default
+  // If true, the iterator's "common dtype" must be computatable
+  //   (see the [Common Dtype Computation] note) and, on the CPU, temporary
+  //   copies of the outputs are passed as the actual output to the operation.
+  //   These temporaries are then copied to the original outputs after
+  //   the operation is performed (see cast_outputs()).
+  // Setting this flag to true sets check_all_same_dtype_ to false.
+  TensorIteratorConfig& cast_common_dtype_to_outputs(const bool _cast_common_dtype_to_outputs) {
+    cast_common_dtype_to_outputs_ = _cast_common_dtype_to_outputs;
+    if (_cast_common_dtype_to_outputs) {
+      check_all_same_dtype_ = false;
+    }
+    return *this;
+  }
+
+  TensorIteratorConfig& resize_outputs(bool resize_outputs) {
+    resize_outputs_ = resize_outputs;
+    return *this;
+  }
+
+  // Bypass output dtype/device computation and fix the dtype/device as specified here.
+  TensorIteratorConfig& declare_static_dtype_and_device(ScalarType dtype, Device device) {
+    TORCH_CHECK(!check_all_same_dtype_, "check_all_same_dtype(false) must be called before declare_static_dtype(...)");
+    static_dtype_and_device_ = c10::make_optional(std::make_pair(dtype, device));
+    return *this;
+  }
+
+  TensorIteratorConfig& declare_static_shape(IntArrayRef shape) {
     // WARNING:
     //   This will bypass all shape checking in the TensorIterator. Kernels which call this method
     //   are expected to check shapes before calling `add_input` or `add_output`.
-    TORCH_CHECK(!resize_outputs_, "dont_resize_outputs() must be called before declare_static_shape(...)")
-    shape_ = shape;
-    static_shape_ = true;
+    TORCH_CHECK(!resize_outputs_, "resize_outputs() must be called before declare_static_shape(...)")
+    static_shape_ = c10::make_optional(DimVector(shape));
+    return *this;
   }
 
-  void declare_static_shape(IntArrayRef shape, const int64_t squash_dim){
+  TensorIteratorConfig& declare_static_shape(IntArrayRef shape, const int64_t squash_dim) {
     declare_static_shape(shape);
-    if (!shape_.size()) return;
-    TORCH_CHECK(squash_dim >= 0 && squash_dim < static_cast<int64_t>(shape_.size()),
-                "squash_dim ", squash_dim, " must be in [0, ", shape_.size(), ").");
-    shape_[squash_dim] = 1;
+    if (!static_shape_->size()) return *this;
+    TORCH_CHECK(squash_dim >= 0 && squash_dim < static_cast<int64_t>(static_shape_->size()),
+                "squash_dim ", squash_dim, " must be in [0, ", static_shape_->size(), ").");
+    (*static_shape_)[squash_dim] = 1;
+    return *this;
   }
 
-  void build();
+  // It would be better if this was && qualified, but this would be at the cost
+  // of a lot of boilerplate above
+  TensorIterator build() {
+    return TensorIterator(*this);
+  }
 
-protected:
-  void mark_outputs();
-  void check_mem_overlaps();
-  void compute_shape();
-  void compute_strides();
-  void reorder_dimensions();
-  void permute_dimensions(IntArrayRef perm);
-  void compute_types();
-  std::tuple<Device, ScalarType, bool> compute_common_type();
-  void allocate_outputs();
-  bool fast_set_up();
-  FastSetupType compute_fast_setup_type();
-  void compute_names();
-  void propagate_names_to_outputs();
-  void coalesce_dimensions();
-  void analyze_memory_format();
-
-protected:
-  DimVector shape_;
-  DimVector perm_;
-  /// The index offsets into the original tensors for each dimension
-  DimVector view_offsets_;
-  NameVector names_;
-  SmallVector<OperandInfo, 4> operands_;
+private:
+  SmallVector<Tensor, 4> tensors_;
   int num_outputs_ = 0;
-  CommonDTypeStrategy common_dtype_strategy_ = CommonDTypeStrategy::CHECK;
-  ScalarType common_dtype_ = ScalarType::Undefined;
-  bool has_coalesced_dimensions_ = false;
-  bool accumulate_ = false;
-  bool resize_outputs_ = true;
-  bool is_reduction_ = false;
-  bool allow_cpu_scalars_ = false;
-  bool promote_gpu_output_dtypes_ = false;
-  bool final_output_ = true;
+  int num_inputs_ = 0;
+
+  c10::optional<DimVector> static_shape_ = c10::nullopt;
+  c10::optional<std::pair<ScalarType, Device>> static_dtype_and_device_ = c10::nullopt;
   bool check_mem_overlap_ = false;
-  bool all_ops_same_shape_ = false;
-  bool requires_channels_last_output_ = false;
-  bool requires_channels_last_3d_output_ = false;
-  bool static_shape_ = false;
+  bool allow_cpu_scalars_ = false;
+  bool is_reduction_ = false;
+  bool resize_outputs_ = true;
+  bool check_all_same_dtype_ = true;
+  bool check_all_same_device_ = true;
+  bool enforce_safe_casting_to_output_ = false;
+  bool promote_inputs_to_common_dtype_ = false;
+  bool promote_integer_inputs_to_float_ = false;
+  bool cast_common_dtype_to_outputs_ = false;
 };
+
+
+
 /// A container-like struct that acts as if it contains splits of a
 /// TensorIterator that can use 32-bit indexing. Taken together the splits cover
 /// the original TensorIterator.

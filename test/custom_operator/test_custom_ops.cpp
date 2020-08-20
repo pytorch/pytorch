@@ -30,7 +30,7 @@ Result get_operator_from_registry_and_execute(const char* op_name, Args&&... arg
 
   torch::jit::Stack stack;
   torch::jit::push(stack, std::forward<Args>(args)...);
-  op->getOperation()(stack);
+  op->getOperation()(&stack);
 
   TORCH_INTERNAL_ASSERT(1 == stack.size());
   return torch::jit::pop(stack).to<Result>();
@@ -66,8 +66,8 @@ void get_autograd_operator_from_registry_and_execute() {
   TORCH_INTERNAL_ASSERT(torch::allclose(y.grad(), x + torch::ones({5,5})*2));
 
   // Test with optional argument.
-  at::zero_(x.grad());
-  at::zero_(y.grad());
+  at::zero_(x.mutable_grad());
+  at::zero_(y.mutable_grad());
   output = helpers::get_operator_from_registry_and_execute<torch::Tensor>(
       "custom::op_with_autograd", x, 2, y, z);
 

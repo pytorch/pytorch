@@ -81,8 +81,7 @@ variable_list run_backward(
     }
     TORCH_CHECK(
         gradient_edge.function,
-        "element ", i, " of tensors does not require grad and does not have a grad_fn",
-        i);
+        "element ", i, " of tensors does not require grad and does not have a grad_fn");
     roots.push_back(std::move(gradient_edge));
   }
 

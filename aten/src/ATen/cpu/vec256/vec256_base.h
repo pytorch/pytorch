@@ -120,8 +120,7 @@ public:
   }
   template<typename... Args,
            typename = std::enable_if_t<(sizeof...(Args) == size())>>
-  Vec256(Args... vals) {
-    values = { vals... };
+  Vec256(Args... vals) : values{vals...}{
   }
   // This also implies const T& operator[](int idx) const
   inline operator const T*() const {
@@ -378,11 +377,25 @@ public:
   Vec256<T> floor() const {
     return map(at::native::floor_impl);
   }
+  Vec256<T> hypot(const Vec256<T> &b) const {
+    Vec256<T> ret;
+    for (int64_t i = 0; i < size(); i++) {
+      ret[i] = std::hypot(values[i], b[i]);
+    }
+    return ret;
+  }
   Vec256<T> neg() const {
     // NB: the trailing return type is needed because we need to coerce the
     // return value back to T in the case of unary operator- incuring a
     // promotion
     return map([](T x) -> T { return -x; });
+  }
+  Vec256<T> nextafter(const Vec256<T> &b) const {
+    Vec256<T> ret;
+    for (int64_t i = 0; i < size(); i++) {
+      ret[i] = std::nextafter(values[i], b[i]);
+    }
+    return ret;
   }
   Vec256<T> round() const {
     // We do not use std::round because we would like to round midway numbers to the nearest even integer.
@@ -712,6 +725,32 @@ inline Vec256<T> operator^(const Vec256<T>& a, const Vec256<T>& b) {
 }
 
 #endif
+
+template <typename T>
+inline Vec256<T>& operator += (Vec256<T>& a, const Vec256<T>& b) {
+  a = a + b;
+  return a;
+}
+template <typename T>
+inline Vec256<T>& operator -= (Vec256<T>& a, const Vec256<T>& b) {
+  a = a - b;
+  return a;
+}
+template <typename T>
+inline Vec256<T>& operator /= (Vec256<T>& a, const Vec256<T>& b) {
+  a = a / b;
+  return a;
+}
+template <typename T>
+inline Vec256<T>& operator %= (Vec256<T>& a, const Vec256<T>& b) {
+  a = a % b;
+  return a;
+}
+template <typename T>
+inline Vec256<T>& operator *= (Vec256<T>& a, const Vec256<T>& b) {
+  a = a * b;
+  return a;
+}
 
 template <typename T>
 inline Vec256<T> fmadd(const Vec256<T>& a, const Vec256<T>& b, const Vec256<T>& c) {

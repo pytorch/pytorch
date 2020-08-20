@@ -19,30 +19,75 @@ typedef Node JitOp;
 namespace fuser {
 namespace cuda {
 
-constexpr auto NUM_UNARY_OPS = 31;
-constexpr auto NUM_BINARY_OPS = 24;
-constexpr auto NUM_BINARY_OPS_WITH_ALPHA = 4;
+constexpr auto kNumUnaryOps = 31;
+constexpr auto kNumBinaryOps = 24;
+constexpr auto kNumBinaryOpsWithAlpha = 4;
+constexpr auto kNumLerpOps = 2;
 
 namespace {
 
 typedef Val* CgValue;
 typedef Expr* CgOp;
 
-typedef void (
-    *ParseFuncPtr)(const Node* const, std::unordered_map<size_t, CgValue>&);
+typedef void (*ParseFuncPtr)(const Node*, std::unordered_map<size_t, CgValue>&);
+typedef bool (*MergeQueryFuncPtr)(const Node*);
+
+std::vector<int> reductionAxes(TensorView* tv) {
+  size_t n_dims = tv->nDims();
+  std::vector<int> reduction_axes;
+  for (size_t i = 0; i < n_dims; i++) {
+    if (tv->axis(i)->isReduction()) {
+      reduction_axes.emplace_back(i);
+    }
+  }
+  return reduction_axes;
+}
+
+// coalesces all reduction to the right side and returns total number of
+// reduction axes
+size_t coalescReduction(TensorView* tv) {
+  auto reduction_axes = reductionAxes(tv);
+  size_t n_dims = tv->nDims();
+  std::unordered_map<int, int> coalesc_permute;
+  for (size_t i = 0; i < reduction_axes.size(); i++) {
+    size_t new_pos = i + n_dims - reduction_axes.size();
+    if (new_pos == size_t(reduction_axes[i])) {
+      break;
+    } else {
+      coalesc_permute[reduction_axes[i]] = new_pos;
+    }
+  }
+  if (!coalesc_permute.empty()) {
+    tv->reorder(coalesc_permute);
+  }
+  return reduction_axes.size();
+}
 
 // TODO: add a mutex to make it thread safe.
 class IrParser {
- private:
-  static const int nthreads = 128;
-  static const int unroll_factor = 4;
+  class RegistrationEntry {
+   public:
+    RegistrationEntry(ParseFuncPtr parse_f, MergeQueryFuncPtr merge_f = nullptr)
+        : parse_f_(parse_f), merge_f_(merge_f) {}
+
+    void parse(const Node* node, std::unordered_map<size_t, CgValue>& values) {
+      parse_f_(node, values);
+    }
+
+    bool is_compatible(const Node* node) {
+      if (merge_f_ == nullptr) {
+        return true;
+      }
+      return merge_f_(node);
+    }
+
+   private:
+    ParseFuncPtr parse_f_;
+    MergeQueryFuncPtr merge_f_;
+  };
 
  public:
-  IrParser(
-      std::shared_ptr<Graph> graph,
-      Fusion& fusion,
-      CudaKernel* cuda_kernel)
-      : graph_(std::move(graph)), fusion_(&fusion), cuda_kernel_(cuda_kernel) {
+  IrParser(std::shared_ptr<Graph> graph) : graph_(std::move(graph)) {
     if (init_registry_) {
       registerJitOperator();
       init_registry_ = false;
@@ -50,23 +95,17 @@ class IrParser {
   }
 
   // Fuses pointwise ops with loop unrolling (factor = 4).
-  void parse() {
-    FusionGuard fg(fusion_);
+  std::unique_ptr<Fusion> parse() {
+    auto fusion = std::make_unique<Fusion>();
+    FusionGuard fg(fusion.get());
     auto block = graph_->block();
 
-    // in case of broadcast, we don't support explicit broadcast, so we need to
-    // convert/expand all inputs tensors to comply to the broadcasted size.
-    // This supports very limited case, which we try to accomodate in graph
-    // partition, that we only merge nodes with identical output shapes.
-    int broadcast_dim =
-        block->outputs()[0]->type()->cast<TensorType>()->dim().value();
-
     // register all inputs;
-    // shape propagation during parsing is effctively done in parsing rules, as
-    // we only explicitly register inputs in the graph.
     for (auto val : block->inputs()) {
-      TORCH_CHECK(registerValue(val, broadcast_dim));
-      fusion_->addInput(value_map_[val->unique()]);
+      TORCH_INTERNAL_ASSERT(
+          registerValue(val),
+          "Error trying to register value with code generation.");
+      fusion->addInput(value_map_[val->unique()]);
 
       auto opt_dtype = value_map_[val->unique()]->getDataType();
       // computation promotion, we cast fp16 inputs to fp32 and use promoted
@@ -80,75 +119,35 @@ class IrParser {
     // TODO: disable unroll to ensure rand_like generates identical output as
     // with eager mode
     bool disable_unroll = false;
+    bool has_reduction = false;
     // compose nodes in topo order;
     for (const JitOp* node : block->nodes()) {
       processJitNode(node);
       if (node->kind() == aten::rand_like) {
         disable_unroll = true;
       }
+      if (node->kind() == aten::sum) {
+        has_reduction = true;
+      }
     }
 
     // mark output;
     for (auto jit_output : block->outputs()) {
-      TensorView* out =
-          static_cast<TensorView*>(value_map_[jit_output->unique()]);
-
+      TensorView* out = value_map_[jit_output->unique()]->as<TensorView>();
       // demote output dtype to be match PyTorch JIT graph.
       auto tensor_type = jit_output->type()->cast<TensorType>();
       TORCH_INTERNAL_ASSERT(
           tensor_type, "output of fusion group is not TensorType.");
       if (tensor_type->scalarType() == at::ScalarType::Half) {
         // No need to update value_map_ after this point.
-        out = static_cast<TensorView*>(castOp(DataType::Half, out));
+        out = castOp(DataType::Half, out)->as<TensorView>();
       }
-
-      fusion_->addOutput(out);
-
-      // Merge all dimensions because we're only supporting pointwise
-      while (out->nDims() > 1)
-        out->merge(0);
-      // Split into 128 which will be bockDim.x
-      out->split(0, nthreads);
-      // Split by another 4 which will be our unroll factor
-      auto ur_factor = disable_unroll ? 1 : unroll_factor;
-      if (!disable_unroll) {
-        out->split(0, ur_factor);
-        cuda_kernel_->unroll_factor_ = ur_factor;
-      }
+      fusion->addOutput(out);
     }
-
-    // Run through outputs, grab all inputs of outputs
-    // squeeze with computeAt to set overall structure.
-    for (auto output : fusion_->outputs()) {
-      if (output->getValType() != ValType::TensorView)
-        continue;
-      TensorView* out_tv = static_cast<TensorView*>(output);
-      for (Val* inp : fusion_->inputsOf(output)) {
-        if (inp->getValType().value() == ValType::TensorView)
-          static_cast<TensorView*>(inp)->computeAt(out_tv, 1);
-      }
-      out_tv->axis(0)->parallelize(ParallelType::BIDx);
-    }
-
-    // Run through intermediates, unroll, and bind their axes
-    for (auto val : fusion_->vals()) {
-      if (val->getValType().value() != ValType::TensorView)
-        continue;
-      TensorView* tv = static_cast<TensorView*>(val);
-
-      // Should be true for all intermediates, but if one isn't hooked
-      // up right, skip it and hope for the best for now
-      if (!disable_unroll && tv->nDims() == 3) {
-        tv->axis(-2)->parallelize(ParallelType::Unroll);
-        tv->axis(-1)->parallelize(ParallelType::TIDx);
-      } else {
-        if (tv->nDims() == 2)
-          tv->axis(-1)->parallelize(ParallelType::TIDx);
-      }
-    }
+    return fusion;
   }
 
-  static bool canParseNode(const Node* const node) {
+  static bool canParseNode(const Node* node) {
     if (init_registry_) {
       // TODO: mutex this guy;
       registerJitOperator();
@@ -162,17 +161,39 @@ class IrParser {
     }
     for (auto& pair_op_func : iter->second) {
       if (node->matches(pair_op_func.first->schema())) {
-        return true;
+        return pair_op_func.second.is_compatible(node);
       }
     }
     return false;
   }
 
+  static bool isReductionNode(const Node* node) {
+    if (init_registry_) {
+      // TODO: mutex this guy;
+      registerJitOperator();
+      init_registry_ = false;
+    }
+
+    return jit_reduction_op_registry_.count(node->kind());
+  }
+
+  // TODO: is_reduction is too hacky here. we should categorize operation types
+  //       based on their memory accessing pattern, which would affect fusion
+  //       strategy and partition logic.
   static void registerParseRule(
       std::shared_ptr<Operator>& op,
-      ParseFuncPtr fn) {
+      ParseFuncPtr parse_fn,
+      MergeQueryFuncPtr merge_query_fn = nullptr,
+      bool is_reduction = false) {
     jit_operator_registry_[Symbol::fromQualString(op->schema().name())]
-        .emplace_back(std::make_pair(op, fn));
+        .emplace_back(
+            std::piecewise_construct,
+            std::forward_as_tuple(op),
+            std::forward_as_tuple(parse_fn, merge_query_fn));
+    if (is_reduction) {
+      jit_reduction_op_registry_.emplace(
+          Symbol::fromQualString(op->schema().name()));
+    }
   }
 
  private:
@@ -181,7 +202,7 @@ class IrParser {
     // This is a one-time look up, our hash registry indexes on the pointer in
     // OperatorRegistry.
 
-    std::array<const char*, NUM_BINARY_OPS_WITH_ALPHA> BinaryOpWithAlpha = {
+    std::array<const char*, kNumBinaryOpsWithAlpha> BinaryOpWithAlpha = {
         "aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
         "aten::add(Tensor self, Scalar other, Scalar alpha) -> Tensor",
         "aten::sub(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
@@ -190,15 +211,21 @@ class IrParser {
       auto ptr_op = getOperatorForLiteral(signature);
       registerParseRule(
           ptr_op,
-          [](const Node* const node,
+          [](const Node* node,
              std::unordered_map<size_t, CgValue>& value_map) -> void {
+            using BinaryOpWithAlphaType = Val* (*)(Val*, Val*, Val*);
             static std::unordered_map<
                 Symbol,
-                std::pair<BinaryOpType, decltype(&add_alpha)>>
-                op_mapping({
-                    {aten::add, std::make_pair(BinaryOpType::Add, &add_alpha)},
-                    {aten::sub, std::make_pair(BinaryOpType::Sub, &sub_alpha)},
-                });
+                std::pair<BinaryOpType, BinaryOpWithAlphaType>>
+                op_mapping(
+                    {{aten::add,
+                      std::make_pair(
+                          BinaryOpType::Add,
+                          static_cast<BinaryOpWithAlphaType>(&add_alpha))},
+                     {aten::sub,
+                      std::make_pair(
+                          BinaryOpType::Sub,
+                          static_cast<BinaryOpWithAlphaType>(&sub_alpha))}});
             // TODO: handle scaling factor when it's not constant 1;
             auto lhs = value_map[node->inputs()[0]->unique()];
             auto rhs = value_map[node->inputs()[1]->unique()];
@@ -214,7 +241,7 @@ class IrParser {
           });
     }
 
-    std::array<const char*, NUM_BINARY_OPS> BinaryOp = {
+    std::array<const char*, kNumBinaryOps> BinaryOp = {
         "aten::div(Tensor self, Tensor other) -> Tensor",
         "aten::div(Tensor self, Scalar other) -> Tensor",
         "aten::mul(Tensor self, Tensor other) -> Tensor",
@@ -243,7 +270,7 @@ class IrParser {
       auto ptr_op = getOperatorForLiteral(signature);
       registerParseRule(
           ptr_op,
-          [](const Node* const node,
+          [](const Node* node,
              std::unordered_map<size_t, CgValue>& value_map) -> void {
             static std::unordered_map<Symbol, BinaryOpType> op_mapping(
                 {{aten::div, BinaryOpType::Div},
@@ -271,7 +298,7 @@ class IrParser {
     }
 
     // TODO: cast operations should be merged in.
-    std::array<const char*, NUM_UNARY_OPS> UnaryOp = {
+    std::array<const char*, kNumUnaryOps> UnaryOp = {
         "aten::neg(Tensor self) -> Tensor",
         "aten::abs(Tensor self) -> Tensor",
         "aten::log(Tensor self) -> Tensor",
@@ -308,7 +335,7 @@ class IrParser {
       auto ptr_op = getOperatorForLiteral(signature);
       registerParseRule(
           ptr_op,
-          [](const Node* const node,
+          [](const Node* node,
              std::unordered_map<size_t, CgValue>& value_map) -> void {
             static std::unordered_map<Symbol, UnaryOpType> op_mapping({
                 {aten::neg, UnaryOpType::Neg},
@@ -355,7 +382,7 @@ class IrParser {
           "aten::rand_like(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor");
       registerParseRule(
           ptr_op,
-          [](const Node* const node,
+          [](const Node* node,
              std::unordered_map<size_t, CgValue>& value_map) -> void {
             auto operand = value_map[node->inputs()[0]->unique()];
 
@@ -369,7 +396,7 @@ class IrParser {
           "aten::threshold(Tensor self, Scalar threshold, Scalar value) -> Tensor");
       registerParseRule(
           ptr_op,
-          [](const Node* const node,
+          [](const Node* node,
              std::unordered_map<size_t, CgValue>& value_map) -> void {
             auto operand = value_map[node->inputs()[0]->unique()];
             auto th = value_map[node->inputs()[1]->unique()];
@@ -385,7 +412,7 @@ class IrParser {
           "aten::clamp(Tensor self, Scalar? min, Scalar? max) -> Tensor");
       registerParseRule(
           ptr_op,
-          [](const Node* const node,
+          [](const Node* node,
              std::unordered_map<size_t, CgValue>& value_map) -> void {
             auto operand = value_map[node->inputs()[0]->unique()];
             // TODO: we need to get a proper lower bound per dtype in operand.
@@ -406,7 +433,7 @@ class IrParser {
           "aten::where(Tensor condition, Tensor self, Tensor other) -> Tensor");
       registerParseRule(
           ptr_op,
-          [](const Node* const node,
+          [](const Node* node,
              std::unordered_map<size_t, CgValue>& value_map) -> void {
             auto condition = value_map[node->inputs()[0]->unique()];
             auto x = value_map[node->inputs()[1]->unique()];
@@ -416,6 +443,85 @@ class IrParser {
             value_map.emplace(node->output()->unique(), out);
           });
     }
+
+    {
+      std::array<const char*, kNumLerpOps> LerpOp = {
+          "aten::lerp(Tensor self, Tensor end, Scalar weight) -> Tensor",
+          "aten::lerp(Tensor self, Tensor end, Tensor weight) -> Tensor"};
+      for (auto signature : LerpOp) {
+        auto ptr_op = getOperatorForLiteral(signature);
+        registerParseRule(
+            ptr_op,
+            [](const Node* node,
+               std::unordered_map<size_t, CgValue>& value_map) -> void {
+              auto self = value_map[node->inputs()[0]->unique()];
+              auto end = value_map[node->inputs()[1]->unique()];
+              auto weight = value_map[node->inputs()[2]->unique()];
+
+              auto out = lerp(self, end, weight);
+              value_map.emplace(node->output()->unique(), out);
+            });
+      }
+    }
+
+    {
+      auto ptr_op = getOperatorForLiteral(
+          "aten::addcmul(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor");
+      registerParseRule(
+          ptr_op,
+          [](const Node* node,
+             std::unordered_map<size_t, CgValue>& value_map) -> void {
+            auto self = value_map[node->inputs()[0]->unique()];
+            auto tensor1 = value_map[node->inputs()[1]->unique()];
+            auto tensor2 = value_map[node->inputs()[2]->unique()];
+            auto value = value_map[node->inputs()[3]->unique()];
+
+            auto out = addcmul(self, tensor1, tensor2, value);
+            value_map.emplace(node->output()->unique(), out);
+          });
+    }
+
+    {
+      auto ptr_op = getOperatorForLiteral(
+          "aten::sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, int? dtype=None) -> (Tensor)");
+      registerParseRule(
+          ptr_op,
+          [](const Node* node,
+             std::unordered_map<size_t, CgValue>& value_map) -> void {
+            auto self = value_map[node->input(0)->unique()];
+            auto dims_list = constant_as<c10::List<int64_t>>(node->input(1));
+            TORCH_INTERNAL_ASSERT(
+                dims_list.has_value(), "requires static reduce axes");
+            auto keepdim = constant_as<bool>(node->input(2));
+            std::vector<int> dims;
+            for (const auto dim : dims_list->vec()) {
+              dims.emplace_back(static_cast<int>(dim));
+            }
+            TORCH_INTERNAL_ASSERT(
+                keepdim.has_value() && !keepdim.value(),
+                "Keep dim in reduction is not a const false");
+            auto out = sum(self->as<TensorView>(), dims);
+            value_map.emplace(node->output()->unique(), out);
+          },
+          [](const Node* node) -> bool {
+            // we don't support cast of output types yet;
+            if (!node->inputs()[3]->type()->isSubtypeOf(
+                    static_cast<c10::TypePtr>(NoneType::get()))) {
+              return false;
+            }
+            // we don't support dynamic reduction axes;
+            if (node->inputs()[1]->node()->kind() != prim::Constant) {
+              return false;
+            }
+            // we don't support keepdim yet;
+            if (node->inputs()[2]->node()->kind() != prim::Constant ||
+                *constant_as<bool>(node->input(2))) {
+              return false;
+            }
+            return true;
+          },
+          true);
+    }
   }
 
   void processJitNode(const JitOp* node) {
@@ -423,30 +529,35 @@ class IrParser {
       // partition doesn't take constant node explicitly, but it does and copy
       // constant into subgraph. So we need to register constants in codegen IR;
       for (auto output : node->outputs()) {
-        TORCH_CHECK(registerScalar(output));
+        TORCH_INTERNAL_ASSERT(
+            registerScalar(output),
+            "registration of output failed at index ",
+            output->offset(),
+            " for node ",
+            *node);
       }
     } else {
       auto iter = IrParser::jit_operator_registry_.find(node->kind());
       // make sure we have a parser for the op;
-      TORCH_CHECK(
+      TORCH_INTERNAL_ASSERT(
           iter != IrParser::jit_operator_registry_.end(),
           "CudaFusionGroup Parser doesn't handle operator kind(): ",
           node->kind().toDisplayString());
       for (auto& pair_op_func : iter->second) {
         if (node->matches(pair_op_func.first->schema())) {
-          pair_op_func.second(node, value_map_);
+          pair_op_func.second.parse(node, value_map_);
           return;
         }
       }
-      TORCH_CHECK(
+      TORCH_INTERNAL_ASSERT(
           false,
           "CudaFusionGroup Parser doesn't recognize operator overload:",
           canonicalSchemaString(node->schema()));
     }
   }
 
-  bool registerValue(const JitValue* val, int broadcast_dim = -1) {
-    return registerTensor(val, broadcast_dim) || registerScalar(val);
+  bool registerValue(const JitValue* val) {
+    return registerTensor(val) || registerScalar(val);
   }
 
   bool registerScalar(const JitValue* val) {
@@ -470,21 +581,31 @@ class IrParser {
       value_map_.emplace(val->unique(), cg_val);
       return true;
     } else if (val->type()->isSubtypeOf(
+                   static_cast<c10::TypePtr>(BoolType::get()))) {
+      CgValue cg_val;
+      if (auto ival = constant_as<bool>(val)) {
+        cg_val = new Bool(ival.value());
+      } else {
+        cg_val = new Bool();
+      }
+      value_map_.emplace(val->unique(), cg_val);
+      return true;
+    } else if (val->type()->isSubtypeOf(
                    static_cast<c10::TypePtr>(NoneType::get()))) {
       // TODO: should we consider adding support for NoneType;
       return true;
+    } else if (val->type()->cast<ListType>()) {
+      // TODO: we don't support list type in codegen yet;
+      // This is a WAR to allow axes of reduction to be passed as constant list;
+      // We simply ignore conversion if the scalar value is a constant;
+      return toIValue(val).has_value();
     }
     return false;
   }
 
-  bool registerTensor(const JitValue* val, int broadcast_dim = -1) {
+  bool registerTensor(const JitValue* val) {
     CgValue cg_val;
     if (auto tensor_type = val->type()->cast<TensorType>()) {
-      // TODO: make this a static function in Tensor class;
-      // create tensor;
-      if (broadcast_dim >= 0) {
-        tensor_type = tensor_type->withDim(broadcast_dim);
-      }
       // TODO: make this a static function in Tensor class;
       // create tensor;
       cg_val = new TensorView(tensor_type);
@@ -495,37 +616,53 @@ class IrParser {
   }
 
   std::shared_ptr<Graph> graph_;
-  Fusion* fusion_;
-  CudaKernel* cuda_kernel_;
 
   // maps from JitValue::unique() to fusion Val;
   std::unordered_map<size_t, CgValue> value_map_;
   // parsing rule registry.
   static std::unordered_map<
       Symbol,
-      std::vector<std::pair<std::shared_ptr<Operator>, ParseFuncPtr>>>
+      std::vector<std::pair<std::shared_ptr<Operator>, RegistrationEntry>>>
       jit_operator_registry_;
+  static std::unordered_set<Symbol> jit_reduction_op_registry_;
   static bool init_registry_;
 };
 
 std::unordered_map<
     Symbol,
-    std::vector<std::pair<std::shared_ptr<Operator>, ParseFuncPtr>>>
+    std::vector<
+        std::pair<std::shared_ptr<Operator>, IrParser::RegistrationEntry>>>
     IrParser::jit_operator_registry_;
+std::unordered_set<Symbol> IrParser::jit_reduction_op_registry_;
 bool IrParser::init_registry_ = true;
 
 } // namespace
 
-bool isNodeParsible(const Node* const node) {
+bool hasReductionNode(const Block* block) {
+  for (auto node : block->nodes()) {
+    if (isReductionNode(node)) {
+      return true;
+    }
+    for (auto block : node->blocks()) {
+      if (hasReductionNode(block)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+bool isReductionNode(const Node* node) {
+  return IrParser::isReductionNode(node);
+}
+
+bool isNodeParsible(const Node* node) {
   return IrParser::canParseNode(node);
 }
 
-void parseJitIR(
-    std::shared_ptr<Graph>& graph,
-    Fusion& fusion,
-    CudaKernel* cuda_kernel) {
-  IrParser parser(graph, fusion, cuda_kernel);
-  parser.parse();
+std::unique_ptr<Fusion> parseJitIR(std::shared_ptr<Graph>& graph) {
+  IrParser parser(graph);
+  return parser.parse();
 }
 
 } // namespace cuda

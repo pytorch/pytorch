@@ -14,7 +14,7 @@ TEST(MemoryFormatTest, SetMemoryFormat) {
       EXPECT_TRUE(t.suggest_memory_format() == memory_format);
     }
   }
-  
+
   Tensor t = at::rand({4, 1, 1, 1});
   EXPECT_TRUE(t.suggest_memory_format() == at::MemoryFormat::Contiguous);
   t.resize_({4, 1, 1, 1}, at::MemoryFormat::ChannelsLast);
@@ -48,10 +48,10 @@ TEST(MemoryFormatTest, TransposeMemoryFormat) {
   t = at::rand({1, 4, 1, 4});
   t.transpose_(2, 3);
   EXPECT_TRUE(t.suggest_memory_format() != at::MemoryFormat::ChannelsLast);
-  // TODO: Should be able to handle this after accumulated permutation is implemented;
-  // t.transpose_(1, 2);
-  // t.transpose_(2, 3);
-  // EXPECT_TRUE(t.suggest_memory_format() == at::MemoryFormat::ChannelsLast);
+  t = at::rand({1, 4, 1, 4});
+  t.transpose_(2, 3);
+  t.transpose_(1, 2);
+  EXPECT_TRUE(t.suggest_memory_format() == at::MemoryFormat::ChannelsLast);
 
   t = at::rand({1, 4, 4, 1});
   t.transpose_(1, 3);
@@ -62,10 +62,10 @@ TEST(MemoryFormatTest, TransposeMemoryFormat) {
   t = at::rand({1, 4, 4, 1});
   t.transpose_(2, 3);
   EXPECT_TRUE(t.suggest_memory_format() != at::MemoryFormat::ChannelsLast);
-  // TODO: Should be able to handle this after accumulated permutation is implemented;
-  // t.transpose_(1, 2);
-  // t.transpose_(2, 3);
-  //EXPECT_TRUE(t.suggest_memory_format() == at::MemoryFormat::ChannelsLast);
+  t = at::rand({1, 4, 4, 1});
+  t.transpose_(2, 3);
+  t.transpose_(1, 2);
+  EXPECT_TRUE(t.suggest_memory_format() == at::MemoryFormat::ChannelsLast);
 }
 
 inline void sliceStepTwo(Tensor& t, int dim, at::MemoryFormat format) {

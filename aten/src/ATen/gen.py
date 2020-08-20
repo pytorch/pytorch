@@ -492,6 +492,7 @@ def generate_outputs():
     declarations += nn_parse.run(nn_files)
     declarations += native_parse.run(native_files)
     declarations = preprocess_declarations.run(declarations)
+
     per_op_registrations = defaultdict(list) if options.per_op_registration else None
     schema_registrations = [] if options.force_schema_registration else None
 

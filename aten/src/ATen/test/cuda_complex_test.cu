@@ -1,4 +1,5 @@
 #include <c10/test/util/complex_test_common.h>
+#include <ATen/cuda/CUDABlas.h>
 
 __global__ void test_thrust_kernel() {
   // thrust conversion
@@ -43,6 +44,14 @@ __global__ void test_reinterpret_cast() {
   c10::complex<double> zzzz = *reinterpret_cast<c10::complex<double>*>(&zzz);
   assert(zzzz.real() == double(1));
   assert(zzzz.imag() == double(2));
+
+  cuComplex cuComplex_zz = *reinterpret_cast<cuComplex*>(&zz);
+  assert(cuComplex_zz.x == float(1));
+  assert(cuComplex_zz.y == float(2));
+
+  cuDoubleComplex cuDoubleComplex_zzzz = *reinterpret_cast<cuDoubleComplex*>(&zzzz);
+  assert(cuDoubleComplex_zzzz.x == double(1));
+  assert(cuDoubleComplex_zzzz.y == double(2));
 }
 
 int safeDeviceCount() {
@@ -85,4 +94,3 @@ TEST(DeviceTests, ReinterpretCast) {
   cudaDeviceSynchronize();
   ASSERT_EQ(cudaGetLastError(), cudaSuccess);
 }
-

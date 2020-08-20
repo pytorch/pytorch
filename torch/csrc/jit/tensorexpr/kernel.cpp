@@ -17,7 +17,7 @@ namespace tensorexpr {
 static int te_cuda_pointwise_loop_levels = -1;
 static int te_cuda_pointwise_block_count = -1;
 static int te_cuda_pointwise_block_size = -1;
-static bool fallback_allowed = true;
+static bool fallback_allowed = false;
 
 bool setFallbackAllowed(bool value) {
   bool old_value = fallback_allowed;
@@ -56,7 +56,68 @@ static at::ScalarType tensorType(Tensor* t) {
   return static_cast<at::ScalarType>(t->body()->dtype().scalar_type());
 }
 
-static std::vector<ExprHandle> texprSizes(
+static std::vector<ExprHandle> computeIndicesToBroadcast(
+    const std::vector<ExprHandle>& outputAxes,
+    const std::vector<ExprHandle>& inputSizes) {
+  if (outputAxes.size() < inputSizes.size()) {
+    throw malformed_input("Cannot broadcast to a lower rank tensor");
+  }
+  std::vector<ExprHandle> bcast;
+  auto axisIt = outputAxes.rbegin();
+  auto sizeIt = inputSizes.rbegin();
+  while (sizeIt != inputSizes.rend()) {
+    auto const& size = sizeIt->AsNode<IntImm>();
+    if (size && size->value() == 1) {
+      bcast.emplace_back(0);
+    } else {
+      bcast.emplace_back(*axisIt);
+    }
+    ++axisIt;
+    ++sizeIt;
+  }
+  std::reverse(bcast.begin(), bcast.end());
+  return bcast;
+}
+
+ExprHandle TensorExprKernel::broadcast(
+    Tensor* t,
+    const std::vector<ExprHandle>& axes) {
+  return t->call(computeIndicesToBroadcast(
+      axes, ExprVectorToExprHandleVector(t->buf()->dims())));
+}
+
+ExprHandle TensorExprKernel::chunk(
+    Tensor* t,
+    size_t chunkIdx,
+    size_t dim,
+    size_t chunks,
+    const std::vector<ExprHandle>& axes) {
+  auto sizes = bufferSizes(t);
+  size_t step = sizes[dim] / chunks;
+
+  std::vector<ExprHandle> indices;
+  for (size_t i = 0; i < axes.size(); ++i) {
+    if (i == dim) {
+      indices.push_back(axes[i] + IntImm::make((int)chunkIdx * (int)step));
+    } else {
+      indices.push_back(axes[i]);
+    }
+  }
+
+  return t->call(indices);
+}
+
+ExprHandle TensorExprKernel::tensorOrConstant(
+    const torch::jit::Value* v,
+    const std::vector<ExprHandle>& axes) {
+  auto ti = tensors_.find(v->unique());
+  if (ti != tensors_.end()) {
+    return broadcast(ti->second, axes);
+  }
+  return constant(v);
+}
+
+std::vector<ExprHandle> TensorExprKernel::sizesFromVaryingShape(
     const c10::VaryingShape<int64_t>& shape) {
   std::vector<ExprHandle> dims;
   for (size_t i = 0; i < *shape.size(); i++) {
@@ -65,27 +126,195 @@ static std::vector<ExprHandle> texprSizes(
   return dims;
 }
 
-static std::vector<DimArg> texprDims(const torch::jit::Value* v) {
-  if (v->type()->kind() != TypeKind::TensorType) {
-    throw malformed_input("type is not Tensor");
-  }
-
-  auto tt = v->type()->cast<TensorType>();
+std::vector<DimArg> TensorExprKernel::dimsFromSizes(
+    const std::vector<ExprHandle>& sizes) {
   std::vector<DimArg> dimArgs;
-  int i = 0;
-  for (auto const& s : texprSizes(tt->sizes())) {
-    dimArgs.emplace_back(DimArg(s, "i" + c10::to_string(i++)));
+  for (size_t idx = 0; idx < sizes.size(); idx++) {
+    dimArgs.emplace_back(DimArg(sizes[idx], "i" + c10::to_string(idx)));
   }
   return dimArgs;
 }
 
-template <typename T>
-int64_t bufferSize(T t) {
-  int64_t size = 1;
-  for (int i = 0; i < t.ndim(); i++) {
-    size *= t.dim(i).template AsNode<IntImm>()->value();
+std::vector<ExprHandle> TensorExprKernel::sizesForValue(
+    const torch::jit::Value* v) {
+  if (known_sizes_.count(v)) {
+    return known_sizes_.at(v);
   }
-  return size;
+
+  // If the shape is present in the type info, just extract it from here. No
+  // need to infer it.
+  if (v->type()->kind() == TypeKind::TensorType) {
+    auto tt = v->type()->cast<TensorType>();
+    if (tt->isComplete()) {
+      return sizesFromVaryingShape(tt->sizes());
+    }
+  }
+
+  if (v->type()->isSubtypeOf(FloatType::get()) ||
+      v->type()->isSubtypeOf(IntType::get())) {
+    return {1};
+  }
+  if (v->type()->isSubtypeOf(NoneType::get())) {
+    return {};
+  }
+
+  known_sizes_[v] = inferSizesForValue(v);
+  return known_sizes_.at(v);
+}
+
+std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
+    const torch::jit::Value* v) {
+  switch (v->node()->kind()) {
+    case aten::_cast_Float:
+    case aten::sigmoid:
+    case aten::reciprocal:
+    case aten::neg:
+    case aten::relu:
+    case aten::log:
+    case aten::log10:
+    case aten::log2:
+    case aten::exp:
+    case aten::expm1:
+    case aten::erf:
+    case aten::erfc:
+    case aten::cos:
+    case aten::sin:
+    case aten::tan:
+    case aten::rand_like:
+    case aten::acos:
+    case aten::asin:
+    case aten::cosh:
+    case aten::sinh:
+    case aten::atan:
+    case aten::tanh:
+    case aten::sqrt:
+    case aten::rsqrt:
+    case aten::abs:
+    case aten::ceil:
+    case aten::floor:
+    case aten::round:
+    case aten::trunc:
+    case aten::frac:
+    case aten::lgamma:
+      return sizesForValue(v->node()->input());
+
+    case aten::sub:
+    case aten::add:
+    case aten::mul:
+    case aten::div:
+    case aten::__and__:
+    case aten::__or__:
+    case aten::__xor__:
+    case aten::__lshift__:
+    case aten::__rshift__:
+    case aten::eq:
+    case aten::ne:
+    case aten::ge:
+    case aten::gt:
+    case aten::le:
+    case aten::lt:
+    case aten::min:
+    case aten::max:
+    case aten::type_as:
+    case aten::pow:
+    case aten::fmod:
+    case aten::remainder:
+    case aten::atan2:
+    case aten::_sigmoid_backward:
+    case aten::_tanh_backward: {
+      std::vector<std::vector<ExprHandle>> shapes;
+      for (size_t idx = 0; idx < 2; idx++) {
+        torch::jit::Value* inp = v->node()->input(idx);
+        shapes.push_back(sizesForValue(inp));
+      }
+      return broadcastShapes(shapes);
+    }
+
+    case aten::lerp:
+    case aten::clamp:
+    case aten::threshold:
+    case aten::where: {
+      std::vector<std::vector<ExprHandle>> shapes;
+      for (size_t idx = 0; idx < 3; idx++) {
+        torch::jit::Value* inp = v->node()->input(idx);
+        shapes.push_back(sizesForValue(inp));
+      }
+      return broadcastShapes(shapes);
+    }
+
+    case aten::addcmul: {
+      std::vector<std::vector<ExprHandle>> shapes;
+      for (size_t idx = 0; idx < 4; idx++) {
+        torch::jit::Value* inp = v->node()->input(idx);
+        shapes.push_back(sizesForValue(inp));
+      }
+      return broadcastShapes(shapes);
+    }
+
+    case prim::ConstantChunk: {
+      auto shape = sizesForValue(v->node()->input());
+      int dim = v->node()->i(attr::dim);
+      int chunks = v->node()->i(attr::chunks);
+      shape[dim] = IRSimplifier::simplify(shape[dim] / chunks);
+      return shape;
+    }
+
+    case aten::unsqueeze: {
+      auto const& n = v->node();
+      auto shape = sizesForValue(n->input(0));
+
+      int64_t dim = constant(n->input(1)).AsNode<IntImm>()->value();
+      // From the documentation
+      // (https://pytorch.org/docs/master/generated/torch.unsqueeze.html):
+      //
+      // A dim value within the range [-input.dim() - 1, input.dim() + 1) can be
+      // used. Negative dim will correspond to unsqueeze() applied at dim = dim
+      // + input.dim() + 1.
+      if (dim < 0) {
+        dim = dim + shape.size() + 1;
+      }
+      if (dim < 0 || dim > shape.size()) {
+        throw std::runtime_error("Invalid 'dim' input in aten::unsqueeze");
+      }
+
+      shape.insert(shape.begin() + dim, ExprHandle(1));
+      return shape;
+    }
+
+    case aten::cat: {
+      // In JIT IR, aten::cat usually appears with the following nodes around
+      // it:
+      //   %dim : int = prim::Constant[value=0]()
+      //   %inputs : Tensor[] = prim::ListConstruct(%a, %b, ...)
+      //   %cat_output : Tensor = aten::cat(%inputs, %dim)
+      // Shapes of the input tensors could only differ at the dimension %dim.
+      // The sizes of the output tensor on that dimension is a sum of the
+      // corresponding sizes of the input tensors, the other dimension have the
+      // same sizes.
+      auto const& n = v->node();
+      auto inputs = n->input(0)->node()->inputs();
+      TORCH_INTERNAL_ASSERT(n->input(1)->node()->kind() == prim::Constant);
+      int64_t dim = n->input(1)->node()->i(attr::value);
+
+      ExprHandle concat_size = IntImm::make(0);
+      for (auto input : inputs) {
+        concat_size = concat_size + sizesForValue(input)[dim];
+      }
+      concat_size = IRSimplifier::simplify(concat_size);
+      auto shape = sizesForValue(inputs[0]);
+      shape[dim] = concat_size;
+      return shape;
+    }
+    case aten::slice:
+      throw std::runtime_error(
+          "Shape info is not implemented for this kind of node");
+
+    default: {
+      GRAPH_DEBUG("Can't infer sizes for the node: ", *v->node());
+      GRAPH_DEBUG("Full fusion group graph:\n", *v->node()->owningGraph());
+      throw std::runtime_error("Unhandled node kind");
+    }
+  }
 }
 
 ExprHandle TensorExprKernel::constant(const torch::jit::Value* v) {
@@ -122,18 +351,10 @@ void TensorExprKernel::promoteInputs(std::vector<ExprHandle>& inputs) {
   // Find the highest type among the inputs.
   ScalarType highType = inputs[0].dtype().scalar_type();
   for (const auto input : inputs) {
-    ScalarType iType = input.dtype().scalar_type();
-    if (iType == ScalarType::Bool) {
-      continue;
-    }
-    highType = promoteTypes(highType, iType);
+    highType = promoteTypes(highType, input.dtype().scalar_type());
   }
 
   for (ExprHandle& e : inputs) {
-    if (e.dtype().scalar_type() == ScalarType::Bool) {
-      continue;
-    }
-
     if (e.dtype().scalar_type() == highType) {
       continue;
     }
@@ -144,7 +365,7 @@ void TensorExprKernel::promoteInputs(std::vector<ExprHandle>& inputs) {
   case ScalarType::Name:      \
     e = cast<Type>(e);        \
     break;
-      AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
+      AT_FORALL_SCALAR_TYPES_AND2(Half, Bool, TYPE_CASE);
 #undef TYPE_CASE
       default:
         throw unsupported_dtype();
@@ -156,6 +377,10 @@ ExprHandle TensorExprKernel::demoteOutput(
     const ExprHandle& e,
     const torch::jit::Value* v) {
   if (v->type()->kind() != TypeKind::TensorType) {
+    return e;
+  }
+
+  if (!v->isCompleteTensor()) {
     return e;
   }
 
@@ -189,21 +414,32 @@ static bool isOne(ExprHandle e) {
   return n->value() == 1;
 }
 
-static std::pair<std::vector<ExprHandle>, bool> broadcastShapes(
+std::vector<ExprHandle> TensorExprKernel::broadcastShapes(
+    std::vector<std::vector<ExprHandle>> shapes) {
+  size_t n = shapes.size();
+  if (n == 1) {
+    return shapes[0];
+  }
+  auto res1 = broadcastShapes(shapes[n - 2], shapes[n - 1]);
+  shapes[n - 2] = res1;
+  shapes.pop_back();
+  auto res2 = broadcastShapes(shapes);
+  return res2;
+}
+std::vector<ExprHandle> TensorExprKernel::broadcastShapes(
     const std::vector<ExprHandle>& a,
     const std::vector<ExprHandle>& b) {
-  bool broadcast = false;
   auto at = a.rbegin();
   auto bt = b.rbegin();
   std::vector<ExprHandle> ret;
   while (at != a.rend() || bt != b.rend()) {
     if (at == a.rend()) {
-      broadcast = true;
+      hasBroadcast_ = true;
       ret.push_back(*bt++);
       continue;
     }
     if (bt == b.rend()) {
-      broadcast = true;
+      hasBroadcast_ = true;
       ret.push_back(*at++);
       continue;
     }
@@ -214,7 +450,7 @@ static std::pair<std::vector<ExprHandle>, bool> broadcastShapes(
     if (isOne(*at)) {
       if (!isOne(*bt)) {
         dim = *bt;
-        broadcast = true;
+        hasBroadcast_ = true;
       }
     }
     ret.push_back(dim);
@@ -222,17 +458,7 @@ static std::pair<std::vector<ExprHandle>, bool> broadcastShapes(
     bt++;
   }
   std::reverse(ret.begin(), ret.end());
-  return {ret, broadcast};
-}
-
-template <typename... Args>
-static std::pair<std::vector<ExprHandle>, bool> broadcastShapes(
-    const std::vector<ExprHandle>& a,
-    const std::vector<ExprHandle>& b,
-    Args... args) {
-  auto const& res = broadcastShapes(a, b);
-  auto const& res2 = broadcastShapes(res.first, args...);
-  return {res2.first, res.second || res2.second};
+  return ret;
 }
 
 std::vector<ExprHandle> TensorExprKernel::valueShape(
@@ -255,8 +481,9 @@ Tensor* TensorExprKernel::computeOneOperand(
       c10::fmap<DimArg>(shape),
       [this, v, innerExpr](const std::vector<VarHandle>& axes) {
         auto const& n = v->node();
+        std::vector<ExprHandle> indices(axes.begin(), axes.end());
         std::vector<ExprHandle> inputs = {
-            tensorOrConstant(n->inputs()[0], axes)};
+            tensorOrConstant(n->inputs()[0], indices)};
 
         promoteInputs(inputs);
         ExprHandle compute = innerExpr(inputs[0]);
@@ -270,18 +497,17 @@ Tensor* TensorExprKernel::computeTwoOperand(
     const std::function<ExprHandle(const ExprHandle&, const ExprHandle&)>&
         innerExpr) {
   auto const& n = v->node();
-  auto const& res =
+  auto const& shape =
       broadcastShapes(valueShape(n->inputs()[0]), valueShape(n->inputs()[1]));
-  auto const& shape = res.first;
-  hasBroadcast_ |= res.second;
   return Compute(
       name,
       c10::fmap<DimArg>(shape),
       [this, v, innerExpr](const std::vector<VarHandle>& axes) {
         auto const& n = v->node();
+        std::vector<ExprHandle> indices(axes.begin(), axes.end());
         std::vector<ExprHandle> inputs = {
-            tensorOrConstant(n->inputs()[0], axes),
-            tensorOrConstant(n->inputs()[1], axes),
+            tensorOrConstant(n->inputs()[0], indices),
+            tensorOrConstant(n->inputs()[1], indices),
         };
 
         promoteInputs(inputs);
@@ -296,19 +522,18 @@ Tensor* TensorExprKernel::computeTwoOperandWithAlpha(
     const std::function<ExprHandle(const ExprHandle&, const ExprHandle&)>&
         innerExpr) {
   auto const& n = v->node();
-  auto const& res =
+  auto const& shape =
       broadcastShapes(valueShape(n->inputs()[0]), valueShape(n->inputs()[1]));
-  auto const& shape = res.first;
-  hasBroadcast_ |= res.second;
   return Compute(
       name,
       c10::fmap<DimArg>(shape),
       [this, v, innerExpr](const std::vector<VarHandle>& axes) {
         auto const& n = v->node();
+        std::vector<ExprHandle> indices(axes.begin(), axes.end());
         std::vector<ExprHandle> inputs = {
-            tensorOrConstant(n->inputs()[0], axes),
-            tensorOrConstant(n->inputs()[1], axes),
-            tensorOrConstant(n->inputs()[2], axes),
+            tensorOrConstant(n->inputs()[0], indices),
+            tensorOrConstant(n->inputs()[1], indices),
+            tensorOrConstant(n->inputs()[2], indices),
         };
 
         promoteInputs(inputs);
@@ -324,25 +549,27 @@ Tensor* TensorExprKernel::computeConditionWithTwoOperand(
         ExprHandle(const ExprHandle&, const ExprHandle&, const ExprHandle&)>&
         innerExpr) {
   auto const& n = v->node();
-  auto const& res = broadcastShapes(
-      valueShape(n->inputs()[0]),
-      valueShape(n->inputs()[1]),
-      valueShape(n->inputs()[2]));
-  auto const& shape = res.first;
-  hasBroadcast_ |= res.second;
+  std::vector<std::vector<ExprHandle>> shapes;
+  for (size_t idx = 0; idx < 2; idx++) {
+    torch::jit::Value* inp = n->input(idx);
+    shapes.push_back(sizesForValue(inp));
+  }
+  auto const& shape = broadcastShapes(shapes);
   return Compute(
       name,
       c10::fmap<DimArg>(shape),
       [this, v, innerExpr](const std::vector<VarHandle>& axes) {
         auto const& n = v->node();
+        std::vector<ExprHandle> indices(axes.begin(), axes.end());
         std::vector<ExprHandle> inputs = {
-            tensorOrConstant(n->inputs()[1], axes),
-            tensorOrConstant(n->inputs()[2], axes),
+            tensorOrConstant(n->inputs()[1], indices),
+            tensorOrConstant(n->inputs()[2], indices),
         };
 
         promoteInputs(inputs);
         // First expr is the condition, which we don't promote
-        inputs.emplace(inputs.begin(), tensorOrConstant(n->inputs()[0], axes));
+        inputs.emplace(
+            inputs.begin(), tensorOrConstant(n->inputs()[0], indices));
         ExprHandle compute = innerExpr(inputs[0], inputs[1], inputs[2]);
         return demoteOutput(compute, n->output());
       });
@@ -355,21 +582,22 @@ Tensor* TensorExprKernel::computeThreeOperand(
         ExprHandle(const ExprHandle&, const ExprHandle&, const ExprHandle&)>&
         innerExpr) {
   auto const& n = v->node();
-  auto const& res = broadcastShapes(
-      valueShape(n->inputs()[0]),
-      valueShape(n->inputs()[1]),
-      valueShape(n->inputs()[2]));
-  auto const& shape = res.first;
-  hasBroadcast_ |= res.second;
+  std::vector<std::vector<ExprHandle>> shapes;
+  for (size_t idx = 0; idx < 3; idx++) {
+    torch::jit::Value* inp = n->input(idx);
+    shapes.push_back(sizesForValue(inp));
+  }
+  auto const& shape = broadcastShapes(shapes);
   return Compute(
       name,
       c10::fmap<DimArg>(shape),
       [this, v, innerExpr](const std::vector<VarHandle>& axes) {
         auto const& n = v->node();
+        std::vector<ExprHandle> indices(axes.begin(), axes.end());
         std::vector<ExprHandle> inputs = {
-            tensorOrConstant(n->inputs()[0], axes),
-            tensorOrConstant(n->inputs()[1], axes),
-            tensorOrConstant(n->inputs()[2], axes),
+            tensorOrConstant(n->inputs()[0], indices),
+            tensorOrConstant(n->inputs()[1], indices),
+            tensorOrConstant(n->inputs()[2], indices),
         };
 
         promoteInputs(inputs);
@@ -387,23 +615,23 @@ Tensor* TensorExprKernel::computeFourOperand(
         const ExprHandle&,
         const ExprHandle&)>& innerExpr) {
   auto const& n = v->node();
-  auto const& res = broadcastShapes(
-      valueShape(n->inputs()[0]),
-      valueShape(n->inputs()[1]),
-      valueShape(n->inputs()[2]),
-      valueShape(n->inputs()[3]));
-  auto const& shape = res.first;
-  hasBroadcast_ |= res.second;
+  std::vector<std::vector<ExprHandle>> shapes;
+  for (size_t idx = 0; idx < 4; idx++) {
+    torch::jit::Value* inp = n->input(idx);
+    shapes.push_back(sizesForValue(inp));
+  }
+  auto const& shape = broadcastShapes(shapes);
   return Compute(
       name,
       c10::fmap<DimArg>(shape),
       [this, v, innerExpr](const std::vector<VarHandle>& axes) {
         auto const& n = v->node();
+        std::vector<ExprHandle> indices(axes.begin(), axes.end());
         std::vector<ExprHandle> inputs = {
-            tensorOrConstant(n->inputs()[0], axes),
-            tensorOrConstant(n->inputs()[1], axes),
-            tensorOrConstant(n->inputs()[2], axes),
-            tensorOrConstant(n->inputs()[3], axes),
+            tensorOrConstant(n->inputs()[0], indices),
+            tensorOrConstant(n->inputs()[1], indices),
+            tensorOrConstant(n->inputs()[2], indices),
+            tensorOrConstant(n->inputs()[3], indices),
         };
 
         promoteInputs(inputs);
@@ -505,41 +733,41 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::eq: {
       return computeTwoOperand(
           "aten_eq", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return lhs == rhs;
+            return cast<bool>(lhs == rhs);
           });
     } break;
 
     case aten::ne: {
       return computeTwoOperand(
           "aten_ne", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return lhs != rhs;
+            return cast<bool>(lhs != rhs);
           });
     } break;
     case aten::ge: {
       return computeTwoOperand(
           "aten_ge", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return lhs >= rhs;
+            return cast<bool>(lhs >= rhs);
           });
     } break;
 
     case aten::gt: {
       return computeTwoOperand(
           "aten_gt", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return lhs > rhs;
+            return cast<bool>(lhs > rhs);
           });
     } break;
 
     case aten::le: {
       return computeTwoOperand(
           "aten_le", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return lhs <= rhs;
+            return cast<bool>(lhs <= rhs);
           });
     } break;
 
     case aten::lt: {
       return computeTwoOperand(
           "aten_lt", v, [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return lhs < rhs;
+            return cast<bool>(lhs < rhs);
           });
     } break;
 
@@ -599,10 +827,8 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     } break;
 
     case aten::sigmoid: {
-      return computeOneOperand("aten_sigmoid", v, [](const ExprHandle& a) {
-        return ExprHandle(1.0f) /
-            (ExprHandle(1.0f) + exp(ExprHandle(-0.0f) - a));
-      });
+      return computeOneOperand(
+          "aten_sigmoid", v, [](const ExprHandle& a) { return sigmoid(a); });
     } break;
 
     case aten::reciprocal: {
@@ -873,24 +1099,25 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case prim::ConstantChunk: {
       return Compute(
           "prim_constantchunk",
-          texprDims(v),
+          dimsFromSizes(sizesForValue(v)),
           [this, v](const std::vector<VarHandle>& axes) {
             auto const& n = v->node();
             int64_t dim = n->i(attr::dim);
             int64_t chunks = n->i(attr::chunks);
+            std::vector<ExprHandle> indices(axes.begin(), axes.end());
             return chunk(
                 tensors_.at(n->inputs()[0]->unique()),
                 v->offset(),
                 dim,
                 chunks,
-                axes);
+                indices);
           });
     }
 
     case aten::cat: {
       return Compute(
           "aten_cat",
-          texprDims(v),
+          dimsFromSizes(sizesForValue(v)),
           [this, v](const std::vector<VarHandle>& axes) {
             auto const& n = v->node();
             auto inputs = n->inputs()[0]->node()->inputs();
@@ -913,11 +1140,10 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
             return load;
           });
     }
-
     case aten::slice: {
       return Compute(
           "aten_slice",
-          texprDims(v),
+          dimsFromSizes(sizesForValue(v)),
           [this, v](const std::vector<VarHandle>& axes) {
             auto const& n = v->node();
             int dim = constant(n->inputs()[1]).AsNode<IntImm>()->value();
@@ -933,7 +1159,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
     case aten::unsqueeze: {
       return Compute(
           "aten_unsqueeze",
-          texprDims(v),
+          dimsFromSizes(sizesForValue(v)),
           [this, v](const std::vector<VarHandle>& axes) {
             auto const& n = v->node();
             int64_t dim = constant(n->inputs()[1]).AsNode<IntImm>()->value();
@@ -941,13 +1167,21 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
               if (axes.size() == 0) {
                 throw malformed_input("axes are zero handling unsqueeze");
               }
-
-              dim += axes.size() - 1;
+              dim += axes.size();
+            }
+            // To construct an expression for an 'unsqueezed' tensor we need to
+            // drop the DIM-th axis, i.e.
+            //    unsqueezed_v[i,j,k,l] = v[i,j,l] # dim = 2 - drop index 'k'
+            //                 0 1 2 3
+            std::vector<ExprHandle> indices;
+            int64_t i = 0;
+            for (auto a : axes) {
+              if (i++ != dim) {
+                indices.emplace_back(ExprHandle(a.node()));
+              }
             }
 
-            std::vector<ExprHandle> newAxes(axes.begin(), axes.end());
-            newAxes.erase(newAxes.begin() + dim);
-            return tensorOrConstant(n->inputs()[0], newAxes);
+            return tensorOrConstant(n->inputs()[0], indices);
           });
     }
 
@@ -1024,6 +1258,7 @@ Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
   flattenTensors(backendType);
 
   torch::jit::tensorexpr::LoopNest l(flatTensorOutputs_);
+  GRAPH_DEBUG("Original Stmt:\n", std::to_string(l.root_stmt()), "\n");
 
   // Compute non-output tensors_ inline
   for (auto& p : tensors_) {
@@ -1154,6 +1389,7 @@ Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
   Stmt* stmt = l.root_stmt();
   // Arithmetic Simplification.
   stmt = IRSimplifier::simplify(stmt);
+  GRAPH_DEBUG("Final Stmt:\n", std::to_string(stmt), "\n");
   return stmt;
 }
 

@@ -3,14 +3,13 @@
 
 #include <ATen/CUDAGeneratorImpl.h>
 #include <c10/cuda/CUDAFunctions.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/tensorexpr/analysis.h>
 #include <torch/csrc/jit/tensorexpr/cuda_random.h>
 #include <torch/csrc/jit/tensorexpr/eval.h>
 #include <torch/csrc/jit/tensorexpr/exceptions.h>
 #include <torch/csrc/jit/tensorexpr/execution_counter.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
-
-#define DEBUG_PRINT 0
 
 namespace torch {
 namespace jit {
@@ -267,20 +266,33 @@ void CudaPrinter::visit(const Intrinsics* v) {
 void CudaPrinter::visit(const Load* v) {
   // TODO: find a better metric in using ldg or not. Support different dtypes.
   if (v->dtype().scalar_type() == ScalarType::Half) {
-    os() << "__half2float(" << *v->base_handle() << "[" << *v->flat_index()
-         << "])";
-  } else {
-    // Detects whether the load target is also a store target.
-    // TODO: this is currently too wide. It detects whether a store-target
-    // exists within the program. In fact, this check is only necessary within a
-    // kernel.
-    if (!cuda_analysis_->is_buf_store_target(v->buf())) {
-      // Cuda __ldg can only be applied on read-only buffers.
-      os() << "__ldg(" << *v->base_handle() << " + " << *v->flat_index() << ")";
+    if (v->indices().empty()) {
+      os() << "__half2float(" << *v->base_handle() << ")";
     } else {
-      os() << *v->base_handle() << "[" << *v->flat_index() << "]";
+      os() << "__half2float(" << *v->base_handle() << "[" << *v->flat_index()
+           << "])";
     }
+    return;
   }
+  // Detects whether the load target is also a store target.
+  // TODO: this is currently too wide. It detects whether a store-target
+  // exists within the program. In fact, this check is only necessary within a
+  // kernel.
+  if (v->indices().empty()) {
+    os() << *v->base_handle();
+    return;
+  }
+  if (v->dtype().scalar_type() == ScalarType::Bool) {
+    // There's no __ldg overload for bool.
+    os() << *v->base_handle() << "[" << *v->flat_index() << "]";
+    return;
+  }
+  if (cuda_analysis_->is_buf_store_target(v->buf())) {
+    // Cuda __ldg can only be applied on read-only buffers.
+    os() << *v->base_handle() << "[" << *v->flat_index() << "]";
+    return;
+  }
+  os() << "__ldg(" << *v->base_handle() << " + " << *v->flat_index() << ")";
 }
 
 // TODO: maybe this should be a more shared location?
@@ -313,6 +325,9 @@ static bool isAtomicAdd(const Store* v, const Expr** atomic_add_value) {
   if (v->base_handle() != load_v->base_handle()) {
     return false;
   }
+  if (v->indices().empty() && load_v->indices().empty()) {
+    return false;
+  }
   bool index_equal = CheckEqual(v->flat_index(), load_v->flat_index());
   if (index_equal) {
     *atomic_add_value = add_v->rhs();
@@ -324,7 +339,6 @@ class AtomicAddFuser : public IRMutator {
   Stmt* mutate(const Store* v) override {
     const Buf* buf = v->buf();
     const std::vector<const Expr*>& indices = v->indices();
-    const Expr* value = v->value();
     const Expr* atomic_add_value = nullptr;
     if (isAtomicAdd(v, &atomic_add_value)) {
       return new AtomicAdd(buf, indices, atomic_add_value);
@@ -335,7 +349,11 @@ class AtomicAddFuser : public IRMutator {
 
 void CudaPrinter::visit(const Store* v) {
   emitIndent();
-  os() << *v->base_handle() << "[" << *v->flat_index() << "] = ";
+  if (v->indices().empty()) {
+    os() << *v->base_handle() << " = ";
+  } else {
+    os() << *v->base_handle() << "[" << *v->flat_index() << "] = ";
+  }
   if (v->value()->dtype().scalar_type() == ScalarType::Half) {
     os() << "__float2half(" << *v->value() << ");";
   } else {
@@ -414,21 +432,6 @@ void CudaPrinter::visit(const IfThenElse* v) {
 void CudaPrinter::visit(const Block* v) {
   os() << "{" << std::endl;
   indent_++;
-  for (const auto& pair : v->varBindings()) {
-    emitIndent();
-    const Var* var = pair.first;
-    const Expr* val = pair.second;
-
-    if (var->dtype().scalar_type() == ScalarType::Half) {
-      // we do math in floats so use that.
-      os() << "float";
-    } else {
-      os() << cudaDtypeCppString(var->dtype());
-    }
-    os() << " " << *var << " = ";
-    val->accept(this);
-    os() << "; " << std::endl;
-  }
 
   for (Stmt* s : v->stmts()) {
     s->accept(this);
@@ -437,6 +440,19 @@ void CudaPrinter::visit(const Block* v) {
   indent_--;
   emitIndent();
   os() << "}";
+}
+
+void CudaPrinter::visit(const Let* v) {
+  emitIndent();
+  if (v->dtype().scalar_type() == ScalarType::Half) {
+    // we do math in floats so use that.
+    os() << "float";
+  } else {
+    os() << cudaDtypeCppString(v->dtype());
+  }
+  os() << " " << *v->var() << " = ";
+  v->value()->accept(this);
+  os() << ";" << std::endl;
 }
 
 class PrioritizeLoad : public IRMutator {
@@ -553,14 +569,23 @@ class PrioritizeLoad : public IRMutator {
       return stmt;
     }
 
+    // TODO: this probably isn't going to order nicely in all cases, vars need
+    // too be inserted before their first usage.
     if (Block* b = dynamic_cast<Block*>(stmt)) {
+      Stmt* last = nullptr;
       for (const auto& pair : load_list) {
-        b->add_var_binding(pair.first, pair.second);
+        Stmt* news = new Let(pair.first, pair.second);
+        if (last == nullptr) {
+          b->prepend_stmt(news);
+        } else {
+          b->insert_stmt_after(news, last);
+        }
+        last = news;
       }
       return b;
     }
 
-    return Block::make(load_list, {stmt});
+    return Block::make({stmt});
   }
 
   MemoryLoadStack load_stack_;
@@ -592,12 +617,12 @@ std::string CudaCodeGen::GetUniqueFuncName(const std::string& func_prefix) {
 // and wrap them under a trivial thread idx.
 class NoThreadIdxRewriter : public IRMutator {
  private:
-  Stmt* rewrite(const VarMapping& vars, const std::vector<Stmt*>& stmts) {
+  Stmt* rewrite(const std::vector<Stmt*>& stmts) {
     std::vector<Stmt*> cloned_stmts(stmts.size());
     for (size_t index = 0; index < stmts.size(); index++) {
       cloned_stmts[index] = Stmt::clone(stmts[index]);
     }
-    Stmt* new_block = Block::make(vars, cloned_stmts);
+    Stmt* new_block = Block::make(cloned_stmts);
     // Wrap the new block under a trivial thread-idx
     //   for t in 0..1: // threadIdx
     //     if (t < 1):
@@ -673,7 +698,7 @@ class NoThreadIdxRewriter : public IRMutator {
       Stmt* parent = v->get_parent();
       For* loop_parent = dynamic_cast<For*>(parent);
       if (loop_parent && loop_parent->loop_options().is_gpu_block_index()) {
-        Stmt* new_block = rewrite(v->varBindings(), new_stmts);
+        Stmt* new_block = rewrite(new_stmts);
         return new_block;
       }
       need_rewrite_ = true;
@@ -700,12 +725,12 @@ class NoThreadIdxRewriter : public IRMutator {
       // Rewrite the stmts from [start, stop)
       std::vector<Stmt*> stmts_to_rewrite(
           new_stmts.begin() + start, new_stmts.begin() + stop);
-      Stmt* rewritten_stmt = rewrite(v->varBindings(), stmts_to_rewrite);
+      Stmt* rewritten_stmt = rewrite(stmts_to_rewrite);
       rewrite_stmts.push_back(rewritten_stmt);
 
       start = stop;
     }
-    Stmt* rewritten_block = Block::make(v->varBindings(), rewrite_stmts);
+    Stmt* rewritten_block = Block::make(rewrite_stmts);
     return rewritten_block;
   }
 
@@ -719,11 +744,27 @@ class NoThreadIdxRewriter : public IRMutator {
   bool need_rewrite_ = false;
 };
 
+static std::ostream& operator<<(
+    std::ostream& out,
+    const std::vector<const Expr*>& exprs) {
+  size_t i = 0;
+  for (auto expr : exprs) {
+    if (i++ > 0) {
+      out << ", ";
+    }
+    out << *expr;
+  }
+  return out;
+}
+
 void CudaCodeGen::Initialize() {
   // TODO: handle multiple kernels.
   // TODO: handle dynamic dimension.
   // TODO: call nvrtc.
   // TODO: merge HasRand with CudaAnalysis.
+  GenericIntrinsicsExpander intrinsics_expander;
+  apply_mutator(&intrinsics_expander);
+
   HasRand has_rand_func(stmt());
   has_random_ = has_rand_func.has_rand();
   cuda_analysis_ = std::make_unique<CudaAnalysis>();
@@ -797,35 +838,22 @@ void CudaCodeGen::Initialize() {
   // Check that all block extents had been set.
   const std::vector<const Expr*>& gpu_block_extents =
       printer_->gpu_block_extents();
-  const std::vector<const Expr*>& gpu_thread_extents =
-      printer_->gpu_thread_extents();
   for (size_t i = 0; i < gpu_block_extents.size(); i++) {
     if (!gpu_block_extents[i]) {
       throw std::runtime_error("Missing gpu_block_index: " + std::to_string(i));
     }
   }
 
-#if DEBUG_PRINT
-  std::cout << "stmt: " << std::endl;
-  std::cout << oss_.str() << std::endl;
-  std::cout << "block(";
-  for (size_t i = 0; i < gpu_block_extents.size(); i++) {
-    if (i > 0) {
-      std::cout << ", ";
-    }
-    std::cout << *gpu_block_extents[i];
-  }
-  std::cout << "), thread(";
-  for (size_t i = 0; i < gpu_thread_extents.size(); i++) {
-    if (i > 0) {
-      std::cout << ", ";
-    }
-    std::cout << *gpu_thread_extents[i];
-  }
-  std::cout << ")" << std::endl;
-  ;
-#endif
-
+  GRAPH_DEBUG(
+      "Fused TE CUDA kernel:\n",
+      oss_.str(),
+      "\n",
+      "gpu_block_extents: (",
+      printer_->gpu_block_extents(),
+      ")\n",
+      "gpu_thread_extents: (",
+      printer_->gpu_thread_extents(),
+      ")");
   CompileToNVRTC(oss_.str(), func_name);
   USE_TRIGGER(cuda_codegen_created);
 }
@@ -847,15 +875,24 @@ void CudaCodeGen::call(const std::vector<CallArg>& args) {
 
   std::vector<int> gpu_block_extents_v(3, 1);
   std::vector<int> gpu_thread_extents_v(3, 1);
+
   // evaluate all the block/thread extents into values
   // TODO: eventually, codegen these calculations and make them part of the
   // module.
   for (size_t i = 0; i < gpu_block_extents.size(); i++) {
+    if (gpu_block_extents[i]->isConstant()) {
+      gpu_block_extents_v[i] = immediateAs<int>(gpu_block_extents[i]);
+      continue;
+    }
     ExprEval<SimpleIREvaluator> eval(
         ExprHandle(gpu_block_extents[i]), buffer_args());
     gpu_block_extents_v[i] = eval.value<int>(args);
   }
   for (size_t i = 0; i < gpu_thread_extents.size(); i++) {
+    if (gpu_thread_extents[i]->isConstant()) {
+      gpu_thread_extents_v[i] = immediateAs<int>(gpu_thread_extents[i]);
+      continue;
+    }
     ExprEval<SimpleIREvaluator> eval(
         ExprHandle(gpu_thread_extents[i]), buffer_args());
     gpu_thread_extents_v[i] = eval.value<int>(args);
@@ -962,11 +999,6 @@ void CudaCodeGen::CompileToNVRTC(
   cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
   int major, minor;
   getMajorMinor(prop, major, minor);
-
-#if DEBUG_PRINT
-  std::cout << "major: " << major << ", "
-            << "minor: " << minor << std::endl;
-#endif
 
   // Creates the NVRTC program
   nvrtcProgram program;

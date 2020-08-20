@@ -129,7 +129,8 @@ template <
     typename Tdata, // embedding and momentum types
     typename T, // everything else
     typename TLengths,
-    typename rowWiseAdagradT>
+    typename rowWiseAdagradT,
+    bool is_mean = false>
 class RowWiseSparseAdagradFusedWithSparseLengthsSumGradientOp final
     : public Operator<CPUContext> {
  public:
@@ -203,13 +204,29 @@ class RowWiseSparseAdagradFusedWithSparseLengthsSumGradientOp final
         " Input Moment size: ",
         Input(MOMENT_1).numel());
 
+    if (is_mean) {
+      grad_buffer_.ResizeLike(Input(GRAD));
+    }
+    auto* grad_buffer_data =
+        is_mean ? grad_buffer_.template mutable_data<T>() : NULL;
+    if (is_mean) {
+      for (auto rangeIndex = 0; rangeIndex < numSegments; ++rangeIndex) {
+        for (auto tmpIndex = 0; tmpIndex < block_size; ++tmpIndex) {
+          auto offsetI = rangeIndex * block_size;
+          grad_buffer_data[offsetI + tmpIndex] = lengths[rangeIndex] > 0
+              ? gradIn[offsetI + tmpIndex] / lengths[rangeIndex]
+              : gradIn[offsetI + tmpIndex];
+        }
+      }
+    }
+
     compute<SIndex>(
         block_size,
         indices,
         n,
         lengths,
         numSegments,
-        gradIn,
+        is_mean ? grad_buffer_data : gradIn,
         paramIn,
         numParams,
         momentIn,
@@ -366,6 +383,7 @@ class RowWiseSparseAdagradFusedWithSparseLengthsSumGradientOp final
   T epsilon_;
   T weight_decay_;
   rowWiseAdagradT kernel_;
+  Tensor grad_buffer_{CPU};
 
   INPUT_TAGS(PARAM, MOMENT_1, INDICES, GRAD, LR, LENGTHS);
   OUTPUT_TAGS(OUTPUT_PARAM, OUTPUT_MOMENT_1);
