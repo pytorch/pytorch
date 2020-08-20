@@ -106,6 +106,22 @@ static Tensor wrapped_scalar_tensor(Scalar scalar) {
   return tensor;
 }
 
+static Tensor restore_reduced_dims(const Tensor &output, IntArrayRef dims, bool keepdim) {
+  if (keepdim) {
+    return output;
+  }
+  std::vector<int64_t> target_shape(output.dim() + dims.size(), 0);
+  for (int64_t i : dims) {
+    target_shape[i] = 1;
+  }
+  int64_t j = 0;
+  for (int64_t i : output.sizes()) {
+    while (target_shape[j]) j++;
+    target_shape[j++] = i;
+  }
+  return output.reshape(target_shape);
+}
+
 std::tuple<Tensor, Tensor> _euclidean_dist_backward(const Tensor & grad, const Tensor & x1, const Tensor & x2, const Tensor & res) {
   if (!grad.defined()) {
     return std::tuple<Tensor, Tensor>(Tensor(), Tensor());
