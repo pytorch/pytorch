@@ -35,7 +35,7 @@ def get_param(module, attr):
         return param
 
 def learn_adaround(quantized_model, tuning_dataset, target_layers=None,
-                    number_of_epochs=15, learning_rate=.25):
+                   number_of_epochs=15, learning_rate=.25):
     ''' Inplace learning procedure for tuning the rounding scheme of the layers specified
     for the given model
 
@@ -53,6 +53,7 @@ def learn_adaround(quantized_model, tuning_dataset, target_layers=None,
         attribute on the adaround module
         '''
         leaf_module.weight_fake_quant.tuning = True
+
         def dummy_generator():
             yield leaf_module.weight_fake_quant.continous_V
         optimizer = torch.optim.Adam(dummy_generator(), lr=learning_rate)
