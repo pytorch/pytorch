@@ -231,7 +231,7 @@ static inline C10_HOST_DEVICE scalar_t chbevl(scalar_t _x, const scalar_t array[
 template <typename scalar_t>
 static inline C10_HOST_DEVICE scalar_t calc_i0(scalar_t _x) {
   using accdouble_t = at::acc_type<double, true>;
-  double x = static_cast<accdouble_t>(_x);
+  accdouble_t x = static_cast<accdouble_t>(_x);
 
   /* Chebyshev coefficients for exp(-x) I0(x)
    * in the interval [0,8].
