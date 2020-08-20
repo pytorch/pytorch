@@ -206,4 +206,3 @@ inline size_t Descriptor::Pool::Factory::Hasher::operator()(
 } // namespace vulkan
 } // namespace native
 } // namespace at
-

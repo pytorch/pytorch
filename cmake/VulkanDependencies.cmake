@@ -133,7 +133,7 @@ else()
   else()
     # Try looking in system path as a last resort.
     find_package(Vulkan)
-    if (NOT Vulkan_FOUND)
+    if(NOT Vulkan_FOUND)
       message(FATAL_ERROR "USE_VULKAN requires either Vulkan installed on system path or environment var VULKAN_SDK set")
     endif()
 
