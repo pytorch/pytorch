@@ -13,6 +13,7 @@ class AdaRoundFakeQuantize(FakeQuantize):
     default rounding scheme during quantization. The defualt is to round to the nearest number,
     but applying an optimizer on this attribute can yield a better rounding scheme and improve
     quantization results.
+
     '''
     adaround_default_attribute_settings = {'continous_V': None, 'beta_high': 8, 'beta_low': 2, 'norm_scaling': 10, 'regularization_scaling': .1}
 
@@ -31,7 +32,7 @@ class AdaRoundFakeQuantize(FakeQuantize):
 
     def forward(self, X):
         if self.continous_V is None:
-            # Small values for initializing V makes the rounding scheme close to nearest integer
+            # need some value already assigned to continuous_V for kaiming to work
             self.continous_V = torch.nn.Parameter(torch.zeros(X.size()))
             init.kaiming_uniform_(self.continous_V, a=math.sqrt(5))
 
