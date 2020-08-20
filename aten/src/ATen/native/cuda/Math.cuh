@@ -309,10 +309,10 @@ static inline C10_HOST_DEVICE scalar_t calc_i0(scalar_t _x) {
   }
   if (x <= 8.0) {
     accdouble_t y = static_cast<accdouble_t>((x / 2.0) - 2.0);
-    return static_cast<T>(::exp(x) * chbevl(y, A, 30));
+    return static_cast<scalar_t>(::exp(x) * chbevl(y, A, 30));
   }
 
-  return static_cast<T>(::exp(x) * chbevl(static_cast<accdouble_t>(32.0 / x - 2.0), B, 25) / ::sqrt(x));
+  return static_cast<scalar_t>(::exp(x) * chbevl(static_cast<accdouble_t>(32.0 / x - 2.0), B, 25) / ::sqrt(x));
 }
 
 }
