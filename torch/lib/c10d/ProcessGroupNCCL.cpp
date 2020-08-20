@@ -498,26 +498,28 @@ void ProcessGroupNCCL::ncclCommWatchdogInternal() {
         if (checkForNCCLErrors(ncclComms)) {
           LOG(INFO) << "Received NCCL errors for communicators in the cache";
 
-          LOG(INFO) << "Aborting communicators that received errors";
-          // We should not abort the communicators if we are performing a
-          // non-blocking wait(). The reason for this is that if we abort the
-          // nccl communicator, wait() might not throw exceptions and
-          // subsequent operations might run on garbage results.
-          // The current model is that when we call wait(), subsequent
-          // operations only run after this work is done or we hang forever
-          // waiting for the operation to complete.
-          for (const auto& ncclComm : ncclComms) {
-            ncclComm->ncclCommAbort();
-            // Note that we don't remove the aborted communicators from the
-            // cache. The reason is that if we do remove the communicator
-            // from the cache, it is possible that a new collective operation
-            // calls `ncclCommInitRank` to create a new communicator whereas
-            // other ranks might have failed/timed out and didn't enter
-            // `ncclCommInitRank`. As a result, when there is a failure on
-            // a communicator the application receives an exception and its
-            // their responsibility to destroy the process group and recreate
-            // it to recover from errors.
-            abortedCommIds.emplace(buildNcclUniqueIdStr(ncclComm->getNcclId()));
+          if (blockingWait_) {
+            LOG(INFO) << "Aborting communicators that received errors";
+            // We should not abort the communicators if we are performing a
+            // non-blocking wait(). The reason for this is that if we abort the
+            // nccl communicator, wait() might not throw exceptions and
+            // subsequent operations might run on garbage results.
+            // The current model is that when we call wait(), subsequent
+            // operations only run after this work is done or we hang forever
+            // waiting for the operation to complete.
+            for (const auto& ncclComm : ncclComms) {
+              ncclComm->ncclCommAbort();
+              // Note that we don't remove the aborted communicators from the
+              // cache. The reason is that if we do remove the communicator
+              // from the cache, it is possible that a new collective operation
+              // calls `ncclCommInitRank` to create a new communicator whereas
+              // other ranks might have failed/timed out and didn't enter
+              // `ncclCommInitRank`. As a result, when there is a failure on
+              // a communicator the application receives an exception and its
+              // their responsibility to destroy the process group and recreate
+              // it to recover from errors.
+              abortedCommIds.emplace(buildNcclUniqueIdStr(ncclComm->getNcclId()));
+            }
           }
         }
       }
