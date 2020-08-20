@@ -5,7 +5,6 @@
 #include <c10/core/DeviceGuard.h>
 #include <c10/core/StreamGuard.h>
 #include <c10/util/Exception.h>
-#include <c10/util/hash.h>
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/function_hook.h>
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
@@ -13,6 +12,7 @@
 #include <torch/csrc/autograd/utils/grad_layout_contract.h>
 #include <torch/csrc/autograd/utils/lambda_post_hook.h>
 #include <torch/csrc/distributed/c10d/comm.h>
+#include <torch/csrc/utils/hash.h>
 #include <torch/csrc/utils/memory.h>
 
 namespace c10d {
@@ -1148,11 +1148,11 @@ std::vector<std::vector<size_t>> Reducer::rebuildBuckets() {
 void Reducer::register_comm_hook(std::unique_ptr<CommHookInterface> iface) {
   TORCH_CHECK(
       comm_hook_ == nullptr, "register_comm_hook can only be called once.");
-  // TODO(@sinannasir): Single process multiple device mode support for DDP
+  // TODO(@sinannasir): Single-process multiple-device mode support for DDP
   // communication hook. Related to GH Issue #42542.
   TORCH_CHECK(
       replicas_.size() == 1,
-      "Communication hook does not support single process multiple device mode.");
+      "Communication hook does not support single-process multiple-device mode.");
 
   comm_hook_ = std::move(iface);
 }
@@ -1171,7 +1171,7 @@ struct BucketKey {
 
   // See torch/csrc/utils/hash.h for dispatch code.
   static size_t hash(const BucketKey& key) {
-    return c10::get_hash(key.type, key.device);
+    return torch::get_hash(key.type, key.device);
   }
 };
 
@@ -1207,7 +1207,7 @@ std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
   std::unordered_map<
       BucketKey,
       std::vector<size_t>::const_iterator,
-      c10::hash<BucketKey>>
+      torch::hash<BucketKey>>
       bucket_size_limit_iterators;
 
   // Local accumulator type for a single bucket.
@@ -1217,7 +1217,7 @@ std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(
   };
 
   // Keep vector of indices and size accumulator by tensor type and device.
-  std::unordered_map<BucketKey, BucketAccumulator, c10::hash<BucketKey>>
+  std::unordered_map<BucketKey, BucketAccumulator, torch::hash<BucketKey>>
       buckets;
 
   for (size_t i = 0; i < tensors.size(); i++) {
