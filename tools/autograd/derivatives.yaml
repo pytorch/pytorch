@@ -663,6 +663,9 @@
   self: zeros_like(self.expand(at::infer_size(self.sizes(), mask.sizes())), at::MemoryFormat::Preserve).masked_scatter_(mask, grad)
   mask: non_differentiable
 
+- name: matrix_exp(Tensor self) -> Tensor
+  self: matrix_exp_backward(self, grad)
+
 - name: max.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
   self: index_select_backward(grad, dim, indices, self.sizes(), keepdim)
 

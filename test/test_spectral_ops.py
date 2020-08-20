@@ -204,6 +204,20 @@ class TestFFT(TestCase):
             C = torch.fft.rfft(t)
             self.assertEqual(C.dtype, PROMOTION_MAP_R2C[dtype])
 
+    @skipCUDAIfRocm
+    @skipCPUIfNoMkl
+    @onlyOnCPUAndCUDA
+    @dtypes(torch.half, torch.bfloat16)
+    def test_fft_half_errors(self, device, dtype):
+        # TODO: Remove torch.half error when complex32 is fully implemented
+        x = torch.randn(64, device=device).to(dtype)
+        fft_functions = (torch.fft.fft, torch.fft.ifft,
+                         torch.fft.rfft, torch.fft.irfft,
+                         torch.fft.hfft, torch.fft.ihfft)
+        for fn in fft_functions:
+            with self.assertRaisesRegex(RuntimeError, "Unsupported dtype "):
+                fn(x)
+
     @skipCPUIfNoMkl
     @skipCUDAIfRocm
     @dtypes(torch.double, torch.complex128)  # gradcheck requires double

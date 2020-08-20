@@ -28,16 +28,23 @@ ScalarType promote_type_fft(ScalarType type, bool require_complex) {
   if (at::isComplexType(type)) {
     return type;
   }
-  // Promote integral to default type
+  // Promote integral to default float type
   if (!at::isFloatingType(type)) {
     type = c10::typeMetaToScalarType(c10::get_default_dtype());
   }
-  // Promote half to float
-  if (require_complex) {
-    return type == kDouble ? kComplexDouble : kComplexFloat;
-  } else {
-    return type == kDouble ? kDouble : kFloat;
+
+  TORCH_CHECK(type == kFloat || type == kDouble, "Unsupported dtype ", type);
+
+  if (!require_complex) {
+    return type;
   }
+
+  // Promote to complex
+  switch (type) {
+  case kFloat: return kComplexFloat;
+  case kDouble: return kComplexDouble;
+  }
+  TORCH_INTERNAL_ASSERT(false, "Unhandled dtype");
 }
 
 Tensor promote_tensor_fft(const Tensor& t, bool require_complex=false) {
