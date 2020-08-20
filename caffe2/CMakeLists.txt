@@ -442,7 +442,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
        ${TORCH_SRC_DIR}/csrc/jit/mobile/module.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/observer.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/interpreter.cpp
-       ${TORCH_SRC_DIR}/csrc/jit/mobile/export.cpp
+       ${TORCH_SRC_DIR}/csrc/jit/mobile/export_data.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/optim/sgd.cpp
        )
     list(APPEND TORCH_SRCS ${MOBILE_SRCS})
