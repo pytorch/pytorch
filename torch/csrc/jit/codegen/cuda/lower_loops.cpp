@@ -1,9 +1,11 @@
 #include <torch/csrc/jit/codegen/cuda/lower_loops.h>
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
+#include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 #include <torch/csrc/jit/codegen/cuda/transform_replay.h>
 
+#include <algorithm>
 #include <numeric>
 
 namespace torch {
@@ -466,6 +468,79 @@ void sortGroup(TensorView* target, ExprListT& exprs, ExprScoreMapT& scores) {
       });
 }
 
+// Reorder expressions that are computed at the same position in a
+// breadth-first order.
+void reorderSegmentBreadthFirst(
+    ExprListT::iterator seg_begin,
+    ExprListT::const_iterator seg_end) {
+  // mapping of each expression to a bool flag indicating if it's
+  // already been visited
+  std::unordered_map<const Expr*, bool> expr_status;
+  for (auto it = seg_begin; it != seg_end; ++it) {
+    expr_status.insert({*it, false});
+  }
+
+  while (seg_begin != seg_end) {
+    std::vector<const Expr*> visited_exprs;
+    for (auto it = seg_begin; it != seg_end; ++it) {
+      const auto expr = *it;
+      const auto& expr_inputs =
+          ir_utils::filterByType<TensorView>(expr->inputs());
+      // expr can be visited if all input expressions are already
+      // visited. If an input expression is not found in expr_status,
+      // that should be safe to ignore.
+      const bool ready_to_visit = std::all_of(
+          expr_inputs.begin(),
+          expr_inputs.end(),
+          [&expr_status](const TensorView* input) {
+            const Expr* input_origin = input->getOrigin();
+            return input_origin == nullptr ||
+                expr_status.find(input_origin) == expr_status.end() ||
+                expr_status.at(input_origin);
+          });
+      if (ready_to_visit) {
+        std::iter_swap(seg_begin, it);
+        TORCH_INTERNAL_ASSERT(*seg_begin == expr);
+        ++seg_begin;
+        visited_exprs.push_back(expr);
+      }
+    }
+    for (const auto& visited_expr : visited_exprs) {
+      expr_status.at(visited_expr) = true;
+    }
+  }
+}
+
+// Reorder expressions in a group in a breadth-first order. Reordering
+// is done within a subset of expressions that have the same score
+// (i.e., computeAt position). For each subset,
+// reorderSegmentBreadthFirst is called.
+void reorderGroupBreadthFirst(ExprListT& exprs, const ExprScoreMapT& scores) {
+  auto seg_begin = exprs.begin();
+  auto seg_end = exprs.begin();
+  ScoreT seg_score = scores.at(*seg_begin);
+  while (seg_end != exprs.end()) {
+    const auto expr = *seg_end;
+    const auto cur_score = scores.at(expr);
+    if (seg_score == cur_score) {
+      // advance further
+      ++seg_end;
+      continue;
+    } else if (seg_score < cur_score) {
+      // segment ended
+      reorderSegmentBreadthFirst(seg_begin, seg_end);
+      seg_begin = seg_end;
+      seg_score = cur_score;
+    } else {
+      // expre list is assumed to be sorted in the order of scores, so
+      // this should never be reachable
+      TORCH_INTERNAL_ASSERT(
+          false, "Unexpected expression: ", expr, ", score: ", cur_score);
+    }
+  }
+  reorderSegmentBreadthFirst(seg_begin, seg_end);
+}
+
 void mergeNonRootGroupsIntoRootGroups(
     TargetGroupMapT& computed_at_exprs,
     ExprTargetMapT& target_map) {
@@ -549,6 +624,8 @@ void reorderExprsForComputeAt(std::vector<Expr*>& exprs) {
   // 2. Sort each loop-nest group based on axis (i.e., score)
   for (auto& group : computed_at_exprs) {
     sortGroup(group.first, group.second, scores);
+    // Reorder expressions in a breadth-first order
+    reorderGroupBreadthFirst(group.second, scores);
   }
 
   // 3. Merge non-root loop-nests into root loop-nests
