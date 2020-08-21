@@ -29,10 +29,7 @@ void prelu_cuda_kernel_share_weights(
   Tensor& result,
   const scalar_t* weight_data)
 {
-  at::TensorIterator iter = TensorIteratorConfig()
-      .add_output(result)
-      .add_input(input)
-      .build();
+  auto iter = TensorIterator::unary_op(result, input);
 
   at::native::gpu_kernel(iter,
     [weight_data] GPU_LAMBDA (scalar_t input_val) {
