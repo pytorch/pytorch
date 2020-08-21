@@ -2,19 +2,21 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 from collections import OrderedDict
 import weakref
 import warnings
+from typing import Any
 
 
 class RemovableHandle(object):
     """A handle which provides the capability to remove a hook."""
 
-    next_id = 0
+    id: int
+    next_id: int = 0
 
-    def __init__(self, hooks_dict):
+    def __init__(self, hooks_dict: Any) -> None:
         self.hooks_dict_ref = weakref.ref(hooks_dict)
         self.id = RemovableHandle.next_id
         RemovableHandle.next_id += 1
 
-    def remove(self):
+    def remove(self) -> None:
         hooks_dict = self.hooks_dict_ref()
         if hooks_dict is not None and self.id in hooks_dict:
             del hooks_dict[self.id]
@@ -22,7 +24,7 @@ class RemovableHandle(object):
     def __getstate__(self):
         return (self.hooks_dict_ref(), self.id)
 
-    def __setstate__(self, state):
+    def __setstate__(self, state) -> None:
         if state[0] is None:
             # create a dead reference
             self.hooks_dict_ref = weakref.ref(OrderedDict())
@@ -31,10 +33,10 @@ class RemovableHandle(object):
         self.id = state[1]
         RemovableHandle.next_id = max(RemovableHandle.next_id, self.id + 1)
 
-    def __enter__(self):
+    def __enter__(self) -> 'RemovableHandle':
         return self
 
-    def __exit__(self, type, value, tb):
+    def __exit__(self, type: Any, value: Any, tb: Any) -> None:
         self.remove()
 
 

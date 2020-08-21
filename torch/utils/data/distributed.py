@@ -1,10 +1,15 @@
 import math
+from typing import TypeVar, Optional, Iterator
+
 import torch
-from . import Sampler
+from . import Sampler, Dataset
 import torch.distributed as dist
 
 
-class DistributedSampler(Sampler):
+T_co = TypeVar('T_co', covariant=True)
+
+
+class DistributedSampler(Sampler[T_co]):
     r"""Sampler that restricts data loading to a subset of the dataset.
 
     It is especially useful in conjunction with
@@ -51,7 +56,9 @@ class DistributedSampler(Sampler):
         ...     train(loader)
     """
 
-    def __init__(self, dataset, num_replicas=None, rank=None, shuffle=True, seed=0, drop_last=False):
+    def __init__(self, dataset: Dataset, num_replicas: Optional[int] = None,
+                 rank: Optional[int] = None, shuffle: bool = True,
+                 seed: int = 0, drop_last: bool = False) -> None:
         if num_replicas is None:
             if not dist.is_available():
                 raise RuntimeError("Requires distributed package to be available")
@@ -80,7 +87,7 @@ class DistributedSampler(Sampler):
         self.shuffle = shuffle
         self.seed = seed
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[T_co]:
         if self.shuffle:
             # deterministically shuffle based on epoch and seed
             g = torch.Generator()
@@ -88,7 +95,6 @@ class DistributedSampler(Sampler):
             indices = torch.randperm(len(self.dataset), generator=g).tolist()
         else:
             indices = list(range(len(self.dataset)))
-
 
         if not self.drop_last:
             # add extra samples to make it evenly divisible
@@ -104,10 +110,10 @@ class DistributedSampler(Sampler):
 
         return iter(indices)
 
-    def __len__(self):
+    def __len__(self) -> int:
         return self.num_samples
 
-    def set_epoch(self, epoch):
+    def set_epoch(self, epoch: int) -> None:
         r"""
         Sets the epoch for this sampler. When :attr:`shuffle=True`, this ensures all replicas
         use a different random ordering for each epoch. Otherwise, the next iteration of this
