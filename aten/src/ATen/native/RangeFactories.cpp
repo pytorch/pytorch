@@ -173,7 +173,7 @@ Tensor& arange_cpu_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
     }
 
     Tensor r = result.is_contiguous() ? result : result.contiguous();
-    auto iter = TensorIterator::nullary_op(r, /*check_mem_overlap=*/true);
+    auto iter = TensorIterator::nullary_op(r);
     arange_stub(iter.device_type(), iter, start, size, step);
     if (!result.is_contiguous()) {
       result.copy_(r);
