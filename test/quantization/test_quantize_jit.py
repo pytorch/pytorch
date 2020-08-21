@@ -1928,17 +1928,10 @@ class TestQuantizeJitOps(QuantizationTestCase):
 
             def forward(self, x):
                 return F.relu(self.bn(x), True)
-        instances = [
-            lambda dim: BNRelu(dim, True),
-            # lambda dim: BNRelu(dim, False),
-            # lambda dim: BNFuncRelu(dim),
-            # lambda dim: BNFuncInplaceRelu(dim)
-        ]
         options = itertools.product([True], [3])
         for tracing, dim in options:
-            # for instance in [BNRelu(dim, True), BNRelu(dim, False),
-            #                  BNFuncRelu(dim), BNFuncInplaceRelu(dim)]:
-            for instance in instances:
+            for instance in [BNRelu(dim, True), BNRelu(dim, False),
+                             BNFuncRelu(dim), BNFuncInplaceRelu(dim)]:
                 instance = instance(dim)
                 model = self.checkGraphModeOp(instance, self.img_data_dict[dim],
                                               "quantized::batch_norm_relu", tracing, debug=True)
