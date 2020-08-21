@@ -21,8 +21,6 @@ struct C10_EXPORT Command final {
 
     struct Descriptor final {
       uint32_t queue_family_index;
-
-      bool operator==(const Descriptor& descriptor) const;
     };
 
     /*
@@ -89,9 +87,10 @@ struct C10_EXPORT Command final {
 // Impl
 //
 
-inline bool Command::Pool::Descriptor::operator==(
-    const Descriptor& descriptor) const {
-  return queue_family_index == descriptor.queue_family_index;
+inline bool operator==(
+    const Command::Pool::Descriptor& _1,
+    const Command::Pool::Descriptor& _2) {
+  return _1.queue_family_index == _2.queue_family_index;
 }
 
 inline size_t Command::Pool::Factory::Hasher::operator()(

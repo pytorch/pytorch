@@ -41,8 +41,6 @@ struct C10_EXPORT Pipeline final {
 
     struct Descriptor final {
       VkDescriptorSetLayout descriptor_set_layout;
-
-      bool operator==(const Descriptor& descriptor) const;
     };
 
     /*
@@ -87,8 +85,6 @@ struct C10_EXPORT Pipeline final {
     VkPipelineLayout pipeline_layout;
     VkShaderModule shader_module;
     Shader::WorkGroup work_group;
-
-    bool operator==(const Descriptor& descriptor) const;
   };
 
   /*
@@ -131,9 +127,10 @@ struct C10_EXPORT Pipeline final {
 // Impl
 //
 
-inline bool Pipeline::Layout::Descriptor::operator==(
-    const Descriptor& descriptor) const {
-  return (descriptor_set_layout == descriptor.descriptor_set_layout);
+inline bool operator==(
+    const Pipeline::Layout::Descriptor& _1,
+    const Pipeline::Layout::Descriptor& _2) {
+  return (_1.descriptor_set_layout == _2.descriptor_set_layout);
 }
 
 inline size_t Pipeline::Layout::Factory::Hasher::operator()(
@@ -141,11 +138,12 @@ inline size_t Pipeline::Layout::Factory::Hasher::operator()(
   return c10::get_hash(descriptor.descriptor_set_layout);
 }
 
-inline bool Pipeline::Descriptor::operator==(
-    const Descriptor& descriptor) const {
-  return (pipeline_layout == descriptor.pipeline_layout) &&
-         (shader_module == descriptor.shader_module) &&
-         (work_group == descriptor.work_group);
+inline bool operator==(
+    const Pipeline::Descriptor& _1,
+    const Pipeline::Descriptor& _2) {
+  return (_1.pipeline_layout == _2.pipeline_layout) &&
+         (_1.shader_module == _2.shader_module) &&
+         (_1.work_group == _2.work_group);
 }
 
 inline size_t Pipeline::Factory::Hasher::operator()(
