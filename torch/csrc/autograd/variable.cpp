@@ -520,6 +520,15 @@ namespace {
     }
     return true;
   }
+
+  Tensor new_with_same_meta(const Variable& base) {
+    // We need to create a storage of the same size to be able to have the same
+    // viewing behavior in all cases
+    auto nelement_in_storage = base.storage().nbytes() / base.itemsize();
+    auto new_tensor = at::empty({nelement_in_storage}, base.options());
+    auto res = new_tensor.as_strided(base.sizes(), base.strides(), base.storage_offset());
+    return res;
+  }
 }
 
 void AutogradMeta::set_fw_grad(Variable& new_grad, const Variable& self) {
@@ -565,7 +574,7 @@ void AutogradMeta::set_fw_grad(Variable& new_grad, const Variable& self) {
         if (!this_view_meta->base_.fw_grad().defined()) {
           // If no other view created it, create a full fw_grad on the base
           auto& base = this_view_meta->base_;
-          auto new_base_fw_grad = at::empty_strided(base.sizes(), base.strides(), base.options());
+          auto new_base_fw_grad = new_with_same_meta(base);
           new_base_fw_grad.fill_(0);
 
           this_view_meta->base_.set_fw_grad(new_base_fw_grad);
@@ -579,7 +588,7 @@ void AutogradMeta::set_fw_grad(Variable& new_grad, const Variable& self) {
         }
       } else {
         // Create a Tensor with the same meta as self
-        fw_grad_ = at::empty_strided(self.sizes(), self.strides(), self.options());
+        fw_grad_ = new_with_same_meta(self);
       }
 
       if (new_grad.defined()) {

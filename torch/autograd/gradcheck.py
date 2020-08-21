@@ -206,6 +206,8 @@ def get_analytical_jacobian_fw(fn, input, output):
                 fw_grad[inp_idx] = 0
         finally:
             inp.fw_grad = None
+            if inp._is_view():
+                inp._base.fw_grad = None
     return jacobian
 
 def _as_tuple(x):
