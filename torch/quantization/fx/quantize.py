@@ -348,6 +348,27 @@ class LinearReLU(QuantizeHandler):
                 return quantizer.quantized_graph.create_node(
                     'call_function', torch.ops.quantized.linear, qlinear_args, kwargs)
 
+@register_quant_pattern(torch.nn.BatchNorm2d)
+@register_quant_pattern(torch.nn.BatchNorm3d)
+class BatchNorm(QuantizeHandler):
+    def __init__(self, quantizer, node):
+        super().__init__(quantizer, node)
+        assert node.op == 'call_module'
+        self.bn_node = node
+        self.bn = quantizer.modules[self.bn_node.target]
+
+    def convert(self, quantizer, node, load_arg, debug=False):
+        self.bn.activation_post_process = quantizer.activation_post_process_map[node.name]
+        qbn_cls = DEFAULT_MODULE_MAPPING[type(self.bn)]
+        quantized = qbn_cls.from_float(self.bn)
+        parent_name, name = _parent_name(self.bn_node.target)
+        setattr(quantizer.modules[parent_name], name, quantized)
+        return quantizer.quantized_graph.create_node(
+            'call_module',
+            self.bn_node.target,
+            load_arg(quantized=[0])(self.bn_node.args),
+            load_arg(quantized=False)(self.bn_node.kwargs))
+
 # these ops have quantized equivalents that do not need any extra information
 @register_quant_pattern(torch.nn.AdaptiveAvgPool2d)
 @register_quant_pattern(torch.nn.AvgPool2d)

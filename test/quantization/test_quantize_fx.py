@@ -504,3 +504,30 @@ class TestQuantizeFxOps(QuantizationTestCase):
         quantized_node = ('call_function', torch.ops.quantized.cat)
         for quant_type in self.static_quant_types:
             self.checkGraphModeFxOp(QuantizedCat(), data, quantized_node, quant_type=quant_type)
+
+
+    @skipIfNoFBGEMM
+    def test_qbatch_norm(self):
+        bn_module = {
+            # TODO: quantized batchnorm 1d module is missing
+            # 1 : torch.nn.BatchNorm1d,
+            2 : torch.nn.BatchNorm2d,
+            3 : torch.nn.BatchNorm3d,
+        }
+
+        class M(torch.nn.Module):
+            def __init__(self, dim):
+                super(M, self).__init__()
+                self.bn = bn_module[dim](3).to(torch.float)
+
+            def forward(self, x):
+                return self.bn(x)
+
+        options = itertools.product(self.static_quant_types, [2, 3])
+        quantized_nodes = {
+            # 1: ('call_module', nnq.BatchNorm1d),
+            2: ('call_module', nnq.BatchNorm2d),
+            3: ('call_module', nnq.BatchNorm3d),
+        }
+        for quant_type, dim in options:
+            model = self.checkGraphModeFxOp(M(dim), self.img_data_dict[dim], quantized_nodes[dim], quant_type)
