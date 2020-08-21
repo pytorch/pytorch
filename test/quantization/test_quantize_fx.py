@@ -486,4 +486,6 @@ class TestQuantizeFxOps(QuantizationTestCase):
             module = instance_norm_modules[dim]
             quantized_module = quantized_instance_norm_modules[dim]
             self._test_norm_impl(
-                module, F.instance_norm, [4], data, quantized_module, torch.ops.quantized.instance_norm, skip_op_arg_for_functional=True)
+                module, F.instance_norm, [4], data,
+                quantized_module, torch.ops.quantized.instance_norm,
+                skip_op_arg_for_functional=True)
