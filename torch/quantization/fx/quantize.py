@@ -3,6 +3,7 @@ from torch.quantization import (
     propagate_qconfig_,
     convert,
     DEFAULT_QAT_MODULE_MAPPING,
+    DEFAULT_MODULE_MAPPING,
 )
 
 from torch.fx import (
@@ -177,7 +178,9 @@ class Cat(QuantizeHandler):
 
 # handle conv, maybe followed by relu
 # NB: matching order is reversed, that is we match from the bottom of this list to the beginning
+@register_quant_pattern(torch.nn.Conv1d)
 @register_quant_pattern(torch.nn.Conv2d)
+@register_quant_pattern(torch.nn.Conv3d)
 @register_quant_pattern(torch.nn.functional.conv2d)
 @register_quant_pattern(torch.nn.qat.Conv2d)
 @register_quant_pattern(torch.nn.intrinsic.ConvReLU2d)
@@ -213,17 +216,11 @@ class ConvRelu(QuantizeHandler):
             else:
                 self.conv.activation_post_process = quantizer.activation_post_process_map[node.name]
             # 2. select quantized class
-            if type(self.conv) in [torch.nn.Conv2d,
-                                   torch.nn.qat.Conv2d,
-                                   torch.nn.intrinsic.qat.ConvBn2d]:
-                qconv = torch.nn.quantized.Conv2d
-            elif type(self.conv) in [torch.nn.intrinsic.ConvReLU2d,
-                                     torch.nn.intrinsic.qat.ConvReLU2d,
-                                     torch.nn.intrinsic.qat.ConvBnReLU2d]:
-                qconv = torch.nn.intrinsic.quantized.ConvReLU2d
-            else:
-                raise Exception("unhandled conv type:", type(self.conv))
-            quantized = qconv.from_float(self.conv)
+            # TODO: make the mapping configurable?
+            assert type(self.conv) in DEFAULT_MODULE_MAPPING, \
+                'unhandled conv type:{}'.format(type(self.conv))
+            qconv_cls = DEFAULT_MODULE_MAPPING[type(self.conv)]
+            quantized = qconv_cls.from_float(self.conv)
             parent_name, name = _parent_name(self.conv_node.target)
             setattr(quantizer.modules[parent_name], name, quantized)
             return quantizer.quantized_graph.create_node(

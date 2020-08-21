@@ -1,22 +1,11 @@
 import torch
 import torch.nn.functional as F
 
-# symbolic trace
-from torch.fx import symbolic_trace
-
-# graph mode quantization based on fx
-from torch.quantization._quantize_fx import (
-    Quantizer,
-    QuantType,
-    fuse,
-)
-
 import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
 import torch.nn.intrinsic.quantized as nniq
 
-# eager mode quantization
-from torch.quantization import default_qconfig
+from torch.quantization.fx import QuantType
 
 # test utils
 from torch.testing._internal.common_quantization import (
@@ -120,7 +109,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
             [(ModuleLinear(has_relu=False), True)],
             # TODO: enable after raw `tensor` is supported in fx
             # (FuncLinear(has_relu=False), False)],
-            [QuantType.DYNAMIC, QuantType.STATIC, QuantType.QAT])
+            self.all_quant_types)
         quantized_nodes = {
             # is_module
             True: {
@@ -146,3 +135,27 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 # TODO: support functional linear + relu fusion
                 # (FuncLinear(has_relu=True, f_relu=f_relu), ('call_function', torch.ops.quantized.linear_relu))]:
                 self.checkGraphModeFxOp(model, data, quantized_node, quant_type=quant_type)
+
+    @skipIfNoFBGEMM
+    def test_quantized_conv(self):
+        conv_module = {1 : torch.nn.Conv1d, 2 : torch.nn.Conv2d, 3 : torch.nn.Conv3d}
+
+        class Conv(torch.nn.Module):
+            def __init__(self, dim):
+                super(Conv, self).__init__()
+                self.conv = conv_module[dim](3, 3, 3).float()
+
+            def forward(self, x):
+                return self.conv(x)
+
+        options = itertools.product([1, 2, 3], self.static_quant_types)
+        quantized_nodes = {
+            # dim
+            1: ('call_module', nnq.Conv1d),
+            2: ('call_module', nnq.Conv2d),
+            3: ('call_module', nnq.Conv3d),
+        }
+        for dim, quant_type in options:
+            model = self.checkGraphModeFxOp(
+                Conv(dim), self.img_data_dict[dim],
+                quantized_nodes[dim], quant_type=quant_type)
