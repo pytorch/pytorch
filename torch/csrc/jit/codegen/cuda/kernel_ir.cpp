@@ -4,9 +4,6 @@
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 #include <torch/csrc/jit/codegen/cuda/type.h>
 
-// TODO(kir): remove
-#include <torch/csrc/jit/codegen/cuda/ir_cloner.h>
-
 namespace torch {
 namespace jit {
 namespace fuser {
@@ -69,14 +66,6 @@ IterDomain::IterDomain(const fuser::IterDomain* iter_domain)
       iter_type_(iter_domain->getIterType()),
       is_rfactor_domain_(iter_domain->isRFactorProduct()) {}
 
-IterDomain::IterDomain(const IterDomain* src, IrCloner* ir_cloner)
-    : Val(src, ir_cloner),
-      start_(ir_cloner->clone(src->start_)),
-      extent_(ir_cloner->clone(src->extent_)),
-      parallel_type_(src->parallel_type_),
-      iter_type_(src->iter_type_),
-      is_rfactor_domain_(src->is_rfactor_domain_) {}
-
 Val* IterDomain::extent() const {
   TORCH_CHECK(isLoweredVal(extent_));
   if (isThread()) {
@@ -114,15 +103,6 @@ TensorDomain::TensorDomain(const fuser::TensorDomain* tensor_domain)
   no_reduction_domain_ = lowerIterDomains(tensor_domain->noReductions());
   rfactor_domain_ = lowerIterDomains(tensor_domain->getRFactorDomain());
 }
-
-TensorDomain::TensorDomain(const TensorDomain* src, IrCloner* ir_cloner)
-    : Val(src, ir_cloner),
-      root_domain_(ir_cloner->clone(src->root_domain_)),
-      domain_(ir_cloner->clone(src->domain_)),
-      no_bcast_domain_(ir_cloner->clone(src->no_bcast_domain_)),
-      no_reduction_domain_(ir_cloner->clone(src->no_reduction_domain_)),
-      rfactor_domain_(ir_cloner->clone(src->rfactor_domain_)),
-      contiguity_(src->contiguity()) {}
 
 bool TensorDomain::hasReduction() const {
   return no_reduction_domain_.size() != domain_.size();
@@ -180,24 +160,12 @@ TensorView::TensorView(const fuser::TensorView* tv) : Val(tv), fuser_tv_(tv) {
   memory_type_ = tv->getMemoryType();
 }
 
-TensorView::TensorView(const TensorView* src, IrCloner* ir_cloner)
-    : Val(src, ir_cloner),
-      domain_(ir_cloner->clone(src->domain_)),
-      memory_type_(src->memory_type_),
-      fuser_tv_(src->fuser_tv_) {}
-
 UnaryOp::UnaryOp(UnaryOpType type, Val* out, Val* in)
     : Expr(ExprType::KirUnaryOp), unary_op_type_{type}, out_{out}, in_{in} {
   addOutput(out);
   addInput(in);
   name_ = FusionGuard::getCurFusion()->registerLoweredExpr(this);
 }
-
-UnaryOp::UnaryOp(const UnaryOp* src, IrCloner* ir_cloner)
-    : Expr(src, ir_cloner),
-      unary_op_type_(src->unary_op_type_),
-      out_(ir_cloner->clone(src->out_)),
-      in_(ir_cloner->clone(src->in_)) {}
 
 BinaryOp::BinaryOp(BinaryOpType type, Val* out, Val* lhs, Val* rhs)
     : Expr(ExprType::KirBinaryOp),
@@ -210,13 +178,6 @@ BinaryOp::BinaryOp(BinaryOpType type, Val* out, Val* lhs, Val* rhs)
   addInput(rhs);
   name_ = FusionGuard::getCurFusion()->registerLoweredExpr(this);
 }
-
-BinaryOp::BinaryOp(const BinaryOp* src, IrCloner* ir_cloner)
-    : Expr(src, ir_cloner),
-      binary_op_type_(src->binary_op_type_),
-      out_(ir_cloner->clone(src->out_)),
-      lhs_(ir_cloner->clone(src->lhs_)),
-      rhs_(ir_cloner->clone(src->rhs_)) {}
 
 TernaryOp::TernaryOp(TernaryOpType type, Val* out, Val* in1, Val* in2, Val* in3)
     : Expr(ExprType::KirTernaryOp),
@@ -232,14 +193,6 @@ TernaryOp::TernaryOp(TernaryOpType type, Val* out, Val* in1, Val* in2, Val* in3)
   name_ = FusionGuard::getCurFusion()->registerLoweredExpr(this);
 }
 
-TernaryOp::TernaryOp(const TernaryOp* src, IrCloner* ir_cloner)
-    : Expr(src, ir_cloner),
-      ternary_op_type_(src->ternary_op_type_),
-      out_(ir_cloner->clone(src->out_)),
-      in1_(ir_cloner->clone(src->in1_)),
-      in2_(ir_cloner->clone(src->in2_)),
-      in3_(ir_cloner->clone(src->in3_)) {}
-
 ReductionOp::ReductionOp(
     BinaryOpType reduction_op_type,
     Val* init,
@@ -254,13 +207,6 @@ ReductionOp::ReductionOp(
   addInput(in);
   name_ = FusionGuard::getCurFusion()->registerLoweredExpr(this);
 }
-
-ReductionOp::ReductionOp(const ReductionOp* src, IrCloner* ir_cloner)
-    : Expr(src, ir_cloner),
-      reduction_op_type_(src->reduction_op_type_),
-      init_(ir_cloner->clone(src->init_)),
-      out_(ir_cloner->clone(src->out_)),
-      in_(ir_cloner->clone(src->in_)) {}
 
 std::vector<IterDomain*> ReductionOp::getReductionDomains() const {
   // out is a TensorIndex after lowering
@@ -297,11 +243,6 @@ BroadcastOp::BroadcastOp(Val* out, Val* in)
   name_ = FusionGuard::getCurFusion()->registerLoweredExpr(this);
 }
 
-BroadcastOp::BroadcastOp(const BroadcastOp* src, IrCloner* ir_cloner)
-    : Expr(src, ir_cloner),
-      out_(ir_cloner->clone(src->out_)),
-      in_(ir_cloner->clone(src->in_)) {}
-
 TensorIndex::TensorIndex(
     const fuser::TensorView* view,
     std::vector<Val*> indices)
@@ -320,13 +261,9 @@ TensorIndex::TensorIndex(
       "Cannot index with a value other than an int.");
 }
 
-TensorIndex::TensorIndex(const TensorIndex* src, IrCloner* ir_cloner)
-    : Val(src, ir_cloner),
-      view_(ir_cloner->clone(src->view_)),
-      indices_(ir_cloner->clone(src->indices_)) {}
-
-Scope::Scope(const Scope* src, IrCloner* ir_cloner)
-    : exprs_(ir_cloner->clone(src->exprs_)) {}
+Sync::Sync() : Expr(ExprType::Sync) {
+  name_ = FusionGuard::getCurFusion()->registerExpr(this);
+}
 
 void Scope::insert_before(Expr* ref, Expr* expr) {
   auto it = exprs_.begin();
@@ -391,13 +328,6 @@ ForLoop::ForLoop(
   }
 }
 
-ForLoop::ForLoop(const ForLoop* src, IrCloner* ir_cloner)
-    : Expr(src, ir_cloner),
-      index_(ir_cloner->clone(src->index_)),
-      iter_domain_(ir_cloner->clone(src->iter_domain_)),
-      body_(&src->body_, ir_cloner),
-      parent_scope_(ir_cloner->clone(src->parent_scope_)) {}
-
 void ForLoop::setParentScope(Expr* scope) {
   TORCH_INTERNAL_ASSERT(
       !scope_utils::exprInScope(parentScope(), this),
@@ -419,13 +349,6 @@ IfThenElse::IfThenElse(
   for (auto* expr : else_body)
     else_body_.push_back(expr);
 }
-
-IfThenElse::IfThenElse(const IfThenElse* src, IrCloner* ir_cloner)
-    : Expr(src, ir_cloner),
-      cond_(src->cond_),
-      body_(&src->body_, ir_cloner),
-      else_body_(&src->else_body_, ir_cloner),
-      parent_scope_(ir_cloner->clone(src->parent_scope_)) {}
 
 void IfThenElse::setParentScope(Expr* scope) {
   TORCH_INTERNAL_ASSERT(
@@ -480,18 +403,6 @@ Allocate::Allocate(Val* buffer, MemoryType memory_type, Val* size)
   name_ = FusionGuard::getCurFusion()->registerLoweredExpr(this);
 }
 
-Allocate::Allocate(const Allocate* src, IrCloner* ir_cloner)
-    : Expr(src, ir_cloner),
-      buffer_(ir_cloner->clone(src->buffer_)),
-      memory_type_(src->memory_type_),
-      size_(ir_cloner->clone(src->size_)) {}
-
-Sync::Sync() : Expr(ExprType::Sync) {
-  name_ = FusionGuard::getCurFusion()->registerExpr(this);
-}
-
-Sync::Sync(const Sync* src, IrCloner* ir_cloner) : Expr(src, ir_cloner) {}
-
 GridReduction::GridReduction(ReductionOp* reduction_op)
     : Expr(ExprType::GridReduction), reduction_op_(reduction_op) {
   TORCH_INTERNAL_ASSERT(false, "Not implemented yet.");
@@ -505,12 +416,6 @@ GridReduction::GridReduction(
       reduction_op_(reduction_op),
       reduction_buffer_(reduction_buffer),
       sync_buffer_(sync_buffer) {}
-
-GridReduction::GridReduction(const GridReduction* src, IrCloner* ir_cloner)
-    : Expr(src, ir_cloner),
-      reduction_op_(ir_cloner->clone(src->reduction_op_)),
-      reduction_buffer_(ir_cloner->clone(src->reduction_buffer_)),
-      sync_buffer_(ir_cloner->clone(src->sync_buffer_)) {}
 
 std::string GridReduction::getPredicateFlagName(const TensorView* val) {
   std::stringstream ss;

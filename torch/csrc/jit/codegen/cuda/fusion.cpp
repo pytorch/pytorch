@@ -90,6 +90,7 @@ void swap(Fusion& a, Fusion& b) noexcept {
   // Lowered IR nodes
   swap(a.lowered_val_set_, b.lowered_val_set_);
   swap(a.lowered_expr_set_, b.lowered_expr_set_);
+  swap(a.lowered_origin_, b.lowered_origin_);
 
   for (auto val : a.lowered_val_set_) {
     val->fusion_ = &a;
@@ -140,15 +141,6 @@ Fusion::Fusion(const Fusion& other) {
 
   inputs_ = ir_cloner.clone(other.inputs_);
   outputs_ = ir_cloner.clone(other.outputs_);
-
-  // Lowered nodes
-  for (auto val : other.lowered_val_set_) {
-    lowered_val_set_.insert(ir_cloner.clone(val));
-  }
-
-  for (auto expr : other.lowered_expr_set_) {
-    lowered_expr_set_.insert(ir_cloner.clone(expr));
-  }
 }
 
 Fusion::Fusion(Fusion&& other) noexcept {
@@ -208,6 +200,7 @@ void Fusion::clear() noexcept {
   }
   lowered_val_set_.clear();
   lowered_expr_set_.clear();
+  lowered_origin_.clear();
 }
 
 void Fusion::removeExpr(Expr* expr) {

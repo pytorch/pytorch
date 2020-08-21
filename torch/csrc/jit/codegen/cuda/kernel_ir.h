@@ -30,9 +30,6 @@ class TORCH_CUDA_API NamedScalar : public Val {
   explicit NamedScalar(const fuser::NamedScalar* node)
       : Val(node), name_(node->name()) {}
 
-  NamedScalar(const NamedScalar* src, IrCloner* ir_cloner)
-      : Val(src, ir_cloner), name_(src->name_) {}
-
   const std::string& name() const {
     return name_;
   }
@@ -64,9 +61,6 @@ class TORCH_CUDA_API Bool : public Val {
   explicit Bool(const fuser::Bool* node)
       : Val(node), maybe_value_(node->value()) {}
 
-  Bool(const Bool* src, IrCloner* ir_cloner)
-      : Val(src, ir_cloner), maybe_value_(src->maybe_value_) {}
-
   bool isSymbolic() const {
     return !(maybe_value_.has_value());
   }
@@ -92,9 +86,6 @@ class TORCH_CUDA_API Float : public Val {
   explicit Float(const fuser::Float* node)
       : Val(node), maybe_value_(node->value()) {}
 
-  Float(const Float* src, IrCloner* ir_cloner)
-      : Val(src, ir_cloner), maybe_value_(src->maybe_value_) {}
-
   bool isSymbolic() const {
     return !(maybe_value_.has_value());
   }
@@ -117,9 +108,6 @@ class TORCH_CUDA_API Half : public Val {
 
   explicit Half(const fuser::Half* node)
       : Val(node), maybe_value_(node->value()) {}
-
-  Half(const Half* src, IrCloner* ir_cloner)
-      : Val(src, ir_cloner), maybe_value_(src->maybe_value_) {}
 
   bool isSymbolic() const {
     return !(maybe_value_.has_value());
@@ -146,9 +134,6 @@ class TORCH_CUDA_API Int : public Val {
   explicit Int(const fuser::Int* node, bool /*avoid_zero_ambiguity*/)
       : Val(node), maybe_value_(node->value()) {}
 
-  Int(const Int* src, IrCloner* ir_cloner)
-      : Val(src, ir_cloner), maybe_value_(src->maybe_value_) {}
-
   bool isSymbolic() const {
     return !(maybe_value_.has_value());
   }
@@ -168,8 +153,6 @@ class TORCH_CUDA_API IterDomain : public Val {
   IterDomain(Val* start, Val* extent);
 
   explicit IterDomain(const fuser::IterDomain* iter_domain);
-
-  IterDomain(const IterDomain* src, IrCloner* ir_cloner);
 
   bool isReduction() const {
     return getIterType() == IterType::Reduction;
@@ -237,8 +220,6 @@ class TORCH_CUDA_API TensorDomain : public Val {
 
   explicit TensorDomain(const fuser::TensorDomain* tensor_domain);
 
-  TensorDomain(const TensorDomain* src, IrCloner* ir_cloner);
-
   std::vector<IterDomain*>::size_type nDims() const {
     return domain_.size();
   }
@@ -304,8 +285,6 @@ class TORCH_CUDA_API TensorView : public Val {
  public:
   explicit TensorView(const fuser::TensorView* tv);
 
-  TensorView(const TensorView* src, IrCloner* ir_cloner);
-
   TensorDomain* domain() const {
     return domain_;
   }
@@ -331,8 +310,6 @@ class TORCH_CUDA_API UnaryOp : public Expr {
  public:
   UnaryOp(UnaryOpType type, Val* out, Val* in);
 
-  UnaryOp(const UnaryOp* src, IrCloner* ir_cloner);
-
   Val* out() const {
     return out_;
   }
@@ -354,8 +331,6 @@ class TORCH_CUDA_API UnaryOp : public Expr {
 class TORCH_CUDA_API BinaryOp : public Expr {
  public:
   BinaryOp(BinaryOpType type, Val* out, Val* lhs, Val* rhs);
-
-  BinaryOp(const BinaryOp* src, IrCloner* ir_cloner);
 
   Val* out() const {
     return out_;
@@ -383,8 +358,6 @@ class TORCH_CUDA_API BinaryOp : public Expr {
 class TORCH_CUDA_API TernaryOp : public Expr {
  public:
   TernaryOp(TernaryOpType type, Val* out, Val* in1, Val* in2, Val* in3);
-
-  TernaryOp(const TernaryOp* src, IrCloner* ir_cloner);
 
   Val* out() const {
     return out_;
@@ -417,8 +390,6 @@ class TORCH_CUDA_API TernaryOp : public Expr {
 class TORCH_CUDA_API ReductionOp : public Expr {
  public:
   ReductionOp(BinaryOpType reduction_op_type, Val* init, Val* out, Val* in);
-
-  ReductionOp(const ReductionOp* src, IrCloner* ir_cloner);
 
   Val* out() const {
     return out_;
@@ -453,8 +424,6 @@ class TORCH_CUDA_API TensorIndex : public Val {
  public:
   TensorIndex(const fuser::TensorView* view, std::vector<Val*> indices);
 
-  TensorIndex(const TensorIndex* src, IrCloner* ir_cloner);
-
   std::vector<Val*>::size_type nDims() const {
     return indices_.size();
   }
@@ -479,8 +448,6 @@ class TORCH_CUDA_API TensorIndex : public Val {
 class TORCH_CUDA_API BroadcastOp : public Expr {
  public:
   BroadcastOp(Val* out, Val* in);
-
-  BroadcastOp(const BroadcastOp* src, IrCloner* ir_cloner);
 
   Val* out() const {
     return out_;
@@ -509,8 +476,6 @@ class TORCH_CUDA_API Allocate : public Expr {
       MemoryType memory_type = MemoryType::Local,
       Val* size = nullptr);
 
-  Allocate(const Allocate* src, IrCloner* ir_cloner);
-
   Val* buffer() const {
     return buffer_;
   }
@@ -537,13 +502,11 @@ class TORCH_CUDA_API Allocate : public Expr {
 class TORCH_CUDA_API Sync : public Expr {
  public:
   Sync();
-  Sync(const Sync* src, IrCloner* ir_cloner);
 };
 
 class TORCH_CUDA_API Scope {
  public:
   Scope() = default;
-  Scope(const Scope* src, IrCloner* ir_cloner);
 
   const std::vector<Expr*>& exprs() const {
     return exprs_;
@@ -605,8 +568,6 @@ class TORCH_CUDA_API ForLoop : public Expr {
       const std::vector<Expr*>& body = {},
       Expr* parent_scope = nullptr);
 
-  ForLoop(const ForLoop* src, IrCloner* ir_cloner);
-
   Val* index() const {
     return index_;
   }
@@ -647,8 +608,6 @@ class TORCH_CUDA_API IfThenElse : public Expr {
       const std::vector<Expr*>& if_body = {},
       const std::vector<Expr*>& else_body = {},
       Expr* parent_scope = nullptr);
-
-  IfThenElse(const IfThenElse* src, IrCloner* ir_cloner);
 
   Bool* cond() const {
     return cond_;
@@ -699,8 +658,6 @@ class TORCH_CUDA_API GridReduction : public Expr {
       ReductionOp* reduction_op,
       Allocate* reduction_buffer,
       Allocate* sync_buffer);
-
-  GridReduction(const GridReduction* src, IrCloner* ir_cloner);
 
   ReductionOp* reduction_op() const {
     return reduction_op_;
