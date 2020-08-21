@@ -382,7 +382,9 @@ class BatchNorm(QuantizeHandler):
             load_arg(quantized=[0])(self.bn_node.args),
             load_arg(quantized=False)(self.bn_node.kwargs))
 
+@register_quant_pattern(torch.nn.ELU)
 @register_quant_pattern(torch.nn.Hardswish)
+@register_quant_pattern(torch.nn.functional.elu)
 @register_quant_pattern(torch.nn.functional.hardswish)
 class DefaultNode(QuantizeHandler):
     ''' Common quantized op, first input and first output will be quantized
