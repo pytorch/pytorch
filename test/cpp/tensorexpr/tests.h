@@ -128,6 +128,9 @@ namespace jit {
   _(ConstantFoldMinMax)                     \
   _(ConstantFoldIntrinsics)                 \
   _(ConstantFoldWithVar)                    \
+  _(ConditionalSelectFoldSimple)            \
+  _(ConditionalSelectFoldTwoLayer)          \
+  _(ConditionalSelectFoldWithVar)           \
   _(UnFoldableExpr)                         \
   _(HashSimple)                             \
   _(HashEquivalence)                        \

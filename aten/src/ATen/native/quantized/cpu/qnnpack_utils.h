@@ -7,6 +7,7 @@
 
 #include <ATen/native/quantized/cpu/conv_packed_params.h>
 #include <ATen/native/quantized/cpu/packed_params.h>
+#include <ATen/native/utils/Factory.h>
 
 #include <utility>
 
@@ -36,7 +37,8 @@ struct PackedLinearWeightsQnnp : public LinearPackedParamsBase {
       std::vector<uint8_t>&& w_zps)
       : w(std::move(w)),
         orig_weight(std::move(orig_weight)),
-        bias_(std::move(bias)),
+        bias_(at::native::mobile::allocate_padded_contiguous_if_needed(
+            bias, bias.suggest_memory_format())),
         input_scale(std::move(input_scale)),
         w_scales(w_scales),
         w_zero_points(std::move(w_zps)) {}

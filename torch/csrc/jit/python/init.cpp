@@ -563,6 +563,16 @@ void initJITBindings(PyObject* module) {
           "_jit_pass_remove_dropout",
           [](script::Module& module) { return removeDropout(module); })
       .def(
+          "_jit_pass_transform_conv1d_to_conv2d",
+          [](std::shared_ptr<Graph>& graph) {
+            return transformConv1dToConv2d(graph);
+          })
+      .def(
+          "_jit_pass_transform_conv1d_to_conv2d",
+          [](script::Module& module) {
+            return transformConv1dToConv2d(module);
+          })
+      .def(
           "_jit_pass_insert_prepacked_ops",
           [](std::shared_ptr<Graph>& graph) {
             return insertPrePackedOps(graph);
@@ -972,6 +982,10 @@ void initJITBindings(PyObject* module) {
           "done",
           // Intentionally not releasing GIL
           &PythonFutureWrapper::done)
+      .def(
+          "value",
+          &PythonFutureWrapper::value,
+          py::call_guard<py::gil_scoped_release>())
       .def(
           "wait",
           &PythonFutureWrapper::wait,

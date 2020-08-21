@@ -269,7 +269,11 @@ Tensor & detach_(Tensor & self) {
                    "of detach_(). Alternatively, create this view with an "
                    "`unsafe_` version of the function that produced it.");
     } else {
-      AT_ERROR("Can't detach views in-place. Use detach() instead");
+      AT_ERROR("If you are using DistributedDataParallel (DDP) for training, "
+               "gradients are views of DDP buckets, and hence detach_() cannot "
+               "be called on these gradients. To fix this error, please refer "
+               "to the Optimizer.zero_grad() function "
+               "in torch/optim/optimizer.py as the solution.");
     }
   }
   // I think the choice here is conservative.  In principle, doing
