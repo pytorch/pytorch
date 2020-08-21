@@ -400,7 +400,7 @@ Tensor& mm_cpu_out(Tensor & result, const Tensor & self, const Tensor & mat2) {
   using namespace xnnpack::internal;
   if (self.scalar_type() == at::kFloat && mat2.scalar_type() == at::kFloat
       && !self.requires_grad() && !mat2.requires_grad()
-      && mat2.t().contiguous().size(Layout::Filter::input) > 0 && mat2.t().contiguous().size(Layout::Filter::output) > 0)) {
+      && mat2.t().contiguous().size(Layout::Filter::input) > 0 && mat2.t().contiguous().size(Layout::Filter::output) > 0) {
     result.resize_({self.size(0), mat2.size(1)});
     result.copy_(xnnpack::linear(self, mat2.t(), {}));
     return result;
