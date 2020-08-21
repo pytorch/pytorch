@@ -144,10 +144,6 @@ commands:
         default: ""
     steps:
       - run:
-          name: "Binary Size - Set Python Version"
-          no_output_timeout: "1m"
-          command: pyenv global 3.7.0
-      - run:
           name: "Binary Size - Install Dependencies"
           no_output_timeout: "5m"
           command: |
