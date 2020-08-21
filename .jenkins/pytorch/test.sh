@@ -47,8 +47,9 @@ fi
 if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]] && [[ "$BUILD_ENVIRONMENT" != *-bazel-* ]] ; then
   # JIT C++ extensions require ninja.
   pip_install --user ninja
-  # ninja is installed in /var/lib/jenkins/.local/bin
-  export PATH="/var/lib/jenkins/.local/bin:$PATH"
+  # ninja is installed in $HOME/.local/bin, e.g., /var/lib/jenkins/.local/bin for CI user jenkins
+  # but this script should be runnable by any user, including root
+  export PATH="$HOME/.local/bin:$PATH"
 
   # TODO: Please move this to Docker
   # The version is fixed to avoid flakiness: https://github.com/pytorch/pytorch/issues/31136
@@ -68,7 +69,7 @@ fi
 # ASAN test is not working
 if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     # Suppress vptr violations arising from multiple copies of pybind11
-    export ASAN_OPTIONS=detect_leaks=0:symbolize=1:strict_init_order=true
+    export ASAN_OPTIONS=detect_leaks=0:symbolize=1:strict_init_order=true:detect_odr_violation=0
     export UBSAN_OPTIONS=print_stacktrace=1:suppressions=$PWD/ubsan.supp
     export PYTORCH_TEST_WITH_ASAN=1
     export PYTORCH_TEST_WITH_UBSAN=1
@@ -133,17 +134,17 @@ test_python_nn() {
 }
 
 test_python_ge_config_profiling() {
-  time python test/run_test.py --include test_jit_profiling test_jit_fuser_te --verbose --determine-from="$DETERMINE_FROM"
+  time python test/run_test.py --include test_jit_cuda_fuser_profiling test_jit_profiling test_jit_fuser_te test_tensorexpr --verbose --determine-from="$DETERMINE_FROM"
   assert_git_not_dirty
 }
 
 test_python_ge_config_legacy() {
-  time python test/run_test.py --include test_jit_legacy test_jit_fuser_legacy --verbose --determine-from="$DETERMINE_FROM"
+  time python test/run_test.py --include test_jit_cuda_fuser_legacy test_jit_legacy test_jit_fuser_legacy --verbose --determine-from="$DETERMINE_FROM"
   assert_git_not_dirty
 }
 
-test_python_all_except_nn() {
-  time python test/run_test.py --exclude test_nn test_jit_profiling test_jit_legacy test_jit_fuser_legacy test_jit_fuser_te test_tensorexpr --verbose --determine-from="$DETERMINE_FROM"
+test_python_all_except_nn_and_cpp_extensions() {
+  time python test/run_test.py --exclude test_jit_cuda_fuser_profiling test_jit_cuda_fuser_legacy test_nn test_jit_profiling test_jit_legacy test_jit_fuser_legacy test_jit_fuser_te test_tensorexpr --verbose --determine-from="$DETERMINE_FROM"
   assert_git_not_dirty
 }
 
@@ -172,9 +173,20 @@ test_aten() {
   fi
 }
 
-test_torchvision() {
-  pip_install --user git+https://github.com/pytorch/vision.git@43e94b39bcdda519c093ca11d99dfa2568aa7258
-}
+# pytorch extensions require including torch/extension.h which includes all.h
+# which includes utils.h which includes Parallel.h.
+# So you can call for instance parallel_for() from your extension,
+# but the compilation will fail because of Parallel.h has only declarations
+# and definitions are conditionally included Parallel.h(see last lines of Parallel.h).
+# I tried to solve it #39612 and #39881 by including Config.h into Parallel.h
+# But if Pytorch is built with TBB it provides Config.h
+# that has AT_PARALLEL_NATIVE_TBB=1(see #3961 or #39881) and it means that if you include
+# torch/extension.h which transitively includes Parallel.h
+# which transitively includes tbb.h which is not available!
+if [[ "${BUILD_ENVIRONMENT}" == *tbb* ]]; then
+  sudo mkdir -p /usr/include/tbb
+  sudo cp -r $PWD/third_party/tbb/include/tbb/* /usr/include/tbb
+fi
 
 test_libtorch() {
   if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
@@ -196,6 +208,43 @@ test_libtorch() {
     wait
     OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" build/bin/test_api --gtest_output=xml:test/test-reports/cpp-unittest/test_api.xml
     build/bin/test_tensorexpr --gtest_output=xml:test/test-reports/cpp-unittests/test_tensorexpr.xml
+    assert_git_not_dirty
+  fi
+}
+
+test_distributed() {
+  if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+    echo "Testing distributed C++ tests"
+    mkdir -p test/test-reports/cpp-distributed
+    build/bin/FileStoreTest --gtest_output=xml:test/test-reports/cpp-distributed/FileStoreTest.xml
+    build/bin/HashStoreTest --gtest_output=xml:test/test-reports/cpp-distributed/HashStoreTest.xml
+    build/bin/TCPStoreTest --gtest_output=xml:test/test-reports/cpp-distributed/TCPStoreTest.xml
+
+    build/bin/ProcessGroupGlooTest --gtest_output=xml:test/test-reports/cpp-distributed/ProcessGroupGlooTest.xml
+    build/bin/ProcessGroupNCCLTest --gtest_output=xml:test/test-reports/cpp-distributed/ProcessGroupNCCLTest.xml
+    build/bin/ProcessGroupNCCLErrorsTest --gtest_output=xml:test/test-reports/cpp-distributed/ProcessGroupNCCLErrorsTest.xml
+  fi
+}
+
+test_rpc() {
+    echo "Testing RPC C++ tests"
+    mkdir -p test/test-reports/cpp-rpc
+    build/bin/test_cpp_rpc --gtest_output=xml:test/test-reports/cpp-rpc/test_cpp_rpc.xml
+}
+
+test_custom_backend() {
+  if [[ "$BUILD_ENVIRONMENT" != *rocm* ]] && [[ "$BUILD_ENVIRONMENT" != *asan* ]] ; then
+    echo "Testing custom backends"
+    CUSTOM_BACKEND_BUILD="$PWD/../custom-backend-build"
+    pushd test/custom_backend
+    cp -a "$CUSTOM_BACKEND_BUILD" build
+    # Run tests Python-side and export a lowered module.
+    python test_custom_backend.py -v
+    python backend.py --export-module-to=model.pt
+    # Run tests C++-side and load the exported lowered module.
+    build/test_custom_backend ./model.pt
+    rm -f ./model.pt
+    popd
     assert_git_not_dirty
   fi
 }
@@ -253,10 +302,15 @@ test_xla() {
 test_backward_compatibility() {
   set -x
   pushd test/backward_compatibility
-  python dump_all_function_schemas.py --filename new_schemas.txt
-  pip_uninstall torch
+  python -m venv venv
+  . venv/bin/activate
   pip_install --pre torch -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html
-  python check_backward_compatibility.py --new-schemas new_schemas.txt
+  pip show torch
+  python dump_all_function_schemas.py --filename nightly_schemas.txt
+  deactivate
+  rm -r venv
+  pip show torch
+  python check_backward_compatibility.py --existing-schemas nightly_schemas.txt
   popd
   set +x
   assert_git_not_dirty
@@ -267,10 +321,22 @@ test_bazel() {
 
   get_bazel
 
-  tools/bazel test --test_output=all --test_tag_filters=-gpu-required --test_filter=-*CUDA :all_tests
+  tools/bazel test --test_timeout=480 --test_output=all --test_tag_filters=-gpu-required --test_filter=-*CUDA :all_tests
 }
 
-test_cpp_extension() {
+test_benchmarks() {
+  if [[ "$BUILD_ENVIRONMENT" == *cuda* && "$BUILD_ENVIRONMENT" != *nogpu* ]]; then
+    pip_install --user "pytest-benchmark==3.2.3"
+    pip_install --user "requests"
+    BENCHMARK_DATA="benchmarks/.data"
+    mkdir -p ${BENCHMARK_DATA}
+    pytest benchmarks/fastrnns/test_bench.py --benchmark-sort=Name --benchmark-json=${BENCHMARK_DATA}/fastrnns.json
+    python benchmarks/upload_scribe.py --pytest_bench_json ${BENCHMARK_DATA}/fastrnns.json
+    assert_git_not_dirty
+  fi
+}
+
+test_cpp_extensions() {
   # This is to test whether cpp extension build is compatible with current env. No need to test both ninja and no-ninja build
   time python test/run_test.py --include test_cpp_extensions_aot_ninja --verbose --determine-from="$DETERMINE_FROM"
   assert_git_not_dirty
@@ -285,7 +351,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *backward* ]]; then
   test_backward_compatibility
   # Do NOT add tests after bc check tests, see its comment.
 elif [[ "${BUILD_ENVIRONMENT}" == *xla* || "${JOB_BASE_NAME}" == *xla* ]]; then
-  test_torchvision
+  install_torchvision
   test_xla
 elif [[ "${BUILD_ENVIRONMENT}" == *ge_config_legacy* || "${JOB_BASE_NAME}" == *ge_config_legacy* ]]; then
   test_python_ge_config_legacy
@@ -296,25 +362,32 @@ elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
   echo "no-op at the moment"
 elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${JOB_BASE_NAME}" == *-test1 ]]; then
   test_python_nn
+  test_cpp_extensions
 elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 ]]; then
-  test_torchvision
-  test_python_all_except_nn
+  install_torchvision
+  test_python_all_except_nn_and_cpp_extensions
   test_aten
   test_libtorch
   test_custom_script_ops
+  test_custom_backend
   test_torch_function_benchmark
 elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   test_bazel
 elif [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc5.4* ]]; then
-  # test cpp extension for xenial + cuda 9.2 + gcc 5.4 to make sure 
-  # cpp extension can be built correctly under this old env 
-  test_cpp_extension
+  # test cpp extension for xenial + cuda 9.2 + gcc 5.4 to make sure
+  # cpp extension can be built correctly under this old env
+  test_cpp_extensions
 else
-  test_torchvision
+  install_torchvision
   test_python_nn
-  test_python_all_except_nn
+  test_python_all_except_nn_and_cpp_extensions
+  test_cpp_extensions
   test_aten
   test_libtorch
   test_custom_script_ops
+  test_custom_backend
   test_torch_function_benchmark
+  test_distributed
+  test_benchmarks
+  test_rpc
 fi

@@ -33,6 +33,40 @@ class TestSparseToDense(TestCase):
         self.assertEqual(output.shape, expected.shape)
         np.testing.assert_array_equal(output, expected)
 
+    def test_sparse_to_dense_shape_inference(self):
+        indices = np.array([2, 4, 999, 2], dtype=np.int32)
+        values = np.array([[1, 2], [2, 4], [6, 7], [7, 8]], dtype=np.int32)
+        data_to_infer_dim = np.array(np.zeros(1500, ), dtype=np.int32)
+        op = core.CreateOperator(
+            'SparseToDense',
+            ['indices', 'values', 'data_to_infer_dim'],
+            ['output'])
+        workspace.FeedBlob('indices', indices)
+        workspace.FeedBlob('values', values)
+        workspace.FeedBlob('data_to_infer_dim', data_to_infer_dim)
+
+        net = core.Net("sparse_to_dense")
+        net.Proto().op.extend([op])
+        shapes, types = workspace.InferShapesAndTypes(
+            [net],
+            blob_dimensions={
+                "indices": indices.shape,
+                "values": values.shape,
+                "data_to_infer_dim": data_to_infer_dim.shape,
+            },
+            blob_types={
+                "indices": core.DataType.INT32,
+                "values": core.DataType.INT32,
+                "data_to_infer_dim": core.DataType.INT32,
+            },
+        )
+        assert (
+            "output" in shapes and "output" in types
+        ), "Failed to infer the shape or type of output"
+        self.assertEqual(shapes["output"], [1500, 2])
+        self.assertEqual(types["output"], core.DataType.INT32)
+
+
     def test_sparse_to_dense_invalid_inputs(self):
         op = core.CreateOperator(
             'SparseToDense',

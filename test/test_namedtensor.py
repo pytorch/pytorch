@@ -116,8 +116,15 @@ class TestNamedTensor(TestCase):
         x = factory(1, 2, 3, names=('N', None, 'D'), device=device)
         self.assertEqual(x.names, ('N', None, 'D'))
 
+        x = factory(1, 2, 3, names=('_1', 'batch9', 'BATCH_5'), device=device)
+        self.assertEqual(x.names, ('_1', 'batch9', 'BATCH_5'))
+
         with self.assertRaisesRegex(RuntimeError,
-                                    'must contain alphabetical characters and/or underscore'):
+                                    'a valid identifier contains only'):
+            x = factory(2, names=('1',), device=device)
+
+        with self.assertRaisesRegex(RuntimeError,
+                                    'a valid identifier contains only'):
             x = factory(2, names=('?',), device=device)
 
         with self.assertRaisesRegex(RuntimeError, 'Number of names'):
@@ -459,8 +466,8 @@ class TestNamedTensor(TestCase):
         # Test torch.full
         for device in torch.testing.get_all_device_types():
             names = ('N', 'T', 'D')
-            result = torch.full([1, 2, 3], 2, names=names, device=device)
-            expected = torch.full([1, 2, 3], 2, device=device).rename_(*names)
+            result = torch.full([1, 2, 3], 2., names=names, device=device)
+            expected = torch.full([1, 2, 3], 2., device=device).rename_(*names)
             self.assertTensorDataAndNamesEqual(result, expected)
 
     def test_tensor_from_lists(self):
@@ -1055,12 +1062,39 @@ class TestNamedTensor(TestCase):
             tensor.flatten(['H', 'D', 'W'], 'features')
 
     def test_unflatten(self):
-        tensor = torch.randn(7, 2 * 3 * 5, 11, names=('N', 'D', 'K'))
+        # test args: tensor, int, namedshape
+        self.assertTrue(torch.equal(
+            torch.ones(4).unflatten(0, (('A', 2), ('B', 2))),
+            torch.ones(2, 2, names=('A', 'B'))))
+        self.assertTrue(torch.equal(
+            torch.ones(4).unflatten(0, [('A', 2), ('B', 2)]),
+            torch.ones(2, 2, names=('A', 'B'))))
+        self.assertTrue(torch.equal(
+            torch.ones(4).unflatten(0, (['A', 2], ['B', 2])),
+            torch.ones(2, 2, names=('A', 'B'))))
+        self.assertTrue(torch.equal(
+            torch.ones(4).unflatten(-1, (['A', 2], ['B', 2])),
+            torch.ones(2, 2, names=('A', 'B'))))
 
-        # accepts iterable of tuples
-        out = tensor.unflatten('D', (('C', 2), ('H', 3), ('W', 5)))
-        self.assertEqual(out.names, ('N', 'C', 'H', 'W', 'K'))
-        self.assertEqual(out.shape, (7, 2, 3, 5, 11))
+        # test args: namedtensor, int, namedshape
+        self.assertTrue(torch.equal(
+            torch.ones(2, 4, names=('A', 'B')).unflatten(1, (('B1', 2), ('B2', 2))),
+            torch.ones(2, 2, 2, names=('A', 'B1', 'B2'))))
+
+        # test args: namedtensor, str, namedshape
+        self.assertTrue(torch.equal(
+            torch.ones(2, 4, names=('A', 'B')).unflatten('B', (('B1', 2), ('B2', 2))),
+            torch.ones(2, 2, 2, names=('A', 'B1', 'B2'))))
+
+        # test invalid args: namedtensor, str, sizes
+        with self.assertRaisesRegex(TypeError, r"received an invalid combination of arguments"):
+            torch.tensor([1], names=('A',)).unflatten('A', (1, 1))
+
+        # test invalid args: namedtensor, int, sizes
+        with self.assertRaisesRegex(RuntimeError, r"input is a named tensor but no names were given for unflattened sizes"):
+            torch.tensor([1], names=("A",)).unflatten(0, (1, 1))
+
+        tensor = torch.randn(7, 2 * 3 * 5, 11, names=('N', 'D', 'K'))
 
         # accepts OrderedDict
         out = tensor.unflatten('D', OrderedDict((('C', 2), ('H', 3), ('W', 5))))
@@ -1077,20 +1111,10 @@ class TestNamedTensor(TestCase):
         self.assertEqual(out.names, ('N', 'D', 'K', 'H'))
         self.assertEqual(out.shape, (7, 2 * 3 * 5, 11, 1))
 
-        # takes positional dim
-        out = tensor.unflatten(1, (('C', 2), ('H', 3), ('W', 5)))
-        self.assertEqual(out.names, ('N', 'C', 'H', 'W', 'K'))
-        self.assertEqual(out.shape, (7, 2, 3, 5, 11))
-
-        # takes negative positional dim
-        out = tensor.unflatten(-2, (('C', 2), ('H', 3), ('W', 5)))
-        self.assertEqual(out.names, ('N', 'C', 'H', 'W', 'K'))
-        self.assertEqual(out.shape, (7, 2, 3, 5, 11))
-
         with self.assertRaisesRegex(RuntimeError, "don't multiply up to"):
             tensor.unflatten('D', (('H', 3), ('W', 5)))
 
-        with self.assertRaisesRegex(RuntimeError, 'OrderedDict or iterable of tuples'):
+        with self.assertRaisesRegex(RuntimeError, 'sizes must be non-empty'):
             tensor.unflatten('D', None)
 
         with self.assertRaisesRegex(RuntimeError, 'non-empty'):
@@ -1388,7 +1412,7 @@ class TestNamedTensor(TestCase):
 
     def test_no_jit_tracer_support(self):
         def foo(x):
-            return torch.full(x.shape, 2, names=('N',))
+            return torch.full(x.shape, 2., names=('N',))
 
         with self.assertRaisesRegex(RuntimeError, 'not supported with the tracer'):
             x = torch.randn(3)

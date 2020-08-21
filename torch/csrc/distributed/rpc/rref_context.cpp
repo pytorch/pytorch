@@ -1,5 +1,6 @@
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #include <torch/csrc/distributed/rpc/rref_proto.h>
+#include <torch/csrc/distributed/rpc/utils.h>
 
 #include <sstream>
 
@@ -16,7 +17,9 @@ void confirmPendingUser(
     const FutureMessage& futureMessage,
     const ForkId& expectedForkId) {
   if (!futureMessage.hasError()) {
-    auto rr = RemoteRet::fromMessage(futureMessage.constValue());
+    auto msgType = futureMessage.constValue().type();
+    auto rpc = deserializeResponse(futureMessage.constValue(), msgType);
+    auto rr = dynamic_cast<RemoteRet*>(rpc.get());
     TORCH_INTERNAL_ASSERT(rr->forkId() == expectedForkId);
   } else {
     // Handle errors, such as timeouts, by invoking the error handler on the
@@ -53,7 +56,9 @@ c10::intrusive_ptr<RRef> finishCreatingOwnerRRef(
         ctx.delForkOfOwner(rref_ptr->rrefId(), rref_ptr->rrefId());
     return deletedRRef;
   } else {
-    auto rr = RemoteRet::fromMessage(futureMessage.constValue());
+    auto msgType = futureMessage.constValue().type();
+    auto rpc = deserializeResponse(futureMessage.constValue(), msgType);
+    auto rr = dynamic_cast<RemoteRet*>(rpc.get());
     TORCH_INTERNAL_ASSERT(
         rr->rrefId() == rr->forkId(),
         "Expecting an OwnerRRef as RemoteRet but got a fork.");
@@ -268,10 +273,14 @@ void RRefContext::delAllUsersAndUnforkedOwners(
     for (auto& rrefId : unforkedOwners) {
       LOG(INFO) << "Removing unforked OwnerRRef with RRefId: " << rrefId;
       auto iter = owners_.find(rrefId);
+      TORCH_CHECK(
+          iter != owners_.end(),
+          c10::str("Did not find OwnerRRef with RRefId: ", rrefId));
       owners_.erase(iter);
     }
   }
-  // Wait for Owners to process all delete UserRRef messages.
+  // Wait for this node to process all delete UserRRef messages it may get for
+  // the OwnerRRefs that exist on this node.
   {
     std::unique_lock<std::mutex> lock(mutex_);
     bool noOwner = deleteAllUsersCV_.wait_for(
@@ -339,11 +348,11 @@ c10::intrusive_ptr<OwnerRRef> RRefContext::getOrCreateOwnerRRef(
           ownerRRef->type()->repr_str());
     } else {
       TORCH_INTERNAL_ASSERT(
-          ownerRRef->type() == type,
+          *ownerRRef->type() == *type,
           "OwnerRRef type is ",
           ownerRRef->type()->repr_str(),
           ", expected type is ",
-          type);
+          type->repr_str());
     }
     return ownerRRef;
   }

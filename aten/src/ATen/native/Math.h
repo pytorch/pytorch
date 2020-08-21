@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdlib>
+#include <cstdint>
 #include <cmath>
 #include <cfloat>
 #include <limits>
@@ -112,6 +113,86 @@ Date:  February 1996
 
 #undef CENTRAL_RANGE
 
+/*
+ * The following function comes with the following copyright notice.
+ * It has been released under the BSD license.
+ *
+ * Cephes Math Library Release 2.8:  June, 2000
+ * Copyright 1984, 1987, 1992, 2000 by Stephen L. Moshier
+ */
+
+static inline double zeta(double x, double q) {
+  static double MACHEP = 1.11022302462515654042E-16;
+  static double A[] = {
+      12.0,
+      -720.0,
+      30240.0,
+      -1209600.0,
+      47900160.0,
+      -1.8924375803183791606e9, /*1.307674368e12/691*/
+      7.47242496e10,
+      -2.950130727918164224e12, /*1.067062284288e16/3617*/
+      1.1646782814350067249e14, /*5.109094217170944e18/43867*/
+      -4.5979787224074726105e15, /*8.028576626982912e20/174611*/
+      1.8152105401943546773e17, /*1.5511210043330985984e23/854513*/
+      -7.1661652561756670113e18 /*1.6938241367317436694528e27/236364091*/
+  };
+
+  int i = 0;
+  double a, b, k, s, t, w;
+  if (x == 1.0) {
+    return INFINITY;
+  }
+
+  if (x < 1.0) {
+    return std::numeric_limits<double>::quiet_NaN();
+  }
+
+  if (q <= 0.0) {
+    if (q == floor(q)) {
+      return INFINITY;
+    }
+    if (x != floor(x)) {
+      return std::numeric_limits<double>::quiet_NaN();
+    }
+  }
+
+  s = std::pow(q, -x);
+  a = q;
+  i = 0;
+  b = 0.0;
+  while ((i < 9) || (a <= 9.0)) {
+    i += 1;
+    a += 1.0;
+    b = std::pow(a, -x);
+    s += b;
+    if ((-MACHEP * s < b) && (b < MACHEP * s)) {
+      return s;
+    }
+  };
+
+  w = a;
+  s += b * w / (x - 1.0);
+  s -= 0.5 * b;
+  a = 1.0;
+  k = 0.0;
+  for (int i = 0; i < 12; i++) {
+    a *= x + k;
+    b /= w;
+    t = a * b / A[i];
+    s = s + t;
+    t = std::abs(t / s);
+    if (t < MACHEP) {
+      return s;
+    }
+    k += 1.0;
+    a *= x + k;
+    b /= w;
+    k += 1.0;
+  }
+  return s;
+}
+
 static inline double polevl(double x, double *A, size_t len) {
   double result = 0;
   for (size_t i = 0; i <= len; i++) {
@@ -170,6 +251,7 @@ static inline float trigamma(float x) {
  * Cephes Math Library Release 2.8:  June, 2000
  * Copyright 1984, 1987, 1992, 2000 by Stephen L. Moshier
  */
+
 static inline double calc_digamma(double x) {
   static double PSI_10 = 2.25175258906672110764;
   if (x == 0) {
@@ -266,4 +348,39 @@ static inline float calc_digamma(float x) {
   return result + logf(x) - (0.5f / x) - y;
 }
 
+static inline double calc_polygamma(int64_t n, double x) {
+  // already blocked if n <= 1
+  return ((n % 2) ? 1.0 : -1.0) * std::exp(lgamma(double(n) + 1.0)) *
+      zeta(double(n + 1), x);
+}
+
+static inline float calc_polygamma(int64_t n, float x) {
+  // already blocked if n <= 1
+  return ((n % 2) ? 1.0f : -1.0f) * std::exp(lgamma(double(n) + 1.0)) *
+      zeta(double(n + 1), x);
+}
+
 inline c10::BFloat16 calc_erfinv(c10::BFloat16 a) { return calc_erfinv(float(a)); }
+
+template <typename T>
+static T abs_impl(T v) {
+  return std::abs(v);
+}
+
+template <>
+uint8_t abs_impl(uint8_t v) {
+  return v;
+}
+
+template <typename T>
+static inline typename std::enable_if<std::is_integral<T>::value, T>::type
+calc_gcd(T a, T b) {
+  a = abs_impl(a);
+  b = abs_impl(b);
+  while (a != 0) {
+    T c = a;
+    a = b % a;
+    b = c;
+  }
+  return b;
+}

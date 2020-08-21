@@ -61,7 +61,7 @@ TypePtr tryInferTypeWithTypeHint(
         "The RRef being created contains a ScriptModule, "
         "must provide its ModuleInterface type hint. ");
     c10::QualifiedName type_qualified_name = c10::QualifiedName(
-        py::cast<std::string>(py::module::import("torch.jit")
+        py::cast<std::string>(py::module::import("torch._jit_internal")
                                   .attr("_qualified_name")(type_hint)));
     TypePtr type_hint_ptr =
         jit::get_python_cu()->get_interface(type_qualified_name);
@@ -182,11 +182,16 @@ py::object PyRRef::toHere(const float timeoutSeconds) const {
 py::object PyRRef::localValue() const {
   TORCH_CHECK(
       rref_->isOwner(),
-      "Cannot call localValue() on a non-local reference. Call it on ",
-      owner().name_);
+      "For ",
+      *rref_,
+      ", can't call localValue() on user ",
+      RRefContext::getInstance().agent()->getWorkerInfo(),
+      ". Call it on owner ",
+      owner());
 
   py::object res;
-  auto value = c10::static_intrusive_pointer_cast<OwnerRRef>(rref_)->getValue();
+  auto value =
+      c10::static_intrusive_pointer_cast<const OwnerRRef>(rref_)->getValue();
   auto& rpcHandler = PythonRpcHandler::getInstance();
   {
     // acquiring GIL as torch::jit::toPyObject creates new py::object without

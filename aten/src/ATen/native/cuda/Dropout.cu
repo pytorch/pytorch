@@ -160,12 +160,12 @@ fused_dropout_kernel(cuda::detail::TensorInfo<scalar_t, IndexType> a,
 
 template<typename scalar_t, typename accscalar_t>
 void masked_scale_kernel(at::Tensor& ret, const at::Tensor src, const at::Tensor mask, accscalar_t scale){
-   auto iter = at::TensorIterator();
-   iter.check_all_same_dtype(false);
-   iter.add_output(ret);
-   iter.add_input(src);
-   iter.add_input(mask);
-   iter.build();
+   auto iter = at::TensorIteratorConfig()
+     .check_all_same_dtype(false)
+     .add_output(ret)
+     .add_input(src)
+     .add_input(mask)
+     .build();
 
    at::native::gpu_kernel(
        iter,

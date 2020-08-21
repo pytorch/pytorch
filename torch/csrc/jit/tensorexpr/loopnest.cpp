@@ -287,7 +287,6 @@ class Vectorizer : public IRMutator {
 
   bool vectorize_inputs(std::vector<const Expr*>& inputs) {
     bool any_vectorized = false;
-    bool all_vectorized = true;
     std::vector<const Expr*> new_inputs;
 
     // Attempt to vectorize each input.
@@ -296,8 +295,6 @@ class Vectorizer : public IRMutator {
       new_inputs.push_back(new_in);
       if (new_in != in) {
         any_vectorized = true;
-      } else {
-        all_vectorized = false;
       }
     }
 
@@ -571,9 +568,16 @@ class RandomInliner : public FunctionInliner {
       b = new Block({s});
     }
 
+    // Make sure theres something in the block, will be simplified out later.
+    if (b->empty()) {
+      b->append_stmt(new Block({}));
+    }
+
+    Stmt* first = b->stmts().front();
     for (auto const& p : random_vars_) {
       Var* v = p.second;
-      b->add_var_binding(v, new Intrinsics(kRand, v->dtype()));
+      b->insert_stmt_before(
+          new Let(v, new Intrinsics(kRand, v->dtype())), first);
     }
     random_vars_.clear();
     return b;
@@ -949,7 +953,8 @@ void LoopNest::splitWithTail(
       Substitute(Stmt::clone(f->body()), {{f->var(), combined_index1}});
 
   *inner = new For(i_inner, new IntImm(0), factor_expr, body_inner);
-  *outer = new For(i_outer, new IntImm(0), split_count, *inner);
+  *outer =
+      new For(i_outer, new IntImm(0), split_count, *inner, f->loop_options());
 
   // TODO: cleanup API for adding/removing statements
   p->replace_stmt(f, *outer);
@@ -1023,7 +1028,8 @@ void LoopNest::splitWithMask(For* f, int factor, For** outer, For** inner) {
   body_inner = Substitute(body_inner, {{f->var(), combined_index}});
 
   *inner = new For(i_inner, new IntImm(0), factor_expr, body_inner);
-  *outer = new For(i_outer, new IntImm(0), split_count, *inner);
+  *outer =
+      new For(i_outer, new IntImm(0), split_count, *inner, f->loop_options());
 
   // TODO: cleanup API for adding/removing statements
   p->replace_stmt(f, *outer);
@@ -1085,7 +1091,7 @@ void LoopNest::reorderAxis(For* a, For* b) {
   CHECK(root);
 
   // Do a shallow copy of the inner blocks.
-  Block* body = new Block(inner->body()->varBindings(), {});
+  Block* body = new Block({});
   body->splice(body->end(), inner->body());
 
   For* before{outer};
@@ -1165,6 +1171,38 @@ void LoopNest::reorderAxis(For* a, For* b) {
     root->insert_stmt_after(after, newInner);
   }
 } // namespace tensorexpr
+
+void LoopNest::unroll(For* f, Stmt** unrolled) {
+  Block* p = dynamic_cast<Block*>(f->get_parent());
+  if (!f) {
+    throw malformed_input("unroll attempted on null loop");
+  } else if (!p) {
+    throw malformed_input("unroll attempted on loop with no parent");
+  }
+
+  if (!f->start()->isConstant()) {
+    throw std::runtime_error("Can't unroll due to non-constant loop start!");
+  }
+  if (!f->stop()->isConstant()) {
+    throw std::runtime_error("Can't unroll due to non-constant loop stop!");
+  }
+
+  std::vector<Stmt*> unrolled_stmts;
+  int start_val = immediateAs<int>(f->start());
+  int stop_val = immediateAs<int>(f->stop());
+  for (int current = start_val; current < stop_val; ++current) {
+    for (const auto stmt : f->body()->stmts()) {
+      auto stmt_copy = Stmt::clone(stmt);
+      unrolled_stmts.push_back(Substitute(
+          stmt_copy,
+          {{f->var(), getImmediateByType(f->var()->dtype(), current)}}));
+    }
+  }
+  *unrolled = new Block(unrolled_stmts);
+  *unrolled = IRSimplifier::simplify(*unrolled);
+
+  p->replace_stmt(f, *unrolled);
+}
 
 std::vector<For*> LoopNest::getLoopStmtsFor(Tensor* t) const {
   std::vector<For*> result;
@@ -1386,10 +1424,13 @@ void LoopNest::computeAt(Stmt* s, For* f) {
   // exit early.
   TensorAccessBoundsInfo store_bounds_info;
   bool found = false;
-  for (const TensorAccessBoundsInfo& p : loop_bounds_info) {
-    if (p.buf == st->buf()) {
-      store_bounds_info = p;
-      found = true;
+  for (const auto& pair : loop_bounds_info) {
+    const Buf* buf = pair.first;
+    for (const TensorAccessBoundsInfo& p : pair.second) {
+      if (buf == st->buf()) {
+        store_bounds_info = p;
+        found = true;
+      }
     }
   }
   if (!found) {
@@ -1452,8 +1493,7 @@ void LoopNest::computeAt(Stmt* s, For* f) {
   f->body()->prepend_stmt(bd);
 
   // Rewrite accesses to producer in consumer with accesses to temp
-  LoopComputeAtRewriter lr(
-      store_bounds_info.buf, temp_buf, store_bounds_info.start);
+  LoopComputeAtRewriter lr(st->buf(), temp_buf, store_bounds_info.start);
   Stmt* new_f = f->accept_mutator(&lr);
   if (f != new_f) {
     Block* bb = dynamic_cast<Block*>(f->get_parent());
@@ -1529,12 +1569,15 @@ void LoopNest::rfactor(
 
   // Store loops below the target point.
   std::vector<const For*> output_loops;
+  bool output_contains_target = false;
 
   while (st) {
     if (For* f = dynamic_cast<For*>(st)) {
       if (f->var() == reduction_var) {
         target_for = f;
-        output_loops.push_back(f);
+      } else if (target_for && !output_contains_target) {
+        output_loops.push_back(target_for);
+        output_contains_target = true;
       }
       if (reduce_args.count(f->var())) {
         reduce_args.erase(f->var());
@@ -1631,13 +1674,16 @@ void LoopNest::rfactor(
   // buffer input with the temporary output buffer and removing other reductions
   // variables.
   SwapReduce sr(reduce_op, first_reduce);
-  auto root_block = dynamic_cast<Block*>(root_stmt());
-  auto parent_block = dynamic_cast<Block*>(root_for->get_parent());
+  Block* root_block = dynamic_cast<Block*>(root_stmt());
+  Block* parent_block = dynamic_cast<Block*>(root_for->get_parent());
   if (!parent_block) {
     std::cerr << "Cannot rfactor a loop whose parent is not a block.\n";
     return;
   }
-  Stmt* new_root_for = root_for->accept_mutator(&sr);
+  For* new_root_for = dynamic_cast<For*>(root_for->accept_mutator(&sr));
+  if (!new_root_for) {
+    std::cerr << "Couldn't find new root for in rfactor\n";
+  }
   auto res = parent_block->replace_stmt(root_for, new_root_for);
   if (!res) {
     std::cerr << "Couldn't find target loop within parent block of loop nest\n";
@@ -1662,7 +1708,11 @@ void LoopNest::rfactor(
       init_stmt = ol->cloneWithNewBody(init_stmt);
     }
 
-    parent_block->insert_stmt_before(init_stmt, new_root_for);
+    if (output_contains_target) {
+      parent_block->insert_stmt_before(init_stmt, new_root_for);
+    } else {
+      new_root_for->body()->prepend_stmt(init_stmt);
+    }
   } else {
     // We may support this but not possible now.
     throw std::runtime_error("can't rfactor reduction with no initializer\n");
@@ -1685,29 +1735,52 @@ void LoopNest::rfactor(
     if (insertion_point) {
       insertion_point->append_stmt(body_stmt);
     } else {
-      parent_block->insert_stmt_after(body_stmt, new_root_for);
+      if (output_contains_target) {
+        parent_block->insert_stmt_after(body_stmt, new_root_for);
+      } else {
+        new_root_for->body()->append_stmt(body_stmt);
+      }
     }
   }
 
   auto loop_bounds_info = inferBounds(root_stmt_);
-  found = false;
-  for (const TensorAccessBoundsInfo& p : loop_bounds_info) {
-    if (p.buf == tmp_buf) {
-      found = true;
-      std::vector<const Expr*> dims;
-      for (size_t i = 0; i < p.start.size(); i++) {
-        const Expr* dim = IRSimplifier::simplify(
-            new Add(new Sub(p.stop[i], p.start[i]), new IntImm(1)));
-        dims.push_back(dim);
-      }
-      tmp_buf->set_dims(dims);
-    }
-  }
-  if (!found) {
+  auto bounds_it = loop_bounds_info.find(tmp_buf);
+  if (bounds_it == loop_bounds_info.end()) {
     throw std::runtime_error(
         "Hit undefined behavior in rfactor -- couldn't infer bounds.");
   }
 
+  std::vector<const Expr*> starts;
+  std::vector<const Expr*> stops;
+
+  // Find the safe size of the temprorary buffer by determining the outer
+  // extents of a union of all bounds.
+  for (const TensorAccessBoundsInfo& p : bounds_it->second) {
+    for (size_t i = 0; i < p.start.size(); i++) {
+      if (starts.size() <= i) {
+        starts.push_back(p.start[i]);
+      } else {
+        starts[i] =
+            IRSimplifier::simplify(new Min(starts[i], p.start[i], true));
+      }
+
+      if (stops.size() <= i) {
+        stops.push_back(p.stop[i]);
+      } else {
+        stops[i] = IRSimplifier::simplify(new Max(stops[i], p.stop[i], true));
+      }
+    }
+  }
+
+  std::vector<const Expr*> tmp_dims;
+  for (size_t i = 0; i < starts.size(); ++i) {
+    const Expr* dim = IRSimplifier::simplify(
+        new Add(new Sub(stops[i], starts[i]), new IntImm(1)));
+
+    tmp_dims.push_back(dim);
+  }
+
+  tmp_buf->set_dims(tmp_dims);
   temp_bufs_.emplace_back(tmp_buf);
 }
 

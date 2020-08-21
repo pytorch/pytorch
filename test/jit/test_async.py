@@ -20,19 +20,19 @@ class TestAsync(JitTestCase):
             return torch.neg(x)
 
         x = torch.rand(3, 4)
-        fut = torch.jit._fork(foo, x)
+        fut = torch.jit.fork(foo, x)
         y_hat = foo(x)
-        y = torch.jit._wait(fut)
+        y = torch.jit.wait(fut)
         # assert nothing; only to make sure the fake python path works
 
     def test_async_future_type_python(self):
         def foo(inp):
             futures = torch.jit.annotate(List[torch.jit.Future[torch.Tensor]], [])
             for i in range(5):
-                futures.append(torch.jit._fork(lambda x: x, inp))
+                futures.append(torch.jit.fork(lambda x: x, inp))
             all_outputs = []
             for future in futures:
-                all_outputs.append(torch.jit._wait(future))
+                all_outputs.append(torch.jit.wait(future))
             return all_outputs
 
         # assert nothing, just to make sure python type parsing works
@@ -50,13 +50,13 @@ class TestAsync(JitTestCase):
             for _ in range(3):
                 future = torch.jit.annotate(
                     Future[List[Tensor]],
-                    torch.jit._fork(foo, x)
+                    torch.jit.fork(foo, x)
                 )
                 futures.append(future)
 
             output = torch.jit.annotate(List[List[Tensor]], [])
             for i in range(3):
-                output.append(torch.jit._wait(futures[i]))
+                output.append(torch.jit.wait(futures[i]))
             return output
 
         x = torch.rand(3, 3)
@@ -72,9 +72,9 @@ class TestAsync(JitTestCase):
 
         @torch.jit.script
         def wait_script(x):
-            fut = torch.jit._fork(foo, x)
+            fut = torch.jit.fork(foo, x)
             y_hat = foo(x)
-            y = torch.jit._wait(fut)
+            y = torch.jit.wait(fut)
             return y, y_hat
 
         y, y_hat = wait_script(x)
@@ -96,9 +96,9 @@ class TestAsync(JitTestCase):
 
             @torch.jit.script_method
             def forward(self, x1, x2):
-                fut = torch.jit._fork(self.foo, x1, x2)
+                fut = torch.jit.fork(self.foo, x1, x2)
                 y_hat = self.foo(x1, x2)
-                y = torch.jit._wait(fut)
+                y = torch.jit.wait(fut)
                 return y, y_hat
 
         x1 = torch.rand(3, 4)

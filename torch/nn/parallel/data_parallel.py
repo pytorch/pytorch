@@ -6,8 +6,12 @@ from ..modules import Module
 from .scatter_gather import scatter_kwargs, gather
 from .replicate import replicate
 from .parallel_apply import parallel_apply
-from torch.cuda._utils import _get_device_index
-
+from torch._utils import (
+    _get_all_device_indices,
+    _get_available_device_type,
+    _get_device_index,
+    _get_devices_properties
+)
 
 def _check_balance(device_ids):
     imbalance_warn = """
@@ -16,7 +20,7 @@ def _check_balance(device_ids):
     the device_ids argument to DataParallel, or by setting the CUDA_VISIBLE_DEVICES
     environment variable."""
     device_ids = list(map(lambda x: _get_device_index(x, True), device_ids))
-    dev_props = [torch.cuda.get_device_properties(i) for i in device_ids]
+    dev_props = _get_devices_properties(device_ids)
 
     def warn_imbalance(get_prop):
         values = [get_prop(props) for props in dev_props]
@@ -117,13 +121,15 @@ class DataParallel(Module):
     def __init__(self, module, device_ids=None, output_device=None, dim=0):
         super(DataParallel, self).__init__()
 
-        if not torch.cuda.is_available():
+        device_type = _get_available_device_type()
+        if device_type is None:
             self.module = module
             self.device_ids = []
             return
 
         if device_ids is None:
-            device_ids = list(range(torch.cuda.device_count()))
+            device_ids = _get_all_device_indices()
+
         if output_device is None:
             output_device = device_ids[0]
 
@@ -131,12 +137,12 @@ class DataParallel(Module):
         self.module = module
         self.device_ids = list(map(lambda x: _get_device_index(x, True), device_ids))
         self.output_device = _get_device_index(output_device, True)
-        self.src_device_obj = torch.device("cuda:{}".format(self.device_ids[0]))
+        self.src_device_obj = torch.device(device_type, self.device_ids[0])
 
         _check_balance(self.device_ids)
 
         if len(self.device_ids) == 1:
-            self.module.cuda(device_ids[0])
+            self.module.to(self.src_device_obj)
 
     def forward(self, *inputs, **kwargs):
         if not self.device_ids:
@@ -186,15 +192,17 @@ def data_parallel(module, inputs, device_ids=None, output_device=None, dim=0, mo
     if not isinstance(inputs, tuple):
         inputs = (inputs,)
 
+    device_type = _get_available_device_type()
+
     if device_ids is None:
-        device_ids = list(range(torch.cuda.device_count()))
+        device_ids = _get_all_device_indices()
 
     if output_device is None:
         output_device = device_ids[0]
 
     device_ids = list(map(lambda x: _get_device_index(x, True), device_ids))
     output_device = _get_device_index(output_device, True)
-    src_device_obj = torch.device("cuda:{}".format(device_ids[0]))
+    src_device_obj = torch.device(device_type, device_ids[0])
 
     for t in chain(module.parameters(), module.buffers()):
         if t.device != src_device_obj:

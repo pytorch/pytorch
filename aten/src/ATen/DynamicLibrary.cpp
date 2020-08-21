@@ -12,6 +12,7 @@
 namespace at {
 
 
+#ifndef C10_MOBILE
 #ifndef _WIN32
 
 // Unix
@@ -45,11 +46,32 @@ DynamicLibrary::~DynamicLibrary() {
 
 DynamicLibrary::DynamicLibrary(const char* name) {
   // NOLINTNEXTLINE(hicpp-signed-bitwise)
-  HMODULE theModule = LoadLibraryA(name);
+  HMODULE theModule;
+  bool reload = true;
+  // Check if LOAD_LIBRARY_SEARCH_DEFAULT_DIRS is supported
+  if (GetProcAddress(GetModuleHandle("KERNEL32.DLL"), "AddDllDirectory") != NULL) {
+    theModule = LoadLibraryExA(
+        name,
+        NULL,
+        LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
+    if (theModule != NULL || (GetLastError() != ERROR_MOD_NOT_FOUND)) {
+      reload = false;
+    }
+  }
+
+  if (reload) {
+    theModule = LoadLibraryA(name);
+  }
+
   if (theModule) {
     handle = theModule;
   } else {
-    AT_ERROR("error in LoadLibraryA");
+    char buf[256];
+    DWORD dw = GetLastError();
+    FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+                  NULL, dw, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+                  buf, (sizeof(buf) / sizeof(char)), NULL);
+    AT_ERROR("error in LoadLibrary for ", name, ". WinError ", dw, ": ", buf);
   }
 }
 
@@ -69,6 +91,7 @@ DynamicLibrary::~DynamicLibrary() {
   FreeLibrary((HMODULE)handle);
 }
 
+#endif
 #endif
 
 } // namespace at

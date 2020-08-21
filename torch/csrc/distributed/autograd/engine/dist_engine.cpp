@@ -73,8 +73,69 @@ class DistAccumulateGradCaptureHook
   ContextPtr autogradContext_;
 };
 
+void DistEngine::globalCpuThread(
+    const std::shared_ptr<ReadyQueue>& ready_queue) {
+  while (true) {
+    NodeTask task = ready_queue->pop();
+    if (task.isShutdownTask_) {
+      // Need to shutdown this thread.
+      C10_LOG_API_USAGE_ONCE("torch.autograd.thread_shutdown");
+      break;
+    }
+
+    auto graphTask = task.base_.lock();
+    if (graphTask == nullptr) {
+      // GraphTask has expired, ignore and continue processing.
+      continue;
+    }
+
+    // Launch the execution on a JIT thread.
+    at::launch([this,
+                graphTask,
+                graphRoot = task.fn_,
+                variables =
+                    InputBuffer::variables(std::move(task.inputs_))]() mutable {
+      InputBuffer inputs(variables.size());
+      for (size_t i = 0; i < variables.size(); i++) {
+        inputs.add(i, std::move(variables[i]), c10::nullopt, c10::nullopt);
+      }
+      execute_graph_task_until_ready_queue_empty(
+          /*node_task*/ NodeTask(graphTask, graphRoot, std::move(inputs)),
+          /*incrementOutstandingTasks*/ false);
+    });
+  }
+}
+
 DistEngine::DistEngine()
-    : initializedContextIds_(), engine_(Engine::get_default_engine()) {}
+    : initializedContextIds_(),
+      engine_(Engine::get_default_engine()),
+      global_cpu_ready_queue_(std::make_shared<ReadyQueue>()),
+      global_cpu_thread_(
+          &DistEngine::globalCpuThread,
+          this,
+          global_cpu_ready_queue_) {
+  // Note [GPU to CPU continuations]
+  // ~~~~~~~~~~~~~~~~~~~~~~~~~~
+  // Initialize a single CPU thread to execute continuations from GPU
+  // tasks. The multithreaded structure for the distributed engine works
+  // well only for CPU tasks. If we have an order of tasks like
+  // CPU->GPU->CPU, distributed autograd has no thread to execute the last
+  // CPU task on. To fix this, we introduce a global CPU thread to handle
+  // such situations and it will be responsible for executing these CPU
+  // tasks. The CPU thread has its own ready_queue which is used as the
+  // cpu_ready_queue for all GraphTasks for DistEngine. This ensures all GPU
+  // to CPU continuations are enqueued on this thread. The global CPU thread
+  // simply dequeues tasks from the global queue and calls
+  // "execute_graph_task_until_ready_queue_empty" on a JIT thread to execute the
+  // appropriate task.
+  global_cpu_thread_.detach();
+}
+
+DistEngine::~DistEngine() {
+  // Ensure we shutdown the CPU thread.
+  global_cpu_ready_queue_->pushShutdownTask();
+  global_cpu_thread_.join();
+}
 
 DistEngine& DistEngine::getInstance() {
   // Leaky singleton to avoid module destructor race.
@@ -92,8 +153,7 @@ void DistEngine::validateRootsAndRetrieveEdges(
 
   // Verify roots are all scalar and require gradients.
   for (const auto& root : roots) {
-    TORCH_CHECK(
-        root.requires_grad(), "requires_grad not set on: ", root.name());
+    TORCH_CHECK(root.requires_grad(), "requires_grad not set on root");
     TORCH_CHECK(
         root.numel() == 1,
         root.name(),
@@ -130,7 +190,7 @@ void DistEngine::computeDependencies(
       /* keep_graph */ retainGraph,
       /* create_graph */ false,
       /* depth */ 0,
-      /* cpu_ready_queue */ nullptr,
+      /* cpu_ready_queue */ global_cpu_ready_queue_,
       /* exit_on_error */ true);
 
   // Run BFS to traverse the graph locally. The roots of the graph are
@@ -251,17 +311,21 @@ void DistEngine::computeDependencies(
 }
 
 void DistEngine::execute_graph_task_until_ready_queue_empty(
-    const std::shared_ptr<GraphTask>& graph_task,
-    std::shared_ptr<Node> root_to_execute,
+    NodeTask&& node_task,
     bool incrementOutstandingTasks) {
   engine_.initialize_device_threads_pool();
   // Create a ready queue per call to traverse the graph_task from
   // root_to_execute This allow concurrent execution of the same GraphTask from
   // different threads
   std::shared_ptr<ReadyQueue> cpu_ready_queue = std::make_shared<ReadyQueue>();
-  cpu_ready_queue->push(
-      NodeTask(graph_task, std::move(root_to_execute), InputBuffer(0)),
-      incrementOutstandingTasks);
+  auto graph_task = node_task.base_.lock();
+  if (graph_task == nullptr) {
+    LOG(ERROR) << "GraphTask has expired for NodeTask: "
+               << node_task.fn_->name() << ", skipping execution.";
+    return;
+  }
+
+  cpu_ready_queue->push(std::move(node_task), incrementOutstandingTasks);
 
   torch::autograd::set_device(torch::autograd::CPU_DEVICE);
   graph_task->owner_ = torch::autograd::CPU_DEVICE;
@@ -315,8 +379,7 @@ std::shared_ptr<rpc::FutureMessage> DistEngine::runEngineAndAccumulateGradients(
   auto graphTask = autogradContext->retrieveGraphTask();
   at::launch([this, graphTask, graphRoot, incrementOutstandingTasks]() {
     execute_graph_task_until_ready_queue_empty(
-        /*graph_task*/ graphTask,
-        /*root_to_execute*/ graphRoot,
+        /*node_task*/ NodeTask(graphTask, graphRoot, InputBuffer(0)),
         /*incrementOutstandingTasks*/ incrementOutstandingTasks);
   });
   // Use a reference here to avoid refcount bump on futureGrads.
@@ -431,8 +494,7 @@ std::shared_ptr<rpc::FutureMessage> DistEngine::executeSendFunctionAsync(
     auto graphTask = autogradContext->retrieveGraphTask();
     at::launch([this, graphTask, sendFunction]() {
       execute_graph_task_until_ready_queue_empty(
-          /*graph_task*/ graphTask,
-          /*root_to_execute*/ sendFunction,
+          /*node_task*/ NodeTask(graphTask, sendFunction, InputBuffer(0)),
           /*incrementOutstandingTasks*/ false);
     });
     return std::make_shared<rpc::FutureMessage>(rpc::Message());

@@ -37,13 +37,13 @@ static void lerp_kernel_tensor(
     const Tensor& weights) {
   TORCH_CHECK(self.dtype() == end.dtype(), "expected dtype ", self.dtype(), " for `end` but got dtype ", end.dtype());
   TORCH_CHECK(self.dtype() == weights.dtype(), "expected dtype ", self.dtype(), " for `weights` but got dtype ", weights.dtype());
-  auto iter = TensorIterator();
-  iter.set_check_mem_overlap(true);
-  iter.add_output(ret);
-  iter.add_input(self);
-  iter.add_input(end);
-  iter.add_input(weights);
-  iter.build();
+  auto iter = TensorIteratorConfig()
+    .set_check_mem_overlap(true)
+    .add_output(ret)
+    .add_input(self)
+    .add_input(end)
+    .add_input(weights)
+    .build();
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(ret.scalar_type(), "lerp_kernel_tensor", [&] {
     using value_t = typename c10::scalar_value_type<scalar_t>::type;
     at::native::cpu_kernel(

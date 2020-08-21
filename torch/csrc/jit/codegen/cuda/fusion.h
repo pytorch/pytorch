@@ -48,22 +48,17 @@ struct TypeHash {
  * us mechanisms for dependency analysis and DCE including safety checks.
  */
 
-struct Fusion;
-struct TensorView;
-
-namespace cuda {
-struct CudaKernel;
-}
+class Fusion;
+class TensorView;
 
 // Fusion Guard is our "context manager". It holds the actrive fusion and allows
 // it to be accessed anywhere through FusionGuard::getCurFusion().
-struct TORCH_CUDA_API FusionGuard {
+class TORCH_CUDA_API FusionGuard {
  public:
   Fusion* prev_fusion;
 
   // Set the active fusion so it can be manipulated.
-  FusionGuard(Fusion* fusion);
-  FusionGuard(const cuda::CudaKernel* cuda_kernel);
+  explicit FusionGuard(Fusion* fusion);
 
   ~FusionGuard();
 
@@ -72,20 +67,21 @@ struct TORCH_CUDA_API FusionGuard {
 
 // Expr sort will take a fusion and return a topologically sorted list of
 // expressions.
-struct ExprSort : public IterVisitor {
+class ExprSort : public IterVisitor {
  private:
   std::vector<Expr*> exprs;
 
   void handle(Expr* expr) override;
 
  public:
+  static std::vector<Expr*> getExprs(Fusion* fusion, bool from_outputs_only);
+
   static std::vector<Expr*> getExprs(
       Fusion* fusion,
-      bool from_outputs_only,
-      bool breadth_first);
+      const std::vector<Val*>& from);
 };
 
-struct InputsOf : public IterVisitor {
+class InputsOf : public IterVisitor {
  private:
   std::unordered_set<Val*> inputs;
 
@@ -101,20 +97,24 @@ struct InputsOf : public IterVisitor {
  * duplicating all associated values and exprs. Fusion is considered to SSA,
  * though this could also change in the future if there is a good reason to do
  * so.
+ *
+ * The Fusion owns the whole IR graph (Vals and Exprs)
  */
+class TORCH_CUDA_API Fusion final {
+ public:
+  Fusion() = default;
 
-struct TORCH_CUDA_API Fusion : public IRInputOutput {
-  Fusion() {}
+  Fusion(const Fusion& other);
+  Fusion(Fusion&& other) noexcept;
 
-  // Not copyable
-  Fusion(const Fusion& other) = delete;
-  Fusion& operator=(const Fusion& other) = delete;
+  Fusion& operator=(const Fusion& other);
+  Fusion& operator=(Fusion&& other) noexcept;
 
-  Fusion(Fusion&& other) = delete;
-  Fusion& operator=(Fusion&& other) = delete;
-
-  // When destroyed clean up all IR associated with this fusion
   ~Fusion();
+
+  friend void swap(Fusion& a, Fusion& b) noexcept;
+
+  void clear() noexcept;
 
   // Break dependency chains associated with Expr, remove references to expr
   // delete expr.
@@ -140,21 +140,15 @@ struct TORCH_CUDA_API Fusion : public IRInputOutput {
   /*
    * Return a list of topologically sorted expressions. We can start
    * by only traversing back from registered outputs, or from all terminating
-   * Vals. Can also select depth first traversal, or breadth first.1
+   * Vals.
    *
    * from_outputs_only:
    *   True - Sort from DAG associated with registered outputs
    *   False - Sort from all terminating Vals.
-   * breadth_first :
-   *   False - Sort from depth first traversal
-   *   True - Sort from breadth first traversal - Not Implemented Yet!
-   *
-   * TODO: Implement breadth_first
    */
-  std::vector<Expr*> exprs(
-      bool from_outputs_only = false,
-      bool breadth_first = false);
+  std::vector<Expr*> exprs(bool from_outputs_only = false);
 
+  // Return a vector of fusion inputs that feed this Val
   std::unordered_set<Val*> inputsOf(Val* val);
 
   // Assert that all leaves found from outputs are registered as an input.
@@ -165,9 +159,11 @@ struct TORCH_CUDA_API Fusion : public IRInputOutput {
 
   // Print Arith exprs used in outputs
   void printMath();
+
   // Print transformations used in fusion (can be very verbose)
   void printTransforms();
-
+  // Lower the fusion and print a kernel
+  void printKernel();
   // Register the Val with this fusion
   StmtNameType registerVal(Val* val);
 
@@ -179,6 +175,13 @@ struct TORCH_CUDA_API Fusion : public IRInputOutput {
 
   // Register stmt with this fusion.
   StmtNameType registerStatement(Statement* stmt);
+
+  // Lowered nodes
+  StmtNameType registerLoweredVal(Val* val);
+  StmtNameType registerLoweredExpr(Expr* expr);
+
+  // Lowered counterpart to inFusion()
+  bool inKernelIr(const Statement* stmt) const;
 
   // Check if val is used in this fusion. Not equivelent to DCE
   bool used(Val* val) const;
@@ -203,34 +206,57 @@ struct TORCH_CUDA_API Fusion : public IRInputOutput {
   // Indicate to kernel to set itself up to generate random numbers
   bool hasRNG();
 
-  // Indicate to kernel to set itself up to generate random numbers
   bool hasReduction();
+  bool hasBlockReduction();
+  bool hasGridReduction();
+  size_t gridReductionTempBufferSize();
+
+  const auto& inputs() const {
+    return inputs_;
+  }
+
+  const auto& outputs() const {
+    return outputs_;
+  }
+
+  std::vector<Val*> getTerminatingOutputs();
+
+  bool hasInput(const Val* val) const;
+  bool hasOutput(const Val* val) const;
+
+  void replaceInput(Val* replace, Val* with);
+  void replaceOutput(Val* replace, Val* with);
 
  private:
-  // Sets of all Vals/Exprs registered with this fusion
-  std::unordered_set<Val*> val_set_;
-  std::deque<Val*> val_deque_;
-  std::unordered_set<Expr*> expr_set_;
-
   // Return an int that monotonically increases for each val/expr, some are
   // explicitly incremented by type.
   StmtNameType getValName(ValType vtype);
   StmtNameType getExprName();
 
-  // map from valtype to individual name counters
-  std::unordered_map<ValType, StmtNameType, TypeHash> val_type_name_map = {
-      {ValType::TensorView, 0},
-      {ValType::TensorDomain, 0},
-      {ValType::IterDomain, 0},
-      {ValType::Scalar, 0}};
+ private:
+  // Sets of all Vals/Exprs registered with this fusion
+  // (val_deque_ is not owning the objects)
+  std::unordered_set<Val*> val_set_;
+  std::deque<Val*> val_deque_;
+  std::unordered_set<Expr*> expr_set_;
 
-  // Generic counters
-  StmtNameType val_name_counter_ = 0;
+  // Values names counters
+  std::unordered_map<ValType, StmtNameType, TypeHash> val_type_name_map_;
+
+  // Expression names counter
   StmtNameType expr_name_counter_ = 0;
 
   // Dependency tracking for Vals. Where did it come from? Where is it used?
   std::unordered_map<Val*, Expr*> origin_;
   std::unordered_map<Val*, std::unordered_set<Expr*>> uses_;
+
+  // Fusion inputs and outputs
+  std::vector<Val*> inputs_;
+  std::vector<Val*> outputs_;
+
+  // Lowered IR
+  std::unordered_set<Val*> lowered_val_set_;
+  std::unordered_set<Expr*> lowered_expr_set_;
 };
 
 } // namespace fuser

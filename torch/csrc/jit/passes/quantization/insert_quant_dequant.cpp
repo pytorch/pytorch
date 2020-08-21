@@ -49,7 +49,11 @@ bool isWeight(Module& module, Value* v) {
   for (const Use& u : v->uses()) {
     Node* n = u.user;
     if (n->kind() == prim::CallMethod) {
-      auto m = getInvokedModule(module, n, self);
+      auto m_opt = getInvokedModuleOpt(module, n, self);
+      if (!m_opt.has_value()) {
+        return false;
+      }
+      auto m = *m_opt;
       auto g = m.get_method(n->s(attr::name)).graph();
       auto call_method_result = isWeight(m, g->inputs()[u.offset]);
       if (result.has_value()) {
@@ -190,6 +194,165 @@ DynamicQuantOps insertChooseQParamQuantDequant(
   return std::make_tuple(choose_qparams, quant, dequant);
 }
 
+Node* insertFP16CastOps(Graph* graph, Value* observer_out) {
+  // If the weight value is outside of the range for FP16 range, i.e. [5.96e-8,
+  // 65504], we saturate the values to the min/max of this range.
+  Node* saturated_weight =
+      graph->create(Symbol::aten("_saturate_weight_to_fp16"), {observer_out});
+  graph->insertNode(saturated_weight);
+  graph->lint();
+
+  return saturated_weight;
+}
+
+// find the observer for Value `v` and return the name of the observer
+c10::optional<std::string> findObserverName(Value* v) {
+  // Note that here we just check for the name of observer, but the ideally
+  // we should be comparing the type of observer, this is a temporary
+  // work around until data only clone of module.clone is supported.
+  Node* n = v->node();
+  if (n->kind() == prim::CallMethod && n->s(attr::name) == "forward") {
+    auto module_instance = n->inputs().at(0);
+    if (module_instance->node()->kind() == prim::GetAttr &&
+        module_instance->node()->s(attr::name).find("_observer_") !=
+            std::string::npos) {
+      return module_instance->node()->s(attr::name);
+    }
+  }
+  return c10::nullopt;
+}
+
+bool isPlaceholderObserver(Value* observer) {
+  if (getModuleName(observer).has_value()) {
+    auto name = getModuleName(observer).value();
+    if (name == "__torch__.torch.quantization.observer.PlaceholderObserver") {
+      return true;
+    }
+  }
+  return false;
+}
+
+at::ScalarType getObserverDtype(Module& module, Value* v) {
+  auto observer_name = findObserverName(v);
+  if (observer_name.has_value()) {
+    auto observer_module = module.attr(observer_name.value()).toModule();
+    at::ScalarType scalar_type = observer_module.attr("dtype").toScalarType();
+    return scalar_type;
+  }
+  return at::ScalarType::Undefined;
+}
+
+c10::optional<std::string> getEmbeddingBagObsName(
+    script::Module& module,
+    Node* n) {
+  Value* v = n->output();
+  auto observer = n->input(0);
+  auto observer_module = module.attr(findObserverName(v).value()).toModule();
+  if (observer_module.hasattr("custom_op")) {
+    auto op_name = observer_module.attr("custom_op").toStringRef();
+    return isPlaceholderObserver(observer) ? op_name : "";
+  }
+  return c10::nullopt;
+}
+
+bool isEmbeddingBagOp(
+    Node* observer,
+    c10::optional<std::string> embedding_bag_name) {
+  return embedding_bag_name &&
+      embedding_bag_name.value().find("embedding_bag_") != std::string::npos;
+}
+
+// Insert quant and dequant nodes into the graph for both static and dynamic
+// quant.
+Node* insertQuantDequantNodes(
+    Value* self,
+    Node* observer,
+    const std::vector<std::string>& qparam_names,
+    const std::string& quantize_func) {
+  Graph* g = observer->owningGraph();
+  Value* observer_out = observer->output();
+  Value* original_val = observer->input(1);
+  std::vector<Value*> inputs = {observer_out};
+  // Insert GetAttr nodes for quantization parameters
+  for (const auto& qparam_name : qparam_names) {
+    inputs.push_back(g->insertGetAttr(self, qparam_name));
+  }
+  Node* quant = insertQuant(
+      g,
+      inputs,
+      at::Symbol::aten(quantize_func),
+      original_val->debugName() + ".quant");
+  Node* dequant = insertDeQuant(g, quant->output(), original_val);
+  return dequant;
+}
+
+Node* insertEmbeddingBagOps(Node* observer, const std::string& op_name) {
+  Graph* g = observer->owningGraph();
+  auto observer_out = observer->output();
+
+  std::string prepack_fn, quant_fn;
+  if (op_name == "embedding_bag_4bit") {
+    prepack_fn = "quantized::embedding_bag_4bit_prepack";
+    quant_fn = "quantized::embedding_bag_4bit_rowwise_offsets";
+  } else if (op_name == "embedding_bag_byte") {
+    prepack_fn = "quantized::embedding_bag_byte_prepack";
+    quant_fn = "quantized::embedding_bag_byte_rowwise_offsets";
+  } else {
+    TORCH_INTERNAL_ASSERT(
+        "Graph Mode Quantization currently supports 4-bit and 8-bit embedding bag quantization.");
+  }
+
+  std::vector<Value*> prepack_inputs = {observer_out};
+  std::vector<Use> uses = observer_out->uses();
+  Node* embedding_bag_float_op;
+  // We expect that the output of the weight observer will be consumed by the
+  // embedding_bag operator.
+  for (const Use& use : uses) {
+    if (matchCallFuncToUse(use, "embedding_bag", 2)) {
+      embedding_bag_float_op = use.user;
+    }
+  }
+  TORCH_CHECK(
+      embedding_bag_float_op->inputs().size() == 11,
+      "Expecting FP EmbeddingBag operator to have 11 inputs");
+  // Insert prepack op
+  Node* prepack = g->create(Symbol::fromQualString(prepack_fn), prepack_inputs);
+  g->insertNode(prepack);
+
+  std::vector<Value*> embedding_bag_inputs =
+      embedding_bag_float_op->inputs().vec();
+
+  // Create and insert quantized embedding op.
+  Value* none = g->insertConstant(IValue());
+  Value* zero = g->insertConstant(IValue(0));
+
+  std::vector<Value*> qembedding_bag_inputs = {
+      /* weight */ prepack->output(),
+      /* indices */ embedding_bag_inputs[1],
+      /* offsets */ embedding_bag_inputs[3],
+      /* scale_grad_by_freq */ embedding_bag_inputs[6],
+      /* mode */ zero,
+      /* sparse */ embedding_bag_inputs[8],
+      /* per_sample_weights_ */ embedding_bag_inputs[9]};
+
+  if (op_name == "embedding_bag_4bit") {
+    // 4-bit op has an extra input compressed_indices_mapping
+    qembedding_bag_inputs.push_back(none);
+  }
+  qembedding_bag_inputs.push_back(embedding_bag_inputs[10]);
+
+  Node* qembedding_bag =
+      g->create(Symbol::fromQualString(quant_fn), qembedding_bag_inputs);
+  g->insertNode(qembedding_bag);
+
+  embedding_bag_float_op->output()->replaceAllUsesWith(
+      qembedding_bag->output());
+  embedding_bag_float_op->removeAllInputs();
+  embedding_bag_float_op->destroy();
+  g->lint();
+  return qembedding_bag;
+}
+
 void insertQuantizationOps(
     Module& module,
     Value* self,
@@ -211,49 +374,44 @@ void insertQuantizationOps(
   }
   Value* original_val = observer->input(1);
   Node *quant, *choose_qparams, *dequant;
-  if (quant_type == QuantType::DYNAMIC && !isWeight(module, observer_out)) {
-    Value* dtype = g->insertGetAttr(self, qparam_names.back());
-    std::tie(choose_qparams, quant, dequant) = insertChooseQParamQuantDequant(
-        g, observer_out, dtype, at::Symbol::aten(quantize_func));
-  } else {
-    std::vector<Value*> inputs = {observer_out};
-    // Insert GetAttr nodes for quantization parameters
-    for (const auto& qparam_name : qparam_names) {
-      inputs.push_back(g->insertGetAttr(self, qparam_name));
+  // Temporary solution to quantize embedding_bag operators. Will be re-written
+  // once we support quantization of embedding_bag weights.
+  auto embedding_bag_name = getEmbeddingBagObsName(module, observer);
+  if (quant_type == QuantType::DYNAMIC &&
+      isEmbeddingBagOp(observer, embedding_bag_name)) {
+    if (isWeight(module, observer_out)) {
+      auto op_name = embedding_bag_name.value();
+      Node* dequant = insertEmbeddingBagOps(observer, op_name);
+      observer_out->replaceAllUsesWith(original_val);
+      original_val->replaceAllUsesAfterNodeWith(dequant, dequant->output());
+    } else {
+      // Special case for embedding bag operators indices input - we don't
+      // quantize the input but we still need to insert observers for it because
+      // the order of input and weight can be changed in the module code.
+      observer_out->replaceAllUsesWith(original_val);
     }
-    quant = insertQuant(
-        g,
-        inputs,
-        at::Symbol::aten(quantize_func),
-        original_val->debugName() + ".quant");
-    dequant = insertDeQuant(g, quant->output(), original_val);
+    return;
+  }
+  if (quant_type == QuantType::DYNAMIC) {
+    if (getObserverDtype(module, observer_out) == at::ScalarType::Half) {
+      dequant = insertFP16CastOps(g, observer_out);
+    } else if (!isWeight(module, observer_out)) {
+      // For activation tensors we insert choose_qparams, quant, dequant ops.
+      Value* dtype = g->insertGetAttr(self, qparam_names.back());
+      std::tie(choose_qparams, quant, dequant) = insertChooseQParamQuantDequant(
+          g, observer_out, dtype, at::Symbol::aten(quantize_func));
+    } else {
+      // For weight tensors we insert quant-dequant ops.
+      dequant =
+          insertQuantDequantNodes(self, observer, qparam_names, quantize_func);
+    }
+  } else { // Static quant
+    dequant =
+        insertQuantDequantNodes(self, observer, qparam_names, quantize_func);
   }
   observer_out->replaceAllUsesWith(original_val);
-  std::vector<Use> uses = original_val->uses();
-  // TODO: use replaceAllUsesAfterNodeWith?
-  for (const auto& use : uses) {
-    auto* user = use.user;
-    if (user != quant && user != observer && user != choose_qparams) {
-      user->replaceInputWith(original_val, dequant->output());
-    }
-  }
-}
 
-// find the observer for Value `v` and return the name of the observer
-c10::optional<std::string> findObserverName(Value* v) {
-  // Note that here we just check for the name of observer, but the ideally
-  // we should be comparing the type of observer, this is a temporary
-  // work around until data only clone of module.clone is supported.
-  Node* n = v->node();
-  if (n->kind() == prim::CallMethod && n->s(attr::name) == "forward") {
-    auto module_instance = n->inputs().at(0);
-    if (module_instance->node()->kind() == prim::GetAttr &&
-        module_instance->node()->s(attr::name).find("_observer_") !=
-            std::string::npos) {
-      return module_instance->node()->s(attr::name);
-    }
-  }
-  return c10::nullopt;
+  original_val->replaceAllUsesAfterNodeWith(dequant, dequant->output());
 }
 
 void ReplicateChooseQParamsQuantDequant(std::shared_ptr<Graph>& graph) {
@@ -333,9 +491,10 @@ void RemoveRedundantDequantize(std::shared_ptr<Graph>& graph) {
     const auto& match_vmap = match.values_map;
     auto dequant_node = match_vmap.at(vmap.at("a_dequant"))->node();
     Value* dequant_out = dequant_node->output();
-    TORCH_CHECK(
-        dequant_out->uses().size() == 1,
-        "Expect dequant output to have single use");
+    // Values can be used multiple times in a single node
+    if (dequant_out->uses().size() != 1) {
+      return false;
+    }
     Node* user = dequant_out->uses()[0].user;
     return isTensorInfoNode(user);
   };
@@ -359,9 +518,10 @@ void RemoveRedundantQuantizationOps(std::shared_ptr<Graph>& graph) {
     const auto& match_vmap = match.values_map;
     auto dequant_node = match_vmap.at(vmap.at("a_dequant"))->node();
     Value* dequant_out = dequant_node->output();
-    TORCH_CHECK(
-        dequant_out->uses().size() == 1,
-        "Expect dequant output to have single use");
+    // Values can be used multiple times in a single node
+    if (dequant_out->uses().size() != 1) {
+      return false;
+    }
     Node* user = dequant_out->uses()[0].user;
     return !nodeQuantizable(user, QuantType::DYNAMIC);
   };
@@ -456,11 +616,11 @@ class SubGraphCloneHelper {
 
 class InsertQuantDeQuantHelper {
  public:
+  InsertQuantDeQuantHelper(QuantType quant_type, bool debug)
+      : quant_type_(quant_type), debug_(debug) {}
+
   void run(Module& module, const std::string& method_name);
 
-  void setQuantType(QuantType quant_type) {
-    quant_type_ = quant_type;
-  }
   // Cleanup observer nodes from graph and observer modules
   // from module object and ClassType
   void cleanup(Module& module);
@@ -561,12 +721,13 @@ class InsertQuantDeQuantHelper {
   // once
   std::unordered_set<Value*> quantized_values_;
 
-  QuantType quant_type_ = QuantType::STATIC;
-
   // Map from original weight value to GraphFunction corresponding to the
   // subgraph that includes the weight observer and dependent nodes.
   std::unordered_map<Value*, std::unique_ptr<GraphFunction>>
       weight_to_graph_fn_;
+
+  QuantType quant_type_ = QuantType::STATIC;
+  bool debug_ = false;
 };
 
 void InsertQuantDeQuantHelper::collectObserverNodesAndValueToQuantize(
@@ -794,11 +955,18 @@ std::tuple<c10::QScheme, QParamVector> InsertQuantDeQuantHelper::
       "getQSchemeAndParamMap expects the corresponding observer for ",
       v->debugName(),
       " exists.");
+  QParamVector qparams;
+  c10::QScheme qscheme;
+
   auto observer_module = module.attr(observer_name.value()).toModule();
+  auto scalar_type = observer_module.attr("dtype");
+  if (isPlaceholderObserver(n->input(0)) ||
+      scalar_type == at::ScalarType::Half) {
+    return std::make_tuple(qscheme, qparams);
+  }
   auto calculate_qparams = observer_module.get_method("calculate_qparams");
   IValue result = calculate_qparams(std::vector<IValue>());
   checkCalculateQParamsResult(result);
-  auto scalar_type = observer_module.attr("dtype");
   TORCH_CHECK(
       scalar_type.toScalarType() != at::ScalarType::Undefined,
       "dtype of observer can't be undefined");
@@ -807,8 +975,8 @@ std::tuple<c10::QScheme, QParamVector> InsertQuantDeQuantHelper::
   at::Tensor zero_point = tp->elements()[1].toTensor().to(at::kInt);
   // quantization parameters should appear in the same order as
   // the argument for quantize_per_tensor/quantize_per_channel function
-  QParamVector qparams;
-  auto qscheme = observer_module.attr("qscheme").toQScheme();
+
+  qscheme = observer_module.attr("qscheme").toQScheme();
   if (isPerChannel(qscheme)) {
     auto axis = observer_module.attr("ch_axis");
     qparams.push_back(std::make_pair("_scale", scale));
@@ -846,7 +1014,7 @@ ModuleMethodVector InsertQuantDeQuantHelper::getInvokedMethods(
             module_instance->node()->kind() == prim::GetAttr &&
             module_instance->node()->s(attr::name).find("_observer_") ==
                 std::string::npos) {
-          m = getInvokedModule(module, n, graph->inputs()[0]);
+          m = getInvokedModuleOpt(module, n, graph->inputs()[0]);
         }
         if (m) {
           invoked_methods.push_back({*m, module_method_name});
@@ -969,6 +1137,12 @@ c10::optional<std::vector<Value*>> getDequantizedInputs(Value* output) {
     // point
     bool is_dequantized = true;
     for (auto* input : inputs) {
+      GRAPH_DEBUG(
+          "checking if input:",
+          input->debugName(),
+          " in node:",
+          *input->node(),
+          "is quantized");
       is_dequantized &= input->node()->kind() == Symbol::aten("dequantize");
     }
     if (is_dequantized) {
@@ -1053,12 +1227,29 @@ void InsertQuantDeQuantHelper::propagateQuantizationOps(Block* block) {
         insertDeQuantForAllUse(output->owningGraph(), output, output);
       }
     }
+
+    if (isBinaryOpWithScalarInput(n)) {
+      // Print warning for add_scalar/mul_scalar when debug is enabled
+      // since the quantization parameter for these ops depends on
+      // input and it's too complicated to encode the equations in
+      // the IR:
+      // https://github.com/pytorch/pytorch/blob/master/aten/src/ATen/native/quantized/cpu/qadd.cpp#L64-L74
+      if (debug_) {
+        TORCH_WARN_ONCE(
+            "debug option for add_scalar and mul_scalar is not supported, "
+            "please don't use debug option for models that uses these ops.");
+      }
+    }
   }
 }
 
 void InsertQuantDeQuantHelper::runWeightObserver(
     Module& module,
     const std::string& method_name) {
+  if (quant_type_ != QuantType::DYNAMIC) {
+    return;
+  }
+
   for (auto& invoked_methods : getInvokedMethods(module, method_name)) {
     auto& invoked_module = std::get<0>(invoked_methods);
     const auto& invoked_method_name = std::get<1>(invoked_methods);
@@ -1109,7 +1300,6 @@ void InsertQuantDeQuantHelper::run(
 
   Method method = module.get_method(method_name);
   auto graph = method.graph();
-
   // We only need to register new parameters if the graph has
   // been quantized before
   // TODO: dedup this part with code in quantizeTensors
@@ -1118,15 +1308,19 @@ void InsertQuantDeQuantHelper::run(
       auto tp = getQSchemeAndQParamVector(module, n);
       checkQScheme(graph.get(), std::get<0>(tp));
       auto qparam_map = std::get<1>(tp);
-      TORCH_INTERNAL_ASSERT(
-          qparam_name_map_for_node_.count(n),
-          "Expected to have a qparam_name_map for node:",
-          *n);
-      auto qparam_name_map = qparam_name_map_for_node_.at(n);
-      for (auto& pr : qparam_map) {
-        const auto& name = pr.first;
-        const auto& qparam = pr.second;
-        module._ivalue()->setAttr(qparam_name_map.at(name), qparam);
+      // We check the size here because for some observers (like
+      // PlaceholderObserver) the qparams might be empty.
+      if (qparam_map.size() > 0) {
+        TORCH_INTERNAL_ASSERT(
+            qparam_name_map_for_node_.count(n),
+            "Expected to have a qparam_name_map for node:",
+            *n);
+        auto qparam_name_map = qparam_name_map_for_node_.at(n);
+        for (auto& pr : qparam_map) {
+          const auto& name = pr.first;
+          const auto& qparam = pr.second;
+          module._ivalue()->setAttr(qparam_name_map.at(name), qparam);
+        }
       }
     }
     return;
@@ -1181,9 +1375,10 @@ void InsertQuantDeQuantHelper::propagateQuantizationOps(Module& module) {
   RemoveRedundantQuantizationOps(graph);
   ReplicateQuant(graph);
   ReplicateDeQuant(graph);
-  RemoveRedundantDequantize(graph);
+  // TODO: add filter to the clamp patterns and remove this pass
   ReplicateClampScalarArgs(graph);
   propagateQuantizationOps(graph->block());
+  RemoveRedundantDequantize(graph);
 }
 
 } // namespace
@@ -1309,13 +1504,11 @@ Module InsertQuantDeQuant(
     Module& input_module,
     const std::string& method_name,
     bool inplace,
+    bool debug,
     QuantType quant_type) {
   Module module = input_module.clone(inplace);
-  InsertQuantDeQuantHelper h;
-  h.setQuantType(quant_type);
-  if (quant_type == QuantType::DYNAMIC) {
-    h.runWeightObserver(module, method_name);
-  }
+  InsertQuantDeQuantHelper h(quant_type, debug);
+  h.runWeightObserver(module, method_name);
   h.run(module, method_name);
   h.cleanup(module);
   h.propagateQuantizationOps(module);

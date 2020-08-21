@@ -64,6 +64,9 @@ static inline bool allIntegral(std::initializer_list<std::reference_wrapper<Scal
 
 } // namespace
 
+DEFINE_DISPATCH(complex_stub);
+DEFINE_DISPATCH(polar_stub);
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ arange ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor arange(Scalar end, const TensorOptions& options) {
@@ -96,6 +99,71 @@ Tensor& arange_out(Tensor& result, Scalar start, Scalar end) {
 
 Tensor _dim_arange(const Tensor& like, int64_t dim) {
   return at::arange(like.size(dim), like.options().dtype(at::kLong));
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ complex / polar ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+void complex_check_floating(const Tensor& a, const Tensor& b) {
+  TORCH_CHECK((a.scalar_type() == kFloat || a.scalar_type() == kDouble) &&
+              (b.scalar_type() == kFloat || b.scalar_type() == kDouble),
+              "Expected both inputs to be Float or Double tensors but got ",
+              a.scalar_type(), " and ", b.scalar_type());
+}
+
+void complex_check_dtype(
+    const Tensor& result,
+    const Tensor& a,
+    const Tensor& b) {
+  complex_check_floating(a, b);
+  TORCH_CHECK(a.scalar_type() == b.scalar_type(),
+              "Expected object of scalar type ", a.scalar_type(),
+              " but got scalar type ", b.scalar_type(), " for second argument");
+  TORCH_CHECK(result.scalar_type() == toComplexType(a.scalar_type()),
+              "Expected object of scalar type ", toComplexType(a.scalar_type()),
+              " but got scalar type ", result.scalar_type(),
+              " for argument 'out'");
+}
+
+Tensor& complex_out(Tensor& result, const Tensor& real, const Tensor& imag) {
+  complex_check_dtype(result, real, imag);
+  auto iter = TensorIteratorConfig()
+      .set_check_mem_overlap(true)
+      .add_output(result)
+      .add_input(real)
+      .add_input(imag)
+      .check_all_same_dtype(false)
+      .build();
+  complex_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor complex(const Tensor& real, const Tensor& imag) {
+  complex_check_floating(real, imag);
+  c10::TensorOptions options = real.options();
+  options = options.dtype(toComplexType(real.scalar_type()));
+  Tensor result = at::empty(0, options);
+  return at::complex_out(result, real, imag);
+}
+
+Tensor& polar_out(Tensor& result, const Tensor& abs, const Tensor& angle) {
+  complex_check_dtype(result, abs, angle);
+  auto iter = TensorIteratorConfig()
+      .set_check_mem_overlap(true)
+      .add_output(result)
+      .add_input(abs)
+      .add_input(angle)
+      .check_all_same_dtype(false)
+      .build();
+  polar_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor polar(const Tensor& abs, const Tensor& angle) {
+  complex_check_floating(abs, angle);
+  c10::TensorOptions options = abs.options();
+  options = options.dtype(toComplexType(abs.scalar_type()));
+  Tensor result = at::empty(0, options);
+  return at::polar_out(result, abs, angle);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ empty ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -354,19 +422,17 @@ TensorOptions infer_full_options(
   const TensorOptions& options) {
 
   if (!options.has_dtype()) {
-    if (fill_value.isIntegral(true)) {
-      TORCH_WARN_ONCE(
-        "Deprecation warning: In a future PyTorch release torch.full ",
-        "will no longer return tensors of floating dtype by default. ",
-        "Instead, a bool fill_value will return a tensor of torch.bool dtype, ",
-        "and an integral fill_value will return a tensor of torch.long dtype. ",
-        "Set the optional `dtype` or `out` arguments to suppress this warning."
-      );
+    if (fill_value.isBoolean()) {
+      return options.dtype(at::kBool);
+    } else if (fill_value.isIntegral(false)) {
+      return options.dtype(at::kLong);
     } else if (fill_value.isComplex()) {
       auto scalar_type = (get_default_dtype() == ScalarType::Double) ?
                             ScalarType::ComplexDouble :
                             ScalarType::ComplexFloat;
       return options.dtype(scalar_type);
+    } else {
+      return options.dtype(get_default_dtype());
     }
   }
 
@@ -967,6 +1033,22 @@ Tensor tensor_backend(ArrayRef<T> values, const TensorOptions& options) {
   return cpu_tensor.to(options.device());
 }
 
+template <typename T>
+Tensor tensor_complex_cpu(ArrayRef<T> values, const TensorOptions& options) {
+  auto result = at::empty(values.size(), options);
+  AT_ASSERT(result.is_contiguous());
+  AT_DISPATCH_COMPLEX_TYPES(result.scalar_type(), "tensor_cpu", [&] {
+    std::copy(values.begin(), values.end(), result.template data_ptr<scalar_t>());
+  });
+  return result;
+}
+
+template <typename T>
+Tensor tensor_complex_backend(ArrayRef<T> values, const TensorOptions& options) {
+  auto cpu_tensor = tensor_complex_cpu(values, options.device(DeviceType::CPU));
+  return cpu_tensor.to(options.device());
+}
+
 #define TENSOR(T, _1)                                               \
   Tensor tensor(ArrayRef<T> values, const TensorOptions& options) { \
     if (options.device().type() != c10::DeviceType::CPU) {          \
@@ -976,6 +1058,17 @@ Tensor tensor_backend(ArrayRef<T> values, const TensorOptions& options) {
     }                                                               \
   }
 AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
+#undef TENSOR
+
+#define TENSOR(T, _1)                                               \
+  Tensor tensor(ArrayRef<T> values, const TensorOptions& options) { \
+    if (options.device().type() != c10::DeviceType::CPU) {          \
+      return tensor_complex_backend(values, options);               \
+    } else {                                                        \
+      return tensor_complex_cpu(values, options);                   \
+    }                                                               \
+  }
+AT_FORALL_COMPLEX_TYPES(TENSOR)
 #undef TENSOR
 
 Tensor from_file(std::string filename, c10::optional<bool> shared, c10::optional<int64_t> size, const TensorOptions& options) {

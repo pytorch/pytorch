@@ -27,11 +27,13 @@ if TEST_CUDA and torch.version.cuda is not None:  # the skip CUDNN test for ROCm
 IS_WINDOWS = sys.platform == "win32"
 
 
-# This effectively allows re-using the same extension (compiled once) in
-# multiple tests, just to split up the tested properties.
-def dont_wipe_extensions_build_folder(func):
-    func.dont_wipe = True
-    return func
+def remove_build_path():
+    if sys.platform == "win32":
+        print("Not wiping extensions build folder because Windows")
+        return
+    default_build_root = torch.utils.cpp_extension.get_default_build_root()
+    if os.path.exists(default_build_root):
+        shutil.rmtree(default_build_root)
 
 
 class TestCppExtensionJIT(common.TestCase):
@@ -45,33 +47,17 @@ class TestCppExtensionJIT(common.TestCase):
         self.old_working_dir = os.getcwd()
         os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
-        test_name = self.id().split(".")[-1]
-        dont_wipe = hasattr(getattr(self, test_name), "dont_wipe")
-        if dont_wipe:
-            print(
-                "Test case {} has 'dont_wipe' attribute set, ".format(test_name)
-                + "therefore not wiping extensions build folder before running the test"
-            )
-            return
-        if sys.platform == "win32":
-            print("Not wiping extensions build folder because Windows")
-            return
-        default_build_root = torch.utils.cpp_extension.get_default_build_root()
-        if os.path.exists(default_build_root):
-            shutil.rmtree(default_build_root)
-
     def tearDown(self):
         # return the working directory (see setUp)
         os.chdir(self.old_working_dir)
 
     @classmethod
+    def setUpClass(cls):
+        remove_build_path()
+
+    @classmethod
     def tearDownClass(cls):
-        if sys.platform == "win32":
-            print("Not wiping extensions build folder because Windows")
-            return
-        default_build_root = torch.utils.cpp_extension.get_default_build_root()
-        if os.path.exists(default_build_root):
-            shutil.rmtree(default_build_root)
+        remove_build_path()
 
     def test_jit_compile_extension(self):
         module = torch.utils.cpp_extension.load(
@@ -100,7 +86,7 @@ class TestCppExtensionJIT(common.TestCase):
         self.assertEqual(doubler.get().sum(), 4)
         self.assertEqual(doubler.forward().sum(), 8)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    @unittest.skipIf(not (TEST_CUDA or TEST_ROCM), "CUDA not found")
     def test_jit_cuda_extension(self):
         # NOTE: The name of the extension must equal the name of the module.
         module = torch.utils.cpp_extension.load(
@@ -299,7 +285,7 @@ class TestCppExtensionJIT(common.TestCase):
         z = module.sin_add(x, y)
         self.assertEqual(z, x.sin() + y.sin())
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    @unittest.skipIf(not (TEST_CUDA or TEST_ROCM), "CUDA not found")
     def test_inline_jit_compile_extension_cuda(self):
         cuda_source = """
         __global__ void cos_add_kernel(
@@ -341,6 +327,53 @@ class TestCppExtensionJIT(common.TestCase):
         z = module.cos_add(x, y)
         self.assertEqual(z, x.cos() + y.cos())
 
+    @unittest.skipIf(not (TEST_CUDA or TEST_ROCM), "CUDA not found")
+    def test_inline_jit_compile_custom_op_cuda(self):
+        cuda_source = """
+        __global__ void cos_add_kernel(
+            const float* __restrict__ x,
+            const float* __restrict__ y,
+            float* __restrict__ output,
+            const int size) {
+          const auto index = blockIdx.x * blockDim.x + threadIdx.x;
+          if (index < size) {
+            output[index] = __cosf(x[index]) + __cosf(y[index]);
+          }
+        }
+
+        torch::Tensor cos_add(torch::Tensor x, torch::Tensor y) {
+          auto output = torch::zeros_like(x);
+          const int threads = 1024;
+          const int blocks = (output.numel() + threads - 1) / threads;
+          cos_add_kernel<<<blocks, threads>>>(x.data_ptr<float>(), y.data_ptr<float>(), output.data_ptr<float>(), output.numel());
+          return output;
+        }
+        """
+
+        # Here, the C++ source need only declare the function signature.
+        cpp_source = """
+           #include <torch/library.h>
+           torch::Tensor cos_add(torch::Tensor x, torch::Tensor y);
+
+           TORCH_LIBRARY(inline_jit_extension_custom_op_cuda, m) {
+             m.def("cos_add", cos_add);
+           }
+        """
+
+        torch.utils.cpp_extension.load_inline(
+            name="inline_jit_extension_custom_op_cuda",
+            cpp_sources=cpp_source,
+            cuda_sources=cuda_source,
+            verbose=True,
+            is_python_module=False,
+        )
+
+        x = torch.randn(4, 4, device="cuda", dtype=torch.float32)
+        y = torch.randn(4, 4, device="cuda", dtype=torch.float32)
+
+        z = torch.ops.inline_jit_extension_custom_op_cuda.cos_add(x, y)
+        self.assertEqual(z, x.cos() + y.cos())
+
     def test_inline_jit_compile_extension_throws_when_functions_is_bad(self):
         with self.assertRaises(ValueError):
             torch.utils.cpp_extension.load_inline(
@@ -368,7 +401,7 @@ class TestCppExtensionJIT(common.TestCase):
         z = module.tanh_add(x, y).cpu()
         self.assertEqual(z, x.tanh() + y.tanh())
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    @unittest.skipIf(not (TEST_CUDA or TEST_ROCM), "CUDA not found")
     def test_half_support(self):
         """
         Checks for an issue with operator< ambiguity for half when certain
@@ -430,8 +463,6 @@ class TestCppExtensionJIT(common.TestCase):
         module = compile("int f() { return 789; }")
         self.assertEqual(module.f(), 789)
 
-    @dont_wipe_extensions_build_folder
-    @common.skipIfRocm
     def test_cpp_frontend_module_has_same_output_as_python(self, dtype=torch.double):
         extension = torch.utils.cpp_extension.load(
             name="cpp_frontend_extension",
@@ -463,8 +494,6 @@ class TestCppExtensionJIT(common.TestCase):
         self.assertEqual(cpp_parameters["fc.weight"].grad, python_linear.weight.grad)
         self.assertEqual(cpp_parameters["fc.bias"].grad, python_linear.bias.grad)
 
-    @dont_wipe_extensions_build_folder
-    @common.skipIfRocm
     def test_cpp_frontend_module_python_inter_op(self):
         extension = torch.utils.cpp_extension.load(
             name="cpp_frontend_extension",
@@ -562,8 +591,6 @@ class TestCppExtensionJIT(common.TestCase):
         self.assertIn("buf", nb)
         self.assertEqual(nb[0][1], torch.eye(5))
 
-    @dont_wipe_extensions_build_folder
-    @common.skipIfRocm
     def test_cpp_frontend_module_has_up_to_date_attributes(self):
         extension = torch.utils.cpp_extension.load(
             name="cpp_frontend_extension",
@@ -585,9 +612,7 @@ class TestCppExtensionJIT(common.TestCase):
         net.add_new_submodule("fc2")
         self.assertEqual(len(net._modules), 2)
 
-    @dont_wipe_extensions_build_folder
-    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
-    @common.skipIfRocm
+    @unittest.skipIf(not (TEST_CUDA or TEST_ROCM), "CUDA not found")
     def test_cpp_frontend_module_python_inter_op_with_cuda(self):
         extension = torch.utils.cpp_extension.load(
             name="cpp_frontend_extension",
@@ -744,21 +769,21 @@ class TestCppExtensionJIT(common.TestCase):
             warn_mod.foo(t, 0)
             self.assertEqual(len(w), 1)
 
-            # Catched with cpp error should not be detected
+            # Catched with cpp error should also be detected
             with self.assertRaisesRegex(TypeError, t.type()):
                 warn_mod.foo(t, 1)
-            self.assertEqual(len(w), 1)
+            self.assertEqual(len(w), 2)
 
-            # Catched with python error should not be detected
+            # Catched with python error should also be detected
             with self.assertRaisesRegex(SystemError, "bad argument to internal function"):
                 warn_mod.foo(t, 2)
-            self.assertEqual(len(w), 1)
+            self.assertEqual(len(w), 3)
 
-            # Catched with pybind error should not be detected
+            # Catched with pybind error should also be detected
             # Note that there is no type name translation for pybind errors
             with self.assertRaisesRegex(KeyError, cpp_tensor_name):
                 warn_mod.foo(t, 3)
-            self.assertEqual(len(w), 1)
+            self.assertEqual(len(w), 4)
 
         # Make sure raising warnings are handled properly
         with warnings.catch_warnings(record=True) as w:

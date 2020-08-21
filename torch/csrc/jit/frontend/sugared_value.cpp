@@ -109,6 +109,7 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
            {"is_sparse", "prim"},
            {"is_mkldnn", "prim"},
            {"is_quantized", "prim"},
+           {"is_meta", "prim"},
            {"is_leaf", "aten"},
            {"requires_grad", "prim"},
            {"layout", "prim"},
@@ -156,10 +157,29 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
       auto n = g.insertNode(g.createGetAttr(value_, field));
       return std::make_shared<SimpleValue>(n->output());
     }
+    // Check and see if it's a getter attribute.
+    auto prop = classType->getProperty(field);
+    if (prop) {
+      return MethodValue(value_, prop->getter->name())
+          .call(loc, m, {}, {}, /*n_binders=*/1);
+    }
   } else if (auto iface = value_->type()->cast<InterfaceType>()) {
     // accessing methods of interfaces
     if (auto schema = iface->getMethod(field)) {
       return std::make_shared<MethodValue>(getValue(), field);
+    }
+  } else if (auto enum_type = value_->type()->cast<EnumType>()) {
+    // Handle access to Enum's `name` and `value` attribute.
+    auto& g = *m.graph();
+
+    if (field == "name") {
+      auto n = g.insertNode(g.createEnumName(value_));
+      return std::make_shared<SimpleValue>(n->output());
+    }
+
+    if (field == "value") {
+      auto n = g.insertNode(g.createEnumValue(value_));
+      return std::make_shared<SimpleValue>(n->output());
     }
   }
 
@@ -270,6 +290,14 @@ void SimpleValue::setAttr(
             << "Initialize the field at the top level first";
       }
     } else {
+      // Check and see if it's a setter attribute.
+      auto prop = classType->getProperty(field);
+      if (prop && prop->setter) {
+        MethodValue(value_, prop->setter->name())
+            .call(loc, m, {newValue}, {}, /*n_binders=*/1);
+        return;
+      }
+
       throw ErrorReport(loc)
           << "Tried to set nonexistent attribute: " << field
           << ". Did you forget to initialize it in __init__()?";
@@ -583,7 +611,8 @@ std::shared_ptr<SugaredValue> ClassValue::attr(
     Function& m,
     const std::string& field) {
   if (field != "__new__") {
-    throw ErrorReport(loc) << "Tried to lookup unknown attribute on class";
+    throw ErrorReport(loc) << "Tried to lookup unknown attribute on class "
+                           << type_->annotation_str();
   }
   return SpecialFormValue::create(prim::CreateObject);
 }

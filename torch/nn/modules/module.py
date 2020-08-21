@@ -46,6 +46,135 @@ def _addindent(s_, numSpaces):
     return s
 
 
+r"""This tracks hooks common to all modules that are executed before/after
+calling forward and backward. This is global state used for debugging/profiling
+purposes"""
+_global_backward_hooks = OrderedDict()
+_global_forward_pre_hooks = OrderedDict()
+_global_forward_hooks = OrderedDict()
+
+
+def register_module_forward_pre_hook(hook: Callable[..., None]) -> RemovableHandle:
+    r"""Registers a forward pre-hook common to all modules.
+
+    .. warning ::
+
+        This adds global state to the `nn.module` module
+        and it is only intended for debugging/profiling purposes.
+
+    The hook will be called every time before :func:`forward` is invoked.
+    It should have the following signature::
+
+        hook(module, input) -> None or modified input
+
+    The input contains only the positional arguments given to the module.
+    Keyword arguments won't be passed to the hooks and only to the ``forward``.
+    The hook can modify the input. User can either return a tuple or a
+    single modified value in the hook. We will wrap the value into a tuple
+    if a single value is returned(unless that value is already a tuple).
+
+    This hook has precedence over the specific module hooks registered with
+    ``register_forward_pre_hook``.
+
+    Returns:
+        :class:`torch.utils.hooks.RemovableHandle`:
+            a handle that can be used to remove the added hook by calling
+            ``handle.remove()``
+    """
+    handle = hooks.RemovableHandle(_global_forward_pre_hooks)
+    _global_forward_pre_hooks[handle.id] = hook
+    return handle
+
+
+def register_module_forward_hook(hook: Callable[..., None]) -> RemovableHandle:
+    r"""Registers a global forward hook for all the modules
+
+    .. warning ::
+
+        This adds global state to the `nn.module` module
+        and it is only intended for debugging/profiling purposes.
+
+    The hook will be called every time after :func:`forward` has computed an output.
+    It should have the following signature::
+
+        hook(module, input, output) -> None or modified output
+
+    The input contains only the positional arguments given to the module.
+    Keyword arguments won't be passed to the hooks and only to the ``forward``.
+    The hook can modify the output. It can modify the input inplace but
+    it will not have effect on forward since this is called after
+    :func:`forward` is called.
+
+    Returns:
+        :class:`torch.utils.hooks.RemovableHandle`:
+            a handle that can be used to remove the added hook by calling
+            ``handle.remove()``
+
+    This hook will be executed before specific module hooks registered with
+    ``register_forward_hook``.
+    """
+    handle = hooks.RemovableHandle(_global_forward_hooks)
+    _global_forward_hooks[handle.id] = hook
+    return handle
+
+def register_module_backward_hook(
+    hook: Callable[['Module', _grad_t, _grad_t], Union[None, Tensor]]
+) -> RemovableHandle:
+    r"""Registers a backward hook common to all the modules.
+
+    .. warning ::
+        This adds global state to the `nn.module` module
+        and it is only intended for debugging/profiling purposes.
+
+        The current implementation will not have the presented behavior
+        for complex :class:`Module` that perform many operations.
+        In some failure cases, :attr:`grad_input` and :attr:`grad_output` will only
+        contain the gradients for a subset of the inputs and outputs.
+        For such :class:`Module`, you should use :func:`torch.Tensor.register_hook`
+        directly on a specific input or output to get the required gradients.
+
+    The hook will be called every time the gradients with respect to module
+    inputs are computed. The hook should have the following signature::
+
+        hook(module, grad_input, grad_output) -> Tensor or None
+
+    The :attr:`grad_input` and :attr:`grad_output` may be tuples if the
+    module has multiple inputs or outputs. The hook should not modify its
+    arguments, but it can optionally return a new gradient with respect to
+    input that will be used in place of :attr:`grad_input` in subsequent
+    computations. :attr:`grad_input` will only correspond to the inputs given
+    as positional arguments.
+
+    Global hooks are called before hooks registered with `register_backward_hook`
+
+    Returns:
+        :class:`torch.utils.hooks.RemovableHandle`:
+            a handle that can be used to remove the added hook by calling
+            ``handle.remove()``
+
+    """
+    handle = hooks.RemovableHandle(_global_backward_hooks)
+    _global_backward_hooks[handle.id] = hook
+    return handle
+
+
+# Trick mypy into not applying contravariance rules to inputs by defining
+# forward as a value, rather than a function.  See also
+# https://github.com/python/mypy/issues/8795
+def _forward_unimplemented(self, *input: Any) -> None:
+    r"""Defines the computation performed at every call.
+
+    Should be overridden by all subclasses.
+
+    .. note::
+        Although the recipe for forward pass needs to be defined within
+        this function, one should call the :class:`Module` instance afterwards
+        instead of this since the former takes care of running the
+        registered hooks while the latter silently ignores them.
+    """
+    raise NotImplementedError
+
+
 class Module:
     r"""Base class for all neural network modules.
 
@@ -69,6 +198,10 @@ class Module:
 
     Submodules assigned in this way will be registered, and will have their
     parameters converted too when you call :meth:`to`, etc.
+
+    :ivar training: Boolean represents whether this module is in training or
+                    evaluation mode.
+    :vartype training: bool
     """
 
     dump_patches: bool = False
@@ -87,7 +220,7 @@ class Module:
 
     training: bool
 
-    def __init__(self) -> None:
+    def __init__(self):
         """
         Initializes internal Module state, shared by both nn.Module and ScriptModule.
         """
@@ -104,25 +237,9 @@ class Module:
         self._load_state_dict_pre_hooks = OrderedDict()
         self._modules = OrderedDict()
 
-    # Trick mypy into not applying contravariance rules to inputs by defining
-    # forward as a value, rather than a function.  See also
-    # https://github.com/python/mypy/issues/8795
-    def _forward_unimplemented(self, *input: Any) -> None:
-        raise NotImplementedError
-
-    r"""Defines the computation performed at every call.
-
-    Should be overridden by all subclasses.
-
-    .. note::
-        Although the recipe for forward pass needs to be defined within
-        this function, one should call the :class:`Module` instance afterwards
-        instead of this since the former takes care of running the
-        registered hooks while the latter silently ignores them.
-    """
     forward: Callable[..., Any] = _forward_unimplemented
 
-    def register_buffer(self, name: str, tensor: Tensor, persistent: bool = True) -> None:
+    def register_buffer(self, name: str, tensor: Optional[Tensor], persistent: bool = True) -> None:
         r"""Adds a buffer to the module.
 
         This is typically used to register a buffer that should not to be
@@ -174,7 +291,7 @@ class Module:
             else:
                 self._non_persistent_buffers_set.add(name)
 
-    def register_parameter(self, name: str, param: Parameter) -> None:
+    def register_parameter(self, name: str, param: Optional[Parameter]) -> None:
         r"""Adds a parameter to the module.
 
         The parameter can be accessed as an attribute using given name.
@@ -213,7 +330,7 @@ class Module:
         else:
             self._parameters[name] = param
 
-    def add_module(self, name: str, module: 'Module') -> None:
+    def add_module(self, name: str, module: Optional['Module']) -> None:
         r"""Adds a child module to the current module.
 
         The module can be accessed as an attribute using the given name.
@@ -576,14 +693,13 @@ class Module:
         self._forward_hooks[handle.id] = hook
         return handle
 
-
     def _slow_forward(self, *input, **kwargs):
         tracing_state = torch._C._get_tracing_state()
         if not tracing_state or isinstance(self.forward, torch._C.ScriptMethod):
             return self.forward(*input, **kwargs)
-        recording_scopes = torch.jit._trace_module_map is not None
+        recording_scopes = torch.jit._trace._trace_module_map is not None
         if recording_scopes:
-            name = torch.jit._trace_module_map[self] if self in torch.jit._trace_module_map else None
+            name = torch.jit._trace._trace_module_map[self] if self in torch.jit._trace._trace_module_map else None
             if name:
                 cur_scope_name = tracing_state.current_scope()
                 tracing_state.push_scope(name)
@@ -597,7 +713,9 @@ class Module:
         return result
 
     def _call_impl(self, *input, **kwargs):
-        for hook in self._forward_pre_hooks.values():
+        for hook in itertools.chain(
+                _global_forward_pre_hooks.values(),
+                self._forward_pre_hooks.values()):
             result = hook(self, input)
             if result is not None:
                 if not isinstance(result, tuple):
@@ -607,11 +725,13 @@ class Module:
             result = self._slow_forward(*input, **kwargs)
         else:
             result = self.forward(*input, **kwargs)
-        for hook in self._forward_hooks.values():
+        for hook in itertools.chain(
+                _global_forward_hooks.values(),
+                self._forward_hooks.values()):
             hook_result = hook(self, input, result)
             if hook_result is not None:
                 result = hook_result
-        if len(self._backward_hooks) > 0:
+        if (len(self._backward_hooks) > 0) or (len(_global_backward_hooks) > 0):
             var = result
             while not isinstance(var, torch.Tensor):
                 if isinstance(var, dict):
@@ -620,7 +740,9 @@ class Module:
                     var = var[0]
             grad_fn = var.grad_fn
             if grad_fn is not None:
-                for hook in self._backward_hooks.values():
+                for hook in itertools.chain(
+                        _global_backward_hooks.values(),
+                        self._backward_hooks.values()):
                     wrapper = functools.partial(hook, self)
                     functools.update_wrapper(wrapper, hook)
                     grad_fn.register_hook(wrapper)
@@ -637,6 +759,8 @@ class Module:
             self._state_dict_hooks = OrderedDict()
         if '_load_state_dict_pre_hooks' not in self.__dict__:
             self._load_state_dict_pre_hooks = OrderedDict()
+        if '_non_persistent_buffers_set' not in self.__dict__:
+            self._non_persistent_buffers_set = set()
 
     def __getattr__(self, name: str) -> Union[Tensor, 'Module']:
         if '_parameters' in self.__dict__:
@@ -860,7 +984,7 @@ class Module:
                     error_msgs.append('While copying the parameter named "{}", '
                                       'whose dimensions in the model are {} and '
                                       'whose dimensions in the checkpoint are {}, '
-                                      'an exception occured : {}.'
+                                      'an exception occurred : {}.'
                                       .format(key, param.size(), input_param.size(), ex.args))
             elif strict:
                 missing_keys.append(key)
@@ -1200,7 +1324,10 @@ class Module:
 
         for p in self.parameters():
             if p.grad is not None:
-                p.grad.detach_()
+                if p.grad.grad_fn is not None:
+                    p.grad.detach_()
+                else:
+                    p.grad.requires_grad_(False)
                 p.grad.zero_()
 
     def share_memory(self: T) -> T:
@@ -1212,7 +1339,7 @@ class Module:
     def extra_repr(self) -> str:
         r"""Set the extra representation of the module
 
-        To print customized extra information, you should reimplement
+        To print customized extra information, you should re-implement
         this method in your own modules. Both single-line and multi-line
         strings are acceptable.
         """

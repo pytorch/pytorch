@@ -36,7 +36,7 @@ T* ptr(T* obj) {
  * }
  *
  * And therefore dispatch should never call:
- * ptr(mutator)->handle(static_cast<Statement*>(this));
+ * ptr(mutator)->handle(this->as<Statement>());
  */
 
 template <typename T>
@@ -45,36 +45,69 @@ void Val::dispatch(T handler, Val* val) {
     case ValType::Scalar:
       switch (*(val->getDataType())) {
         case DataType::Bool:
-          ptr(handler)->handle(static_cast<Bool*>(val));
+          ptr(handler)->handle(val->as<Bool>());
           return;
         case DataType::Float:
-          ptr(handler)->handle(static_cast<Float*>(val));
+          ptr(handler)->handle(val->as<Float>());
           return;
         case DataType::Half:
-          ptr(handler)->handle(static_cast<Half*>(val));
+          ptr(handler)->handle(val->as<Half>());
           return;
         case DataType::Int:
-          ptr(handler)->handle(static_cast<Int*>(val));
+          ptr(handler)->handle(val->as<Int>());
           return;
         default:
           break;
       }
       break;
     case ValType::IterDomain:
-      ptr(handler)->handle(static_cast<IterDomain*>(val));
+      ptr(handler)->handle(val->as<IterDomain>());
       return;
     case ValType::TensorDomain:
-      ptr(handler)->handle(static_cast<TensorDomain*>(val));
+      ptr(handler)->handle(val->as<TensorDomain>());
       return;
     case ValType::TensorView:
-      ptr(handler)->handle(static_cast<TensorView*>(val));
-      return;
-    case ValType::TensorIndex:
-      ptr(handler)->handle(static_cast<TensorIndex*>(val));
+      ptr(handler)->handle(val->as<TensorView>());
       return;
     case ValType::NamedScalar:
-      ptr(handler)->handle(static_cast<NamedScalar*>(val));
+      ptr(handler)->handle(val->as<NamedScalar>());
       return;
+
+    // TODO: remove once the Kernel IR has its own visitor
+    case ValType::TensorIndex:
+      ptr(handler)->handle(val->as<kir::TensorIndex>());
+      return;
+    case ValType::KirScalar:
+      switch (*(val->getDataType())) {
+        case DataType::Bool:
+          ptr(handler)->handle(val->as<kir::Bool>());
+          return;
+        case DataType::Float:
+          ptr(handler)->handle(val->as<kir::Float>());
+          return;
+        case DataType::Half:
+          ptr(handler)->handle(val->as<kir::Half>());
+          return;
+        case DataType::Int:
+          ptr(handler)->handle(val->as<kir::Int>());
+          return;
+        default:
+          break;
+      }
+      break;
+    case ValType::KirNamedScalar:
+      ptr(handler)->handle(val->as<kir::NamedScalar>());
+      return;
+    case ValType::KirIterDomain:
+      ptr(handler)->handle(val->as<kir::IterDomain>());
+      return;
+    case ValType::KirTensorDomain:
+      ptr(handler)->handle(val->as<kir::TensorDomain>());
+      return;
+    case ValType::KirTensorView:
+      ptr(handler)->handle(val->as<kir::TensorView>());
+      return;
+
     default:
       break;
   }
@@ -85,35 +118,59 @@ template <typename T>
 void Expr::dispatch(T handler, Expr* expr) {
   switch (*(expr->getExprType())) {
     case ExprType::Split:
-      ptr(handler)->handle(static_cast<Split*>(expr));
+      ptr(handler)->handle(expr->as<Split>());
       return;
     case ExprType::Merge:
-      ptr(handler)->handle(static_cast<Merge*>(expr));
+      ptr(handler)->handle(expr->as<Merge>());
       return;
     case ExprType::UnaryOp:
-      ptr(handler)->handle(static_cast<UnaryOp*>(expr));
+      ptr(handler)->handle(expr->as<UnaryOp>());
       return;
     case ExprType::BinaryOp:
-      ptr(handler)->handle(static_cast<BinaryOp*>(expr));
+      ptr(handler)->handle(expr->as<BinaryOp>());
       return;
     case ExprType::TernaryOp:
-      ptr(handler)->handle(static_cast<TernaryOp*>(expr));
+      ptr(handler)->handle(expr->as<TernaryOp>());
       return;
     case ExprType::ReductionOp:
-      ptr(handler)->handle(static_cast<ReductionOp*>(expr));
+      ptr(handler)->handle(expr->as<ReductionOp>());
       return;
     case ExprType::BroadcastOp:
-      ptr(handler)->handle(static_cast<BroadcastOp*>(expr));
+      ptr(handler)->handle(expr->as<BroadcastOp>());
+      return;
+
+    case ExprType::KirUnaryOp:
+      ptr(handler)->handle(expr->as<kir::UnaryOp>());
+      return;
+    case ExprType::KirBinaryOp:
+      ptr(handler)->handle(expr->as<kir::BinaryOp>());
+      return;
+    case ExprType::KirTernaryOp:
+      ptr(handler)->handle(expr->as<kir::TernaryOp>());
+      return;
+    case ExprType::KirReductionOp:
+      ptr(handler)->handle(expr->as<kir::ReductionOp>());
+      return;
+    case ExprType::KirBroadcastOp:
+      ptr(handler)->handle(expr->as<kir::BroadcastOp>());
+      return;
+
+    case ExprType::GridReduction:
+      ptr(handler)->handle(expr->as<kir::GridReduction>());
       return;
     case ExprType::ForLoop:
-      ptr(handler)->handle(static_cast<ForLoop*>(expr));
+      ptr(handler)->handle(expr->as<kir::ForLoop>());
       return;
     case ExprType::IfThenElse:
-      ptr(handler)->handle(static_cast<IfThenElse*>(expr));
+      ptr(handler)->handle(expr->as<kir::IfThenElse>());
       return;
     case ExprType::Allocate:
-      ptr(handler)->handle(static_cast<Allocate*>(expr));
+      ptr(handler)->handle(expr->as<kir::Allocate>());
       return;
+    case ExprType::Sync:
+      ptr(handler)->handle(expr->as<kir::Sync>());
+      return;
+
     default:
       TORCH_INTERNAL_ASSERT(false, "Unknown exprtype in dispatch!");
   }
@@ -122,9 +179,9 @@ void Expr::dispatch(T handler, Expr* expr) {
 template <typename T>
 void Statement::dispatch(T handler, Statement* stmt) {
   if (stmt->isVal()) {
-    ptr(handler)->handle(static_cast<Val*>(stmt));
+    ptr(handler)->handle(stmt->as<Val>());
   } else if (stmt->isExpr()) {
-    ptr(handler)->handle(static_cast<Expr*>(stmt));
+    ptr(handler)->handle(stmt->as<Expr>());
   } else
     TORCH_INTERNAL_ASSERT(false, "Unknown stmttype in dispatch!");
 }
@@ -135,36 +192,69 @@ void Val::constDispatch(T handler, const Val* val) {
     case ValType::Scalar:
       switch (*(val->getDataType())) {
         case DataType::Bool:
-          ptr(handler)->handle(static_cast<const Bool*>(val));
+          ptr(handler)->handle(val->as<Bool>());
           return;
         case DataType::Float:
-          ptr(handler)->handle(static_cast<const Float*>(val));
+          ptr(handler)->handle(val->as<Float>());
           return;
         case DataType::Half:
-          ptr(handler)->handle(static_cast<const Half*>(val));
+          ptr(handler)->handle(val->as<Half>());
           return;
         case DataType::Int:
-          ptr(handler)->handle(static_cast<const Int*>(val));
+          ptr(handler)->handle(val->as<Int>());
           return;
         default:
           break;
       }
       break;
     case ValType::IterDomain:
-      ptr(handler)->handle(static_cast<const IterDomain*>(val));
+      ptr(handler)->handle(val->as<IterDomain>());
       return;
     case ValType::TensorDomain:
-      ptr(handler)->handle(static_cast<const TensorDomain*>(val));
+      ptr(handler)->handle(val->as<TensorDomain>());
       return;
     case ValType::TensorView:
-      ptr(handler)->handle(static_cast<const TensorView*>(val));
-      return;
-    case ValType::TensorIndex:
-      ptr(handler)->handle(static_cast<const TensorIndex*>(val));
+      ptr(handler)->handle(val->as<TensorView>());
       return;
     case ValType::NamedScalar:
-      ptr(handler)->handle(static_cast<const NamedScalar*>(val));
+      ptr(handler)->handle(val->as<NamedScalar>());
       return;
+
+    // TODO: remove once the Kernel IR has its own visitor
+    case ValType::TensorIndex:
+      ptr(handler)->handle(val->as<kir::TensorIndex>());
+      return;
+    case ValType::KirScalar:
+      switch (*(val->getDataType())) {
+        case DataType::Bool:
+          ptr(handler)->handle(val->as<kir::Bool>());
+          return;
+        case DataType::Float:
+          ptr(handler)->handle(val->as<kir::Float>());
+          return;
+        case DataType::Half:
+          ptr(handler)->handle(val->as<kir::Half>());
+          return;
+        case DataType::Int:
+          ptr(handler)->handle(val->as<kir::Int>());
+          return;
+        default:
+          break;
+      }
+      break;
+    case ValType::KirNamedScalar:
+      ptr(handler)->handle(val->as<kir::NamedScalar>());
+      return;
+    case ValType::KirIterDomain:
+      ptr(handler)->handle(val->as<kir::IterDomain>());
+      return;
+    case ValType::KirTensorDomain:
+      ptr(handler)->handle(val->as<kir::TensorDomain>());
+      return;
+    case ValType::KirTensorView:
+      ptr(handler)->handle(val->as<kir::TensorView>());
+      return;
+
     default:
       break;
   }
@@ -175,35 +265,59 @@ template <typename T>
 void Expr::constDispatch(T handler, const Expr* expr) {
   switch (*(expr->getExprType())) {
     case ExprType::Split:
-      ptr(handler)->handle(static_cast<const Split*>(expr));
+      ptr(handler)->handle(expr->as<Split>());
       return;
     case ExprType::Merge:
-      ptr(handler)->handle(static_cast<const Merge*>(expr));
+      ptr(handler)->handle(expr->as<Merge>());
       return;
     case ExprType::UnaryOp:
-      ptr(handler)->handle(static_cast<const UnaryOp*>(expr));
+      ptr(handler)->handle(expr->as<UnaryOp>());
       return;
     case ExprType::BinaryOp:
-      ptr(handler)->handle(static_cast<const BinaryOp*>(expr));
+      ptr(handler)->handle(expr->as<BinaryOp>());
       return;
     case ExprType::TernaryOp:
-      ptr(handler)->handle(static_cast<const TernaryOp*>(expr));
+      ptr(handler)->handle(expr->as<TernaryOp>());
       return;
     case ExprType::ReductionOp:
-      ptr(handler)->handle(static_cast<const ReductionOp*>(expr));
+      ptr(handler)->handle(expr->as<ReductionOp>());
       return;
     case ExprType::BroadcastOp:
-      ptr(handler)->handle(static_cast<const BroadcastOp*>(expr));
+      ptr(handler)->handle(expr->as<BroadcastOp>());
+      return;
+
+    case ExprType::KirUnaryOp:
+      ptr(handler)->handle(expr->as<kir::UnaryOp>());
+      return;
+    case ExprType::KirBinaryOp:
+      ptr(handler)->handle(expr->as<kir::BinaryOp>());
+      return;
+    case ExprType::KirTernaryOp:
+      ptr(handler)->handle(expr->as<kir::TernaryOp>());
+      return;
+    case ExprType::KirReductionOp:
+      ptr(handler)->handle(expr->as<kir::ReductionOp>());
+      return;
+    case ExprType::KirBroadcastOp:
+      ptr(handler)->handle(expr->as<kir::BroadcastOp>());
+      return;
+
+    case ExprType::GridReduction:
+      ptr(handler)->handle(expr->as<kir::GridReduction>());
       return;
     case ExprType::ForLoop:
-      ptr(handler)->handle(static_cast<const ForLoop*>(expr));
+      ptr(handler)->handle(expr->as<kir::ForLoop>());
       return;
     case ExprType::IfThenElse:
-      ptr(handler)->handle(static_cast<const IfThenElse*>(expr));
+      ptr(handler)->handle(expr->as<kir::IfThenElse>());
       return;
     case ExprType::Allocate:
-      ptr(handler)->handle(static_cast<const Allocate*>(expr));
+      ptr(handler)->handle(expr->as<kir::Allocate>());
       return;
+    case ExprType::Sync:
+      ptr(handler)->handle(expr->as<kir::Sync>());
+      return;
+
     default:
       TORCH_INTERNAL_ASSERT(false, "Unknown exprtype in dispatch!");
   }
@@ -212,9 +326,9 @@ void Expr::constDispatch(T handler, const Expr* expr) {
 template <typename T>
 void Statement::constDispatch(T handler, const Statement* stmt) {
   if (stmt->isVal()) {
-    ptr(handler)->handle(static_cast<const Val*>(stmt));
+    ptr(handler)->handle(stmt->as<Val>());
   } else if (stmt->isExpr()) {
-    ptr(handler)->handle(static_cast<const Expr*>(stmt));
+    ptr(handler)->handle(stmt->as<Expr>());
   } else
     TORCH_INTERNAL_ASSERT(false, "Unknown stmttype in dispatch!");
 }
@@ -228,7 +342,7 @@ void Statement::constDispatch(T handler, const Statement* stmt) {
  * implement Statement* mutate(Statement* stmt){ stmt->mutatorDispatch(this);
  * }
  * And therefore dispatch should never call:
- *   ptr(mutator)->mutate(static_cast<Statement*>(this));
+ *   ptr(mutator)->mutate(this->as<Statement>());
  */
 template <typename T>
 Statement* Val::mutatorDispatch(T mutator, Val* val) {
@@ -236,27 +350,27 @@ Statement* Val::mutatorDispatch(T mutator, Val* val) {
     case ValType::Scalar:
       switch (*(val->getDataType())) {
         case DataType::Bool:
-          return ptr(mutator)->mutate(static_cast<Bool*>(val));
+          return ptr(mutator)->mutate(val->as<Bool>());
         case DataType::Float:
-          return ptr(mutator)->mutate(static_cast<Float*>(val));
+          return ptr(mutator)->mutate(val->as<Float>());
         case DataType::Half:
-          return ptr(mutator)->mutate(static_cast<Half*>(val));
+          return ptr(mutator)->mutate(val->as<Half>());
         case DataType::Int:
-          return ptr(mutator)->mutate(static_cast<Int*>(val));
+          return ptr(mutator)->mutate(val->as<Int>());
         default:
           break;
       }
       break;
     case ValType::IterDomain:
-      return ptr(mutator)->mutate(static_cast<IterDomain*>(val));
+      return ptr(mutator)->mutate(val->as<IterDomain>());
     case ValType::TensorDomain:
-      return ptr(mutator)->mutate(static_cast<TensorDomain*>(val));
+      return ptr(mutator)->mutate(val->as<TensorDomain>());
     case ValType::TensorView:
-      return ptr(mutator)->mutate(static_cast<TensorView*>(val));
+      return ptr(mutator)->mutate(val->as<TensorView>());
     case ValType::TensorIndex:
-      return ptr(mutator)->mutate(static_cast<TensorIndex*>(val));
+      return ptr(mutator)->mutate(val->as<kir::TensorIndex>());
     case ValType::NamedScalar:
-      return ptr(mutator)->mutate(static_cast<NamedScalar*>(val));
+      return ptr(mutator)->mutate(val->as<NamedScalar>());
     default:
       break;
   }
@@ -267,25 +381,29 @@ template <typename T>
 Statement* Expr::mutatorDispatch(T mutator, Expr* expr) {
   switch (*(expr->getExprType())) {
     case ExprType::Split:
-      return ptr(mutator)->mutate(static_cast<Split*>(expr));
+      return ptr(mutator)->mutate(expr->as<Split>());
     case ExprType::Merge:
-      return ptr(mutator)->mutate(static_cast<Merge*>(expr));
+      return ptr(mutator)->mutate(expr->as<Merge>());
     case ExprType::UnaryOp:
-      return ptr(mutator)->mutate(static_cast<UnaryOp*>(expr));
+      return ptr(mutator)->mutate(expr->as<UnaryOp>());
     case ExprType::BinaryOp:
-      return ptr(mutator)->mutate(static_cast<BinaryOp*>(expr));
+      return ptr(mutator)->mutate(expr->as<BinaryOp>());
     case ExprType::TernaryOp:
-      return ptr(mutator)->mutate(static_cast<TernaryOp*>(expr));
+      return ptr(mutator)->mutate(expr->as<TernaryOp>());
     case ExprType::ReductionOp:
-      return ptr(mutator)->mutate(static_cast<ReductionOp*>(expr));
+      return ptr(mutator)->mutate(expr->as<ReductionOp>());
+    case ExprType::GridReduction:
+      return ptr(mutator)->mutate(expr->as<kir::GridReduction>());
     case ExprType::BroadcastOp:
-      return ptr(mutator)->mutate(static_cast<BroadcastOp*>(expr));
+      return ptr(mutator)->mutate(expr->as<BroadcastOp>());
     case ExprType::ForLoop:
-      return ptr(mutator)->mutate(static_cast<ForLoop*>(expr));
+      return ptr(mutator)->mutate(expr->as<kir::ForLoop>());
     case ExprType::IfThenElse:
-      return ptr(mutator)->mutate(static_cast<IfThenElse*>(expr));
+      return ptr(mutator)->mutate(expr->as<kir::IfThenElse>());
     case ExprType::Allocate:
-      return ptr(mutator)->mutate(static_cast<Allocate*>(expr));
+      return ptr(mutator)->mutate(expr->as<kir::Allocate>());
+    case ExprType::Sync:
+      return ptr(mutator)->mutate(expr->as<kir::Sync>());
     default:
       TORCH_INTERNAL_ASSERT(false, "Unknown exprtype in dispatch!");
   }
@@ -294,10 +412,10 @@ Statement* Expr::mutatorDispatch(T mutator, Expr* expr) {
 template <typename T>
 Statement* Statement::mutatorDispatch(T mutator, Statement* stmt) {
   if (stmt->isVal()) {
-    return ptr(mutator)->mutate(static_cast<Val*>(stmt));
+    return ptr(mutator)->mutate(stmt->as<Val>());
   }
   if (stmt->isExpr()) {
-    return ptr(mutator)->mutate(static_cast<Expr*>(stmt));
+    return ptr(mutator)->mutate(stmt->as<Expr>());
   }
   TORCH_INTERNAL_ASSERT(false, "Unknown stmttype in dispatch!");
 }
@@ -321,27 +439,19 @@ template void Val::dispatch(OptInDispatch*, Val*);
 template void Expr::dispatch(OptInDispatch, Expr*);
 template void Expr::dispatch(OptInDispatch*, Expr*);
 
-template void Statement::constDispatch(
-    OptOutConstDispatch,
-    const Statement* const);
-template void Statement::constDispatch(
-    OptOutConstDispatch*,
-    const Statement* const);
-template void Val::constDispatch(OptOutConstDispatch, const Val* const);
-template void Val::constDispatch(OptOutConstDispatch*, const Val* const);
-template void Expr::constDispatch(OptOutConstDispatch, const Expr* const);
-template void Expr::constDispatch(OptOutConstDispatch*, const Expr* const);
+template void Statement::constDispatch(OptOutConstDispatch, const Statement*);
+template void Statement::constDispatch(OptOutConstDispatch*, const Statement*);
+template void Val::constDispatch(OptOutConstDispatch, const Val*);
+template void Val::constDispatch(OptOutConstDispatch*, const Val*);
+template void Expr::constDispatch(OptOutConstDispatch, const Expr*);
+template void Expr::constDispatch(OptOutConstDispatch*, const Expr*);
 
-template void Statement::constDispatch(
-    OptInConstDispatch,
-    const Statement* const);
-template void Statement::constDispatch(
-    OptInConstDispatch*,
-    const Statement* const);
-template void Val::constDispatch(OptInConstDispatch, const Val* const);
-template void Val::constDispatch(OptInConstDispatch*, const Val* const);
-template void Expr::constDispatch(OptInConstDispatch, const Expr* const);
-template void Expr::constDispatch(OptInConstDispatch*, const Expr* const);
+template void Statement::constDispatch(OptInConstDispatch, const Statement*);
+template void Statement::constDispatch(OptInConstDispatch*, const Statement*);
+template void Val::constDispatch(OptInConstDispatch, const Val*);
+template void Val::constDispatch(OptInConstDispatch*, const Val*);
+template void Expr::constDispatch(OptInConstDispatch, const Expr*);
+template void Expr::constDispatch(OptInConstDispatch*, const Expr*);
 
 template Statement* Statement::mutatorDispatch(OptOutMutator, Statement*);
 template Statement* Statement::mutatorDispatch(OptOutMutator*, Statement*);
@@ -360,9 +470,11 @@ template Statement* Expr::mutatorDispatch(OptInMutator*, Expr*);
 void OptOutDispatch::handle(Statement* s) {
   Statement::dispatch(this, s);
 }
+
 void OptOutDispatch::handle(Expr* e) {
   Expr::dispatch(this, e);
 }
+
 void OptOutDispatch::handle(Val* v) {
   Val::dispatch(this, v);
 }
@@ -370,30 +482,36 @@ void OptOutDispatch::handle(Val* v) {
 void OptInDispatch::handle(Statement* s) {
   Statement::dispatch(this, s);
 }
+
 void OptInDispatch::handle(Expr* e) {
   Expr::dispatch(this, e);
 }
+
 void OptInDispatch::handle(Val* v) {
   Val::dispatch(this, v);
 }
 
-void OptOutConstDispatch::handle(const Statement* const s) {
+void OptOutConstDispatch::handle(const Statement* s) {
   Statement::constDispatch(this, s);
 }
-void OptOutConstDispatch::handle(const Expr* const e) {
+
+void OptOutConstDispatch::handle(const Expr* e) {
   Expr::constDispatch(this, e);
 }
-void OptOutConstDispatch::handle(const Val* const v) {
+
+void OptOutConstDispatch::handle(const Val* v) {
   Val::constDispatch(this, v);
 }
 
-void OptInConstDispatch::handle(const Statement* const s) {
+void OptInConstDispatch::handle(const Statement* s) {
   Statement::constDispatch(this, s);
 }
-void OptInConstDispatch::handle(const Expr* const e) {
+
+void OptInConstDispatch::handle(const Expr* e) {
   Expr::constDispatch(this, e);
 }
-void OptInConstDispatch::handle(const Val* const v) {
+
+void OptInConstDispatch::handle(const Val* v) {
   Val::constDispatch(this, v);
 }
 
@@ -415,9 +533,11 @@ Statement* OptInMutator::mutate(Val* v) {
 Statement* OptOutMutator::mutate(Statement* s) {
   return Statement::mutatorDispatch(this, s);
 }
+
 Statement* OptOutMutator::mutate(Expr* e) {
   return Expr::mutatorDispatch(this, e);
 }
+
 Statement* OptOutMutator::mutate(Val* v) {
   // If value is already mutated, return the mutation
   if (mutations.find(v) != mutations.end())

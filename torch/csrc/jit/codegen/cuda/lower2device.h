@@ -3,44 +3,48 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/kernel.h>
+#include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
 
-#include <map>
 #include <ostream>
-#include <stack>
 
 namespace torch {
 namespace jit {
 namespace fuser {
 
-// TODO: Change lowering so it can be called multiple times. It would be good to
-// keep user references intact so they can lower it as they describe the kernel.
-// Right now we can only lower once.
+class TORCH_CUDA_API GpuLower {
+  class KernelIrMapper;
 
-struct TORCH_CUDA_API GPULower : public OptOutMutator {
+ public:
+  GpuLower() = default;
+
+  explicit GpuLower(Fusion* fusion) : fusion_(fusion) {
+    lower();
+  }
+
+  // print generated code to ostream
+  std::ostream& printKernel(
+      std::ostream& _os,
+      const std::string& kernel_name = "CUDAGeneratedKernel");
+
+  std::string getKernel(const std::string& kernel_name = "CUDAGeneratedKernel");
+
+  std::vector<kir::Allocate*> global_allocations() {
+    return global_allocations_;
+  }
+
+  std::vector<kir::Allocate*> sync_allocations() {
+    return sync_allocations_;
+  }
+
+  // Converts a Fusion IR value into the Kernel IR equivalent
+  //
+  // TODO(kir): revisit this interface
+  //
+  static Val* lowerValue(const Val* val);
+
  private:
-  Fusion* const fusion_;
-  std::vector<Expr*> lowered_exprs;
-  Expr* active_scope = nullptr;
-
-  // Wrap pushBack in lower_utils if active_scope is null we want it to go
-  // straight to lower_exprs
-  void pushBack(Expr*);
-
-  // Custom dispatch for Expr, want to find out of it's a TV op
-  Statement* mutate(Expr*) final;
-
-  // Open the for loop.
-  Statement* mutate(ForLoop*) final;
-
-  // Open the for loop.
-  Statement* mutate(IfThenElse*) final;
-
-  // Remake operations with TensorIndex
-  Statement* mutate(UnaryOp*) final;
-  Statement* mutate(BinaryOp*) final;
-  Statement* mutate(TernaryOp*) final;
-  Statement* mutate(ReductionOp*) final;
-  Statement* mutate(BroadcastOp*) final;
+  void lower();
 
   // TensorViews are all based on symbolic sizes. When we first initialize them
   // we don't know if they're inputs or outputs which would mean that they have
@@ -48,18 +52,26 @@ struct TORCH_CUDA_API GPULower : public OptOutMutator {
   // not have this information. Since we need to have the correct information in
   // the kernel being fetched for shapes, we want to replace input and output
   // tensors to reference the runtime structure containing sizes.
-  void replaceSizes();
-  void fixComputeAt(Fusion* fusion);
+  void buildSizesMap();
 
- public:
-  // Init printer on ostream
-  GPULower(Fusion* _fusion) : fusion_(_fusion) {}
+  // Adjust memory types to make sure they are valid
+  void adjustMemoryTypes();
 
-  // print generated code to ostream
-  std::vector<Expr*> getLoweredExprs();
-  std::ostream& printKernel(
-      std::ostream& _os,
-      const std::string& kernel_name = "CUDAGeneratedKernel");
+ private:
+  // List of global buffers (not including buffers for grid syncronization)
+  std::vector<kir::Allocate*> global_allocations_;
+
+  // List of syncronization buffers that must be initialized to 0 when running
+  // the fusion
+  std::vector<kir::Allocate*> sync_allocations_;
+
+  // Lowered IR
+  std::vector<Expr*> lowered_exprs_;
+
+  // Fusion IR node to Kernel IR node mapping
+  std::unordered_map<const Val*, Val*> kir_map_;
+
+  Fusion* fusion_ = nullptr;
 };
 
 } // namespace fuser

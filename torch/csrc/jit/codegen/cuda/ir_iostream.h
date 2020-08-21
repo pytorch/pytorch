@@ -3,6 +3,7 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <torch/csrc/jit/codegen/cuda/dispatch.h>
+#include <torch/csrc/jit/codegen/cuda/lower_thread_predicate.h>
 
 #include <iostream>
 
@@ -10,37 +11,59 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
-struct Fusion;
+class Fusion;
 
-struct Statement;
+// Hierarchal dispatch functions for handle
+class Statement;
+class Expr;
+class Val;
 
-struct Val;
-struct Expr;
+// Vals
+class IterDomain;
+class TensorDomain;
+class TensorView;
+class Bool;
+class Float;
+class Half;
+class Int;
+class NamedScalar;
 
-struct UnaryOp;
-struct BinaryOp;
-struct TernaryOp;
-struct ReductionOp;
-struct BroadcastOp;
+// Exprs
+class Split;
+class Merge;
+class UnaryOp;
+class BinaryOp;
+class TernaryOp;
+class ReductionOp;
+class BroadcastOp;
 
-struct ForLoop;
-struct IfThenElse;
+// Kernel IR
+namespace kir {
 
-struct TensorDomain;
-struct TensorView;
-struct IterDomain;
-struct TensorIndex;
+class Bool;
+class Float;
+class Half;
+class Int;
+class NamedScalar;
 
-struct TensorContiguity;
+class IterDomain;
+class TensorDomain;
+class TensorView;
 
-struct Split;
-struct Merge;
+class UnaryOp;
+class BinaryOp;
+class TernaryOp;
+class ReductionOp;
+class BroadcastOp;
 
-struct Bool;
-struct Float;
-struct Half;
-struct Int;
-struct Add;
+class TensorIndex;
+class Allocate;
+class ForLoop;
+class IfThenElse;
+class GridReduction;
+class Sync;
+
+} // namespace kir
 
 /*
  * Define pretty printing functions for all nodes. handle is used so we can take
@@ -50,7 +73,7 @@ struct Add;
  * stream operator <<.
  */
 
-struct TORCH_CUDA_API IRPrinter : public OptInConstDispatch {
+class TORCH_CUDA_API IRPrinter : public OptInConstDispatch {
  public:
   std::ostream& os;
   bool print_inline_ = false;
@@ -68,58 +91,73 @@ struct TORCH_CUDA_API IRPrinter : public OptInConstDispatch {
     indent_size = 0;
   }
 
-  void printHeader(Fusion* fusion, const std::string& kernel_name_);
+  void printHeader(
+      Fusion* fusion,
+      const std::string& kernel_name_,
+      const std::vector<Val*>& global_buffers);
 
   IRPrinter(std::ostream& _os) : os(_os) {}
 
-  virtual void handle(Fusion* const f);
+  virtual void handle(Fusion* f);
 
   // handle calls some non const fusion ops,
   // eventhough fusion should remain unchanged.
   // Need to look into this.
-  virtual void handle(const Fusion* const f) {
+  virtual void handle(const Fusion* f) {
     handle(const_cast<Fusion*>(f));
   }
+
   virtual void handle(Fusion& f) {
     handle(&f);
   }
 
-  virtual void handle(const Statement* const s) {
-    OptInConstDispatch::handle(s);
-  };
+  void handle(const Statement* s) override;
+  void handle(const Val* v) override;
+  void handle(const Expr* e) override;
 
-  virtual void handle(const Val* const v) {
-    OptInConstDispatch::handle(v);
-  };
-  virtual void handle(const Expr* const e) {
-    OptInConstDispatch::handle(e);
-  };
+  void handle(const TensorDomain*) override;
+  void handle(const TensorView*) override;
+  void handle(const IterDomain*) override;
+  void handle(const kir::TensorIndex*) override;
 
-  virtual void handle(const TensorDomain* const) override;
-  virtual void handle(const TensorView* const) override;
-  virtual void handle(const IterDomain* const) override;
-  virtual void handle(const TensorIndex* const) override;
+  void handle(const Bool*) override;
+  void handle(const Float*) override;
+  void handle(const Half*) override;
+  void handle(const Int*) override;
+  void handle(const NamedScalar*) override;
 
-  virtual void handle(const Bool* const) override;
-  virtual void handle(const Float* const) override;
-  virtual void handle(const Half* const) override;
-  virtual void handle(const Int* const) override;
-  virtual void handle(const NamedScalar* const) override;
+  void handle(const UnaryOp*) override;
+  void handle(const BinaryOp*) override;
+  void handle(const TernaryOp*) override;
+  void handle(const ReductionOp*) override;
+  void handle(const BroadcastOp*) override;
 
-  virtual void handle(const UnaryOp* const) override;
-  virtual void handle(const BinaryOp* const) override;
-  virtual void handle(const TernaryOp* const) override;
-  virtual void handle(const ReductionOp* const) override;
-  virtual void handle(const BroadcastOp* const) override;
+  void handle(const kir::Bool*) override;
+  void handle(const kir::Float*) override;
+  void handle(const kir::Half*) override;
+  void handle(const kir::Int*) override;
+  void handle(const kir::NamedScalar*) override;
 
-  virtual void handle(const ForLoop* const) override;
-  virtual void handle(const IfThenElse* const) override;
-  virtual void handle(const Allocate* const) override;
+  void handle(const kir::IterDomain*) override;
+  void handle(const kir::TensorDomain*) override;
+  void handle(const kir::TensorView*) override;
 
-  virtual void handle(const Split* const) override;
-  virtual void handle(const Merge* const) override;
+  void handle(const kir::UnaryOp*) override;
+  void handle(const kir::BinaryOp*) override;
+  void handle(const kir::TernaryOp*) override;
+  void handle(const kir::ReductionOp*) override;
+  void handle(const kir::BroadcastOp*) override;
 
-  void print_inline(const Statement* const stmt) {
+  void handle(const kir::GridReduction*) override;
+  void handle(const kir::ForLoop*) override;
+  void handle(const kir::IfThenElse*) override;
+  void handle(const kir::Allocate*) override;
+  void handle(const kir::Sync*) override;
+
+  void handle(const Split*) override;
+  void handle(const Merge*) override;
+
+  void print_inline(const Statement* stmt) {
     bool prev = print_inline_;
     print_inline_ = true;
     handle(stmt);
@@ -130,12 +168,18 @@ struct TORCH_CUDA_API IRPrinter : public OptInConstDispatch {
 
   void printKernel(
       const std::vector<Expr*>& exprs,
-      const std::string& kernel_name);
+      const std::string& kernel_name,
+      const std::vector<Val*>& global_buffers);
+
+ private:
+  std::unique_ptr<ThreadPredicateMap> thread_predicates_;
+
+  const ThreadPredicateMap& getThreadPredicateMap();
 };
 
 TORCH_CUDA_API std::ostream& operator<<(
     std::ostream& os,
-    const Statement* const stmt);
+    const Statement* stmt);
 TORCH_CUDA_API std::ostream& operator<<(std::ostream& os, Fusion* f);
 TORCH_CUDA_API std::ostream& operator<<(std::ostream& os, Fusion& f);
 

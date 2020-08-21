@@ -126,3 +126,5 @@ def override_qengines(qfunction):
 
 def qengine_is_fbgemm():
     return torch.backends.quantized.engine == 'fbgemm'
+def qengine_is_qnnpack():
+    return torch.backends.quantized.engine == 'qnnpack'

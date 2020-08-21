@@ -737,16 +737,17 @@ void checkTracedInputs(const TracedTestInputs& inputs) {
   for (const auto& input : inputs) {
     const auto& fn = std::get<0>(input);
     const auto& sizes = std::get<1>(input);
+
     if (fn == "test") {
       found_test = true;
       TORCH_CHECK(sizes.size() == 1);
       TORCH_CHECK(sizes[0] == std::vector<int64_t>({1, 2, 3}));
-    } else if (fn == "pow") {
+    } else if (fn == "aten::pow") {
       found_pow = true;
       TORCH_CHECK(sizes.size() == 2);
       TORCH_CHECK(sizes[0] == std::vector<int64_t>({1, 2, 3}));
       TORCH_CHECK(sizes[1].empty());
-    } else if (fn == "mul") {
+    } else if (fn == "aten::mul") {
       found_mul = true;
       TORCH_CHECK(sizes.size() > 1);
       TORCH_CHECK(sizes[0] == std::vector<int64_t>({1, 2, 3}));
@@ -820,8 +821,6 @@ void checkScopeCallbacks() {
 }
 
 void testRecordFunction() {
-  // enable observers
-  c10::impl::IncludeDispatchKeyGuard observer_guard(c10::DispatchKey::Profiler);
   // disabling the inlining of method calls
   GraphOptimizerEnabledGuard opt_guard(false);
 
@@ -1015,8 +1014,6 @@ void testRecordFunction() {
   ids.clear();
 
   auto th = std::thread([&ids]() {
-    c10::impl::IncludeDispatchKeyGuard observer_guard(
-        c10::DispatchKey::Profiler);
     addThreadLocalCallback(RecordFunctionCallback(
         [&ids](const RecordFunction& fn) { ids.push_back(2); },
         [](const RecordFunction&) {}));
@@ -1127,9 +1124,6 @@ void checkDebugInfo(c10::DebugInfoKind kind, int model_id) {
 }
 
 void testThreadLocalDebugInfo() {
-  // enable observers
-  c10::impl::IncludeDispatchKeyGuard observer_guard(c10::DispatchKey::Profiler);
-
   TORCH_CHECK(
       c10::ThreadLocalDebugInfo::get(c10::DebugInfoKind::TEST_INFO) == nullptr);
   auto debug_info = std::make_shared<TestThreadLocalDebugInfo>();
@@ -1234,21 +1228,17 @@ void testNoneSchemaMatch() {
   RegisterOperators reg({
       Operator(
           "prim::test_none() -> int?",
-          [](Stack& stack) {
-            push(stack, IValue());
-            return 0;
-          },
+          [](Stack* stack) { push(stack, IValue()); },
           aliasAnalysisFromSchema()),
       Operator(
           "prim::is_none(int? a) -> bool",
-          [](Stack& stack) {
+          [](Stack* stack) {
             IValue a = pop(stack);
             if (a.isNone()) {
               push(stack, true);
             } else {
               push(stack, false);
             }
-            return 0;
           },
           aliasAnalysisFromSchema()),
   });
@@ -1332,14 +1322,17 @@ graph(%a):
   }
 }
 
+static void checkShape(TypePtr typ, std::vector<int64_t> expected) {
+  auto ptp = typ->expect<TensorType>();
+  ASSERT_EQ(ptp->sizes().concrete_sizes().value(), expected);
+}
+
 static void checkShape(
     Node* n,
     std::vector<int64_t> expected,
     bool prev = true) {
   auto profile = (prev) ? n->inputs().at(0)->node() : n;
-  auto tp = profile->output()->type();
-  auto ptp = tp->expect<TensorType>();
-  ASSERT_EQ(ptp->sizes().concrete_sizes().value(), expected);
+  checkShape(profile->output()->type(), expected);
 }
 
 void count_(
@@ -1695,6 +1688,14 @@ void testProfiler() {
   InterpreterState is{cd};
   is.run(stack);
 
+  // profiled types are stored as attributes and show up in the dump, e.g.
+  // Tensor = prim::profile[profiled_type=Double(4:256, 256:1, requires_grad=0,
+  // device=cpu)
+  testing::FileCheck()
+      .check("Tensor = prim::profile[profiled_type")
+      ->check_same("256")
+      ->run(*pr->profiled_graph_);
+
   auto begin = pr->profiled_graph_->block()->nodes().begin();
   auto end = pr->profiled_graph_->block()->nodes().end();
   auto mm =
@@ -1702,14 +1703,14 @@ void testProfiler() {
   ASSERT_NE(mm, end);
   std::vector<int64_t> mm_expected{4, 2048};
   std::vector<int64_t> eltwise{4, 512};
-  checkShape(*mm, mm_expected);
+  checkShape(mm->inputs().at(0)->node()->ty(attr::profiled_type), mm_expected);
   auto mul_n =
       std::find_if(begin, end, [](Node* n) { return n->kind() == aten::mul; });
   ASSERT_NE(mul_n, end);
-  checkShape(*mul_n, eltwise);
+  checkShape(mul_n->inputs().at(0)->node()->ty(attr::profiled_type), eltwise);
   auto tanh_n =
       std::find_if(begin, end, [](Node* n) { return n->kind() == aten::tanh; });
-  checkShape(*tanh_n, eltwise);
+  checkShape(tanh_n->inputs().at(0)->node()->ty(attr::profiled_type), eltwise);
 }
 
 void testCallStack() {
@@ -1881,11 +1882,13 @@ void testFutures() {
   {
     auto f1 = c10::make_intrusive<Future>(IntType::get());
     ASSERT_FALSE(f1->completed());
+    ASSERT_FALSE(f1->hasValue());
     int32_t sat1 = 0;
     int32_t sat2 = 0;
     f1->addCallback([&]() { ++sat1; });
     f1->markCompleted(43);
     ASSERT_TRUE(f1->completed());
+    ASSERT_TRUE(f1->hasValue());
     ASSERT_FALSE(f1->hasError());
     ASSERT_EQ(sat1, 1);
     ASSERT_EQ(f1->constValue().toInt(), 43);
@@ -1905,16 +1908,12 @@ void testFutures() {
     ASSERT_EQ(sat1, 1);
     ASSERT_TRUE(f1->completed());
     ASSERT_TRUE(f1->hasError());
+    ASSERT_FALSE(f1->hasValue());
     try {
       (void)f1->value();
       ASSERT_TRUE(false); // Supposed to throw.
     } catch (const std::exception& e) {
       ASSERT_TRUE(strcmp(e.what(), "Failed") == 0);
-    }
-    try {
-      (void)f1->constValue();
-    } catch (const std::exception& e) {
-      ASSERT_TRUE(false); // Not supposed to throw.
     }
     f1->addCallback([&]() { ++sat2; });
     ASSERT_EQ(sat1, 1);
@@ -2049,6 +2048,45 @@ void testFutures() {
     ASSERT_EQ(c4->value().toInt(), 7);
     s2->markCompleted(1);
     ASSERT_EQ(c4->value().toInt(), 7);
+  }
+}
+
+void testTLSFutureCallbacks() {
+  // cb that verifies the profiler is enabled
+  auto profilerEnabledCb = []() {
+    ASSERT_TRUE(torch::autograd::profiler::profilerEnabled());
+  };
+  // test running callbacks with propagation of TLS state.
+  {
+    // Enable the profiler in this thread
+    torch::autograd::profiler::enableProfiler(
+        torch::autograd::profiler::ProfilerConfig(
+            torch::autograd::profiler::ProfilerState::CPU, false, false));
+    auto s1 = c10::make_intrusive<Future>(IntType::get());
+    s1->addCallback(wrapPropagateTLSState<void>(profilerEnabledCb));
+    std::thread t([s1 = std::move(s1)]() { s1->markCompleted(); });
+    // Since we join here, we can ensure that all callbacks corresponding to
+    // markCompleted() have finished.
+    t.join();
+    torch::autograd::profiler::disableProfiler();
+  }
+  // then() with TLS State
+  {
+    // Enable the profiler in this thread
+    torch::autograd::profiler::enableProfiler(
+        torch::autograd::profiler::ProfilerConfig(
+            torch::autograd::profiler::ProfilerState::CPU, false, false));
+    auto s1 = c10::make_intrusive<Future>(IntType::get());
+    auto s2 = s1->then(
+        wrapPropagateTLSState<c10::IValue>([&profilerEnabledCb]() {
+          profilerEnabledCb();
+          return at::IValue(1);
+        }),
+        IntType::get());
+    std::thread t([s1 = std::move(s1)]() { s1->markCompleted(); });
+    t.join();
+    s2->wait();
+    torch::autograd::profiler::disableProfiler();
   }
 }
 

@@ -1,15 +1,41 @@
 #pragma once
 
+#ifdef USE_TENSORPIPE
+
 #include <atomic>
 #include <thread>
-
-#include <tensorpipe/tensorpipe.h>
 
 #include <c10/core/thread_pool.h>
 #include <c10d/PrefixStore.hpp>
 #include <c10d/ProcessGroup.hpp>
 #include <c10d/Store.hpp>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
+
+// Forward-declare the TensorPipe classes we need, to avoid including its
+// headers in PyTorch's ones and thus have it become a public dependency.
+
+namespace tensorpipe {
+
+class Context;
+class Error;
+class Listener;
+class Message;
+class Pipe;
+
+namespace transport {
+class Context;
+namespace uv {
+class Context;
+} // namespace uv
+} // namespace transport
+
+namespace channel {
+class Context;
+} // namespace channel
+
+using DeviceMap = std::unordered_map<c10::DeviceIndex, c10::DeviceIndex>;
+
+} // namespace tensorpipe
 
 namespace torch {
 namespace distributed {
@@ -18,9 +44,77 @@ namespace rpc {
 using steady_clock_time_point =
     std::chrono::time_point<std::chrono::steady_clock>;
 
+struct TransportRegistration {
+  std::shared_ptr<tensorpipe::transport::Context> transport;
+  int64_t priority;
+  std::string address;
+};
+
+C10_DECLARE_REGISTRY(TensorPipeTransportRegistry, TransportRegistration);
+
+struct ChannelRegistration {
+  std::shared_ptr<tensorpipe::channel::Context> channel;
+  int64_t priority;
+};
+
+C10_DECLARE_REGISTRY(TensorPipeChannelRegistry, ChannelRegistration);
+
+constexpr auto kDefaultNumWorkerThreads = 16;
+
 struct TensorPipeRpcBackendOptions : public RpcBackendOptions {
-  TensorPipeRpcBackendOptions(float rpc_timeout, std::string init_method)
-      : RpcBackendOptions(rpc_timeout, init_method) {}
+  TensorPipeRpcBackendOptions(
+      int numWorkerThreads,
+      optional<std::vector<std::string>> transports,
+      optional<std::vector<std::string>> channels,
+      float rpc_timeout,
+      std::string init_method,
+      std::unordered_map<std::string, tensorpipe::DeviceMap> device_maps = {})
+      : RpcBackendOptions(rpc_timeout, init_method),
+        numWorkerThreads(numWorkerThreads),
+        transports(std::move(transports)),
+        channels(std::move(channels)),
+        deviceMaps(std::move(device_maps)) {
+    TORCH_CHECK(
+        numWorkerThreads > 0,
+        "num_worker_threads must be positive, got ",
+        numWorkerThreads);
+
+    if (transports.has_value()) {
+      for (const std::string& transportName : transports.value()) {
+        TORCH_CHECK(
+            TensorPipeTransportRegistry()->Has(transportName),
+            "Unknown transport: ",
+            transportName);
+      }
+    }
+
+    if (channels.has_value()) {
+      for (const std::string& channelName : channels.value()) {
+        TORCH_CHECK(
+            TensorPipeChannelRegistry()->Has(channelName),
+            "Unknown channel: ",
+            channelName);
+      }
+    }
+  }
+
+  void setDeviceMap(
+      const std::string& workerName,
+      const tensorpipe::DeviceMap& deviceMap) {
+    auto iter = deviceMaps.find(workerName);
+    if (iter == deviceMaps.end()) {
+      deviceMaps[workerName] = deviceMap;
+    } else {
+      for (auto& entry : deviceMap) {
+        iter->second[entry.first] = entry.second;
+      }
+    }
+  }
+
+  int numWorkerThreads;
+  const optional<std::vector<std::string>> transports;
+  const optional<std::vector<std::string>> channels;
+  std::unordered_map<std::string, tensorpipe::DeviceMap> deviceMaps;
 };
 
 // Struct to track the network source metrics
@@ -49,7 +143,8 @@ class TensorPipeAgent : public RpcAgent {
       worker_id_t selfId,
       int worldSize,
       std::shared_ptr<c10d::ProcessGroup> processGroup,
-      TensorPipeRpcBackendOptions opts);
+      TensorPipeRpcBackendOptions opts,
+      std::unique_ptr<RequestCallback> cb);
 
   TensorPipeAgent(const TensorPipeAgent&) = delete;
   TensorPipeAgent& operator=(const TensorPipeAgent&) = delete;
@@ -71,6 +166,11 @@ class TensorPipeAgent : public RpcAgent {
   const WorkerInfo& getWorkerInfo(const std::string& workerName) const override;
   const WorkerInfo& getWorkerInfo(worker_id_t workerId) const override;
   std::vector<WorkerInfo> getWorkerInfos() const override;
+  void setReverseDeviceMaps(
+      const std::unordered_map<std::string, tensorpipe::DeviceMap>&
+          reverseDeviceMaps) {
+    reverseDeviceMaps_ = reverseDeviceMaps;
+  }
 
   std::unordered_map<std::string, std::string> getMetrics() override;
 
@@ -84,15 +184,14 @@ class TensorPipeAgent : public RpcAgent {
   // Returns NetworkSourceInfo struct
   NetworkSourceInfo getNetworkSourceInfo();
 
+  static std::string guessUvAddress(
+      tensorpipe::transport::uv::Context& uvContext);
+
  private:
   // Populates workerIdToInfo_ and workerNameToInfo_ using addressStore_
   void collectNames();
 
   const std::string& findWorkerURL(const WorkerInfo& worker) const;
-
-#ifdef TP_ENABLE_SHM
-  std::string createUniqueShmAddr();
-#endif
 
   // TensorPipe read function that could be used to read response messages
   // by client, and read request messages by server.
@@ -156,8 +255,10 @@ class TensorPipeAgent : public RpcAgent {
         pendingResponseMessage_;
   };
 
-  // TODO: configure thread pool size through RpcBackendOptions.
-  ThreadPool threadPool_{16};
+  const TensorPipeRpcBackendOptions opts_;
+  std::unordered_map<std::string, tensorpipe::DeviceMap> reverseDeviceMaps_;
+
+  ThreadPool threadPool_;
   std::shared_ptr<tensorpipe::Context> context_;
   std::shared_ptr<tensorpipe::Listener> listener_;
   std::unordered_map<worker_id_t, ClientPipe> connectedPipes_;
@@ -170,7 +271,6 @@ class TensorPipeAgent : public RpcAgent {
   ::c10d::PrefixStore rankToNameStore_;
   ::c10d::PrefixStore nameToAddressStore_;
   const int worldSize_;
-  const TensorPipeRpcBackendOptions opts_;
 
   // The join method is required to behave like a barrier and perform collective
   // operations. For simplicity and reliability, we offload this to a process
@@ -267,3 +367,5 @@ class TensorPipeAgent : public RpcAgent {
 } // namespace rpc
 } // namespace distributed
 } // namespace torch
+
+#endif // USE_TENSORPIPE

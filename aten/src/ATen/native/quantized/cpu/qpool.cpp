@@ -9,7 +9,7 @@
 #include <ATen/native/quantized/cpu/quantized_ops.h>
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
-#include <caffe2/utils/threadpool/ThreadPoolMobile.h>
+#include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 
 #include <algorithm>
 #include <vector>
@@ -346,7 +346,7 @@ void check_maxpool2d_params(
        setupStatus == pytorch_qnnp_status_success,
        "failed to setup QNNPACK MaxPool operator");
 
-   pthreadpool_t threadpool = caffe2::mobile_pthreadpool();
+   pthreadpool_t threadpool = caffe2::pthreadpool_();
    const pytorch_qnnp_status runStatus =
        pytorch_qnnp_run_operator(qnnpack_operator, threadpool);
    TORCH_INTERNAL_ASSERT(
@@ -416,7 +416,7 @@ class QMaxPool2D_arr_args final {
 };
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
-  m.impl("max_pool2d", QMaxPool2D_arr_args::run);
+  m.impl("max_pool2d", TORCH_FN(QMaxPool2D_arr_args::run));
 }
 
 } // namespace

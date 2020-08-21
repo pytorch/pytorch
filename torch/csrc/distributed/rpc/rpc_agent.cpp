@@ -293,6 +293,11 @@ std::unordered_map<std::string, std::string> RpcAgent::getDebugInfo() {
   return getMetrics();
 }
 
+std::ostream& operator<<(std::ostream& os, const WorkerInfo& workerInfo) {
+  return os << "WorkerInfo(id=" << workerInfo.id_
+            << ", name=" << workerInfo.name_ << ")";
+}
+
 } // namespace rpc
 } // namespace distributed
 } // namespace torch

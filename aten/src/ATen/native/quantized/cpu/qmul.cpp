@@ -105,7 +105,7 @@ class QMul final {
   static Tensor run(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
     check_inputs(qa, qb);
     auto qc = at::_empty_affine_quantized(
-        qa.sizes(),
+        DimVector(infer_size(qa.sizes(), qb.sizes())),
         at::device(kCPU).dtype(qa.scalar_type()),
         scale,
         zero_point,
@@ -173,19 +173,26 @@ class QMulScalarTensorOut final {
 };
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
-  m.impl("mul",                 QMul</*ReLUFused=*/false>::run);
-  m.impl("mul_relu",            QMul</*ReLUFused=*/true>::run);
-  m.impl("mul_out",             QMulOut</*ReLUFused=*/false>::run);
-  m.impl("mul_relu_out",        QMulOut</*ReLUFused=*/true>::run);
-  m.impl("mul_scalar",          QMulScalar</*ReLUFused=*/false>::run);
-  m.impl("mul_scalar_relu",     QMulScalar</*ReLUFused=*/true>::run);
-  m.impl("mul_scalar_out",      QMulScalarOut</*ReLUFused=*/false>::run);
-  m.impl("mul_scalar_relu_out", QMulScalarOut</*ReLUFused=*/true>::run);
+  m.impl("mul",                 TORCH_FN(QMul</*ReLUFused=*/false>::run));
+  m.impl("mul.out",             TORCH_FN(QMulOut</*ReLUFused=*/false>::run));
+  m.impl("mul.Scalar",          TORCH_FN(QMulScalar</*ReLUFused=*/false>::run));
+  m.impl("mul.Scalar_out",      TORCH_FN(QMulScalarOut</*ReLUFused=*/false>::run));
+  m.impl("mul_relu",            TORCH_FN(QMul</*ReLUFused=*/true>::run));
+  m.impl("mul_relu.out",        TORCH_FN(QMulOut</*ReLUFused=*/true>::run));
+  m.impl("mul_relu.Scalar",     TORCH_FN(QMulScalar</*ReLUFused=*/true>::run));
+  m.impl("mul_relu.Scalar_out", TORCH_FN(QMulScalarOut</*ReLUFused=*/true>::run));
+  // deprecated functions, kept for backward compatibility
+  m.impl("mul_out",             TORCH_FN(QMulOut</*ReLUFused=*/false>::run));
+  m.impl("mul_relu_out",        TORCH_FN(QMulOut</*ReLUFused=*/true>::run));
+  m.impl("mul_scalar",          TORCH_FN(QMulScalar</*ReLUFused=*/false>::run));
+  m.impl("mul_scalar_relu",     TORCH_FN(QMulScalar</*ReLUFused=*/true>::run));
+  m.impl("mul_scalar_out",      TORCH_FN(QMulScalarOut</*ReLUFused=*/false>::run));
+  m.impl("mul_scalar_relu_out", TORCH_FN(QMulScalarOut</*ReLUFused=*/true>::run));
   // TODO: remove after broadcasting is supported
-  m.impl("mul_scalar.Tensor", QMulScalarTensor</*ReLUFused=*/false>::run);
-  m.impl("mul_scalar_relu.Tensor", QMulScalarTensor</*ReLUFused=*/true>::run);
-  m.impl("mul_scalar_out.Tensor", QMulScalarTensorOut</*ReLUFused=*/false>::run);
-  m.impl("mul_scalar_relu_out.Tensor", QMulScalarTensorOut</*ReLUFused=*/true>::run);
+  m.impl("mul_scalar.Tensor", TORCH_FN(QMulScalarTensor</*ReLUFused=*/false>::run));
+  m.impl("mul_scalar_relu.Tensor", TORCH_FN(QMulScalarTensor</*ReLUFused=*/true>::run));
+  m.impl("mul_scalar_out.Tensor", TORCH_FN(QMulScalarTensorOut</*ReLUFused=*/false>::run));
+  m.impl("mul_scalar_relu_out.Tensor", TORCH_FN(QMulScalarTensorOut</*ReLUFused=*/true>::run));
 }
 
 }  // namespace

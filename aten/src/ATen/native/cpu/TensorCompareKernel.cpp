@@ -38,14 +38,14 @@ static inline void compare_base_kernel(Tensor& result, Tensor& indices,
 
   auto self_dim_stride = ensure_nonempty_stride(self, dim);
 
-  auto iter = TensorIterator();
-  iter.check_all_same_dtype(false);
-  iter.dont_resize_outputs();
-  iter.declare_static_shape(self.sizes(), /*squash_dim=*/dim);
-  iter.add_output(result);
-  iter.add_output(indices);
-  iter.add_input(self);
-  iter.build();
+  auto iter = TensorIteratorConfig()
+    .check_all_same_dtype(false)
+    .resize_outputs(false)
+    .declare_static_shape(self.sizes(), /*squash_dim=*/dim)
+    .add_output(result)
+    .add_output(indices)
+    .add_input(self)
+    .build();
 
   auto loop = [&](char** data, const int64_t* strides, int64_t n) {
     auto* result_data_bytes = data[0];
@@ -161,10 +161,24 @@ static void where_kernel_impl(TensorIterator &iter, ScalarType condition_type) {
   });
 }
 
+static void isposinf_kernel_impl(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.input_dtype(), "isposinf_cpu", [&]() {
+    cpu_kernel(iter, [](scalar_t a) -> bool { return a == std::numeric_limits<scalar_t>::infinity(); });
+  });
+}
+
+static void isneginf_kernel_impl(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.input_dtype(), "isneginf_cpu", [&]() {
+    cpu_kernel(iter, [](scalar_t a) -> bool { return a == -std::numeric_limits<scalar_t>::infinity(); });
+  });
+}
+
 } // anonymous namespace
 
 REGISTER_DISPATCH(max_stub, &max_kernel_impl);
 REGISTER_DISPATCH(min_stub, &min_kernel_impl);
 REGISTER_DISPATCH(where_kernel, &where_kernel_impl);
+REGISTER_DISPATCH(isposinf_stub, &isposinf_kernel_impl);
+REGISTER_DISPATCH(isneginf_stub, &isneginf_kernel_impl);
 
 }} // namespace at::native

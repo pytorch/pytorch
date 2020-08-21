@@ -246,8 +246,8 @@ struct ReadyQueue {
  public:
   // incrementOutstandingTasks indicates whether or not we should increment
   // 'outstanding_tasks_' for the associated GraphTask. This should mostly
-  // always be true, see the doc for 'enqueue_blocked_task_on_cpu' for when we
-  // might set this to false.
+  // always be true and is only set false in certain cases (see docs for
+  // DistEngine.execute_graph_task_until_ready_queue_empty)
   void push(NodeTask item, bool incrementOutstandingTasks = true);
   void pushShutdownTask();
   NodeTask pop();
@@ -312,6 +312,12 @@ struct TORCH_API Engine {
   // Should be called after fork to notify that worker threads are gone
   void release_workers();
 
+  // Initializes a device thread for the autograd engine.
+  virtual void thread_init(
+      int device,
+      const std::shared_ptr<ReadyQueue>& ready_queue,
+      bool should_increment = true);
+
  protected:
   Engine();
   void compute_dependencies(Node* root, GraphTask& task);
@@ -331,13 +337,8 @@ struct TORCH_API Engine {
   // note that it does NOT start CPU thread.
   void start_device_threads();
   void increment_non_reentrant_thread_count();
-  virtual void thread_init(
-      int device,
-      const std::shared_ptr<ReadyQueue>& ready_queue,
-      bool should_increment = true);
-  virtual void thread_main(
-      const std::shared_ptr<GraphTask>& task,
-      bool reentrant_thread);
+  void decrement_non_reentrant_thread_count();
+  virtual void thread_main(const std::shared_ptr<GraphTask>& task);
   void reentrant_thread_init();
   void add_thread_pool_task(const std::weak_ptr<GraphTask>& graph_task);
 

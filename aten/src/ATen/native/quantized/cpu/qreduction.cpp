@@ -3,7 +3,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
-#include <caffe2/utils/threadpool/ThreadPoolMobile.h>
+#include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 
 namespace at {
 namespace native {
@@ -66,7 +66,7 @@ Tensor qnnpack_mean(const Tensor& input, IntArrayRef dim) {
   CAFFE_ENFORCE(
       setupStatus == pytorch_qnnp_status_success,
       "failed to setup QNNPACK Global Average Pooling operator");
-  pthreadpool_t threadpool = caffe2::mobile_pthreadpool();
+  pthreadpool_t threadpool = caffe2::pthreadpool_();
   const pytorch_qnnp_status runStatus =
       pytorch_qnnp_run_operator(qnnpack_operator, threadpool);
   TORCH_INTERNAL_ASSERT(
@@ -75,7 +75,7 @@ Tensor qnnpack_mean(const Tensor& input, IntArrayRef dim) {
   return output;
 }
 #endif
-Tensor& quantized_mean_out_cpu(
+Tensor& mean_out_quantized_cpu(
     Tensor& result,
     const Tensor& self,
     IntArrayRef dim,
@@ -99,38 +99,38 @@ Tensor& quantized_mean_out_cpu(
   return result;
 }
 
-Tensor quantized_mean_cpu(const Tensor& self, optional<ScalarType> dtype) {
+Tensor mean_quantized_cpu(const Tensor& self, optional<ScalarType> dtype) {
   Tensor result;
-  quantized_mean_out_cpu(result, self, IntArrayRef{}, false, dtype);
+  mean_out_quantized_cpu(result, self, IntArrayRef{}, false, dtype);
   return result;
 }
 
-Tensor quantized_mean_cpu(
+Tensor mean_quantized_cpu(
     const Tensor& self,
     IntArrayRef dim,
     bool keepdim,
     optional<ScalarType> dtype) {
   Tensor result;
-  quantized_mean_out_cpu(result, self, dim, keepdim, dtype);
+  mean_out_quantized_cpu(result, self, dim, keepdim, dtype);
   return result;
 }
 
-Tensor quantized_mean_cpu(
+Tensor mean_quantized_cpu(
     const Tensor& self,
     DimnameList dim,
     bool keepdim,
     optional<ScalarType> dtype) {
-  return quantized_mean_cpu(
+  return mean_quantized_cpu(
       self, dimnames_to_positions(self, dim), keepdim, dtype);
 }
 
-Tensor& quantized_mean_out_cpu(
+Tensor& mean_out_quantized_cpu(
     Tensor& result,
     const Tensor& self,
     DimnameList dim,
     bool keepdim,
     c10::optional<ScalarType> opt_dtype) {
-  return quantized_mean_out_cpu(
+  return mean_out_quantized_cpu(
       result, self, dimnames_to_positions(self, dim), keepdim, opt_dtype);
 }
 

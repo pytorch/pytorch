@@ -61,9 +61,9 @@ TEST(TensorIteratorTest, SerialLoopUnary_##name) {                              
 #define NO_OUTPUT_UNARY_TEST_ITER_FOR_TYPE(ctype,name)                         \
 TEST(TensorIteratorTest, SerialLoopUnaryNoOutput_##name) {                     \
   auto in = random_tensor_for_type(k##name);                                   \
-  auto iter = at::TensorIterator();                                            \
-  iter.add_input(in);                                                          \
-  iter.build();                                                                \
+  auto iter = at::TensorIteratorConfig()                                       \
+      .add_input(in)                                                           \
+      .build();                                                                \
   int64_t acc = 0;                                                             \
   at::native::cpu_serial_kernel(iter, [&](ctype a) -> void { acc++; }); \
   EXPECT_TRUE(acc == in.numel());                                              \
@@ -84,10 +84,10 @@ TEST(TensorIteratorTest, SerialLoopBinary_##name) {                             
 TEST(TensorIteratorTest, SerialLoopBinaryNoOutput_##name) {                      \
   auto in1 = random_tensor_for_type(k##name);                                    \
   auto in2 = random_tensor_for_type(k##name);                                    \
-  auto iter = at::TensorIterator();                                              \
-  iter.add_input(in1);                                                           \
-  iter.add_input(in2);                                                           \
-  iter.build();                                                                  \
+  auto iter = at::TensorIteratorConfig()                                         \
+      .add_input(in1)                                                            \
+      .add_input(in2)                                                            \
+      .build();                                                                  \
   int64_t acc = 0;                                                               \
   at::native::cpu_serial_kernel(iter, [&](ctype a, ctype b) -> void { acc++; }); \
   EXPECT_TRUE(acc == in1.numel());                                               \
@@ -100,12 +100,12 @@ TEST(TensorIteratorTest, SerialLoopPointwise_##name) {                          
   auto in2 = random_tensor_for_type(k##name);                                                         \
   auto in3 = random_tensor_for_type(k##name);                                                         \
   auto expected = in1.add(in2).add(in3);                                                              \
-  auto iter = at::TensorIterator();                                                                   \
-  iter.add_output(out);                                                                               \
-  iter.add_input(in1);                                                                                \
-  iter.add_input(in2);                                                                                \
-  iter.add_input(in3);                                                                                \
-  iter.build();                                                                                       \
+  auto iter = at::TensorIteratorConfig()                                                              \
+      .add_output(out)                                                                                \
+      .add_input(in1)                                                                                 \
+      .add_input(in2)                                                                                 \
+      .add_input(in3)                                                                                 \
+      .build();                                                                                       \
   at::native::cpu_serial_kernel(iter, [=](ctype a, ctype b, ctype c) -> ctype { return a + b + c; }); \
   ASSERT_ANY_THROW(out.equal(expected));                                                              \
 }
@@ -115,11 +115,11 @@ TEST(TensorIteratorTest, SerialLoopPoinwiseNoOutput_##name) {                   
   auto in1 = random_tensor_for_type(k##name);                                             \
   auto in2 = random_tensor_for_type(k##name);                                             \
   auto in3 = random_tensor_for_type(k##name);                                             \
-  auto iter = at::TensorIterator();                                                       \
-  iter.add_input(in1);                                                                    \
-  iter.add_input(in2);                                                                    \
-  iter.add_input(in3);                                                                    \
-  iter.build();                                                                           \
+  auto iter = at::TensorIteratorConfig()                                                  \
+      .add_input(in1)                                                                     \
+      .add_input(in2)                                                                     \
+      .add_input(in3)                                                                     \
+      .build();                                                                           \
   int64_t acc = 0;                                                                        \
   at::native::cpu_serial_kernel(iter, [&](ctype a, ctype b, ctype c) -> void { acc++; }); \
   EXPECT_TRUE(acc == in1.numel());                                                        \
@@ -166,24 +166,24 @@ TEST(TensorIteratorTest, SerialLoopSingleThread) {
 }
 
 TEST(TensorIteratorTest, InputDType) {
-  auto iter = at::TensorIterator();
-  iter.check_all_same_dtype(false);
-  iter.add_output(at::ones({1, 1}, at::dtype(at::kBool)));
-  iter.add_input(at::ones({1, 1}, at::dtype(at::kFloat)));
-  iter.add_input(at::ones({1, 1}, at::dtype(at::kDouble)));
-  iter.build();
+  auto iter = at::TensorIteratorConfig()
+      .check_all_same_dtype(false)
+      .add_output(at::ones({1, 1}, at::dtype(at::kBool)))
+      .add_input(at::ones({1, 1}, at::dtype(at::kFloat)))
+      .add_input(at::ones({1, 1}, at::dtype(at::kDouble)))
+      .build();
   EXPECT_TRUE(iter.input_dtype() == at::kFloat);
   EXPECT_TRUE(iter.input_dtype(0) == at::kFloat);
   EXPECT_TRUE(iter.input_dtype(1) == at::kDouble);
 }
 
 TEST(TensorIteratorTest, ComputeCommonDTypeInputOnly) {
-  auto iter = at::TensorIterator();
-  iter.add_output(at::ones({1, 1}, at::dtype(at::kBool)));
-  iter.add_input(at::ones({1, 1}, at::dtype(at::kFloat)));
-  iter.add_input(at::ones({1, 1}, at::dtype(at::kDouble)));
-  iter.promote_inputs_to_common_dtype(true);
-  iter.build();
+  auto iter = at::TensorIteratorConfig()
+      .add_output(at::ones({1, 1}, at::dtype(at::kBool)))
+      .add_input(at::ones({1, 1}, at::dtype(at::kFloat)))
+      .add_input(at::ones({1, 1}, at::dtype(at::kDouble)))
+      .promote_inputs_to_common_dtype(true)
+      .build();
   EXPECT_TRUE(iter.dtype(0) == at::kBool);
   EXPECT_TRUE(iter.dtype(1) == at::kDouble);
   EXPECT_TRUE(iter.dtype(2) == at::kDouble);
@@ -191,12 +191,12 @@ TEST(TensorIteratorTest, ComputeCommonDTypeInputOnly) {
 }
 
 TEST(TensorIteratorTest, DoNotComputeCommonDTypeInputOnly) {
-  auto iter = at::TensorIterator();
-  iter.check_all_same_dtype(false);
-  iter.add_output(at::ones({1, 1}, at::dtype(at::kLong)));
-  iter.add_input(at::ones({1, 1}, at::dtype(at::kFloat)));
-  iter.add_input(at::ones({1, 1}, at::dtype(at::kDouble)));
-  iter.build();
+  auto iter = at::TensorIteratorConfig()
+      .check_all_same_dtype(false)
+      .add_output(at::ones({1, 1}, at::dtype(at::kLong)))
+      .add_input(at::ones({1, 1}, at::dtype(at::kFloat)))
+      .add_input(at::ones({1, 1}, at::dtype(at::kDouble)))
+      .build();
   EXPECT_TRUE(iter.dtype(0) == at::kLong);
   EXPECT_TRUE(iter.dtype(1) == at::kFloat);
   EXPECT_TRUE(iter.dtype(2) == at::kDouble);
@@ -204,9 +204,9 @@ TEST(TensorIteratorTest, DoNotComputeCommonDTypeInputOnly) {
 
 TEST(TensorIteratorTest, FailNonPromotingBinaryOp) {
   Tensor out;
-  auto iter = at::TensorIterator();
-  iter.add_output(out);
-  iter.add_input(at::ones({1,1}, at::dtype(at::kDouble)));
-  iter.add_input(at::ones({1,1}, at::dtype(at::kInt)));
-  ASSERT_ANY_THROW(iter.build());
+  at::TensorIteratorConfig config;
+  config.add_output(out);
+  config.add_input(at::ones({1,1}, at::dtype(at::kDouble)));
+  config.add_input(at::ones({1,1}, at::dtype(at::kInt)));
+  ASSERT_ANY_THROW(config.build());
 }

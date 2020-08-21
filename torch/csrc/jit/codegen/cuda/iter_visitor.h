@@ -12,11 +12,11 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
-struct Statement;
-struct Val;
-struct Expr;
+class Statement;
+class Val;
+class Expr;
 
-struct Fusion;
+class Fusion;
 
 enum class ValType;
 
@@ -32,7 +32,8 @@ enum class ValType;
  * TODO: We may want to have ordering of outputs to inputs. I'm not sure why we
  * would want this, but seems like it would be a reasonable request.
  */
-struct TORCH_CUDA_API IterVisitor : public OptOutDispatch {
+class TORCH_CUDA_API IterVisitor : public OptOutDispatch {
+ public:
   virtual ~IterVisitor() = default;
 
   IterVisitor() = default;
@@ -54,17 +55,17 @@ struct TORCH_CUDA_API IterVisitor : public OptOutDispatch {
 
   // This handle functions is called on every Statement* in topological order,
   // starting from outputs to inputs.
-  virtual void handle(Statement* s) override {
+  void handle(Statement* s) override {
     OptOutDispatch::handle(s);
   }
   // This handle functions is called on every Expr* in topological order,
   // starting from outputs to inputs.
-  virtual void handle(Expr* e) override {
+  void handle(Expr* e) override {
     OptOutDispatch::handle(e);
   }
   // This handle functions is called on every Val* in topological order,
   // starting from outputs to inputs.
-  virtual void handle(Val* v) override {
+  void handle(Val* v) override {
     OptOutDispatch::handle(v);
   }
 
@@ -75,10 +76,13 @@ struct TORCH_CUDA_API IterVisitor : public OptOutDispatch {
   // throughout traversal).
   std::vector<std::vector<Statement*>> stmt_stack;
 
+  // Statements to stop traversal on if they're hit (pretends they're leaf
+  // nodes in next)
+  std::unordered_set<Statement*> termination_stmts;
+
   void traverse_(
-      Fusion* const fusion,
+      Fusion* fusion,
       bool from_outputs_only = false,
-      bool breadth_first = false,
       bool traverse_all_paths = false);
 
  public:
@@ -86,29 +90,24 @@ struct TORCH_CUDA_API IterVisitor : public OptOutDispatch {
   // Calls handle on all Statement*s in topological sorted order.
   // traverseAllPaths = false only call handle on each Statement* once
   // traverseAllPaths = true traverses all paths from nodes in from to inputs.
-  //   Handle on a Statement* for every path from "from" nodes, to inputs.
+  // Handle on a Statement* for every path from "from" nodes, to inputs.
+  // to argument allows specification of nodes to stop at if we want to stop
+  // beffore we hit all leaf nodes. This can be helpful when we want to traverse
+  // from TensorView::domain(), to the rfactor domain, instead of root domain.
   void traverseFrom(
-      Fusion* const fusion,
+      Fusion* fusion,
       const std::vector<Val*>& from,
       bool traverseAllPaths = false);
 
   // from_outputs_only = true start from outputs registered with fusion,
-  // from_outputs_only = false start from all leaf nodes,
-  // bool breadth_first = true is not implemented yet
-  void traverse(
-      Fusion* const fusion,
-      bool from_outputs_only = false,
-      bool breadth_first = false);
+  // from_outputs_only = false start from all leaf nodes. Calls into
+  // traverseFrom.
+  void traverse(Fusion* fusion, bool from_outputs_only = false);
 
   // from_outputs_only = true start from outputs registered with fusion,
-  // from_outputs_only = false start from all leaf nodes,
-  // bool breadth_first = true is not implemented yet
-  void traverseAllPaths(
-      Fusion* const fusion,
-      bool from_outputs_only = false,
-      bool breadth_first = false);
-
-  static std::unordered_set<Val*> getTerminatingOutputs(Fusion* const);
+  // from_outputs_only = false start from all leaf nodes. Calls into
+  // traverseFrom.
+  void traverseAllPaths(Fusion* fusion, bool from_outputs_only = false);
 
   static std::unordered_set<Val*> getInputsTo(const std::vector<Val*>& vals);
 };
@@ -128,7 +127,8 @@ struct TORCH_CUDA_API IterVisitor : public OptOutDispatch {
  * outputs to guarentee that we will traverse all outputs of all exprs during
  * the backward traversal.
  */
-struct TORCH_CUDA_API BackwardVisitor : public OptOutDispatch {
+class TORCH_CUDA_API BackwardVisitor : public OptOutDispatch {
+ public:
   virtual ~BackwardVisitor() = default;
 
   BackwardVisitor() = default;
@@ -182,12 +182,12 @@ struct TORCH_CUDA_API BackwardVisitor : public OptOutDispatch {
   // traverseAllPaths = true traverses all paths from nodes in from to inputs.
   //   Handle on a Statement* for every path from "from" nodes, to inputs.
   void traverseFrom(
-      Fusion* const fusion,
+      Fusion* fusion,
       const std::vector<Val*>& from,
       bool traverseAllPaths = false);
 };
 
-struct TORCH_CUDA_API DependencyCheck {
+class TORCH_CUDA_API DependencyCheck {
  public:
   // Returns if "dependency" is a dependency of "of".
   static bool isDependencyOf(Val* dependency, Val* of);
@@ -206,7 +206,12 @@ struct TORCH_CUDA_API DependencyCheck {
   // Finds all Val* paths from all leaf nodes to "dependency". Returns those
   // paths. deque[i].back() are leaf nodes, and deque[i][0] is "dependency".
   // Returns an empty deque if there are no uses of dependency found.
-  static std::deque<std::deque<Val*>> getAllDependencyChainsTo(Val* dependency);
+  static std::deque<std::deque<Val*>> getAllUseChains(Val* dependency);
+
+  // Grab all values that exist between and including provided vals
+  static std::unordered_set<Val*> getAllValsBetween(
+      const std::unordered_set<Val*>& dependencies,
+      const std::vector<Val*>& of);
 };
 
 } // namespace fuser
