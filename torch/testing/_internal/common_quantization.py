@@ -23,6 +23,15 @@ from torch.quantization.default_mappings import (
     DEFAULT_QCONFIG_PROPAGATE_WHITE_LIST,
     DEFAULT_QAT_MODULE_MAPPING,
 )
+# symbolic trace
+from torch.fx import symbolic_trace
+
+# graph mode quantization based on fx
+from torch.quantization._quantize_fx import (
+    Quantizer,
+    QuantType,
+    fuse,
+)
 
 import unittest
 from torch.testing import FileCheck
@@ -358,6 +367,82 @@ class QuantizationTestCase(TestCase):
 
         return models[False]
 
+    def checkGraphModuleHasNode(self, graph_module, target_node):
+        """ Check if GraphModule contains the target node
+        Args:
+            graph_module: the GraphModule instance we want to check
+            target_node: a tuple of 2 elements, first element is
+                the op type for GraphModule node, second element
+                is the target function for call_function and
+                type of the module for call_module,
+                only thse two types are supported currently
+        """
+        assert target_node[0] in ['call_function', 'call_module'], 'Only call function' \
+            ' and call module are supported right now'
+        modules = dict(graph_module.root.named_modules())
+        for node in graph_module.graph.nodes:
+            if node.op == 'call_function' and node.op == target_node[0] and node.target == target_node[1]:
+                return
+            elif node.op == 'call_module' and node.op == target_node[0] and type(modules[node.target]) == target_node[1]:
+                return
+        self.assertTrue(False, 'node:' + str(target_node) +
+                        ' not found in the graph module')
+
+    def printGraphModule(self, graph_module):
+        modules = dict(graph_module.root.named_modules())
+        for n in graph_module.graph.nodes:
+            node_info = ' '.join(map(repr, [n.op, n.name, n.target, n.args, n.kwargs]))
+            if n.op == 'call_module':
+                node_info += ' module type:' + repr(type(modules[n.target]))
+            print(node_info)
+
+    def checkGraphModeFxOp(self, model, inputs, quantized_node, quant_type=QuantType.STATIC, debug=False):
+        """ Quantizes model with graph mode quantization on fx and check if the
+        quantized model contains the quantized_node
+
+        Args:
+            model: floating point torch.nn.Module
+            inputs: one positional sample input arguments for model
+            quantized_node: a tuple of 2 elements, first element is
+                the op type for GraphModule node, second element
+                is the target function for call_function and
+                type of the module for call_module
+        """
+        if quant_type == QuantType.QAT:
+            model.train()
+        else:
+            model.eval()
+        original = symbolic_trace(model)
+        fused = fuse(original)
+
+        quantizer = Quantizer()
+        # TODO: uncommon after we make per channel observer work in the flow
+        # qconfig_dict = {'': get_default_qconfig(torch.backends.quantized.engine)}
+        qconfig_dict = {'' : default_qconfig}
+        if quant_type == QuantType.DYNAMIC:
+            prepared = quantizer.prepare_dynamic(fused, qconfig_dict)
+        else:
+            prepared = quantizer.prepare(fused, qconfig_dict)
+
+        prepared(*inputs)
+        qgraph = quantizer.convert(prepared)
+        qgraph_debug = quantizer.convert(prepared, debug=True)
+
+        result = qgraph(*inputs)
+        result_debug = qgraph_debug(*inputs)
+
+        self.assertEqual((result - result_debug).abs().max(), 0), \
+            'Expecting debug and non-debug option to produce identical result'
+
+        if debug:
+            print()
+            print('origianl graph module:', type(model))
+            self.printGraphModule(original)
+            print()
+            print('quantized graph module:', type(qgraph))
+            self.printGraphModule(qgraph)
+            print()
+        self.checkGraphModuleHasNode(qgraph, quantized_node)
 
 # Below are a series of neural net models to use in testing quantization
 # Single layer models
