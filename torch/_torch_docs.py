@@ -7361,6 +7361,13 @@ Example::
     tensor([ 3.,  0., -0., -0.])
 """.format(**common_args))
 
+add_docstr(torch.fix,
+           r"""
+fix(input, *, out=None) -> Tensor
+
+Alias for :func:`torch.trunc`
+""".format(**common_args))
+
 add_docstr(torch.unsqueeze,
            r"""
 unsqueeze(input, dim) -> Tensor
