@@ -1537,14 +1537,14 @@ See :func:`torch.nn.functional.hardshrink`
 
 add_docstr_all('heaviside',
                r"""
-heaviside(val) -> Tensor
+heaviside(values) -> Tensor
 
 See :func:`torch.heaviside`
 """)
 
 add_docstr_all('heaviside_',
                r"""
-heaviside_(val) -> Tensor
+heaviside_(values) -> Tensor
 
 In-place version of :meth:`~Tensor.heaviside`
 """)

@@ -5593,35 +5593,36 @@ Example::
 
 add_docstr(torch.heaviside,
            r"""
-heaviside(input, val, *, out=None) -> Tensor
+heaviside(input, values, *, out=None) -> Tensor
 
 Computes the Heaviside step function for each element in :attr:`input`.
-
 The Heaviside step function is defined as:
 
 .. math::
-    \text{{heaviside}}(input, val) = \begin{cases}
+    \text{{heaviside}}(input, values) = \begin{cases}
         \0, & \text{if input < 0}\\
-        \val, & \text{if input == 0}\\
+        \values, & \text{if input == 0}\\
         \1, & \text{if input > 0}
     \end{cases}
 """ + r"""
+
+When :attr:`values` is a tensor, the shapes of :attr:`input`
+and :attr:`values` must be :ref:`broadcastable <broadcasting-semantics>`.
+
 Args:
     {input}
-    val (Float point Tensor or value): The value of the element where is 0 in input. 
-                                       If input.shape != val.shape, they must be broadcastable to a common shape 
-                                       (which becomes the shape of the output).
+    values (Tensor or Scalar): The value(s) to sample from where :attr:`input` is zero.
 
 Keyword arguments:
     {out}
 
 Example::
 
-    >>> a = torch.tensor([-1.5, 0, 2.0])
-    >>> torch.heaviside(a, 0.5)
-    tensor([0, 0.5, 1.0])
-    >>> torch.heaviside(a, 1)
-    tensor([0, 1.0, 1.0])
+    >>> t = torch.tensor([-1.5, 0, 2.0])
+    >>> torch.heaviside(t, 0.5)
+    tensor([0.0000, 0.5000, 1.0000])
+    >>> torch.heaviside(t, -2)
+    tensor([0., -2., 1.])
 
 """.format(**common_args))
 

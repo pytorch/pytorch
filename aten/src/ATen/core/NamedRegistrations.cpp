@@ -211,12 +211,6 @@ TORCH_LIBRARY_IMPL(aten, Named, m) {
   m.impl("hypot", CppFunction::makeFallthrough());
   m.impl("hypot.out", CppFunction::makeFallthrough());
   m.impl("hypot_", CppFunction::makeFallthrough());
-  m.impl("heaviside.Tensor", CppFunction::makeFallthrough());
-  m.impl("heaviside.Scalar", CppFunction::makeFallthrough());
-  m.impl("heaviside_.Tensor", CppFunction::makeFallthrough());
-  m.impl("heaviside_.Scalar", CppFunction::makeFallthrough());
-  m.impl("heaviside.Tensor_out", CppFunction::makeFallthrough());
-  m.impl("heaviside.Scalar_out", CppFunction::makeFallthrough());
   m.impl("imag", CppFunction::makeFallthrough());
   m.impl("index_fill.Dimname_Scalar", CppFunction::makeFallthrough());
   m.impl("index_fill.Dimname_Tensor", CppFunction::makeFallthrough());

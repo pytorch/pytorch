@@ -3602,11 +3602,11 @@
 
 - func: heaviside.Tensor_out(Tensor self, Tensor val, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU, CUDA: heaviside_tensor_out
+    CPU, CUDA: heaviside_out
 
 - func: heaviside.Scalar_out(Tensor self, Scalar val, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
-    CPU, CUDA: heaviside_scalar_out
+    CPU, CUDA: heaviside_out
 
 - func: heaviside.Tensor(Tensor self, Tensor val) -> Tensor
   use_c10_dispatcher: full
