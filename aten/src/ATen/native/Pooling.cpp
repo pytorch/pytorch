@@ -58,7 +58,7 @@ void max_pool2d_out_impl(
    */
   at::parallel_for(
       0, NB * NC * OH, 0, [&](const int64_t begin, const int64_t end) {
-        // Buffer for storing row-wise max
+        // Buffer to store row-reduced max values
         std::vector<scalar_t> buffer(IW + PADDING, FILL);
 
         for (int64_t it = begin; it < end; ++it) {
@@ -76,22 +76,20 @@ void max_pool2d_out_impl(
           for (; ii < ei; ii += DI, ip += ROW_KER_STRIDE) {
             for (int64_t ij = 0; ij < IW; ++ij) {
               const scalar_t val = ip[ij];
-              const scalar_t max_val = buffer[ij + PJ];
-              buffer[ij + PJ] =
-                  std::isnan(val) ? val : std::max<scalar_t>(max_val, val);
+              buffer[ij + PJ] = std::isnan(val)
+                  ? val
+                  : std::max<scalar_t>(buffer[ij + PJ], val);
             }
           }
 
           // Compute column-wise max for current output row
+          std::fill_n(op, OW, FILL);
           for (int64_t oj = 0; oj < OW; ++oj) {
-            scalar_t max_val = FILL;
             int64_t ij = oj * SJ - PJ;
             for (int64_t kj = 0; kj < KW; ++kj, ij += DJ) {
               const scalar_t val = buffer[ij + PJ];
-              max_val =
-                  std::isnan(val) ? val : std::max<scalar_t>(max_val, val);
+              op[oj] = std::isnan(val) ? val : std::max<scalar_t>(op[oj], val);
             }
-            op[oj] = max_val;
           }
         }
       });
