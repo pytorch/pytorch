@@ -74,6 +74,7 @@ C10_EXPORT void SourceRange::print_with_context(
     out << str;
     return;
   }
+
   // determine CONTEXT line range
   size_t begin_line = start(); // beginning of lines to highlight
   size_t end_line = end(); // end of lines to highlight
@@ -129,7 +130,10 @@ C10_EXPORT void SourceRange::print_with_context(
         ++line_end;
       }
       // print line of code
-      out << str.substr(line_start, (line_end - line_start) + 1);
+      auto actual_line = str.substr(line_start, (line_end - line_start) + 1);
+      out << actual_line;
+      if (actual_line.back() != '\n')
+        out << "\n";
 
       size_t empty_space = 0;
       size_t highlight_space = 0;
@@ -162,7 +166,7 @@ C10_EXPORT void SourceRange::print_with_context(
         }
         out << std::string(empty_space, ' ');
         out << std::string(highlight_space, '~');
-        out << (more_lines ? "\n" : " <--- HERE\n");
+        out << (more_lines && line_end != end() ? "\n" : " <--- HERE\n");
       }
       ++line_end;
       line_start = line_end;
@@ -172,10 +176,12 @@ C10_EXPORT void SourceRange::print_with_context(
     out << str.substr(start(), (end() - start()) + 1);
   }
   // print out ending context
-  auto line_substr = str.substr(line_end, end_context - line_end);
-  out << line_substr;
-  if (!line_substr.empty() && line_substr.back() != '\n')
-    out << "\n";
+  if (line_end <= str.size()) {
+    auto line_substr = str.substr(line_end, end_context - line_end);
+    out << line_substr;
+    if (!line_substr.empty() && line_substr.back() != '\n')
+      out << "\n";
+  }
 }
 
 } // namespace jit
