@@ -350,6 +350,8 @@ class LinearReLU(QuantizeHandler):
 
 @register_quant_pattern(torch.nn.BatchNorm2d)
 @register_quant_pattern(torch.nn.BatchNorm3d)
+@register_quant_pattern(torch.nn.intrinsic.BNReLU2d)
+@register_quant_pattern(torch.nn.intrinsic.BNReLU3d)
 class BatchNorm(QuantizeHandler):
     def __init__(self, quantizer, node):
         super().__init__(quantizer, node)
@@ -358,7 +360,14 @@ class BatchNorm(QuantizeHandler):
         self.bn = quantizer.modules[self.bn_node.target]
 
     def convert(self, quantizer, node, load_arg, debug=False):
-        self.bn.activation_post_process = quantizer.activation_post_process_map[node.name]
+        # 1. attach activation post process to module
+        activation_post_process = quantizer.activation_post_process_map[node.name]
+        if type(self.bn) in \
+            [torch.nn.intrinsic.BNReLU2d,
+             torch.nn.intrinsic.BNReLU3d]:
+            self.bn[1].activation_post_process = activation_post_process
+        else:
+            self.bn.activation_post_process = activation_post_process
         qbn_cls = DEFAULT_MODULE_MAPPING[type(self.bn)]
         quantized = qbn_cls.from_float(self.bn)
         parent_name, name = _parent_name(self.bn_node.target)

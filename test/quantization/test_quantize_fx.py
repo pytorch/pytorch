@@ -531,3 +531,43 @@ class TestQuantizeFxOps(QuantizationTestCase):
         }
         for quant_type, dim in options:
             model = self.checkGraphModeFxOp(M(dim), self.img_data_dict[dim], quantized_nodes[dim], quant_type)
+
+    @skipIfNoFBGEMM
+    def test_qbatch_norm_relu(self):
+        bn_module = {2 : torch.nn.BatchNorm2d, 3 : torch.nn.BatchNorm3d}
+
+        class BNRelu(torch.nn.Module):
+            def __init__(self, dim, inplace):
+                super(BNRelu, self).__init__()
+                self.bn = bn_module[dim](3).to(torch.float)
+                self.relu = torch.nn.ReLU(inplace=inplace)
+
+            def forward(self, x):
+                return self.relu(self.bn(x))
+
+        class BNFuncRelu(torch.nn.Module):
+            def __init__(self, dim):
+                super(BNFuncRelu, self).__init__()
+                self.bn = bn_module[dim](3).to(torch.float)
+
+            def forward(self, x):
+                return F.relu(self.bn(x), False)
+
+        class BNFuncInplaceRelu(torch.nn.Module):
+            def __init__(self, dim):
+                super(BNFuncInplaceRelu, self).__init__()
+                self.bn = bn_module[dim](3).to(torch.float)
+
+            def forward(self, x):
+                return F.relu(self.bn(x), True)
+
+        options = itertools.product(self.static_quant_types, [2, 3])
+        quantized_nodes = {
+            2: ('call_module', nniq.BNReLU2d),
+            3: ('call_module', nniq.BNReLU3d),
+        }
+        for quant_type, dim in options:
+            for instance in [BNRelu(dim, True), BNRelu(dim, False),
+                             BNFuncRelu(dim), BNFuncInplaceRelu(dim)]:
+                self.checkGraphModeFxOp(
+                    instance, self.img_data_dict[dim], quantized_nodes[dim], quant_type)
