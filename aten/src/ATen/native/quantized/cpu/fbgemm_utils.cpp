@@ -217,13 +217,82 @@ CAFFE2_API torch::class_<ConvPackedParamsBase<kSpatialDim>> register_conv_params
   static auto register_conv_params =
     torch::class_<ConvPackedParamsBase<kSpatialDim>>(
         "quantized", "Conv" + c10::to_string(kSpatialDim) + "dPackedParamsBase")
-    .def_pickle(
+    // TODO(before land): document the hack and add a deprecation date
+    .def_pickle_setstate_boxed_DO_NOT_USE(
         [](const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>& params)
         -> SerializationType { // __getstate__
           return serialize_conv<kSpatialDim>(params);
         },
-        [](SerializationType state)
+        // TODO(before land): document everything well
+        [](c10::IValue v)
         -> c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> { // __setstate__
+
+          // determine the version based on IValue contents
+          int version = -1;
+          if (v.isTuple()) {
+            auto elements = v.toTuple()->elements();
+            if (elements.size() > 0) {
+              auto firstElement = elements[0];
+              // TODO before land: stronger checks
+              if (firstElement.isTensor()) {
+                version = 1;
+              } else if (firstElement.isString()) {
+                version = 2;
+              }
+            }
+          }
+          TORCH_INTERNAL_ASSERT(version != -1, "Unable to parse serialization version");
+
+          SerializationType state;
+
+          if (version == 1) {
+            // version 1 - convert to version 2 manually
+
+            auto elements = v.toTuple()->elements();
+
+            at::Tensor weight = elements[0].toTensor();
+            // TODO before land: test optional bias
+            c10::optional<at::Tensor> bias = elements[1].toTensor();
+            torch::List<at::Tensor> stride_x_kSpatialDim = elements[2].toTensorList();
+            torch::List<at::Tensor> padding_x_kSpatialDim = elements[3].toTensorList();
+            torch::List<at::Tensor> dilation_x_kSpatialDim = elements[4].toTensorList();
+            at::Tensor groups = elements[5].toTensor();
+
+            // create a v2 object with data from v1
+            // TODO before land: clean up everything (this is just the first version which worked)
+            std::string name_v2 = "conv";
+            int64_t version_v2 = 2;
+            std::vector<at::Tensor> required_tensors_v2;
+            required_tensors_v2.push_back(weight);
+            std::vector<c10::optional<at::Tensor>> optional_tensors_v2;
+            optional_tensors_v2.push_back(bias);
+            std::vector<double> doubles_v2;
+            std::vector<int64_t> ints_v2;
+            int64_t spatialDim = stride_x_kSpatialDim.size();
+            ints_v2.push_back(spatialDim);
+            for (int i = 0; i < stride_x_kSpatialDim.size(); i++) {
+              auto stride = stride_x_kSpatialDim.get(0);
+              ints_v2.push_back(stride[0].item<int64_t>());
+            }
+            for (int i = 0; i < padding_x_kSpatialDim.size(); i++) {
+              auto padding = padding_x_kSpatialDim.get(0);
+              ints_v2.push_back(padding[0].item<int64_t>());
+            }
+            for (int i = 0; i < dilation_x_kSpatialDim.size(); i++) {
+              auto dilation = dilation_x_kSpatialDim.get(0);
+              ints_v2.push_back(dilation[0].item<int64_t>());
+            }
+
+            // TODO before land: check numerical equivalency with tests
+            state = std::make_tuple(name_v2, version_v2, required_tensors_v2, optional_tensors_v2,
+                doubles_v2, ints_v2);
+
+          } else {
+
+            // version 2 - return the value as is
+            // TODO(before land): implement the conversion from v2 c10::IValue to SerializationType
+          }
+
           return deserialize_conv<kSpatialDim>(state);
         })
     .def("weight", [](const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>& self) {
