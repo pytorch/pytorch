@@ -315,3 +315,161 @@ class TestQuantizeFxOps(QuantizationTestCase):
             for quant_type in self.static_quant_types:
                 target_node = quantized_node if quantized else non_quantized_node
                 self.checkGraphModeFxOp(m, data, target_node, quant_type=quant_type)
+
+    @skipIfNoFBGEMM
+    def test_quantized_add_relu(self):
+        class AddRelu(torch.nn.Module):
+            def __init__(self, inplace):
+                super(AddRelu, self).__init__()
+                self.conv1 = torch.nn.Conv2d(2, 2, 2).float()
+                self.conv2 = torch.nn.Conv2d(2, 2, 2).float()
+                self.relu = torch.nn.ReLU(inplace)
+
+            def forward(self, x, y):
+                x = self.conv1(x)
+                y = self.conv2(y)
+                x = x + y
+                return self.relu(x)
+
+        class InplaceAddRelu(torch.nn.Module):
+            def __init__(self, inplace):
+                super(InplaceAddRelu, self).__init__()
+                self.conv1 = torch.nn.Conv2d(2, 2, 2).float()
+                self.conv2 = torch.nn.Conv2d(2, 2, 2).float()
+                self.relu = torch.nn.ReLU(inplace)
+
+            def forward(self, x, y):
+                x = self.conv1(x)
+                y = self.conv2(y)
+                x += y
+                return self.relu(x)
+
+        class AddFunctionalRelu(torch.nn.Module):
+            def __init__(self):
+                super(AddFunctionalRelu, self).__init__()
+                self.conv1 = torch.nn.Conv2d(2, 2, 2).float()
+                self.conv2 = torch.nn.Conv2d(2, 2, 2).float()
+
+            def forward(self, x, y):
+                x = self.conv1(x)
+                y = self.conv2(y)
+                x = x + y
+                return F.relu(x)
+
+        class InplaceAddFunctionalRelu(torch.nn.Module):
+            def __init__(self):
+                super(InplaceAddFunctionalRelu, self).__init__()
+                self.conv1 = torch.nn.Conv2d(2, 2, 2).float()
+                self.conv2 = torch.nn.Conv2d(2, 2, 2).float()
+
+            def forward(self, x, y):
+                x = self.conv1(x)
+                y = self.conv2(y)
+                x += y
+                return F.relu(x)
+
+        class AddInplaceFunctionalRelu(torch.nn.Module):
+            def __init__(self):
+                super(AddInplaceFunctionalRelu, self).__init__()
+                self.conv1 = torch.nn.Conv2d(2, 2, 2).float()
+                self.conv2 = torch.nn.Conv2d(2, 2, 2).float()
+
+            def forward(self, x, y):
+                x = self.conv1(x)
+                y = self.conv2(y)
+                x = x + y
+                return F.relu(x, True)
+
+        class InplaceAddInplaceFunctionalRelu(torch.nn.Module):
+            def __init__(self):
+                super(InplaceAddInplaceFunctionalRelu, self).__init__()
+                self.conv1 = torch.nn.Conv2d(2, 2, 2).float()
+                self.conv2 = torch.nn.Conv2d(2, 2, 2).float()
+
+            def forward(self, x, y):
+                x = self.conv1(x)
+                y = self.conv2(y)
+                x += y
+                return F.relu(x, True)
+
+        data = (torch.rand((1, 2, 5, 5), dtype=torch.float),
+                torch.rand((1, 2, 5, 5), dtype=torch.float))
+        quantized_node = ('call_function', torch.ops.quantized.add_relu)
+        for m in [AddRelu(True), AddRelu(False),
+                  InplaceAddRelu(True), InplaceAddRelu(False),
+                  AddFunctionalRelu(), InplaceAddFunctionalRelu(),
+                  AddInplaceFunctionalRelu(), InplaceAddInplaceFunctionalRelu()]:
+            for quant_type in self.static_quant_types:
+                self.checkGraphModeFxOp(m, data, quantized_node, quant_type=quant_type)
+
+    @skipIfNoFBGEMM
+    def test_quantized_add_scalar_relu(self):
+        class AddScalarRelu(torch.nn.Module):
+            def __init__(self, inplace):
+                super(AddScalarRelu, self).__init__()
+                self.conv = torch.nn.Conv2d(2, 2, 2).float()
+                self.relu = torch.nn.ReLU(inplace)
+
+            def forward(self, x):
+                x = self.conv(x)
+                return self.relu(x + 3)
+
+        class InplaceAddScalarRelu(torch.nn.Module):
+            def __init__(self, inplace):
+                super(InplaceAddScalarRelu, self).__init__()
+                self.conv = torch.nn.Conv2d(2, 2, 2).float()
+                self.relu = torch.nn.ReLU(inplace)
+
+            def forward(self, x):
+                x = self.conv(x)
+                x += 3
+                return self.relu(x)
+
+        class AddScalarFunctionalRelu(torch.nn.Module):
+            def __init__(self):
+                super(AddScalarFunctionalRelu, self).__init__()
+                self.conv = torch.nn.Conv2d(2, 2, 2).float()
+
+            def forward(self, x):
+                x = self.conv(x)
+                return F.relu(x + 3)
+
+        class InplaceAddScalarFunctionalRelu(torch.nn.Module):
+            def __init__(self):
+                super(InplaceAddScalarFunctionalRelu, self).__init__()
+                self.conv = torch.nn.Conv2d(2, 2, 2).float()
+
+            def forward(self, x):
+                x = self.conv(x)
+                x += 3
+                return F.relu(x)
+
+        class AddScalarInplaceFunctionalRelu(torch.nn.Module):
+            def __init__(self):
+                super(AddScalarInplaceFunctionalRelu, self).__init__()
+                self.conv = torch.nn.Conv2d(2, 2, 2).float()
+
+            def forward(self, x):
+                x = self.conv(x)
+                return F.relu(x + 3, True)
+
+        class InplaceAddScalarInplaceFunctionalRelu(torch.nn.Module):
+            def __init__(self):
+                super(InplaceAddScalarInplaceFunctionalRelu, self).__init__()
+                self.conv = torch.nn.Conv2d(2, 2, 2).float()
+
+            def forward(self, x):
+                x = self.conv(x)
+                x += 3
+                return F.relu(x, True)
+
+        data = (torch.rand((1, 2, 5, 5), dtype=torch.float),)
+        quantized_node = ('call_function', torch.ops.quantized.add_relu)
+        for m in [AddScalarRelu(True), AddScalarRelu(False),
+                  InplaceAddScalarRelu(True), InplaceAddScalarRelu(False),
+                  AddScalarFunctionalRelu(),
+                  InplaceAddScalarFunctionalRelu(),
+                  AddScalarInplaceFunctionalRelu(),
+                  InplaceAddScalarInplaceFunctionalRelu()]:
+            for quant_type in self.static_quant_types:
+                self.checkGraphModeFxOp(m, data, quantized_node, quant_type=quant_type)
