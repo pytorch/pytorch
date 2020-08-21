@@ -245,7 +245,7 @@
 #     adding an alias in a namespace.)
 # 5) Update torch/overrides.py consistent with the original function.
 # 6) Update the alias_map in torch/csrc/jit/passes/normalize_ops.cpp.
-# 8) Add entries to test/test_op_aliases.py's "alias_infos"
+# 7) Add entries to test/test_op_aliases.py's "alias_infos"
 #
 # See torch.absolute, an alias for torch.abs, as an example.
 
@@ -297,6 +297,17 @@
   variants: function, method
 
 - func: acos.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+
+# arccos, alias of acos
+- func: arccos(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: arccos_(Tensor(a!) self) -> Tensor(a!)
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: arccos.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
 
 - func: avg_pool1d(Tensor self, int[1] kernel_size, int[1] stride=[], int[1] padding=0, bool ceil_mode=False, bool count_include_pad=True) -> Tensor
   use_c10_dispatcher: full
@@ -463,7 +474,7 @@
 
 - func: acosh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
 
-# arcosh, alias for acosh
+# arccosh, alias for acosh
 - func: arccosh(Tensor self) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
@@ -516,6 +527,17 @@
 
 - func: asin.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
 
+# arcsin, alias of asin
+- func: arcsin(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: arcsin_(Tensor(a!) self) -> Tensor(a!)
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: arcsin.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+
 - func: atan(Tensor self) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
@@ -525,6 +547,17 @@
   variants: function, method
 
 - func: atan.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+
+# arctan, alias of atan
+- func: arctan(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: arctan_(Tensor(a!) self) -> Tensor(a!)
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: arctan.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
 
 - func: atleast_1d(Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -3155,8 +3188,17 @@
   variants: function, method
 
 - func: trunc.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU, CUDA: trunc_out
+
+# Alias for trunc
+- func: fix(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+  
+- func: fix_(Tensor(a!) self) -> Tensor(a!)
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: fix.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
 
 - func: type_as(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full

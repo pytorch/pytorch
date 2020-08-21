@@ -525,6 +525,8 @@ jobs:
               export COMMIT_DOCKER_IMAGE=$output_image-android-x86_32
             elif [[ ${BUILD_ENVIRONMENT} == *"android-ndk-r19c-vulkan-x86_32"* ]]; then
               export COMMIT_DOCKER_IMAGE=$output_image-android-vulkan-x86_32
+            elif [[ ${BUILD_ENVIRONMENT} == *"vulkan-linux"* ]]; then
+              export COMMIT_DOCKER_IMAGE=$output_image-vulkan
             else
               export COMMIT_DOCKER_IMAGE=$output_image
             fi
@@ -562,6 +564,8 @@ jobs:
             export COMMIT_DOCKER_IMAGE=$output_image-paralleltbb
           elif [[ ${BUILD_ENVIRONMENT} == *"parallelnative"* ]]; then
             export COMMIT_DOCKER_IMAGE=$output_image-parallelnative
+          elif [[ ${BUILD_ENVIRONMENT} == *"vulkan-linux"* ]]; then
+            export COMMIT_DOCKER_IMAGE=$output_image-vulkan
           else
             export COMMIT_DOCKER_IMAGE=$output_image
           fi
@@ -1676,7 +1680,7 @@ jobs:
   pytorch_android_gradle_custom_build_single:
     environment:
       BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:209062ef-ab58-422a-b295-36c4eed6e906"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c"
       PYTHON_VERSION: "3.6"
     resource_class: large
     machine:
@@ -1685,6 +1689,7 @@ jobs:
     - checkout
     - setup_linux_system_environment
     - checkout
+    - calculate_docker_image_tag
     - setup_ci_environment
     - run:
         name: pytorch android gradle custom build single architecture (for PR)
@@ -1695,14 +1700,11 @@ jobs:
           # 1) Not shareable: it's custom selective build, which is different from default libtorch mobile build;
           # 2) Not parallelizable by architecture: it only builds libtorch for one architecture;
 
-          echo "DOCKER_IMAGE: ${DOCKER_IMAGE}"
-          time docker pull ${DOCKER_IMAGE} >/dev/null
-          export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
-
+          echo "DOCKER_IMAGE: ${DOCKER_IMAGE}:${DOCKER_TAG}"
+          time docker pull ${DOCKER_IMAGE}:${DOCKER_TAG} >/dev/null
           git submodule sync && git submodule update -q --init --recursive
-
           VOLUME_MOUNTS="-v /home/circleci/project/:/var/lib/jenkins/workspace"
-          export id=$(docker run ${VOLUME_MOUNTS} --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
+          export id=$(docker run ${VOLUME_MOUNTS} --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${DOCKER_IMAGE}:${DOCKER_TAG})
 
           export COMMAND='((echo "source ./workspace/env" && echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "export GRADLE_OFFLINE=1" && echo "sudo chown -R jenkins workspace && cd workspace && ./.circleci/scripts/build_android_gradle.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
@@ -6506,6 +6508,19 @@ workflows:
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-bionic-py3.6-clang9"
           resource_class: large
       - pytorch_linux_build:
+          name: pytorch_vulkan_linux_bionic_py3_6_clang9_build
+          requires:
+            - "docker-pytorch-linux-bionic-py3.6-clang9"
+          build_environment: "pytorch-vulkan-linux-bionic-py3.6-clang9-build"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-bionic-py3.6-clang9"
+      - pytorch_linux_test:
+          name: pytorch_vulkan_linux_bionic_py3_6_clang9_test
+          requires:
+            - pytorch_vulkan_linux_bionic_py3_6_clang9_build
+          build_environment: "pytorch-vulkan-linux-bionic-py3.6-clang9-test"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-bionic-py3.6-clang9"
+          resource_class: large
+      - pytorch_linux_build:
           name: pytorch_linux_bionic_py3_8_gcc9_build
           requires:
             - "docker-pytorch-linux-bionic-py3.8-gcc9"
@@ -6588,6 +6603,8 @@ workflows:
                 - /gh\/.*\/head/
                 - /pull\/.*/
           name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single
+          requires:
+            - docker-pytorch-linux-xenial-py3-clang5-android-ndk-r19c
       - pytorch_android_gradle_build:
           filters:
             branches:
