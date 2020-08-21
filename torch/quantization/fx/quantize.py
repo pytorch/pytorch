@@ -213,10 +213,11 @@ class ConvRelu(QuantizeHandler):
             assert self.relu_node is None, 'conv module and relu fusion is not executed, ' \
                 'please make sure to run fusion before prepare'
             # 1. attach activation post process to module
-            if type(self.conv) in \
-               [torch.nn.intrinsic.ConvReLU1d,
-                torch.nn.intrinsic.ConvReLU2d,
-                torch.nn.intrinsic.ConvReLU3d]:
+            if type(self.conv) in [
+                    torch.nn.intrinsic.ConvReLU1d,
+                    torch.nn.intrinsic.ConvReLU2d,
+                    torch.nn.intrinsic.ConvReLU3d
+            ]:
                 self.conv[1].activation_post_process = quantizer.activation_post_process_map[node.name]
             else:
                 self.conv.activation_post_process = quantizer.activation_post_process_map[node.name]
