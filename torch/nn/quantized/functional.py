@@ -439,7 +439,7 @@ def leaky_relu(input: Tensor, negative_slope: float = 0.01, inplace: bool = Fals
         result = torch._C._nn.leaky_relu(input, negative_slope)
     return result
 
-def hardtanh(input: Tensor, min_val: float = -1., max_val: float = 1., inplace: bool =False) -> Tensor:
+def hardtanh(input: Tensor, min_val: float = -1., max_val: float = 1., inplace: bool = False) -> Tensor:
     r"""This is the quantized version of :func:`~torch.nn.functional.hardtanh`.
     """
     if not input.is_quantized:
