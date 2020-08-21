@@ -315,13 +315,12 @@ static inline bool isSignedType(ScalarType t) {
       return std::numeric_limits<ctype>::is_signed;
 
   switch (t) {
-    case ScalarType::ComplexHalf:
-    case ScalarType::ComplexFloat:
-    case ScalarType::ComplexDouble:
-      return true;
+    case ScalarType::ComplexFloat: \
+    case ScalarType::ComplexDouble: \
+      return true; \
     AT_FORALL_SCALAR_TYPES_AND3(Half, Bool, BFloat16, CASE_SIGNED)
     default:
-      TORCH_CHECK(false, "Unknown ScalarType");
+      AT_ERROR("Unknown ScalarType");
   }
   #undef CASE_SIGNED
 }
@@ -332,8 +331,6 @@ static inline bool isUnderlying(ScalarType type, ScalarType qtype) {
 
 static inline ScalarType toValueType(ScalarType t) {
   switch (t) {
-    case ScalarType::ComplexHalf:
-      return ScalarType::Half;
     case ScalarType::ComplexFloat:
       return ScalarType::Float;
     case ScalarType::ComplexDouble:
@@ -345,8 +342,6 @@ static inline ScalarType toValueType(ScalarType t) {
 
 static inline ScalarType toComplexType(ScalarType t) {
   switch (t) {
-    case ScalarType::Half:
-      return ScalarType::ComplexHalf;
     case ScalarType::Float:
       return ScalarType::ComplexFloat;
     case ScalarType::Double:

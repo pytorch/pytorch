@@ -280,7 +280,6 @@ Pointwise Ops
     erfinv
     exp
     expm1
-    fix
     floor
     floor_divide
     fmod
