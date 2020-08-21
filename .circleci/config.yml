@@ -183,10 +183,6 @@ commands:
         default: ""
     steps:
       - run:
-          name: "Binary Size - Set Python Version"
-          no_output_timeout: "1m"
-          command: pyenv global 3.7.0
-      - run:
           name: "Binary Size - Install Dependencies"
           no_output_timeout: "5m"
           command: |
@@ -467,7 +463,7 @@ jobs:
   pytorch_linux_build:
     <<: *pytorch_params
     machine:
-      image: ubuntu-1604:201903-01
+      image: ubuntu-1604:202007-01
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - checkout
@@ -529,6 +525,8 @@ jobs:
               export COMMIT_DOCKER_IMAGE=$output_image-android-x86_32
             elif [[ ${BUILD_ENVIRONMENT} == *"android-ndk-r19c-vulkan-x86_32"* ]]; then
               export COMMIT_DOCKER_IMAGE=$output_image-android-vulkan-x86_32
+            elif [[ ${BUILD_ENVIRONMENT} == *"vulkan-linux"* ]]; then
+              export COMMIT_DOCKER_IMAGE=$output_image-vulkan
             else
               export COMMIT_DOCKER_IMAGE=$output_image
             fi
@@ -539,7 +537,7 @@ jobs:
   pytorch_linux_test:
     <<: *pytorch_params
     machine:
-      image: ubuntu-1604:201903-01
+      image: ubuntu-1604:202007-01
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - checkout
@@ -566,6 +564,8 @@ jobs:
             export COMMIT_DOCKER_IMAGE=$output_image-paralleltbb
           elif [[ ${BUILD_ENVIRONMENT} == *"parallelnative"* ]]; then
             export COMMIT_DOCKER_IMAGE=$output_image-parallelnative
+          elif [[ ${BUILD_ENVIRONMENT} == *"vulkan-linux"* ]]; then
+            export COMMIT_DOCKER_IMAGE=$output_image-vulkan
           else
             export COMMIT_DOCKER_IMAGE=$output_image
           fi
@@ -581,7 +581,7 @@ jobs:
           time docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
 
           if [ -n "${USE_CUDA_DOCKER_RUNTIME}" ]; then
-            export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --runtime=nvidia --shm-size=2g -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
+            export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --gpus all --shm-size=2g -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
           elif [[ ${BUILD_ENVIRONMENT} == *"rocm"* ]]; then
             hostname
             export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --shm-size=8g --ipc=host --device /dev/kfd --device /dev/dri --group-add video -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
@@ -798,7 +798,7 @@ jobs:
   caffe2_linux_build:
     <<: *caffe2_params
     machine:
-      image: ubuntu-1604:201903-01
+      image: ubuntu-1604:202007-01
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - checkout
@@ -858,7 +858,7 @@ jobs:
   caffe2_linux_test:
     <<: *caffe2_params
     machine:
-      image: ubuntu-1604:201903-01
+      image: ubuntu-1604:202007-01
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - checkout
@@ -910,7 +910,7 @@ jobs:
           echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
           time docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
           if [ -n "${USE_CUDA_DOCKER_RUNTIME}" ]; then
-            export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
+            export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --gpus all -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
           else
             export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
           fi
@@ -1068,7 +1068,7 @@ jobs:
   binary_linux_test:
     <<: *binary_linux_test_upload_params
     machine:
-        image: ubuntu-1604:201903-01
+        image: ubuntu-1604:202007-01
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - checkout
@@ -1131,7 +1131,7 @@ jobs:
   smoke_linux_test:
     <<: *binary_linux_test_upload_params
     machine:
-      image: ubuntu-1604:201903-01
+      image: ubuntu-1604:202007-01
     steps:
     - checkout
     - calculate_docker_image_tag
@@ -1350,7 +1350,7 @@ jobs:
   pytorch_doc_push:
     resource_class: medium
     machine:
-      image: ubuntu-1604:201903-01
+      image: ubuntu-1604:202007-01
     parameters:
       branch:
         type: string
@@ -1379,7 +1379,7 @@ jobs:
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4"
     resource_class: large
     machine:
-      image: ubuntu-1604:201903-01
+      image: ubuntu-1604:202007-01
     steps:
     - checkout
     - calculate_docker_image_tag
@@ -1421,7 +1421,7 @@ jobs:
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4"
     resource_class: large
     machine:
-      image: ubuntu-1604:201903-01
+      image: ubuntu-1604:202007-01
     steps:
     - checkout
     - calculate_docker_image_tag
@@ -1517,7 +1517,7 @@ jobs:
       PYTHON_VERSION: "3.6"
     resource_class: large
     machine:
-      image: ubuntu-1604:201903-01
+      image: ubuntu-1604:202007-01
     steps:
     - checkout
     - calculate_docker_image_tag
@@ -1606,7 +1606,7 @@ jobs:
       PYTHON_VERSION: "3.6"
     resource_class: large
     machine:
-      image: ubuntu-1604:201903-01
+      image: ubuntu-1604:202007-01
     steps:
     - checkout
     - setup_linux_system_environment
@@ -1642,7 +1642,7 @@ jobs:
       PYTHON_VERSION: "3.6"
     resource_class: large
     machine:
-      image: ubuntu-1604:201903-01
+      image: ubuntu-1604:202007-01
     steps:
     - checkout
     - calculate_docker_image_tag
@@ -1680,15 +1680,16 @@ jobs:
   pytorch_android_gradle_custom_build_single:
     environment:
       BUILD_ENVIRONMENT: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single
-      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c:209062ef-ab58-422a-b295-36c4eed6e906"
+      DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c"
       PYTHON_VERSION: "3.6"
     resource_class: large
     machine:
-      image: ubuntu-1604:201903-01
+      image: ubuntu-1604:202007-01
     steps:
     - checkout
     - setup_linux_system_environment
     - checkout
+    - calculate_docker_image_tag
     - setup_ci_environment
     - run:
         name: pytorch android gradle custom build single architecture (for PR)
@@ -1699,14 +1700,11 @@ jobs:
           # 1) Not shareable: it's custom selective build, which is different from default libtorch mobile build;
           # 2) Not parallelizable by architecture: it only builds libtorch for one architecture;
 
-          echo "DOCKER_IMAGE: ${DOCKER_IMAGE}"
-          time docker pull ${DOCKER_IMAGE} >/dev/null
-          export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
-
+          echo "DOCKER_IMAGE: ${DOCKER_IMAGE}:${DOCKER_TAG}"
+          time docker pull ${DOCKER_IMAGE}:${DOCKER_TAG} >/dev/null
           git submodule sync && git submodule update -q --init --recursive
-
           VOLUME_MOUNTS="-v /home/circleci/project/:/var/lib/jenkins/workspace"
-          export id=$(docker run ${VOLUME_MOUNTS} --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
+          export id=$(docker run ${VOLUME_MOUNTS} --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${DOCKER_IMAGE}:${DOCKER_TAG})
 
           export COMMAND='((echo "source ./workspace/env" && echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo "export GRADLE_OFFLINE=1" && echo "sudo chown -R jenkins workspace && cd workspace && ./.circleci/scripts/build_android_gradle.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
@@ -1836,7 +1834,7 @@ jobs:
   pytorch_linux_bazel_build:
     <<: *pytorch_params
     machine:
-      image: ubuntu-1604:201903-01
+      image: ubuntu-1604:202007-01
     steps:
     - checkout
     - calculate_docker_image_tag
@@ -1874,7 +1872,7 @@ jobs:
   pytorch_linux_bazel_test:
     <<: *pytorch_params
     machine:
-      image: ubuntu-1604:201903-01
+      image: ubuntu-1604:202007-01
     steps:
     - checkout
     - calculate_docker_image_tag
@@ -1892,7 +1890,7 @@ jobs:
           time docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
 
           if [ -n "${USE_CUDA_DOCKER_RUNTIME}" ]; then
-            export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
+            export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --gpus all -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
           else
             export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
           fi
@@ -1921,7 +1919,7 @@ jobs:
       DOCKER_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4"
     resource_class: medium
     machine:
-      image: ubuntu-1604:201903-01
+      image: ubuntu-1604:202007-01
     steps:
     - checkout
     - calculate_docker_image_tag
@@ -1966,7 +1964,7 @@ jobs:
   # then install the one with the most recent version.
   update_s3_htmls: &update_s3_htmls
     machine:
-      image: ubuntu-1604:201903-01
+      image: ubuntu-1604:202007-01
     resource_class: medium
     steps:
     - checkout
@@ -2029,7 +2027,7 @@ jobs:
           type: string
           default: ""
       machine:
-        image: ubuntu-1604:201903-01
+        image: ubuntu-1604:202007-01
       resource_class: large
       environment:
         IMAGE_NAME: << parameters.image_name >>
@@ -2078,7 +2076,7 @@ jobs:
               cd .circleci/docker && ./build_docker.sh
   docker_for_ecr_gc_build_job:
       machine:
-        image: ubuntu-1604:201903-01
+        image: ubuntu-1604:202007-01
       steps:
         - checkout
         - run:
@@ -5934,6 +5932,19 @@ workflows:
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-bionic-py3.6-clang9"
           resource_class: large
       - pytorch_linux_build:
+          name: pytorch_vulkan_linux_bionic_py3_6_clang9_build
+          requires:
+            - "docker-pytorch-linux-bionic-py3.6-clang9"
+          build_environment: "pytorch-vulkan-linux-bionic-py3.6-clang9-build"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-bionic-py3.6-clang9"
+      - pytorch_linux_test:
+          name: pytorch_vulkan_linux_bionic_py3_6_clang9_test
+          requires:
+            - pytorch_vulkan_linux_bionic_py3_6_clang9_build
+          build_environment: "pytorch-vulkan-linux-bionic-py3.6-clang9-test"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-bionic-py3.6-clang9"
+          resource_class: large
+      - pytorch_linux_build:
           name: pytorch_linux_bionic_py3_8_gcc9_build
           requires:
             - "docker-pytorch-linux-bionic-py3.8-gcc9"
@@ -6016,6 +6027,8 @@ workflows:
                 - /gh\/.*\/head/
                 - /pull\/.*/
           name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single
+          requires:
+            - docker-pytorch-linux-xenial-py3-clang5-android-ndk-r19c
       - pytorch_android_gradle_build:
           filters:
             branches:
