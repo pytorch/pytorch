@@ -159,66 +159,7 @@ class class_ {
   ///         })
   template <typename GetStateFn, typename SetStateFn>
   class_& def_pickle(GetStateFn&& get_state, SetStateFn&& set_state) {
-    static_assert(
-        c10::guts::is_stateless_lambda<std::decay_t<GetStateFn>>::value &&
-            c10::guts::is_stateless_lambda<std::decay_t<SetStateFn>>::value,
-        "def_pickle() currently only supports lambdas as "
-        "__getstate__ and __setstate__ arguments.");
-    def("__getstate__", std::forward<GetStateFn>(get_state));
-
-    // __setstate__ needs to be registered with some custom handling:
-    // We need to wrap the invocation of of the user-provided function
-    // such that we take the return value (i.e. c10::intrusive_ptr<CurrClass>)
-    // and assign it to the `capsule` attribute.
-    using SetStateTraits =
-        c10::guts::infer_function_traits_t<std::decay_t<SetStateFn>>;
-    using SetStateArg = typename c10::guts::typelist::head_t<
-        typename SetStateTraits::parameter_types>;
-    auto setstate_wrapper = [set_state = std::move(set_state)](
-                                c10::tagged_capsule<CurClass> self,
-                                SetStateArg&& arg) {
-      c10::intrusive_ptr<CurClass> classObj =
-          at::guts::invoke(set_state, std::forward<SetStateArg>(arg));
-      auto object = self.ivalue.toObject();
-      object->setSlot(0, c10::IValue::make_capsule(classObj));
-    };
-    defineMethod(
-        "__setstate__",
-        detail::wrap_func<CurClass, decltype(setstate_wrapper)>(
-            std::move(setstate_wrapper)));
-
-    // type validation
-    auto getstate_schema = classTypePtr->getMethod("__getstate__").getSchema();
-    auto format_getstate_schema = [&getstate_schema]() {
-      std::stringstream ss;
-      ss << getstate_schema;
-      return ss.str();
-    };
-    TORCH_CHECK(
-        getstate_schema.arguments().size() == 1,
-        "__getstate__ should take exactly one argument: self. Got: ",
-        format_getstate_schema());
-    auto first_arg_type = getstate_schema.arguments().at(0).type();
-    TORCH_CHECK(
-        *first_arg_type == *classTypePtr,
-        "self argument of __getstate__ must be the custom class type. Got ",
-        first_arg_type->repr_str());
-    TORCH_CHECK(
-        getstate_schema.returns().size() == 1,
-        "__getstate__ should return exactly one value for serialization. Got: ",
-        format_getstate_schema());
-    auto ser_type = getstate_schema.returns().at(0).type();
-    auto setstate_schema = classTypePtr->getMethod("__setstate__").getSchema();
-    auto arg_type = setstate_schema.arguments().at(1).type();
-    TORCH_CHECK(
-        (*arg_type == *ser_type),
-        "__setstate__'s argument should be the same type as the "
-        "return value of __getstate__. Got ",
-        arg_type->repr_str(),
-        " but expected ",
-        ser_type->repr_str());
-
-    return *this;
+    return _def_pickle_impl(get_state, set_state);
   }
 
   // This is a temporary hack to change the format of ConvPackedParams without
@@ -226,11 +167,15 @@ class class_ {
   // version of __set_state__, which knows how to parse historical formats.
   // TODO(before land): create an issue to delete this in a month and link here.
   template <typename GetStateFn, typename SetStateFn>
-  class_& def_pickle_unboxed_DO_NOT_USE(
+  class_& def_pickle_setstate_boxed_DO_NOT_USE(
       GetStateFn&& get_state, SetStateFn&& set_state) {
-    // Note: most of this code is copy-pasta from def_pickle
-    // TODO(before land): if this approach gets consensus, potentially reuse
-    //   more things.
+    bool validate_setstate_input_type = false;
+    return _def_pickle_impl(get_state, set_state, validate_setstate_input_type);
+  }
+
+  template <typename GetStateFn, typename SetStateFn>
+  class_& _def_pickle_impl(GetStateFn&& get_state, SetStateFn&& set_state,
+      bool validate_setstate_input_type=true) {
     static_assert(
         c10::guts::is_stateless_lambda<std::decay_t<GetStateFn>>::value &&
             c10::guts::is_stateless_lambda<std::decay_t<SetStateFn>>::value,
@@ -279,20 +224,19 @@ class class_ {
         getstate_schema.returns().size() == 1,
         "__getstate__ should return exactly one value for serialization. Got: ",
         format_getstate_schema());
-    auto ser_type = getstate_schema.returns().at(0).type();
-    auto setstate_schema = classTypePtr->getMethod("__setstate__").getSchema();
-    // Leaving the below code for clarity, it would be deleted if this approach
-    // is what people want to move forward with.
-    /*
-    auto arg_type = setstate_schema.arguments().at(1).type();
-    TORCH_CHECK(
-        (*arg_type == *ser_type),
-        "__setstate__'s argument should be the same type as the "
-        "return value of __getstate__. Got ",
-        arg_type->repr_str(),
-        " but expected ",
-        ser_type->repr_str());
-        */
+
+    if (validate_setstate_input_type) {
+      auto ser_type = getstate_schema.returns().at(0).type();
+      auto setstate_schema = classTypePtr->getMethod("__setstate__").getSchema();
+      auto arg_type = setstate_schema.arguments().at(1).type();
+      TORCH_CHECK(
+          (*arg_type == *ser_type),
+          "__setstate__'s argument should be the same type as the "
+          "return value of __getstate__. Got ",
+          arg_type->repr_str(),
+          " but expected ",
+          ser_type->repr_str());
+    }
 
     return *this;
   }
