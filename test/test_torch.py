@@ -6992,15 +6992,6 @@ class TestTorchDeviceType(TestCase):
             for other_dtype in torch.testing.get_all_dtypes():
                 b = torch.tensor(b_, dtype=other_dtype, device=device)
 
-                # TODO Remove this skipping after bfloat16 can be handled nicely with other dtypes.
-                # Skip only if either dtype or other_dtype is bfloat16, and promotion is unsupported.
-                if (dtype == torch.bfloat16) != (other_dtype == torch.bfloat16):
-                    non_bfloat16_dtype = dtype if dtype != torch.bfloat16 else other_dtype
-                    if non_bfloat16_dtype.is_complex or non_bfloat16_dtype == torch.float16:
-                        with self.assertRaises(RuntimeError):
-                            getattr(a, op)(b)
-                        continue
-
                 # Skip bfloat16 on CUDA. Remove this after bfloat16 is supported on CUDA.
                 # After type promotion of bfloat16 is supported, some bfloat16 logical operation will go through on
                 # CUDA as long as the two tensors are promoted to a supported type.
