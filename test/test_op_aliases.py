@@ -52,6 +52,10 @@ alias_infos = (
               lambda d: torch.randn(20, device=d) + 2),
     AliasInfo('arccosh_', torch.Tensor.arccosh_, 'acosh_', torch.Tensor.acosh_,
               lambda d: torch.randn(20, device=d) + 2),
+    AliasInfo('fix', torch.fix, 'trunc', torch.trunc,
+              lambda d: 10 * torch.randn(20, device=d)),
+    AliasInfo('fix_', torch.Tensor.fix_, 'trunc_', torch.Tensor.trunc_,
+              lambda d: 10 * torch.randn(20, device=d)),
 )
 
 # Placeholder test class for validating that aliases are correctly
