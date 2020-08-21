@@ -77,7 +77,8 @@ C10_EXPORT void SourceRange::print_with_context(
 
   // determine CONTEXT line range
   size_t begin_line = start(); // beginning of lines to highlight
-  size_t end_line = end(); // end of lines to highlight
+  size_t end_line =
+      (str.size() < end() ? str.size() : end()); // end of lines to highlight
   while (begin_line > 0 && str[begin_line - 1] != '\n')
     --begin_line;
   while (end_line < str.size() && str[end_line] != '\n')
@@ -173,7 +174,7 @@ C10_EXPORT void SourceRange::print_with_context(
     }
   } else {
     // print out code with no highlight
-    out << str.substr(start(), (end() - start()) + 1);
+    out << str.substr(start(), end() - start());
   }
   // print out ending context
   if (line_end <= str.size()) {
