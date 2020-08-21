@@ -202,6 +202,18 @@ acos_() -> Tensor
 In-place version of :meth:`~Tensor.acos`
 """)
 
+add_docstr_all('arccos', r"""
+arccos() -> Tensor
+
+See :func:`torch.arccos`
+""")
+
+add_docstr_all('arccos_', r"""
+arccos_() -> Tensor
+
+In-place version of :meth:`~Tensor.arccos`
+""")
+
 add_docstr_all('acosh',
                r"""
 acosh() -> Tensor
@@ -507,6 +519,18 @@ asin_() -> Tensor
 In-place version of :meth:`~Tensor.asin`
 """)
 
+add_docstr_all('arcsin', r"""
+arcsin() -> Tensor
+
+See :func:`torch.arcsin`
+""")
+
+add_docstr_all('arcsin_', r"""
+arcsin_() -> Tensor
+
+In-place version of :meth:`~Tensor.arcsin`
+""")
+
 add_docstr_all('asinh', r"""
 asinh() -> Tensor
 
@@ -526,11 +550,28 @@ as_strided(size, stride, storage_offset=0) -> Tensor
 See :func:`torch.as_strided`
 """)
 
-add_docstr_all('atan',
-               r"""
+add_docstr_all('atan', r"""
 atan() -> Tensor
 
 See :func:`torch.atan`
+""")
+
+add_docstr_all('atan_', r"""
+atan_() -> Tensor
+
+In-place version of :meth:`~Tensor.atan`
+""")
+
+add_docstr_all('arctan', r"""
+arctan() -> Tensor
+
+See :func:`torch.arctan`
+""")
+
+add_docstr_all('arctan_', r"""
+arctan_() -> Tensor
+
+In-place version of :meth:`~Tensor.arctan`
 """)
 
 add_docstr_all('atan2',
@@ -545,13 +586,6 @@ add_docstr_all('atan2_',
 atan2_(other) -> Tensor
 
 In-place version of :meth:`~Tensor.atan2`
-""")
-
-add_docstr_all('atan_',
-               r"""
-atan_() -> Tensor
-
-In-place version of :meth:`~Tensor.atan`
 """)
 
 add_docstr_all('atanh',
@@ -1748,8 +1782,8 @@ add_docstr_all('is_set_to',
                r"""
 is_set_to(tensor) -> bool
 
-Returns True if this object refers to the same ``THTensor`` object from the
-Torch C API as the given tensor.
+Returns True if both tensors are pointing to the exact same memory (same
+storage, offset, size and stride).
 """)
 
 add_docstr_all('item', r"""
@@ -3495,11 +3529,25 @@ trunc() -> Tensor
 See :func:`torch.trunc`
 """)
 
+add_docstr_all('fix',
+               r"""
+fix() -> Tensor
+
+See :func:`torch.fix`.
+""")
+
 add_docstr_all('trunc_',
                r"""
 trunc_() -> Tensor
 
 In-place version of :meth:`~Tensor.trunc`
+""")
+
+add_docstr_all('fix_',
+               r"""
+fix_() -> Tensor
+
+In-place version of :meth:`~Tensor.fix`
 """)
 
 add_docstr_all('type',
