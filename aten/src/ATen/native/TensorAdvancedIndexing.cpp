@@ -54,6 +54,7 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/MemoryOverlap.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/Copy.h>
@@ -271,6 +272,7 @@ Tensor index(const Tensor & self, TensorList indices) {
 
 Tensor& index_out(Tensor& result, const Tensor & self, TensorList indices) {
   TORCH_CHECK_INDEX(indices.size() <= (size_t)self.dim(), "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
+  at::assert_no_internal_overlap(result);
 
   auto info = make_info(self, indices);
   auto iter = make_index_out_iterator(info, result);
@@ -290,6 +292,7 @@ Tensor & _index_put_impl_(Tensor & self, TensorList indices, const Tensor & valu
       index_put_accum_stub(self.device().type(), self, indices, value, unsafe);
       return self;
   }
+  at::assert_no_internal_overlap(self);
   auto info = make_info(self, indices);
   auto iter = make_index_put_iterator(info, value);
   index_put_stub(iter.device_type(), iter, info.indexed_sizes, info.indexed_strides, accumulate);
@@ -428,6 +431,7 @@ Tensor & index_select_out_cpu_(Tensor & result, const Tensor & self, int64_t dim
               "index_select(): self and result must have the same scalar type");
   TORCH_CHECK(dim == 0 || dim < self.dim(),
               "index_select(): Indexing dim ", dim, " is out of bounds of tensor");
+  at::assert_no_internal_overlap(result);
 
   auto result_size = self.sizes().vec();
   if (self.dim() > 0) {
@@ -697,6 +701,7 @@ static Tensor & masked_select_out_impl_cpu(Tensor & result, const Tensor & self,
               "masked_select: expected BoolTensor or ByteTensor for mask");
   TORCH_CHECK(self.scalar_type() == result.scalar_type(),
               "masked_select(): self and result must have the same scalar type");
+  at::assert_no_internal_overlap(result);
 
   at::assert_no_internal_overlap(result);
   at::assert_no_partial_overlap(result, self);

@@ -4,6 +4,7 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/MemoryOverlap.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
@@ -812,6 +813,7 @@ Tensor& index_select_out_cuda(Tensor& out, const Tensor& self, int64_t dim,
 
   TORCH_CHECK(at::cuda::check_device({out, self, index}),
               "Input, output and indices must be on the current device");
+  at::assert_no_internal_overlap(out);
 
   dim = at::maybe_wrap_dim(dim, self);
   TORCH_CHECK(self.dim() <= MAX_TENSORINFO_DIMS, DIM_WARNING);

@@ -11,6 +11,7 @@ namespace at { namespace native {
 
 Tensor & masked_fill__cuda(Tensor& self, const Tensor & mask, Scalar value) {
   auto maybe_outnames = namedinference::broadcast_to_outnames(self, mask, "masked_fill_");
+  at::assert_no_internal_overlap(self);
   Tensor b_mask;
   std::tie(b_mask) = expand_inplace(self, mask, "masked_fill_");
   // As we dispatch on self and TH is type-checked, we need different definitions.
@@ -28,6 +29,7 @@ Tensor & masked_fill__cuda(Tensor& self, const Tensor & mask, Scalar value) {
 
 Tensor & masked_fill__cuda(Tensor& self, const Tensor & mask, const Tensor & value) {
   auto maybe_outnames = namedinference::broadcast_to_outnames(self, mask, "masked_fill_");
+  at::assert_no_internal_overlap(self);
 
   TORCH_CHECK(value.dim() == 0, "masked_fill_ only supports a 0-dimensional value tensor, but got tensor "
       "with ", value.dim(), " dimension(s).");
@@ -47,6 +49,7 @@ Tensor & masked_fill__cuda(Tensor& self, const Tensor & mask, const Tensor & val
 }
 
 Tensor & masked_scatter__cuda(Tensor& self, const Tensor & mask, const Tensor & source) {
+  at::assert_no_internal_overlap(self);
   Tensor b_mask;
   std::tie(b_mask) = expand_inplace(self, mask, "masked_scatter_");
   // As we dispatch on self and TH is type-checked, we need different definitions.

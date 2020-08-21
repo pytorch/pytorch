@@ -314,6 +314,7 @@ Tensor& cat_out_cuda(Tensor& out, TensorList inputs, int64_t dimension) {
                 "of the output memory locations. Found overlap in input "
                 "tensor ", i);
   }
+  at::assert_no_internal_overlap(out);
 
   for (int i = 0; i < inputs.size(); i++)
   {
