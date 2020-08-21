@@ -31,6 +31,8 @@ common_args = parse_kwargs("""
     input (Tensor): the input tensor.
     generator (:class:`torch.Generator`, optional): a pseudorandom number generator for sampling
     out (Tensor, optional): the output tensor.
+    memory_format (:class:`torch.memory_format`, optional): the desired memory format of
+        returned tensor. Default: ``torch.preserve_format``.
 """)
 
 reduceops_common_args = merge_dicts(common_args, parse_kwargs("""
@@ -154,9 +156,8 @@ Example::
     tensor([ 1.2294,  2.2004,  1.3690,  1.7298])
 """.format(**common_args))
 
-add_docstr(torch.acosh,
-           r"""
-acosh(input, out=None) -> Tensor
+add_docstr(torch.acosh, r"""
+acosh(input, *, out=None) -> Tensor
 
 Returns a new tensor with the inverse hyperbolic cosine of the elements of :attr:`input`.
 
@@ -182,8 +183,13 @@ Example::
     tensor([ 0.7791, 1.3120, 1.2979, 1.1341 ])
 """.format(**common_args))
 
-add_docstr(torch.add,
-           r"""
+add_docstr(torch.arccosh, r"""
+arccosh(input, *, out=None) -> Tensor
+
+Alias for :func:`torch.acosh`.
+""".format(**common_args))
+
+add_docstr(torch.add, r"""
 add(input, other, out=None)
 
 Adds the scalar :attr:`other` to each element of the input :attr:`input`
@@ -1016,6 +1022,100 @@ Arguments:
     {out}
 """.format(**common_args))
 
+add_docstr(torch.hstack,
+           r"""
+hstack(tensors, *, out=None) -> Tensor
+
+Stack tensors in sequence horizontally (column wise).
+
+This is equivalent to concatenation along the first axis for 1-D tensors, and along the second axis for all other tensors.
+
+Args:
+    tensors (sequence of Tensors): sequence of tensors to concatenate
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> a = torch.tensor([1, 2, 3])
+    >>> b = torch.tensor([4, 5, 6])
+    >>> torch.hstack((a,b))
+    tensor([1, 2, 3, 4, 5, 6])
+    >>> a = torch.tensor([[1],[2],[3]])
+    >>> b = torch.tensor([[4],[5],[6]])
+    >>> torch.hstack((a,b))
+    tensor([[1, 4],
+            [2, 5],
+            [3, 6]])
+
+""".format(**common_args))
+
+add_docstr(torch.vstack,
+           r"""
+vstack(tensors, *, out=None) -> Tensor
+
+Stack tensors in sequence vertically (row wise).
+
+This is equivalent to concatenation along the first axis after all 1-D tensors have been reshaped by :func:`torch.atleast_2d`.
+
+Args:
+    tensors (sequence of Tensors): sequence of tensors to concatenate
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> a = torch.tensor([1, 2, 3])
+    >>> b = torch.tensor([4, 5, 6])
+    >>> torch.vstack((a,b))
+    tensor([[1, 2, 3],
+            [4, 5, 6]])
+    >>> a = torch.tensor([[1],[2],[3]])
+    >>> b = torch.tensor([[4],[5],[6]])
+    >>> torch.vstack((a,b))
+    tensor([[1],
+            [2],
+            [3],
+            [4],
+            [5],
+            [6]])
+
+
+""".format(**common_args))
+
+add_docstr(torch.dstack,
+           r"""
+dstack(tensors, *, out=None) -> Tensor
+
+Stack tensors in sequence depthwise (along third axis).
+
+This is equivalent to concatenation along the third axis after 1-D and 2-D tensors have been reshaped by :func:`torch.atleast_3d`.
+
+Args:
+    tensors (sequence of Tensors): sequence of tensors to concatenate
+
+Keyword args:
+    {out}
+
+Example::
+    >>> a = torch.tensor([1, 2, 3])
+    >>> b = torch.tensor([4, 5, 6])
+    >>> torch.dstack((a,b))
+    tensor([[[1, 4],
+             [2, 5],
+             [3, 6]]])
+    >>> a = torch.tensor([[1],[2],[3]])
+    >>> b = torch.tensor([[4],[5],[6]])
+    >>> torch.dstack((a,b))
+    tensor([[[1, 4]],
+            [[2, 5]],
+            [[3, 6]]])
+
+
+""".format(**common_args))
+
 add_docstr(torch.chunk,
            r"""
 chunk(input, chunks, dim=0) -> List of Tensors
@@ -1424,6 +1524,24 @@ Example::
             [ 1.2251,  2.4439,  0.2122],
             [-0.0889,  0.2122,  0.1412]])
 """)
+
+add_docstr(torch.clone, r"""
+clone(input, *, memory_format=torch.preserve_format) -> Tensor
+
+Returns a copy of :attr:`input`.
+
+.. note::
+
+    This function is differentiable, so gradients will flow back from the
+    result of this operation to :attr:`input`. To create a tensor without an
+    autograd relationship to :attr:`input` see :meth:`~Tensor.detach`.
+
+Args:
+    {input}
+
+Keyword args:
+    {memory_format}
+""".format(**common_args))
 
 add_docstr(torch.clamp, r"""
 clamp(input, min, max, out=None) -> Tensor
@@ -3869,6 +3987,50 @@ Example::
              [  2.0774,  -0.8187]]])
 """.format(**common_args))
 
+add_docstr(torch.matrix_exp,
+           r"""
+matrix_power(input) -> Tensor
+
+Returns the matrix exponential. Supports batched input.
+For a matrix ``A``, the matrix exponential is defined as
+
+.. math::
+    \exp^A = \sum_{k=0}^\infty A^k / k!.
+
+""" + r"""
+The implementation is based on:
+Bader, P.; Blanes, S.; Casas, F.
+Computing the Matrix Exponential with an Optimized Taylor Polynomial Approximation.
+Mathematics 2019, 7, 1174.
+
+Args:
+    {input}
+
+Example::
+
+    >>> a = torch.randn(2, 2, 2)
+    >>> a[0, :, :] = torch.eye(2, 2)
+    >>> a[1, :, :] = 2 * torch.eye(2, 2)
+    >>> a
+    tensor([[[1., 0.],
+             [0., 1.]],
+
+            [[2., 0.],
+             [0., 2.]]])
+    >>> torch.matrix_exp(a)
+    tensor([[[2.7183, 0.0000],
+             [0.0000, 2.7183]],
+
+             [[7.3891, 0.0000],
+              [0.0000, 7.3891]]])
+
+    >>> import math
+    >>> x = torch.tensor([[0, math.pi/3], [-math.pi/3, 0]])
+    >>> x.matrix_exp() # should be [[cos(pi/3), sin(pi/3)], [-sin(pi/3), cos(pi/3)]]
+    tensor([[ 0.5000,  0.8660],
+            [-0.8660,  0.5000]])
+""".format(**common_args))
+
 add_docstr(torch.max,
            r"""
 max(input) -> Tensor
@@ -4114,7 +4276,7 @@ add_docstr(torch.quantile,
            r"""
 quantile(input, q) -> Tensor
 
-Returns the q-th quantiles of all elements in the :attr:`input` tensor, doing a linear 
+Returns the q-th quantiles of all elements in the :attr:`input` tensor, doing a linear
 interpolation when the q-th quantile lies between two data.
 
 Args:
@@ -4133,16 +4295,16 @@ Example::
 .. function:: quantile(input, q, dim=None, keepdim=False, *, out=None) -> Tensor
 
 Returns the q-th quantiles of each row of the :attr:`input` tensor along the dimension
-:attr:`dim`, doing a linear interpolation when the q-th quantile lies between two 
+:attr:`dim`, doing a linear interpolation when the q-th quantile lies between two
 data points. By default, :attr:`dim` is `None` resulting in the :attr:`input` tensor
 beign flattened before computation.
 
-If :attr:`q` is a 1D tensor, the first dimension of the result corresponds to the quantiles 
+If :attr:`q` is a 1D tensor, the first dimension of the result corresponds to the quantiles
 and the remaining dimensions are what remains from the reduction of the :attr:`input` tensor.
 If :attr:`q` is a scalar or scalar tensor, the result is placed in the reduced dimension.
 
-If :attr:`keepdim` is ``True``, the remaining dimensions are of the same size as 
-:attr:`input` except in the dimension :attr:`dim` where it is size 1. Otherwise, 
+If :attr:`keepdim` is ``True``, the remaining dimensions are of the same size as
+:attr:`input` except in the dimension :attr:`dim` where it is size 1. Otherwise,
 the dimension :attr:`dim` is squeezed (see :func:`torch.squeeze`).
 
 Args:
@@ -4598,8 +4760,7 @@ Example::
             [1.0311, 0.3901, 0.5049]])
 """)
 
-add_docstr(torch.movedim,
-           r"""
+add_docstr(torch.movedim, r"""
 movedim(input, source, destination) -> Tensor
 
 Moves the dimension(s) of :attr:`input` at the position(s) in :attr:`source`
@@ -5043,7 +5204,7 @@ Computes the :math:`n^{th}` derivative of the digamma function on :attr:`input`.
     \psi^{(n)}(x) = \frac{d^{(n)}}{dx^{(n)}} \psi(x)
 
 .. note::
-    This function is not implemented for :math:`n \geq 2`.
+    This function is implemented only for nonnegative integers :math:`n \geq 0`.
 """ + """
 Args:
     n (int): the order of the polygamma function
@@ -5054,6 +5215,12 @@ Example::
     >>> a = torch.tensor([1, 0.5])
     >>> torch.polygamma(1, a)
     tensor([1.64493, 4.9348])
+    >>> torch.polygamma(2, a)
+    tensor([ -2.4041, -16.8288])
+    >>> torch.polygamma(3, a)
+    tensor([ 6.4939, 97.4091])
+    >>> torch.polygamma(4, a)
+    tensor([ -24.8863, -771.4742])
 """.format(**common_args))
 
 add_docstr(torch.pow,
@@ -7192,6 +7359,13 @@ Example::
     tensor([ 3.4742,  0.5466, -0.8008, -0.9079])
     >>> torch.trunc(a)
     tensor([ 3.,  0., -0., -0.])
+""".format(**common_args))
+
+add_docstr(torch.fix,
+           r"""
+fix(input, *, out=None) -> Tensor
+
+Alias for :func:`torch.trunc`
 """.format(**common_args))
 
 add_docstr(torch.unsqueeze,

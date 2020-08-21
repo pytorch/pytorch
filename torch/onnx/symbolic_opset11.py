@@ -284,6 +284,19 @@ def append(g, self, tensor):
     return g.op("SequenceInsert", self, tensor)
 
 
+def add(g, self, other, alpha=None):
+    if sym_help._is_value(self) and sym_help._is_tensor_list(self):
+        tensor_list_node = other.node()
+        if tensor_list_node.kind() != "prim::ListConstruct":
+            return _unimplemented("add", "does not support adding dynamic tensor list to another")
+        tensors = sym_help._unpack_list(other)
+        l = self
+        for t in tensors:
+            l = g.op("SequenceInsert", l, t)
+        return l
+
+    return torch.onnx.symbolic_opset9.add(g, self, other, alpha)
+
 def insert(g, self, pos, tensor):
     return g.op("SequenceInsert", self, tensor, pos)
 
@@ -497,14 +510,21 @@ def size(g, self, dim=None):
 
 def squeeze(g, self, dim=None):
     if dim is None:
-        dims = []
-        for i, size in enumerate(self.type().sizes()):
-            if size == 1:
-                dims.append(i)
-    else:
-        dims = [sym_help._get_const(dim, 'i', 'dim')]
-    return g.op("Squeeze", self, axes_i=dims)
+        return g.op("Squeeze", self)
 
+    dim = sym_help._get_const(dim, 'i', 'dim')
+
+    # create 'cond' node (condition is shape[i]==1)
+    dim_constant = g.op("Constant", value_t=torch.tensor([dim]))
+    size = sym_help._size_helper(g, self, dim_constant)
+    const_one = g.op("Constant", value_t=torch.ones(1, dtype=torch.int64))
+    cond = g.op("Equal", size, const_one)
+    # create the 'If' node and add the 'then' and 'else' blocks to it.
+    if_node_outputs = g.op("If", cond)
+    if_node = if_node_outputs.node()
+    torch.onnx.utils._add_block(if_node, self, "onnx::Squeeze", axes_i=[dim])
+    torch.onnx.utils._add_block(if_node, self, "onnx::Identity")
+    return if_node_outputs
 
 @parse_args('v', 'i')
 def unsqueeze(g, self, dim):
