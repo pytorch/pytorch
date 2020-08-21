@@ -135,8 +135,8 @@ constexpr uint64_t kProducedFileFormatVersion = 0x3L;
 
 // the version we write when the archive contains bytecode.
 // It must be higher or eq to kProducedFileFormatVersion.
-// Because torchscript changes is likely introduce bytecode change,
-// if kProducedFileFormatVersion is increased, kProducedBytecodeVersion
+// Because torchscript changes is likely introduce bytecode change.
+// If kProducedFileFormatVersion is increased, kProducedBytecodeVersion
 // should be increased too. The relationship is:
 // kMaxSupportedFileFormatVersion >= (most likely ==) kProducedBytecodeVersion
 //   >= kProducedFileFormatVersion
@@ -144,6 +144,13 @@ constexpr uint64_t kProducedBytecodeVersion = 0x3L;
 
 static_assert(kProducedBytecodeVersion >= kProducedFileFormatVersion,
     "kProducedBytecodeVersion must be higher or equal to kProducedFileFormatVersion.");
+
+// Introduce kMinSupportedBytecodeVersion for limited backward compatibility
+// support of bytecode. If
+// kMinSupportedBytecodeVersion <= model_version <= kProducedBytecodeVersion (in loader),
+// we should support this model_version. For example, we provide a wrapper to
+// handle an updated operator.
+constexpr uint64_t kMinSupportedBytecodeVersion = 0x3L;
 
 // Writer-specific constants
 constexpr uint64_t kFieldAlignment = 64;
