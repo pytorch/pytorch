@@ -55,8 +55,71 @@ Tensor sum_batching_rule(const Tensor& self, IntArrayRef dims, bool keepdim, opt
   return self_physical.newLogicalFromPhysical(result);
 }
 
+bool isPhysicalScalarTensor(const Tensor& logical_tensor) {
+  if (logical_tensor.dim() > 0) {
+    return false;
+  }
+  auto* batched = maybeGetBatchedImpl(logical_tensor);
+  if (batched) {
+    return false;
+  }
+  return true;
+}
+
 Tensor mul_batching_rule(const Tensor& self, const Tensor& other) {
-  auto physical_args = BroadcastingVmapTransform::logicalToPhysical({self, other});
+  if (self.dim() > 0 && other.dim() > 0) {
+    auto physical_args = BroadcastingVmapTransform::logicalToPhysical({self, other});
+    auto result = at::mul(physical_args[0].tensor(), physical_args[1].tensor());
+    return physical_args[0].newLogicalFromPhysical(result);
+  }
+  if (isPhysicalScalarTensor(self)) {
+    auto other_physical = MultiBatchVmapTransform::logicalToPhysical(other);
+    auto result = at::mul(self, other_physical.tensor());
+    return other_physical.newLogicalFromPhysical(result);
+  }
+  if (isPhysicalScalarTensor(other)) {
+    auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
+    auto result = at::mul(self_physical.tensor(), other);
+    return self_physical.newLogicalFromPhysical(result);
+  }
+
+  // At this point, we know at least one of the operands is a logical Scalar tensor.
+  // Here we must emulate TensorIterator's special behavior on Scalars.
+  //
+  // As a motivating example, consider the following:
+  //   x = torch.randn(3, 10)
+  //   y = torch.randn(3, dtype=torch.double)
+  //   vmap(torch.mul)(torch.randn(3, 10), torch.randn(3, dtype=torch.double))
+  //
+  // At a per-example level, we are adding FloatTensor[10] and DoubleTensor[];
+  // Type Promotion dictates that the result should be FloatTensor[10].
+  // This means we cannot directly pass the physical tensors (x and y) to
+  // TensorIterator (if we did, it would promote them to DoubleTensor).
+  //
+  // FIXME(rzou): I didn't want to go down the slippery slope of emulating
+  // everything TensorIterator does (it would be better to refactor out the
+  // TensorIterator logic). The one thing that this code doesn't handle
+  // is cross-device logical scalar tensors.
+  //   cpu_tensor = torch.randn(3)
+  //   cuda_tensor = torch.randn(3, 10, device='cuda')
+  //   vmap(torch.mul)(cpu_tensor, cuda_tensor)
+  //
+  // At a per-example level, we are adding CPUTensor[] and CUDATensor[10].
+  // TensorIterator allows for this cross-device operation because one of the
+  // tensors is a Scalar CPU tensor. However, the following code will throw an
+  // error in that case. I don't expect to see many use cases for this, so
+  // this is probably fine as-is.
+  auto logical_self = self;
+  auto logical_other = other;
+  auto result_type = at::native::result_type(logical_self, logical_other);
+  if (logical_self.scalar_type() != result_type) {
+    logical_self = logical_self.to(result_type);
+  }
+  if (logical_other.scalar_type() != result_type) {
+    logical_other = logical_other.to(result_type);
+  }
+  auto physical_args = BroadcastingVmapTransform::logicalToPhysical(
+      {logical_self, logical_other});
   auto result = at::mul(physical_args[0].tensor(), physical_args[1].tensor());
   return physical_args[0].newLogicalFromPhysical(result);
 }
@@ -234,6 +297,14 @@ Tensor unary_pointwise_batching_rule(const Tensor& input) {
   return makeBatched(output_physical, BatchDims(old_bdims.begin(), old_bdims.end()));
 }
 
+template <typename F, F Func, typename... ExtraArgs>
+Tensor unary_pointwise_method_batching_rule(const Tensor& input, ExtraArgs... extra_args) {
+  auto* input_batched = unsafeGetBatchedImpl(input);
+  auto output_physical = (input_batched->value().*Func)(extra_args...);
+  auto old_bdims = input_batched->bdims();
+  return makeBatched(output_physical, BatchDims(old_bdims.begin(), old_bdims.end()));
+}
+
 TORCH_LIBRARY_IMPL(_, Batched, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&batchedTensorForLoopFallback>());
 }
@@ -310,6 +381,16 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   UNARY_POINTWISE(tanh);
   UNARY_POINTWISE(trunc);
 #undef UNARY_POINTWISE
+#define TO_BATCHING_RULE(name, ...) \
+  { \
+    using to_type = Tensor(Tensor::*)(__VA_ARGS__) const; \
+    m.impl(name, unary_pointwise_method_batching_rule< \
+        to_type, &Tensor::to, __VA_ARGS__>);\
+  }
+  TO_BATCHING_RULE("to.device", Device, ScalarType, bool, bool, optional<MemoryFormat>)
+  TO_BATCHING_RULE("to.dtype", ScalarType, bool, bool, optional<MemoryFormat>)
+  TO_BATCHING_RULE("to.other", const Tensor&, bool, bool, optional<MemoryFormat>)
+#undef TO_BATCHING_RULE
 }
 
 } // namespace at
