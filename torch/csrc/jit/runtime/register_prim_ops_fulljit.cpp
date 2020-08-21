@@ -68,7 +68,7 @@ RegisterOperators reg(
          [](const Node* node) -> Operation {
            return [](Stack* stack) {
              AT_ERROR(
-                 "Must be lowered to Interpreter's PROFILE instruction"); // NOLINT
+                 "Must be converted to prim::FunctionCall by replaceFallbackGraphWithFallbackFunction"); // NOLINT
            };
          },
          aliasAnalysisSpecialCase()),

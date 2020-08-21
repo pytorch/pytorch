@@ -420,7 +420,7 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(
   ProfilingRecord::removeProfileCounter(copy->block());
   runProfilingOptimizations(copy);
   // replaces a fallback graph inserted by
-  // if specialize_autogradzero one exists
+  // specialize_autogradzero if one exists
   replaceFallbackGraphWithFallbackFunction(copy->block());
   // cache
   optimized_plan_ =
@@ -460,6 +460,8 @@ static Function* createFallbackPathFunction(
 
   auto otypes = c10::fmap(
       graph->return_node()->inputs(), [](Value* v) { return v->type(); });
+  // a GraphFunction call only have one output, so all the outputs
+  // need to be packed into a tuple
   auto tuple_type = TupleType::create(otypes);
   auto return_tuple = graph->createTuple(graph->return_node()->inputs());
   graph->appendNode(return_tuple);
