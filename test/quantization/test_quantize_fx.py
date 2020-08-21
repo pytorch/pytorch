@@ -392,8 +392,8 @@ class TestQuantizeFxOps(QuantizationTestCase):
 
     def _test_activation_impl(
             self, float_module, float_op, quantized_module, quantized_op):
-        ''' Test for most common quantized op, float_op can be torch
-        op or functional op
+        ''' Test for activation op(with inplace options), float_op can be
+        torch op or functional op
         '''
         class M(torch.nn.Module):
             def __init__(self, is_module, inplace):
@@ -427,3 +427,40 @@ class TestQuantizeFxOps(QuantizationTestCase):
 
     def test_elu(self):
         self._test_activation_impl(nn.ELU, F.elu, nnq.ELU, torch.ops.quantized.elu)
+
+    def _test_norm_impl(
+            self, float_module, float_op, op_args, data, quantized_module, quantized_op):
+        ''' Test for normalization op, float_op can be torch op or functional op,
+        op_args is a list of positional argument for the module/op
+        '''
+        class M(torch.nn.Module):
+            def __init__(self, is_module):
+                super(M, self).__init__()
+                self.is_module = is_module
+                if self.is_module:
+                    self.op = float_module(*op_args)
+                else:
+                    self.op = float_op
+
+            def forward(self, input):
+                if self.is_module:
+                    return self.op(input)
+                else:
+                    args = [input] + op_args
+                    return self.op(*args)
+
+        options = itertools.product([True, False], self.static_quant_types)
+        quantized_nodes = {
+            # is_module
+            True: ('call_module', quantized_module),
+            False: ('call_function', quantized_op),
+        }
+
+        for is_module, quant_type in options:
+            self.checkGraphModeFxOp(
+                M(is_module), data, quantized_nodes[is_module], quant_type)
+
+    def test_layer_norm(self):
+        data = (torch.rand((1, 2, 5, 5), dtype=torch.float),)
+        self._test_norm_impl(
+            nn.LayerNorm, F.layer_norm, [[2, 5, 5]], data, nnq.LayerNorm, torch.ops.quantized.layer_norm)

@@ -52,6 +52,7 @@ DEFAULT_MODULE_MAPPING = {
 DEFAULT_OPERATOR_MAPPING = {
     F.elu: torch._ops.ops.quantized.elu,
     F.hardswish: torch._ops.ops.quantized.hardswish,
+    F.layer_norm: torch._ops.ops.quantized.layer_norm,
 }
 
 # Map for swapping float module to qat modules
