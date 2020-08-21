@@ -121,6 +121,26 @@ class ConstCheck : OptOutConstDispatch {
     is_const_ = is_const_ && false;
   }
 
+  void handle(const kir::Bool* b) override {
+    is_const_ = is_const_ && b->isConst();
+  }
+
+  void handle(const kir::Float* f) override {
+    is_const_ = is_const_ && f->isConst();
+  }
+
+  void handle(const kir::Half* h) override {
+    is_const_ = is_const_ && h->isConst();
+  }
+
+  void handle(const kir::Int* i) override {
+    is_const_ = is_const_ && i->isConst();
+  }
+
+  void handle(const kir::NamedScalar* ns) override {
+    is_const_ = is_const_ && false;
+  }
+
   void handle(const Expr* expr) override {
     for (auto inp : expr->inputs()) {
       handle(inp);

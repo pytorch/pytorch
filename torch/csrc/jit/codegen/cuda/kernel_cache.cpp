@@ -157,9 +157,9 @@ at::DimVector inversePermutation(
     for (const auto& dim : permuted) {
       int adjusted_offset = 0;
       for (const auto& red_dim : reduction_axes) {
-        if (red_dim < (const unsigned long)dim) {
+        if (red_dim < (unsigned long)dim) {
           adjusted_offset++; // 1.b
-        } else if (red_dim == (const unsigned long)dim) {
+        } else if (red_dim == (unsigned long)dim) {
           adjusted_offset = -1; // 1.a
           break;
         }
