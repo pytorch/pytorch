@@ -98,19 +98,24 @@ class AsyncInputIsOutputTest : public AsyncTest {
     work->wait();
   }
 
-  std::vector<at::Tensor> getTensors() {
-    std::vector<at::Tensor> outputs(numTensors_);
+  std::vector<at::Tensor> getCpuTensors(const std::vector<at::Tensor>& gpu_tensors) {
+    std::vector<at::Tensor> outputs(gpu_tensors.size());
 
     // For the duration of this function, make THC use our streams
     at::cuda::CUDAMultiStreamGuard guard(streams_);
 
     // Copy inputs to outputs
-    for (auto i = 0; i < numTensors_; i++) {
-      outputs[i] = inputs_[i].cpu();
+    for (unsigned i = 0; i < gpu_tensors.size(); i++) {
+      outputs[i] = gpu_tensors[i].cpu();
     }
 
     return outputs;
   }
+
+  std::vector<at::Tensor> getTensors() {
+    return getCpuTensors(inputs_);
+  }
+
 
  protected:
   const int numTensors_;
@@ -195,11 +200,21 @@ void runAsyncAllreduceTest(
     const auto size = numProcesses * numTensors;
     const auto expected = (size * (size - 1)) / 2;
     auto tensors = tests[i].getTensors();
+    auto results = tests[i].getCpuTensors(work[i]->result());
+    EXPECT_EQ(tensors.size(), results.size());
+
     for (size_t j = 0; j < tensors.size(); j++) {
       auto& tensor = tensors[j];
       auto data = tensor.data_ptr<float>();
+
+      auto& result_tensor = results[j];
+      auto result_data = result_tensor.data_ptr<float>();
+
+      EXPECT_EQ(tensor.numel(), result_tensor.numel());
+
       for (auto k = 0; k < tensor.numel(); k++) {
         EXPECT_EQ(data[k], expected);
+        EXPECT_EQ(result_data[k], expected);
       }
     }
   }

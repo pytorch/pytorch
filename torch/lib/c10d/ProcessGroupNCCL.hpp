@@ -89,6 +89,11 @@ class ProcessGroupNCCL : public ProcessGroup {
     // It actually returns a FutureNCCL object which is a sub class Future.
     c10::intrusive_ptr<c10::ivalue::Future> getFuture() override;
 
+
+    std::vector<at::Tensor> result() const override {
+      return *outputs_;
+    }
+
    protected:
     // The cached list of CUDA devices to operate on
     std::vector<at::Device> devices_;

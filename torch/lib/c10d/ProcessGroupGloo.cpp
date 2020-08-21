@@ -804,6 +804,8 @@ class AsyncAllreduceWork : public ProcessGroupGloo::AsyncWork {
     for (size_t i = 1; i < inputs.size(); i++) {
       inputs[i].copy_(inputs[0]);
     }
+
+    outputs_ = inputs;
   }
 
   template <typename T>
@@ -818,6 +820,14 @@ class AsyncAllreduceWork : public ProcessGroupGloo::AsyncWork {
     GENERATE_ALL_TYPES(dtype, getFunction, fn, op);
     return fn;
   }
+
+
+  std::vector<at::Tensor> result() const override {
+    return outputs_;
+  }
+
+ protected:
+  std::vector<at::Tensor> outputs_;
 };
 
 class AsyncAllreduceCoalescedWork : public AsyncAllreduceWork {
@@ -1170,6 +1180,8 @@ class AsyncAllreduceCUDAWork : public AsyncAllreduceWork {
       inputs[i].copy_(tmp[0], /* non_blocking */ true);
       events[i].record(streams[i]);
     }
+
+    outputs_ = inputs;
   }
 
   void synchronize() override {
