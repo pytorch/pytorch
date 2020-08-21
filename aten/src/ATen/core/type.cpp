@@ -135,6 +135,10 @@ GeneratorTypePtr GeneratorType::get() {
   static auto value = GeneratorType::create();
   return value;
 }
+QuantizerTypePtr QuantizerType::get() {
+  static auto value = QuantizerType::create();
+  return value;
+}
 QSchemeTypePtr QSchemeType::get() {
   static auto value = QSchemeType::create();
   return value;
@@ -208,7 +212,7 @@ AnyEnumTypePtr AnyEnumType::get() {
   return value;
 }
 
-c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2, bool default_to_any) {
+c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2) {
   // check direct subtyping relation
   if (t1->isSubtypeOf(t2)) {
     return t2;
@@ -280,7 +284,7 @@ c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2, bool def
     return t1_unshaped;
   }
 
-  return default_to_any ? c10::optional<TypePtr>(AnyType::get()) : c10::nullopt;
+  return c10::nullopt;
 }
 
 c10::optional<TypePtr> unifyTypeList(
@@ -1340,6 +1344,22 @@ std::shared_ptr<const CompilationUnit> ClassType::compilation_unit() const {
   auto cu = compilation_unit_.lock();
   return cu;
 }
+
+c10::optional<ClassType::Property> ClassType::getProperty(const std::string& name) {
+  for (auto& prop : properties_) {
+    if (name == prop.name) {
+      return prop;
+    }
+  }
+
+  return c10::nullopt;
+}
+
+void ClassType::addProperty(const std::string& name, torch::jit::Function* getter, torch::jit::Function* setter) {
+  TORCH_INTERNAL_ASSERT(!getProperty(name), "Property named ", name, " already exists!");
+  properties_.push_back({name, getter, setter});
+}
+
 
 static bool containsAny(const TypePtr& type) {
   std::vector<TypePtr> to_scan = { type };

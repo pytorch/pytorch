@@ -41,31 +41,15 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # TODO: Move this to Docker
   sudo apt-get -qq update
   sudo apt-get -qq install --no-install-recommends libsndfile1
-
-  # TODO: Remove this once ROCm CI images are >= ROCm 3.5
-  # ROCm 3.5 required a backwards-incompatible change; the kernel and thunk must match.
-  # Detect kernel version and upgrade thunk if this is a ROCm 3.3 container running on a 3.5 kernel.
-  ROCM_ASD_FW_VERSION=$(/opt/rocm/bin/rocm-smi --showfwinfo -d 1 | grep ASD |  awk '{print $6}')
-  if [[ $ROCM_ASD_FW_VERSION = 553648174 && "$BUILD_ENVIRONMENT" == *rocm3.3* ]]; then
-    # upgrade thunk to 3.5
-    mkdir rocm3.5-thunk
-    pushd rocm3.5-thunk
-    wget http://repo.radeon.com/rocm/apt/3.5/pool/main/h/hsakmt-roct3.5.0/hsakmt-roct3.5.0_1.0.9-347-gd4b224f_amd64.deb
-    wget http://repo.radeon.com/rocm/apt/3.5/pool/main/h/hsakmt-roct-dev3.5.0/hsakmt-roct-dev3.5.0_1.0.9-347-gd4b224f_amd64.deb
-    dpkg-deb -vx hsakmt-roct3.5.0_1.0.9-347-gd4b224f_amd64.deb .
-    dpkg-deb -vx hsakmt-roct-dev3.5.0_1.0.9-347-gd4b224f_amd64.deb .
-    sudo cp -r opt/rocm-3.5.0/* /opt/rocm-3.3.0/
-    popd
-    rm -rf rocm3.5-thunk
-  fi
 fi
 
 # --user breaks ppc64le builds and these packages are already in ppc64le docker
 if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]] && [[ "$BUILD_ENVIRONMENT" != *-bazel-* ]] ; then
   # JIT C++ extensions require ninja.
   pip_install --user ninja
-  # ninja is installed in /var/lib/jenkins/.local/bin
-  export PATH="/var/lib/jenkins/.local/bin:$PATH"
+  # ninja is installed in $HOME/.local/bin, e.g., /var/lib/jenkins/.local/bin for CI user jenkins
+  # but this script should be runnable by any user, including root
+  export PATH="$HOME/.local/bin:$PATH"
 
   # TODO: Please move this to Docker
   # The version is fixed to avoid flakiness: https://github.com/pytorch/pytorch/issues/31136
@@ -237,8 +221,15 @@ test_distributed() {
     build/bin/TCPStoreTest --gtest_output=xml:test/test-reports/cpp-distributed/TCPStoreTest.xml
 
     build/bin/ProcessGroupGlooTest --gtest_output=xml:test/test-reports/cpp-distributed/ProcessGroupGlooTest.xml
+    build/bin/ProcessGroupNCCLTest --gtest_output=xml:test/test-reports/cpp-distributed/ProcessGroupNCCLTest.xml
     build/bin/ProcessGroupNCCLErrorsTest --gtest_output=xml:test/test-reports/cpp-distributed/ProcessGroupNCCLErrorsTest.xml
   fi
+}
+
+test_rpc() {
+    echo "Testing RPC C++ tests"
+    mkdir -p test/test-reports/cpp-rpc
+    build/bin/test_cpp_rpc --gtest_output=xml:test/test-reports/cpp-rpc/test_cpp_rpc.xml
 }
 
 test_custom_backend() {
@@ -333,6 +324,18 @@ test_bazel() {
   tools/bazel test --test_timeout=480 --test_output=all --test_tag_filters=-gpu-required --test_filter=-*CUDA :all_tests
 }
 
+test_benchmarks() {
+  if [[ "$BUILD_ENVIRONMENT" == *cuda* && "$BUILD_ENVIRONMENT" != *nogpu* ]]; then
+    pip_install --user "pytest-benchmark==3.2.3"
+    pip_install --user "requests"
+    BENCHMARK_DATA="benchmarks/.data"
+    mkdir -p ${BENCHMARK_DATA}
+    pytest benchmarks/fastrnns/test_bench.py --benchmark-sort=Name --benchmark-json=${BENCHMARK_DATA}/fastrnns.json
+    python benchmarks/upload_scribe.py --pytest_bench_json ${BENCHMARK_DATA}/fastrnns.json
+    assert_git_not_dirty
+  fi
+}
+
 test_cpp_extensions() {
   # This is to test whether cpp extension build is compatible with current env. No need to test both ninja and no-ninja build
   time python test/run_test.py --include test_cpp_extensions_aot_ninja --verbose --determine-from="$DETERMINE_FROM"
@@ -385,4 +388,6 @@ else
   test_custom_backend
   test_torch_function_benchmark
   test_distributed
+  test_benchmarks
+  test_rpc
 fi

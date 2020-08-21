@@ -430,6 +430,15 @@ class TestScriptPy3(JitTestCase):
 
         FileCheck().check("Future[int]").run(fn.graph)
 
+    def test_str_refine_any(self):
+        def forward(x: Any) -> str:
+            if isinstance(x, str):
+                return x
+            return "foo"
+        forward = torch.jit.script(forward)
+        self.assertEqual(forward(1), "foo")
+        self.assertEqual(forward("bar"), "bar")
+
     def test_subexpression_Tuple_int_int_Future(self):
 
         @torch.jit.script
@@ -541,13 +550,11 @@ class TestScriptPy3(JitTestCase):
         """
         def if_function(inp: torch.Tensor) -> Any:
             if inp.shape[0] == 1:
-                return inp * inp
+                return inp*inp
             else:
-                return 3
+                return "str"
 
-
-        with torch._jit_internal._disable_emit_hooks():
-            self.checkScript(if_function, (torch.randn(5),))
+        self.checkScript(if_function, (torch.randn(5),))
 
     def test_export_opnames_interface(self):
         global OneTwoModule
