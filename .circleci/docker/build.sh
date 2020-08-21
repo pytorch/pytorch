@@ -201,6 +201,8 @@ case "$image" in
     PROTOBUF=yes
     DB=yes
     VISION=yes
+    VULKAN_SDK_VERSION=1.2.148.0
+    SWIFTSHADER=yes
     ;;
   pytorch-linux-bionic-py3.8-gcc9)
     ANACONDA_PYTHON_VERSION=3.8
@@ -353,6 +355,8 @@ docker build \
        --build-arg "ANDROID=${ANDROID}" \
        --build-arg "ANDROID_NDK=${ANDROID_NDK_VERSION}" \
        --build-arg "GRADLE_VERSION=${GRADLE_VERSION}" \
+       --build-arg "VULKAN_SDK_VERSION=${VULKAN_SDK_VERSION}" \
+       --build-arg "SWIFTSHADER=${SWIFTSHADER}" \
        --build-arg "CMAKE_VERSION=${CMAKE_VERSION:-}" \
        --build-arg "NINJA_VERSION=${NINJA_VERSION:-}" \
        --build-arg "KATEX=${KATEX:-}" \
