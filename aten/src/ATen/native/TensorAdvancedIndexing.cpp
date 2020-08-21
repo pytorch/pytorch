@@ -222,6 +222,8 @@ static TensorIterator make_index_put_iterator(const AdvancedIndex& info, const T
               "got ", info.src.scalar_type(), " for the destination "
               "and ", value.scalar_type(), " for the source.");
   TensorIteratorConfig config;
+  // info.src is restrided by restride_src with 0 strided dimensions
+  config.set_check_mem_overlap(false);
   config.resize_outputs(false);
   config.check_all_same_dtype(false);
   config.add_output(info.src);
@@ -234,7 +236,8 @@ static TensorIterator make_index_put_iterator(const AdvancedIndex& info, const T
 
 static TensorIterator make_index_iterator(const AdvancedIndex& info) {
   TensorIteratorConfig config;
-  config.check_all_same_dtype(false)
+  config.set_check_mem_overlap(false)
+        .check_all_same_dtype(false)
         .declare_static_dtype_and_device(info.src.scalar_type(), info.src.device())
         .add_output(Tensor())
         .add_input(info.src);
@@ -246,7 +249,9 @@ static TensorIterator make_index_iterator(const AdvancedIndex& info) {
 
 static TensorIterator make_index_out_iterator(const AdvancedIndex& info, Tensor& result) {
   TensorIteratorConfig config;
-  config.check_all_same_dtype(false)
+  // info.src is a restrided view of result
+  config.set_check_mem_overlap(false)
+        .check_all_same_dtype(false)
         .add_output(result)
         .add_input(info.src);
   for (auto& index : info.indices) {
@@ -693,6 +698,10 @@ static Tensor & masked_select_out_impl_cpu(Tensor & result, const Tensor & self,
   TORCH_CHECK(self.scalar_type() == result.scalar_type(),
               "masked_select(): self and result must have the same scalar type");
 
+  at::assert_no_internal_overlap(result);
+  at::assert_no_partial_overlap(result, self);
+  at::assert_no_partial_overlap(result, mask);
+
   if (mask.dtype() == at::ScalarType::Byte) {
     TORCH_WARN("masked_select received a mask with dtype torch.uint8, this behavior is now deprecated," \
             "please use a mask with dtype torch.bool instead.");
@@ -722,6 +731,7 @@ static Tensor & masked_select_out_impl_cpu(Tensor & result, const Tensor & self,
   _self.is_contiguous() && _mask.is_contiguous();
   if (use_serial_kernel) {
     auto iter = TensorIteratorConfig()
+      .set_check_mem_overlap(false)  // result is intenionally zero-strided above
       .check_all_same_dtype(false)
       .resize_outputs(false)
       .add_output(result_strided)
@@ -745,6 +755,7 @@ static Tensor & masked_select_out_impl_cpu(Tensor & result, const Tensor & self,
   std::partial_sum(mask_long_data, mask_long_data + mask_long.numel(), mask_prefix_sum_data);
 
   auto iter = TensorIteratorConfig()
+    .set_check_mem_overlap(false)  // result is intenionally zero-strided above
     .check_all_same_dtype(false)
     .resize_outputs(false)
     .add_output(result_strided)

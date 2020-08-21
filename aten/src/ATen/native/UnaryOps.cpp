@@ -374,7 +374,6 @@ Tensor& logical_not_(Tensor& self) {
 Tensor& logical_not_out(Tensor& result, const Tensor& self) {
   TensorIterator iter = TensorIteratorConfig()
     .check_all_same_dtype(false)
-    .set_check_mem_overlap(true)
     .add_output(result)
     .add_input(self)
     .build();

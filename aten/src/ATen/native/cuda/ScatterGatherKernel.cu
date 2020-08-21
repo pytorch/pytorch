@@ -2,6 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
+#include <ATen/MemoryOverlap.h>
 
 #include <ATen/native/ScatterGatherChecks.h>
 #include <ATen/native/ReduceOpsUtils.h>
@@ -112,6 +113,7 @@ struct cuda_scatter_gather_base_kernel {
     if (index.numel() == 0) {
       return;
     }
+    at::assert_no_internal_overlap(self);
 
     dim = maybe_wrap_dim(dim, self.dim());
 
@@ -141,6 +143,7 @@ struct cuda_scatter_gather_base_kernel {
       : restride_dim(src, dim, index_sizes);
 
     auto iter = TensorIteratorConfig()
+      .set_check_mem_overlap(false)
       .check_all_same_dtype(false)
       .resize_outputs(false)
       .add_output(self_restrided)
@@ -233,6 +236,7 @@ struct cuda_scatter_fill_base_kernel {
     if (index.numel() == 0) {
       return;
     }
+    at::assert_no_internal_overlap(self);
 
     dim = maybe_wrap_dim(dim, self.dim());
 
@@ -247,6 +251,7 @@ struct cuda_scatter_fill_base_kernel {
     auto self_restrided = restride_dim(self, dim, index_sizes);
 
     auto iter = TensorIteratorConfig()
+      .set_check_mem_overlap(false)
       .check_all_same_dtype(false)
       .resize_outputs(false)
       .add_output(self_restrided)
