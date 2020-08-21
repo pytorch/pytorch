@@ -24,6 +24,16 @@ namespace at {
 namespace native {
 namespace {
 
+void check_tensor_memory_format(const Tensor& ref, const Tensor& other) {
+  TORCH_CHECK(
+      ref.is_contiguous(ref.suggest_memory_format()),
+      "Quantized tensor should be contiguous");
+  TORCH_CHECK(
+      other.is_contiguous(ref.suggest_memory_format()),
+      "Float tensor should be contiguous "
+      "in same memory format as quantizd tensor");
+}
+
 // ****************** HEY YOU! YES YOU! Read this! ********************
 //
 // Please read the README.md in this directory before editing this file
@@ -2329,13 +2339,7 @@ void quantize_tensor_per_tensor_affine_cpu(
     int64_t zero_point) {
   AT_DISPATCH_QINT_TYPES(
       qtensor.scalar_type(), "quantize_tensor_per_tensor_affine_cpu", [&]() {
-        TORCH_CHECK(
-            rtensor.is_contiguous(rtensor.suggest_memory_format()),
-            "Float tensor should be contiguous");
-        TORCH_CHECK(
-            qtensor.is_contiguous(rtensor.suggest_memory_format()),
-            "Quantized tensor should be contiguous "
-            "in same memory format as float tensor");
+        check_tensor_memory_format(rtensor, qtensor);
         const float* rd = rtensor.data_ptr<float>();
         auto qd = reinterpret_cast<underlying_t*>(qtensor.data_ptr<scalar_t>());
         fbgemm::TensorQuantizationParams qparams;
@@ -2364,13 +2368,7 @@ void dequantize_tensor_per_tensor_affine_cpu(
     int64_t zero_point) {
   AT_DISPATCH_QINT_TYPES(
       qtensor.scalar_type(), "dequantize_tensor_per_tensor_affine_cpu", [&]() {
-        TORCH_CHECK(
-            qtensor.is_contiguous(qtensor.suggest_memory_format()),
-            "Quantized tensor should be contiguous");
-        TORCH_CHECK(
-            rtensor.is_contiguous(qtensor.suggest_memory_format()),
-            "Float tensor should be contiguous "
-            "in same memory format as quantizd tensor");
+        check_tensor_memory_format(qtensor, rtensor);
         const auto* qd =
             reinterpret_cast<const underlying_t*>(qtensor.data_ptr<scalar_t>());
         fbgemm::TensorQuantizationParams qparams;
@@ -2493,13 +2491,7 @@ void quantize_tensor_per_tensor_affine_cpu(
 #if defined(__ARM_NEON__) || defined(__aarch64__)
   AT_DISPATCH_QINT_TYPES(
       qtensor.scalar_type(), "quantize_tensor_per_tensor_affine_cpu", [&]() {
-        TORCH_CHECK(
-            rtensor.is_contiguous(rtensor.suggest_memory_format()),
-            "Float tensor should be contiguous");
-        TORCH_CHECK(
-            qtensor.is_contiguous(rtensor.suggest_memory_format()),
-            "Quantized tensor should be contiguous "
-            "in same memory format as float tensor");
+        check_tensor_memory_format(rtensor, qtensor);
         const float* const rdata = rtensor.data_ptr<float>();
         quantize_tensor_arm<scalar_t>(
             rdata, qtensor, rtensor.numel(), scale, zero_point);
@@ -2508,13 +2500,7 @@ void quantize_tensor_per_tensor_affine_cpu(
   // Fallback path
   AT_DISPATCH_QINT_TYPES(
       qtensor.scalar_type(), "quantize_tensor_per_tensor_affine_cpu", [&]() {
-        TORCH_CHECK(
-            rtensor.is_contiguous(rtensor.suggest_memory_format()),
-            "Float tensor should be contiguous");
-        TORCH_CHECK(
-            qtensor.is_contiguous(rtensor.suggest_memory_format()),
-            "Quantized tensor should be contiguous "
-            "in same memory format as float tensor");
+        check_tensor_memory_format(rtensor, qtensor);
         const float* const rdata = rtensor.data_ptr<float>();
         auto qdata = qtensor.data_ptr<scalar_t>();
         auto numel = rtensor.numel();
@@ -2532,13 +2518,7 @@ void dequantize_tensor_per_tensor_affine_cpu(
     int64_t zero_point) {
   AT_DISPATCH_QINT_TYPES(
       qtensor.scalar_type(), "dequantize_tensor_per_tensor_affine_cpu", [&]() {
-        TORCH_CHECK(
-            qtensor.is_contiguous(qtensor.suggest_memory_format()),
-            "Quantized tensor should be contiguous");
-        TORCH_CHECK(
-            rtensor.is_contiguous(qtensor.suggest_memory_format()),
-            "Float tensor should be contiguous "
-            "in same memory format as quantizd tensor");
+      check_tensor_memory_format(qtensor, rtensor);
         const auto* qd = qtensor.data_ptr<scalar_t>();
         float* rd = rtensor.data_ptr<float>();
         auto numel = qtensor.numel();
@@ -2573,13 +2553,7 @@ void quantize_tensor_per_channel_affine_cpu(
         int64_t channel = rtensor.size(axis);
         auto scales_data = scales.data_ptr<double>();
         auto zero_points_data = zero_points.data_ptr<int64_t>();
-        TORCH_CHECK(
-            rtensor.is_contiguous(rtensor.suggest_memory_format()),
-            "Float tensor should be contiguous");
-        TORCH_CHECK(
-            qtensor.is_contiguous(rtensor.suggest_memory_format()),
-            "Quantized tensor should be contiguous "
-            "in same memory format as Float tensor");
+        check_tensor_memory_format(rtensor, qtensor);
         const float* rdata = rtensor.data_ptr<float>();
         auto qdata = qtensor.data_ptr<scalar_t>();
         if (axis == 1 && (rtensor.is_contiguous(MemoryFormat::ChannelsLast) ||
@@ -2634,13 +2608,7 @@ void dequantize_per_channel_affine_kernel(
   int64_t channel = rtensor.size(axis);
   auto scales_data = scales.data_ptr<T>();
   auto zero_points_data = zero_points.data_ptr<N>();
-  TORCH_CHECK(
-      qtensor.is_contiguous(qtensor.suggest_memory_format()),
-      "Quantized tensor should be contiguous");
-  TORCH_CHECK(
-      rtensor.is_contiguous(qtensor.suggest_memory_format()),
-      "Float tensor should be contiguous "
-      "in same memory format as quantizd tensor");
+  check_tensor_memory_format(qtensor, rtensor);
   const auto* qd = qtensor.data_ptr<Q>();
   float* rd = rtensor.data_ptr<float>();
   if (axis == 1 && (rtensor.is_contiguous(MemoryFormat::ChannelsLast) ||
@@ -2707,13 +2675,7 @@ void quantize_tensor_per_channel_float_qparams_cpu(
         int64_t channel = rtensor.size(axis);
         auto scales_data = scales.data_ptr<float>();
         auto zero_points_data = zero_points.data_ptr<float>();
-        TORCH_CHECK(
-            rtensor.is_contiguous(rtensor.suggest_memory_format()),
-            "Float tensor should be contiguous");
-        TORCH_CHECK(
-            qtensor.is_contiguous(rtensor.suggest_memory_format()),
-            "Quantized tensor should be contiguous "
-            "in same memory format as Float tensor");
+        check_tensor_memory_format(rtensor, qtensor);
         const float* rdata = rtensor.data_ptr<float>();
         auto qdata = qtensor.data_ptr<scalar_t>();
         if (axis == 1 && (rtensor.is_contiguous(MemoryFormat::ChannelsLast) ||
