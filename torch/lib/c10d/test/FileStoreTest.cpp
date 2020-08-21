@@ -5,6 +5,8 @@
 #include <iostream>
 #include <thread>
 
+#include <gtest/gtest.h>
+
 #include <c10d/FileStore.hpp>
 #include <c10d/PrefixStore.hpp>
 
@@ -28,11 +30,8 @@ std::string tmppath() {
   return std::string(tmp.data(), tmp.size());
 }
 
-void testHelper(const std::string prefix = "") {
-  auto path = tmppath();
-  std::cout << "Using temporary file: " << path << std::endl;
-
-  // Basic set/get
+void testGetSet(std::string path, const std::string prefix = "") {
+  // Basic Set/Get on File Store
   {
     auto fileStore = std::make_shared<c10d::FileStore>(path, 2);
     c10d::PrefixStore store(prefix, fileStore);
@@ -50,12 +49,16 @@ void testHelper(const std::string prefix = "") {
     c10d::PrefixStore store(prefix, fileStore);
     c10d::test::check(store, "key0", "value0");
   }
+}
 
-  // Hammer on FileStore#add
-  std::vector<std::thread> threads;
+void stressTestStore(std::string path, const std::string prefix = "") {
+  // Hammer on FileStore::add
   const auto numThreads = 4;
   const auto numIterations = 100;
+
+  std::vector<std::thread> threads;
   c10d::test::Semaphore sem1, sem2;
+
   for (auto i = 0; i < numThreads; i++) {
     threads.push_back(std::thread([&] {
       auto fileStore = std::make_shared<c10d::FileStore>(path, numThreads + 1);
@@ -67,6 +70,7 @@ void testHelper(const std::string prefix = "") {
       }
     }));
   }
+
   sem1.wait(numThreads);
   sem2.post(numThreads);
   for (auto& thread : threads) {
@@ -80,12 +84,33 @@ void testHelper(const std::string prefix = "") {
     std::string expected = std::to_string(numThreads * numIterations);
     c10d::test::check(store, "counter", expected);
   }
-
-  unlink(path.c_str());
 }
 
-int main(int argc, char** argv) {
-  testHelper();
-  testHelper("testPrefix");
-  std::cout << "Test succeeded" << std::endl;
+class FileStoreTest : public ::testing::Test {
+ protected:
+  void SetUp() override {
+    path_ = tmppath();
+  }
+
+  void TearDown() override {
+    unlink(path_.c_str());
+  }
+
+  std::string path_;
+};
+
+TEST_F(FileStoreTest, testGetAndSet) {
+  testGetSet(path_);
+}
+
+TEST_F(FileStoreTest, testGetAndSetWithPrefix) {
+  testGetSet(path_, "testPrefix");
+}
+
+TEST_F(FileStoreTest, testStressStore) {
+  stressTestStore(path_);
+}
+
+TEST_F(FileStoreTest, testStressStoreWithPrefix) {
+  stressTestStore(path_, "testPrefix");
 }
