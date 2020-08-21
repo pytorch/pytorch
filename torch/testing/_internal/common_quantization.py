@@ -251,8 +251,8 @@ class QuantizationTestCase(TestCase):
         b.seek(0)
         loaded_dict = torch.load(b)
         loaded_model.load_state_dict(loaded_dict)
-        ref_out = ref_model(x)
-        load_out = loaded_model(x)
+        ref_out = ref_model(*x)
+        load_out = loaded_model(*x)
 
         def check_outputs(ref_out, load_out):
             self.assertEqual(ref_out[0], load_out[0])
@@ -267,7 +267,7 @@ class QuantizationTestCase(TestCase):
         torch.save(ref_model, b)
         b.seek(0)
         loaded = torch.load(b)
-        load_out = loaded(x)
+        load_out = loaded(*x)
         check_outputs(ref_out, load_out)
 
     def check_weight_bias_api(self, ref_model, weight_keys, bias_keys):
@@ -303,7 +303,7 @@ class QuantizationTestCase(TestCase):
         self._checkScriptable(orig_mod, scripted, calib_data, check_save_load)
 
         # Use first calib_data entry as trace input
-        traced = torch.jit.trace(orig_mod, calib_data[0][0])
+        traced = torch.jit.trace(orig_mod, calib_data[0])
         self._checkScriptable(orig_mod, traced, calib_data, check_save_load)
 
     # Call this twice: once for a scripted module and once for a traced module
