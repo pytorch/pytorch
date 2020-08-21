@@ -384,8 +384,9 @@ class BatchNorm(QuantizeHandler):
 
 @register_quant_pattern(torch.nn.ELU)
 @register_quant_pattern(torch.nn.Hardswish)
-@register_quant_pattern(torch.nn.functional.elu)
+@register_quant_pattern(torch.nn.LayerNorm)
 @register_quant_pattern(torch.nn.functional.hardswish)
+@register_quant_pattern(torch.nn.functional.layer_norm)
 class DefaultNode(QuantizeHandler):
     ''' Common quantized op, first input and first output will be quantized
     '''
@@ -411,15 +412,33 @@ class DefaultNode(QuantizeHandler):
             scale, zero_point = activation_post_process.calculate_qparams()
             scale = float(scale)
             zero_point = int(zero_point)
-            args = list(load_arg(quantized=[0])(node.args))
-            args.append(scale)
-            args.append(zero_point)
-            args = tuple(args)
-            # kwargs are ignored
-            kwargs = {}
+
             quantized_op = DEFAULT_OPERATOR_MAPPING[node.target]
+            args = load_arg(quantized=[0])(node.args)
+            kwargs = load_arg(quantized=False)(node.kwargs)
+            kwargs.update({'output_scale': scale, 'output_zero_point': zero_point})
+            # none of the quantized ops support inplace now
+            # we can enable it in the future if inplace is supported
+            if 'inplace' in kwargs:
+                kwargs.pop('inplace')
             return quantizer.quantized_graph.create_node(
                 'call_function', quantized_op, args, kwargs)
+
+# TODO: elu is using scale/zero_point instead of output_scale, output_zero_point
+@register_quant_pattern(torch.nn.functional.elu)
+class ELU(QuantizeHandler):
+    def convert(self, quantizer, node, load_arg, debug=False):
+        activation_post_process = quantizer.activation_post_process_map[node.name]
+        scale, zero_point = activation_post_process.calculate_qparams()
+        scale = float(scale)
+        zero_point = int(zero_point)
+        quantized_op = DEFAULT_OPERATOR_MAPPING[node.target]
+        args = load_arg(quantized=[0])(node.args)
+        kwargs = load_arg(quantized=False)(node.kwargs)
+        kwargs.update({'output_scale': scale, 'output_zero_point': zero_point})
+        kwargs.pop('inplace')
+        return quantizer.quantized_graph.create_node(
+            'call_function', quantized_op, args, kwargs)
 
 # these ops have quantized equivalents that do not need any extra information
 @register_quant_pattern(torch.nn.AdaptiveAvgPool2d)
