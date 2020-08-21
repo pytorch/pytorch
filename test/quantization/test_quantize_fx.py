@@ -255,10 +255,11 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 torch.randn(1, 2, 3, 3, dtype=torch.float))
         quantized_node = ('call_function', torch.ops.quantized.add)
         non_quantized_node = ('call_function', operator.add)
-        for m, quantized in [(QuantizedAdd(), True),
-                             (QuantizedInplaceAdd(), True),
-                             # (NonQuantizedAdd(), False),
-                             # (NonQuantizedInplaceAdd(), False)]:
+        for m, quantized in [
+                (QuantizedAdd(), True),
+                (QuantizedInplaceAdd(), True),
+                # (NonQuantizedAdd(), False),
+                # (NonQuantizedInplaceAdd(), False)]:
         ]:
             for quant_type in self.static_quant_types:
                 target_node = quantized_node if quantized else non_quantized_node
@@ -305,10 +306,11 @@ class TestQuantizeFxOps(QuantizationTestCase):
         data = (torch.randn(1, 2, 3, 3, dtype=torch.float),)
         quantized_node = ('call_function', torch.ops.quantized.add)
         non_quantized_node = ('call_function', operator.add)
-        for m, quantized in [(QuantizedAddScalar(), True),
-                             (QuantizedInplaceAddScalar(), True),
-                             # (NonQuantizedAddScalar(), False),
-                             # (NonQuantizedInplaceAddScalar(), False)]:
+        for m, quantized in [
+                (QuantizedAddScalar(), True),
+                (QuantizedInplaceAddScalar(), True),
+                # (NonQuantizedAddScalar(), False),
+                # (NonQuantizedInplaceAddScalar(), False)]:
         ]:
             for quant_type in self.static_quant_types:
                 target_node = quantized_node if quantized else non_quantized_node
