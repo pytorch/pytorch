@@ -196,6 +196,10 @@ namespace c10 {
   _(aten, hex)                       \
   _(aten, oct)                       \
   _(aten, clear)                     \
+  _(aten, trunc)                     \
+  _(aten, trunc_)                    \
+  _(aten, fix)                       \
+  _(aten, fix_)                      \
   _(aten, setdefault)                \
   _(aten, bin)                       \
   _(aten, pop)                       \
