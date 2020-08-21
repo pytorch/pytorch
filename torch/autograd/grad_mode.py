@@ -2,18 +2,20 @@ import torch
 import functools
 import inspect
 
-from typing import Any, Callable, TypeVar
+from typing import Any, Callable, TypeVar, cast
 from typing_extensions import Literal
+
 
 # Used for annotating the decorator usage of 'no_grad' and 'enable_grad'.
 # See https://mypy.readthedocs.io/en/latest/generics.html#declaring-decorators
 FuncType = Callable[..., Any]
-T = TypeVar('T', bound=FuncType)
+F = TypeVar('F', bound=FuncType)
+
 
 class _DecoratorContextManager:
     """Allow a context manager to be used as a decorator"""
 
-    def __call__(self, func):
+    def __call__(self, func: F) -> F:
         if inspect.isgeneratorfunction(func):
             return self._wrap_generator(func)
 
@@ -21,7 +23,7 @@ class _DecoratorContextManager:
         def decorate_context(*args, **kwargs):
             with self:
                 return func(*args, **kwargs)
-        return decorate_context
+        return cast(F, decorate_context)
 
     def _wrap_generator(self, func):
         """Wrap each generator invocation with the context manager"""
@@ -80,6 +82,7 @@ class no_grad(_DecoratorContextManager):
 
     def __exit__(self, *args: Any) -> Literal[False]:
         torch._C._set_grad_enabled(self.prev)
+        return False
 
 
 class enable_grad(_DecoratorContextManager):
@@ -119,6 +122,7 @@ class enable_grad(_DecoratorContextManager):
 
     def __exit__(self, *args: Any) -> Literal[False]:
         torch._C._set_grad_enabled(self.prev)
+        return False
 
 
 class set_grad_enabled(object):
@@ -164,3 +168,4 @@ class set_grad_enabled(object):
 
     def __exit__(self, *args: Any) -> Literal[False]:
         torch._C._set_grad_enabled(self.prev)
+        return False
