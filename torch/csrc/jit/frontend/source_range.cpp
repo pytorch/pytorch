@@ -75,10 +75,15 @@ C10_EXPORT void SourceRange::print_with_context(
     return;
   }
 
+  size_t range_end =
+      (str.size() < end()
+           ? str.size()
+           : end()); // use instead of 'end()' because some ranges extend past
+                     // the length of the source
+
   // determine CONTEXT line range
   size_t begin_line = start(); // beginning of lines to highlight
-  size_t end_line =
-      (str.size() < end() ? str.size() : end()); // end of lines to highlight
+  size_t end_line = range_end;
   while (begin_line > 0 && str[begin_line - 1] != '\n')
     --begin_line;
   while (end_line < str.size() && str[end_line] != '\n')
@@ -122,11 +127,10 @@ C10_EXPORT void SourceRange::print_with_context(
   // print out inital context
   out << str.substr(begin_context, start() - begin_context);
   size_t line_start = start();
-  size_t line_end =
-      (str.size() < end() ? str.size() : end()); // end of lines to highlight
+  size_t line_end = range_end;
   if (highlight) {
     line_end = start();
-    while (line_start < end()) {
+    while (line_start < range_end) {
       // move line_end to end of line
       while (str[line_end] != '\n' && line_end < str.size()) {
         ++line_end;
@@ -144,10 +148,10 @@ C10_EXPORT void SourceRange::print_with_context(
       // determine length of line which is being highlighted
       while (hightlight_begin > 0 && str[hightlight_begin - 1] != '\n')
         --hightlight_begin;
-      while (highlight_end < end() && str[highlight_end] != '\n')
+      while (highlight_end < range_end && str[highlight_end] != '\n')
         ++highlight_end;
       AT_ASSERT(hightlight_begin == 0 || str[hightlight_begin - 1] == '\n');
-      AT_ASSERT(highlight_end == end() || str[highlight_end] == '\n');
+      AT_ASSERT(highlight_end == range_end || str[highlight_end] == '\n');
       // determine amount of empty space vs highlighted space
       for (size_t i = hightlight_begin; i < highlight_end; i++) {
         if (str[i] == ' ' || i < start()) {
@@ -161,21 +165,21 @@ C10_EXPORT void SourceRange::print_with_context(
         // some ranges are off and include empty white space on new lines which
         // don't need to be printed
         bool more_lines = false;
-        for (size_t i = line_end; i <= end(); i++) {
+        for (size_t i = line_end; i <= range_end; i++) {
           if (str[i] != '\n' && str[i] != ' ') {
             more_lines = true;
           }
         }
         out << std::string(empty_space, ' ');
         out << std::string(highlight_space, '~');
-        out << (more_lines && line_end != end() ? "\n" : " <--- HERE\n");
+        out << (more_lines && line_end != range_end ? "\n" : " <--- HERE\n");
       }
       ++line_end;
       line_start = line_end;
     }
   } else {
     // print out code with no highlight
-    out << str.substr(start(), end() - start());
+    out << str.substr(start(), range_end - start());
   }
   // print out ending context
   if (line_end <= str.size()) {
