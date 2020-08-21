@@ -2,6 +2,7 @@ import os
 import sys
 
 import torch
+from torch.testing import FileCheck
 from enum import Enum
 from typing import Any, List
 
@@ -47,10 +48,17 @@ class TestEnum(JitTestCase):
 
         def supported_enum_types(a: IntEnum, b: FloatEnum, c: StringEnum):
             return (a.name, b.name, c.name)
+
         # TODO(gmagogsfm): Re-enable hooks when serialization/deserialization
         # is supported.
         with torch._jit_internal._disable_emit_hooks():
-            torch.jit.script(supported_enum_types)
+            scripted = torch.jit.script(supported_enum_types)
+
+        FileCheck() \
+            .check("IntEnum") \
+            .check("FloatEnum") \
+            .check("StringEnum") \
+            .run(str(scripted.graph))
 
         global TensorEnum
 
@@ -79,13 +87,13 @@ class TestEnum(JitTestCase):
         with torch._jit_internal._disable_emit_hooks():
             scripted_enum_comp = torch.jit.script(enum_comp)
 
-        self.assertEqual(
-            scripted_enum_comp(Color.RED, Color.RED),
-            enum_comp(Color.RED, Color.RED))
+        FileCheck().check("aten::eq").run(str(scripted_enum_comp.graph))
 
         self.assertEqual(
-            scripted_enum_comp(Color.RED, Color.GREEN),
-            enum_comp(Color.RED, Color.GREEN))
+            scripted_enum_comp(Color.RED, Color.RED), True)
+
+        self.assertEqual(
+            scripted_enum_comp(Color.RED, Color.GREEN), False)
 
     def test_enum_comp_diff_classes(self):
         global Foo, Bar
@@ -106,9 +114,13 @@ class TestEnum(JitTestCase):
         with torch._jit_internal._disable_emit_hooks():
             scripted_enum_comp = torch.jit.script(enum_comp)
 
-        self.assertEqual(
-            scripted_enum_comp(Foo.ITEM1),
-            False)
+        FileCheck() \
+            .check("prim::Constant") \
+            .check_same("Bar.ITEM1") \
+            .check("aten::eq") \
+            .run(str(scripted_enum_comp.graph))
+
+        self.assertEqual(scripted_enum_comp(Foo.ITEM1), False)
 
     def test_heterogenous_value_type_enum_error(self):
         global Color
@@ -120,10 +132,8 @@ class TestEnum(JitTestCase):
         def enum_comp(x: Color, y: Color) -> bool:
             return x == y
 
-        # TODO(gmagogsfm): Re-enable hooks when serialization/deserialization
-        # is supported.
         with self.assertRaisesRegex(RuntimeError, "Could not unify type list"):
-            scripted_enum_comp = torch.jit.script(enum_comp)
+            torch.jit.script(enum_comp)
 
     def test_enum_name(self):
         global Color
@@ -139,6 +149,12 @@ class TestEnum(JitTestCase):
         # is supported.
         with torch._jit_internal._disable_emit_hooks():
             scripted_enum_name = torch.jit.script(enum_name)
+
+        FileCheck() \
+            .check("Color") \
+            .check_next("prim::EnumName") \
+            .check_next("return") \
+            .run(str(scripted_enum_name.graph))
 
         self.assertEqual(scripted_enum_name(Color.RED), Color.RED.name)
         self.assertEqual(scripted_enum_name(Color.GREEN), Color.GREEN.name)
@@ -158,6 +174,12 @@ class TestEnum(JitTestCase):
         with torch._jit_internal._disable_emit_hooks():
             scripted_enum_value = torch.jit.script(enum_value)
 
+        FileCheck() \
+            .check("Color") \
+            .check_next("prim::EnumValue") \
+            .check_next("return") \
+            .run(str(scripted_enum_value.graph))
+
         self.assertEqual(scripted_enum_value(Color.RED), Color.RED.value)
         self.assertEqual(scripted_enum_value(Color.GREEN), Color.GREEN.value)
 
@@ -169,15 +191,18 @@ class TestEnum(JitTestCase):
             GREEN = 2
 
         def enum_const(x: Color) -> bool:
-            if x == Color.RED:
-                return True
-            else:
-                return False
+            return x == Color.RED
 
         # TODO(gmagogsfm): Re-enable hooks when serialization/deserialization
         # is supported.
         with torch._jit_internal._disable_emit_hooks():
             scripted = torch.jit.script(enum_const)
+
+        FileCheck() \
+            .check("prim::Constant[value=__torch__.jit.test_enum.Color.RED]") \
+            .check_next("aten::eq") \
+            .check_next("return") \
+            .run(str(scripted.graph))
 
         self.assertEqual(scripted(Color.RED), True)
         self.assertEqual(scripted(Color.GREEN), False)
@@ -206,13 +231,17 @@ class TestEnum(JitTestCase):
             GREEN = 2
 
         def is_color_enum(x: Any):
-            if isinstance(x, Color):
-                return True
-            else:
-                return False
+            return isinstance(x, Color)
 
+        # TODO(gmagogsfm): Re-enable hooks when serialization/deserialization
+        # is supported.
         with torch._jit_internal._disable_emit_hooks():
             scripted_is_color_enum = torch.jit.script(is_color_enum)
+
+        FileCheck() \
+            .check("prim::isinstance[types=[Enum<__torch__.jit.test_enum.Color>]]") \
+            .check_next("return") \
+            .run(str(scripted_is_color_enum.graph))
 
         self.assertEqual(scripted_is_color_enum(Color.RED), True)
         self.assertEqual(scripted_is_color_enum(Color.GREEN), True)
@@ -230,19 +259,32 @@ class TestEnum(JitTestCase):
         def closed_over_aliased_type():
             return a.RED.value
 
+        # TODO(gmagogsfm): Re-enable hooks when serialization/deserialization
+        # is supported.
         with torch._jit_internal._disable_emit_hooks():
             scripted = torch.jit.script(closed_over_aliased_type)
 
-        self.assertEqual(scripted(), Color.RED.value)
+        FileCheck() \
+            .check("prim::Constant[value={}]".format(a.RED.value)) \
+            .check_next("return") \
+            .run(str(scripted.graph))
 
+        self.assertEqual(scripted(), Color.RED.value)
 
         b = Color.RED
 
         def closed_over_aliased_value():
             return b.value
 
+        # TODO(gmagogsfm): Re-enable hooks when serialization/deserialization
+        # is supported.
         with torch._jit_internal._disable_emit_hooks():
             scripted = torch.jit.script(closed_over_aliased_value)
+
+        FileCheck() \
+            .check("prim::Constant[value={}]".format(b.value)) \
+            .check_next("return") \
+            .run(str(scripted.graph))
 
         self.assertEqual(scripted(), Color.RED.value)
 
@@ -262,8 +304,18 @@ class TestEnum(JitTestCase):
                 return self.e.value
 
         m = TestModule(Color.RED)
+        # TODO(gmagogsfm): Re-enable hooks when serialization/deserialization
+        # is supported.
         with torch._jit_internal._disable_emit_hooks():
             scripted = torch.jit.script(m)
+
+        FileCheck() \
+            .check("TestModule") \
+            .check_next("Color") \
+            .check_same("prim::GetAttr[name=\"e\"]") \
+            .check_next("prim::EnumValue") \
+            .check_next("return") \
+            .run(str(scripted.graph))
 
         self.assertEqual(scripted(), Color.RED.value)
 
@@ -304,8 +356,18 @@ class TestEnum(JitTestCase):
                 return self.e
 
         m = TestModule(Color.RED)
+
+        # TODO(gmagogsfm): Re-enable hooks when serialization/deserialization
+        # is supported.
         with torch._jit_internal._disable_emit_hooks():
             scripted = torch.jit.script(m)
+
+        FileCheck() \
+            .check("TestModule") \
+            .check_next("Color") \
+            .check_same("prim::GetAttr[name=\"e\"]") \
+            .check_next("return") \
+            .run(str(scripted.graph))
 
         self.assertEqual(scripted(), Color.RED)
 
@@ -325,14 +387,21 @@ class TestEnum(JitTestCase):
                     res.append(e.value)
             return res
 
+        # TODO(gmagogsfm): Re-enable hooks when serialization/deserialization
+        # is supported.
         with torch._jit_internal._disable_emit_hooks():
             scripted = torch.jit.script(iterate_enum)
+
+        FileCheck() \
+            .check("Enum<__torch__.jit.test_enum.Color>[]") \
+            .check_same("Color.RED") \
+            .check_same("Color.GREEN") \
+            .check_same("Color.PURPLE") \
+            .run(str(scripted.graph))
 
         # PURPLE always appear last because we follow Python's Enum definition order.
         self.assertEqual(scripted(Color.RED), [Color.GREEN.value, Color.PURPLE.value])
         self.assertEqual(scripted(Color.GREEN), [Color.RED.value, Color.PURPLE.value])
-
-        # TODO(gmagogsfm): Add FileCheck test after serialization and ir representation is completed.
 
 
 # Tests that Enum support features are properly guarded before they are mature.
