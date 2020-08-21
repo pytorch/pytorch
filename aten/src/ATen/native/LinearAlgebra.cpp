@@ -4,6 +4,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/LinearAlgebraUtils.h>
+#include <ATen/native/xnnpack/Factory.h>
 #include <ATen/native/xnnpack/Engine.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Parallel.h>
@@ -361,14 +362,15 @@ Tensor& addmm_cpu_out(Tensor &result, const Tensor& self, const Tensor& mat1, co
   TORCH_CHECK(mat1.dim() == 2, "mat1 must be a matrix, got ", mat1.dim(), "-D tensor");
   TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix, got ", mat2.dim(), "-D tensor");
   #if defined(USE_XNNPACK) && !defined(USE_BLAS)
+  using namespace xnnpack::internal;
   if (alpha.type() == at::kInt && alpha.to<int>() == 1
       && beta.type() == at::kInt && beta.to<int>() == 1
       && self.scalar_type() == at::kFloat && mat1.scalar_type() == at::kFloat && mat2.scalar_type() == at::kFloat
       && !self.requires_grad() && !mat1.requires_grad() && !mat2.requires_grad()
-      && self.dim() == 1 && mat1.sizes()[0] == self.sizes()[0]
-      && mat2.t().contiguous().sizes()[0] > 0 && mat2.t().contiguous().sizes()[1] > 0) {
-    native::resize_(result, {self.sizes()[0], mat2.sizes()[1]});
-    native::copy_(result, xnnpack::linear(mat1, mat2.t(), self));
+      && self.dim() == 1 && mat1.size(Layout::Filter::output) == self.size(0)
+      && mat2.t().contiguous().size(Layout::Filter::input) > 0 && mat2.t().contiguous().size(Layout::Filter::output) > 0) {
+    result.resize_({self.size(0), mat2.size(1)});
+    result.copy_(xnnpack::linear(mat1, mat2.t(), self));
     at::namedinference::propagate_names_for_addmm(result, mat1, mat2, self);
     return result;
   }
@@ -395,11 +397,12 @@ Tensor& mm_cpu_out(Tensor & result, const Tensor & self, const Tensor & mat2) {
   TORCH_CHECK(self.dim() == 2, "self must be a matrix");
   TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix");
   #if defined(USE_XNNPACK) && !defined(USE_BLAS)
+  using namespace xnnpack::internal;
   if (self.scalar_type() == at::kFloat && mat2.scalar_type() == at::kFloat
       && !self.requires_grad() && !mat2.requires_grad()
-      && mat2.t().contiguous().sizes()[0] > 0 && mat2.t().contiguous().sizes()[1] > 0) {
-    native::resize_(result, {self.sizes()[0], mat2.sizes()[1]});
-    native::copy_(result, xnnpack::linear(self, mat2.t(), {}));
+      && mat2.t().contiguous().size(Layout::Filter::input) > 0 && mat2.t().contiguous().size(Layout::Filter::output) > 0)) {
+    result.resize_({self.size(0), mat2.size(1)});
+    result.copy_(xnnpack::linear(self, mat2.t(), {}));
     return result;
   }
   #endif
