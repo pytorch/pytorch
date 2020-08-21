@@ -43,9 +43,7 @@ TORCH_LIBRARY(quantized, m) {
   // This is needed for graph mode quantization, when we fuse
   // dequant - aten::batch_norm - quant into quantized::batch_norm
   // and dimension is unknown given only the aten op call
-  // quantized::batch_norm supports both 2d and 3d batch norm right now
-  // it should also support 1d batch_norm after quantized::batch_norm1d is
-  // implemented
+  // quantized::batch_norm supports 1d, 2d, and 3d batch norm right now
   m.def("batch_norm(Tensor qx, Tensor? weight, Tensor? bias, Tensor mean, Tensor var, float eps, float output_scale, int output_zero_point) -> Tensor");
   m.def("batch_norm_relu(Tensor qx, Tensor? weight, Tensor? bias, Tensor mean, Tensor var, float eps, float output_scale, int output_zero_point) -> Tensor");
   m.def("batch_norm1d(Tensor qx, Tensor? weight, Tensor? bias, Tensor mean, Tensor var, float eps, float output_scale, int output_zero_point) -> Tensor");

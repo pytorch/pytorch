@@ -93,6 +93,15 @@ class ConvBnReLU3d(torch.nn.Sequential):
         super(ConvBnReLU3d, self).__init__(conv, bn, relu)
 
 
+class BNReLU1d(torch.nn.Sequential):
+    r"""This is a sequential container which calls the BatchNorm 1d and ReLU modules.
+    During quantization this will be replaced with the corresponding fused module."""
+    def __init__(self, batch_norm, relu):
+        assert type(batch_norm) == BatchNorm1d and type(relu) == ReLU, \
+            'Incorrect types for input modules{}{}'.format(
+                type(batch_norm), type(relu))
+        super(BNReLU1d, self).__init__(batch_norm, relu)
+
 class BNReLU2d(torch.nn.Sequential):
     r"""This is a sequential container which calls the BatchNorm 2d and ReLU modules.
     During quantization this will be replaced with the corresponding fused module."""

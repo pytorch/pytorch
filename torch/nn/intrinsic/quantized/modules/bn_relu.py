@@ -6,6 +6,39 @@ import torch.nn.intrinsic.qat
 import torch.nn.quantized as nnq
 
 
+class BNReLU1d(nnq.BatchNorm1d):
+    r"""
+    A BNReLU1d module is a fused module of BatchNorm1d and ReLU
+
+    We adopt the same interface as :class:`torch.nn.quantized.BatchNorm1d`.
+
+    Attributes:
+        Same as torch.nn.quantized.BatchNorm1d
+
+    """
+    _FLOAT_MODULE = torch.nn.intrinsic.BNReLU1d
+
+    def __init__(self, num_features, eps=1e-5, momentum=0.1):
+        super(BNReLU1d, self).__init__(num_features, eps=eps, momentum=momentum)
+
+    def forward(self, input):
+        # Temporarily using len(shape) instead of ndim due to JIT issue
+        # https://github.com/pytorch/pytorch/issues/23890
+        if len(input.shape) != 4:
+            raise ValueError("Input shape must be `(N, C, W)`!")
+        return torch.ops.quantized.batch_norm1d_relu(
+            input, self.weight, self.bias, self.running_mean,
+            self.running_var, self.eps, self.scale, self.zero_point)
+
+    def _get_name(self):
+        return 'QuantizedBNReLU1d'
+
+    @classmethod
+    def from_float(cls, mod):
+        # TODO: Add qat support for BNReLU1d
+        return super(BNReLU1d, cls).from_float(mod)
+
+
 class BNReLU2d(nnq.BatchNorm2d):
     r"""
     A BNReLU2d module is a fused module of BatchNorm2d and ReLU

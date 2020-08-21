@@ -366,8 +366,17 @@ void FoldConvBatchNormHelper::transform() {
 Module FoldConvBatchNorm(const Module& module) {
   Module m = module.clone();
 
+  addBiasForConvIfNone(m, "Conv1d");
   addBiasForConvIfNone(m, "Conv2d");
   addBiasForConvIfNone(m, "Conv3d");
+  // Conv1d + BatchNorm1d
+  const PatternInfo pattern1d = PatternInfo::parse_from_str(
+      R"(
+graph(%self, %input, %conv, %batchnorm):
+    %conv_out = prim::CallMethod[name="forward"](%conv, %input)
+    %bn_out = prim::CallMethod[name="forward"](%batchnorm, %conv_out)
+    return (%bn_out))",
+      {is_conv1d_module, is_batchnorm1d_module});
   // Conv2d + BatchNorm2d
   const PatternInfo pattern2d = PatternInfo::parse_from_str(
       R"(
@@ -386,7 +395,7 @@ graph(%self, %input, %conv, %batchnorm):
       {is_conv3d_module, is_batchnorm3d_module});
 
   const std::vector<std::reference_wrapper<const PatternInfo>> patterns = {
-      pattern2d, pattern3d};
+      pattern1d, pattern2d, pattern3d};
   for (const auto& pattern : patterns) {
     FoldConvBatchNormHelper h;
     h.analyze(m, pattern);

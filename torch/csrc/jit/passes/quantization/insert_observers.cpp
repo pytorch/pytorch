@@ -751,6 +751,38 @@ graph(%self, %a, %b, %alpha):
      %second_output = aten::relu_(%first_output)
      return (%second_output) )");
 
+  const PatternInfo nn_bn1d_nn_relu = PatternInfo::parse_from_str(
+      R"(
+graph(%self, %input, %batchnorm, %relu):
+    %first_output = prim::CallMethod[name="forward"](%batchnorm, %input)
+    %second_output = prim::CallMethod[name="forward\\d*"](%relu, %first_output)
+    return (%second_output) )",
+      {is_batchnorm1d_module, is_relu_module});
+
+  const PatternInfo nn_bn1d_f_relu = PatternInfo::parse_from_str(
+      R"(
+graph(%self, %input, %batchnorm, %relu, %inplace):
+    %first_output = prim::CallMethod[name="forward"](%batchnorm, %input)
+    %second_output = prim::CallFunction(%relu, %first_output, %inplace)
+    return (%second_output) )",
+      {is_batchnorm1d_module, is_functional_relu});
+
+  const PatternInfo nn_bn1d_aten_relu = PatternInfo::parse_from_str(
+      R"(
+graph(%self, %input, %batchnorm):
+    %first_output = prim::CallMethod[name="forward"](%batchnorm, %input)
+    %second_output = aten::relu(%first_output)
+    return (%second_output) )",
+      {is_batchnorm1d_module});
+
+  const PatternInfo nn_bn1d_aten_relu_ = PatternInfo::parse_from_str(
+      R"(
+graph(%self, %input, %batchnorm):
+    %first_output = prim::CallMethod[name="forward"](%batchnorm, %input)
+    %second_output = aten::relu_(%first_output)
+    return (%second_output) )",
+      {is_batchnorm1d_module});
+
   const PatternInfo nn_bn2d_nn_relu = PatternInfo::parse_from_str(
       R"(
 graph(%self, %input, %batchnorm, %relu):

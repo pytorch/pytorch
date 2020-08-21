@@ -9,6 +9,7 @@ from .modules import ConvReLU1d
 from .modules import ConvReLU2d
 from .modules import ConvReLU3d
 from .modules import LinearReLU
+from .modules import BNReLU1d
 from .modules import BNReLU2d
 from .modules import BNReLU3d
 
@@ -23,6 +24,7 @@ __all__ = [
     'ConvReLU2d',
     'ConvReLU3d',
     'LinearReLU',
+    'BNReLU1d',
     'BNReLU2d',
     'BNReLU3d',
 ]
