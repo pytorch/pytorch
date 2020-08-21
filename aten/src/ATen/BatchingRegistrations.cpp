@@ -398,18 +398,14 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   using TensorScalarType = Tensor (*)(const Tensor&, Scalar);
 
 #define BINARY_POINTWISE(op) \
-  m.impl(#op".Tensor", binary_pointwise_batching_rule< \
-      TensorTensorType, static_cast<TensorTensorType>(at::op)>); \
-  m.impl(#op".Scalar", unary_pointwise_batching_rule< \
-      TensorScalarType, static_cast<TensorScalarType>(at::op), Scalar>);
+  m.impl(#op".Tensor", binary_pointwise_batching_rule<TensorTensorType, at::op>); \
+  m.impl(#op".Scalar", unary_pointwise_batching_rule<TensorScalarType, at::op, Scalar>);
 #define BINARY_POINTWISE_VA(op, ...) \
   { \
     using Binop = Tensor (*)(const Tensor&, const Tensor&, __VA_ARGS__); \
     using Unop = Tensor (*)(const Tensor&, Scalar, __VA_ARGS__); \
-  m.impl(#op".Tensor", binary_pointwise_batching_rule< \
-      Binop, static_cast<Binop>(at::op), __VA_ARGS__>); \
-  m.impl(#op".Scalar", unary_pointwise_batching_rule< \
-      Unop, static_cast<Unop>(at::op), Scalar, __VA_ARGS__>); \
+    m.impl(#op".Tensor", binary_pointwise_batching_rule<Binop, at::op, __VA_ARGS__>); \
+    m.impl(#op".Scalar", unary_pointwise_batching_rule<Unop, at::op, Scalar, __VA_ARGS__>); \
   }
 
   BINARY_POINTWISE_VA(add, Scalar);
