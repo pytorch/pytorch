@@ -409,7 +409,7 @@ class QuantizationTestCase(TestCase):
         if isinstance(check_spec, tuple):
             target_node = check_spec
             self.assertTrue(target_node in nodes_in_graph, 'node:' + str(target_node) +
-                        ' not found in the graph module')
+                            ' not found in the graph module')
         elif isinstance(check_spec, dict):
             node_occurrence_map = check_spec
             for target_node, occurrence in node_occurrence_map.items():
