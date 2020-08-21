@@ -182,7 +182,7 @@ class QuantizationTestCase(TestCase):
                               2 : self.img_data_2d,
                               3 : self.img_data_3d}
 
-        # quant types that produce statically quantized ops
+        # Quant types that produce statically quantized ops
         self.static_quant_types = [QuantType.STATIC, QuantType.QAT]
         # All quant types for (fx based) graph mode quantization
         self.all_quant_types = [QuantType.DYNAMIC, QuantType.STATIC, QuantType.QAT]
@@ -455,6 +455,7 @@ class QuantizationTestCase(TestCase):
 
         if debug:
             print()
+            print('quant type:', quant_type)
             print('origianl graph module:', type(model))
             self.printGraphModule(original)
             print()

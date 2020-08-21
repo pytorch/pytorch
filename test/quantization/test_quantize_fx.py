@@ -159,3 +159,50 @@ class TestQuantizeFxOps(QuantizationTestCase):
             model = self.checkGraphModeFxOp(
                 Conv(dim), self.img_data_dict[dim],
                 quantized_nodes[dim], quant_type=quant_type)
+
+    @skipIfNoFBGEMM
+    def test_quantized_conv_relu(self):
+        """tests for conv1d_relu/conv2d_relu/conv3d_relu"""
+        conv_module = {1 : torch.nn.Conv1d, 2 : torch.nn.Conv2d, 3 : torch.nn.Conv3d}
+
+        class ConvNdRelu(torch.nn.Module):
+            def __init__(self, dim, inplace):
+                super(ConvNdRelu, self).__init__()
+                self.conv = conv_module[dim](3, 3, 3).float()
+                self.relu = torch.nn.ReLU(inplace)
+
+            def forward(self, x):
+                return self.relu(self.conv(x))
+
+        class ConvNdFunctionalRelu(torch.nn.Module):
+            def __init__(self, dim):
+                super(ConvNdFunctionalRelu, self).__init__()
+                self.conv = conv_module[dim](3, 3, 3).float()
+
+            def forward(self, x):
+                return F.relu(self.conv(x))
+
+        class ConvNdInplaceFunctionalRelu(torch.nn.Module):
+            def __init__(self, dim):
+                super(ConvNdInplaceFunctionalRelu, self).__init__()
+                self.conv = conv_module[dim](3, 3, 3).float()
+
+            def forward(self, x):
+                return F.relu(self.conv(x), True)
+
+        options = itertools.product([1, 2, 3], self.static_quant_types)
+        quantized_nodes = {
+            # dim
+            1: ('call_module', nniq.ConvReLU1d),
+            2: ('call_module', nniq.ConvReLU2d),
+            3: ('call_module', nniq.ConvReLU3d),
+        }
+        for dim, quant_type in options:
+            for orig_m in [ConvNdRelu(dim, True),
+                           ConvNdRelu(dim, False),
+                           ConvNdFunctionalRelu(dim),
+                           ConvNdInplaceFunctionalRelu(dim)]:
+                conv_name = "conv{}d".format(dim)
+                m = self.checkGraphModeFxOp(
+                    orig_m, self.img_data_dict[dim],
+                    quantized_nodes[dim], quant_type=quant_type)
