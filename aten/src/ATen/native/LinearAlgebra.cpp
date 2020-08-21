@@ -369,7 +369,7 @@ Tensor& addmm_cpu_out(Tensor &result, const Tensor& self, const Tensor& mat1, co
       && !self.requires_grad() && !mat1.requires_grad() && !mat2.requires_grad()
       && self.dim() == 1 && mat1.size(Layout::Filter::output) == self.size(0)
       && mat2.t().contiguous().size(Layout::Filter::input) > 0 && mat2.t().contiguous().size(Layout::Filter::output) > 0) {
-    result.resize_({self.size(0), mat2.size(1)});
+    result.resize_({mat1.size(0), mat2.size(1)});
     result.copy_(xnnpack::linear(mat1, mat2.t(), self));
     at::namedinference::propagate_names_for_addmm(result, mat1, mat2, self);
     return result;
