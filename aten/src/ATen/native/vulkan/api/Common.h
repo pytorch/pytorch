@@ -11,7 +11,13 @@
 #define VK_CHECK(function)                                  \
   {                                                         \
     const VkResult result = (function);                     \
-    TORCH_CHECK(result == VK_SUCCESS, "VkResult:", result); \
+    TORCH_CHECK(VK_SUCCESS == result, "VkResult:", result); \
+  }
+
+#define VK_CHECK_RELAXED(function)                          \
+  {                                                         \
+    const VkResult result = (function);                     \
+    TORCH_CHECK(VK_SUCCESS <= result, "VkResult:", result); \
   }
 
 #define VK_DELETER(Handle) \
