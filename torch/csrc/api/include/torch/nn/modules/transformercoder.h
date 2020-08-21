@@ -15,58 +15,6 @@
 namespace torch {
 namespace nn {
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ TransformerEncoder ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-/// TransformerEncoder module.
-/// See https://pytorch.org/docs/master/generated/torch.nn.TransformerEncoder.html to
-/// learn abouut the exact behavior of this encoder layer module.
-///
-/// See the documentation for `torch::nn::TransformerEncoder` class to learn what
-/// constructor arguments are supported for this encoder module.
-///
-/// Example:
-/// ```
-/// TransformerEncoderLayer encoderLayer(TransformerEncoderLayerOptions(512, 8).dropout(0.1));
-//  TransformerEncoder encoder(TransformerEncoderOptions(encoderLayer, 6).norm(LayerNorm(LayerNormOptions({2}))));
-/// ```
-class TORCH_API TransformerEncoderImpl : public Cloneable<TransformerEncoderImpl> {
-
-  public:
-    explicit TransformerEncoderImpl(TransformerEncoderOptions options_);
-
-    Tensor forward(
-      const Tensor& src,
-      const Tensor& src_mask = {},
-      const Tensor& src_key_padding_mask = {});
-
-    void reset() override;
-
-    void reset_parameters();
-
-  protected:
-    FORWARD_HAS_DEFAULT_ARGS(
-        {1, AnyValue(Tensor())},
-        {2, AnyValue(Tensor())})
-
-  public:
-    /// options with which this `TransformerEncoder` was constructed
-    TransformerEncoderOptions options;
-
-    /// module list that contains all the encoder layers
-    ModuleList layers = nullptr;
-
-    /// optional normalization module
-    AnyModule norm;
-};
-
-/// A `ModuleHolder` subclass for `TransformerEncoderImpl``.
-/// See the documentation for `TransformerEncoderImpl` class to learn what
-/// methods it provides, and examples of how to use `TransformerEncoder` with
-/// `torch::nn::TransformerEncoderOptions`.
-/// See the documentation for `ModuleHolder` to learn about PyTorch's
-/// module storage semantics.
-TORCH_MODULE(TransformerEncoder);
-
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ TransformerDecoder ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// TransformerDecoder is a stack of N decoder layers.
@@ -86,13 +34,16 @@ TORCH_MODULE(TransformerEncoder);
 /// ```
 class TORCH_API TransformerDecoderImpl : public Cloneable<TransformerDecoderImpl> {
  public:
-  TransformerDecoderImpl(TransformerDecoderLayer decoder_layer, int64_t num_layers)
+  TransformerDecoderImpl(TransformerDecoder decoder_layer, int64_t num_layers)
     : TransformerDecoderImpl(TransformerDecoderOptions(decoder_layer, num_layers)) {}
-  explicit TransformerDecoderImpl(TransformerDecoderOptions options_);
+  explicit TransformerDecoderImpl(const TransformerDecoderOptions& options_);
 
   void reset() override;
 
   void reset_parameters();
+
+  /// Pretty prints the `TransformerDecoder` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
 
   /// Pass the inputs (and mask) through the decoder layer in turn.
   ///Args:
@@ -102,7 +53,7 @@ class TORCH_API TransformerDecoderImpl : public Cloneable<TransformerDecoderImpl
   ///       memory_mask: the mask for the memory sequence (optional).
   ///       tgt_key_padding_mask: the mask for the tgt keys per batch (optional).
   ///       memory_key_padding_mask: the mask for the memory keys per batch (optional).
-  Tensor forward(const Tensor& tgt,
+  Tensor forward(Tensor tgt,
                  const Tensor& memory,
                  const Tensor& tgt_mask = {},
                  const Tensor& memory_mask = {},
@@ -116,7 +67,7 @@ class TORCH_API TransformerDecoderImpl : public Cloneable<TransformerDecoderImpl
   ModuleList layers{nullptr};
 
   ///optional layer normalization module
-  AnyModule norm;
+  AnyModule norm{nullptr};
 
  protected:
   FORWARD_HAS_DEFAULT_ARGS(
@@ -129,7 +80,7 @@ class TORCH_API TransformerDecoderImpl : public Cloneable<TransformerDecoderImpl
 
 /// A `ModuleHolder` subclass for `TransformerDecoderImpl`.
 /// See the documentation for `TransformerDecoderImpl` class to learn what methods it
-/// provides, and examples of how to use `TransformerDecoder` with
+/// provides, and examples of how to use `TransformerDecoder` with 
 /// `torch::nn::TransformerDecoderOptions`.
 /// See the documentation for `ModuleHolder` to learn about PyTorch's
 /// module storage semantics.

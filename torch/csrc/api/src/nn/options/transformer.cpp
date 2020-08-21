@@ -28,8 +28,12 @@ TransformerDecoderOptions::TransformerDecoderOptions(
 
 
 TransformerDecoderOptions::TransformerDecoderOptions(
-  const TransformerDecoderLayerOptions& decoder_layer_options,
-  int64_t num_layers)
+  const TransformerDecoderLayer& decoder_layer, int64_t num_layers) :
+  decoder_layer_(decoder_layer), num_layers_(num_layers) {}
+
+
+TransformerDecoderOptions::TransformerDecoderOptions(
+  const TransformerDecoderLayerOptions& decoder_layer_options, int64_t num_layers)
   : decoder_layer_(decoder_layer_options), num_layers_(num_layers){}
 
 } // namespace nn

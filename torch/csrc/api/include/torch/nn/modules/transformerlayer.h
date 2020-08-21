@@ -9,7 +9,6 @@
 #include <torch/nn/modules/normalization.h>
 #include <torch/nn/modules/activation.h>
 #include <torch/nn/modules/common.h>
-#include <torch/nn/modules/container/modulelist.h>
 
 #include <torch/types.h>
 
@@ -184,7 +183,6 @@ class TORCH_API TransformerDecoderLayerImpl : public Cloneable<TransformerDecode
 /// See the documentation for `ModuleHolder` to learn about PyTorch's
 /// module storage semantics.
 TORCH_MODULE(TransformerDecoderLayer);
-
 
 } // namespace nn
 } // namespace torch

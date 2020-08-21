@@ -4,7 +4,6 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/types.h>
 #include <torch/enum.h>
-#include <torch/nn/module.h>
 
 namespace torch {
 namespace nn {
