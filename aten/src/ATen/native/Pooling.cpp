@@ -64,7 +64,7 @@ void max_pool2d_out_impl(
         for (int64_t it = begin; it < end; ++it) {
           // Compute valid kernel row limits (skip padding)
           int64_t ii = (it % OH) * SI - PI;
-          const int64_t ei = std::min(ii + KH * DI, IH);
+          const int64_t ei = std::min<int64_t>(ii + KH * DI, IH);
           ii += (ii < 0) ? ((-ii + DI - 1) / DI) * DI : 0;
 
           // Pointers to kernel window and output row
