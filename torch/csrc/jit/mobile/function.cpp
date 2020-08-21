@@ -52,9 +52,10 @@ bool Function::append_operator(
   if (model_version == 0x3L &&
       model_version < caffe2::serialize::kProducedBytecodeVersion &&
       opname == c10::OperatorName("aten::_convolution", "")) {
-    // A default-value argument will be added in https://github.com/pytorch/pytorch/pull/40737.
-    // This wrapper is used to handle backward compatibility, where there is no
-    // default bool value in old models.
+    // A default-value argument will be added in
+    // https://github.com/pytorch/pytorch/pull/40737. This wrapper is used to
+    // handle backward compatibility, where there is no default bool value in
+    // old models.
     fn = [fn](Stack& stack) {
       stack.push_back(true);
       fn(stack);

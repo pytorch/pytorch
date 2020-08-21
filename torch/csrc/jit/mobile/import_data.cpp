@@ -151,7 +151,7 @@ c10::IValue BytecodeDeserializer::readArchive(
   return unpickler.parse_ivalue();
 }
 
-} // namespacele/
+} // namespace
 
 namespace mobile {
 
