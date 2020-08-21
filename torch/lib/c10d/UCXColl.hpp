@@ -7,6 +7,7 @@
 #pragma once
 
 #include <c10d/UCXSendRecv.hpp>
+#include <ATen/ATen.h>
 
 namespace c10d {
 
@@ -32,6 +33,8 @@ struct torch_ucx_coll_comm_t {
 
 struct torch_ucx_coll_request_t {
     torch_ucx_coll_comm_t   *comm;
+    c10::DeviceIndex        dev_index;
+    c10::DeviceType         dev_type;
     uint32_t                tag;
     torch_ucx_progress_p    progress;
     torch_ucx_status_t      status;
