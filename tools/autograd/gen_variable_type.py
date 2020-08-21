@@ -382,11 +382,11 @@ ${assign_return_values}c10::Dispatcher::singleton()
 """)
 
 FW_DERIVATIVE_CHECK_TEMPLATE = CodeTemplate("""\
-${req_inp}.fw_grad().defined()\
+isFwGradDefined(${req_inp})\
 """)
 
 FW_DERIVATIVE_DEFINED_TEMPLATE = CodeTemplate("""\
-auto ${inp}_fw_grad = ${inp}.fw_grad();
+auto ${inp}_fw_grad = toLegacyFwGrad(${inp});
 """)
 
 FW_DERIVATIVE_SETTER_TENSOR = CodeTemplate("""\

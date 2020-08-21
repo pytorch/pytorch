@@ -5206,8 +5206,8 @@ class TestAutogradFunctional(TestCase):
         self.assertIsNotNone(res[0].grad_fn)
         self.assertIsNotNone(res[1].grad_fn)
 
-        gradcheck(lambda inp, v: autogradF.jvp(reducer, inp, v, create_graph=True), (inputs, v), mode="backward")
-        gradgradcheck(lambda inp, v: autogradF.jvp(reducer, inp, v, create_graph=True), (inputs, v), mode="backward")
+        gradcheck(lambda inp, v: autogradF.jvp(reducer, inp, v, create_graph=True), (inputs, v), check_forward=False)
+        gradgradcheck(lambda inp, v: autogradF.jvp(reducer, inp, v, create_graph=True), (inputs, v), check_forward=False)
         gradcheck(lambda inp, v: autogradF.jvp(reducer, inp, v, create_graph=True, fw_mode=False), (inputs, v))
         gradgradcheck(lambda inp, v: autogradF.jvp(reducer, inp, v, create_graph=True, fw_mode=False), (inputs, v))
 
@@ -5217,8 +5217,8 @@ class TestAutogradFunctional(TestCase):
         inputs = (torch.rand(2, requires_grad=True), torch.rand(2, requires_grad=True))
         v = (torch.tensor([1., 0.], requires_grad=True), torch.tensor([1., 0.], requires_grad=True))
 
-        gradcheck(lambda *args: autogradF.jvp(adder, args[:2], args[2:], create_graph=True)[1], inputs + v, mode="backward")
-        gradgradcheck(lambda *args: autogradF.jvp(adder, args[:2], args[2:], create_graph=True)[1], inputs + v, mode="backward")
+        gradcheck(lambda *args: autogradF.jvp(adder, args[:2], args[2:], create_graph=True)[1], inputs + v, check_forward=False)
+        gradgradcheck(lambda *args: autogradF.jvp(adder, args[:2], args[2:], create_graph=True)[1], inputs + v, check_forward=False)
         gradcheck(lambda *args: autogradF.jvp(adder, args[:2], args[2:], create_graph=True, fw_mode=False)[1], inputs + v)
         gradgradcheck(lambda *args: autogradF.jvp(adder, args[:2], args[2:], create_graph=True, fw_mode=False)[1], inputs + v)
 
@@ -5232,8 +5232,8 @@ class TestAutogradFunctional(TestCase):
 
             return val[0].exp() + val[1].exp() + grad[0].exp() + grad[1].exp() + x.exp() + y.exp()
 
-        gradcheck(foo, inputs + v, mode="backward")
-        gradgradcheck(foo, inputs + v, mode="backward")
+        gradcheck(foo, inputs + v, check_forward=False)
+        gradgradcheck(foo, inputs + v, check_forward=False)
         fw_mode = False
         gradcheck(foo, inputs + v)
         gradgradcheck(foo, inputs + v)

@@ -20,7 +20,9 @@ void GradMode::set_enabled(bool enabled) {
   GradMode_enabled = enabled;
 }
 
-thread_local bool FwGradMode_enabled = true;
+/// For now, forward grad is not broadly available so turn it
+/// off by default to avoid leaking its state to user code
+thread_local bool FwGradMode_enabled = false;
 
 bool FwGradMode::is_enabled() {
   return FwGradMode_enabled;

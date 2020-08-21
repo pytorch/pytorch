@@ -34,7 +34,8 @@ __all__ = [
     'ShortStorage', 'CharStorage', 'ByteStorage', 'BoolStorage',
     'DoubleTensor', 'FloatTensor', 'LongTensor', 'IntTensor',
     'ShortTensor', 'CharTensor', 'ByteTensor', 'BoolTensor', 'Tensor',
-    'lobpcg', 'set_deterministic', 'is_deterministic'
+    'lobpcg', 'set_deterministic', 'is_deterministic',
+    'set_grad_enabled', 'set_fw_grad_enabled'
 ]
 
 ################################################################################
@@ -459,7 +460,7 @@ del ComplexFloatStorageBase
 
 import torch.cuda
 import torch.autograd
-from torch.autograd import no_grad, enable_grad, set_grad_enabled
+from torch.autograd import no_grad, enable_grad, set_grad_enabled, set_fw_grad_enabled
 # import torch.fft  # TODO: enable once torch.fft() is removed
 import torch.futures
 import torch.nn

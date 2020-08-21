@@ -127,7 +127,6 @@ static PyObject * set_grad_enabled(PyObject* _unused, PyObject *arg) {
     throw TypeError("enabled must be a bool (got %s)", Py_TYPE(arg)->tp_name);
   }
   GradMode::set_enabled(arg == Py_True);
-  FwGradMode::set_enabled(arg == Py_True);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -135,6 +134,26 @@ static PyObject * set_grad_enabled(PyObject* _unused, PyObject *arg) {
 static PyObject * is_grad_enabled(PyObject* _unused, PyObject *arg) {
   HANDLE_TH_ERRORS
   if (GradMode::is_enabled()) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * set_fw_grad_enabled(PyObject* _unused, PyObject *arg) {
+  HANDLE_TH_ERRORS
+  if (!PyBool_Check(arg)) {
+    throw TypeError("enabled must be a bool (got %s)", Py_TYPE(arg)->tp_name);
+  }
+  FwGradMode::set_enabled(arg == Py_True);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * is_fw_grad_enabled(PyObject* _unused, PyObject *arg) {
+  HANDLE_TH_ERRORS
+  if (FwGradMode::is_enabled()) {
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;
@@ -166,6 +185,8 @@ static PyObject * is_anomaly_mode_enabled(PyObject* _unused, PyObject *arg) {
 static PyMethodDef methods[] = { // NOLINT
   {"set_grad_enabled", (PyCFunction)set_grad_enabled, METH_O, nullptr},
   {"is_grad_enabled", (PyCFunction)is_grad_enabled, METH_NOARGS, nullptr},
+  {"set_fw_grad_enabled", (PyCFunction)set_fw_grad_enabled, METH_O, nullptr},
+  {"is_fw_grad_enabled", (PyCFunction)is_fw_grad_enabled, METH_NOARGS, nullptr},
   {"set_autocast_enabled", (PyCFunction)set_autocast_enabled, METH_O, nullptr},
   {"is_autocast_enabled", (PyCFunction)is_autocast_enabled, METH_NOARGS, nullptr},
   {"clear_autocast_cache", (PyCFunction)clear_autocast_cache, METH_NOARGS, nullptr},

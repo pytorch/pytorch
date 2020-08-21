@@ -345,7 +345,8 @@ def jvp(func, inputs, v=None, create_graph=False, strict=False, fw_mode=True):
         for el_inp, el_v in zip(inputs, v):
             el_inp.fw_grad = el_v
 
-        outputs = func(*inputs)
+        with torch.set_fw_grad_enabled(True):
+            outputs = func(*inputs)
         is_outputs_tuple, outputs = _as_tuple(outputs, "outputs of the user-provided function", "jvp")
 
         grad_res = tuple(out.fw_grad for out in outputs)
@@ -357,6 +358,9 @@ def jvp(func, inputs, v=None, create_graph=False, strict=False, fw_mode=True):
         # cleanup
         for el_inp in inputs:
             el_inp.fw_grad = None
+            # Because _grad_preprocess creates these view, make sure we clean fw_grad on them properly
+            if el_inp._is_view():
+                el_inp._base.fw_grad = None
         for out in outputs:
             out.fw_grad = None
     else:

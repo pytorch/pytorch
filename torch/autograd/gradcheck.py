@@ -197,7 +197,8 @@ def get_analytical_jacobian_fw(fn, input, output):
             inp.fw_grad = fw_grad
             for lin_idx, inp_idx in enumerate(product(*[range(m) for m in inp.size()])):
                 fw_grad[inp_idx] = 1
-                grad = fn(input).fw_grad
+                with torch.set_fw_grad_enabled(True):
+                    grad = fn(input).fw_grad
                 if grad is None:
                     jacobian[i][lin_idx].zero_()
                 else:
@@ -239,7 +240,8 @@ def gradcheck(
     check_sparse_nnz: bool = False,
     nondet_tol: float = 0.0,
     check_undefined_grad: bool = True,
-    mode: str = "all",
+    check_backward: bool = True,
+    check_forward: bool = True,
     stacklevel = 2
 ) -> bool:
     r"""Check gradients computed via small finite differences against analytical
@@ -277,8 +279,8 @@ def gradcheck(
             exactly (default, 0.0) or be within this tolerance.
         check_undefined_grad (bool, options): if True, check if undefined output grads
             are supported and treated as zeros
-        mode (str, optional): which mode of computation should be used. Can be "backward" to test
-            backward mode AD, "forward" to test forward mode AD or "all" to test all of them.
+        check_backward (bool, options): if True, check the backward mode AD gradient
+        check_forward(bool, options): if True, check the forward mode AD gradient
 
     Returns:
         True if all differences satisfy allclose condition
@@ -341,7 +343,7 @@ def gradcheck(
 
         numerical = get_numerical_jacobian(fn, tupled_inputs, eps=eps)
 
-        if mode in ["all", "backward"]:
+        if check_backward:
             analytical, reentrant, correct_grad_sizes = get_analytical_jacobian(tupled_inputs, o, nondet_tol=nondet_tol)
 
             if not correct_grad_sizes:
@@ -359,17 +361,13 @@ def gradcheck(
                                  'although analytical gradient matches numerical gradient. '
                                  'The tolerance for nondeterminism was {}.'.format(nondet_tol))
 
-        if mode in ["all", "forward"]:
+        if check_forward:
             try:
                 fw_analytical = get_analytical_jacobian_fw(fn, tupled_inputs, o)
             except RuntimeError as e:
                 msg = str(e)
                 if "Trying to use forward prop with" in msg:
                     warnings.warn("Failed to compute gradcheck using fw mode: {}".format(msg), stacklevel=stacklevel)
-                    continue
-                elif "Cannot set as a forward grad a Tensor that already has a forward grad." in msg:
-                    warnings.warn("Failed to compute gradcheck using fw mode because the user provided "
-                                  "function also uses forward gradient", stacklevel=stacklevel)
                     continue
                 else:
                     raise e
@@ -425,18 +423,6 @@ def gradcheck(
                                                   grads_output,
                                                   allow_unused=True,
                                                   retain_graph=True)
-                # try:
-                #     grads_input = torch.autograd.grad(output_to_check,
-                #                                       diff_input_list,
-                #                                       grads_output,
-                #                                       allow_unused=True,
-                #                                       retain_graph=True)
-                # except RuntimeError:
-                #     warn_bc_breaking()
-                #     return fail_test((
-                #         'Expected backward function to handle undefined output grads. '
-                #         'Please look at "Notes about undefined output gradients" in '
-                #         '"tools/autograd/derivatives.yaml"'))
 
                 for gi, i in zip(grads_input, diff_input_list):
                     if (gi is not None) and (not gi.eq(0).all()):
@@ -459,7 +445,6 @@ def gradcheck(
                         for idx, o in enumerate(output_to_check)])
 
             for output_to_check in outputs_to_check:
-                print("loop")
                 if not check_undefined_grad_support(output_to_check):
                     return False
 
@@ -476,7 +461,9 @@ def gradgradcheck(
     gen_non_contig_grad_outputs: bool = False,
     raise_exception: bool = True,
     nondet_tol: float = 0.0,
-    check_undefined_grad: bool = True
+    check_undefined_grad: bool = True,
+    check_backward: bool = True,
+    check_forward: bool = True,
 ) -> bool:
     r"""Check gradients of gradients computed via small finite differences
     against analytical gradients w.r.t. tensors in :attr:`inputs` and
@@ -523,6 +510,8 @@ def gradgradcheck(
             the second derivative.
         check_undefined_grad (bool, options): if True, check if undefined output grads
             are supported and treated as zeros
+        check_backward (bool, options): if True, check the backward mode AD gradient
+        check_forward(bool, options): if True, check the forward mode AD gradient
 
     Returns:
         True if all differences satisfy allclose condition
@@ -554,4 +543,5 @@ def gradgradcheck(
         return grad_inputs
 
     return gradcheck(new_func, tupled_inputs + tupled_grad_outputs, eps, atol, rtol, raise_exception,
-                     nondet_tol=nondet_tol, check_undefined_grad=check_undefined_grad, stacklevel=3)
+                     nondet_tol=nondet_tol, check_undefined_grad=check_undefined_grad, stacklevel=3,
+                     check_backward=check_backward, check_forward=check_forward)
