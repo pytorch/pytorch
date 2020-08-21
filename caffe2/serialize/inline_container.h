@@ -140,7 +140,7 @@ constexpr uint64_t kProducedFileFormatVersion = 0x3L;
 // should be increased too. The relationship is:
 // kMaxSupportedFileFormatVersion >= (most likely ==) kProducedBytecodeVersion
 //   >= kProducedFileFormatVersion
-constexpr uint64_t kProducedBytecodeVersion = 0x3L;
+constexpr uint64_t kProducedBytecodeVersion = 0x4L;
 
 static_assert(kProducedBytecodeVersion >= kProducedFileFormatVersion,
     "kProducedBytecodeVersion must be higher or equal to kProducedFileFormatVersion.");
