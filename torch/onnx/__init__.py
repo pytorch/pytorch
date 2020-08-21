@@ -231,6 +231,73 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
 
 
 def _diagnose_export(*args, **kwargs):
+    r"""
+    This diagnostic too runs your model with operator_export_type set to
+    OperatorExportTypes.ONNX_FALLTHROUGH once in order to get a list of 
+    all the ops that are not supported/implemented by the current exporter
+
+    Arguments:
+        model (torch.nn.Module): the model to be exported.
+        args (tuple of arguments or torch.Tensor): the inputs to
+            the model, e.g., such that ``model(*args)`` is a valid
+            invocation of the model.  Any non-Tensor arguments will
+            be hard-coded into the exported model; any Tensor arguments
+            will become inputs of the exported model, in the order they
+            occur in args.  If args is a Tensor, this is equivalent
+            to having called it with a 1-ary tuple of that Tensor.
+            (Note: passing keyword arguments to the model is not currently
+            supported.  Give us a shout if you need it.)
+        f: a file-like object (has to implement fileno that returns a file descriptor)
+            or a string containing a file name.  A binary Protobuf will be written
+            to this file.
+        input_names(list of strings, default empty list): names to assign to the
+            input nodes of the graph, in order
+        output_names(list of strings, default empty list): names to assign to the
+            output nodes of the graph, in order
+        opset_version (int, default is 9): by default we export the model to the
+            opset version of the onnx submodule. Since ONNX's latest opset may
+            evolve before next stable release, by default we export to one stable
+            opset version. Right now, supported stable opset version is 9.
+            The opset_version must be _onnx_master_opset or in _onnx_stable_opsets
+            which are defined in torch/onnx/symbolic_helper.py
+        dynamic_axes (dict<string, dict<int, string>> or dict<string, list(int)>, default empty dict):
+            a dictionary to specify dynamic axes of input/output, such that:
+            - KEY:  input and/or output names
+            - VALUE: index of dynamic axes for given key and potentially the name to be used for
+            exported dynamic axes. Similar behavior to dyanmic axes argument in export
+
+        operator_export_type is set to OperatorExportTypes.ONNX_FALLTHROUGH by default
+            OperatorExportTypes.ONNX_FALLTHROUGH: If an op is not supported
+            in ONNX, fall through and export the operator as is, as a custom 
+            ONNX op. Using this mode, the op can be exported and implemented by
+            the user for their runtime backend.
+            Example graph::
+
+                graph(%0 : Float(2:12, 3:4, 4:1, requires_grad=0, device=cpu),
+                      %1 : Float(2:12, 3:4, 4:1, requires_grad=0, device=cpu)):
+                    %11 : Long(requires_grad=0, device=cpu) = prim::Constant[value={2}]()
+                    %7 : Float(2:12, 3:4, 4:1, requires_grad=0, device=cpu) = aten::add(%0, %1, %11) # main.py:6:0
+                    %12 : Long(requires_grad=0, device=cpu) = prim::Constant[value={0}]()
+                    %9 : None = prim::Constant()
+                    %10 : Float(2:12, 3:4, 4:1, requires_grad=0, device=cpu) = aten::cumsum(%7, %12, %9) # main.py:6:0
+                    return (%10)
+
+            is exported as::
+
+                graph(%0 : Float(2:12, 3:4, 4:1, requires_grad=0, device=cpu),
+                      %1 : Float(2:12, 3:4, 4:1, requires_grad=0, device=cpu)):
+                    %2 : Long(requires_grad=0, device=cpu) = onnx::Constant[value={2}]()
+                    %3 : Float(2:12, 3:4, 4:1, requires_grad=0, device=cpu) = aten::add(%0, %1, %2) # main.py:6:0
+                    %4 : Long(requires_grad=0, device=cpu) = onnx::Constant[value={0}]()
+                    %5 : None = prim::Constant()
+                    %6 : Float(2:12, 3:4, 4:1, requires_grad=0, device=cpu) = aten::cumsum(%3, %4, %5) # main.py:6:0
+                    return (%6)
+
+            In the above example, prim::ListConstruct is not supported, hence
+            exporter falls through and provides a list of usupported ops, thre result being 
+            [aten:add, aten:cumsum] as aten:add with alpha != 1 is not supported and aten:cumsum in not
+            implemented in opset 9
+    """
     from torch.onnx import utils
     result = utils._diagnose_export(*args, **kwargs)
     return result
