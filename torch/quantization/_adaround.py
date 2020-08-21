@@ -52,7 +52,7 @@ def learn_adaround(quantized_model, tuning_dataset, target_layers=None,
         weight_fake_quant attribute and runs an adam optimizer on the continous_V
         attribute on the adaround module
         '''
-        leaf_module.weight_fake_quant.tuning = True
+        leaf_module.weight_fake_quant.enable_adaround = True
 
         def dummy_generator():
             yield leaf_module.weight_fake_quant.continous_V

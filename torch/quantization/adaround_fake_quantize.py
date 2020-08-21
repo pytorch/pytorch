@@ -14,25 +14,26 @@ class AdaRoundFakeQuantize(FakeQuantize):
     but applying an optimizer on this attribute can yield a better rounding scheme and improve
     quantization results.
 
+    Attributes:
+        continous_V:
+        beta_high:
+        beta_low:
+        norm_scaling:
+        regulatizaion_scaling:
     '''
-    adaround_default_attribute_settings = {'continous_V': None,
-                                           'beta_high': 8,
-                                           'beta_low': 2,
-                                           'norm_scaling': 10,
-                                           'regularization_scaling': .1}
 
-    def __init__(self, *args, **keywords):
-        settings = AdaRoundFakeQuantize.adaround_default_attribute_settings
-
-        for attribute in settings:
-            if attribute in settings:
-                setattr(self, attribute, keywords[attribute])
-                del keywords[attribute]
-            else:
-                setattr(self, attribute, settings[attribute])
-
-        self.tuning = False
-        super(AdaRoundFakeQuantize, self).__init__(*args, **keywords)
+    def __init__(self, observer=MovingAverageMinMaxObserver, quant_min=-128, quant_max=127,
+                 dtype=torch.qint8, qscheme=torch.per_tensor_symmetric, reduce_range=False,
+                 beta_high=8, beta_low=2, norm_scaling=10, regularization_scaling=.1, continous_V=None):
+        self.enable_adaround = False
+        self.continous_V = continous_V
+        self.beta_high = beta_high
+        self.beta_low = beta_low
+        self.norm_scaling = norm_scaling
+        self.regulatizaion_scaling = regularization_scaling
+        super(AdaRoundFakeQuantize, self).__init__(observer=MovingAverageMinMaxObserver,
+                                                   quant_min=-128, quant_max=127, dtype=torch.qint8,
+                                                   qscheme=torch.per_tensor_symmetric, reduce_range=False)
 
     def forward(self, X):
         if self.continous_V is None:
@@ -40,7 +41,7 @@ class AdaRoundFakeQuantize(FakeQuantize):
             self.continous_V = torch.nn.Parameter(torch.zeros(X.size()))
             init.kaiming_uniform_(self.continous_V, a=math.sqrt(5))
 
-        if self.tuning:
+        if self.enable_adaround:
             X = self.adaround_rounding(X)
 
         return super().forward(X)
@@ -92,11 +93,11 @@ class AdaRoundFakeQuantize(FakeQuantize):
 
         return Frobenius_norm * self.norm_scaling + self.regularization_scaling * regulization
 
-parameters = {'observer': MovingAverageMinMaxObserver, 'quant_min': -128, 'quant_max': 127, 'dtype': torch.qint8,
-              'qscheme': torch.per_tensor_symmetric, 'reduce_range': False, 'beta_high': 8, 'beta_low': 2,
-              'norm_scaling': 10, 'regularization_scaling': .1, 'continous_V': None}
-
-default_araround_fake_quant = AdaRoundFakeQuantize.with_args(**parameters)
+default_araround_fake_quant = AdaRoundFakeQuantize.with_args(observer=MovingAverageMinMaxObserver,
+                                                             quant_min=-128, quant_max=127, dtype=torch.qint8,
+                                                             qscheme=torch.per_tensor_symmetric, reduce_range=False,
+                                                             beta_high=8, beta_low=2, norm_scaling=10,
+                                                             regularization_scaling=.1, continous_V=None)
 
 adaround_qconfig = QConfig(activation=default_fake_quant,
                            weight=default_araround_fake_quant)
