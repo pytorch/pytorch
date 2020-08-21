@@ -4932,6 +4932,9 @@ nonzero(input, *, out=None, as_tuple=False) -> LongTensor or tuple of LongTensor
     gives all nonzero values of tensor ``x``. Of the returned tuple, each index tensor
     contains nonzero indices for a certain dimension.
 
+    `as_tuple` is a required argument since pytorch-1.5. If not passed a warning
+    will be issued.
+
     See below for more details on the two behaviors.
 
 
@@ -4962,6 +4965,7 @@ value, it is treated as a one-dimensional tensor with one element.
 Args:
     {input}
     out (LongTensor, optional): the output tensor containing indices
+    as_tuple (bool, required): see the description above
 
 Returns:
     LongTensor or tuple of LongTensor: If :attr:`as_tuple` is ``False``, the output
@@ -4971,7 +4975,7 @@ Returns:
 
 Example::
 
-    >>> torch.nonzero(torch.tensor([1, 1, 1, 0, 1]))
+    >>> torch.nonzero(torch.tensor([1, 1, 1, 0, 1]), as_tuple=False)
     tensor([[ 0],
             [ 1],
             [ 2],
@@ -4979,7 +4983,7 @@ Example::
     >>> torch.nonzero(torch.tensor([[0.6, 0.0, 0.0, 0.0],
                                     [0.0, 0.4, 0.0, 0.0],
                                     [0.0, 0.0, 1.2, 0.0],
-                                    [0.0, 0.0, 0.0,-0.4]]))
+                                    [0.0, 0.0, 0.0,-0.4]]), as_tuple=False)
     tensor([[ 0,  0],
             [ 1,  1],
             [ 2,  2],
