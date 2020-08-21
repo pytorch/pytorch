@@ -99,7 +99,6 @@ class CudaFusionManager {
 
   std::vector<at::Tensor> runFusionNode(
       int32_t kernel_id,
-      std::shared_ptr<Graph>& graph,
       const at::ArrayRef<IValue> inputs) {
     std::lock_guard<std::mutex> guard(mutex_);
     return graph_cache_[kernel_id]->runGraphWithInputs(inputs);
@@ -222,9 +221,24 @@ void compileCudaFusionGroup(Node* fusion_node) {
   if (fusion_node->hasAttribute(attr::cache_id)) {
     TORCH_WARN("Double registration of CudaFusionGroup on CudaFusionManager");
   }
+  // This is not a critical code path, it's OK to do graph copy here;
+  auto graph = fusion_node->g(attr::Subgraph)->copy();
+
+  if (!IsNewExecutorEnabled()) {
+    // TODO: this doesn't cover the case where input types are missing. If we do
+    //       the graph construction at run-time, it's expensive to copy graph
+    //       at critical path. We take the trade-off here as profiling executor
+    //       is the future;
+    //
+    // Type propagation that's here just to cover corner case, incase type
+    // propagation failed in the original subgraph. We currently need output
+    // types in order to support fp16, where we cast input to fp32 and output
+    // back to fp16.
+    TypePropagate(graph);
+  }
+
   int32_t fusion_cache_id =
-      CudaFusionManager::getManager().registerOrGetCacheId(
-          fusion_node->g(attr::Subgraph));
+      CudaFusionManager::getManager().registerOrGetCacheId(graph);
   fusion_node->i_(attr::cache_id, fusion_cache_id);
 }
 
@@ -240,31 +254,14 @@ void runCudaFusionGroup(const Node* fusion_node, Stack& stack) {
   int32_t kernel_id = fusion_node->i(attr::cache_id);
 
   // Currently we just construct I/O tensors for static graph;
-  std::shared_ptr<Graph> graph = fusion_node->g(attr::Subgraph)->copy();
+
+  const auto nInputs = fusion_node->g(attr::Subgraph)->inputs().size();
 
   auto execute_lambda = [&]() {
-    const auto nInputs = graph->inputs().size();
     at::ArrayRef<IValue> inputs = last(stack, nInputs);
 
-    // TODO: we would/could want an extra layer of graph cache in order to
-    //       handle varying contiguity/broadcast;
-    // Only needed if we are doing codegen
-    // if no shape information available, we feed current shape into the kernel;
-    // This is needed because our current broadcast on size-1 dimension
-    if (!IsNewExecutorEnabled()) {
-      EraseShapeInformation(graph);
-      for (size_t i = 0; i < nInputs; i++) {
-        graph->inputs()[i]->setType(inputs[i].type());
-      }
-      // Type propagation that's here just to cover corner case, incase type
-      // propagation failed in the original subgraph. We currently need output
-      // types in order to support fp16, where we cast input to fp32 and output
-      // back to fp16.
-      TypePropagate(graph);
-    }
-
     auto outputs =
-        CudaFusionManager::getManager().runFusionNode(kernel_id, graph, inputs);
+        CudaFusionManager::getManager().runFusionNode(kernel_id, inputs);
 
     drop(stack, inputs.size());
     stack.insert(
@@ -286,8 +283,10 @@ void runCudaFusionGroup(const Node* fusion_node, Stack& stack) {
           "Failed for some reason. To debug try disable codegen fallback path"
           "via setting the env variable"
           "`export PYTORCH_CUDA_FUSER_DISABLE_FALLBACK=1`");
-      EraseShapeInformation(graph);
-      InterpreterState{Code(graph, "fallback_cuda_fuser")}.run(stack);
+      // copying graph here since we are eliminating shape information;
+      auto copied_graph = fusion_node->g(attr::Subgraph)->copy();
+      EraseShapeInformation(copied_graph);
+      InterpreterState{Code(copied_graph, "fallback_cuda_fuser")}.run(stack);
     }
   }
 }

@@ -188,13 +188,16 @@ at::DimVector inversePermutation(
 FusionExecutorCache::FusionExecutorCache(
     std::unique_ptr<Fusion>&& fusion,
     at::Device device)
-    : device_(device), fusion_(std::move(fusion)) {}
+    : device_(device), fusion_(std::move(fusion)) {
+  // avoid putting `has_reduction_` in the initializer list
+  has_reduction_ = fusion_->hasReduction();
+}
 
 // TODO: dummy cache
 std::vector<at::Tensor> FusionExecutorCache::runFusionWithInputs(
     const at::ArrayRef<IValue>& inputs) {
   // caching strategy is different for pw-fusion and reduction-fusion.
-  if (fusion_->hasReduction()) {
+  if (has_reduction_) {
     // copy the fusion, since each FusionExecutor needs to manipulate the fusion
     // in order to generate kernel.
     Fusion fusion = *fusion_;
