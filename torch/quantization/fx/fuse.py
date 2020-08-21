@@ -86,28 +86,41 @@ class ConvBNReLUFusion():
 
 @register_fusion_pattern((torch.nn.functional.relu, torch.nn.Linear))
 @register_fusion_pattern((torch.nn.ReLU, torch.nn.Linear))
-class LinearReLUFusion():
+@register_fusion_pattern((torch.nn.functional.relu, torch.nn.BatchNorm1d))
+@register_fusion_pattern((torch.nn.ReLU, torch.nn.BatchNorm1d))
+@register_fusion_pattern((torch.nn.functional.relu, torch.nn.BatchNorm2d))
+@register_fusion_pattern((torch.nn.ReLU, torch.nn.BatchNorm2d))
+@register_fusion_pattern((torch.nn.functional.relu, torch.nn.BatchNorm3d))
+@register_fusion_pattern((torch.nn.ReLU, torch.nn.BatchNorm3d))
+class ModuleReLUFusion():
     def __init__(self, quantizer, node):
         super().__init__()
         self.relu_node = node
         node = node.args[0]
         assert node.op == 'call_module'
-        assert isinstance(quantizer.modules[node.target], torch.nn.modules.Linear)
-        self.linear_node = node
-        self.linear = quantizer.modules[self.linear_node.target]
+        self.module_node = node
+        self.module = quantizer.modules[self.module_node.target]
 
     def fuse(self, quantizer, load_arg):
+        op_list = []
         # since relu can be used multiple times, we'll need to create a relu module for each match
         if self.relu_node.op == 'call_module':
             relu = torch.nn.ReLU(quantizer.modules[self.relu_node.target].inplace)
         else:
             # TODO: get inplace argument from functional
             relu = torch.nn.ReLU()
-        relu.training = self.linear.training
-        # linear_relu
-        linear_parent_name, linear_name = _parent_name(self.linear_node.target)
-        setattr(quantizer.modules[linear_parent_name], linear_name, torch.nn.intrinsic.LinearReLU(self.linear, relu))
-        return quantizer.fused_graph.node_copy(self.linear_node, load_arg)
+        relu.training = self.module.training
+        op_list.append(relu)
+        op_list.append(self.module)
+
+        op_list.reverse()
+        op_type_list = tuple(type(m) for m in op_list)
+        module_parent_name, module_name = _parent_name(self.module_node.target)
+        fuser_method = OP_LIST_TO_FUSER_METHOD.get(op_type_list, None)
+        if fuser_method is None:
+            raise NotImplementedError("Cannot fuse modules: {}".format(types))
+        setattr(quantizer.modules[module_parent_name], module_name, fuser_method(*op_list))
+        return quantizer.fused_graph.node_copy(self.module_node, load_arg)
 
 class Fuser:
     def fuse_conv_bn(self, model, inplace=False):
