@@ -262,7 +262,7 @@ TensorIndex::TensorIndex(
 }
 
 Sync::Sync() : Expr(ExprType::Sync) {
-  name_ = FusionGuard::getCurFusion()->registerExpr(this);
+  name_ = FusionGuard::getCurFusion()->registerLoweredExpr(this);
 }
 
 void Scope::insert_before(Expr* ref, Expr* expr) {
