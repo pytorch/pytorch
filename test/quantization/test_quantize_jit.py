@@ -1416,7 +1416,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
                            ConvNdInplaceFunctionalRelu(dim)]:
                 conv_name = "conv{}d".format(dim)
                 m = self.checkGraphModeOp(
-                    orig_m, self.img_data_dict[dim][0], "quantized::conv{}d_relu(".format(dim), tracing=tracing)
+                    orig_m, self.img_data_dict[dim], "quantized::conv{}d_relu(".format(dim), tracing=tracing)
 
                 FileCheck().check_not("aten::conv{}d(".format(dim)) \
                            .check_not("aten::relu") \
