@@ -52,6 +52,9 @@ bool Function::append_operator(
   if (model_version == 0x3L &&
       model_version < caffe2::serialize::kProducedBytecodeVersion &&
       opname == c10::OperatorName("aten::_convolution", "")) {
+    // A default-value argument will be added in https://github.com/pytorch/pytorch/pull/40737.
+    // This wrapper is used to handle backward compatibility, where there is no
+    // default bool value in old models.
     fn = [fn](Stack& stack) {
       stack.push_back(true);
       fn(stack);
@@ -60,6 +63,20 @@ bool Function::append_operator(
 
   code_->operators_.emplace_back(fn);
   return true;
+}
+
+void Function::set_module_debug_info_list_size(size_t size) {
+  pc_to_module_debug_info_.resize(size);
+  for (size_t i = 0; i < size; ++i) {
+    pc_to_module_debug_info_[i] = "<no module info>";
+  }
+}
+
+void Function::set_module_info(const std::string& module_info, size_t pc) {
+  TORCH_CHECK(
+      pc < pc_to_module_debug_info_.size(),
+      "Module debug info index out of boundary.");
+  pc_to_module_debug_info_[pc] = module_info;
 }
 
 void Function::append_constant(const c10::IValue& constant) {
@@ -74,10 +91,18 @@ void Function::set_register_size(size_t size) {
   code_->register_size_ = size;
 }
 
+std::string Function::get_module_debug_info(size_t pc) const {
+  TORCH_CHECK(
+      pc < pc_to_module_debug_info_.size(),
+      "Module debug info index out of boundary.");
+  return pc_to_module_debug_info_[pc];
+}
+
 bool Function::run(Stack& stack) const {
   InterpreterState interp_state(code_);
   return interp_state.run(stack);
 }
+
 } // namespace mobile
 } // namespace jit
 } // namespace torch

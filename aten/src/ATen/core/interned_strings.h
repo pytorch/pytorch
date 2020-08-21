@@ -143,6 +143,16 @@ namespace c10 {
   _(aten, abs_)                      \
   _(aten, absolute)                  \
   _(aten, absolute_)                 \
+  _(aten, acosh)                     \
+  _(aten, acosh_)                    \
+  _(aten, arccosh)                   \
+  _(aten, arccosh_)                  \
+  _(aten, clamp)                     \
+  _(aten, clamp_)                    \
+  _(aten, clip)                      \
+  _(aten, clip_)                     \
+  _(aten, det)                       \
+  _(aten, linalg_det)                \
   _(aten, append)                    \
   _(aten, item)                      \
   _(aten, format)                    \
@@ -164,6 +174,9 @@ namespace c10 {
   _(aten, lerp_)                     \
   _(aten, lt_)                       \
   _(aten, ne_)                       \
+  _(aten, _ger)                      \
+  _(aten, ger)                       \
+  _(aten, outer)                     \
   _(aten, transpose_)                \
   _(aten, unsqueeze_)                \
   _(aten, __getitem__)               \
@@ -183,6 +196,10 @@ namespace c10 {
   _(aten, hex)                       \
   _(aten, oct)                       \
   _(aten, clear)                     \
+  _(aten, trunc)                     \
+  _(aten, trunc_)                    \
+  _(aten, fix)                       \
+  _(aten, fix_)                      \
   _(aten, setdefault)                \
   _(aten, bin)                       \
   _(aten, pop)                       \
@@ -262,6 +279,7 @@ namespace c10 {
   _(attr, perm)                      \
   _(attr, sizes)                     \
   _(attr, starts)                    \
+  _(attr, profiled_type)             \
   _(attr, transA)                    \
   _(attr, transB)                    \
   _(attr, name)                      \

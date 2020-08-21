@@ -79,6 +79,17 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
     return fut->completed();
   }
 
+  py::object value() {
+    // acquiring GIL as toPyObject creates new py::object
+    // without grabbing the GIL.
+    py::gil_scoped_acquire acquire;
+    py::object py_obj = toPyObject(fut->value());
+    if (unwrap_func) {
+      (*unwrap_func)(py_obj);
+    }
+    return py_obj;
+  }
+
   py::object wait() {
     fut->wait();
     if (jit::tracer::isTracing()) {
@@ -88,16 +99,7 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
       auto output = graph->insert(aten::wait, {fut_val});
       jit::tracer::setValueTrace(fut->value(), output);
     }
-    {
-      // acquiring GIL as toPyObject creates new py::object
-      // without grabbing the GIL.
-      py::gil_scoped_acquire acquire;
-      py::object py_obj = toPyObject(fut->value());
-      if (unwrap_func) {
-        (*unwrap_func)(py_obj);
-      }
-      return py_obj;
-    }
+    return value();
   }
 
   // The py::function cb arg must take a std::shared_ptr<PythonFutureWrapper>
@@ -733,6 +735,7 @@ inline IValue toIValue(
       return toTypeInferredIValue(obj);
     case TypeKind::FunctionType:
     case TypeKind::GeneratorType:
+    case TypeKind::QuantizerType:
     case TypeKind::VarType:
     case TypeKind::QSchemeType:
     case TypeKind::AnyListType:
@@ -1166,6 +1169,8 @@ inline py::object invokeOperatorFromPython(
     // Create a stack full of the arguments and keyword arguments.
     stack = createStackForSchema(
         op.schema(), std::move(args), std::move(kwargs), c10::nullopt);
+
+    pybind11::gil_scoped_release no_gil_guard;
     op.getOperation()(&stack);
   } else {
     std::vector<schema_match_error> errors;
@@ -1187,6 +1192,8 @@ inline py::object invokeOperatorFromPython(
       }
       throw std::runtime_error(ss.str());
     }
+
+    pybind11::gil_scoped_release no_gil_guard;
     found_op->getOperation()(&stack);
   }
 
