@@ -3,19 +3,16 @@
 #include <ATen/Dispatch.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/Parallel.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/native/Pool.h>
 #include <ATen/native/xnnpack/Engine.h>
+#include <c10/core/DeviceType.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 
-#include <cmath>
-#include <cstring>
 #include <limits>
 #include <tuple>
-#include "ATen/Parallel.h"
-#include "Functions.h"
-#include "c10/core/DeviceType.h"
 
 namespace at { namespace native {
 
@@ -55,33 +52,36 @@ void max_pool2d_out_impl(
   at::parallel_for(
       0, NB * NC * OH, 0, [&](const int64_t begin, const int64_t end) {
         for (int64_t it = begin; it < end; ++it) {
+          int64_t ii = (it % OH) * SI - PI;
+
+          // Pointers to kernel window and output row for this iteration
+          const scalar_t* ip = IP + ((it / OH) * IH + ii) * IW;
+          scalar_t* const op = OP + it * OW;
+
           // Buffer for storing row-wise max
           std::vector<scalar_t> buffer(IW, FILL);
 
           // Compute row-wise max of rows used for current output row
-          for (int64_t ki = 0; ki < KH; ++ki) {
-            const int64_t ii = (it % OH) * SI + ki * DI - PI;
-            if (ii < 0 || ii >= IH) {
-              continue;
-            }
-            for (int64_t ij = 0; ij < IW; ++ij) {
-              const scalar_t val = IP[((it / OH) * IH + ii) * IW + ij];
-              buffer[ij] = std::isnan(val) ? val : std::max(buffer[ij], val);
+          for (int64_t ki = 0; ki < KH; ++ki, ii += DI, ip += DI * IW) {
+            if (ii >= 0 && ii < IH) {
+              for (int64_t ij = 0; ij < IW; ++ij) {
+                const scalar_t val = ip[ij];
+                buffer[ij] = std::isnan(val) ? val : std::max(buffer[ij], val);
+              }
             }
           }
 
-          // Compute each output for the current row
+          // Compute each output for the current row using buffer
           for (int64_t oj = 0; oj < OW; ++oj) {
             scalar_t max_val = FILL;
-            for (int64_t kj = 0; kj < KW; ++kj) {
-              const int64_t ij = oj * SJ + kj * DJ - PJ;
-              if (ij < 0 || ij >= IW) {
-                continue;
+            int64_t ij = oj * SJ - PJ;
+            for (int64_t kj = 0; kj < KW; ++kj, ij += DJ) {
+              if (ij >= 0 && ij < IW) {
+                const scalar_t val = buffer[ij];
+                max_val = std::isnan(val) ? val : std::max(max_val, val);
               }
-              const scalar_t val = buffer[ij];
-              max_val = std::isnan(val) ? val : std::max(max_val, val);
             }
-            OP[it * OW + oj] = max_val;
+            op[oj] = max_val;
           }
         }
       });
