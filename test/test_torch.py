@@ -11609,7 +11609,7 @@ class TestTorchDeviceType(TestCase):
                             self.assertTrue(from_ <= double_t.min() <= (from_ + delta))
                             self.assertTrue((to_ - delta) <= double_t.max() < to_)
 
-    @dtypes(torch.float, torch.double, torch.complex64, torch.complex128)
+    @dtypes(torch.float, torch.double, torch.half, torch.complex32, torch.complex64, torch.complex128)
     def test_randn(self, device, dtype):
         for size in [0, SIZE]:
             torch.manual_seed(123456)
