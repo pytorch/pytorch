@@ -85,6 +85,11 @@ Linear
 .. autoclass:: Linear
     :members:
 
+BatchNorm1d
+~~~~~~~~~~~~~~~
+.. autoclass:: BatchNorm1d
+    :members:
+
 BatchNorm2d
 ~~~~~~~~~~~~~~~
 .. autoclass:: BatchNorm2d
