@@ -185,10 +185,8 @@ if rpc_constants._USE_TENSORPIPE:
             _channels=_channels,
         )
 
-
     # detect if any worker has invalid device_map configurations, and return
     # names of failed workers
-
     def _tensorpipe_check_device_maps(agent, device_maps):
         if device_maps is None:
             device_maps = {}
@@ -236,7 +234,6 @@ if rpc_constants._USE_TENSORPIPE:
                 }
 
         agent._set_reverse_device_maps(reverse_device_maps)
-
 
     def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_options):
         from . import TensorPipeRpcBackendOptions
