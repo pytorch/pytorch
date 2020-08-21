@@ -407,7 +407,7 @@ def gen_nn_functional(out):
 
     # functional.pyi already contains the definitions for those functions
     # so, we don't export then to it
-    from_c.extend(['hardtanh', 'leaky_relu',])
+    from_c.extend(['hardtanh', 'leaky_relu'])
     dispatch_code = ["{}: Callable".format(_) for _ in (dispatches + from_c)]
     env = {
         'imported_hints': import_code,
