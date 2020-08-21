@@ -303,6 +303,7 @@ Pointwise Ops
     mul
     mvlgamma
     neg
+    negative
     nextafter
     polygamma
     pow

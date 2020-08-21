@@ -18,6 +18,8 @@ static const std::unordered_map<Symbol, Symbol> alias_map = {
     {aten::arccosh_, aten::acosh_},
     {aten::fix, aten::trunc},
     {aten::fix_, aten::trunc_},
+    {aten::negative, aten::neg},
+    {aten::negative_, aten::neg_},
 };
 
 void replaceNodeWithNewSymbol(Node* node, Symbol new_symbol) {
