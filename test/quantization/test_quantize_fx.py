@@ -12,7 +12,6 @@ from torch.fx import symbolic_trace
 from torch.quantization._quantize_fx import (
     Quantizer,
     QuantType,
-    fuse,
 )
 
 from torch.quantization import default_qconfig

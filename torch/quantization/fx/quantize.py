@@ -697,6 +697,7 @@ class Quantizer:
                         'call_function',
                         'call_method'], \
                         'CopyNode of type ' + node.op + ' is not handled'
+
                     def is_observed(input_arg):
                         if isinstance(input_arg, Node):
                             return input_arg.name in observed
