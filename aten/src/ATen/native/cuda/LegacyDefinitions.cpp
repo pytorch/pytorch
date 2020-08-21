@@ -3,6 +3,7 @@
 #include <ATen/LegacyTHFunctionsCUDA.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/MemoryOverlap.h>
 
 namespace at { namespace native {
 
@@ -60,6 +61,7 @@ Tensor & masked_scatter__cuda(Tensor& self, const Tensor & mask, const Tensor & 
 }
 
 Tensor & fmod_cuda_out(Tensor & result, const Tensor & self, Scalar other) {
+  at::assert_no_internal_overlap(result);
   return legacy::cuda::_th_fmod_out(result, self, other);
 }
 
@@ -68,6 +70,7 @@ Tensor fmod_cuda(const Tensor & self, Scalar other) {
 }
 
 Tensor & fmod_cuda_out(Tensor & result, const Tensor & self, const Tensor & other) {
+  at::assert_no_internal_overlap(result);
   Tensor b_self, b_other;
   // optimization that codegen used to do; avoids broadcast.
   if (other.dim() == 0) {
@@ -88,6 +91,7 @@ Tensor fmod_cuda(const Tensor & self, const Tensor & other) {
 }
 
 Tensor & fmod_cuda_(Tensor & self, Scalar other) {
+  at::assert_no_internal_overlap(self);
   return legacy::cuda::_th_fmod_(self, other);
 }
 
@@ -96,6 +100,7 @@ Tensor & fmod_cuda_(Tensor & self, const Tensor & other) {
   if (other.dim() == 0) {
     return fmod_cuda_(self, other.item());
   }
+  at::assert_no_internal_overlap(self);
   Tensor b_other;
   std::tie(b_other) = expand_inplace(self, other, "fmod_");
   return legacy::cuda::_th_fmod_(self, b_other);

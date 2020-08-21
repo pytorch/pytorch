@@ -11910,6 +11910,13 @@ class TestNNDeviceType(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             F.leaky_relu_(x)
 
+    def test_threshold_inplace_overlap(self, device):
+        x = torch.randn((1, 6), device=device).expand((6, 6))
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            F.threshold(x, 0.5, 0.5, inplace=True)
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            F.threshold_(x, 0.5, 0.5)
+
 class TestModuleGlobalHooks(TestCase):
 
     def tearDown(self):

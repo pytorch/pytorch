@@ -156,10 +156,9 @@ struct CAFFE2_API TensorIterator {
 
   void foreach_reduced_elt(loop_subiter_t loop, bool parallelize=true);
 
-  static TensorIterator binary_op(Tensor& out, const Tensor& a, const Tensor& b,
-    bool check_mem_overlap = false);
   static TensorIterator comparison_op(Tensor& out, const Tensor& a, const Tensor& b,
     bool check_mem_overlap = false);
+  static TensorIterator binary_op(Tensor& out, const Tensor& a, const Tensor& b);
   static TensorIterator unary_op(Tensor& out, const Tensor& a);
   static TensorIterator nullary_op(Tensor& out,
     bool check_mem_overlap = false);
