@@ -232,7 +232,7 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
 
 def _diagnose_export(*args, **kwargs):
     r"""
-    This diagnostic too runs your model with operator_export_type set to
+    This diagnostic tool runs your model with operator_export_type set to
     OperatorExportTypes.ONNX_FALLTHROUGH once in order to get a list of 
     all the ops that are not supported/implemented by the current exporter
 
@@ -293,10 +293,10 @@ def _diagnose_export(*args, **kwargs):
                     %6 : Float(2:12, 3:4, 4:1, requires_grad=0, device=cpu) = aten::cumsum(%3, %4, %5) # main.py:6:0
                     return (%6)
 
-            In the above example, prim::ListConstruct is not supported, hence
-            exporter falls through and provides a list of usupported ops, thre result being 
-            [aten:add, aten:cumsum] as aten:add with alpha != 1 is not supported and aten:cumsum in not
-            implemented in opset 9
+            In the above example, aten::add with alpha != 1 is not supported and aten::cumsum in not
+            implemented in opset 9, hence exporter falls through and provides a list of unsupported ops, 
+            the result being:
+                Unsupported ops : [aten:add, aten:cumsum]
     """
     from torch.onnx import utils
     result = utils._diagnose_export(*args, **kwargs)
