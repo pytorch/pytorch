@@ -50,6 +50,7 @@ DEFAULT_MODULE_MAPPING = {
 
 # mapping from floating point function or torch ops to quantized ops
 DEFAULT_OPERATOR_MAPPING = {
+    F.elu: torch._ops.ops.quantized.elu,
     F.hardswish: torch._ops.ops.quantized.hardswish,
 }
 
