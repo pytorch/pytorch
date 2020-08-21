@@ -11883,10 +11883,10 @@ class TestNNDeviceType(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             F.elu_(x)
 
-    def test_hardwish_inplace_overlap(self, device):
+    def test_hardswish_inplace_overlap(self, device):
         x = torch.randn((1, 6), device=device).expand((6, 6))
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
-            F.hardwish(x, inplace=True)
+            F.hardswish(x, inplace=True)
 
     def test_silu_inplace_overlap(self, device):
         x = torch.randn((1, 6), device=device).expand((6, 6))
