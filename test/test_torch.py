@@ -17274,8 +17274,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         if dtype is torch.bfloat16:
             a = a.to(torch.float32)
         expected = scipy.special.i0(a.cpu().numpy())
-        if dtype is torch.bfloat16:
-            expected = torch.from_numpy(expected).to(torch.bfloat16)
+        if dtype is torch.bfloat16 or dtype is torch.float16:
+            expected = torch.from_numpy(expected).to(dtype)
         self.assertEqual(actual, expected)
 
         a = torch.randn(100, device=device).to(dtype) * 8
@@ -17283,8 +17283,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         if dtype is torch.bfloat16:
             a = a.to(torch.float32)
         expected = scipy.special.i0(a.cpu().numpy())
-        if dtype is torch.bfloat16:
-            expected = torch.from_numpy(expected).to(torch.bfloat16)
+        if dtype is torch.bfloat16 or dtype is torch.float16:
+            expected = torch.from_numpy(expected).to(dtype)
         self.assertEqual(actual, expected)
 
         a = torch.randn(100, device=device).to(dtype) * 20
@@ -17292,8 +17292,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         if dtype is torch.bfloat16:
             a = a.to(torch.float32)
         expected = scipy.special.i0(a.cpu().numpy())
-        if dtype is torch.bfloat16:
-            expected = torch.from_numpy(expected).to(torch.bfloat16)
+        if dtype is torch.bfloat16 or dtype is torch.float16:
+            expected = torch.from_numpy(expected).to(dtype)
         self.assertEqual(actual, expected)
 
     @slowTest
