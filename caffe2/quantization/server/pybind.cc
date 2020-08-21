@@ -3,7 +3,8 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include "activation_distribution_observer.h"
-#include "caffe2/opt/custom/fakefp16_transform.h"
+#include "caffe2/opt/fakefp16_transform.h"
+#include "caffe2/opt/custom/freeze_quantization_params.h"
 #include "caffe2/quantization/server/caffe2_dnnlowp_utils.h"
 #include "caffe2/quantization/server/fbgemm_pack_blob.h"
 #include "caffe2/quantization/server/int8_gen_quant_params.h"
@@ -97,6 +98,15 @@ PYBIND11_MODULE(dnnlowp_pybind11, m) {
       pybind11::arg("dump_freq") = -1,
       pybind11::arg("mul_nets") = false,
       pybind11::arg("delimiter") = " ");
+
+  m.def(
+      "DumpOutputColumnMaxHistogramFile",
+      [](Observable<NetBase>::Observer* ob) {
+        OutputColumnMaxHistogramNetObserver* hist_ob =
+            dynamic_cast_if_rtti<OutputColumnMaxHistogramNetObserver*>(ob);
+        hist_ob->DumpOutputColumnMaxHistogramFile();
+      },
+      pybind11::arg("ob"));
 
   m.def(
       "AddOutputColumnMaxHistogramObserver",
@@ -273,6 +283,18 @@ PYBIND11_MODULE(dnnlowp_pybind11, m) {
   m.def("get_fakefp16_mapping", [](bool use_fp16_acc, bool use_nnpi) {
     return caffe2::opt::getFakeFp16OpMapping(use_fp16_acc, use_nnpi);
   });
+  m.def("freeze_quantization_params",
+      [](const pybind11::bytes& net_def_bytes){
+        NetDef def;
+        CAFFE_ENFORCE(
+            ParseProtoFromLargeString(net_def_bytes.cast<string>(), &def));
+        string protob;
+        Workspace* gWorkspace = caffe2::python::GetCurrentWorkspace();
+        CAFFE_ENFORCE(gWorkspace);
+        freezeQuantizationParams(&def, gWorkspace);
+        CAFFE_ENFORCE(def.SerializeToString(&protob));
+        return pybind11::bytes(protob);
+      });
   m.def(
       "ChooseStaticQuantizationParams",
       [](float min,

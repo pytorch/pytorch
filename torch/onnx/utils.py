@@ -152,6 +152,14 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
         torch._C._jit_pass_peephole(graph, True)
         torch._C._jit_pass_lower_all_tuples(graph)
 
+        # in _jit_pass_onnx, symbolic functions are called for each node for conversion.
+        # However, there are nodes that cannot be converted without additional context.
+        # For example, the number of outputs from split (and whether it is static or dynamic) is unknown
+        # until the point where it is unpacked by listUnpack node.
+        # This pass does a preprocess, and prepares the nodes such that enough context can be received
+        # by the symbolic function.
+        torch._C._jit_pass_onnx_preprocess(graph)
+
         # _prepare_inplace_ops makes the IR invalid for JIT passes / alias db
         torch._C._jit_pass_onnx_prepare_inplace_ops_for_onnx(graph)
 
@@ -415,6 +423,8 @@ def _model_to_graph(model, args, verbose=False,
         params_dict = torch._C._jit_pass_onnx_constant_fold(graph, params_dict,
                                                             _export_onnx_opset_version)
         torch._C._jit_pass_dce_allow_deleting_nodes_with_side_effects(graph)
+
+    params_dict = torch._C._jit_pass_onnx_eliminate_unused_items(graph, params_dict)
 
     # For ONNX opset < 9, constants only have three data types: float16, float, double.
     # In this pass transform constants of other data types to float/double + cast operator.
@@ -975,6 +985,12 @@ def _validate_dynamic_axes(dynamic_axes, model, input_names, output_names):
                 else:
                     value_dict[x] = str(key) + '_dynamic_axes_' + str(i + 1)
             dynamic_axes[key] = value_dict
+
+def _add_block(node, input_node, op_name, **kwargs):
+    new_block = node.addBlock()
+    new_node = new_block.addNode(input_node, op_name)
+    for k, v in kwargs.items():
+        _add_attribute(new_node, k, v, False)
 
 torch._C.Graph.op = _graph_op
 torch._C.Graph.at = _graph_at
