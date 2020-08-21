@@ -1,6 +1,6 @@
 import torch
 import torch.nn.functional as F
-
+import torch.nn as nn
 import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
 import torch.nn.intrinsic.quantized as nniq
@@ -389,3 +389,38 @@ class TestQuantizeFxOps(QuantizationTestCase):
                              BNFuncRelu(dim), BNFuncInplaceRelu(dim)]:
                 self.checkGraphModeFxOp(
                     instance, self.img_data_dict[dim], quantized_nodes[dim], quant_type)
+
+    def _test_activation_impl(
+            self, float_module, float_op, quantized_module, quantized_op):
+        ''' Test for most common quantized op, float_op can be torch
+        op or functional op
+        '''
+        class M(torch.nn.Module):
+            def __init__(self, is_module, inplace):
+                super(M, self).__init__()
+                self.is_module = is_module
+                self.inplace = inplace
+                if self.is_module:
+                    self.op = float_module(self.inplace)
+                else:
+                    self.op = float_op
+
+            def forward(self, input):
+                if self.is_module:
+                    return self.op(input)
+                else:
+                    return self.op(input, self.inplace)
+
+        options = itertools.product([True, False], [True, False], self.static_quant_types)
+        quantized_nodes = {
+            # is_module
+            True: ('call_module', quantized_module),
+            False: ('call_function', quantized_op),
+        }
+
+        for is_module, is_inplace, quant_type in options:
+            self.checkGraphModeFxOp(
+                M(is_module, is_inplace), self.img_data_2d, quantized_nodes[is_module], quant_type)
+
+    def test_hardswish(self):
+        self._test_activation_impl(nn.Hardswish, F.hardswish, nnq.Hardswish, torch.ops.quantized.hardswish)

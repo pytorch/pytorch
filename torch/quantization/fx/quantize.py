@@ -2,8 +2,12 @@ import torch
 from torch.quantization import (
     propagate_qconfig_,
     convert,
+)
+
+from torch.quantization.default_mappings import (
     DEFAULT_QAT_MODULE_MAPPING,
     DEFAULT_MODULE_MAPPING,
+    DEFAULT_OPERATOR_MAPPING,
 )
 
 from torch.fx import (
@@ -377,6 +381,43 @@ class BatchNorm(QuantizeHandler):
             self.bn_node.target,
             load_arg(quantized=[0])(self.bn_node.args),
             load_arg(quantized=False)(self.bn_node.kwargs))
+
+@register_quant_pattern(torch.nn.Hardswish)
+@register_quant_pattern(torch.nn.functional.hardswish)
+class DefaultNode(QuantizeHandler):
+    ''' Common quantized op, first input and first output will be quantized
+    '''
+    def convert(self, quantizer, node, load_arg, debug=False):
+        if not self.all_nodes:
+            return NotImplemented
+        assert node.op in ['call_module', 'call_function'], 'Only call_module and ' + \
+            'call_function are handled in DefaultNode'
+        activation_post_process = quantizer.activation_post_process_map[node.name]
+        if node.op == 'call_module':
+            module = quantizer.modules[node.target]
+            module.activation_post_process = activation_post_process
+            quantized_module = DEFAULT_MODULE_MAPPING[type(module)].from_float(module)
+            parent_name, name = _parent_name(node.target)
+            setattr(quantizer.modules[parent_name], name, quantized_module)
+            return quantizer.quantized_graph.create_node(
+                'call_module',
+                node.target,
+                load_arg(quantized=[0])(node.args),
+                load_arg(quantized=False)(node.kwargs))
+        else:
+            # call_function
+            scale, zero_point = activation_post_process.calculate_qparams()
+            scale = float(scale)
+            zero_point = int(zero_point)
+            args = list(load_arg(quantized=[0])(node.args))
+            args.append(scale)
+            args.append(zero_point)
+            args = tuple(args)
+            # kwargs are ignored
+            kwargs = {}
+            quantized_op = DEFAULT_OPERATOR_MAPPING[node.target]
+            return quantizer.quantized_graph.create_node(
+                'call_function', quantized_op, args, kwargs)
 
 # these ops have quantized equivalents that do not need any extra information
 @register_quant_pattern(torch.nn.AdaptiveAvgPool2d)

@@ -1,6 +1,7 @@
-
+import torch
 from torch import nn
 
+import torch.nn.functional as F
 import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.quantized as nniq
 import torch.nn.intrinsic.qat as nniqat
@@ -45,6 +46,11 @@ DEFAULT_MODULE_MAPPING = {
     # QAT modules:
     nnqat.Linear: nnq.Linear,
     nnqat.Conv2d: nnq.Conv2d,
+}
+
+# mapping from floating point function or torch ops to quantized ops
+DEFAULT_OPERATOR_MAPPING = {
+    F.hardswish: torch._ops.ops.quantized.hardswish,
 }
 
 # Map for swapping float module to qat modules
