@@ -1724,7 +1724,7 @@ def to(g, self, *args):
 
 
 def repeat(g, self, repeats):
-    dtype = 4  #int64
+    dtype = 4  # int64
     shape_ = ones_like(g, repeats, dtype)
     self = expand(g, self, shape_, None)
     return g.op("Tile", self, repeats)
