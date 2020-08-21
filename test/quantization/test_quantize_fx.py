@@ -275,7 +275,9 @@ class TestQuantizeFxOps(QuantizationTestCase):
         options = itertools.product(
             [True, False], [True, False], [True, False], [True, False], self.static_quant_types)
         for is_inplace_op, is_functional_relu, is_inplace_relu, is_scalar, quant_type in options:
-            self.checkGraphModeFxOp(OpRelu(is_inplace_op, is_functional_relu, is_inplace_relu, is_scalar), data, quantized_node, quant_type=quant_type)
+            self.checkGraphModeFxOp(
+                OpRelu(is_inplace_op, is_functional_relu, is_inplace_relu, is_scalar),
+                data, quantized_node, quant_type=quant_type)
 
     @skipIfNoFBGEMM
     def test_quantized_binary_op(self):
@@ -312,7 +314,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         #         return torch.cat([x, y], 1)
 
         data = (torch.randn(1, 2, 5, 5, dtype=torch.float),
-                 torch.randn(1, 2, 5, 5, dtype=torch.float))
+                torch.randn(1, 2, 5, 5, dtype=torch.float))
         quantized_node = ('call_function', torch.ops.quantized.cat)
         for quant_type in self.static_quant_types:
             self.checkGraphModeFxOp(QuantizedCat(), data, quantized_node, quant_type=quant_type)
