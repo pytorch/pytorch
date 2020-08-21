@@ -92,7 +92,7 @@ class TORCH_CUDA_API UnrollPass : public OptOutDispatch {
       : fusion_(_fusion),
         incoming_exprs_(_incoming_exprs),
         thread_predicates_(_thread_predicates) {
-    auto p2c_root_map = loop_utils::p2cRootMap(_fusion->exprs(true));
+    p2c_root_map = loop_utils::p2cRootMap(_fusion->exprs(true));
   }
 
   // Generate the for Expr replacement map

@@ -5975,6 +5975,86 @@ void testGPU_FusionThreadPredicate() {
   TORCH_CHECK(aten_output_tv3.allclose(cg_output_tv3));
 }
 
+void testGPU_FusionLSTMCell() {
+  const int hidden_features = 512;
+  const int batch_size = 64;
+
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  TensorView* tvs[16];
+  for (size_t i = 0; i < 16; i++) {
+    tvs[i] = makeDummyTensor(2);
+    fusion.addInput(tvs[i]);
+  }
+
+  auto ingate = unaryOp(
+      UnaryOpType::Sigmoid, add(add(add(tvs[0], tvs[1]), tvs[2]), tvs[3]));
+
+  auto forgetgate = unaryOp(
+      UnaryOpType::Sigmoid, add(add(add(tvs[4], tvs[5]), tvs[6]), tvs[7]));
+
+  auto cellgate = unaryOp(
+      UnaryOpType::Tanh, add(add(add(tvs[8], tvs[9]), tvs[10]), tvs[11]));
+
+  auto outgate = unaryOp(
+      UnaryOpType::Sigmoid, add(add(add(tvs[12], tvs[13]), tvs[14]), tvs[15]));
+
+  auto cx = makeContigTensor(2);
+  fusion.addInput(cx);
+
+  auto cy = add(mul(forgetgate, cx), mul(ingate, cellgate));
+
+  auto hy = mul(outgate, unaryOp(UnaryOpType::Tanh, cy));
+
+  fusion.addOutput(cy);
+  fusion.addOutput(hy);
+
+  std::vector<c10::IValue> inputs;
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor large_tensor0 =
+      at::randn({batch_size, hidden_features * 4}, options);
+  at::Tensor large_tensor1 =
+      at::randn({batch_size, hidden_features * 4}, options);
+  at::Tensor large_tensor2 =
+      at::randn({batch_size, hidden_features * 4}, options);
+  at::Tensor large_tensor3 =
+      at::randn({batch_size, hidden_features * 4}, options);
+
+  auto chunked0 = large_tensor0.chunk(4, 1);
+  auto chunked1 = large_tensor1.chunk(4, 1);
+  auto chunked2 = large_tensor2.chunk(4, 1);
+  auto chunked3 = large_tensor3.chunk(4, 1);
+
+  inputs.insert(inputs.end(), chunked0.begin(), chunked0.end());
+  inputs.insert(inputs.end(), chunked1.begin(), chunked1.end());
+  inputs.insert(inputs.end(), chunked2.begin(), chunked2.end());
+  inputs.insert(inputs.end(), chunked3.begin(), chunked3.end());
+
+  auto at_ingate =
+      chunked0[0].add(chunked0[1]).add(chunked0[2]).add(chunked0[3]).sigmoid();
+  auto at_forgetgate =
+      chunked1[0].add(chunked1[1]).add(chunked1[2]).add(chunked1[3]).sigmoid();
+  auto at_cellgate =
+      chunked2[0].add(chunked2[1]).add(chunked2[2]).add(chunked2[3]).tanh();
+  auto at_outgate =
+      chunked3[0].add(chunked3[1]).add(chunked3[2]).add(chunked3[3]).sigmoid();
+
+  auto at_cx = at::randn({batch_size, hidden_features}, options);
+  inputs.push_back(at_cx);
+  auto at_cy = at_forgetgate.mul(at_cx).add(at_ingate.mul(at_cellgate));
+  auto at_hy = at_outgate.mul(at_cy.tanh());
+
+  fuser::cuda::scheduleFusion(&fusion, c10::ArrayRef<c10::IValue>(inputs));
+
+  torch::jit::fuser::cuda::FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto outputs = fe.runFusion(c10::ArrayRef<c10::IValue>(inputs));
+
+  TORCH_CHECK(at_cy.allclose(outputs[0], 1e-4, 1e-7));
+  TORCH_CHECK(at_hy.allclose(outputs[1], 1e-4, 1e-7));
+}
+
 } // namespace jit
 } // namespace torch
 
