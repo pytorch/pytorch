@@ -159,7 +159,7 @@ Library& Library::_def(c10::either<c10::OperatorName, c10::FunctionSchema>&& nam
 }
 
 #define IMPL_PRELUDE "impl(\"", name_str, "\", ...): "
-Library& Library::_impl(const char* name_str, CppFunction&& f) & {
+Library& Library::_impl(c10::string_view name_str, CppFunction&& f) & {
   auto name = torch::jit::parseName(name_str);
   auto ns_opt = name.getNamespace();
   // This is kind of similar to the checking in def(), but the error

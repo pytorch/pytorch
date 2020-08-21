@@ -260,7 +260,7 @@ inline CppFunction dispatch(c10::DeviceType type, Func&& raw_f) {
 /// ```
 ///
 /// \ingroup torch-schema-overloads
-inline c10::FunctionSchema schema(const char* str, c10::AliasAnalysisKind k) {
+inline c10::FunctionSchema schema(c10::string_view str, c10::AliasAnalysisKind k) {
   c10::FunctionSchema s = torch::jit::parseSchema(str);
   s.setAliasAnalysis(k);
   return s;
@@ -269,7 +269,7 @@ inline c10::FunctionSchema schema(const char* str, c10::AliasAnalysisKind k) {
 /// Function schemas can be directly constructed from string literals.
 ///
 /// \ingroup torch-schema-overloads
-inline c10::FunctionSchema schema(const char* s) {
+inline c10::FunctionSchema schema(c10::string_view s) {
   return schema(s, c10::AliasAnalysisKind::FROM_SCHEMA);
 }
 
@@ -289,7 +289,7 @@ namespace detail {
   inline c10::either<c10::OperatorName, c10::FunctionSchema> constructSchemaOrName(c10::OperatorName&& n) {
     return c10::make_left<c10::OperatorName, c10::FunctionSchema>(std::move(n));
   }
-  inline c10::either<c10::OperatorName, c10::FunctionSchema> constructSchemaOrName(const char* str) {
+  inline c10::either<c10::OperatorName, c10::FunctionSchema> constructSchemaOrName(c10::string_view str) {
     auto s = torch::jit::parseSchemaOrName(str);
     if (s.is_right()) {
       s.right().setAliasAnalysis(c10::AliasAnalysisKind::FROM_SCHEMA);
@@ -332,10 +332,10 @@ namespace detail {
   template <bool enabled>
   class SelectiveStr {
   public:
-    constexpr SelectiveStr(const char* name) : name_(name) {}
-    constexpr operator const char*() { return name_; }
+    constexpr SelectiveStr(c10::string_view name) : name_(name) {}
+    constexpr operator c10::string_view() { return name_; }
   private:
-    const char* name_;
+    c10::string_view name_;
   };
 
 #define TORCH_SELECTIVE_NAME(n) torch::detail::SelectiveStr<c10::impl::op_whitelist_check(n)>(n)
@@ -575,7 +575,7 @@ private:
   // public because we only implement & qualifier and not && qualifier
   Library& _def(c10::FunctionSchema&& schema, c10::OperatorName* out_name = nullptr) &;
   Library& _def(c10::either<c10::OperatorName, c10::FunctionSchema>&&, CppFunction&& f) &;
-  Library& _impl(const char* name, CppFunction&& f) &;
+  Library& _impl(c10::string_view name, CppFunction&& f) &;
   Library& _fallback(CppFunction&& f) &;
 };
 
