@@ -2,8 +2,12 @@ import torch
 from torch.quantization import (
     propagate_qconfig_,
     convert,
+)
+
+from torch.quantization.default_mappings import (
     DEFAULT_QAT_MODULE_MAPPING,
     DEFAULT_MODULE_MAPPING,
+    DEFAULT_OPERATOR_MAPPING,
 )
 
 from torch.fx import (
@@ -347,6 +351,94 @@ class LinearReLU(QuantizeHandler):
                 qlinear_args = [linear_input, packed_weight, scale, zero_point]
                 return quantizer.quantized_graph.create_node(
                     'call_function', torch.ops.quantized.linear, qlinear_args, kwargs)
+
+@register_quant_pattern(torch.nn.BatchNorm2d)
+@register_quant_pattern(torch.nn.BatchNorm3d)
+@register_quant_pattern(torch.nn.intrinsic.BNReLU2d)
+@register_quant_pattern(torch.nn.intrinsic.BNReLU3d)
+class BatchNorm(QuantizeHandler):
+    def __init__(self, quantizer, node):
+        super().__init__(quantizer, node)
+        assert node.op == 'call_module'
+        self.bn_node = node
+        self.bn = quantizer.modules[self.bn_node.target]
+
+    def convert(self, quantizer, node, load_arg, debug=False):
+        # 1. attach activation post process to module
+        activation_post_process = quantizer.activation_post_process_map[node.name]
+        if type(self.bn) in \
+            [torch.nn.intrinsic.BNReLU2d,
+             torch.nn.intrinsic.BNReLU3d]:
+            self.bn[1].activation_post_process = activation_post_process
+        else:
+            self.bn.activation_post_process = activation_post_process
+        qbn_cls = DEFAULT_MODULE_MAPPING[type(self.bn)]
+        quantized = qbn_cls.from_float(self.bn)
+        parent_name, name = _parent_name(self.bn_node.target)
+        setattr(quantizer.modules[parent_name], name, quantized)
+        return quantizer.quantized_graph.create_node(
+            'call_module',
+            self.bn_node.target,
+            load_arg(quantized=[0])(self.bn_node.args),
+            load_arg(quantized=False)(self.bn_node.kwargs))
+
+@register_quant_pattern(torch.nn.ELU)
+@register_quant_pattern(torch.nn.Hardswish)
+@register_quant_pattern(torch.nn.LayerNorm)
+@register_quant_pattern(torch.nn.functional.hardswish)
+@register_quant_pattern(torch.nn.functional.layer_norm)
+class DefaultNode(QuantizeHandler):
+    ''' Common quantized op, first input and first output will be quantized
+    '''
+    def convert(self, quantizer, node, load_arg, debug=False):
+        if not self.all_nodes:
+            return NotImplemented
+        assert node.op in ['call_module', 'call_function'], 'Only call_module and ' + \
+            'call_function are handled in DefaultNode'
+        activation_post_process = quantizer.activation_post_process_map[node.name]
+        if node.op == 'call_module':
+            module = quantizer.modules[node.target]
+            module.activation_post_process = activation_post_process
+            quantized_module = DEFAULT_MODULE_MAPPING[type(module)].from_float(module)
+            parent_name, name = _parent_name(node.target)
+            setattr(quantizer.modules[parent_name], name, quantized_module)
+            return quantizer.quantized_graph.create_node(
+                'call_module',
+                node.target,
+                load_arg(quantized=[0])(node.args),
+                load_arg(quantized=False)(node.kwargs))
+        else:
+            # call_function
+            scale, zero_point = activation_post_process.calculate_qparams()
+            scale = float(scale)
+            zero_point = int(zero_point)
+
+            quantized_op = DEFAULT_OPERATOR_MAPPING[node.target]
+            args = load_arg(quantized=[0])(node.args)
+            kwargs = load_arg(quantized=False)(node.kwargs)
+            kwargs.update({'output_scale': scale, 'output_zero_point': zero_point})
+            # none of the quantized ops support inplace now
+            # we can enable it in the future if inplace is supported
+            if 'inplace' in kwargs:
+                kwargs.pop('inplace')
+            return quantizer.quantized_graph.create_node(
+                'call_function', quantized_op, args, kwargs)
+
+# TODO: elu is using scale/zero_point instead of output_scale, output_zero_point
+@register_quant_pattern(torch.nn.functional.elu)
+class ELU(QuantizeHandler):
+    def convert(self, quantizer, node, load_arg, debug=False):
+        activation_post_process = quantizer.activation_post_process_map[node.name]
+        scale, zero_point = activation_post_process.calculate_qparams()
+        scale = float(scale)
+        zero_point = int(zero_point)
+        quantized_op = DEFAULT_OPERATOR_MAPPING[node.target]
+        args = load_arg(quantized=[0])(node.args)
+        kwargs = load_arg(quantized=False)(node.kwargs)
+        kwargs.update({'output_scale': scale, 'output_zero_point': zero_point})
+        kwargs.pop('inplace')
+        return quantizer.quantized_graph.create_node(
+            'call_function', quantized_op, args, kwargs)
 
 # these ops have quantized equivalents that do not need any extra information
 @register_quant_pattern(torch.nn.AdaptiveAvgPool2d)
