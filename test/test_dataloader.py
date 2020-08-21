@@ -1208,7 +1208,7 @@ except RuntimeError as e:
         counting_ds_n = 11
         dl_common_args = dict(num_workers=3, batch_size=3, pin_memory=(not TEST_CUDA))
         for ctx in supported_multiprocessing_contexts:
-            if ctx in ['spawn', 'forkserver'] and TEST_CUDA and not IS_WINDOWS:  # windows doesn't support sharing cuda tensor
+            if ctx in ['spawn', 'forkserver'] and TEST_CUDA and not IS_WINDOWS and not TEST_WITH_ROCM:  # windows doesn't support sharing cuda tensor
                 ds_cls = CUDACountingDataset
             else:
                 ds_cls = CountingDataset
