@@ -4,6 +4,7 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/MemoryOverlap.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
