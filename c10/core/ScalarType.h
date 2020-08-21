@@ -315,13 +315,13 @@ static inline bool isSignedType(ScalarType t) {
       return std::numeric_limits<ctype>::is_signed;
 
   switch (t) {
-    case ScalarType::ComplexHalf: \
-    case ScalarType::ComplexFloat: \
-    case ScalarType::ComplexDouble: \
-      return true; \
+    case ScalarType::ComplexHalf:
+    case ScalarType::ComplexFloat:
+    case ScalarType::ComplexDouble:
+      return true;
     AT_FORALL_SCALAR_TYPES_AND3(Half, Bool, BFloat16, CASE_SIGNED)
     default:
-      AT_ERROR("Unknown ScalarType");
+      TORCH_CHECK(false, "Unknown ScalarType");
   }
   #undef CASE_SIGNED
 }
