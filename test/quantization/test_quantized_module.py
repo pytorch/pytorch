@@ -6,11 +6,16 @@ import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
 import torch.quantization
 
+from torch.quantization import (
+    float_qparams_dynamic_qconfig,
+    default_float_qparams_observer
+)
 from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
     prepare_dynamic,
     _make_conv_test_input,
     skipIfNoFBGEMM,
+    lengths_to_offsets
 )
 from torch.testing._internal.common_quantized import (
     _calculate_dynamic_qparams,
@@ -919,21 +924,33 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
                 self.check_eager_serialization(cell_dq, cell_dict[rnn_type](**kwargs), [x])
                 self.check_weight_bias_api(cell_dq, weight_keys, bias_keys)
 
+    @given(
+        num_embeddings=st.integers(10, 50),
+        embedding_dim=st.integers(5, 50).filter(lambda x: x % 4 == 0),
+        num_offsets=st.integers(1, 20),
+        set_qconfig=st.booleans(),
+    )
     @skipIfNoFBGEMM
-    def test_embedding_bag_api(self):
+    def test_embedding_bag_api(self, num_embeddings, embedding_dim, num_offsets, set_qconfig):
         r"""Test execution and serialization for dynamic quantized embedding_bag modules on int8
         """
-        indices = torch.tensor([9, 6, 5, 7, 8, 8, 9, 2, 8, 6, 6, 9, 1, 6, 8, 8, 3, 2, 3, 6, 3, 6, 5, 7, 0, 8, 4, 6, 5, 8, 2, 3])
-        offsets = torch.tensor([0, 19, 20, 28, 28, 32])
-        weights = torch.randn(10, 12, dtype=torch.float32)
-        from torch.quantization import PerChannelMinMaxObserver
-        obs = PerChannelMinMaxObserver(dtype=torch.quint8, qscheme=torch.per_channel_affine_float_qparams, ch_axis=0)
+        num_lengths = np.random.randint(1, 6)
+        lengths = np.random.randint(0, 21, size=num_lengths).astype(np.int32)
+        num_indices = np.sum(lengths)
+        indices = torch.from_numpy(np.random.randint(low=0, high=num_embeddings, size=num_indices, dtype=np.int64))
+
+        offsets = lengths_to_offsets(lengths)
+        # include the last offset
+        offsets = torch.cat((offsets, torch.tensor([indices.size(0)], dtype=torch.long)), 0)
+        weights = torch.from_numpy((np.random.random_sample((num_embeddings, embedding_dim)) + 1).astype(np.float32))
+
+        obs = default_float_qparams_observer()
         obs(weights)
         # Get the scale and zero point for the weight tensor
         qparams = obs.calculate_qparams()
         # Quantize the weights to 8bits
         qweight = torch.quantize_per_channel(weights, qparams[0], qparams[1], axis=0, dtype=torch.quint8)
-        qemb = nnqd.EmbeddingBag(num_embeddings=10, embedding_dim=12, include_last_offset=True, mode='sum')
+        qemb = nnqd.EmbeddingBag(num_embeddings=num_embeddings, embedding_dim=embedding_dim, include_last_offset=True, mode='sum')
         qemb.set_weight(qweight)
         qemb(indices, offsets)
 
@@ -965,7 +982,8 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
                 self.assertEqual(emb_weight, loaded_weight)
 
         # Check state dict serialization and torch.save APIs
-        loaded_qemb = nnqd.EmbeddingBag(num_embeddings=10, embedding_dim=12, include_last_offset=True, mode='sum')
+        loaded_qemb = nnqd.EmbeddingBag(num_embeddings=num_embeddings, embedding_dim=embedding_dim,
+                                        include_last_offset=True, mode='sum')
         self.check_eager_serialization(qemb, loaded_qemb, [indices, offsets])
 
         loaded_qemb.load_state_dict(loaded_dict)
@@ -975,4 +993,17 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
         # Test JIT serialization
         self.checkScriptable(qemb, [[indices, offsets]], check_save_load=True)
 
-        # TODO add from_float test
+        # Test from_float call
+        float_embedding = torch.nn.EmbeddingBag(num_embeddings=num_embeddings, embedding_dim=embedding_dim,
+                                                include_last_offset=True, scale_grad_by_freq=False, mode='sum')
+        if set_qconfig:
+            float_embedding.qconfig = float_qparams_dynamic_qconfig
+
+        prepare_dynamic(float_embedding)
+
+        float_embedding(indices, offsets)
+        q_embeddingbag = nnqd.EmbeddingBag.from_float(float_embedding)
+
+        q_embeddingbag(indices, offsets)
+
+        self.assertTrue('DynamicQuantizedEmbeddingBag' in str(q_embeddingbag))

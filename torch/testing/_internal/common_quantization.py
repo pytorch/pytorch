@@ -34,6 +34,7 @@ from torch.quantization._quantize_fx import (
 )
 
 import unittest
+import numpy as np
 from torch.testing import FileCheck
 
 def test_only_eval_fn(model, calib_data):
@@ -144,6 +145,16 @@ def skipIfNoFBGEMM(fn):
 def get_script_module(model, tracing, data):
     return torch.jit.trace(model, data) if tracing else torch.jit.script(model)
 
+def lengths_to_offsets(t, offset_type=np.int64, use_begin_offset=True):
+    """
+    Convert lengths to offsets for embedding_bag
+    """
+    tt = np.zeros((t.shape[0] + 1,), dtype=offset_type)
+    tt[1:] = t
+    tt = torch.from_numpy(np.cumsum(tt, dtype=offset_type))
+    if use_begin_offset:
+        return tt[:-1]
+    return tt[1:]
 
 # QuantizationTestCase used as a base class for testing quantization on modules
 class QuantizationTestCase(TestCase):
@@ -1102,3 +1113,12 @@ class ModelMultipleOpsNoAvgPool(torch.nn.Module):
         out = out.view(-1, 3 * 2 * 2)
         out = self.fc(out)
         return out
+
+class EmbeddingModule(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.emb = torch.nn.EmbeddingBag(num_embeddings=10, embedding_dim=12,
+                                         include_last_offset=True, scale_grad_by_freq=False, mode='sum')
+
+    def forward(self, indices, offsets, per_sample_weights):
+        return self.emb(indices, offsets, per_sample_weights)
