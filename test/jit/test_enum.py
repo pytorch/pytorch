@@ -17,10 +17,12 @@ if __name__ == '__main__':
 
 class TestEnum(JitTestCase):
     def setUp(self):
+        super().setUp()
         self.saved_enum_env_var = os.environ.get("EXPERIMENTAL_ENUM_SUPPORT", None)
         os.environ["EXPERIMENTAL_ENUM_SUPPORT"] = "1"
 
     def tearDown(self):
+        super().tearDown()
         if self.saved_enum_env_var:
             os.environ["EXPERIMENTAL_ENUM_SUPPORT"] = self.saved_enum_env_var
 
@@ -108,7 +110,6 @@ class TestEnum(JitTestCase):
             scripted_enum_comp(Foo.ITEM1),
             False)
 
-
     def test_heterogenous_value_type_enum_error(self):
         global Color
 
@@ -167,15 +168,19 @@ class TestEnum(JitTestCase):
             RED = 1
             GREEN = 2
 
-        @torch.jit.script
         def enum_const(x: Color) -> bool:
             if x == Color.RED:
                 return True
             else:
                 return False
 
-        self.assertEqual(enum_const(Color.RED), True)
-        self.assertEqual(enum_const(Color.GREEN), False)
+        # TODO(gmagogsfm): Re-enable hooks when serialization/deserialization
+        # is supported.
+        with torch._jit_internal._disable_emit_hooks():
+            scripted = torch.jit.script(enum_const)
+
+        self.assertEqual(scripted(Color.RED), True)
+        self.assertEqual(scripted(Color.GREEN), False)
 
     def test_non_existent_enum_value(self):
         global Color
@@ -262,17 +267,60 @@ class TestEnum(JitTestCase):
 
         self.assertEqual(scripted(), Color.RED.value)
 
-    def test_enum_iterate(self):
-        global ColorForIterate
+    def test_enum_return(self):
+        global Color
 
-        class ColorForIterate(Enum):
+        class Color(Enum):
+            RED = 1
+            GREEN = 2
+
+        def return_enum(cond: bool):
+            if cond:
+                return Color.RED
+            else:
+                return Color.GREEN
+
+        # TODO(gmagogsfm): Re-enable hooks when serialization/deserialization
+        # is supported.
+        with torch._jit_internal._disable_emit_hooks():
+            scripted = torch.jit.script(return_enum)
+
+        self.assertEqual(scripted(True), Color.RED)
+        self.assertEqual(scripted(False), Color.GREEN)
+
+    def test_enum_module_return(self):
+        global Color
+
+        class Color(Enum):
+            RED = 1
+            GREEN = 2
+
+        class TestModule(torch.nn.Module):
+            def __init__(self, e: Color):
+                super(TestModule, self).__init__()
+                self.e = e
+
+            def forward(self):
+                return self.e
+
+        m = TestModule(Color.RED)
+        with torch._jit_internal._disable_emit_hooks():
+            scripted = torch.jit.script(m)
+
+        self.assertEqual(scripted(), Color.RED)
+
+
+    def test_enum_iterate(self):
+        global Color
+
+        class Color(Enum):
             RED = 1
             GREEN = 2
             PURPLE = 3
 
-        def iterate_enum(x: ColorForIterate):
+        def iterate_enum(x: Color):
             res: List[int] = []
-            for e in ColorForIterate:
+            for e in Color:
                 if e != x:
                     res.append(e.value)
             return res
@@ -281,8 +329,8 @@ class TestEnum(JitTestCase):
             scripted = torch.jit.script(iterate_enum)
 
         # PURPLE always appear last because we follow Python's Enum definition order.
-        self.assertEqual(scripted(ColorForIterate.RED), [ColorForIterate.GREEN.value, ColorForIterate.PURPLE.value])
-        self.assertEqual(scripted(ColorForIterate.GREEN), [ColorForIterate.RED.value, ColorForIterate.PURPLE.value])
+        self.assertEqual(scripted(Color.RED), [Color.GREEN.value, Color.PURPLE.value])
+        self.assertEqual(scripted(Color.GREEN), [Color.RED.value, Color.PURPLE.value])
 
         # TODO(gmagogsfm): Add FileCheck test after serialization and ir representation is completed.
 
@@ -290,11 +338,13 @@ class TestEnum(JitTestCase):
 # Tests that Enum support features are properly guarded before they are mature.
 class TestEnumFeatureGuard(JitTestCase):
     def setUp(self):
+        super().setUp()
         self.saved_enum_env_var = os.environ.get("EXPERIMENTAL_ENUM_SUPPORT", None)
         if self.saved_enum_env_var:
             del os.environ["EXPERIMENTAL_ENUM_SUPPORT"]
 
     def tearDown(self):
+        super().tearDown()
         if self.saved_enum_env_var:
             os.environ["EXPERIMENTAL_ENUM_SUPPORT"] = self.saved_enum_env_var
 
