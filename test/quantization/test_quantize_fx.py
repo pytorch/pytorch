@@ -1,22 +1,14 @@
 import torch
 import torch.nn.functional as F
 
-# symbolic trace
-from torch.fx import symbolic_trace
-
 # graph mode quantization based on fx
 from torch.quantization._quantize_fx import (
-    Quantizer,
     QuantType,
-    fuse,
 )
 
 import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
 import torch.nn.intrinsic.quantized as nniq
-
-# eager mode quantization
-from torch.quantization import default_qconfig
 
 # test utils
 from torch.testing._internal.common_quantization import (
