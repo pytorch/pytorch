@@ -37,7 +37,15 @@ void max_pool2d_out_impl(
     const int64_t DI,
     const int64_t DJ) {
   // Value to fill the padded region with
-  constexpr scalar_t FILL = std::numeric_limits<scalar_t>::lowest();
+  constexpr scalar_t FILL = std::numeric_limits<scalar_t>::has_infinity
+      ? -std::numeric_limits<scalar_t>::infinity()
+      : std::numeric_limits<scalar_t>::lowest();
+
+  // Horizontal padding to add to buffer
+  const int64_t PADDING = std::max(0L, (OW - 1) * SJ + (KW - 1) * DJ - IW + 1);
+
+  // Row kernel stride
+  const int64_t ROW_KER_STRIDE = DI * IW;
 
   /*
    * For each row of the output tensor, first compute a row-wise max of the
@@ -51,35 +59,36 @@ void max_pool2d_out_impl(
    */
   at::parallel_for(
       0, NB * NC * OH, 0, [&](const int64_t begin, const int64_t end) {
-        for (int64_t it = begin; it < end; ++it) {
-          int64_t ii = (it % OH) * SI - PI;
+        // Buffer for storing row-wise max
+        std::vector<scalar_t> buffer(IW + PADDING, FILL);
 
-          // Pointers to kernel window and output row for this iteration
+        for (int64_t it = begin; it < end; ++it) {
+          // Compute valid kernel row limits (skip padding)
+          int64_t ii = (it % OH) * SI - PI;
+          const int64_t ei = std::min(ii + KH * DI, IH);
+          ii += (ii < 0) ? ((-ii + DI - 1) / DI) * DI : 0;
+
+          // Pointers to kernel window and output row
           const scalar_t* ip = IP + ((it / OH) * IH + ii) * IW;
           scalar_t* const op = OP + it * OW;
 
-          // Buffer for storing row-wise max
-          std::vector<scalar_t> buffer(IW, FILL);
-
-          // Compute row-wise max of rows used for current output row
-          for (int64_t ki = 0; ki < KH; ++ki, ii += DI, ip += DI * IW) {
-            if (ii >= 0 && ii < IH) {
-              for (int64_t ij = 0; ij < IW; ++ij) {
-                const scalar_t val = ip[ij];
-                buffer[ij] = std::isnan(val) ? val : std::max(buffer[ij], val);
-              }
+          // Compute row-wise max for current output row
+          std::fill_n(buffer.begin() + PJ, IW, FILL);
+          for (; ii < ei; ii += DI, ip += ROW_KER_STRIDE) {
+            for (int64_t ij = 0; ij < IW; ++ij) {
+              const scalar_t val = ip[ij];
+              const scalar_t max_val = buffer[ij + PJ];
+              buffer[ij + PJ] = std::isnan(val) ? val : std::max(max_val, val);
             }
           }
 
-          // Compute each output for the current row using buffer
+          // Compute column-wise max for current output row
           for (int64_t oj = 0; oj < OW; ++oj) {
             scalar_t max_val = FILL;
             int64_t ij = oj * SJ - PJ;
             for (int64_t kj = 0; kj < KW; ++kj, ij += DJ) {
-              if (ij >= 0 && ij < IW) {
-                const scalar_t val = buffer[ij];
-                max_val = std::isnan(val) ? val : std::max(max_val, val);
-              }
+              const scalar_t val = buffer[ij + PJ];
+              max_val = std::isnan(val) ? val : std::max(max_val, val);
             }
             op[oj] = max_val;
           }
@@ -124,15 +133,18 @@ Tensor max_pool2d_impl(
   const int64_t PJ = padding.size() == 1 ? PI : padding[1];
   const int64_t DI = dilation[0];
   const int64_t DJ = dilation.size() == 1 ? DI : dilation[1];
-  const int64_t OH = pooling_output_shape<int64_t>(IH, KH, PI, SI, DI, ceil_mode);
-  const int64_t OW = pooling_output_shape<int64_t>(IW, KW, PJ, SJ, DJ, ceil_mode);
+
+  const int64_t OH =
+      pooling_output_shape<int64_t>(IH, KH, PI, SI, DI, ceil_mode);
+  const int64_t OW =
+      pooling_output_shape<int64_t>(IW, KW, PJ, SJ, DJ, ceil_mode);
 
   pool2d_shape_check(input, KH, KW, SI, SJ, PI, PJ, DI, DJ, NC, IH, IW, OH, OW);
   Tensor output = at::empty({NB, NC, OH, OW}, input.options());
 
   AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "max_pool2d_impl", [&] {
-    max_pool2d_out_impl(
-        input.data_ptr<scalar_t>(),
+    max_pool2d_out_impl<scalar_t>(
+        input.contiguous().data_ptr<scalar_t>(),
         output.data_ptr<scalar_t>(),
         NB,
         NC,
@@ -296,6 +308,8 @@ Tensor max_pool2d(
     return std::get<0>(at::max_pool2d_with_indices(
         self, kernel_size, stride, padding, dilation, ceil_mode));
   }
+  // TODO (Heitor): Working on replacing with_indices version later
+  // with new implementation.
   return max_pool2d_impl(
       self, kernel_size, stride, padding, dilation, ceil_mode);
 }

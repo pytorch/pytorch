@@ -9815,12 +9815,13 @@ class TestNNDeviceType(NNTestCase):
             x = torch.randn(n, c, h, w, device=device, dtype=torch.float, requires_grad=requires_grad)
             ref_x = x.detach().clone().cpu().requires_grad_()
 
-            pool = torch.nn.MaxPool2d(kernel_size=ks)
+            pool = torch.nn.MaxPool2d(kernel_size=ks, return_indices=True)
 
-            y = pool(x)
-            ref_y = pool(ref_x)
+            y, ind = pool(x)
+            ref_y, ref_ind = pool(ref_x)
 
             self.assertEqual(y, ref_y)
+            self.assertEqual(ind, ref_ind)
 
             if requires_grad:
                 y.sum().backward()

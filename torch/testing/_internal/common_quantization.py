@@ -34,6 +34,7 @@ from torch.quantization._quantize_fx import (
 )
 
 import unittest
+import numpy as np
 from torch.testing import FileCheck
 
 def test_only_eval_fn(model, calib_data):
@@ -144,6 +145,16 @@ def skipIfNoFBGEMM(fn):
 def get_script_module(model, tracing, data):
     return torch.jit.trace(model, data) if tracing else torch.jit.script(model)
 
+def lengths_to_offsets(t, offset_type=np.int64, use_begin_offset=True):
+    """
+    Convert lengths to offsets for embedding_bag
+    """
+    tt = np.zeros((t.shape[0] + 1,), dtype=offset_type)
+    tt[1:] = t
+    tt = torch.from_numpy(np.cumsum(tt, dtype=offset_type))
+    if use_begin_offset:
+        return tt[:-1]
+    return tt[1:]
 
 # QuantizationTestCase used as a base class for testing quantization on modules
 class QuantizationTestCase(TestCase):
@@ -170,6 +181,11 @@ class QuantizationTestCase(TestCase):
         self.img_data_dict = {1 : self.img_data_1d,
                               2 : self.img_data_2d,
                               3 : self.img_data_3d}
+
+        # quant types that produce statically quantized ops
+        self.static_quant_types = [QuantType.STATIC, QuantType.QAT]
+        # All quant types for (fx based) graph mode quantization
+        self.all_quant_types = [QuantType.DYNAMIC, QuantType.STATIC, QuantType.QAT]
 
     def checkNoPrepModules(self, module):
         r"""Checks the module does not contain child
@@ -246,8 +262,8 @@ class QuantizationTestCase(TestCase):
         b.seek(0)
         loaded_dict = torch.load(b)
         loaded_model.load_state_dict(loaded_dict)
-        ref_out = ref_model(x)
-        load_out = loaded_model(x)
+        ref_out = ref_model(*x)
+        load_out = loaded_model(*x)
 
         def check_outputs(ref_out, load_out):
             self.assertEqual(ref_out[0], load_out[0])
@@ -262,7 +278,7 @@ class QuantizationTestCase(TestCase):
         torch.save(ref_model, b)
         b.seek(0)
         loaded = torch.load(b)
-        load_out = loaded(x)
+        load_out = loaded(*x)
         check_outputs(ref_out, load_out)
 
     def check_weight_bias_api(self, ref_model, weight_keys, bias_keys):
@@ -298,7 +314,7 @@ class QuantizationTestCase(TestCase):
         self._checkScriptable(orig_mod, scripted, calib_data, check_save_load)
 
         # Use first calib_data entry as trace input
-        traced = torch.jit.trace(orig_mod, calib_data[0][0])
+        traced = torch.jit.trace(orig_mod, calib_data[0])
         self._checkScriptable(orig_mod, traced, calib_data, check_save_load)
 
     # Call this twice: once for a scripted module and once for a traced module
@@ -408,6 +424,9 @@ class QuantizationTestCase(TestCase):
                 is the target function for call_function and
                 type of the module for call_module
         """
+        # TODO: make img_data a single example instead of a list
+        if type(inputs) == list:
+            inputs = inputs[0]
         if quant_type == QuantType.QAT:
             model.train()
         else:
@@ -1094,3 +1113,12 @@ class ModelMultipleOpsNoAvgPool(torch.nn.Module):
         out = out.view(-1, 3 * 2 * 2)
         out = self.fc(out)
         return out
+
+class EmbeddingModule(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.emb = torch.nn.EmbeddingBag(num_embeddings=10, embedding_dim=12,
+                                         include_last_offset=True, scale_grad_by_freq=False, mode='sum')
+
+    def forward(self, indices, offsets, per_sample_weights):
+        return self.emb(indices, offsets, per_sample_weights)
