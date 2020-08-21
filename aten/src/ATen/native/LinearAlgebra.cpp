@@ -1411,7 +1411,7 @@ Tensor chain_matmul(TensorList matrices) {
     return at::mm(matrices[0], matrices[1]);
   } else if (matrices.size() == 3) {
     return _chain_matmul_three_matrices(matrices);
-  } else {
+  } else if (matrices.size() > 0){
 
     // Following the algorithm in Chapter 15.2 : Introduction to Algorithms, Cormen et al.
     // Minor modifications have been made to accommodate zero-indexing
