@@ -19,23 +19,23 @@ jobs:
           if [[ "${DOCKER_IMAGE}" == *rocm* ]]; then
             export DOCKER_TAG="ab1632df-fa59-40e6-8c23-98e004f61148"
           fi
+          if [[ ${BUILD_ENVIRONMENT} == *"paralleltbb"* ]]; then
+            echo 'ATEN_THREADING=TBB' >> "${BASH_ENV}"
+            echo 'USE_TBB=1' >> "${BASH_ENV}"
+          elif [[ ${BUILD_ENVIRONMENT} == *"parallelnative"* ]]; then
+            echo 'ATEN_THREADING=NATIVE' >> "${BASH_ENV}"
+          fi
+          echo "Parallel backend flags: "${PARALLEL_FLAGS}
           # Pull Docker image and run build
           echo "DOCKER_IMAGE: "${DOCKER_IMAGE}:${DOCKER_TAG}
           time docker pull ${DOCKER_IMAGE}:${DOCKER_TAG} >/dev/null
-          export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${DOCKER_IMAGE}:${DOCKER_TAG})
+          export id=$(docker run --env-file "${BASH_ENV}" --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${DOCKER_IMAGE}:${DOCKER_TAG})
 
           git submodule sync && git submodule update -q --init --recursive
 
           docker cp /home/circleci/project/. $id:/var/lib/jenkins/workspace
 
-          if [[ ${BUILD_ENVIRONMENT} == *"paralleltbb"* ]]; then
-            export PARALLEL_FLAGS="export ATEN_THREADING=TBB USE_TBB=1 "
-          elif [[ ${BUILD_ENVIRONMENT} == *"parallelnative"* ]]; then
-            export PARALLEL_FLAGS="export ATEN_THREADING=NATIVE "
-          fi
-          echo "Parallel backend flags: "${PARALLEL_FLAGS}
-
-          export COMMAND='((echo "export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}" && echo '"$PARALLEL_FLAGS"' && echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/build.sh && find ${BUILD_ROOT} -type f -name "*.a" -or -name "*.o" -delete") | docker exec -u jenkins -i "$id" bash) 2>&1'
+          export COMMAND='((echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/build.sh && find ${BUILD_ROOT} -type f -name "*.a" -or -name "*.o" -delete") | docker exec -u jenkins -i "$id" bash) 2>&1'
 
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
 
@@ -111,27 +111,26 @@ jobs:
           echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
 
           if [[ ${BUILD_ENVIRONMENT} == *"paralleltbb"* ]]; then
-            export PARALLEL_FLAGS="export ATEN_THREADING=TBB USE_TBB=1 "
+            echo 'ATEN_THREADING=TBB' >> "${BASH_ENV}"
+            echo 'USE_TBB=1' >> "${BASH_ENV}"
           elif [[ ${BUILD_ENVIRONMENT} == *"parallelnative"* ]]; then
-            export PARALLEL_FLAGS="export ATEN_THREADING=NATIVE "
+            echo 'ATEN_THREADING=NATIVE' >> "${BASH_ENV}"
           fi
           echo "Parallel backend flags: "${PARALLEL_FLAGS}
 
           time docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
 
+          # TODO: Make this less painful
           if [ -n "${USE_CUDA_DOCKER_RUNTIME}" ]; then
-            export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --gpus all --shm-size=2g -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
+            export id=$(docker run --env-file "${BASH_ENV}" --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --gpus all --shm-size=2g -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
           elif [[ ${BUILD_ENVIRONMENT} == *"rocm"* ]]; then
             hostname
-            export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --shm-size=8g --ipc=host --device /dev/kfd --device /dev/dri --group-add video -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
+            export id=$(docker run --env-file "${BASH_ENV}" --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --shm-size=8g --ipc=host --device /dev/kfd --device /dev/dri --group-add video -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
           else
-            export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
+            export id=$(docker run --env-file "${BASH_ENV}" --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
           fi
+          echo "id=${id}" >> "${BASH_ENV}"
 
-          # Pass environment variables to the next step
-          # See https://circleci.com/docs/2.0/env-vars/#using-parameters-and-bash-environment
-          echo "export PARALLEL_FLAGS=\"${PARALLEL_FLAGS}\"" >> $BASH_ENV
-          echo "export id=$id" >> $BASH_ENV
     - run:
         name: Check for no AVX instruction by default
         no_output_timeout: "20m"
@@ -162,10 +161,8 @@ jobs:
           cat >docker_commands.sh \<<EOL
           # =================== The following code will be executed inside Docker container ===================
           set -ex
-          export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}
           export SCRIBE_GRAPHQL_ACCESS_TOKEN="${SCRIBE_GRAPHQL_ACCESS_TOKEN}"
           ${PARALLEL_FLAGS}
-          source ./workspace/env
           cd workspace
           EOL
           if [[ ${BUILD_ENVIRONMENT} == *"multigpu"* ]]; then
