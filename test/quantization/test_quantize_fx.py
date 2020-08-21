@@ -424,3 +424,6 @@ class TestQuantizeFxOps(QuantizationTestCase):
 
     def test_hardswish(self):
         self._test_activation_impl(nn.Hardswish, F.hardswish, nnq.Hardswish, torch.ops.quantized.hardswish)
+
+    def test_elu(self):
+        self._test_activation_impl(nn.ELU, F.elu, nnq.ELU, torch.ops.quantized.elu)
