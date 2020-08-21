@@ -9,7 +9,7 @@ from torch import nn
 from torch.nn.parallel import DistributedDataParallel
 import torch.distributed as c10d
 
-from torch.distributed.algorithms.compression import hook_registry
+from torch.distributed.algorithms.ddp_comm_hooks import hook_registry
 
 from torch.testing._internal.common_distributed import MultiProcessTestCase, \
     requires_nccl, skip_if_lt_x_gpu
