@@ -228,6 +228,13 @@ namespace jit {
   _(UnrollEmpty)                            \
   _(NoUnroll)                               \
   _(UnrollWithLet)                          \
+  _(NormalizeStartPositive)                 \
+  _(NormalizeStartNegative)                 \
+  _(NormalizeStartZero)                     \
+  _(NormalizeStartVariable)                 \
+  _(NormalizeOnNestedOuterLoop)             \
+  _(NormalizeOnNestedInnerLoop)             \
+  _(NormalizeAndSplitWithTail)              \
   _(Kernel_1)                               \
   _(Kernel_2)                               \
   _(Kernel_3)                               \
