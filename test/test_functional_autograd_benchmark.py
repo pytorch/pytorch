@@ -3,6 +3,7 @@ from torch.testing._internal.common_utils import TestCase, run_tests, slowTest, 
 import subprocess
 import tempfile
 import os
+import unittest
 
 # This is a very simple smoke test for the functional autograd benchmarking script.
 class TestFunctionalAutogradBenchmark(TestCase):
