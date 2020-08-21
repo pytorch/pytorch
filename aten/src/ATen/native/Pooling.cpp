@@ -1,13 +1,11 @@
 #include <ATen/ATen.h>
 
-#include <ATen/Dispatch.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/native/Pool.h>
 #include <ATen/native/xnnpack/Engine.h>
-#include <c10/core/DeviceType.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 
@@ -42,7 +40,8 @@ void max_pool2d_out_impl(
       : std::numeric_limits<scalar_t>::lowest();
 
   // Horizontal padding to add to buffer
-  const int64_t PADDING = std::max(0L, (OW - 1) * SJ + (KW - 1) * DJ - IW + 1);
+  const int64_t PADDING =
+      std::max<int64_t>(0, (OW - 1) * SJ + (KW - 1) * DJ - IW + 1);
 
   // Row kernel stride
   const int64_t ROW_KER_STRIDE = DI * IW;
@@ -78,7 +77,8 @@ void max_pool2d_out_impl(
             for (int64_t ij = 0; ij < IW; ++ij) {
               const scalar_t val = ip[ij];
               const scalar_t max_val = buffer[ij + PJ];
-              buffer[ij + PJ] = std::isnan(val) ? val : std::max(max_val, val);
+              buffer[ij + PJ] =
+                  std::isnan(val) ? val : std::max<scalar_t>(max_val, val);
             }
           }
 
@@ -88,7 +88,8 @@ void max_pool2d_out_impl(
             int64_t ij = oj * SJ - PJ;
             for (int64_t kj = 0; kj < KW; ++kj, ij += DJ) {
               const scalar_t val = buffer[ij + PJ];
-              max_val = std::isnan(val) ? val : std::max(max_val, val);
+              max_val =
+                  std::isnan(val) ? val : std::max<scalar_t>(max_val, val);
             }
             op[oj] = max_val;
           }
