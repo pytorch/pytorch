@@ -386,11 +386,9 @@ def gen_nn_functional(out):
     from_c = [
         'avg_pool2d',
         'avg_pool3d',
-        'hardtanh',
         'hardtanh_',
         'hardsigmoid',
         'elu_',
-        'leaky_relu',
         'leaky_relu_',
         'logsigmoid',
         'softplus',
@@ -407,6 +405,14 @@ def gen_nn_functional(out):
     }
     write(out, 'torch/nn/functional.pyi', stubs, env)
 
+    # functional.pyi already contains the definitions for those functions
+    # so, we don't export then to it
+    from_c.extend(['hardtanh', 'leaky_relu',])
+    dispatch_code = ["{}: Callable".format(_) for _ in (dispatches + from_c)]
+    env = {
+        'imported_hints': import_code,
+        'dispatched_hints': dispatch_code
+    }
     stubs = CodeTemplate.from_file(os.path.join('torch', '_C', '_nn.pyi.in'))
     write(out, 'torch/_C/_nn.pyi', stubs, env)
 
