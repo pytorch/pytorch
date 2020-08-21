@@ -102,9 +102,13 @@ Example (a type mismatch)
      @torch.jit.script
      def an_error(x):
          if x:
-         ~~~~~...  <--- HERE
+         ~~~~~
              r = torch.rand(1)
+             ~~~~~~~~~~~~~~~~~
          else:
+         ~~~~~
+             r = 4
+             ~~~~~ <--- HERE
      and was used here:
          else:
              r = 4
