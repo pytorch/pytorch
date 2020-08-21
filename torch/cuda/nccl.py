@@ -1,3 +1,4 @@
+import collections
 import warnings
 
 import torch._six
@@ -43,9 +44,8 @@ def init_rank(num_ranks, uid, rank):
 
 
 def _check_sequence_type(inputs):
-    if not isinstance(inputs, list) and not isinstance(inputs, tuple):
-        raise TypeError("inputs should be a list/tuple")
-
+    if not isinstance(inputs, collections.Container) or isinstance(inputs, torch.Tensor):
+        raise TypeError("Inputs should be a collection of tensors")
 
 
 def all_reduce(inputs, outputs=None, op=SUM, streams=None, comms=None):

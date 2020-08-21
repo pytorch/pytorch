@@ -64,7 +64,8 @@ DEFAULT_DYNAMIC_MODULE_MAPPING = {
     nn.LSTM: nnqd.LSTM,
     nn.LSTMCell: nnqd.LSTMCell,
     nn.RNNCell: nnqd.RNNCell,
-    nn.GRUCell: nnqd.GRUCell
+    nn.GRUCell: nnqd.GRUCell,
+    nn.EmbeddingBag: nnqd.EmbeddingBag,
 }
 
 # Whitelist for propagating the qconfig

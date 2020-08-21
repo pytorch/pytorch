@@ -156,6 +156,12 @@ Example::
     tensor([ 1.2294,  2.2004,  1.3690,  1.7298])
 """.format(**common_args))
 
+add_docstr(torch.arccos, r"""
+arccos(input, *, out=None) -> Tensor
+
+Alias for :func:`torch.acos`.
+""")
+
 add_docstr(torch.acosh, r"""
 acosh(input, *, out=None) -> Tensor
 
@@ -626,9 +632,8 @@ Example::
     array([1,  2,  3])
 """.format(**factory_data_common_args))
 
-add_docstr(torch.asin,
-           r"""
-asin(input, out=None) -> Tensor
+add_docstr(torch.asin, r"""
+asin(input, *, out=None) -> Tensor
 
 Returns a new tensor with the arcsine  of the elements of :attr:`input`.
 
@@ -637,6 +642,8 @@ Returns a new tensor with the arcsine  of the elements of :attr:`input`.
 """ + r"""
 Args:
     {input}
+
+Keyword args:
     {out}
 
 Example::
@@ -647,6 +654,12 @@ Example::
     >>> torch.asin(a)
     tensor([-0.6387,     nan, -0.4552,     nan])
 """.format(**common_args))
+
+add_docstr(torch.arcsin, r"""
+arcsin(input, *, out=None) -> Tensor
+
+Alias for :func:`torch.asin`.
+""")
 
 add_docstr(torch.asinh,
            r"""
@@ -672,9 +685,8 @@ Example::
     tensor([ 0.1599, -1.1534, -0.9435, -0.8990 ])
 """.format(**common_args))
 
-add_docstr(torch.atan,
-           r"""
-atan(input, out=None) -> Tensor
+add_docstr(torch.atan, r"""
+atan(input, *, out=None) -> Tensor
 
 Returns a new tensor with the arctangent  of the elements of :attr:`input`.
 
@@ -683,6 +695,8 @@ Returns a new tensor with the arctangent  of the elements of :attr:`input`.
 """ + r"""
 Args:
     {input}
+
+Keyword args:
     {out}
 
 Example::
@@ -693,6 +707,12 @@ Example::
     >>> torch.atan(a)
     tensor([ 0.2299,  0.2487, -0.5591, -0.5727])
 """.format(**common_args))
+
+add_docstr(torch.arctan, r"""
+arctan(input, *, out=None) -> Tensor
+
+Alias for :func:`torch.atan`.
+""")
 
 add_docstr(torch.atan2,
            r"""
@@ -3985,6 +4005,50 @@ Example::
 
             [[  0.2468,  -6.7168],
              [  2.0774,  -0.8187]]])
+""".format(**common_args))
+
+add_docstr(torch.matrix_exp,
+           r"""
+matrix_power(input) -> Tensor
+
+Returns the matrix exponential. Supports batched input.
+For a matrix ``A``, the matrix exponential is defined as
+
+.. math::
+    \exp^A = \sum_{k=0}^\infty A^k / k!.
+
+""" + r"""
+The implementation is based on:
+Bader, P.; Blanes, S.; Casas, F.
+Computing the Matrix Exponential with an Optimized Taylor Polynomial Approximation.
+Mathematics 2019, 7, 1174.
+
+Args:
+    {input}
+
+Example::
+
+    >>> a = torch.randn(2, 2, 2)
+    >>> a[0, :, :] = torch.eye(2, 2)
+    >>> a[1, :, :] = 2 * torch.eye(2, 2)
+    >>> a
+    tensor([[[1., 0.],
+             [0., 1.]],
+
+            [[2., 0.],
+             [0., 2.]]])
+    >>> torch.matrix_exp(a)
+    tensor([[[2.7183, 0.0000],
+             [0.0000, 2.7183]],
+
+             [[7.3891, 0.0000],
+              [0.0000, 7.3891]]])
+
+    >>> import math
+    >>> x = torch.tensor([[0, math.pi/3], [-math.pi/3, 0]])
+    >>> x.matrix_exp() # should be [[cos(pi/3), sin(pi/3)], [-sin(pi/3), cos(pi/3)]]
+    tensor([[ 0.5000,  0.8660],
+            [-0.8660,  0.5000]])
 """.format(**common_args))
 
 add_docstr(torch.max,
@@ -7315,6 +7379,13 @@ Example::
     tensor([ 3.4742,  0.5466, -0.8008, -0.9079])
     >>> torch.trunc(a)
     tensor([ 3.,  0., -0., -0.])
+""".format(**common_args))
+
+add_docstr(torch.fix,
+           r"""
+fix(input, *, out=None) -> Tensor
+
+Alias for :func:`torch.trunc`
 """.format(**common_args))
 
 add_docstr(torch.unsqueeze,

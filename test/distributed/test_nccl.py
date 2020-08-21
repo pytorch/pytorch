@@ -102,23 +102,30 @@ class TestNCCL(TestCase):
         for tensor in tensors:
             self.assertEqual(tensor, expected)
 
+        # Test with set.
+        tensors = {cpu_tensors[i].cuda(i) for i in range(nGPUs)}
+        nccl.all_reduce(tensors)
+
+        for tensor in tensors:
+            self.assertEqual(tensor, expected)
+
     @unittest.skipIf(TEST_WITH_ROCM and HIP_VERSION < 3.5, 'Skip NCCL tests for ROCm')
     @unittest.skipIf(IS_WINDOWS, "NCCL doesn't support Windows")
     def test_collective_errors(self, device):
         t = torch.rand(10).cuda(0)
-        with self.assertRaisesRegex(TypeError, "inputs should be a list/tuple"):
+        with self.assertRaisesRegex(TypeError, "Inputs should be a collection of tensors"):
             nccl.all_reduce(t)
 
-        with self.assertRaisesRegex(TypeError, "inputs should be a list/tuple"):
+        with self.assertRaisesRegex(TypeError, "Inputs should be a collection of tensors"):
             nccl.reduce(t)
 
-        with self.assertRaisesRegex(TypeError, "inputs should be a list/tuple"):
+        with self.assertRaisesRegex(TypeError, "Inputs should be a collection of tensors"):
             nccl.broadcast(t)
 
-        with self.assertRaisesRegex(TypeError, "inputs should be a list/tuple"):
+        with self.assertRaisesRegex(TypeError, "Inputs should be a collection of tensors"):
             nccl.all_gather(t, t)
 
-        with self.assertRaisesRegex(TypeError, "inputs should be a list/tuple"):
+        with self.assertRaisesRegex(TypeError, "Inputs should be a collection of tensors"):
             nccl.reduce_scatter(t, t)
 
     @unittest.skipIf(TEST_WITH_ROCM and HIP_VERSION < 3.5, 'Skip NCCL tests for ROCm')
