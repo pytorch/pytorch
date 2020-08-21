@@ -56,13 +56,14 @@ class TestSparseGCS(TestCase):
             dims1 = tuple(range(N//2))
             dims2 = tuple(range(N//2, N))
             reduction = dims1 + dims2 + (N//2,)
+            l = N // 2
         else:
             l = reduction[-1]
             dims1 = reduction[:l]
             dims2 = reduction[l:-1]
 
-        strides1 = make_strides(dims1)
-        strides2 = make_strides(dims2)
+        strides1 = make_strides(shape[:l])
+        strides2 = make_strides(shape[l-1:-1])
         # print(f'{shape} {strides1} {strides2} {dims1} {dims2}')
         # <row>: <list of (colindex, value)>
         col_value = defaultdict(list)

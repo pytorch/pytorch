@@ -40,7 +40,7 @@ Tensor& add_out_dense_sparse_gcs_cpu(Tensor& out, const Tensor& dense, const Spa
 
   out.resize_as_(dense);
 
-
+  
   return out;
 }
 
