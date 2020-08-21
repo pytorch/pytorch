@@ -14,6 +14,7 @@ from torch.testing._internal.common_quantization import (
 )
 
 import itertools
+import operator
 
 class TestQuantizeFx(QuantizationTestCase):
     """ Unit tests for functionalities
@@ -206,3 +207,111 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 m = self.checkGraphModeFxOp(
                     orig_m, self.img_data_dict[dim],
                     quantized_nodes[dim], quant_type=quant_type)
+
+
+    @skipIfNoFBGEMM
+    def test_quantized_add(self):
+        class QuantizedAdd(torch.nn.Module):
+            def __init__(self):
+                super(QuantizedAdd, self).__init__()
+                self.conv1 = torch.nn.Conv2d(2, 2, 2).float()
+                self.conv2 = torch.nn.Conv2d(2, 2, 2).float()
+
+            def forward(self, x, y):
+                x = self.conv1(x)
+                y = self.conv2(y)
+                return x + y
+
+        class QuantizedInplaceAdd(torch.nn.Module):
+            def __init__(self):
+                super(QuantizedInplaceAdd, self).__init__()
+                self.conv1 = torch.nn.Conv2d(2, 2, 2).float()
+                self.conv2 = torch.nn.Conv2d(2, 2, 2).float()
+
+            def forward(self, x, y):
+                x = self.conv1(x)
+                y = self.conv2(y)
+                x += y
+                return x
+
+        # TODO: decide whether we want to quantize or not
+        # in this case
+        # class NonQuantizedAdd(torch.nn.Module):
+        #     def __init__(self):
+        #         super(NonQuantizedAdd, self).__init__()
+
+        #     def forward(self, x, y):
+        #         return x + y
+
+        # class NonQuantizedInplaceAdd(torch.nn.Module):
+        #     def __init__(self):
+        #         super(NonQuantizedInplaceAdd, self).__init__()
+
+        #     def forward(self, x, y):
+        #         x += y
+        #         return x
+
+        data = (torch.randn(1, 2, 3, 3, dtype=torch.float),
+                torch.randn(1, 2, 3, 3, dtype=torch.float))
+        quantized_node = ('call_function', torch.ops.quantized.add)
+        non_quantized_node = ('call_function', operator.add)
+        for m, quantized in [
+                (QuantizedAdd(), True),
+                (QuantizedInplaceAdd(), True),
+                # (NonQuantizedAdd(), False),
+                # (NonQuantizedInplaceAdd(), False)]:
+        ]:
+            for quant_type in self.static_quant_types:
+                target_node = quantized_node if quantized else non_quantized_node
+                self.checkGraphModeFxOp(m, data, target_node, quant_type=quant_type)
+
+    @skipIfNoFBGEMM
+    def test_quantized_add_scalar(self):
+        class QuantizedAddScalar(torch.nn.Module):
+            def __init__(self):
+                super(QuantizedAddScalar, self).__init__()
+                self.conv = torch.nn.Conv2d(2, 2, 2).float()
+
+            def forward(self, x):
+                x = self.conv(x)
+                return x + 3
+
+        class QuantizedInplaceAddScalar(torch.nn.Module):
+            def __init__(self):
+                super(QuantizedInplaceAddScalar, self).__init__()
+                self.conv = torch.nn.Conv2d(2, 2, 2).float()
+
+            def forward(self, x):
+                x = self.conv(x)
+                x += 3
+                return x
+
+        # TODO: decide whether we want to quantize or not
+        # in this case
+        # class NonQuantizedAddScalar(torch.nn.Module):
+        #     def __init__(self):
+        #         super(NonQuantizedAddScalar, self).__init__()
+
+        #     def forward(self, x):
+        #         return x + 3
+
+        # class NonQuantizedInplaceAddScalar(torch.nn.Module):
+        #     def __init__(self):
+        #         super(NonQuantizedInplaceAddScalar, self).__init__()
+
+        #     def forward(self, x):
+        #         x += 3
+        #         return x
+
+        data = (torch.randn(1, 2, 3, 3, dtype=torch.float),)
+        quantized_node = ('call_function', torch.ops.quantized.add)
+        non_quantized_node = ('call_function', operator.add)
+        for m, quantized in [
+                (QuantizedAddScalar(), True),
+                (QuantizedInplaceAddScalar(), True),
+                # (NonQuantizedAddScalar(), False),
+                # (NonQuantizedInplaceAddScalar(), False)]:
+        ]:
+            for quant_type in self.static_quant_types:
+                target_node = quantized_node if quantized else non_quantized_node
+                self.checkGraphModeFxOp(m, data, target_node, quant_type=quant_type)
