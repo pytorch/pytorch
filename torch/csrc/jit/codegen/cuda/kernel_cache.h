@@ -75,6 +75,16 @@ class FusionExecutorCache {
   // original un-scheduled `Fusion`;
   std::unique_ptr<Fusion> fusion_;
 
+  // I'm trading the const model in favor of assigning `has_reduction_` in the
+  // body of constructor, instead of the initializer list;
+  // Because of the move statement used in the constructor, it's tricky to
+  // maintain the code if we have `has_reduction_` as a const member and
+  // initizlize it in the initializer list, where the order of initialization
+  // is controled by the order of declaration instead of their order in the list
+  //
+  // cache fusion->hasReduction() because it's expensive;
+  bool has_reduction_;
+
   // TODO: ugly logic for now. We should integrate the hashing of cache for
   //       different kernels. (alternatively we could do so in scheduler).
   // ugly bits now:
