@@ -5,7 +5,44 @@ namespace native {
 namespace vulkan {
 namespace api {
 
-constexpr Descriptor::Pool::Descriptor Descriptor::Pool::kDefault;
+const Descriptor::Pool::Descriptor Descriptor::Pool::kDefault{
+  1024u,
+  {
+    // Note: It is OK for the sum of descriptors per type, below, to exceed
+    // the max total figure above, but be concenious of memory consumption.
+    // Considering how the descriptor pool must be frequently purged anyway
+    // as a result of the impracticality of having enormous pools that
+    // persist through the execution of the program, there is diminishing
+    // return in increasing max counts.
+    {
+      /*
+        Buffers
+      */
+
+      {
+        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        256u,
+      },
+      {
+        VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+        256u,
+      },
+
+      /*
+        Images
+      */
+
+      {
+        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        256u,
+      },
+      {
+        VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+        256u,
+      },
+    },
+  },
+};
 
 Descriptor::Pool::Factory::Factory(const VkDevice device)
   : device_(device) {
@@ -13,18 +50,13 @@ Descriptor::Pool::Factory::Factory(const VkDevice device)
 
 typename Descriptor::Pool::Factory::Handle Descriptor::Pool::Factory::operator()(
   const Descriptor& descriptor) const {
-  static_assert(
-      sizeof(Descriptor::Size) == sizeof(VkDescriptorPoolSize),
-      "This implementation assumes a Descriptor::Size's memory layout is the same"
-      "as VkDescriptorPoolSize.  A copy needs to be performed otherwise.");
-
   const VkDescriptorPoolCreateInfo descriptor_pool_create_info{
     VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
     nullptr,
     0u, /* Do not use VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT */
     descriptor.capacity,
     descriptor.sizes.size(),
-    reinterpret_cast<const VkDescriptorPoolSize*>(descriptor.sizes.data()),
+    descriptor.sizes.data(),
   };
 
   VkDescriptorPool descriptor_pool{};
