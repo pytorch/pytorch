@@ -13,7 +13,13 @@ endif()
 if(INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE)
   set(ATEN_THREADING "NATIVE" CACHE STRING "ATen parallel backend")
 else()
-  set(ATEN_THREADING "OMP" CACHE STRING "ATen parallel backend")
+  if(USE_OPENMP)
+    set(ATEN_THREADING "OMP" CACHE STRING "ATen parallel backend")
+  elseif(USE_TBB)
+    set(ATEN_THREADING "TBB" CACHE STRING "ATen parallel backend")
+  else()
+    set(ATEN_THREADING "NATIVE" CACHE STRING "ATen parallel backend")
+  endif()
 endif()
 
 set(AT_PARALLEL_OPENMP 0)
@@ -142,12 +148,12 @@ if(NOT INTERN_BUILD_MOBILE OR BUILD_CAFFE2_MOBILE)
   add_subdirectory(transforms)
 endif()
 
-# Advanced: if we have white list specified, we will do intersections for all
+# Advanced: if we have allow list specified, we will do intersections for all
 # main lib srcs.
-if(CAFFE2_WHITELISTED_FILES)
-  caffe2_do_whitelist(Caffe2_CPU_SRCS CAFFE2_WHITELISTED_FILES)
-  caffe2_do_whitelist(Caffe2_GPU_SRCS CAFFE2_WHITELISTED_FILES)
-  caffe2_do_whitelist(Caffe2_HIP_SRCS CAFFE2_WHITELISTED_FILES)
+if(CAFFE2_ALLOWLISTED_FILES)
+  caffe2_do_allowlist(Caffe2_CPU_SRCS CAFFE2_ALLOWLISTED_FILES)
+  caffe2_do_allowlist(Caffe2_GPU_SRCS CAFFE2_ALLOWLISTED_FILES)
+  caffe2_do_allowlist(Caffe2_HIP_SRCS CAFFE2_ALLOWLISTED_FILES)
 endif()
 
 # Debug messages - if you want to get a list of source files, enable the
@@ -278,7 +284,19 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     add_library(process_group_agent "${TORCH_SRC_DIR}/csrc/distributed/rpc/process_group_agent.cpp" "${TORCH_SRC_DIR}/csrc/distributed/rpc/process_group_agent.h")
     target_link_libraries(process_group_agent PRIVATE torch c10d fmt::fmt-header-only)
     add_dependencies(process_group_agent torch c10d)
-    target_include_directories(process_group_agent PRIVATE ${TORCH_ROOT}/third_party/tensorpipe)
+
+    # Define this target even if we're building without TensorPipe, to make life
+    # easier to other targets that depend on this. However, in that case, by not
+    # setting the USE_TENSORPIPE compile definition, this target will just end
+    # up being empty. Downstream targets should also add a #ifdef guard.
+    add_library(tensorpipe_agent "${TORCH_SRC_DIR}/csrc/distributed/rpc/tensorpipe_agent.cpp" "${TORCH_SRC_DIR}/csrc/distributed/rpc/tensorpipe_agent.h")
+    target_link_libraries(tensorpipe_agent PRIVATE torch c10d tensorpipe fmt::fmt-header-only)
+    add_dependencies(tensorpipe_agent torch c10d)
+    if(USE_TENSORPIPE)
+      target_compile_definitions(tensorpipe_agent PUBLIC USE_TENSORPIPE)
+      target_link_libraries(tensorpipe_agent PRIVATE tensorpipe)
+      add_dependencies(tensorpipe_agent tensorpipe)
+    endif()
   endif()
 
   set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
@@ -309,11 +327,6 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_2.cpp"
       "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_3.cpp"
       "${TORCH_SRC_DIR}/csrc/autograd/generated/VariableType_4.cpp"
-      "${TORCH_SRC_DIR}/csrc/autograd/generated/ProfiledType_0.cpp"
-      "${TORCH_SRC_DIR}/csrc/autograd/generated/ProfiledType_1.cpp"
-      "${TORCH_SRC_DIR}/csrc/autograd/generated/ProfiledType_2.cpp"
-      "${TORCH_SRC_DIR}/csrc/autograd/generated/ProfiledType_3.cpp"
-      "${TORCH_SRC_DIR}/csrc/autograd/generated/ProfiledType_4.cpp"
       "${TORCH_SRC_DIR}/csrc/autograd/generated/TraceType_0.cpp"
       "${TORCH_SRC_DIR}/csrc/autograd/generated/TraceType_1.cpp"
       "${TORCH_SRC_DIR}/csrc/autograd/generated/TraceType_2.cpp"
@@ -338,6 +351,8 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_variable_methods.cpp"
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_torch_functions.cpp"
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_nn_functions.cpp"
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_fft_functions.cpp"
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_linalg_functions.cpp"
     )
 
   set(GENERATED_H_PYTHON
@@ -370,7 +385,6 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
     "${TOOLS_PATH}/autograd/templates/VariableType.h"
     "${TOOLS_PATH}/autograd/templates/VariableType.cpp"
-    "${TOOLS_PATH}/autograd/templates/ProfiledType.cpp"
     "${TOOLS_PATH}/autograd/templates/TraceType.cpp"
     "${TOOLS_PATH}/autograd/templates/Functions.h"
     "${TOOLS_PATH}/autograd/templates/Functions.cpp"
@@ -379,6 +393,8 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${TOOLS_PATH}/autograd/templates/python_variable_methods.cpp"
     "${TOOLS_PATH}/autograd/templates/python_torch_functions.cpp"
     "${TOOLS_PATH}/autograd/templates/python_nn_functions.cpp"
+    "${TOOLS_PATH}/autograd/templates/python_fft_functions.cpp"
+    "${TOOLS_PATH}/autograd/templates/python_linalg_functions.cpp"
     "${TOOLS_PATH}/autograd/templates/variable_factories.h"
     "${TOOLS_PATH}/autograd/templates/annotated_fn_args.py"
     "${TOOLS_PATH}/autograd/deprecated.yaml"
@@ -422,10 +438,12 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     set(MOBILE_SRCS
        ${TORCH_SRC_DIR}/csrc/jit/mobile/function.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/import.cpp
+       ${TORCH_SRC_DIR}/csrc/jit/mobile/import_data.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/module.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/observer.cpp
-       ${TORCH_SRC_DIR}/csrc/jit/mobile/register_mobile_autograd.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/interpreter.cpp
+       ${TORCH_SRC_DIR}/csrc/jit/mobile/export_data.cpp
+       ${TORCH_SRC_DIR}/csrc/jit/mobile/optim/sgd.cpp
        )
     list(APPEND TORCH_SRCS ${MOBILE_SRCS})
   endif()
@@ -462,6 +480,10 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/compute_at.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/dispatch.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/expr_evaluator.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/executor.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/executor_kernel_arg.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/executor_launch_params.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/executor_utils.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/fusion.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/graph_fuser.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/index_compute.cpp
@@ -473,9 +495,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/iter_visitor.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/kernel.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/kernel_cache.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/manager.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/shape_inference.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/mutator.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/kernel_ir.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower_index.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower_loops.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower_thread_predicate.cpp
@@ -483,16 +503,19 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower_utils.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower_validation.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/lower2device.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/manager.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/mutator.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/parser.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/partition.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/predicate_compute.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/register_interface.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/scheduler.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/shape_inference.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/tensor_view.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/transform_iter.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/transform_replay.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/transform_rfactor.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/type.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/utils.cpp
-      ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/register_interface.cpp
       ${TORCH_SRC_DIR}/csrc/jit/tensorexpr/cuda_codegen.cpp
     )
     add_library(caffe2_nvrtc SHARED ${ATen_NVRTC_STUB_SRCS})
@@ -562,6 +585,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/pooling.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/rnn.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/upsampling.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/transformer.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/container/functional.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/activation.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/adaptive.cpp
@@ -576,6 +600,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/pooling.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/rnn.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/nn/options/vision.cpp
+      ${TORCH_SRC_DIR}/csrc/api/src/nn/options/transformer.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/optim/adagrad.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/optim/adam.cpp
       ${TORCH_SRC_DIR}/csrc/api/src/optim/adamw.cpp

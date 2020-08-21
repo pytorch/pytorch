@@ -647,7 +647,8 @@ class FunctionEvent(FormattedTimesMixin):
     """Profiling information about a single function."""
     def __init__(
             self, id, node_id, name, thread, cpu_start, cpu_end, input_shapes=None,
-            cpu_memory_usage=0, cuda_memory_usage=0, is_async=False, is_remote=True):
+            cpu_memory_usage=0, cuda_memory_usage=0, is_async=False, is_remote=True,
+            sequence_nr=-1):
         self.id = id
         self.node_id = node_id
         self.name = name
@@ -661,6 +662,7 @@ class FunctionEvent(FormattedTimesMixin):
         self.cuda_memory_usage = cuda_memory_usage
         self.is_async = is_async
         self.is_remote = is_remote
+        self.sequence_nr = sequence_nr
 
     def append_kernel(self, name, device, start, end):
         self.kernels.append(Kernel(name, device, Interval(start, end)))
@@ -668,7 +670,7 @@ class FunctionEvent(FormattedTimesMixin):
     def append_cpu_child(self, child):
         """Append a CPU child of type FunctionEvent.
 
-        One is supposed to append only dirrect children to the event to have
+        One is supposed to append only direct children to the event to have
         correct self cpu time being reported.
         """
         assert(isinstance(child, FunctionEvent))
@@ -716,7 +718,7 @@ class FunctionEvent(FormattedTimesMixin):
         return (
             '<FunctionEvent id={} node_id={} cpu_time={} cpu_start={} cpu_end={} '
             'cpu_children={} cuda_time={} name={} thread={} input_shapes={} '
-            'cpu_memory_usage={} cuda_memory_usage={} is_async={} is_remote={}>'.format(
+            'cpu_memory_usage={} cuda_memory_usage={} is_async={} is_remote={} seq_nr={}>'.format(
                 self.id,
                 self.node_id,
                 self.cpu_time_str,
@@ -731,6 +733,7 @@ class FunctionEvent(FormattedTimesMixin):
                 self.cuda_memory_usage,
                 self.is_async,
                 self.is_remote,
+                self.sequence_nr,
             )
         )
 
@@ -832,9 +835,9 @@ def parse_cpu_trace(thread_records):
     filtered_out_names = [
         "profiler::_record_function_enter",
         "profiler::_record_function_exit",
-        "is_leaf",
-        "output_nr",
-        "_version",
+        "aten::is_leaf",
+        "aten::output_nr",
+        "aten::_version",
     ]
 
     # cuda start events and the overall profiler start event don't happen
@@ -896,9 +899,9 @@ def parse_cpu_trace(thread_records):
             elif record.kind() == 'pop':
                 assert (
                     record_key in range_starts
-                ), """Expected record (name={}) with key {} to exist in range_starts.
+                ), """Expected record with key {} to exist in range_starts.
                     This means that the pop event did not have a corresponding push.""".format(
-                    record.name(), record_key
+                    record_key
                 )
 
                 start = range_starts[record_key]
@@ -920,6 +923,7 @@ def parse_cpu_trace(thread_records):
                     cuda_memory_usage=cuda_memory_usage,
                     is_async=is_async,
                     is_remote=is_remote_event,
+                    sequence_nr=start.sequence_nr(),
                 )
                 # note: async events have only cpu total time
                 if not is_async and start.has_cuda():

@@ -4,6 +4,7 @@
 #include <ATen/core/jit_type.h>
 #include <ATen/core/stack.h>
 #include <pybind11/pybind11.h>
+#include <pybind11/pytypes.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/Layout.h>
@@ -74,6 +75,21 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
   explicit PythonFutureWrapper(const PythonFutureWrapper&) = delete;
   PythonFutureWrapper& operator=(const PythonFutureWrapper&) = delete;
 
+  bool done() {
+    return fut->completed();
+  }
+
+  py::object value() {
+    // acquiring GIL as toPyObject creates new py::object
+    // without grabbing the GIL.
+    py::gil_scoped_acquire acquire;
+    py::object py_obj = toPyObject(fut->value());
+    if (unwrap_func) {
+      (*unwrap_func)(py_obj);
+    }
+    return py_obj;
+  }
+
   py::object wait() {
     fut->wait();
     if (jit::tracer::isTracing()) {
@@ -83,16 +99,7 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
       auto output = graph->insert(aten::wait, {fut_val});
       jit::tracer::setValueTrace(fut->value(), output);
     }
-    {
-      // acquiring GIL as toPyObject creates new py::object
-      // without grabbing the GIL.
-      py::gil_scoped_acquire acquire;
-      py::object py_obj = toPyObject(fut->value());
-      if (unwrap_func) {
-        (*unwrap_func)(py_obj);
-      }
-      return py_obj;
-    }
+    return value();
   }
 
   // The py::function cb arg must take a std::shared_ptr<PythonFutureWrapper>
@@ -280,6 +287,16 @@ inline InferredType tryToInferType(py::handle input) {
     return InferredType(IntType::get());
   } else if (THPLayout_Check(input.ptr())) {
     return InferredType(IntType::get());
+  }
+
+  auto enum_type = py::module::import("enum").attr("Enum");
+  py::bool_ isEnumValue = py::isinstance(input, enum_type);
+  if (py::cast<bool>(isEnumValue)) {
+    auto enum_class = input.attr("__class__");
+    auto enum_type =
+        py::cast<TypePtr>(py::module::import("torch.jit.annotations")
+                              .attr("try_ann_to_type")(enum_class, py::none()));
+    return InferredType(enum_type);
   }
 
   py::bool_ isClass =
@@ -718,12 +735,22 @@ inline IValue toIValue(
       return toTypeInferredIValue(obj);
     case TypeKind::FunctionType:
     case TypeKind::GeneratorType:
+    case TypeKind::QuantizerType:
     case TypeKind::VarType:
     case TypeKind::QSchemeType:
     case TypeKind::AnyListType:
     case TypeKind::AnyTupleType:
     case TypeKind::AnyClassType:
+    case TypeKind::AnyEnumType:
       break;
+    case TypeKind::EnumType:
+      EnumTypePtr enum_type = type->expect<EnumType>();
+      py::object py_obj = py::reinterpret_borrow<py::object>(obj);
+      std::string name = py::cast<std::string>(obj.attr("name"));
+      IValue value = toIValue(obj.attr("value"), enum_type->getValueType(), {});
+      auto enum_holder =
+          c10::make_intrusive<c10::ivalue::EnumHolder>(enum_type, name, value);
+      return IValue(enum_holder);
   }
   throw py::cast_error(c10::str(
       "toIValue() cannot handle converting to type: ", type->repr_str()));
@@ -1142,6 +1169,8 @@ inline py::object invokeOperatorFromPython(
     // Create a stack full of the arguments and keyword arguments.
     stack = createStackForSchema(
         op.schema(), std::move(args), std::move(kwargs), c10::nullopt);
+
+    pybind11::gil_scoped_release no_gil_guard;
     op.getOperation()(&stack);
   } else {
     std::vector<schema_match_error> errors;
@@ -1163,6 +1192,8 @@ inline py::object invokeOperatorFromPython(
       }
       throw std::runtime_error(ss.str());
     }
+
+    pybind11::gil_scoped_release no_gil_guard;
     found_op->getOperation()(&stack);
   }
 

@@ -29,7 +29,7 @@ from itertools import product, permutations
 from test_jit import backward_graph, all_backward_graphs, get_lstm_inputs, get_milstm_inputs, \
     LSTMCellC, LSTMCellF, LSTMCellS, MiLSTMCell
 
-from te_utils import CudaCodeGenExecuted
+from torch.testing._internal.te_utils import CudaCodeGenExecuted
 
 FUSION_GROUP = 'tensorexpr::Group'
 
@@ -59,7 +59,7 @@ def warmup_forward(f, *args):
     return results
 
 
-class TestFuser(JitTestCase):
+class TestTEFuser(JitTestCase):
     def setUp(self):
         self.old_cpu_fuser_state = torch._C._jit_can_fuse_on_cpu()
         self.old_gpu_fuser_state = torch._C._jit_can_fuse_on_gpu()

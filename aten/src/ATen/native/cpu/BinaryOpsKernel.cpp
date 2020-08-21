@@ -646,6 +646,7 @@ void fmod_scalar_kernel(TensorIterator& iter, Scalar divisor) {
   if (isIntegralType(iter.dtype(), /*includeBool=*/ false)) {
     AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "fmod_scalar_cpu", [&]() {
       const auto div = divisor.to<scalar_t>();
+      TORCH_CHECK(div != 0, "ZeroDivisionError");
       cpu_kernel(iter, [=](scalar_t x) -> scalar_t {
         return x % div;
       });
@@ -732,9 +733,35 @@ void lcm_kernel(TensorIterator& iter) {
           iter,
           [](scalar_t a, scalar_t b) -> scalar_t {
             scalar_t g = calc_gcd(a, b);
-            return (g == 0) ? 0 : a / g * b;
+            return (g == 0) ? 0 : std::abs(a / g * b);
           });
     });
+}
+
+void hypot_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), "hypot_cpu", [&]() {
+    cpu_kernel_vec(
+        iter,
+        [=](scalar_t a, scalar_t b) -> scalar_t {
+            return std::hypot(a, b);
+        },
+        [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
+            return a.hypot(b);
+        });
+  });
+}
+
+void nextafter_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "nextafter_cpu", [&]() {
+    cpu_kernel_vec(
+        iter,
+        [=](scalar_t a, scalar_t b) -> scalar_t {
+            return std::nextafter(a, b);
+        },
+        [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
+            return a.nextafter(b);
+        });
+  });
 }
 
 } // namespace
@@ -773,6 +800,8 @@ REGISTER_DISPATCH(logaddexp_stub, &logaddexp_kernel);
 REGISTER_DISPATCH(logaddexp2_stub, &logaddexp2_kernel);
 REGISTER_DISPATCH(gcd_stub, &gcd_kernel);
 REGISTER_DISPATCH(lcm_stub, &lcm_kernel);
+REGISTER_DISPATCH(hypot_stub, &hypot_kernel);
+REGISTER_DISPATCH(nextafter_stub, &nextafter_kernel);
 
 } // namespace native
 } // namespace at

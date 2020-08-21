@@ -24,7 +24,7 @@ class _MaxPoolNd(Module):
                  return_indices: bool = False, ceil_mode: bool = False) -> None:
         super(_MaxPoolNd, self).__init__()
         self.kernel_size = kernel_size
-        self.stride = stride or kernel_size
+        self.stride = stride if (stride is not None) else kernel_size
         self.padding = padding
         self.dilation = dilation
         self.return_indices = return_indices
@@ -302,7 +302,7 @@ class MaxUnpool1d(_MaxUnpoolNd):
     def __init__(self, kernel_size: _size_1_t, stride: Optional[_size_1_t] = None, padding: _size_1_t = 0) -> None:
         super(MaxUnpool1d, self).__init__()
         self.kernel_size = _single(kernel_size)
-        self.stride = _single(stride or kernel_size)
+        self.stride = _single(stride if (stride is not None) else kernel_size)
         self.padding = _single(padding)
 
     def forward(self, input: Tensor, indices: Tensor, output_size: Optional[List[int]] = None) -> Tensor:
@@ -379,7 +379,7 @@ class MaxUnpool2d(_MaxUnpoolNd):
     def __init__(self, kernel_size: _size_2_t, stride: Optional[_size_2_t] = None, padding: _size_2_t = 0) -> None:
         super(MaxUnpool2d, self).__init__()
         self.kernel_size = _pair(kernel_size)
-        self.stride = _pair(stride or kernel_size)
+        self.stride = _pair(stride if (stride is not None) else kernel_size)
         self.padding = _pair(padding)
 
     def forward(self, input: Tensor, indices: Tensor, output_size: Optional[List[int]] = None) -> Tensor:
@@ -445,7 +445,7 @@ class MaxUnpool3d(_MaxUnpoolNd):
     def __init__(self, kernel_size: _size_3_t, stride: Optional[_size_3_t] = None, padding: _size_3_t = 0) -> None:
         super(MaxUnpool3d, self).__init__()
         self.kernel_size = _triple(kernel_size)
-        self.stride = _triple(stride or kernel_size)
+        self.stride = _triple(stride if (stride is not None) else kernel_size)
         self.padding = _triple(padding)
 
     def forward(self, input: Tensor, indices: Tensor, output_size: Optional[List[int]] = None) -> Tensor:
@@ -588,7 +588,7 @@ class AvgPool2d(_AvgPoolNd):
                  ceil_mode: bool = False, count_include_pad: bool = True, divisor_override: bool = None) -> None:
         super(AvgPool2d, self).__init__()
         self.kernel_size = kernel_size
-        self.stride = stride or kernel_size
+        self.stride = stride if (stride is not None) else kernel_size
         self.padding = padding
         self.ceil_mode = ceil_mode
         self.count_include_pad = count_include_pad
@@ -669,7 +669,7 @@ class AvgPool3d(_AvgPoolNd):
                  ceil_mode: bool = False, count_include_pad: bool = True, divisor_override=None) -> None:
         super(AvgPool3d, self).__init__()
         self.kernel_size = kernel_size
-        self.stride = stride or kernel_size
+        self.stride = stride if (stride is not None) else kernel_size
         self.padding = padding
         self.ceil_mode = ceil_mode
         self.count_include_pad = count_include_pad

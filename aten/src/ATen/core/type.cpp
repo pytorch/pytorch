@@ -9,6 +9,13 @@
 
 namespace c10 {
 
+TypeVerbosity type_verbosity() {
+  static const char* c_verbosity = std::getenv("PYTORCH_JIT_TYPE_VERBOSITY");
+  static TypeVerbosity verbosity = c_verbosity ?
+    static_cast<TypeVerbosity>(c10::stoi(c_verbosity)) : TypeVerbosity::Default;
+  return verbosity;
+}
+
 std::ostream& operator<<(std::ostream & out, const Type & t) {
   if (auto value = t.cast<TensorType>()) {
     if  (value->scalarType().has_value()) {
@@ -34,21 +41,24 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
         } else {
           out << "*";
         }
-        if (has_valid_strides_info) {
+        if (has_valid_strides_info &&
+            type_verbosity() >= TypeVerbosity::TypeAndStride) {
           out << ":" << *value->strides()[i];
         }
       }
-      if (value->requiresGrad()) {
-        if (i++ > 0) {
-          out << ", ";
+      if (type_verbosity() >= TypeVerbosity::Full) {
+        if (value->requiresGrad()) {
+          if (i++ > 0) {
+            out << ", ";
+          }
+          out << "requires_grad=" << *value->requiresGrad();
         }
-        out << "requires_grad=" << *value->requiresGrad();
-      }
-      if (value->device()) {
-        if (i++ > 0) {
-          out << ", ";
+        if (value->device()) {
+          if (i++ > 0) {
+            out << ", ";
+          }
+          out << "device=" << *value->device();
         }
-        out << "device=" << *value->device();
       }
       out << ")";
     }
@@ -125,6 +135,10 @@ GeneratorTypePtr GeneratorType::get() {
   static auto value = GeneratorType::create();
   return value;
 }
+QuantizerTypePtr QuantizerType::get() {
+  static auto value = QuantizerType::create();
+  return value;
+}
 QSchemeTypePtr QSchemeType::get() {
   static auto value = QSchemeType::create();
   return value;
@@ -190,6 +204,11 @@ AnyTupleTypePtr AnyTupleType::get() {
 
 AnyClassTypePtr AnyClassType::get() {
   static auto value = AnyClassType::create();
+  return value;
+}
+
+AnyEnumTypePtr AnyEnumType::get() {
+  static auto value = AnyEnumType::create();
   return value;
 }
 
@@ -1326,6 +1345,22 @@ std::shared_ptr<const CompilationUnit> ClassType::compilation_unit() const {
   return cu;
 }
 
+c10::optional<ClassType::Property> ClassType::getProperty(const std::string& name) {
+  for (auto& prop : properties_) {
+    if (name == prop.name) {
+      return prop;
+    }
+  }
+
+  return c10::nullopt;
+}
+
+void ClassType::addProperty(const std::string& name, torch::jit::Function* getter, torch::jit::Function* setter) {
+  TORCH_INTERNAL_ASSERT(!getProperty(name), "Property named ", name, " already exists!");
+  properties_.push_back({name, getter, setter});
+}
+
+
 static bool containsAny(const TypePtr& type) {
   std::vector<TypePtr> to_scan = { type };
   while (!to_scan.empty()) {
@@ -1364,6 +1399,11 @@ SymbolicShape SymbolicShape::merge(const SymbolicShape& other) const {
     dims.push_back(merge_primitive((*dims_)[i], (*other.dims_)[i]));
   }
   return SymbolicShape(std::move(dims));
+}
+
+bool EnumType::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const {
+  return rhs->kind() == TypeKind::AnyType ||
+      rhs->kind() == TypeKind::AnyEnumType || *this == *rhs;
 }
 
 } // namespace c10

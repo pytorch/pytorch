@@ -102,13 +102,13 @@ class RemoteModuleTest(RpcAgentTestFixture):
 
         with self.assertRaisesRegex(
             ValueError,
-            r"Expect `module_cls\(\*args, \*\*kwargs\)` returns an instancee of <class nn.Module>,",
+            r"Expect `module_cls\(\*args, \*\*kwargs\)` returns an instance of <class nn.Module>,",
         ):
             RemoteModule(dst_worker_name, BadModule, args, kwargs)
 
         with self.assertRaisesRegex(
             ValueError,
-            r"Expect `module_cls\(\*args, \*\*kwargs\)` returns an instancee of <class nn.Module>,",
+            r"Expect `module_cls\(\*args, \*\*kwargs\)` returns an instance of <class nn.Module>,",
         ):
             RemoteModule(dst_worker_name, BadModule, args, kwargs)
 

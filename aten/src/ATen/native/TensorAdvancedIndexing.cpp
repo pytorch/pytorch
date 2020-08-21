@@ -567,7 +567,7 @@ SCATTER_GATHER_OP get_operator_enum(const std::string& reduce) {
   else {
     TORCH_CHECK(false,
                 "reduce argument must be either of add, subtract, multiply or divide.");
-  } 
+  }
 }
 
 Tensor& scatter_cpu_scalar_reduce_(Tensor& self, const int64_t dim, const Tensor& index,
@@ -706,10 +706,16 @@ static Tensor & masked_select_out_impl_cpu(Tensor & result, const Tensor & self,
 
   // Create strided view of result before feeding into TensorIterator
   auto strides = DimVector(shape.size(), 0);
+  auto orig_stride = result.strides()[0];
   auto result_strided = result.as_strided(shape, strides);
 
   // serial kernel
-  bool use_serial_kernel = self.numel() < at::internal::GRAIN_SIZE || at::get_num_threads() == 1;
+  // serial kernel requires that src is traversed in its logical order. However, TensorIterator might
+  // have reordered dimensions so that src would be traversed in its physical order, producing wrong
+  // answers. A sufficient condition that no reorder happened is that both _self and _mask is contiguous.
+  // If it is not satisfied, use parallel kernel that handles permutations correctly
+  bool use_serial_kernel = (self.numel() < at::internal::GRAIN_SIZE || at::get_num_threads() == 1 ) &&
+  _self.is_contiguous() && _mask.is_contiguous();
   if (use_serial_kernel) {
     auto iter = TensorIteratorConfig()
       .check_all_same_dtype(false)
@@ -719,7 +725,7 @@ static Tensor & masked_select_out_impl_cpu(Tensor & result, const Tensor & self,
       .add_input(_mask)
       .build();
 
-    masked_select_serial_stub(iter.device_type(), iter);
+    masked_select_serial_stub(iter.device_type(), iter, orig_stride);
     return result;
   }
 
@@ -743,7 +749,7 @@ static Tensor & masked_select_out_impl_cpu(Tensor & result, const Tensor & self,
     .add_input(mask_prefix_sum)
     .build();
 
-  masked_select_stub(iter.device_type(), iter);
+  masked_select_stub(iter.device_type(), iter, orig_stride);
   return result;
 }
 
