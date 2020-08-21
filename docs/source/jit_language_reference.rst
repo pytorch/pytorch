@@ -114,7 +114,6 @@ Example (a type mismatch)
              r = 4
          return r
                 ~ <--- HERE
-     ...
 
 
 Unsupported Typing Constructs
