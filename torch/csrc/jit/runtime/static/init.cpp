@@ -1,5 +1,5 @@
-#include <torch/csrc/jit/runtime/static/impl.h>
 #include <torch/csrc/jit/runtime/static/init.h>
+#include <torch/csrc/jit/runtime/static/impl.h>
 
 namespace torch {
 namespace jit {
@@ -12,12 +12,9 @@ void initStaticRuntimeBindings(PyObject* module) {
        [](const std::shared_ptr<torch::jit::Graph>& g) {
          return StaticRuntime(g);
        })
-      .def(
-          "_jit_to_static_runtime",
-          [](const torch::jit::Module& m,
-             const std::shared_ptr<torch::jit::Graph>& g) {
-            return StaticRuntime(m, g);
-          });
+      .def("_jit_to_static_runtime", [](const torch::jit::Module& m) {
+        return StaticRuntime(m);
+      });
 }
 
 } // namespace jit

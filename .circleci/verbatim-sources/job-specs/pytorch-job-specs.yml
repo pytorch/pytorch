@@ -2,7 +2,7 @@ jobs:
   pytorch_linux_build:
     <<: *pytorch_params
     machine:
-      image: ubuntu-1604:201903-01
+      image: ubuntu-1604:202007-01
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - checkout
@@ -64,6 +64,8 @@ jobs:
               export COMMIT_DOCKER_IMAGE=$output_image-android-x86_32
             elif [[ ${BUILD_ENVIRONMENT} == *"android-ndk-r19c-vulkan-x86_32"* ]]; then
               export COMMIT_DOCKER_IMAGE=$output_image-android-vulkan-x86_32
+            elif [[ ${BUILD_ENVIRONMENT} == *"vulkan-linux"* ]]; then
+              export COMMIT_DOCKER_IMAGE=$output_image-vulkan
             else
               export COMMIT_DOCKER_IMAGE=$output_image
             fi
@@ -74,7 +76,7 @@ jobs:
   pytorch_linux_test:
     <<: *pytorch_params
     machine:
-      image: ubuntu-1604:201903-01
+      image: ubuntu-1604:202007-01
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - checkout
@@ -101,6 +103,8 @@ jobs:
             export COMMIT_DOCKER_IMAGE=$output_image-paralleltbb
           elif [[ ${BUILD_ENVIRONMENT} == *"parallelnative"* ]]; then
             export COMMIT_DOCKER_IMAGE=$output_image-parallelnative
+          elif [[ ${BUILD_ENVIRONMENT} == *"vulkan-linux"* ]]; then
+            export COMMIT_DOCKER_IMAGE=$output_image-vulkan
           else
             export COMMIT_DOCKER_IMAGE=$output_image
           fi
@@ -116,7 +120,7 @@ jobs:
           time docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
 
           if [ -n "${USE_CUDA_DOCKER_RUNTIME}" ]; then
-            export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --runtime=nvidia --shm-size=2g -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
+            export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --gpus all --shm-size=2g -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
           elif [[ ${BUILD_ENVIRONMENT} == *"rocm"* ]]; then
             hostname
             export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --shm-size=8g --ipc=host --device /dev/kfd --device /dev/dri --group-add video -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
@@ -180,7 +184,22 @@ jobs:
         command: |
           set -e
           docker stats --all --no-stream
-          echo "cd workspace; python test/print_test_stats.py test" | docker exec -u jenkins -i "$id" bash
+
+          cat >docker_commands.sh \<<EOL
+          # =================== The following code will be executed inside Docker container ===================
+          set -ex
+          export BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT}
+          export SCRIBE_GRAPHQL_ACCESS_TOKEN="${SCRIBE_GRAPHQL_ACCESS_TOKEN}"
+          export CIRCLE_TAG="${CIRCLE_TAG:-}"
+          export CIRCLE_SHA1="$CIRCLE_SHA1"
+          export CIRCLE_PR_NUMBER="${CIRCLE_PR_NUMBER:-}"
+          export CIRCLE_BRANCH="$CIRCLE_BRANCH"
+          cd workspace
+          python test/print_test_stats.py test
+          EOL
+          echo "(cat docker_commands.sh | docker exec -u jenkins -i "$id" bash) 2>&1" > command.sh
+          unbuffer bash command.sh | ts
+
           echo "Retrieving test reports"
           docker cp $id:/var/lib/jenkins/workspace/test/test-reports ./ || echo 'No test reports found!'
         when: always
