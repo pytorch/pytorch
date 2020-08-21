@@ -473,3 +473,34 @@ class TestQuantizeFxOps(QuantizationTestCase):
                   InplaceAddScalarInplaceFunctionalRelu()]:
             for quant_type in self.static_quant_types:
                 self.checkGraphModeFxOp(m, data, quantized_node, quant_type=quant_type)
+
+
+    @skipIfNoFBGEMM
+    def test_quantized_cat(self):
+        """ quantization of the output of cat will be depend on the
+        input of cat. we only quantize the output of cat when its inputs are quantized.
+        """
+        class QuantizedCat(torch.nn.Module):
+            def __init__(self):
+                super(QuantizedCat, self).__init__()
+                self.conv1 = torch.nn.Conv2d(2, 2, 2).float()
+                self.conv2 = torch.nn.Conv2d(2, 2, 2).float()
+
+            def forward(self, x, y):
+                x = self.conv1(x)
+                y = self.conv2(y)
+                return torch.cat([x, y], 1)
+
+        # TODO: decide whether to quantize in this case
+        # class NonQuantizedCat(torch.nn.Module):
+        #     def __init__(self):
+        #         super(NonQuantizedCat, self).__init__()
+
+        #     def forward(self, x, y):
+        #         return torch.cat([x, y], 1)
+
+        data = (torch.randn(1, 2, 5, 5, dtype=torch.float),
+                torch.randn(1, 2, 5, 5, dtype=torch.float))
+        quantized_node = ('call_function', torch.ops.quantized.cat)
+        for quant_type in self.static_quant_types:
+            self.checkGraphModeFxOp(QuantizedCat(), data, quantized_node, quant_type=quant_type)
