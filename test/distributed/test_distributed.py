@@ -2119,7 +2119,7 @@ class _DistTestBase(object):
                 # Clear gradients manually
                 grad = net.module.weight.grad
                 if grad is not None:
-                    grad.requires_grad_(False)
+                    grad.detach_()
                     grad.zero_()
                 # Forward + BW
                 batch = torch.tensor([rank]).float().cuda(rank)

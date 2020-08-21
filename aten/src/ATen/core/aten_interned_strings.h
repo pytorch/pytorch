@@ -712,6 +712,7 @@ _(aten, triangular_solve) \
 _(aten, tril) \
 _(aten, triplet_margin_loss) \
 _(aten, triu) \
+_(aten, trunc) \
 _(aten, type_as) \
 _(aten, unbind) \
 _(aten, unfold) \
