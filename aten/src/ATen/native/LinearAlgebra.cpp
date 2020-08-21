@@ -4,7 +4,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/LinearAlgebraUtils.h>
-#include <ATen/native/xnnpack/Factory.h>
+#include <ATen/native/xnnpack/Common.h>
 #include <ATen/native/xnnpack/Engine.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Parallel.h>
