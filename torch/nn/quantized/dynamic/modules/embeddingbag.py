@@ -116,7 +116,7 @@ class EmbeddingBag(torch.nn.Module):
         self._packed_params = EmbeddingPackedParams(num_embeddings, embedding_dim, dtype)
         self._packed_params.set_weight(self.qweight)
 
-    def forward(self, indices: Tensor, offsets: Tensor, per_sample_weights: Optional[Tensor] = None,
+    def forward(self, indices: Tensor, offsets: Optional[Tensor] = None, per_sample_weights: Optional[Tensor] = None,
                 compressed_indices_mapping: Optional[Tensor] = None) -> Tensor:
         return torch.ops.quantized.embedding_bag_byte(self._packed_params._packed_weight, indices, offsets, False, 0,
                                                       self.sparse, per_sample_weights, compressed_indices_mapping,
