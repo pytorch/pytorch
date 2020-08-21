@@ -999,6 +999,10 @@ struct to_ir {
 
     def_stack_.back().merged_return_type_ = result_type;
 
+    // If the annotated return type is Any and the result type is not Any,
+    // cast the result to Any to facilitate type unification between return
+    // statements on different code paths (e.g. different branches of an if,
+    // body and containing scope of a loop).
     if (result_type == AnyType::get() && result->type() != AnyType::get()) {
       result = graph->insertUncheckedCast(result, result_type);
     }
