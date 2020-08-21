@@ -19,14 +19,19 @@ class TestForeach(TestCase):
     #
     @dtypes(*[torch.float, torch.double, torch.complex64, torch.complex128])
     def test_sqrt(self, device, dtype):
-        tensors = [torch.ones(20, 20, device=device, dtype=dtype) for _ in range(20)]
+        tensors = [torch.ones(2, 2, device=device, dtype=dtype) for _ in range(2)]
 
+        exp = [torch.sqrt(t) for t in tensors]
         res = torch._foreach_sqrt(tensors)
         torch._foreach_sqrt_(tensors)
 
-        self.assertEqual([torch.sqrt(torch.ones(20, 20, device=device, dtype=dtype)) for _ in range(20)], res)
+        self.assertEqual([torch.sqrt(torch.ones(2,2, device=device, dtype=dtype)) for _ in range(2)], res)
         self.assertEqual(tensors, res)
-
+        self.assertEqual(exp, res)
+        print(exp, res)
+        print(torch._foreach_div(res, exp))
+        
+'''
     @dtypes(*[torch.float, torch.double, torch.complex64, torch.complex128])
     def test_exp(self, device, dtype):
         tensors = [torch.ones(20, 20, device=device, dtype=dtype) for _ in range(20)]
@@ -271,6 +276,7 @@ class TestForeach(TestCase):
             with self.assertRaises(RuntimeError):
                 bin_op(tensors1, tensors2)
 
+'''
 instantiate_device_type_tests(TestForeach, globals())
 
 if __name__ == '__main__':

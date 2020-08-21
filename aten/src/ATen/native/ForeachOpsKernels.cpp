@@ -117,22 +117,22 @@ void foreach_tensor_mul_scalar_kernel_slow_(TensorList tensors, Scalar scalar) {
   }
 }
 
-std::vector<Tensor> foreach_tensor_add_list_kernel_slow(TensorList tensors1, TensorList tensors2) {
+std::vector<Tensor> foreach_tensor_add_list_kernel_slow(TensorList tensors1, TensorList tensors2, Scalar alpha) {
   verify_list(tensors1, tensors2);
 
   std::vector<Tensor> result;
   for (int i = 0; i < tensors1.size(); i++) {
-    result.emplace_back(tensors1[i].add(tensors2[i]));
+    result.emplace_back(tensors1[i].add(tensors2[i], alpha));
   }
 
   return result;
 }
 
-void foreach_tensor_add_list_kernel_slow_(TensorList tensors1, TensorList tensors2) {
+void foreach_tensor_add_list_kernel_slow_(TensorList tensors1, TensorList tensors2, Scalar alpha) {
   verify_list(tensors1, tensors2);
 
   for (int i = 0; i < tensors1.size(); i++) {
-    tensors1[i].add_(tensors2[i]);
+    tensors1[i].add_(tensors2[i], alpha);
   }
 }
 
