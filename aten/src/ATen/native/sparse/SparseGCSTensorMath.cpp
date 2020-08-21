@@ -30,16 +30,23 @@ Tensor& add_out_dense_sparse_gcs_cpu(Tensor& out, const Tensor& dense, const Spa
   TORCH_CHECK(!out.is_cuda(), "add: expected 'out' to be CPU tensor, but got CUDA tensor");
   TORCH_CHECK(!src.is_cuda(), "add: expected 'other' to be a CPU tensor, but got a CUDA tensor");
 
-  TORCH_CHECK(dense.sizes().equals(sparse.sizes()), "add: expected 'self' and 'other' to have same size, but self has size ",
-    dense.sizes(), " while other has size ", sparse.sizes(), " (FYI: dense-sparse addition does not currently support broadcasting)");
+  TORCH_CHECK(dense.sizes().equals(src.sizes()), "add: expected 'self' and 'other' to have same size, but self has size ",
+    dense.sizes(), " while other has size ", src.sizes(), " (FYI: dense-sparse addition does not currently support broadcasting)");
 
-  auto commonDtype = promoteTypes(dense.scalar_type(), sparse.scalar_type());
+  auto commonDtype = promoteTypes(dense.scalar_type(), src.scalar_type());
 
   TORCH_CHECK(canCast(commonDtype, out.scalar_type()), "Can't convert result type ",
               commonDtype, " to output ", out.scalar_type(), " in add operation");
 
+  Tensor src_values = src.values().to(commonDtype);
+  Tensor src_pointers = src.pointers();
+  Tensor src_indices = src.indices();
+
   out.resize_as_(dense);
 
+  AT_DISPATCH_ALL_TYPES(commonDtype, "add_dense_sparse_gcs", [&] {
+    
+  });
   
   return out;
 }
