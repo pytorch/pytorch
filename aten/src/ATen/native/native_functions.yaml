@@ -2428,8 +2428,9 @@
   dispatch:
     CPU, CUDA: neg_out
 
-- func: packbits(Tensor bit_array, int? dim=None, bool big_endian=True) -> Tensor
+- func: packbits(Tensor self, int? dim=None, bool big_endian=True) -> Tensor
   use_c10_dispatcher: full
+  variants: function, method
 
 - func: repeat(Tensor self, int[] repeats) -> Tensor
   use_c10_dispatcher: full

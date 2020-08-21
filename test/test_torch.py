@@ -16945,6 +16945,39 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         self.assertEqual(r.dtype, a.dtype)
 
     @onlyOnCPUAndCUDA
+    @dtypes(torch.bool)
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_packbits(self, device, dtype):
+        a = np.array([[[1,0,1],
+                       [0,1,0]],
+                      [[1,1,0],
+                       [0,0,1]]])
+        at = torch.tensor(a, dtype=dtype, device=device)
+
+        # test with dim=None
+        actual = torch.packbits(at)
+        expected = np.packbits(a)
+        self.assertEqual(actual, expected)
+
+        # test with dim=0
+        actual = torch.packbits(at, dim=0)
+        expected = np.packbits(a, axis=0)
+        print(actual)
+        print(expected)
+
+        self.assertEqual(actual, expected)
+
+        # # test with dim=1
+        # actual = torch.packbits(at, dim=1)
+        # expected = np.packbits(a, axis=1)
+        # self.assertEqual(actual, expected)
+
+        # # test with dim=-1
+        # actual = torch.packbits(at, dim=-1)
+        # expected = np.packbits(a, axis=-1)
+        # self.assertEqual(actual, expected)
+
+    @onlyOnCPUAndCUDA
     @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_gcd(self, device, dtype):

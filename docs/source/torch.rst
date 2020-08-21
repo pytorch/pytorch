@@ -421,6 +421,7 @@ Other Operations
     meshgrid
     lcm
     logcumsumexp
+    packbits
     renorm
     repeat_interleave
     roll

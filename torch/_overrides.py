@@ -150,7 +150,7 @@ def get_ignored_functions():
         torch.is_vulkan_available,
         torch.is_deterministic,
         torch.set_deterministic,
-        torch.unify_type_list,
+        torch.unify_type_list
     )
 
 def get_testing_overrides():

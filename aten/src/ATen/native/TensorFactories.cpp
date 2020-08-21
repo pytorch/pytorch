@@ -472,8 +472,8 @@ Tensor scalar_tensor(Scalar s, const TensorOptions& options) {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ packbits ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor packbits(const Tensor& bit_array, c10::optional<int64_t> dim, bool big_endian) {
-  return at::native::packbits_test::packbits(bit_array, dim, big_endian);
+Tensor packbits(const Tensor& self, c10::optional<int64_t> dim, bool big_endian) {
+  return at::native::packbits_helper(self, dim, big_endian);
 }
 
 // Tensor packbits(const Tensor& bit_array, int64_t dim, const TensorOptions& options) {
