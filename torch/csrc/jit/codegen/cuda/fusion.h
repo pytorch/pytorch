@@ -162,8 +162,10 @@ class TORCH_CUDA_API Fusion final {
 
   // Print transformations used in fusion (can be very verbose)
   void printTransforms();
+
   // Lower the fusion and print a kernel
   void printKernel();
+
   // Register the Val with this fusion
   StmtNameType registerVal(Val* val);
 
@@ -198,10 +200,7 @@ class TORCH_CUDA_API Fusion final {
   std::unordered_set<Expr*> unordered_uses(Val* val) const;
 
   // Return the Expr that produces val
-  Expr* origin(Val* val) const;
-
-  // Return the Expr that produces val (const version)
-  const Expr* origin(const Val* val) const;
+  Expr* origin(const Val* val) const;
 
   // Indicate to kernel to set itself up to generate random numbers
   bool hasRNG();
@@ -247,7 +246,7 @@ class TORCH_CUDA_API Fusion final {
   StmtNameType expr_name_counter_ = 0;
 
   // Dependency tracking for Vals. Where did it come from? Where is it used?
-  std::unordered_map<Val*, Expr*> origin_;
+  std::unordered_map<const Val*, Expr*> origin_;
   std::unordered_map<Val*, std::unordered_set<Expr*>> uses_;
 
   // Fusion inputs and outputs
@@ -257,6 +256,7 @@ class TORCH_CUDA_API Fusion final {
   // Lowered IR
   std::unordered_set<Val*> lowered_val_set_;
   std::unordered_set<Expr*> lowered_expr_set_;
+  std::unordered_map<const Val*, Expr*> lowered_origin_;
 };
 
 } // namespace fuser

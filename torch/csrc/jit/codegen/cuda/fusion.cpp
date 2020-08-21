@@ -335,9 +335,6 @@ void Fusion::assertInFusion(const Statement* stmt, const std::string& msg)
   if (inFusion(stmt)) {
     return;
   }
-  if (inKernelIr(stmt)) {
-    return;
-  }
   TORCH_CHECK(false, msg, " it was not found in the active fusion.");
 }
 
@@ -478,13 +475,11 @@ StmtNameType Fusion::registerLoweredExpr(Expr* expr) {
 
   for (Val* input : expr->inputs()) {
     TORCH_CHECK(inKernelIr(input));
-    assertInFusion(input);
   }
 
   for (Val* output : expr->outputs()) {
     TORCH_CHECK(inKernelIr(output));
-    assertInFusion(output);
-    TORCH_CHECK(origin_.insert({output, expr}).second);
+    TORCH_CHECK(lowered_origin_.insert({output, expr}).second);
   }
 
   lowered_expr_set_.insert(expr);
@@ -518,20 +513,17 @@ std::unordered_set<Expr*> Fusion::unordered_uses(Val* val) const {
   return std::unordered_set<Expr*>();
 }
 
-Expr* Fusion::origin(Val* val) const {
-  assertInFusion(val, "Cannot detect the origin of val, ");
-  auto it = origin_.find(val);
-  if (it == origin_.end())
-    return nullptr;
-  return it->second;
-}
-
-const Expr* Fusion::origin(const Val* val) const {
-  assertInFusion(val, "Cannot dettect the origin of val, ");
-  auto it = origin_.find(const_cast<Val*>(val)); // NOLINT
-  if (it == origin_.end())
-    return nullptr;
-  return it->second;
+Expr* Fusion::origin(const Val* val) const {
+  // TODO(kir): remove the lowered branch
+  if (kir::isLoweredVal(val)) {
+    TORCH_INTERNAL_ASSERT(inKernelIr(val));
+    auto it = lowered_origin_.find(val);
+    return it != lowered_origin_.end() ? it->second : nullptr;
+  } else {
+    assertInFusion(val, "Cannot detect the origin of val, ");
+    auto it = origin_.find(val);
+    return it != origin_.end() ? it->second : nullptr;
+  }
 }
 
 bool Fusion::hasInput(const Val* val) const {
