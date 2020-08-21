@@ -119,8 +119,14 @@ def _proxy_placeholder(name, delegate):
 #   - root - the `nn.Module` instance to trace
 #   - delegate : An instance of a Delegate object
 def symbolic_trace(root : torch.nn.Module, delegate_class=DefaultDelegate):
+    if isinstance(root, GraphModule):
+        # graph modules already have `.root` attribute, let's avoid `.root.root`
+        new_root = root.root
+    else:
+        new_root = root
+
     graph = Graph()
-    delegate = delegate_class(root, graph)
+    delegate = delegate_class(new_root, graph)
 
     fn = type(root).forward
 
@@ -128,7 +134,7 @@ def symbolic_trace(root : torch.nn.Module, delegate_class=DefaultDelegate):
     total_args = co.co_argcount + co.co_kwonlyargcount
     names_iter = iter(co.co_varnames)
     next(names_iter)  # skip self
-    args = [root]
+    args = [root]  # calling the original root in case of re-tracing GraphModule
     args.extend(_proxy_placeholder(next(names_iter), delegate) for name in range(1, total_args))
 
     if co.co_kwonlyargcount > 0 or co.co_flags & HAS_VARSTUFF:
@@ -145,11 +151,11 @@ def symbolic_trace(root : torch.nn.Module, delegate_class=DefaultDelegate):
         if not delegate.is_leaf_module(mod):
             return orig_call(mod, *args, **kwargs)
         else:
-            target = _find_module(root, mod)
+            target = _find_module(new_root, mod)
             return _create_proxy(delegate, 'call_module', target, args, kwargs)
     try:
         torch.nn.Module.__call__ = module_call_wrapper
         graph.output(delegate.create_arg(fn(*args)))
     finally:
         torch.nn.Module.__call__ = orig_call
-    return GraphModule(root, graph)
+    return GraphModule(new_root, graph)

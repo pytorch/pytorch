@@ -40,6 +40,14 @@ class TestFX(TestCase):
 
         ms = torch.jit.script(gm)
 
+        gmr = symbolic_trace(gm)
+        self.assertEqual(len(gm.graph.nodes), len(gmr.graph.nodes))
+        for n, nr in zip(gm.graph.nodes, gmr.graph.nodes):
+            self.assertEqual(n.op, nr.op)
+            self.assertEqual(n.target, nr.target)
+            self.assertEqual(n.name, nr.name)
+        self.assertEqual(gm.graph.result.name, gmr.graph.result.name)
+
         class M2(torch.nn.Module):
             def forward(self, A):
                 m, idx = torch.max(A, 0)
