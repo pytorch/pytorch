@@ -416,13 +416,22 @@ std::shared_ptr<SugaredEnumClass> SugaredEnumClass::create(
 
   std::map<std::string, SugaredValuePtr> enum_values;
   auto enum_values_list = py::cast<py::list>(obj);
+
+  auto enum_value_ivalues = c10::impl::GenericList(enum_type);
   for (auto enum_value : enum_values_list) {
     auto enum_name = enum_value.attr("name").cast<std::string>();
     auto enum_sugared_value =
         toSugaredValue(py::reinterpret_steal<py::object>(enum_value), m, loc);
     enum_values.insert(std::make_pair(enum_name, enum_sugared_value));
+    enum_value_ivalues.push_back(toIValue(enum_value, enum_type));
   }
-  return std::make_shared<SugaredEnumClass>(enum_values, enum_type);
+
+  IValue enum_value_list_ivalues(enum_value_ivalues);
+  auto enum_values_list_constant = std::make_shared<SimpleValue>(
+      m.graph()->insertConstant(enum_value_list_ivalues, loc));
+
+  return std::make_shared<SugaredEnumClass>(
+      enum_values, enum_values_list_constant, enum_type);
 }
 
 std::shared_ptr<SugaredValue> SugaredEnumClass::attr(
@@ -437,9 +446,10 @@ std::shared_ptr<SugaredValue> SugaredEnumClass::attr(
   return it->second;
 }
 
-SugaredValuePtr SugaredEnumClass::iter(const SourceRange& loc, Function& m) {
-  // TODO(gmagogsfm): Implement getting iterator.
-  TORCH_INTERNAL_ASSERT(false);
+SugaredValuePtr SugaredEnumClass::iter(
+    const SourceRange& /*loc*/,
+    Function& /*m*/) {
+  return enum_values_list_constant_;
 }
 
 // helper function for instantiating a SugaredValue from an IValue
@@ -696,6 +706,36 @@ std::shared_ptr<SugaredValue> BooleanDispatchValue::call(
   return value->call(loc, caller, inputs, attributes, n_binders);
 }
 
+std::shared_ptr<SugaredValue> PythonExceptionValue::call(
+    const SourceRange& loc,
+    Function& caller,
+    at::ArrayRef<NamedValue> inputs,
+    at::ArrayRef<NamedValue> attributes,
+    size_t /*n_binders*/) {
+  Value* error_message = nullptr;
+  if (inputs.size() == 0) {
+    error_message = insertConstant(*caller.graph(), "", loc);
+  } else if (inputs.size() == 1) {
+    error_message = inputs.at(0).value(*caller.graph());
+  } else {
+    std::vector<Value*> message_values;
+    message_values.reserve(inputs.size() + attributes.size());
+
+    for (auto inp : inputs) {
+      message_values.push_back(inp.value(*caller.graph()));
+    }
+    for (auto kwarg_inp : attributes) {
+      message_values.push_back(kwarg_inp.value(*caller.graph()));
+    }
+    error_message =
+        caller.graph()
+            ->insertNode(caller.graph()->createTuple(message_values))
+            ->output();
+  }
+
+  return std::make_shared<ExceptionMessageValue>(error_message);
+}
+
 bool isNamedTupleClass(const py::object& obj) {
   auto tuple_type = reinterpret_cast<PyObject*>(&PyTuple_Type);
   return PyObject_IsSubclass(obj.ptr(), tuple_type) &&
@@ -857,6 +897,11 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   if (!builtin_name.is_none()) {
     return std::make_shared<BuiltinFunction>(
         Symbol::fromQualString(py::str(builtin_name)), c10::nullopt);
+  }
+
+  if (py::cast<bool>(py::module::import("torch._jit_internal")
+                         .attr("_is_exception")(obj))) {
+    return std::make_shared<PythonExceptionValue>(obj);
   }
 
   if (py::isinstance<py::function>(obj)) {

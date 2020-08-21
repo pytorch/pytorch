@@ -26,7 +26,6 @@ from jit.test_python_ir import TestPythonIr  # noqa: F401
 from jit.test_functional_blocks import TestFunctionalBlocks  # noqa: F401
 from jit.test_remove_mutation import TestRemoveMutation  # noqa: F401
 from jit.test_torchbind import TestTorchbind  # noqa: F401
-from jit.test_op_normalization import TestOpNormalization  # noqa: F401
 from jit.test_module_interface import TestModuleInterface  # noqa: F401
 from jit.test_onnx_export import TestONNXExport  # noqa: F401
 from jit.test_with import TestWith  # noqa: F401
@@ -55,7 +54,7 @@ from torch.testing._internal.common_utils import run_tests, IS_WINDOWS, TEST_WIT
 from torch.testing._internal.jit_utils import JitTestCase, enable_cpu_fuser, disable_autodiff_subgraph_inlining, \
     _trace, enable_cpu_fuser_if, do_input_map, get_execution_plan, \
     execWrapper, _inline_everything, _tmp_donotuse_dont_inline_everything, \
-    RUN_CUDA, op_alias_mappings
+    RUN_CUDA
 from torch.testing._internal.jit_metaprogramming_utils import create_script_fn, nn_functional_tests, get_script_args, \
     get_call, script_template, EXCLUDE_SCRIPT, additional_module_tests, EXCLUDE_SCRIPT_MODULES, \
     get_nn_module_name_from_kwargs, script_method_template, create_traced_fn
@@ -1199,6 +1198,56 @@ graph(%Ra, %Rb):
           return (%z)""", m._c._get_method("forward").graph)
 
         FileCheck().check("my::matched_conv_bn").run(m._c._get_method("forward").graph)
+
+    def test_reconstruct_scopes(self):
+        class SubModule(torch.nn.Module):
+            def __init__(self):
+                super(SubModule, self).__init__()
+
+            def bar(self, x):
+                return x + x
+
+            def forward(self, x):
+                return x * self.bar(x)
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.sub = SubModule()
+
+            def forward(self, x):
+                return self.sub(x) + x
+
+        traced = torch.jit.trace(MyModule(), torch.zeros(1))
+        g = traced.graph
+        torch._C._jit_pass_inline(g)
+        torch._C._jit_pass_reconstruct_scopes(traced._c, g)
+        FileCheck().check("scope: top(MyModule).sub(SubModule).forward").run(g)
+
+    def test_reconstruct_scopes_duplicated_class_types(self):
+        class SubModule(torch.nn.Module):
+            def __init__(self):
+                super(SubModule, self).__init__()
+
+            def forward(self, x):
+                return x + 2
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.sub1 = SubModule()
+                self.sub2 = SubModule()
+
+            def forward(self, x):
+                return self.sub1(x) + self.sub2(x)
+
+        traced = torch.jit.trace(MyModule(), torch.zeros(1))
+        g = traced.graph
+        torch._C._jit_pass_inline(g)
+        torch._C._jit_pass_reconstruct_scopes(traced._c, g)
+        FileCheck().check_dag("scope: top(MyModule).sub1(SubModule).forward")  \
+                   .check_dag("scope: top(MyModule).sub2(SubModule).forward")  \
+                   .run(g)
 
     def test_expand_quantlint(self):
         pass
@@ -4353,6 +4402,20 @@ a")
             return a + a, "ab" == "b", "ab" != "b", "ab" == "ab", "ab" != "ab"
 
         self.checkScript(foo, ())
+
+    def test_string_sort(self):
+        @torch.jit.script
+        def foo(strs: List[str]):
+            return sorted(strs)
+
+        FileCheck() \
+            .check("graph") \
+            .check_next("str[] = aten::sorted") \
+            .check_next("return") \
+            .run(str(foo.graph))
+
+        inputs = ["str3", "str2", "str1"]
+        self.assertEqual(foo(inputs), sorted(inputs))
 
     def test_string_new_line(self):
         with self.assertRaisesRegex(RuntimeError, "expected a valid token*"):
@@ -8412,7 +8475,7 @@ a")
 
         with self.assertRaisesRegex(
                 TypeError,
-                "Linear' object for attribute 'invalid' is not a valid constant"):
+                "Linear' object in attribute 'Foo.invalid' is not a valid constant"):
             Foo()
 
         class Foo2(torch.jit.ScriptModule):
@@ -12344,10 +12407,9 @@ a")
         ''')
 
         cu.foo(torch.tensor(0))
-        with self.assertRaisesRegex(torch.jit.Error, "Exception"):
+        with self.assertRaisesRegex(torch.jit.Error, "3"):
             cu.foo(torch.tensor(1))
 
-        @torch.jit.script
         def foo(cond):
             a = 3
             if bool(cond):
@@ -12356,24 +12418,19 @@ a")
                     raise ArbitraryError
             return a
 
-        foo(torch.tensor(0))
-        # we don't currently validate the name of the exception
-        with self.assertRaisesRegex(torch.jit.Error, "Exception"):
-            foo(torch.tensor(1))
+        with self.assertRaisesRegex(RuntimeError, "undefined value ArbitraryError"):
+            torch.jit.script(foo)
 
-        @torch.jit.script
-        def foo_except_used():
+        def exception_as_value():
             a = Exception()
             print(a)
-            raise a
 
-        # a not DCEd
-        with self.assertRaisesRegex(RuntimeError, "expected value of type Tensor"):
-            foo_except_used()
+        with self.assertRaisesRegex(RuntimeError, "cannot be used as a value"):
+            torch.jit.script(exception_as_value)
 
         @torch.jit.script
         def foo_no_decl_always_throws():
-            raise "Hi"
+            raise RuntimeError("Hi")
 
         # function that has no declared type but always throws set to None
         output_type = next(foo_no_decl_always_throws.graph.outputs()).type()
@@ -12387,10 +12444,11 @@ a")
         output_type = next(foo_decl_always_throws.graph.outputs()).type()
         self.assertTrue(str(output_type) == "Tensor")
 
-        # We don't validate the expr following raise
-        @torch.jit.script
         def foo():
             raise 3 + 4
+
+        with self.assertRaisesRegex(RuntimeError, "must derive from BaseException"):
+            torch.jit.script(foo)
 
         # a escapes scope
         @torch.jit.script
@@ -12405,6 +12463,20 @@ a")
             return a
         self.assertEqual(foo(), 1)
 
+        @torch.jit.script
+        def tuple_fn():
+            raise RuntimeError("hello", "goodbye")
+
+        with self.assertRaisesRegex(torch.jit.Error, "hello, goodbye"):
+            tuple_fn()
+
+        @torch.jit.script
+        def no_message():
+            raise RuntimeError
+
+        with self.assertRaisesRegex(torch.jit.Error, "RuntimeError"):
+            no_message()
+
     def test_assertions(self):
         cu = torch.jit.CompilationUnit('''
             def foo(cond):
@@ -12413,7 +12485,7 @@ a")
         ''')
 
         cu.foo(torch.tensor(1))
-        with self.assertRaisesRegex(torch.jit.Error, "Exception"):
+        with self.assertRaisesRegex(torch.jit.Error, "AssertionError: hi"):
             cu.foo(torch.tensor(0))
 
         @torch.jit.script
@@ -12422,7 +12494,7 @@ a")
 
         foo(torch.tensor(1))
         # we don't currently validate the name of the exception
-        with self.assertRaisesRegex(torch.jit.Error, "Exception"):
+        with self.assertRaisesRegex(torch.jit.Error, "AssertionError: hi"):
             foo(torch.tensor(0))
 
     def test_python_op_exception(self):
@@ -13211,7 +13283,7 @@ a")
         def no_ifs_added(x):
             # type: (int) -> int
             if x < 0:
-                raise RunTimeError("hi")
+                raise RuntimeError("hi")
             return x
 
         self.checkScript(no_ifs_added, (1,))
@@ -13226,7 +13298,7 @@ a")
                 else:
                     a = 2
             else:
-                raise RunTimeError("hi")
+                raise RuntimeError("hi")
             return a + 2
 
         self.checkScript(test_if_might, (1,))
@@ -13238,7 +13310,7 @@ a")
             # type: (int)
             if x >= 0:
                 for i in range(x):
-                    raise RunTimeError("hi")
+                    raise RuntimeError("hi")
             else:
                 return 5
             return x + 3
@@ -13255,7 +13327,7 @@ a")
             i = 0
             for i in range(5):
                 if i == x:
-                    raise RunTimeError("hi")
+                    raise RuntimeError("hi")
                 else:
                     continue
                 print(i)
@@ -13272,7 +13344,7 @@ a")
                 # type: (Tensor) -> Tensor
                 output = torch.tanh(self)
                 def backward(grad_output):
-                    raise "Hi"
+                    raise RuntimeError("Hi")
         ''')
         with self.assertRaisesRegex(RuntimeError, "does not return along all"):
             cu = torch.jit.CompilationUnit(code)
@@ -13283,7 +13355,7 @@ a")
                 if x > 0:
                     a = 0
                     def backward(grad_output):
-                        raise "Hi"
+                        raise RuntimeError("Hi")
                     a = a + 1
                 else:
                     return x
@@ -15421,7 +15493,7 @@ def add_autograd_test(
 
                 # alias annotation testing
                 if is_inplace and test_name not in EXCLUDE_SCRIPT:
-                    check_alias_annotation(op_alias_mappings.get(name, name), (self_variable,) + args_variable, kwargs_variable)
+                    check_alias_annotation(name, (self_variable,) + args_variable, kwargs_variable)
 
             check(name)
             inplace_name = name + '_'

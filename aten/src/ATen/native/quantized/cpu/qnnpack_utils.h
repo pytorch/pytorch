@@ -7,6 +7,7 @@
 
 #include <ATen/native/quantized/cpu/conv_packed_params.h>
 #include <ATen/native/quantized/cpu/packed_params.h>
+#include <ATen/native/utils/Factory.h>
 
 #include <utility>
 
@@ -36,7 +37,8 @@ struct PackedLinearWeightsQnnp : public LinearPackedParamsBase {
       std::vector<uint8_t>&& w_zps)
       : w(std::move(w)),
         orig_weight(std::move(orig_weight)),
-        bias_(std::move(bias)),
+        bias_(at::native::mobile::allocate_padded_contiguous_if_needed(
+            bias, bias.suggest_memory_format())),
         input_scale(std::move(input_scale)),
         w_scales(w_scales),
         w_zero_points(std::move(w_zps)) {}
@@ -255,7 +257,8 @@ std::vector<float> generate_requantization_scales(
     requant_scales.resize(num_output_channels_padded);
   }
   for (int i = 0; i < num_output_channels_padded; ++i) {
-    requant_scales[i] = weight_scales_data[i] * input_scale / output_scale;
+    auto inverse_output_scale = 1.f /output_scale;
+    requant_scales[i] = (weight_scales_data[i] * input_scale) * inverse_output_scale;
     TORCH_CHECK(
         (requant_scales[i] > 0.0f && std::isnormal(requant_scales[i])),
         "failed to create op with requantization scale: ",

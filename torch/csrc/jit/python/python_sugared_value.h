@@ -252,8 +252,10 @@ struct VISIBILITY_HIDDEN SugaredDict : public SugaredValue {
 struct VISIBILITY_HIDDEN SugaredEnumClass : public SugaredValue {
   explicit SugaredEnumClass(
       std::map<std::string, SugaredValuePtr> enum_values,
+      SugaredValuePtr enum_values_list_constant,
       EnumTypePtr enum_type)
       : enum_values_(std::move(enum_values)),
+        enum_values_list_constant_(std::move(enum_values_list_constant)),
         enum_type_(std::move(enum_type)) {}
 
   static std::shared_ptr<SugaredEnumClass> create(
@@ -276,6 +278,7 @@ struct VISIBILITY_HIDDEN SugaredEnumClass : public SugaredValue {
   // Using ordered map here to ensure ordering of enum values is deterministic
   // when iterating through them.
   std::map<std::string, SugaredValuePtr> enum_values_;
+  SugaredValuePtr enum_values_list_constant_;
   EnumTypePtr enum_type_;
 };
 
@@ -316,6 +319,23 @@ struct VISIBILITY_HIDDEN PythonClassValue : public ClassValue {
 
  private:
   py::object py_type_;
+};
+
+struct VISIBILITY_HIDDEN PythonExceptionValue : public ExceptionValue {
+  explicit PythonExceptionValue(const py::object& exception_class)
+      : ExceptionValue(
+            py::str(py::getattr(exception_class, "__name__", py::str("")))) {}
+
+  std::string kind() const override {
+    return "Python exception";
+  }
+
+  std::shared_ptr<SugaredValue> call(
+      const SourceRange& loc,
+      Function& caller,
+      at::ArrayRef<NamedValue> inputs,
+      at::ArrayRef<NamedValue> attributes,
+      size_t n_binders) override;
 };
 
 } // namespace jit
