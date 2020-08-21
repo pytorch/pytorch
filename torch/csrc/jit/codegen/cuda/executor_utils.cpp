@@ -267,8 +267,35 @@ NvrtcFunction nvrtcCompile(
 
   const std::string compute = "--gpu-architecture=compute_" +
       std::to_string(major) + std::to_string(minor);
-  const std::vector<const char*> args = {
+  std::vector<const char*> args = {
       "--std=c++14", compute.c_str(), "-default-device"};
+
+  const char* disable_fma = getenv("PYTORCH_CUDA_FUSER_DISABLE_FMA");
+  // int disable_fma_flag = disable_fma ? atoi(disable_fma) : 0;
+  if (disable_fma && atoi(disable_fma)) {
+    printf("disabling fmad\n");
+    args.push_back("--fmad=false");
+  }
+
+  const char* ptxas_opt_level = getenv("PYTORCH_CUDA_FUSER_JIT_OPT_LEVEL");
+  uint32_t jit_opt_level;
+
+  std::vector<CUjit_option> options;
+  std::vector<void*> option_vals;
+
+  if (ptxas_opt_level) {
+    int val = atoi(ptxas_opt_level);
+    if (val <= 4 && val >= 0) {
+      jit_opt_level = static_cast<uint32_t>(val);
+      options.push_back(CU_JIT_OPTIMIZATION_LEVEL);
+      option_vals.emplace_back(&jit_opt_level);
+    } else {
+      TORCH_WARN_ONCE(
+          "acceptable range for PYTORCH_CUDA_FUSER_JIT_OPT_LEVEL is between 0 and 4, but received ",
+          jit_opt_level,
+          ", ignoring the option");
+    }
+  }
 
   at::globalContext().getNVRTC().nvrtcAddNameExpression(
       program, func_name.c_str());
@@ -323,9 +350,9 @@ NvrtcFunction nvrtcCompile(
         ptx.data(),
         ptx_size,
         "compiling PTX",
-        0,
-        nullptr,
-        nullptr));
+        options.size(),
+        options.data(),
+        option_vals.data()));
 
     size_t cubinSize;
     void* cubin;
@@ -348,8 +375,12 @@ NvrtcFunction nvrtcCompile(
         &(compiled_kernel_.module), cubin));
   } else {
     // load ptx directly
-    AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuModuleLoadData(
-        &(compiled_kernel_.module), ptx.data()));
+    AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuModuleLoadDataEx(
+        &(compiled_kernel_.module),
+        ptx.data(),
+        options.size(),
+        options.data(),
+        option_vals.data()));
   }
   AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuModuleGetFunction(
       &(compiled_kernel_.function),
