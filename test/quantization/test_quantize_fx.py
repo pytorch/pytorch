@@ -283,11 +283,15 @@ class TestQuantizeFxOps(QuantizationTestCase):
     def test_quantized_binary_op(self):
         self._test_quantized_binary_op_impl(
             operator.add, operator.iadd, torch.ops.quantized.add)
+        self._test_quantized_binary_op_impl(
+            operator.mul, operator.imul, torch.ops.quantized.mul)
 
     @skipIfNoFBGEMM
     def test_quantized_binary_op_relu(self):
         self._test_quantized_binary_op_relu_impl(
             operator.add, operator.iadd, torch.ops.quantized.add_relu)
+        self._test_quantized_binary_op_relu_impl(
+            operator.mul, operator.imul, torch.ops.quantized.mul_relu)
 
     @skipIfNoFBGEMM
     def test_quantized_cat(self):
