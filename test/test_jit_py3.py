@@ -550,7 +550,7 @@ class TestScriptPy3(JitTestCase):
         """
         def if_function(inp: torch.Tensor) -> Any:
             if inp.shape[0] == 1:
-                return inp*inp
+                return inp * inp
             else:
                 return "str"
 
