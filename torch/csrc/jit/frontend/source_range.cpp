@@ -122,7 +122,8 @@ C10_EXPORT void SourceRange::print_with_context(
   // print out inital context
   out << str.substr(begin_context, start() - begin_context);
   size_t line_start = start();
-  size_t line_end = end();
+  size_t line_end =
+      (str.size() < end() ? str.size() : end()); // end of lines to highlight
   if (highlight) {
     line_end = start();
     while (line_start < end()) {
