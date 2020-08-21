@@ -880,6 +880,11 @@ class TestPostTrainingDynamic(QuantizationTestCase):
         self.checkDynamicQuantizedModule(quantized_model.emb, torch.nn.quantized.dynamic.EmbeddingBag, torch.quint8)
         self.checkScriptable(quantized_model, [[indices, offsets, per_sample_weights]], check_save_load=True)
 
+        # Test set API
+        quantized_model = quantize_dynamic(model, set([nn.EmbeddingBag]), dtype=torch.quint8)
+        self.assertTrue('DynamicQuantizedEmbeddingBag' in str(quantized_model))
+        self.checkDynamicQuantizedModule(quantized_model.emb, torch.nn.quantized.dynamic.EmbeddingBag, torch.quint8)
+
 class TestQuantizationAwareTraining(QuantizationTestCase):
     def test_manual(self):
         for qengine in supported_qengines:
