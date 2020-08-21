@@ -289,7 +289,7 @@ static inline __device__ void atomicAdd(bool *address, bool val) {
 // tensors.
 template<typename T>
 inline __device__ void gpuAtomicMul(T * address, T val) {
-  assert(0);
+  CUDA_KERNEL_ASSERT(0);
 }
 
 inline __device__ at::Half gpuAtomicMul(at::Half * address, at::Half val) {
@@ -327,11 +327,5 @@ inline __device__ float gpuAtomicMul (float * address, float val) {
 
     // Note: uses integer comparison to avoid hang in case of NaN (since NaN != NaN)
   } while (assumed != old);
-}
-
-template<typename T>
-inline __device__ void gpuAtomicMul (c10::complex<T> * address, c10::complex<T> val) {
-  gpuAtomicMul(&address->real_, val.real_);
-  gpuAtomicMul(&address->imag_, val.imag_);
 }
 #endif // THC_ATOMICS_INC

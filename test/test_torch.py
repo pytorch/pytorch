@@ -13437,6 +13437,8 @@ class TestTorchDeviceType(TestCase):
             ]
 
             for input, src, result, operation in test_data:
+                if operator == "multiply" and torch.is_complex(input):
+                    continue
                 input.scatter_(0, index, src, reduce=operation)
                 self.assertEqual(input, result)
 
@@ -13459,6 +13461,8 @@ class TestTorchDeviceType(TestCase):
             ]
 
             for input, src, result, operation in test_data:
+                if operator == "multiply" and torch.is_complex(input):
+                    continue
                 input.scatter_(0, index, src, reduce=operation)
                 self.assertEqual(input, result)
 
@@ -13492,6 +13496,8 @@ class TestTorchDeviceType(TestCase):
             ]
 
             for input, src, result, operation in test_data:
+                if operator == "multiply" and torch.is_complex(input):
+                    continue
                 input.scatter_(0, index, src, reduce=operation)
                 self.assertEqual(input, result, msg=f"result: {result} input: {input} method: {str(operation)}")
 

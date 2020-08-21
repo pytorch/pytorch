@@ -1,7 +1,6 @@
 #include <gtest/gtest.h>
 #include <THC/THCAtomics.cuh>
-
-#include <stdio.h>
+#include <cmath>
 
 const int blocksize = 256;
 const int factor = 4;
@@ -75,7 +74,7 @@ void test_atomic_mul() {
   for (int i = 0; i < arraysize; ++i) {
     a[i] = 2;
     sum[i] = 2;
-    answer[i] = 8*factor;
+    answer[i] = pow(sum[i], factor);
   }
 
   cudaMalloc((void**)&ad, arraysize * sizeof(T));
@@ -119,6 +118,4 @@ TEST(TestAtomicOps, TestAtomicMul) {
   test_atomic_mul<at::Half>();
   test_atomic_mul<float>();
   test_atomic_mul<double>();
-  test_atomic_add<c10::complex<float> >();
-  test_atomic_add<c10::complex<double> >();
 }
