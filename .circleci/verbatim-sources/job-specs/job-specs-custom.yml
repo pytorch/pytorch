@@ -341,6 +341,7 @@
     - calculate_docker_image_tag
     - setup_linux_system_environment
     - checkout
+    - calculate_docker_image_tag
     - setup_ci_environment
     - run:
         name: pytorch android gradle custom build single architecture (for PR)
@@ -353,9 +354,8 @@
 
           echo "DOCKER_IMAGE: ${DOCKER_IMAGE}:${DOCKER_TAG}"
           time docker pull ${DOCKER_IMAGE}:${DOCKER_TAG} >/dev/null
-          git submodule sync
-          git submodule update --init --recursive
 
+          git submodule sync && git submodule update -q --init --recursive
           VOLUME_MOUNTS="-v /home/circleci/project/:/var/lib/jenkins/workspace"
           export id=$(docker run --env-file "${BASH_ENV}" ${VOLUME_MOUNTS} --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${DOCKER_IMAGE}:${DOCKER_TAG})
 
