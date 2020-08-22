@@ -7,7 +7,7 @@ commands:
           name: "Calculate docker image hash"
           command: |
             DOCKER_TAG=$(git rev-parse HEAD:.circleci/docker)
-            echo "export DOCKER_TAG=${DOCKER_TAG}" >> ${BASH_ENV}
+            echo "DOCKER_TAG=${DOCKER_TAG}" >> "${BASH_ENV}"
 
   designate_upload_channel:
     description: "inserts the correct upload channel into ${BASH_ENV}"
