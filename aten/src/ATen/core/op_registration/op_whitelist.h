@@ -76,6 +76,12 @@ constexpr bool schema_whitelist_check(string_view schema) {
 #endif
 }
 
+// schema_whitelist_check() implicitly depends on a macro, TORCH_OPERATOR_WHITELIST.
+// Add this API to pass arbitrary whitelist.
+constexpr bool op_whitelist_contains_name_in_schema(string_view whitelist, string_view schema) {
+  return op_whitelist_contains(whitelist, schema.substr(0, schema.find("(")));
+}
+
 // Returns true iff the given dispatch key is on the whitelist
 // and should be registered.  When we turn this on, the list of valid
 // mobile dispatch keys is hard coded (but you need to make sure

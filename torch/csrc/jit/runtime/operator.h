@@ -6,9 +6,11 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/dispatch/OperatorOptions.h>
 #include <ATen/core/stack.h>
+#include <ATen/core/op_registration/op_whitelist.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
 #include <torch/csrc/jit/runtime/operator_options.h>
+#include <torch/library.h>
 
 #include <ATen/ATen.h>
 #include <ATen/core/function_schema.h>
@@ -222,6 +224,28 @@ TORCH_API void ensure_c10_registerer_defined();
 
 // Used to assert that unschematized operators have an analysis method written
 TORCH_API bool aliasAnalysisHasSpecialCaseFor(c10::Symbol sym);
+
+// A factory function to generate an optional operator. It has two instatiations
+// depending on the template bool arg. The arg can be a compile-time function for
+// the selective op registration based on schema string.
+template <typename Func>
+__attribute__((always_inline))
+c10::optional<Operator> OperatorGenerator(
+    torch::detail::SelectiveStr<true> schema_str,
+    Func&& op,
+    AliasAnalysisKind alias_analysis) {
+  return c10::optional<Operator>(Operator(schema_str.operator const char *(),
+                                 std::forward<Func>(op), alias_analysis));
+}
+
+template <typename Func>
+__attribute__((always_inline))
+c10::optional<Operator> OperatorGenerator(
+    torch::detail::SelectiveStr<false> schema_str,
+    Func&& op,
+    AliasAnalysisKind alias_analysis) {
+  return c10::nullopt;
+}
 
 } // namespace jit
 } // namespace torch
