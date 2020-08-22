@@ -527,6 +527,13 @@ void AliasDb::analyzeImpl(Node* node) {
         makePointerTo(node->output(), node->inputs().at(0));
       }
       return;
+    case prim::TypeCheck: {
+      auto num_inputs = node->inputs().size();
+      for (size_t i = 0; i < num_inputs; i++) {
+        makePointerTo(node->outputs().at(i), node->inputs().at(i));
+      }
+      return;
+    }
     case prim::BailOut:
       TORCH_INTERNAL_ASSERT(
           node->inputs().at(0)->node()->kind() == prim::BailoutTemplate);
