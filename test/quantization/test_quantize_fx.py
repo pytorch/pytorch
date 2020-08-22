@@ -489,3 +489,39 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 module, F.instance_norm, [4], data,
                 quantized_module, torch.ops.quantized.instance_norm,
                 skip_op_arg_for_functional=True)
+
+    @skipIfNoFBGEMM
+    def test_clamp(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.conv = torch.nn.Conv2d(2, 2, 2).float()
+                self.relu6 = torch.nn.ReLU6()
+                self.relu6_ = torch.nn.ReLU6(True)
+                self.hardtanh = torch.nn.Hardtanh()
+                self.hardtanh_ = torch.nn.Hardtanh(inplace=True)
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.relu6(x)
+                self.relu6_(x)
+                x = F.relu6(x)
+                x = torch.clamp(x, -3, 3)
+                x = x.clamp(-2.5, 2.5)
+                # x = x.clamp_(-2, 2)  # Enable when quantized `clamp_` is ready
+                x = self.hardtanh(x)
+                self.hardtanh_(x)
+                x = F.hardtanh(x)
+                F.hardtanh_(x)
+                return x
+
+        data = (torch.rand((1, 2, 5, 5), dtype=torch.float),)
+        # map from node to number of occurences
+        checks = [
+            ('call_function', torch.quantize_per_tensor),
+            ('call_module', nnq.Conv2d),
+            ('call_function', F.hardtanh_),
+            ('call_method', 'dequantize')
+        ]
+        for quant_type in self.static_quant_types:
+            m = self.checkGraphModeFxOp(M(), data, checks, quant_type)
