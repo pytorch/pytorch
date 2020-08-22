@@ -110,7 +110,7 @@ static void prod_kernel_cuda(TensorIterator& iter) {
 
 static void nanprod_kernel_cuda(TensorIterator& iter) {
     auto general_dispatcher = [](TensorIterator& iter) {
-        AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "nanprod_cuda", [&]() {
+        AT_DISPATCH_ALL_TYPES(iter.dtype(), "nanprod_cuda", [&]() {
             nanprod_functor<scalar_t>{}(iter);
         });
     };
