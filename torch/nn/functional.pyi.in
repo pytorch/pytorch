@@ -1,6 +1,6 @@
 from torch import Tensor
 from torch.types import _size
-from typing import Any, Optional, Tuple, Dict, List, Callable
+from typing import Any, Optional, Tuple, Dict, List, Callable, Sequence
 from .common_types import _ratio_any_t
 
 # 'TypedDict' is a new accepted type that represents a dictionary with a fixed set of allowed keys.
@@ -300,7 +300,7 @@ def grid_sample(input: Tensor, grid: Tensor, mode: str = ..., padding_mode: str 
 def affine_grid(theta: Tensor, size: List[int], align_corners: Optional[Any] = ...) -> Tensor: ...
 
 
-def pad(input: Tensor, pad: List[int], mode: str = ..., value: float = ...) -> Tensor: ...
+def pad(input: Tensor, pad: Sequence[int], mode: str = ..., value: float = ...) -> Tensor: ...
 
 
 def pairwise_distance(x1: Tensor, x2: Tensor, p: float = ..., eps: float = ..., keepdim: bool = ...) -> Tensor: ...
