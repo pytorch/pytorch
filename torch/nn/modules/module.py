@@ -1313,8 +1313,12 @@ class Module:
             p.requires_grad_(requires_grad)
         return self
 
-    def zero_grad(self) -> None:
-        r"""Sets gradients of all model parameters to zero."""
+    def zero_grad(self, set_to_none=False) -> None:
+        r"""Sets gradients of all model parameters to zero.
+
+        Arguments:
+            set_to_none (bool): instead of setting to zero, set the grad to None.
+        """
         if getattr(self, '_is_replica', False):
             warnings.warn(
                 "Calling .zero_grad() from a module created with nn.DataParallel() has no effect. "
@@ -1324,11 +1328,15 @@ class Module:
 
         for p in self.parameters():
             if p.grad is not None:
-                if p.grad.grad_fn is not None:
+                if set_to_none:
                     p.grad.detach_()
+                    p.grad = None
                 else:
-                    p.grad.requires_grad_(False)
-                p.grad.zero_()
+                    if p.grad.grad_fn is not None:
+                        p.grad.detach_()
+                    else:
+                        p.grad.requires_grad_(False)
+                    p.grad.zero_()
 
     def share_memory(self: T) -> T:
         return self._apply(lambda t: t.share_memory_())
