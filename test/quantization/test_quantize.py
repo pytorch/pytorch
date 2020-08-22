@@ -47,6 +47,7 @@ from torch.testing._internal.common_quantization import (
     prepare_dynamic,
     convert_dynamic,
     skipIfNoFBGEMM,
+    EmbeddingModule,
 )
 
 # annotated models
@@ -860,6 +861,25 @@ class TestPostTrainingDynamic(QuantizationTestCase):
             convert_dynamic(model)
             checkHooksIsPresent(model)
 
+    def test_quantized_embedding(self):
+        r""" Test the post-training dynamic quantization flow, serialization and scripting
+        of embedding modules
+        """
+        model = EmbeddingModule().eval()
+        indices = torch.tensor([9, 6, 5, 7, 8, 8, 9, 2, 8, 6, 6, 9, 1, 6, 8, 8, 3, 2, 3, 6, 3, 6, 5, 7, 0, 8, 4, 6, 5, 8, 2, 3])
+        offsets = torch.tensor([0, 19, 20, 28, 28, 32])
+        weights = torch.randn(10, 12, dtype=torch.float32)
+
+        quantized_model = quantize_dynamic(model, dtype=torch.quint8)
+
+        per_sample_weights = torch.from_numpy(np.random.uniform(
+            low=0.01, high=0.5, size=[len(indices)]).astype(np.float32))
+
+        # Test to make sure module is quantized correctly.
+        self.assertTrue('DynamicQuantizedEmbeddingBag' in str(quantized_model))
+        self.checkDynamicQuantizedModule(quantized_model.emb, torch.nn.quantized.dynamic.EmbeddingBag, torch.quint8)
+        self.checkScriptable(quantized_model, [[indices, offsets, per_sample_weights]], check_save_load=True)
+
 class TestQuantizationAwareTraining(QuantizationTestCase):
     def test_manual(self):
         for qengine in supported_qengines:
@@ -998,14 +1018,16 @@ class TestQuantizationAwareTraining(QuantizationTestCase):
         model = prepare_qat(model)
 
         def checkHooksIsPresent(model, before_convert=True):
+            forward_hooks = 1
             if before_convert:
                 self.assertEqual(len(model.quant._forward_hooks.values()), 1,
                                  "Quantization observer hook has disappeared")
+                forward_hooks = 2
             self.assertObjectIn(fw_pre_hook, model.fc._forward_pre_hooks.values())
             self.assertObjectIn(fw_hook, model.fc._forward_hooks.values())
             self.assertEqual(len(model.fc._forward_pre_hooks.values()), 1,
                              "Extra pre forward hooks have appeared on a layer")
-            self.assertEqual(len(model.fc._forward_hooks.values()), 1,
+            self.assertEqual(len(model.fc._forward_hooks.values()), forward_hooks,
                              "Extra post forward hooks have appeared on a layer")
 
         checkHooksIsPresent(model, True)

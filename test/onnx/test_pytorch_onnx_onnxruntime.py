@@ -686,13 +686,64 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(TraceModel(), (x1, x2, x3), atol=10e-5)
         self.run_test(ScriptModel(), (x1, x2, x3), atol=10e-5)
 
-    def test_squeeze(self):
+    def squeeze_model_tests(self, d, x1, x2):
         class Squeeze(torch.nn.Module):
             def forward(self, x):
-                return torch.torch.squeeze(x, dim=-2)
+                if d is not None:
+                    return torch.squeeze(x, dim=d)
+                else:
+                    return torch.squeeze(x)
 
+        x2 = [] if x2 is None else [x2]
+        self.run_test(Squeeze(), x1, input_names=['input'], dynamic_axes={'input': {0: '0', 1: '1', 2: '2'}}, test_with_inputs=x2)
+
+    def test_squeeze_without_no_op(self):
         x = torch.randn(2, 1, 4)
-        self.run_test(Squeeze(), x)
+        self.squeeze_model_tests(1, x, None)
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_squeeze(self):
+        x_squeeze = torch.randn(2, 1, 4)
+        x_noop = torch.randn(2, 2, 3)
+        self.squeeze_model_tests(1, x_squeeze, x_noop)
+
+    def test_squeeze_neg_without_no_op(self):
+        x = torch.randn(2, 1, 4)
+        self.squeeze_model_tests(-2, x, None)
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_squeeze_neg(self):
+        x_squeeze = torch.randn(2, 1, 4)
+        x_noop = torch.randn(2, 2, 3)
+        self.squeeze_model_tests(-2, x_squeeze, x_noop)
+
+    def test_squeeze_all_dims(self):
+        x_squeeze = torch.randn(2, 1, 4)
+        x_noop = torch.randn(2, 2, 3)
+        self.squeeze_model_tests(None, x_squeeze, x_noop)
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_squeeze_no_op(self):
+        x_noop = torch.randn(2, 1, 4)
+        x_squeeze = torch.randn(2, 2, 1)
+        self.squeeze_model_tests(2, x_noop, x_squeeze)
+
+    def test_squeeze_no_op_without_additional_inputs(self):
+        x_noop = torch.randn(2, 1, 4)
+        self.squeeze_model_tests(2, x_noop, None)
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_squeeze_runtime_dim(self):
+        class Squeeze(torch.nn.Module):
+            def forward(self, d1, d2):
+                t = torch.zeros(d1[0], d2[0])
+                return t.squeeze(0)
+
+        d1 = torch.tensor([1])
+        d3 = torch.tensor([3])
+        d4 = torch.tensor([4])
+        self.run_test(Squeeze(), (d1, d4), test_with_inputs=[(d3, d4)])
+        self.run_test(Squeeze(), (d3, d4), test_with_inputs=[(d1, d3)])
 
     def test_unsqueeze(self):
         class Unsqueeze(torch.nn.Module):
@@ -1568,6 +1619,22 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(3, 4, 5, requires_grad=True)
         self.run_test(IndexCopyModel(), x)
 
+    def test_select(self):
+        class Select(torch.nn.Module):
+            def forward(self, x):
+                return x[:, 1]
+
+        x = torch.randn(3, 4)
+        self.run_test(Select(), x)
+
+    def test_select_negative_index(self):
+        class Select(torch.nn.Module):
+            def forward(self, x):
+                return x[:, -1]
+
+        x = torch.randn(3, 4)
+        self.run_test(Select(), x)
+
     # TODO: enable for opset 10 when ONNXRuntime version will be updated
 
     def test_index_select_constant_scaler_index(self):
@@ -1684,6 +1751,17 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(10, 3, 128, 128, 128)
         model = torch.nn.BatchNorm3d(3, affine=False)
         self.run_test(model, x)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_scatter_with_scalar(self):
+        class ScatterModel(torch.nn.Module):
+            def forward(self, input, indices):
+                values = 1.0
+                return input.scatter(1, indices, values)
+
+        input = torch.tensor([[0., 0., 0.], [0., 0., 0.], [0., 0., 0.]], dtype=torch.float64)
+        indices = torch.tensor([[1, 0], [0, 1], [0, 1]], dtype=torch.int64)
+        self.run_test(ScatterModel(), input=(input, indices))
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_scatter(self):
@@ -2622,11 +2700,15 @@ class TestONNXRuntime(unittest.TestCase):
                 res1 = []
                 arr = x.split([3, 4, 1, 1, 2, 3, 2], 0)
                 res2 = torch.zeros(3, 4, dtype=torch.long)
+                res3 = []
+                res4 = []
                 for i in range(len(arr)):
                     res = res.append(arr[i].sum(0, False))
                     res1 = res1.append(arr[-1 - i].sum(0, False))
                     res2 += 1
-                return torch.stack(res), torch.stack(res1), res2
+                    res3 = res3 + [arr[i].sum(0, False)]
+                    res4 += [arr[-1 - i].sum(0, False)]
+                return torch.stack(res), torch.stack(res1), res2, torch.stack(res3), torch.stack(res4)
 
         model = ListLoopModel()
         inputs = torch.randn(16)
@@ -2645,6 +2727,8 @@ class TestONNXRuntime(unittest.TestCase):
 
                 res.insert(0, tensors[1])
                 res.append(tensors[2])
+                res += [tensors[3], tensors[4]]
+                res = res + [tensors[5]]
                 return torch.ones(len(res))
 
         model = ListModel()
@@ -2818,7 +2902,8 @@ class TestONNXRuntime(unittest.TestCase):
 
         class ComparisonModel(torch.nn.Module):
             def forward(self, x, y):
-                return x.ge(0.5) & y.le(2)
+                a = torch.tensor([12.0])
+                return x.lt(1.5) & y.le(2) & x.le(1), x.gt(y), x.lt(y), a.ge(x.size(0))
 
         x = torch.ones(2, 3, dtype=torch.int32)
         y = torch.ones(2, 3, dtype=torch.float32)
