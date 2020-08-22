@@ -4921,10 +4921,10 @@ Example::
 
 add_docstr(torch.nonzero,
            r"""
-nonzero(input, *, out=None, as_tuple=False) -> LongTensor or tuple of LongTensors
+nonzero(input, *, as_tuple) -> LongTensor or tuple of LongTensors
 
 .. note::
-    :func:`torch.nonzero(..., as_tuple=False) <torch.nonzero>` (default) returns a
+    :func:`torch.nonzero(..., as_tuple=False) <torch.nonzero>` returns a
     2-D tensor where each row is the index for a nonzero value.
 
     :func:`torch.nonzero(..., as_tuple=True) <torch.nonzero>` returns a tuple of 1-D
@@ -4932,13 +4932,14 @@ nonzero(input, *, out=None, as_tuple=False) -> LongTensor or tuple of LongTensor
     gives all nonzero values of tensor ``x``. Of the returned tuple, each index tensor
     contains nonzero indices for a certain dimension.
 
-    `as_tuple` is a required argument since pytorch-1.5. If not passed a warning
-    will be issued.
+    `as_tuple` is a required argument since pytorch-1.5. If not passed, a warning
+    will be issued. When `nonzero` is called without any arguments besides the tensor 
+    it conflict with the now deprecated `nonzero(input, *, out)` signature.
 
     See below for more details on the two behaviors.
 
 
-**When** :attr:`as_tuple` **is ``False`` (default)**:
+**When** :attr:`as_tuple` **is ``False`` **:
 
 Returns a tensor containing the indices of all non-zero elements of
 :attr:`input`.  Each row in the result contains the indices of a non-zero
@@ -4964,8 +4965,7 @@ value, it is treated as a one-dimensional tensor with one element.
 
 Args:
     {input}
-    out (LongTensor, optional): the output tensor containing indices
-    as_tuple (bool, required): see the description above
+    as_tuple (bool, required): see the detailed description above
 
 Returns:
     LongTensor or tuple of LongTensor: If :attr:`as_tuple` is ``False``, the output
