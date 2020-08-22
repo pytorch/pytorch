@@ -7,7 +7,7 @@ commands:
           name: "Calculate docker image hash"
           command: |
             DOCKER_TAG=$(git rev-parse HEAD:.circleci/docker)
-            echo "export DOCKER_TAG=${DOCKER_TAG}" >> ${BASH_ENV}
+            echo "DOCKER_TAG=${DOCKER_TAG}" >> "${BASH_ENV}"
 
   designate_upload_channel:
     description: "inserts the correct upload channel into ${BASH_ENV}"
@@ -143,10 +143,6 @@ commands:
         type: string
         default: ""
     steps:
-      - run:
-          name: "Binary Size - Set Python Version"
-          no_output_timeout: "1m"
-          command: pyenv global 3.7.0
       - run:
           name: "Binary Size - Install Dependencies"
           no_output_timeout: "5m"
