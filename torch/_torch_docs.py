@@ -4932,9 +4932,10 @@ nonzero(input, as_tuple) -> LongTensor or tuple of LongTensors
     gives all nonzero values of tensor ``x``. Of the returned tuple, each index tensor
     contains nonzero indices for a certain dimension.
 
-    `as_tuple` is a required argument since pytorch-1.5. If not passed, a warning
-    will be issued. When `nonzero` is called without any arguments besides the tensor 
-    it conflict with the now deprecated `nonzero(input, *, out)` signature.
+    `as_tuple` is a required argument since pytorch-1.5. If not passed, it will behave 
+    as if `as_tuple=False` was passed and a warning will be issued. When `nonzero` is called 
+    without any arguments besides the tensor it conflict with the now deprecated 
+    `nonzero(input, *, out)` signature.
 
     See below for more details on the two behaviors.
 
