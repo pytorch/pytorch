@@ -544,7 +544,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
             m = self.checkGraphModeFxOp(
                 M(), data, quant_type, expected_node_list=node_list)
 
-
+    @skipIfNoFBGEMM
     def test_general_shape_ops(self):
         """ A test that checks dequantize will be swapped for
         all supported general shape ops like aten::flatten
@@ -664,7 +664,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
             expected_node_occurrence=count_check,
             expected_node_list = order_check)
 
-
+    @skipIfNoFBGEMM
     def test_general_value_ops(self):
         """ A test that checks correct patterns are produced for
         all supported general value ops like aten::avg_pool2d \
