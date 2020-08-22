@@ -429,7 +429,8 @@ class TestQuantizeFxOps(QuantizationTestCase):
         self._test_activation_impl(nn.ELU, F.elu, nnq.ELU, torch.ops.quantized.elu)
 
     def _test_norm_impl(
-            self, float_module, float_op, op_args, data, quantized_module, quantized_op):
+            self, float_module, float_op, op_args, data, quantized_module, quantized_op,
+            skip_op_arg_for_functional=False):
         ''' Test for normalization op, float_op can be torch op or functional op,
         op_args is a list of positional argument for the module/op
         '''
@@ -446,7 +447,9 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 if self.is_module:
                     return self.op(input)
                 else:
-                    args = [input] + op_args
+                    args = [input]
+                    if not skip_op_arg_for_functional:
+                        args += op_args
                     return self.op(*args)
 
         options = itertools.product([True, False], self.static_quant_types)
@@ -464,3 +467,25 @@ class TestQuantizeFxOps(QuantizationTestCase):
         data = (torch.rand((1, 2, 5, 5), dtype=torch.float),)
         self._test_norm_impl(
             nn.LayerNorm, F.layer_norm, [[2, 5, 5]], data, nnq.LayerNorm, torch.ops.quantized.layer_norm)
+
+    def test_instance_norm(self):
+        data_1d = (torch.rand((1, 4, 5), dtype=torch.float),)
+        data_2d = (torch.rand((1, 4, 5, 1), dtype=torch.float),)
+        data_3d = (torch.rand((1, 4, 5, 1, 1), dtype=torch.float),)
+        data_dict = {1 : data_1d, 2 : data_2d, 3 : data_3d}
+        instance_norm_modules = {1 : nn.InstanceNorm1d,
+                                 2 : nn.InstanceNorm2d,
+                                 3 : nn.InstanceNorm3d}
+        quantized_instance_norm_modules = {
+            1 : nnq.InstanceNorm1d,
+            2 : nnq.InstanceNorm2d,
+            3 : nnq.InstanceNorm3d
+        }
+        for dim in [1, 2, 3]:
+            data = data_dict[dim]
+            module = instance_norm_modules[dim]
+            quantized_module = quantized_instance_norm_modules[dim]
+            self._test_norm_impl(
+                module, F.instance_norm, [4], data,
+                quantized_module, torch.ops.quantized.instance_norm,
+                skip_op_arg_for_functional=True)
