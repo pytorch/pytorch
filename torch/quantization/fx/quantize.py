@@ -382,10 +382,19 @@ class BatchNorm(QuantizeHandler):
             load_arg(quantized=[0])(self.bn_node.args),
             load_arg(quantized=False)(self.bn_node.kwargs))
 
+ARGS_TO_SKIP = {
+    torch.ops.quantized.hardswish: ['inplace'],
+    torch.ops.quantized.instance_norm:
+    ['running_mean', 'running_var', 'use_input_stats', 'momentum'],
+}
 @register_quant_pattern(torch.nn.ELU)
 @register_quant_pattern(torch.nn.Hardswish)
+@register_quant_pattern(torch.nn.InstanceNorm1d)
+@register_quant_pattern(torch.nn.InstanceNorm2d)
+@register_quant_pattern(torch.nn.InstanceNorm3d)
 @register_quant_pattern(torch.nn.LayerNorm)
 @register_quant_pattern(torch.nn.functional.hardswish)
+@register_quant_pattern(torch.nn.functional.instance_norm)
 @register_quant_pattern(torch.nn.functional.layer_norm)
 class DefaultNode(QuantizeHandler):
     ''' Common quantized op, first input and first output will be quantized
@@ -417,10 +426,11 @@ class DefaultNode(QuantizeHandler):
             args = load_arg(quantized=[0])(node.args)
             kwargs = load_arg(quantized=False)(node.kwargs)
             kwargs.update({'output_scale': scale, 'output_zero_point': zero_point})
-            # none of the quantized ops support inplace now
-            # we can enable it in the future if inplace is supported
-            if 'inplace' in kwargs:
-                kwargs.pop('inplace')
+            if quantized_op in ARGS_TO_SKIP:
+                args_to_skip = ARGS_TO_SKIP[quantized_op]
+                for arg in args_to_skip:
+                    if arg in kwargs:
+                        kwargs.pop(arg)
             return quantizer.quantized_graph.create_node(
                 'call_function', quantized_op, args, kwargs)
 
