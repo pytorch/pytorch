@@ -8,19 +8,16 @@ import torch
 
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, torch_to_numpy_dtype_dict, suppress_warnings,
-     IS_WINDOWS, TEST_NUMPY)
+     TEST_NUMPY, make_tensor)
 from torch.testing._internal.common_methods_invocations import \
     (unary_ufuncs)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, ops, onlyOnCPUAndCUDA, skipCUDAIfRocm,
-     dtypes)
+    (instantiate_device_type_tests, ops, dtypes)
 from torch.testing import \
-    (floating_types_and, integral_types, complex_types)
+    (floating_types_and)
 
 if TEST_NUMPY:
     import numpy as np
-
-# Tensor generators and helpers
 
 # Interesting values and extremal values for different dtypes
 _unsigned_int_vals = (0, 1, 55, 127)
@@ -40,40 +37,6 @@ _large_float_vals = (-501, 501,
                      -4988429.2, 4988429.2,
                      -1e20, 1e20)
 _float_extremals = (float('inf'), float('-inf'), float('nan'))
-
-
-def _make_tensor(size, device: torch.device, dtype: torch.dtype, *, low, high) -> torch.Tensor:
-    if dtype is torch.bool:
-        return torch.randint(0, 2, size, device=device, dtype=dtype)
-
-    def _maybe_clamp(t, low_default, low, high_default, high):
-        low = low_default if low is None else max(low_default, low)
-        high = high_default if high is None else min(high_default, high)
-        if low != low_default or high != high_default:
-            return torch.clamp(t, low, high)
-        return t
-
-    if dtype is torch.uint8:
-        t = torch.randint(0, 10, size, device=device, dtype=dtype)
-        return _maybe_clamp(t, 0, low, 9, high)
-    elif dtype in integral_types():
-        t = torch.randint(-9, 10, size, device=device, dtype=dtype)
-        return _maybe_clamp(t, -9, low, 9, high)
-    elif dtype in floating_types_and(torch.half, torch.bfloat16):
-        # Windows doesn't support torch.rand(bfloat16) on CUDA
-        if IS_WINDOWS and torch.device(device).type == 'cuda' and dtype is torch.bfloat16:
-            t = (torch.rand(size, device=device, dtype=torch.float32) * 18 - 9).to(torch.bfloat16)
-        else:
-            t = torch.rand(size, device=device, dtype=dtype) * 18 - 9
-        return _maybe_clamp(t, -9, low, 9, high)
-    else:
-        assert dtype in complex_types()
-        float_dtype = torch.float if dtype is torch.cfloat else torch.double
-        real = torch.rand(size, device=device, dtype=float_dtype) * 18 - 9
-        real = _maybe_clamp(real, -9, low, 9, high)
-        imag = torch.rand(size, device=device, dtype=float_dtype) * 18 - 9
-        imag = _maybe_clamp(imag, -9, low, 9, high)
-        return torch.complex(real, imag)
 
 
 # Returns an iterable of contiguous tensors with the same storage on the requested
@@ -111,8 +74,8 @@ def generate_numeric_tensors(device, dtype, *,
                    torch.tensor(True, device=device),
                    torch.tensor(False, device=device),
                    torch.tensor((True, False), device=device),
-                   _make_tensor((medium_length,), device=device, dtype=dtype, low=None, high=None),
-                   _make_tensor(large_size, device=device, dtype=dtype, low=None, high=None))
+                   make_tensor((medium_length,), device=device, dtype=dtype, low=None, high=None),
+                   make_tensor(large_size, device=device, dtype=dtype, low=None, high=None))
         return tensors
 
     # Acquires dtype-specific vals
@@ -134,7 +97,7 @@ def generate_numeric_tensors(device, dtype, *,
     assert len(vals) < medium_length
 
     # Constructs the large tensor containing vals
-    large_tensor = _make_tensor(large_size, device=device, dtype=dtype, low=domain[0], high=domain[1])
+    large_tensor = make_tensor(large_size, device=device, dtype=dtype, low=domain[0], high=domain[1])
 
     # Inserts the vals at an odd place
     large_tensor[57][offset:offset + len(vals)] = torch.tensor(vals, device=device, dtype=dtype)
@@ -198,17 +161,6 @@ class TestUnaryUfuncs(TestCase):
         else:
             self.assertEqual(actual, expected, exact_device=False, **kwargs)
 
-    # Verifies that the unary ufuncs have their supported dtypes
-    #   registered correctly by testing that each unlisted dtype
-    #   throws a runtime error
-    @skipCUDAIfRocm
-    @onlyOnCPUAndCUDA
-    @ops(unary_ufuncs, unsupported_dtypes_only=True)
-    def test_unsupported_dtypes(self, device, dtype, op):
-        t = torch.empty(1, device=device, dtype=dtype)
-        with self.assertRaises(RuntimeError):
-            op(t)
-
     # Tests bool tensor negation raises the correct error
     def test_neg_error_message(self, device):
         msg = ("Negation, the `\\-` operator, on a bool tensor is not supported."
@@ -271,7 +223,7 @@ class TestUnaryUfuncs(TestCase):
         def _fn(t):
             return op(t)
 
-        t = _make_tensor((5, 5), device, dtype, low=op.domain[0], high=op.domain[1])
+        t = make_tensor((5, 5), device, dtype, low=op.domain[0], high=op.domain[1])
         expected = op(t)
 
         for alt in (op.get_method(), op.get_inplace(), torch.jit.script(_fn)):
@@ -320,8 +272,8 @@ class TestUnaryUfuncs(TestCase):
 
     @ops(unary_ufuncs)
     def test_contig_vs_every_other(self, device, dtype, op):
-        contig = _make_tensor((1026,), device=device, dtype=dtype,
-                              low=op.domain[0], high=op.domain[1])
+        contig = make_tensor((1026,), device=device, dtype=dtype,
+                             low=op.domain[0], high=op.domain[1])
         non_contig = contig[::2]
 
         self.assertTrue(contig.is_contiguous())
@@ -331,8 +283,8 @@ class TestUnaryUfuncs(TestCase):
 
     @ops(unary_ufuncs)
     def test_contig_vs_transposed(self, device, dtype, op):
-        contig = _make_tensor((789, 357), device=device, dtype=dtype,
-                              low=op.domain[0], high=op.domain[1])
+        contig = make_tensor((789, 357), device=device, dtype=dtype,
+                             low=op.domain[0], high=op.domain[1])
         non_contig = contig.T
 
         self.assertTrue(contig.is_contiguous())
@@ -344,8 +296,8 @@ class TestUnaryUfuncs(TestCase):
     def test_non_contig(self, device, dtype, op):
         shapes = [(5, 7), (1024,)]
         for shape in shapes:
-            contig = _make_tensor(shape, device, dtype,
-                                  low=op.domain[0], high=op.domain[1])
+            contig = make_tensor(shape, device, dtype,
+                                 low=op.domain[0], high=op.domain[1])
             non_contig = torch.empty(shape + (2,), device=device, dtype=dtype)[..., 0]
             non_contig.copy_(contig)
 
@@ -356,8 +308,8 @@ class TestUnaryUfuncs(TestCase):
 
     @ops(unary_ufuncs)
     def test_non_contig_index(self, device, dtype, op):
-        contig = _make_tensor((2, 2, 1, 2), device, dtype,
-                              low=op.domain[0], high=op.domain[1])
+        contig = make_tensor((2, 2, 1, 2), device, dtype,
+                             low=op.domain[0], high=op.domain[1])
         non_contig = contig[:, 1, ...]
         contig = non_contig.contiguous()
 
@@ -370,8 +322,8 @@ class TestUnaryUfuncs(TestCase):
     def test_non_contig_expand(self, device, dtype, op):
         shapes = [(1, 3), (1, 7), (5, 7)]
         for shape in shapes:
-            contig = _make_tensor(shape, device, dtype,
-                                  low=op.domain[0], high=op.domain[1])
+            contig = make_tensor(shape, device, dtype,
+                                 low=op.domain[0], high=op.domain[1])
             non_contig = contig.clone().expand(3, -1, -1)
 
             self.assertTrue(contig.is_contiguous())
@@ -385,8 +337,8 @@ class TestUnaryUfuncs(TestCase):
 
     @ops(unary_ufuncs)
     def test_contig_size1(self, device, dtype, op):
-        contig = _make_tensor((5, 100), device, dtype,
-                              low=op.domain[0], high=op.domain[1])
+        contig = make_tensor((5, 100), device, dtype,
+                             low=op.domain[0], high=op.domain[1])
         contig = contig[:1, :50]
         contig2 = torch.empty(contig.size(), device=device, dtype=dtype)
         contig2.copy_(contig)
@@ -398,8 +350,8 @@ class TestUnaryUfuncs(TestCase):
 
     @ops(unary_ufuncs)
     def test_contig_size1_large_dim(self, device, dtype, op):
-        contig = _make_tensor((5, 2, 3, 1, 4, 5, 3, 2, 1, 2, 3, 4), device, dtype,
-                              low=op.domain[0], high=op.domain[1])
+        contig = make_tensor((5, 2, 3, 1, 4, 5, 3, 2, 1, 2, 3, 4), device, dtype,
+                             low=op.domain[0], high=op.domain[1])
         contig = contig[:1, :, :, :, :, :, :, :, :, :, :, :]
         contig2 = torch.empty(contig.size(), device=device, dtype=dtype)
         contig2.copy_(contig)
@@ -413,8 +365,8 @@ class TestUnaryUfuncs(TestCase):
     # per-batch computation.
     @ops(unary_ufuncs)
     def test_batch_vs_slicing(self, device, dtype, op):
-        input = _make_tensor((1024, 512), dtype=dtype, device=device,
-                             low=op.domain[0], high=op.domain[1])
+        input = make_tensor((1024, 512), dtype=dtype, device=device,
+                            low=op.domain[0], high=op.domain[1])
 
         actual = op(input)
         expected = torch.stack([op(slice) for slice in input])

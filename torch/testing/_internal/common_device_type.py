@@ -225,7 +225,7 @@ class DeviceTypeTestBase(TestCase):
 
     # Creates device-specific tests.
     @classmethod
-    def instantiate_test(cls, name, test):
+    def instantiate_test(cls, generic_cls, name, test):
 
         def instantiate_test_helper(cls, name, *, test, dtype, op):
 
@@ -240,7 +240,8 @@ class DeviceTypeTestBase(TestCase):
             # Constructs the test
             @wraps(test)
             def instantiated_test(self, name=name, test=test, dtype=dtype, op=op):
-                if op is not None and op.should_skip(name, self.device_type, dtype):
+                if op is not None and op.should_skip(generic_cls.__name__, name,
+                                                     self.device_type, dtype):
                     self.skipTest("Skipped!")
 
                 device_arg = cls.get_primary_device()
@@ -417,7 +418,7 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
                 assert inspect.isfunction(test), "Couldn't extract function from '{0}'".format(name)
 
                 # Instantiates the device-specific tests
-                device_type_test_class.instantiate_test(name, copy.deepcopy(test))
+                device_type_test_class.instantiate_test(generic_test_class, name, copy.deepcopy(test))
             else:  # Ports non-test member
                 assert name not in device_type_test_class.__dict__, "Redefinition of directly defined member {0}".format(name)
 
