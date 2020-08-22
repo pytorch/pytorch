@@ -302,7 +302,7 @@ Tensor nanprod_backward(const Tensor& grad, const Tensor& input, const Tensor& r
   }
   Tensor zero_idx = (input == 0).nonzero();
   if (zero_idx.numel() == 0) {
-    Tensor nans_replace = at::where(at::isnan(input), torch::tensor(1, torch::tensoroptions().dtype(input.dtype()).device(input.device())), input);
+    Tensor nans_replace = at::where(at::isnan(input), torch::tensor(1, torch::TensorOptions().dtype(input.dtype()).device(input.device())), input);
     return grad * result / nans_replace * input.isnan().logical_not();
   } else if (zero_idx.size(0) > 1) {
     return at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
@@ -325,7 +325,7 @@ Tensor nanprod_backward(Tensor grad, const Tensor& input, Tensor result, int64_t
   Tensor slice_zero_count = zero_mask.sum(dim, true);
   int64_t total_zeros = slice_zero_count.sum().item<int64_t>();
   if (total_zeros == 0) {
-    Tensor nans_replace = at::where(at::isnan(input), torch::tensor(1, torch::tensoroptions().dtype(input.dtype()).device(input.device())), input);
+    Tensor nans_replace = at::where(at::isnan(input), torch::tensor(1, torch::TensorOptions().dtype(input.dtype()).device(input.device())), input);
     return (grad * result) / nans_replace * input.isnan().logical_not();
   } else {
     return prod_safe_zeros_backward(grad, input, dim);
