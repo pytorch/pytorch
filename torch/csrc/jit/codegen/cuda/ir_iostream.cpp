@@ -352,8 +352,10 @@ void IRPrinter::handle(const kir::TensorDomain*) {
   TORCH_INTERNAL_ASSERT(false, "Unreachable");
 }
 
-void IRPrinter::handle(const kir::TensorView*) {
-  TORCH_INTERNAL_ASSERT(false, "Unreachable");
+void IRPrinter::handle(const kir::TensorView* tv) {
+  // This should never be reachable, but the current codebase assumes
+  // kir::TensorView can be printable for debugging messages.
+  os << "KT" << tv->name();
 }
 
 static bool isTV(const Val* val) {
