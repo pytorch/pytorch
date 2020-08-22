@@ -177,6 +177,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: absolute_
    .. automethod:: acos
    .. automethod:: acos_
+   .. automethod:: arccos
+   .. automethod:: arccos_
    .. automethod:: add
    .. automethod:: add_
    .. automethod:: addbmm
@@ -199,11 +201,15 @@ view of a storage and defines numeric operations on it.
    .. automethod:: argsort
    .. automethod:: asin
    .. automethod:: asin_
+   .. automethod:: arcsin
+   .. automethod:: arcsin_
    .. automethod:: as_strided
    .. automethod:: atan
+   .. automethod:: atan_
+   .. automethod:: arctan
+   .. automethod:: arctan_
    .. automethod:: atan2
    .. automethod:: atan2_
-   .. automethod:: atan_
    .. automethod:: backward
       :noindex:
    .. automethod:: baddbmm
