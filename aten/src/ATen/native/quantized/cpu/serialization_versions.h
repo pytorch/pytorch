@@ -8,14 +8,32 @@
 
 #include <tuple>
 
+// TODO before land: clean up docs
+//using SerializationType = std::tuple<
+//  std::string /*name of the op that is serialized*/,
+//  std::vector<int64_t> /*version, ONNX does not support ints so this is a list*/,
+//  std::vector<at::Tensor> /*list of all non-optional tensors*/,
+//  std::vector<c10::optional<at::Tensor>> /*list of all optional tensors*/,
+//  std::vector<double> /*list of all doubles*/,
+//  std::vector<int64_t> /*list of all integers*/
+//>;
+
 using SerializationType = std::tuple<
-  std::string /*name of the op that is serialized*/,
-  int64_t /*version*/,
-  std::vector<at::Tensor> /*list of all non-optional tensors*/,
-  std::vector<c10::optional<at::Tensor>> /*list of all optional tensors*/,
-  std::vector<double> /*list of all doubles*/,
-  std::vector<int64_t> /*list of all integers*/
->;
+  // version
+  std::string,
+  // non-optional tensors: [
+  //   Tensor<int64_t> conv_params_packed,
+  //     - kSpatialDim
+  //     - stride x kSpatialDim
+  //     - padding x kSpatialDim
+  //     - dilation x kSpatialDim
+  //   Tensor<dtype> weight,
+  // ]
+  std::vector<at::Tensor>,
+  // optional tensors: [
+  //   Tensor<dtype> bias,
+  // ]
+  std::vector<c10::optional<at::Tensor>>>;
 
 /* Legacy serialization types */
 
@@ -35,6 +53,20 @@ using SerializationType = std::tuple<
  *  5. dilation x kSpatialDim
  *  6. groups
  *
+ * Version 2 (new)
+ * - Fields:
+ *  1. List of object parameters Tensors (vector<Tensor>)
+ *     - Tensor<int64_t>
+ *       - version
+ *       - kSpatialDim
+ *       - stride x kSpatialDim
+ *       - padding x kSpatialDim
+ *       - dilation x kSpatialDim
+ *  2. list of all non-optional tensors (vector<Tensor>)
+ *    1. unpacked weight
+ *  3. list of all optional tensors (vector<optional<Tensor>>)
+ *    1. bias
+ *
  * Version 2+
  * - Fields:
  *  1. name of the op ("conv")
@@ -53,10 +85,42 @@ using SerializationType = std::tuple<
  *    5. groups
  */
 const std::string kConvName = "conv";
-constexpr int64_t kConvPackedParamsSerializationVersion = 2;
+const std::vector<int64_t> kConvPackedParamsSerializationVersion = {2};
 template <uint32_t kSpatialDim>
 SerializationType serialize_conv(
     const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>& params) {
+
+  std::string version = "2";
+  std::vector<at::Tensor> non_optional;
+  std::vector<c10::optional<at::Tensor>> optional;
+
+  // create a packed int64_t tensor for conv params
+  std::vector<int64_t> params_vec;
+  params_vec.push_back(kSpatialDim);
+  auto stride = params->stride().vec();
+  params_vec.insert(params_vec.end(), stride.begin(), stride.end());
+  auto padding = params->padding().vec();
+  params_vec.insert(params_vec.end(), padding.begin(), padding.end());
+  auto dilation = params->dilation().vec();
+  params_vec.insert(params_vec.end(), dilation.begin(), dilation.end());
+  params_vec.push_back(params->groups());
+  at::Tensor params_tensor = at::from_blob(
+      params_vec.data(), {params_vec.size()},
+      at::TensorOptions().dtype(at::kLong));
+
+  at::Tensor weight;
+  c10::optional<at::Tensor> bias;
+  std::tie(weight, bias) = params->unpack();
+
+  // create the non_optional tensor
+  // TODO(before land): fix clone
+  non_optional.emplace_back(params_tensor.clone());
+  non_optional.emplace_back(weight.clone());
+  optional.emplace_back(std::move(bias));
+
+  return std::tie(version, non_optional, optional);
+
+  /*
   std::vector<at::Tensor> non_optional;
   std::vector<c10::optional<at::Tensor>> optional;
   std::vector<double> doubles;
@@ -93,13 +157,44 @@ SerializationType serialize_conv(
     doubles,
     longs
   );
+  */
 }
 
 template <uint32_t kSpatialDim>
 c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> deserialize_conv(
     SerializationType state) {
+
+  std::string version;
+  std::vector<at::Tensor> non_optional;
+  std::vector<c10::optional<at::Tensor>> optional;
+
+  std::tie(version, non_optional, optional) = state;
+
+  // at::Tensor conv_params_packed, weight;
+  // c10::optional<at::Tensor> bias;
+  torch::List<int64_t> stride, padding, dilation;
+  int64_t groups;
+
+  at::Tensor conv_params_packed = non_optional[0];
+  at::Tensor weight = non_optional[1];
+  c10::optional<at::Tensor> bias = optional[0];
+
+  // skip kSpatialDim
+  int idx = 1;
+  for (; idx < kSpatialDim + 1; ++idx) {
+    stride.emplace_back(conv_params_packed[idx].item<int64_t>());
+  }
+  for (; idx < 2 * kSpatialDim + 1; ++idx) {
+    padding.emplace_back(conv_params_packed[idx].item<int64_t>());
+  }
+  for (; idx < 3 * kSpatialDim + 1; ++idx) {
+    dilation.emplace_back(conv_params_packed[idx].item<int64_t>());
+  }
+  groups = conv_params_packed[idx].item<int64_t>();
+
+  /*
   std::string name;
-  int64_t version;
+  std::vector<int64_t> version;
   std::vector<at::Tensor> non_optional;
   std::vector<c10::optional<at::Tensor>> optional;
   std::vector<double> doubles;
@@ -126,6 +221,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> deserialize_conv(
     dilation.emplace_back(longs[idx]);
   }
   groups = longs[idx];
+  */
 
 auto& ctx = at::globalContext();
 

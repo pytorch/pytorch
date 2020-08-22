@@ -360,6 +360,14 @@ def _model_to_graph(model, args, verbose=False,
             graph = model.forward.graph
             torch._C._jit_pass_onnx_function_substitution(graph)
             method_graph, params = torch._C._jit_pass_lower_graph(graph, model._c)
+            # debug, not for land
+            if False:
+                for i in range(len(params)):
+                    for j in range(len(params[i])):
+                        print('param', params[i][j])
+                        if j == 1:
+                            continue
+                        torch.jit._flatten(tuple([[params[i][j]]]))
             in_vars, in_desc = torch.jit._flatten(tuple(args) + tuple(params))
             graph = _propagate_and_assign_input_shapes(
                 method_graph, tuple(in_vars), False, propagate)

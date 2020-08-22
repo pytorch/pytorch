@@ -237,6 +237,7 @@ CAFFE2_API torch::class_<ConvPackedParamsBase<kSpatialDim>> register_conv_params
               if (firstElement.isTensor()) {
                 version = 1;
               } else if (firstElement.isString()) {
+                // TODO before land: parse version
                 version = 2;
               }
             }
@@ -258,10 +259,43 @@ CAFFE2_API torch::class_<ConvPackedParamsBase<kSpatialDim>> register_conv_params
             torch::List<at::Tensor> dilation_x_kSpatialDim = elements[4].toTensorList();
             at::Tensor groups = elements[5].toTensor();
 
+            std::string version = "2";
+            std::vector<at::Tensor> non_optional;
+            std::vector<c10::optional<at::Tensor>> optional;
+
+            std::vector<int64_t> params_vec;
+            params_vec.push_back(kSpatialDim);
+            for (int i = 0; i < stride_x_kSpatialDim.size(); i++) {
+              auto stride = stride_x_kSpatialDim.get(0);
+              params_vec.push_back(stride[0].item<int64_t>());
+            }
+            for (int i = 0; i < padding_x_kSpatialDim.size(); i++) {
+              auto padding = padding_x_kSpatialDim.get(0);
+              params_vec.push_back(padding[0].item<int64_t>());
+            }
+            for (int i = 0; i < dilation_x_kSpatialDim.size(); i++) {
+              auto dilation = dilation_x_kSpatialDim.get(0);
+              params_vec.push_back(dilation[0].item<int64_t>());
+            }
+            params_vec.push_back(groups[0].item<int64_t>());
+            at::Tensor params_tensor = at::from_blob(
+                params_vec.data(), {params_vec.size()},
+                at::TensorOptions().dtype(at::kLong));
+
+            // non_optional.emplace_back(std::move(params_tensor));
+            // TODO before land: fix clone
+            non_optional.emplace_back(params_tensor.clone());
+            non_optional.emplace_back(std::move(weight));
+            optional.emplace_back(std::move(bias));
+
+            state = std::tie(version, non_optional, optional);
+
             // create a v2 object with data from v1
             // TODO before land: clean up everything (this is just the first version which worked)
+            /*
             std::string name_v2 = "conv";
-            int64_t version_v2 = 2;
+            // int64_t version_v2 = 2;
+            std::vector<int64_t> version_v2 = {2};
             std::vector<at::Tensor> required_tensors_v2;
             required_tensors_v2.push_back(weight);
             std::vector<c10::optional<at::Tensor>> optional_tensors_v2;
@@ -286,11 +320,26 @@ CAFFE2_API torch::class_<ConvPackedParamsBase<kSpatialDim>> register_conv_params
             // TODO before land: check numerical equivalency with tests
             state = std::make_tuple(name_v2, version_v2, required_tensors_v2, optional_tensors_v2,
                 doubles_v2, ints_v2);
+                */
 
           } else {
+            // version 2
+            // TODO before land: assertions
 
-            // version 2 - return the value as is
-            // TODO(before land): implement the conversion from v2 c10::IValue to SerializationType
+            auto elements = v.toTuple()->elements();
+            std::string version = elements[0].toStringRef();
+            torch::List<at::Tensor> non_optional = elements[1].toTensorList();
+            // TODO: OptionalTensorList
+            torch::List<c10::IValue> optional = elements[2].toList();
+            std::vector<at::Tensor> non_optional_vec;
+            non_optional_vec.insert(non_optional_vec.end(), non_optional.begin(), non_optional.end());
+
+            std::vector<c10::optional<at::Tensor>> optional_vec;
+            c10::optional<at::Tensor> bias = optional.get(0).toOptional<at::Tensor>();
+            optional_vec.push_back(bias);
+
+            state = std::tie(version, non_optional_vec, optional_vec);
+
           }
 
           return deserialize_conv<kSpatialDim>(state);
