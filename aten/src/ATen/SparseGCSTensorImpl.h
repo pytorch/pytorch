@@ -20,30 +20,15 @@ struct CAFFE2_API SparseGCSTensorImpl : public TensorImpl {
   // Data for making index conversion operations faster.
 
   // strides of the first half of the split dimensions.
-  IntArrayRef strides0_;
-  IntArrayRef strides1_, dims0_, dims1_;
+  std::vector<int64_t> strides0_;
+  std::vector<int64_t> strides1_, dims0_, dims1_;
   // Dimension at which we split the tensor dimensions into two groups for reduction to
   // a 2D GCS tensor.
   int64_t rsplit_dim_;           
  public:
   explicit SparseGCSTensorImpl(at::DispatchKeySet, const caffe2::TypeMeta&);
   
-  void resize_and_clear_(int nnz_size, int ptr_size, int redux_size) {
-    // TODO: perform error checking.
-
-    // call pointers().options() here since the struct contructor calls the tensor constructor
-    // with args for device specific init.
-    auto empty_pointers = at::empty(ptr_size, pointers().options());
-    auto empty_indices = at::empty(nnz_size, indices().options());
-    auto empty_values = at::empty(nnz_size, values().options());
-    auto empty_reduction = at::empty(redux_size, reduction().options());
-
-    // directly set to the member variables. there should be lots of error checking here.
-    pointers_ = empty_pointers;
-    indices_ = empty_indices;
-    values_ = empty_values;
-    reduction_ = empty_reduction;
-  }
+  void resize_and_clear_(int64_t nnz_size, int64_t ptr_size, int64_t redux_size, ArrayRef<int64_t> size);
 
   void set_member_tensors_unsafe(const Tensor& pointers, const Tensor& indices, const Tensor& values, const Tensor& reduction,
                                  const Scalar& fill_value);
@@ -60,6 +45,7 @@ struct CAFFE2_API SparseGCSTensorImpl : public TensorImpl {
                                at::Tensor pointers, at::Tensor indices, at::Tensor values, at::Tensor reduction,
                                Scalar fill_value);
 
-  IntArrayRef make_strides(IntArrayRef);
+  template <typename T>
+  void make_strides(T& shape, std::vector<int64_t>& strides, std::vector<int64_t>& dims);
 };
 }

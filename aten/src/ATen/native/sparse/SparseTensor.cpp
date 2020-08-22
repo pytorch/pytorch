@@ -169,11 +169,11 @@ Tensor sparse_gcs_tensor(const Tensor& pointers, const Tensor& indices, const Te
   TORCH_CHECK(!options.has_layout() || options.layout() == kSparseGCS, "expected sparse GCS layout, but got layout ", options.layout());
   
   SparseTensor self = new_gcs_tensor(options);
-  int nnz_size = values.numel();
-  int ptr_size = pointers.numel();
-  int redux_size = reduction.numel();
+  int64_t nnz_size = values.numel();
+  int64_t ptr_size = pointers.numel();
+  int64_t redux_size = reduction.numel();
   
-  get_sparse_impl<SparseGCSTensorImpl>(self)->resize_and_clear_(nnz_size, ptr_size, redux_size);
+  get_sparse_impl<SparseGCSTensorImpl>(self)->resize_and_clear_(nnz_size, ptr_size, redux_size, size);
   get_sparse_impl<SparseGCSTensorImpl>(self)->set_member_tensors_unsafe(pointers,
                                                                         indices, values, reduction,
                                                                         fill_value);

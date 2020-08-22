@@ -123,6 +123,11 @@ class TestSparseGCS(TestCase):
         self.assertEqual(torch.tensor([1, 2, 3, 4]), sp.values())
 
     def test_dense_convert(self):
+        ones = np.ones((5, 5, 5, 5, 5))
+        sparse = self.make_sparse_gcs(ones)
+
+        self.assertEqual(sparse.to_dense(), ones)
+        
         rand = np.random.randn(100, 100)
         sparse = self.make_sparse_gcs(rand)
 

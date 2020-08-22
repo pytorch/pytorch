@@ -68,7 +68,6 @@ Tensor& add_out_dense_sparse_gcs_cpu(Tensor& out, const Tensor& dense, const Spa
       
       for (int i = start_index; i < end_index; ++i) {
         index = indices_accessor[i];
-        std::cout << "ptr: " << start_index << " index: " << index << std::endl;
       }
     }
   });
