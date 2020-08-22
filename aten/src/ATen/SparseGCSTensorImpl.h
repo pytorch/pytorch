@@ -45,7 +45,6 @@ struct CAFFE2_API SparseGCSTensorImpl : public TensorImpl {
                                at::Tensor pointers, at::Tensor indices, at::Tensor values, at::Tensor reduction,
                                Scalar fill_value);
 
-  template <typename T>
-  void make_strides(T& shape, std::vector<int64_t>& strides, std::vector<int64_t>& dims);
+  void make_strides(int shape_begin, std::vector<int64_t>& strides, std::vector<int64_t>& dims);
 };
 }

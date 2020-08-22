@@ -201,8 +201,6 @@ Tensor indices_sparse_gcs(const Tensor& self) {
 Tensor reduction_sparse_gcs(const Tensor& self) {
   return get_sparse_impl<SparseGCSTensorImpl>(self)->reduction().alias();      
 }
-
-
     
 Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values_, const TensorOptions& options) {
   Tensor values = expand_values_if_needed(values_);

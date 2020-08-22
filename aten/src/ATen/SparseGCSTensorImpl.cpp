@@ -57,40 +57,41 @@ void SparseGCSTensorImpl::resize_and_clear_(int64_t nnz_size, int64_t ptr_size, 
   
 void SparseGCSTensorImpl::set_member_tensors_unsafe(const Tensor& pointers, const Tensor& indices,
                                                       const Tensor& values, const Tensor& reduction,
-                                                      const Scalar& fill_value) {
-    // TODO: perform lots of error checking to check correct type and sizes of inputs. Check
-    // SparseTensorImpl::set_indices_and_values_unsafe() for details
-    pointers_ = pointers;
-    indices_ = indices;
-    values_ = values;
-    reduction_ = reduction;
-    fill_value_ = fill_value;
+                                                    const Scalar& fill_value) {
+  // TODO: perform lots of error checking to check correct type and sizes of inputs. Check
+  // SparseTensorImpl::set_indices_and_values_unsafe() for details
+  pointers_ = pointers;
+  indices_ = indices;
+  values_ = values;
+  reduction_ = reduction;
+  fill_value_ = fill_value;
 
-    AT_ASSERT(device() == values_.device());    
-    AT_ASSERT(indices_.device() == values_.device());
-    AT_ASSERT(reduction_.device() == values_.device());
+  AT_ASSERT(device() == values_.device());    
+  AT_ASSERT(indices_.device() == values_.device());
+  AT_ASSERT(reduction_.device() == values_.device());
 
-    auto reduction_accessor = reduction_.accessor<int64_t, 1>();
+  auto reduction_accessor = reduction_.accessor<int64_t, 1>();
 
-    rsplit_dim_ = reduction_accessor[reduction_.size(0)-1];
+  rsplit_dim_ = reduction_accessor[reduction_.size(0)-1];
     
-    strides0_.resize(rsplit_dim_);
-    dims0_.resize(rsplit_dim_);
-    
-    strides1_.resize(sizes_.size() - rsplit_dim_);
-    dims1_.resize(sizes_.size() - rsplit_dim_);
+  dims0_.resize(rsplit_dim_);
+  dims1_.resize(sizes_.size() - rsplit_dim_);
 
-    for (int i = 0; i < rsplit_dim_; ++i) { dims0_[i] = i; }
-    for (int i = 0; i < sizes_.size() - rsplit_dim_; ++i) { dims1_[i] = i + rsplit_dim_; }
+  for (int i = 0; i < rsplit_dim_; ++i) { dims0_[i] = i; }
+  for (int i = 0; i < sizes_.size() - rsplit_dim_; ++i) { dims1_[i] = i + rsplit_dim_; }
 
-    
+  make_strides(0, strides0_, dims0_);
+  make_strides(rsplit_dim_, strides1_, dims1_);
 
-    std::cout << ">>>>> sizes: " << sizes_ << " dims0: " << dims0_ << " dims1: " << dims1_ << std::endl;
+  std::cout << ">>>>> sizes: " << sizes_ << " dims0: " << dims0_ << " strides0: " << strides0_
+            << " dims1: " << dims1_ << " strides1: " << strides1_ <<  std::endl;
 }
 
-template <typename T>
-void make_strides(T& shape, std::vector<int64_t>& strides, std::vector<int64_t>& dims) {
-  
-
+void SparseGCSTensorImpl::make_strides(int shape_start, std::vector<int64_t>& strides, std::vector<int64_t>& dims) {
+  int ndims = dims.size();
+  strides[0] = 1;
+  for (int i = 0; i < ndims-1; ++i) {
+    strides.insert(strides.begin(), strides[0] * sizes_[shape_start + ndims - i - 1]);
+  }
 }
 }
