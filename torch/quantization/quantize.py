@@ -101,7 +101,7 @@ def add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=No
         None, module is modified inplace with added observer modules and forward_hooks
     """
     if qconfig_propagation_list is None:
-        qconfig_propagation_list = DEFAULT_QCONFIG_PROPAGATE_WHITE_LIST
+        qconfig_propagation_list = DEFAULT_QCONFIG_PROPAGATE_ALLOW_LIST
     # respect device affinity when adding observers
     if device is None:
         devices = get_unique_devices_(module)
