@@ -36,6 +36,10 @@ int64_t _nnz_sparse(const SparseTensor& self) {
   return get_sparse_impl(self)->nnz();
 }
 
+int64_t _nnz_sparse_gcs(const SparseTensor& self) {
+  return get_sparse_impl<SparseGCSTensorImpl>(self)->nnz();
+}
+
 // Why are there so many methods to get indices and value?
 // See Note [ Sparse: different methods to get indices and values ] in native_functions.yaml
 

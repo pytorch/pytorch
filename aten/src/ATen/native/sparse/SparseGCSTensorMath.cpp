@@ -43,13 +43,34 @@ Tensor& add_out_dense_sparse_gcs_cpu(Tensor& out, const Tensor& dense, const Spa
   Tensor src_indices = src.indices();
 
   out.resize_as_(dense);
+  Tensor resultBuffer = out;
+  Tensor valuesBuffer = src_values.to(commonDtype);
+
+  if (out.scalar_type() != commonDtype) {
+    resultBuffer = dense.to(commonDtype);
+  } else if (!is_same_tensor(out, dense)) {
+    resultBuffer.copy_(dense);
+  }
 
   AT_DISPATCH_ALL_TYPES(commonDtype, "add_dense_sparse_gcs", [&] {
     auto values_accessor = src_values.accessor<scalar_t, 1>();
     auto pointers_accessor = src_pointers.accessor<int64_t, 1>();
     auto indices_accessor = src_indices.accessor<int64_t, 1>();
 
+    scalar_t *out_ptr = out.data_ptr<scalar_t>();
     scalar_t cast_value = alpha.to<scalar_t>();
+
+    for (int64_t iptr = 0; iptr < src_pointers.size(0)-1; ++iptr) {
+      int64_t start_index = pointers_accessor[iptr];
+      int64_t end_index = pointers_accessor[iptr + 1];
+      int64_t nindices = end_index - start_index;
+      int64_t index;
+      
+      for (int i = start_index; i < end_index; ++i) {
+        index = indices_accessor[i];
+        std::cout << "ptr: " << start_index << " index: " << index << std::endl;
+      }
+    }
   });
   
   return out;

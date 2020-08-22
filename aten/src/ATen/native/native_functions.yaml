@@ -3783,6 +3783,7 @@
   variants: method
   dispatch:
     SparseCPU, SparseCUDA: _nnz_sparse
+    SparseGCS_CPU: _nnz_sparse_gcs
   device_guard: False
 
 - func: coalesce(Tensor self) -> Tensor

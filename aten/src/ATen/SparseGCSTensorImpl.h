@@ -16,6 +16,15 @@ struct CAFFE2_API SparseGCSTensorImpl : public TensorImpl {
   Tensor values_;
   Tensor reduction_;
   Scalar fill_value_;
+
+  // Data for making index conversion operations faster.
+
+  // strides of the first half of the split dimensions.
+  IntArrayRef strides0_;
+  IntArrayRef strides1_, dims0_, dims1_;
+  // Dimension at which we split the tensor dimensions into two groups for reduction to
+  // a 2D GCS tensor.
+  int64_t rsplit_dim_;           
  public:
   explicit SparseGCSTensorImpl(at::DispatchKeySet, const caffe2::TypeMeta&);
   
@@ -43,6 +52,7 @@ struct CAFFE2_API SparseGCSTensorImpl : public TensorImpl {
   Tensor indices() const { return indices_; }
   Tensor values() const { return values_; }
   Tensor reduction() const { return reduction_; }
+  int64_t nnz() const { return values_.size(0); } // TODO: methods like these also exist in COO tensor. Deduplicate?
 
  private :
   
@@ -51,7 +61,5 @@ struct CAFFE2_API SparseGCSTensorImpl : public TensorImpl {
                                Scalar fill_value);
 
   IntArrayRef make_strides(IntArrayRef);
-
-
 };
 }

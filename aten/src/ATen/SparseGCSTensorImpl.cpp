@@ -24,7 +24,7 @@ SparseGCSTensorImpl::SparseGCSTensorImpl(at::DispatchKeySet key_set, const caffe
       // indices in case of GCS tensor is always a 1D array so need to init size as {1,0}.
       , at::empty({0}, at::initialTensorOptions().device(sparseGCSTensorSetToDeviceType(key_set)).dtype(ScalarType::Long))
       , at::empty({0}, at::initialTensorOptions().device(sparseGCSTensorSetToDeviceType(key_set)).dtype(data_type))
-      , at::empty({0}, at::initialTensorOptions().device(sparseGCSTensorSetToDeviceType(key_set)).dtype(data_type))
+      , at::empty({0}, at::initialTensorOptions().device(sparseGCSTensorSetToDeviceType(key_set)).dtype(ScalarType::Long))
       , Scalar()  ) {}
 
 SparseGCSTensorImpl::SparseGCSTensorImpl(at::DispatchKeySet key_set, const caffe2::TypeMeta& data_type,
@@ -51,7 +51,11 @@ void SparseGCSTensorImpl::set_member_tensors_unsafe(const Tensor& pointers, cons
     AT_ASSERT(device() == values_.device());    
     AT_ASSERT(indices_.device() == values_.device());
     AT_ASSERT(values_.device() == values_.device());
-    AT_ASSERT(reduction_.device() == values_.device());    
+    AT_ASSERT(reduction_.device() == values_.device());
+
+    auto reduction_accessor = reduction_.accessor<int64_t, 1>();
+
+    rsplit_dim_ = reduction_accessor[reduction_.size(0)-1];
 }
 
 IntArrayRef make_strides(IntArrayRef shape) {
