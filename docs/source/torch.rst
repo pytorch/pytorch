@@ -280,6 +280,7 @@ Pointwise Ops
     erfinv
     exp
     expm1
+    fix
     floor
     floor_divide
     fmod
@@ -480,6 +481,7 @@ BLAS and LAPACK Operations
     matmul
     matrix_power
     matrix_rank
+    matrix_exp
     mm
     mv
     orgqr

@@ -644,6 +644,11 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
 
     // Creates the NCCL streams
     streamVal.push_back(at::cuda::getStreamFromPool());
+
+    if (devices.size() == 1) {
+      futureNCCLCallbackStream_ =
+          std::make_shared<at::cuda::CUDAStream>(at::cuda::getStreamFromPool());
+    }
   }
 
   C10D_NCCL_CHECK(ncclGroupEnd());
@@ -779,7 +784,10 @@ c10::intrusive_ptr<c10::ivalue::Future> ProcessGroupNCCL::WorkNCCL::
   // Create a new FutureNCCL object after checking for single-process
   // single-device mode.
   return c10::make_intrusive<FutureNCCL>(
-      at::IValue(*outputs_), (*outputs_)[0].device().index(), cudaEvents_);
+      at::IValue(*outputs_),
+      (*outputs_)[0].device().index(),
+      cudaEvents_,
+      futureNCCLCallbackStream_);
 }
 
 template <typename Fn, typename PreProcess, typename PostProcess>
@@ -799,8 +807,13 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
   // Work itself will create the CUDA events on all GPUs of tensors
   auto work = initWork(devices);
 
-  // Store a reference to outputs to be used by WorkNCCL::getFuture.
-  work->outputs_ = std::make_shared<std::vector<at::Tensor>>(outputs);
+  // If single-process single-device mode, WorkNCCL::getFuture is supported.
+  // Store references to outputs and futureNCCLCallbackStream to be used by
+  // WorkNCCL::getFuture.
+  if (outputs.size() == 1) {
+    work->outputs_ = std::make_shared<std::vector<at::Tensor>>(outputs);
+    work->futureNCCLCallbackStream_ = futureNCCLCallbackStream_;
+  }
 
   at::cuda::OptionalCUDAGuard gpuGuard;
 
