@@ -194,38 +194,41 @@ void testIValueKWargs() {
 
 void testTemplatedOperatorCreator() {
   constexpr char op_list[] = "foofoo::bar.template;foo::another";
-  #define TORCH_SELECTIVE_NAME_IN_SCHEMA(l, n) torch::detail::SelectiveStr<c10::impl::op_whitelist_contains_name_in_schema(l, n)>(n)
+#define TORCH_SELECTIVE_NAME_IN_SCHEMA(l, n)                                   \
+  torch::detail::SelectiveStr<c10::impl::op_whitelist_contains_name_in_schema( \
+      l, n)>(n)
 
   {
     // Try to register an op name that does not exist in op_list.
     // Expected: the op name is not registered.
-    torch::jit::RegisterOperators reg(
-        {OperatorGenerator(
-            TORCH_SELECTIVE_NAME_IN_SCHEMA(op_list, "foofoo::not_exist(float a, Tensor b) -> Tensor"),
-            [](Stack* stack) {
-              double a;
-              at::Tensor b;
-              pop(stack, a, b);
-              push(stack, a + b);
-            },
-            aliasAnalysisFromSchema())});
+    torch::jit::RegisterOperators reg({OperatorGenerator(
+        TORCH_SELECTIVE_NAME_IN_SCHEMA(
+            op_list, "foofoo::not_exist(float a, Tensor b) -> Tensor"),
+        [](Stack* stack) {
+          double a;
+          at::Tensor b;
+          pop(stack, a, b);
+          push(stack, a + b);
+        },
+        aliasAnalysisFromSchema())});
 
     auto& ops = getAllOperatorsFor(Symbol::fromQualString("foofoo::not_exist"));
     ASSERT_EQ(ops.size(), 0);
   }
 
   {
-    // The operator should be successfully registered since its name is in the whitelist.
-    torch::jit::RegisterOperators reg(
-        {OperatorGenerator(
-            TORCH_SELECTIVE_NAME_IN_SCHEMA(op_list, "foofoo::bar.template(float a, Tensor b) -> Tensor"),
-            [](Stack* stack) {
-              double a;
-              at::Tensor b;
-              pop(stack, a, b);
-              push(stack, a + b);
-            },
-            aliasAnalysisFromSchema())});
+    // The operator should be successfully registered since its name is in the
+    // whitelist.
+    torch::jit::RegisterOperators reg({OperatorGenerator(
+        TORCH_SELECTIVE_NAME_IN_SCHEMA(
+            op_list, "foofoo::bar.template(float a, Tensor b) -> Tensor"),
+        [](Stack* stack) {
+          double a;
+          at::Tensor b;
+          pop(stack, a, b);
+          push(stack, a + b);
+        },
+        aliasAnalysisFromSchema())});
 
     auto& ops = getAllOperatorsFor(Symbol::fromQualString("foofoo::bar"));
     ASSERT_EQ(ops.size(), 1);
