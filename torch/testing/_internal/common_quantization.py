@@ -467,6 +467,9 @@ class QuantizationTestCase(TestCase):
                 node map: a dict from node(tuple of 2 elements) to
                    number of occurences (int)
                    e.g. {('call_function', torch.quantize_per_tensor) : 1)}
+                ordered node list: a list of node(tuple of 2 elements)
+                   e.g. [('call_function', torch.quantize_per_tensor),
+                         ('call_function', torch.dequantize)]
         """
         # TODO: make img_data a single example instead of a list
         if type(inputs) == list:
