@@ -320,7 +320,7 @@ def try_ann_to_type(ann, loc):
             return None
         if not hasattr(ann, "__torch_script_class__"):
             torch.jit._script._recursive_compile_class(ann, loc)
-        return EnumType(_qualified_name(ann), get_enum_value_type(ann, loc), list(ann))
+        return EnumType(_qualified_name(ann), get_enum_value_type(ann, loc))
     if inspect.isclass(ann):
         if hasattr(ann, "__torch_script_class__"):
             return ClassType(_qualified_name(ann))
