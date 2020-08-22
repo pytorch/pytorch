@@ -45,7 +45,11 @@ Tensor& add_out_dense_sparse_gcs_cpu(Tensor& out, const Tensor& dense, const Spa
   out.resize_as_(dense);
 
   AT_DISPATCH_ALL_TYPES(commonDtype, "add_dense_sparse_gcs", [&] {
-    
+    auto values_accessor = src_values.accessor<scalar_t, 1>();
+    auto pointers_accessor = src_pointers.accessor<int64_t, 1>();
+    auto indices_accessor = src_indices.accessor<int64_t, 1>();
+
+    scalar_t cast_value = alpha.to<scalar_t>();
   });
   
   return out;

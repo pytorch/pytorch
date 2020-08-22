@@ -50,6 +50,8 @@ struct CAFFE2_API SparseGCSTensorImpl : public TensorImpl {
                                at::Tensor pointers, at::Tensor indices, at::Tensor values, at::Tensor reduction,
                                Scalar fill_value);
 
+  IntArrayRef make_strides(IntArrayRef);
+
 
 };
 }

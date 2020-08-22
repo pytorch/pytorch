@@ -128,6 +128,11 @@ class TestSparseGCS(TestCase):
 
         self.assertEqual(sparse.to_dense(), rand)
 
+        multi_dim = np.random.randn(10, 8, 50, 20, 300)
+        sparse = self.make_sparse_gcs(multi_dim)
+
+        self.assertEqual(sparse.to_dense(), multi_dim)
+
     def test_basic_ops(self):
         # sparse-sparse addition
         x1 = self.gen_sparse_gcs((10, 3, 40, 5, 2), 100)

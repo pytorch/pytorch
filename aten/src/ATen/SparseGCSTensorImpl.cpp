@@ -37,7 +37,7 @@ SparseGCSTensorImpl::SparseGCSTensorImpl(at::DispatchKeySet key_set, const caffe
     reduction_(std::move(reduction)),
     fill_value_(std::move(fill_value)) {}
 
-  void SparseGCSTensorImpl::set_member_tensors_unsafe(const Tensor& pointers, const Tensor& indices,
+void SparseGCSTensorImpl::set_member_tensors_unsafe(const Tensor& pointers, const Tensor& indices,
                                                       const Tensor& values, const Tensor& reduction,
                                                       const Scalar& fill_value) {
     // TODO: perform lots of error checking to check correct type and sizes of inputs. Check
@@ -52,5 +52,9 @@ SparseGCSTensorImpl::SparseGCSTensorImpl(at::DispatchKeySet key_set, const caffe
     AT_ASSERT(indices_.device() == values_.device());
     AT_ASSERT(values_.device() == values_.device());
     AT_ASSERT(reduction_.device() == values_.device());    
-  }
+}
+
+IntArrayRef make_strides(IntArrayRef shape) {
+  return shape;
+}
 }
