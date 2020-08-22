@@ -70,6 +70,9 @@ namespace {
     class BitwiseFloatsAdditional2 : public ::testing::Test {};
 
     template <typename T>
+    class RealTests : public ::testing::Test {};
+
+    template <typename T>
     class ComplexTests : public ::testing::Test {};
     
     template <typename T>
@@ -124,6 +127,8 @@ namespace {
     TYPED_TEST_CASE(LogarithmReals, RealFloatTestedTypes);
 
     TYPED_TEST_CASE(Pow, RealFloatTestedTypes);
+
+    TYPED_TEST_CASE(RealTests, RealFloatTestedTypes);
 
     TYPED_TEST_CASE(BitwiseFloatsAdditional, RealFloatTestedTypes);
 
@@ -444,6 +449,20 @@ namespace {
         test_binary<vec_type>(
             "pow", RESOLVE_OVERLOAD(std::pow),
             [](vec_type v0, vec_type v1) { return v0.pow(v1); }, false, {}, true);
+    }
+
+    TYPED_TEST(RealTests, Hypot) {
+        using vec_type = TypeParam;
+        test_binary<vec_type>(
+            "hypot", RESOLVE_OVERLOAD(std::hypot),
+            [](vec_type v0, vec_type v1) { return v0.hypot(v1); }, false, {}, true);
+    }
+
+    TYPED_TEST(RealTests, NextAfter) {
+        using vec_type = TypeParam;
+        test_binary<vec_type>(
+            "nextafter", RESOLVE_OVERLOAD(std::nextafter),
+            [](vec_type v0, vec_type v1) { return v0.nextafter(v1); }, false, {}, true);
     }
 
     TYPED_TEST(Interleave, Interleave) {
