@@ -784,11 +784,8 @@ class Quantizer:
                 elif node.name in env:
                     return False
             elif isinstance(node, list):
-                quantized = map(is_quantized, node)
-                if all(quantized):
+                if all(map(is_quantized, node)):
                     return True
-                elif not any(quantized):
-                    return False
                 else:
                     raise Exception("partially quantized inputs in list not handled yet")
 

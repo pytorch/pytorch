@@ -94,6 +94,7 @@ namespace c10 {
   _(aten, backward)                  \
   _(prim, Guard)                     \
   _(prim, BailOut)                   \
+  _(prim, TypeCheck)                 \
   _(prim, FusedConcat)               \
   _(prim, ConstantChunk)             \
   _(prim, MMTreeReduce)              \
