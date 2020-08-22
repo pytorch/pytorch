@@ -6739,44 +6739,6 @@ class TestTorchDeviceType(TestCase):
             torch.pow(m1, 1, out=out)
             self.assertEqual(out, m1)
 
-
-    def test_neg(self, device):
-        int_types = [torch.int, torch.short, torch.int8, torch.uint8]
-        float_types = [torch.float, torch.double, torch.long]
-
-        # Tests bool tensor negation raises the correct error
-        self.assertRaisesRegex(
-            RuntimeError,
-            r"Negation, the `\-` operator, on a bool tensor is not supported. "
-            r"If you are trying to invert a mask, use the `\~` or `logical_not\(\)` operator instead.",
-            lambda: - torch.tensor([False, True], device=device))
-
-        for dtype in float_types + int_types:
-            if dtype in float_types:
-                a = torch.randn(100, 90).to(device=device, dtype=dtype)
-            if dtype == torch.uint8:
-                a = torch.randint(0, 256, (100, 90), dtype=dtype, device=device)
-            else:
-                a = torch.randint(-128, 128, (100, 90), dtype=dtype, device=device)
-            zeros = torch.zeros_like(a, device=device, dtype=dtype)
-
-            if dtype == torch.uint8:
-                res_add = torch.add(zeros, a, alpha=255)
-            else:
-                res_add = torch.add(zeros, a, alpha=-1)
-
-            res_neg = a.clone()
-            res_neg.neg_()
-            self.assertEqual(res_neg, res_add)
-
-            # test out of place as well
-            res_neg_out_place = a.clone().neg()
-            self.assertEqual(res_neg_out_place, res_add)
-
-            # test via __neg__ operator
-            res_neg_op = -a.clone()
-            self.assertEqual(res_neg_op, res_add)
-
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     def test_inverse(self, device):
@@ -7029,15 +6991,6 @@ class TestTorchDeviceType(TestCase):
             a = torch.tensor(a_, dtype=dtype, device=device)
             for other_dtype in torch.testing.get_all_dtypes():
                 b = torch.tensor(b_, dtype=other_dtype, device=device)
-
-                # TODO Remove this skipping after bfloat16 can be handled nicely with other dtypes.
-                # Skip only if either dtype or other_dtype is bfloat16, and promotion is unsupported.
-                if (dtype == torch.bfloat16) != (other_dtype == torch.bfloat16):
-                    non_bfloat16_dtype = dtype if dtype != torch.bfloat16 else other_dtype
-                    if non_bfloat16_dtype.is_complex or non_bfloat16_dtype == torch.float16:
-                        with self.assertRaises(RuntimeError):
-                            getattr(a, op)(b)
-                        continue
 
                 # Skip bfloat16 on CUDA. Remove this after bfloat16 is supported on CUDA.
                 # After type promotion of bfloat16 is supported, some bfloat16 logical operation will go through on
@@ -11609,7 +11562,7 @@ class TestTorchDeviceType(TestCase):
                             self.assertTrue(from_ <= double_t.min() <= (from_ + delta))
                             self.assertTrue((to_ - delta) <= double_t.max() < to_)
 
-    @dtypes(torch.float, torch.double, torch.complex64, torch.complex128)
+    @dtypes(torch.float, torch.double, torch.half, torch.complex32, torch.complex64, torch.complex128)
     def test_randn(self, device, dtype):
         for size in [0, SIZE]:
             torch.manual_seed(123456)
@@ -15248,7 +15201,7 @@ class TestTorchDeviceType(TestCase):
         test_helper((10, 3, 32, 32), 10 * 3 * 32 * 32, torch.channels_last, device)
         test_helper((3, 10, 3, 32, 32), 3 * 10 * 3 * 32 * 32, torch.channels_last_3d, device)
 
-    def test_memory_format_proparation_rules(self, device):
+    def test_memory_format_propagation_rules(self, device):
 
         contiguous = torch.rand(10, 3, 5, 5, device=device)
         cl = torch.rand(10, 3, 5, 5, device=device).contiguous(memory_format=torch.channels_last)
@@ -15490,6 +15443,52 @@ class TestTorchDeviceType(TestCase):
             abs(torch.randn((4, 3, 8, 8, 8), device=device)) + 1,
             torch.randn((1, 3, 1, 1, 1), device=device).contiguous(memory_format=torch.channels_last_3d),
             torch.channels_last_3d)
+
+    def test_strides_propagation(self, device):
+
+        def _test_helper(x, op, unary=False):
+            def compare_strides(s1, s2, div):
+                sdiv = [s // div for s in s1]
+                self.assertEqual(sdiv, s2)
+
+            dim = x.dim()
+            # we produce memory dense outputs, so when input is strided on the last dimension
+            # we need to divide by that dimension stride to compare input and result strides
+            div = x.stride(-1)
+            for p in permutations(range(dim)):
+                xp = x.permute(p)
+                if not unary:
+                    y = torch.randn(xp.size(-1), device=x.device, dtype=x.dtype)
+                    for inputs in ((xp, xp), (xp, y), (y, xp)):
+                        res = op(*inputs)
+                        compare_strides(xp.stride(), res.stride(), div)
+                        self.assertEqual(xp.size(), res.size())
+                        out = torch.empty(0, device=xp.device, dtype=res.dtype)
+                        res = op(*inputs, out=out)
+                        compare_strides(xp.stride(), res.stride(), div)
+                        self.assertEqual(xp.size(), res.size())
+                else:
+                    res = op(xp)
+                    compare_strides(xp.stride(), res.stride(), div)
+                    self.assertEqual(xp.size(), res.size())
+                    out = torch.empty(0, device=xp.device, dtype=res.dtype)
+                    res = op(xp, out=out)
+                    compare_strides(xp.stride(), res.stride(), div)
+                    self.assertEqual(xp.size(), res.size())
+
+        # torch.eq by default calls TensorIterator with defined output, torch.add with undefined
+        binary_ops = (torch.eq, torch.add)
+        unary_ops = (torch.exp,)
+        # memory dense, sliced and ambiguous sliced (ambiguous dense loses permutation information)
+        xs = (torch.randn(2, 3, 4, device=device), torch.randn(2, 3, 8, device=device)[:, :, ::2],
+              torch.randn(1, 1, 4, 12, device=device)[:, :, :, ::2])
+        for op in binary_ops:
+            for x in xs:
+                _test_helper(x, op)
+        for op in unary_ops:
+            for x in xs:
+                _test_helper(x, op, unary=True)
+
 
     def _test_unique_scalar_empty(self, dtype, device, f):
         # test scalar
@@ -20490,17 +20489,13 @@ tensor_op_tests = [
     ('log2', '', _small_3d, lambda t, d: [], 1e-2, 1e-1, 1e-5, _float_types2, [torch.bfloat16]),
     ('sigmoid', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types2),
     ('logit', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types2),
-    ('sin', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
     ('sqrt', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types2, [torch.bfloat16]),
     ('tanh', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types2 + _complex_types, [torch.bfloat16]),
-    ('acos', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
     ('asin', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
     ('atan', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
     ('acosh', '', lambda t, d: _small_3d(t, d) + 1, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types2),
     ('asinh', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types2),
     ('atanh', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types2),
-    ('cos', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
-    ('cosh', '', _small_3d, lambda t, d: [], 1e-2, 1e-5, 1e-5, _float_types),
     ('erf', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types2, [torch.bfloat16]),
     ('erfc', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
     ('exp', '', _small_3d, lambda t, d: [], 1e-2, 1e-2, 1e-5, _float_types),
@@ -20514,7 +20509,6 @@ tensor_op_tests = [
     ('reciprocal', '', _small_3d, lambda t, d: [], 1e-1, 1e-1, 1e-5, _float_types2, [torch.bfloat16]),
     ('floor', '', _small_3d, lambda t, d: [], 1e-5, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
     ('frac', '', _small_3d, lambda t, d: [], 1e-5, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
-    ('neg', '', _small_3d, lambda t, d: [], 1e-5, 1e-2, 1e-5, _float_types2, [torch.bfloat16]),
     ('round', '', _small_3d, lambda t, d: [], 1e-5, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
     ('trunc', '', _small_3d, lambda t, d: [], 1e-5, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
     ('ceil', '', _small_3d, lambda t, d: [], 1e-5, 1e-2, 1e-5, _float_types, [torch.bfloat16]),
@@ -20678,14 +20672,10 @@ class _TorchMathTestMeta(object):
         self.dtypes = dtypes
         self.replace_inf_with_nan = replace_inf_with_nan
 
-torch_op_tests = [_TorchMathTestMeta('sin'),
-                  _TorchMathTestMeta('asin', reffn='arcsin'),
+torch_op_tests = [_TorchMathTestMeta('asin', reffn='arcsin'),
                   _TorchMathTestMeta('asinh', reffn='arcsinh'),
                   _TorchMathTestMeta('sinh'),
-                  _TorchMathTestMeta('cos'),
-                  _TorchMathTestMeta('acos', reffn='arccos'),
                   _TorchMathTestMeta('acosh', reffn='arccosh'),
-                  _TorchMathTestMeta('cosh'),
                   _TorchMathTestMeta('tan'),
                   _TorchMathTestMeta('atan', reffn='arctan'),
                   _TorchMathTestMeta('atanh', reffn='arctanh'),

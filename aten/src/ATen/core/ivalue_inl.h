@@ -300,7 +300,7 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
     markCompleted(IValue {});
   }
 
-  void setError(std::string err) {
+  virtual void setError(std::string err) {
     setError(FutureError(std::move(err)));
   }
 
@@ -363,7 +363,7 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
    * value of the callback. This is necessary when the callback provider needs
    * to know for sure when the callback has finished.
    */
-  c10::intrusive_ptr<Future> then(
+  virtual c10::intrusive_ptr<Future> then(
       std::function<IValue(void)> callback,
       TypePtr type) {
     auto fut = c10::make_intrusive<Future>(type);
@@ -559,7 +559,9 @@ struct ivalue::EnumHolder : c10::intrusive_ptr_target {
       std::ostream& out,
       const EnumHolder& v);
 
-  const std::string qualifiedClassName() const;
+  CAFFE2_API const std::string qualifiedClassName() const;
+
+  const std::string unqualifiedClassName() const;
 
   const std::string& name() const {
     return name_;
