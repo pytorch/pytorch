@@ -225,11 +225,12 @@ TORCH_API void ensure_c10_registerer_defined();
 // Used to assert that unschematized operators have an analysis method written
 TORCH_API bool aliasAnalysisHasSpecialCaseFor(c10::Symbol sym);
 
-// A factory function to generate an optional operator. It has two instatiations
-// depending on the template bool arg. The arg can be a compile-time function
-// for the selective op registration based on schema string.
+// A factory function to generate an optional operator. It has two
+// instantiations depending on the template bool arg value. The arg can be a
+// compile-time function for the selective op registration based on schema
+// string.
 template <typename Func>
-__attribute__((always_inline)) c10::optional<Operator> OperatorGenerator(
+c10::optional<Operator> OperatorGenerator(
     torch::detail::SelectiveStr<true> schema_str,
     Func&& op,
     AliasAnalysisKind alias_analysis) {
@@ -240,7 +241,7 @@ __attribute__((always_inline)) c10::optional<Operator> OperatorGenerator(
 }
 
 template <typename Func>
-__attribute__((always_inline)) c10::optional<Operator> OperatorGenerator(
+c10::optional<Operator> OperatorGenerator(
     torch::detail::SelectiveStr<false> schema_str,
     Func&& op,
     AliasAnalysisKind alias_analysis) {
