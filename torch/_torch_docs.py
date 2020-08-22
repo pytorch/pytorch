@@ -4921,7 +4921,7 @@ Example::
 
 add_docstr(torch.nonzero,
            r"""
-nonzero(input, *, as_tuple) -> LongTensor or tuple of LongTensors
+nonzero(input, as_tuple) -> LongTensor or tuple of LongTensors
 
 .. note::
     :func:`torch.nonzero(..., as_tuple=False) <torch.nonzero>` returns a
