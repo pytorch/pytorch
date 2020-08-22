@@ -1,12 +1,18 @@
 import torch
-from torch.fx import symbolic_trace
-from torch.fx.symbolic_trace import DefaultDelegate
-from torch.fx.graph import Graph
-from torch.fx.node import Node
+import unittest
+from torch.fx import symbolic_trace, Proxy, Node, GraphModule, DefaultDelegate
+
+from fx.quantization import Quantizer
 
 from typing import Any, Callable, Dict, Optional, Tuple, Union
-
 from torch.testing._internal.common_utils import TestCase, run_tests
+
+try:
+    from torchvision.models import resnet18
+    HAS_TORCHVISION = True
+except ImportError:
+    HAS_TORCHVISION = False
+skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 class TestFX(TestCase):
     def test_graph_module(self):
@@ -81,7 +87,7 @@ class TestFX(TestCase):
     def test_disallow_override(self):
         # Custom delegate to disallow in-place tensor operations
         class NoMutableCallDelegate(DefaultDelegate):
-            def create_node(self, graph : Graph, kind : str, target : Union[str, Callable],
+            def create_node(self, kind : str, target : Union[str, Callable],
                             args : Tuple[Any], kwargs : Dict[str, Any], name : Optional[str] = None) -> Node:
                 name = target if isinstance(target, str) else torch.typename(target)
                 if name[-1] == '_':
@@ -97,7 +103,7 @@ class TestFX(TestCase):
         m = MyInplaceMod()
 
         with self.assertRaisesRegex(RuntimeError, 'In-place operations'):
-            symbolic_trace(m, delegate=NoMutableCallDelegate())
+            symbolic_trace(m, delegate_class=NoMutableCallDelegate)
 
         # Test free function
         class MyInplaceMod2(torch.nn.Module):
@@ -106,7 +112,7 @@ class TestFX(TestCase):
                 return x
         m2 = MyInplaceMod2()
         with self.assertRaisesRegex(RuntimeError, 'In-place operations'):
-            symbolic_trace(m2, delegate=NoMutableCallDelegate())
+            symbolic_trace(m2, delegate_class=NoMutableCallDelegate)
 
         # Test symbolic node as an arg
         class MyInplaceMod3(torch.nn.Module):
@@ -116,7 +122,7 @@ class TestFX(TestCase):
                 return x
         m3 = MyInplaceMod3()
         with self.assertRaisesRegex(RuntimeError, 'In-place operations'):
-            symbolic_trace(m3, delegate=NoMutableCallDelegate())
+            symbolic_trace(m3, delegate_class=NoMutableCallDelegate)
 
     def test_leaf_module(self):
         # Custom delegate to make it so that there are no leaf modules, everything
@@ -134,9 +140,52 @@ class TestFX(TestCase):
                 return self.relu(x)
 
         mrm = MyReluMod()
-        sym = symbolic_trace(mrm, delegate=NoLeafModulesDelegate())
+        sym = symbolic_trace(mrm, delegate_class=NoLeafModulesDelegate)
         for node in sym.graph.nodes:
             self.assertNotEqual(node.op, 'call_module')
+
+    def test_graph_edit_with_proxy(self):
+        class M(torch.nn.Module):
+            def forward(self, a, b):
+                return a + b
+        m = M()
+        g = symbolic_trace(m).graph
+        t = Proxy(g.result)
+        # test that we can use proxy objects to generate more graph code later for things that do not need to work with modules.
+        g.output((t + t).node)
+        gm = GraphModule(m, g)
+        self.assertEqual(gm(3, 4), 14)
+
+    @skipIfNoTorchVision
+    def test_resnet(self):
+        resnet = resnet18()
+        resnet.train()
+
+        res_graph = symbolic_trace(resnet)
+        res_script = torch.jit.script(res_graph)
+
+        ip = torch.rand(1, 3, 224, 224)
+
+        a = resnet(ip)
+        b = res_graph(ip)
+        c = res_script(ip)
+        assert torch.allclose(a, b)
+        assert torch.allclose(a, c)
+
+        quantizer = Quantizer(res_graph)
+
+        for i in range(10):
+            quantizer.observe((torch.rand(1, 3, 224, 224),))
+
+        qgraph = quantizer.quantize()
+        qgraph_script = torch.jit.script(qgraph)
+
+        d = qgraph(ip)
+        e = qgraph_script(ip)
+
+        assert (a - d).abs().max() < 2
+        assert torch.allclose(d, e)
+
 
 if __name__ == '__main__':
     run_tests()
