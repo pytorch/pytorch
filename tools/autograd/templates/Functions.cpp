@@ -302,7 +302,7 @@ Tensor nanprod_backward(const Tensor& grad, const Tensor& input, const Tensor& r
   }
   Tensor zero_idx = (input == 0).nonzero();
   if (zero_idx.numel() == 0) {
-    Tensor nans_replace = at::where(at::isnan(input), at::ones_like(input), input);
+    Tensor nans_replace = at::where(at::isnan(input), at::tensor({1}), input);
     return grad * result / nans_replace * input.isnan().logical_not();
   } else if (zero_idx.size(0) > 1) {
     return at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
