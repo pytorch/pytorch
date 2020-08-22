@@ -298,7 +298,7 @@ Tensor prod_safe_zeros_backward(const Tensor &grad, const Tensor& inp, int64_t d
 
 Tensor nanprod_backward(const Tensor& grad, const Tensor& input, const Tensor& result) {
   if (input.dim() == 0) {
-    return grad * input.isnan().logical_not();
+    return grad;
   }
   Tensor zero_idx = (input == 0).nonzero();
   if (zero_idx.numel() == 0) {
@@ -313,7 +313,7 @@ Tensor nanprod_backward(const Tensor& grad, const Tensor& input, const Tensor& r
 
 Tensor nanprod_backward(Tensor grad, const Tensor& input, Tensor result, int64_t dim, bool keepdim) {
   if (input.dim() == 0) {
-    return grad * input.isnan().logical_not();
+    return grad;
   }
   dim = at::maybe_wrap_dim(dim, input.sizes().size());
   if (!keepdim && input.dim() != 1) {
