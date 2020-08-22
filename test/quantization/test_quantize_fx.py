@@ -662,7 +662,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         self.checkGraphModuleNodes(
             quantized,
             expected_node_occurrence=count_check,
-            expected_node_list = order_check)
+            expected_node_list=order_check)
 
     @skipIfNoFBGEMM
     def test_general_value_ops(self):
@@ -756,4 +756,4 @@ class TestQuantizeFxOps(QuantizationTestCase):
         self.checkGraphModuleNodes(
             quantized,
             expected_node_occurrence=count_check,
-            expected_node_list = order_check)
+            expected_node_list=order_check)
