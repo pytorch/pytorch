@@ -296,6 +296,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: expand
    .. automethod:: expand_as
    .. automethod:: exponential_
+   .. automethod:: fix
+   .. automethod:: fix_
    .. automethod:: fft
    .. automethod:: fill_
    .. automethod:: flatten
@@ -408,6 +410,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: masked_select
    .. automethod:: matmul
    .. automethod:: matrix_power
+   .. automethod:: matrix_exp
    .. automethod:: max
    .. automethod:: mean
    .. automethod:: median
