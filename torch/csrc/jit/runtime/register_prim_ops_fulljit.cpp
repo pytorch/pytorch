@@ -776,7 +776,6 @@ RegisterOperators reg2({
         "aten::sorted.str(str[](a) input) -> (str[])",
         listCopyAndSort<std::string>,
         aliasAnalysisFromSchema()),
-
     Operator(
         "aten::eq.float_list(float[] a, float[] b) -> bool",
         listEq<double>,
@@ -1164,38 +1163,105 @@ Function* checkSortSchema(const c10::TypePtr& list_element_type) {
               << "returns a bool";
   } else {
     error_str << "To sort a list of " << list_element_type->repr_str()
-              << " must be of Tensors, ints, floats, bools, strs or "
-              << "a User Defined Class that defines the __lt__ compare method"
-              << ", got list of " << list_element_type->repr_str() << "\n";
+              << " must be of Tensors, ints, floats, bools, strs, "
+              << "a User Defined Class that defines the __lt__ compare method "
+              << "or Tuples of aforementioned types, got list of "
+              << list_element_type->repr_str() << "\n";
   }
   throw std::runtime_error(error_str.str());
+}
+
+bool isSortableTupleType(const TupleTypePtr& tuple_type) {
+  for (const TypePtr& ele_type : tuple_type->containedTypes()) {
+    switch (ele_type->kind()) {
+      case TypeKind::IntType:
+      case TypeKind::BoolType:
+      case TypeKind::FloatType:
+      case TypeKind::StringType:
+      case TypeKind::TensorType:
+        continue;
+      case TypeKind::TupleType:
+        if (!isSortableTupleType(ele_type->expect<TupleType>())) {
+          return false;
+        }
+        continue;
+      default:
+        return false;
+    }
+  }
+
+  return true;
+}
+
+bool isSortableListOfTuple(
+    const c10::List<IValue>& list_ivalues,
+    std::stringstream& why_not) {
+  // Tuple type must contain only sortable types
+  auto tuple_type = list_ivalues.get(0).toTuple()->type();
+  if (!isSortableTupleType(tuple_type)) {
+    why_not << "Contained elements in " << *tuple_type
+            << " are not sortable. Only Int, Bool, Float, String, Tensor "
+            << " or Tuples of aforementionted types can be sorted.";
+    return false;
+  }
+
+  // All tuples must have exactly same type.
+  for (const IValue v : list_ivalues) {
+    auto curr_type = v.toTuple()->type();
+    if (*curr_type != *tuple_type) {
+      why_not << "Different tuple types can not be sorted. "
+              << "Found different tuple types: " << *tuple_type << " and "
+              << *curr_type << ".";
+      return false;
+    }
+  }
+
+  return true;
 }
 
 template <bool has_reverse_arg, bool copy_return_list>
 void sort_op(Stack* stack) {
   bool reverse = has_reverse_arg ? pop(stack).toBool() : false;
   auto g_list = pop(stack).toList();
+
   if (copy_return_list) {
     g_list = g_list.copy();
   }
-  Stack sort_stack;
-  Function* lt_func = nullptr;
-  std::sort(
-      g_list.begin(),
-      g_list.end(),
-      [reverse, &sort_stack, &lt_func](IValue a, IValue b) -> bool {
-        // "strict weak ordering" issue - see other sort
-        if (a.is(b)) {
-          return false;
-        }
-        if (!lt_func) {
-          lt_func = checkSortSchema(a.type());
-        }
-        sort_stack.push_back(a);
-        sort_stack.push_back(b);
-        lt_func->run(sort_stack);
-        return pop(sort_stack).toBool() != reverse;
-      });
+
+  if (!g_list.empty()) {
+    std::stringstream ss;
+    if (g_list.get(0).isTuple()) {
+      if (!isSortableListOfTuple(g_list, ss)) {
+        throw std::runtime_error(ss.str());
+      }
+      if (reverse) {
+        std::sort(g_list.begin(), g_list.end(), std::greater<>());
+      } else {
+        std::sort(g_list.begin(), g_list.end());
+      }
+    } else {
+      Stack sort_stack;
+      Function* lt_func = nullptr;
+      std::sort(
+          g_list.begin(),
+          g_list.end(),
+          [reverse, &sort_stack, &lt_func](
+              const IValue& a, const IValue& b) -> bool {
+            // "strict weak ordering" issue - see other sort
+            if (a.is(b)) {
+              return false;
+            }
+            if (!lt_func) {
+              lt_func = checkSortSchema(a.type());
+            }
+            sort_stack.push_back(a);
+            sort_stack.push_back(b);
+            lt_func->run(sort_stack);
+            return pop(sort_stack).toBool() != reverse;
+          });
+    }
+  }
+
   if (copy_return_list) {
     push(stack, g_list);
   }

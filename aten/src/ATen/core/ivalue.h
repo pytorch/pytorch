@@ -651,6 +651,9 @@ struct CAFFE2_API IValue final {
       std::function<bool(std::ostream&, const IValue& v)> customFormatter)
       const;
 
+  CAFFE2_API friend bool operator<(const IValue& a, const IValue& b);
+  CAFFE2_API friend bool operator>(const IValue& a, const IValue& b);
+
   // Computes an "informal" string representation of an IValue. This should be
   // used for debugging, or servicing `print()`-like functions.
   // This is different from `repr()` in that there is no expectation that we can

@@ -46,6 +46,50 @@ bool operator==(const ivalue::Tuple& lhs, const ivalue::Tuple& rhs) {
              _fastEqualsForContainer);
 }
 
+bool operator<(const ivalue::Tuple& lhs, const ivalue::Tuple& rhs) {
+  const auto& lhs_vals = lhs.elements();
+  const auto& rhs_vals = rhs.elements();
+
+  TORCH_INTERNAL_ASSERT(
+      lhs_vals.size() == rhs_vals.size(),
+      "tuples of different length can not be compared");
+
+  const size_t n = lhs_vals.size();
+  for(size_t i = 0; i < n; ++i) {
+    if(lhs_vals[i] < rhs_vals[i]) {
+      return true;
+    }
+    if(lhs_vals[i] > rhs_vals[i]) {
+      return false;
+    }
+  }
+
+  // Reaching here means rhs and lhs are equal.
+  return false;
+}
+
+bool operator>(const ivalue::Tuple& lhs, const ivalue::Tuple& rhs) {
+  const auto& lhs_vals = lhs.elements();
+  const auto& rhs_vals = rhs.elements();
+
+  TORCH_INTERNAL_ASSERT(
+      lhs_vals.size() == rhs_vals.size(),
+      "tuples of different length can not be compared");
+
+  const size_t n = lhs_vals.size();
+  for(size_t i = 0; i < n; ++i) {
+    if(lhs_vals[i] > rhs_vals[i]) {
+      return true;
+    }
+    if(lhs_vals[i] < rhs_vals[i]) {
+      return false;
+    }
+  }
+
+  // Reaching here means rhs and lhs are equal.
+  return false;
+}
+
 TupleTypePtr Tuple::type() const {
   if (!type_) {
     type_ = TupleType::create(
@@ -460,6 +504,50 @@ std::ostream& IValue::repr(
     }
     default:
       TORCH_INTERNAL_ASSERT(false, "repr() not defined on: ", v.tagKind());
+  }
+}
+
+
+
+bool operator<(const IValue& a, const IValue& b) {
+  // Must be same type to be compared.
+  TORCH_INTERNAL_ASSERT(a.tag == b.tag, "IValues of different types can not be compared");
+  switch (a.tag) {
+    case IValue::Tag::Tensor:
+       return a.toTensor().lt(b.toTensor()).is_nonzero();
+    case IValue::Tag::Double:
+       return a.toDouble() < b.toDouble();
+    case IValue::Tag::Int:
+       return a.toInt() < b.toInt();
+    case IValue::Tag::Bool:
+       return a.toBool() == false && b.toBool() == true;
+    case IValue::Tag::String:
+       return a.toString()->string() < b.toString()->string();
+    case IValue::Tag::Tuple:
+       return *a.toTuple() < *b.toTuple();
+    default:
+      AT_ERROR("IValue of type: ", a.tagKind(), " is not comparable");
+  }
+}
+
+bool operator>(const IValue& a, const IValue& b) {
+  // Must be same type to be compared.
+  TORCH_INTERNAL_ASSERT(a.tag == b.tag, "IValues of different types can not be compared");
+  switch (a.tag) {
+    case IValue::Tag::Tensor:
+       return a.toTensor().gt(b.toTensor()).is_nonzero();
+    case IValue::Tag::Double:
+       return a.toDouble() > b.toDouble();
+    case IValue::Tag::Int:
+       return a.toInt() > b.toInt();
+    case IValue::Tag::Bool:
+       return a.toBool() == true && b.toBool() == false;
+    case IValue::Tag::String:
+       return a.toString()->string() > b.toString()->string();
+    case IValue::Tag::Tuple:
+       return *a.toTuple() > *b.toTuple();
+    default:
+      AT_ERROR("IValue of type: ", a.tagKind(), " is not comparable");
   }
 }
 
