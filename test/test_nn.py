@@ -4311,6 +4311,22 @@ class TestNN(NNTestCase):
             self.assertEqual(len(w), 1)
             self.assertIn('Please ensure they have the same size.', str(w[0]))
 
+    def test_mse_loss_elemwise_mean(self):
+        i = torch.randn((10,), requires_grad=True)
+        t = torch.randn((10,), requires_grad=True)
+        with warnings.catch_warnings(record=True) as w:
+            # Ensure warnings are being shown
+            warnings.simplefilter("always")
+            # Trigger Warning
+            F.mse_loss(i, t, reduction='elementwise_mean')
+            # Check warning occurs
+            self.assertEqual(len(w), 1)
+            self.assertIn('reduction=\'elementwise_mean\' is deprecated', str(w[0]))
+
+        out_elemwise_mean = F.mse_loss(i, t, reduction='elementwise_mean')
+        out_mean = F.mse_loss(i, t, reduction='mean')
+        self.assertEqual(out_elemwise_mean, out_mean)
+
     def test_poisson_nll_loss_reduction_modes(self):
         input = torch.tensor([0.5, 1.5, 2.5])
         target = torch.tensor([1., 2., 3.])
