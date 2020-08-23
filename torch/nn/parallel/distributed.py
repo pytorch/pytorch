@@ -787,7 +787,8 @@ class DistributedDataParallel(Module):
                         # Check if we need to allreduce locally unused params.
                         if self.find_unused_parameters:
                             self._match_unused_params_allreduce()
-                        # Does not work if buckets already rebuilt.
+                        # If buckets not rebuilt, will push original bucket
+                        # indices to simulate a rebuild.
                         if not buckets_rebuilt:
                             self.reducer._push_all_rebuilt_params()
 
