@@ -266,7 +266,7 @@ Tensor TransformerEncoderImpl::forward(
 
 // ========================TransformerDecoderImpl=========================
 TransformerDecoderImpl::TransformerDecoderImpl(
-  const TransformerDecoderOptions& options_ ) : options(std::move(options_)){
+  TransformerDecoderOptions options_ ) : options(std::move(options_)){
   reset();
 }
 

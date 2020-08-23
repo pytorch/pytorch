@@ -36,7 +36,7 @@ class TORCH_API TransformerDecoderImpl : public Cloneable<TransformerDecoderImpl
  public:
   TransformerDecoderImpl(TransformerDecoderLayer decoder_layer, int64_t num_layers)
     : TransformerDecoderImpl(TransformerDecoderOptions(decoder_layer, num_layers)) {}
-  explicit TransformerDecoderImpl(const TransformerDecoderOptions& options_);
+  explicit TransformerDecoderImpl(TransformerDecoderOptions options_);
 
   void reset() override;
 
