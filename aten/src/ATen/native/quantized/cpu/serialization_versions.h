@@ -104,8 +104,9 @@ SerializationType serialize_conv(
   auto dilation = params->dilation().vec();
   params_vec.insert(params_vec.end(), dilation.begin(), dilation.end());
   params_vec.push_back(params->groups());
+  int64_t vec_size = params_vec.size();
   at::Tensor params_tensor = at::from_blob(
-      params_vec.data(), {params_vec.size()},
+      params_vec.data(), {vec_size},
       at::TensorOptions().dtype(at::kLong));
 
   at::Tensor weight;
