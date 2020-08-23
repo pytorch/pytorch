@@ -50,7 +50,7 @@ class TORCH_API TransformerDecoderImpl : public Cloneable<TransformerDecoderImpl
   ///       memory_mask: the mask for the memory sequence (optional).
   ///       tgt_key_padding_mask: the mask for the tgt keys per batch (optional).
   ///       memory_key_padding_mask: the mask for the memory keys per batch (optional).
-  Tensor forward(Tensor tgt,
+  Tensor forward(const Tensor& tgt,
                  const Tensor& memory,
                  const Tensor& tgt_mask = {},
                  const Tensor& memory_mask = {},
