@@ -1204,6 +1204,40 @@ void LoopNest::unroll(For* f, Stmt** unrolled) {
   p->replace_stmt(f, *unrolled);
 }
 
+void LoopNest::normalize(For* f, For** normalized) {
+  if (!f) {
+    throw malformed_input("normalize attempted on null loop");
+  }
+  Block* p = dynamic_cast<Block*>(f->get_parent());
+  if (!p) {
+    throw malformed_input("normalize attempted on loop with no parent");
+  }
+
+  if (!f->start()->isConstant()) {
+    // Do not normalize when the loop start is not a constant.
+    *normalized = f;
+    return;
+  }
+
+  int start_idx = immediateAs<int>(f->start());
+  if (start_idx == 0) {
+    // No need to normalize in this case.
+    *normalized = f;
+    return;
+  }
+
+  auto for_body_normalized = Substitute(
+      Stmt::clone(f->body()),
+      {{f->var(), (VarHandle(f->var()) + ExprHandle(f->start())).node()}});
+  *normalized = For::make(
+      VarHandle(f->var()),
+      ExprHandle(0),
+      ExprHandle(f->stop()) - ExprHandle(f->start()),
+      for_body_normalized);
+
+  p->replace_stmt(f, *normalized);
+}
+
 std::vector<For*> LoopNest::getLoopStmtsFor(Tensor* t) const {
   std::vector<For*> result;
   Stmt* cur_stmt = tensor_to_stmt_.at(t);

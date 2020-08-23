@@ -401,6 +401,7 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(
   }
 
   auto copy = pr_->graph()->copy();
+  ProfilingRecord::removeProfileCounter(copy->block());
   runProfilingOptimizations(copy);
   // cache
   optimized_plan_ =
