@@ -195,6 +195,7 @@ def get_analytical_jacobian_fw(fn, input, output):
         fw_grad = torch.zeros_like(inp)
         try:
             inp.fw_grad = fw_grad
+            fw_grad = inp.fw_grad
             for lin_idx, inp_idx in enumerate(product(*[range(m) for m in inp.size()])):
                 fw_grad[inp_idx] = 1
                 with torch.set_fw_grad_enabled(True):

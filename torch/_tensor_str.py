@@ -372,4 +372,5 @@ def _str_intern(self):
 
 def _str(self):
     with torch.no_grad():
-        return _str_intern(self)
+        with torch.set_fw_grad_enabled(False):
+            return _str_intern(self)
