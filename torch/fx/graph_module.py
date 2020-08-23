@@ -1,7 +1,7 @@
-# type: ignore
 import torch
 import torch.overrides
 import linecache
+from typing import Type, Dict, List
 
 # normal exec loses the source code, however we can patch
 # the linecache module to still recover it.
@@ -17,7 +17,7 @@ def exec_with_source(src, globals):
 
 # patch linecache so that any code we exec using exec_with_source
 # works with inspect
-_eval_cache = {}
+_eval_cache : Dict[str, List[str]] = {}
 _orig_getlines = linecache.getlines
 def patched_getline(*args, **kwargs):
     if args[0] in _eval_cache:
@@ -27,12 +27,13 @@ linecache.getlines = patched_getline
 
 
 class GraphModule(torch.nn.Module):
-    def __new__(cls, *args, **kwargs):
+    def __new__(cls: 'Type[GraphModule]', *args, **kwargs):
         # each instance of a graph module needs its own forward method
         # so create a new singleton class for each instance.
         # it is a subclass of the user-defined class, the only difference
         # is an extra layer to install the forward method
-        class GraphModuleImpl(cls):
+
+        class GraphModuleImpl(cls):  # type: ignore
             pass
         return super().__new__(GraphModuleImpl)
 

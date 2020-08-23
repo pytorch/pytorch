@@ -1,4 +1,3 @@
-# type: ignore
 import inspect
 from types import CodeType, FunctionType
 from typing import Any, Callable, Dict, Optional, Tuple, Union
@@ -20,6 +19,7 @@ def _find_module(root, m):
 def _patch_function(fn, nargs):
     co = fn.__code__
     co_flags = co.co_flags & ~HAS_VARSTUFF
+    co_args : tuple
     if hasattr(co, "co_posonlyargcount"):
         co_args = (
             nargs, 0,
@@ -36,7 +36,7 @@ def _patch_function(fn, nargs):
             co.co_names, co.co_varnames, co.co_filename,
             co.co_name, co.co_firstlineno, co.co_lnotab,
             co.co_freevars, co.co_cellvars)
-    new_code = CodeType(*co_args)
+    new_code = CodeType(*co_args)  # type: ignore
     return FunctionType(new_code, fn.__globals__, fn.__name__, fn.__defaults__, fn.__closure__)
 
     # we need to insert placeholder nodes for *args, and **kwargs,
@@ -138,7 +138,6 @@ def symbolic_trace(root : torch.nn.Module, delegate_class=DefaultDelegate):
             args.append(_proxy_placeholder('**' + next(names_iter), delegate))
         fn = _patch_function(fn, len(args))
 
-    args = tuple(args)
     orig_call = torch.nn.Module.__call__
 
     def module_call_wrapper(mod, *args, **kwargs):
