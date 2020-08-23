@@ -1609,15 +1609,17 @@ class TestQuantizeJitOps(QuantizationTestCase):
                              (NonQuantizedInplaceAdd(), False)]:
             for tracing in [True, False]:
                 op = "quantized::add" if quantized else "aten::add"
-                m = self.checkGraphModeOp(m, data, op, tracing)
+                # TODO before land: investigate and fix more properly
+                # context: https://app.circleci.com/pipelines/github/pytorch/pytorch/203747/workflows/f6f8e383-4dcd-4e21-8f1e-af0dc5f6cdb3/jobs/6894794
+                m2 = self.checkGraphModeOp(m, data, op, tracing)
                 # TODO: remove after refactor of checkGraphModeOp
                 if quantized:
                     FileCheck().check_not("aten::add") \
                                .check_not("aten::add_") \
-                               .run(m.graph)
+                               .run(m2.graph)
                 else:
                     FileCheck().check_not("quantized::add") \
-                               .run(m.graph)
+                               .run(m2.graph)
 
     @skipIfNoFBGEMM
     def test_quantized_add_scalar(self):
@@ -1664,15 +1666,15 @@ class TestQuantizeJitOps(QuantizationTestCase):
                 op = "quantized::add_scalar" if quantized else "aten::add"
                 # we don't check the numerical consistency for add_scalar
                 # since it's not supported
-                m = self.checkGraphModeOp(m, data, op, tracing, check=False)
+                m2 = self.checkGraphModeOp(m, data, op, tracing, check=False)
                 # TODO: remove after refactor of checkGraphModeOp
                 if quantized:
                     FileCheck().check_not("aten::add") \
                                .check_not("aten::add_") \
-                               .run(m.graph)
+                               .run(m2.graph)
                 else:
                     FileCheck().check_not("quantized::add_scalar") \
-                               .run(m.graph)
+                               .run(m2.graph)
 
     @skipIfNoFBGEMM
     def test_quantized_add_relu(self):
@@ -1757,14 +1759,14 @@ class TestQuantizeJitOps(QuantizationTestCase):
                   AddFunctionalRelu(), InplaceAddFunctionalRelu(),
                   AddInplaceFunctionalRelu(), InplaceAddInplaceFunctionalRelu()]:
             for tracing in [True, False]:
-                m = self.checkGraphModeOp(m, data, "quantized::add_relu(", tracing)
+                m2 = self.checkGraphModeOp(m, data, "quantized::add_relu(", tracing)
                 FileCheck().check_not("aten::add(") \
                            .check_not("aten::add_(") \
                            .check_not("aten::relu(") \
                            .check_not("aten::relu_(") \
                            .check_not("quantized::add(") \
                            .check_not("quantized::relu(") \
-                           .run(m.graph)
+                           .run(m2.graph)
 
     @skipIfNoFBGEMM
     def test_quantized_add_scalar_relu(self):
@@ -1837,14 +1839,14 @@ class TestQuantizeJitOps(QuantizationTestCase):
             for tracing in [True, False]:
                 # quantized::add_scalar_relu or quantized::add_scalar_relu_out
                 # TODO: split this after refactor of checkGraphModeOp
-                m = self.checkGraphModeOp(m, data, "quantized::add_scalar_relu", tracing, check=False)
+                m2 = self.checkGraphModeOp(m, data, "quantized::add_scalar_relu", tracing, check=False)
                 FileCheck().check_not("aten::add(") \
                            .check_not("aten::add_(") \
                            .check_not("aten::relu(") \
                            .check_not("aten::relu_(") \
                            .check_not("quantized::add_scalar(") \
                            .check_not("quantized::relu(") \
-                           .run(m.graph)
+                           .run(m2.graph)
 
     @skipIfNoFBGEMM
     def test_quantized_cat(self):
@@ -1991,15 +1993,15 @@ class TestQuantizeJitOps(QuantizationTestCase):
                              (NonQuantizedInplaceMul(), False)]:
             for tracing in [True, False]:
                 op = "quantized::mul" if quantized else "aten::mul"
-                m = self.checkGraphModeOp(m, data, op, tracing)
+                m2 = self.checkGraphModeOp(m, data, op, tracing)
                 # TODO: remove after refactor of checkGraphModeOp
                 if quantized:
                     FileCheck().check_not("aten::mul") \
                                .check_not("aten::mul_") \
-                               .run(m.graph)
+                               .run(m2.graph)
                 else:
                     FileCheck().check_not("quantized::mul") \
-                               .run(m.graph)
+                               .run(m2.graph)
 
     @skipIfNoFBGEMM
     def test_quantized_mul_scalar(self):
@@ -2046,15 +2048,15 @@ class TestQuantizeJitOps(QuantizationTestCase):
                 op = "quantized::mul_scalar" if quantized else "aten::mul"
                 # we don't check the numerical consistency for add_scalar
                 # since it's not supported
-                m = self.checkGraphModeOp(m, data, op, tracing, check=False)
+                m2 = self.checkGraphModeOp(m, data, op, tracing, check=False)
                 # TODO: remove after refactor of checkGraphModeOp
                 if quantized:
                     FileCheck().check_not("aten::mul") \
                                .check_not("aten::mul_") \
-                               .run(m.graph)
+                               .run(m2.graph)
                 else:
                     FileCheck().check_not("quantized::mul_scalar") \
-                               .run(m.graph)
+                               .run(m2.graph)
 
     @skipIfNoFBGEMM
     def test_quantized_mul_relu(self):
@@ -2139,14 +2141,14 @@ class TestQuantizeJitOps(QuantizationTestCase):
                   MulFunctionalRelu(), InplaceMulFunctionalRelu(),
                   MulInplaceFunctionalRelu(), InplaceMulInplaceFunctionalRelu()]:
             for tracing in [True, False]:
-                m = self.checkGraphModeOp(m, data, "quantized::mul_relu(", tracing)
+                m2 = self.checkGraphModeOp(m, data, "quantized::mul_relu(", tracing)
                 FileCheck().check_not("aten::mul(") \
                            .check_not("aten::mul_(") \
                            .check_not("aten::relu(") \
                            .check_not("aten::relu_(") \
                            .check_not("quantized::mul(") \
                            .check_not("quantized::relu(") \
-                           .run(m.graph)
+                           .run(m2.graph)
 
     @skipIfNoFBGEMM
     def test_quantized_mul_scalar_relu(self):
@@ -2218,14 +2220,14 @@ class TestQuantizeJitOps(QuantizationTestCase):
                   InplaceMulScalarInplaceFunctionalRelu()]:
             for tracing in [True, False]:
                 # quantized::mul_scalar_relu or quantized::mul_scalar_relu_out
-                m = self.checkGraphModeOp(m, data, "quantized::mul_scalar_relu", tracing, check=False)
+                m2 = self.checkGraphModeOp(m, data, "quantized::mul_scalar_relu", tracing, check=False)
                 FileCheck().check_not("aten::mul(") \
                            .check_not("aten::mul_(") \
                            .check_not("aten::relu(") \
                            .check_not("aten::relu_(") \
                            .check_not("quantized::mul_scalar(") \
                            .check_not("quantized::relu(") \
-                           .run(m.graph)
+                           .run(m2.graph)
 
     def test_hardswish(self):
         class FunctionalHardswish(torch.nn.Module):

@@ -278,8 +278,9 @@ CAFFE2_API torch::class_<ConvPackedParamsBase<kSpatialDim>> register_conv_params
               params_vec.push_back(dilation[0].item<int64_t>());
             }
             params_vec.push_back(groups[0].item<int64_t>());
+            int64_t vec_size = params_vec.size();
             at::Tensor params_tensor = at::from_blob(
-                params_vec.data(), {params_vec.size()},
+                params_vec.data(), {vec_size},
                 at::TensorOptions().dtype(at::kLong));
 
             // non_optional.emplace_back(std::move(params_tensor));
