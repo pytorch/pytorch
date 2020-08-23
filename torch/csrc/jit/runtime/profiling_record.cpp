@@ -103,7 +103,8 @@ c10::SymbolicShape ProfilingRecord::mergeSymbolicShapes(
   return c10::SymbolicShape(new_symbols);
 }
 
-void ProfilingRecord::insertShapeProfile(Node* n, Value* i) {
+void ProfilingRecord::insertShapeProfile(Node* n, size_t offset) {
+  Value* i = n->input(offset);
   auto pn = createProfileNode(nullptr, {i});
   auto pno = pn->addOutput();
   pn->ty_(attr::profiled_type, TensorType::get());
@@ -145,7 +146,7 @@ void ProfilingRecord::insertShapeProfile(Node* n, Value* i) {
 
   pn->setCallback(shape_profiler);
   pn->insertBefore(n);
-  n->replaceInputWith(i, pn->output());
+  n->replaceInput(offset, pn->output());
 }
 
 bool needsProfiledInputs(Node* n) {
@@ -194,10 +195,11 @@ bool needsProfiledOutput(Node* n) {
 void ProfilingRecord::instrumentBlock(Block* block) {
   for (auto it = block->nodes().begin(); it != block->nodes().end(); ++it) {
     auto n = *it;
-    for (auto i : n->inputs()) {
+    for (size_t offset = 0; offset < n->inputs().size(); offset++) {
+      auto i = n->input(offset);
       if (i->type()->kind() == c10::TypeKind::TensorType &&
           (needsProfiledInputs(n) || needsProfiledOutput(i->node()))) {
-        insertShapeProfile(n, i);
+        insertShapeProfile(n, offset);
       }
     }
 
@@ -211,9 +213,11 @@ void ProfilingRecord::instrumentBlock(Block* block) {
   // the use of a guard is now in the same
   // block as opposed to being separated from
   // the definition by block boundaries
-  for (auto i : block->return_node()->inputs()) {
+  for (size_t offset = 0; offset < block->return_node()->inputs().size();
+       offset++) {
+    auto i = block->return_node()->input(offset);
     if (i->type()->isSubtypeOf(TensorType::get())) {
-      insertShapeProfile(block->return_node(), i);
+      insertShapeProfile(block->return_node(), offset);
     }
   }
 }
