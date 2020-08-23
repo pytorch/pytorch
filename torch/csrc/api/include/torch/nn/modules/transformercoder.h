@@ -34,16 +34,13 @@ namespace nn {
 /// ```
 class TORCH_API TransformerDecoderImpl : public Cloneable<TransformerDecoderImpl> {
  public:
-  TransformerDecoderImpl(TransformerDecoder decoder_layer, int64_t num_layers)
+  TransformerDecoderImpl(TransformerDecoderLayer decoder_layer, int64_t num_layers)
     : TransformerDecoderImpl(TransformerDecoderOptions(decoder_layer, num_layers)) {}
   explicit TransformerDecoderImpl(const TransformerDecoderOptions& options_);
 
   void reset() override;
 
   void reset_parameters();
-
-  /// Pretty prints the `TransformerDecoder` module into the given `stream`.
-  void pretty_print(std::ostream& stream) const override;
 
   /// Pass the inputs (and mask) through the decoder layer in turn.
   ///Args:
@@ -67,7 +64,7 @@ class TORCH_API TransformerDecoderImpl : public Cloneable<TransformerDecoderImpl
   ModuleList layers{nullptr};
 
   ///optional layer normalization module
-  AnyModule norm{nullptr};
+  AnyModule norm;
 
  protected:
   FORWARD_HAS_DEFAULT_ARGS(
@@ -80,7 +77,7 @@ class TORCH_API TransformerDecoderImpl : public Cloneable<TransformerDecoderImpl
 
 /// A `ModuleHolder` subclass for `TransformerDecoderImpl`.
 /// See the documentation for `TransformerDecoderImpl` class to learn what methods it
-/// provides, and examples of how to use `TransformerDecoder` with 
+/// provides, and examples of how to use `TransformerDecoder` with
 /// `torch::nn::TransformerDecoderOptions`.
 /// See the documentation for `ModuleHolder` to learn about PyTorch's
 /// module storage semantics.

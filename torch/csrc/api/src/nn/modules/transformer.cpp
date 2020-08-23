@@ -155,7 +155,9 @@ void TransformerDecoderLayerImpl::reset_parameters() {
 }
 
 ///Pass the inputs (and mask) through the decoder layer.
-Tensor TransformerDecoderLayerImpl::forward(Tensor tgt, const Tensor& memory,
+Tensor TransformerDecoderLayerImpl::forward(
+  Tensor tgt,
+  const Tensor& memory,
   const Tensor& tgt_mask,
   const Tensor& memory_mask,
   const Tensor& tgt_key_padding_mask,
@@ -264,102 +266,81 @@ Tensor TransformerEncoderImpl::forward(
 
 // ========================TransformerDecoderImpl=========================
 TransformerDecoderImpl::TransformerDecoderImpl(
-  const TransformerDecoderOptions& options_ )
-  : options(options_){
+  const TransformerDecoderOptions& options_ ) : options(options_){
   reset();
 }
 
 void TransformerDecoderImpl::reset() {
 
-  layers = ModuleList();
-
-  for (int i = 0; i < options.num_layers(); i++){
-    layers->push_back(TransformerDecoderLayer(options.decoder_layer()));
+  layers = this->register_module("layers", ModuleList());
+  for (int64_t i = 0; i < options.num_layers(); ++i) {
+    layers->push_back(options.decoder_layer()->clone());
   }
-  ///initialize layers
-  layers = register_module("layers", layers);
 
-  ///initialize Dropout, post self attention
-  dropout1 = register_module("dropout1",
-                              Dropout(DropoutOptions().p(options.dropout())));
-
-  ///initialize Normalization, post self attention
-  norm1 = register_module(
-    "norm1",
-    LayerNorm(LayerNormOptions(std::vector<int64_t> {options.d_model()})));
-
-  ///initialize multihed attention
-  multihead_attn = register_module(
-    "multihead_attn",
-    MultiheadAttention(
-      MultiheadAttentionOptions(options.d_model(), options.nhead())
-      .dropout(options.dropout())));
-
-  ///initialize post multi-headed attention dropout layer
-  dropout2 = register_module(
-    "dropout2", Dropout(DropoutOptions().p(options.dropout())));
-
-  ///initialize post multi-headed attention Normalization
-  norm2 = register_module(
-    "norm2", LayerNorm(
-      LayerNormOptions(std::vector<int64_t> {options.d_model()})));
-
-  ///Initialize Feed forward first linear layer
-  linear1 = register_module(
-    "linear1",
-    Linear(LinearOptions(options.d_model(), options.dim_feedforward())));
-
-  ///initialize Feed forward dropout layer
-  dropout = register_module(
-    "dropout",
-    Dropout(DropoutOptions().p(options.dropout())));
-
-  ///initialize Feed forward second linear layer
-  linear2 = register_module(
-    "linear2",
-    Linear(LinearOptions(options.dim_feedforward(), options.d_model())));
-
-  ///initialize dropout, post feed forward
-  dropout3 = register_module(
-    "dropout3",
-    Dropout(DropoutOptions().p(options.dropout())));
-
-  ///initialize normalization, post feed forward
-  norm3 = register_module(
-    "norm3",
-    LayerNorm(LayerNormOptions(std::vector<int64_t> {options.d_model()})));
+  if (!options.norm().is_empty()) {
+    norm = options.norm().clone();
+    this->register_module("norm", norm.ptr());
+  }
 }
 
+void TransformerDecoderImpl::reset_parameters() {
 
-  // ========================TransformerDecoderImpl=========================
-  TransformerDecoderImpl::TransformerDecoderImpl(
-    const TransformerDecoderOptions& options_ )
-    : options(options_){
-    reset();
+  TORCH_CHECK(layers->size() == options.num_layers(),
+    "TransformerDecoder should have", options.num_layers(),
+    " decoder layers, but got ", layers->size());
+
+  size_t num_layers = layers->size();
+  for (size_t i = 0; i < num_layers; ++i) {
+    layers->at<TransformerDecoderLayerImpl>(i).reset_parameters();
+  }
+  // a. No way to know whether module in AnyModule has api to reset_parameters, so replace instead
+  // b. Allow user to add/delete normalization module when reset parameters
+  if (!norm.is_empty()) {
+    this->unregister_module("norm");
+    norm = AnyModule();
+  }
+  if (!options.norm().is_empty()) {
+    norm = options.norm().clone();
+    this->register_module("norm", norm.ptr());
   }
 
-  void TransformerDecoderImpl::reset() {
+}
 
-    //Create the layers based and clone them for the number of layers
+Tensor TransformerDecoderImpl::forward(
+  Tensor tgt,
+  const Tensor& memory,
+  const Tensor& tgt_mask,
+  const Tensor& memory_mask,
+  const Tensor& tgt_key_padding_mask,
+  const Tensor& memory_key_padding_mask){
 
+  size_t num_layers = layers->size();
+  Tensor output;
+  if (num_layers > 0) {
+    output = layers->at<TransformerDecoderLayerImpl>(0).forward(
+      tgt,
+      memory,
+      tgt_mask,
+      memory_mask,
+      tgt_key_padding_mask,
+      memory_key_padding_mask);
+  }
+  for (size_t i = 1; i < num_layers; ++i) {
+    output = layers->at<TransformerDecoderLayerImpl>(i).forward(
+      output,
+      memory,
+      tgt_mask,
+      memory_mask,
+      tgt_key_padding_mask,
+      memory_key_padding_mask);
   }
 
-  void TransformerDecoderImpl::reset_parameters() {
-
-    //reset the parameters
-
+  if (!norm.is_empty()) {
+    output = norm.forward<Tensor>(num_layers == 0 ? tgt : output);
   }
 
-  Tensor TransformerDecoderImpl::forward(Tensor tgt, const Tensor& memory,
-    const Tensor& tgt_mask,
-    const Tensor& memory_mask,
-    const Tensor& tgt_key_padding_mask,
-    const Tensor& memory_key_padding_mask){
-      at::Tensor temp = {};
-      return temp;
-  }
-
-  void TransformerDecoderImpl::pretty_print(std::ostream& stream) const {}
+  return output;
+}
 
 } // namespace nn
 } // namespace torch
