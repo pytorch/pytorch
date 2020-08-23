@@ -584,6 +584,8 @@ class DistributedDataParallel(Module):
         if self.require_forward_param_sync:
             self._sync_params()
 
+        self.reducer.prepare_forward()
+
         if self.device_ids:
             inputs, kwargs = self.scatter(inputs, kwargs, self.device_ids)
             if len(self.device_ids) == 1:
@@ -652,8 +654,8 @@ class DistributedDataParallel(Module):
         # The current rank is a candidate for being the authoritative copy if
         # is_last_joiner=True. We break ties via picking the larger rank.
         my_rank = dist.get_rank(self.process_group)
-        self.authoritative_rank = self._find_common_rank(my_rank, is_last_joiner)
-        self._sync_params_and_buffers(authoritative_rank=self.authoritative_rank)
+        self._authoritative_rank = self._find_common_rank(my_rank, is_last_joiner)
+        self._sync_params_and_buffers(authoritative_rank=self._authoritative_rank)
 
     # Schedule allreduce ops to match those scheduled in the reducer's backward
     # pass.
@@ -668,6 +670,8 @@ class DistributedDataParallel(Module):
             # Joined processes contribute zero gradient. To keep the gradient
             # consistent, the dividing factor is reduced by 1 for each joined
             # process.
+            if len(bucket_tensors) > 1:
+                raise ValueError(f"Expected len 1, got {len(bucket_tensors)}")
             zero_tensors = [
                 torch.zeros_like(t) for t in bucket_tensors
             ]
@@ -717,8 +721,8 @@ class DistributedDataParallel(Module):
 
         Args:
             enable (bool): Whether to enable uneven input detection or not. Pass
-             in``enable=False`` to disable in cases where you know that inputs
-             are even across participating processes. Default is ``True``.
+            in``enable=False`` to disable in cases where you know that inputs
+            are even across participating processes. Default is ``True``.
 
 
         Example::
@@ -757,7 +761,7 @@ class DistributedDataParallel(Module):
                 all_procs_joined = False
                 is_last_joiner = True
                 buckets_rebuilt = False
-                # Schedule an allreduce to match fwd pass allreduce in non-joined procs
+                # Schedules allreduce to match fwd pass allreduce in non-joined procs
                 while not all_procs_joined:
                     num_active_procs = self._schedule_shadow_all_reduce_for_fwd_pass()
                     if num_active_procs == 0:
@@ -769,24 +773,19 @@ class DistributedDataParallel(Module):
                         # Schedule a corresponding broadcast if we are syncing module
                         # buffers in the forward pass.
                         self._check_and_sync_module_buffers()
-                        # Schedule an allreduce to match the backwards pass allreduce.
+                        # Check if we need to rebuild buckets to match broadcast
+                        # calls from other processes.
+                        if not buckets_rebuilt:
+                            buckets_rebuilt = self.reducer.prepare_forward()
+                        # Schedules one allreduce per gradient bucket to match
+                        # the backwards pass allreduce.
                         self._match_all_reduce_for_bwd_pass()
                         # Check if we need to allreduce locally unused params.
                         if self.find_unused_parameters:
                             self._match_unused_params_allreduce()
-                        # Check if we need to rebuild buckets to match broadcast calls
-                        # from other processes.
-                        if not self.find_unused_parameters and not buckets_rebuilt:
-                            # Does no work if buckets are already rebuilt.
+                        # Does not work if buckets already rebuilt.
+                        if not buckets_rebuilt:
                             self.reducer._push_all_rebuilt_params()
-                            # If buckets not rebuilt, will rebuild and
-                            # re-intialize tensor/bucket mapping so that future
-                            # allreduce orders are consisted across joined and
-                            # un-joined processes.
-                            self.reducer._rebuild_buckets()
-                        # If not find_unused_parameters, buckets are certainly
-                        # rebuilt at this point.
-                        buckets_rebuilt = True
 
                 # All procs joined. Agree on authoritative rank and broadcast the model.
                 self._sync_final_model(is_last_joiner)

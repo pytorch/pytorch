@@ -1,4 +1,5 @@
 #include <c10/core/CPUAllocator.h>
+#include <c10/core/CPUCachingAllocator.h>
 #include <c10/core/DeviceType.h>
 
 // TODO: rename flags to C10
@@ -154,7 +155,15 @@ class DefaultMobileCPUAllocator final : public at::Allocator {
     }
     // TODO: enable with better TLS support on mobile
     // profiledCPUMemoryReporter().Delete(pointer);
-    c10::free_cpu(pointer);
+    auto allocator_ptr = GetThreadLocalCachingAllocator();
+    if (allocator_ptr != nullptr) {
+      allocator_ptr->free(pointer);
+    } else {
+      c10::free_cpu(pointer);
+      // This adds extra cost to freeing memory to the default case when
+      // caching allocator is not enabled.
+      CPUCachingAllocator::record_free(pointer);
+    }
   }
 
   virtual DataPtr allocate(const size_t nbytes) const override {
@@ -168,7 +177,13 @@ class DefaultMobileCPUAllocator final : public at::Allocator {
     }
 
     auto alloc_size = PreGuardBytes + nbytes + PostGuardBytes;
-    void* const data = c10::alloc_cpu(alloc_size);
+    void* data;
+    auto allocator_ptr = GetThreadLocalCachingAllocator();
+    if (allocator_ptr != nullptr) {
+      data = allocator_ptr->allocate(alloc_size);
+    } else {
+      data = c10::alloc_cpu(alloc_size);
+    }
     //  profiledCPUMemoryReporter().New(data, alloc_size);
     return {
         reinterpret_cast<uint8_t*>(data) + PreGuardBytes,

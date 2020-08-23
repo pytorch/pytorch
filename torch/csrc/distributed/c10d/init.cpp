@@ -168,8 +168,8 @@ PyObject* c10d_init(PyObject* _unused) {
           py::arg("find_unused_parameters") = false,
           py::call_guard<py::gil_scoped_release>())
       .def(
-          "initialize_buckets",
-          &::c10d::Reducer::initialize_buckets,
+          "prepare_forward",
+          &::c10d::Reducer::prepare_forward,
           py::call_guard<py::gil_scoped_release>())
       .def(
           "prepare_for_backward",
@@ -184,18 +184,6 @@ PyObject* c10d_init(PyObject* _unused) {
       .def(
           "get_bucket_tensors",
           &::c10d::Reducer::getBucketTensors,
-          py::call_guard<py::gil_scoped_release>()
-      )
-      .def(
-          "_rebuild_buckets",
-          [](::c10d::Reducer& reducer) {
-            // Rebuild and re-init buckets.
-            std::vector<std::vector<size_t>> bucketIndices =
-                reducer.rebuildBuckets();
-            if (bucketIndices.size() > 0) {
-                reducer.initialize_buckets(std::move(bucketIndices));
-            }
-          },
           py::call_guard<py::gil_scoped_release>())
       .def(
           "_push_all_rebuilt_params",

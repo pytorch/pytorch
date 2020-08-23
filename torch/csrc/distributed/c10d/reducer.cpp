@@ -67,7 +67,9 @@ Reducer::Reducer(
 
   // Initialize variable bucketing.
   // This can be reinitialized later after capturing runtime information.
+  std::unique_lock<std::mutex> lock(this->mutex_);
   initialize_buckets(std::move(bucket_indices));
+  lock.unlock();
 
   // All variables are expected to have their `grad_fn` set to the gradient
   // accumulation function (since they are leafs in the autograd graph).
@@ -318,56 +320,66 @@ void Reducer::mark_variable_ready_dense(VariableIndex index) {
   const auto length = replica.lengths[bucket_index.intra_bucket_index];
   auto& bucket_view = replica.bucket_views[bucket_index.intra_bucket_index];
 
-  // Copy contents of gradient tensor to bucket tensor.
-  // If the gradient is not set, we assume it wasn't computed
-  // as part of the current backwards pass, and zero the part
-  // of the bucket it would otherwise hold.
   runGradCallbackForVariable(variable, [&](auto& grad) {
     if (grad.defined()) {
-      // Ensure that the gradient type matches the bucket type.
-      TORCH_CHECK(
-          grad.options().type_equal(bucket_view.options()),
-          "Expected ",
-          bucket_view.toString(),
-          ", got ",
-          grad.toString());
-      // Assert that the grad tensor and the bucket don't share storage.
-      // If they did, we could avoid the copy altogether.
-      // The reason for not doing this is that existing code calls
-      // `detach_` from `zero_grad`, which is incompatible with views.
-      TORCH_INTERNAL_ASSERT(!grad.is_alias_of(bucket_view));
-      TORCH_INTERNAL_ASSERT(grad.device() == bucket_view.device());
-      TORCH_INTERNAL_ASSERT(grad.numel() == bucket_view.numel());
-      // AccumulateGrad doesn't HAVE to obey the grad layout contract.
-      // The penalty for disobedience is reduced performance, not numerical
-      // death. Warnings here help diagnose poor DDP performance.
-      if (grad.strides() != bucket_view.strides()) {
-        TORCH_WARN_ONCE(
-            "Grad strides do not match bucket view strides. "
-            "This may indicate grad was not created according to the "
-            "gradient layout contract, or that the param's strides "
-            "changed since DDP was constructed.  This is not an error, "
-            "but may impair performance.\n"
-            "grad.sizes() = ",
-            grad.sizes(),
-            ", strides() = ",
-            grad.strides(),
-            "\n",
-            "bucket_view.sizes() = ",
-            bucket_view.sizes(),
-            ", strides() = ",
-            bucket_view.strides());
-      }
-      // See Note [DDP Communication Hook]
-      if (comm_hook_ == nullptr) {
-        // imitates wrapped_scalar_tensor in ATen/native/BinaryOps.cpp
-        auto wrapped =
-            c10::scalar_to_tensor(double(1.) / divFactor_);
-        wrapped.unsafeGetTensorImpl()->set_wrapped_number(true);
-        // Divides while copying into the bucket view.
-        at::native::mul_out(bucket_view, grad, wrapped);
+      // Copy grad to bucket view buffer if grad and bucket_view are pointing
+      // to different storages, and then let grad point to bucket_view
+      // for saving memory and avoiding copies in subsquent iterations.
+      // In most cases, the copy is needed only at first
+      // iteration, there will be no copies in subsquent iterations.
+      // In rare cases, if users explicitly set grad to be None after every
+      // iteration, then it needs to copy grad to bucket_view in every
+      // iteration.
+      if (!grad.is_alias_of(bucket_view)) {
+        // Ensure that the gradient type matches the bucket type.
+        TORCH_CHECK(
+            grad.options().type_equal(bucket_view.options()),
+            "Expected ",
+            bucket_view.toString(),
+            ", got ",
+            grad.toString());
+        TORCH_INTERNAL_ASSERT(grad.device() == bucket_view.device());
+        TORCH_INTERNAL_ASSERT(grad.numel() == bucket_view.numel());
+        // AccumulateGrad doesn't HAVE to obey the grad layout contract.
+        // The penalty for disobedience is reduced performance, not numerical
+        // death. Warnings here help diagnose poor DDP performance.
+        if (grad.strides() != bucket_view.strides()) {
+          TORCH_WARN_ONCE(
+              "Grad strides do not match bucket view strides. "
+              "This may indicate grad was not created according to the "
+              "gradient layout contract, or that the param's strides "
+              "changed since DDP was constructed.  This is not an error, "
+              "but may impair performance.\n"
+              "grad.sizes() = ",
+              grad.sizes(),
+              ", strides() = ",
+              grad.strides(),
+              "\n",
+              "bucket_view.sizes() = ",
+              bucket_view.sizes(),
+              ", strides() = ",
+              bucket_view.strides());
+        }
+        // See Note [DDP Communication Hook]
+        if (comm_hook_ == nullptr) {
+          // imitates wrapped_scalar_tensor in ATen/native/BinaryOps.cpp
+          auto wrapped =
+              c10::scalar_to_tensor(double(1.) / divFactor_);
+          wrapped.unsafeGetTensorImpl()->set_wrapped_number(true);
+          // Divides while copying into the bucket view.
+          at::native::mul_out(bucket_view, grad, wrapped);
+        } else {
+          bucket_view.copy_(grad);
+        }
+        // Let grad point to bucket_view buffer.
+        grad = bucket_view;
+        // The grad is modified and need to be written back.
+        return true;
       } else {
-        bucket_view.copy_(grad);
+        // If grad and bucket view point to the same storage, no need to copy
+        if (comm_hook_ == nullptr) {
+          bucket_view.div_(divFactor_);
+        }
       }
     } else {
       bucket_view.zero_();
@@ -409,6 +421,7 @@ void Reducer::mark_variable_ready_sparse(VariableIndex index) {
 std::vector<std::vector<at::Tensor>> Reducer::getBucketTensors() const {
  std::lock_guard<std::mutex> lock(mutex_);
  std::vector<std::vector<at::Tensor>> bucketTensors;
+ bucketTensors.reserve(buckets_.size());
  for (const auto& bucket : buckets_) {
   std::vector<at::Tensor> tensors;
   tensors.reserve(bucket.replicas.size());
@@ -420,21 +433,10 @@ std::vector<std::vector<at::Tensor>> Reducer::getBucketTensors() const {
  return bucketTensors;
 }
 
-bool Reducer::shouldRebuildBuckets() const {
-  // if find_unused_parameters_, we do not rebuild buckets.
-  return !find_unused_parameters_ && !has_rebuilt_bucket_;
-}
-
 void Reducer::setForwardPassWorkHandle(
     std::shared_ptr<c10d::ProcessGroup::Work> forwardPassWorkHandle,
     at::Tensor& tensor) {
   std::lock_guard<std::mutex> lock(mutex_);
-  // If there was a previous handle, it should have already completed. This is
-  // because we await this handle in the backward pass, and only reinstall in
-  // the next forward pass.
-  if (forwardPassWorkHandle_.workHandle) {
-    TORCH_INTERNAL_ASSERT(forwardPassWorkHandle_.workHandle->isCompleted());
-  }
   forwardPassWorkHandle_.workHandle = std::move(forwardPassWorkHandle);
   forwardPassWorkHandle_.resultTensor = tensor;
 }
@@ -465,7 +467,7 @@ void Reducer::pushRebuiltParamsForAllIndices() {
 }
 
 void Reducer::pushRebuiltParams(const VariableIndex& index) {
-  if (!has_rebuilt_bucket_ && !find_unused_parameters_ &&
+  if (shouldRebuildBuckets() &&
       index.replica_index == 0) {
     rebuilt_params_.push_back(
         replicas_[index.replica_index][index.variable_index]);
@@ -629,18 +631,10 @@ void Reducer::mark_variable_ready(VariableIndex index) {
     const c10::Stream currentStream =
         guard.getStream(replica.contents.device());
     torch::autograd::Engine::get_default_engine().queue_callback([=] {
-      std::unique_lock<std::mutex> lock(this->mutex_);
+      std::lock_guard<std::mutex> lock(this->mutex_);
       // Run callback with the current stream
       c10::OptionalStreamGuard currentStreamGuard{currentStream};
       this->finalize_backward();
-      lock.unlock();
-      // We rebuild buckets only if this is the first time to rebuild. Future
-      // calls will return an empty vector of bucket indices. Unlock since both
-      // rebuildBuckets() and initialize_bucket_indices() grab the lock.
-      auto rebuilt_bucket_indices = rebuildBuckets();
-      if (rebuilt_bucket_indices.size() > 0) {
-        initialize_buckets(std::move(rebuilt_bucket_indices));
-      }
     });
   }
 }
@@ -688,7 +682,16 @@ void Reducer::mark_bucket_ready(size_t bucket_index) {
 
 void Reducer::initialize_buckets(
     std::vector<std::vector<size_t>> bucket_indices) {
-  std::lock_guard<std::mutex> lock(mutex_);
+  // If initialize_buckets is called inside DDP constructor, then
+  // it does not matter rpc context ptr is nullptr or not, as grad
+  // will not be mutated.
+  // If initialize_buckets is called during training loop, e.g, inside
+  // rebuild_buckets(), since grad could be mutated and be pointed to
+  // bucket_view, then it needs to check rpc context ptr is nullptr or not,
+  // If rpc context ptr is nullptr, mutate variable.grad(); otherwise,
+  // mutate grad in rpc context.
+  using torch::distributed::autograd::ThreadLocalDistAutogradContext;
+  this->rpc_context_.set(ThreadLocalDistAutogradContext::getContextPtr());
 
   // This shouldn't be called if we're expecting autograd hooks to fire.
   TORCH_CHECK(
@@ -772,7 +775,6 @@ void Reducer::initialize_buckets(
 
         // Allocate bucket contents tensor.
         replica.contents = at::empty({static_cast<long>(offset)}, options);
-
         // Note:  "Gradient Layout Contract"
         //
         // Here, create views into the contents tensor for each variable's grad.
@@ -810,7 +812,7 @@ void Reducer::initialize_buckets(
         // metadata.  Checking just once won't catch if someone messes with
         // param layouts over time, but not messing with params after DDP
         // construction is already a documented constraint.
-        initialize_bucketviews(replica, replica.contents);
+        initialize_bucket_views(replica, replica.contents, true);
       }
 
       // Add bucket replica to enclosing bucket.
@@ -836,27 +838,59 @@ void Reducer::initialize_buckets(
 }
 
 // (see Note:  "Gradient Layout Contract" in initialize_buckets).
-void Reducer::initialize_bucketviews(
+void Reducer::initialize_bucket_views(
     Reducer::BucketReplica& replica,
-    at::Tensor& contents) {
+    at::Tensor& contents,
+    bool copy_to_bucket_view) {
   for (size_t i = 0; i < replica.variables.size(); i++) {
-    const auto& v = replica.variables[i];
+    auto& v = replica.variables[i];
     const auto offset = replica.offsets[i];
     const auto length = replica.lengths[i];
+    at::Tensor bucket_view;
     if (v.is_non_overlapping_and_dense()) {
       // If the param's memory is dense, match its layout, anticipating
       // the autograd engine (AccumulateGrad) will also create gradients
       // matching its layout.
-      replica.bucket_views.push_back(
-          contents.as_strided(v.sizes(), v.strides(), offset));
+      bucket_view = contents.as_strided(v.sizes(), v.strides(), offset);
     } else {
       // Fall back to a C-style contiguous view, again anticipating
       // AccumulateGrad will do the same when stashing grads for non-dense
       // params.
-      replica.bucket_views.push_back(
-          contents.narrow(0, offset, length).view(v.sizes()));
+      bucket_view = contents.narrow(0, offset, length).view(v.sizes());
     }
+    replica.bucket_views.push_back(bucket_view);
+    // There are three cases to handle:
+    // 1. initialize_bucket_views could be called inside communication hook,
+    // bucket_view has the updated results in new tensor, just let grad point to
+    // bucket_view, copy_to_bucket_view is false in this case.
+    // 2. initialize_bucket_views could be called inside initialize_buckets when
+    // rebuild_buckets, if grad has already been defined/calculated in previous
+    // iteration, old grad needs to be copied into new bucket_view
+    // and let grad point to the new bucket_view,
+    // copy_to_bucket_view is true in this case.
+    // 3. initialize_bucket_views could be called inside initialize_buckets
+    // during construction. copy_to_bucket_view is true in this case. But mostly
+    // grads are not defined during construction time, when grad is not defined,
+    // do not let grad point to bucket_view, because grads should be kept as
+    // being undefined for globally unused parameters.
+    runGradCallbackForVariable(v, [&](auto& grad) {
+      if (grad.defined() && !grad.is_alias_of(bucket_view)) {
+        if (copy_to_bucket_view) {
+          bucket_view.copy_(grad);
+        }
+        grad = bucket_view;
+        // The grad is modefied and needs to be written back.
+        return true;
+      }
+      // The grad is not modified and does not need to be written back.
+      return false;
+    });
   }
+}
+
+bool Reducer::prepare_forward() {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return rebuild_buckets();
 }
 
 // Traverse the autograd graph starting at the specified output.
@@ -1006,13 +1040,14 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
       runGradCallbackForVariable(variable, [&](auto& grad) {
         // If a parameter is globally unused, we keep its grad untouched.
         if (!global_unused) {
+          // If grad is globally used but locally unused, let grad point to
+          // bucket_view
           if (!grad.defined()) {
-            // Creates grad according to the "Gradient Layout Contract"
-            // (see torch/csrc/grad/AccumulateGrad.h)
-            grad = torch::autograd::utils::clone_obey_contract(
-                bucket_view, variable);
+            grad = bucket_view;
           } else {
-            grad.copy_(bucket_view);
+            TORCH_INTERNAL_ASSERT(
+                grad.is_alias_of(bucket_view),
+                "Grad should have been pointed to bucket_view if grad is defined");
           }
           // The grad is modified and needs to be written back.
           return true;
@@ -1066,7 +1101,7 @@ void Reducer::finalize_backward() {
           // Reinitialize bucket_views with the future_result by following
           // the same logic in `inititalize_buckets`.
           bucket.replicas[i].bucket_views.clear();
-          initialize_bucketviews(bucket.replicas[i], future_result[i]);
+          initialize_bucket_views(bucket.replicas[i], future_result[i], false);
         }
       }
     }
@@ -1194,14 +1229,11 @@ void Reducer::sync_bucket_indices(
   }
 }
 
-std::vector<std::vector<size_t>> Reducer::rebuildBuckets() {
-  std::lock_guard<std::mutex> lock(mutex_);
-  if(!shouldRebuildBuckets()) {
-    return {};
+bool Reducer::rebuild_buckets() {
+  if (!shouldRebuildBuckets() || rebuilt_params_.empty()) {
+    return false;
   }
-  TORCH_INTERNAL_ASSERT(!rebuilt_params_.empty(), "No rebuilt parameters.");
-  TORCH_INTERNAL_ASSERT(
-      !has_rebuilt_bucket_, "Expected to rebuild buckets at most once.");
+
   TORCH_INTERNAL_ASSERT(
       rebuilt_params_.size() == rebuilt_param_indices_.size(),
       c10::str(
@@ -1235,7 +1267,8 @@ std::vector<std::vector<size_t>> Reducer::rebuildBuckets() {
   rebuilt_params_.clear();
   rebuilt_param_indices_.clear();
 
-  return rebuilt_bucket_indices;
+  initialize_buckets(std::move(rebuilt_bucket_indices));
+  return true;
 }
 
 // See Note [DDP Communication Hook]

@@ -2129,7 +2129,7 @@ class _DistTestBase(object):
                 # Clear gradients manually
                 grad = net.module.weight.grad
                 if grad is not None:
-                    grad.detach_()
+                    grad.requires_grad_(False)
                     grad.zero_()
                 # Forward + BW
                 batch = torch.tensor([rank]).float().cuda(rank)
@@ -2767,7 +2767,7 @@ class _DistTestBase(object):
         )
         n_iters = 1 if self.rank == 0 else 2
 
-        with net.join(net):
+        with net.join():
             for i in range(n_iters):
                 loss = net(inp).sum()
                 loss.backward()
@@ -2793,12 +2793,12 @@ class _DistTestBase(object):
         dim = 10
         learning_rate = 0.03
         model = nn.Linear(dim, dim, bias=False)
-        inp = torch.randn(batch, dim, device=self.rank)
+        inp = torch.rand(batch, dim, device=self.rank)
         local_model = copy.deepcopy(model)
         local_model = local_model.cuda(self.rank)
-        rank_to_iter_mapping = {rank : 2 * rank for rank in range(dist.get_world_size())}
+        rank_to_iter_mapping = {rank : 2 * (rank + 1) for rank in range(dist.get_world_size())}
         # run local model
-        local_iters = max(rank_to_iter_mapping.values())
+        local_iters = sum(rank_to_iter_mapping.values())
 
         for _ in range(local_iters):
             out = local_model(inp)
@@ -2807,8 +2807,8 @@ class _DistTestBase(object):
             for param in local_model.parameters():
                 if param.grad is not None:
                     with torch.no_grad():
-                        param.add_(param.grad, alpha=learning_rate)
-                        param.grad.detach_()
+                        param.add_(param.grad, alpha=-learning_rate)
+                        param.grad.requires_grad_(False)
                         param.grad.zero_()
 
         # run DDP model with join API
@@ -2818,16 +2818,17 @@ class _DistTestBase(object):
         )
 
         with net.join():
-            for _ in range(num_iters):
+            for i in range(num_iters):
                 out = net(inp)
                 loss = out.sum()
                 loss.backward()
                 torch.cuda.synchronize(device=self.rank)
+                effective_ws = sum(1 if v > i else 0 for v in rank_to_iter_mapping.values())
                 for param in net.module.parameters():
                     if param.grad is not None:
                         with torch.no_grad():
-                            param.add_(param.grad, alpha=learning_rate)
-                            param.grad.detach_()
+                            param.add_(param.grad, alpha=-learning_rate * effective_ws)
+                            param.grad.requires_grad_(False)
                             param.grad.zero_()
 
         # Validate model state dicts are equal
@@ -2855,8 +2856,7 @@ class _DistTestBase(object):
 
         # Determine num iters for this rank via the passed in mapping.
         num_iters = iteration_mapping[rank]
-
-        with net.join(net):
+        with net.join():
             for _ in range(num_iters):
                 if isinstance(inp, tuple):
                     loss = net(*inp).sum()
@@ -2871,9 +2871,9 @@ class _DistTestBase(object):
 
         # Ensure completion of all GPU kernels.
         torch.cuda.synchronize(device=rank)
-        self.assertTrue(net.authoritative_rank)
+        self.assertTrue(net._authoritative_rank)
         # All ranks should have agreed on the same authoritative_rank!
-        final_rank_tensor = torch.tensor([net.authoritative_rank], device=self.rank)
+        final_rank_tensor = torch.tensor([net._authoritative_rank], device=self.rank)
         tensor_list = [
             torch.zeros_like(final_rank_tensor)
             for _ in range(dist.get_world_size())
@@ -3036,7 +3036,7 @@ class _DistTestBase(object):
                 # Clear grads
                 grad = net.module.weight.grad
                 if grad is not None:
-                    grad.detach_()
+                    grad.requires_grad_(False)
                     grad.zero_()
                 out = net(inp)
                 loss = out.sum()
