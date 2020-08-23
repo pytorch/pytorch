@@ -670,8 +670,6 @@ class DistributedDataParallel(Module):
             # Joined processes contribute zero gradient. To keep the gradient
             # consistent, the dividing factor is reduced by 1 for each joined
             # process.
-            if len(bucket_tensors) > 1:
-                raise ValueError(f"Expected len 1, got {len(bucket_tensors)}")
             zero_tensors = [
                 torch.zeros_like(t) for t in bucket_tensors
             ]
@@ -747,6 +745,12 @@ class DistributedDataParallel(Module):
           >>>  torch.cuda.synchronize(device=rank)
         """
         try:
+            if self.device_ids and len(self.device_ids) > 1:
+                raise ValueError(
+                    """DDP join() API does not support Single-Process Multi-GPU
+                    mode training. The recommended approach for DDP training is
+                    to spawn a single process that works on a single GPU."""
+                )
             has_error = False
             self.ddp_join_enabled = enable
             yield

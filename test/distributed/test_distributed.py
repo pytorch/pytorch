@@ -2799,37 +2799,35 @@ class _DistTestBase(object):
         rank_to_iter_mapping = {rank : 2 * (rank + 1) for rank in range(dist.get_world_size())}
         # run local model
         local_iters = sum(rank_to_iter_mapping.values())
-
+        local_optim = torch.optim.SGD(local_model.parameters(), lr=learning_rate)
         for _ in range(local_iters):
+            local_optim.zero_grad()
             out = local_model(inp)
             loss = out.sum()
             loss.backward()
-            for param in local_model.parameters():
-                if param.grad is not None:
-                    with torch.no_grad():
-                        param.add_(param.grad, alpha=-learning_rate)
-                        param.grad.requires_grad_(False)
-                        param.grad.zero_()
+            local_optim.step()
 
         # run DDP model with join API
         num_iters = rank_to_iter_mapping[self.rank]
         net = torch.nn.parallel.DistributedDataParallel(
             model.cuda(self.rank), device_ids=[self.rank]
         )
-
+        ddp_optim = torch.optim.SGD(model.parameters(), lr=learning_rate)
         with net.join():
             for i in range(num_iters):
+                ddp_optim.zero_grad()
                 out = net(inp)
                 loss = out.sum()
                 loss.backward()
                 torch.cuda.synchronize(device=self.rank)
                 effective_ws = sum(1 if v > i else 0 for v in rank_to_iter_mapping.values())
+                # scale grads with the current effective world size for parity
+                # with the local model.
                 for param in net.module.parameters():
                     if param.grad is not None:
                         with torch.no_grad():
-                            param.add_(param.grad, alpha=-learning_rate * effective_ws)
-                            param.grad.requires_grad_(False)
-                            param.grad.zero_()
+                            param.grad *= effective_ws
+                ddp_optim.step()
 
         # Validate model state dicts are equal
         for (_, local_tensor), (_, dist_tensor) in zip(
@@ -3079,6 +3077,29 @@ class _DistTestBase(object):
                 loss = out.sum()
                 loss.backward()
 
+    @require_backend({"gloo", "nccl"})
+    @require_backends_available({"gloo", "nccl"})
+    @skip_if_lt_x_gpu(4)
+    @skip_if_rocm
+    def test_ddp_uneven_inputs_replicated_error(self):
+        # Tests that the context manager errors out in SPMD mode.
+        group = dist.new_group([0, 1])
+        if self.rank < 2:
+            model = nn.Linear(1, 1, bias=False)
+            rank_to_device = {0: [0, 1], 1: [2, 3]}
+
+            devices = rank_to_device[self.rank]
+            net = torch.nn.parallel.DistributedDataParallel(
+                model.cuda(devices[0]), device_ids=devices, process_group=group
+            )
+            with self.assertRaisesRegex(
+                ValueError, r"DDP join\(\) API does not support Single-Process Multi-GPU"
+            ):
+                with net.join():
+                    pass
+        # We need a barrier since otherwise non-participating processes exit too early
+        # and cause a timeout.
+        self._barrier(timeout=60)
 
 if BACKEND == "gloo" or BACKEND == "nccl":
     WORLD_SIZE = os.environ["WORLD_SIZE"]

@@ -183,17 +183,19 @@ PyObject* c10d_init(PyObject* _unused) {
       .def("get_backward_stats", &::c10d::Reducer::get_backward_stats)
       .def(
           "get_bucket_tensors",
-          &::c10d::Reducer::getBucketTensors,
+          &::c10d::Reducer::get_bucket_tensors,
           py::call_guard<py::gil_scoped_release>())
       .def(
           "_push_all_rebuilt_params",
-          &::c10d::Reducer::pushRebuiltParamsForAllIndices,
+          &::c10d::Reducer::push_rebuilt_params_for_all_indices,
           py::call_guard<py::gil_scoped_release>())
       .def(
           "_set_forward_pass_work_handle",
-          &::c10d::Reducer::setForwardPassWorkHandle,
+          &::c10d::Reducer::set_forward_pass_work_handle,
           py::call_guard<py::gil_scoped_release>())
-      .def("_get_local_used_maps", &::c10d::Reducer::getLocalUsedMapsOnDevice);
+      .def(
+          "_get_local_used_maps",
+          &::c10d::Reducer::get_local_used_maps_on_device);
 
   py::enum_<::c10d::ReduceOp>(module, "ReduceOp", R"(
 An enum-like class for available reduction operations: ``SUM``, ``PRODUCT``,
@@ -795,7 +797,7 @@ They are used in specifying strategies for reduction collectives, e.g.,
       py::arg("tensors"),
       py::arg("buffer_size"),
       // The source of truth rank to broadcast the tensors from.
-      py::arg("authoritative_rank") = 0,
+      py::arg("src") = 0,
       py::call_guard<py::gil_scoped_release>());
 
   module.def(

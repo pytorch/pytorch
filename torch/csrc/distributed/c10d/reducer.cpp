@@ -418,7 +418,7 @@ void Reducer::mark_variable_ready_sparse(VariableIndex index) {
   });
 }
 
-std::vector<std::vector<at::Tensor>> Reducer::getBucketTensors() const {
+std::vector<std::vector<at::Tensor>> Reducer::get_bucket_tensors() const {
  std::lock_guard<std::mutex> lock(mutex_);
  std::vector<std::vector<at::Tensor>> bucketTensors;
  bucketTensors.reserve(buckets_.size());
@@ -433,7 +433,7 @@ std::vector<std::vector<at::Tensor>> Reducer::getBucketTensors() const {
  return bucketTensors;
 }
 
-void Reducer::setForwardPassWorkHandle(
+void Reducer::set_forward_pass_work_handle(
     std::shared_ptr<c10d::ProcessGroup::Work> forwardPassWorkHandle,
     at::Tensor& tensor) {
   std::lock_guard<std::mutex> lock(mutex_);
@@ -441,14 +441,14 @@ void Reducer::setForwardPassWorkHandle(
   forwardPassWorkHandle_.resultTensor = tensor;
 }
 
-std::vector<at::Tensor> Reducer::getLocalUsedMapsOnDevice() const {
+std::vector<at::Tensor> Reducer::get_local_used_maps_on_device() const {
   std::lock_guard<std::mutex> lock(mutex_);
   return local_used_maps_dev_;
 }
 
-void Reducer::pushRebuiltParamsForAllIndices() {
+void Reducer::push_rebuilt_params_for_all_indices() {
   std::lock_guard<std::mutex> lock(mutex_);
-  if (!shouldRebuildBuckets()) {
+  if (!should_rebuild_buckets()) {
     return;
   }
   const auto replica_count = replicas_.size();
@@ -461,13 +461,13 @@ void Reducer::pushRebuiltParamsForAllIndices() {
           .replica_index = replica_index,
           .variable_index = variable_index,
       };
-      pushRebuiltParams(index);
+      push_rebuilt_params(index);
     }
   }
 }
 
-void Reducer::pushRebuiltParams(const VariableIndex& index) {
-  if (shouldRebuildBuckets() &&
+void Reducer::push_rebuilt_params(const VariableIndex& index) {
+  if (should_rebuild_buckets() &&
       index.replica_index == 0) {
     rebuilt_params_.push_back(
         replicas_[index.replica_index][index.variable_index]);
@@ -506,7 +506,7 @@ void Reducer::autograd_hook(VariableIndex index) {
   // rebuilt_params_ and rebuilt_param_indices_, and then will be broadcasted
   // and intialized. Also we only need to dump tensors and parameter indcies of
   // one replica.
-  pushRebuiltParams(index);
+  push_rebuilt_params(index);
 
   // If `find_unused_parameters_` is true there may be model parameters that
   // went unused when computing the model output, they won't be part of the
@@ -1230,7 +1230,7 @@ void Reducer::sync_bucket_indices(
 }
 
 bool Reducer::rebuild_buckets() {
-  if (!shouldRebuildBuckets() || rebuilt_params_.empty()) {
+  if (!should_rebuild_buckets() || rebuilt_params_.empty()) {
     return false;
   }
 
