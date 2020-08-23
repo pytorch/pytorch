@@ -120,6 +120,7 @@ namespace jit {
   _(GraphExecutor)                                  \
   _(ModuleConversion)                               \
   _(Interp)                                         \
+  _(TypeCheck)                                      \
   _(GPU_IrGraphGenerator)                           \
   _(GPU_FusionDispatch)                             \
   _(GPU_FusionClear)                                \
@@ -225,7 +226,8 @@ namespace jit {
   _(Fusion)                     \
   _(GraphExecutor)              \
   _(ModuleConversion)           \
-  _(Interp)
+  _(Interp)                     \
+  _(TypeCheck)
 #endif
 
 #define DECLARE_JIT_TEST(name) void test##name();
