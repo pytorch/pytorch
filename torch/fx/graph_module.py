@@ -1,14 +1,15 @@
 import torch
 import torch.overrides
 import linecache
-from typing import Type, Dict, List
+from typing import Type, Dict, List, Any
+from .graph import Graph
 
 # normal exec loses the source code, however we can patch
 # the linecache module to still recover it.
 # using exec_with_source will add it to our local cache
 # and then tools like TorchScript will be able to get source info.
 _next_id = 0
-def exec_with_source(src, globals):
+def exec_with_source(src: str, globals: Dict[str, Any]):
     global _next_id
     key = f'<eval_with_key_{_next_id}>'
     _next_id += 1
@@ -37,13 +38,13 @@ class GraphModule(torch.nn.Module):
             pass
         return super().__new__(GraphModuleImpl)
 
-    def __init__(self, root, graph):
+    def __init__(self, root: torch.nn.Module, graph: Graph):
         super().__init__()
         self.root = root
         self.graph = graph
         self._generate_forward()
 
-    def _generate_forward(self):
+    def _generate_forward(self) -> None:
         body, result, free_variables = self.graph.python_code(root_module='self')
         body = '\n'.join('    ' + line for line in body.split('\n')) + '\n'
         self.src = f"""\
@@ -56,7 +57,7 @@ def forward(self, {', '.join(free_variables)}):
         # install forward into the classes dictionary, this is what normally happens in the
         # 'class' statement
         # __new__ ensured that each instance has its own class
-        gbls = {
+        gbls: Dict[str, Any] = {
             'torch': torch
         }
         exec_with_source(self.src, gbls)
