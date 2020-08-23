@@ -116,7 +116,7 @@ def _make_conv_test_input(
             W_init.float() - W_zero_points_tensor.reshape(*W_shape)).float()
         b = X_scale * W_scales_tensor * b_init.float()
         W_q = torch.quantize_per_channel(
-            W, W_scales_tensor, W_zero_points_tensor.long(), 0,
+            W, W_scales_tensor.double(), W_zero_points_tensor.long(), 0,
             dtype=torch.qint8)
     else:
         W = W_scale[0] * (W_init - W_zero_point[0]).float()
@@ -383,46 +383,93 @@ class QuantizationTestCase(TestCase):
 
         return models[False]
 
-    def checkGraphModuleHasNode(self, graph_module, target_node):
+    def checkGraphModule(self, graph_module, check_spec):
         """ Check if GraphModule contains the target node
         Args:
             graph_module: the GraphModule instance we want to check
-            target_node: a tuple of 2 elements, first element is
-                the op type for GraphModule node, second element
-                is the target function for call_function and
-                type of the module for call_module,
-                only thse two types are supported currently
+            check_spec: see docs for checkGraphModeFxOp
         """
-        assert target_node[0] in ['call_function', 'call_module'], 'Only call function' \
-            ' and call module are supported right now'
+        nodes_in_graph = dict()
+        node_list = []
         modules = dict(graph_module.root.named_modules())
         for node in graph_module.graph.nodes:
-            if node.op == 'call_function' and node.op == target_node[0] and node.target == target_node[1]:
-                return
-            elif node.op == 'call_module' and node.op == target_node[0] and type(modules[node.target]) == target_node[1]:
-                return
-        self.assertTrue(False, 'node:' + str(target_node) +
-                        ' not found in the graph module')
+            n = None
+            if node.op == 'call_function' or node.op == 'call_method':
+                n = (node.op, node.target)
+            elif node.op == 'call_module':
+                n = (node.op, type(modules[node.target]))
 
-    def printGraphModule(self, graph_module):
+            if n is not None:
+                node_list.append(n)
+                if n in nodes_in_graph:
+                    nodes_in_graph[n] += 1
+                else:
+                    nodes_in_graph[n] = 1
+
+        if isinstance(check_spec, tuple):
+            target_node = check_spec
+            self.assertTrue(target_node in nodes_in_graph, 'node:' + str(target_node) +
+                            ' not found in the graph module')
+        elif isinstance(check_spec, dict):
+            node_occurrence_map = check_spec
+            for target_node, occurrence in node_occurrence_map.items():
+                self.assertTrue(
+                    target_node in nodes_in_graph,
+                    'Check failed for node:' + str(target_node) +
+                    ' not found')
+                self.assertTrue(
+                    nodes_in_graph[target_node] == occurrence,
+                    'Check failed for node:' + str(target_node) +
+                    ' Expected occurrence:' + str(occurrence) +
+                    ' Found occurrence:' + str(nodes_in_graph[target_node]))
+        elif isinstance(check_spec, list):
+            ordered_node_check_list = check_spec
+            cur_index = 0
+            for n in node_list:
+                if cur_index == len(ordered_node_check_list):
+                    return
+                if n == ordered_node_check_list[cur_index]:
+                    cur_index += 1
+            self.assertTrue(
+                cur_index == len(ordered_node_check_list),
+                "Check failed for graph:" +
+                self.printGraphModule(graph_module, print_str=False) +
+                "Expected ordered list:" +
+                str(ordered_node_check_list))
+
+    def printGraphModule(self, graph_module, print_str=True):
         modules = dict(graph_module.root.named_modules())
+        node_infos = []
         for n in graph_module.graph.nodes:
             node_info = ' '.join(map(repr, [n.op, n.name, n.target, n.args, n.kwargs]))
             if n.op == 'call_module':
-                node_info += ' module type:' + repr(type(modules[n.target]))
-            print(node_info)
+                node_info += ' module type: ' + repr(type(modules[n.target]))
+            node_infos.append(node_info)
+        str_to_print = '\n'.join(node_infos)
+        if print_str:
+            print(str_to_print)
+        return str_to_print
 
-    def checkGraphModeFxOp(self, model, inputs, quantized_node, quant_type=QuantType.STATIC, debug=False):
+    def checkGraphModeFxOp(self, model, inputs, check_spec, quant_type=QuantType.STATIC, debug=False):
         """ Quantizes model with graph mode quantization on fx and check if the
         quantized model contains the quantized_node
 
         Args:
             model: floating point torch.nn.Module
             inputs: one positional sample input arguments for model
-            quantized_node: a tuple of 2 elements, first element is
-                the op type for GraphModule node, second element
-                is the target function for call_function and
-                type of the module for call_module
+            check_spec:
+              either:
+                quntized_node: a tuple of 2 elements, first element is
+                   the op type for GraphModule node, second element
+                   is the target function for call_function and
+                   type of the module for call_module
+                   e.g. ('call_function', torch.ops.quantized.conv2d)
+                node map: a dict from node(tuple of 2 elements) to
+                   number of occurences (int)
+                   e.g. {('call_function', torch.quantize_per_tensor) : 1)}
+                ordered node list: a list of node(tuple of 2 elements)
+                   e.g. [('call_function', torch.quantize_per_tensor),
+                         ('call_function', torch.dequantize)]
         """
         # TODO: make img_data a single example instead of a list
         if type(inputs) == list:
@@ -462,7 +509,7 @@ class QuantizationTestCase(TestCase):
             print('quantized graph module:', type(qgraph))
             self.printGraphModule(qgraph)
             print()
-        self.checkGraphModuleHasNode(qgraph, quantized_node)
+        self.checkGraphModule(qgraph, check_spec)
 
 # Below are a series of neural net models to use in testing quantization
 # Single layer models
@@ -1077,7 +1124,7 @@ class ModelMultipleOps(torch.nn.Module):
         out = self.conv2(out)
         out = torch.nn.functional.max_pool2d(out, 2, 2)
         out = self.cat.cat([out, out])
-        out = out.view(-1, 3 * 2 * 2)
+        out = out.reshape(-1, 3 * 2 * 2)
         out = self.fc(out)
         return out
 
@@ -1111,7 +1158,7 @@ class ModelMultipleOpsNoAvgPool(torch.nn.Module):
         out = self.conv2(out)
         out = torch.nn.functional.max_pool2d(out, 2, 2)
         out = self.cat.cat([out, out])
-        out = out.view(-1, 3 * 2 * 2)
+        out = out.reshape(-1, 3 * 2 * 2)
         out = self.fc(out)
         return out
 

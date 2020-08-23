@@ -751,24 +751,5 @@ struct TORCH_API ExceptionValue : public SugaredValue {
   std::string message_;
 };
 
-struct TORCH_API SugaredEnumClass : public SugaredValue {
-  explicit SugaredEnumClass(EnumTypePtr enum_type)
-      : enum_type_(std::move(enum_type)) {}
-
-  std::string kind() const override {
-    return "EnumClass";
-  }
-
-  SugaredValuePtr attr(
-      const SourceRange& loc,
-      Function& m,
-      const std::string& field) override;
-
-  SugaredValuePtr iter(const SourceRange& loc, Function& m) override;
-
- private:
-  EnumTypePtr enum_type_;
-};
-
 } // namespace jit
 } // namespace torch
