@@ -101,9 +101,11 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
     throw std::logic_error("No grad accumulator for a saved leaf!");
   impl::set_grad_accumulator(var, grad_accumulator_);
 
-  // Because we can't steal fw_grad_ directly
-  Variable new_fw_grad = fw_grad_;
-  var.set_fw_grad(new_fw_grad);
+  if (fw_grad_.defined()) {
+    // Because we can't steal fw_grad_ directly
+    Variable new_fw_grad = fw_grad_;
+    var.set_fw_grad(new_fw_grad);
+  }
 
   return var;
 }

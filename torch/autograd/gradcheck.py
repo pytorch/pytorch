@@ -297,6 +297,9 @@ def gradcheck(
     if any(t.is_sparse for t in tupled_inputs if isinstance(t, torch.Tensor)) and not check_sparse_nnz:
         return fail_test('gradcheck expects all tensor inputs are dense when check_sparse_nnz is set to False.')
 
+    if check_sparse_nnz and check_forward:
+        return fail_test('Forward more gradcheck does not support sparse inputs.')
+
     # Make sure that gradients are saved for at least one input
     any_input_requiring_grad = False
     for idx, inp in enumerate(tupled_inputs):
