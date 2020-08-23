@@ -2677,7 +2677,8 @@ def mse_loss(input, target, size_average=None, reduce=None, reduction='mean'):
     if target.requires_grad:
         ret = (input - target) ** 2
         if reduction != 'none':
-            ret = torch.mean(ret) if reduction == 'mean' else torch.sum(ret)
+            reduction = _Reduction.get_enum(reduction)
+            ret = torch.mean(ret) if reduction == 1 else torch.sum(ret)
     else:
         expanded_input, expanded_target = torch.broadcast_tensors(input, target)
         ret = torch._C._nn.mse_loss(expanded_input, expanded_target, _Reduction.get_enum(reduction))
