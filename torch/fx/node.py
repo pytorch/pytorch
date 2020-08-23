@@ -1,5 +1,3 @@
-# type: ignore
-
 # Nodes represent a definition of a value in our graph of operators.
 class Node:
     def __init__(self, graph, name, op, target, args, kwargs):

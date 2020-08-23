@@ -1,4 +1,3 @@
-# type: ignore
 import dis
 import torch
 import inspect
@@ -40,14 +39,16 @@ class Proxy:
         return Attribute(self, k)
 
     def __call__(self, *args, **kwargs):
-        return _create_proxy(self.delegate, 'call_method', '__call__', [self] + args, kwargs)
+        return _create_proxy(self.delegate, 'call_method', '__call__', (self,) + args, kwargs)
 
     def __iter__(self):
         frame = inspect.currentframe()
+        assert frame is not None
         calling_frame = frame.f_back
+        assert calling_frame is not None
         inst = list(dis.get_instructions(calling_frame.f_code))[calling_frame.f_lasti // 2]
         if inst.opname == 'UNPACK_SEQUENCE':
-            return (self[i] for i in range(inst.argval))
+            return (self[i] for i in range(inst.argval))  # type: ignore
         self._no_control_flow()
 
     def _no_control_flow(self):
@@ -94,14 +95,15 @@ for method in magic_methods:
         setattr(Proxy, as_magic, impl)
     scope(method)
 
-for orig_method_name in reflectable_magic_methods:
-    def scope(orig_method_name):
-        method_name = f'__r{orig_method_name}__'
+def _define_reflectable(orig_method_name):
+    method_name = f'__r{orig_method_name}__'
 
-        def impl(self, rhs):
-            target = getattr(operator, orig_method_name)
-            return _create_proxy(self.delegate, 'call_function', target, [rhs, self], {})
-        impl.__name__ = method_name
-        impl.__qualname__ = method_name
-        setattr(Proxy, method_name, impl)
-    scope(orig_method_name)
+    def impl(self, rhs):
+        target = getattr(operator, orig_method_name)
+        return _create_proxy(self.delegate, 'call_function', target, [rhs, self], {})
+    impl.__name__ = method_name
+    impl.__qualname__ = method_name
+    setattr(Proxy, method_name, impl)
+
+for orig_method_name in reflectable_magic_methods:
+    _define_reflectable(orig_method_name)

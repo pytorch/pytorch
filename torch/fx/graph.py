@@ -1,4 +1,3 @@
-# type: ignore
 from .node import Node
 
 import builtins
