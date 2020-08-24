@@ -741,10 +741,9 @@ Example:
      @torch.jit.script...
      def foo(x):
          if x < 0:
-         ~~~~~~~~~...  <--- HERE
+         ~~~~~~~~~ <--- HERE
              y = 4
          print(y)
-     ...
 
 Non-local variables are resolved to Python values at compile time when the
 function is defined. These values are then converted into TorchScript values using
