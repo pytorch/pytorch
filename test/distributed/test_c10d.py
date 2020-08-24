@@ -2071,34 +2071,34 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @requires_gloo()
     def test_gloo_backend_cpu_module(self):
-        self._test_gloo_backend([torch.device('cpu')], [])
+        self._test_gloo_backend([torch.device("cpu")], [])
 
     @requires_gloo()
     @skip_if_not_multigpu
     def test_gloo_backend_1gpu_module_device_ids_integer_list(self):
         int_devices = gpus_for_rank(self.world_size)[self.rank][:1]
-        devices = list([torch.device('cuda:' + str(i)) for i in int_devices])
+        devices = [torch.device("cuda:" + str(i)) for i in int_devices]
         self._test_gloo_backend(devices, int_devices)
 
     @requires_gloo()
     @skip_if_not_multigpu
     def test_gloo_backend_1gpu_module_device_ids_torch_device_list(self):
         int_devices = gpus_for_rank(self.world_size)[self.rank][:1]
-        devices = list([torch.device('cuda:' + str(i)) for i in int_devices])
+        devices = [torch.device("cuda:" + str(i)) for i in int_devices]
         self._test_gloo_backend(devices, devices)
 
     @requires_gloo()
     @skip_if_lt_x_gpu(4)
     def test_gloo_backend_2gpu_module(self):
         int_devices = gpus_for_rank(self.world_size)[self.rank][:2]
-        devices = list([torch.device('cuda:' + str(i)) for i in int_devices])
+        devices = [torch.device("cuda:" + str(i)) for i in int_devices]
         self._test_gloo_backend(devices, [], multi_device=True)
 
     @requires_gloo()
     @skip_if_lt_x_gpu(8)
     def test_gloo_backend_4gpu_module(self):
         int_devices = gpus_for_rank(self.world_size)[self.rank][:4]
-        devices = list([torch.device('cuda:' + str(i)) for i in int_devices])
+        devices = [torch.device("cuda:" + str(i)) for i in int_devices]
         self._test_gloo_backend(devices, [], multi_device=True)
 
     def _test_nccl_backend(self, devices, device_ids, multi_device=False):
@@ -2110,28 +2110,28 @@ class DistributedDataParallelTest(MultiProcessTestCase):
     @skip_if_not_multigpu
     def test_nccl_backend_1gpu_module_device_ids_integer_list(self):
         int_devices = gpus_for_rank(self.world_size)[self.rank][:1]
-        devices = list([torch.device('cuda:' + str(i)) for i in int_devices])
+        devices = [torch.device("cuda:" + str(i)) for i in int_devices]
         self._test_nccl_backend(devices, int_devices)
 
     @requires_nccl()
     @skip_if_not_multigpu
     def test_nccl_backend_1gpu_module_device_ids_torch_device_list(self):
         int_devices = gpus_for_rank(self.world_size)[self.rank][:1]
-        devices = list([torch.device('cuda:' + str(i)) for i in int_devices])
+        devices = [torch.device("cuda:" + str(i)) for i in int_devices]
         self._test_nccl_backend(devices, devices)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
     def test_nccl_backend_2gpu_module(self):
         int_devices = gpus_for_rank(self.world_size)[self.rank][:2]
-        devices = list([torch.device('cuda:' + str(i)) for i in int_devices])
+        devices = [torch.device("cuda:" + str(i)) for i in int_devices]
         self._test_nccl_backend(devices, [], multi_device=True)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(8)
     def test_nccl_backend_4gpu_module(self):
         int_devices = gpus_for_rank(self.world_size)[self.rank][:4]
-        devices = list([torch.device('cuda:' + str(i)) for i in int_devices])
+        devices = [torch.device("cuda:" + str(i)) for i in int_devices]
         self._test_nccl_backend(devices, [], multi_device=True)
 
     @requires_nccl()
@@ -2584,7 +2584,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         the resulting gradients.
         """
         int_devices = gpus_for_rank(self.world_size)[self.rank][:1]
-        devices = list([torch.device("cuda:" + str(i)) for i in int_devices])
+        devices = [torch.device("cuda:" + str(i)) for i in int_devices]
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
         global_batch_size = self.world_size
@@ -2702,7 +2702,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         # we would like to make sure DDP does not mess up with the underlying
         # module.
         int_devices = gpus_for_rank(self.world_size)[self.rank][:1]
-        devices = list([torch.device('cuda:' + str(i)) for i in int_devices])
+        devices = [torch.device("cuda:" + str(i)) for i in int_devices]
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
         global_batch_size = self.world_size
@@ -3762,7 +3762,7 @@ class CommTest(MultiProcessTestCase):
         half = torch.float16
 
         # No support for float16 for CPU tensors
-        if device == torch.device('cpu'):
+        if device == torch.device("cpu"):
             half = torch.float32
 
         target = torch.arange(60, dtype=half, device=device).chunk(5)
@@ -3791,7 +3791,7 @@ class CommTest(MultiProcessTestCase):
     def test_broadcast_coalesced_nccl(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
-        device = torch.device('cuda:%d' % self.rank)
+        device = torch.device("cuda:%d" % self.rank)
         self._test_broadcast_coalesced(process_group, device)
 
     @requires_gloo()
@@ -3801,7 +3801,7 @@ class CommTest(MultiProcessTestCase):
         options = c10d.ProcessGroupGloo.Options()
         options.devices = [c10d.ProcessGroupGloo.create_device(interface=LOOPBACK)]
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size, options)
-        device = torch.device('cuda:%d' % self.rank)
+        device = torch.device("cuda:%d" % self.rank)
         self._test_broadcast_coalesced(process_group, device)
 
     @requires_gloo()
@@ -3810,7 +3810,7 @@ class CommTest(MultiProcessTestCase):
         options = c10d.ProcessGroupGloo.Options()
         options.devices = [c10d.ProcessGroupGloo.create_device(interface=LOOPBACK)]
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size, options)
-        device = torch.device('cpu')
+        device = torch.device("cpu")
         self._test_broadcast_coalesced(process_group, device)
 
 
