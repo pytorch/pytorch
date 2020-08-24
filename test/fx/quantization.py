@@ -190,7 +190,7 @@ def matches(modules, node, pattern, max_uses=sys.maxsize):
 
 class Quantizer:
     def __init__(self, mod, patterns=DEFAULT_QUANTIZATION_PATTERNS, quant_ctor=DefaultQuant):
-        self.root = mod.root
+        self.root = mod
         self.graph = mod.graph
         self.quant_ctor = quant_ctor
 

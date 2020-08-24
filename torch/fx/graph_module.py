@@ -26,6 +26,26 @@ def patched_getline(*args, **kwargs):
     return _orig_getlines(*args, **kwargs)
 linecache.getlines = patched_getline
 
+# copy an attribute value with qualified name 'target' from 'from_module' to 'to_module'
+# This installs empty Modules where none exist yet if they are subpaths of target
+def _copy_attr(from_module: torch.nn.Module, to_module: torch.nn.Module, target: str):
+    *prefix, field = target.split('.')
+    for item in prefix:
+        f = getattr(from_module, item)
+        t = getattr(to_module, item, None)
+        if f is t:
+            # we have already installed one of its parents
+            # (e.g. target = root.linear.weight, but we have already installed root.linear)
+            # once we install a parent, we no longer need to copy the children
+            # since all the needed properties will already be present
+            return
+
+        if t is None:
+            t = torch.nn.Module()
+            setattr(to_module, item, t)
+        from_module, to_module = f, t
+
+    setattr(to_module, field, getattr(from_module, field))
 
 class GraphModule(torch.nn.Module):
     def __new__(cls: 'Type[GraphModule]', *args, **kwargs):
@@ -40,7 +60,9 @@ class GraphModule(torch.nn.Module):
 
     def __init__(self, root: torch.nn.Module, graph: Graph):
         super().__init__()
-        self.root = root
+        for node in graph.nodes:
+            if node.op in ['get_param', 'call_module']:
+                _copy_attr(root, self, node.target)
         self.graph = graph
         self._generate_forward()
 
@@ -49,7 +71,6 @@ class GraphModule(torch.nn.Module):
         body = '\n'.join('    ' + line for line in body.split('\n')) + '\n'
         self.src = f"""\
 def forward(self, {', '.join(free_variables)}):
-    self = self.root
 {body}
     return {result}
 """

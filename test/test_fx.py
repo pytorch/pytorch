@@ -169,8 +169,8 @@ class TestFX(TestCase):
         a = resnet(ip)
         b = res_graph(ip)
         c = res_script(ip)
-        assert torch.allclose(a, b)
-        assert torch.allclose(a, c)
+        self.assertEqual(a, b)
+        self.assertEqual(a, c)
 
         quantizer = Quantizer(res_graph)
 
@@ -184,7 +184,7 @@ class TestFX(TestCase):
         e = qgraph_script(ip)
 
         assert (a - d).abs().max() < 2
-        assert torch.allclose(d, e)
+        self.assertEqual(d, e)
 
     def test_unpack(self):
         class M(torch.nn.Module):
