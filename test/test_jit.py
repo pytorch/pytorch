@@ -961,10 +961,10 @@ class TestJit(JitTestCase):
                 result = scripted_fn(*inputs)
                 result.sum().backward(retain_graph=retain_graph_)
                 if not retain_graph_:
-                  self.assertRaisesRegex(RuntimeError, 'Specify retain_graph=True',
-                                         lambda: result.sum().backward())
+                    self.assertRaisesRegex(RuntimeError, 'Specify retain_graph=True',
+                                           lambda: result.sum().backward())
                 else:
-                  result.sum().backward()
+                    result.sum().backward()
 
         def test_script_backward_twice_with_saved_values(input1, input2):
             # type: (Tensor, Tensor) -> Tensor
