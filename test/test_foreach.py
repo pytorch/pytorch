@@ -25,13 +25,12 @@ class TestForeach(TestCase):
         res = torch._foreach_sqrt(tensors)
         torch._foreach_sqrt_(tensors)
 
-        self.assertEqual([torch.sqrt(torch.ones(2,2, device=device, dtype=dtype)) for _ in range(2)], res)
+        self.assertEqual([torch.sqrt(torch.ones(2, 2, device=device, dtype=dtype)) for _ in range(2)], res)
         self.assertEqual(tensors, res)
         self.assertEqual(exp, res)
         print(exp, res)
         print(torch._foreach_div(res, exp))
-        
-'''
+
     @dtypes(*[torch.float, torch.double, torch.complex64, torch.complex128])
     def test_exp(self, device, dtype):
         tensors = [torch.ones(20, 20, device=device, dtype=dtype) for _ in range(20)]
@@ -223,9 +222,14 @@ class TestForeach(TestCase):
         self.assertEqual(res, tensors1)
         self.assertEqual(tensors1, [torch.ones(20, 20, device=device, dtype=dtype) for _ in range(20)])
 
+        res = torch._foreach_add(tensors1, tensors2, 2)
+        torch._foreach_add_(tensors1, tensors2, 2)
+        self.assertEqual(res, tensors1)
+        self.assertEqual(tensors1, [torch.ones(20, 20, device=device, dtype=dtype).mul(3) for _ in range(20)])
+
         # sub
-        res = torch._foreach_sub(tensors1, tensors2)
-        torch._foreach_sub_(tensors1, tensors2)
+        res = torch._foreach_sub(tensors1, tensors2, 3)
+        torch._foreach_sub_(tensors1, tensors2, 3)
         self.assertEqual(res, tensors1)
         self.assertEqual(tensors1, [torch.zeros(20, 20, device=device, dtype=dtype) for _ in range(20)])
 
@@ -276,7 +280,6 @@ class TestForeach(TestCase):
             with self.assertRaises(RuntimeError):
                 bin_op(tensors1, tensors2)
 
-'''
 instantiate_device_type_tests(TestForeach, globals())
 
 if __name__ == '__main__':

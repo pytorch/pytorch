@@ -15,6 +15,7 @@ void verify_list(TensorList tensors) {
 }
 
 // To go via 'fast' path, several conditions must be satisfied
+// - All tensors must be on the same device
 // - All tensors must have strided layout
 // - All tensors must be non-overlapping and dense
 // - Resulting tensor must have the same dtype as the input one
@@ -24,35 +25,29 @@ bool check_fast_route(TensorList tensors, Scalar scalar) {
 
   for (auto t : tensors) {
     if (t.layout() != at::kStrided) {
-       std::cout << "SLOW 8" << std::endl;
       return false;
     }
 
     if (t.device() != expected_device) {
-       std::cout << "SLOW 9" << std::endl;
       return false;
     }
 
     if (!t.is_non_overlapping_and_dense()) {
-       std::cout << "SLOW 10" << std::endl;
       return false;
     }
 
     // complex scalar + integral or boolean tensor will result in complex tensor
     if (scalar.isComplex() && at::isIntegralType(t.scalar_type(), /*includeBool*/ true)) {
-       std::cout << "SLOW 11" << std::endl;
       return false;
     }
 
     // float scalar + integral or boolean tensor will result in float tensor
     if (scalar.isFloatingPoint() && at::isIntegralType(t.scalar_type(), /*includeBool*/ true)) {
-       std::cout << "SLOW 12" << std::endl;
       return false;
     }
 
     // integral scalar + boolean tensor will result in integral tensor 
     if (scalar.isIntegral(/*includeBool*/ false) && t.dtype() == at::kBool) {
-       std::cout << "SLOW 13" << std::endl;
       return false;
     }
   }
@@ -66,17 +61,14 @@ bool check_fast_route(TensorList tensors) {
 
    for (auto t : tensors) {
     if (t.layout() != at::kStrided) {
-      std::cout << "SLOW 5" << std::endl;
       return false;
     }
 
     if (!t.is_non_overlapping_and_dense()) {
-      std::cout << "SLOW 6" << std::endl;
       return false;
     }
 
     if (t.device() != expected_device) {
-      std::cout << "SLOW 7" << std::endl;
       return false;
     }
   }
@@ -105,24 +97,20 @@ bool check_fast_route(TensorList tensors1, TensorList tensors2) {
 
     if (tensors1[i].layout() != at::kStrided || 
         tensors2[i].layout() != at::kStrided) {
-      std::cout << "SLOW 1" << std::endl;
       return false;
     }
 
     if (tensors1[i].device() != expected_device || 
         tensors2[i].device() != expected_device) {
-      std::cout << "SLOW 2" << std::endl;
       return false;
     }
 
     if (tensors1[i].strides() != tensors2[i].strides()) {
-      std::cout << "SLOW 3" << std::endl;     
       return false;
     }
 
     if (!tensors1[i].is_non_overlapping_and_dense() || 
         !tensors2[i].is_non_overlapping_and_dense()) {
-      std::cout << "SLOW 4" << std::endl;
       return false;
     }
   }
