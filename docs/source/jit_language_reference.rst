@@ -114,7 +114,7 @@ Example (a type mismatch)
          else:
              r = 4
          return r
-                ~ <--- HERE
+                ~ <--- HERE...
 
 Unsupported Typing Constructs
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -749,7 +749,7 @@ Example:
          if x < 0:
              y = 4
          print(y)
-               ~ <--- HERE
+               ~ <--- HERE...
 
 Non-local variables are resolved to Python values at compile time when the
 function is defined. These values are then converted into TorchScript values using
