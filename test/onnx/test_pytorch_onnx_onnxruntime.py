@@ -866,9 +866,10 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.randn(2, 3, 4)
         self.run_test(FloorDivModule(), (x, y))
 
+    @enableScriptTest()
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_floordiv(self):
-        class FloordivModule(torch.jit.ScriptModule):
-            @torch.jit.script_method
+        class FloordivModule(torch.nn.Module):
             def forward(self, x):
                 return x.new_zeros(x.size(2) // x.size(1))
 
