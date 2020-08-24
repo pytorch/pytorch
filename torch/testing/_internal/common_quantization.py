@@ -155,7 +155,7 @@ def train_one_epoch(model, criterion, optimizer, data_loader, device, ntrain_bat
     cnt = 0
     for image, target in data_loader:
         start_time = time.time()
-        print('.', end = '')
+        print('.', end='')
         cnt += 1
         image, target = image.to(device), target.to(device)
         output = model(image)
@@ -194,7 +194,7 @@ def run_ddp(rank, world_size, prepared):
     prepared = torch.nn.parallel.DistributedDataParallel(prepared, device_ids=[rank])
     prepared.to(rank)
     model_with_ddp = prepared
-    optimizer = torch.optim.SGD(model_with_ddp.parameters(), lr = 0.0001)
+    optimizer = torch.optim.SGD(model_with_ddp.parameters(), lr=0.0001)
     train_one_epoch(model_with_ddp, criterion, optimizer, dataset, rank, 1)
     ddp_cleanup()
 
@@ -275,7 +275,7 @@ def skipIfNoFBGEMM(fn):
     return wrapper
 
 try:
-    import torchvision
+    import torchvision  # noqa: F401
     HAS_TORCHVISION = True
 except ImportError:
     HAS_TORCHVISION = False

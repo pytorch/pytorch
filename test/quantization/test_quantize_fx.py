@@ -789,20 +789,19 @@ class TestQuantizeFxModels(QuantizationTestCase):
         model_list = set(model_list) - {'googlenet', 'inception_v3'}
         # getattr should not be used as node name(https://github.com/pytorch/pytorch/issues/43522)
         model_list -= {'shufflenet_v2_x1_0', 'mobilenet_v2'}
-        quantized_not_working = [('qat', 'mobilenet_v2'), # dropout error RuntimeError: "bernoulli_scalar_cpu_" not implemented for 'QUInt8'
+
+        # mobilenet: dropout error RuntimeError: "bernoulli_scalar_cpu_" not implemented for 'QUInt8'
+        # incpetion_v3: looks like there is some problem with AuxLogits
+        quantized_not_working = [('qat', 'mobilenet_v2'),
                                  ('qat', 'inception_v3'),
-                                 ('static', 'inception_v3'), # looks like there is some problem with AuxLogits
-        ]
+                                 ('static', 'inception_v3')]
+
         fx_eager_not_matching = ['googlenet',  # because _transform_input is not quantized in eager
                                  'mobilenetv2']  # because relu6 is replaced as relu in mobilenetv2
 
-        input_tensor = torch.rand(1,3,224,224)
+        input_tensor = torch.rand(1, 3, 224, 224)
         input_tensor_inception = torch.rand(1, 3, 299, 299)
         output_value = torch.randint(0, 1, (1,))
-
-        def eval_fn(model, calib_data):
-            for x in calib_data:
-                output = model(x)
 
         qconfig_dict = {'': torch.quantization.default_qconfig}
         diff_of_quant = {}
@@ -819,7 +818,7 @@ class TestQuantizeFxModels(QuantizationTestCase):
                 greater_than_one[mode] = {}
 
             # print('quantizing:', name, ' mode:', mode)
-            pretrained = name in quantized_model_list # load pretrained model to compare with quantized model
+            pretrained = name in quantized_model_list  # load pretrained model to compare with quantized model
             model = models.__dict__[name](pretrained=pretrained).eval().float()
             if name in set(['inception_v3']):
                 input_value = input_tensor_inception
@@ -833,11 +832,12 @@ class TestQuantizeFxModels(QuantizationTestCase):
             script = torch.jit.script(graph_module)
 
             # make sure graph module and script module are both runanble
-            a = graph_module(input_value)
-            b = script(input_value)
+            original_out = graph_module(input_value)
+            is_not_tuple_out = not isinstance(original_out, tuple)
+            script_out = script(input_value)
             self.assertEqual(
-                (a-b).abs().max(), 0, 'Reslut of original graph module ' + \
-                'and script module does not match')
+                (original_out - script_out).abs().max(), 0,
+                'Reslut of original graph module and script module does not match')
 
             # set to train just before quantization
             if mode != 'static':
@@ -854,7 +854,7 @@ class TestQuantizeFxModels(QuantizationTestCase):
                          join=True)
             elif mode == 'qat':
                 assert prepared.training, 'prepared must be in training mode for qat'
-                optimizer = torch.optim.SGD(prepared.parameters(), lr = 0.0001)
+                optimizer = torch.optim.SGD(prepared.parameters(), lr=0.0001)
                 criterion = nn.CrossEntropyLoss()
                 train_one_epoch(prepared, criterion, optimizer, [(input_value, output_value)], torch.device('cpu'), 1)
             else:
@@ -873,8 +873,8 @@ class TestQuantizeFxModels(QuantizationTestCase):
             qgraph_out = qgraph(input_value)
             qgraph_script = qgraph_script(input_value)
 
-            if not isinstance(a, tuple):
-                diff_of_quant[mode][name] = (a-qgraph_out).abs().max()
+            if is_not_tuple_out:
+                diff_of_quant[mode][name] = (original_out - qgraph_out).abs().max()
                 if diff_of_quant[mode][name] > 1:
                     greater_than_one[mode][name] = diff_of_quant[mode][name]
                     assert torch.allclose(qgraph_out, qgraph_script), 'graph, scripted graph'
@@ -904,7 +904,7 @@ class TestQuantizeFxModels(QuantizationTestCase):
                              join=True)
                 elif mode == 'qat':
                     assert qeager.training, 'qeager should be in training mode for qat'
-                    optimizer = torch.optim.SGD(qeager.parameters(), lr = 0.0001)
+                    optimizer = torch.optim.SGD(qeager.parameters(), lr=0.0001)
                     train_one_epoch(qeager, criterion, optimizer, [(input_value, output_value)], torch.device('cpu'), 1)
                 else:
                     for i in range(10):
@@ -919,13 +919,13 @@ class TestQuantizeFxModels(QuantizationTestCase):
                 qeager_out = qeager(input_value)
                 qeager_script = torch.jit.script(qeager)
                 qscript_out = qeager_script(input_value)
-                if not isinstance(a, tuple):
+                if is_not_tuple_out:
                     diff_from_eager[mode][name] = (qeager_out - qgraph_out).abs().max()
                     if name not in fx_eager_not_matching:
                         self.assertEqual(diff_from_eager[mode][name], 0,
-                                         'Result of graph mode quantization and ' + \
-                                         'eager mode quantization on model: ' + name + \
-                                         ' should match. Mode: ' + mode + \
+                                         'Result of graph mode quantization and ' +
+                                         'eager mode quantization on model: ' + name +
+                                         ' should match. Mode: ' + mode +
                                          ' diff:' + str(diff_from_eager[mode][name]))
 
             def print_diffs(diffs):
