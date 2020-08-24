@@ -116,7 +116,6 @@ Example (a type mismatch)
          return r
                 ~ <--- HERE
 
-
 Unsupported Typing Constructs
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 TorchScript does not support all features and types of the :mod:`typing` module. Some of these
