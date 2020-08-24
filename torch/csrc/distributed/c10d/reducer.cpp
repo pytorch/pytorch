@@ -583,9 +583,9 @@ void Reducer::mark_variable_ready(VariableIndex index) {
     divFactor_ = process_group_->getSize();
     auto& workHandle = forwardPassWorkHandle_.workHandle;
     if (workHandle) {
-      workHandle->wait();
       auto useStaticWorldSize = forwardPassWorkHandle_.useStaticWorldSize;
       if (!useStaticWorldSize) {
+        workHandle->wait();
         at::Tensor& res = forwardPassWorkHandle_.resultTensor;
         divFactor_ = res.item().to<int>();
       }
