@@ -816,13 +816,10 @@ def _adaptive_pool(name, type, tuple_fn, fn=None):
         # so we try using max_poolxd_with_indices, and if it is not possible
         # (input is not a complete tensor or output size not factor of input size)
         # then we call GlobalAveragePool and return None for the indices
-        output_size = sym_help._maybe_get_const(output_size, 'is')
-        if sym_help._is_packed_list(output_size):
-            output_size_list = sym_help._unpack_list(output_size)
-            try:
-                output_size = [sym_help._get_const(v, 'i', 'output_size') for v in output_size_list]
-            except Exception:
-                return sym_help._onnx_unsupported('adaptive pooling, since output_size is not constant.')
+        try:
+            output_size = _parse_arg(output_size, 'is')
+        except Exception:
+            return sym_help._onnx_unsupported('adaptive pooling, since output_size is not constant.')
         if output_size == [1] * len(output_size) and type == "AveragePool":
             return g.op("GlobalAveragePool", input)
         if not input.isCompleteTensor():
