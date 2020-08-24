@@ -1000,6 +1000,22 @@ const Expr* PolynomialTransformer::mutate(const Min* v) {
   return rhs_new;
 }
 
+const Expr* PolynomialTransformer::mutate(const CompareSelect* v) {
+  const Expr* lhs_new = v->lhs()->accept_mutator(this);
+  const Expr* rhs_new = v->rhs()->accept_mutator(this);
+  const Expr* retval1_new = v->ret_val1()->accept_mutator(this);
+  const Expr* retval2_new = v->ret_val2()->accept_mutator(this);
+  const Expr* v_new = new CompareSelect(
+      lhs_new, rhs_new, retval1_new, retval2_new, v->compare_select_op());
+
+  // Constant Folding.
+  if (lhs_new->isConstant() && rhs_new->isConstant()) {
+    return evaluateOp(v_new);
+  }
+
+  return v_new;
+}
+
 const Expr* PolynomialTransformer::mutate(const Intrinsics* v) {
   std::vector<const Expr*> new_params;
   bool changed = false;
