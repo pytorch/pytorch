@@ -38,6 +38,7 @@
 #include "torch/csrc/jit/runtime/argument_spec.h"
 #include "torch/csrc/jit/runtime/autodiff.h"
 #include "torch/csrc/jit/runtime/custom_operator.h"
+#include "torch/csrc/jit/runtime/graph_executor.h"
 #include "torch/csrc/jit/runtime/interpreter.h"
 #include "torch/csrc/jit/runtime/symbolic_script.h"
 #include "torch/csrc/jit/serialization/import.h"
@@ -45,6 +46,7 @@
 #include "torch/csrc/autograd/engine.h"
 #include "torch/csrc/autograd/variable.h"
 
+#include <torch/csrc/jit/runtime/profiling_graph_executor_impl.h>
 #include <torch/csrc/jit/testing/file_check.h>
 #include <torch/script.h>
 #include "torch/csrc/jit/api/module.h"
@@ -1194,6 +1196,76 @@ void testThreadLocalDebugInfo() {
       }
     }
   }
+}
+
+static void nestGraphIntoFallbackGraph(std::shared_ptr<Graph> graph) {
+  auto fallback =
+      createFallbackGraph(graph->block(), graph->inputs(), graph.get());
+  graph->prependNode(fallback);
+  for (size_t i = 0; i < graph->outputs().size(); i++) {
+    graph->outputs()[i]->replaceAllUsesWith(fallback->output(i));
+    fallback->output(i)->copyMetadata(graph->outputs()[i]);
+  }
+  GRAPH_DUMP("nestGraphIntoFallbackGraph:", graph);
+  EliminateDeadCode(graph);
+}
+
+void testFallbackGraphs() {
+  auto x = at::randn({1}, at::kCPU);
+  auto y = at::randn({1}, at::kCPU);
+  auto stack = createStack({x, y});
+
+  auto graph_string = R"IR(
+    graph(%0 : Float(1),
+          %1 : Float(1)):
+      %2 : Tensor = aten::mul(%0, %1)
+      %3 : Tensor = aten::mul(%2, %0)
+      return (%3))IR";
+  auto graph = std::make_shared<Graph>();
+  torch::jit::parseIR(graph_string, graph.get());
+
+  {
+    Code code(graph, "");
+    InterpreterState interpreter{code};
+    interpreter.run(stack);
+  }
+  at::Tensor et;
+  pop(stack, et);
+  float ef = et.item<float>();
+  {
+    EnableProfilingGuard epg;
+
+    GraphFunction f("fallbackGraphs", graph, nullptr);
+    for (size_t i = 0; i < getNumProfiledRuns() + 1; i++) {
+      x = at::randn({1}, at::kCPU);
+      y = at::randn({1}, at::kCPU);
+      stack.emplace_back(x);
+      stack.emplace_back(y);
+
+      if (i == getNumProfiledRuns()) {
+        auto opt_graph = lastExecutedOptimizedGraph();
+        GRAPH_DUMP("Original graph:", opt_graph);
+        nestGraphIntoFallbackGraph(opt_graph);
+        GRAPH_DUMP("nestGraphIntoFallbackGraph:", opt_graph);
+        auto it = opt_graph->block()->nodes().begin();
+        ASSERT_EQ(it->kind(), prim::FallbackGraph);
+        auto fallback = *it++;
+        ASSERT_EQ(it, opt_graph->block()->nodes().end());
+        ASSERT_TRUE(fallback->hasAttribute(attr::Subgraph));
+        testing::FileCheck()
+            .check("Tensor = aten::mul")
+            ->check("Tensor = aten::mul")
+            ->run(*fallback->g(attr::Subgraph));
+      }
+
+      f.run(stack);
+    }
+  }
+
+  at::Tensor at;
+  pop(stack, at);
+  float af = et.item<float>();
+  ASSERT_EQ(af, ef);
 }
 
 void testAutogradProfiler() {
