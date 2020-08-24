@@ -3720,7 +3720,7 @@ class CommTest(MultiProcessTestCase):
             process_group,
             tensors,
             buffer_size=256,
-            authoritative_rank=root_rank)
+            src=root_rank)
 
         if self.rank != root_rank:
             self.assertEqual(tensors, target)
