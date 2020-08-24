@@ -143,7 +143,7 @@ def matched_files_iter(root_path, includes=('*',), ignores=(), extensions=(), ou
                 and (not _fnmatch(filepath, ignores))
                 and (match_extensions(filepath) or filepath in exact_matches)
             ):
-                if not is_pytorch_extension: # for pytorch extensions, consider all files
+                if not is_pytorch_extension:  # for pytorch extensions, consider all files
                     if not is_pytorch_file(filepath) and not is_caffe2_gpu_file(filepath):
                         continue
                     if out_of_place_only and not is_out_of_place(filepath):
