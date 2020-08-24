@@ -451,8 +451,149 @@ class TestModuleInterface(JitTestCase):
 
         m = torch.jit.script(TestModule())
         m.eval()
-        with self.assertRaisesRegex(RuntimeError, "attempted to freeze a module that uses interface attributes"):
-            mf = torch._C._freeze_module(m._c)
+        mf = torch._C._freeze_module(m._c)
+        # Assume interface has no aliasing
+        mf = torch._C._freeze_module(m._c, freezeInterfaces = True)
+        input = torch.tensor([1])
+        out_s = m.forward(input)
+        out_f = mf.forward(input)
+        self.assertEqual(out_s, out_f)
+
+    def test_freeze_module_with_setattr_in_interface(self):
+        class SubModule(torch.nn.Module):
+            def __init__(self):
+                super(SubModule, self).__init__()
+                self.b = 20
+
+            def forward(self, x):
+                self.b += 2;
+                return self.b
+            @torch.jit.export
+            def getb(self, x):
+                return self.b
+
+        class OrigMod(torch.nn.Module):
+            def __init__(self):
+                super(OrigMod, self).__init__()
+                self.a = 0
+
+            def forward(self, x):
+                return self.a
+
+        @torch.jit.interface
+        class ModInterface(torch.nn.Module):
+            def forward(self, x):
+                # type:  (Tensor) -> int
+                pass
+
+        class TestModule(torch.nn.Module):
+            proxy_mod : ModInterface
+
+            def __init__(self):
+                super(TestModule, self).__init__()
+                self.proxy_mod = OrigMod()
+                self.sub = SubModule()
+
+            def forward(self, x):
+                return self.proxy_mod(x) + self.sub.getb(x)
+
+        m = torch.jit.script(TestModule())
+        m.proxy_mod = m.sub
+        m.eval()
+        with self.assertRaisesRegex(RuntimeError, "failed to freeze interface attribute 'proxy_mod'"):
+            mf = torch._C._freeze_module(m._c, freezeInterfaces = True)
+
+    def test_freeze_module_with_inplace_mutation_in_interface(self):
+        class SubModule(torch.nn.Module):
+            def __init__(self):
+                super(SubModule, self).__init__()
+                self.b = torch.tensor([1.5])
+
+            def forward(self, x):
+                self.b[0] += 2;
+                return self.b
+            @torch.jit.export
+            def getb(self, x):
+                return self.b
+
+        class OrigMod(torch.nn.Module):
+            def __init__(self):
+                super(OrigMod, self).__init__()
+                self.a = torch.tensor([0.5])
+
+            def forward(self, x):
+                return self.a
+
+        @torch.jit.interface
+        class ModInterface(torch.nn.Module):
+            def forward(self, x):
+                # type:  (Tensor) -> Tensor
+                pass
+
+        class TestModule(torch.nn.Module):
+            proxy_mod : ModInterface
+
+            def __init__(self):
+                super(TestModule, self).__init__()
+                self.proxy_mod = OrigMod()
+                self.sub = SubModule()
+
+            def forward(self, x):
+                y = self.proxy_mod(x);
+                z= self.sub.getb(x)
+                return y[0] + z[0]
+
+        m = torch.jit.script(TestModule())
+        m.proxy_mod = m.sub
+        m.sub.b = m.proxy_mod.b
+        m.eval()
+        with self.assertRaisesRegex(RuntimeError, "failed to freeze interface attribute 'proxy_mod'"):
+            mf = torch._C._freeze_module(m._c, freezeInterfaces = True)
+
+    def test_freeze_module_with_mutated_interface(self):
+        class SubModule(torch.nn.Module):
+            def __init__(self):
+                super(SubModule, self).__init__()
+                self.b = torch.tensor([1.5])
+
+            def forward(self, x):
+                return self.b
+            @torch.jit.export
+            def getb(self, x):
+                return self.b
+
+        class OrigMod(torch.nn.Module):
+            def __init__(self):
+                super(OrigMod, self).__init__()
+                self.a = torch.tensor([0.5])
+
+            def forward(self, x):
+                return self.a
+
+        @torch.jit.interface
+        class ModInterface(torch.nn.Module):
+            def forward(self, x):
+                # type:  (Tensor) -> Tensor
+                pass
+
+        class TestModule(torch.nn.Module):
+            proxy_mod : ModInterface
+
+            def __init__(self):
+                super(TestModule, self).__init__()
+                self.proxy_mod = OrigMod()
+                self.sub = SubModule()
+
+            def forward(self, x):
+                self.proxy_mod = self.sub
+                y = self.proxy_mod(x);
+                z= self.sub.getb(x)
+                return y[0] + z[0]
+
+        m = torch.jit.script(TestModule())
+        m.eval()
+        with self.assertRaisesRegex(RuntimeError, "failed to freeze interface attribute 'proxy_mod'"):
+            mf = torch._C._freeze_module(m._c, freezeInterfaces = True)
 
     def test_module_apis_interface(self):
         @torch.jit.interface

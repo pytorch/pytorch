@@ -20,6 +20,55 @@
 namespace torch {
 namespace jit {
 
+namespace {
+
+void replaceConv1dWithConv2d(std::shared_ptr<Graph>& graph) {
+  std::string conv_1d_pattern = R"(
+    graph(%input, %weight, %bias, %stride:int[], %padding:int[], %dilation:int[], %groups:int):
+        %r = aten::conv1d(%input, %weight, %bias, %stride, %padding, %dilation, %groups)
+        return (%r) )";
+
+  std::string conv_2d_pattern = R"(
+    graph(%input, %weight, %bias, %stride:int[], %padding:int[], %dilation:int[], %groups:int):
+        %zero : int = prim::Constant[value=0]()
+        %one : int = prim::Constant[value=1]()
+        %stride_w : int = prim::ListUnpack(%stride)
+        %stride_2d : int[] = prim::ListConstruct(%one, %stride_w)
+        %padding_w : int = prim::ListUnpack(%padding)
+        %padding_2d : int[] = prim::ListConstruct(%zero, %padding_w)
+        %dilation_w : int = prim::ListUnpack(%dilation)
+        %dilation_2d : int[] = prim::ListConstruct(%one, %dilation_w)
+        %two : int = prim::Constant[value=2]()
+        %input_2d : Tensor = aten::unsqueeze(%input, %two)
+        %weight_2d : Tensor = aten::unsqueeze(%weight, %two)
+        %output_2d = aten::conv2d(
+            %input_2d, %weight_2d, %bias, %stride_2d, %padding_2d, %dilation_2d, %groups)
+        %output : Tensor = aten::squeeze(%output_2d, %two)
+        return (%output) )";
+
+  SubgraphRewriter rewriter;
+  rewriter.RegisterRewritePattern(conv_1d_pattern, conv_2d_pattern);
+  rewriter.runOnGraph(graph);
+}
+
+} // namespace
+
+void transformConv1dToConv2d(std::shared_ptr<Graph>& graph) {
+  // Replace _convolution with conv1d and conv2d
+  graph_rewrite_helper::replaceConvolutionWithAtenConv(graph);
+  replaceConv1dWithConv2d(graph);
+}
+
+void transformConv1dToConv2d(script::Module& module) {
+  for (auto& method : module.get_methods()) {
+    auto graph = method.graph();
+    transformConv1dToConv2d(graph);
+  }
+  for (script::Module m : module.children()) {
+    transformConv1dToConv2d(m);
+  }
+}
+
 #ifdef USE_XNNPACK
 
 namespace {
