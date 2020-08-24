@@ -720,17 +720,19 @@ class DistributedDataParallel(Module):
 
         Args:
             divide_by_initial_world_size (bool): If True, will divide gradients
-            by the initial world_size DDP training was launched with. If False,
-            will compute the effective world size (number of ranks that have not
-            depleted their inputs yet) and divide gradients by that during
-            allreduce. Set ``divide_by_initial_world_size=True`` when you want
-            to weight gradients of uneven inputs properly, i.e. it will ensure
-            that gradients of later inputs do not get higher weighting. Set to
-            ``False`` to more closely simulate training with the same number of
-            inputs but a smaller world_size. Default is ``True``.
+                by the initial world_size DDP training was launched with. If
+                False, will compute the effective world size (number of ranks
+                that have not depleted their inputs yet) and divide gradients by
+                that during allreduce. Set ``divide_by_initial_world_size=True``
+                when you want to weight gradients of uneven inputs properly,
+                i.e. it will ensure that gradients of later inputs do not get
+                higher weighting. Set to ``False`` to more closely simulate
+                training with the same number of inputs but a smaller
+                world_size. Default is ``True``.
             enable (bool): Whether to enable uneven input detection or not. Pass
-            in ``enable=False`` to disable in cases where you know that inputs
-            are even across participating processes. Default is ``True``.
+                in ``enable=False`` to disable in cases where you know that
+                inputs are even across participating processes. Default is
+                ``True``.
 
 
         Example::

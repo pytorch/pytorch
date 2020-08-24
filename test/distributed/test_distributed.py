@@ -2769,7 +2769,6 @@ class _DistTestBase(object):
         if self.rank > 0:
             n_iters += 2
 
-
         with net.join(divide_by_initial_world_size=False):
             for _ in range(n_iters):
                 loss = net(inp).sum()
