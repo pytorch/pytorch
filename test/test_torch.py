@@ -2105,10 +2105,6 @@ class AbstractTestCases:
                         val = random.random()
                         dst2 = dst.clone()
 
-                        if dt == torch.half:
-                            self.assertRaises(RuntimeError, lambda: dst.masked_fill_(mask, val))
-                            continue
-
                         dst.masked_fill_(mask, val)
                         for i in range(num_dest):
                             if mask[i]:
@@ -2122,7 +2118,7 @@ class AbstractTestCases:
                         dst2.masked_fill_((dst2 > 0).to(dtype), val)
                         self.assertEqual(dst, dst2, atol=0, rtol=0)
 
-                self.assertEqual(len(w), 34)
+                self.assertEqual(len(w), 36)
 
                 warn = 'masked_fill_ received a mask with dtype torch.uint8,'
                 for wi in w:
