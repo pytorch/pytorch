@@ -95,6 +95,13 @@ class TestSerialization(TestCase):
         # TODO: graph mode quantized conv2d module
 
     @override_qengines
+    def test_conv2d_nobias(self):
+        module = nnq.Conv2d(3, 3, kernel_size=3, stride=1, padding=0, dilation=1,
+                            groups=1, bias=False, padding_mode="zeros")
+        self._test_op(module, input_size=[1, 3, 6, 6], generate=False)
+        # TODO: graph mode quantized conv2d module
+
+    @override_qengines
     def test_conv2d_relu(self):
         module = nniq.ConvReLU2d(3, 3, kernel_size=3, stride=1, padding=0, dilation=1,
                                  groups=1, bias=True, padding_mode="zeros")
