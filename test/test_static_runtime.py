@@ -7,10 +7,7 @@ class StaticRuntime:
     def __init__(self, scripted):
         # this is an nn.Module
         if hasattr(scripted, "_c"):
-            scripted._c = torch._C._freeze_module(scripted._c)
-            self.static_runtime = torch._C._jit_to_static_runtime(
-                scripted._c, scripted._c._get_method("forward").graph
-            )
+            self.static_runtime = torch._C._jit_to_static_runtime(scripted._c)
         else:
             self.static_runtime = torch._C._jit_to_static_runtime(scripted.graph)
 
