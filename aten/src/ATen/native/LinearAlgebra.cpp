@@ -199,6 +199,11 @@ static void addmm_impl_cpu_(
   auto m2_strides = m2.strides();
   auto m2_sizes = m2.sizes();
 
+  TORCH_CHECK(self.device() == kCPU && m1.device() == kCPU &&
+              m2.device() == kCPU && result.device() == kCPU,
+             "Tensor device mismatch,  {self: ", self.device(), ", mat1: ",
+             m1.device(), ", mat2: ", m2.device(), ", out: ", result.device(), ")");
+
   TORCH_CHECK(
       m1_sizes[1] == m2_sizes[0], "mat1 and mat2 shapes cannot be multiplied (",
       m1_sizes[0], "x", m1_sizes[1], " and ", m2_sizes[0], "x", m2_sizes[1], ")");
