@@ -15,11 +15,11 @@ class BroadcastWork {
   BroadcastWork(
       const std::shared_ptr<c10d::ProcessGroup>& process_group,
       std::vector<at::Tensor> bucket_tensors,
-      int rootRank = 0)
+      int root_rank = 0)
       : bucket_tensors_(std::move(bucket_tensors)),
         flat_tensor_({torch::utils::flatten_dense_tensors(bucket_tensors_)}) {
     BroadcastOptions broadcastOptions;
-    broadcastOptions.rootRank = rootRank;
+    broadcastOptions.rootRank = root_rank;
     work_ = process_group->broadcast(flat_tensor_, broadcastOptions);
   }
 

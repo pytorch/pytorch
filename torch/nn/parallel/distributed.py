@@ -508,10 +508,9 @@ class DistributedDataParallel(Module):
         # Note: reverse list of buckets because we want to approximate the
         # order in which their gradients are produced, and assume they
         # are used in the forward pass in the order they are defined.
-        bucket_indices = list(reversed(bucket_indices))
         self.reducer = dist.Reducer(
             parameters,
-            bucket_indices,
+            list(reversed(bucket_indices)),
             self.process_group,
             expect_sparse_gradient,
             self.bucket_bytes_cap,
@@ -642,9 +641,9 @@ class DistributedDataParallel(Module):
     def _check_and_sync_module_buffers(self):
         if self.will_sync_module_buffers():
             my_rank = dist.get_rank(self.process_group)
-            rank_to_use = self._find_common_rank(my_rank, False)
+            authoritative_rank = self._find_common_rank(my_rank, False)
             self._distributed_broadcast_coalesced(
-                self.modules_buffers[0], self.broadcast_bucket_size, rank_to_use
+                self.modules_buffers[0], self.broadcast_bucket_size, authoritative_rank
             )
 
     # When running in join model, agrees upon a common rank and broadcast model
@@ -719,7 +718,7 @@ class DistributedDataParallel(Module):
 
         Args:
             enable (bool): Whether to enable uneven input detection or not. Pass
-            in``enable=False`` to disable in cases where you know that inputs
+            in ``enable=False`` to disable in cases where you know that inputs
             are even across participating processes. Default is ``True``.
 
 
@@ -735,13 +734,15 @@ class DistributedDataParallel(Module):
           >>>      torch.cuda.set_device(rank)
           >>>      model = nn.Linear(1, 1, bias=False).to(rank)
           >>>      model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[rank], output_device=rank)
-          >>>      # Rank 1 gets one more input thank rank 0.
+          >>>      # Rank 1 gets one more input than rank 0.
           >>>      inputs = [torch.tensor([1]).float() for _ in range(10 + rank)]
           >>>      with model.join():
           >>>          for _ in range(5):
           >>>              for inp in inputs:
           >>>                  loss = model(inp).sum()
           >>>                  loss.backward()
+          >>>  # Without the join() API, the below synchronization will hang
+          >>>  # blocking for rank 1's allreduce to complete.
           >>>  torch.cuda.synchronize(device=rank)
         """
         try:
