@@ -583,8 +583,7 @@ void AutogradMeta::set_fw_grad(Variable& new_grad, const Variable& self) {
         if (this_view_meta->has_view_fn()) {
           fw_grad_ = this_view_meta->view_fn()(this_view_meta->base_.fw_grad());
         } else {
-          auto offset = self.storage_offset() - this_view_meta->base_.storage_offset();
-          fw_grad_ = this_view_meta->base_.fw_grad().as_strided(self.sizes(), self.strides(), offset);
+          fw_grad_ = this_view_meta->base_.fw_grad().as_strided(self.sizes(), self.strides(), self.storage_offset());
         }
       } else {
         // Create a Tensor with the same meta as self
