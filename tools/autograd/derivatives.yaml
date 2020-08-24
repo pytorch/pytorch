@@ -698,7 +698,7 @@
 
 - name: max.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
   self: index_select_backward(grad, dim, indices, self.sizes(), keepdim)
-  values: index_select_backward(self_fw_grad, dim, indices, self.sizes(), keepdim)
+  values: max_dim_forward(self_fw_grad, dim, indices, keepdim)
 
 - name: max(Tensor self) -> Tensor
   self: evenly_distribute_backward(grad, self, result)

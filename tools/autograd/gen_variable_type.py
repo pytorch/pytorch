@@ -23,6 +23,7 @@
 #     differentiable subcomponents.
 #
 from __future__ import print_function
+import warnings
 from .utils import CodeTemplate, nested_dict, write, uninplace_api_name
 from .gen_autograd import VIEW_FUNCTIONS, VIEW_FUNCTIONS_WITH_METADATA_CHANGE, \
     MULTI_OUTPUT_SAFE_FUNCTIONS, RETURNS_VIEWS_OF_INPUT
@@ -1206,6 +1207,10 @@ def emit_body(declaration):
             fw_grad_defined = ""
             for inp in differentiable_inputs:
                 if inp['name'] in derivative['required_inputs']:
+                    if inp['type'] == 'Tensor &':
+                        warnings.warn('The formula for "{}" uses the original value of {} that is being '
+                                      'modified inplace. This would lead to wrong gradients.'.format(name, inp['name']))
+                        return [emit_forbid_fw_derivatives(is_inplace=True),]
                     fw_grad_defined += FW_DERIVATIVE_DEFINED_TEMPLATE.substitute(inp=inp['name'])#, new_val=new_val)
             if derivative['out_type'] == "Tensor":
                 fw_grad_setter = FW_DERIVATIVE_SETTER_TENSOR.substitute(out_arg=res)

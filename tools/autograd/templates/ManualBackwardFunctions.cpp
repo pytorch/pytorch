@@ -3119,3 +3119,16 @@ Tensor min_max_other_forward(const at::Tensor& self_fw_grad, const at::Tensor& o
 
   return out_fw_grad;
 }
+
+Tensor max_dim_forward(const Tensor& self_fw_grad, int64_t dim, const Tensor& indices, bool keepdim) {
+  auto full_indices = indices;
+  if (!keepdim) {
+    full_indices = indices.unsqueeze(dim);
+  }
+  auto out_fw_grad = at::gather(self_fw_grad, dim, full_indices);
+  if (!keepdim) {
+    out_fw_grad = out_fw_grad.squeeze(dim);
+  }
+
+  return out_fw_grad;
+}
