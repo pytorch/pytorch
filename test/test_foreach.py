@@ -127,15 +127,11 @@ class TestForeach(TestCase):
         tensors = [torch.zeros(10, 10, device=device, dtype=dtype) for _ in range(10)]
         complex_scalar = 3 + 5j
 
-        if dtype == torch.bfloat16:
-            # bug: 42374
-            self.assertRaises(RuntimeError, lambda: torch._foreach_add(tensors, complex_scalar))
-            return
-
         # bool tensor + 1 will result in int64 tensor
         expected = [torch.add(complex_scalar, torch.zeros(10, 10, device=device, dtype=dtype)) for _ in range(10)]
 
-        if dtype in [torch.float16, torch.float32, torch.float64] and device == 'cuda:0':
+        if dtype in [torch.float16, torch.float32, torch.float64, torch.bfloat16] and device == 'cuda:0':
+            # value cannot be converted to dtype without overflow: 
             self.assertRaises(RuntimeError, lambda: torch._foreach_add_(tensors, complex_scalar))
             self.assertRaises(RuntimeError, lambda: torch._foreach_add(tensors, complex_scalar))
             return
