@@ -2,7 +2,7 @@
 
 - [Contributing to PyTorch](#contributing-to-pytorch)
 - [Developing PyTorch](#developing-pytorch)
-  - [Nightly Checkout](#nightly-checkout)
+  - [Nightly Checkout & Pull](#nightly-checkout--pull)
 - [Codebase structure](#codebase-structure)
 - [Unit testing](#unit-testing)
   - [Better local unit tests with pytest](#better-local-unit-tests-with-pytest)
