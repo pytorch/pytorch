@@ -484,6 +484,32 @@ class TestQuantizedTensor(TestCase):
                 # Check to make sure the scale and zero_point has been copied.
                 self.assertEqual(q, q2)
 
+    def test_qtensor_fill(self):
+        numel = 10
+        scale = 0.5
+        zero_point = 10
+
+        dtypes = zip([torch.qint8, torch.quint8, torch.qint32],
+                     [torch.int8, torch.uint8, torch.int32])
+
+        fill_with = -1
+        int_repr = int(round(fill_with / scale + zero_point))
+        for device in get_supported_device_types():
+            for qtype, dtype in dtypes:
+                q = torch._empty_affine_quantized([numel], scale=scale,
+                                                  zero_point=zero_point,
+                                                  device=device, dtype=qtype)
+                q_filled = q.fill_(-1)
+                self.assertEqual(
+                    q_filled.int_repr(),
+                    torch.ones(numel).to(dtype) * int_repr)
+                self.assertEqual(
+                    q_filled.dequantize(),
+                    torch.ones(numel).to(torch.float32) * fill_with)
+                # Make sure the scale and zero_point don't change
+                self.assertEqual(q_filled.q_scale(), scale)
+                self.assertEqual(q_filled.q_zero_point(), zero_point)
+
     def test_qtensor_view(self):
         scale, zero_point, dtype = 1.0, 2, torch.uint8
         for device in get_supported_device_types():
