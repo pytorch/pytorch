@@ -924,6 +924,8 @@ graph(%self, %a, %b):
           add_aten_relu,         add_aten_relu_,
           inplace_add_aten_relu, inplace_add_aten_relu_,
 
+          nn_bn1d_nn_relu,       nn_bn1d_f_relu,
+          nn_bn1d_aten_relu,     nn_bn1d_aten_relu_,
           nn_bn2d_nn_relu,       nn_bn2d_f_relu,
           nn_bn2d_aten_relu,     nn_bn2d_aten_relu_,
           nn_bn3d_nn_relu,       nn_bn3d_f_relu,

@@ -1928,7 +1928,8 @@ class TestQuantizeJitOps(QuantizationTestCase):
 
             def forward(self, x):
                 return F.relu(self.bn(x), True)
-        options = itertools.product([True], [3])
+
+        options = itertools.product([True, False], [1, 2, 3])
         for tracing, dim in options:
             for instance in [BNRelu(dim, True), BNRelu(dim, False),
                              BNFuncRelu(dim), BNFuncInplaceRelu(dim)]:
