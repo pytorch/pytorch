@@ -8,14 +8,6 @@
 
 #include <tuple>
 
-using SerializationType = std::tuple<
-  // version
-  std::string,
-  // non-optional tensors
-  std::vector<at::Tensor>,
-  // optional tensors
-  std::vector<c10::optional<at::Tensor>>>;
-
 /* Convolution prepacked parameters serialization.
  *
  * Files that need to be updated if version changes:
@@ -45,8 +37,108 @@ using SerializationType = std::tuple<
  *  2. list of optional tensors
  *    0: bias
  */
-const std::string kConvName = "conv";
-const std::vector<int64_t> kConvPackedParamsSerializationVersion = {2};
+using SerializationType = std::tuple<
+  // version
+  std::string,
+  // non-optional tensors
+  std::vector<at::Tensor>,
+  // optional tensors
+  std::vector<c10::optional<at::Tensor>>>;
+
+// Parses any historical conv packed params format into
+// the current format.
+template <uint32_t kSpatialDim>
+SerializationType parse_conv_serialized_state(c10::IValue v) {
+  // determine the version based on IValue contents
+  int version = -1;
+  if (v.isTuple()) {
+    auto elements = v.toTuple()->elements();
+    if (elements.size() > 0) {
+      auto firstElement = elements[0];
+      if (firstElement.isTensor()) {
+        version = 1;
+      } else if (firstElement.isString()) {
+        std::string version_str = firstElement.toStringRef();
+        // note: not parsing the string to automatically handle bad
+        // inputs
+        if (version_str == "2") {
+          version = 2;
+        }
+      }
+    }
+  }
+  TORCH_INTERNAL_ASSERT(version != -1, "Unable to parse serialization version");
+  TORCH_INTERNAL_ASSERT(version >= 1 && version <= 2, "Unknown serialization version");
+
+  SerializationType state;
+
+  if (version == 1) {
+    // version 1 - convert to version 2 manually
+
+    auto elements = v.toTuple()->elements();
+
+    at::Tensor weight = elements[0].toTensor();
+    // TODO before land: test optional bias
+    c10::optional<at::Tensor> bias = elements[1].toTensor();
+    torch::List<at::Tensor> stride_x_kSpatialDim = elements[2].toTensorList();
+    torch::List<at::Tensor> padding_x_kSpatialDim = elements[3].toTensorList();
+    torch::List<at::Tensor> dilation_x_kSpatialDim = elements[4].toTensorList();
+    at::Tensor groups = elements[5].toTensor();
+
+    std::string version = "2";
+    std::vector<at::Tensor> non_optional;
+    std::vector<c10::optional<at::Tensor>> optional;
+
+    std::vector<int64_t> params_vec;
+    params_vec.push_back(kSpatialDim);
+    for (int i = 0; i < stride_x_kSpatialDim.size(); i++) {
+      auto stride = stride_x_kSpatialDim.get(i);
+      params_vec.push_back(stride[0].item<int64_t>());
+    }
+    for (int i = 0; i < padding_x_kSpatialDim.size(); i++) {
+      auto padding = padding_x_kSpatialDim.get(i);
+      params_vec.push_back(padding[0].item<int64_t>());
+    }
+    for (int i = 0; i < dilation_x_kSpatialDim.size(); i++) {
+      auto dilation = dilation_x_kSpatialDim.get(i);
+      params_vec.push_back(dilation[0].item<int64_t>());
+    }
+    params_vec.push_back(groups[0].item<int64_t>());
+    int64_t vec_size = params_vec.size();
+    at::Tensor params_tensor = at::from_blob(params_vec.data(),
+        {vec_size}, at::TensorOptions().dtype(at::kLong))
+      // clone to retain ownership of the data
+      .clone();
+
+    non_optional.emplace_back(std::move(params_tensor));
+    non_optional.emplace_back(std::move(weight));
+    optional.emplace_back(std::move(bias));
+
+    state = std::tie(version, non_optional, optional);
+
+  } else {
+    // version 2
+
+    auto elements = v.toTuple()->elements();
+    std::string version = elements[0].toStringRef();
+    torch::List<at::Tensor> non_optional = elements[1].toTensorList();
+    // TODO before land: figure out if there is a better way to
+    //   cast to OptionalTensorList
+    torch::List<c10::IValue> optional = elements[2].toList();
+
+    std::vector<at::Tensor> non_optional_vec;
+    non_optional_vec.insert(non_optional_vec.end(), non_optional.begin(), non_optional.end());
+
+    std::vector<c10::optional<at::Tensor>> optional_vec;
+    c10::optional<at::Tensor> bias = optional.get(0).toOptional<at::Tensor>();
+    optional_vec.push_back(bias);
+
+    state = std::tie(version, non_optional_vec, optional_vec);
+  }
+
+  return state;
+}
+
 template <uint32_t kSpatialDim>
 SerializationType serialize_conv(
     const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>& params) {
@@ -68,16 +160,16 @@ SerializationType serialize_conv(
   int64_t vec_size = params_vec.size();
   at::Tensor params_tensor = at::from_blob(
       params_vec.data(), {vec_size},
-      at::TensorOptions().dtype(at::kLong));
+      at::TensorOptions().dtype(at::kLong))
+    // clone to retain ownership of the data
+    .clone();
 
   at::Tensor weight;
   c10::optional<at::Tensor> bias;
   std::tie(weight, bias) = params->unpack();
 
-  // create the non_optional tensor
-  // TODO(before land): fix clone
-  non_optional.emplace_back(params_tensor.clone());
-  non_optional.emplace_back(weight.clone());
+  non_optional.emplace_back(std::move(params_tensor));
+  non_optional.emplace_back(std::move(weight));
   optional.emplace_back(std::move(bias));
 
   return std::tie(version, non_optional, optional);

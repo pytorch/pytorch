@@ -183,16 +183,14 @@ void unpackQuantizedWeightsHelper(
 
         auto elements = ser_tup->elements();
         auto version = elements[0].toStringRef();
-        // TODO before land: assert version 2
+        TORCH_INTERNAL_ASSERT(version == "2", "Unknown serialization version");
         std::vector<at::Tensor> non_optional = elements[1].toTensorVector();
 
         at::Tensor conv_params_packed = non_optional[0];
         unpacked_weight = non_optional[1];
-        // torch::List<int64_t> stride, padding, dilation;
-        // int64_t groups;
 
-        // skip kSpatialDim
         const int64_t kSpatialDim = conv_params_packed[0].item<int64_t>();
+        // skip kSpatialDim
         int idx = 1;
         for (; idx < kSpatialDim + 1; ++idx) {
           stride_int.emplace_back(conv_params_packed[idx].item<int64_t>());
