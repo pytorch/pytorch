@@ -571,6 +571,8 @@ class DistributedDataParallel(Module):
         if self.require_forward_param_sync:
             self._sync_params()
 
+        self.reducer.prepare_forward()
+
         if self.device_ids:
             inputs, kwargs = self.scatter(inputs, kwargs, self.device_ids)
             if len(self.device_ids) == 1:
@@ -657,7 +659,7 @@ class DistributedDataParallel(Module):
             shape with the tensors inside grad bucket.
 
         .. warning ::
-            DDP communication hook does not support single process multiple device mode.
+            DDP communication hook does not support single-process multiple-device mode.
             Gradbucket tensors should consist of only a single tensor.
 
         .. warning ::
@@ -689,7 +691,7 @@ class DistributedDataParallel(Module):
             >>>     fut = process_group.allreduce(encoded_tensors).get_future()
             >>>     # Define the then callback to decode.
             >>>     def decode(fut):
-            >>>         decoded_tensors = decode(fut.wait()) # decode gradients
+            >>>         decoded_tensors = decode(fut.value()) # decode gradients
             >>>         return decoded_tensors
             >>>     return fut.then(decode)
 

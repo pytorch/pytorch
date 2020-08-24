@@ -126,6 +126,10 @@ template <>
 void dot<float>(CUDABLAS_DOT_ARGTYPES(float));
 template <>
 void dot<at::Half>(CUDABLAS_DOT_ARGTYPES(at::Half));
+template <>
+void dot<c10::complex<double>>(CUDABLAS_DOT_ARGTYPES(c10::complex<double>));
+template <>
+void dot<c10::complex<float>>(CUDABLAS_DOT_ARGTYPES(c10::complex<float>));
 
 } // namespace blas
 } // namespace cuda
