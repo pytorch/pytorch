@@ -438,6 +438,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: ne_
    .. automethod:: neg
    .. automethod:: neg_
+   .. automethod:: negative
+   .. automethod:: negative_
    .. automethod:: nelement
    .. automethod:: nextafter
    .. automethod:: nextafter_
