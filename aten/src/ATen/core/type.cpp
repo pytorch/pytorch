@@ -291,7 +291,7 @@ c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2, bool def
   auto unified = unifyTypesImpl(t1, t2);
 
   if (default_to_any && !unified) {
-    return c10::optional<TypePtr>(AnyType::get());
+    return AnyType::get();
   }
 
   return unified;
