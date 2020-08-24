@@ -94,6 +94,7 @@ namespace c10 {
   _(aten, backward)                  \
   _(prim, Guard)                     \
   _(prim, BailOut)                   \
+  _(prim, TypeCheck)                 \
   _(prim, FusedConcat)               \
   _(prim, ConstantChunk)             \
   _(prim, MMTreeReduce)              \
@@ -143,6 +144,22 @@ namespace c10 {
   _(aten, abs_)                      \
   _(aten, absolute)                  \
   _(aten, absolute_)                 \
+  _(aten, acos)                      \
+  _(aten, acos_)                     \
+  _(aten, arccos)                    \
+  _(aten, arccos_)                   \
+  _(aten, acosh)                     \
+  _(aten, acosh_)                    \
+  _(aten, arccosh)                   \
+  _(aten, arccosh_)                  \
+  _(aten, asin)                      \
+  _(aten, asin_)                     \
+  _(aten, arcsin)                    \
+  _(aten, arcsin_)                   \
+  _(aten, atan)                      \
+  _(aten, atan_)                     \
+  _(aten, arctan)                    \
+  _(aten, arctan_)                   \
   _(aten, clamp)                     \
   _(aten, clamp_)                    \
   _(aten, clip)                      \
@@ -192,6 +209,10 @@ namespace c10 {
   _(aten, hex)                       \
   _(aten, oct)                       \
   _(aten, clear)                     \
+  _(aten, trunc)                     \
+  _(aten, trunc_)                    \
+  _(aten, fix)                       \
+  _(aten, fix_)                      \
   _(aten, setdefault)                \
   _(aten, bin)                       \
   _(aten, pop)                       \
@@ -271,6 +292,7 @@ namespace c10 {
   _(attr, perm)                      \
   _(attr, sizes)                     \
   _(attr, starts)                    \
+  _(attr, profiled_type)             \
   _(attr, transA)                    \
   _(attr, transB)                    \
   _(attr, name)                      \
