@@ -561,26 +561,20 @@ class JitRpcOpTest:
             return
 
         dst_worker_name = worker_name((self.rank + 1) % self.world_size)
-
-        @torch.jit.script
-        def script_rpc_async_call_with_extra_arg(
-            dst_worker_name: str,  # noqa: E999
-        ):
-            args = (
-                torch.tensor([1, 1]),
-                torch.tensor([2, 2]),
-                # This extra arg will be fed to the first kwarg.
-                torch.tensor([2, 2]),
-            )
-            kwargs = {"second_kwarg": torch.tensor([3, 3])}
-            fut = rpc.rpc_async(dst_worker_name, two_args_two_kwargs, args, kwargs)
-            ret = fut.wait()
-            return ret
-
-        ret = script_rpc_async_call_with_extra_arg(
-            dst_worker_name
+        args = (
+            torch.tensor([1, 1]),
+            torch.tensor([2, 2]),
+            # This extra arg will be fed to the first kwarg.
+            torch.tensor([2, 2]),
         )
-        self.assertEqual(ret, torch.tensor([8, 8]))
+        kwargs = {"second_kwarg": torch.tensor([3, 3])}
+
+        for script_op in [script_rpc_async_call, script_rpc_sync_call]:
+            ret = script_op(
+                dst_worker_name, args, kwargs
+            )
+            self.assertEqual(ret, torch.tensor([8, 8]))
+
 
     @dist_init
     def test_args_and_kwargs_contain_different_types(self):
