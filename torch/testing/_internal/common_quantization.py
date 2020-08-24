@@ -150,7 +150,7 @@ def _make_conv_test_input(
             W_init.float() - W_zero_points_tensor.reshape(*W_shape)).float()
         b = X_scale * W_scales_tensor * b_init.float()
         W_q = torch.quantize_per_channel(
-            W, W_scales_tensor, W_zero_points_tensor.long(), 0,
+            W, W_scales_tensor.double(), W_zero_points_tensor.long(), 0,
             dtype=torch.qint8)
     else:
         W = W_scale[0] * (W_init - W_zero_point[0]).float()
@@ -500,10 +500,17 @@ class QuantizationTestCase(TestCase):
             model: floating point torch.nn.Module
             inputs: one positional sample input arguments for model
             expected_node: NodeSpec
+                  e.g. NodeSpec.call_function(torch.quantize_per_tensor)
             expected_node_occurrence: a dict from NodeSpec to
                   expected number of occurences (int)
+                  e.g. {NodeSpec.call_function(torch.quantize_per_tensor) : 1,
+                        NodeSpec.call_method('dequantize'): 1}
             expected_node_list: a list of NodeSpec, used to check the order
                   of the occurrence of Node
+                  e.g. [NodeSpec.call_function(torch.quantize_per_tensor),
+                        NodeSpec.call_module(nnq.Conv2d),
+                        NodeSpec.call_function(F.hardtanh_),
+                        NodeSpec.call_method('dequantize')]
         """
         # TODO: make img_data a single example instead of a list
         if type(inputs) == list:
@@ -1159,7 +1166,7 @@ class ModelMultipleOps(torch.nn.Module):
         out = self.conv2(out)
         out = torch.nn.functional.max_pool2d(out, 2, 2)
         out = self.cat.cat([out, out])
-        out = out.view(-1, 3 * 2 * 2)
+        out = out.reshape(-1, 3 * 2 * 2)
         out = self.fc(out)
         return out
 
@@ -1193,7 +1200,7 @@ class ModelMultipleOpsNoAvgPool(torch.nn.Module):
         out = self.conv2(out)
         out = torch.nn.functional.max_pool2d(out, 2, 2)
         out = self.cat.cat([out, out])
-        out = out.view(-1, 3 * 2 * 2)
+        out = out.reshape(-1, 3 * 2 * 2)
         out = self.fc(out)
         return out
 
