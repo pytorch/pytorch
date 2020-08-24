@@ -1147,7 +1147,7 @@ void transformer_decoder_test_helper_gelu(bool is_cuda) {
                               /*equal_nan=*/true));
 
   // Multiple layers with norm
-  norm(LayerNormOptions({decoder_layer.get()->options.d_model()}));
+  norm = LayerNorm(LayerNormOptions({decoder_layer.get()->options.d_model()}));
   model = TransformerDecoder(TransformerDecoderOptions(decoder_layer, 6)
     .norm(AnyModule(norm)));
   if (is_cuda) {
