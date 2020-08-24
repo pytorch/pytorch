@@ -668,7 +668,7 @@ class LSTMCell(RNNCellBase):
     """
 
     def __init__(self, *args, **kwargs):
-        super(LSTMCell, self).__init__(*args, **kwargs)
+        super(LSTMCell, self).__init__(*args, num_chunks=4, **kwargs)  # type: ignore
 
     def _get_name(self):
         return 'DynamicQuantizedLSTMCell'
