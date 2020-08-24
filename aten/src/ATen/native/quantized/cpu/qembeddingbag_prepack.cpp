@@ -137,19 +137,24 @@ Tensor qembeddingbag_byte_prepack(const Tensor& weight) {
   return output;
 }
 
-Tensor qembeddingbag_4bit_prepack(const Tensor& weight) {
+Tensor _qembeddingbag_nbit_prepack_helper(const Tensor& weight, int BIT_RATE) {
   int64_t embedding_rows = weight.size(0);
   int64_t embedding_cols = weight.size(1);
 
   Tensor weight_contig = weight.contiguous(weight.suggest_memory_format());
 
   const auto weight_data = weight.data_ptr<float>();
-  constexpr int BIT_RATE = 4;
-  constexpr int NUM_ELEM_PER_BYTE = 8 / BIT_RATE;
+  TORCH_CHECK(
+    BIT_RATE == 4 || BIT_RATE == 2,
+    "BIT_RATE must be either 2 or 4 to use 'qembeddingbag_nbit_prepack'."
+    "For 8bit, consider using 'embedding_bag_byte_prepack'.");
+
+  int NUM_ELEM_PER_BYTE = 8 / BIT_RATE;
   TORCH_CHECK(
       weight_contig.size(weight.dim() - 1) % NUM_ELEM_PER_BYTE == 0,
-      "FloatToFused4BitRowwiseQuantizedOp only works for the number of "
-      "columns a multiple of 2");
+      "qembeddingbag_" + c10::to_string(BIT_RATE) +
+      "bit_prepack only works for the number of columns a multiple of "
+      + c10::to_string(NUM_ELEM_PER_BYTE));
 
   // The "fused" representation stores the scale and bias with the
   // row-wise quantized data in one tensor.
@@ -219,6 +224,29 @@ Tensor qembeddingbag_4bit_prepack(const Tensor& weight) {
   return output;
 }
 
+// Applies 4-bit row-wise quantization by determining the range
+// (maximum - minimum) and bias (minimum value) of each row in the input
+// matrix, and then scaling each element to an 2-bit number between 0 and
+// 15.
+// To later de-quantize values, the scale (range / 15) and zero_point
+// are stored alongside the data. More precisely, each row first has quantized
+// values, and then 2-byte fp16 scale and 2-byte zero_offset.
+Tensor qembeddingbag_4bit_prepack(const Tensor& weight) {
+  return _qembeddingbag_nbit_prepack_helper(weight, 4 /*BIT_RATE*/);
+}
+
+// Applies 2-bit row-wise quantization by determining the range
+// (maximum - minimum) and bias (minimum value) of each row in the input
+// matrix, and then scaling each element to an 2-bit number between 0 and
+// 3.
+// To later de-quantize values, the scale (range / 3) and zero_point
+// are stored alongside the data. More precisely, each row first has quantized
+// values, and then 2-byte fp16 scale and 2-byte zero_offset.
+// TODO() - Add 2Bit Embedding Lookup operator.
+Tensor qembeddingbag_2bit_prepack(const Tensor& weight) {
+  return _qembeddingbag_nbit_prepack_helper(weight, 2 /*BIT_RATE*/);
+}
+
 class QEmbeddingPackWeights final {
  public:
   static c10::intrusive_ptr<EmbeddingPackedParamsBase> run(at::Tensor weight) {
@@ -229,7 +257,9 @@ class QEmbeddingPackWeights final {
 TORCH_LIBRARY_IMPL(quantized, CPU, m) {
   m.impl("embedding_bag_byte_prepack", qembeddingbag_byte_prepack);
   m.impl("embedding_bag_4bit_prepack", qembeddingbag_4bit_prepack);
+  m.impl("embedding_bag_2bit_prepack", qembeddingbag_2bit_prepack);
 }
+
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
   m.impl("embedding_bag_prepack", TORCH_FN(QEmbeddingPackWeights::run));
 }
