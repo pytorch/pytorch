@@ -232,6 +232,48 @@ EvaluationContext bindInputs(
   return eval_context;
 }
 
+EvaluationContext bindInputs(
+    const at::ArrayRef<IValue>& aten_inputs,
+    Fusion* fusion,
+    GpuLower* lowered) {
+  TORCH_INTERNAL_ASSERT(
+      fusion->inputs().size() == aten_inputs.size(),
+      "Something went wrong configuring launch. Inputs no longer match.");
+
+  auto fusion_inputs = fusion->inputs();
+  EvaluationContext eval_context(fusion);
+
+  // This should probably move to EvaluationContext as we may want to bind
+  // input values frequently. Bind fusion input values to runtime values.
+  for (size_t i = 0; i < fusion->inputs().size(); i++) {
+    if (fusion->inputs()[i]->getValType() == ValType::TensorView) {
+      TensorView* cg_tensor = fusion->inputs()[i]->as<TensorView>();
+
+      TORCH_INTERNAL_ASSERT(
+          aten_inputs[i].isTensor(),
+          "Something went wrong configuring launch. Inputs no longer match.");
+
+      auto aten_tensor = aten_inputs[i].toTensor();
+      auto root_dom = TensorDomain::noReductions(cg_tensor->getRootDomain());
+      TORCH_INTERNAL_ASSERT(
+          aten_tensor.ndimension() == root_dom.size(),
+          "Something went wrong configuring launch. Inputs no longer match.");
+
+      for (size_t dim = 0; dim < root_dom.size(); dim++) {
+        auto extent = root_dom[dim]->extent();
+        safeBind(eval_context, extent, aten_tensor.sizes()[dim]);
+        if (!extent->isConstScalar()) {
+          safeBind(
+              eval_context,
+              lowered->getLowerValue(extent),
+              aten_tensor.sizes()[dim]);
+        }
+      }
+    }
+  }
+  return eval_context;
+}
+
 NvrtcFunction nvrtcCompile(
     const std::string& code,
     const std::string& func_name,

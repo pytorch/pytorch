@@ -386,8 +386,7 @@ Allocate::Allocate(Val* buffer, MemoryType memory_type, Val* size)
     }
   }
 
-  if ((memory_type_ == MemoryType::Local ||
-       memory_type_ == MemoryType::Shared)) {
+  if (memory_type_ == MemoryType::Local) {
     if (!size_->isConstScalar()) {
       TORCH_INTERNAL_ASSERT(
           false,
