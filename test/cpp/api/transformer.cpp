@@ -1039,12 +1039,12 @@ void transformer_decoder_test_helper_gelu(bool is_cuda) {
   }
 
   // deterministic input
-  at::Tensor decoder_input = torch::tensor({{{20, 30, 40, 50}}},
+  decoder_input = torch::tensor({{{20, 30, 40, 50}}},
                                            tensor_options);
-  at::Tensor memory_input = torch::tensor({{{60, 70, 80, 90}}},
+  memory_input = torch::tensor({{{60, 70, 80, 90}}},
                                           tensor_options);
-  at::Tensor result = model(decoder_input, memory_input).detach();
-  at::Tensor ref_output = torch::tensor(
+  result = model(decoder_input, memory_input).detach();
+  ref_output = torch::tensor(
     {{{2.306435, 0.095946, -0.675796, 0.10687}}},
     tensor_options);
   ASSERT_EQ(result.sizes().size(),ref_output.sizes().size());
