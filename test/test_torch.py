@@ -18577,7 +18577,7 @@ class TestViewOps(TestCase):
         self.assertEqual(res.shape, torch.Size([0]))
 
     @onlyOnCPUAndCUDA
-    @dtypes(torch.complex32, torch.complex64, torch.complex128)
+    @dtypes(*torch.testing.get_all_complex_dtypes(include_complex32=True))
     def test_view_as_real(self, device, dtype):
         def fn(contiguous_input=True):
             t = torch.randn(3, 4, dtype=dtype, device=device)
