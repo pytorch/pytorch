@@ -11925,7 +11925,6 @@ class TestTorchDeviceType(TestCase):
             dim_list = list(combinations(list(range(dims)), r=num_of_dims))
             for dim in dim_list:
                 for keepdim in [False, True]:
-                    print(dim)
                     amin1 = torch.amin(x, dim=dim, keepdim=keepdim)
                     amax1 = torch.amax(x, dim=dim, keepdim=keepdim)
                     amin2 = x

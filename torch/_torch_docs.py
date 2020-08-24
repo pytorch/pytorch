@@ -4140,27 +4140,30 @@ Example::
 
 add_docstr(torch.amax,
            r"""
-amax(input, dim, keepdim=False, out=None) -> Tensor
+amax(input, dim, keepdim=False, *, out=None) -> Tensor
 
 Returns the maximum value of each row of the :attr:`input` tensor in the given
-dimensions :attr:`dim`.
+dimension(s) :attr:`dim`.
 
-.. warning::
-    This function produces deterministic (sub)gradients unlike ``max(dim=0)``
+.. note::
+    The difference between ``max``/``min`` and ``amax``/``amin`` is:
+    1. ``amax``/``amin`` supports reducing on multiple dimensions,
+    2. ``amax``/``amin`` does not return indices,
+    3. ``amax``/``amin`` produces deterministic (sub)gradients unlike
+    ``max(dim=0)``/``min(dim=0)``.
 
-.. warning::
-    This function is similar to ``max``, except that it does not produce indices.
-
-If ``keepdim`` is ``True``, the output tensors are of the same size
-as ``input`` except in the dimensions ``dim`` where they are of size 1.
-Otherwise, ``dim``s are squeezed (see :func:`torch.squeeze`), resulting
-in the output tensors having fewer dimension than ``input``.
+If :attr:`keepdim is ``True``, the output tensors are of the same size
+as :attr:`input` except in the dimension(s) :attr:`dim` where they are of size 1.
+Otherwise, :attr:`dim`s are squeezed (see :func:`torch.squeeze`), resulting
+in the output tensors having fewer dimension than :attr:`input`.
 
 Args:
     {input}
     {dim}
     {keepdim}
-    {out}
+
+Keyword args:
+  {out}
 
 Example::
 
@@ -4482,19 +4485,20 @@ Example::
 
 add_docstr(torch.amin,
            r"""
-amin(input, dim, keepdim=False, out=None) -> Tensor
+amin(input, dim, keepdim=False, *, out=None) -> Tensor
 
 Returns the minimum value of each row of the :attr:`input` tensor in the given
-dimensions :attr:`dim`.
+dimension(s) :attr:`dim`.
 
-.. warning::
-    This function produces deterministic (sub)gradients unlike ``max(dim=0)``
-
-.. warning::
-    This function is similar to ``max``, except that it does not produce indices.
+.. note::
+    The difference between ``max``/``min`` and ``amax``/``amin`` is:
+    1. ``amax``/``amin`` supports reducing on multiple dimensions,
+    2. ``amax``/``amin`` does not return indices,
+    3. ``amax``/``amin`` produces deterministic (sub)gradients unlike
+    ``max(dim=0)``/``min(dim=0)``.
 
 If :attr:`keepdim` is ``True``, the output tensors are of the same size as
-:attr:`input` except in the dimensions :attr:`dim` where they are of size 1.
+:attr:`input` except in the dimension(s) :attr:`dim` where they are of size 1.
 Otherwise, :attr:`dim`s are squeezed (see :func:`torch.squeeze`), resulting in
 the output tensors having fewer dimensions than :attr:`input`.
 
@@ -4502,7 +4506,9 @@ Args:
     {input}
     {dim}
     {keepdim}
-    {out}
+
+Keyword args:
+  {out}
 
 Example::
 
