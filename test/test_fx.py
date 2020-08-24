@@ -2,7 +2,7 @@ import torch
 import unittest
 import operator
 import numbers
-from torch.fx import symbolic_trace, Proxy, Node, GraphModule, DefaultDelegate
+from torch.fx import symbolic_trace, Proxy, Node, GraphModule, DefaultDelegate, map_arg
 
 from fx.quantization import Quantizer
 
@@ -189,6 +189,17 @@ class TestFX(JitTestCase):
         assert (a - d).abs().max() < 2
         assert torch.allclose(d, e)
 
+    def test_unpack(self):
+        class M(torch.nn.Module):
+            def forward(self, a, b):
+                c, d = a
+                return c + d + b
+        m = M()
+        m_g = symbolic_trace(m)
+        a = (torch.rand(1), torch.rand(1))
+        b = torch.rand(1)
+        self.assertEqual(m(a, b), m_g(a, b))
+
     def test_native_callable(self):
         # This test exercises the case where we use FX to translate from Python
         # code to some native callable object
@@ -286,6 +297,12 @@ class TestFX(JitTestCase):
             # Create a graph that: 1) Takes function arguments 2) Invokes the interpreter
             # 3) Returns the speficied return value
 
+            # FIXME: The following code could be greatly simplified by symbolic_trace'ing
+            # the wrapper with a Delegate that considers the Wrapper instance a root
+            # module, however, I can't get `__call__` exposed on TorchBind classes
+            # without it messing up Python `hasattr` for some reason. More digging
+            # into CPython's implementation of hasattr is probably in order...
+
             graph = torch.fx.Graph()
             # Add placeholders for fn inputs
             placeholder_nodes = []
@@ -324,7 +341,6 @@ class TestFX(JitTestCase):
         import_copy = self.getExportImportCopy(scripted_lowered)
         imported_out = import_copy(x)
         torch.testing.assert_allclose(imported_out, ref_out)
-
 
 if __name__ == '__main__':
     run_tests()
