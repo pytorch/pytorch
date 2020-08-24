@@ -4897,6 +4897,13 @@ Example::
     tensor([-0.0090,  0.2262,  0.0682,  0.2866, -0.3940])
 """.format(**common_args))
 
+add_docstr(torch.negative,
+           r"""
+negative(input, *, out=None) -> Tensor
+
+Alias for :func:`torch.neg`
+""".format(**common_args))
+
 add_docstr(torch.nextafter,
            r"""
 nextafter(input, other, *, out=None) -> Tensor

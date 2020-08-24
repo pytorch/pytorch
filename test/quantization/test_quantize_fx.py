@@ -5,7 +5,16 @@ import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
 import torch.nn.intrinsic.quantized as nniq
 
-from torch.quantization.fx import QuantType
+# symbolic trace
+from torch.fx import symbolic_trace
+
+# graph mode quantization based on fx
+from torch.quantization._quantize_fx import (
+    Quantizer,
+    QuantType,
+)
+
+from torch.quantization import default_qconfig
 
 # test utils
 from torch.testing._internal.common_quantization import (
@@ -429,7 +438,8 @@ class TestQuantizeFxOps(QuantizationTestCase):
         self._test_activation_impl(nn.ELU, F.elu, nnq.ELU, torch.ops.quantized.elu)
 
     def _test_norm_impl(
-            self, float_module, float_op, op_args, data, quantized_module, quantized_op):
+            self, float_module, float_op, op_args, data, quantized_module, quantized_op,
+            skip_op_arg_for_functional=False):
         ''' Test for normalization op, float_op can be torch op or functional op,
         op_args is a list of positional argument for the module/op
         '''
@@ -446,7 +456,9 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 if self.is_module:
                     return self.op(input)
                 else:
-                    args = [input] + op_args
+                    args = [input]
+                    if not skip_op_arg_for_functional:
+                        args += op_args
                     return self.op(*args)
 
         options = itertools.product([True, False], self.static_quant_types)
@@ -464,3 +476,271 @@ class TestQuantizeFxOps(QuantizationTestCase):
         data = (torch.rand((1, 2, 5, 5), dtype=torch.float),)
         self._test_norm_impl(
             nn.LayerNorm, F.layer_norm, [[2, 5, 5]], data, nnq.LayerNorm, torch.ops.quantized.layer_norm)
+
+    def test_instance_norm(self):
+        data_1d = (torch.rand((1, 4, 5), dtype=torch.float),)
+        data_2d = (torch.rand((1, 4, 5, 1), dtype=torch.float),)
+        data_3d = (torch.rand((1, 4, 5, 1, 1), dtype=torch.float),)
+        data_dict = {1 : data_1d, 2 : data_2d, 3 : data_3d}
+        instance_norm_modules = {1 : nn.InstanceNorm1d,
+                                 2 : nn.InstanceNorm2d,
+                                 3 : nn.InstanceNorm3d}
+        quantized_instance_norm_modules = {
+            1 : nnq.InstanceNorm1d,
+            2 : nnq.InstanceNorm2d,
+            3 : nnq.InstanceNorm3d
+        }
+        for dim in [1, 2, 3]:
+            data = data_dict[dim]
+            module = instance_norm_modules[dim]
+            quantized_module = quantized_instance_norm_modules[dim]
+            self._test_norm_impl(
+                module, F.instance_norm, [4], data,
+                quantized_module, torch.ops.quantized.instance_norm,
+                skip_op_arg_for_functional=True)
+
+    @skipIfNoFBGEMM
+    def test_clamp(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.conv = torch.nn.Conv2d(2, 2, 2).float()
+                self.relu6 = torch.nn.ReLU6()
+                self.relu6_ = torch.nn.ReLU6(True)
+                self.hardtanh = torch.nn.Hardtanh()
+                self.hardtanh_ = torch.nn.Hardtanh(inplace=True)
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.relu6(x)
+                self.relu6_(x)
+                x = F.relu6(x)
+                x = torch.clamp(x, -3, 3)
+                x = x.clamp(-2.5, 2.5)
+                # x = x.clamp_(-2, 2)  # Enable when quantized `clamp_` is ready
+                x = self.hardtanh(x)
+                self.hardtanh_(x)
+                x = F.hardtanh(x)
+                F.hardtanh_(x)
+                return x
+
+        data = (torch.rand((1, 2, 5, 5), dtype=torch.float),)
+        # map from node to number of occurences
+        checks = [
+            ('call_function', torch.quantize_per_tensor),
+            ('call_module', nnq.Conv2d),
+            ('call_function', F.hardtanh_),
+            ('call_method', 'dequantize')
+        ]
+        for quant_type in self.static_quant_types:
+            m = self.checkGraphModeFxOp(M(), data, checks, quant_type)
+
+    @skipIfNoFBGEMM
+    def test_general_shape_ops(self):
+        """ A test that checks dequantize will be swapped for
+        all supported general shape ops like aten::flatten
+        without actually checking for execution of these ops
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.maxpool1d = torch.nn.MaxPool1d(kernel_size=3)
+                self.maxpool2d = torch.nn.MaxPool2d(kernel_size=3)
+                self.maxpool3d = torch.nn.MaxPool3d(kernel_size=3)
+                self.dropout = torch.nn.Dropout()
+                self.conv1 = torch.nn.Conv2d(3, 3, 3)
+                self.conv2 = torch.nn.Conv2d(3, 3, 3)
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                x = self.conv1(x)
+                # add_scalar
+                x = x + 3
+                # mul_scalar
+                x = x * 3
+                # add_scalar_out
+                x += 3
+                # mul_scalar_out
+                x *= 3
+                # add_scalar_relu
+                x = x + 3
+                x = F.relu(x)
+                # add_scalar_relu_out
+                x += 3
+                x = F.relu(x)
+                # mul_scalar_relu
+                x = x * 3
+                x = F.relu(x)
+                # mul_scalar_relu_out
+                x *= 3
+                x = F.relu(x)
+                x = self.maxpool1d(x)
+                x = self.maxpool2d(x)
+                x = self.maxpool3d(x)
+                x = torch.flatten(x)
+                x = torch.max(x)
+                x = torch.min(x)
+                x = x.reshape([-1])
+                x = x.resize_(1, 1, x.numel())
+                x = x.view(-1)
+                # prim::ListConstruct
+                xs = [x, x]
+                # prim::ListUnpack
+                x, y = xs
+                # prim::TupleConstruct
+                xs = (x, x)
+                # prim::TupleUnpack
+                x, y = xs
+                x = x.transpose(1, 2)
+                x = x.contiguous()
+                x, y = torch.chunk(x, 2)
+                x = F.dropout(x)
+                x = self.dropout(x)
+                x, _ = torch.sort(x)
+                x = x.permute(0, 2, 3, 1)
+                x = x.repeat_interleave(3, 1)
+                x = torch.repeat_interleave(x, 3, 1)
+                x = self.relu(x)
+                x = F.relu(x)
+                x = F.relu(x, inplace=True)
+                x = x.relu()
+                x.relu_()
+                x = x.squeeze(0)
+                x.squeeze_(0)
+                x = torch.squeeze(x, 0)
+                x = x.unsqueeze(0)
+                x.unsqueeze_(0)
+                x = torch.unsqueeze(x, 0)
+                x = x.detach()
+                x.detach_()
+                x = x.repeat(4, 2)
+                y = []
+                y.append(x)
+                z = torch.stack(y, 0)
+                z = [z, z]
+                x, _ = z
+                x = self.conv2(x)
+                return x
+
+        data = torch.rand(1, 3, 10, 10)
+        # This model is not executable since we just put all ops
+        # in the same forward
+        m = M()
+        original = symbolic_trace(m)
+        # nothing to fuse so skipping the fuse step
+        quantizer = Quantizer()
+        qconfig_dict = {'': default_qconfig}
+        prepared = quantizer.prepare(original, qconfig_dict)
+        # not runnable
+        quantized = quantizer.convert(prepared)
+
+        # This checks that the dequantize from the output of first conv
+        # is being propagated to the end, so that we don't insert extra
+        # observers and also successfully fused two quantized::conv2d
+        # patterns
+        # one quantize_per_tensor for input
+        order_check = [
+            ('call_function', torch.quantize_per_tensor),
+            ('call_module', nnq.Conv2d),
+            ('call_module', nnq.Conv2d),
+            ('call_method', 'dequantize'),
+        ]
+        # check exact counts of quantize and dequantize
+        count_check = {
+            ('call_function', torch.quantize_per_tensor) : 1,
+            ('call_method', 'dequantize') : 1
+        }
+        for check in (order_check, count_check):
+            self.checkGraphModule(quantized, check)
+
+    @skipIfNoFBGEMM
+    def test_general_value_ops(self):
+        """ A test that checks correct patterns are produced for
+        all supported general value ops like aten::avg_pool2d \
+        without actually checking for execution of these ops
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 3)
+                self.avg_pool1d = torch.nn.AvgPool1d(3)
+                self.avg_pool2d = torch.nn.AvgPool2d(3)
+                self.avg_pool3d = torch.nn.AvgPool3d(3)
+                self.adaptive_avg_pool1d = torch.nn.AdaptiveAvgPool1d((1))
+                self.adaptive_avg_pool2d = torch.nn.AdaptiveAvgPool2d((1, 1))
+                self.adaptive_avg_pool3d = torch.nn.AdaptiveAvgPool3d((1, 1, 1))
+                self.leaky_relu = torch.nn.LeakyReLU()
+                self.hardsigmoid = torch.nn.Hardsigmoid()
+                self.sigmoid = torch.nn.Sigmoid()
+                self.tanh = torch.nn.Tanh()
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.avg_pool1d(x)
+                x = self.avg_pool2d(x)
+                x = self.avg_pool3d(x)
+                x = self.adaptive_avg_pool1d(x)
+                x = self.adaptive_avg_pool2d(x)
+                x = self.adaptive_avg_pool3d(x)
+                x = F.avg_pool1d(x, 3)
+                x = F.avg_pool2d(x, 3)
+                x = F.avg_pool3d(x, 3)
+                x = F.adaptive_avg_pool1d(x, (1))
+                x = F.adaptive_avg_pool2d(x, (1, 1))
+                x = F.adaptive_avg_pool3d(x, (1, 1, 1))
+                x = torch.mean(x)
+                x = torch.mean(x, [2, 3], False)
+                x = x.mean()
+                x = x.mean([2, 3], True)
+                x = F.interpolate(x, 4, mode='nearest')
+                x = F.interpolate(x, 4, mode='linear')
+                x = self.leaky_relu(x)
+                x = F.leaky_relu(x)
+                x = F.leaky_relu(x, inplace=True)
+                x = x.leaky_relu()
+                x.leaky_relu_()
+                x = self.hardsigmoid(x)
+                x = F.hardsigmoid(x)
+                x = F.hardsigmoid(x, inplace=True)
+                x = x.hardsigmoid()
+                x.hardsigmoid_()
+                x = self.sigmoid(x)
+                x = torch.sigmoid(x)
+                # F.sigmoid is deprecated
+                x = x.sigmoid()
+                x.sigmoid_()
+                x = self.tanh(x)
+                # F.tanh is deprecated
+                x = torch.tanh(x)
+                x = x.tanh()
+                x.tanh_()
+                x = self.conv(x)
+                return x
+
+        # This model is not executable since we just put all ops
+        # in the same forward
+        m = M()
+        original = symbolic_trace(m)
+        # nothing to fuse so skipping the fuse step
+        quantizer = Quantizer()
+        qconfig_dict = {'': default_qconfig}
+        prepared = quantizer.prepare(original, qconfig_dict)
+        # not runnable
+        quantized = quantizer.convert(prepared)
+
+        # This checks that the dequantize from the output of first conv
+        # is being propagated to the end, so that we don't insert extra
+        # observers
+        order_check = [
+            ('call_function', torch.quantize_per_tensor),
+            ('call_module', nnq.Conv2d),
+            ('call_module', nnq.Conv2d),
+            ('call_method', 'dequantize'),
+        ]
+        # check exact counts of quantize and dequantize
+        count_check = {
+            ('call_function', torch.quantize_per_tensor) : 1,
+            ('call_method', 'dequantize') : 1
+        }
+        for check in (order_check, count_check):
+            self.checkGraphModule(quantized, check)
