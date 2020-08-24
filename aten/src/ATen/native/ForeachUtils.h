@@ -24,6 +24,10 @@ bool check_fast_route(TensorList tensors, Scalar scalar) {
   auto expected_device = tensors[0].device();
 
   for (auto t : tensors) {
+    if (t.device() != expected_device) {
+      return false;
+    }
+
     if (t.layout() != at::kStrided) {
       return false;
     }
