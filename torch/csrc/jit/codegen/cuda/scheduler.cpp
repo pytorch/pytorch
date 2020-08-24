@@ -208,10 +208,6 @@ bool scheduleFusion(Fusion* fusion, const at::ArrayRef<c10::IValue> inputs) {
 }
 
 namespace {
-constexpr int ceilDiv(int a, int b) {
-  return (a + b - 1) / b;
-}
-
 // Largest Power of 2 less-than n
 constexpr int lastPow2(int n) {
   n |= (n >> 1);

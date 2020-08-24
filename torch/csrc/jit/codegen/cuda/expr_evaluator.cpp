@@ -13,7 +13,7 @@ namespace fuser {
 void EvaluationContext::bind(const Val* value, Int::ScalarType concrete_value) {
   TORCH_INTERNAL_ASSERT(
       value->isAnInt(),
-      "Expressoin Evaluation does not support values other than integers at this time.");
+      "Expression Evaluation does not support values other than integers at this time.");
 
   if (value->isConstScalar()) {
     auto const_value = value->as<Int>()->value().value();
@@ -53,7 +53,7 @@ void EvaluationContext::print() const {
       std::cout << " ; original value = "
                 << kv.first->as<Int>()->value().value();
     }
-    std::cout << "\n";
+    std::cout << " ; " << *kv.first->getValType() << "\n";
   }
   std::cout << "--------------------\n\n";
 }

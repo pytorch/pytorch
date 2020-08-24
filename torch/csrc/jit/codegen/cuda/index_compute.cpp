@@ -1040,7 +1040,7 @@ kir::TensorIndex* Index::getConsumerIndex_impl(
 
   // Indices should now be mapped onto IterDomains in consumer, so just grab
   // and use them.
-  auto root_dom = consumer_tv->getRootDomain();
+  auto root_dom = consumer_tv->getMaybeRFactorDomain();
 
   std::vector<Val*> strided_inds;
   for (size_t i = 0; i < root_dom.size(); i++) {

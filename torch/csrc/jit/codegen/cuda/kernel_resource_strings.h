@@ -149,6 +149,9 @@ static auto code_helper_funcs = R"(
 __device__ constexpr int ceilDiv(const int a, const int b) {
   return (a + b - 1) / b;
 }
+__device__ constexpr int alignBufferSize(const int buffer, const int size) {
+  return (buffer + (size-1)) & ~(size-1);
+}
 __device__ float clamp(const float x, const float minv, const float maxv) {
   return x < minv ? minv : (x > maxv ? maxv : x);
 }
@@ -595,10 +598,7 @@ __host__ __device__ unsigned offset_of_source(const dim3& block_dim, const dim3&
     out: Per-thread output location
  */
 template <bool X_THREAD, bool Y_THREAD, bool Z_THREAD, typename T>
-__device__ void blockBroadcast(T& out, T inp_val) {
-
-  // Use worst case for memory.
-  __shared__ T shared_mem[1024];
+  __device__ void blockBroadcast(T& out, T inp_val, T* shared_mem) {
 
   const bool has_valid_data =
       (!X_THREAD || threadIdx.x == 0) &&

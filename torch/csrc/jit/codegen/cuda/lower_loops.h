@@ -52,6 +52,10 @@ class TORCH_CUDA_API LoopNestGenerator : public OptOutDispatch {
   // Tracks if shared memory is modified
   std::unordered_map<Val*, bool> smem_;
 
+  // Track dynamic shared memory buffer
+  // Insert allocation at the beginning of the kernel
+  std::deque<kir::Allocate*> dynamic_smem_;
+
   // Clear the modify status for all shared memory buffers
   void cleanSharedMemory();
 

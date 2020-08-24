@@ -328,6 +328,9 @@ void Fusion::assertInFusion(const Statement* stmt, const std::string& msg)
   if (inFusion(stmt)) {
     return;
   }
+  if (inKernelIr(stmt)) {
+    return;
+  }
   TORCH_CHECK(false, msg, " it was not found in the active fusion.");
 }
 
@@ -581,6 +584,42 @@ bool Fusion::hasGridReduction() {
           return true;
 
   return false;
+}
+
+bool Fusion::hasBroadcast() {
+  for (auto expr : exprs(true))
+    for (auto out : expr->outputs())
+      if (out->getValType() == ValType::TensorView)
+        if (out->as<TensorView>()->hasBroadcast())
+          return true;
+
+  return false;
+}
+
+DataType Fusion::getMaximumSmemDataType() {
+  DataType result = DataType::Null;
+  unsigned max_size = 0;
+  for (auto expr : exprs(true)) {
+    for (auto out : expr->outputs()) {
+      if (out->getValType() == ValType::TensorView) {
+        auto tv = out->as<TensorView>();
+        bool hasWorkspace = tv->hasBlockReduction() || tv->hasGridReduction();
+        bool hasDynamic = tv->getMemoryType() == MemoryType::Shared;
+        if (hasWorkspace || hasDynamic) {
+          auto data_type = tv->getDataType();
+          if (data_type.has_value()) {
+            unsigned size = dataTypeSize(data_type.value());
+            if (size > max_size) {
+              max_size = size;
+              result = data_type.value();
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return result;
 }
 
 std::vector<Val*> Fusion::getTerminatingOutputs() {
