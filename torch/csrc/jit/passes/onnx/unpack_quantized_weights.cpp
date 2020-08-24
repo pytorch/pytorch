@@ -139,6 +139,8 @@ Node* createInt(int64_t i, std::shared_ptr<Graph>& graph) {
 // passed to the appropriate unpack function using c10::Dispatcher. We insert
 // the unpacked weights and bias into the graph using
 // caffe2::Int8GivenTensorFill nodes.
+// TODO before land: is this called for both conv and linear? do we need
+//   and extra check?
 void unpackQuantizedWeightsHelper(
     std::shared_ptr<Graph>& graph,
     std::map<std::string, IValue>& paramsDict,
@@ -211,47 +213,6 @@ void unpackQuantizedWeightsHelper(
         dilation = dilation_int;
         groups = groups_int;
 
-        /*
-        // SerializationType as defined in
-        // aten/src/ATen/native/quantized/cpu/serialization_versions.h
-        auto name = ser_tup->elements()[0].toString()->string();
-        auto version = ser_tup->elements()[1].toInt();
-        auto non_optional = ser_tup->elements()[2].toTensorVector();
-        auto optional = ser_tup->elements()[3].toTensorVector();
-        auto doubles = ser_tup->elements()[4].toDoubleVector();
-        auto longs = ser_tup->elements()[5].toIntVector();
-
-        // Versions below 2 should not be here -- should be in the legacy path.
-        TORCH_CHECK(version >= 2, "Incorrect version");
-        if (name == "conv") {
-          if (version == 2) {
-            unpacked_weight = non_optional[0];
-            bias = optional[0];
-
-            const int64_t kSpatialDim = longs[0];
-            int idx = 0;
-            for (; idx < kSpatialDim; ++idx) {
-              stride_int.emplace_back(longs[idx]);
-            }
-            for (; idx < 2 * kSpatialDim; ++idx) {
-              padding_int.emplace_back(longs[idx]);
-            }
-            for (; idx < 3 * kSpatialDim; ++idx) {
-              dilation_int.emplace_back(longs[idx]);
-            }
-            groups_int = longs[idx];
-
-            stride = stride_int;
-            padding = padding_int;
-            dilation = dilation_int;
-            groups = groups_int;
-          } else {
-            TORCH_CHECK(false, "Unsupported serialization version ", version);
-          }
-        } else {
-          TORCH_CHECK(false, "Unsupported serialization type ", name);
-        }
-        */
       } else {  // Legacy
         unpacked_weight = ser_tup->elements()[0].toTensor();
         bias = ser_tup->elements()[1].toOptional<at::Tensor>();

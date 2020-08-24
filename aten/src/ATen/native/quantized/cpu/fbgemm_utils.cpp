@@ -291,38 +291,6 @@ CAFFE2_API torch::class_<ConvPackedParamsBase<kSpatialDim>> register_conv_params
 
             state = std::tie(version, non_optional, optional);
 
-            // create a v2 object with data from v1
-            // TODO before land: clean up everything (this is just the first version which worked)
-            /*
-            std::string name_v2 = "conv";
-            // int64_t version_v2 = 2;
-            std::vector<int64_t> version_v2 = {2};
-            std::vector<at::Tensor> required_tensors_v2;
-            required_tensors_v2.push_back(weight);
-            std::vector<c10::optional<at::Tensor>> optional_tensors_v2;
-            optional_tensors_v2.push_back(bias);
-            std::vector<double> doubles_v2;
-            std::vector<int64_t> ints_v2;
-            int64_t spatialDim = stride_x_kSpatialDim.size();
-            ints_v2.push_back(spatialDim);
-            for (int i = 0; i < stride_x_kSpatialDim.size(); i++) {
-              auto stride = stride_x_kSpatialDim.get(0);
-              ints_v2.push_back(stride[0].item<int64_t>());
-            }
-            for (int i = 0; i < padding_x_kSpatialDim.size(); i++) {
-              auto padding = padding_x_kSpatialDim.get(0);
-              ints_v2.push_back(padding[0].item<int64_t>());
-            }
-            for (int i = 0; i < dilation_x_kSpatialDim.size(); i++) {
-              auto dilation = dilation_x_kSpatialDim.get(0);
-              ints_v2.push_back(dilation[0].item<int64_t>());
-            }
-
-            // TODO before land: check numerical equivalency with tests
-            state = std::make_tuple(name_v2, version_v2, required_tensors_v2, optional_tensors_v2,
-                doubles_v2, ints_v2);
-                */
-
           } else {
             // version 2
             // TODO before land: assertions
