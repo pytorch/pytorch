@@ -198,7 +198,17 @@ std::vector<std::string> PyTorchStreamReader::getAllRecords() {
   char buf[MZ_ZIP_MAX_ARCHIVE_FILENAME_SIZE];
   for (size_t i = 0; i < num_files; i++) {
     mz_zip_reader_get_filename(ar_.get(), i, buf, MZ_ZIP_MAX_ARCHIVE_FILENAME_SIZE);
-    out.push_back(buf);
+    if (strncmp(
+            buf,
+            archive_name_plus_slash_.data(),
+            archive_name_plus_slash_.size()) != 0) {
+      CAFFE_THROW(
+          "file in archive is not in a subdirectory ",
+          archive_name_plus_slash_,
+          ": ",
+          buf);
+    }
+    out.push_back(buf + archive_name_plus_slash_.size());
   }
   return out;
 }

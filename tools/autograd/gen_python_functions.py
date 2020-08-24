@@ -302,6 +302,7 @@ UNPACK_WITH_SIZE_METHODS = {
     'TensorList': 'tensorlist_n<{}>',
     'DimnameList': 'dimnamelist',
     'IntArrayRef': 'intlist',
+    'c10::optional<IntArrayRef>': 'intlistOptional',
 }
 
 UNPACK_WITH_DEFAULT_METHODS = {
@@ -1228,7 +1229,10 @@ def get_schema_formal(arg, is_python_method):
 
     size = arg.get('size')
     if size is not None:
-        typename = '{}[{}]'.format(typename, size)
+        if typename.endswith('?'):
+            typename = '{}[{}]?'.format(typename[:-1], size)
+        else:
+            typename = '{}[{}]'.format(typename, size)
 
     # default
     default = arg.get('default')
