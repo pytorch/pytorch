@@ -34,14 +34,6 @@ void max_pool2d_out_impl(
     const int64_t PJ,
     const int64_t DI,
     const int64_t DJ) {
-  // Value to fill the padded region with
-  constexpr scalar_t FILL = std::numeric_limits<scalar_t>::has_infinity
-      ? -std::numeric_limits<scalar_t>::infinity()
-      : std::numeric_limits<scalar_t>::lowest();
-
-  const int64_t KER_ROW_STRIDE = DI * IW;
-  const int64_t KER_COL_END = KW * DJ;
-
   /*
    * For each row of the output tensor, first compute a row-wise max of the
    * input rows accessed by the current kernel window. Then, compute the max for
@@ -54,40 +46,45 @@ void max_pool2d_out_impl(
    */
   at::parallel_for(
       0, NB * NC * OH, 0, [&](const int64_t begin, const int64_t end) {
-        // Buffer to store row-reduced max values
         std::vector<scalar_t> buffer(IW);
 
-        // For each output row
+        ////////////////////////////////////////////////////////////////////////
+        // ROW-WISE REDUCTION (2D)
+        ////////////////////////////////////////////////////////////////////////
         for (int64_t it = begin; it < end; ++it) {
+          // Pointers to current input channel and output row
+          const scalar_t* ip = IP + (it / OH) * IH * IW;
+          scalar_t* op = OP + it * OW;
+
           // Compute valid kernel row limits (skip padding)
           int64_t ii = (it % OH) * SI - PI;
           const int64_t ei = std::min<int64_t>(ii + KH * DI, IH);
-          ii += (ii < 0) ? divup(-ii, DI) * DI : 0;
-
-          // Pointers to kernel window and output row
-          const scalar_t* ip = IP + ((it / OH) * IH + ii) * IW;
-          scalar_t* const op = OP + it * OW;
+          ii += (ii < 0) ? at::divup(-ii, DI) * DI : 0;
 
           // Compute row-wise max for current output row
-          std::fill_n(buffer.begin(), IW, FILL);
-          for (; ii < ei; ii += DI, ip += KER_ROW_STRIDE) {
-            for (int64_t ij = 0; ij < IW; ++ij) {
-              const scalar_t val = ip[ij];
-              buffer[ij] =
-                  std::isnan(val) ? val : std::max<scalar_t>(buffer[ij], val);
+          std::copy_n(ip + ii * IW, IW, buffer.begin());
+          while ((ii += DI) < ei) {
+            const scalar_t* ptr = ip + ii * IW;
+            for (auto it = buffer.begin(); it < buffer.end(); ++it, ++ptr) {
+              const scalar_t val = *ptr;
+              *it = std::isnan(val) ? val : std::max<scalar_t>(*it, val);
             }
           }
 
-          // Compute column-wise max for current output row
-          std::fill_n(op, OW, FILL);
-          for (int64_t oj = 0; oj < OW; ++oj) {
-            // Compute valid kernel column limits (skip padding)
+          ////////////////////////////////////////////////////////////////////////
+          // COLUMN-WISE REDUCTION (1D - BASE CASE)
+          ////////////////////////////////////////////////////////////////////////
+          for (int64_t oj = 0; oj < OW; ++oj, ++op) {
+            // Compute valid kernel limits (skip padding)
             int64_t ij = oj * SJ - PJ;
-            const int64_t ej = std::min<int64_t>(ij + KER_COL_END, IW);
-            ij += (ij < 0) ? divup(-ij, DJ) * DJ : 0;
-            for (; ij < ej; ij += DJ) {
+            const int64_t ej = std::min<int64_t>(ij + KW * DJ, IW);
+            ij += (ij < 0) ? at::divup(-ij, DJ) * DJ : 0;
+
+            // Compute column-wise max for current output column
+            *op = buffer[ij];
+            while ((ij += DJ) < ej) {
               const scalar_t val = buffer[ij];
-              op[oj] = std::isnan(val) ? val : std::max<scalar_t>(op[oj], val);
+              *op = std::isnan(val) ? val : std::max<scalar_t>(*op, val);
             }
           }
         }

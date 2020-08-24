@@ -451,34 +451,85 @@ class ELU(QuantizeHandler):
             'call_function', quantized_op, args, kwargs)
 
 # these ops have quantized equivalents that do not need any extra information
+@register_quant_pattern(torch.nn.AdaptiveAvgPool1d)
 @register_quant_pattern(torch.nn.AdaptiveAvgPool2d)
+@register_quant_pattern(torch.nn.AdaptiveAvgPool3d)
+@register_quant_pattern(torch.nn.AvgPool1d)
 @register_quant_pattern(torch.nn.AvgPool2d)
+@register_quant_pattern(torch.nn.AvgPool3d)
 @register_quant_pattern(torch.nn.Dropout)
+@register_quant_pattern(torch.nn.Hardsigmoid)
 @register_quant_pattern(torch.nn.Hardtanh)
+@register_quant_pattern(torch.nn.LeakyReLU)
+@register_quant_pattern(torch.nn.MaxPool1d)
 @register_quant_pattern(torch.nn.MaxPool2d)
+@register_quant_pattern(torch.nn.MaxPool3d)
 @register_quant_pattern(torch.nn.ReLU)
 @register_quant_pattern(torch.nn.ReLU6)
+@register_quant_pattern(torch.nn.Sigmoid)
+@register_quant_pattern(torch.nn.Tanh)
+@register_quant_pattern(torch.adaptive_avg_pool1d)
 @register_quant_pattern(torch.nn.functional.adaptive_avg_pool2d)
+@register_quant_pattern(torch.nn.functional.adaptive_avg_pool3d)
 @register_quant_pattern(torch.nn.functional.dropout)
+@register_quant_pattern(torch.nn.functional.hardsigmoid)
 @register_quant_pattern(torch.nn.functional.hardtanh)
 @register_quant_pattern(torch.nn.functional.hardtanh_)
+@register_quant_pattern(torch.nn.functional.interpolate)
+@register_quant_pattern(torch.nn.functional.leaky_relu)
+@register_quant_pattern(torch.nn.functional.max_pool1d)
 @register_quant_pattern(torch.nn.functional.max_pool2d)
+@register_quant_pattern(torch.nn.functional.max_pool3d)
+@register_quant_pattern(torch.nn.functional.relu)
 @register_quant_pattern(torch.nn.functional.relu6)
+@register_quant_pattern(torch.avg_pool1d)
 @register_quant_pattern(torch._C._nn.avg_pool2d)
+@register_quant_pattern(torch._C._nn.avg_pool3d)
+@register_quant_pattern(torch.chunk)
 @register_quant_pattern(torch.clamp)
 @register_quant_pattern(torch.flatten)
 @register_quant_pattern(torch.transpose)
+@register_quant_pattern(torch.max)
 @register_quant_pattern(torch.mean)
+@register_quant_pattern(torch.min)
+@register_quant_pattern(torch.repeat_interleave)
+@register_quant_pattern(torch.sigmoid)
+@register_quant_pattern(torch.sort)
+@register_quant_pattern(torch.squeeze)
+@register_quant_pattern(torch.stack)
+@register_quant_pattern(torch.tanh)
 @register_quant_pattern(torch.unsqueeze)
 @register_quant_pattern(operator.getitem)
 @register_quant_pattern(operator.floordiv)
 @register_quant_pattern('chunk')
 @register_quant_pattern('clamp')
 @register_quant_pattern('contiguous')
+@register_quant_pattern('detach')
+@register_quant_pattern('detach_')
+@register_quant_pattern('hardsigmoid')
+@register_quant_pattern('hardsigmoid_')
+@register_quant_pattern('leaky_relu')
+@register_quant_pattern('leaky_relu_')
 @register_quant_pattern('mean')
+@register_quant_pattern('numel')
+@register_quant_pattern('permute')
+@register_quant_pattern('relu')
+@register_quant_pattern('relu_')
+@register_quant_pattern('repeat')
+@register_quant_pattern('repeat_interleave')
 @register_quant_pattern('reshape')
+@register_quant_pattern('resize_')
 @register_quant_pattern('shape')
+@register_quant_pattern('sigmoid')
+@register_quant_pattern('sigmoid_')
 @register_quant_pattern('size')
+@register_quant_pattern('squeeze')
+@register_quant_pattern('squeeze_')
+@register_quant_pattern('tanh')
+@register_quant_pattern('tanh_')
+@register_quant_pattern('transpose')
+@register_quant_pattern('unsqueeze')
+@register_quant_pattern('unsqueeze_')
 @register_quant_pattern('view')
 class CopyNode(QuantizeHandler):
     def convert(self, quantizer, node, load_arg, debug=False):
@@ -646,8 +697,14 @@ class Quantizer:
                         'call_function',
                         'call_method'], \
                         'CopyNode of type ' + node.op + ' is not handled'
+
+                    def is_observed(input_arg):
+                        if isinstance(input_arg, Node):
+                            return input_arg.name in observed
+                        elif isinstance(input_arg, list):
+                            return all(map(is_observed, input_arg))
                     # propagate observed property from input
-                    if node.args[0].name in observed:
+                    if is_observed(node.args[0]):
                         observed.add(node.name)
                 elif (isinstance(obj, Add) or isinstance(obj, Mul)) and not obj.all_nodes:
                     if node.args[0].name in observed:
@@ -745,13 +802,22 @@ class Quantizer:
             return load_arg_impl
 
         def is_quantized(node):
-            assert node.name in env or node.name in quant_env, 'Expecting node to be in the environment'
-            # there might be nodes appearing in both environemnts, but quant_env will take
-            # precedence
-            if node.name in quant_env:
-                return True
-            elif node.name in env:
-                return False
+            if isinstance(node, Node):
+                assert node.name in env or node.name in quant_env, 'Expecting node to be in the environment'
+                # there might be nodes appearing in both environemnts, but quant_env will take
+                # precedence
+                if node.name in quant_env:
+                    return True
+                elif node.name in env:
+                    return False
+            elif isinstance(node, list):
+                quantized = map(is_quantized, node)
+                if all(quantized):
+                    return True
+                elif not any(quantized):
+                    return False
+                else:
+                    raise Exception("partially quantized inputs in list not handled yet")
 
         for node in observed_graph.nodes:
             root_node, matched, obj, qconfig = matches.get(node.name, (None, None, None, None))
