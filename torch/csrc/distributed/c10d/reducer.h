@@ -161,10 +161,11 @@ class Reducer {
     // Views into contents for each grad.  Each view will be created with
     // layout (sizes + strides) matching the grad's expected layout
     // ("Gradient Layout Contract" in torch/csrc/autograd/AccumulateGrad.h).
-    // grad.copy_(bucket_views[i]) and
-    // bucket_views[i].copy_(grad)
+    // bucket_views_in[i].copy_(grad) and
+    // grad.copy_(bucket_views_out[i])
     // provide convenient ways to move grad data in/out of contents.
-    std::vector<at::Tensor> bucket_views;
+    std::vector<at::Tensor> bucket_views_in;
+    std::vector<at::Tensor> bucket_views_out;
 
     // Variables that contribute to this bucket replica. Use refcounted value
     // here so that we can easily unflatten the bucket contents into the
@@ -193,7 +194,10 @@ class Reducer {
   // function call in `finalize_backward` happens only if DDP communication hook
   // was registered to recrate views with the result of `future_work`. Before
   // `finalize_backward` call, views must be cleared.
-  void initialize_bucketviews(BucketReplica& replica, at::Tensor& contents);
+  void initialize_bucketviews(
+      BucketReplica& replica,
+      std::vector<at::Tensor>& bucket_views,
+      at::Tensor& contents);
 
   // A bucket holds N bucket replicas (1 per model replica).
   //

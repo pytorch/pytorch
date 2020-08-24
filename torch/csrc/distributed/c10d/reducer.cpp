@@ -313,7 +313,8 @@ void Reducer::mark_variable_ready_dense(VariableIndex index) {
   auto& variable = replica.variables[bucket_index.intra_bucket_index];
   const auto offset = replica.offsets[bucket_index.intra_bucket_index];
   const auto length = replica.lengths[bucket_index.intra_bucket_index];
-  auto& bucket_view = replica.bucket_views[bucket_index.intra_bucket_index];
+  auto& bucket_view_in =
+      replica.bucket_views_in[bucket_index.intra_bucket_index];
 
   // Copy contents of gradient tensor to bucket tensor.
   // If the gradient is not set, we assume it wasn't computed
@@ -323,22 +324,22 @@ void Reducer::mark_variable_ready_dense(VariableIndex index) {
     if (grad.defined()) {
       // Ensure that the gradient type matches the bucket type.
       TORCH_CHECK(
-          grad.options().type_equal(bucket_view.options()),
+          grad.options().type_equal(bucket_view_in.options()),
           "Expected ",
-          bucket_view.toString(),
+          bucket_view_in.toString(),
           ", got ",
           grad.toString());
       // Assert that the grad tensor and the bucket don't share storage.
       // If they did, we could avoid the copy altogether.
       // The reason for not doing this is that existing code calls
       // `detach_` from `zero_grad`, which is incompatible with views.
-      TORCH_INTERNAL_ASSERT(!grad.is_alias_of(bucket_view));
-      TORCH_INTERNAL_ASSERT(grad.device() == bucket_view.device());
-      TORCH_INTERNAL_ASSERT(grad.numel() == bucket_view.numel());
+      TORCH_INTERNAL_ASSERT(!grad.is_alias_of(bucket_view_in));
+      TORCH_INTERNAL_ASSERT(grad.device() == bucket_view_in.device());
+      TORCH_INTERNAL_ASSERT(grad.numel() == bucket_view_in.numel());
       // AccumulateGrad doesn't HAVE to obey the grad layout contract.
       // The penalty for disobedience is reduced performance, not numerical
       // death. Warnings here help diagnose poor DDP performance.
-      if (grad.strides() != bucket_view.strides()) {
+      if (grad.strides() != bucket_view_in.strides()) {
         TORCH_WARN_ONCE(
             "Grad strides do not match bucket view strides. "
             "This may indicate grad was not created according to the "
@@ -350,10 +351,10 @@ void Reducer::mark_variable_ready_dense(VariableIndex index) {
             ", strides() = ",
             grad.strides(),
             "\n",
-            "bucket_view.sizes() = ",
-            bucket_view.sizes(),
+            "bucket_view_in.sizes() = ",
+            bucket_view_in.sizes(),
             ", strides() = ",
-            bucket_view.strides());
+            bucket_view_in.strides());
       }
       // See Note [DDP Communication Hook]
       if (comm_hook_ == nullptr) {
@@ -362,12 +363,12 @@ void Reducer::mark_variable_ready_dense(VariableIndex index) {
             c10::scalar_to_tensor(double(1.) / process_group_->getSize());
         wrapped.unsafeGetTensorImpl()->set_wrapped_number(true);
         // Divides while copying into the bucket view.
-        at::native::mul_out(bucket_view, grad, wrapped);
+        at::native::mul_out(bucket_view_in, grad, wrapped);
       } else {
-        bucket_view.copy_(grad);
+        bucket_view_in.copy_(grad);
       }
     } else {
-      bucket_view.zero_();
+      bucket_view_in.zero_();
     }
     // The grad is not modified and doesn't need to be written back.
     return false;
@@ -720,9 +721,10 @@ void Reducer::initialize_buckets(
         // unexpected layout, performance will degrade due to poor memory access
         // patterns when copy_ing grad data in and out of its bucket view.
         // However, numerics remain correct, because the bucket view is the same
-        // on either end of the raw allreduce.  bucket_view.copy(grad) tranposes
+        // on either end of the raw allreduce.  bucket_view_in.copy(grad)
+        // tranposes
         // (+ densifies) to the bucket view's layout, the data is allreduced,
-        // then grad.copy_(bucket_view) transposes it back to grad's layout.
+        // then grad.copy_(bucket_view_out) transposes it back to grad's layout.
         //
         // The only way the numerics can go haywire is if the bucket views
         // themselves have different layouts across processes (or replicas).
@@ -735,7 +737,10 @@ void Reducer::initialize_buckets(
         // metadata.  Checking just once won't catch if someone messes with
         // param layouts over time, but not messing with params after DDP
         // construction is already a documented constraint.
-        initialize_bucketviews(replica, replica.contents);
+        initialize_bucketviews(
+            replica, replica.bucket_views_in, replica.contents);
+        initialize_bucketviews(
+            replica, replica.bucket_views_out, replica.contents);
       }
 
       // Add bucket replica to enclosing bucket.
@@ -763,6 +768,7 @@ void Reducer::initialize_buckets(
 // (see Note:  "Gradient Layout Contract" in initialize_buckets).
 void Reducer::initialize_bucketviews(
     Reducer::BucketReplica& replica,
+    std::vector<at::Tensor>& bucket_views,
     at::Tensor& contents) {
   for (size_t i = 0; i < replica.variables.size(); i++) {
     const auto& v = replica.variables[i];
@@ -772,13 +778,13 @@ void Reducer::initialize_bucketviews(
       // If the param's memory is dense, match its layout, anticipating
       // the autograd engine (AccumulateGrad) will also create gradients
       // matching its layout.
-      replica.bucket_views.push_back(
+      bucket_views.push_back(
           contents.as_strided(v.sizes(), v.strides(), offset));
     } else {
       // Fall back to a C-style contiguous view, again anticipating
       // AccumulateGrad will do the same when stashing grads for non-dense
       // params.
-      replica.bucket_views.push_back(
+      bucket_views.push_back(
           contents.narrow(0, offset, length).view(v.sizes()));
     }
   }
@@ -927,7 +933,8 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
         }
       }
 
-      const auto& bucket_view = replica.bucket_views[intra_bucket_index];
+      const auto& bucket_view_out =
+          replica.bucket_views_out[intra_bucket_index];
       runGradCallbackForVariable(variable, [&](auto& grad) {
         // If a parameter is globally unused, we keep its grad untouched.
         if (!global_unused) {
@@ -935,9 +942,9 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
             // Creates grad according to the "Gradient Layout Contract"
             // (see torch/csrc/grad/AccumulateGrad.h)
             grad = torch::autograd::utils::clone_obey_contract(
-                bucket_view, variable);
+                bucket_view_out, variable);
           } else {
-            grad.copy_(bucket_view);
+            grad.copy_(bucket_view_out);
           }
           // The grad is modified and needs to be written back.
           return true;
@@ -981,7 +988,16 @@ void Reducer::finalize_backward() {
           comm_hook_->processFuture(bucket.future_work->value());
 
       for (size_t i = 0; i < future_result.size(); i++) {
-        bucket.replicas[i].contents.copy_(future_result[i]);
+        auto& replica = bucket.replicas[i];
+        if (bucket.expect_sparse_gradient) {
+          replica.contents.copy_(future_result[i]);
+        } else {
+          // Reinitialize bucket_views_out with the future_result by following
+          // the same logic in `inititalize_buckets`.
+          replica.bucket_views_out.clear();
+          initialize_bucketviews(
+              replica, replica.bucket_views_out, future_result[i]);
+        }
       }
     }
     if (!bucket.expect_sparse_gradient) {
