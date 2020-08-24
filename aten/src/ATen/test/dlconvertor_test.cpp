@@ -8,7 +8,6 @@
 #include <sstream>
 
 using namespace at;
-
 TEST(TestDlconvertor, TestDlconvertor) {
   manual_seed(123);
 
