@@ -45,8 +45,8 @@ inline std::vector<int64_t> computeStrideForViewAsComplex(IntArrayRef oldstride)
 // and returns back a tensor with corresponding complex dtype
 Tensor view_as_complex(const Tensor& self) {
   TORCH_CHECK(
-    self.scalar_type() == kFloat || self.scalar_type() == kDouble,
-    "view_as_complex is only supported for float and double tensors, but got a tensor of scalar type: ", self.scalar_type());
+    self.scalar_type() == kFloat || self.scalar_type() == kDouble || self.scalar_type() == kHalf,
+    "view_as_complex is only supported for half, float and double tensors, but got a tensor of scalar type: ", self.scalar_type());
 
   auto new_sizes = self.sizes().vec();
   TORCH_CHECK(new_sizes[self.dim()-1] == 2, "Tensor must have a last dimension of size 2");
