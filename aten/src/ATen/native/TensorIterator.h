@@ -110,6 +110,8 @@ struct CAFFE2_API OperandInfo {
 
   bool is_output = false;
 
+  bool will_resize = false;
+
   bool is_read_write = false;
 
   void validate() {
@@ -302,6 +304,7 @@ protected:
   // Mutable reference as it moves tensors out of TensorIteratorConfig
   void populate_operands(TensorIteratorConfig&);
   void mark_outputs();
+  void mark_resize_outputs(const TensorIteratorConfig&);
   void compute_mem_overlaps(const TensorIteratorConfig&);
   void compute_shape(const TensorIteratorConfig&);
   void compute_strides(const TensorIteratorConfig&);
@@ -309,18 +312,12 @@ protected:
   void permute_dimensions(IntArrayRef perm);
   void compute_types(const TensorIteratorConfig&);
   ScalarType compute_common_dtype();
-  void allocate_outputs();
+  void allocate_or_resize_outputs();
   bool fast_set_up(const TensorIteratorConfig&);
   FastSetupType compute_fast_setup_type(const TensorIteratorConfig&);
   void compute_names(const TensorIteratorConfig&);
-  void resize_outputs(const TensorIteratorConfig&);
   void propagate_names_to_outputs();
   void coalesce_dimensions();
-
-  template <int dim, MemoryFormat memory_format> bool requires_channels_last_nd_output();
-  bool requires_channels_last_2d_output();
-  bool requires_channels_last_3d_output();
-
 
 protected:
 
