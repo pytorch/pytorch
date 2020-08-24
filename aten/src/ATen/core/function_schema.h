@@ -357,43 +357,44 @@ inline bool operator!=(const FunctionSchema& lhs, const FunctionSchema& rhs) {
 // print out Argument, which is compatible with FunctionSchema parser
 // full format: Type(alias)? name=default_value
 inline std::ostream& operator<<(std::ostream& out, const Argument& arg) {
-  bool optional_type = arg.type()->kind() == OptionalType::Kind;
+
   // for adjusting the ? position.
   // in schema, we have Tensor?(a!) input, and t(a!)?.
   // however, t?(a!) doesn't work with schema parser.
   // so we always use Type(alias)? format
-  std::stringstream oss;
-  if (auto list = arg.type()->cast<c10::ListType>()) {
-    oss << list->getElementType()->str();
-    oss << "[";
-    if (arg.N()) {
-      oss << *arg.N();
-    }
-    oss << "]";
+  auto type = arg.type();
+  bool is_opt = type->kind() == OptionalType::Kind;
+  auto unopt_type = is_opt ? type->cast<OptionalType>()->getElementType() : type;
+
+  if (unopt_type->kind() == ListType::Kind && arg.N()) {
+    // sized lists get size N from arg, not type
+    auto list = unopt_type->cast<c10::ListType>();
+    out << list->getElementType()->str() << "[" << *arg.N() << "]";
   } else {
-    oss << arg.type()->str();
+    out << unopt_type->str();
   }
-  if (optional_type) {
-    oss.seekp(oss.str().size() - 1);
-  }
+
   if (arg.alias_info()) {
-    oss << arg.alias_info().value();
+    out << arg.alias_info().value();
   }
-  if (optional_type) {
-    oss << "?";
+
+  if (is_opt) {
+    out << "?";
   }
-  out << oss.str();
+
   if (!arg.name().empty()) {
     out << " " << arg.name();
   }
+
   if (arg.default_value()) {
     out << "=";
-    if (arg.type()->kind() == c10::TypeKind::StringType) {
-        printQuotedString(out, arg.default_value().value().toStringRef());
+    if (type->kind() == c10::TypeKind::StringType) {
+      printQuotedString(out, arg.default_value().value().toStringRef());
     } else {
       out << arg.default_value().value();
     }
   }
+
   return out;
 }
 
