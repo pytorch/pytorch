@@ -14869,20 +14869,9 @@ class TestTorchDeviceType(TestCase):
     def test_maximum_minimum_type_promotion(self, device, dtypes):
         a = torch.tensor((0, 1), device=device, dtype=dtypes[0])
         b = torch.tensor((1, 0), device=device, dtype=dtypes[1])
-
-        has_half = dtypes[0] is torch.half or dtypes[1] is torch.half
-        has_bfloat16 = dtypes[0] is torch.bfloat16 or dtypes[1] is torch.bfloat16
-
         for op in (torch.maximum, torch.max, torch.minimum, torch.min):
-            # NOTE: half x bfloat16 type promotion is not supported
-            if has_half and has_bfloat16:
-                with self.assertRaises(RuntimeError):
-                    result = op(a, b)
-                continue
-
             result = op(a, b)
             self.assertEqual(result.dtype, torch.result_type(a, b))
-
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     @dtypes(*(torch.testing.get_all_int_dtypes() + [torch.bool]))
