@@ -168,8 +168,8 @@ PyObject* c10d_init(PyObject* _unused) {
           py::arg("find_unused_parameters") = false,
           py::call_guard<py::gil_scoped_release>())
       .def(
-          "initialize_buckets",
-          &::c10d::Reducer::initialize_buckets,
+          "prepare_forward",
+          &::c10d::Reducer::prepare_forward,
           py::call_guard<py::gil_scoped_release>())
       .def(
           "prepare_for_backward",
