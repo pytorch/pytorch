@@ -126,6 +126,10 @@ static Tensor restore_reduced_dims(const Tensor &output, IntArrayRef dims, bool 
   return output.reshape(target_shape);
 }
 
+static Tensor scale_by_count(const Tensor &mask, IntArrayRef dims, ScalarType dtype) {
+  return mask / mask.sum(dims, true, dtype).pow_(-1);
+}
+
 std::tuple<Tensor, Tensor> _euclidean_dist_backward(const Tensor & grad, const Tensor & x1, const Tensor & x2, const Tensor & res) {
   if (!grad.defined()) {
     return std::tuple<Tensor, Tensor>(Tensor(), Tensor());
