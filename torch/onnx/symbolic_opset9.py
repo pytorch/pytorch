@@ -1618,6 +1618,7 @@ def slice(g, self, *args):
     if len(args) == 4:
         # aten::slice(Tensor self, int dim, int start, int end, int step) -> Tensor
         dim, start, end, step = args
+        step = _parse_arg(step, 'i')
         if step != 1:
             raise RuntimeError("step!=1 is currently not supported")
         if start.node().kind() != 'onnx::Constant' or \
