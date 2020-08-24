@@ -44,6 +44,8 @@ void max_pool2d_out_impl(
    * The downsides are that it uses an extra buffer and will compute row-wise
    * max of every column even if it will be skipped over when striding.
    */
+  constexpr scalar_t FILL = -std::numeric_limits<scalar_t>::infinity();
+
   at::parallel_for(
       0, NB * NC * OH, 0, [&](const int64_t begin, const int64_t end) {
         std::vector<scalar_t> buffer(IW);
@@ -62,12 +64,12 @@ void max_pool2d_out_impl(
           ii += (ii < 0) ? at::divup(-ii, DI) * DI : 0;
 
           // Compute row-wise max for current output row
-          std::copy_n(ip + ii * IW, IW, buffer.begin());
-          while ((ii += DI) < ei) {
+          std::fill_n(buffer.begin(), IW, FILL);
+          for (; ii < ei; ii += DI) {
             const scalar_t* ptr = ip + ii * IW;
-            for (auto it = buffer.begin(); it < buffer.end(); ++it, ++ptr) {
+            for (auto i = buffer.begin(); i < buffer.end(); ++i, ++ptr) {
               const scalar_t val = *ptr;
-              *it = std::isnan(val) ? val : std::max<scalar_t>(*it, val);
+              *i = std::isnan(val) ? val : std::max<scalar_t>(*i, val);
             }
           }
 
@@ -81,8 +83,8 @@ void max_pool2d_out_impl(
             ij += (ij < 0) ? at::divup(-ij, DJ) * DJ : 0;
 
             // Compute column-wise max for current output column
-            *op = buffer[ij];
-            while ((ij += DJ) < ej) {
+            *op = FILL;
+            for (; ij < ej; ij += DJ) {
               const scalar_t val = buffer[ij];
               *op = std::isnan(val) ? val : std::max<scalar_t>(*op, val);
             }
