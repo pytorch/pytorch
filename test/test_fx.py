@@ -2,7 +2,7 @@ import torch
 import unittest
 import operator
 import numbers
-from torch.fx import symbolic_trace, Proxy, Node, GraphModule, DefaultDelegate, map_arg
+from torch.fx import symbolic_trace, Proxy, Node, GraphModule, DefaultDelegate
 
 from fx.quantization import Quantizer
 
