@@ -20,7 +20,8 @@ class Function {
   void append_instruction(OpCode op, int X, int N);
   bool append_operator(
       const std::string& name,
-      const std::string& overload_name);
+      const std::string& overload_name,
+      int64_t model_version);
   void set_module_debug_info_list_size(size_t size);
   void set_module_info(const std::string& module_info, size_t pc);
   void append_constant(const c10::IValue& constant);

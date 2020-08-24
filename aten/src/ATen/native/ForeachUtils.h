@@ -7,11 +7,9 @@ namespace native {
 void verify_list(TensorList tensors) {
   TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
   auto expected_dtype = tensors[0].dtype();
-  auto expected_device = tensors[0].device();
 
   for (auto t : tensors) {
     TORCH_CHECK(t.dtype() == expected_dtype, "All tensors in the tensor list must have the same dtype.");
-    TORCH_CHECK(t.device() == expected_device, "All tensors in the tensor list must have the same device.");
   }
 }
 
@@ -21,8 +19,13 @@ void verify_list(TensorList tensors) {
 // - Resulting tensor must have the same dtype as the input one
 bool check_fast_route(TensorList tensors, Scalar scalar) {
   TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
+  auto expected_device = tensors[0].device();
 
   for (auto t : tensors) {
+    if (t.device() != expected_device) {
+      return false;
+    }
+
     if (t.layout() != at::kStrided) {
       return false;
     }
