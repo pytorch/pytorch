@@ -22,7 +22,7 @@ inline int64_t current_time_in_nanos() {
   return torch::autograd::profiler::getTime();
 }
 
-constexpr int kUnsetDivFactor = - 1;
+constexpr int kUnsetDivFactor = -1;
 
 } // namespace
 
@@ -363,8 +363,7 @@ void Reducer::mark_variable_ready_dense(VariableIndex index) {
         // See Note [DDP Communication Hook]
         if (comm_hook_ == nullptr) {
           // imitates wrapped_scalar_tensor in ATen/native/BinaryOps.cpp
-          auto wrapped =
-              c10::scalar_to_tensor(double(1.) / divFactor_);
+          auto wrapped = c10::scalar_to_tensor(double(1.) / divFactor_);
           wrapped.unsafeGetTensorImpl()->set_wrapped_number(true);
           // Divides while copying into the bucket view.
           at::native::mul_out(bucket_view, grad, wrapped);
@@ -419,26 +418,28 @@ void Reducer::mark_variable_ready_sparse(VariableIndex index) {
 }
 
 std::vector<std::vector<at::Tensor>> Reducer::get_bucket_tensors() const {
- std::lock_guard<std::mutex> lock(mutex_);
- std::vector<std::vector<at::Tensor>> bucketTensors;
- bucketTensors.reserve(buckets_.size());
- for (const auto& bucket : buckets_) {
-  std::vector<at::Tensor> tensors;
-  tensors.reserve(bucket.replicas.size());
-  for (const auto& rep : bucket.replicas) {
-    tensors.push_back(rep.contents);
+  std::lock_guard<std::mutex> lock(mutex_);
+  std::vector<std::vector<at::Tensor>> bucketTensors;
+  bucketTensors.reserve(buckets_.size());
+  for (const auto& bucket : buckets_) {
+    std::vector<at::Tensor> tensors;
+    tensors.reserve(bucket.replicas.size());
+    for (const auto& rep : bucket.replicas) {
+      tensors.push_back(rep.contents);
+    }
+    bucketTensors.push_back(std::move(tensors));
   }
-  bucketTensors.push_back(std::move(tensors));
- }
- return bucketTensors;
+  return bucketTensors;
 }
 
 void Reducer::set_forward_pass_work_handle(
     std::shared_ptr<c10d::ProcessGroup::Work> forwardPassWorkHandle,
-    at::Tensor& tensor) {
+    at::Tensor& tensor,
+    bool useStaticWorldSize) {
   std::lock_guard<std::mutex> lock(mutex_);
   forwardPassWorkHandle_.workHandle = std::move(forwardPassWorkHandle);
   forwardPassWorkHandle_.resultTensor = tensor;
+  forwardPassWorkHandle_.useStaticWorldSize = useStaticWorldSize;
 }
 
 std::vector<at::Tensor> Reducer::get_local_used_maps_on_device() const {
@@ -467,8 +468,7 @@ void Reducer::push_rebuilt_params_for_all_indices() {
 }
 
 void Reducer::push_rebuilt_params(const VariableIndex& index) {
-  if (should_rebuild_buckets() &&
-      index.replica_index == 0) {
+  if (should_rebuild_buckets() && index.replica_index == 0) {
     rebuilt_params_.push_back(
         replicas_[index.replica_index][index.variable_index]);
     rebuilt_param_indices_.push_back(index.variable_index);
@@ -584,8 +584,11 @@ void Reducer::mark_variable_ready(VariableIndex index) {
     auto& workHandle = forwardPassWorkHandle_.workHandle;
     if (workHandle) {
       workHandle->wait();
-      at::Tensor& res = forwardPassWorkHandle_.resultTensor;
-      divFactor_ = res.item().to<int>();
+      auto useStaticWorldSize = forwardPassWorkHandle_.useStaticWorldSize;
+      if (!useStaticWorldSize) {
+        at::Tensor& res = forwardPassWorkHandle_.resultTensor;
+        divFactor_ = res.item().to<int>();
+      }
     }
   }
 

@@ -578,7 +578,9 @@ class DistributedDataParallel(Module):
                 1, device=self.device_ids[0] if self.device_type != "cpu" else "cpu"
             )
             work = dist.all_reduce(ones, group=self.process_group, async_op=True)
-            self.reducer._set_forward_pass_work_handle(work, ones)
+            self.reducer._set_forward_pass_work_handle(
+                work, ones, self.ddp_join_divide_by_initial_world_size
+            )
 
         if self.require_forward_param_sync:
             self._sync_params()
@@ -683,7 +685,7 @@ class DistributedDataParallel(Module):
         self.process_group.allreduce(locally_used_param_maps)
 
     @contextmanager
-    def join(self, enable=True):
+    def join(self, divide_by_initial_world_size=True, enable=True):
         r"""
         A context manager to be used in conjunction with an instance of
         :class:`torch.nn.parallel.distributed.DistributedDataParallel` to be
@@ -717,6 +719,15 @@ class DistributedDataParallel(Module):
             custom defined collectives in the model's forward pass.
 
         Args:
+            divide_by_initial_world_size (bool): If True, will divide gradients
+            by the initial world_size DDP training was launched with. If False,
+            will compute the effective world size (number of ranks that have not
+            depleted their inputs yet) and divide gradients by that during
+            allreduce. Set ``divide_by_initial_world_size=True`` when you want
+            to weight gradients of uneven inputs properly, i.e. it will ensure
+            that gradients of later inputs do not get higher weighting. Set to
+            ``False`` to more closely simulate training with the same number of
+            inputs but a smaller world_size. Default is ``True``.
             enable (bool): Whether to enable uneven input detection or not. Pass
             in ``enable=False`` to disable in cases where you know that inputs
             are even across participating processes. Default is ``True``.
@@ -754,6 +765,7 @@ class DistributedDataParallel(Module):
                 )
             has_error = False
             self.ddp_join_enabled = enable
+            self.ddp_join_divide_by_initial_world_size = divide_by_initial_world_size
             yield
         except Exception as e:
             # Set to skip any processing in the finally block.

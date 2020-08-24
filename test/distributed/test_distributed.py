@@ -2753,9 +2753,9 @@ class _DistTestBase(object):
     @skip_if_lt_x_gpu(2)
     @skip_if_rocm
     def test_ddp_grad_div_uneven_inputs(self):
-        # Test that we scale by the effective world size when allreducing grads.
-        # For example if N processes start DDP training but 0 < K < N join, we
-        # should divide by N - K and not N.
+        # Test gradient division during training with join() API. If
+        # divide_by_initial_world_size=False, we scale by the effective world
+        # size when allreducing grads.
         dim = 5
         batch = 1
         grad_scale = 50
@@ -2765,10 +2765,13 @@ class _DistTestBase(object):
         net = torch.nn.parallel.DistributedDataParallel(
             model.cuda(rank), device_ids=[self.rank], bucket_cap_mb=1
         )
-        n_iters = 1 if self.rank == 0 else 2
+        n_iters = 3
+        if self.rank > 0:
+            n_iters += 2
 
-        with net.join():
-            for i in range(n_iters):
+
+        with net.join(divide_by_initial_world_size=False):
+            for _ in range(n_iters):
                 loss = net(inp).sum()
                 loss.backward()
                 # The grad is always expected_grad, since we divide by the number
@@ -2779,6 +2782,24 @@ class _DistTestBase(object):
                 param = list(net.parameters())[0]
                 self.assertEqual(expected_grad, param.grad)
                 # Avoid accumulating grads so that it's the same every iteration
+                net.zero_grad()
+                torch.cuda.synchronize(device=self.rank)
+
+        # If divide_by_initial_world_size=True (default), we always scale grads
+        # by the initial world_size.
+        with net.join(divide_by_initial_world_size=True):
+            for i in range(n_iters):
+                loss = net(inp).sum()
+                loss.backward()
+                effective_ws = dist.get_world_size()
+                if i >= 3:
+                    effective_ws -= 1
+                expected_grad = (
+                    torch.ones(dim, dim, device=self.rank) * grad_scale * effective_ws
+                ) / dist.get_world_size()
+                param = list(net.parameters())[0]
+                self.assertEqual(expected_grad, param.grad)
+                # Avoid accumulating grad so that it's the same every iteration.
                 net.zero_grad()
                 torch.cuda.synchronize(device=self.rank)
 
@@ -2812,7 +2833,9 @@ class _DistTestBase(object):
         net = torch.nn.parallel.DistributedDataParallel(
             model.cuda(self.rank), device_ids=[self.rank]
         )
-        ddp_optim = torch.optim.SGD(model.parameters(), lr=learning_rate)
+        ddp_optim = torch.optim.SGD(
+            model.parameters(), lr=learning_rate * dist.get_world_size()
+        )
         with net.join():
             for i in range(num_iters):
                 ddp_optim.zero_grad()
@@ -2820,13 +2843,6 @@ class _DistTestBase(object):
                 loss = out.sum()
                 loss.backward()
                 torch.cuda.synchronize(device=self.rank)
-                effective_ws = sum(1 if v > i else 0 for v in rank_to_iter_mapping.values())
-                # scale grads with the current effective world size for parity
-                # with the local model.
-                for param in net.module.parameters():
-                    if param.grad is not None:
-                        with torch.no_grad():
-                            param.grad *= effective_ws
                 ddp_optim.step()
 
         # Validate model state dicts are equal

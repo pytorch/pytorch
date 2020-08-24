@@ -91,7 +91,7 @@ class Reducer {
   // corresponding tensor being reduced.
   void set_forward_pass_work_handle(
       std::shared_ptr<c10d::ProcessGroup::Work> forwardPassWorkHandle,
-      at::Tensor& tensor);
+      at::Tensor& tensor, bool useStaticWorldSize);
 
   // Retrieve on-device tensors used to track locally unused parameters. For
   // each replica, it is a tensor where index i = 1 if the Variable with that
@@ -306,6 +306,9 @@ class Reducer {
   struct ForwardPassAllreduceWork {
     std::shared_ptr<c10d::ProcessGroup::Work> workHandle;
     at::Tensor resultTensor;
+    // whether we should divide by the initial world_size or the no. of
+    // remaining DDP ranks.
+    bool useStaticWorldSize;
   };
 
   // Handle for the currently scheduled allreduce in the forward pass, if
