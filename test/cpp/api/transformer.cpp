@@ -1031,12 +1031,9 @@ void transformer_decoder_test_helper_gelu(bool is_cuda) {
   torch::TensorOptions tensor_options = torch::TensorOptions()
     .dtype(torch::kFloat32).device(device);
 
-  TransformerDecoderLayer decoder_layer = get_a_test_layer<
-    TransformerDecoderLayer,
-    TransformerDecoderLayerOptions>(tensor_options);
+  //gelu activation test cases
   decoder_layer.get()->options.activation(torch::kGELU);
-
-  TransformerDecoder model(TransformerDecoderOptions(decoder_layer, 1));
+  model = TransformerDecoder(TransformerDecoderOptions(decoder_layer, 1));
   if (is_cuda) {
     model->to(torch::kCUDA);
   }
@@ -1115,12 +1112,10 @@ void transformer_decoder_test_helper_gelu(bool is_cuda) {
                               /*equal_nan=*/true));
 
   // Multiple layers no norm
-  TransformerDecoder multi_layer_model(
-    TransformerDecoderOptions(decoder_layer, 6));
+  model = TransformerDecoder(TransformerDecoderOptions(decoder_layer, 6));
   if (is_cuda) {
     model->to(torch::kCUDA);
   }
-
   decoder_input = torch::tensor({{{0.4517, 0.6793, 0.5313, 0.0034},
                                   {0.2678, 0.3677, 0.4459, 0.7166}},
                                  {{0.8100, 0.3716, 0.4096, 0.1976},
@@ -1139,7 +1134,7 @@ void transformer_decoder_test_helper_gelu(bool is_cuda) {
                                 {{0.8117, 0.2366, 0.4838, 0.7881},
                                  {0.3718, 0.4945, 0.9511, 0.0864}}},
                                 tensor_options);
-  result = multi_layer_model(decoder_input, memory_input).detach();
+  result = model(decoder_input, memory_input).detach();
   ref_output = torch::tensor({{{2.41859, 0.0328114, -0.609269, -0.0560386},
                                {2.42138, 0.034598, -0.607316, -0.0546574}},
                               {{2.41859, 0.0328114, -0.609269, -0.0560386},
@@ -1153,8 +1148,8 @@ void transformer_decoder_test_helper_gelu(bool is_cuda) {
 
   // Multiple layers with norm
   LayerNorm norm(LayerNormOptions({decoder_layer.get()->options.d_model()}));
-  TransformerDecoder multi_layer_norm_model(
-    TransformerDecoderOptions(decoder_layer, 6).norm(AnyModule(norm)));
+  model = TransformerDecoder(TransformerDecoderOptions(decoder_layer, 6)
+    .norm(AnyModule(norm)));
   if (is_cuda) {
     model->to(torch::kCUDA);
   }
@@ -1177,7 +1172,7 @@ void transformer_decoder_test_helper_gelu(bool is_cuda) {
                                 {{0.8117, 0.2366, 0.4838, 0.7881},
                                  {0.3718, 0.4945, 0.9511, 0.0864}}},
                                 tensor_options);
-  result = multi_layer_norm_model(decoder_input, memory_input).detach();
+  result = model(decoder_input, memory_input).detach();
   ref_output = torch::tensor({{{1.69298, -0.355163, -0.906375, -0.431439},
                                {1.69305, -0.355195, -0.906062, -0.431791}},
                               {{1.69298, -0.355163, -0.906375, -0.431439},
@@ -1191,12 +1186,12 @@ void transformer_decoder_test_helper_gelu(bool is_cuda) {
 
 }
 
-TEST_F(TransformerTest, TransformerDecoder_gelu) {
-  transformer_decoder_test_helper_gelu(false);
+TEST_F(TransformerTest, TransformerDecoder) {
+  transformer_decoder_test_helper(false);
 }
 
-TEST_F(TransformerTest, TransformerDecoder_gelu_CUDA) {
-  transformer_decoder_test_helper_gelu(true);
+TEST_F(TransformerTest, TransformerDecoder_CUDA) {
+  transformer_decoder_test_helper(true);
 }
 
 
