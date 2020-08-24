@@ -2602,6 +2602,7 @@ def smooth_l1_loss(input, target, size_average=None, reduce=None, reduction='mea
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
     if target.requires_grad:
+        _Reduction.get_enum(reduction)  # throw an error if reduction is invalid
         ret = _smooth_l1_loss(input, target, delta=delta)
         if reduction != 'none':
             ret = torch.mean(ret) if reduction == 'mean' else torch.sum(ret)
@@ -2633,6 +2634,7 @@ def l1_loss(input, target, size_average=None, reduce=None, reduction='mean'):
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
     if target.requires_grad:
+        _Reduction.get_enum(reduction)  # throw an error if reduction is invalid
         ret = torch.abs(input - target)
         if reduction != 'none':
             ret = torch.mean(ret) if reduction == 'mean' else torch.sum(ret)
@@ -2664,6 +2666,7 @@ def mse_loss(input, target, size_average=None, reduce=None, reduction='mean'):
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
     if target.requires_grad:
+        _Reduction.get_enum(reduction)  # throw an error if reduction is invalid
         ret = (input - target) ** 2
         if reduction != 'none':
             ret = torch.mean(ret) if reduction == 'mean' else torch.sum(ret)
