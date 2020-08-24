@@ -128,7 +128,23 @@ static PyObject * THPGenerator_manualSeed(THPGenerator *self, PyObject *seed)
           "but got %s", THPUtils_typename(seed));
   // See Note [Acquire lock when using random generators]
   std::lock_guard<std::mutex> lock(generator.mutex());
-  generator.set_current_seed(THPUtils_unpackLong(seed));
+  uint64_t seed_unpacked;
+  try {
+    // First try to interpret as unsigned long
+    seed_unpacked = THPUtils_unpackUInt64(seed);
+  } catch(...) {
+    if (PyErr_ExceptionMatches(PyExc_OverflowError)) {
+      // If an overflow happened, then the seed could be negative,
+      // so try to interpret it as signed long
+      PyErr_Clear();
+      int64_t seed_unpacked_signed = THPUtils_unpackLong(seed);
+      seed_unpacked = *(reinterpret_cast<uint64_t*>(&seed_unpacked_signed));
+    } else {
+      // If any other type of exception happened, rethrow it
+      throw;
+    }
+  }
+  generator.set_current_seed(seed_unpacked);
   Py_INCREF(self);
   return (PyObject*)self;
   END_HANDLE_TH_ERRORS

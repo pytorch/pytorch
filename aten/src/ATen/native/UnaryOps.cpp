@@ -107,6 +107,11 @@ Tensor& acos_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(
 Tensor acos(const Tensor& self) { return unary_op_impl(self, at::acos_out); }
 Tensor& acos_(Tensor& self) { return unary_op_impl_(self, at::acos_out); }
 
+// arccos, alias for acos
+Tensor& arccos_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, acos_stub); }
+Tensor arccos(const Tensor& self) { return unary_op_impl(self, at::acos_out); }
+Tensor& arccos_(Tensor& self) { return unary_op_impl_(self, at::acos_out); }
+
 static Tensor wrapped_scalar_tensor(Scalar scalar) {
   auto tensor = scalar_to_tensor(scalar);
   tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
@@ -134,9 +139,19 @@ Tensor& asin_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(
 Tensor asin(const Tensor& self) { return unary_op_impl(self, at::asin_out); }
 Tensor& asin_(Tensor& self) { return unary_op_impl_(self, at::asin_out); }
 
+// arcsin, alias of asin
+Tensor& arcsin_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, asin_stub); }
+Tensor arcsin(const Tensor& self) { return unary_op_impl(self, at::asin_out); }
+Tensor& arcsin_(Tensor& self) { return unary_op_impl_(self, at::asin_out); }
+
 Tensor& atan_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, atan_stub); }
 Tensor atan(const Tensor& self) { return unary_op_impl(self, at::atan_out); }
 Tensor& atan_(Tensor& self) { return unary_op_impl_(self, at::atan_out); }
+
+// arctan, alias of atan
+Tensor& arctan_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, atan_stub); }
+Tensor arctan(const Tensor& self) { return unary_op_impl(self, at::atan_out); }
+Tensor& arctan_(Tensor& self) { return unary_op_impl_(self, at::atan_out); }
 
 // Note [Complex abs and angle]
 // Complex inputs to abs and angle return float results by default.
@@ -150,6 +165,17 @@ Tensor abs(const Tensor& self) {
   return unary_op_impl_with_complex_to_float(self, at::abs_out);
 }
 Tensor& abs_(Tensor& self) { return unary_op_impl_(self, at::abs_out); }
+
+// Absolute, alias for abs
+Tensor& absolute_out(Tensor& result, const Tensor& self) {
+  return at::abs_out(result, self);
+}
+Tensor absolute(const Tensor& self) {
+  return self.abs();
+}
+Tensor& absolute_(Tensor& self) {
+  return self.abs_();
+}
 
 Tensor& angle_out(Tensor& result, const Tensor& self) {
   return unary_op_impl_with_complex_to_float_out(result, self, angle_stub);
@@ -279,6 +305,11 @@ Tensor& acosh_out(Tensor& result, const Tensor& self) { return unary_op_impl_out
 Tensor acosh(const Tensor& self) { return unary_op_impl(self, at::acosh_out); }
 Tensor& acosh_(Tensor& self) { return unary_op_impl_(self, at::acosh_out); }
 
+// arccosh, alias for acosh
+Tensor& arccosh_out(Tensor& result, const Tensor& self) { return at::acosh_out(result, self); }
+Tensor arccosh(const Tensor& self) { return at::acosh(self); }
+Tensor& arccosh_(Tensor& self) { return at::acosh_(self); }
+
 Tensor& asinh_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, asinh_stub); }
 Tensor asinh(const Tensor& self) { return unary_op_impl(self, at::asinh_out); }
 Tensor& asinh_(Tensor& self) { return unary_op_impl_(self, at::asinh_out); }
@@ -337,6 +368,11 @@ Tensor& trunc_out(Tensor& result, const Tensor& self) {
 Tensor trunc(const Tensor& self) { return unary_op_impl(self, at::trunc_out); }
 Tensor& trunc_(Tensor& self) { return unary_op_impl_(self, at::trunc_out); }
 
+// Alias for trunc
+Tensor& fix_out(Tensor& result, const Tensor& self) { return at::native::trunc_out(result, self); }
+Tensor fix(const Tensor& self) { return at::native::trunc(self); }
+Tensor& fix_(Tensor& self) { return at::native::trunc_(self); }
+
 Tensor& neg_out(Tensor& result, const Tensor& self) {
   TORCH_CHECK(self.scalar_type() != kBool,
               "Negation, the `-` operator, on a bool tensor is not supported. "
@@ -345,6 +381,10 @@ Tensor& neg_out(Tensor& result, const Tensor& self) {
 }
 Tensor neg(const Tensor& self) { return unary_op_impl(self, at::neg_out); }
 Tensor& neg_(Tensor& self) { return unary_op_impl_(self, at::neg_out); }
+
+Tensor& negative_out(Tensor& result, const Tensor& self) { return at::native::neg_out(result, self); }
+Tensor negative(const Tensor& self) { return at::native::neg(self); }
+Tensor& negative_(Tensor& self) { return at::native::neg_(self); }
 
 Tensor logical_not(const Tensor& self) {
   Tensor result = at::empty({0}, self.options().dtype(kBool));
@@ -453,6 +493,19 @@ Tensor clamp_min(const Tensor& self, Scalar min) {
 
 Tensor& clamp_min_(Tensor& self, Scalar min) {
   return at::clamp_min_out(self, self, min);
+}
+
+// Implements the "clip" alias for clamp
+Tensor& clip_out(Tensor& result, const Tensor& self, optional<Scalar> min, optional<Scalar> max) {
+  return at::clamp_out(result, self, min, max);
+}
+
+Tensor clip(const Tensor& self, optional<Scalar> min, optional<Scalar> max) {
+  return at::clamp(self, min, max);
+}
+
+Tensor& clip_(Tensor& self, optional<Scalar> min, optional<Scalar> max) {
+  return at::clamp_(self, min, max);
 }
 
 Tensor polygamma(int64_t n, const Tensor& self) {

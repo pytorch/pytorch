@@ -208,6 +208,7 @@ libtorch_python_generated_sources = [
         "torch/csrc/autograd/generated/python_torch_functions.cpp",
         "torch/csrc/autograd/generated/python_nn_functions.cpp",
         "torch/csrc/autograd/generated/python_fft_functions.cpp",
+        "torch/csrc/autograd/generated/python_linalg_functions.cpp",
 ]
 
 genrule(
@@ -294,8 +295,8 @@ filegroup(
 )
 
 filegroup(
-    name = "aten_native_vulkan_stub",
-    srcs = glob(["aten/src/ATen/native/vulkan/stub/*.cpp"]),
+    name = "aten_base_vulkan",
+    srcs = glob(["aten/src/ATen/vulkan/*.cpp"]),
 )
 
 filegroup(
@@ -339,6 +340,7 @@ filegroup(
         "aten/src/ATen/cuda/CublasHandlePool.cpp",
         "aten/src/ATen/cuda/PinnedMemoryAllocator.cpp",
         "aten/src/ATen/cuda/detail/CUDAHooks.cpp",
+        "aten/src/ATen/cudnn/AutocastRNN.cpp",
         "aten/src/ATen/cudnn/Descriptors.cpp",
         "aten/src/ATen/cudnn/Handle.cpp",
         "aten/src/ATen/cudnn/Types.cpp",
@@ -646,13 +648,13 @@ cc_library(
         ":ATen_CORE_SRCS",
         ":ATen_QUANTIZED_SRCS",
         ":aten_base_cpp",
+        ":aten_base_vulkan",
         ":aten_native_cpp",
         ":aten_native_mkl_cpp",
         ":aten_native_mkldnn_cpp",
         ":aten_native_quantized_cpp",
         ":aten_native_sparse_cpp",
         ":aten_native_xnnpack",
-        ":aten_native_vulkan_stub",
         ":aten_src_ATen_config",
         ":generated_cpp",
     ],

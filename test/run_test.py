@@ -58,9 +58,11 @@ TESTS = [
     'test_spectral_ops',
     'test_serialization',
     'test_show_pickle',
+    'test_tensor_creation_ops',
     'test_torch',
     'test_type_info',
     'test_type_hints',
+    'test_unary_ufuncs',
     'test_utils',
     'test_namedtuple_return_api',
     'test_jit_profiling',
@@ -71,6 +73,7 @@ TESTS = [
     'test_type_promotion',
     'test_jit_disabled',
     'test_function_schema',
+    'test_op_aliases.py',
     'test_overrides',
     'test_jit_fuser_te',
     'test_tensorexpr',
@@ -83,6 +86,7 @@ TESTS = [
     'test_jit_py3',
     'test_determination',
     'test_futures',
+    'test_fx',
 ]
 
 WINDOWS_BLOCKLIST = [
