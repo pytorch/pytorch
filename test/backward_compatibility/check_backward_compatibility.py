@@ -60,6 +60,9 @@ allow_list = [
     ("aten::linalg_outer", datetime.date(2020, 8, 30)),
     ("aten::linalg_outer.out", datetime.date(2020, 8, 30)),
     ("aten::_compute_linear_combination", datetime.date(2020, 9, 1)),
+    # TODO before land: make the matching logic in this test more generic
+    #   to allow matching by function arguments
+    ("getstate", datetime.date(2020, 9, 1)),
 ]
 
 

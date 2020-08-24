@@ -180,7 +180,6 @@ void unpackQuantizedWeightsHelper(
       // stored as bound C++ classes.
       auto ser_tup = itr->second.toTuple();
       if (ser_tup->elements()[0].isString()) {
-
         auto elements = ser_tup->elements();
         auto version = elements[0].toStringRef();
         TORCH_INTERNAL_ASSERT(version == "2", "Unknown serialization version");
@@ -211,7 +210,7 @@ void unpackQuantizedWeightsHelper(
         dilation = dilation_int;
         groups = groups_int;
 
-      } else {  // Legacy
+      } else { // Legacy
         unpacked_weight = ser_tup->elements()[0].toTensor();
         bias = ser_tup->elements()[1].toOptional<at::Tensor>();
         // conv only parameters

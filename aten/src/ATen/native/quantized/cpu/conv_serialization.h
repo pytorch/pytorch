@@ -15,6 +15,7 @@
  * - jit/passes/onnx/unpack_quantized_weights.cpp
  *
  * Version 1
+ *
  * - Fields:
  *  1. weight
  *  2. bias
@@ -24,10 +25,11 @@
  *  6. groups
  *
  * Version 2
+ *
  * - Fields:
  *  0. version (string)
- *  1. list of non-optional tensors (int64_t)
- *    0: packed parameters
+ *  1. list of non-optional tensors
+ *    0: packed parameters (int64_t)
  *      - kSpatialDim
  *      - stride x kSpatialDim
  *      - padding x kSpatialDim
@@ -36,6 +38,9 @@
  *    1: weight
  *  2. list of optional tensors
  *    0: bias
+ *
+ *  Note: version is a string and conv params are packed into a Tensor
+ *    to make ONNX happy (ints and containers of ints are not supported).
  */
 using ConvParamsSerializationType = std::tuple<
   // version

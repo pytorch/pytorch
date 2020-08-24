@@ -1610,7 +1610,7 @@ class TestQuantizeJitOps(QuantizationTestCase):
             for tracing in [True, False]:
                 op = "quantized::add" if quantized else "aten::add"
                 # TODO before land: investigate and fix more properly
-                # context: https://app.circleci.com/pipelines/github/pytorch/pytorch/203747/workflows/f6f8e383-4dcd-4e21-8f1e-af0dc5f6cdb3/jobs/6894794
+                # context: https://fburl.com/h5n04yol
                 m2 = self.checkGraphModeOp(m, data, op, tracing)
                 # TODO: remove after refactor of checkGraphModeOp
                 if quantized:
