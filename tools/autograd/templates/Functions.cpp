@@ -726,10 +726,15 @@ Tensor _fused_dropout_backward(Tensor grad, Tensor mask, double p1m) {
   }
 }
 
-Tensor evenly_dispatch_backward(Tensor grad, const Tensor & input, const Tensor & value) {
+Tensor evenly_distribute_backward(Tensor grad, const Tensor & input, const Tensor & value) {
   auto mask = (input == value);
-  auto count = mask.sum(input.scalar_type());
-  return at::zeros_like(input).masked_fill_(mask, grad / count);
+  auto count = mask.sum();
+  auto grad_input = grad / count;
+  if (input.is_cuda()) {
+    return mask * grad_input;
+  } else {
+    return at::zeros_like(input).masked_fill_(mask, grad_input);
+  }
 }
 
 Tensor index_select_backward(Tensor grad, int64_t dim, Tensor indices, IntArrayRef sizes, bool keepdim) {
