@@ -2,9 +2,9 @@
 #include <ATen/native/TensorFactories.h>
 
 #include <ATen/native/quantized/cpu/conv_packed_params.h>
+#include <ATen/native/quantized/cpu/conv_serialization.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/packed_params.h>
-#include <ATen/native/quantized/cpu/serialization_versions.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
 #include <ATen/quantized/QTensorImpl.h>
 #include <ATen/quantized/Quantizer.h>
@@ -220,13 +220,13 @@ CAFFE2_API torch::class_<ConvPackedParamsBase<kSpatialDim>> register_conv_params
     // TODO(before land): document the hack and add a deprecation date
     .def_pickle_setstate_boxed_DO_NOT_USE(
         [](const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>& params)
-        -> SerializationType { // __getstate__
+        -> ConvParamsSerializationType { // __getstate__
           return serialize_conv<kSpatialDim>(params);
         },
         // TODO(before land): document everything well
         [](c10::IValue v)
         -> c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> { // __setstate__
-          SerializationType state = parse_conv_serialized_state<kSpatialDim>(v);
+          ConvParamsSerializationType state = parse_conv_serialized_state<kSpatialDim>(v);
           return deserialize_conv<kSpatialDim>(state);
         })
     .def("weight", [](const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>& self) {

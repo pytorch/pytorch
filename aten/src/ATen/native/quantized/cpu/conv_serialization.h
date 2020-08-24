@@ -37,7 +37,7 @@
  *  2. list of optional tensors
  *    0: bias
  */
-using SerializationType = std::tuple<
+using ConvParamsSerializationType = std::tuple<
   // version
   std::string,
   // non-optional tensors
@@ -48,7 +48,8 @@ using SerializationType = std::tuple<
 // Parses any historical conv packed params format into
 // the current format.
 template <uint32_t kSpatialDim>
-SerializationType parse_conv_serialized_state(c10::IValue v) {
+ConvParamsSerializationType parse_conv_serialized_state(c10::IValue v) {
+
   // determine the version based on IValue contents
   int version = -1;
   if (v.isTuple()) {
@@ -70,7 +71,7 @@ SerializationType parse_conv_serialized_state(c10::IValue v) {
   TORCH_INTERNAL_ASSERT(version != -1, "Unable to parse serialization version");
   TORCH_INTERNAL_ASSERT(version >= 1 && version <= 2, "Unknown serialization version");
 
-  SerializationType state;
+  ConvParamsSerializationType state;
 
   if (version == 1) {
     // version 1 - convert to version 2 manually
@@ -140,7 +141,7 @@ SerializationType parse_conv_serialized_state(c10::IValue v) {
 }
 
 template <uint32_t kSpatialDim>
-SerializationType serialize_conv(
+ConvParamsSerializationType serialize_conv(
     const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>& params) {
 
   std::string version = "2";
@@ -177,7 +178,7 @@ SerializationType serialize_conv(
 
 template <uint32_t kSpatialDim>
 c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> deserialize_conv(
-    SerializationType state) {
+    ConvParamsSerializationType state) {
 
   std::string version;
   std::vector<at::Tensor> non_optional;
