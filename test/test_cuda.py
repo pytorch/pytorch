@@ -3028,7 +3028,7 @@ class TestCudaComm(TestCase):
         with self.assertRaisesRegex(RuntimeError, "expected (it|them) to be on GPU"):
             cuda @ cpu
 
-        for s, m1, m2 in product((cpu, cuda), repeats=3):
+        for s, m1, m2 in product((cpu, cuda), repeat=3):
             if s.device == m1.device == m2.device:
                 torch.addmm(s, m1, m2)
             else:
