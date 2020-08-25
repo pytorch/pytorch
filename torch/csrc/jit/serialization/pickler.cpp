@@ -384,6 +384,7 @@ void Pickler::pushLiteralTensor(const IValue& ivalue) {
         pushDouble(tensor.q_scale());
         pushInt(tensor.q_zero_point());
         break;
+      case at::kPerChannelAffineFloatQParams:
       case at::kPerChannelAffine: {
         const auto* quantizer = static_cast<at::PerChannelAffineQuantizer*>(
             tensor.quantizer().get());
