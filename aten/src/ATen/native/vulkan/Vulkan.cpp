@@ -35,36 +35,42 @@ namespace native {
 namespace vulkan {
 namespace detail {
 
-VContext::VContext(bool enableValidationLayers)
+VContext::VContext(const bool enableValidationLayers)
     : enableValidationLayers_(enableValidationLayers) {
   createInstance();
   findPhysicalDevice();
   createDevice();
+
+  computeUnitFactory_ = std::make_unique<ComputeUnitFactory>(device_);
 }
 
 VContext::~VContext() {
-  vkDestroyCommandPool(device_, commandPool_, nullptr);
   if (enableValidationLayers_) {
-    auto func = (PFN_vkDestroyDebugReportCallbackEXT)vkGetInstanceProcAddr(
+    const auto func = (PFN_vkDestroyDebugReportCallbackEXT)vkGetInstanceProcAddr(
         instance_, "vkDestroyDebugReportCallbackEXT");
     if (func) {
       func(instance_, debugReportCallback_, nullptr);
     }
   }
 
+  // ComputeUnitFactory_ owns ComputeUnits and VkPipelineCache, need valid
+  // VkDevice for destructing, destructing before vkDestroyDevice
+  computeUnitFactory_.reset();
+
+  vkDestroyCommandPool(device_, commandPool_, nullptr);
   vkDestroyDevice(device_, nullptr);
   vkDestroyInstance(instance_, nullptr);
 }
 
 static VKAPI_ATTR VkBool32 VKAPI_CALL debugReportCallbackFn(
-    VkDebugReportFlagsEXT msgFlags,
-    VkDebugReportObjectTypeEXT objectType,
-    uint64_t object,
-    size_t location,
-    int32_t msgCode,
-    const char* pLayerPrefix,
-    const char* pMsg,
-    void* pUserData) {
+    const VkDebugReportFlagsEXT msgFlags,
+    const VkDebugReportObjectTypeEXT objectType,
+    const uint64_t object,
+    const size_t location,
+    const int32_t msgCode,
+    const char* const pLayerPrefix,
+    const char* const pMsg,
+    void* const pUserData) {
   std::stringstream s;
   s << pLayerPrefix << " " << msgCode << " " << pMsg << std::endl;
   if (msgFlags & VK_DEBUG_REPORT_ERROR_BIT_EXT) {
@@ -82,10 +88,10 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debugReportCallbackFn(
 void VContext::createInstance() {
   std::vector<const char*> enabledExtensions;
   if (enableValidationLayers_) {
-    uint32_t layerPresentCount;
-    vkEnumerateInstanceLayerProperties(&layerPresentCount, nullptr);
+    uint32_t layerPresentCount = 0;
+    VK_CHECK(vkEnumerateInstanceLayerProperties(&layerPresentCount, nullptr));
     std::vector<VkLayerProperties> layerProps(layerPresentCount);
-    vkEnumerateInstanceLayerProperties(&layerPresentCount, layerProps.data());
+    VK_CHECK(vkEnumerateInstanceLayerProperties(&layerPresentCount, layerProps.data()));
     std::array<const char*, 6> instanceLayers{
         "VK_LAYER_GOOGLE_unique_objects",
         "VK_LAYER_GOOGLE_threading",
@@ -105,10 +111,10 @@ void VContext::createInstance() {
       }
     }
 
-    uint32_t extCount;
-    vkEnumerateInstanceExtensionProperties(nullptr, &extCount, nullptr);
+    uint32_t extCount = 0;
+    VK_CHECK(vkEnumerateInstanceExtensionProperties(nullptr, &extCount, nullptr));
     std::vector<VkExtensionProperties> extProps(extCount);
-    vkEnumerateInstanceExtensionProperties(nullptr, &extCount, extProps.data());
+    VK_CHECK(vkEnumerateInstanceExtensionProperties(nullptr, &extCount, extProps.data()));
     bool foundExt = false;
     for (VkExtensionProperties p : extProps) {
       if (strcmp(VK_EXT_DEBUG_REPORT_EXTENSION_NAME, p.extensionName) == 0) {
@@ -138,7 +144,7 @@ void VContext::createInstance() {
   createInfo.enabledExtensionCount = enabledExtensions.size();
   createInfo.ppEnabledExtensionNames = enabledExtensions.data();
 
-  vkCreateInstance(&createInfo, nullptr, &instance_);
+  VK_CHECK(vkCreateInstance(&createInfo, nullptr, &instance_));
 
   if (enableValidationLayers_) {
     VkDebugReportCallbackCreateInfoEXT debugReportCallbackCreateInfo{};
@@ -149,7 +155,7 @@ void VContext::createInstance() {
         VK_DEBUG_REPORT_PERFORMANCE_WARNING_BIT_EXT;
     debugReportCallbackCreateInfo.pfnCallback = &debugReportCallbackFn;
 
-    auto vkCreateDebugReportCallbackEXT =
+    const auto vkCreateDebugReportCallbackEXT =
         (PFN_vkCreateDebugReportCallbackEXT)vkGetInstanceProcAddr(
             instance_, "vkCreateDebugReportCallbackEXT");
     TORCH_CHECK(
@@ -164,21 +170,22 @@ void VContext::createInstance() {
 }
 
 void VContext::findPhysicalDevice() {
-  uint32_t deviceCount;
-  vkEnumeratePhysicalDevices(instance_, &deviceCount, nullptr);
+  uint32_t deviceCount = 0;
+  VK_CHECK(vkEnumeratePhysicalDevices(instance_, &deviceCount, nullptr));
   TORCH_CHECK(
       deviceCount > 0, "Vulkan: Could not find a device with vulkan support");
   std::vector<VkPhysicalDevice> devices(deviceCount);
-  vkEnumeratePhysicalDevices(instance_, &deviceCount, devices.data());
+  VK_CHECK(vkEnumeratePhysicalDevices(instance_, &deviceCount, devices.data()));
   physicalDevice_ = devices[0];
 }
 
 uint32_t VContext::getComputeQueueFamilyIndex() {
-  uint32_t queueFamilyCount;
+  uint32_t queueFamilyCount = 0;
 
   vkGetPhysicalDeviceQueueFamilyProperties(
       physicalDevice_, &queueFamilyCount, nullptr);
-
+  TORCH_CHECK(
+      queueFamilyCount > 0, "Vulkan: Invalid number of queue families");
   std::vector<VkQueueFamilyProperties> queueFamilies(queueFamilyCount);
   vkGetPhysicalDeviceQueueFamilyProperties(
       physicalDevice_, &queueFamilyCount, queueFamilies.data());
@@ -200,7 +207,7 @@ void VContext::createDevice() {
   queueFamilyIndex_ = getComputeQueueFamilyIndex();
   queueCreateInfo.queueFamilyIndex = queueFamilyIndex_;
   queueCreateInfo.queueCount = 1;
-  float queuePriorities = 1.0;
+  const float queuePriorities = 1.0f;
   queueCreateInfo.pQueuePriorities = &queuePriorities;
   VkDeviceCreateInfo deviceCreateInfo{};
   VkPhysicalDeviceFeatures deviceFeatures{};
@@ -218,7 +225,7 @@ void VContext::createDevice() {
   queue_ = {};
   vkGetDeviceQueue(device_, queueFamilyIndex_, 0, &queue_);
 
-  VkPhysicalDeviceProperties physicalDeviceProperties;
+  VkPhysicalDeviceProperties physicalDeviceProperties{};
   vkGetPhysicalDeviceProperties(physicalDevice_, &physicalDeviceProperties);
 
   VkCommandPoolCreateInfo commandPoolCreateInfo{};
@@ -260,10 +267,10 @@ bool is_available() {
 }
 
 uint32_t findMemoryType(
-    VkPhysicalDevice& physicalDevice,
-    uint32_t memoryTypeBits,
-    VkMemoryPropertyFlags properties) {
-  VkPhysicalDeviceMemoryProperties memoryProperties;
+    const VkPhysicalDevice physicalDevice,
+    const uint32_t memoryTypeBits,
+    const VkMemoryPropertyFlags properties) {
+  VkPhysicalDeviceMemoryProperties memoryProperties{};
   vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memoryProperties);
   for (uint32_t i = 0; i < memoryProperties.memoryTypeCount; ++i) {
     if ((memoryTypeBits & (1 << i)) &&
@@ -298,12 +305,12 @@ void VBuffer::MapMemory::flushWriteToHost() {
 }
 
 VBuffer::VBuffer(
-    VkDeviceSize bufferSizeBytes,
-    VkBufferUsageFlags bufferUsageFlags,
-    VkDescriptorType descriptorType)
+    const VkDeviceSize bufferSizeBytes,
+    const VkBufferUsageFlags bufferUsageFlags,
+    const VkDescriptorType descriptorType)
     : bufferSizeBytes_(bufferSizeBytes), descriptorType_(descriptorType) {
-  auto device = context().device();
-  auto physicalDevice = context().physicalDevice();
+  const auto device = context().device();
+  const auto physicalDevice = context().physicalDevice();
   VkBufferCreateInfo bufferCreateInfo{};
   bufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
   bufferCreateInfo.size = bufferSizeBytes_;
@@ -329,14 +336,16 @@ VBuffer::~VBuffer() {
   vkDestroyBuffer(context().device(), buffer_, nullptr);
 }
 
-void VBuffer::copy_from_device_to_host(void* outputData, int64_t size) {
+void VBuffer::copy_from_device_to_host(
+    void* const outputData, const int64_t size) const {
   auto mm = map();
   TORCH_INTERNAL_ASSERT(mm.ptr(), "Vulkan: Failed to map Vulkan Buffer memory");
   ::memcpy(outputData, mm.ptr(), size);
   mm.flushWriteToHost();
 }
 
-void VBuffer::copy_from_host_to_device(const void* data, int64_t size) {
+void VBuffer::copy_from_host_to_device(
+    const void* const data, const int64_t size) {
   auto mm = map();
   TORCH_INTERNAL_ASSERT(mm.ptr(), "Vulkan: Failed to map Vulkan Buffer memory");
   ::memcpy(mm.ptr(), data, size);
@@ -358,9 +367,9 @@ VkDescriptorBufferInfo VBuffer::makeDescriptorBufferInfo() const {
 }
 
 VkWriteDescriptorSet VBuffer::makeWriteDescriptorSet(
-    VkDescriptorSet descriptorSet,
-    uint32_t binding,
-    const VkDescriptorBufferInfo* bufferInfo) const {
+    const VkDescriptorSet descriptorSet,
+    const uint32_t binding,
+    const VkDescriptorBufferInfo* const bufferInfo) const {
   VkWriteDescriptorSet writeSet{};
   writeSet.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
   writeSet.pNext = nullptr;
@@ -375,18 +384,18 @@ VkWriteDescriptorSet VBuffer::makeWriteDescriptorSet(
   return writeSet;
 }
 
-void VBuffer::bind(VkDescriptorSet descriptorSet, uint32_t binding) const {
-  auto descrBufferInfo = makeDescriptorBufferInfo();
-  auto writeDescrSet =
+void VBuffer::bind(const VkDescriptorSet descriptorSet, const uint32_t binding) const {
+  const auto descrBufferInfo = makeDescriptorBufferInfo();
+  const auto writeDescrSet =
       makeWriteDescriptorSet(descriptorSet, binding, &descrBufferInfo);
   vkUpdateDescriptorSets(context().device(), 1, &writeDescrSet, 0, nullptr);
 }
 
 void VBuffer::addBufferMemoryBarrier(
-    VkCommandBuffer commandBuffer,
-    VkDeviceSize offset,
-    VkDeviceSize size) const {
-  VkBufferMemoryBarrier barrier;
+    const VkCommandBuffer commandBuffer,
+    const VkDeviceSize offset,
+    const VkDeviceSize size) const {
+  VkBufferMemoryBarrier barrier{};
   barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
   barrier.buffer = buffer_;
   barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
@@ -412,10 +421,10 @@ void VBuffer::addBufferMemoryBarrier(
       nullptr);
 }
 
-VImage::VImage(ImageSize imageSize, ImageSize dataSize)
+VImage::VImage(const ImageSize imageSize, const ImageSize dataSize)
     : imageSize_(imageSize), dataSize_(dataSize) {
-  auto device = context().device();
-  auto physicalDevice = context().physicalDevice();
+  const auto device = context().device();
+  const auto physicalDevice = context().physicalDevice();
 
   VkImageCreateInfo imageInfo{};
   imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
@@ -451,11 +460,11 @@ VImage::VImage(ImageSize imageSize, ImageSize dataSize)
   VK_CHECK(vkAllocateMemory(device, &allocInfo, nullptr, &imageMemory_));
   VK_CHECK(vkBindImageMemory(device, image_, imageMemory_, 0));
 
-  VkImageViewCreateInfo imageViewCreateInfo = makeImageViewCreateInfo();
+  const VkImageViewCreateInfo imageViewCreateInfo = makeImageViewCreateInfo();
   VK_CHECK(
       vkCreateImageView(device, &imageViewCreateInfo, nullptr, &imageView_));
 
-  VkSamplerCreateInfo samplerCreateInfo = makeSamplerCreateInfo();
+  const VkSamplerCreateInfo samplerCreateInfo = makeSamplerCreateInfo();
   VK_CHECK(vkCreateSampler(device, &samplerCreateInfo, nullptr, &sampler_));
 }
 
@@ -500,7 +509,7 @@ VkSamplerCreateInfo VImage::makeSamplerCreateInfo() const {
 }
 
 VkDescriptorImageInfo VImage::makeDescriptorImageInfo(
-    VkImageLayout imageLayout) const {
+    const VkImageLayout imageLayout) const {
   VkDescriptorImageInfo info{};
   info.sampler = sampler_;
   info.imageView = imageView_;
@@ -509,10 +518,10 @@ VkDescriptorImageInfo VImage::makeDescriptorImageInfo(
 }
 
 VkWriteDescriptorSet VImage::makeWriteDescriptorSet(
-    VkDescriptorSet descriptorSet,
-    uint32_t binding,
-    VkDescriptorType descriptorType,
-    const VkDescriptorImageInfo* imageInfo) const {
+    const VkDescriptorSet descriptorSet,
+    const uint32_t binding,
+    const VkDescriptorType descriptorType,
+    const VkDescriptorImageInfo* const imageInfo) const {
   VkWriteDescriptorSet writeSet{};
   writeSet.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
   writeSet.pNext = nullptr;
@@ -527,18 +536,18 @@ VkWriteDescriptorSet VImage::makeWriteDescriptorSet(
 }
 
 void VImage::bind(
-    VkDescriptorSet descriptorSet,
-    uint32_t binding,
-    VkDescriptorType descriptorType,
-    VkImageLayout imageLayout) const {
-  auto descrImageInfo = makeDescriptorImageInfo(imageLayout);
-  auto writeDescrSet = makeWriteDescriptorSet(
+    const VkDescriptorSet descriptorSet,
+    const uint32_t binding,
+    const VkDescriptorType descriptorType,
+    const VkImageLayout imageLayout) const {
+  const auto descrImageInfo = makeDescriptorImageInfo(imageLayout);
+  const auto writeDescrSet = makeWriteDescriptorSet(
       descriptorSet, binding, descriptorType, &descrImageInfo);
   vkUpdateDescriptorSets(context().device(), 1, &writeDescrSet, 0, nullptr);
 }
 
-void VImage::bindShaderRead(VkDescriptorSet descriptorSet, uint32_t binding)
-    const {
+void VImage::bindShaderRead(
+    const VkDescriptorSet descriptorSet, const uint32_t binding) const {
   bind(
       descriptorSet,
       binding,
@@ -546,8 +555,8 @@ void VImage::bindShaderRead(VkDescriptorSet descriptorSet, uint32_t binding)
       VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 }
 
-void VImage::bindStorageImage(VkDescriptorSet descriptorSet, uint32_t binding)
-    const {
+void VImage::bindStorageImage(
+    const VkDescriptorSet descriptorSet, const uint32_t binding) const {
   bind(
       descriptorSet,
       binding,
@@ -556,9 +565,9 @@ void VImage::bindStorageImage(VkDescriptorSet descriptorSet, uint32_t binding)
 }
 
 void VImage::addImageMemoryBarrier(
-    VkCommandBuffer commandBuffer,
-    VkImageLayout newLayout) const {
-  VkImageLayout oldLayout = imageLayout_;
+    const VkCommandBuffer commandBuffer,
+    const VkImageLayout newLayout) const {
+  const VkImageLayout oldLayout = imageLayout_;
   if (oldLayout == newLayout) {
     return;
   }
@@ -584,6 +593,11 @@ void VImage::addImageMemoryBarrier(
     barrier.srcAccessMask = 0;
     barrier.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
     srcStageMask = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+  } else if (
+      oldLayout == VK_IMAGE_LAYOUT_UNDEFINED &&
+      newLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
+    barrier.srcAccessMask = 0;
+    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
   } else if (
       oldLayout == VK_IMAGE_LAYOUT_GENERAL &&
       newLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
@@ -613,27 +627,27 @@ void VImage::addImageMemoryBarrier(
 }
 
 void VImage::addImageMemoryBarrierToGeneral(
-    VkCommandBuffer commandBuffer) const {
+    const VkCommandBuffer commandBuffer) const {
   addImageMemoryBarrier(commandBuffer, VK_IMAGE_LAYOUT_GENERAL);
 }
 
 void VImage::addImageMemoryBarrierToShaderRead(
-    VkCommandBuffer commandBuffer) const {
+    const VkCommandBuffer commandBuffer) const {
   addImageMemoryBarrier(
       commandBuffer, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 }
 
 VkDescriptorSetLayoutBinding descriptorSetLayoutBinding(
-    uint32_t binding,
-    VkDescriptorType descriptorType) {
+    const uint32_t binding,
+    const VkDescriptorType descriptorType) {
   return {binding, descriptorType, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr};
 }
 
 void createDescriptorSetLayout(
-    VkDevice device,
-    const VkDescriptorSetLayoutBinding* bindings,
-    uint32_t bindingCount,
-    VkDescriptorSetLayout* setLayout) {
+    const VkDevice device,
+    const VkDescriptorSetLayoutBinding* const bindings,
+    const uint32_t bindingCount,
+    VkDescriptorSetLayout* const setLayout) {
   VkDescriptorSetLayoutCreateInfo createInfo{};
   createInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
   createInfo.pNext = nullptr;
@@ -645,11 +659,11 @@ void createDescriptorSetLayout(
 }
 
 void createDescriptorPool(
-    VkDevice device,
+    const VkDevice device,
     const VkDescriptorPoolSize* poolSizes,
-    uint32_t poolSizeCount,
-    uint32_t maxSets,
-    VkDescriptorPool* descriptorPool) {
+    const uint32_t poolSizeCount,
+    const uint32_t maxSets,
+    VkDescriptorPool* const descriptorPool) {
   VkDescriptorPoolCreateInfo createInfo{};
   createInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
   createInfo.pNext = nullptr;
@@ -662,10 +676,10 @@ void createDescriptorPool(
 }
 
 void allocateDescriptorSet(
-    VkDevice device,
-    VkDescriptorPool descriptorPool,
-    const VkDescriptorSetLayout* descriptorSetLayout,
-    VkDescriptorSet* descriptorSet) {
+    const VkDevice device,
+    const VkDescriptorPool descriptorPool,
+    const VkDescriptorSetLayout* const descriptorSetLayout,
+    VkDescriptorSet* const descriptorSet) {
   VkDescriptorSetAllocateInfo allocateInfo{};
   allocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
   allocateInfo.pNext = nullptr;
@@ -676,12 +690,12 @@ void allocateDescriptorSet(
 }
 
 void createDescriptorSetLayoutSinglePool(
-    VkDevice device,
-    std::vector<VkDescriptorType> descrTypes,
-    VkDescriptorSetLayout* descrSetLayout,
-    VkDescriptorPool* descrPool,
-    VkDescriptorSet* descrSet) {
-  auto size = descrTypes.size();
+    const VkDevice device,
+    const std::vector<VkDescriptorType>& descrTypes,
+    VkDescriptorSetLayout* const descrSetLayout,
+    VkDescriptorPool* const descrPool,
+    VkDescriptorSet* const descrSet) {
+  const auto size = descrTypes.size();
   std::vector<VkDescriptorSetLayoutBinding> bindings;
   std::vector<VkDescriptorPoolSize> poolSizes;
   uint32_t i = 0;
@@ -696,6 +710,50 @@ void createDescriptorSetLayoutSinglePool(
   allocateDescriptorSet(device, *descrPool, descrSetLayout, descrSet);
 }
 
+void allocateCommandBuffer(VkDevice device, VkCommandBuffer* commandBuffer) {
+  VkCommandBufferAllocateInfo commandBufferAllocateInfo{};
+  commandBufferAllocateInfo.sType =
+      VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+  commandBufferAllocateInfo.commandPool = context().commandPool();
+  commandBufferAllocateInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+  commandBufferAllocateInfo.commandBufferCount = 1;
+
+  VK_CHECK(vkAllocateCommandBuffers(
+      device, &commandBufferAllocateInfo, commandBuffer));
+}
+
+void beginCommandBuffer(VkCommandBuffer commandBuffer) {
+  VkCommandBufferBeginInfo beginInfo{};
+  beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+  beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+  VK_CHECK(vkBeginCommandBuffer(commandBuffer, &beginInfo));
+}
+
+void endCommandBuffer(VkCommandBuffer commandBuffer) {
+  VK_CHECK(vkEndCommandBuffer(commandBuffer));
+}
+
+void submitAndWaitCommandBuffer(
+    VkDevice device,
+    VkQueue queue,
+    VkCommandBuffer commandBuffer) {
+  VkSubmitInfo submitInfo{};
+  submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+  submitInfo.commandBufferCount = 1;
+  submitInfo.pCommandBuffers = &commandBuffer;
+
+  VkFence fence;
+  VkFenceCreateInfo fenceCreateInfo{};
+  fenceCreateInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+  fenceCreateInfo.flags = 0;
+  VK_CHECK(vkCreateFence(device, &fenceCreateInfo, NULL, &fence))
+
+  VK_CHECK(vkQueueSubmit(queue, 1, &submitInfo, fence));
+  vkWaitForFences(device, 1, &fence, VK_TRUE, ComputeUnit::kFenceTimeoutNanos);
+
+  vkDestroyFence(device, fence, NULL);
+}
+
 ComputeUnit::~ComputeUnit() {
   vkDestroyShaderModule(context().device(), computeShaderModule_, nullptr);
   vkDestroyPipelineLayout(context().device(), pipelineLayout_, nullptr);
@@ -703,11 +761,12 @@ ComputeUnit::~ComputeUnit() {
 }
 
 void ComputeUnit::createComputePipeline(
-    const uint32_t* code,
+    const uint32_t* const code,
     const uint32_t codeSize,
-    const VkDescriptorSetLayout& descrSetLayout,
-    WorkGroupSize& workGroupSize) {
-  auto device = context().device();
+    const VkPipelineCache pipelineCache,
+    const VkDescriptorSetLayout descrSetLayout,
+    const WorkGroupSize workGroupSize) {
+  const auto device = context().device();
   VkShaderModuleCreateInfo createInfo{};
   createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
   createInfo.pCode = code;
@@ -763,43 +822,48 @@ void ComputeUnit::createComputePipeline(
   pipelineCreateInfo.layout = pipelineLayout_;
 
   VK_CHECK(vkCreateComputePipelines(
-      device, VK_NULL_HANDLE, 1, &pipelineCreateInfo, nullptr, &pipeline_));
+      device, pipelineCache, 1, &pipelineCreateInfo, nullptr, &pipeline_));
 }
 
 #ifdef USE_VULKAN_SHADERC_RUNTIME
 void ComputeUnit::createComputePipelineCompile(
-    std::string glslSrc,
-    const VkDescriptorSetLayout& descrSetLayout,
-    WorkGroupSize& workGroupSize) {
-  shaderc::Compiler compiler;
-  shaderc::CompileOptions options;
+    const std::string& glslSrc,
+    const VkPipelineCache pipelineCache,
+    const VkDescriptorSetLayout descrSetLayout,
+    const WorkGroupSize workGroupSize) {
+  shaderc::Compiler compiler{};
+  shaderc::CompileOptions options{};
   options.SetGenerateDebugInfo();
   options.SetTargetEnvironment(
       shaderc_target_env_vulkan, shaderc_env_version_vulkan_1_0);
   options.SetForcedVersionProfile(450, shaderc_profile_core);
-  shaderc::SpvCompilationResult compilationResult = compiler.CompileGlslToSpv(
+  const shaderc::SpvCompilationResult compilationResult = compiler.CompileGlslToSpv(
       glslSrc.c_str(),
       glslSrc.size(),
       shaderc_compute_shader,
       "vulkan_shader.comp",
       "main",
       options);
-  auto compilationStatus = compilationResult.GetCompilationStatus();
+  const auto compilationStatus = compilationResult.GetCompilationStatus();
   TORCH_INTERNAL_ASSERT(
       compilationStatus == shaderc_compilation_status_success,
       "Shader compilation error: status:",
       compilationStatus,
       compilationResult.GetErrorMessage());
-  std::vector<uint32_t> shaderSpvCode(
+  const std::vector<uint32_t> shaderSpvCode(
       compilationResult.cbegin(), compilationResult.cend());
   const auto codeSizeBytes = 4 * shaderSpvCode.size();
   createComputePipeline(
-      shaderSpvCode.data(), codeSizeBytes, descrSetLayout, workGroupSize);
+      shaderSpvCode.data(),
+      codeSizeBytes,
+      pipelineCache,
+      descrSetLayout,
+      workGroupSize);
 }
 #endif
 
 void ComputeUnit::createCommandBuffer(VkDescriptorSet& descriptorSet) {
-  auto device = context().device();
+  const auto device = context().device();
   VkCommandBufferAllocateInfo commandBufferAllocateInfo{};
   commandBufferAllocateInfo.sType =
       VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -828,10 +892,10 @@ void ComputeUnit::createCommandBuffer(VkDescriptorSet& descriptorSet) {
 }
 
 void ComputeUnit::addMemoryBarrier(
-    VkPipelineStageFlags srcStageMask,
-    VkAccessFlags srcAccessMask,
-    VkPipelineStageFlags dstStageMask,
-    VkAccessFlags dstAccessMask) {
+    const VkPipelineStageFlags srcStageMask,
+    const VkAccessFlags srcAccessMask,
+    const VkPipelineStageFlags dstStageMask,
+    const VkAccessFlags dstAccessMask) {
   VkMemoryBarrier barrier{};
   barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
   barrier.pNext = nullptr;
@@ -851,21 +915,21 @@ void ComputeUnit::addMemoryBarrier(
 }
 
 void ComputeUnit::dispatchCommandBuffer(
-    uint32_t groupCountX,
-    uint32_t groupCountY,
-    uint32_t groupCountZ) {
+    const uint32_t groupCountX,
+    const uint32_t groupCountY,
+    const uint32_t groupCountZ) {
   vkCmdDispatch(commandBuffer_, groupCountX, groupCountY, groupCountZ);
 }
 
 void ComputeUnit::endCommandBuffer() {
-  VK_CHECK(vkEndCommandBuffer(commandBuffer_));
+  at::native::vulkan::detail::endCommandBuffer(commandBuffer_);
 }
 
 void ComputeUnit::dispatchCommandBuffer(
-    uint32_t gridX,
-    uint32_t gridY,
-    uint32_t gridZ,
-    WorkGroupSize workGroupSize) {
+    const uint32_t gridX,
+    const uint32_t gridY,
+    const uint32_t gridZ,
+    const WorkGroupSize workGroupSize) {
   dispatchCommandBuffer(
       UP_DIV(gridX, workGroupSize.x),
       UP_DIV(gridY, workGroupSize.y),
@@ -878,7 +942,7 @@ void ComputeUnit::submitAndWaitCommandBuffer() {
   submitInfo.commandBufferCount = 1;
   submitInfo.pCommandBuffers = &commandBuffer_;
 
-  VkFence fence;
+  VkFence fence{};
   VkFenceCreateInfo fenceCreateInfo{};
   fenceCreateInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
   fenceCreateInfo.flags = 0;
@@ -890,23 +954,95 @@ void ComputeUnit::submitAndWaitCommandBuffer() {
   vkDestroyFence(context().device(), fence, NULL);
 }
 
-VBuffer makeUniformConstBuffer(void* ptr, VkDeviceSize size) {
+VBuffer makeUniformConstBuffer(const void* const ptr, const VkDeviceSize size) {
   VBuffer constBuffer = VBuffer::makeUniformBuffer(size);
   constBuffer.copy_from_host_to_device(ptr, size);
   return constBuffer;
 }
 
+ComputeUnitFactory::ComputeUnitFactory(const VkDevice device)
+    : device_(device) {
+  VkPipelineCacheCreateInfo createInfo{};
+  createInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
+  createInfo.pNext = nullptr;
+  createInfo.flags = 0;
+  createInfo.initialDataSize = 0;
+  createInfo.pInitialData = nullptr;
+  VK_CHECK(vkCreatePipelineCache(
+      device_, &createInfo, nullptr /* allocator */, &pipelineCache_));
+}
+
+ComputeUnitFactory::~ComputeUnitFactory() {
+  vkDestroyPipelineCache(device_, pipelineCache_, nullptr /* allocator */);
+}
+
+std::string ComputeUnitFactory::getCacheKey(
+    const char* const key,
+    const WorkGroupSize workGroupSize) {
+  std::stringstream ss;
+  ss << key << ':' << workGroupSize.x << ':' << workGroupSize.y << ':'
+     << workGroupSize.z;
+  return ss.str();
+}
+
+ComputeUnit& ComputeUnitFactory::get(
+    const std::string& cacheKey,
+    const std::function<std::shared_ptr<ComputeUnit>()> factoryFn) {
+  const auto it = computeUnits_.find(cacheKey);
+  if (it != computeUnits_.end()) {
+    return *(it->second.get());
+  }
+  auto computeUnit = factoryFn();
+  computeUnits_.insert(std::make_pair(cacheKey, computeUnit));
+  return *(computeUnit.get());
+}
+
+#ifdef USE_VULKAN_SHADERC_RUNTIME
+ComputeUnit& ComputeUnitFactory::get(
+    const char* const key,
+    const char* const glslSrc,
+    const VkDescriptorSetLayout descrSetLayout,
+    const WorkGroupSize workGroupSize) {
+  return get(
+      getCacheKey(key, workGroupSize),
+      [glslSrc,
+       pipelineCache = pipelineCache_,
+       descrSetLayout,
+       workGroupSize]() {
+        return std::make_shared<ComputeUnit>(
+            glslSrc, pipelineCache, descrSetLayout, workGroupSize);
+      });
+}
+#else
+ComputeUnit& ComputeUnitFactory::get(
+    const char* const key,
+    const uint32_t* const code,
+    const uint32_t codeSize,
+    const VkDescriptorSetLayout descrSetLayout,
+    const WorkGroupSize workGroupSize) {
+  return get(
+      getCacheKey(key, workGroupSize),
+      [code,
+       codeSize,
+       pipelineCache = pipelineCache_,
+       descrSetLayout,
+       workGroupSize]() {
+        return std::make_shared<ComputeUnit>(
+            code, codeSize, pipelineCache, descrSetLayout, workGroupSize);
+      });
+}
+#endif
+
 // VBuffer <-> VImage
 void copy_buffer_to_image(const VBuffer& buffer, VImage& image) {
-  auto device = context().device();
-  auto physicalDevice = context().physicalDevice();
+  const auto device = context().device();
+  const auto physicalDevice = context().physicalDevice();
   struct ConstBlock {
     int32_t w;
     int32_t h;
   };
-  ConstBlock constBlock{image.w(), image.h()};
-  VBuffer constBuffer =
-      makeUniformConstBuffer((void*)&constBlock, sizeof(constBlock));
+  const ConstBlock constBlock{image.w(), image.h()};
+  VBuffer constBuffer = makeUniformConstBuffer(&constBlock, sizeof(constBlock));
 
   VkDescriptorSetLayout descrSetLayout{};
   VkDescriptorSetLayoutBinding bindings[] = {
@@ -930,9 +1066,9 @@ void copy_buffer_to_image(const VBuffer& buffer, VImage& image) {
   buffer.bind(descrSet, 1);
   constBuffer.bind(descrSet, 2);
   WorkGroupSize workGroupSize{8, 8, 1};
-  ComputeUnit computeUnit{at::native::vulkan::GLSL_SPV(nchw_to_image),
-                          descrSetLayout,
-                          workGroupSize};
+
+  auto& computeUnit = context().computeUnitFactory().get(
+      GLSL_SPV(nchw_to_image), descrSetLayout, workGroupSize);
   computeUnit.createCommandBuffer(descrSet);
 
   image.addImageMemoryBarrierToGeneral(computeUnit.commandBuffer());
@@ -956,8 +1092,8 @@ void copy_image_to_buffer(
     const VImage& image,
     VBuffer& buffer,
     bool addBufferMemoryBarrierForHost) {
-  auto device = context().device();
-  auto physicalDevice = context().physicalDevice();
+  const auto device = context().device();
+  const auto physicalDevice = context().physicalDevice();
   TORCH_INTERNAL_ASSERT(
       buffer.sizeBytes() >= image.capacityBytes(),
       "VulkanBuffer's capacity is less than VulkanImage capacity to copy from");
@@ -965,12 +1101,11 @@ void copy_image_to_buffer(
     int32_t w;
     int32_t h;
   };
-  ConstBlock constBlock{image.w(), image.h()};
-  VBuffer constBuffer =
-      makeUniformConstBuffer((void*)&constBlock, sizeof(constBlock));
+  const ConstBlock constBlock{image.w(), image.h()};
+  VBuffer constBuffer = makeUniformConstBuffer(&constBlock, sizeof(constBlock));
 
   VkDescriptorSetLayout descrSetLayout{};
-  VkDescriptorSetLayoutBinding bindings[] = {
+  const VkDescriptorSetLayoutBinding bindings[] = {
       descriptorSetLayoutBinding(0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER),
       descriptorSetLayoutBinding(1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER),
       descriptorSetLayoutBinding(2, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)};
@@ -978,7 +1113,7 @@ void copy_image_to_buffer(
       device, bindings, 3 /* bindingsCount */, &descrSetLayout);
 
   VkDescriptorPool descrPool{};
-  VkDescriptorPoolSize poolSizes[] = {
+  const VkDescriptorPoolSize poolSizes[] = {
       {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1},
       {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1},
       {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1}};
@@ -992,10 +1127,9 @@ void copy_image_to_buffer(
   buffer.bind(descrSet, 1);
   constBuffer.bind(descrSet, 2);
 
-  WorkGroupSize workGroupSize{8, 8, 1};
-  ComputeUnit computeUnit{at::native::vulkan::GLSL_SPV(image_to_nchw),
-                          descrSetLayout,
-                          workGroupSize};
+  const WorkGroupSize workGroupSize{8, 8, 1};
+  auto& computeUnit = context().computeUnitFactory().get(
+      GLSL_SPV(image_to_nchw), descrSetLayout, workGroupSize);
 
   computeUnit.createCommandBuffer(descrSet);
   image.addImageMemoryBarrierToShaderRead(computeUnit.commandBuffer());
@@ -1016,11 +1150,37 @@ void copy_image_to_buffer(
   vkDestroyDescriptorSetLayout(device, descrSetLayout, nullptr);
 } // VBuffer <-> VImage
 
+void copy_buffer_to_buffer(
+    const VBuffer& srcBuffer,
+    VBuffer& dstBuffer,
+    VkDeviceSize size,
+    VkDeviceSize srcOffset,
+    VkDeviceSize dstOffset) {
+  auto device = context().device();
+  VkCommandBuffer commandBuffer{};
+  allocateCommandBuffer(device, &commandBuffer);
+  beginCommandBuffer(commandBuffer);
+
+  VkBufferCopy copyRegion{};
+  copyRegion.srcOffset = srcOffset;
+  copyRegion.dstOffset = dstOffset;
+  copyRegion.size = size;
+  vkCmdCopyBuffer(
+      commandBuffer,
+      srcBuffer.vkbuffer(),
+      dstBuffer.vkbuffer(),
+      1,
+      &copyRegion);
+
+  endCommandBuffer(commandBuffer);
+  submitAndWaitCommandBuffer(device, context().queue(), commandBuffer);
+}
+
 // VulkanTensor
 
-class VulkanTensor::Impl {
+class VulkanTensor::Impl final {
  public:
-  Impl(std::vector<int64_t> sizes)
+  explicit Impl(std::vector<int64_t> sizes)
       : sizes_(std::move(sizes)),
         strides_(std::vector<int64_t>(sizes_.size())),
         numel_(std::accumulate(
@@ -1053,12 +1213,19 @@ class VulkanTensor::Impl {
   }
 
   inline VBuffer* buffer() {
+    if (!has_buffer()) {
+      buffer_ = std::make_unique<VBuffer>(buffer_size_for_sizes(sizes_));
+    }
     return buffer_.get();
   }
 
   const VBuffer* buffer() const {
+    if (!has_buffer()) {
+      buffer_ = std::make_unique<VBuffer>(buffer_size_for_sizes(sizes_));
+    }
     return buffer_.get();
   }
+
   inline bool can_be_image() const {
     return dim() <= 4;
   }
@@ -1076,28 +1243,30 @@ class VulkanTensor::Impl {
         can_be_image(),
         "Vulkan: Only Tensors with dim <= 4 can be represented as Vulkam Image");
     auto d = dim();
-    uint32_t wd = 1;
-    uint32_t hd = 1;
-    uint32_t dd = 1;
+    int64_t _wd = 1;
+    int64_t _hd = 1;
+    int64_t _dd = 1;
     if (d == 4) {
-      wd = sizes_[3];
-      hd = sizes_[2];
-      dd = sizes_[1] * sizes_[0];
+      _wd = sizes_[3];
+      _hd = sizes_[2];
+      _dd = sizes_[1] * sizes_[0];
     } else if (d == 3) {
-      wd = sizes_[2];
-      hd = sizes_[1];
-      dd = sizes_[0];
+      _wd = sizes_[2];
+      _hd = sizes_[1];
+      _dd = sizes_[0];
     } else if (d == 2) {
-      wd = sizes_[1];
-      hd = sizes_[0];
+      _wd = sizes_[1];
+      _hd = sizes_[0];
     } else if (d == 1) {
-      wd = sizes_[0];
+      _wd = sizes_[0];
     }
-
+    int32_t wd = safe_downcast<int64_t>(_wd);
+    int32_t hd = safe_downcast<int64_t>(_hd);
+    int32_t dd = safe_downcast<int64_t>(_dd);
     return {{wd, hd, UP_DIV(dd, 4)}, {wd, hd, dd}};
   }
 
-  VImage* image(c10::optional<ImageSizes> imageSizes = c10::nullopt) {
+  VImage* image(const c10::optional<ImageSizes> imageSizes = c10::nullopt) {
     if (image_) {
       return image_.get();
     }
@@ -1119,46 +1288,53 @@ class VulkanTensor::Impl {
     return const_cast<VulkanTensor::Impl*>(this)->image(imageSizes);
   }
 
-  void allocate_storage() {
-    auto bufferSize = sizeof(float) * numel_;
+  VkDeviceSize buffer_size_for_sizes(std::vector<int64_t> sizes) const {
+    const auto d = sizes.size();
+    const auto numel = std::accumulate(
+        std::begin(sizes), std::end(sizes), 1, std::multiplies<int64_t>());
+    VkDeviceSize bufferSize{sizeof(float) * numel};
     // alignment to be able to copy between image and buffer
-    const auto d = dim();
     if (d == 4) {
-      bufferSize = sizeof(float) * ALIGN_UP4(sizes_[0] * sizes_[1]) *
-          sizes_[2] * sizes_[3];
+      bufferSize =
+          sizeof(float) * ALIGN_UP4(sizes[0] * sizes[1]) * sizes[2] * sizes[3];
     } else if (d == 3) {
-      bufferSize = sizeof(float) * ALIGN_UP4(sizes_[0]) * sizes_[1] * sizes_[2];
+      bufferSize = sizeof(float) * ALIGN_UP4(sizes[0]) * sizes[1] * sizes[2];
     } else if (d == 2) {
-      bufferSize = sizeof(float) * 4 * sizes_[0] * sizes_[1];
+      bufferSize = sizeof(float) * 4 * sizes[0] * sizes[1];
     } else if (d == 1) {
-      bufferSize = sizeof(float) * 4 * sizes_[0];
+      bufferSize = sizeof(float) * 4 * sizes[0];
     }
-    buffer_ = std::make_unique<VBuffer>(bufferSize);
+    return bufferSize;
   }
 
-  void set_data_from_host(const float* inputData) {
-    if (!has_storage()) {
-      allocate_storage();
-    }
-    buffer_->copy_from_host_to_device(
+  void allocate_storage() {
+    buffer_ = std::make_unique<VBuffer>(buffer_size_for_sizes(sizes_));
+  }
+
+  void set_data_from_host(const float* const inputData) {
+    buffer()->copy_from_host_to_device(
         (const void*)inputData, sizeof(float) * numel_);
   }
 
-  void copy_data_to_host(float* outputData) const {
+  void copy_data_to_host(float* const outputData) const {
+    sync_image_to_buffer();
+    buffer()->copy_from_device_to_host(outputData, sizeof(float) * numel_);
+  }
+
+  void sync_image_to_buffer() const {
     if (has_image()) {
       copy_image_to_buffer(
           *image(),
           *(const_cast<VBuffer*>(buffer())),
           true /* memory barrier for host memory map */);
     }
-    buffer_->copy_from_device_to_host(outputData, sizeof(float) * numel_);
   }
 
  private:
   std::vector<int64_t> sizes_;
   std::vector<int64_t> strides_;
   int64_t numel_;
-  std::unique_ptr<VBuffer> buffer_;
+  mutable std::unique_ptr<VBuffer> buffer_;
   std::unique_ptr<VImage> image_;
 };
 
@@ -1172,6 +1348,10 @@ std::shared_ptr<const VulkanTensor::Impl> VulkanTensor::impl() const {
 
 std::vector<int64_t> VulkanTensor::sizes() const {
   return impl()->sizes();
+}
+
+void VulkanTensor::sync_image_to_buffer() const {
+  return impl()->sync_image_to_buffer();
 }
 
 std::vector<int64_t> VulkanTensor::strides() const {
@@ -1194,11 +1374,11 @@ void VulkanTensor::allocate_storage() {
   impl()->allocate_storage();
 }
 
-void VulkanTensor::set_data_from_host(const float* inputData) {
+void VulkanTensor::set_data_from_host(const float* const inputData) {
   impl()->set_data_from_host(inputData);
 }
 
-void VulkanTensor::copy_data_to_host(float* outputData) {
+void VulkanTensor::copy_data_to_host(float* const outputData) const {
   impl()->copy_data_to_host(outputData);
 }
 
@@ -1222,11 +1402,11 @@ bool VulkanTensor::has_image() const {
   return impl()->has_image();
 }
 
-VImage* VulkanTensor::image(c10::optional<ImageSizes> imageSizes) {
+VImage* VulkanTensor::image(const c10::optional<ImageSizes> imageSizes) {
   return impl()->image(imageSizes);
 }
 
-const VImage* VulkanTensor::image(c10::optional<ImageSizes> imageSizes) const {
+const VImage* VulkanTensor::image(const c10::optional<ImageSizes> imageSizes) const {
   return impl()->image(imageSizes);
 }
 

@@ -1,5 +1,6 @@
-#include <type_traits>
 #include <ATen/native/BinaryOps.h>
+
+#include <type_traits>
 
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
@@ -34,6 +35,7 @@ DEFINE_DISPATCH(ge_stub);
 DEFINE_DISPATCH(eq_stub);
 DEFINE_DISPATCH(ne_stub);
 DEFINE_DISPATCH(sigmoid_backward_stub);
+DEFINE_DISPATCH(logit_backward_stub);
 DEFINE_DISPATCH(tanh_backward_stub);
 DEFINE_DISPATCH(max_elementwise_stub);
 DEFINE_DISPATCH(min_elementwise_stub);
@@ -41,6 +43,10 @@ DEFINE_DISPATCH(fmod_stub);
 DEFINE_DISPATCH(fmod_scalar_stub);
 DEFINE_DISPATCH(logaddexp_stub);
 DEFINE_DISPATCH(logaddexp2_stub);
+DEFINE_DISPATCH(gcd_stub);
+DEFINE_DISPATCH(lcm_stub);
+DEFINE_DISPATCH(hypot_stub);
+DEFINE_DISPATCH(nextafter_stub);
 
 Tensor& add_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar alpha) {
   auto iter = TensorIterator::binary_op(result, self, other,
@@ -162,19 +168,18 @@ Tensor& remainder_(Tensor& self, const Tensor& other) {
 }
 
 Tensor& true_divide_out(Tensor& result, const Tensor& self, const Tensor& divisor) {
-  // If both inputs have integral (or bool) types, creates
-  // temporary float copies as new inputs.
-  if (isIntegralType(self.scalar_type(), /*includeBool=*/ true)
-   && isIntegralType(divisor.scalar_type(), /*includeBool=*/ true)) {
-    const auto scalar_type = typeMetaToScalarType(c10::get_default_dtype());
-    auto iter = TensorIterator::binary_op(result,
-                                          self.to(scalar_type),
-                                          divisor.to(scalar_type),
-                                          /*check_mem_overlap=*/ true);
-    div_stub(iter.device_type(), iter);
-    return result;
-  }
-  auto iter = TensorIterator::binary_op(result, self, divisor, /*check_mem_overlap=*/ true);
+  TensorIterator iter = TensorIteratorConfig()
+     .set_check_mem_overlap(true)
+     .add_output(result)
+     .add_input(self)
+     .add_input(divisor)
+     .allow_cpu_scalars(true)
+     .promote_inputs_to_common_dtype(true)
+     .promote_integer_inputs_to_float(true)
+     .cast_common_dtype_to_outputs(true)
+     .enforce_safe_casting_to_output(true)
+     .build();
+
   div_stub(iter.device_type(), iter);
   return result;
 }
@@ -287,6 +292,28 @@ Tensor sigmoid_backward(const Tensor& grad_output, const Tensor& output) {
   Tensor result;
   auto iter = TensorIterator::binary_op(result, grad_output, output);
   sigmoid_backward_stub(iter.device_type(), iter);
+  return iter.output();
+}
+
+Tensor& logit_backward_out(
+    Tensor& result,
+    const Tensor& grad_output,
+    const Tensor& input,
+    c10::optional<double> eps) {
+  auto iter = TensorIterator::binary_op(result, grad_output, input);
+  logit_backward_stub(
+      iter.device_type(), iter, Scalar(eps ? eps.value() : -1.0));
+  return result;
+}
+
+Tensor logit_backward(
+    const Tensor& grad_output,
+    const Tensor& input,
+    c10::optional<double> eps) {
+  Tensor result;
+  auto iter = TensorIterator::binary_op(result, grad_output, input);
+  logit_backward_stub(
+      iter.device_type(), iter, Scalar(eps ? eps.value() : -1.0));
   return iter.output();
 }
 
@@ -828,6 +855,70 @@ Tensor logaddexp2(const Tensor& self, const Tensor& other) {
   return at::logaddexp2_out(result, self, other);
 }
 
+Tensor& gcd_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  auto iter = TensorIterator::binary_op(result, self, other, /*check_mem_overlap=*/ true);
+  gcd_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor gcd(const Tensor& self, const Tensor& other) {
+  Tensor result = at::empty({0}, self.options());
+  return at::gcd_out(result, self, other);
+}
+
+Tensor& gcd_(Tensor& self, const Tensor& other) {
+  return at::gcd_out(self, self, other);
+}
+
+Tensor& lcm_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  auto iter = TensorIterator::binary_op(result, self, other, /*check_mem_overlap=*/ true);
+  lcm_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor lcm(const Tensor& self, const Tensor& other) {
+  Tensor result = at::empty({0}, self.options());
+  return at::lcm_out(result, self, other);
+}
+
+Tensor& lcm_(Tensor& self, const Tensor& other) {
+  return at::lcm_out(self, self, other);
+}
+
+Tensor& hypot_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  auto iter = TensorIterator::binary_op(result, self, other);
+  hypot_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor hypot(const Tensor& self, const Tensor& other) {
+  Tensor result;
+  auto iter = TensorIterator::binary_op(result, self, other);
+  hypot_stub(iter.device_type(), iter);
+  return iter.output();
+}
+
+Tensor& hypot_(Tensor& self, const Tensor& other) {
+  return at::hypot_out(self, self, other);
+}
+
+Tensor& nextafter_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  auto iter = TensorIterator::binary_op(result, self, other);
+  nextafter_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor nextafter(const Tensor& self, const Tensor& other) {
+  Tensor result;
+  auto iter = TensorIterator::binary_op(result, self, other);
+  nextafter_stub(iter.device_type(), iter);
+  return iter.output();
+}
+
+Tensor& nextafter_(Tensor& self, const Tensor& other) {
+  return at::nextafter_out(self, self, other);
+}
+
 Tensor true_divide(const Tensor& self, Scalar divisor) {
   return self.true_divide(wrapped_scalar_tensor(divisor)); // redispatch!
 }
@@ -874,5 +965,5 @@ TORCH_LIBRARY_IMPL(aten, Meta, m) {
   m.impl("add.Tensor", binary_op_with_scalar_meta);
 }
 
-
-}}  // at::native
+} // namespace native
+} // namespace at

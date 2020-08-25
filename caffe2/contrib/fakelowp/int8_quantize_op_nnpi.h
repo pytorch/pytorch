@@ -21,9 +21,9 @@ namespace {
 static float ClampScale(float s)
 {
   const float MinScale(1e-10f);
-
-   if (std::fabs(s) < MinScale) {
-        LOG(WARNING) << "Too small scale detected: " << s << " clamping to +/-" << MinScale;
+    if (std::fabs(s) < MinScale) {
+        LOG_EVERY_N(WARNING, 1000) << "Too small scale detected: "
+            << s << " clamping to +/-" << MinScale;
         return std::signbit(s) ? -MinScale : MinScale;
     } else {
         return s;
@@ -51,7 +51,7 @@ void Int8QuantizeNNPI(
       in, in_fp16.data(), N, false /* no clamping */);
 
   std::vector<float> inv_scalev(N, inv_scale_fp16);
-  std::vector<float> offsetv(N, offset_tmp);
+  std::vector<float> offsetv(N, -offset_tmp);
   fake_fp16::fma_fp16(N, in_fp16.data(), inv_scalev.data(), offsetv.data());
   for (int i = 0; i < N; i++) {
     offsetv[i] = round(offsetv[i]);
@@ -87,7 +87,8 @@ class Int8QuantizeNNPIOp final : public Operator<CPUContext> {
     const auto& X = Input(0);
     auto* Y = Outputs()[0]->template GetMutable<Int8TensorCPU>();
     Y->t.ResizeLike(X);
-    int32_t Y_offset = this->template GetSingleArgument<int>("Y_zero_point", 0);
+    int32_t Y_offset =
+        this->template GetSingleArgument<int>("Y_zero_point", 0);
     auto Y_scale = this->template GetSingleArgument<float>("Y_scale", 1);
     Y->scale = Y_scale;
     Y->zero_point = Y_offset;

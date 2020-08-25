@@ -1,10 +1,11 @@
   caffe2_linux_build:
     <<: *caffe2_params
     machine:
-      image: ubuntu-1604:201903-01
+      image: ubuntu-1604:202007-01
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - checkout
+    - calculate_docker_image_tag
     - setup_linux_system_environment
     - setup_ci_environment
     - run:
@@ -40,10 +41,10 @@
 
           echo "DOCKER_IMAGE: "${DOCKER_IMAGE}
           time docker pull ${DOCKER_IMAGE} >/dev/null
-          export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
+          export id=$(docker run --env-file "${BASH_ENV}" --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${DOCKER_IMAGE})
           docker cp /home/circleci/project/. $id:/var/lib/jenkins/workspace
 
-          export COMMAND='((echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && ./ci_build_script.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
+          export COMMAND='((echo "sudo chown -R jenkins workspace && cd workspace && ./ci_build_script.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
 
           # Push intermediate Docker image for next phase to use
@@ -60,10 +61,11 @@
   caffe2_linux_test:
     <<: *caffe2_params
     machine:
-      image: ubuntu-1604:201903-01
+      image: ubuntu-1604:202007-01
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - checkout
+    - calculate_docker_image_tag
     - setup_linux_system_environment
     - setup_ci_environment
     - run:
@@ -111,13 +113,13 @@
           echo "DOCKER_IMAGE: "${COMMIT_DOCKER_IMAGE}
           time docker pull ${COMMIT_DOCKER_IMAGE} >/dev/null
           if [ -n "${USE_CUDA_DOCKER_RUNTIME}" ]; then
-            export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --runtime=nvidia -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
+            export id=$(docker run --env-file "${BASH_ENV}" --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --gpus all -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
           else
-            export id=$(docker run --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
+            export id=$(docker run --env-file "${BASH_ENV}" --cap-add=SYS_PTRACE --security-opt seccomp=unconfined -t -d -w /var/lib/jenkins ${COMMIT_DOCKER_IMAGE})
           fi
           docker cp /home/circleci/project/. "$id:/var/lib/jenkins/workspace"
 
-          export COMMAND='((echo "source ./workspace/env" && echo "sudo chown -R jenkins workspace && cd workspace && ./ci_test_script.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
+          export COMMAND='((echo "sudo chown -R jenkins workspace && cd workspace && ./ci_test_script.sh") | docker exec -u jenkins -i "$id" bash) 2>&1'
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
 
   caffe2_macos_build:

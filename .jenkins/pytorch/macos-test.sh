@@ -63,7 +63,7 @@ test_python_all() {
   # Increase default limit on open file handles from 256 to 1024
   ulimit -n 1024
 
-  python test/run_test.py --verbose --exclude test_jit_cuda_fuser_profiling test_jit_cuda_fuser_legacy test_jit_profiling test_jit_legacy test_jit_fuser_legacy test_jit_fuser_te test_tensorexpr --determine-from="$DETERMINE_FROM"
+  python test/run_test.py --verbose --exclude test_jit_cuda_fuser_profiling test_jit_cuda_fuser_legacy test_jit_legacy test_jit_fuser_legacy --determine-from="$DETERMINE_FROM"
 
   assert_git_not_dirty
 }
@@ -99,6 +99,26 @@ test_libtorch() {
   fi
 }
 
+test_custom_backend() {
+  echo "Testing custom backends"
+  pushd test/custom_backend
+  rm -rf build && mkdir build
+  pushd build
+  SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
+  CMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" cmake ..
+  make VERBOSE=1
+  popd
+
+  # Run Python tests and export a lowered module.
+  python test_custom_backend.py -v
+  python backend.py --export-module-to=model.pt
+  # Run C++ tests using the exported module.
+  build/test_custom_backend ./model.pt
+  rm -f ./model.pt
+  popd
+  assert_git_not_dirty
+}
+
 test_custom_script_ops() {
   echo "Testing custom script operators"
   pushd test/custom_operator
@@ -124,11 +144,13 @@ if [ -z "${BUILD_ENVIRONMENT}" ] || [[ "${BUILD_ENVIRONMENT}" == *-test ]]; then
   test_python_all
   test_libtorch
   test_custom_script_ops
+  test_custom_backend
 else
   if [[ "${BUILD_ENVIRONMENT}" == *-test1 ]]; then
     test_python_all
   elif [[ "${BUILD_ENVIRONMENT}" == *-test2 ]]; then
     test_libtorch
     test_custom_script_ops
+    test_custom_backend
   fi
 fi

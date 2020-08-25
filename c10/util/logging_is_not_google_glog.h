@@ -14,17 +14,16 @@
 
 #include <c10/util/Flags.h>
 
+const char CAFFE2_SEVERITY_PREFIX[] = "FEWIV";
+
+namespace c10 {
+
 // Log severity level constants.
-namespace google {
 const int GLOG_FATAL = 3;
 const int GLOG_ERROR = 2;
 const int GLOG_WARNING = 1;
 const int GLOG_INFO = 0;
-} // namespace google
 
-const char CAFFE2_SEVERITY_PREFIX[] = "FEWIV";
-
-namespace c10 {
 class C10_API MessageLogger {
  public:
   MessageLogger(const char* file, int line, int severity);
@@ -59,7 +58,7 @@ class C10_API LoggerVoidify {
 // Log a message and terminate.
 template <class T>
 void LogMessageFatal(const char* file, int line, const T& message) {
-  MessageLogger(file, line, ::google::GLOG_FATAL).stream() << message;
+  MessageLogger(file, line, GLOG_FATAL).stream() << message;
 }
 
 // Helpers for CHECK_NOTNULL(). Two are necessary to support both raw pointers
@@ -86,20 +85,20 @@ T& CheckNotNull(const char* file, int line, const char* names, T& t) {
 // ---------------------- Logging Macro definitions --------------------------
 
 static_assert(
-    CAFFE2_LOG_THRESHOLD <= ::google::GLOG_FATAL,
+    CAFFE2_LOG_THRESHOLD <= ::c10::GLOG_FATAL,
     "CAFFE2_LOG_THRESHOLD should at most be GLOG_FATAL.");
 // If n is under the compile time caffe log threshold, The _CAFFE_LOG(n)
 // should not generate anything in optimized code.
 #define LOG(n)                                    \
-  if (::google::GLOG_##n >= CAFFE2_LOG_THRESHOLD) \
-  ::c10::MessageLogger((char*)__FILE__, __LINE__, ::google::GLOG_##n).stream()
+  if (::c10::GLOG_##n >= CAFFE2_LOG_THRESHOLD) \
+  ::c10::MessageLogger((char*)__FILE__, __LINE__, ::c10::GLOG_##n).stream()
 #define VLOG(n)                   \
   if (-n >= CAFFE2_LOG_THRESHOLD) \
   ::c10::MessageLogger((char*)__FILE__, __LINE__, -n).stream()
 
 #define LOG_IF(n, condition)                                     \
-  if (::google::GLOG_##n >= CAFFE2_LOG_THRESHOLD && (condition)) \
-  ::c10::MessageLogger((char*)__FILE__, __LINE__, ::google::GLOG_##n).stream()
+  if (::c10::GLOG_##n >= CAFFE2_LOG_THRESHOLD && (condition)) \
+  ::c10::MessageLogger((char*)__FILE__, __LINE__, ::c10::GLOG_##n).stream()
 #define VLOG_IF(n, condition)                    \
   if (-n >= CAFFE2_LOG_THRESHOLD && (condition)) \
   ::c10::MessageLogger((char*)__FILE__, __LINE__, -n).stream()
@@ -109,15 +108,15 @@ static_assert(
 // Log with source location information override (to be used in generic
 // warning/error handlers implemented as functions, not macros)
 #define LOG_AT_FILE_LINE(n, file, line)           \
-  if (::google::GLOG_##n >= CAFFE2_LOG_THRESHOLD) \
-  ::c10::MessageLogger(file, line, ::google::GLOG_##n).stream()
+  if (::c10::GLOG_##n >= CAFFE2_LOG_THRESHOLD) \
+  ::c10::MessageLogger(file, line, ::c10::GLOG_##n).stream()
 
 // Log only if condition is met.  Otherwise evaluates to void.
 #define FATAL_IF(condition)                                    \
   condition ? (void)0                                          \
             : ::c10::LoggerVoidify() &                         \
           ::c10::MessageLogger(                                \
-              (char*)__FILE__, __LINE__, ::google::GLOG_FATAL) \
+              (char*)__FILE__, __LINE__, ::c10::GLOG_FATAL) \
               .stream()
 
 // Check for a given boolean condition.

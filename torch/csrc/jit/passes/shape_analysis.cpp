@@ -811,6 +811,7 @@ class ShapePropagator {
             "aten::neg(Tensor self) -> Tensor",
             "aten::t(Tensor self) -> Tensor",
             "aten::sigmoid(Tensor self) -> Tensor",
+            "aten::logit(Tensor self, float? eps=None) -> Tensor",
             "aten::tanh(Tensor self) -> Tensor",
             "aten::relu(Tensor self) -> Tensor",
             "aten::asin(Tensor self) -> Tensor",
@@ -1964,6 +1965,8 @@ class ShapePropagator {
       broadcastBinary(node, tensor_types, 0, 1);
       return PropagateShapeOnNodeByRunningIt(node);
     } else if (
+        node->matches(
+            "aten::logit(Tensor self, float? eps = None) -> Tensor") ||
         node->matches("aten::neg(Tensor self) -> Tensor") ||
         node->matches("aten::sigmoid(Tensor self) -> Tensor") ||
         node->matches("aten::tanh(Tensor self) -> Tensor")) {

@@ -8,7 +8,7 @@ Please see README.md in this directory for details.
 import os
 import shutil
 import sys
-from collections import OrderedDict, namedtuple
+from collections import namedtuple
 
 import cimodel.data.binary_build_definitions as binary_build_definitions
 import cimodel.data.caffe2_build_definitions as caffe2_build_definitions
@@ -83,6 +83,7 @@ class Header(object):
 
 def gen_build_workflows_tree():
     build_workflows_functions = [
+        cimodel.data.simple.docker_definitions.get_workflow_jobs,
         pytorch_build_definitions.get_workflow_jobs,
         cimodel.data.simple.macos_definitions.get_workflow_jobs,
         cimodel.data.simple.android_definitions.get_workflow_jobs,
@@ -95,18 +96,14 @@ def gen_build_workflows_tree():
         cimodel.data.simple.nightly_ios.get_workflow_jobs,
         cimodel.data.simple.nightly_android.get_workflow_jobs,
         windows_build_definitions.get_windows_workflows,
+        binary_build_definitions.get_post_upload_jobs,
+        binary_build_definitions.get_binary_smoke_test_jobs,
     ]
 
     binary_build_functions = [
         binary_build_definitions.get_binary_build_jobs,
         binary_build_definitions.get_nightly_tests,
         binary_build_definitions.get_nightly_uploads,
-        binary_build_definitions.get_post_upload_jobs,
-        binary_build_definitions.get_binary_smoke_test_jobs,
-    ]
-
-    docker_builder_functions = [
-        cimodel.data.simple.docker_definitions.get_workflow_jobs
     ]
 
     return {
@@ -115,19 +112,6 @@ def gen_build_workflows_tree():
                 "when": r"<< pipeline.parameters.run_binary_tests >>",
                 "jobs": [f() for f in binary_build_functions],
             },
-            "docker_build": OrderedDict(
-                {
-                    "triggers": [
-                        {
-                            "schedule": {
-                                "cron": miniutils.quote("0 15 * * 0"),
-                                "filters": {"branches": {"only": ["master"]}},
-                            }
-                        }
-                    ],
-                    "jobs": [f() for f in docker_builder_functions],
-                }
-            ),
             "build": {"jobs": [f() for f in build_workflows_functions]},
         }
     }

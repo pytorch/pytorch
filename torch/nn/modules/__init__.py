@@ -30,7 +30,7 @@ from .fold import Fold, Unfold
 from .adaptive import AdaptiveLogSoftmaxWithLoss
 from .transformer import TransformerEncoder, TransformerDecoder, \
     TransformerEncoderLayer, TransformerDecoderLayer, Transformer
-from .flatten import Flatten
+from .flatten import Flatten, Unflatten
 
 __all__ = [
     'Module', 'Identity', 'Linear', 'Conv1d', 'Conv2d', 'Conv3d', 'ConvTranspose1d',
@@ -54,5 +54,5 @@ __all__ = [
     'ConstantPad3d', 'Bilinear', 'CosineSimilarity', 'Unfold', 'Fold',
     'AdaptiveLogSoftmaxWithLoss', 'TransformerEncoder', 'TransformerDecoder',
     'TransformerEncoderLayer', 'TransformerDecoderLayer', 'Transformer',
-    'Flatten', 'Hardsigmoid', 'Hardswish', 'SiLU',
+    'Flatten', 'Unflatten', 'Hardsigmoid', 'Hardswish', 'SiLU',
 ]

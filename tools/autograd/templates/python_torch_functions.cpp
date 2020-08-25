@@ -255,8 +255,7 @@ static PyObject * THPVariable_full(PyObject* self, PyObject* args, PyObject* kwa
       .dtype(r.scalartypeOptional(3))
       .layout(r.layout(4))
       .device(r.device(5))
-      .pinned_memory(r.toBool(6))
-      .requires_grad(r.toBool(7));
+      .pinned_memory(r.toBool(6));
 
   if (r.idx == 0) {
     // full

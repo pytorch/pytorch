@@ -14,49 +14,49 @@ public:
   template <typename scalar_t>
   constexpr void operator() (scalar_t * self_data, scalar_t * src_data) const {
     *self_data *= *src_data;
-  };
+  }
 
   constexpr void operator() (bool * self_data, bool * src_data) const {
     *self_data = *self_data && *src_data;
-  };
+  }
 };
-ReduceMultiply reduce_multiply;
+static ReduceMultiply reduce_multiply;
 
 class ReduceAdd {
 public:
   template <typename scalar_t>
   constexpr void operator() (scalar_t * self_data, scalar_t * src_data) const {
     *self_data += *src_data;
-  };
+  }
 };
-ReduceAdd reduce_add;
+static ReduceAdd reduce_add;
 
 class ReduceSubtract {
 public:
   template <typename scalar_t>
   constexpr void operator() (scalar_t * self_data, scalar_t * src_data) const {
     *self_data -= *src_data;
-  };  
+  }
 };
-ReduceSubtract reduce_subtract;
-  
+static ReduceSubtract reduce_subtract;
+
 class ReduceDivide {
 public:
   template <typename scalar_t>
   constexpr void operator() (scalar_t * self_data, scalar_t * src_data) const {
     *self_data /= *src_data;
-  };  
+  }
 };
-ReduceDivide reduce_divide;
+static ReduceDivide reduce_divide;
 
 class TensorAssign {
 public:
   template <typename scalar_t>
   constexpr void operator() (scalar_t * self_data, scalar_t * src_data) const {
     *self_data = *src_data;
-  };    
+  }
 };
-TensorAssign tensor_assign;
+static TensorAssign tensor_assign;
 
 template <bool is_scatter_like = true>
 struct _cpu_scatter_gather_dim_loop {
@@ -158,7 +158,7 @@ struct cpu_scatter_gather_base_kernel {
 
     auto index_dim_stride = ensure_nonempty_stride(index, dim);
     auto index_dim_size = ensure_nonempty_size(index, dim);
-    
+
     auto index_upper_bound = self_dim_size;
 
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
@@ -166,7 +166,7 @@ struct cpu_scatter_gather_base_kernel {
       method_name, [&] {
         constexpr auto SELF_ITER_STRIDE_IDX = 0;
         constexpr auto INDEX_ITER_STRIDE_IDX = 1;
-        
+
         auto loop = [&](char** data, const int64_t* strides, int64_t n) {
           auto* self_data_bytes = data[SELF_ITER_STRIDE_IDX];
           auto* index_data_bytes = data[INDEX_ITER_STRIDE_IDX];
@@ -215,8 +215,8 @@ struct cpu_scatter_gather_base_kernel {
       }
     );
   }
-  
-  template <typename func_t>  
+
+  template <typename func_t>
   void operator()(Tensor& self, int64_t dim,
     const Tensor& index, const Tensor& src,
     const std::string& method_name, func_t& kernel_func) {
@@ -250,7 +250,7 @@ struct cpu_scatter_gather_base_kernel {
 
     auto index_dim_stride = ensure_nonempty_stride(index, dim);
     auto index_dim_size = ensure_nonempty_size(index, dim);
-    
+
     auto src_dim_stride = ensure_nonempty_stride(src, dim);
     auto src_dim_size = ensure_nonempty_size(src, dim);
 

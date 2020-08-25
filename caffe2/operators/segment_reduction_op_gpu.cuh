@@ -12,6 +12,33 @@
 
 namespace caffe2{
 
+template <typename T>
+struct SharedMemory;
+
+template <>
+struct SharedMemory<double> {
+  __device__ double* getPointer() {
+    extern __shared__ double s_double[];
+    return s_double;
+  }
+};
+
+template <>
+struct SharedMemory<float> {
+  __device__ float* getPointer() {
+    extern __shared__ float s_float[];
+    return s_float;
+  }
+};
+
+template <>
+struct SharedMemory<at::Half> {
+  __device__ at::Half* getPointer() {
+    extern __shared__ at::Half s_half[];
+    return s_half;
+  }
+};
+
 template <
     typename T,
     typename IndexType,
@@ -37,7 +64,8 @@ __global__ void sparse_length_sum_kernel(
   CUDA_KERNEL_ASSERT(start <= len_indices);
   CUDA_KERNEL_ASSERT(end <= len_indices);
 
-  extern __shared__ T reduceVals[];
+  struct SharedMemory<T> smem;
+  T* reduceVals = smem.getPointer();
 
   if (ExactBlock) {
     T sum = (T)0;

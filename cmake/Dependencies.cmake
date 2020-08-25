@@ -46,7 +46,7 @@ endif()
 # 3. If MSVC_Z7_OVERRIDE is ON, then /Zi and /ZI will be replaced with /Z7
 #    for Debug and RelWithDebInfo builds
 if(MSVC)
-  foreach(flag_var 
+  foreach(flag_var
       CMAKE_C_FLAGS CMAKE_C_FLAGS_RELEASE CMAKE_C_FLAGS_MINSIZEREL
       CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_RELEASE CMAKE_CXX_FLAGS_MINSIZEREL)
     if(${flag_var} MATCHES "/Z[iI7]")
@@ -87,13 +87,13 @@ if(USE_TBB)
   set(OLD_CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
   set(CMAKE_CXX_FLAGS)
 
-  set(TBB_ROOT_DIR "${CMAKE_SOURCE_DIR}/third_party/tbb")
+  set(TBB_ROOT_DIR "${PROJECT_SOURCE_DIR}/third_party/tbb")
   set(TBB_BUILD_STATIC OFF CACHE BOOL " " FORCE)
   set(TBB_BUILD_SHARED ON CACHE BOOL " " FORCE)
   set(TBB_BUILD_TBBMALLOC OFF CACHE BOOL " " FORCE)
   set(TBB_BUILD_TBBMALLOC_PROXY OFF CACHE BOOL " " FORCE)
   set(TBB_BUILD_TESTS OFF CACHE BOOL " " FORCE)
-  add_subdirectory(${CMAKE_SOURCE_DIR}/aten/src/ATen/cpu/tbb)
+  add_subdirectory(${PROJECT_SOURCE_DIR}/aten/src/ATen/cpu/tbb)
   set_property(TARGET tbb tbb_def_files PROPERTY FOLDER "dependencies")
 
   set(CMAKE_CXX_FLAGS ${OLD_CMAKE_CXX_FLAGS})
@@ -584,7 +584,7 @@ if(BUILD_TEST OR BUILD_MOBILE_BENCHMARK OR BUILD_MOBILE_TEST)
               "-P"
               "${CMAKE_CURRENT_LIST_DIR}/GoogleTestPatch.cmake"
       RESULT_VARIABLE _exitcode)
-    if(NOT ${_exitcode} EQUAL 0)
+    if(NOT _exitcode EQUAL 0)
       message(WARNING "Patching failed for Google Test. The build may fail.")
     endif()
   endif()
@@ -634,7 +634,7 @@ if(BUILD_TEST OR BUILD_MOBILE_BENCHMARK OR BUILD_MOBILE_TEST)
               "-P"
               "${CMAKE_CURRENT_LIST_DIR}/GoogleTestPatch.cmake"
       RESULT_VARIABLE _exitcode)
-    if(NOT ${_exitcode} EQUAL 0)
+    if(NOT _exitcode EQUAL 0)
       message(WARNING "Reverting changes failed for Google Test. The build may fail.")
     endif()
   endif()
@@ -819,8 +819,13 @@ endif()
 
 # ---[ Caffe2 depends on FP16 library for half-precision conversions
 if(NOT TARGET fp16 AND NOT USE_SYSTEM_FP16)
+  set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
+  # PSIMD is required by FP16
+  if(NOT DEFINED PSIMD_SOURCE_DIR)
+    set(PSIMD_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/psimd" CACHE STRING "PSimd source directory")
+  endif()
   if(NOT DEFINED FP16_SOURCE_DIR)
-    set(FP16_SOURCE_DIR "${CMAKE_CURRENT_LIST_DIR}/../third_party/FP16" CACHE STRING "FP16 source directory")
+    set(FP16_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/FP16" CACHE STRING "FP16 source directory")
   endif()
 
   set(FP16_BUILD_TESTS OFF CACHE BOOL "")
@@ -872,7 +877,7 @@ if(BUILD_PYTHON)
     execute_process(
         COMMAND "${PYTHON_EXECUTABLE}" "--version"
         RESULT_VARIABLE _exitcode OUTPUT_VARIABLE PYTHON_VERSION)
-    if(NOT ${_exitcode} EQUAL 0)
+    if(NOT _exitcode EQUAL 0)
       message(FATAL_ERROR "The Python executable ${PYTHON_EXECUTABLE} cannot be run. Make sure that it is an absolute path.")
     endif()
     if(PYTHON_VERSION)
@@ -950,7 +955,7 @@ if(BUILD_PYTHON)
 endif()
 
 # ---[ pybind11
-if(NOT ${pybind11_PREFER_third_party})
+if(NOT pybind11_PREFER_third_party)
   find_package(pybind11 CONFIG)
   if(NOT pybind11_FOUND)
     find_package(pybind11)
@@ -1221,7 +1226,7 @@ if(USE_NCCL)
         "Not using CUDA/ROCM, so disabling USE_NCCL. Suppress this warning with "
         "-DUSE_NCCL=OFF.")
     caffe2_update_option(USE_NCCL OFF)
-  elseif(NOT ${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
+  elseif(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
     message(WARNING "NCCL is currently only supported under Linux.")
     caffe2_update_option(USE_NCCL OFF)
   elseif(USE_CUDA)
@@ -1302,17 +1307,12 @@ if(USE_DISTRIBUTED AND USE_TENSORPIPE)
   if(MSVC)
     message(WARNING "Tensorpipe cannot be used on Windows.")
   else()
-    set(__PYTORCH_BUILD ${PYTORCH_BUILD})
-    set(PYTORCH_BUILD ON)
-    set(__BUILD_TESTING ${BUILD_TESTING})
-    set(BUILD_TESTING OFF)
-    set(TP_BUILD_PYTHON OFF)
-    set(TP_BUILD_LIBUV ON)
+    set(TP_BUILD_LIBUV ON CACHE BOOL "" FORCE)
+    set(TP_ENABLE_SHM OFF CACHE BOOL "" FORCE)
+    set(TP_ENABLE_CMA OFF CACHE BOOL "" FORCE)
+    set(TP_STATIC_OR_SHARED STATIC CACHE STRING "" FORCE)
 
     add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/tensorpipe)
-
-    set(PYTORCH_BUILD ${__PYTORCH_BUILD})
-    set(BUILD_TESING ${__BUILD_TESTING})
 
     list(APPEND Caffe2_DEPENDENCY_LIBS tensorpipe)
   endif()
@@ -1731,7 +1731,7 @@ endif()
 # End ATen checks
 #
 
-add_subdirectory(${CMAKE_SOURCE_DIR}/third_party/fmt)
+add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/fmt)
 
 # Disable compiler feature checks for `fmt`.
 #
