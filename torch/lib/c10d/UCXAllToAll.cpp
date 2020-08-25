@@ -119,7 +119,7 @@ torch_ucx_status_t torch_ucx_alltoall_start(torch_ucx_coll_comm_t *comm,
         total_reqs = comm->config.chunk;
     }
     request->reqs = new torch_ucx_request_t*[2*(total_reqs+1)];
-    memset(request->reqs, 0, total_reqs * sizeof(torch_ucx_request_t));
+    memset(request->reqs, 0, 2*(total_reqs+1) * sizeof(torch_ucx_request_t));
 
     torch_ucx_recv_nb(p2p_comm, (void*)(rbuf+data_size*group_rank), data_size,
                       group_rank, tag, &request->reqs[2*total_reqs],
@@ -243,7 +243,7 @@ torch_ucx_status_t torch_ucx_alltoallv_start(torch_ucx_coll_comm_t *comm,
         total_reqs = comm->config.chunk;
     }
     request->reqs = new torch_ucx_request_t*[2*(total_reqs+1)];
-    memset(request->reqs, 0, total_reqs * sizeof(torch_ucx_request_t));
+    memset(request->reqs, 0, 2*(total_reqs+1) * sizeof(torch_ucx_request_t));
 
     send_size = request->send_lengths[group_rank];
     recv_size = request->recv_lengths[group_rank];

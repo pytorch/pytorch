@@ -43,6 +43,8 @@ class ProcessGroupUCX : public ProcessGroup {
     bool isSuccess() const override;
     bool wait(std::chrono::milliseconds timeout = kUnsetTimeout) override;
    protected:
+    at::Tensor               src;
+    at::Tensor               dst;
     bool                     no_progress;
     torch_ucx_coll_request_t *req;
     friend class ProcessGroupUCX;

@@ -116,6 +116,17 @@ static inline void torch_ucx_request_free(torch_ucx_request_t *request)
     ucp_request_free(request);
 }
 
+static inline torch_ucx_status_t torch_ucx_check_req(ucs_status_ptr_t st)
+{
+    if (UCS_PTR_IS_ERR(st)) {
+        fprintf(stderr, "ProcessGroupUCC: %s\n",
+                ucs_status_string(UCS_PTR_STATUS(st)));
+        return TORCH_UCX_ERROR;
+    }
+
+    return TORCH_UCX_OK;
+}
+
 void torch_ucx_send_cmpl_cb(void* request, ucs_status_t status);
 void torch_ucx_recv_cmpl_cb(void* request, ucs_status_t status,
                             ucp_tag_recv_info_t *info);
@@ -156,8 +167,10 @@ torch_ucx_send_nb(torch_ucx_comm_t *comm,
     };
     //fprintf(stderr, "rank %d send tag %" PRIu64 "\n", comm->rank, ucp_tag);    
     st = ucp_tag_send_nb(ep, data, 1, dt, ucp_tag, torch_ucx_send_cmpl_cb);
+    if (torch_ucx_check_req(st) != TORCH_UCX_OK) {
+        return TORCH_UCX_ERROR;
+    };
     *req = reinterpret_cast<torch_ucx_request_t*>(st);
-    /*TODO: check request*/
 
     return TORCH_UCX_OK;
 }
@@ -190,8 +203,10 @@ torch_ucx_recv_nb(torch_ucx_comm_t *comm,
     //fprintf(stderr, "rank %d recv tag %" PRIu64 " mask %" PRIu64 "\n", comm->rank, ucp_tag, ucp_tag_mask );
     st = ucp_tag_recv_nb(comm->worker, data, 1, dt, ucp_tag, ucp_tag_mask,
                          torch_ucx_recv_cmpl_cb);
+    if (torch_ucx_check_req(st) != TORCH_UCX_OK) {
+        return TORCH_UCX_ERROR;
+    };
     *req = reinterpret_cast<torch_ucx_request_t*>(st);
-    /*TODO: check request*/
 
     return TORCH_UCX_OK;
 }

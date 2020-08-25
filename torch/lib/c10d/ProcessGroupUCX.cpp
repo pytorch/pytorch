@@ -277,6 +277,8 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupUCX::alltoall_base(
   assertDense(invalidArgument, {inputTensor});
 
   auto request = std::make_shared<ProcessGroupUCX::WorkUCXColl>();
+  request->src = inputTensor;
+  request->dst = outputTensor;
   torch_ucx_coll_request_t *req = request->req;
   req->src_buf_mtype = inputTensor.is_cuda() ? TORCH_UCX_CUDA: TORCH_UCX_HOST;
   req->dst_buf_mtype = outputTensor.is_cuda() ? TORCH_UCX_CUDA: TORCH_UCX_HOST;
