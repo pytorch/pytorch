@@ -107,7 +107,10 @@ namespace jit {
   _(LiteInterpreterDict)                          \
   _(MobileNamedParameters)                        \
   _(MobileSaveLoadData)                           \
+  _(MobileSaveLoadParameters)                     \
+  _(MobileSaveLoadParametersEmpty)                \
   _(LiteSGD)                                      \
+  _(LiteSequentialSampler)                        \
   _(FusionAliasing)
 
 #if defined(USE_CUDA)
@@ -118,6 +121,7 @@ namespace jit {
   _(GraphExecutor)                                  \
   _(ModuleConversion)                               \
   _(Interp)                                         \
+  _(TypeCheck)                                      \
   _(GPU_IrGraphGenerator)                           \
   _(GPU_FusionDispatch)                             \
   _(GPU_FusionClear)                                \
@@ -223,7 +227,8 @@ namespace jit {
   _(Fusion)                     \
   _(GraphExecutor)              \
   _(ModuleConversion)           \
-  _(Interp)
+  _(Interp)                     \
+  _(TypeCheck)
 #endif
 
 #define DECLARE_JIT_TEST(name) void test##name();
