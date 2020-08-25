@@ -264,9 +264,7 @@ class MultiProcessTestCase(TestCase):
         test_skips_manager = Manager()
         test_skips = test_skips_manager.dict()
         global TEST_SKIPS
-        for k, v in TEST_SKIPS.items():
-            test_skips[k] = v
-
+        test_skips.update(TEST_SKIPS)
         TEST_SKIPS = test_skips
 
         self.processes = []
