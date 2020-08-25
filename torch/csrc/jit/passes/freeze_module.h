@@ -21,7 +21,8 @@ namespace jit {
 
 TORCH_API Module freeze_module(
     const Module& module,
-    std::vector<std::string> preservedAttrs = std::vector<std::string>());
+    std::vector<std::string> preservedAttrs = std::vector<std::string>(),
+    bool freezeInterfaces = true);
 
 } // namespace jit
 } // namespace torch
