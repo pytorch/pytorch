@@ -23,57 +23,52 @@ graph(%a.1 : Tensor,
     InterpreterState interp(function);
     {
       // TypeCheck yields to true! Shape, grad and device matches.
-      auto a = at::zeros({2, 2});
-      auto b = at::ones({3, 3});
+      auto a = at::zeros({2, 2}, at::kFloat);
+      auto b = at::ones({3, 3}, at::kFloat);
       a.set_requires_grad(true);
       a = a.to(at::kCPU);
       std::vector<IValue> stack({a, b});
       interp.run(stack);
-      bool ret = stack[2].toBool();
       ASSERT_TRUE(exactlyEqual(stack[0].toTensor(), a));
       ASSERT_TRUE(exactlyEqual(stack[1].toTensor(), b));
-      ASSERT_TRUE(ret);
+      ASSERT_TRUE(stack[2].toBool());
     }
     {
-      auto a = at::zeros({2, 2});
-      auto b = at::ones({2, 2}); // Size mismatch
+      auto a = at::zeros({2, 2}, at::kFloat);
+      auto b = at::ones({2, 2}, at::kFloat); // Size mismatch
       a.set_requires_grad(true);
       a = a.to(at::kCPU);
       std::vector<IValue> stack({a, b});
       interp.run(stack);
-      bool ret2 = stack[2].toBool();
-      ASSERT_FALSE(ret2);
+      ASSERT_FALSE(stack[2].toBool());
     }
     {
-      auto a = at::zeros({2, 2});
-      auto b = at::ones({3, 3});
+      auto a = at::zeros({2, 2}, at::kFloat);
+      auto b = at::ones({3, 3}, at::kFloat);
       a = a.to(at::kCPU);
       a.set_requires_grad(false); // Gradient mismatch
       std::vector<IValue> stack({a, b});
       interp.run(stack);
-      bool ret3 = stack[2].toBool();
-      ASSERT_FALSE(ret3);
+      ASSERT_FALSE(stack[2].toBool());
     }
     {
-      auto a = at::zeros({2, 2});
-      auto b = at::ones({3, 3});
+      auto a = at::zeros({2, 2}, at::kFloat);
+      auto b = at::ones({3, 3}, at::kFloat);
       a = a.to(at::kCPU);
       a.set_requires_grad(true);
       a = a.to(at::kInt); // Scalar type mismatch
       std::vector<IValue> stack({a, b});
       interp.run(stack);
-      bool ret4 = stack[2].toBool();
-      ASSERT_FALSE(ret4);
+      ASSERT_FALSE(stack[2].toBool());
     }
     {
-      auto a = at::zeros({2, 2});
-      auto b = at::ones({3, 3});
+      auto a = at::zeros({2, 2}, at::kFloat);
+      auto b = at::ones({3, 3}, at::kFloat);
       a.set_requires_grad(true);
-      a = a.to(at::kCUDA); // device mismatch
+      a = a.to(at::kCUDA); // Device mismatch
       std::vector<IValue> stack({a, b});
       interp.run(stack);
-      bool ret5 = stack[2].toBool();
-      ASSERT_FALSE(ret5);
+      ASSERT_FALSE(stack[2].toBool());
     }
   }
 
