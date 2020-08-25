@@ -7,7 +7,7 @@ import unittest
 
 # This is a very simple smoke test for the functional autograd benchmarking script.
 class TestFunctionalAutogradBenchmark(TestCase):
-    def _test_runner(self, model):
+    def _test_runner(self, model, disable_gpu=False):
         # Note about windows:
         # The temporary file is exclusively open by this process and the child process
         # is not allowed to open it again. As this is a simple smoke test, we choose for now
@@ -22,6 +22,8 @@ class TestFunctionalAutogradBenchmark(TestCase):
             cmd += ['--model-filter', model]
             # Output file
             cmd += ['--output', out_file.name]
+            if disable_gpu:
+                cmd += ['--gpu', '-1']
 
             res = subprocess.run(cmd)
 
@@ -47,7 +49,8 @@ class TestFunctionalAutogradBenchmark(TestCase):
         # proper tuning of the number of threads it should use.
 
         for task in slow_tasks:
-            self._test_runner(task)
+            # Disable GPU for slow test as the CI GPU don't have enough memory
+            self._test_runner(task, disable_gpu=True)
 
 
 if __name__ == '__main__':

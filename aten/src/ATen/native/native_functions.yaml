@@ -2554,8 +2554,17 @@
   variants: function, method
 
 - func: neg.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU, CUDA: neg_out
+
+# Alias for neg
+- func: negative(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: negative_(Tensor(a!) self) -> Tensor(a!)
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: negative.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
 
 - func: repeat(Tensor self, int[] repeats) -> Tensor
   use_c10_dispatcher: full
@@ -7286,6 +7295,13 @@
 
 # Note: this function is only for testing.
 - func: _test_optional_intlist(Tensor values, int[]? addends) -> Tensor
+  use_c10_dispatcher: full
+  python_module: nn
+  dispatch:
+    CPU: _test_optional_intlist
+
+# Note: this function is only for testing.
+- func: _test_optional_filled_intlist(Tensor values, int[2]? addends) -> Tensor
   use_c10_dispatcher: full
   python_module: nn
   dispatch:
