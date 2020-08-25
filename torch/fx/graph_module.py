@@ -41,6 +41,7 @@ class GraphModule(torch.nn.Module):
     def __init__(self, root: torch.nn.Module, graph: Graph):
         super().__init__()
         self.root = root
+        self.training = self.root.training
         self.graph = graph
         self._generate_forward()
 

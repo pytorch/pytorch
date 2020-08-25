@@ -7,13 +7,12 @@ r"""Importing this file includes common utility methods and base clases for
 checking quantization api and properties of resulting modules.
 """
 
-import copy
-import io
-import functools
 import torch
 import torch.nn as nn
 import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
+import torch.distributed as dist
+
 from torch.testing._internal.common_utils import TestCase
 from torch.quantization import QuantWrapper, QuantStub, DeQuantStub, \
     default_qconfig, default_dynamic_qconfig, default_per_channel_qconfig, QConfig, default_observer, default_weight_observer, \
@@ -32,6 +31,12 @@ from torch.quantization._quantize_fx import (
     QuantType,
     fuse,
 )
+
+import copy
+import io
+import functools
+import time
+import os
 
 import unittest
 import numpy as np
@@ -100,6 +105,85 @@ def test_only_train_fn(model, train_data, loss_fn=_default_loss_fn):
             total += target.size(0)
             correct += (predicted == target).sum().item()
     return train_loss, correct, total
+
+class AverageMeter(object):
+    """Computes and stores the average and current value"""
+    def __init__(self, name, fmt=':f'):
+        self.name = name
+        self.fmt = fmt
+        self.reset()
+
+    def reset(self):
+        self.val = 0
+        self.avg = 0
+        self.sum = 0
+        self.count = 0
+
+    def update(self, val, n=1):
+        self.val = val
+        self.sum += val * n
+        self.count += n
+        self.avg = self.sum / self.count
+
+    def __str__(self):
+        fmtstr = '{name} {val' + self.fmt + '} ({avg' + self.fmt + '})'
+        return fmtstr.format(**self.__dict__)
+
+
+def accuracy(output, target, topk=(1,)):
+    """Computes the accuracy over the k top predictions for the specified values of k"""
+    with torch.no_grad():
+        maxk = max(topk)
+        batch_size = target.size(0)
+
+        _, pred = output.topk(maxk, 1, True, True)
+        pred = pred.t()
+        correct = pred.eq(target.view(1, -1).expand_as(pred))
+
+        res = []
+        for k in topk:
+            correct_k = correct[:k].view(-1).float().sum(0, keepdim=True)
+            res.append(correct_k.mul_(100.0 / batch_size))
+        return res
+
+def train_one_epoch(model, criterion, optimizer, data_loader, device, ntrain_batches):
+    model.train()
+    cnt = 0
+    for image, target in data_loader:
+        start_time = time.time()
+        print('.', end='')
+        cnt += 1
+        image, target = image.to(device), target.to(device)
+        output = model(image)
+        loss = criterion(output, target)
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+        acc1, acc5 = accuracy(output, target, topk=(1, 5))
+        if cnt >= ntrain_batches:
+            return
+    return
+
+def ddp_setup(rank, world_size):
+    os.environ['MASTER_ADDR'] = 'localhost'
+    os.environ['MASTER_PORT'] = '12355'
+
+    # initialize the process group
+    dist.init_process_group("gloo", rank=rank, world_size=world_size)
+
+def ddp_cleanup():
+    dist.destroy_process_group()
+
+def run_ddp(rank, world_size, prepared):
+    ddp_setup(rank, world_size)
+    prepared.cuda()
+    prepared = torch.nn.parallel.DistributedDataParallel(prepared, device_ids=[rank])
+    prepared.to(rank)
+    model_with_ddp = prepared
+    optimizer = torch.optim.SGD(model_with_ddp.parameters(), lr=0.0001)
+    train_one_epoch(model_with_ddp, criterion, optimizer, dataset, rank, 1)
+    ddp_cleanup()
+
 
 def convert_dynamic(module):
     convert(module, DEFAULT_DYNAMIC_MODULE_MAPPING, inplace=True)
@@ -175,6 +259,13 @@ def skipIfNoFBGEMM(fn):
         else:
             fn(*args, **kwargs)
     return wrapper
+
+try:
+    import torchvision  # noqa: F401
+    HAS_TORCHVISION = True
+except ImportError:
+    HAS_TORCHVISION = False
+skip_if_no_torchvision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 def get_script_module(model, tracing, data):
     return torch.jit.trace(model, data) if tracing else torch.jit.script(model)
