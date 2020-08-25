@@ -24,7 +24,7 @@ jobs:
       - name: Create Pull Request
         uses: peter-evans/create-pull-request@v3
         with:
-          branch: IFU-master-${{ steps.date.outputs.date }}
-          title: IFU-master-${{ steps.date.outputs.date }}
+          branch: IFU-rocm38-${{ steps.date.outputs.date }}
+          title: IFU-rocm38-${{ steps.date.outputs.date }}
           assignees: jeffdaily
           reviewers: jeffdaily
