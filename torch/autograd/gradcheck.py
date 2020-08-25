@@ -65,6 +65,7 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
 
         def fn_out():
             if not is_mkldnn:
+                # x is a view into input and so this works
                 return fn(input).clone()
             else:
                 # convert the dense tensor back to have mkldnn layout
@@ -72,9 +73,9 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
 
         orig = x[idx].item()
         x[idx] = orig - eps
-        outa = fn_out(is_mkldnn)
+        outa = fn_out()
         x[idx] = orig + eps
-        outb = fn_out(is_mkldnn)
+        outb = fn_out()
         x[idx] = orig
         r = (outb - outa) / (2 * eps)
         return r.detach().reshape(-1)
