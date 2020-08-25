@@ -1,20 +1,20 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
 import os
+
 import numpy as np
-
 import torch
-import torch.distributed as dist
-from torch import nn
-from torch.nn.parallel import DistributedDataParallel
 import torch.distributed as c10d
-
-from torch.distributed.algorithms.ddp_comm_hooks import hook_registry
-
-from torch.testing._internal.common_distributed import MultiProcessTestCase, \
-    requires_nccl, skip_if_lt_x_gpu
-
+from torch import nn
+from torch.distributed.algorithms.ddp_comm_hooks import register_ddp_comm_hook
+from torch.nn.parallel import DistributedDataParallel
+from torch.testing._internal.common_distributed import (
+    MultiProcessTestCase,
+    requires_nccl,
+    skip_if_lt_x_gpu,
+)
 from torch.testing._internal.common_utils import run_tests
+
 
 def gpus_for_rank(world_size):
     visible_devices = list(range(torch.cuda.device_count()))
@@ -61,7 +61,6 @@ class DistributedDataParallelCommHookTest(MultiProcessTestCase):
     def world_size(self):
         return 2
 
-
     def _local_model(self):
         local_model = TestDdpCommHook().cpu()
 
@@ -77,10 +76,11 @@ class DistributedDataParallelCommHookTest(MultiProcessTestCase):
 
         # Register DDP Communication Hook if defined
         if hook is not None:
-            hook_registry[hook](gpu_model, process_group)
+            register_ddp_comm_hook(
+                comm_hook_name=hook, model=gpu_model, state=process_group
+            )
 
         return self._run_and_get_grads(gpu_model)
-
 
     def _run_and_get_grads(self, model):
         torch.manual_seed(2020)
@@ -93,7 +93,6 @@ class DistributedDataParallelCommHookTest(MultiProcessTestCase):
 
         return [p.grad.data.cpu().numpy() for p in model.parameters()]
 
-
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_ddp_comm_hook_allreduce_hook(self):
@@ -104,36 +103,12 @@ class DistributedDataParallelCommHookTest(MultiProcessTestCase):
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
-        def allreduce_hook(state: object, bucket: dist._GradBucket) -> torch._C.Future:
-            tensors = [t / self.world_size for t in bucket.get_tensors()]
-            return process_group.allreduce(tensors).get_future()
         # No hook registered case, get the reference grads.
         reference_grads = self._get_grads(process_group, None)
         # Register hook case, get the hook grads.
-        hook_grads = self._get_grads(process_group, "allreduce")
+        hook_grads = self._get_grads(process_group, "ALLREDUCE")
 
         np.testing.assert_allclose(hook_grads, reference_grads, rtol=1e-5, atol=0)
-
-    @requires_nccl()
-    @skip_if_lt_x_gpu(2)
-    def test_ddp_comm_hook_allgather_hook(self):
-        """
-        This unit test verifies the ``allgather then aggregate`` hook registered case
-        gives the same result with no hook registered case.
-        """
-        store = c10d.FileStore(self.file_name, self.world_size)
-        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
-
-        def allreduce_hook(state: object, bucket: dist._GradBucket) -> torch._C.Future:
-            tensors = [t / self.world_size for t in bucket.get_tensors()]
-            return process_group.allreduce(tensors).get_future()
-        # No hook registered case, get the reference grads.
-        reference_grads = self._get_grads(process_group, None)
-        # Register hook case, get the hook grads.
-        hook_grads = self._get_grads(process_group, "allgather then aggregate")
-
-        np.testing.assert_allclose(hook_grads, reference_grads, rtol=1e-5, atol=0)
-
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
@@ -145,16 +120,12 @@ class DistributedDataParallelCommHookTest(MultiProcessTestCase):
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
-        def allreduce_hook(state: object, bucket: dist._GradBucket) -> torch._C.Future:
-            tensors = [t / self.world_size for t in bucket.get_tensors()]
-            return process_group.allreduce(tensors).get_future()
         # No hook registered case, get the reference grads.
         reference_grads = self._get_grads(process_group, None)
         # Register hook case, get the hook grads.
-        hook_grads = self._get_grads(process_group, "fp16 compress")
+        hook_grads = self._get_grads(process_group, "FP16_COMPRESS")
 
         np.testing.assert_allclose(hook_grads, reference_grads, rtol=1e-5, atol=1e-4)
-
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
@@ -166,16 +137,12 @@ class DistributedDataParallelCommHookTest(MultiProcessTestCase):
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
-        def allreduce_hook(state: object, bucket: dist._GradBucket) -> torch._C.Future:
-            tensors = [t / self.world_size for t in bucket.get_tensors()]
-            return process_group.allreduce(tensors).get_future()
         # No hook registered case, get the reference grads.
         reference_grads = self._get_grads(process_group, None)
         # Register hook case, get the hook grads.
-        hook_grads = self._get_grads(process_group, "quantize per tensor")
+        hook_grads = self._get_grads(process_group, "QUANTIZE_PER_TENSOR")
 
         np.testing.assert_allclose(hook_grads, reference_grads, rtol=1e-5, atol=1e-4)
-
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
@@ -187,17 +154,17 @@ class DistributedDataParallelCommHookTest(MultiProcessTestCase):
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
-        def allreduce_hook(state: object, bucket: dist._GradBucket) -> torch._C.Future:
-            tensors = [t / self.world_size for t in bucket.get_tensors()]
-            return process_group.allreduce(tensors).get_future()
         # No hook registered case, get the reference grads.
         reference_grads = self._get_grads(process_group, None)
         # Register hook case, get the hook grads.
-        hook_grads = self._get_grads(process_group, "quantize per channel")
+        hook_grads = self._get_grads(process_group, "QUANTIZE_PER_CHANNEL")
 
         np.testing.assert_allclose(hook_grads, reference_grads, rtol=1e-5, atol=1e-4)
 
-if __name__ == '__main__':
-    assert not torch.cuda._initialized, "test_distributed must not have initialized CUDA context on main process"
+
+if __name__ == "__main__":
+    assert (
+        not torch.cuda._initialized
+    ), "test_distributed must not have initialized CUDA context on main process"
 
     run_tests()

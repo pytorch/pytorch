@@ -18,7 +18,9 @@ def allreduce_hook(
             >>> ddp_model._register_comm_hook(process_group, allreduce_hook)
     """
     group_to_use = process_group if process_group is not None else dist.group.WORLD
-    world_size = process_group.size() if process_group is not None else dist.get_world_size()
+    world_size = (
+        process_group.size() if process_group is not None else dist.get_world_size()
+    )
 
     tensor = bucket.get_tensors()[0]
     fut = dist.all_reduce(tensor, group=group_to_use, async_op=True).get_future()
@@ -27,6 +29,35 @@ def allreduce_hook(
         return [fut.value()[0].div_(world_size)]
 
     return fut.then(then_callback)
+
+
+def fp16_compress_hook(process_group: object, bucket: dist._GradBucket):
+    """
+        This DDP communication hook implements a simple gradient compression
+        approach that converts ``GradBucket`` tensors whose type is assumed to be
+        ``torch.float32`` to half-precision floating point format (``torch.float16``).
+        It allreduces those ``float16`` gradient tensors. Once compressed gradient
+        tensors are allreduced, its then callback called ``decompress`` converts the
+        aggregated result back to ``float32`` and takes the mean.
+
+        Example::
+            >>> ddp_model._register_comm_hook(process_group, fp16_compress_hook)
+    """
+    group_to_use = process_group if process_group is not None else dist.group.WORLD
+    world_size = (
+        process_group.size() if process_group is not None else dist.get_world_size()
+    )
+
+    compressed_tensor = bucket.get_tensors()[0].to(torch.float16)
+
+    fut = dist.all_reduce(
+        compressed_tensor, group=group_to_use, async_op=True
+    ).get_future()
+
+    def decompress(fut):
+        return [fut.value()[0].to(torch.float32).div_(world_size)]
+
+    return fut.then(decompress)
 
 
 def __get_allgather_out_list(all_gather_in_list, world_size):
@@ -41,7 +72,7 @@ def __get_allgather_out_list(all_gather_in_list, world_size):
     return out_list
 
 
-def allgather_then_aggregate_hook(
+def _allgather_then_aggregate_hook(
     process_group: object, bucket: dist._GradBucket
 ) -> torch.futures.Future:
     """
@@ -63,11 +94,16 @@ def allgather_then_aggregate_hook(
     """
     group_to_use = process_group if process_group is not None else dist.group.WORLD
     rank = process_group.rank() if process_group is not None else dist.get_rank()
-    world_size = process_group.size() if process_group is not None else dist.get_world_size()
+    world_size = (
+        process_group.size() if process_group is not None else dist.get_world_size()
+    )
 
     tensor = bucket.get_tensors()[0]
     fut = dist.all_gather(
-        __get_allgather_out_list(tensor, world_size), tensor, group=group_to_use, async_op=True
+        __get_allgather_out_list(tensor, world_size),
+        tensor,
+        group=group_to_use,
+        async_op=True,
     ).get_future()
 
     def aggregate(fut):
@@ -80,30 +116,3 @@ def allgather_then_aggregate_hook(
         return [tensor.div_(world_size)]
 
     return fut.then(aggregate)
-
-
-def fp16_compress_hook(process_group: object, bucket: dist._GradBucket):
-    """
-        This DDP communication hook implements a simple gradient compression
-        approach that converts ``GradBucket`` tensors whose type is assumed to be
-        ``torch.float32`` to half-precision floating point format (``torch.float16``).
-        It allreduces those ``float16`` gradient tensors. Once compressed gradient
-        tensors are allreduced, its then callback called ``decompress`` converts the
-        aggregated result back to ``float32`` and takes the mean.
-
-        Example::
-            >>> ddp_model._register_comm_hook(process_group, fp16_compress_hook)
-    """
-    group_to_use = process_group if process_group is not None else dist.group.WORLD
-    world_size = process_group.size() if process_group is not None else dist.get_world_size()
-
-    compressed_tensor = bucket.get_tensors()[0].to(torch.float16)
-
-    fut = dist.all_reduce(
-        compressed_tensor, group=group_to_use, async_op=True
-    ).get_future()
-
-    def decompress(fut):
-        return [fut.value()[0].to(torch.float32).div_(world_size)]
-
-    return fut.then(decompress)
