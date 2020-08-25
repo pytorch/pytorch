@@ -77,13 +77,7 @@ void specializeAutogradZero(Graph& g) {
         state[n->output()] = State::Zero;
       } break;
       case prim::profile: {
-        // if prim::profile doesn't have an input
-        // it's a counter to keep track how many times
-        // a graph was profiled
-        if (n->inputs().size() > 0) {
           state[n->output()] = State::Unknown;
-          // state[n->input()];
-        }
         break;
       }
       case prim::BailOut: {
