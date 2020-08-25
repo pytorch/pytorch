@@ -1,5 +1,9 @@
 #pragma once
 
+#ifdef XPLAT_MOBILE_BUILD
+#include <Aten/selected_mobile_ops.h>
+#endif
+
 /**
  * This header implements functionality to build PyTorch with only a certain
  * set of operators (+ dependencies) included.
