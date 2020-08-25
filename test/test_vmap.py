@@ -1,6 +1,7 @@
 from torch.testing._internal.common_utils import TestCase, run_tests
 import torch
 from torch import vmap
+import functools
 import warnings
 
 class TestVmapAPI(TestCase):
@@ -576,6 +577,18 @@ class TestVmapAPI(TestCase):
         jacobian = vmap(vjp_mul)(batched_v)
         self.assertEqual(jacobian, torch.diagflat(y))
 
+    def test_functools_partial(self):
+        x = torch.randn(3)
+        y = torch.randn(2, 3)
+        result = vmap(functools.partial(torch.mul, x))(y)
+        self.assertEqual(result, x * y)
+
+    def test_nn_module(self):
+        tensor = torch.randn(2, 3)
+        model = torch.nn.Linear(3, 3, bias=False)
+        result = vmap(model)(tensor)
+        self.assertEqual(result, model(tensor))
+
 
 def slice_inputs(inputs, bdims, i):
     result = []
@@ -612,8 +625,23 @@ def reference_vmap(op, inputs, in_dims=0, out_dims=0):
                  for result_shards, out_dim in zip(zip(*results), out_dims))
 
 
+class TensorFactory:
+    @staticmethod
+    def rand(size, device='cpu', dtype=torch.float):
+        return torch.rand(size, device=device, dtype=dtype)
+
+    @staticmethod
+    def randn(size, device='cpu', dtype=torch.float):
+        return torch.randn(size, device=device, dtype=dtype)
+
+    @staticmethod
+    def randp1(size, device='cpu', dtype=torch.float):
+        return torch.rand(size, device=device, dtype=dtype) + 1
+
+
 class TestVmapOperators(TestCase):
-    def _vmap_test(self, op, inputs, in_dims=0, out_dims=0, check_view=False):
+    def _vmap_test(self, op, inputs, in_dims=0, out_dims=0,
+                   check_view=False, check_propagates_grad=True):
         result = vmap(op, in_dims, out_dims)(*inputs)
         reference_result = reference_vmap(op, inputs, in_dims, out_dims)
         self.assertEqual(result, reference_result)
@@ -626,6 +654,8 @@ class TestVmapOperators(TestCase):
                                  inputs[0].data_ptr(),
                                  msg="result was not a view of the first input!")
 
+        if not check_propagates_grad:
+            return
         # Assuming input[0] is a floating-point tensor. Check if the vmap
         # operation propagates the requires_grad flag to the zeroth output.
         # Some vmap operators are implemented in a way that assumes that
@@ -640,6 +670,127 @@ class TestVmapOperators(TestCase):
 
     def _vmap_view_test(self, *args, **kwargs):
         self._vmap_test(*args, **kwargs, check_view=True)
+
+    def _assert_doesnt_use_vmap_fallback(self, vmap_args, inputs):
+        regex = r'falling back to slow \(for loop and stack\) implementation'
+        with warnings.catch_warnings(record=True) as wa:
+            result = vmap(*vmap_args)(*inputs)
+            for captured_warning in wa:
+                self.assertNotRegex(str(captured_warning.message), regex)
+
+    def test_assert_doesnt_use_vmap_fallback(self):
+        with self.assertRaises(AssertionError):
+            # One day we'll implement a batching rule for torch.var_mean.
+            # When that happens, please change the example to use an
+            # operator that doesn't have a batching rule implemented.
+            self._assert_doesnt_use_vmap_fallback([torch.var_mean], [torch.rand(3)])
+
+    def _test_unary(self, op, getter, device):
+        test = self._vmap_test
+        B0, B1 = 7, 11
+
+        self._assert_doesnt_use_vmap_fallback([op], [getter([B0], device)])
+
+        # Single vmap, various in_dims / out_dims
+        test(op, [getter([B0, 3], device)])
+        test(op, [getter([2, 5, B0, 3], device)], in_dims=2)
+        test(op, [getter([2, 5, B0, 3], device)], in_dims=2, out_dims=2)
+
+        # Doubly nested vmap
+        test(vmap(op), [getter([B0, B1], device)])
+        test(vmap(op), [getter([B1, 2, 5, B0, 3], device)], in_dims=2)
+        test(vmap(op, in_dims=2), [getter([2, 5, B0, B1, 3], device)],
+             in_dims=2, out_dims=2)
+
+    def test_unary_pointwise_ops(self):
+        cases = [
+            (torch.abs, TensorFactory.randn),
+            (torch.acos, TensorFactory.rand),
+            (torch.asin, TensorFactory.rand),
+            (torch.atan, TensorFactory.rand),
+            (torch.ceil, TensorFactory.randn),
+            (torch.cos, TensorFactory.rand),
+            (torch.cosh, TensorFactory.rand),
+            (torch.digamma, TensorFactory.rand),
+            (torch.exp, TensorFactory.randn),
+            (torch.expm1, TensorFactory.randn),
+            (torch.floor, TensorFactory.randn),
+            (torch.frac, TensorFactory.randn),
+            (torch.lgamma, TensorFactory.rand),
+            (torch.log, TensorFactory.randp1),
+            (torch.log10, TensorFactory.randp1),
+            (torch.log1p, TensorFactory.randp1),
+            (torch.log2, TensorFactory.randp1),
+            (torch.neg, TensorFactory.randn),
+            (torch.reciprocal, TensorFactory.randp1),
+            (torch.relu, TensorFactory.randn),
+            (torch.round, TensorFactory.randn),
+            (torch.rsqrt, TensorFactory.randp1),
+            (torch.sigmoid, TensorFactory.randn),
+            (torch.sign, TensorFactory.randn),
+            (torch.sin, TensorFactory.rand),
+            (torch.sinh, TensorFactory.rand),
+            (torch.sqrt, TensorFactory.rand),
+            (torch.tan, TensorFactory.rand),
+            (torch.tanh, TensorFactory.rand),
+            (torch.trunc, TensorFactory.randn),
+        ]
+        for op, getter in cases:
+            self._test_unary(op, getter, 'cpu')
+
+    def test_binary_pointwise_ops(self):
+        def get_number(getter):
+            return getter([]).item()
+
+        cases = [
+            (torch.mul, TensorFactory.rand),
+            (lambda x, y: x * y, TensorFactory.randn),
+        ]
+        test = self._vmap_test
+
+        for op, getter in cases:
+            device = 'cpu'
+            B0, B1 = 7, 11
+
+            self._assert_doesnt_use_vmap_fallback(
+                [op], (getter([B0], device), getter([B0], device)))
+
+            # Single vmap: op(Tensor, Tensor)
+            test(op, (getter([B0, 3], device), getter([B0, 3], device)))
+            test(op, (getter([B0], device), getter([B0, 2, 3], device)))
+            test(op, (getter([B0], device), getter([2, B0, 3], device)), in_dims=(0, 1))
+            test(op, (getter([B0], device), getter([2, B0, 3], device)),
+                 in_dims=(0, 1), out_dims=1)
+            test(op, (getter([B0], device), getter([2, 3], device)), in_dims=(0, None))
+            test(op, (getter([2, 3], device), getter([B0, 3], device)), in_dims=(0, None))
+
+            # Nested vmap: op(Tensor, Tensor)
+            test(vmap(op), (getter([B0, B1, 2, 3], device), getter([B0, B1, 3], device)))
+            test(vmap(op, in_dims=(None, 0)),
+                 (getter([B0, 2, 3], device), getter([B1, 3], device)), in_dims=(0, None))
+
+            # Python number overload: op(Tensor, Number) (and vice-versa)
+            number = get_number(getter)
+            self._test_unary(lambda t: op(t, number), getter, device)
+            number = get_number(getter)
+            self._test_unary(lambda t: op(number, t), getter, device)
+
+            # Type promotion: op(Logical Scalar Tensor, Logical Scalar Tensor)
+            test(op, (getter([B0], device), getter([B0], device, dtype=torch.double)))
+            test(op, (getter([B0], device, dtype=torch.double), getter([B0], device)))
+            test(op, (getter([B0], device), getter([B0], device)))
+
+            # Type promotion: op(Tensor, Logical Scalar Tensor) (and vice-versa)
+            test(op, (getter([B0, 2], device), getter([B0], device, torch.double)))
+            test(op, (getter([B0], device, torch.double), getter([B0, 2], device)))
+
+            if not torch.cuda.is_available():
+                return
+
+            # Test cross-device scalars
+            number = get_number(getter)
+            self._test_unary(lambda t: op(t, number), getter, device='cuda')
+            self._test_unary(lambda t: op(t, torch.tensor(number)), getter, device='cuda')
 
     def test_chunk(self):
         test = self._vmap_view_test
@@ -795,6 +946,24 @@ class TestVmapOperators(TestCase):
         test(vmap(op), (torch.rand(B1, 2, B0, 5),), in_dims=2)
         test(vmap(op), (torch.rand(B1, 2, B0, 3, 5),), in_dims=2)
         test(vmap(vmap(op, in_dims=2)), (torch.rand(B1, 2, B0, 3, B2, 5),), in_dims=2)
+
+    def test_to(self):
+        test = self._vmap_test
+        B0, B1 = 7, 11
+
+        test(lambda t: t.to('cpu'), (torch.rand(B0),))
+        test(lambda t: t.to(torch.double), (torch.rand(B0),))
+        test(lambda t, o: t.to(o), (torch.rand(B0), torch.randn(B0, dtype=torch.float64)))
+        test(lambda t, o: t.to(o),
+             (torch.rand(B0), torch.randn(B0, dtype=torch.float64)),
+             in_dims=(0, None))
+        test(vmap(lambda t: t.to(torch.double)), (torch.rand(B0, B1, 3),))
+
+        # also test some casting methods
+        test(lambda t: t.double(), (torch.rand(B0),))
+        test(lambda t: t.float(), (torch.rand(B0),))
+        test(lambda t: t.int(), (torch.rand(B0),), check_propagates_grad=False)
+        test(lambda t: t.long(), (torch.rand(B0),), check_propagates_grad=False)
 
     def test_unfold(self):
         op = torch.Tensor.unfold
