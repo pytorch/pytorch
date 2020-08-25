@@ -23,9 +23,9 @@ template <uint32_t kSpatialDim>
 ConvPackedParamsBasePtr<kSpatialDim> call_prepack(
     const at::Tensor& weight,
     const c10::optional<at::Tensor>& bias,
-    const torch::List<int64_t>& stride,
-    const torch::List<int64_t>& padding,
-    const torch::List<int64_t>& dilation,
+    const at::List<int64_t>& stride,
+    const at::List<int64_t>& padding,
+    const at::List<int64_t>& dilation,
     int64_t groups) {
   auto& ctx = at::globalContext();
 #ifdef USE_FBGEMM
@@ -74,9 +74,9 @@ TODO: Can we factor out the code from jit/passes/onnx to this file?
 Version 1 ======================================================================
 - weight (at::Tensor)
 - bias (c10::optional<at::Tensor>)
-- strides (torch::List<at::Tensor>)
-- padding (torch::List<at::Tensor>)
-- dilation (torch::List<at::Tensor>)
+- strides (at::List<at::Tensor>)
+- padding (at::List<at::Tensor>)
+- dilation (at::List<at::Tensor>)
 - groups (at::Tensor)
 
 Notes:
@@ -88,12 +88,12 @@ Notes:
 using ConvPackedParamsSerializationType = std::tuple<
   at::Tensor,
   c10::optional<at::Tensor>,
-  // these are meant to be torch::List<int64_t> but
+  // these are meant to be at::List<int64_t> but
   // it's not supported by onnx, so we'll use Tensor as
   // a workaround
-  torch::List<at::Tensor>,
-  torch::List<at::Tensor>,
-  torch::List<at::Tensor>,
+  at::List<at::Tensor>,
+  at::List<at::Tensor>,
+  at::List<at::Tensor>,
   at::Tensor
 >;
 
@@ -103,9 +103,9 @@ ConvPackedParamsSerializationType conv_packed_params_v1(
   at::Tensor weight;
   c10::optional<at::Tensor> bias;
   std::tie(weight, bias) = params->unpack();
-  torch::List<at::Tensor> stride;
-  torch::List<at::Tensor> padding;
-  torch::List<at::Tensor> dilation;
+  at::List<at::Tensor> stride;
+  at::List<at::Tensor> padding;
+  at::List<at::Tensor> dilation;
   at::Tensor groups;
   for (int64_t s : params->stride()) {
     stride.emplace_back(at::tensor(s));
@@ -130,11 +130,11 @@ template <uint32_t kSpatialDim>
 ConvPackedParamsBasePtr<kSpatialDim> conv_packed_params_v1(
     const at::Tensor& weight,
     const c10::optional<at::Tensor>& bias,
-    const torch::List<at::Tensor>& stride_tensor,
-    const torch::List<at::Tensor>& padding_tensor,
-    const torch::List<at::Tensor>& dilation_tensor,
+    const at::List<at::Tensor>& stride_tensor,
+    const at::List<at::Tensor>& padding_tensor,
+    const at::List<at::Tensor>& dilation_tensor,
     const at::Tensor& groups_tensor) {
-  torch::List<int64_t> stride, padding, dilation;
+  at::List<int64_t> stride, padding, dilation;
   for (at::Tensor s : stride_tensor) {
     stride.emplace_back(s[0].item<int64_t>());
   }
@@ -172,7 +172,7 @@ ConvPackedParamsBasePtr<kSpatialDim> conv_packed_params(
   // Detect the version
   at::Tensor field_1;
   c10::optional<at::Tensor> field_2;
-  torch::List<at::Tensor> field_3, field_4, field_5;
+  at::List<at::Tensor> field_3, field_4, field_5;
   at::Tensor field_6;
   std::tie(field_1, field_2, field_3, field_4, field_5, field_6) = state;
 
