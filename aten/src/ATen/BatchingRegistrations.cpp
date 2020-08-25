@@ -421,7 +421,7 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   BINARY_POINTWISE(mul);
   BINARY_POINTWISE(div);
 
-  // at::pow has three overloads
+  // at::pow has three out-of-place overloads
   m.impl("pow.Tensor_Tensor", binary_pointwise_batching_rule<TensorTensorType, at::pow>);
   m.impl("pow.Tensor_Scalar", unary_pointwise_batching_rule<TensorScalarType, at::pow, Scalar>);
   m.impl("pow.Scalar", pow_scalar_Tensor_batching_rule);
