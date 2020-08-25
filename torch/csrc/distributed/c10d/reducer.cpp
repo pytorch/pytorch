@@ -315,32 +315,33 @@ void Reducer::mark_variable_ready_dense(VariableIndex index) {
   auto& variable = replica.variables[bucket_index.intra_bucket_index];
   const auto offset = replica.offsets[bucket_index.intra_bucket_index];
   const auto length = replica.lengths[bucket_index.intra_bucket_index];
-  auto& bucket_view = replica.bucket_views[bucket_index.intra_bucket_index];
+  auto& bucket_view_in =
+      replica.bucket_views_in[bucket_index.intra_bucket_index];
 
   runGradCallbackForVariable(variable, [&](auto& grad) {
     if (grad.defined()) {
-      // Copy grad to bucket view buffer if grad and bucket_view are pointing
-      // to different storages, and then let grad point to bucket_view
+      // Copy grad to bucket view buffer if grad and bucket_view_in are pointing
+      // to different storages, and then let grad point to bucket_view_in
       // for saving memory and avoiding copies in subsquent iterations.
       // In most cases, the copy is needed only at first
       // iteration, there will be no copies in subsquent iterations.
       // In rare cases, if users explicitly set grad to be None after every
-      // iteration, then it needs to copy grad to bucket_view in every
+      // iteration, then it needs to copy grad to bucket_view_in in every
       // iteration.
-      if (!grad.is_alias_of(bucket_view)) {
+      if (!grad.is_alias_of(bucket_view_in)) {
         // Ensure that the gradient type matches the bucket type.
         TORCH_CHECK(
-            grad.options().type_equal(bucket_view.options()),
+            grad.options().type_equal(bucket_view_in.options()),
             "Expected ",
-            bucket_view.toString(),
+            bucket_view_in.toString(),
             ", got ",
             grad.toString());
-        TORCH_INTERNAL_ASSERT(grad.device() == bucket_view.device());
-        TORCH_INTERNAL_ASSERT(grad.numel() == bucket_view.numel());
+        TORCH_INTERNAL_ASSERT(grad.device() == bucket_view_in.device());
+        TORCH_INTERNAL_ASSERT(grad.numel() == bucket_view_in.numel());
         // AccumulateGrad doesn't HAVE to obey the grad layout contract.
         // The penalty for disobedience is reduced performance, not numerical
         // death. Warnings here help diagnose poor DDP performance.
-        if (grad.strides() != bucket_view.strides()) {
+        if (grad.strides() != bucket_view_in.strides()) {
           TORCH_WARN_ONCE(
               "Grad strides do not match bucket view strides. "
               "This may indicate grad was not created according to the "
@@ -352,10 +353,10 @@ void Reducer::mark_variable_ready_dense(VariableIndex index) {
               ", strides() = ",
               grad.strides(),
               "\n",
-              "bucket_view.sizes() = ",
-              bucket_view.sizes(),
+              "bucket_view_in.sizes() = ",
+              bucket_view_in.sizes(),
               ", strides() = ",
-              bucket_view.strides());
+              bucket_view_in.strides());
         }
         // See Note [DDP Communication Hook]
         if (comm_hook_ == nullptr) {
@@ -364,22 +365,22 @@ void Reducer::mark_variable_ready_dense(VariableIndex index) {
               c10::scalar_to_tensor(double(1.) / process_group_->getSize());
           wrapped.unsafeGetTensorImpl()->set_wrapped_number(true);
           // Divides while copying into the bucket view.
-          at::native::mul_out(bucket_view, grad, wrapped);
+          at::native::mul_out(bucket_view_in, grad, wrapped);
         } else {
-          bucket_view.copy_(grad);
+          bucket_view_in.copy_(grad);
         }
-        // Let grad point to bucket_view buffer.
-        grad = bucket_view;
+        // Let grad point to bucket_view_in buffer.
+        grad = bucket_view_in;
         // The grad is modified and need to be written back.
         return true;
       } else {
         // If grad and bucket view point to the same storage, no need to copy
         if (comm_hook_ == nullptr) {
-          bucket_view.div_(process_group_->getSize());
+          bucket_view_in.div_(process_group_->getSize());
         }
       }
     } else {
-      bucket_view.zero_();
+      bucket_view_in.zero_();
     }
     // The grad is not modified and doesn't need to be written back.
     return false;
@@ -620,7 +621,7 @@ void Reducer::initialize_buckets(
   // will not be mutated.
   // If initialize_buckets is called during training loop, e.g, inside
   // rebuild_buckets(), since grad could be mutated and be pointed to
-  // bucket_view, then it needs to check rpc context ptr is nullptr or not,
+  // bucket_view_out, then it needs to check rpc context ptr is nullptr or not,
   // If rpc context ptr is nullptr, mutate variable.grad(); otherwise,
   // mutate grad in rpc context.
   using torch::distributed::autograd::ThreadLocalDistAutogradContext;
@@ -730,9 +731,10 @@ void Reducer::initialize_buckets(
         // unexpected layout, performance will degrade due to poor memory access
         // patterns when copy_ing grad data in and out of its bucket view.
         // However, numerics remain correct, because the bucket view is the same
-        // on either end of the raw allreduce.  bucket_view.copy(grad) tranposes
+        // on either end of the raw allreduce. bucket_view_in.copy(grad)
+        // tranposes
         // (+ densifies) to the bucket view's layout, the data is allreduced,
-        // then grad.copy_(bucket_view) transposes it back to grad's layout.
+        // then grad.copy_(bucket_view_out) transposes it back to grad's layout.
         //
         // The only way the numerics can go haywire is if the bucket views
         // themselves have different layouts across processes (or replicas).
@@ -746,6 +748,7 @@ void Reducer::initialize_buckets(
         // param layouts over time, but not messing with params after DDP
         // construction is already a documented constraint.
         initialize_bucket_views(replica, replica.contents, true);
+        initialize_bucket_views(replica, replica.contents, false);
       }
 
       // Add bucket replica to enclosing bucket.
@@ -791,21 +794,27 @@ void Reducer::initialize_bucket_views(
       // params.
       bucket_view = contents.narrow(0, offset, length).view(v.sizes());
     }
-    replica.bucket_views.push_back(bucket_view);
+    if (copy_to_bucket_view) {
+      replica.bucket_views_in.push_back(bucket_view);
+    } else {
+      replica.bucket_views_out.push_back(bucket_view);
+    }
     // There are three cases to handle:
-    // 1. initialize_bucket_views could be called inside communication hook,
-    // bucket_view has the updated results in new tensor, just let grad point to
-    // bucket_view, copy_to_bucket_view is false in this case.
-    // 2. initialize_bucket_views could be called inside initialize_buckets when
-    // rebuild_buckets, if grad has already been defined/calculated in previous
-    // iteration, old grad needs to be copied into new bucket_view
-    // and let grad point to the new bucket_view,
+    // 1. initialize_bucket_views could be called inside initialize_buckets to
+    // inititalize or inside communication hook to reinititalize
+    // bucket_views_out, bucket_view has the updated results in new tensor, just
+    // let grad point to bucket_view, copy_to_bucket_view is false in this case.
+    // 2. initialize_bucket_views could be called inside initialize_buckets to
+    // inititalize bucket_views_in when rebuild_buckets, if grad has already
+    // been defined/calculated in previous iteration, old grad needs to be
+    // copied into new bucket_view and let grad point to the new bucket_view,
     // copy_to_bucket_view is true in this case.
-    // 3. initialize_bucket_views could be called inside initialize_buckets
-    // during construction. copy_to_bucket_view is true in this case. But mostly
-    // grads are not defined during construction time, when grad is not defined,
-    // do not let grad point to bucket_view, because grads should be kept as
-    // being undefined for globally unused parameters.
+    // 3. initialize_bucket_views could be called inside initialize_buckets to
+    // inititalize bucket_views_in during construction. copy_to_bucket_view is
+    // true in this case. But mostly grads are not defined during construction
+    // time, when grad is not defined, do not let grad point to bucket_view,
+    // because grads should be kept as being undefined for globally unused
+    // parameters.
     runGradCallbackForVariable(v, [&](auto& grad) {
       if (grad.defined() && !grad.is_alias_of(bucket_view)) {
         if (copy_to_bucket_view) {
@@ -969,18 +978,19 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
         }
       }
 
-      const auto& bucket_view = replica.bucket_views[intra_bucket_index];
+      const auto& bucket_view_out =
+          replica.bucket_views_out[intra_bucket_index];
       runGradCallbackForVariable(variable, [&](auto& grad) {
         // If a parameter is globally unused, we keep its grad untouched.
         if (!global_unused) {
           // If grad is globally used but locally unused, let grad point to
-          // bucket_view
+          // bucket_view_out
           if (!grad.defined()) {
-            grad = bucket_view;
+            grad = bucket_view_out;
           } else {
             TORCH_INTERNAL_ASSERT(
-                grad.is_alias_of(bucket_view),
-                "Grad should have been pointed to bucket_view if grad is defined");
+                grad.is_alias_of(bucket_view_out),
+                "Grad should have been pointed to bucket_view_out if grad is defined");
           }
           // The grad is modified and needs to be written back.
           return true;
@@ -1024,13 +1034,14 @@ void Reducer::finalize_backward() {
           comm_hook_->processFuture(bucket.future_work->value());
 
       for (size_t i = 0; i < future_result.size(); i++) {
+        auto& replica = bucket.replicas[i];
         if (bucket.expect_sparse_gradient) {
-          bucket.replicas[i].contents.copy_(future_result[i]);
+          replica.contents.copy_(future_result[i]);
         } else {
-          // Reinitialize bucket_views with the future_result by following
+          // Reinitialize bucket_views_out with the future_result by following
           // the same logic in `inititalize_buckets`.
-          bucket.replicas[i].bucket_views.clear();
-          initialize_bucket_views(bucket.replicas[i], future_result[i], false);
+          replica.bucket_views_out.clear();
+          initialize_bucket_views(replica, future_result[i], false);
         }
       }
     }
