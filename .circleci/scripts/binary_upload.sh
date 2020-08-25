@@ -39,7 +39,7 @@ conda_upload() {
     set -x
     ${ANACONDA} \
       upload  \
-      "${PKG_DIR}/*.tar.bz2" \
+      ${PKG_DIR}/*.tar.bz2 \
       -u "pytorch-${UPLOAD_CHANNEL}" \
       --label main \
       --no-progress \
