@@ -211,6 +211,8 @@ Autograd relies on the user to write thread safe C++ hooks. If you want the hook
 to be correctly applied in multithreading environment, you will need to write
 proper thread locking code to ensure the hooks are thread safe.
 
+.. _complex_autograd-doc:
+
 Autograd for Complex Numbers
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 

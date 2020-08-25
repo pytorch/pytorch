@@ -66,6 +66,8 @@ namespace c10 {
   _(prim, ListConstruct)             \
   _(prim, ListUnpack)                \
   _(prim, DictConstruct)             \
+  _(prim, EnumName)                  \
+  _(prim, EnumValue)                 \
   _(prim, StringIndex)               \
   _(prim, NumToTensor)               \
   _(prim, Uninitialized)             \
@@ -92,6 +94,7 @@ namespace c10 {
   _(aten, backward)                  \
   _(prim, Guard)                     \
   _(prim, BailOut)                   \
+  _(prim, TypeCheck)                 \
   _(prim, FusedConcat)               \
   _(prim, ConstantChunk)             \
   _(prim, MMTreeReduce)              \
@@ -141,6 +144,28 @@ namespace c10 {
   _(aten, abs_)                      \
   _(aten, absolute)                  \
   _(aten, absolute_)                 \
+  _(aten, acos)                      \
+  _(aten, acos_)                     \
+  _(aten, arccos)                    \
+  _(aten, arccos_)                   \
+  _(aten, acosh)                     \
+  _(aten, acosh_)                    \
+  _(aten, arccosh)                   \
+  _(aten, arccosh_)                  \
+  _(aten, asin)                      \
+  _(aten, asin_)                     \
+  _(aten, arcsin)                    \
+  _(aten, arcsin_)                   \
+  _(aten, atan)                      \
+  _(aten, atan_)                     \
+  _(aten, arctan)                    \
+  _(aten, arctan_)                   \
+  _(aten, clamp)                     \
+  _(aten, clamp_)                    \
+  _(aten, clip)                      \
+  _(aten, clip_)                     \
+  _(aten, det)                       \
+  _(aten, linalg_det)                \
   _(aten, append)                    \
   _(aten, item)                      \
   _(aten, format)                    \
@@ -162,6 +187,9 @@ namespace c10 {
   _(aten, lerp_)                     \
   _(aten, lt_)                       \
   _(aten, ne_)                       \
+  _(aten, _ger)                      \
+  _(aten, ger)                       \
+  _(aten, outer)                     \
   _(aten, transpose_)                \
   _(aten, unsqueeze_)                \
   _(aten, __getitem__)               \
@@ -181,6 +209,14 @@ namespace c10 {
   _(aten, hex)                       \
   _(aten, oct)                       \
   _(aten, clear)                     \
+  _(aten, trunc)                     \
+  _(aten, trunc_)                    \
+  _(aten, fix)                       \
+  _(aten, fix_)                      \
+  _(aten, neg)                       \
+  _(aten, neg_)                      \
+  _(aten, negative)                  \
+  _(aten, negative_)                 \
   _(aten, setdefault)                \
   _(aten, bin)                       \
   _(aten, pop)                       \
@@ -239,6 +275,8 @@ namespace c10 {
   _(onnx, LogSoftmax)                \
   _(onnx, ReduceL1)                  \
   _(onnx, ReduceL2)                  \
+  _(onnx, Conv)                      \
+  _(onnx, BatchNormalization)        \
   FORALL_ATTR_BASE_SYMBOLS(_)        \
   _(attr, Subgraph)                  \
   _(attr, ReverseSubgraph)           \
@@ -258,6 +296,7 @@ namespace c10 {
   _(attr, perm)                      \
   _(attr, sizes)                     \
   _(attr, starts)                    \
+  _(attr, profiled_type)             \
   _(attr, transA)                    \
   _(attr, transB)                    \
   _(attr, name)                      \

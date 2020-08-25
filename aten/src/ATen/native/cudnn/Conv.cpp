@@ -112,7 +112,7 @@ std::tuple<at::Tensor,at::Tensor> cudnn_convolution_transpose_backward(
 // with the best algo, under the hood, cudnn will run with the slower kernel
 // since it sees fastest algorithm combination with a sub optimal mathType.
 
-// Note [blacklist fft algorithms for strided dgrad]
+// Note [blocklist fft algorithms for strided dgrad]
 // This is a workaround for a CuDNN bug that gave wrong results in certain strided convolution
 // gradient setups. Check Issue #16610 for bug details. Bug is there for CUDNN version < 7.5 .
 
@@ -393,11 +393,11 @@ size_t getMaxWorkspaceSize(
 template<typename perf_t>
 std::vector<perf_t> getValidAlgorithms(perf_t *perfResults, const ConvolutionArgs& args, int n_algo) {
 
-// See Note [blacklist fft algorithms for strided dgrad]
+// See Note [blocklist fft algorithms for strided dgrad]
 #if CUDNN_VERSION < 7500
-  bool blacklist = std::is_same<decltype(perfResults[0].algo), cudnnConvolutionBwdDataAlgo_t>::value;
+  bool blocklist = std::is_same<decltype(perfResults[0].algo), cudnnConvolutionBwdDataAlgo_t>::value;
   int stride_dim = args.input.dim() - 2;
-  blacklist &= std::any_of(std::begin(args.params.stride),
+  blocklist &= std::any_of(std::begin(args.params.stride),
                             std::begin(args.params.stride) + stride_dim,
                             [=](int n){return n != 1;});
 #endif
@@ -412,9 +412,9 @@ std::vector<perf_t> getValidAlgorithms(perf_t *perfResults, const ConvolutionArg
     if (perf.status == CUDNN_STATUS_SUCCESS) {
       if (!args.params.deterministic || perf.determinism == CUDNN_DETERMINISTIC) {
 
-        // See Note [blacklist fft algorithms for strided dgrad]
+        // See Note [blocklist fft algorithms for strided dgrad]
 #if CUDNN_VERSION < 7500
-        bool skip = blacklist;
+        bool skip = blocklist;
         skip &= (static_cast<cudnnConvolutionBwdDataAlgo_t>(perfResults[i].algo) == CUDNN_CONVOLUTION_BWD_DATA_ALGO_FFT_TILING ||
                   static_cast<cudnnConvolutionBwdDataAlgo_t>(perfResults[i].algo) == CUDNN_CONVOLUTION_BWD_DATA_ALGO_FFT);
         if (skip) {
@@ -1204,7 +1204,7 @@ Tensor cudnn_convolution_backward_weight(
   // Make sure that NC11 strides follow formula
   grad_output_contig_t.resize_(grad_output_contig_t.sizes(), layout);
   TensorArg grad_output_contig{ grad_output_contig_t, "grad_output", 1 };
- 
+
   Tensor input_contig_t = input_t.contiguous(layout);
   input_contig_t.resize_(input_contig_t.sizes(), layout);
   TensorArg input{ input_contig_t, "input", 2};

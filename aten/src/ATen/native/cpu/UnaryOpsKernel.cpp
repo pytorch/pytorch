@@ -1,32 +1,34 @@
-#include <cmath>
-#include <type_traits>
-#include <ATen/Config.h>
-#include <ATen/Dispatch.h>
-#include <ATen/CPUGeneratorImpl.h>
-#include <ATen/Utils.h>
-#include <ATen/Generator.h>
-#include <ATen/Parallel.h>
-
-#include <ATen/cpu/vml.h>
-#include <ATen/cpu/vec256/vec256.h>
-#include <ATen/cpu/vec256/functional.h>
-
-#include <ATen/native/Distributions.h>
-#include <ATen/native/TensorIterator.h>
 #include <ATen/native/UnaryOps.h>
 
+#include <cmath>
+#include <limits>
+#include <type_traits>
+
+#include <ATen/CPUGeneratorImpl.h>
+#include <ATen/Config.h>
+#include <ATen/Dispatch.h>
+#include <ATen/Generator.h>
+#include <ATen/Parallel.h>
+#include <ATen/Utils.h>
+#include <ATen/core/DistributionsHelper.h>
+#include <ATen/cpu/vec256/functional.h>
+#include <ATen/cpu/vec256/vec256.h>
+#include <ATen/cpu/vml.h>
+#include <ATen/native/Distributions.h>
+#include <ATen/native/Math.h>
+#include <ATen/native/TensorIterator.h>
+#include <ATen/native/cpu/DistributionTemplates.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/cpu/zmath.h>
-#include <ATen/native/Math.h>
-#include <ATen/core/DistributionsHelper.h>
-#include <ATen/native/cpu/DistributionTemplates.h>
 
 #if AT_MKL_ENABLED()
 #include <mkl.h>
 #include <cpuinfo.h>
 #endif
 
-namespace at { namespace native {
+namespace at {
+namespace native {
+
 namespace {
 
 using namespace vec256;
@@ -46,13 +48,112 @@ static void sigmoid_kernel(TensorIterator& iter) {
   });
 }
 
-template<typename T>
-T abs_impl(T v) {
-  return std::abs(v);
+#if AT_MKL_ENABLED()
+
+template <typename T>
+void VmlLog(int64_t N, const T* X, T* Y) {
+  constexpr int64_t K = Vec256<T>::size();
+  at::parallel_for(0, N, K, [=](int64_t begin, int64_t end) {
+    vec256::map(
+        [](Vec256<T> x_vec) { return x_vec.log(); },
+        Y + begin,
+        X + begin,
+        end - begin);
+  });
 }
-template<>
-uint8_t abs_impl(uint8_t v) {
-  return v;
+
+template <>
+void VmlLog<float>(int64_t N, const float* X, float* Y) {
+  vsLn(N, X, Y);
+}
+
+template <>
+void VmlLog<double>(int64_t N, const double* X, double* Y) {
+  vdLn(N, X, Y);
+}
+
+template <typename T>
+void LogitMKLKernel(T eps, TensorIterator* it) {
+  if (!it->can_use_32bit_indexing()) {
+    for (auto& sub_it : it->with_32bit_indexing()) {
+      LogitMKLKernel<T>(eps, &sub_it);
+    }
+    return;
+  }
+
+  constexpr int64_t K = Vec256<T>::size();
+  const int64_t N = it->numel();
+  const T* X_data = static_cast<T*>(it->data_ptr(1));
+  T* Y_data = static_cast<T*>(it->data_ptr(0));
+  if (eps < T(0)) {
+    at::parallel_for(0, N, K, [=](int64_t begin, int64_t end) {
+      for (int64_t i = begin; i < end; ++i) {
+        Y_data[i] = X_data[i] == T(1) ? std::numeric_limits<T>::infinity()
+                                      : X_data[i] / (T(1) - X_data[i]);
+      }
+      VmlLog<T>(end - begin, Y_data + begin, Y_data + begin);
+    });
+  } else {
+    const T lo = eps;
+    const T hi = T(1) - eps;
+    at::parallel_for(0, N, K, [=](int64_t begin, int64_t end) {
+      for (int64_t i = begin; i < end; ++i) {
+        const T x = X_data[i] < lo ? lo : (X_data[i] > hi ? hi : X_data[i]);
+        Y_data[i] =
+            x == T(1) ? std::numeric_limits<T>::infinity() : (x / (T(1) - x));
+      }
+      VmlLog<T>(end - begin, Y_data + begin, Y_data + begin);
+    });
+  }
+}
+
+#else
+
+template <typename T>
+void LogitMKLKernel(T eps, TensorIterator* it) {
+  TORCH_CHECK(false, "ATen not compiled with MKL");
+}
+
+#endif // AT_MKL_ENABLED
+
+void logit_kernel(TensorIterator& iter, Scalar eps_scalar) {
+  AT_DISPATCH_FLOATING_TYPES_AND(
+      kBFloat16, iter.dtype(), "logit_cpu", [&]() {
+        const scalar_t eps = eps_scalar.to<scalar_t>();
+        if (at::hasMKL() && iter.is_contiguous()) {
+          LogitMKLKernel<scalar_t>(eps, &iter);
+        } else if (eps < scalar_t(0)) {
+          const Vec256<scalar_t> kOneVec(scalar_t(1));
+          cpu_kernel_vec(
+              iter,
+              [](scalar_t x) {
+                return x == scalar_t(1)
+                    ? std::numeric_limits<scalar_t>::infinity()
+                    : std::log(x / (scalar_t(1) - x));
+              },
+              [kOneVec](Vec256<scalar_t> x_vec) {
+                return (x_vec / (kOneVec - x_vec)).log();
+              });
+        } else {
+          const scalar_t lo = eps;
+          const scalar_t hi = scalar_t(1) - eps;
+          const Vec256<scalar_t> kOneVec(scalar_t(1));
+          const Vec256<scalar_t> lo_vec(lo);
+          const Vec256<scalar_t> hi_vec(hi);
+          cpu_kernel_vec(
+              iter,
+              [lo, hi](scalar_t x) {
+                x = x < lo ? lo : (x > hi ? hi : x);
+                return x == scalar_t(1)
+                    ? std::numeric_limits<scalar_t>::infinity()
+                    : std::log(x / (scalar_t(1) - x));
+              },
+              [kOneVec, lo_vec, hi_vec](Vec256<scalar_t> x_vec) {
+                x_vec = vec256::clamp(x_vec, lo_vec, hi_vec);
+                return (x_vec / (kOneVec - x_vec)).log();
+              });
+        }
+      });
 }
 
 static void abs_kernel(TensorIterator& iter) {
@@ -182,6 +283,12 @@ static void sign_kernel(TensorIterator& iter){
   }
 }
 
+static void signbit_kernel(TensorIterator& iter){
+  AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, ScalarType::Half, iter.input_dtype(), "signbit_cpu", [&]() {
+    cpu_kernel(iter, [](scalar_t a) -> bool { return a < 0; });
+  });
+}
+
 static void sinh_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(iter.dtype(), "sinh_cpu", [&]() {
     cpu_kernel_vec(
@@ -241,10 +348,15 @@ static void trigamma_kernel(TensorIterator& iter) {
 }
 
 static void polygamma_kernel(TensorIterator& iter, int64_t n) {
-  switch (n) {
-    case 0: digamma_kernel(iter); break;
-    case 1: trigamma_kernel(iter); break;
-    default: TORCH_CHECK(false, "polygamma(n,x) is not implemented for n>=2, but was ", n);
+  if (n == 0) {
+    digamma_kernel(iter);
+  } else if (n == 1) {
+    trigamma_kernel(iter);
+  } else {
+    AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "polygamma", [&]() {
+      cpu_kernel(
+          iter, [=](scalar_t a) -> scalar_t { return calc_polygamma(n, a); });
+    });
   }
 }
 
@@ -482,6 +594,7 @@ static void rsqrt_kernel(TensorIterator& iter) {
 
 REGISTER_DISPATCH(rsqrt_stub, &rsqrt_kernel);
 REGISTER_DISPATCH(sigmoid_stub, &sigmoid_kernel);
+REGISTER_DISPATCH(logit_stub, &logit_kernel);
 REGISTER_DISPATCH(bernoulli_tensor_stub, &bernoulli_tensor_kernel);
 REGISTER_DISPATCH(bernoulli_scalar_stub, &bernoulli_scalar_kernel);
 REGISTER_DISPATCH(cauchy_stub, &cauchy_kernel);
@@ -504,6 +617,7 @@ REGISTER_DISPATCH(frac_stub, &frac_kernel);
 REGISTER_DISPATCH(reciprocal_stub, &reciprocal_kernel);
 REGISTER_DISPATCH(neg_stub, &neg_kernel);
 REGISTER_DISPATCH(sign_stub, &sign_kernel);
+REGISTER_DISPATCH(signbit_stub, &signbit_kernel);
 REGISTER_DISPATCH(sinh_stub, &sinh_kernel);
 REGISTER_DISPATCH(cosh_stub, &cosh_kernel);
 REGISTER_DISPATCH(acosh_stub, &acosh_kernel);
@@ -540,4 +654,5 @@ IMPLEMENT_COMPLEX_KERNEL(FLOATING, tanh)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, trunc)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, lgamma)
 
-}} // namespace at::native
+} // namespace native
+} // namespace at

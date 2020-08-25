@@ -162,11 +162,14 @@
 #      When turned on, the following cmake variables will be toggled as well:
 #        USE_SYSTEM_CPUINFO=ON USE_SYSTEM_SLEEF=ON BUILD_CUSTOM_PROTOBUF=OFF
 
+from __future__ import print_function
 import sys
 if sys.version_info < (3,):
-    raise Exception("Python 2 has reached end-of-life and is no longer supported by PyTorch.")
+    print("Python 2 has reached end-of-life and is no longer supported by PyTorch.")
+    sys.exit(-1)
 if sys.platform == 'win32' and sys.maxsize.bit_length() == 31:
-    raise Exception("32-bit Windows Python runtime is not supported. Please switch to 64-bit Python.")
+    print("32-bit Windows Python runtime is not supported. Please switch to 64-bit Python.")
+    sys.exit(-1)
 
 from setuptools import setup, Extension, distutils, find_packages
 from collections import defaultdict
@@ -354,7 +357,7 @@ def build_deps():
 ################################################################################
 
 # the list of runtime dependencies required by this built package
-install_requires = ['future']
+install_requires = ['future', 'typing_extensions']
 
 missing_pydep = '''
 Missing build dependency: Unable to `import {importname}`.
@@ -869,6 +872,7 @@ if __name__ == '__main__':
                 'share/cmake/Caffe2/Modules_CUDA_fix/upstream/*.cmake',
                 'share/cmake/Caffe2/Modules_CUDA_fix/upstream/FindCUDA/*.cmake',
                 'share/cmake/Gloo/*.cmake',
+                'share/cmake/Tensorpipe/*.cmake',
                 'share/cmake/Torch/*.cmake',
             ],
             'caffe2': [

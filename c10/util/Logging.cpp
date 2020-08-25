@@ -209,7 +209,7 @@ void ShowLogInfoToStderr() {
 
 C10_DEFINE_int(
     caffe2_log_level,
-    ::google::GLOG_WARNING,
+    c10::GLOG_WARNING,
     "The minimum log level that caffe2 will output.");
 
 namespace c10 {
@@ -225,11 +225,11 @@ bool InitCaffeLogging(int* argc, char** argv) {
               << std::endl;
     return false;
   }
-  if (FLAGS_caffe2_log_level > ::google::GLOG_FATAL) {
+  if (FLAGS_caffe2_log_level > GLOG_FATAL) {
     std::cerr << "The log level of Caffe2 has to be no larger than GLOG_FATAL("
-              << ::google::GLOG_FATAL << "). Capping it to GLOG_FATAL."
+              << GLOG_FATAL << "). Capping it to GLOG_FATAL."
               << std::endl;
-    FLAGS_caffe2_log_level = ::google::GLOG_FATAL;
+    FLAGS_caffe2_log_level = GLOG_FATAL;
   }
   return true;
 }
@@ -237,7 +237,7 @@ bool InitCaffeLogging(int* argc, char** argv) {
 void UpdateLoggingLevelsFromFlags() {}
 
 void ShowLogInfoToStderr() {
-  FLAGS_caffe2_log_level = ::google::GLOG_INFO;
+  FLAGS_caffe2_log_level = GLOG_INFO;
 }
 
 MessageLogger::MessageLogger(const char* file, int line, int severity)
@@ -262,7 +262,7 @@ MessageLogger::MessageLogger(const char* file, int line, int severity)
   */
   stream_
       << "["
-      << CAFFE2_SEVERITY_PREFIX[std::min(4, ::google::GLOG_FATAL - severity_)]
+      << CAFFE2_SEVERITY_PREFIX[std::min(4, GLOG_FATAL - severity_)]
       //<< (timeinfo->tm_mon + 1) * 100 + timeinfo->tm_mday
       //<< std::setfill('0')
       //<< " " << std::setw(2) << timeinfo->tm_hour
@@ -290,12 +290,12 @@ MessageLogger::~MessageLogger() {
       ANDROID_LOG_VERBOSE, // VLOG(2) .. VLOG(N)
   };
   int android_level_index =
-      ::google::GLOG_FATAL - std::min(::google::GLOG_FATAL, severity_);
+      GLOG_FATAL - std::min(GLOG_FATAL, severity_);
   int level = android_log_levels[std::min(android_level_index, 5)];
   // Output the log string the Android log at the appropriate level.
   __android_log_print(level, tag_, "%s", stream_.str().c_str());
   // Indicate termination if needed.
-  if (severity_ == ::google::GLOG_FATAL) {
+  if (severity_ == GLOG_FATAL) {
     __android_log_print(ANDROID_LOG_FATAL, tag_, "terminating.\n");
   }
 #else // !ANDROID
@@ -305,12 +305,12 @@ MessageLogger::~MessageLogger() {
     // Simulating the glog default behavior: if the severity is above INFO,
     // we flush the stream so that the output appears immediately on std::cerr.
     // This is expected in some of our tests.
-    if (severity_ > ::google::GLOG_INFO) {
+    if (severity_ > GLOG_INFO) {
       std::cerr << std::flush;
     }
   }
 #endif // ANDROID
-  if (severity_ == ::google::GLOG_FATAL) {
+  if (severity_ == GLOG_FATAL) {
     DealWithFatal();
   }
 }

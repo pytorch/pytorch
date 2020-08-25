@@ -3,6 +3,7 @@
 #include <memory>
 #include <string>
 
+#include <ATen/core/interned_strings.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/frontend/schema_matching.h>
@@ -704,5 +705,70 @@ struct SimpleSelf : public Self {
  private:
   ClassTypePtr classType_;
 };
+
+// This is not a SimpleValue so it can not pass through the code paths that
+// expect a SimpleValue as a sugared value.
+struct TORCH_API ExceptionMessageValue : public SugaredValue {
+  explicit ExceptionMessageValue(Value* value) : value_(value) {}
+
+  std::string kind() const override {
+    return "exception message";
+  }
+
+  Value* getValue() {
+    return value_;
+  }
+
+  Value* value_;
+};
+
+struct TORCH_API ExceptionValue : public SugaredValue {
+  explicit ExceptionValue(const std::string& message) : message_(message) {}
+
+  std::string kind() const override {
+    return "exception";
+  }
+
+  std::shared_ptr<SugaredValue> call(
+      const SourceRange& loc,
+      Function& m,
+      at::ArrayRef<NamedValue> inputs,
+      at::ArrayRef<NamedValue> /*attributes*/,
+      size_t /*n_binders*/) override {
+    auto exception_message = insertConstant(*m.graph(), message_ + ": ", loc);
+    for (auto& input : inputs) {
+      auto input_str = input.value(*m.graph());
+      if (!input_str->type()->isSubtypeOf(StringType::get())) {
+        input_str =
+            emitBuiltinCall(loc, *m.graph(), aten::str, {input_str}, {});
+      }
+      exception_message = emitBuiltinCall(
+          loc, *m.graph(), aten::add, {exception_message, input_str}, {});
+    }
+    return std::make_shared<ExceptionMessageValue>(exception_message);
+  }
+
+  std::string message_;
+};
+
+struct TORCH_API SugaredEnumClass : public SugaredValue {
+  explicit SugaredEnumClass(EnumTypePtr enum_type)
+      : enum_type_(std::move(enum_type)) {}
+
+  std::string kind() const override {
+    return "EnumClass";
+  }
+
+  SugaredValuePtr attr(
+      const SourceRange& loc,
+      Function& m,
+      const std::string& field) override;
+
+  SugaredValuePtr iter(const SourceRange& loc, Function& m) override;
+
+ private:
+  EnumTypePtr enum_type_;
+};
+
 } // namespace jit
 } // namespace torch

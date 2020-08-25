@@ -69,14 +69,10 @@ class Conf(object):
                 "update_s3_htmls",
             ]
             job_def["filters"] = branch_filters.gen_filter_dict(
-                branches_list=["nightly"],
-                tags_list=[branch_filters.RC_PATTERN],
+                branches_list=["postnightly"],
             )
         else:
-            if phase in ["upload"]:
-                filter_branch = "nightly"
-            else:
-                filter_branch = r"/.*/"
+            filter_branch = r"/.*/"
             job_def["filters"] = branch_filters.gen_filter_dict(
                 branches_list=[filter_branch],
                 tags_list=[branch_filters.RC_PATTERN],
@@ -101,15 +97,47 @@ class Conf(object):
                     job_def["executor"] = "windows-with-nvidia-gpu"
                 else:
                     job_def["resource_class"] = "gpu.medium"
-        if phase == "upload":
-            job_def["context"] = "org-member"
-            job_def["requires"] = [
-                self.gen_build_name(upload_phase_dependency, nightly)
-            ]
 
         os_name = miniutils.override(self.os, {"macos": "mac"})
         job_name = "_".join([self.get_name_prefix(), os_name, phase])
         return {job_name : job_def}
+
+    def gen_upload_job(self, phase, requires_dependency):
+        """Generate binary_upload job for configuration
+
+        Output looks similar to:
+
+      - binary_upload:
+          name: binary_linux_manywheel_3_7m_cu92_devtoolset7_nightly_upload
+          context: org-member
+          requires: binary_linux_manywheel_3_7m_cu92_devtoolset7_nightly_test
+          filters:
+            branches:
+              only:
+                - nightly
+            tags:
+              only: /v[0-9]+(\\.[0-9]+)*-rc[0-9]+/
+          package_type: manywheel
+          upload_subfolder: cu92
+        """
+        return {
+            "binary_upload": OrderedDict({
+                "name": self.gen_build_name(phase, nightly=True),
+                "context": "org-member",
+                "requires": [self.gen_build_name(
+                    requires_dependency,
+                    nightly=True
+                )],
+                "filters": branch_filters.gen_filter_dict(
+                    branches_list=["nightly"],
+                    tags_list=[branch_filters.RC_PATTERN],
+                ),
+                "package_type": self.pydistro,
+                "upload_subfolder": binary_build_data.get_processor_arch_name(
+                    self.cuda_version
+                ),
+            })
+        }
 
 def get_root(smoke, name):
 
@@ -149,32 +177,19 @@ def get_nightly_uploads():
     mylist = []
     for conf in configs:
         phase_dependency = "test" if predicate_exclude_macos(conf) else "build"
-        mylist.append(conf.gen_workflow_job("upload", phase_dependency, nightly=True))
+        mylist.append(conf.gen_upload_job("upload", phase_dependency))
 
     return mylist
 
 def get_post_upload_jobs():
-    """Generate jobs to update HTML indices and report binary sizes"""
-    configs = gen_build_env_list(False)
-    common_job_def = {
-        "context": "org-member",
-        "filters": branch_filters.gen_filter_dict(
-            branches_list=["nightly"],
-            tags_list=[branch_filters.RC_PATTERN],
-        ),
-        "requires": [],
-    }
-    for conf in configs:
-        upload_job_name = conf.gen_build_name(
-            build_or_test="upload",
-            nightly=True
-        )
-        common_job_def["requires"].append(upload_job_name)
     return [
         {
             "update_s3_htmls": {
                 "name": "update_s3_htmls",
-                **common_job_def,
+                "context": "org-member",
+                "filters": branch_filters.gen_filter_dict(
+                    branches_list=["postnightly"],
+                ),
             },
         },
     ]

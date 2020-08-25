@@ -16,21 +16,29 @@ class Int8OpsTest(serial.SerializedTestCase):
         tensor_max = np.max(tensor)
         tensor_min = min(0, np.min(tensor))
         scale = np.float32(np.float16((tensor_max - tensor_min) / 255.0))
+        if scale < 1e-6:
+            scale = 1e-6
         zero_point = 0 - tensor_min / scale
         zero_point = int(round(np.clip(zero_point, 0, 255.0)))
         return (scale, zero_point)
 
+    @settings(max_examples=30, deadline=None)
     @given(
         n=st.integers(2, 1024),
-        rand_seed=st.integers(0, 65534)
+        rand_seed=st.integers(0, 65534),
+        non_zero_offset=st.booleans()
     )
-    @settings(max_examples=100)
-    def test_int8_quantize(self, n, rand_seed):
+    def test_int8_quantize(self, n, rand_seed, non_zero_offset):
         print("n={}, rand_seed={}".format(n, rand_seed))
         np.random.seed(rand_seed)
         workspace.ResetWorkspace()
 
-        X_fp32 = np.random.rand(n, n).astype(np.float16).astype(np.float32)
+        if non_zero_offset:
+            X_fp32 = np.random.uniform(-1, 1, size=(n, n)).astype(np.float16) \
+                .astype(np.float32)
+        else:
+            X_fp32 = np.random.rand(n, n).astype(np.float16).astype(np.float32)
+
         W_fp32 = np.identity(n, dtype=np.float32)
         b_fp32 = np.zeros((n,), dtype=np.float32)
 
@@ -116,24 +124,24 @@ class Int8OpsTest(serial.SerializedTestCase):
         n=st.integers(1, 1024),
         m=st.integers(1, 1024),
         k=st.integers(1, 1024),
+        f=st.integers(1, 1),  # TODO: figure a safe number to increase
         rand_seed=st.integers(0, 65534),
         quantize_bias=st.sampled_from([False]),
     )
-    @settings(max_examples=100)
+    @settings(deadline=None, max_examples=30)
     def test_int8_fc(
-        self, n, m, k, rand_seed, quantize_bias
+        self, n, m, k, rand_seed, quantize_bias, f
     ):
         print(
-            "n={}, m={}, k={}, rand_seed={}, quantize_bias={}".format(
-                n, m, k, rand_seed, quantize_bias
-            )
+            f"n={n}, m={m}, k={k}, rand_seed={rand_seed}, quantize_bias={quantize_bias}"
         )
         np.random.seed(rand_seed)
         workspace.ResetWorkspace()
 
-        X_fp32 = np.random.rand(m, k).astype(np.float16).astype(np.float32)
-        W_fp32 = np.random.rand(n, k).astype(np.float32)
-        b_fp32 = np.random.rand(n).astype(np.float16).astype(np.float32)
+        ff = float(f)
+        X_fp32 = np.random.uniform(-ff, ff, size=(m, k)).astype(np.float32)
+        W_fp32 = np.random.uniform(-ff, ff, size=(n, k)).astype(np.float32)
+        b_fp32 = np.random.uniform(-ff, ff, size=(n)).astype(np.float32)
 
         X_scale, X_zero_point = self._get_scale_zp(X_fp32)
         Y_fp32 = np.dot(X_fp32, W_fp32.T) + b_fp32
@@ -221,13 +229,13 @@ class Int8OpsTest(serial.SerializedTestCase):
         n=st.integers(1, 4),
         rand_seed=st.integers(0, 65534)
     )
-    @settings(max_examples=1)
+    @settings(max_examples=100, deadline=None)
     def test_int8_small_input(self, n, rand_seed):
         print("n={}, rand_seed={}".format(n, rand_seed))
         np.random.seed(rand_seed)
         workspace.ResetWorkspace()
 
-        X_fp32 = np.random.uniform(0.001, 0.003, size=(n, n)).astype(np.float16).astype(np.float32)
+        X_fp32 = np.random.uniform(0.01, 0.03, size=(n, n)).astype(np.float32)
         W_fp32 = np.identity(n, dtype=np.float32)
         b_fp32 = np.zeros((n,), dtype=np.float32)
 

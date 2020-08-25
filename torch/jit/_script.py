@@ -15,18 +15,31 @@ import warnings
 
 import torch
 import torch._jit_internal as _jit_internal
+from torch.utils import set_module
 from torch.jit._recursive import ScriptMethodStub, wrap_cpp_module
 from torch.nn import Module
 from torch.jit._state import _enabled
+from torch.jit._builtins import _register_builtin
 from torch._six import with_metaclass, get_function_from_type
 from torch.jit.frontend import get_jit_def, get_default_args, get_jit_class_def
 from torch._jit_internal import _qualified_name
+from torch.jit._fuser import _graph_for
 from torch.jit._state import (
     _try_get_jit_cached_function,
     _try_get_jit_cached_overloads,
     _set_jit_function_cache,
     _set_jit_overload_cache,
 )
+
+torch._C.ScriptMethod.graph_for = _graph_for
+torch._C.ScriptFunction.graph_for = _graph_for
+ScriptFunction = torch._C.ScriptFunction
+ScriptFunction.__doc__ = """
+Functionally equivalent to a :class:`ScriptModule`, but represents a single
+function and does not have any attributes or Parameters.
+"""
+set_module(ScriptFunction, "torch.jit")
+
 
 if _enabled:
     Attribute = collections.namedtuple("Attribute", ["value", "type"])
@@ -418,7 +431,7 @@ if _enabled:
         def graph(self):
             r"""
             Returns a string representation of the internal graph for the
-            ``forward`` method. See `interpreting-graphs`_ for details.
+            ``forward`` method. See :ref:`interpreting-graphs` for details.
             """
             return self.forward.graph
 
@@ -427,7 +440,7 @@ if _enabled:
             r"""
             Returns a string representation of the internal graph for the
             ``forward`` method. This graph will be preprocessed to inline all function and method calls.
-            See `interpreting-graphs`_ for details.
+            See :ref:`interpreting-graphs` for details.
             """
             return self.forward.inlined_graph
 
@@ -435,8 +448,8 @@ if _enabled:
         def code(self):
             r"""
             Returns a pretty-printed representation (as valid Python syntax) of
-            the internal graph for the ``forward`` method. See `inspecting-code`_
-            for details.
+            the internal graph for the ``forward`` method. See
+            :ref:`inspecting-code` for details.
             """
             return self.forward.code
 
@@ -450,7 +463,7 @@ if _enabled:
             [1] a ConstMap following the CONSTANT.cN format of the output in [0].
             The indices in the [0] output are keys to the underlying constant's values.
 
-            See `inspecting-code`_ for details.
+            See :ref:`inspecting-code` for details.
             """
             r = self.forward.code_with_constants
             return (r[0], ConstMap(r[1]))
@@ -655,7 +668,7 @@ if _enabled:
             cls, predicate=lambda x: inspect.isfunction(x) or inspect.ismethod(x)
         )
 
-    _compiled_methods_whitelist = {
+    _compiled_methods_allowlist = {
         "forward",
         "register_buffer",
         "register_parameter",
@@ -703,7 +716,7 @@ if _enabled:
             continue
         if (
             name not in RecursiveScriptModule.__dict__
-            and name not in _compiled_methods_whitelist
+            and name not in _compiled_methods_allowlist
         ):
             setattr(RecursiveScriptModule, method.__name__, _make_fail(name))
 
@@ -821,9 +834,9 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
                     self.conv2 = torch.jit.trace(nn.Conv2d(20, 20, 5), torch.rand(1, 20, 16, 16))
 
                 def forward(self, input):
-                  input = F.relu(self.conv1(input))
-                  input = F.relu(self.conv2(input))
-                  return input
+                    input = F.relu(self.conv1(input))
+                    input = F.relu(self.conv2(input))
+                    return input
 
             scripted_module = torch.jit.script(MyModule())
 
@@ -936,10 +949,10 @@ def is_scripting():
             return x
 
         def linear(x):
-           if not torch.jit.is_scripting():
-              return torch.linear(x)
-           else:
-              return unsupported_linear_op(x)
+            if not torch.jit.is_scripting():
+                return torch.linear(x)
+            else:
+                return unsupported_linear_op(x)
     """
     return False
 
@@ -1053,3 +1066,32 @@ def _recursive_compile_class(obj, loc):
     error_stack = torch._C.CallStack(_qual_name, loc)
     rcb = _jit_internal.createResolutionCallbackForClassMethods(obj)
     _compile_and_register_class(obj, rcb, _qual_name)
+
+
+_register_builtin(is_scripting, "aten::is_scripting")
+
+
+class CompilationUnit(object):
+    def __init__(self, lang=None, _frames_up=0):
+        self._c = torch._C.CompilationUnit()
+        if lang is not None:
+            self.define(lang, _frames_up=_frames_up + 1)
+
+    def define(self, lang, rcb=None, _frames_up=0):
+        if not rcb:
+            rcb = _jit_internal.createResolutionCallbackFromFrame(_frames_up + 1)
+        self._c.define(lang, rcb)
+
+    def __getattr__(self, attr):
+        r = self._c.find_function(attr)
+        if r is None:
+            raise AttributeError("'CompilationUnit' has no attribute '{}'".format(attr))
+        return r
+
+
+def _unwrap_optional(x):
+    assert x is not None, "Unwrapping null optional"
+    return x
+
+
+_register_builtin(_unwrap_optional, "aten::_unwrap_optional")

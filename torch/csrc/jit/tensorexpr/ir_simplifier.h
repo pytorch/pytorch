@@ -375,13 +375,11 @@ class TORCH_API PolynomialTransformer : public IRSimplifierBase {
     return mutateBinaryOp(v, this);
   }
 
-  const Expr* mutate(const Max* v) override {
-    return mutateBinaryOp(v, this, v->propagate_nans());
-  }
+  const Expr* mutate(const Max* v) override;
 
-  const Expr* mutate(const Min* v) override {
-    return mutateBinaryOp(v, this, v->propagate_nans());
-  }
+  const Expr* mutate(const Min* v) override;
+
+  const Expr* mutate(const CompareSelect* v) override;
 
   const Expr* mutate(const Intrinsics* v) override;
 
@@ -484,6 +482,9 @@ class TORCH_API IRSimplifier {
     return s;
   }
 };
+
+// Returns true if expressions A and B can be simplified to an equal expression.
+TORCH_API bool exprEquals(const Expr* A, const Expr* B);
 
 } // namespace tensorexpr
 } // namespace jit

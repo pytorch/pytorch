@@ -47,6 +47,7 @@ from torch.testing._internal.common_quantization import (
     prepare_dynamic,
     convert_dynamic,
     skipIfNoFBGEMM,
+    EmbeddingModule,
 )
 
 # annotated models
@@ -61,6 +62,7 @@ from torch.testing._internal.common_quantization import (
 from torch.testing._internal.common_quantized import (
     override_quantized_engine,
     supported_qengines,
+    override_qengines,
 )
 from torch.testing._internal.common_utils import TemporaryFileName
 from torch.testing._internal.common_utils import suppress_warnings
@@ -101,6 +103,7 @@ class TestPostTrainingStatic(QuantizationTestCase):
                     self.checkWrappedQuantizedLinear(model.fc1)
                     test_only_eval_fn(model, self.calib_data)
                     self.checkScriptable(model, self.calib_data)
+                    self.checkNoQconfig(model)
 
                 checkQuantized(model)
 
@@ -144,6 +147,7 @@ class TestPostTrainingStatic(QuantizationTestCase):
                 self.checkWrappedQuantizedLinear(model.fc2)
                 test_only_eval_fn(model, self.calib_data)
                 self.checkScriptable(model, self.calib_data)
+                self.checkNoQconfig(model)
 
             checkQuantized(model)
 
@@ -185,6 +189,7 @@ class TestPostTrainingStatic(QuantizationTestCase):
                     self.checkLinear(model.sub2.fc2)
                     test_only_eval_fn(model, self.calib_data)
                     self.checkScriptable(model, self.calib_data)
+                    self.checkNoQconfig(model)
 
                 checkQuantized(model)
 
@@ -225,6 +230,7 @@ class TestPostTrainingStatic(QuantizationTestCase):
             self.checkWrappedQuantizedLinear(model.fc3)
             test_only_eval_fn(model, self.calib_data)
             self.checkScriptable(model, self.calib_data)
+            self.checkNoQconfig(model)
 
         checkQuantized(model)
 
@@ -266,6 +272,7 @@ class TestPostTrainingStatic(QuantizationTestCase):
                     self.checkWrappedQuantizedLinear(model.fc3)
                     test_only_eval_fn(model, self.calib_data)
                     self.checkScriptable(model, self.calib_data)
+                    self.checkNoQconfig(model)
 
                 checkQuantized(model)
 
@@ -294,6 +301,7 @@ class TestPostTrainingStatic(QuantizationTestCase):
                     self.assertEqual(type(model.sub.module.relu1), nnq.ReLU)
                     self.assertEqual(type(model.sub.module.relu2), nnq.ReLU)
                     self.checkScriptable(model, self.calib_data)
+                    self.checkNoQconfig(model)
 
                 checkQuantized(model)
 
@@ -319,6 +327,7 @@ class TestPostTrainingStatic(QuantizationTestCase):
             self.assertEqual(type(model.fc), nnq.Linear)
             test_only_eval_fn(model, self.calib_data)
             self.checkScriptable(model, self.calib_data)
+            self.checkNoQconfig(model)
 
         checkQuantized(model)
 
@@ -348,6 +357,7 @@ class TestPostTrainingStatic(QuantizationTestCase):
                     self.assertEqual(type(model.module.myop), nn.quantized.QFunctional)
                     self.assertEqual(type(model.module.avgpool), nn.AdaptiveAvgPool2d)
                     test_only_eval_fn(model, self.img_data_2d)
+                    self.checkNoQconfig(model)
 
                 checkQuantized(model)
 
@@ -376,6 +386,7 @@ class TestPostTrainingStatic(QuantizationTestCase):
             self.assertEqual(type(model.instance_norm3d), nnq.InstanceNorm3d)
             test_only_eval_fn(model, self.calib_data)
             self.checkScriptable(model, self.calib_data)
+            self.checkNoQconfig(model)
 
         checkQuantized(model)
 
@@ -437,6 +448,7 @@ class TestPostTrainingStatic(QuantizationTestCase):
             self.assertEqual(type(model.elu), nnq.ELU)
             test_only_eval_fn(model, self.calib_data)
             self.checkScriptable(model, self.calib_data)
+            self.checkNoQconfig(model)
 
         checkQuantized(model)
 
@@ -444,6 +456,55 @@ class TestPostTrainingStatic(QuantizationTestCase):
         model_oneline = quantize(ActivationsTestModel(), test_only_eval_fn,
                                  self.calib_data)
         checkQuantized(model_oneline)
+
+    @override_qengines
+    def test_forward_hooks_preserved(self):
+        r"""Test post-training static quantization on preserving
+        pre forward and post forward hooks of original model
+        """
+        qengine = torch.backends.quantized.engine
+        model = QuantStubModel()
+        counter = {
+            'pre_forwards': 0,
+            'forwards': 0,
+        }
+
+        def fw_pre_hook(h_module, input):
+            counter['pre_forwards'] += 1
+
+        def fw_hook(h_module, input, output):
+            counter['forwards'] += 1
+
+        model.fc.register_forward_pre_hook(fw_pre_hook)
+        model.fc.register_forward_hook(fw_hook)
+
+        model.qconfig = torch.quantization.get_default_qconfig(qengine)
+        model = prepare(model)
+
+        def checkHooksIsPresent(model, before_convert=True):
+            num_fwd_hooks = 1
+            if before_convert:
+                self.assertEqual(len(model.quant._forward_hooks.values()), 1,
+                                 "Quantization observer hook has disappeared")
+                num_fwd_hooks = 2
+
+            self.assertObjectIn(fw_pre_hook, model.fc._forward_pre_hooks.values())
+            self.assertObjectIn(fw_hook, model.fc._forward_hooks.values())
+            self.assertEqual(len(model.fc._forward_pre_hooks.values()), 1,
+                             "Extra pre forward hooks have appeared on a layer")
+            # During static quantization non stub layers are provided with quantization observer hook too
+            self.assertEqual(len(model.fc._forward_hooks.values()), num_fwd_hooks,
+                             "Extra post forward hooks have appeared on a layer")
+            # Implicitly check that fw_hook goes after _observer_forward_hook
+            self.assertEqual(list(model.fc._forward_hooks.values())[-1], fw_hook,
+                             "_observer_forward_hook is not a first entry of the hooks list")
+
+        checkHooksIsPresent(model, True)
+        test_only_eval_fn(model, self.calib_data)
+        torch.quantization.convert(model, inplace=True)
+        checkHooksIsPresent(model, False)
+
+
 
 @skipIfNoFBGEMM
 class TestPostTrainingDynamic(QuantizationTestCase):
@@ -464,6 +525,7 @@ class TestPostTrainingDynamic(QuantizationTestCase):
             def checkQuantized(model):
                 self.checkDynamicQuantizedLinear(model.fc1, dtype)
                 self.checkScriptable(model, self.calib_data, check_save_load=True)
+                self.checkNoQconfig(model)
 
             checkQuantized(model)
 
@@ -503,6 +565,7 @@ class TestPostTrainingDynamic(QuantizationTestCase):
                 self.assertEqual(type(model.fc1), torch.nn.Linear)
                 self.checkDynamicQuantizedLinear(model.fc2, dtype=dtype)
                 self.checkScriptable(model, self.calib_data, check_save_load=True)
+                self.checkNoQconfig(model)
 
             checkQuantized(model)
 
@@ -535,6 +598,7 @@ class TestPostTrainingDynamic(QuantizationTestCase):
                 self.checkDynamicQuantizedLinear(model.sub2.fc1, dtype=dtype)
                 self.checkLinear(model.sub2.fc2)
                 self.checkScriptable(model, self.calib_data, check_save_load=True)
+                self.checkNoQconfig(model)
 
             checkQuantized(model)
 
@@ -567,6 +631,7 @@ class TestPostTrainingDynamic(QuantizationTestCase):
                 self.checkDynamicQuantizedLinear(model.sub2.fc2, dtype=dtype)
                 self.checkDynamicQuantizedLinear(model.fc3, dtype=dtype)
                 self.checkScriptable(model, self.calib_data, check_save_load=True)
+                self.checkNoQconfig(model)
 
             checkQuantized(model)
 
@@ -599,6 +664,7 @@ class TestPostTrainingDynamic(QuantizationTestCase):
                 self.checkDynamicQuantizedLinear(model.sub2.fc2, dtype=dtype)
                 self.checkDynamicQuantizedLinear(model.fc3, dtype=dtype)
                 self.checkScriptable(model, self.calib_data, check_save_load=True)
+                self.checkNoQconfig(model)
 
             checkQuantized(model)
 
@@ -634,6 +700,7 @@ class TestPostTrainingDynamic(QuantizationTestCase):
                 self.checkDynamicQuantizedLinear(model.sub2.fc2, dtype=dtype)
                 test_only_eval_fn(model, self.calib_data)
                 self.checkScriptable(model, self.calib_data, check_save_load=True)
+                self.checkNoQconfig(model)
 
             checkQuantized(model)
 
@@ -660,6 +727,7 @@ class TestPostTrainingDynamic(QuantizationTestCase):
             self.checkDynamicQuantizedLinear(model.sub2.fc2, dtype=torch.qint8)
             test_only_eval_fn(model, self.calib_data)
             self.checkScriptable(model, self.calib_data, check_save_load=True)
+            self.checkNoQconfig(model)
 
         checkQuantized(model)
         # test one line API
@@ -746,11 +814,89 @@ class TestPostTrainingDynamic(QuantizationTestCase):
 
                 self.assertTrue(mod_repr_map[module_type] in str(model_quantized))
                 self.checkDynamicQuantizedModule(model_quantized.mod, mod_type_map[module_type], dtype)
+                self.checkNoQconfig(model)
 
             # Smoke test extra reprs
             checkQuantized(model_quantized, module_type)
             self.checkScriptable(model_quantized, [[x]], check_save_load=True)
 
+
+    def test_forward_hooks_preserved(self):
+        r"""Test post-training dynamic quantization on preserving
+        pre forward and post forward hooks of original model
+        """
+        for dtype in [torch.qint8, torch.float16]:
+            model = SingleLayerLinearDynamicModel().eval()
+            qconfig = float16_dynamic_qconfig if dtype == torch.float16 else default_dynamic_qconfig
+            qconfig_dict = {
+                'fc1': qconfig
+            }
+            convert_dynamic(model)
+
+            counter = {
+                'pre_forwards': 0,
+                'forwards': 0,
+            }
+
+            def fw_pre_hook(h_module, input):
+                counter['pre_forwards'] += 1
+
+            def fw_hook(h_module, input, output):
+                counter['forwards'] += 1
+
+            model.fc1.register_forward_pre_hook(fw_pre_hook)
+            model.fc1.register_forward_hook(fw_hook)
+            prepare_dynamic(model, qconfig_dict)
+
+            def checkHooksIsPresent(model):
+                self.assertObjectIn(fw_pre_hook, model.fc1._forward_pre_hooks.values())
+                self.assertObjectIn(fw_hook, model.fc1._forward_hooks.values())
+                self.assertEqual(len(model.fc1._forward_pre_hooks.values()), 1,
+                                 "Extra pre forward hooks have appeared on a layer")
+                self.assertEqual(len(model.fc1._forward_hooks.values()), 1,
+                                 "Extra post forward hooks have appeared on a layer")
+
+            checkHooksIsPresent(model)
+            test_only_eval_fn(model, self.calib_data)
+            convert_dynamic(model)
+            checkHooksIsPresent(model)
+
+    def test_quantized_embedding(self):
+        r""" Test the post-training dynamic quantization flow, serialization and scripting
+        of embedding modules
+        """
+        model = EmbeddingModule().eval()
+        indices = torch.tensor([9, 6, 5, 7, 8, 8, 9, 2, 8, 6, 6, 9, 1, 6, 8, 8, 3, 2, 3, 6, 3, 6, 5, 7, 0, 8, 4, 6, 5, 8, 2, 3])
+        offsets = torch.tensor([0, 19, 20, 28, 28, 32])
+        weights = torch.randn(10, 12, dtype=torch.float32)
+
+        quantized_model = quantize_dynamic(model, dtype=torch.quint8)
+
+        per_sample_weights = torch.from_numpy(np.random.uniform(
+            low=0.01, high=0.5, size=[len(indices)]).astype(np.float32))
+
+        # Test to make sure module is quantized correctly.
+        self.assertTrue('DynamicQuantizedEmbeddingBag' in str(quantized_model))
+        self.checkDynamicQuantizedModule(quantized_model.emb, torch.nn.quantized.dynamic.EmbeddingBag, torch.quint8)
+        self.checkScriptable(quantized_model, [[indices, offsets, per_sample_weights]], check_save_load=True)
+
+        class EmbeddingWithLinear(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.emb = torch.nn.EmbeddingBag(num_embeddings=10, embedding_dim=12,
+                                                 include_last_offset=True, scale_grad_by_freq=False, mode='sum')
+                self.fc = torch.nn.Linear(5, 5)
+
+            def forward(self, indices, offsets, per_sample_weights, linear_in):
+                return self.emb(indices, offsets, per_sample_weights), self.fc(linear_in)
+
+        # Test set API
+        model = EmbeddingWithLinear().eval()
+        quantized_model = quantize_dynamic(model, set([nn.EmbeddingBag]), dtype=torch.quint8)
+
+        self.assertTrue('DynamicQuantizedEmbeddingBag' in str(quantized_model))
+        self.checkLinear(model.fc)
+        self.checkDynamicQuantizedModule(quantized_model.emb, torch.nn.quantized.dynamic.EmbeddingBag, torch.quint8)
 
 class TestQuantizationAwareTraining(QuantizationTestCase):
     def test_manual(self):
@@ -767,6 +913,7 @@ class TestQuantizationAwareTraining(QuantizationTestCase):
                     self.assertEqual(type(model.fc2), nnq.Linear)
                     test_only_eval_fn(model, self.calib_data)
                     self.checkScriptable(model, self.calib_data)
+                    self.checkNoQconfig(model)
 
                 checkQuantized(model)
 
@@ -806,6 +953,7 @@ class TestQuantizationAwareTraining(QuantizationTestCase):
                     self.assertEqual(type(model.fc2), nnq.Linear)
                     test_only_eval_fn(model, self.img_data_2d)
                     self.checkScriptable(model, self.img_data_2d)
+                    self.checkNoQconfig(model)
 
                 checkQuantized(model)
 
@@ -864,6 +1012,47 @@ class TestQuantizationAwareTraining(QuantizationTestCase):
                 out = model(x)
                 self.assertEqual(ref, out)
 
+    @override_qengines
+    def test_forward_hooks_preserved(self):
+        r"""Test QAT on preserving pre forward and post forward hooks of original model
+        """
+        qengine = torch.backends.quantized.engine
+        model = QuantStubModel()
+        counter = {
+            'pre_forwards': 0,
+            'forwards': 0,
+        }
+
+        def fw_pre_hook(h_module, input):
+            counter['pre_forwards'] += 1
+
+        def fw_hook(h_module, input, output):
+            counter['forwards'] += 1
+
+        model.fc.register_forward_pre_hook(fw_pre_hook)
+        model.fc.register_forward_hook(fw_hook)
+
+        model.qconfig = torch.quantization.get_default_qat_qconfig(qengine)
+        model = prepare_qat(model)
+
+        def checkHooksIsPresent(model, before_convert=True):
+            forward_hooks = 1
+            if before_convert:
+                self.assertEqual(len(model.quant._forward_hooks.values()), 1,
+                                 "Quantization observer hook has disappeared")
+                forward_hooks = 2
+            self.assertObjectIn(fw_pre_hook, model.fc._forward_pre_hooks.values())
+            self.assertObjectIn(fw_hook, model.fc._forward_hooks.values())
+            self.assertEqual(len(model.fc._forward_pre_hooks.values()), 1,
+                             "Extra pre forward hooks have appeared on a layer")
+            self.assertEqual(len(model.fc._forward_hooks.values()), forward_hooks,
+                             "Extra post forward hooks have appeared on a layer")
+
+        checkHooksIsPresent(model, True)
+        x = torch.rand(2, 5, dtype=torch.float)
+        model(x)
+        torch.quantization.convert(model, inplace=True)
+        checkHooksIsPresent(model, False)
 
 class TestFunctionalModule(QuantizationTestCase):
     # Histogram Observers are slow, so have no-deadline to ensure test doesn't time out
@@ -891,6 +1080,7 @@ class TestFunctionalModule(QuantizationTestCase):
             self.assertEqual(type(model.myadd), torch.nn.quantized.QFunctional)
             self.assertEqual(type(model.mycat), torch.nn.quantized.QFunctional)
             self.assertEqual(type(model.myadd_relu), torch.nn.quantized.QFunctional)
+            self.checkNoQconfig(model)
 
         checkQuantized(model)
         self.checkScriptable(model, [[xq]], check_save_load=True)
@@ -942,6 +1132,8 @@ class TestFusion(QuantizationTestCase):
             self.assertEqual(type(model.sub2.conv), nn.Conv2d)
             self.assertEqual(type(model.sub2.relu), nn.ReLU)
             test_only_eval_fn(model, self.img_data_1d)
+            self.checkNoQconfig(model)
+
         with self.assertRaisesRegex(RuntimeError, "Could not run 'aten::native_batch_norm' with arguments from the 'QuantizedCPU'"):
             checkQuantized(model)
 
@@ -1018,6 +1210,8 @@ class TestFusion(QuantizationTestCase):
             self.assertEqual(type(model.sub2.relu), nn.ReLU)
             self.assertEqual(type(model.bn2), nniq.BNReLU3d)
             test_only_eval_fn(model, self.img_data_1d)
+            self.checkNoQconfig(model)
+
         checkQuantized(model)
 
         model = ModelForFusion(default_qconfig).eval()
@@ -1155,6 +1349,52 @@ class TestFusion(QuantizationTestCase):
                     self.assertEqual(type(model.bn2), nn.Identity)
 
                 checkQAT(model)
+
+    def test_forward_hooks_preserved(self):
+        r"""Test case that checks whether forward pre hooks of the first module and
+        post forward hooks of the last module in modules list passed to fusion function preserved.
+        (e.g. before fusion: [nn.Conv2d (with pre forward hooks), nn.BatchNorm2d, nn.ReLU (with post forward hooks)]
+        after fusion: [nni.ConvBnReLU2d (with pre and post hooks), nn.Identity, nn.Identity])
+        """
+        model = ModelForFusion(default_qat_qconfig).train()
+
+        counter = {
+            'pre_forwards': 0,
+            'forwards': 0,
+        }
+        fused = False
+
+        def fw_pre_hook(fused_module_class, h_module, input):
+            if fused:
+                self.assertEqual(type(h_module), fused_module_class,
+                                 "After fusion owner of the first module's forward pre hook is not a fused module")
+            counter['pre_forwards'] += 1
+
+        def fw_hook(fused_module_class, h_module, input, output):
+            if fused:
+                self.assertEqual(type(h_module), fused_module_class,
+                                 "After fusion owner of the last module's forward hook is not a fused module")
+            counter['forwards'] += 1
+
+        # Registering two pre and two post forward hooks, thus expecting counter increment by two each inference
+        model.conv1.register_forward_pre_hook(lambda *args: fw_pre_hook(nni.ConvBnReLU2d, *args))
+        model.sub1.conv.register_forward_pre_hook(lambda *args: fw_pre_hook(nni.ConvBn2d, *args))
+        model.relu1.register_forward_hook(lambda *args: fw_hook(nni.ConvBnReLU2d, *args))
+        model.sub1.bn.register_forward_hook(lambda *args: fw_hook(nni.ConvBn2d, *args))
+
+        test_only_eval_fn(model, self.img_data_1d)
+        self.assertEqual(counter['pre_forwards'], 2 * len(self.img_data_1d))
+        self.assertEqual(counter['forwards'], 2 * len(self.img_data_1d))
+
+        model = fuse_modules(model, ['conv1', 'bn1', 'relu1'])
+        model = fuse_modules(model, ['sub1.conv', 'sub1.bn'])
+
+        fused = True
+        before_fusion_pre_count = counter['pre_forwards']
+        before_fusion_post_count = counter['forwards']
+        test_only_eval_fn(model, self.img_data_1d)
+        self.assertEqual(counter['pre_forwards'] - before_fusion_pre_count, 2 * len(self.img_data_1d))
+        self.assertEqual(counter['forwards'] - before_fusion_post_count, 2 * len(self.img_data_1d))
 
 class TestModelNumerics(QuantizationTestCase):
     def test_float_quant_compare_per_tensor(self):
@@ -1642,7 +1882,7 @@ class TestDeprecatedJitQuantized(JitTestCase):
             def weight(self, w):
                 self._packed_weight = torch.ops.quantized.linear_prepack(w)
 
-        with torch.jit._disable_emit_hooks():
+        with torch._jit_internal._disable_emit_hooks():
             x = torch.jit.script(Linear(10, 10))
             torch._C._jit_pass_erase_shape_information(x.graph)
 

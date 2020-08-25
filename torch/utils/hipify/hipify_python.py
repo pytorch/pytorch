@@ -122,7 +122,7 @@ def matched_files_iter(root_path, includes=('*',), ignores=(), extensions=(), ou
     # This is a very rough heuristic; really, we want to avoid scanning
     # any file which is not checked into source control, but this script
     # needs to work even if you're in a Git or Hg checkout, so easier to
-    # just blacklist the biggest time sinks that won't matter in the
+    # just block the biggest time sinks that won't matter in the
     # end.
     for (abs_dirpath, dirs, filenames) in os.walk(root_path, topdown=True):
         rel_dirpath = os.path.relpath(abs_dirpath, root_path)
@@ -360,7 +360,7 @@ def processKernelLaunches(string, stats):
 def find_closure_group(input_string, start, group):
     """Generalization for finding a balancing closure group
 
-         if group = ["(", ")"], then finds the first balanced parantheses.
+         if group = ["(", ")"], then finds the first balanced parentheses.
          if group = ["{", "}"], then finds the first balanced bracket.
 
     Given an input string, a starting position in the input string, and the group type,

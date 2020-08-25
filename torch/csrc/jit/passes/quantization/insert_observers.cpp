@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/passes/fuse_linear.h>
 #include <torch/csrc/jit/passes/graph_rewrite_helper.h>
 #include <torch/csrc/jit/passes/quantization/helper.h>
+#include <torch/csrc/jit/passes/remove_mutation.h>
 
 #include <regex>
 #include <stack>
@@ -123,11 +124,24 @@ class ModuleCloneHelper {
     size_t N = type->numAttributes();
     for (size_t i = 0; i < N; ++i) {
       IValue s = module._ivalue()->getSlot(i);
-      if (type->getAttribute(i)->is_module()) {
+      std::string attr_name = type->getAttributeName(i);
+      TypePtr attr_type = type->getAttribute(i);
+      if (attr_type->is_module()) {
         const Module& orig = Module(s.toObject());
         Module cloned =
             clone_impl(orig, module_qconfig_map, type_remap, inplace, memo);
-        r.register_module(type->getAttributeName(i), cloned);
+
+        // NOTE: why do we need to manually setattr on object instead of using
+        // register_module here? because the attr can be a module interface
+        // type and hold a Module object still. register_module will not let us
+        // correctly set up the type for this attr, so we had to do this
+        // manually. In the case it's an interface type, the type will be shared
+        // by the new cloned instance in the same compilation unit bc it only
+        // contains a list of functionSchema
+        r.type()->addOrCheckAttribute(
+            attr_name,
+            attr_type->cast<ClassType>() ? cloned.type() : attr_type);
+        r._ivalue()->setAttr(attr_name, cloned._ivalue());
       } else {
         // we'll deepcopy the IValue in non inplace option
         r.register_attribute(
@@ -175,10 +189,11 @@ class ModuleCloneHelper {
       // remapping type for module instance
       if (node->kind() == prim::CallMethod) {
         Value* instance = node->inputs()[0];
-        auto path = getModuleAccessPath(instance, self);
-        auto child = findChildModule(source, path);
-        auto qconfig = module_qconfig_map.at(child._ivalue());
-        instance->setType(type_remap_fn(instance->type(), qconfig));
+        auto child_opt = getInvokedModuleOpt(source, node, self);
+        if (child_opt.has_value()) {
+          auto qconfig = module_qconfig_map.at(child_opt->_ivalue());
+          instance->setType(type_remap_fn(instance->type(), qconfig));
+        }
       }
       // We don't remap output and the remapping of module type
       // will be done in CallMethod, we don't support type remapping
@@ -335,7 +350,7 @@ class InsertObserversHelper {
       Module& module,
       const std::string& method_name);
 
-  bool valueNeedsToBeQuantized(Value* v);
+  bool valueNeedsToBeQuantized(Value* v, const QConfig& qconfig);
 
   bool isObserved(
       Value* v,
@@ -907,8 +922,10 @@ ModuleMethodVector InsertObserversHelper::getInvokedMethods(
         continue;
       }
       if (n->kind() == prim::CallMethod) {
-        invoked_methods.push_back(std::make_pair(
-            getInvokedModule(module, n, graph->inputs()[0]), n->s(attr::name)));
+        auto m_opt = getInvokedModuleOpt(module, n, graph->inputs()[0]);
+        if (m_opt.has_value()) {
+          invoked_methods.push_back(std::make_pair(*m_opt, n->s(attr::name)));
+        }
       }
 
       for (Block* subblock : n->blocks()) {
@@ -1049,7 +1066,11 @@ void InsertObserversHelper::fillBoundaryValueMap(
         // for CallFunction start with actual input
         size_t input_offset;
         if (n->kind() == prim::CallMethod) {
-          auto m = getInvokedModule(module, n, self);
+          auto m_opt = getInvokedModuleOpt(module, n, self);
+          if (!m_opt.has_value()) {
+            continue;
+          }
+          auto m = *m_opt;
           g = m.get_method(n->s(attr::name)).graph();
           input_offset = 0;
         } else {
@@ -1099,50 +1120,6 @@ void InsertObserversHelper::fillBoundaryValueMap(
   }
 }
 
-void makeAppendNonInplace(std::shared_ptr<Graph>& graph) {
-  std::string append_pattern = R"IR(
-graph(%list, %x):
-    %ignore : Tensor[] = aten::append(%list, %x)
-    return (%ignore) )IR";
-
-  /* Rewrite the above pattern to
-  std::string append_replacement = R"IR(
-graph(%list, %x):
-    %x_list : Tensor[]  = prim::ListConstruct(%x)
-    %result : Tensor[] = aten::add(%list, %x_list)
-    return (%result) )IR";
-   this is not supported by subgraph rewriter, so we'll do
-   this manually.
-  */
-
-  GRAPH_DUMP("Before replace append", graph);
-  const PatternInfo& append_pattern_info =
-      PatternInfo::parse_from_str(append_pattern);
-  const Graph& append_graph = *append_pattern_info.pattern_graph;
-  const auto& append_vmap = append_pattern_info.vmap;
-  const auto& matches = findPatternMatches(append_graph, *graph);
-  for (const auto& match : matches) {
-    auto append_node = match.values_map.at(append_vmap.at("ignore"))->node();
-    Value* list_val = append_node->input(0);
-    Value* x = append_node->input(1);
-    if (!list_val->type()->isSubtypeOf(ListType::ofTensors()) ||
-        !x->type()->isSubtypeOf(TensorType::get())) {
-      continue;
-    }
-    WithInsertPoint ins(append_node);
-    Node* x_list_node = graph->createList(TensorType::get(), {x});
-    graph->insertNode(x_list_node);
-    Node* add_node =
-        graph->create(Symbol::aten("add"), {list_val, x_list_node->output()});
-    graph->insertNode(add_node);
-    add_node->output()->setType(ListType::ofTensors());
-    list_val->replaceAllUsesAfterNodeWith(add_node, add_node->output());
-    append_node->removeAllInputs();
-    append_node->destroy();
-  }
-  GRAPH_DUMP("After replace append", graph);
-}
-
 void InsertObserversHelper::preprocess(
     Module& module,
     const std::string& method_name) {
@@ -1159,7 +1136,7 @@ void InsertObserversHelper::preprocess(
   // fuse decomposed linear into aten::linear
   FuseLinear(graph);
   replaceConvolutionWithAtenConv(graph);
-  makeAppendNonInplace(graph);
+  RemoveListMutation(graph);
 }
 
 void InsertObserversHelper::analyze(
@@ -1180,7 +1157,9 @@ void InsertObserversHelper::analyze(
   fillPassThroughValueMap(graph);
 }
 
-bool InsertObserversHelper::valueNeedsToBeQuantized(Value* v) {
+bool InsertObserversHelper::valueNeedsToBeQuantized(
+    Value* v,
+    const QConfig& qconfig) {
   if (isBiasOfConvOrLinear(v) ||
       !(v->type()->isSubtypeOf(TensorType::get()) ||
         v->type()->isSubtypeOf(ListType::ofTensors()))) {
@@ -1192,6 +1171,16 @@ bool InsertObserversHelper::valueNeedsToBeQuantized(Value* v) {
     // Check whether producer is quantizable
     if (nodeQuantizable(v->node()) || isPropagateQuantOp(v->node())) {
       return true;
+    }
+  }
+  if (quant_type_ == QuantType::DYNAMIC) {
+    // Check the dtype of the observer module.
+    Module observer_module = getObserverModuleFor(v, qconfig);
+    auto scalar_type = observer_module.attr("dtype");
+    // For inputs with Fp16 type that are not-weights we don't observer them for
+    // dynamic quantization.
+    if (scalar_type == at::ScalarType::Half && !isWeight(v)) {
+      return false;
     }
   }
   // Check whether node input value is quantizable
@@ -1221,7 +1210,7 @@ void InsertObserversHelper::fillValueObserverMap(
   }
   auto qconfig = *qconfig_opt;
   for (auto* v : graph->inputs()) {
-    if (valueNeedsToBeQuantized(v)) {
+    if (valueNeedsToBeQuantized(v, qconfig)) {
       GRAPH_DEBUG("Recording observer for ", v->debugName());
       GRAPH_DUMP("In graph:", v->owningGraph());
       observer_for_value_[v] = getObserverModuleFor(v, qconfig);
@@ -1234,7 +1223,7 @@ void InsertObserversHelper::fillValueObserverMap(
     blocks_to_visit.pop();
     for (Node* n : b->nodes()) {
       for (Value* v : n->outputs()) {
-        if (valueNeedsToBeQuantized(v)) {
+        if (valueNeedsToBeQuantized(v, qconfig)) {
           GRAPH_DEBUG("Recording observer for ", v->debugName());
           GRAPH_DUMP("In graph:", v->owningGraph());
           observer_for_value_[v] = getObserverModuleFor(v, qconfig);
@@ -1408,7 +1397,11 @@ InsertObserversHelper::insertObserversFor(
         size_t input_offset;
         bool is_udf_for_subblock = is_user_defined_function;
         if (n->kind() == prim::CallMethod) {
-          m = getInvokedModule(module, n, self);
+          auto m_opt = getInvokedModuleOpt(module, n, self);
+          if (!m_opt.has_value()) {
+            continue;
+          }
+          m = *m_opt;
           g = m.get_method(n->s(attr::name)).graph();
           input_offset = 0;
         } else { // CallFunction

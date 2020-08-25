@@ -15,7 +15,7 @@ from torch._six import get_function_from_type, bind_method
 ScriptMethodStub = collections.namedtuple('ScriptMethodStub', ('resolution_callback', 'def_', 'original_method'))
 
 # TODO: there should be a more principled way of doing this.
-blacklist = [
+ignored_attributes = [
     "_version",
     "_parameters",
     "_buffers",
@@ -54,19 +54,19 @@ def make_stub_from_method(nn_module, method_name):
 # ConstantValue in jit/script/init.cpp
 _constant_types = (bool, float, int, str, type(None), torch.device, torch.layout, torch.dtype)
 
-def _get_valid_constant(attr, v):
+def _get_valid_constant(attr, v, owner_type):
     if isinstance(v, _constant_types):
         return v
     elif isinstance(v, tuple) or isinstance(v, list):
-        return tuple(_get_valid_constant(attr, x) for x in v)
+        return tuple(_get_valid_constant(attr, x, owner_type) for x in v)
     constants = ", ".join(torch.typename(typ) for typ in _constant_types)
     raise TypeError(textwrap.dedent("""
-        '{}' object for attribute '{}' is not a valid constant.
+        '{}' object in attribute '{}.{}' is not a valid constant.
         Valid constants are:
         1. a nn.ModuleList
         2. a value of type {{{}}}
         3. a list or tuple of (2)
-        """.format(torch.typename(type(v)), attr, constants)))
+        """.format(torch.typename(type(v)), owner_type, attr, constants)))
 
 
 class SourceContext(torch._C._jit_tree_views.SourceRangeFactory):
@@ -172,7 +172,7 @@ def infer_concrete_type_builder(nn_module):
                           "Consider removing it.".format(name))
             continue
         value = getattr(nn_module, name)
-        concrete_type_builder.add_constant(name, _get_valid_constant(name, value))
+        concrete_type_builder.add_constant(name, _get_valid_constant(name, value, type(nn_module).__name__))
         added_names.add(name)
 
     # populate overloads
@@ -183,7 +183,7 @@ def infer_concrete_type_builder(nn_module):
         concrete_type_builder.add_overload(name, overloaded_names)
 
     for name, value in nn_module.__dict__.items():
-        if name in blacklist or name.startswith("__"):
+        if name in ignored_attributes or name.startswith("__"):
             # Python objects have lots of random attributes attached to them;
             # PyTorch adds a few more. Prevent these from getting compiled.
             continue
@@ -609,7 +609,7 @@ def compile_unbound_method(concrete_type, fn):
     if _jit_internal.is_ignored_fn(fn):
         return None
     stub = make_stub(fn, fn.__name__)
-    with torch.jit._disable_emit_hooks():
+    with torch._jit_internal._disable_emit_hooks():
         # We don't want to call the hooks here since the graph that is calling
         # this function is not yet complete
         create_methods_from_stubs(concrete_type, (stub,))

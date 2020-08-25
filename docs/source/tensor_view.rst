@@ -53,6 +53,7 @@ For reference, here’s a full list of view ops in PyTorch:
 - :meth:`~torch.Tensor.diagonal`
 - :meth:`~torch.Tensor.expand`
 - :meth:`~torch.Tensor.expand_as`
+- :meth:`~torch.Tensor.movedim`
 - :meth:`~torch.Tensor.narrow`
 - :meth:`~torch.Tensor.permute`
 - :meth:`~torch.Tensor.select`
@@ -62,14 +63,16 @@ For reference, here’s a full list of view ops in PyTorch:
 - :attr:`~torch.Tensor.T`
 - :attr:`~torch.Tensor.real`
 - :attr:`~torch.Tensor.imag`
-- :func:`~torch.Tensor.view_as_real`
-- :func:`~torch.Tensor.view_as_imag`
+- :meth:`~torch.Tensor.view_as_real`
+- :meth:`~torch.Tensor.view_as_imag`
+- :meth:`~torch.Tensor.unflatten`
 - :meth:`~torch.Tensor.unfold`
 - :meth:`~torch.Tensor.unsqueeze`
 - :meth:`~torch.Tensor.view`
 - :meth:`~torch.Tensor.view_as`
 - :meth:`~torch.Tensor.unbind`
 - :meth:`~torch.Tensor.split`
+- :meth:`~torch.Tensor.split_with_sizes`
 - :meth:`~torch.Tensor.chunk`
 - :meth:`~torch.Tensor.indices` (sparse tensor only)
 - :meth:`~torch.Tensor.values`  (sparse tensor only)
@@ -82,7 +85,7 @@ For reference, here’s a full list of view ops in PyTorch:
 
 It's also worth mentioning a few ops with special behaviors:
 
-- :meth:`~torch.Tensor.reshape` and :meth:`~torch.Tensor.reshape_as` can return either a view or new tensor, user code shouldn't rely on whether it's view or not.
+- :meth:`~torch.Tensor.reshape`, :meth:`~torch.Tensor.reshape_as` and :meth:`~torch.Tensor.flatten` can return either a view or new tensor, user code shouldn't rely on whether it's view or not.
 - :meth:`~torch.Tensor.contiguous` returns **itself** if input tensor is already contiguous, otherwise it returns a new contiguous tensor by copying data.
 
 For a more detailed walk-through of PyTorch internal implementation,

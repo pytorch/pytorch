@@ -7,6 +7,13 @@
 # shellcheck disable=SC2034
 COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
 
+# Temp: use new sccache
+if [[ -n "$IN_CIRCLECI" && "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+  # Download customized sccache
+  sudo curl --retry 3 http://repo.radeon.com/misc/.sccache_amd/sccache -o /opt/cache/bin/sccache
+  sudo chmod 755 /opt/cache/bin/sccache
+fi
+
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 # For distributed, four environmental configs:
@@ -115,6 +122,11 @@ if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
   exec ./scripts/build_android.sh "${build_args[@]}" "$@"
 fi
 
+if [[ "$BUILD_ENVIRONMENT" != *android* && "$BUILD_ENVIRONMENT" == *vulkan-linux* ]]; then
+  export USE_VULKAN=1
+  export VULKAN_SDK=/var/lib/jenkins/vulkansdk/
+fi
+
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # hcc used to run out of memory, silently exiting without stopping
   # the build process, leaving undefined symbols in the shared lib,
@@ -126,7 +138,7 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
 
   # ROCm CI is using Caffe2 docker images, which needs these wrapper
   # scripts to correctly use sccache.
-  if [ -n "${SCCACHE_BUCKET}" ]; then
+  if [[ -n "${SCCACHE_BUCKET}" && -z "$IN_CIRCLECI" ]]; then
     mkdir -p ./sccache
 
     SCCACHE="$(which sccache)"
@@ -150,8 +162,8 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
     export PATH="$CACHE_WRAPPER_DIR:$PATH"
   fi
 
-  # Set ROCM_ARCH to gtx900 and gtx906
-  if [[ -n "$CIRCLECI" ]]; then
+  if [[ -n "$IN_CIRCLECI" ]]; then
+      # Set ROCM_ARCH to gtx900 and gtx906 in CircleCI
       echo "Limiting PYTORCH_ROCM_ARCH to gfx90[06] for CircleCI builds"
       export PYTORCH_ROCM_ARCH="gfx900;gfx906"
   fi
@@ -230,6 +242,17 @@ else
     mkdir "$CUSTOM_OP_BUILD"
     pushd "$CUSTOM_OP_BUILD"
     cmake "$CUSTOM_OP_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPYTHON_EXECUTABLE="$(which python)"
+    make VERBOSE=1
+    popd
+    assert_git_not_dirty
+
+    # Build custom backend tests.
+    CUSTOM_BACKEND_BUILD="$PWD/../custom-backend-build"
+    CUSTOM_BACKEND_TEST="$PWD/test/custom_backend"
+    python --version
+    mkdir "$CUSTOM_BACKEND_BUILD"
+    pushd "$CUSTOM_BACKEND_BUILD"
+    cmake "$CUSTOM_BACKEND_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPYTHON_EXECUTABLE="$(which python)"
     make VERBOSE=1
     popd
     assert_git_not_dirty

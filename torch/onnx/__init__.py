@@ -42,7 +42,7 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
 
     Arguments:
         model (torch.nn.Module): the model to be exported.
-        args (tuple of arguments): the inputs to
+        args (tuple of arguments or torch.Tensor): the inputs to
             the model, e.g., such that ``model(*args)`` is a valid
             invocation of the model.  Any non-Tensor arguments will
             be hard-coded into the exported model; any Tensor arguments
