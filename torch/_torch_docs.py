@@ -5384,7 +5384,7 @@ Example::
 
 add_docstr(torch.qr,
            r"""
-qr(input, some=True, out=None) -> (Tensor, Tensor)
+qr(input, some=True, *, out=None) -> (Tensor, Tensor)
 
 Computes the QR decomposition of a matrix or a batch of matrices :attr:`input`,
 and returns a namedtuple (Q, R) of tensors such that :math:`\text{input} = Q R`
@@ -5412,6 +5412,8 @@ Args:
                 batch dimensions consisting of matrices of dimension :math:`m \times n`.
     some (bool, optional): Set to ``True`` for reduced QR decomposition and ``False`` for
                 complete QR decomposition.
+
+Keyword args:
     out (tuple, optional): tuple of `Q` and `R` tensors
                 satisfying :code:`input = torch.matmul(Q, R)`.
                 The dimensions of `Q` and `R` are :math:`(*, m, k)` and :math:`(*, k, n)`
@@ -5448,7 +5450,7 @@ Example::
 
 add_docstr(torch.rad2deg,
            r"""
-rad2deg(input, out=None) -> Tensor
+rad2deg(input, *, out=None) -> Tensor
 
 Returns a new tensor with each of the elements of :attr:`input`
 converted from angles in radians to degrees.
@@ -5471,7 +5473,7 @@ Example::
 
 add_docstr(torch.deg2rad,
            r"""
-deg2rad(input, out=None) -> Tensor
+deg2rad(input, *, out=None) -> Tensor
 
 Returns a new tensor with each of the elements of :attr:`input`
 converted from angles in degrees to radians.
@@ -5494,7 +5496,7 @@ Example::
 
 add_docstr(torch.rand,
            r"""
-rand(*size, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
+rand(*size, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
 Returns a tensor filled with random numbers from a uniform distribution
 on the interval :math:`[0, 1)`
@@ -5504,6 +5506,8 @@ The shape of the tensor is defined by the variable argument :attr:`size`.
 Args:
     size (int...): a sequence of integers defining the shape of the output tensor.
         Can be a variable number of arguments or a collection like a list or tuple.
+
+Keyword args:
     {out}
     {dtype}
     {layout}
@@ -5521,7 +5525,7 @@ Example::
 
 add_docstr(torch.rand_like,
            r"""
-rand_like(input, dtype=None, layout=None, device=None, requires_grad=False, memory_format=torch.preserve_format) -> Tensor
+rand_like(input, *, dtype=None, layout=None, device=None, requires_grad=False, memory_format=torch.preserve_format) -> Tensor
 
 Returns a tensor with the same size as :attr:`input` that is filled with
 random numbers from a uniform distribution on the interval :math:`[0, 1)`.
@@ -5530,6 +5534,8 @@ random numbers from a uniform distribution on the interval :math:`[0, 1)`.
 
 Args:
     {input}
+
+Keyword args:
     {dtype}
     {layout}
     {device}
@@ -5556,6 +5562,8 @@ Args:
     low (int, optional): Lowest integer to be drawn from the distribution. Default: 0.
     high (int): One above the highest integer to be drawn from the distribution.
     size (tuple): a tuple defining the shape of the output tensor.
+
+Keyword args:
     {generator}
     {out}
     {dtype}
@@ -5583,7 +5591,7 @@ Example::
 
 add_docstr(torch.randint_like,
            """
-randint_like(input, low=0, high, dtype=None, layout=torch.strided, device=None, requires_grad=False, \
+randint_like(input, low=0, high, \\*, dtype=None, layout=torch.strided, device=None, requires_grad=False, \
 memory_format=torch.preserve_format) -> Tensor
 
 Returns a tensor with the same shape as Tensor :attr:`input` filled with
@@ -5598,6 +5606,8 @@ Args:
     {input}
     low (int, optional): Lowest integer to be drawn from the distribution. Default: 0.
     high (int): One above the highest integer to be drawn from the distribution.
+
+Keyword args:
     {dtype}
     {layout}
     {device}
@@ -5608,7 +5618,7 @@ Args:
 
 add_docstr(torch.randn,
            r"""
-randn(*size, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
+randn(*size, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
 Returns a tensor filled with random numbers from a normal distribution
 with mean `0` and variance `1` (also called the standard normal
@@ -5622,6 +5632,8 @@ The shape of the tensor is defined by the variable argument :attr:`size`.
 Args:
     size (int...): a sequence of integers defining the shape of the output tensor.
         Can be a variable number of arguments or a collection like a list or tuple.
+
+Keyword args:
     {out}
     {dtype}
     {layout}
@@ -5639,7 +5651,7 @@ Example::
 
 add_docstr(torch.randn_like,
            r"""
-randn_like(input, dtype=None, layout=None, device=None, requires_grad=False, memory_format=torch.preserve_format) -> Tensor
+randn_like(input, *, dtype=None, layout=None, device=None, requires_grad=False, memory_format=torch.preserve_format) -> Tensor
 
 Returns a tensor with the same size as :attr:`input` that is filled with
 random numbers from a normal distribution with mean 0 and variance 1.
@@ -5648,6 +5660,8 @@ random numbers from a normal distribution with mean 0 and variance 1.
 
 Args:
     {input}
+
+Keyword args:
     {dtype}
     {layout}
     {device}
@@ -5658,12 +5672,14 @@ Args:
 
 add_docstr(torch.randperm,
            r"""
-randperm(n, out=None, dtype=torch.int64, layout=torch.strided, device=None, requires_grad=False) -> LongTensor
+randperm(n， *, out=None, dtype=torch.int64, layout=torch.strided, device=None, requires_grad=False) -> LongTensor
 
 Returns a random permutation of integers from ``0`` to ``n - 1``.
 
 Args:
     n (int): the upper bound (exclusive)
+
+Keyword args:
     {out}
     dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
         Default: ``torch.int64``.
@@ -5679,7 +5695,7 @@ Example::
 
 add_docstr(torch.tensor,
            r"""
-tensor(data, dtype=None, device=None, requires_grad=False, pin_memory=False) -> Tensor
+tensor(data, *, dtype=None, device=None, requires_grad=False, pin_memory=False) -> Tensor
 
 Constructs a tensor with :attr:`data`.
 
@@ -5700,6 +5716,8 @@ Constructs a tensor with :attr:`data`.
 
 Args:
     {data}
+
+Keyword args:
     {dtype}
     {device}
     {requires_grad}
@@ -5730,7 +5748,7 @@ Example::
 
 add_docstr(torch.range,
            r"""
-range(start=0, end, step=1, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
+range(start=0, end, step=1, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
 Returns a 1-D tensor of size :math:`\left\lfloor \frac{\text{end} - \text{start}}{\text{step}} \right\rfloor + 1`
 with values from :attr:`start` to :attr:`end` with step :attr:`step`. Step is
@@ -5746,6 +5764,8 @@ Args:
     start (float): the starting value for the set of points. Default: ``0``.
     end (float): the ending value for the set of points
     step (float): the gap between each pair of adjacent points. Default: ``1``.
+
+Keyword args:
     {out}
     {dtype} If `dtype` is not given, infer the data type from the other input
         arguments. If any of `start`, `end`, or `stop` are floating-point, the
@@ -5766,7 +5786,7 @@ Example::
 
 add_docstr(torch.arange,
            r"""
-arange(start=0, end, step=1, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
+arange(start=0, end, step=1, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
 Returns a 1-D tensor of size :math:`\left\lceil \frac{\text{end} - \text{start}}{\text{step}} \right\rceil`
 with values from the interval ``[start, end)`` taken with common difference
@@ -5783,6 +5803,8 @@ Args:
     start (Number): the starting value for the set of points. Default: ``0``.
     end (Number): the ending value for the set of points
     step (Number): the gap between each pair of adjacent points. Default: ``1``.
+
+Keyword args:
     {out}
     {dtype} If `dtype` is not given, infer the data type from the other input
         arguments. If any of `start`, `end`, or `stop` are floating-point, the
@@ -5805,7 +5827,7 @@ Example::
 
 add_docstr(torch.remainder,
            r"""
-remainder(input, other, out=None) -> Tensor
+remainder(input, other, *, out=None) -> Tensor
 
 Computes the element-wise remainder of division.
 
@@ -5819,6 +5841,8 @@ Args:
     input (Tensor): the dividend
     other (Tensor or float): the divisor that may be either a number or a
                                Tensor of the same shape as the dividend
+
+Keyword args:
     {out}
 
 Example::
@@ -5836,7 +5860,7 @@ Example::
 
 add_docstr(torch.renorm,
            r"""
-renorm(input, p, dim, maxnorm, out=None) -> Tensor
+renorm(input, p, dim, maxnorm, *, out=None) -> Tensor
 
 Returns a tensor where each sub-tensor of :attr:`input` along dimension
 :attr:`dim` is normalized such that the `p`-norm of the sub-tensor is lower
@@ -5849,6 +5873,8 @@ Args:
     p (float): the power for the norm computation
     dim (int): the dimension to slice over to get the sub-tensors
     maxnorm (float): the maximum norm to keep each sub-tensor under
+
+Keyword args:
     {out}
 
 Example::
@@ -5922,13 +5948,15 @@ Example::
 
 add_docstr(torch.round,
            r"""
-round(input, out=None) -> Tensor
+round(input, *, out=None) -> Tensor
 
 Returns a new tensor with each of the elements of :attr:`input` rounded
 to the closest integer.
 
 Args:
     {input}
+
+Keyword args:
     {out}
 
 Example::
@@ -5942,7 +5970,7 @@ Example::
 
 add_docstr(torch.rsqrt,
            r"""
-rsqrt(input, out=None) -> Tensor
+rsqrt(input, *, out=None) -> Tensor
 
 Returns a new tensor with the reciprocal of the square-root of each of
 the elements of :attr:`input`.
@@ -5952,6 +5980,8 @@ the elements of :attr:`input`.
 """ + r"""
 Args:
     {input}
+
+Keyword args:
     {out}
 
 Example::
@@ -6035,7 +6065,7 @@ Example::
 
 add_docstr(torch.logit,
            r"""
-logit(input, eps=None, out=None) -> Tensor
+logit(input, eps=None, *, out=None) -> Tensor
 
 Returns a new tensor with the logit of the elements of :attr:`input`.
 :attr:`input` is clamped to [eps, 1 - eps] when eps is not None.
@@ -6053,6 +6083,8 @@ When eps is None and :attr:`input` < 0 or :attr:`input` > 1, the function will y
 Args:
     {input}
     eps (float, optional): the epsilon for input clamp bound. Default: ``None``
+
+Keyword args:
     {out}
 
 Example::
@@ -6066,7 +6098,7 @@ Example::
 
 add_docstr(torch.sign,
            r"""
-sign(input, out=None) -> Tensor
+sign(input, *, out=None) -> Tensor
 
 Returns a new tensor with the signs of the elements of :attr:`input`.
 
@@ -6075,6 +6107,8 @@ Returns a new tensor with the signs of the elements of :attr:`input`.
 """ + r"""
 Args:
     {input}
+
+Keyword args:
     {out}
 
 Example::
@@ -6107,7 +6141,7 @@ Example::
 
 add_docstr(torch.sin,
            r"""
-sin(input, out=None) -> Tensor
+sin(input, *, out=None) -> Tensor
 
 Returns a new tensor with the sine of the elements of :attr:`input`.
 
@@ -6116,6 +6150,8 @@ Returns a new tensor with the sine of the elements of :attr:`input`.
 """ + r"""
 Args:
     {input}
+
+Keyword args:
     {out}
 
 Example::
@@ -6129,7 +6165,7 @@ Example::
 
 add_docstr(torch.sinh,
            r"""
-sinh(input, out=None) -> Tensor
+sinh(input, *, out=None) -> Tensor
 
 Returns a new tensor with the hyperbolic sine of the elements of
 :attr:`input`.
@@ -6139,6 +6175,8 @@ Returns a new tensor with the hyperbolic sine of the elements of
 """ + r"""
 Args:
     {input}
+
+Keyword args:
     {out}
 
 Example::
@@ -6152,7 +6190,7 @@ Example::
 
 add_docstr(torch.sort,
            r"""
-sort(input, dim=-1, descending=False, out=None) -> (Tensor, LongTensor)
+sort(input, dim=-1, descending=False, *, out=None) -> (Tensor, LongTensor)
 
 Sorts the elements of the :attr:`input` tensor along a given dimension
 in ascending order by value.
@@ -6170,6 +6208,8 @@ Args:
     {input}
     dim (int, optional): the dimension to sort along
     descending (bool, optional): controls the sorting order (ascending or descending)
+
+Keyword args:
     out (tuple, optional): the output tuple of (`Tensor`, `LongTensor`) that can
         be optionally given to be used as output buffers
 
@@ -6231,7 +6271,7 @@ Example::
 
 add_docstr(torch.sparse_coo_tensor,
            r"""
-sparse_coo_tensor(indices, values, size=None, dtype=None, device=None, requires_grad=False) -> Tensor
+sparse_coo_tensor(indices, values, size=None, *, dtype=None, device=None, requires_grad=False) -> Tensor
 
 Constructs a sparse tensors in COO(rdinate) format with non-zero elements at the given :attr:`indices`
 with the given :attr:`values`. A sparse tensor can be `uncoalesced`, in that case, there are duplicate
@@ -6249,6 +6289,8 @@ Args:
     size (list, tuple, or :class:`torch.Size`, optional): Size of the sparse tensor. If not
         provided the size will be inferred as the minimum size big enough to hold all non-zero
         elements.
+
+Keyword args:
     dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
         Default: if None, infers data type from :attr:`values`.
     device (:class:`torch.device`, optional): the desired device of returned tensor.
@@ -6308,7 +6350,7 @@ Example::
 
 add_docstr(torch.sqrt,
            r"""
-sqrt(input, out=None) -> Tensor
+sqrt(input， *, out=None) -> Tensor
 
 Returns a new tensor with the square-root of the elements of :attr:`input`.
 
@@ -6317,6 +6359,8 @@ Returns a new tensor with the square-root of the elements of :attr:`input`.
 """ + r"""
 Args:
     {input}
+
+Keyword args:
     {out}
 
 Example::
@@ -6330,12 +6374,14 @@ Example::
 
 add_docstr(torch.square,
            r"""
-square(input, out=None) -> Tensor
+square(input, *, out=None) -> Tensor
 
 Returns a new tensor with the square of the elements of :attr:`input`.
 
 Args:
     {input}
+
+Keyword args:
     {out}
 
 Example::
@@ -6349,7 +6395,7 @@ Example::
 
 add_docstr(torch.squeeze,
            r"""
-squeeze(input, dim=None, out=None) -> Tensor
+squeeze(input, dim=None, *, out=None) -> Tensor
 
 Returns a tensor with all the dimensions of :attr:`input` of size `1` removed.
 
@@ -6373,6 +6419,8 @@ Args:
     {input}
     dim (int, optional): if given, the input will be squeezed only in
            this dimension
+
+Keyword args:
     {out}
 
 Example::
@@ -6412,7 +6460,7 @@ Example::
     >>> torch.std(a)
     tensor(0.5130)
 
-.. function:: std(input, dim, unbiased=True, keepdim=False, out=None) -> Tensor
+.. function:: std(input, dim, unbiased=True, keepdim=False， *, out=None) -> Tensor
 
 Returns the standard-deviation of each row of the :attr:`input` tensor in the
 dimension :attr:`dim`. If :attr:`dim` is a list of dimensions,
@@ -6428,6 +6476,8 @@ Args:
     {dim}
     unbiased (bool): whether to use the unbiased estimation or not
     {keepdim}
+
+Keyword args:
     {out}
 
 Example::
@@ -6494,12 +6544,14 @@ Example::
 
 add_docstr(torch.sum,
            r"""
-sum(input, dtype=None) -> Tensor
+sum(input, *, dtype=None) -> Tensor
 
 Returns the sum of all elements in the :attr:`input` tensor.
 
 Args:
     {input}
+
+Keyword args:
     {dtype}
 
 Example::
@@ -6510,7 +6562,7 @@ Example::
     >>> torch.sum(a)
     tensor(-0.5475)
 
-.. function:: sum(input, dim, keepdim=False, dtype=None) -> Tensor
+.. function:: sum(input, dim, keepdim=False, *, dtype=None) -> Tensor
 
 Returns the sum of each row of the :attr:`input` tensor in the given
 dimension :attr:`dim`. If :attr:`dim` is a list of dimensions,
@@ -6522,6 +6574,8 @@ Args:
     {input}
     {dim}
     {keepdim}
+
+Keyword args:
     {dtype}
 
 Example::
@@ -6541,7 +6595,7 @@ Example::
 
 add_docstr(torch.nansum,
            r"""
-nansum(input, dtype=None) -> Tensor
+nansum(input, *, dtype=None) -> Tensor
 
 Returns the sum of all elements, treating Not a Numbers (NaNs) as zero.
 
@@ -6557,7 +6611,7 @@ Example::
     >>> torch.nansum(a)
     tensor(7.)
 
-.. function:: nansum(input, dim, keepdim=False, dtype=None) -> Tensor
+.. function:: nansum(input, dim, keepdim=False, *, dtype=None) -> Tensor
 
 Returns the sum of each row of the :attr:`input` tensor in the given
 dimension :attr:`dim`, treating Not a Numbers (NaNs) as zero.
@@ -6588,7 +6642,7 @@ Example::
 
 add_docstr(torch.svd,
            r"""
-svd(input, some=True, compute_uv=True, out=None) -> (Tensor, Tensor, Tensor)
+svd(input, some=True, compute_uv=True, *, out=None) -> (Tensor, Tensor, Tensor)
 
 This function returns a namedtuple ``(U, S, V)`` which is the singular value
 decomposition of a input real matrix or batches of real matrices :attr:`input` such that
@@ -6630,6 +6684,8 @@ Args:
                     batch dimensions consisting of :math:`m \times n` matrices.
     some (bool, optional): controls the shape of returned `U` and `V`
     compute_uv (bool, optional): option whether to compute `U` and `V` or not
+
+Keyword args:
     out (tuple, optional): the output tuple of tensors
 
 Example::
@@ -6664,7 +6720,7 @@ Example::
 
 add_docstr(torch.symeig,
            r"""
-symeig(input, eigenvectors=False, upper=True, out=None) -> (Tensor, Tensor)
+symeig(input, eigenvectors=False, upper=True, *, out=None) -> (Tensor, Tensor)
 
 This function returns eigenvalues and eigenvectors
 of a real symmetric matrix :attr:`input` or a batch of real symmetric matrices,
@@ -6699,6 +6755,8 @@ Args:
                     batch dimensions consisting of symmetric matrices.
     eigenvectors(boolean, optional): controls whether eigenvectors have to be computed
     upper(boolean, optional): controls whether to consider upper-triangular or lower-triangular region
+
+Keyword args:
     out (tuple, optional): the output tuple of (Tensor, Tensor)
 
 Returns:
@@ -6951,7 +7009,7 @@ Example::
 
 add_docstr(torch.tan,
            r"""
-tan(input, out=None) -> Tensor
+tan(input, *, out=None) -> Tensor
 
 Returns a new tensor with the tangent of the elements of :attr:`input`.
 
@@ -6960,6 +7018,8 @@ Returns a new tensor with the tangent of the elements of :attr:`input`.
 """ + r"""
 Args:
     {input}
+
+Keyword args:
     {out}
 
 Example::
@@ -6973,7 +7033,7 @@ Example::
 
 add_docstr(torch.tanh,
            r"""
-tanh(input, out=None) -> Tensor
+tanh(input, *, out=None) -> Tensor
 
 Returns a new tensor with the hyperbolic tangent of the elements
 of :attr:`input`.
@@ -6983,6 +7043,8 @@ of :attr:`input`.
 """ + r"""
 Args:
     {input}
+
+Keyword args:
     {out}
 
 Example::
@@ -6996,7 +7058,7 @@ Example::
 
 add_docstr(torch.topk,
            r"""
-topk(input, k, dim=None, largest=True, sorted=True, out=None) -> (Tensor, LongTensor)
+topk(input, k, dim=None, largest=True, sorted=True, *, out=None) -> (Tensor, LongTensor)
 
 Returns the :attr:`k` largest elements of the given :attr:`input` tensor along
 a given dimension.
@@ -7019,6 +7081,8 @@ Args:
            smallest elements
     sorted (bool, optional): controls whether to return the elements
            in sorted order
+
+Keyword args:
     out (tuple, optional): the output tuple of (Tensor, LongTensor) that can be
         optionally given to be used as output buffers
 
@@ -7128,7 +7192,7 @@ Examples::
 
 add_docstr(torch.tril,
            r"""
-tril(input, diagonal=0, out=None) -> Tensor
+tril(input, diagonal=0, *, out=None) -> Tensor
 
 Returns the lower triangular part of the matrix (2-D tensor) or batch of matrices
 :attr:`input`, the other elements of the result tensor :attr:`out` are set to 0.
@@ -7147,6 +7211,8 @@ the main diagonal. The main diagonal are the set of indices
 Args:
     {input}
     diagonal (int, optional): the diagonal to consider
+
+Keyword args:
     {out}
 
 Example::
@@ -7183,7 +7249,7 @@ Example::
 # as common args.
 add_docstr(torch.tril_indices,
            r"""
-tril_indices(row, col, offset=0, dtype=torch.long, device='cpu', layout=torch.strided) -> Tensor
+tril_indices(row, col, offset=0, *, dtype=torch.long, device='cpu', layout=torch.strided) -> Tensor
 
 Returns the indices of the lower triangular part of a :attr:`row`-by-
 :attr:`col` matrix in a 2-by-N Tensor, where the first row contains row
@@ -7210,6 +7276,8 @@ Args:
     col (``int``): number of columns in the 2-D matrix.
     offset (``int``): diagonal offset from the main diagonal.
         Default: if not provided, 0.
+
+Keyword args:
     dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
         Default: if ``None``, ``torch.long``.
     {device}
@@ -7234,7 +7302,7 @@ Example::
 
 add_docstr(torch.triu,
            r"""
-triu(input, diagonal=0, out=None) -> Tensor
+triu(input, diagonal=0, *, out=None) -> Tensor
 
 Returns the upper triangular part of a matrix (2-D tensor) or batch of matrices
 :attr:`input`, the other elements of the result tensor :attr:`out` are set to 0.
@@ -7253,6 +7321,8 @@ the main diagonal. The main diagonal are the set of indices
 Args:
     {input}
     diagonal (int, optional): the diagonal to consider
+
+Keyword args:
     {out}
 
 Example::
@@ -7297,7 +7367,7 @@ Example::
 # as common args.
 add_docstr(torch.triu_indices,
            r"""
-triu_indices(row, col, offset=0, dtype=torch.long, device='cpu', layout=torch.strided) -> Tensor
+triu_indices(row, col, offset=0, *, dtype=torch.long, device='cpu', layout=torch.strided) -> Tensor
 
 Returns the indices of the upper triangular part of a :attr:`row` by
 :attr:`col` matrix in a 2-by-N Tensor, where the first row contains row
@@ -7324,6 +7394,8 @@ Args:
     col (``int``): number of columns in the 2-D matrix.
     offset (``int``): diagonal offset from the main diagonal.
         Default: if not provided, 0.
+
+Keyword args:
     dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
         Default: if ``None``, ``torch.long``.
     {device}
@@ -7376,13 +7448,15 @@ Example::
 
 add_docstr(torch.trunc,
            r"""
-trunc(input, out=None) -> Tensor
+trunc(input, *, out=None) -> Tensor
 
 Returns a new tensor with the truncated integer values of
 the elements of :attr:`input`.
 
 Args:
     {input}
+
+Keyword args:
     {out}
 
 Example::
@@ -7452,7 +7526,7 @@ Example::
     tensor(0.2455)
 
 
-.. function:: var(input, dim, keepdim=False, unbiased=True, out=None) -> Tensor
+.. function:: var(input, dim, keepdim=False, unbiased=True, *, out=None) -> Tensor
 
 Returns the variance of each row of the :attr:`input` tensor in the given
 dimension :attr:`dim`.
@@ -7467,6 +7541,8 @@ Args:
     {dim}
     {keepdim}
     unbiased (bool): whether to use the unbiased estimation or not
+
+Keyword args:
     {out}
 
 Example::
@@ -7532,7 +7608,7 @@ Example::
 
 add_docstr(torch.zeros,
            r"""
-zeros(*size, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
+zeros(*size, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
 Returns a tensor filled with the scalar value `0`, with the shape defined
 by the variable argument :attr:`size`.
@@ -7540,6 +7616,8 @@ by the variable argument :attr:`size`.
 Args:
     size (int...): a sequence of integers defining the shape of the output tensor.
         Can be a variable number of arguments or a collection like a list or tuple.
+
+Keyword args:
     {out}
     {dtype}
     {layout}
@@ -7558,7 +7636,7 @@ Example::
 
 add_docstr(torch.zeros_like,
            r"""
-zeros_like(input, dtype=None, layout=None, device=None, requires_grad=False, memory_format=torch.preserve_format) -> Tensor
+zeros_like(input, *, dtype=None, layout=None, device=None, requires_grad=False, memory_format=torch.preserve_format) -> Tensor
 
 Returns a tensor filled with the scalar value `0`, with the same size as
 :attr:`input`. ``torch.zeros_like(input)`` is equivalent to
@@ -7571,6 +7649,8 @@ Returns a tensor filled with the scalar value `0`, with the same size as
 
 Args:
     {input}
+
+Keyword args:
     {dtype}
     {layout}
     {device}
@@ -7587,7 +7667,7 @@ Example::
 
 add_docstr(torch.empty,
            r"""
-empty(*size, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False, pin_memory=False) -> Tensor
+empty(*size, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False, pin_memory=False) -> Tensor
 
 Returns a tensor filled with uninitialized data. The shape of the tensor is
 defined by the variable argument :attr:`size`.
@@ -7595,6 +7675,8 @@ defined by the variable argument :attr:`size`.
 Args:
     size (int...): a sequence of integers defining the shape of the output tensor.
         Can be a variable number of arguments or a collection like a list or tuple.
+
+Keyword args:
     {out}
     {dtype}
     {layout}
@@ -7614,7 +7696,7 @@ Example::
 
 add_docstr(torch.empty_like,
            r"""
-empty_like(input, dtype=None, layout=None, device=None, requires_grad=False, memory_format=torch.preserve_format) -> Tensor
+empty_like(input, *, dtype=None, layout=None, device=None, requires_grad=False, memory_format=torch.preserve_format) -> Tensor
 
 Returns an uninitialized tensor with the same size as :attr:`input`.
 ``torch.empty_like(input)`` is equivalent to
@@ -7622,6 +7704,8 @@ Returns an uninitialized tensor with the same size as :attr:`input`.
 
 Args:
     {input}
+
+Keyword args:
     {dtype}
     {layout}
     {device}
@@ -7637,7 +7721,7 @@ Example::
 
 add_docstr(torch.empty_strided,
            r"""
-empty_strided(size, stride, dtype=None, layout=None, device=None, requires_grad=False, pin_memory=False) -> Tensor
+empty_strided(size, stride, *, dtype=None, layout=None, device=None, requires_grad=False, pin_memory=False) -> Tensor
 
 Returns a tensor filled with uninitialized data. The shape and strides of the tensor is
 defined by the variable argument :attr:`size` and :attr:`stride` respectively.
@@ -7653,6 +7737,8 @@ defined by the variable argument :attr:`size` and :attr:`stride` respectively.
 Args:
     size (tuple of ints): the shape of the output tensor
     stride (tuple of ints): the strides of the output tensor
+
+Keyword args:
     {dtype}
     {layout}
     {device}
@@ -7681,6 +7767,8 @@ Args:
     size (int...): a list, tuple, or :class:`torch.Size` of integers defining the
         shape of the output tensor.
     fill_value (Scalar): the value to fill the output tensor with.
+
+Keyword args:
     {out}
     {dtype}
     {layout}
@@ -7696,7 +7784,7 @@ Example::
 
 add_docstr(torch.full_like,
            """
-full_like(input, fill_value, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False, \
+full_like(input, fill_value, \\*, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False, \
 memory_format=torch.preserve_format) -> Tensor
 
 Returns a tensor with the same size as :attr:`input` filled with :attr:`fill_value`.
@@ -7706,6 +7794,8 @@ Returns a tensor with the same size as :attr:`input` filled with :attr:`fill_val
 Args:
     {input}
     fill_value: the number to fill the output tensor with.
+
+Keyword args:
     {dtype}
     {layout}
     {device}
@@ -8308,7 +8398,7 @@ Example::
 
 add_docstr(torch.hann_window,
            """
-hann_window(window_length, periodic=True, dtype=None, \
+hann_window(window_length, periodic=True, *, dtype=None, \
 layout=torch.strided, device=None, requires_grad=False) -> Tensor
 """ + r"""
 Hann window function.
@@ -8335,6 +8425,8 @@ Arguments:
     window_length (int): the size of returned window
     periodic (bool, optional): If True, returns a window to be used as periodic
         function. If False, return a symmetric window.
+
+Keyword args:
     {dtype} Only floating point types are supported.
     layout (:class:`torch.layout`, optional): the desired layout of returned window tensor. Only
           ``torch.strided`` (dense layout) is supported.
@@ -8349,7 +8441,7 @@ Returns:
 
 add_docstr(torch.hamming_window,
            """
-hamming_window(window_length, periodic=True, alpha=0.54, beta=0.46, dtype=None, \
+hamming_window(window_length, periodic=True, alpha=0.54, beta=0.46, *, dtype=None, \
 layout=torch.strided, device=None, requires_grad=False) -> Tensor
 """ + r"""
 Hamming window function.
@@ -8380,6 +8472,8 @@ Arguments:
         function. If False, return a symmetric window.
     alpha (float, optional): The coefficient :math:`\alpha` in the equation above
     beta (float, optional): The coefficient :math:`\beta` in the equation above
+
+Keyword args:
     {dtype} Only floating point types are supported.
     layout (:class:`torch.layout`, optional): the desired layout of returned window tensor. Only
           ``torch.strided`` (dense layout) is supported.
@@ -8394,7 +8488,7 @@ Returns:
 
 add_docstr(torch.bartlett_window,
            """
-bartlett_window(window_length, periodic=True, dtype=None, \
+bartlett_window(window_length, periodic=True, *, dtype=None, \
 layout=torch.strided, device=None, requires_grad=False) -> Tensor
 """ + r"""
 Bartlett window function.
@@ -8423,6 +8517,8 @@ Arguments:
     window_length (int): the size of returned window
     periodic (bool, optional): If True, returns a window to be used as periodic
         function. If False, return a symmetric window.
+
+Keyword args:
     {dtype} Only floating point types are supported.
     layout (:class:`torch.layout`, optional): the desired layout of returned window tensor. Only
           ``torch.strided`` (dense layout) is supported.
@@ -8437,7 +8533,7 @@ Returns:
 
 add_docstr(torch.blackman_window,
            """
-blackman_window(window_length, periodic=True, dtype=None, \
+blackman_window(window_length, periodic=True, *, dtype=None, \
 layout=torch.strided, device=None, requires_grad=False) -> Tensor
 """ + r"""
 Blackman window function.
@@ -8463,6 +8559,8 @@ Arguments:
     window_length (int): the size of returned window
     periodic (bool, optional): If True, returns a window to be used as periodic
         function. If False, return a symmetric window.
+
+Keyword args:
     {dtype} Only floating point types are supported.
     layout (:class:`torch.layout`, optional): the desired layout of returned window tensor. Only
           ``torch.strided`` (dense layout) is supported.
@@ -8854,7 +8952,7 @@ Example::
 
 add_docstr(torch.searchsorted,
            r"""
-searchsorted(sorted_sequence, values, out_int32=False, right=False, out=None) -> Tensor
+searchsorted(sorted_sequence, values, *, out_int32=False, right=False, out=None) -> Tensor
 
 Find the indices from the *innermost* dimension of :attr:`sorted_sequence` such that, if the
 corresponding values in :attr:`values` were inserted before the indices, the order of the
@@ -8887,6 +8985,8 @@ Args:
     sorted_sequence (Tensor): N-D or 1-D tensor, containing monotonically increasing sequence on the *innermost*
                               dimension.
     values (Tensor or Scalar): N-D tensor or a Scalar containing the search value(s).
+
+Keyword args:
     out_int32 (bool, optional): indicate the output data type. torch.int32 if True, torch.int64 otherwise.
                                 Default value is False, i.e. default output data type is torch.int64.
     right (bool, optional): if False, return the first suitable location that is found. If True, return the
@@ -8929,7 +9029,7 @@ Example::
 
 add_docstr(torch.bucketize,
            r"""
-bucketize(input, boundaries, out_int32=False, right=False, out=None) -> Tensor
+bucketize(input, boundaries, *, out_int32=False, right=False, out=None) -> Tensor
 
 Returns the indices of the buckets to which each value in the :attr:`input` belongs, where the
 boundaries of the buckets are set by :attr:`boundaries`. Return a new tensor with the same size
@@ -8950,6 +9050,8 @@ formally, the returned index satisfies the following rules:
 Args:
     input (Tensor or Scalar): N-D tensor or a Scalar containing the search value(s).
     boundaries (Tensor): 1-D tensor, must contain a monotonically increasing sequence.
+
+Keyword args:
     out_int32 (bool, optional): indicate the output data type. torch.int32 if True, torch.int64 otherwise.
                                 Default value is False, i.e. default output data type is torch.int64.
     right (bool, optional): if False, return the first suitable location that is found. If True, return the
