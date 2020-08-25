@@ -7,7 +7,7 @@ from torch.fx import symbolic_trace, Proxy, Node, GraphModule, DefaultDelegate
 from fx.quantization import Quantizer
 
 from typing import Any, Callable, Dict, Optional, Tuple, Union
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, skipIfRocm
 from torch.testing._internal.jit_utils import JitTestCase
 
 try:
@@ -200,6 +200,7 @@ class TestFX(JitTestCase):
         b = torch.rand(1)
         self.assertEqual(m(a, b), m_g(a, b))
 
+    @skipIfRocm
     def test_native_callable(self):
         # This test exercises the case where we use FX to translate from Python
         # code to some native callable object
