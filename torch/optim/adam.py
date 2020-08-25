@@ -107,10 +107,8 @@ class Adam(Optimizer):
                 state['step'] += 1
                 states.append(state)
 
-
             beta1, beta2 = group['betas']
 
-            # FIX
             bias_correction1 = [1 - beta1 ** state['step'] for state in states] 
             bias_correction2 = [1 - beta2 ** state['step'] for state in states] 
             if group['weight_decay'] != 0:
@@ -131,20 +129,16 @@ class Adam(Optimizer):
                 # Use the max. for normalizing running avg. of gradient
                 max_exp_avg_sq_sqrt = torch._foreach_sqrt(max_exp_avg_sq)
                 bias_correction_sqrt = [math.sqrt(bc) for bc in bias_correction2]
-                #FIX
                 max_exp_avg_sq_sqrt = [torch.div(a, b) for a, b in zip(max_exp_avg_sq_sqrt, bias_correction_sqrt)]
                 denom = torch._foreach_add(max_exp_avg_sq_sqrt, group['eps'])
             else:
                 exp_avg_sq_sqrt = torch._foreach_sqrt(exp_avg_sq)
                 bias_correction_sqrt = [math.sqrt(bc) for bc in bias_correction2]
-                
-                #FIX
+
                 exp_avg_sq_sqrt = [torch.div(a, b) for a, b in zip(exp_avg_sq_sqrt, bias_correction_sqrt)]
                 denom = torch._foreach_add(exp_avg_sq_sqrt, group['eps'])
 
-            # FIX
             step_size = [group['lr'] / bc for bc in bias_correction1]
-
 
             for i in range(len(step_size)):
                 params_with_grad[i].addcdiv_(exp_avg[i], denom[i], value=-step_size[i])
