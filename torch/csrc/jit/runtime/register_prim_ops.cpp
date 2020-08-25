@@ -129,6 +129,14 @@ TORCH_LIBRARY_IMPL(aten, CatchAll, m) {
 
 RegisterOperators reg(
     {Operator(
+         "aten::str(t elem) -> str",
+         [](Stack* stack) {
+           std::stringstream ss;
+           ss << pop(stack);
+           push(stack, ss.str());
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
          "aten::list(str t) -> str[]",
          [](Stack& stack) {
            auto str = pop(stack).toStringRef();
