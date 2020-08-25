@@ -320,7 +320,6 @@ class TensorExprFuser {
     for (const auto& kv : vmap) {
       if (typeinfo_map_.count(kv.first)) {
         auto ty = typeinfo_map_.at(kv.first);
-        // typeinfo_map_.erase(kv.first);
         typeinfo_map_[kv.second] = ty;
         GRAPH_DEBUG("TYPEINFO UPDATE: %", kv.second->debugName(), " --> ", *ty);
       }
