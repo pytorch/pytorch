@@ -427,11 +427,13 @@ class TestLinalg(TestCase):
                 result_n = np.linalg.norm(x_n, ord=ord)
                 self.assertEqual(result, result_n, msg=msg)
 
-        # TODO: Need to fix these cases
+        # TODO: Remove this function once the broken cases are fixed
         def is_broken_matrix_norm_case(ord, x):
             if self.device_type == 'cuda':
                 if x.size() == torch.Size([1, 2]):
                     if ord in ['nuc', 2, -2] and isnan(x[0][0]) and x[0][1] == 1:
+                        # These cases are broken because of an issue with svd
+                        # https://github.com/pytorch/pytorch/issues/43567
                         return True
             return False
 
@@ -439,12 +441,14 @@ class TestLinalg(TestCase):
             x = torch.tensor(matrix).to(device)
             x_n = x.cpu().numpy()
             for ord in matrix_ords:
-                if is_broken_matrix_norm_case(ord, x):
-                    continue
                 msg = f'ord={ord}, matrix={matrix}'
                 result = torch.linalg.norm(x, ord=ord)
                 result_n = np.linalg.norm(x_n, ord=ord)
-                self.assertEqual(result, result_n, msg=msg)
+
+                if is_broken_matrix_norm_case(ord, x):
+                    self.assertNotEqual(result, result_n, msg=msg)
+                else:
+                    self.assertEqual(result, result_n, msg=msg)
 
     # Test degenerate shape results match numpy for linalg.norm vector norms
     @skipCUDAIfNoMagma
