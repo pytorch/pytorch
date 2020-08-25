@@ -217,8 +217,7 @@ CAFFE2_API torch::class_<ConvPackedParamsBase<kSpatialDim>> register_conv_params
   static auto register_conv_params =
     torch::class_<ConvPackedParamsBase<kSpatialDim>>(
         "quantized", "Conv" + c10::to_string(kSpatialDim) + "dPackedParamsBase")
-    // TODO(before land): document the hack and add a deprecation date
-    .def_pickle_setstate_boxed_DO_NOT_USE(
+    .def_pickle(
         [](const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>& params)
         -> ConvParamsSerializationType { // __getstate__
           return serialize_conv<kSpatialDim>(params);

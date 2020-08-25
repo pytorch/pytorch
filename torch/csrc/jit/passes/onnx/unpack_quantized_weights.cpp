@@ -190,7 +190,7 @@ void unpackQuantizedWeightsHelper(
 
         const int64_t kSpatialDim = conv_params_packed[0].item<int64_t>();
         // skip kSpatialDim
-        int idx = 1;
+        int64_t idx = 1;
         for (; idx < kSpatialDim + 1; ++idx) {
           stride_int.emplace_back(conv_params_packed[idx].item<int64_t>());
         }

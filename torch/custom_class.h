@@ -157,25 +157,9 @@ class class_ {
   ///            return c10::make_intrusive<MyStackClass<std::string>>(
   ///               std::vector<std::string>{"i", "was", "deserialized"});
   ///         })
+  /// TODO(before land): update the above doc
   template <typename GetStateFn, typename SetStateFn>
   class_& def_pickle(GetStateFn&& get_state, SetStateFn&& set_state) {
-    return _def_pickle_impl(get_state, set_state);
-  }
-
-  // This is a temporary hack to change the format of ConvPackedParams without
-  // breaking BC. We modify the default pickle protocol by defining a boxed
-  // version of __set_state__, which knows how to parse historical formats.
-  // TODO(before land): create an issue to delete this in a month and link here.
-  template <typename GetStateFn, typename SetStateFn>
-  class_& def_pickle_setstate_boxed_DO_NOT_USE(
-      GetStateFn&& get_state, SetStateFn&& set_state) {
-    bool validate_setstate_input_type = false;
-    return _def_pickle_impl(get_state, set_state, validate_setstate_input_type);
-  }
-
-  template <typename GetStateFn, typename SetStateFn>
-  class_& _def_pickle_impl(GetStateFn&& get_state, SetStateFn&& set_state,
-      bool validate_setstate_input_type=true) {
     static_assert(
         c10::guts::is_stateless_lambda<std::decay_t<GetStateFn>>::value &&
             c10::guts::is_stateless_lambda<std::decay_t<SetStateFn>>::value,
@@ -225,18 +209,16 @@ class class_ {
         "__getstate__ should return exactly one value for serialization. Got: ",
         format_getstate_schema());
 
-    if (validate_setstate_input_type) {
-      auto ser_type = getstate_schema.returns().at(0).type();
-      auto setstate_schema = classTypePtr->getMethod("__setstate__").getSchema();
-      auto arg_type = setstate_schema.arguments().at(1).type();
-      TORCH_CHECK(
-          (*arg_type == *ser_type),
-          "__setstate__'s argument should be the same type as the "
-          "return value of __getstate__. Got ",
-          arg_type->repr_str(),
-          " but expected ",
-          ser_type->repr_str());
-    }
+    auto ser_type = getstate_schema.returns().at(0).type();
+    auto setstate_schema = classTypePtr->getMethod("__setstate__").getSchema();
+    auto arg_type = setstate_schema.arguments().at(1).type();
+    TORCH_CHECK(
+        ser_type->isSubtypeOf(arg_type),
+        "__getstate__'s return type should be a subtype of "
+        "input argument of __setstate__. Got ",
+        ser_type->repr_str(),
+        " but expected ",
+        arg_type->repr_str());
 
     return *this;
   }

@@ -84,8 +84,7 @@ ConvParamsSerializationType parse_conv_serialized_state(c10::IValue v) {
     auto elements = v.toTuple()->elements();
 
     at::Tensor weight = elements[0].toTensor();
-    // TODO before land: test optional bias
-    c10::optional<at::Tensor> bias = elements[1].toTensor();
+    c10::optional<at::Tensor> bias = elements[1].toOptional<at::Tensor>();
     torch::List<at::Tensor> stride_x_kSpatialDim = elements[2].toTensorList();
     torch::List<at::Tensor> padding_x_kSpatialDim = elements[3].toTensorList();
     torch::List<at::Tensor> dilation_x_kSpatialDim = elements[4].toTensorList();
