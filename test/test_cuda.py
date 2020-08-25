@@ -3028,20 +3028,12 @@ class TestCudaComm(TestCase):
         with self.assertRaisesRegex(RuntimeError, "expected (it|them) to be on GPU"):
             cuda @ cpu
 
-        torch.addmm(cpu, cpu, cpu)
-        with self.assertRaisesRegex(RuntimeError, "expected (it|them) to be on GPU"):
-            torch.addmm(cpu, cpu, cuda)
-        with self.assertRaisesRegex(RuntimeError, "expected (it|them) to be on GPU"):
-            torch.addmm(cpu, cuda, cpu)
-        with self.assertRaisesRegex(RuntimeError, "expected (it|them) to be on GPU"):
-            torch.addmm(cpu, cuda, cuda)
-        with self.assertRaisesRegex(RuntimeError, "expected (it|them) to be on GPU"):
-            torch.addmm(cuda, cpu, cpu)
-        with self.assertRaisesRegex(RuntimeError, "expected (it|them) to be on GPU"):
-            torch.addmm(cuda, cpu, cuda)
-        with self.assertRaisesRegex(RuntimeError, "expected (it|them) to be on GPU"):
-            torch.addmm(cuda, cuda, cpu)
-        torch.addmm(cuda, cuda, cuda)
+        for s, m1, m2 in product((cpu, cuda), repeats=3):
+            if s.device == m1.device == m2.device:
+                torch.addmm(s, m1, m2)
+            else:
+                with self.assertRaisesRegex(RuntimeError, "expected (it|them) to be on GPU"):
+                    torch.addmm(s, m1, m2)
 
 
 if __name__ == '__main__':
