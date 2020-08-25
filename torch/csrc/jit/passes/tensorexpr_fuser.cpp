@@ -543,7 +543,8 @@ class TensorExprFuser {
             typecheck_node->output(output_idx);
         typecheck_node->output(output_idx++)
             ->setType(typeinfo_map_.at(subgraph->inputs()[idx]));
-      } else if (auto tt = subgraph->inputs()[idx]->type()->cast<TensorType>()) {
+      } else if (
+          auto tt = subgraph->inputs()[idx]->type()->cast<TensorType>()) {
         TORCH_INTERNAL_ASSERT(tt->isComplete());
       }
     }
