@@ -413,51 +413,28 @@ public:
   C10_DISABLE_COPY_AND_ASSIGN(TensorIteratorConfig);
 
   /// Construction
-  TensorIteratorConfig& add_output(const Tensor& output) {
-    TORCH_INTERNAL_ASSERT(num_inputs_ == 0);
-    tensors_.emplace_back(output);
-    num_outputs_++;
-    return *this;
-  }
-
-  TensorIteratorConfig& add_input(const Tensor& input) {
-    tensors_.emplace_back(input);
-    num_inputs_++;
-    return *this;
-  }
-
-  TensorIteratorConfig& set_check_mem_overlap(bool check_mem_overlap) {
-    check_mem_overlap_ = check_mem_overlap;
-    return *this;
-  }
+  TensorIteratorConfig& add_output(const Tensor& output);
+  TensorIteratorConfig& add_input(const Tensor& input);
+  TensorIteratorConfig& set_check_mem_overlap(bool check_mem_overlap);
 
   // Sets the check_all_same_dtype_ flag, which is true by default
   // If true, checks that all inputs and defined outputs have the same dtype
   // Setting either of promote_inputs_to_common_dtype_
   //   or cast_common_dtype_to_outputs_ to true will set
   //   check_all_same_dtype_ to false.
-  TensorIteratorConfig& check_all_same_dtype(const bool _check_all_same_dtype) {
-    check_all_same_dtype_ = _check_all_same_dtype;
-    return *this;
-  }
+  TensorIteratorConfig& check_all_same_dtype(const bool _check_all_same_dtype);
 
   // Sets the check_all_same_device_ flag, which is true by default
   // If true, all operands must be on the same device, with the possible
   //   exception of CPU scalars, which can be passed to some CUDA kernels
   //   as kernel arguments.
-  TensorIteratorConfig& check_all_same_device(const bool _check_all_same_device) {
-    check_all_same_device_ = _check_all_same_device;
-    return *this;
-  }
+  TensorIteratorConfig& check_all_same_device(const bool _check_all_same_device);
 
   // Sets the enforce_safe_casting_to_output_ flag, which is false by default
   // If true, the iterator's "common dtype" must be computable
   //   (see the [Common Dtype Computation] note) and
   //   canCast(common dtype, output dtype) must be true for all outputs.
-  TensorIteratorConfig& enforce_safe_casting_to_output(const bool _enforce_safe_casting_to_output) {
-    enforce_safe_casting_to_output_ = _enforce_safe_casting_to_output;
-    return *this;
-  }
+  TensorIteratorConfig& enforce_safe_casting_to_output(const bool _enforce_safe_casting_to_output);
 
   // Sets the promote_inputs_to_common_dtype_ flag, which is false by default
   // If true, the iterator's "common dtype" is always computed (see the
@@ -465,33 +442,15 @@ public:
   //   the inputs in the common dtype are passed as the actual inputs to
   //   the operation.
   // Setting this flag to true sets check_all_same_dtype_ to false.
-  TensorIteratorConfig& promote_inputs_to_common_dtype(const bool _promote_inputs_to_common_dtype) {
-    promote_inputs_to_common_dtype_ = _promote_inputs_to_common_dtype;
-    if (_promote_inputs_to_common_dtype) {
-      check_all_same_dtype_ = false;
-    }
-    return *this;
-  }
+  TensorIteratorConfig& promote_inputs_to_common_dtype(const bool _promote_inputs_to_common_dtype);
 
   // Sets the promote_integer_inputs_to_float_ flag, which is false by default
   // NOTE: If set to true, the promote_inputs_to_common_dtype_ must also be true.
   // If true, if the iterator's "common dtype" is an integral type (including bool)
   //   then it is changed to the default float scalar type.
-  TensorIteratorConfig& promote_integer_inputs_to_float(const bool _promote_integer_inputs_to_float) {
-    promote_integer_inputs_to_float_ = _promote_integer_inputs_to_float;
-    TORCH_INTERNAL_ASSERT(!promote_integer_inputs_to_float_ || promote_inputs_to_common_dtype_);
-    return *this;
-  }
-
-  TensorIteratorConfig& is_reduction(const bool _is_reduction) {
-    is_reduction_ = _is_reduction;
-    return *this;
-  }
-
-  TensorIteratorConfig& allow_cpu_scalars(const bool _allow_cpu_scalars) {
-    allow_cpu_scalars_ = _allow_cpu_scalars;
-    return *this;
-  }
+  TensorIteratorConfig& promote_integer_inputs_to_float(const bool _promote_integer_inputs_to_float);
+  TensorIteratorConfig& is_reduction(const bool _is_reduction);
+  TensorIteratorConfig& allow_cpu_scalars(const bool _allow_cpu_scalars);
 
   // Sets the cast_common_dtype_to_outputs_ flag, which is false by default
   // If true, the iterator's "common dtype" must be computatable
@@ -500,43 +459,13 @@ public:
   //   These temporaries are then copied to the original outputs after
   //   the operation is performed (see cast_outputs()).
   // Setting this flag to true sets check_all_same_dtype_ to false.
-  TensorIteratorConfig& cast_common_dtype_to_outputs(const bool _cast_common_dtype_to_outputs) {
-    cast_common_dtype_to_outputs_ = _cast_common_dtype_to_outputs;
-    if (_cast_common_dtype_to_outputs) {
-      check_all_same_dtype_ = false;
-    }
-    return *this;
-  }
-
-  TensorIteratorConfig& resize_outputs(bool resize_outputs) {
-    resize_outputs_ = resize_outputs;
-    return *this;
-  }
+  TensorIteratorConfig& cast_common_dtype_to_outputs(const bool _cast_common_dtype_to_outputs);
+  TensorIteratorConfig& resize_outputs(bool resize_outputs);
 
   // Bypass output dtype/device computation and fix the dtype/device as specified here.
-  TensorIteratorConfig& declare_static_dtype_and_device(ScalarType dtype, Device device) {
-    TORCH_CHECK(!check_all_same_dtype_, "check_all_same_dtype(false) must be called before declare_static_dtype(...)");
-    static_dtype_and_device_ = c10::make_optional(std::make_pair(dtype, device));
-    return *this;
-  }
-
-  TensorIteratorConfig& declare_static_shape(IntArrayRef shape) {
-    // WARNING:
-    //   This will bypass all shape checking in the TensorIterator. Kernels which call this method
-    //   are expected to check shapes before calling `add_input` or `add_output`.
-    TORCH_CHECK(!resize_outputs_, "resize_outputs() must be called before declare_static_shape(...)")
-    static_shape_ = c10::make_optional(DimVector(shape));
-    return *this;
-  }
-
-  TensorIteratorConfig& declare_static_shape(IntArrayRef shape, const int64_t squash_dim) {
-    declare_static_shape(shape);
-    if (!static_shape_->size()) return *this;
-    TORCH_CHECK(squash_dim >= 0 && squash_dim < static_cast<int64_t>(static_shape_->size()),
-                "squash_dim ", squash_dim, " must be in [0, ", static_shape_->size(), ").");
-    (*static_shape_)[squash_dim] = 1;
-    return *this;
-  }
+  TensorIteratorConfig& declare_static_dtype_and_device(ScalarType dtype, Device device);
+  TensorIteratorConfig& declare_static_shape(IntArrayRef shape);
+  TensorIteratorConfig& declare_static_shape(IntArrayRef shape, const int64_t squash_dim);
 
   // It would be better if this was && qualified, but this would be at the cost
   // of a lot of boilerplate above
