@@ -148,10 +148,6 @@ def accuracy(output, target, topk=(1,)):
 
 def train_one_epoch(model, criterion, optimizer, data_loader, device, ntrain_batches):
     model.train()
-    top1 = AverageMeter('Acc@1', ':6.2f')
-    top5 = AverageMeter('Acc@5', ':6.2f')
-    avgloss = AverageMeter('Loss', '1.5f')
-
     cnt = 0
     for image, target in data_loader:
         start_time = time.time()
@@ -164,18 +160,8 @@ def train_one_epoch(model, criterion, optimizer, data_loader, device, ntrain_bat
         loss.backward()
         optimizer.step()
         acc1, acc5 = accuracy(output, target, topk=(1, 5))
-        top1.update(acc1[0], image.size(0))
-        top5.update(acc5[0], image.size(0))
-        avgloss.update(loss, image.size(0))
         if cnt >= ntrain_batches:
-            print('Loss', avgloss.avg)
-
-            print('Training: * Acc@1 {top1.avg:.3f} Acc@5 {top5.avg:.3f}'
-                  .format(top1=top1, top5=top5))
             return
-
-    print('Full imagenet train set:  * Acc@1 {top1.global_avg:.3f} Acc@5 {top5.global_avg:.3f}'
-          .format(top1=top1, top5=top5))
     return
 
 def ddp_setup(rank, world_size):
@@ -279,7 +265,7 @@ try:
     HAS_TORCHVISION = True
 except ImportError:
     HAS_TORCHVISION = False
-skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
+skip_if_no_torchvision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 def get_script_module(model, tracing, data):
     return torch.jit.trace(model, data) if tracing else torch.jit.script(model)
