@@ -1,6 +1,5 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
-import enum
 import torch
 from .qconfig import QConfig
 from .quant_type import QuantType

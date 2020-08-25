@@ -33,7 +33,6 @@ from .utils import _parent_name
 
 from abc import ABC, abstractmethod
 import copy
-import enum
 import operator
 
 # ------------------------

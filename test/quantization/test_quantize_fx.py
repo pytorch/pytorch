@@ -14,7 +14,6 @@ from torch.quantization import (
     QuantType,
     fuse_fx,
     prepare_fx,
-    prepare_dynamic_fx,
     convert_fx,
 )
 
