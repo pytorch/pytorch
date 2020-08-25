@@ -57,7 +57,6 @@ class ConcreteModuleType;
 // this to decide whether we can share types between modules.
 class VISIBILITY_HIDDEN ConcreteModuleTypeBuilder {
  public:
-  ConcreteModuleTypeBuilder() {}
   explicit ConcreteModuleTypeBuilder(py::object pyClass) {
     TORCH_INTERNAL_ASSERT(pyClass);
     pyClass_ = std::move(pyClass);
@@ -134,6 +133,7 @@ class VISIBILITY_HIDDEN ConcreteModuleTypeBuilder {
   };
 
  private:
+  ConcreteModuleTypeBuilder() {}
   ClassTypePtr createTypeFromThis() const;
 
   // If true, this type will never compare equally to anything else. This is

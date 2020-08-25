@@ -76,7 +76,7 @@ std::shared_ptr<ConcreteModuleType> ConcreteModuleType::fromJitType(
     }
   }
 
-  // Not make_shared because the constructor is private
+  // Not make_shared because the constructor is private.
   auto ret = std::shared_ptr<ConcreteModuleType>(new ConcreteModuleType());
   ret->jitType_ = std::move(type);
   ret->data_ = builder;

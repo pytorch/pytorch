@@ -15187,6 +15187,8 @@ a")
             def __init__(self):
                 super().__init__()
                 self.register_buffer("foo", torch.ones(1))
+                self.register_parameter("bar", torch.nn.Parameter(torch.ones(1)))
+                self.baz = torch.ones(1)
 
             def forward(self, x):
                 return x + x
@@ -15205,14 +15207,16 @@ a")
                 self.inner = inner
 
             def forward(self, x):
-                # access inn eelem
-                return self.inner.submod(x) + self.inner.submod.foo
+                # access inner elements
+                return self.inner.submod(x) + self.inner.submod.foo + self.inner.submod.bar + self.inner.submod.baz
 
         inner_module = torch.jit.script(Inner())
-        inner_module = self.getExportImportCopy(inner_module)
         wrapped = Wrapper(inner_module)
         self.checkModule(wrapped, torch.ones(1))
 
+        inner_module_loaded = self.getExportImportCopy(inner_module)
+        wrapped_loaded = Wrapper(inner_module_loaded)
+        self.assertEqual(wrapped(torch.ones(1)), wrapped_loaded(torch.ones(1)))
 
 
 # known to be failing in tracer
