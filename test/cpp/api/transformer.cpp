@@ -141,11 +141,11 @@ void transformer_encoder_layer_test_helper(bool is_cuda) {
   ASSERT_TRUE(torch::allclose(result, ref_output, 1e-7, 1e-5, /*equal_nan=*/true));
 }
 
-TEST_F(TransformerTest, TestTransformerEncoderLayer) {
+TEST_F(TransformerTest, TransformerEncoderLayer) {
   transformer_encoder_layer_test_helper(false);
 }
 
-TEST_F(TransformerTest, TestTransformerEncoderLayer_CUDA) {
+TEST_F(TransformerTest, TransformerEncoderLayer_CUDA) {
   transformer_encoder_layer_test_helper(true);
 }
 
@@ -442,26 +442,20 @@ TEST_F(TransformerTest, TransformerDecoderLayer_gelu_CUDA) {
 TEST_F(TransformerTest, PrettyPrintTransformerDecoderLayer) {
   ASSERT_EQ(
       c10::str(TransformerDecoderLayer(4, 2)),
-      "(\n"
+      "torch::nn::TransformerDecoderLayerImpl(\n"
       "  (self_attn): torch::nn::MultiheadAttention(\n"
-      "    (out_proj): torch::nn::Linear("
-              "in_features=4, out_features=4, bias=true)\n"
+      "    (out_proj): torch::nn::Linear(in_features=4, out_features=4, bias=true)\n"
       "  )\n"
       "  (dropout1): torch::nn::Dropout(p=0.1, inplace=false)\n"
-      "  (norm1): torch::nn::LayerNorm([4], eps=1e-05,"
-      " elementwise_affine=true)\n"
+      "  (norm1): torch::nn::LayerNorm([4], eps=1e-05, elementwise_affine=true)\n"
       "  (multihead_attn): torch::nn::MultiheadAttention(\n"
-      "    (out_proj): torch::nn::Linear("
-             "in_features=4, out_features=4, bias=true)\n"
+      "    (out_proj): torch::nn::Linear(in_features=4, out_features=4, bias=true)\n"
       "  )\n"
       "  (dropout2): torch::nn::Dropout(p=0.1, inplace=false)\n"
-      "  (norm2): torch::nn::LayerNorm([4], eps=1e-05, "
-           "elementwise_affine=true)\n"
-      "  (linear1): torch::nn::Linear("
-           "in_features=4, out_features=2048, bias=true)\n"
+      "  (norm2): torch::nn::LayerNorm([4], eps=1e-05, elementwise_affine=true)\n"
+      "  (linear1): torch::nn::Linear(in_features=4, out_features=2048, bias=true)\n"
       "  (dropout): torch::nn::Dropout(p=0.1, inplace=false)\n"
-      "  (linear2): torch::nn::Linear("
-           "in_features=2048, out_features=4, bias=true)\n"
+      "  (linear2): torch::nn::Linear(in_features=2048, out_features=4, bias=true)\n"
       "  (dropout3): torch::nn::Dropout(p=0.1, inplace=false)\n"
       "  (norm3): torch::nn::LayerNorm([4], eps=1e-05, elementwise_affine=true)\n"
       ")");
