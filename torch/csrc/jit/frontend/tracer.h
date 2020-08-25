@@ -237,6 +237,10 @@ TORCH_API void addInputs(
     const char* name,
     const c10::optional<at::Scalar>& value);
 TORCH_API void addInputs(Node* n, const char* name, const at::Tensor& value);
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
+    const c10::optional<at::Tensor>& value);
 TORCH_API void addInputs(Node* n, const char* name, ArrayRef<int64_t> value);
 TORCH_API void addInputs(
     Node* n,
@@ -253,6 +257,10 @@ TORCH_API void addInputs(
     ArrayRef<c10::intrusive_ptr<c10::ivalue::Object>> value,
     const ClassTypePtr& class_type);
 TORCH_API void addInputs(Node* n, const char* name, ArrayRef<double> value);
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
+    const c10::optional<ArrayRef<double>>& value);
 TORCH_API void addInputs(Node* n, const char* name, const std::string& value);
 TORCH_API void addInputs(
     Node* n,
@@ -320,6 +328,9 @@ TORCH_API void addInputs(
 TORCH_API void ensureUniqueIfOutOfPlaced(
     const char* name,
     const at::Tensor& tensor);
+TORCH_API void ensureUniqueIfOutOfPlaced(
+    const char* name,
+    const c10::optional<at::Tensor>& tensor);
 
 template <
     typename T,

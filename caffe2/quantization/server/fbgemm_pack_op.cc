@@ -4,6 +4,7 @@
 #include "caffe2/core/tensor_int8.h"
 
 #include "caffe2_dnnlowp_utils.h"
+#include <fbgemm/FbgemmConvert.h>
 
 C10_DECLARE_int32(caffe2_dnnlowp_nbits_in_non_outlier);
 C10_DECLARE_double(caffe2_dnnlowp_acc16_density_threshold);
@@ -187,7 +188,8 @@ void QuantizeConvBias(
     int M,
     const TensorQuantizationParams& in_qparams,
     const vector<TensorQuantizationParams>& filter_qparams,
-    vector<int32_t>& b_quantized, bool round_to_nearest_even) {
+    vector<int32_t>& b_quantized, bool use_fp16,
+    bool round_to_nearest_even) {
   const auto& bias = blob.IsType<int8::Int8TensorCPU>()
       ? blob.Get<int8::Int8TensorCPU>().t
       : blob.Get<TensorCPU>();
@@ -205,6 +207,13 @@ void QuantizeConvBias(
         bias.data<int32_t>(), bias.data<int32_t>() + bias.numel());
   } else {
     const float* bdata = bias.data<float>();
+    vector<float> bdata_local;
+    if (use_fp16) {
+      bdata_local.resize(bias.numel());
+      fbgemm::RoundToFloat16(
+              bdata, bdata_local.data(), bias.numel(), 1 /* FLAGS_caffe2_fbgemm_fake_fp16_clamp */);
+      bdata = bdata_local.data();
+    }
     b_quantized.resize(bias.numel());
     for (int g = 0; g < filter_qparams.size(); ++g) {
       int i_begin = g * (M / filter_qparams.size());
@@ -222,7 +231,6 @@ void QuantizeConvBias(
           b_quantized[i] = std::max(std::min(b_quantized[i], INT32_MAX), INT32_MIN);
         }
       }
-
     }
   }
 }
@@ -866,6 +874,19 @@ REGISTER_CPU_OPERATOR_WITH_ENGINE(
 OPERATOR_SCHEMA(Int8FCPackWeight)
     .NumInputs(1, 2)
     .NumOutputs(1, 2)
+    .TensorInferenceFunction([](const OperatorDef& def,
+                                const vector<TensorShape>& in) {
+      vector<TensorShape> out;
+      TensorShape W = in[0];
+      out.emplace_back(std::move(W));
+      out[0].set_data_type(TensorProto_DataType_INT8);
+      if (def.output_size() > 1) {
+        TensorShape b = in[1];
+        out.emplace_back(std::move(b));
+        out[1].set_data_type(TensorProto_DataType_INT32);
+      }
+      return out;
+    })
     .SetDoc(R"DOC(Prepack weight for Int8FC)DOC")
     .Input(0, "W", "Weight tensor in KRSC layout")
     .Input(1, "b", "Bias tensor")
@@ -902,6 +923,19 @@ REGISTER_CPU_OPERATOR_WITH_ENGINE(
 OPERATOR_SCHEMA(Int8ConvPackWeight)
     .NumInputs(1, 2)
     .NumOutputs(1)
+    .TensorInferenceFunction([](const OperatorDef& def,
+                                const vector<TensorShape>& in) {
+      vector<TensorShape> out;
+      TensorShape W = in[0];
+      out.emplace_back(std::move(W));
+      out[0].set_data_type(TensorProto_DataType_INT8);
+      if (def.output_size() > 1) {
+        TensorShape b = in[1];
+        out.emplace_back(std::move(b));
+        out[1].set_data_type(TensorProto_DataType_INT32);
+      }
+      return out;
+    })
     .SetDoc(R"DOC(Prepack weight for Int8Conv)DOC")
     .Input(0, "W", "Weight tensor in KRSC layout")
     .Input(1, "b", "Bias tensor")

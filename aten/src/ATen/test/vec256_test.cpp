@@ -413,8 +413,8 @@ TEST(Vec256TestFloat, Blend) {
   int32_t full_int_mask = 0xFFFFFFFF;
   float* full_ptr = reinterpret_cast<float*>(&full_int_mask);
   float full_float_mask = *full_ptr;
-  Vec256<float> float_mask(full_float_mask, 0, full_float_mask, 0,
-                           0, full_float_mask, 0, 0);
+  Vec256<float> float_mask(full_float_mask, 0.f, full_float_mask, 0.f,
+                           0.f, full_float_mask, 0.f, 0.f);
   float float_mask_array[Vec256<float>::size()];
   float_mask.store(float_mask_array);
   ref_res_ptr = ref_res.data_ptr<float>();

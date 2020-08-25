@@ -11,6 +11,7 @@
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/distributed/autograd/context/context.h>
+#include <torch/csrc/distributed/c10d/comm.h>
 
 namespace c10d {
 
@@ -33,11 +34,13 @@ class Reducer {
 
   ~Reducer() noexcept(false);
 
-  // To (re-)initialize bucket assignment, pass a list of buckets, each
-  // of which is specified by a list of indices in the variables list.
-  // This function performs validation that the variables within a bucket
-  // all live on the same device and have the same dimensionality.
-  void initialize_buckets(std::vector<std::vector<size_t>> bucket_indices);
+  // This funcation is called before forward compuation, e.g.
+  // rebuild_buckets.
+  // It may allocate new buckets before deallocating old buckets
+  // inside rebuild_buckets. To save peak memory usage,
+  // call rebuild_buckets before the peak memory usage increases
+  // during forward computation.
+  void prepare_forward();
 
   // This function is called when the forward function has produced an output,
   // and the user wishes to reduce gradients in the backwards pass.
@@ -52,6 +55,11 @@ class Reducer {
   std::vector<std::vector<int64_t>> get_backward_stats() const {
     return backward_stats_;
   }
+
+  // Registeres a hook to the reducer. The hook is `CommHookInterface`
+  // type to allow both Python and CPP hooks. This function can only
+  // be called once before calling backward.
+  void register_comm_hook(std::unique_ptr<CommHookInterface> iface);
 
  protected:
   // Forward declaration.
@@ -117,9 +125,16 @@ class Reducer {
 
   void finalize_backward();
 
+  // To (re-)initialize bucket assignment, pass a list of buckets, each
+  // of which is specified by a list of indices in the variables list.
+  // This function performs validation that the variables within a bucket
+  // all live on the same device and have the same dimensionality.
+  void initialize_buckets(std::vector<std::vector<size_t>> bucket_indices);
+
   // Broadcast rebuilt buckets from rank 0 to other ranks before initializing
   // the buckets
   void sync_bucket_indices(std::vector<std::vector<size_t>>& bucket_indices);
+
   // Rebuild buckets based on rebuilt_params_ and rebuilt_param_indices_
   // TODO this function makes broadcast communication call and
   // could be overlapped with next forward() call, thus
@@ -129,7 +144,7 @@ class Reducer {
   // and parameter indices order may change more frequently.
   // For find_unused_parameters = false case, buckets are only rebuilt once,
   // the performance cost is negligible.
-  std::vector<std::vector<size_t>> rebuildBuckets();
+  void rebuild_buckets();
 
   using GradCallback =
       torch::distributed::autograd::DistAutogradContext::GradCallback;
@@ -180,6 +195,23 @@ class Reducer {
     // std::vector<at::cuda::CUDAEvent> events;
   };
 
+  // This function is called inside `initialize_buckets` and
+  // `finalize_backward`. The function call in `initialize_bucket` creates views
+  // into the contents tensor for each variable's grad. Views serve as entry
+  // points to refer to each grad's data of the flat contents tensor. When it is
+  // called inside 'initialize_buckets', copy_to_bucket_view is true, meaning grad
+  // needs to be copied into bucket_view.
+  // The function call in `finalize_backward` happens only if DDP communication
+  // hook was registered to recrate views with the result of `future_work`.
+  // Before `finalize_backward` call, views must be cleared. In this case,
+  // copy_to_bucket_view is false, meaning grad does not need to be copied into
+  // bucket_view, as grad has already been mutated in bucket_view, just let grad
+  // point to bucket_view here.
+  void initialize_bucket_views(
+      BucketReplica& replica,
+      at::Tensor& contents,
+      bool copy_to_bucket_view);
+
   // A bucket holds N bucket replicas (1 per model replica).
   //
   // If every bucket in this struct is ready, the reduction can be kicked off.
@@ -196,6 +228,9 @@ class Reducer {
 
     // Keep work handle around when this set of buckets is being reduced.
     std::shared_ptr<c10d::ProcessGroup::Work> work;
+
+    // Keep future work handle around if DDP comm hook is registered.
+    c10::intrusive_ptr<torch::jit::Future> future_work;
 
     // If this bucket should expect a single sparse gradient.
     // Implies: replicas[i].variables.size() == 1.
@@ -239,6 +274,10 @@ class Reducer {
     void set(ContextPtr&& new_context_ptr);
   };
   RpcContext rpc_context_;
+
+ private:
+  // comm_hook_ is used to access the DDP communication hook if registered.
+  std::unique_ptr<CommHookInterface> comm_hook_;
 };
 
 std::vector<std::vector<size_t>> compute_bucket_assignment_by_size(

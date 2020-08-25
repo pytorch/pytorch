@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/runtime/vararg_functions.h>
+#include <ATen/ATen.h>
 
 namespace torch {
 namespace jit {
@@ -122,6 +123,37 @@ void tupleSlice(Stack& stack, size_t begin, size_t end) {
     output_elems.emplace_back(tuple->elements()[i]);
   }
   push(stack, c10::ivalue::Tuple::create(std::move(output_elems)));
+}
+
+void dequantize(Stack& stack) {
+  auto iv = pop(stack);
+  if (iv.isTuple()) {
+    auto tuple = iv.toTuple();
+    auto elems = tuple->elements();
+    std::vector<IValue> output_elems;
+    output_elems.reserve(elems.size());
+    for (size_t i = 0; i < elems.size(); ++i) {
+      if (elems[i].isTensor()) {
+        output_elems.emplace_back(at::dequantize(elems[i].toTensor()));
+      } else {
+        output_elems.emplace_back(elems[i]);
+      }
+    }
+    push(stack, c10::ivalue::Tuple::create(std::move(output_elems)));
+  } else if (iv.isTensorList()) {
+    auto elems = iv.toTensorList();
+    auto output_list = c10::impl::GenericList(elems.elementType());
+    for (size_t i = 0; i < elems.size(); ++i) {
+      output_list.emplace_back(at::dequantize(elems[i]));
+    }
+    push(stack, std::move(output_list));
+  } else {
+    TORCH_CHECK(
+        false,
+        "Unsupported type in dequantize, only List[Tensor] and \
+ Tuple[Tensor or other types] are supported, got type:",
+        toString(iv.type()));
+  }
 }
 
 } // namespace jit

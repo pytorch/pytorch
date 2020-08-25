@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
+#include <ATen/native/quantized/cpu/embedding_packed_params.h>
+#include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <torch/library.h>
-
 #ifdef USE_FBGEMM
 #include <fbgemm/Fbgemm.h>
 #include <fbgemm/FbgemmEmbedding.h>
@@ -8,13 +9,113 @@
 
 #include <ATen/Parallel.h>
 
+torch::class_<EmbeddingPackedParamsBase> register_embedding_params();
+
+at::Tensor PackedEmbeddingBagWeight::embeddingbag_byte(
+    const at::Tensor& indices,
+    const c10::optional<at::Tensor>& offsets_in,
+    bool sparse,
+    const c10::optional<at::Tensor>& per_sample_weights_,
+    bool include_last_offset) {
+
+  TORCH_CHECK(offsets_in.has_value(), "embedding_bag_byte_rowwise_offsets expects offsets to be set");
+  auto offsets = offsets_in.value();
+  auto offsets_data = offsets.data_ptr<int64_t>();
+  const auto indices_data = indices.data_ptr<int64_t>();
+
+  const auto weight_data = packed_w.data_ptr<uint8_t>();
+
+  const int64_t N = packed_w.size(0);
+  const int64_t D =
+      packed_w.size(1) - 8; // NB: -8 to account for scale and bias
+  const int64_t M = offsets.size(0);
+
+  int64_t output_size = M - 1;
+  std::vector<int64_t> offsets_include_last;
+
+  if (!include_last_offset) {
+    output_size = M;
+    offsets_include_last.resize(M + 1);
+    std::memcpy(
+        offsets_include_last.data(),
+        offsets.data_ptr<int64_t>(),
+        sizeof(int64_t) * M);
+    offsets_include_last[M] = indices.numel();
+    offsets_data = offsets_include_last.data();
+  }
+
+  std::vector<int64_t> shape = {output_size, D};
+  auto output = at::empty(shape, packed_w.options().dtype(at::kFloat));
+  auto* output_data = output.data_ptr<float>();
+
+#ifdef USE_FBGEMM
+
+  auto kernel_i8_i64 =
+      fbgemm::GenerateEmbeddingSpMDM<uint8_t, int64_t, int64_t>(
+          /*block_size=*/D,
+          /*has_weight=*/per_sample_weights_.has_value(),
+          /*normalize_by_lengths=*/false,
+          /*prefetch=*/16, // NOLINT(cppcoreguidelines-avoid-magic-numbers)
+          /*is_weight_positional=*/false,
+          /*use_offsets=*/true);
+
+  if (packed_w.is_contiguous()) {
+    at::parallel_for(
+        0, output_size, 1, [&](int64_t start_idx, int64_t end_idx) {
+          bool success = kernel_i8_i64(
+              /*output_size=*/end_idx - start_idx,
+              /*index_size=*/offsets_data[end_idx] - offsets_data[start_idx],
+              /*data_size=*/N,
+              /*input=*/weight_data,
+              /*indices=*/indices_data + offsets_data[start_idx],
+              /*offsets_or_lengths=*/offsets_data + start_idx,
+              /*weights=*/
+              per_sample_weights_
+                  ? per_sample_weights_.value().data_ptr<float>() +
+                      offsets_data[start_idx]
+                  : nullptr,
+              /*out=*/output_data + start_idx * D);
+
+          TORCH_CHECK(
+              success,
+              "FBGEMM GenerateEmbeddingSpMDM kernel failed for 8-bit input");
+        });
+  } else {
+    auto weight_contig = packed_w.contiguous();
+    const auto weight_data_contig = weight_contig.data_ptr<uint8_t>();
+    at::parallel_for(
+        0, output_size, 1, [&](int64_t start_idx, int64_t end_idx) {
+          bool success = kernel_i8_i64(
+              /*output_size=*/end_idx - start_idx,
+              /*index_size=*/offsets_data[end_idx] - offsets_data[start_idx],
+              /*data_size=*/N,
+              /*input=*/weight_data_contig,
+              /*indices=*/indices_data + offsets_data[start_idx],
+              /*offsets_or_lengths=*/offsets_data + start_idx,
+              /*weights=*/
+              per_sample_weights_
+                  ? per_sample_weights_.value().data_ptr<float>() +
+                      offsets_data[start_idx]
+                  : nullptr,
+              /*out=*/output_data + start_idx * D);
+          TORCH_CHECK(
+              success,
+              "FBGEMM GenerateEmbeddingSpMDM kernel failed for 8-bit input");
+        });
+  }
+#endif
+  // TODO add default (non-FBGEMM) implementation.
+  return output;
+}
+
 namespace at {
 namespace native {
+namespace {
 
 Tensor embedding_bag_byte_rowwise_offsets(
     const Tensor& weight,
     const Tensor& indices,
-    const Tensor& offsets,
+    const c10::optional<Tensor>& offsets_in,
     const bool /* scale_grad_by_freq */,
     const int64_t /* mode */,
     bool /* sparse */,
@@ -22,6 +123,9 @@ Tensor embedding_bag_byte_rowwise_offsets(
     bool include_last_offset) {
   TORCH_CHECK(weight.scalar_type() == at::kByte);
   TORCH_CHECK(weight.ndimension() == 2);
+  TORCH_CHECK(offsets_in.has_value(), "embedding_bag_byte_rowwise_offsets expects offsets to be set");
+
+  auto offsets = offsets_in.value();
   auto offsets_data = offsets.data_ptr<int64_t>();
   const auto weight_data = weight.data_ptr<uint8_t>();
   const auto indices_data = indices.data_ptr<int64_t>();
@@ -36,8 +140,10 @@ Tensor embedding_bag_byte_rowwise_offsets(
   if (!include_last_offset) {
     output_size = M;
     offsets_include_last.resize(M + 1);
-    std::memcpy(offsets_include_last.data(), offsets.data_ptr<int64_t>(),
-      sizeof(int64_t) * M);
+    std::memcpy(
+        offsets_include_last.data(),
+        offsets.data_ptr<int64_t>(),
+        sizeof(int64_t) * M);
     offsets_include_last[M] = indices.numel();
     offsets_data = offsets_include_last.data();
   }
@@ -49,61 +155,57 @@ Tensor embedding_bag_byte_rowwise_offsets(
 #ifdef USE_FBGEMM
 
   auto kernel_i8_i64 =
-    fbgemm::GenerateEmbeddingSpMDM<uint8_t, int64_t, int64_t>(
-      /*block_size=*/D,
-      /*has_weight=*/per_sample_weights_.has_value(),
-      /*normalize_by_lengths=*/false,
-      /*prefetch=*/16, // NOLINT(cppcoreguidelines-avoid-magic-numbers)
-      /*is_weight_positional=*/false,
-      /*use_offsets=*/true
-    );
+      fbgemm::GenerateEmbeddingSpMDM<uint8_t, int64_t, int64_t>(
+          /*block_size=*/D,
+          /*has_weight=*/per_sample_weights_.has_value(),
+          /*normalize_by_lengths=*/false,
+          /*prefetch=*/16, // NOLINT(cppcoreguidelines-avoid-magic-numbers)
+          /*is_weight_positional=*/false,
+          /*use_offsets=*/true);
 
   if (weight.is_contiguous()) {
-    at::parallel_for(0, output_size, 1,
-      [&](int64_t start_idx, int64_t end_idx) {
-        bool success = kernel_i8_i64(
-          /*output_size=*/end_idx - start_idx,
-          /*index_size=*/offsets_data[end_idx] - offsets_data[start_idx],
-          /*data_size=*/N,
-          /*input=*/weight_data,
-          /*indices=*/indices_data + offsets_data[start_idx],
-          /*offsets_or_lengths=*/offsets_data + start_idx,
-          /*weights=*/
-          per_sample_weights_
-            ? per_sample_weights_.value().data_ptr<float>() +
-                offsets_data[start_idx]
-            : nullptr,
-          /*out=*/output_data + start_idx * D
-          );
+    at::parallel_for(
+        0, output_size, 1, [&](int64_t start_idx, int64_t end_idx) {
+          bool success = kernel_i8_i64(
+              /*output_size=*/end_idx - start_idx,
+              /*index_size=*/offsets_data[end_idx] - offsets_data[start_idx],
+              /*data_size=*/N,
+              /*input=*/weight_data,
+              /*indices=*/indices_data + offsets_data[start_idx],
+              /*offsets_or_lengths=*/offsets_data + start_idx,
+              /*weights=*/
+              per_sample_weights_
+                  ? per_sample_weights_.value().data_ptr<float>() +
+                      offsets_data[start_idx]
+                  : nullptr,
+              /*out=*/output_data + start_idx * D);
 
-      TORCH_CHECK(
-        success,
-        "FBGEMM GenerateEmbeddingSpMDM kernel failed for 8-bit input");
-    });
+          TORCH_CHECK(
+              success,
+              "FBGEMM GenerateEmbeddingSpMDM kernel failed for 8-bit input");
+        });
   } else {
     auto weight_contig = weight.contiguous();
     const auto weight_data_contig = weight_contig.data_ptr<uint8_t>();
     at::parallel_for(
-      0, output_size, 1, [&](int64_t start_idx, int64_t end_idx) {
-        bool success = kernel_i8_i64(
-          /*output_size=*/end_idx - start_idx,
-          /*index_size=*/offsets_data[end_idx] - offsets_data[start_idx],
-          /*data_size=*/N,
-          /*input=*/weight_data_contig,
-          /*indices=*/indices_data + offsets_data[start_idx],
-          /*offsets_or_lengths=*/offsets_data + start_idx,
-          /*weights=*/
-          per_sample_weights_
-            ? per_sample_weights_.value().data_ptr<float>() +
-                offsets_data[start_idx]
-            : nullptr,
-            /*out=*/output_data + start_idx * D
-        );
-        TORCH_CHECK(
-          success,
-          "FBGEMM GenerateEmbeddingSpMDM kernel failed for 8-bit input");
-    });
-
+        0, output_size, 1, [&](int64_t start_idx, int64_t end_idx) {
+          bool success = kernel_i8_i64(
+              /*output_size=*/end_idx - start_idx,
+              /*index_size=*/offsets_data[end_idx] - offsets_data[start_idx],
+              /*data_size=*/N,
+              /*input=*/weight_data_contig,
+              /*indices=*/indices_data + offsets_data[start_idx],
+              /*offsets_or_lengths=*/offsets_data + start_idx,
+              /*weights=*/
+              per_sample_weights_
+                  ? per_sample_weights_.value().data_ptr<float>() +
+                      offsets_data[start_idx]
+                  : nullptr,
+              /*out=*/output_data + start_idx * D);
+          TORCH_CHECK(
+              success,
+              "FBGEMM GenerateEmbeddingSpMDM kernel failed for 8-bit input");
+        });
   }
 #endif
   return output;
@@ -112,15 +214,19 @@ Tensor embedding_bag_byte_rowwise_offsets(
 Tensor embedding_bag_4bit_rowwise_offsets(
     const Tensor& weight,
     const Tensor& indices,
-    const Tensor& offsets,
+    const c10::optional<Tensor>& offsets_in,
     const bool /* scale_grad_by_freq */,
     const int64_t /* mode */,
     bool sparse,
     const c10::optional<Tensor>& per_sample_weights_,
     const c10::optional<Tensor>& compressed_indices_mapping,
     bool include_last_offset) {
+  TORCH_CHECK(offsets_in.has_value(), "embedding_bag_4bit_rowwise_offsets expects offsets to be set");
+
   TORCH_CHECK(weight.ndimension() == 2);
   TORCH_CHECK(indices.ndimension() == 1);
+
+  auto offsets = offsets_in.value();
   TORCH_CHECK(offsets.ndimension() == 1);
 
   // FBGEMM expects the offsets to be of int type.
@@ -159,7 +265,8 @@ Tensor embedding_bag_4bit_rowwise_offsets(
     // Avoid `null pointer passed as argument 2` ASAN violation when ofests
     // tensor is empty.
     if (M > 0) {
-      std::memcpy(offsets_include_last_val.data(), offsets_data, sizeof(int) * M);
+      std::memcpy(
+          offsets_include_last_val.data(), offsets_data, sizeof(int) * M);
     }
     offsets_include_last_val[M] = indices.numel();
     offsets_data = offsets_include_last_val.data();
@@ -192,8 +299,9 @@ Tensor embedding_bag_4bit_rowwise_offsets(
         /*indices=*/indices_data,
         /*offsets=*/offsets_data,
         /*weights=*/
-        per_sample_weights_.has_value() ? per_sample_weights_.value().data_ptr<float>()
-                            : nullptr,
+        per_sample_weights_.has_value()
+            ? per_sample_weights_.value().data_ptr<float>()
+            : nullptr,
         /*output=*/output_data);
 
     TORCH_CHECK(
@@ -206,7 +314,7 @@ Tensor embedding_bag_4bit_rowwise_offsets(
             /*block_size=*/block_size,
             /*has weights=*/per_sample_weights_.has_value(),
             /*normalize_by_lengths=*/false,
-            /*prefetch distance*/prefetch_distance,
+            /*prefetch distance*/ prefetch_distance,
             /*is_weight_positional*/ false,
             /*use_offsets*/ true);
     bool success = kernel_64_(
@@ -217,8 +325,9 @@ Tensor embedding_bag_4bit_rowwise_offsets(
         /*indices=*/indices_data,
         /*offsets=*/offsets_data,
         /*weights=*/
-        per_sample_weights_.has_value() ? per_sample_weights_.value().data_ptr<float>()
-                            : nullptr,
+        per_sample_weights_.has_value()
+            ? per_sample_weights_.value().data_ptr<float>()
+            : nullptr,
         /*output=*/output_data,
         /*compressed_indices_table=*/compressed_indices_mapping_data);
     TORCH_CHECK(
@@ -291,10 +400,39 @@ Tensor embedding_bag_4bit_rowwise_offsets(
   return output;
 }
 
-TORCH_LIBRARY_IMPL(quantized, CPU, m) {
-    m.impl("embedding_bag_byte_rowwise_offsets", embedding_bag_byte_rowwise_offsets);
-    m.impl("embedding_bag_4bit_rowwise_offsets", embedding_bag_4bit_rowwise_offsets);
-}
+template <int bit_rate>
+class QEmbeddingBag final {
+ public:
+  static at::Tensor run(
+      const c10::intrusive_ptr<EmbeddingPackedParamsBase>& packed_weight,
+      const Tensor& indices,
+      const c10::optional<Tensor>& offsets,
+      const bool /* scale_grad_by_freq */,
+      const int64_t /* mode */,
+      bool sparse,
+      const c10::optional<Tensor>& per_sample_weights_,
+      const c10::optional<Tensor>& compressed_indices_mapping,
+      bool include_last_offset) {
+    if (bit_rate == 8) {
+      return packed_weight->embeddingbag_byte(
+          indices, offsets, sparse, per_sample_weights_, include_last_offset);
+    } else {
+      TORCH_INTERNAL_ASSERT(
+          "Currently only support 8-bit embedding_bag quantization");
+    }
+  }
+};
 
+TORCH_LIBRARY_IMPL(quantized, CPU, m) {
+  // Function that works on TorchBind packed weights.
+  m.impl("embedding_bag_byte", TORCH_FN(QEmbeddingBag<8>::run));
+
+  // Functions that work on at::Tensor packed weight.
+  m.impl(
+      "embedding_bag_byte_rowwise_offsets", embedding_bag_byte_rowwise_offsets);
+  m.impl(
+      "embedding_bag_4bit_rowwise_offsets", embedding_bag_4bit_rowwise_offsets);
 }
-}
+} // namespace
+} // namespace native
+} // namespace at

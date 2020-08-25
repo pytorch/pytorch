@@ -134,7 +134,7 @@ struct TensorImpl;
 struct C10_API AutogradMetaInterface {
   virtual void set_requires_grad(bool requires_grad, at::TensorImpl* self_impl) = 0;
   virtual bool requires_grad() const = 0;
-  virtual at::Tensor& grad() = 0;
+  virtual at::Tensor& mutable_grad() = 0;
   virtual const at::Tensor& grad() const = 0;
   virtual ~AutogradMetaInterface();
 };
@@ -575,7 +575,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * It is only valid to call this method on a Variable.
    * See Note [Tensor versus Variable in C++].
    */
-  at::Tensor& grad();
+  at::Tensor& mutable_grad();
 
   /**
    * Return the accumulated gradient of a tensor.  This gradient is written

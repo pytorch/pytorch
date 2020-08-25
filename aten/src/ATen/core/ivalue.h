@@ -37,6 +37,7 @@ struct ConstantString;
 struct GenericDict;
 struct Object;
 struct PyObjectHolder;
+struct EnumHolder;
 }
 
 // This is an owning wrapper for a c10::optional<std::vector<T>>
@@ -77,24 +78,26 @@ struct OptionalArray {
 // retain/release calls.
 
 #define TORCH_FORALL_TAGS(_) \
-  _(None) \
-  _(Tensor) \
-  _(Double) \
-  _(Int) \
-  _(Bool) \
-  _(Tuple) \
-  _(String) \
-  _(Blob) \
-  _(GenericList) \
-  _(GenericDict) \
-  _(Future) \
-  _(Device) \
-  _(Object) \
-  _(PyObject) \
-  _(Uninitialized) \
-  _(Capsule) \
-  _(RRef) \
-  _(Generator) \
+  _(None)                    \
+  _(Tensor)                  \
+  _(Double)                  \
+  _(Int)                     \
+  _(Bool)                    \
+  _(Tuple)                   \
+  _(String)                  \
+  _(Blob)                    \
+  _(GenericList)             \
+  _(GenericDict)             \
+  _(Future)                  \
+  _(Device)                  \
+  _(Object)                  \
+  _(PyObject)                \
+  _(Uninitialized)           \
+  _(Capsule)                 \
+  _(RRef)                    \
+  _(Quantizer)               \
+  _(Generator)               \
+  _(Enum)                    \
 
 // [doxygen private]
 // These methods are not actually private but we don't want to document them, so
@@ -346,6 +349,12 @@ struct CAFFE2_API IValue final {
   c10::intrusive_ptr<c10::RRefInterface> toRRef() &&;
   c10::intrusive_ptr<c10::RRefInterface> toRRef() const &;
 
+  // Quantizer
+  IValue(c10::intrusive_ptr<at::Quantizer> v);
+  bool isQuantizer() const { return Tag::Quantizer == tag; }
+  c10::intrusive_ptr<at::Quantizer> toQuantizer() &&;
+  c10::intrusive_ptr<at::Quantizer> toQuantizer() const &;
+
   // Int
   IValue(int64_t i)
   : tag(Tag::Int), is_intrusive_ptr(false) {
@@ -395,6 +404,7 @@ struct CAFFE2_API IValue final {
   c10::intrusive_ptr<ivalue::ConstantString> toString() &&;
   c10::intrusive_ptr<ivalue::ConstantString> toString() const &;
   const std::string& toStringRef() const;
+  c10::optional<std::reference_wrapper<const std::string>> toOptionalStringRef() const;
 
   // DoubleList
   bool isDoubleList() const;
@@ -407,13 +417,13 @@ struct CAFFE2_API IValue final {
   c10::List<bool> toBoolList() &&;
   c10::List<bool> toBoolList() const &;
 
-  //TensorList
+  // TensorList
   bool isTensorList() const;
   c10::List<at::Tensor> toTensorList() &&;
   c10::List<at::Tensor> toTensorList() const &;
   std::vector<at::Tensor> toTensorVector() const;
 
-  //GenericList
+  // GenericList
   IValue(c10::List<IValue> v);
   bool isList() const { return Tag::GenericList == tag; }
   c10::List<IValue> toList() &&;
@@ -478,6 +488,12 @@ struct CAFFE2_API IValue final {
   c10::intrusive_ptr<ivalue::PyObjectHolder> toPyObjectHolder() &&;
   c10::intrusive_ptr<ivalue::PyObjectHolder> toPyObjectHolder() const &;
   PyObject* toPyObject() const;
+
+  // Enum
+  explicit IValue(c10::intrusive_ptr<ivalue::EnumHolder> v);
+  bool isEnum() const { return tag == Tag::Enum; }
+  c10::intrusive_ptr<ivalue::EnumHolder> toEnumHolder() &&;
+  c10::intrusive_ptr<ivalue::EnumHolder> toEnumHolder() const &;
 
   // None
   IValue() : payload{0}, tag(Tag::None), is_intrusive_ptr(false) {}
@@ -558,6 +574,14 @@ struct CAFFE2_API IValue final {
     return static_cast<at::QScheme>(toInt());
   }
 
+  // Dimname
+  IValue(at::Dimname dimname)
+  : IValue(dimname.symbol().toQualString()) {}
+
+  at::Dimname toDimname() const {
+    return at::Dimname::fromSymbol(Symbol::fromQualString(toStringRef()));
+  }
+
   // Generator
   IValue(at::Generator g)
   : tag(Tag::Generator), is_intrusive_ptr(g.defined())  {
@@ -603,6 +627,10 @@ struct CAFFE2_API IValue final {
   /// @private [doxygen private]
   /// Only for use in generated code.
   OptionalArray<int64_t> toOptionalIntArray();
+
+  /// @private [doxygen private]
+  /// Only for use in generated code.
+  OptionalArray<double> toOptionalDoubleArray();
 
   /// @private [doxygen private]
   /// this is a shallow comparison of two IValues to test the object identity
