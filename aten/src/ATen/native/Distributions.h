@@ -44,7 +44,7 @@ namespace {
 #if !defined(__CUDA_ARCH__) && !defined(__HIPCC__)
 // we cannot use std::isnan directly due to some incompatibility of
 // gcc constexpr'ing and nvcc
-using std::isnan;
+#define isnan std::isnan
 #endif
 
 // Here sampler_t should be function type scalar_t(void). For gpu

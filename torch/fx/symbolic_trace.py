@@ -1,25 +1,25 @@
+# type: ignore
 import inspect
 from types import CodeType, FunctionType
-from typing import Any, Callable, Dict, Optional, Tuple, Union, List
+from typing import Any, Callable, Dict, Optional, Tuple, Union
 import torch
 
-from .node import Node, base_types, Argument
+from .node import Node
 from .graph import Graph
 from .graph_module import GraphModule
 from .proxy import Proxy, _create_proxy
 
 HAS_VARSTUFF = inspect.CO_VARARGS | inspect.CO_VARKEYWORDS
 
-def _find_module(root: torch.nn.Module, m: torch.nn.Module):
+def _find_module(root, m):
     for n, p in root.named_modules():
         if m is p:
             return n
     raise NameError('module is not installed as a submodule')
 
-def _patch_function(fn: FunctionType, nargs: int) -> FunctionType:
+def _patch_function(fn, nargs):
     co = fn.__code__
     co_flags = co.co_flags & ~HAS_VARSTUFF
-    co_args : tuple
     if hasattr(co, "co_posonlyargcount"):
         co_args = (
             nargs, 0,
@@ -36,7 +36,7 @@ def _patch_function(fn: FunctionType, nargs: int) -> FunctionType:
             co.co_names, co.co_varnames, co.co_filename,
             co.co_name, co.co_firstlineno, co.co_lnotab,
             co.co_freevars, co.co_cellvars)
-    new_code = CodeType(*co_args)  # type: ignore
+    new_code = CodeType(*co_args)
     return FunctionType(new_code, fn.__globals__, fn.__name__, fn.__defaults__, fn.__closure__)
 
     # we need to insert placeholder nodes for *args, and **kwargs,
@@ -52,7 +52,7 @@ class DelegateBase:
     # modification of values used in node creation. For example, one might
     # want to disallow in-place operations from being recorded.
     def create_node(self, kind : str, target : Union[str, Callable],
-                    args : Tuple[Argument, ...], kwargs : Dict[str, Argument], name : Optional[str] = None) -> Node:
+                    args : Tuple[Any], kwargs : Dict[str, Any], name : Optional[str] = None) -> Node:
         return self.graph.create_node(kind, target, args, kwargs, name)
 
     # A method to specify whether a given `nn.Module` is a "leaf"
@@ -62,13 +62,10 @@ class DelegateBase:
     # are leaf modules. All other modules are traced through and
     # their constituent ops are recorded, unless specified otherwise
     # via this parameter.
-    def is_leaf_module(self, m: torch.nn.Module) -> bool:
+    def is_leaf_module(self, m):
         return m.__module__.startswith('torch.nn') and not isinstance(m, torch.nn.Sequential)
 
-    # A method that lowers the objects seen as arguments during symbolic evaluation
-    # into Argument types that can be stored in IR.
-    # Can be override to support more trace-specific types.
-    def create_arg(self, a: Any) -> Argument:
+    def create_arg(self, a):
         # aggregates
         if isinstance(a, (tuple, list)):
             return type(a)(self.create_arg(elem) for elem in a)
@@ -85,7 +82,7 @@ class DelegateBase:
         if isinstance(a, Proxy):
             # base case: we unwrap the Proxy object
             return a.node
-        elif isinstance(a, base_types) or a is None:
+        elif isinstance(a, (str, int, float, bool, torch.dtype, torch.Tensor)) or a is None:
             return a
 
         raise NotImplementedError(f"argument of type: {type(a)}")
@@ -96,7 +93,7 @@ class DefaultDelegate(DelegateBase):
         super().__init__(graph)
         self.root = root
 
-    def create_arg(self, a: Any) -> Argument:
+    def create_arg(self, a):
         # The base delegate is used to construct Graphs when there is no associated
         # module hierarchy, so it can never create parameter references.
         # The default delegate adds the ability to refer to parameters when
@@ -110,7 +107,7 @@ class DefaultDelegate(DelegateBase):
 
 
 
-def _proxy_placeholder(name: str, delegate: DelegateBase) -> Proxy:
+def _proxy_placeholder(name, delegate):
     return Proxy(delegate.graph.placeholder(name), delegate)
 
 # Symbolic tracing API
@@ -121,17 +118,17 @@ def _proxy_placeholder(name: str, delegate: DelegateBase) -> Proxy:
 # Args:
 #   - root - the `nn.Module` instance to trace
 #   - delegate : An instance of a Delegate object
-def symbolic_trace(root : torch.nn.Module, delegate_class=DefaultDelegate) -> GraphModule:
+def symbolic_trace(root : torch.nn.Module, delegate_class=DefaultDelegate):
     graph = Graph()
     delegate = delegate_class(root, graph)
 
     fn = type(root).forward
-    assert isinstance(fn, FunctionType)
+
     co = fn.__code__
     total_args = co.co_argcount + co.co_kwonlyargcount
     names_iter = iter(co.co_varnames)
     next(names_iter)  # skip self
-    args : List[Any] = [root]
+    args = [root]
     args.extend(_proxy_placeholder(next(names_iter), delegate) for name in range(1, total_args))
 
     if co.co_kwonlyargcount > 0 or co.co_flags & HAS_VARSTUFF:
@@ -141,6 +138,7 @@ def symbolic_trace(root : torch.nn.Module, delegate_class=DefaultDelegate) -> Gr
             args.append(_proxy_placeholder('**' + next(names_iter), delegate))
         fn = _patch_function(fn, len(args))
 
+    args = tuple(args)
     orig_call = torch.nn.Module.__call__
 
     def module_call_wrapper(mod, *args, **kwargs):

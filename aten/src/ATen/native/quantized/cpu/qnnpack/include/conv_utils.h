@@ -7,7 +7,6 @@
 #include <pytorch_qnnpack.h>
 #include <qnnpack/log.h>
 #include <qnnpack/operator.h>
-#include <qnnpack/params.h>
 
 namespace qnnpack {
 

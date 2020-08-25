@@ -177,8 +177,6 @@ struct ProfilingRecord {
   TORCH_API static std::unique_ptr<ProfilingRecord> instrumentGraph(
       const std::shared_ptr<Graph>& graph);
 
-  TORCH_API static void removeProfileCounter(Block* b);
-
   std::shared_ptr<Graph> profiled_graph_;
   std::mutex mutex_;
   size_t profiling_count_;
@@ -207,7 +205,7 @@ struct ProfilingRecord {
       const std::function<void(Stack&)>& fp,
       at::ArrayRef<Value*> inputs);
   void instrumentBlock(Block* block);
-  void insertShapeProfile(Node* n, size_t offset);
+  void insertShapeProfile(Node* n, Value* i);
   ProfilingRecord(std::shared_ptr<Graph> g);
 };
 

@@ -3,6 +3,7 @@
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/mobile/observer.h>
+#include <torch/csrc/jit/mobile/type_parser.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
 #include <torch/csrc/jit/serialization/unpickler.h>
@@ -101,14 +102,11 @@ void parseMethods(
     method_i_start = 1;
   }
   TORCH_CHECK(
-      caffe2::serialize::kMinSupportedBytecodeVersion <= model_version &&
-          model_version <= caffe2::serialize::kProducedBytecodeVersion,
+      model_version == caffe2::serialize::kProducedBytecodeVersion,
       "Lite Interpreter verson number does not match. ",
-      "The model version must be between ",
-      caffe2::serialize::kMinSupportedBytecodeVersion,
-      " and ",
+      "The code version is ",
       caffe2::serialize::kProducedBytecodeVersion,
-      "But the model version is ",
+      " but the model version is ",
       model_version);
 
   bool has_debug_info = debug_info_vals.has_value();
@@ -192,9 +190,7 @@ void parseMethods(
           op_item.size() == 2,
           "There should be two parts in an operator name.");
       auto op_found = function->append_operator(
-          op_item[0].toString()->string(),
-          op_item[1].toString()->string(),
-          model_version);
+          op_item[0].toString()->string(), op_item[1].toString()->string());
       if (!op_found) {
         unsupported_op_names.emplace(operator_str(
             op_item[0].toString()->string(), op_item[1].toString()->string()));

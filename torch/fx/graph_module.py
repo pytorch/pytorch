@@ -1,15 +1,14 @@
+# type: ignore
 import torch
 import torch.overrides
 import linecache
-from typing import Type, Dict, List, Any
-from .graph import Graph
 
 # normal exec loses the source code, however we can patch
 # the linecache module to still recover it.
 # using exec_with_source will add it to our local cache
 # and then tools like TorchScript will be able to get source info.
 _next_id = 0
-def exec_with_source(src: str, globals: Dict[str, Any]):
+def exec_with_source(src, globals):
     global _next_id
     key = f'<eval_with_key_{_next_id}>'
     _next_id += 1
@@ -18,7 +17,7 @@ def exec_with_source(src: str, globals: Dict[str, Any]):
 
 # patch linecache so that any code we exec using exec_with_source
 # works with inspect
-_eval_cache : Dict[str, List[str]] = {}
+_eval_cache = {}
 _orig_getlines = linecache.getlines
 def patched_getline(*args, **kwargs):
     if args[0] in _eval_cache:
@@ -28,23 +27,22 @@ linecache.getlines = patched_getline
 
 
 class GraphModule(torch.nn.Module):
-    def __new__(cls: 'Type[GraphModule]', *args, **kwargs):
+    def __new__(cls, *args, **kwargs):
         # each instance of a graph module needs its own forward method
         # so create a new singleton class for each instance.
         # it is a subclass of the user-defined class, the only difference
         # is an extra layer to install the forward method
-
-        class GraphModuleImpl(cls):  # type: ignore
+        class GraphModuleImpl(cls):
             pass
         return super().__new__(GraphModuleImpl)
 
-    def __init__(self, root: torch.nn.Module, graph: Graph):
+    def __init__(self, root, graph):
         super().__init__()
         self.root = root
         self.graph = graph
         self._generate_forward()
 
-    def _generate_forward(self) -> None:
+    def _generate_forward(self):
         body, result, free_variables = self.graph.python_code(root_module='self')
         body = '\n'.join('    ' + line for line in body.split('\n')) + '\n'
         self.src = f"""\
@@ -57,7 +55,7 @@ def forward(self, {', '.join(free_variables)}):
         # install forward into the classes dictionary, this is what normally happens in the
         # 'class' statement
         # __new__ ensured that each instance has its own class
-        gbls: Dict[str, Any] = {
+        gbls = {
             'torch': torch
         }
         exec_with_source(self.src, gbls)

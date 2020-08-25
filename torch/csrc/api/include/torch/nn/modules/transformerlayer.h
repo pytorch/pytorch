@@ -114,6 +114,9 @@ class TORCH_API TransformerDecoderLayerImpl : public Cloneable<TransformerDecode
 
   void reset_parameters();
 
+  /// Pretty prints the `TransformerDecoderLayer` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
   /// Pass the inputs (and mask) through the decoder layer.
   ///Args:
   ///       tgt: the sequence to the decoder layer (required).

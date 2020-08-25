@@ -57,8 +57,7 @@ if [ -n "$TRAVIS_PYTHON_VERSION" ]; then
       protobuf \
       pytest \
       pillow \
-      typing \
-      dataclasses
+      typing
 
   as_jenkins pip install mkl mkl-devel
 

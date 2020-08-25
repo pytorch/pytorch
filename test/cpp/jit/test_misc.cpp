@@ -1595,7 +1595,6 @@ void testInsertAndEliminateRedundantGuards() {
   InterpreterState is{cd};
   is.run(stack);
   auto copy = pr->profiled_graph_->copy();
-  ProfilingRecord::removeProfileCounter(copy->block());
   InsertGuards(copy);
   auto nodes = copy->block()->nodes();
   auto guard = std::find_if(nodes.begin(), nodes.end(), [](Node* n) {
@@ -1646,7 +1645,6 @@ void testInsertBailOuts() {
   InterpreterState is{cd};
   is.run(stack);
   auto copy = pr->profiled_graph_->copy();
-  ProfilingRecord::removeProfileCounter(copy->block());
   InsertGuards(copy);
   EliminateRedundantGuards(copy);
   auto nodes = copy->block()->nodes();

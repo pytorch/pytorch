@@ -379,8 +379,6 @@ class TORCH_API PolynomialTransformer : public IRSimplifierBase {
 
   const Expr* mutate(const Min* v) override;
 
-  const Expr* mutate(const CompareSelect* v) override;
-
   const Expr* mutate(const Intrinsics* v) override;
 
   const Expr* mutate(const Cast* v) override;
