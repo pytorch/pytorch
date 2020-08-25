@@ -6,11 +6,16 @@ import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
 import torch.quantization
 
+from torch.quantization import (
+    float_qparams_dynamic_qconfig,
+    default_float_qparams_observer
+)
 from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
     prepare_dynamic,
     _make_conv_test_input,
     skipIfNoFBGEMM,
+    lengths_to_offsets
 )
 from torch.testing._internal.common_quantized import (
     _calculate_dynamic_qparams,
@@ -864,7 +869,7 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
             self.assertEqual(result[1], h)
             self.assertEqual(result[2], c)
             x = torch.randn(10, 20, 3)
-            self.check_eager_serialization(cell_dq, ref_dq, x)
+            self.check_eager_serialization(cell_dq, ref_dq, [x])
             self.check_weight_bias_api(cell_dq, weight_keys, bias_keys)
 
     @given(
@@ -916,5 +921,89 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
                 self.assertEqual(result[1], result_module[1], msg="RNNCell module API failed")
                 weight_keys = ['weight_ih', 'weight_hh']
                 bias_keys = ['bias_ih', 'bias_hh']
-                self.check_eager_serialization(cell_dq, cell_dict[rnn_type](**kwargs), x)
+                self.check_eager_serialization(cell_dq, cell_dict[rnn_type](**kwargs), [x])
                 self.check_weight_bias_api(cell_dq, weight_keys, bias_keys)
+
+    @given(
+        num_embeddings=st.integers(10, 50),
+        embedding_dim=st.integers(5, 50).filter(lambda x: x % 4 == 0),
+        num_offsets=st.integers(1, 20),
+        set_qconfig=st.booleans(),
+    )
+    @skipIfNoFBGEMM
+    def test_embedding_bag_api(self, num_embeddings, embedding_dim, num_offsets, set_qconfig):
+        r"""Test execution and serialization for dynamic quantized embedding_bag modules on int8
+        """
+        num_lengths = np.random.randint(1, 6)
+        lengths = np.random.randint(0, 21, size=num_lengths).astype(np.int32)
+        num_indices = np.sum(lengths)
+        indices = torch.from_numpy(np.random.randint(low=0, high=num_embeddings, size=num_indices, dtype=np.int64))
+
+        offsets = lengths_to_offsets(lengths)
+        # include the last offset
+        offsets = torch.cat((offsets, torch.tensor([indices.size(0)], dtype=torch.long)), 0)
+        weights = torch.from_numpy((np.random.random_sample((num_embeddings, embedding_dim)) + 1).astype(np.float32))
+
+        obs = default_float_qparams_observer()
+        obs(weights)
+        # Get the scale and zero point for the weight tensor
+        qparams = obs.calculate_qparams()
+        # Quantize the weights to 8bits
+        qweight = torch.quantize_per_channel(weights, qparams[0], qparams[1], axis=0, dtype=torch.quint8)
+        qemb = nnqd.EmbeddingBag(num_embeddings=num_embeddings, embedding_dim=embedding_dim, include_last_offset=True, mode='sum')
+        qemb.set_weight(qweight)
+        qemb(indices, offsets)
+
+        # Ensure the module has the correct weights
+        self.assertEqual(qweight, qemb.weight())
+
+        w_packed = qemb._packed_params._packed_weight
+        module_out = qemb(indices, offsets)
+
+        # Call the qembedding_bag operator directly
+        ref = torch.ops.quantized.embedding_bag_byte(w_packed, indices, offsets, mode=0,
+                                                     per_sample_weights=None,
+                                                     include_last_offset=True)
+        self.assertEqual(module_out, ref)
+
+        # Test serialization of dynamic EmbeddingBag module using state_dict
+        emb_dict = qemb.state_dict()
+        b = io.BytesIO()
+        torch.save(emb_dict, b)
+        b.seek(0)
+        loaded_dict = torch.load(b)
+        embedding_unpack = torch.ops.quantized.embedding_bag_unpack
+        # Check unpacked weight values explicitly
+        for key in emb_dict:
+            if isinstance(emb_dict[key], torch._C.ScriptObject):
+                assert isinstance(loaded_dict[key], torch._C.ScriptObject)
+                emb_weight = embedding_unpack(emb_dict[key])
+                loaded_weight = embedding_unpack(loaded_dict[key])
+                self.assertEqual(emb_weight, loaded_weight)
+
+        # Check state dict serialization and torch.save APIs
+        loaded_qemb = nnqd.EmbeddingBag(num_embeddings=num_embeddings, embedding_dim=embedding_dim,
+                                        include_last_offset=True, mode='sum')
+        self.check_eager_serialization(qemb, loaded_qemb, [indices, offsets])
+
+        loaded_qemb.load_state_dict(loaded_dict)
+        self.assertEqual(embedding_unpack(qemb._packed_params._packed_weight),
+                         embedding_unpack(loaded_qemb._packed_params._packed_weight))
+
+        # Test JIT serialization
+        self.checkScriptable(qemb, [[indices, offsets]], check_save_load=True)
+
+        # Test from_float call
+        float_embedding = torch.nn.EmbeddingBag(num_embeddings=num_embeddings, embedding_dim=embedding_dim,
+                                                include_last_offset=True, scale_grad_by_freq=False, mode='sum')
+        if set_qconfig:
+            float_embedding.qconfig = float_qparams_dynamic_qconfig
+
+        prepare_dynamic(float_embedding)
+
+        float_embedding(indices, offsets)
+        q_embeddingbag = nnqd.EmbeddingBag.from_float(float_embedding)
+
+        q_embeddingbag(indices, offsets)
+
+        self.assertTrue('DynamicQuantizedEmbeddingBag' in str(q_embeddingbag))

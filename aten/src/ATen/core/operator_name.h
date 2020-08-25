@@ -45,6 +45,25 @@ struct OperatorName final {
   }
 };
 
+// Non-owning view of an OperatorName.  Unlike OperatorName, most of
+// its functions are constexpr, so it can be used for compile time
+// computations
+struct OperatorNameView final {
+  c10::string_view name;
+  c10::string_view overload_name;
+  constexpr OperatorNameView(c10::string_view name, c10::string_view overload_name)
+    : name(name), overload_name(overload_name) {}
+  // Parses strings like "foo.overload" and also "foo"
+  constexpr static OperatorNameView parse(c10::string_view full_name) {
+    auto i = full_name.find('.');
+    if (i == c10::string_view::npos) {
+      return OperatorNameView(full_name, c10::string_view());
+    } else {
+      return OperatorNameView(full_name.substr(0, i), full_name.substr(i + 1));
+    }
+  }
+};
+
 inline bool operator==(const OperatorName& lhs, const OperatorName& rhs) {
   return lhs.name == rhs.name && lhs.overload_name == rhs.overload_name;
 }
