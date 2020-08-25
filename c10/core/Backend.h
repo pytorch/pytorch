@@ -102,7 +102,7 @@ static inline Backend dispatchKeyToBackend(DispatchKey t) {
     return Backend::FPGA;
   } else if (t == DispatchKey::MSNPU) {
     return Backend::MSNPU;
-  } else if (t == DispatchKey::XLA || t == DispatchKey::XLAPreAutograd) {
+  } else if (t == DispatchKey::XLA || t == DispatchKey::AutogradXLA) {
     return Backend::XLA;
   } else if (t == DispatchKey::Vulkan) {
     return Backend::Vulkan;

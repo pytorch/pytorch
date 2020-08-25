@@ -645,6 +645,13 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
         // Calling unpack after this will throw an assertion.
         orig_weight.reset();
     }
+
+    // Set padding buffer to zero point. This can only be done if we want
+    // to do it only once.
+    if (zero_buffer_size) {
+      memset(
+          convolution_op->zero_buffer, act_nhwc.q_zero_point(), zero_buffer_size);
+    }
   }
 
   TORCH_INTERNAL_ASSERT(pack_w != nullptr, "Packed Weights are NULL");
@@ -681,6 +688,7 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
   if (transpose()) {
     run_status = qnnpack::qnnpackDeConv(
         conv_p,
+        convolution_op.get(),
         pack_w->getPackedWeights(),
         N,
         H,
@@ -697,6 +705,7 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl(
   } else {
     run_status = qnnpack::qnnpackConv(
         conv_p,
+        convolution_op.get(),
         pack_w->getPackedWeights(),
         N,
         H,
