@@ -72,7 +72,7 @@ graph(%a : Tensor, %b : Tensor, %c : Tensor):
   // still can use it as a key in the value map to find the value it was moved
   // to.
   Node* new_tanh = vmap1.at(parse_map.at("x"))->node();
-  ASSERT_TRUE(new_tanh->kind() == aten::tanh)
+  ASSERT_TRUE(new_tanh->kind() == aten::tanh);
 
   Node* subgraph2 = SubgraphUtils::createSingletonSubgraph(
       parse_map["q"]->node(), prim::DifferentiableGraph);
@@ -88,7 +88,7 @@ graph(%a : Tensor, %b : Tensor, %c : Tensor):
   // Check that after mergeNodeIntoSubgraph we can still access the node
   // corresponding to the original node, even if the toMerge node had a subgraph
   // as well
-  ASSERT_TRUE(vmap2.at(new_tanh_out)->node()->kind() == aten::tanh)
+  ASSERT_TRUE(vmap2.at(new_tanh_out)->node()->kind() == aten::tanh);
 }
 
 } // namespace jit
