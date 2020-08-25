@@ -400,10 +400,18 @@ class Type:
     def __str__(self) -> str:
         raise NotImplementedError
 
+    # WARNING: These concepts are not very well-defined.  For example,
+    # is "int?" nullable? How about "int?[]".  They are defined
+    # so we can conveniently generate legacy Declarations.yaml but
+    # really we should probably just remove these at some point
+
     def is_tensor_like(self) -> bool:
         raise NotImplementedError
 
     def is_nullable(self) -> bool:
+        raise NotImplementedError
+
+    def is_list_like(self) -> Optional['ListType']:
         raise NotImplementedError
 
 # Base types are simple, atomic types with no further structure
@@ -438,6 +446,9 @@ class BaseType(Type):
     def is_nullable(self) -> bool:
         return False
 
+    def is_list_like(self) -> Optional['ListType']:
+        return None
+
 # Optional types may be specified, or may also be validly given None
 @dataclass(frozen=True)
 class OptionalType(Type):
@@ -451,6 +462,9 @@ class OptionalType(Type):
 
     def is_nullable(self) -> bool:
         return True
+
+    def is_list_like(self) -> Optional['ListType']:
+        return self.elem.is_list_like()
 
 # List types specify that we may have multiples of an element.  We
 # also support explicit sizes on list types, but these have
@@ -473,6 +487,9 @@ class ListType(Type):
 
     def is_nullable(self) -> bool:
         return self.elem.is_nullable()
+
+    def is_list_like(self) -> Optional['ListType']:
+        return self
 
 @dataclass(frozen=True)
 class Argument:

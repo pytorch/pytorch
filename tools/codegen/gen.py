@@ -673,8 +673,9 @@ def compute_argument_yaml(a: Argument, *, schema_order: bool, kwarg_only_set: Se
             arg['field_name'] = name_to_field_name[a.name]
     # Historically, booleans don't get their size recorded, because it
     # is already built into the cpp type (e.g., std::array<bool, 4>)
-    if isinstance(a.type, ListType) and a.type.size is not None and str(a.type.elem) != 'bool':
-        arg['size'] = a.type.size
+    l = a.type.is_list_like()
+    if l is not None and l.size is not None and str(l.elem) != 'bool':
+        arg['size'] = l.size
     return arg
 
 @with_native_function
