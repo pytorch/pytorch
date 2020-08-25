@@ -355,7 +355,8 @@ class TensorExprFuser {
 
     // Symbolic checks
     REQ(canHandle(producer));
-    AT_ASSERT(canHandle(consumer) || consumer->kind() == getTensorExprSymbol());
+    TORCH_INTERNAL_ASSERT(
+        canHandle(consumer) || consumer->kind() == getTensorExprSymbol());
 
     // Alias checks
     REQ(aliasDb_->couldMoveBeforeTopologically(producer, consumer));
