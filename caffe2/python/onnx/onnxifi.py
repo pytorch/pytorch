@@ -25,7 +25,7 @@ def onnxifi_caffe2_net(
         use_onnx=True,
         merge_fp32_inputs_into_fp16=False,
         adjust_batch=True,
-        black_list=None,
+        block_list=None,
         weight_names=None,
         net_ssa_rewritten=False,
         timeout=0):
@@ -46,7 +46,8 @@ def onnxifi_caffe2_net(
         shape_hints.max_batch_size = max_batch_size
         shape_hints.max_feature_len = max_seq_size
     pred_net_str = C.onnxifi(pred_net.SerializeToString(),
-            black_list if black_list else [],
+                             shape_hints.SerializeToString(),
+                             block_list if block_list else [],
                              weight_names if weight_names is not None else [],
                              max_batch_size,
                              max_seq_size,
