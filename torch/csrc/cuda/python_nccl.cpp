@@ -7,12 +7,9 @@
 #include <torch/csrc/THP.h>
 #include <torch/csrc/Types.h>
 #include <torch/csrc/cuda/THCP.h>
-#include <torch/csrc/cuda/nccl.h>
 #include <ATen/core/functional.h>
 
 #include <c10/cuda/CUDAGuard.h>
-
-#include <nccl.h>
 
 #include <sstream>
 #include <unordered_map>

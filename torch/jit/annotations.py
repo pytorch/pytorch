@@ -318,6 +318,8 @@ def try_ann_to_type(ann, loc):
             warnings.warn("Enum support is work in progress, enum class {}"
                           " is not compiled".format(ann))
             return None
+        if not hasattr(ann, "__torch_script_class__"):
+            torch.jit._script._recursive_compile_class(ann, loc)
         return EnumType(_qualified_name(ann), get_enum_value_type(ann, loc))
     if inspect.isclass(ann):
         if hasattr(ann, "__torch_script_class__"):
