@@ -1105,6 +1105,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         model2, input2 = get_GruNet_model_and_inputs(5, 4, 3, batch_size2, 7, False)
         self.run_actual_test(model2, train=False, batch_size=batch_size2, input=input2, use_gpu=False, do_constant_folding=True)
 
+    @skipIfUnsupportedOpsetVersion([7, 8])
     def test_repeat(self):
         class MyModel(torch.nn.Module):
             def __init__(self):
@@ -1159,6 +1160,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         self.run_model_test(model, train=False, input=(x),
                             batch_size=BATCH_SIZE, use_gpu=False)
 
+    @skipIfUnsupportedOpsetVersion([7, 8])
     def test_repeat_dim_overflow(self):
         class MyModel(torch.nn.Module):
             def __init__(self):
@@ -1170,6 +1172,7 @@ class TestCaffe2Backend_opset9(unittest.TestCase):
         x = torch.randn(1, 2, requires_grad=True)
         self.run_model_test(MyModel(), train=False, input=(x), batch_size=BATCH_SIZE, use_gpu=False)
 
+    @skipIfUnsupportedOpsetVersion([7, 8])
     def test_repeat_dynamic(self):
         class MyModel(torch.nn.Module):
             def __init__(self):
