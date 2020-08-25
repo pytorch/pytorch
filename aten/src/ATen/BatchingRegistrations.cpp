@@ -66,20 +66,22 @@ bool isPhysicalScalarTensor(const Tensor& logical_tensor) {
   return true;
 }
 
-Tensor mul_batching_rule(const Tensor& self, const Tensor& other) {
+template <typename F, F Func, typename... ExtraArgs>
+Tensor binary_pointwise_batching_rule(
+    const Tensor& self, const Tensor& other, ExtraArgs... args) {
   if (self.dim() > 0 && other.dim() > 0) {
     auto physical_args = BroadcastingVmapTransform::logicalToPhysical({self, other});
-    auto result = at::mul(physical_args[0].tensor(), physical_args[1].tensor());
+    auto result = Func(physical_args[0].tensor(), physical_args[1].tensor(), args...);
     return physical_args[0].newLogicalFromPhysical(result);
   }
   if (isPhysicalScalarTensor(self)) {
     auto other_physical = MultiBatchVmapTransform::logicalToPhysical(other);
-    auto result = at::mul(self, other_physical.tensor());
+    auto result = Func(self, other_physical.tensor(), args...);
     return other_physical.newLogicalFromPhysical(result);
   }
   if (isPhysicalScalarTensor(other)) {
     auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
-    auto result = at::mul(self_physical.tensor(), other);
+    auto result = Func(self_physical.tensor(), other, args...);
     return self_physical.newLogicalFromPhysical(result);
   }
 
@@ -120,7 +122,7 @@ Tensor mul_batching_rule(const Tensor& self, const Tensor& other) {
   }
   auto physical_args = BroadcastingVmapTransform::logicalToPhysical(
       {logical_self, logical_other});
-  auto result = at::mul(physical_args[0].tensor(), physical_args[1].tensor());
+  auto result = Func(physical_args[0].tensor(), physical_args[1].tensor(), args...);
   return physical_args[0].newLogicalFromPhysical(result);
 }
 
@@ -289,10 +291,10 @@ Tensor view_batching_rule(const Tensor& self, IntArrayRef size) {
   return self_physical.newLogicalFromPhysical(result);
 }
 
-template <Tensor (*Op)(const Tensor&)>
-Tensor unary_pointwise_batching_rule(const Tensor& input) {
+template <typename F, F Func, typename... ExtraArgs>
+Tensor unary_pointwise_batching_rule(const Tensor& input, ExtraArgs... args) {
   auto* input_batched = unsafeGetBatchedImpl(input);
-  auto output_physical = Op(input_batched->value());
+  auto output_physical = Func(input_batched->value(), args...);
   auto old_bdims = input_batched->bdims();
   return makeBatched(output_physical, BatchDims(old_bdims.begin(), old_bdims.end()));
 }
@@ -319,7 +321,6 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("_remove_batch_dim", native::_remove_batch_dim);
 
   m.impl_UNBOXED("sum.dim_IntList", sum_batching_rule);
-  m.impl_UNBOXED("mul.Tensor", mul_batching_rule);
 
   // view operations
   m.impl("chunk", chunk_batching_rule);
@@ -349,7 +350,8 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("view_as", native::view_as); // composite wrt autograd
 
   // unary pointwise, out-of-place, no additional arguments.
-#define UNARY_POINTWISE(op) m.impl(#op, unary_pointwise_batching_rule<at::op>);
+#define UNARY_POINTWISE(op) m.impl(#op, \
+    unary_pointwise_batching_rule<Tensor (*)(const Tensor&), at::op>);
   UNARY_POINTWISE(abs);
   UNARY_POINTWISE(acos);
   UNARY_POINTWISE(asin);
@@ -391,6 +393,28 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   TO_BATCHING_RULE("to.dtype", ScalarType, bool, bool, optional<MemoryFormat>)
   TO_BATCHING_RULE("to.other", const Tensor&, bool, bool, optional<MemoryFormat>)
 #undef TO_BATCHING_RULE
+
+  using TensorTensorType = Tensor (*)(const Tensor&, const Tensor&);
+  using TensorScalarType = Tensor (*)(const Tensor&, Scalar);
+
+#define BINARY_POINTWISE(op) \
+  m.impl(#op".Tensor", binary_pointwise_batching_rule<TensorTensorType, at::op>); \
+  m.impl(#op".Scalar", unary_pointwise_batching_rule<TensorScalarType, at::op, Scalar>);
+#define BINARY_POINTWISE_VA(op, ...) \
+  { \
+    using Binop = Tensor (*)(const Tensor&, const Tensor&, __VA_ARGS__); \
+    using Unop = Tensor (*)(const Tensor&, Scalar, __VA_ARGS__); \
+    m.impl(#op".Tensor", binary_pointwise_batching_rule<Binop, at::op, __VA_ARGS__>); \
+    m.impl(#op".Scalar", unary_pointwise_batching_rule<Unop, at::op, Scalar, __VA_ARGS__>); \
+  }
+
+  BINARY_POINTWISE_VA(add, Scalar);
+  BINARY_POINTWISE_VA(sub, Scalar);
+  BINARY_POINTWISE_VA(rsub, Scalar);
+  BINARY_POINTWISE(mul);
+  BINARY_POINTWISE(div);
+#undef BINARY_POINTWISE_VA
+#undef BINARY_POINTWISE
 }
 
 } // namespace at

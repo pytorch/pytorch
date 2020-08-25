@@ -2554,8 +2554,17 @@
   variants: function, method
 
 - func: neg.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU, CUDA: neg_out
+
+# Alias for neg
+- func: negative(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: negative_(Tensor(a!) self) -> Tensor(a!)
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: negative.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
 
 - func: repeat(Tensor self, int[] repeats) -> Tensor
   use_c10_dispatcher: full

@@ -4,6 +4,7 @@ import torch.nn as nn
 import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
 import torch.nn.intrinsic.quantized as nniq
+import torch.multiprocessing as mp
 
 # symbolic trace
 from torch.fx import symbolic_trace
@@ -11,19 +12,34 @@ from torch.fx import symbolic_trace
 # graph mode quantization based on fx
 from torch.quantization._quantize_fx import (
     Quantizer,
+    fuse,
     QuantType,
 )
 
-from torch.quantization import default_qconfig
+from torch.quantization import (
+    default_qconfig,
+    default_qat_qconfig,
+    prepare,
+    prepare_qat,
+    convert,
+)
 
 # test utils
 from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
     skipIfNoFBGEMM,
+    skip_if_no_torchvision,
+    train_one_epoch,
+    run_ddp,
 )
+
+from torch.testing._internal.common_distributed import skip_if_not_multigpu
+
+from torch.testing._internal.common_quantization import NodeSpec as ns
 
 import itertools
 import operator
+import unittest
 
 class TestQuantizeFx(QuantizationTestCase):
     """ Unit tests for functionalities
@@ -67,16 +83,17 @@ class TestQuantizeFx(QuantizationTestCase):
         linear_module_input = torch.rand(8, 5)
 
         tests = [
-            (False, Conv, (conv_input, conv_weight), ('call_function', torch.ops.quantized.conv2d)),
-            (True, Linear, (linear_input, linear_weight), ('call_function', torch.ops.quantized.linear_dynamic)),
-            (False, Linear, (linear_input, linear_weight), ('call_function', torch.ops.quantized.linear)),
-            (True, LinearModule, (linear_module_input,), ('call_module', torch.nn.quantized.dynamic.Linear)),
-            (False, LinearModule, (linear_module_input,), ('call_module', torch.nn.quantized.Linear)),
+            (False, Conv, (conv_input, conv_weight), ns.call_function(torch.ops.quantized.conv2d)),
+            (True, Linear, (linear_input, linear_weight), ns.call_function(torch.ops.quantized.linear_dynamic)),
+            (False, Linear, (linear_input, linear_weight), ns.call_function(torch.ops.quantized.linear)),
+            (True, LinearModule, (linear_module_input,), ns.call_module(nnqd.Linear)),
+            (False, LinearModule, (linear_module_input,), ns.call_module(nnq.Linear)),
         ]
 
         for is_dynamic, M, inputs, quantized_node in tests:
             quant_type = QuantType.DYNAMIC if is_dynamic else QuantType.STATIC
-            self.checkGraphModeFxOp(M(), inputs, quantized_node, quant_type=quant_type)
+            self.checkGraphModeFxOp(
+                M(), inputs, quant_type, quantized_node)
 
 class TestQuantizeFxOps(QuantizationTestCase):
     """Unit tests for individual ops
@@ -124,27 +141,28 @@ class TestQuantizeFxOps(QuantizationTestCase):
             # is_module
             True: {
                 # quant_type:
-                QuantType.DYNAMIC: ('call_module', nnqd.Linear),
-                QuantType.STATIC: ('call_module', nnq.Linear),
+                QuantType.DYNAMIC: ns.call_module(nnqd.Linear),
+                QuantType.STATIC: ns.call_module(nnq.Linear),
                 # note that we are checking the final result
-                QuantType.QAT: ('call_module', nnq.Linear),
+                QuantType.QAT: ns.call_module(nnq.Linear),
             },
             False: {
                 # quant_type:
-                QuantType.DYNAMIC: ('call_function', torch.ops.quantized.linear_dynamic),
-                QuantType.STATIC: ('call_function', torch.ops.quantized.linear),
-                QuantType.QAT: ('call_function', torch.ops.quantized.linear),
+                QuantType.DYNAMIC: ns.call_function(torch.ops.quantized.linear_dynamic),
+                QuantType.STATIC: ns.call_function(torch.ops.quantized.linear),
+                QuantType.QAT: ns.call_function(torch.ops.quantized.linear),
             }
         }
         for (model, is_module), quant_type in options:
-            self.checkGraphModeFxOp(model, data, quantized_nodes[is_module][quant_type], quant_type=quant_type)
+            self.checkGraphModeFxOp(
+                model, data, quant_type, quantized_nodes[is_module][quant_type])
 
         for f_relu, quant_type in itertools.product([True, False], [QuantType.STATIC, QuantType.QAT]):
             for model, quantized_node in [
-                    (ModuleLinear(has_relu=True, f_relu=f_relu), ('call_module', nniq.LinearReLU))]:
+                    (ModuleLinear(has_relu=True, f_relu=f_relu), ns.call_module(nniq.LinearReLU))]:
                 # TODO: support functional linear + relu fusion
-                # (FuncLinear(has_relu=True, f_relu=f_relu), ('call_function', torch.ops.quantized.linear_relu))]:
-                self.checkGraphModeFxOp(model, data, quantized_node, quant_type=quant_type)
+                # (FuncLinear(has_relu=True, f_relu=f_relu), ns.call_function(torch.ops.quantized.linear_relu))]:
+                self.checkGraphModeFxOp(model, data, quant_type, quantized_node)
 
     @skipIfNoFBGEMM
     def test_quantized_conv(self):
@@ -161,14 +179,14 @@ class TestQuantizeFxOps(QuantizationTestCase):
         options = itertools.product([1, 2, 3], self.static_quant_types)
         quantized_nodes = {
             # dim
-            1: ('call_module', nnq.Conv1d),
-            2: ('call_module', nnq.Conv2d),
-            3: ('call_module', nnq.Conv3d),
+            1: ns.call_module(nnq.Conv1d),
+            2: ns.call_module(nnq.Conv2d),
+            3: ns.call_module(nnq.Conv3d),
         }
         for dim, quant_type in options:
             model = self.checkGraphModeFxOp(
-                Conv(dim), self.img_data_dict[dim],
-                quantized_nodes[dim], quant_type=quant_type)
+                Conv(dim), self.img_data_dict[dim], quant_type,
+                quantized_nodes[dim])
 
     @skipIfNoFBGEMM
     def test_quantized_conv_relu(self):
@@ -203,9 +221,9 @@ class TestQuantizeFxOps(QuantizationTestCase):
         options = itertools.product([1, 2, 3], self.static_quant_types)
         quantized_nodes = {
             # dim
-            1: ('call_module', nniq.ConvReLU1d),
-            2: ('call_module', nniq.ConvReLU2d),
-            3: ('call_module', nniq.ConvReLU3d),
+            1: ns.call_module(nniq.ConvReLU1d),
+            2: ns.call_module(nniq.ConvReLU2d),
+            3: ns.call_module(nniq.ConvReLU3d),
         }
         for dim, quant_type in options:
             for orig_m in [ConvNdRelu(dim, True),
@@ -214,8 +232,8 @@ class TestQuantizeFxOps(QuantizationTestCase):
                            ConvNdInplaceFunctionalRelu(dim)]:
                 conv_name = "conv{}d".format(dim)
                 m = self.checkGraphModeFxOp(
-                    orig_m, self.img_data_dict[dim],
-                    quantized_nodes[dim], quant_type=quant_type)
+                    orig_m, self.img_data_dict[dim], quant_type,
+                    quantized_nodes[dim])
 
 
     def _test_quantized_binary_op_impl(self, binary_op, ibinary_op, quantized_op):
@@ -248,10 +266,11 @@ class TestQuantizeFxOps(QuantizationTestCase):
 
         data = (torch.randn(1, 2, 3, 3, dtype=torch.float),
                 torch.randn(1, 2, 3, 3, dtype=torch.float))
-        quantized_node = ('call_function', quantized_op)
+        quantized_node = ns.call_function(quantized_op)
         options = itertools.product([True, False], [True, False], self.static_quant_types)
         for is_inplace, is_scalar, quant_type in options:
-            self.checkGraphModeFxOp(Op(is_inplace, is_scalar), data, quantized_node, quant_type=quant_type)
+            self.checkGraphModeFxOp(
+                Op(is_inplace, is_scalar), data, quant_type, quantized_node)
 
     def _test_quantized_binary_op_relu_impl(self, binary_op, ibinary_op, quantized_op):
         class OpRelu(torch.nn.Module):
@@ -280,13 +299,13 @@ class TestQuantizeFxOps(QuantizationTestCase):
 
         data = (torch.rand((1, 2, 5, 5), dtype=torch.float),
                 torch.rand((1, 2, 5, 5), dtype=torch.float))
-        quantized_node = ('call_function', quantized_op)
+        quantized_node = ns.call_function(quantized_op)
         options = itertools.product(
             [True, False], [True, False], [True, False], [True, False], self.static_quant_types)
         for is_inplace_op, is_functional_relu, is_inplace_relu, is_scalar, quant_type in options:
             self.checkGraphModeFxOp(
                 OpRelu(is_inplace_op, is_functional_relu, is_inplace_relu, is_scalar),
-                data, quantized_node, quant_type=quant_type)
+                data, quant_type, quantized_node)
 
     @skipIfNoFBGEMM
     def test_quantized_binary_op(self):
@@ -328,9 +347,9 @@ class TestQuantizeFxOps(QuantizationTestCase):
 
         data = (torch.randn(1, 2, 5, 5, dtype=torch.float),
                 torch.randn(1, 2, 5, 5, dtype=torch.float))
-        quantized_node = ('call_function', torch.ops.quantized.cat)
+        quantized_node = ns.call_function(torch.ops.quantized.cat)
         for quant_type in self.static_quant_types:
-            self.checkGraphModeFxOp(QuantizedCat(), data, quantized_node, quant_type=quant_type)
+            self.checkGraphModeFxOp(QuantizedCat(), data, quant_type, quantized_node)
 
 
     @skipIfNoFBGEMM
@@ -352,12 +371,13 @@ class TestQuantizeFxOps(QuantizationTestCase):
 
         options = itertools.product(self.static_quant_types, [2, 3])
         quantized_nodes = {
-            # 1: ('call_module', nnq.BatchNorm1d),
-            2: ('call_module', nnq.BatchNorm2d),
-            3: ('call_module', nnq.BatchNorm3d),
+            # 1: ns.call_module(nnq.BatchNorm1d),
+            2: ns.call_module(nnq.BatchNorm2d),
+            3: ns.call_module(nnq.BatchNorm3d),
         }
         for quant_type, dim in options:
-            model = self.checkGraphModeFxOp(M(dim), self.img_data_dict[dim], quantized_nodes[dim], quant_type)
+            model = self.checkGraphModeFxOp(
+                M(dim), self.img_data_dict[dim], quant_type, quantized_nodes[dim])
 
     @skipIfNoFBGEMM
     def test_qbatch_norm_relu(self):
@@ -390,14 +410,15 @@ class TestQuantizeFxOps(QuantizationTestCase):
 
         options = itertools.product(self.static_quant_types, [2, 3])
         quantized_nodes = {
-            2: ('call_module', nniq.BNReLU2d),
-            3: ('call_module', nniq.BNReLU3d),
+            2: ns.call_module(nniq.BNReLU2d),
+            3: ns.call_module(nniq.BNReLU3d),
         }
         for quant_type, dim in options:
             for instance in [BNRelu(dim, True), BNRelu(dim, False),
                              BNFuncRelu(dim), BNFuncInplaceRelu(dim)]:
                 self.checkGraphModeFxOp(
-                    instance, self.img_data_dict[dim], quantized_nodes[dim], quant_type)
+                    instance, self.img_data_dict[dim], quant_type,
+                    quantized_nodes[dim])
 
     def _test_activation_impl(
             self, float_module, float_op, quantized_module, quantized_op):
@@ -423,13 +444,14 @@ class TestQuantizeFxOps(QuantizationTestCase):
         options = itertools.product([True, False], [True, False], self.static_quant_types)
         quantized_nodes = {
             # is_module
-            True: ('call_module', quantized_module),
-            False: ('call_function', quantized_op),
+            True: ns.call_module(quantized_module),
+            False: ns.call_function(quantized_op),
         }
 
         for is_module, is_inplace, quant_type in options:
             self.checkGraphModeFxOp(
-                M(is_module, is_inplace), self.img_data_2d, quantized_nodes[is_module], quant_type)
+                M(is_module, is_inplace), self.img_data_2d,
+                quant_type, quantized_nodes[is_module])
 
     def test_hardswish(self):
         self._test_activation_impl(nn.Hardswish, F.hardswish, nnq.Hardswish, torch.ops.quantized.hardswish)
@@ -464,13 +486,13 @@ class TestQuantizeFxOps(QuantizationTestCase):
         options = itertools.product([True, False], self.static_quant_types)
         quantized_nodes = {
             # is_module
-            True: ('call_module', quantized_module),
-            False: ('call_function', quantized_op),
+            True: ns.call_module(quantized_module),
+            False: ns.call_function(quantized_op),
         }
 
         for is_module, quant_type in options:
             self.checkGraphModeFxOp(
-                M(is_module), data, quantized_nodes[is_module], quant_type)
+                M(is_module), data, quant_type, quantized_nodes[is_module])
 
     def test_layer_norm(self):
         data = (torch.rand((1, 2, 5, 5), dtype=torch.float),)
@@ -525,15 +547,16 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 return x
 
         data = (torch.rand((1, 2, 5, 5), dtype=torch.float),)
-        # map from node to number of occurences
-        checks = [
-            ('call_function', torch.quantize_per_tensor),
-            ('call_module', nnq.Conv2d),
-            ('call_function', F.hardtanh_),
-            ('call_method', 'dequantize')
+        # list of node that should occur in order
+        node_list = [
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_module(nnq.Conv2d),
+            ns.call_function(F.hardtanh_),
+            ns.call_method('dequantize')
         ]
         for quant_type in self.static_quant_types:
-            m = self.checkGraphModeFxOp(M(), data, checks, quant_type)
+            m = self.checkGraphModeFxOp(
+                M(), data, quant_type, expected_node_list=node_list)
 
     @skipIfNoFBGEMM
     def test_general_shape_ops(self):
@@ -639,19 +662,21 @@ class TestQuantizeFxOps(QuantizationTestCase):
         # observers and also successfully fused two quantized::conv2d
         # patterns
         # one quantize_per_tensor for input
-        order_check = [
-            ('call_function', torch.quantize_per_tensor),
-            ('call_module', nnq.Conv2d),
-            ('call_module', nnq.Conv2d),
-            ('call_method', 'dequantize'),
-        ]
         # check exact counts of quantize and dequantize
         count_check = {
-            ('call_function', torch.quantize_per_tensor) : 1,
-            ('call_method', 'dequantize') : 1
+            ns.call_function(torch.quantize_per_tensor) : 1,
+            ns.call_method('dequantize') : 1
         }
-        for check in (order_check, count_check):
-            self.checkGraphModule(quantized, check)
+        order_check = [
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_module(nnq.Conv2d),
+            ns.call_module(nnq.Conv2d),
+            ns.call_method('dequantize'),
+        ]
+        self.checkGraphModuleNodes(
+            quantized,
+            expected_node_occurrence=count_check,
+            expected_node_list=order_check)
 
     @skipIfNoFBGEMM
     def test_general_value_ops(self):
@@ -731,16 +756,214 @@ class TestQuantizeFxOps(QuantizationTestCase):
         # This checks that the dequantize from the output of first conv
         # is being propagated to the end, so that we don't insert extra
         # observers
-        order_check = [
-            ('call_function', torch.quantize_per_tensor),
-            ('call_module', nnq.Conv2d),
-            ('call_module', nnq.Conv2d),
-            ('call_method', 'dequantize'),
-        ]
         # check exact counts of quantize and dequantize
         count_check = {
-            ('call_function', torch.quantize_per_tensor) : 1,
-            ('call_method', 'dequantize') : 1
+            ns.call_function(torch.quantize_per_tensor) : 1,
+            ns.call_method('dequantize') : 1
         }
-        for check in (order_check, count_check):
-            self.checkGraphModule(quantized, check)
+        order_check = [
+            ns.call_function(torch.quantize_per_tensor),
+            ns.call_module(nnq.Conv2d),
+            ns.call_module(nnq.Conv2d),
+            ns.call_method('dequantize'),
+        ]
+        self.checkGraphModuleNodes(
+            quantized,
+            expected_node_occurrence=count_check,
+            expected_node_list=order_check)
+
+class TestQuantizeFxModels(QuantizationTestCase):
+    def _test_model_impl(
+            self, mode, name, model, eager_quantizable_model,
+            check_with_eager=True,
+            diff_of_quant=None,
+            diff_from_eager=None):
+        if diff_of_quant is None or diff_from_eager is None:
+            diff_of_quant = {}
+            diff_from_eager = {}
+
+        if mode not in diff_of_quant or mode not in diff_from_eager:
+            diff_of_quant[mode] = {}
+            diff_from_eager[mode] = {}
+
+        input_tensor = torch.rand(1, 3, 224, 224)
+        input_tensor_inception = torch.rand(1, 3, 299, 299)
+        output_value = torch.randint(0, 1, (1,))
+
+        # print('quantizing:', name, ' mode:', mode)
+        if name == 'inception_v3':
+            input_value = input_tensor_inception
+        else:
+            input_value = input_tensor
+
+        qconfig = default_qconfig if mode == 'static' else default_qat_qconfig
+        qconfig_dict = {'': qconfig}
+        graph_module = symbolic_trace(model)
+        # print('graph module:', graph_module.src)
+        script = torch.jit.script(graph_module)
+
+        # make sure graph module and script module are both runanble
+        original_out = graph_module(input_value)
+        is_not_tuple_out = not isinstance(original_out, tuple)
+        script_out = script(input_value)
+        self.assertEqual(
+            (original_out - script_out).abs().max(), 0,
+            'Reslut of original graph module and script module does not match')
+
+        # set to train just before quantization
+        if mode != 'static':
+            model.train()
+
+        graph_module = fuse(graph_module)
+        quantizer = Quantizer()
+        prepared = quantizer.prepare(graph_module, qconfig_dict)
+
+        if mode == 'ddp':
+            mp.spawn(run_ddp,
+                     args=(world_size, prepared),
+                     nprocs=world_size,
+                     join=True)
+        elif mode == 'qat':
+            assert prepared.training, 'prepared must be in training mode for qat'
+            optimizer = torch.optim.SGD(prepared.parameters(), lr=0.0001)
+            criterion = nn.CrossEntropyLoss()
+            train_one_epoch(prepared, criterion, optimizer, [(input_value, output_value)], torch.device('cpu'), 1)
+        else:
+            for i in range(10):
+                prepared(input_value)
+
+        # print('after observation root:', prepared.root)
+
+        qgraph = quantizer.convert(prepared)
+        # print('after quantization root:', qgraph.root)
+        # print('after quantization code:', qgraph.src)
+        qgraph.eval()
+        qgraph_script = torch.jit.script(qgraph)
+        # print('quantized and scripted:', qgraph_script.graph)
+
+        qgraph_out = qgraph(input_value)
+        qgraph_script = qgraph_script(input_value)
+
+        if is_not_tuple_out:
+            diff_of_quant[mode][name] = (original_out - qgraph_out).abs().max()
+            assert torch.allclose(qgraph_out, qgraph_script), 'graph, scripted graph'
+        else:
+            print('tuple output')
+
+        if eager_quantizable_model is not None:
+            # comparing to eager mode quantization
+            qeager = eager_quantizable_model
+            ref_out = qeager(input_value)
+            qeager.qconfig = qconfig
+            if mode == 'static':
+                qeager.fuse_model()
+                prepare(qeager, inplace=True)
+            else:
+                qeager.train()
+                qeager.fuse_model()
+                prepare_qat(qeager, inplace=True)
+
+            # calibration
+            if mode == 'ddp':
+                mp.spawn(run_ddp,
+                         args=(world_size, qeager),
+                         nprocs=world_size,
+                         join=True)
+            elif mode == 'qat':
+                assert qeager.training, 'qeager should be in training mode for qat'
+                optimizer = torch.optim.SGD(qeager.parameters(), lr=0.0001)
+                train_one_epoch(qeager, criterion, optimizer, [(input_value, output_value)], torch.device('cpu'), 1)
+            else:
+                for i in range(10):
+                    qeager(input_value)
+
+            # print('ref after observation:', qeager)
+
+            convert(qeager, inplace=True)
+            qeager.eval()
+
+            # print('ref after quantization:', qeager)
+            qeager_out = qeager(input_value)
+            qeager_script = torch.jit.script(qeager)
+            qscript_out = qeager_script(input_value)
+            if is_not_tuple_out:
+                diff_from_eager[mode][name] = (qeager_out - qgraph_out).abs().max()
+                if check_with_eager:
+                    self.assertEqual(diff_from_eager[mode][name], 0,
+                                     'Result of graph mode quantization and ' +
+                                     'eager mode quantization on model: ' + name +
+                                     ' should match. Mode: ' + mode +
+                                     ' diff:' + str(diff_from_eager[mode][name]))
+
+    @skip_if_no_torchvision
+    def test_torchvision(self):
+        from torchvision import models
+        from torchvision.models import quantization as quantized_models
+
+        def get_available_classification_models(models):
+            return [k for k, v in models.__dict__.items() if callable(v) and k[0].lower() == k[0] and k[0] != "_"]
+
+        model_list = get_available_classification_models(models)
+        quantized_model_list = get_available_classification_models(quantized_models)
+
+        no_pretrained_model = set(['shufflenet_v2_x0_5', 'shufflenet_v2_x1_5', 'shufflenet_v2_x2_0'])
+        quantized_model_list = set(quantized_model_list) - no_pretrained_model
+        # test eager and graph consistency
+        model_list = quantized_model_list
+        # slice need to be fixed in symbolic tracing(https://github.com/pytorch/pytorch/issues/43511)
+        model_list = set(model_list) - {'googlenet', 'inception_v3'}
+        # getattr should not be used as node name(https://github.com/pytorch/pytorch/issues/43522)
+        model_list -= {'shufflenet_v2_x1_0', 'mobilenet_v2'}
+
+        # mobilenet: dropout error RuntimeError: "bernoulli_scalar_cpu_" not implemented for 'QUInt8'
+        # incpetion_v3: looks like there is some problem with AuxLogits
+        quantized_not_working = [('qat', 'mobilenet_v2'),
+                                 ('qat', 'inception_v3'),
+                                 ('static', 'inception_v3')]
+
+        fx_eager_not_matching = ['googlenet',  # because _transform_input is not quantized in eager
+                                 'mobilenetv2']  # because relu6 is replaced as relu in mobilenetv2
+
+        diff_of_quant = {}
+        diff_from_eager = {}
+        modes = ['static', 'qat']
+        options = itertools.product(modes, model_list)
+        for mode, name in options:
+            pretrained = name in quantized_model_list  # load pretrained model to compare with quantized model
+            if name in quantized_model_list:
+                if (mode, name) in quantized_not_working:
+                    eager_quantizable_model = None
+                else:
+                    eager_quantizable_model = quantized_models.__dict__[name](pretrained=True, quantize=False).eval().float()
+            # compare with eager mode quantized model when it is available
+            pretrained = eager_quantizable_model is not None
+            model = models.__dict__[name](pretrained=pretrained).eval().float()
+            check_with_eager = name not in fx_eager_not_matching
+            self._test_model_impl(
+                mode, name, model, eager_quantizable_model,
+                check_with_eager,
+                diff_of_quant, diff_from_eager)
+
+            def print_diffs(diffs):
+                for mode, diffs_for_mode in diffs.items():
+                    print('mode:', mode)
+                    for name, diff in diffs_for_mode.items():
+                        print(name, ':', diff)
+
+            # print('differences between float and quantized')
+            # print_diffs(diff_of_quant)
+            # print('----------------------')
+            # print('differences between graph mode and eager mode')
+            # print_diffs(diff_from_eager)
+            # print('----------------------')
+
+    @skip_if_no_torchvision
+    @skip_if_not_multigpu
+    @unittest.skip('TODO: not working yet due to https://github.com/pytorch/pytorch/issues/43513')
+    def test_resnet18_ddp(self):
+        from torchvision import models
+        from torchvision.models import quantization as quantized_models
+        eager_quantizable_model = quantized_models.__dict__[name](pretrained=True, quantize=False).eval().float()
+        model = models.__dict__[name](pretrained=True).eval().float()
+        self._test_model_impl(
+            'ddp', 'resnet18', model, eager_quantizable_model)
