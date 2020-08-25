@@ -1,0 +1,30 @@
+name: IntegrateFromUpstream_rocm38_internal_testing
+on:
+  schedule:
+    # verified via crontab.guru website. “At 01:00 on Monday.”
+    - cron: '0 1 * * 1'
+jobs:
+  IntegrateFromUpstream_rocm38_internal_testing:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+      - name: Get Current Date
+        id: date
+        run: echo "::set-output name=date::$(date +'%Y-%m-%d')"
+      - name: Fetch and Merge
+        run: |
+          git checkout rocm3.8_internal_testing
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git remote add upstream https://github.com/pytorch/pytorch
+          git fetch upstream master
+          git merge upstream/master 
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v3
+        with:
+          branch: IFU-master-${{ steps.date.outputs.date }}
+          title: IFU-master-${{ steps.date.outputs.date }}
+          assignees: jeffdaily
+          reviewers: jeffdaily
