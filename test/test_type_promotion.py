@@ -971,6 +971,12 @@ class TestTypePromotion(TestCase):
         self.assertEqual(result, a - b, exact_dtype=False)
         self.assertNotEqual(result, a.double() - b, exact_dtype=False)
 
+    def test_atan2_type_promotion(self, device):
+        dtypes = torch.testing.get_all_fp_dtypes(include_half=True)
+        for dtype1, dtype2 in itertools.permutations(dtypes, r=2):
+            x = torch.tensor(1, dtype=dtype1, device=device)
+            y = torch.tensor(2, dtype=dtype2, device=device)
+            self.assertEqual(torch.result_type(x, y), torch.atan2(x, y).dtype)
 
 instantiate_device_type_tests(TestTypePromotion, globals())
 
