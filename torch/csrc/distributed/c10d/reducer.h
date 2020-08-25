@@ -170,10 +170,11 @@ class Reducer {
     // Views into contents for each grad.  Each view will be created with
     // layout (sizes + strides) matching the grad's expected layout
     // ("Gradient Layout Contract" in torch/csrc/autograd/AccumulateGrad.h).
-    // grad.copy_(bucket_views[i]) and
-    // bucket_views[i].copy_(grad)
+    // bucket_views_in[i].copy_(grad) and
+    // grad.copy_(bucket_views_out[i])
     // provide convenient ways to move grad data in/out of contents.
-    std::vector<at::Tensor> bucket_views;
+    std::vector<at::Tensor> bucket_views_in;
+    std::vector<at::Tensor> bucket_views_out;
 
     // Variables that contribute to this bucket replica. Use refcounted value
     // here so that we can easily unflatten the bucket contents into the
@@ -199,14 +200,15 @@ class Reducer {
   // `finalize_backward`. The function call in `initialize_bucket` creates views
   // into the contents tensor for each variable's grad. Views serve as entry
   // points to refer to each grad's data of the flat contents tensor. When it is
-  // called inside 'initialize_buckets', copy_to_bucket_view is true, meaning grad
-  // needs to be copied into bucket_view.
+  // called inside 'initialize_buckets' to inititalize bucket_views_in,
+  // copy_to_bucket_view is true, meaning grad needs to be copied into
+  // bucket_view.
   // The function call in `finalize_backward` happens only if DDP communication
-  // hook was registered to recrate views with the result of `future_work`.
-  // Before `finalize_backward` call, views must be cleared. In this case,
-  // copy_to_bucket_view is false, meaning grad does not need to be copied into
-  // bucket_view, as grad has already been mutated in bucket_view, just let grad
-  // point to bucket_view here.
+  // hook was registered to recrate bucket_views_out with the result of `future_work`.
+  // Before `finalize_backward` call, bucket_views_out must be cleared. In this case,
+  // copy_to_bucket_view is false, meaning grad does not need to be copied
+  // into bucket_view, as grad has already been mutated in bucket_view, just
+  // let grad point to bucket_view here.
   void initialize_bucket_views(
       BucketReplica& replica,
       at::Tensor& contents,
