@@ -645,295 +645,6 @@ void testScheduleDynamicShape2D() {
   testWithSize(37, 11);
 }
 
-static std::unordered_map<const Buf*, TensorAccessBoundsInfo>
-convertBoundsInfoToMap(const std::vector<TensorAccessBoundsInfo>& v) {
-  std::unordered_map<const Buf*, TensorAccessBoundsInfo> res;
-  for (const auto& el : v) {
-    res[el.buf] = el;
-  }
-  return res;
-}
-
-static void verifyConstBounds(
-    const TensorAccessBoundsInfo& access_info,
-    const std::vector<std::pair<int, int>>& ref) {
-  size_t ndim = ref.size();
-  ASSERT_EQ(access_info.start.size(), ndim);
-  ASSERT_EQ(access_info.stop.size(), ndim);
-  for (size_t i = 0; i < ndim; i++) {
-    if (ref[i].first >= 0) { // Negative values are used to skip the check
-      auto start_imm = dynamic_cast<const IntImm*>(access_info.start[i]);
-      ASSERT_TRUE(start_imm);
-      ASSERT_EQ(start_imm->value(), ref[i].first);
-    }
-    if (ref[i].second >= 0) {
-      auto stop_imm = dynamic_cast<const IntImm*>(access_info.stop[i]);
-      ASSERT_TRUE(stop_imm);
-      ASSERT_EQ(stop_imm->value(), ref[i].second);
-    }
-  }
-}
-
-void testBoundsInference_1() {
-  // Verify that bounds inference works for the following example:
-  // for i in 0..100:
-  //   b[i] = a[i]
-  // For this loop bounds inference should yield the following:
-  // {{b, kStore, 0, 99}, {a, kLoad, 0, 99}}
-  KernelScope kernel_scope;
-  ExprHandle n(100);
-  Buffer a(BufHandle("a", {n}, kFloat));
-  Tensor* b =
-      Compute("b", {{n, "i"}}, [&](const VarHandle& i) { return a(i); });
-  LoopNest l({b});
-  const std::vector<TensorAccessBoundsInfo>& bounds_info =
-      inferBounds(l.root_stmt());
-  auto bounds_info_map = convertBoundsInfoToMap(bounds_info);
-
-  // We should have two entries: one for 'b' and one for 'a'.
-  ASSERT_EQ(bounds_info_map.size(), 2);
-  ASSERT_EQ(bounds_info_map.at(a.data()).kind, kLoad);
-  verifyConstBounds(bounds_info_map.at(a.data()), {{0, 99}});
-  ASSERT_EQ(bounds_info_map.at(b->buf()).kind, kStore);
-  verifyConstBounds(bounds_info_map.at(b->buf()), {{0, 99}});
-}
-
-void testBoundsInference_2() {
-  // Verify that bounds inference works for the following example:
-  // for i in 0..n:
-  //   b[i] = a[i]
-  // For this loop bounds inference should yield the following:
-  // {{b, kStore, 0, n-1}, {a, kLoad, 0, n-1}}
-  KernelScope kernel_scope;
-  VarHandle n("n", kInt);
-  Buffer a(BufHandle("a", {n}, kFloat));
-  Tensor* b =
-      Compute("b", {{n, "i"}}, [&](const VarHandle& i) { return a(i); });
-  LoopNest l({b});
-  const std::vector<TensorAccessBoundsInfo>& bounds_info =
-      inferBounds(l.root_stmt());
-  auto bounds_info_map = convertBoundsInfoToMap(bounds_info);
-
-  // We should have two entries: one for 'b' and one for 'a'.
-  ASSERT_EQ(bounds_info_map.size(), 2);
-  ASSERT_EQ(bounds_info_map.at(a.data()).kind, kLoad);
-  verifyConstBounds(bounds_info_map.at(a.data()), {{0, -1}});
-  ASSERT_EQ(bounds_info_map.at(b->buf()).kind, kStore);
-  verifyConstBounds(bounds_info_map.at(b->buf()), {{0, -1}});
-}
-
-void testBoundsInference_3() {
-  // Verify that bounds inference works for the following example:
-  // for i in 0..100:
-  //   b[i] = a[i] * a[i+10]
-  // For this loop bounds inference should yield the following:
-  // {{b, kStore, 0, 99}, {a, kLoad, 0, 109}}
-  KernelScope kernel_scope;
-  ExprHandle n(100);
-  Buffer a(BufHandle("a", {n + 10}, kFloat));
-  Tensor* b = Compute(
-      "b", {{n, "i"}}, [&](const VarHandle& i) { return a(i) * a(i + 10); });
-  LoopNest l({b});
-  const std::vector<TensorAccessBoundsInfo>& bounds_info =
-      inferBounds(l.root_stmt());
-  auto bounds_info_map = convertBoundsInfoToMap(bounds_info);
-
-  // We should have two entries: one for 'b' and one for 'a'.
-  ASSERT_EQ(bounds_info_map.size(), 2);
-  ASSERT_EQ(bounds_info_map.at(a.data()).kind, kLoad);
-  verifyConstBounds(bounds_info_map.at(a.data()), {{0, 109}});
-  ASSERT_EQ(bounds_info_map.at(b->buf()).kind, kStore);
-  verifyConstBounds(bounds_info_map.at(b->buf()), {{0, 99}});
-}
-
-void testBoundsInference_4() {
-  // Verify that bounds inference works for the following example:
-  //
-  // for y in 0..200:
-  //   for x in 0..320:
-  //     b[y,x] = x*y
-  // for y in 0..200:
-  //   for x in 0..320:
-  //     c[y,x] = a[y,x] * b[y,x]
-  KernelScope kernel_scope;
-  ExprHandle W(320);
-  ExprHandle H(200);
-  Buffer a(BufHandle("a", {H, W}, kFloat));
-  Tensor* b = Compute(
-      "b", {{H, "y"}, {W, "x"}}, [&](const VarHandle& y, const VarHandle& x) {
-        return x * y;
-      });
-  Tensor* c = Compute(
-      "c", {{H, "y"}, {W, "x"}}, [&](const VarHandle& y, const VarHandle& x) {
-        return a(y, x) * b->call(y, x);
-      });
-  LoopNest l({c});
-  std::vector<For*> loops = l.getLoopStmtsFor(c);
-  Stmt* body = l.getLoopBodyFor(c);
-  {
-    // Infer bounds on the top-level loop scope
-    const std::vector<TensorAccessBoundsInfo>& bounds_info =
-        inferBounds(loops[0]);
-    auto bounds_info_map = convertBoundsInfoToMap(bounds_info);
-
-    ASSERT_EQ(bounds_info_map.at(a.data()).kind, kLoad);
-    verifyConstBounds(bounds_info_map.at(a.data()), {{0, 199}, {0, 319}});
-
-    ASSERT_EQ(bounds_info_map.at(b->buf()).kind, kLoad);
-    verifyConstBounds(bounds_info_map.at(b->buf()), {{0, 199}, {0, 319}});
-
-    ASSERT_EQ(bounds_info_map.at(c->buf()).kind, kStore);
-    verifyConstBounds(bounds_info_map.at(c->buf()), {{0, 199}, {0, 319}});
-  }
-  {
-    // Infer bounds on the inner loop scope
-    const std::vector<TensorAccessBoundsInfo>& bounds_info =
-        inferBounds(loops[1]);
-    auto bounds_info_map = convertBoundsInfoToMap(bounds_info);
-
-    ASSERT_EQ(bounds_info_map.at(a.data()).kind, kLoad);
-    verifyConstBounds(bounds_info_map.at(a.data()), {{-1, -1}, {0, 319}});
-
-    ASSERT_EQ(bounds_info_map.at(b->buf()).kind, kLoad);
-    verifyConstBounds(bounds_info_map.at(b->buf()), {{-1, -1}, {0, 319}});
-
-    ASSERT_EQ(bounds_info_map.at(c->buf()).kind, kStore);
-    verifyConstBounds(bounds_info_map.at(c->buf()), {{-1, -1}, {0, 319}});
-  }
-  {
-    // Infer bounds on the inner loop body's scope
-    const std::vector<TensorAccessBoundsInfo>& bounds_info = inferBounds(body);
-    auto bounds_info_map = convertBoundsInfoToMap(bounds_info);
-
-    ASSERT_EQ(bounds_info_map.at(a.data()).kind, kLoad);
-    verifyConstBounds(bounds_info_map.at(a.data()), {{-1, -1}, {-1, -1}});
-
-    ASSERT_EQ(bounds_info_map.at(b->buf()).kind, kLoad);
-    verifyConstBounds(bounds_info_map.at(b->buf()), {{-1, -1}, {-1, -1}});
-
-    ASSERT_EQ(bounds_info_map.at(c->buf()).kind, kStore);
-    verifyConstBounds(bounds_info_map.at(c->buf()), {{-1, -1}, {-1, -1}});
-  }
-}
-
-void testBoundsInference_5() {
-  // Verify that bounds inference works for the following example:
-  // for i in 0..100:
-  //   b[i] = a[i]
-  //
-  // ==> split ==>
-  //
-  // for i_outer in 0..100/16:
-  //   for i_inner in 0..16:
-  //     b[i_outer * 16 + i_inner] = a[i_outer * 16 + i_inner]
-  // for i_tail in 0..100%16:
-  //   b[i_tail + (100/16)*16] = a[i_tail + (100/16)*16];
-  KernelScope kernel_scope;
-  ExprHandle n(100);
-  Buffer a(BufHandle("a", {n}, kFloat));
-  Tensor* b =
-      Compute("b", {{n, "i"}}, [&](const VarHandle& i) { return a(i); });
-  LoopNest l({b});
-
-  For* outer;
-  For* inner;
-  For* tail;
-  std::vector<For*> loops = l.getLoopStmtsFor(b);
-  l.splitWithTail(loops[0], 16, &outer, &inner, &tail);
-
-  {
-    // Verify inferred bounds for the outer loop
-    const std::vector<TensorAccessBoundsInfo>& bounds_info = inferBounds(outer);
-    auto bounds_info_map = convertBoundsInfoToMap(bounds_info);
-    ASSERT_EQ(bounds_info_map.size(), 2);
-    ASSERT_EQ(bounds_info_map.at(a.data()).kind, kLoad);
-    verifyConstBounds(bounds_info_map.at(a.data()), {{0, 95}});
-    ASSERT_EQ(bounds_info_map.at(b->buf()).kind, kStore);
-    verifyConstBounds(bounds_info_map.at(b->buf()), {{0, 95}});
-  }
-  {
-    // Verify inferred bounds for the tail loop
-    const std::vector<TensorAccessBoundsInfo>& bounds_info = inferBounds(tail);
-    auto bounds_info_map = convertBoundsInfoToMap(bounds_info);
-    ASSERT_EQ(bounds_info_map.at(a.data()).kind, kLoad);
-    verifyConstBounds(bounds_info_map.at(a.data()), {{96, 99}});
-    ASSERT_EQ(bounds_info_map.at(b->buf()).kind, kStore);
-    verifyConstBounds(bounds_info_map.at(b->buf()), {{96, 99}});
-  }
-}
-
-void testBoundsInference_6() {
-  // Verify that bounds inference works for the following example:
-  //
-  // for y in 0..200:
-  //   for x in 0..320:
-  //     b[y,x] = x*y
-  // for y in 0..20:
-  //   for x in 0..32:
-  //     c[y,x] = a[y+100,x+100] * b[y*2,x*5]
-  KernelScope kernel_scope;
-  ExprHandle W(320);
-  ExprHandle H(200);
-  ExprHandle CW(32);
-  ExprHandle CH(20);
-  Buffer a(BufHandle("a", {H, W}, kFloat));
-  Tensor* b = Compute(
-      "b", {{H, "y"}, {W, "x"}}, [&](const VarHandle& y, const VarHandle& x) {
-        return x * y;
-      });
-  Tensor* c = Compute(
-      "c", {{CH, "y"}, {CW, "x"}}, [&](const VarHandle& y, const VarHandle& x) {
-        return a(y + 100, x + 100) * b->call(y * 2, x * 5);
-      });
-  LoopNest l({c});
-  std::vector<For*> loops = l.getLoopStmtsFor(c);
-  Stmt* body = l.getLoopBodyFor(c);
-  {
-    // Infer bounds on the top-level loop scope
-    const std::vector<TensorAccessBoundsInfo>& bounds_info =
-        inferBounds(loops[0]);
-    auto bounds_info_map = convertBoundsInfoToMap(bounds_info);
-
-    ASSERT_EQ(bounds_info_map.at(a.data()).kind, kLoad);
-    verifyConstBounds(bounds_info_map.at(a.data()), {{100, 119}, {100, 131}});
-
-    ASSERT_EQ(bounds_info_map.at(b->buf()).kind, kLoad);
-    verifyConstBounds(bounds_info_map.at(b->buf()), {{0, 38}, {0, 155}});
-
-    ASSERT_EQ(bounds_info_map.at(c->buf()).kind, kStore);
-    verifyConstBounds(bounds_info_map.at(c->buf()), {{0, 19}, {0, 31}});
-  }
-  {
-    // Infer bounds on the inner loop scope
-    const std::vector<TensorAccessBoundsInfo>& bounds_info =
-        inferBounds(loops[1]);
-    auto bounds_info_map = convertBoundsInfoToMap(bounds_info);
-
-    ASSERT_EQ(bounds_info_map.at(a.data()).kind, kLoad);
-    verifyConstBounds(bounds_info_map.at(a.data()), {{-1, -1}, {100, 131}});
-
-    ASSERT_EQ(bounds_info_map.at(b->buf()).kind, kLoad);
-    verifyConstBounds(bounds_info_map.at(b->buf()), {{-1, -1}, {0, 155}});
-
-    ASSERT_EQ(bounds_info_map.at(c->buf()).kind, kStore);
-    verifyConstBounds(bounds_info_map.at(c->buf()), {{-1, -1}, {0, 31}});
-  }
-  {
-    // Infer bounds on the inner loop body's scope
-    const std::vector<TensorAccessBoundsInfo>& bounds_info = inferBounds(body);
-    auto bounds_info_map = convertBoundsInfoToMap(bounds_info);
-
-    ASSERT_EQ(bounds_info_map.at(a.data()).kind, kLoad);
-    verifyConstBounds(bounds_info_map.at(a.data()), {{-1, -1}, {-1, -1}});
-
-    ASSERT_EQ(bounds_info_map.at(b->buf()).kind, kLoad);
-    verifyConstBounds(bounds_info_map.at(b->buf()), {{-1, -1}, {-1, -1}});
-
-    ASSERT_EQ(bounds_info_map.at(c->buf()).kind, kStore);
-    verifyConstBounds(bounds_info_map.at(c->buf()), {{-1, -1}, {-1, -1}});
-  }
-}
-
 void testLoopNestComputeAt_1() {
   // Verify that compute_at works on the following example:
   //
@@ -1815,6 +1526,446 @@ void testOuterLoopVectorization() {
   Block* for_body = for_loop->body();
   ASSERT_EQ(for_body->nstmts(), 1);
   ASSERT_EQ(dynamic_cast<For*>(for_body->front()), nullptr);
+}
+
+namespace {
+
+std::string constantUpperBoundLoopIR(int upper_bound_val) {
+  KernelScope kernel_scope;
+  ExprHandle upper_bound(upper_bound_val);
+  Tensor* A = Compute(
+      "A", {{upper_bound, "x"}}, [&](const VarHandle& x) { return x * 2; });
+  LoopNest l({A});
+  std::vector<For*> loops = l.getLoopStmtsFor(A);
+  Stmt* unrolled = nullptr;
+  LoopNest::unroll(loops[0], &unrolled);
+  std::ostringstream oss;
+  oss << *unrolled;
+  return oss.str();
+}
+
+} // namespace
+
+void testUnroll() {
+  const std::string actual = constantUpperBoundLoopIR(3);
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: A[0] = 0;
+# CHECK: A[1] = 2;
+# CHECK: A[2] = 4)IR";
+
+  torch::jit::testing::FileCheck().run(verification_pattern, actual);
+}
+
+void testUnrollOuter() {
+  KernelScope kernel_scope;
+  ExprHandle outer_bound(3);
+  ExprHandle inner_bound(4);
+  Tensor* A = Compute(
+      "A",
+      {{outer_bound, "x"}, {inner_bound, "y"}},
+      [&](const VarHandle& x, const VarHandle& y) { return x + y; });
+  LoopNest l({A});
+  std::vector<For*> loops = l.getLoopStmtsFor(A);
+  Stmt* unrolled = nullptr;
+  LoopNest::unroll(loops[0], &unrolled);
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int y = 0; y < 4; y++) {
+# CHECK: A[0, y] = y;
+# CHECK: }
+# CHECK: for (int y = 0; y < 4; y++) {
+# CHECK: A[1, y] = y + 1;
+# CHECK: }
+# CHECK: for (int y = 0; y < 4; y++) {
+# CHECK: A[2, y] = y + 2;
+# CHECK: })IR";
+
+  std::ostringstream oss;
+  oss << *unrolled;
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
+void testUnrollInner() {
+  KernelScope kernel_scope;
+  ExprHandle outer_bound(3);
+  ExprHandle inner_bound(4);
+  Tensor* A = Compute(
+      "A",
+      {{outer_bound, "x"}, {inner_bound, "y"}},
+      [&](const VarHandle& x, const VarHandle& y) { return x + y; });
+  LoopNest l({A});
+  std::vector<For*> loops = l.getLoopStmtsFor(A);
+  Stmt* unrolled = nullptr;
+  LoopNest::unroll(
+      static_cast<For*>(loops[0]->body()->stmts().front()), &unrolled);
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int x = 0; x < 3; x++) {
+# CHECK: A[x, 0] = x;
+# CHECK: A[x, 1] = x + 1;
+# CHECK: A[x, 2] = x + 2;
+# CHECK: A[x, 3] = x + 3;
+# CHECK: })IR";
+
+  std::ostringstream oss;
+  oss << *loops[0];
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
+void testUnrollMultipleStatements() {
+  KernelScope kernel_scope;
+  const int kTotalSize = 3;
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kInt);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kInt);
+
+  VarHandle x("x", kInt);
+  auto f = For::make(
+      x,
+      0,
+      kTotalSize,
+      Block::make({Store::make(a_buf, {x}, x * 2),
+                   Store::make(b_buf, {x}, Load::make(a_buf, {x}, 1))}));
+  Block::make({f});
+  Stmt* unrolled = nullptr;
+  LoopNest::unroll(f, &unrolled);
+  std::ostringstream oss;
+  oss << *unrolled;
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: A[0] = 0;
+# CHECK: B[0] = A[0];
+# CHECK: A[1] = 2;
+# CHECK: B[1] = A[1];
+# CHECK: A[2] = 4
+# CHECK: B[2] = A[2];)IR";
+
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
+void testUnrollEmpty() {
+  const std::string actual = constantUpperBoundLoopIR(0);
+  const std::string& verification_pattern = R"IR(
+# CHECK-NOT: A[
+  )IR";
+
+  torch::jit::testing::FileCheck().run(verification_pattern, actual);
+}
+
+void testNoUnroll() {
+  KernelScope kernel_scope;
+  VarHandle upper_bound("N", kInt);
+  Tensor* A = Compute(
+      "A", {{upper_bound, "x"}}, [&](const VarHandle& x) { return x * 2; });
+  LoopNest l({A});
+  std::vector<For*> loops = l.getLoopStmtsFor(A);
+  Stmt* unrolled = nullptr;
+  ASSERT_THROWS_WITH(
+      LoopNest::unroll(loops[0], &unrolled), "non-constant loop");
+}
+
+void testUnrollWithLet() {
+  KernelScope kernel_scope;
+  const int kTotalSize = 3;
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kInt);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kInt);
+
+  VarHandle e("e", kInt);
+  VarHandle x("x", kInt);
+  auto f = For::make(
+      x,
+      0,
+      kTotalSize,
+      Block::make({Let::make(e, 7),
+                   Store::make(a_buf, {x}, e),
+                   Store::make(b_buf, {x}, e + 1)}));
+  Block::make({f});
+  Stmt* unrolled = nullptr;
+  LoopNest::unroll(f, &unrolled);
+  std::ostringstream oss;
+  oss << *unrolled;
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: int e = 7;
+# CHECK: A[0] = e;
+# CHECK: B[0] = e + 1;
+# CHECK: A[1] = e;
+# CHECK: B[1] = e + 1;
+# CHECK: A[2] = e;
+# CHECK: B[2] = e + 1;)IR";
+
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+
+  std::vector<int> a_v(kTotalSize, 0);
+  std::vector<int> b_v(kTotalSize, 0);
+  SimpleIREvaluator eval(unrolled, a_buf, b_buf);
+  eval(a_v, b_v);
+  for (int i = 0; i < kTotalSize; ++i) {
+    ASSERT_EQ(a_v[i], 7);
+    ASSERT_EQ(b_v[i], 8);
+  }
+}
+
+void testNormalizeStartPositive() {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int x = 50; x < 100; x++) {
+  //     A[x] = B[x];
+  //     B[x] = x * 2;
+  //   }
+  const int kTotalSize = 50;
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kInt);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kInt);
+  VarHandle x("x", kInt);
+  auto for_body =
+      Block::make({Store::make(a_buf, {x}, Load::make(kInt, b_buf, {x}, 1), 1),
+                   Store::make(b_buf, {x}, x * 2)});
+  auto for_stmt = For::make(x, 50, 100, for_body);
+  Block::make({for_stmt});
+
+  For* normalized = nullptr;
+  LoopNest::normalize(for_stmt, &normalized);
+
+  auto result = IRSimplifier::simplify(normalized);
+  std::ostringstream oss;
+  oss << *result;
+  const std::string& expected_ir =
+      R"IR(
+        # CHECK: for (int x = 0; x < 50; x++) {
+        # CHECK:   A[x + 50] = B[x + 50];
+        # CHECK:   B[x + 50] = 2 * (x + 50);
+      )IR";
+  torch::jit::testing::FileCheck().run(expected_ir, oss.str());
+}
+
+void testNormalizeStartNegative() {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int x = -50; x < 100; x++) {
+  //     A[x + 50] = B[x + 50];
+  //     B[x + 50] = x * 2;
+  //   }
+  const int kTotalSize = 150;
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kInt);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kInt);
+  VarHandle x("x", kInt);
+  auto for_body = Block::make(
+      {Store::make(a_buf, {x + 50}, Load::make(kInt, b_buf, {x + 50}, 1), 1),
+       Store::make(b_buf, {x + 50}, x * 2)});
+  auto for_stmt = For::make(x, -50, 100, for_body);
+  Block::make({for_stmt});
+
+  For* normalized = nullptr;
+  LoopNest::normalize(for_stmt, &normalized);
+
+  auto result = IRSimplifier::simplify(normalized);
+  std::ostringstream oss;
+  oss << *result;
+  const std::string& expected_ir =
+      R"IR(
+        # CHECK: for (int x = 0; x < 150; x++) {
+        # CHECK:   A[x] = B[x];
+        # CHECK:   B[x] = 2 * (x - 50);
+      )IR";
+  torch::jit::testing::FileCheck().run(expected_ir, oss.str());
+}
+
+void testNormalizeStartZero() {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int x = 0; x < 100; x++) {
+  //     A[x] = B[x];
+  //     B[x] = x * 2;
+  //   }
+  // Should not be modified.
+
+  const int kTotalSize = 100;
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kInt);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kInt);
+  VarHandle x("x", kInt);
+  auto for_body =
+      Block::make({Store::make(a_buf, {x}, Load::make(kInt, b_buf, {x}, 1), 1),
+                   Store::make(b_buf, {x}, x * 2)});
+  auto for_stmt = For::make(x, 0, 100, for_body);
+  Block::make({for_stmt});
+
+  For* normalized = nullptr;
+  LoopNest::normalize(for_stmt, &normalized);
+
+  auto result = IRSimplifier::simplify(normalized);
+  std::ostringstream oss;
+  oss << *result;
+  const std::string& expected_ir =
+      R"IR(
+        # CHECK: for (int x = 0; x < 100; x++) {
+        # CHECK:   A[x] = B[x];
+        # CHECK:   B[x] = 2 * x;
+      )IR";
+  torch::jit::testing::FileCheck().run(expected_ir, oss.str());
+}
+
+void testNormalizeStartVariable() {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int x = y; x < 100; x++) {
+  //     A[x] = B[x];
+  //     B[x] = x * 2;
+  //   }
+  // Should not be modified.
+
+  const int kTotalSize = 100;
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kInt);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kInt);
+  VarHandle x("x", kInt);
+  VarHandle y("y", kInt);
+  auto for_body =
+      Block::make({Store::make(a_buf, {x}, Load::make(kInt, b_buf, {x}, 1), 1),
+                   Store::make(b_buf, {x}, x * 2)});
+  auto for_stmt = For::make(x, y, 100, for_body);
+  Block::make({for_stmt});
+
+  For* normalized = nullptr;
+  LoopNest::normalize(for_stmt, &normalized);
+
+  auto result = IRSimplifier::simplify(normalized);
+  std::ostringstream oss;
+  oss << *result;
+  const std::string& expected_ir =
+      R"IR(
+        # CHECK: for (int x = y; x < 100; x++) {
+        # CHECK:   A[x] = B[x];
+        # CHECK:   B[x] = 2 * x;
+      )IR";
+  torch::jit::testing::FileCheck().run(expected_ir, oss.str());
+}
+
+void testNormalizeOnNestedOuterLoop() {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int x = 50; x < 100; x++) {
+  //     for (int y = 10; y < 100; y++) {
+  //       A[x] = A[x] + B[y] + y * 2;
+  //     }
+  //   }
+
+  BufHandle a_buf("A", {ExprHandle(50)}, kInt);
+  BufHandle b_buf("B", {ExprHandle(100)}, kInt);
+  VarHandle x("x", kInt);
+  VarHandle y("y", kInt);
+  auto inner_for_body = Store::make(
+      a_buf,
+      {x},
+      Load::make(a_buf, {x}, 1) + Load::make(b_buf, {y}, 1) + y * 2,
+      1);
+  auto inner_for = For::make(y, 10, 100, inner_for_body);
+  auto for_stmt = For::make(x, 50, 100, inner_for);
+  Block::make({for_stmt});
+
+  For* normalized = nullptr;
+  LoopNest::normalize(for_stmt, &normalized);
+
+  auto result = IRSimplifier::simplify(normalized);
+  std::ostringstream oss;
+  oss << *result;
+  const std::string& expected_ir =
+      R"IR(
+        # CHECK: for (int x = 0; x < 50; x++) {
+        # CHECK:   for (int y = 10; y < 100; y++) {
+        # CHECK:     A[x + 50] = ((B[y]) + (A[x + 50])) + 2 * y;
+      )IR";
+  torch::jit::testing::FileCheck().run(expected_ir, oss.str());
+}
+
+void testNormalizeOnNestedInnerLoop() {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int x = 50; x < 100; x++) {
+  //     for (int y = 10; y < 100; y++) {
+  //       A[x] = A[x] + B[y] + y * 2;
+  //     }
+  //   }
+
+  BufHandle a_buf("A", {ExprHandle(50)}, kInt);
+  BufHandle b_buf("B", {ExprHandle(100)}, kInt);
+  VarHandle x("x", kInt);
+  VarHandle y("y", kInt);
+  auto inner_for_body = Store::make(
+      a_buf,
+      {x},
+      Load::make(a_buf, {x}, 1) + Load::make(b_buf, {y}, 1) + y * 2,
+      1);
+  auto inner_for = For::make(y, 10, 100, inner_for_body);
+  auto for_stmt = For::make(x, 50, 100, inner_for);
+  Block::make({for_stmt});
+
+  For* normalized = nullptr;
+  LoopNest::normalize(inner_for, &normalized);
+
+  auto result = IRSimplifier::simplify(for_stmt);
+  std::ostringstream oss;
+  oss << *result;
+  const std::string& expected_ir =
+      R"IR(
+        # CHECK: for (int x = 50; x < 100; x++) {
+        # CHECK:   for (int y = 0; y < 90; y++) {
+        # CHECK:     A[x] = (((B[y + 10]) + (A[x])) + 2 * y) + 20;
+      )IR";
+  torch::jit::testing::FileCheck().run(expected_ir, oss.str());
+}
+
+void testNormalizeAndSplitWithTail() {
+  KernelScope kernel_scope;
+
+  // Create a dummy tensor to construct LoopNest.
+  ExprHandle n(100);
+  Buffer a(BufHandle("a", {n}, kFloat));
+  Tensor* b =
+      Compute("b", {{n, "i"}}, [&](const VarHandle& i) { return a(i); });
+  LoopNest l({b});
+
+  // Input IR:
+  //   for (int x = 5; x < 10; x++) {
+  //     A[x] = x * 2;
+  //   }
+  const int kTotalSize = 5;
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kInt);
+  VarHandle x("x", kInt);
+  auto for_stmt = For::make(x, 5, 10, Store::make(a_buf, {x}, x * 2));
+  Block::make({for_stmt});
+
+  For* normalized = nullptr;
+  LoopNest::normalize(for_stmt, &normalized);
+
+  For* x_outer;
+  For* x_inner;
+  For* x_tail;
+  l.splitWithTail(normalized, 10, &x_outer, &x_inner, &x_tail);
+
+  auto x_outer_result = IRSimplifier::simplify(x_outer);
+  std::ostringstream oss_outer;
+  oss_outer << *x_outer_result;
+  const std::string& expected_outer_ir =
+      R"IR(
+        # CHECK: {
+        # CHECK: }
+      )IR";
+  torch::jit::testing::FileCheck().run(expected_outer_ir, oss_outer.str());
+
+  auto x_tail_result = IRSimplifier::simplify(x_tail);
+  std::ostringstream oss_tail;
+  oss_tail << *x_tail_result;
+  const std::string& expected_tail_ir =
+      R"IR(
+        # CHECK: for (int x_tail = 0; x_tail < 5; x_tail++) {
+        # CHECK:   A[x_tail + 5] = 2 * (x_tail + 5);
+      )IR";
+  torch::jit::testing::FileCheck().run(expected_tail_ir, oss_tail.str());
 }
 
 } // namespace jit

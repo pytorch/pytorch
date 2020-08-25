@@ -29,8 +29,8 @@ struct GuardInserter {
   void insertGuards(Block* b) {
     for (auto it = b->nodes().begin(); it != b->nodes().end(); it++) {
       auto n = *it;
-      if (n->kind() == prim::profile && n->outputs().size() == 1) {
-        auto pttp = n->output()->type()->cast<TensorType>();
+      if (n->kind() == prim::profile) {
+        auto pttp = n->ty(attr::profiled_type)->cast<TensorType>();
         if (pttp) {
           auto guard = graph_->create(prim::Guard, {n->input()}, 1);
           auto go = guard->output();

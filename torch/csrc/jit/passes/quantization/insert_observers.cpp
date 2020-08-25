@@ -124,11 +124,24 @@ class ModuleCloneHelper {
     size_t N = type->numAttributes();
     for (size_t i = 0; i < N; ++i) {
       IValue s = module._ivalue()->getSlot(i);
-      if (type->getAttribute(i)->is_module()) {
+      std::string attr_name = type->getAttributeName(i);
+      TypePtr attr_type = type->getAttribute(i);
+      if (attr_type->is_module()) {
         const Module& orig = Module(s.toObject());
         Module cloned =
             clone_impl(orig, module_qconfig_map, type_remap, inplace, memo);
-        r.register_module(type->getAttributeName(i), cloned);
+
+        // NOTE: why do we need to manually setattr on object instead of using
+        // register_module here? because the attr can be a module interface
+        // type and hold a Module object still. register_module will not let us
+        // correctly set up the type for this attr, so we had to do this
+        // manually. In the case it's an interface type, the type will be shared
+        // by the new cloned instance in the same compilation unit bc it only
+        // contains a list of functionSchema
+        r.type()->addOrCheckAttribute(
+            attr_name,
+            attr_type->cast<ClassType>() ? cloned.type() : attr_type);
+        r._ivalue()->setAttr(attr_name, cloned._ivalue());
       } else {
         // we'll deepcopy the IValue in non inplace option
         r.register_attribute(
@@ -337,7 +350,7 @@ class InsertObserversHelper {
       Module& module,
       const std::string& method_name);
 
-  bool valueNeedsToBeQuantized(Value* v);
+  bool valueNeedsToBeQuantized(Value* v, const QConfig& qconfig);
 
   bool isObserved(
       Value* v,
@@ -1144,7 +1157,9 @@ void InsertObserversHelper::analyze(
   fillPassThroughValueMap(graph);
 }
 
-bool InsertObserversHelper::valueNeedsToBeQuantized(Value* v) {
+bool InsertObserversHelper::valueNeedsToBeQuantized(
+    Value* v,
+    const QConfig& qconfig) {
   if (isBiasOfConvOrLinear(v) ||
       !(v->type()->isSubtypeOf(TensorType::get()) ||
         v->type()->isSubtypeOf(ListType::ofTensors()))) {
@@ -1156,6 +1171,16 @@ bool InsertObserversHelper::valueNeedsToBeQuantized(Value* v) {
     // Check whether producer is quantizable
     if (nodeQuantizable(v->node()) || isPropagateQuantOp(v->node())) {
       return true;
+    }
+  }
+  if (quant_type_ == QuantType::DYNAMIC) {
+    // Check the dtype of the observer module.
+    Module observer_module = getObserverModuleFor(v, qconfig);
+    auto scalar_type = observer_module.attr("dtype");
+    // For inputs with Fp16 type that are not-weights we don't observer them for
+    // dynamic quantization.
+    if (scalar_type == at::ScalarType::Half && !isWeight(v)) {
+      return false;
     }
   }
   // Check whether node input value is quantizable
@@ -1185,7 +1210,7 @@ void InsertObserversHelper::fillValueObserverMap(
   }
   auto qconfig = *qconfig_opt;
   for (auto* v : graph->inputs()) {
-    if (valueNeedsToBeQuantized(v)) {
+    if (valueNeedsToBeQuantized(v, qconfig)) {
       GRAPH_DEBUG("Recording observer for ", v->debugName());
       GRAPH_DUMP("In graph:", v->owningGraph());
       observer_for_value_[v] = getObserverModuleFor(v, qconfig);
@@ -1198,7 +1223,7 @@ void InsertObserversHelper::fillValueObserverMap(
     blocks_to_visit.pop();
     for (Node* n : b->nodes()) {
       for (Value* v : n->outputs()) {
-        if (valueNeedsToBeQuantized(v)) {
+        if (valueNeedsToBeQuantized(v, qconfig)) {
           GRAPH_DEBUG("Recording observer for ", v->debugName());
           GRAPH_DUMP("In graph:", v->owningGraph());
           observer_for_value_[v] = getObserverModuleFor(v, qconfig);

@@ -32,13 +32,14 @@
 #include <torch/csrc/jit/passes/onnx.h>
 #include <torch/csrc/jit/passes/onnx/cast_all_constant_to_floating.h>
 #include <torch/csrc/jit/passes/onnx/constant_fold.h>
+#include <torch/csrc/jit/passes/onnx/eliminate_unused_items.h>
 #include <torch/csrc/jit/passes/onnx/eval_peephole.h>
-#include <torch/csrc/jit/passes/onnx/fixup_onnx_conditionals.h>
-#include <torch/csrc/jit/passes/onnx/fixup_onnx_loop.h>
+#include <torch/csrc/jit/passes/onnx/fixup_onnx_controlflow.h>
 #include <torch/csrc/jit/passes/onnx/function_substitution.h>
 #include <torch/csrc/jit/passes/onnx/peephole.h>
 #include <torch/csrc/jit/passes/onnx/prepare_division_for_onnx.h>
 #include <torch/csrc/jit/passes/onnx/prepare_inplace_ops_for_onnx.h>
+#include <torch/csrc/jit/passes/onnx/preprocess_for_onnx.h>
 #include <torch/csrc/jit/passes/onnx/scalar_type_analysis.h>
 #include <torch/csrc/jit/passes/onnx/unpack_quantized_weights.h>
 #include <torch/csrc/jit/passes/peephole.h>
@@ -48,6 +49,7 @@
 #include <torch/csrc/jit/passes/quantization/insert_observers.h>
 #include <torch/csrc/jit/passes/quantization/insert_quant_dequant.h>
 #include <torch/csrc/jit/passes/quantization/quantization_type.h>
+#include <torch/csrc/jit/passes/reconstruct_scopes.h>
 #include <torch/csrc/jit/passes/remove_dropout.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
 #include <torch/csrc/jit/passes/remove_inplace_ops.h>
@@ -72,6 +74,7 @@
 #include <torch/csrc/jit/runtime/jit_exception.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/print_handler.h>
+#include <torch/csrc/jit/runtime/static/init.h>
 #include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/tensorexpr/execution_counter.h>
@@ -144,6 +147,7 @@ void initJITBindings(PyObject* module) {
              bool fixed_batch_size) {
             return PeepholeOptimizeONNX(graph, opset_version, fixed_batch_size);
           })
+      .def("_jit_pass_onnx_preprocess", PreprocessForONNX)
       .def(
           "_jit_pass_onnx_eval_peephole",
           [](std::shared_ptr<Graph>& graph,
@@ -164,6 +168,16 @@ void initJITBindings(PyObject* module) {
                 graph->block(),
                 paramsDict,
                 opset_version); // overload resolution
+            return paramsDict;
+          },
+          pybind11::return_value_policy::move)
+      .def(
+          "_jit_pass_onnx_eliminate_unused_items",
+          [](std::shared_ptr<Graph>& graph,
+             std::map<std::string, IValue>& paramsDict) {
+            EliminateUnusedItemsONNX(
+                graph->block(),
+                paramsDict); // overload resolution
             return paramsDict;
           },
           pybind11::return_value_policy::move)
@@ -244,11 +258,14 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_fold_convbn", &FoldConvBatchNorm)
       .def(
           "_freeze_module",
-          [](Module& module, std::vector<std::string>& preservedAttrs) {
-            return freeze_module(module, preservedAttrs);
+          [](Module& module,
+             std::vector<std::string>& preservedAttrs,
+             bool freezeInterfaces) {
+            return freeze_module(module, preservedAttrs, freezeInterfaces);
           },
           py::arg("module"),
-          py::arg("preservedAttrs") = std::vector<std::string>())
+          py::arg("preservedAttrs") = std::vector<std::string>(),
+          py::arg("freezeInterfaces") = true)
       .def("_jit_pass_fuse_linear", &FuseLinear)
       .def(
           "_jit_pass_fuse_add_relu",
@@ -290,6 +307,16 @@ void initJITBindings(PyObject* module) {
             subgraph_rewriter.RegisterRewritePattern(pattern, fused_node_name);
             subgraph_rewriter.runOnGraph(g);
           })
+      .def(
+          "_jit_pass_reconstruct_scopes",
+          [](script::Module& module,
+             std::shared_ptr<Graph>& g,
+             const std::string& prefix) {
+            ReconstructScopes(module, *g, prefix);
+          },
+          py::arg("module"),
+          py::arg("graph"),
+          py::arg("prefix") = "top")
       .def(
           "_jit_pass_remove_inplace_ops",
           [](std::shared_ptr<Graph> g) { return RemoveInplaceOps(g); })
@@ -354,6 +381,11 @@ void initJITBindings(PyObject* module) {
           })
       .def("_jit_pass_loop_unrolling", UnrollLoops)
       .def(
+          "_jit_pass_constant_propagation_immutable_types",
+          [](std::shared_ptr<Graph>& g) {
+            return ConstantPropagationImmutableTypes(g);
+          })
+      .def(
           "_jit_pass_constant_propagation",
           [](std::shared_ptr<Graph>& g) { return ConstantPropagation(g); })
       .def("_jit_pass_erase_shape_information", EraseShapeInformation)
@@ -404,8 +436,7 @@ void initJITBindings(PyObject* module) {
                 python::unflatten(vars, desc));
           })
       .def("_jit_pass_onnx_block", BlockToONNX)
-      .def("_jit_pass_fixup_onnx_loops", FixupONNXLoops)
-      .def("_jit_pass_fixup_onnx_conditionals", FixupONNXConditionals)
+      .def("_jit_pass_fixup_onnx_controlflow_node", FixupONNXControlflowNode)
       .def("_jit_pass_canonicalize_graph_fuser_ops", CanonicalizeOps)
       .def("_jit_pass_decompose_ops", DecomposeOps)
       .def("_jit_pass_specialize_autogradzero", specializeAutogradZero)
@@ -534,6 +565,16 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_remove_dropout",
           [](script::Module& module) { return removeDropout(module); })
+      .def(
+          "_jit_pass_transform_conv1d_to_conv2d",
+          [](std::shared_ptr<Graph>& graph) {
+            return transformConv1dToConv2d(graph);
+          })
+      .def(
+          "_jit_pass_transform_conv1d_to_conv2d",
+          [](script::Module& module) {
+            return transformConv1dToConv2d(module);
+          })
       .def(
           "_jit_pass_insert_prepacked_ops",
           [](std::shared_ptr<Graph>& graph) {
@@ -720,6 +761,9 @@ void initJITBindings(PyObject* module) {
           MobileOptimizerType::INSERT_FOLD_PREPACK_OPS)
       .value("REMOVE_DROPOUT", MobileOptimizerType::REMOVE_DROPOUT)
       .value("FUSE_ADD_RELU", MobileOptimizerType::FUSE_ADD_RELU)
+      .value(
+          "HOIST_CONV_PACKED_PARAMS",
+          MobileOptimizerType::HOIST_CONV_PACKED_PARAMS)
       .export_values();
 
   // This allows PyTorchStreamReader to read from a Python buffer. It requires
@@ -938,6 +982,14 @@ void initJITBindings(PyObject* module) {
             c10::make_intrusive<c10::ivalue::Future>(PyObjectType::get()));
       }))
       .def(
+          "done",
+          // Intentionally not releasing GIL
+          &PythonFutureWrapper::done)
+      .def(
+          "value",
+          &PythonFutureWrapper::value,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
           "wait",
           &PythonFutureWrapper::wait,
           py::call_guard<py::gil_scoped_release>())
@@ -1068,6 +1120,7 @@ void initJITBindings(PyObject* module) {
   initTreeViewBindings(module);
   initJitScriptBindings(module);
   initJitBackendBindings(module);
+  initStaticRuntimeBindings(module);
 
   setPrintHandler([](const std::string& str) {
     py::gil_scoped_acquire acquire;

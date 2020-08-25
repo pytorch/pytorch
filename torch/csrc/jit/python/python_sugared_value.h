@@ -288,5 +288,22 @@ struct VISIBILITY_HIDDEN PythonClassValue : public ClassValue {
   py::object py_type_;
 };
 
+struct VISIBILITY_HIDDEN PythonExceptionValue : public ExceptionValue {
+  explicit PythonExceptionValue(const py::object& exception_class)
+      : ExceptionValue(
+            py::str(py::getattr(exception_class, "__name__", py::str("")))) {}
+
+  std::string kind() const override {
+    return "Python exception";
+  }
+
+  std::shared_ptr<SugaredValue> call(
+      const SourceRange& loc,
+      Function& caller,
+      at::ArrayRef<NamedValue> inputs,
+      at::ArrayRef<NamedValue> attributes,
+      size_t n_binders) override;
+};
+
 } // namespace jit
 } // namespace torch

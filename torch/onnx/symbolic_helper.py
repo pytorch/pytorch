@@ -453,6 +453,13 @@ def _flatten_helper(g, input, start_dim, end_dim, dim):
     from torch.onnx.symbolic_opset9 import _reshape_from_tensor
     return _reshape_from_tensor(g, input, final_shape)
 
+def _is_split_static(split_size_or_sizes, _outputs):
+    if _outputs is None:
+        return False
+    if _is_value(split_size_or_sizes) and split_size_or_sizes.node().kind() != 'onnx::Constant':
+        return False
+    return True
+
 # ---------------------------------------------------------------------
 # ONNX operator version
 # ---------------------------------------------------------------------

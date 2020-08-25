@@ -124,8 +124,7 @@ class TestCheckpoint(TestCase):
         chunks = 2
         modules = list(model.children())
         out = checkpoint_sequential(modules, chunks, input_var)
-        # python_error in case of py2_7_9.
-        with self.assertRaisesRegex(RuntimeError, "(Checkpointing is not compatible)|(python_error)"):
+        with self.assertRaisesRegex(RuntimeError, "Checkpointing is not compatible"):
             torch.autograd.grad(
                 outputs=[out], grad_outputs=[torch.ones(1, 5)], inputs=[input_var], create_graph=True
             )
@@ -571,6 +570,18 @@ class TestHub(TestCase):
             verbose=False)
         self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
                          SUM_OF_HUB_EXAMPLE)
+
+    # Test the default zipfile serialization format produced by >=1.6 release.
+    @retry(URLError, tries=3, skip_after_retries=True)
+    def test_load_zip_1_6_checkpoint(self):
+        hub_model = hub.load(
+            'ailzhang/torchhub_example',
+            'mnist_zip_1_6',
+            pretrained=True,
+            verbose=False)
+        self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
+                         SUM_OF_HUB_EXAMPLE)
+
 
     def test_hub_dir(self):
         with tempfile.TemporaryDirectory('hub_dir') as dirname:
