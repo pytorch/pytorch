@@ -1,6 +1,6 @@
 ir_version: 6
 producer_name: "pytorch"
-producer_version: "CURRENT_VERSION"
+producer_versionproducer_version: "CURRENT_VERSION"
 graph {
   node {
     output: "1"
@@ -17,34 +17,108 @@ graph {
     }
   }
   node {
-    output: "2"
-    name: "Constant_1"
-    op_type: "Constant"
+    input: "13"
+    output: "3"
+    name: "ConstantOfShape_1"
+    op_type: "ConstantOfShape"
     attribute {
       name: "value"
       t {
-        dims: 4
+        dims: 1
         data_type: 7
-        raw_data: "\001\000\000\000\000\000\000\000\001\000\000\000\000\000\000\000\001\000\000\000\000\000\000\000\002\000\000\000\000\000\000\000"
+        raw_data: "\001\000\000\000\000\000\000\000"
       }
       type: TENSOR
     }
   }
   node {
-    input: "0"
-    input: "2"
-    output: "3"
-    name: "Reshape_2"
-    op_type: "Reshape"
+    input: "3"
+    output: "4"
+    name: "Shape_2"
+    op_type: "Shape"
+  }
+  node {
+    input: "4"
+    output: "5"
+    name: "ConstantOfShape_3"
+    op_type: "ConstantOfShape"
+    attribute {
+      name: "value"
+      t {
+        dims: 1
+        data_type: 7
+        raw_data: "\001\000\000\000\000\000\000\000"
+      }
+      type: TENSOR
+    }
+  }
+  node {
+    output: "6"
+    name: "Constant_4"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        data_type: 7
+        raw_data: "\377\377\377\377\377\377\377\377"
+      }
+      type: TENSOR
+    }
+  }
+  node {
+    input: "5"
+    input: "6"
+    output: "7"
+    name: "Mul_5"
+    op_type: "Mul"
   }
   node {
     input: "3"
+    input: "7"
+    output: "8"
+    name: "Equal_6"
+    op_type: "Equal"
+  }
+  node {
+    input: "8"
+    output: "9"
+    name: "Cast_7"
+    op_type: "Cast"
+    attribute {
+      name: "to"
+      i: 9
+      type: INT
+    }
+  }
+  node {
+    input: "9"
+    input: "5"
+    input: "3"
+    output: "10"
+    name: "Where_8"
+    op_type: "Where"
+  }
+  node {
+    input: "0"
+    input: "10"
+    output: "11"
+    name: "Expand_9"
+    op_type: "Expand"
+  }
+  node {
+    input: "11"
     input: "1"
-    output: "4"
-    name: "Tile_3"
+    output: "12"
+    name: "Tile_10"
     op_type: "Tile"
   }
   name: "torch-jit-export"
+  initializer {
+    dims: 1
+    data_type: 7
+    name: "13"
+    raw_data: "\004\000\000\000\000\000\000\000"
+  }
   input {
     name: "0"
     type {
@@ -62,7 +136,7 @@ graph {
     }
   }
   output {
-    name: "4"
+    name: "12"
     type {
       tensor_type {
         elem_type: 1
