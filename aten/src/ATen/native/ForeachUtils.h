@@ -99,6 +99,11 @@ bool check_fast_route(TensorList tensors1, TensorList tensors2) {
   for (int64_t i = 0; i < tensors1.size(); i++) {
     TORCH_CHECK(tensors1[i].sizes() == tensors2[i].sizes(), "Corresponding tensors from tensor lists have different size.");
 
+    if (tensors1[i].device() != expected_device || 
+        tensors2[i].device() != expected_device) {
+      return false;
+    }
+
     if (tensors1[i].layout() != at::kStrided || 
         tensors2[i].layout() != at::kStrided) {
       return false;
