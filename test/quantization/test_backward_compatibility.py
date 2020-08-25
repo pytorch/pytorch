@@ -19,6 +19,30 @@ def remove_prefix(text, prefix):
         return text[len(prefix):]
     return text
 
+def get_filenames(self, subname):
+    # NB: we take __file__ from the module that defined the test
+    # class, so we place the expect directory where the test script
+    # lives, NOT where test/common_utils.py lives.
+    module_id = self.__class__.__module__
+    munged_id = remove_prefix(self.id(), module_id + ".")
+    test_file = os.path.realpath(sys.modules[module_id].__file__)
+    base_name = os.path.join(os.path.dirname(test_file),
+                             "serialized",
+                             munged_id)
+
+    subname_output = ""
+    if subname:
+        base_name += "_" + subname
+        subname_output = " ({})".format(subname)
+
+    input_file = base_name + ".input.pt"
+    state_dict_file = base_name + ".state_dict.pt"
+    scripted_module_file = base_name + ".scripted.pt"
+    traced_module_file = base_name + ".traced.pt"
+    expected_file = base_name + ".expected.pt"
+
+    return input_file, state_dict_file, scripted_module_file, traced_module_file, expected_file
+
 class TestSerialization(TestCase):
     """ Test backward compatiblity for serialization and numerics
     """
@@ -29,26 +53,8 @@ class TestSerialization(TestCase):
         with current code, make sure we don't break backward compatibility for the
         serialization of quantized modules
         """
-        # NB: we take __file__ from the module that defined the test
-        # class, so we place the expect directory where the test script
-        # lives, NOT where test/common_utils.py lives.
-        module_id = self.__class__.__module__
-        munged_id = remove_prefix(self.id(), module_id + ".")
-        test_file = os.path.realpath(sys.modules[module_id].__file__)
-        base_name = os.path.join(os.path.dirname(test_file),
-                                 "serialized",
-                                 munged_id)
-
-        subname_output = ""
-        if subname:
-            base_name += "_" + subname
-            subname_output = " ({})".format(subname)
-
-        input_file = base_name + ".input.pt"
-        state_dict_file = base_name + ".state_dict.pt"
-        scripted_module_file = base_name + ".scripted.pt"
-        traced_module_file = base_name + ".traced.pt"
-        expected_file = base_name + ".expected.pt"
+        input_file, state_dict_file, scripted_module_file, traced_module_file, expected_file = \
+            get_filenames(self, subname)
 
         # only generate once.
         if generate and qengine_is_fbgemm():
@@ -82,26 +88,8 @@ class TestSerialization(TestCase):
         If generate == False, traces and scripts the module and quantizes the results with
         PTQ, and compares to saved results.
         """
-        # NB: we take __file__ from the module that defined the test
-        # class, so we place the expect directory where the test script
-        # lives, NOT where test/common_utils.py lives.
-        module_id = self.__class__.__module__
-        munged_id = remove_prefix(self.id(), module_id + ".")
-        test_file = os.path.realpath(sys.modules[module_id].__file__)
-        base_name = os.path.join(os.path.dirname(test_file),
-                                 "serialized",
-                                 munged_id)
-
-        subname_output = ""
-        if subname:
-            base_name += "_" + subname
-            subname_output = " ({})".format(subname)
-
-        input_file = base_name + ".input.pt"
-        state_dict_file = base_name + ".state_dict.pt"
-        scripted_module_file = base_name + ".scripted.pt"
-        traced_module_file = base_name + ".traced.pt"
-        expected_file = base_name + ".expected.pt"
+        input_file, state_dict_file, scripted_module_file, traced_module_file, expected_file = \
+            get_filenames(self, subname)
 
         # only generate once.
         if generate and qengine_is_fbgemm():
