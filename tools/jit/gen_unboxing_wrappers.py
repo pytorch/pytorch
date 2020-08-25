@@ -166,11 +166,7 @@ const auto options = TensorOptions()
         .layout(${layout})
         .device(${device})
         .pinned_memory(${pin_memory});
-#ifdef USE_STATIC_DISPATCH
-    auto result_ = at::${name}(${args_with_tensor_options});
-#else
     auto result_ = torch::${name}(${args_with_tensor_options});
-#endif
 """)
 CALL_METHOD_WITH_TENSOR_OPTIONS = CodeTemplate("""\
 const auto options = TensorOptions()
