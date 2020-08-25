@@ -32,6 +32,11 @@ class Upsample(Module):
             and output tensors are aligned, and thus preserving the values at
             those pixels. This only has effect when :attr:`mode` is
             ``'linear'``, ``'bilinear'``, or ``'trilinear'``. Default: ``False``
+        recompute_scale_factor (bool, optional): recompute the scale_factor for use in the
+            interpolation calculation.  If ``False`` or not specified,
+            the passed-in `scale_factor` will be used in the interpolation computation.
+            Otherwise, a new `scale_factor` will be computed based on the output and input sizes for
+            use in the interpolation computation
 
     Shape:
         - Input: :math:`(N, C, W_{in})`, :math:`(N, C, H_{in}, W_{in})` or :math:`(N, C, D_{in}, H_{in}, W_{in})`
@@ -118,15 +123,17 @@ class Upsample(Module):
                   [ 1.2000,  1.3600,  1.5200,  1.2800,  0.6400,  0.0000],
                   [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000]]]])
     """
-    __constants__ = ['size', 'scale_factor', 'mode', 'align_corners', 'name']
+    __constants__ = ['size', 'scale_factor', 'mode', 'align_corners', 'name', 'recompute_scale_factor']
     name: str
     size: _size_any_t
     scale_factor: _ratio_any_t
     mode: str
     align_corners: bool
+    recompute_scale_factor: bool
 
     def __init__(self, size: Optional[_size_any_t] = None, scale_factor: Optional[_ratio_any_t] = None,
-                 mode: str = 'nearest', align_corners: Optional[bool] = None) -> None:
+                 mode: str = 'nearest', align_corners: Optional[bool] = None, 
+                 recompute_scale_factor: Optional[bool] = None) -> None:
         super(Upsample, self).__init__()
         self.name = type(self).__name__
         self.size = size
@@ -136,9 +143,10 @@ class Upsample(Module):
             self.scale_factor = float(scale_factor) if scale_factor else None
         self.mode = mode
         self.align_corners = align_corners
+        self.recompute_scale_factor = recompute_scale_factor
 
     def forward(self, input: Tensor) -> Tensor:
-        return F.interpolate(input, self.size, self.scale_factor, self.mode, self.align_corners)
+        return F.interpolate(input, self.size, self.scale_factor, self.mode, self.align_corners, self.recompute_scale_factor)
 
     def extra_repr(self) -> str:
         if self.scale_factor is not None:
