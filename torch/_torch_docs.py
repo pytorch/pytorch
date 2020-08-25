@@ -3767,7 +3767,8 @@ Example::
 
 add_docstr(torch.logspace,
            r"""
-logspace(start, end, steps=100, base=10.0, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
+logspace(start, end, steps=100, base=10.0, *,
+         out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
 Returns a one-dimensional tensor of :attr:`steps` points
 logarithmically spaced with base :attr:`base` between
