@@ -1,6 +1,7 @@
 import ast
 import enum
 import inspect
+import warnings
 import os
 import re
 import torch
@@ -314,13 +315,16 @@ def try_ann_to_type(ann, loc):
         return IntType.get()  # dtype not yet bound in as its own type
     if inspect.isclass(ann) and issubclass(ann, enum.Enum):
         if not is_enum_support_enabled():
-            raise NotImplementedError(
-                "Enum support is work in progress, please do not use it now")
-        return EnumType(_qualified_name(ann), get_enum_value_type(ann, loc))
+            warnings.warn("Enum support is work in progress, enum class {}"
+                          " is not compiled".format(ann))
+            return None
+        if not hasattr(ann, "__torch_script_class__"):
+            torch.jit._script._recursive_compile_class(ann, loc)
+        return EnumType(_qualified_name(ann), get_enum_value_type(ann, loc), list(ann))
     if inspect.isclass(ann):
         if hasattr(ann, "__torch_script_class__"):
             return ClassType(_qualified_name(ann))
-        ignored_builtin_classes = (torch.nn.Module, tuple, list)
+        ignored_builtin_classes = (torch.nn.Module, tuple, list, Exception)
         if torch._jit_internal.can_compile_class(ann) and not issubclass(ann, ignored_builtin_classes):
             torch.jit._script._recursive_compile_class(ann, loc)
             return ClassType(_qualified_name(ann))

@@ -568,9 +568,16 @@ class RandomInliner : public FunctionInliner {
       b = new Block({s});
     }
 
+    // Make sure theres something in the block, will be simplified out later.
+    if (b->empty()) {
+      b->append_stmt(new Block({}));
+    }
+
+    Stmt* first = b->stmts().front();
     for (auto const& p : random_vars_) {
       Var* v = p.second;
-      b->add_var_binding(v, new Intrinsics(kRand, v->dtype()));
+      b->insert_stmt_before(
+          new Let(v, new Intrinsics(kRand, v->dtype())), first);
     }
     random_vars_.clear();
     return b;
@@ -1084,7 +1091,7 @@ void LoopNest::reorderAxis(For* a, For* b) {
   CHECK(root);
 
   // Do a shallow copy of the inner blocks.
-  Block* body = new Block(inner->body()->varBindings(), {});
+  Block* body = new Block({});
   body->splice(body->end(), inner->body());
 
   For* before{outer};
@@ -1164,6 +1171,72 @@ void LoopNest::reorderAxis(For* a, For* b) {
     root->insert_stmt_after(after, newInner);
   }
 } // namespace tensorexpr
+
+void LoopNest::unroll(For* f, Stmt** unrolled) {
+  Block* p = dynamic_cast<Block*>(f->get_parent());
+  if (!f) {
+    throw malformed_input("unroll attempted on null loop");
+  } else if (!p) {
+    throw malformed_input("unroll attempted on loop with no parent");
+  }
+
+  if (!f->start()->isConstant()) {
+    throw std::runtime_error("Can't unroll due to non-constant loop start!");
+  }
+  if (!f->stop()->isConstant()) {
+    throw std::runtime_error("Can't unroll due to non-constant loop stop!");
+  }
+
+  std::vector<Stmt*> unrolled_stmts;
+  int start_val = immediateAs<int>(f->start());
+  int stop_val = immediateAs<int>(f->stop());
+  for (int current = start_val; current < stop_val; ++current) {
+    for (const auto stmt : f->body()->stmts()) {
+      auto stmt_copy = Stmt::clone(stmt);
+      unrolled_stmts.push_back(Substitute(
+          stmt_copy,
+          {{f->var(), getImmediateByType(f->var()->dtype(), current)}}));
+    }
+  }
+  *unrolled = new Block(unrolled_stmts);
+  *unrolled = IRSimplifier::simplify(*unrolled);
+
+  p->replace_stmt(f, *unrolled);
+}
+
+void LoopNest::normalize(For* f, For** normalized) {
+  if (!f) {
+    throw malformed_input("normalize attempted on null loop");
+  }
+  Block* p = dynamic_cast<Block*>(f->get_parent());
+  if (!p) {
+    throw malformed_input("normalize attempted on loop with no parent");
+  }
+
+  if (!f->start()->isConstant()) {
+    // Do not normalize when the loop start is not a constant.
+    *normalized = f;
+    return;
+  }
+
+  int start_idx = immediateAs<int>(f->start());
+  if (start_idx == 0) {
+    // No need to normalize in this case.
+    *normalized = f;
+    return;
+  }
+
+  auto for_body_normalized = Substitute(
+      Stmt::clone(f->body()),
+      {{f->var(), (VarHandle(f->var()) + ExprHandle(f->start())).node()}});
+  *normalized = For::make(
+      VarHandle(f->var()),
+      ExprHandle(0),
+      ExprHandle(f->stop()) - ExprHandle(f->start()),
+      for_body_normalized);
+
+  p->replace_stmt(f, *normalized);
+}
 
 std::vector<For*> LoopNest::getLoopStmtsFor(Tensor* t) const {
   std::vector<For*> result;
@@ -1385,10 +1458,13 @@ void LoopNest::computeAt(Stmt* s, For* f) {
   // exit early.
   TensorAccessBoundsInfo store_bounds_info;
   bool found = false;
-  for (const TensorAccessBoundsInfo& p : loop_bounds_info) {
-    if (p.buf == st->buf()) {
-      store_bounds_info = p;
-      found = true;
+  for (const auto& pair : loop_bounds_info) {
+    const Buf* buf = pair.first;
+    for (const TensorAccessBoundsInfo& p : pair.second) {
+      if (buf == st->buf()) {
+        store_bounds_info = p;
+        found = true;
+      }
     }
   }
   if (!found) {
@@ -1451,8 +1527,7 @@ void LoopNest::computeAt(Stmt* s, For* f) {
   f->body()->prepend_stmt(bd);
 
   // Rewrite accesses to producer in consumer with accesses to temp
-  LoopComputeAtRewriter lr(
-      store_bounds_info.buf, temp_buf, store_bounds_info.start);
+  LoopComputeAtRewriter lr(st->buf(), temp_buf, store_bounds_info.start);
   Stmt* new_f = f->accept_mutator(&lr);
   if (f != new_f) {
     Block* bb = dynamic_cast<Block*>(f->get_parent());
@@ -1703,24 +1778,43 @@ void LoopNest::rfactor(
   }
 
   auto loop_bounds_info = inferBounds(root_stmt_);
-  found = false;
-  for (const TensorAccessBoundsInfo& p : loop_bounds_info) {
-    if (p.buf == tmp_buf) {
-      found = true;
-      std::vector<const Expr*> dims;
-      for (size_t i = 0; i < p.start.size(); i++) {
-        const Expr* dim = IRSimplifier::simplify(
-            new Add(new Sub(p.stop[i], p.start[i]), new IntImm(1)));
-        dims.push_back(dim);
-      }
-      tmp_buf->set_dims(dims);
-    }
-  }
-  if (!found) {
+  auto bounds_it = loop_bounds_info.find(tmp_buf);
+  if (bounds_it == loop_bounds_info.end()) {
     throw std::runtime_error(
         "Hit undefined behavior in rfactor -- couldn't infer bounds.");
   }
 
+  std::vector<const Expr*> starts;
+  std::vector<const Expr*> stops;
+
+  // Find the safe size of the temprorary buffer by determining the outer
+  // extents of a union of all bounds.
+  for (const TensorAccessBoundsInfo& p : bounds_it->second) {
+    for (size_t i = 0; i < p.start.size(); i++) {
+      if (starts.size() <= i) {
+        starts.push_back(p.start[i]);
+      } else {
+        starts[i] =
+            IRSimplifier::simplify(new Min(starts[i], p.start[i], true));
+      }
+
+      if (stops.size() <= i) {
+        stops.push_back(p.stop[i]);
+      } else {
+        stops[i] = IRSimplifier::simplify(new Max(stops[i], p.stop[i], true));
+      }
+    }
+  }
+
+  std::vector<const Expr*> tmp_dims;
+  for (size_t i = 0; i < starts.size(); ++i) {
+    const Expr* dim = IRSimplifier::simplify(
+        new Add(new Sub(stops[i], starts[i]), new IntImm(1)));
+
+    tmp_dims.push_back(dim);
+  }
+
+  tmp_buf->set_dims(tmp_dims);
   temp_bufs_.emplace_back(tmp_buf);
 }
 

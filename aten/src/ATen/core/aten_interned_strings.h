@@ -20,17 +20,13 @@ _(aten, __or__) \
 _(aten, __rshift__) \
 _(aten, __xor__) \
 _(aten, _abs) \
-_(aten, _acos) \
 _(aten, _addmv) \
 _(aten, _addr) \
 _(aten, _arange) \
-_(aten, _acosh) \
 _(aten, _asinh) \
 _(aten, _atanh) \
 _(aten, _argmax) \
 _(aten, _argmin) \
-_(aten, _asin) \
-_(aten, _atan) \
 _(aten, _baddbmm_mkl) \
 _(aten, _cast_Byte) \
 _(aten, _cast_Char) \
@@ -42,7 +38,6 @@ _(aten, _cast_Long) \
 _(aten, _cast_Short) \
 _(aten, _cat) \
 _(aten, _ceil) \
-_(aten, _clamp) \
 _(aten, _clamp_max) \
 _(aten, _clamp_min) \
 _(aten, _convolution) \
@@ -84,7 +79,6 @@ _(aten, _fft_with_size) \
 _(aten, _fill) \
 _(aten, _floor) \
 _(aten, _fused_dropout) \
-_(aten, _ger) \
 _(aten, _indexCopy) \
 _(aten, _indices) \
 _(aten, _linspace) \
@@ -100,6 +94,7 @@ _(aten, _masked_scale) \
 _(aten, _mm) \
 _(aten, _mv) \
 _(aten, _nnz) \
+_(aten, _nansum) \
 _(aten, _pack_padded_sequence) \
 _(aten, _pack_padded_sequence_backward) \
 _(aten, _pad_packed_sequence) \
@@ -169,7 +164,6 @@ _(aten, _weight_norm_cuda_interface) \
 _(aten, _weight_norm_cuda_interface_backward) \
 _(aten, _weight_norm_differentiable_backward) \
 _(aten, abs) \
-_(aten, acos) \
 _(aten, adaptive_avg_pool1d) \
 _(aten, adaptive_avg_pool2d) \
 _(aten, adaptive_avg_pool2d_backward) \
@@ -204,8 +198,6 @@ _(aten, argmax) \
 _(aten, argmin) \
 _(aten, as_strided) \
 _(aten, as_tensor) \
-_(aten, asin) \
-_(aten, atan) \
 _(aten, atan2) \
 _(aten, atleast_1d) \
 _(aten, atleast_2d) \
@@ -243,12 +235,13 @@ _(aten, cholesky) \
 _(aten, cholesky_inverse) \
 _(aten, cholesky_solve) \
 _(aten, chunk) \
-_(aten, clamp) \
 _(aten, clamp_max) \
 _(aten, clamp_min) \
 _(aten, clone) \
 _(aten, coalesce) \
 _(aten, combinations) \
+_(aten, complex) \
+_(aten, polar) \
 _(aten, constant_pad_nd) \
 _(aten, contiguous) \
 _(aten, conv1d) \
@@ -291,7 +284,6 @@ _(aten, cumprod) \
 _(aten, cumsum) \
 _(aten, data_ptr) \
 _(aten, deg2rad) \
-_(aten, det) \
 _(aten, detach) \
 _(aten, diag) \
 _(aten, diag_embed) \
@@ -305,6 +297,7 @@ _(aten, div) \
 _(aten, div_) \
 _(aten, dot) \
 _(aten, dropout) \
+_(aten, dstack) \
 _(aten, eig) \
 _(aten, einsum) \
 _(aten, elu) \
@@ -354,7 +347,6 @@ _(aten, ge) \
 _(aten, gelu) \
 _(aten, geometric) \
 _(aten, geqrf) \
-_(aten, ger) \
 _(aten, get_device) \
 _(aten, glu) \
 _(aten, glu_backward) \
@@ -380,6 +372,8 @@ _(aten, hardtanh_forward) \
 _(aten, hinge_embedding_loss) \
 _(aten, histc) \
 _(aten, hspmm) \
+_(aten, hstack) \
+_(aten, hypot) \
 _(aten, ifft) \
 _(aten, index) \
 _(aten, index_add) \
@@ -451,6 +445,7 @@ _(aten, masked_select) \
 _(aten, matmul) \
 _(aten, matrix_power) \
 _(aten, matrix_rank) \
+_(aten, matrix_exp) \
 _(aten, max) \
 _(aten, max_pool1d) \
 _(aten, max_pool1d_with_indices) \
@@ -511,6 +506,7 @@ _(aten, multilabel_margin_loss_forward) \
 _(aten, multinomial) \
 _(aten, mv) \
 _(aten, mvlgamma) \
+_(aten, nansum) \
 _(aten, narrow) \
 _(aten, narrow_copy) \
 _(aten, native_batch_norm) \
@@ -523,7 +519,7 @@ _(aten, native_resize_as) \
 _(aten, native_tensor) \
 _(aten, native_zero) \
 _(aten, ne) \
-_(aten, neg) \
+_(aten, nextafter) \
 _(aten, bitwise_and) \
 _(aten, bitwise_not) \
 _(aten, bitwise_or) \
@@ -562,6 +558,7 @@ _(aten, prelu_backward) \
 _(aten, prod) \
 _(aten, put) \
 _(aten, qr) \
+_(aten, quantile) \
 _(aten, rad2deg) \
 _(aten, rand) \
 _(aten, rand_like) \
@@ -708,11 +705,13 @@ _(aten, triangular_solve) \
 _(aten, tril) \
 _(aten, triplet_margin_loss) \
 _(aten, triu) \
-_(aten, trunc) \
 _(aten, type_as) \
 _(aten, unbind) \
 _(aten, unfold) \
 _(aten, uniform) \
+_(aten, unsafe_chunk) \
+_(aten, unsafe_split) \
+_(aten, unsafe_split_with_sizes) \
 _(aten, unsqueeze) \
 _(aten, upsample_bilinear2d) \
 _(aten, upsample_bilinear2d_backward) \
@@ -740,6 +739,7 @@ _(aten, vander) \
 _(aten, var) \
 _(aten, view) \
 _(aten, view_as) \
+_(aten, vstack) \
 _(aten, where) \
 _(aten, zero) \
 _(aten, zeros) \
