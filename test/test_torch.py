@@ -19723,31 +19723,37 @@ class TestTensorDeviceOps(TestCase):
             self.assertEqual(x[..., :m].abs(), y[..., :m].abs(), atol=1e-5, rtol=0)
 
     @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
     @dtypes(*_float_types_no_half)
     def test_svd_square(self, device, dtype):
         self._test_svd_helper((10, 10), True, False, device, dtype)
 
     @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
     @dtypes(*_float_types_no_half)
     def test_svd_square_col_maj(self, device, dtype):
         self._test_svd_helper((10, 10), True, True, device, dtype)
 
     @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
     @dtypes(*_float_types_no_half)
     def test_svd_tall_some(self, device, dtype):
         self._test_svd_helper((20, 5), True, False, device, dtype)
 
     @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
     @dtypes(*_float_types_no_half)
     def test_svd_tall_all(self, device, dtype):
         self._test_svd_helper((20, 5), False, False, device, dtype)
 
     @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
     @dtypes(*_float_types_no_half)
     def test_svd_tall_some_col_maj(self, device, dtype):
         self._test_svd_helper((5, 20), True, True, device, dtype)
 
     @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
     @dtypes(*_float_types_no_half)
     def test_svd_tall_all_col_maj(self, device, dtype):
         self._test_svd_helper((5, 20), False, True, device, dtype)
