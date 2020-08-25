@@ -238,7 +238,7 @@ class Conv1d(_ConvNd):
             activation_post_process = mod.activation_post_process
         weight_post_process = mod.qconfig.weight()
         weight_post_process(mod.weight)
-        act_scale, act_zp = mod.activation_post_process.calculate_qparams()
+        act_scale, act_zp = activation_post_process.calculate_qparams()
         assert weight_post_process.dtype == torch.qint8, \
             'Weight observer must have a dtype of qint8'
         qweight = _quantize_weight(mod.weight.float(), weight_post_process)
