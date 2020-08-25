@@ -197,5 +197,17 @@ class TestFX(TestCase):
         b = torch.rand(1)
         self.assertEqual(m(a, b), m_g(a, b))
 
+    def test_reserved_getattr(self):
+        """Ensure that we do not name any nodes with a reserved builtin like `getattr`"""
+        class M(torch.nn.Module):
+            def forward(self, a):
+                return a.foo.bar.baz
+
+        m = M()
+        m_g = symbolic_trace(m)
+        for node in m_g.graph.nodes:
+            self.assertTrue(node.name != "getattr")
+
+
 if __name__ == '__main__':
     run_tests()

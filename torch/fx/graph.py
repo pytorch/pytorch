@@ -3,6 +3,10 @@ from .node import Node, Argument, Target
 from typing import Callable, Any, List, Dict, Optional, Tuple
 import builtins
 import torch
+import keyword
+
+def _shadows_builtin_name(name):
+    return name in dir(builtins) or name in keyword.kwlist
 
 def _is_magic(x: str) -> bool:
     return x.startswith('__') and x.endswith('__')
@@ -71,9 +75,9 @@ class Graph:
             return n
         map_arg(a, add_use)
 
-    def create_node(self, op: str, target: Target, 
-                    args: Optional[Tuple[Argument, ...]] = None, 
-                    kwargs: Optional[Dict[str, Argument]] = None, 
+    def create_node(self, op: str, target: Target,
+                    args: Optional[Tuple[Argument, ...]] = None,
+                    kwargs: Optional[Dict[str, Argument]] = None,
                     name: Optional[str] = None):
         assert op in ('call_function', 'call_method', 'get_param', 'call_module', 'placeholder')
         args = () if args is None else args
@@ -109,6 +113,10 @@ class Graph:
                 op = op[2:-2]
         op = op.replace('.', '_')
         op = snake_case(op)
+
+        if _shadows_builtin_name(op):
+            # Avoid collisions with builtins or language keywords.
+            op = "_" + op
 
         if op not in self._used_names:
             self._used_names[op] = 0
