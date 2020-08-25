@@ -105,6 +105,7 @@ class TestTEFuser(JitTestCase):
 
     @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
     def test_abs_cpu(self):
+        raise RuntimeError("@#$FAILING")
         self._test_fused_abs()
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
