@@ -111,6 +111,7 @@ namespace jit {
   _(MobileSaveLoadParameters)                     \
   _(MobileSaveLoadParametersEmpty)                \
   _(LiteSGD)                                      \
+  _(LiteSequentialSampler)                        \
   _(FusionAliasing)
 
 #if defined(USE_CUDA)
