@@ -181,40 +181,8 @@ class TestONNXRuntime(unittest.TestCase):
                     onnxruntime.GraphOptimizationLevel.ORT_DISABLE_ALL
                 ort_sess = onnxruntime.InferenceSession(model_file_name, sess_options=ort_sess_opt)
                 input_copy = copy.deepcopy(input)
-                ort_test_with_input(ort_sess, input_copy, output, rtol, atol)
-
-    def run_ort(self, model, batch_size=2, state_dict=None,
-                input=None, use_gpu=True, rtol=0.001, atol=1e-7,
-                example_outputs=None, do_constant_folding=True,
-                dynamic_axes=None, test_with_inputs=None,
-                input_names=None, output_names=None,
-                fixed_batch_size=False, training=None):
-        f = io.BytesIO()
-        torch.onnx._export(model, input, f,
-                           opset_version=self.opset_version,
-                           example_outputs=example_outputs,
-                           do_constant_folding=do_constant_folding,
-                           keep_initializers_as_inputs=self.keep_initializers_as_inputs,
-                           dynamic_axes=dynamic_axes,
-                           input_names=input_names, output_names=output_names,
-                           fixed_batch_size=fixed_batch_size, training=training)
-
-        # compute onnxruntime output prediction
-        ort_sess = onnxruntime.InferenceSession(f.getvalue())
-        input, _ = torch.jit._flatten(input)
-
-        def to_numpy(tensor):
-            if tensor.requires_grad:
-                return tensor.detach().cpu().numpy()
-            else:
-                return tensor.cpu().numpy()
-
-        inputs = list(map(to_numpy, input))
-
-        ort_inputs = dict((ort_sess.get_inputs()[i].name, input) for i, input in enumerate(inputs))
-        ort_outs = ort_sess.run(None, ort_inputs)
-
-        return ort_outs
+                ort_outs = run_ort(ort_sess, input_copy)
+                ort_compare_with_pytorch(ort_outs, output, rtol, atol)
 
     @skipIfUnsupportedMinOpsetVersion(9)  # Because external data format was released with Opset 9.
     def test_embedding_model_with_external_data(self):
@@ -267,6 +235,35 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(2, 1)
         self.run_model_test_with_external_data(torch.jit.script(LargeModel()), x) 
+
+    # Export Torchvision models
+
+    def test_googlenet(self):
+        model = torchvision.models.googlenet(pretrained=True)
+        x = torch.randn(2, 3, 224, 224, requires_grad=True)
+        self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
+
+    def test_mnasnet(self):
+        model = torchvision.models.mnasnet1_0(pretrained=True)
+        x = torch.randn(2, 3, 224, 224, requires_grad=True)
+        self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
+
+    def test_mobilenet(self):
+        model = torchvision.models.mobilenet_v2(pretrained=True)
+        x = torch.randn(2, 3, 224, 224, requires_grad=True)
+        self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
+
+    def test_shufflenet(self):
+        model = torchvision.models.shufflenet_v2_x1_0(pretrained=True)
+        x = torch.randn(2, 3, 224, 224, requires_grad=True)
+        self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
+
+    def test_vgg(self):
+        model = torchvision.models.vgg19(pretrained=True)
+        x = torch.randn(2, 3, 224, 224, requires_grad=True)
+        self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
+        model = torchvision.models.vgg19_bn(pretrained=True)
+        self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
 
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_fcn(self):
