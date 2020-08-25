@@ -3052,9 +3052,7 @@ class TestQuantizeJit(QuantizationTestCase):
                     [self.img_data_2d],
                     inplace=False)
                 self.assertEqual(model_quantized(self.img_data_2d[0][0]),
-                                 result_eager,
-                                 rtol=1e-2,
-                                 atol=1e-2)
+                                 result_eager)
 
     @override_qengines
     def test_conv_bn(self):
