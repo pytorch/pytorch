@@ -592,9 +592,6 @@ class ConvTranspose1d(_ConvTransposeNd):
 
     def set_weight_bias(self, w, b):
         # type: (torch.Tensor, Optional[torch.Tensor]) -> None
-        if w.qscheme() != torch.per_tensor_affine:
-            raise NotImplementedError(
-                "Only per-tensor quantization is supported.")
         self._packed_params = torch.ops.quantized.conv_transpose1d_prepack(
             w, b, self.stride, self.padding, self.output_padding, self.dilation,
             self.groups)
@@ -674,9 +671,6 @@ class ConvTranspose2d(_ConvTransposeNd):
 
     def set_weight_bias(self, w, b):
         # type: (torch.Tensor, Optional[torch.Tensor]) -> None
-        if w.qscheme() != torch.per_tensor_affine:
-            raise NotImplementedError(
-                "Only per-tensor quantization is supported.")
         self._packed_params = torch.ops.quantized.conv_transpose2d_prepack(
             w, b, self.stride, self.padding, self.output_padding, self.dilation,
             self.groups)
