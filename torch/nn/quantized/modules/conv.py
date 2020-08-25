@@ -163,7 +163,6 @@ class _ConvNd(nn.Module):
         qconv.scale = float(act_scale)
         qconv.zero_point = int(act_zp)
         return qconv
-        
 
 
 class Conv1d(_ConvNd):
@@ -256,10 +255,9 @@ class Conv1d(_ConvNd):
             mod = mod[0]
         else:
             activation_post_process = mod.activation_post_process
-        
         return cls.get_qconv(mod, activation_post_process)
 
-    
+
 class Conv2d(_ConvNd):
     r"""Applies a 2D convolution over a quantized input signal composed of
     several quantized input planes.
@@ -465,7 +463,6 @@ class Conv3d(_ConvNd):
             mod = mod[0]
         else:
             activation_post_process = mod.activation_post_process
-        
         return cls.get_qconv(mod, activation_post_process)
 
 # === Transposed Convolutions ===
