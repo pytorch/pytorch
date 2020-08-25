@@ -355,12 +355,12 @@ class TensorExprFuser {
     // group, so we can safely merge them into the fusion group subgraph.
     fusion_group = getOrCreateTensorExprSubgraph(fusion_group);
 
-    std::unordered_map<Value*, Value*> vmap;
     for (auto n : nodes_to_merge) {
       GRAPH_UPDATE("Merging ", getHeader(n));
+      std::unordered_map<Value*, Value*> vmap;
       SubgraphUtils::mergeNodeIntoSubgraph(n, fusion_group, vmap);
+      updateTypeinfoMapWithVmap(vmap);
     }
-    updateTypeinfoMapWithVmap(vmap);
     return fusion_group;
   }
 
@@ -544,6 +544,8 @@ class TensorExprFuser {
             typecheck_node->output(output_idx);
         typecheck_node->output(output_idx++)
             ->setType(typeinfo_map_.at(subgraph->inputs()[idx]));
+      } else if (auto tt = subgraph->inputs()[idx]->type()->cast<TensorType>()) {
+        TORCH_INTERNAL_ASSERT(tt->isComplete());
       }
     }
     typecheck_node->output(inputs_to_check.size())->setType(BoolType::get());
