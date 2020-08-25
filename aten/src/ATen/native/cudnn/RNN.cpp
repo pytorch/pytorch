@@ -684,7 +684,7 @@ namespace cudnn_rnn {
       }
     }
 
-    return {weight_buf, params_arr};
+    return std::make_tuple(weight_buf, params_arr);
   }
 
 } // namespace cudnn_rnn
