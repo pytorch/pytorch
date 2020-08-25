@@ -338,9 +338,9 @@ class TestTEFuser(JitTestCase):
         ge = self.checkScript(fn, inputs)
         self.assertAllFused(ge.graph_for(*inputs))
 
+    # TODO: reenable the test after backwards passes start working in PE
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    @unittest.skip("temporarily disable") # The problem seems to be with backward pass,
-                                          # reenable this test once we land all the things there
+    @unittest.skip("temporarily disable")
     def test_clamp(self):
         def func2(a, b):
             return torch.clamp(a + b, min=0, max=2)
@@ -871,8 +871,8 @@ class TestTEFuser(JitTestCase):
         self.assertAllFused(ge.graph_for(x, y))
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    @unittest.skip("temporarily disable") # The problem seems to be with backward pass,
-                                          # reenable this test once we land all the things there
+    # TODO: reenable the test after backwards passes start working in PE
+    @unittest.skip("temporarily disable")
     def test_erf_cuda(self):
         def fn_test_erf(x):
             return F.relu(torch.erf(x) - torch.erfc(x))
