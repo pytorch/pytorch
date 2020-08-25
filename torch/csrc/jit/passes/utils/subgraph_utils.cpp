@@ -42,7 +42,7 @@ void mergeSubgraph(
 
   // Vmap should contain "original" -> "merged" mapping, thus we basically need
   // to perform the following transformation:
-  //   vmap[x] = merge_vmap[unmerge_map[x]]
+  // vmap[x] = merge_vmap[unmerge_map[x]]
   for (auto& kv : unmerge_vmap) {
     if (merge_vmap.count(kv.second)) {
       vmap[kv.first] = merge_vmap.at(kv.second);
