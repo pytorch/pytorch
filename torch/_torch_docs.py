@@ -2299,14 +2299,14 @@ Args:
     input (Tensor): the tensor to compute the digamma function on
 
 Keyword args:
-    {out}
+    out (Tensor, optional): the output tensor.
 
 Example::
 
     >>> a = torch.tensor([1, 0.5])
     >>> torch.digamma(a)
     tensor([-0.5772, -1.9635])
-""".format(**common_args))
+""")
 
 
 add_docstr(torch.dist,
