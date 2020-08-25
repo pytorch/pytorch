@@ -4897,6 +4897,13 @@ Example::
     tensor([-0.0090,  0.2262,  0.0682,  0.2866, -0.3940])
 """.format(**common_args))
 
+add_docstr(torch.negative,
+           r"""
+negative(input, *, out=None) -> Tensor
+
+Alias for :func:`torch.neg`
+""".format(**common_args))
+
 add_docstr(torch.nextafter,
            r"""
 nextafter(input, other, *, out=None) -> Tensor
@@ -5386,6 +5393,12 @@ with :math:`Q` being an orthogonal matrix or batch of orthogonal matrices and
 
 If :attr:`some` is ``True``, then this function returns the thin (reduced) QR factorization.
 Otherwise, if :attr:`some` is ``False``, this function returns the complete QR factorization.
+
+.. warning::
+          If you plan to backpropagate through QR, note that the current backward implementation
+          is only well-defined when the first :math:`\min(input.size(-1), input.size(-2))`
+          columns of :attr:`input` are linearly independent.
+          This behavior will propably change once QR supports pivoting.
 
 .. note:: precision may be lost if the magnitudes of the elements of :attr:`input`
           are large

@@ -61,7 +61,6 @@ class ConvBNReLUFusion():
             op_list.append(relu)
             relu.training = self.conv.training
             if self.bn_node is not None:
-                setattr(quantizer.modules[conv_parent_name], conv_name, fuse_conv_bn_relu(self.conv, self.bn, relu))
                 op_list.append(self.bn)
             op_list.append(self.conv)
         else:
@@ -69,6 +68,8 @@ class ConvBNReLUFusion():
             op_list.append(self.bn)
             op_list.append(self.conv)
 
+        # the modules are added in order of relu - bn - conv
+        # so we need to correct it
         op_list.reverse()
         op_type_list = tuple(type(m) for m in op_list)
         conv_parent_name, conv_name = _parent_name(self.conv_node.target)
@@ -131,8 +132,8 @@ class Fuser:
         self.modules = dict(input_root.named_modules())
 
         fusion_patterns = get_fusion_patterns()
-        # find conv-bn pairs
-        conv_bn_pairs = self._find_matches(input_root, input_graph, fusion_patterns)
+        # find fusion
+        fusion_pairs = self._find_matches(input_root, input_graph, fusion_patterns)
         self.fused_graph = Graph()
         env = {}
 
@@ -140,7 +141,7 @@ class Fuser:
             return map_arg(a, lambda node: env[node.name])
 
         for node in input_graph.nodes:
-            root_node, obj = conv_bn_pairs.get(node.name, (None, None))
+            root_node, obj = fusion_pairs.get(node.name, (None, None))
             if root_node is node:
                 env[node.name] = obj.fuse(self, load_arg)
             elif root_node is None:
@@ -161,7 +162,9 @@ class Fuser:
                 for subpattern, arg in zip(args, node.args):
                     apply_match(subpattern, arg, match)
             else:
-                match_map[node.name] = match
+                # the first pattern matches will take precedence
+                if node.name not in match_map:
+                    match_map[node.name] = match
 
         for node in reversed(graph.nodes):
             if node.name not in match_map:
