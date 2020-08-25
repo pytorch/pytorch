@@ -922,7 +922,7 @@ class TestQuantizeFxModels(QuantizationTestCase):
                                  ('static', 'inception_v3')]
 
         fx_eager_not_matching = ['googlenet',  # because _transform_input is not quantized in eager
-                                 'mobilenetv2']  # because relu6 is replaced as relu in mobilenetv2
+                                 'mobilenet_v2']  # because relu6 is replaced as relu in mobilenetv2
 
         diff_of_quant = {}
         diff_from_eager = {}
@@ -944,18 +944,18 @@ class TestQuantizeFxModels(QuantizationTestCase):
                 check_with_eager,
                 diff_of_quant, diff_from_eager)
 
-            def print_diffs(diffs):
-                for mode, diffs_for_mode in diffs.items():
-                    print('mode:', mode)
-                    for name, diff in diffs_for_mode.items():
-                        print(name, ':', diff)
+        def print_diffs(diffs):
+            for mode, diffs_for_mode in diffs.items():
+                print('mode:', mode)
+                for name, diff in diffs_for_mode.items():
+                    print(name, ':', diff)
 
-            # print('differences between float and quantized')
-            # print_diffs(diff_of_quant)
-            # print('----------------------')
-            # print('differences between graph mode and eager mode')
-            # print_diffs(diff_from_eager)
-            # print('----------------------')
+        # print('differences between float and quantized')
+        # print_diffs(diff_of_quant)
+        # print('----------------------')
+        # print('differences between graph mode and eager mode')
+        # print_diffs(diff_from_eager)
+        # print('----------------------')
 
     @skip_if_no_torchvision
     @skip_if_not_multigpu
