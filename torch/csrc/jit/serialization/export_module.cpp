@@ -35,11 +35,6 @@ ExportModuleExtraFilesHook& GetExtraFilesHook() {
   return func;
 }
 
-ExportModuleMobileInfoConverter& GetMobileInfoConverter() {
-  static ExportModuleMobileInfoConverter func = nullptr;
-  return func;
-}
-
 static IValue Tup(std::vector<IValue> ivalues) {
   return c10::ivalue::Tuple::create(std::move(ivalues));
 }
@@ -247,11 +242,6 @@ void SetExportModuleExtraFilesHook(ExportModuleExtraFilesHook hook) {
   GetExtraFilesHook() = hook;
 }
 
-void SetExportModuleMobileInfoConverter(
-    ExportModuleMobileInfoConverter converter) {
-  GetMobileInfoConverter() = converter;
-}
-
 class ScriptModuleSerializer {
  public:
   explicit ScriptModuleSerializer(const std::string& filename)
@@ -279,7 +269,6 @@ class ScriptModuleSerializer {
     writeArchive("constants", c10::ivalue::Tuple::create(ivalue_constants));
     if (bytecode_format) {
       writeByteCode(module, save_mobile_debug_info);
-      writeMobileMetadata(module, extra_files);
     }
 
     // Acquires and sets minimum (dynamic) version
@@ -345,26 +334,6 @@ class ScriptModuleSerializer {
         const std::string key = "extra/" + kv.first;
         writer_.writeRecord(key, kv.second.data(), kv.second.size());
       }
-    }
-  }
-
-  void writeMobileMetadata(
-      const Module& module,
-      const ExtraFilesMap& extra_files) {
-    auto hook = GetExtraFilesHook();
-    auto converter = GetMobileInfoConverter();
-    if (!converter) {
-      return;
-    }
-    ExtraFilesMap files_to_write = extra_files;
-    // merge hook files and extra files
-    if (hook) {
-      ExtraFilesMap hook_files = hook(module);
-      files_to_write.insert(hook_files.begin(), hook_files.end());
-    }
-    auto content_to_write = converter(module, files_to_write);
-    if (!content_to_write.empty()) {
-      writeArchive("metadata", content_to_write);
     }
   }
 
