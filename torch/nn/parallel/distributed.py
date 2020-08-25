@@ -719,16 +719,24 @@ class DistributedDataParallel(Module):
             custom defined collectives in the model's forward pass.
 
         Args:
-            divide_by_initial_world_size (bool): If True, will divide gradients
-                by the initial world_size DDP training was launched with. If
-                False, will compute the effective world size (number of ranks
-                that have not depleted their inputs yet) and divide gradients by
-                that during allreduce. Set ``divide_by_initial_world_size=True``
-                when you want to weight gradients of uneven inputs properly,
-                i.e. it will ensure that gradients of later inputs do not get
-                higher weighting. Set to ``False`` to more closely simulate
-                training with the same number of inputs but a smaller
-                world_size. Default is ``True``.
+            divide_by_initial_world_size (bool): If ``True``, will divide
+                gradients by the initial world_size DDP training was launched
+                with. If ``False``, will compute the effective world size
+                (number of ranks that have not depleted their inputs yet) and
+                divide gradients by that during allreduce. Set
+                ``divide_by_initial_world_size=True`` to ensure every input
+                sample including the uneven inputs have equal weight in terms of
+                how much they contribute to the global gradient. This is
+                achieved by always dividing the gradient by the initial
+                ``world_size`` even when we encounter uneven inputs. If you set
+                this to ``False``, we divide the gradient by the remaining
+                number of nodes. This ensures parity with training on a smaller
+                world_size although it also means the uneven inputs would
+                contribute more towards the global gradient. Typically, you
+                would want to set this to ``True`` for cases where the last few
+                inputs of your training job are uneven. In extreme cases, where
+                there is a large discrepancy in the number of inputs, setting
+                this to ``False`` might provide better results.
             enable (bool): Whether to enable uneven input detection or not. Pass
                 in ``enable=False`` to disable in cases where you know that
                 inputs are even across participating processes. Default is
