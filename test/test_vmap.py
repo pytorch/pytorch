@@ -446,32 +446,34 @@ class TestVmapAPI(TestCase):
             self.assertRegex(str(wa[-1].message),
                              r'falling back to slow \(for loop and stack\) implementation')
 
-    def test_fallback_sub(self):
-        # NB: One day we will implement a batching rule for torch.sub.
+    def test_fallback_atan2(self):
+        # NB: One day we will implement a batching rule for torch.atan2.
         # If/when we do, this test should be replaced to test the fallback
         # path on another operator to avoid bitrot.
+        op = torch.atan2
+
         x = torch.randn(5, 7, 11)
         y = torch.randn(5, 7, 11)
 
-        self._assert_uses_vmap_fallback((torch.sub,), (x, y))
+        self._assert_uses_vmap_fallback((op,), (x, y))
 
         # fallback on torch.sub
         x = torch.randn(7, 11, 5)
         y = torch.randn(5, 7, 11)
-        result = vmap(torch.sub, (2, 0))(x, y)
-        self.assertEqual(result, x.permute(2, 0, 1) - y)
+        result = vmap(op, (2, 0))(x, y)
+        self.assertEqual(result, op(x.permute(2, 0, 1), y))
 
         # fallback on torch.sub, nested vmap
         x = torch.randn(7, 11, 5)
         y = torch.randn(5, 7, 11)
-        result = vmap(vmap(torch.sub), (2, 0))(x, y)
-        self.assertEqual(result, x.permute(2, 0, 1) - y)
+        result = vmap(vmap(op), (2, 0))(x, y)
+        self.assertEqual(result, op(x.permute(2, 0, 1), y))
 
         # big batch size (total 10000)
         x = torch.randn(100, 10, 10, 5)
         y = torch.randn(100, 10, 10)
-        result = vmap(vmap(vmap(torch.sub)))(x, y)
-        self.assertEqual(result, x - y.view(100, 10, 10, 1))
+        result = vmap(vmap(vmap(op)))(x, y)
+        self.assertEqual(result, op(x, y.view(100, 10, 10, 1)))
 
     def test_fallback_masked_fill(self):
         # NB: One day we will implement a batching rule for masked_fill
@@ -742,9 +744,19 @@ class TestVmapOperators(TestCase):
         def get_number(getter):
             return getter([]).item()
 
+        def make_case(op, input_getter=TensorFactory.randn):
+            return (op, input_getter)
+
         cases = [
-            (torch.mul, TensorFactory.rand),
-            (lambda x, y: x * y, TensorFactory.randn),
+            # Basic arithmetic
+            make_case(torch.add),
+            make_case(lambda x, y: x + y),
+            make_case(torch.sub),
+            make_case(lambda x, y: x - y),
+            make_case(torch.mul),
+            make_case(lambda x, y: x * y),
+            make_case(torch.div, input_getter=TensorFactory.randp1),
+            make_case(lambda x, y: x / y, input_getter=TensorFactory.randp1),
         ]
         test = self._vmap_test
 
@@ -785,11 +797,12 @@ class TestVmapOperators(TestCase):
             test(op, (getter([B0], device, torch.double), getter([B0, 2], device)))
 
             if not torch.cuda.is_available():
-                return
+                continue
 
             # Test cross-device scalars
             number = get_number(getter)
             self._test_unary(lambda t: op(t, number), getter, device='cuda')
+            self._test_unary(lambda t: op(number, t), getter, device='cuda')
             self._test_unary(lambda t: op(t, torch.tensor(number)), getter, device='cuda')
 
     def test_chunk(self):
