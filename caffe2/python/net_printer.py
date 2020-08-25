@@ -416,7 +416,7 @@ def debug_net(net):
     assert isinstance(net, Net)
     for op in net.Proto().op:
         text = Text()
-        print_op(op, text)
+        print_op(text, op)
         debug_net.LogInfo(str(text))
         debug_net.Proto().op.extend([op])
     return debug_net
