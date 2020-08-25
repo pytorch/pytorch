@@ -2363,10 +2363,9 @@ add_docstr(torch.vdot,
            r"""
 vdot(input, other, *, out=None) -> Tensor
 
-Computes the dot product (inner product) of two tensors.
-The vdot(a, b) function handles complex numbers differently than dot(a, b).
-If the first argument is complex the complex conjugate of the first argument
-is used for the calculation of the dot product.
+Computes the dot product (inner product) of two tensors. The vdot(a, b) function
+handles complex numbers differently than dot(a, b). If the first argument is complex,
+the complex conjugate of the first argument is used for the calculation of the dot product.
 
 .. note:: This function does not :ref:`broadcast <broadcasting-semantics>`.
 
