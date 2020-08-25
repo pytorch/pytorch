@@ -532,7 +532,7 @@ class TestUtilityFuns(TestCase):
 
         # run export in diagnose mode
         graph, unsupported_ops = torch.onnx._diagnose_export(model, (x, y,), f,
-                                                             opset_version=self.opset_version)
+                                                             opset_version=9)
         iter = graph.nodes()
         assert next(iter).kind() == "onnx::Constant"
         assert next(iter).kind() == "aten::add"
