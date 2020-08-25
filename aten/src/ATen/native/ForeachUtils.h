@@ -60,22 +60,24 @@ void verify_list(TensorList tensors1, TensorList tensors2) {
   TORCH_CHECK(tensors1.size() == tensors2.size(), "Tensor lists must have the same number of tensors.");
 
   auto expected_dtype = tensors1[0].dtype();
-  auto expected_device = tensors1[0].device();
 
   for (int i = 0; i < tensors1.size(); i++) {
     TORCH_CHECK(tensors1[i].dtype() == expected_dtype, "All tensors in the tensor list must have the same dtype.");
-    TORCH_CHECK(tensors1[i].device() == expected_device, "All tensors in the tensor list must have the same device.");
-    
     TORCH_CHECK(tensors2[i].dtype() == expected_dtype, "All tensors in the tensor list must have the same dtype.");
-    TORCH_CHECK(tensors2[i].device() == expected_device, "All tensors in the tensor list must have the same device.");
-
     TORCH_CHECK(tensors1[i].sizes() == tensors2[i].sizes(), "Corresponding tensors in lists must have the same size.");
   }
 }
 
 bool check_fast_route(TensorList tensors1, TensorList tensors2) {
+  auto expected_device = tensors1[0].device();
+
   for (int64_t i = 0; i < tensors1.size(); i++) {
     TORCH_CHECK(tensors1[i].sizes() == tensors2[i].sizes(), "Corresponding tensors from tensor lists have different size.");
+
+    if (tensors1[i].device() != expected_device || 
+        tensors2[i].device() != expected_device) {
+      return false;
+    }
 
     if (tensors1[i].layout() != at::kStrided || 
         tensors2[i].layout() != at::kStrided) {
