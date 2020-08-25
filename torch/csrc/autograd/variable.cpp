@@ -11,6 +11,7 @@
 #include <ATen/core/VariableHooksInterface.h>
 
 #include <ATen/ATen.h>
+#include <ATen/MemoryOverlap.h>
 #include <c10/util/Exception.h>
 
 #include <list>
@@ -537,7 +538,14 @@ void AutogradMeta::set_fw_grad(Variable& new_grad, const Variable& self) {
     // If there is already a fw_grad, re-use it
     if (new_grad.defined()) {
       // They are always the same size as the current Tensor
-      fw_grad_.copy_(new_grad);
+      // TODO find a better way to get this error message
+      try {
+        fw_grad_.copy_(new_grad);
+      } catch (const c10::Error& e) {
+        TORCH_WARN("Updating the forward grad on a Tensor that has overlapping memory is not supported. "
+                   "You should reset it first.");
+        throw;
+      }
     } else {
       fw_grad_.fill_(0);
     }
@@ -591,7 +599,31 @@ void AutogradMeta::set_fw_grad(Variable& new_grad, const Variable& self) {
       }
 
       if (new_grad.defined()) {
-        fw_grad_.copy_(new_grad);
+        if (is_view_) {
+          // TODO find a better way to get this error message
+          try {
+            fw_grad_.copy_(new_grad);
+          } catch (const c10::Error& e) {
+            // If the content is already correct, ignore the fact that we cannot copy_
+            // We may be able to skip this expensive check for some functions that just change metadata
+            // on Tensor to speed things up later if needed.
+            if (!*fw_grad_.eq(new_grad).all().data_ptr<bool>()) {
+              TORCH_WARN("Setting the forward grad of a Tensor that is a view and has memory overlap is not supported. "
+                         "You should set the forward grad on the base directly.");
+              throw;
+            }
+          }
+        } else {
+          // TODO find a better way to get this error message
+          try {
+            fw_grad_.copy_(new_grad);
+          } catch (const c10::Error& e) {
+            TORCH_WARN("Setting the forward grad of a Tensor that has memory overlap with a Tensor with different "
+                       "memory overlap is not supported. Both should have the same memory layour (size, stride and "
+                       "storage offset).");
+            throw;
+          }
+        }
       } else {
         fw_grad_.fill_(0);
       }

@@ -192,10 +192,13 @@ def get_analytical_jacobian_fw(fn, input, output):
         if torch.is_tensor(inp) and inp.requires_grad==True:
             diff_input.append(inp)
     for i, inp in enumerate(diff_input):
-        fw_grad = torch.zeros_like(inp)
+        # Generate a forward grad for inp that has the same metadata (size/stride/storage offset)
+        # This is to make sure the assignment below is always valid
+        fw_grad = torch.zeros(inp.storage().size(), dtype=inp.dtype, layout=inp.layout, device=inp.device)
+        fw_grad = fw_grad.as_strided(inp.size(), inp.stride(), inp.storage_offset())
         try:
+            # TODO(albanD): use set_fw_grad
             inp.fw_grad = fw_grad
-            fw_grad = inp.fw_grad
             for lin_idx, inp_idx in enumerate(product(*[range(m) for m in inp.size()])):
                 fw_grad[inp_idx] = 1
                 with torch.set_fw_grad_enabled(True):
