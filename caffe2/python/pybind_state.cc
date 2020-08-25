@@ -1749,6 +1749,7 @@ void addGlobalMethods(py::module& m) {
   m.def(
       "onnxifi",
       [](const py::bytes& pred_net_str,
+         const py::bytes& shapes_str,
          const std::vector<int>& block_list,
          const std::vector<std::string>& weight_names,
          int max_batch_size,
