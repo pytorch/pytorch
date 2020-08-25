@@ -228,8 +228,6 @@ class BytecodeDeserializer final {
   c10::IValue readArchive(
       const std::string& archive_name,
       std::shared_ptr<mobile::CompilationUnit> mcu);
-  std::unordered_map<std::string, std::string> readMobileMetadata(
-      std::shared_ptr<mobile::CompilationUnit> mcu);
   std::shared_ptr<CompilationUnit> compilation_unit_;
   std::unordered_set<std::string> imported_libs_;
   std::unique_ptr<PyTorchStreamReader> reader_;
@@ -252,23 +250,8 @@ mobile::Module BytecodeDeserializer::deserialize(
     debug_info_bvals = readArchive("mobile_debug", mcu).toTuple()->elements();
   }
   parseMethods(bvals, debug_info_bvals, *mcu);
-  auto meta_dict = readMobileMetadata(mcu);
-  return mobile::Module(readArchive("data", mcu).toObject(), meta_dict, mcu);
-}
 
-std::unordered_map<std::string, std::string> BytecodeDeserializer::
-    readMobileMetadata(std::shared_ptr<mobile::CompilationUnit> mcu) {
-  std::unordered_map<std::string, std::string> res;
-  if (!reader_->hasRecord("metadata.pkl")) {
-    return res;
-  }
-  auto ivalue_dict = readArchive("metadata", mcu).toGenericDict();
-  for (auto it = ivalue_dict.begin(); it != ivalue_dict.end(); ++it) {
-    auto key = it->key().toString()->string();
-    auto value = it->value().toString()->string();
-    res[key] = value;
-  }
-  return res;
+  return mobile::Module(readArchive("data", mcu).toObject(), mcu);
 }
 
 c10::IValue BytecodeDeserializer::readArchive(
