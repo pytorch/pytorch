@@ -258,14 +258,11 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_fold_convbn", &FoldConvBatchNorm)
       .def(
           "_freeze_module",
-          [](Module& module,
-             std::vector<std::string>& preservedAttrs,
-             bool freezeInterfaces) {
-            return freeze_module(module, preservedAttrs, freezeInterfaces);
+          [](Module& module, std::vector<std::string>& preservedAttrs) {
+            return freeze_module(module, preservedAttrs);
           },
           py::arg("module"),
-          py::arg("preservedAttrs") = std::vector<std::string>(),
-          py::arg("freezeInterfaces") = true)
+          py::arg("preservedAttrs") = std::vector<std::string>())
       .def("_jit_pass_fuse_linear", &FuseLinear)
       .def(
           "_jit_pass_fuse_add_relu",
@@ -565,16 +562,6 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_remove_dropout",
           [](script::Module& module) { return removeDropout(module); })
-      .def(
-          "_jit_pass_transform_conv1d_to_conv2d",
-          [](std::shared_ptr<Graph>& graph) {
-            return transformConv1dToConv2d(graph);
-          })
-      .def(
-          "_jit_pass_transform_conv1d_to_conv2d",
-          [](script::Module& module) {
-            return transformConv1dToConv2d(module);
-          })
       .def(
           "_jit_pass_insert_prepacked_ops",
           [](std::shared_ptr<Graph>& graph) {
@@ -985,10 +972,6 @@ void initJITBindings(PyObject* module) {
           "done",
           // Intentionally not releasing GIL
           &PythonFutureWrapper::done)
-      .def(
-          "value",
-          &PythonFutureWrapper::value,
-          py::call_guard<py::gil_scoped_release>())
       .def(
           "wait",
           &PythonFutureWrapper::wait,

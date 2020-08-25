@@ -103,8 +103,7 @@ c10::SymbolicShape ProfilingRecord::mergeSymbolicShapes(
   return c10::SymbolicShape(new_symbols);
 }
 
-void ProfilingRecord::insertShapeProfile(Node* n, size_t offset) {
-  Value* i = n->input(offset);
+void ProfilingRecord::insertShapeProfile(Node* n, Value* i) {
   auto pn = createProfileNode(nullptr, {i});
   auto pno = pn->addOutput();
   pn->ty_(attr::profiled_type, TensorType::get());
@@ -146,7 +145,7 @@ void ProfilingRecord::insertShapeProfile(Node* n, size_t offset) {
 
   pn->setCallback(shape_profiler);
   pn->insertBefore(n);
-  n->replaceInput(offset, pn->output());
+  n->replaceInputWith(i, pn->output());
 }
 
 bool needsProfiledInputs(Node* n) {
@@ -192,27 +191,13 @@ bool needsProfiledOutput(Node* n) {
   }
 }
 
-void ProfilingRecord::removeProfileCounter(Block* b) {
-  for (auto it = b->nodes().rbegin(); it != b->nodes().rend();) {
-    auto n = *it;
-    if (n->kind() == prim::profile && n->inputs().size() == 0) {
-      it.destroyCurrent();
-      // there is only one counter node
-      return;
-    } else {
-      it++;
-    }
-  }
-}
-
 void ProfilingRecord::instrumentBlock(Block* block) {
   for (auto it = block->nodes().begin(); it != block->nodes().end(); ++it) {
     auto n = *it;
-    for (size_t offset = 0; offset < n->inputs().size(); offset++) {
-      auto i = n->input(offset);
+    for (auto i : n->inputs()) {
       if (i->type()->kind() == c10::TypeKind::TensorType &&
           (needsProfiledInputs(n) || needsProfiledOutput(i->node()))) {
-        insertShapeProfile(n, offset);
+        insertShapeProfile(n, i);
       }
     }
 
@@ -226,11 +211,9 @@ void ProfilingRecord::instrumentBlock(Block* block) {
   // the use of a guard is now in the same
   // block as opposed to being separated from
   // the definition by block boundaries
-  for (size_t offset = 0; offset < block->return_node()->inputs().size();
-       offset++) {
-    auto i = block->return_node()->input(offset);
+  for (auto i : block->return_node()->inputs()) {
     if (i->type()->isSubtypeOf(TensorType::get())) {
-      insertShapeProfile(block->return_node(), offset);
+      insertShapeProfile(block->return_node(), i);
     }
   }
 }

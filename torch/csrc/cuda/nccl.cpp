@@ -9,95 +9,10 @@
 
 #include <THC/THC.h>
 
-#include <nccl.h>
-
 #include <limits>
 #include <sstream>
 #include <type_traits>
 #include <unordered_map>
-
-
-ncclComm_t* to_nccl_comm(torch::cuda::nccl::ncclComm_t* var) {
-  return reinterpret_cast<ncclComm_t*>(var);
-}
-
-ncclUniqueId* to_nccl_unique_id(torch::cuda::nccl::ncclUniqueId* var) {
-  return reinterpret_cast<ncclUniqueId*>(var);
-}
-
-ncclResult_t to_nccl_result(torch::cuda::nccl::ncclResult var) {
-  switch (var) {
-    case torch::cuda::nccl::ncclResult::Success:
-      return ncclResult_t::ncclSuccess;
-    case torch::cuda::nccl::ncclResult::UnhandledCudaError:
-      return ncclResult_t::ncclUnhandledCudaError;
-    case torch::cuda::nccl::ncclResult::SystemError:
-      return ncclResult_t::ncclSystemError;
-    case torch::cuda::nccl::ncclResult::InternalError:
-      return ncclResult_t::ncclInternalError;
-    case torch::cuda::nccl::ncclResult::InvalidArgument:
-      return ncclResult_t::ncclInvalidArgument;
-    case torch::cuda::nccl::ncclResult::InvalidUsage:
-      return ncclResult_t::ncclInvalidUsage;
-    case torch::cuda::nccl::ncclResult::NumResults:
-      return ncclResult_t::ncclNumResults;
-    default:
-      throw std::runtime_error("Unconvertible NCCL type");
-  }
-}
-
-torch::cuda::nccl::ncclResult from_nccl_result(ncclResult_t var) {
-    switch (var) {
-    case ncclSuccess:
-      return torch::cuda::nccl::ncclResult::Success;
-    case ncclUnhandledCudaError:
-      return torch::cuda::nccl::ncclResult::UnhandledCudaError;
-    case ncclSystemError:
-      return torch::cuda::nccl::ncclResult::SystemError;
-    case ncclInternalError:
-      return torch::cuda::nccl::ncclResult::InternalError;
-    case ncclInvalidArgument:
-      return torch::cuda::nccl::ncclResult::InvalidArgument;
-    case ncclInvalidUsage:
-      return torch::cuda::nccl::ncclResult::InvalidUsage;
-    case ncclNumResults:
-      return torch::cuda::nccl::ncclResult::NumResults;
-    default:
-      throw std::runtime_error("Unconvertible NCCL type");
-  }
-}
-
-ncclDataType_t to_nccl_data_type(const at::Tensor& t) {
-  if (!t.is_cuda()) {
-    throw std::runtime_error("Unconvertible NCCL type");
-  }
-  switch (t.scalar_type()) {
-    case at::kFloat:
-      return ncclDataType_t::ncclFloat;
-    case at::kHalf:
-      return ncclDataType_t::ncclHalf;
-    case at::kDouble:
-      return ncclDataType_t::ncclDouble;
-    case at::kLong:
-      return ncclDataType_t::ncclInt64;
-    case at::kInt:
-      return ncclDataType_t::ncclInt;
-    case at::kChar:
-      return ncclDataType_t::ncclChar;
-    case at::kByte:
-      return ncclDataType_t::ncclChar;
-#if defined(__HIP_PLATFORM_HCC__) && HIP_VERSION >= 301
-    case at::kBFloat16:
-      return ncclDataType_t::ncclBfloat16;
-#endif
-    default:
-      throw std::runtime_error("Unconvertible NCCL type");
-  }
-}
-
-ncclRedOp_t to_nccl_red_op(int var) {
-  return (ncclRedOp_t)(var);
-}
 
 namespace torch {
 namespace cuda {
@@ -107,24 +22,9 @@ using namespace at;
 
 namespace detail {
 
-struct AutoNcclGroup {
-  AutoNcclGroup() {
-    (c10::cuda::CUDACachingAllocator::getFreeMutex())->lock();
-#if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
-    NCCL_CHECK(from_nccl_result(ncclGroupStart()));
-#endif
-  }
-  ~AutoNcclGroup() {
-#if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
-    NCCL_CHECK(from_nccl_result(ncclGroupEnd()));
-#endif
-    (c10::cuda::CUDACachingAllocator::getFreeMutex())->unlock();
-  }
-};
-
-void throw_nccl_error(torch::cuda::nccl::ncclResult status) {
+void throw_nccl_error(ncclResult_t status) {
   std::ostringstream err;
-  err << "NCCL Error " << static_cast<int>(status) << ": " << ncclGetErrorString(to_nccl_result(status));
+  err << "NCCL Error " << status << ": " << ncclGetErrorString(status);
   throw std::runtime_error(err.str());
 }
 
@@ -133,8 +33,7 @@ struct NcclCommList {
   int ndevices;
   NcclCommList(const std::vector<int>& devices)
       : comms(new ncclComm_t[devices.size()]), ndevices(devices.size()) {
-    NCCL_CHECK(from_nccl_result(
-      ncclCommInitAll(to_nccl_comm(comms.get()), devices.size(), devices.data())));
+    NCCL_CHECK(ncclCommInitAll(comms.get(), devices.size(), devices.data()));
   }
   NcclCommList(NcclCommList&& foo) = default;
   ~NcclCommList() {
@@ -170,6 +69,35 @@ ArrayRef<ncclComm_t> get_communicators(TensorList inputs) {
   if (it == _communicators.end())
     std::tie(it, std::ignore) = _communicators.emplace(devices, devices);
   return it->second.ref();
+}
+
+inline
+ncclDataType_t get_data_type(const Tensor& t) {
+  if (!t.is_cuda()) {
+    throw std::runtime_error("Unconvertible NCCL type");
+  }
+  switch (t.scalar_type()) {
+    case at::kFloat:
+      return ncclFloat;
+    case at::kHalf:
+      return ncclHalf;
+    case at::kDouble:
+      return ncclDouble;
+    case at::kLong:
+      return ncclInt64;
+    case at::kInt:
+      return ncclInt;
+    case at::kChar:
+      return ncclChar;
+    case at::kByte:
+      return ncclChar;
+#if defined(__HIP_PLATFORM_HCC__) && HIP_VERSION >= 301
+    case at::kBFloat16:
+      return ncclBfloat16;
+#endif
+    default:
+      throw std::runtime_error("Unconvertible NCCL type");
+  }
 }
 
 static inline
@@ -326,7 +254,7 @@ void get_unique_id(ncclUniqueId& id)
 {
 #ifdef USE_NCCL
   using namespace torch::cuda::nccl::detail;
-  NCCL_CHECK(from_nccl_result(ncclGetUniqueId(to_nccl_unique_id(&id))));
+  NCCL_CHECK(ncclGetUniqueId(&id));
 #else
   AT_ERROR("PyTorch built without NCCL support");
 #endif
@@ -336,12 +264,7 @@ ncclComm_t comm_init_rank(int nranks, const ncclUniqueId& comm_id, int rank) {
 #ifdef USE_NCCL
   using namespace torch::cuda::nccl::detail;
   ncclComm_t comm;
-  ncclUniqueId id = comm_id;
-  NCCL_CHECK(from_nccl_result(ncclCommInitRank(
-    to_nccl_comm(&comm),
-    nranks,
-    *(to_nccl_unique_id(&id)),
-    rank)));
+  NCCL_CHECK(ncclCommInitRank(&comm, nranks, comm_id, rank));
   return comm;
 #else
   return nullptr;
@@ -362,8 +285,7 @@ void comm_destroy(ncclComm_t comm)
 
 #ifdef USE_NCCL
   using namespace torch::cuda::nccl::detail;
-  NCCL_CHECK(from_nccl_result(ncclCommDestroy(
-    *(to_nccl_comm(&comm)))));
+  NCCL_CHECK(ncclCommDestroy(comm));
 #endif
 }
 
@@ -396,7 +318,7 @@ void broadcast(
 #ifdef USE_NCCL
   using namespace torch::cuda::nccl::detail;
   check_inputs(tensors, tensors, 1, 1);
-  auto data_type = to_nccl_data_type(tensors[0]);
+  ncclDataType_t data_type = get_data_type(tensors[0]);
   int64_t numel = tensors[0].numel();
 
   const auto comms = user_comms.empty() ? get_communicators(tensors)
@@ -419,9 +341,8 @@ void broadcast(
         "maximum NCCL supports (",
         count_max,
         ")");
-    ncclComm_t comm = comms[i];
-    NCCL_CHECK(from_nccl_result(ncclBcast(
-        tensors[i].data_ptr(), numel, data_type, 0, *(to_nccl_comm(&comm)), stream)));
+    NCCL_CHECK(ncclBcast(
+        tensors[i].data_ptr(), numel, data_type, 0, comms[i], stream));
   }
 #else
   AT_ERROR("PyTorch built without NCCL support");
@@ -443,7 +364,7 @@ void reduce(
   check_inputs(inputs, output, root, 1, 1);
   const auto len = inputs.size();
 
-  auto data_type = to_nccl_data_type(inputs[0]);
+  ncclDataType_t data_type = get_data_type(inputs[0]);
 
   const auto count = inputs[0].numel();
   auto comms_ref = user_comms.empty() ? get_communicators(inputs)
@@ -459,16 +380,15 @@ void reduce(
         ? at::cuda::getCurrentCUDAStream(device).stream()
         : streams[i]->stream();
 
-    ncclComm_t comm = comms_ref[i];
-    NCCL_CHECK(from_nccl_result(ncclReduce(
+    NCCL_CHECK(ncclReduce(
         inputs[i].data_ptr(),
         root == i ? output.data_ptr() : nullptr,
         count,
         data_type,
-        to_nccl_red_op(op),
+        (ncclRedOp_t)op,
         root,
-        *(to_nccl_comm(&comm)),
-        stream)));
+        comms_ref[i],
+        stream));
   }
 #else
   AT_ERROR("PyTorch built without NCCL support");
@@ -495,7 +415,7 @@ void all_reduce(
   check_inputs(inputs, outputs, 1, 1);
   const auto len = inputs.size();
 
-  auto data_type = to_nccl_data_type(inputs[0]);
+  ncclDataType_t data_type = get_data_type(inputs[0]);
 
   const auto count = inputs[0].numel();
   auto comms_ref = user_comms.empty() ? get_communicators(inputs)
@@ -511,15 +431,14 @@ void all_reduce(
         ? at::cuda::getCurrentCUDAStream(device).stream()
         : streams[i]->stream();
 
-    ncclComm_t comm = comms_ref[i];
-    NCCL_CHECK(from_nccl_result(ncclAllReduce(
+    NCCL_CHECK(ncclAllReduce(
         inputs[i].data_ptr(),
         outputs[i].data_ptr(),
         count,
         data_type,
-        to_nccl_red_op(op),
-        *(to_nccl_comm(&comm)),
-        stream)));
+        (ncclRedOp_t)op,
+        comms_ref[i],
+        stream));
   }
 #else
   AT_ERROR("PyTorch built without NCCL support");
@@ -537,7 +456,7 @@ void reduce_scatter(
   const auto len = inputs.size();
   check_inputs(inputs, outputs, 1, len);
 
-  auto data_type = to_nccl_data_type(inputs[0]);
+  ncclDataType_t data_type = get_data_type(inputs[0]);
 
   const auto count = inputs[0].numel() / len;
   auto comms_ref = user_comms.empty() ? get_communicators(inputs)
@@ -553,15 +472,14 @@ void reduce_scatter(
         ? at::cuda::getCurrentCUDAStream(device).stream()
         : streams[i]->stream();
 
-    ncclComm_t comm = comms_ref[i];
-    NCCL_CHECK(from_nccl_result(ncclReduceScatter(
+    NCCL_CHECK(ncclReduceScatter(
         inputs[i].data_ptr(),
         outputs[i].data_ptr(),
         count,
         data_type,
-        to_nccl_red_op(op),
-        *(to_nccl_comm(&comm)),
-        stream)));
+        (ncclRedOp_t)op,
+        comms_ref[i],
+        stream));
   }
 #else
   AT_ERROR("PyTorch built without NCCL support");
@@ -578,7 +496,7 @@ void all_gather(
   const auto len = inputs.size();
   check_inputs(inputs, outputs, len, 1);
 
-  auto data_type = to_nccl_data_type(inputs[0]);
+  ncclDataType_t data_type = get_data_type(inputs[0]);
 
   const auto count = inputs[0].numel();
   auto comms_ref = user_comms.empty() ? get_communicators(inputs)
@@ -594,23 +512,22 @@ void all_gather(
         ? at::cuda::getCurrentCUDAStream(device).stream()
         : streams[i]->stream();
 
-    ncclComm_t comm = comms_ref[i];
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
-      NCCL_CHECK(from_nccl_result(ncclAllGather(
+      NCCL_CHECK(ncclAllGather(
           inputs[i].data_ptr(),
           outputs[i].data_ptr(),
           count,
           data_type,
-          *(to_nccl_comm(&comm)),
-          stream)));
+          comms_ref[i],
+          stream));
 #else
-      NCCL_CHECK(from_nccl_result(ncclAllGather(
+      NCCL_CHECK(ncclAllGather(
           inputs[i].data_ptr(),
           count,
           data_type,
           outputs[i].data_ptr(),
-          *(to_nccl_comm(&comm)),
-          stream)));
+          comms_ref[i],
+          stream));
 #endif
   }
 #else

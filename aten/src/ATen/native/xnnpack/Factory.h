@@ -1,10 +1,13 @@
 #pragma once
 
-#include <ATen/ATen.h>
+#include <ATen/native/xnnpack/Common.h>
+
+#ifdef USE_XNNPACK
 
 namespace at {
 namespace native {
-namespace mobile {
+namespace xnnpack {
+namespace internal {
 
 Tensor allocate_padded_contiguous_if_needed(
     const Tensor& input,
@@ -19,6 +22,9 @@ at::Tensor empty_with_tail_padding(
     c10::MemoryFormat memory_format,
     DimnameList maybe_names);
 
-} // namespace mobile
+} // namespace internal
+} // namespace xnnpack
 } // namespace native
 } // namespace at
+
+#endif /* USE_XNNPACK */

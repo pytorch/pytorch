@@ -1,7 +1,6 @@
 
 from .linear import Linear
 from .rnn import LSTM, LSTMCell, RNNCell, GRUCell
-from .embeddingbag import EmbeddingBag
 
 __all__ = [
     'Linear',
@@ -9,5 +8,4 @@ __all__ = [
     'LSTMCell',
     'RNNCell',
     'GRUCell',
-    'EmbeddingBag',
 ]

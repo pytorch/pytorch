@@ -126,11 +126,10 @@ TEST(VulkanTest, conv2d) {
   auto t_in = at::rand({1, C, H, W}, at::device(at::kCPU).dtype(at::kFloat));
   auto t_w = at::rand({OC, C, KH, KW}, at::device(at::kCPU).dtype(at::kFloat));
   auto t_b = at::zeros({OC}, at::device(at::kCPU).dtype(at::kFloat));
+  auto stride = c10::IntArrayRef{1};
+  auto padding = c10::IntArrayRef{0};
+  auto dilation = c10::IntArrayRef{1};
   int64_t groups = 1;
-  std::vector<int64_t> stride{1, 1};
-  std::vector<int64_t> padding{0, 0};
-  std::vector<int64_t> dilation{1, 1};
-
   auto t_out_expected =
       at::conv2d(t_in, t_w, t_b, stride, padding, dilation, groups);
   auto tv_in = t_in.vulkan();
@@ -157,9 +156,9 @@ TEST(VulkanTest, conv2dDWWeightsOnCPU) {
   auto t_w =
       at::rand({groups, 1, KH, KW}, at::device(at::kCPU).dtype(at::kFloat));
   auto t_b = at::zeros({groups}, at::device(at::kCPU).dtype(at::kFloat));
-  std::vector<int64_t> stride{1, 1};
-  std::vector<int64_t> padding{0, 0};
-  std::vector<int64_t> dilation{1, 1};
+  auto stride = c10::IntArrayRef{1};
+  auto padding = c10::IntArrayRef{0};
+  auto dilation = c10::IntArrayRef{1};
   auto t_out_expected =
       at::conv2d(t_in, t_w, t_b, stride, padding, dilation, groups);
   auto tv_in = t_in.vulkan();
@@ -557,10 +556,9 @@ TEST(VulkanTest, conv2dPrepack) {
   auto t_in = at::rand({1, C, 3, 3}, at::device(at::kCPU).dtype(at::kFloat));
   auto t_w = at::rand({OC, C, 2, 2}, at::device(at::kCPU).dtype(at::kFloat));
   auto t_b = at::zeros({OC}, at::device(at::kCPU).dtype(at::kFloat));
-
-  std::vector<int64_t> stride{1, 1};
-  std::vector<int64_t> padding{0, 0};
-  std::vector<int64_t> dilation{1, 1};
+  auto stride = c10::IntArrayRef{1};
+  auto padding = c10::IntArrayRef{0};
+  auto dilation = c10::IntArrayRef{1};
   float output_min = 0.25;
   float output_max = 1.0;
 
@@ -624,8 +622,7 @@ TEST(VulkanTest, adaptive_avg_pool2d) {
   ASSERT_TRUE(check);
 }
 
-// TODO: Enable when view operator for Vulkan landed
-TEST(VulkanTest, DISABLED_adaptive_avg_pool2d_2) {
+TEST(VulkanTest, adaptive_avg_pool2d_2) {
   if (!at::is_vulkan_available())
     return;
 
