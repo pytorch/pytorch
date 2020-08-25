@@ -60,6 +60,7 @@
 
 #include <c10/core/DispatchKey.h>
 #include <ATen/core/dispatch/Dispatcher.h>
+#include <ATen/core/op_registration/op_whitelist.h>
 #include <ATen/core/op_registration/infer_schema.h>
 #if defined(EXPOSE_C2_OPS) || !defined(CAFFE2_IS_XPLAT_BUILD)
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
@@ -298,6 +299,48 @@ namespace detail {
 
   class TorchLibraryInit;
 
+} // namespace detail
+
+// Note [Selective build]
+// ~~~~~~~~~~~~~~~~~~~~~~
+// In some settings, especially mobile, it is important to avoid compiling any
+// references to functions that you aren't actually going to use, so that they
+// can be eliminated by the linker.  We call this capability "selective build".
+//
+// A very easy way to implement selective build which results in a lot of
+// boilerplate is to just add ifdef's around every registration call, but this
+// means you have to write a lot of extra lines of code at every registration
+// site, and it also means you have to define some munging scheme to map
+// operators to macros.
+//
+// Instead of doing this, we have a different mechanism centered around the
+// concept of a SelectiveStr.  A selective name is like a const char* string,
+// except it also carries at compile time a boolean saying whether or not a
+// registration should actually happen or not.  We then have extra overloads which
+// bypass registration entirely if a selective name is disabled.  We do a
+// constexpr test to see if a operator should be enabled or not; this is
+// currently implemented in ATen/core/op_registration/op_whitelist.h
+
+namespace detail {
+
+  // A SelectiveStr is like a const char*, except that it also comes
+  // with a type brand that says whether or not the name is enabled or
+  // not.  If the string is disabled, then (at compile time) we DON'T generate
+  // a registration call for it.  This class is not intended to be called
+  // directly; use TORCH_SELECTIVE_NAME or TORCH_SELECTIVE_SCHEMA macros below
+  // to create it.
+  template <bool enabled>
+  class SelectiveStr {
+  public:
+    constexpr SelectiveStr(const char* name) : name_(name) {}
+    constexpr operator const char*() { return name_; }
+  private:
+    const char* name_;
+  };
+
+#define TORCH_SELECTIVE_NAME(n) torch::detail::SelectiveStr<c10::impl::op_whitelist_check(n)>(n)
+#define TORCH_SELECTIVE_SCHEMA(n) torch::detail::SelectiveStr<c10::impl::schema_whitelist_check(n)>(n)
+
 }
 
 /// This object provides the API for defining operators and providing
@@ -435,8 +478,8 @@ public:
   ///   m.impl("add", add_cuda);
   /// }
   /// ```
-  template <typename Func>
-  Library& impl(const char* name, Func&& raw_f) & {
+  template <typename Name, typename Func>
+  Library& impl(Name name, Func&& raw_f) & {
     // TODO: need to raise an error when you impl a function that has a
     // catch all def
     CppFunction f(std::forward<Func>(raw_f));
@@ -448,8 +491,8 @@ public:
   /// Convenience overload for directly specifying the dispatch key when
   /// impl().  You probably don't need this; instead, prefer specifying
   /// the dispatch key for the entire block in TORCH_LIBRARY_IMPL()
-  template <typename Dispatch, typename Func>
-  Library& impl(const char* name, Dispatch&& key, Func&& raw_f) & {
+  template <typename Name, typename Dispatch, typename Func>
+  Library& impl(Name name, Dispatch&& key, Func&& raw_f) & {
     return impl(name, dispatch(std::forward<Dispatch>(key), std::forward<Func>(raw_f)));
   }
 
@@ -462,12 +505,26 @@ public:
   ///
   /// This is equivalent to calling CppFunction::makeUnboxedOnly() on
   /// the function, but this name for the function makes it easy to grep for.
-  template <typename Func>
-  Library& impl_UNBOXED(const char* name, Func* raw_f) & {
+  template <typename Name, typename Func>
+  Library& impl_UNBOXED(Name name, Func* raw_f) & {
     // TODO: Remove this overload once the makeUnboxedOnly incidence rate
     // goes way down
     return impl(name, CppFunction::makeUnboxedOnly(raw_f));
   }
+
+  // These overloads cover cases when a SelectiveStr (see Note [Selective build])
+  // has been disabled at compile time.  In that case, don't generate any code
+  // referencing the passed in functions at all.
+  template <typename Schema>
+  Library& def(detail::SelectiveStr<false>) & { return *this; }
+  template <typename Func>
+  Library& def(detail::SelectiveStr<false>, Func&& raw_f) & { return *this; }
+  template <typename Func>
+  Library& impl(detail::SelectiveStr<false>, Func&& raw_f) & { return *this; }
+  template <typename Dispatch, typename Func>
+  Library& impl(detail::SelectiveStr<false>, Dispatch&& key, Func&& raw_f) & { return *this; }
+  template <typename Func>
+  Library& impl_UNBOXED(detail::SelectiveStr<false> name, Func* raw_f) & { return *this; }
 
   /// Register a fallback implementation for all operators which will be used
   /// if there is not a specific implementation for an operator available.
@@ -484,9 +541,9 @@ public:
   /// ```
   /// // Example:
   ///
-  /// TORCH_LIBRARY_IMPL(_, XLAPreAutograd, m) {
+  /// TORCH_LIBRARY_IMPL(_, AutogradXLA, m) {
   ///   // If there is not a kernel explicitly registered
-  ///   // for XLAPreAutograd, fallthrough to the next
+  ///   // for AutogradXLA, fallthrough to the next
   ///   // available kernel
   ///   m.fallback(torch::CppFunction::makeFallthrough());
   /// }
@@ -624,12 +681,19 @@ public:
 /// If ``add_cpu_impl`` is an overloaded function, use a
 /// ``static_cast`` to specify which overload you want
 /// (by providing the full type).
+///
+// NB: if the dispatch key is not whitelisted, we simply omit the Library
+// call entirely
 #define TORCH_LIBRARY_IMPL(ns, k, m) \
   static void TORCH_LIBRARY_IMPL_init_ ## ns ## _ ## k (torch::Library&); \
   static torch::detail::TorchLibraryInit TORCH_LIBRARY_IMPL_static_init_ ## ns ## _ ## k ( \
     torch::Library::IMPL, \
-    & TORCH_LIBRARY_IMPL_init_ ## ns ## _ ## k, \
-    #ns, c10::make_optional(c10::DispatchKey::k), __FILE__, __LINE__ \
+    c10::guts::if_constexpr<c10::impl::dispatch_key_whitelist_check(c10::DispatchKey::k)>( \
+      []() { return & TORCH_LIBRARY_IMPL_init_ ## ns ## _ ## k; }, \
+      []() { return [](torch::Library&) -> void {}; } \
+    ), \
+    #ns, c10::make_optional(c10::DispatchKey::k), \
+    __FILE__, __LINE__ \
   ); \
   void TORCH_LIBRARY_IMPL_init_ ## ns ## _ ## k (torch::Library& m)
 
