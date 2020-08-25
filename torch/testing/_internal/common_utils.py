@@ -674,7 +674,7 @@ try:
             derandomize=True,
             suppress_health_check=[hypothesis.HealthCheck.too_slow],
             database=None,
-            max_examples=100,
+            max_examples=50,
             verbosity=hypothesis.Verbosity.normal))
     hypothesis.settings.register_profile(
         "dev",
