@@ -336,6 +336,10 @@ Reduction Ops
 
     argmax
     argmin
+    amax
+    amin
+    max
+    min
     dist
     logsumexp
     mean
