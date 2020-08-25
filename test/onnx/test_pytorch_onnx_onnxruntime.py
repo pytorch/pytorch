@@ -2427,6 +2427,19 @@ class TestONNXRuntime(unittest.TestCase):
         shape = torch.randn(6, 4)
         self.run_test(ViewModel(), (x, shape))
 
+    def test_view_dynamic_zero_dim(self):
+        class ViewModel(torch.nn.Module):
+            def forward(self, input):
+                input = input.view(-1, 2)
+                return input.view(1, -1)
+
+        x = torch.ones(2)
+        another_x = torch.empty((0,))
+        model = ViewModel()
+        print(model(x).shape)
+        self.run_test(ViewModel(), x, test_with_inputs=[another_x],
+                      input_names=['input_1'], dynamic_axes={'input_1': [0, ]})
+
     def test_view_as(self):
         class ViewModel(torch.nn.Module):
             def forward(self, input, other):
