@@ -4481,10 +4481,10 @@ class NNTestCase(TestCase):
 
         res = tuple()
         if jacobian_input:
-            res += get_numerical_jacobian(fw, input, eps=1e-6),
+            res += get_numerical_jacobian(fw, input, eps=1e-6)[0],
         if jacobian_parameters:
             param, _ = self._get_parameters(module)
-            res += torch.cat([get_numerical_jacobian(fw, input, p, eps=1e-6) for p in param], 0),
+            res += torch.cat([get_numerical_jacobian(fw, input, p, eps=1e-6)[0] for p in param], 0),
         return res
 
     def check_jacobian(self, module, input, jacobian_input=True):
