@@ -197,6 +197,122 @@ void testConstantFoldWithVar() {
   }
 }
 
+void testConditionalSelectFoldSimple() {
+  KernelScope kernel_scope;
+  ExprHandle a(3.0f);
+  ExprHandle b(4.0f);
+  ExprHandle c(3.0f);
+  {
+    ExprHandle f = (a > b);
+
+    ExprHandle newF = IRSimplifier::simplify(f);
+    ASSERT_NE(newF.AsNode<IntImm>(), nullptr);
+    ASSERT_EQ(newF.AsNode<IntImm>()->value(), 0);
+
+    SimpleIRExprEval eval(newF);
+    ASSERT_EQ(eval.value<int>(), 0);
+  }
+  {
+    ExprHandle f = (a < b);
+
+    ExprHandle newF = IRSimplifier::simplify(f);
+    ASSERT_NE(newF.AsNode<IntImm>(), nullptr);
+    ASSERT_EQ(newF.AsNode<IntImm>()->value(), 1);
+
+    SimpleIRExprEval eval(newF);
+    ASSERT_EQ(eval.value<int>(), 1);
+  }
+  {
+    ExprHandle f = (a == c);
+
+    ExprHandle newF = IRSimplifier::simplify(f);
+    ASSERT_NE(newF.AsNode<IntImm>(), nullptr);
+    ASSERT_EQ(newF.AsNode<IntImm>()->value(), 1);
+
+    SimpleIRExprEval eval(newF);
+    ASSERT_EQ(eval.value<int>(), 1);
+  }
+  {
+    ExprHandle f = (a != c);
+
+    ExprHandle newF = IRSimplifier::simplify(f);
+    ASSERT_NE(newF.AsNode<IntImm>(), nullptr);
+    ASSERT_EQ(newF.AsNode<IntImm>()->value(), 0);
+
+    SimpleIRExprEval eval(newF);
+    ASSERT_EQ(eval.value<int>(), 0);
+  }
+}
+
+void testConditionalSelectFoldTwoLayer() {
+  KernelScope kernel_scope;
+  ExprHandle a(3.0f);
+  ExprHandle b(2.0f);
+  ExprHandle c(2.0f);
+  ExprHandle d(1.0f);
+  {
+    ExprHandle f = (a + b < c + d);
+
+    ExprHandle newF = IRSimplifier::simplify(f);
+    ASSERT_NE(newF.AsNode<IntImm>(), nullptr);
+    ASSERT_EQ(newF.AsNode<IntImm>()->value(), 0);
+
+    SimpleIRExprEval eval(newF);
+    ASSERT_EQ(eval.value<int>(), 0);
+  }
+  {
+    ExprHandle f = (a + b > c + d);
+
+    ExprHandle newF = IRSimplifier::simplify(f);
+    ASSERT_NE(newF.AsNode<IntImm>(), nullptr);
+    ASSERT_EQ(newF.AsNode<IntImm>()->value(), 1);
+
+    SimpleIRExprEval eval(newF);
+    ASSERT_EQ(eval.value<int>(), 1);
+  }
+  {
+    ExprHandle f = (a + d == b + c);
+
+    ExprHandle newF = IRSimplifier::simplify(f);
+    ASSERT_NE(newF.AsNode<IntImm>(), nullptr);
+    ASSERT_EQ(newF.AsNode<IntImm>()->value(), 1);
+
+    SimpleIRExprEval eval(newF);
+    ASSERT_EQ(eval.value<int>(), 1);
+  }
+  {
+    ExprHandle f = (a + d != b + c);
+
+    ExprHandle newF = IRSimplifier::simplify(f);
+    ASSERT_NE(newF.AsNode<IntImm>(), nullptr);
+    ASSERT_EQ(newF.AsNode<IntImm>()->value(), 0);
+
+    SimpleIRExprEval eval(newF);
+    ASSERT_EQ(eval.value<int>(), 0);
+  }
+}
+
+void testConditionalSelectFoldWithVar() {
+  KernelScope kernel_scope;
+  VarHandle x("x", kFloat);
+  ExprHandle f = x < 4.f;
+
+  ExprHandle newF = IRSimplifier::simplify(f);
+  const IntImm* folded = newF.AsNode<IntImm>();
+  ASSERT_EQ(folded, nullptr);
+
+  {
+    SimpleIRExprEval eval(newF);
+    eval.bindVar(x, ExprHandle(3.f));
+    ASSERT_EQ(eval.value<int>(), 1);
+  }
+  {
+    SimpleIRExprEval eval(newF);
+    eval.bindVar(x, ExprHandle(5.f));
+    ASSERT_EQ(eval.value<int>(), 0);
+  }
+}
+
 void testUnFoldableExpr() {
   KernelScope kernel_scope;
   VarHandle x("x", kFloat);
