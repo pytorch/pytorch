@@ -3,18 +3,18 @@ import torch.distributed as dist
 from torch import nn
 
 
-def quantize_per_tensor_cuda(x, scale, zero_point):
+def __quantize_per_tensor_cuda(x, scale, zero_point):
     y = torch.round(x / scale) + zero_point
     y = torch.clamp(y, 0, 255).to(torch.uint8)
     return y
 
 
-def dequantize_per_tensor_cuda(y, scale, zero_point):
+def __dequantize_per_tensor_cuda(y, scale, zero_point):
     x = scale * (y.to(torch.float32) - zero_point)
     return x
 
 
-def quantize_per_channel_cuda(x, scale, zero_point):
+def __quantize_per_channel_cuda(x, scale, zero_point):
     y = torch.zeros(x.size(), device=x.device)
     for i in range(x.size()[0]):
         y[i, :] = torch.round(x[i, :] / scale[i]) + zero_point[i]
@@ -22,7 +22,7 @@ def quantize_per_channel_cuda(x, scale, zero_point):
     return y
 
 
-def dequantize_per_channel_cuda(y, scale, zero_point):
+def __dequantize_per_channel_cuda(y, scale, zero_point):
     y = y.to(torch.float32).cuda(y.device)
     x = torch.zeros_like(y, device=y.device)
     for i in range(x.size()[0]):
@@ -30,7 +30,7 @@ def dequantize_per_channel_cuda(y, scale, zero_point):
     return x
 
 
-def get_allgather_out_list(all_gather_in_list, world_size):
+def __get_allgather_out_list(all_gather_in_list, world_size):
     out_list = [
         torch.zeros_like(
             all_gather_in_list,
@@ -73,7 +73,7 @@ def quantization_pertensor_hook(
     s, z = myObserver.calculate_qparams()
     s_and_z = torch.FloatTensor([s, z]).cuda(tensor.device)
 
-    all_ranks_s_and_z = get_allgather_out_list(s_and_z, world_size)
+    all_ranks_s_and_z = __get_allgather_out_list(s_and_z, world_size)
 
     # First, allgather scale and zeros.
     fut = dist.all_gather(
@@ -84,12 +84,12 @@ def quantization_pertensor_hook(
         # Store scale and zeros accross all workers.
         all_ranks_s_and_z = fut.wait()[0]
         # All workers quantize their own ``GradBucket`` tensors.
-        quantized_tensor = quantize_per_tensor_cuda(
+        quantized_tensor = __quantize_per_tensor_cuda(
             tensor, all_ranks_s_and_z[rank][0], all_ranks_s_and_z[rank][1]
         )
         # Allgather quantized tensors.
         fut = dist.all_gather(
-            get_allgather_out_list(quantized_tensor, world_size),
+            __get_allgather_out_list(quantized_tensor, world_size),
             quantized_tensor,
             group=group_to_use,
             async_op=True,
@@ -106,7 +106,7 @@ def quantization_pertensor_hook(
         # Using previously allgathered scales and zeros, dequantize gradient tensors
         # locally and then aggregate them.
         for r, quantized_tensor in enumerate(all_ranks_quantized_tensor):
-            aggregated_dequantized_tensor += dequantize_per_tensor_cuda(
+            aggregated_dequantized_tensor += __dequantize_per_tensor_cuda(
                 quantized_tensor, all_ranks_s_and_z[r][0], all_ranks_s_and_z[r][1]
             )
 
@@ -165,7 +165,7 @@ def quantization_perchannel_hook(
     s_ch, z_ch = myPerChannelObserver.calculate_qparams()
     s_and_z = torch.stack((s_ch, z_ch)).cuda(tensor.device)
 
-    all_ranks_s_and_z = get_allgather_out_list(s_and_z, world_size)
+    all_ranks_s_and_z = __get_allgather_out_list(s_and_z, world_size)
     # First, allgather scale and zeros.
     fut = dist.all_gather(
         all_ranks_s_and_z, s_and_z, group=group_to_use, async_op=True
@@ -175,14 +175,14 @@ def quantization_perchannel_hook(
         # Store scale and zeros accross all workers.
         all_ranks_s_and_z = fut.wait()[0]
         # All workers quantize their corresponding ``GradBucket`` tensors.
-        quantized_tensor = quantize_per_channel_cuda(
+        quantized_tensor = __quantize_per_channel_cuda(
             tensor_in_channels,
             all_ranks_s_and_z[rank, 0, :],
             all_ranks_s_and_z[rank, 1, :],
         )
         # Allgather quantized tensors.
         fut = dist.all_gather(
-            get_allgather_out_list(quantized_tensor, world_size),
+            __get_allgather_out_list(quantized_tensor, world_size),
             quantized_tensor,
             group=group_to_use,
             async_op=True,
@@ -199,7 +199,7 @@ def quantization_perchannel_hook(
         # Using previously allgathered scales and zeros, dequantize gradient tensors
         # locally and then aggregate them.
         for r, quantized_tensor in enumerate(all_ranks_quantized_tensor):
-            aggregated_dequantized_tensor += dequantize_per_channel_cuda(
+            aggregated_dequantized_tensor += __dequantize_per_channel_cuda(
                 quantized_tensor, all_ranks_s_and_z[r][0], all_ranks_s_and_z[r][1]
             )
 

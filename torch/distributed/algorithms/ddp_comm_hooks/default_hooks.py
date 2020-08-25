@@ -29,7 +29,7 @@ def allreduce_hook(
     return fut.then(then_callback)
 
 
-def get_allgather_out_list(all_gather_in_list, world_size):
+def __get_allgather_out_list(all_gather_in_list, world_size):
     out_list = [
         torch.zeros_like(
             all_gather_in_list,
@@ -67,7 +67,7 @@ def allgather_then_aggregate_hook(
 
     tensor = bucket.get_tensors()[0]
     fut = dist.all_gather(
-        get_allgather_out_list(tensor, world_size), tensor, group=group_to_use, async_op=True
+        __get_allgather_out_list(tensor, world_size), tensor, group=group_to_use, async_op=True
     ).get_future()
 
     def aggregate(fut):

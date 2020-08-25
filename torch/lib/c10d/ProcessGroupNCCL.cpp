@@ -645,6 +645,8 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
     // Creates the NCCL streams
     streamVal.push_back(at::cuda::getStreamFromPool());
 
+    // If single-process single-device mode, WorkNCCL::getFuture is supported,
+    // so get a dedicated stream to run FutureNCCL then callbacks.
     if (devices.size() == 1) {
       futureNCCLCallbackStream_ =
           std::make_shared<at::cuda::CUDAStream>(at::cuda::getStreamFromPool());
