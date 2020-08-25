@@ -37,20 +37,15 @@ inline void KernelFunction::callBoxed(const OperatorHandle& opHandle, Stack* sta
 }
 
 template<class Return, class... Args>
-inline Return callUnboxedKernelFunction(void* unboxed_kernel_func, OperatorKernel* functor, Args&&... args) {
-    using ActualSignature = Return (OperatorKernel*, Args...);
-    ActualSignature* func = reinterpret_cast<ActualSignature*>(unboxed_kernel_func);
-    return (*func)(functor, std::forward<Args>(args)...);
-}
-
-template<class Return, class... Args>
 inline Return KernelFunction::call(const OperatorHandle& opHandle, Args... args) const {
     // note: Args above is intentionally not Args&&. We don't want perfect
     // forwarding, which would require Args to be deduced, but instead we
     // want callers to explicitly specify the Args.
 
     if (C10_LIKELY(unboxed_kernel_func_ != nullptr)) {
-        return callUnboxedKernelFunction<Return, Args...>(unboxed_kernel_func_, functor_.get(), std::forward<Args>(args)...);
+        using ActualSignature = Return (OperatorKernel*, Args...);
+        ActualSignature* func = reinterpret_cast<ActualSignature*>(unboxed_kernel_func_);
+        return (*func)(functor_.get(), std::forward<Args>(args)...);
     }
 
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(

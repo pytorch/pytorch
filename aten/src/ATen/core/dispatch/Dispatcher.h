@@ -118,9 +118,6 @@ public:
   //
   // ------------------------------------------------------------------------
 
-  template<class Return, class... Args>
-  Return call(const TypedOperatorHandle<Return (Args...)>& op, Args... args) const;
-
   // Like call, but override the default DispatchKey calculation code,
   // instead dispatching straight to the provided DispatchKey
   template<class Return, class... Args>
@@ -301,6 +298,10 @@ private:
   std::list<Dispatcher::OperatorDef>::iterator operatorIterator_;
 };
 
+namespace detail {
+template<class... Args> inline void unused_arg_(const Args&...) {}
+}
+
 /**
  * This is a handle to an operator schema registered with the dispatcher.
  * It holds the same information as an OperatorHandle, but it is templated
@@ -320,7 +321,13 @@ public:
   TypedOperatorHandle& operator=(const TypedOperatorHandle&) = default;
 
   Return call(Args... args) const {
-    return c10::Dispatcher::singleton().call<Return, Args...>(*this, std::forward<Args>(args)...);
+    detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
+    auto dispatchKey = operatorIterator_->op.dispatchKeyExtractor()
+      .template getDispatchKeyUnboxed<Args...>(
+        DispatchKeySet::FULL,
+        args...
+    );
+    return c10::Dispatcher::singleton().callWithDispatchKey<Return, Args...>(*this, dispatchKey, args...);
   }
 
   Return callWithDispatchKey(DispatchKey dispatchKey, Args... args) const {
@@ -332,10 +339,6 @@ private:
   : OperatorHandle(std::move(operatorIterator)) {}
   friend class OperatorHandle;
 };
-
-namespace detail {
-template<class... Args> inline void unused_arg_(const Args&...) {}
-}
 
 template<class Return, class... Args>
 inline Return Dispatcher::callWithDispatchKey(const TypedOperatorHandle<Return(Args...)>& op, DispatchKey dispatchKey, Args... args) const {
@@ -368,17 +371,6 @@ inline Return Dispatcher::callWithDispatchKey(const TypedOperatorHandle<Return(A
   }
 #endif  // PYTORCH_DISABLE_PER_OP_PROFILING
   return kernel.template call<Return, Args...>(op, std::forward<Args>(args)...);
-}
-
-template<class Return, class... Args>
-inline Return Dispatcher::call(const TypedOperatorHandle<Return(Args...)>& op, Args... args) const {
-  detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
-  auto dispatchKey = op.operatorIterator_->op.dispatchKeyExtractor()
-    .template getDispatchKeyUnboxed<Args...>(
-      DispatchKeySet::FULL,
-      args...
-    );
-  return callWithDispatchKey<Return, Args...>(op, dispatchKey, args...);
 }
 
 template<class Return, class... Args>
