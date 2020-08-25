@@ -1,6 +1,6 @@
-#include "caffe2/opt/onnxifi_op.h"
 #include "caffe2/operators/slice_op.h"
 #include "caffe2/opt/bound_shape_inferencer.h"
+#include "caffe2/opt/onnxifi_op.h"
 
 namespace caffe2 {
 
@@ -143,7 +143,8 @@ void BlobToTensorDescriptor(
        is_external_tensor),
       "Initialization blob ",
       name,
-      " needs to be TensorCPU or Int8TensorCPU or Int8FCDNNLowPPackedWeightBlob Based class");
+      " needs to be TensorCPU or Int8TensorCPU or Int8FCDNNLowPPackedWeightBlob Based class: ",
+      blob->TypeName());
   desc->tag = ONNXIFI_TAG_TENSOR_DESCRIPTOR_V1;
   desc->memoryType = ONNXIFI_MEMORY_TYPE_CPU;
   desc->isOffline = false;
@@ -306,12 +307,23 @@ int OnnxifiOp<CPUContext>::extractOutputBatchSizes() {
   // max_batch_size, mark that we don't need to adjust batch size and return.
   // Otherwise, do a pass of shape inference to get the real shapes of the
   // outputs.
-  const auto& t = Input(nominal_batch_idx_);
-  CAFFE_ENFORCE(
-      !t.sizes().empty(), input_names_[nominal_batch_idx_], " cannot be empty");
-  const auto dims = t.sizes();
-  const int current_batch_size = dims[0];
+  const Tensor* t = nullptr;
+  if (this->template InputIsType<int8::Int8TensorCPU>(nominal_batch_idx_)) {
+    const auto& input_tensor_int8 =
+        this->template Input<int8::Int8TensorCPU>(nominal_batch_idx_);
+    t = &input_tensor_int8.t;
+  } else {
+    t = &Input(nominal_batch_idx_);
+  }
 
+  CAFFE_ENFORCE(
+      t, "Null input shape tensor ptr. Possibly unsupported tensor type");
+  CAFFE_ENFORCE(
+      !t->sizes().empty(),
+      input_names_[nominal_batch_idx_],
+      " cannot be empty");
+  const auto dims = t->sizes();
+  const int current_batch_size = dims[0];
   if (current_batch_size == max_batch_size_) {
     return max_batch_size_;
   }
@@ -329,8 +341,18 @@ int OnnxifiOp<CPUContext>::extractOutputBatchSizes() {
   auto bound_shape_inferencer =
       BoundShapeInferencerRegistry()->Create("C10", spec);
   for (int i = 0; i < InputSize(); ++i) {
-    const auto& t0 = Input(i);
-    const auto dim0 = t0.sizes();
+    at::IntArrayRef dim0;
+    bool quantized = false;
+    if (this->template InputIsType<int8::Int8TensorCPU>(i)) {
+      const auto& input_tensor_int8 =
+          this->template Input<int8::Int8TensorCPU>(i);
+      const auto& t0 = input_tensor_int8.t;
+      dim0 = t0.sizes();
+      quantized = true;
+    } else {
+      const auto& t0 = Input(i);
+      dim0 = t0.sizes();
+    }
     TensorShape shape;
     for (const auto d : dim0) {
       shape.add_dims(d);
@@ -340,7 +362,8 @@ int OnnxifiOp<CPUContext>::extractOutputBatchSizes() {
     if (dim_type.size()) {
       dim_type[0] = TensorBoundShape_DimType_BATCH;
     }
-    input_shape_info_[input_names_[i]] = ShapeInfo(dim_type, std::move(shape));
+    input_shape_info_[input_names_[i]] =
+        ShapeInfo(dim_type, std::move(shape), quantized);
   }
   bound_shape_inferencer->InferBoundShapeAndType(
       netdef_, input_shape_info_, nullptr, false);
@@ -373,7 +396,7 @@ int OnnxifiOp<CPUContext>::extractOutputBatchSizes() {
           real_shape.dims(j),
           ")");
       begin_ptr[j] = 0;
-      if (max_shape[j] > real_shape.dims(j)) {
+      if (max_shape[j] >= real_shape.dims(j)) {
         end_ptr[j] = real_shape.dims(j);
         mismatch += j;
       } else {
@@ -473,18 +496,28 @@ template <>
 bool OnnxifiOp<CPUContext>::RunOnDevice() {
   CAFFE_ENFORCE_EQ(input_desc_.size(), InputSize());
   for (unsigned i = 0U; i < InputSize(); ++i) {
-    const auto& input_tensor = Input(i);
-    const at::IntArrayRef tensor_dims = input_tensor.sizes();
     auto& tensor_descriptor = input_desc_[i];
     tensor_descriptor.tag = ONNXIFI_TAG_TENSOR_DESCRIPTOR_V1;
     tensor_descriptor.memoryType = ONNXIFI_MEMORY_TYPE_CPU;
-    tensor_descriptor.dimensions = tensor_dims.size();
+    at::IntArrayRef tensor_dims;
+    if (this->template InputIsType<int8::Int8TensorCPU>(i)) {
+      const auto& input_tensor_int8 =
+          this->template Input<int8::Int8TensorCPU>(i);
+      const auto& cpu_tensor = input_tensor_int8.t;
+      tensor_dims = cpu_tensor.sizes();
+      setInputTensorDescriptorTypeAndBuffer(
+          input_tensor_int8, &tensor_descriptor);
+    } else {
+      const auto& input_tensor = Input(i);
+      tensor_dims = input_tensor.sizes();
+      setInputTensorDescriptorTypeAndBuffer(input_tensor, &tensor_descriptor);
+    }
     auto& input_shape = input_shapes_[i];
     input_shape.clear();
     input_shape.insert(
         input_shape.begin(), tensor_dims.cbegin(), tensor_dims.cend());
+    tensor_descriptor.dimensions = tensor_dims.size();
     tensor_descriptor.shape = input_shape.data();
-    setInputTensorDescriptorTypeAndBuffer(input_tensor, &tensor_descriptor);
   }
 
   CAFFE_ENFORCE_EQ(output_desc_.size(), OutputSize());
@@ -507,8 +540,8 @@ bool OnnxifiOp<CPUContext>::RunOnDevice() {
     ext_supported = true;
     output_fence.tag = ONNXIFI_TAG_MEMORY_FENCE_V1;
     output_fence.type = ONNXIFI_SYNCHRONIZATION_EVENT;
+    traces_.reset();
     if (enable_tracing_) {
-      traces_.reset();
       traces_ = std::shared_ptr<onnxTraceEventList>(
           new onnxTraceEventList(), [this](onnxTraceEventList* p) {
             if (p && onnxReleaseTraceEventsPointer_) {
@@ -532,9 +565,18 @@ bool OnnxifiOp<CPUContext>::RunOnDevice() {
     current_batch_size = extractOutputBatchSizes();
     onnxEventState eventState;
     onnxStatus eventStatus;
+    std::string message;
+    size_t messageLength = 512;
+    message.resize(messageLength);
+
     CAFFE_ENFORCE_EQ(
         (*onnxWaitEventForPointer_)(
-            output_fence.event, timeout_, &eventState, &eventStatus),
+            output_fence.event,
+            timeout_,
+            &eventState,
+            &eventStatus,
+            const_cast<char*>(message.data()),
+            &messageLength),
         ONNXIFI_STATUS_SUCCESS);
     CAFFE_ENFORCE_EQ(
         eventState,
@@ -542,7 +584,13 @@ bool OnnxifiOp<CPUContext>::RunOnDevice() {
         "Onnxifi run timeouted out after ",
         timeout_,
         " ms.");
-    CAFFE_ENFORCE_EQ(eventStatus, ONNXIFI_STATUS_SUCCESS);
+    if (eventStatus != ONNXIFI_STATUS_SUCCESS) {
+      if (messageLength == 0) {
+        CAFFE_THROW("onnxifi internal error");
+      } else {
+        CAFFE_THROW(message);
+      }
+    }
     CAFFE_ENFORCE_EQ(
         lib_->onnxReleaseEvent(output_fence.event), ONNXIFI_STATUS_SUCCESS);
   }

@@ -334,7 +334,7 @@ def save(obj, f: Union[str, os.PathLike, BinaryIO],
          pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL, _use_new_zipfile_serialization=True) -> None:
     """Saves an object to a disk file.
 
-    See also: :ref:`recommend-saving-models`
+    See also: `saving-loading-tensors`
 
     Args:
         obj: saved object
@@ -859,8 +859,4 @@ def _load(zip_file, map_location, pickle_module, **pickle_load_args):
 
 
 def _is_torchscript_zip(zip_file):
-    for file_name in zip_file.get_all_records():
-        parts = file_name.split(os.sep)
-        if len(parts) > 1 and parts[1] == 'constants.pkl':
-            return True
-    return False
+    return 'constants.pkl' in zip_file.get_all_records()

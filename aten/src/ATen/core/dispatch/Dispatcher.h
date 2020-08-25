@@ -12,6 +12,8 @@
 #include <mutex>
 #include <list>
 
+#include <ATen/core/grad_mode.h>
+
 namespace c10 {
 
 class CAFFE2_API OperatorHandle;
@@ -340,6 +342,7 @@ inline Return Dispatcher::callWithDispatchKey(const TypedOperatorHandle<Return(A
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
   const KernelFunction& kernel = op.operatorIterator_->op.lookup(dispatchKey);
 
+#ifndef PYTORCH_DISABLE_PER_OP_PROFILING
   // Check if we need to run callbacks registered with RecordFunction
   // If true and callbacks need inputs, we box the arguments and pass
   // them into the callbacks and also into the kernel call
@@ -349,22 +352,21 @@ inline Return Dispatcher::callWithDispatchKey(const TypedOperatorHandle<Return(A
   at::RecordFunction guard(at::RecordScope::FUNCTION);
   if (C10_UNLIKELY(guard.active)) {
     if (shouldRecord(dispatchKey) && op.operatorIterator_->op.isObserved()) {
+      int64_t seq_num = -1;
+      // Setting sequence number in the Autograd case to associate
+      // the forward range with the coresponding Autograd's node
+      if (dispatchKey == DispatchKey::Autograd && at::GradMode::is_enabled()) {
+        seq_num = at::sequence_number::peek();
+      }
       if (guard.needs_inputs) {
-        std::vector<c10::IValue> stack;
-        stack.reserve(sizeof...(Args));
-        auto boxed_all_args = impl::boxArgumentsOrCannotBoxIntoStack(stack, args...);
-
-        guard.before(op.schema().name(), stack, at::sequence_number::peek());
-
-        // if we could convert all the arguments, also pass the stack into the kernel call
-        if (boxed_all_args) {
-          return kernel.template callBoxedOrUnboxed<Return, Args...>(op, stack, std::forward<Args>(args)...);
-        }
+        torch::jit::Stack stack = impl::BoxedKernelWrapper<Return(Args...)>::boxArgs(args...);
+        guard.before(op.schema().name(), stack, seq_num);
       } else {
-        guard.before(op.schema().name(), at::sequence_number::peek());
+        guard.before(op.schema().name(), seq_num);
       }
     }
   }
+#endif  // PYTORCH_DISABLE_PER_OP_PROFILING
   return kernel.template call<Return, Args...>(op, std::forward<Args>(args)...);
 }
 
@@ -398,17 +400,23 @@ inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const 
   auto dispatchKey = entry.dispatchKeyExtractor().getDispatchKeyBoxed(stack);
   const auto& kernel = entry.lookup(dispatchKey);
 
+#ifndef PYTORCH_DISABLE_PER_OP_PROFILING
   // using already existing stack to record function execution in observers
   at::RecordFunction guard(at::RecordScope::FUNCTION);
   if (C10_UNLIKELY(guard.active)) {
     if (shouldRecord(dispatchKey) && entry.isObserved()) {
+      int64_t seq_num = -1;
+      if (dispatchKey == DispatchKey::Autograd && at::GradMode::is_enabled()) {
+        seq_num = at::sequence_number::peek();
+      }
       if (guard.needs_inputs) {
-        guard.before(op.schema().name(), *stack, at::sequence_number::peek());
+        guard.before(op.schema().name(), *stack, seq_num);
       } else {
-        guard.before(op.schema().name(), at::sequence_number::peek());
+        guard.before(op.schema().name(), seq_num);
       }
     }
   }
+#endif  // PYTORCH_DISABLE_PER_OP_PROFILING
   kernel.callBoxed(op, stack);
 }
 

@@ -300,6 +300,51 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(1, 3, 4, 112, 112, requires_grad=True)
         self.run_test(model, (x,), rtol=1e-3, atol=1e-5)
 
+    def test_fuse_conv_bn1d(self):
+        class Fuse(torch.nn.Module):
+            def __init__(self):
+                super(Fuse, self).__init__()
+                self.conv = torch.nn.Conv1d(16, 33, 3, stride=2)
+                self.bn = torch.nn.BatchNorm1d(33)
+
+            def forward(self, x):
+                out = self.conv(x)
+                return self.bn(out)
+
+        model = Fuse()
+        x = torch.randn(20, 16, 50, requires_grad=True)
+        self.run_test(model, (x,))
+
+    def test_fuse_conv_bn2d(self):
+        class Fuse(torch.nn.Module):
+            def __init__(self):
+                super(Fuse, self).__init__()
+                self.conv = torch.nn.Conv2d(3, 2, kernel_size=1, stride=2, padding=3, bias=False)
+                self.bn = torch.nn.BatchNorm2d(2)
+
+            def forward(self, x):
+                out = self.conv(x)
+                return self.bn(out)
+
+        model = Fuse()
+        x = torch.randn(2, 3, 2, 2, requires_grad=True)
+        self.run_test(model, (x,))
+
+    def test_fuse_conv_bn3d(self):
+        class Fuse(torch.nn.Module):
+            def __init__(self):
+                super(Fuse, self).__init__()
+                self.conv = torch.nn.Conv3d(3, 2, (3, 5, 2), stride=(2, 1, 1), padding=(3, 2, 0), bias=False)
+                self.bn = torch.nn.BatchNorm3d(2)
+
+            def forward(self, x):
+                out = self.conv(x)
+                return self.bn(out)
+
+        model = Fuse()
+        x = torch.randn(2, 3, 10, 50, 100, requires_grad=True)
+        self.run_test(model, (x,), rtol=1e-3, atol=1e-6)
+
     def test_reshape_constant_fold(self):
         class Reshape(torch.nn.Module):
             def __init__(self, ):
@@ -446,6 +491,47 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(model, x, test_with_inputs=[y],
                       input_names=['input_1'],
                       dynamic_axes={'input_1': [0, 1, 2]})
+
+    def test_tensor(self):
+        class ScalarInputModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, input):
+                return torch.tensor(input.shape[1]) 
+
+        x = torch.randn(3, 4)
+        self.run_test(ScalarInputModel(), x)
+
+        class TensorInputModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, input):
+                return torch.tensor([input.shape[0], input.shape[1]]) 
+
+        x = torch.randn(3, 4)
+        self.run_test(TensorInputModel(), x)
+
+        class FloatInputModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, input):
+                return torch.tensor([float(input)])
+
+        x = torch.randn(1)
+        self.run_test(FloatInputModel(), x)
+
+        class InputWithDtypeModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, input):
+                return torch.tensor(input.shape[1], dtype=torch.long) 
+
+        x = torch.randn(3, 4)
+        self.run_test(InputWithDtypeModel(), x)
+
+        class MixedInputModel(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, input):
+                return torch.tensor([input.shape[0], int(input)]) 
+
+        x = torch.randn(1)
+        self.run_test(MixedInputModel(), x)
 
     def test_hardtanh(self):
         model = torch.nn.Hardtanh(-1.5, 2.5)
@@ -600,13 +686,64 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(TraceModel(), (x1, x2, x3), atol=10e-5)
         self.run_test(ScriptModel(), (x1, x2, x3), atol=10e-5)
 
-    def test_squeeze(self):
+    def squeeze_model_tests(self, d, x1, x2):
         class Squeeze(torch.nn.Module):
             def forward(self, x):
-                return torch.torch.squeeze(x, dim=-2)
+                if d is not None:
+                    return torch.squeeze(x, dim=d)
+                else:
+                    return torch.squeeze(x)
 
+        x2 = [] if x2 is None else [x2]
+        self.run_test(Squeeze(), x1, input_names=['input'], dynamic_axes={'input': {0: '0', 1: '1', 2: '2'}}, test_with_inputs=x2)
+
+    def test_squeeze_without_no_op(self):
         x = torch.randn(2, 1, 4)
-        self.run_test(Squeeze(), x)
+        self.squeeze_model_tests(1, x, None)
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_squeeze(self):
+        x_squeeze = torch.randn(2, 1, 4)
+        x_noop = torch.randn(2, 2, 3)
+        self.squeeze_model_tests(1, x_squeeze, x_noop)
+
+    def test_squeeze_neg_without_no_op(self):
+        x = torch.randn(2, 1, 4)
+        self.squeeze_model_tests(-2, x, None)
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_squeeze_neg(self):
+        x_squeeze = torch.randn(2, 1, 4)
+        x_noop = torch.randn(2, 2, 3)
+        self.squeeze_model_tests(-2, x_squeeze, x_noop)
+
+    def test_squeeze_all_dims(self):
+        x_squeeze = torch.randn(2, 1, 4)
+        x_noop = torch.randn(2, 2, 3)
+        self.squeeze_model_tests(None, x_squeeze, x_noop)
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_squeeze_no_op(self):
+        x_noop = torch.randn(2, 1, 4)
+        x_squeeze = torch.randn(2, 2, 1)
+        self.squeeze_model_tests(2, x_noop, x_squeeze)
+
+    def test_squeeze_no_op_without_additional_inputs(self):
+        x_noop = torch.randn(2, 1, 4)
+        self.squeeze_model_tests(2, x_noop, None)
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_squeeze_runtime_dim(self):
+        class Squeeze(torch.nn.Module):
+            def forward(self, d1, d2):
+                t = torch.zeros(d1[0], d2[0])
+                return t.squeeze(0)
+
+        d1 = torch.tensor([1])
+        d3 = torch.tensor([3])
+        d4 = torch.tensor([4])
+        self.run_test(Squeeze(), (d1, d4), test_with_inputs=[(d3, d4)])
+        self.run_test(Squeeze(), (d3, d4), test_with_inputs=[(d1, d3)])
 
     def test_unsqueeze(self):
         class Unsqueeze(torch.nn.Module):
@@ -884,6 +1021,19 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(5, 3, 2)
         self.run_test(SizeModel(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_as_strided(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                chunk_size = list(x.size())
+                chunk_size[1] = chunk_size[1] * 2 - 1
+                chunk_stride = list(x.stride())
+                chunk_stride[1] = chunk_stride[1] // 2
+                return x.as_strided((3, 3, 3), (1, 4, 2), storage_offset=2), x.as_strided(chunk_size, chunk_stride)
+
+        x = torch.randn(5, 8, 7)
+        self.run_test(Model(), x)
 
     def _test_index_generic(self, fn):
         class MyModel(torch.nn.Module):
@@ -1469,6 +1619,22 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(3, 4, 5, requires_grad=True)
         self.run_test(IndexCopyModel(), x)
 
+    def test_select(self):
+        class Select(torch.nn.Module):
+            def forward(self, x):
+                return x[:, 1]
+
+        x = torch.randn(3, 4)
+        self.run_test(Select(), x)
+
+    def test_select_negative_index(self):
+        class Select(torch.nn.Module):
+            def forward(self, x):
+                return x[:, -1]
+
+        x = torch.randn(3, 4)
+        self.run_test(Select(), x)
+
     # TODO: enable for opset 10 when ONNXRuntime version will be updated
 
     def test_index_select_constant_scaler_index(self):
@@ -1585,6 +1751,17 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(10, 3, 128, 128, 128)
         model = torch.nn.BatchNorm3d(3, affine=False)
         self.run_test(model, x)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_scatter_with_scalar(self):
+        class ScatterModel(torch.nn.Module):
+            def forward(self, input, indices):
+                values = 1.0
+                return input.scatter(1, indices, values)
+
+        input = torch.tensor([[0., 0., 0.], [0., 0., 0.], [0., 0., 0.]], dtype=torch.float64)
+        indices = torch.tensor([[1, 0], [0, 1], [0, 1]], dtype=torch.int64)
+        self.run_test(ScatterModel(), input=(input, indices))
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_scatter(self):
@@ -2407,6 +2584,14 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(5, 4, 3)
         self.run_test(SplitModel2(), x)
 
+        class SplitModel3(torch.nn.Module):
+            def forward(self, input):
+                out1, out2, out3 = input.split([2, 1, 2])
+                return out3, out1
+
+        x = torch.randn(5, 4, 3)
+        self.run_test(torch.jit.script(SplitModel3()), x)
+
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_split_size_as_list(self):
         class SplitModel(torch.nn.Module):
@@ -2515,11 +2700,15 @@ class TestONNXRuntime(unittest.TestCase):
                 res1 = []
                 arr = x.split([3, 4, 1, 1, 2, 3, 2], 0)
                 res2 = torch.zeros(3, 4, dtype=torch.long)
+                res3 = []
+                res4 = []
                 for i in range(len(arr)):
                     res = res.append(arr[i].sum(0, False))
                     res1 = res1.append(arr[-1 - i].sum(0, False))
                     res2 += 1
-                return torch.stack(res), torch.stack(res1), res2
+                    res3 = res3 + [arr[i].sum(0, False)]
+                    res4 += [arr[-1 - i].sum(0, False)]
+                return torch.stack(res), torch.stack(res1), res2, torch.stack(res3), torch.stack(res4)
 
         model = ListLoopModel()
         inputs = torch.randn(16)
@@ -2538,6 +2727,8 @@ class TestONNXRuntime(unittest.TestCase):
 
                 res.insert(0, tensors[1])
                 res.append(tensors[2])
+                res += [tensors[3], tensors[4]]
+                res = res + [tensors[5]]
                 return torch.ones(len(res))
 
         model = ListModel()
@@ -2574,6 +2765,18 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(2, 3, 4)
         self.run_test(TensorFactory(), x)
+
+    @enableScriptTest()
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_eye(self):
+        class TensorFactory(torch.nn.Module):
+            def forward(self, x):
+                return torch.eye(x.size()[1], 3), torch.eye(4, 4, dtype=torch.long), torch.eye(x.size()[1], 2, dtype=torch.long)
+
+        x = torch.randn(2, 3, 4)
+        another_x = torch.randn(5, 6, 7)
+        self.run_test(TensorFactory(), x, test_with_inputs=[another_x],
+                      input_names=['input_1'], dynamic_axes={'input_1': [0, 1, 2]})
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_inplace_zero(self):
@@ -2699,7 +2902,8 @@ class TestONNXRuntime(unittest.TestCase):
 
         class ComparisonModel(torch.nn.Module):
             def forward(self, x, y):
-                return x.ge(0.5) & y.le(2)
+                a = torch.tensor([12.0])
+                return x.lt(1.5) & y.le(2) & x.le(1), x.gt(y), x.lt(y), a.ge(x.size(0))
 
         x = torch.ones(2, 3, dtype=torch.int32)
         y = torch.ones(2, 3, dtype=torch.float32)
@@ -3503,6 +3707,30 @@ class TestONNXRuntime(unittest.TestCase):
         mat1 = torch.randn(2, 3)
         mat2 = torch.randn(3, 3)
         self.run_test(M(), input=(mat1, mat2))
+
+    @skipIfUnsupportedMinOpsetVersion(9)  # Because where op is not supported for opset < 9.
+    def test_where_with_bool_tensor(self):
+        class M(torch.nn.Module):
+            def forward(self, mat1, mat2):
+                out = torch.where(mat1 > 0, mat1, mat2)
+                return out
+
+        mat1 = torch.randn(2, 3)
+        mat2 = torch.ones(2, 3)
+        self.run_test(M(), input=(mat1, mat2))
+
+    @skipIfUnsupportedMinOpsetVersion(9)  # Because where op is not supported for opset < 9.
+    def test_where_with_byte_tensor(self):
+        class M(torch.nn.Module):
+            def forward(self, cond, mat1, mat2):
+                out = torch.where(cond, mat1, mat2)
+                return out
+
+        cond = torch.ones(2, 3, dtype=torch.uint8)
+        cond[1, 2] = 0
+        mat1 = torch.randn(2, 3)
+        mat2 = torch.ones(2, 3)
+        self.run_test(M(), input=(cond, mat1, mat2))
 
     def test_dropout(self):
         class M(torch.nn.Module):

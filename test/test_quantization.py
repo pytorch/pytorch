@@ -60,11 +60,21 @@ from quantization.test_quantize_jit import TestQuantizeJitOps  # noqa: F401
 from quantization.test_quantize_jit import TestQuantizeDynamicJitPasses  # noqa: F401
 from quantization.test_quantize_jit import TestQuantizeDynamicJitOps  # noqaa: F401
 
+# 3. GraphModule based graph mode quantization
+from quantization.test_quantize_fx import TestQuantizeFx  # noqa: F401
+from quantization.test_quantize_fx import TestQuantizeFxOps  # noqa: F401
+from quantization.test_quantize_fx import TestQuantizeFxModels  # noqa: F401
+
 # Tooling: numric_suite
 from quantization.test_numeric_suite import TestEagerModeNumericSuite  # noqa: F401
 
 # Backward Compatibility
 from quantization.test_backward_compatibility import TestSerialization  # noqa: F401
+
+# Equalization
+from quantization.test_equalize import TestEqualizeEager  # noqa: F401
+# Bias Correction
+from quantization.test_bias_correction import TestBiasCorrection  # noqa: F401
 
 if __name__ == '__main__':
     run_tests()

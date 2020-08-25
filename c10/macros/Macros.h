@@ -33,6 +33,31 @@
   #define __ubsan_ignore_signed_int_overflow__
 #endif
 
+
+// Detect address sanitizer as some stuff doesn't work with it
+#undef C10_ASAN_ENABLED
+
+// for clang
+#if defined(__has_feature)
+#if ((__has_feature(address_sanitizer)))
+#define C10_ASAN_ENABLED 1
+#endif
+#endif
+
+// for gcc
+#if defined(__SANITIZE_ADDRESS__)
+#if __SANITIZE_ADDRESS__
+#if !defined(C10_ASAN_ENABLED)
+#define C10_ASAN_ENABLED 1
+#endif
+#endif
+#endif
+
+#if !defined(C10_ASAN_ENABLED)
+#define C10_ASAN_ENABLED 0
+#endif
+
+
 // Disable the copy and assignment operator for a class. Note that this will
 // disable the usage of the class in std containers.
 #define C10_DISABLE_COPY_AND_ASSIGN(classname) \
@@ -308,7 +333,7 @@ __host__ __device__
 
 #if defined(__CUDA_ARCH__)
 #if defined(_MSC_VER) && defined(__CUDACC__)
-#define CONSTEXPR_EXCEPT_WIN_CUDA
+#define CONSTEXPR_EXCEPT_WIN_CUDA const
 #define C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA __host__
 #else
 #define CONSTEXPR_EXCEPT_WIN_CUDA constexpr
@@ -316,7 +341,7 @@ __host__ __device__
 #endif
 #else
 #if defined(_MSC_VER) && defined(__CUDACC__)
-#define CONSTEXPR_EXCEPT_WIN_CUDA
+#define CONSTEXPR_EXCEPT_WIN_CUDA const
 #define C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA
 #else
 #define CONSTEXPR_EXCEPT_WIN_CUDA constexpr

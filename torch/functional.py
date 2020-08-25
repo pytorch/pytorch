@@ -3,7 +3,7 @@ from typing import Tuple, Optional
 import torch
 import torch.nn.functional as F
 from ._lowrank import svd_lowrank, pca_lowrank
-from ._overrides import has_torch_function, handle_torch_function
+from .overrides import has_torch_function, handle_torch_function
 from ._jit_internal import boolean_dispatch, List
 from ._jit_internal import _overload as overload
 
@@ -319,7 +319,6 @@ Examples::
     if not torch.jit.is_scripting():
         if any(type(t) is not Tensor for t in operands) and has_torch_function(operands):
             return handle_torch_function(einsum, operands, equation, *operands)
-
     if len(operands) == 1 and isinstance(operands[0], (list, tuple)):
         # the old interface of passing the operands as one list argument
         operands = operands[0]
@@ -465,8 +464,7 @@ def stft(input, n_fft, hop_length=None, win_length=None, window=None,
         pad = int(n_fft // 2)
         input = F.pad(input.view(extended_shape), (pad, pad), pad_mode)
         input = input.view(input.shape[-signal_dim:])
-    return _VF.stft(input, n_fft, hop_length, win_length, window, normalized, onesided)
-
+    return _VF.stft(input, n_fft, hop_length, win_length, window, normalized, onesided)  # type: ignore
 
 def istft(input, n_fft, hop_length=None, win_length=None, window=None,
           center=True, normalized=False, onesided=True, length=None):
@@ -1063,7 +1061,8 @@ def atleast_3d(*tensors):
     Returns:
         output (Tensor or tuple of Tensors)
 
-    Example::
+    Example:
+
         >>> x = torch.tensor(0.5)
         >>> x
         tensor(0.5000)
@@ -1076,7 +1075,7 @@ def atleast_3d(*tensors):
         >>> torch.atleast_3d(y)
         tensor([[[-0.8079],
                 [ 0.7460]],
-
+                <BLANKLINE>
                 [[-1.1647],
                 [ 1.4734]]])
         >>> x = torch.randn(1,1,1)
@@ -1189,9 +1188,10 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
     if dim is None and out is None and dtype is None and p is not None:
         if isinstance(p, str):
             if p == "fro":
-                return _VF.frobenius_norm(input)
+                return _VF.frobenius_norm(input, dim=(), keepdim=keepdim)
         if not isinstance(p, str):
-            return _VF.norm(input, p)
+            _dim = [i for i in range(ndim)]  # noqa: C416 TODO: rewrite as list(range(m))
+            return _VF.norm(input, p, dim=_dim, keepdim=keepdim)
 
     # TODO: when https://github.com/pytorch/pytorch/issues/33782 is fixed
     # remove the overloads where dim is an int and replace with BraodcastingList1
