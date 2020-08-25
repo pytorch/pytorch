@@ -150,7 +150,8 @@ constexpr int MZ_ZIP_LOCAL_DIR_HEADER_SIZE = 30;
 constexpr int MZ_ZIP_LDH_FILENAME_LEN_OFS = 26;
 constexpr int MZ_ZIP_LDH_EXTRA_LEN_OFS = 28;
 
-static size_t getPadding(
+namespace detail {
+size_t getPadding(
     size_t cursor,
     size_t filename_size,
     size_t size,
@@ -179,6 +180,7 @@ static size_t getPadding(
   padding_buf[2] = (uint8_t)padding_size;
   padding_buf[3] = (uint8_t)(padding_size >> 8);
   return padding_size_plus_fbxx;
+}
 }
 
 bool PyTorchStreamReader::hasRecord(const std::string& name) {
@@ -330,7 +332,7 @@ void PyTorchStreamWriter::writeRecord(
   AT_ASSERT(!archive_name_plus_slash_.empty());
   std::string full_name = archive_name_plus_slash_ + name;
   size_t padding_size =
-      getPadding(ar_->m_archive_size, full_name.size(), size, padding_);
+      detail::getPadding(ar_->m_archive_size, full_name.size(), size, padding_);
   uint32_t flags = compress ? MZ_BEST_COMPRESSION : 0;
   mz_zip_writer_add_mem_ex_v2(
       ar_.get(),
