@@ -9,7 +9,7 @@ namespace at { namespace native {
 Tensor mkldnn_convolution(
     const Tensor& input, const Tensor& weight, const Tensor& bias,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups) {
-  TORCH_CHECk(false, "mkldnn_convolution_forward: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "mkldnn_convolution_forward: ATen not compiled with MKLDNN support");
 }
 
 Tensor mkldnn_convolution_backward_input(
