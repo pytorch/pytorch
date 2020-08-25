@@ -668,9 +668,10 @@ class DistributedDataParallel(Module):
         # order is rebuilt dynamically.
         all_bucket_tensors = self.reducer.get_bucket_tensors()
         for bucket_tensors in all_bucket_tensors:
-            # Joined processes contribute zero gradient. To keep the gradient
-            # consistent, the dividing factor is reduced by 1 for each joined
-            # process.
+            # Joined processes contribute zero gradient. In the case that
+            # divide_by_initial_world_size=True, we divide grads by the static
+            # world size, if not, the dividing factor is reduced by the number
+            # of joined processes.
             zero_tensors = [
                 torch.zeros_like(t) for t in bucket_tensors
             ]
