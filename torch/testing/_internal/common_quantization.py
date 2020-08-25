@@ -583,19 +583,25 @@ class LSTMwithHiddenDynamicModel(torch.nn.Module):
         return x, hid
 
 class ConvModel(torch.nn.Module):
-    def __init__(self):
+    def __init__(self, transposed=False):
         super().__init__()
-        self.conv = torch.nn.Conv2d(3, 5, 3, bias=False).to(dtype=torch.float)
+        if transposed:
+            self.conv = torch.nn.ConvTranspose2d(3, 5, 3, bias=False).to(dtype=torch.float)
+        else:
+            self.conv = torch.nn.Conv2d(3, 5, 3, bias=False).to(dtype=torch.float)
 
     def forward(self, x):
         x = self.conv(x)
         return x
 
 class AnnotatedConvModel(torch.nn.Module):
-    def __init__(self, qengine):
+    def __init__(self, qengine, transposed=False):
         super().__init__()
         self.qconfig = torch.quantization.get_default_qconfig(qengine)
-        self.conv = torch.nn.Conv2d(3, 5, 3, bias=False).to(dtype=torch.float)
+        if transposed:
+            self.conv = torch.nn.ConvTranspose2d(3, 5, 3, bias=False).to(dtype=torch.float)
+        else:
+            self.conv = torch.nn.Conv2d(3, 5, 3, bias=False).to(dtype=torch.float)
         self.quant = QuantStub()
         self.dequant = DeQuantStub()
 
