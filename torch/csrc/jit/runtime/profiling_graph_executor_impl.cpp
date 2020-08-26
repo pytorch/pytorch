@@ -28,7 +28,6 @@
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
-#include <torch/include/torch/csrc/jit/passes/clear_profiling.h>
 
 C10_DECLARE_bool();
 
@@ -321,8 +320,8 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
 void ProfilingGraphExecutorImpl::runProfilingInsensitiveOptimizations(
     std::shared_ptr<Graph>& graph) {
   GRAPH_DUMP(
-    "Before inlining (beginning of runProfilingInsensitiveOptimizations)",
-    graph);
+      "Before inlining (beginning of runProfilingInsensitiveOptimizations)",
+      graph);
   Inline(*graph);
   GRAPH_DUMP("After inlining, before ClearProfilingInformation", graph);
   ClearProfilingInformation(graph);
