@@ -1535,11 +1535,6 @@ jobs:
           export COMMAND='((echo "sudo chown -R jenkins workspace && cd workspace && .jenkins/pytorch/build.sh && find ${BUILD_ROOT} -type f -name "*.a" -or -name "*.o" -delete") | docker exec -u jenkins -i "$id" bash) 2>&1'
 
           echo ${COMMAND} > ./command.sh && unbuffer bash ./command.sh | ts
-
-          if [[ ${BUILD_ENVIRONMENT} == *-mobile-custom-build-dynamic* ]]; then
-            echo "Fetching the mobile code analysis result from docker image..."
-            docker cp $id:/var/lib/jenkins/workspace/build_test_custom_build/build_analyzer/work/torch_result.yaml /home/circleci/workspace/torch_result.yaml
-          fi
     - run:
         name: Upload Mobile Code Analysis Result
         no_output_timeout: "10m"
@@ -1549,22 +1544,23 @@ jobs:
               $* || (sleep 1 && $*) || (sleep 2 && $*) || (sleep 4 && $*) || (sleep 8 && $*)
           }
 
-          if ! [[ ${BUILD_ENVIRONMENT} == *-mobile-custom-build-dynamic* ]]; then
+          if ! [[ "${BUILD_ENVIRONMENT}" == *"-mobile-custom-build-dynamic"* ]]; then
             exit 0
           fi
 
-          RESULT_PATH="/home/circleci/workspace/torch_result.yaml"
-          S3_PATH="s3://pytorch-mobile-build/op_deps/${CIRCLE_SHA1}.yaml"
-
-          echo "============================ BEGIN ============================"
-          cat "${RESULT_PATH}"
-          echo "============================  END  ============================"
+          RESULT_PATH="/home/circleci/project/build_test_custom_build/build_analyzer/work/torch_result.yaml"
+          FILENAME="${CIRCLE_BRANCH//\//-}.$(git rev-list --count HEAD).${CIRCLE_SHA1}"
+          S3_PATH="s3://pytorch-mobile-build/op_deps/${FILENAME}.yaml"
 
           echo "Uploading the mobile code analysis result to AWS S3..."
           echo "CIRCLE_BRANCH: ${CIRCLE_BRANCH}"
           echo "CIRCLE_SHA1: ${CIRCLE_SHA1}"
           echo "RESULT_PATH: ${RESULT_PATH}"
           echo "S3_PATH: ${S3_PATH}"
+
+          echo "============================ BEGIN ============================"
+          cat "${RESULT_PATH}"
+          echo "============================  END  ============================"
 
           # Running the CI job multiple times for the same commit should be idempotent.
           # TODO: should maintain an index file for downloading.
