@@ -3,6 +3,12 @@ from .node import Node, Argument, Target
 from typing import Callable, Any, List, Dict, Optional, Tuple
 import builtins
 import torch
+import re
+
+# One '*' followed by something else.
+IS_ARG = re.compile(r"\*[^\*]")
+# Two '*'s followed by something else.
+IS_KWARG = re.compile(r"\*\*[^\*]")
 
 def _is_magic(x: str) -> bool:
     return x.startswith('__') and x.endswith('__')
@@ -71,9 +77,9 @@ class Graph:
             return n
         map_arg(a, add_use)
 
-    def create_node(self, op: str, target: Target, 
-                    args: Optional[Tuple[Argument, ...]] = None, 
-                    kwargs: Optional[Dict[str, Argument]] = None, 
+    def create_node(self, op: str, target: Target,
+                    args: Optional[Tuple[Argument, ...]] = None,
+                    kwargs: Optional[Dict[str, Argument]] = None,
                     name: Optional[str] = None):
         assert op in ('call_function', 'call_method', 'get_param', 'call_module', 'placeholder')
         args = () if args is None else args
@@ -121,7 +127,17 @@ class Graph:
         return self.create_node('get_param', name)
 
     def placeholder(self, name: str) -> Node:
-        return self.create_node('placeholder', target=name, name=name.replace('*', ''))
+        # Populate `target` based on whether this placeholder represents a stararg parameter.
+        if IS_ARG.match(name):
+            target = '*'
+        elif IS_KWARG.match(name):
+            target = '**'
+        else:
+            # Common case: this is a normal function parameter.
+            assert name.isidentifier()
+            target = ''
+
+        return self.create_node('placeholder', target=target, name=name.replace('*', ''))
 
     def python_code(self, root_module: str) -> Tuple[str, str, List[str]]:
         free_vars: List[str] = []
@@ -129,7 +145,7 @@ class Graph:
         for node in self.nodes:
             if node.op == 'placeholder':
                 assert isinstance(node.target, str)
-                free_vars.append(node.target)
+                free_vars.append(node.target + node.name)
                 continue
             elif node.op == 'call_method':
                 assert isinstance(node.target, str)
