@@ -320,10 +320,11 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
 
 void ProfilingGraphExecutorImpl::runProfilingInsensitiveOptimizations(
     std::shared_ptr<Graph>& graph) {
-  Inline(*graph);
   GRAPH_DUMP(
-      "Before ClearProfilingInformation (beginning of runProfilingInsensitiveOptimizations)",
-      graph);
+    "Before inlining (beginning of runProfilingInsensitiveOptimizations)",
+    graph);
+  Inline(*graph);
+  GRAPH_DUMP("After inlining, before ClearProfilingInformation", graph);
   ClearProfilingInformation(graph);
   GRAPH_DUMP("After ClearProfilingInformation, before LowerGradOf", graph);
   LowerGradOf(*graph);
