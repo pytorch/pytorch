@@ -435,6 +435,11 @@ struct TORCH_API Node {
   bool isNondeterministic() const;
   bool hasSideEffects() const;
 
+  // instructions lowered by the interpreter and not run in the optimized graph
+  bool notExecutedOp() const {
+    return kind_ == prim::Constant || kind_ == prim::profile;
+  }
+
   // Graphs
 
   // Note [Topological invariant]
