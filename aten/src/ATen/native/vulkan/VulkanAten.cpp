@@ -58,7 +58,7 @@ Tensor empty(
       "'memory_format' argument is incompatible with Vulkan tensor");
   VulkanTensor vt{size.vec()};
   return new_with_vtensor_vulkan(
-      std::move(vt), at::device(at::kVulkan).dtype(dtype));
+      std::move(vt), at::device(at::kVulkan).dtype(options.dtype()));
 }
 
 Tensor empty_strided(
