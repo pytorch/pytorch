@@ -1244,6 +1244,7 @@ class TestTensorExprFuser(BaseTestClass):
         np.testing.assert_allclose(x.numpy(), y.numpy())
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @unittest.skip("temporarily disable")
     def test_unused(self):
         def test(x, y):
             return x * x + torch.rand_like(y)

@@ -123,16 +123,6 @@ const Symbol& getTensorExprSymbol() {
   return s;
 }
 
-Node* getOrCreateTensorExprSubgraph(Node* n) {
-  if (n->hasAttribute(attr::Subgraph) && n->kind() == getTensorExprSymbol()) {
-    return n;
-  }
-  GRAPH_UPDATE("Creating a tensorexpr::Group node from: ", *n);
-  auto te_group =
-      SubgraphUtils::createSingletonSubgraph(n, getTensorExprSymbol());
-  return te_group;
-}
-
 struct nodesComparator {
   bool operator()(Node* a, Node* b) const {
     return a->isAfter(b);
@@ -141,14 +131,35 @@ struct nodesComparator {
 
 class TensorExprFuser {
  public:
-  TensorExprFuser(std::shared_ptr<Graph> graph) : graph_(std::move(graph)) {}
+  TensorExprFuser(std::shared_ptr<Graph> graph, size_t min_group_size)
+      : graph_(std::move(graph)), min_group_size_(min_group_size) {}
 
   void run() {
     aliasDb_ = torch::make_unique<AliasDb>(graph_);
+    fillTypeInfoMap(graph_->block());
+    printTypeInfoMap();
+    removeProfilingNodes(graph_->block());
+    printTypeInfoMap();
+    GRAPH_DUMP("After removing profiling nodes: ", graph_);
     createFusionGroups(graph_->block());
+    printTypeInfoMap();
+    GRAPH_DUMP("After creating fusion groups: ", graph_);
+    guardFusionGroups(graph_->block());
   }
 
  private:
+  Node* getOrCreateTensorExprSubgraph(Node* n) {
+    if (n->hasAttribute(attr::Subgraph) && n->kind() == getTensorExprSymbol()) {
+      return n;
+    }
+    std::unordered_map<Value*, Value*> vmap;
+    GRAPH_UPDATE("Creating a tensorexpr::Group node from: ", *n);
+    auto te_group =
+        SubgraphUtils::createSingletonSubgraph(n, getTensorExprSymbol(), vmap);
+    updateTypeinfoMapWithVmap(vmap);
+    return te_group;
+  }
+
   // Add unvisited input nodes to the queue for further merging into the fusion
   // group.
   void updateQueue(
@@ -178,7 +189,7 @@ class TensorExprFuser {
     std::unordered_set<Node*> visited_nodes;
 
     Node* fusion_group = n;
-    if (minSubgraphSize_ == 1) {
+    if (min_group_size_ == 1) {
       fusion_group = getOrCreateTensorExprSubgraph(n);
     }
 
@@ -186,7 +197,7 @@ class TensorExprFuser {
 
     GRAPH_DEBUG("Iteratively pull input nodes into the fusion group...\n");
     while (!queue.empty()) {
-      GRAPH_DEBUG("Current fusion group: ", *fusion_group);
+      debugDumpFusionGroup("Current fusion group: ", fusion_group);
       GRAPH_DEBUG(queue.size(), " nodes are in the queue.\n");
 
       Node* input_node = *queue.begin();
@@ -198,7 +209,42 @@ class TensorExprFuser {
       updateQueue(fusion_group, queue, visited_nodes);
     }
 
+    // Update typeinfo for inputs and outputs of the fusion group
+    if (fusion_group->kind() == getTensorExprSymbol()) {
+      auto subgraph = SubgraphUtils::getSubgraph(fusion_group);
+      for (size_t idx = 0; idx < subgraph->inputs().size(); idx++) {
+        if (typeinfo_map_.count(subgraph->inputs()[idx])) {
+          auto ty = typeinfo_map_[subgraph->inputs()[idx]];
+          typeinfo_map_[fusion_group->input(idx)] = ty;
+          subgraph->inputs()[idx]->setType(ty);
+          GRAPH_DEBUG(
+              "TYPEINFO ADD: %",
+              fusion_group->input(idx)->debugName(),
+              " --> ",
+              *ty);
+        }
+      }
+      for (size_t idx = 0; idx < subgraph->outputs().size(); idx++) {
+        if (typeinfo_map_.count(subgraph->outputs()[idx])) {
+          auto ty = typeinfo_map_[subgraph->outputs()[idx]];
+          typeinfo_map_[fusion_group->output(idx)] = ty;
+          GRAPH_DEBUG(
+              "TYPEINFO ADD: %",
+              fusion_group->output(idx)->debugName(),
+              " --> ",
+              *ty);
+        }
+      }
+    }
+
     return fusion_group;
+  }
+
+  static void debugDumpFusionGroup(const std::string& msg, Node* n) {
+    GRAPH_DEBUG(msg, *n);
+    if (n->kind() == getTensorExprSymbol()) {
+      GRAPH_DEBUG(*n->g(attr::Subgraph));
+    }
   }
 
   // Merge fusible nodes into subgraphs in tensorexpr::Group nodes.
@@ -207,8 +253,9 @@ class TensorExprFuser {
     auto reverse_iter = block->nodes().reverse();
     for (auto it = reverse_iter.begin(); it != reverse_iter.end();) {
       Node* n = *it;
+      GRAPH_DEBUG("Considering node:", *n)
 
-      for (auto b : n->blocks()) {
+      for (Block* b : n->blocks()) {
         createFusionGroups(b);
       }
 
@@ -231,7 +278,7 @@ class TensorExprFuser {
       it++;
     }
 
-    for (auto n : fusion_groups) {
+    for (Node* n : fusion_groups) {
       inlineIfTooSmall(n);
     }
   }
@@ -260,12 +307,23 @@ class TensorExprFuser {
     }
     auto subgraph = SubgraphUtils::getSubgraph(n);
     size_t num_modes = blockSize(subgraph->block());
-    if (num_modes < minSubgraphSize_) {
+    if (num_modes < min_group_size_) {
       GRAPH_UPDATE("Fusion group is too small, unmerging: ", *n);
       SubgraphUtils::unmergeSubgraph(n);
       return true;
     }
     return false;
+  }
+
+  void updateTypeinfoMapWithVmap(
+      const std::unordered_map<Value*, Value*>& vmap) {
+    for (const auto& kv : vmap) {
+      if (typeinfo_map_.count(kv.first)) {
+        auto ty = typeinfo_map_.at(kv.first);
+        typeinfo_map_[kv.second] = ty;
+        GRAPH_DEBUG("TYPEINFO UPDATE: %", kv.second->debugName(), " --> ", *ty);
+      }
+    }
   }
 
   Node* tryMerge(Node* fusion_group, Node* to_merge) {
@@ -295,9 +353,12 @@ class TensorExprFuser {
     // Now all the nodes that we're going to fuse are moved next to the fusion
     // group, so we can safely merge them into the fusion group subgraph.
     fusion_group = getOrCreateTensorExprSubgraph(fusion_group);
+
     for (auto n : nodes_to_merge) {
       GRAPH_UPDATE("Merging ", getHeader(n));
-      SubgraphUtils::mergeNodeIntoSubgraph(n, fusion_group);
+      std::unordered_map<Value*, Value*> vmap;
+      SubgraphUtils::mergeNodeIntoSubgraph(n, fusion_group, vmap);
+      updateTypeinfoMapWithVmap(vmap);
     }
     return fusion_group;
   }
@@ -305,6 +366,9 @@ class TensorExprFuser {
   bool allShapesAreKnown(Value* v) {
     if (!v->type()->cast<TensorType>()) {
       return true;
+    }
+    if (typeinfo_map_.count(v)) {
+      return typeinfo_map_.at(v)->isComplete();
     }
     return v->isCompleteTensor();
   }
@@ -321,11 +385,8 @@ class TensorExprFuser {
 
   bool canHandle(Node* node) {
     if (node->kind() == prim::Constant) {
-      if (node->output()->type()->cast<TensorType>()) {
-        // TODO: add support for tensor constants.
-        return false;
-      }
-      return true;
+      // TODO: add support for tensor constants.
+      return false;
     }
     if (!allShapesAreKnown(node)) {
       return false;
@@ -396,18 +457,171 @@ class TensorExprFuser {
   }
 #undef REQ
 
+  void fillTypeInfoMap(Block* block) {
+    for (Node* n : block->nodes()) {
+      if (n->kind() == prim::profile) {
+        if (auto tensor_ty = n->ty(attr::profiled_type)->cast<TensorType>()) {
+          GRAPH_DEBUG(
+              "TYPEINFO ADD: %", n->input()->debugName(), " --> ", *tensor_ty);
+          typeinfo_map_[n->input()] = tensor_ty;
+        }
+      }
+
+      for (Block* b : n->blocks()) {
+        fillTypeInfoMap(b);
+      }
+    }
+  }
+  void printTypeInfoMap() {
+    GRAPH_DEBUG("Typeinfo map:");
+    for (const auto& kv : typeinfo_map_) {
+      // GRAPH_DEBUG("%", kv.first->debugName(), " --> ", *kv.second);
+      GRAPH_DEBUG("%??? --> ", *kv.second);
+    }
+  }
+
+  void removeProfilingNodes(Block* b) {
+    for (auto it = b->nodes().begin(); it != b->nodes().end(); it++) {
+      if (it->kind() == prim::profile) {
+        GRAPH_DEBUG("TYPEINFO ERASE: %", it->output()->debugName());
+        typeinfo_map_.erase(it->output());
+        it->output()->replaceAllUsesWith(it->input());
+        it.destroyCurrent();
+      } else {
+        for (Block* ib : it->blocks()) {
+          removeProfilingNodes(ib);
+        }
+      }
+    }
+  }
+
+  void guardFusionGroup(Node* fusion_group) {
+    GRAPH_DEBUG("Inserting a typecheck guard for a node", *fusion_group);
+    auto subgraph = SubgraphUtils::getSubgraph(fusion_group);
+
+    // Fixup types of the subgraph inputs
+    std::vector<Value*> inputs_to_check;
+    for (size_t idx = 0; idx < subgraph->inputs().size(); idx++) {
+      // TODO: If a type of the input was explicitly set in IR (in constrast to
+      // us expecting it from a hint given by a prim::profile node), we don't
+      // need to check that input in the typecheck.
+
+      // We only check inputs of the fusion group and expect NNC to infer
+      // intermediates and outputs shapes
+      if (typeinfo_map_.count(subgraph->inputs()[idx])) {
+        subgraph->inputs()[idx]->setType(
+            typeinfo_map_.at(subgraph->inputs()[idx]));
+        inputs_to_check.push_back(fusion_group->input(idx));
+      }
+    }
+    if (!inputs_to_check.size()) {
+      return;
+    }
+
+    // Add prim::TypeCheck node
+    //
+    // TypeCheck nodes  look like the following:
+    //   %out1 : Float(2, 3), %out2 : Int(10, 30), %types_match : bool =
+    //   prim::TypeCheck(%inp1 : Tensor, %inp2 : Tensor)
+    //
+    // They have N inputs whose types we are going to check and N+1 outputs. The
+    // first N outputs specify expected types and N+1-th output holds the result
+    // of the check (bool).
+    Node* typecheck_node =
+        fusion_group->owningGraph()
+            ->create(
+                prim::TypeCheck, inputs_to_check, inputs_to_check.size() + 1)
+            ->insertBefore(fusion_group);
+    Value* typecheck_result = typecheck_node->output(inputs_to_check.size());
+
+    // Fixup types of the typecheck node outputs
+    std::unordered_map<Value*, Value*> typechecked_inputs;
+    size_t output_idx = 0;
+    for (size_t idx = 0; idx < subgraph->inputs().size(); idx++) {
+      if (typeinfo_map_.count(subgraph->inputs()[idx])) {
+        typechecked_inputs[fusion_group->input(idx)] =
+            typecheck_node->output(output_idx);
+        typecheck_node->output(output_idx++)
+            ->setType(typeinfo_map_.at(subgraph->inputs()[idx]));
+      } else if (
+          auto tt = subgraph->inputs()[idx]->type()->cast<TensorType>()) {
+        TORCH_INTERNAL_ASSERT(tt->isComplete());
+      }
+    }
+    typecheck_node->output(inputs_to_check.size())->setType(BoolType::get());
+
+    // Insert if
+    auto versioning_if =
+        fusion_group->owningGraph()
+            ->create(
+                prim::If, {typecheck_result}, fusion_group->outputs().size())
+            ->insertAfter(typecheck_node);
+    for (size_t idx = 0; idx < fusion_group->outputs().size(); ++idx) {
+      versioning_if->output(idx)->setType(fusion_group->output(idx)->type());
+      fusion_group->output(idx)->replaceAllUsesWith(versioning_if->output(idx));
+    }
+    auto true_block = versioning_if->addBlock();
+    auto false_block = versioning_if->addBlock();
+
+    // Fill in the false block. It should contain the unoptimized
+    // copy of the fused subgraph.
+    WithInsertPoint guard(false_block->return_node());
+    const auto subgraph_outputs = insertGraph(
+        *fusion_group->owningGraph(), *subgraph, fusion_group->inputs());
+    for (Value* output : subgraph_outputs) {
+      false_block->registerOutput(output);
+    }
+
+    // Fill in the true block. It has all inputs type-checked and its
+    // body should be the fusion group node.
+    fusion_group->moveBefore(true_block->return_node());
+    for (size_t idx = 0; idx < fusion_group->inputs().size(); ++idx) {
+      if (typechecked_inputs.count(fusion_group->input(idx))) {
+        fusion_group->replaceInput(
+            idx, typechecked_inputs.at(fusion_group->input(idx)));
+      }
+    }
+    for (Value* output : fusion_group->outputs()) {
+      true_block->registerOutput(output);
+    }
+  }
+
+  void guardFusionGroups(Block* block) {
+    std::vector<Node*> fusion_groups;
+    for (Node* n : block->nodes()) {
+      for (Block* b : n->blocks()) {
+        guardFusionGroups(b);
+      }
+      if (n->kind() == getTensorExprSymbol()) {
+        fusion_groups.push_back(n);
+      }
+    }
+    for (Node* fusion_group : fusion_groups) {
+      guardFusionGroup(fusion_group);
+    }
+  }
+
+  // A typeinfo map hold profile information (which currently is a type
+  // information for the values in the graph). In the beginning the values
+  // represented in the map are the values from the original graph for which we
+  // had prim::profile nodes. As we start constructing fusion groups, we start
+  // adding values from subgraphs of these groups into the map as well.
+  std::unordered_map<Value*, TensorTypePtr> typeinfo_map_;
+
   std::shared_ptr<Graph> graph_;
   std::unique_ptr<AliasDb> aliasDb_ = nullptr;
-  size_t minSubgraphSize_ = 2;
+
+  // Minimal size of a fusion group
+  size_t min_group_size_;
 };
 
-void FuseTensorExprs(std::shared_ptr<Graph>& graph) {
+void FuseTensorExprs(std::shared_ptr<Graph>& graph, size_t min_group_size) {
   GRAPH_DUMP("Before TExprFuser: ", graph);
 
   // Get rid of dead code so that we don't waste effort fusing it.
   EliminateDeadCode(graph);
 
-  TensorExprFuser fuser(graph);
+  TensorExprFuser fuser(graph, min_group_size);
   fuser.run();
 
   EliminateCommonSubexpression(graph);
