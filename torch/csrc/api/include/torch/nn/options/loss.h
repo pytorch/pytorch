@@ -357,6 +357,7 @@ using MultilabelSoftMarginLossFuncOptions = MultiLabelSoftMarginLossOptions;
 /// ```
 struct TORCH_API TripletMarginLossOptions {
   typedef c10::variant<enumtype::kNone, enumtype::kMean, enumtype::kSum> reduction_t;
+  typedef std::function<Tensor(const Tensor&, const Tensor&)> distance_function_t;
 
   /// Specifies the threshold for which the distance of a negative sample must
   /// reach in order to incur zero loss. Default: 1
@@ -370,6 +371,10 @@ struct TORCH_API TripletMarginLossOptions {
   TORCH_ARG(bool, swap) = false;
   /// Specifies the reduction to apply to the output. Default: Mean
   TORCH_ARG(reduction_t, reduction) = torch::kMean;
+  /// Specifies an optional distance function for computing distance. Default: nullopt
+  TORCH_ARG(c10::optional<distance_function_t>, distance_function) = c10::nullopt;
+  /// Specifies whether the optional distance module is a similarity metric. Default: False
+  TORCH_ARG(bool, is_similarity_function) = false;
 };
 
 namespace functional {

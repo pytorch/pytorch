@@ -175,7 +175,9 @@ Tensor TripletMarginLossImpl::forward(
     options.p(),
     options.eps(),
     options.swap(),
-    options.reduction());
+    options.reduction(),
+    options.distance_function(),
+    options.is_similarity_function());
 }
 
 // ============================================================================
@@ -223,9 +225,9 @@ void SmoothL1LossImpl::pretty_print(std::ostream& stream) const {
 Tensor SmoothL1LossImpl::forward(const Tensor& input, const Tensor& target) {
   return F::detail::smooth_l1_loss(input, target, options.reduction());
 }
-  
+
 // ============================================================================
-  
+
 CTCLossImpl::CTCLossImpl(const CTCLossOptions& options_) : options(options_) {}
 
 void CTCLossImpl::reset() {}

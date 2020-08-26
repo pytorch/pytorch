@@ -34,6 +34,8 @@ DEFINE_DISPATCH(smooth_l1_backward_stub);
 DEFINE_DISPATCH(mse_stub);
 DEFINE_DISPATCH(mse_backward_stub);
 
+
+
 Tensor cosine_embedding_loss(const Tensor& input1, const Tensor& input2, const Tensor& target, double margin, int64_t reduction) {
   auto prod_sum = (input1 * input2).sum(1);
   auto mag_square1 = (input1 * input1).sum(1) + EPSILON;
@@ -60,14 +62,33 @@ Tensor hinge_embedding_loss(const Tensor& self, const Tensor& target, double mar
 }
 
 Tensor triplet_margin_loss(const Tensor& anchor, const Tensor& positive, const Tensor& negative, double margin,
-                           double p, double eps, bool swap, int64_t reduction) {
-  auto dist_pos = at::pairwise_distance(anchor, positive, p, eps);
-  auto dist_neg = at::pairwise_distance(anchor, negative, p, eps);
+                           double p, double eps, bool swap, int64_t reduction,
+                           const c10::optional<std::function<Tensor(const Tensor&, const Tensor&)>>& distance_function,
+                           bool is_similarity_function) {
+  Tensor dist_pos, dist_neg, output;
+  if (distance_function.has_value()) {
+    auto distance_function_impl = distance_function.value();
+    dist_pos = distance_function_impl(anchor, positive);
+    dist_neg = distance_function_impl(anchor, negative);
+  } else {
+    dist_pos = at::pairwise_distance(anchor, positive, p, eps);
+    dist_neg = at::pairwise_distance(anchor, negative, p, eps);
+  }
+
   if (swap) {
     auto dist_swap = at::pairwise_distance(positive, negative, p, eps);
-    dist_neg = at::min(dist_neg, dist_swap);
+    if (is_similarity_function) {
+      dist_neg = at::max(dist_neg, dist_swap);
+    } else {
+      dist_neg = at::min(dist_neg, dist_swap);
+    }
   }
-  auto output = at::clamp_min(margin + dist_pos - dist_neg, 0);
+
+  if (is_similarity_function) {
+    output = at::clamp_min(margin - dist_pos + dist_neg, 0);
+  } else {
+    output = at::clamp_min(margin + dist_pos - dist_neg, 0);
+  }
   return apply_loss_reduction(output, reduction);
 }
 

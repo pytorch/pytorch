@@ -501,7 +501,9 @@ inline Tensor triplet_margin_loss(
     double p,
     double eps,
     bool swap,
-    TripletMarginLossFuncOptions::reduction_t reduction) {
+    TripletMarginLossFuncOptions::reduction_t reduction,
+    c10::optional<TripletMarginLossFuncOptions::distance_function_t> distance_function,
+    bool is_similarity_function) {
   return torch::triplet_margin_loss(
       anchor,
       positive,
@@ -510,7 +512,9 @@ inline Tensor triplet_margin_loss(
       p,
       eps,
       swap,
-      enumtype::reduction_get_enum(reduction));
+      enumtype::reduction_get_enum(reduction),
+      distance_function,
+      is_similarity_function);
 }
 } // namespace detail
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
@@ -539,7 +543,9 @@ inline Tensor triplet_margin_loss(
     options.p(),
     options.eps(),
     options.swap(),
-    options.reduction());
+    options.reduction(),
+    options.distance_function(),
+    options.is_similarity_function());
 }
 
 // ============================================================================

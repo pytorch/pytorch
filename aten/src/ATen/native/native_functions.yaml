@@ -3158,7 +3158,7 @@
 - func: _trilinear(Tensor i1, Tensor i2, Tensor i3, int[] expand1, int[] expand2, int[] expand3, int[] sumdim, int unroll_dim=1) -> Tensor
   use_c10_dispatcher: full
 
-- func: triplet_margin_loss(Tensor anchor, Tensor positive, Tensor negative, float margin=1.0, float p=2, float eps=1e-06, bool swap=False, int reduction=Mean) -> Tensor
+- func: triplet_margin_loss(Tensor anchor, Tensor positive, Tensor negative, float margin=1.0, float p=2, float eps=1e-06, bool swap=False, int reduction=Mean, TODO? distance_function=None, bool is_similarity_function=False) -> Tensor
   use_c10_dispatcher: full
 
 - func: true_divide.Tensor(Tensor self, Tensor other) -> Tensor
@@ -3202,7 +3202,7 @@
 - func: fix(Tensor self) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
-  
+
 - func: fix_(Tensor(a!) self) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: function, method
