@@ -54,7 +54,7 @@ Tensor empty(
       !options.has_pinned_memory(),
       "'pin_memory' argument is incompatible with Vulkan tensor");
   TORCH_CHECK(
-      !options.has_memory_format(),
+      !options.has_memory_format() && !memory_format,
       "'memory_format' argument is incompatible with Vulkan tensor");
   VulkanTensor vt{size.vec()};
   return new_with_vtensor_vulkan(
@@ -405,8 +405,8 @@ Tensor mean(
 }
 
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
-  m.impl("empty.memory_format", TORCH_FN(at::native::vulkan::aten::empty));
-  m.impl("empty_strided", TORCH_FN(at::native::vulkan::aten::empty_strided));
+  m.impl_UNBOXED("empty.memory_format", TORCH_FN(at::native::vulkan::aten::empty));
+  m.impl_UNBOXED("empty_strided", TORCH_FN(at::native::vulkan::aten::empty_strided));
   m.impl("add.Tensor", TORCH_FN(at::native::vulkan::aten::add));
   m.impl("clamp", TORCH_FN(at::native::vulkan::aten::clamp));
   m.impl("mean.dim", TORCH_FN(at::native::vulkan::aten::mean));
