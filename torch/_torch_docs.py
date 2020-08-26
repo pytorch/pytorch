@@ -4142,15 +4142,16 @@ add_docstr(torch.amax,
            r"""
 amax(input, dim, keepdim=False, *, out=None) -> Tensor
 
-Returns the maximum value of each row of the :attr:`input` tensor in the given
+Returns the maximum value of each slice of the :attr:`input` tensor in the given
 dimension(s) :attr:`dim`.
 
 .. note::
     The difference between ``max``/``min`` and ``amax``/``amin`` is:
     1. ``amax``/``amin`` supports reducing on multiple dimensions,
     2. ``amax``/``amin`` does not return indices,
-    3. ``amax``/``amin`` produces deterministic (sub)gradients unlike
-    ``max(dim=0)``/``min(dim=0)``.
+    3. ``amax``/``amin`` evenly distributes gradient between equal values,
+       while ``max(dim)``/``min(dim)`` propagates gradient only to a single
+       index in the source tensor.
 
 If :attr:`keepdim is ``True``, the output tensors are of the same size
 as :attr:`input` except in the dimension(s) :attr:`dim` where they are of size 1.
@@ -4487,15 +4488,16 @@ add_docstr(torch.amin,
            r"""
 amin(input, dim, keepdim=False, *, out=None) -> Tensor
 
-Returns the minimum value of each row of the :attr:`input` tensor in the given
+Returns the minimum value of each slice of the :attr:`input` tensor in the given
 dimension(s) :attr:`dim`.
 
 .. note::
     The difference between ``max``/``min`` and ``amax``/``amin`` is:
     1. ``amax``/``amin`` supports reducing on multiple dimensions,
     2. ``amax``/``amin`` does not return indices,
-    3. ``amax``/``amin`` produces deterministic (sub)gradients unlike
-    ``max(dim=0)``/``min(dim=0)``.
+    3. ``amax``/``amin`` evenly distributes gradient between equal values,
+       while ``max(dim)``/``min(dim)`` propagates gradient only to a single
+       index in the source tensor.
 
 If :attr:`keepdim` is ``True``, the output tensors are of the same size as
 :attr:`input` except in the dimension(s) :attr:`dim` where they are of size 1.
