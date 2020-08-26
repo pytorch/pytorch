@@ -6217,6 +6217,24 @@ void testGPU_FusionLSTMCell() {
   TORCH_CHECK(at_hy.allclose(outputs[1], 1e-4, 1e-7));
 }
 
+void testGPU_FusionComputeAtMultiBCast() {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  // Set up your input tensor views
+  TensorView* tv0 = makeDummyTensor(1);
+  fusion.addInput(tv0);
+
+  TensorView* tv1 = mul(tv0, new Float(0.5));
+  TensorView* tv2 = broadcast(tv1, {true, false});
+  TensorView* tv3 = broadcast(tv1, {false, true});
+  TensorView* tv4 = add(tv2, tv3);
+  fusion.addOutput(tv4);
+
+  // This is not supported and should throw an exception.
+  ASSERT_ANY_THROW(tv1->computeAt(tv3, -1));
+}
+
 } // namespace jit
 } // namespace torch
 
