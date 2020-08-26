@@ -168,10 +168,14 @@ def get_type_line(source):
     lines = source.split('\n')
     lines = [(line_num, line) for line_num, line in enumerate(lines)]
     type_lines = list(filter(lambda line: type_comment in line[1], lines))
+    # `type: ignore` comments may be needed in JIT'ed functions for mypy, due
+    # to the hack in torch/_VF.py.
+    type_lines = list(filter(lambda line: not line[1].endswith("# type: ignore"),
+                             type_lines))
     lines_with_type = list(filter(lambda line: 'type' in line[1], lines))
 
     if len(type_lines) == 0:
-        type_pattern = re.compile('#[\t ]*type[\t ]*:')
+        type_pattern = re.compile('#[\t ]*type[\t ]*(?!: ignore$):')
         wrong_type_lines = list(filter(lambda line: type_pattern.search(line[1]), lines))
         if len(wrong_type_lines) > 0:
             raise RuntimeError("The annotation prefix in line " + str(wrong_type_lines[0][0])
@@ -194,8 +198,11 @@ def get_type_line(source):
         elif type_comment in line:
             parameter_type_lines.append(line)
     if return_line is None:
-        raise RuntimeError("Return type line '# type: (...) -> ...' not found on multiline "
-                           "type annotation\n(See PEP 484 https://www.python.org/dev/peps/pep-0484/#suggested-syntax-for-python-2-7-and-straddling-code)")  # noqa
+        raise RuntimeError(
+            "Return type line '# type: (...) -> ...' not found on multiline "
+            "type annotation\nfor type lines:\n" +
+            '\n'.join([line[1] for line in type_lines]) +
+            "\n(See PEP 484 https://www.python.org/dev/peps/pep-0484/#suggested-syntax-for-python-2-7-and-straddling-code)")  # noqa
 
     def get_parameter_type(line):
         item_type = line[line.find(type_comment) + len(type_comment):]
