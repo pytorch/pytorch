@@ -33,7 +33,7 @@ def to_custom_backend(module):
     Returns:
         The module, lowered so that it can run on TestBackend.
     """
-    lowered_module = torch._C._jit_to_backend("custom_backend", module._c, {"forward": {"": ""}})
+    lowered_module = torch._C._jit_to_backend("custom_backend", module, {"forward": {"": ""}})
     return lowered_module
 
 
