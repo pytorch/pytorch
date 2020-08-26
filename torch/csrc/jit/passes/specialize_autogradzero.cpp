@@ -10,15 +10,49 @@ namespace jit {
 
 struct AutogradZeroSpecializer {
   enum class State { Nonzero, Zero, Unknown };
+
   AutogradZeroSpecializer(std::shared_ptr<Graph> graph)
       : graph_(std::move(graph)) {}
 
   void run() {
-    setStatesOnGraphInputs();
-    specializeAutogradOps(graph_->block());
+    if (!isBackwardGraph()) {
+      return;
+    }
+    if (getProfilingMode()) {
+      if (auto vif = guardSpecializations()) {
+        specializeAutogradOps(vif->blocks()[0]);
+        GRAPH_DUMP("After versioning graph", graph_);
+      }
+    } else {
+      setStatesOnGraphInputs();
+      specializeAutogradOps(graph_->block());
+    }
+    GRAPH_DUMP("After specializeAutogradOps graph", graph_);
   }
 
  private:
+  bool isBackwardGraph() {
+    return std::any_of(
+        graph_->nodes().begin(), graph_->nodes().end(), [](Node* n) {
+          switch (n->kind()) {
+            case prim::AutogradAnyNonZero:
+            case prim::AutogradAdd:
+            case aten::_grad_sum_to_size:
+              return true;
+            default:
+              return false;
+          }
+        });
+  }
+
+  void replaceBlockInputsWithGraph(Block* b) {
+    TORCH_INTERNAL_ASSERT(graph_->inputs().size() == b->inputs().size());
+    for (int i = graph_->inputs().size() - 1; i >= 0; i--) {
+      b->inputs()[i]->replaceAllUsesWith(graph_->inputs()[i]);
+      b->eraseInput(i);
+    }
+  }
+
   void setStatesOnGraphInputs() {
     for (Value* input : graph_->inputs()) {
       const auto& tp = input->type();
@@ -40,6 +74,98 @@ struct AutogradZeroSpecializer {
         state_[input] = State::Unknown;
       }
     }
+  }
+
+  static Node* getProfiledUse(Value* inp) {
+    for (auto use : inp->uses()) {
+      if (use.user->kind() == prim::profile) {
+        return use.user;
+      }
+    }
+
+    return nullptr;
+  }
+
+  Node* guardSpecializations() {
+    auto vif = graph_->create(prim::If, {}, graph_->outputs().size());
+    auto value_map = [](Value* v) { return v; };
+    auto true_block = vif->addBlock();
+    auto false_block = vif->addBlock();
+
+    // we will optimize true_block
+    true_block->cloneFrom(graph_->block(), value_map);
+    replaceBlockInputsWithGraph(true_block);
+    false_block->cloneFrom(graph_->block(), value_map);
+    replaceBlockInputsWithGraph(false_block);
+
+    WithInsertPoint wip{graph_->block()};
+    std::vector<Value*> checks;
+
+    for (auto inp : graph_->inputs()) {
+      if (inp->uses().size() == 0 || !inp->type()->cast<TensorType>()) {
+        continue;
+      }
+
+      // TODO: check multiple uses ?
+      auto pout = getProfiledUse(inp);
+      if (!pout) {
+        continue;
+      }
+
+      auto pttp = pout->ty(attr::profiled_type)->expect<TensorType>();
+      if (!pttp->undefined().has_value()) {
+        continue;
+      }
+
+      state_[inp] = *pttp->undefined() ? State::Zero : State::Nonzero;
+      auto check = graph_->insert(prim::AutogradAnyNonZero, {inp});
+      if (!*pttp->undefined()) {
+        check = graph_->insert(aten::__not__, {check});
+      }
+      checks.push_back(check);
+    }
+
+    // unable to specialize any of the inputs
+    if (checks.size() == 0) {
+      vif->destroy();
+      // the checks we inserted will be cleaned up
+      // by any subsequent DCE pass
+      return nullptr;
+    }
+
+    Value* bool_list =
+        graph_->insertNode(graph_->createList(BoolType::get(), checks))
+            ->output();
+    Value* conjunction = graph_->insert(aten::all, {bool_list});
+
+    vif->addInput(conjunction);
+    graph_->insertNode(vif);
+
+    auto ret = graph_->return_node();
+    for (size_t i = 0; i < ret->inputs().size(); i++) {
+      auto ogo = ret->input(i);
+      auto ngo = vif->output(i);
+      ngo->copyMetadata(ogo);
+      ret->replaceInput(i, ngo);
+    }
+
+    // We've created:
+    // succesful_checks = Guards(...)
+    // if (succesful_checks)
+    // -> optimized graph
+    // else:
+    // -> fallback graph
+    // original graph
+    //
+    // Remove the dead original graph
+    for (auto it = graph_->block()->nodes().reverse().begin(); *it != vif;) {
+      Node* n = *it;
+      it++;
+      n->destroy();
+    }
+
+    GRAPH_DUMP("After guardSpecializations", graph_);
+    return vif;
   }
 
   void specializeAutogradOps(Block* block) {
