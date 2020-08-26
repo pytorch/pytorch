@@ -152,9 +152,6 @@ static_assert(kProducedBytecodeVersion >= kProducedFileFormatVersion,
 // handle an updated operator.
 constexpr uint64_t kMinSupportedBytecodeVersion = 0x3L;
 
-// Writer-specific constants
-constexpr uint64_t kFieldAlignment = 64;
-
 class CAFFE2_API PyTorchStreamReader final {
  public:
   explicit PyTorchStreamReader(const std::string& file_name);
@@ -231,6 +228,19 @@ class CAFFE2_API PyTorchStreamWriter final {
       const void* pBuf,
       size_t n);
 };
+
+namespace detail {
+// Writer-specific constants
+constexpr uint64_t kFieldAlignment = 64;
+
+// Returns a record to be appended to the local user extra data entry in order
+// to make data beginning aligned at kFieldAlignment bytes boundary.
+size_t getPadding(
+    size_t cursor,
+    size_t filename_size,
+    size_t size,
+    std::string& padding_buf);
+}
 
 } // namespace serialize
 } // namespace caffe2
