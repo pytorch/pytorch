@@ -97,7 +97,7 @@ class TestTEFuser(JitTestCase):
             if n.kind().startswith('prim::'):
                 continue
             # TODO: reenable the checks once the fallbacks are implemented as function calls
-            # self.assertTrue(n.kind() in allowed_nodes, 'unexpected node {}\ngraph: {}'.format(n, graph))
+            # self.assertTrue(n.kind() in allowed_nodes, '\n Unexpected node {}\n{}'.format(n, graph))
 
         # self.assertEqual(len(self.findFusionGroups(graph)), 1)
 
