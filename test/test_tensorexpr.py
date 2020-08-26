@@ -1072,6 +1072,7 @@ class TestTensorExprFuser(BaseTestClass):
 #    r = test(x, y, z)
 #    assert llvm.elapsed_value == 1 or interp.elapsed_value() > 1
 
+    @unittest.skip("no shape inference for aten::slice yet")
     def test_slice(self):
         def easy(x, y):
             a = x[0:512:2]
@@ -1243,6 +1244,7 @@ class TestTensorExprFuser(BaseTestClass):
         np.testing.assert_allclose(x.numpy(), y.numpy())
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @unittest.skip("temporarily disable")
     def test_unused(self):
         def test(x, y):
             return x * x + torch.rand_like(y)
