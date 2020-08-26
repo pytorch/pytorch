@@ -3473,7 +3473,7 @@ class TestAutograd(TestCase):
             @staticmethod
             def backward(ctx, gO):
                 g = gO.clone().expand(size)
-                gI = MyFunc2.apply(g*ctx.inp, g+ctx.inp, ctx.fail_0th)
+                gI = MyFunc2.apply(g * ctx.inp, g + ctx.inp, ctx.fail_0th)
                 return gI, None
 
         class MyFunc2(Function):
@@ -3488,8 +3488,9 @@ class TestAutograd(TestCase):
                 g2 = gO.clone()
                 g1[0] = 0
                 g2[0] = 0
+                # generate a nan
                 if ctx.fail_0th:
-                    g1[0] /= 0 # generate a nan
+                    g1[0] /= 0
                 else:
                     g2[0] /= 0
                 return g1, g2, None
@@ -3498,7 +3499,7 @@ class TestAutograd(TestCase):
         out = MyFunc.apply(inp, True)
         ginp, = torch.autograd.grad(out, (inp,), create_graph=True)
         gsum = ginp.sum()
-        gsum.backward() # should not fail
+        gsum.backward()  # should not fail
 
         inp = torch.rand(size, requires_grad=True)
         out = MyFunc.apply(inp, True)
