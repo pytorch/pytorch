@@ -6106,6 +6106,9 @@ workflows:
       - docker_build_job:
           name: "docker-pytorch-linux-xenial-rocm3.5.1-py3.6"
           image_name: "pytorch-linux-xenial-rocm3.5.1-py3.6"
+      - docker_build_job:
+          name: "docker-pytorch-linux-bionic-rocm3.7-py3.6"
+          image_name: "pytorch-linux-bionic-rocm3.7-py3.6"
       - pytorch_linux_build:
           name: pytorch_linux_xenial_rocm3_5_1_py3_6_build
           requires:
