@@ -168,8 +168,8 @@ PyObject* c10d_init(PyObject* _unused) {
           py::arg("find_unused_parameters") = false,
           py::call_guard<py::gil_scoped_release>())
       .def(
-          "prepare_forward",
-          &::c10d::Reducer::prepare_forward,
+          "initialize_buckets",
+          &::c10d::Reducer::initialize_buckets,
           py::call_guard<py::gil_scoped_release>())
       .def(
           "prepare_for_backward",
@@ -283,6 +283,11 @@ They are used in specifying strategies for reduction collectives, e.g.,
       .def_readwrite("reduceOp", &::c10d::NCCLReduceScatterOptions::reduceOp)
       .def_readwrite("timeout", &::c10d::NCCLReduceScatterOptions::timeout)
       .def_readwrite("cudaStreams", &::c10d::NCCLReduceScatterOptions::cudaStreams);
+
+  py::class_<::c10d::NCCLAllToAllOptions>(module, "NCCLAllToAllOptions")
+      .def(py::init<>())
+      .def_readwrite("timeout", &::c10d::NCCLAllToAllOptions::timeout)
+      .def_readwrite("cudaStreams", &::c10d::NCCLAllToAllOptions::cudaStreams);
 #endif
 
   auto store =
