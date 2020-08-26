@@ -12235,10 +12235,6 @@ class TestTorchDeviceType(TestCase):
             x = torch.tensor([1, 2, 3, 4], device=device, dtype=dt)
             b = torch.tensor([2], device=device, dtype=dt)
 
-            if dt == torch.half and device == 'cpu':
-                self.assertRaises(RuntimeError, lambda: x.lt(2))
-                continue
-
             if dt == torch.bool:
                 # torch.bool is a special case and is being tested later
                 # in this test
@@ -12534,10 +12530,6 @@ class TestTorchDeviceType(TestCase):
             num_src = 10
             src = torch.tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0], dtype=dtype, device=device)
             mask = torch.randint(2, (num_src,), device=device, dtype=maskType)
-
-            if dtype == torch.half and torch.device(device).type == 'cpu':
-                self.assertRaises(RuntimeError, lambda: src.masked_select(mask))
-                continue
 
             with warnings.catch_warnings(record=True) as w:
                 dst = src.masked_select(mask)
