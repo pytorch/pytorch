@@ -3020,5 +3020,21 @@ class TestCudaComm(TestCase):
         self.assertTrue(gathered.is_contiguous(memory_format=torch.channels_last))
 
 
+    def test_matmul_device_mismatch(self):
+        cpu = torch.rand((10, 10))
+        cuda = cpu.cuda()
+        with self.assertRaisesRegex(RuntimeError, "expected (it|them) to be on GPU"):
+            cpu @ cuda
+        with self.assertRaisesRegex(RuntimeError, "expected (it|them) to be on GPU"):
+            cuda @ cpu
+
+        for s, m1, m2 in product((cpu, cuda), repeat=3):
+            if s.device == m1.device == m2.device:
+                torch.addmm(s, m1, m2)
+            else:
+                with self.assertRaisesRegex(RuntimeError, "expected (it|them) to be on GPU"):
+                    torch.addmm(s, m1, m2)
+
+
 if __name__ == '__main__':
     run_tests()
