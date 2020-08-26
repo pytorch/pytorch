@@ -5672,7 +5672,7 @@ Keyword args:
 
 add_docstr(torch.randperm,
            r"""
-randperm(n， *, out=None, dtype=torch.int64, layout=torch.strided, device=None, requires_grad=False) -> LongTensor
+randperm(n, *, out=None, dtype=torch.int64, layout=torch.strided, device=None, requires_grad=False) -> LongTensor
 
 Returns a random permutation of integers from ``0`` to ``n - 1``.
 
