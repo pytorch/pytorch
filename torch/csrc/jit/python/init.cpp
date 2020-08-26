@@ -282,7 +282,7 @@ void initJITBindings(PyObject* module) {
           "_jit_pass_quant_finalize",
           [](Module& module, int quant_type_int, bool freeze_only_quant_ops) {
             auto quant_type = static_cast<QuantType>(quant_type_int);
-            return Finalize(module, quant_type, false);
+            return Finalize(module, quant_type, freeze_only_quant_ops);
           },
           py::arg("module"),
           py::arg("quant_type_int") = 1,

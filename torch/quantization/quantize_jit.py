@@ -74,7 +74,7 @@ def prepare_jit(model, qconfig_dict, inplace=False):
 def prepare_dynamic_jit(model, qconfig_dict, inplace=False):
     return _prepare_jit(model, qconfig_dict, inplace, quant_type=QuantType.DYNAMIC)
 
-def _convert_jit(model, inplace=False, debug=False, quant_type=QuantType.STATIC):
+def _convert_jit(model, inplace=False, debug=False, freeze_only_quant_ops=False, quant_type=QuantType.STATIC):
     _check_is_script_module(model)
     model.eval()
     model_c = model._c
@@ -83,18 +83,18 @@ def _convert_jit(model, inplace=False, debug=False, quant_type=QuantType.STATIC)
         # Moving model parameters to CPU since quantized operators
         # are only supported on CPU right now
         model.cpu()
-        model_c = torch._C._jit_pass_quant_finalize(model_c, quant_type)
+        model_c = torch._C._jit_pass_quant_finalize(model_c, quant_type, freeze_only_quant_ops)
     if inplace:
         model._reconstruct(model_c)
     else:
         model = wrap_cpp_module(model_c)
     return model
 
-def convert_jit(model, inplace=False, debug=False):
-    return _convert_jit(model, inplace, debug, quant_type=QuantType.STATIC)
+def convert_jit(model, inplace=False, debug=False, freeze_only_quant_ops=False):
+    return _convert_jit(model, inplace, debug, freeze_only_quant_ops, quant_type=QuantType.STATIC)
 
-def convert_dynamic_jit(model, inplace=False, debug=False):
-    return _convert_jit(model, inplace, debug, quant_type=QuantType.DYNAMIC)
+def convert_dynamic_jit(model, inplace=False, debug=False, freeze_only_quant_ops=False):
+    return _convert_jit(model, inplace, debug, freeze_only_quant_ops, quant_type=QuantType.DYNAMIC)
 
 def _quantize_jit(model, qconfig_dict, run_fn=None, run_args=None, inplace=False, debug=False, quant_type=QuantType.STATIC):
     # Always do inplace convert because the Tensor is already
