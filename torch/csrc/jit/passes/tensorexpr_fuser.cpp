@@ -309,11 +309,6 @@ class TensorExprFuser {
 
   bool allShapesAreKnown(Node* node) {
     // TODO: Relax the checks to support dynamic shapes
-    for (Value* output : node->outputs()) {
-      if (!allShapesAreKnown(output)) {
-        return false;
-      }
-    }
     for (Value* input : node->inputs()) {
       if (!allShapesAreKnown(input)) {
         return false;
@@ -353,17 +348,13 @@ class TensorExprFuser {
   }
 
   bool canMerge(Node* consumer, Node* producer) {
-    // Only handle complete tensor types
-    for (Value* output : consumer->outputs()) {
-      REQ(output->isCompleteTensor());
-    }
-
     // Only fuse within a block
     REQ(consumer->owningBlock() == producer->owningBlock());
 
     // Symbolic checks
     REQ(canHandle(producer));
-    REQ((canHandle(consumer) || consumer->kind() == getTensorExprSymbol()));
+    TORCH_INTERNAL_ASSERT(
+        canHandle(consumer) || consumer->kind() == getTensorExprSymbol());
 
     // Alias checks
     REQ(aliasDb_->couldMoveBeforeTopologically(producer, consumer));
