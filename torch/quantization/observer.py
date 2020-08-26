@@ -1101,3 +1101,6 @@ default_weight_observer = MinMaxObserver.with_args(dtype=torch.qint8, qscheme=to
 default_histogram_observer = HistogramObserver.with_args(reduce_range=True)
 default_per_channel_weight_observer = PerChannelMinMaxObserver.with_args(dtype=torch.qint8, qscheme=torch.per_channel_symmetric)
 default_dynamic_quant_observer = MinMaxDynamicQuantObserver
+default_float_qparams_observer = PerChannelMinMaxObserver.with_args(dtype=torch.quint8,
+                                                                    qscheme=torch.per_channel_affine_float_qparams,
+                                                                    ch_axis=0)
