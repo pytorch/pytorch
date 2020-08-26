@@ -317,7 +317,7 @@ def gradcheck(
             return fail_test('Analytical gradient has incorrect size')
 
         for j, (a, n_w, n_conj_w, inp) in enumerate(zip(analytical, numerical_w, numerical_conj_w, tupled_inputs)):
-            if a.numel() != 0 or n_re.numel() != 0:
+            if a.numel() != 0 or n_w.numel() != 0:
                 dL_dz_conj = n_conj_w + n_w.conj()
                 if not torch.allclose(a, dL_dz_conj, rtol, atol):
                     return fail_test('Jacobian mismatch for output %d with respect to input %d,\n'
