@@ -106,7 +106,8 @@ C10_EXPORT void SourceRange::print_with_context(
   }
   AT_ASSERT(end_highlight == str.size() || str[end_highlight] == '\n');
 
-  out << "SourceRange at:" << "\n";
+  out << "SourceRange at:"
+      << "\n";
   if (auto flc = file_line_col()) {
     std::string filename;
     size_t line, col;
