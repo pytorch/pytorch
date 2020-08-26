@@ -98,6 +98,8 @@ class SGD(Optimizer):
                 if weight_decay != 0:
                     d_p = d_p.add(p, alpha=weight_decay)
                 if momentum != 0:
+                    if d_p.is_sparse: 
+                        raise RuntimeError('SGD does not support momentum for sparse gradients')
                     param_state = self.state[p]
                     if 'momentum_buffer' not in param_state:
                         buf = param_state['momentum_buffer'] = torch.clone(d_p).detach()

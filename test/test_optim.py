@@ -292,6 +292,8 @@ class TestOptim(TestCase):
             lambda params: optim.SGD(params, lr=0.005),
             [lambda opt: StepLR(opt, gamma=0.99999, step_size=300)]
         )
+        with self.assertRaisesRegex(RuntimeError, "SGD does not support momentum for sparse gradients"):
+            optim.SGD(params, lr=5e-3, momentum=-0.5)
 
     def test_adam(self):
         self._test_basic_cases(
