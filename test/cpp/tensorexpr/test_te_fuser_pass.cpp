@@ -76,7 +76,7 @@ void testFuserPass_3() {
     FuseTensorExprs(g, /* min_group_size= */ 2);
 
     // We should not create a fusion group since its size would be too small
-    testing::FileCheck().check_not("tensorexpr::Group")->run(*g);
+    testing::FileCheck().check_not("prim::TensorExprGroup")->run(*g);
   }
   {
     auto g = std::make_shared<Graph>();
@@ -86,7 +86,7 @@ void testFuserPass_3() {
     FuseTensorExprs(g, /* min_group_size= */ 1);
 
     // We should create a fusion group since its size is above the threshold
-    testing::FileCheck().check("tensorexpr::Group")->run(*g);
+    testing::FileCheck().check("prim::TensorExprGroup")->run(*g);
   }
 }
 } // namespace jit

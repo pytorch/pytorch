@@ -437,7 +437,8 @@ struct TORCH_API Node {
 
   // instructions lowered by the interpreter and not run in the optimized graph
   bool notExecutedOp() const {
-    return kind_ == prim::Constant || kind_ == prim::profile;
+    return kind_ == prim::Constant || kind_ == prim::profile ||
+        kind_ == prim::profile_optional;
   }
 
   // Graphs

@@ -485,7 +485,7 @@ void AliasDb::analyzeImpl(Node* node) {
       return analyzeRpcAsync(node);
     case prim::GradOf:
       return analyzeGradOf(node);
-    // todo: think abt correctness
+    // TODO: think more about TensorExpr alias correctness
     case prim::TensorExprGroup:
     case prim::Constant:
     case prim::AutogradZero:
@@ -503,7 +503,6 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::DictConstruct:
     case prim::ListConstruct:
       return analyzeContainerConstruct(node);
-    // TODO: think more about TensorExpr alias correctness
     case prim::TupleUnpack:
     case prim::TupleIndex:
     case prim::TupleSlice:
