@@ -19,15 +19,10 @@ class TestFX(TestCase):
         """Check that an nn.Module's results match the GraphModule version
         for a given set of args/kwargs.
         """
-        if kwargs is not None:
-            ref_outs = m(*args, **kwargs)
-        else:
-            ref_outs = m(*args)
+        kwargs = kwargs if kwargs else {}
+        ref_outs = m(*args, **kwargs)
         gm = symbolic_trace(m)
-        if kwargs is not None:
-            test_outs = gm(*args, **kwargs)
-        else:
-            test_outs = gm(*args)
+        test_outs = gm(*args, **kwargs)
         self.assertEqual(ref_outs, test_outs)
 
     def test_graph_module(self):
@@ -70,7 +65,7 @@ class TestFX(TestCase):
                 return x
 
         t = T()
-        s = symbolic_trace(t)
+        symbolic_trace(t)
 
     def test_args_kwargs(self):
         class T(torch.nn.Module):
