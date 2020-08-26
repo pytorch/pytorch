@@ -77,7 +77,7 @@ void specializeAutogradZero(Graph& g) {
         state[n->output()] = State::Zero;
       } break;
       case prim::profile: {
-          state[n->output()] = State::Unknown;
+        state[n->output()] = State::Unknown;
         break;
       }
       case prim::BailOut: {
