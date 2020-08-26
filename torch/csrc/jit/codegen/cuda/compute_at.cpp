@@ -82,6 +82,20 @@ void ComputeAtData::validateNewComputeAt() const {
       ".");
 }
 
+void ComputeAtData::setComputeAtDomain(TensorDomain* td) {
+  if (new_compute_at_domain_ != original_domain_) {
+    TORCH_INTERNAL_ASSERT(
+        *new_compute_at_domain_ == *td,
+        "TensorDomain, ",
+        td,
+        ", does not match with the previously set domain of ",
+        tv_ref_,
+        ", which is ",
+        new_compute_at_domain_);
+  }
+  new_compute_at_domain_ = td;
+}
+
 namespace {
 // Wrapper around set_intersection
 template <typename T>
