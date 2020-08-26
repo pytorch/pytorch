@@ -951,6 +951,7 @@ Example:
     tensor([ 0,  1, -4], dtype=torch.int8)
 """.format(**common_args))
 
+# TODO: see https://github.com/pytorch/pytorch/issues/43667
 add_docstr(torch.bmm,
            r"""
 bmm(input, mat2, *, deterministic=False, out=None) -> Tensor
@@ -974,8 +975,6 @@ If :attr:`input` is a :math:`(b \times n \times m)` tensor, :attr:`mat2` is a
 Args:
     input (Tensor): the first batch of matrices to be multiplied
     mat2 (Tensor): the second batch of matrices to be multiplied
-
-Keyword args:
     deterministic (bool, optional): flag to choose between a faster non-deterministic
                                     calculation, or a slower deterministic calculation.
                                     This argument is only available for sparse-dense CUDA bmm.
@@ -2617,6 +2616,7 @@ Example::
     tensor([ 0.,  1.])
 """.format(**common_args))
 
+# TODO: see https://github.com/pytorch/pytorch/issues/43667
 add_docstr(torch.eye,
            r"""
 eye(n, m=None, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
@@ -2626,8 +2626,6 @@ Returns a 2-D tensor with ones on the diagonal and zeros elsewhere.
 Args:
     n (int): the number of rows
     m (int, optional): the number of columns with default being :attr:`n`
-
-Keyword args:
     {out}
     {dtype}
     {layout}
