@@ -49,7 +49,7 @@ ScalarType promote_type_fft(ScalarType type, bool require_complex) {
   switch (type) {
   case kFloat: return kComplexFloat;
   case kDouble: return kComplexDouble;
-	default: TORCH_INTERNAL_ASSERT(false, "Unhandled dtype");
+  default: TORCH_INTERNAL_ASSERT(false, "Unhandled dtype");
   }
 }
 
@@ -117,7 +117,7 @@ Tensor fft_c2r(Tensor input, c10::optional<int64_t> n_opt,
   if (n_opt) {
     input = resize_fft_input(input, dim, n/2 + 1);
   }
-	// _fft only operates on the last dim, so transpose the selected dim to the end
+  // _fft only operates on the last dim, so transpose the selected dim to the end
   const bool must_transpose = (dim != input_dim - 1);
   if (must_transpose) {
     input = at::transpose(input, -1, dim);
@@ -130,8 +130,8 @@ Tensor fft_c2r(Tensor input, c10::optional<int64_t> n_opt,
   auto out = _fft(at::view_as_real(input),
                   /*signal_ndim=*/1, /*complex_input=*/true,
                   /*complex_output=*/false, /*inverse=*/true,
-									/*signal_sizes=*/{n}, /*normalization=*/norm,
-									/*onesided=*/true);
+                  /*signal_sizes=*/{n}, /*normalization=*/norm,
+                  /*onesided=*/true);
   if (must_transpose) {
     out = at::transpose(out, -1, dim);
   }
@@ -151,7 +151,7 @@ Tensor fft_r2c(Tensor input, c10::optional<int64_t> n_opt,
   if (n_opt) {
     input = resize_fft_input(input, dim, n);
   }
-	// _fft only operates on the last dim, so transpose the selected dim to the end
+  // _fft only operates on the last dim, so transpose the selected dim to the end
   const bool must_transpose = (dim != input_dim - 1);
   if (must_transpose) {
     input = at::transpose(input, -1, dim);
@@ -159,8 +159,8 @@ Tensor fft_r2c(Tensor input, c10::optional<int64_t> n_opt,
   const auto norm = norm_from_string(norm_str, forward);
   auto out = _fft(input, /*signal_ndim=*/1, /*complex_input=*/false,
                   /*complex_output=*/true, /*inverse=*/false,
-									/*signal_sizes=*/{}, /*normalization=*/norm,
-									/*onesided=*/onesided);
+                  /*signal_sizes=*/{}, /*normalization=*/norm,
+                  /*onesided=*/onesided);
   out = at::view_as_complex(out);
   if (must_transpose) {
     out = at::transpose(out, -1, dim);
@@ -184,7 +184,7 @@ Tensor fft_c2c(Tensor input, c10::optional<int64_t> n_opt,
   if (n_opt) {
     input = resize_fft_input(input, dim, n);
   }
-	// _fft only operates on the last dim, so transpose the selected dim to the end
+  // _fft only operates on the last dim, so transpose the selected dim to the end
   const bool must_transpose = (dim != input_dim - 1);
   if (must_transpose) {
     input = at::transpose(input, -1, dim);
@@ -193,8 +193,8 @@ Tensor fft_c2c(Tensor input, c10::optional<int64_t> n_opt,
   auto out = _fft(at::view_as_real(input),
                   /*signal_ndim=*/1, /*complex_input=*/true,
                   /*complex_output=*/true, /*inverse=*/!forward,
-									/*signal_sizes=*/{}, /*normalization=*/norm,
-									/*onesided=*/false);
+                  /*signal_sizes=*/{}, /*normalization=*/norm,
+                  /*onesided=*/false);
   out = at::view_as_complex(out);
   if (must_transpose) {
     out = at::transpose(out, -1, dim);
