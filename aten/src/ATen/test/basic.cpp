@@ -370,7 +370,6 @@ TEST(BasicTest, FactoryMethodsTest) {
   ASSERT_FALSE(tensor0.is_pinned());
 
   // Test setting requires_grad to true.
-  // Issue https://github.com/pytorch/pytorch/issues/30405
   tensor0 = at::empty({4}, at::TensorOptions().requires_grad(true));
   ASSERT_EQ(tensor0.dtype(), at::kFloat);
   ASSERT_EQ(tensor0.layout(), at::kStrided);
