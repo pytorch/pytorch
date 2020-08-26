@@ -15,21 +15,6 @@ except ImportError:
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 class TestFX(TestCase):
-    def checkGraphModule(self, m: torch.nn.Module, args, kwargs=None):
-        """Check that an nn.Module's results match the GraphModule version
-        for a given set of args/kwargs.
-        """
-        if kwargs is not None:
-            ref_outs = m(*args, **kwargs)
-        else:
-            ref_outs = m(*args)
-        gm = symbolic_trace(m)
-        if kwargs is not None:
-            test_outs = gm(*args, **kwargs)
-        else:
-            test_outs = gm(*args)
-        self.assertEqual(ref_outs, test_outs)
-
     def test_graph_module(self):
         class MySub(torch.nn.Module):
             def __init__(self):
@@ -70,16 +55,7 @@ class TestFX(TestCase):
                 return x
 
         t = T()
-        s = symbolic_trace(t)
-
-    def test_args_kwargs(self):
-        class T(torch.nn.Module):
-            def forward(self, *args, **kwargs):
-                x = args[0] + kwargs['foo']
-                return x
-
-        t = T()
-        self.checkGraphModule(t, (torch.rand(1), torch.rand(1)), {'foo': torch.rand(1)})
+        symbolic_trace(t)
 
     def test_fx_shifts(self):
         class MyModule(torch.nn.Module):
@@ -89,7 +65,11 @@ class TestFX(TestCase):
         input = torch.LongTensor(10).random_(0, 1024)
 
         m = MyModule()
-        self.checkGraphModule(m, (input,))
+        ref_outs = m(input)
+        gm = symbolic_trace(m)
+        test_outs = gm(input)
+
+        self.assertEqual(ref_outs, test_outs)
 
     def test_dict(self):
         class MyDictMod(torch.nn.Module):
@@ -98,8 +78,11 @@ class TestFX(TestCase):
 
         input_dict = {'3': torch.rand(3, 4)}
         m = MyDictMod()
+        ref_out = m(input_dict)
+        gm = symbolic_trace(m)
+        out = gm(input_dict)
 
-        self.checkGraphModule(m, (input_dict,))
+        self.assertEqual(out, ref_out)
 
     def test_disallow_override(self):
         # Custom delegate to disallow in-place tensor operations
@@ -208,11 +191,11 @@ class TestFX(TestCase):
             def forward(self, a, b):
                 c, d = a
                 return c + d + b
-
+        m = M()
+        m_g = symbolic_trace(m)
         a = (torch.rand(1), torch.rand(1))
         b = torch.rand(1)
-        m = M()
-        self.checkGraphModule(m, (a, b))
+        self.assertEqual(m(a, b), m_g(a, b))
 
     def test_reserved_getattr(self):
         """Ensure that we do not name any nodes with a reserved builtin like `getattr`"""
