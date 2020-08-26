@@ -19,7 +19,7 @@ Shader::Layout::Factory::Handle Shader::Layout::Factory::operator()(
     VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
     nullptr,
     0u,
-    descriptor.bindings.size(),
+    static_cast<uint32_t>(descriptor.bindings.size()),
     descriptor.bindings.data(),
   };
 
@@ -67,7 +67,7 @@ struct Shader::Factory::Compiler final {
   #endif /* DEBUG */
   }
 
-  std::vector<const uint32_t> compile(const char* const source) const {
+  std::vector<uint32_t> compile(const char* const source) const {
     const shaderc::SpvCompilationResult result = context.CompileGlslToSpv(
         source,
         ::strlen(source),
@@ -81,15 +81,15 @@ struct Shader::Factory::Compiler final {
         "Shader compilation error: ",
         result.GetErrorMessage());
 
-    return std::vector<const uint32_t>(result.cbegin(), result.cend());
+    return std::vector<uint32_t>(result.cbegin(), result.cend());
   }
 };
 
 #else
 
 struct Shader::Factory::Compiler final {
-  std::vector<const uint32_t> compile(const char* const /* source */) const {
-    return std::vector<const uint32_t>{};
+  std::vector<uint32_t> compile(const char* const /* source */) const {
+    return std::vector<uint32_t>{};
   }
 };
 
@@ -111,7 +111,7 @@ Shader::Factory::~Factory() = default;
 
 typename Shader::Factory::Handle Shader::Factory::operator()(
     const Descriptor& descriptor) const {
-  std::vector<const uint32_t> binary;
+  std::vector<uint32_t> binary;
 
   const uint32_t* code = nullptr;
   uint32_t size = 0u;
@@ -119,7 +119,7 @@ typename Shader::Factory::Handle Shader::Factory::operator()(
   if (Descriptor::Type::Source == descriptor.type) {
     binary = compiler_->compile(descriptor.shader.source.glsl);
     code = binary.data();
-    size = sizeof(uint32_t) * binary.size();
+    size = sizeof(uint32_t) * static_cast<uint32_t>(binary.size());
   }
   else if (Descriptor::Type::Binary == descriptor.type) {
     code = descriptor.shader.binary.spirv;
