@@ -451,18 +451,6 @@ class ProcessGroupNCCL : public ProcessGroup {
   std::shared_ptr<ProcessGroup::Work> collective(
       std::vector<at::Tensor>& input,
       std::vector<at::Tensor>& output,
-      Fn fn);
-  template <typename Fn, typename PreProcess, typename PostProcess>
-  std::shared_ptr<ProcessGroup::Work> collective(
-      std::vector<at::Tensor>& input,
-      std::vector<at::Tensor>& output,
-      Fn fn,
-      PreProcess pre,
-      PostProcess post);
-  template <typename Fn>
-  std::shared_ptr<ProcessGroup::Work> collective(
-      std::vector<at::Tensor>& input,
-      std::vector<at::Tensor>& output,
       c10::optional<std::vector<at::cuda::CUDAStream>> cudaStreams,
       Fn fn);
   template <typename Fn, typename PreProcess, typename PostProcess>
@@ -609,6 +597,10 @@ struct NCCLBroadcastOptions : BroadcastOptions {
 };
 
 struct NCCLReduceScatterOptions : ReduceScatterOptions {
+  c10::optional<std::vector<at::cuda::CUDAStream>> cudaStreams;
+};
+
+struct NCCLAllToAllOptions : AllToAllOptions {
   c10::optional<std::vector<at::cuda::CUDAStream>> cudaStreams;
 };
 

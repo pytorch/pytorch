@@ -16,7 +16,7 @@ MKL and MAGMA. Here are the steps to build with them.
 
     REM Download MKL files
     curl https://s3.amazonaws.com/ossci-windows/mkl_2020.0.166.7z -k -O
-    7z x -aoa mkl_2018.2.185.7z -omkl
+    7z x -aoa mkl_2020.0.166.7z -omkl
 
     REM Download MAGMA files
     REM version available:
@@ -31,9 +31,9 @@ MKL and MAGMA. Here are the steps to build with them.
     7z x -aoa magma.7z -omagma
     
     REM Setting essential environment variables
-    set "CMAKE_INCLUDE_PATH=%cd%\\mkl\\include"
-    set "LIB=%cd%\\mkl\\lib;%LIB%"
-    set "MAGMA_HOME=%cd%\\magma"
+    set "CMAKE_INCLUDE_PATH=%cd%\mkl\include"
+    set "LIB=%cd%\mkl\lib;%LIB%"
+    set "MAGMA_HOME=%cd%\magma"
 
 Speeding CUDA build for Windows
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
