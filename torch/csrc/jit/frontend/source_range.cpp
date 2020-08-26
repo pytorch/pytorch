@@ -105,8 +105,9 @@ C10_EXPORT void SourceRange::print_with_context(
   size_t end_context =
       end_line; // end of context, CONTEXT lines after the highlight lines
   for (size_t i = 0; end_context < str.size(); ++end_context) {
-    if (str[end_context] == '\n')
+    if (str[end_context] == '\n'){
       ++i;
+    }
     if (i >= context) {
       break;
     }
@@ -138,18 +139,21 @@ C10_EXPORT void SourceRange::print_with_context(
       // print line of code
       auto actual_line = str.substr(line_start, (line_end - line_start) + 1);
       out << actual_line;
-      if (actual_line.back() != '\n')
+      if (actual_line.back() != '\n'){
         out << "\n";
+      }
 
       size_t empty_space = 0;
       size_t highlight_space = 0;
       size_t hightlight_begin = line_start;
       size_t highlight_end = line_start;
       // determine length of line which is being highlighted
-      while (hightlight_begin > 0 && str[hightlight_begin - 1] != '\n')
+      while (hightlight_begin > 0 && str[hightlight_begin - 1] != '\n'){
         --hightlight_begin;
-      while (highlight_end < range_end && str[highlight_end] != '\n')
+      }
+      while (highlight_end < range_end && str[highlight_end] != '\n'){
         ++highlight_end;
+      }
       AT_ASSERT(hightlight_begin == 0 || str[hightlight_begin - 1] == '\n');
       AT_ASSERT(highlight_end == range_end || str[highlight_end] == '\n');
       // determine amount of empty space vs highlighted space
@@ -185,8 +189,9 @@ C10_EXPORT void SourceRange::print_with_context(
   if (line_end <= str.size()) {
     auto line_substr = str.substr(line_end, end_context - line_end);
     out << line_substr;
-    if (!line_substr.empty() && line_substr.back() != '\n')
+    if (!line_substr.empty() && line_substr.back() != '\n'){
       out << "\n";
+    }
   }
 }
 
