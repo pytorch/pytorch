@@ -31,6 +31,8 @@ allow_list = [
     ("aten::_max", datetime.date(2020, 9, 9)),
     ("aten::amax", datetime.date(2020, 10, 9)),
     ("aten::amin", datetime.date(2020, 10, 9)),
+    ("aten::min_values", datetime.date(2020, 10, 9)),
+    ("aten::max_values", datetime.date(2020, 10, 9)),
     ("aten::split_with_sizes", datetime.date(2020, 7, 29)),
     ("aten::eq", datetime.date(2020, 7, 30)),
     ("aten::log", datetime.date(2020, 7, 30)),
