@@ -2835,6 +2835,40 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             loss = criterion(output, target)
             loss.backward()
 
+
+    @requires_nccl()
+    @skip_if_not_multigpu
+    def test_update_after_ddp_ctor(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+
+        class TestModel(nn.Module):
+            def __init__(self):
+                super(TestModel, self).__init__()
+                self.fc1 = nn.Linear(2, 10, bias=False)
+                self.fc2 = None
+                self.relu = nn.ReLU()
+
+            def forward(self, x):
+                x = self.relu(self.fc1(x))
+                x = self.relu(self.fc2(x))
+                return F.softmax(x, dim=1)
+
+        device_id = gpus_for_rank(self.world_size)[self.rank][0]
+        model = TestModel().float().to(device_id)
+        ddp = DistributedDataParallel(
+            model,
+            device_ids=[device_id],
+            process_group=process_group,
+        )
+
+        ddp.module.fc2 = nn.Linear(10, 4, bias=False).to(device_id)
+        inp = torch.rand([4, 2], dtype=torch.float)
+
+        for i in range(6):
+            ddp(inp).sum().backward()
+
+
     def _run_and_verify_sparse_gradients(self, vanilla_model, ddp_model):
         mult = 2
         batch_size = mult * self.world_size
