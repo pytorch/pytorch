@@ -479,6 +479,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.native_norm: lambda input, p=2, dim=None, keepdim=False, dtype=None: -1,
         torch.ne: lambda input, other, out=None: -1,
         torch.neg: lambda input, out=None: -1,
+        torch.negative: lambda input, out=None: -1,
         torch.nextafter: lambda input, other, out=None: -1,
         torch.nn.functional.adaptive_avg_pool2d: lambda input, output_size: -1,
         torch.nn.functional.adaptive_avg_pool3d: lambda input, output_size: -1,
