@@ -4,8 +4,8 @@
 
 #include <ATen/native/xnnpack/Common.h>
 #include <ATen/native/ConvUtils.h>
+#include <ATen/native/utils/Factory.h>
 #include <ATen/native/utils/ParamUtils.h>
-#include <ATen/native/xnnpack/Factory.h>
 #include <ATen/native/xnnpack/Convolution.h>
 
 namespace at {
@@ -93,17 +93,16 @@ Tensor create_and_run(
     const int64_t groups,
     const float output_min,
     const float output_max) {
-  return run(
-      create(
-          weight,
-          bias,
-          padding,
-          stride,
-          dilation,
-          groups,
-          output_min,
-          output_max),
-      input);
+  auto op_context = create(
+      weight,
+      bias,
+      padding,
+      stride,
+      dilation,
+      groups,
+      output_min,
+      output_max);
+  return run(op_context, input);
 }
 
 } // namespace
@@ -178,11 +177,11 @@ ContextConv2D create(
 }
 
 Tensor run(
-    const ContextConv2D& context,
+    ContextConv2D& context,
     const Tensor& input) {
   using namespace internal;
 
-  const Tensor padded_input_nhwc = allocate_padded_contiguous_if_needed(
+  const Tensor padded_input_nhwc = mobile::allocate_padded_contiguous_if_needed(
       input, MemoryFormat::ChannelsLast);
 
   TORCH_CHECK(
@@ -190,7 +189,7 @@ Tensor run(
       "XNNPACK Convolution not usable! "
       "Reason: The provided input tensor is either invalid or unsupported by XNNPACK.");
 
-  Tensor output = empty_with_tail_padding(
+  Tensor output = mobile::empty_with_tail_padding(
       conv_output_size(
           padded_input_nhwc.sizes(),
           context.weight_size_,
@@ -201,18 +200,38 @@ Tensor run(
       MemoryFormat::ChannelsLast,
       padded_input_nhwc.names());
 
-  const xnn_status setup_status = xnn_setup_convolution2d_nhwc_f32(
-      context.op.get(),                                      // operator
-      padded_input_nhwc.size(Layout::Activation4D::batch),   // batch_size
-      padded_input_nhwc.size(Layout::Activation4D::height),  // input_height
-      padded_input_nhwc.size(Layout::Activation4D::width),   // input_width
-      padded_input_nhwc.data_ptr<float>(),                   // input
-      output.data_ptr<float>(),                              // output
-      caffe2::pthreadpool_());                               // threadpool
+  if ((context.cached_input_ptr != padded_input_nhwc.data_ptr<float>()) ||
+      (context.cached_output_ptr != output.data_ptr<float>()) ||
+      (padded_input_nhwc.size(Layout::Activation4D::batch) !=
+        context.batch_size) ||
+      (padded_input_nhwc.size(Layout::Activation4D::channels) !=
+        context.input_channels) ||
+      (padded_input_nhwc.size(Layout::Activation4D::height) !=
+        context.input_height) ||
+      (padded_input_nhwc.size(Layout::Activation4D::width) !=
+        context.input_width)
+      ) {
+    const xnn_status setup_status = xnn_setup_convolution2d_nhwc_f32(
+        context.op.get(),                                      // operator
+        padded_input_nhwc.size(Layout::Activation4D::batch),   // batch_size
+        padded_input_nhwc.size(Layout::Activation4D::height),  // input_height
+        padded_input_nhwc.size(Layout::Activation4D::width),   // input_width
+        padded_input_nhwc.data_ptr<float>(),                   // input
+        output.data_ptr<float>(),                              // output
+        caffe2::pthreadpool_());                               // threadpool
 
-  TORCH_CHECK(
-      xnn_status_success == setup_status,
-      "xnn_setup_convolution2d_nhwc_f32 failed!");
+    TORCH_CHECK(
+        xnn_status_success == setup_status,
+        "xnn_setup_convolution2d_nhwc_f32 failed!");
+
+    // Cache values to avoid setup for the next round.
+    context.cached_input_ptr = padded_input_nhwc.data_ptr<float>();
+    context.cached_output_ptr = output.data_ptr<float>();
+    context.batch_size = padded_input_nhwc.size(Layout::Activation4D::batch);
+    context.input_channels = padded_input_nhwc.size(Layout::Activation4D::channels);
+    context.input_height = padded_input_nhwc.size(Layout::Activation4D::height);
+    context.input_width = padded_input_nhwc.size(Layout::Activation4D::width);
+  }
 
   const xnn_status run_status = xnn_run_operator(
       context.op.get(),         // operator

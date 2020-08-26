@@ -21,9 +21,55 @@ from torch.quantization import QuantWrapper, QuantStub, DeQuantStub, \
 from torch.quantization.default_mappings import (
     DEFAULT_DYNAMIC_MODULE_MAPPING,
     DEFAULT_QCONFIG_PROPAGATE_WHITE_LIST,
+    DEFAULT_QAT_MODULE_MAPPING,
 )
+# symbolic trace
+from torch.fx import symbolic_trace
+
+# graph mode quantization based on fx
+from torch.quantization._quantize_fx import (
+    Quantizer,
+    QuantType,
+    fuse,
+)
+
 import unittest
+import numpy as np
 from torch.testing import FileCheck
+
+class NodeSpec:
+    ''' Used for checking GraphModule Node
+    '''
+    def __init__(self, op, target):
+        '''
+        op: call_function | call_module
+        target:
+          for call_function, target would be a function
+          for call_module, target would be the type of PyTorch module
+        '''
+        self.op = op
+        self.target = target
+
+    @classmethod
+    def call_function(cls, target):
+        return NodeSpec('call_function', target)
+
+    @classmethod
+    def call_method(cls, target):
+        return NodeSpec('call_method', target)
+
+    @classmethod
+    def call_module(cls, target):
+        return NodeSpec('call_module', target)
+
+    def __hash__(self):
+        return hash((self.op, self.target))
+
+    def __eq__(self, other):
+        if not isinstance(other, NodeSpec):
+            return NotImplemented
+
+        return self.op == other.op and self.target == other.target
 
 def test_only_eval_fn(model, calib_data):
     r"""
@@ -104,7 +150,7 @@ def _make_conv_test_input(
             W_init.float() - W_zero_points_tensor.reshape(*W_shape)).float()
         b = X_scale * W_scales_tensor * b_init.float()
         W_q = torch.quantize_per_channel(
-            W, W_scales_tensor, W_zero_points_tensor.long(), 0,
+            W, W_scales_tensor.double(), W_zero_points_tensor.long(), 0,
             dtype=torch.qint8)
     else:
         W = W_scale[0] * (W_init - W_zero_point[0]).float()
@@ -133,6 +179,16 @@ def skipIfNoFBGEMM(fn):
 def get_script_module(model, tracing, data):
     return torch.jit.trace(model, data) if tracing else torch.jit.script(model)
 
+def lengths_to_offsets(t, offset_type=np.int64, use_begin_offset=True):
+    """
+    Convert lengths to offsets for embedding_bag
+    """
+    tt = np.zeros((t.shape[0] + 1,), dtype=offset_type)
+    tt[1:] = t
+    tt = torch.from_numpy(np.cumsum(tt, dtype=offset_type))
+    if use_begin_offset:
+        return tt[:-1]
+    return tt[1:]
 
 # QuantizationTestCase used as a base class for testing quantization on modules
 class QuantizationTestCase(TestCase):
@@ -159,6 +215,11 @@ class QuantizationTestCase(TestCase):
         self.img_data_dict = {1 : self.img_data_1d,
                               2 : self.img_data_2d,
                               3 : self.img_data_3d}
+
+        # Quant types that produce statically quantized ops
+        self.static_quant_types = [QuantType.STATIC, QuantType.QAT]
+        # All quant types for (fx based) graph mode quantization
+        self.all_quant_types = [QuantType.DYNAMIC, QuantType.STATIC, QuantType.QAT]
 
     def checkNoPrepModules(self, module):
         r"""Checks the module does not contain child
@@ -196,8 +257,11 @@ class QuantizationTestCase(TestCase):
            and type(module) in propagate_qconfig_list:
             self.assertTrue(hasattr(module, 'activation_post_process'),
                             'module: ' + str(type(module)) + ' do not have observer')
-        for child in module.children():
-            self.checkObservers(child)
+        # we don't need to check observers for child modules of the
+        # qat modules
+        if type(module) not in DEFAULT_QAT_MODULE_MAPPING.values():
+            for child in module.children():
+                self.checkObservers(child)
 
     def checkQuantDequant(self, mod):
         r"""Checks that mod has nn.Quantize and
@@ -232,8 +296,8 @@ class QuantizationTestCase(TestCase):
         b.seek(0)
         loaded_dict = torch.load(b)
         loaded_model.load_state_dict(loaded_dict)
-        ref_out = ref_model(x)
-        load_out = loaded_model(x)
+        ref_out = ref_model(*x)
+        load_out = loaded_model(*x)
 
         def check_outputs(ref_out, load_out):
             self.assertEqual(ref_out[0], load_out[0])
@@ -248,7 +312,7 @@ class QuantizationTestCase(TestCase):
         torch.save(ref_model, b)
         b.seek(0)
         loaded = torch.load(b)
-        load_out = loaded(x)
+        load_out = loaded(*x)
         check_outputs(ref_out, load_out)
 
     def check_weight_bias_api(self, ref_model, weight_keys, bias_keys):
@@ -284,7 +348,7 @@ class QuantizationTestCase(TestCase):
         self._checkScriptable(orig_mod, scripted, calib_data, check_save_load)
 
         # Use first calib_data entry as trace input
-        traced = torch.jit.trace(orig_mod, calib_data[0][0])
+        traced = torch.jit.trace(orig_mod, calib_data[0])
         self._checkScriptable(orig_mod, traced, calib_data, check_save_load)
 
     # Call this twice: once for a scripted module and once for a traced module
@@ -353,6 +417,141 @@ class QuantizationTestCase(TestCase):
 
         return models[False]
 
+    def checkGraphModuleNodes(
+            self, graph_module,
+            expected_node=None,
+            expected_node_occurrence=None,
+            expected_node_list=None):
+        """ Check if GraphModule contains the target node
+        Args:
+            graph_module: the GraphModule instance we want to check
+            expected_node, expected_node_occurrence, expected_node_list:
+               see docs for checkGraphModeFxOp
+        """
+        nodes_in_graph = dict()
+        node_list = []
+        modules = dict(graph_module.root.named_modules())
+        for node in graph_module.graph.nodes:
+            n = None
+            if node.op == 'call_function' or node.op == 'call_method':
+                n = NodeSpec(node.op, node.target)
+            elif node.op == 'call_module':
+                n = NodeSpec(node.op, type(modules[node.target]))
+
+            if n is not None:
+                node_list.append(n)
+                if n in nodes_in_graph:
+                    nodes_in_graph[n] += 1
+                else:
+                    nodes_in_graph[n] = 1
+
+        if expected_node is not None:
+            self.assertTrue(expected_node in nodes_in_graph, 'node:' + str(expected_node) +
+                            ' not found in the graph module')
+
+        if expected_node_occurrence is not None:
+            for expected_node, occurrence in expected_node_occurrence.items():
+                self.assertTrue(
+                    expected_node in nodes_in_graph,
+                    'Check failed for node:' + str(expected_node) +
+                    ' not found')
+                self.assertTrue(
+                    nodes_in_graph[expected_node] == occurrence,
+                    'Check failed for node:' + str(expected_node) +
+                    ' Expected occurrence:' + str(occurrence) +
+                    ' Found occurrence:' + str(nodes_in_graph[expected_node]))
+
+        if expected_node_list is not None:
+            cur_index = 0
+            for n in node_list:
+                if cur_index == len(expected_node_list):
+                    return
+                if n == expected_node_list[cur_index]:
+                    cur_index += 1
+            self.assertTrue(
+                cur_index == len(expected_node_list),
+                "Check failed for graph:" +
+                self.printGraphModule(graph_module, print_str=False) +
+                "Expected ordered list:" +
+                str(expected_node_list))
+
+    def printGraphModule(self, graph_module, print_str=True):
+        modules = dict(graph_module.root.named_modules())
+        node_infos = []
+        for n in graph_module.graph.nodes:
+            node_info = ' '.join(map(repr, [n.op, n.name, n.target, n.args, n.kwargs]))
+            if n.op == 'call_module':
+                node_info += ' module type: ' + repr(type(modules[n.target]))
+            node_infos.append(node_info)
+        str_to_print = '\n'.join(node_infos)
+        if print_str:
+            print(str_to_print)
+        return str_to_print
+
+    def checkGraphModeFxOp(self, model, inputs, quant_type,
+                           expected_node=None,
+                           expected_node_occurrence=None,
+                           expected_node_list=None,
+                           debug=False):
+        """ Quantizes model with graph mode quantization on fx and check if the
+        quantized model contains the quantized_node
+
+        Args:
+            model: floating point torch.nn.Module
+            inputs: one positional sample input arguments for model
+            expected_node: NodeSpec
+                  e.g. NodeSpec.call_function(torch.quantize_per_tensor)
+            expected_node_occurrence: a dict from NodeSpec to
+                  expected number of occurences (int)
+                  e.g. {NodeSpec.call_function(torch.quantize_per_tensor) : 1,
+                        NodeSpec.call_method('dequantize'): 1}
+            expected_node_list: a list of NodeSpec, used to check the order
+                  of the occurrence of Node
+                  e.g. [NodeSpec.call_function(torch.quantize_per_tensor),
+                        NodeSpec.call_module(nnq.Conv2d),
+                        NodeSpec.call_function(F.hardtanh_),
+                        NodeSpec.call_method('dequantize')]
+        """
+        # TODO: make img_data a single example instead of a list
+        if type(inputs) == list:
+            inputs = inputs[0]
+        if quant_type == QuantType.QAT:
+            model.train()
+        else:
+            model.eval()
+        original = symbolic_trace(model)
+        fused = fuse(original)
+
+        quantizer = Quantizer()
+        # TODO: uncommon after we make per channel observer work in the flow
+        # qconfig_dict = {'': get_default_qconfig(torch.backends.quantized.engine)}
+        qconfig_dict = {'' : default_qconfig}
+        if quant_type == QuantType.DYNAMIC:
+            prepared = quantizer.prepare_dynamic(fused, qconfig_dict)
+        else:
+            prepared = quantizer.prepare(fused, qconfig_dict)
+
+        prepared(*inputs)
+        qgraph = quantizer.convert(prepared)
+        qgraph_debug = quantizer.convert(prepared, debug=True)
+
+        result = qgraph(*inputs)
+        result_debug = qgraph_debug(*inputs)
+
+        self.assertEqual((result - result_debug).abs().max(), 0), \
+            'Expecting debug and non-debug option to produce identical result'
+
+        if debug:
+            print()
+            print('quant type:', quant_type)
+            print('origianl graph module:', type(model))
+            self.printGraphModule(original)
+            print()
+            print('quantized graph module:', type(qgraph))
+            self.printGraphModule(qgraph)
+            print()
+        self.checkGraphModuleNodes(
+            qgraph, expected_node, expected_node_occurrence, expected_node_list)
 
 # Below are a series of neural net models to use in testing quantization
 # Single layer models
@@ -967,7 +1166,7 @@ class ModelMultipleOps(torch.nn.Module):
         out = self.conv2(out)
         out = torch.nn.functional.max_pool2d(out, 2, 2)
         out = self.cat.cat([out, out])
-        out = out.view(-1, 3 * 2 * 2)
+        out = out.reshape(-1, 3 * 2 * 2)
         out = self.fc(out)
         return out
 
@@ -1001,6 +1200,15 @@ class ModelMultipleOpsNoAvgPool(torch.nn.Module):
         out = self.conv2(out)
         out = torch.nn.functional.max_pool2d(out, 2, 2)
         out = self.cat.cat([out, out])
-        out = out.view(-1, 3 * 2 * 2)
+        out = out.reshape(-1, 3 * 2 * 2)
         out = self.fc(out)
         return out
+
+class EmbeddingModule(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.emb = torch.nn.EmbeddingBag(num_embeddings=10, embedding_dim=12,
+                                         include_last_offset=True, scale_grad_by_freq=False, mode='sum')
+
+    def forward(self, indices, offsets, per_sample_weights):
+        return self.emb(indices, offsets, per_sample_weights)

@@ -123,12 +123,18 @@ void BoundShapeInferencer::Initialize(
 void BoundShapeInferencer::InferOps(
     const OperatorDef& op,
     caffe2::Workspace* /* ws */) {
-  if (op.type() == "SparseLengthsSum" ||
-      op.type() == "SparseLengthsSumFused8BitRowwise" ||
-      op.type() == "SparseLengthsWeightedSum" ||
-      op.type() == "SparseLengthsWeightedSumFused8BitRowwise" ||
-      op.type() == "SparseLengthsSumFused4BitRowwise" ||
-      op.type() == "SparseLengthsWeightedSumFused4BitRowwise") {
+  const static std::unordered_set<std::string> kSlsOps = {
+      "SparseLengthsSum",
+      "SparseLengthsSumFused8BitRowwise",
+      "SparseLengthsWeightedSum",
+      "SparseLengthsWeightedSumFused8BitRowwise",
+      "SparseLengthsSumFused4BitRowwise",
+      "SparseLengthsWeightedSumFused4BitRowwise",
+      "SparseLengthsSum4BitRowwiseSparse",
+      "SparseLengthsWeightedSum4BitRowwiseSparse",
+      "SparseLengthsSum8BitRowwiseSparse",
+      "SparseLengthsWeightedSum8BitRowwiseSparse"};
+  if (kSlsOps.count(op.type())) {
     InferSparseLengthsSum(op);
   } else if (op.type() == "Add" || op.type() == "Mul") {
     InferElementwiseOp(op);
@@ -348,18 +354,32 @@ void BoundShapeInferencer::InferSparseLengthsSum(const OperatorDef& op) {
       op.input(0),
       "needs to be 2D");
 
-  int weight = (op.type() == "SparseLengthsWeightedSum" ||
-                op.type() == "SparseLengthsWeightedSumFused8BitRowwise" ||
-                op.type() == "SparseLengthsWeightedSumFused4BitRowwise")
+  const int weight =
+      (op.type() == "SparseLengthsWeightedSum" ||
+       op.type() == "SparseLengthsWeightedSumFused8BitRowwise" ||
+       op.type() == "SparseLengthsWeightedSumFused4BitRowwise" ||
+       op.type() == "SparseLengthsWeightedSum4BitRowwiseSparse" ||
+       op.type() == "SparseLengthsWeightedSum8BitRowwiseSparse")
       ? 1
       : 0;
 
-  const bool is4bit = op.type() == "SparseLengthsSumFused4BitRowwise" ||
-      op.type() == "SparseLengthsWeightedSumFused4BitRowwise";
+  const bool is4bit =
+      (op.type() == "SparseLengthsSumFused4BitRowwise" ||
+       op.type() == "SparseLengthsWeightedSumFused4BitRowwise" ||
+       op.type() == "SparseLengthsWeightedSum4BitRowwiseSparse" ||
+       op.type() == "SparseLengthsSum4BitRowwiseSparse");
+
+  const bool isSparse =
+      (op.type() == "SparseLengthsSum4BitRowwiseSparse" ||
+       op.type() == "SparseLengthsWeightedSum4BitRowwiseSparse" ||
+       op.type() == "SparseLengthsSum8BitRowwiseSparse" ||
+       op.type() == "SparseLengthsWeightedSum8BitRowwiseSparse");
 
   if (weight) {
-    CAFFE_ENFORCE_EQ(
-        op.input_size(), 4, "SparseLengthsWeightedSum must have 4 inputs");
+    CAFFE_ENFORCE_GE(
+        op.input_size(),
+        4,
+        "SparseLengthsWeightedSum(Sparse) must have 4 or 5 inputs");
     SetTensorBoundShapeIfNotExist(
         op.input(weight),
         {TensorBoundShape_DimType_BATCH_OF_FEATURE_MAX_DEFAULT},
@@ -390,7 +410,9 @@ void BoundShapeInferencer::InferSparseLengthsSum(const OperatorDef& op) {
   // If the op is SparseLengthsSumFused8BitRowwise, we need to extract 4 bytes
   // for fp32 scale and 4 bytes for fp32 bias (https://fburl.com/t6dp9tsc)
   if (op.type() == "SparseLengthsSumFused8BitRowwise" ||
-      op.type() == "SparseLengthsWeightedSumFused8BitRowwise") {
+      op.type() == "SparseLengthsWeightedSumFused8BitRowwise" ||
+      op.type() == "SparseLengthsSum8BitRowwiseSparse" ||
+      op.type() == "SparseLengthsWeightedSum8BitRowwiseSparse") {
     output_dim1 -= 8;
   }
   // If the op is SparseLengthsSumFused4BitRowwise, we need to extract 2 bytes

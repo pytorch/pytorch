@@ -49,6 +49,7 @@
 #include <torch/csrc/jit/passes/quantization/insert_observers.h>
 #include <torch/csrc/jit/passes/quantization/insert_quant_dequant.h>
 #include <torch/csrc/jit/passes/quantization/quantization_type.h>
+#include <torch/csrc/jit/passes/reconstruct_scopes.h>
 #include <torch/csrc/jit/passes/remove_dropout.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
 #include <torch/csrc/jit/passes/remove_inplace_ops.h>
@@ -73,6 +74,7 @@
 #include <torch/csrc/jit/runtime/jit_exception.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/print_handler.h>
+#include <torch/csrc/jit/runtime/static/init.h>
 #include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/tensorexpr/execution_counter.h>
@@ -256,11 +258,14 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_fold_convbn", &FoldConvBatchNorm)
       .def(
           "_freeze_module",
-          [](Module& module, std::vector<std::string>& preservedAttrs) {
-            return freeze_module(module, preservedAttrs);
+          [](Module& module,
+             std::vector<std::string>& preservedAttrs,
+             bool freezeInterfaces) {
+            return freeze_module(module, preservedAttrs, freezeInterfaces);
           },
           py::arg("module"),
-          py::arg("preservedAttrs") = std::vector<std::string>())
+          py::arg("preservedAttrs") = std::vector<std::string>(),
+          py::arg("freezeInterfaces") = true)
       .def("_jit_pass_fuse_linear", &FuseLinear)
       .def(
           "_jit_pass_fuse_add_relu",
@@ -302,6 +307,16 @@ void initJITBindings(PyObject* module) {
             subgraph_rewriter.RegisterRewritePattern(pattern, fused_node_name);
             subgraph_rewriter.runOnGraph(g);
           })
+      .def(
+          "_jit_pass_reconstruct_scopes",
+          [](script::Module& module,
+             std::shared_ptr<Graph>& g,
+             const std::string& prefix) {
+            ReconstructScopes(module, *g, prefix);
+          },
+          py::arg("module"),
+          py::arg("graph"),
+          py::arg("prefix") = "top")
       .def(
           "_jit_pass_remove_inplace_ops",
           [](std::shared_ptr<Graph> g) { return RemoveInplaceOps(g); })
@@ -550,6 +565,16 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_remove_dropout",
           [](script::Module& module) { return removeDropout(module); })
+      .def(
+          "_jit_pass_transform_conv1d_to_conv2d",
+          [](std::shared_ptr<Graph>& graph) {
+            return transformConv1dToConv2d(graph);
+          })
+      .def(
+          "_jit_pass_transform_conv1d_to_conv2d",
+          [](script::Module& module) {
+            return transformConv1dToConv2d(module);
+          })
       .def(
           "_jit_pass_insert_prepacked_ops",
           [](std::shared_ptr<Graph>& graph) {
@@ -961,6 +986,10 @@ void initJITBindings(PyObject* module) {
           // Intentionally not releasing GIL
           &PythonFutureWrapper::done)
       .def(
+          "value",
+          &PythonFutureWrapper::value,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
           "wait",
           &PythonFutureWrapper::wait,
           py::call_guard<py::gil_scoped_release>())
@@ -1091,6 +1120,7 @@ void initJITBindings(PyObject* module) {
   initTreeViewBindings(module);
   initJitScriptBindings(module);
   initJitBackendBindings(module);
+  initStaticRuntimeBindings(module);
 
   setPrintHandler([](const std::string& str) {
     py::gil_scoped_acquire acquire;

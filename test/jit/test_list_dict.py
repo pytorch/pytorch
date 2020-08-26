@@ -1152,6 +1152,9 @@ class TestDict(JitTestCase):
     def dict2(self):
         return {'x': torch.ones(1) + 100, 'y': torch.ones(1) + 101, 'z': torch.ones(1) + 102}
 
+    def dict_bool(self):
+        return {True: 1}
+
     def test_del(self):
         def inputs():
             return {'hi': 2, 'bye': 3}
@@ -1333,6 +1336,21 @@ class TestDict(JitTestCase):
 
         self.checkScript(get, (self.dict(), 'a'))
         self.checkScript(get, (self.dict(), "doesn't exist"))
+
+    def test_get_boolkey(self):
+        def get(x, key):
+            # type: (Dict[bool, int], bool) -> Optional[int]
+            return x.get(key)
+
+        self.checkScript(get, (self.dict_bool(), True))
+        self.checkScript(get, (self.dict_bool(), False))
+
+        def get_default(x, key):
+            # type: (Dict[bool, int], bool) -> int
+            return x.get(key, 42)
+
+        self.checkScript(get_default, (self.dict_bool(), True))
+        self.checkScript(get_default, (self.dict_bool(), False))
 
     def test_basic(self):
         def simple(x):

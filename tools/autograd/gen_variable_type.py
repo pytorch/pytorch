@@ -138,7 +138,7 @@ DONT_REQUIRE_DERIVATIVE = {
     # Quantize functions should not record gradients
     'quantize_per_tensor', 'quantize_per_channel',
     # Functions that return integers should not have output that require gradients
-    'argmax', 'argmin', 'argsort',
+    'argmax', 'argmin', 'argsort', 'searchsorted'
 }
 
 # Some operators invalidate the grad_accumulator. Let's reset it.

@@ -351,18 +351,10 @@ void TensorExprKernel::promoteInputs(std::vector<ExprHandle>& inputs) {
   // Find the highest type among the inputs.
   ScalarType highType = inputs[0].dtype().scalar_type();
   for (const auto input : inputs) {
-    ScalarType iType = input.dtype().scalar_type();
-    if (iType == ScalarType::Bool) {
-      continue;
-    }
-    highType = promoteTypes(highType, iType);
+    highType = promoteTypes(highType, input.dtype().scalar_type());
   }
 
   for (ExprHandle& e : inputs) {
-    if (e.dtype().scalar_type() == ScalarType::Bool) {
-      continue;
-    }
-
     if (e.dtype().scalar_type() == highType) {
       continue;
     }
@@ -373,7 +365,7 @@ void TensorExprKernel::promoteInputs(std::vector<ExprHandle>& inputs) {
   case ScalarType::Name:      \
     e = cast<Type>(e);        \
     break;
-      AT_FORALL_SCALAR_TYPES_AND(Half, TYPE_CASE);
+      AT_FORALL_SCALAR_TYPES_AND2(Half, Bool, TYPE_CASE);
 #undef TYPE_CASE
       default:
         throw unsupported_dtype();

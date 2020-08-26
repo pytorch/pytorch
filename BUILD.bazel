@@ -340,6 +340,7 @@ filegroup(
         "aten/src/ATen/cuda/CublasHandlePool.cpp",
         "aten/src/ATen/cuda/PinnedMemoryAllocator.cpp",
         "aten/src/ATen/cuda/detail/CUDAHooks.cpp",
+        "aten/src/ATen/cudnn/AutocastRNN.cpp",
         "aten/src/ATen/cudnn/Descriptors.cpp",
         "aten/src/ATen/cudnn/Handle.cpp",
         "aten/src/ATen/cudnn/Types.cpp",

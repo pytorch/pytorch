@@ -25,6 +25,7 @@ namespace at {
 namespace native {
 
 DEFINE_DISPATCH(sum_stub);
+DEFINE_DISPATCH(nansum_stub);
 DEFINE_DISPATCH(std_var_stub);
 DEFINE_DISPATCH(prod_stub);
 DEFINE_DISPATCH(norm_stub);
@@ -289,6 +290,34 @@ Tensor sum(const Tensor& self, DimnameList dim, bool keepdim, c10::optional<Scal
 Tensor& sum_out(Tensor& result, const Tensor& self, DimnameList dim,
                 bool keepdim, optional<ScalarType> opt_dtype) {
   return at::sum_out(result, self, dimnames_to_positions(self, dim), keepdim, opt_dtype);
+}
+
+Tensor& nansum_out(Tensor& result, const Tensor& self, IntArrayRef dim,
+                       bool keepdim, optional<ScalarType> opt_dtype) {
+  TORCH_CHECK(!c10::isComplexType(self.scalar_type()), "nansum does not support complex inputs");
+  // For integral types, use existing sum as
+  // integral types don't have `Nan`.
+  if (c10::isIntegralType(self.scalar_type(), true)){
+    return at::sum_out(result, self, dim, keepdim, opt_dtype);
+  }
+
+  ScalarType dtype = get_dtype(result, self, opt_dtype, true);
+  auto iter = make_reduction("nansum", result, self, dim, keepdim, dtype);
+  if (iter.numel() == 0) {
+    result = result.zero_();
+  } else {
+    nansum_stub(iter.device_type(), iter);
+  }
+  return result;
+}
+
+Tensor nansum(const Tensor &self, c10::optional<ScalarType> dtype) {
+  return at::native::nansum(self, std::vector<int64_t>{}, false, dtype);
+}
+
+Tensor nansum(const Tensor& self, IntArrayRef dim, bool keepdim, c10::optional<ScalarType> dtype) {
+  Tensor result;
+  return at::native::nansum_out(result, self, dim, keepdim, dtype);
 }
 
 static Tensor& prod_out_impl(Tensor& result, const Tensor& self, IntArrayRef dim,

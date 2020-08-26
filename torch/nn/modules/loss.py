@@ -1087,9 +1087,19 @@ class MarginRankingLoss(_Loss):
             specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
 
     Shape:
-        - Input: :math:`(N, D)` where `N` is the batch size and `D` is the size of a sample.
-        - Target: :math:`(N)`
+        - Input1: :math:`(N)` where `N` is the batch size.
+        - Input2: :math:`(N)`, same shape as the Input1.
+        - Target: :math:`(N)`, same shape as the inputs.
         - Output: scalar. If :attr:`reduction` is ``'none'``, then :math:`(N)`.
+
+    Examples::
+
+        >>> loss = nn.MarginRankingLoss()
+        >>> input1 = torch.randn(3, requires_grad=True)
+        >>> input2 = torch.randn(3, requires_grad=True)
+        >>> target = torch.randn(3).sign()
+        >>> output = loss(input1, input2, target)
+        >>> output.backward()
     """
     __constants__ = ['margin', 'reduction']
     margin: float
