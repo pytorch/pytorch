@@ -6899,6 +6899,19 @@ class TestMultithreadAutograd(TestCase):
         self.assertEqual(grad, grad1)
         self.assertEqual(grad, grad2)
 
+    def test_preserve_backtrace(self):
+        class Foo(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, input):
+                return input
+
+            @staticmethod
+            def backward(ctx, *grad):
+                raise ValueError("something")
+
+        t = torch.rand(10, requires_grad=True)
+        with self.assertRaisesRegex(RuntimeError, r'(?ms)something\nPython Traceback.+raise ValueError'):
+            Foo.apply(t).sum().backward()
 
 for test in method_tests():
     add_test(*test)

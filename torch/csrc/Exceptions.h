@@ -5,6 +5,8 @@
 #include <memory>
 #include <queue>
 #include <mutex>
+#include <iostream>
+#include <vector>
 
 #include <c10/util/Exception.h>
 #include <pybind11/pybind11.h>
@@ -188,6 +190,38 @@ struct python_error : public std::exception {
         }
         Py_XDECREF(pyStr);
       }
+    }
+
+    // Try to retrieve the traceback.
+    if (traceback != nullptr) {
+      // Reference count should not be zero.
+      TORCH_INTERNAL_ASSERT(Py_REFCNT(traceback) > 0);
+
+      namespace py = pybind11;
+      // Import the appropriate methods.
+      py::object traceback_module = py::module::import("traceback");
+      py::object format_tb_func = traceback_module.attr("format_tb");
+      TORCH_INTERNAL_ASSERT(!traceback_module.is_none() && !format_tb_func.is_none());
+
+      // Build the traceback string.
+      std::string traceback_str;
+      py::list traceback_list = format_tb_func(py::handle(traceback));
+      for (const auto& obj : traceback_list) {
+        traceback_str += obj.attr("__str__")().cast<std::string>();
+      }
+
+      // Append python traceback to original message.
+      message += "\nPython Traceback (most recent call last):\n" + traceback_str;
+
+      traceback_module.dec_ref();
+      format_tb_func.dec_ref();
+      traceback_list.dec_ref();
+      // explicitly setting PyObject* to nullptr to prevent py::object's dtor to
+      // decref on the PyObject again.
+      // See Note [Destructing py::object] in python_ivalue.h
+      traceback_module.ptr() = nullptr;
+      format_tb_func.ptr() = nullptr;
+      traceback_list.ptr() = nullptr;
     }
 
     // Clear any errors since we don't want to propagate errors for functions
