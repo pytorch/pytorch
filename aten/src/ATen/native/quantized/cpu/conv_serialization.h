@@ -29,7 +29,7 @@
  * - Fields:
  *  0. version (string)
  *  1. list of non-optional tensors
- *    0: packed parameters (int64_t)
+ *    0: packed parameters (int8_t)
  *      - kSpatialDim
  *      - stride x kSpatialDim
  *      - padding x kSpatialDim
@@ -74,7 +74,6 @@ ConvParamsSerializationType parse_conv_serialized_state(c10::IValue v) {
     }
   }
   TORCH_INTERNAL_ASSERT(version != -1, "Unable to parse serialization version");
-  TORCH_INTERNAL_ASSERT(version >= 1 && version <= 2, "Unknown serialization version");
 
   ConvParamsSerializationType state;
 
@@ -94,24 +93,24 @@ ConvParamsSerializationType parse_conv_serialized_state(c10::IValue v) {
     std::vector<at::Tensor> non_optional;
     std::vector<c10::optional<at::Tensor>> optional;
 
-    std::vector<int64_t> params_vec;
+    std::vector<int8_t> params_vec;
     params_vec.push_back(kSpatialDim);
     for (int i = 0; i < stride_x_kSpatialDim.size(); i++) {
       auto stride = stride_x_kSpatialDim.get(i);
-      params_vec.push_back(stride[0].item<int64_t>());
+      params_vec.push_back(stride[0].item<int8_t>());
     }
     for (int i = 0; i < padding_x_kSpatialDim.size(); i++) {
       auto padding = padding_x_kSpatialDim.get(i);
-      params_vec.push_back(padding[0].item<int64_t>());
+      params_vec.push_back(padding[0].item<int8_t>());
     }
     for (int i = 0; i < dilation_x_kSpatialDim.size(); i++) {
       auto dilation = dilation_x_kSpatialDim.get(i);
-      params_vec.push_back(dilation[0].item<int64_t>());
+      params_vec.push_back(dilation[0].item<int8_t>());
     }
-    params_vec.push_back(groups[0].item<int64_t>());
+    params_vec.push_back(groups[0].item<int8_t>());
     int64_t vec_size = params_vec.size();
     at::Tensor params_tensor = at::from_blob(params_vec.data(),
-        {vec_size}, at::TensorOptions().dtype(at::kLong))
+        {vec_size}, at::TensorOptions().dtype(at::kChar))
       // clone to retain ownership of the data
       .clone();
 
@@ -123,22 +122,7 @@ ConvParamsSerializationType parse_conv_serialized_state(c10::IValue v) {
 
   } else {
     // version 2
-
-    auto elements = v.toTuple()->elements();
-    std::string version = elements[0].toStringRef();
-    torch::List<at::Tensor> non_optional = elements[1].toTensorList();
-    // TODO before land: figure out if there is a better way to
-    //   cast to OptionalTensorList
-    torch::List<c10::IValue> optional = elements[2].toList();
-
-    std::vector<at::Tensor> non_optional_vec;
-    non_optional_vec.insert(non_optional_vec.end(), non_optional.begin(), non_optional.end());
-
-    std::vector<c10::optional<at::Tensor>> optional_vec;
-    c10::optional<at::Tensor> bias = optional.get(0).toOptional<at::Tensor>();
-    optional_vec.push_back(bias);
-
-    state = std::tie(version, non_optional_vec, optional_vec);
+    state = v.to<ConvParamsSerializationType>();
   }
 
   return state;
@@ -152,8 +136,8 @@ ConvParamsSerializationType serialize_conv(
   std::vector<at::Tensor> non_optional;
   std::vector<c10::optional<at::Tensor>> optional;
 
-  // create a packed int64_t tensor for conv params
-  std::vector<int64_t> params_vec;
+  // create a packed int8_t tensor for conv params
+  std::vector<int8_t> params_vec;
   params_vec.push_back(kSpatialDim);
   auto stride = params->stride().vec();
   params_vec.insert(params_vec.end(), stride.begin(), stride.end());
@@ -165,7 +149,7 @@ ConvParamsSerializationType serialize_conv(
   int64_t vec_size = params_vec.size();
   at::Tensor params_tensor = at::from_blob(
       params_vec.data(), {vec_size},
-      at::TensorOptions().dtype(at::kLong))
+      at::TensorOptions().dtype(at::kChar))
     // clone to retain ownership of the data
     .clone();
 
