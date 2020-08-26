@@ -1,8 +1,9 @@
 #pragma once
 #include <ATen/ATen.h>
 
-namespace at { 
+namespace at {
 namespace native {
+namespace {
 
 void verify_list(TensorList tensors) {
   TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
@@ -52,4 +53,6 @@ bool check_fast_route(TensorList tensors, Scalar scalar) {
 
   return true;
 }
+
+} // namespace
 }} // at::native
