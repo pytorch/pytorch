@@ -4,7 +4,7 @@
 # size for mobile devices and the flow to integrate it with a simple predictor
 # in c++.
 #
-# There are three custom build types:
+# Supported custom build types:
 #
 # 1. `TEST_DEFAULT_BUILD=1 ./build.sh` - it is similar to the prebuilt libtorch
 # libraries released for Android and iOS (same CMake build options + host
