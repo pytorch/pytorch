@@ -2410,6 +2410,7 @@ class TestONNXRuntime(unittest.TestCase):
         input = torch.ones(7, 3, 5)
         self._argmin_argmax_model(input)
 
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_repeat(self):
         class RepeatModel(torch.nn.Module):
             def forward(self, x, y):
