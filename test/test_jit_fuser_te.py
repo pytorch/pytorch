@@ -89,12 +89,17 @@ class TestTEFuser(JitTestCase):
             self.assertEqual(len(diff_graphs), 1)
             graph = diff_graphs[0].g('Subgraph')
 
-        allowed_nodes = {'prim::Constant', FUSION_GROUP, 'prim::BailoutTemplate',
-                         'prim::BailOut', 'prim::TupleConstruct'} | set(except_for)
-        # TODO: reenable the checks once we have prim::FallBack nodes:
-        # self.assertTrue(all(node.kind() in allowed_nodes for node in graph.nodes()),
-        #                 'got {}'.format(graph))
-        # self.assertTrue([node.kind() for node in graph.nodes()].count(FUSION_GROUP) == 1)
+        allowed_nodes = {FUSION_GROUP} | set(except_for)
+
+        for n in graph.nodes():
+            for block in n.blocks():
+                self.assertAllFused(block)
+            if n.kind().startswith('prim::'):
+                continue
+            # TODO: reenable the checks once the fallbacks are implemented as function calls
+            # self.assertTrue(n.kind() in allowed_nodes, 'unexpected node {}\ngraph: {}'.format(n, graph))
+
+        # self.assertEqual(len(self.findFusionGroups(graph)), 1)
 
     def findFusionGroups(self, graph):
         result = []
