@@ -113,9 +113,9 @@ VkInstance create_instance(const bool enable_validation_layers) {
     nullptr,
     0u,
     &application_info,
-    enabled_instance_layers.size(),
+    static_cast<uint32_t>(enabled_instance_layers.size()),
     enabled_instance_layers.data(),
-    enabled_instance_extensions.size(),
+    static_cast<uint32_t>(enabled_instance_extensions.size()),
     enabled_instance_extensions.data(),
   };
 

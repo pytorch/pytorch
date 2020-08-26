@@ -54,7 +54,7 @@ class Tensor(torch._C._TensorBase):
                 if self.is_quantized:
                     if self.qscheme() == torch.per_tensor_affine:
                         quantizer_params = self.qscheme(), self.q_scale(), self.q_zero_point()
-                    elif self.qscheme() == torch.per_channel_affine:
+                    elif self.qscheme() in (torch.per_channel_affine, torch.per_channel_affine_float_qparams):
                         quantizer_params = self.qscheme(), \
                             self.q_per_channel_scales(), \
                             self.q_per_channel_zero_points(), \
@@ -105,7 +105,7 @@ class Tensor(torch._C._TensorBase):
                 quantizer_params = (torch.per_tensor_affine,
                                     self.q_scale(),
                                     self.q_zero_point())
-            elif self.qscheme() == torch.per_channel_affine:
+            elif self.qscheme() in (torch.per_channel_affine, torch.per_channel_affine_float_qparams):
                 # convert scales and zero points to tuple to avoid recursive calls
                 # when/if we get multi-axis quantized tensors in the future, the shape
                 # is recoverable from the main tensor shape
