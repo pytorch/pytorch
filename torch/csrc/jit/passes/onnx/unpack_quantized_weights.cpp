@@ -367,19 +367,34 @@ void UnpackQuantizedWeights(
         %r = quantized::conv3d_relu(%input, %packed_params, %scale, %zero_point)
         return (%r) )";
   unpackQuantizedWeightsHelper(
-      graph, paramsDict, qlinear, "quantized::linear_unpack",
+      graph,
+      paramsDict,
+      qlinear,
+      "quantized::linear_unpack",
       QuantizedParamsType::LINEAR);
   unpackQuantizedWeightsHelper(
-      graph, paramsDict, qconv2d, "quantized::conv2d_unpack",
+      graph,
+      paramsDict,
+      qconv2d,
+      "quantized::conv2d_unpack",
       QuantizedParamsType::CONV);
   unpackQuantizedWeightsHelper(
-      graph, paramsDict, qconv2d_relu, "quantized::conv2d_unpack",
+      graph,
+      paramsDict,
+      qconv2d_relu,
+      "quantized::conv2d_unpack",
       QuantizedParamsType::CONV);
   unpackQuantizedWeightsHelper(
-      graph, paramsDict, qconv3d, "quantized::conv3d_unpack",
+      graph,
+      paramsDict,
+      qconv3d,
+      "quantized::conv3d_unpack",
       QuantizedParamsType::CONV);
   unpackQuantizedWeightsHelper(
-      graph, paramsDict, qconv3d_relu, "quantized::conv3d_unpack",
+      graph,
+      paramsDict,
+      qconv3d_relu,
+      "quantized::conv3d_unpack",
       QuantizedParamsType::CONV);
 }
 
