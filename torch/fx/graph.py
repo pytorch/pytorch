@@ -84,7 +84,23 @@ class Graph:
         kwargs = {} if kwargs is None else kwargs
         self._mark_uses(args)
         self._mark_uses(kwargs)
-        n = Node(self, name if name is not None else self._name(target or op), op, target, args, kwargs)
+
+        if name is None:
+            # If we weren't given a name, infer a name from the target.
+            if callable(target):
+                name = target.__name__
+            else:
+                assert isinstance(target, str)
+                name = target
+
+        name = self._normalize_name(name)
+        if op == 'placeholder':
+            # Placeholder names and target fields should always be the same. So
+            # if we normalize the name, we must apply the same normalization to
+            # the target.
+            target = name
+
+        n = Node(self, name, op, target, args, kwargs)
         self.nodes.append(n)
         return n
 
@@ -96,34 +112,41 @@ class Graph:
         assert isinstance(args, tuple)
         assert isinstance(kwargs, dict)
         return self.create_node(
-            node.op, node.target, args, kwargs,
-            self._name(node.name))
+            node.op, node.target, args, kwargs, node.name)
+
+    def dump(self):
+        from tabulate import tabulate
+        node_specs = [[n.op, n.name, n.target, n.args, n.kwargs] for n in self.nodes]
+        print(tabulate(node_specs, headers=['opcode', 'name', 'target', 'args', 'kwargs']))
 
     def output(self, result: Argument):
         self.result = result
         self._mark_uses(result)
 
-    def _name(self, target: Target) -> str:
-        if callable(target):
-            op = target.__name__
-        else:
-            assert isinstance(target, str)
-            op = target
-            if _is_magic(op):
-                op = op[2:-2]
-        op = op.replace('.', '_')
-        op = snake_case(op)
+    def _normalize_name(self, name: str) -> str:
+        """
+        Given a raw name (potentially inferred), transform it into a name that:
+            1. Is a valid Python identifier.
+            2. Doesn't shadow a Python builtin or keyword.
+            3. Is unique within the graph.
 
-        if _shadows_builtin_name(op):
-            # Avoid collisions with builtins or language keywords.
-            op = "_" + op
+        All names stored in the graph (in `node.name`) must be normalized.
+        """
+        if _is_magic(name):
+            name = name[2:-2]
+        name = name.replace('.', '_')
+        name = snake_case(name)
 
-        if op not in self._used_names:
-            self._used_names[op] = 0
-            if not hasattr(torch, op) and not hasattr(torch.nn.functional, op) and not hasattr(torch.nn, op):
-                return op
-        i = self._used_names[op] = self._used_names[op] + 1
-        return f'{op}_{i}'
+        if name not in self._used_names:
+            self._used_names[name] = 0
+            # Avoid shadowing torch and Python builtins.
+            if not hasattr(torch, name) and \
+               not hasattr(torch.nn.functional, name) and \
+               not hasattr(torch.nn, name) and\
+               not _shadows_builtin_name(name):
+                return name
+        i = self._used_names[name] = self._used_names[name] + 1
+        return f'{name}_{i}'
 
     def get_param(self, name: str) -> Node:
         return self.create_node('get_param', name)
@@ -136,8 +159,8 @@ class Graph:
         body: List[str] = []
         for node in self.nodes:
             if node.op == 'placeholder':
-                assert isinstance(node.target, str)
-                free_vars.append(node.target)
+                assert isinstance(node.name, str)
+                free_vars.append(node.name)
                 continue
             elif node.op == 'call_method':
                 assert isinstance(node.target, str)

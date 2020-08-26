@@ -148,7 +148,9 @@ class Fuser:
             # node matched in patterns and is not root is removed here
 
         self.fused_graph.output(load_arg(input_graph.result))
-        return GraphModule(input_root, self.fused_graph)
+        ret = GraphModule(input_root, self.fused_graph)
+        ret.graph.dump()
+        return ret
 
     def _find_matches(self, root, graph, patterns):
         modules = dict(root.named_modules())

@@ -73,7 +73,7 @@ class Proxy:
             return _create_proxy(self.delegate, 'call_method', orig_method.__name__, args, kwargs)
         else:
             return _create_proxy(self.delegate, 'call_function', orig_method, args, kwargs,
-                                 name=self.delegate.graph._name(orig_method.__name__))
+                                 name=orig_method.__name__)
 
 class Attribute(Proxy):
     def __init__(self, root: Proxy, attr: str):
