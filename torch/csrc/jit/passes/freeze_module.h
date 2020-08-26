@@ -24,5 +24,7 @@ TORCH_API Module freeze_module(
     std::vector<std::string> preservedAttrs = std::vector<std::string>(),
     bool freezeInterfaces = true);
 
+IValue overrideGradient(IValue attr);
+
 } // namespace jit
 } // namespace torch

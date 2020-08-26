@@ -210,6 +210,7 @@ core_sources_full = [
     "torch/csrc/jit/passes/quantization/insert_quant_dequant.cpp",
     "torch/csrc/jit/passes/quantization/dedup_module_uses.cpp",
     "torch/csrc/jit/passes/quantization/finalize.cpp",
+    "torch/csrc/jit/passes/quantization/freeze_quant_ops.cpp",
     "torch/csrc/jit/passes/quantization/fusion_passes.cpp",
     "torch/csrc/jit/python/update_graph_executor_opt.cpp",
     "torch/csrc/jit/runtime/argument_spec.cpp",

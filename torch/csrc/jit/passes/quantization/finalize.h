@@ -49,7 +49,8 @@ TORCH_API void InsertPrepackUnpack(Module& module);
 
 TORCH_API script::Module Finalize(
     script::Module& module,
-    QuantType quant_type = QuantType::STATIC);
+    QuantType quant_type = QuantType::STATIC,
+    bool freeze_only_quant_ops = false);
 
 TORCH_API void FoldQuantizedPrepackingOps(Module& module);
 

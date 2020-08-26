@@ -291,39 +291,7 @@ class AttributePropagator {
     }
   }
 
-  IValue overrideGradient(IValue attr) {
-    if (attr.isTensor()) {
-      auto t = attr.toTensor();
-      if (t.requires_grad()) {
-        t = t.detach();
-        t.set_requires_grad(false);
-        attr = IValue(t);
-      }
-    } else if (attr.isTuple()) {
-      auto tuple = std::move(attr).toTuple();
-      std::vector<IValue>& elems = tuple->elements();
-      for (auto& elem : elems) {
-        elem = overrideGradient(elem);
-      }
-      attr = std::move(tuple);
 
-    } else if (attr.isList()) {
-      c10::List<IValue> elems = std::move(attr).toList();
-      for (size_t i = 0; i < elems.size(); i++) {
-        elems.set(i, overrideGradient(elems.extract(i)));
-      }
-      attr = std::move(elems);
-    } else if (attr.isGenericDict()) {
-      auto dict = std::move(attr).toGenericDict();
-      for (const auto& pair : dict) {
-        auto val = pair.value();
-        val = overrideGradient(val);
-      }
-      attr = std::move(dict);
-    }
-
-    return attr;
-  }
 
   // This method is invoked only when 'freezeInterfaces' parameter is on.
   // The module associated with Interface is retrieved and the invoked method
@@ -671,6 +639,40 @@ class AttributePropagator {
   std::deque<std::string> names_;
 }; // class AttributePropagator
 } // namespace
+
+IValue overrideGradient(IValue attr) {
+  if (attr.isTensor()) {
+    auto t = attr.toTensor();
+    if (t.requires_grad()) {
+      t = t.detach();
+      t.set_requires_grad(false);
+      attr = IValue(t);
+    }
+  } else if (attr.isTuple()) {
+    auto tuple = std::move(attr).toTuple();
+    std::vector<IValue>& elems = tuple->elements();
+    for (auto& elem : elems) {
+      elem = overrideGradient(elem);
+    }
+    attr = std::move(tuple);
+
+  } else if (attr.isList()) {
+    c10::List<IValue> elems = std::move(attr).toList();
+    for (size_t i = 0; i < elems.size(); i++) {
+      elems.set(i, overrideGradient(elems.extract(i)));
+    }
+    attr = std::move(elems);
+  } else if (attr.isGenericDict()) {
+    auto dict = std::move(attr).toGenericDict();
+    for (const auto& pair : dict) {
+      auto val = pair.value();
+      val = overrideGradient(val);
+    }
+    attr = std::move(dict);
+  }
+
+  return attr;
+}
 
 Module freeze_module(
     const Module& module,

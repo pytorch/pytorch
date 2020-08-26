@@ -280,12 +280,13 @@ void initJITBindings(PyObject* module) {
           [](Module& module) { SwapFunctionalLinear(module); })
       .def(
           "_jit_pass_quant_finalize",
-          [](Module& module, int quant_type_int) {
+          [](Module& module, int quant_type_int, bool freeze_only_quant_ops) {
             auto quant_type = static_cast<QuantType>(quant_type_int);
-            return Finalize(module, quant_type);
+            return Finalize(module, quant_type, false);
           },
           py::arg("module"),
-          py::arg("quant_type_int") = 1)
+          py::arg("quant_type_int") = 1,
+          py::arg("freeze_only_quant_ops") = false)
       .def(
           "_jit_pass_pattern_based_rewrite",
           [](const Module& m) { return PatternBasedRewrite(m); })
