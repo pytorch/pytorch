@@ -405,8 +405,8 @@ Tensor mean(
 }
 
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
-  m.impl_UNBOXED("empty.memory_format", TORCH_FN(at::native::vulkan::aten::empty));
-  m.impl_UNBOXED("empty_strided", TORCH_FN(at::native::vulkan::aten::empty_strided));
+  m.impl_UNBOXED("empty.memory_format", at::native::vulkan::aten::empty);
+  m.impl_UNBOXED("empty_strided", at::native::vulkan::aten::empty_strided);
   m.impl("add.Tensor", TORCH_FN(at::native::vulkan::aten::add));
   m.impl("clamp", TORCH_FN(at::native::vulkan::aten::clamp));
   m.impl("mean.dim", TORCH_FN(at::native::vulkan::aten::mean));
