@@ -2294,19 +2294,19 @@ Computes the logarithmic derivative of the gamma function on `input`.
 
 .. math::
     \psi(x) = \frac{d}{dx} \ln\left(\Gamma\left(x\right)\right) = \frac{\Gamma'(x)}{\Gamma(x)}
-
+""" + r"""
 Args:
     input (Tensor): the tensor to compute the digamma function on
 
 Keyword args:
-    out (Tensor, optional): the output tensor.
+    {out}
 
 Example::
 
     >>> a = torch.tensor([1, 0.5])
     >>> torch.digamma(a)
     tensor([-0.5772, -1.9635])
-""")
+""".format(**common_args))
 
 
 add_docstr(torch.dist,
