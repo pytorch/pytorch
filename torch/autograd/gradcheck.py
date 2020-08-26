@@ -191,6 +191,9 @@ def get_analytical_jacobian_fw(fn, input, output):
     for inp in input:
         if torch.is_tensor(inp) and inp.requires_grad==True:
             diff_input.append(inp)
+            if inp.layout == torch._mkldnn:
+                warnings.warn('MKLDNN inputs are not supported for forward gradcheck.')
+                return None
     for i, inp in enumerate(diff_input):
         # Generate a forward grad for inp that has the same metadata (size/stride/storage offset)
         # This is to make sure the assignment below is always valid
@@ -382,6 +385,9 @@ def gradcheck(
                 else:
                     raise e
 
+            if fw_analytical is None:
+                # Test was aborded while computing the jacobian
+                continue
 
             for j, (a, n) in enumerate(zip(fw_analytical, numerical)):
                 if a.numel() != 0 or n.numel() != 0:
