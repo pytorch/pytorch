@@ -1,5 +1,6 @@
 import torch
 import unittest
+import pickle
 from torch.fx import symbolic_trace, Proxy, Node, GraphModule, DefaultDelegate
 
 from fx.quantization import Quantizer
@@ -13,6 +14,10 @@ try:
 except ImportError:
     HAS_TORCHVISION = False
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
+
+class SimpleTest(torch.nn.Module):
+    def forward(self, x):
+        return torch.relu(x + 3.0)
 
 class TestFX(TestCase):
     def checkGraphModule(self, m: torch.nn.Module, args, kwargs=None):
@@ -242,6 +247,14 @@ class TestFX(TestCase):
         ct = ConstTensor()
         traced = symbolic_trace(ct)
         traced(torch.rand(4, 4))
+
+    def test_pickle_graphmodule(self):
+        st = SimpleTest()
+        traced = symbolic_trace(st)
+        pickled = pickle.dumps(traced)
+        loaded = pickle.loads(pickled)
+        x = torch.rand(3, 4)
+        self.assertEqual(loaded(x), traced(x))
 
 if __name__ == '__main__':
     run_tests()
