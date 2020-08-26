@@ -1696,6 +1696,7 @@ class TestSparse(TestCase):
 
     def _test_abs_absolute(self, sparse_tensor, dense_tensor):
         expected_output = dense_tensor.abs()
+        self.assertEqual(expected_output, abs(sparse_tensor).to_dense())
         self.assertEqual(expected_output, torch.abs(sparse_tensor).to_dense())
         self.assertEqual(expected_output, sparse_tensor.abs().to_dense())
         self.assertEqual(expected_output, sparse_tensor.coalesce().abs_().to_dense())
@@ -1705,11 +1706,11 @@ class TestSparse(TestCase):
         self.assertEqual(expected_output, sparse_tensor.coalesce().absolute_().to_dense())
 
         # test in-place op on uncoalesced input
-        with self.assertRaisesRegex(RuntimeError, "in-place on uncoalesced tensors is not supported yet"):
+        with self.assertRaisesRegex(RuntimeError, "in-place on uncoalesced tensors is not supported"):
             sparse_tensor.abs_()
 
         # test in-place op on uncoalesced input
-        with self.assertRaisesRegex(RuntimeError, "in-place on uncoalesced tensors is not supported yet"):
+        with self.assertRaisesRegex(RuntimeError, "in-place on uncoalesced tensors is not supported"):
             sparse_tensor.absolute_()
 
         sparse_tensor.requires_grad_()
@@ -1748,15 +1749,30 @@ class TestSparse(TestCase):
         )
         self._test_abs_absolute(input_coalesced, torch.tensor([3.0, -4.0, 5.0]))
 
+        # hybrid sparse input
+        input_coalesced = torch.sparse_coo_tensor(
+            indices=torch.tensor([[1, 3], [2, 4]]),
+            values=torch.tensor([[-1.0, 3.0], [-5.0, 7.0]]),
+            size=[4, 5, 2],
+            device=self.device
+        )
+        true_dense = torch.sparse_coo_tensor(
+            indices=torch.tensor([[1, 3], [2, 4]]),
+            values=torch.tensor([[1.0, 3.0], [5.0, 7.0]]),
+            size=[4, 5, 2],
+            device=self.device
+        ).to_dense()
+        self._test_abs_absolute(input_coalesced, true_dense)
+
         if self.is_uncoalesced:
             # test uncoalesced input
             input_uncoalesced = torch.sparse_coo_tensor(
                 indices=torch.tensor([[0], [1], [2], [0], [1], [2]]).transpose(1, 0),
-                values=torch.tensor([2.0, 3.0, 4.0, 1.0, 1.0, 1.0]),
+                values=torch.tensor([2.0, -3.0, -4.0, 1.0, -1.0, 1.5]),
                 size=[3, ],
                 device=self.device
             )
-            self._test_abs_absolute(input_uncoalesced, torch.tensor([3.0, 4.0, 5.0]))
+            self._test_abs_absolute(input_uncoalesced, torch.tensor([3.0, 4.0, 2.5]))
 
             # test on empty sparse tensor
             input_uncoalesced = torch.sparse_coo_tensor(
@@ -1814,6 +1830,21 @@ class TestSparse(TestCase):
             device=self.device
         )
         self._test_sign(input_coalesced, torch.tensor([3.0, -4.0, 5.0, -6.0]))
+
+        # hybrid sparse input
+        input_coalesced = torch.sparse_coo_tensor(
+            indices=torch.tensor([[1, 3], [2, 4]]),
+            values=torch.tensor([[-1.0, 3.0], [-5.0, 7.0]]),
+            size=[4, 5, 2],
+            device=self.device
+        )
+        true_dense = torch.sparse_coo_tensor(
+            indices=torch.tensor([[1, 3], [2, 4]]),
+            values=torch.tensor([[1.0, 3.0], [5.0, 7.0]]),
+            size=[4, 5, 2],
+            device=self.device
+        ).to_dense()
+        self._test_abs_absolute(input_coalesced, true_dense)
 
         if self.is_uncoalesced:
             # test uncoalesced input

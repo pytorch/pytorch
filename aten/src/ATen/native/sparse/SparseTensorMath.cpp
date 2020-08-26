@@ -122,15 +122,17 @@ SparseTensor& log1p_sparse_(SparseTensor& t) {
 // abs(SparseTensor)
 // --------------------------------------------------------------------
 
-// TODO: add in-place variant
+// abs in-place on uncoalesced tensors is not possible due non-linear type of abs operation
+// as in uncoalesced format tensor the values corresponding to the same indices are summed
+// and abs(summed_value) != abs(v1) + abs(v2)
 
 SparseTensor& abs_out_sparse(SparseTensor& r, const SparseTensor& t) {
   AT_ASSERT(r.is_sparse());
   AT_ASSERT(t.is_sparse());
 
   if (is_same_tensor(r, t)) {
-    // don't have in-place abs for uncoalesced input because coalesce() is not in-place
-    TORCH_CHECK(r.is_coalesced(), "abs: in-place on uncoalesced tensors is not supported yet!");
+    // don't have in-place abs for uncoalesced input because coalesce() is not in-place, see above comment
+    TORCH_CHECK(r.is_coalesced(), "abs: in-place on uncoalesced tensors is not supported");
   }
   else {
     copy_sparse_to_sparse_(r, t.coalesce());
@@ -140,7 +142,7 @@ SparseTensor& abs_out_sparse(SparseTensor& r, const SparseTensor& t) {
 }
 
 SparseTensor& abs_sparse_(SparseTensor& t) {
-  TORCH_CHECK(t.is_coalesced(), "abs: in-place on uncoalesced tensors is not supported yet!");
+  TORCH_CHECK(t.is_coalesced(), "abs: in-place on uncoalesced tensors is not supported");
   return abs_out_sparse(t, t);
 }
 
@@ -148,15 +150,18 @@ SparseTensor& abs_sparse_(SparseTensor& t) {
 // sign(SparseTensor)
 // --------------------------------------------------------------------
 
-// TODO: add in-place variant
+// sign in-place on uncoalesced tensors is not possible due non-linear type of sign operation
+// as in uncoalesced format tensor the values corresponding to the same indices are summed
+// and sign(summed_value) != sign(v1) + sign(v2)
+
 
 SparseTensor& sign_out_sparse(SparseTensor& r, const SparseTensor& t) {
   AT_ASSERT(r.is_sparse());
   AT_ASSERT(t.is_sparse());
 
   if (is_same_tensor(r, t)) {
-    // don't have in-place abs for uncoalesced input because coalesce() is not in-place
-    TORCH_CHECK(r.is_coalesced(), "sign: in-place on uncoalesced tensors is not supported yet!");
+    // don't have in-place sign for uncoalesced input because coalesce() is not in-place, see above comment
+    TORCH_CHECK(r.is_coalesced(), "sign: in-place on uncoalesced tensors is not supported");
   }
   else {
     copy_sparse_to_sparse_(r, t.coalesce());
@@ -166,7 +171,7 @@ SparseTensor& sign_out_sparse(SparseTensor& r, const SparseTensor& t) {
 }
 
 SparseTensor& sign_sparse_(SparseTensor& t) {
-  TORCH_CHECK(t.is_coalesced(), "sign: in-place on uncoalesced tensors is not supported yet!");
+  TORCH_CHECK(t.is_coalesced(), "sign: in-place on uncoalesced tensors is not supported");
   return sign_out_sparse(t, t);
 }
 
