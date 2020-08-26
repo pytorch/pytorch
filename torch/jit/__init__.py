@@ -12,6 +12,9 @@ from torch._jit_internal import (
     export,
     unused,
 )
+from torch.jit._backends import (
+    selective_to_jit_backend,
+)
 from torch.jit._script import (
     script,
     Attribute,

@@ -387,7 +387,30 @@ void initPythonIRBindings(PyObject* module_) {
           "insertConstant",
           [](Graph& g, IValue ival) { return g.insertConstant(ival); })
       .GS(lint)
-      .GS(insertNode);
+      .GS(insertNode)
+      .def(
+          "remapTypes",
+          [](Graph& g,
+             const std::vector<TypePtr>& from,
+             const std::vector<TypePtr>& to) {
+            std::unordered_map<TypePtr, TypePtr> type_map;
+
+            // Create a map of from -> to, elementwise.
+            for (size_t i = 0, e = from.size(); i < e; ++i) {
+              type_map[from[i]] = to[i];
+            }
+
+            // Remap types in g.
+            g.remapTypes([&type_map](TypePtr ty) {
+              if (type_map.count(ty)) {
+                return type_map[ty];
+              }
+
+              // If ty is not in type_map, assume that it should be
+              // returned as is.
+              return ty;
+            });
+          });
 #undef GS
 
 #define VS(name) def(#name, &Value ::name)
@@ -789,7 +812,19 @@ void initPythonIRBindings(PyObject* module_) {
       .def(py::init([](const std::string& qualified_name) {
         return get_python_cu()->get_class(c10::QualifiedName(qualified_name));
       }))
-      .def("name", [](ClassType& self) { return self.name()->name(); });
+      .def("name", [](ClassType& self) { return self.name()->name(); })
+      .def(
+          "add_attribute",
+          [](const std::shared_ptr<ClassType>& self,
+             const std::string& name,
+             const std::shared_ptr<ClassType>& other) {
+            return self->addAttribute(name, other);
+          })
+      .def(
+          "unsafe_remove_attribute",
+          [](const std::shared_ptr<ClassType>& self, const std::string& name) {
+            self->unsafeRemoveAttribute(name);
+          });
   py::class_<EnumType, Type, std::shared_ptr<EnumType>>(m, "EnumType")
       .def(py::init([](const std::string& qualified_name,
                        TypePtr value_type,
