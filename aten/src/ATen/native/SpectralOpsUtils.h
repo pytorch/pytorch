@@ -6,10 +6,11 @@
 
 namespace at { namespace native {
 
+// Normalization types used in _fft_with_size
 enum class fft_norm_mode {
-  none,
-  by_root_n,
-  by_n,
+  none,       // No normalization
+  by_root_n,  // Divide by sqrt(signal_size)
+  by_n,       // Divide by signal_size
 };
 
 // NOTE [ Fourier Transform Conjugate Symmetry ]

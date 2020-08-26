@@ -2,7 +2,7 @@ import torch
 import unittest
 import math
 from contextlib import contextmanager
-from itertools import product
+from itertools import product, chain
 
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, TEST_NUMPY, TEST_LIBROSA)
@@ -50,21 +50,31 @@ class TestFFT(TestCase):
     @precisionOverride({torch.complex64: 1e-4, torch.float: 1e-4})
     @dtypes(torch.float, torch.double, torch.complex64, torch.complex128)
     def test_fft_numpy(self, device, dtype):
-        test_args = product(
-            # input
-            (torch.randn(67, device=device, dtype=dtype),
-             torch.randn(80, device=device, dtype=dtype),
-             torch.randn(12, 14, device=device, dtype=dtype),
-             torch.randn(9, 6, 3, device=device, dtype=dtype)),
-            # n
-            (None, 50, 6),
-            # dim
-            (-1, 0),
-            # norm
-            ((None, "forward", "backward", "ortho")
-             if LooseVersion(np.__version__) >= '1.20.0'
-             else (None, "ortho"))
-        )
+        norm_modes = ((None, "forward", "backward", "ortho")
+                      if LooseVersion(np.__version__) >= '1.20.0'
+                      else (None, "ortho"))
+        test_args = list(chain(
+            product(
+                # input
+                (torch.randn(67, device=device, dtype=dtype),
+                 torch.randn(80, device=device, dtype=dtype),
+                 torch.randn(12, 14, device=device, dtype=dtype),
+                 torch.randn(9, 6, 3, device=device, dtype=dtype)),
+                # n
+                (None, 50, 6),
+                # dim
+                (-1, 0),
+                # norm
+                norm_modes
+            ),
+            # Test transforming middle dimensions of multi-dim tensor
+            product(
+                (torch.randn(4, 5, 6, 7, device=device, dtype=dtype),),
+                (None,),
+                (1, 2, -2,),
+                norm_modes
+            )))
+
 
         fft_functions = ['fft', 'ifft', 'hfft', 'irfft']
         # Real-only functions
