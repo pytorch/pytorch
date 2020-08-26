@@ -522,25 +522,22 @@ class TestUtilityFuns(TestCase):
 
     def test_diagnose_export_mode(self):
         class MyModule(torch.nn.Module):
-            def forward(self, x, y):
-                return torch.cumsum(torch.add(x, y, alpha=2), dim=0)
+            def forward(self, x):
+                return torch.cumsum(x, dim=0)
 
         model = MyModule()
         x = torch.randn(2, 3, 4)
-        y = torch.randn(2, 3, 4)
         f = io.BytesIO()
 
         # run export in diagnose mode
-        graph, unsupported_ops = torch.onnx._diagnose_export(model, (x, y,), f,
+        graph, unsupported_ops = torch.onnx._diagnose_export(model, (x,), f,
                                                              opset_version=9)
         iter = graph.nodes()
         assert next(iter).kind() == "onnx::Constant"
-        assert next(iter).kind() == "aten::add"
-        assert next(iter).kind() == "onnx::Constant"
         assert next(iter).kind() == "prim::Constant"
         assert next(iter).kind() == "aten::cumsum"
-        assert len(unsupported_ops) == 2
-        assert unsupported_ops == ['aten::add', 'aten::cumsum']
+        assert len(unsupported_ops) == 1
+        assert unsupported_ops == ['aten::cumsum']
 
     def test_dropout_training(self):
         class MyModule(torch.nn.Module):
