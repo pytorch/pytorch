@@ -721,7 +721,7 @@ def main():
     finally:
         if options.coverage:
             shell(['coverage', 'combine'])
-            shell(['coverage', 'json'])
+            shell(['coverage', 'xml'])
 
     if options.continue_through_error and has_failed:
         for err in failure_messages:
