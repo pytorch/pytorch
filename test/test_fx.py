@@ -186,6 +186,16 @@ class TestFX(TestCase):
         assert (a - d).abs().max() < 2
         assert torch.allclose(d, e)
 
+    def test_unpack(self):
+        class M(torch.nn.Module):
+            def forward(self, a, b):
+                c, d = a
+                return c + d + b
+        m = M()
+        m_g = symbolic_trace(m)
+        a = (torch.rand(1), torch.rand(1))
+        b = torch.rand(1)
+        self.assertEqual(m(a, b), m_g(a, b))
 
 if __name__ == '__main__':
     run_tests()
