@@ -5674,12 +5674,10 @@ a")
         def fn():
             raise Exception("hello")
         ast = torch.jit.frontend.get_jit_def(fn, fn.__name__)
-        src_range_str = str(ast.range())
-        start_quote = src_range_str.find('"')
-        end_quote = src_range_str.find('"', start_quote+1)
-        # ignore the file path string as it might be different on different machines
-        src_range_str_path_replaced = src_range_str[:start_quote] + '"test_jit.py"' + src_range_str[end_quote+1:]
-        self.assertExpected(src_range_str_path_replaced)
+        src_range_by_lines = str(ast.range()).split("\n")
+        # ignore the file path line as it is stateful
+        src_range_file_path_removed = src_range_by_lines[:1] + src_range_by_lines[2:]
+        self.assertExpected("\n".join(src_range_file_path_removed))
 
 
     def test_python_frontend_py3(self):
