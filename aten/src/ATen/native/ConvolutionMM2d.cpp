@@ -191,11 +191,10 @@ static void slow_conv2d_update_output_frame(
       output.reshape({n_output_plane, output_height * output_width});
   if (bias.defined()) {
     output.copy_(bias.unsqueeze(-1).unsqueeze(-1));
+    output2d.addmm_(weight, finput, 1, 1);
   } else {
-    output.zero_();
+    output2d.addmm_(weight, finput, 0, 1);
   }
-
-  output2d.addmm_(weight, finput, 1, 1);
 }
 
 void slow_conv2d_backward_update_grad_input_frame(
@@ -443,7 +442,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> slow_conv2d_forward_out_cpu(
     NoGradGuard no_grad;
     AutoNonVariableTypeMode non_variable_type_mode;
     for (int64_t t = start; t < end; t++) {
-      Tensor input_t = input[t];
+      Tensor input_t = input[t].unsqueeze(0);
       Tensor output_t = output[t];
       Tensor finput_t = finput[t];
       slow_conv2d_update_output_frame(
