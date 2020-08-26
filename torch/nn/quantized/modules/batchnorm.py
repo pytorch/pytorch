@@ -59,8 +59,7 @@ class _BatchNorm(torch.nn.modules.batchnorm._BatchNorm):
         return new_mod
 
 class BatchNorm2d(_BatchNorm):
-    r"""This is the quantized version of :class:`~torch.nn.BatchNorm2d`.
-    """
+    r"""This is the quantized version of :class:`~torch.nn.BatchNorm2d`."""
     _INTRINSIC_BN_RELU = nni.BNReLU2d
 
     def __init__(self, *args, **kwargs):
@@ -72,12 +71,11 @@ class BatchNorm2d(_BatchNorm):
 
 
 class BatchNorm3d(_BatchNorm):
-    r"""This is the quantized version of :class:`~torch.nn.BatchNorm3d`.
-    """
+    r"""This is the quantized version of :class:`~torch.nn.BatchNorm3d`."""
     _INTRINSIC_BN_RELU = nni.BNReLU3d
 
     def __init__(self, *args, **kwargs):
-        super(BatchNorm2d, self).__init__(*args, **kwargs)
+        super(BatchNorm3d, self).__init__(*args, **kwargs)
         self.scale = 1.0
         self.zero_point = 0
         self._name = 'QuantizedBatchNorm3d'
