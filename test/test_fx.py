@@ -15,13 +15,19 @@ except ImportError:
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 class TestFX(TestCase):
-    def checkGraphModule(self, m: torch.nn.Module, args, kwargs):
+    def checkGraphModule(self, m: torch.nn.Module, args, kwargs=None):
         """Check that an nn.Module's results match the GraphModule version
         for a given set of args/kwargs.
         """
-        ref_outs = m(*args, **kwargs)
+        if kwargs is not None:
+            ref_outs = m(*args, **kwargs)
+        else:
+            ref_outs = m(*args)
         gm = symbolic_trace(m)
-        test_outs = gm(*args, **kwargs)
+        if kwargs is not None:
+            test_outs = gm(*args, **kwargs)
+        else:
+            test_outs = gm(*args)
         self.assertEqual(ref_outs, test_outs)
 
     def test_graph_module(self):
