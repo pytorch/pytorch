@@ -186,14 +186,6 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
-         "aten::str(t elem) -> str",
-         [](Stack* stack) {
-           std::stringstream ss;
-           ss << pop(stack);
-           push(stack, ss.str());
-         },
-         aliasAnalysisFromSchema()),
-     Operator(
          "aten::device(str a) -> Device",
          [](Stack* stack) {
            push(stack, c10::Device(pop(stack).toStringRef()));
