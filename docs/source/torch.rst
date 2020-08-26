@@ -380,8 +380,6 @@ Comparison Ops
     kthvalue
     le
     lt
-    max
-    min
     ne
     sort
     topk
