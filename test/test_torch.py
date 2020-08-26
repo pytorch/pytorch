@@ -6263,41 +6263,41 @@ class TestTorchDeviceType(TestCase):
                           torch.testing.get_all_dtypes(include_complex=False))))
     def test_heaviside(self, device, dtypes):
         input_dtype = dtypes[0]
-        val_dtype = dtypes[1]
+        values_dtype = dtypes[1]
 
         rng = np.random.default_rng()
         input = np.array(rng.integers(-10, 10, size=10),
                          dtype=torch_to_numpy_dtype_dict[input_dtype if (input_dtype != torch.bfloat16) else torch.float64])
         input[0] = input[3] = input[7] = 0
-        val = np.array(rng.integers(-10, 10, size=10),
-                       dtype=torch_to_numpy_dtype_dict[val_dtype if (val_dtype != torch.bfloat16) else torch.float64])
-        np_result = torch.from_numpy(np.heaviside(input, val)).to(device=device, dtype=input_dtype)
+        values = np.array(rng.integers(-10, 10, size=10),
+                          dtype=torch_to_numpy_dtype_dict[values_dtype if (values_dtype != torch.bfloat16) else torch.float64])
+        np_result = torch.from_numpy(np.heaviside(input, values)).to(device=device, dtype=input_dtype)
 
         input = torch.from_numpy(input).to(device=device, dtype=input_dtype)
-        val = torch.from_numpy(val).to(device=device, dtype=val_dtype)
+        values = torch.from_numpy(values).to(device=device, dtype=values_dtype)
         out = torch.empty_like(input)
 
-        if input_dtype == val_dtype:
-            torch_result = torch.heaviside(input, val)
+        if input_dtype == values_dtype:
+            torch_result = torch.heaviside(input, values)
             self.assertEqual(np_result, torch_result)
 
-            torch_result = input.heaviside(val)
+            torch_result = input.heaviside(values)
             self.assertEqual(np_result, torch_result)
 
-            torch.heaviside(input, val, out=out)
+            torch.heaviside(input, values, out=out)
             self.assertEqual(np_result, out)
 
-            input.heaviside_(val)
+            input.heaviside_(values)
             self.assertEqual(np_result, input)
         else:
             with self.assertRaisesRegex(RuntimeError, 'heaviside is not yet implemented for tensors with different dtypes.'):
-                torch.heaviside(input, val)
+                torch.heaviside(input, values)
             with self.assertRaisesRegex(RuntimeError, 'heaviside is not yet implemented for tensors with different dtypes.'):
-                input.heaviside(val)
+                input.heaviside(values)
             with self.assertRaisesRegex(RuntimeError, 'heaviside is not yet implemented for tensors with different dtypes.'):
-                torch.heaviside(input, val, out=out)
+                torch.heaviside(input, values, out=out)
             with self.assertRaisesRegex(RuntimeError, 'heaviside is not yet implemented for tensors with different dtypes.'):
-                input.heaviside_(val)
+                input.heaviside_(values)
 
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
@@ -6305,21 +6305,21 @@ class TestTorchDeviceType(TestCase):
                           torch.testing.get_all_complex_dtypes())))
     def test_heaviside_complex(self, device, dtypes):
         input_dtype = dtypes[0]
-        val_dtype = dtypes[1]
+        values_dtype = dtypes[1]
 
         data = (complex(0, -6), complex(-1, 3), complex(1, 1))
         input = torch.tensor(data, device=device, dtype=input_dtype)
-        val = torch.tensor(data, device=device, dtype=val_dtype)
+        values = torch.tensor(data, device=device, dtype=values_dtype)
         out = torch.empty_like(input)
         real = input.real
 
-        with self.assertRaisesRegex(RuntimeError, 'heaviside is not implemented for complex tensors.'):
+        with self.assertRaisesRegex(RuntimeError, 'heaviside is not yet implemented for complex tensors.'):
             torch.heaviside(input, real)
-        with self.assertRaisesRegex(RuntimeError, 'heaviside is not implemented for complex tensors.'):
-            real.heaviside(val)
-        with self.assertRaisesRegex(RuntimeError, 'heaviside is not implemented for complex tensors.'):
-            input.heaviside_(val)
-        with self.assertRaisesRegex(RuntimeError, 'heaviside is not implemented for complex tensors.'):
+        with self.assertRaisesRegex(RuntimeError, 'heaviside is not yet implemented for complex tensors.'):
+            real.heaviside(values)
+        with self.assertRaisesRegex(RuntimeError, 'heaviside is not yet implemented for complex tensors.'):
+            input.heaviside_(values)
+        with self.assertRaisesRegex(RuntimeError, 'heaviside is not yet implemented for complex tensors.'):
             torch.heaviside(real, real, out=out)
 
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')

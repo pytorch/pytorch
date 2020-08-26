@@ -5611,17 +5611,19 @@ and :attr:`values` must be :ref:`broadcastable <broadcasting-semantics>`.
 
 Args:
     {input}
-    values (Tensor or Scalar): The value(s) to sample from where :attr:`input` is zero.
+    values (Tensor): The values to sample from where :attr:`input` is zero.
 
 Keyword arguments:
     {out}
 
 Example::
 
-    >>> t = torch.tensor([-1.5, 0, 2.0])
-    >>> torch.heaviside(t, 0.5)
+    >>> input = torch.tensor([-1.5, 0, 2.0])
+    >>> values = torch.tensor([0.5])
+    >>> torch.heaviside(input, values)
     tensor([0.0000, 0.5000, 1.0000])
-    >>> torch.heaviside(t, -2)
+    >>> values = torch.tensor([1.2, -2.0, 3.5])
+    >>> torch.heaviside(input, values)
     tensor([0., -2., 1.])
 
 """.format(**common_args))

@@ -932,45 +932,31 @@ Tensor _test_serialization_subcmul(const Tensor& self, const Tensor& other, Scal
   return self - (other * alpha);
 }
 
-Tensor& heaviside_out(Tensor& result, const Tensor& self, const Tensor& val) {
-  TORCH_CHECK(!self.is_complex() && !result.is_complex() && !val.is_complex(),
-              "heaviside is not implemented for complex tensors.");
-  TORCH_CHECK(self.dtype() == val.dtype() &&  result.dtype() == self.dtype(),
+Tensor& heaviside_out(Tensor& result, const Tensor& self, const Tensor& values) {
+  TORCH_CHECK(!self.is_complex() && !result.is_complex() && !values.is_complex(),
+              "heaviside is not yet implemented for complex tensors.");
+  TORCH_CHECK(self.dtype() == values.dtype() &&  result.dtype() == self.dtype(),
               "heaviside is not yet implemented for tensors with different dtypes.");
 
-  auto iter = TensorIterator::binary_op(result, self, val, /*check_mem_overlap=*/true);
+  auto iter = TensorIterator::binary_op(result, self, values, /*check_mem_overlap=*/true);
   heaviside_stub(iter.device_type(), iter);
   return result;
 }
 
-Tensor& heaviside_out(Tensor& result, const Tensor& self, Scalar val) {
-  Tensor val_t = wrapped_scalar_tensor_and_check_convert(val, self);
-  return at::heaviside_out(result, self, val_t);
-}
-
-Tensor heaviside(const Tensor& self, const Tensor& val) {
-  TORCH_CHECK(!self.is_complex() && !val.is_complex(),
-              "heaviside is not implemented for complex tensors.");
-  TORCH_CHECK(self.dtype() == val.dtype(),
+Tensor heaviside(const Tensor& self, const Tensor& values) {
+  TORCH_CHECK(!self.is_complex() && !values.is_complex(),
+              "heaviside is not yet implemented for complex tensors.");
+  TORCH_CHECK(self.dtype() == values.dtype(),
               "heaviside is not yet implemented for tensors with different dtypes.");
 
   Tensor result;
-  auto iter = TensorIterator::binary_op(result, self, val);
+  auto iter = TensorIterator::binary_op(result, self, values);
   heaviside_stub(iter.device_type(), iter);
   return iter.output();
 }
 
-Tensor heaviside(const Tensor& self, Scalar val) {
-  Tensor val_t = wrapped_scalar_tensor_and_check_convert(val, self);
-  return at::heaviside(self, val_t);
-}
-
-Tensor& heaviside_(Tensor& self, const Tensor& val) {
-  return at::heaviside_out(self, self, val);
-}
-
-Tensor& heaviside_(Tensor& self, Scalar val) {
-  return at::heaviside_out(self, self, val);
+Tensor& heaviside_(Tensor& self, const Tensor& values) {
+  return at::heaviside_out(self, self, values);
 }
 
 // TODO: Deduplicate this with the TensorIterator logic.  This would

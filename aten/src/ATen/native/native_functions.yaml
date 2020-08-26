@@ -3600,28 +3600,6 @@
     CPU, CUDA: sub_
     SparseCPU, SparseCUDA: sub_sparse_
 
-- func: heaviside.Tensor_out(Tensor self, Tensor val, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU, CUDA: heaviside_out
-
-- func: heaviside.Scalar_out(Tensor self, Scalar val, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU, CUDA: heaviside_out
-
-- func: heaviside.Tensor(Tensor self, Tensor val) -> Tensor
-  use_c10_dispatcher: full
-  variants: function, method
-
-- func: heaviside.Scalar(Tensor self, Scalar val) -> Tensor
-  use_c10_dispatcher: full
-  variants: function, method
-
-- func: heaviside_.Tensor(Tensor(a!) self, Tensor val) -> Tensor(a!)
-  variants: method
-
-- func: heaviside_.Scalar(Tensor(a!) self, Scalar val) -> Tensor(a!)
-  variants: method
-
 # For C++ only, until we have conversion from C++ numbers to Tensor
 - func: sub.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
   use_c10_dispatcher: full
@@ -3634,6 +3612,17 @@
 - func: rsub.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
   use_c10_dispatcher: full
   variants: function
+
+- func: heaviside.out(Tensor self, Tensor values, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: heaviside_out
+
+- func: heaviside(Tensor self, Tensor values) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: heaviside_(Tensor(a!) self, Tensor values) -> Tensor(a!)
+  variants: method
 
 # For C++ only, until we have conversion from C++ numbers to Tensor
 - func: rsub.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
