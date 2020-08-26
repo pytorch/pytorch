@@ -5670,6 +5670,13 @@ a")
         ast = torch.jit.frontend.get_jit_def(fn, fn.__name__)
         self.assertExpected(str(ast))
 
+    def test_python_frontend_source_range(self):
+        def fn():
+            raise Exception("hello")
+        ast = torch.jit.frontend.get_jit_def(fn, fn.__name__)
+        src_range = ast.range()
+        self.assertExpected(str(src_range))
+
     def test_python_frontend_py3(self):
         def fn():
             raise Exception("hello")

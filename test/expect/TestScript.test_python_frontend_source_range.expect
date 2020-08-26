@@ -1,0 +1,5 @@
+SourceRange at:
+  File "test_jit.py", line 5674
+        def fn():
+        ~~~~~~~~~...  <--- HERE
+            raise Exception("hello")
