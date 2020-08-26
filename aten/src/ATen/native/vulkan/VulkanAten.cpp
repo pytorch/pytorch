@@ -48,7 +48,7 @@ VulkanTensor& vtensor_from_vulkan(Tensor& tensor) {
 
 Tensor empty(
     IntArrayRef size,
-    TensorOptions& options,
+    const TensorOptions& options,
     const optional<MemoryFormat> memory_format) {
   TORCH_CHECK(
       !options.has_pinned_memory(),
