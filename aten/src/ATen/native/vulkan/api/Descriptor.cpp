@@ -55,7 +55,7 @@ typename Descriptor::Pool::Factory::Handle Descriptor::Pool::Factory::operator()
     nullptr,
     0u, /* Do not use VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT */
     descriptor.capacity,
-    descriptor.sizes.size(),
+    static_cast<uint32_t>(descriptor.sizes.size()),
     descriptor.sizes.data(),
   };
 
