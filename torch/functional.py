@@ -464,8 +464,7 @@ def stft(input, n_fft, hop_length=None, win_length=None, window=None,
         pad = int(n_fft // 2)
         input = F.pad(input.view(extended_shape), (pad, pad), pad_mode)
         input = input.view(input.shape[-signal_dim:])
-    return _VF.stft(input, n_fft, hop_length, win_length, window, normalized, onesided)
-
+    return _VF.stft(input, n_fft, hop_length, win_length, window, normalized, onesided)  # type: ignore
 
 def istft(input, n_fft, hop_length=None, win_length=None, window=None,
           center=True, normalized=False, onesided=True, length=None):
