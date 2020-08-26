@@ -17,7 +17,8 @@ bool use_convolution2d(
     const IntArrayRef padding,
     const IntArrayRef stride,
     const IntArrayRef dilation,
-    const int64_t groups);
+    const int64_t groups,
+    const bool transposed);
 
 Tensor convolution2d(
     const Tensor& input,
