@@ -1131,18 +1131,19 @@ struct CAFFE2_API TupleType : public NamedType {
 
 struct EnumType;
 using EnumTypePtr = std::shared_ptr<EnumType>;
+using EnumNameValue = std::pair<std::string, IValue>;
 struct CAFFE2_API EnumType : public NamedType {
   friend struct Type;
   static const TypeKind Kind = TypeKind::EnumType;
 
   static EnumTypePtr create(
       const c10::QualifiedName& qualified_class_name,
-      TypePtr value, std::weak_ptr<::torch::jit::CompilationUnit> cu) {
+      TypePtr value, std::vector<EnumNameValue> enum_names_values, std::weak_ptr<::torch::jit::CompilationUnit> cu) {
     switch (value->kind()) {
       case TypeKind::IntType:
       case TypeKind::FloatType:
       case TypeKind::StringType:
-        return EnumTypePtr(new EnumType(qualified_class_name, std::move(value), std::move(cu)));
+        return EnumTypePtr(new EnumType(qualified_class_name, std::move(value), std::move(enum_names_values), std::move(cu)));
       default:
         AT_ERROR(
             "Cannot create Enum with value type '",
@@ -1183,10 +1184,24 @@ struct CAFFE2_API EnumType : public NamedType {
     return name().value();
   }
 
+  at::ArrayRef<TypePtr> containedTypes() const override {
+    return value_type_;
+  }
+
+  const at::ArrayRef<EnumNameValue> enumNamesValues() const {
+    return enum_names_values_;
+  }
+
  private:
-  EnumType(c10::QualifiedName qualified_class_name, TypePtr value_type, std::weak_ptr<torch::jit::CompilationUnit> cu)
+  EnumType(
+      c10::QualifiedName qualified_class_name,
+      TypePtr value_type,
+      std::vector<EnumNameValue> enum_names_values,
+      std::weak_ptr<torch::jit::CompilationUnit> cu)
       : NamedType(TypeKind::EnumType, std::move(qualified_class_name)),
-        value_type_(std::move(value_type)), cu_(cu) {}
+        value_type_(std::move(value_type)),
+        enum_names_values_(std::move(enum_names_values)),
+        cu_(cu) {}
 
   std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
     const auto& n = name().value();
@@ -1194,6 +1209,7 @@ struct CAFFE2_API EnumType : public NamedType {
   }
 
   TypePtr value_type_;
+  std::vector<EnumNameValue> enum_names_values_;
   std::weak_ptr<::torch::jit::CompilationUnit> cu_;
 };
 
