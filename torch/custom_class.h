@@ -137,14 +137,18 @@ class class_ {
   ///
   /// Currently, both the `get_state` and `set_state` callables must be
   /// C++ lambda expressions. They should have the following signatures,
-  /// where `CurClass` is the class you're registering and `T` is some object
+  /// where `CurClass` is the class you're registering and `T1` is some object
   /// that encapsulates the state of the object.
   ///
-  ///     __getstate__(intrusive_ptr<CurClass>) -> T
-  ///     __setstate__(T) -> intrusive_ptr<CurClass>
+  ///     __getstate__(intrusive_ptr<CurClass>) -> T1
+  ///     __setstate__(T2) -> intrusive_ptr<CurClass>
   ///
-  /// `T` must be an object that is convertable to IValue by the same rules
+  /// `T1` must be an object that is convertable to IValue by the same rules
   /// for custom op/method registration.
+  ///
+  /// For the common case, T1 == T2. T1 can also be a subtype of T2. An
+  /// example where it makes sense for T1 and T2 to differ is if __setstate__
+  /// handles legacy formats in a backwards compatible way.
   ///
   /// Example:
   ///
@@ -157,7 +161,6 @@ class class_ {
   ///            return c10::make_intrusive<MyStackClass<std::string>>(
   ///               std::vector<std::string>{"i", "was", "deserialized"});
   ///         })
-  /// TODO(before land): update the above doc
   template <typename GetStateFn, typename SetStateFn>
   class_& def_pickle(GetStateFn&& get_state, SetStateFn&& set_state) {
     static_assert(

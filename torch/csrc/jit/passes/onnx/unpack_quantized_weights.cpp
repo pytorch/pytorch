@@ -134,18 +134,19 @@ Node* createInt(int64_t i, std::shared_ptr<Graph>& graph) {
   return const_node;
 }
 
+enum class QuantizedParamsType { CONV, LINEAR };
+
 // This is called before the onnx pass. Using pattern matching we
 // find the relevant nodes and extract the packed_params. The packed_params are
 // passed to the appropriate unpack function using c10::Dispatcher. We insert
 // the unpacked weights and bias into the graph using
 // caffe2::Int8GivenTensorFill nodes.
-// TODO before land: is this called for both conv and linear? do we need
-//   and extra check?
 void unpackQuantizedWeightsHelper(
     std::shared_ptr<Graph>& graph,
     std::map<std::string, IValue>& paramsDict,
     const std::string& pattern,
-    const std::string& unpack_fn) {
+    const std::string& unpack_fn,
+    QuantizedParamsType params_type) {
   Graph pattern_graph;
   std::unordered_map<std::string, Value*> vmap;
   parseIR(pattern, &pattern_graph, vmap);
@@ -164,13 +165,12 @@ void unpackQuantizedWeightsHelper(
     }
     at::Tensor unpacked_weight;
     c10::optional<at::Tensor> bias;
-    c10::optional<torch::List<int64_t>> stride, padding, dilation;
-    c10::optional<int64_t> groups;
-
     constexpr int64_t stride_idx = 2;
     constexpr int64_t padding_idx = 3;
     constexpr int64_t dilation_idx = 4;
     constexpr int64_t groups_idx = 5;
+    c10::optional<torch::List<int64_t>> stride, padding, dilation;
+    c10::optional<int64_t> groups;
 
     torch::List<int64_t> stride_int, padding_int, dilation_int;
     int64_t groups_int;
@@ -179,7 +179,9 @@ void unpackQuantizedWeightsHelper(
       // Pre-unpacked weights. Comes from Conv/Linear weights which are
       // stored as bound C++ classes.
       auto ser_tup = itr->second.toTuple();
-      if (ser_tup->elements()[0].isString()) {
+
+      if (params_type == QuantizedParamsType::CONV &&
+          ser_tup->elements()[0].isString()) {
         auto elements = ser_tup->elements();
         auto version = elements[0].toStringRef();
         TORCH_INTERNAL_ASSERT(version == "2", "Unknown serialization version");
@@ -365,15 +367,20 @@ void UnpackQuantizedWeights(
         %r = quantized::conv3d_relu(%input, %packed_params, %scale, %zero_point)
         return (%r) )";
   unpackQuantizedWeightsHelper(
-      graph, paramsDict, qlinear, "quantized::linear_unpack");
+      graph, paramsDict, qlinear, "quantized::linear_unpack",
+      QuantizedParamsType::LINEAR);
   unpackQuantizedWeightsHelper(
-      graph, paramsDict, qconv2d, "quantized::conv2d_unpack");
+      graph, paramsDict, qconv2d, "quantized::conv2d_unpack",
+      QuantizedParamsType::CONV);
   unpackQuantizedWeightsHelper(
-      graph, paramsDict, qconv2d_relu, "quantized::conv2d_unpack");
+      graph, paramsDict, qconv2d_relu, "quantized::conv2d_unpack",
+      QuantizedParamsType::CONV);
   unpackQuantizedWeightsHelper(
-      graph, paramsDict, qconv3d, "quantized::conv3d_unpack");
+      graph, paramsDict, qconv3d, "quantized::conv3d_unpack",
+      QuantizedParamsType::CONV);
   unpackQuantizedWeightsHelper(
-      graph, paramsDict, qconv3d_relu, "quantized::conv3d_unpack");
+      graph, paramsDict, qconv3d_relu, "quantized::conv3d_unpack",
+      QuantizedParamsType::CONV);
 }
 
 // Caffe2 expects quantized ops to be in NHWC format while pytorch inputs are in

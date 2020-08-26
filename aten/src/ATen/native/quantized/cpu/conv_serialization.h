@@ -10,10 +10,6 @@
 
 /* Convolution prepacked parameters serialization.
  *
- * Files that need to be updated if version changes:
- * - ATen/native/quantized/cpu/fbgemm_utils.cpp
- * - jit/passes/onnx/unpack_quantized_weights.cpp
- *
  * Version 1
  *
  * - Fields:
