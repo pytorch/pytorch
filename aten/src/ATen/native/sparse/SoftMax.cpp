@@ -4,7 +4,7 @@
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/Parallel.h>
 #include <ATen/NamedTensorUtils.h>
-#include <ATen/native/sparse/cpu/ParamUtils.h>
+#include <ATen/native/sparse/utils/ParamUtils.h>
 #include <map>
 
 namespace at {

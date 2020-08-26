@@ -6,7 +6,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAUtils.h>
 #include <ATen/native/sparse/SparseTensorMath.h>
-#include <ATen/native/sparse/cpu/ParamUtils.h>
+#include <ATen/native/sparse/utils/ParamUtils.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/native/sparse/cuda/SparseCUDAApplyUtils.cuh>
