@@ -30,7 +30,9 @@
  *      - stride x kSpatialDim
  *      - padding x kSpatialDim
  *      - dilation x kSpatialDim
+ *      - output_padding x kSpatialDim (unused)
  *      - groups
+ *      - traspose (0 or 1, unused)
  *    1: weight
  *  2. list of optional tensors
  *    0: bias
@@ -105,7 +107,13 @@ ConvParamsSerializationType parse_conv_serialized_state(c10::IValue v) {
       auto dilation = dilation_x_kSpatialDim.get(i);
       params_vec.push_back(dilation[0].item<int8_t>());
     }
+    // output_padding does not exist in v1, so we fill in a default value
+    for (int i = 0; i < kSpatialDim; i++) {
+      params_vec.push_back(0);
+    }
     params_vec.push_back(groups[0].item<int8_t>());
+    // transpose does not exist in v1, so we fill in a default value
+    params_vec.push_back(0);
     int64_t vec_size = params_vec.size();
     at::Tensor params_tensor = at::from_blob(params_vec.data(),
         {vec_size}, at::TensorOptions().dtype(at::kChar))
@@ -143,7 +151,13 @@ ConvParamsSerializationType serialize_conv(
   params_vec.insert(params_vec.end(), padding.begin(), padding.end());
   auto dilation = params->dilation().vec();
   params_vec.insert(params_vec.end(), dilation.begin(), dilation.end());
+  // output_padding is not implemented yet, so we fill in a default value
+  for (int i = 0; i < kSpatialDim; i++) {
+    params_vec.push_back(0);
+  }
   params_vec.push_back(params->groups());
+  // transpose is not implemented yet, so we fill in a default value
+  params_vec.push_back(0);
   int64_t vec_size = params_vec.size();
   at::Tensor params_tensor = at::from_blob(
       params_vec.data(), {vec_size},
@@ -190,6 +204,10 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> deserialize_conv(
   }
   for (; idx < 3 * kSpatialDim + 1; ++idx) {
     dilation.emplace_back(conv_params_packed[idx].item<int64_t>());
+  }
+  // output_padding is not implemented yet, so we skip the entries
+  for (; idx < 4 * kSpatialDim + 1; ++idx) {
+    // do nothing
   }
   groups = conv_params_packed[idx].item<int64_t>();
 

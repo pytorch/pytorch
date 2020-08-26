@@ -202,7 +202,12 @@ void unpackQuantizedWeightsHelper(
         for (; idx < 3 * kSpatialDim + 1; ++idx) {
           dilation_int.emplace_back(conv_params_packed[idx].item<int64_t>());
         }
+        // output_padding is not implemented yet, so we skip the entries
+        for (; idx < 4 * kSpatialDim + 1; ++idx) {
+          // do nothing
+        }
         groups_int = conv_params_packed[idx].item<int64_t>();
+        // skip transpose
 
         torch::List<c10::IValue> optional = elements[2].toList();
         bias = optional.get(0).toOptional<at::Tensor>();
