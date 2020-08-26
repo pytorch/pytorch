@@ -3021,9 +3021,10 @@ class _DistTestBase(object):
         for (test_case, iteration_mapping) in itertools.product(
             models_to_test, iteration_mappings
         ):
-            print(
-                f"Running test: {test_case.name} with iteration mapping {iteration_mapping}"
-            )
+            if self.rank == 0:
+                print(
+                    f"Running test: {test_case.name} with iteration mapping {iteration_mapping}"
+                )
             self._run_uneven_inputs_test(
                 test_case,
                 iteration_mapping,
