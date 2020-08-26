@@ -1342,6 +1342,28 @@ struct ProfileOp : public Node {
   std::function<void(std::vector<IValue>&)> callback_;
 };
 
+struct TORCH_API ProfileOptionalOp : public Node {
+  static constexpr Symbol Kind = ::c10::prim::profile_optional;
+  ProfileOptionalOp(
+      Graph* graph,
+      std::function<void(std::vector<IValue>&)> callback)
+      : Node(graph, ::c10::prim::profile_optional), callback_(callback) {}
+
+  void cloneFrom(Node* other_) override;
+  Node* allocNewInstance(Graph* g) override;
+
+  const std::function<void(std::vector<IValue>&)>& getCallback() const {
+    return callback_;
+  }
+
+  void setCallback(std::function<void(std::vector<IValue>&)> callback) {
+    callback_ = callback;
+  }
+
+ private:
+  std::function<void(std::vector<IValue>&)> callback_;
+};
+
 // execute a Python function, used for Ops we can't optimize but that we want to
 // optimize around
 //
