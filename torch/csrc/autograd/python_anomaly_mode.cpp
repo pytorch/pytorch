@@ -28,7 +28,7 @@ void PyAnomalyMetadata::store_stack() {
   }
 }
 
-void PyAnomalyMetadata::print_stack(const std::string& current_node_name) {
+void PyAnomalyMetadata::print_stack(const std::string& current_node_name, bool is_parent) {
   pybind11::gil_scoped_acquire gil;
   if (!PyDict_Check(dict())) {
     throw std::runtime_error("Anomaly metadata is not a python dictionary.");
@@ -55,9 +55,15 @@ void PyAnomalyMetadata::print_stack(const std::string& current_node_name) {
     throw python_error();
   }
 
-  TORCH_WARN("Error detected in ", current_node_name, ". ",
-          "Traceback of forward call that caused the error:\n",
-          THPUtils_unpackString(msg.get()));
+  if (!is_parent) {
+    TORCH_WARN("Error detected in ", current_node_name, ". ",
+            "Traceback of forward call that caused the error:\n",
+            THPUtils_unpackString(msg.get()));
+  } else {
+    TORCH_WARN("\n\n",
+            "Traceback of forward call that induces the previous calculation:\n",
+            THPUtils_unpackString(msg.get()));
+  }
 }
 
 }}

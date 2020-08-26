@@ -37,6 +37,17 @@ using IndexRange = std::pair<size_t, size_t>;
 // Custom deleter to prevent stack overflows.
 TORCH_API void deleteNode(Node* function);
 
+// Guard that sets and restores the evaluating node
+class NodeGuard {
+ public:
+  explicit NodeGuard() {};
+  void set_node(std::shared_ptr<Node> node);
+  ~NodeGuard();
+
+ private:
+  std::shared_ptr<Node> last_evaluating_node_;
+};
+
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 //                               Node
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -97,6 +108,13 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
       next_edges_(std::move(next_edges)) {
     if (AnomalyMode::is_enabled()) {
       metadata()->store_stack();
+
+    }
+    // If anomaly mode is enabled and graph is constructed, then assign this
+    // node to a parent. A parent is a Node where this Node is created.
+    // We are tracking the parents to track multiple backward operations.
+    if (GradMode::is_enabled()) {
+      assign_parent();
     }
   }
 
@@ -258,6 +276,14 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   /// If none exist, creates a new empty one.
   AnomalyMetadata* metadata() noexcept;
 
+  // Assigning the currently evaluating node as the parent node of this node
+  // (parent in the sense of what node spawn this node).
+  void assign_parent() noexcept;
+
+  const std::shared_ptr<Node>& parent() const noexcept {
+    return parent_node_;
+  }
+
   // Hook API
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -383,6 +409,7 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
 
   edge_list next_edges_;
   PyObject* pyobj_ = nullptr; // weak reference
+  std::shared_ptr<Node> parent_node_ = nullptr;
   std::unique_ptr<AnomalyMetadata> anomaly_metadata_ = nullptr;
   std::vector<std::unique_ptr<FunctionPreHook>> pre_hooks_;
   std::vector<std::unique_ptr<FunctionPostHook>> post_hooks_;
