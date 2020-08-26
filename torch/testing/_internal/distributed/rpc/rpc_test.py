@@ -41,9 +41,14 @@ from torch.testing._internal.common_utils import TemporaryFileName
 def foo_add():
     return torch.add(torch.ones(1), torch.ones(1))
 
-def udf_with_torch_ops(device=-1):
+def udf_with_torch_ops(device=-1, use_record_function=False):
     device_ctx = contextlib.suppress() if device == -1 else torch.cuda.device(device)
-    with device_ctx:
+    record_function_ctx = (
+        torch.autograd.profiler.record_function("##forward##")
+        if use_record_function
+        else contextlib.suppress()
+    )
+    with device_ctx, record_function_ctx:
         t1, t2 = torch.ones(1), torch.ones(1)
         t = torch.add(t1, t2)
         t = torch.mul(t, t)
@@ -366,7 +371,6 @@ def async_wrong_type():
 @rpc.functions.async_execution
 def async_add(to, x, y):
     return rpc.rpc_async(to, torch.add, args=(x, y))
-
 
 @rpc.functions.async_execution
 def async_add_with_future_ctor(to, x, y, z):
@@ -1208,6 +1212,36 @@ class RpcTest(RpcAgentTestFixture):
             ),
         )
         fut.wait()
+
+    @dist_init
+    def test_rpc_profiling_remote_record_function(self):
+        # test that functions run over RPC with record_function show the expected
+        # profiled block.
+        if self.rank != 1:
+            return
+        dst_ranks = [i for i in range(self.world_size) if i != self.rank]
+        for dst_rank in dst_ranks:
+            dst_worker = worker_name(dst_rank)
+            with torch.autograd.profiler.profile() as prof:
+                fut = rpc.rpc_async(dst_worker, udf_with_torch_ops, args=(-1, True))
+                fut.wait()
+
+            function_events = prof.function_events
+            record_function_remote_event = [
+                evt for evt in function_events if "##forward##" in evt.name
+            ]
+            self.assertEqual(1, len(record_function_remote_event))
+            record_function_remote_event = record_function_remote_event[0]
+            self.assertEqual(record_function_remote_event.node_id, dst_rank)
+            # The record function block CPU time should be greater than the
+            # sum of remotely profiled ops since they are executed in that block.
+            remaining_remote_events = {
+                evt for evt in function_events if evt.node_id == dst_rank
+            } - {record_function_remote_event}
+            remote_ops_time = sum(evt.cpu_time_total for evt in remaining_remote_events)
+            self.assertGreaterEqual(
+                record_function_remote_event.cpu_time_total, remote_ops_time
+            )
 
     def validate_profiling_workload(self, dst, prof):
         REMOTE_OP_STR = "#remote_op: "
