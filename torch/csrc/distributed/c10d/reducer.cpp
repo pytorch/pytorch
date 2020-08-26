@@ -765,7 +765,7 @@ void Reducer::initialize_buckets(
 void Reducer::initialize_bucket_views(
     Reducer::BucketReplica& replica,
     at::Tensor& contents,
-    bool from_initialize_buckets) {
+    bool populate_bucket_views_in) {
   for (size_t i = 0; i < replica.variables.size(); i++) {
     const auto& v = replica.variables[i];
     const auto offset = replica.offsets[i];
@@ -777,7 +777,7 @@ void Reducer::initialize_bucket_views(
       replica.bucket_views_out.push_back(
           contents.as_strided(v.sizes(), v.strides(), offset));
       // If calling from `initialize_buckets`, push_back to views_in too.
-      if (from_initialize_buckets) {
+      if (populate_bucket_views_in) {
         replica.bucket_views_in.push_back(
             contents.as_strided(v.sizes(), v.strides(), offset));
       }
@@ -788,7 +788,7 @@ void Reducer::initialize_bucket_views(
       replica.bucket_views_out.push_back(
           contents.narrow(0, offset, length).view(v.sizes()));
       // If calling from `initialize_buckets`, push_back to views_in too.
-      if (from_initialize_buckets) {
+      if (populate_bucket_views_in) {
         replica.bucket_views_in.push_back(
             contents.as_strided(v.sizes(), v.strides(), offset));
       }

@@ -200,14 +200,14 @@ class Reducer {
   // DDP communication hook was registered to recrate just views_out with the
   // result of `future_work`. If called from `finalize_backward`,
   // `initialize_bucket_views` will not modify `bucket_views_in`. This will keep
-  // `bucket_views_in` referring to `replica`'s `contents` and
-  // `bucket_view_in.copy_(grad)` call inside `Reducer`'s
+  // `bucket_views_in` referring to replica's contents and
+  // `bucket_view_in.copy_(grad)` call inside reducer's
   // `mark_variable_ready_dense` will work as expected. Note that before the
   // call in `finalize_backward`, views_out must be cleared.
   void initialize_bucket_views(
       BucketReplica& replica,
       at::Tensor& contents,
-      bool from_initialize_buckets);
+      bool populate_bucket_views_in);
 
   // A bucket holds N bucket replicas (1 per model replica).
   //
