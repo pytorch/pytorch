@@ -18,6 +18,16 @@ except ImportError:
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 class TestFX(JitTestCase):
+    def checkGraphModule(self, m: torch.nn.Module, args, kwargs=None):
+        """Check that an nn.Module's results match the GraphModule version
+        for a given set of args/kwargs.
+        """
+        kwargs = kwargs if kwargs else {}
+        ref_outs = m(*args, **kwargs)
+        gm = symbolic_trace(m)
+        test_outs = gm(*args, **kwargs)
+        self.assertEqual(ref_outs, test_outs)
+
     def test_graph_module(self):
         class MySub(torch.nn.Module):
             def __init__(self):
@@ -60,6 +70,15 @@ class TestFX(JitTestCase):
         t = T()
         symbolic_trace(t)
 
+    def test_args_kwargs(self):
+        class T(torch.nn.Module):
+            def forward(self, *args, **kwargs):
+                x = args[0] + kwargs['foo']
+                return x
+
+        t = T()
+        self.checkGraphModule(t, (torch.rand(1), torch.rand(1)), {'foo': torch.rand(1)})
+
     def test_fx_shifts(self):
         class MyModule(torch.nn.Module):
             def forward(self, x):
@@ -68,11 +87,7 @@ class TestFX(JitTestCase):
         input = torch.LongTensor(10).random_(0, 1024)
 
         m = MyModule()
-        ref_outs = m(input)
-        gm = symbolic_trace(m)
-        test_outs = gm(input)
-
-        self.assertEqual(ref_outs, test_outs)
+        self.checkGraphModule(m, (input,))
 
     def test_dict(self):
         class MyDictMod(torch.nn.Module):
@@ -81,11 +96,8 @@ class TestFX(JitTestCase):
 
         input_dict = {'3': torch.rand(3, 4)}
         m = MyDictMod()
-        ref_out = m(input_dict)
-        gm = symbolic_trace(m)
-        out = gm(input_dict)
 
-        self.assertEqual(out, ref_out)
+        self.checkGraphModule(m, (input_dict,))
 
     def test_disallow_override(self):
         # Custom delegate to disallow in-place tensor operations
@@ -194,11 +206,11 @@ class TestFX(JitTestCase):
             def forward(self, a, b):
                 c, d = a
                 return c + d + b
-        m = M()
-        m_g = symbolic_trace(m)
+
         a = (torch.rand(1), torch.rand(1))
         b = torch.rand(1)
-        self.assertEqual(m(a, b), m_g(a, b))
+        m = M()
+        self.checkGraphModule(m, (a, b))
 
     @skipIfRocm
     def test_native_callable(self):
