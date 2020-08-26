@@ -88,13 +88,6 @@ TORCH_API void writeArchiveAndTensors(
 using ExportModuleExtraFilesHook = std::function<ExtraFilesMap(const Module&)>;
 TORCH_API void SetExportModuleExtraFilesHook(ExportModuleExtraFilesHook hook);
 
-using ExportModuleMobileInfoConverter =
-    std::function<c10::Dict<std::string, std::string>(
-        const Module&,
-        const std::unordered_map<std::string, std::string>&)>;
-TORCH_API void SetExportModuleMobileInfoConverter(
-    ExportModuleMobileInfoConverter converter);
-
 // Returns a list of names of all operators in the module and its submodules.
 TORCH_API std::vector<std::string> export_opnames(const Module& m);
 

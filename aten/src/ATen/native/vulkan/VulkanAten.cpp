@@ -48,16 +48,13 @@ VulkanTensor& vtensor_from_vulkan(Tensor& tensor) {
 
 Tensor empty(
     IntArrayRef size,
-    const optional<ScalarType> dtype,
-    const optional<Layout> layout,
-    const optional<Device> device,
-    const optional<bool> pin_memory,
+    TensorOptions& options,
     const optional<MemoryFormat> memory_format) {
   TORCH_CHECK(
-      !pin_memory.has_value(),
+      !options.has_pinned_memory(),
       "'pin_memory' argument is incompatible with Vulkan tensor");
   TORCH_CHECK(
-      !memory_format.has_value(),
+      !options.has_memory_format(),
       "'memory_format' argument is incompatible with Vulkan tensor");
   VulkanTensor vt{size.vec()};
   return new_with_vtensor_vulkan(
@@ -66,13 +63,10 @@ Tensor empty(
 
 Tensor empty_strided(
     IntArrayRef size,
-    IntArrayRef stride,
-    optional<ScalarType> dtype,
-    optional<Layout> layout,
-    optional<Device> device,
+    TensorOptions& options,
     optional<bool> pin_memory) {
   return vulkan::aten::empty(
-      size, dtype, layout, device, pin_memory, c10::nullopt);
+      size, options, c10::nullopt);
 }
 
 Tensor upsample_nearest2d(
