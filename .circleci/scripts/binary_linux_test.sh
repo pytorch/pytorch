@@ -40,7 +40,7 @@ if [[ "$PACKAGE_TYPE" == conda ]]; then
     else
       cu_ver="${DESIRED_CUDA:2:2}.${DESIRED_CUDA:4}"
     fi
-    retry conda install -yq -c pytorch "cudatoolkit=\${cu_ver}"
+    retry conda install -yq -c nvidia -c pytorch "cudatoolkit=\${cu_ver}"
   fi
 elif [[ "$PACKAGE_TYPE" != libtorch ]]; then
   pip install "\$pkg"
