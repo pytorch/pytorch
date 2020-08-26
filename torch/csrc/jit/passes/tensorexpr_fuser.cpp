@@ -69,7 +69,6 @@ bool isSupported(Node* node) {
     case aten::reciprocal:
     case aten::expm1:
     case aten::lgamma:
-    case aten::slice:
     case aten::unsqueeze:
     case aten::frac:
     // TODO: uncomment once we can handle rand+broadcasts
@@ -94,6 +93,9 @@ bool isSupported(Node* node) {
         return false;
       }
       return true;
+    case aten::slice:
+      // TODO: Shape inference is not implemented for this op yet
+      return false;
     default:
       return false;
   }
