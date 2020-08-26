@@ -16,7 +16,7 @@ channel_shuffle_long_configs = op_bench.cross_product_configs(
     channels_per_group=[16, 32, 64],
     height=[16, 32, 64],
     width=[16, 32, 64],
-    groups=[1, 2, 4],
+    groups=[2, 4, 8, 16],
     tags=["long"]
 )
 
@@ -24,11 +24,12 @@ channel_shuffle_long_configs = op_bench.cross_product_configs(
 channel_shuffle_short_configs = op_bench.config_list(
     attr_names=["batch_size", "channels_per_group", "height", "width", "groups"],
     attrs=[
-        [1, 16, 16, 16, 1],
         [2, 16, 16, 16, 2],
         [2, 32, 32, 32, 2],
         [4, 32, 32, 32, 4],
         [4, 64, 64, 64, 4],
+        [8, 64, 64, 64, 8],
+        [16, 64, 64, 64, 16],
     ],
     tags=["short"]
 )

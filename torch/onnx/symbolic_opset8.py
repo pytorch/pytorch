@@ -4,7 +4,7 @@ import torch
 import torch.onnx.symbolic_helper as sym_help
 import torch.onnx.symbolic_opset9 as sym_opset9
 
-from torch.onnx.symbolic_helper import parse_args, _unimplemented, _black_list_in_opset, _try_get_scalar_type
+from torch.onnx.symbolic_helper import parse_args, _unimplemented, _block_list_in_opset, _try_get_scalar_type
 from torch.onnx.symbolic_opset9 import _cast_Float
 
 import warnings
@@ -39,14 +39,14 @@ import warnings
 #   Upsample: moved scales from attribute to input.
 #   Scan
 
-black_listed_operators = [
+block_listed_operators = [
     "nonzero", "where", "scatter", "scatter_add", "erf", "sign", "isnan", "gather",
     "arange", "masked_fill",
     "index_fill", "index_copy"
 ]
 
-for black_listed_op in black_listed_operators:
-    vars()[black_listed_op] = _black_list_in_opset(black_listed_op)
+for block_listed_op in block_listed_operators:
+    vars()[block_listed_op] = _block_list_in_opset(block_listed_op)
 
 
 def _interpolate(name, dim, interpolate_mode):
