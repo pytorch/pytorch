@@ -25,8 +25,6 @@ if [ -n "${IN_CIRCLECI}" ]; then
     # TODO: move this to Docker
     sudo apt-get -qq update
     sudo apt-get -qq install --allow-downgrades --allow-change-held-packages openmpi-bin libopenmpi-dev
-    sudo apt-get -qq install --no-install-recommends openssh-client openssh-server
-    sudo mkdir -p /var/run/sshd
   fi
 
   if [[ "$BUILD_ENVIRONMENT" == *-slow-* ]]; then

@@ -35,7 +35,6 @@ if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda9*gcc7* ]] || [[ "$BUILD_ENVIRONMENT"
   else
     sudo apt-get -qq install --allow-downgrades --allow-change-held-packages openmpi-bin libopenmpi-dev
   fi
-  sudo apt-get -qq install --no-install-recommends openssh-client openssh-server
   sudo mkdir -p /var/run/sshd
 fi
 
