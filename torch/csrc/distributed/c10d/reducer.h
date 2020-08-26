@@ -34,13 +34,11 @@ class Reducer {
 
   ~Reducer() noexcept(false);
 
-  // This funcation is called before forward compuation, e.g.
-  // rebuild_buckets.
-  // It may allocate new buckets before deallocating old buckets
-  // inside rebuild_buckets. To save peak memory usage,
-  // call rebuild_buckets before the peak memory usage increases
-  // during forward computation. Returns true if the buckets were rebuilt.
-  bool prepare_forward();
+  // To (re-)initialize bucket assignment, pass a list of buckets, each
+  // of which is specified by a list of indices in the variables list.
+  // This function performs validation that the variables within a bucket
+  // all live on the same device and have the same dimensionality.
+  void initialize_buckets(std::vector<std::vector<size_t>> bucket_indices);
 
   // This function is called when the forward function has produced an output,
   // and the user wishes to reduce gradients in the backwards pass.
@@ -163,12 +161,6 @@ class Reducer {
 
   void finalize_backward();
 
-  // To (re-)initialize bucket assignment, pass a list of buckets, each
-  // of which is specified by a list of indices in the variables list.
-  // This function performs validation that the variables within a bucket
-  // all live on the same device and have the same dimensionality.
-  void initialize_buckets(std::vector<std::vector<size_t>> bucket_indices);
-
   // Broadcast rebuilt buckets from rank 0 to other ranks before initializing
   // the buckets
   void sync_bucket_indices(std::vector<std::vector<size_t>>& bucket_indices);
@@ -224,19 +216,11 @@ class Reducer {
   // This function is called inside `initialize_buckets` and
   // `finalize_backward`. The function call in `initialize_bucket` creates views
   // into the contents tensor for each variable's grad. Views serve as entry
-  // points to refer to each grad's data of the flat contents tensor. When it is
-  // called inside 'initialize_buckets', copy_to_bucket_view is true, meaning grad
-  // needs to be copied into bucket_view.
-  // The function call in `finalize_backward` happens only if DDP communication
-  // hook was registered to recrate views with the result of `future_work`.
-  // Before `finalize_backward` call, views must be cleared. In this case,
-  // copy_to_bucket_view is false, meaning grad does not need to be copied into
-  // bucket_view, as grad has already been mutated in bucket_view, just let grad
-  // point to bucket_view here.
-  void initialize_bucket_views(
-      BucketReplica& replica,
-      at::Tensor& contents,
-      bool copy_to_bucket_view);
+  // points to copy_ each grad's data in/out of the flat contents tensor. The
+  // function call in `finalize_backward` happens only if DDP communication hook
+  // was registered to recrate views with the result of `future_work`. Before
+  // `finalize_backward` call, views must be cleared.
+  void initialize_bucketviews(BucketReplica& replica, at::Tensor& contents);
 
   // A bucket holds N bucket replicas (1 per model replica).
   //

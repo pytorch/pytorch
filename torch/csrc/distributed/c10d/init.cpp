@@ -168,8 +168,8 @@ PyObject* c10d_init(PyObject* _unused) {
           py::arg("find_unused_parameters") = false,
           py::call_guard<py::gil_scoped_release>())
       .def(
-          "prepare_forward",
-          &::c10d::Reducer::prepare_forward,
+          "initialize_buckets",
+          &::c10d::Reducer::initialize_buckets,
           py::call_guard<py::gil_scoped_release>())
       .def(
           "prepare_for_backward",
@@ -181,6 +181,7 @@ PyObject* c10d_init(PyObject* _unused) {
               -> void { reducer.prepare_for_backward({output}); },
           py::call_guard<py::gil_scoped_release>())
       .def("get_backward_stats", &::c10d::Reducer::get_backward_stats)
+      .def("_rebuild_buckets", &::c10d::Reducer::rebuild_buckets)
       .def(
           "get_bucket_tensors",
           &::c10d::Reducer::get_bucket_tensors,

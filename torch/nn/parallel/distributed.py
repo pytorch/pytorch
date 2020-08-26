@@ -586,8 +586,6 @@ class DistributedDataParallel(Module):
         if self.require_forward_param_sync:
             self._sync_params()
 
-        self.reducer.prepare_forward()
-
         if self.device_ids:
             inputs, kwargs = self.scatter(inputs, kwargs, self.device_ids)
             if len(self.device_ids) == 1:
@@ -802,10 +800,6 @@ class DistributedDataParallel(Module):
                         # Schedule a corresponding broadcast if we are syncing module
                         # buffers in the forward pass.
                         self._check_and_sync_module_buffers()
-                        # Check if we need to rebuild buckets to match broadcast
-                        # calls from other processes.
-                        if not buckets_rebuilt:
-                            buckets_rebuilt = self.reducer.prepare_forward()
                         # Schedules one allreduce per gradient bucket to match
                         # the backwards pass allreduce.
                         self._match_all_reduce_for_bwd_pass()
@@ -814,8 +808,9 @@ class DistributedDataParallel(Module):
                             self._match_unused_params_allreduce()
                         # If buckets not rebuilt, will push original bucket
                         # indices to simulate a rebuild.
-                        if not buckets_rebuilt:
+                        if not buckets_rebuilt and not self.find_unused_parameters:
                             self.reducer._push_all_rebuilt_params()
+                            buckets_rebuilt = self.reducer._rebuild_buckets()
 
                 # All procs joined. Agree on authoritative rank and broadcast the model.
                 self._sync_final_model(is_last_joiner)
