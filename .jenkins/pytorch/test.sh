@@ -13,7 +13,7 @@ echo "Testing pytorch"
 
 if [ -n "${IN_CIRCLECI}" ]; then
   # TODO move this to docker
-  pip_install unittest-xml-reporting coverage codecov
+  pip_install unittest-xml-reporting coverage
 
   if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda10.1-* ]]; then
     # TODO: move this to Docker
@@ -400,4 +400,10 @@ else
   test_distributed
   test_benchmarks
   test_rpc
+  if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
+    pushd test
+    echo "Generating XML coverage report"
+    time python -mcoverage xml
+    popd
+  fi
 fi

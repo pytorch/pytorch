@@ -200,10 +200,7 @@ def print_to_stderr(message):
 
 def get_executable_command(options, allow_pytest):
     if options.coverage:
-        executable = ['coverage', 'run']
-        if PYTORCH_COLLECT_COVERAGE:
-            executable.append('--append')
-        executable.append('--source=torch')
+        executable = ['coverage', 'run', '--parallel-mode', '--source=torch']
     else:
         executable = [sys.executable]
     if options.pytest:
@@ -720,8 +717,12 @@ def main():
             print_to_stderr(err_message)
     finally:
         if options.coverage:
-            shell(['coverage', 'combine'])
-            shell(['coverage', 'xml'])
+            test_dir = os.path.dirname(os.path.abspath(__file__))
+            if not PYTORCH_COLLECT_COVERAGE:
+                shell(['coverage', 'combine'], cwd=test_dir)
+                shell(['coverage', 'html'], cwd=test_dir)
+            else:
+                shell(['coverage', 'combine', '--append'], cwd=test_dir)
 
     if options.continue_through_error and has_failed:
         for err in failure_messages:
