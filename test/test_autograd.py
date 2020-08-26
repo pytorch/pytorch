@@ -4579,18 +4579,19 @@ def run_functional_checks(test_case, test_name, name, apply_fn, run_grad_checks,
 # the tests for these ops which do not have 'complex' in variant should not run for complex
 # and only run for floating point
 
-separate_complex_tests = ['log', 'log10', 'log1p', 'log2', 'reciprocal', 'tan']
+separate_complex_tests = [] #['log', 'log10', 'log1p', 'log2', 'reciprocal', 'tan']
 
 # NOTE: Some non-holomorphic are separately tested in TestAutogradComplex until gradcheck works properly
 # for non-holomorphic functions
 
 # allow list for complex
-complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'zero_', 'clone',
-                'tril', 'triu', 'fill_', 'eq_', 'ne_', 'permute', 'squeeze', 'unsqueeze',
-                'chunk', 'split', 'split_with_sizes', 'resize', 'resize_as', 'sin', 'cos',
-                '__rmul__', '__rdiv__', 'sum', 'transpose', 'round', 'add', 'roll',
-                '__radd__', 'repeat', 'expand', 'mul', 'tanh', 'flip', 'fliplr', 'flipud',
-                'rot90'] + separate_complex_tests
+complex_list = []
+# complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'zero_', 'clone',
+#                 'tril', 'triu', 'fill_', 'eq_', 'ne_', 'permute', 'squeeze', 'unsqueeze',
+#                 'chunk', 'split', 'split_with_sizes', 'resize', 'resize_as', 'sin', 'cos',
+#                 '__rmul__', '__rdiv__', 'sum', 'transpose', 'round', 'add', 'roll',
+#                 '__radd__', 'repeat', 'expand', 'mul', 'tanh', 'flip', 'fliplr', 'flipud',
+#                 'rot90'] + separate_complex_tests
 
 def add_test(
         name,

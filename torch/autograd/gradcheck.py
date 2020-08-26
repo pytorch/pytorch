@@ -137,7 +137,7 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
             for d_idx, x_idx in enumerate(product(*[range(m) for m in x_tensor.size()])):
                 update_jacobians(x_tensor, x_idx, d_tensor, conj_d_tensor, d_idx)
 
-        return w_jacobian, conj_w_jacobian
+    return w_jacobian, conj_w_jacobian
 
 
 def get_analytical_jacobian(input, output, nondet_tol=0.0):
