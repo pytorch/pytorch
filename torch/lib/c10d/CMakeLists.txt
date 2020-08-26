@@ -20,6 +20,7 @@ include_directories(${TBB_ROOT_DIR}/include)
 endif()
 
 if(USE_GLOO)
+  set(USE_TCP_OPENSSL ON)
   option(USE_C10D_GLOO "USE C10D GLOO" ON)
 endif()
 

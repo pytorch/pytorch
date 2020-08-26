@@ -161,6 +161,10 @@ jobs:
           cat >docker_commands.sh \<<EOL
           # =================== The following code will be executed inside Docker container ===================
           set -ex
+          export GLOO_DEVICE_TRANSPORT=TCP_TLS
+          export GLOO_DEVICE_TRANSPORT_TCP_TLS_PKEY=test_cert/pkey.key
+          export GLOO_DEVICE_TRANSPORT_TCP_TLS_CERT=test_cert/cert.pem
+          export GLOO_DEVICE_TRANSPORT_TCP_TLS_CA_FILE=test_cert/ca.pem
           export SCRIBE_GRAPHQL_ACCESS_TOKEN="${SCRIBE_GRAPHQL_ACCESS_TOKEN}"
           ${PARALLEL_FLAGS}
           cd workspace
