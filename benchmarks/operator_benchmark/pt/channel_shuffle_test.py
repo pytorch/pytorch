@@ -39,7 +39,7 @@ class ChannelSHuffleBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, batch_size, channels_per_group, height, width, groups):
         channels = channels_per_group * groups
         data_shape = (batch_size, channels, height, width)
-        self.input_data = torch.rand(data_shape)
+        self.input_data = torch.rand(data_shape).contiguous(memory_format=torch.channels_last)
         self.groups = groups
         self.set_module_name('channel_shuffle')
 

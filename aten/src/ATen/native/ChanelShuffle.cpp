@@ -2,6 +2,7 @@
 
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/native/xnnpack/Engine.h>
 #include <c10/util/Exception.h>
 
 #include <algorithm>
@@ -11,6 +12,13 @@ namespace at {
 namespace native {
 
 Tensor channel_shuffle(const Tensor& self, int64_t groups) {
+#if defined(USE_XNNPACK)
+  if (self.is_contiguous(MemoryFormat::ChannelsLast) &&
+      xnnpack::use_channel_shuffle(self, groups)) {
+    return xnnpack::channel_shuffle(self, groups);
+  }
+#endif
+
   AT_ASSERTM(self.dim() > 2,
       "channel_shuffle expects input with > 2 dims, but got input with sizes ",
       self.sizes());
