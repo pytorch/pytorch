@@ -213,6 +213,10 @@ namespace c10 {
   _(aten, trunc_)                    \
   _(aten, fix)                       \
   _(aten, fix_)                      \
+  _(aten, neg)                       \
+  _(aten, neg_)                      \
+  _(aten, negative)                  \
+  _(aten, negative_)                 \
   _(aten, setdefault)                \
   _(aten, bin)                       \
   _(aten, pop)                       \
