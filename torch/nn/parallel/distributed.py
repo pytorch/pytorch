@@ -373,6 +373,7 @@ class DistributedDataParallel(Module):
 
         self.dim = dim
         self.module = module
+        self.device = list(self.module.parameters())[0].device
         self.broadcast_buffers = broadcast_buffers
         self.find_unused_parameters = find_unused_parameters
         self.require_backward_grad_sync = True
@@ -575,7 +576,7 @@ class DistributedDataParallel(Module):
     def forward(self, *inputs, **kwargs):
         if self.ddp_join_enabled:
             ones = torch.ones(
-                1, device=self.device_ids[0] if self.device_type != "cpu" else "cpu"
+                1, device=self.device
             )
             work = dist.all_reduce(ones, group=self.process_group, async_op=True)
             self.reducer._set_forward_pass_work_handle(
@@ -633,7 +634,7 @@ class DistributedDataParallel(Module):
     # all processes have joined.
     def _schedule_shadow_all_reduce_for_fwd_pass(self):
         all_active_procs = torch.zeros(
-            1, device=self.device_ids[0] if self.device_type != "cpu" else "cpu"
+            1, device=self.device
         )
         dist.all_reduce(all_active_procs, group=self.process_group)
         return all_active_procs.item()
@@ -721,7 +722,7 @@ class DistributedDataParallel(Module):
 
         Args:
             divide_by_initial_world_size (bool): If ``True``, will divide
-                gradients by the initial world_size DDP training was launched
+                gradients by the initial ``world_size`` DDP training was launched
                 with. If ``False``, will compute the effective world size
                 (number of ranks that have not depleted their inputs yet) and
                 divide gradients by that during allreduce. Set
@@ -925,7 +926,7 @@ class DistributedDataParallel(Module):
         # common_rank
         rank_to_use = torch.tensor(
             [input_rank if rank_cond else -1],
-            device=self.device_ids[0] if self.device_type != "cpu" else "cpu",
+            device=self.device,
         )
         dist.all_reduce(rank_to_use, op=ReduceOp.MAX, group=self.process_group)
         if rank_to_use.item() == -1:
