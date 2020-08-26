@@ -114,7 +114,7 @@ void runPreAutodiffPassPipeline(std::shared_ptr<Graph>& graph) {
     GRAPH_DUMP("After InsertBailOuts, before specializeAutogradZero", graph);
   }
 
-  specializeAutogradZero(*graph);
+  specializeAutogradZero(graph);
   GRAPH_DUMP("After specializeAutogradZero", graph);
   // runRequiredPasses
   {
