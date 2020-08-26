@@ -2702,6 +2702,7 @@ Example::
             [5, 6, 7, 8]])
 """.format(**common_args))
 
+# TODO: see https://github.com/pytorch/pytorch/issues/43667
 add_docstr(torch.gather,
            r"""
 gather(input, dim, index, *, sparse_grad=False, out=None) -> Tensor
@@ -2724,8 +2725,6 @@ Args:
     input (Tensor): the source tensor
     dim (int): the axis along which to index
     index (LongTensor): the indices of elements to gather
-
-Keyword args:
     sparse_grad(bool,optional): If ``True``, gradient w.r.t. :attr:`input` will be a sparse tensor.
     out (Tensor, optional): the destination tensor
 
@@ -3455,6 +3454,7 @@ Example::
     tensor([ 0.5724,  0.0000, -0.1208])
 """.format(**common_args))
 
+# TODO: see https://github.com/pytorch/pytorch/issues/43667
 add_docstr(torch.linspace,
            r"""
 linspace(start, end, steps=100, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
@@ -3469,8 +3469,6 @@ Args:
     end (float): the ending value for the set of points
     steps (int): number of points to sample between :attr:`start`
         and :attr:`end`. Default: ``100``.
-
-Keyword args:
     {out}
     {dtype}
     {layout}
@@ -3765,11 +3763,12 @@ Example::
     tensor([ True,  True, False, False])
 """.format(**common_args))
 
+# TODO: see https://github.com/pytorch/pytorch/issues/43667
 add_docstr(torch.logspace,
-           r"""
-logspace(start, end, steps=100, base=10.0, *,
+           """
+logspace(start, end, steps=100, base=10.0, *, \
          out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
-
+""" + r"""
 Returns a one-dimensional tensor of :attr:`steps` points
 logarithmically spaced with base :attr:`base` between
 :math:`{{\text{{base}}}}^{{\text{{start}}}}` and :math:`{{\text{{base}}}}^{{\text{{end}}}}`.
@@ -3782,8 +3781,6 @@ Args:
     steps (int): number of points to sample between :attr:`start`
         and :attr:`end`. Default: ``100``.
     base (float): base of the logarithm function. Default: ``10.0``.
-
-Keyword args:
     {out}
     {dtype}
     {layout}
@@ -5194,6 +5191,7 @@ Example::
 
 """.format(**common_args))
 
+# TODO: see https://github.com/pytorch/pytorch/issues/43667
 add_docstr(torch.ones,
            r"""
 ones(*size, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
@@ -5204,8 +5202,6 @@ by the variable argument :attr:`size`.
 Args:
     size (int...): a sequence of integers defining the shape of the output tensor.
         Can be a variable number of arguments or a collection like a list or tuple.
-
-Keyword args:
     {out}
     {dtype}
     {layout}
@@ -5223,6 +5219,7 @@ Example::
 
 """.format(**factory_common_args))
 
+# TODO: see https://github.com/pytorch/pytorch/issues/43667
 add_docstr(torch.ones_like,
            r"""
 ones_like(input, *, dtype=None, layout=None, device=None, requires_grad=False, memory_format=torch.preserve_format) -> Tensor
@@ -5238,8 +5235,6 @@ Returns a tensor filled with the scalar value `1`, with the same size as
 
 Args:
     {input}
-
-Keyword args:
     {dtype}
     {layout}
     {device}
