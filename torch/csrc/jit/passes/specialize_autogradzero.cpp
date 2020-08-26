@@ -19,8 +19,8 @@ struct AutogradZeroSpecializer {
       return;
     }
     if (getProfilingMode()) {
-      if (auto vif = guardSpecializations()) {
-        specializeAutogradOps(vif->blocks()[0]);
+      if (auto versioning_if = guardSpecializations()) {
+        specializeAutogradOps(versioning_if->blocks()[0]);
         GRAPH_DUMP("After versioning graph", graph_);
       }
     } else {
@@ -45,11 +45,14 @@ struct AutogradZeroSpecializer {
         });
   }
 
-  void replaceBlockInputsWithGraph(Block* b) {
+  void replaceBlockInputsWithGraphInputs(Block* b) {
     TORCH_INTERNAL_ASSERT(graph_->inputs().size() == b->inputs().size());
-    for (int i = graph_->inputs().size() - 1; i >= 0; i--) {
-      b->inputs()[i]->replaceAllUsesWith(graph_->inputs()[i]);
-      b->eraseInput(i);
+    size_t num_inputs = graph_->inputs().size();
+    for (size_t i = 0; i < num_inputs; ++i) {
+      b->inputs().at(i)->replaceAllUsesWith(graph_->inputs().at(i));
+    }
+    for (size_t i = 0; i < num_inputs; ++i) {
+      b->eraseInput(num_inputs - (1 + i));
     }
   }
 
@@ -87,16 +90,16 @@ struct AutogradZeroSpecializer {
   }
 
   Node* guardSpecializations() {
-    auto vif = graph_->create(prim::If, {}, graph_->outputs().size());
+    auto versioning_if = graph_->create(prim::If, {}, graph_->outputs().size());
     auto value_map = [](Value* v) { return v; };
-    auto true_block = vif->addBlock();
-    auto false_block = vif->addBlock();
+    auto true_block = versioning_if->addBlock();
+    auto false_block = versioning_if->addBlock();
 
     // we will optimize true_block
     true_block->cloneFrom(graph_->block(), value_map);
-    replaceBlockInputsWithGraph(true_block);
+    replaceBlockInputsWithGraphInputs(true_block);
     false_block->cloneFrom(graph_->block(), value_map);
-    replaceBlockInputsWithGraph(false_block);
+    replaceBlockInputsWithGraphInputs(false_block);
 
     WithInsertPoint wip{graph_->block()};
     std::vector<Value*> checks;
@@ -127,7 +130,8 @@ struct AutogradZeroSpecializer {
 
     // unable to specialize any of the inputs
     if (checks.size() == 0) {
-      vif->destroy();
+      GRAPH_DUMP("Unable to add any specialization guards", graph_);
+      versioning_if->destroy();
       // the checks we inserted will be cleaned up
       // by any subsequent DCE pass
       return nullptr;
@@ -138,13 +142,13 @@ struct AutogradZeroSpecializer {
             ->output();
     Value* conjunction = graph_->insert(aten::all, {bool_list});
 
-    vif->addInput(conjunction);
-    graph_->insertNode(vif);
+    versioning_if->addInput(conjunction);
+    graph_->insertNode(versioning_if);
 
     auto ret = graph_->return_node();
     for (size_t i = 0; i < ret->inputs().size(); i++) {
       auto ogo = ret->input(i);
-      auto ngo = vif->output(i);
+      auto ngo = versioning_if->output(i);
       ngo->copyMetadata(ogo);
       ret->replaceInput(i, ngo);
     }
@@ -158,14 +162,15 @@ struct AutogradZeroSpecializer {
     // original graph
     //
     // Remove the dead original graph
-    for (auto it = graph_->block()->nodes().reverse().begin(); *it != vif;) {
+    for (auto it = graph_->block()->nodes().reverse().begin();
+         *it != versioning_if;) {
       Node* n = *it;
       it++;
       n->destroy();
     }
 
     GRAPH_DUMP("After guardSpecializations", graph_);
-    return vif;
+    return versioning_if;
   }
 
   void specializeAutogradOps(Block* block) {
