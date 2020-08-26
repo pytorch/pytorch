@@ -1386,6 +1386,8 @@ Tensor& nuclear_norm_out(Tensor& result, const Tensor& self, IntArrayRef dim, bo
   return result;
 }
 
+// Creates a vector of length ndim with values equal to its indices
+// (e.g. [0, 1, 2, ..., ndim-1])
 static std::vector<int64_t> make_dim_list(int64_t ndim) {
   std::vector<int64_t> dim_list(ndim);
   for (int64_t ind = 0; ind < ndim; ind++) {
@@ -1394,10 +1396,10 @@ static std::vector<int64_t> make_dim_list(int64_t ndim) {
   return dim_list;
 }
 
-static void check_str_ord_valid(std::string str_ord, optional<IntArrayRef> opt_dim, int64_t ndim, optional<ScalarType> opt_dtype) {
+// Checks for valid arguments to linalg_norm when type(ord) == str
+static void check_str_ord_valid(const std::string& str_ord, optional<IntArrayRef> opt_dim, int64_t ndim, optional<ScalarType> opt_dtype) {
   TORCH_CHECK((str_ord == "nuc") || (str_ord == "fro"), "Invalid norm order: ", str_ord);
-  TORCH_CHECK(!opt_dtype.has_value(), "dtype argument is currently not supported in frobenius norm, ",
-    "but will be in the future");
+  TORCH_CHECK(!opt_dtype.has_value(), "ord=\'", str_ord, "\' does not yet support the dtype argument");
   bool dims_valid = (ndim == 2 && !opt_dim.has_value()) || (opt_dim.has_value() && opt_dim.value().size() == 2);
   TORCH_CHECK(dims_valid, "order \"", str_ord,
     "\" can only be used if either len(dim) == 2 or (self.dim() == 2 and dim is None)");
@@ -1439,26 +1441,21 @@ static Tensor _linalg_norm_matrix(const Tensor &self, optional<Scalar> opt_ord,
               "matrix norm only supports CPU AND CUDA device type, got: ", self.device().type());
   TORCH_CHECK(self.layout() == Layout::Strided,
               "matrix norm only supports strided layout, got: ", self.layout());
-  if ((dim.size() == 0) && (self.dim() == 2)) {
-    dim = {0, 1};
-  }
-  TORCH_CHECK(dim.size() == 2, "_norm_matrix: 'dim' must either specify 2 dimensions, or if ",
-    "'self' is 2-D 'dim' can specify 0 dimensions for a full reduction. Got 'dim' specifying ",
-    dim.size(), " dims and 'self' is ", self.dim(), "-D");
-  ScalarType scalarType = opt_dtype.has_value() ? opt_dtype.value() : self.scalar_type();
-  TORCH_CHECK(
-      at::isFloatingType(scalarType) || at::isComplexType(scalarType),
-      "Can only calculate the mean of floating types. Got ",
-      toString(scalarType),
-      " instead.");
 
+  TORCH_CHECK(dim.size() == 2, "_linalg_norm_matrix: 'dim' must either specify 2 dimensions. ",
+    "Got 'dim' specifying ", dim.size(), " dims");
   auto dim_ = dim.vec();
   maybe_wrap_dims(dim_, self.dim());
   TORCH_CHECK(dim_[0] != dim_[1],
     "Expected dims to be different, got (", dim[0], ", ", dim[1], ") instead");
 
-  Tensor self_;
+  ScalarType scalarType = opt_dtype.has_value() ? opt_dtype.value() : self.scalar_type();
+  TORCH_CHECK(
+      at::isFloatingType(scalarType) || at::isComplexType(scalarType),
+      "Can only calculate the mean of floating and complex types. Got ",
+      toString(scalarType), " instead.");
 
+  Tensor self_;
   if (opt_dtype.has_value()) {
     self_ = self.to(scalarType);
   } else {
@@ -1588,13 +1585,15 @@ static Tensor& linalg_norm_out_impl(Tensor& result, const Tensor& self, optional
 
 // Numerical or None norms
 Tensor linalg_norm(const Tensor& self, optional<Scalar> opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
-  Tensor result = at::empty({0}, opt_dtype.has_value() ? opt_dtype.value() : self.scalar_type()).to(self.device());
+  auto options = TensorOptions().dtype(opt_dtype.has_value() ? opt_dtype.value() : self.scalar_type()).device(self.device());
+  Tensor result = at::empty({0}, options);
   return at::native::linalg_norm_out(result, self, opt_ord, opt_dim, keepdim, opt_dtype);
 }
 
 // Frobenius and nuclear norms
 Tensor linalg_norm(const Tensor& self, std::string ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
-  Tensor result = at::empty({0}, opt_dtype.has_value() ? opt_dtype.value() : self.scalar_type()).to(self.device());
+  auto options = TensorOptions().dtype(opt_dtype.has_value() ? opt_dtype.value() : self.scalar_type()).device(self.device());
+  Tensor result = at::empty({0}, options);
   return at::native::linalg_norm_out(result, self, ord, opt_dim, keepdim, opt_dtype);
 }
 

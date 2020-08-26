@@ -110,7 +110,7 @@ class TestLinalg(TestCase):
         #       and  add 'nuc' and 'fro' to ord_matrix above
         for ord in ['nuc', 'fro']:
             input = torch.randn(10, 10, device=device)
-            with self.assertRaisesRegex(RuntimeError, r'dtype argument is currently not supported'):
+            with self.assertRaisesRegex(RuntimeError, f"ord=\'{ord}\' does not yet support the dtype argument"):
                 torch.linalg.norm(input, ord, dtype=torch.float)
 
     # This test compares torch.linalg.norm and numpy.linalg.norm to ensure that

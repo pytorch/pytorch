@@ -15,7 +15,7 @@ Alias of :func:`torch.det`.
 """)
 
 norm = _add_docstr(_linalg.linalg_norm, r"""
-linalg.norm(input, ord=None, dim=None, keepdim=False, out=None, dtype=None) -> Tensor
+linalg.norm(input, ord=None, dim=None, keepdim=False, *, out=None, dtype=None) -> Tensor
 
 Returns the matrix norm or vector norm of a given tensor.
 
@@ -60,14 +60,16 @@ Args:
     keepdim (bool, optional): If set to True, the reduced dimensions are retained
         in the result as dimensions with size one. Default: ``False``
 
+Keyword args:
+
     out (Tensor, optional): The output tensor. Ignored if ``None``. Default: ``None``
 
     dtype (:class:`torch.dtype`, optional): If specified, the input tensor is cast to
         :attr:`dtype` before performing the operation, and the returned tensor's type
         will be :attr:`dtype`. If this argument is used in conjunction with the
-        :attr:`out` argument, the output tensor's type must match this argument;
-        otherwise, a RuntimeError will be raised. This argument is not currently
-        supported for :attr:`ord='nuc'` or :attr:`ord='fro'`. Default: ``None``
+        :attr:`out` argument, the output tensor's type must match this argument or a
+        RuntimeError will be raised. This argument is not currently supported for
+        :attr:`ord='nuc'` or :attr:`ord='fro'`. Default: ``None``
 
 Examples::
 
