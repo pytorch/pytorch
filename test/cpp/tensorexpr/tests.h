@@ -128,6 +128,9 @@ namespace jit {
   _(ConstantFoldMinMax)                     \
   _(ConstantFoldIntrinsics)                 \
   _(ConstantFoldWithVar)                    \
+  _(ConditionalSelectFoldSimple)            \
+  _(ConditionalSelectFoldTwoLayer)          \
+  _(ConditionalSelectFoldWithVar)           \
   _(UnFoldableExpr)                         \
   _(HashSimple)                             \
   _(HashEquivalence)                        \
@@ -225,12 +228,20 @@ namespace jit {
   _(UnrollEmpty)                            \
   _(NoUnroll)                               \
   _(UnrollWithLet)                          \
+  _(NormalizeStartPositive)                 \
+  _(NormalizeStartNegative)                 \
+  _(NormalizeStartZero)                     \
+  _(NormalizeStartVariable)                 \
+  _(NormalizeOnNestedOuterLoop)             \
+  _(NormalizeOnNestedInnerLoop)             \
+  _(NormalizeAndSplitWithTail)              \
   _(Kernel_1)                               \
   _(Kernel_2)                               \
   _(Kernel_3)                               \
   _(Kernel_4)                               \
   _(FuserPass_1)                            \
   _(FuserPass_2)                            \
+  _(FuserPass_3)                            \
   _(TrainBasic)
 
 #define TH_FORALL_TENSOREXPR_TESTS_LLVM(_) \
