@@ -2756,7 +2756,8 @@ Tensor _cudnn_ctc_loss_backward(const Tensor& grad_out, const Tensor& loss, cons
 }
 
 Tensor mkldnn_convolution_forward(const Tensor& self_fw_grad, const Tensor& weight_fw_grad, const Tensor& bias_fw_grad,
-        const Tensor& self, const Tensor& weight, IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int groups) {
+        const Tensor& self, const Tensor& weight, IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int groups,
+        const Tensor& result) {
   Tensor out_fw_grad;
 
   if (self_fw_grad.defined()) {
@@ -2770,15 +2771,28 @@ Tensor mkldnn_convolution_forward(const Tensor& self_fw_grad, const Tensor& weig
     } else {
       out_fw_grad = val;
     }
-  } else {
-    TORCH_CHECK(!bias_fw_grad.defined(), "Forward grad formula for conv only support weight and bias having both gradients or both no gradients");
+  } else if (bias_fw_grad.defined()) {
+    // Used to make the broadcasting work when working with channel-only values
+    auto view_size = result.sizes().vec();
+    for (auto dim = 0; dim < view_size.size(); ++dim) {
+      // Don't change the channel size
+      if (dim != 1) {
+        view_size[dim] = 1;
+      }
+    }
+
+    if (out_fw_grad.defined()) {
+      out_fw_grad = out_fw_grad + bias_fw_grad.view(view_size);
+    } else {
+      out_fw_grad = bias_fw_grad.view(view_size).expand_as(result);
+    }
   }
 
   return out_fw_grad;
 }
 
 Tensor thnn_conv2d_forward_grad(const Tensor& self_fw_grad, const Tensor& weight_fw_grad, IntArrayRef kernel_size, const Tensor& bias_fw_grad,
-        const Tensor& self, const Tensor& weight, IntArrayRef stride, IntArrayRef padding) {
+        const Tensor& self, const Tensor& weight, IntArrayRef stride, IntArrayRef padding, const Tensor& result) {
   Tensor out_fw_grad;
 
   if (self_fw_grad.defined()) {
@@ -2792,15 +2806,28 @@ Tensor thnn_conv2d_forward_grad(const Tensor& self_fw_grad, const Tensor& weight
     } else {
       out_fw_grad = val;
     }
-  } else {
-    TORCH_CHECK(!bias_fw_grad.defined(), "Forward grad formula for conv only support weight and bias having both gradients or both no gradients");
+  } else if (bias_fw_grad.defined()) {
+    // Used to make the broadcasting work when working with channel-only values
+    auto view_size = result.sizes().vec();
+    for (auto dim = 0; dim < view_size.size(); ++dim) {
+      // Don't change the channel size
+      if (dim != 1) {
+        view_size[dim] = 1;
+      }
+    }
+
+    if (out_fw_grad.defined()) {
+      out_fw_grad = out_fw_grad + bias_fw_grad.view(view_size);
+    } else {
+      out_fw_grad = bias_fw_grad.view(view_size).expand_as(result);
+    }
   }
 
   return out_fw_grad;
 }
 
 Tensor slow_conv_dilated2d_forward_grad(const Tensor& self_fw_grad, const Tensor& weight_fw_grad, IntArrayRef kernel_size, const Tensor& bias_fw_grad,
-        const Tensor& self, const Tensor& weight, IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation) {
+        const Tensor& self, const Tensor& weight, IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, const Tensor& result) {
   Tensor out_fw_grad;
 
   if (self_fw_grad.defined()) {
@@ -2814,8 +2841,21 @@ Tensor slow_conv_dilated2d_forward_grad(const Tensor& self_fw_grad, const Tensor
     } else {
       out_fw_grad = val;
     }
-  } else {
-    TORCH_CHECK(!bias_fw_grad.defined(), "Forward grad formula for conv only support weight and bias having both gradients or both no gradients");
+  } else if (bias_fw_grad.defined()) {
+    // Used to make the broadcasting work when working with channel-only values
+    auto view_size = result.sizes().vec();
+    for (auto dim = 0; dim < view_size.size(); ++dim) {
+      // Don't change the channel size
+      if (dim != 1) {
+        view_size[dim] = 1;
+      }
+    }
+
+    if (out_fw_grad.defined()) {
+      out_fw_grad = out_fw_grad + bias_fw_grad.view(view_size);
+    } else {
+      out_fw_grad = bias_fw_grad.view(view_size).expand_as(result);
+    }
   }
 
   return out_fw_grad;
@@ -2840,7 +2880,12 @@ Tensor native_batch_norm_forward(const Tensor& input_fw_grad, const Tensor& inpu
   }
 
   if (weight_fw_grad.defined()) {
-    auto val = weight_fw_grad.view(view_size) * (input - result1.view(view_size)) / result2.view(view_size);
+    Tensor val;
+    if (training) {
+      val = weight_fw_grad.view(view_size) * (input - result1.view(view_size)) * result2.view(view_size);
+    } else {
+      val = weight_fw_grad.view(view_size) * (input - toLegacyTensor(running_mean).view(view_size)) / (toLegacyTensor(running_var).view(view_size) + eps).sqrt();
+    }
     if (out_fw_grad.defined()) {
       out_fw_grad = out_fw_grad + val;
     } else {
@@ -2860,18 +2905,25 @@ Tensor native_batch_norm_forward(const Tensor& input_fw_grad, const Tensor& inpu
 }
 
 Tensor native_layer_norm_forward(const Tensor& input_fw_grad, const Tensor& input, const c10::optional<at::Tensor> weight,
-        const Tensor& result1, const Tensor& result2, int64_t M, int64_t N, const Tensor& weight_fw_grad, const Tensor& bias_fw_grad) {
+        const Tensor& result1, const Tensor& result2, int64_t M, int64_t N, const Tensor& weight_fw_grad, const Tensor& bias_fw_grad,
+        const Tensor& result) {
   Tensor out_fw_grad;
 
   // Used to make the broadcasting work when working with channel-only values
   auto param_size = input.sizes().vec();
-  auto res_size = input.sizes().vec();
+  auto res_size = result.sizes().vec();
 
+  size_t curr_prod = 1;
   for (auto dim = 0; dim < param_size.size(); ++dim) {
-    if (dim == param_size.size() - 1) {
-      res_size[dim] = 1;
-    } else {
+    // early exit for empty Tensors that have at least one size of 0
+    if (param_size[dim] == 0) {
+      return at::zeros_like(result);
+    }
+    curr_prod *= param_size[dim];
+    if (curr_prod <= M) {
       param_size[dim] = 1;
+    } else {
+      res_size[dim] = 1;
     }
   }
 
@@ -2880,7 +2932,7 @@ Tensor native_layer_norm_forward(const Tensor& input_fw_grad, const Tensor& inpu
   }
 
   if (weight_fw_grad.defined()) {
-    auto val = weight_fw_grad.view(param_size) * (input - result1.view(res_size)) / result2.view(res_size);
+    auto val = weight_fw_grad.view(param_size) * (input - result1.view(res_size)) * result2.view(res_size);
     if (out_fw_grad.defined()) {
       out_fw_grad = out_fw_grad + val;
     } else {
@@ -2900,10 +2952,16 @@ Tensor native_layer_norm_forward(const Tensor& input_fw_grad, const Tensor& inpu
 }
 
 Tensor max_pool2d_with_indices_forward(const Tensor& self_fw_grad, const Tensor& indices) {
-  // Do the same indexing as the one done during the forward
-  auto out_size = indices.sizes();
-  auto linearized_fw_grad = self_fw_grad.view({out_size[0], out_size[1], -1});
-  auto linearized_ind = indices.view({out_size[0], out_size[1], -1});
+  auto out_size = indices.sizes().vec();
+  auto lin_size = out_size;
+  if (out_size.size() == 4) {
+    // batch mode
+    lin_size = {out_size[0], out_size[1], -1};
+  } else {
+    lin_size = {out_size[0], -1};
+  }
+  auto linearized_fw_grad = self_fw_grad.view(lin_size);
+  auto linearized_ind = indices.view(lin_size);
 
   auto res = linearized_fw_grad.gather(-1, linearized_ind);
 
@@ -2996,7 +3054,7 @@ Tensor cat_forward(TensorList tensors, int64_t dim) {
   Tensor out_fw_grad;
 
   auto any_defined = false;
-  for (auto& t: tensors) {
+  for (const auto& t: tensors) {
     any_defined |= isFwGradDefined(t);
   }
 
