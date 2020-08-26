@@ -1711,6 +1711,37 @@ class ProcessGroupNCCLTest(TestCase):
                 with self.assertRaisesRegex(RuntimeError, "Cannot use " + str(op) + " with NCCL"):
                     reduce(tensors, self.rank, rt, op)
 
+    def test_reduce_ops_stream_overwrite(self):
+        store = c10d.FileStore(self.file.name, self.world_size)
+        pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+
+        def reduce(xs, rootRank, rootTensor, op=None):
+            opts = c10d.NCCLReduceOptions()
+            opts.rootRank = rootRank
+            opts.rootTensor = rootTensor
+            opts.cudaStreams = [torch.cuda.Stream() for i in range(self.world_size)]
+            if op:
+                opts.reduceOp = op
+            work = pg.reduce(xs, opts)
+            work.wait()
+
+        # for every root tensor
+        for rt in range(self.num_gpus):
+            tensors = []
+            for i in range(self.num_gpus):
+                tensors.append(torch.tensor([i + 1]).cuda(i))
+
+            reduce(tensors, self.rank, rt)
+
+            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+            self.assertEqualIgnoreType(
+                torch.tensor([float(self.num_gpus * (self.num_gpus + 1) / 2)]),
+                tensors[rt])
+
+            for op in (c10d.ReduceOp.BAND, c10d.ReduceOp.BOR, c10d.ReduceOp.BXOR):
+                with self.assertRaisesRegex(RuntimeError, "Cannot use " + str(op) + " with NCCL"):
+                    reduce(tensors, self.rank, rt, op)
+
     def test_allgather_ops(self):
         store = c10d.FileStore(self.file.name, self.world_size)
         pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
