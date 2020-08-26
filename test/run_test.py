@@ -192,6 +192,7 @@ or `conda install ninja`. Alternatively, disable said tests with
 `run_test.py --exclude test_cpp_extensions_aot_ninja test_cpp_extensions_jit`.
 """
 
+PYTORCH_COLLECT_COVERAGE = bool(os.environ.get("PYTORCH_COLLECT_COVERAGE"))
 
 def print_to_stderr(message):
     print(message, file=sys.stderr)
@@ -199,7 +200,10 @@ def print_to_stderr(message):
 
 def get_executable_command(options, allow_pytest):
     if options.coverage:
-        executable = ['coverage', 'run', '--source=torch']
+        executable = ['coverage', 'run']
+        if PYTORCH_COLLECT_COVERAGE:
+            executable.append('--append')
+        executable.append('--source=torch')
     else:
         executable = [sys.executable]
     if options.pytest:
@@ -380,7 +384,8 @@ def parse_args():
              'TestTorch with pytest in verbose and coverage mode: '
              'python run_test.py -vci torch -pt')
     parser.add_argument(
-        '-c', '--coverage', action='store_true', help='enable coverage')
+        '-c', '--coverage', action='store_true', help='enable coverage',
+        default=PYTORCH_COLLECT_COVERAGE)
     parser.add_argument(
         '-i',
         '--include',
@@ -681,7 +686,7 @@ def main():
     if options.verbose:
         print_to_stderr('Selected tests: {}'.format(', '.join(selected_tests)))
 
-    if options.coverage:
+    if options.coverage and not PYTORCH_COLLECT_COVERAGE:
         shell(['coverage', 'erase'])
 
     if options.jit:
