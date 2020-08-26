@@ -11,12 +11,13 @@
 #include <caffe2/perfkernels/embedding_lookup_idx.h>
 #endif
 
+#include <algorithm>
 #include <cstring>
 #include <iostream>
 #include <memory>
 #include <sstream>
+#include <tuple>
 #include <vector>
-#include <algorithm>
 
 
 namespace {
@@ -27,6 +28,9 @@ namespace {
 
 namespace at {
 namespace native {
+
+template<typename scalar_t>
+scalar_t dot_impl(int64_t n, scalar_t *x, int64_t incx, scalar_t *y, int64_t incy);
 
 static void make_offset2bag(const Tensor &offsets, const Tensor &indices, Tensor& offset2bag) {
   offset2bag.index_add_(
@@ -353,7 +357,6 @@ static Tensor apply_bag_size_backward(const Tensor &offsets,
   return output;
 }
 
-
 template <typename scalar_t>
 std::tuple<Tensor, Tensor, Tensor, Tensor> embedding_bag_cpu_max(
     const Tensor& weight,
@@ -361,63 +364,66 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> embedding_bag_cpu_max(
     const Tensor& offset2bag,
     const Tensor& output,
     const Tensor& bag_size,
-    const Tensor& offsets) {
+    const Tensor& offsets,
+    bool include_last_offset) {
+  int64_t numIndices = indices.numel();
+  int64_t numBags = offsets.size(0);
+  int64_t featureSize = weight.size(1);
+  if (include_last_offset) {
+    // Check https://github.com/pytorch/pytorch/issues/29019
+    // We plan to add one more element in offsets, which is equal to the size of
+    // indices. Currently for cuda devices, we still use the legacy
+    // implementation even this flag is enabled.
+    TORCH_CHECK(
+        numBags >= 1, "include_last_offset: numBags should be at least 1");
+    numBags -= 1;
+  }
+  auto max_indices =
+      at::zeros({numBags, featureSize}, indices.options());
 
-    auto max_indices = at::zeros({offsets.size(0), weight.size(1)}, indices.options());
+  auto* indices_data = indices.data_ptr<int64_t>();
+  auto* offset2bag_data = offset2bag.data_ptr<int64_t>();
 
-    int64_t numel = indices.numel();
-    int64_t dims = weight.size(1);
-    auto* indices_data = indices.data_ptr<int64_t>();
-    auto* offset2bag_data = offset2bag.data_ptr<int64_t>();
+  auto* max_indices_data = max_indices.data_ptr<int64_t>();
+  auto max_indices_stride = max_indices.stride(0);
 
-    auto* max_indices_data = max_indices.data_ptr<int64_t>();
-    auto max_indices_stride = max_indices.stride(0);
+  auto* weight_data = weight.data_ptr<scalar_t>();
+  auto* output_data = output.data_ptr<scalar_t>();
+  auto weight_stride0 = weight.stride(0);
+  auto weight_stride1 = weight.stride(1);
+  auto output_stride = output.stride(0);
 
-    auto* weight_data = weight.data_ptr<scalar_t>();
-    auto* output_data = output.data_ptr<scalar_t>();
-    auto weight_stride0 = weight.stride(0);
-    auto weight_stride1 = weight.stride(1);
-    auto output_stride = output.stride(0);
+  for (int i = 0; i < numIndices; i++) {
+    auto bag = offset2bag_data[i];
+    auto word_idx = indices_data[i];
 
-    for (int i = 0; i < numel; i++) {
-      auto bag = offset2bag_data[i];
-      auto word_idx = indices_data[i];
+    for (int dim = 0; dim < featureSize; dim++) {
+      auto& current_item = output_data[output_stride * bag + dim];
+      auto weight_item =
+          weight_data[weight_stride0 * word_idx + dim * weight_stride1];
+      bool is_first_for_bag = (i == 0) || offset2bag_data[i - 1] != bag;
 
-      for (int dim = 0; dim < dims; dim++) {
-        auto& current_item = output_data[output_stride * bag + dim];
-        auto weight_item = weight_data[weight_stride0 * word_idx + dim * weight_stride1];
-        bool is_first_for_bag = (i == 0) || offset2bag_data[i - 1] != bag;
-
-        if (is_first_for_bag || weight_item > current_item) {
-          current_item = weight_item;
-          max_indices_data[max_indices_stride * bag + dim] = word_idx;
-        }
+      if (is_first_for_bag || weight_item > current_item) {
+        current_item = weight_item;
+        max_indices_data[max_indices_stride * bag + dim] = word_idx;
       }
     }
+  }
 
-    return std::tuple<Tensor, Tensor, Tensor, Tensor>(output, offset2bag, bag_size, max_indices);
+  return std::tuple<Tensor, Tensor, Tensor, Tensor>(
+      output, offset2bag, bag_size, max_indices);
 }
-
-// embedding_bag wrapper to enforce contiguity in tensors other than `weight`.
-// This is created to save extra `.contiguous()` call in backward.
-// See NOTE [ embedding_bag Native Functions ] in native_functions.yaml for details
-std::tuple<Tensor, Tensor, Tensor, Tensor>
-embedding_bag(const Tensor &weight, const Tensor &indices,
-              const Tensor &offsets, const bool scale_grad_by_freq,
-              const int64_t mode, bool sparse,
-              const Tensor &per_sample_weights,
-              bool include_last_offset) {
-  return at::_embedding_bag(weight, indices.contiguous(), offsets.contiguous(),
-                            scale_grad_by_freq, mode, sparse, per_sample_weights, include_last_offset);
-  };
 
 // Assumes all input tensors except for `weight` are contiguous.
 // See NOTE [ embedding_bag Native Functions ] in native_functions.yaml for details
-std::tuple<Tensor, Tensor, Tensor, Tensor>
-_embedding_bag_cpu(const Tensor &weight, const Tensor &indices,
-                  const Tensor &offsets, const bool scale_grad_by_freq,
-                  const int64_t mode, bool sparse,
-                  const Tensor &per_sample_weights, bool include_last_offset) {
+std::tuple<Tensor, Tensor, Tensor, Tensor> _embedding_bag_cpu_impl(
+    const Tensor& weight,
+    const Tensor& indices,
+    const Tensor& offsets,
+    const int64_t mode,
+    const Tensor& per_sample_weights,
+    bool include_last_offset,
+    bool requires_grad) {
   auto indices_arg = TensorArg(indices, "indices", 1);
   checkScalarType("embedding_bag", indices_arg, kLong);
   auto offsets_arg = TensorArg(offsets, "offsets", 1);
@@ -443,7 +449,15 @@ _embedding_bag_cpu(const Tensor &weight, const Tensor &indices,
     TORCH_CHECK(per_sample_weights.numel() == indices.numel());
   }
 
-  auto bag_size = make_bag_size(offsets, indices, mode, weight.requires_grad());
+
+  at::Tensor bag_size;
+  if (include_last_offset) {
+    // TODO: make_bag_size can be optimized to do less temporary tensors (with
+    // include_last_offset).
+    bag_size = make_bag_size(offsets.slice(0, 0, offsets.size(0) - 1, 1), indices, mode, requires_grad);
+  } else {
+    bag_size = make_bag_size(offsets, indices, mode, requires_grad);
+  }
 
   if (include_last_offset) {
     TORCH_CHECK(
@@ -506,10 +520,66 @@ _embedding_bag_cpu(const Tensor &weight, const Tensor &indices,
     return AT_DISPATCH_FLOATING_TYPES_AND_HALF(
       weight.scalar_type(), "embedding_bag_cpu_max", [&]() {
         return embedding_bag_cpu_max<scalar_t>(
-            weight, indices, offset2bag, output, bag_size, offsets);
+            weight, indices, offset2bag, output, bag_size, offsets, include_last_offset);
       }
     );
   }
+}
+
+// embedding_bag wrapper to enforce contiguity in tensors other than `weight`.
+// This is created to save extra `.contiguous()` call in backward.
+// See NOTE [ embedding_bag Native Functions ] in native_functions.yaml for details
+std::tuple<Tensor, Tensor, Tensor, Tensor>
+embedding_bag(const Tensor &weight, const Tensor &indices,
+              const Tensor &offsets, const bool scale_grad_by_freq,
+              const int64_t mode, bool sparse,
+              const Tensor &per_sample_weights,
+              bool include_last_offset) {
+  if (!weight.requires_grad()) {
+    return at::_embedding_bag_forward_only(weight, indices.contiguous(), offsets.contiguous(),
+                              scale_grad_by_freq, mode, sparse, per_sample_weights, include_last_offset);
+  }
+
+  return at::_embedding_bag(weight, indices.contiguous(), offsets.contiguous(),
+                            scale_grad_by_freq, mode, sparse, per_sample_weights, include_last_offset);
+};
+
+// Assumes all input tensors except for `weight` are contiguous.
+// See NOTE [ embedding_bag Native Functions ] in native_functions.yaml for details
+std::tuple<Tensor, Tensor, Tensor, Tensor>
+_embedding_bag_forward_only_cpu(const Tensor &weight, const Tensor &indices,
+                  const Tensor &offsets, const bool scale_grad_by_freq,
+                  const int64_t mode, bool sparse,
+                  const Tensor &per_sample_weights, bool include_last_offset) {
+  std::ignore = scale_grad_by_freq;
+  std::ignore = sparse;
+  return _embedding_bag_cpu_impl(
+      weight,
+      indices,
+      offsets,
+      mode,
+      per_sample_weights,
+      include_last_offset,
+      /*requires_grad=*/false);
+}
+
+// Assumes all input tensors except for `weight` are contiguous.
+// See NOTE [ embedding_bag Native Functions ] in native_functions.yaml for details
+std::tuple<Tensor, Tensor, Tensor, Tensor>
+_embedding_bag_cpu(const Tensor &weight, const Tensor &indices,
+                  const Tensor &offsets, const bool scale_grad_by_freq,
+                  const int64_t mode, bool sparse,
+                  const Tensor &per_sample_weights, bool include_last_offset) {
+  std::ignore = scale_grad_by_freq;
+  std::ignore = sparse;
+  return _embedding_bag_cpu_impl(
+      weight,
+      indices,
+      offsets,
+      mode,
+      per_sample_weights,
+      include_last_offset,
+      /*requires_grad=*/true);
 }
 
 // Assumes all input tensors are contiguous.
@@ -784,7 +854,7 @@ Tensor _embedding_bag_per_sample_weights_backward_cpu_template(
       auto bag_idx = offset2bag_data[sample_idx];
       auto embedding_idx = indices_data[sample_idx];
 
-      output_data[sample_idx] = THBlas_dot<scalar_t>(
+      output_data[sample_idx] = dot_impl<scalar_t>(
           embedding_features,
           grad_data + grad_stride0 * bag_idx, grad_stride1,
           weight_data + weight_stride0 * embedding_idx, weight_stride1);

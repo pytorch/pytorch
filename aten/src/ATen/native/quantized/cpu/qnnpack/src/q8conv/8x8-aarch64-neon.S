@@ -44,7 +44,6 @@ BEGIN_FUNCTION pytorch_q8conv_ukernel_8x8__aarch64_neon
     # Load output channel index: x9
     # Note since this is an offset into a byte pointer
     # We do not need to multiply with size of pointer type
-    # Load pointer to per channel zero points array
     LDP x9, x8, [sp]
 
     STP d15, d14, [sp, -16]
@@ -55,13 +54,11 @@ BEGIN_FUNCTION pytorch_q8conv_ukernel_8x8__aarch64_neon
     # Load bias0123, bias4567
     LD1 {v8.4s, v9.4s}, [x5], 32
 
-    LDR x10, [x8]
-    # To go to a_zero_point
-    ADD x8, x8, 8
+    # Load pointer to per channel zero points array
+    # And go to a_zero_point with post-index
+    LDR x10, [x8], 8
     # Add offset to the base pointer
     ADD x10, x10, x9
-    # Mul by 4 to get byte offset for requant scale.
-    LSL x9, x9, 2
 
     # v10 := vacc1x0123
     MOV v10.16b, v8.16b
@@ -106,8 +103,9 @@ BEGIN_FUNCTION pytorch_q8conv_ukernel_8x8__aarch64_neon
     # v23 := vacc7x4567
     MOV v23.16b, v9.16b
 
+    # Fold mul by 4 to get byte offset for requant scale.
     # Add offset to the base pointer
-    ADD x10, x10, x9
+    ADD x10, x10, x9, lsl#2
     // Load requantization_scale
     // - v26 = requantization_scale channels 0-3
     // - v31 = requantization_scale channels 4-7

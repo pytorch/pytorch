@@ -4,7 +4,6 @@
 #include <torch/csrc/jit/ir/ir.h>
 
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
-#include <torch/csrc/jit/codegen/cuda/kernel.h>
 
 /*
  * This file handles Parsing PyTorch jit ir;
@@ -26,14 +25,21 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
+constexpr int kPwThreadX = 128;
+constexpr int kFcdReductionThreadX = 128;
+constexpr int kNonFcdReductionThreadX = 32;
+constexpr int kNonFcdReductionThreadY = 32;
+
+TORCH_CUDA_API bool hasReductionNode(const Block* block);
+
+TORCH_CUDA_API bool isReductionNode(const Node* node);
+
 // returns whether or not a parsing function exists for the given node type.
-TORCH_CUDA_API bool isNodeParsible(const Node* const node);
+TORCH_CUDA_API bool isNodeParsible(const Node* node);
 
 // lowers PyTorch jit graph to `Fusion`.
-TORCH_CUDA_API void parseJitIR(
-    std::shared_ptr<Graph>& graph,
-    Fusion& fusion,
-    CudaKernel* cuda_kernel);
+TORCH_CUDA_API std::unique_ptr<Fusion> parseJitIR(
+    std::shared_ptr<Graph>& graph);
 
 } // namespace cuda
 } // namespace fuser

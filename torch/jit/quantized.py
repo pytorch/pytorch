@@ -332,7 +332,7 @@ class QuantizedRNNBase(torch.jit.ScriptModule):
     def check_hidden_size(self, hx, expected_hidden_size, msg='Expected hidden size {}, got {}'):
         # type: (Tensor, Tuple[int, int, int], str) -> None
         if hx.size() != expected_hidden_size:
-            raise RuntimeError(msg.format(expected_hidden_size, tuple(hx.size())))
+            raise RuntimeError(msg.format(expected_hidden_size, list(hx.size())))
 
     @torch.jit.script_method
     def check_forward_args(self, input, hidden, batch_sizes):
@@ -490,6 +490,8 @@ class QuantizedGRU(QuantizedRNNBase):
 
 
 def quantize_rnn_cell_modules(module):
+    warnings.warn("quantize_rnn_cell_modules function has been deprecated. "
+                  "Please use torch.quantization.quantize_dynamic API instead.")
     reassign = {}
     for name, mod in module.named_modules():
         if mod is module:
@@ -534,6 +536,8 @@ def quantize_linear_modules(module, dtype=torch.int8):
 
 
 def quantize_rnn_modules(module, dtype=torch.int8):
+    warnings.warn("quantize_rnn_modules function has been deprecated. "
+                  "Please use torch.quantization.quantize_dynamic API instead.")
     reassign = {}
     for name, mod in module.named_modules():
         if mod is module:

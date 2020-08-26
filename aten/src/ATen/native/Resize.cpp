@@ -6,6 +6,22 @@
 
 namespace at { namespace native {
 
+void resize_output(Tensor& output, IntArrayRef shape) {
+  // Tests for resizing of tensors with one more elements
+  if (output.numel() != 0 && !output.sizes().equals(shape)) {
+    TORCH_WARN(
+      "An output with one or more elements was resized since it had ",
+      "shape ", output.sizes(), ", which does not match the required ",
+      "output shape ", shape, ".",
+      "This behavior is deprecated, and in a future PyTorch release outputs ",
+      "will not be resized unless they have zero elements. You can explicitly ",
+      "reuse an out tensor t by resizing it, inplace, to zero elements with ",
+      "t.resize_(0).");
+  }
+
+  output.resize_(shape);
+}
+
 // Call the sparse implementation in SparseTensor.cpp directly.
 // A dynamic dispatch here is NOT necessary, so I didn't put
 // this function in native_functions.yaml
@@ -77,14 +93,6 @@ Tensor& resize_(
     self_->empty_tensor_restride(memory_format);
   }
   return self;
-}
-
-TORCH_LIBRARY_IMPL(aten, CPU, m) {
-  m.impl_UNBOXED("resize_", resize_);
-}
-
-TORCH_LIBRARY_IMPL(aten, CatchAll, m) {
-  m.impl_UNBOXED("resize_as_", resize_as_);
 }
 
 } // namespace native

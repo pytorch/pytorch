@@ -7,6 +7,7 @@
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
 #include <torch/library.h>
+#include <ATen/core/op_registration/hacky_wrapper_for_legacy_signatures.h>
 #include <c10/core/TensorOptions.h>
 
 namespace at {
@@ -15,9 +16,9 @@ namespace {
 
 ${backend_select_method_definitions}
 
-static auto registry = torch::RegisterOperators()
+TORCH_LIBRARY_IMPL(aten, BackendSelect, m) {
   ${backend_select_function_registrations};
-
+}
 
 } // namespace
 } // at

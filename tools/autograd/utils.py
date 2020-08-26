@@ -1,5 +1,6 @@
 import re
 import os
+import yaml
 from .nested_dict import nested_dict
 
 
@@ -73,3 +74,21 @@ def write(dirname, name, template, env):
 
 def is_tensor_method(declaration):
     return 'Tensor' in declaration['method_of']
+
+def is_out_variant(decl):
+    return decl['name'].endswith('_out')
+
+def op_name_without_overload(decl):
+    name = decl['name'] if not is_out_variant(decl) else decl['name'][:-4]
+    return 'aten::{}'.format(name)
+
+def load_op_list_and_strip_overload(op_list, op_list_path):
+    if op_list is None and op_list_path is None:
+        return None
+    if op_list is None:
+        op_list = []
+    if op_list_path is not None:
+        with open(op_list_path, 'r') as f:
+            op_list += yaml.load(f, Loader=YamlLoader)
+    # strip out the overload part
+    return {opname.split('.', 1)[0] for opname in op_list}

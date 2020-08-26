@@ -55,13 +55,17 @@ Tensor quantized_group_norm_impl(
     double output_scale,
     int64_t output_zero_point) {
 
-  const auto input_ndim = qx.dim();
+  const auto& qx_contig = qx.contiguous();
+  const auto& weight_contig = weight.contiguous();
+  const auto& bias_contig = bias.contiguous();
+
+  const auto input_ndim = qx_contig.dim();
   TORCH_CHECK(
       input_ndim >= 3,
       "Expected normalized_shape to be at least 3-dimensional");
   TORCH_CHECK(num_groups > 0, "Expected num_groups to be positive");
 
-  const auto input_shape = qx.sizes();
+  const auto input_shape = qx_contig.sizes();
   TORCH_CHECK(input_shape[1] % num_groups == 0,
       "Expected channels to be divisible by groups");
 
@@ -76,16 +80,12 @@ Tensor quantized_group_norm_impl(
   const int64_t M = batches * num_groups;
   const int64_t N = elements_per_batch / num_groups;
 
-  const auto& qx_contig = qx.is_contiguous() ? qx : qx.contiguous();
-  const auto& weight_contig = weight.is_contiguous() ? weight : weight.contiguous();
-  const auto& bias_contig = bias.is_contiguous() ? bias : bias.contiguous();
-
   Tensor Y = at::_empty_affine_quantized(
-    qx.sizes(),
-    qx.scalar_type(),
+    qx_contig.sizes(),
+    qx_contig.scalar_type(),
     output_scale,
     output_zero_point,
-    qx.suggest_memory_format());
+    qx_contig.suggest_memory_format());
 
   if (M > 0) {
     bool affine_per_channel = true;
@@ -123,33 +123,43 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
   m.impl("layer_norm", [](
     Tensor input,
     std::vector<int64_t> normalized_shape,  // because IntArrayRef doesn't work
-    Tensor weight /* optional */,
-    Tensor bias /* optional */,
+    c10::optional<Tensor> weight,
+    c10::optional<Tensor> bias,
     double eps,
     double output_scale,
     int64_t output_zero_point) {
-      return quantized_layer_norm_impl(input, normalized_shape, weight, bias, eps, output_scale, output_zero_point);
+      return quantized_layer_norm_impl(
+          input, normalized_shape,
+          weight.has_value() ? *weight : Tensor(),
+          bias.has_value() ? *bias : Tensor(),
+          eps, output_scale, output_zero_point);
   });
   m.impl("group_norm", [](
       Tensor qx,
       int64_t num_groups,
-      Tensor weight,
-      Tensor bias,
+      c10::optional<Tensor> weight,
+      c10::optional<Tensor> bias,
       double eps,
       double output_scale,
       int64_t output_zero_point) {
     return quantized_group_norm_impl(
-        qx, num_groups, weight, bias, eps, output_scale, output_zero_point);
+        qx, num_groups,
+        weight.has_value() ? *weight : Tensor(),
+        bias.has_value() ? *bias : Tensor(),
+        eps, output_scale, output_zero_point);
   });
   m.impl("instance_norm", [](
       Tensor qx,
-      Tensor weight,
-      Tensor bias,
+      c10::optional<Tensor> weight,
+      c10::optional<Tensor> bias,
       double eps,
       double output_scale,
       int64_t output_zero_point) {
     return quantized_instance_norm_impl(
-        qx, weight, bias, eps, output_scale, output_zero_point);
+        qx,
+        weight.has_value() ? *weight : Tensor(),
+        bias.has_value() ? *bias : Tensor(),
+        eps, output_scale, output_zero_point);
   });
 }
 

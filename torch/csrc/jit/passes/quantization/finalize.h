@@ -2,6 +2,7 @@
 
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/passes/quantization/quantization_type.h>
 
 namespace torch {
 namespace jit {
@@ -25,7 +26,7 @@ namespace jit {
  */
 TORCH_API void QuantFusion(
     std::shared_ptr<Graph>& graph,
-    bool is_dynamic = false);
+    QuantType quant_type = QuantType::STATIC);
 
 /** \brief Insert prepack and unpack function in graph
  *  We want add pack/unpack functions for quantized weight because later we want
@@ -48,7 +49,7 @@ TORCH_API void InsertPrepackUnpack(Module& module);
 
 TORCH_API script::Module Finalize(
     script::Module& module,
-    bool is_dynamic = false);
+    QuantType quant_type = QuantType::STATIC);
 
 TORCH_API void FoldQuantizedPrepackingOps(Module& module);
 

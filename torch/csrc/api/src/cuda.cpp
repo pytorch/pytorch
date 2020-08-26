@@ -6,6 +6,7 @@
 
 namespace torch {
 namespace cuda {
+
 size_t device_count() {
   return at::detail::getCUDAHooks().getNumGPUs();
 }
@@ -21,5 +22,32 @@ bool is_available() {
 bool cudnn_is_available() {
   return is_available() && at::detail::getCUDAHooks().hasCuDNN();
 }
+
+/// Sets the seed for the current GPU.
+void manual_seed(uint64_t seed) {
+  if (is_available()) {
+    auto index = at::detail::getCUDAHooks().current_device();
+    auto gen = at::detail::getCUDAHooks().getDefaultCUDAGenerator(index);
+    {
+      // See Note [Acquire lock when using random generators]
+      std::lock_guard<std::mutex> lock(gen.mutex());
+      gen.set_current_seed(seed);
+    }
+  }
+}
+
+/// Sets the seed for all available GPUs.
+void manual_seed_all(uint64_t seed) {
+  auto num_gpu = device_count();
+  for (size_t i = 0; i < num_gpu; ++i) {
+    auto gen = at::detail::getCUDAHooks().getDefaultCUDAGenerator(i);
+    {
+      // See Note [Acquire lock when using random generators]
+      std::lock_guard<std::mutex> lock(gen.mutex());
+      gen.set_current_seed(seed);
+    }
+  }
+}
+
 } // namespace cuda
 } // namespace torch

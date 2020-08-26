@@ -25,7 +25,7 @@ ClassTypePtr ConcreteModuleTypeBuilder::createTypeFromThis() const {
     const auto& type = pr.value().type_;
     const auto& isParameter = pr.value().isParam_;
     const auto& isBuffer = pr.value().isBuffer_;
-    cls->addAttribute(name, type, isParameter, false, isBuffer);
+    cls->addAttribute(name, type, isParameter, isBuffer);
   }
 
   for (const auto& pr : constants_) {
@@ -258,13 +258,13 @@ void ConcreteModuleType::dump() const {
   }
   std::cout << "\nAttributes: \n";
   for (const auto& pr : data_.attributes_) {
-    std::cout << "\t" << pr.key() << ": " << pr.value().type_->python_str()
+    std::cout << "\t" << pr.key() << ": " << pr.value().type_->annotation_str()
               << "\n";
   }
   std::cout << "\nSubmodules: \n";
   for (const auto& info : data_.modules_) {
     std::cout << "\t" << info.name_ << ": "
-              << info.meta_->getJitType()->python_str() << "\n";
+              << info.meta_->getJitType()->annotation_str() << "\n";
   }
   std::cout << "\nOverloads: \n";
   for (const auto& pr : data_.overloads_) {
@@ -273,7 +273,7 @@ void ConcreteModuleType::dump() const {
   std::string isPoisoned = data_.isPoisoned_ ? "true" : "false";
   std::cout << "isPoisoned: " << isPoisoned << "\n";
   if (jitType_) {
-    std::cout << "jit type: " << jitType_->python_str() << "\n";
+    std::cout << "jit type: " << jitType_->annotation_str() << "\n";
   }
 }
 

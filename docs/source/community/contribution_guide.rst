@@ -127,7 +127,7 @@ the best entrance point are great places to start.
 Adding Tutorials
 ~~~~~~~~~~~~~~~~
 
-A great deal of the tutorials on `pytorch.org <http://pytorch.org/>`__
+A great deal of the tutorials on `pytorch.org <https://pytorch.org/>`__
 come from the community itself and we welcome additional contributions.
 To learn more about how to contribute a new tutorial you can learn more
 here: `PyTorch.org Tutorial Contribution Guide on
@@ -305,12 +305,12 @@ Python Docs
 ~~~~~~~~~~~
 
 PyTorch documentation is generated from python source using
-`Sphinx <http://www.sphinx-doc.org/en/master/>`__. Generated HTML is
+`Sphinx <https://www.sphinx-doc.org/en/master/>`__. Generated HTML is
 copied to the docs folder in the master branch of
 `pytorch.github.io <https://github.com/pytorch/pytorch.github.io/tree/master/docs>`__,
 and is served via GitHub pages.
 
--  Site: http://pytorch.org/docs
+-  Site: https://pytorch.org/docs
 -  GitHub: https://github.com/pytorch/pytorch/tree/master/docs
 -  Served from:
    `https://github.com/pytorch/pytorch.github.io/tree/master/doc <https://github.com/pytorch/pytorch.github.io/tree/master/docs>`__
@@ -323,7 +323,7 @@ are built on a special server and the resulting files are copied to the
 https://github.com/pytorch/cppdocs repo, and are served from GitHub
 pages.
 
--  Site: http://pytorch.org/cppdocs
+-  Site: https://pytorch.org/cppdocs
 -  GitHub: https://github.com/pytorch/pytorch/tree/master/docs/cpp
 -  Served from: https://github.com/pytorch/cppdocs
 
@@ -337,8 +337,8 @@ Tutorials are built using
 from executable python sources files, or from restructured-text (rst)
 files.
 
--  Site: http://pytorch.org/tutorials
--  GitHub: http://github.com/pytorch/tutorials
+-  Site: https://pytorch.org/tutorials
+-  GitHub: https://github.com/pytorch/tutorials
 
 Tutorials Build Overview
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~

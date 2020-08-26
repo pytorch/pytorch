@@ -169,6 +169,12 @@ class C10_API ValueError : public Error {
   using Error::Error;
 };
 
+// Used in ATen for invalid types.  These turn into
+// TypeError when they cross to Python.
+class C10_API TypeError : public Error {
+  using Error::Error;
+};
+
 // Used in ATen for non finite indices.  These turn into
 // ExitException when they cross to Python.
 class C10_API EnforceFiniteError : public Error {
@@ -367,6 +373,10 @@ inline std::string if_empty_then(std::string x, std::string y) {
 // Like TORCH_CHECK, but raises ValueErrors instead of Errors.
 #define TORCH_CHECK_VALUE(cond, ...) \
   TORCH_CHECK_WITH_MSG(ValueError, cond, "VALUE", __VA_ARGS__)
+
+// Like TORCH_CHECK, but raises TypeErrors instead of Errors.
+#define TORCH_CHECK_TYPE(cond, ...) \
+  TORCH_CHECK_WITH_MSG(TypeError, cond, "TYPE", __VA_ARGS__)
 
 // Report a warning to the user.  Accepts an arbitrary number of extra
 // arguments which are concatenated into the warning message using operator<<

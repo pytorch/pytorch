@@ -11,7 +11,7 @@ from test_pytorch_onnx_onnxruntime import run_model_test
 
 
 def exportTest(self, model, inputs, rtol=1e-2, atol=1e-7, opset_versions=None):
-    opset_versions = opset_versions if opset_versions else [7, 8, 9, 10]
+    opset_versions = opset_versions if opset_versions else [7, 8, 9, 10, 11, 12]
     for opset_version in opset_versions:
         self.opset_version = opset_version
         run_model_test(self, model, False,

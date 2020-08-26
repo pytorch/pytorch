@@ -202,6 +202,44 @@ acos_() -> Tensor
 In-place version of :meth:`~Tensor.acos`
 """)
 
+add_docstr_all('arccos', r"""
+arccos() -> Tensor
+
+See :func:`torch.arccos`
+""")
+
+add_docstr_all('arccos_', r"""
+arccos_() -> Tensor
+
+In-place version of :meth:`~Tensor.arccos`
+""")
+
+add_docstr_all('acosh',
+               r"""
+acosh() -> Tensor
+
+See :func:`torch.acosh`
+""")
+
+add_docstr_all('acosh_',
+               r"""
+acosh_() -> Tensor
+
+In-place version of :meth:`~Tensor.acosh`
+""")
+
+add_docstr_all('arccosh', r"""
+acosh() -> Tensor
+
+See :func:`torch.arccosh`
+""")
+
+add_docstr_all('arccosh_', r"""
+acosh_() -> Tensor
+
+In-place version of :meth:`~Tensor.arccosh`
+""")
+
 add_docstr_all('add',
                r"""
 add(other, *, alpha=1) -> Tensor
@@ -481,17 +519,59 @@ asin_() -> Tensor
 In-place version of :meth:`~Tensor.asin`
 """)
 
+add_docstr_all('arcsin', r"""
+arcsin() -> Tensor
+
+See :func:`torch.arcsin`
+""")
+
+add_docstr_all('arcsin_', r"""
+arcsin_() -> Tensor
+
+In-place version of :meth:`~Tensor.arcsin`
+""")
+
+add_docstr_all('asinh', r"""
+asinh() -> Tensor
+
+See :func:`torch.asinh`
+""")
+
+add_docstr_all('asinh_',
+               r"""
+asinh_() -> Tensor
+
+In-place version of :meth:`~Tensor.asinh`
+""")
+
 add_docstr_all('as_strided', r"""
 as_strided(size, stride, storage_offset=0) -> Tensor
 
 See :func:`torch.as_strided`
 """)
 
-add_docstr_all('atan',
-               r"""
+add_docstr_all('atan', r"""
 atan() -> Tensor
 
 See :func:`torch.atan`
+""")
+
+add_docstr_all('atan_', r"""
+atan_() -> Tensor
+
+In-place version of :meth:`~Tensor.atan`
+""")
+
+add_docstr_all('arctan', r"""
+arctan() -> Tensor
+
+See :func:`torch.arctan`
+""")
+
+add_docstr_all('arctan_', r"""
+arctan_() -> Tensor
+
+In-place version of :meth:`~Tensor.arctan`
 """)
 
 add_docstr_all('atan2',
@@ -508,11 +588,16 @@ atan2_(other) -> Tensor
 In-place version of :meth:`~Tensor.atan2`
 """)
 
-add_docstr_all('atan_',
+add_docstr_all('atanh',
                r"""
-atan_() -> Tensor
+atanh() -> Tensor
 
-In-place version of :meth:`~Tensor.atan`
+See :func:`torch.atanh`
+""")
+
+add_docstr_all('atanh_',
+               r"""
+In-place version of :meth:`~Tensor.atanh`
 """)
 
 add_docstr_all('baddbmm',
@@ -748,20 +833,22 @@ clamp_(min, max) -> Tensor
 In-place version of :meth:`~Tensor.clamp`
 """)
 
-add_docstr_all('clone',
-               r"""
-clone(memory_format=torch.preserve_format) -> Tensor
+add_docstr_all('clip', r"""
+clip(min, max) -> Tensor
 
-Returns a copy of the :attr:`self` tensor. The copy has the same size and data
-type as :attr:`self`.
+Alias for :meth:`~Tensor.clamp`.
+""")
 
-.. note::
+add_docstr_all('clip_', r"""
+clip_(min, max) -> Tensor
 
-    Unlike `copy_()`, this function is recorded in the computation graph. Gradients
-    propagating to the cloned tensor will propagate to the original tensor.
+Alias for :meth:`~Tensor.clamp_`.
+""")
 
-Args:
-    {memory_format}
+add_docstr_all('clone', r"""
+clone(*, memory_format=torch.preserve_format) -> Tensor
+
+See :func:`torch.clone`
 """.format(**common_args))
 
 add_docstr_all('contiguous',
@@ -844,6 +931,13 @@ Args:
 
 """.format(**common_args))
 
+add_docstr_all('count_nonzero',
+               r"""
+count_nonzero(dim=None) -> Tensor
+
+See :func:`torch.count_nonzero`
+""")
+
 add_docstr_all('cross',
                r"""
 cross(other, dim=-1) -> Tensor
@@ -868,6 +962,13 @@ Args:
         Otherwise, the argument has no effect. Default: ``False``.
     {memory_format}
 """.format(**common_args))
+
+add_docstr_all('logcumsumexp',
+               r"""
+logcumsumexp(dim) -> Tensor
+
+See :func:`torch.logcumsumexp`
+""")
 
 add_docstr_all('cummax',
                r"""
@@ -1197,6 +1298,20 @@ flip(dims) -> Tensor
 See :func:`torch.flip`
 """)
 
+add_docstr_all('fliplr',
+               r"""
+fliplr() -> Tensor
+
+See :func:`torch.fliplr`
+""")
+
+add_docstr_all('flipud',
+               r"""
+flipud() -> Tensor
+
+See :func:`torch.flipud`
+""")
+
 add_docstr_all('roll',
                r"""
 roll(shifts, dims) -> Tensor
@@ -1253,6 +1368,20 @@ gather(dim, index) -> Tensor
 See :func:`torch.gather`
 """)
 
+add_docstr_all('gcd',
+               r"""
+gcd(other) -> Tensor
+
+See :func:`torch.gcd`
+""")
+
+add_docstr_all('gcd_',
+               r"""
+gcd_(other) -> Tensor
+
+In-place version of :meth:`~Tensor.gcd`
+""")
+
 add_docstr_all('ge',
                r"""
 ge(other) -> Tensor
@@ -1291,6 +1420,26 @@ add_docstr_all('ger',
 ger(vec2) -> Tensor
 
 See :func:`torch.ger`
+""")
+
+add_docstr_all('outer', r"""
+outer(vec2) -> Tensor
+
+See :func:`torch.outer`.
+""")
+
+add_docstr_all('hypot',
+               r"""
+hypot(other) -> Tensor
+
+See :func:`torch.hypot`
+""")
+
+add_docstr_all('hypot_',
+               r"""
+hypot_(other) -> Tensor
+
+In-place version of :meth:`~Tensor.hypot`
 """)
 
 add_docstr_all('indices',
@@ -1556,6 +1705,20 @@ isinf() -> Tensor
 See :func:`torch.isinf`
 """)
 
+add_docstr_all('isposinf',
+               r"""
+isposinf() -> Tensor
+
+See :func:`torch.isposinf`
+""")
+
+add_docstr_all('isneginf',
+               r"""
+isneginf() -> Tensor
+
+See :func:`torch.isneginf`
+""")
+
 add_docstr_all('isfinite',
                r"""
 isfinite() -> Tensor
@@ -1568,6 +1731,13 @@ add_docstr_all('isclose',
 isclose(other, rtol=1e-05, atol=1e-08, equal_nan=False) -> Tensor
 
 See :func:`torch.isclose`
+""")
+
+add_docstr_all('isreal',
+               r"""
+isreal() -> Tensor
+
+See :func:`torch.isreal`
 """)
 
 add_docstr_all('is_contiguous',
@@ -1612,8 +1782,8 @@ add_docstr_all('is_set_to',
                r"""
 is_set_to(tensor) -> bool
 
-Returns True if this object refers to the same ``THTensor`` object from the
-Torch C API as the given tensor.
+Returns True if both tensors are pointing to the exact same memory (same
+storage, offset, size and stride).
 """)
 
 add_docstr_all('item', r"""
@@ -1637,6 +1807,20 @@ add_docstr_all('kthvalue',
 kthvalue(k, dim=None, keepdim=False) -> (Tensor, LongTensor)
 
 See :func:`torch.kthvalue`
+""")
+
+add_docstr_all('lcm',
+               r"""
+lcm(other) -> Tensor
+
+See :func:`torch.lcm`
+""")
+
+add_docstr_all('lcm_',
+               r"""
+lcm_(other) -> Tensor
+
+In-place version of :meth:`~Tensor.lcm`
 """)
 
 add_docstr_all('le',
@@ -1733,6 +1917,20 @@ add_docstr_all('log2_',
 log2_() -> Tensor
 
 In-place version of :meth:`~Tensor.log2`
+""")
+
+add_docstr_all('logaddexp',
+               r"""
+logaddexp(other) -> Tensor
+
+See :func:`torch.logaddexp`
+""")
+
+add_docstr_all('logaddexp2',
+               r"""
+logaddexp2(other) -> Tensor
+
+See :func:`torch.logaddexp2`
 """)
 
 add_docstr_all('log_normal_', r"""
@@ -1845,6 +2043,13 @@ matrix_power(n) -> Tensor
 See :func:`torch.matrix_power`
 """)
 
+add_docstr_all('matrix_exp',
+               r"""
+matrix_exp() -> Tensor
+
+See :func:`torch.matrix_exp`
+""")
+
 add_docstr_all('max',
                r"""
 max(dim=None, keepdim=False) -> Tensor or (Tensor, Tensor)
@@ -1899,6 +2104,12 @@ add_docstr_all('mode',
 mode(dim=None, keepdim=False) -> (Tensor, LongTensor)
 
 See :func:`torch.mode`
+""")
+
+add_docstr_all('movedim', r"""
+movedim(source, destination) -> Tensor
+
+See :func:`torch.movedim`
 """)
 
 add_docstr_all('mul',
@@ -2000,6 +2211,13 @@ neg() -> Tensor
 See :func:`torch.neg`
 """)
 
+add_docstr_all('negative',
+               r"""
+negative() -> Tensor
+
+See :func:`torch.negative`
+""")
+
 add_docstr_all('neg_',
                r"""
 neg_() -> Tensor
@@ -2007,11 +2225,30 @@ neg_() -> Tensor
 In-place version of :meth:`~Tensor.neg`
 """)
 
+add_docstr_all('negative_',
+               r"""
+negative_() -> Tensor
+
+In-place version of :meth:`~Tensor.negative`
+""")
+
 add_docstr_all('nelement',
                r"""
 nelement() -> int
 
 Alias for :meth:`~Tensor.numel`
+""")
+
+add_docstr_all('nextafter',
+               r"""
+nextafter(other) -> Tensor
+See :func:`torch.nextafter`
+""")
+
+add_docstr_all('nextafter_',
+               r"""
+nextafter_(other) -> Tensor
+In-place version of :meth:`~Tensor.nextafter`
 """)
 
 add_docstr_all('nonzero',
@@ -2065,7 +2302,6 @@ ormqr(input2, input3, left=True, transpose=False) -> Tensor
 
 See :func:`torch.ormqr`
 """)
-
 
 add_docstr_all('permute',
                r"""
@@ -2159,6 +2395,13 @@ qscheme() -> torch.qscheme
 Returns the quantization scheme of a given QTensor.
 """)
 
+add_docstr_all('quantile',
+               r"""
+quantile(q, dim=None, keepdim=False) -> Tensor
+
+See :func:`torch.quantile`
+""")
+
 add_docstr_all('q_scale',
                r"""
 q_scale() -> float
@@ -2213,6 +2456,34 @@ only bounded by :attr:`self` tensor's data type. However, for floating point
 types, if unspecified, range will be ``[0, 2^mantissa]`` to ensure that every
 value is representable. For example, `torch.tensor(1, dtype=torch.double).random_()`
 will be uniform in ``[0, 2^53]``.
+""")
+
+add_docstr_all('rad2deg',
+               r"""
+rad2deg() -> Tensor
+
+See :func:`torch.rad2deg`
+""")
+
+add_docstr_all('rad2deg_',
+               r"""
+rad2deg_() -> Tensor
+
+In-place version of :meth:`~Tensor.rad2deg`
+""")
+
+add_docstr_all('deg2rad',
+               r"""
+deg2rad() -> Tensor
+
+See :func:`torch.deg2rad`
+""")
+
+add_docstr_all('deg2rad_',
+               r"""
+deg2rad_() -> Tensor
+
+In-place version of :meth:`~Tensor.deg2rad`
 """)
 
 add_docstr_all('reciprocal',
@@ -2466,7 +2737,7 @@ In-place version of :meth:`~Tensor.rsqrt`
 
 add_docstr_all('scatter_',
                r"""
-scatter_(dim, index, src) -> Tensor
+scatter_(dim, index, src, reduce=None) -> Tensor
 
 Writes all values from the tensor :attr:`src` into :attr:`self` at the indices
 specified in the :attr:`index` tensor. For each value in :attr:`src`, its output
@@ -2490,6 +2761,27 @@ Moreover, as for :meth:`~Tensor.gather`, the values of :attr:`index` must be
 between ``0`` and ``self.size(dim) - 1`` inclusive, and all values in a row
 along the specified dimension :attr:`dim` must be unique.
 
+Additionally accepts an optional :attr:`reduce` argument that allows
+specification of an optional reduction operation, which is applied to all
+values in the tensor :attr:`src` into :attr:`self` at the indicies
+specified in the :attr:`index`. For each value in :attr:`src`, the reduction
+operation is applied to an index in :attr:`self` which is specified by
+its index in :attr:`src` for ``dimension != dim`` and by the corresponding
+value in :attr:`index` for ``dimension = dim``.
+
+Given a 3-D tensor and reduction using the multiplication operation, :attr:`self`
+is updated as::
+
+    self[index[i][j][k]][j][k] *= src[i][j][k]  # if dim == 0
+    self[i][index[i][j][k]][k] *= src[i][j][k]  # if dim == 1
+    self[i][j][index[i][j][k]] *= src[i][j][k]  # if dim == 2
+
+Reducing with the addition operation is the same as using
+:meth:`~torch.Tensor.scatter_add_`.
+
+Note:
+    Reduction is not yet implemented for the CUDA backend.
+
 Args:
     dim (int): the axis along which to index
     index (LongTensor): the indices of elements to scatter,
@@ -2499,6 +2791,8 @@ Args:
       incase `value` is not specified
     value (float): the source element(s) to scatter,
       incase `src` is not specified
+    reduce (string): reduction operation to apply,
+      can be either 'add', 'subtract', 'multiply' or 'divide'.
 
 Example::
 
@@ -2515,6 +2809,11 @@ Example::
     >>> z
     tensor([[ 0.0000,  0.0000,  1.2300,  0.0000],
             [ 0.0000,  0.0000,  0.0000,  1.2300]])
+
+    >>> z = torch.ones(2, 4).scatter_(1, torch.tensor([[2], [3]]), 1.23, reduce='multiply')
+    >>> z
+    tensor([[1.0000, 1.0000, 1.2300, 1.0000],
+            [1.0000, 1.0000, 1.0000, 1.2300]])
 """)
 
 add_docstr_all('scatter_add_',
@@ -2618,6 +2917,20 @@ sigmoid_() -> Tensor
 In-place version of :meth:`~Tensor.sigmoid`
 """)
 
+add_docstr_all('logit',
+               r"""
+logit() -> Tensor
+
+See :func:`torch.logit`
+""")
+
+add_docstr_all('logit_',
+               r"""
+logit_() -> Tensor
+
+In-place version of :meth:`~Tensor.logit`
+""")
+
 add_docstr_all('sign',
                r"""
 sign() -> Tensor
@@ -2630,6 +2943,13 @@ add_docstr_all('sign_',
 sign_() -> Tensor
 
 In-place version of :meth:`~Tensor.sign`
+""")
+
+add_docstr_all('signbit',
+               r"""
+signbit() -> Tensor
+
+See :func:`torch.signbit`
 """)
 
 add_docstr_all('sin',
@@ -2837,6 +3157,13 @@ add_docstr_all('sum',
 sum(dim=None, keepdim=False, dtype=None) -> Tensor
 
 See :func:`torch.sum`
+""")
+
+add_docstr_all('nansum',
+               r"""
+nansum(dim=None, keepdim=False, dtype=None) -> Tensor
+
+See :func:`torch.nansum`
 """)
 
 add_docstr_all('svd',
@@ -3079,7 +3406,7 @@ In-place version of :meth:`~Tensor.tanh`
 """)
 
 add_docstr_all('tolist',
-               r""""
+               r"""
 tolist() -> list or number
 
 Returns the tensor as a (nested) list. For scalars, a standard
@@ -3216,11 +3543,25 @@ trunc() -> Tensor
 See :func:`torch.trunc`
 """)
 
+add_docstr_all('fix',
+               r"""
+fix() -> Tensor
+
+See :func:`torch.fix`.
+""")
+
 add_docstr_all('trunc_',
                r"""
 trunc_() -> Tensor
 
 In-place version of :meth:`~Tensor.trunc`
+""")
+
+add_docstr_all('fix_',
+               r"""
+fix_() -> Tensor
+
+In-place version of :meth:`~Tensor.fix`
 """)
 
 add_docstr_all('type',
@@ -3346,7 +3687,7 @@ contiguity-like condition that :math:`\forall i = d, \dots, d+k-1`,
 Otherwise, it will not be possible to view :attr:`self` tensor as :attr:`shape`
 without copying it (e.g., via :meth:`contiguous`). When it is unclear whether a
 :meth:`view` can be performed, it is advisable to use :meth:`reshape`, which
-returns a view if the shapes are compatible, and copies (equivalent to calling 
+returns a view if the shapes are compatible, and copies (equivalent to calling
 :meth:`contiguous`) otherwise.
 
 Args:
@@ -3484,6 +3825,20 @@ chunk(chunks, dim=0) -> List of Tensors
 See :func:`torch.chunk`
 """)
 
+add_docstr_all('unsafe_chunk',
+               r"""
+unsafe_chunk(chunks, dim=0) -> List of Tensors
+
+See :func:`torch.unsafe_chunk`
+""")
+
+add_docstr_all('unsafe_split',
+               r"""
+unsafe_split(split_size, dim=0) -> List of Tensors
+
+See :func:`torch.unsafe_split`
+""")
+
 add_docstr_all('stft',
                r"""
 stft(frame_length, hop, fft_size=None, return_onesided=True, window=None, pad_end=0) -> Tensor
@@ -3499,8 +3854,7 @@ istft(n_fft, hop_length=None, win_length=None, window=None,
 See :func:`torch.istft`
 """)
 
-add_docstr_all('fft',
-               r"""
+add_docstr_all('fft', r"""
 fft(signal_ndim, normalized=False) -> Tensor
 
 See :func:`torch.fft`
@@ -3708,6 +4062,12 @@ add_docstr_all('is_quantized',
 Is ``True`` if the Tensor is quantized, ``False`` otherwise.
 """)
 
+add_docstr_all('is_meta',
+               r"""
+Is ``True`` if the Tensor is a meta tensor, ``False`` otherwise.  Meta tensors
+are like normal tensors, but they carry no data.
+""")
+
 add_docstr_all('device',
                r"""
 Is the :class:`torch.device` where this Tensor is.
@@ -3724,6 +4084,40 @@ Is this Tensor with its dimensions reversed.
 
 If ``n`` is the number of dimensions in ``x``,
 ``x.T`` is equivalent to ``x.permute(n-1, n-2, ..., 0)``.
+""")
+
+add_docstr_all('real',
+               r"""
+Returns a new tensor containing real values of the :attr:`self` tensor.
+The returned tensor and :attr:`self` share the same underlying storage.
+
+.. warning::
+    :func:`real` is only supported for tensors with complex dtypes.
+
+Example::
+    >>> x=torch.randn(4, dtype=torch.cfloat)
+    >>> x
+    tensor([(0.3100+0.3553j), (-0.5445-0.7896j), (-1.6492-0.0633j), (-0.0638-0.8119j)])
+    >>> x.real
+    tensor([ 0.3100, -0.5445, -1.6492, -0.0638])
+
+""")
+
+add_docstr_all('imag',
+               r"""
+Returns a new tensor containing imaginary values of the :attr:`self` tensor.
+The returned tensor and :attr:`self` share the same underlying storage.
+
+.. warning::
+    :func:`imag` is only supported for tensors with complex dtypes.
+
+Example::
+    >>> x=torch.randn(4, dtype=torch.cfloat)
+    >>> x
+    tensor([(0.3100+0.3553j), (-0.5445-0.7896j), (-1.6492-0.0633j), (-0.0638-0.8119j)])
+    >>> x.imag
+    tensor([ 0.3553, -0.7896, -0.0633, -0.8119])
+
 """)
 
 add_docstr_all('as_subclass',

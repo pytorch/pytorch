@@ -5,7 +5,7 @@ from __future__ import unicode_literals
 
 import numpy as np
 import unittest
-from hypothesis import given
+from hypothesis import given, settings
 import hypothesis.strategies as st
 
 from caffe2.python import brew, core, model_helper, rnn_cell
@@ -39,6 +39,7 @@ class TestObservers(unittest.TestCase):
         num_layers=st.integers(1, 4),
         forward_only=st.booleans()
     )
+    @settings(deadline=1000)
     def test_observer_rnn_executor(self, num_layers, forward_only):
         '''
         Test that the RNN executor produces same results as

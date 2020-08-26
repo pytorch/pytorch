@@ -156,6 +156,36 @@ class TestRowWiseAdagrad(OptimizerTestBase, TestCase):
     def testGPUDense(self):
         raise unittest.SkipTest("no dense support")
 
+class TestRowWiseAdagradWithCounter(OptimizerTestBase, TestCase):
+    def build_optimizer(self, model, **kwargs):
+        self._skip_gpu = True
+        return build_adagrad(
+            model,
+            base_learning_rate=1.0,
+            lars=0.5,
+            rowWise=True,
+            counter_halflife=5,
+            **kwargs
+        )
+
+    def check_optimizer(self, optimizer):
+        self.assertTrue(optimizer.get_auxiliary_parameters().shared)
+        self.assertTrue(optimizer.get_auxiliary_parameters().local)
+        self.assertTrue(workspace.HasBlob("optimizer_iteration"))
+        iteration_tensor = workspace.FetchBlob("optimizer_iteration")
+        np.testing.assert_allclose(np.array([2000]),
+                                   iteration_tensor,
+                                   atol=1e-5)
+        for param in optimizer.get_auxiliary_parameters().shared:
+            workspace.FetchBlob(param)
+        for param in optimizer.get_auxiliary_parameters().local:
+            workspace.FetchBlob(param)
+
+    def testDense(self):
+        raise unittest.SkipTest("no dense support")
+
+    def testGPUDense(self):
+        raise unittest.SkipTest("no dense support")
 
 class TestWngrad(OptimizerTestBase, LRModificationTestBase, TestCase):
     def build_optimizer(self, model, **kwargs):

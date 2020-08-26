@@ -13,7 +13,7 @@ struct PythonPrintImpl;
 
 struct TORCH_API PythonPrint {
   PythonPrint(
-      std::vector<at::Tensor>& tensor_table,
+      std::vector<IValue>& constant_table,
       std::vector<c10::NamedTypePtr>& deps_table,
       c10::TypePrinter type_printer = nullptr,
       bool enforce_importable = false);
@@ -24,6 +24,7 @@ struct TORCH_API PythonPrint {
 
   std::string str() const;
   const SourceRangeRecords& ranges() const;
+  uint64_t minVersion() const;
 
   ~PythonPrint();
 

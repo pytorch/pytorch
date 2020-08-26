@@ -4,13 +4,14 @@
 #include <string>
 #include <unordered_map>
 
+#include <ATen/Context.h>
+#include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include "cub/util_allocator.cuh"
 
 // Needed to be included first to check the CAFFE2_USE_CUDNN macros.
 #include "caffe2/core/macros.h"
 
-#include "caffe2/core/asan.h"
 #include "caffe2/core/blob_stats.h"
 #ifdef CAFFE2_USE_CUDNN
 #include "caffe2/core/common_cudnn.h"
@@ -279,6 +280,8 @@ static void Caffe2SetCUDAMemoryPool() {
     SetUpCub();
   } else if (FLAGS_caffe2_cuda_memory_pool == "thc") {
     g_cuda_memory_pool_type = CudaMemoryPoolType::THC;
+    // Initialize caching allocator
+    at::globalContext().lazyInitCUDA();
   } else {
     CAFFE_THROW(
         "Unrecognized cuda memory pool type: ", FLAGS_caffe2_cuda_memory_pool);
@@ -368,7 +371,7 @@ static PinnedCPUAllocator g_pinned_cpu_alloc;
 // An initialization function that sets the CPU side to use pinned cpu
 // allocator.
 void Caffe2UsePinnedCPUAllocator() {
-#if CAFFE2_ASAN_ENABLED
+#if C10_ASAN_ENABLED
   // Note(jiayq): for more details, see
   //     https://github.com/google/sanitizers/issues/629
   LOG(WARNING) << "There are known issues between address sanitizer and "

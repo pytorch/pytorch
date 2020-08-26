@@ -60,14 +60,14 @@ TEST_F(NNUtilsTest, ClipGradNorm) {
   };
   for (auto norm_type : norm_types) {
     for (int i = 0; i < grads.size(); i++) {
-      l->parameters()[i].grad() =
+      l->parameters()[i].mutable_grad() =
           grads[i].clone().view_as(l->parameters()[i].data());
     }
     auto norm_before = compute_norm(norm_type);
     auto norm = utils::clip_grad_norm_(l->parameters(), max_norm, norm_type);
     auto norm_after = compute_norm(norm_type);
     ASSERT_FLOAT_EQ(norm, norm_before);
-    ASSERT_FLOAT_EQ(norm_after, max_norm);
+    ASSERT_NEAR(norm_after, max_norm, 1e-6);
     ASSERT_LE(norm_after, max_norm);
     auto scaled = compare_scaling(grads);
     ASSERT_NEAR(0, scaled.std().item().toFloat(), 1e-7);
@@ -95,8 +95,8 @@ TEST_F(NNUtilsTest, ClipGradNorm) {
   auto p1 = torch::randn({10, 10});
   auto p2 = torch::randn({10, 10});
   auto g = torch::arange(1., 101).view({10, 10});
-  p1.grad() = g.clone();
-  p2.grad() = g.clone();
+  p1.mutable_grad() = g.clone();
+  p2.mutable_grad() = g.clone();
   for (const auto norm_type : norm_types) {
     utils::clip_grad_norm_(p1, max_norm, norm_type);
     utils::clip_grad_norm_({p2}, max_norm, norm_type);
@@ -116,7 +116,7 @@ TEST_F(NNUtilsTest, ClipGradValue) {
     for (int i = 0; i < grad_list.size(); i++) {
       auto p = l->parameters()[i];
       auto g = grad_list[i];
-      p.grad() = g.defined() ? g.clone().view_as(p.data()) : g;
+      p.mutable_grad() = g.defined() ? g.clone().view_as(p.data()) : g;
     }
 
     utils::clip_grad_value_(l->parameters(), clip_value);
@@ -134,8 +134,8 @@ TEST_F(NNUtilsTest, ClipGradValue) {
   auto p1 = torch::randn({10, 10});
   auto p2 = torch::randn({10, 10});
   auto g = torch::arange(-50., 50).view({10, 10}).div_(5);
-  p1.grad() = g.clone();
-  p2.grad() = g.clone();
+  p1.mutable_grad() = g.clone();
+  p2.mutable_grad() = g.clone();
   utils::clip_grad_value_(p1, clip_value);
   utils::clip_grad_value_({p2}, clip_value);
   ASSERT_TRUE(torch::allclose(p1.grad(), p2.grad()));

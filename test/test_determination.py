@@ -17,7 +17,7 @@ class DeterminationTest(unittest.TestCase):
         "test_jit",
         "test_torch",
         "distributed/test_distributed",
-        "distributed/rpc/test_rpc_spawn",
+        "distributed/rpc/test_process_group_agent",
         "test_cpp_extensions_aot_ninja",
         "test_cpp_extensions_aot_no_ninja",
         "test_utils",
@@ -69,8 +69,8 @@ class DeterminationTest(unittest.TestCase):
             ["test_jit_profiling", "test_jit"],
         )
         self.assertEqual(
-            self.determined_tests(["test/distributed/rpc/test_rpc_spawn.py"]),
-            ["distributed/rpc/test_rpc_spawn"],
+            self.determined_tests(["test/distributed/rpc/test_process_group_agent.py"]),
+            ["distributed/rpc/test_process_group_agent"],
         )
         self.assertEqual(
             self.determined_tests(["test/quantization/test_quantize.py"]),
@@ -81,7 +81,11 @@ class DeterminationTest(unittest.TestCase):
         """testing/_internal files trigger dependent tests"""
         self.assertEqual(
             self.determined_tests(["torch/testing/_internal/common_quantization.py"]),
-            ["test_quantization"],
+            [
+                "test_jit_profiling",
+                "test_jit",
+                "test_quantization",
+            ],
         )
 
     def test_torch_file(self):

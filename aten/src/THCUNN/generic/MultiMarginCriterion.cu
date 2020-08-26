@@ -122,8 +122,9 @@ void THNN_(MultiMarginCriterion_updateOutput)(
         );
       }
       THCudaCheck(cudaGetLastError());
-      float sum = THCTensor_(sumall)(state, output_);
-      THCTensor_(set0d)(state, output, ScalarConvert<accreal, scalar_t>::to(sum));
+      auto t = THTensor_wrap(output_);
+      auto r = THTensor_wrap(output);
+      at::native::sum_out(r, t, at::IntArrayRef(std::vector<int64_t>{}), false, r.scalar_type());
       THCTensor_(free)(state, output_);
     }
   }

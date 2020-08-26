@@ -59,7 +59,7 @@ binary_windows_params: &binary_windows_params
       default: ""
     executor:
       type: string
-      default: "windows-cpu-with-nvidia-cuda"
+      default: "windows-xlarge-cpu-with-nvidia-cuda"
   environment:
     BUILD_ENVIRONMENT: << parameters.build_environment >>
     BUILD_FOR_SYSTEM: windows

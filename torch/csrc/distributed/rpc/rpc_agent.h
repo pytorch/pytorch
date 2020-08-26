@@ -78,6 +78,10 @@ struct TORCH_API WorkerInfo : torch::CustomClassHolder {
   const worker_id_t id_;
 };
 
+TORCH_API std::ostream& operator<<(
+    std::ostream& os,
+    const WorkerInfo& workerInfo);
+
 // Struct for options to configure the RPC Retry protocol.
 struct TORCH_API RpcRetryOptions {
   // Using a default constructor like all other Options structs in the RPC

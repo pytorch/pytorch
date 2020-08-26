@@ -162,9 +162,14 @@
 #      When turned on, the following cmake variables will be toggled as well:
 #        USE_SYSTEM_CPUINFO=ON USE_SYSTEM_SLEEF=ON BUILD_CUSTOM_PROTOBUF=OFF
 
+from __future__ import print_function
 import sys
 if sys.version_info < (3,):
-    raise Exception("Python 2 has reached end-of-life and is no longer supported by PyTorch.")
+    print("Python 2 has reached end-of-life and is no longer supported by PyTorch.")
+    sys.exit(-1)
+if sys.platform == 'win32' and sys.maxsize.bit_length() == 31:
+    print("32-bit Windows Python runtime is not supported. Please switch to 64-bit Python.")
+    sys.exit(-1)
 
 from setuptools import setup, Extension, distutils, find_packages
 from collections import defaultdict
@@ -352,7 +357,7 @@ def build_deps():
 ################################################################################
 
 # the list of runtime dependencies required by this built package
-install_requires = ['future']
+install_requires = ['future', 'typing_extensions']
 
 missing_pydep = '''
 Missing build dependency: Unable to `import {importname}`.
@@ -567,19 +572,16 @@ def configure_extension_build():
         extra_link_args = ['/NODEFAULTLIB:LIBCMT.LIB']
         # /MD links against DLL runtime
         # and matches the flags set for protobuf and ONNX
-        # /Z7 turns on symbolic debugging information in .obj files
         # /EHsc is about standard C++ exception handling
         # /DNOMINMAX removes builtin min/max functions
         # /wdXXXX disables warning no. XXXX
-        extra_compile_args = ['/MD', '/Z7',
-                              '/EHsc', '/DNOMINMAX',
+        extra_compile_args = ['/MD', '/EHsc', '/DNOMINMAX',
                               '/wd4267', '/wd4251', '/wd4522', '/wd4522', '/wd4838',
                               '/wd4305', '/wd4244', '/wd4190', '/wd4101', '/wd4996',
                               '/wd4275']
     else:
         extra_link_args = []
         extra_compile_args = [
-            '-std=c++14',
             '-Wall',
             '-Wextra',
             '-Wno-strict-overflow',
@@ -604,9 +606,9 @@ def configure_extension_build():
     library_dirs.append(lib_path)
 
     main_compile_args = []
-    main_libraries = ['shm', 'torch_python']
+    main_libraries = ['torch_python']
     main_link_args = []
-    main_sources = ["torch/csrc/stub.cpp"]
+    main_sources = ["torch/csrc/stub.c"]
 
     if cmake_cache_vars['USE_CUDA']:
         library_dirs.append(
@@ -617,6 +619,7 @@ def configure_extension_build():
 
     if build_type.is_debug():
         if IS_WINDOWS:
+            extra_compile_args.append('/Z7')
             extra_link_args.append('/DEBUG:FULL')
         else:
             extra_compile_args += ['-O0', '-g']
@@ -624,6 +627,7 @@ def configure_extension_build():
 
     if build_type.is_rel_with_deb_info():
         if IS_WINDOWS:
+            extra_compile_args.append('/Z7')
             extra_link_args.append('/DEBUG:FULL')
         else:
             extra_compile_args += ['-g']
@@ -647,7 +651,7 @@ def configure_extension_build():
     C = Extension("torch._C",
                   libraries=main_libraries,
                   sources=main_sources,
-                  language='c++',
+                  language='c',
                   extra_compile_args=main_compile_args + extra_compile_args,
                   include_dirs=[],
                   library_dirs=library_dirs,
@@ -661,7 +665,7 @@ def configure_extension_build():
         extensions.append(DL)
 
     # These extensions are built by cmake and copied manually in build_extensions()
-    # inside the build_ext implementaiton
+    # inside the build_ext implementation
     extensions.append(
         Extension(
             name=str('caffe2.python.caffe2_pybind11_state'),
@@ -736,11 +740,17 @@ if __name__ == '__main__':
 
     install_requires += extra_install_requires
 
+    # Read in README.md for our long_description
+    with open(os.path.join(cwd, "README.md"), encoding="utf-8") as f:
+        long_description = f.read()
+
     setup(
         name=package_name,
         version=version,
         description=("Tensors and Dynamic neural networks in "
                      "Python with strong GPU acceleration"),
+        long_description=long_description,
+        long_description_content_type="text/markdown",
         ext_modules=extensions,
         cmdclass=cmdclass,
         packages=packages,
@@ -862,6 +872,7 @@ if __name__ == '__main__':
                 'share/cmake/Caffe2/Modules_CUDA_fix/upstream/*.cmake',
                 'share/cmake/Caffe2/Modules_CUDA_fix/upstream/FindCUDA/*.cmake',
                 'share/cmake/Gloo/*.cmake',
+                'share/cmake/Tensorpipe/*.cmake',
                 'share/cmake/Torch/*.cmake',
             ],
             'caffe2': [

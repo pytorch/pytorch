@@ -232,6 +232,7 @@ def function_info(name, arguments, cimpls, buffers, backends, inplace, backend_t
                 'BFloat16' in backend_types['CUDA'] else False,
         'backend_types': backend_types,
         'arguments': arguments,
+        'schema_order_arguments': copy.deepcopy(arguments),
         'return': 'argument 0' if inplace else get_return(arguments),
         'buffers': buffers,
         'backends': backends,

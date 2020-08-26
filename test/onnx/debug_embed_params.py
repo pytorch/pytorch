@@ -41,12 +41,7 @@ def run_embed_params(proto, model, input, state_dict=None, use_gpu=True):
         # sure our order is consistent with the model's order.
         # TODO: Even better: keyword arguments!
         for k in model.state_dict():
-            if k not in state_dict:
-                # Once PyTorch Module adds unnecessary parameter, the old pre-trained model does not have it.
-                # Just simply pass the new one.
-                # TODO: Please don't export unnecessary parameter.
-                parameters.append(model.state_dict()[k])
-            else:
+            if k in state_dict:
                 parameters.append(state_dict[k])
     else:
         parameters = list(model.state_dict().values())

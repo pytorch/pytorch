@@ -11,17 +11,18 @@ inline Tensor _narrow_with_range(const Tensor& input, int64_t dim, int64_t start
 }
 
 inline Tensor _pad_circular(Tensor input, IntArrayRef padding) {
-  input = torch::cat({input, _narrow_with_range(input, 2, 0, padding[-1 + padding.size()])}, /*dim=*/2);
-  input = torch::cat({_narrow_with_range(input, 2, -(padding[-1 + padding.size()] + padding[-2 + padding.size()]), -padding[-1 + padding.size()]), input}, /*dim=*/2);
+  int padding_size = padding.size();
+  input = torch::cat({input, _narrow_with_range(input, 2, 0, padding[-1 + padding_size])}, /*dim=*/2);
+  input = torch::cat({_narrow_with_range(input, 2, -(padding[-1 + padding_size] + padding[-2 + padding_size]), -padding[-1 + padding_size]), input}, /*dim=*/2);
 
-  if (padding.size() > 2) {
-    input = torch::cat({input, _narrow_with_range(input, 3, 0, padding[-3 + padding.size()])}, /*dim=*/3);
-    input = torch::cat({_narrow_with_range(input, 3, -(padding[-3 + padding.size()] + padding[-4 + padding.size()]), -padding[-3 + padding.size()]), input}, /*dim=*/3);
+  if (padding_size > 2) {
+    input = torch::cat({input, _narrow_with_range(input, 3, 0, padding[-3 + padding_size])}, /*dim=*/3);
+    input = torch::cat({_narrow_with_range(input, 3, -(padding[-3 + padding_size] + padding[-4 + padding_size]), -padding[-3 + padding_size]), input}, /*dim=*/3);
   }
 
-  if (padding.size() > 4) {
-    input = torch::cat({input, _narrow_with_range(input, 4, 0, padding[-5 + padding.size()])}, /*dim=*/4);
-    input = torch::cat({_narrow_with_range(input, 4, -(padding[-5 + padding.size()] + padding[-6 + padding.size()]), -padding[-5 + padding.size()]), input}, /*dim=*/4);
+  if (padding_size > 4) {
+    input = torch::cat({input, _narrow_with_range(input, 4, 0, padding[-5 + padding_size])}, /*dim=*/4);
+    input = torch::cat({_narrow_with_range(input, 4, -(padding[-5 + padding_size] + padding[-6 + padding_size]), -padding[-5 + padding_size]), input}, /*dim=*/4);
   }
 
   return input;

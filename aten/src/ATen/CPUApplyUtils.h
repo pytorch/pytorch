@@ -341,21 +341,6 @@ apply_op(int64_t numel, int64_t offset, const Op& op, Args... iters) {
   b_val[0] * c_val[0]; };
 */
 
-template <typename scalar1, typename Op>
-inline void CPU_tensor_apply1(Tensor tensor1, const Op op) {
-  if (!_apply_preamble({tensor1}))
-    return;
-  if (tensor1.ndimension() < 8) {
-    apply_op(
-        tensor1.numel(),
-        0,
-        op,
-        strided_tensor_iter_fixed<scalar1, 8>(tensor1, true));
-  } else {
-    apply_op(tensor1.numel(), 0, op, strided_tensor_iter<scalar1>(tensor1));
-  }
-}
-
 template <typename scalar1, typename scalar2, typename Op>
 inline void CPU_tensor_apply2(Tensor tensor1, Tensor tensor2, const Op op) {
   if (!_apply_preamble({tensor1, tensor2}))

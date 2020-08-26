@@ -5,7 +5,7 @@ import torch
 from torch._jit_internal import Optional  # noqa: F401
 import torch.nn as nn
 import torch.nn.intrinsic as nni
-from torch.nn.quantized.modules.utils import _quantize_weight
+from torch.nn.quantized.modules.utils import _quantize_weight, hide_packed_params_repr
 
 class LinearPackedParams(torch.nn.Module):
     _version = 3
@@ -87,10 +87,6 @@ class LinearPackedParams(torch.nn.Module):
 
     @torch.jit.export
     def __getstate__(self):
-        if not torch.jit.is_scripting():
-            raise RuntimeError('torch.save() is not currently supported for quantized modules.'
-                               ' See https://github.com/pytorch/pytorch/issues/24045.'
-                               ' Please use state_dict or torch.jit serialization.')
         qweight, bias = self._weight_bias()
         return qweight, bias, self.training, self.dtype
 
@@ -167,34 +163,7 @@ class Linear(torch.nn.Module):
         )
 
     def __repr__(self):
-        # We don't want to show `LinearPackedParams` children, hence custom
-        # `__repr__`. This is the same as nn.Module.__repr__, except the check
-        # for the `LinearPackedParams`.
-        # You should still override `extra_repr` to add more info.
-        extra_lines = []
-        extra_repr = self.extra_repr()
-        # empty string will be split into list ['']
-        if extra_repr:
-            extra_lines = extra_repr.split('\n')
-        child_lines = []
-        for key, module in self._modules.items():
-            if isinstance(module, LinearPackedParams):
-                continue
-            mod_str = repr(module)
-            mod_str = _addindent(mod_str, 2)
-            child_lines.append('(' + key + '): ' + mod_str)
-        lines = extra_lines + child_lines
-
-        main_str = self._get_name() + '('
-        if lines:
-            # simple one-liner info, which most builtin Modules will use
-            if len(extra_lines) == 1 and not child_lines:
-                main_str += extra_lines[0]
-            else:
-                main_str += '\n  ' + '\n  '.join(lines) + '\n'
-
-        main_str += ')'
-        return main_str
+        return hide_packed_params_repr(self, LinearPackedParams)
 
     def forward(self, x):
         return torch.ops.quantized.linear(

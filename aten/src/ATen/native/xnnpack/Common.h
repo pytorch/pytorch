@@ -5,7 +5,7 @@
 #ifdef USE_XNNPACK
 
 #include <xnnpack.h>
-#include <caffe2/utils/threadpool/ThreadPoolXNNPACK.h>
+#include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 
 namespace at {
 namespace native {
@@ -39,6 +39,9 @@ struct ContextConv2D final {
   std::array<int64_t, 2> padding_;
   std::array<int64_t, 2> stride_;
   std::array<int64_t, 2> dilation_;
+  const float* cached_input_ptr{nullptr};
+  const float* cached_output_ptr{nullptr};
+  size_t input_height{0}, input_width{0}, batch_size{0}, input_channels{0};
 
   ContextConv2D() = delete;
 

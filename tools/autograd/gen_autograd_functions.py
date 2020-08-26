@@ -143,7 +143,8 @@ def process_function(func):
     def save_arg(arg, is_output):
         name = arg['name']
 
-        if arg['type'] == 'Tensor' or (arg['type'] == 'Scalar' and is_output):
+        if arg['type'] == 'Tensor' or arg['type'] == 'c10::optional<Tensor>' or arg['type'] == 'c10::optional<Tensor>&' or \
+                (arg['type'] == 'Scalar' and is_output):
             saved_variables.append('SavedVariable {}_;'.format(name))
             release_variables.append('{}_.reset_data();'.format(name))
             release_variables.append('{}_.reset_grad_function();'.format(name))
@@ -160,6 +161,10 @@ def process_function(func):
             asserts.append('TORCH_CHECK(!{}_released_, ERR_BACKWARD_TWICE);'.format(name))
         elif arg['type'] == 'IntArrayRef':
             saved_variables.append('std::vector<int64_t> {};'.format(name))
+        elif arg['type'] == 'c10::optional<IntArrayRef>':
+            saved_variables.append('c10::OptionalArray<int64_t> {};'.format(name))
+        elif arg['type'] == 'c10::optional<ArrayRef<double>>':
+            saved_variables.append('c10::OptionalArray<double> {};'.format(name))
         elif arg['type'] == 'int64_t':
             saved_variables.append('{} {} = 0;'.format(arg['type'], name))
         else:
@@ -191,11 +196,22 @@ def process_function(func):
     if uses_single_grad(func):
         body.append('auto& grad = grads[0];')
 
-    def emit_derivative(derivative):
+    def emit_derivative(derivative, args_with_derivatives):
         formula = derivative['formula']
         var_names = derivative['var_names']
         if len(var_names) == 1:
-            return DERIVATIVE_SINGLE.substitute(name=var_names[0], derivative=formula)
+            checks_any_grad_defined = False
+            if 'not_implemented' not in formula:
+                matching_args = [
+                    arg for arg in args_with_derivatives
+                    if ('name' in arg) and (arg['name'] == var_names[0])]
+                if len(matching_args) == 1:
+                    # We can add undefined grad support if the input variable is a Tensor
+                    if ('simple_type' in matching_args[0].keys()) and (matching_args[0]['simple_type'] == 'Tensor'):
+                        formula = 'any_grad_defined ? (' + formula + ') : Tensor()'
+                        checks_any_grad_defined = True
+            return (checks_any_grad_defined,
+                    DERIVATIVE_SINGLE.substitute(name=var_names[0], derivative=formula))
         else:
             if 'grad_input_mask' in formula:
                 masks = ['should_compute_output({{ {}_ix }}),'.format(n) for n in var_names]
@@ -206,14 +222,22 @@ def process_function(func):
             copy_ranges = []
             for i, n in enumerate(var_names):
                 copy_ranges.append(DERIVATIVE_MULTI_COPY_RANGE.substitute(name=n, i=i))
-            return DERIVATIVE_MULTI.substitute(
+            return False, DERIVATIVE_MULTI.substitute(
                 idx_ranges=idx_ranges, copy_ranges=copy_ranges,
                 derivative=formula,
                 grad_input_mask=grad_input_mask)
 
     body.extend(unpack)
+    need_any_grad_defined_var = False
     for derivative in func['derivatives']:
-        body.append(emit_derivative(derivative))
+        checks_any_grad_defined, derivative_text = emit_derivative(derivative, func['args_with_derivatives'])
+        body.append(derivative_text)
+        need_any_grad_defined_var |= checks_any_grad_defined
+    # Since single-output derivative formulas need to check if grads are
+    # defined, only perform the check once, before all the formulas
+    if need_any_grad_defined_var:
+        body.insert(-len(func['derivatives']),
+                    'bool any_grad_defined = any_variable_defined(grads);')
 
     env['body'] = body
     if func['name'] in UNTRACEABLE_FUNCTIONS:

@@ -341,5 +341,14 @@ Tensor multilabel_margin_loss_backward_cpu(
   return grad_input;
 }
 
+Tensor & multilabel_margin_loss_out(Tensor & output, const Tensor & self, const Tensor & target, int64_t reduction) {
+  Tensor is_target = at::empty({0}, self.options());
+  return std::get<0>(at::multilabel_margin_loss_forward_out(output, is_target, self, target, reduction));
+}
+
+Tensor multilabel_margin_loss(const Tensor & self, const Tensor & target, int64_t reduction) {
+  return std::get<0>(at::multilabel_margin_loss_forward(self, target, reduction));
+}
+
 } // namespace native
 } // namespace at

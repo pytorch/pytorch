@@ -332,6 +332,16 @@ struct TORCH_API Node {
     }
     return scope_->namesFromRoot();
   }
+
+  Node* copyMetadata(Node* from) {
+    this->setSourceRange(from->sourceRange());
+    this->setScope(from->scope());
+    if (auto cs = from->callstack()) {
+      this->setCallStack(*cs);
+    }
+    return this;
+  }
+
   c10::optional<InlinedCallStackPtr> callstack() const {
     return callstack_;
   }
@@ -1105,6 +1115,8 @@ struct Graph {
       Value* idx,
       const TypePtr& output_type);
   TORCH_API Node* createTupleSlice(Value* tup, int64_t beg, int64_t end);
+  TORCH_API Node* createEnumName(Value* e);
+  TORCH_API Node* createEnumValue(Value* e);
   TORCH_API Node* createList(
       const TypePtr& elem_type,
       at::ArrayRef<Value*> values);

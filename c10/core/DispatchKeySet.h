@@ -116,6 +116,9 @@ private:
 C10_API std::string toString(DispatchKeySet);
 C10_API std::ostream& operator<<(std::ostream&, DispatchKeySet);
 
+// all Autograd dispatch keys
+C10_API DispatchKeySet AutogradDispatchKeys();
+
 // Historically, every tensor only had a single DispatchKey, and it was always
 // something like CPU, and there wasn't any of this business where TLS
 // could cause the DispatchKey of a tensor to change.  But we still have some
@@ -130,6 +133,13 @@ static inline DispatchKey legacyExtractDispatchKey(DispatchKeySet s) {
   // Autograd does NOT need this as it is applied universally
   // (and doesn't show up in TensorImpl)
   return s.highestPriorityTypeId();
+}
+
+// For backwards compatibility with XLA repository
+// (I don't want to fix this in XLA right now because there might be
+// more renaming coming in the future.)
+static inline DispatchKeySet XLA() {
+  return DispatchKeySet{DispatchKey::XLA, DispatchKey::AutogradXLA};
 }
 
 }

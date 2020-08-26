@@ -57,19 +57,22 @@ TORCH_API void ExportModule(
     const Module& module,
     std::ostream& out,
     const ExtraFilesMap& metadata = ExtraFilesMap(),
-    bool bytecode_format = false);
+    bool bytecode_format = false,
+    bool save_mobile_debug_info = false);
 
 TORCH_API void ExportModule(
     const Module& module,
     const std::string& filename,
     const ExtraFilesMap& metadata = ExtraFilesMap(),
-    bool bytecode_format = false);
+    bool bytecode_format = false,
+    bool save_mobile_debug_info = false);
 
 TORCH_API void ExportModule(
     const Module& module,
     const std::function<size_t(const void*, size_t)>& writer_func,
     const ExtraFilesMap& metadata = ExtraFilesMap(),
-    bool bytecode_format = false);
+    bool bytecode_format = false,
+    bool save_mobile_debug_info = false);
 
 // Write the bytes of a pickle archive and the tensors referenced inside that
 // archive
@@ -77,7 +80,7 @@ TORCH_API void writeArchiveAndTensors(
     const std::string& archive_name,
     const char* pickle_bytes,
     size_t size,
-    const std::vector<WriteableTensorData>& tensors,
+    const std::vector<at::Tensor>& tensors,
     caffe2::serialize::PyTorchStreamWriter& out);
 
 // Surrounding system can install an additional hook to produce extra files

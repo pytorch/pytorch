@@ -57,6 +57,7 @@ bool isSimpleMap(Node* node) {
       "aten::log10(Tensor self) -> Tensor",
       "aten::log1p(Tensor self) -> Tensor",
       "aten::log2(Tensor self) -> Tensor",
+      "aten::logit(Tensor self, float? eps=None) -> Tensor",
       "aten::lerp(Tensor self, Tensor end, Scalar weight) -> Tensor",
       "aten::lerp(Tensor self, Tensor end, Tensor weight) -> Tensor",
       "aten::max(Tensor self, Tensor other) -> Tensor",
@@ -130,16 +131,16 @@ Value* broadcastSizes(at::ArrayRef<Value*> sizes, AliasDb* db) {
 }
 
 struct GraphFuser {
-  using FusionCallback = std::function<bool(Node*)>;
+  using FusionCallback = std::function<bool(GraphFuser*, Node*)>;
 
   Block* block_;
   AliasDb* aliasDb_;
   std::shared_ptr<Graph> graph_;
-  FusionCallback callback_ = [&](Node* n) {
-    return isFusableDefault(n, this->strict_fuser_check_);
+  FusionCallback callback_ = [](GraphFuser* gf, Node* n) {
+    return gf->isFusableDefault(n, gf->strict_fuser_check_);
   };
   Symbol kind_ = prim::FusionGroup;
-  bool strict_fuser_check_;
+  bool strict_fuser_check_ = false;
 
   // nvrtc has a limit on the number of arguments allowed in a CUDA kernel.
   // The specific limit is a function of constant memory size, amount available
@@ -163,7 +164,8 @@ struct GraphFuser {
       : block_(block),
         aliasDb_(aliasDb),
         callback_(std::move(callback)),
-        kind_(kind) {}
+        kind_(kind),
+        strict_fuser_check_(false) {}
 
   void setInputArgLimit(size_t limit) {
     subgraph_arg_limit_ = limit;
@@ -176,7 +178,7 @@ struct GraphFuser {
   }
 
   bool isFusable(Node* node) {
-    return callback_(node);
+    return callback_(this, node);
   }
 
   bool isFusableDevice(Value* v, bool strict_fuser_check) {
@@ -1265,7 +1267,7 @@ void CustomFuseGraph(
   auto g = GraphFuser(
       &db,
       graph->block(),
-      [=](Node* n) { return fn(n) || n->kind() == kind; },
+      [=](GraphFuser* gf, Node* n) { return fn(n) || n->kind() == kind; },
       kind);
   g.setInputArgLimit(arg_limit);
   g.run();

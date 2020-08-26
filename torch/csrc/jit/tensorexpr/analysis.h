@@ -28,6 +28,45 @@ class HasRand : public IRVisitor {
   Stmt* stmt_;
   bool has_rand_ = false;
 };
+
+template <typename Node>
+class NodeFinder : public IRVisitor {
+ public:
+  virtual void visit(const Node* v) override {
+    nodes.push_back((Node*)v);
+    IRVisitor::visit(v);
+  }
+
+  static std::vector<Node*> find(Stmt* s) {
+    NodeFinder<Node> nf;
+    s->accept(&nf);
+    return nf.nodes;
+  }
+
+  std::vector<Node*> nodes;
+};
+
+class VarFinder : public IRVisitor {
+ public:
+  virtual void visit(const Var* v) override {
+    vars_.insert(v);
+    IRVisitor::visit(v);
+  }
+
+  static std::unordered_set<const Var*> find(Stmt* s) {
+    VarFinder nf;
+    s->accept(&nf);
+    return nf.vars();
+  }
+
+  const std::unordered_set<const Var*>& vars() {
+    return vars_;
+  }
+
+ private:
+  std::unordered_set<const Var*> vars_;
+};
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch

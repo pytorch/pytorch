@@ -8,7 +8,7 @@ from typing import Tuple, Optional
 import torch
 from torch import Tensor
 from . import _linalg_utils as _utils
-from ._overrides import has_torch_function, handle_torch_function
+from .overrides import has_torch_function, handle_torch_function
 
 
 def get_approximate_basis(A,        # type: Tensor
@@ -120,7 +120,7 @@ def svd_lowrank(A, q=6, niter=2, M=None):
           structure with randomness: probabilistic algorithms for
           constructing approximate matrix decompositions,
           arXiv:0909.4061 [math.NA; math.PR], 2009 (available at
-          `arXiv <http://arxiv.org/abs/0909.4061>`_).
+          `arXiv <https://arxiv.org/abs/0909.4061>`_).
 
     """
     if not torch.jit.is_scripting():
@@ -267,8 +267,5 @@ def pca_lowrank(A, q=None, center=True, niter=2):
         M = _utils.transpose(torch.sparse.mm(C_t, ones_m1_t))
         return _svd_lowrank(A, q, niter=niter, M=M)
     else:
-        c = A.sum(dim=(-2,)) / m
-        C = c.reshape(A.shape[:-2] + (1, n))
-        ones_m1 = torch.ones(A.shape[:-1] + (1, ), dtype=dtype, device=A.device)
-        M = ones_m1.matmul(C)
-        return _svd_lowrank(A - M, q, niter=niter, M=None)
+        C = A.mean(dim=(-2,), keepdim=True)
+        return _svd_lowrank(A - C, q, niter=niter, M=None)

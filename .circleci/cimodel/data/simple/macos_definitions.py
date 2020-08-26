@@ -4,12 +4,7 @@ class MacOsJob:
         self.is_test = is_test
 
     def gen_tree(self):
-        non_phase_parts = [
-            "pytorch",
-            "macos",
-            self.os_version,
-            "py3",
-        ]
+        non_phase_parts = ["pytorch", "macos", self.os_version, "py3"]
 
         phase_name = "test" if self.is_test else "build"
 
@@ -17,19 +12,16 @@ class MacOsJob:
 
         test_build_dependency = "_".join(non_phase_parts + ["build"])
         extra_dependencies = [test_build_dependency] if self.is_test else []
-        job_dependencies = ["setup"] + extra_dependencies
+        job_dependencies = extra_dependencies
 
-        props_dict = {
-            "requires": job_dependencies,
-        }
+        # Yes we name the job after itself, it needs a non-empty value in here
+        # for the YAML output to work.
+        props_dict = {"requires": job_dependencies, "name": full_job_name}
 
         return [{full_job_name: props_dict}]
 
 
-WORKFLOW_DATA = [
-    MacOsJob("10_13"),
-    MacOsJob("10_13", True),
-]
+WORKFLOW_DATA = [MacOsJob("10_13"), MacOsJob("10_13", True)]
 
 
 def get_workflow_jobs():

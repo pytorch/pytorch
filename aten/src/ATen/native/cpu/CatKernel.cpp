@@ -20,27 +20,19 @@ struct InputMeta {
 
 template <typename scalar_t>
 void cat_serial_kernel_impl(Tensor& result, TensorList tensors, int64_t dim) {
-  auto size = result.sizes().vec();
-  int64_t outer = 1, inner = 1;
-  for (int64_t i = 0; i < dim; i++) {
-    outer *= size[i];
-  }
-  for (int64_t i = dim + 1; i < size.size(); i++) {
-    inner *= size[i];
-  }
+  int64_t outer = result.numel() / (result.size(dim) * result.stride(dim));
   scalar_t* result_data = result.data_ptr<scalar_t>();
   int64_t ninputs = tensors.size();
   std::vector<InputMeta> inputs;
   inputs.reserve(ninputs);
   for (auto const &tensor : tensors) {
-    inputs.emplace_back(tensor, dim, inner);
+    inputs.emplace_back(tensor, dim, result.stride(dim));
   }
- 
+
   using Vec = vec256::Vec256<scalar_t>;
-  int64_t offset = 0;
-  for (int64_t i = 0; i < outer; i++) {
+  scalar_t* result_ptr = result_data;
+  for (int64_t i = 0; i < outer; ++i) {
     for (int64_t j = 0; j < ninputs; j++) {
-      scalar_t* result_ptr = result_data + offset;
       int64_t local_inner = inputs[j].inner_size;
       scalar_t* input_ptr = (scalar_t*)(inputs[j].data_ptr) + i * local_inner;
       if (local_inner < Vec::size()) {
@@ -57,7 +49,7 @@ void cat_serial_kernel_impl(Tensor& result, TensorList tensors, int64_t dim) {
             input_ptr,
             local_inner);
       }
-      offset += local_inner;
+      result_ptr += local_inner;
     }
   }
 }

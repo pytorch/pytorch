@@ -28,7 +28,7 @@ type_map = {
 all_types = type_map['floating_point'] + type_map['integral'] + type_map['quantized']
 type_map['all'] = all_types
 
-all_backends = ['CPU', 'CUDA', 'SparseCPU', 'SparseCUDA', 'MkldnnCPU', 'QuantizedCPU', 'QuantizedCUDA']
+all_backends = ['CPU', 'CUDA', 'SparseCPU', 'SparseCUDA', 'MkldnnCPU', 'QuantizedCPU', 'QuantizedCUDA', 'Vulkan']
 default_backends = ['CPU', 'CUDA']
 
 
@@ -63,7 +63,7 @@ def process_types_and_backends(option):
         return ret
 
     for backend in backend_types.keys():
-        assert(backend in all_backends)
+        assert backend in all_backends, "{} {}".format(backend, option['name'])
         backend_types[backend] = set(expand(backend_types[backend]))
 
     # special case remove Half for cpu unless it is explicitly enabled

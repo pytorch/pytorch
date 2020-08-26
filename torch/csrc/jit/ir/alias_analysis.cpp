@@ -507,9 +507,12 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::ListUnpack:
     case prim::PythonOp:
     case prim::GetAttr:
-      if (isFrozen_ && node->kind() == prim::GetAttr &&
-          node->input()->type()->expect<ClassType>()->is_module())
-        return analyzeCreator(node);
+      if (isFrozen_ && node->kind() == prim::GetAttr) {
+        auto& ty = node->input()->type();
+        if (ty->expect<ClassType>()->is_module()) {
+          return analyzeCreator(node);
+        }
+      }
       return analyzeExtractor(node);
     case prim::unchecked_cast:
       return makePointerTo(node->output(), node->input());
@@ -520,10 +523,15 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::SetAttr:
       return analyzeSetAttr(node);
     case prim::profile:
-      if (node->inputs().size() > 0) {
-        makePointerTo(node->output(), node->inputs().at(0));
+      makePointerTo(node->output(), node->inputs().at(0));
+      return;
+    case prim::TypeCheck: {
+      auto num_inputs = node->inputs().size();
+      for (size_t i = 0; i < num_inputs; i++) {
+        makePointerTo(node->outputs().at(i), node->inputs().at(i));
       }
       return;
+    }
     case prim::BailOut:
       TORCH_INTERNAL_ASSERT(
           node->inputs().at(0)->node()->kind() == prim::BailoutTemplate);
@@ -534,6 +542,8 @@ void AliasDb::analyzeImpl(Node* node) {
       return;
     case prim::CallFunction:
     case prim::CallMethod:
+    case prim::Enter:
+    case prim::Exit:
       // TODO: this can be improved with summarizes of what the function does
       // for now we assume the worst
       // NB: update safeToChangeAliasingRelationship if changed
@@ -1081,9 +1091,9 @@ void AliasDb::replaceWithNewValue(Value* existing, Value* new_value) {
       *unshapedType(existing->type()) == *unshapedType(new_value->type()),
       "Types must be strictly equal if you are replacing aliasing information. ",
       "Got existing: '",
-      existing->type()->python_str(),
+      existing->type()->repr_str(),
       "', new_value: '",
-      new_value->type()->python_str(),
+      new_value->type()->repr_str(),
       "'");
   if (!isMutableTypeInternal(existing)) {
     return;
@@ -1099,9 +1109,9 @@ void AliasDb::copyValue(Value* from, Value* to) {
       *unshapedType(from->type()) == *unshapedType(to->type()),
       "Types must be strictly equal if you are copying aliasing information. ",
       "Got from: '",
-      from->type()->python_str(),
+      from->type()->repr_str(),
       "', to: '",
-      to->type()->python_str(),
+      to->type()->repr_str(),
       "'");
   if (!isMutableTypeInternal(to)) {
     return;
@@ -1348,8 +1358,28 @@ bool AliasDb::tryMove(
   }
 
   auto curNode = toMove->next_in_graph[direction];
+
+  bool toMoveIsOnMoveSide =
+      (moveSide == MoveSide::BEFORE && toMove->isBefore(movePoint)) ||
+      (moveSide == MoveSide::AFTER && toMove->isAfter(movePoint));
+
+  if (toMoveIsOnMoveSide && curNode == movePoint) {
+    return true;
+  }
+
+  // it is never valid to move reorder a node with side effects
+  if (toMove->hasSideEffects() ||
+      (!toMoveIsOnMoveSide && movePoint->hasSideEffects())) {
+    return false;
+  }
+
   // Move forward one node at a time
   while (curNode != movePoint) {
+    // never valid to reorder around a node with side effects
+    if (curNode->hasSideEffects()) {
+      return false;
+    }
+
     if (workingSet.dependsOn(curNode)) {
       // If we can't move past this node, add it to the working set
       workingSet.add(curNode);
@@ -1537,8 +1567,8 @@ void Lint(const AliasDb* db) {
     auto it = db->elementMap_.find(v);
     if (it == db->elementMap_.end()) {
       failed = true;
-      ss << "Value %" << v->debugName() << " of type "
-         << v->type()->python_str() << " wasn't found in the element map.\n"
+      ss << "Value %" << v->debugName() << " of type " << v->type()->repr_str()
+         << " wasn't found in the element map.\n"
          << "It was defined in " << *v->node();
     }
   }

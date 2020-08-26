@@ -40,6 +40,13 @@ using Variable = at::Tensor;
 
 namespace torch { namespace autograd {
 
+/// Check if this type is supported by the autograd engine.
+/// If you change this, update the doc at the top of the torch/autograd/__init__.py file
+/// and "test_set_requires_grad_only_for_continuous_types" in test/test_autograd.py
+static inline bool isDifferentiableType(at::ScalarType t) {
+    return isFloatingType(t) || isComplexType(t);
+}
+
 struct Node;
 
 ///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -213,8 +220,7 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
   /// variables.
   void set_requires_grad(bool requires_grad, at::TensorImpl* self_impl) override {
     TORCH_CHECK(
-      !requires_grad || at::isFloatingType(at::typeMetaToScalarType(self_impl->dtype())) ||
-      at::isComplexType(at::typeMetaToScalarType(self_impl->dtype())),
+      !requires_grad || isDifferentiableType(at::typeMetaToScalarType(self_impl->dtype())),
       "Only Tensors of floating point and complex dtype can require gradients");
     requires_grad_ = requires_grad;
   }
@@ -224,7 +230,7 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
   }
 
   /// Accesses the gradient `Variable` of this `Variable`.
-  Variable& grad() override {
+  Variable& mutable_grad() override {
     return grad_;
   }
 
@@ -371,9 +377,14 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
 /// - NO_GRAD_MODE should be set when a view in created when GradMode is disabled
 /// - MULTI_OUTPUT_NODE should be set when a Node created by codegen code returns
 ///   multiple differentiable views
+/// - MULTI_OUTPUT_SAFE should be set when a view was returned by a function
+///   that returns multiple views, and unsafe_* version of that function
+///   exists. These are note considered as views for now for the view+inplace
+///   logic! The graph won't be rewritten when an inplace is done, only a
+///   warning will be thrown.
 /// - DEFAULT is for all other cases
 enum class CreationMeta: uint8_t { DEFAULT, IN_CUSTOM_FUNCTION, MULTI_OUTPUT_NODE,
-                                   NO_GRAD_MODE };
+                                   NO_GRAD_MODE, MULTI_OUTPUT_SAFE };
 
 /// Unified function to handle error checking when rebase happens
 /// indirect=true means that the caller is not doing the inplace, but the inplace happened

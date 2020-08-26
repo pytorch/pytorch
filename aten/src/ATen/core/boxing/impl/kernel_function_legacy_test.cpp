@@ -9,6 +9,8 @@
 #include <ATen/core/Tensor.h>
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
 
+#include <ATen/core/LegacyTypeDispatch.h>
+
 /**
  * This file tests the legacy function-based API for registering kernels.
  *

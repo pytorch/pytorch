@@ -22,6 +22,7 @@ using c10::NoneType;
 using c10::NumberType;
 using c10::OptionalType;
 using c10::QSchemeType;
+using c10::QuantizerType;
 using c10::RRefType;
 using c10::StringType;
 using c10::Symbol;
@@ -41,6 +42,7 @@ TypePtr SchemaTypeParser::parseBaseType() {
       {"MemoryFormat", IntType::get()},
       {"Storage", IntType::get()},
       {"QScheme", QSchemeType::get()},
+      {"Quantizer", QuantizerType::get()},
       {"ConstQuantizerPtr",
        IntType::get()}, // TODO This type should be removed from the schema
                         // parser, it should use the custom class mechanism
@@ -55,6 +57,7 @@ TypePtr SchemaTypeParser::parseBaseType() {
       {"Capsule", CapsuleType::get()},
       {"Any", at::AnyType::get()},
       {"AnyClassType", at::AnyClassType::get()},
+      {"AnyEnumType", at::AnyEnumType::get()},
   };
   auto tok = L.cur();
   if (!L.nextIf(TK_NONE)) {
@@ -144,6 +147,36 @@ c10::optional<at::ScalarType> SchemaTypeParser::parseTensorDType(
   return c10::nullopt;
 }
 
+c10::optional<c10::Device> SchemaTypeParser::tryToParseDeviceType() {
+  c10::optional<c10::Device> device;
+  L.expect('=');
+  const std::string& dev = L.expect(TK_IDENT).text();
+
+  if (dev == "cpu") {
+    return c10::Device(at::kCPU);
+  }
+
+  if (dev == "cuda") {
+    c10::DeviceIndex device_idx = -1;
+    if (L.cur().kind == ':') {
+      L.expect(':');
+      const std::string& num = L.expect(TK_NUMBER).text();
+      std::string::size_type num_len;
+      device_idx = c10::stoi(num, &num_len);
+    }
+    return c10::Device(at::kCUDA, device_idx);
+  }
+
+  throw ErrorReport(L.cur()) << "cannot parse device type '" << dev << "'\n";
+}
+
+c10::optional<bool> SchemaTypeParser::tryToParseRequiresGrad() {
+  L.expect('=');
+  const std::string& num = L.expect(TK_NUMBER).text();
+  std::string::size_type num_len;
+  return (bool)c10::stoi(num, &num_len);
+}
+
 TypePtr SchemaTypeParser::parseRefinedTensor() {
   auto maybe_dtype = parseTensorDType(L.expect(TK_IDENT).text());
   AT_ASSERT(maybe_dtype);
@@ -151,19 +184,90 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
   TypePtr ptr;
   L.expect('(');
   TypePtr tensor_type;
+  c10::optional<c10::Device> device;
+  c10::optional<bool> requires_grad;
   if (L.cur().kind == '*') {
+    // Parse a type with unknown sizes but known number of dimensions. The type
+    // might also have requires_grad and/or device option.
+    // An example of a type we're handling here:
+    //   Float(*,*,*, device=cpu, requires_grad=1)
     size_t num_dims = 0;
     parseList(TK_NOTHING, ',', ')', [&] {
+      // Extra handling for options like 'device' and 'requires_grad'
+      if (L.cur().kind == TK_IDENT) {
+        const std::string& field = L.expect(TK_IDENT).text();
+        if (field == "device") {
+          auto parsed_device = tryToParseDeviceType();
+          if (parsed_device.has_value()) {
+            if (device.has_value()) {
+              throw ErrorReport(L.cur()) << "'device' is specified twice";
+            }
+            device = parsed_device;
+          }
+          return;
+        }
+        if (field == "requires_grad") {
+          auto parsed_requires_grad = tryToParseRequiresGrad();
+          if (parsed_requires_grad.has_value()) {
+            if (requires_grad.has_value()) {
+              throw ErrorReport(L.cur())
+                  << "'requires_grad' is specified twice";
+            }
+            requires_grad = parsed_requires_grad;
+          }
+          return;
+        }
+        throw ErrorReport(L.cur()) << "Unexpected specifier '" << field << "'";
+      }
+      if (device.has_value() || requires_grad.has_value()) {
+        throw ErrorReport(L.cur())
+            << "'device' and 'requires_grad' should come after dimensions in the type specification";
+      }
       L.expect('*');
       num_dims++;
     });
-    ptr =
-        at::TensorType::create(dtype, DeviceType::CPU, num_dims, c10::nullopt);
+    ptr = at::TensorType::create(dtype, device, num_dims, requires_grad);
   } else {
+    // Parse a type with known sizes and (optionally) strides. The type
+    // might also have requires_grad and/or device option.
+    // An example of a type we're handling here:
+    //   Long(10:48,8:6,6:1, requires_grad=0, device=cuda:1)
     std::vector<int64_t> dims;
     bool seen_strides = false;
     std::vector<int64_t> strides;
     parseList(TK_NOTHING, ',', ')', [&] {
+      // Extra handling for options like 'device' and 'requires_grad'
+      if (L.cur().kind == TK_IDENT) {
+        const std::string& field = L.expect(TK_IDENT).text();
+        if (field == "device") {
+          auto parsed_device = tryToParseDeviceType();
+          if (parsed_device.has_value()) {
+            if (device.has_value()) {
+              throw ErrorReport(L.cur()) << "'device' is specified twice";
+            }
+            device = parsed_device;
+          }
+          return;
+        }
+        if (field == "requires_grad") {
+          auto parsed_requires_grad = tryToParseRequiresGrad();
+          if (parsed_requires_grad.has_value()) {
+            if (requires_grad.has_value()) {
+              throw ErrorReport(L.cur())
+                  << "'requires_grad' is specified twice";
+            }
+            requires_grad = parsed_requires_grad;
+          }
+          return;
+        }
+        throw ErrorReport(L.cur()) << "Unexpected specifier '" << field << "'";
+      }
+      if (device.has_value() || requires_grad.has_value()) {
+        throw ErrorReport(L.cur())
+            << "'device' and 'requires_grad' should come after dimensions in the type specification";
+      }
+
+      // Parsing the size/stride numbers
       const std::string& num = L.expect(TK_NUMBER).text();
       std::string::size_type num_len;
       size_t dim = c10::stoi(num, &num_len);
@@ -186,17 +290,17 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
       }
       ptr = at::TensorType::create(
           dtype,
-          DeviceType::CPU,
+          device,
           c10::VaryingShape<int64_t>(dims),
           c10::VaryingShape<int64_t>(strides),
-          c10::nullopt);
+          requires_grad);
     } else {
       ptr = at::TensorType::create(
           dtype,
-          DeviceType::CPU,
+          device,
           c10::VaryingShape<int64_t>(dims_ref),
           c10::VaryingShape<int64_t>(dims.size()),
-          c10::nullopt);
+          requires_grad);
     }
   }
   return ptr;

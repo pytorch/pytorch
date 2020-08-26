@@ -6,11 +6,11 @@ namespace torch {
 namespace jit {
 namespace detail {
 
-c10::FunctionSchema getPreprocessSchema();
+constexpr static auto kBackendsNamespace = "__backends__";
 
-c10::FunctionSchema getCompileSchema();
-
-c10::FunctionSchema getExecuteSchema();
+c10::FunctionSchema TORCH_API getPreprocessSchema();
+c10::FunctionSchema TORCH_API getCompileSchema();
+c10::FunctionSchema TORCH_API getExecuteSchema();
 
 template <typename TBackendInterface>
 std::function<void(Stack&)> getPreprocessFunc() {
@@ -45,7 +45,6 @@ std::function<void(Stack&)> getExecuteFunc() {
     push(stack, res);
   };
 }
-
 } // namespace detail
 } // namespace jit
 } // namespace torch

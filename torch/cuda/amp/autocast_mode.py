@@ -140,7 +140,8 @@ class autocast(object):
 # may be falsely detected as "Iterables."
 def _cast(value, dtype):
     if isinstance(value, torch.Tensor):
-        return value.to(dtype) if (value.is_floating_point() and value.is_cuda) else value
+        is_eligible = (value.is_floating_point() and value.is_cuda and (value.dtype is not torch.float64))
+        return value.to(dtype) if is_eligible else value
     elif isinstance(value, string_classes):
         return value
     elif isinstance(value, np.ndarray):
@@ -169,10 +170,15 @@ def custom_fwd(fwd=None, **kwargs):
     :class:`torch.autograd.Function`).  See the :ref:`example page<amp-custom-examples>` for more detail.
 
     Arguments:
-        cast_inputs (:class:`torch.dtype` or None, optional, default=None):  If not ``None``, casts incoming
-            floating-point Tensors to the target dtype (non-floating-point Tensors are not affected),
-            and causes ``forward`` to execute with autocast disabled.
+        cast_inputs (:class:`torch.dtype` or None, optional, default=None):  If not ``None``,
+            when ``forward`` runs in an autocast-enabled region, casts incoming
+            floating-point CUDA Tensors to the target dtype (non-floating-point Tensors are not affected),
+            then executes ``forward`` with autocast disabled.
             If ``None``, ``forward``'s internal ops execute with the current autocast state.
+
+    .. note::
+        If the decorated ``forward`` is called outside an autocast-enabled region,
+        :func:`custom_fwd<custom_fwd>` is a no-op and ``cast_inputs`` has no effect.
     """
     if fwd is None:
         if len(kwargs) == 0:
@@ -194,9 +200,13 @@ def custom_fwd(fwd=None, **kwargs):
             args[0]._fwd_used_autocast = torch.is_autocast_enabled()
             return fwd(*args, **kwargs)
         else:
+            autocast_context = torch.is_autocast_enabled()
             args[0]._fwd_used_autocast = False
-            with autocast(enabled=False):
-                return fwd(*_cast(args, cast_inputs), **_cast(kwargs, cast_inputs))
+            if autocast_context:
+                with autocast(enabled=False):
+                    return fwd(*_cast(args, cast_inputs), **_cast(kwargs, cast_inputs))
+            else:
+                return fwd(*args, **kwargs)
     return decorate_fwd
 
 

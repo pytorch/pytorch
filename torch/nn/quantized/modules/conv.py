@@ -92,11 +92,6 @@ class _ConvNd(nn.Module):
 
     @torch.jit.export
     def __getstate__(self):
-        if not torch.jit.is_scripting():
-            raise RuntimeError(
-                'torch.save() is not currently supported for quantized modules.'
-                ' See https://github.com/pytorch/pytorch/issues/24045.'
-                ' Please use state_dict or torch.jit serialization.')
         (w, b) = self._weight_bias()
         return (
             self.in_channels,
@@ -149,6 +144,25 @@ class _ConvNd(nn.Module):
         self.scale = state[12]
         self.zero_point = state[13]
         self.training = state[14]
+
+    @classmethod
+    def get_qconv(cls, mod, activation_post_process, weight_post_process=None):
+        r"""Creates a qconv object and returns it. 
+        """
+        if weight_post_process is None:
+            weight_post_process = mod.qconfig.weight()
+        weight_post_process(mod.weight)
+        act_scale, act_zp = activation_post_process.calculate_qparams()
+        assert weight_post_process.dtype == torch.qint8, \
+            'Weight observer must have a dtype of qint8'
+        qweight = _quantize_weight(mod.weight.float(), weight_post_process)
+        qconv = cls(mod.in_channels, mod.out_channels, mod.kernel_size,
+                    mod.stride, mod.padding, mod.dilation, mod.groups,
+                    mod.bias is not None, mod.padding_mode)
+        qconv.set_weight_bias(qweight, mod.bias)
+        qconv.scale = float(act_scale)
+        qconv.zero_point = int(act_zp)
+        return qconv
 
 
 class Conv1d(_ConvNd):
@@ -241,20 +255,7 @@ class Conv1d(_ConvNd):
             mod = mod[0]
         else:
             activation_post_process = mod.activation_post_process
-        weight_post_process = mod.qconfig.weight()
-        weight_post_process(mod.weight)
-        act_scale, act_zp = mod.activation_post_process.calculate_qparams()
-        assert weight_post_process.dtype == torch.qint8, \
-            'Weight observer must have a dtype of qint8'
-        qweight = _quantize_weight(mod.weight.float(), weight_post_process)
-        qconv = cls(mod.in_channels, mod.out_channels, mod.kernel_size,
-                    mod.stride, mod.padding, mod.dilation, mod.groups,
-                    mod.bias is not None, mod.padding_mode)
-        qconv.set_weight_bias(qweight, mod.bias)
-        qconv.scale = float(act_scale)
-        qconv.zero_point = int(act_zp)
-
-        return qconv
+        return cls.get_qconv(mod, activation_post_process)
 
 
 class Conv2d(_ConvNd):
@@ -364,19 +365,8 @@ class Conv2d(_ConvNd):
             else:
                 activation_post_process = mod.activation_post_process
             weight_post_process = mod.qconfig.weight()
-        weight_post_process(mod.weight)
-        act_scale, act_zp = activation_post_process.calculate_qparams()
-        assert weight_post_process.dtype == torch.qint8, \
-            'Weight observer must have a dtype of qint8'
-        qweight = _quantize_weight(mod.weight.float(), weight_post_process)
-        qconv = cls(mod.in_channels, mod.out_channels, mod.kernel_size,
-                    mod.stride, mod.padding, mod.dilation, mod.groups,
-                    mod.bias is not None, mod.padding_mode)
-        qconv.set_weight_bias(qweight, mod.bias)
-        qconv.scale = float(act_scale)
-        qconv.zero_point = int(act_zp)
 
-        return qconv
+        return cls.get_qconv(mod, activation_post_process, weight_post_process)
 
 
 class Conv3d(_ConvNd):
@@ -473,21 +463,7 @@ class Conv3d(_ConvNd):
             mod = mod[0]
         else:
             activation_post_process = mod.activation_post_process
-        weight_post_process = mod.qconfig.weight()
-        weight_post_process(mod.weight)
-        act_scale, act_zp = activation_post_process.calculate_qparams()
-        assert weight_post_process.dtype == torch.qint8, \
-            'Weight observer must have a dtype of qint8'
-        qweight = _quantize_weight(mod.weight.float(), weight_post_process)
-        qconv = cls(mod.in_channels, mod.out_channels, mod.kernel_size,
-                    mod.stride, mod.padding, mod.dilation, mod.groups,
-                    mod.bias is not None, mod.padding_mode)
-        qconv.set_weight_bias(qweight, mod.bias)
-        qconv.scale = float(act_scale)
-        qconv.zero_point = int(act_zp)
-
-        return qconv
-
+        return cls.get_qconv(mod, activation_post_process)
 
 # === Transposed Convolutions ===
 

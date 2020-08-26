@@ -20,6 +20,7 @@ SystemEnv = namedtuple('SystemEnv', [
     'is_debug_build',
     'cuda_compiled_version',
     'gcc_version',
+    'clang_version',
     'cmake_version',
     'os',
     'python_version',
@@ -38,11 +39,11 @@ def run(command):
     """Returns (return-code, stdout, stderr)"""
     p = subprocess.Popen(command, stdout=subprocess.PIPE,
                          stderr=subprocess.PIPE, shell=True)
-    output, err = p.communicate()
+    raw_output, raw_err = p.communicate()
     rc = p.returncode
     enc = locale.getpreferredencoding()
-    output = output.decode(enc)
-    err = err.decode(enc)
+    output = raw_output.decode(enc)
+    err = raw_err.decode(enc)
     return rc, output.strip(), err.strip()
 
 
@@ -67,7 +68,9 @@ def run_and_parse_first_match(run_lambda, command, regex):
 
 def get_conda_packages(run_lambda):
     if get_platform() == 'win32':
-        grep_cmd = r'findstr /R "torch numpy cudatoolkit soumith mkl magma"'
+        system_root = os.environ.get('SystemRoot', 'C:\\Windows')
+        findstr_cmd = os.path.join(system_root, 'System32', 'findstr')
+        grep_cmd = r'{} /R "torch numpy cudatoolkit soumith mkl magma"'.format(findstr_cmd)
     else:
         grep_cmd = r'grep "torch\|numpy\|cudatoolkit\|soumith\|mkl\|magma"'
     conda = os.environ.get('CONDA_EXE', 'conda')
@@ -81,6 +84,9 @@ def get_conda_packages(run_lambda):
 
 def get_gcc_version(run_lambda):
     return run_and_parse_first_match(run_lambda, 'gcc --version', r'gcc (.*)')
+
+def get_clang_version(run_lambda):
+    return run_and_parse_first_match(run_lambda, 'clang --version', r'clang version (.*)')
 
 
 def get_cmake_version(run_lambda):
@@ -117,7 +123,10 @@ def get_running_cuda_version(run_lambda):
 def get_cudnn_version(run_lambda):
     """This will return a list of libcudnn.so; it's hard to tell which one is being used"""
     if get_platform() == 'win32':
-        cudnn_cmd = 'where /R "%CUDA_PATH%\\bin" cudnn*.dll'
+        system_root = os.environ.get('SystemRoot', 'C:\\Windows')
+        cuda_path = os.environ.get('CUDA_PATH', "%CUDA_PATH%")
+        where_cmd = os.path.join(system_root, 'System32', 'where')
+        cudnn_cmd = '{} /R "{}\\bin" cudnn*.dll'.format(where_cmd, cuda_path)
     elif get_platform() == 'darwin':
         # CUDA libraries and drivers can be found in /usr/local/cuda/. See
         # https://docs.nvidia.com/cuda/cuda-installation-guide-mac-os-x/index.html#install
@@ -133,15 +142,15 @@ def get_cudnn_version(run_lambda):
         if l is not None and os.path.isfile(l):
             return os.path.realpath(l)
         return None
-    files = set()
+    files_set = set()
     for fn in out.split('\n'):
         fn = os.path.realpath(fn)  # eliminate symbolic links
         if os.path.isfile(fn):
-            files.add(fn)
-    if not files:
+            files_set.add(fn)
+    if not files_set:
         return None
     # Alphabetize the result because the order is non-deterministic otherwise
-    files = list(sorted(files))
+    files = list(sorted(files_set))
     if len(files) == 1:
         return files[0]
     result = '\n'.join(files)
@@ -174,7 +183,10 @@ def get_mac_version(run_lambda):
 
 
 def get_windows_version(run_lambda):
-    return run_and_read_all(run_lambda, 'wmic os get Caption | findstr /v Caption')
+    system_root = os.environ.get('SystemRoot', 'C:\\Windows')
+    wmic_cmd = os.path.join(system_root, 'System32', 'Wbem', 'wmic')
+    findstr_cmd = os.path.join(system_root, 'System32', 'findstr')
+    return run_and_read_all(run_lambda, '{} os get Caption | {} /v Caption'.format(wmic_cmd, findstr_cmd))
 
 
 def get_lsb_version(run_lambda):
@@ -187,6 +199,7 @@ def check_release_file(run_lambda):
 
 
 def get_os(run_lambda):
+    from platform import machine
     platform = get_platform()
 
     if platform == 'win32' or platform == 'cygwin':
@@ -196,20 +209,20 @@ def get_os(run_lambda):
         version = get_mac_version(run_lambda)
         if version is None:
             return None
-        return 'Mac OSX {}'.format(version)
+        return 'Mac OSX {} ({})'.format(version, machine())
 
     if platform == 'linux':
         # Ubuntu/Debian based
         desc = get_lsb_version(run_lambda)
         if desc is not None:
-            return desc
+            return '{} ({})'.format(desc, machine())
 
         # Try reading /etc/*-release
         desc = check_release_file(run_lambda)
         if desc is not None:
-            return desc
+            return '{} ({})'.format(desc, machine())
 
-        return platform
+        return '{} ({})'.format(platform, machine())
 
     # Unknown platform
     return platform
@@ -221,7 +234,9 @@ def get_pip_packages(run_lambda):
     # People generally have `pip` as `pip` or `pip3`
     def run_with_pip(pip):
         if get_platform() == 'win32':
-            grep_cmd = r'findstr /R "numpy torch"'
+            system_root = os.environ.get('SystemRoot', 'C:\\Windows')
+            findstr_cmd = os.path.join(system_root, 'System32', 'findstr')
+            grep_cmd = r'{} /R "numpy torch"'.format(findstr_cmd)
         else:
             grep_cmd = r'grep "torch\|numpy"'
         return run_and_read_all(run_lambda, pip + ' list --format=freeze | ' + grep_cmd)
@@ -250,8 +265,8 @@ def get_env_info():
 
     if TORCH_AVAILABLE:
         version_str = torch.__version__
-        debug_mode_str = torch.version.debug
-        cuda_available_str = torch.cuda.is_available()
+        debug_mode_str = str(torch.version.debug)
+        cuda_available_str = str(torch.cuda.is_available())
         cuda_version_str = torch.version.cuda
     else:
         version_str = debug_mode_str = cuda_available_str = cuda_version_str = 'N/A'
@@ -259,7 +274,7 @@ def get_env_info():
     return SystemEnv(
         torch_version=version_str,
         is_debug_build=debug_mode_str,
-        python_version='{}.{}'.format(sys.version_info[0], sys.version_info[1]),
+        python_version='{}.{} ({}-bit runtime)'.format(sys.version_info[0], sys.version_info[1], sys.maxsize.bit_length() + 1),
         is_cuda_available=cuda_available_str,
         cuda_compiled_version=cuda_version_str,
         cuda_runtime_version=get_running_cuda_version(run_lambda),
@@ -271,6 +286,7 @@ def get_env_info():
         conda_packages=get_conda_packages(run_lambda),
         os=get_os(run_lambda),
         gcc_version=get_gcc_version(run_lambda),
+        clang_version=get_clang_version(run_lambda),
         cmake_version=get_cmake_version(run_lambda),
     )
 
@@ -281,6 +297,7 @@ CUDA used to build PyTorch: {cuda_compiled_version}
 
 OS: {os}
 GCC version: {gcc_version}
+Clang version: {clang_version}
 CMake version: {cmake_version}
 
 Python version: {python_version}

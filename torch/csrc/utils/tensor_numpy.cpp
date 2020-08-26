@@ -84,10 +84,10 @@ PyObject* tensor_to_numpy(const at::Tensor& tensor) {
         "can't convert %s layout tensor to numpy."
         "convert the tensor to a strided layout first.", c10::str(tensor.layout()).c_str());
   }
-  if (tensor.requires_grad()) {
+  if (at::GradMode::is_enabled() && tensor.requires_grad()) {
     throw std::runtime_error(
-        "Can't call numpy() on Variable that requires grad. "
-        "Use var.detach().numpy() instead.");
+        "Can't call numpy() on Tensor that requires grad. "
+        "Use tensor.detach().numpy() instead.");
   }
   auto dtype = aten_to_numpy_dtype(tensor.scalar_type());
   auto sizes = to_numpy_shape(tensor.sizes());

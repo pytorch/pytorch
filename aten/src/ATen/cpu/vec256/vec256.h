@@ -7,12 +7,11 @@
 
 #include <ATen/cpu/vec256/vec256_base.h>
 #include <ATen/cpu/vec256/vec256_float.h>
+#include <ATen/cpu/vec256/vec256_float_neon.h>
 #include <ATen/cpu/vec256/vec256_bfloat16.h>
 #include <ATen/cpu/vec256/vec256_double.h>
 #include <ATen/cpu/vec256/vec256_int.h>
 #include <ATen/cpu/vec256/vec256_qint.h>
-#include <ATen/cpu/vec256/vec256_std_complex_float.h>
-#include <ATen/cpu/vec256/vec256_std_complex_double.h>
 #include <ATen/cpu/vec256/vec256_complex_float.h>
 #include <ATen/cpu/vec256/vec256_complex_double.h>
 

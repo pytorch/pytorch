@@ -1,5 +1,3 @@
-// (c) Facebook, Inc. and its affiliates. Confidential and proprietary.
-
 package org.pytorch;
 
 import com.facebook.jni.HybridData;
@@ -9,6 +7,7 @@ import com.facebook.soloader.nativeloader.NativeLoader;
 class NativePeer implements INativePeer {
   static {
     NativeLoader.loadLibrary("pytorch_jni");
+    PyTorchCodegenLoader.loadNativeLibs();
   }
 
   private final HybridData mHybridData;

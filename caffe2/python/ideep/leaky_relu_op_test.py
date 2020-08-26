@@ -5,7 +5,7 @@ from __future__ import unicode_literals
 
 import unittest
 import hypothesis.strategies as st
-from hypothesis import given
+from hypothesis import given, settings
 import numpy as np
 from caffe2.python import core, workspace, model_helper
 import caffe2.python.hypothesis_test_util as hu
@@ -47,6 +47,7 @@ class LeakyReluTest(hu.HypothesisTestCase):
            alpha=st.floats(0, 1),
            seed=st.integers(0, 1000),
            **mu.gcs)
+    @settings(deadline=1000)
     def test_leaky_relu_gradients(self, gc, dc, N, C, H, W, alpha, seed):
         np.random.seed(seed)
 
