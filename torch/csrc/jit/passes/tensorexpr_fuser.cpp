@@ -148,7 +148,7 @@ class TensorExprFuser {
       return n;
     }
     std::unordered_map<Value*, Value*> vmap;
-    GRAPH_UPDATE("Creating a tensorexpr::Group node from: ", *n);
+    GRAPH_UPDATE("Creating a prim::TensorExprGroup node from: ", *n);
     auto te_group =
         SubgraphUtils::createSingletonSubgraph(n, prim::TensorExprGroup, vmap);
     updateTypeinfoMapWithVmap(vmap);

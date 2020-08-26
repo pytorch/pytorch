@@ -315,7 +315,6 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
     runNoGradOptimizations(copy);
   }
   EliminateDeadCode(copy);
-  ClearProfilingInformation(copy);
   GRAPH_DUMP("After runProfilingOptimizations:", copy);
 }
 

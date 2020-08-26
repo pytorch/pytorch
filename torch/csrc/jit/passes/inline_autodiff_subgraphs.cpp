@@ -49,7 +49,7 @@ graph_node_list::iterator scanNode(Node* node, size_t threshold) {
   // now that we inline the graph, we are no longer detaching input tensors,
   // so the profiles will have outdated requires_grad=False.
   // conservatively update them to maybe requiring grad, bc we might create
-  // autodiff graphs is tensors maybe require grad
+  // autodiff graphs when the tensors maybe require grad
   UpdateDifferentiableGraphRequiresGrad(subgraph, c10::nullopt);
   SubgraphUtils::unmergeSubgraph(node);
   return next_node;
