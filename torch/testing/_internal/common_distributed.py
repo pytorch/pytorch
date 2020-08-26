@@ -1,5 +1,6 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
+from multiprocessing import Manager
 import os
 import sys
 import tempfile
@@ -260,6 +261,12 @@ class MultiProcessTestCase(TestCase):
         return self.id().split(".")[-1]
 
     def _start_processes(self, proc):
+        test_skips_manager = Manager()
+        test_skips = test_skips_manager.dict()
+        global TEST_SKIPS
+        test_skips.update(TEST_SKIPS)
+        TEST_SKIPS = test_skips
+
         self.processes = []
         for rank in range(int(self.world_size)):
             process = proc(

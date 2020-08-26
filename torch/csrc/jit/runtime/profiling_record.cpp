@@ -235,6 +235,9 @@ void ProfilingRecord::instrumentBlock(Block* block) {
       }
 
       if (i->type()->cast<OptionalType>() && hasGradSumToSizeUses(i)) {
+        // here we are profile the definition instead of the use,
+        // because we are only optimizing in the case of a None value which is
+        // immutable
         auto opt_pn = createProfileOptionalNode(nullptr, {i});
         std::function<void(Stack&)> optional_profiler = [this,
                                                          opt_pn](Stack& stack) {
@@ -254,7 +257,6 @@ void ProfilingRecord::instrumentBlock(Block* block) {
         opt_pn->setCallback(optional_profiler);
         auto pno = opt_pn->addOutput();
         pno->setType(i->type());
-        WithInsertPoint guard(i->node());
         opt_pn->insertAfter(i->node());
         i->replaceAllUsesAfterNodeWith(opt_pn, pno);
       }
