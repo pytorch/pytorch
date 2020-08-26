@@ -119,6 +119,7 @@ class Graph:
 
         if op not in self._used_names:
             self._used_names[op] = 0
+            # Avoid shadowing PyTorch and Python builtins.
             if not hasattr(torch, op) and \
                not hasattr(torch.nn.functional, op) and \
                not hasattr(torch.nn, op) and \
