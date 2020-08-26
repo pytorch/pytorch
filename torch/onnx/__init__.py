@@ -273,25 +273,19 @@ def _diagnose_export(*args, **kwargs):
             the user for their runtime backend.
             Example graph::
 
-                graph(%0 : Float(2:12, 3:4, 4:1, requires_grad=0, device=cpu),
-                      %1 : Float(2:12, 3:4, 4:1, requires_grad=0, device=cpu)):
-                    %11 : Long(requires_grad=0, device=cpu) = prim::Constant[value={2}]()
-                    %7 : Float(2:12, 3:4, 4:1, requires_grad=0, device=cpu) = aten::add(%0, %1, %11) # main.py:6:0
-                    %12 : Long(requires_grad=0, device=cpu) = prim::Constant[value={0}]()
-                    %9 : None = prim::Constant()
-                    %10 : Float(2:12, 3:4, 4:1, requires_grad=0, device=cpu) = aten::cumsum(%7, %12, %9) # main.py:6:0
-                    return (%10)
+                graph(%0 : Float(2:12, 3:4, 4:1, requires_grad=0, device=cpu)):
+                    %6 : Long(requires_grad=0, device=cpu) = prim::Constant[value={0}]()
+                    %4 : None = prim::Constant()
+                    %5 : Float(2:12, 3:4, 4:1, requires_grad=0, device=cpu) = aten::cumsum(%0, %6, %4) # main.py:6:0
+                    return (%5)
 
             is exported as::
 
-                graph(%0 : Float(2:12, 3:4, 4:1, requires_grad=0, device=cpu),
-                      %1 : Float(2:12, 3:4, 4:1, requires_grad=0, device=cpu)):
-                    %2 : Long(requires_grad=0, device=cpu) = onnx::Constant[value={2}]()
-                    %3 : Float(2:12, 3:4, 4:1, requires_grad=0, device=cpu) = aten::add(%0, %1, %2) # main.py:6:0
-                    %4 : Long(requires_grad=0, device=cpu) = onnx::Constant[value={0}]()
-                    %5 : None = prim::Constant()
-                    %6 : Float(2:12, 3:4, 4:1, requires_grad=0, device=cpu) = aten::cumsum(%3, %4, %5) # main.py:6:0
-                    return (%6)
+                graph(%0 : Float(2:12, 3:4, 4:1, requires_grad=0, device=cpu)):
+                    %6 : Long(requires_grad=0, device=cpu) = prim::Constant[value={0}]()
+                    %4 : None = prim::Constant()
+                    %5 : Float(2:12, 3:4, 4:1, requires_grad=0, device=cpu) = aten::cumsum(%0, %6, %4) # main.py:6:0
+                    return (%5)
 
             In the above example, aten::add with alpha != 1 is not supported and aten::cumsum in not
             implemented in opset 9, hence exporter falls through and provides a list of unsupported ops, 
