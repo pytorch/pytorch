@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/runtime/profiling_graph_executor_impl.h>
+#include <jit/passes/inliner.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/bailout_graph.h>
 #include <torch/csrc/jit/passes/batch_mm.h>
@@ -27,6 +28,7 @@
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
+#include <torch/include/torch/csrc/jit/passes/clear_profiling.h>
 
 C10_DECLARE_bool();
 
@@ -313,11 +315,13 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
     runNoGradOptimizations(copy);
   }
   EliminateDeadCode(copy);
+  ClearProfilingInformation(copy);
   GRAPH_DUMP("After runProfilingOptimizations:", copy);
 }
 
 void ProfilingGraphExecutorImpl::runProfilingInsensitiveOptimizations(
     std::shared_ptr<Graph>& graph) {
+  Inline(*graph);
   GRAPH_DUMP(
       "Before ClearProfilingInformation (beginning of runProfilingInsensitiveOptimizations)",
       graph);
