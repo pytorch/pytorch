@@ -6,6 +6,8 @@ cmake_print_variables(TORCH_ROOT)
 
 set(TORCHPY_DIR "${TORCH_ROOT}/torchpy")
 
+add_subdirectory(interpreter)
+
 set(TORCHPY_LIB_SOURCES
   ${TORCHPY_DIR}/torchpy.cpp
 )
@@ -37,7 +39,8 @@ set(TORCHPY_THREADS_SOURCES
 )
 add_executable(torchpy_threads ${TORCHPY_THREADS_SOURCES})
 target_include_directories(torchpy_threads  PRIVATE ${TORCHPY_DIR})
-target_link_libraries(torchpy_threads PRIVATE torchpy torch -Wl,-rpath,/home/whc/local/pytorch-env/lib/ ${PYTHON_LIBRARIES})
+target_include_directories(torchpy_threads  PRIVATE ${INTERPRETER_DIR})
+target_link_libraries(torchpy_threads PRIVATE dl)
 
 if(USE_CUDA)
   target_link_libraries(torchpy_test PRIVATE
