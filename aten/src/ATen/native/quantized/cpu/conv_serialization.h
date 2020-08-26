@@ -194,7 +194,7 @@ ConvParamsSerializationType serialize_conv(
 template <uint32_t kSpatialDim>
 ConvParamsSerializationTypeLegacy serialize_conv_legacy(
     const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>& params) {
-			at::Tensor weight;
+      at::Tensor weight;
       c10::optional<at::Tensor> bias;
       std::tie(weight, bias) = params->unpack();
       torch::List<at::Tensor> stride;
