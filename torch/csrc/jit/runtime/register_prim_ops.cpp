@@ -724,6 +724,14 @@ RegisterOperators reg(
          },
          aliasAnalysisFromSchema()),
      Operator(
+         "aten::str(t elem) -> str",
+         [](Stack* stack) {
+           std::stringstream ss;
+           ss << pop(stack);
+           push(stack, ss.str());
+         },
+         aliasAnalysisFromSchema()),
+     Operator(
          "aten::__getitem__.str(str s, int index) -> str",
          [](Stack& stack) {
            auto index = pop(stack).toInt();
