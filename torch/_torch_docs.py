@@ -4147,11 +4147,11 @@ dimension(s) :attr:`dim`.
 
 .. note::
     The difference between ``max``/``min`` and ``amax``/``amin`` is:
-    1. ``amax``/``amin`` supports reducing on multiple dimensions,
-    2. ``amax``/``amin`` does not return indices,
-    3. ``amax``/``amin`` evenly distributes gradient between equal values,
-       while ``max(dim)``/``min(dim)`` propagates gradient only to a single
-       index in the source tensor.
+        - ``amax``/``amin`` supports reducing on multiple dimensions,
+        - ``amax``/``amin`` does not return indices,
+        - ``amax``/``amin`` evenly distributes gradient between equal values,
+          while ``max(dim)``/``min(dim)`` propagates gradient only to a single
+          index in the source tensor.
 
 If :attr:`keepdim is ``True``, the output tensors are of the same size
 as :attr:`input` except in the dimension(s) :attr:`dim` where they are of size 1.
@@ -4493,11 +4493,11 @@ dimension(s) :attr:`dim`.
 
 .. note::
     The difference between ``max``/``min`` and ``amax``/``amin`` is:
-    1. ``amax``/``amin`` supports reducing on multiple dimensions,
-    2. ``amax``/``amin`` does not return indices,
-    3. ``amax``/``amin`` evenly distributes gradient between equal values,
-       while ``max(dim)``/``min(dim)`` propagates gradient only to a single
-       index in the source tensor.
+        - ``amax``/``amin`` supports reducing on multiple dimensions,
+        - ``amax``/``amin`` does not return indices,
+        - ``amax``/``amin`` evenly distributes gradient between equal values,
+          while ``max(dim)``/``min(dim)`` propagates gradient only to a single
+          index in the source tensor.
 
 If :attr:`keepdim` is ``True``, the output tensors are of the same size as
 :attr:`input` except in the dimension(s) :attr:`dim` where they are of size 1.
