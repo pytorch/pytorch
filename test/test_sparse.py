@@ -1801,7 +1801,7 @@ class TestSparse(TestCase):
         self.assertEqual(expected_output, sparse_tensor.coalesce().sign_().to_dense())
 
         # test in-place op on uncoalesced input
-        with self.assertRaisesRegex(RuntimeError, "in-place on uncoalesced tensors is not supported yet"):
+        with self.assertRaisesRegex(RuntimeError, "in-place on uncoalesced tensors is not supported"):
             sparse_tensor.sign_()
 
         # TODO: vfdev-5: Currently backprop through sign op on sparse tensor is not working due to
