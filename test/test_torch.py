@@ -14865,6 +14865,110 @@ class TestTorchDeviceType(TestCase):
         self._test_minmax_helper(lambda x: torch._min_max(x)[0], np.min, device, dtype, skip_indices=True)
         self._test_minmax_helper(lambda x: torch._min_max(x)[1], np.max, device, dtype, skip_indices=True)
 
+    @dtypes(*product(torch.testing.get_all_dtypes(include_complex=False), torch.testing.get_all_dtypes(include_complex=False)))
+    def test_maximum_minimum_type_promotion(self, device, dtypes):
+        a = torch.tensor((0, 1), device=device, dtype=dtypes[0])
+        b = torch.tensor((1, 0), device=device, dtype=dtypes[1])
+        for op in (torch.maximum, torch.max, torch.minimum, torch.min):
+            result = op(a, b)
+            self.assertEqual(result.dtype, torch.result_type(a, b))
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @dtypes(*(torch.testing.get_all_int_dtypes() + [torch.bool]))
+    def test_maximum_minimum_int_and_bool(self, device, dtype):
+        ops = ((torch.maximum, torch.max, np.maximum), (torch.minimum, torch.min, np.minimum))
+        rng = np.random.default_rng()
+        a_np = np.array(rng.integers(-100, 100, size=10), dtype=torch_to_numpy_dtype_dict[dtype])
+        b_np = np.array(rng.integers(-100, 100, size=10), dtype=torch_to_numpy_dtype_dict[dtype])
+
+        for torch_op, alias, numpy_op in ops:
+            a_tensor = torch.from_numpy(a_np).to(device=device, dtype=dtype)
+            b_tensor = torch.from_numpy(b_np).to(device=device, dtype=dtype)
+            tensor_result = torch_op(a_tensor, b_tensor)
+            alias_result = alias(a_tensor, b_tensor)
+
+            out = torch.empty_like(a_tensor)
+            torch_op(a_tensor, b_tensor, out=out)
+
+            numpy_result = numpy_op(a_np, b_np)
+
+            self.assertEqual(alias_result, tensor_result)
+            self.assertEqual(tensor_result, numpy_result)
+            self.assertEqual(out, numpy_result)
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @precisionOverride({torch.bfloat16: 1e-2})
+    @dtypes(*(torch.testing.get_all_fp_dtypes()))
+    def test_maximum_minimum_float(self, device, dtype):
+        ops = ((torch.maximum, torch.max, np.maximum), (torch.minimum, torch.min, np.minimum))
+
+        if dtype == torch.bfloat16:
+            a_np = np.random.randn(10).astype(np.float64)
+            b_np = np.random.randn(10).astype(np.float64)
+        else:
+            a_np = np.random.randn(10).astype(torch_to_numpy_dtype_dict[dtype])
+            b_np = np.random.randn(10).astype(torch_to_numpy_dtype_dict[dtype])
+
+        for torch_op, alias, numpy_op in ops:
+            numpy_result = numpy_op(a_np, b_np)
+
+            a_tensor = torch.from_numpy(a_np).to(device=device, dtype=dtype)
+            b_tensor = torch.from_numpy(b_np).to(device=device, dtype=dtype)
+            tensor_result = torch_op(a_tensor, b_tensor)
+            alias_result = alias(a_tensor, b_tensor)
+            out = torch.empty_like(a_tensor)
+            torch_op(a_tensor, b_tensor, out=out)
+
+            self.assertEqual(alias_result, tensor_result)
+            self.assertEqual(tensor_result, numpy_result)
+            self.assertEqual(out, numpy_result)
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @dtypes(*(torch.testing.get_all_fp_dtypes()))
+    def test_maximum_minimum_float_nan_and_inf(self, device, dtype):
+        # np.maximum and np.minimum functions compare input arrays element-wisely.
+        # if one of the elements being compared is a NaN, then that element is returned.
+        ops = ((torch.maximum, torch.max, np.maximum), (torch.minimum, torch.min, np.minimum))
+        a_vals = (float('inf'), -float('inf'), float('nan'), float('nan'))
+        b_vals = (-float('inf'), float('inf'), float('inf'), float('nan'))
+        if dtype == torch.bfloat16:
+            a_np = np.array(a_vals, dtype=np.float64)
+            b_np = np.array(b_vals, dtype=np.float64)
+        else:
+            a_np = np.array(a_vals, dtype=torch_to_numpy_dtype_dict[dtype])
+            b_np = np.array(b_vals, dtype=torch_to_numpy_dtype_dict[dtype])
+
+        for torch_op, alias, numpy_op in ops:
+            numpy_result = numpy_op(a_np, b_np)
+
+            a_tensor = torch.from_numpy(a_np).to(device=device, dtype=dtype)
+            b_tensor = torch.from_numpy(b_np).to(device=device, dtype=dtype)
+            tensor_result = torch_op(a_tensor, b_tensor)
+            alias_result = alias(a_tensor, b_tensor)
+
+            out = torch.empty_like(a_tensor)
+            torch_op(a_tensor, b_tensor, out=out)
+
+            self.assertEqual(alias_result, tensor_result)
+            if dtype == torch.bfloat16:
+                self.assertEqual(tensor_result, numpy_result, exact_dtype=False)
+                self.assertEqual(out, numpy_result, exact_dtype=False)
+            else:
+                self.assertEqual(tensor_result, numpy_result)
+                self.assertEqual(out, numpy_result)
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @dtypes(*product(torch.testing.get_all_complex_dtypes(), torch.testing.get_all_dtypes()))
+    def test_maximum_minimum_complex(self, device, dtypes):
+        for torch_op in (torch.maximum, torch.minimum, torch.max, torch.min):
+            with self.assertRaisesRegex(RuntimeError, 'does not support complex inputs'):
+                torch_op(torch.ones(1, device=device, dtype=dtypes[0]),
+                         torch.ones(1, device=device, dtype=dtypes[1]))
+
+            with self.assertRaisesRegex(RuntimeError, 'does not support complex inputs'):
+                torch_op(torch.ones(1, device=device, dtype=dtypes[1]),
+                         torch.ones(1, device=device, dtype=dtypes[0]))
+
     def test_bincount(self, device):
         # negative input throws
         with self.assertRaisesRegex(RuntimeError, '1-d non-negative integral'):
@@ -19155,10 +19259,14 @@ tensor_op_tests = [
     ('max', 'neg_dim', _small_3d_unique, lambda t, d: [-1], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('max', 'elementwise', _medium_2d, lambda t, d: [_medium_2d(t, d)],
         1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
+    ('maximum', '', _medium_2d, lambda t, d: [_medium_2d(t, d)],
+        1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('min', '', _small_3d, lambda t, d: [], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('min', 'dim', _small_3d_unique, lambda t, d: [1], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('min', 'neg_dim', _small_3d_unique, lambda t, d: [-1], 1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('min', 'elementwise', _medium_2d, lambda t, d: [_medium_2d(t, d)],
+        1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
+    ('minimum', '', _medium_2d, lambda t, d: [_medium_2d(t, d)],
         1e-5, 1e-5, 1e-5, _types, _cpu_types, False),
     ('mean', '', _small_3d, lambda t, d: [], 1e-3, 1e-2, 1e-5, _float_types2, _cpu_types, False),
     ('mean', 'neg_dim', _small_3d, lambda t, d: [-1], 1e-3, 1e-2, 1e-5, _float_types2, _cpu_types, False),
