@@ -1,7 +1,7 @@
 #pragma once
 #include <ATen/ATen.h>
 
-namespace at { 
+namespace at {
 namespace native {
 namespace {
 
