@@ -12,7 +12,7 @@ def pytest_generate_tests(metafunc):
     # This creates lists of tests to generate, can be customized
     if metafunc.cls.__name__ == "TestBenchNetwork":
         metafunc.parametrize('net_name', all_nets, scope="class")
-        metafunc.parametrize("executor_and_fuser", ["legacy-old", "profiling-te"], scope="class")
+        metafunc.parametrize("executor_and_fuser", ["legacy-old"], scope="class")
 
 def set_fuser(fuser_name):
     if fuser_name == 'te':
