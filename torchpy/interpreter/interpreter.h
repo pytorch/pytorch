@@ -39,7 +39,7 @@ class Interpreter : public InterpreterImpl {
     // the actual torch loading process is not thread safe, by doing it
     // in the constructor before we have multiple worker threads, then we
     // ensure it doesn't race.
-    run_some_python("import torch");
+    // run_some_python("import torch");
   }
   ~Interpreter() {
     if (handle_) {
