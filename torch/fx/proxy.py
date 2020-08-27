@@ -67,7 +67,8 @@ class Proxy:
         raise TraceError('symbolically traced variables cannot be used as inputs to control flow')
 
     def _no_arg_unpack(self) -> NoReturn:
-        raise TraceError('Proxy object cannot be unpacked as function argument')
+        raise TraceError('Proxy object cannot be unpacked as function argument. Please specify `input_prototypes`'
+                         ' on `symbolic_trace` to automatically unpack this Proxy')
 
     def __bool__(self) -> NoReturn:
         self._no_control_flow()
