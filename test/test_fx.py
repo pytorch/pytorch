@@ -1,11 +1,14 @@
 import torch
 import unittest
+import operator
+import numbers
 from torch.fx import symbolic_trace, Proxy, Node, GraphModule, DefaultDelegate
 
 from fx.quantization import Quantizer
 
 from typing import Any, Callable, Dict, Optional, Tuple, Union
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import run_tests, skipIfRocm
+from torch.testing._internal.jit_utils import JitTestCase
 
 try:
     from torchvision.models import resnet18
@@ -14,7 +17,7 @@ except ImportError:
     HAS_TORCHVISION = False
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
-class TestFX(TestCase):
+class TestFX(JitTestCase):
     def checkGraphModule(self, m: torch.nn.Module, args, kwargs=None):
         """Check that an nn.Module's results match the GraphModule version
         for a given set of args/kwargs.
@@ -208,6 +211,149 @@ class TestFX(TestCase):
         b = torch.rand(1)
         m = M()
         self.checkGraphModule(m, (a, b))
+
+    @skipIfRocm
+    def test_native_callable(self):
+        # This test exercises the case where we use FX to translate from Python
+        # code to some native callable object
+        #
+        # For the purposes of testing, we use ElementwiseInterpreter defined
+        # in test_custom_class.cpp.
+        #
+        # We test that we can
+        # 1) Construct a native callable from FX IR
+        # 2) Construct a drop-in replacement module that delegates to the
+        #    native callable rather than the original code
+        # 3) Run both the original code and native callable wrapper with
+        #    equivalent results
+        # 4) TorchScript compile the native callable wrapper and confirm
+        #    equivalent results with the reference
+        # 5) TorchScript serialize and deserialize the native callable
+        #    and confirm equivalent results with the reference
+
+        # We use this simple Module as a reference computation
+        class MySimpleMod(torch.nn.Module):
+            def forward(self, x):
+                return 3.0 * x + x
+
+        msm = MySimpleMod()
+
+        # This is what a lowering pass might look like: a function that takes
+        # a valid nn.Module, symbolically traces it, lowers the Module to some
+        # representation, and wraps that representation up into another
+        # nn.Module instance that handles dispatch to the compiled/lowered code.
+        def lower_to_elementwise_interpreter(orig_mod : torch.nn.Module) -> torch.nn.Module:
+            # ===== Stage 1: Symbolic trace the module =====
+            mod = symbolic_trace(orig_mod)
+
+            # ===== Stage 2: Lower GraphModule representation to the C++
+            #       interpreter's instruction format ======
+            instructions = []
+            constant_idx = 0
+            constants = {}
+            fn_input_names = []
+
+            target_to_name = {
+                operator.add : "add",
+                operator.mul : "mul"
+            }
+
+            # For each instruction, create a triple
+            # (instruction_name : str, inputs : List[str], output : str)
+            # to feed into the C++ interpreter
+            for n in mod.graph.nodes:
+                target, args, out_name = n.target, n.args, n.name
+                assert len(n.kwargs) == 0, "kwargs currently not supported"
+
+                if n.op == 'placeholder':
+                    # Placeholders specify function argument names. Save these
+                    # for later when we generate the wrapper GraphModule
+                    fn_input_names.append(target)
+                elif n.op == 'call_function':
+                    assert target in target_to_name, "Unsupported call target " + target
+                    arg_names = []
+                    for arg in args:
+                        if not isinstance(arg, Node):
+                            # Pull out constants. These constants will later be
+                            # fed to the interpreter C++ object via add_constant()
+                            arg_name = f'constant_{constant_idx}'
+                            constants[arg_name] = torch.Tensor(
+                                [arg] if isinstance(arg, numbers.Number) else arg)
+                            arg_names.append(arg_name)
+                            constant_idx += 1
+                        else:
+                            arg_names.append(arg.name)
+                    instructions.append((target_to_name[target], arg_names, out_name))
+
+                else:
+                    raise RuntimeError('Unsupported opcode' + n.op)
+
+            interpreter = torch.classes._TorchScriptTesting._ElementwiseInterpreter()
+            # Load constants
+            for k, v in constants.items():
+                interpreter.add_constant(k, v)
+            # Specify names for positional input arguments
+            interpreter.set_input_names(fn_input_names)
+            # Load instructions
+            interpreter.set_instructions(instructions)
+            # Specify name for single output
+            interpreter.set_output_name(mod.graph.result.name)
+
+            # ===== Stage 3: Create a wrapper GraphModule around the interpreter =====
+            class WrapperModule(torch.nn.Module):
+                def __init__(self, interpreter):
+                    super().__init__()
+                    self.interpreter = interpreter
+
+            wrapper = WrapperModule(interpreter)
+
+            # Create a graph that: 1) Takes function arguments 2) Invokes the interpreter
+            # 3) Returns the speficied return value
+
+            # FIXME: The following code could be greatly simplified by symbolic_trace'ing
+            # the wrapper with a Delegate that considers the Wrapper instance a root
+            # module, however, I can't get `__call__` exposed on TorchBind classes
+            # without it messing up Python `hasattr` for some reason. More digging
+            # into CPython's implementation of hasattr is probably in order...
+
+            graph = torch.fx.Graph()
+            # Add placeholders for fn inputs
+            placeholder_nodes = []
+            for name in fn_input_names:
+                placeholder_nodes.append(graph.placeholder(name))
+
+            # Get the interpreter object
+            interpreter_node = graph.get_param('interpreter')
+
+            # Add a node to call the interpreter instance
+            output_node = graph.create_node(
+                op='call_method', target='__call__', args=(interpreter_node, placeholder_nodes))
+
+            # Register output
+            graph.output(output_node)
+
+            # Return final GraphModule!!!
+            return GraphModule(wrapper, graph)
+
+
+        # Lower GraphModule to C++ interpreter
+        lowered = lower_to_elementwise_interpreter(msm)
+
+        # Compare correctness with original module
+        x = torch.rand(3, 4)
+        ref_out = msm(x)
+        test_out = lowered(x)
+        torch.testing.assert_allclose(test_out, ref_out)
+
+        # Test TorchScript compilation
+        scripted_lowered = torch.jit.script(lowered)
+        script_out = scripted_lowered(x)
+        torch.testing.assert_allclose(script_out, ref_out)
+
+        # Test TorchScript ser/de
+        import_copy = self.getExportImportCopy(scripted_lowered)
+        imported_out = import_copy(x)
+        torch.testing.assert_allclose(imported_out, ref_out)
 
 if __name__ == '__main__':
     run_tests()
