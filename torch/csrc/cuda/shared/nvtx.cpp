@@ -10,6 +10,24 @@ void initNvtxBindings(PyObject* module) {
   nvtx.def("rangePushA", nvtxRangePushA);
   nvtx.def("rangePop", nvtxRangePop);
   nvtx.def("markA", nvtxMarkA);
+  //newer additions, to add color
+  nvtx.def("rangePushEx", nvtxRangePushEx);
+  nvtx.def("markEx", nvtxMarkEx);
+  nvtx.attr("version") = NVTX_VERSION;
+  nvtx.attr("size") = NVTX_EVENT_ATTRIB_STRUCT_SIZE;
+  // THIS DOESNT WORK
+  // nvtx.attr("NVTX_COLOR_UNKNOWN") = nvtxColorType_t::NVTX_COLOR_UNKNOWN;
+  py::enum_<nvtxColorType_t>(nvtx, "nvtxColorType_t")
+    .value("NVTX_COLOR_UNKNOWN",    nvtxColorType_t::NVTX_COLOR_UNKNOWN)
+    .value("NVTX_COLOR_ARGB",       nvtxColorType_t::NVTX_COLOR_ARGB)
+    .export_values();
+  py::enum_<nvtxMessageType_t>(nvtx, "nvtxMessageType_t")
+    .value("NVTX_MESSAGE_UNKNOWN",          nvtxMessageType_t::NVTX_MESSAGE_UNKNOWN)
+    .value("NVTX_MESSAGE_TYPE_ASCII",       nvtxMessageType_t::NVTX_MESSAGE_TYPE_ASCII)
+    .value("NVTX_MESSAGE_TYPE_UNICODE",     nvtxMessageType_t::NVTX_MESSAGE_TYPE_UNICODE)
+    .value("NVTX_MESSAGE_TYPE_REGISTERED",  nvtxMessageType_t::NVTX_MESSAGE_TYPE_REGISTERED) //TODO: nvToolsExt.h says only NVTX_VERSION_2, do I have to be careful with this?
+    .export_values();
+
 }
 
 } // namespace shared
