@@ -1710,6 +1710,403 @@ void testGPU_FusionAdvancedComputeAt() {
   }
 }
 
+void testGPU_FusionComputeAtMultiConsumers() {
+  // tv1 = tv0 * 0.5
+  // tv2 = tv1 * -1
+  // tv3 = tv2 * -2
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  TensorView* tv0 = makeDummyTensor(1);
+  fusion.addInput(tv0);
+
+  TensorView* tv1 = mul(tv0, new Float(0.5));
+  TensorView* tv2 = mul(tv1, new Float(-1.0));
+  TensorView* tv3 = mul(tv1, new Float(-2.0));
+  fusion.addOutput(tv2);
+  fusion.addOutput(tv3);
+
+  // This computeAt will affect tv2 as well, even though tv2 is not in
+  // the data-flow path between tv1 and tv3. The reason is that tv1 is
+  // now computed at tv3, so tv2 must also be computed at the same
+  // location. Overall, what will happen is basically we merge
+  // expressions of all tensors and compute them in a single loop
+  // nest.
+  TensorView* computeAtTarget = tv3;
+  computeAtTarget->split(0, 128);
+  tv1->computeAt(computeAtTarget, 1);
+
+  TensorView* affected_tensors[] = {tv1, tv2, tv3};
+  for (auto tv : affected_tensors) {
+    TORCH_CHECK(tv->nDims() == computeAtTarget->nDims());
+  }
+
+  // Note that tv2 is also computed at tv3.
+  TORCH_CHECK(tv1->getComputeAtView() == computeAtTarget);
+  TORCH_CHECK(tv2->getComputeAtView() == tv3);
+  TORCH_CHECK(!tv3->hasComputeAt());
+
+  computeAtTarget->axis(0)->parallelize(ParallelType::BIDx);
+  for (auto tv : affected_tensors) {
+    tv->axis(-1)->parallelize(ParallelType::TIDx);
+  }
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  at::Tensor t0 = at::randn({1000}, options);
+
+  auto t1 = t0 * 0.5;
+  auto t2 = t1 * -1.0;
+  auto t3 = t1 * -2.0;
+
+  at::Tensor kernel_tv2 = at::empty_like(t0, options);
+  at::Tensor kernel_tv3 = at::empty_like(t0, options);
+
+  torch::jit::fuser::cuda::FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  fe.runFusion({t0}, {kernel_tv2, kernel_tv3});
+
+  TORCH_CHECK(at::allclose(kernel_tv2, t2));
+  TORCH_CHECK(at::allclose(kernel_tv3, t3));
+}
+
+// Similar to ComputeAtMultiConsumers, but with a common consumer.
+void testGPU_FusionComputeAtCommonConsumer1() {
+  // tv1 = tv0 * 0.5
+  // tv2 = tv1 * -1
+  // tv3 = tv2 * -2
+  // tv4 = tv2 + tv3
+  // tv5 = tv4 * 5
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  TensorView* tv0 = makeDummyTensor(1);
+  fusion.addInput(tv0);
+
+  TensorView* tv1 = mul(tv0, new Float(0.5));
+  TensorView* tv2 = mul(tv1, new Float(-1.0));
+  TensorView* tv3 = mul(tv1, new Float(-2.0));
+  TensorView* tv4 = add(tv2, tv3);
+  TensorView* tv5 = mul(tv4, new Float(5.0));
+  fusion.addOutput(tv3);
+  fusion.addOutput(tv4);
+  fusion.addOutput(tv5);
+
+  // Computing tv1 at tv3. This will affect tv2 as discussed in
+  // ComplexComputeAt1. Additionally, in this case, notice that tv4 is
+  // the common consumer of tv2 and tv3, so they are computed at
+  // tv4. The indirect propagation of the computeAt should stop at the
+  // common consumer, and no further change should occur. More
+  // specifically, tv4 and tv5 should not have a computeAt tensor.
+  TensorView* computeAtTarget = tv3;
+  computeAtTarget->split(0, 128);
+  tv1->computeAt(computeAtTarget, 1);
+
+  fusion.printMath();
+  fusion.printKernel();
+
+  TensorView* affected_tensors[] = {tv1, tv2, tv3, tv4};
+  for (auto tv : affected_tensors) {
+    TORCH_CHECK(tv->nDims() == computeAtTarget->nDims());
+  }
+
+  TORCH_CHECK(tv1->getComputeAtView() == computeAtTarget);
+  TORCH_CHECK(tv2->getComputeAtView() == tv4);
+  TORCH_CHECK(tv3->getComputeAtView() == tv4);
+  TORCH_CHECK(!tv4->hasComputeAt());
+  TORCH_CHECK(!tv5->hasComputeAt());
+
+  computeAtTarget->axis(0)->parallelize(ParallelType::BIDx);
+
+  for (auto tv : affected_tensors) {
+    tv->axis(-1)->parallelize(ParallelType::TIDx);
+  }
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  at::Tensor t0 = at::randn({1000}, options);
+
+  auto t1 = t0 * 0.5;
+  auto t2 = t1 * -1.0;
+  auto t3 = t1 * -2.0;
+  auto t4 = t2 + t3;
+  auto t5 = t4 * 5.0;
+
+  at::Tensor kernel_tv3 = at::empty_like(t0, options);
+  at::Tensor kernel_tv4 = at::empty_like(t0, options);
+  at::Tensor kernel_tv5 = at::empty_like(t0, options);
+
+  torch::jit::fuser::cuda::FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  fe.runFusion({t0}, {kernel_tv3, kernel_tv4, kernel_tv5});
+
+  TORCH_CHECK(at::allclose(kernel_tv3, t3));
+  TORCH_CHECK(at::allclose(kernel_tv4, t4));
+  TORCH_CHECK(at::allclose(kernel_tv5, t5));
+}
+
+void testGPU_FusionComputeAtCommonConsumer2() {
+  // tv1 = tv0 * 0.5
+  // tv2 = tv1 * -1
+  // tv3 = tv2 * -1
+  // tv4 = tv1 + 4
+  // tv5 = tv3 + tv4
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  TensorView* tv0 = makeDummyTensor(2);
+  fusion.addInput(tv0);
+
+  TensorView* tv1 = mul(tv0, new Float(0.5));
+  TensorView* tv2 = mul(tv1, new Float(-1.0));
+  TensorView* tv3 = mul(tv2, new Float(-1.0));
+  TensorView* tv4 = add(tv1, new Float(4.0));
+  TensorView* tv5 = add(tv3, tv4);
+
+  fusion.addOutput(tv5);
+
+  TensorView* computeAtTarget = tv3;
+
+  computeAtTarget->merge(0);
+  computeAtTarget->split(0, 128);
+  computeAtTarget->split(0, 4);
+
+  computeAtTarget->axis(0)->parallelize(ParallelType::BIDx);
+
+  // This computeAt will affect all tensors including tv3, tv4 and
+  // tv5, even though it appears to impact only tv1 and tv2. The
+  // reason is that tv1 is now computed at tv3, so tv4 must also be
+  // computed at the same location. Similarly, the consumer of tv4,
+  // tv5, must also be computed at the same location. Overall, what
+  // will happen is basically we merge expressions of all tensors and
+  // compute them in a single loop nest. Internally, this will be
+  // realized by making all tensors, except for those in the path
+  // between tv1 and tv3, computed at tv5, which we call the common
+  // consumer.
+  tv1->computeAt(computeAtTarget, 1);
+
+  fusion.printKernel();
+
+  // All tensors should have the same dimenionality as the target
+  for (Val* val : fusion.vals()) {
+    if (fusion.hasInput(val) ||
+        val->getValType().value() != ValType::TensorView) {
+      continue;
+    }
+    TensorView* tv = val->as<TensorView>();
+    TORCH_CHECK(tv->nDims() == computeAtTarget->nDims());
+  }
+
+  TORCH_CHECK(tv1->getComputeAtView() == tv2);
+  TORCH_CHECK(tv2->getComputeAtView() == tv3);
+  // tv3 and tv4 are computed at tv5
+  TORCH_CHECK(tv3->getComputeAtView() == tv5);
+  TORCH_CHECK(tv4->getComputeAtView() == tv5);
+  TORCH_CHECK(!tv5->hasComputeAt());
+
+  for (Val* val : fusion.vals()) {
+    if (!fusion.hasInput(val) &&
+        val->getValType().value() == ValType::TensorView) {
+      TensorView* tv = val->as<TensorView>();
+      tv->axis(1)->parallelize(ParallelType::Unroll);
+      tv->axis(-1)->parallelize(ParallelType::TIDx);
+    }
+  }
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  at::Tensor t0 = at::randn({129, 127}, options);
+
+  auto t1 = t0.mul({0.5});
+  auto t2 = t1.mul({-1.0});
+  auto t3 = t2.mul({-1.0});
+  auto t4 = t1.add({4.0});
+  auto t5 = t3 + t4;
+
+  at::Tensor kernel_tv5 = at::empty_like(t0, options);
+
+  torch::jit::fuser::cuda::FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  fe.runFusion({t0}, {kernel_tv5});
+
+  TORCH_CHECK(at::allclose(kernel_tv5, t5));
+}
+
+// Similar to the above common consumer test but adds an additional
+// tensor that has no common consumer with the other tensors.
+void testGPU_FusionComputeAtCommonConsumer3() {
+  // tv1 = tv0 * 0.5
+  // tv2 = tv1 * -1
+  // tv3 = tv2 * -1
+  // tv4 = tv1 + 4
+  // tv5 = tv2 + tv3
+  // tv6 = tv1 + 6
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  TensorView* tv0 = makeDummyTensor(2);
+  fusion.addInput(tv0);
+
+  TensorView* tv1 = mul(tv0, new Float(0.5));
+  TensorView* tv2 = mul(tv1, new Float(-1.0));
+  TensorView* tv3 = mul(tv2, new Float(-1.0));
+  TensorView* tv4 = add(tv1, new Float(4.0));
+  TensorView* tv5 = add(tv3, tv4);
+  TensorView* tv6 = add(tv1, new Float(6.0));
+
+  fusion.addOutput(tv5);
+  fusion.addOutput(tv6);
+
+  TensorView* computeAtTarget = tv3;
+
+  computeAtTarget->merge(0);
+  computeAtTarget->split(0, 128);
+  computeAtTarget->split(0, 4);
+
+  computeAtTarget->axis(0)->parallelize(ParallelType::BIDx);
+
+  // This will have the same impact on the tensors except for tv5 and
+  // tv6. tv6 does not have any common consumer with the computeAt
+  // target, but since it uses tv1, it must be also computed at the
+  // same location as the other impacted tensors. We can either make
+  // tv5 computed at tv6 or tv6 computed at tv5. In this case, tv5
+  // should be computed at tv6 just because the current implementation
+  // orders the computeAt relationship based on the order in which
+  // tensors are specified as outputs.
+
+  tv1->computeAt(computeAtTarget, 1);
+
+  fusion.printKernel();
+
+  // All tensors should have the same dimenionality as the target
+  for (Val* val : fusion.vals()) {
+    if (fusion.hasInput(val) ||
+        val->getValType().value() != ValType::TensorView) {
+      continue;
+    }
+    TensorView* tv = val->as<TensorView>();
+    TORCH_CHECK(tv->nDims() == computeAtTarget->nDims());
+  }
+
+  TORCH_CHECK(tv1->getComputeAtView() == tv2);
+  TORCH_CHECK(tv2->getComputeAtView() == tv3);
+
+  // tv3 and tv4 are computed at tv5
+  TORCH_CHECK(tv3->getComputeAtView() == tv5);
+  TORCH_CHECK(tv4->getComputeAtView() == tv5);
+
+  // tv5 should be computed at tv6 since tv5 is added as an output
+  // before tv6. If we call fusion.addOutput(tv6) first, tv6 should be
+  // computed at tv5.
+  TORCH_CHECK(tv5->getComputeAtView() == tv6);
+  TORCH_CHECK(!tv6->hasComputeAt());
+
+  for (Val* val : fusion.vals()) {
+    if (!fusion.hasInput(val) &&
+        val->getValType().value() == ValType::TensorView) {
+      TensorView* tv = val->as<TensorView>();
+      tv->axis(1)->parallelize(ParallelType::Unroll);
+      tv->axis(-1)->parallelize(ParallelType::TIDx);
+    }
+  }
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  at::Tensor t0 = at::randn({129, 127}, options);
+
+  auto t1 = t0.mul({0.5});
+  auto t2 = t1.mul({-1.0});
+  auto t3 = t2.mul({-1.0});
+  auto t4 = t1.add({4.0});
+  auto t5 = t3 + t4;
+  auto t6 = t1.add({6.0});
+
+  at::Tensor kernel_tv5 = at::empty_like(t0, options);
+  at::Tensor kernel_tv6 = at::empty_like(t0, options);
+
+  torch::jit::fuser::cuda::FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  fe.runFusion({t0}, {kernel_tv5, kernel_tv6});
+
+  TORCH_CHECK(at::allclose(kernel_tv5, t5));
+  TORCH_CHECK(at::allclose(kernel_tv6, t6));
+}
+
+// Similar to ComputeAtCommonConsumer1 but with an addtiona ltensor
+// that does not have data dependency with the consumer.
+void testGPU_FusionComputeAtNoCommonConsumer() {
+  // tv1 = tv0 * 0.5
+  // tv2 = tv1 * -1
+  // tv3 = tv1 * -2
+  // tv4 = tv2 + tv3
+  // tv5 = tv4 * 5
+  // tv6 = tv1 * 6
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  TensorView* tv0 = makeDummyTensor(1);
+  fusion.addInput(tv0);
+
+  TensorView* tv1 = mul(tv0, new Float(0.5));
+  TensorView* tv2 = mul(tv1, new Float(-1.0));
+  TensorView* tv3 = mul(tv1, new Float(-2.0));
+  TensorView* tv4 = add(tv2, tv3);
+  TensorView* tv5 = mul(tv4, new Float(5.0));
+  // Notice that tv6 is not a consumer of tv4.
+  TensorView* tv6 = mul(tv1, new Float(6.0));
+  fusion.addOutput(tv3);
+  fusion.addOutput(tv4);
+  fusion.addOutput(tv5);
+  fusion.addOutput(tv6);
+
+  TensorView* computeAtTarget = tv3;
+  computeAtTarget->split(0, 128);
+  tv1->computeAt(computeAtTarget, 1);
+
+  TensorView* affected_tensors[] = {tv1, tv2, tv3, tv4, tv6};
+  for (auto tv : affected_tensors) {
+    TORCH_CHECK(tv->nDims() == computeAtTarget->nDims());
+  }
+
+  TORCH_CHECK(tv1->getComputeAtView() == computeAtTarget);
+  TORCH_CHECK(tv2->getComputeAtView() == tv4);
+  TORCH_CHECK(tv3->getComputeAtView() == tv4);
+  TORCH_CHECK(tv4->getComputeAtView() == tv5);
+  TORCH_CHECK(tv5->getComputeAtView() == tv6);
+  TORCH_CHECK(!tv6->hasComputeAt());
+
+  computeAtTarget->axis(0)->parallelize(ParallelType::BIDx);
+
+  for (auto tv : affected_tensors) {
+    tv->axis(-1)->parallelize(ParallelType::TIDx);
+  }
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  at::Tensor t0 = at::randn({1000}, options);
+
+  auto t1 = t0 * 0.5;
+  auto t2 = t1 * -1.0;
+  auto t3 = t1 * -2.0;
+  auto t4 = t2 + t3;
+  auto t5 = t4 * 5.0;
+  auto t6 = t1 * 6.0;
+
+  at::Tensor kernel_tv3 = at::empty_like(t0, options);
+  at::Tensor kernel_tv4 = at::empty_like(t0, options);
+  at::Tensor kernel_tv5 = at::empty_like(t0, options);
+  at::Tensor kernel_tv6 = at::empty_like(t0, options);
+
+  torch::jit::fuser::cuda::FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  fe.runFusion({t0}, {kernel_tv3, kernel_tv4, kernel_tv5, kernel_tv6});
+
+  TORCH_CHECK(at::allclose(kernel_tv3, t3));
+  TORCH_CHECK(at::allclose(kernel_tv4, t4));
+  TORCH_CHECK(at::allclose(kernel_tv5, t5));
+  TORCH_CHECK(at::allclose(kernel_tv6, t6));
+}
+
 void testGPU_FusionScalarInputs() {
   Fusion fusion;
   FusionGuard fg(&fusion);

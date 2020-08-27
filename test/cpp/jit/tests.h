@@ -154,6 +154,11 @@ namespace jit {
   _(GPU_FusionCompoundOps)                          \
   _(GPU_FusionCastOps)                              \
   _(GPU_FusionAdvancedComputeAt)                    \
+  _(GPU_FusionComputeAtMultiConsumers)              \
+  _(GPU_FusionComputeAtCommonConsumer1)             \
+  _(GPU_FusionComputeAtCommonConsumer2)             \
+  _(GPU_FusionComputeAtCommonConsumer3)             \
+  _(GPU_FusionComputeAtNoCommonConsumer)            \
   _(GPU_FusionScalarInputs)                         \
   _(GPU_FusionRFactorReplay)                        \
   _(GPU_FusionReduction)                            \
