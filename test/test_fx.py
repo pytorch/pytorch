@@ -291,5 +291,43 @@ class TestFX(TestCase):
         with self.assertRaisesRegex(TraceError, 'Proxy object cannot be unpacked as function argument'):
             symbolic_trace(ud)
 
+    def test_input_prototype_list(self):
+        class SomeArgs(torch.nn.Module):
+            def forward(self, a, b):
+                return a + b
+
+        class UnpacksList(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.sa = SomeArgs()
+
+            def forward(self, x : list):
+                return self.sa(*x)
+
+        ul = UnpacksList()
+        S = torch.fx.SymVal
+        traced = symbolic_trace(ul, input_prototypes=[[S, S]])
+        example_input = [torch.rand(3), torch.rand(3)]
+        self.assertEqual(traced(example_input), ul(example_input))
+
+    def test_input_prototype_dict(self):
+        class SomeKwargs(torch.nn.Module):
+            def forward(self, x=3, y=4):
+                return x + y
+
+        class UnpacksDict(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.sk = SomeKwargs()
+
+            def forward(self, x : dict):
+                return self.sk(**x)
+
+        ul = UnpacksDict()
+        S = torch.fx.SymVal
+        traced = symbolic_trace(ul, input_prototypes=[{'x' : S, 'y' : S}])
+        example_input = {'x' : torch.rand(3), 'y' : torch.rand(3)}
+        self.assertEqual(traced(example_input), ul(example_input))
+
 if __name__ == '__main__':
     run_tests()

@@ -151,6 +151,21 @@ class DefaultDelegate(DelegateBase):
 def _proxy_placeholder(name: str, delegate: DelegateBase) -> Proxy:
     return Proxy(delegate.graph.placeholder(name), delegate)
 
+class SymVal:
+    pass
+
+def unpack_collection_type(proxy : Proxy, prototype : Any, delegate : DelegateBase):
+    if isinstance(prototype, list):
+        return [unpack_collection_type(proxy[i], prototype[i], delegate) for i in range(len(prototype))]
+    if isinstance(prototype, dict):
+        rv = {}
+        for k, v in prototype.items():
+            rv[k] = unpack_collection_type(proxy[k], v, delegate)
+        return rv
+    if prototype is SymVal:
+        return proxy
+    raise RuntimeError('Unknown type ' + str(arg) + ' in input protytpe')
+
 # Symbolic tracing API
 #
 # Given an `nn.Module` instance `root`, this function will return a `GraphModule`
@@ -159,7 +174,9 @@ def _proxy_placeholder(name: str, delegate: DelegateBase) -> Proxy:
 # Args:
 #   - root - the `nn.Module` instance to trace
 #   - delegate : An instance of a Delegate object
-def symbolic_trace(root : torch.nn.Module, delegate_class=DefaultDelegate) -> GraphModule:
+def symbolic_trace(root : torch.nn.Module,
+                   delegate_class : DelegateBase = DefaultDelegate,
+                   input_prototypes : List[Union[SymVal, Any]]=None) -> GraphModule:
     graph = Graph()
     delegate = delegate_class(root, graph)
 
@@ -171,6 +188,12 @@ def symbolic_trace(root : torch.nn.Module, delegate_class=DefaultDelegate) -> Gr
     next(names_iter)  # skip self
     args : List[Any] = [root]
     args.extend(_proxy_placeholder(next(names_iter), delegate) for name in range(1, total_args))
+
+    if input_prototypes:
+        assert isinstance(input_prototypes, list)
+        assert len(input_prototypes) == len(args) - 1
+        fixedup_inputs = [unpack_collection_type(proxy, prototype, delegate) for prototype, proxy in zip(input_prototypes, args[1:])]
+        args = [args[0]] + fixedup_inputs
 
     if co.co_kwonlyargcount > 0 or co.co_flags & HAS_VARSTUFF:
         if co.co_flags & inspect.CO_VARARGS:
