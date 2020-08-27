@@ -365,7 +365,7 @@ static void _wrap_outputs(const std::shared_ptr<PyNode>& cdata, THPFunction *sel
     if (THPVariable_Check(obj)) {
       return ((THPVariable*)obj)->cdata;
     }
-    throw TypeError("%s.forward: expected Variable (got %s) for return value %d",
+    throw TypeError("%s.forward: expected Tensor or tuple of Tensor (got %s) for return value %d",
         Py_TYPE(self)->tp_name, Py_TYPE(obj)->tp_name, i);
   };
 

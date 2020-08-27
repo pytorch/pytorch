@@ -153,28 +153,6 @@ void TransformerDecoderLayerImpl::reset_parameters() {
   norm3->reset_parameters();
 }
 
-// By default contained sub-modules are printed.
-// TODO: The pretty print needs to be implemented along with python
-// implementation, currently using the default print.
-void TransformerDecoderLayerImpl::pretty_print(std::ostream& stream) const {
-  // stream << "(d_model=" << options.d_model()
-  //    << ", nhead=" << options.nhead()
-  //    << ", dim_feedforward=" << options.dim_feedforward()
-  //    << ", dropout=" << options.dropout()
-  //    << ", self_attn=torch::nn::MultiheadAttention()"
-  //    << ", dropout1=torch::nn::Dropout()"
-  //    << ", norm1=torch::nn::LayerNorm()"
-  //    << ", multihead_attn=torch::nn::MultiheadAttention()"
-  //    << ", dropout2=torch::nn::Dropout()"
-  //    << ", norm2=torch::nn::LayerNorm()"
-  //    << ", linear1=torch::nn::Linear()"
-  //    << ", dropout=torch::nn::Dropout()"
-  //    << ", linear2=torch::nn::Linear()"
-  //    << ", dropout3=torch::nn::Dropout()"
-  //    << ", norm3=torch::nn::LayerNorm()"
-  //    << ")";
-}
-
 ///Pass the inputs (and mask) through the decoder layer.
 Tensor TransformerDecoderLayerImpl::forward(Tensor tgt, const Tensor& memory,
   const Tensor& tgt_mask,
