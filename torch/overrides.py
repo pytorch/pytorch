@@ -672,6 +672,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.roll: lambda input, shifts, dims=None: -1,
         torch.rot90: lambda input, k=1, dims=(0, 1): -1,
         torch.round: lambda input, out=None: -1,
+        torch.rowwise_prune: (lambda weight, mask, compressed_indices_dtype: -1),
         torch.rrelu: lambda input, lower=1. / 8, upper=1. / 3, training=False, inplace=False: -1,
         torch.rsqrt: lambda input, out=None: -1,
         torch.rsub: lambda input, other, alpha=1: -1,
