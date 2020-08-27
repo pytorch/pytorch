@@ -1,5 +1,5 @@
 #include <torch/csrc/jit/runtime/profiling_graph_executor_impl.h>
-#include <jit/passes/inliner.h>
+#include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/bailout_graph.h>
 #include <torch/csrc/jit/passes/batch_mm.h>

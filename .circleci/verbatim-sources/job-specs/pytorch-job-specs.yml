@@ -199,6 +199,13 @@ jobs:
 
           echo "Retrieving test reports"
           docker cp $id:/var/lib/jenkins/workspace/test/test-reports ./ || echo 'No test reports found!'
+          if [[ ${BUILD_ENVIRONMENT} == *"coverage"* ]]; then
+              echo "Retrieving coverage report"
+              docker cp $id:/var/lib/jenkins/workspace/test/.coverage ./test
+              docker cp $id:/var/lib/jenkins/workspace/test/coverage.xml ./test
+              python3 -mpip install codecov
+              python3 -mcodecov
+          fi
         when: always
     - store_test_results:
         path: test-reports
