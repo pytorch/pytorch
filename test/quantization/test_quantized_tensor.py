@@ -489,26 +489,34 @@ class TestQuantizedTensor(TestCase):
         scale = 0.5
         zero_point = 10
 
-        dtypes = zip([torch.qint8, torch.quint8, torch.qint32],
-                     [torch.int8, torch.uint8, torch.int32])
+        ones = torch.ones(numel).to(torch.float)
 
-        fill_with = -1
-        int_repr = int(round(fill_with / scale + zero_point))
-        for device in get_supported_device_types():
-            for qtype, dtype in dtypes:
-                q = torch._empty_affine_quantized([numel], scale=scale,
-                                                  zero_point=zero_point,
-                                                  device=device, dtype=qtype)
-                q_filled = q.fill_(-1)
-                self.assertEqual(
-                    q_filled.int_repr(),
-                    torch.ones(numel).to(dtype) * int_repr)
-                self.assertEqual(
-                    q_filled.dequantize(),
-                    torch.ones(numel).to(torch.float32) * fill_with)
-                # Make sure the scale and zero_point don't change
-                self.assertEqual(q_filled.q_scale(), scale)
-                self.assertEqual(q_filled.q_zero_point(), zero_point)
+        types = [torch.qint8, torch.quint8, torch.qint32]
+        fills = [-1, 1, 2**32]  # positive, negative, overflow
+
+        # `fill_` uses `copy_(float)`, which doesn't support CUDA
+        device = 'cpu'
+        ones = ones.to(device)
+        for qtype, fill_with in itertools.product(types, fills):
+            q_filled = torch._empty_affine_quantized([numel], scale=scale,
+                                              zero_point=zero_point,
+                                              device=device, dtype=qtype)
+            q_filled.fill_(fill_with)
+            int_repr = torch.quantize_per_tensor(ones * fill_with, scale, zero_point, qtype)
+            fill_with = int_repr.dequantize()
+            int_repr = int_repr.int_repr()
+
+            self.assertEqual(q_filled.int_repr(), int_repr,
+                msg=f"int_repr difference: {q_filled.int_repr()} vs {int_repr}")
+            self.assertEqual(q_filled.dequantize(), fill_with,
+                msg=f"dequantized difference: {q_filled.dequantize()} vs {fill_with}")
+            # Make sure the scale and zero_point don't change
+            self.assertEqual(
+                q_filled.q_scale(), scale,
+                msg=f"Scale difference: {q_filled.q_scale()} vs. {scale}")
+            self.assertEqual(
+                q_filled.q_zero_point(), zero_point,
+                msg=f"Scale difference: {q_filled.q_zero_point()} vs. {zero_point}")
 
     def test_qtensor_view(self):
         scale, zero_point, dtype = 1.0, 2, torch.uint8
