@@ -313,7 +313,7 @@ void Reducer::mark_variable_ready_dense(VariableIndex index) {
   auto& variable = replica.variables[bucket_index.intra_bucket_index];
   const auto offset = replica.offsets[bucket_index.intra_bucket_index];
   const auto length = replica.lengths[bucket_index.intra_bucket_index];
-  auto& bucket_view = replica.bucket_views[bucket_index.intra_bucket_index];
+  auto& bucket_view = replica.bucket_views_in[bucket_index.intra_bucket_index];
 
   // Copy contents of gradient tensor to bucket tensor.
   // If the gradient is not set, we assume it wasn't computed
@@ -720,9 +720,10 @@ void Reducer::initialize_buckets(
         // unexpected layout, performance will degrade due to poor memory access
         // patterns when copy_ing grad data in and out of its bucket view.
         // However, numerics remain correct, because the bucket view is the same
-        // on either end of the raw allreduce.  bucket_view.copy(grad) tranposes
+        // on either end of the raw allreduce.  bucket_view_in.copy(grad)
+        // tranposes
         // (+ densifies) to the bucket view's layout, the data is allreduced,
-        // then grad.copy_(bucket_view) transposes it back to grad's layout.
+        // then grad.copy_(bucket_view_out) transposes it back to grad's layout.
         //
         // The only way the numerics can go haywire is if the bucket views
         // themselves have different layouts across processes (or replicas).
@@ -735,7 +736,7 @@ void Reducer::initialize_buckets(
         // metadata.  Checking just once won't catch if someone messes with
         // param layouts over time, but not messing with params after DDP
         // construction is already a documented constraint.
-        initialize_bucketviews(replica, replica.contents);
+        initialize_bucket_views(replica, replica.contents, true);
       }
 
       // Add bucket replica to enclosing bucket.
@@ -761,9 +762,10 @@ void Reducer::initialize_buckets(
 }
 
 // (see Note:  "Gradient Layout Contract" in initialize_buckets).
-void Reducer::initialize_bucketviews(
+void Reducer::initialize_bucket_views(
     Reducer::BucketReplica& replica,
-    at::Tensor& contents) {
+    at::Tensor& contents,
+    bool populate_bucket_views_in) {
   for (size_t i = 0; i < replica.variables.size(); i++) {
     const auto& v = replica.variables[i];
     const auto offset = replica.offsets[i];
@@ -772,14 +774,24 @@ void Reducer::initialize_bucketviews(
       // If the param's memory is dense, match its layout, anticipating
       // the autograd engine (AccumulateGrad) will also create gradients
       // matching its layout.
-      replica.bucket_views.push_back(
+      replica.bucket_views_out.push_back(
           contents.as_strided(v.sizes(), v.strides(), offset));
+      // If calling from `initialize_buckets`, push_back to views_in too.
+      if (populate_bucket_views_in) {
+        replica.bucket_views_in.push_back(
+            contents.as_strided(v.sizes(), v.strides(), offset));
+      }
     } else {
       // Fall back to a C-style contiguous view, again anticipating
       // AccumulateGrad will do the same when stashing grads for non-dense
       // params.
-      replica.bucket_views.push_back(
+      replica.bucket_views_out.push_back(
           contents.narrow(0, offset, length).view(v.sizes()));
+      // If calling from `initialize_buckets`, push_back to views_in too.
+      if (populate_bucket_views_in) {
+        replica.bucket_views_in.push_back(
+            contents.as_strided(v.sizes(), v.strides(), offset));
+      }
     }
   }
 }
@@ -927,7 +939,7 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
         }
       }
 
-      const auto& bucket_view = replica.bucket_views[intra_bucket_index];
+      const auto& bucket_view = replica.bucket_views_out[intra_bucket_index];
       runGradCallbackForVariable(variable, [&](auto& grad) {
         // If a parameter is globally unused, we keep its grad untouched.
         if (!global_unused) {
@@ -981,13 +993,14 @@ void Reducer::finalize_backward() {
           comm_hook_->processFuture(bucket.future_work->value());
 
       for (size_t i = 0; i < future_result.size(); i++) {
+        auto& replica = bucket.replicas[i];
         if (bucket.expect_sparse_gradient) {
-          bucket.replicas[i].contents.copy_(future_result[i]);
+          replica.contents.copy_(future_result[i]);
         } else {
-          // Reinitialize bucket_views with the future_result by following
-          // the same logic in `inititalize_buckets`.
-          bucket.replicas[i].bucket_views.clear();
-          initialize_bucketviews(bucket.replicas[i], future_result[i]);
+          // Reinitialize only `bucket_views_out` with the future_result by
+          // following the same logic in `initialize_buckets`.
+          replica.bucket_views_out.clear();
+          initialize_bucket_views(replica, future_result[i], false);
         }
       }
     }
