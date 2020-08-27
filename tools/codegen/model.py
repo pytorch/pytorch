@@ -47,6 +47,11 @@ class Location:
 # Valid values of the 'variants' field in native_functions.yaml
 Variant = Enum('Variant', ('function', 'method'))
 
+UseC10Dispatcher = Enum('UseC10Dispatcher', (
+    'full',
+    'with_codegenerated_unboxing_wrapper'
+))
+
 # The basic input to the code generation is native_functions.yaml.
 # The name "native", BTW, comes from the distinction between native
 # functions and legacy TH functions.  The legacy TH functions are gone,
@@ -68,10 +73,9 @@ class NativeFunction:
     # classes for expository clarity.)
     func: 'FunctionSchema'
 
-    # Corresponds to the 'use_c10_dispatcher' field.  Historically,
-    # this field could take several possible strings, but right
-    # now you can have it in any color you like, as long as it's 'full'
-    use_c10_dispatcher_full: bool
+    # Corresponds to the 'use_c10_dispatcher' field.  The default
+    # is 'with_codegenerated_unboxing_wrapper'
+    use_c10_dispatcher: UseC10Dispatcher
 
     # Whether or not to omit automatic generation of a DeviceGuard
     device_guard: bool
@@ -119,10 +123,14 @@ class NativeFunction:
         assert isinstance(funcs, str), f'not a str: {funcs}'
         func = FunctionSchema.parse(funcs)
 
-        use_c10_dispatcher = e.pop('use_c10_dispatcher', None)
-        assert use_c10_dispatcher is None or use_c10_dispatcher == 'full', \
-            f'use_c10_dispatcher must be unset or set to full, got {use_c10_dispatcher}'
-        use_c10_dispatcher_full = use_c10_dispatcher == 'full'
+        use_c10_dispatcher_s = e.pop('use_c10_dispatcher', None)
+        if use_c10_dispatcher_s is None:
+            use_c10_dispatcher = UseC10Dispatcher.with_codegenerated_unboxing_wrapper
+        elif use_c10_dispatcher_s == 'full':
+            use_c10_dispatcher = UseC10Dispatcher.full
+        else:
+            raise AssertionError(
+                f'use_c10_dispatcher must be unset or set to full, got {use_c10_dispatcher}')
 
         variants_s = e.pop('variants', 'function')
         assert isinstance(variants_s, str)
@@ -165,7 +173,7 @@ class NativeFunction:
 
         return NativeFunction(
             func=func,
-            use_c10_dispatcher_full=use_c10_dispatcher_full,
+            use_c10_dispatcher=use_c10_dispatcher,
             variants=variants,
             manual_kernel_registration=manual_kernel_registration,
             python_module=python_module,

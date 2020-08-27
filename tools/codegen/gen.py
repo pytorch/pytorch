@@ -102,13 +102,15 @@ S = TypeVar('S')
 
 # Given a function that operates on NativeFunction, wrap it into a new function
 # that sets some appropriate context managers for that native function.
-# YOU MUST WRAP FUNCTIONS IN THIS for calls to cpp to be sound.
+# YOU MUST WRAP FUNCTIONS IN THIS for calls to api modules to be sound
+# (you will get an error if we try to access the local variables without having
+# set them).
 def with_native_function(func: Callable[[NativeFunction], T]) -> Callable[[NativeFunction], T]:
     @functools.wraps(func)
     def wrapper(f: NativeFunction) -> T:
         with context(f'in {f.loc}:\n  {f.func}'):
             with local.parametrize(
-                use_c10_dispatcher_full=f.use_c10_dispatcher_full,
+                use_c10_dispatcher=f.use_c10_dispatcher,
                 # See Note [Byte-for-byte compatibility]
                 hack_const_mutable_self=str(f.func.name) in ["set_data", "retain_grad"],
             ):
@@ -143,6 +145,19 @@ def concatMap(func: Callable[[T], Sequence[S]], xs: Sequence[T]) -> Iterator[S]:
 # code we want.
 Target = Enum('Target', ('DEFINITION', 'DECLARATION', 'REGISTRATION'))
 
+# Generates {dispatch}Type.cpp and {dispatch}Type.h (e.g., CPUType.cpp
+# and CPUType.h).  This function is also reused to implement per-operator
+# registration
+#
+# {dispatch}Type.cpp
+#   - The primary function of this file is to register all of the
+#     dispatch-specific
+#
+# {dispatch}Type.h
+#   - In principle, this file shouldn't exist at all; historically,
+#     it existed so that we could directly access these functions
+#     outside of the registration API for the implementation of
+#     static dispatch.  Should be deleted now!
 def compute_type_method(
     dispatch: Optional[str], *,
     target: Target, op_registration_whitelist: Optional[Set[str]], def_only: bool = False
@@ -259,7 +274,7 @@ def compute_type_method(
             impl_registration = ""
             if not def_only and not f.manual_kernel_registration and (dispatch is not None or f.dispatch is None):
                 # Figure out which signature the function is
-                if local.use_c10_dispatcher_full():
+                if local.use_c10_dispatcher() is UseC10Dispatcher.full:
                     # See Note [Byte-for-byte compatibility]
                     if dispatch is not None:
                         nl = "\n"
@@ -439,7 +454,7 @@ DispatchKeySet _dk_set = DispatchKeySet(options.computeDispatchKey()) | c10::det
 }}
 """
         elif target is Target.REGISTRATION:
-            if local.use_c10_dispatcher_full():
+            if local.use_c10_dispatcher() is UseC10Dispatcher.full:
                 return f"""m.impl("aten::{f.func.name}",
           c10::impl::hacky_wrapper_for_legacy_signatures<{dispatcher_returns_type} ({', '.join(a.type for a in dispatcher_args)})>(
             TORCH_FN({name})));"""
@@ -711,7 +726,7 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
         ('name', cpp.name(f.func)),
         ('operator_name', str(f.func.name.name)),
         ('overload_name', str(f.func.name.overload_name)),
-        ('use_c10_dispatcher', 'full' if f.use_c10_dispatcher_full else 'with_codegenerated_unboxing_wrapper'),
+        ('use_c10_dispatcher', f.use_c10_dispatcher.name),
         ('manual_kernel_registration', f.manual_kernel_registration),
         ('category_override', f.category_override if f.category_override is not None else ''),
         ('matches_jit_signature', True),
@@ -823,7 +838,6 @@ def main() -> None:
     parser.add_argument(
         '-d', '--install_dir', help='output directory',
         default='build/aten/src/ATen')
-    # TODO: remove this, it does nothing
     parser.add_argument(
         '--rocm',
         action='store_true',
@@ -887,10 +901,16 @@ def main() -> None:
     cuda_fm = make_file_manager(options.install_dir)
 
     extra_cuda_headers = '''\
-    #include <ATen/DeviceGuard.h>
-    #include <ATen/cuda/ATenCUDAGeneral.h>
-    #include <ATen/cuda/CUDADevice.h>
-    #include <ATen/cuda/CUDAContext.h>'''
+#include <ATen/DeviceGuard.h>
+#include <ATen/cuda/ATenCUDAGeneral.h>
+#include <ATen/cuda/CUDADevice.h>
+#include <ATen/cuda/CUDAContext.h>'''
+    if options.rocm:
+        extra_cuda_headers = '''\
+#include <ATen/DeviceGuard.h>
+#include <ATen/hip/ATenHIPGeneral.h>
+#include <ATen/hip/HIPDevice.h>
+#include <ATen/hip/HIPContext.h>'''
 
     backends = ["CPU", "SparseCPU", "MkldnnCPU", "CUDA", "SparseCUDA", "QuantizedCPU", "QuantizedCUDA"]
     if options.vulkan:
