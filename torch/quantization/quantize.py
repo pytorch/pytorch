@@ -15,7 +15,7 @@ from .default_mappings import (DEFAULT_DYNAMIC_MODULE_MAPPING,
                                DEFAULT_QAT_MODULE_MAPPING,
                                DEFAULT_QCONFIG_PROPAGATE_WHITE_LIST)
 from .stubs import DeQuantStub, QuantWrapper
-from .qconfig import default_dynamic_qconfig, float16_dynamic_qconfig
+from .qconfig import default_dynamic_qconfig, float16_dynamic_qconfig, float_qparams_dynamic_qconfig
 
 def _propagate_qconfig_helper(module, qconfig_dict, white_list=None,
                               qconfig_parent=None, prefix=''):
@@ -297,6 +297,10 @@ def quantize_dynamic(model, qconfig_spec=None, dtype=torch.qint8,
                 nn.RNNCell : float16_dynamic_qconfig,
                 nn.GRUCell : float16_dynamic_qconfig,
             }
+        elif dtype == torch.quint8:
+            qconfig_spec = {
+                nn.EmbeddingBag : float_qparams_dynamic_qconfig,
+            }
         else:
             raise ValueError(
                 "Don't know how to quantize with default settings for {}. Provide full qconfig please".format(dtype))
@@ -305,6 +309,8 @@ def quantize_dynamic(model, qconfig_spec=None, dtype=torch.qint8,
             default_qconfig = default_dynamic_qconfig
         elif dtype is torch.float16:
             default_qconfig = float16_dynamic_qconfig
+        elif dtype is torch.quint8:
+            default_qconfig = float_qparams_dynamic_qconfig
         else:
             raise RuntimeError('Unknown dtype specified for quantize_dynamic: ', str(dtype))
         qconfig_spec = dict(zip(qconfig_spec, itertools.repeat(default_qconfig)))
