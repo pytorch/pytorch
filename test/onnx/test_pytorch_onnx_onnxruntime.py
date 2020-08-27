@@ -2435,8 +2435,6 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.ones(2)
         another_x = torch.empty((0,))
-        model = ViewModel()
-        print(model(x).shape)
         self.run_test(ViewModel(), x, test_with_inputs=[another_x],
                       input_names=['input_1'], dynamic_axes={'input_1': [0, ]})
 
