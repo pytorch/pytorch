@@ -214,7 +214,8 @@ void unpackQuantizedWeightsHelper(
         idx++;
         // skip transpose
         idx++;
-        TORCH_INTERNAL_ASSERT(idx == conv_params_packed.numel(),
+        TORCH_INTERNAL_ASSERT(
+            idx == conv_params_packed.numel(),
             "Unexpected length of conv_params_packed, expected ",
             conv_params_packed.numel(),
             " got ",
