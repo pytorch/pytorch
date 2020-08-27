@@ -293,6 +293,24 @@ class TestFuser(JitTestCase):
         self.assertAllFused(ge.graph_for(*inputs))
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    def test_minmax(self):
+        def tmax(a, b):
+            return torch.max(2 * a, b)
+
+        def tmin(a, b):
+            return torch.min(2 * a, b)
+
+        a = torch.randn(4, 4, dtype=torch.float, device="cuda")
+        b = torch.randn(4, 4, dtype=torch.float, device="cuda")
+        nan = torch.tensor(float('nan'), dtype=torch.float, device="cuda")
+
+        for f, inputs in product(
+                (tmax, tmin),
+                ([a, b], [a, nan], [b, nan])):
+            s = self.checkScript(f, inputs)
+            self.assertAllFused(s.graph_for(*inputs))
+
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_clamp(self):
         def func2(a, b):
             return torch.clamp(a + b, min=0, max=2)
