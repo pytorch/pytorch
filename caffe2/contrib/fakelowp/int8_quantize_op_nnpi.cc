@@ -7,9 +7,10 @@ OPERATOR_SCHEMA(Int8QuantizeNNPI)
     .IdenticalTypeAndShape()
     .Arg("Y_scale", "Output tensor quantization scale")
     .Arg("Y_zero_point", "Output tensor quantization offset")
-    .NumInputs(1)
+    .NumInputs(1, 2)
     .NumOutputs(1)
     .Input(0, "X", "FP32 Tensor X.")
+    .Input(1, "Qparam", "Optional quantization params blob.")
     .Output(0, "Y", "Int8 Tensor qX representing X with linear quantization.");
 
 } // namespace caffe2

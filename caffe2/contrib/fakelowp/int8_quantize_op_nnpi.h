@@ -8,6 +8,7 @@
 #include "caffe2/core/tensor_int8.h"
 #include "caffe2/operators/quantized/int8_utils.h"
 #include "fp16_fma.h"
+#include "caffe2/quantization/server/int8_gen_quant_params.h"
 
 C10_DECLARE_bool(caffe2_fbgemm_fake_fp16_clamp);
 
@@ -85,19 +86,26 @@ class Int8QuantizeNNPIOp final : public Operator<CPUContext> {
 
   bool RunOnDevice() override {
     const auto& X = Input(0);
+    int zp = 0;
+    float scale = 0.0;
+    if(InputSize() == 2) {
+      const auto* qparam_blob = OperatorBase::template Input<std::unique_ptr<Int8QuantParamsBlob>>(1).get();
+      scale = qparam_blob->qparam.scale;
+      zp = qparam_blob->qparam.zero_point;
+    } else {
+      scale = this->template GetSingleArgument<float>("Y_scale", 1);
+      zp = this->template GetSingleArgument<int>("Y_zero_point", 0);
+    }
     auto* Y = Outputs()[0]->template GetMutable<Int8TensorCPU>();
     Y->t.ResizeLike(X);
-    int32_t Y_offset =
-        this->template GetSingleArgument<int>("Y_zero_point", 0);
-    auto Y_scale = this->template GetSingleArgument<float>("Y_scale", 1);
-    Y->scale = Y_scale;
-    Y->zero_point = Y_offset;
+    Y->scale = scale;
+    Y->zero_point = zp;
     Int8QuantizeNNPI(
         X.data<float>(),
         Y->t.mutable_data<uint8_t>(),
         X.numel(),
-        Y_scale,
-        Y_offset);
+        scale,
+        zp);
     return true;
   }
 };
