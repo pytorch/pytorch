@@ -20,6 +20,7 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/native/ComplexHelper.h>
+#include <ATen/quantized/QTensorImpl.h>
 
 #include <algorithm>
 #include <cmath>
@@ -204,6 +205,30 @@ Tensor imag(const Tensor& self) {
 
 Tensor& conj_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, conj_stub); }
 Tensor conj(const Tensor& self) { return unary_op_impl(self, at::conj_out); }
+
+Tensor conj_view(const Tensor& self) {
+ Tensor self_;
+  if (self.is_quantized()) {
+    auto impl = c10::make_intrusive<QTensorImpl>(
+        Storage(self.storage()),
+        self.key_set(),
+        self.dtype(),
+        get_qtensorimpl(self)->quantizer());
+    impl->set_storage_offset(self.storage_offset());
+    impl->set_sizes_and_strides(self.sizes(), self.strides());
+    impl->set_conjugate(!self.is_conjugate());
+    self_ = Tensor(std::move(impl));
+  } else {
+    auto impl = c10::make_intrusive<TensorImpl>(
+        Storage(self.storage()), self.key_set(), self.dtype());
+    impl->set_storage_offset(self.storage_offset());
+    impl->set_sizes_and_strides(self.sizes(), self.strides());
+    impl->set_conjugate(!self.is_conjugate());
+    self_ = Tensor(std::move(impl));
+  }
+  namedinference::propagate_names(self_, self);
+  return self_;
+}
 
 Tensor& bitwise_not_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, bitwise_not_stub); }
 Tensor bitwise_not(const Tensor& self) { return unary_op_impl(self, at::bitwise_not_out); }

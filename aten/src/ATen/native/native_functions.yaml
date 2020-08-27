@@ -286,6 +286,10 @@
   use_c10_dispatcher: full
   variants: function, method
 
+- func: conj_view(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
 - func: conj.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
 
 - func: acos(Tensor self) -> Tensor

@@ -586,6 +586,25 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   const at::Tensor& grad() const;
 
+
+  /**
+   * Whether or not the imaginary part of the tensor should be conjugated
+   */
+  inline bool is_conjugate() const {
+    return conjugate_;
+  }
+
+  /**
+   * Set whether or not to take the conjugate of the tensor (flip the imaginary bit).
+   */
+  void set_conjugate(bool value) {
+    conjugate_ = value;
+    if (conjugate_)
+      key_set_ = key_set_.add(DispatchKey::Named);
+    else
+      key_set_ = key_set_.remove(DispatchKey::Named);
+  }
+
   /**
    * Return a typed data pointer to the actual data which this tensor refers to.
    * This checks that the requested type (from the template parameter) matches
@@ -1716,6 +1735,9 @@ protected:
   // The logic is that if Extend() or ReserveSpace() were ever called,
   // then subsequent Resize()s will not free up Storage.
   bool reserved_ = false;
+
+  // Whether or not to conjugate the imaginary part of the tensor
+  bool conjugate_ = false;
 
 };
 
