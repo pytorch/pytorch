@@ -79,14 +79,27 @@ struct AutogradZeroSpecializer {
     }
   }
 
-  static Node* getProfiledUse(Value* inp) {
+  static Node* getUse(Value* inp, Symbol kind) {
     for (auto use : inp->uses()) {
-      if (use.user->kind() == prim::profile) {
+      if (use.user->kind() == kind) {
         return use.user;
       }
     }
 
     return nullptr;
+  }
+
+  void removeProfiledOptionalUses(Value* v) {
+    std::vector<Node*> profiled_opt_uses;
+    for (const Use& use : v->uses()) {
+      if (use.user->kind() == prim::profile_optional) {
+        profiled_opt_uses.push_back(use.user);
+      }
+    }
+    for (Node* n : profiled_opt_uses) {
+      n->output()->replaceAllUsesWith(v);
+      n->destroy();
+    }
   }
 
   Node* guardSpecializations() {
@@ -102,15 +115,27 @@ struct AutogradZeroSpecializer {
     replaceBlockInputsWithGraphInputs(false_block);
 
     WithInsertPoint wip{graph_->block()};
+    Value* none_val = graph_->insertConstant(IValue());
     std::vector<Value*> checks;
 
     for (auto inp : graph_->inputs()) {
+      if (auto profile_optional_node = getUse(inp, prim::profile_optional)) {
+        if (profile_optional_node->i(attr::num_present) == 0 &&
+            profile_optional_node->i(attr::num_none) != 0) {
+          auto check = graph_->insert(aten::__is__, {inp, none_val})->node();
+          checks.push_back(check->output());
+          profiled_none_.insert(inp);
+        }
+        removeProfiledOptionalUses(inp);
+        continue;
+      }
+
       if (inp->uses().size() == 0 || !inp->type()->cast<TensorType>()) {
         continue;
       }
 
       // TODO: check multiple uses ?
-      auto pout = getProfiledUse(inp);
+      auto pout = getUse(inp, prim::profile);
       if (!pout) {
         continue;
       }
@@ -260,6 +285,7 @@ struct AutogradZeroSpecializer {
               break;
             }
 
+            specializeGradSumToSize(n->blocks().at(0));
             if (all_nonzeros) {
               auto body = n->blocks().at(0);
               // hoist the nodes in the GradOf body to be before the linear
@@ -293,7 +319,20 @@ struct AutogradZeroSpecializer {
     }
   }
 
+  void specializeGradSumToSize(Block* b) {
+    for (auto it = b->nodes().begin(); it != b->nodes().end(); ++it) {
+      Node* n = *it;
+      if (n->kind() == aten::_grad_sum_to_size) {
+        if (n->input(1)->mustBeNone() || profiled_none_.count(n->input(1))) {
+          n->output()->replaceAllUsesWith(n->input(0));
+          it.destroyCurrent();
+        }
+      }
+    }
+  }
+
   std::shared_ptr<Graph> graph_;
+  std::unordered_set<Value*> profiled_none_;
   std::unordered_map<Value*, State> state_;
 };
 

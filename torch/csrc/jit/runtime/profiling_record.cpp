@@ -51,6 +51,19 @@ ProfileOp* ProfilingRecord::createProfileNode(
   return pn;
 }
 
+ProfileOptionalOp* ProfilingRecord::createProfileOptionalNode(
+    const std::function<void(Stack&)>& fp,
+    at::ArrayRef<Value*> inputs) {
+  auto pn = new ProfileOptionalOp(profiled_graph_.get(), fp);
+  pn->i_(attr::num_present, 0);
+  pn->i_(attr::num_none, 0);
+
+  for (auto in : inputs) {
+    pn->addInput(in);
+  }
+  return pn;
+}
+
 static void unprofileGraphInputs(const std::shared_ptr<Graph>& graph) {
   for (auto i : graph->inputs()) {
     if (i->type()->isSubtypeOf(TensorType::get())) {
@@ -205,6 +218,12 @@ void ProfilingRecord::removeProfileCounter(Block* b) {
   }
 }
 
+bool hasGradSumToSizeUses(Value* v) {
+  return std::any_of(v->uses().begin(), v->uses().end(), [](const Use& use) {
+    return use.user->kind() == aten::_grad_sum_to_size;
+  });
+}
+
 void ProfilingRecord::instrumentBlock(Block* block) {
   for (auto it = block->nodes().begin(); it != block->nodes().end(); ++it) {
     auto n = *it;
@@ -213,6 +232,33 @@ void ProfilingRecord::instrumentBlock(Block* block) {
       if (i->type()->kind() == c10::TypeKind::TensorType &&
           (needsProfiledInputs(n) || needsProfiledOutput(i->node()))) {
         insertShapeProfile(n, offset);
+      }
+
+      if (i->type()->cast<OptionalType>() && hasGradSumToSizeUses(i)) {
+        // here we are profile the definition instead of the use,
+        // because we are only optimizing in the case of a None value which is
+        // immutable
+        auto opt_pn = createProfileOptionalNode(nullptr, {i});
+        std::function<void(Stack&)> optional_profiler = [this,
+                                                         opt_pn](Stack& stack) {
+          std::lock_guard<std::mutex> lock(this->mutex_);
+          // frame_id is unused
+          int64_t frame_id = 0;
+          pop(stack, frame_id);
+          IValue value;
+          pop(stack, value);
+          if (value.isNone()) {
+            opt_pn->i_(attr::num_none, opt_pn->i(attr::num_none) + 1);
+          } else {
+            opt_pn->i_(attr::num_present, opt_pn->i(attr::num_present) + 1);
+          }
+          push(stack, value);
+        };
+        opt_pn->setCallback(optional_profiler);
+        auto pno = opt_pn->addOutput();
+        pno->setType(i->type());
+        opt_pn->insertAfter(i->node());
+        i->replaceAllUsesAfterNodeWith(opt_pn, pno);
       }
     }
 
