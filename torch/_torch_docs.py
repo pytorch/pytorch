@@ -8413,49 +8413,6 @@ Returns:
 
 """.format(**factory_common_args))
 
-add_docstr(torch.kaiser_window,
-           """
-kaiser_window(window_length, beta, periodic=True, dtype=None, \
-layout=torch.strided, device=None, requires_grad=False) -> Tensor
-""" + r"""
-Kaiser window function.
-
-.. math::
-    w[n] = I_0 \left( \beta \sqrt{1 - \frac{4n^2}{(M-1)^2}} \right) / I_0( \beta )
-
-with
-
-.. math::
-    -\frac{M-1}{2} \leq n \leq \frac{M-1}{2}
-
-where :math:`N` is the full window size.
-
-The input :attr:`window_length` is a positive integer controlling the
-returned window size. :attr:`periodic` flag determines whether the returned
-window trims off the last duplicate value from the symmetric window and is
-ready to be used as a periodic window with functions like
-:meth:`torch.stft`. Therefore, if :attr:`periodic` is true, the :math:`N` in
-above formula is in fact :math:`\text{window\_length} + 1`. Also, we always have
-``torch.kaiser_window(L, B, periodic=True)`` equal to
-``torch.kaiser_window(L + 1, B, periodic=False)[:-1])``.
-
-.. note::
-    If :attr:`window_length` :math:`=1`, the returned window contains a single value 1.
-""" + r"""
-Arguments:
-    window_length (int): the size of returned window
-    periodic (bool, optional): If True, returns a window to be used as periodic
-        function. If False, return a symmetric window.
-    {dtype} Only floating point types are supported.
-    layout (:class:`torch.layout`, optional): the desired layout of returned window tensor. Only
-          ``torch.strided`` (dense layout) is supported.
-    {device}
-    {requires_grad}
-
-Returns:
-    Tensor: A 1-D tensor of size :math:`(\text{{window\_length}},)` containing the window
-
-""".format(**factory_common_args))
 
 add_docstr(torch.vander,
            """

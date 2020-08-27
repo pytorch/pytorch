@@ -8408,29 +8408,27 @@ class TestTorchDeviceType(TestCase):
             np_fn = partial(np.rot90, k=rot_times, axes=[0, 1])
             self.compare_with_numpy(torch_fn, np_fn, data)
 
-    @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
     def test_signal_window_functions(self, device):
+        if not TEST_SCIPY:
+            raise unittest.SkipTest('Scipy not found')
 
-        def test(name, args=()):
+        def test(name):
             torch_method = getattr(torch, name + '_window')
             for size in [1, 2, 5, 10, 50, 100, 1024, 2048]:
                 for periodic in [True, False]:
-                    res = torch_method(size, *args, periodic=periodic, device=device)
+                    res = torch_method(size, periodic=periodic, device=device)
                     # NB: scipy always returns a float32 result
-                    ref = torch.from_numpy(signal.get_window((name, *args), size, fftbins=periodic))
+                    ref = torch.from_numpy(signal.get_window(name, size, fftbins=periodic))
                     self.assertEqual(res, ref, exact_dtype=False)
             with self.assertRaisesRegex(RuntimeError, r'not implemented for sparse types'):
-                torch_method(3, *args, layout=torch.sparse_coo)
+                torch_method(3, layout=torch.sparse_coo)
             with self.assertRaisesRegex(RuntimeError, r'floating point'):
-                torch_method(3, *args, dtype=torch.long)
-            self.assertTrue(torch_method(3, *args, requires_grad=True).requires_grad)
-            self.assertFalse(torch_method(3, *args).requires_grad)
+                torch_method(3, dtype=torch.long)
+            self.assertTrue(torch_method(3, requires_grad=True).requires_grad)
+            self.assertFalse(torch_method(3).requires_grad)
 
         for window in ['hann', 'hamming', 'bartlett', 'blackman']:
             test(window)
-
-        for num_test in range(50):
-            test('kaiser', (random.random() * 30,))
 
     def test_broadcast(self, device):
 
@@ -12700,7 +12698,6 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual((0,), torch.randperm(0, device=device).shape)
         self.assertEqual((0,), torch.bartlett_window(0, device=device).shape)
         self.assertEqual((0,), torch.bartlett_window(0, periodic=False, device=device).shape)
-        self.assertEqual((0,), torch.kaiser_window(0, 1, device=device).shape)
         self.assertEqual((0,), torch.hamming_window(0, device=device).shape)
         self.assertEqual((0,), torch.hann_window(0, device=device).shape)
         self.assertEqual((1, 1, 0), torch.tensor([[[]]], device=device).shape)
