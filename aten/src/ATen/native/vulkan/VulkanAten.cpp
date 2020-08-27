@@ -48,20 +48,17 @@ VulkanTensor& vtensor_from_vulkan(Tensor& tensor) {
 
 Tensor empty(
     IntArrayRef size,
-    const optional<ScalarType> dtype,
-    const optional<Layout> layout,
-    const optional<Device> device,
-    const optional<bool> pin_memory,
+    const TensorOptions& options,
     const optional<MemoryFormat> memory_format) {
   TORCH_CHECK(
-      !pin_memory.has_value(),
+      !options.has_pinned_memory(),
       "'pin_memory' argument is incompatible with Vulkan tensor");
   TORCH_CHECK(
-      !memory_format.has_value(),
+      !options.has_memory_format() && !memory_format,
       "'memory_format' argument is incompatible with Vulkan tensor");
   VulkanTensor vt{size.vec()};
   return new_with_vtensor_vulkan(
-      std::move(vt), at::device(at::kVulkan).dtype(dtype));
+      std::move(vt), at::device(at::kVulkan).dtype(options.dtype()));
 }
 
 Tensor empty_strided(
@@ -72,7 +69,7 @@ Tensor empty_strided(
     optional<Device> device,
     optional<bool> pin_memory) {
   return vulkan::aten::empty(
-      size, dtype, layout, device, pin_memory, c10::nullopt);
+      size, TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory), c10::nullopt);
 }
 
 Tensor upsample_nearest2d(
@@ -411,7 +408,7 @@ Tensor mean(
 }
 
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
-  m.impl("empty.memory_format", TORCH_FN(at::native::vulkan::aten::empty));
+  m.impl_UNBOXED("empty.memory_format", at::native::vulkan::aten::empty);
   m.impl("empty_strided", TORCH_FN(at::native::vulkan::aten::empty_strided));
   m.impl("add.Tensor", TORCH_FN(at::native::vulkan::aten::add));
   m.impl("clamp", TORCH_FN(at::native::vulkan::aten::clamp));

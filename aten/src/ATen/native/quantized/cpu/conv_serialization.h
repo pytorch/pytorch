@@ -32,7 +32,7 @@
  *      - dilation x kSpatialDim
  *      - output_padding x kSpatialDim (unused)
  *      - groups
- *      - traspose (0 or 1, unused)
+ *      - transpose (0 or 1, unused)
  *    1: weight
  *  2. list of optional tensors
  *    0: bias
@@ -74,8 +74,6 @@ ConvParamsSerializationType parse_conv_serialized_state(c10::IValue v) {
     }
   }
   TORCH_INTERNAL_ASSERT(version != -1, "Unable to parse serialization version");
-
-  ConvParamsSerializationType state;
 
   if (version == 1) {
     // version 1 - convert to version 2 manually
@@ -124,14 +122,14 @@ ConvParamsSerializationType parse_conv_serialized_state(c10::IValue v) {
     non_optional.emplace_back(std::move(weight));
     optional.emplace_back(std::move(bias));
 
-    state = std::tie(version, non_optional, optional);
-
-  } else {
+    return std::tie(version, non_optional, optional);
+  } else if (version == 2) {
     // version 2
-    state = v.to<ConvParamsSerializationType>();
+    return v.to<ConvParamsSerializationType>();
+  } else {
+    TORCH_INTERNAL_ASSERT(false, "Unexpected serialized qconv version: ",
+        version);
   }
-
-  return state;
 }
 
 template <uint32_t kSpatialDim>
@@ -185,31 +183,42 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> deserialize_conv(
   std::vector<c10::optional<at::Tensor>> optional;
 
   std::tie(version, non_optional, optional) = state;
-
-  // c10::optional<at::Tensor> bias;
-  torch::List<int64_t> stride, padding, dilation;
-  int64_t groups;
+  TORCH_INTERNAL_ASSERT(version == "2", "Unexpected serialized qconv version: ",
+      version);
 
   at::Tensor conv_params_packed = non_optional[0];
   at::Tensor weight = non_optional[1];
   c10::optional<at::Tensor> bias = optional[0];
 
+  torch::List<int64_t> stride, padding, dilation;
   // skip kSpatialDim
   int idx = 1;
-  for (; idx < kSpatialDim + 1; ++idx) {
+  for (int i = 0; i < kSpatialDim; ++i) {
     stride.emplace_back(conv_params_packed[idx].item<int64_t>());
+    idx++;
   }
-  for (; idx < 2 * kSpatialDim + 1; ++idx) {
+  for (int i = 0; i < kSpatialDim; ++i) {
     padding.emplace_back(conv_params_packed[idx].item<int64_t>());
+    idx++;
   }
-  for (; idx < 3 * kSpatialDim + 1; ++idx) {
+  for (int i = 0; i < kSpatialDim; ++i) {
     dilation.emplace_back(conv_params_packed[idx].item<int64_t>());
+    idx++;
   }
   // output_padding is not implemented yet, so we skip the entries
-  for (; idx < 4 * kSpatialDim + 1; ++idx) {
+  for (int i = 0; i < kSpatialDim; ++i) {
     // do nothing
+    idx++;
   }
-  groups = conv_params_packed[idx].item<int64_t>();
+  int64_t groups = conv_params_packed[idx].item<int64_t>();
+  idx++;
+  // transpose is not implemented yet, so we skip the entry
+  idx++;
+  TORCH_INTERNAL_ASSERT(idx == conv_params_packed.numel(),
+      "Unexpected length of conv_params_packed, expected ",
+      conv_params_packed.numel(),
+      " got ",
+      idx);
 
   auto& ctx = at::globalContext();
 
