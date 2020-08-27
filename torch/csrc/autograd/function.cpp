@@ -21,7 +21,7 @@ namespace torch { namespace autograd {
 // mode.
 static thread_local std::shared_ptr<Node> current_evaluating_node = nullptr;
 
-void NodeGuard::set_node(std::shared_ptr<Node> node) {
+NodeGuard::NodeGuard(std::shared_ptr<Node> node) {
   last_evaluating_node_ = std::move(current_evaluating_node);
   current_evaluating_node = std::move(node);
 }
@@ -30,9 +30,8 @@ NodeGuard::~NodeGuard() {
   current_evaluating_node = std::move(last_evaluating_node_);
 }
 
-void Node::assign_parent() noexcept {
-  // copy assignment to increase the use_count
-  parent_node_ = current_evaluating_node;
+void Node::assign_parent() {
+  metadata()->assign_parent(current_evaluating_node);
 }
 
 auto Node::name() const -> std::string {

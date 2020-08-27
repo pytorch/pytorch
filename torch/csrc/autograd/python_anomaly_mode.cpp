@@ -2,6 +2,8 @@
 #include <c10/util/Exception.h>
 #include <pybind11/pybind11.h>
 #include <torch/csrc/Exceptions.h>
+#include <torch/csrc/autograd/function.h>
+#include <torch/csrc/autograd/python_cpp_function.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/auto_gil.h>
 #include <torch/csrc/utils/object_ptr.h>
@@ -28,14 +30,57 @@ void PyAnomalyMetadata::store_stack() {
   }
 }
 
-void PyAnomalyMetadata::print_stack(const std::string& current_node_name, bool is_parent) {
+void PyAnomalyMetadata::print_stack(const std::string& current_node_name) {
   pybind11::gil_scoped_acquire gil;
-  if (!PyDict_Check(dict())) {
+  _print_stack(dict(), ANOMALY_TRACE_KEY, current_node_name, false);
+  PyObject* pyparent(PyDict_GetItemString(dict(), ANOMALY_PARENT_KEY));
+
+  // if there is no "parent_" in metadata, then it means this metadata's node
+  // is the root and stop printing the traceback
+  while (pyparent) {
+    PyObject* parent_metadata(PyObject_GetAttrString(pyparent, "metadata"));
+    if (!parent_metadata) {
+      throw python_error();
+    }
+    PyObject* parent_name_pyobj(PyObject_CallMethod(pyparent, "name", ""));
+    if (!parent_name_pyobj) {
+      throw python_error();
+    }
+    const char* parent_name_char = PyUnicode_AsUTF8(parent_name_pyobj);
+    if (!parent_name_char) {
+      throw python_error();
+    }
+    const std::string parent_name(parent_name_char);
+    _print_stack(parent_metadata, ANOMALY_TRACE_KEY, parent_name, true);
+    pyparent = PyDict_GetItemString(parent_metadata, ANOMALY_PARENT_KEY);
+  }
+}
+
+void PyAnomalyMetadata::assign_parent(const std::shared_ptr<void>& parent_node) {
+  // assign the python object of parent_node in metadata["parent_"]
+  // if parent_node is nullptr, then do nothing (it can mean that "parent_" key
+  // is not in metadata)
+
+  pybind11::gil_scoped_acquire gil;
+  if (!parent_node) return;
+
+  const auto node = std::static_pointer_cast<Node>(parent_node);
+  PyObject* pyobj = functionToPyObject(node);
+  if (!pyobj) {
+    throw python_error();
+  }
+  if (PyDict_SetItemString(dict(), ANOMALY_PARENT_KEY, pyobj)) {
+    throw python_error();
+  }
+}
+
+void _print_stack(PyObject* dict, const char* anomaly_trace_key, const std::string& current_node_name, bool is_parent) {
+  if (!PyDict_Check(dict)) {
     throw std::runtime_error("Anomaly metadata is not a python dictionary.");
   }
 
   // PyDict_GetItemString returns a borrowed reference
-  PyObject* stack(PyDict_GetItemString(dict(), ANOMALY_TRACE_KEY));
+  PyObject* stack(PyDict_GetItemString(dict, anomaly_trace_key));
   if (!stack) {
     TORCH_WARN("Error detected in ", current_node_name, ". ",
             "No forward pass information available. Enable detect anomaly "
@@ -61,7 +106,8 @@ void PyAnomalyMetadata::print_stack(const std::string& current_node_name, bool i
             THPUtils_unpackString(msg.get()));
   } else {
     TORCH_WARN("\n\n",
-            "Traceback of forward call that induces the previous calculation:\n",
+            "Previous calculation was induced by ", current_node_name, ". "
+            "Traceback of forward call that induced the previous calculation:\n",
             THPUtils_unpackString(msg.get()));
   }
 }

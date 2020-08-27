@@ -102,15 +102,6 @@ void THPCppFunction_dealloc(PyObject* self)
 
 } // namespace
 
-PyObject* THPCppFunction_parent_function(THPCppFunction* self, void *_unused)
-{
-  const auto& parent = self->cdata->parent();
-  if (!parent) return Py_None;
-  PyObject *py_parent_fn = functionToPyObject(parent);
-  if (!py_parent_fn) return nullptr;
-  return py_parent_fn;
-}
-
 PyObject* THPCppFunction_next_functions(THPCppFunction* self, PyObject* hook)
 {
   const auto num_next = self->cdata->num_outputs();

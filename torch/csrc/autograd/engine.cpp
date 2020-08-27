@@ -375,10 +375,7 @@ auto Engine::thread_main(const std::shared_ptr<GraphTask>& graph_task) -> void {
           // queue_callback() to find the target GraphTask to append final
           // callbacks.
           GraphTaskGuard guard(local_graph_task);
-          NodeGuard ndguard;
-          if (AnomalyMode::is_enabled()) {
-            ndguard.set_node(task.fn_);
-          }
+          NodeGuard ndguard(task.fn_);
           evaluate_function(local_graph_task, task.fn_.get(), task.inputs_, local_graph_task->cpu_ready_queue_);
         } catch (std::exception& e) {
           thread_on_exception(local_graph_task, task.fn_, e);
@@ -519,12 +516,7 @@ void GraphTask::set_exception_without_signal(const std::shared_ptr<Node>& fn) {
   std::unique_lock<std::mutex> lock(mutex_);
   if (!has_error_.load()) {
     if (AnomalyMode::is_enabled() && fn) {
-      fn->metadata()->print_stack(fn->name(), false);
-      auto fnp = fn->parent();
-      while (fnp) {
-        fnp->metadata()->print_stack(fnp->name(), true);
-        fnp = fnp->parent();
-      }
+      fn->metadata()->print_stack(fn->name());
     }
     has_error_ = true;
   }

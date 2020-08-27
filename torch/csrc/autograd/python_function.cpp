@@ -21,6 +21,7 @@
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/python/python_tracer.h>
+#include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
 
@@ -610,6 +611,13 @@ PyObject* process_outputs(PyObject *op_obj, const std::shared_ptr<PyNode>& cdata
   return outputs.release();
 }
 
+PyObject* THPFunction_name(THPFunction *self, PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  auto cdata = self->cdata.lock();
+  return THPUtils_packString(cdata->name());
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject *THPFunction_apply(PyObject *cls, PyObject *inputs)
 {
   HANDLE_TH_ERRORS
@@ -919,25 +927,6 @@ PyObject *THPFunction_next_functions(THPFunction *self, void *_unused)
   END_HANDLE_TH_ERRORS
 }
 
-PyObject *THPFunction_parent_function(THPFunction *self, void *_unused)
-{
-  HANDLE_TH_ERRORS
-  auto cdata = self->cdata.lock();
-  TORCH_CHECK(cdata,
-    "Legacy autograd function had parent_function accessed before the function was "
-    "invoked.  This doesn't make any sense: we have no idea what the next "
-    "functions are, because you haven't actually inserted this grad_fn inside "
-    "a graph.  Try invoking your function first before accessing this field.")
-
-  const auto& parent = cdata->parent();
-  if (!parent) return Py_None;
-  PyObject *py_parent_fn = functionToPyObject(parent);
-  if (!py_parent_fn) return nullptr;
-  return py_parent_fn;
-
-  END_HANDLE_TH_ERRORS
-}
-
 PyObject *THPFunction_metadata(THPFunction *self, void *_unused)
 {
   HANDLE_TH_ERRORS
@@ -1012,7 +1001,6 @@ static struct PyGetSetDef THPFunction_properties[] = {
   {"saved_tensors", (getter)THPFunction_saved_tensors, nullptr, nullptr, nullptr},
   {"saved_variables", (getter)THPFunction_saved_variables, nullptr, nullptr, nullptr},
   {"next_functions", (getter)THPFunction_next_functions, nullptr, nullptr, nullptr},
-  {"parent_function", (getter)THPFunction_parent_function, nullptr, nullptr, nullptr}, \
   {"to_save", &getObject<&THPFunction::to_save>, &setObject<&THPFunction::to_save>, nullptr, nullptr},
   {"non_differentiable", &getObject<&THPFunction::non_differentiable>, &setObject<&THPFunction::non_differentiable>, nullptr, nullptr},
   {"dirty_tensors", &getObject<&THPFunction::dirty_tensors>, &setObject<&THPFunction::dirty_tensors>, nullptr, nullptr},
@@ -1024,6 +1012,7 @@ static struct PyGetSetDef THPFunction_properties[] = {
 };
 
 static struct PyMethodDef THPFunction_methods[] = {
+  {(char*)"name", (PyCFunction)THPFunction_name, METH_NOARGS, nullptr},
   {(char*)"apply", (PyCFunction)THPFunction_apply, METH_CLASS | METH_VARARGS, nullptr},
   {(char*)"_do_backward", (PyCFunction)THPFunction_do_backward, METH_VARARGS, nullptr},
   {(char*)"_register_hook_dict", (PyCFunction)THPFunction__register_hook_dict, METH_O, nullptr},
