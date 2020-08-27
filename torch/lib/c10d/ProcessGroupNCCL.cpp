@@ -1121,6 +1121,8 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall_base(
               inputSplitSizes, input, &send_lengths, &send_offsets);
           c10d::computeLengthsAndOffsets(
               outputSplitSizes, output, &recv_lengths, &recv_offsets);
+          c10::cuda::CUDACachingAllocator::recordStream(
+              output.storage().data_ptr(), stream);
           return ncclAlltoallv(
               input.data_ptr(),
               send_lengths.data(),
