@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/runtime/register_ops_utils.h>
+#include <torch/csrc/jit/runtime/operator.h>
 #include <torch/library.h>
 
 #include <algorithm>
@@ -129,6 +130,14 @@ TORCH_LIBRARY_IMPL(aten, CatchAll, m) {
 
 RegisterOperators reg(
     {OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA("aten::str(t elem) -> str"),
+         [](Stack* stack) {
+           std::stringstream ss;
+           ss << pop(stack);
+           push(stack, ss.str());
+         },
+         aliasAnalysisFromSchema()),
+    OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA("aten::list(str t) -> str[]"),
          [](Stack& stack) {
            auto str = pop(stack).toStringRef();

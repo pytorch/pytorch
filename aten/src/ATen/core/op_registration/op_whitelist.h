@@ -1,7 +1,7 @@
 #pragma once
 
 #ifdef XPLAT_MOBILE_BUILD
-#include <Aten/selected_mobile_ops.h>
+#include <ATen/selected_mobile_ops.h>
 #endif
 
 /**
