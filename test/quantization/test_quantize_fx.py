@@ -4,6 +4,7 @@ import torch.nn as nn
 import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
 import torch.nn.intrinsic.quantized as nniq
+import torch.multiprocessing as mp
 
 # symbolic trace
 from torch.fx import symbolic_trace
@@ -16,18 +17,30 @@ from torch.quantization import (
     convert_fx,
 )
 
-from torch.quantization import default_qconfig
+from torch.quantization import (
+    default_qconfig,
+    default_qat_qconfig,
+    prepare,
+    prepare_qat,
+    convert,
+)
 
 # test utils
 from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
     skipIfNoFBGEMM,
+    skip_if_no_torchvision,
+    train_one_epoch,
+    run_ddp,
 )
+
+from torch.testing._internal.common_distributed import skip_if_not_multigpu
 
 from torch.testing._internal.common_quantization import NodeSpec as ns
 
 import itertools
 import operator
+import unittest
 
 class TestQuantizeFx(QuantizationTestCase):
     """ Unit tests for functionalities
@@ -881,6 +894,8 @@ class TestQuantizeFxModels(QuantizationTestCase):
                                      ' diff:' + str(diff_from_eager[mode][name]))
 
     @skip_if_no_torchvision
+    @skipIfNoFBGEMM
+    @unittest.skip("skip for now since tbb failed")
     def test_torchvision(self):
         from torchvision import models
         from torchvision.models import quantization as quantized_models
@@ -944,6 +959,7 @@ class TestQuantizeFxModels(QuantizationTestCase):
 
     @skip_if_no_torchvision
     @skip_if_not_multigpu
+    @skipIfNoFBGEMM
     @unittest.skip('TODO: not working yet due to https://github.com/pytorch/pytorch/issues/43513')
     def test_resnet18_ddp(self):
         from torchvision import models
