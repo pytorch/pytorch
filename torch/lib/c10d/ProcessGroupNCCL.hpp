@@ -246,6 +246,8 @@ class ProcessGroupNCCL : public ProcessGroup {
     // callback's stream and will have the result value of the callback.
     void addCallback(std::function<void(void)> callback) override {
       (*cudaEvents_)[0].block(*futureNCCLCallbackStream_);
+      c10::OptionalStreamGuard streamGuard{
+          c10::Stream(*futureNCCLCallbackStream_)};
       callback();
     }
 
