@@ -320,13 +320,10 @@ def compute_function(*, target: Target) -> Callable[[NativeFunction], Optional[s
         return f"""
 // aten::{f.func}
 {cpp_returns_type} {name}({cpp_args_str_no_default}) {{
-#ifdef USE_STATIC_DISPATCH
-#else
     static auto op = c10::Dispatcher::singleton()
         .findSchemaOrThrow("aten::{f.func.name.name}", "{f.func.name.overload_name}")
         .typed<{dispatcher_returns_type} ({dispatcher_types_str})>();
     return op.call({dispatcher_exprs_str});
-#endif
 }}
 """
     return go
@@ -361,13 +358,10 @@ def compute_tensor_method(*, target: Target) -> Callable[[NativeFunction], Optio
         return f"""
 // aten::{f.func}
 {cpp_returns_type} Tensor::{name}({cpp_args_exclude_this_str_no_default}) const {{
-#ifdef USE_STATIC_DISPATCH
-#else
     static auto op = c10::Dispatcher::singleton()
         .findSchemaOrThrow("aten::{f.func.name.name}", "{f.func.name.overload_name}")
         .typed<{dispatcher_returns_type} ({dispatcher_types_str})>();
     return op.call({dispatcher_exprs_str});
-#endif
 }}
 """
 
