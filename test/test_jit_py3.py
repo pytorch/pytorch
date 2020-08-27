@@ -542,6 +542,20 @@ class TestScriptPy3(JitTestCase):
         # Check that ignored method is still intact.
         self.assertEqual(inp, n.ignored_method(inp))
 
+    def test_if_returning_any(self):
+        """
+        Check that an if statement can return different
+        types early from each branch when the return
+        type of the function is Any.
+        """
+        def if_function(inp: torch.Tensor) -> Any:
+            if inp.shape[0] == 1:
+                return inp * inp
+            else:
+                return "str"
+
+        self.checkScript(if_function, (torch.randn(5),))
+
     def test_export_opnames_interface(self):
         global OneTwoModule
 

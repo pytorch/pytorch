@@ -193,21 +193,32 @@ void unpackQuantizedWeightsHelper(
         const int64_t kSpatialDim = conv_params_packed[0].item<int64_t>();
         // skip kSpatialDim
         int64_t idx = 1;
-        for (; idx < kSpatialDim + 1; ++idx) {
+        for (int i = 0; i < kSpatialDim; ++i) {
           stride_int.emplace_back(conv_params_packed[idx].item<int64_t>());
+          idx++;
         }
-        for (; idx < 2 * kSpatialDim + 1; ++idx) {
+        for (int i = 0; i < kSpatialDim; ++i) {
           padding_int.emplace_back(conv_params_packed[idx].item<int64_t>());
+          idx++;
         }
-        for (; idx < 3 * kSpatialDim + 1; ++idx) {
+        for (int i = 0; i < kSpatialDim; ++i) {
           dilation_int.emplace_back(conv_params_packed[idx].item<int64_t>());
+          idx++;
         }
         // output_padding is not implemented yet, so we skip the entries
-        for (; idx < 4 * kSpatialDim + 1; ++idx) {
+        for (int i = 0; i < kSpatialDim; ++i) {
           // do nothing
+          idx++;
         }
         groups_int = conv_params_packed[idx].item<int64_t>();
+        idx++;
         // skip transpose
+        idx++;
+        TORCH_INTERNAL_ASSERT(idx == conv_params_packed.numel(),
+            "Unexpected length of conv_params_packed, expected ",
+            conv_params_packed.numel(),
+            " got ",
+            idx);
 
         torch::List<c10::IValue> optional = elements[2].toList();
         bias = optional.get(0).toOptional<at::Tensor>();

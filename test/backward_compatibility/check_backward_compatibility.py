@@ -80,7 +80,7 @@ def allow_listed(schema, allow_list):
             if len(item) > 2:
                 # if arguments regex is present, use it
                 regexp_args = re.compile(item[2])
-                return True if regexp_args.search(str(schema)) else False
+                return bool(regexp_args.search(str(schema)))
             return True
     return False
 
