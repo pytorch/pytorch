@@ -177,46 +177,6 @@ void checkOverloadDecl(const Decl& new_decl, const Decl& old_decl) {
         old_params[i].ident());
   }
 }
-
-c10::optional<IValue> tryCalculateDefaultParam(
-    const Argument& arg,
-    const py::object& def_value) {
-  auto n = arg.N();
-  auto list_type = arg.type()->cast<ListType>();
-  try {
-    if (n && *n > 0 && list_type) {
-      // BroadcastingList, allow default values T for arg types List[T]
-      return toIValue(def_value, list_type->getElementType());
-    } else {
-      return toIValue(def_value, arg.type());
-    }
-  } catch (...) {
-    return c10::nullopt;
-  }
-}
-
-// An overloaded function may have a default that does not subtype all overloads
-// @overload
-// def foo(x: str)
-// def foo(x=1)
-FunctionDefaults calcOverloadedFunctionDefaults(
-    const FunctionSchema& schema,
-    const FunctionDefaults& defaults) {
-  FunctionDefaults updated_defaults;
-  for (const auto& arg : schema.arguments()) {
-    const std::string& arg_name = arg.name();
-    auto value = defaults.find(arg_name);
-    if (value == defaults.end()) {
-      continue;
-    }
-    auto maybe_ivalue = tryCalculateDefaultParam(arg, value->second);
-    if (maybe_ivalue) {
-      updated_defaults[arg_name] = value->second;
-    }
-  }
-  return updated_defaults;
-}
-
 } // namespace
 
 bool checkMutableFunctionDefault(const py::object& def_arg) {
@@ -248,47 +208,9 @@ void checkMutableFunctionDefault(
   }
 }
 
-FunctionSchema getSchemaWithNameAndDefaults(
-    const SourceRange& range,
-    const FunctionSchema& schema,
-    const at::optional<std::string>& new_name,
-    const FunctionDefaults& default_args) {
-  std::vector<Argument> new_args;
-  for (auto& arg : schema.arguments()) {
-    auto it = default_args.find(arg.name());
-    if (it != default_args.end()) {
-      checkMutableFunctionDefault(range, arg, it->second);
-      c10::optional<IValue> value = tryCalculateDefaultParam(arg, it->second);
-      if (!value) {
-        ErrorReport error(range);
-        error << "Expected a default value of type " << arg.type()->repr_str()
-              << " on parameter \"" << arg.name() << "\".";
-        if (arg.is_inferred_type()) {
-          error << "Because \"" << arg.name()
-                << "\" was not annotated with an explicit type "
-                << "it is assumed to be type 'Tensor'.";
-        }
-        throw error;
-      }
-      new_args.emplace_back(
-          arg.name(), arg.type(), arg.N(), *value, arg.kwarg_only());
-    } else {
-      new_args.push_back(arg);
-    }
-  }
-  return FunctionSchema(
-      new_name.value_or(schema.name()),
-      schema.overload_name(),
-      new_args,
-      schema.returns(),
-      schema.is_vararg(),
-      schema.is_varret());
-}
-
 static Decl mergeDefaultsAndExtraParametersToOverloadDecl(
     const Decl& overload_decl,
-    const Decl& impl_decl,
-    const FunctionDefaults& defaults) {
+    const Decl& impl_decl) {
   std::vector<Param> adjusted_params;
   const auto& overload_params = overload_decl.params();
   const auto& impl_params = impl_decl.params();
@@ -317,12 +239,6 @@ static Decl mergeDefaultsAndExtraParametersToOverloadDecl(
     adjusted_params.push_back(overload_params[i]);
   }
   for (size_t i = overload_params.size(); i < impl_params.size(); ++i) {
-    if (!defaults.count(impl_params[i].ident().name())) {
-      throw ErrorReport(impl_decl.range())
-          << "Expected to find default parameter on argument"
-          << impl_params[i].ident().name()
-          << " because it is not defined on the overloaded declaration";
-    }
     if (!impl_params[i].type().present()) {
       throw ErrorReport(impl_decl.range())
           << "Parameters not specified on the overloaded declaration must have a type annotation in the implementation function."
@@ -341,7 +257,6 @@ static StrongFunctionPtr script_compile_overloaded_function(
     const Decl& overload_decl,
     const Def& implementation_def,
     ResolutionCallback rcb,
-    const FunctionDefaults& implementation_defaults,
     const py::object& signature) {
   if (signature.is(py::none())) {
     throw ErrorReport(overload_decl.range())
@@ -349,24 +264,19 @@ static StrongFunctionPtr script_compile_overloaded_function(
   }
 
   auto adjusted_decl = mergeDefaultsAndExtraParametersToOverloadDecl(
-      overload_decl, implementation_def.decl(), implementation_defaults);
+      overload_decl, implementation_def.decl());
   auto new_def = implementation_def.withDecl(adjusted_decl);
   auto cu = get_python_cu();
   auto defined_functions = cu->define(
       QualifiedName(name.prefix()),
+      /*properties=*/{},
+      /*propResolvers=*/{},
       {new_def},
       {pythonResolver(std::move(rcb))},
       nullptr,
       true);
   TORCH_INTERNAL_ASSERT(defined_functions.size() == 1);
   auto& defined = defined_functions[0];
-  FunctionDefaults updated_defaults = calcOverloadedFunctionDefaults(
-      defined->getSchema(), implementation_defaults);
-  defined->setSchema(getSchemaWithNameAndDefaults(
-      new_def.range(),
-      defined->getSchema(),
-      new_def.name().name(),
-      updated_defaults));
   StrongFunctionPtr ret(std::move(cu), defined);
   didFinishEmitFunction(ret);
   return ret;
@@ -375,19 +285,18 @@ static StrongFunctionPtr script_compile_overloaded_function(
 static StrongFunctionPtr script_compile_function(
     const c10::QualifiedName& name,
     const Def& def,
-    const FunctionDefaults& defaults,
     ResolutionCallback rcb) {
   auto cu = get_python_cu();
   auto defined_functions = cu->define(
       QualifiedName(name.prefix()),
+      /*properties=*/{},
+      /*propResolvers=*/{},
       {def},
       {pythonResolver(std::move(rcb))},
       nullptr,
       true);
   TORCH_INTERNAL_ASSERT(defined_functions.size() == 1);
   auto& defined = defined_functions[0];
-  defined->setSchema(getSchemaWithNameAndDefaults(
-      def.range(), defined->getSchema(), def.name().name(), defaults));
   StrongFunctionPtr ret(std::move(cu), defined);
   didFinishEmitFunction(ret);
   return ret;
@@ -898,19 +807,24 @@ void initJitScriptBindings(PyObject* module) {
           "_save_for_mobile",
           [](Module& m,
              const std::string& filename,
-             const ExtraFilesMap& _extra_files = ExtraFilesMap()) {
-            m._save_for_mobile(filename, _extra_files);
+             const ExtraFilesMap& _extra_files = ExtraFilesMap(),
+             bool _save_mobile_debug_info = false) {
+            m._save_for_mobile(filename, _extra_files, _save_mobile_debug_info);
           },
           py::arg("filename"),
-          py::arg("_extra_files") = ExtraFilesMap())
+          py::arg("_extra_files") = ExtraFilesMap(),
+          py::arg("_save_mobile_debug_info") = false)
       .def(
           "_save_to_buffer_for_mobile",
-          [](Module& m, const ExtraFilesMap& _extra_files = ExtraFilesMap()) {
+          [](Module& m,
+             const ExtraFilesMap& _extra_files = ExtraFilesMap(),
+             bool _save_mobile_debug_info = false) {
             std::ostringstream buf;
-            m._save_for_mobile(buf, _extra_files);
+            m._save_for_mobile(buf, _extra_files, _save_mobile_debug_info);
             return py::bytes(buf.str());
           },
-          py::arg("_extra_files") = ExtraFilesMap())
+          py::arg("_extra_files") = ExtraFilesMap(),
+          py::arg("_save_mobile_debug_info") = false)
       .def("_set_optimized", &Module::set_optimized)
       .def(
           "dump",
@@ -1224,14 +1138,11 @@ void initJitScriptBindings(PyObject* module) {
       });
   m.def(
       "_jit_script_compile",
-      [](const std::string& qualname,
-         const Def& def,
-         ResolutionCallback rcb,
-         const FunctionDefaults& defaults) {
+      [](const std::string& qualname, const Def& def, ResolutionCallback rcb) {
         C10_LOG_API_USAGE_ONCE("torch.script.compile");
         const auto name = c10::QualifiedName(qualname);
         TORCH_INTERNAL_ASSERT(name.name() == def.name().name());
-        return script_compile_function(name, def, defaults, std::move(rcb));
+        return script_compile_function(name, def, std::move(rcb));
       });
   m.def(
       "_jit_script_compile_overload",
@@ -1243,12 +1154,7 @@ void initJitScriptBindings(PyObject* module) {
          const py::object& signature) {
         const auto name = c10::QualifiedName(qualname);
         return script_compile_overloaded_function(
-            name,
-            overload_decl,
-            implementation_def,
-            std::move(rcb),
-            implementation_defaults,
-            signature);
+            name, overload_decl, implementation_def, std::move(rcb), signature);
       });
   m.def(
       "_replace_overloaded_method_decl",
@@ -1293,8 +1199,10 @@ void initJitScriptBindings(PyObject* module) {
         const auto classname = c10::QualifiedName(qualifiedName);
         auto classType = ClassType::create(classname, cu);
         cu->register_type(classType);
-        std::vector<ResolverPtr> rcbs;
+        std::vector<ResolverPtr> methodRcbs, propRcbs;
         std::vector<Def> methodDefs;
+        std::vector<Property> props;
+
         for (const auto& def : classDef.body()) {
           if (def.kind() != TK_DEF) {
             throw ErrorReport(def.range())
@@ -1303,11 +1211,22 @@ void initJitScriptBindings(PyObject* module) {
                    "something else!";
           }
           methodDefs.emplace_back(Def(def));
-          rcbs.push_back(
+          methodRcbs.push_back(
               pythonResolver(rcb, classDef.name().name(), classType));
         }
+
+        // Gather definitions for property getters and setters as well as
+        // corresponding resolution callbacks.
+        if (classDef.properties().present()) {
+          for (const auto& prop : classDef.properties().get()) {
+            props.emplace_back(prop);
+            propRcbs.push_back(
+                pythonResolver(rcb, classDef.name().name(), classType));
+          }
+        }
+
         const auto self = SimpleSelf(classType);
-        cu->define(classname, methodDefs, rcbs, &self);
+        cu->define(classname, props, propRcbs, methodDefs, methodRcbs, &self);
       });
   m.def(
       "_jit_script_interface_compile",
@@ -1550,8 +1469,7 @@ void initJitScriptBindings(PyObject* module) {
           "_create_methods",
           [](std::shared_ptr<ConcreteModuleType> concreteType,
              const std::vector<Def>& defs,
-             const std::vector<ResolutionCallback>& rcbs,
-             const std::vector<FunctionDefaults>& defaults) {
+             const std::vector<ResolutionCallback>& rcbs) {
             TORCH_INTERNAL_ASSERT(defs.size() == rcbs.size());
             std::vector<ResolverPtr> resolvers;
             resolvers.reserve(rcbs.size());
@@ -1563,22 +1481,13 @@ void initJitScriptBindings(PyObject* module) {
             const auto& prefix = selfType->name().value();
             const auto self = ModuleSelf(std::move(concreteType));
             auto cu = selfType->compilation_unit();
-            cu->define(prefix, defs, resolvers, &self);
-            // Stitch in default arguments for each Def if provided
-            auto defaults_it = defaults.begin();
-            auto defs_it = defs.begin();
-            while (defs_it != defs.end()) {
-              const auto method_name =
-                  QualifiedName(prefix, (*defs_it).name().name());
-              auto& method = cu->get_function(method_name);
-              method.setSchema(getSchemaWithNameAndDefaults(
-                  defs_it->range(),
-                  method.getSchema(),
-                  at::nullopt,
-                  *defaults_it));
-              ++defs_it;
-              ++defaults_it;
-            }
+            cu->define(
+                prefix,
+                /*properties=*/{},
+                /*propResolvers=*/{},
+                defs,
+                resolvers,
+                &self);
           });
 
   m.def(

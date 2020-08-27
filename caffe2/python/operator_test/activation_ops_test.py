@@ -21,7 +21,7 @@ import unittest
 class TestActivations(serial.SerializedTestCase):
     @given(X=hu.tensor(), in_place=st.booleans(),
                   engine=st.sampled_from(["", "CUDNN"]), **mu.gcs)
-    @settings(deadline=3000)
+    @settings(deadline=10000)
     def test_relu(self, X, in_place, engine, gc, dc):
         if gc == mu.mkl_do:
             in_place = False

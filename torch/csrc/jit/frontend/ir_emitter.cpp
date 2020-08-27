@@ -3746,6 +3746,61 @@ CompilationUnit::CompilationUnit(const std::string& source)
   define(c10::nullopt, source, nativeResolver(), nullptr);
 }
 
+// This pair represents a pair of functions (getter and setter) obtained from
+// compiling a Property.
+struct CompilationUnit::PropertyPair
+    : public std::pair<std::unique_ptr<Function>, std::unique_ptr<Function>> {
+  PropertyPair(
+      std::unique_ptr<Function> getter,
+      std::unique_ptr<Function> setter) {
+    TORCH_INTERNAL_ASSERT(getter, "Property pair must have defined getter")
+    this->first = std::move(getter);
+    this->second = std::move(setter);
+  }
+
+  std::unique_ptr<Function>& getGetter() {
+    return this->first;
+  }
+
+  std::unique_ptr<Function>& getSetter() {
+    return this->second;
+  }
+};
+
+CompilationUnit::PropertyPair CompilationUnit::define_property(
+    const c10::optional<c10::QualifiedName>& prefix,
+    const Property& prop,
+    const ResolverPtr& resolver,
+    const Self* self,
+    const std::unordered_map<std::string, Function*>& function_table,
+    bool shouldMangle) const {
+  // self must be defined because properties are features of classes and
+  // modules.
+  TORCH_INTERNAL_ASSERT(self);
+
+  // Compile the getter function.
+  std::unique_ptr<Function> getter_fn = define(
+      prefix, prop.getter(), resolver, self, function_table, shouldMangle);
+
+  // Compile the setter function if it exists.
+  std::unique_ptr<Function> setter_fn = nullptr;
+  if (prop.setter().present()) {
+    setter_fn = define(
+        prefix,
+        prop.setter().get(),
+        resolver,
+        self,
+        function_table,
+        shouldMangle);
+  }
+
+  // Add the property to the class type definition.
+  self->getClassType()->addProperty(
+      prop.name().name(), getter_fn.get(), setter_fn.get());
+
+  return PropertyPair(std::move(getter_fn), std::move(setter_fn));
+}
+
 std::unique_ptr<Function> CompilationUnit::define(
     const c10::optional<QualifiedName>& prefix,
     const Def& def,
@@ -3794,41 +3849,70 @@ std::unique_ptr<Function> CompilationUnit::define(
 }
 
 std::vector<Function*> CompilationUnit::define(
-    const c10::optional<QualifiedName>& prefix,
+    const c10::optional<c10::QualifiedName>& prefix,
+    const std::vector<Property>& properties,
+    const std::vector<ResolverPtr>& propResolvers,
     const std::vector<Def>& definitions,
-    const std::vector<ResolverPtr>& resolvers,
+    const std::vector<ResolverPtr>& defResolvers,
     const Self* self,
     bool shouldMangle) {
-  TORCH_INTERNAL_ASSERT(definitions.size() == resolvers.size());
+  TORCH_INTERNAL_ASSERT(definitions.size() == defResolvers.size());
+  TORCH_INTERNAL_ASSERT(properties.size() == propResolvers.size());
   std::vector<Function*> functions;
   std::unordered_map<std::string, Function*> function_table;
+
+  // Records fn in function_table, functions and with register_function.
+  // This is done several times below, so this lambda helps avoid repeating
+  // code.
+  auto record_function = [&](std::unique_ptr<Function> fn) {
+    function_table[fn->name()] = fn.get();
+    functions.emplace_back(fn.get());
+    this->register_function(std::move(fn));
+  };
+
+  for (size_t i = 0; i < properties.size(); i++) {
+    PropertyPair property_fns = define_property(
+        prefix,
+        properties[i],
+        propResolvers[i],
+        self,
+        function_table,
+        shouldMangle);
+
+    auto& getter_fn = property_fns.getGetter();
+    auto& setter_fn = property_fns.getSetter();
+
+    record_function(std::move(getter_fn));
+
+    if (setter_fn) {
+      record_function(std::move(setter_fn));
+    }
+  }
 
   for (size_t i = 0; i < definitions.size(); i++) {
     auto fn = define(
         prefix,
         definitions[i],
-        resolvers[i],
+        defResolvers[i],
         self,
         function_table,
         shouldMangle);
-    const auto& name = fn->name();
-    function_table[name] = fn.get();
-    functions.push_back(fn.get());
-    register_function(std::move(fn));
+
+    record_function(std::move(fn));
   }
 
   // We need to compile `__init__` first, since it can determine what attributes
   // are available to other methods. So reorder the definitions accordingly.
-  for (size_t i = 0; i < definitions.size(); i++) {
-    const auto& def = definitions[i];
-    if (def.name().name() == "__init__") {
-      functions[i]->ensure_defined();
+  for (auto& kv : function_table) {
+    if (kv.first == "__init__") {
+      kv.second->ensure_defined();
     }
   }
 
   for (Function* function : functions) {
     function->ensure_defined();
   }
+
   return functions;
 }
 
@@ -3845,7 +3929,13 @@ std::vector<Function*> CompilationUnit::define(
     definitions.push_back(def);
     resolvers.push_back(resolver);
   }
-  return define(prefix, definitions, resolvers, self);
+  return define(
+      prefix,
+      /*properties=*/{},
+      /*propResolvers=*/{},
+      definitions,
+      resolvers,
+      self);
 }
 
 void runCleanupPasses(std::shared_ptr<Graph>& to_clean) {

@@ -325,12 +325,9 @@ static bool dispatch_to_Bool(const Tensor & self) {
 static PyObject * THPVariable_float_scalar(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
   if (check_has_torch_function(self)) {
-    try {
-      return handle_torch_function(self, "__bool__");
-    }
-    catch(const python_error&) {
-      return nullptr;
-    }
+    HANDLE_TH_ERRORS
+    return handle_torch_function(self, "__bool__");
+    END_HANDLE_TH_ERRORS
   }
   jit::tracer::warn("Converting a tensor to a Python float", jit::tracer::WARN_PYTHON_DATAFLOW);
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
@@ -1016,12 +1013,9 @@ ${py_methods}
 
 static PyObject * THPVariable_bool_scalar(PyObject* self, PyObject* args) {
   if (check_has_torch_function(self)) {
-    try {
-      return handle_torch_function(self, "__bool__");
-    }
-    catch(const python_error&) {
-      return nullptr;
-    }
+    HANDLE_TH_ERRORS
+    return handle_torch_function(self, "__bool__");
+    END_HANDLE_TH_ERRORS
   }
   jit::tracer::warn("Converting a tensor to a Python boolean", jit::tracer::WARN_PYTHON_DATAFLOW);
   return THPVariable_is_nonzero(self, args);

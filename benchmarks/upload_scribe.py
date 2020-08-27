@@ -75,7 +75,8 @@ class PytorchBenchmarkUploader(ScribeUploader):
                 'time', 'rounds',
             ],
             'normal': [
-                'benchmark_group', 'benchmark_name', 'benchmark_class', 'benchmark_time',
+                'benchmark_group', 'benchmark_name', 'benchmark_executor',
+                'benchmark_fuser', 'benchmark_class', 'benchmark_time',
                 'pytorch_commit_id', 'pytorch_branch', 'pytorch_commit_time', 'pytorch_version',
                 'pytorch_git_dirty',
                 'machine_kernel', 'machine_processor', 'machine_hostname',
@@ -92,10 +93,16 @@ class PytorchBenchmarkUploader(ScribeUploader):
         upload_time = int(time.time())
         messages = []
         for b in pytest_json['benchmarks']:
+            test = b['name'].split('[')[0]
+            net_name = b['params']['net_name']
+            benchmark_name = '{}[{}]'.format(test, net_name)
+            executor, fuser = b['params']['executor_and_fuser'].split('-')
             m = self.format_message({
                 "time": upload_time,
                 "benchmark_group": b['group'],
-                "benchmark_name": b['name'],
+                "benchmark_name": benchmark_name,
+                "benchmark_executor": executor,
+                "benchmark_fuser": fuser,
                 "benchmark_class": b['fullname'],
                 "benchmark_time": pytest_json['datetime'],
                 "pytorch_commit_id": commit_info['id'],

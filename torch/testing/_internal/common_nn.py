@@ -3063,6 +3063,17 @@ new_module_tests = [
         reference_fn=lambda x, *_: x * 0.5 * (1.0 + torch.erf(x / math.sqrt(2.0))),
     ),
     dict(
+        module_name='SiLU',
+        input_size=(),
+        desc='scalar',
+        reference_fn=lambda x, *_: x * torch.sigmoid(x),
+    ),
+    dict(
+        module_name='SiLU',
+        input_size=(5, 6, 7),
+        reference_fn=lambda x, *_: x * torch.sigmoid(x),
+    ),
+    dict(
         constructor=wrap_functional(F.softmax, dim=-1),
         cpp_options_args='F::SoftmaxFuncOptions(-1)',
         input_size=(2, 128),  # trigger the last-dim algo in CUDA

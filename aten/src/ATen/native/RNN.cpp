@@ -1182,7 +1182,7 @@ bool _use_cudnn_rnn_flatten_weight() {
           batch_first);                                                     \
       return std::make_tuple(std::move(output), std::move(hy));             \
     }                                                                       \
-    check_device(_input, _params, hx);                                      \
+    check_attributes(_input, _params, hx);                                  \
     auto input = batch_first ? _input.transpose(0, 1) : _input;             \
     auto params = gather_params(_params, has_biases);                       \
     auto results =                                                          \
@@ -1410,7 +1410,7 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
               num_layers, dropout_p, train, bidirectional, batch_first);
     return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
   }
-  check_device(_input, _params, hx);
+  check_attributes(_input, _params, hx);
   auto input = batch_first ? _input.transpose(0, 1) : _input;
   auto params = gather_params(_params, has_biases);
   auto results = _lstm_impl<FullLayer, FullBidirectionalLayer>(

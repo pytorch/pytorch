@@ -2179,7 +2179,7 @@ class TestLayers(LayersTestCase):
         npt.assert_allclose(expected, result, atol=1e-4, rtol=1e-4)
 
     @given(**hu.gcs)
-    @settings(deadline=1000)
+    @settings(deadline=10000)
     def testHomotopyWeight(self, gc, dc):
         input_record = self.new_record(schema.RawTuple(2))
         data = np.random.random(2)

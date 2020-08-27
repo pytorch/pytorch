@@ -1642,7 +1642,7 @@ class TestOperators(hu.HypothesisTestCase):
            b=st.integers(),
            is_empty=st.booleans(),
            **hu.gcs_cpu_only)
-    @settings(deadline=10000)
+    @settings(deadline=None, max_examples=50)
     def test_slice(self, input, slice_dim, a, b, is_empty, gc, dc):
         slice_dim = slice_dim % len(input.shape)
         if (is_empty):

@@ -329,6 +329,14 @@
 - name: coalesce(Tensor self) -> Tensor
   self: grad
 
+- name: complex(Tensor real, Tensor imag) -> Tensor
+  real: not_implemented("complex real")
+  imag: not_implemented("complex imag")
+
+- name: polar(Tensor abs, Tensor angle) -> Tensor
+  abs: not_implemented("polar abs")
+  angle: not_implemented("polar angle")
+
 - name: conj(Tensor self) -> Tensor
   self: grad.conj()
 
@@ -515,6 +523,10 @@
 - name: hardswish(Tensor self) -> Tensor
   self: hardswish_backward(grad, self)
 
+- name: hypot(Tensor self, Tensor other) -> Tensor
+  self: grad * self / result
+  other: grad * other / result
+
 - name: index.Tensor(Tensor self, Tensor?[] indices) -> Tensor
   self: index_backward(zeros_like(self), indices, grad)
   indices: TensorList()
@@ -651,11 +663,14 @@
   self: zeros_like(self.expand(at::infer_size(self.sizes(), mask.sizes())), at::MemoryFormat::Preserve).masked_scatter_(mask, grad)
   mask: non_differentiable
 
+- name: matrix_exp(Tensor self) -> Tensor
+  self: matrix_exp_backward(self, grad)
+
 - name: max.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
   self: index_select_backward(grad, dim, indices, self.sizes(), keepdim)
 
 - name: max(Tensor self) -> Tensor
-  self: select_first_equal_backward(grad, self, result)
+  self: evenly_distribute_backward(grad, self, result)
 
 - name: max.other(Tensor self, Tensor other) -> Tensor
   self: grad.clone().masked_fill_(self <= other, 0)
@@ -668,7 +683,7 @@
   self: sum_backward(grad, self.sizes(), dim, keepdim).to(self.scalar_type()) / _safe_size(self.sizes(), dim)
 
 - name: median(Tensor self) -> Tensor
-  self: select_first_equal_backward(grad, self, result)
+  self: evenly_distribute_backward(grad, self, result)
 
 # This is in theory incorrect in the following case:
 #   sorted list: [..., a, b, b, ..., b, b, c, ...] with median = b and the value
@@ -691,7 +706,7 @@
   self: index_select_backward(grad, dim, indices, self.sizes(), keepdim)
 
 - name: min(Tensor self) -> Tensor
-  self: select_first_equal_backward(grad, self, result)
+  self: evenly_distribute_backward(grad, self, result)
 
 - name: min.other(Tensor self, Tensor other) -> Tensor
   self: grad.clone().masked_fill_(self >= other, 0)
@@ -741,6 +756,10 @@
 
 - name: neg(Tensor self) -> Tensor
   self: grad.neg()
+
+- name: nextafter(Tensor self, Tensor other) -> Tensor
+  self: not_implemented("nextafter")
+  other: not_implemented("nextafter")
 
 - name: norm.Scalar(Tensor self, Scalar p=2) -> Tensor
   self: norm_backward(grad, self, p, result)
@@ -966,6 +985,12 @@
 
 - name: sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   self: sum_backward(grad, self.sizes(), dim, keepdim)
+
+- name: nansum(Tensor self, *, ScalarType? dtype=None) -> Tensor
+  self: grad.expand(self.sizes()).to(self.scalar_type()) * self.isnan().logical_not()
+
+- name: nansum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+  self: nansum_backward(grad.to(self.scalar_type()), self, dim, keepdim)
 
 - name: svd(Tensor self, bool some=True, bool compute_uv=True) -> (Tensor U, Tensor S, Tensor V)
   self: svd_backward(grads, self, some, compute_uv, U, S, V)
@@ -1198,10 +1223,7 @@
   self: threshold_backward(grad, result, 0)
 
 - name: silu(Tensor self) -> Tensor
-  self: silu_backward(grad, self)
-
-- name: silu_(Tensor(a!) self) -> Tensor(a!)
-  self: not_implemented("silu_ cannot compute gradient of inplace version, use silu instead")
+  self: "GradMode::is_enabled() ? infinitely_differentiable_silu_backward(grad, self) : silu_backward(grad, self)"
 
 - name: elu(Tensor self, Scalar alpha=1, Scalar scale=1, Scalar input_scale=1) -> Tensor
   self: elu_backward(grad, alpha, scale, input_scale, result)

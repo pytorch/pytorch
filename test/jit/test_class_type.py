@@ -1022,69 +1022,96 @@ class TestClassType(JitTestCase):
             def __init__(
                 self,
                 a: int = 1,
-                b: List[int] = [1, 2, 3],
+                b: Optional[List[int]] = None,
                 c: Tuple[int, int, int] = (1, 2, 3),
-                d: Dict[int, int] = {1: 2},
+                d: Optional[Dict[int, int]] = None,
                 e: Optional[str] = None,
             ):
-                self.a = a
-                self.b = b
-                self.c = c
-                self.d = d
-                self.e = e
+                self.int = a
+                self.tup = c
+                self.str = e
 
-            def get_int(self) -> int:
-                return self.a
+                self.list = [1, 2, 3]
+                if b is not None:
+                    self.list = b
 
-            def get_list(self) -> List[int]:
-                return self.b
-
-            def get_tup(self) -> Tuple[int, int, int]:
-                return self.c
-
-            def get_dict(self) -> Dict[int, int]:
-                return self.d
-
-            def get_str(self) -> Optional[str]:
-                return self.e
+                self.dict = {1: 2, 3: 4}
+                if d is not None:
+                    self.dict = d
 
             def add(self, b: int, scale: float = 1.0) -> float:
-                return self.a * scale + b
+                return self.int * scale + b
 
         def all_defaults() -> int:
-            a: ClassWithDefaultArgs = ClassWithDefaultArgs()
-            return a.get_int() + a.get_list()[2] + a.get_tup()[1]
+            obj: ClassWithDefaultArgs = ClassWithDefaultArgs()
+            return obj.int + obj.list[2] + obj.tup[1]
 
         def some_defaults() -> int:
-            a: ClassWithDefaultArgs = ClassWithDefaultArgs(b=[5, 6, 7])
-            return a.get_int() + a.get_list()[2] + a.get_dict()[1]
+            obj: ClassWithDefaultArgs = ClassWithDefaultArgs(b=[5, 6, 7])
+            return obj.int + obj.list[2] + obj.dict[1]
 
         def override_defaults() -> int:
-            a: ClassWithDefaultArgs = ClassWithDefaultArgs(3, [9, 10, 11], (12, 13, 14), {3: 4}, "str")
-            s: int = a.get_int()
+            obj: ClassWithDefaultArgs = ClassWithDefaultArgs(3, [9, 10, 11], (12, 13, 14), {3: 4}, "str")
+            s: int = obj.int
 
-            for x in a.get_list():
+            for x in obj.list:
                 s += x
 
-            for y in a.get_tup():
+            for y in obj.tup:
                 s += y
 
-            s += a.get_dict()[3]
+            s += obj.dict[3]
 
-            st = a.get_str()
+            st = obj.str
             if st is not None:
                 s += len(st)
 
             return s
 
         def method_defaults() -> float:
-            a: ClassWithDefaultArgs = ClassWithDefaultArgs()
-            return a.add(3) + a.add(3, 0.25)
+            obj: ClassWithDefaultArgs = ClassWithDefaultArgs()
+            return obj.add(3) + obj.add(3, 0.25)
 
         self.checkScript(all_defaults, ())
         self.checkScript(some_defaults, ())
         self.checkScript(override_defaults, ())
         self.checkScript(method_defaults, ())
+
+        # The constructor of this class below has some arguments without default values.
+        class ClassWithSomeDefaultArgs:  # noqa: B903
+            def __init__(
+                self,
+                a: int,
+                b: int = 1,
+            ):
+                self.a = a
+                self.b = b
+
+        def default_b() -> int:
+            obj: ClassWithSomeDefaultArgs = ClassWithSomeDefaultArgs(1)
+            return obj.a + obj.b
+
+        def set_b() -> int:
+            obj: ClassWithSomeDefaultArgs = ClassWithSomeDefaultArgs(1, 4)
+            return obj.a + obj.b
+
+        self.checkScript(default_b, ())
+        self.checkScript(set_b, ())
+
+        # The constructor of this class below has mutable arguments. This should throw
+        # an error.
+        class ClassWithMutableArgs:   # noqa: B903
+            def __init__(
+                self,
+                a: List[int] = [1, 2, 3],  # noqa: B006
+            ):
+                self.a = a
+
+        def should_fail():
+            obj: ClassWithMutableArgs = ClassWithMutableArgs()
+
+        with self.assertRaisesRegex(RuntimeError, "Mutable default parameters are not supported"):
+            torch.jit.script(should_fail)
 
     def test_staticmethod(self):
         """
@@ -1123,3 +1150,66 @@ class TestClassType(JitTestCase):
             return ClassWithStaticMethod.create_from(a, b)
 
         self.checkScript(test_function, (1, 2))
+
+    def test_properties(self):
+        """
+        Test that a scripted class can make use of the @property decorator.
+        """
+        def free_function(x: int) -> int:
+            return x + 1
+
+        @torch.jit.script
+        class Properties(object):
+            def __init__(self, a: int):
+                self.a = a
+
+            @property
+            def attr(self) -> int:
+                return self.a - 1
+
+            @attr.setter
+            def attr(self, value: int):
+                self.a = value + 3
+
+        @torch.jit.script
+        class NoSetter(object):
+            def __init__(self, a: int):
+                self.a = a
+
+            @property
+            def attr(self) -> int:
+                return free_function(self.a)
+
+        @torch.jit.script
+        class MethodThatUsesProperty(object):
+            def __init__(self, a: int):
+                self.a = a
+
+            @property
+            def attr(self) -> int:
+                return self.a - 2
+
+            @attr.setter
+            def attr(self, value: int):
+                self.a = value + 4
+
+            def forward(self):
+                return self.attr
+
+        class ModuleWithProperties(torch.nn.Module):
+            def __init__(self, a: int):
+                super().__init__()
+                self.props = Properties(a)
+
+            def forward(self, a: int, b: int, c: int, d: int):
+                self.props.attr = a
+                props = Properties(b)
+                no_setter = NoSetter(c)
+                method_uses_property = MethodThatUsesProperty(a + b)
+
+                props.attr = c
+                method_uses_property.attr = d
+
+                return self.props.attr + no_setter.attr + method_uses_property.forward()
+
+        self.checkModule(ModuleWithProperties(5), (5, 6, 7, 8,))

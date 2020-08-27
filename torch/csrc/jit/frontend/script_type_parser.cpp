@@ -233,13 +233,19 @@ bool checkMutableFunctionDefault(const IValue& def) {
 
 void checkMutableFunctionDefaults(
     const SourceRange& range,
-    const std::vector<IValue>& defaults) {
-  for (auto& def : defaults) {
-    if (checkMutableFunctionDefault(def)) {
+    const std::vector<IValue>& defaults,
+    const std::vector<Ident>& default_names,
+    const std::vector<Expr>& default_types) {
+  TORCH_INTERNAL_ASSERT(defaults.size() == default_names.size());
+  TORCH_INTERNAL_ASSERT(defaults.size() == default_types.size());
+
+  for (size_t i = 0, e = defaults.size(); i < e; ++i) {
+    if (checkMutableFunctionDefault(defaults[i])) {
       throw ErrorReport(range)
           << "Mutable default parameters are not supported because Python binds them to the function"
           << " and they persist across function calls.\n As a workaround, make the default None and instantiate"
-          << " the default parameter within the body of the function.";
+          << " the default parameter within the body of the function. Found "
+          << default_types[i] << " on parameter " << default_names[i].name();
     }
   }
 }
@@ -275,14 +281,19 @@ std::vector<IValue> ScriptTypeParser::evaluateDefaults(
       List<Stmt>::create(r, {ret}));
 
   CompilationUnit cu;
-  cu.define(c10::nullopt, {def}, {resolver_}, nullptr);
+  cu.define(
+      c10::nullopt,
+      /*properties=*/{},
+      /*propResolvers=*/{},
+      {def},
+      {resolver_},
+      nullptr);
   Stack stack;
   // XXX: We need to turn optimization off here because otherwise we try to
   // recursively initialize stuff in DecomposeOps.
   GraphOptimizerEnabledGuard guard(false);
   cu.get_function(def.name().name()).run(stack);
   auto defaults = stack.at(0).toTuple()->elements();
-  checkMutableFunctionDefaults(r, defaults);
   return defaults;
 }
 
@@ -296,6 +307,7 @@ std::vector<Argument> ScriptTypeParser::parseArgsFromDecl(
   }
   std::vector<Argument> retval;
 
+  std::vector<Ident> default_names;
   std::vector<Expr> default_types;
   std::vector<Expr> default_exprs;
   // gather any non-empty default arguments
@@ -314,6 +326,7 @@ std::vector<Argument> ScriptTypeParser::parseArgsFromDecl(
         throw ErrorReport(param.range())
             << "Keyword arguments with defaults need to be type-hinted (TorchScript C++ frontend)";
       }
+      default_names.emplace_back(param.ident());
       default_types.emplace_back(param.type().get());
       default_exprs.emplace_back(def.get());
     }
@@ -321,6 +334,8 @@ std::vector<Argument> ScriptTypeParser::parseArgsFromDecl(
 
   auto default_values =
       evaluateDefaults(decl.range(), default_types, default_exprs);
+  checkMutableFunctionDefaults(
+      decl.range(), default_values, default_names, default_types);
 
   auto defaults_it = default_values.begin();
   for (auto it = params_begin; it != params_end; ++it) {

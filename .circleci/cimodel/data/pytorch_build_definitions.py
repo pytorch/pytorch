@@ -22,7 +22,7 @@ class Conf:
     #  tesnrorrt, leveldb, lmdb, redis, opencv, mkldnn, ideep, etc.
     # (from https://github.com/pytorch/pytorch/pull/17323#discussion_r259453608)
     is_xla: bool = False
-    vulkan: bool = False
+    is_vulkan: bool = False
     restrict_phases: Optional[List[str]] = None
     gpu_resource: Optional[str] = None
     dependent_tests: List = field(default_factory=list)
@@ -46,6 +46,8 @@ class Conf:
         leading.append("pytorch")
         if self.is_xla and not for_docker:
             leading.append("xla")
+        if self.is_vulkan and not for_docker:
+            leading.append("vulkan")
         if self.is_libtorch and not for_docker:
             leading.append("libtorch")
         if self.parallel_backend is not None and not for_docker:
@@ -181,7 +183,7 @@ def gen_dependent_configs(xenial_parent_config):
         c = Conf(
             xenial_parent_config.distro,
             ["py3"] + parms,
-            pyver="3.6",
+            pyver=xenial_parent_config.pyver,
             cuda_version=xenial_parent_config.cuda_version,
             restrict_phases=["test"],
             gpu_resource=gpu,
@@ -257,11 +259,9 @@ def instantiate_configs():
         compiler_name = fc.find_prop("compiler_name")
         compiler_version = fc.find_prop("compiler_version")
         is_xla = fc.find_prop("is_xla") or False
+        is_asan = fc.find_prop("is_asan") or False
+        is_vulkan = fc.find_prop("is_vulkan") or False
         parms_list_ignored_for_docker_image = []
-
-        vulkan = fc.find_prop("vulkan") or False
-        if vulkan:
-            parms_list_ignored_for_docker_image.append("vulkan")
 
         python_version = None
         if compiler_name == "cuda" or compiler_name == "android":
@@ -292,12 +292,11 @@ def instantiate_configs():
             gcc_version = compiler_name + (fc.find_prop("compiler_version") or "")
             parms_list.append(gcc_version)
 
-            # TODO: This is a nasty special case
-            if gcc_version == "clang5" and not is_xla:
-                parms_list.append("asan")
-                python_version = fc.find_prop("pyver")
-                parms_list[0] = fc.find_prop("abbreviated_pyver")
-                restrict_phases = ["build", "test1", "test2"]
+        if is_asan:
+            parms_list.append("asan")
+            python_version = fc.find_prop("pyver")
+            parms_list[0] = fc.find_prop("abbreviated_pyver")
+            restrict_phases = ["build", "test1", "test2"]
 
         if cuda_version:
             cuda_gcc_version = fc.find_prop("cuda_gcc_override") or "gcc7"
@@ -322,7 +321,7 @@ def instantiate_configs():
             cuda_version,
             rocm_version,
             is_xla,
-            vulkan,
+            is_vulkan,
             restrict_phases,
             gpu_resource,
             is_libtorch=is_libtorch,
@@ -337,6 +336,7 @@ def instantiate_configs():
             and fc.find_prop("pyver") == "3.6"
             and cuda_version is None
             and parallel_backend is None
+            and not is_vulkan
             and compiler_name == "gcc"
             and fc.find_prop("compiler_version") == "5.4"
         ):
@@ -349,6 +349,7 @@ def instantiate_configs():
             compiler_name == "gcc"
             and compiler_version == "5.4"
             and not is_libtorch
+            and not is_vulkan
             and parallel_backend is None
         ):
             bc_breaking_check = Conf(

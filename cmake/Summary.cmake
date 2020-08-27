@@ -45,10 +45,11 @@ function(caffe2_print_configuration_summary)
   message(STATUS "  BUILD_SHARED_LIBS     : ${BUILD_SHARED_LIBS}")
   message(STATUS "  BUILD_TEST            : ${BUILD_TEST}")
   message(STATUS "  BUILD_JNI             : ${BUILD_JNI}")
+  message(STATUS "  BUILD_MOBILE_AUTOGRAD : ${BUILD_MOBILE_AUTOGRAD}")
 
   message(STATUS "  INTERN_BUILD_MOBILE   : ${INTERN_BUILD_MOBILE}")
 
-  message(STATUS "  CLANG_CODE_COVERAGE   : ${CLANG_CODE_COVERAGE}")
+  message(STATUS "  CODE_COVERAGE         : ${CODE_COVERAGE}")
   message(STATUS "  USE_ASAN              : ${USE_ASAN}")
   message(STATUS "  USE_CUDA              : ${USE_CUDA}")
   if(${USE_CUDA})
