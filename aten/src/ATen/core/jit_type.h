@@ -1647,14 +1647,16 @@ inline at::ScalarType scalarTypeFromJitType(const c10::TypePtr& type) {
 }
 
 // Attempt to find the correct supertype of t1 and t2. If none is found then
-// nullopt will be returned. If t1 == t2, or t1 is a type refinement of t2,
+// nullopt will be returned if default_to_any is false, and Any will be returned
+// if it is true. If t1 == t2, or t1 is a type refinement of t2,
 // then t2 will be returned (and vice versa).
 // Two different tensortypes will return dynamic.
 // Currently we chose not to support returning a NumberType for a float & int
 // input because of a lack of operator support for NumberType
 CAFFE2_API c10::optional<TypePtr> unifyTypes(
     const TypePtr& t1,
-    const TypePtr& t2);
+    const TypePtr& t2,
+    bool default_to_any = false);
 
 CAFFE2_API c10::optional<TypePtr> unifyTypeList(
     at::ArrayRef<TypePtr> elements,

@@ -128,7 +128,7 @@ Example::
 
 add_docstr(torch.absolute,
            r"""
-absolute(input, out=None) -> Tensor
+absolute(input, *, out=None) -> Tensor
 
 Alias for :func:`torch.abs`
 """.format(**common_args))
@@ -196,7 +196,7 @@ Alias for :func:`torch.acosh`.
 """.format(**common_args))
 
 add_docstr(torch.add, r"""
-add(input, other, out=None)
+add(input, other, *, out=None)
 
 Adds the scalar :attr:`other` to each element of the input :attr:`input`
 and returns a new resulting tensor.
@@ -240,9 +240,9 @@ a real number, otherwise it should be an integer.
 Args:
     input (Tensor): the first input tensor
     other (Tensor): the second input tensor
-    alpha (Number): the scalar multiplier for :attr:`other`
 
-Keyword arguments:
+Keyword args:
+    alpha (Number): the scalar multiplier for :attr:`other`
     {out}
 
 Example::
@@ -290,6 +290,8 @@ must be real numbers, otherwise they should be integers.
 Args:
     batch1 (Tensor): the first batch of matrices to be multiplied
     batch2 (Tensor): the second batch of matrices to be multiplied
+
+Keyword args:
     beta (Number, optional): multiplier for :attr:`input` (:math:`\beta`)
     input (Tensor): matrix to be added
     alpha (Number, optional): multiplier for `batch1 @ batch2` (:math:`\alpha`)
@@ -339,6 +341,8 @@ Args:
     input (Tensor): the tensor to be added
     tensor1 (Tensor): the numerator tensor
     tensor2 (Tensor): the denominator tensor
+
+Keyword args:
     value (Number, optional): multiplier for :math:`\text{{tensor1}} / \text{{tensor2}}`
     {out}
 
@@ -374,6 +378,8 @@ Args:
     input (Tensor): the tensor to be added
     tensor1 (Tensor): the tensor to be multiplied
     tensor2 (Tensor): the tensor to be multiplied
+
+Keyword args:
     value (Number, optional): multiplier for :math:`tensor1 .* tensor2`
     {out}
 
@@ -413,6 +419,8 @@ Args:
     input (Tensor): matrix to be added
     mat1 (Tensor): the first matrix to be multiplied
     mat2 (Tensor): the second matrix to be multiplied
+
+Keyword args:
     beta (Number, optional): multiplier for :attr:`input` (:math:`\beta`)
     alpha (Number, optional): multiplier for :math:`mat1 @ mat2` (:math:`\alpha`)
     {out}
@@ -453,6 +461,8 @@ Args:
     input (Tensor): vector to be added
     mat (Tensor): matrix to be multiplied
     vec (Tensor): vector to be multiplied
+
+Keyword args:
     beta (Number, optional): multiplier for :attr:`input` (:math:`\beta`)
     alpha (Number, optional): multiplier for :math:`mat @ vec` (:math:`\alpha`)
     {out}
@@ -493,6 +503,8 @@ Args:
     input (Tensor): matrix to be added
     vec1 (Tensor): the first vector of the outer product
     vec2 (Tensor): the second vector of the outer product
+
+Keyword args:
     beta (Number, optional): multiplier for :attr:`input` (:math:`\beta`)
     alpha (Number, optional): multiplier for :math:`\text{{vec1}} \otimes \text{{vec2}}` (:math:`\alpha`)
     {out}
@@ -541,7 +553,7 @@ Example::
 
 add_docstr(torch.angle,
            r"""
-angle(input, out=None) -> Tensor
+angle(input, *, out=None) -> Tensor
 
 Computes the element-wise angle (in radians) of the given :attr:`input` tensor.
 
@@ -550,6 +562,8 @@ Computes the element-wise angle (in radians) of the given :attr:`input` tensor.
 """ + r"""
 Args:
     {input}
+
+Keyword args:
     {out}
 
 Example::
@@ -663,7 +677,7 @@ Alias for :func:`torch.asin`.
 
 add_docstr(torch.asinh,
            r"""
-asinh(input, out=None) -> Tensor
+asinh(input, *, out=None) -> Tensor
 
 Returns a new tensor with the inverse hyperbolic sine of the elements of :attr:`input`.
 
@@ -716,7 +730,7 @@ Alias for :func:`torch.atan`.
 
 add_docstr(torch.atan2,
            r"""
-atan2(input, other, out=None) -> Tensor
+atan2(input, other, *, out=None) -> Tensor
 
 Element-wise arctangent of :math:`\text{{input}}_{{i}} / \text{{other}}_{{i}}`
 with consideration of the quadrant. Returns a new tensor with the signed angles
@@ -731,6 +745,8 @@ The shapes of ``input`` and ``other`` must be
 Args:
     input (Tensor): the first input tensor
     other (Tensor): the second input tensor
+
+Keyword args:
     {out}
 
 Example::
@@ -744,7 +760,7 @@ Example::
 
 add_docstr(torch.atanh,
            r"""
-atanh(input, out=None) -> Tensor
+atanh(input, *, out=None) -> Tensor
 
 Returns a new tensor with the inverse hyperbolic tangent of the elements of :attr:`input`.
 
@@ -799,6 +815,8 @@ Args:
     input (Tensor): the tensor to be added
     batch1 (Tensor): the first batch of matrices to be multiplied
     batch2 (Tensor): the second batch of matrices to be multiplied
+
+Keyword args:
     beta (Number, optional): multiplier for :attr:`input` (:math:`\beta`)
     alpha (Number, optional): multiplier for :math:`\text{{batch1}} \mathbin{{@}} \text{{batch2}}` (:math:`\alpha`)
     {out}
@@ -838,6 +856,8 @@ point ``dtype``.
 
 Args:
     input (Tensor): the input tensor of probability values for the Bernoulli distribution
+
+Keyword args:
     {generator}
     {out}
 
@@ -914,13 +934,15 @@ Example::
 
 add_docstr(torch.bitwise_not,
            r"""
-bitwise_not(input, out=None) -> Tensor
+bitwise_not(input, *, out=None) -> Tensor
 
 Computes the bitwise NOT of the given input tensor. The input tensor must be of
 integral or Boolean types. For bool tensors, it computes the logical NOT.
 
 Args:
     {input}
+
+Keyword args:
     {out}
 
 Example:
@@ -929,9 +951,10 @@ Example:
     tensor([ 0,  1, -4], dtype=torch.int8)
 """.format(**common_args))
 
+# TODO: see https://github.com/pytorch/pytorch/issues/43667
 add_docstr(torch.bmm,
            r"""
-bmm(input, mat2, deterministic=False, out=None) -> Tensor
+bmm(input, mat2, *, deterministic=False, out=None) -> Tensor
 
 Performs a batch matrix-matrix product of matrices stored in :attr:`input`
 and :attr:`mat2`.
@@ -969,7 +992,7 @@ Example::
 
 add_docstr(torch.bitwise_and,
            r"""
-bitwise_and(input, other, out=None) -> Tensor
+bitwise_and(input, other, *, out=None) -> Tensor
 
 Computes the bitwise AND of :attr:`input` and :attr:`other`. The input tensor must be of
 integral or Boolean types. For bool tensors, it computes the logical AND.
@@ -977,6 +1000,8 @@ integral or Boolean types. For bool tensors, it computes the logical AND.
 Args:
     input: the first input tensor
     other: the second input tensor
+
+Keyword args:
     {out}
 
 Example:
@@ -989,7 +1014,7 @@ Example:
 
 add_docstr(torch.bitwise_or,
            r"""
-bitwise_or(input, other, out=None) -> Tensor
+bitwise_or(input, other, *, out=None) -> Tensor
 
 Computes the bitwise OR of :attr:`input` and :attr:`other`. The input tensor must be of
 integral or Boolean types. For bool tensors, it computes the logical OR.
@@ -997,6 +1022,8 @@ integral or Boolean types. For bool tensors, it computes the logical OR.
 Args:
     input: the first input tensor
     other: the second input tensor
+
+Keyword args:
     {out}
 
 Example:
@@ -1009,7 +1036,7 @@ Example:
 
 add_docstr(torch.bitwise_xor,
            r"""
-bitwise_xor(input, other, out=None) -> Tensor
+bitwise_xor(input, other, *, out=None) -> Tensor
 
 Computes the bitwise XOR of :attr:`input` and :attr:`other`. The input tensor must be of
 integral or Boolean types. For bool tensors, it computes the logical XOR.
@@ -1017,6 +1044,8 @@ integral or Boolean types. For bool tensors, it computes the logical XOR.
 Args:
     input: the first input tensor
     other: the second input tensor
+
+Keyword args:
     {out}
 
 Example:
@@ -1029,7 +1058,7 @@ Example:
 
 add_docstr(torch.stack,
            r"""
-stack(tensors, dim=0, out=None) -> Tensor
+stack(tensors, dim=0, *, out=None) -> Tensor
 
 Concatenates sequence of tensors along a new dimension.
 
@@ -1039,6 +1068,8 @@ Arguments:
     tensors (sequence of Tensors): sequence of tensors to concatenate
     dim (int): dimension to insert. Has to be between 0 and the number
         of dimensions of concatenated tensors (inclusive)
+
+Keyword args:
     {out}
 """.format(**common_args))
 
@@ -1203,7 +1234,7 @@ Example::
 
 add_docstr(torch.cat,
            r"""
-cat(tensors, dim=0, out=None) -> Tensor
+cat(tensors, dim=0, *, out=None) -> Tensor
 
 Concatenates the given sequence of :attr:`seq` tensors in the given dimension.
 All tensors must either have the same shape (except in the concatenating
@@ -1219,6 +1250,8 @@ Args:
         Non-empty tensors provided must have the same shape, except in the
         cat dimension.
     dim (int, optional): the dimension over which the tensors are concatenated
+
+Keyword args:
     {out}
 
 Example::
@@ -1243,7 +1276,7 @@ Example::
 
 add_docstr(torch.ceil,
            r"""
-ceil(input, out=None) -> Tensor
+ceil(input, *, out=None) -> Tensor
 
 Returns a new tensor with the ceil of the elements of :attr:`input`,
 the smallest integer greater than or equal to each element.
@@ -1253,6 +1286,8 @@ the smallest integer greater than or equal to each element.
 """ + r"""
 Args:
     {input}
+
+Keyword args:
     {out}
 
 Example::
@@ -1367,7 +1402,7 @@ Example::
 
 add_docstr(torch.reciprocal,
            r"""
-reciprocal(input, out=None) -> Tensor
+reciprocal(input, *, out=None) -> Tensor
 
 Returns a new tensor with the reciprocal of the elements of :attr:`input`
 
@@ -1376,6 +1411,8 @@ Returns a new tensor with the reciprocal of the elements of :attr:`input`
 """ + r"""
 Args:
     {input}
+
+Keyword args:
     {out}
 
 Example::
@@ -1388,7 +1425,7 @@ Example::
 """.format(**common_args))
 
 add_docstr(torch.cholesky, r"""
-cholesky(input, upper=False, out=None) -> Tensor
+cholesky(input, upper=False, *, out=None) -> Tensor
 
 Computes the Cholesky decomposition of a symmetric positive-definite
 matrix :math:`A` or for batches of symmetric positive-definite matrices.
@@ -1418,6 +1455,8 @@ Args:
                 batch dimensions consisting of symmetric positive-definite matrices.
     upper (bool, optional): flag that indicates whether to return a
                             upper or lower triangular matrix. Default: ``False``
+
+Keyword args:
     out (Tensor, optional): the output matrix
 
 Example::
@@ -1446,7 +1485,7 @@ Example::
 """)
 
 add_docstr(torch.cholesky_solve, r"""
-cholesky_solve(input, input2, upper=False, out=None) -> Tensor
+cholesky_solve(input, input2, upper=False, *, out=None) -> Tensor
 
 Solves a linear system of equations with a positive semidefinite
 matrix to be inverted given its Cholesky factor matrix :math:`u`.
@@ -1475,6 +1514,8 @@ Args:
                 upper or lower triangular Cholesky factor
     upper (bool, optional): whether to consider the Cholesky factor as a
                             lower or upper triangular matrix. Default: ``False``.
+
+Keyword args:
     out (Tensor, optional): the output tensor for `c`
 
 Example::
@@ -1502,7 +1543,7 @@ Example::
 """)
 
 add_docstr(torch.cholesky_inverse, r"""
-cholesky_inverse(input, upper=False, out=None) -> Tensor
+cholesky_inverse(input, upper=False, *, out=None) -> Tensor
 
 Computes the inverse of a symmetric positive-definite matrix :math:`A` using its
 Cholesky factor :math:`u`: returns matrix ``inv``. The inverse is computed using
@@ -1524,6 +1565,8 @@ Args:
     input (Tensor): the input 2-D tensor :math:`u`, a upper or lower triangular
            Cholesky factor
     upper (bool, optional): whether to return a lower (default) or upper triangular matrix
+
+Keyword args:
     out (Tensor, optional): the output tensor for `inv`
 
 Example::
@@ -1564,7 +1607,7 @@ Keyword args:
 """.format(**common_args))
 
 add_docstr(torch.clamp, r"""
-clamp(input, min, max, out=None) -> Tensor
+clamp(input, min, max, *, out=None) -> Tensor
 
 Clamp all elements in :attr:`input` into the range `[` :attr:`min`, :attr:`max` `]` and return
 a resulting tensor:
@@ -1583,6 +1626,8 @@ Args:
     {input}
     min (Number): lower-bound of the range to be clamped to
     max (Number): upper-bound of the range to be clamped to
+
+Keyword args:
     {out}
 
 Example::
@@ -1602,7 +1647,9 @@ should be a real number, otherwise it should be an integer.
 
 Args:
     {input}
-    value (Number): minimal value of each element in the output
+
+Keyword args:
+    min (Number): minimal value of each element in the output
     {out}
 
 Example::
@@ -1622,7 +1669,9 @@ should be a real number, otherwise it should be an integer.
 
 Args:
     {input}
-    value (Number): maximal value of each element in the output
+
+Keyword args:
+    max (Number): maximal value of each element in the output
     {out}
 
 Example::
@@ -1701,7 +1750,7 @@ Example::
 
 add_docstr(torch.conj,
            r"""
-conj(input, out=None) -> Tensor
+conj(input, *, out=None) -> Tensor
 
 Computes the element-wise conjugate of the given :attr:`input` tensor.
 
@@ -1710,6 +1759,8 @@ Computes the element-wise conjugate of the given :attr:`input` tensor.
 """ + r"""
 Args:
     {input}
+
+Keyword args:
     {out}
 
 Example::
@@ -1720,7 +1771,7 @@ Example::
 
 add_docstr(torch.cos,
            r"""
-cos(input, out=None) -> Tensor
+cos(input, *, out=None) -> Tensor
 
 Returns a new tensor with the cosine  of the elements of :attr:`input`.
 
@@ -1729,6 +1780,8 @@ Returns a new tensor with the cosine  of the elements of :attr:`input`.
 """ + r"""
 Args:
     {input}
+
+Keyword args:
     {out}
 
 Example::
@@ -1742,7 +1795,7 @@ Example::
 
 add_docstr(torch.cosh,
            r"""
-cosh(input, out=None) -> Tensor
+cosh(input, *, out=None) -> Tensor
 
 Returns a new tensor with the hyperbolic cosine  of the elements of
 :attr:`input`.
@@ -1752,6 +1805,8 @@ Returns a new tensor with the hyperbolic cosine  of the elements of
 """ + r"""
 Args:
     {input}
+
+Keyword args:
     {out}
 
 Example::
@@ -1765,7 +1820,7 @@ Example::
 
 add_docstr(torch.cross,
            r"""
-cross(input, other, dim=None, out=None) -> Tensor
+cross(input, other, dim=None, *, out=None) -> Tensor
 
 
 Returns the cross product of vectors in dimension :attr:`dim` of :attr:`input`
@@ -1781,6 +1836,8 @@ Args:
     {input}
     other (Tensor): the second input tensor
     dim  (int, optional): the dimension to take the cross-product in.
+
+Keyword args:
     {out}
 
 Example::
@@ -1811,7 +1868,7 @@ Example::
 
 add_docstr(torch.logcumsumexp,
            r"""
-logcumsumexp(input, dim, out=None) -> Tensor
+logcumsumexp(input, dim, *, out=None) -> Tensor
 Returns the logarithm of the cumulative summation of the exponentiation of
 elements of :attr:`input` in the dimension :attr:`dim`.
 
@@ -1823,7 +1880,10 @@ For summation index :math:`j` given by `dim` and other indices :math:`i`, the re
 Args:
     {input}
     dim  (int): the dimension to do the operation over
+
+Keyword args:
     {out}
+
 Example::
     >>> a = torch.randn(10)
     >>> torch.logcumsumexp(a, dim=0)
@@ -1833,7 +1893,7 @@ Example::
 
 add_docstr(torch.cummax,
            r"""
-cummax(input, dim, out=None) -> (Tensor, LongTensor)
+cummax(input, dim, *, out=None) -> (Tensor, LongTensor)
 Returns a namedtuple ``(values, indices)`` where ``values`` is the cumulative maximum of
 elements of :attr:`input` in the dimension :attr:`dim`. And ``indices`` is the index
 location of each maximum value found in the dimension :attr:`dim`.
@@ -1844,6 +1904,8 @@ location of each maximum value found in the dimension :attr:`dim`.
 Args:
     {input}
     dim  (int): the dimension to do the operation over
+
+Keyword args:
     out (tuple, optional): the result tuple of two output tensors (values, indices)
 
 Example::
@@ -1861,7 +1923,7 @@ Example::
 
 add_docstr(torch.cummin,
            r"""
-cummin(input, dim, out=None) -> (Tensor, LongTensor)
+cummin(input, dim, *, out=None) -> (Tensor, LongTensor)
 Returns a namedtuple ``(values, indices)`` where ``values`` is the cumulative minimum of
 elements of :attr:`input` in the dimension :attr:`dim`. And ``indices`` is the index
 location of each maximum value found in the dimension :attr:`dim`.
@@ -1872,6 +1934,8 @@ location of each maximum value found in the dimension :attr:`dim`.
 Args:
     {input}
     dim  (int): the dimension to do the operation over
+
+Keyword args:
     out (tuple, optional): the result tuple of two output tensors (values, indices)
 
 Example::
@@ -1889,7 +1953,7 @@ Example::
 
 add_docstr(torch.cumprod,
            r"""
-cumprod(input, dim, out=None, dtype=None) -> Tensor
+cumprod(input, dim, *, dtype=None, out=None) -> Tensor
 
 Returns the cumulative product of elements of :attr:`input` in the dimension
 :attr:`dim`.
@@ -1903,6 +1967,8 @@ a vector of size N, with elements.
 Args:
     {input}
     dim  (int): the dimension to do the operation over
+
+Keyword args:
     {dtype}
     {out}
 
@@ -1924,7 +1990,7 @@ Example::
 
 add_docstr(torch.cumsum,
            r"""
-cumsum(input, dim, out=None, dtype=None) -> Tensor
+cumsum(input, dim, *, dtype=None, out=None) -> Tensor
 
 Returns the cumulative sum of elements of :attr:`input` in the dimension
 :attr:`dim`.
@@ -1938,6 +2004,8 @@ a vector of size N, with elements.
 Args:
     {input}
     dim  (int): the dimension to do the operation over
+
+Keyword args:
     {dtype}
     {out}
 
@@ -1996,7 +2064,7 @@ Args:
 
 add_docstr(torch.diag,
            r"""
-diag(input, diagonal=0, out=None) -> Tensor
+diag(input, diagonal=0, *, out=None) -> Tensor
 
 - If :attr:`input` is a vector (1-D tensor), then returns a 2-D square tensor
   with the elements of :attr:`input` as the diagonal.
@@ -2012,6 +2080,8 @@ The argument :attr:`diagonal` controls which diagonal to consider:
 Args:
     {input}
     diagonal (int, optional): the diagonal to consider
+
+Keyword args:
     {out}
 
 .. seealso::
@@ -2217,22 +2287,25 @@ Examples::
 
 add_docstr(torch.digamma,
            r"""
-digamma(input, out=None) -> Tensor
+digamma(input, *, out=None) -> Tensor
 
 Computes the logarithmic derivative of the gamma function on `input`.
 
 .. math::
     \psi(x) = \frac{d}{dx} \ln\left(\Gamma\left(x\right)\right) = \frac{\Gamma'(x)}{\Gamma(x)}
-
+""" + r"""
 Args:
     input (Tensor): the tensor to compute the digamma function on
+
+Keyword args:
+    {out}
 
 Example::
 
     >>> a = torch.tensor([1, 0.5])
     >>> torch.digamma(a)
     tensor([-0.5772, -1.9635])
-""")
+""".format(**common_args))
 
 
 add_docstr(torch.dist,
@@ -2269,7 +2342,7 @@ Example::
 
 add_docstr(torch.div,
            r"""
-div(input, other, out=None) -> Tensor
+div(input, other, *, out=None) -> Tensor
 
 Divides each element of the input ``input`` with the scalar ``other`` and
 returns a new resulting tensor.
@@ -2304,7 +2377,7 @@ Example::
     >>> torch.div(a, 0.5)
     tensor([ 0.7620,  2.5548, -0.5944, -0.7439,  0.9275])
 
-.. function:: div(input, other, out=None) -> Tensor
+.. function:: div(input, other, *, out=None) -> Tensor
 
 Each element of the tensor ``input`` is divided by each element of the tensor
 ``other``. The resulting tensor is returned.
@@ -2361,7 +2434,7 @@ Example::
 
 add_docstr(torch.eig,
            r"""
-eig(input, eigenvectors=False, out=None) -> (Tensor, Tensor)
+eig(input, eigenvectors=False, *, out=None) -> (Tensor, Tensor)
 
 Computes the eigenvalues and eigenvectors of a real square matrix.
 
@@ -2374,6 +2447,8 @@ Args:
         will be computed
     eigenvectors (bool): ``True`` to compute both eigenvalues and eigenvectors;
         otherwise, only eigenvalues will be computed
+
+Keyword args:
     out (tuple, optional): the output tensors
 
 Returns:
@@ -2432,7 +2507,7 @@ Example::
 
 add_docstr(torch.erf,
            r"""
-erf(input, out=None) -> Tensor
+erf(input, *, out=None) -> Tensor
 
 Computes the error function of each element. The error function is defined as follows:
 
@@ -2441,6 +2516,8 @@ Computes the error function of each element. The error function is defined as fo
 """ + r"""
 Args:
     {input}
+
+Keyword args:
     {out}
 
 Example::
@@ -2451,7 +2528,7 @@ Example::
 
 add_docstr(torch.erfc,
            r"""
-erfc(input, out=None) -> Tensor
+erfc(input, *, out=None) -> Tensor
 
 Computes the complementary error function of each element of :attr:`input`.
 The complementary error function is defined as follows:
@@ -2461,6 +2538,8 @@ The complementary error function is defined as follows:
 """ + r"""
 Args:
     {input}
+
+Keyword args:
     {out}
 
 Example::
@@ -2471,7 +2550,7 @@ Example::
 
 add_docstr(torch.erfinv,
            r"""
-erfinv(input, out=None) -> Tensor
+erfinv(input, *, out=None) -> Tensor
 
 Computes the inverse error function of each element of :attr:`input`.
 The inverse error function is defined in the range :math:`(-1, 1)` as:
@@ -2479,8 +2558,11 @@ The inverse error function is defined in the range :math:`(-1, 1)` as:
 .. math::
     \mathrm{erfinv}(\mathrm{erf}(x)) = x
 """ + r"""
+
 Args:
     {input}
+
+Keyword args:
     {out}
 
 Example::
@@ -2491,7 +2573,7 @@ Example::
 
 add_docstr(torch.exp,
            r"""
-exp(input, out=None) -> Tensor
+exp(input, *, out=None) -> Tensor
 
 Returns a new tensor with the exponential of the elements
 of the input tensor :attr:`input`.
@@ -2501,6 +2583,8 @@ of the input tensor :attr:`input`.
 """ + r"""
 Args:
     {input}
+
+Keyword args:
     {out}
 
 Example::
@@ -2511,7 +2595,7 @@ Example::
 
 add_docstr(torch.expm1,
            r"""
-expm1(input, out=None) -> Tensor
+expm1(input, *, out=None) -> Tensor
 
 Returns a new tensor with the exponential of the elements minus 1
 of :attr:`input`.
@@ -2519,8 +2603,11 @@ of :attr:`input`.
 .. math::
     y_{i} = e^{x_{i}} - 1
 """ + r"""
+
 Args:
     {input}
+
+Keyword args:
     {out}
 
 Example::
@@ -2529,9 +2616,10 @@ Example::
     tensor([ 0.,  1.])
 """.format(**common_args))
 
+# TODO: see https://github.com/pytorch/pytorch/issues/43667
 add_docstr(torch.eye,
            r"""
-eye(n, m=None, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
+eye(n, m=None, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
 Returns a 2-D tensor with ones on the diagonal and zeros elsewhere.
 

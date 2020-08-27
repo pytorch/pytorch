@@ -113,6 +113,8 @@ class TORCH_API TensorExprKernel {
           const ExprHandle&,
           const ExprHandle&)>& innerExpr);
 
+  Tensor* computeSum(const torch::jit::Value* v);
+
   Tensor* computeValue(const torch::jit::Value* v);
 
   void flattenTensors(BackendType backendType);
@@ -128,6 +130,18 @@ class TORCH_API TensorExprKernel {
   at::Device pickDeviceType(const at::ArrayRef<torch::jit::Value*>& inputs);
 
   void bindInput(const torch::jit::Value* input);
+
+  // Captures the information for reduction operation nodes.
+  struct ReductionInfo {
+    std::vector<DimArg> reductionDims;
+    std::vector<DimArg> outputDims;
+    std::vector<size_t> axes;
+    bool keepdim;
+    c10::optional<Dtype> dtype;
+  };
+
+  // Get the reduction info for the given node, based on properties and inputs.
+  ReductionInfo getReductionInfo(const torch::jit::Node* node);
 
  private:
   struct ShapeArg {
