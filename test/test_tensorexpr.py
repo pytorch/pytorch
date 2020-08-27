@@ -1031,6 +1031,7 @@ class TestTensorExprFuser(BaseTestClass):
     def test_cat_cuda(self):
         self._test_cat('cuda')
 
+    @unittest.skip("temporarily disable")
     def test_scalar(self):
         @torch.jit.script
         def test_float(x, y, z, a, b):
