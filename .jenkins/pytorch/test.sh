@@ -13,7 +13,7 @@ echo "Testing pytorch"
 
 if [ -n "${IN_CIRCLECI}" ]; then
   # TODO move this to docker
-  pip_install unittest-xml-reporting
+  pip_install unittest-xml-reporting coverage
 
   if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda10.1-* ]]; then
     # TODO: move this to Docker
@@ -25,22 +25,20 @@ if [ -n "${IN_CIRCLECI}" ]; then
     # TODO: move this to Docker
     sudo apt-get -qq update
     sudo apt-get -qq install --allow-downgrades --allow-change-held-packages openmpi-bin libopenmpi-dev
-    sudo apt-get -qq install --no-install-recommends openssh-client openssh-server
-    sudo mkdir -p /var/run/sshd
   fi
 
   if [[ "$BUILD_ENVIRONMENT" == *-slow-* ]]; then
     export PYTORCH_TEST_WITH_SLOW=1
     export PYTORCH_TEST_SKIP_FAST=1
   fi
+  if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
+    export PYTORCH_COLLECT_COVERAGE=1
+  fi
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # Print GPU info
   rocminfo | egrep 'Name:.*\sgfx|Marketing'
-  # TODO: Move this to Docker
-  sudo apt-get -qq update
-  sudo apt-get -qq install --no-install-recommends libsndfile1
 fi
 
 # --user breaks ppc64le builds and these packages are already in ppc64le docker
@@ -402,4 +400,10 @@ else
   test_distributed
   test_benchmarks
   test_rpc
+  if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
+    pushd test
+    echo "Generating XML coverage report"
+    time python -mcoverage xml
+    popd
+  fi
 fi

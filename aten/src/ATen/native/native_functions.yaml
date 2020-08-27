@@ -1264,13 +1264,13 @@
     CUDA: _embedding_bag_per_sample_weights_backward_cuda
 
 - func: empty_meta(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
-  use_c10_dispatcher: full
+  #use_c10_dispatcher: full
 
 - func: empty.names(int[] size, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   device_guard: False
 
 - func: empty.memory_format(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
-  use_c10_dispatcher: full
+  #use_c10_dispatcher: full
   dispatch:
     CPU: empty_cpu
     CUDA: empty_cuda
@@ -1278,7 +1278,7 @@
     SparseCPU, SparseCUDA: empty_sparse
 
 - func: new_empty(Tensor self, int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  use_c10_dispatcher: full
+  #use_c10_dispatcher: full
   variants: method
 
 - func: new_full(Tensor self, int[] size, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
@@ -3202,7 +3202,7 @@
 - func: fix(Tensor self) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
-  
+
 - func: fix_(Tensor(a!) self) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: function, method
@@ -5448,12 +5448,6 @@
   dispatch:
     CPU, CUDA: remainder
 
-- func: min.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-
-- func: min.other(Tensor self, Tensor other) -> Tensor
-  use_c10_dispatcher: full
-  variants: method, function
-
 - func: min(Tensor self) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
@@ -5461,18 +5455,40 @@
     CPU, CUDA: min
     QuantizedCPU: min_quantized_cpu
 
-- func: max.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-
-- func: max.other(Tensor self, Tensor other) -> Tensor
-  use_c10_dispatcher: full
-  variants: method, function
-
 - func: max(Tensor self) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
     CPU, CUDA: max
     QuantizedCPU: max_quantized_cpu
+
+- func: maximum(Tensor self, Tensor other) -> Tensor
+  use_c10_dispatcher: full
+  variants: method, function
+
+- func: maximum.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+
+# binary max, alias of maximum
+# NOTE: max is not an alias for maximum, since there is also unary max
+- func: max.other(Tensor self, Tensor other) -> Tensor
+  use_c10_dispatcher: full
+  variants: method, function
+
+- func: max.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+
+- func: minimum(Tensor self, Tensor other) -> Tensor
+  use_c10_dispatcher: full
+  variants: method, function
+
+- func: minimum.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+
+# binary min, alias for minimum
+# NOTE: min is not an alias for minimum, since there is also unary min
+- func: min.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+
+- func: min.other(Tensor self, Tensor other) -> Tensor
+  use_c10_dispatcher: full
+  variants: method, function
 
 # Return: (Tensor min, Tensor max)
 - func: _min_max(Tensor self) -> (Tensor, Tensor)
