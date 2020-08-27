@@ -529,7 +529,7 @@ class ProcessGroupNCCL : public ProcessGroup {
   // Watchdog thread which looks for errors on the cached NCCL communicators.
   std::thread ncclCommWatchdogThread_;
 
-  // Whether or not we should terminate the watchdog thread.
+  // Whether or not we should terminate the watchdog and workCleanup threads.
   std::atomic<bool> terminateProcessGroup_;
 
   // Condition variable to control how long the watchdog thread waits.
@@ -541,17 +541,17 @@ class ProcessGroupNCCL : public ProcessGroup {
   // Thread that removes NCCL Work upon timeout
   std::thread workCleanupThread_;
 
-  // Mutex to Guard workVector_
-  std::mutex workVectorMutex_;
+  // Mutex to Guard workList_
+  std::mutex workListMutex_;
 
   // Condition Variable for timeout thread sleep
   std::condition_variable workVectorCV_;
 
   // Vector to Store WorkNCCL pointers
-  std::list<std::shared_ptr<ProcessGroupNCCL::WorkNCCL>> workVector_;
+  std::list<std::shared_ptr<ProcessGroupNCCL::WorkNCCL>> workList_;
 
   // Add Work Pointer to workVector
-  void enqueue(std::shared_ptr<ProcessGroupNCCL::WorkNCCL>);
+  void workEnqueue(std::shared_ptr<ProcessGroupNCCL::WorkNCCL>);
 
   // The CUDA steams used by NCCL kernels
   std::unordered_map<std::string, std::vector<at::cuda::CUDAStream>>
