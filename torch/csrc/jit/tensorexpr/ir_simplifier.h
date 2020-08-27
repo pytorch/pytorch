@@ -411,7 +411,6 @@ class TORCH_API PolynomialTransformer : public IRSimplifierBase {
   static const Expr* simplify(const Expr* e);
   static ExprHandle simplify(const ExprHandle& e);
   static Stmt* simplify(Stmt* e);
-
 };
 
 // Expands Terms and Polynomial expressions into primitive operations.
