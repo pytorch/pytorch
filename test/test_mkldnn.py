@@ -285,9 +285,8 @@ class TestMkldnn(TestCase):
             stride=3,
             padding=1,
             dilation=2)
-
         self.assertRaisesRegex(RuntimeError,
-                               'mkldnn_max_pool2d not support dilation case',
+                               'mkldnn_max_pool2d does not support dilation case',
                                lambda: max_pool2d(x))
 
         # 3d dilation case
@@ -297,9 +296,8 @@ class TestMkldnn(TestCase):
             stride=3,
             padding=1,
             dilation=2)
-
         self.assertRaisesRegex(RuntimeError,
-                               'mkldnn_max_pool3d not support dilation case',
+                               'mkldnn_max_pool3d does not support dilation case',
                                lambda: max_pool3d(x))
 
     def test_avg_pool2d(self):
