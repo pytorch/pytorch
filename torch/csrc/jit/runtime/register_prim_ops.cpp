@@ -1,5 +1,5 @@
-#include <torch/csrc/jit/runtime/register_ops_utils.h>
 #include <torch/csrc/jit/runtime/operator.h>
+#include <torch/csrc/jit/runtime/register_ops_utils.h>
 #include <torch/library.h>
 
 #include <algorithm>
@@ -137,7 +137,7 @@ RegisterOperators reg(
            push(stack, ss.str());
          },
          aliasAnalysisFromSchema()),
-    OperatorGenerator(
+     OperatorGenerator(
          TORCH_SELECTIVE_SCHEMA("aten::list(str t) -> str[]"),
          [](Stack& stack) {
            auto str = pop(stack).toStringRef();
