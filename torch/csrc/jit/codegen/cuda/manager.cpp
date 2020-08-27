@@ -91,7 +91,7 @@ class CudaFusionManager {
       int32_t kernel_id = getNextUniqueID();
       graph_cache_ids_[repr] = kernel_id;
       TORCH_CHECK(
-          graph_cache_.insert({kernel_id, std::make_unique<GraphCache>(graph)})
+          graph_cache_.emplace(kernel_id, std::make_unique<GraphCache>(graph))
               .second);
     }
     return graph_cache_ids_[repr];

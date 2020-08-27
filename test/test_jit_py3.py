@@ -430,6 +430,15 @@ class TestScriptPy3(JitTestCase):
 
         FileCheck().check("Future[int]").run(fn.graph)
 
+    def test_str_refine_any(self):
+        def forward(x: Any) -> str:
+            if isinstance(x, str):
+                return x
+            return "foo"
+        forward = torch.jit.script(forward)
+        self.assertEqual(forward(1), "foo")
+        self.assertEqual(forward("bar"), "bar")
+
     def test_subexpression_Tuple_int_int_Future(self):
 
         @torch.jit.script

@@ -37,7 +37,7 @@ ContextConv2D create(
     const float output_min,
     const float output_max);
 
-Tensor run(const ContextConv2D& context, const Tensor& input);
+Tensor run(ContextConv2D& context, const Tensor& input);
 
 } // namespace convolution2d
 } // namespace internal

@@ -1,23 +1,41 @@
-import torch
-from torch._six import inf, istuple
 from functools import reduce
 from operator import mul, itemgetter
 import collections
+
+import torch
+import numpy as np
+from torch._six import inf, istuple
 from torch.autograd import Variable
 
 from torch.testing import \
     (make_non_contiguous,
      _dispatch_dtypes,
      floating_types, floating_types_and,
-     floating_and_complex_types, floating_and_complex_types_and)
+     floating_and_complex_types, floating_and_complex_types_and,
+     all_types_and_complex_and)
 from torch.testing._internal.common_device_type import \
     (skipCUDAIfNoMagma, skipCPUIfNoLapack, expectedFailureCUDA,
-     expectedAlertNondeterministic)
+     expectedAlertNondeterministic, precisionOverride)
 from torch.testing._internal.common_utils import \
     (prod_single_zero, random_square_matrix_of_rank,
      random_symmetric_matrix, random_symmetric_psd_matrix,
      random_symmetric_pd_matrix, make_nonzero_det,
-     random_fullrank_matrix_distinct_singular_value, set_rng_seed)
+     random_fullrank_matrix_distinct_singular_value, set_rng_seed,
+     TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS)
+
+# Class for holding information about which tests should skip testing
+#   an operator.
+# Any test which matches all non-None fields will be skipped.
+# The skip will only be checked if the active_if argument is True.
+class SkipInfo(object):
+    __slots__ = ['test_name', 'device_type', 'dtypes', 'active_if']
+
+    def __init__(self, test_name=None, *, device_type=None, dtypes=None, active_if=True):
+        self.test_name = test_name
+        self.device_type = device_type
+        self.dtypes = dtypes
+        self.active_if = active_if
+
 
 # Classes and methods for the operator database
 class OpInfo(object):
@@ -30,6 +48,7 @@ class OpInfo(object):
                  dtypesIfCPU=None,  # dtypes this function is expected to work with on CPU
                  dtypesIfCUDA=None,  # dtypes this function is expected to work with on CUDA
                  dtypesIfROCM=None,  # dtypes this function is expected to work with on ROCM
+                 skips=tuple(),  # information about which tests to skip
                  decorators=None):  # decorators to apply to generated tests
         # Validates the dtypes are generated from the dispatch-related functions
         for dtype_list in (dtypes, dtypesIfCPU, dtypesIfCUDA, dtypesIfROCM):
@@ -46,6 +65,8 @@ class OpInfo(object):
         self.method_variant = getattr(torch.Tensor, name) if hasattr(torch.Tensor, name) else None
         inplace_name = name + "_"
         self.inplace_variant = getattr(torch.Tensor, inplace_name) if hasattr(torch.Tensor, name) else None
+
+        self.skips = skips
         self.decorators = decorators
 
     def __call__(self, *args, **kwargs):
@@ -68,6 +89,31 @@ class OpInfo(object):
         """
         return self.inplace_variant
 
+    # Returns True if the test should be skipped and False otherwise
+    def should_skip(self, test_name, device_type, dtype):
+        for si in self.skips:
+            if not si.active_if:
+                continue
+
+            name_match = si.test_name is None or test_name == si.test_name
+            device_type_match = si.device_type is None or device_type == si.device_type
+            dtype_match = si.dtypes is None or dtype in si.dtypes
+            if name_match and device_type_match and dtype_match:
+                return True
+
+        return False
+
+    def supports_dtype(self, dtype, device_type):
+        if device_type == 'cpu':
+            return dtype in self.dtypesIfCPU
+        if device_type == 'cuda':
+            if TEST_WITH_ROCM:
+                return dtype in self.dtypesIfROCM
+            return dtype in self.dtypesIfCUDA
+
+        return dtype in self.dtypes
+
+
 
 # Metadata class for unary "universal functions (ufuncs)" that accept a single
 # tensor and have common properties like:
@@ -88,10 +134,15 @@ class UnaryUfuncInfo(OpInfo):
     def __init__(self,
                  name,  # the string name of the function
                  *,
+                 ref,  # a reference function
                  dtypes=floating_types(),
                  dtypesIfCPU=floating_and_complex_types_and(torch.bfloat16),
                  dtypesIfCUDA=floating_and_complex_types_and(torch.half),
-                 dtypesIfROCM=floating_types_and(torch.half, torch.bfloat16),
+                 dtypesIfROCM=floating_types_and(torch.half),
+                 domain=(None, None),  # the [low, high) domain of the function
+                 handles_large_floats=True,  # whether the op correctly handles large float values (like 1e20)
+                 handles_extremals=True,  # whether the op correctly handles extremal values (like inf)
+                 handles_complex_extremals=True,  # whether the op correct handles complex extremals (like inf -infj)
                  **kwargs):
         super(UnaryUfuncInfo, self).__init__(name,
                                              dtypes=dtypes,
@@ -99,17 +150,69 @@ class UnaryUfuncInfo(OpInfo):
                                              dtypesIfCUDA=dtypesIfCUDA,
                                              dtypesIfROCM=dtypesIfROCM,
                                              **kwargs)
+        self.ref = ref
+        self.domain = domain
+        self.handles_large_floats = handles_large_floats
+        self.handles_extremals = handles_extremals
+        self.handles_complex_extremals = handles_complex_extremals
 
 L = 20
 M = 10
 S = 5
 
+# Situational skips for tests that fail on particular builds
+_windows_skip = ('.*numerics.*complex.*',) if IS_WINDOWS else tuple()
+_mac_skip = ('.*numerics.*cpu.*complex.*',) if IS_MACOS else tuple()
+_rocm_skip = ('.*numerics.*float32.*',) if TEST_WITH_ROCM else tuple()
+
 # Operator database
 op_db = [
+    # NOTE: CPU complex acos produces incorrect outputs (https://github.com/pytorch/pytorch/issues/42952)
+    UnaryUfuncInfo('acos',
+                   ref=np.arccos,
+                   domain=(-1, 1),
+                   handles_complex_extremals=False,
+                   decorators=(precisionOverride({torch.bfloat16: 1e-1,
+                                                  torch.complex64: 1e-2}),),
+                   skips=(
+                       SkipInfo('test_reference_numerics', device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
+                       SkipInfo('test_reference_numerics', dtypes=[torch.cfloat, torch.cdouble], active_if=IS_WINDOWS),
+                   )),
     UnaryUfuncInfo('cos',
-                   dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16)),
+                   ref=np.cos,
+                   dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
+                   handles_large_floats=False,
+                   decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
+                   skips=(
+                       SkipInfo('test_reference_numerics', dtypes=[torch.cfloat, torch.cdouble], active_if=IS_WINDOWS),
+                       SkipInfo('test_reference_numerics', device_type='cpu',
+                                dtypes=[torch.cfloat, torch.cdouble], active_if=IS_MACOS),
+                       SkipInfo('test_reference_numerics', dtypes=[torch.float], active_if=TEST_WITH_ROCM),
+                   )),
     UnaryUfuncInfo('cosh',
-                   dtypesIfCPU=floating_and_complex_types()),
+                   ref=np.cosh,
+                   dtypesIfCPU=floating_and_complex_types(),
+                   skips=(
+                       SkipInfo('test_reference_numerics',
+                                dtypes=[torch.cfloat, torch.cdouble], active_if=IS_WINDOWS),
+                       SkipInfo('test_reference_numerics', device_type='cpu',
+                                dtypes=[torch.cfloat, torch.cdouble], active_if=IS_MACOS),
+                   )),
+    UnaryUfuncInfo('sin',
+                   ref=np.sin,
+                   handles_large_floats=False,
+                   handles_complex_extremals=False,
+                   decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
+                   skips=(
+                       SkipInfo('test_reference_numerics',
+                                dtypes=[torch.cfloat, torch.cdouble], active_if=IS_WINDOWS),
+                       SkipInfo('test_reference_numerics', dtypes=[torch.float], active_if=TEST_WITH_ROCM),
+                   )),
+    UnaryUfuncInfo('neg',
+                   ref=np.negative,
+                   dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
+                   dtypesIfCPU=all_types_and_complex_and(torch.half, torch.bfloat16),
+                   dtypesIfCUDA=all_types_and_complex_and(torch.half)),
 ]
 
 # Common operator groupings
@@ -655,6 +758,8 @@ def method_tests():
          NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
         ('matrix_power', lambda: random_fullrank_matrix_distinct_singular_value(S, S), [-2], "n=-2", (),
          NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
+        ('matrix_exp', (S, S), NO_ARGS, "single_matrix"),
+        ('matrix_exp', (S, S, S), NO_ARGS, "batch_of_matrices"),
         ('mvlgamma', torch.empty(S,).uniform_(0.5, 1), [1], "p=1"),
         ('mvlgamma', torch.empty(S,).uniform_(1, 2), [2], "p=2"),
         ('mvlgamma', torch.empty(S, S).uniform_(1.5, 3), [3], "p=3"),

@@ -245,7 +245,7 @@
 #     adding an alias in a namespace.)
 # 5) Update torch/overrides.py consistent with the original function.
 # 6) Update the alias_map in torch/csrc/jit/passes/normalize_ops.cpp.
-# 8) Add entries to test/test_op_aliases.py's "alias_infos"
+# 7) Add entries to test/test_op_aliases.py's "alias_infos"
 #
 # See torch.absolute, an alias for torch.abs, as an example.
 
@@ -298,6 +298,17 @@
 
 - func: acos.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
 
+# arccos, alias of acos
+- func: arccos(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: arccos_(Tensor(a!) self) -> Tensor(a!)
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: arccos.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+
 - func: avg_pool1d(Tensor self, int[1] kernel_size, int[1] stride=[], int[1] padding=0, bool ceil_mode=False, bool count_include_pad=True) -> Tensor
   use_c10_dispatcher: full
 
@@ -336,20 +347,17 @@
   variants: function
   dispatch:
     CPU: add_relu
-  supports_named_tensor: True
 
 - func: add_relu_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: function
   dispatch:
     CPU: add_relu_
-  supports_named_tensor: True
 
 - func: add_relu.out(Tensor self, Tensor other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
   variants: function
   dispatch:
     CPU: add_relu_out
-  supports_named_tensor: True
 
 # For C++ only, until we have conversion from C++ numbers to Tensor
 - func: add.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
@@ -458,56 +466,44 @@
 
 - func: acosh(Tensor self) -> Tensor
   use_c10_dispatcher: full
-  supports_named_tensor: True
   variants: function, method
 
 - func: acosh_(Tensor(a!) self) -> Tensor(a!)
   use_c10_dispatcher: full
-  supports_named_tensor: True
   variants: function, method
 
 - func: acosh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  supports_named_tensor: True
 
-# arcosh, alias for acosh
+# arccosh, alias for acosh
 - func: arccosh(Tensor self) -> Tensor
   use_c10_dispatcher: full
-  supports_named_tensor: True
   variants: function, method
 
 - func: arccosh_(Tensor(a!) self) -> Tensor(a!)
   use_c10_dispatcher: full
-  supports_named_tensor: True
   variants: function, method
 
 - func: arccosh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  supports_named_tensor: True
 
 - func: asinh(Tensor self) -> Tensor
   use_c10_dispatcher: full
-  supports_named_tensor: True
   variants: function, method
 
 - func: asinh_(Tensor(a!) self) -> Tensor(a!)
   use_c10_dispatcher: full
-  supports_named_tensor: True
   variants: function, method
 
 - func: asinh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  supports_named_tensor: True
 
 - func: atanh(Tensor self) -> Tensor
   use_c10_dispatcher: full
-  supports_named_tensor: True
   variants: function, method
 
 - func: atanh_(Tensor(a!) self) -> Tensor(a!)
   use_c10_dispatcher: full
-  supports_named_tensor: True
   variants: function, method
 
 - func: atanh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  supports_named_tensor: True
 
 - func: as_strided(Tensor(a) self, int[] size, int[] stride, int? storage_offset=None) -> Tensor(a)
   use_c10_dispatcher: full
@@ -531,6 +527,17 @@
 
 - func: asin.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
 
+# arcsin, alias of asin
+- func: arcsin(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: arcsin_(Tensor(a!) self) -> Tensor(a!)
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: arcsin.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+
 - func: atan(Tensor self) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
@@ -540,6 +547,17 @@
   variants: function, method
 
 - func: atan.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+
+# arctan, alias of atan
+- func: arctan(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: arctan_(Tensor(a!) self) -> Tensor(a!)
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: arctan.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
 
 - func: atleast_1d(Tensor self) -> Tensor
   use_c10_dispatcher: full
@@ -806,7 +824,6 @@
   use_c10_dispatcher: full
   variants: function, method
   device_guard: False
-  supports_named_tensor: True
 
 - func: chunk(Tensor(a) self, int chunks, int dim=0) -> Tensor(a)[]
   use_c10_dispatcher: full
@@ -1936,6 +1953,21 @@
   use_c10_dispatcher: full
   variants: function, method
 
+- func: matrix_exp(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: matrix_exp_backward(Tensor self, Tensor grad) -> Tensor
+  use_c10_dispatcher: full
+
+- func: _compute_linear_combination(Tensor input, Tensor coefficients) -> Tensor
+  dispatch:
+    CPU, CUDA: _compute_linear_combination
+
+- func: _compute_linear_combination.out(Tensor input, Tensor coefficients, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: _compute_linear_combination_out
+
 - func: max.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
   use_c10_dispatcher: full
   variants: function, method
@@ -2400,28 +2432,22 @@
 - func: rad2deg(Tensor self) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
-  supports_named_tensor: True
 
 - func: rad2deg_(Tensor(a!) self) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: function, method
-  supports_named_tensor: True
 
 - func: rad2deg.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  supports_named_tensor: True
 
 - func: deg2rad(Tensor self) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
-  supports_named_tensor: True
 
 - func: deg2rad_(Tensor(a!) self) -> Tensor(a!)
   use_c10_dispatcher: full
   variants: function, method
-  supports_named_tensor: True
 
 - func: deg2rad.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  supports_named_tensor: True
 
 - func: scalar_tensor(Scalar s, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   use_c10_dispatcher: full
@@ -2528,8 +2554,17 @@
   variants: function, method
 
 - func: neg.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU, CUDA: neg_out
+
+# Alias for neg
+- func: negative(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: negative_(Tensor(a!) self) -> Tensor(a!)
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: negative.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
 
 - func: repeat(Tensor self, int[] repeats) -> Tensor
   use_c10_dispatcher: full
@@ -2805,7 +2840,6 @@
   use_c10_dispatcher: full
   variants: function, method
   device_guard: False
-  supports_named_tensor: True
 
 - func: split.Tensor(Tensor(a) self, int split_size, int dim=0) -> Tensor(a)[]
   use_c10_dispatcher: full
@@ -2816,7 +2850,6 @@
   use_c10_dispatcher: full
   variants: function, method
   device_guard: False
-  supports_named_tensor: True
 
 - func: split_with_sizes(Tensor(a) self, int[] split_sizes, int dim=0) -> Tensor(a)[]
   use_c10_dispatcher: full
@@ -3164,8 +3197,17 @@
   variants: function, method
 
 - func: trunc.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU, CUDA: trunc_out
+
+# Alias for trunc
+- func: fix(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+  
+- func: fix_(Tensor(a!) self) -> Tensor(a!)
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: fix.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
 
 - func: type_as(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
@@ -7236,7 +7278,7 @@
 # torch.outer, alias for torch.ger
 - func: outer(Tensor self, Tensor vec2) -> Tensor
   use_c10_dispatcher: full
-  variants: function. method
+  variants: function, method
 
 - func: outer.out(Tensor self, Tensor vec2, *, Tensor(a!) out) -> Tensor(a!)
 
@@ -7253,6 +7295,13 @@
 
 # Note: this function is only for testing.
 - func: _test_optional_intlist(Tensor values, int[]? addends) -> Tensor
+  use_c10_dispatcher: full
+  python_module: nn
+  dispatch:
+    CPU: _test_optional_intlist
+
+# Note: this function is only for testing.
+- func: _test_optional_filled_intlist(Tensor values, int[2]? addends) -> Tensor
   use_c10_dispatcher: full
   python_module: nn
   dispatch:
