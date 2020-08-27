@@ -29,7 +29,13 @@
 using namespace at;
 using namespace torch::autograd::generated;
 
+${manual_functions_h}
+
 namespace torch { namespace autograd {
+
+namespace {
+${manual_functions_cpp}
+} // anonymous namespace
 
 namespace VariableType {
 namespace{

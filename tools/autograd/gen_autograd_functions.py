@@ -84,6 +84,14 @@ if (should_compute_output({ ${idx_ranges} })) {
 # TODO: This is probably not exhaustive, but it's a start
 UNTRACEABLE_FUNCTIONS = VIEW_FUNCTIONS
 
+def get_manual_functions(template_path):
+    filename = os.path.join(template_path, "ManualFunctions.cpp")
+    with open(filename, "r") as f:
+        cpp_file = f.read()
+    filename = os.path.join(template_path, "ManualFunctions.h")
+    with open(filename, "r") as f:
+        header_file = f.read()
+    return cpp_file, header_file
 
 def gen_autograd_functions_lib(out, autograd_functions, template_path):
     gen_autograd_functions(out, autograd_functions, template_path, "Functions")
@@ -111,10 +119,13 @@ def gen_autograd_functions(out, autograd_functions, template_path, file_basename
         function_definitions.append(FUNCTION_DEFINITION.substitute(env))
         py_function_initializers.append(PY_FUNCTION_DEFINITION.substitute(env))
 
+    manual_functions_cpp, manual_functions_h = get_manual_functions(template_path)
     top_env = {
         'autograd_function_definitions': function_definitions,
         'autograd_function_declarations': function_declarations,
         'py_function_initializers': py_function_initializers,
+        'manual_functions_cpp': manual_functions_cpp,
+        'manual_functions_h': manual_functions_h
     }
 
     for suffix in [".h", ".cpp"]:

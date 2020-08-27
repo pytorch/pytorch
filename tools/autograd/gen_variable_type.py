@@ -26,7 +26,7 @@ from __future__ import print_function
 from .utils import CodeTemplate, nested_dict, write, uninplace_api_name
 from .gen_autograd import VIEW_FUNCTIONS, VIEW_FUNCTIONS_WITH_METADATA_CHANGE, \
     MULTI_OUTPUT_SAFE_FUNCTIONS, RETURNS_VIEWS_OF_INPUT
-from .gen_autograd_functions import uses_single_grad
+from .gen_autograd_functions import uses_single_grad, get_manual_functions
 
 # These functions we don't want to record for tracing, because we always want
 # to trace their constituent parts.  This is a temporary hack in lieue
@@ -701,12 +701,15 @@ def gen_variable_type_shard(out, aten_declarations, template_path, suffix, heade
                 trace_wrapper_registrations.append(UNBOXEDONLY_WRAPPER_REGISTRATION.substitute(
                     declaration, class_type='TraceType'))
 
+    manual_functions_cpp, manual_functions_h = get_manual_functions(template_path)
     env = {
         'type_derived_method_declarations': type_declarations,
         'type_derived_method_definitions': type_definitions,
         'wrapper_registrations': wrapper_registrations,
         'trace_method_definitions': trace_method_definitions,
         'trace_wrapper_registrations': trace_wrapper_registrations,
+        'manual_functions_cpp': manual_functions_cpp,
+        'manual_functions_h': manual_functions_h
     }
     if header:
         write(out, 'VariableType.h', VARIABLE_TYPE_H, env)
