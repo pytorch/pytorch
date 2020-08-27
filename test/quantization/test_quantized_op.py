@@ -3464,16 +3464,14 @@ class TestPadding(TestCase):
     def test_constant_padNd(self, batch_size, channels, d, hwd, value, qtype):
         padding = hwd // 4
 
-        shape = [batch_size, channels]
-        if d <= 3:
-            shape.append(hwd)
-            op = torch.nn.ConstantPad3d
-        if d <= 2:
+        shape = [batch_size, channels, hwd]
+        op = torch.nn.ConstantPad1d
+        if d >= 2:
             shape.append(hwd)
             op = torch.nn.ConstantPad2d
-        if d == 1:
+        if d == 3:
             shape.append(hwd)
-            op = torch.nn.ConstantPad1d
+            op = torch.nn.ConstantPad3d
         numel = np.prod(shape)
 
         x = torch.arange(numel).to(torch.float)
