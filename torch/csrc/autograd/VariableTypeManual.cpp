@@ -214,6 +214,13 @@ Tensor & copy_(Tensor & self, const Tensor & src, bool non_blocking) {
   }
   increment_version(self);
   rebase_history(self , std::move(grad_fn));
+
+  if (FwGradMode::is_enabled() && isDifferentiableType(self.scalar_type()) &&
+      (self.fw_grad().defined() || src.fw_grad().defined())) {
+    auto new_fw_grad = src.fw_grad();
+    self.set_fw_grad(new_fw_grad);
+  }
+
   return self;
 }
 
@@ -229,6 +236,11 @@ Tensor& resize_(
     at::AutoNonVariableTypeMode non_var_type_mode(true);
     self_.resize_(size, std::move(optional_memory_format));
   }
+
+  if (FwGradMode::is_enabled() && self.fw_grad().defined()) {
+    AT_ERROR("cannot resize variables that has a forward grad");
+  }
+
   return self;
 }
 
@@ -245,6 +257,11 @@ Tensor& resize_as_(
     at::AutoNonVariableTypeMode non_var_type_mode(true);
     at::resize_as_(self_, the_template_, std::move(optional_memory_format));
   }
+
+  // Handle fw grad
+  if (FwGradMode::is_enabled() && self.fw_grad().defined()) {
+    AT_ERROR("cannot resize variables that has a forward grad");
+  }
   return self;
 }
 
@@ -252,6 +269,13 @@ Tensor detach(const Tensor & self) {
   RECORD_FUNCTION("detach", std::vector<c10::IValue>({self}));
   auto result = make_variable_non_differentiable_view(self, self, /*allow_tensor_metadata_change=*/false);
   namedinference::propagate_names(result, self);
+
+  // detach only backward gradients
+  if (FwGradMode::is_enabled() && self.fw_grad().defined()) {
+    auto new_fw_grad = self.fw_grad();
+    result.set_fw_grad(new_fw_grad);
+  }
+
   return result;
 }
 
