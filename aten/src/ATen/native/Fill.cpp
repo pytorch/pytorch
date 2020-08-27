@@ -21,6 +21,8 @@ namespace {
 Tensor& fill_out(Tensor& self, Scalar value) {
   if (self.is_quantized()) {
     at::Tensor out = at::ones(self.sizes()).to(kFloat) * value;
+    out = out.to(self.device());
+    // Trust the `copy_` to handle the quantization and the boundary chacks.
     self.copy_(out);
     return self;
   }
