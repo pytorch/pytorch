@@ -235,7 +235,7 @@ c10::optional<Operator> OperatorGenerator(
     Func&& op,
     AliasAnalysisKind alias_analysis) {
   return c10::optional<Operator>(Operator(
-      schema_str.operator const char*(),
+      std::string(schema_str),
       std::forward<Func>(op),
       alias_analysis));
 }

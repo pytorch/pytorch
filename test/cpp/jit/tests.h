@@ -34,6 +34,7 @@ namespace jit {
   _(TopologicalIndex)                             \
   _(TopologicalMove)                              \
   _(SubgraphUtils)                                \
+  _(SubgraphUtilsVmap)                            \
   _(AliasAnalysis)                                \
   _(ContainerAliasing)                            \
   _(AliasRegistration)                            \
