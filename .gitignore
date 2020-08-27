@@ -9,6 +9,7 @@
 ## PyTorch
 
 .coverage
+coverage.xml
 .gradle
 .hypothesis
 .mypy_cache

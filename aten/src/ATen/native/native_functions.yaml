@@ -5448,12 +5448,6 @@
   dispatch:
     CPU, CUDA: remainder
 
-- func: min.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-
-- func: min.other(Tensor self, Tensor other) -> Tensor
-  use_c10_dispatcher: full
-  variants: method, function
-
 - func: min(Tensor self) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
@@ -5461,18 +5455,40 @@
     CPU, CUDA: min
     QuantizedCPU: min_quantized_cpu
 
-- func: max.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-
-- func: max.other(Tensor self, Tensor other) -> Tensor
-  use_c10_dispatcher: full
-  variants: method, function
-
 - func: max(Tensor self) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
   dispatch:
     CPU, CUDA: max
     QuantizedCPU: max_quantized_cpu
+
+- func: maximum(Tensor self, Tensor other) -> Tensor
+  use_c10_dispatcher: full
+  variants: method, function
+
+- func: maximum.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+
+# binary max, alias of maximum
+# NOTE: max is not an alias for maximum, since there is also unary max
+- func: max.other(Tensor self, Tensor other) -> Tensor
+  use_c10_dispatcher: full
+  variants: method, function
+
+- func: max.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+
+- func: minimum(Tensor self, Tensor other) -> Tensor
+  use_c10_dispatcher: full
+  variants: method, function
+
+- func: minimum.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+
+# binary min, alias for minimum
+# NOTE: min is not an alias for minimum, since there is also unary min
+- func: min.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+
+- func: min.other(Tensor self, Tensor other) -> Tensor
+  use_c10_dispatcher: full
+  variants: method, function
 
 # Return: (Tensor min, Tensor max)
 - func: _min_max(Tensor self) -> (Tensor, Tensor)
