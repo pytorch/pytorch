@@ -7023,7 +7023,7 @@ takes the same shape as the indices.
 
 Args:
     {input}
-    indices (LongTensor): the indices into tensor
+    index (LongTensor): the indices into tensor
 
 Example::
 
