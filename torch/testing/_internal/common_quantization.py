@@ -586,7 +586,8 @@ class QuantizationTestCase(TestCase):
                            expected_node=None,
                            expected_node_occurrence=None,
                            expected_node_list=None,
-                           debug=False):
+                           debug=False,
+                           print_debug_info=False):
         """ Quantizes model with graph mode quantization on fx and check if the
         quantized model contains the quantized_node
 
@@ -635,7 +636,7 @@ class QuantizationTestCase(TestCase):
         self.assertEqual((result - result_debug).abs().max(), 0), \
             'Expecting debug and non-debug option to produce identical result'
 
-        if debug:
+        if print_debug_info:
             print()
             print('quant type:', quant_type)
             print('origianl graph module:', type(model))
@@ -644,8 +645,9 @@ class QuantizationTestCase(TestCase):
             print('quantized graph module:', type(qgraph))
             self.printGraphModule(qgraph)
             print()
+        qgraph_to_check = qgraph_debug if debug else qgraph
         self.checkGraphModuleNodes(
-            qgraph, expected_node, expected_node_occurrence, expected_node_list)
+            qgraph_to_check, expected_node, expected_node_occurrence, expected_node_list)
 
 # Below are a series of neural net models to use in testing quantization
 # Single layer models

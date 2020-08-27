@@ -43,12 +43,10 @@ import operator
 import unittest
 
 class TestQuantizeFx(QuantizationTestCase):
-    """ Unit tests for functionalities
-    """
-    @skipIfNoFBGEMM
-    def test_functional(self):
-        """ Test quantizing functional conv and linear
-        """
+    def _get_conv_linear_test_cases(self):
+        ''' Returns a list of test cases, with format:
+        is_dynamic, M, inputs, quantized_node, weight prepack op
+        '''
         class Conv(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -84,17 +82,55 @@ class TestQuantizeFx(QuantizationTestCase):
         linear_module_input = torch.rand(8, 5)
 
         tests = [
-            (False, Conv, (conv_input, conv_weight), ns.call_function(torch.ops.quantized.conv2d)),
-            (True, Linear, (linear_input, linear_weight), ns.call_function(torch.ops.quantized.linear_dynamic)),
-            (False, Linear, (linear_input, linear_weight), ns.call_function(torch.ops.quantized.linear)),
-            (True, LinearModule, (linear_module_input,), ns.call_module(nnqd.Linear)),
-            (False, LinearModule, (linear_module_input,), ns.call_module(nnq.Linear)),
+            (False, Conv, (conv_input, conv_weight),
+             ns.call_function(torch.ops.quantized.conv2d),
+             ns.call_function(torch.ops.quantizd.conv2d_prepack)),
+            (True, Linear, (linear_input, linear_weight),
+             ns.call_function(torch.ops.quantized.linear_dynamic),
+             ns.call_function(torch.ops.quantized.linear_prepack)),
+            (False, Linear, (linear_input, linear_weight),
+             ns.call_function(torch.ops.quantized.linear),
+             ns.call_function(torch.ops.quantized.linear_prepack)),
+            (True, LinearModule, (linear_module_input,),
+             ns.call_module(nnqd.Linear),
+             None),
+            (False, LinearModule, (linear_module_input,),
+             ns.call_module(nnq.Linear),
+             None),
         ]
+        return tests
 
-        for is_dynamic, M, inputs, quantized_node in tests:
+    """ Unit tests for functionalities
+    """
+    @skipIfNoFBGEMM
+    def test_functional(self):
+        """ Test quantizing functional conv and linear
+        """
+        tests = self._get_conv_linear_test_cases()
+        for is_dynamic, M, inputs, quantized_node, weight_prepack_ndoe in tests:
             quant_type = QuantType.DYNAMIC if is_dynamic else QuantType.STATIC
+            node_occurrence = dict()
+            if weight_prepack_node:
+                node_occurrence[weight_prepack_node] = 0
             self.checkGraphModeFxOp(
-                M(), inputs, quant_type, quantized_node)
+                M(), inputs, quant_type,
+                expected_node=quantized_node,
+                expected_node_occurrence=node_occurrence,
+                debug=False)
+
+    @skipIfNoFBGEMM
+    def test_debug_option_function(self):
+        tests = self._get_conv_linear_test_cases()
+        for is_dynamic, M, inputs, quantized_node, weight_prepack_node in tests:
+            quant_type = QuantType.DYNAMIC if is_dynamic else QuantType.STATIC
+            node_occurrence = dict()
+            if weight_prepack_node:
+                node_occurrence[weight_prepack_node] = 1
+            self.checkGraphModeFxOp(
+                M(), inputs, quant_type,
+                expected_node=quantized_node,
+                expected_node_occurrence=node_occurrence,
+                debug=True)
 
 class TestQuantizeFxOps(QuantizationTestCase):
     """Unit tests for individual ops

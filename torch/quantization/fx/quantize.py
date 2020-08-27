@@ -52,6 +52,18 @@ def quantize_node(node, activation_post_process):
 def quantize(quantizer, node):
     quantize_node(node, quantizer.activation_post_process_map[node.name])
 
+# returns a function that can get a new attribute name for module with given prefix
+def get_new_attr_name_with_prefix(prefix):
+    def get_new_attr_name(module):
+        i = 0
+        get_attr_name = lambda i: prefix + str(i)
+        attr_name = get_attr_name(i)
+        while hasattr(module, attr_name):
+            i += 1
+            attr_name = get_attr_name(i)
+        return attr_name
+    return get_new_attr_name
+
 # A dictionary for querying the weight index for a given op
 WEIGHT_INDEX_DICT = {
     torch.nn.functional.conv2d : [1],
@@ -586,6 +598,31 @@ class DynamicLinear(QuantizeHandler):
                 return quantizer.quantized_graph.create_node(
                     'call_function', torch.ops.quantized.linear_dynamic, qdynamic_linear_args, kwargs)
 
+
+# Patterns for weight prepack op folding
+# Base Weight Prepack Folding Pattern Handler
+class FoldingHandler(ABC):
+    """ Base handler class for the weight prepack folding patterns
+    """
+    def __init__(self, folder, node):
+        """ Records pattern information in __init__, which will be used
+        in fold
+        """
+        pass
+
+    @abstractmethod
+    def fold(self, folder, node, load_arg):
+        """ Convert the given node to a quantized node and insert
+        it to the quantized graph
+        """
+        return NotImplemented
+
+# weight prepacking ops
+WEIGHT_PREPACK_OPS = {
+    torch._ops.ops.quantized.linear_prepack,
+    torch._ops.ops.quantized.conv2d_prepack,
+}
+
 class Quantizer:
     def __init__(self):
         # mapping from matched node to activation_post_process
@@ -657,16 +694,7 @@ class Quantizer:
             if node.name in observed:
                 continue
 
-            def get_new_observer_name(parent_module):
-                i = 0
-
-                def get_observer_name(i):
-                    return 'activation_post_process_' + str(i)
-                observer_name = get_observer_name(i)
-                while hasattr(parent_module, observer_name):
-                    i += 1
-                    observer_name = get_observer_name(i)
-                return observer_name
+            get_new_observer_name = get_new_attr_name_with_prefix('activation_post_process_')
             root_node, _, obj, qconfig = matches.get(node.name, (None, None, None, None))
             if root_node is None:
                 env[node.name] = observed_graph.node_copy(node, load_arg)
@@ -745,7 +773,7 @@ class Quantizer:
     def prepare_dynamic(self, model, qconfig_dict, inplace=False):
         return self._prepare(model, qconfig_dict, inplace, is_dynamic=True)
 
-    def convert(self, observed, inplace=False, debug=False, is_dynamic=False):
+    def _convert(self, observed, inplace=False, debug=False, is_dynamic=False):
         assert not inplace, 'inplace convert is not supported yet'
         self.restore_state(observed)
         self.is_dynamic = is_dynamic
@@ -925,6 +953,80 @@ class Quantizer:
         for n in to_be_removed:
             delattr(observed_root, n)
         return GraphModule(observed_root, self.quantized_graph)
+
+    def _fold_weight(self, quantized):
+        def collect_nodes_to_fold(node):
+            nodes = [node]
+            frontier = [node]
+            while frontier:
+                node = frontier.pop()
+                all_args = list(node.args) + list(node.kwargs.values())
+                for arg in all_args:
+                    if arg.op == 'placeholder':
+                        # hit input, can't fold in this case
+                        return None
+                    nodes.append(arg)
+                    if not (arg.op == 'call_function' and arg.target == getattr):
+                        frontier.append(arg)
+            return nodes
+
+        packed_weights = dict()
+        # map from folded node name to the prepacked weight name
+        folded_nodes = dict()
+        # get packed weights
+        for node in quantized.graph.nodes:
+            if node.op == 'call_function' and node.target in WEIGHT_PREPACK_OPS:
+                nodes_to_fold = collect_nodes_to_fold(node)
+                if nodes_to_fold is not None:
+                    # since we traced back from weight node to getattrr
+                    nodes_to_fold.reverse()
+                    prepacking_graph = Graph()
+                    env = {}
+                    def load_arg(a):
+                        return map_arg(a, lambda node: env[node.name])
+                    for node_to_fold in nodes_to_fold:
+                        prepacking_graph.node_copy(node_to_fold, load_arg)
+                        folded_nodes[node_to_fold.name] = node
+                    prepacking_graph.output(load_arg(node.name))
+                    prepacking_module = GraphModule(quantized, prepacking_graph)
+                    print('prepacking module code:', prepacking_module.src)
+                    packed_weight = prepacking_module()
+                    print('packed weight:', packed_weight)
+                    packed_weights[node.name] = packed_weight
+
+        # remove folded nodes and replace the prepacking node with getattr
+        folded_graph = Graph()
+        env = {}
+        def load_arg(a):
+            return map_arg(a, lambda node: env[node.name])
+        get_new_packed_weight_name = get_new_attr_name_with_prefix('_fx_pass_packed_weight_')
+        quantized_root = quantized.root
+        quantized_graph = quantized.graph
+        for node in quantized_graph.nodes:
+            prepack_node = folded_nodes.get(node.name, None)
+            if prepack_node is node:
+                packed_weight = packed_weights[node.name]
+                # add a prepacked attribute to root
+                packed_weight_name = get_new_packed_weight_name(root)
+                setattr(root, packed_weight_name, packed_weight)
+                # replace prepack node with a getattr node
+                env[node.name] = folded_graph.create_node('call_function', getattr, (packed_weight_name,), {})
+            elif prepack_node is not None:
+                # remove the foled node
+                continue
+            else:
+                # copy other nodes
+                env[node.name] = folded_graph.node_copy(node, load_arg)
+        folded_graph.output(load_arg(quantized_graph.result))
+        return GraphModule(quantized_root, folded_graph)
+
+
+
+    def convert(self, observed, inplace=False, debug=False, is_dynamic=False):
+        quantized = self._convert(observed, inplace, debug, is_dynamic)
+        if not debug:
+            quantized = self._fold_weight(quantized)
+        return quantized
 
     def _find_matches(self, graph, modules, patterns):
         match_map = {}  # node name -> (root_node, match_value?)
