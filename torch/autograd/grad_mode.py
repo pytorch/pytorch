@@ -150,3 +150,18 @@ class set_grad_enabled(object):
 
     def __exit__(self, *args):
         torch.set_grad_enabled(self.prev)
+
+# We only provide this variant for now as it is an internal API
+class set_fw_grad_enabled(object):
+    r"""Context-manager that sets forward gradient calculation to on or off.
+    """
+
+    def __init__(self, mode):
+        self.prev = torch.is_fw_grad_enabled()
+        torch._C.set_fw_grad_enabled(mode)
+
+    def __enter__(self):
+        pass
+
+    def __exit__(self, *args):
+        torch._C.set_fw_grad_enabled(self.prev)

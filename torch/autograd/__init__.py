@@ -14,7 +14,7 @@ from torch.types import _TensorOrTensors
 from .variable import Variable
 from .function import Function, NestedIOFunction
 from .gradcheck import gradcheck, gradgradcheck
-from .grad_mode import no_grad, enable_grad, set_grad_enabled
+from .grad_mode import no_grad, enable_grad, set_grad_enabled, set_fw_grad_enabled
 from .anomaly_mode import detect_anomaly, set_detect_anomaly
 from . import profiler
 from . import functional

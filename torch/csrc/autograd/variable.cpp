@@ -536,6 +536,7 @@ namespace {
 // This function is will ensure that the fw_grad_ has the same content as self and will
 // respect the [Forward Grad Layout] discussed above.
 void AutogradMeta::set_fw_grad(Variable& new_grad, const Variable& self) {
+  at::NoFwGradGuard guard;
   if (fw_grad_.defined()) {
     // If there is already a fw_grad, re-use it
     if (new_grad.defined()) {

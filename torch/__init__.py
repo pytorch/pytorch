@@ -459,7 +459,7 @@ del ComplexFloatStorageBase
 
 import torch.cuda
 import torch.autograd
-from torch.autograd import no_grad, enable_grad, set_grad_enabled
+from torch.autograd import no_grad, enable_grad, set_grad_enabled, set_fw_grad_enabled
 # import torch.fft  # TODO: enable once torch.fft() is removed
 import torch.futures
 import torch.nn

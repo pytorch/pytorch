@@ -7,5 +7,6 @@ namespace torch { namespace autograd {
 
 using GradMode = at::GradMode;
 using AutoGradMode = at::AutoGradMode;
+using FwGradMode = at::FwGradMode;
 
 }}
