@@ -399,7 +399,7 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(
   std::lock_guard<std::mutex> lock(compile_mutex);
   GRAPH_DEBUG("Running ProfilingGraphExecutorImpl ", this);
 
-  if (!remaining_bailout_depth_.has_value()) {
+  if (!remaining_bailout_depth_.has_value() || !tensorExprFuserEnabled()) {
     remaining_bailout_depth_ = remaining_bailout_depth;
   }
 
@@ -436,7 +436,8 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(
     return *profiling_plan_;
   }
 
-  auto copy = pr_->graph()->copy();
+  // auto copy = pr_->graph()->copy();
+  auto copy = profiling_plan_->graph->copy();
   ProfilingRecord::removeProfileCounter(copy->block());
   runProfilingOptimizations(copy);
   // replaces a fallback graph inserted by

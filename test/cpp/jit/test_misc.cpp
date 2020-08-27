@@ -1199,6 +1199,7 @@ void testThreadLocalDebugInfo() {
 }
 
 static void nestGraphIntoFallbackGraph(std::shared_ptr<Graph> graph) {
+  ProfilingRecord::removeProfileCounter(graph->block());
   auto fallback =
       createFallbackGraph(graph->block(), graph->inputs(), graph.get());
   graph->prependNode(fallback);
@@ -1234,19 +1235,15 @@ void testFallbackGraphs() {
   float ef = et.item<float>();
   {
     EnableProfilingGuard epg;
-
     GraphFunction f("fallbackGraphs", graph, nullptr);
     for (size_t i = 0; i < getNumProfiledRuns() + 1; i++) {
       x = at::randn({1}, at::kCPU);
       y = at::randn({1}, at::kCPU);
       stack.emplace_back(x);
       stack.emplace_back(y);
-
       if (i == getNumProfiledRuns()) {
         auto opt_graph = lastExecutedOptimizedGraph();
-        GRAPH_DUMP("Original graph:", opt_graph);
         nestGraphIntoFallbackGraph(opt_graph);
-        GRAPH_DUMP("nestGraphIntoFallbackGraph:", opt_graph);
         auto it = opt_graph->block()->nodes().begin();
         ASSERT_EQ(it->kind(), prim::FallbackGraph);
         auto fallback = *it++;
@@ -1257,9 +1254,13 @@ void testFallbackGraphs() {
             ->check("Tensor = aten::mul")
             ->run(*fallback->g(attr::Subgraph));
       }
-
       f.run(stack);
     }
+
+    auto opt_graph = lastExecutedOptimizedGraph();
+    testing::FileCheck()
+        .check("(Tensor) = prim::CallFunction")
+        ->run(*opt_graph);
   }
 
   at::Tensor at;
