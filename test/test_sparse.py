@@ -8,6 +8,7 @@ import itertools
 import functools
 import operator
 import random
+from collections import defaultdict
 import unittest
 from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm, do_test_dtypes, \
     do_test_empty_full, load_tests, TEST_NUMPY, IS_WINDOWS
@@ -3011,6 +3012,23 @@ class TestSparse(TestCase):
     @cpu_only
     def test_sparse_matmul(self):
 
+        def _indices2csr(indices, dim):
+            nnz = len(indices)
+            r = [0] * (dim + 1)
+            last_i = 0
+            for i in indices:
+                if i == last_i:
+                    r[last_i + 1] += 1
+                else:
+                    for _i in range(last_i, i + 1):
+                        r[_i + 1] = r[last_i + 1]
+                    last_i = i
+                    r[last_i + 1] += 1
+            for _i in range(last_i, dim):
+                r[_i + 1] = r[last_i + 1]
+            assert r[-1] == nnz
+            return r
+
         def sparse_mm(a, b):
             if a.shape[1] != b.shape[0]:
                 print("Incompatible matrices")
@@ -3021,73 +3039,31 @@ class TestSparse(TestCase):
             values_a = a._values()
             indices_b = b._indices()
             values_b = b._values()
+            nnz1 = len(indices_a[0])
+            nnz2 = len(indices_b[0])
 
-            # sorting the triplets
-            _, map_a = torch.sort(indices_a[1])
-            _, map_b = torch.sort(indices_b[0])
+            if a.is_coalesced() and b.is_coalesced():
+                r2 = _indices2csr(indices_b[0], b.shape[0])
+                d = defaultdict(values_b.numpy().dtype.type)
+                for n1 in range(nnz1):
+                    for n2 in range(r2[indices_a[1][n1]], r2[indices_a[1][n1] + 1]):
+                        d[indices_a[0][n1].item(), indices_b[1][n2].item()] += values_a[n1] * values_b[n2]
 
-            # build vectors of indices b1 and b2, which contain the indices
-            # of elements which begin a new column for A1 and which begin a
-            # new row for A2.
-            b1 = [0]
-            for i in range(values_a.numel() - 1):
-                idx = map_a[i]
-                idx_1 = map_a[i + 1]
-                if indices_a[1][idx] != indices_a[1][idx_1]:
-                    b1.append(i + 1)
-            b1.append(values_a.numel())
+            else:
+                d = defaultdict(values_b.numpy().dtype.type)
+                for n1 in range(nnz1):
+                    for n2 in range(nnz2):
+                        if indices_b[0][n2] == indices_a[1][n1]:
+                            d[indices_a[0][n1].item(), indices_b[1][n2].item()] += values_a[n1] * values_b[n2]
 
-            b2 = [0]
-            for i in range(values_b.numel() - 1):
-                idx = map_b[i]
-                idx_1 = map_b[i + 1]
-                if indices_b[0][idx] != indices_b[0][idx_1]:
-                    b2.append(i + 1)
-            b2.append(values_b.numel())
-
-            i = 0
-            j = 0
-            nnz_result = 0
-            while i < len(b1) - 1 and j < len(b2) - 1:
-                b1i = map_a[b1[i]]
-                b2j = map_b[b2[j]]
-                if indices_a[1][b1i] == indices_b[0][b2j]:
-                    nnz_result += (b1[i + 1] - b1[i]) * (b2[j + 1] - b2[j])
-                    i += 1
-                    j += 1
-                elif indices_a[1][b1i] < indices_b[0][b2j]:
-                    i += 1
-                else:
-                    j += 1
-
-            result_indices = [[0] * nnz_result, [0] * nnz_result]
-            result_values = [0] * nnz_result
-            # exploiting the special sorting of l1, l2 we are able to pass
-            # in a single loop all and only the elements of the matrices
-            # A1, A2 which will be paired when one computes A1*A2.
-            i = 0
-            j = 0
-            index = 0
-            while i < len(b1) - 1 and j < len(b2) - 1:
-                b1i = map_a[b1[i]]
-                b2j = map_b[b2[j]]
-                if indices_a[1][b1i] == indices_b[0][b2j]:
-                    for c1 in range(b1[i], b1[i + 1]):
-                        for c2 in range(b2[j], b2[j + 1]):
-                            mc1 = map_a[c1]
-                            mc2 = map_b[c2]
-                            result_indices[0][index] = indices_a[0][mc1]
-                            result_indices[1][index] = indices_b[1][mc2]
-                            result_values[index] = values_a[mc1] * values_b[mc2]
-                            index += 1
-                    i += 1
-                    j += 1
-                else:
-                    if indices_a[1][b1i] < indices_b[0][b2j]:
-                        i += 1
-                    else:
-                        j += 1
-            return torch.sparse_coo_tensor(torch.tensor(result_indices), torch.tensor(result_values), (n, m))
+            i3 = []
+            j3 = []
+            values = []
+            for i, j in sorted(d):
+                i3.append(i)
+                j3.append(j)
+                values.append(d[i, j])
+            return torch.sparse_coo_tensor(torch.tensor([i3, j3]), torch.tensor(values), (n, m))
 
         def test_op(sparse_dims, nnz, shape_a, shape_b):
             a, i_a, v_a = self._gen_sparse(sparse_dims, nnz, shape_a)
