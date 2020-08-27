@@ -30,6 +30,7 @@ from jit.test_module_interface import TestModuleInterface  # noqa: F401
 from jit.test_onnx_export import TestONNXExport  # noqa: F401
 from jit.test_with import TestWith  # noqa: F401
 from jit.test_enum import TestEnum, TestEnumFeatureGuard  # noqa: F401
+from jit.test_profiler import TestProfiler  # noqa: F401
 
 # Torch
 from torch import Tensor
@@ -5269,7 +5270,6 @@ a")
             self.assertEqual(def_in_one_branch(a, False), 6.0)
             # this triggers 2 bailouts
             self.assertEqual(def_in_one_branch(a, True), 3.0)
-
 
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "skip if profiling isn't enabled")
     def test_maxpool_guard_elimination(self):
