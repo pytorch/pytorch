@@ -4107,36 +4107,35 @@ Example::
     >>> torch.max(a, 1)
     torch.return_types.max(values=tensor([0.8475, 1.1949, 1.5717, 1.0036]), indices=tensor([3, 0, 0, 1]))
 
-.. function:: max(input, other, out=None) -> Tensor
+.. function:: max(input, other, *, out=None) -> Tensor
 
-Each element of the tensor ``input`` is compared with the corresponding
-element of the tensor ``other`` and an element-wise maximum is taken.
+See :func:`torch.maximum`.
 
-The shapes of ``input`` and ``other`` don't need to match,
-but they must be :ref:`broadcastable <broadcasting-semantics>`.
+""".format(**single_dim_common))
 
-.. math::
-    \text{{out}}_i = \max(\text{{tensor}}_i, \text{{other}}_i)
+add_docstr(torch.maximum, r"""
+maximum(input, other, *, out=None) -> Tensor
 
-.. note:: When the shapes do not match, the shape of the returned output tensor
-          follows the :ref:`broadcasting rules <broadcasting-semantics>`.
+Computes the element-wise maximum of :attr:`input` and :attr:`other`.
+
+.. note::
+    If one of the elements being compared is a NaN, then that element is returned.
+    :func:`maximum` is not supported for tensors with complex dtypes.
 
 Args:
     {input}
     other (Tensor): the second input tensor
+
+Keyword args:
     {out}
 
 Example::
 
-    >>> a = torch.randn(4)
-    >>> a
-    tensor([ 0.2942, -0.7416,  0.2653, -0.1584])
-    >>> b = torch.randn(4)
-    >>> b
-    tensor([ 0.8722, -1.7421, -0.4141, -0.5055])
-    >>> torch.max(a, b)
-    tensor([ 0.8722, -0.7416,  0.2653, -0.1584])
-""".format(**single_dim_common))
+    >>> a = torch.tensor((1, 2, -1))
+    >>> b = torch.tensor((3, 0, 4))
+    >>> torch.maximum(a, b)
+    tensor([3, 2, 4])
+""".format(**common_args))
 
 add_docstr(torch.argmax,
            r"""
@@ -4412,37 +4411,34 @@ Example::
     >>> torch.min(a, 1)
     torch.return_types.min(values=tensor([-1.1899, -1.4644,  0.0384, -0.1153]), indices=tensor([2, 0, 1, 0]))
 
-.. function:: min(input, other, out=None) -> Tensor
+.. function:: min(input, other, *, out=None) -> Tensor
 
-Each element of the tensor :attr:`input` is compared with the corresponding
-element of the tensor :attr:`other` and an element-wise minimum is taken.
-The resulting tensor is returned.
+See :func:`torch.minimum`.
+""".format(**single_dim_common))
 
-The shapes of :attr:`input` and :attr:`other` don't need to match,
-but they must be :ref:`broadcastable <broadcasting-semantics>`.
+add_docstr(torch.minimum, r"""
+minimum(input, other, *, out=None) -> Tensor
 
-.. math::
-    \text{{out}}_i = \min(\text{{tensor}}_i, \text{{other}}_i)
+Computes the element-wise minimum of :attr:`input` and :attr:`other`.
 
-.. note:: When the shapes do not match, the shape of the returned output tensor
-          follows the :ref:`broadcasting rules <broadcasting-semantics>`.
+.. note::
+    If one of the elements being compared is a NaN, then that element is returned.
+    :func:`minimum` is not supported for tensors with complex dtypes.
 
 Args:
     {input}
     other (Tensor): the second input tensor
+
+Keyword args:
     {out}
 
 Example::
 
-    >>> a = torch.randn(4)
-    >>> a
-    tensor([ 0.8137, -1.1740, -0.6460,  0.6308])
-    >>> b = torch.randn(4)
-    >>> b
-    tensor([-0.1369,  0.1555,  0.4019, -0.1929])
-    >>> torch.min(a, b)
-    tensor([-0.1369, -1.1740, -0.6460, -0.1929])
-""".format(**single_dim_common))
+    >>> a = torch.tensor((1, 2, -1))
+    >>> b = torch.tensor((3, 0, 4))
+    >>> torch.minimum(a, b)
+    tensor([1, 0, -1])
+""".format(**common_args))
 
 add_docstr(torch.argmin,
            r"""
