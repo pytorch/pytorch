@@ -1,11 +1,30 @@
 import torch
+import unittest
 from torch.fx import symbolic_trace, Proxy, Node, GraphModule, DefaultDelegate
 
-from typing import Any, Callable, Dict, Optional, Tuple, Union
+from fx.quantization import Quantizer
 
+from typing import Any, Callable, Dict, Optional, Tuple, Union
 from torch.testing._internal.common_utils import TestCase, run_tests
 
+try:
+    from torchvision.models import resnet18
+    HAS_TORCHVISION = True
+except ImportError:
+    HAS_TORCHVISION = False
+skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
+
 class TestFX(TestCase):
+    def checkGraphModule(self, m: torch.nn.Module, args, kwargs=None):
+        """Check that an nn.Module's results match the GraphModule version
+        for a given set of args/kwargs.
+        """
+        kwargs = kwargs if kwargs else {}
+        ref_outs = m(*args, **kwargs)
+        gm = symbolic_trace(m)
+        test_outs = gm(*args, **kwargs)
+        self.assertEqual(ref_outs, test_outs)
+
     def test_graph_module(self):
         class MySub(torch.nn.Module):
             def __init__(self):
@@ -48,6 +67,15 @@ class TestFX(TestCase):
         t = T()
         symbolic_trace(t)
 
+    def test_args_kwargs(self):
+        class T(torch.nn.Module):
+            def forward(self, *args, **kwargs):
+                x = args[0] + kwargs['foo']
+                return x
+
+        t = T()
+        self.checkGraphModule(t, (torch.rand(1), torch.rand(1)), {'foo': torch.rand(1)})
+
     def test_fx_shifts(self):
         class MyModule(torch.nn.Module):
             def forward(self, x):
@@ -56,11 +84,7 @@ class TestFX(TestCase):
         input = torch.LongTensor(10).random_(0, 1024)
 
         m = MyModule()
-        ref_outs = m(input)
-        gm = symbolic_trace(m)
-        test_outs = gm(input)
-
-        self.assertEqual(ref_outs, test_outs)
+        self.checkGraphModule(m, (input,))
 
     def test_dict(self):
         class MyDictMod(torch.nn.Module):
@@ -69,11 +93,8 @@ class TestFX(TestCase):
 
         input_dict = {'3': torch.rand(3, 4)}
         m = MyDictMod()
-        ref_out = m(input_dict)
-        gm = symbolic_trace(m)
-        out = gm(input_dict)
 
-        self.assertEqual(out, ref_out)
+        self.checkGraphModule(m, (input_dict,))
 
     def test_disallow_override(self):
         # Custom delegate to disallow in-place tensor operations
@@ -141,12 +162,52 @@ class TestFX(TestCase):
                 return a + b
         m = M()
         g = symbolic_trace(m).graph
-        t = Proxy(g.result) 
+        t = Proxy(g.result)
         # test that we can use proxy objects to generate more graph code later for things that do not need to work with modules.
         g.output((t + t).node)
         gm = GraphModule(m, g)
         self.assertEqual(gm(3, 4), 14)
 
+    @skipIfNoTorchVision
+    def test_resnet(self):
+        resnet = resnet18()
+        resnet.train()
+
+        res_graph = symbolic_trace(resnet)
+        res_script = torch.jit.script(res_graph)
+
+        ip = torch.rand(1, 3, 224, 224)
+
+        a = resnet(ip)
+        b = res_graph(ip)
+        c = res_script(ip)
+        assert torch.allclose(a, b)
+        assert torch.allclose(a, c)
+
+        quantizer = Quantizer(res_graph)
+
+        for i in range(10):
+            quantizer.observe((torch.rand(1, 3, 224, 224),))
+
+        qgraph = quantizer.quantize()
+        qgraph_script = torch.jit.script(qgraph)
+
+        d = qgraph(ip)
+        e = qgraph_script(ip)
+
+        assert (a - d).abs().max() < 2
+        assert torch.allclose(d, e)
+
+    def test_unpack(self):
+        class M(torch.nn.Module):
+            def forward(self, a, b):
+                c, d = a
+                return c + d + b
+
+        a = (torch.rand(1), torch.rand(1))
+        b = torch.rand(1)
+        m = M()
+        self.checkGraphModule(m, (a, b))
 
 if __name__ == '__main__':
     run_tests()

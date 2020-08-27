@@ -55,6 +55,9 @@ namespace {
 Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& mat1, const Tensor& mat2, Scalar beta, Scalar alpha) {
   TORCH_CHECK(mat1.dim() == 2 && mat2.dim() == 2, "tensors must be 2-D");
 
+  TensorArg args[]{{result, "out", 0}, {self, "self", 1}, {mat1, "mat1", 2}, {mat2, "mat2", 3}};
+  checkAllSameGPU("addmm", args);
+
   Tensor self_;
   if (&result != &self) {
     std::tie(self_) = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm");
@@ -106,6 +109,10 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   int64_t mat2_ld = mat2_.stride((transpose_mat2 == transpose_result) ? 1 : 0);
   int64_t result_ld = result_.stride(transpose_result ? 0 : 1);
   at::ScalarType scalar_type = self_.scalar_type();
+
+  if (mat1.numel() == 0) {
+    return at::native::mul_out(result, self, at::native::scalar_tensor(beta, at::device(at::kCPU).dtype(self.scalar_type())));
+  }
 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, scalar_type, "addmm_cuda", [&] {
     scalar_t alpha_val = alpha.to<scalar_t>();
@@ -392,7 +399,7 @@ Tensor dot_cuda(const Tensor& self, const Tensor& other) {
     incy = 1;
   }
 
-  return AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "dot", [&] {
+  return AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(ScalarType::Half, self.scalar_type(), "dot", [&] {
     Tensor result = at::empty({}, self.options());
 
     auto handle = at::cuda::getCurrentCUDABlasHandle();

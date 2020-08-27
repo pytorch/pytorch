@@ -156,9 +156,14 @@ Example::
     tensor([ 1.2294,  2.2004,  1.3690,  1.7298])
 """.format(**common_args))
 
-add_docstr(torch.acosh,
-           r"""
-acosh(input, out=None) -> Tensor
+add_docstr(torch.arccos, r"""
+arccos(input, *, out=None) -> Tensor
+
+Alias for :func:`torch.acos`.
+""")
+
+add_docstr(torch.acosh, r"""
+acosh(input, *, out=None) -> Tensor
 
 Returns a new tensor with the inverse hyperbolic cosine of the elements of :attr:`input`.
 
@@ -184,8 +189,13 @@ Example::
     tensor([ 0.7791, 1.3120, 1.2979, 1.1341 ])
 """.format(**common_args))
 
-add_docstr(torch.add,
-           r"""
+add_docstr(torch.arccosh, r"""
+arccosh(input, *, out=None) -> Tensor
+
+Alias for :func:`torch.acosh`.
+""".format(**common_args))
+
+add_docstr(torch.add, r"""
 add(input, other, out=None)
 
 Adds the scalar :attr:`other` to each element of the input :attr:`input`
@@ -622,9 +632,8 @@ Example::
     array([1,  2,  3])
 """.format(**factory_data_common_args))
 
-add_docstr(torch.asin,
-           r"""
-asin(input, out=None) -> Tensor
+add_docstr(torch.asin, r"""
+asin(input, *, out=None) -> Tensor
 
 Returns a new tensor with the arcsine  of the elements of :attr:`input`.
 
@@ -633,6 +642,8 @@ Returns a new tensor with the arcsine  of the elements of :attr:`input`.
 """ + r"""
 Args:
     {input}
+
+Keyword args:
     {out}
 
 Example::
@@ -643,6 +654,12 @@ Example::
     >>> torch.asin(a)
     tensor([-0.6387,     nan, -0.4552,     nan])
 """.format(**common_args))
+
+add_docstr(torch.arcsin, r"""
+arcsin(input, *, out=None) -> Tensor
+
+Alias for :func:`torch.asin`.
+""")
 
 add_docstr(torch.asinh,
            r"""
@@ -668,9 +685,8 @@ Example::
     tensor([ 0.1599, -1.1534, -0.9435, -0.8990 ])
 """.format(**common_args))
 
-add_docstr(torch.atan,
-           r"""
-atan(input, out=None) -> Tensor
+add_docstr(torch.atan, r"""
+atan(input, *, out=None) -> Tensor
 
 Returns a new tensor with the arctangent  of the elements of :attr:`input`.
 
@@ -679,6 +695,8 @@ Returns a new tensor with the arctangent  of the elements of :attr:`input`.
 """ + r"""
 Args:
     {input}
+
+Keyword args:
     {out}
 
 Example::
@@ -689,6 +707,12 @@ Example::
     >>> torch.atan(a)
     tensor([ 0.2299,  0.2487, -0.5591, -0.5727])
 """.format(**common_args))
+
+add_docstr(torch.arctan, r"""
+arctan(input, *, out=None) -> Tensor
+
+Alias for :func:`torch.atan`.
+""")
 
 add_docstr(torch.atan2,
            r"""
@@ -1053,7 +1077,7 @@ vstack(tensors, *, out=None) -> Tensor
 
 Stack tensors in sequence vertically (row wise).
 
-This is equivalent to concatenation along the first axis after all 1-D tensors have been reshaped by :func:`torch.atleast_2d`. 
+This is equivalent to concatenation along the first axis after all 1-D tensors have been reshaped by :func:`torch.atleast_2d`.
 
 Args:
     tensors (sequence of Tensors): sequence of tensors to concatenate
@@ -1087,7 +1111,7 @@ dstack(tensors, *, out=None) -> Tensor
 
 Stack tensors in sequence depthwise (along third axis).
 
-This is equivalent to concatenation along the third axis after 1-D and 2-D tensors have been reshaped by :func:`torch.atleast_3d`. 
+This is equivalent to concatenation along the third axis after 1-D and 2-D tensors have been reshaped by :func:`torch.atleast_3d`.
 
 Args:
     tensors (sequence of Tensors): sequence of tensors to concatenate
@@ -3983,6 +4007,50 @@ Example::
              [  2.0774,  -0.8187]]])
 """.format(**common_args))
 
+add_docstr(torch.matrix_exp,
+           r"""
+matrix_power(input) -> Tensor
+
+Returns the matrix exponential. Supports batched input.
+For a matrix ``A``, the matrix exponential is defined as
+
+.. math::
+    \exp^A = \sum_{k=0}^\infty A^k / k!.
+
+""" + r"""
+The implementation is based on:
+Bader, P.; Blanes, S.; Casas, F.
+Computing the Matrix Exponential with an Optimized Taylor Polynomial Approximation.
+Mathematics 2019, 7, 1174.
+
+Args:
+    {input}
+
+Example::
+
+    >>> a = torch.randn(2, 2, 2)
+    >>> a[0, :, :] = torch.eye(2, 2)
+    >>> a[1, :, :] = 2 * torch.eye(2, 2)
+    >>> a
+    tensor([[[1., 0.],
+             [0., 1.]],
+
+            [[2., 0.],
+             [0., 2.]]])
+    >>> torch.matrix_exp(a)
+    tensor([[[2.7183, 0.0000],
+             [0.0000, 2.7183]],
+
+             [[7.3891, 0.0000],
+              [0.0000, 7.3891]]])
+
+    >>> import math
+    >>> x = torch.tensor([[0, math.pi/3], [-math.pi/3, 0]])
+    >>> x.matrix_exp() # should be [[cos(pi/3), sin(pi/3)], [-sin(pi/3), cos(pi/3)]]
+    tensor([[ 0.5000,  0.8660],
+            [-0.8660,  0.5000]])
+""".format(**common_args))
+
 add_docstr(torch.max,
            r"""
 max(input) -> Tensor
@@ -4039,36 +4107,35 @@ Example::
     >>> torch.max(a, 1)
     torch.return_types.max(values=tensor([0.8475, 1.1949, 1.5717, 1.0036]), indices=tensor([3, 0, 0, 1]))
 
-.. function:: max(input, other, out=None) -> Tensor
+.. function:: max(input, other, *, out=None) -> Tensor
 
-Each element of the tensor ``input`` is compared with the corresponding
-element of the tensor ``other`` and an element-wise maximum is taken.
+See :func:`torch.maximum`.
 
-The shapes of ``input`` and ``other`` don't need to match,
-but they must be :ref:`broadcastable <broadcasting-semantics>`.
+""".format(**single_dim_common))
 
-.. math::
-    \text{{out}}_i = \max(\text{{tensor}}_i, \text{{other}}_i)
+add_docstr(torch.maximum, r"""
+maximum(input, other, *, out=None) -> Tensor
 
-.. note:: When the shapes do not match, the shape of the returned output tensor
-          follows the :ref:`broadcasting rules <broadcasting-semantics>`.
+Computes the element-wise maximum of :attr:`input` and :attr:`other`.
+
+.. note::
+    If one of the elements being compared is a NaN, then that element is returned.
+    :func:`maximum` is not supported for tensors with complex dtypes.
 
 Args:
     {input}
     other (Tensor): the second input tensor
+
+Keyword args:
     {out}
 
 Example::
 
-    >>> a = torch.randn(4)
-    >>> a
-    tensor([ 0.2942, -0.7416,  0.2653, -0.1584])
-    >>> b = torch.randn(4)
-    >>> b
-    tensor([ 0.8722, -1.7421, -0.4141, -0.5055])
-    >>> torch.max(a, b)
-    tensor([ 0.8722, -0.7416,  0.2653, -0.1584])
-""".format(**single_dim_common))
+    >>> a = torch.tensor((1, 2, -1))
+    >>> b = torch.tensor((3, 0, 4))
+    >>> torch.maximum(a, b)
+    tensor([3, 2, 4])
+""".format(**common_args))
 
 add_docstr(torch.argmax,
            r"""
@@ -4344,37 +4411,34 @@ Example::
     >>> torch.min(a, 1)
     torch.return_types.min(values=tensor([-1.1899, -1.4644,  0.0384, -0.1153]), indices=tensor([2, 0, 1, 0]))
 
-.. function:: min(input, other, out=None) -> Tensor
+.. function:: min(input, other, *, out=None) -> Tensor
 
-Each element of the tensor :attr:`input` is compared with the corresponding
-element of the tensor :attr:`other` and an element-wise minimum is taken.
-The resulting tensor is returned.
+See :func:`torch.minimum`.
+""".format(**single_dim_common))
 
-The shapes of :attr:`input` and :attr:`other` don't need to match,
-but they must be :ref:`broadcastable <broadcasting-semantics>`.
+add_docstr(torch.minimum, r"""
+minimum(input, other, *, out=None) -> Tensor
 
-.. math::
-    \text{{out}}_i = \min(\text{{tensor}}_i, \text{{other}}_i)
+Computes the element-wise minimum of :attr:`input` and :attr:`other`.
 
-.. note:: When the shapes do not match, the shape of the returned output tensor
-          follows the :ref:`broadcasting rules <broadcasting-semantics>`.
+.. note::
+    If one of the elements being compared is a NaN, then that element is returned.
+    :func:`minimum` is not supported for tensors with complex dtypes.
 
 Args:
     {input}
     other (Tensor): the second input tensor
+
+Keyword args:
     {out}
 
 Example::
 
-    >>> a = torch.randn(4)
-    >>> a
-    tensor([ 0.8137, -1.1740, -0.6460,  0.6308])
-    >>> b = torch.randn(4)
-    >>> b
-    tensor([-0.1369,  0.1555,  0.4019, -0.1929])
-    >>> torch.min(a, b)
-    tensor([-0.1369, -1.1740, -0.6460, -0.1929])
-""".format(**single_dim_common))
+    >>> a = torch.tensor((1, 2, -1))
+    >>> b = torch.tensor((3, 0, 4))
+    >>> torch.minimum(a, b)
+    tensor([1, 0, -1])
+""".format(**common_args))
 
 add_docstr(torch.argmin,
            r"""
@@ -4712,8 +4776,7 @@ Example::
             [1.0311, 0.3901, 0.5049]])
 """)
 
-add_docstr(torch.movedim,
-           r"""
+add_docstr(torch.movedim, r"""
 movedim(input, source, destination) -> Tensor
 
 Moves the dimension(s) of :attr:`input` at the position(s) in :attr:`source`
@@ -4828,6 +4891,13 @@ Example::
     tensor([ 0.0090, -0.2262, -0.0682, -0.2866,  0.3940])
     >>> torch.neg(a)
     tensor([-0.0090,  0.2262,  0.0682,  0.2866, -0.3940])
+""".format(**common_args))
+
+add_docstr(torch.negative,
+           r"""
+negative(input, *, out=None) -> Tensor
+
+Alias for :func:`torch.neg`
 """.format(**common_args))
 
 add_docstr(torch.nextafter,
@@ -5319,6 +5389,12 @@ with :math:`Q` being an orthogonal matrix or batch of orthogonal matrices and
 
 If :attr:`some` is ``True``, then this function returns the thin (reduced) QR factorization.
 Otherwise, if :attr:`some` is ``False``, this function returns the complete QR factorization.
+
+.. warning::
+          If you plan to backpropagate through QR, note that the current backward implementation
+          is only well-defined when the first :math:`\min(input.size(-1), input.size(-2))`
+          columns of :attr:`input` are linearly independent.
+          This behavior will propably change once QR supports pivoting.
 
 .. note:: precision may be lost if the magnitudes of the elements of :attr:`input`
           are large
@@ -7312,6 +7388,13 @@ Example::
     tensor([ 3.4742,  0.5466, -0.8008, -0.9079])
     >>> torch.trunc(a)
     tensor([ 3.,  0., -0., -0.])
+""".format(**common_args))
+
+add_docstr(torch.fix,
+           r"""
+fix(input, *, out=None) -> Tensor
+
+Alias for :func:`torch.trunc`
 """.format(**common_args))
 
 add_docstr(torch.unsqueeze,

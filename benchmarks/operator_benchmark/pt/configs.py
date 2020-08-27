@@ -97,3 +97,15 @@ linear_configs_long = op_bench.cross_product_configs(
     device=['cpu', 'cuda'],
     tags=["long"]
 )
+
+embeddingbag_short_configs = op_bench.cross_product_configs(
+    embeddingbags=[10, 120, 1000, 2300],
+    dim=[64],
+    mode=['sum'],
+    input_size=[8, 16, 64],
+    offset=[0],
+    sparse=[True],
+    include_last_offset=[True, False],
+    device=['cpu'],
+    tags=['short']
+)
