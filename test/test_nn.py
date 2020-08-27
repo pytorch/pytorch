@@ -9736,6 +9736,43 @@ class TestNNDeviceType(NNTestCase):
                     output = m(sigmoid(input), target)
                     verify_reduction_scalars(input, reduction, output)
 
+    # verify that bogus reduction strings are errors
+    @onlyOnCPUAndCUDA
+    def test_invalid_reduction_strings(self, device):
+        input = torch.randn(3, 5, requires_grad=True, device=device)
+        target = torch.tensor([1, 0, 4], device=device)
+
+        for reduction in ['none', 'invalid']:
+            def v(fn):
+                if reduction == 'invalid':
+                    self.assertRaises(ValueError, lambda: fn())
+                else:
+                    fn()
+
+            v(lambda: F.nll_loss(input, target, reduction=reduction))
+            v(lambda: F.cross_entropy(input, target, reduction=reduction))
+            v(lambda: F.multi_margin_loss(input, target, reduction=reduction))
+
+            v(lambda: F.kl_div(input, input, reduction=reduction))
+            v(lambda: F.smooth_l1_loss(input, input, reduction=reduction))
+            v(lambda: F.l1_loss(input, input, reduction=reduction))
+            v(lambda: F.mse_loss(input, input, reduction=reduction))
+            v(lambda: F.hinge_embedding_loss(input, input, reduction=reduction))
+            v(lambda: F.poisson_nll_loss(input, input, reduction=reduction))
+            v(lambda: F.binary_cross_entropy_with_logits(input, input, reduction=reduction))
+
+            zeros = torch.zeros_like(input).to(torch.int64)
+            v(lambda: F.multilabel_soft_margin_loss(input, zeros, reduction=reduction))
+            v(lambda: F.multilabel_margin_loss(input, zeros, reduction=reduction))
+
+            v(lambda: F.triplet_margin_loss(input, input, input, reduction=reduction))
+            v(lambda: F.margin_ranking_loss(input, input, input.sign(), reduction=reduction))
+            v(lambda: F.cosine_embedding_loss(input, input, input[:, 0].sign(), reduction=reduction))
+
+            # FIXME: should we allow derivatives on these?
+            v(lambda: F.binary_cross_entropy(torch.sigmoid(input), input.detach(), reduction=reduction))
+            v(lambda: F.soft_margin_loss(input, input.sign().detach(), reduction=reduction))
+
     # We don't want to make propagating NaN a hard requirement on ops, but for
     # these easy ones, we should make them do so.
     def test_nonlinearity_propagate_nan(self, device):
