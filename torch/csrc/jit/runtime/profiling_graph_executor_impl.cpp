@@ -84,127 +84,174 @@ static bool needsGradientInProfilingMode(Block* b) {
 }
 
 void runNooptPassPipeline(std::shared_ptr<Graph>& graph) {
-  GRAPH_DUMP("Before LowerGradOf (beginning of runNooptPassPipeline)", graph);
+  GRAPH_DEBUG(
+      "Before LowerGradOf (beginning of runNooptPassPipeline)\n",
+      graph->toString());
   LowerGradOf(*graph);
-  GRAPH_DUMP("After LowerGradOf, before RemoveExpands", graph);
+  GRAPH_DEBUG("After LowerGradOf, before RemoveExpands\n", graph->toString());
   RemoveExpands(graph);
-  GRAPH_DUMP("After RemoveExpands, before CanonicalizeOps", graph);
+  GRAPH_DEBUG(
+      "After RemoveExpands, before CanonicalizeOps\n", graph->toString());
   CanonicalizeOps(graph);
-  GRAPH_DUMP("After CanonicalizeOps, before EliminateDeadCode", graph);
+  GRAPH_DEBUG(
+      "After CanonicalizeOps, before EliminateDeadCode\n", graph->toString());
   EliminateDeadCode(graph);
-  GRAPH_DUMP("After EliminateDeadCode (end of runNooptPassPipeline)", graph);
+  GRAPH_DEBUG(
+      "After EliminateDeadCode (end of runNooptPassPipeline)\n",
+      graph->toString());
 }
 
 void runPreAutodiffPassPipeline(std::shared_ptr<Graph>& graph) {
-  GRAPH_DUMP(
-      "Before InsertGuards (beginning of runPreAutodiffPassPipeline)", graph);
+  GRAPH_DEBUG(
+      "Before InsertGuards (beginning of runPreAutodiffPassPipeline)\n",
+      graph->toString());
 
   if (tensorExprFuserEnabled()) {
     // With TE fuser we don't generate bailouts
     LowerGradOf(*graph);
-    GRAPH_DUMP("After LowerGradOf, before specializeAutogradZero", graph);
+    GRAPH_DEBUG(
+        "After LowerGradOf, before specializeAutogradZero\n",
+        graph->toString());
   } else {
     InsertGuards(graph);
-    GRAPH_DUMP("After InsertGuards, before LowerGradOf", graph);
+    GRAPH_DEBUG("After InsertGuards, before LowerGradOf\n", graph->toString());
     LowerGradOf(*graph);
-    GRAPH_DUMP("After LowerGradOf, before EliminateRedundantGuards", graph);
+    GRAPH_DEBUG(
+        "After LowerGradOf, before EliminateRedundantGuards\n",
+        graph->toString());
     EliminateRedundantGuards(graph);
-    GRAPH_DUMP("After EliminateRedundantGuards, before InsertBailOuts", graph);
+    GRAPH_DEBUG(
+        "After EliminateRedundantGuards, before InsertBailOuts\n",
+        graph->toString());
     InsertBailOuts(graph);
-    GRAPH_DUMP("After InsertBailOuts, before specializeAutogradZero", graph);
+    GRAPH_DEBUG(
+        "After InsertBailOuts, before specializeAutogradZero\n",
+        graph->toString());
   }
 
   specializeAutogradZero(*graph);
-  GRAPH_DUMP("After specializeAutogradZero", graph);
+  GRAPH_DEBUG("After specializeAutogradZero\n", graph->toString());
   // runRequiredPasses
   {
     RemoveExpands(graph);
-    GRAPH_DUMP("After RemoveExpands, before CanonicalizeOps", graph);
+    GRAPH_DEBUG(
+        "After RemoveExpands, before CanonicalizeOps\n", graph->toString());
     CanonicalizeOps(graph);
-    GRAPH_DUMP("After CanonicalizeOps, before EliminateDeadCode", graph);
+    GRAPH_DEBUG(
+        "After CanonicalizeOps, before EliminateDeadCode\n", graph->toString());
     EliminateDeadCode(graph);
-    GRAPH_DUMP("After EliminateDeadCode", graph);
+    GRAPH_DEBUG("After EliminateDeadCode", graph->toString());
   }
   PeepholeOptimize(graph);
-  GRAPH_DUMP("After PeepholeOptimize, before ConstantPropagation", graph);
+  GRAPH_DEBUG(
+      "After PeepholeOptimize, before ConstantPropagation\n",
+      graph->toString());
   ConstantPropagation(graph);
 
   // runOptimization:
   {
     EliminateDeadCode(graph);
-    GRAPH_DUMP(
-        "After EliminateDeadCode, before EliminateCommonSubexpression", graph);
+    GRAPH_DEBUG(
+        "After EliminateDeadCode, before EliminateCommonSubexpression\n",
+        graph->toString());
     EliminateCommonSubexpression(graph);
-    GRAPH_DUMP(
-        "After EliminateCommonSubexpression, before PeepholeOptimize", graph);
+    GRAPH_DEBUG(
+        "After EliminateCommonSubexpression, before PeepholeOptimize\n",
+        graph->toString());
 
     PeepholeOptimize(graph);
-    GRAPH_DUMP("After PeepholeOptimize, before ConstantPropagation", graph);
+    GRAPH_DEBUG("After PeepholeOptimize, before ConstantPropagation\n", graph);
     ConstantPropagation(graph);
-    GRAPH_DUMP("After ConstantPropagation, before ConstantPooling", graph);
+    GRAPH_DEBUG(
+        "After ConstantPropagation, before ConstantPooling\n",
+        graph->toString());
     ConstantPooling(graph);
-    GRAPH_DUMP("After ConstantPooling, before UnrollLoops", graph);
+    GRAPH_DEBUG(
+        "After ConstantPooling, before UnrollLoops\n", graph->toString());
 
     UnrollLoops(graph);
-    GRAPH_DUMP("After UnrollLoops, before RemoveListMutation", graph);
+    GRAPH_DEBUG(
+        "After UnrollLoops, before RemoveListMutation\n", graph->toString());
     // run again with unrolled loops
     RemoveListMutation(graph);
-    GRAPH_DUMP("After RemoveListMutation, before PeepholeOptimize", graph);
+    GRAPH_DEBUG(
+        "After RemoveListMutation, before PeepholeOptimize\n",
+        graph->toString());
     PeepholeOptimize(graph);
-    GRAPH_DUMP("After PeepholeOptimize, before ConstantPropagation", graph);
+    GRAPH_DEBUG(
+        "After PeepholeOptimize, before ConstantPropagation\n",
+        graph->toString());
     ConstantPropagation(graph);
-    GRAPH_DUMP(
-        "After ConstantPropagation, before EliminateCommonSubexpression",
-        graph);
+    GRAPH_DEBUG(
+        "After ConstantPropagation, before EliminateCommonSubexpression\n",
+        graph->toString());
 
     EliminateCommonSubexpression(graph);
-    GRAPH_DUMP(
-        "After EliminateCommonSubexpression, before CheckInplace", graph);
+    GRAPH_DEBUG(
+        "After EliminateCommonSubexpression, before CheckInplace\n",
+        graph->toString());
 
     CheckInplace(graph);
   }
-  GRAPH_DUMP("After CheckInplace (end of runPreAutodiffPassPipeline)", graph);
+  GRAPH_DEBUG(
+      "After CheckInplace (end of runPreAutodiffPassPipeline)\n",
+      graph->toString());
 }
 
 void runDiffGraphPasses(std::shared_ptr<Graph>& graph) {
-  GRAPH_DUMP(
-      "Before EliminateDeadCode (beginning of runDiffGraphPasses)", graph);
+  GRAPH_DEBUG(
+      "Before EliminateDeadCode (beginning of runDiffGraphPasses)\n",
+      graph->toString());
   // runOptimization:
   {
     // Basic graph preprocessing to eliminate noise.
     EliminateDeadCode(graph);
-    GRAPH_DUMP(
-        "After EliminateDeadCode, before EliminateCommonSubexpression", graph);
+    GRAPH_DEBUG(
+        "After EliminateDeadCode, before EliminateCommonSubexpression\n",
+        graph->toString());
     EliminateCommonSubexpression(graph);
-    GRAPH_DUMP(
-        "After EliminateCommonSubexpression, before PeepholeOptimize", graph);
+    GRAPH_DEBUG(
+        "After EliminateCommonSubexpression, before PeepholeOptimize\n",
+        graph->toString());
 
     PeepholeOptimize(graph);
-    GRAPH_DUMP("After PeepholeOptimize, before ConstantPropagation", graph);
+    GRAPH_DEBUG(
+        "After PeepholeOptimize, before ConstantPropagation\n",
+        graph->toString());
     ConstantPropagation(graph);
-    GRAPH_DUMP("After ConstantPropagation, before ConstantPooling", graph);
+    GRAPH_DEBUG(
+        "After ConstantPropagation, before ConstantPooling\n",
+        graph->toString());
     ConstantPooling(graph);
-    GRAPH_DUMP("After ConstantPooling, before UnrollLoops", graph);
+    GRAPH_DEBUG(
+        "After ConstantPooling, before UnrollLoops\n", graph->toString());
 
     UnrollLoops(graph);
-    GRAPH_DUMP("After UnrollLoops, before RemoveListMutation", graph);
+    GRAPH_DEBUG(
+        "After UnrollLoops, before RemoveListMutation\n", graph->toString());
     // run again with unrolled loops
     RemoveListMutation(graph);
-    GRAPH_DUMP("After RemoveListMutation, before PeepholeOptimize", graph);
+    GRAPH_DEBUG(
+        "After RemoveListMutation, before PeepholeOptimize\n",
+        graph->toString());
     PeepholeOptimize(graph);
-    GRAPH_DUMP("After PeepholeOptimize, before ConstantPropagation", graph);
+    GRAPH_DEBUG(
+        "After PeepholeOptimize, before ConstantPropagation\n",
+        graph->toString());
     ConstantPropagation(graph);
-    GRAPH_DUMP(
-        "After ConstantPropagation, before EliminateCommonSubexpression",
-        graph);
+    GRAPH_DEBUG(
+        "After ConstantPropagation, before EliminateCommonSubexpression\n",
+        graph->toString());
 
     EliminateCommonSubexpression(graph);
-    GRAPH_DUMP(
-        "After EliminateCommonSubexpression, before CheckInplace", graph);
+    GRAPH_DEBUG(
+        "After EliminateCommonSubexpression, before CheckInplace\n",
+        graph->toString());
 
     CheckInplace(graph);
   }
-  GRAPH_DUMP("After CheckInplace, before customPrePasses", graph);
+  GRAPH_DEBUG(
+      "After CheckInplace, before customPrePasses\n", graph->toString());
 
   // runNondiffOptimization
   {
@@ -212,70 +259,77 @@ void runDiffGraphPasses(std::shared_ptr<Graph>& graph) {
     for (const auto& passPair : getCustomPrePasses()) {
       passPair.first(graph);
     }
-    GRAPH_DUMP("After customPrePasses, before LowerSimpleTuples", graph);
+    GRAPH_DEBUG(
+        "After customPrePasses, before LowerSimpleTuples\n", graph->toString());
 
     // TupleConstruct / TupleUnpack pairs can still be present at this point
     // and must be removed for fusion.
     LowerSimpleTuples(graph);
-    GRAPH_DUMP("After LowerSimpleTuples, before BatchMM", graph);
+    GRAPH_DEBUG("After LowerSimpleTuples, before BatchMM\n", graph->toString());
 
     // Rewrite subgraphs with many MMs into expressions that batch them.
     BatchMM(graph);
-    GRAPH_DUMP("After BatchMM, before Fusion", graph);
+    GRAPH_DEBUG("After BatchMM, before Fusion\n", graph->toString());
 
     if (tensorExprFuserEnabled()) {
       FuseTensorExprs(graph);
     } else {
       FuseGraph(graph, true);
     }
-    GRAPH_DUMP("After Fusion, before customPostPasses", graph);
+    GRAPH_DEBUG("After Fusion, before customPostPasses\n", graph->toString());
 
     // Run custom post-fusion passes
     for (const auto& passPair : getCustomPostPasses()) {
       passPair.first(graph);
     }
   }
-  GRAPH_DUMP("After customPostPasses (end of runDiffGraphPasses)", graph);
+  GRAPH_DEBUG(
+      "After customPostPasses (end of runDiffGraphPasses)\n",
+      graph->toString());
 }
 
 void runNoGradOptimizations(std::shared_ptr<Graph>& graph) {
-  GRAPH_DUMP(
-      "After customPostPasses (beginning of runNoGradOptimizations)", graph);
+  GRAPH_DEBUG(
+      "After customPostPasses (beginning of runNoGradOptimizations)\n",
+      graph->toString());
   // runNondiffOptimization
   {
     // Run custom passes that different backends can register.
     for (const auto& passPair : getCustomPrePasses()) {
       passPair.first(graph);
     }
-    GRAPH_DUMP("After customPrePasses, before LowerSimpleTuples", graph);
+    GRAPH_DEBUG(
+        "After customPrePasses, before LowerSimpleTuples\n", graph->toString());
 
     // TupleConstruct / TupleUnpack pairs can still be present at this point
     // and must be removed for fusion.
     LowerSimpleTuples(graph);
-    GRAPH_DUMP("After LowerSimpleTuples, before BatchMM", graph);
+    GRAPH_DEBUG("After LowerSimpleTuples, before BatchMM\n", graph->toString());
 
     // Rewrite subgraphs with many MMs into expressions that batch them.
     BatchMM(graph);
-    GRAPH_DUMP("After BatchMM, before Fusion", graph);
+    GRAPH_DEBUG("After BatchMM, before Fusion\n", graph->toString());
 
     if (tensorExprFuserEnabled()) {
       FuseTensorExprs(graph);
     } else {
       FuseGraph(graph, true);
     }
-    GRAPH_DUMP("After Fusion, before customPostPasses", graph);
+    GRAPH_DEBUG("After Fusion, before customPostPasses\n", graph->toString());
 
     // Run custom post-fusion passes
     for (const auto& passPair : getCustomPostPasses()) {
       passPair.first(graph);
     }
   }
-  GRAPH_DUMP("After customPostPasses (end of runNoGradOptimizations)", graph);
+  GRAPH_DEBUG(
+      "After customPostPasses (end of runNoGradOptimizations)\n",
+      graph->toString());
 }
 
 void ProfilingGraphExecutorImpl::runProfilingOptimizations(
     std::shared_ptr<Graph>& copy) {
-  GRAPH_DUMP("Before runProfilingOptimizations:", copy);
+  GRAPH_DEBUG("Before runProfilingOptimizations:\n", copy->toString());
   if (!getGraphExecutorOptimize()) {
     runNooptPassPipeline(copy);
     return;
@@ -287,14 +341,14 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
     auto diff_nodes = CreateAutodiffSubgraphs(
         copy,
         getAutodiffSubgraphInlining() ? autodiffSubgraphNodeThreshold : 1);
-    GRAPH_DUMP("After CreateAutodiffSubgraphs", copy);
+    GRAPH_DEBUG("After CreateAutodiffSubgraphs\n", copy->toString());
     size_t idx = 0;
     for (Node* dnode : diff_nodes) {
       GRAPH_DEBUG("Optimizing diff node ", idx);
       auto diff_graph = std::move(dnode->g(attr::Subgraph));
       Gradient gradient = differentiate(diff_graph);
-      GRAPH_DUMP("Forward graph:", gradient.f);
-      GRAPH_DUMP("Backward graph:", gradient.df);
+      GRAPH_DEBUG("Forward graph:\n", gradient.f->toString());
+      GRAPH_DEBUG("Backward graph:\n", gradient.df->toString());
       runDiffGraphPasses(gradient.f);
       packGradient(gradient, dnode);
       GRAPH_DEBUG("Finished optimizing diff node ", idx++);
@@ -302,23 +356,26 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
     InlineAutodiffSubgraphs(
         copy,
         getAutodiffSubgraphInlining() ? autodiffSubgraphInlineThreshold : 1);
-    GRAPH_DUMP("After InlineAutodiffSubgraphs", copy);
+    GRAPH_DEBUG("After InlineAutodiffSubgraphs\n", copy->toString());
   } else {
     runNoGradOptimizations(copy);
   }
   EliminateDeadCode(copy);
-  GRAPH_DUMP("After runProfilingOptimizations:", copy);
+  GRAPH_DEBUG("After runProfilingOptimizations:\n", copy->toString());
 }
 
 void ProfilingGraphExecutorImpl::runProfilingInsensitiveOptimizations(
     std::shared_ptr<Graph>& graph) {
-  GRAPH_DUMP(
-      "Before ClearProfilingInformation (beginning of runProfilingInsensitiveOptimizations)",
-      graph);
+  GRAPH_DEBUG(
+      "Before ClearProfilingInformation (beginning of runProfilingInsensitiveOptimizations)\n",
+      graph->toString());
   ClearProfilingInformation(graph);
-  GRAPH_DUMP("After ClearProfilingInformation, before LowerGradOf", graph);
+  GRAPH_DEBUG(
+      "After ClearProfilingInformation, before LowerGradOf\n",
+      graph->toString());
   LowerGradOf(*graph);
-  GRAPH_DUMP("After LowerGradOf, before ClearUndefinedness", graph);
+  GRAPH_DEBUG(
+      "After LowerGradOf, before ClearUndefinedness\n", graph->toString());
   // clear any residual undefinedness
   // as double backward graph inputs'
   // may carry over undefinedness
@@ -326,43 +383,56 @@ void ProfilingGraphExecutorImpl::runProfilingInsensitiveOptimizations(
   ClearUndefinedness(graph);
   // runRequiredPasses
   {
-    GRAPH_DUMP("After ClearUndefinedness, before RemoveExpands", graph);
+    GRAPH_DEBUG(
+        "After ClearUndefinedness, before RemoveExpands\n", graph->toString());
     RemoveExpands(graph);
-    GRAPH_DUMP("After RemoveExpands, before CanonicalizeOps", graph);
+    GRAPH_DEBUG(
+        "After RemoveExpands, before CanonicalizeOps\n", graph->toString());
     CanonicalizeOps(graph);
-    GRAPH_DUMP("After CanonicalizeOps, before EliminateDeadCode", graph);
+    GRAPH_DEBUG(
+        "After CanonicalizeOps, before EliminateDeadCode\n", graph->toString());
     EliminateDeadCode(graph);
   }
   if (!getGraphExecutorOptimize()) {
-    GRAPH_DUMP(
-        "After EliminateDeadCode (end of runProfilingInsensitiveOptimizations)",
-        graph);
+    GRAPH_DEBUG(
+        "After EliminateDeadCode (end of runProfilingInsensitiveOptimizations)\n",
+        graph->toString());
     return;
   }
 
-  GRAPH_DUMP("After EliminateDeadCode, before DecomposeOps", graph);
+  GRAPH_DEBUG(
+      "After EliminateDeadCode, before DecomposeOps\n", graph->toString());
   DecomposeOps(graph);
-  GRAPH_DUMP("After DecomposeOps, before ConstantPropagation", graph);
+  GRAPH_DEBUG(
+      "After DecomposeOps, before ConstantPropagation\n", graph->toString());
   ConstantPropagation(graph);
-  GRAPH_DUMP("After ConstantPropagation, before EliminateDeadCode", graph);
+  GRAPH_DEBUG(
+      "After ConstantPropagation, before EliminateDeadCode\n",
+      graph->toString());
   EliminateDeadCode(graph);
-  GRAPH_DUMP(
-      "After EliminateDeadCode, before EliminateCommonSubexpression", graph);
+  GRAPH_DEBUG(
+      "After EliminateDeadCode, before EliminateCommonSubexpression\n",
+      graph->toString());
   EliminateCommonSubexpression(graph);
-  GRAPH_DUMP(
-      "After EliminateCommonSubexpression, before ConstantPooling", graph);
+  GRAPH_DEBUG(
+      "After EliminateCommonSubexpression, before ConstantPooling\n",
+      graph->toString());
   ConstantPooling(graph);
-  GRAPH_DUMP("After ConstantPooling, before PeepholeOptimize", graph);
+  GRAPH_DEBUG(
+      "After ConstantPooling, before PeepholeOptimize\n", graph->toString());
   PeepholeOptimize(graph);
-  GRAPH_DUMP("After PeepholeOptimize, before EliminateDeadCode", graph);
+  GRAPH_DEBUG(
+      "After PeepholeOptimize, before EliminateDeadCode\n", graph->toString());
   EliminateDeadCode(graph);
-  GRAPH_DUMP("After EliminateDeadCode, before LowerSimpleTuples", graph);
+  GRAPH_DEBUG(
+      "After EliminateDeadCode, before LowerSimpleTuples\n", graph->toString());
   LowerSimpleTuples(graph);
-  GRAPH_DUMP("After LowerSimpleTuples, before CheckInplace", graph);
+  GRAPH_DEBUG(
+      "After LowerSimpleTuples, before CheckInplace\n", graph->toString());
   CheckInplace(graph);
-  GRAPH_DUMP(
-      "After CheckInplace (end of runProfilingInsensitiveOptimizations)",
-      graph);
+  GRAPH_DEBUG(
+      "After CheckInplace (end of runProfilingInsensitiveOptimizations)\n",
+      graph->toString());
 }
 
 ProfilingGraphExecutorImpl::ProfilingGraphExecutorImpl(
@@ -374,9 +444,10 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(
     Stack& stack,
     size_t remaining_bailout_depth) {
   std::lock_guard<std::mutex> lock(compile_mutex);
-  GRAPH_DEBUG("Running ProfilingGraphExecutorImpl ", this);
+  GRAPH_DUMP("Running ProfilingGraphExecutorImpl", graph);
 
   if (optimized_plan_) {
+    GRAPH_DUMP("plan already optimized:", graph);
     return *optimized_plan_;
   }
 
@@ -412,6 +483,7 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(
   ProfilingRecord::removeProfileCounter(copy->block());
   runProfilingOptimizations(copy);
   // cache
+  GRAPH_DUMP("Optimized Graph: ", copy);
   optimized_plan_ =
       ExecutionPlan(copy, function_name_, remaining_bailout_depth);
   return *optimized_plan_;
