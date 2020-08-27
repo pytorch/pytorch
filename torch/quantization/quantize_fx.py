@@ -1,24 +1,44 @@
 from .fx import Fuser  # noqa: F401
 from .fx import Quantizer  # noqa: F401
+from torch.fx import GraphModule
+
+def _check_is_graph_module(model):
+    if not isinstance(model, GraphModule):
+        raise ValueError(
+            'input model must be a GraphModule, ' +
+            'please run torch.fx.symbolic_trace on your model before using ' +
+            'quantize_fx. Got type:' + str(type(model)))
 
 def fuse_fx(graph_module, inplace=False):
+    r""" Fuse modules in preparation for quantization
+
+    Args:
+        graph_module: GraphModule object from symbolic tracing (torch.fx.symbolic_trace)
+    """
+    _check_is_graph_module(graph_module)
     fuser = Fuser()
     return fuser.fuse(graph_module, inplace)
 
 def _prepare_fx(graph_module, qconfig_dict, inplace, is_dynamic):
+    _check_is_graph_module(graph_module)
+
     quantizer = Quantizer()
     prepare = quantizer.prepare_dynamic if is_dynamic else quantizer.prepare
     prepared = prepare(graph_module, qconfig_dict, inplace)
     return prepared
 
 def prepare_fx(graph_module, qconfig_dict, inplace=False):
-    """ If graph_module is in training mode, the model will be
+    r""" If graph_module is in training mode, the model will be
     prepared as a qat model, otherwise, it will be prepared as a
     model used for post training static quantization.
 
     Args:
-      graph_module: model from symbolic_tracing (torch.fx)
-      qconfig_dict: tbd
+      graph_module: model from symbolic_tracing (torch.fx.symbolic_trace)
+      qconfig_dict: see :func:`~torch.quantization.quantize_fx`
+
+    Return:
+      A GraphModule with observer or fake quant modules, ready for
+      calibration or quantization aware training
     """
     return _prepare_fx(graph_module, qconfig_dict, inplace, False)
 
@@ -26,6 +46,7 @@ def prepare_dynamic_fx(graph_module, qconfig_dict, inplace=False):
     return _prepare_fx(graph_module, qconfig_dict, inplace, True)
 
 def _convert_fx(graph_module, inplace=False, debug=False, is_dynamic=False):
+    _check_is_graph_module(graph_module)
     quantizer = Quantizer()
     return quantizer.convert(graph_module, inplace, debug, is_dynamic)
 
@@ -35,7 +56,8 @@ def convert_fx(graph_module, inplace=False, debug=False):
 def convert_dynamic_fx(graph_module, inplace=False, debug=False):
     return _convert_fx(graph_module, inplace, debug, is_dynamic=True)
 
-def _quantize_fx(model, qconfig_dict, run_fn=None, run_args=None, inplace=False, debug=False, is_dynamic=False):
+def _quantize_fx(model, qconfig_dict, run_fn=None, run_args=None, inplace=False,
+                 debug=False, is_dynamic=False):
     if is_dynamic:
         model = prepare_dynamic_fx(model, qconfig_dict, inplace)
         # TODO: change inplace to True since the model is already copied in
@@ -104,6 +126,10 @@ def quantize_fx(model, qconfig_dict, run_fn, run_args, inplace=False, debug=Fals
         [data_loader_test])
     ```
     """
+    assert not model.training, 'quantize_fx is only used for post training ' + \
+        'quantization(eval mode), for quantization aware training please use ' + \
+        'prepare_fx and convert_fx.'
+
     return _quantize_fx(
         model, qconfig_dict, run_fn, run_args, inplace, debug, is_dynamic=Falsse)
 
