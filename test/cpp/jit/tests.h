@@ -19,6 +19,7 @@ namespace jit {
   _(CreateAutodiffSubgraphs)                      \
   _(CustomOperators)                              \
   _(CustomOperatorAliasing)                       \
+  _(TemplatedOperatorCreator)                     \
   _(IValueKWargs)                                 \
   _(CustomFusion)                                 \
   _(SchemaMatching)                               \
