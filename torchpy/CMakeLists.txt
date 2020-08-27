@@ -1,10 +1,4 @@
-# WHY?
-SET(TORCH_ROOT "/data/users/whc/pytorch")
-
-include(CMakePrintHelpers)
-cmake_print_variables(TORCH_ROOT)
-
-set(TORCHPY_DIR "${TORCH_ROOT}/torchpy")
+set(TORCHPY_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 
 add_subdirectory(interpreter)
 
