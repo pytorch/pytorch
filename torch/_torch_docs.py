@@ -7489,7 +7489,7 @@ add_docstr(torch.unsqueeze,
            r"""
 unsqueeze(input, dim) -> Tensor
 
-Returns a new tensor with a dimension of size one inserted at the
+Returns the new tensor with the dimension of size one inserted at the
 specified position.
 
 The returned tensor shares the same underlying data with this tensor.
