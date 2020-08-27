@@ -109,16 +109,18 @@ __attribute__((constructor)) void init() {
 #undef APPEND_INIT
   // PyImport_AppendInittab("torch._C", initModule);
   Py_Initialize();
-  // PyRun_SimpleString("import sys; sys.path = ['',
-  // '/scratch/zdevito/miniconda3/envs/hidden/lib/python37.zip',
-  // '/scratch/zdevito/miniconda3/envs/hidden/lib/python3.7',
-  // '/scratch/zdevito/miniconda3/envs/hidden/lib/python3.7/lib-dynload',
-  // '/scratch/zdevito/miniconda3/envs/hidden/lib/python3.7/site-packages',
-  // '/scratch/zdevito/pytorch']"); PyRun_SimpleString(finder);
+
+  // TODO get string from cmake?
+  // TODO add pytorch include path back in
+  PyRun_SimpleString(
+      "import sys; sys.path = ['',"
+      "'/data/users/whc/pytorch/torchpy/interpreter/cpython/lib/python37.zip',"
+      "'/data/users/whc/pytorch/torchpy/interpreter/cpython/lib/python3.7',"
+      "'/data/users/whc/pytorch/torchpy/interpreter/cpython/lib/lib-dynload',"
+      "'/data/users/whc/pytorch/torchpy/interpreter/cpython/lib/site-packages']");
+  // PyRun_SimpleString(finder);
   PyEval_ReleaseThread(PyThreadState_Get());
 }
-
-
 static void teardown() {
   PyGILState_Ensure();
   if (Py_FinalizeEx() < 0) {

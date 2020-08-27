@@ -72,14 +72,14 @@ SET(PYTHON_MODULES
   ${PYTHON_MODULE_DIR}/_xxtestfuzz/_xxtestfuzz.o ${PYTHON_MODULE_DIR}/_xxtestfuzz/fuzzer.o
   ${PYTHON_MODULE_DIR}/zlibmodule.o
 )
-SET(PYTHON_SHARED_LIB_DIR "${PYTHON_SOURCE_DIR}/lib/")
-SET(PYTHON_SHARED_LIB "${PYTHON_SHARED_LIB_DIR}/libpython3.7m.so")
+SET(PYTHON_LIB_DIR "${PYTHON_SOURCE_DIR}/lib/")
+SET(PYTHON_LIB "${PYTHON_LIB_DIR}/libpython3.7m.a")
 add_custom_target(cpython
-   COMMAND ./configure --enable-shared --prefix ${PYTHON_SOURCE_DIR}
-   COMMAND make -j8
+   COMMAND CFLAGS=-fPIC CPPFLAGS=-fPIC ./configure --prefix ${PYTHON_SOURCE_DIR}
+   COMMAND CFLAGS=-fPIC CPPFLAGS=-fPIC make -j8
    COMMAND make install
    WORKING_DIRECTORY ${PYTHON_SOURCE_DIR}
-   BYPRODUCTS ${PYTHON_MODULES} ${PYTHON_SHARED_LIB}
+   BYPRODUCTS ${PYTHON_MODULES} ${PYTHON_LIB}
    VERBATIM
 )
 
@@ -93,5 +93,5 @@ add_dependencies(interpreter cpython)
 target_include_directories(interpreter PRIVATE ${INTERPRETER_DIR})
 
 # libraries python modules need
-target_link_libraries(interpreter PRIVATE -Wl,-rpath,${PYTHON_SHARED_LIB_DIR} -L${PYTHON_SHARED_LIB_DIR} ${PYTHON_SHARED_LIB})
+target_link_libraries(interpreter PRIVATE -L${PYTHON_LIB_DIR} libpython3.7m.a)
 target_link_libraries(interpreter PRIVATE crypt crypto ssl pthread dl util m ffi lzma readline nsl ncursesw panelw)
