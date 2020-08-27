@@ -155,8 +155,8 @@ class SymVal:
     pass
 
 def unpack_collection_type(proxy : Proxy, prototype : Any, delegate : DelegateBase):
-    if isinstance(prototype, list):
-        return [unpack_collection_type(proxy[i], prototype[i], delegate) for i in range(len(prototype))]
+    if isinstance(prototype, (list, tuple)):
+        return type(prototype)(unpack_collection_type(proxy[i], prototype[i], delegate) for i in range(len(prototype)))
     if isinstance(prototype, dict):
         rv = {}
         for k, v in prototype.items():
@@ -176,7 +176,7 @@ def unpack_collection_type(proxy : Proxy, prototype : Any, delegate : DelegateBa
 #   - delegate : An instance of a Delegate object
 def symbolic_trace(root : torch.nn.Module,
                    delegate_class : DelegateBase = DefaultDelegate,
-                   input_prototypes : List[Union[SymVal, Any]]=None) -> GraphModule:
+                   input_prototypes : List[Union[SymVal, Any]] = None) -> GraphModule:
     graph = Graph()
     delegate = delegate_class(root, graph)
 
@@ -190,9 +190,10 @@ def symbolic_trace(root : torch.nn.Module,
     args.extend(_proxy_placeholder(next(names_iter), delegate) for name in range(1, total_args))
 
     if input_prototypes:
-        assert isinstance(input_prototypes, list)
+        assert isinstance(input_prototypes, (list, tuple))
         assert len(input_prototypes) == len(args) - 1
-        fixedup_inputs = [unpack_collection_type(proxy, prototype, delegate) for prototype, proxy in zip(input_prototypes, args[1:])]
+        fixedup_inputs = [unpack_collection_type(proxy, prototype, delegate)
+                          for prototype, proxy in zip(input_prototypes, args[1:])]
         args = [args[0]] + fixedup_inputs
 
     if co.co_kwonlyargcount > 0 or co.co_flags & HAS_VARSTUFF:
