@@ -512,7 +512,7 @@ namespace {
     if (base.dim() != other.dim()) {
       return false;
     }
-    for (auto i=0; i<base.dim(); ++i) {
+    for (size_t i=0; i<base.dim(); ++i) {
       if (base.sizes()[i] != other.sizes()[i]) {
         return false;
       }
@@ -526,7 +526,8 @@ namespace {
   Tensor new_with_same_meta(const Variable& base) {
     // We need to create a storage of the same size to be able to have the same
     // viewing behavior in all cases
-    auto nelement_in_storage = base.storage().nbytes() / base.itemsize();
+    // Explicit type here to appease Windows build
+    int64_t nelement_in_storage = base.storage().nbytes() / base.itemsize();
     auto new_tensor = at::empty({nelement_in_storage}, base.options());
     auto res = new_tensor.as_strided(base.sizes(), base.strides(), base.storage_offset());
     return res;
