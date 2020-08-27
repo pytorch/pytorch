@@ -1698,15 +1698,12 @@ TensorExprKernel::ReductionInfo TensorExprKernel::getReductionInfo(
   // aten::sum takes the input tensor named self.
   auto sizes = sizesForValue(node->namedInput(attr::self));
   const auto inputs = node->inputs();
+  int rank = sizes.size();
   if (inputs.size() > 2) {
+    auto nodeAxes = getReductionAxes(node);
     // Canonicalize axes: wrap around, sort and make unique.
-    auto axesValue = node->namedInput(attr::dim);
-    TORCH_INTERNAL_ASSERT(axesValue->node()->kind() == prim::ListConstruct);
-    for (auto axisNode : axesValue->node()->inputs()) {
-      int rank = sizes.size();
-      int axis = at::maybe_wrap_dim(
-          constant(axisNode).AsNode<IntImm>()->value(), rank);
-      axes.push_back(axis);
+    for (auto axis : nodeAxes) {
+      axes.push_back(at::maybe_wrap_dim(axis, rank));
     }
     std::sort(axes.begin(), axes.end());
     axes.erase(std::unique(axes.begin(), axes.end()), axes.end());
@@ -1739,6 +1736,29 @@ TensorExprKernel::ReductionInfo TensorExprKernel::getReductionInfo(
     dtype = ToDtype(scalarType);
   }
   return {reductionDims, outputDims, axes, keepdim, dtype};
+}
+
+std::vector<int64_t> TensorExprKernel::getReductionAxes(
+    const torch::jit::Node* node) {
+  std::vector<int64_t> axes;
+  auto axesNode = node->namedInput(attr::dim)->node();
+  // There are two possible representations for reduction axes:
+  //   1. A prim::ListConstruct of integer constants.
+  //   2. A prim::Constant list of integer ival's.
+  // We need to handle both of them.
+  if (axesNode->kind() == prim::ListConstruct) {
+    for (auto axisNode : axesNode->inputs()) {
+      axes.push_back(constant(axisNode).AsNode<IntImm>()->value());
+    }
+    return axes;
+  }
+  TORCH_INTERNAL_ASSERT(axesNode->kind() == prim::Constant);
+  TORCH_INTERNAL_ASSERT(axesNode->kindOf(attr::value) == AttributeKind::ival);
+  const auto& genericList = axesNode->ival(attr::value).toList();
+  for (const IValue axisNode : genericList) {
+    axes.push_back(axisNode.toInt());
+  }
+  return axes;
 }
 
 void TensorExprKernel::compile() {
