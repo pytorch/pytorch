@@ -36,6 +36,7 @@ struct ProfilingGraphExecutorImpl : public GraphExecutorImplBase {
   // They only exist in the optimized graph which is a private property
   // of the GraphExecutor and only shared with InterpreterState
   std::vector<std::unique_ptr<Function>> fallback_functions_;
+  c10::optional<size_t> remaining_bailout_depth_;
 };
 
 } // namespace jit
