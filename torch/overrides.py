@@ -180,6 +180,7 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor.unflatten,
     }
 
+
 @functools.lru_cache(None)
 def get_testing_overrides() -> Dict[Callable, Callable]:
     """Return a dict containing dummy overrides for all overridable functions
@@ -447,6 +448,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.matrix_rank: lambda input, tol=None, symmetric=False: -1,
         torch.matrix_exp: lambda input: -1,
         torch.max: lambda input, out=None: -1,
+        torch.maximum: lambda input, other, out=None: -1,
         torch.max_pool1d: lambda input, kernel_size, stride=None, padding=0, dilation=1, return_indices=False, ceil_mode=False: -1,
         torch.max_pool2d: lambda input, kernel_size, stride=None, padding=0, dilation=1, return_indices=False, ceil_mode=False: -1,
         torch.max_pool3d: lambda input, kernel_size, stride=None, padding=0, dilation=1, return_indices=False, ceil_mode=False: -1,
@@ -456,6 +458,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.median: lambda input, dim=None: -1,
         torch.meshgrid: lambda *tensors, **kwargs: -1,
         torch.min: lambda input, out=None: -1,
+        torch.minimum: lambda input, other, out=None: -1,
         torch.miopen_batch_norm: (lambda input, weight, bias, running_mean, running_var, training,
                                   exponential_average_factor, epsilon: -1),
         torch.miopen_convolution: lambda input, weight, bias, padding, stride, dilation, groups, benchmark, deterministic: -1,
