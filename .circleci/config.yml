@@ -660,6 +660,13 @@ jobs:
 
           echo "Retrieving test reports"
           docker cp $id:/var/lib/jenkins/workspace/test/test-reports ./ || echo 'No test reports found!'
+          if [[ ${BUILD_ENVIRONMENT} == *"coverage"* ]]; then
+              echo "Retrieving coverage report"
+              docker cp $id:/var/lib/jenkins/workspace/test/.coverage ./test
+              docker cp $id:/var/lib/jenkins/workspace/test/coverage.xml ./test
+              python3 -mpip install codecov
+              python3 -mcodecov
+          fi
         when: always
     - store_test_results:
         path: test-reports
@@ -6529,10 +6536,10 @@ workflows:
           build_environment: "pytorch-linux-bionic-py3.8-gcc9-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-bionic-py3.8-gcc9"
       - pytorch_linux_test:
-          name: pytorch_linux_bionic_py3_8_gcc9_test
+          name: pytorch_linux_bionic_py3_8_gcc9_coverage_test
           requires:
             - pytorch_linux_bionic_py3_8_gcc9_build
-          build_environment: "pytorch-linux-bionic-py3.8-gcc9-test"
+          build_environment: "pytorch-linux-bionic-py3.8-gcc9-coverage_test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-bionic-py3.8-gcc9"
           resource_class: large
       - pytorch_macos_10_13_py3_build:

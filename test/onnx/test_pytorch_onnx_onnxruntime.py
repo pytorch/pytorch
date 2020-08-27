@@ -931,6 +931,17 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(3, 4, 5, 6, 7)
         self.run_test(NegSlice(), x)
 
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_slice_with_input_index(self):
+        class InputIndexSlice(torch.nn.Module):
+            def forward(self, x, y):
+                x[:y.size(0), 0, :] = y
+                return x
+
+        x = torch.zeros((56, 6, 256))
+        y = torch.rand((22, 256))
+        self.run_test(InputIndexSlice(), (x, y))
+
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_slice_dynamic(self):
         class DynamicSliceExportMod(torch.nn.Module):
