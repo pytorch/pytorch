@@ -5222,6 +5222,7 @@ class TestAutogradFunctional(TestCase):
         gradgradcheck(lambda *args: autogradF.jvp(adder, args[:2], args[2:], create_graph=True, fw_mode=False)[1], inputs + v)
 
         fw_mode = True
+
         def foo(*args):
             x, y = args[:2]
             v = args[2:]
@@ -5233,7 +5234,7 @@ class TestAutogradFunctional(TestCase):
 
         gradcheck(foo, inputs + v, check_forward=False)
         gradgradcheck(foo, inputs + v, check_forward=False)
-        
+
         fw_mode = False
         gradcheck(foo, inputs + v)
         gradgradcheck(foo, inputs + v)

@@ -166,6 +166,7 @@ def process_definition(defn, declarations_by_signature, declarations_by_schema):
 
         # Used to differentiate forward and backward formulas
         arg_names = [arg['name'] for arg in declaration['arguments']]
+
         def is_fw_def(names):
             if len(names) > 1:
                 # Forward definition are always for a single output at a time
@@ -483,8 +484,9 @@ def match_declarations_with_differentiability_info(declarations, differentiabili
         if info:
             fw_info = copy.deepcopy(info['autograd_fw_info'])
             if fw_info and declaration['inplace']:
-                assert len(fw_info) == 1 # Only single output inplace should exist
+                assert len(fw_info) == 1  # Only single output inplace should exist
                 d = fw_info[0]
+
                 # replace "result" from the formula by self
                 def repl(m):
                     return "{}self{}".format(m.group(1), m.group(2))
