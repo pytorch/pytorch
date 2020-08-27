@@ -176,6 +176,48 @@ def get_analytical_jacobian(input, output, nondet_tol=0.0):
 
     return jacobian, reentrant, correct_grad_sizes
 
+def get_analytical_jacobian_fw(fn, input, output):
+    # it is easier to call to_dense() on the sparse output than
+    # to modify analytical jacobian
+    if output.is_sparse:
+        raise ValueError('Sparse output is not supported at gradcheck yet. '
+                         'Please call to_dense() on the output of fn for gradcheck.')
+    if output.layout == torch._mkldnn:
+        raise ValueError('MKLDNN output is not supported at gradcheck yet. '
+                         'Please call to_dense() on the output of fn for gradcheck.')
+    jacobian = make_jacobian(input, output.numel())
+
+    diff_input = []
+    for inp in input:
+        if torch.is_tensor(inp) and inp.requires_grad==True:
+            diff_input.append(inp)
+            if inp.layout == torch._mkldnn:
+                warnings.warn('MKLDNN inputs are not supported for forward gradcheck.')
+                return None
+    for i, inp in enumerate(diff_input):
+        # Generate a forward grad for inp that has the same metadata (size/stride/storage offset)
+        # This is to make sure the assignment below is always valid
+        fw_grad = torch.zeros(inp.storage().size(), dtype=inp.dtype, layout=inp.layout, device=inp.device)
+        fw_grad = fw_grad.as_strided(inp.size(), inp.stride(), inp.storage_offset())
+        try:
+            # TODO(albanD): use set_fw_grad
+            inp._fw_grad = fw_grad
+            fw_grad = inp._fw_grad # For views, the value that is set might not be the same as the one we provided
+            for lin_idx, inp_idx in enumerate(product(*[range(m) for m in inp.size()])):
+                fw_grad[inp_idx] = 1
+                with torch.set_fw_grad_enabled(True):
+                    grad = fn(input)._fw_grad
+                if grad is None:
+                    jacobian[i][lin_idx].zero_()
+                else:
+                    jacobian[i][lin_idx].copy_(grad.contiguous().view(-1))
+                fw_grad[inp_idx] = 0
+        finally:
+            inp._fw_grad = None
+            if inp._is_view():
+                inp._base._fw_grad = None
+    return jacobian
+
 
 def _as_tuple(x):
     if istuple(x):
@@ -208,7 +250,10 @@ def gradcheck(
     raise_exception: bool = True,
     check_sparse_nnz: bool = False,
     nondet_tol: float = 0.0,
-    check_undefined_grad: bool = True
+    check_undefined_grad: bool = True,
+    check_backward: bool = True,
+    check_forward: bool = True,
+    stacklevel = 2
 ) -> bool:
     r"""Check gradients computed via small finite differences against analytical
     gradients w.r.t. tensors in :attr:`inputs` that are of floating point or complex type
@@ -243,8 +288,11 @@ def gradcheck(
         nondet_tol (float, optional): tolerance for non-determinism. When running
             identical inputs through the differentiation, the results must either match
             exactly (default, 0.0) or be within this tolerance.
-        check_undefined_grad (bool, options): if True, check if undefined output grads
+        check_undefined_grad (bool, optional): if True, check if undefined output grads
             are supported and treated as zeros
+        check_backward (bool, optional): if True, check the backward mode AD gradient
+        check_forward (bool, optional): if True, check the forward mode AD gradient
+        stacklevel (int, optional): the stack level to use for raising errors and warnings
 
     Returns:
         True if all differences satisfy allclose condition
@@ -257,6 +305,9 @@ def gradcheck(
     tupled_inputs = _as_tuple(inputs)
     if any(t.is_sparse for t in tupled_inputs if isinstance(t, torch.Tensor)) and not check_sparse_nnz:
         return fail_test('gradcheck expects all tensor inputs are dense when check_sparse_nnz is set to False.')
+
+    if check_sparse_nnz and check_forward:
+        return fail_test('Forward mode gradcheck does not support sparse inputs.')
 
     # Make sure that gradients are saved for at least one input
     any_input_requiring_grad = False
@@ -305,23 +356,47 @@ def gradcheck(
         def fn(input):
             return _as_tuple(func(*input))[i]
 
-        analytical, reentrant, correct_grad_sizes = get_analytical_jacobian(tupled_inputs, o, nondet_tol=nondet_tol)
         numerical = get_numerical_jacobian(fn, tupled_inputs, eps=eps)
 
-        if not correct_grad_sizes:
-            return fail_test('Analytical gradient has incorrect size')
+        if check_backward:
+            analytical, reentrant, correct_grad_sizes = get_analytical_jacobian(tupled_inputs, o, nondet_tol=nondet_tol)
 
-        for j, (a, n) in enumerate(zip(analytical, numerical)):
-            if a.numel() != 0 or n.numel() != 0:
-                if not torch.allclose(a, n, rtol, atol):
-                    return fail_test('Jacobian mismatch for output %d with respect to input %d,\n'
-                                     'numerical:%s\nanalytical:%s\n' % (i, j, n, a))
+            if not correct_grad_sizes:
+                return fail_test('Analytical gradient has incorrect size')
 
-        if not reentrant:
-            return fail_test('Backward is not reentrant, i.e., running backward with same '
-                             'input and grad_output multiple times gives different values, '
-                             'although analytical gradient matches numerical gradient. '
-                             'The tolerance for nondeterminism was {}.'.format(nondet_tol))
+            for j, (a, n) in enumerate(zip(analytical, numerical)):
+                if a.numel() != 0 or n.numel() != 0:
+                    if not torch.allclose(a, n, rtol, atol):
+                        return fail_test('Jacobian mismatch for output %d with respect to input %d,\n'
+                                         'numerical:%s\nbackward analytical:%s\n' % (i, j, n, a))
+
+            if not reentrant:
+                return fail_test('Backward is not reentrant, i.e., running backward with same '
+                                 'input and grad_output multiple times gives different values, '
+                                 'although analytical gradient matches numerical gradient. '
+                                 'The tolerance for nondeterminism was {}.'.format(nondet_tol))
+
+        if check_forward:
+            try:
+                fw_analytical = get_analytical_jacobian_fw(fn, tupled_inputs, o)
+            except RuntimeError as e:
+                msg = str(e)
+                if "Trying to use forward prop with" in msg:
+                    warnings.warn("Failed to compute gradcheck using fw mode: {}".format(msg), stacklevel=stacklevel)
+                    continue
+                else:
+                    raise e
+
+            if fw_analytical is None:
+                # Test was aborded while computing the jacobian
+                continue
+
+            for j, (a, n) in enumerate(zip(fw_analytical, numerical)):
+                if a.numel() != 0 or n.numel() != 0:
+                    if not torch.allclose(a, n, rtol, atol):
+                        return fail_test('Jacobian mismatch for output %d with respect to input %d,\n'
+                                         'numerical:%s\nforward analytical:%s\n' % (i, j, n, a))
+
 
     # check if the backward multiplies by grad_output
     output = _differentiable_outputs(func(*tupled_inputs))
@@ -411,7 +486,9 @@ def gradgradcheck(
     gen_non_contig_grad_outputs: bool = False,
     raise_exception: bool = True,
     nondet_tol: float = 0.0,
-    check_undefined_grad: bool = True
+    check_undefined_grad: bool = True,
+    check_backward: bool = True,
+    check_forward: bool = True,
 ) -> bool:
     r"""Check gradients of gradients computed via small finite differences
     against analytical gradients w.r.t. tensors in :attr:`inputs` and
@@ -458,6 +535,8 @@ def gradgradcheck(
             the second derivative.
         check_undefined_grad (bool, options): if True, check if undefined output grads
             are supported and treated as zeros
+        check_backward (bool, options): if True, check the backward mode AD gradient
+        check_forward(bool, options): if True, check the forward mode AD gradient
 
     Returns:
         True if all differences satisfy allclose condition
@@ -489,4 +568,5 @@ def gradgradcheck(
         return grad_inputs
 
     return gradcheck(new_func, tupled_inputs + tupled_grad_outputs, eps, atol, rtol, raise_exception,
-                     nondet_tol=nondet_tol, check_undefined_grad=check_undefined_grad)
+                     nondet_tol=nondet_tol, check_undefined_grad=check_undefined_grad, stacklevel=3,
+                     check_backward=check_backward, check_forward=check_forward)

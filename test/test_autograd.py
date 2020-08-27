@@ -3661,11 +3661,11 @@ class TestAutograd(TestCase):
 
     def test_gradcheck_sparse_input(self):
         def fn(sparse):
-            return torch.sparse.sum(sparse)
+            return torch.sparse.sum(sparse.clone())
 
-        gradcheck(fn, torch.rand(10).to_sparse().requires_grad_(True), check_sparse_nnz=True)
+        gradcheck(fn, torch.rand(10).to_sparse().requires_grad_(True), check_sparse_nnz=True, check_forward=False)
         with self.assertRaisesRegex(RuntimeError, 'gradcheck expects all tensor inputs are dense'):
-            gradcheck(fn, torch.rand(10).to_sparse().requires_grad_(True), check_sparse_nnz=False)
+            gradcheck(fn, torch.rand(10).to_sparse().requires_grad_(True), check_sparse_nnz=False, check_forward=False)
 
     def test_gradcheck_nondeterministic(self):
         class NonDetFunc(Function):
