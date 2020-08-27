@@ -89,6 +89,10 @@ def type_argument_translations(arg):
         raise RuntimeError("Please use float and not double. "
                            "See [temp translations] for details.")
     # Enables int[x] by translating to legacy IntArrayRef[x]. See [temp translations]
+    elif re.match(r'int\[(\d+)\]\?', t):
+        match = re.match(r'int\[(\d+)\]\?', t)
+        t = 'IntArrayRef'
+        size = int(match.group(1))
     elif re.match(r'int\[(\d+)\]', t):
         match = re.match(r'int\[(\d+)\]', t)
         t = 'IntArrayRef'
