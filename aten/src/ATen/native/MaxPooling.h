@@ -16,16 +16,16 @@ struct PoolingParams {
   int64_t PJ; // Column padding
   int64_t DJ; // Column dilation
 
-  // Return first output index within bounds for this kernel index
+  // Return index of first output within bounds for this kernel index
   inline int64_t valid_kernel_start(int64_t kj) const {
     const int64_t ij = kj * DJ - PJ;
     return ij < 0 ? (-ij + SJ - 1) / SJ : 0;
   }
 
-  // Return one past last output index within bounds for this kernel index
+  // Return index one past last output within bounds for this kernel index
   inline int64_t valid_kernel_end(int64_t kj) const {
-    const int64_t ij = OW * SJ + kj * DJ - PJ;
-    return OW - std::max<int64_t>((ij - IW - 1 + SJ - 1) / SJ, 0);
+    const int64_t ij = (OW - 1) * SJ + kj * DJ - PJ;
+    return OW - (ij >= IW ? (ij - IW + SJ) / SJ : 0);
   }
 };
 

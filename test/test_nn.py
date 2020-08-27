@@ -9813,19 +9813,19 @@ class TestNNDeviceType(NNTestCase):
     @onlyCPU
     @dtypes(torch.float)
     def test_max_pool1d_errors(self, device, dtype):
-        def check(x, args, error, message):
+        def check(x, args, message):
             model = torch.nn.MaxPool1d(*args)
-            with self.assertRaisesRegex(error, r'max_pool1d\(\) ' + message):
+            with self.assertRaisesRegex(RuntimeError, r'max_pool1d\(\) ' + message):
                 model(torch.tensor(x, device=device, dtype=dtype))
 
         # Pooling args: (kernel_size, stride, padding, dilation, return_indices, ceil_mode)
-        check(0, (1,), RuntimeError, "input tensor must have 2 or 3 dimensions but got 0")
-        check([], (1,), RuntimeError, "input tensor must have 2 or 3 dimensions but got 1")
-        check([[]], (1, 0), RuntimeError, "stride must be greater than zero, but got 0")
-        check([[]], (1, 1, -1), RuntimeError, "padding must be non-negative, but got -1")
-        check([[]], (1, 1, 2), RuntimeError, "padding should be at most half of kernel size, but got padding=2 and kernel_size=1")
-        check([[]], (1, 1, 0, 0), RuntimeError, "dilation must be greater than zero, but got 0")
-        check([[]], (5, 1, 0, 1), RuntimeError, "Invalid computed output size: -4")
+        check(0, (1,), "input tensor must have 2 or 3 dimensions but got 0")
+        check([], (1,), "input tensor must have 2 or 3 dimensions but got 1")
+        check([[]], (1, 0), "stride must be greater than zero, but got 0")
+        check([[]], (1, 1, -1), "padding must be non-negative, but got -1")
+        check([[]], (1, 1, 2), "padding should be at most half of kernel size, but got padding=2 and kernel_size=1")
+        check([[]], (1, 1, 0, 0), "dilation must be greater than zero, but got 0")
+        check([[]], (5, 1, 0, 1), "Invalid computed output size: -4")
 
     @onlyCPU
     @dtypes(torch.float, torch.double)
@@ -9834,7 +9834,7 @@ class TestNNDeviceType(NNTestCase):
             model = torch.nn.MaxPool1d(*args)
             tensor = torch.tensor(x, device=device, dtype=dtype)
             self.assertEqual(model(tensor), torch.tensor(expected, device=device, dtype=dtype))
-        
+
         # Pooling args: (kernel_size, stride, padding, dilation, return_indices, ceil_mode)
         check([[]], (1, None, 0, 1, False, False), [[]])
         check([[[]]], (1, None, 0, 1, False, False), [[[]]])
@@ -11363,7 +11363,7 @@ class TestNNDeviceType(NNTestCase):
             for num_dim in [1, 2, 3]:
                 fn_name = '{}max_pool{}d'.format(adaptive, num_dim)
                 fn = getattr(F, fn_name)
-                
+
                 x = torch.full([1, 1] + num_dim * [3], nan, device=device, dtype=dtype, requires_grad=True)
                 res = fn(x, 1 if adaptive else 3)
                 res.backward(torch.randn_like(res))

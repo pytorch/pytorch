@@ -4,8 +4,6 @@
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/MaxPooling.h>
 
-#include <limits>
-
 namespace at {
 namespace native {
 
