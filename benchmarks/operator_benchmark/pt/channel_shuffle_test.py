@@ -17,6 +17,7 @@ channel_shuffle_long_configs = op_bench.cross_product_configs(
     height=[16, 32, 64],
     width=[16, 32, 64],
     groups=[2, 4, 8, 16],
+    channel_last=[True, False],
     tags=["long"]
 )
 
@@ -31,16 +32,21 @@ channel_shuffle_short_configs = op_bench.config_list(
         [8, 64, 64, 64, 8],
         [16, 64, 64, 64, 16],
     ],
+    cross_product_configs={
+        "channel_last": [True, False],
+    },
     tags=["short"]
 )
 
 
 class ChannelSHuffleBenchmark(op_bench.TorchBenchmarkBase):
-    def init(self, batch_size, channels_per_group, height, width, groups):
+    def init(self, batch_size, channels_per_group, height, width, groups, channel_last):
+        self.groups = groups
         channels = channels_per_group * groups
         data_shape = (batch_size, channels, height, width)
-        self.input_data = torch.rand(data_shape).contiguous(memory_format=torch.channels_last)
-        self.groups = groups
+        self.input_data = torch.rand(data_shape)
+        if channel_last:
+            self.input_data = self.input_data.contiguous(memory_format=torch.channels_last)
         self.set_module_name('channel_shuffle')
 
     def forward(self):

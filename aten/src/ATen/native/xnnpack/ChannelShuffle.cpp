@@ -13,9 +13,10 @@ bool use_channel_shuffle(
   using namespace internal;
 
   // Here are the list of conditions required for this code path to be taken:
-  // * Input must be 4D CPU float tensor with no gradients.
-  // * output_max must be greater than output_min.
-  //   Namely, setting both output_min and output_max to 0 is not valid usage.
+  // * Input must be 4D CPU float tensor with no gradients and
+  //   and all dimensions must be positive.
+  // * The number of groups must be larger than 1 and
+  //   the number of channels must be divisible by the number of groups.
   return xnnpack::internal::available() &&
       // Input
       (4 == input.dim()) &&
