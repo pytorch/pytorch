@@ -382,6 +382,10 @@ Tensor& neg_out(Tensor& result, const Tensor& self) {
 Tensor neg(const Tensor& self) { return unary_op_impl(self, at::neg_out); }
 Tensor& neg_(Tensor& self) { return unary_op_impl_(self, at::neg_out); }
 
+Tensor& negative_out(Tensor& result, const Tensor& self) { return at::native::neg_out(result, self); }
+Tensor negative(const Tensor& self) { return at::native::neg(self); }
+Tensor& negative_(Tensor& self) { return at::native::neg_(self); }
+
 Tensor logical_not(const Tensor& self) {
   Tensor result = at::empty({0}, self.options().dtype(kBool));
   return at::logical_not_out(result, self);
