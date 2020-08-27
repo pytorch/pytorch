@@ -1,4 +1,3 @@
-import unittest
 import torch
 import torch.nn as nn
 from torch.testing._internal.jit_utils import JitTestCase
@@ -17,7 +16,6 @@ if __name__ == '__main__':
                        "instead.")
 
 class TestFreezing(JitTestCase):
-    @unittest.skip("temporarily disable the test for fwd compatibility")
     def test_freeze_module(self):
         class M(nn.Module):
             def __init__(self):

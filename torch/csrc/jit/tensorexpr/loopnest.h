@@ -40,6 +40,7 @@ class TORCH_API LoopNest {
   void splitWithMask(For* f, int factor, For** outer, For** inner);
   void reorderAxis(For* a, For* b);
   static void unroll(For* f, Stmt** unrolled);
+  static void normalize(For* f, For** normalized);
 
   void setGPUBlockIndex(For* f, int idx);
   void setGPUThreadIndex(For* f, int idx);
