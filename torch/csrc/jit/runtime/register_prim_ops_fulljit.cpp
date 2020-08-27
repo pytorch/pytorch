@@ -36,6 +36,16 @@ RegisterOperators reg(
          },
          aliasAnalysisSpecialCase()),
      Operator(
+         prim::profile_optional,
+         [](const Node* node) -> Operation {
+           auto callback = node->cast<ProfileOptionalOp>()->getCallback();
+           return [](Stack* stack) {
+             AT_ERROR(
+                 "Must be lowered to Interpreter's PROFILE instruction"); // NOLINT
+           };
+         },
+         aliasAnalysisSpecialCase()),
+     Operator(
          prim::FusionGroup,
          [](const Node* node) -> Operation {
            const auto key = registerFusion(node);
@@ -183,14 +193,6 @@ RegisterOperators reg(
            bool b;
            pop(stack, b);
            push(stack, at::scalar_to_tensor(b));
-         },
-         aliasAnalysisFromSchema()),
-     Operator(
-         "aten::str(t elem) -> str",
-         [](Stack* stack) {
-           std::stringstream ss;
-           ss << pop(stack);
-           push(stack, ss.str());
          },
          aliasAnalysisFromSchema()),
      Operator(
