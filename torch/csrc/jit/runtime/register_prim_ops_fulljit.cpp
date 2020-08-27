@@ -46,6 +46,14 @@ RegisterOperators reg(
          },
          aliasAnalysisSpecialCase()),
      Operator(
+         prim::TypeCheck /* (...)  -> (..., bool) */,
+         [](const Node * /* node */) -> Operation {
+           return [](Stack* /* stack */) {
+             AT_ERROR("prim::TypeCheck not yet implemented"); // NOLINT
+           };
+         },
+         aliasAnalysisSpecialCase()),
+     Operator(
          "prim::Guard(Tensor(a) t) -> Tensor(a)",
          [](Stack* stack) { AT_ERROR("Should be replaced by prim::BailOut"); },
          aliasAnalysisFromSchema()),
@@ -175,14 +183,6 @@ RegisterOperators reg(
            bool b;
            pop(stack, b);
            push(stack, at::scalar_to_tensor(b));
-         },
-         aliasAnalysisFromSchema()),
-     Operator(
-         "aten::str(t elem) -> str",
-         [](Stack* stack) {
-           std::stringstream ss;
-           ss << pop(stack);
-           push(stack, ss.str());
          },
          aliasAnalysisFromSchema()),
      Operator(
