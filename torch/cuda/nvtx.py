@@ -40,7 +40,7 @@ def range_push(msg,color=colors['silver']):
     Arguments:
         msg (string): ASCII message to associate with range
     """
-    attrib = nvtxEventAttributes_t()#msg=msg,color=colors[color])
+    attrib = nvtxEventAttributes_t(msg=msg,color=colors[color])
     return _nvtx.rangePushEx(attrib)
 
 
@@ -52,14 +52,14 @@ def range_pop():
     return _nvtx.rangePop()
 
 
-def mark(msg):
+def mark(msg,color=colors['silver']):
     """
     Describe an instantaneous event that occurred at some point.
 
     Arguments:
         msg (string): ASCII message to associate with the event.
     """
-    attrib = nvtxEventAttributes_t(msg,color=color)
+    attrib = nvtxEventAttributes_t(msg=msg,color=color)
     return _nvtx.markEx(attrib)
 
 
