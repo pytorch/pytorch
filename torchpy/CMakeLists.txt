@@ -1,5 +1,5 @@
 # WHY?
-SET(TORCH_ROOT "/home/whc/local/pytorch")
+SET(TORCH_ROOT "/data/users/whc/pytorch")
 
 include(CMakePrintHelpers)
 cmake_print_variables(TORCH_ROOT)

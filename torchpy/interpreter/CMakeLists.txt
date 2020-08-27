@@ -1,8 +1,8 @@
 SET(INTERPRETER_DIR "${TORCHPY_DIR}/interpreter" )
 SET(INTERPRETER_DIR "${TORCHPY_DIR}/interpreter" PARENT_SCOPE)
 
-SET(PYTHON_INSTALL_DIR "/home/whc/local/python-install")
-SET(PYTHON_MODULE_DIR "/home/whc/local/cpython/build/temp.linux-x86_64-3.7/data/users/whc/cpython/Modules")
+SET(PYTHON_SOURCE_DIR "${INTERPRETER_DIR}/cpython")
+SET(PYTHON_MODULE_DIR "${PYTHON_SOURCE_DIR}/build/temp.linux-x86_64-3.7/${PYTHON_SOURCE_DIR}/Modules")
 SET(PYTHON_MODULES
   ${PYTHON_MODULE_DIR}/arraymodule.o
   ${PYTHON_MODULE_DIR}/_asynciomodule.o
@@ -72,16 +72,26 @@ SET(PYTHON_MODULES
   ${PYTHON_MODULE_DIR}/_xxtestfuzz/_xxtestfuzz.o ${PYTHON_MODULE_DIR}/_xxtestfuzz/fuzzer.o
   ${PYTHON_MODULE_DIR}/zlibmodule.o
 )
+SET(PYTHON_SHARED_LIB_DIR "${PYTHON_SOURCE_DIR}/lib/")
+SET(PYTHON_SHARED_LIB "${PYTHON_SHARED_LIB_DIR}/libpython3.7m.so")
+add_custom_target(cpython
+   COMMAND ./configure --enable-shared --prefix ${PYTHON_SOURCE_DIR}
+   COMMAND make -j8
+   COMMAND make install
+   WORKING_DIRECTORY ${PYTHON_SOURCE_DIR}
+   BYPRODUCTS ${PYTHON_MODULES} ${PYTHON_SHARED_LIB}
+   VERBATIM
+)
 
 set(INTERPRETER_LIB_SOURCES
   ${INTERPRETER_DIR}/interpreter.cpp
   ${PYTHON_MODULES}
 )
-add_library(interpreter ${INTERPRETER_LIB_SOURCES})
+add_library(interpreter
+  ${INTERPRETER_LIB_SOURCES})
+add_dependencies(interpreter cpython)
 target_include_directories(interpreter PRIVATE ${INTERPRETER_DIR})
-# target_link_libraries(interpreter PRIVATE torch torch_python -Wl,-rpath,/home/whc/local/pytorch-env/lib/)
-
 
 # libraries python modules need
-target_link_libraries(interpreter PRIVATE -Wl,-rpath,${PYTHON_INSTALL_DIR}/lib -L${PYTHON_INSTALL_DIR}/lib python3.7m)
+target_link_libraries(interpreter PRIVATE -Wl,-rpath,${PYTHON_SHARED_LIB_DIR} -L${PYTHON_SHARED_LIB_DIR} ${PYTHON_SHARED_LIB})
 target_link_libraries(interpreter PRIVATE crypt crypto ssl pthread dl util m ffi lzma readline nsl ncursesw panelw)
