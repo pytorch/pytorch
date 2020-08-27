@@ -1292,6 +1292,27 @@ class TestQuantizeJitPasses(QuantizationTestCase):
                    .check_not("aten::mul") \
                    .run(m.graph)
 
+    def test_finalize_only_quant_ops(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+                self.fc = torch.nn.Linear(5, 5).float()
+
+            def forward(self, x):
+                return self.fc(x)
+
+        data = [[torch.rand((1, 5), dtype=torch.float)]]
+        qconfig_dict = {'': default_qconfig}
+        model = torch.jit.script(M()).eval()
+        model = quantize_jit(model, qconfig_dict, test_only_eval_fn, [data], freeze_only_quant_ops=True)
+        # make sure there is only one quantize_per_tensor for input
+        # and linear_prepack is folded
+        FileCheck().check_count("aten::quantize_per_tensor", 1, exactly=True) \
+                   .check_not("quantized::linear_prepack") \
+                   .check("quantized::linear") \
+                   .run(model.graph)
+
+
 class TestQuantizeJitOps(QuantizationTestCase):
     """ Test graph mode post training static quantization works
     for individual ops end to end.

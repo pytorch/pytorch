@@ -64,26 +64,6 @@ class AttributePropagator {
     }
   }
 
-  void optimizeSubGraphs(
-      std::shared_ptr<Graph>& graph,
-      const std::function<void(std::shared_ptr<Graph>&)>& func) {
-    func(graph);
-    std::stack<Block*> blocks({graph->block()});
-    while (!blocks.empty()) {
-      Block* block = blocks.top();
-      blocks.pop();
-      for (auto n : block->nodes()) {
-        for (Block* sub_block : n->blocks()) {
-          blocks.push(sub_block);
-        }
-        if (n->kind() == prim::fork) {
-          auto subgraph = n->g(attr::Subgraph);
-          optimizeSubGraphs(subgraph, func);
-        }
-      }
-    }
-  }
-
   void run() {
     auto applyInline = [](std::shared_ptr<Graph>& subgraph) {
       Inline(*subgraph);
@@ -293,33 +273,7 @@ class AttributePropagator {
 
 
 
-  // This method is invoked only when 'freezeInterfaces' parameter is on.
-  // The module associated with Interface is retrieved and the invoked method
-  // is inlined.
-  bool inlineInterfaceCall(Node* n, const IValue& attr) {
-    auto class_type = attr.type()->expect<ClassType>();
-    bool inlined = false;
-    for (auto use : n->output()->uses()) {
-      auto user_node = use.user;
-      if (user_node->kind() == prim::CallMethod) {
-        const std::string& methodName = user_node->s(attr::name);
-        Function& function = class_type->getMethod(methodName);
-        if (!function.isGraphFunction()) {
-          continue;
-        }
-        GRAPH_UPDATE(
-            "Inlining interface method '",
-            function.name(),
-            "' to ",
-            *user_node);
 
-        GRAPH_UPDATE("Function body: ", *function.optimized_graph());
-        inlineCallTo(user_node, &function);
-        inlined = true;
-      }
-    }
-    return inlined;
-  }
 
   void inlineInterfaceCalls(std::shared_ptr<Graph>& graph) {
     auto block = graph->block();
@@ -639,6 +593,54 @@ class AttributePropagator {
   std::deque<std::string> names_;
 }; // class AttributePropagator
 } // namespace
+
+// This method is invoked only when 'freezeInterfaces' parameter is on.
+// The module associated with Interface is retrieved and the invoked method
+// is inlined.
+bool inlineInterfaceCall(Node* n, const IValue& attr) {
+  auto class_type = attr.type()->expect<ClassType>();
+  bool inlined = false;
+  for (auto use : n->output()->uses()) {
+    auto user_node = use.user;
+    if (user_node->kind() == prim::CallMethod) {
+      const std::string& methodName = user_node->s(attr::name);
+      Function& function = class_type->getMethod(methodName);
+      if (!function.isGraphFunction()) {
+        continue;
+      }
+      GRAPH_UPDATE(
+          "Inlining interface method '",
+          function.name(),
+          "' to ",
+          *user_node);
+
+      GRAPH_UPDATE("Function body: ", *function.optimized_graph());
+      inlineCallTo(user_node, &function);
+      inlined = true;
+    }
+  }
+  return inlined;
+}
+
+void optimizeSubGraphs(
+    std::shared_ptr<Graph>& graph,
+    const std::function<void(std::shared_ptr<Graph>&)>& func) {
+  func(graph);
+  std::stack<Block*> blocks({graph->block()});
+  while (!blocks.empty()) {
+    Block* block = blocks.top();
+    blocks.pop();
+    for (auto n : block->nodes()) {
+      for (Block* sub_block : n->blocks()) {
+        blocks.push(sub_block);
+      }
+      if (n->kind() == prim::fork) {
+        auto subgraph = n->g(attr::Subgraph);
+        optimizeSubGraphs(subgraph, func);
+      }
+    }
+  }
+}
 
 IValue overrideGradient(IValue attr) {
   if (attr.isTensor()) {
