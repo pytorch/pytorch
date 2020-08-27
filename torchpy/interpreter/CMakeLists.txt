@@ -83,7 +83,15 @@ add_custom_target(cpython
    VERBATIM
 )
 
+SET(PY_PATH_STRING "import sys; sys.path = ['', '${EMBEDDED_PY_ROOT}/python37.zip', '${EMBEDDED_PY_ROOT}/python3.7', '${EMBEDDED_PY_ROOT}/lib-dynload', '${EMBEDDED_PY_ROOT}/site-packages']")
+add_custom_command(
+    OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/python_path.h
+    COMMAND echo "#define PY_PATH_STRING \"${PY_PATH_STRING}\"" > ${CMAKE_CURRENT_SOURCE_DIR}/python_path.h
+    VERBATIM
+)
+
 set(INTERPRETER_LIB_SOURCES
+  python_path.h
   ${INTERPRETER_DIR}/interpreter.cpp
   ${PYTHON_MODULES}
 )

@@ -4,6 +4,7 @@
 #include <Python.h>
 #include <iostream>
 #include "interpreter_impl.h"
+#include "python_path.h"
 
 static wchar_t* program;
 
@@ -112,12 +113,7 @@ __attribute__((constructor)) void init() {
 
   // TODO get string from cmake?
   // TODO add pytorch include path back in
-  PyRun_SimpleString(
-      "import sys; sys.path = ['',"
-      "'/data/users/whc/pytorch/torchpy/interpreter/cpython/lib/python37.zip',"
-      "'/data/users/whc/pytorch/torchpy/interpreter/cpython/lib/python3.7',"
-      "'/data/users/whc/pytorch/torchpy/interpreter/cpython/lib/lib-dynload',"
-      "'/data/users/whc/pytorch/torchpy/interpreter/cpython/lib/site-packages']");
+  PyRun_SimpleString(PY_PATH_STRING);
   // PyRun_SimpleString(finder);
   PyEval_ReleaseThread(PyThreadState_Get());
 }
