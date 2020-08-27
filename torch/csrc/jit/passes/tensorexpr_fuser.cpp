@@ -133,7 +133,6 @@ class TensorExprFuser {
   // TODO: handle better
   bool profiledWithDifferentTypes(Value* v) {
     std::vector<TypePtr> types;
-    TypePtr previous_type = nullptr;
     for (const auto& use : v->uses()) {
       if (use.user->kind() == prim::profile) {
         types.push_back(use.user->ty(attr::profiled_type));
@@ -198,7 +197,8 @@ class TensorExprFuser {
     RemoveRedundantProfiles(graph_);
     GRAPH_DUMP("After removing redundant profile nodes: ", graph_);
     removeProfileNodesAndSpecializeTypes(graph_->block());
-    GRAPH_DUMP("After removing profiling nodes and specializing types: ", graph_);
+    GRAPH_DUMP(
+        "After removing profiling nodes and specializing types: ", graph_);
     createFusionGroups(graph_->block());
     GRAPH_DUMP("After creating fusion groups: ", graph_);
     guardFusionGroups(graph_->block());
@@ -378,25 +378,10 @@ class TensorExprFuser {
     return fusion_group;
   }
 
-  bool allShapesAreKnown(Value* v) {
-    if (!v->type()->cast<TensorType>()) {
-      return true;
-    }
-    if (v->node()->kind() != prim::profile) {
-      return v->type()->cast<TensorType>()->isComplete();
-    } else {
-      return v->node()
-          ->ty(attr::profiled_type)
-          ->cast<TensorType>()
-          ->isComplete();
-    }
-    return v->isCompleteTensor();
-  }
-
   bool allShapesAreKnown(Node* node) {
     // TODO: Relax the checks to support dynamic shapes
     for (Value* input : node->inputs()) {
-      if (!allShapesAreKnown(input)) {
+      if (!input->isCompleteTensor()) {
         return false;
       }
     }
@@ -522,7 +507,8 @@ class TensorExprFuser {
       typechecked_inputs[typecheck_node->input(i)] = typecheck_node->output(i);
     }
 
-    // Fixup types of the typecheck node outputs, which are used by the op in execution
+    // Fixup types of the typecheck node outputs, which are used by the op in
+    // execution
     typecheck_node->output(inputs_to_check.size())->setType(BoolType::get());
     for (size_t i = 0; i < typecheck_node->inputs().size(); ++i) {
       typecheck_node->output(i)->setType(typecheck_node->input(i)->type());
