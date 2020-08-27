@@ -2,7 +2,6 @@
 #include <c10/util/Exception.h>
 #include <pybind11/pybind11.h>
 #include <torch/csrc/Exceptions.h>
-#include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/python_cpp_function.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/auto_gil.h>

@@ -37,22 +37,11 @@ using IndexRange = std::pair<size_t, size_t>;
 // Custom deleter to prevent stack overflows.
 TORCH_API void deleteNode(Node* function);
 
-// The current evaluating node. This is useful to assign the current node as a
-// parent of new nodes created during the evaluation of this node in anomaly
-// mode.
-static thread_local std::shared_ptr<Node> current_evaluating_node = nullptr;
-
 // Guard that sets and restores the evaluating node
 class NodeGuard {
  public:
-  explicit NodeGuard(std::shared_ptr<Node> node) {
-    last_evaluating_node_ = std::move(current_evaluating_node);
-    current_evaluating_node = std::move(node);
-  }
-  ~NodeGuard() {
-      // restore the previous evaluating node
-      current_evaluating_node = std::move(last_evaluating_node_);
-  }
+  explicit NodeGuard(std::shared_ptr<Node> node);
+  ~NodeGuard();
 
  private:
   std::shared_ptr<Node> last_evaluating_node_;
@@ -119,10 +108,11 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
     if (AnomalyMode::is_enabled()) {
       metadata()->store_stack();
 
-      // If anomaly mode is enabled and graph is constructed, then assign this
-      // node to a parent. A parent is a Node where this Node is created.
+      // If anomaly mode is enabled and graph is constructed, then assign the
+      // currently evaluating node as the parent of this node.
+      // A parent is a Node where this Node is created.
       // We are tracking the parents to track multiple backward operations.
-      metadata()->assign_parent(current_evaluating_node);
+      assign_parent();
     }
   }
 
@@ -247,6 +237,9 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   uint64_t sequence_nr() const noexcept {
     return sequence_nr_;
   }
+
+  // assigning a node as a parent to this node
+  void assign_parent();
 
   /// Returns the name of the dynamic type of the function, for debugging.
   virtual std::string name() const;

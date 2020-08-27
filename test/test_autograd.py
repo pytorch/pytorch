@@ -3467,13 +3467,15 @@ class TestAutograd(TestCase):
             @staticmethod
             def forward(ctx, inp1, fail_0th):
                 ctx.fail_0th = fail_0th
-                ctx.inp = inp1
+                ctx.save_for_backward(inp1)
                 return inp1.sum(0, keepdim=True)
 
             @staticmethod
             def backward(ctx, gO):
+                inp, = ctx.saved_tensors
+                fail_0th = ctx.fail_0th
                 g = gO.clone().expand(size)
-                gI = MyFunc2.apply(g * ctx.inp, g + ctx.inp, ctx.fail_0th)
+                gI = MyFunc2.apply(g * inp, g + inp, fail_0th)
                 return gI, None
 
         class MyFunc2(Function):
@@ -3484,12 +3486,13 @@ class TestAutograd(TestCase):
 
             @staticmethod
             def backward(ctx, gO):
+                fail_0th = ctx.fail_0th
                 g1 = gO.clone()
                 g2 = gO.clone()
                 g1[0] = 0
                 g2[0] = 0
                 # generate a nan
-                if ctx.fail_0th:
+                if fail_0th:
                     g1[0] /= 0
                 else:
                     g2[0] /= 0
@@ -3505,22 +3508,22 @@ class TestAutograd(TestCase):
         out = MyFunc.apply(inp, True)
         ginp, = torch.autograd.grad(out, (inp,), create_graph=True)
         gsum = ginp.sum()
-        with self.assertRaisesRegex(RuntimeError, "Function 'MyFunc2Backward' returned nan values in its 0th output."):
-            with warnings.catch_warnings(record=True) as w:
+        with warnings.catch_warnings(record=True) as w:
+            with self.assertRaisesRegex(RuntimeError, "Function 'MyFunc2Backward' returned nan values in its 0th output."):
                 with detect_anomaly():
                     gsum.backward()
-            self.assertIn('No forward pass information', str(w[0].message))
+        self.assertIn('No forward pass information', str(w[1].message))
 
         inp = torch.rand(size, requires_grad=True)
-        with self.assertRaisesRegex(RuntimeError, "Function 'MyFunc2Backward' returned nan values in its 1th output."):
-            with warnings.catch_warnings(record=True) as w:
+        with warnings.catch_warnings(record=True) as w:
+            with self.assertRaisesRegex(RuntimeError, "Function 'MyFunc2Backward' returned nan values in its 1th output."):
                 with detect_anomaly():
                     out = MyFunc.apply(inp, False)
                     ginp, = torch.autograd.grad(out, (inp,), create_graph=True)
                     gsum = ginp.sum()
                     gsum.backward()
-            self.assertIn('MyFunc.apply', str(w[0].message))
-            self.assertIn('MyFunc2.apply', str(w[0].message))
+        self.assertIn('MyFunc2.apply', str(w[1].message))
+        self.assertIn('MyFunc.apply', str(w[2].message))
 
     def test_anomaly_grad_warnings(self):
         # PyTorch won't throw warnings if there is an error
