@@ -1,5 +1,8 @@
 import warnings
 
+import torch
+
+from .distance import PairwiseDistance
 from .module import Module
 from .. import functional as F
 from .. import _reduction as _Reduction
@@ -1314,11 +1317,11 @@ class TripletMarginLossWithDistance(_Loss):
     margin: float
     swap: bool
 
-    def __init__(self, distance_function: Optional[Callable[[Tensor, Tensor], Tensor]] = None, margin: float = 1.0,
-                 reduction: str = 'mean', is_similarity_function: bool = False):
-        super(TripletMarginLoss, self).__init__(size_average=None, reduce=None, reduction=reduction)
+    def __init__(self, distance_function: Optional[Callable[[Tensor, Tensor], Tensor]] = None, is_similarity_function: bool = False,
+                 margin: float = 1.0, swap: bool = False, reduction: str = 'mean'):
+        super(TripletMarginLossWithDistance, self).__init__(size_average=None, reduce=None, reduction=reduction)
         if distance_function is None:
-            self.distance_function = nn.PairwiseDistance()
+            self.distance_function = PairwiseDistance()
         else:
             self.distance_function = distance_function
         self.is_similarity_function = is_similarity_function
@@ -1340,7 +1343,7 @@ class TripletMarginLossWithDistance(_Loss):
             output = torch.clamp(self.margin - positive_dist + negative_dist, min=0.0)
         else:
             output = torch.clamp(self.margin + positive_dist - negative_dist, min=0.0)
-        reduction_enum = _Reduction.get_enum(reduction)
+        reduction_enum = _Reduction.get_enum(self.reduction)
 
         if reduction_enum == 1:
             return output.mean()
