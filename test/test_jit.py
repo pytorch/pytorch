@@ -15184,11 +15184,14 @@ a")
 
     def test_rescripting_loaded_modules(self):
         class InnerSubmod(nn.Module):
+            my_constant: torch.jit.Final[int]
+
             def __init__(self):
                 super().__init__()
                 self.register_buffer("foo", torch.ones(1))
                 self.register_parameter("bar", torch.nn.Parameter(torch.ones(1)))
                 self.baz = torch.ones(1)
+                self.my_constant = 1
 
             def forward(self, x):
                 return x + x
@@ -15208,7 +15211,9 @@ a")
 
             def forward(self, x):
                 # access inner elements
-                return self.inner.submod(x) + self.inner.submod.foo + self.inner.submod.bar + self.inner.submod.baz
+                ret = self.inner.submod(x) + self.inner.submod.foo + self.inner.submod.bar + self.inner.submod.baz
+                ret = ret + self.inner.submod.my_constant
+                return ret
 
         inner_module = torch.jit.script(Inner())
         wrapped = Wrapper(inner_module)
