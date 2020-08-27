@@ -652,7 +652,10 @@ def allowVmapFallbackUsage(fn):
 # This is so that we can incrementally add batching rules for operators to
 # replace the slow vmap fallback path for said operators. To skip this check,
 # please use the allowVmapFallbackUsage decorator.
-class TestVmapBase(TestCase):
+#
+# NB: Don't add tests to _TestVmapBase directly! Add them to e.g.
+# TestVmapOperators.
+class _TestVmapBase(TestCase):
     def __init__(self, method_name='runTest'):
         super().__init__(method_name)
 
@@ -712,7 +715,7 @@ class TestVmapBase(TestCase):
             uses_fallback(self)
 
 
-class TestVmapOperators(TestVmapBase):
+class TestVmapOperators(_TestVmapBase):
     def _vmap_test(self, op, inputs, in_dims=0, out_dims=0,
                    check_view=False, check_propagates_grad=True):
         result = vmap(op, in_dims, out_dims)(*inputs)
@@ -743,7 +746,6 @@ class TestVmapOperators(TestVmapBase):
 
     def _vmap_view_test(self, *args, **kwargs):
         self._vmap_test(*args, **kwargs, check_view=True)
-
 
     def _test_unary(self, op, getter, device):
         test = self._vmap_test
