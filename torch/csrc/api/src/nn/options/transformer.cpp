@@ -28,11 +28,6 @@ TransformerDecoderOptions::TransformerDecoderOptions(
 
 
 TransformerDecoderOptions::TransformerDecoderOptions(
-  TransformerDecoderLayer decoder_layer, int64_t num_layers) :
-  decoder_layer_(std::move(decoder_layer)), num_layers_(num_layers) {}
-
-
-TransformerDecoderOptions::TransformerDecoderOptions(
   const TransformerDecoderLayerOptions& decoder_layer_options,
   int64_t num_layers)
   : decoder_layer_(decoder_layer_options), num_layers_(num_layers){}
