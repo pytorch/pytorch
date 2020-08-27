@@ -1198,7 +1198,8 @@ def emit_body(declaration):
         for derivative in fw_derivatives:
             res = derivative['out_arg']
 
-            if_stmt = " or ".join([FW_DERIVATIVE_CHECK_TEMPLATE.substitute(req_inp=inp['name']) for inp in differentiable_inputs if inp['name'] in derivative['required_inputs']])
+            if_stmt = " or ".join([FW_DERIVATIVE_CHECK_TEMPLATE.substitute(req_inp=inp['name'])
+                                   for inp in differentiable_inputs if inp['name'] in derivative['required_inputs']])
             if not if_stmt:
                 # Handle functions like stack
                 # For these, we don't unpack anything and always call the user function
@@ -1211,8 +1212,8 @@ def emit_body(declaration):
                     if inp['type'] == 'Tensor &':
                         warnings.warn('The formula for "{}" uses the original value of {} that is being '
                                       'modified inplace. This would lead to wrong gradients.'.format(name, inp['name']))
-                        return [emit_forbid_fw_derivatives(is_inplace=True),]
-                    fw_grad_defined += FW_DERIVATIVE_DEFINED_TEMPLATE.substitute(inp=inp['name'])#, new_val=new_val)
+                        return [emit_forbid_fw_derivatives(is_inplace=True), ]
+                    fw_grad_defined += FW_DERIVATIVE_DEFINED_TEMPLATE.substitute(inp=inp['name'])
             if derivative['out_type'] == "Tensor":
                 fw_grad_setter = FW_DERIVATIVE_SETTER_TENSOR.substitute(out_arg=res)
             elif derivative['out_type'] == "TensorList":
