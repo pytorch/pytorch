@@ -50,6 +50,10 @@ if [[ "$BUILD_ENVIRONMENT" == *-mobile-code-analysis* ]]; then
   exec "$(dirname "${BASH_SOURCE[0]}")/build-mobile-code-analysis.sh" "$@"
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *-non-caffe2* ]]; then
+  exec "$(dirname "${BASH_SOURCE[0]}")/build-non-caffe2.sh" "$@"
+fi
+
 echo "Python version:"
 python --version
 
