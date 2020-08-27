@@ -58,7 +58,8 @@ bool isDifferentiable(Node* n) {
   // Tensor", "aten::min(Tensor self) -> Tensor"
 
   if (n->kind() == prim::Constant || n->kind() == prim::AutogradZero ||
-      n->kind() == prim::AutogradAdd || n->kind() == prim::ConstantChunk)
+      n->kind() == prim::AutogradAdd || n->kind() == prim::ConstantChunk ||
+      n->kind() == prim::profile)
     return true;
 
   if (n->isMemberOf(differentiable_ops))
@@ -208,6 +209,8 @@ class GradientHelper {
     if (node->kind() == prim::AutogradAdd) {
       // NB: AutogradAdds don't broadcast
       return {grad_values.at(0), grad_values.at(0)};
+    } else if (node->kind() == prim::profile) {
+      return {grad_values.at(0)};
     } else if (node->kind() == prim::ConstantChunk) {
       auto* g = node->owningGraph();
 

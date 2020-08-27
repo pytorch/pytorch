@@ -73,6 +73,12 @@ static bool needsGradientInProfilingMode(Block* b) {
         return true;
       }
     }
+    if (n->kind() == prim::profile) {
+      auto type = n->ty(attr::profiled_type)->expect<TensorType>();
+      if (type->requiresGrad() && *type->requiresGrad()) {
+        return true;
+      }
+    }
 
     for (auto ib : n->blocks()) {
       if (needsGradientInProfilingMode(ib)) {
