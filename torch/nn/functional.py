@@ -3737,6 +3737,39 @@ def triplet_margin_loss(anchor, positive, negative, margin=1.0, p=2, eps=1e-6, s
                                      swap, reduction_enum)
 
 
+def triplet_margin_loss_with_distance(anchor, positive, negative, distance_function=None, is_similarity_function=False,
+                                      margin=1.0, swap=False, reduction="mean"):
+    # type: (Tensor, Tensor, Tensor, Optional[Callable[[Tensor, Tensor], Tensor]], bool, float, bool, str) -> Tensor
+    r"""
+    See :class:`~torch.nn.TripletMarginLossWithDistance` for details
+    """
+    if distance_function is None:
+        distance_function = pairwise_distance
+
+    positive_dist = distance_function(anchor, positive)
+    negative_dist = distance_function(anchor, negative)
+
+    if swap:
+        swap_dist = distance_function(positive, negative)
+        if is_similarity_function:
+            negative_dist = torch.max(negative_dist, swap_dist)
+        else:
+            negative_dist = torch.min(negative_dist, swap_dist)
+
+    if is_similarity_function:
+        output = torch.clamp(margin - positive_dist + negative_dist, min=0.0)
+    else:
+        output = torch.clamp(margin + positive_dist - negative_dist, min=0.0)
+    reduction_enum = _Reduction.get_enum(reduction)
+
+    if reduction_enum == 1:
+        return output.mean()
+    elif reduction_enum == 2:
+        return output.sum()
+    else:
+        return output
+
+
 def normalize(input, p=2, dim=1, eps=1e-12, out=None):
     # type: (Tensor, float, int, float, Optional[Tensor]) -> Tensor
     r"""Performs :math:`L_p` normalization of inputs over specified dimension.

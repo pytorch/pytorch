@@ -5,7 +5,7 @@ from .. import functional as F
 from .. import _reduction as _Reduction
 
 from torch import Tensor
-from typing import Optional
+from typing import Callable, Optional
 
 
 class _Loss(Module):
@@ -1252,6 +1252,102 @@ class TripletMarginLoss(_Loss):
     def forward(self, anchor: Tensor, positive: Tensor, negative: Tensor) -> Tensor:
         return F.triplet_margin_loss(anchor, positive, negative, margin=self.margin, p=self.p,
                                      eps=self.eps, swap=self.swap, reduction=self.reduction)
+
+
+class TripletMarginLossWithDistance(_Loss):
+    r"""Creates a criterion that measures the triplet loss given an input
+    tensors :math:`x1`, :math:`x2`, :math:`x3` and a margin with a value greater than :math:`0`.
+    This is used for measuring a relative similarity between samples. A triplet
+    is composed by `a`, `p` and `n` (i.e., `anchor`, `positive examples` and `negative
+    examples` respectively). The shapes of all input tensors should be
+    :math:`(N, D)`.
+
+    The distance swap is described in detail in the paper `Learning shallow
+    convolutional feature descriptors with triplet losses`_ by
+    V. Balntas, E. Riba et al.
+
+    The loss function for each sample in the mini-batch is:
+
+    .. math::
+        L(a, p, n) = \max \{d(a_i, p_i) - d(a_i, n_i) + {\rm margin}, 0\}
+
+
+    where :math:`d(x_i, y_i)` represents the output of `distance_function` on the two
+    inputs.  See also :class:`~torch.nn.TripletMarginLoss`.
+
+    Args:
+        distance_function (callable, optional): A distance function between two Tensors which,
+            if specified, will be used instead of the pairwise distance. If not specified,
+            `nn.PairwiseDistance` will be used.  Default: ``None``
+        is_similarity_function (bool, optional): Whether `distance_function` represents a
+            similarity metrics. Default: ``False``
+        margin (float, optional): Default: :math:`1`.
+        swap (bool, optional): The distance swap is described in detail in the paper
+            `Learning shallow convolutional feature descriptors with triplet losses` by
+            V. Balntas, E. Riba et al. Default: ``False``.
+        reduction (string, optional): Specifies the reduction to apply to the output:
+            ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
+            ``'mean'``: the sum of the output will be divided by the number of
+            elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
+            and :attr:`reduce` are in the process of being deprecated, and in the meantime,
+            specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
+
+
+    Shape:
+        - Input: :math:`(N, D)` where :math:`D` is the vector dimension.
+        - Output: scalar. If :attr:`reduction` is ``'none'``, then :math:`(N)`.
+
+    >>> distance_function = nn.PairwiseDistance(p=2)
+    >>> triplet_loss = nn.TripletMarginLossWithDistance(distance_function=distance_function, margin=1.0)
+    >>> anchor = torch.randn(100, 128, requires_grad=True)
+    >>> positive = torch.randn(100, 128, requires_grad=True)
+    >>> negative = torch.randn(100, 128, requires_grad=True)
+    >>> output = triplet_loss(anchor, positive, negative)
+    >>> output.backward()
+
+    .. _Learning shallow convolutional feature descriptors with triplet losses:
+        http://www.bmva.org/bmvc/2016/papers/paper119/index.html
+    """
+    __constants__ = ['distance_function', 'is_similarity_function', 'margin', 'swap', 'reduction']
+    distance_function: Optional[Callable[[Tensor, Tensor], Tensor]]
+    is_similarity_function: bool
+    margin: float
+    swap: bool
+
+    def __init__(self, distance_function: Optional[Callable[[Tensor, Tensor], Tensor]] = None, margin: float = 1.0,
+                 reduction: str = 'mean', is_similarity_function: bool = False):
+        super(TripletMarginLoss, self).__init__(size_average=None, reduce=None, reduction=reduction)
+        if distance_function is None:
+            self.distance_function = nn.PairwiseDistance()
+        else:
+            self.distance_function = distance_function
+        self.is_similarity_function = is_similarity_function
+        self.margin = margin
+        self.swap = swap
+
+    def forward(self, anchor: Tensor, positive: Tensor, negative: Tensor) -> Tensor:
+        positive_dist = self.distance_function(anchor, positive)
+        negative_dist = self.distance_function(anchor, negative)
+
+        if self.swap:
+            swap_dist = self.distance_function(positive, negative)
+            if self.is_similarity_function:
+                negative_dist = torch.max(negative_dist, swap_dist)
+            else:
+                negative_dist = torch.min(negative_dist, swap_dist)
+
+        if self.is_similarity_function:
+            output = torch.clamp(self.margin - positive_dist + negative_dist, min=0.0)
+        else:
+            output = torch.clamp(self.margin + positive_dist - negative_dist, min=0.0)
+        reduction_enum = _Reduction.get_enum(reduction)
+
+        if reduction_enum == 1:
+            return output.mean()
+        elif reduction_enum == 2:
+            return output.sum()
+        else:
+            return output
 
 
 class CTCLoss(_Loss):

@@ -6513,6 +6513,167 @@ class TestNN(NNTestCase):
         self.assertEqual(F.triplet_margin_loss(input1, input2, input3, swap=True, reduction='none'),
                          loss_reference_fns['TripletMarginLoss'](input1, input2, input3, swap=True, reduction='none'))
 
+    def test_triplet_margin_loss_with_distance_parity(self):
+        anchor = torch.randn(5, 10, requires_grad=True)
+        positive = torch.randn(5, 10, requires_grad=True)
+        negative = torch.randn(5, 10, requires_grad=True)
+        self.assertTrue(gradcheck(lambda a, p, n: F.triplet_margin_loss_with_distance(
+            a, p, n), (anchor, positive, negative)))
+        self.assertEqual(F.triplet_margin_loss_with_distance(anchor, positive, negative),
+                         F.triplet_margin_loss(anchor, positive, negative))
+
+    def test_triplet_margin_loss_with_distance(self):
+        anchor = torch.randn(5, 10, requires_grad=True)
+        positive = torch.randn(5, 10, requires_grad=True)
+        negative = torch.randn(5, 10, requires_grad=True)
+        distance_fn = nn.PairwiseDistance()
+        self.assertTrue(gradcheck(lambda a, p, n: F.triplet_margin_loss_with_distance(
+            a, p, n, distance_function=distance_fn), (anchor, positive, negative)))
+        self.assertEqual(F.triplet_margin_loss_with_distance(anchor, positive, negative, distance_function=distance_fn),
+                         F.triplet_margin_loss(anchor, positive, negative))
+
+    def test_triplet_margin_loss_with_distance_similarity(self):
+        anchor = torch.randn(5, 10, requires_grad=True)
+        positive = torch.randn(5, 10, requires_grad=True)
+        negative = torch.randn(5, 10, requires_grad=True)
+        def distance_fn(x, y):
+            return 1.0 - F.pairwise_distance(x, y)
+        self.assertTrue(gradcheck(lambda a, p, n: F.triplet_margin_loss_with_distance(
+            a, p, n, distance_function=distance_fn, is_similarity_function=True), (anchor, positive, negative)))
+        self.assertEqual(F.triplet_margin_loss_with_distance(anchor, positive, negative,
+                            distance_function=distance_fn, is_similarity_function=True),
+                         F.triplet_margin_loss(anchor, positive, negative))
+
+    def test_triplet_margin_loss_with_distance_swap(self):
+        anchor = torch.randn(5, 10, requires_grad=True)
+        positive = torch.randn(5, 10, requires_grad=True)
+        negative = torch.randn(5, 10, requires_grad=True)
+        distance_fn = nn.PairwiseDistance()
+        self.assertTrue(gradcheck(lambda a, p, n: F.triplet_margin_loss_with_distance(
+            a, p, n, distance_function=distance_fn, swap=True), (anchor, positive, negative)))
+        self.assertEqual(F.triplet_margin_loss_with_distance(anchor, positive, negative, distance_function=distance_fn, swap=True),
+                         F.triplet_margin_loss(anchor, positive, negative, swap=True))
+
+    def test_triplet_margin_loss_with_distance_similarity_swap(self):
+        anchor = torch.randn(5, 10, requires_grad=True)
+        positive = torch.randn(5, 10, requires_grad=True)
+        negative = torch.randn(5, 10, requires_grad=True)
+        def distance_fn(x, y):
+            return 1.0 - F.pairwise_distance(x, y)
+        self.assertTrue(gradcheck(lambda a, p, n: F.triplet_margin_loss_with_distance(
+            a, p, n, distance_function=distance_fn, is_similarity_function=True, swap=True), (anchor, positive, negative)))
+        self.assertEqual(F.triplet_margin_loss_with_distance(anchor, positive, negative,
+                            distance_function=distance_fn, is_similarity_function=True, swap=True),
+                         F.triplet_margin_loss(anchor, positive, negative, swap=True))
+
+    def test_triplet_margin_loss_with_distance_no_reduce(self):
+        anchor = torch.randn(5, 10, requires_grad=True)
+        positive = torch.randn(5, 10, requires_grad=True)
+        negative = torch.randn(5, 10, requires_grad=True)
+        distance_fn = nn.PairwiseDistance()
+        self.assertTrue(gradcheck(lambda a, p, n: F.triplet_margin_loss_with_distance(
+            a, p, n, distance_function=distance_fn, reduction='none'), (anchor, positive, negative)))
+        self.assertEqual(F.triplet_margin_loss_with_distance(anchor, positive, negative,
+                            distance_function=distance_fn, reduction='none'),
+                         F.triplet_margin_loss(anchor, positive, negative, reduction='none'))
+
+    def test_triplet_margin_loss_with_distance_margin(self):
+        anchor = torch.randn(5, 10, requires_grad=True)
+        positive = torch.randn(5, 10, requires_grad=True)
+        negative = torch.randn(5, 10, requires_grad=True)
+        distance_fn = nn.PairwiseDistance()
+        self.assertTrue(gradcheck(lambda a, p, n: F.triplet_margin_loss_with_distance(
+            a, p, n, distance_function=distance_fn, margin=1.5), (anchor, positive, negative)))
+        self.assertEqual(F.triplet_margin_loss_with_distance(anchor, positive, negative,
+                            distance_function=distance_fn, margin=1.5),
+                         F.triplet_margin_loss(anchor, positive, negative, margin=1.5))
+
+    def test_triplet_margin_loss_with_distance_module_parity(self):
+        anchor = torch.randn(5, 10, requires_grad=True)
+        positive = torch.randn(5, 10, requires_grad=True)
+        negative = torch.randn(5, 10, requires_grad=True)
+        loss_base = nn.TripletMarginLoss()
+        loss_test = nn.TripletMarginLossWithDistance()
+        self.assertTrue(gradcheck(lambda a, p, n: loss_test(
+            a, p, n), (anchor, positive, negative)))
+        self.assertEqual(loss_test(anchor, positive, negative),
+                         loss_base(anchor, positive, negative))
+
+    def test_triplet_margin_loss_with_distance(self):
+        anchor = torch.randn(5, 10, requires_grad=True)
+        positive = torch.randn(5, 10, requires_grad=True)
+        negative = torch.randn(5, 10, requires_grad=True)
+        distance_fn = nn.PairwiseDistance()
+        loss_base = nn.TripletMarginLoss()
+        loss_test = nn.TripletMarginLossWithDistance(distance_function=distance_fn)
+        self.assertTrue(gradcheck(lambda a, p, n: loss_test(
+            a, p, n), (anchor, positive, negative)))
+        self.assertEqual(loss_test(anchor, positive, negative),
+                         loss_base(anchor, positive, negative))
+
+    def test_triplet_margin_loss_with_distance_similarity(self):
+        anchor = torch.randn(5, 10, requires_grad=True)
+        positive = torch.randn(5, 10, requires_grad=True)
+        negative = torch.randn(5, 10, requires_grad=True)
+        def distance_fn(x, y):
+            return 1.0 - F.pairwise_distance(x, y)
+        loss_base = nn.TripletMarginLoss()
+        loss_test = nn.TripletMarginLossWithDistance(distance_function=distance_fn, is_similarity_function=True)
+        self.assertTrue(gradcheck(lambda a, p, n: loss_test(
+            a, p, n), (anchor, positive, negative)))
+        self.assertEqual(loss_test(anchor, positive, negative),
+                         loss_base(anchor, positive, negative))
+
+    def test_triplet_margin_loss_with_distance_swap(self):
+        anchor = torch.randn(5, 10, requires_grad=True)
+        positive = torch.randn(5, 10, requires_grad=True)
+        negative = torch.randn(5, 10, requires_grad=True)
+        distance_fn = nn.PairwiseDistance()
+        loss_base = nn.TripletMarginLoss(swap=True)
+        loss_test = nn.TripletMarginLossWithDistance(distance_function=distance_fn, swap=True)
+        self.assertTrue(gradcheck(lambda a, p, n: loss_test(
+            a, p, n), (anchor, positive, negative)))
+        self.assertEqual(loss_test(anchor, positive, negative),
+                         loss_base(anchor, positive, negative))
+
+    def test_triplet_margin_loss_with_distance_similarity_swap(self):
+        anchor = torch.randn(5, 10, requires_grad=True)
+        positive = torch.randn(5, 10, requires_grad=True)
+        negative = torch.randn(5, 10, requires_grad=True)
+        def distance_fn(x, y):
+            return 1.0 - F.pairwise_distance(x, y)
+        loss_base = nn.TripletMarginLoss(swap=True)
+        loss_test = nn.TripletMarginLossWithDistance(
+            distance_function=distance_fn, is_similarity_function=True, swap=True)
+        self.assertTrue(gradcheck(lambda a, p, n: loss_test(
+            a, p, n), (anchor, positive, negative)))
+        self.assertEqual(loss_test(anchor, positive, negative),
+                         loss_base(anchor, positive, negative))
+
+    def test_triplet_margin_loss_with_distance_no_reduce(self):
+        anchor = torch.randn(5, 10, requires_grad=True)
+        positive = torch.randn(5, 10, requires_grad=True)
+        negative = torch.randn(5, 10, requires_grad=True)
+        distance_fn = nn.PairwiseDistance()
+        loss_base = nn.TripletMarginLoss(reduction='none')
+        loss_test = nn.TripletMarginLossWithDistance(distance_function=distance_fn, reduction='none')
+        self.assertTrue(gradcheck(lambda a, p, n: loss_test(
+            a, p, n), (anchor, positive, negative)))
+        self.assertEqual(loss_test(anchor, positive, negative),
+                         loss_base(anchor, positive, negative))
+
+    def test_triplet_margin_loss_with_distance_margin(self):
+        anchor = torch.randn(5, 10, requires_grad=True)
+        positive = torch.randn(5, 10, requires_grad=True)
+        negative = torch.randn(5, 10, requires_grad=True)
+        distance_fn = nn.PairwiseDistance()
+        loss_base = nn.TripletMarginLoss(margin=1.5)
+        loss_test = nn.TripletMarginLossWithDistance(distance_function=distance_fn, margin=1.5)
+        self.assertTrue(gradcheck(lambda a, p, n: loss_test(
+            a, p, n), (anchor, positive, negative)))
+        self.assertEqual(loss_test(anchor, positive, negative),
+                         loss_base(anchor, positive, negative))
+
     def test_pointwise_loss_target_grad_none_reduction(self):
         i = torch.randn(5, 10)
         t = torch.randn(5, 10, requires_grad=True)

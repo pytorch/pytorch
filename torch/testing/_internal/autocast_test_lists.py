@@ -134,6 +134,7 @@ class AutocastTestLists(object):
             ("kl_div", mat0_fp16 + (torch.rand((n, n), device=dev, dtype=torch.float16),)),
             ("margin_ranking_loss", mat0_fp16 + mat1_fp16 + (torch.ones((n,), device=dev, dtype=torch.float16),)),
             ("triplet_margin_loss", mat0_fp16 + mat1_fp16 + mat2_fp16),
+            ("triplet_margin_loss_with_distance", mat0_fp16 + mat1_fp16 + mat2_fp16),
             ("binary_cross_entropy_with_logits", mat0_fp16 + (torch.rand((n, n), device=dev, dtype=torch.float16),)),
             ("cumprod", pointwise0_fp16 + (0,)),
             ("cumsum", pointwise0_fp16 + (0,)),
