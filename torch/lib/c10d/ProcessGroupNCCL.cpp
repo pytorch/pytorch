@@ -562,7 +562,7 @@ void ProcessGroupNCCL::ncclCommWatchdogInternal() {
 
 void ProcessGroupNCCL::workCleanupLoop() {
   while (!terminateProcessGroup_.load()) {
-    std::unique_lock<std::mutex> lock(workVectorMutex_);
+    std::unique_lock<std::mutex> lock(workListMutex_);
     // We busy-poll the work vector every kWatchdogThreadSleepMillis
     // milliseconds as long as the atomic is True.
     workVectorCV_.wait_for(
@@ -570,7 +570,7 @@ void ProcessGroupNCCL::workCleanupLoop() {
         std::chrono::milliseconds(kWorkCleanupThreadSleepMillis),
         [&]() -> bool { return terminateProcessGroup_.load(); });
 
-    for (auto it = workVector_.begin(); it != workVector_.end();
+    for (auto it = workList_.begin(); it != workList_.end();
          /* no increment*/) {
       auto& work = *it;
       if (work->isCompleted()) {
@@ -579,7 +579,7 @@ void ProcessGroupNCCL::workCleanupLoop() {
         if (work->finishedGPUExecution()) {
           work->handleNCCLGuard();
         }
-        it = workVector_.erase(it);
+        it = workList_.erase(it);
       } else {
         // Increment the iterator if the current WorkNCCL object is not
         // completed.
@@ -824,13 +824,10 @@ c10::intrusive_ptr<c10::ivalue::Future> ProcessGroupNCCL::WorkNCCL::
       at::IValue(*outputs_), (*outputs_)[0].device().index(), cudaEvents_);
 }
 
-void ProcessGroupNCCL::enqueue(
+void ProcessGroupNCCL::workEnqueue(
     std::shared_ptr<ProcessGroupNCCL::WorkNCCL> work) {
-  {
-    std::lock_guard<std::mutex> lock(workVectorMutex_);
-    workVector_.emplace_back(std::move(work));
-  }
-  workVectorCV_.notify_one();
+  std::lock_guard<std::mutex> lock(workListMutex_);
+  workList_.emplace_back(std::move(work));
 }
 
 template <typename Fn, typename PreProcess, typename PostProcess>
@@ -895,7 +892,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
     work->store_ = store_;
   }
 
-  enqueue(work);
+  workEnqueue(work);
 
   return work;
 }
