@@ -1097,10 +1097,10 @@
   self: grad.reshape(self.sizes())
 
 - name: view_as_real(Tensor(a) self) -> Tensor(a)
-  self: at::view_as_complex(grad.contiguous()).conj() # gx0 - i gx1
+  self: at::view_as_complex(grad.contiguous()) # gx0 + 1j * gx1
 
 - name: view_as_complex(Tensor(a) self) -> Tensor(a)
-  self: at::view_as_real(grad.contiguous().conj()) # [gx, -gy]
+  self: at::view_as_real(grad.contiguous()) # [gx, gy]
 
 - name: _s_where(Tensor condition, Tensor self, Tensor other) -> Tensor
   condition: non_differentiable
