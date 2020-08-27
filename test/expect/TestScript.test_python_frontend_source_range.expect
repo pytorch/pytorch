@@ -1,4 +1,0 @@
-SourceRange at:
-        def fn():
-        ~~~~~~~~~...  <--- HERE
-            raise Exception("hello")

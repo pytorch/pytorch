@@ -5674,10 +5674,8 @@ a")
         def fn():
             raise Exception("hello")
         ast = torch.jit.frontend.get_jit_def(fn, fn.__name__)
-        src_range_by_lines = str(ast.range()).split("\n")
-        # ignore the file path line as it is stateful
-        src_range_file_path_removed = src_range_by_lines[:1] + src_range_by_lines[2:]
-        self.assertExpected("\n".join(src_range_file_path_removed))
+        FileCheck().check("SourceRange at:").check("def fn():").check("~~~~~~~~~...  <--- HERE").\
+                    check('raise Exception("hello")').run(str(ast.range()))
 
 
     def test_python_frontend_py3(self):
