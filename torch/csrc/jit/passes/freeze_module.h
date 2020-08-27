@@ -26,5 +26,14 @@ TORCH_API Module freeze_module(
 
 IValue overrideGradient(IValue attr);
 
+/*
+* Recursively apply func to the graph.
+*/
+void optimizeSubGraphs(
+    std::shared_ptr<Graph>& graph,
+    const std::function<void(std::shared_ptr<Graph>&)>& func);
+
+bool inlineInterfaceCall(Node* n, const IValue& attr);
+
 } // namespace jit
 } // namespace torch

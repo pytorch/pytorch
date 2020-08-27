@@ -2,10 +2,11 @@
 
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
+#include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/quantization/freeze_quant_ops.h>
+#include <torch/csrc/jit/passes/quantization/helper.h>
 #include <torch/csrc/jit/runtime/graph_executor_impl.h>
-#include <torch/csrc/jit/passes/freeze_module.h>
 
 namespace torch {
 namespace jit {
@@ -25,7 +26,19 @@ class QuantizationAttributeFreezer {
     auto graph = func_->graph();
     // Inline the graph to make sure we don't have to traverse different
     // subgraphs when trying to get the weight attributes.
-    Inline(*graph);
+    auto applyInline = [](std::shared_ptr<Graph>& subgraph) {
+      Inline(*subgraph);
+    };
+    optimizeSubGraphs(graph, applyInline);
+    // Inline interface attributes in a separate pass
+    // Freeze interface attributes
+    optimizeSubGraphs(
+        graph,
+        std::bind(
+            &QuantizationAttributeFreezer::inlineInterfaceCalls,
+            *this,
+            std::placeholders::_1));
+
     std::stack<Block*> blocks_to_visit({graph->block()});
     while (!blocks_to_visit.empty()) {
       Block* block = blocks_to_visit.top();
@@ -40,6 +53,7 @@ class QuantizationAttributeFreezer {
         }
       }
     }
+    std::cout << "Graph before opt " << graph->toString();
     runOptimization(graph, false);
     removeUnusedAttrs();
     std::cout << "** FINAL Graph ** " << graph->toString();
@@ -77,17 +91,13 @@ class QuantizationAttributeFreezer {
     std::unordered_map<ModulePtr, std::unordered_map<std::string, Value*>>
         moduleAttrs;
     auto name = attr_node->s(attr::name);
-
-    auto attrModule = module;
-    std::deque<std::string> module_names;
+    auto* instance = attr_node->inputs()[0];
+    Value* self = graph->inputs()[0];
+    std::vector<std::string> module_names = getModuleAccessPath(instance, self);
     // Get the module corresponding to the attr
-    if (!updateAttrModule(
-            attr_node->inputs()[0], name, attrModule, module_names, graph)) {
-      TORCH_WARN_ONCE(
-          "Quantization param attribute ",
-          name,
-          " is not a constant in the graph. Cannot be frozen.");
-    }
+    auto m = getInvokedModuleOpt(module, attr_node, self);
+    TORCH_CHECK(m.has_value());
+    auto attrModule = m.value();
     TORCH_INTERNAL_ASSERT(attrModule.hasattr(name));
     auto attrs = moduleAttrs.find(attrModule._ivalue());
 
@@ -147,29 +157,36 @@ class QuantizationAttributeFreezer {
     }
   }
 
-  /*
-   * Traverse the module hierarchy to find the module corresponding to the
-   * GetAttr node in the graph.
-   */
-  bool updateAttrModule(
-      Value* input,
-      std::string& name,
-      Module& attrModule,
-      std::deque<std::string>& names,
-      std::shared_ptr<Graph>& graph) {
-    Node* node = input->node();
-    while (!(node->outputs()[0]->type() == graph->inputs()[0]->type())) {
-      if (node->kind() == prim::GetAttr) {
-        names.push_front(node->s(attr::name));
-        node = node->inputs()[0]->node();
-      } else {
-        return false;
+  void inlineInterfaceCalls(std::shared_ptr<Graph>& graph) {
+    auto block = graph->block();
+    std::stack<Block*> blocks({block});
+
+    while (!blocks.empty()) {
+      Block* block = blocks.top();
+      blocks.pop();
+      for (auto n : block->nodes()) {
+        for (Block* sub_block : n->blocks()) {
+          blocks.push(sub_block);
+        }
+        if (n->kind() == prim::GetAttr) {
+          if (!n->output()->type()->cast<InterfaceType>()) {
+            continue;
+          }
+          auto name = n->s(attr::name);
+          auto input = n->inputs()[0];
+          auto m = getInvokedModuleOpt(module_, n, graph->inputs()[0]);
+          TORCH_CHECK(
+              m.has_value(),
+              "Expected child module to exist while inlining interface");
+          auto attrModule = m.value();
+          TORCH_INTERNAL_ASSERT(attrModule.hasattr(name));
+          auto attr = attrModule.attr(name);
+          inlineInterfaceCall(n, attr);
+          // Reset the GetAttr to concrete module type.
+          n->output()->setType(attr.type());
+        }
       }
     }
-    for (auto& moduleName : names) {
-      attrModule = attrModule.attr(moduleName).toModule();
-    }
-    return true;
   }
 
   Module& module_;

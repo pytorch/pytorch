@@ -81,14 +81,19 @@ Module FreezeQuantizedAttrs(Module& module) {
         n->kind() == Symbol::fromQualString("quantized::conv1d_prepack") ||
         n->kind() == Symbol::fromQualString("quantized::conv2d_prepack") ||
         n->kind() == Symbol::fromQualString("quantized::conv3d_prepack") ||
-        n->kind() == Symbol::fromQualString("quantized::embedding_bag_4bit_prepack") ||
-        n->kind() == Symbol::fromQualString("quantized::embedding_bag_byte_prepack") ||
+        n->kind() ==
+            Symbol::fromQualString("quantized::embedding_bag_4bit_prepack") ||
+        n->kind() ==
+            Symbol::fromQualString("quantized::embedding_bag_byte_prepack") ||
         n->kind() == Symbol::fromQualString("quantized::linear"));
   };
   return FreezeAndFoldQuantOps(module, filter_fn);
 }
 
-Module Finalize(Module& module, QuantType quant_type, bool freeze_only_quant_ops) {
+Module Finalize(
+    Module& module,
+    QuantType quant_type,
+    bool freeze_only_quant_ops) {
   auto graph = module.get_method("forward").graph();
   InsertPrepackUnpack(graph);
   GRAPH_DUMP("Before QuantFusion:", graph);
