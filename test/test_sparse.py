@@ -1698,10 +1698,16 @@ class TestSparse(TestCase):
         expected_output = dense_tensor.abs()
         self.assertEqual(expected_output, abs(sparse_tensor).to_dense())
         self.assertEqual(expected_output, torch.abs(sparse_tensor).to_dense())
+        sparse_tensor_out = torch.zeros_like(sparse_tensor)
+        torch.abs(sparse_tensor, out=sparse_tensor_out)
+        self.assertEqual(expected_output, sparse_tensor_out.to_dense())
         self.assertEqual(expected_output, sparse_tensor.abs().to_dense())
         self.assertEqual(expected_output, sparse_tensor.coalesce().abs_().to_dense())
 
         self.assertEqual(expected_output, torch.absolute(sparse_tensor).to_dense())
+        sparse_tensor_out = torch.zeros_like(sparse_tensor)
+        torch.absolute(sparse_tensor, out=sparse_tensor_out)
+        self.assertEqual(expected_output, sparse_tensor_out.to_dense())
         self.assertEqual(expected_output, sparse_tensor.absolute().to_dense())
         self.assertEqual(expected_output, sparse_tensor.coalesce().absolute_().to_dense())
 
@@ -1783,17 +1789,6 @@ class TestSparse(TestCase):
             )
             self._test_abs_absolute(input_uncoalesced, torch.zeros([0, 0, 5, 5, 5, 5, 5, 5, 0]))
 
-            # test on empty sparse tensor, values empty, index not empty
-            # crashes with RuntimeError: CUDA error: an illegal memory access was encountered
-            # Exception raised from copy_kernel_cuda at pytorch/aten/src/ATen/native/cuda/Copy.cu:200
-            # input_uncoalesced = torch.sparse_coo_tensor(
-            #     indices=torch.zeros([1, 5]),
-            #     values=torch.zeros([5, 6, 0]),
-            #     size=[5, 6, 0],
-            #     device=self.device
-            # )
-            # self._test_abs(input_uncoalesced, torch.zeros([5, 6, 0]))
-
     def _test_sign(self, sparse_tensor, dense_tensor):
         expected_output = dense_tensor.sign()
         self.assertEqual(expected_output, torch.sign(sparse_tensor).to_dense())
@@ -1824,7 +1819,7 @@ class TestSparse(TestCase):
 
     def test_sign(self):
         input_coalesced = torch.sparse_coo_tensor(
-            indices=torch.tensor([[0], [1], [2], [3]]).transpose(1, 0),
+            indices=torch.tensor([[0, 1, 2, 3]]),
             values=torch.tensor([3.0, -4.0, 5.0, -6.0]),
             size=[4, ],
             device=self.device
@@ -1863,14 +1858,6 @@ class TestSparse(TestCase):
                 device=self.device
             )
             self._test_sign(input_uncoalesced, torch.zeros([0, 0, 5, 5, 5, 5, 5, 5, 0]))
-
-            # test on empty sparse tensor, values empty, index not empty 
-            input_uncoalesced = torch.sparse_coo_tensor(
-                indices=torch.zeros([1, 5]),
-                values=torch.zeros([5, 6, 0]),
-                size=[5, 6, 0],
-                device=self.device)
-            self._test_sign(input_uncoalesced, torch.zeros([5, 6, 0]))
 
     def test_mv(self):
         def test_shape(di, dj, dk, nnz):

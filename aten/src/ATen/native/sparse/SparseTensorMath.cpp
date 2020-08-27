@@ -122,8 +122,8 @@ SparseTensor& log1p_sparse_(SparseTensor& t) {
 // abs(SparseTensor)
 // --------------------------------------------------------------------
 
-// abs in-place on uncoalesced tensors is not possible due non-linear type of abs operation
-// as in uncoalesced format tensor the values corresponding to the same indices are summed
+// In-place abs on uncoalesced tensors is not supported due non-linear type of operation.
+// Values of uncoalesced tensor corresponding to the same indices are summed
 // and abs(summed_value) != abs(v1) + abs(v2)
 
 SparseTensor& abs_out_sparse(SparseTensor& r, const SparseTensor& t) {
