@@ -13,6 +13,9 @@ except ImportError:
         markA = _fail
         rangePushEx = _fail
         markEx = _fail
+        version = None
+        size = None
+
 
     _nvtx = _NVTXStub()  # type: ignore[assignment]
 
