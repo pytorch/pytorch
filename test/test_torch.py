@@ -18580,6 +18580,8 @@ class TestViewOps(TestCase):
             # TODO: Add torch.ComplexHalfStorage
             if dtype != torch.complex32:
                 self.assertTrue(self.is_view_of(t, res))
+            else:
+                self.assertRaises(RuntimeError, lambda: self.is_view_of(t, res))
 
         fn()
         fn(contiguous_input=False)
@@ -18590,6 +18592,8 @@ class TestViewOps(TestCase):
         # TODO: Add torch.ComplexHalfStorage
         if dtype != torch.complex32:
             self.assertTrue(self.is_view_of(x, res))
+        else:
+            self.assertRaises(RuntimeError, lambda: self.is_view_of(x, res))
         self.assertEqual(res.shape, torch.Size([0, 2]))
 
         # tensor with zero dim
@@ -18598,6 +18602,8 @@ class TestViewOps(TestCase):
         # TODO: Add torch.ComplexHalfStorage
         if dtype != torch.complex32:
             self.assertTrue(self.is_view_of(x, res))
+        else:
+            self.assertRaises(RuntimeError, lambda: self.is_view_of(x, res))
         self.assertEqual(res.shape, torch.Size([2]))
 
     @onlyOnCPUAndCUDA
