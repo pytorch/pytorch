@@ -60,7 +60,7 @@ def fp16_compress_hook(process_group: object, bucket: dist._GradBucket):
     return fut.then(decompress)
 
 
-def __get_allgather_out_list(all_gather_in_list, world_size):
+def _get_allgather_out_list(all_gather_in_list, world_size):
     out_list = [
         torch.zeros_like(
             all_gather_in_list,
@@ -100,7 +100,7 @@ def _allgather_then_aggregate_hook(
 
     tensor = bucket.get_tensors()[0]
     fut = dist.all_gather(
-        __get_allgather_out_list(tensor, world_size),
+        _get_allgather_out_list(tensor, world_size),
         tensor,
         group=group_to_use,
         async_op=True,

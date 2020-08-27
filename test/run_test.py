@@ -87,6 +87,7 @@ TESTS = [
     'test_determination',
     'test_futures',
     'test_fx',
+    'test_functional_autograd_benchmark'
 ]
 
 WINDOWS_BLOCKLIST = [

@@ -2071,34 +2071,34 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @requires_gloo()
     def test_gloo_backend_cpu_module(self):
-        self._test_gloo_backend([torch.device("cpu")], [])
+        self._test_gloo_backend([torch.device('cpu')], [])
 
     @requires_gloo()
     @skip_if_not_multigpu
     def test_gloo_backend_1gpu_module_device_ids_integer_list(self):
         int_devices = gpus_for_rank(self.world_size)[self.rank][:1]
-        devices = [torch.device("cuda:" + str(i)) for i in int_devices]
+        devices = list([torch.device('cuda:' + str(i)) for i in int_devices])
         self._test_gloo_backend(devices, int_devices)
 
     @requires_gloo()
     @skip_if_not_multigpu
     def test_gloo_backend_1gpu_module_device_ids_torch_device_list(self):
         int_devices = gpus_for_rank(self.world_size)[self.rank][:1]
-        devices = [torch.device("cuda:" + str(i)) for i in int_devices]
+        devices = list([torch.device('cuda:' + str(i)) for i in int_devices])
         self._test_gloo_backend(devices, devices)
 
     @requires_gloo()
     @skip_if_lt_x_gpu(4)
     def test_gloo_backend_2gpu_module(self):
         int_devices = gpus_for_rank(self.world_size)[self.rank][:2]
-        devices = [torch.device("cuda:" + str(i)) for i in int_devices]
+        devices = list([torch.device('cuda:' + str(i)) for i in int_devices])
         self._test_gloo_backend(devices, [], multi_device=True)
 
     @requires_gloo()
     @skip_if_lt_x_gpu(8)
     def test_gloo_backend_4gpu_module(self):
         int_devices = gpus_for_rank(self.world_size)[self.rank][:4]
-        devices = [torch.device("cuda:" + str(i)) for i in int_devices]
+        devices = list([torch.device('cuda:' + str(i)) for i in int_devices])
         self._test_gloo_backend(devices, [], multi_device=True)
 
     def _test_nccl_backend(self, devices, device_ids, multi_device=False):
@@ -2110,28 +2110,28 @@ class DistributedDataParallelTest(MultiProcessTestCase):
     @skip_if_not_multigpu
     def test_nccl_backend_1gpu_module_device_ids_integer_list(self):
         int_devices = gpus_for_rank(self.world_size)[self.rank][:1]
-        devices = [torch.device("cuda:" + str(i)) for i in int_devices]
+        devices = list([torch.device('cuda:' + str(i)) for i in int_devices])
         self._test_nccl_backend(devices, int_devices)
 
     @requires_nccl()
     @skip_if_not_multigpu
     def test_nccl_backend_1gpu_module_device_ids_torch_device_list(self):
         int_devices = gpus_for_rank(self.world_size)[self.rank][:1]
-        devices = [torch.device("cuda:" + str(i)) for i in int_devices]
+        devices = list([torch.device('cuda:' + str(i)) for i in int_devices])
         self._test_nccl_backend(devices, devices)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
     def test_nccl_backend_2gpu_module(self):
         int_devices = gpus_for_rank(self.world_size)[self.rank][:2]
-        devices = [torch.device("cuda:" + str(i)) for i in int_devices]
+        devices = list([torch.device('cuda:' + str(i)) for i in int_devices])
         self._test_nccl_backend(devices, [], multi_device=True)
 
     @requires_nccl()
     @skip_if_lt_x_gpu(8)
     def test_nccl_backend_4gpu_module(self):
         int_devices = gpus_for_rank(self.world_size)[self.rank][:4]
-        devices = [torch.device("cuda:" + str(i)) for i in int_devices]
+        devices = list([torch.device('cuda:' + str(i)) for i in int_devices])
         self._test_nccl_backend(devices, [], multi_device=True)
 
     @requires_nccl()
@@ -2576,26 +2576,20 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         # No parameter should have their gradient set.
         check_no_grads()
 
-    def _test_accumulate_gradients_no_sync(self, num_iters=2, ddp_comm_hook=None):
-        """
-        This is the recommended way to implement accumulate grads.
-        If ``ddp_comm_hook`` input was specified, it will also register that hook
-        to the ``ddp_model``. The hook fed into this function should not change
-        the resulting gradients.
-        """
+    @requires_nccl()
+    @skip_if_not_multigpu
+    def test_accumulate_gradients_no_sync(self):
+        # This is the recommended way to implement accumulate grads
         int_devices = gpus_for_rank(self.world_size)[self.rank][:1]
-        devices = [torch.device("cuda:" + str(i)) for i in int_devices]
+        devices = list([torch.device('cuda:' + str(i)) for i in int_devices])
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
         global_batch_size = self.world_size
         local_batch_size = len(devices)
 
-        model, ddp_model, input, target = self._prepare_single_device_module(
-            process_group, devices, devices, global_batch_size
-        )
-
-        if ddp_comm_hook is not None:
-            ddp_model._register_comm_hook(process_group, ddp_comm_hook)
+        model, ddp_model, input, target = \
+            self._prepare_single_device_module(
+                process_group, devices, devices, global_batch_size)
 
         def step_model(model, input, target):
             model.train()
@@ -2609,28 +2603,24 @@ class DistributedDataParallelTest(MultiProcessTestCase):
                 ddp_model.train()
                 ddp_model(input)
 
-        # check two model parameters over num_iters iterations
-        for iteration in range(num_iters):
+        # check two model parameters over 2 iterations
+        for iteration in range(2):
             # single cpu/gpu training
             step_model(model, input, target)
 
-            ddp_input = input[
-                self.rank * local_batch_size : (self.rank + 1) * local_batch_size
-            ]
-            ddp_target = target[
-                self.rank * local_batch_size : (self.rank + 1) * local_batch_size
-            ]
+            ddp_input = input[self.rank * local_batch_size: (self.rank + 1) * local_batch_size]
+            ddp_target = target[self.rank * local_batch_size: (self.rank + 1) * local_batch_size]
 
-            if iteration % num_iters == 0:
-                # accumulate grads locally
+            if iteration % 2 == 0:
+                # accumulate grads locally when iteration == 0
                 with ddp_model.no_sync():
                     step_model(ddp_model, ddp_input, ddp_target)
             else:
-                # sync grads
+                # sync grads when iteration == 1
                 step_model(ddp_model, ddp_input, ddp_target)
 
             for i, j in zip(model.parameters(), ddp_model.parameters()):
-                if iteration % num_iters == 0:
+                if iteration % 2 == 0:
                     self.assertNotEqual(i.grad, j.grad)
                 else:
                     self.assertEqual(i.grad, j.grad)
@@ -2641,68 +2631,12 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_not_multigpu
-    def test_accumulate_gradients_no_sync(self):
-        """
-        Runs _test_accumulate_gradients_no_sync using default inputs
-        """
-        self._test_accumulate_gradients_no_sync()
-
-    @requires_nccl()
-    @skip_if_not_multigpu
-    def test_accumulate_gradients_no_sync_allreduce_hook(self):
-        """
-        Runs multiple iterations on _test_accumulate_gradients_no_sync
-        using allreduce hook and validates whether future result was properly
-        passed as gradients in reducer.
-        """
-
-        def allreduce_hook(
-            process_group: object, bucket: dist._GradBucket
-        ) -> torch._C.Future:
-            tensors = [t / self.world_size for t in bucket.get_tensors()]
-            return process_group.allreduce(tensors).get_future()
-
-        self._test_accumulate_gradients_no_sync(
-            num_iters=4, ddp_comm_hook=allreduce_hook
-        )
-
-    @requires_nccl()
-    @skip_if_not_multigpu
-    def test_accumulate_gradients_no_sync_allreduce_with_then_hook(self):
-        """
-        Runs multiple iterations on _test_accumulate_gradients_no_sync using allreduce
-        hook that also uses then callbacks. In first then callback result is multiplied
-        by 2, and the second callback divides the result by 2 * world_size. It validates
-        whether final result was properly passed as gradients in reducer.
-        """
-
-        def allreduce_with_then_hook(
-            process_group: object, bucket: dist._GradBucket
-        ) -> torch.futures.Future:
-            fut = process_group.allreduce(bucket.get_tensors()).get_future()
-
-            def mult(fut):
-                # Multiply the result by 2.
-                return [2 * t for t in fut.wait()]
-
-            def div(fut):
-                # Divide the result by 2 * world_size.
-                return [t / (2 * self.world_size) for t in fut.wait()]
-
-            return fut.then(mult).then(div)
-
-        self._test_accumulate_gradients_no_sync(
-            num_iters=4, ddp_comm_hook=allreduce_with_then_hook
-        )
-
-    @requires_nccl()
-    @skip_if_not_multigpu
     def test_accumulate_gradients_module(self):
         # This is NOT the recommended way to implement accumulating grads, but
         # we would like to make sure DDP does not mess up with the underlying
         # module.
         int_devices = gpus_for_rank(self.world_size)[self.rank][:1]
-        devices = [torch.device("cuda:" + str(i)) for i in int_devices]
+        devices = list([torch.device('cuda:' + str(i)) for i in int_devices])
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
         global_batch_size = self.world_size
@@ -3762,7 +3696,7 @@ class CommTest(MultiProcessTestCase):
         half = torch.float16
 
         # No support for float16 for CPU tensors
-        if device == torch.device("cpu"):
+        if device == torch.device('cpu'):
             half = torch.float32
 
         target = torch.arange(60, dtype=half, device=device).chunk(5)
@@ -3791,7 +3725,7 @@ class CommTest(MultiProcessTestCase):
     def test_broadcast_coalesced_nccl(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
-        device = torch.device("cuda:%d" % self.rank)
+        device = torch.device('cuda:%d' % self.rank)
         self._test_broadcast_coalesced(process_group, device)
 
     @requires_gloo()
@@ -3801,7 +3735,7 @@ class CommTest(MultiProcessTestCase):
         options = c10d.ProcessGroupGloo.Options()
         options.devices = [c10d.ProcessGroupGloo.create_device(interface=LOOPBACK)]
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size, options)
-        device = torch.device("cuda:%d" % self.rank)
+        device = torch.device('cuda:%d' % self.rank)
         self._test_broadcast_coalesced(process_group, device)
 
     @requires_gloo()
@@ -3810,7 +3744,7 @@ class CommTest(MultiProcessTestCase):
         options = c10d.ProcessGroupGloo.Options()
         options.devices = [c10d.ProcessGroupGloo.create_device(interface=LOOPBACK)]
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size, options)
-        device = torch.device("cpu")
+        device = torch.device('cpu')
         self._test_broadcast_coalesced(process_group, device)
 
 

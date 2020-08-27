@@ -31,15 +31,15 @@ class GradBucket {
   std::vector<at::Tensor> tensors_;
 };
 
-// DDP's c10d reducer allows communication hooks defined as a sub class
+// DDP's c10d reducer allows communcation hooks defined as a sub class
 // of CommHookInterface. CommHookInterface is an abstract class and can
 // be used to implement both Python and CPP hooks.
 struct TORCH_API CommHookInterface {
  public:
   virtual ~CommHookInterface() {}
 
-  // runHook takes a GradBucket type bucket and passes the tensors of
-  // this grad bucket to hook's callback. This function is called once
+  // runHook takes a GradBucket type bucket and passses the tensors of
+  // this grad bucket to hook's callaback. This function is called once
   // the bucket is ready. The hook can perform whatever processing is
   // needed and return a Future that will hold the new value of the grad
   // bucket's tensors once ready.
