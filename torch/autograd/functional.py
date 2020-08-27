@@ -273,7 +273,7 @@ def vjp(func, inputs, v=None, create_graph=False, strict=False):
     return _tuple_postprocess(outputs, is_outputs_tuple), _tuple_postprocess(vjp, is_inputs_tuple)
 
 
-def jvp(func, inputs, v=None, create_graph=False, strict=False):
+def jvp(func, inputs, v=None, create_graph=False, strict=False, fw_mode=True):
     r"""Function that computes the dot product between  the Jacobian of
     the given function at the point given by the inputs and a vector ``v``.
 
@@ -295,6 +295,9 @@ def jvp(func, inputs, v=None, create_graph=False, strict=False):
             independent of it. If ``False``, we return a Tensor of zeros as the
             jvp for said inputs, which is the expected mathematical value.
             Defaults to ``False``.
+        fw_mode (bool, optional): If ``True``, forward mode AD will be used to
+            compute the jvp, otherwise, the backward of backward is used (sometimes
+            called the double backwards trick).
 
     Returns:
         jvp (tuple of Tensors or Tensor): result of the dot product with
@@ -321,15 +324,10 @@ def jvp(func, inputs, v=None, create_graph=False, strict=False):
         >>> jvp(adder, inputs, v)
         (tensor([2.2399, 2.5005]),
          tensor([5., 5.]))
-
-    Note:
-        The jvp is currently computed by using the backward of the backward
-        (sometimes called the double backwards trick) as we don't have support
-        for forward mode AD in PyTorch at the moment.
     """
 
     is_inputs_tuple, inputs = _as_tuple(inputs, "inputs", "jvp")
-    inputs = _grad_preprocess(inputs, create_graph=create_graph, need_graph=True)
+    inputs = _grad_preprocess(inputs, create_graph=create_graph, need_graph=False)
 
     if v is not None:
         _, v = _as_tuple(v, "v", "jvp")
@@ -341,18 +339,44 @@ def jvp(func, inputs, v=None, create_graph=False, strict=False):
                                "the user-provided function is a single Tensor "
                                "with a single element.")
 
-    outputs = func(*inputs)
-    is_outputs_tuple, outputs = _as_tuple(outputs, "outputs of the user-provided function", "jvp")
-    _check_requires_grad(outputs, "outputs", strict=strict)
-    # The backward is linear so the value of grad_outputs is not important as
-    # it won't appear in the double backward graph. We only need to ensure that
-    # it does not contain inf or nan.
-    grad_outputs = tuple(torch.zeros_like(out, requires_grad=True) for out in outputs)
+    if fw_mode:
+        if v is None:
+            v = (torch.ones_like(inputs[0]),)
 
-    grad_inputs = _autograd_grad(outputs, inputs, grad_outputs, create_graph=True)
-    _check_requires_grad(grad_inputs, "grad_inputs", strict=strict)
+        for el_inp, el_v in zip(inputs, v):
+            el_inp._fw_grad = el_v
 
-    grad_res = _autograd_grad(grad_inputs, grad_outputs, v, create_graph=create_graph)
+        with torch.set_fw_grad_enabled(True):
+            outputs = func(*inputs)
+        is_outputs_tuple, outputs = _as_tuple(outputs, "outputs of the user-provided function", "jvp")
+
+        grad_res = tuple(out._fw_grad for out in outputs)
+        for i, g in enumerate(grad_res):
+            if g is None and strict:
+                raise RuntimeError("The output of the user-provided function is independent of "
+                                   "input {}. This is not allowed in strict mode.".format(i))
+
+        # cleanup
+        for el_inp in inputs:
+            el_inp._fw_grad = None
+            # Because _grad_preprocess creates these view, make sure we clean fw_grad on them properly
+            if el_inp._is_view():
+                el_inp._base._fw_grad = None
+        for out in outputs:
+            out._fw_grad = None
+    else:
+        outputs = func(*inputs)
+        is_outputs_tuple, outputs = _as_tuple(outputs, "outputs of the user-provided function", "jvp")
+        _check_requires_grad(outputs, "outputs", strict=strict)
+        # The backward is linear so the value of grad_outputs is not important as
+        # it won't appear in the double backward graph. We only need to ensure that
+        # it does not contain inf or nan.
+        grad_outputs = tuple(torch.zeros_like(out, requires_grad=True) for out in outputs)
+
+        grad_inputs = _autograd_grad(outputs, inputs, grad_outputs, create_graph=True)
+        _check_requires_grad(grad_inputs, "grad_inputs", strict=strict)
+
+        grad_res = _autograd_grad(grad_inputs, grad_outputs, v, create_graph=create_graph)
 
     jvp = _fill_in_zeros(grad_res, outputs, strict, create_graph, "back_trick")
 
