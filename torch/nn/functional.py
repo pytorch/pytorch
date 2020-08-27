@@ -3743,6 +3743,9 @@ def triplet_margin_loss_with_distance(anchor, positive, negative, distance_funct
     r"""
     See :class:`~torch.nn.TripletMarginLossWithDistance` for details
     """
+    if torch.jit.is_scripting():
+        raise NotImplementedError("F.triplet_margin_loss_with_distance does not support JIT. "
+                                  "Please use nn.TripletMarginLossWithDistance instead.")
     if distance_function is None:
         distance_function = pairwise_distance
 

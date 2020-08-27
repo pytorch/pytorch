@@ -1329,28 +1329,34 @@ class TripletMarginLossWithDistance(_Loss):
         self.swap = swap
 
     def forward(self, anchor: Tensor, positive: Tensor, negative: Tensor) -> Tensor:
-        positive_dist = self.distance_function(anchor, positive)
-        negative_dist = self.distance_function(anchor, negative)
+        if not torch.jit.is_scripting():
+            return F.triplet_margin_loss_with_distance(anchor, positive, negative,
+                                                       distance_function=self.distance_function,
+                                                       is_similarity_function=self.is_similarity_function,
+                                                       margin=self.margin, swap=self.swap, reduction=self.reduction)
+        else:
+            positive_dist = self.distance_function(anchor, positive)
+            negative_dist = self.distance_function(anchor, negative)
 
-        if self.swap:
-            swap_dist = self.distance_function(positive, negative)
+            if self.swap:
+                swap_dist = self.distance_function(positive, negative)
+                if self.is_similarity_function:
+                    negative_dist = torch.max(negative_dist, swap_dist)
+                else:
+                    negative_dist = torch.min(negative_dist, swap_dist)
+
             if self.is_similarity_function:
-                negative_dist = torch.max(negative_dist, swap_dist)
+                output = torch.clamp(self.margin - positive_dist + negative_dist, min=0.0)
             else:
-                negative_dist = torch.min(negative_dist, swap_dist)
+                output = torch.clamp(self.margin + positive_dist - negative_dist, min=0.0)
+            reduction_enum = _Reduction.get_enum(self.reduction)
 
-        if self.is_similarity_function:
-            output = torch.clamp(self.margin - positive_dist + negative_dist, min=0.0)
-        else:
-            output = torch.clamp(self.margin + positive_dist - negative_dist, min=0.0)
-        reduction_enum = _Reduction.get_enum(self.reduction)
-
-        if reduction_enum == 1:
-            return output.mean()
-        elif reduction_enum == 2:
-            return output.sum()
-        else:
-            return output
+            if reduction_enum == 1:
+                return output.mean()
+            elif reduction_enum == 2:
+                return output.sum()
+            else:
+                return output
 
 
 class CTCLoss(_Loss):
