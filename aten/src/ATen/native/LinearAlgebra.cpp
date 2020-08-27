@@ -1551,7 +1551,7 @@ static Tensor& linalg_norm_out_impl(Tensor& result, const Tensor& self, optional
       "dtype = ", dtype, ", out.dtype = ", result.scalar_type());
   }
   int64_t ndim = self.dim();
-  Tensor result_ = result.clone();
+  Tensor result_;
   if (opt_str_ord.has_value()) {
     // 'ord' is string
     auto str_ord = opt_str_ord.value();

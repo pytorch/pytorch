@@ -9816,15 +9816,16 @@ class TestTorchDeviceType(TestCase):
         ]
         for keepdim in [False, True]:
             for input_size, dim in test_cases:
+                msg = f'input_size: {input_size}, dim: {dim}, keepdim: {keepdim}'
                 x = torch.randn(*input_size, device=device, dtype=dtype)
-                result_out = torch.tensor(0, device=device, dtype=dtype)
+                result_out = torch.empty(0, device=device, dtype=dtype)
                 if dim is None:
                     result = torch.nuclear_norm(x, keepdim=keepdim)
                     torch.nuclear_norm(x, keepdim=keepdim, out=result_out)
                 else:
                     result = torch.nuclear_norm(x, keepdim=keepdim, dim=dim)
                     torch.nuclear_norm(x, keepdim=keepdim, dim=dim, out=result_out)
-                self.assertEqual(result, result_out)
+                self.assertEqual(result, result_out, msg=msg)
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
