@@ -189,7 +189,7 @@ def get_analytical_jacobian_fw(fn, input, output):
 
     diff_input = []
     for inp in input:
-        if torch.is_tensor(inp) and inp.requires_grad==True:
+        if torch.is_tensor(inp) and inp.requires_grad:
             diff_input.append(inp)
             if inp.layout == torch._mkldnn:
                 warnings.warn('MKLDNN inputs are not supported for forward gradcheck.')
@@ -202,7 +202,7 @@ def get_analytical_jacobian_fw(fn, input, output):
         try:
             # TODO(albanD): use set_fw_grad
             inp._fw_grad = fw_grad
-            fw_grad = inp._fw_grad # For views, the value that is set might not be the same as the one we provided
+            fw_grad = inp._fw_grad  # For views, the value that is set might not be the same as the one we provided
             for lin_idx, inp_idx in enumerate(product(*[range(m) for m in inp.size()])):
                 fw_grad[inp_idx] = 1
                 with torch.set_fw_grad_enabled(True):
@@ -253,7 +253,7 @@ def gradcheck(
     check_undefined_grad: bool = True,
     check_backward: bool = True,
     check_forward: bool = True,
-    stacklevel = 2
+    stacklevel: int = 2
 ) -> bool:
     r"""Check gradients computed via small finite differences against analytical
     gradients w.r.t. tensors in :attr:`inputs` that are of floating point or complex type
