@@ -804,7 +804,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
   }
 
   // First let NCCL streams wait for input tensors allocation streams
-  syncStreams(devices, ncclEvents_[key], ncclStreams_[key]);
+  syncStreams(devices, ncclEvents_[key], streams);
 
   // Work itself will create the CUDA events on all GPUs of tensors
   auto work = initWork(devices);
