@@ -672,7 +672,7 @@
 - name: max(Tensor self) -> Tensor
   self: evenly_distribute_backward(grad, self, result)
 
-- name: max.other(Tensor self, Tensor other) -> Tensor
+- name: maximum(Tensor self, Tensor other) -> Tensor
   self: grad.clone().masked_fill_(self <= other, 0)
   other: grad.clone().masked_fill_(self > other, 0)
 
@@ -708,7 +708,7 @@
 - name: min(Tensor self) -> Tensor
   self: evenly_distribute_backward(grad, self, result)
 
-- name: min.other(Tensor self, Tensor other) -> Tensor
+- name: minimum(Tensor self, Tensor other) -> Tensor
   self: grad.clone().masked_fill_(self >= other, 0)
   other: grad.clone().masked_fill_(self < other, 0)
 
