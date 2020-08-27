@@ -133,7 +133,6 @@ class TensorExprFuser {
   // TODO: handle better
   bool profiledWithDifferentTypes(Value* v) {
     std::vector<TypePtr> types;
-    TypePtr previous_type = nullptr;
     for (const auto& use : v->uses()) {
       if (use.user->kind() == prim::profile) {
         types.push_back(use.user->ty(attr::profiled_type));
@@ -431,25 +430,10 @@ class TensorExprFuser {
     return fusion_group;
   }
 
-  bool allShapesAreKnown(Value* v) {
-    if (!v->type()->cast<TensorType>()) {
-      return true;
-    }
-    if (v->node()->kind() != prim::profile) {
-      return v->type()->cast<TensorType>()->isComplete();
-    } else {
-      return v->node()
-          ->ty(attr::profiled_type)
-          ->cast<TensorType>()
-          ->isComplete();
-    }
-    return v->isCompleteTensor();
-  }
-
   bool allShapesAreKnown(Node* node) {
     // TODO: Relax the checks to support dynamic shapes
     for (Value* input : node->inputs()) {
-      if (!allShapesAreKnown(input)) {
+      if (!input->isCompleteTensor()) {
         return false;
       }
     }
