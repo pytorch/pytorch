@@ -217,9 +217,9 @@ void unpackQuantizedWeightsHelper(
         TORCH_INTERNAL_ASSERT(
             idx == conv_params_packed.numel(),
             "Unexpected length of conv_params_packed, expected ",
-            conv_params_packed.numel(),
+            idx,
             " got ",
-            idx);
+            conv_params_packed.numel());
 
         torch::List<c10::IValue> optional = elements[2].toList();
         bias = optional.get(0).toOptional<at::Tensor>();
