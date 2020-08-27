@@ -167,7 +167,7 @@ if(INTERN_BUILD_ATEN_OPS)
   endif()
 
   if(SELECTED_OP_LIST)
-    if(NOT USE_STATIC_DISPATCH AND NOT OP_DEPENDENCY)
+    if(NOT OP_DEPENDENCY)
       message(INFO "Use default op dependency graph .yaml file for custom build with dynamic dispatch.")
       set(OP_DEPENDENCY ${CMAKE_CURRENT_LIST_DIR}/../tools/code_analyzer/default_op_deps.yaml)
     endif()
