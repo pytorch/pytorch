@@ -1,9 +1,10 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
-import torch
 import copy
 
 import torch.nn.intrinsic.modules.fused as torch_fused
+import torch.nn as nn
+import torch.nn.intrinsic as nni
 
 def fuse_conv_bn(conv, bn):
     r"""Given the conv and bn modules, fuses them and returns the fused module
@@ -21,16 +22,16 @@ def fuse_conv_bn(conv, bn):
     assert(conv.training == bn.training),\
         "Conv and BN both must be in the same mode (train or eval)."
 
-    is_3d = isinstance(conv, torch.nn.Conv3d)
+    is_3d = isinstance(conv, nn.Conv3d)
 
     if conv.training:
         assert bn.num_features == conv.out_channels, 'Output channel of Conv2d must match num_features of BatchNorm2d'
         assert bn.affine, 'Only support fusing BatchNorm2d with affine set to True'
         assert bn.track_running_stats, 'Only support fusing BatchNorm2d with tracking_running_stats set to True'
-        return torch.nn.intrinsic.ConvBn3d(conv, bn) if is_3d \
-            else torch.nn.intrinsic.ConvBn2d(conv, bn)
+        return nni.ConvBn3d(conv, bn) if is_3d \
+            else nni.ConvBn2d(conv, bn)
     else:
-        return torch.nn.utils.fuse_conv_bn_eval(conv, bn)
+        return nn.utils.fuse_conv_bn_eval(conv, bn)
 
 def fuse_conv_bn_relu(conv, bn, relu):
     r"""Given the conv and bn modules, fuses them and returns the fused module
@@ -49,8 +50,8 @@ def fuse_conv_bn_relu(conv, bn, relu):
         "Conv and BN both must be in the same mode (train or eval)."
     if conv.training:
         map_to_fused_module_train = {
-            torch.nn.Conv2d: torch_fused.ConvBnReLU2d,
-            torch.nn.Conv3d: torch_fused.ConvBnReLU3d,
+            nn.Conv2d: torch_fused.ConvBnReLU2d,
+            nn.Conv3d: torch_fused.ConvBnReLU3d,
         }
         assert bn.num_features == conv.out_channels, 'Output channel of Conv must match num_features of BatchNorm'
         assert bn.affine, 'Only support fusing BatchNorm with affine set to True'
@@ -62,15 +63,30 @@ def fuse_conv_bn_relu(conv, bn, relu):
             raise NotImplementedError("Cannot fuse train modules: {}".format((conv, bn, relu)))
     else:
         map_to_fused_module_eval = {
-            torch.nn.Conv1d: torch_fused.ConvReLU1d,
-            torch.nn.Conv2d: torch_fused.ConvReLU2d,
-            torch.nn.Conv3d: torch_fused.ConvReLU3d,
+            nn.Conv1d: torch_fused.ConvReLU1d,
+            nn.Conv2d: torch_fused.ConvReLU2d,
+            nn.Conv3d: torch_fused.ConvReLU3d,
         }
         fused_module = map_to_fused_module_eval[type(conv)]
         if fused_module is not None:
-            return fused_module(torch.nn.utils.fusion.fuse_conv_bn_eval(conv, bn), relu)
+            return fused_module(nn.utils.fusion.fuse_conv_bn_eval(conv, bn), relu)
         else:
             raise NotImplementedError("Cannot fuse eval modules: {}".format((conv, bn, relu)))
+
+OP_LIST_TO_FUSER_METHOD = {
+    (nn.Conv1d, nn.BatchNorm1d): fuse_conv_bn,
+    (nn.Conv1d, nn.BatchNorm1d, nn.ReLU): fuse_conv_bn_relu,
+    (nn.Conv2d, nn.BatchNorm2d): fuse_conv_bn,
+    (nn.Conv2d, nn.BatchNorm2d, nn.ReLU): fuse_conv_bn_relu,
+    (nn.Conv3d, nn.BatchNorm3d): fuse_conv_bn,
+    (nn.Conv3d, nn.BatchNorm3d, nn.ReLU): fuse_conv_bn_relu,
+    (nn.Conv1d, nn.ReLU): nni.ConvReLU1d,
+    (nn.Conv2d, nn.ReLU): nni.ConvReLU2d,
+    (nn.Conv3d, nn.ReLU): nni.ConvReLU3d,
+    (nn.Linear, nn.ReLU): nni.LinearReLU,
+    (nn.BatchNorm2d, nn.ReLU): nni.BNReLU2d,
+    (nn.BatchNorm3d, nn.ReLU): nni.BNReLU3d,
+}
 
 # Generalization of getattr
 def _get_module(model, submodule_key):
@@ -102,22 +118,6 @@ def fuse_known_modules(mod_list):
     For these sequences, the first element in the output module list performs
     the fused operation. The rest of the elements are set to nn.Identity()
     """
-
-    OP_LIST_TO_FUSER_METHOD = {
-        (torch.nn.Conv1d, torch.nn.BatchNorm1d): fuse_conv_bn,
-        (torch.nn.Conv1d, torch.nn.BatchNorm1d, torch.nn.ReLU): fuse_conv_bn_relu,
-        (torch.nn.Conv2d, torch.nn.BatchNorm2d): fuse_conv_bn,
-        (torch.nn.Conv2d, torch.nn.BatchNorm2d, torch.nn.ReLU): fuse_conv_bn_relu,
-        (torch.nn.Conv3d, torch.nn.BatchNorm3d): fuse_conv_bn,
-        (torch.nn.Conv3d, torch.nn.BatchNorm3d, torch.nn.ReLU): fuse_conv_bn_relu,
-        (torch.nn.Conv1d, torch.nn.ReLU): torch.nn.intrinsic.ConvReLU1d,
-        (torch.nn.Conv2d, torch.nn.ReLU): torch.nn.intrinsic.ConvReLU2d,
-        (torch.nn.Conv3d, torch.nn.ReLU): torch.nn.intrinsic.ConvReLU3d,
-        (torch.nn.Linear, torch.nn.ReLU): torch.nn.intrinsic.LinearReLU,
-        (torch.nn.BatchNorm2d, torch.nn.ReLU): torch.nn.intrinsic.BNReLU2d,
-        (torch.nn.BatchNorm3d, torch.nn.ReLU): torch.nn.intrinsic.BNReLU3d,
-    }
-
     types = tuple(type(m) for m in mod_list)
     fuser_method = OP_LIST_TO_FUSER_METHOD.get(types, None)
     if fuser_method is None:
@@ -135,7 +135,7 @@ def fuse_known_modules(mod_list):
         del mod_list[-1]._forward_hooks[handle_id]
 
     for i in range(1, len(mod_list)):
-        new_mod[i] = torch.nn.Identity()
+        new_mod[i] = nn.Identity()
         new_mod[i].training = mod_list[0].training
 
     return new_mod
