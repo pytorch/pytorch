@@ -227,7 +227,7 @@ __global__ void cuda_sparse_coo_softmax_backward_kernel(
             values_row[k] =
                 c10::cuda::compat::exp(out_values_row[k]) * tmp_row[k];
           } else {
-            values_row[k] = out_values_row[k] * (tmp_row[k]);
+            values_row[k] = out_values_row[k] * tmp_row[k];
           }
         }
       }
@@ -309,44 +309,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> compute_pool_max(
   auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
   auto policy = thrust::cuda::par(allocator).on(stream);
 
-  auto ndim = indices.size(0);
   auto nnz = indices.size(1);
-  auto host_strides =
-      at::empty({ndim}, TensorOptions(kCPU).dtype(at::kLong).layout(kStrided));
-  at::fill_(host_strides, at::Scalar(int64_t(1)));
-  int64_t* host_strides_ptr = host_strides.data_ptr<int64_t>();
-  if (ndim > 1) {
-    for (int64_t i = ndim - 2; i >= 0; i--) {
-      host_strides_ptr[i] =
-          host_strides_ptr[i + 1] * (i + 1 == dim ? 1 : sizes[i + 1]);
-    }
-  }
-  auto strides =
-      host_strides.to(at::Device(kCUDA), indices.dtype(), false, true);
-
-  auto strides_ptr = strides.data_ptr<int64_t>();
-
-  auto indices_accessor = indices.packed_accessor<int64_t, 2>();
-
-  auto pools = at::empty({nnz}, indices.options());
-
-  thrust::transform(
-      policy,
-      thrust::make_counting_iterator(int64_t(0)),
-      thrust::make_counting_iterator(int64_t(nnz)),
-      thrust_ptr(pools.data_ptr<int64_t>()),
-      [indices_accessor, strides_ptr, dim, ndim] __device__(int64_t x) {
-        int64_t pool_index = 0;
-        for (int64_t j = 0; j < ndim; j++) {
-          if (j != dim) {
-            auto indices_row = indices_accessor[j];
-            auto stride = strides_ptr[j];
-            pool_index += stride * indices_row[x];
-          }
-        }
-        return pool_index;
-      });
-  int64_t* pools_ptr = pools.data_ptr<int64_t>();
+  auto offsets  = get_offsets(indices, sizes, dim);
+  int64_t* offsets_ptr = offsets.data_ptr<int64_t>();
 
   auto sorted_indices = at::empty({nnz}, indices.options());
   thrust_ptr sorted_indices_thrust_ptr(sorted_indices.data_ptr<int64_t>());
@@ -357,10 +322,10 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> compute_pool_max(
       policy,
       sorted_indices_thrust_ptr,
       sorted_indices_thrust_ptr + nnz,
-      [pools_ptr] __device__(int64_t x, int64_t y) {
-        return pools_ptr[x] < pools_ptr[y];
+      [offsets_ptr] __device__(int64_t x, int64_t y) {
+        return offsets_ptr[x] < offsets_ptr[y];
       });
-  auto count_set = at::empty({nnz}, indices.options());
+  auto pool_sizes = at::empty({nnz}, indices.options());
 
   auto new_end = thrust::reduce_by_key(
       policy,
@@ -368,22 +333,22 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> compute_pool_max(
       sorted_indices_thrust_ptr + nnz,
       thrust::make_constant_iterator(int64_t(1)),
       thrust::make_discard_iterator(),
-      thrust_ptr(count_set.data_ptr<int64_t>()),
-      [pools_ptr] __device__(int64_t x, int64_t y) {
-        return pools_ptr[x] == pools_ptr[y];
+      thrust_ptr(pool_sizes.data_ptr<int64_t>()),
+      [offsets_ptr] __device__(int64_t x, int64_t y) {
+        return offsets_ptr[x] == offsets_ptr[y];
       });
   auto new_sz = thrust::distance(
-      thrust_ptr(count_set.data_ptr<int64_t>()), new_end.second);
-  count_set.resize_({new_sz});
+      thrust_ptr(pool_sizes.data_ptr<int64_t>()), new_end.second);
+  pool_sizes.resize_({new_sz});
 
-  auto device_pool_offsets = count_set.clone();
-  thrust_ptr device_pool_offsets_thrust_ptr(
-      device_pool_offsets.data_ptr<int64_t>());
+  auto pool_offsets = pool_sizes.clone();
+  thrust_ptr pool_offsets_thrust_ptr(
+      pool_offsets.data_ptr<int64_t>());
   thrust::exclusive_scan(
       policy,
-      device_pool_offsets_thrust_ptr,
-      device_pool_offsets_thrust_ptr + new_sz,
-      device_pool_offsets_thrust_ptr);
+      pool_offsets_thrust_ptr,
+      pool_offsets_thrust_ptr + new_sz,
+      pool_offsets_thrust_ptr);
 
   Tensor mx_buffer;
   if (requireMxRows) {
@@ -400,9 +365,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> compute_pool_max(
 
     auto mx_buffer_ptr = mx_buffer.data_ptr<scalar_t>();
 
-    auto count_set_ptr = count_set.data_ptr<int64_t>();
+    auto pool_sizes_ptr = pool_sizes.data_ptr<int64_t>();
     auto sorted_indices_ptr = sorted_indices.data_ptr<int64_t>();
-    auto device_pool_offsets_ptr = device_pool_offsets.data_ptr<int64_t>();
+    auto pool_offsets_ptr = pool_offsets.data_ptr<int64_t>();
 
     thrust::for_each(
         policy,
@@ -410,13 +375,13 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> compute_pool_max(
         thrust::make_counting_iterator(int64_t(new_sz)),
         [values_accessor,
          sorted_indices_ptr,
-         count_set_ptr,
-         device_pool_offsets_ptr,
+         pool_sizes_ptr,
+         pool_offsets_ptr,
          mx_buffer_ptr,
          nvalues] __device__(int64_t index) {
-          int64_t curr_pool_size = count_set_ptr[index];
+          int64_t curr_pool_size = pool_sizes_ptr[index];
           auto mx_row = mx_buffer_ptr + index * nvalues;
-          int64_t offset = device_pool_offsets_ptr[index];
+          int64_t offset = pool_offsets_ptr[index];
           for (int64_t p = 0; p < curr_pool_size; p++) {
             int64_t i = *(sorted_indices_ptr + offset + p);
             auto values_row = values_accessor[i].data();
@@ -427,7 +392,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> compute_pool_max(
         });
   }
   return std::make_tuple(
-      sorted_indices, device_pool_offsets, count_set, mx_buffer);
+      sorted_indices, pool_offsets, pool_sizes, mx_buffer);
 }
 
 template <typename scalar_t, bool LogSoftMax>
@@ -476,14 +441,14 @@ void cuda_sparse_coo_softmax(
   auto out_values_accessor = out_values_2.packed_accessor<scalar_t, 2>();
 
   Tensor sorted_indices;
-  Tensor device_pool_offsets;
-  Tensor device_pool_sizes;
+  Tensor pool_offsets;
+  Tensor pool_sizes;
   Tensor mx_buffer;
 
-  std::tie(sorted_indices, device_pool_offsets, device_pool_sizes, mx_buffer) =
+  std::tie(sorted_indices, pool_offsets, pool_sizes, mx_buffer) =
       compute_pool_max<scalar_t, true>(indices, values_2, sizes, nvalues, dim);
 
-  auto pool_size = device_pool_offsets.size(0);
+  auto pool_size = pool_offsets.size(0);
   auto exp_sums_rows = at::empty({nvalues * pool_size}, values.options());
   thrust::device_ptr<scalar_t> exp_sums_rows_thrust_ptr(
       exp_sums_rows.data_ptr<scalar_t>());
@@ -500,8 +465,8 @@ void cuda_sparse_coo_softmax(
       <<<grid_size, block_size, 0, stream>>>(
           sorted_indices.data_ptr<int64_t>(),
           pool_size,
-          device_pool_sizes.data_ptr<int64_t>(),
-          device_pool_offsets.data_ptr<int64_t>(),
+          pool_sizes.data_ptr<int64_t>(),
+          pool_offsets.data_ptr<int64_t>(),
           nvalues,
           mx_buffer.data_ptr<scalar_t>(),
           exp_sums_rows.data_ptr<scalar_t>(),
@@ -597,16 +562,16 @@ void cuda_sparse_coo_softmax_backward(
       thrust_ptr(lower_bound_values.data_ptr<int64_t>()));
 
   Tensor sorted_indices;
-  Tensor device_pool_offsets;
-  Tensor device_pool_sizes;
+  Tensor pool_offsets;
+  Tensor pool_sizes;
 
-  // /* Compute independent pools of indices */
+  /* Compute independent pools of indices */
   std::tie(
-      sorted_indices, device_pool_offsets, device_pool_sizes, std::ignore) =
+      sorted_indices, pool_offsets, pool_sizes, std::ignore) =
       compute_pool_max<scalar_t, false>(
           out_indices, values_2, sizes, nvalues, dim);
 
-  auto pool_size = device_pool_offsets.size(0);
+  auto pool_size = pool_offsets.size(0);
 
   auto exp_sums_rows = at::empty({nvalues * pool_size}, values.options());
   thrust::device_ptr<scalar_t> exp_sums_rows_thrust_ptr(
@@ -624,8 +589,8 @@ void cuda_sparse_coo_softmax_backward(
       <<<grid_size, block_size, 0, stream>>>(
           sorted_indices.data_ptr<int64_t>(),
           pool_size,
-          device_pool_sizes.data_ptr<int64_t>(),
-          device_pool_offsets.data_ptr<int64_t>(),
+          pool_sizes.data_ptr<int64_t>(),
+          pool_offsets.data_ptr<int64_t>(),
           nvalues,
           grad_nnz,
           exp_sums_rows.data_ptr<scalar_t>(),

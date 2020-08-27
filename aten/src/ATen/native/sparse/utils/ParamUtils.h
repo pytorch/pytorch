@@ -18,12 +18,12 @@ std::pair<Tensor, Tensor> softmax_sparse_check_invariants(
   TORCH_CHECK(
       !half_to_float,
       std::string(function_name) +
-          "with half to float conversion is not supported on CPU");
+          ": with half to float conversion is not supported on CPU");
   auto input = input_.coalesce();
   Tensor output = at::native::empty_like(input);
   TORCH_CHECK(
       dim_ >= 0 && dim_ < input.dim(),
-      "dim must be non-negative and less than input dimensions");
+      ": dim must be non-negative and less than input dimensions");
   return std::make_pair(input, output);
 }
 
@@ -44,10 +44,10 @@ std::tuple<Tensor, Tensor, Tensor> softmax_backward_sparse_check_invariants(
   Tensor grad_input = at::native::empty_like(output);
   TORCH_CHECK(
       dim >= 0 && dim < grad.dim(),
-      "dim must be non-negative and less than input dimensions");
+      ": dim must be non-negative and less than input dimensions");
   TORCH_CHECK(
       grad.sparse_dim() == output.sparse_dim(),
-      "grad and output sparse dimensions must be equal");
+      ": grad and output sparse dimensions must be equal");
   return std::make_tuple(grad_input, grad, output);
 }
 
