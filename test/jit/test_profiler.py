@@ -65,3 +65,21 @@ class TestProfiler(JitTestCase):
         optimized_block = next(g.findNode("prim::If").blocks())
         # broadcasts occurred, currently expect to see aten::_grad_sum_to_size
         self.assertIsNotNone(optimized_block.findNode("aten::_grad_sum_to_size"))
+
+    def test_specialized_types(self):
+        @torch.jit.script
+        def test_fuse(a, b):
+            c = a * b
+            d = c * b
+            return d
+
+        x = torch.tensor([.5])
+        for _ in range(3):
+            test_fuse(x, x)
+
+        g = torch.jit.last_executed_optimized_graph()
+        # Types should remain specialized for typecheck outputs & fusion outputs
+        FileCheck().check("Double(").check_same("prim::TypeCheck").check("Double").check_same("TensorExpr").run(g)
+
+        # other outputs should not be specialized
+        FileCheck().check("Tensor = prim::If").run(g)
