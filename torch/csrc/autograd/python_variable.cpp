@@ -332,6 +332,47 @@ int THPVariable_set_grad(THPVariable *self, PyObject *py_grad, void *unused)
   END_HANDLE_TH_ERRORS_RET(-1)
 }
 
+PyObject *THPVariable_get_fw_grad(THPVariable *self, void *unused)
+{
+  HANDLE_TH_ERRORS
+  return THPVariable_Wrap(self->cdata.fw_grad());
+  END_HANDLE_TH_ERRORS
+}
+
+int THPVariable_set_fw_grad(THPVariable *self, PyObject *py_fw_grad, void *unused)
+{
+  HANDLE_TH_ERRORS
+  auto& var = self->cdata;
+  if (!py_fw_grad || py_fw_grad == Py_None) {
+    var.reset_fw_grad();
+    return 0;
+  }
+
+  THPUtils_assertRet(-1, THPVariable_Check(py_fw_grad),
+      "expected Variable or None (got %s)", THPUtils_typename(py_fw_grad));
+  THPUtils_assertRet(-1, self != (THPVariable*)py_fw_grad,
+      "can't assign Variable as its own forward fw_grad");
+
+  auto& fw_grad = ((THPVariable*)py_fw_grad)->cdata;
+  bool gradIsSparse = (var.dtype() == fw_grad.dtype() &&
+                       var.device().type() == fw_grad.device().type() &&
+                       fw_grad.layout() == kSparse);
+  THPUtils_assertRet(-1, fw_grad.type() == var.type() || gradIsSparse,
+      "assigned fw_grad has data of a different type");
+  if (var.is_cuda()) {
+    THPUtils_assertRet(-1, fw_grad.get_device() == var.get_device(),
+        "assigned fw_grad has data located on a different device");
+  }
+  THPUtils_assertRet(-1, fw_grad.sizes().equals(var.sizes()),
+      "assigned fw_grad has data of a different size");
+  TORCH_CHECK(!fw_grad.fw_grad().defined(), "Cannot set as a forward grad a Tensor "
+    "that already has a forward grad.")
+
+  var.set_fw_grad(fw_grad);
+  return 0;
+  END_HANDLE_TH_ERRORS_RET(-1)
+}
+
 PyObject *THPVariable_get_volatile(THPVariable *self, void *unused)
 {
   if (check_has_torch_function((PyObject *)self)) {
@@ -682,6 +723,7 @@ static struct PyGetSetDef THPVariable_properties[] = {
   {"data", (getter)THPVariable_get_data, (setter)THPVariable_set_data, nullptr, nullptr},
   {"_grad", (getter)THPVariable_get_grad, (setter)THPVariable_set_grad, nullptr, nullptr}, // Allows the python class to override .grad
   {"grad", (getter)THPVariable_get_grad, (setter)THPVariable_set_grad, nullptr, nullptr},
+  {"_fw_grad", (getter)THPVariable_get_fw_grad, (setter)THPVariable_set_fw_grad, nullptr, nullptr},
   {"_base", (getter)THPVariable_get_base, nullptr, nullptr, nullptr},
   {"volatile", (getter)THPVariable_get_volatile, (setter)THPVariable_set_volatile, nullptr, nullptr},
   {"output_nr", (getter)THPVariable_get_output_nr, nullptr, nullptr, nullptr},

@@ -11,6 +11,7 @@
 #include <ATen/core/VariableHooksInterface.h>
 
 #include <ATen/ATen.h>
+#include <ATen/MemoryOverlap.h>
 #include <c10/util/Exception.h>
 
 #include <list>
@@ -486,6 +487,152 @@ void handle_view_on_rebase(DifferentiableViewMeta* diff_view_meta, bool indirect
     // multiple time. This is ok as it should be a rare event.
     diff_view_meta->creation_meta = CreationMeta::DEFAULT;
   }
+}
+
+// [Forward Grad Layout]
+// The storage offset, size and stride of the fw grad must match the original Tensor.
+// Also if the Tensor is a view of a base, the fw grad must be a view of the base's fw grad.
+//
+// This is for two reasons
+// - To make sure views of the original Tensor are also valid views of the fw_grad
+// - Avoid performance issues with mismatched layouts
+//
+// Note that we assume for now that the view info are ALWAYS tracked.
+// This is not the case when `.detach()` is used but we leave this as future work
+
+namespace {
+  // Check if two Tensor have the same storage offset, sizes and strides
+  bool has_same_meta(const Variable& base, const Variable& other) {
+    if (!base.defined() || !other.defined()) {
+      return false;
+    }
+    if (base.storage_offset() != other.storage_offset()) {
+      return false;
+    }
+    if (base.dim() != other.dim()) {
+      return false;
+    }
+    for (auto i=0; i<base.dim(); ++i) {
+      if (base.sizes()[i] != other.sizes()[i]) {
+        return false;
+      }
+      if (base.strides()[i] != other.strides()[i]) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  Tensor new_with_same_meta(const Variable& base) {
+    // We need to create a storage of the same size to be able to have the same
+    // viewing behavior in all cases
+    auto nelement_in_storage = base.storage().nbytes() / base.itemsize();
+    auto new_tensor = at::empty({nelement_in_storage}, base.options());
+    auto res = new_tensor.as_strided(base.sizes(), base.strides(), base.storage_offset());
+    return res;
+  }
+} // anonymous namespace
+
+// This function is will ensure that the fw_grad_ has the same content as self and will
+// respect the [Forward Grad Layout] discussed above.
+void AutogradMeta::set_fw_grad(Variable& new_grad, const Variable& self) {
+  if (fw_grad_.defined()) {
+    // If there is already a fw_grad, re-use it
+    if (new_grad.defined()) {
+      // They are always the same size as the current Tensor
+      // TODO find a better way to get this error message
+      try {
+        fw_grad_.copy_(new_grad);
+      } catch (const c10::Error& e) {
+        TORCH_WARN("Updating the forward grad on a Tensor that has overlapping memory is not supported. "
+                   "You should reset it first.");
+        throw;
+      }
+    } else {
+      fw_grad_.fill_(0);
+    }
+  } else {
+    // Otherwise, check if the new_grad is valid
+    bool keep_new_grad = false;
+    if (has_same_meta(new_grad, self)) {
+      if (is_view_) {
+        // For views, we need to have the same meta and it must be a view of the base's fw_grad
+        auto this_view_meta = static_cast<DifferentiableViewMeta*>(this);
+        auto& base = this_view_meta->base_;
+        // The given new grad must be a view
+        if (new_grad.is_view() && base.fw_grad().defined()) {
+          auto new_grad_view_meta = static_cast<DifferentiableViewMeta*>(impl::get_autograd_meta(new_grad));
+          // And it must share data with the base's fw_grad
+          if (new_grad_view_meta->base_.data_ptr() == base.fw_grad().data_ptr()) {
+            keep_new_grad = true;
+          }
+        }
+      } else {
+        // For non-views, this is enough
+        keep_new_grad = true;
+      }
+    }
+
+    if (keep_new_grad) {
+      // Just re-use the given new_grad
+      fw_grad_ = new_grad;
+    } else {
+      // Otherwise reate the new fw_grad and populate it
+      if (is_view_) {
+        // For views, the fw_grad **must** be a view of the base's fw_grad
+        auto this_view_meta = static_cast<DifferentiableViewMeta*>(this);
+        if (!this_view_meta->base_.fw_grad().defined()) {
+          // If no other view created it, create a full fw_grad on the base
+          auto& base = this_view_meta->base_;
+          auto new_base_fw_grad = new_with_same_meta(base);
+          new_base_fw_grad.fill_(0);
+
+          this_view_meta->base_.set_fw_grad(new_base_fw_grad);
+        }
+        // Update this view's fw_grad as a view of the base
+        if (this_view_meta->has_view_fn()) {
+          fw_grad_ = this_view_meta->view_fn()(this_view_meta->base_.fw_grad());
+        } else {
+          fw_grad_ = this_view_meta->base_.fw_grad().as_strided(self.sizes(), self.strides(), self.storage_offset());
+        }
+      } else {
+        // Create a Tensor with the same meta as self
+        fw_grad_ = new_with_same_meta(self);
+      }
+
+      if (new_grad.defined()) {
+        if (is_view_) {
+          // TODO find a better way to get this error message
+          try {
+            fw_grad_.copy_(new_grad);
+          } catch (const c10::Error& e) {
+            // If the content is already correct, ignore the fact that we cannot copy_
+            // We may be able to skip this expensive check for some functions that just change metadata
+            // on Tensor to speed things up later if needed.
+            if (!*fw_grad_.eq(new_grad).all().data_ptr<bool>()) {
+              TORCH_WARN("Setting the forward grad of a Tensor that is a view and has memory overlap is not supported. "
+                         "You should set the forward grad on the base directly.");
+              throw;
+            }
+          }
+        } else {
+          // TODO find a better way to get this error message
+          try {
+            fw_grad_.copy_(new_grad);
+          } catch (const c10::Error& e) {
+            TORCH_WARN("Setting the forward grad of a Tensor that has memory overlap with a Tensor with different "
+                       "memory overlap is not supported. Both should have the same memory layour (size, stride and "
+                       "storage offset).");
+            throw;
+          }
+        }
+      } else {
+        fw_grad_.fill_(0);
+      }
+    }
+  }
+
+  TORCH_INTERNAL_ASSERT(has_same_meta(self, fw_grad_));
 }
 
 }} // namespace torch::autograd

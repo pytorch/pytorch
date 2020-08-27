@@ -552,6 +552,26 @@ class CAFFE2_API Tensor {
     return impl_->grad();
   }
 
+  /// This function returns the forward gradient for this Tensor.
+  /// You can set this value to start computing forward gradients using
+  /// set_fw_grad below.
+  const Tensor& fw_grad() const {
+    return impl_->fw_grad();
+  }
+
+  /// This function can be used to set the value of the forward grad.
+  /// Note that the given value might not be used directly if this Tensor already
+  /// has a forward grad or if it is a view of another Tensor.
+  void set_fw_grad(Tensor& new_grad) {
+    impl_->set_fw_grad(new_grad, *this);
+  }
+
+  /// This function can be used to reset the forward grad to an undefined Tensor.
+  void reset_fw_grad() {
+    impl_->reset_fw_grad();
+  }
+
+
   // STOP.  Thinking of adding a method here, which only makes use
   // of other ATen methods?  Define it in native_functions.yaml.
 

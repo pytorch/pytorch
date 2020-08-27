@@ -354,6 +354,9 @@ def _str_intern(self):
     if self.layout != torch.strided:
         suffixes.append('layout=' + str(self.layout))
 
+    if self._fw_grad is not None:
+        suffixes.append('_fw_grad={}'.format(self._fw_grad))
+
     if self.grad_fn is not None:
         name = type(self.grad_fn).__name__
         if name == 'CppFunction':

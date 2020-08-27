@@ -44,6 +44,22 @@ const at::Tensor& TensorImpl::grad() const {
   return autograd_meta_->grad();
 }
 
+const at::Tensor& TensorImpl::fw_grad() const {
+  // See TensorImpl::grad() above for explanation about the line below
+  if (!autograd_meta_) return impl::GetAutogradMetaFactory()->undefined_tensor();
+  return autograd_meta_->fw_grad();
+}
+
+void TensorImpl::set_fw_grad(at::Tensor& new_grad, const at::Tensor& self) {
+  if (!autograd_meta_) autograd_meta_ = impl::GetAutogradMetaFactory()->make();
+  autograd_meta_->set_fw_grad(new_grad, self);
+}
+
+void TensorImpl::reset_fw_grad() {
+  if (!autograd_meta_) autograd_meta_ = impl::GetAutogradMetaFactory()->make();
+  autograd_meta_->reset_fw_grad();
+}
+
 TensorImpl::TensorImpl(
     Storage&& storage,
     DispatchKeySet key_set,

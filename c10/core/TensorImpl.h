@@ -136,6 +136,9 @@ struct C10_API AutogradMetaInterface {
   virtual bool requires_grad() const = 0;
   virtual at::Tensor& mutable_grad() = 0;
   virtual const at::Tensor& grad() const = 0;
+  virtual const at::Tensor& fw_grad() const = 0;
+  virtual void set_fw_grad(at::Tensor& new_grad, const at::Tensor& self) = 0;
+  virtual void reset_fw_grad() = 0;
   virtual ~AutogradMetaInterface();
 };
 
@@ -585,6 +588,35 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * See Note [Tensor versus Variable in C++].
    */
   const at::Tensor& grad() const;
+
+  /**
+   * Return the accumulated gradient of a tensor. This gradient is computed
+   * using forward mode AD. This is populated during initial computation
+   * of the content of this Tensor then set with set_fw_grad().
+   *
+   * It is only valid to call this method on a Variable.
+   * See Note [Tensor versus Variable in C++].
+   */
+  const at::Tensor& fw_grad() const;
+
+  /**
+   * Sets the forward gradient for this Tensor.
+   * The given Tensor might not be used directly and its content will be copied.
+   * This function will always re-use the existing fw_grad if it exists, use the reset
+   * method below to reset this Tensor if needed.
+   *
+   * It is only valid to call this method on a Variable.
+   * See Note [Tensor versus Variable in C++].
+   */
+  void set_fw_grad(at::Tensor& new_grad, const at::Tensor& self);
+
+  /**
+   * Sets the forward gradient for this Tensor to an empty Tensor (undefined Tensor).
+   *
+   * It is only valid to call this method on a Variable.
+   * See Note [Tensor versus Variable in C++].
+   */
+  void reset_fw_grad();
 
   /**
    * Return a typed data pointer to the actual data which this tensor refers to.
