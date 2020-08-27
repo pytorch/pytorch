@@ -24,6 +24,7 @@ SavedVariable::SavedVariable(const Variable& variable, bool is_output, bool is_i
     // These copies are all shared_ptr copies, so slightly more expensive.
     // Do them here instead of in the init list in case data is undefined.
     data_ = variable.tensor_data();
+    fw_grad_ = variable.fw_grad();
     if (variable.is_leaf()) {
       grad_accumulator_ = impl::grad_accumulator(variable);
     } else if (!is_output) {
@@ -99,6 +100,12 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
   if (requires_grad_ && !var.grad_fn() && grad_accumulator_.expired())
     throw std::logic_error("No grad accumulator for a saved leaf!");
   impl::set_grad_accumulator(var, grad_accumulator_);
+
+  if (fw_grad_.defined()) {
+    // Because we can't steal fw_grad_ directly
+    Variable new_fw_grad = fw_grad_;
+    var.set_fw_grad(new_fw_grad);
+  }
 
   return var;
 }

@@ -30,6 +30,7 @@ class TORCH_API SavedVariable {
   Variable unpack(std::shared_ptr<Node> saved_for = nullptr) const;
 
   void reset_data() {
+    fw_grad_.reset();
     return data_.reset();
   }
 
@@ -39,6 +40,7 @@ class TORCH_API SavedVariable {
 
  private:
   at::Tensor data_;
+  at::Tensor fw_grad_;
 
   // The gradient function associated with this node. If has_grad_fn
   // is false, then this is a leaf node. Note that the grad_fn is not saved if
