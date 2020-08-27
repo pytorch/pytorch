@@ -444,14 +444,26 @@ ProcessGroupNCCL::ProcessGroupNCCL(
 }
 
 ProcessGroupNCCL::~ProcessGroupNCCL() {
-  std::unique_lock<std::mutex> lock(workVectorMutex_);
-  // Wait for workVector_ to become empty before proceeding with shutdown.
-  workVectorCV_.wait(lock, [&]() -> bool { return workVector_.empty(); });
-  lock.unlock();
-
   terminateProcessGroup_.store(true);
   watchdogCV_.notify_one();
   workVectorCV_.notify_one();
+
+  std::unique_lock<std::mutex> lock(workListMutex_);
+  // Clean up any remaining items in the workList_ instead of waiting for the
+  // workCleanup Thread to be scheduled again.
+  for (auto it = workList_.begin(); it != workList_.end();
+       /* no increment*/) {
+    auto& work = *it;
+    if (work->isCompleted()) {
+      it = workList_.erase(it);
+    } else {
+      ++it;
+    }
+  }
+  // Wait for workList_ to become empty before proceeding with shutdown.
+  workVectorCV_.wait(lock, [&]() -> bool { return workList_.empty(); });
+  lock.unlock();
+
 #ifdef ENABLE_NCCL_ERROR_CHECKING
   ncclCommWatchdogThread_.join();
 #endif
@@ -526,8 +538,8 @@ void ProcessGroupNCCL::ncclCommWatchdogInternal() {
     }
 
     {
-      std::unique_lock<std::mutex> lock(workVectorMutex_);
-      for (auto& work : workVector_) {
+      std::unique_lock<std::mutex> lock(workListMutex_);
+      for (auto& work : workList_) {
         work->checkAndSetException();
         // Aborting NCCL Communicators due to errors is already handled above.
         if (work->exception()) {
@@ -604,7 +616,7 @@ void ProcessGroupNCCL::ncclCommWatchdogInternal() {
 
 void ProcessGroupNCCL::workCleanupLoop() {
   while (!terminateProcessGroup_.load()) {
-    std::unique_lock<std::mutex> lock(workVectorMutex_);
+    std::unique_lock<std::mutex> lock(workListMutex_);
     // We busy-poll the work vector every kWatchdogThreadSleepMillis
     // milliseconds as long as the atomic is True.
     workVectorCV_.wait_for(
@@ -612,7 +624,7 @@ void ProcessGroupNCCL::workCleanupLoop() {
         std::chrono::milliseconds(kWorkCleanupThreadSleepMillis),
         [&]() -> bool { return terminateProcessGroup_.load(); });
 
-    for (auto it = workVector_.begin(); it != workVector_.end();
+    for (auto it = workList_.begin(); it != workList_.end();
          /* no increment*/) {
       auto& work = *it;
       if (work->isCompleted()) {
@@ -621,7 +633,7 @@ void ProcessGroupNCCL::workCleanupLoop() {
         if (work->finishedGPUExecution()) {
           work->handleNCCLGuard();
         }
-        it = workVector_.erase(it);
+        it = workList_.erase(it);
       } else {
         // Increment the iterator if the current WorkNCCL object is not
         // completed.
@@ -629,9 +641,10 @@ void ProcessGroupNCCL::workCleanupLoop() {
       }
     }
 
-    if (workVector_.empty()) {
+    if (workList_.empty()) {
       // Notify the main thread if it is blocked in the shutdown sequence,
       // waiting for the work vector to become empty.
+      lock.unlock();
       workVectorCV_.notify_one();
     }
   }
@@ -872,13 +885,10 @@ c10::intrusive_ptr<c10::ivalue::Future> ProcessGroupNCCL::WorkNCCL::
       at::IValue(*outputs_), (*outputs_)[0].device().index(), cudaEvents_);
 }
 
-void ProcessGroupNCCL::enqueue(
+void ProcessGroupNCCL::workEnqueue(
     std::shared_ptr<ProcessGroupNCCL::WorkNCCL> work) {
-  {
-    std::lock_guard<std::mutex> lock(workVectorMutex_);
-    workVector_.emplace_back(std::move(work));
-  }
-  workVectorCV_.notify_one();
+  std::lock_guard<std::mutex> lock(workListMutex_);
+  workList_.emplace_back(std::move(work));
 }
 
 template <typename Fn, typename PreProcess, typename PostProcess>
@@ -943,7 +953,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
     work->store_ = store_;
   }
 
-  enqueue(work);
+  workEnqueue(work);
 
   return work;
 }
