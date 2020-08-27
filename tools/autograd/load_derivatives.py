@@ -36,12 +36,13 @@ def load_derivatives(path, declarations):
 
 def create_differentiability_info(signature, non_differentiable_arg_names,
                                   output_differentiability,
-                                  autograd_fn):
+                                  autograd_fn, fw_derivatives):
     return {
         'signature': signature,
         'non_differentiable_arg_names': non_differentiable_arg_names,
         'output_differentiability': output_differentiability,
         'autograd_fn': autograd_fn,
+        'autograd_fw_info': fw_derivatives,
     }
 
 
@@ -70,6 +71,8 @@ def create_derivative(arguments, returns, name, formula, var_names):
             r['name'] = 'result'
         return r
 
+    original_formula = formula
+
     returns = [transform_return(r) for r in returns]
     formula, saved_inputs = saved_variables(formula, arguments)
     formula, saved_outputs = saved_variables(formula, returns)
@@ -84,6 +87,7 @@ def create_derivative(arguments, returns, name, formula, var_names):
 
     return {
         'formula': formula,
+        'original_formula': original_formula,
         'saved_inputs': saved_inputs,
         'saved_outputs': saved_outputs,
         'var_names': var_names,
@@ -143,6 +147,10 @@ def process_definition(defn, declarations_by_signature, declarations_by_schema):
                                "otherwise, there is a likely error in your derivatives "
                                "declaration.".format(defn_name))
 
+    def find_required_inputs_fw_grads(formula):
+        FW_GRAD_REGEX = r'(\w+).fw_grad'
+        return re.findall(FW_GRAD_REGEX, formula)
+
     def set_up_derivatives(defn_name, defn, declaration):
         # Determine the set of inputs which have derivatives
         args_with_derivatives_set = set()
@@ -156,28 +164,101 @@ def process_definition(defn, declarations_by_signature, declarations_by_schema):
                 continue
             args_with_derivatives.append(arg)
 
+        # Used to differentiate forward and backward formulas
+        arg_names = [arg['name'] for arg in declaration['arguments']]
+        def is_fw_def(names):
+            if len(names) > 1:
+                # Forward definition are always for a single output at a time
+                return False
+            name = names[0]
+            if name not in arg_names:
+                return True
+            else:
+                return False
+
+        def postprocess_fw_derivative(fw_derivatives, derivatives, args_with_derivatives):
+            # Generate the formulas for the special cases of fw derivatives
+
+            for fw_def in fw_derivatives:
+                if fw_def['formula'] == "element_wise":
+                    if (not len(args_with_derivatives) == 1) or len(fw_derivatives) > 1:
+                        raise RuntimeError("Derivative definition of {} in derivatives.yaml defines the "
+                                           "forward definition of gradient as element_wise but this only "
+                                           "works for functions with a single differentiable input and a "
+                                           "single differentiable output.".format(defn_name))
+                    if not len(derivatives) == 1:
+                        raise RuntimeError("Derivative definition of {} in derivatives.yaml defines the "
+                                           "forward definition of gradient as element_wise but it does not "
+                                           "defines the gradient formula for its argument which is required."
+                                           .format(defn_name))
+
+                    backward_formula = derivatives[0]['original_formula']
+                    input_name = args_with_derivatives[0]['name']
+
+                    def repl(m):
+                        return "{}{}_fw_grad{}".format(m.group(1), input_name, m.group(2))
+                    fw_formula = re.sub(IDENT_REGEX.format("grad"), repl, backward_formula)
+
+                    fw_def['required_inputs'] = arg_names
+                    fw_def['formula'] = fw_formula
+                elif fw_def['formula'] == "linear":
+                    if len(fw_derivatives) > 1:
+                        raise RuntimeError("Derivative definition of {} in derivatives.yaml defines the "
+                                           "forward definition of gradient as linear but this only works "
+                                           "for functions with a single differentiable output."
+                                           .format(defn_name))
+
+                    diff_arg_names = [arg['name'] for arg in args_with_derivatives]
+                    assert len(diff_arg_names) > 0
+
+                    args = []
+                    for arg_name in arg_names:
+                        if arg_name in diff_arg_names:
+                            arg_name = arg_name + "_fw_grad"
+                        args.append(arg_name)
+
+                    if "namespace" in declaration['method_of']:
+                        fw_formula = "at::{}({})".format(defn_name, ", ".join(args))
+                    else:
+                        assert not declaration['inplace']
+                        assert "Tensor" in declaration['method_of']
+                        fw_formula = "{}.{}({})".format(args[0], defn_name, ", ".join(args[1:]))
+
+                    fw_def['required_inputs'] = diff_arg_names
+                    fw_def['formula'] = fw_formula
+
         # Set up the derivative information
         derivatives = []
+        fw_derivatives = []
         non_differentiable_arg_names = []
         for raw_names in sorted(defn.keys()):
             formula = defn[raw_names]
             names = split_names(raw_names)
-            derivative = create_derivative(declaration['arguments'], declaration['returns'],
-                                           declaration['name'], formula, names)
-            if formula.lower().strip() == 'non_differentiable':
-                assert not sum([type(var_name) == list
-                                for var_name in derivative['var_names']]), \
-                    "Variable names associated to a formula should be a flat list"
-                non_differentiable_arg_names += derivative['var_names']
+            if is_fw_def(names):
+                derivative = {"out_arg": names[0],
+                              "out_type": declaration['returns'][0]['dynamic_type'],
+                              "formula": formula,
+                              "required_inputs": find_required_inputs_fw_grads(formula)}
+                fw_derivatives.append(derivative)
             else:
-                derivatives.append(derivative)
+                derivative = create_derivative(declaration['arguments'], declaration['returns'],
+                                               declaration['name'], formula, names)
+                if formula.lower().strip() == 'non_differentiable':
+                    assert not sum([type(var_name) == list
+                                    for var_name in derivative['var_names']]), \
+                        "Variable names associated to a formula should be a flat list"
+                    non_differentiable_arg_names += derivative['var_names']
+                else:
+                    derivatives.append(derivative)
         args_with_derivatives = list(filter(lambda x: x['name'] not in non_differentiable_arg_names,
                                             args_with_derivatives))
 
         # Test to see if the use of 'grads' makes sense.
         check_grad_usage(defn_name, declaration, derivatives)
 
-        return derivatives, args_with_derivatives, non_differentiable_arg_names
+        postprocess_fw_derivative(fw_derivatives, derivatives, args_with_derivatives)
+
+        return derivatives, fw_derivatives, args_with_derivatives, non_differentiable_arg_names
 
     def unzip(xs):
         return zip(*xs)
@@ -214,7 +295,14 @@ def process_definition(defn, declarations_by_signature, declarations_by_schema):
                            "Please use a different name in native_functions.yaml."
                            .format(defn_name))
 
-    derivatives, args_with_derivatives, non_differentiable_arg_names = set_up_derivatives(defn_name, defn, canonical)
+    if 'result' in (a['name'] for a in canonical['arguments']):
+        raise RuntimeError("Schema for {} has an argument named result, "
+                           "but this is only allowed for outputs."
+                           "Please use a different name in native_functions.yaml."
+                           .format(defn_name))
+
+    derivatives, fw_derivatives, args_with_derivatives, non_differentiable_arg_names = \
+        set_up_derivatives(defn_name, defn, canonical)
     autograd_fn = None
 
     # only create an autograd function if we are actually going to calculate a derivative
@@ -223,7 +311,7 @@ def process_definition(defn, declarations_by_signature, declarations_by_schema):
                                                canonical)
 
     return create_differentiability_info(signature, non_differentiable_arg_names,
-                                         output_differentiability, autograd_fn)
+                                         output_differentiability, autograd_fn, fw_derivatives)
 
 
 def ensure_unique_names(autograd_functions):
@@ -389,6 +477,21 @@ def match_declarations_with_differentiability_info(declarations, differentiabili
 
     for declaration in declarations:
         info = find_info(declaration)
+
+        # For functions that have a single def for out of place and inplace (like exp())
+        fw_info = []
+        if info:
+            fw_info = copy.deepcopy(info['autograd_fw_info'])
+            if fw_info and declaration['inplace']:
+                assert len(fw_info) == 1 # Only single output inplace should exist
+                d = fw_info[0]
+                # replace "result" from the formula by self
+                def repl(m):
+                    return "{}self{}".format(m.group(1), m.group(2))
+                d['formula'] = re.sub(IDENT_REGEX.format("result"), repl, d['formula'])
+                d['out_arg'] = "self"
+
         declaration['derivative'] = info['autograd_fn'] if info else None
         declaration['non_differentiable_arg_names'] = info['non_differentiable_arg_names'] if info else []
         declaration['output_differentiability'] = info['output_differentiability'] if info else None
+        declaration['autograd_fw_info'] = fw_info

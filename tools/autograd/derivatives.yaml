@@ -160,6 +160,7 @@
 # in Decalarations.yaml
 - name: abs(Tensor self) -> Tensor
   self: grad * self.sign()
+  result: element_wise
 
 - name: acos(Tensor self) -> Tensor
   self: grad * -((-self * self + 1).rsqrt())
@@ -249,6 +250,7 @@
 
 - name: as_strided(Tensor(a) self, int[] size, int[] stride, int? storage_offset=None) -> Tensor(a)
   self: as_strided_backward(grad, TensorGeometry(self), size, stride, storage_offset)
+  result: linear
 
 - name: asin(Tensor self) -> Tensor
   self: grad * (-self * self + 1).rsqrt()
