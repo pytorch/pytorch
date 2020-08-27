@@ -413,6 +413,17 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   ncclCommWatchdogThread_ =
       std::thread(&ProcessGroupNCCL::ncclCommWatchdog, this);
 #endif
+
+  // If single-process single-device mode, WorkNCCL::getFuture is supported,
+  // so get a dedicated stream for each device to run FutureNCCL then callbacks.
+  // Depending on the device index of collective outputs, WorkNCCL passes
+  // the corresponding device's then callback stream to FutureNCCL.
+  futureNCCLCallbackStreams_.reserve(c10::cuda::device_count());
+  for (int device_index = 0; device_index < c10::cuda::device_count();
+       device_index++) {
+    futureNCCLCallbackStreams_.push_back(std::make_shared<at::cuda::CUDAStream>(
+        at::cuda::getStreamFromPool(device_index)));
+  }
 }
 
 ProcessGroupNCCL::~ProcessGroupNCCL() {
@@ -644,13 +655,6 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
 
     // Creates the NCCL streams
     streamVal.push_back(at::cuda::getStreamFromPool());
-
-    // If single-process single-device mode, WorkNCCL::getFuture is supported,
-    // so get a dedicated stream to run FutureNCCL then callbacks.
-    if (devices.size() == 1) {
-      futureNCCLCallbackStream_ =
-          std::make_shared<at::cuda::CUDAStream>(at::cuda::getStreamFromPool());
-    }
   }
 
   C10D_NCCL_CHECK(ncclGroupEnd());
@@ -814,7 +818,8 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
   // WorkNCCL::getFuture.
   if (outputs.size() == 1) {
     work->outputs_ = std::make_shared<std::vector<at::Tensor>>(outputs);
-    work->futureNCCLCallbackStream_ = futureNCCLCallbackStream_;
+    work->futureNCCLCallbackStream_ =
+        futureNCCLCallbackStreams_[outputs[0].device().index()];
   }
 
   at::cuda::OptionalCUDAGuard gpuGuard;

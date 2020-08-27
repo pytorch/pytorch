@@ -152,10 +152,10 @@ class ProcessGroupNCCL : public ProcessGroup {
   // If created by WorkNCCL's getFuture API, FutureNCCL has a reference to
   // WorkNCCL's cudaEvents, NCCL collective's outputs, device index of
   // outputs' device, and the ProcesGroupNCCL's dedicated
-  // futureNCCLCallbackStream that runs all the then callbacks called from this
-  // FutureNCCL. Its value is NCCL collective's outputs. FutureNCCL only
-  // supports single-process single-device mode where the size of outputs is
-  // equal to 1.
+  // futureNCCLCallbackStream for outputs' device that runs all the then
+  // callbacks called from this FutureNCCL. Its value is NCCL collective's
+  // outputs. FutureNCCL only supports single-process single-device mode where
+  // the size of outputs is equal to 1.
   //
   // If created by FutureNCCL's then callback, its value becomes the value of
   // callback() and its cudaEvents will record the NCCL stream that runs that
@@ -165,7 +165,7 @@ class ProcessGroupNCCL : public ProcessGroup {
   // default stream while running the callback. In case of multiple then
   // callbacks, the design will work like a chain such that FutureNCCL n will
   // wait on the cudaEvents from FutureNCCL n - 1. All callbacks are executed on
-  // ProcesGroupNCCL's dedicated futureNCCLCallbackStream.
+  // outputs' device's dedicated futureNCCLCallbackStream.
   struct FutureNCCL : at::ivalue::Future {
    public:
     explicit FutureNCCL(
@@ -244,18 +244,9 @@ class ProcessGroupNCCL : public ProcessGroup {
     // synchronizing FutureNCCL's own cudaEvents with the stream that runs
     // this callback. This new FutureNCCL's cudaEvents will record the
     // callback's stream and will have the result value of the callback.
-    void addCallbackWithStream(
-        std::function<void(void)> callback,
-        const c10::cuda::CUDAStream& stream) {
-      (*cudaEvents_)[0].block(stream);
+    void addCallback(std::function<void(void)> callback) override {
+      (*cudaEvents_)[0].block(*futureNCCLCallbackStream_);
       callback();
-    }
-
-    // We use addCallbackWithStream instead of addCallback.
-    void addCallback(std::function<void(void)> /* unused */) override {
-      C10_THROW_ERROR(
-          Error,
-          "FutureNCCL uses addCallbackWithStream instead of addCallback.");
     }
 
     // Adds a callback to FutureNCCL, and returns another FutureNCCL to hold
@@ -277,20 +268,18 @@ class ProcessGroupNCCL : public ProcessGroup {
       // Cannot move capture std::function in lambda, because it cannot deduce
       // the template type for std::function. Hence use std::bind to explicitly
       // specify types.
-      addCallbackWithStream(
-          std::bind(
-              [&](std::function<at::IValue(void)> cb) {
-                try {
-                  fut->markCompleted(at::IValue(cb()));
-                  // In case of chained then callback calls, thenFutCudaEvents
-                  // records callback's stream.
-                  (*thenFutCudaEvents)[0].record(*futureNCCLCallbackStream_);
-                } catch (const std::exception& e) {
-                  fut->setError(e.what());
-                }
-              },
-              std::move(callback)),
-          *futureNCCLCallbackStream_);
+      addCallback(std::bind(
+          [&](std::function<at::IValue(void)> cb) {
+            try {
+              fut->markCompleted(at::IValue(cb()));
+              // In case of chained then callback calls, thenFutCudaEvents
+              // records callback's stream.
+              (*thenFutCudaEvents)[0].record(*futureNCCLCallbackStream_);
+            } catch (const std::exception& e) {
+              fut->setError(e.what());
+            }
+          },
+          std::move(callback)));
       return fut;
     }
 
@@ -585,8 +574,9 @@ class ProcessGroupNCCL : public ProcessGroup {
   // set contains the string representation of ncclUniqueId.
   std::unordered_set<std::string> abortedComms_;
 
-  // Dedicated CUDA stream that runs FutureNCCL then callback.
-  std::shared_ptr<at::cuda::CUDAStream> futureNCCLCallbackStream_;
+  // Dedicated CUDA stream for each available device that runs FutureNCCL then
+  // callback.
+  std::vector<std::shared_ptr<at::cuda::CUDAStream>> futureNCCLCallbackStreams_;
 };
 
 } // namespace c10d

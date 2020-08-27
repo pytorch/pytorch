@@ -33,6 +33,7 @@ namespace jit {
   _(TopologicalIndex)                             \
   _(TopologicalMove)                              \
   _(SubgraphUtils)                                \
+  _(SubgraphUtilsVmap)                            \
   _(AliasAnalysis)                                \
   _(ContainerAliasing)                            \
   _(AliasRegistration)                            \
@@ -110,6 +111,7 @@ namespace jit {
   _(MobileSaveLoadParameters)                     \
   _(MobileSaveLoadParametersEmpty)                \
   _(LiteSGD)                                      \
+  _(LiteSequentialSampler)                        \
   _(FusionAliasing)
 
 #if defined(USE_CUDA)
