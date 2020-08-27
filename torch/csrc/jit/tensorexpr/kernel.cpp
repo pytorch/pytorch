@@ -1273,9 +1273,11 @@ Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
   torch::jit::tensorexpr::LoopNest l(flatTensorOutputs_);
   GRAPH_DEBUG("Original Stmt:\n", std::to_string(l.root_stmt()), "\n");
 
+  bool hasReduction = NodeFinder<ReduceOp>::find(l.root_stmt()).size() != 0;
+
   // Compute non-output tensors_ inline
   for (auto& p : tensors_) {
-    if (!l.hasLoopBodyFor(p.second)) {
+    if (!l.hasLoopBodyFor(p.second) || hasReduction) {
       continue;
     }
     Stmt* loop = l.getLoopBodyFor(p.second);
@@ -1359,12 +1361,9 @@ Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
     }
   }
 
-  bool allowVectorization =
-      NodeFinder<ReduceOp>::find(l.root_stmt()).size() == 0;
-
   l.prepareForCodegen();
 
-  if (backendType == kLLVMCodeGen && allowVectorization) {
+  if (backendType == kLLVMCodeGen && !hasReduction) {
     std::vector<For*> innerLoops;
     std::vector<For*> worklist;
 
