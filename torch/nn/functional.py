@@ -3908,44 +3908,51 @@ def _pad_circular(input, padding):
     out = torch.empty(out_shape, dtype=input.dtype, layout=input.layout,
                       device=input.device)
 
-    # Put original tensor in padded tensor
-
-    def calc_indices(in_size, out_size, padding):
-        """Calculates indices for placing original tensor into new tensor.
-
-        Args:
-            in_size (int): Size of dimension of input tensor.
-            out_size (int): Size of dimension of output tensor.
-            padding (tuple): Length 2 tuple containing padding values for
-                beginning and end of tensor.
-
-        Returns:
-            in_idx (tuple): Start and end indices for slicing input tensor.
-            out_idx (tuple): Start and end indices for slicing output tensor.
-        """
-        in_idx = (max(-padding[0], 0),
-                  in_size - max(-padding[1], 0))
-        out_idx = (max(padding[0], 0),
-                   out_size - max(padding[1], 0))
-        return in_idx, out_idx
-
+    # Put original array in padded array
     if ndim == 1:
-        in_d, out_d = calc_indices(in_shape[2], out_shape[2], padding[-2:])
+        out_d0 = max(padding[-2], 0)
+        out_d1 = out_shape[2] - max(padding[-1], 0)
 
-        out[..., out_d[0]:out_d[1]] = input[..., in_d[0]:in_d[1]]
+        in_d0 = max(-padding[-2], 0)
+        in_d1 = in_shape[2] - max(-padding[-1], 0)
+
+        out[..., out_d0:out_d1] = input[..., in_d0:in_d1]
     elif ndim == 2:
-        in_d, out_d = calc_indices(in_shape[2], out_shape[2], padding[-2:])
-        in_h, out_h = calc_indices(in_shape[3], out_shape[3], padding[-4:-2])
+        out_d0 = max(padding[-2], 0)
+        out_d1 = out_shape[2] - max(padding[-1], 0)
 
-        out[..., out_d[0]:out_d[1], out_h[0]:out_h[1]] = \
-            input[..., in_d[0]:in_d[1], in_h[0]:in_h[1]]
+        out_h0 = max(padding[-4], 0)
+        out_h1 = out_shape[3] - max(padding[-3], 0)
+
+        in_d0 = max(-padding[-2], 0)
+        in_d1 = in_shape[2] - max(-padding[-1], 0)
+
+        in_h0 = max(-padding[-4], 0)
+        in_h1 = in_shape[3] - max(-padding[-3], 0)
+
+        out[..., out_d0:out_d1, out_h0:out_h1] = \
+            input[..., in_d0:in_d1, in_h0:in_h1]
     elif ndim == 3:
-        in_d, out_d = calc_indices(in_shape[2], out_shape[2], padding[-2:])
-        in_h, out_h = calc_indices(in_shape[3], out_shape[3], padding[-4:-2])
-        in_w, out_w = calc_indices(in_shape[4], out_shape[4], padding[-6:-4])
+        out_d0 = max(padding[-2], 0)
+        out_d1 = out_shape[2] - max(padding[-1], 0)
 
-        out[..., out_d[0]:out_d[1], out_h[0]:out_h[1], out_w[0]:out_w[1]] = \
-            input[..., in_d[0]:in_d[1], in_h[0]:in_h[1], in_w[0]:in_w[1]]
+        out_h0 = max(padding[-4], 0)
+        out_h1 = out_shape[3] - max(padding[-3], 0)
+
+        out_w0 = max(padding[-6], 0)
+        out_w1 = out_shape[4] - max(padding[-5], 0)
+
+        in_d0 = max(-padding[-2], 0)
+        in_d1 = in_shape[2] - max(-padding[-1], 0)
+
+        in_h0 = max(-padding[-4], 0)
+        in_h1 = in_shape[3] - max(-padding[-3], 0)
+
+        in_w0 = max(-padding[-6], 0)
+        in_w1 = in_shape[4] - max(-padding[-5], 0)
+
+        out[..., out_d0:out_d1, out_h0:out_h1, out_w0:out_w1] = \
+            input[..., in_d0:in_d1, in_h0:in_h1, in_w0:in_w1]
 
     # The following steps first pad the beginning of the tensor (left side),
     # and then pad the end of the tensor (right side).
