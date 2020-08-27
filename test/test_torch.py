@@ -9798,6 +9798,31 @@ class TestTorchDeviceType(TestCase):
         expected = torch.diag(x.contiguous().view(-1))
         self.assertEqual(result, expected)
 
+    # Ensure that nuclear_norm's out variant gives the same result as the non-out
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.float32, torch.float64)
+    def test_nuclear_norm_out(self, device, dtype):
+        test_cases = [
+            # input size, dim
+            ((25, 25), None),
+            ((25, 25), (0, 1)),
+            ((25, 25), (1, 0)),
+            ((25, 25, 25), (2, 0)),
+            ((25, 25, 25), (0, 1)),
+        ]
+        for keepdim in [False, True]:
+            for input_size, dim in test_cases:
+                x = torch.randn(*input_size, device=device, dtype=dtype)
+                result_out = torch.tensor(0, device=device, dtype=dtype)
+                if dim is None:
+                    result = torch.nuclear_norm(x, keepdim=keepdim)
+                    torch.nuclear_norm(x, keepdim=keepdim, out=result_out)
+                else:
+                    result = torch.nuclear_norm(x, keepdim=keepdim, dim=dim)
+                    torch.nuclear_norm(x, keepdim=keepdim, dim=dim, out=result_out)
+                self.assertEqual(result, result_out)
+
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")

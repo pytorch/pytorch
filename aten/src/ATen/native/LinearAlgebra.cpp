@@ -1380,8 +1380,7 @@ Tensor& nuclear_norm_out(Tensor& result, const Tensor& self, IntArrayRef dim, bo
   if (keepdim) {
     result.unsqueeze_(-1);
     Tensor result_ = result.permute(permutation_reverse);
-    at::native::resize_output(result, result_.sizes());
-    result.copy_(result_);
+    result.set_(result_);
   }
   return result;
 }
