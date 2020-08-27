@@ -12405,7 +12405,7 @@ a")
                                     "supported in TorchScript"):
             @torch.jit.script
             def unknown_op(x):
-                torch.set_grad_enabled(True)
+                torch.set_anomaly_enabled(True)
                 return x
 
     def test_exceptions(self):
