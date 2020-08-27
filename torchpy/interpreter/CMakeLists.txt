@@ -79,7 +79,8 @@ set(INTERPRETER_LIB_SOURCES
 )
 add_library(interpreter ${INTERPRETER_LIB_SOURCES})
 target_include_directories(interpreter PRIVATE ${INTERPRETER_DIR})
-target_link_libraries(interpreter PRIVATE torch torch_python -Wl,-rpath,/home/whc/local/pytorch-env/lib/)
+# target_link_libraries(interpreter PRIVATE torch torch_python -Wl,-rpath,/home/whc/local/pytorch-env/lib/)
+
 
 # libraries python modules need
 target_link_libraries(interpreter PRIVATE -Wl,-rpath,${PYTHON_INSTALL_DIR}/lib -L${PYTHON_INSTALL_DIR}/lib python3.7m)
