@@ -54,7 +54,7 @@ static auto reg =
   F(prim::TupleConstruct)
 
 StaticRuntime::StaticRuntime(const torch::jit::Module& m)
-    : module_(m.deepcopy()), graph_(nullptr) {
+    : module_(m.copy()), graph_(nullptr) {
   module_.eval();
   module_ = freeze_module(module_);
   graph_ = module_.get_method("forward").graph();
