@@ -5677,8 +5677,8 @@ a")
         FileCheck().check("SourceRange at:") \
                    .check("def fn():") \
                    .check("~~~~~~~~~...  <--- HERE") \
-                   .check('raise Exception("hello")').run(str(ast.range()))
-
+                   .check('raise Exception("hello")') \
+                   .run(str(ast.range()))
 
     def test_python_frontend_py3(self):
         def fn():
