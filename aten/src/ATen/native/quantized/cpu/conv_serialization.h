@@ -216,9 +216,9 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> deserialize_conv(
   idx++;
   TORCH_INTERNAL_ASSERT(idx == conv_params_packed.numel(),
       "Unexpected length of conv_params_packed, expected ",
-      conv_params_packed.numel(),
+      idx,
       " got ",
-      idx);
+      conv_params_packed.numel());
 
   auto& ctx = at::globalContext();
 
