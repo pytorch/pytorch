@@ -996,7 +996,17 @@ struct to_ir {
       result_type = merged_result_type.value();
     }
     AT_ASSERT(result_type);
+
     def_stack_.back().merged_return_type_ = result_type;
+
+    // If the annotated return type is Any and the result type is not Any,
+    // cast the result to Any to facilitate type unification between return
+    // statements on different code paths (e.g. different branches of an if,
+    // body and containing scope of a loop).
+    if (result_type == AnyType::get() && result->type() != AnyType::get()) {
+      result = graph->insertUncheckedCast(result, result_type);
+    }
+
     graph->insertNode(graph->create(prim::ReturnStmt, {result}, 0));
     exit_blocks.insert(environment_stack->block());
   }
