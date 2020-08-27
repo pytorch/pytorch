@@ -11,7 +11,7 @@ from typing import Union, Sequence
 # and the C++ API exactly matched), but over time we have
 # evolved the C++ API without actually changing our native::
 # kernels.  To be deleted eventually.  Dispatcher calls use
-# this when you are not use_c10_dispatcher_full.
+# this when you are not use_c10_dispatcher: full.
 
 def name(func: FunctionSchema) -> str:
     name = str(func.name.name)

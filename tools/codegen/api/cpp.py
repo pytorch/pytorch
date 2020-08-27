@@ -65,8 +65,6 @@ def valuetype_type(t: Type) -> Optional[str]:
         raise AssertionError(f"unrecognized type {repr(t)}")
 
 # Translation of types occuring in JIT arguments to a C++ argument type.
-# TODO: remove use_c10_dispatcher_full kwarg from this function; type
-# translation ideally doesn't depend on this
 def argumenttype_type(t: Type, *, mutable: bool) -> str:
     # If it's a value type, do the value type translation
     r = valuetype_type(t)
@@ -89,7 +87,7 @@ def argumenttype_type(t: Type, *, mutable: bool) -> str:
             if mutable:
                 return 'Tensor &'  # TODO: fix this discrepancy
             else:
-                if local.use_c10_dispatcher_full():
+                if local.use_c10_dispatcher() is UseC10Dispatcher.full:
                     return 'const c10::optional<Tensor>&'
                 else:
                     return 'const Tensor &'
@@ -104,7 +102,7 @@ def argumenttype_type(t: Type, *, mutable: bool) -> str:
         elif str(t.elem) == 'Dimname':
             return "DimnameList"
         # TODO: do something reasonable about lists of optional tensors
-        elif not local.use_c10_dispatcher_full() and str(t.elem) == 'Tensor?':
+        elif not local.use_c10_dispatcher() is UseC10Dispatcher.full and str(t.elem) == 'Tensor?':
             return "TensorList"
         elem = argumenttype_type(t.elem, mutable=mutable)
         # TODO: explicitly qualify namespace here

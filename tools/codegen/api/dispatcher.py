@@ -29,7 +29,7 @@ from typing import Sequence, Optional
 #
 
 def argumenttype_type(t: Type, *, mutable: bool) -> str:
-    if local.use_c10_dispatcher_full():
+    if local.use_c10_dispatcher() is UseC10Dispatcher.full:
         # This is a faux amis.  If it makes sense in the future to add
         # more special cases here, or invert things so cpp.argument_type
         # calls this, or just completely inline the function, please do
@@ -49,7 +49,7 @@ def returns_type(rs: Sequence[Return]) -> str:
     return cpp.returns_type(rs)
 
 def argument(a: Argument) -> DispatcherArgument:
-    if local.use_c10_dispatcher_full():
+    if local.use_c10_dispatcher() is UseC10Dispatcher.full:
         return DispatcherArgument(
             type=argument_type(a),
             name=a.name,
@@ -64,7 +64,7 @@ def argument(a: Argument) -> DispatcherArgument:
         )
 
 def arguments(func: FunctionSchema) -> Sequence[DispatcherArgument]:
-    if local.use_c10_dispatcher_full():
+    if local.use_c10_dispatcher() is UseC10Dispatcher.full:
         return list(map(argument, itertools.chain(func.out_arguments, func.arguments, func.kwarg_only_arguments)))
     else:
         return [
@@ -76,7 +76,7 @@ def arguments(func: FunctionSchema) -> Sequence[DispatcherArgument]:
 # expressions that translate the cpp API into dispatcher API
 def cppargument_exprs(a: CppArgument, *, tensor_options: Optional[CppArgument]) -> Sequence[DispatcherExpr]:
     if isinstance(a.argument, TensorOptionsArguments):
-        if local.use_c10_dispatcher_full():
+        if local.use_c10_dispatcher() is UseC10Dispatcher.full:
             ta = a.argument
             return [
                 DispatcherExpr(type=argument_type(ta.dtype), expr=f'optTypeMetaToScalarType({a.name}.dtype_opt())'),
@@ -87,7 +87,7 @@ def cppargument_exprs(a: CppArgument, *, tensor_options: Optional[CppArgument]) 
         else:
             return [DispatcherExpr(type='const TensorOptions &', expr=a.name)]
     elif isinstance(a.argument, Argument):
-        if a.name == 'memory_format' and tensor_options is not None and local.use_c10_dispatcher_full():
+        if a.name == 'memory_format' and tensor_options is not None and local.use_c10_dispatcher() is UseC10Dispatcher.full:
             return [DispatcherExpr(
                 type=argument_type(a.argument),
                 expr=f'c10::impl::check_tensor_options_and_extract_memory_format({tensor_options.name}, {a.name})')
