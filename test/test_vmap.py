@@ -757,6 +757,8 @@ class TestVmapOperators(TestCase):
             make_case(lambda x, y: x * y),
             make_case(torch.div, input_getter=TensorFactory.randp1),
             make_case(lambda x, y: x / y, input_getter=TensorFactory.randp1),
+            make_case(torch.pow, input_getter=TensorFactory.randp1),
+            make_case(lambda x, y: x ** y, input_getter=TensorFactory.randp1),
         ]
         test = self._vmap_test
 
@@ -916,6 +918,49 @@ class TestVmapOperators(TestCase):
         test(vmap(vmap(op, in_dims=(2, None)), in_dims=(1, None)),
              (torch.rand(3, B1, 2, B2, 5, B0), torch.rand(B0, 3 * 2 * 5)),
              in_dims=(5, 0), check_view=False)
+
+    def test_result_type(self):
+        def scalar_tensor_with_dtype(op):
+            def wrapped(*args, **kwargs):
+                dtype = op(*args, **kwargs)
+                return torch.ones([], dtype=dtype)
+            return wrapped
+
+        test = self._vmap_test
+        op = scalar_tensor_with_dtype(torch.result_type)
+
+        B0 = 2
+
+        test(op, (torch.randn(B0), torch.randn(B0, dtype=torch.float64)),
+             check_propagates_grad=False)
+        test(op, (torch.randn(B0), torch.randint(10, [B0], dtype=torch.int64)),
+             check_propagates_grad=False)
+
+        test(lambda x: op(x, 1), (torch.randn(B0),), check_propagates_grad=False)
+        test(lambda x: op(x, 1.6), (torch.randn(B0),), check_propagates_grad=False)
+
+        test(lambda x: op(x, torch.tensor(1)), (torch.randn(B0),),
+             check_propagates_grad=False)
+        test(lambda x: op(x, torch.tensor(1.6, dtype=torch.double)),
+             (torch.randn(B0),), check_propagates_grad=False)
+
+        test(op, (torch.randn(B0, 2), torch.randn(B0, 2, dtype=torch.float64)),
+             check_propagates_grad=False)
+        test(op, (torch.randn(B0, 2), torch.randint(10, [B0, 2], dtype=torch.int64)),
+             check_propagates_grad=False)
+
+        test(lambda x: op(x, 1), (torch.randn(B0, 2),), check_propagates_grad=False)
+        test(lambda x: op(x, 1.6), (torch.randn(B0, 2),), check_propagates_grad=False)
+
+        test(lambda x: op(x, torch.tensor(1)), (torch.randn(B0, 2),),
+             check_propagates_grad=False)
+        test(lambda x: op(x, torch.tensor(1.6, dtype=torch.double)),
+             (torch.randn(B0, 2),), check_propagates_grad=False)
+
+        test(op, (torch.randn(B0, 2), torch.randn(B0, dtype=torch.float64)),
+             check_propagates_grad=False)
+        test(op, (torch.randn(B0, 2), torch.randint(10, [B0], dtype=torch.int64)),
+             check_propagates_grad=False)
 
     def test_split(self):
         test = self._vmap_view_test
