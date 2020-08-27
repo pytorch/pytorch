@@ -37,8 +37,8 @@ DEFINE_DISPATCH(ne_stub);
 DEFINE_DISPATCH(sigmoid_backward_stub);
 DEFINE_DISPATCH(logit_backward_stub);
 DEFINE_DISPATCH(tanh_backward_stub);
-DEFINE_DISPATCH(max_elementwise_stub);
-DEFINE_DISPATCH(min_elementwise_stub);
+DEFINE_DISPATCH(maximum_stub);
+DEFINE_DISPATCH(minimum_stub);
 DEFINE_DISPATCH(fmod_stub);
 DEFINE_DISPATCH(fmod_scalar_stub);
 DEFINE_DISPATCH(logaddexp_stub);
@@ -749,47 +749,59 @@ Tensor& logical_xor_out(Tensor& result, const Tensor& self, Scalar other) { retu
 Tensor logical_xor(const Tensor& self, Scalar other) { return comparison_op(self, other, static_cast<OutFunc>(at::logical_xor_out)); }
 Tensor& logical_xor_(Tensor& self, Scalar other) { return comparison_op_(self, other, static_cast<OutFunc>(at::logical_xor_out)); }
 
-Tensor& max_out(Tensor& result, const Tensor& self, const Tensor& other) {
-  TORCH_CHECK(!self.is_complex(), "max is not yet implemented for complex tensors.");
-  TORCH_CHECK(!other.is_complex(), "max is not yet implemented for complex tensors.");
+Tensor& maximum_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  TORCH_CHECK(!self.is_complex() && !other.is_complex(), "maximum does not support complex inputs.");
+
   auto iter = TensorIterator::binary_op(result, self, other,
                                         /*check_mem_overlap=*/true);
-  TORCH_CHECK(self.dtype() == other.dtype(),
-              "Expected object of scalar type ", self.dtype(), " but got scalar type ",
-              other.dtype(), " for argument 'other'");
-  max_elementwise_stub(iter.device_type(), iter);
+  maximum_stub(iter.device_type(), iter);
   return result;
+}
+
+Tensor maximum(const Tensor& self, const Tensor& other) {
+  TORCH_CHECK(!self.is_complex() && !other.is_complex(), "maximum does not support complex inputs.");
+
+  Tensor result;
+  auto iter = TensorIterator::binary_op(result, self, other);
+  maximum_stub(iter.device_type(), iter);
+  return iter.output();
+}
+
+// binary max, alias for maximum
+Tensor& max_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  return at::maximum_out(result, self, other);
 }
 
 Tensor max(const Tensor& self, const Tensor& other) {
-  TORCH_CHECK(!self.is_complex(), "max is not yet implemented for complex tensors.");
-  TORCH_CHECK(!other.is_complex(), "max is not yet implemented for complex tensors.");
-  Tensor result = at::empty(0, self.options());
-  return at::max_out(result, self, other);
+  return at::maximum(self, other);
 }
 
-Tensor& max_(Tensor& self, const Tensor& other) { return at::max_out(self, self, other); }
+Tensor& minimum_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  TORCH_CHECK(!self.is_complex() && !other.is_complex(), "minimum does not support complex inputs.");
 
-Tensor& min_out(Tensor& result, const Tensor& self, const Tensor& other) {
-  TORCH_CHECK(!self.is_complex(), "min is not yet implemented for complex tensors.");
-  TORCH_CHECK(!other.is_complex(), "min is not yet implemented for complex tensors.");
   auto iter = TensorIterator::binary_op(result, self, other,
                                         /*check_mem_overlap=*/true);
-  TORCH_CHECK(self.dtype() == other.dtype(),
-              "Expected object of scalar type ", self.dtype(), " but got scalar type ",
-              other.dtype(), " for argument 'other'");
-  min_elementwise_stub(iter.device_type(), iter);
+  minimum_stub(iter.device_type(), iter);
   return result;
 }
 
-Tensor min(const Tensor& self, const Tensor& other) {
-  TORCH_CHECK(!self.is_complex(), "min is not yet implemented for complex tensors.");
-  TORCH_CHECK(!other.is_complex(), "min is not yet implemented for complex tensors.");
-  Tensor result = at::empty(0, self.options());
-  return at::min_out(result, self, other);
+Tensor minimum(const Tensor& self, const Tensor& other) {
+  TORCH_CHECK(!self.is_complex() && !other.is_complex(), "minimum does not support complex inputs.");
+
+  Tensor result;
+  auto iter = TensorIterator::binary_op(result, self, other);
+  minimum_stub(iter.device_type(), iter);
+  return iter.output();
 }
 
-Tensor& min_(Tensor& self, const Tensor& other) { return at::min_out(self, self, other); }
+// binary min, alias for minimum
+Tensor& min_out(Tensor& result, const Tensor& self, const Tensor& other) {
+  return at::minimum_out(result, self, other);
+}
+
+Tensor min(const Tensor& self, const Tensor& other) {
+  return at::minimum(self, other);
+}
 
 Tensor floor_divide(const Tensor& self, Scalar other) {
   return at::floor_divide(self, wrapped_scalar_tensor(other));
