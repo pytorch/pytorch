@@ -931,6 +931,17 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(3, 4, 5, 6, 7)
         self.run_test(NegSlice(), x)
 
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_slice_with_input_index(self):
+        class InputIndexSlice(torch.nn.Module):
+            def forward(self, x, y):
+                x[:y.size(0), 0, :] = y
+                return x
+
+        x = torch.zeros((56, 6, 256))
+        y = torch.rand((22, 256))
+        self.run_test(InputIndexSlice(), (x, y))
+
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_slice_dynamic(self):
         class DynamicSliceExportMod(torch.nn.Module):
@@ -2700,11 +2711,15 @@ class TestONNXRuntime(unittest.TestCase):
                 res1 = []
                 arr = x.split([3, 4, 1, 1, 2, 3, 2], 0)
                 res2 = torch.zeros(3, 4, dtype=torch.long)
+                res3 = []
+                res4 = []
                 for i in range(len(arr)):
                     res = res.append(arr[i].sum(0, False))
                     res1 = res1.append(arr[-1 - i].sum(0, False))
                     res2 += 1
-                return torch.stack(res), torch.stack(res1), res2
+                    res3 = res3 + [arr[i].sum(0, False)]
+                    res4 += [arr[-1 - i].sum(0, False)]
+                return torch.stack(res), torch.stack(res1), res2, torch.stack(res3), torch.stack(res4)
 
         model = ListLoopModel()
         inputs = torch.randn(16)
@@ -2723,6 +2738,8 @@ class TestONNXRuntime(unittest.TestCase):
 
                 res.insert(0, tensors[1])
                 res.append(tensors[2])
+                res += [tensors[3], tensors[4]]
+                res = res + [tensors[5]]
                 return torch.ones(len(res))
 
         model = ListModel()
