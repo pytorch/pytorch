@@ -2,8 +2,12 @@ import torch
 from torch.quantization import (
     propagate_qconfig_,
     convert,
+)
+
+from torch.quantization.default_mappings import (
     DEFAULT_QAT_MODULE_MAPPING,
     DEFAULT_MODULE_MAPPING,
+    DEFAULT_OPERATOR_MAPPING,
 )
 
 from torch.fx import (
@@ -183,7 +187,9 @@ class Cat(QuantizeHandler):
 @register_quant_pattern(torch.nn.Conv3d)
 @register_quant_pattern(torch.nn.functional.conv2d)
 @register_quant_pattern(torch.nn.qat.Conv2d)
+@register_quant_pattern(torch.nn.intrinsic.ConvReLU1d)
 @register_quant_pattern(torch.nn.intrinsic.ConvReLU2d)
+@register_quant_pattern(torch.nn.intrinsic.ConvReLU3d)
 @register_quant_pattern(torch.nn.intrinsic.qat.ConvBn2d)
 @register_quant_pattern(torch.nn.intrinsic.qat.ConvBnReLU2d)
 @register_quant_pattern(torch.nn.intrinsic.qat.ConvReLU2d)
@@ -211,7 +217,11 @@ class ConvRelu(QuantizeHandler):
             assert self.relu_node is None, 'conv module and relu fusion is not executed, ' \
                 'please make sure to run fusion before prepare'
             # 1. attach activation post process to module
-            if type(self.conv) == torch.nn.intrinsic.ConvReLU2d:
+            if type(self.conv) in [
+                    torch.nn.intrinsic.ConvReLU1d,
+                    torch.nn.intrinsic.ConvReLU2d,
+                    torch.nn.intrinsic.ConvReLU3d
+            ]:
                 self.conv[1].activation_post_process = quantizer.activation_post_process_map[node.name]
             else:
                 self.conv.activation_post_process = quantizer.activation_post_process_map[node.name]
@@ -342,29 +352,184 @@ class LinearReLU(QuantizeHandler):
                 return quantizer.quantized_graph.create_node(
                     'call_function', torch.ops.quantized.linear, qlinear_args, kwargs)
 
+@register_quant_pattern(torch.nn.BatchNorm2d)
+@register_quant_pattern(torch.nn.BatchNorm3d)
+@register_quant_pattern(torch.nn.intrinsic.BNReLU2d)
+@register_quant_pattern(torch.nn.intrinsic.BNReLU3d)
+class BatchNorm(QuantizeHandler):
+    def __init__(self, quantizer, node):
+        super().__init__(quantizer, node)
+        assert node.op == 'call_module'
+        self.bn_node = node
+        self.bn = quantizer.modules[self.bn_node.target]
+
+    def convert(self, quantizer, node, load_arg, debug=False):
+        # 1. attach activation post process to module
+        activation_post_process = quantizer.activation_post_process_map[node.name]
+        if type(self.bn) in \
+            [torch.nn.intrinsic.BNReLU2d,
+             torch.nn.intrinsic.BNReLU3d]:
+            self.bn[1].activation_post_process = activation_post_process
+        else:
+            self.bn.activation_post_process = activation_post_process
+        qbn_cls = DEFAULT_MODULE_MAPPING[type(self.bn)]
+        quantized = qbn_cls.from_float(self.bn)
+        parent_name, name = _parent_name(self.bn_node.target)
+        setattr(quantizer.modules[parent_name], name, quantized)
+        return quantizer.quantized_graph.create_node(
+            'call_module',
+            self.bn_node.target,
+            load_arg(quantized=[0])(self.bn_node.args),
+            load_arg(quantized=False)(self.bn_node.kwargs))
+
+ARGS_TO_SKIP = {
+    torch.ops.quantized.hardswish: ['inplace'],
+    torch.ops.quantized.instance_norm:
+    ['running_mean', 'running_var', 'use_input_stats', 'momentum'],
+}
+@register_quant_pattern(torch.nn.ELU)
+@register_quant_pattern(torch.nn.Hardswish)
+@register_quant_pattern(torch.nn.InstanceNorm1d)
+@register_quant_pattern(torch.nn.InstanceNorm2d)
+@register_quant_pattern(torch.nn.InstanceNorm3d)
+@register_quant_pattern(torch.nn.LayerNorm)
+@register_quant_pattern(torch.nn.functional.hardswish)
+@register_quant_pattern(torch.nn.functional.instance_norm)
+@register_quant_pattern(torch.nn.functional.layer_norm)
+class DefaultNode(QuantizeHandler):
+    ''' Common quantized op, first input and first output will be quantized
+    '''
+    def convert(self, quantizer, node, load_arg, debug=False):
+        if not self.all_nodes:
+            return NotImplemented
+        assert node.op in ['call_module', 'call_function'], 'Only call_module and ' + \
+            'call_function are handled in DefaultNode'
+        activation_post_process = quantizer.activation_post_process_map[node.name]
+        if node.op == 'call_module':
+            module = quantizer.modules[node.target]
+            module.activation_post_process = activation_post_process
+            quantized_module = DEFAULT_MODULE_MAPPING[type(module)].from_float(module)
+            parent_name, name = _parent_name(node.target)
+            setattr(quantizer.modules[parent_name], name, quantized_module)
+            return quantizer.quantized_graph.create_node(
+                'call_module',
+                node.target,
+                load_arg(quantized=[0])(node.args),
+                load_arg(quantized=False)(node.kwargs))
+        else:
+            # call_function
+            scale, zero_point = activation_post_process.calculate_qparams()
+            scale = float(scale)
+            zero_point = int(zero_point)
+
+            quantized_op = DEFAULT_OPERATOR_MAPPING[node.target]
+            args = load_arg(quantized=[0])(node.args)
+            kwargs = load_arg(quantized=False)(node.kwargs)
+            kwargs.update({'output_scale': scale, 'output_zero_point': zero_point})
+            if quantized_op in ARGS_TO_SKIP:
+                args_to_skip = ARGS_TO_SKIP[quantized_op]
+                for arg in args_to_skip:
+                    if arg in kwargs:
+                        kwargs.pop(arg)
+            return quantizer.quantized_graph.create_node(
+                'call_function', quantized_op, args, kwargs)
+
+# TODO: elu is using scale/zero_point instead of output_scale, output_zero_point
+@register_quant_pattern(torch.nn.functional.elu)
+class ELU(QuantizeHandler):
+    def convert(self, quantizer, node, load_arg, debug=False):
+        activation_post_process = quantizer.activation_post_process_map[node.name]
+        scale, zero_point = activation_post_process.calculate_qparams()
+        scale = float(scale)
+        zero_point = int(zero_point)
+        quantized_op = DEFAULT_OPERATOR_MAPPING[node.target]
+        args = load_arg(quantized=[0])(node.args)
+        kwargs = load_arg(quantized=False)(node.kwargs)
+        kwargs.update({'output_scale': scale, 'output_zero_point': zero_point})
+        kwargs.pop('inplace')
+        return quantizer.quantized_graph.create_node(
+            'call_function', quantized_op, args, kwargs)
+
 # these ops have quantized equivalents that do not need any extra information
+@register_quant_pattern(torch.nn.AdaptiveAvgPool1d)
 @register_quant_pattern(torch.nn.AdaptiveAvgPool2d)
+@register_quant_pattern(torch.nn.AdaptiveAvgPool3d)
+@register_quant_pattern(torch.nn.AvgPool1d)
 @register_quant_pattern(torch.nn.AvgPool2d)
+@register_quant_pattern(torch.nn.AvgPool3d)
 @register_quant_pattern(torch.nn.Dropout)
+@register_quant_pattern(torch.nn.Hardsigmoid)
+@register_quant_pattern(torch.nn.Hardtanh)
+@register_quant_pattern(torch.nn.LeakyReLU)
+@register_quant_pattern(torch.nn.MaxPool1d)
 @register_quant_pattern(torch.nn.MaxPool2d)
+@register_quant_pattern(torch.nn.MaxPool3d)
 @register_quant_pattern(torch.nn.ReLU)
 @register_quant_pattern(torch.nn.ReLU6)
+@register_quant_pattern(torch.nn.Sigmoid)
+@register_quant_pattern(torch.nn.Tanh)
+@register_quant_pattern(torch.adaptive_avg_pool1d)
 @register_quant_pattern(torch.nn.functional.adaptive_avg_pool2d)
+@register_quant_pattern(torch.nn.functional.adaptive_avg_pool3d)
 @register_quant_pattern(torch.nn.functional.dropout)
+@register_quant_pattern(torch.nn.functional.hardsigmoid)
+@register_quant_pattern(torch.nn.functional.hardtanh)
+@register_quant_pattern(torch.nn.functional.hardtanh_)
+@register_quant_pattern(torch.nn.functional.interpolate)
+@register_quant_pattern(torch.nn.functional.leaky_relu)
+@register_quant_pattern(torch.nn.functional.max_pool1d)
 @register_quant_pattern(torch.nn.functional.max_pool2d)
+@register_quant_pattern(torch.nn.functional.max_pool3d)
+@register_quant_pattern(torch.nn.functional.relu)
+@register_quant_pattern(torch.nn.functional.relu6)
+@register_quant_pattern(torch.avg_pool1d)
 @register_quant_pattern(torch._C._nn.avg_pool2d)
+@register_quant_pattern(torch._C._nn.avg_pool3d)
+@register_quant_pattern(torch.chunk)
+@register_quant_pattern(torch.clamp)
 @register_quant_pattern(torch.flatten)
 @register_quant_pattern(torch.transpose)
+@register_quant_pattern(torch.max)
 @register_quant_pattern(torch.mean)
+@register_quant_pattern(torch.min)
+@register_quant_pattern(torch.repeat_interleave)
+@register_quant_pattern(torch.sigmoid)
+@register_quant_pattern(torch.sort)
+@register_quant_pattern(torch.squeeze)
+@register_quant_pattern(torch.stack)
+@register_quant_pattern(torch.tanh)
 @register_quant_pattern(torch.unsqueeze)
 @register_quant_pattern(operator.getitem)
 @register_quant_pattern(operator.floordiv)
 @register_quant_pattern('chunk')
+@register_quant_pattern('clamp')
 @register_quant_pattern('contiguous')
+@register_quant_pattern('detach')
+@register_quant_pattern('detach_')
+@register_quant_pattern('hardsigmoid')
+@register_quant_pattern('hardsigmoid_')
+@register_quant_pattern('leaky_relu')
+@register_quant_pattern('leaky_relu_')
 @register_quant_pattern('mean')
+@register_quant_pattern('numel')
+@register_quant_pattern('permute')
+@register_quant_pattern('relu')
+@register_quant_pattern('relu_')
+@register_quant_pattern('repeat')
+@register_quant_pattern('repeat_interleave')
 @register_quant_pattern('reshape')
+@register_quant_pattern('resize_')
 @register_quant_pattern('shape')
+@register_quant_pattern('sigmoid')
+@register_quant_pattern('sigmoid_')
 @register_quant_pattern('size')
+@register_quant_pattern('squeeze')
+@register_quant_pattern('squeeze_')
+@register_quant_pattern('tanh')
+@register_quant_pattern('tanh_')
+@register_quant_pattern('transpose')
+@register_quant_pattern('unsqueeze')
+@register_quant_pattern('unsqueeze_')
 @register_quant_pattern('view')
 class CopyNode(QuantizeHandler):
     def convert(self, quantizer, node, load_arg, debug=False):
@@ -532,8 +697,14 @@ class Quantizer:
                         'call_function',
                         'call_method'], \
                         'CopyNode of type ' + node.op + ' is not handled'
+
+                    def is_observed(input_arg):
+                        if isinstance(input_arg, Node):
+                            return input_arg.name in observed
+                        elif isinstance(input_arg, list):
+                            return all(map(is_observed, input_arg))
                     # propagate observed property from input
-                    if node.args[0].name in observed:
+                    if is_observed(node.args[0]):
                         observed.add(node.name)
                 elif (isinstance(obj, Add) or isinstance(obj, Mul)) and not obj.all_nodes:
                     if node.args[0].name in observed:
@@ -631,13 +802,22 @@ class Quantizer:
             return load_arg_impl
 
         def is_quantized(node):
-            assert node.name in env or node.name in quant_env, 'Expecting node to be in the environment'
-            # there might be nodes appearing in both environemnts, but quant_env will take
-            # precedence
-            if node.name in quant_env:
-                return True
-            elif node.name in env:
-                return False
+            if isinstance(node, Node):
+                assert node.name in env or node.name in quant_env, 'Expecting node to be in the environment'
+                # there might be nodes appearing in both environemnts, but quant_env will take
+                # precedence
+                if node.name in quant_env:
+                    return True
+                elif node.name in env:
+                    return False
+            elif isinstance(node, list):
+                quantized = map(is_quantized, node)
+                if all(quantized):
+                    return True
+                elif not any(quantized):
+                    return False
+                else:
+                    raise Exception("partially quantized inputs in list not handled yet")
 
         for node in observed_graph.nodes:
             root_node, matched, obj, qconfig = matches.get(node.name, (None, None, None, None))
