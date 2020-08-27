@@ -239,6 +239,9 @@ namespace jit {
   _(Kernel_2)                               \
   _(Kernel_3)                               \
   _(Kernel_4)                               \
+  _(KernelSumAllAxes)                       \
+  _(KernelSumOneAxis)                       \
+  _(KernelSumMultipleAxes)                  \
   _(FuserPass_1)                            \
   _(FuserPass_2)                            \
   _(FuserPass_3)                            \
