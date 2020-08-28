@@ -190,7 +190,7 @@ static PyObject * THPVariable_range(PyObject* self, PyObject* args, PyObject* kw
         PyExc_UserWarning,
         "torch.range is deprecated and will be removed in a future release "
         "because its behavior is inconsistent with Python's range builtin. "
-        "Instead, use torch.arange, which produces values in [start, end) and runs faster.",
+        "Instead, use torch.arange, which produces values in [start, end).",
         1);
     if (r.isNone(3)) {
       const auto options = TensorOptions()
