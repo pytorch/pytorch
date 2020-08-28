@@ -30,7 +30,7 @@ do_backup() {
   (
     pushd /tmp/workspace
     set -x
-    ${AWS_S3_CP} --recursive . "${BACKUP_BUCKET}/${CIRCLE_TAG}/${backup_dir}"
+    ${AWS_S3_CP} --recursive . "${BACKUP_BUCKET}/${CIRCLE_TAG}/${backup_dir}/"
   )
 }
 
@@ -52,7 +52,7 @@ s3_upload() {
   local pkg_type
   extension="$1"
   pkg_type="$2"
-  s3_dir="${UPLOAD_BUCKET}/${pkg_type}/${UPLOAD_CHANNEL}/${UPLOAD_SUBFOLDER}"
+  s3_dir="${UPLOAD_BUCKET}/${pkg_type}/${UPLOAD_CHANNEL}/${UPLOAD_SUBFOLDER}/"
   (
     for pkg in ${PKG_DIR}/*.${extension}; do
       (
@@ -74,16 +74,16 @@ case "${PACKAGE_TYPE}" in
         | cut -d ':' -f2 \
         | sed -e 's/[[:space:]]//' -e 's/"//g' -e 's/,//' \
     )
-    BACKUP_DIR="conda/${subdir}"
+    BACKUP_DIR="conda/${subdir}/"
     ;;
   libtorch)
     s3_upload "zip" "libtorch"
-    BACKUP_DIR="libtorch/${UPLOAD_CHANNEL}/${UPLOAD_SUBFOLDER}"
+    BACKUP_DIR="libtorch/${UPLOAD_CHANNEL}/${UPLOAD_SUBFOLDER}/"
     ;;
   # wheel can either refer to wheel/manywheel
   *wheel)
     s3_upload "whl" "whl"
-    BACKUP_DIR="whl/${UPLOAD_CHANNEL}/${UPLOAD_SUBFOLDER}"
+    BACKUP_DIR="whl/${UPLOAD_CHANNEL}/${UPLOAD_SUBFOLDER}/"
     ;;
   *)
     echo "ERROR: unknown package type: ${PACKAGE_TYPE}"
