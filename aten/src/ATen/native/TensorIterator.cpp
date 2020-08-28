@@ -841,10 +841,9 @@ TensorIterator TensorIterator::comparison_op(Tensor& out, const Tensor& a,
     .build();
 }
 
-TensorIterator TensorIterator::unary_op(Tensor& out, const Tensor& a,
-    bool check_mem_overlap) {
+TensorIterator TensorIterator::unary_op(Tensor& out, const Tensor& a) {
   return TensorIteratorConfig()
-    .set_check_mem_overlap(check_mem_overlap)
+    .set_check_mem_overlap(true)
     .add_output(out)
     .add_input(a)
     .cast_common_dtype_to_outputs(false)

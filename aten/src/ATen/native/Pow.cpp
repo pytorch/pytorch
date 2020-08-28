@@ -37,8 +37,7 @@ Tensor& pow_out(Tensor& result, const Tensor& base, Scalar exp) {
   } else if (!exp.isComplex() && (exp.toDouble() == 1.0)) {
     result.resize_as_(base).copy_(base);
   } else {
-    auto iter = TensorIterator::unary_op(result, base.to(common_dtype),
-                                         /*check_mem_overlap=*/true);
+    auto iter = TensorIterator::unary_op(result, base.to(common_dtype));
     pow_tensor_scalar_stub(iter.device_type(), iter, exp);
   }
   return result;
