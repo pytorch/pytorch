@@ -1198,23 +1198,26 @@ void testThreadLocalDebugInfo() {
   }
 }
 
-static void nestGraphIntoFallbackGraph(std::shared_ptr<Graph> graph) {
-  ProfilingRecord::removeProfileCounter(graph->block());
-  auto fallback =
-      createFallbackGraph(graph->block(), graph->inputs(), graph.get());
-  graph->prependNode(fallback);
-  for (size_t i = 0; i < graph->outputs().size(); i++) {
-    graph->outputs()[i]->replaceAllUsesWith(fallback->output(i));
-    fallback->output(i)->copyMetadata(graph->outputs()[i]);
-  }
-  GRAPH_DUMP("nestGraphIntoFallbackGraph:", graph);
-  EliminateDeadCode(graph);
-}
-
 void testFallbackGraphs() {
+
+
+  static const auto nestGraphIntoFallbackGraph = [](const std::shared_ptr<Graph>& graph) {
+    ProfilingRecord::removeProfileCounter(graph->block());
+    auto fallback =
+        createFallbackGraph(graph->block(), graph->inputs(), graph.get());
+    graph->prependNode(fallback);
+    for (size_t i = 0; i < graph->outputs().size(); i++) {
+      graph->outputs()[i]->replaceAllUsesWith(fallback->output(i));
+      fallback->output(i)->copyMetadata(graph->outputs()[i]);
+    }
+    for (auto it = graph->block()->nodes().rbegin(); it != fallback->iterator(); it++) {
+      it.destroyCurrent();
+    }
+  };
+
   auto x = at::randn({1}, at::kCPU);
   auto y = at::randn({1}, at::kCPU);
-  auto stack = createStack({x, y});
+  auto stack = createStack({x.clone(), y.clone()});
 
   auto graph_string = R"IR(
     graph(%0 : Float(1),
@@ -1237,10 +1240,8 @@ void testFallbackGraphs() {
     EnableProfilingGuard epg;
     GraphFunction f("fallbackGraphs", graph, nullptr);
     for (size_t i = 0; i < getNumProfiledRuns() + 1; i++) {
-      x = at::randn({1}, at::kCPU);
-      y = at::randn({1}, at::kCPU);
-      stack.emplace_back(x);
-      stack.emplace_back(y);
+      stack.emplace_back(x.clone());
+      stack.emplace_back(y.clone());
       if (i == getNumProfiledRuns()) {
         auto opt_graph = lastExecutedOptimizedGraph();
         nestGraphIntoFallbackGraph(opt_graph);
@@ -1255,6 +1256,10 @@ void testFallbackGraphs() {
             ->run(*fallback->g(attr::Subgraph));
       }
       f.run(stack);
+      at::Tensor at;
+      pop(stack, at);
+      float af = at.item<float>();
+      ASSERT_EQ(af, ef);
     }
 
     auto opt_graph = lastExecutedOptimizedGraph();
@@ -1263,10 +1268,7 @@ void testFallbackGraphs() {
         ->run(*opt_graph);
   }
 
-  at::Tensor at;
-  pop(stack, at);
-  float af = et.item<float>();
-  ASSERT_EQ(af, ef);
+
 }
 
 void testAutogradProfiler() {
