@@ -115,7 +115,7 @@ class DefaultDelegate(DelegateBase):
         # retrieve it with a get_param.
         if isinstance(a, torch.Tensor):
             # TODO: slow
-            def search_for_tensor(m : torch.nn.Module) -> Optional[str]:
+            def search_for_tensor(m : torch.nn.Module) -> Optional[List[str]]:
                 """
                 Search for a tensor value in the module's attributes. If it's
                 found, return the qualified name of that attribute, given the
