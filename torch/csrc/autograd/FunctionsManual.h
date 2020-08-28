@@ -9,7 +9,7 @@
 #include <cmath>
 #endif
 
-#include "torch/csrc/autograd/generated/Functions.h"
+#include <torch/csrc/autograd/generated/Functions.h>
 #include <ATen/ATen.h>
 
 namespace torch {
