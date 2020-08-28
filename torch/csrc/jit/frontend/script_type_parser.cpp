@@ -286,7 +286,8 @@ std::vector<IValue> ScriptTypeParser::evaluateDefaults(
         modified_types.emplace_back(
             Var::create(r, Ident::create(r, modified_type->annotation_str())));
       } else {
-        TORCH_INTERNAL_ASSERT("Expected BroadcastList but got ", parsed_type->repr_str());
+        TORCH_INTERNAL_ASSERT(
+            "Expected BroadcastList but got ", parsed_type->repr_str());
       }
     }
   }
