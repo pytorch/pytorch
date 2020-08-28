@@ -589,7 +589,7 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
     LowerGradOf(*opt_graph);
     GRAPH_DEBUG(
         "After LowerGradOf, before specializeAutogradZero\n", *opt_graph);
-    specializeAutogradZero(*opt_graph);
+    specializeAutogradZero(opt_graph);
     GRAPH_DEBUG(
         "After specializeAutogradZero, before LowerSimpleTuples\n", *opt_graph);
     LowerSimpleTuples(opt_graph);
