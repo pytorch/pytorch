@@ -3125,7 +3125,7 @@ Tensor index_add_forward(const Tensor& self_fw_grad, const Tensor& source_fw_gra
 }
 
 // Utility function used in derivatives.yaml for different loss functions
-static inline at::Tensor apply_loss_reduction(const at::Tensor& unreduced, int64_t reduction) {
+at::Tensor apply_loss_reduction(const at::Tensor& unreduced, int64_t reduction) {
   if (reduction == at::Reduction::Mean) {
     return unreduced.mean();
   } else if (reduction == at::Reduction::Sum) {
