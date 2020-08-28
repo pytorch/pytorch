@@ -830,9 +830,9 @@ TensorIterator TensorIterator::binary_op(Tensor& out, const Tensor& a,
 }
 
 TensorIterator TensorIterator::comparison_op(Tensor& out, const Tensor& a,
-    const Tensor& b, bool check_mem_overlap) {
+    const Tensor& b) {
   return TensorIteratorConfig()
-    .set_check_mem_overlap(check_mem_overlap)
+    .set_check_mem_overlap(true)
     .add_output(out)
     .add_input(a)
     .add_input(b)
