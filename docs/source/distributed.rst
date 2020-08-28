@@ -323,7 +323,11 @@ Collective functions
 
 .. autofunction:: all_gather
 
+.. autofunction:: all_gather_object
+
 .. autofunction:: gather
+
+.. autofunction:: gather_object
 
 .. autofunction:: scatter
 
