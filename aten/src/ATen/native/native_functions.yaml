@@ -5750,8 +5750,15 @@
   device_guard: False
   variants: function
   dispatch:
-    CPU: foreach_add_scalar_kernel_fallback
+    CPU: foreach_tensor_add_scalar_kernel_slow
     CUDA: foreach_tensor_add_scalar_kernel_cuda
+
+- func: _foreach_add_.Scalar(Tensor[](a!) self, Scalar scalar) -> ()
+  device_guard: False  
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_add_scalar_kernel_slow_
+    CUDA: foreach_tensor_add_scalar_kernel_cuda_
 
 - func: _mode(Tensor self, int dim=-1, bool keepdim=False) -> (Tensor, Tensor)
   use_c10_dispatcher: full
