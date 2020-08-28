@@ -372,16 +372,7 @@ static Tensor threshold_out(
     Scalar value,
     const Tensor& other) {
   Tensor result = opt_result.value_or(Tensor());
-  auto iter = TensorIteratorConfig()
-    .set_check_mem_overlap(false)  // threshold is idempotent, so overlap is okay
-    .add_output(result)
-    .add_input(self)
-    .add_input(other)
-    .allow_cpu_scalars(true)
-    .promote_inputs_to_common_dtype(true)
-    .cast_common_dtype_to_outputs(true)
-    .enforce_safe_casting_to_output(true)
-    .build();
+  auto iter = TensorIterator::binary_op(result, self, other);
   threshold_stub(iter.device_type(), iter, threshold, value);
   return iter.output();
 }
