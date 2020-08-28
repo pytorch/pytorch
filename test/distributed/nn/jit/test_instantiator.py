@@ -33,7 +33,7 @@ class TestInstantiator(unittest.TestCase):
             return_type_str,
         ) = instantiator.get_arg_return_types_from_interface(MyModuleInterface)
         self.assertEqual(args_str, "tensor, number, word")
-        self.assertEqual(arg_types_str, "tensor: Tensor, number: int, word: str")
+        self.assertEqual(arg_types_str, "tensor: Tensor, number: int, word: str = \"default\"")
         self.assertEqual(return_type_str, "Tuple[Tensor, int, str]")
 
     def test_instantiate_scripted_remote_module_template(self):

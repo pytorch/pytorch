@@ -1309,14 +1309,14 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
 
         if out is None:
             if dtype is None:
-                return _VF.norm(input, p, _dim, keepdim=keepdim)
+                return _VF.norm(input, p, _dim, keepdim=keepdim)  # type: ignore
             else:
-                return _VF.norm(input, p, _dim, keepdim=keepdim, dtype=dtype)
+                return _VF.norm(input, p, _dim, keepdim=keepdim, dtype=dtype)  # type: ignore
         else:
             if dtype is None:
-                return _VF.norm(input, p, _dim, keepdim=keepdim, out=out)
+                return _VF.norm(input, p, _dim, keepdim=keepdim, out=out)  # type: ignore
             else:
-                return _VF.norm(input, p, _dim, keepdim=keepdim, dtype=dtype, out=out)
+                return _VF.norm(input, p, _dim, keepdim=keepdim, dtype=dtype, out=out)  # type: ignore
 
     raise RuntimeError('Unknown norm type')
 
