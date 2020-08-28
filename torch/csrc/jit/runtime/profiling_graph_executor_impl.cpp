@@ -425,9 +425,8 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(
       PeelProfilingLoops(copy);
     }
     pr_ = ProfilingRecord::instrumentGraph(copy);
-    auto pr_copy = pr_->graph()->copy();
-    GRAPH_DUMP("Profiled Graph: ", pr_copy);
-    profiling_plan_ = ExecutionPlan(pr_copy, function_name_);
+    GRAPH_DUMP("Profiled Graph: ", pr_->graph());
+    profiling_plan_ = ExecutionPlan(pr_->graph(), function_name_);
     // fall-through
   }
 
@@ -436,8 +435,7 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(
     return *profiling_plan_;
   }
 
-  // auto copy = pr_->graph()->copy();
-  auto copy = profiling_plan_->graph->copy();
+  auto copy = pr_->graph()->copy();
   ProfilingRecord::removeProfileCounter(copy->block());
   runProfilingOptimizations(copy);
   // replaces a fallback graph inserted by
