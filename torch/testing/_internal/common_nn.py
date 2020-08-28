@@ -4803,7 +4803,6 @@ class CriterionTest(TestBase):
         return self._get_arg('target', True)
 
     def __call__(self, test_case):
-        raise AssertionError()
         module = self.constructor(*self.constructor_args)
         input = self._get_input()
 
@@ -4854,7 +4853,7 @@ class CriterionTest(TestBase):
             pass
 
     def _do_extra_tests(self, test_case, module, input, target):
-        assert False
+        raise AssertionError()
         pass
 
 
