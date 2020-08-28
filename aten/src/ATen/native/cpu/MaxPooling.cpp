@@ -10,8 +10,8 @@ namespace {
 
 template <typename scalar_t>
 inline void max_pool1d_kernel(
-    scalar_t* op,
-    const scalar_t* ip,
+    scalar_t* C10_RESTRICT op,
+    const scalar_t* C10_RESTRICT ip,
     const PoolingParams1D& p) {
   for (int64_t kj = 0; kj < p.KW; ++kj) {
     int64_t oj = p.valid_kernel_start(kj);
@@ -28,7 +28,7 @@ void max_pool1d_impl(
     Tensor& output,
     const Tensor& input,
     const PoolingParams1D& p) {
-  AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "max_pool1d_impl", [&] {
+  AT_DISPATCH_ALL_TYPES(input.scalar_type(), "max_pool1d_impl", [&] {
     scalar_t* const OP = output.data_ptr<scalar_t>();
     const scalar_t* const IP = input.contiguous().data_ptr<scalar_t>();
 

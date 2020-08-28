@@ -1,6 +1,5 @@
 #include <ATen/ATen.h>
 #include <ATen/NamedTensorUtils.h>
-#include <ATen/Parallel.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/MaxPooling.h>
 
@@ -19,10 +18,11 @@ inline int64_t output_size(
     int64_t padding,
     int64_t dilation,
     bool ceil_mode) {
+  // Effective input size (with padding) - effective kernel size (with dilation)
   int64_t num = input_size + 2 * padding - dilation * (kernel_size - 1) - 1;
-  // Ensure last kernel window starts within bounds in ceil mode
+  // Ensure that the last kernel window in ceil mode is not entirely off bounds
   if (ceil_mode && stride - dilation * (kernel_size - 1) <= num % stride) {
-    return (num + stride - 1) / stride + 1;
+    return at::divup(num, stride) + 1;
   }
   return num / stride + 1;
 }
