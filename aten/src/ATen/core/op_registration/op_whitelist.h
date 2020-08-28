@@ -60,9 +60,13 @@ constexpr bool op_whitelist_check(string_view op_name) {
 #else
   return op_whitelist_contains(
     C10_STRINGIZE(TORCH_OPERATOR_WHITELIST),
-    // Strip overload name (as whitelist doesn't contain overloads)
-    OperatorNameView::parse(op_name).name
-  );
+    // This function is majorly used for mobile selective build with
+    // root operators, where the overload is included in the whitelist.
+    op_name);
+    // // Strip overload name (as whitelist doesn't contain overloads)
+    // // Another function based on this may be added when there's usage
+    // // on op names without overload.
+    // OperatorNameView::parse(op_name).name);
 #endif
 }
 
@@ -74,6 +78,12 @@ constexpr bool schema_whitelist_check(string_view schema) {
 #else
   return op_whitelist_check(schema.substr(0, schema.find("(")));
 #endif
+}
+
+// schema_whitelist_check() implicitly depends on a macro, TORCH_OPERATOR_WHITELIST.
+// Add this API to pass arbitrary whitelist.
+constexpr bool op_whitelist_contains_name_in_schema(string_view whitelist, string_view schema) {
+  return op_whitelist_contains(whitelist, schema.substr(0, schema.find("(")));
 }
 
 // Returns true iff the given dispatch key is on the whitelist
