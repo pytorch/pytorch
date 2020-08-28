@@ -36,6 +36,31 @@ std::string FusionExecutor::getStructuredCode(const std::string& kernel) {
   return code;
 }
 
+void FusionExecutor::compileFusionFromStr(
+    Fusion* fusion,
+    const std::string& code,
+    const std::string& name,
+    int id,
+    CompileOptions options) {
+  fusion_ = *fusion;
+  FusionGuard fg(&fusion_);
+  options_ = options;
+
+  const char* debug_env = getenv("PYTORCH_CUDA_FUSER_DEBUG");
+  if (debug_env && atoi(debug_env)) {
+    std::cout << "\n==== codegen output for kernel: " << kernelName()
+              << " ====" << std::endl
+              << code << std::endl
+              << "=====*===============================" << std::endl;
+  }
+
+  fusion_id_ = id;
+  has_random_ = fusion->hasRNG();
+  lowered_ = GpuLower(&fusion_);
+  compiled_kernel_ = executor_utils::nvrtcCompile(code, name, fusion_id_);
+  compiled_ = true;
+}
+
 void FusionExecutor::compileFusion(Fusion* fusion, CompileOptions options) {
   TORCH_INTERNAL_ASSERT(
       !fusion->outputs().empty(), "No output found for this kernel, aborting.");

@@ -5008,7 +5008,7 @@ void testGPU_FusionReductionScheduler() {
 
   const auto options =
       at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
-  at::Tensor input = at::rand({bid_x, tid_x}, options);
+  at::Tensor input = at::randn({bid_x, tid_x}, options);
 
   // Apply reduction heuristic
   const at::ArrayRef<c10::IValue> inputs({input});
@@ -5024,7 +5024,7 @@ void testGPU_FusionReductionScheduler() {
   auto aten_output = input.sum({red_dim});
 
   TORCH_CHECK(
-      aten_output.allclose(outputs[0]),
+      aten_output.allclose(outputs[0], 1e-04, 1e-04),
       "Error of: ",
       aten_output.sub(outputs[0]).abs().max());
 }
@@ -5100,7 +5100,7 @@ void testGPU_FusionReductionSchedulerMultiDimNonFastest() {
 
   const auto options =
       at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
-  at::Tensor input = at::rand(tensor_dims_in, options);
+  at::Tensor input = at::randn(tensor_dims_in, options);
   at::Tensor cg_output = at::empty(tensor_dims_out, options);
 
   // Apply reduction heuristic
@@ -5117,7 +5117,7 @@ void testGPU_FusionReductionSchedulerMultiDimNonFastest() {
   auto aten_output = input.sum(red_dims64);
 
   TORCH_CHECK(
-      aten_output.allclose(outputs[0]),
+      aten_output.allclose(outputs[0], 1e-04, 1e-04),
       "Error of: ",
       aten_output.sub(outputs[0]).abs().max());
 }
@@ -5142,7 +5142,7 @@ void testGPU_FusionReductionSchedulerMultiDimFastest() {
 
   const auto options =
       at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
-  at::Tensor input = at::rand(tensor_dims_in, options);
+  at::Tensor input = at::randn(tensor_dims_in, options);
 
   TORCH_CHECK(
       cuda::scheduleReduction(&fusion, {input}, tv1),
@@ -5155,7 +5155,7 @@ void testGPU_FusionReductionSchedulerMultiDimFastest() {
   auto aten_output = input.sum(red_dims64);
 
   TORCH_CHECK(
-      aten_output.allclose(outputs[0]),
+      aten_output.allclose(outputs[0], 1e-05, 1e-05),
       "Error of: ",
       aten_output.sub(outputs[0]).abs().max());
 }
@@ -5205,8 +5205,8 @@ void testGPU_FusionReductionSchedulerDimShmoo() {
                              .dtype((fp16 ? at::kHalf : at::kFloat))
                              .device(at::kCUDA, 0);
           at::Tensor input =
-              (axis ? at::rand({odim, rdim}, options)
-                    : at::rand({rdim, odim}, options));
+              (axis ? at::randn({odim, rdim}, options)
+                    : at::randn({rdim, odim}, options));
 
           const at::ArrayRef<c10::IValue> inputs({input});
 
@@ -5236,7 +5236,7 @@ void testGPU_FusionReductionSchedulerDimShmoo() {
           auto aten_output = input.sum({axis});
 
           TORCH_CHECK(
-              aten_output.allclose(cg_output[0]),
+              aten_output.allclose(cg_output[0], 1e-03, 1e-03),
               "Error of: ",
               aten_output.sub(cg_output[0]).abs().max());
         }

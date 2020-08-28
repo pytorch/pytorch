@@ -24,12 +24,15 @@ struct ReductionParams {
   bool cross_grid = false;
   bool mul_reds_per_blk = false;
 
+  int loop_unroll = 4;
+
   LaunchParams lparams;
 
   bool operator==(const ReductionParams& other) const {
     bool attr_equal = other.fastest_dim == fastest_dim &&
         other.cross_block == cross_block && other.cross_grid == cross_grid &&
-        other.mul_reds_per_blk == mul_reds_per_blk;
+        other.mul_reds_per_blk == mul_reds_per_blk &&
+        other.loop_unroll == loop_unroll;
     return attr_equal && lparams == other.lparams;
   }
 };
@@ -38,7 +41,7 @@ class ReductionParamsHash {
  public:
   size_t operator()(const ReductionParams& rp) const {
     size_t lp_hash = rp.lparams.gdimx() ^ rp.lparams.gdimy() ^
-        rp.lparams.bdimx() ^ rp.lparams.bdimy();
+        rp.lparams.bdimx() ^ rp.lparams.bdimy() ^ rp.loop_unroll;
     constexpr size_t bits = sizeof(std::size_t) * 8;
     size_t attr_hash = static_cast<size_t>(rp.fastest_dim) << (bits - 1) |
         static_cast<size_t>(rp.cross_block) << (bits - 2) |
