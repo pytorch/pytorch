@@ -14,7 +14,7 @@ struct PythonPrintImpl;
 struct TORCH_API PythonPrint {
   PythonPrint(
       std::vector<IValue>& constant_table,
-      std::vector<c10::NamedTypePtr>& deps_table,
+      std::set<c10::NamedTypePtr>& deps_table,
       c10::TypePrinter type_printer = nullptr,
       bool enforce_importable = false);
 

@@ -11,6 +11,8 @@
 #include <torch/csrc/jit/resource_guard.h>
 
 #include <algorithm>
+#include "ATen/core/ivalue.h"
+#include "ATen/core/jit_type.h"
 
 using c10::QualifiedName;
 
@@ -170,7 +172,14 @@ struct PythonPrintImpl {
   };
 
   // Helper to avoid duplicating class types
-  void registerDependency(const c10::NamedTypePtr& type) {
+  void registerNamedTypeDependency(const c10::NamedTypePtr& type) {
+    if (deps_table_.find(type) == deps_table_.end()) {
+      deps_table_.emplace(type);
+    }
+  }
+  
+  // Helper to avoid duplicating function types
+  void registerFunctionTypeDependency(const c10::FunctionTypePtr& type) {
     // Need to do actual equality comparison, not a pointer equality. This is
     // because for some types (e.g. FunctionType), we may have multiple
     // TypePtr's that represent the same underlying thing.
@@ -180,7 +189,7 @@ struct PythonPrintImpl {
         [&](const c10::NamedTypePtr& dep) { return *dep == *type; });
 
     if (it == deps_table_.cend()) {
-      deps_table_.push_back(type);
+      deps_table_.emplace(type);
     }
   }
 
@@ -665,15 +674,15 @@ struct PythonPrintImpl {
   // Recursively check contained types for any class dependencies
   void registerClassDependencies(const TypePtr& type) {
     if (const auto classType = type->cast<ClassType>()) {
-      registerDependency(classType);
+      registerNamedTypeDependency(classType);
     } else if (const auto tupleType = type->cast<TupleType>()) {
       if (tupleType->name()) {
-        registerDependency(tupleType);
+        registerNamedTypeDependency(tupleType);
       }
     } else if (const auto interfaceType = type->cast<InterfaceType>()) {
-      registerDependency(interfaceType);
+      registerNamedTypeDependency(interfaceType);
     } else if (const auto enumType = type->cast<EnumType>()) {
-      registerDependency(enumType);
+      registerNamedTypeDependency(enumType);
     }
     for (const auto& containedType : type->containedTypes()) {
       registerClassDependencies(containedType);
@@ -923,7 +932,7 @@ struct PythonPrintImpl {
         if (node->outputs().size() == 1 &&
             node->output()->type()->kind() == TypeKind::FunctionType) {
           auto fn = node->output()->type()->expect<FunctionType>();
-          registerDependency(fn);
+          registerFunctionTypeDependency(fn);
           stmt << fn->annotation_str(type_printer_);
         } else if (!node->mustBeNone()) {
           IValue v = toIValue(node->output()).value();
@@ -1053,13 +1062,13 @@ struct PythonPrintImpl {
         stmt << ")";
 
         if (auto selfClass = self->type()->cast<ClassType>()) {
-          registerDependency(selfClass);
+          registerNamedTypeDependency(selfClass);
           const Function& method = selfClass->getMethod(node->s(attr::name));
           TORCH_INTERNAL_ASSERT(
               method.qualname() ==
               QualifiedName(selfClass->name()->qualifiedName(), methodName));
         } else if (auto selfInterface = self->type()->cast<InterfaceType>()) {
-          registerDependency(selfInterface);
+          registerNamedTypeDependency(selfInterface);
         } else {
           TORCH_INTERNAL_ASSERT(
               false, "method call to unhandled type in serialization");
@@ -1258,7 +1267,7 @@ struct PythonPrintImpl {
 
   PythonPrintImpl(
       std::vector<at::IValue>& constant_table,
-      std::vector<c10::NamedTypePtr>& deps_table,
+      std::set<c10::NamedTypePtr>& deps_table,
       c10::TypePrinter type_printer,
       bool enforce_importable)
       : body_(&source_range_stack_),
@@ -1459,7 +1468,7 @@ struct PythonPrintImpl {
 
   // Any NamedTypes (classes, functions, NamedTuples) used are written to this
   // table.
-  std::vector<c10::NamedTypePtr>& deps_table_;
+  std::set<c10::NamedTypePtr>& deps_table_;
 
   // A function that, given a named type, returns us the correct string to print
   // for it.
@@ -1475,7 +1484,7 @@ struct PythonPrintImpl {
 
 PythonPrint::PythonPrint(
     std::vector<at::IValue>& constant_table,
-    std::vector<c10::NamedTypePtr>& deps_table,
+    std::set<c10::NamedTypePtr>& deps_table,
     c10::TypePrinter type_printer,
     bool enforce_importable)
     : pImpl(std::make_shared<PythonPrintImpl>(

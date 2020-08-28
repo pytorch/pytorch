@@ -369,11 +369,17 @@ class ScriptModuleSerializer {
   }
 
   void writeCode(const at::NamedTypePtr& root_type) {
-    class_deps_.push_back(root_type);
-    for (size_t i = 0; i < class_deps_.size(); ++i) {
+    class_deps_.emplace(root_type);
+    // for (size_t i = 0; i < class_deps_.size(); ++i) {
+    //   // note: convertNameType may extend class_deps_, so re-checking
+    //   // .size() is necessary
+    //   convertNamedType(class_deps_[i]);
+    // }
+    for (auto it = class_deps_.begin(); it != class_deps_.end(); ) {
       // note: convertNameType may extend class_deps_, so re-checking
       // .size() is necessary
-      convertNamedType(class_deps_[i]);
+      convertNamedType(*it);
+      ++it;
     }
 
     // Mapping of filename => src. We need this because multiple classes may go
@@ -459,7 +465,7 @@ class ScriptModuleSerializer {
   caffe2::serialize::PyTorchStreamWriter writer_;
   std::vector<at::IValue> constant_table_;
   std::unordered_set<c10::NamedTypePtr> converted_types_;
-  std::vector<c10::NamedTypePtr> class_deps_;
+  std::set<c10::NamedTypePtr> class_deps_;
   TypeNameUniquer type_name_uniquer_;
 
   // qualifier, e.g. '__torch__.Bar' -> PythonPrint for the file that will be

@@ -77,7 +77,7 @@ bool is_enabled(const char* cfname, JitLoggingLevels level) {
 std::string log_function(const std::shared_ptr<torch::jit::Graph>& graph) {
   torch::jit::GraphFunction func("source_dump", graph, nullptr);
   std::vector<at::IValue> constants;
-  std::vector<c10::NamedTypePtr> deps;
+  std::set<c10::NamedTypePtr> deps;
   PythonPrint pp(constants, deps);
   pp.printFunction(func);
   return pp.str();
