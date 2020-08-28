@@ -43,7 +43,6 @@ def range_push(msg,color='silver'):
     Arguments:
         msg (string): ASCII message to associate with range
     """
-    #attrib = nvtxEventAttributes_v2(msg=msg,color=colors[color])
     attrib = EventAttributes(msg=msg,color=colors[color])
     return _nvtx.rangePushEx(attrib)
 
@@ -63,18 +62,9 @@ def mark(msg,color='silver'):
     Arguments:
         msg (string): ASCII message to associate with the event.
     """
-    #attrib = nvtxEventAttributes_v2(msg=msg,color=colors[color])
     attrib = EventAttributes(msg=msg,color=colors[color])
     return _nvtx.markEx(attrib)
 
-
-class nvtxMessageValue_t(ctypes.Union):
-    """
-    """
-    _fields_ = [('ascii', ctypes.c_char_p),
-                ('unicode',ctypes.c_wchar_p),
-                #('registered', ctypes.c_char_p) #this isnt the type, its a specific struct
-               ]
 
 def EventAttributes(version=_nvtx.version, 
                     size=_nvtx.size, 
@@ -91,42 +81,7 @@ def EventAttributes(version=_nvtx.version,
     attrib.colorType=colorType
     attrib.color=color
     attrib.messageType=msgType
-    #attrib.message=nvtxMessageValue_t()
     attrib.message=_nvtx.nvtxMessageValue_t() #use pybind11 instead of ctypes for this
     attrib.message.ascii=msg.encode("utf-8")
     return attrib
 
-class nvtxEventAttributes_v2(ctypes.Structure):
-    """
-    A C struct containing essential attributes and optional
-    attributes about a CUDA event. 
-    """
-    _fields_ = [('version', ctypes.c_ushort),
-                ('size', ctypes.c_ushort),
-                ('colorType', ctypes.c_int),
-                ('color', ctypes.c_uint),
-                ('msgType', ctypes.c_int),
-                ('msg', nvtxMessageValue_t) #TODO: do I need c_char_p instead?
-               ]
-
-    def __init__(self,
-                  version=_nvtx.version, 
-                  size=_nvtx.size, 
-                  colorType=int(_nvtx.NVTX_COLOR_ARGB),
-                  color=colors['yellow'],
-                  msgType=int(_nvtx.NVTX_MESSAGE_TYPE_ASCII),
-                  msg=''):
-        # Set to fields to zero as per NVTX documentation
-        #for attr_name in [field[0] for field in self._fields_]:
-        #    setattr(self, attr_name, 0)
-        self.version=version
-        self.size=size
-        self.colorType=colorType
-        self.color=color
-        self.msgType=msgType
-        self.msg.ascii=msg.encode('utf-8')
-            #TODO: Is this right to initialize all of whats in __fields__? There are chars
-        #    ctypes.memset(ctypes.addressof(attr_name), 0, ctypes.sizeof(attr_name))
-            # Now use user-defined values for the fields
-            # TODO - is this needed?
-        #super(nvtxEventAttributes_t, self).__init__(version, size, colorType, color, msgType, msg)
