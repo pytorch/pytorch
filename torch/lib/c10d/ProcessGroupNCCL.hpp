@@ -451,13 +451,13 @@ class ProcessGroupNCCL : public ProcessGroup {
   std::shared_ptr<ProcessGroup::Work> collective(
       std::vector<at::Tensor>& input,
       std::vector<at::Tensor>& output,
-      c10::optional<std::vector<at::cuda::CUDAStream>> cudaStreams,
+      std::vector<at::cuda::CUDAStream> cudaStreams,
       Fn fn);
   template <typename Fn, typename PreProcess, typename PostProcess>
   std::shared_ptr<ProcessGroup::Work> collective(
       std::vector<at::Tensor>& input,
       std::vector<at::Tensor>& output,
-      c10::optional<std::vector<at::cuda::CUDAStream>> cudaStreams,
+      std::vector<at::cuda::CUDAStream> cudaStreams,
       Fn fn,
       PreProcess pre,
       PostProcess post);
@@ -578,30 +578,6 @@ class ProcessGroupNCCL : public ProcessGroup {
   // for this map since only the watchdog thread accesses this set. The
   // set contains the string representation of ncclUniqueId.
   std::unordered_set<std::string> abortedComms_;
-};
-
-struct NCCLAllreduceOptions : AllreduceOptions {
-  c10::optional<std::vector<at::cuda::CUDAStream>> cudaStreams;
-};
-
-struct NCCLAllgatherOptions : AllgatherOptions {
-  c10::optional<std::vector<at::cuda::CUDAStream>> cudaStreams;
-};
-
-struct NCCLReduceOptions : ReduceOptions {
-  c10::optional<std::vector<at::cuda::CUDAStream>> cudaStreams;
-};
-
-struct NCCLBroadcastOptions : BroadcastOptions {
-  c10::optional<std::vector<at::cuda::CUDAStream>> cudaStreams;
-};
-
-struct NCCLReduceScatterOptions : ReduceScatterOptions {
-  c10::optional<std::vector<at::cuda::CUDAStream>> cudaStreams;
-};
-
-struct NCCLAllToAllOptions : AllToAllOptions {
-  c10::optional<std::vector<at::cuda::CUDAStream>> cudaStreams;
 };
 
 } // namespace c10d
