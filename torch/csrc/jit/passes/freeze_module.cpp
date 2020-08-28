@@ -97,12 +97,7 @@ class AttributePropagator {
       auto graph = function->graph();
       optimizeSubGraphs(graph, applyInline);
       if (freezeInterfaces_) {
-        optimizeSubGraphs(
-            graph,
-            std::bind(
-                &AttributePropagator::inlineInterfaceCalls,
-                *this,
-                std::placeholders::_1));
+        inlineInterfaceCalls(graph);
       }
       // Record Attributes that are explicitly set in the module.
       // They cannot be folded.
@@ -379,6 +374,14 @@ class AttributePropagator {
           inlineInterfaceCall(n, attr);
           // Reset the GetAttr to concrete module type.
           n->output()->setType(attr.type());
+        } else if (n->kind() == prim::fork) {
+          applyToForkSubgraph(
+              n,
+              graph,
+              std::bind(
+                  &AttributePropagator::inlineInterfaceCalls,
+                  *this,
+                  std::placeholders::_1));
         }
       }
     }
