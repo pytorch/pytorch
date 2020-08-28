@@ -13,7 +13,6 @@
 #include <math.h>
 #include <float.h>
 #include <algorithm>
-#include <c10/util/Optional.h>
 #include <initializer_list>
 #define CACHE_LINE 32
 #if defined(__GNUC__)
