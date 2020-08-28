@@ -49,8 +49,7 @@ DEFINE_DISPATCH(hypot_stub);
 DEFINE_DISPATCH(nextafter_stub);
 
 Tensor& add_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar alpha) {
-  auto iter = TensorIterator::binary_op(result, self, other,
-    /*check_mem_overlap=*/true);
+  auto iter = TensorIterator::binary_op(result, self, other);
   alpha_check(iter.dtype(), alpha);
   add_stub(iter.device_type(), iter, alpha);
   TORCH_INTERNAL_ASSERT(result.scalar_type() == iter.output().dtype());
@@ -71,8 +70,7 @@ Tensor& add_(Tensor& self, const Tensor& other, Scalar alpha) {
 
 Tensor& add_relu_impl(
     Tensor& result, const Tensor& self, const Tensor& other, Scalar alpha) {
-  auto iter = TensorIterator::binary_op(result, self, other,
-    /*check_mem_overlap=*/true);
+  auto iter = TensorIterator::binary_op(result, self, other);
   Scalar min_val;
   Scalar max_val;
   if (self.dtype() == at::kInt) {
@@ -124,8 +122,7 @@ Tensor& div_out(Tensor& result, const Tensor& self, const Tensor& other) {
       "Use true_divide or floor_divide (// in Python) instead.");
   }
 
-  auto iter = TensorIterator::binary_op(result, self, other,
-    /*check_mem_overlap=*/true);
+  auto iter = TensorIterator::binary_op(result, self, other);
   div_stub(iter.device_type(), iter);
   return result;
 }
@@ -150,8 +147,7 @@ Tensor& div_(Tensor& self, const Tensor& other) {
 }
 
 Tensor& remainder_out(Tensor& result, const Tensor& self, const Tensor& other) {
-  auto iter = TensorIterator::binary_op(result, self, other,
-    /*check_mem_overlap=*/true);
+  auto iter = TensorIterator::binary_op(result, self, other);
   remainder_stub(iter.device_type(), iter);
   return result;
 }
@@ -212,8 +208,7 @@ Tensor& true_divide_(Tensor& self, const Tensor& divisor) {
 }
 
 Tensor& floor_divide_out(Tensor& result, const Tensor& self, const Tensor& other) {
-  auto iter = TensorIterator::binary_op(result, self, other,
-    /*check_mem_overlap=*/true);
+  auto iter = TensorIterator::binary_op(result, self, other);
   div_stub(iter.device_type(), iter);
 
   if (result.is_floating_point()) {
@@ -242,8 +237,7 @@ Tensor& floor_divide_(Tensor& self, const Tensor& other) {
 }
 
 Tensor& mul_out(Tensor& result, const Tensor& self, const Tensor& other) {
-  auto iter = TensorIterator::binary_op(result, self, other,
-    /*check_mem_overlap=*/true);
+  auto iter = TensorIterator::binary_op(result, self, other);
   mul_stub(iter.device_type(), iter);
   return result;
 }
@@ -261,8 +255,7 @@ Tensor& mul_(Tensor& self, const Tensor& other) {
 
 Tensor& sub_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar alpha) {
   sub_check(self, other);
-  auto iter = TensorIterator::binary_op(result, self, other,
-    /*check_mem_overlap=*/true);
+  auto iter = TensorIterator::binary_op(result, self, other);
   alpha_check(iter.dtype(), alpha);
   sub_stub(iter.device_type(), iter, alpha);
   TORCH_INTERNAL_ASSERT(result.scalar_type() == iter.output().dtype());
@@ -438,8 +431,7 @@ Tensor rsub(const Tensor& self, Scalar other, Scalar alpha) {
 }
 
 Tensor& bitwise_and_out(Tensor& result, const Tensor& self, const Tensor& other) {
-  auto iter = TensorIterator::binary_op(result, self, other,
-    /*check_mem_overlap=*/true);
+  auto iter = TensorIterator::binary_op(result, self, other);
   bitwise_and_stub(iter.device_type(), iter);
   return result;
 }
@@ -485,8 +477,7 @@ Tensor& __iand__(Tensor& self, Scalar other) {
 }
 
 Tensor& bitwise_or_out(Tensor& result, const Tensor& self, const Tensor& other) {
-  auto iter = TensorIterator::binary_op(result, self, other,
-    /*check_mem_overlap=*/true);
+  auto iter = TensorIterator::binary_op(result, self, other);
   bitwise_or_stub(iter.device_type(), iter);
   return result;
 }
@@ -532,8 +523,7 @@ Tensor& __ior__(Tensor& self, Scalar other) {
 }
 
 Tensor& bitwise_xor_out(Tensor& result, const Tensor& self, const Tensor& other) {
-  auto iter = TensorIterator::binary_op(result, self, other,
-    /*check_mem_overlap=*/true);
+  auto iter = TensorIterator::binary_op(result, self, other);
   bitwise_xor_stub(iter.device_type(), iter);
   return result;
 }
@@ -752,8 +742,7 @@ Tensor& logical_xor_(Tensor& self, Scalar other) { return comparison_op_(self, o
 Tensor& maximum_out(Tensor& result, const Tensor& self, const Tensor& other) {
   TORCH_CHECK(!self.is_complex() && !other.is_complex(), "maximum does not support complex inputs.");
 
-  auto iter = TensorIterator::binary_op(result, self, other,
-                                        /*check_mem_overlap=*/true);
+  auto iter = TensorIterator::binary_op(result, self, other);
   maximum_stub(iter.device_type(), iter);
   return result;
 }
@@ -779,8 +768,7 @@ Tensor max(const Tensor& self, const Tensor& other) {
 Tensor& minimum_out(Tensor& result, const Tensor& self, const Tensor& other) {
   TORCH_CHECK(!self.is_complex() && !other.is_complex(), "minimum does not support complex inputs.");
 
-  auto iter = TensorIterator::binary_op(result, self, other,
-                                        /*check_mem_overlap=*/true);
+  auto iter = TensorIterator::binary_op(result, self, other);
   minimum_stub(iter.device_type(), iter);
   return result;
 }
@@ -812,8 +800,7 @@ Tensor& floor_divide_(Tensor& self, Scalar other) {
 }
 
 Tensor& fmod_out(Tensor & result, const Tensor& self, const Tensor& other) {
-  auto iter = TensorIterator::binary_op(result, self, other,
-                                        /*check_mem_overlap=*/true);
+  auto iter = TensorIterator::binary_op(result, self, other);
   TORCH_CHECK(iter.device_type() == at::kCPU, "Native fmod only supports CPU");
   fmod_stub(iter.device_type(), iter);
   return result;
@@ -845,7 +832,7 @@ Tensor& fmod_(Tensor& self, Scalar other) {
 }
 
 Tensor& logaddexp_out(Tensor& result, const Tensor& self, const Tensor& other) {
-  auto iter = TensorIterator::binary_op(result, self, other, /*check_mem_overlap=*/true);
+  auto iter = TensorIterator::binary_op(result, self, other);
   logaddexp_stub(iter.device_type(), iter);
   return result;
 }
@@ -856,7 +843,7 @@ Tensor logaddexp(const Tensor& self, const Tensor& other) {
 }
 
 Tensor& logaddexp2_out(Tensor& result, const Tensor& self, const Tensor& other) {
-  auto iter = TensorIterator::binary_op(result, self, other, /*check_mem_overlap=*/true);
+  auto iter = TensorIterator::binary_op(result, self, other);
   logaddexp2_stub(iter.device_type(), iter);
   return result;
 }
@@ -867,7 +854,7 @@ Tensor logaddexp2(const Tensor& self, const Tensor& other) {
 }
 
 Tensor& gcd_out(Tensor& result, const Tensor& self, const Tensor& other) {
-  auto iter = TensorIterator::binary_op(result, self, other, /*check_mem_overlap=*/ true);
+  auto iter = TensorIterator::binary_op(result, self, other);
   gcd_stub(iter.device_type(), iter);
   return result;
 }
@@ -882,7 +869,7 @@ Tensor& gcd_(Tensor& self, const Tensor& other) {
 }
 
 Tensor& lcm_out(Tensor& result, const Tensor& self, const Tensor& other) {
-  auto iter = TensorIterator::binary_op(result, self, other, /*check_mem_overlap=*/ true);
+  auto iter = TensorIterator::binary_op(result, self, other);
   lcm_stub(iter.device_type(), iter);
   return result;
 }

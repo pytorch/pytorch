@@ -11,8 +11,7 @@ DEFINE_DISPATCH(pow_tensor_tensor_stub);
 DEFINE_DISPATCH(pow_tensor_scalar_stub);
 
 Tensor& pow_out(Tensor& result, const Tensor& base, const Tensor& exp) {
-  auto iter = TensorIterator::binary_op(result, base, exp,
-                                        /*check_mem_overlap=*/true);
+  auto iter = TensorIterator::binary_op(result, base, exp);
   pow_tensor_tensor_stub(iter.device_type(), iter);
   return result;
 }
