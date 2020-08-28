@@ -1,12 +1,18 @@
-${manual_functions_h}
+#include "torch/csrc/autograd/FunctionsManual.h"
 
 // ${generated_comment}
 
-namespace torch { namespace autograd { namespace generated {
+// The manual function definitions that used to be here are now in torch/csrc/autograd/FunctionsManual.cpp
+// This speeds up re-compilation and allow to share these implementations so that they can be
+// used for forward formulas as well.
 
-namespace {
-${manual_functions_cpp}
-} // anonymous namespace
+using namespace torch::autograd::generated::details;
+using at::Tensor;
+using at::Scalar;
+using at::IntArrayRef;
+using at::TensorList;
+
+namespace torch { namespace autograd { namespace generated {
 
 ${autograd_function_definitions}
 
