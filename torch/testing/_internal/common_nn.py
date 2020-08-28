@@ -3809,7 +3809,7 @@ loss_reference_fns = {
 }
 
 
-criterion_tests = [
+new_criterion_tests = [
     dict(
         module_name='L1Loss',
         input_size=(2, 3, 4),
@@ -4086,9 +4086,6 @@ criterion_tests = [
         desc='margin',
         check_sum_reduction=True,
     ),
-]
-
-new_criterion_tests = [
     dict(
         module_name='BCEWithLogitsLoss',
         input_fn=lambda: torch.rand(15, 10).clamp_(1e-2, 1 - 1e-2),
@@ -4789,74 +4786,6 @@ class ModuleTest(TestBase):
                 raise
 
 
-class CriterionTest(TestBase):
-
-    _required_arg_names = TestBase._required_arg_names.union({'target'})
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.should_test_cuda = kwargs.get('test_cuda', True)
-        self.check_forward_only = kwargs.get('check_forward_only', True)
-
-    def _get_target(self):
-        raise AssertionError()
-        return self._get_arg('target', True)
-
-    def __call__(self, test_case):
-        module = self.constructor(*self.constructor_args)
-        input = self._get_input()
-
-        # Check that these methods don't raise errors
-        module.__repr__()
-        str(module)
-
-        target = self._get_target()
-
-        if self.reference_fn is not None:
-            out = test_case._forward_criterion(module, input, target, extra_args=self.extra_args)
-            ref_args = (deepcopy(input), deepcopy(target)) + self.extra_args + (module,)
-            expected_out = self.reference_fn(*ref_args)
-            test_case.assertEqual(out, expected_out)
-
-        if self.check_forward_only:
-            return
-
-        test_case.check_criterion_jacobian(module, input, target)
-        self._do_extra_tests(test_case, module, input, target)
-
-    def test_cuda(self, test_case):
-        raise AssertionError()
-        if not TEST_CUDA or not self.should_test_cuda:
-            raise unittest.SkipTest('Excluded from CUDA tests')
-        try:
-            cpu_input = self._get_input()
-            type_map = {
-                'torch.DoubleTensor': torch.cuda.FloatTensor,
-            }
-            gpu_input = to_gpu(cpu_input, type_map=type_map)
-
-            cpu_target = self._get_target()
-            gpu_target = to_gpu(cpu_target, type_map=type_map)
-
-            cpu_module = self.constructor(*self.constructor_args)
-            gpu_module = self.constructor(*self.constructor_args).float().cuda()
-
-            cpu_output = test_case._forward_criterion(cpu_module, cpu_input, cpu_target)
-            gpu_output = test_case._forward_criterion(gpu_module, gpu_input, gpu_target)
-            test_case.assertEqual(cpu_output, gpu_output, atol=4e-4, rtol=0)
-
-            gradOutput = torch.randn(())
-            cpu_gradInput = test_case._backward_criterion(cpu_module, cpu_input, cpu_target, gradOutput)
-            gpu_gradInput = test_case._backward_criterion(gpu_module, gpu_input, gpu_target, gradOutput)
-            test_case.assertEqual(cpu_gradInput, gpu_gradInput, atol=4e-4, rtol=0)
-        except NotImplementedError:
-            pass
-
-    def _do_extra_tests(self, test_case, module, input, target):
-        raise AssertionError()
-        pass
-
-
 class InputVariableMixin(object):
     def _get_input(self):
         input = TestBase._get_input(self, False)
@@ -5027,16 +4956,42 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
         return self._get_arg('constructor_args', False)
 
 
-class NewCriterionTest(InputVariableMixin, CriterionTest):
+class NewCriterionTest(InputVariableMixin):
     # TODO: check that criterions don't ignore grad_output
+
+    _required_arg_names = TestBase._required_arg_names.union({'target'})
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.should_test_cuda = kwargs.get('test_cuda', True)
+        self.check_forward_only = kwargs.get('check_forward_only', True)
         self.check_gradgrad = kwargs.get('check_gradgrad', True)
         self.check_half = kwargs.get('check_half', True)
         self.check_bfloat16 = kwargs.get('check_bfloat16', False)
         self.convert_target = kwargs.get('convert_target', True)
         self.test_cpu = kwargs.get('test_cpu', True)
+
+    def __call__(self, test_case):
+        module = self.constructor(*self.constructor_args)
+        input = self._get_input()
+
+        # Check that these methods don't raise errors
+        module.__repr__()
+        str(module)
+
+        target = self._get_target()
+
+        if self.reference_fn is not None:
+            out = test_case._forward_criterion(module, input, target, extra_args=self.extra_args)
+            ref_args = (deepcopy(input), deepcopy(target)) + self.extra_args + (module,)
+            expected_out = self.reference_fn(*ref_args)
+            test_case.assertEqual(out, expected_out)
+
+        if self.check_forward_only:
+            return
+
+        test_case.check_criterion_jacobian(module, input, target)
+        self._do_extra_tests(test_case, module, input, target)
 
     def _do_extra_tests(self, test_case, module, input, target):
         if not self.check_gradgrad:
