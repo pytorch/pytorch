@@ -331,8 +331,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> compute_pool_max(
     auto values_accessor =
         values.packed_accessor<scalar_t, 2>(); // {nnz, nvalues}
 
-    mx_buffer = at::empty({new_sz * nvalues}, values.options());
-    mx_buffer.fill_(-std::numeric_limits<scalar_t>::infinity());
+    mx_buffer = at::full({new_sz * nvalues}, Scalar(-std::numeric_limits<scalar_t>::infinity()), values.options());
  
     auto mx_buffer_ptr = mx_buffer.data_ptr<scalar_t>();
 
