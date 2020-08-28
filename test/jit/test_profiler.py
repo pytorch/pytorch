@@ -40,7 +40,7 @@ class TestProfiler(JitTestCase):
         x = torch.ones(1, requires_grad=True)
         y = torch.ones(1, requires_grad=True)
         scripted_f(x, y)
-        b = scripted_f(x, y)
+        scripted_f(x, y)
         warmup_backward(b)
         g = torch.jit.last_executed_optimized_graph()
         # Backward has an if node guarding specializations,
