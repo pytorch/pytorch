@@ -76,7 +76,6 @@ __global__ void cuda_sparse_coo_softmax_kernel(
     int64_t* pool_offsets,
     int64_t nvalues,
     scalar_t* mx_rows,
-    scalar_t* exp_sums_rows,
     PackedTensorAccessor<scalar_t, 2> input_values_acc,
     PackedTensorAccessor<scalar_t, 2> ouput_values_acc) {
   /*
@@ -98,38 +97,28 @@ __global__ void cuda_sparse_coo_softmax_kernel(
     int64_t pool_indices_size = pool_sizes[index];
     scalar_t* mx_row = mx_rows + index * nvalues;
 
-    /* Apply exp to (v - mx) and sum the results */
-    scalar_t* exp_sums_row = exp_sums_rows + index * nvalues;
-    for (int64_t p = 0; p < pool_indices_size; p++) {
-      auto i = pool_indices[p];
-      auto values_row = input_values_acc[i];
-      auto out_values_row = ouput_values_acc[i];
-      for (int64_t j = 0; j < nvalues; j++) {
+    for (int64_t j = 0; j < nvalues; j++) {
+      scalar_t exp_sums = 0;
+      for (int64_t p = 0; p < pool_indices_size; p++) {
+        auto i = pool_indices[p];
+        auto values_row = input_values_acc[i];
+        auto out_values_row = ouput_values_acc[i];
+
         auto v = c10::cuda::compat::exp(values_row[j] - mx_row[j]);
         if (!LogSoftMax) {
           out_values_row[j] = v;
         }
-        exp_sums_row[j] += v;
+        exp_sums += v;
       }
-    }
-    for (int64_t j = 0; j < nvalues; j++) {
-      if (LogSoftMax) {
-        exp_sums_row[j] = c10::cuda::compat::log(exp_sums_row[j]);
-      } else {
-        exp_sums_row[j] = 1.0 / exp_sums_row[j];
-      }
-    }
-
-    /* Normalize with the sum of exponents */
-    for (int64_t p = 0; p < pool_indices_size; p++) {
-      auto i = pool_indices[p];
-      auto values_row = input_values_acc[i];
-      auto out_values_row = ouput_values_acc[i];
-      for (int64_t j = 0; j < nvalues; j++) {
+      for (int64_t p = 0; p < pool_indices_size; p++) {
+        auto i = pool_indices[p];
+        auto values_row = input_values_acc[i];
+        auto out_values_row = ouput_values_acc[i];
+        
         if (LogSoftMax) {
-          out_values_row[j] = values_row[j] - mx_row[j] - exp_sums_row[j];
+          out_values_row[j] = values_row[j] - mx_row[j] - c10::cuda::compat::log(exp_sums);
         } else {
-          out_values_row[j] *= exp_sums_row[j];
+          out_values_row[j] *= 1.0 / exp_sums;
         }
       }
     }
@@ -431,8 +420,6 @@ void cuda_sparse_coo_softmax(
       compute_pool_max<scalar_t, true>(indices, values_2, sizes, nvalues, dim);
 
   auto pool_size = pool_offsets.size(0);
-  auto exp_sums_rows = at::zeros({nvalues * pool_size}, values.options());
-
   int block_size = getNumThreads(pool_size);
   const int grid_size = (pool_size + block_size - 1) / block_size;
 
@@ -444,7 +431,6 @@ void cuda_sparse_coo_softmax(
           pool_offsets.data_ptr<int64_t>(),
           nvalues,
           mx_buffer.data_ptr<scalar_t>(),
-          exp_sums_rows.data_ptr<scalar_t>(),
           values_accessor,
           out_values_accessor);
   THCudaCheck(cudaGetLastError());
