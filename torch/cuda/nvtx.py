@@ -1,5 +1,3 @@
-import ctypes
-
 try:
     from torch._C import _nvtx
 except ImportError:
