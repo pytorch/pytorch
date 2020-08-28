@@ -9802,6 +9802,7 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(result, expected)
 
     # Ensure that nuclear_norm's out variant gives the same result as the non-out
+    @onlyOnCPUAndCUDA
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float32, torch.float64)
