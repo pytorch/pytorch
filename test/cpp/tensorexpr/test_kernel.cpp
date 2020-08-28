@@ -1,4 +1,5 @@
 #include <test/cpp/tensorexpr/test_base.h>
+#include <torch/csrc/jit/frontend/code_template.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/tensorexpr/buffer.h>
@@ -257,6 +258,168 @@ void testKernel_4() {
     // Check the contents
     for (size_t i = 0; i < num_el; i++) {
       CHECK_EQ(((float*)o.data_ptr())[i], ((float*)ref.data_ptr())[i]);
+    }
+  }
+}
+
+namespace {
+
+std::string dtypeConstant(ScalarType scalar_type) {
+  if (scalar_type == ScalarType::None) {
+    return "None = prim::Constant()";
+  } else {
+    TemplateEnv env_dtype;
+    env_dtype.d("scalar_type", static_cast<int>(scalar_type));
+    return format("int = prim::Constant[value=${scalar_type}]()", env_dtype);
+  }
+}
+
+at::Tensor iotaTensor(IntArrayRef sizes, const at::TensorOptions& options) {
+  int64_t numel = std::accumulate(
+      sizes.begin(), sizes.end(), 1, std::multiplies<int64_t>());
+  std::vector<float> values(numel);
+  std::iota(values.begin(), values.end(), 0);
+  auto a = at::tensor(values, options);
+  return a.reshape(sizes);
+}
+
+} // namespace
+
+void testKernelSumAllAxes() {
+  // Test lowering of sum on all axes.
+  const auto graph_template = R"IR(
+      graph(%0 : Float(5:3,3:1, device=cpu)):
+        %1 : ${dtype}
+        %2 : Tensor = aten::sum(%0, %1)
+        return (%2))IR";
+  auto a = iotaTensor({5, 3}, TensorOptions(kCPU).dtype(at::kFloat));
+
+  for (auto scalar_type : {ScalarType::None, ScalarType::Double}) {
+    KernelScope kernel_scope;
+    TemplateEnv env;
+    env.s("dtype", dtypeConstant(scalar_type));
+    const auto graph_string = format(graph_template, env);
+
+    auto graph = std::make_shared<Graph>();
+    parseIR(graph_string, &*graph);
+
+    auto o = at::empty({}, TensorOptions(kCPU));
+    c10::optional<c10::ScalarType> dtype;
+    if (scalar_type != ScalarType::None) {
+      dtype = static_cast<c10::ScalarType>(scalar_type);
+    }
+    auto ref = a.sum(/*dtype=*/dtype);
+    TensorExprKernel k(graph);
+    std::vector<at::Tensor> inputs = {a};
+    Stmt* s = k.getCodeGenStmt();
+    // TODO: verify stmt
+
+    std::vector<IValue> stack = fmap<IValue>(inputs);
+    k.run(stack);
+    o = stack[0].toTensor();
+    ASSERT_EQ(o.sizes(), ref.sizes());
+    ASSERT_EQ(o.dtype(), ref.dtype());
+    ASSERT_TRUE(at::allclose(o, ref));
+  }
+}
+
+void testKernelSumOneAxis() {
+  // Test lowering of sum on one axis.
+  const auto graph_template = R"IR(
+      graph(%0 : Float(5:3,3:1, device=cpu)):
+        %1 : int = prim::Constant[value=${dim}]()
+        %2 : int[] = prim::ListConstruct(%1)
+        %3 : bool = prim::Constant[value=${keepdim}]()
+        %4 : ${dtype}
+        %5 : Tensor = aten::sum(%0, %2, %3, %4)
+        return (%5))IR";
+  auto a = iotaTensor({5, 3}, TensorOptions(kCPU).dtype(at::kFloat));
+
+  for (int dim = -a.dim(); dim < a.dim(); ++dim) {
+    for (bool keepdim : {false, true}) {
+      for (auto scalar_type : {ScalarType::None, ScalarType::Double}) {
+        KernelScope kernel_scope;
+        TemplateEnv env;
+        env.d("dim", dim);
+        env.d("keepdim", keepdim);
+        env.s("dtype", dtypeConstant(scalar_type));
+        const auto graph_string = format(graph_template, env);
+
+        auto graph = std::make_shared<Graph>();
+        parseIR(graph_string, &*graph);
+
+        auto o = at::empty({}, TensorOptions(kCPU));
+        c10::optional<c10::ScalarType> dtype;
+        if (scalar_type != ScalarType::None) {
+          dtype = static_cast<c10::ScalarType>(scalar_type);
+        }
+        auto ref = a.sum({dim}, /*keepdim=*/keepdim, /*dtype=*/dtype);
+        TensorExprKernel k(graph);
+        std::vector<at::Tensor> inputs = {a};
+        Stmt* s = k.getCodeGenStmt();
+        // TODO: verify stmt
+
+        std::vector<IValue> stack = fmap<IValue>(inputs);
+        k.run(stack);
+        o = stack[0].toTensor();
+        ASSERT_EQ(o.sizes(), ref.sizes());
+        ASSERT_EQ(o.dtype(), ref.dtype());
+        ASSERT_TRUE(at::allclose(o, ref));
+      }
+    }
+  }
+}
+
+void testKernelSumMultipleAxes() {
+  // Test lowering of sum on multiple axes.
+  const auto graph_template = R"IR(
+      graph(%0 : Float(5:72,3:24,4:6,6:1, device=cpu)):
+        %1 : int = prim::Constant[value=${dim1}]()
+        %2 : int = prim::Constant[value=${dim2}]()
+        %3 : int[] = prim::ListConstruct(%1, %2)
+        %4 : bool = prim::Constant[value=${keepdim}]()
+        %5 : ${dtype}
+        %6 : Tensor = aten::sum(%0, %3, %4, %5)
+        return (%6))IR";
+  auto a = iotaTensor({5, 3, 4, 6}, TensorOptions(kCPU).dtype(at::kFloat));
+
+  // Only iterate over positive values of axes to keep the running time
+  // reasonable, since the number of pairs is quadratic.
+  for (int dim1 = 0; dim1 < a.dim(); ++dim1) {
+    for (int dim2 = 0; dim2 < a.dim(); ++dim2) {
+      for (bool keepdim : {false, true}) {
+        for (auto scalar_type : {ScalarType::None, ScalarType::Double}) {
+          KernelScope kernel_scope;
+          TemplateEnv env;
+          env.d("dim1", dim1);
+          env.d("dim2", dim2);
+          env.d("keepdim", keepdim);
+          env.s("dtype", dtypeConstant(scalar_type));
+          const auto graph_string = format(graph_template, env);
+
+          auto graph = std::make_shared<Graph>();
+          parseIR(graph_string, &*graph);
+
+          auto o = at::empty({}, TensorOptions(kCPU));
+          c10::optional<c10::ScalarType> dtype;
+          if (scalar_type != ScalarType::None) {
+            dtype = static_cast<c10::ScalarType>(scalar_type);
+          }
+          auto ref = a.sum(
+              IntArrayRef{dim1, dim2}, /*keepdim=*/keepdim, /*dtype=*/dtype);
+          TensorExprKernel k(graph);
+          std::vector<at::Tensor> inputs = {a};
+          Stmt* s = k.getCodeGenStmt();
+          // TODO: verify stmt
+
+          std::vector<IValue> stack = fmap<IValue>(inputs);
+          k.run(stack);
+          o = stack[0].toTensor();
+          ASSERT_EQ(o.sizes(), ref.sizes());
+          ASSERT_EQ(o.dtype(), ref.dtype());
+          ASSERT_TRUE(at::allclose(o, ref));
+        }
+      }
     }
   }
 }

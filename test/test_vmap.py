@@ -3,7 +3,6 @@ import torch
 from torch import Tensor, vmap
 import functools
 import warnings
-from torch._six import istuple
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import TEST_WITH_ROCM
 
@@ -658,9 +657,9 @@ def _vmap_test(self, op, inputs, in_dims=0, out_dims=0,
     if check_view:
         result_as_tuple = (result,) if op_has_single_return else result
         for output in result_as_tuple:
-            self.assertEqual(output.data_ptr() - output.storage_offset() * output.element_size(),
-                             inputs[0].data_ptr(),
-                             msg="result was not a view of the first input!")
+            input0_base = inputs[0] if inputs[0]._base is None else inputs[0]._base
+            self.assertTrue(output._base is input0_base,
+                            msg="result was not a view of the first input!")
 
     if not check_propagates_grad:
         return
@@ -1165,7 +1164,7 @@ def construct_v(output, batch_size):
                        dtype=output.dtype, device=output.device)
 
 def as_tuple(x):
-    if istuple(x):
+    if isinstance(x, tuple):
         return x
     elif isinstance(x, list):
         return tuple(x)
