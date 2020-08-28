@@ -478,6 +478,27 @@ def _link_files(listing, source_dir, target_dir):
         _move_single(src, source_dir, target_dir, os.link, "Linking")
 
 
+def _can_link(platform, source_dir, target_dir):
+    """Determines if we can link from source to target directory"""
+    if platform.startswith("win"):
+        return False
+    src = os.path.join(source_dir, "__nightly_test__")
+    trg = os.path.join(source_dir, "__nightky_test__")
+    try:
+        with open(src, "w"):
+            pass
+        os.link(src, trg)
+        linkable = True
+    except OSError:
+        linkable = False
+    finally:
+        if os.path.isfile(trg):
+            os.remove(trg)
+        if os.path.isfile(src):
+            os.remove(src)
+    return linkable
+
+
 @timed("Moving nightly files into repo")
 def move_nightly_files(spdir, platform):
     """Moves PyTorch files from temporary installed location to repo."""
@@ -486,10 +507,10 @@ def move_nightly_files(spdir, platform):
     target_dir = os.path.abspath("torch")
     listing = _get_listing(source_dir, target_dir, platform)
     # copy / link files
-    if platform.startswith("win"):
-        _copy_files(listing, source_dir, target_dir)
-    else:
+    if _can_link(platform, source_dir, target_dir):
         _link_files(listing, source_dir, target_dir)
+    else:
+        _copy_files(listing, source_dir, target_dir)
 
 
 def _available_envs():
