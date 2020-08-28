@@ -3,6 +3,9 @@
 #include <chrono>
 #include <cstdint>
 
+#include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/CUDAEvent.h>
+
 namespace c10d {
 
 enum class ReduceOp : std::uint8_t {
@@ -27,6 +30,7 @@ struct BroadcastOptions {
 struct AllreduceOptions {
   ReduceOp reduceOp = ReduceOp::SUM;
   std::chrono::milliseconds timeout = kUnsetTimeout;
+  std::vector<at::cuda::CUDAStream> cudaStreams = {};
 };
 
 struct AllreduceCoalescedOptions : AllreduceOptions {};

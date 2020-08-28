@@ -786,7 +786,7 @@ template <typename Fn, typename PreProcess, typename PostProcess>
 std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
     std::vector<at::Tensor>& inputs,
     std::vector<at::Tensor>& outputs,
-    c10::optional<std::vector<at::cuda::CUDAStream>> cudaStreams,
+    std::vector<at::cuda::CUDAStream> cudaStreams,
     Fn fn,
     PreProcess pre,
     PostProcess post) {
@@ -794,7 +794,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
   const auto key = getKeyFromDevices(devices);
   auto& ncclComms = getNCCLComm(key, devices);
 
-  auto& streams = cudaStreams.has_value() ? cudaStreams.value() : ncclStreams_[key];
+  auto& streams = cudaStreams.empty() ? ncclStreams_[key] : cudaStreams;
 
   // Check the size of the streams vector (this is necessary when we're using
   // the user-supplied CUDA streams).
@@ -861,7 +861,7 @@ template <typename Fn>
 std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
     std::vector<at::Tensor>& inputs,
     std::vector<at::Tensor>& outputs,
-    c10::optional<std::vector<at::cuda::CUDAStream>> cudaStreams,
+    std::vector<at::cuda::CUDAStream> cudaStreams,
     Fn fn) {
   return collective(
       inputs,
@@ -880,7 +880,7 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
   return collective(
       inputs,
       outputs,
-      c10::optional<std::vector<at::cuda::CUDAStream>>(),
+      std::vector<at::cuda::CUDAStream>(),
       fn,
       [](std::vector<at::cuda::CUDAStream>&) {},
       [](std::vector<at::cuda::CUDAStream>&) {});
@@ -894,20 +894,17 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
     PreProcess pre,
     PostProcess post) {
   return collective(
-      inputs, outputs, c10::optional<std::vector<at::cuda::CUDAStream>>(), fn, pre, post);
+      inputs, outputs, std::vector<at::cuda::CUDAStream>(), fn, pre, post);
 }
 std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce(
     std::vector<at::Tensor>& tensors,
     const AllreduceOptions& opts) {
   check_gpu_tensors(tensors);
 
-  const NCCLAllreduceOptions& ncclOpts =
-      static_cast<const NCCLAllreduceOptions&>(opts);
-
   return collective(
       tensors,
       tensors,
-      ncclOpts.cudaStreams,
+      opts.cudaStreams,
       [&](at::Tensor& input,
           at::Tensor& output,
           ncclComm_t comm,
