@@ -1136,13 +1136,7 @@ def atleast_3d(*tensors):
     return _VF.atleast_3d(tensors)  # type: ignore
 
 
-<<<<<<< HEAD
 if TYPE_CHECKING:
-=======
-@overload  # noqa: 749
-def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa: 749
-    # type: (Tensor, Any, Optional[List[int]], bool, Optional[Tensor], Optional[int]) -> Tensor
->>>>>>> [JIT] Add support for default args in class types
     pass
     # There's no good way to use this type annotation; cannot rename norm() to
     # _norm_impl() in a way that doesn't break JIT overloads. So leave untyped
@@ -1164,12 +1158,12 @@ else:
 
     @overload  # noqa: 749
     def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa: 749
-        # type: (Tensor, Optional[number], Optional[List[int]], bool, Optional[Tensor], Optional[int]) -> Tensor
+        # type: (Tensor, Any, Optional[List[int]], bool, Optional[Tensor], Optional[int]) -> Tensor
         pass
 
     @overload  # noqa: 749
     def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa: 749
-        # type: (Tensor, Optional[number], Optional[int], bool, Optional[Tensor], Optional[int]) -> Tensor
+        # type: (Tensor, Any, Optional[int], bool, Optional[Tensor], Optional[int]) -> Tensor
         pass
 
     @overload  # noqa: 749
@@ -1177,18 +1171,6 @@ else:
         # type: (Tensor, str, Optional[int], bool, Optional[Tensor], Optional[int]) -> Tensor
         pass
 
-<<<<<<< HEAD
-=======
-@overload  # noqa: 749
-def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa: 749
-    # type: (Tensor, Any, Optional[int], bool, Optional[Tensor], Optional[int]) -> Tensor
-    pass
-
-@overload  # noqa: 749
-def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa: 749
-    # type: (Tensor, str, Optional[int], bool, Optional[Tensor], Optional[int]) -> Tensor
-    pass
->>>>>>> [JIT] Add support for default args in class types
 
 def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa: 749
     r"""Returns the matrix norm or vector norm of a given tensor.
