@@ -43,7 +43,7 @@ class _DecoratorContextManager:
     def __enter__(self) -> None:
         raise NotImplementedError
 
-    def __exit__(self, *args: Any) -> bool:
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> Literal[False]:
         raise NotImplementedError
 
 
@@ -126,7 +126,7 @@ class enable_grad(_DecoratorContextManager):
         self.prev = torch.is_grad_enabled()
         torch._C._set_grad_enabled(True)
 
-    def __exit__(self, *args: Any) -> Literal[False]:
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> Literal[False]:
         torch._C._set_grad_enabled(self.prev)
         return False
 
@@ -172,6 +172,6 @@ class set_grad_enabled(object):
     def __enter__(self) -> None:
         pass
 
-    def __exit__(self, *args: Any) -> Literal[False]:
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> Literal[False]:
         torch._C._set_grad_enabled(self.prev)
         return False
