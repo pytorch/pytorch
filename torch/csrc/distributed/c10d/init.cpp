@@ -204,13 +204,13 @@ They are used in specifying strategies for reduction collectives, e.g.,
       .def(py::init<>())
       .def_readwrite("rootRank", &::c10d::BroadcastOptions::rootRank)
       .def_readwrite("rootTensor", &::c10d::BroadcastOptions::rootTensor)
-      .def_readwrite("timeout", &::c10d::BroadcastOptions::timeout);
+      .def_readwrite("timeout", &::c10d::BroadcastOptions::timeout)
       .def_readwrite("cudaStreams", &::c10d::BroadcastOptions::cudaStreams);
 
   py::class_<::c10d::AllreduceOptions>(module, "AllreduceOptions")
       .def(py::init<>())
       .def_readwrite("reduceOp", &::c10d::AllreduceOptions::reduceOp)
-      .def_readwrite("timeout", &::c10d::AllreduceOptions::timeout);
+      .def_readwrite("timeout", &::c10d::AllreduceOptions::timeout)
       .def_readwrite("cudaStreams", &::c10d::AllreduceOptions::cudaStreams);
 
   py::class_<::c10d::AllreduceCoalescedOptions>(
@@ -224,12 +224,12 @@ They are used in specifying strategies for reduction collectives, e.g.,
       .def_readwrite("reduceOp", &::c10d::ReduceOptions::reduceOp)
       .def_readwrite("rootRank", &::c10d::ReduceOptions::rootRank)
       .def_readwrite("rootTensor", &::c10d::ReduceOptions::rootTensor)
-      .def_readwrite("timeout", &::c10d::ReduceOptions::timeout);
+      .def_readwrite("timeout", &::c10d::ReduceOptions::timeout)
       .def_readwrite("cudaStreams", &::c10d::ReduceOptions::cudaStreams);
 
   py::class_<::c10d::AllgatherOptions>(module, "AllgatherOptions")
       .def(py::init<>())
-      .def_readwrite("timeout", &::c10d::AllgatherOptions::timeout);
+      .def_readwrite("timeout", &::c10d::AllgatherOptions::timeout)
       .def_readwrite("cudaStreams", &::c10d::AllgatherOptions::cudaStreams);
 
   py::class_<::c10d::GatherOptions>(module, "GatherOptions")
@@ -245,7 +245,7 @@ They are used in specifying strategies for reduction collectives, e.g.,
   py::class_<::c10d::ReduceScatterOptions>(module, "ReduceScatterOptions")
       .def(py::init<>())
       .def_readwrite("reduceOp", &::c10d::ReduceScatterOptions::reduceOp)
-      .def_readwrite("timeout", &::c10d::ReduceScatterOptions::timeout);
+      .def_readwrite("timeout", &::c10d::ReduceScatterOptions::timeout)
       .def_readwrite("cudaStreams", &::c10d::ReduceScatterOptions::cudaStreams);
 
   py::class_<::c10d::BarrierOptions>(module, "BarrierOptions")
@@ -254,7 +254,7 @@ They are used in specifying strategies for reduction collectives, e.g.,
 
   py::class_<::c10d::AllToAllOptions>(module, "AllToAllOptions")
       .def(py::init<>())
-      .def_readwrite("timeout", &::c10d::AllToAllOptions::timeout);
+      .def_readwrite("timeout", &::c10d::AllToAllOptions::timeout)
       .def_readwrite("cudaStreams", &::c10d::AllToAllOptions::cudaStreams);
 
   auto store =
