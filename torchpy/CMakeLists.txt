@@ -9,7 +9,6 @@ add_library(torchpy ${TORCHPY_LIB_SOURCES})
 target_include_directories(torchpy PRIVATE ${TORCHPY_DIR})
 target_link_libraries(torchpy PRIVATE torch torch_python -Wl,-rpath,/home/whc/local/pytorch-env/lib/ ${PYTHON_LIBRARIES})
 
-
 set(TORCHPY_TEST_SOURCES
   ${TORCHPY_DIR}/test_main.cpp
   ${TORCHPY_DIR}/example/test_threads.cpp

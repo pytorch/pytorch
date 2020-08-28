@@ -1,5 +1,4 @@
 #include <future>
 #include <iostream>
 
-int main() {
-}
+int main() {}

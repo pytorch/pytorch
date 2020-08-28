@@ -219,94 +219,98 @@ void initPythonIRBindings(PyObject* module_) {
             AliasDb db(g);
             db.dump();
           })
-      .def(
-          "_export_onnx",
-          [](const std::shared_ptr<Graph> g,
-             const std::map<std::string, at::Tensor>& initializers,
-             int64_t onnx_opset_version,
-             const std::unordered_map<
-                 std::string,
-                 std::unordered_map<int64_t, std::string>>& dynamic_axes,
-             bool defer_weight_export,
-             ::torch::onnx::OperatorExportTypes operator_export_type,
-             bool strip_doc_string,
-             bool keep_initializers_as_inputs,
-             const std::map<std::string, int>& custom_opsets,
-             bool add_node_names,
-             bool use_external_data_format,
-             const std::string& onnx_file_path) {
-            std::string graph;
-            RawDataExportMap export_map;
-            std::tie(graph, export_map) = export_onnx(
-                g,
-                initializers,
-                onnx_opset_version,
-                dynamic_axes,
-                defer_weight_export,
-                operator_export_type,
-                strip_doc_string,
-                keep_initializers_as_inputs,
-                custom_opsets,
-                add_node_names,
-                use_external_data_format,
-                onnx_file_path);
-            std::unordered_map<std::string, py::bytes>
-                python_serialized_export_map;
-            for (auto& kv : export_map) {
-              auto t = kv.second;
-              size_t copy_bytes = t.element_size() * t.numel();
-              // TODO: this is an unnecessary copy. In theory we can directly
-              // return the map from identifier to Tensor, but we need some API
-              // in Python to get raw `bytes` containing the raw tensor data.
-              python_serialized_export_map[kv.first] =
-                  py::bytes(static_cast<const char*>(t.data_ptr()), copy_bytes);
-            }
-            return std::make_tuple(
-                py::bytes(graph), python_serialized_export_map);
-          },
-          py::arg("initializers"),
-          py::arg("onnx_opset_version") = 0,
-          py::arg("dynamic_axes"),
-          py::arg("defer_weight_export") = false,
-          py::arg("operator_export_type") =
-              ::torch::onnx::OperatorExportTypes::ONNX,
-          py::arg("strip_doc_string") = true,
-          py::arg("keep_initializers_as_inputs") = true,
-          py::arg("custom_opsets"),
-          py::arg("add_node_names") = true,
-          py::arg("use_external_data_format") = false,
-          py::arg("onnx_file_path") = std::string())
-      .def(
-          "_pretty_print_onnx",
-          [](const std::shared_ptr<Graph> g,
-             const std::map<std::string, at::Tensor>& initializers,
-             int64_t onnx_opset_version,
-             bool defer_weight_export,
-             ::torch::onnx::OperatorExportTypes operator_export_type,
-             bool google_printer,
-             bool keep_initializers_as_inputs,
-             const std::map<std::string, int>& custom_opsets,
-             bool add_node_names) {
-            return pretty_print_onnx(
-                g,
-                initializers,
-                onnx_opset_version,
-                defer_weight_export,
-                operator_export_type,
-                google_printer,
-                keep_initializers_as_inputs,
-                custom_opsets,
-                add_node_names);
-          },
-          py::arg("initializers"),
-          py::arg("onnx_opset_version") = 0,
-          py::arg("defer_weight_export") = false,
-          py::arg("operator_export_type") =
-              ::torch::onnx::OperatorExportTypes::ONNX,
-          py::arg("google_printer") = false,
-          py::arg("keep_initializers_as_inputs") = true,
-          py::arg("custom_opsets"),
-          py::arg("add_node_names") = true)
+      // *******************************************************************************************************
+      // TODO - these .def() calls were segfaulting either when dlopening libinterpreter or when importing torch
+      // presumably there is something onnx related missing from my libinterpreter objects recipe...
+      // *******************************************************************************************************
+      // .def(
+      //     "_export_onnx",
+      //     [](const std::shared_ptr<Graph> g,
+      //        const std::map<std::string, at::Tensor>& initializers,
+      //        int64_t onnx_opset_version,
+      //        const std::unordered_map<
+      //            std::string,
+      //            std::unordered_map<int64_t, std::string>>& dynamic_axes,
+      //        bool defer_weight_export,
+      //        ::torch::onnx::OperatorExportTypes operator_export_type,
+      //        bool strip_doc_string,
+      //        bool keep_initializers_as_inputs,
+      //        const std::map<std::string, int>& custom_opsets,
+      //        bool add_node_names,
+      //        bool use_external_data_format,
+      //        const std::string& onnx_file_path) {
+      //       std::string graph;
+      //       RawDataExportMap export_map;
+      //       std::tie(graph, export_map) = export_onnx(
+      //           g,
+      //           initializers,
+      //           onnx_opset_version,
+      //           dynamic_axes,
+      //           defer_weight_export,
+      //           operator_export_type,
+      //           strip_doc_string,
+      //           keep_initializers_as_inputs,
+      //           custom_opsets,
+      //           add_node_names,
+      //           use_external_data_format,
+      //           onnx_file_path);
+      //       std::unordered_map<std::string, py::bytes>
+      //           python_serialized_export_map;
+      //       for (auto& kv : export_map) {
+      //         auto t = kv.second;
+      //         size_t copy_bytes = t.element_size() * t.numel();
+      //         // TODO: this is an unnecessary copy. In theory we can directly
+      //         // return the map from identifier to Tensor, but we need some API
+      //         // in Python to get raw `bytes` containing the raw tensor data.
+      //         python_serialized_export_map[kv.first] =
+      //             py::bytes(static_cast<const char*>(t.data_ptr()), copy_bytes);
+      //       }
+      //       return std::make_tuple(
+      //           py::bytes(graph), python_serialized_export_map);
+      //     },
+      //     py::arg("initializers"),
+      //     py::arg("onnx_opset_version") = 0,
+      //     py::arg("dynamic_axes"),
+      //     py::arg("defer_weight_export") = false,
+      //     py::arg("operator_export_type") =
+      //         ::torch::onnx::OperatorExportTypes::ONNX,
+      //     py::arg("strip_doc_string") = true,
+      //     py::arg("keep_initializers_as_inputs") = true,
+      //     py::arg("custom_opsets"),
+      //     py::arg("add_node_names") = true,
+      //     py::arg("use_external_data_format") = false,
+      //     py::arg("onnx_file_path") = std::string())
+      // .def(
+      //     "_pretty_print_onnx",
+      //     [](const std::shared_ptr<Graph> g,
+      //        const std::map<std::string, at::Tensor>& initializers,
+      //        int64_t onnx_opset_version,
+      //        bool defer_weight_export,
+      //        ::torch::onnx::OperatorExportTypes operator_export_type,
+      //        bool google_printer,
+      //        bool keep_initializers_as_inputs,
+      //        const std::map<std::string, int>& custom_opsets,
+      //        bool add_node_names) {
+      //       return pretty_print_onnx(
+      //           g,
+      //           initializers,
+      //           onnx_opset_version,
+      //           defer_weight_export,
+      //           operator_export_type,
+      //           google_printer,
+      //           keep_initializers_as_inputs,
+      //           custom_opsets,
+      //           add_node_names);
+      //     },
+      //     py::arg("initializers"),
+      //     py::arg("onnx_opset_version") = 0,
+      //     py::arg("defer_weight_export") = false,
+      //     py::arg("operator_export_type") =
+      //         ::torch::onnx::OperatorExportTypes::ONNX,
+      //     py::arg("google_printer") = false,
+      //     py::arg("keep_initializers_as_inputs") = true,
+      //     py::arg("custom_opsets"),
+      //     py::arg("add_node_names") = true)
       .def(
           "inputs",
           [](Graph& g) {
