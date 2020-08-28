@@ -487,7 +487,7 @@ static Function* createFallbackPathFunction(
   auto tuple_type = TupleType::create(otypes);
   auto return_tuple = graph->createTuple(graph->return_node()->inputs());
   graph->appendNode(return_tuple);
-  for (int i = graph->outputs().size() - 1; i >= 0; i--) {
+  for (int i = static_cast<int>(graph->outputs().size()) - 1; i >= 0; i--) {
     graph->eraseOutput(i);
   }
   graph->registerOutput(return_tuple->output());
