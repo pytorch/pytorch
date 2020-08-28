@@ -21,6 +21,8 @@ struct TORCH_API constant_not_supported_error : public std::runtime_error {
   using runtime_error::runtime_error;
 };
 
+bool insertableIValue(const IValue& ivalue);
+
 TORCH_API Value* insertConstant(
     Graph& g,
     const IValue& val,

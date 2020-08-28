@@ -429,6 +429,9 @@ class AttributePropagator {
 
             if (isEval) {
               attr = overrideGradient(attr);
+            } else if (!insertableIValue(attr)) {
+              // Check if attr contains tensor with requires_grad
+              continue;
             }
             if (auto attrVal = tryInsertConstant(*graph, attr)) {
               paramConst = *attrVal;
@@ -683,9 +686,9 @@ Module freeze_module(
   // folded.
   // TODO: Determine if freezing in training mode is useful and further clarify
   // its semantics.
-  TORCH_CHECK(
-      !module.hasattr("training") || !module.is_training(),
-      "Freezing module in training mode is not yet supported");
+  // TORCH_CHECK(
+  //    !module.hasattr("training") || !module.is_training(),
+  //    "Freezing module in training mode is not yet supported");
 
   Method method = module.get_method("forward");
   // Check that module does not return itself.
