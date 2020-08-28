@@ -115,7 +115,7 @@ class DefaultDelegate(DelegateBase):
         # retrieve it with a get_param.
         if isinstance(a, torch.Tensor):
             # TODO: slow
-            def search_for_tensor(m : torch.nn.Module, qualname_atoms : List[str]) -> Optional[str]:
+            def search_for_tensor(m : torch.nn.Module) -> Optional[str]:
                 """
                 Search for a tensor value in the module's attributes. If it's
                 found, return the qualified name of that attribute, given the
@@ -123,15 +123,16 @@ class DefaultDelegate(DelegateBase):
                 child submodules. If it's not found there, return None
                 """
                 for n, p in m.__dict__.items():
-                    if isinstance(p, torch.Tensor) and a is p:
-                        return '.'.join(qualname_atoms + [n])
+                    if a is p:
+                        return [n]
                 for n, c in m.named_children():
-                    maybe_result : Optional[str] = search_for_tensor(c, qualname_atoms + [n])
+                    maybe_result : Optional[List[str]] = search_for_tensor(c)
                     if maybe_result:
-                        return maybe_result
+                        return [n] + maybe_result
                 return None
             # Retrieve the qualname for an existing Tensor attribute
-            qualname : Optional[str] = search_for_tensor(self.root, [])
+            qualname_atoms : Optional[List[str]] = search_for_tensor(self.root)
+            qualname = '.'.join(qualname_atoms) if qualname_atoms else None
 
             # Tensor was not found in the Module hierarchy, stow it away in a
             # special attribute and set the qualname to refer to that
@@ -143,6 +144,7 @@ class DefaultDelegate(DelegateBase):
                         break
                     i += 1
                 setattr(self.root, qualname, a)
+
             return self.graph.get_param(qualname)
         return super().create_arg(a)
 
