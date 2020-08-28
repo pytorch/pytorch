@@ -9,7 +9,7 @@ namespace native {
 
 namespace apply {
 
-std::pair<Tensor, Tensor> softmax_sparse_check_invariants(
+std::pair<Tensor, Tensor> softmax_sparse_input_preprocessing(
     const Tensor& input_,
     const int64_t dim_,
     const bool half_to_float,
@@ -18,7 +18,7 @@ std::pair<Tensor, Tensor> softmax_sparse_check_invariants(
   TORCH_CHECK(
       !half_to_float,
       std::string(function_name) +
-          ": with half to float conversion is not supported on CPU");
+          ": with half to float conversion is not supported on " + input_.device().str());
   auto input = input_.coalesce();
   Tensor output = at::native::empty_like(input);
   TORCH_CHECK(
@@ -27,7 +27,7 @@ std::pair<Tensor, Tensor> softmax_sparse_check_invariants(
   return std::make_pair(input, output);
 }
 
-std::tuple<Tensor, Tensor, Tensor> softmax_backward_sparse_check_invariants(
+std::tuple<Tensor, Tensor, Tensor> softmax_backward_sparse_input_preprocessing(
     const Tensor& grad_,
     const Tensor& output_,
     int64_t dim_,

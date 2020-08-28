@@ -68,20 +68,6 @@ static int getNumThreads(int nElem) {
   return threadSizes[4];
 }
 
-int64_t get_nvalues(const IntArrayRef& sizes, int64_t sparse_dim) {
-  /* Return the number of entries in the dense part of a sparse tensor.
-
-      `sizes` is a vector of sparse tensor dimensions.
-      `sparse_dim` is the dimension of the sparse part of a sparse tensor.
-    */
-  auto dim = sizes.size();
-  int64_t nvalues = 1;
-  for (auto i = sparse_dim; i < dim; i++) {
-    nvalues *= sizes[i];
-  }
-  return nvalues;
-}
-
 template <typename scalar_t, bool LogSoftMax>
 __global__ void cuda_sparse_coo_softmax_kernel(
     int64_t* sorted_pool_indices,
@@ -94,7 +80,7 @@ __global__ void cuda_sparse_coo_softmax_kernel(
     PackedTensorAccessor<scalar_t, 2> input_values_acc,
     PackedTensorAccessor<scalar_t, 2> ouput_values_acc) {
   /*
-    See ATen/native/sparse/cpu/Softmax.cpp:cpu_sparse_coo_softmax for the CPU
+    See ATen/native/sparse/Softmax.cpp:cpu_sparse_coo_softmax for the CPU
     implementation of the sparse softmax algorithm that this implementation is
     based on.
   */
@@ -167,7 +153,7 @@ __global__ void cuda_sparse_coo_softmax_backward_kernel(
     PackedTensorAccessor<scalar_t, 2> out_values_accessor,
     PackedTensorAccessor<scalar_t, 2> grad_values_accessor) {
   /*
-    See ATen/native/sparse/cpu/Softmax.cpp:cpu_sparse_coo_softmax_backward for
+    See ATen/native/sparse/Softmax.cpp:cpu_sparse_coo_softmax_backward for
     the CPU implementation of the sparse softmax backward algorithm that this
     implementation is based on.
   */
@@ -243,7 +229,7 @@ Tensor get_offsets(
     const IntArrayRef& sizes,
     const int64_t dim) {
   /*
-    See ATen/native/sparse/cpu/Softmax.cpp:get_offsets for the CPU
+    See ATen/native/sparse/Softmax.cpp:get_offsets for the CPU
     implementation of get_offsets function that this implementation is based on.
   */
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
@@ -252,20 +238,20 @@ Tensor get_offsets(
 
   auto ndim = indices.size(0);
   auto nnz = indices.size(1);
-  auto host_strides =
-      at::empty({ndim}, TensorOptions(kCPU).dtype(at::kLong).layout(kStrided));
-  at::fill_(host_strides, at::Scalar(int64_t(1)));
-  int64_t* host_strides_ptr = host_strides.data_ptr<int64_t>();
+  std::vector<int64_t> host_strides(ndim, 1);
   if (ndim > 1) {
     for (int64_t i = ndim - 2; i >= 0; i--) {
-      host_strides_ptr[i] =
-          host_strides_ptr[i + 1] * (i + 1 == dim ? 1 : sizes[i + 1]);
+      host_strides[i] =
+          host_strides[i + 1] * (i + 1 == dim ? 1 : sizes[i + 1]);
     }
   }
-  auto strides =
-      host_strides.to(at::Device(kCUDA), indices.dtype(), false, true);
-
+  auto strides = at::empty({ndim}, indices.options());
   auto strides_ptr = strides.data_ptr<int64_t>();
+
+  AT_CUDA_CHECK(cudaMemcpyAsync(
+          strides_ptr, host_strides.data(), host_strides.size() * sizeof(int64_t),
+          cudaMemcpyHostToDevice,
+          stream));
 
   auto indices_accessor = indices.packed_accessor<int64_t, 2>();
 
@@ -299,10 +285,10 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> compute_pool_max(
     const int64_t dim) {
   /*
     Return pools of indices that align with the given dimension and the
-    correspoinding max values for each pool.
+    corresponding max values for each pool.
 
-    See ATen/native/sparse/cpu/Softmax.cpp:get_offsets and
-    ATen/native/sparse/cpu/Softmax.cpp:cpu_sparse_coo_softmax for the CPU
+    See ATen/native/sparse/Softmax.cpp:get_offsets and
+    ATen/native/sparse/Softmax.cpp:cpu_sparse_coo_softmax for the CPU
     implementation that this implementation is based on.
   */
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
@@ -352,17 +338,13 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> compute_pool_max(
 
   Tensor mx_buffer;
   if (requireMxRows) {
-    mx_buffer = at::empty({new_sz * nvalues}, values.options());
+    
     auto values_accessor =
         values.packed_accessor<scalar_t, 2>(); // {nnz, nvalues}
-    thrust::device_ptr<scalar_t> mx_buffer_thrust_ptr(
-        mx_buffer.data_ptr<scalar_t>());
-    thrust::fill(
-        policy,
-        mx_buffer_thrust_ptr,
-        mx_buffer_thrust_ptr + new_sz * nvalues,
-        -std::numeric_limits<scalar_t>::infinity());
 
+    mx_buffer = at::empty({new_sz * nvalues}, values.options());
+    mx_buffer.fill_(-std::numeric_limits<scalar_t>::infinity());
+ 
     auto mx_buffer_ptr = mx_buffer.data_ptr<scalar_t>();
 
     auto pool_sizes_ptr = pool_sizes.data_ptr<int64_t>();
@@ -401,7 +383,7 @@ void cuda_sparse_coo_softmax(
     const Tensor& input,
     const int64_t dim) {
   /*
-    See ATen/native/sparse/cpu/Softmax.cpp:cpu_sparse_coo_softmax for the CPU
+    See ATen/native/sparse/Softmax.cpp:cpu_sparse_coo_softmax for the CPU
     implementation of the sparse softmax algorithm that this implementation is
     based on.
   */
@@ -417,10 +399,10 @@ void cuda_sparse_coo_softmax(
   if (dim >= sparse_dim) {
     if (LogSoftMax) {
       auto new_values = log_softmax_cuda(values, dim - sparse_dim + 1, false);
-      out_values.copy_(new_values);
+      out_values.set_(new_values);
     } else {
       auto new_values = softmax_cuda(values, dim - sparse_dim + 1, false);
-      out_values.copy_(new_values);
+      out_values.set_(new_values);
     }
     return;
   }
@@ -431,7 +413,7 @@ void cuda_sparse_coo_softmax(
 
   auto nnz = values.size(0);
   auto sizes = input.sizes();
-  auto nvalues = get_nvalues(sizes, sparse_dim);
+  auto nvalues = values.numel() / nnz;
 
   /* Prepare accessors */
   auto values_2 = values.view({nnz, nvalues});
@@ -449,14 +431,7 @@ void cuda_sparse_coo_softmax(
       compute_pool_max<scalar_t, true>(indices, values_2, sizes, nvalues, dim);
 
   auto pool_size = pool_offsets.size(0);
-  auto exp_sums_rows = at::empty({nvalues * pool_size}, values.options());
-  thrust::device_ptr<scalar_t> exp_sums_rows_thrust_ptr(
-      exp_sums_rows.data_ptr<scalar_t>());
-  thrust::fill(
-      policy,
-      exp_sums_rows_thrust_ptr,
-      exp_sums_rows_thrust_ptr + pool_size * nvalues,
-      scalar_t(0));
+  auto exp_sums_rows = at::zeros({nvalues * pool_size}, values.options());
 
   int block_size = getNumThreads(pool_size);
   const int grid_size = (pool_size + block_size - 1) / block_size;
@@ -482,7 +457,7 @@ void cuda_sparse_coo_softmax_backward(
     const Tensor& output,
     const int64_t dim) {
   /*
-    See ATen/native/sparse/cpu/Softmax.cpp:cpu_sparse_coo_softmax_backward for
+    See ATen/native/sparse/Softmax.cpp:cpu_sparse_coo_softmax_backward for
     the CPU implementation of the sparse softmax backward algorithm that this
     implementation is based on.
   */
@@ -539,7 +514,7 @@ void cuda_sparse_coo_softmax_backward(
   }
 
   auto nnz = values.size(0);
-  auto nvalues = get_nvalues(sizes, sparse_dim);
+  auto nvalues = values.numel() / nnz;
 
   auto values_2 = values.view({nnz, nvalues});
   auto values_accessor = values_2.packed_accessor<scalar_t, 2>();
@@ -610,7 +585,7 @@ Tensor softmax_sparse_cuda(
     const int64_t dim,
     const bool half_to_float) {
   Tensor input, output;
-  std::tie(input, output) = apply::softmax_sparse_check_invariants(
+  std::tie(input, output) = apply::softmax_sparse_input_preprocessing(
       input_, dim, half_to_float, "softmax");
   if (input.numel() == 0) {
     return output;
@@ -626,7 +601,7 @@ Tensor log_softmax_sparse_cuda(
     const int64_t dim,
     const bool half_to_float) {
   Tensor input, output;
-  std::tie(input, output) = apply::softmax_sparse_check_invariants(
+  std::tie(input, output) = apply::softmax_sparse_input_preprocessing(
       input_, dim, half_to_float, "log_softmax");
   if (input.numel() == 0) {
     return output;
@@ -644,7 +619,7 @@ Tensor softmax_backward_sparse_cuda(
     const Tensor& input_) {
   Tensor grad_input, grad, output;
   std::tie(grad_input, grad, output) =
-      apply::softmax_backward_sparse_check_invariants(
+      apply::softmax_backward_sparse_input_preprocessing(
           grad_, output_, dim_, input_, "softmax_backward");
   if (output.numel() == 0) {
     return grad_input;
@@ -663,7 +638,7 @@ Tensor log_softmax_backward_sparse_cuda(
     const Tensor& input_) {
   Tensor grad_input, grad, output;
   std::tie(grad_input, grad, output) =
-      apply::softmax_backward_sparse_check_invariants(
+      apply::softmax_backward_sparse_input_preprocessing(
           grad_, output_, dim_, input_, "log_softmax_backward");
   if (output.numel() == 0) {
     return grad_input;

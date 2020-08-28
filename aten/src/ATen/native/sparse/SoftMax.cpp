@@ -292,10 +292,10 @@ void cpu_sparse_coo_softmax(Tensor output, const Tensor& input, const int64_t di
   if (dim >= sparse_dim) {
     if (LogSoftMax) {
       auto new_values = log_softmax_cpu(values, dim - sparse_dim + 1, false);
-      out_values.copy_(new_values);
+      out_values.set_(new_values);
     } else {
       auto new_values = softmax_cpu(values, dim - sparse_dim + 1, false);
-      out_values.copy_(new_values);
+      out_values.set_(new_values);
     }
     return;
   }
@@ -511,7 +511,7 @@ Tensor softmax_sparse_cpu(
     const int64_t dim,
     const bool half_to_float) {
   Tensor input, output;
-  std::tie(input, output) = apply::softmax_sparse_check_invariants(
+  std::tie(input, output) = apply::softmax_sparse_input_preprocessing(
       input_, dim, half_to_float, "softmax");
   if (input.numel() == 0) {
     return output;
@@ -527,7 +527,7 @@ Tensor log_softmax_sparse_cpu(
     const int64_t dim,
     const bool half_to_float) {
   Tensor input, output;
-  std::tie(input, output) = apply::softmax_sparse_check_invariants(
+  std::tie(input, output) = apply::softmax_sparse_input_preprocessing(
       input_, dim, half_to_float, "log_softmax");
   if (input.numel() == 0) {
     return output;
@@ -545,7 +545,7 @@ Tensor softmax_backward_sparse_cpu(
     const Tensor& input_) {
   Tensor grad_input, grad, output;
   std::tie(grad_input, grad, output) =
-      apply::softmax_backward_sparse_check_invariants(
+      apply::softmax_backward_sparse_input_preprocessing(
           grad_, output_, dim_, input_, "softmax_backward");
   if (output.numel() == 0) {
     return grad_input;
@@ -564,7 +564,7 @@ Tensor log_softmax_backward_sparse_cpu(
     const Tensor& input_) {
   Tensor grad_input, grad, output;
   std::tie(grad_input, grad, output) =
-      apply::softmax_backward_sparse_check_invariants(
+      apply::softmax_backward_sparse_input_preprocessing(
           grad_, output_, dim_, input_, "log_softmax_backward");
   if (output.numel() == 0) {
     return grad_input;
