@@ -5909,7 +5909,7 @@ the gap between two values in the tensor.
 """ + r"""
 .. warning::
     This function is deprecated and will be removed in a future release because its behavior is inconsistent with
-    Python's range builtin. Instead, use :func:`torch.arange`, which produces values in [start, end) and runs faster.
+    Python's range builtin. Instead, use :func:`torch.arange`, which produces values in [start, end).
 
 Args:
     start (float): the starting value for the set of points. Default: ``0``.
