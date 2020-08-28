@@ -20,6 +20,8 @@ class TestProfiler(JitTestCase):
         self.inline_autodiff = torch._C._debug_set_autodiff_subgraph_inlining(False)
         self.texpr_fuser_state = torch._C._jit_texpr_fuser_enabled()
         torch._C._jit_set_texpr_fuser_enabled(True)
+        self.default_dtype = torch.get_default_dtype()
+        torch.set_default_dtype(torch.double)
 
 
     def tearDown(self):
@@ -27,6 +29,7 @@ class TestProfiler(JitTestCase):
         torch._C._jit_set_profiling_mode(self.prev_profiling)
         torch._C._debug_set_autodiff_subgraph_inlining(self.inline_autodiff)
         torch._C._jit_set_texpr_fuser_enabled(self.texpr_fuser_state)
+        torch.set_default_dtype(self.default_dtype)
 
     def test_specialize_backward(self):
         def test_fuse(a, b):
