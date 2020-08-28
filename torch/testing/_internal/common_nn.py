@@ -19,7 +19,7 @@ from torch.testing._internal.common_utils import TestCase, to_gpu, freeze_rng_st
     TEST_WITH_ROCM, _assertGradAndGradgradChecks
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import expectedAlertNondeterministic
-from torch.autograd.gradcheck import get_numerical_jacobian, iter_tensors
+from torch.autograd.gradcheck import get_numerical_jacobian, iter_tensors, gradcheck, gradgradcheck
 from torch.autograd import Variable
 import torch.backends.cudnn
 
@@ -4249,7 +4249,6 @@ criterion_tests = [
         target_fn=lambda: torch.zeros(5, 68, 64, 64, dtype=torch.float),
         reference_fn=lambda i, t, m: ((i - t).abs().pow(2).sum() /
                                       (i.numel() if get_reduction(m) == 'mean' else 1)),
-        check_forward_only=True,
         desc='prec',
         check_bfloat16=TEST_WITH_ROCM,
     ),
@@ -4964,7 +4963,7 @@ class CriterionTest(InputVariableMixin, TestBase):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.should_test_cuda = kwargs.get('test_cuda', True)
-        self.check_forward_only = kwargs.get('check_forward_only', True)
+        self.check_forward_only = kwargs.get('check_forward_only', False)
         self.check_gradgrad = kwargs.get('check_gradgrad', True)
         self.check_half = kwargs.get('check_half', True)
         self.check_bfloat16 = kwargs.get('check_bfloat16', False)
