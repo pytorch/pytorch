@@ -495,6 +495,17 @@
 
 - func: asinh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
 
+# arcsinh, alias for asinh
+- func: arcsinh(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: arcsinh_(Tensor(a!) self) -> Tensor(a!)
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: arcsinh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+
 - func: atanh(Tensor self) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
@@ -504,6 +515,17 @@
   variants: function, method
 
 - func: atanh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+
+# arctanh, alias for atanh
+- func: arctanh(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: arctanh_(Tensor(a!) self) -> Tensor(a!)
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: arctanh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
 
 - func: as_strided(Tensor(a) self, int[] size, int[] stride, int? storage_offset=None) -> Tensor(a)
   use_c10_dispatcher: full
@@ -1241,6 +1263,9 @@
   dispatch:
     CPU: _embedding_bag_forward_only_cpu
     CUDA: _embedding_bag_forward_only_cuda
+
+- func: rowwise_prune(Tensor weight, Tensor mask, ScalarType compressed_indices_dtype) -> (Tensor, Tensor)
+  use_c10_dispatcher: full
 
 - func: embedding_bag(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq=False, int mode=0, bool sparse=False, Tensor? per_sample_weights=None, bool include_last_offset=False) -> (Tensor, Tensor, Tensor, Tensor)
   use_c10_dispatcher: full
@@ -1980,17 +2005,16 @@
 
 - func: max.dim_max(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) max, Tensor(b!) max_values) -> (Tensor(a!) values, Tensor(b!) indices)
 
-- func: max_values(Tensor self, int[1] dim, bool keepdim=False) -> Tensor
-  use_c10_dispatcher: full
-  variants: function, method
-
 - func: max.names_dim(Tensor self, Dimname dim, bool keepdim=False) -> (Tensor values, Tensor indices)
   variants: function, method
 
 - func: max.names_dim_max(Tensor self, Dimname dim, bool keepdim=False, *, Tensor(a!) max, Tensor(b!) max_values) -> (Tensor(a!) values, Tensor(b!) indices)
 
-- func: max_values.names(Tensor self, Dimname[1] dim, bool keepdim=False) -> Tensor
+- func: amax(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor
+  use_c10_dispatcher: full
   variants: function, method
+
+- func: amax.out(Tensor self, int[1] dim=[], bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
 
 # Return: (Tensor output, Tensor indices)
 - func: max_pool1d_with_indices(Tensor self, int[1] kernel_size, int[1] stride=[], int[1] padding=0, int[1] dilation=1, bool ceil_mode=False) -> (Tensor, Tensor)
@@ -2063,17 +2087,16 @@
 
 - func: min.dim_min(Tensor self, int dim, bool keepdim=False, *, Tensor(a!) min, Tensor(b!) min_indices) -> (Tensor(a!) values, Tensor(b!) indices)
 
-- func: min_values(Tensor self, int[1] dim, bool keepdim=False) -> Tensor
-  use_c10_dispatcher: full
-  variants: function, method
-
 - func: min.names_dim(Tensor self, Dimname dim, bool keepdim=False) -> (Tensor values, Tensor indices)
   variants: function, method
 
 - func: min.names_dim_min(Tensor self, Dimname dim, bool keepdim=False, *, Tensor(a!) min, Tensor(b!) min_indices) -> (Tensor(a!) values, Tensor(b!) indices)
 
-- func: min_values.names(Tensor self, Dimname[1] dim, bool keepdim=False) -> Tensor
+- func: amin(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor
+  use_c10_dispatcher: full
   variants: function, method
+
+- func: amin.out(Tensor self, int[1] dim=[], bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
 
 - func: mkldnn_convolution(Tensor self, Tensor weight, Tensor? bias, int[] padding, int[] stride, int[] dilation, int groups) -> Tensor
   use_c10_dispatcher: full

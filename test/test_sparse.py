@@ -1721,7 +1721,7 @@ class TestSparse(TestCase):
         sparse_tensor.requires_grad_()
         self.assertTrue(sparse_tensor.requires_grad)
 
-        # # test autograd on asin
+        # test autograd on asin
         # x = sparse_tensor.detach().clone()
         # y = sparse_tensor.asin()
         # y.backward(x)
@@ -1761,12 +1761,7 @@ class TestSparse(TestCase):
             size=[4, 5, 2],
             device=self.device
         )
-        true_dense = torch.sparse_coo_tensor(
-            indices=torch.tensor([[1, 3], [2, 4]]),
-            values=torch.tensor([[1.0, 3.0], [5.0, 7.0]]),
-            size=[4, 5, 2],
-            device=self.device
-        ).to_dense()
+        true_dense = input_coalesced.to_dense()
         self._test_asin_arcsin(input_coalesced, true_dense)
 
         if self.is_uncoalesced:
@@ -1777,7 +1772,7 @@ class TestSparse(TestCase):
                 size=[3, ],
                 device=self.device
             )
-            self._test_asin_arcsin(input_uncoalesced, torch.tensor([3.0, 4.0, 2.5]))
+            self._test_asin_arcsin(input_uncoalesced, torch.tensor([3.0, -4.0, -2.5]))
 
             # test on empty sparse tensor
             input_uncoalesced = torch.sparse_coo_tensor(
