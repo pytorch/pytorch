@@ -29,7 +29,10 @@ void prelu_cuda_kernel_share_weights(
   Tensor& result,
   const scalar_t* weight_data)
 {
-  auto iter = TensorIterator::unary_op(result, input);
+  at::TensorIterator iter = TensorIteratorConfig()
+      .add_output(result)
+      .add_input(input)
+      .build();
 
   at::native::gpu_kernel(iter,
     [weight_data] GPU_LAMBDA (scalar_t input_val) {
@@ -537,16 +540,7 @@ static Tensor threshold_out_cuda(
     Scalar value,
     const Tensor& other) {
   Tensor result = opt_result.value_or(Tensor());
-  auto iter = TensorIteratorConfig()
-    .set_check_mem_overlap(false)  // threshold is idempotent, so overlap is okay
-    .add_output(result)
-    .add_input(self)
-    .add_input(other)
-    .allow_cpu_scalars(true)
-    .promote_inputs_to_common_dtype(true)
-    .cast_common_dtype_to_outputs(true)
-    .enforce_safe_casting_to_output(true)
-    .build();
+  auto iter = TensorIterator::binary_op(result, self, other);
   threshold_kernel(iter, threshold, value);
   return iter.output();
 }

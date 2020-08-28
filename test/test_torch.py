@@ -10862,6 +10862,10 @@ class TestTorchDeviceType(TestCase):
         torch.bernoulli(torch.rand_like(p), out=p)
         self.assertTrue(isBinary(p))
 
+        p = torch.rand(5, dtype=dtype, device=device).expand(5, 5)
+        torch.bernoulli(torch.rand_like(p), out=p)
+        self.assertTrue(isBinary(p))
+
     # RngUniform not implemented for Integral type in XLA test
     @dtypes(*(torch.testing.get_all_fp_dtypes(include_half=False, include_bfloat16=False)))
     @dtypesIfCPU(*(torch.testing.get_all_dtypes(include_half=False, include_bfloat16=False, include_complex=False)))
@@ -13169,22 +13173,6 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(torch.isinf(torch.atanh(sample)), inf_mask)
         self.assertEqual(torch.isinf(sample.atanh()), inf_mask)
 
-    def test_nullary_op_mem_overlap(self, device):
-        ops = (
-            ("random_", ()),
-            ("uniform_", ()),
-            ("cauchy_", ()),
-            ("log_normal_", ()),
-            ("exponential_", ()),
-            ("geometric_", (0.5,)),
-            ("normal_", ()),
-        )
-
-        x = torch.rand((1, 3)).expand((3, 3))
-        for op, args in ops:
-            with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
-                getattr(x, op)(*args)
-
     # TODO: run on non-native device types
     @dtypes(torch.double)
     def test_unary_out_op_mem_overlap(self, device, dtype):
@@ -13289,33 +13277,7 @@ class TestTorchDeviceType(TestCase):
             ("div", True, True, 'cpu'),
             ("div", True, True, 'cuda'),
             ("pow", True, True, 'cpu'),
-            ("pow", True, True, 'cuda'),
-            ("fmod", True, True, 'cpu'),
-            ("fmod", True, True, 'cuda'),
-            ("atan2", True, True, 'cpu'),
-            ("atan2", True, True, 'cuda'),
-            ("hypot", True, True, 'cpu'),
-            ("hypot", True, True, 'cuda'),
-            ("nextafter", True, True, 'cpu'),
-            ("nextafter", True, True, 'cuda'),
-            ("le", True, True, 'cpu'),
-            ("le", True, True, 'cuda'),
-            ("lt", True, True, 'cpu'),
-            ("lt", True, True, 'cuda'),
-            ("ge", True, True, 'cpu'),
-            ("ge", True, True, 'cuda'),
-            ("gt", True, True, 'cpu'),
-            ("gt", True, True, 'cuda'),
-            ("eq", True, True, 'cpu'),
-            ("eq", True, True, 'cuda'),
-            ("ne", True, True, 'cpu'),
-            ("ne", True, True, 'cuda'),
-            ("logical_and", True, True, 'cpu'),
-            ("logical_and", True, True, 'cuda'),
-            ("logical_or", True, True, 'cpu'),
-            ("logical_or", True, True, 'cuda'),
-            ("logical_xor", True, True, 'cpu'),
-            ("logical_xor", True, True, 'cuda'),
+            ("pow", True, True, 'cuda')
         ]
 
         for (fn, has_input_output_mem_overlap_check,
@@ -13373,21 +13335,6 @@ class TestTorchDeviceType(TestCase):
             doubles, sz, lambda input, out: torch.pow(input, 42, out=out))
         self.unary_check_input_output_mem_overlap(
             doubles, sz, lambda input, out: torch.pow(42, input, out=out))
-
-    def test_index_add_mem_overlap(self, device):
-        x = torch.rand((1,), device=device).expand((6,))
-        y = torch.rand((6,), device=device)
-        ind = torch.tensor([0, 2, 3], device=device)
-        value = torch.rand((3,), device=device)
-        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
-            x.index_add_(0, ind, value)
-
-    def test_shift_mem_overlap(self, device):
-        x = torch.rand(3, device=device)
-        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
-            x[:-1] <<= x[1:]
-        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
-            x[:-1] >>= x[1:]
 
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     def test_int_pow(self, device):
