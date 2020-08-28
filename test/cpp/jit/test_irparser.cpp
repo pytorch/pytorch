@@ -355,6 +355,8 @@ graph():
     for (const IValue& ival : genericList) {
       int_vals.push_back(ival.toInt());
     }
+    AT_ASSERT(int_vals.size() == 3);
+    AT_ASSERT(int_vals[0] == 1 && int_vals[1] == 2 && int_vals[2] == 3);
   }
 }
 } // namespace jit
