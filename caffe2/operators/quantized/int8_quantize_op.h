@@ -22,7 +22,7 @@ void Int8Quantize(
   const float inv_scale = 1.0f / Y_scale;
   uint32_t i = 0;
 
-#ifdef INT8_NEON_SIMD
+/*#ifdef INT8_NEON_SIMD
   const float32x4_t vinv_scale = vdupq_n_f32(inv_scale);
   // magic float and magic int to take care of rounding
   // int magic_round(float f): interpret_int32(f + 12582912.0f) - 0x4B400000
@@ -56,7 +56,7 @@ void Int8Quantize(
     vst1_u8(out, vout01234567);
     out += 8;
   }
-#endif
+#endif*/
   for (; i < N; ++i) {
     (*out++) = QuantizeUint8(Y_scale, Y_offset, (*in++));
   }
