@@ -51,7 +51,7 @@ class TestQuantizeFx(QuantizationTestCase):
         class Conv(torch.nn.Module):
             def __init__(self, weight):
                 super().__init__()
-                self.weight = weight
+                self.weight = torch.nn.Parameter(weight)
                 self.stride = (1, 1)
                 self.padding = (0, 0)
                 self.dilation = (1, 1)
@@ -66,7 +66,7 @@ class TestQuantizeFx(QuantizationTestCase):
         class Linear(torch.nn.Module):
             def __init__(self, weight):
                 super().__init__()
-                self.wegiht = weight
+                self.weight = torch.nn.Parameter(weight)
 
             def forward(self, x):
                 return F.linear(x, self.weight)
@@ -85,10 +85,10 @@ class TestQuantizeFx(QuantizationTestCase):
         linear_module_input = torch.rand(8, 5)
 
         tests = [
-            (False, Conv, (conv_weight,), (conv_input),
+            (False, Conv, (conv_weight,), (conv_input,),
              ns.call_function(torch.ops.quantized.conv2d),
              ns.call_function(torch.ops.quantized.conv2d_prepack)),
-            (True, Linear, (linear_weight,), (linear_input),
+            (True, Linear, (linear_weight,), (linear_input,),
              ns.call_function(torch.ops.quantized.linear_dynamic),
              ns.call_function(torch.ops.quantized.linear_prepack)),
             (False, Linear, (linear_weight,), (linear_input,),

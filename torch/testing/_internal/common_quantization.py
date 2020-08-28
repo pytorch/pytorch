@@ -79,6 +79,9 @@ class NodeSpec:
 
         return self.op == other.op and self.target == other.target
 
+    def __repr__(self):
+        return repr(self.op) + " " + repr(self.target)
+
 def test_only_eval_fn(model, calib_data):
     r"""
     Default evaluation function takes a torch.utils.data.Dataset or a list of
@@ -545,15 +548,21 @@ class QuantizationTestCase(TestCase):
 
         if expected_node_occurrence is not None:
             for expected_node, occurrence in expected_node_occurrence.items():
-                self.assertTrue(
-                    expected_node in nodes_in_graph,
-                    'Check failed for node:' + str(expected_node) +
-                    ' not found')
-                self.assertTrue(
-                    nodes_in_graph[expected_node] == occurrence,
-                    'Check failed for node:' + str(expected_node) +
-                    ' Expected occurrence:' + str(occurrence) +
-                    ' Found occurrence:' + str(nodes_in_graph[expected_node]))
+                if occurrence != 0:
+                    self.assertTrue(
+                        expected_node in nodes_in_graph,
+                        'Check failed for node:' + str(expected_node) +
+                        ' not found')
+                    self.assertTrue(
+                        nodes_in_graph[expected_node] == occurrence,
+                        'Check failed for node:' + str(expected_node) +
+                        ' Expected occurrence:' + str(occurrence) +
+                        ' Found occurrence:' + str(nodes_in_graph[expected_node]))
+                else:
+                    self.assertTrue(
+                        expected_node not in nodes_in_graph,
+                        'Check failed for node:' + str(expected_node) +
+                        ' expected no occurrence but found')
 
         if expected_node_list is not None:
             cur_index = 0
