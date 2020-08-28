@@ -20,7 +20,6 @@ _(aten, __or__) \
 _(aten, __rshift__) \
 _(aten, __xor__) \
 _(aten, _abs) \
-_(aten, _acos) \
 _(aten, _addmv) \
 _(aten, _addr) \
 _(aten, _arange) \
@@ -28,8 +27,6 @@ _(aten, _asinh) \
 _(aten, _atanh) \
 _(aten, _argmax) \
 _(aten, _argmin) \
-_(aten, _asin) \
-_(aten, _atan) \
 _(aten, _baddbmm_mkl) \
 _(aten, _cast_Byte) \
 _(aten, _cast_Char) \
@@ -167,7 +164,6 @@ _(aten, _weight_norm_cuda_interface) \
 _(aten, _weight_norm_cuda_interface_backward) \
 _(aten, _weight_norm_differentiable_backward) \
 _(aten, abs) \
-_(aten, acos) \
 _(aten, adaptive_avg_pool1d) \
 _(aten, adaptive_avg_pool2d) \
 _(aten, adaptive_avg_pool2d_backward) \
@@ -202,8 +198,6 @@ _(aten, argmax) \
 _(aten, argmin) \
 _(aten, as_strided) \
 _(aten, as_tensor) \
-_(aten, asin) \
-_(aten, atan) \
 _(aten, atan2) \
 _(aten, atleast_1d) \
 _(aten, atleast_2d) \
@@ -453,6 +447,7 @@ _(aten, masked_select) \
 _(aten, matmul) \
 _(aten, matrix_power) \
 _(aten, matrix_rank) \
+_(aten, matrix_exp) \
 _(aten, max) \
 _(aten, max_pool1d) \
 _(aten, max_pool1d_with_indices) \
@@ -526,7 +521,6 @@ _(aten, native_resize_as) \
 _(aten, native_tensor) \
 _(aten, native_zero) \
 _(aten, ne) \
-_(aten, neg) \
 _(aten, nextafter) \
 _(aten, bitwise_and) \
 _(aten, bitwise_not) \
@@ -713,7 +707,6 @@ _(aten, triangular_solve) \
 _(aten, tril) \
 _(aten, triplet_margin_loss) \
 _(aten, triu) \
-_(aten, trunc) \
 _(aten, type_as) \
 _(aten, unbind) \
 _(aten, unfold) \
@@ -912,12 +905,14 @@ _(attr, max_val) \
 _(attr, max_values) \
 _(attr, maximum_indices) \
 _(attr, maxnorm) \
+_(attr, maximum) \
 _(attr, mean) \
 _(attr, median) \
 _(attr, min) \
 _(attr, min_indices) \
 _(attr, min_val) \
 _(attr, minlength) \
+_(attr, minimum) \
 _(attr, mode) \
 _(attr, momentum) \
 _(attr, n) \

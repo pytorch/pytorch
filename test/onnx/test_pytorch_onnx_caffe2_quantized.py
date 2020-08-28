@@ -277,7 +277,7 @@ class TestQuantizedOps(unittest.TestCase):
                 x = self.act1(x)
                 x = self.conv2(x)
                 x = self.dequant(x)
-                x = x.view(-1, 72).contiguous()
+                x = x.reshape(-1, 72).contiguous()
                 x = self.fc(x)
                 return x
 

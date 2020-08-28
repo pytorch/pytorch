@@ -393,9 +393,12 @@
   self: norm_backward(grad, self - other, p, result)
   other: -norm_backward(grad, self - other, p, result)
 
+# The backward formula is done in this order to improve numerical stability
+# of the higher order derivatives, see https://github.com/pytorch/pytorch/issues/43414
+# Note that we don't use "result" because saving it would be BC-breaking when it is used in an inplace operation later
 - name: div.Tensor(Tensor self, Tensor other) -> Tensor
   self: grad / other
-  other: -grad * self / (other * other)
+  other: -grad * (self / other) / other
 
 - name: div.Scalar(Tensor self, Scalar other) -> Tensor
   self: grad / other
@@ -663,13 +666,16 @@
   self: zeros_like(self.expand(at::infer_size(self.sizes(), mask.sizes())), at::MemoryFormat::Preserve).masked_scatter_(mask, grad)
   mask: non_differentiable
 
+- name: matrix_exp(Tensor self) -> Tensor
+  self: matrix_exp_backward(self, grad)
+
 - name: max.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
   self: index_select_backward(grad, dim, indices, self.sizes(), keepdim)
 
 - name: max(Tensor self) -> Tensor
-  self: select_first_equal_backward(grad, self, result)
+  self: evenly_distribute_backward(grad, self, result)
 
-- name: max.other(Tensor self, Tensor other) -> Tensor
+- name: maximum(Tensor self, Tensor other) -> Tensor
   self: grad.clone().masked_fill_(self <= other, 0)
   other: grad.clone().masked_fill_(self > other, 0)
 
@@ -680,7 +686,7 @@
   self: sum_backward(grad, self.sizes(), dim, keepdim).to(self.scalar_type()) / _safe_size(self.sizes(), dim)
 
 - name: median(Tensor self) -> Tensor
-  self: select_first_equal_backward(grad, self, result)
+  self: evenly_distribute_backward(grad, self, result)
 
 # This is in theory incorrect in the following case:
 #   sorted list: [..., a, b, b, ..., b, b, c, ...] with median = b and the value
@@ -703,9 +709,9 @@
   self: index_select_backward(grad, dim, indices, self.sizes(), keepdim)
 
 - name: min(Tensor self) -> Tensor
-  self: select_first_equal_backward(grad, self, result)
+  self: evenly_distribute_backward(grad, self, result)
 
-- name: min.other(Tensor self, Tensor other) -> Tensor
+- name: minimum(Tensor self, Tensor other) -> Tensor
   self: grad.clone().masked_fill_(self >= other, 0)
   other: grad.clone().masked_fill_(self < other, 0)
 
