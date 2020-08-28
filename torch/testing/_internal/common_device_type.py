@@ -417,8 +417,13 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
                     test = test.__func__
                 assert inspect.isfunction(test), "Couldn't extract function from '{0}'".format(name)
 
-                # Instantiates the device-specific tests
-                device_type_test_class.instantiate_test(generic_test_class, name, copy.deepcopy(test))
+                # XLA-compat shim (XLA's instantiate_test takes 2 args)
+                sig = inspect.signature(device_type_test_class.instantiate_test)
+                if len(sig.parameters) == 3:
+                    # Instantiates the device-specific tests
+                    device_type_test_class.instantiate_test(generic_test_class, name, copy.deepcopy(test))
+                else:
+                    device_type_test_class.instantiate_test(name, copy.deepcopy(test))
             else:  # Ports non-test member
                 assert name not in device_type_test_class.__dict__, "Redefinition of directly defined member {0}".format(name)
 
