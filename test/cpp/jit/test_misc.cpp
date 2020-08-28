@@ -8,6 +8,7 @@
 
 #include <torch/csrc/jit/ir/type_hashing.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
+#include <torch/csrc/jit/runtime/profiling_graph_executor_impl.h>
 #include "torch/csrc/autograd/generated/variable_factories.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/jit/codegen/fuser/interface.h"
