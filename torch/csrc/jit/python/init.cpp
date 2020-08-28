@@ -555,18 +555,6 @@ void initJITBindings(PyObject* module) {
       .def("_jit_texpr_fallback_allowed", &tensorexpr::fallbackAllowed)
       .def("_jit_texpr_set_fallback_allowed", &tensorexpr::setFallbackAllowed)
       .def(
-          "_jit_set_te_generate_block_code",
-          [](bool gen_block_code) {
-            using namespace torch::jit::tensorexpr;
-            return getTEGenerateBlockCode() = gen_block_code;
-          })
-      .def(
-          "_jit_get_te_generate_block_code",
-          []() -> bool {
-            using namespace torch::jit::tensorexpr;
-            return getTEGenerateBlockCode();
-          })
-      .def(
           "_jit_pass_fuse_tensorexprs",
           [](std::shared_ptr<Graph>& g) { return FuseTensorExprs(g); })
       .def(
