@@ -111,7 +111,7 @@ void LogitMKLKernel(T eps, TensorIterator* it) {
 
 template <typename T>
 void LogitMKLKernel(T eps, TensorIterator* it) {
-  AT_ASSERTM(false, "ATen not compiled with MKL");
+  TORCH_CHECK(false, "ATen not compiled with MKL");
 }
 
 #endif // AT_MKL_ENABLED

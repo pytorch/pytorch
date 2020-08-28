@@ -4,7 +4,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 import errno
 import hypothesis.strategies as st
-from hypothesis import given, assume
+from hypothesis import given, assume, settings
 import numpy as np
 import os
 import shutil
@@ -31,6 +31,7 @@ class TestLoadSaveBase(test_util.TestCase):
         super(TestLoadSaveBase, self).__init__(methodName)
         self._db_type = db_type
 
+    @settings(deadline=None)
     @given(src_device_type=st.sampled_from(DEVICES),
            src_gpu_id=st.integers(min_value=0, max_value=max_gpuid),
            dst_device_type=st.sampled_from(DEVICES),

@@ -931,6 +931,17 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(3, 4, 5, 6, 7)
         self.run_test(NegSlice(), x)
 
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_slice_with_input_index(self):
+        class InputIndexSlice(torch.nn.Module):
+            def forward(self, x, y):
+                x[:y.size(0), 0, :] = y
+                return x
+
+        x = torch.zeros((56, 6, 256))
+        y = torch.rand((22, 256))
+        self.run_test(InputIndexSlice(), (x, y))
+
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_slice_dynamic(self):
         class DynamicSliceExportMod(torch.nn.Module):
@@ -1760,6 +1771,20 @@ class TestONNXRuntime(unittest.TestCase):
                 return input.scatter(1, indices, values)
 
         input = torch.tensor([[0., 0., 0.], [0., 0., 0.], [0., 0., 0.]], dtype=torch.float64)
+        indices = torch.tensor([[1, 0], [0, 1], [0, 1]], dtype=torch.int64)
+        self.run_test(ScatterModel(), input=(input, indices))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_scatter_with_scalar_different_types(self):
+        # Tests the case when scalar src (updates values) type is different
+        # from self type. Happens only with scalar src - PyTorch does not
+        # allow this when src is a tensor.
+        class ScatterModel(torch.nn.Module):
+            def forward(self, input, indices):
+                values = 1.0
+                return input.scatter(1, indices, values)
+
+        input = torch.tensor([[0., 0., 0.], [0., 0., 0.], [0., 0., 0.]], dtype=torch.float32)
         indices = torch.tensor([[1, 0], [0, 1], [0, 1]], dtype=torch.int64)
         self.run_test(ScatterModel(), input=(input, indices))
 
@@ -2700,11 +2725,15 @@ class TestONNXRuntime(unittest.TestCase):
                 res1 = []
                 arr = x.split([3, 4, 1, 1, 2, 3, 2], 0)
                 res2 = torch.zeros(3, 4, dtype=torch.long)
+                res3 = []
+                res4 = []
                 for i in range(len(arr)):
                     res = res.append(arr[i].sum(0, False))
                     res1 = res1.append(arr[-1 - i].sum(0, False))
                     res2 += 1
-                return torch.stack(res), torch.stack(res1), res2
+                    res3 = res3 + [arr[i].sum(0, False)]
+                    res4 += [arr[-1 - i].sum(0, False)]
+                return torch.stack(res), torch.stack(res1), res2, torch.stack(res3), torch.stack(res4)
 
         model = ListLoopModel()
         inputs = torch.randn(16)
@@ -2723,6 +2752,8 @@ class TestONNXRuntime(unittest.TestCase):
 
                 res.insert(0, tensors[1])
                 res.append(tensors[2])
+                res += [tensors[3], tensors[4]]
+                res = res + [tensors[5]]
                 return torch.ones(len(res))
 
         model = ListModel()

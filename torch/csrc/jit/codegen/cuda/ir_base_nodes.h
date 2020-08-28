@@ -6,6 +6,7 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <torch/csrc/jit/codegen/cuda/type.h>
+#include <torch/csrc/jit/codegen/cuda/utils.h>
 
 #include <cstdint>
 #include <deque>
@@ -58,7 +59,7 @@ class IrCloner;
  * Basically beinng able to succienctly traverse down the inhereitance stack of
  * a Statment at runtime. This is currently implemented in dispatch.h
  */
-class TORCH_CUDA_API Statement {
+class TORCH_CUDA_API Statement : public NonCopyable, public PolymorphicBase {
   friend void swap(Fusion&, Fusion&) noexcept;
 
  public:
@@ -66,8 +67,6 @@ class TORCH_CUDA_API Statement {
 
   // Cloning constructor
   Statement(const Statement* src, IrCloner* ir_cloner);
-
-  virtual ~Statement() = default;
 
   // Dispatch functions, definitions in dispatch.cpp
   template <typename T>
@@ -103,29 +102,6 @@ class TORCH_CUDA_API Statement {
 
   // Make sure this is an Expr and return it as an Expr*
   Expr* asExpr();
-
-  // Replacement for static_cast<T*>(ptr): ptr->as<T>()
-  template <class T>
-  T* as() {
-#ifdef NDEBUG
-    auto downcast_ptr = static_cast<T*>(this);
-#else
-    auto downcast_ptr = dynamic_cast<T*>(this);
-    TORCH_INTERNAL_ASSERT(downcast_ptr != nullptr);
-#endif
-    return downcast_ptr;
-  }
-
-  template <class T>
-  const T* as() const {
-#ifdef NDEBUG
-    auto downcast_ptr = static_cast<const T*>(this);
-#else
-    auto downcast_ptr = dynamic_cast<const T*>(this);
-    TORCH_INTERNAL_ASSERT(downcast_ptr != nullptr);
-#endif
-    return downcast_ptr;
-  }
 
   // Return the fusion this statement belongs to
   Fusion* fusion() const {
@@ -199,7 +175,11 @@ class TORCH_CUDA_API Val : public Statement {
   explicit Val(
       ValType _vtype,
       DataType _dtype = DataType::Null,
-      bool register_val = true);
+      bool register_val = true,
+      bool lowered = false);
+
+  // Lowers an existing Fusion IR node into a Kernel IR counterpart
+  explicit Val(const Val* fusion_ir_node);
 
   Val(const Val* src, IrCloner* ir_cloner);
 
@@ -218,7 +198,8 @@ class TORCH_CUDA_API Val : public Statement {
   c10::optional<DataType> getDataType() const override;
 
   bool isScalar() const {
-    return vtype_ == ValType::Scalar || vtype_ == ValType::NamedScalar;
+    return vtype_ == ValType::Scalar || vtype_ == ValType::NamedScalar ||
+        vtype_ == ValType::KirScalar || vtype_ == ValType::KirNamedScalar;
   }
 
   bool isConstScalar() const;
@@ -227,16 +208,19 @@ class TORCH_CUDA_API Val : public Statement {
     return isScalar() && dtype_ == DataType::Int;
   }
 
+  c10::optional<int64_t> getInt() const;
+
   bool isZeroInt() const;
   bool isOneInt() const;
 
   // Returns the Expr that this value is an output of, returns nullptr if none
   // was found
   Expr* getOrigin();
+  const Expr* getOrigin() const;
 
   virtual bool sameType(const Statement* other) {
     return Statement::sameType(other) &&
-        getDataType() == static_cast<const Val*>(other)->getDataType();
+        getDataType() == other->as<Val>()->getDataType();
   }
 
   // TODO: Make this more sophisticated. A value being the same as another value
@@ -261,99 +245,45 @@ class TORCH_CUDA_API Val : public Statement {
   const DataType dtype_;
 };
 
-class TORCH_CUDA_API Scope {
- public:
-  Scope() = default;
-  Scope(const Scope* src, IrCloner* ir_cloner);
+//  A Expr represents a "computation." These are functions that takes inputs
+//  and produce outputs, inputs and outputs all being Vals. There are
+//  specializations of BinaryOp which takes 2 inputs and produces 1 output, and
+//  UnaryOp which takes 1 input and produces 1 output. Exprs are unique and
+//  immutable. Conceptually, Exprs could always be manipulated using unique
+//  pointers, and we could add this later. However, for now Exprs can be
+//  replaced in a fusion, but they cannot be modified in place.
 
-  const std::vector<Expr*>& exprs() const {
-    return exprs_;
-  }
+//  The IR is static single assignment (SSA). Values can only be defined as an
+//  output of an Expr once. If they are re-defined the original definition is
+//  deleted from the program, as opposed to an ordered redefinition of the value
+//  in the program.
 
-  void push_back(Expr* e) {
-    exprs_.push_back(e);
-  }
+//  Note: Registering an Expr with a Fusion is actually 2 parts, one part is
+//  done in the Expr constructor, so that should be called on anything that
+//  inherits Expr. The issue with having registration in Expr's constructor, is
+//  that the constructor of an Expr will set ouputs and inputs. This information
+//  is important for registration with Fuser, so it can track the dependency
+//  chain.
 
-  void insert(std::vector<Expr*>::iterator it, Expr* expr) {
-    exprs_.insert(it, expr);
-  }
+//  Adding an Expr:
+//  Right now adding an Expr is quite involved. Expr's can be defined in ir.h or
+//  in their own header file. The following is what is currently needed for Expr
+//  definitions:
+//  1) Definition inheriting from Expr.
+//      - Members must be private or protected
+//      - Accessor functions for members
+//      - Constructors need to register with the Fusion after inputs/outputs are
+//         defined
+//      - Implementation of bool sameAs(...)
+//  2) dispatch.h/.cpp must be updated to include dispatch of the new Val
+//  3) Default mutator function should be added to mutator.h/.cpp
+//  4) Printing functions should be added to ir_iostream.h/.cpp
+//  5) Lower case convenience functions should be added to arith.h/.cpp (If user
+//   facing)
+//  6) An enum value must be added to ExprType in type.h
+//  7) A string entry must be added in expr_type_string_map
+//  8) Entry added to ir_graphviz .cpp/.h
 
-  void erase(std::vector<Expr*>::iterator it) {
-    exprs_.erase(it);
-  }
-
-  bool empty() const {
-    return exprs_.empty();
-  }
-
-  auto size() const {
-    return exprs_.size();
-  }
-
-  auto& operator[](size_t i) {
-    return exprs_[i];
-  }
-
-  auto& operator[](size_t i) const {
-    return exprs_[i];
-  }
-
-  // Insert expr before ref
-  void insert_before(Expr* ref, Expr* expr);
-
-  // Insert expr after ref
-  void insert_after(Expr* ref, Expr* expr);
-
-  bool contains(Expr* expr) const;
-
-  void erase(Expr* ref);
-
-  bool sameAs(const Scope& other) const;
-
-  void clear();
-
- private:
-  std::vector<Expr*> exprs_;
-};
-
-/*
- * A Expr represents a "computation." These are functions that takes inputs
- * and produce outputs, inputs and outputs all being Vals. There are
- * specializations of BinaryOp which takes 2 inputs and produces 1 output, and
- * UnaryOp which takes 1 input and produces 1 output. Exprs are unique and
- * immutable. Conceptually, Exprs could always be manipulated using unique
- * pointers, and we could add this later. However, for now Exprs can be replaced
- * in a fusion, but they cannot be modified in place.
- *
- * The IR is static single assignment (SSA). Values can only be defined as an
- * output of an Expr once. If they are re-defined the original definition is
- * deleted from the program, as opposed to an ordered redefinition of the value
- * in the program.
- *
- * Note: Registering an Expr with a Fusion is actually 2 parts, one part is done
- * in the Expr constructor, so that should be called on anything that inherits
- * Expr. The issue with having registration in Expr's constructor, is that the
- * constructor of an Expr will set ouputs and inputs. This information is
- * important for registration with Fuser, so it can track the dependency chain.
- *
- * Adding an Expr:
- * Right now adding an Expr is quite involved. Expr's can be defined in ir.h or
- * in their own header file. The following is what is currently needed for Expr
- * definitions:
- * 1) Definition inheriting from Expr.
- *     - Members must be private or protected
- *     - Accessor functions for members
- *     - Constructors need to register with the Fusion after inputs/outputs are
- *        defined
- *     - Implementation of bool sameAs(...)
- * 2) dispatch.h/.cpp must be updated to include dispatch of the new Val
- * 3) Default mutator function should be added to mutator.h/.cpp
- * 4) Printing functions should be added to ir_iostream.h/.cpp
- * 5) Lower case convenience functions should be added to arith.h/.cpp (If user
- *  facing)
- * 6) An enum value must be added to ExprType in type.h 7) A string
- *  entry must be added in expr_type_string_map
- */
 class TORCH_CUDA_API Expr : public Statement {
  public:
   Expr() = delete;
@@ -406,10 +336,12 @@ class TORCH_CUDA_API Expr : public Statement {
 
  protected:
   void addInput(Val* input) {
+    TORCH_INTERNAL_ASSERT(input != nullptr);
     inputs_.push_back(input);
   }
 
   void addOutput(Val* output) {
+    TORCH_INTERNAL_ASSERT(output != nullptr);
     outputs_.push_back(output);
   }
 
