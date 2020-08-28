@@ -171,6 +171,28 @@ class TestSerialization(TestCase):
         self._test_op_graph(module, input_size=[1, 3, 6, 6], generate=False)
 
     @override_qengines
+    def test_conv2d_graph_v2(self):
+        # tests the same thing as test_conv2d_graph, but for version 2 of
+        # ConvPackedParams{n}d
+        module = nn.Sequential(
+            torch.quantization.QuantStub(),
+            nn.Conv2d(3, 3, kernel_size=3, stride=1, padding=0, dilation=1,
+                      groups=1, bias=True, padding_mode="zeros"),
+        )
+        self._test_op_graph(module, input_size=[1, 3, 6, 6], generate=False)
+
+    @override_qengines
+    def test_conv2d_nobias_graph_v2(self):
+        # tests the same thing as test_conv2d_nobias_graph, but for version 2 of
+        # ConvPackedParams{n}d
+        module = nn.Sequential(
+            torch.quantization.QuantStub(),
+            nn.Conv2d(3, 3, kernel_size=3, stride=1, padding=0, dilation=1,
+                      groups=1, bias=False, padding_mode="zeros"),
+        )
+        self._test_op_graph(module, input_size=[1, 3, 6, 6], generate=False)
+
+    @override_qengines
     def test_conv2d_relu(self):
         module = nniq.ConvReLU2d(3, 3, kernel_size=3, stride=1, padding=0, dilation=1,
                                  groups=1, bias=True, padding_mode="zeros")
