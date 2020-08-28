@@ -11,6 +11,14 @@ TEST(VulkanAPITest, Context) {
   ASSERT_NO_THROW(at::native::vulkan::api::Context{kDebug});
 }
 
+TEST(VulkanAPITest, empty) {
+  if (!at::native::vulkan::api::available()) {
+    return;
+  }
+
+  auto t = at::empty({1, 3, 64, 64}, at::device(at::kVulkan).dtype(at::kFloat));
+}
+
 } // namespace
 
 #endif /* USE_VULKAN_API */

@@ -8,3 +8,6 @@
 #include <ATen/native/vulkan/api/Pipeline.h>
 #include <ATen/native/vulkan/api/Resource.h>
 #include <ATen/native/vulkan/api/Shader.h>
+
+// MOVE
+#include <ATen/native/vulkan/api/Tensor.h>
