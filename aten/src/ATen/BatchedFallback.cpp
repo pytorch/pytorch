@@ -123,14 +123,12 @@ void batchedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Sta
       // We assume that torch::jit::Stack is backed by vector<IValue> for
       // simplicity. When that is not the case, this code should be updated.
       const auto& argument = (*stack)[arguments_begin + arg_idx];
-      if (batched_tensor_inputs_pos_iter == batched_tensor_inputs_position.end()
-          || arg_idx != *batched_tensor_inputs_pos_iter) {
+      if (arg_idx != *batched_tensor_inputs_pos_iter) {
         // argument isn't a BatchedTensor
         torch::jit::push(stack, argument);
         continue;
       }
       // argument is a BatchedTensor
-      TORCH_INTERNAL_ASSERT(input_physical_views_iter != input_physical_views.end());
       const auto& physical_view_for_argument = *input_physical_views_iter;
       torch::jit::push(stack, physical_view_for_argument.tensor().index(index));
       batched_tensor_inputs_pos_iter++;
