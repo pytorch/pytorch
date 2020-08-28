@@ -1258,12 +1258,6 @@ void LoopNest::setGPUThreadIndex(For* f, int thread_index) {
   f->set_gpu_thread_index(thread_index);
 }
 
-void LoopNest::setBufferMap(
-    For* f,
-    const std::unordered_map<std::string, const Buf*>& map) {
-  f->set_buffer_map(map);
-}
-
 Stmt* LoopNest::getLoopBodyFor(Tensor* t) const {
   return tensor_to_stmt_.at(t);
 }
