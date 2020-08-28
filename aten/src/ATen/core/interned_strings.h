@@ -157,10 +157,18 @@ namespace c10 {
   _(aten, asin_)                     \
   _(aten, arcsin)                    \
   _(aten, arcsin_)                   \
+  _(aten, asinh)                     \
+  _(aten, asinh_)                    \
+  _(aten, arcsinh)                   \
+  _(aten, arcsinh_)                  \
   _(aten, atan)                      \
   _(aten, atan_)                     \
   _(aten, arctan)                    \
   _(aten, arctan_)                   \
+  _(aten, atanh)                     \
+  _(aten, atanh_)                    \
+  _(aten, arctanh)                   \
+  _(aten, arctanh_)                  \
   _(aten, clamp)                     \
   _(aten, clamp_)                    \
   _(aten, clip)                      \
