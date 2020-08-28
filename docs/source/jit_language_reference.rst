@@ -102,16 +102,19 @@ Example (a type mismatch)
      @torch.jit.script
      def an_error(x):
          if x:
-         ~~~~~...  <--- HERE
+         ~~~~~
              r = torch.rand(1)
+             ~~~~~~~~~~~~~~~~~
          else:
+         ~~~~~
+             r = 4
+             ~~~~~ <--- HERE
+         return r
      and was used here:
          else:
              r = 4
          return r
-                ~ <--- HERE
-     ...
-
+                ~ <--- HERE...
 
 Unsupported Typing Constructs
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -738,10 +741,15 @@ Example:
      @torch.jit.script...
      def foo(x):
          if x < 0:
-         ~~~~~~~~~...  <--- HERE
+         ~~~~~~~~~
+             y = 4
+             ~~~~~ <--- HERE
+         print(y)
+     and was used here:
+         if x < 0:
              y = 4
          print(y)
-     ...
+               ~ <--- HERE...
 
 Non-local variables are resolved to Python values at compile time when the
 function is defined. These values are then converted into TorchScript values using
