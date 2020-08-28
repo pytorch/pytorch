@@ -198,6 +198,7 @@ core_sources_full = [
     "torch/csrc/jit/passes/requires_grad_analysis.cpp",
     "torch/csrc/jit/passes/shape_analysis.cpp",
     "torch/csrc/jit/passes/specialize_autogradzero.cpp",
+    "torch/csrc/jit/passes/update_differentiable_graph_requires_grad.cpp",
     "torch/csrc/jit/passes/subgraph_rewrite.cpp",
     "torch/csrc/jit/passes/tensorexpr_fuser.cpp",
     "torch/csrc/jit/passes/utils/memory_dag.cpp",
