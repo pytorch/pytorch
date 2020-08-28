@@ -117,6 +117,12 @@ void magmaSymeig(
     magma_int_t* iwork, magma_int_t liwork, magma_int_t* info);
 
 template<class scalar_t>
+void magmaEig(
+    magma_vec_t jobvl, magma_vec_t jobvr, magma_int_t n, scalar_t *A, magma_int_t lda,
+    scalar_t *wr, scalar_t *wi, scalar_t *VL, magma_int_t ldvl,
+    scalar_t *VR, magma_int_t ldvr, scalar_t *work, magma_int_t lwork, magma_int_t *info);
+
+template<class scalar_t>
 void magmaSvd(
     magma_vec_t jobz, magma_int_t m, magma_int_t n, scalar_t* A,
     magma_int_t lda, scalar_t* s, scalar_t* U, magma_int_t ldu,
@@ -461,6 +467,26 @@ void magmaSymeig<float>(
     magma_int_t* iwork, magma_int_t liwork, magma_int_t* info) {
   MagmaStreamSyncGuard guard;
   magma_ssyevd_gpu(jobz, uplo, n, dA, ldda, w, wA, ldwa, work, lwork, iwork, liwork, info);
+  AT_CUDA_CHECK(cudaGetLastError());
+}
+
+template<>
+void magmaEig<double>(
+    magma_vec_t jobvl, magma_vec_t jobvr, magma_int_t n, double *A, magma_int_t lda,
+    double *wr, double *wi, double *VL, magma_int_t ldvl,
+    double *VR, magma_int_t ldvr, double *work, magma_int_t lwork, magma_int_t *info) {
+  MagmaStreamSyncGuard guard;
+  magma_dgeev(jobvl, jobvr, n, A, lda, wr, wi, VL, ldvl, VR, ldvr, work, lwork, info);
+  AT_CUDA_CHECK(cudaGetLastError());
+}
+
+template<>
+void magmaEig<float>(
+    magma_vec_t jobvl, magma_vec_t jobvr, magma_int_t n, float *A, magma_int_t lda,
+    float *wr, float *wi, float *VL, magma_int_t ldvl,
+    float *VR, magma_int_t ldvr, float *work, magma_int_t lwork, magma_int_t *info) {
+  MagmaStreamSyncGuard guard;
+  magma_sgeev(jobvl, jobvr, n, A, lda, wr, wi, VL, ldvl, VR, ldvr, work, lwork, info);
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
@@ -1263,6 +1289,99 @@ std::tuple<Tensor, Tensor> _symeig_helper_cuda(const Tensor& self, bool eigenvec
   }
 }
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ eig ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+template <typename scalar_t>
+static void apply_eig(const Tensor& self, Tensor& eigvals, bool eigenvectors, magma_int_t *info_ptr) {
+#ifndef USE_MAGMA
+AT_ERROR("symeig: MAGMA library not found in "
+    "compilation. Please rebuild with MAGMA.");
+#else
+  magma_vec_t jobvr = eigenvectors ? MagmaVec : MagmaNoVec;
+  magma_int_t n = magma_int_cast(self.size(-1), "n");
+
+  auto self_data = self.data_ptr<scalar_t>();
+  scalar_t *wr;
+  scalar_t *wi;
+  ALLOCATE_ARRAY(wr, scalar_t, n);
+  ALLOCATE_ARRAY(wi, scalar_t, n);
+
+  scalar_t *vr_data = NULL;
+  magma_int_t ldvr = 1;
+  if (jobvr == MagmaVec)
+  {
+      ALLOCATE_ARRAY(vr_data, scalar_t, n*n);
+      ldvr = n;
+  }
+
+  if (n > 0) {
+    // call magmaEig once to get the optimal size of work_data
+    scalar_t wkopt;
+    magmaEig<scalar_t>(MagmaNoVec, jobvr, n, self_data, n, wr, wi, NULL, 1, vr_data, ldvr, &wkopt, -1, info_ptr);
+    magma_int_t lwork = (magma_int_t) wkopt;
+
+    // call it a 2nd time to to the actual work
+    scalar_t *work_data = nullptr;
+    ALLOCATE_ARRAY(work_data, scalar_t, lwork);
+    magmaEig<scalar_t>(MagmaNoVec, jobvr, n, self_data, n, wr, wi, NULL, 1, vr_data, ldvr, work_data, lwork, info_ptr);
+  }
+
+  // copy the results into the eigvals tensor
+  eigvals.resize_({2, n});
+  auto eigvals_data = eigvals.data_ptr<scalar_t>();
+  // XXX antocuni: it looks wrong to use memcpy for this, nobody else is using
+  // it in this file. What is the "proper" alternative?
+  std::memcpy(eigvals_data, wr, n*sizeof(scalar_t));
+  std::memcpy(eigvals_data+n, wi, n*sizeof(scalar_t));
+  eigvals.transpose_(0, 1);
+
+  // TODO: copy the result in case jobvr==MagmaVec
+  //if (jobvr == MagmaVec)
+  //  THCTensor_(copyArray2d)(state, rv_, vr_data, n, n);
+
+#endif
+}
+
+
+std::tuple<Tensor &,Tensor &> eig_cuda_out(Tensor & e, Tensor & v, const Tensor & self, bool eigenvectors) {
+  TORCH_CHECK(0, "eig_cuda_out: hello world ", -1);
+}
+
+std::tuple<Tensor,Tensor> eig_cuda(const Tensor & self, bool eigenvectors) {
+  squareCheckInputs(self);
+  int64_t n = self.size(-1);
+
+  // XXX antocuni: this has been copied from _symeig_helper, but is it
+  // possible to reach this code path at all? I don't think it's possible to
+  // have a square matrix with self.numel() == 0
+  if (self.numel() == 0) {
+    auto eigvals = at::empty({n}, self.options());
+    return std::tuple<Tensor, Tensor>(eigvals, at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT));
+  }
+
+  // copy self to pinned CPU memory
+  auto self_working_copy = at::empty(self.sizes(),
+                                     at::TensorOptions(at::kCPU).dtype(self.dtype()).pinned_memory(true));
+  self_working_copy.copy_(self);
+
+  // tensor holding the result
+  auto eigvals = at::empty(0, self.options().device(at::kCPU), LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+
+  magma_int_t info;
+  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "eig_cuda", [&]{
+    apply_eig<scalar_t>(self_working_copy, eigvals, eigenvectors, &info);
+  });
+  singleCheckErrors(info, "eig_cuda");
+
+  if (eigenvectors) {
+      TORCH_CHECK(0, "eig_cuda: TODO: if (eigenvectors) ", -1);
+      //return std::tuple<Tensor, Tensor>(eigvals.to(self.device()), self_working_copy);
+  } else {
+      return std::tuple<Tensor, Tensor>(eigvals.to(self.device()), at::empty({0}, self.options()));
+  }
+}
+
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ svd ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template<typename scalar_t>
@@ -1464,15 +1583,8 @@ Tensor _lu_solve_helper_cuda(const Tensor& self, const Tensor& LU_data, const Te
   return self_working_copy;
 }
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ eig ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-std::tuple<Tensor &,Tensor &> eig_cuda_out(Tensor & e, Tensor & v, const Tensor & self, bool eigenvectors) {
-  TORCH_CHECK(0, "eig_cuda_out: hello world ", -1);
-}
 
-std::tuple<Tensor,Tensor> eig_cuda(const Tensor & self, bool eigenvectors) {
-  TORCH_CHECK(0, "eig_cuda: hello world ", -1);
-}
 
 }}  // namespace at::native
 
