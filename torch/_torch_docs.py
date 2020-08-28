@@ -3100,7 +3100,7 @@ Example::
 
 add_docstr(torch.i0,
            r"""
-i0(input, out=None) -> Tensor
+i0(input, *, out=None) -> Tensor
 
 Computes the modified Bessel function of the first kind, order 0, for each element of :attr:`input`.
 

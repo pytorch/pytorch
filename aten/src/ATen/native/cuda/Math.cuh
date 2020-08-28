@@ -203,6 +203,25 @@ static inline C10_HOST_DEVICE scalar_t calc_gcd(scalar_t a_in, scalar_t b_in) {
  * Cephes Math Library Release 2.0:  April, 1987
  * Copyright 1985, 1987 by Stephen L. Moshier
  * Direct inquiries to 30 Frost Street, Cambridge, MA 02140
+ *
+ * Evaluates the series
+ *
+ *       len-1
+ *         - '
+ *  y  =   >   array[i] T (x/2)
+ *         -             i
+ *        i=0
+ *
+ * of Chebyshev polynomials Ti at argument x/2.
+ *
+ * Coefficients are stored in reverse order, i.e. the zero order term is last in the array.  Note len is the number of
+ * coefficients, not the order.
+ *
+ * If coefficients are for the interval a to b, x must have been transformed to x -> 2(2x - b - a)/(b-a) before
+ * entering the routine.  This maps x from (a, b) to (-1, 1), over which the Chebyshev polynomials are defined.
+ *
+ * If the coefficients are for the inverted interval, in which (a, b) is mapped to (1/b, 1/a), the transformation
+ * required is x -> 2(2ab/x - b - a)/(b-a).  If b is infinity, this becomes x -> 4a/x - 1.
  */
 template <typename scalar_t>
 static inline C10_HOST_DEVICE scalar_t chbevl(scalar_t _x, const scalar_t array[], size_t len) {
@@ -227,6 +246,10 @@ static inline C10_HOST_DEVICE scalar_t chbevl(scalar_t _x, const scalar_t array[
  *
  * Cephes Math Library Release 2.8:  June, 2000
  * Copyright 1984, 1987, 2000 by Stephen L. Moshier
+ *
+ * Returns modified Bessel function of order zero of the argument.
+ * The range is partitioned into the two intervals [0,8] and (8, infinity). Chebyshev polynomial expansions are employed
+ * in each interval.
  */
 template <typename scalar_t>
 static inline C10_HOST_DEVICE scalar_t calc_i0(scalar_t _x) {
