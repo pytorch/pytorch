@@ -410,9 +410,9 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(
   if (!pr_) {
     auto copy = graph->copy();
     runProfilingInsensitiveOptimizations(copy);
-    if (*remaining_bailout_depth_ == getBailoutDepth()) {
-      PeelProfilingLoops(copy);
-    }
+    //     if (*remaining_bailout_depth_ == getBailoutDepth()) {
+    //       PeelProfilingLoops(copy);
+    //     }
     pr_ = ProfilingRecord::instrumentGraph(copy);
     GRAPH_DUMP("Profiled Graph: ", pr_->graph());
     profiling_plan_ = ExecutionPlan(pr_->graph(), function_name_);
