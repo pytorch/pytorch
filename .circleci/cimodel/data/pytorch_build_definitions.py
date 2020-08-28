@@ -306,8 +306,12 @@ def instantiate_configs():
         is_important = fc.find_prop("is_important") or False
         parallel_backend = fc.find_prop("parallel_backend") or None
         build_only = fc.find_prop("build_only") or False
+        is_coverage = fc.find_prop("is_coverage") or False
         if build_only and restrict_phases is None:
             restrict_phases = ["build"]
+        if is_coverage and restrict_phases is None:
+            restrict_phases = ["build", "coverage_test"]
+
 
         gpu_resource = None
         if cuda_version and cuda_version != "10":
