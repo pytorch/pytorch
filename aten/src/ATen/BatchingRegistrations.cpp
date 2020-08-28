@@ -307,6 +307,13 @@ Tensor unary_pointwise_method_batching_rule(const Tensor& input, ExtraArgs... ex
   return makeBatched(output_physical, BatchDims(old_bdims.begin(), old_bdims.end()));
 }
 
+Tensor pow_scalar_Tensor_batching_rule(Scalar other, const Tensor& self) {
+  auto* self_batched = unsafeGetBatchedImpl(self);
+  auto output_physical = at::pow(other, self_batched->value());
+  auto old_bdims = self_batched->bdims();
+  return makeBatched(output_physical, BatchDims(old_bdims.begin(), old_bdims.end()));
+}
+
 TORCH_LIBRARY_IMPL(_, Batched, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&batchedTensorForLoopFallback>());
 }
@@ -413,6 +420,20 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   BINARY_POINTWISE_VA(rsub, Scalar);
   BINARY_POINTWISE(mul);
   BINARY_POINTWISE(div);
+
+  // at::pow has three out-of-place overloads
+  m.impl("pow.Tensor_Tensor", binary_pointwise_batching_rule<TensorTensorType, at::pow>);
+  m.impl("pow.Tensor_Scalar", unary_pointwise_batching_rule<TensorScalarType, at::pow, Scalar>);
+  m.impl("pow.Scalar", pow_scalar_Tensor_batching_rule);
+
+  // for at::result_type, call the native::result_type implementation.
+  // We don't have to do anything special because native::result_type operates
+  // on the logical shape of the tensors.
+  m.impl("result_type.Tensor", static_cast<ScalarType (*)(const Tensor&, const Tensor&)>(native::result_type));
+  m.impl("result_type.Scalar", static_cast<ScalarType (*)(const Tensor&, Scalar)>(native::result_type));
+  m.impl("result_type.Scalar_Tensor", static_cast<ScalarType (*)(Scalar, const Tensor&)>(native::result_type));
+  m.impl("result_type.Scalar_Scalar", static_cast<ScalarType (*)(Scalar, Scalar)>(native::result_type));
+
 #undef BINARY_POINTWISE_VA
 #undef BINARY_POINTWISE
 }
