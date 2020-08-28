@@ -4,7 +4,7 @@ import warnings
 from typing import Any, Dict, Union
 
 import torch
-from . import is_initialized, _get_device_index
+from . import is_initialized, _get_device_index, _lazy_init
 from torch.types import Device
 
 def _host_allocator():
@@ -31,7 +31,7 @@ def caching_allocator_alloc(size, device: Union[Device, int] = None, stream=None
 
     Arguments:
         size (int): number of bytes to be allocated.
-        device (torch.device or int, optional): selected device. If it is 
+        device (torch.device or int, optional): selected device. If it is
             ``None`` the default CUDA device is used.
         stream (torch.cuda.Stream or int, optional): selected stream. If is ``None`` then
             the default stream for the selected device is used.

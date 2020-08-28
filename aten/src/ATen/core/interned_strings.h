@@ -94,6 +94,7 @@ namespace c10 {
   _(aten, backward)                  \
   _(prim, Guard)                     \
   _(prim, BailOut)                   \
+  _(prim, TypeCheck)                 \
   _(prim, FusedConcat)               \
   _(prim, ConstantChunk)             \
   _(prim, MMTreeReduce)              \
@@ -129,6 +130,7 @@ namespace c10 {
   _(prim, GetAttr)                   \
   _(prim, HasAttr)                   \
   _(prim, profile)                   \
+  _(prim, profile_optional)          \
   _(prim, AddStatValue)              \
   _(prim, TimePoint)                 \
   _(prim, CallFunction)              \
@@ -143,10 +145,22 @@ namespace c10 {
   _(aten, abs_)                      \
   _(aten, absolute)                  \
   _(aten, absolute_)                 \
+  _(aten, acos)                      \
+  _(aten, acos_)                     \
+  _(aten, arccos)                    \
+  _(aten, arccos_)                   \
   _(aten, acosh)                     \
   _(aten, acosh_)                    \
   _(aten, arccosh)                   \
   _(aten, arccosh_)                  \
+  _(aten, asin)                      \
+  _(aten, asin_)                     \
+  _(aten, arcsin)                    \
+  _(aten, arcsin_)                   \
+  _(aten, atan)                      \
+  _(aten, atan_)                     \
+  _(aten, arctan)                    \
+  _(aten, arctan_)                   \
   _(aten, clamp)                     \
   _(aten, clamp_)                    \
   _(aten, clip)                      \
@@ -200,6 +214,10 @@ namespace c10 {
   _(aten, trunc_)                    \
   _(aten, fix)                       \
   _(aten, fix_)                      \
+  _(aten, neg)                       \
+  _(aten, neg_)                      \
+  _(aten, negative)                  \
+  _(aten, negative_)                 \
   _(aten, setdefault)                \
   _(aten, bin)                       \
   _(aten, pop)                       \
@@ -276,6 +294,8 @@ namespace c10 {
   _(attr, inplace)                   \
   _(attr, input_as_shape)            \
   _(attr, is_zero)                   \
+  _(attr, num_none)                  \
+  _(attr, num_present)               \
   _(attr, perm)                      \
   _(attr, sizes)                     \
   _(attr, starts)                    \

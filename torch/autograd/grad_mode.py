@@ -1,6 +1,7 @@
 import torch
 import functools
 import inspect
+from typing import Any
 
 from typing import Any, Callable, TypeVar, cast
 from typing_extensions import Literal
@@ -76,12 +77,17 @@ class no_grad(_DecoratorContextManager):
         >>> z.requires_grad
         False
     """
-    def __enter__(self) -> None:
-        self.prev = torch.is_grad_enabled()
-        torch._C._set_grad_enabled(False)
+    def __init__(self):
+        if not torch._jit_internal.is_scripting():
+            super().__init__()
+        self.prev = False
 
-    def __exit__(self, *args: Any) -> Literal[False]:
-        torch._C._set_grad_enabled(self.prev)
+    def __enter__(self):
+        self.prev = torch.is_grad_enabled()
+        torch.set_grad_enabled(False)
+
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> Literal[False]:
+        torch.set_grad_enabled(self.prev)
         return False
 
 
