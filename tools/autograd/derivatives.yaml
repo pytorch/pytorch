@@ -393,9 +393,12 @@
   self: norm_backward(grad, self - other, p, result)
   other: -norm_backward(grad, self - other, p, result)
 
+# The backward formula is done in this order to improve numerical stability
+# of the higher order derivatives, see https://github.com/pytorch/pytorch/issues/43414
+# Note that we don't use "result" because saving it would be BC-breaking when it is used in an inplace operation later
 - name: div.Tensor(Tensor self, Tensor other) -> Tensor
   self: grad / other
-  other: -grad * self / (other * other)
+  other: -grad * (self / other) / other
 
 - name: div.Scalar(Tensor self, Scalar other) -> Tensor
   self: grad / other
