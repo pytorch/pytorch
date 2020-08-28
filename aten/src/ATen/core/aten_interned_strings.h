@@ -246,7 +246,7 @@ _(aten, clamp_min) \
 _(aten, clone) \
 _(aten, coalesce) \
 _(aten, combinations) \
-_(aten, fast_conj) \
+_(aten, _conj) \
 _(aten, conj) \
 _(aten, complex) \
 _(aten, polar) \

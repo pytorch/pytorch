@@ -187,15 +187,17 @@ Tensor imag(const Tensor& self) {
   }
 }
 
-Tensor& conj_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, conj_stub); }
+Tensor& conj_out(Tensor& result, const Tensor& self) {
+  return unary_op_impl_out(result, self, conj_stub);
+}
 
-Tensor conj(const Tensor& self) { return unary_op_impl(self, at::conj_out); }
+Tensor _conj(const Tensor& self) { return unary_op_impl(self, at::conj_out); }
 
-Tensor fast_conj(const Tensor& self) {
+Tensor conj(const Tensor& self) {
   if (!self.is_complex()) {
     return self;
   }
-  return at::conj(self);
+  return at::_conj(self);
 }
 
 Tensor& bitwise_not_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, bitwise_not_stub); }
