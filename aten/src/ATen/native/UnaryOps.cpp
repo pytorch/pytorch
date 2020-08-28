@@ -140,9 +140,9 @@ Tensor asin(const Tensor& self) { return unary_op_impl(self, at::asin_out); }
 Tensor& asin_(Tensor& self) { return unary_op_impl_(self, at::asin_out); }
 
 // arcsin, alias of asin
-Tensor& arcsin_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, asin_stub); }
-Tensor arcsin(const Tensor& self) { return unary_op_impl(self, at::asin_out); }
-Tensor& arcsin_(Tensor& self) { return unary_op_impl_(self, at::asin_out); }
+Tensor& arcsin_out(Tensor& result, const Tensor& self) { return at::asin_out(result, self); }
+Tensor arcsin(const Tensor& self) { return at::asin(self); }
+Tensor& arcsin_(Tensor& self) { return at::asin_(self); }
 
 Tensor& atan_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, atan_stub); }
 Tensor atan(const Tensor& self) { return unary_op_impl(self, at::atan_out); }

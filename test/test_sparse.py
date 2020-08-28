@@ -1694,6 +1694,100 @@ class TestSparse(TestCase):
             device=self.device)
         self._test_log1p_tensor(input, torch.zeros([5, 6, 0]))
 
+    def _test_asin_arcsin(self, sparse_tensor, dense_tensor):
+        expected_output = dense_tensor.asin()
+        self.assertEqual(expected_output, torch.asin(sparse_tensor).to_dense())
+        sparse_tensor_out = torch.zeros_like(sparse_tensor)
+        torch.asin(sparse_tensor, out=sparse_tensor_out)
+        self.assertEqual(expected_output, sparse_tensor_out.to_dense())
+        self.assertEqual(expected_output, sparse_tensor.asin().to_dense())
+        self.assertEqual(expected_output, sparse_tensor.coalesce().asin_().to_dense())
+
+        self.assertEqual(expected_output, torch.arcsin(sparse_tensor).to_dense())
+        sparse_tensor_out = torch.zeros_like(sparse_tensor)
+        torch.arcsin(sparse_tensor, out=sparse_tensor_out)
+        self.assertEqual(expected_output, sparse_tensor_out.to_dense())
+        self.assertEqual(expected_output, sparse_tensor.arcsin().to_dense())
+        self.assertEqual(expected_output, sparse_tensor.coalesce().arcsin_().to_dense())
+
+        # test in-place op on uncoalesced input
+        with self.assertRaisesRegex(RuntimeError, "in-place on uncoalesced tensors is not supported"):
+            sparse_tensor.asin_()
+
+        # test in-place op on uncoalesced input
+        with self.assertRaisesRegex(RuntimeError, "in-place on uncoalesced tensors is not supported"):
+            sparse_tensor.arcsin_()
+
+        sparse_tensor.requires_grad_()
+        self.assertTrue(sparse_tensor.requires_grad)
+
+        # # test autograd on asin
+        # x = sparse_tensor.detach().clone()
+        # y = sparse_tensor.asin()
+        # y.backward(x)
+
+        # dense_tensor.requires_grad_()
+        # x0 = dense_tensor.detach().clone()
+        # y = dense_tensor.asin()
+        # y.backward(x0)
+        # self.assertEqual(dense_tensor.grad, sparse_tensor.grad.to_dense())
+
+        # sparse_tensor.grad.zero_()
+        # dense_tensor.grad.zero_()
+        # # test autograd on arcsin
+        # x = sparse_tensor.detach().clone()
+        # y = sparse_tensor.arcsin()
+        # y.backward(x)
+
+        # dense_tensor.requires_grad_()
+        # x0 = dense_tensor.detach().clone()
+        # y = dense_tensor.arcsin()
+        # y.backward(x0)
+        # self.assertEqual(dense_tensor.grad, sparse_tensor.grad.to_dense())
+
+    def test_asin_arcsin(self):
+        input_coalesced = torch.sparse_coo_tensor(
+            indices=torch.tensor([[0, 1, 2]]),
+            values=torch.tensor([3.0, -4.0, 5.0]),
+            size=[3, ],
+            device=self.device
+        )
+        self._test_asin_arcsin(input_coalesced, torch.tensor([3.0, -4.0, 5.0]))
+
+        # hybrid sparse input
+        input_coalesced = torch.sparse_coo_tensor(
+            indices=torch.tensor([[1, 3], [2, 4]]),
+            values=torch.tensor([[-1.0, 3.0], [-5.0, 7.0]]),
+            size=[4, 5, 2],
+            device=self.device
+        )
+        true_dense = torch.sparse_coo_tensor(
+            indices=torch.tensor([[1, 3], [2, 4]]),
+            values=torch.tensor([[1.0, 3.0], [5.0, 7.0]]),
+            size=[4, 5, 2],
+            device=self.device
+        ).to_dense()
+        self._test_asin_arcsin(input_coalesced, true_dense)
+
+        if self.is_uncoalesced:
+            # test uncoalesced input
+            input_uncoalesced = torch.sparse_coo_tensor(
+                indices=torch.tensor([[0], [1], [2], [0], [1], [2]]).transpose(1, 0),
+                values=torch.tensor([2.0, -3.0, -4.0, 1.0, -1.0, 1.5]),
+                size=[3, ],
+                device=self.device
+            )
+            self._test_asin_arcsin(input_uncoalesced, torch.tensor([3.0, 4.0, 2.5]))
+
+            # test on empty sparse tensor
+            input_uncoalesced = torch.sparse_coo_tensor(
+                indices=torch.zeros([2, 0]),
+                values=torch.zeros([0, 5, 5, 5, 5, 5, 5, 0]),
+                size=[0, 0, 5, 5, 5, 5, 5, 5, 0],
+                device=self.device
+            )
+            self._test_asin_arcsin(input_uncoalesced, torch.zeros([0, 0, 5, 5, 5, 5, 5, 5, 0]))
+
     def test_mv(self):
         def test_shape(di, dj, dk, nnz):
             x, _, _ = self._gen_sparse(2, nnz, [di, dj])

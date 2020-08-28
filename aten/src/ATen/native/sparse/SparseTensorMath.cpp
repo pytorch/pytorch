@@ -119,6 +119,54 @@ SparseTensor& log1p_sparse_(SparseTensor& t) {
 }
 
 // --------------------------------------------------------------------
+// neg(SparseTensor)
+// --------------------------------------------------------------------
+
+SparseTensor& neg_out_sparse(SparseTensor& r, const SparseTensor& t) {
+  AT_ASSERT(r.is_sparse());
+  AT_ASSERT(t.is_sparse());
+
+  if (!is_same_tensor(r, t)) {
+    copy_sparse_to_sparse_(r, t);
+  }
+  r._values().neg_();
+  return r;
+}
+
+SparseTensor& neg_sparse_(SparseTensor& t) {
+  TORCH_CHECK(t.is_coalesced(), "abs: in-place on uncoalesced tensors is not supported");
+  return neg_out_sparse(t, t);
+}
+
+// --------------------------------------------------------------------
+// asin(SparseTensor)
+// --------------------------------------------------------------------
+
+// In-place asin on uncoalesced tensors is not supported due non-linear type of operation.
+// Values of uncoalesced tensor corresponding to the same indices are summed
+// and asin(summed_value) != asin(v1) + asin(v2)
+
+SparseTensor& asin_out_sparse(SparseTensor& r, const SparseTensor& t) {
+  AT_ASSERT(r.is_sparse());
+  AT_ASSERT(t.is_sparse());
+
+  if (is_same_tensor(r, t)) {
+    // don't have in-place asin for uncoalesced input because coalesce() is not in-place, see above comment
+    TORCH_CHECK(r.is_coalesced(), "asin: in-place on uncoalesced tensors is not supported");
+  }
+  else {
+    copy_sparse_to_sparse_(r, t.coalesce());
+  }
+  r._values().asin_();
+  return r;
+}
+
+SparseTensor& asin_sparse_(SparseTensor& t) {
+  TORCH_CHECK(t.is_coalesced(), "asin: in-place on uncoalesced tensors is not supported");
+  return asin_out_sparse(t, t);
+}
+
+// --------------------------------------------------------------------
 // pow(SparseTensor, Scalar)
 // --------------------------------------------------------------------
 
