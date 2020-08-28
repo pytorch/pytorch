@@ -21,7 +21,7 @@ TESTS = [
     'test_autograd',
     'test_bundled_inputs',
     'test_complex',
-    'test_cpp_api_parity',
+    #'test_cpp_api_parity',
     'test_cpp_extensions_aot_no_ninja',
     'test_cpp_extensions_aot_ninja',
     'test_cpp_extensions_jit',
