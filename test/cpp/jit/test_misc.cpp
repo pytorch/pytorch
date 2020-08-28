@@ -1244,8 +1244,13 @@ void testFallbackGraphs() {
       stack.emplace_back(x.clone());
       stack.emplace_back(y.clone());
       if (i == getNumProfiledRuns()) {
+        // we will be modifying a profiled graph
+        // before ProfilingGraphExecutor
+        // will optimize it in the next iteration
         auto opt_graph = lastExecutedOptimizedGraph();
-        nestGraphIntoFallbackGraph(opt_graph);
+        // this is safe to do since we are done profiling
+        ProfilingRecord::removeProfileCounter(opt_graph->block());
+        replaceBlockWithFallbackGraph(opt_graph->block());
         auto it = opt_graph->block()->nodes().begin();
         ASSERT_EQ(it->kind(), prim::FallbackGraph);
         auto fallback = *it++;

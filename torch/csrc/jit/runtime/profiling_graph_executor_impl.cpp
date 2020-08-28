@@ -456,19 +456,24 @@ GraphExecutorState ProfilingGraphExecutorImpl::getDebugState() {
   return state;
 }
 
-Node* createFallbackGraph(Block* b, ArrayRef<Value*> inputs, Graph* g) {
+void replaceBlockWithFallbackGraph(Block* b) {
   auto graph = std::make_shared<Graph>();
   auto value_map = [](Value* v) { return v; };
   graph->block()->cloneFrom(b, value_map);
-
-  auto fallback = g->create(prim::FallbackGraph, inputs, b->outputs().size());
+  auto fallback = b->owningGraph()->create(
+      prim::FallbackGraph, b->inputs(), b->outputs().size());
   fallback->g_(attr::Subgraph, graph);
+  b->prependNode(fallback);
 
   for (size_t i = 0; i < b->outputs().size(); i++) {
     fallback->output(i)->setType(b->outputs()[i]->type());
     fallback->output(i)->copyMetadata(b->outputs()[i]);
+    b->replaceOutput(i, fallback->output(i));
   }
-  return fallback;
+
+  for (auto it = b->nodes().rbegin(); it != fallback->iterator(); it++) {
+    it.destroyCurrent();
+  }
 }
 
 static Function* createFallbackPathFunction(
