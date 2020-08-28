@@ -613,16 +613,16 @@ class Quantizer:
             elif node.op == 'call_module':
                 self.qconfig_map[node.name] = get_qconfig(self.modules[node.target])
 
-    def _prepare(self, model, qconfig_dict, inplace, is_dynamic):
+    def _prepare(self, model, qconfig_dict, inplace, is_dynamic_quant):
         assert not inplace, 'inplace prepare is not supported yet'
         input_root = model.root
         if not inplace:
             input_root = copy.deepcopy(input_root)
 
         input_graph = model.graph
-        self.is_dynamic = is_dynamic
+        self.is_dynamic_quant = is_dynamic_quant
         # TODO: allow user specified patterns
-        if self.is_dynamic:
+        if self.is_dynamic_quant:
             self.patterns = get_dynamic_quant_patterns()
         else:
             self.patterns = get_quant_patterns()
@@ -681,7 +681,7 @@ class Quantizer:
                     observed.add(node.name)
 
                 # don't need to insert observer for output in dynamic quantization
-                if self.is_dynamic:
+                if self.is_dynamic_quant:
                     continue
 
                 if isinstance(obj, CopyNode):
@@ -740,15 +740,15 @@ class Quantizer:
         self.qconfig_map = observed._qconfig_map
 
     def prepare(self, model, qconfig_dict, inplace=False):
-        return self._prepare(model, qconfig_dict, inplace, is_dynamic=False)
+        return self._prepare(model, qconfig_dict, inplace, is_dynamic_quant=False)
 
     def prepare_dynamic(self, model, qconfig_dict, inplace=False):
-        return self._prepare(model, qconfig_dict, inplace, is_dynamic=True)
+        return self._prepare(model, qconfig_dict, inplace, is_dynamic_quant=True)
 
-    def convert(self, observed, inplace=False, debug=False, is_dynamic=False):
+    def convert(self, observed, inplace=False, debug=False, is_dynamic_quant=False):
         assert not inplace, 'inplace convert is not supported yet'
         self.restore_state(observed)
-        self.is_dynamic = is_dynamic
+        self.is_dynamic_quant = is_dynamic_quant
         # move to cpu since we only have quantized cpu kernels
         observed.eval().cpu()
         observed_root = observed.root
@@ -849,7 +849,7 @@ class Quantizer:
                     quantized = is_quantized(node.args[0])
 
                 # output of dynamic quantization is not quantized
-                if self.is_dynamic:
+                if self.is_dynamic_quant:
                     quantized = False
 
                 if quantized:
@@ -967,7 +967,7 @@ class Quantizer:
                     for i, node_arg in enumerate(node.args):
                         if arg is node_arg and i in WEIGHT_INDEX_DICT[node.target]:
                             is_weight = True
-                if (not self.is_dynamic) or is_weight:
+                if (not self.is_dynamic_quant) or is_weight:
                     # overwrite previous quant config
                     quants[arg.name] = (DefaultQuant(self, arg), qconfig, is_weight)
             return visit_arg
