@@ -404,6 +404,31 @@ Tensor bmm_batching_rule(const Tensor& self, const Tensor& other) {
   return physical_args[0].newLogicalFromPhysical(result);
 }
 
+Tensor mm_batching_rule(const Tensor& self, const Tensor& other) {
+  TORCH_CHECK(/*logical*/self.dim() == 2 && /*logical*/other.dim() == 2,
+      "mm(self, other): Shape mismatch: expected matrix "
+      "(got `self` of size ", self.sizes(), ") ",
+      "and matrix (got `other` of size ", other.sizes(), ")");
+
+  // See Note [Batching rules for matmul-like operators] for why we have cases
+  if (self_batched && !other_batched) {
+    auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
+    auto result = at::matmul(self_physical.tensor(), other);
+    return self_physical.newLogicalFromPhysical(result);
+  }
+  if (!self_batched && other_batched) {
+    auto other_physical = MultiBatchVmapTransform::logicalToPhysical(other);
+    auto result = at::matmul(self, other_physical.tensor());
+    return other_physical.newLogicalFromPhysical(result);
+  }
+  if (self_batched && other_batched) {
+    auto physical_args = MultiBatchVmapTransform::logicalToPhysical({self, other});
+    auto result = at::matmul(physical_args[0].tensor(), physical_args[1].tensor());
+    return physical_args[0].newLogicalFromPhysical(result.squeeze(-1).squeeze(-1));
+  }
+  TORCH_INTERNAL_ASSERT(false, "either self or other must be a BatchedTensor");
+}
+
 // I am quite sad that we need to register operators with exploded TensorOptions,
 // even though the native:: implementations can use TensorOptions&.
 // This also makes it hard to metaprogram: i.e., we can't use
