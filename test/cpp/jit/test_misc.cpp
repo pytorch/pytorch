@@ -38,7 +38,6 @@
 #include "torch/csrc/jit/runtime/argument_spec.h"
 #include "torch/csrc/jit/runtime/autodiff.h"
 #include "torch/csrc/jit/runtime/custom_operator.h"
-#include "torch/csrc/jit/runtime/graph_executor.h"
 #include "torch/csrc/jit/runtime/interpreter.h"
 #include "torch/csrc/jit/runtime/symbolic_script.h"
 #include "torch/csrc/jit/serialization/import.h"
@@ -46,9 +45,10 @@
 #include "torch/csrc/autograd/engine.h"
 #include "torch/csrc/autograd/variable.h"
 
-#include <torch/csrc/jit/runtime/profiling_graph_executor_impl.h>
+#include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/testing/file_check.h>
 #include <torch/script.h>
+
 #include "torch/csrc/jit/api/module.h"
 #include "torch/csrc/jit/frontend/ir_emitter.h"
 #include "torch/csrc/jit/runtime/profiling_record.h"
@@ -1251,6 +1251,7 @@ void testFallbackGraphs() {
         // this is safe to do since we are done profiling
         ProfilingRecord::removeProfileCounter(opt_graph->block());
         replaceBlockWithFallbackGraph(opt_graph->block());
+        GRAPH_DUMP("replaceBlockWithFallbackGraph:", opt_graph);
         auto it = opt_graph->block()->nodes().begin();
         ASSERT_EQ(it->kind(), prim::FallbackGraph);
         auto fallback = *it++;

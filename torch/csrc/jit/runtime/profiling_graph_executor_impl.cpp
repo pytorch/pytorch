@@ -65,21 +65,6 @@ std::atomic<size_t>& getBailoutDepth() {
   return bailout_depth;
 }
 
-void removeProfilingNodes(Block* b) {
-  for (auto it = b->nodes().begin(); it != b->nodes().end(); it++) {
-    if (it->kind() == prim::profile) {
-      if (it->outputs().size()) {
-        it->output()->replaceAllUsesWith(it->input());
-      }
-      it.destroyCurrent();
-    } else {
-      for (Block* ib : it->blocks()) {
-        removeProfilingNodes(ib);
-      }
-    }
-  }
-}
-
 static bool needsGradientInProfilingMode(Block* b) {
   for (auto n : b->nodes()) {
     if (n->kind() == prim::BailOut) {
@@ -399,6 +384,11 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(
   std::lock_guard<std::mutex> lock(compile_mutex);
   GRAPH_DEBUG("Running ProfilingGraphExecutorImpl ", this);
 
+  // if tensorExprFuserEnabled() returns true we need to persist the very first
+  // time ProfilingGraphExecutorImpl is called, so we can update it correctly
+  // for fallback functions in ProfilingGraphExecutorImpl Else,
+  // getPlanFor(remaining_bailout_depth) is corrected and persisted by the Code
+  // object in interpreter.
   if (!remaining_bailout_depth_.has_value() || !tensorExprFuserEnabled()) {
     remaining_bailout_depth_ = remaining_bailout_depth;
   }
@@ -419,7 +409,6 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(
   // if a profiling graph hasn't been created yet
   if (!pr_) {
     auto copy = graph->copy();
-    removeProfilingNodes(copy->block());
     runProfilingInsensitiveOptimizations(copy);
     if (*remaining_bailout_depth_ == getBailoutDepth()) {
       PeelProfilingLoops(copy);
