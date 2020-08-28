@@ -16634,8 +16634,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @dtypesIfCPU(torch.bfloat16, torch.float32, torch.float64)
     @dtypes(torch.float32, torch.float64)
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
-    def test_i0(self, device, dtype):
-        a = torch.randn(100, device=device).to(dtype)
+    def test_i0_range1(self, device, dtype):
+        a = torch.rand(100, device=device).to(dtype) * 13.25
         actual = torch.i0(a)
         if dtype is torch.bfloat16:
             a = a.to(torch.float32)
@@ -16644,7 +16644,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             expected = torch.from_numpy(expected).to(dtype)
         self.assertEqual(actual, expected)
 
-        a = torch.randn(100, device=device).to(dtype) * 8
+        a = torch.rand(100, device=device).to(dtype) * -13.25
         actual = torch.i0(a)
         if dtype is torch.bfloat16:
             a = a.to(torch.float32)
@@ -16653,13 +16653,39 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             expected = torch.from_numpy(expected).to(dtype)
         self.assertEqual(actual, expected)
 
-        a = torch.randn(100, device=device).to(dtype) * 20
+    @dtypesIfCPU(torch.bfloat16, torch.float32, torch.float64)
+    @dtypes(torch.float32, torch.float64)
+    @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
+    def test_i0_range2(self, device, dtype):
+        a = torch.rand(1000, device=device).to(dtype) * 88.5
         actual = torch.i0(a)
         if dtype is torch.bfloat16:
             a = a.to(torch.float32)
         expected = scipy.special.i0(a.cpu().numpy())
-        if dtype is torch.bfloat16 or dtype is torch.float16:
+        if dtype is torch.bfloat16:
             expected = torch.from_numpy(expected).to(dtype)
+        self.assertEqual(actual, expected)
+
+        a = torch.rand(1000, device=device).to(dtype) * -88.5
+        actual = torch.i0(a)
+        if dtype is torch.bfloat16:
+            a = a.to(torch.float32)
+        expected = scipy.special.i0(a.cpu().numpy())
+        if dtype is torch.bfloat16:
+            expected = torch.from_numpy(expected).to(dtype)
+        self.assertEqual(actual, expected)
+
+    @dtypes(torch.float64)
+    @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
+    def test_i0_range3(self, device, dtype):
+        a = torch.rand(1000, device=device).to(dtype) * 709.75
+        actual = torch.i0(a)
+        expected = scipy.special.i0(a.cpu().numpy())
+        self.assertEqual(actual, expected)
+
+        a = torch.rand(1000, device=device).to(dtype) * -709.75
+        actual = torch.i0(a)
+        expected = scipy.special.i0(a.cpu().numpy())
         self.assertEqual(actual, expected)
 
     @slowTest
