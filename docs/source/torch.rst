@@ -306,6 +306,7 @@ Pointwise Ops
     mul
     mvlgamma
     neg
+    negative
     nextafter
     polygamma
     pow
@@ -376,7 +377,9 @@ Comparison Ops
     le
     lt
     max
+    maximum
     min
+    minimum
     ne
     sort
     topk

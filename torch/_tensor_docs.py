@@ -2057,6 +2057,13 @@ max(dim=None, keepdim=False) -> Tensor or (Tensor, Tensor)
 See :func:`torch.max`
 """)
 
+add_docstr_all('maximum',
+               r"""
+maximum(other) -> Tensor
+
+See :func:`torch.maximum`
+""")
+
 add_docstr_all('argmax',
                r"""
 argmax(dim=None, keepdim=False) -> LongTensor
@@ -2083,6 +2090,13 @@ add_docstr_all('min',
 min(dim=None, keepdim=False) -> Tensor or (Tensor, Tensor)
 
 See :func:`torch.min`
+""")
+
+add_docstr_all('minimum',
+               r"""
+minimum(other) -> Tensor
+
+See :func:`torch.minimum`
 """)
 
 add_docstr_all('argmin',
@@ -2211,11 +2225,25 @@ neg() -> Tensor
 See :func:`torch.neg`
 """)
 
+add_docstr_all('negative',
+               r"""
+negative() -> Tensor
+
+See :func:`torch.negative`
+""")
+
 add_docstr_all('neg_',
                r"""
 neg_() -> Tensor
 
 In-place version of :meth:`~Tensor.neg`
+""")
+
+add_docstr_all('negative_',
+               r"""
+negative_() -> Tensor
+
+In-place version of :meth:`~Tensor.negative`
 """)
 
 add_docstr_all('nelement',

@@ -73,6 +73,12 @@ static bool needsGradientInProfilingMode(Block* b) {
         return true;
       }
     }
+    if (n->kind() == prim::profile) {
+      auto type = n->ty(attr::profiled_type)->expect<TensorType>();
+      if (type->requiresGrad() && *type->requiresGrad()) {
+        return true;
+      }
+    }
 
     for (auto ib : n->blocks()) {
       if (needsGradientInProfilingMode(ib)) {
@@ -98,15 +104,23 @@ void runNooptPassPipeline(std::shared_ptr<Graph>& graph) {
 void runPreAutodiffPassPipeline(std::shared_ptr<Graph>& graph) {
   GRAPH_DUMP(
       "Before InsertGuards (beginning of runPreAutodiffPassPipeline)", graph);
-  InsertGuards(graph);
-  GRAPH_DUMP("After InsertGuards, before LowerGradOf", graph);
-  LowerGradOf(*graph);
-  GRAPH_DUMP("After LowerGradOf, before EliminateRedundantGuards", graph);
-  EliminateRedundantGuards(graph);
-  GRAPH_DUMP("After EliminateRedundantGuards, before InsertBailOuts", graph);
-  InsertBailOuts(graph);
-  GRAPH_DUMP("After InsertBailOuts, before specializeAutogradZero", graph);
-  specializeAutogradZero(*graph);
+
+  if (tensorExprFuserEnabled()) {
+    // With TE fuser we don't generate bailouts
+    LowerGradOf(*graph);
+    GRAPH_DUMP("After LowerGradOf, before specializeAutogradZero", graph);
+  } else {
+    InsertGuards(graph);
+    GRAPH_DUMP("After InsertGuards, before LowerGradOf", graph);
+    LowerGradOf(*graph);
+    GRAPH_DUMP("After LowerGradOf, before EliminateRedundantGuards", graph);
+    EliminateRedundantGuards(graph);
+    GRAPH_DUMP("After EliminateRedundantGuards, before InsertBailOuts", graph);
+    InsertBailOuts(graph);
+    GRAPH_DUMP("After InsertBailOuts, before specializeAutogradZero", graph);
+  }
+
+  specializeAutogradZero(graph);
   GRAPH_DUMP("After specializeAutogradZero", graph);
   // runRequiredPasses
   {
@@ -401,6 +415,7 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(
   }
 
   auto copy = pr_->graph()->copy();
+  ProfilingRecord::removeProfileCounter(copy->block());
   runProfilingOptimizations(copy);
   // cache
   optimized_plan_ =

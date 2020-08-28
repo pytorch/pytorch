@@ -418,9 +418,11 @@ view of a storage and defines numeric operations on it.
    .. automethod:: matrix_power
    .. automethod:: matrix_exp
    .. automethod:: max
+   .. automethod:: maximum
    .. automethod:: mean
    .. automethod:: median
    .. automethod:: min
+   .. automethod:: minimum
    .. automethod:: mm
    .. automethod:: mode
    .. automethod:: movedim
@@ -438,6 +440,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: ne_
    .. automethod:: neg
    .. automethod:: neg_
+   .. automethod:: negative
+   .. automethod:: negative_
    .. automethod:: nelement
    .. automethod:: nextafter
    .. automethod:: nextafter_

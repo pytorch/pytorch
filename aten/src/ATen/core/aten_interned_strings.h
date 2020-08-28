@@ -519,7 +519,6 @@ _(aten, native_resize_as) \
 _(aten, native_tensor) \
 _(aten, native_zero) \
 _(aten, ne) \
-_(aten, neg) \
 _(aten, nextafter) \
 _(aten, bitwise_and) \
 _(aten, bitwise_not) \
@@ -904,12 +903,14 @@ _(attr, max_val) \
 _(attr, max_values) \
 _(attr, maximum_indices) \
 _(attr, maxnorm) \
+_(attr, maximum) \
 _(attr, mean) \
 _(attr, median) \
 _(attr, min) \
 _(attr, min_indices) \
 _(attr, min_val) \
 _(attr, minlength) \
+_(attr, minimum) \
 _(attr, mode) \
 _(attr, momentum) \
 _(attr, n) \
