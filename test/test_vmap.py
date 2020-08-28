@@ -862,6 +862,36 @@ class TestVmapOperators(_TestVmapBase):
             self._test_unary(lambda t: op(number, t), getter, device='cuda')
             self._test_unary(lambda t: op(t, torch.tensor(number)), getter, device='cuda')
 
+    def test_bmm(self):
+        op = torch.bmm
+        test = self._vmap_test
+        B0, B1 = 7, 11
+
+        # shape mismatch
+        msg = "Shape mismatch"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            vmap(op)(torch.randn(B0, 2, 2, 2), torch.randn(B0, 2))
+        with self.assertRaisesRegex(RuntimeError, msg):
+            vmap(op, in_dims=(0, None))(torch.randn(B0, 3, 3, 2), torch.randn(2, 2))
+        with self.assertRaisesRegex(RuntimeError, msg):
+            vmap(op, in_dims=(None, 0))(torch.randn(2, 2), torch.randn(B0, 2, 2, 2))
+
+        # left arg is vmapped
+        test(op, (torch.rand(B0, 2, 3, 5), torch.rand(2, 5, 3)), in_dims=(0, None))
+        test(vmap(op, in_dims=(0, None)), (torch.rand(B1, B0, 2, 3, 5), torch.rand(2, 5, 3)),
+             in_dims=(1, None))
+
+        # right arg is vmapped
+        test(op, (torch.rand(2, 5, 3), torch.rand(B0, 2, 3, 5)), in_dims=(None, 0))
+        test(vmap(op, in_dims=(None, 0)), (torch.rand(2, 5, 3), torch.rand(B1, B0, 2, 3, 5)),
+             in_dims=(None, 1))
+
+        # both args are vmapped
+        test(op, (torch.rand(B0, 2, 3, 5), torch.rand(B0, 2, 5, 3)))
+        test(vmap(op), (torch.rand(B1, B0, 2, 3, 5), torch.rand(B0, B1, 2, 5, 3)), in_dims=(1, 0))
+        test(vmap(op, in_dims=(0, None)),
+             (torch.rand(B1, 2, 3, 5), torch.rand(B0, 2, 5, 3)), in_dims=(None, 0))
+
     def test_chunk(self):
         test = self._vmap_view_test
         op = torch.chunk
@@ -886,6 +916,36 @@ class TestVmapOperators(_TestVmapBase):
         test(vmap(lambda t: op(t, 0, 0, -1)), (tensor,), in_dims=1, out_dims=1)
         test(vmap(vmap(lambda t: op(t, 0, 0, 1), in_dims=1), in_dims=3),
              (tensor,), in_dims=1, out_dims=1)
+
+    def test_dot(self):
+        op = torch.dot
+        test = self._vmap_test
+        B0, B1 = 7, 11
+
+        # shape mismatch
+        msg = "Shape mismatch"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            vmap(op)(torch.randn(B0, 2, 2, 2), torch.randn(B0, 2))
+        with self.assertRaisesRegex(RuntimeError, msg):
+            vmap(op, in_dims=(0, None))(torch.randn(B0, 2), torch.randn(2, 2))
+        with self.assertRaisesRegex(RuntimeError, msg):
+            vmap(op, in_dims=(None, 0))(torch.randn(2, 2), torch.randn(B0, 2))
+
+        # left arg is vmapped
+        test(op, (torch.rand(B0, 5), torch.rand(5)), in_dims=(0, None))
+        test(vmap(op, in_dims=(0, None)), (torch.rand(B1, B0, 5), torch.rand(5)),
+             in_dims=(1, None))
+
+        # right arg is vmapped
+        test(op, (torch.rand(5), torch.rand(B0, 5)), in_dims=(None, 0))
+        test(vmap(op, in_dims=(None, 0)), (torch.rand(5), torch.rand(B1, B0, 5)),
+             in_dims=(None, 1))
+
+        # both args are vmapped
+        test(op, (torch.rand(B0, 5), torch.rand(B0, 5)))
+        test(vmap(op), (torch.rand(B1, B0, 5), torch.rand(B0, B1, 5)), in_dims=(1, 0))
+        test(vmap(op, in_dims=(0, None)),
+             (torch.rand(B1, 5), torch.rand(B0, 5)), in_dims=(None, 0))
 
     def test_expand_as(self):
         op = torch.Tensor.expand_as
