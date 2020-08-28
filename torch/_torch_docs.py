@@ -699,6 +699,12 @@ Example::
     tensor([ 0.1599, -1.1534, -0.9435, -0.8990 ])
 """.format(**common_args))
 
+add_docstr(torch.arcsinh, r"""
+arcsinh(input, *, out=None) -> Tensor
+
+Alias for :func:`torch.asinh`.
+""")
+
 add_docstr(torch.atan, r"""
 atan(input, *, out=None) -> Tensor
 
@@ -758,8 +764,7 @@ Example::
     tensor([ 0.9833,  0.0811, -1.9743, -1.4151])
 """.format(**common_args))
 
-add_docstr(torch.atanh,
-           r"""
+add_docstr(torch.atanh, r"""
 atanh(input, *, out=None) -> Tensor
 
 Returns a new tensor with the inverse hyperbolic tangent of the elements of :attr:`input`.
@@ -786,6 +791,12 @@ Example::
     >>> torch.atanh(a)
     tensor([ -1.7253, 0.3060, -1.2899, -0.1893 ])
 """.format(**common_args))
+
+add_docstr(torch.arctanh, r"""
+arctanh(input, *, out=None) -> Tensor
+
+Alias for :func:`torch.atanh`.
+""")
 
 add_docstr(torch.baddbmm,
            r"""

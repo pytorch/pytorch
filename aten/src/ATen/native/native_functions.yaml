@@ -495,6 +495,17 @@
 
 - func: asinh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
 
+# arcsinh, alias for asinh
+- func: arcsinh(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: arcsinh_(Tensor(a!) self) -> Tensor(a!)
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: arcsinh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+
 - func: atanh(Tensor self) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
@@ -504,6 +515,17 @@
   variants: function, method
 
 - func: atanh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+
+# arctanh, alias for atanh
+- func: arctanh(Tensor self) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: arctanh_(Tensor(a!) self) -> Tensor(a!)
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: arctanh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
 
 - func: as_strided(Tensor(a) self, int[] size, int[] stride, int? storage_offset=None) -> Tensor(a)
   use_c10_dispatcher: full
