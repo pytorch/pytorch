@@ -1,5 +1,5 @@
-#include "torch/csrc/autograd/FunctionsManual.h"
-#include "torch/csrc/autograd/variable.h"
+#include <torch/csrc/autograd/FunctionsManual.h>
+#include <torch/csrc/autograd/variable.h>
 
 #include <ATen/ATen.h>
 #include <ATen/Utils.h>
