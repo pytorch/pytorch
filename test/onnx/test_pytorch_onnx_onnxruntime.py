@@ -1014,7 +1014,7 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.tensor(8.5, dtype=torch.float)
         self.run_test(ArangeModel(), (x, y))
 
-    #@skipIfUnsupportedMinOpsetVersion(11)
+    @skipIfUnsupportedMinOpsetVersion(11)
     def test_arange_out(self):
         class ArangeOutModel(torch.nn.Module):
             def forward(self, end):
@@ -1022,7 +1022,6 @@ class TestONNXRuntime(unittest.TestCase):
                 return torch.arange(end, out=out_t)
 
         x = torch.tensor(8.5, dtype=torch.float)
-
         self.run_test(ArangeOutModel(), (x))
 
     @skipIfUnsupportedMinOpsetVersion(11)
