@@ -35,9 +35,12 @@ bool isForLoop(Node* node) {
 int64_t limitedBlockSize(Block* body, int64_t limit) {
   auto it = body->nodes().begin();
   auto end = body->nodes().end();
-  for (int64_t i = 0; i < limit; ++i, ++it) {
+  for (int64_t i = 0; i < limit; ++it) {
     for (Block* subblock : it->blocks()) {
       i += limitedBlockSize(subblock, limit - i);
+    }
+    if (!it->notExecutedOp()) {
+      ++i;
     }
     if (it == end) {
       return i;
