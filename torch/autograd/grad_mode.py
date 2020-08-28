@@ -1,10 +1,10 @@
 import torch
 import functools
 import inspect
-from typing import Any
-
 from typing import Any, Callable, TypeVar, cast
-from typing_extensions import Literal
+
+
+__all__ = ['no_grad', 'enable_grad', 'set_grad_enabled']
 
 
 # Used for annotating the decorator usage of 'no_grad' and 'enable_grad'.
@@ -43,7 +43,7 @@ class _DecoratorContextManager:
     def __enter__(self) -> None:
         raise NotImplementedError
 
-    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> Literal[False]:
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
         raise NotImplementedError
 
 
@@ -86,9 +86,8 @@ class no_grad(_DecoratorContextManager):
         self.prev = torch.is_grad_enabled()
         torch.set_grad_enabled(False)
 
-    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> Literal[False]:
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
         torch.set_grad_enabled(self.prev)
-        return False
 
 
 class enable_grad(_DecoratorContextManager):
@@ -126,9 +125,8 @@ class enable_grad(_DecoratorContextManager):
         self.prev = torch.is_grad_enabled()
         torch._C._set_grad_enabled(True)
 
-    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> Literal[False]:
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
         torch._C._set_grad_enabled(self.prev)
-        return False
 
 
 class set_grad_enabled(object):
@@ -172,6 +170,5 @@ class set_grad_enabled(object):
     def __enter__(self) -> None:
         pass
 
-    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> Literal[False]:
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
         torch._C._set_grad_enabled(self.prev)
-        return False
