@@ -9,6 +9,7 @@ add_library(torchpy ${TORCHPY_LIB_SOURCES})
 target_include_directories(torchpy PRIVATE ${TORCHPY_DIR})
 target_link_libraries(torchpy PRIVATE torch torch_python -Wl,-rpath,/home/whc/local/pytorch-env/lib/ ${PYTHON_LIBRARIES})
 
+
 set(TORCHPY_TEST_SOURCES
   ${TORCHPY_DIR}/test_main.cpp
   ${TORCHPY_DIR}/example/test_threads.cpp
@@ -19,22 +20,12 @@ target_include_directories(torchpy_test PRIVATE ${TORCHPY_DIR})
 target_link_libraries(torchpy_test PRIVATE torchpy torch -Wl,-rpath,/home/whc/local/pytorch-env/lib/ ${PYTHON_LIBRARIES})
 target_link_libraries(torchpy_test PUBLIC gtest)
 
-# Just a debug helper
-set(PYBIND_TEST_SOURCES
-  ${TORCHPY_DIR}/test_pybind.cpp
+set(TORCHPY_APP_SOURCES
+  ${TORCHPY_DIR}/app_main.cpp
 )
-add_executable(pybind_test ${PYBIND_TEST_SOURCES})
-target_include_directories(pybind_test PRIVATE ${TORCHPY_DIR})
-target_link_libraries(pybind_test PRIVATE torchpy torch torch_python -Wl,-rpath,/home/whc/local/pytorch-env/lib/ ${PYTHON_LIBRARIES})
-target_link_libraries(pybind_test PUBLIC gtest)
-
-set(TORCHPY_THREADS_SOURCES
-  ${TORCHPY_DIR}/threads_main.cpp
-)
-add_executable(torchpy_threads ${TORCHPY_THREADS_SOURCES})
-target_include_directories(torchpy_threads  PRIVATE ${TORCHPY_DIR})
-target_include_directories(torchpy_threads  PRIVATE ${INTERPRETER_DIR})
-target_link_libraries(torchpy_threads PRIVATE dl)
+add_executable(torchpy_app ${TORCHPY_APP_SOURCES})
+target_include_directories(torchpy_app  PRIVATE ${TORCHPY_DIR})
+target_link_libraries(torchpy_app PRIVATE dl)
 
 if(USE_CUDA)
   target_link_libraries(torchpy_test PRIVATE
@@ -43,7 +34,14 @@ if(USE_CUDA)
     ${CUDA_CUDA_LIB}
     ${TORCH_CUDA_LIBRARIES})
 
+  target_link_libraries(torchpy_app PRIVATE
+    ${CUDA_LIBRARIES}
+    ${CUDA_NVRTC_LIB}
+    ${CUDA_CUDA_LIB}
+    ${TORCH_CUDA_LIBRARIES})
+
   target_compile_definitions(torchpy_test PRIVATE "USE_CUDA")
+  target_compile_definitions(torchpy_app PRIVATE "USE_CUDA")
 endif()
 
 if(NOT MSVC)

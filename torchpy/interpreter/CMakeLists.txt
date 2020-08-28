@@ -74,16 +74,17 @@ SET(PYTHON_MODULES
 )
 SET(PYTHON_LIB_DIR "${PYTHON_SOURCE_DIR}/lib/")
 SET(PYTHON_LIB "${PYTHON_LIB_DIR}/libpython3.7m.a")
-add_custom_target(cpython
+add_custom_command(
+   OUTPUT ${PYTHON_MODULES} ${PYTHON_LIB}
    COMMAND CFLAGS=-fPIC CPPFLAGS=-fPIC ./configure --prefix ${PYTHON_SOURCE_DIR}
    COMMAND CFLAGS=-fPIC CPPFLAGS=-fPIC make -j8
    COMMAND make install
    WORKING_DIRECTORY ${PYTHON_SOURCE_DIR}
-   BYPRODUCTS ${PYTHON_MODULES} ${PYTHON_LIB}
    VERBATIM
 )
 
-SET(PY_PATH_STRING "import sys; sys.path = ['', '${EMBEDDED_PY_ROOT}/python37.zip', '${EMBEDDED_PY_ROOT}/python3.7', '${EMBEDDED_PY_ROOT}/lib-dynload', '${EMBEDDED_PY_ROOT}/site-packages']")
+SET(PYTORCH_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../")
+SET(PY_PATH_STRING "import sys; sys.path = ['', '${PYTHON_LIB_DIR}/python37.zip', '${PYTHON_LIB_DIR}/python3.7', '${PYTHON_LIB_DIR}/lib-dynload', '${PYTHON_LIB_DIR}/site-packages', '${PYTORCH_ROOT}']")
 add_custom_command(
     OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/python_path.h
     COMMAND echo "#define PY_PATH_STRING \"${PY_PATH_STRING}\"" > ${CMAKE_CURRENT_SOURCE_DIR}/python_path.h
@@ -91,15 +92,22 @@ add_custom_command(
 )
 
 set(INTERPRETER_LIB_SOURCES
-  python_path.h
+  ${CMAKE_CURRENT_SOURCE_DIR}/python_path.h
   ${INTERPRETER_DIR}/interpreter.cpp
   ${PYTHON_MODULES}
 )
 add_library(interpreter
   ${INTERPRETER_LIB_SOURCES})
-add_dependencies(interpreter cpython)
 target_include_directories(interpreter PRIVATE ${INTERPRETER_DIR})
 
-# libraries python modules need
 target_link_libraries(interpreter PRIVATE -L${PYTHON_LIB_DIR} libpython3.7m.a)
-target_link_libraries(interpreter PRIVATE crypt crypto ssl pthread dl util m ffi lzma readline nsl ncursesw panelw)
+target_link_libraries(interpreter PRIVATE crypt crypto ssl pthread dl util m ffi lzma readline nsl ncursesw panelw) # for python builtins
+target_link_libraries(interpreter PRIVATE torch torch_python)
+
+# handy to have a standalone app to verify linkage and usage of interpreter before embedding it in another lib
+set(INTERPRETER_TEST_SOURCES
+  ${INTERPRETER_DIR}/test_main.cpp
+)
+add_executable(interpreter_test ${INTERPRETER_TEST_SOURCES})
+target_include_directories(interpreter_test PRIVATE ${INTERPRETER_DIR})
+target_link_libraries(interpreter_test PUBLIC gtest dl)
