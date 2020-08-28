@@ -115,7 +115,7 @@ class DefaultDelegate(DelegateBase):
         # retrieve it with a get_param.
         if isinstance(a, torch.Tensor):
             # TODO: slow
-            def search_for_tensor(m : torch.nn.Module) -> Optional[str]:
+            def search_for_tensor(m : torch.nn.Module) -> Optional[List[str]]:
                 """
                 Search for a tensor value in the module's attributes. If it's
                 found, return the qualified name of that attribute, given the
@@ -166,7 +166,7 @@ def unpack_collection_type(proxy : Proxy, prototype : Any, delegate : DelegateBa
         return rv
     if prototype is SymVal:
         return proxy
-    raise RuntimeError('Unknown type ' + str(arg) + ' in input protytpe')
+    raise RuntimeError('Unknown type ' + str(prototype) + ' in input protytpe')
 
 # Symbolic tracing API
 #
@@ -177,7 +177,7 @@ def unpack_collection_type(proxy : Proxy, prototype : Any, delegate : DelegateBa
 #   - root - the `nn.Module` instance to trace
 #   - delegate : An instance of a Delegate object
 def symbolic_trace(root : torch.nn.Module,
-                   delegate_class : DelegateBase = DefaultDelegate,
+                   delegate_class : type = DefaultDelegate,
                    input_prototypes : List[Union[SymVal, Any]] = None) -> GraphModule:
     graph = Graph()
     delegate = delegate_class(root, graph)
