@@ -99,6 +99,7 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
                                    output_names=output_names, fixed_batch_size=fixed_batch_size, training=None)
 
         ort_outs = run_ort(ort_sess, input)
+        ort_compare_with_pytorch(ort_outs, output, rtol, atol)
 
         # if additional test inputs are provided run the onnx
         # model with these inputs and check the outputs
@@ -111,8 +112,7 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
                 if isinstance(output, torch.Tensor):
                     output = (output,)
                 ort_outs = run_ort(ort_sess, test_input)
-
-        ort_compare_with_pytorch(ort_outs, output, rtol, atol)
+                ort_compare_with_pytorch(ort_outs, output, rtol, atol)
 
 
 class TestONNXRuntime(unittest.TestCase):
@@ -234,7 +234,7 @@ class TestONNXRuntime(unittest.TestCase):
                 return x
 
         x = torch.randn(2, 1)
-        self.run_model_test_with_external_data(torch.jit.script(LargeModel()), x) 
+        self.run_model_test_with_external_data(torch.jit.script(LargeModel()), x)
 
     # Export Torchvision models
 
@@ -3987,6 +3987,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(6, 4, 3, 3)
         self.run_test(FakeQuantizePerTensorModel(), (x))
 
+    @skipIfUnsupportedMinOpsetVersion(12)
     def test_dropout_training(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -3998,13 +3999,13 @@ class TestONNXRuntime(unittest.TestCase):
                 return dropout
 
         model = MyModule()
-        x = torch.randn(10, 3, 128, 128)
+        x = torch.randn(10)
 
         model.train()
 
         ort_sess = convert_to_onnx(model, input=(x,), opset_version=self.opset_version, training=torch.onnx.TrainingMode.TRAINING)
         ort_outs = run_ort(ort_sess, input=(x,))
-        assert x != ort_outs[0]
+        assert not torch.all(torch.eq(x, torch.from_numpy(ort_outs[0])))
 
     @skipIfUnsupportedMinOpsetVersion(12)
     def test_dropout_training_zero(self):
