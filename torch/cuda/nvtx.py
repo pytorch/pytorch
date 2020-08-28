@@ -35,7 +35,7 @@ colors = {
         'darkgray':    0x007f8c8d,
         }
 
-def range_push(msg,color=colors['silver']):
+def range_push(msg,color='silver'):
     """
     Pushes a range onto a stack of nested range span.  Returns zero-based
     depth of the range that is started.
@@ -43,7 +43,8 @@ def range_push(msg,color=colors['silver']):
     Arguments:
         msg (string): ASCII message to associate with range
     """
-    attrib = nvtxEventAttributes_t(msg=msg,color=colors[color])
+    #attrib = nvtxEventAttributes_v2(msg=msg,color=colors[color])
+    attrib = EventAttributes(msg=msg,color=colors[color])
     return _nvtx.rangePushEx(attrib)
 
 
@@ -55,18 +56,47 @@ def range_pop():
     return _nvtx.rangePop()
 
 
-def mark(msg,color=colors['silver']):
+def mark(msg,color='silver'):
     """
     Describe an instantaneous event that occurred at some point.
 
     Arguments:
         msg (string): ASCII message to associate with the event.
     """
-    attrib = nvtxEventAttributes_t(msg=msg,color=color)
+    #attrib = nvtxEventAttributes_v2(msg=msg,color=colors[color])
+    attrib = EventAttributes(msg=msg,color=colors[color])
     return _nvtx.markEx(attrib)
 
 
-class nvtxEventAttributes_t(ctypes.Structure):
+class nvtxMessageValue_t(ctypes.Union):
+    """
+    """
+    _fields_ = [('ascii', ctypes.c_char_p),
+                ('unicode',ctypes.c_wchar_p),
+                #('registered', ctypes.c_char_p) #this isnt the type, its a specific struct
+               ]
+
+def EventAttributes(version=_nvtx.version, 
+                    size=_nvtx.size, 
+                    colorType=int(_nvtx.NVTX_COLOR_ARGB),
+                    color=colors['yellow'],
+                    msgType=int(_nvtx.NVTX_MESSAGE_TYPE_ASCII),
+                    msg=''):
+    """
+    This uses instead the pybind included class, to ease the message usage
+    """
+    attrib = _nvtx.nvtxEventAttributes_t()
+    attrib.version=version
+    attrib.size=size
+    attrib.colorType=colorType
+    attrib.color=color
+    attrib.messageType=msgType
+    #attrib.message=nvtxMessageValue_t()
+    attrib.message=_nvtx.nvtxMessageValue_t() #use pybind11 instead of ctypes for this
+    attrib.message.ascii=msg.encode("utf-8")
+    return attrib
+
+class nvtxEventAttributes_v2(ctypes.Structure):
     """
     A C struct containing essential attributes and optional
     attributes about a CUDA event. 
@@ -76,7 +106,7 @@ class nvtxEventAttributes_t(ctypes.Structure):
                 ('colorType', ctypes.c_int),
                 ('color', ctypes.c_uint),
                 ('msgType', ctypes.c_int),
-                ('msg', ctypes.c_wchar_p) #TODO: do I need c_char_p instead?
+                ('msg', nvtxMessageValue_t) #TODO: do I need c_char_p instead?
                ]
 
     def __init__(self,
@@ -85,16 +115,16 @@ class nvtxEventAttributes_t(ctypes.Structure):
                   colorType=int(_nvtx.NVTX_COLOR_ARGB),
                   color=colors['yellow'],
                   msgType=int(_nvtx.NVTX_MESSAGE_TYPE_ASCII),
-                  msg=""):
+                  msg=''):
         # Set to fields to zero as per NVTX documentation
         #for attr_name in [field[0] for field in self._fields_]:
-        #    setattr(self, attr_name, )
+        #    setattr(self, attr_name, 0)
         self.version=version
         self.size=size
         self.colorType=colorType
         self.color=color
         self.msgType=msgType
-        self.msg=msg
+        self.msg.ascii=msg.encode('utf-8')
             #TODO: Is this right to initialize all of whats in __fields__? There are chars
         #    ctypes.memset(ctypes.addressof(attr_name), 0, ctypes.sizeof(attr_name))
             # Now use user-defined values for the fields
