@@ -405,6 +405,9 @@ Tensor bmm_batching_rule(const Tensor& self, const Tensor& other) {
 }
 
 Tensor mm_batching_rule(const Tensor& self, const Tensor& other) {
+  auto self_batched = isBatchedTensor(self);
+  auto other_batched = isBatchedTensor(other);
+
   TORCH_CHECK(/*logical*/self.dim() == 2 && /*logical*/other.dim() == 2,
       "mm(self, other): Shape mismatch: expected matrix "
       "(got `self` of size ", self.sizes(), ") ",
@@ -580,6 +583,7 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("mv", mv_batching_rule);
   m.impl("dot", dot_batching_rule);
   m.impl("bmm", bmm_batching_rule);
+  m.impl("mm", mm_batching_rule);
 }
 
 } // namespace at
