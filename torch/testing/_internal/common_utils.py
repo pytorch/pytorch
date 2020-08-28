@@ -1423,9 +1423,12 @@ def retry(ExceptionToCheck, tries=3, delay=3, skip_after_retries=False):
 def make_tensor(size, device: torch.device, dtype: torch.dtype, *,
                 low, high, requires_grad: bool = False) -> torch.Tensor:
     """Returns a tensor of the specified size on the given device and dtype.
-       The tensors values are between -9 and 9, inclusive, unless low (high)
-       is not None in which case the values are between max(-9, low) and
-       min(9, high)."""
+       The tensors values are between -9 and 9, inclusive, for most dtypes,
+       unless low (high) is not None in which case the values are between
+       max(-9, low) and min(9, high).
+       For unsigned types the values are between 0 and 9, and for complex
+       dtypes the real and imaginary parts are each between -9 and 9,
+       independently."""
     if dtype is torch.bool:
         return torch.randint(0, 2, size, device=device, dtype=dtype)
 
@@ -1436,7 +1439,7 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *,
     elif dtype in integral_types():
         low = math.floor(-9 if low is None else max(low, -9))
         high = math.ceil(10 if high is None else min(high, 10))
-        return torch.randint(-9, 10, size, device=device, dtype=dtype)
+        return torch.randint(low, high, size, device=device, dtype=dtype)
     elif dtype in floating_types_and(torch.half, torch.bfloat16):
         low = -9 if low is None else max(low, -9)
         high = 9 if high is None else min(high, 10)

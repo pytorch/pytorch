@@ -1,5 +1,6 @@
-from functools import partial
+from functools import partial, wraps
 from copy import deepcopy
+from itertools import product
 
 import torch
 
@@ -52,6 +53,15 @@ class TestOpInfo(TestCase):
 class TestGradients(TestCase):
     exact_dtype = True
 
+    # Copies inputs to inplace operations to avoid inplace modifications
+    #   to leaves requiring gradient
+    def _get_safe_inplace(self, inplace_variant):
+        @wraps(inplace_variant)
+        def _fn(t, *args, **kwargs):
+            return inplace_variant(t.clone(), *args, **kwargs)
+
+        return _fn
+
     # Tests that gradients are computed correctly
     @dtypes(torch.double, torch.cdouble)
     @ops(op_db)
@@ -59,16 +69,14 @@ class TestGradients(TestCase):
         if not op.supports_dtype(dtype, torch.device(device).type):
             self.skipTest("Skipped!")
 
+        variants = (op.get_op(),
+                    op.get_method(),
+                    self._get_safe_inplace(op.get_inplace()))
         samples = op.sample_inputs(device, dtype, requires_grad=True)
-        for sample in samples:
-            with self.subTest(sample=sample):
-                partial_fn = partial(op, **sample.kwargs)
-                self.assertTrue(gradcheck(partial_fn, (sample.input,) + sample.args))
-
-            # NOTE: the following prevents the test from reporting a CUDA memory leak
-            # TODO: extend to multiple input tensors requiring grad
-            del sample.input.grad
-            del sample.input
+        for variant, sample in product(variants, samples):
+            sample_copy = deepcopy(sample)
+            partial_fn = partial(variant, **sample_copy.kwargs)
+            self.assertTrue(gradcheck(partial_fn, (sample_copy.input,) + sample_copy.args))
 
     # Test that gradients of gradients are computed correctly
     @dtypes(torch.double, torch.cdouble)
@@ -77,42 +85,17 @@ class TestGradients(TestCase):
         if not op.supports_dtype(dtype, torch.device(device).type):
             self.skipTest("Skipped!")
 
+        variants = (op.get_op(),
+                    op.get_method(),
+                    self._get_safe_inplace(op.get_inplace()))
         samples = op.sample_inputs(device, dtype, requires_grad=True)
-        for sample in samples:
-            with self.subTest(sample=sample):
-                partial_fn = partial(op, **sample.kwargs)
-                self.assertTrue(gradgradcheck(partial_fn, (sample.input,) + sample.args,
-                                              gen_non_contig_grad_outputs=False))
-                self.assertTrue(gradgradcheck(partial_fn, (sample.input,) + sample.args,
-                                              gen_non_contig_grad_outputs=True))
-
-                # NOTE: the following prevents the test from reporting a CUDA memory leak
-                # TODO: extend to multiple input tensors requiring grad
-                del sample.input.grad
-                del sample.input
-
-    # Compares gradients of functions and their inplace variants
-    @dtypes(torch.double, torch.cdouble)
-    @ops((op for op in op_db if op.get_inplace() is not None))
-    def test_grad_variants(self, device, dtype, op):
-        inplace = op.get_inplace()
-        samples = op.sample_inputs(device, dtype, requires_grad=True)
-        for sample in samples:
-            inplace_input = deepcopy(sample.input)
-
-            output = op(sample.input, *sample.args, **sample.kwargs)
-
-            # NOTE: inplace inputs are cloned because leaves requiring
-            #   requiring gradients cann't be transformed inplace
-            inplace_input_clone = inplace_input.clone()
-            inplace_output = inplace(inplace_input_clone, *sample.args, **sample.kwargs)
-
-            t = torch.randn_like(output)
-            output.backward(t)
-            inplace_output.backward(t)
-
-            self.assertEqual(sample.input.grad, inplace_input.grad)
-            self.assertEqual(sample.input.dtype, sample.input.grad.dtype)
+        for variant, sample in product(variants, samples):
+            sample_copy = deepcopy(sample)
+            partial_fn = partial(variant, **sample.kwargs)
+            self.assertTrue(gradgradcheck(partial_fn, (sample.input,) + sample.args,
+                                          gen_non_contig_grad_outputs=False))
+            self.assertTrue(gradgradcheck(partial_fn, (sample.input,) + sample.args,
+                                          gen_non_contig_grad_outputs=True))
 
 
 instantiate_device_type_tests(TestOpInfo, globals())

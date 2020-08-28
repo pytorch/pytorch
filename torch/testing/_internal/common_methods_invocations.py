@@ -26,7 +26,7 @@ from torch.testing._internal.common_utils import \
 
 class SkipInfo(object):
     """Describes which test, or type of tests, should be skipped when testing
-       an operator. Any test which matches all non-None fields will be skipped.
+       an operator. Any test that matches all provided arguments will be skipped.
        The skip will only be checked if the active_if argument is True."""
 
     __slots__ = ['cls_name', 'test_name', 'device_type', 'dtypes', 'active_if']
@@ -44,10 +44,10 @@ class SampleInput(object):
 
     __slots__ = ['input', 'args', 'kwargs']
 
-    def __init__(self, input, *, args=tuple(), kwargs={}):
+    def __init__(self, input, *, args=tuple(), kwargs=None):
         self.input = input
         self.args = args
-        self.kwargs = kwargs
+        self.kwargs = kwargs if kwargs is not None else {}
 
 
 # Classes and methods for the operator database
@@ -75,6 +75,7 @@ class OpInfo(object):
         self.dtypesIfCUDA = dtypesIfCUDA if dtypesIfCUDA is not None else dtypes
         self.dtypesIfROCM = dtypesIfROCM if dtypesIfROCM is not None else dtypes
 
+        # NOTE: if the op is unspecified it is assumed to be under the torch namespace
         if op is None:
             assert hasattr(torch, self.name)
         self.op = op if op else getattr(torch, self.name)
@@ -135,6 +136,10 @@ class OpInfo(object):
         return dtype in self.dtypes
 
 
+L = 20
+M = 10
+S = 5
+
 
 # Metadata class for unary "universal functions (ufuncs)" that accept a single
 # tensor and have common properties like:
@@ -186,13 +191,11 @@ class UnaryUfuncInfo(OpInfo):
         low = low if low is None else low + self._domain_eps
         high = high if high is None else high - self._domain_eps
 
-        return (SampleInput(make_tensor((20,), device, dtype,
+        return (SampleInput(make_tensor((L,), device, dtype,
                                         low=low, high=high,
                                         requires_grad=requires_grad)),)
 
-L = 20
-M = 10
-S = 5
+
 
 # Operator database
 op_db = [
