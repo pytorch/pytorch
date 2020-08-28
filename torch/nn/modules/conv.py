@@ -579,7 +579,7 @@ class _ConvTransposeNd(_ConvNd):
             padding, dilation, transposed, output_padding,
             groups, bias, padding_mode)
 
-    def _output_padding(self, input, output_size, stride, padding, kernel_size):
+    def _output_padding(self, input, output_size, stride, padding, kernel_size, dilation):
         # type: (Tensor, Optional[List[int]], List[int], List[int], List[int]) -> List[int]
         if output_size is None:
             ret = _single(self.output_padding)  # converting to list if was not already
@@ -596,7 +596,7 @@ class _ConvTransposeNd(_ConvNd):
             max_sizes = torch.jit.annotate(List[int], [])
             for d in range(k):
                 dim_size = ((input.size(d + 2) - 1) * stride[d] -
-                            2 * padding[d] + kernel_size[d])
+                            2 * padding[d] + dilation[d] * (kernel_size[d] - 1) + 1)
                 min_sizes.append(dim_size)
                 max_sizes.append(min_sizes[d] + stride[d] - 1)
 
@@ -744,7 +744,8 @@ class ConvTranspose1d(_ConvTransposeNd):
         if self.padding_mode != 'zeros':
             raise ValueError('Only `zeros` padding mode is supported for ConvTranspose1d')
 
-        output_padding = self._output_padding(input, output_size, self.stride, self.padding, self.kernel_size)
+        output_padding = self._output_padding(
+            input, output_size, self.stride, self.padding, self.kernel_size, self.dilation)
         return F.conv_transpose1d(
             input, self.weight, self.bias, self.stride, self.padding,
             output_padding, self.groups, self.dilation)
@@ -906,7 +907,8 @@ class ConvTranspose2d(_ConvTransposeNd):
         if self.padding_mode != 'zeros':
             raise ValueError('Only `zeros` padding mode is supported for ConvTranspose2d')
 
-        output_padding = self._output_padding(input, output_size, self.stride, self.padding, self.kernel_size)
+        output_padding = self._output_padding(
+            input, output_size, self.stride, self.padding, self.kernel_size, self.dilation)
 
         return F.conv_transpose2d(
             input, self.weight, self.bias, self.stride, self.padding,
@@ -1065,7 +1067,8 @@ class ConvTranspose3d(_ConvTransposeNd):
         if self.padding_mode != 'zeros':
             raise ValueError('Only `zeros` padding mode is supported for ConvTranspose3d')
 
-        output_padding = self._output_padding(input, output_size, self.stride, self.padding, self.kernel_size)
+        output_padding = self._output_padding(
+            input, output_size, self.stride, self.padding, self.kernel_size, self.dilation)
 
         return F.conv_transpose3d(
             input, self.weight, self.bias, self.stride, self.padding,
