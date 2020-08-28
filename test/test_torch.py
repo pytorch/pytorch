@@ -645,6 +645,15 @@ class AbstractTestCases:
                 IndexError, "Dimension out of range",
                 lambda: torch.cross(torch.rand(5, 3, 4), torch.rand(5, 3, 4), dim=-5))
 
+        def test_tensor_numel_overflow(self):
+            with self.assertRaisesRegex(
+                    RuntimeError, r'int64 overflow while computing numel for sizes \[2, 2, 1, 2305843009213693952\]'):
+                torch.ones(2, 2, 1, 2305843009213693952)
+
+            with self.assertRaisesRegex(
+                    RuntimeError, r'int64 overflow while computing numel for sizes \[2, 2, 1, 9132760301568586890\]'):
+                torch.nn.functional.adaptive_avg_pool1d(torch.randn([2, 2, 2]), 9132760301568586890)
+
         def test_dtypes(self):
             all_dtypes = torch.testing.get_all_dtypes()
             do_test_dtypes(self, all_dtypes, torch.strided, torch.device('cpu'))

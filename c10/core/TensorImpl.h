@@ -1496,10 +1496,13 @@ private:
    * Compute the number of elements based on the sizes of a tensor.
    */
   int64_t compute_numel() const {
-    int64_t n = 1;
-    for (auto s : sizes()) {
-      n *= s;
+    uint64_t n = 1;
+    for (uint64_t s : sizes()) {
+      uint64_t n_next = n * s;
+      TORCH_CHECK((n_next >= n) || (n_next >= s), "int64 overflow while computing numel for sizes ", sizes());
+      n = n_next;
     }
+    TORCH_CHECK(n <= std::numeric_limits<int64_t>::max(), "int64 overflow while computing numel for sizes ", sizes());
     return n;
   }
 
