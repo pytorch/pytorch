@@ -17797,8 +17797,8 @@ else:
             test(z, True)
 
     def test_multinomial_empty(self, device):
-        probs = torch.ones(0, 3)
-        num_samples = 1
+        probs = torch.ones(0, 128, device=device)
+        num_samples = 64
         expected = torch.empty(0, num_samples, dtype=torch.int64)
         for replacement in (True, False):
             out = torch.multinomial(probs, num_samples=num_samples, replacement=replacement)
