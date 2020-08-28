@@ -1405,6 +1405,7 @@ static inline Tensor _chain_matmul_three_matrices(TensorList matrices) {
 Tensor chain_matmul(TensorList matrices) {
   checkAllSameDim(matrices, 2);
 
+  TORCH_CHECK(matrices.size() > 0, "chain_matmul: Expected one or more matrices");
   if (matrices.size() == 1) {
     return matrices[0];
   } else if (matrices.size() == 2) {

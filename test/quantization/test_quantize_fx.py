@@ -4,6 +4,7 @@ import torch.nn as nn
 import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
 import torch.nn.intrinsic.quantized as nniq
+import torch.multiprocessing as mp
 
 # symbolic trace
 from torch.fx import symbolic_trace
@@ -11,21 +12,34 @@ from torch.fx import symbolic_trace
 # graph mode quantization based on fx
 from torch.quantization._quantize_fx import (
     Quantizer,
+    fuse,
     QuantType,
 )
 
-from torch.quantization import default_qconfig
+from torch.quantization import (
+    default_qconfig,
+    default_qat_qconfig,
+    prepare,
+    prepare_qat,
+    convert,
+)
 
 # test utils
 from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
     skipIfNoFBGEMM,
+    skip_if_no_torchvision,
+    train_one_epoch,
+    run_ddp,
 )
+
+from torch.testing._internal.common_distributed import skip_if_not_multigpu
 
 from torch.testing._internal.common_quantization import NodeSpec as ns
 
 import itertools
 import operator
+import unittest
 
 class TestQuantizeFx(QuantizationTestCase):
     """ Unit tests for functionalities
@@ -757,3 +771,202 @@ class TestQuantizeFxOps(QuantizationTestCase):
             quantized,
             expected_node_occurrence=count_check,
             expected_node_list=order_check)
+
+class TestQuantizeFxModels(QuantizationTestCase):
+    def _test_model_impl(
+            self, mode, name, model, eager_quantizable_model,
+            check_with_eager=True,
+            diff_of_quant=None,
+            diff_from_eager=None):
+        if diff_of_quant is None or diff_from_eager is None:
+            diff_of_quant = {}
+            diff_from_eager = {}
+
+        if mode not in diff_of_quant or mode not in diff_from_eager:
+            diff_of_quant[mode] = {}
+            diff_from_eager[mode] = {}
+
+        input_tensor = torch.rand(1, 3, 224, 224)
+        input_tensor_inception = torch.rand(1, 3, 299, 299)
+        output_value = torch.randint(0, 1, (1,))
+
+        # print('quantizing:', name, ' mode:', mode)
+        if name == 'inception_v3':
+            input_value = input_tensor_inception
+        else:
+            input_value = input_tensor
+
+        qconfig = default_qconfig if mode == 'static' else default_qat_qconfig
+        qconfig_dict = {'': qconfig}
+        graph_module = symbolic_trace(model)
+        # print('graph module:', graph_module.src)
+        script = torch.jit.script(graph_module)
+
+        # make sure graph module and script module are both runanble
+        original_out = graph_module(input_value)
+        is_not_tuple_out = not isinstance(original_out, tuple)
+        script_out = script(input_value)
+        self.assertEqual(
+            (original_out - script_out).abs().max(), 0,
+            'Reslut of original graph module and script module does not match')
+
+        # set to train just before quantization
+        if mode != 'static':
+            model.train()
+
+        graph_module = fuse(graph_module)
+        quantizer = Quantizer()
+        prepared = quantizer.prepare(graph_module, qconfig_dict)
+
+        if mode == 'ddp':
+            mp.spawn(run_ddp,
+                     args=(world_size, prepared),
+                     nprocs=world_size,
+                     join=True)
+        elif mode == 'qat':
+            assert prepared.training, 'prepared must be in training mode for qat'
+            optimizer = torch.optim.SGD(prepared.parameters(), lr=0.0001)
+            criterion = nn.CrossEntropyLoss()
+            train_one_epoch(prepared, criterion, optimizer, [(input_value, output_value)], torch.device('cpu'), 1)
+        else:
+            for i in range(10):
+                prepared(input_value)
+
+        # print('after observation root:', prepared.root)
+
+        qgraph = quantizer.convert(prepared)
+        # print('after quantization root:', qgraph.root)
+        # print('after quantization code:', qgraph.src)
+        qgraph.eval()
+        qgraph_script = torch.jit.script(qgraph)
+        # print('quantized and scripted:', qgraph_script.graph)
+
+        qgraph_out = qgraph(input_value)
+        qgraph_script = qgraph_script(input_value)
+
+        if is_not_tuple_out:
+            diff_of_quant[mode][name] = (original_out - qgraph_out).abs().max()
+            assert torch.allclose(qgraph_out, qgraph_script), 'graph, scripted graph'
+        else:
+            print('tuple output')
+
+        if eager_quantizable_model is not None:
+            # comparing to eager mode quantization
+            qeager = eager_quantizable_model
+            ref_out = qeager(input_value)
+            qeager.qconfig = qconfig
+            if mode == 'static':
+                qeager.fuse_model()
+                prepare(qeager, inplace=True)
+            else:
+                qeager.train()
+                qeager.fuse_model()
+                prepare_qat(qeager, inplace=True)
+
+            # calibration
+            if mode == 'ddp':
+                mp.spawn(run_ddp,
+                         args=(world_size, qeager),
+                         nprocs=world_size,
+                         join=True)
+            elif mode == 'qat':
+                assert qeager.training, 'qeager should be in training mode for qat'
+                optimizer = torch.optim.SGD(qeager.parameters(), lr=0.0001)
+                train_one_epoch(qeager, criterion, optimizer, [(input_value, output_value)], torch.device('cpu'), 1)
+            else:
+                for i in range(10):
+                    qeager(input_value)
+
+            # print('ref after observation:', qeager)
+
+            convert(qeager, inplace=True)
+            qeager.eval()
+
+            # print('ref after quantization:', qeager)
+            qeager_out = qeager(input_value)
+            qeager_script = torch.jit.script(qeager)
+            qscript_out = qeager_script(input_value)
+            if is_not_tuple_out:
+                diff_from_eager[mode][name] = (qeager_out - qgraph_out).abs().max()
+                if check_with_eager:
+                    self.assertEqual(diff_from_eager[mode][name], 0,
+                                     'Result of graph mode quantization and ' +
+                                     'eager mode quantization on model: ' + name +
+                                     ' should match. Mode: ' + mode +
+                                     ' diff:' + str(diff_from_eager[mode][name]))
+
+    @skip_if_no_torchvision
+    @skipIfNoFBGEMM
+    @unittest.skip("skip for now since tbb failed")
+    def test_torchvision(self):
+        from torchvision import models
+        from torchvision.models import quantization as quantized_models
+
+        def get_available_classification_models(models):
+            return [k for k, v in models.__dict__.items() if callable(v) and k[0].lower() == k[0] and k[0] != "_"]
+
+        model_list = get_available_classification_models(models)
+        quantized_model_list = get_available_classification_models(quantized_models)
+
+        no_pretrained_model = set(['shufflenet_v2_x0_5', 'shufflenet_v2_x1_5', 'shufflenet_v2_x2_0'])
+        quantized_model_list = set(quantized_model_list) - no_pretrained_model
+        # test eager and graph consistency
+        model_list = quantized_model_list
+        # slice need to be fixed in symbolic tracing(https://github.com/pytorch/pytorch/issues/43511)
+        model_list = set(model_list) - {'googlenet', 'inception_v3'}
+        # getattr should not be used as node name(https://github.com/pytorch/pytorch/issues/43522)
+        model_list -= {'shufflenet_v2_x1_0', 'mobilenet_v2'}
+
+        # mobilenet: dropout error RuntimeError: "bernoulli_scalar_cpu_" not implemented for 'QUInt8'
+        # incpetion_v3: looks like there is some problem with AuxLogits
+        quantized_not_working = [('qat', 'mobilenet_v2'),
+                                 ('qat', 'inception_v3'),
+                                 ('static', 'inception_v3')]
+
+        fx_eager_not_matching = ['googlenet',  # because _transform_input is not quantized in eager
+                                 'mobilenet_v2']  # because relu6 is replaced as relu in mobilenetv2
+
+        diff_of_quant = {}
+        diff_from_eager = {}
+        modes = ['static', 'qat']
+        options = itertools.product(modes, model_list)
+        for mode, name in options:
+            pretrained = name in quantized_model_list  # load pretrained model to compare with quantized model
+            if name in quantized_model_list:
+                if (mode, name) in quantized_not_working:
+                    eager_quantizable_model = None
+                else:
+                    eager_quantizable_model = quantized_models.__dict__[name](pretrained=True, quantize=False).eval().float()
+            # compare with eager mode quantized model when it is available
+            pretrained = eager_quantizable_model is not None
+            model = models.__dict__[name](pretrained=pretrained).eval().float()
+            check_with_eager = name not in fx_eager_not_matching
+            self._test_model_impl(
+                mode, name, model, eager_quantizable_model,
+                check_with_eager,
+                diff_of_quant, diff_from_eager)
+
+        def print_diffs(diffs):
+            for mode, diffs_for_mode in diffs.items():
+                print('mode:', mode)
+                for name, diff in diffs_for_mode.items():
+                    print(name, ':', diff)
+
+        # print('differences between float and quantized')
+        # print_diffs(diff_of_quant)
+        # print('----------------------')
+        # print('differences between graph mode and eager mode')
+        # print_diffs(diff_from_eager)
+        # print('----------------------')
+
+    @skip_if_no_torchvision
+    @skip_if_not_multigpu
+    @skipIfNoFBGEMM
+    @unittest.skip('TODO: not working yet due to https://github.com/pytorch/pytorch/issues/43513')
+    def test_resnet18_ddp(self):
+        from torchvision import models
+        from torchvision.models import quantization as quantized_models
+        eager_quantizable_model = quantized_models.__dict__[name](pretrained=True, quantize=False).eval().float()
+        model = models.__dict__[name](pretrained=True).eval().float()
+        self._test_model_impl(
+            'ddp', 'resnet18', model, eager_quantizable_model)
