@@ -402,9 +402,10 @@ void TensorIterator::compute_types(const TensorIteratorConfig& config) {
       // Casts to outputs by creating temporaries of the correct dtype (if needed)
       if (config.cast_common_dtype_to_outputs_ && op.is_output && op.current_dtype != common_dtype_) {
         op.original_tensor = op.tensor;
-        op.tensor = at::empty_like(op.tensor,
-                                   op.tensor.options().dtype(common_dtype_),
-                                   LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+        op.tensor = at::native::empty_like(
+            op.tensor,
+            op.tensor.options().dtype(common_dtype_),
+            LEGACY_CONTIGUOUS_MEMORY_FORMAT);
         op.current_dtype = common_dtype_;
     }
 
@@ -461,7 +462,7 @@ void TensorIterator::allocate_or_resize_outputs() {
           // can just return contiguous output
           // it is faster because it avoids allocating 0 size tensor and
           // resizing and restriding it
-          op.tensor = at::empty(tensor_shape, op.options());
+          op.tensor = at::native::empty(tensor_shape, op.options());
         } else {
           at::native::resize_output(op.tensor, tensor_shape);
         }
@@ -1087,7 +1088,7 @@ bool TensorIterator::fast_set_up(const TensorIteratorConfig& config) {
           auto& op = operands_[i];
           if (!op.tensor.defined()) {
             TORCH_INTERNAL_ASSERT(op.is_type_defined(), "no type for operand", i);
-            op.tensor = at::empty(shape_, op.options(), MemoryFormat::Contiguous);
+            op.tensor = at::native::empty(shape_, op.options(), MemoryFormat::Contiguous);
             op.current_dtype = op.target_dtype;
           } else if (op.will_resize) {
             at::native::resize_output(op.tensor, shape_);
@@ -1101,7 +1102,7 @@ bool TensorIterator::fast_set_up(const TensorIteratorConfig& config) {
           auto& op = operands_[i];
           if (!op.tensor.defined()) {
             TORCH_INTERNAL_ASSERT(op.is_type_defined(), "no type for operand", i);
-            op.tensor = at::empty(shape_, op.options(), MemoryFormat::ChannelsLast);
+            op.tensor = at::native::empty(shape_, op.options(), MemoryFormat::ChannelsLast);
             op.current_dtype = op.target_dtype;
           } else if (op.will_resize) {
             at::native::resize_output(op.tensor, shape_);

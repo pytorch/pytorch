@@ -514,7 +514,7 @@ void scan_thrust_or_cub(const Tensor& self, Tensor& result, scalar_t init, Binar
         binary_op,
         size_cub,
         at::cuda::getCurrentCUDAStream()));
-    auto temp_storage = at::native::empty_cuda(
+    auto temp_storage = at::native::empty(
         {static_cast<int64_t>(temp_storage_bytes)},
         self.options().dtype(kByte));
     AT_CUDA_CHECK(cub::DeviceScan::InclusiveScan(

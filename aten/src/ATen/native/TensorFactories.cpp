@@ -167,23 +167,28 @@ Tensor polar(const Tensor& abs, const Tensor& angle) {
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ empty ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Tensor empty_cpu(IntArrayRef size, const TensorOptions& options_, c10::optional<c10::MemoryFormat> optional_memory_format) {
+Tensor empty(IntArrayRef size, const TensorOptions& options_, c10::optional<c10::MemoryFormat> optional_memory_format) {
 
   TORCH_CHECK(
     !(options_.has_memory_format() && optional_memory_format.has_value()),
     "Cannot set memory_format both in TensorOptions and explicit argument; please delete "
     "the redundant setter.");
   TensorOptions options = options_.merge_in(TensorOptions().memory_format(optional_memory_format));
+  bool cpu = options.device().type() == DeviceType::CPU;
+  bool cuda = options.device().type() == DeviceType::CUDA;
 
-  AT_ASSERT(options.device().type() == DeviceType::CPU);
+  TORCH_INTERNAL_ASSERT(cpu || cuda);
+  TORCH_CHECK(!options.pinned_memory() || cpu, "Only dense CPU tensors can be pinned");
   TORCH_INTERNAL_ASSERT(impl::variable_excluded_from_dispatch());
   check_size_nonnegative(size);
 
   c10::Allocator* allocator;
   if (options.pinned_memory()) {
     allocator = detail::getCUDAHooks().getPinnedMemoryAllocator();
-  } else {
+  } else if (cpu) {
     allocator = at::getCPUAllocator();
+  } else { //cuda
+    allocator = at::detail::getCUDAHooks().getCUDADeviceAllocator();
   }
 
   int64_t nelements = prod_intlist(size);
@@ -196,15 +201,19 @@ Tensor empty_cpu(IntArrayRef size, const TensorOptions& options_, c10::optional<
       allocator,
       /*resizeable=*/true);
 
+  c10::DispatchKey dispatch_key = cpu ? at::DispatchKey::CPU : at::DispatchKey::CUDA;
   auto tensor = detail::make_tensor<TensorImpl>(
-      std::move(storage_impl), at::DispatchKey::CPU, dtype);
+      std::move(storage_impl), dispatch_key, dtype);
   // Default TensorImpl has size [0]
   if (size.size() != 1 || size[0] != 0) {
     tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);
   }
 
   auto memory_format = options.memory_format_opt().value_or(MemoryFormat::Contiguous);
-  tensor.unsafeGetTensorImpl()->empty_tensor_restride(memory_format);
+  //for contiguous format restride was done in set_sizes_contiguous
+  if (memory_format != MemoryFormat::Contiguous) {
+      tensor.unsafeGetTensorImpl()->empty_tensor_restride(memory_format);
+  }
 
   return tensor;
 }
@@ -228,7 +237,7 @@ Tensor empty(
 
 Tensor empty_strided_cpu(IntArrayRef size, IntArrayRef stride, const TensorOptions& options) {
   check_size_nonnegative(size);
-  auto t = at::native::empty_cpu({0}, options);
+  auto t = at::native::empty({0}, options);
   at::native::resize_impl_cpu_(t.unsafeGetTensorImpl(), size, stride);
   return t;
 }
@@ -530,7 +539,7 @@ Tensor scalar_tensor(Scalar s, const TensorOptions& options) {
     //   auto result = at::empty({}, options);
     at::tracer::impl::NoTracerDispatchMode tracer_guard;
     at::AutoNonVariableTypeMode non_var_type_mode(true);
-    auto result = empty_cpu({}, options);
+    auto result = empty({}, options);
     at::native::fill_(result, s);
     return result;
   }

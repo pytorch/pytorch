@@ -1297,8 +1297,8 @@
 - func: empty.memory_format(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   #use_c10_dispatcher: full
   dispatch:
-    CPU: empty_cpu
-    CUDA: empty_cuda
+    CPU: empty
+    CUDA: empty
     MkldnnCPU: empty_mkldnn
     SparseCPU, SparseCUDA: empty_sparse
 
