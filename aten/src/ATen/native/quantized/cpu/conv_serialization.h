@@ -25,7 +25,7 @@
  * - Fields:
  *  0. version (string)
  *  1. list of non-optional tensors
- *    0: packed parameters (int8_t)
+ *    0: packed parameters (int16_t)
  *      - kSpatialDim
  *      - stride x kSpatialDim
  *      - padding x kSpatialDim
@@ -91,30 +91,30 @@ ConvParamsSerializationType parse_conv_serialized_state(c10::IValue v) {
     std::vector<at::Tensor> non_optional;
     std::vector<c10::optional<at::Tensor>> optional;
 
-    std::vector<int8_t> params_vec;
+    std::vector<int16_t> params_vec;
     params_vec.push_back(kSpatialDim);
     for (int i = 0; i < stride_x_kSpatialDim.size(); i++) {
       auto stride = stride_x_kSpatialDim.get(i);
-      params_vec.push_back(stride[0].item<int8_t>());
+      params_vec.push_back(stride[0].item<int16_t>());
     }
     for (int i = 0; i < padding_x_kSpatialDim.size(); i++) {
       auto padding = padding_x_kSpatialDim.get(i);
-      params_vec.push_back(padding[0].item<int8_t>());
+      params_vec.push_back(padding[0].item<int16_t>());
     }
     for (int i = 0; i < dilation_x_kSpatialDim.size(); i++) {
       auto dilation = dilation_x_kSpatialDim.get(i);
-      params_vec.push_back(dilation[0].item<int8_t>());
+      params_vec.push_back(dilation[0].item<int16_t>());
     }
     // output_padding does not exist in v1, so we fill in a default value
     for (int i = 0; i < kSpatialDim; i++) {
       params_vec.push_back(0);
     }
-    params_vec.push_back(groups[0].item<int8_t>());
+    params_vec.push_back(groups[0].item<int16_t>());
     // transpose does not exist in v1, so we fill in a default value
     params_vec.push_back(0);
     int64_t vec_size = params_vec.size();
     at::Tensor params_tensor = at::from_blob(params_vec.data(),
-        {vec_size}, at::TensorOptions().dtype(at::kChar))
+        {vec_size}, at::TensorOptions().dtype(at::kShort))
       // clone to retain ownership of the data
       .clone();
 
@@ -141,7 +141,7 @@ ConvParamsSerializationType serialize_conv(
   std::vector<c10::optional<at::Tensor>> optional;
 
   // create a packed int8_t tensor for conv params
-  std::vector<int8_t> params_vec;
+  std::vector<int16_t> params_vec;
   params_vec.push_back(kSpatialDim);
   auto stride = params->stride().vec();
   params_vec.insert(params_vec.end(), stride.begin(), stride.end());
@@ -159,7 +159,7 @@ ConvParamsSerializationType serialize_conv(
   int64_t vec_size = params_vec.size();
   at::Tensor params_tensor = at::from_blob(
       params_vec.data(), {vec_size},
-      at::TensorOptions().dtype(at::kChar))
+      at::TensorOptions().dtype(at::kShort))
     // clone to retain ownership of the data
     .clone();
 
