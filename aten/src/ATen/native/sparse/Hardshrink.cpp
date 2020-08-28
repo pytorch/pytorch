@@ -23,7 +23,7 @@ Tensor sparse_hardshrink(const Tensor& input_, Scalar lambd) {
 
   result_values.resize_as_(input_values);
 
-  result_values.copy_(at::native::hardshrink(input_values, lambd));
+  result_values.set_(at::native::hardshrink(input_values, lambd));
 
   return result;
 }
@@ -51,7 +51,7 @@ Tensor sparse_hardshrink_backward(
   result_values.resize_as_(input_values);
 
   auto grad_values = grad._values().contiguous();
-  result_values.copy_(
+  result_values.set_(
       at::native::hardshrink_backward(grad_values, input_values, lambd));
   return result;
 }
