@@ -6,7 +6,10 @@ import numpy as np
 import torch
 import torch.distributed as c10d
 from torch import nn
-from torch.distributed.algorithms.ddp_comm_hooks import register_ddp_comm_hook
+from torch.distributed.algorithms.ddp_comm_hooks import (
+    DDPCommHookType,
+    register_ddp_comm_hook,
+)
 from torch.nn.parallel import DistributedDataParallel
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
@@ -66,7 +69,7 @@ class DistributedDataParallelCommHookTest(MultiProcessTestCase):
 
         return local_model
 
-    def _get_grads(self, process_group, hook=None):
+    def _get_grads(self, process_group, hook_type=None):
         device_id = gpus_for_rank(self.world_size)[self.rank][0]
         gpu_model = DistributedDataParallel(
             TestDdpCommHook().to(device_id),
@@ -75,9 +78,9 @@ class DistributedDataParallelCommHookTest(MultiProcessTestCase):
         )
 
         # Register DDP Communication Hook if defined
-        if hook is not None:
+        if hook_type is not None:
             register_ddp_comm_hook(
-                comm_hook_name=hook, model=gpu_model, state=process_group
+                comm_hook_type=hook_type, model=gpu_model, state=process_group
             )
 
         return self._run_and_get_grads(gpu_model)
@@ -106,7 +109,7 @@ class DistributedDataParallelCommHookTest(MultiProcessTestCase):
         # No hook registered case, get the reference grads.
         reference_grads = self._get_grads(process_group, None)
         # Register hook case, get the hook grads.
-        hook_grads = self._get_grads(process_group, "ALLREDUCE")
+        hook_grads = self._get_grads(process_group, DDPCommHookType.ALLREDUCE)
 
         np.testing.assert_allclose(hook_grads, reference_grads, rtol=1e-5, atol=0)
 
@@ -123,7 +126,7 @@ class DistributedDataParallelCommHookTest(MultiProcessTestCase):
         # No hook registered case, get the reference grads.
         reference_grads = self._get_grads(process_group, None)
         # Register hook case, get the hook grads.
-        hook_grads = self._get_grads(process_group, "FP16_COMPRESS")
+        hook_grads = self._get_grads(process_group, DDPCommHookType.FP16_COMPRESS)
 
         np.testing.assert_allclose(hook_grads, reference_grads, rtol=1e-5, atol=1e-4)
 
@@ -140,7 +143,7 @@ class DistributedDataParallelCommHookTest(MultiProcessTestCase):
         # No hook registered case, get the reference grads.
         reference_grads = self._get_grads(process_group, None)
         # Register hook case, get the hook grads.
-        hook_grads = self._get_grads(process_group, "QUANTIZE_PER_TENSOR")
+        hook_grads = self._get_grads(process_group, DDPCommHookType.QUANTIZE_PER_TENSOR)
 
         np.testing.assert_allclose(hook_grads, reference_grads, rtol=1e-5, atol=1e-4)
 
@@ -157,7 +160,9 @@ class DistributedDataParallelCommHookTest(MultiProcessTestCase):
         # No hook registered case, get the reference grads.
         reference_grads = self._get_grads(process_group, None)
         # Register hook case, get the hook grads.
-        hook_grads = self._get_grads(process_group, "QUANTIZE_PER_CHANNEL")
+        hook_grads = self._get_grads(
+            process_group, DDPCommHookType.QUANTIZE_PER_CHANNEL
+        )
 
         np.testing.assert_allclose(hook_grads, reference_grads, rtol=1e-5, atol=1e-4)
 

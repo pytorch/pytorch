@@ -2,7 +2,7 @@ load("@bazel_skylib//lib:paths.bzl", "paths")
 load("@pybind11_bazel//:build_defs.bzl", "pybind_extension")
 load("@rules_proto//proto:defs.bzl", "proto_library")
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_proto_library", "cc_test")
-load("//third_party:substitution.bzl", "template_rule")
+load("//third_party:substitution.bzl", "header_template_rule")
 load("//:tools/build_variables.bzl", "torch_cpp_srcs", "libtorch_python_core_sources", "libtorch_core_sources", "libtorch_distributed_sources", "libtorch_extra_sources", "jit_core_sources")
 load("//tools/rules:cu.bzl", "cu_library")
 load("//tools/config:defs.bzl", "if_cuda")
@@ -27,7 +27,7 @@ COMMON_COPTS = [
 ])
 
 # c10
-template_rule(
+header_template_rule(
     name = "cmake_macros_h",
     src = "c10/macros/cmake_macros.h.in",
     out = "c10/macros/cmake_macros.h",
@@ -39,7 +39,7 @@ template_rule(
     },
 )
 
-template_rule(
+header_template_rule(
     name = "cuda_cmake_macros_h",
     src = "c10/cuda/impl/cuda_cmake_macros.h.in",
     out = "c10/cuda/impl/cuda_cmake_macros.h",
@@ -58,13 +58,12 @@ cc_library(
         "c10/macros/*.h",
         "c10/util/*.h",
         "c10/util/*.hpp",
-    ]) + [
-        "c10/macros/cmake_macros.h",
-        "c10/cuda/impl/cuda_cmake_macros.h",
-    ],
+    ]),
     deps = [
         "@com_github_gflags_gflags//:gflags",
         "@com_github_glog//:glog",
+        ":cmake_macros_h",
+        ":cuda_cmake_macros_h",
     ],
 )
 
@@ -531,7 +530,7 @@ filegroup(
     ],
 )
 
-template_rule(
+header_template_rule(
     name = "aten_src_ATen_config",
     src = "aten/src/ATen/Config.h.in",
     out = "aten/src/ATen/Config.h",
@@ -547,7 +546,7 @@ template_rule(
     },
 )
 
-template_rule(
+header_template_rule(
     name = "aten_src_ATen_cuda_config",
     src = "aten/src/ATen/cuda/CUDAConfig.h.in",
     out = "aten/src/ATen/cuda/CUDAConfig.h",
@@ -558,7 +557,7 @@ template_rule(
     },
 )
 
-template_rule(
+header_template_rule(
     name = "aten_src_TH_THGeneral",
     src = "aten/src/TH/THGeneral.h.in",
     out = "aten/src/TH/THGeneral.h",
@@ -570,7 +569,7 @@ template_rule(
     },
 )
 
-template_rule(
+header_template_rule(
     name = "aten_src_THC_THCGeneral",
     src = "aten/src/THC/THCGeneral.h.in",
     out = "aten/src/THC/THCGeneral.h",
@@ -582,8 +581,6 @@ template_rule(
 cc_library(
     name = "aten_headers",
     hdrs = [
-        "aten/src/TH/THGeneral.h",
-        "aten/src/THC/THCGeneral.h",
         "torch/csrc/WindowsTorchApiMacro.h",
         "torch/csrc/jit/frontend/function_schema_parser.h",
     ] + glob([
@@ -605,6 +602,8 @@ cc_library(
     ],
     deps = [
         ":c10_headers",
+        ":aten_src_TH_THGeneral",
+        ":aten_src_THC_THCGeneral",
     ],
 )
 
@@ -766,7 +765,7 @@ cc_proto_library(
     deps = [":caffe2_proto_source"],
 )
 
-template_rule(
+header_template_rule(
     name = "caffe2_core_macros_h",
     src = "caffe2/core/macros.h.in",
     out = "caffe2/core/macros.h",
@@ -1586,7 +1585,6 @@ filegroup(
 cc_library(
     name = "caffe2_for_aten_headers",
     hdrs = [
-        "caffe2/core/macros.h",
         "caffe2/core/common.h",
         "caffe2/core/logging.h",
         "caffe2/core/types.h",
@@ -1604,6 +1602,7 @@ cc_library(
     deps = [
         ":c10_headers",
         ":caffe2_protos",
+        ":caffe2_core_macros_h",
     ],
 )
 
