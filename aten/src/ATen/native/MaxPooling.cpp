@@ -91,7 +91,7 @@ Tensor max_pool1d_impl(
   TORCH_CHECK(OW >= 0, "max_pool1d() Invalid computed output size: ", OW);
   Tensor output = at::empty({NB, NC, OW}, self.options());
 
-  PoolingParams params{NB, NC, IW, OW, KW, SJ, PJ, DJ};
+  PoolingParams1D params{NB, NC, IW, OW, KW, SJ, PJ, DJ};
   max_pool1d_stub(self.device().type(), output, self, params);
 
   if (self.dim() == 2) {
@@ -114,6 +114,7 @@ Tensor max_pool1d(
     IntArrayRef dilation,
     bool ceil_mode) {
   if (self.requires_grad() || !self.device().is_cpu()) {
+    // Needs indices for grad and with_indices defines CUDA dispatch
     return std::get<0>(at::max_pool1d_with_indices(
         self, kernel_size, stride, padding, dilation, ceil_mode));
   }

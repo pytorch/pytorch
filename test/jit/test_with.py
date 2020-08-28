@@ -548,3 +548,65 @@ class TestWith(JitTestCase):
             self.checkScript(
                 test_exit_incorrect_types, (test_tensor, ExitIncorrectTypes())
             )
+
+    def test_with_no_grad(self):
+        """
+        Check that torch.no_grad() works. Most of these are adapted from
+        corresponding tests for eager-mode no_grad.
+        """
+
+        # Basic no_grad test.
+        def test_no_grad(x, y):
+            # type: (Tensor, Tensor) -> Tensor
+            with torch.no_grad():
+                w = x + y
+
+            return w
+
+        s = torch.jit.script(test_no_grad)
+        x = torch.ones(5, 5, requires_grad=True)
+        y = torch.ones(5, 5) * 4
+        w = s(x, y)
+
+        self.assertFalse(w.requires_grad)
+        self.assertRaises(RuntimeError, lambda: w.backward(torch.ones(5, 5)))
+        self.assertIsNone(w.grad_fn)
+
+        # Test assignment of a grad-less Tensor to a Tensor with gradients
+        # in a no_grad block.
+        def test_no_grad_assignment(x, y):
+            # type: (Tensor, Tensor) -> Tensor
+            with torch.no_grad():
+                x[0] = y
+
+            return x
+
+        s = torch.jit.script(test_no_grad_assignment)
+        z = torch.randn(5)
+        w = s(x, z)
+        self.assertTrue(w.requires_grad)
+        self.assertIsNone(w.grad_fn)
+
+        # Check that @torch.jit.ignored functions respect no_grad when it is
+        # called in JIT mode.
+        class NoGradModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            @torch.jit.ignore
+            def adder(self, x, y):
+                # type: (Tensor, Tensor) -> Tensor
+                w = x + y
+                return w
+
+            def forward(self, x, y):
+                # type: (Tensor, Tensor) -> Tensor
+                with torch.no_grad():
+                    w = self.adder(x, y)
+
+                return w
+
+        s = torch.jit.script(NoGradModule())
+        w = s(x, y)
+
+        self.assertFalse(w.requires_grad)

@@ -6,7 +6,8 @@
 namespace at {
 namespace native {
 
-struct PoolingParams {
+// TODO(Heitor) Template by dimension
+struct PoolingParams1D {
   int64_t NB; // Number of batches
   int64_t NC; // Number of channels
   int64_t IW; // Input width
@@ -18,18 +19,18 @@ struct PoolingParams {
 
   // Return index of first output within bounds for this kernel index
   inline int64_t valid_kernel_start(int64_t kj) const {
-    const int64_t ij = kj * DJ - PJ;
+    int64_t ij = kj * DJ - PJ;
     return ij < 0 ? (-ij + SJ - 1) / SJ : 0;
   }
 
   // Return index one past last output within bounds for this kernel index
   inline int64_t valid_kernel_end(int64_t kj) const {
-    const int64_t ij = (OW - 1) * SJ + kj * DJ - PJ;
-    return OW - (ij >= IW ? (ij - IW + SJ) / SJ : 0);
+    int64_t ij = (OW - 1) * SJ + kj * DJ - PJ;
+    return ij >= IW ? OW - (ij - IW + SJ) / SJ : OW;
   }
 };
 
-using pooling_fn = void (*)(Tensor&, const Tensor&, const PoolingParams&);
+using pooling_fn = void (*)(Tensor&, const Tensor&, const PoolingParams1D&);
 
 DECLARE_DISPATCH(pooling_fn, max_pool1d_stub);
 

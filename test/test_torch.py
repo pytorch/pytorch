@@ -10862,10 +10862,6 @@ class TestTorchDeviceType(TestCase):
         torch.bernoulli(torch.rand_like(p), out=p)
         self.assertTrue(isBinary(p))
 
-        p = torch.rand(5, dtype=dtype, device=device).expand(5, 5)
-        torch.bernoulli(torch.rand_like(p), out=p)
-        self.assertTrue(isBinary(p))
-
     # RngUniform not implemented for Integral type in XLA test
     @dtypes(*(torch.testing.get_all_fp_dtypes(include_half=False, include_bfloat16=False)))
     @dtypesIfCPU(*(torch.testing.get_all_dtypes(include_half=False, include_bfloat16=False, include_complex=False)))
@@ -13173,6 +13169,22 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(torch.isinf(torch.atanh(sample)), inf_mask)
         self.assertEqual(torch.isinf(sample.atanh()), inf_mask)
 
+    def test_nullary_op_mem_overlap(self, device):
+        ops = (
+            ("random_", ()),
+            ("uniform_", ()),
+            ("cauchy_", ()),
+            ("log_normal_", ()),
+            ("exponential_", ()),
+            ("geometric_", (0.5,)),
+            ("normal_", ()),
+        )
+
+        x = torch.rand((1, 3)).expand((3, 3))
+        for op, args in ops:
+            with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+                getattr(x, op)(*args)
+
     # TODO: run on non-native device types
     @dtypes(torch.double)
     def test_unary_out_op_mem_overlap(self, device, dtype):
@@ -13277,7 +13289,33 @@ class TestTorchDeviceType(TestCase):
             ("div", True, True, 'cpu'),
             ("div", True, True, 'cuda'),
             ("pow", True, True, 'cpu'),
-            ("pow", True, True, 'cuda')
+            ("pow", True, True, 'cuda'),
+            ("fmod", True, True, 'cpu'),
+            ("fmod", True, True, 'cuda'),
+            ("atan2", True, True, 'cpu'),
+            ("atan2", True, True, 'cuda'),
+            ("hypot", True, True, 'cpu'),
+            ("hypot", True, True, 'cuda'),
+            ("nextafter", True, True, 'cpu'),
+            ("nextafter", True, True, 'cuda'),
+            ("le", True, True, 'cpu'),
+            ("le", True, True, 'cuda'),
+            ("lt", True, True, 'cpu'),
+            ("lt", True, True, 'cuda'),
+            ("ge", True, True, 'cpu'),
+            ("ge", True, True, 'cuda'),
+            ("gt", True, True, 'cpu'),
+            ("gt", True, True, 'cuda'),
+            ("eq", True, True, 'cpu'),
+            ("eq", True, True, 'cuda'),
+            ("ne", True, True, 'cpu'),
+            ("ne", True, True, 'cuda'),
+            ("logical_and", True, True, 'cpu'),
+            ("logical_and", True, True, 'cuda'),
+            ("logical_or", True, True, 'cpu'),
+            ("logical_or", True, True, 'cuda'),
+            ("logical_xor", True, True, 'cpu'),
+            ("logical_xor", True, True, 'cuda'),
         ]
 
         for (fn, has_input_output_mem_overlap_check,
@@ -13335,6 +13373,21 @@ class TestTorchDeviceType(TestCase):
             doubles, sz, lambda input, out: torch.pow(input, 42, out=out))
         self.unary_check_input_output_mem_overlap(
             doubles, sz, lambda input, out: torch.pow(42, input, out=out))
+
+    def test_index_add_mem_overlap(self, device):
+        x = torch.rand((1,), device=device).expand((6,))
+        y = torch.rand((6,), device=device)
+        ind = torch.tensor([0, 2, 3], device=device)
+        value = torch.rand((3,), device=device)
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            x.index_add_(0, ind, value)
+
+    def test_shift_mem_overlap(self, device):
+        x = torch.rand(3, device=device)
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            x[:-1] <<= x[1:]
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            x[:-1] >>= x[1:]
 
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     def test_int_pow(self, device):
@@ -18092,6 +18145,92 @@ else:
         self._test_atleast_dim(torch.atleast_1d, np.atleast_1d, device, dtype)
         self._test_atleast_dim(torch.atleast_2d, np.atleast_2d, device, dtype)
         self._test_atleast_dim(torch.atleast_3d, np.atleast_3d, device, dtype)
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False)))
+    def test_argminmax_multiple(self, device, dtype):
+        # Case: All Ones
+        t = torch.ones(3, 3, device=device, dtype=dtype)
+        self.compare_with_numpy(torch.argmax, np.argmax, t)
+        self.compare_with_numpy(torch.argmin, np.argmin, t)
+
+        # Case: With single `nan` present.
+        if dtype in torch.testing.get_all_fp_dtypes():
+            t[2, 2] = float('nan')
+            self.compare_with_numpy(torch.argmax, np.argmax, t)
+            self.compare_with_numpy(torch.argmin, np.argmin, t)
+
+        # Case: Randomly Generated Tensors
+        for ndims in range(1, 5):
+            shape = self._rand_shape(ndims, min_size=5, max_size=10)
+            for with_extremal in [False, True]:
+                for contiguous in [False, True]:
+                    # Generate Input.
+                    x = self._generate_input(shape, dtype, device, with_extremal)
+
+                    if dtype == torch.half:
+                        max_val = torch.max(x.to(torch.float))
+                        min_val = torch.min(x.to(torch.float))
+                    else:
+                        max_val = torch.max(x)
+                        min_val = torch.min(x)
+
+                    mask = torch.randn(x.shape) > 0.5
+                    x[mask] = torch.tensor(max_val + 1, dtype=dtype)
+
+                    mask = torch.randn(x.shape) > 0.5
+                    x[mask] = torch.tensor(min_val - 1, dtype=dtype)
+
+                    if not contiguous:
+                        x = x.T
+
+                    self.compare_with_numpy(torch.argmax, np.argmax, x, device=None, dtype=None)
+                    self.compare_with_numpy(torch.argmin, np.argmin, x, device=None, dtype=None)
+
+                    # Verify indices returned by max and min.
+                    if dtype != torch.half:
+                        rand_dim = random.randint(0, ndims - 1)
+                        self.compare_with_numpy(lambda x: torch.max(x, dim=rand_dim)[1],
+                                                lambda x: np.argmax(x, axis=rand_dim), x, device=None, dtype=None)
+                        self.compare_with_numpy(lambda x: torch.min(x, dim=rand_dim)[1],
+                                                lambda x: np.argmin(x, axis=rand_dim), x, device=None, dtype=None)
+
+        def verify_against_numpy(t):
+            # Argmax
+            torch_fn = partial(torch.argmax, dim=1)
+            np_fn = partial(np.argmax, axis=1)
+            self.compare_with_numpy(torch_fn, np_fn, t)
+            # Non-contiguous input
+            self.compare_with_numpy(torch_fn, np_fn, t.T)
+
+            # Verify indices returned by max.
+            if dtype != torch.half:
+                self.compare_with_numpy(lambda x: torch.max(x, dim=1)[1], np_fn, x, device=None, dtype=None)
+                self.compare_with_numpy(lambda x: torch.max(x, dim=1)[1], np_fn, x.T, device=None, dtype=None)
+
+            # Argmin
+            torch_fn = partial(torch.argmin, dim=1)
+            np_fn = partial(np.argmin, axis=1)
+            self.compare_with_numpy(torch_fn, np_fn, t)
+            # Non-contiguous input
+            self.compare_with_numpy(torch_fn, np_fn, t.T)
+
+            # Verify indices returned by min.
+            if dtype != torch.half:
+                self.compare_with_numpy(lambda x: torch.min(x, dim=1)[1], np_fn, x, device=None, dtype=None)
+                self.compare_with_numpy(lambda x: torch.min(x, dim=1)[1], np_fn, x.T, device=None, dtype=None)
+
+        # Case: Sample from issue: https://github.com/pytorch/pytorch/issues/41998
+        t = torch.tensor([[1, 5],
+                          [2, 10],
+                          [3, 3]], device=device, dtype=dtype)
+        verify_against_numpy(t)
+
+        # Case: Sample from issue: https://github.com/pytorch/pytorch/issues/41998
+        t = torch.tensor([[1, 5],
+                          [2, 10],
+                          [0, 0]], device=device, dtype=dtype)
+        verify_against_numpy(t)
 
     def _test_special_stacks(self, dim, at_least_dim, torch_fn, np_fn, device, dtype):
         # Test error for non-tuple argument
