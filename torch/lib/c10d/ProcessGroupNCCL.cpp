@@ -414,17 +414,10 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   // Depending on the device index of collective outputs, WorkNCCL passes
   // the corresponding device's then callback stream to FutureNCCL.
   futureNCCLCallbackStreams_.reserve(c10::cuda::device_count());
-  try {
-    for (int device_index = 0; device_index < c10::cuda::device_count();
-         device_index++) {
-      futureNCCLCallbackStreams_.push_back(
-          std::make_shared<at::cuda::CUDAStream>(
-              at::cuda::getStreamFromPool(device_index)));
-    }
-  } catch (const std::exception& e) {
-    throw std::runtime_error(
-        "Error when inititalizing futureNCCLCallbackStreams: " +
-        std::string(e.what()));
+  for (int device_index = 0; device_index < c10::cuda::device_count();
+       device_index++) {
+    futureNCCLCallbackStreams_.push_back(std::make_shared<at::cuda::CUDAStream>(
+        at::cuda::getStreamFromPool(device_index)));
   }
 
 #ifdef ENABLE_NCCL_ERROR_CHECKING
@@ -794,13 +787,14 @@ c10::intrusive_ptr<c10::ivalue::Future> ProcessGroupNCCL::WorkNCCL::
   TORCH_INTERNAL_ASSERT(
       outputs_->size() == 1,
       "WorkNCCL's getFuture API is only supported for single-process single-device mode.");
+  auto deviceIndex = (*outputs_)[0].device().index();
   // Create a new FutureNCCL object after checking for single-process
   // single-device mode.
   return c10::make_intrusive<FutureNCCL>(
       at::IValue(*outputs_),
-      (*outputs_)[0].device().index(),
+      deviceIndex,
       cudaEvents_,
-      futureNCCLCallbackStream_);
+      futureNCCLCallbackStreams_[deviceIndex]);
 }
 
 template <typename Fn, typename PreProcess, typename PostProcess>
@@ -820,14 +814,10 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
   // Work itself will create the CUDA events on all GPUs of tensors
   auto work = initWork(devices);
 
-  // If single-process single-device mode, WorkNCCL::getFuture is supported.
   // Store references to outputs and futureNCCLCallbackStream to be used by
   // WorkNCCL::getFuture.
-  if (outputs.size() == 1) {
-    work->outputs_ = std::make_shared<std::vector<at::Tensor>>(outputs);
-    work->futureNCCLCallbackStream_ =
-        futureNCCLCallbackStreams_[outputs[0].device().index()];
-  }
+  work->outputs_ = std::make_shared<std::vector<at::Tensor>>(outputs);
+  work->futureNCCLCallbackStreams_ = futureNCCLCallbackStreams_;
 
   at::cuda::OptionalCUDAGuard gpuGuard;
 

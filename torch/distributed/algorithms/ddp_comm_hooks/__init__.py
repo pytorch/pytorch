@@ -39,17 +39,4 @@ def register_ddp_comm_hook(
         Example::
             >>> register_ddp_comm_hook(DDPCommHookType.FP16_COMPRESS, model, state)
     """
-    DDPCommHookType.value(model=model, state=state)
-
-
-def register_ddp_comm_hook_string_wrapper(comm_hook_name, model, state=None):
-    """
-    Registers the hooks of ``torch.distributed.algorithms.ddp_comm_hooks`` by
-    taking ``comm_hook_name`` input as a ``str```. Also, checks whether hook
-    is in ``DDPCommHookType``.
-    """
-    assert comm_hook_name in DDPCommHookType.__members__.keys(), (
-        "%s is not in the supported DDP communication hook types: %s."
-        % (comm_hook_name, list(DDPCommHookType.__members__.keys())),
-    )
-    register_ddp_comm_hook(getattr(DDPCommHookType, comm_hook_name), model, state)
+    comm_hook_type.value(model=model, state=state)

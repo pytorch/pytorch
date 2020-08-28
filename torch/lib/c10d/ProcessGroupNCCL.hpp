@@ -136,8 +136,9 @@ class ProcessGroupNCCL : public ProcessGroup {
 
     // Store a reference to NCCL collective's outputs to be used by getFuture.
     std::shared_ptr<std::vector<at::Tensor>> outputs_;
-    // Store a reference to the NCCL stream that runs all FutureNCCL callbacks.
-    std::shared_ptr<at::cuda::CUDAStream> futureNCCLCallbackStream_;
+    // Store streams that run FutureNCCL then callbacks.
+    std::vector<std::shared_ptr<at::cuda::CUDAStream>>
+        futureNCCLCallbackStreams_;
 
     friend class ProcessGroupNCCL;
   };
@@ -577,7 +578,7 @@ class ProcessGroupNCCL : public ProcessGroup {
   std::unordered_set<std::string> abortedComms_;
 
   // Dedicated CUDA stream for each available device that runs FutureNCCL then
-  // callback.
+  // callbacks.
   std::vector<std::shared_ptr<at::cuda::CUDAStream>> futureNCCLCallbackStreams_;
 };
 
