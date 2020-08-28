@@ -13,7 +13,8 @@
 #include <math.h>
 #include <float.h>
 #include <algorithm>
-
+#include <c10/util/Optional.h>
+#include <initializer_list>
 #define CACHE_LINE 32
 #if defined(__GNUC__)
 #define CACHE_ALIGN __attribute__((aligned(CACHE_LINE)))
@@ -22,6 +23,11 @@
 #else
 CACHE_ALIGN #define
 #endif
+
+#undef NAME_INFO
+#define STRINGIFY(x) #x
+#define TOSTRING(x) STRINGIFY(x)
+#define NAME_INFO(name) TOSTRING(name) " " TOSTRING(__FILE__) ":" TOSTRING(__LINE__)
 
 #define RESOLVE_OVERLOAD(...)                                  \
   [](auto&&... args) -> decltype(auto) {                       \
@@ -43,18 +49,18 @@ template<typename T>
 using Complex = typename c10::complex<T>;
 
 template <typename T>
-using Vec = typename at::vec256::Vec256<T>;
+using VecType = typename at::vec256::Vec256<T>;
 
-using vfloat = Vec<float>;
-using vdouble = Vec<double>;
-using vcomplex = Vec<Complex<float>>;
-using vcomplexDbl = Vec<Complex<double>>;
-using vlong = Vec<int64_t>;
-using vint = Vec<int32_t>;
-using vshort = Vec<int16_t>;
-using vqint8 = Vec<c10::qint8>;
-using vquint8 = Vec<c10::quint8>;
-using vqint = Vec<c10::qint32>;
+using vfloat = VecType<float>;
+using vdouble = VecType<double>;
+using vcomplex = VecType<Complex<float>>;
+using vcomplexDbl = VecType<Complex<double>>;
+using vlong = VecType<int64_t>;
+using vint = VecType<int32_t>;
+using vshort = VecType<int16_t>;
+using vqint8 = VecType<c10::qint8>;
+using vquint8 = VecType<c10::quint8>;
+using vqint = VecType<c10::qint32>;
 
 template <typename T>
 using ValueType = typename T::value_type;
@@ -452,7 +458,7 @@ template<>
 struct CmpHelper<Complex<double>> {
     using cmpType = double;
     static constexpr int size() { return 2; }
-    static void bitCheck(const Complex<double>& act, const Complex<double>& exp, int i, std::function<std::string(int index)>& get_details) {
+    static void bitCheck(const Complex<double>& act, const Complex<double>& exp, int i,const std::function<std::string(int index)>& get_details) {
         using bit_rep = typename BitStr<sizeof(double)>::type;
         bit_rep b_expReal = bit_cast<bit_rep>(exp.real());
         bit_rep b_actReal = bit_cast<bit_rep>(act.real());
@@ -461,7 +467,7 @@ struct CmpHelper<Complex<double>> {
         bit_rep b_actI = bit_cast<bit_rep>(act.imag());
         ASSERT_EQ(b_expI, b_actI) << (get_details ? get_details(i) : "");
     }
-    static void nearCheck(const Complex<double>& act, const Complex<double>& exp, const Complex<double>& absErr, int i, std::function<std::string(int index)>& get_details) {
+    static void nearCheck(const Complex<double>& act, const Complex<double>& exp, const Complex<double>& absErr, int i,const std::function<std::string(int index)>& get_details) {
         if (!(check_both_nan(exp.real(), act.real()))) {
             ASSERT_EQ(nearlyEqual(exp.real(), act.real(), absErr.real()), true) << exp.real() << " " << act.real() << "\n" << (get_details ? get_details(i) : "");
         }
@@ -469,7 +475,7 @@ struct CmpHelper<Complex<double>> {
             ASSERT_EQ(nearlyEqual(exp.imag(), act.imag(), absErr.real()), true) << exp.imag() << " " << act.imag() << "\n" << (get_details ? get_details(i) : "");
         }
     }
-    static void eqCheck(const Complex<double>& act, const Complex<double>& exp, int i, std::function<std::string(int index)>& get_details) {
+    static void eqCheck(const Complex<double>& act, const Complex<double>& exp, int i,const std::function<std::string(int index)>& get_details) {
         if (!(check_both_nan(exp.real(), act.real()))) {
             ASSERT_DOUBLE_EQ(exp.real(), act.real()) << (get_details ? get_details(i) : "");
         }
@@ -483,7 +489,7 @@ template<>
 struct CmpHelper<Complex<float>> {
     using cmpType = float;
     static constexpr int size() { return 2; }
-    static void bitCheck(const Complex<float>& act, const Complex<float>& exp, int i, std::function<std::string(int index)>& get_details) {
+    static void bitCheck(const Complex<float>& act, const Complex<float>& exp, int i, const std::function<std::string(int index)>& get_details) {
         using bit_rep = typename BitStr<sizeof(float)>::type;
         bit_rep b_expReal = bit_cast<bit_rep>(exp.real());
         bit_rep b_actReal = bit_cast<bit_rep>(act.real());
@@ -492,7 +498,7 @@ struct CmpHelper<Complex<float>> {
         bit_rep b_actI = bit_cast<bit_rep>(act.imag());
         ASSERT_EQ(b_expI, b_actI) << (get_details ? get_details(i) : "");
     }
-    static void nearCheck(const Complex<float>& act, const Complex<float>& exp, const Complex<float>& absErr, int i, std::function<std::string(int index)>& get_details) {
+    static void nearCheck(const Complex<float>& act, const Complex<float>& exp, const Complex<float>& absErr, int i,const std::function<std::string(int index)>& get_details) {
         if (!(check_both_nan(exp.real(), act.real()))) {
             ASSERT_EQ(nearlyEqual(exp.real(), act.real(), absErr.real()), true) << exp.real() << " " << act.real() << "\n" << (get_details ? get_details(i) : "");;
         }
@@ -500,7 +506,7 @@ struct CmpHelper<Complex<float>> {
             ASSERT_EQ(nearlyEqual(exp.imag(), act.imag(), absErr.real()), true) << exp.imag() << " " << act.imag() << "\n" << (get_details ? get_details(i) : "");;
         }
     }
-    static void eqCheck(const Complex<float>& act, const Complex<float>& exp, int i, std::function<std::string(int index)>& get_details) {
+    static void eqCheck(const Complex<float>& act, const Complex<float>& exp, int i,const std::function<std::string(int index)>& get_details) {
         if (!(check_both_nan(exp.real(), act.real()))) {
             ASSERT_FLOAT_EQ(exp.real(), act.real()) << (get_details ? get_details(i) : "");
         }
@@ -526,42 +532,7 @@ using BitValueType = typename BitStr<sizeof(ValueType<T>)>::type;
 template <typename T>
 using BitUvalueType = typename BitStr<sizeof(UvalueType<T>)>::type;
 
-template <typename T>
-void AssertVec256(T expected, T actual,
-    std::function<std::string(int index)> get_details = {},
-    bool bitwise = false, bool check_absError = false,
-    ValueType<T> absError = {}) {
-    using VT = ValueType<T>;
-    constexpr auto sizeX = T::size();
-    CACHE_ALIGN VT exp[sizeX];
-    CACHE_ALIGN VT act[sizeX];
-    expected.store(exp);
-    actual.store(act);
-    if (bitwise) {
-        for (int i = 0; i < sizeX; i++) {
-            CmpHelper<VT>::bitCheck(act[i], exp[i], i, get_details);
-            if (::testing::Test::HasFailure()) {
-                break;
-            }
-        }
-    }
-    else if (check_absError) {
-        for (int i = 0; i < sizeX; i++) {
-            CmpHelper<VT>::nearCheck(act[i], exp[i], absError, i, get_details);
-            if (::testing::Test::HasFailure()) {
-                break;
-            }
-        }
-    }
-    else {
-        for (int i = 0; i < sizeX; i++) {
-            CmpHelper<VT>::eqCheck(act[i], exp[i], i, get_details);
-            if (::testing::Test::HasFailure()) {
-                break;
-            }
-        }
-    }
-}
+
 struct TestSeed {
     TestSeed() : testSeed( std::chrono::high_resolution_clock::now().time_since_epoch().count()){
     }
@@ -570,7 +541,7 @@ struct TestSeed {
     uint64_t getSeed() {
         return testSeed;
     }
-    operator uint64_t () {
+    operator uint64_t () const{
         return testSeed;
     }
     uint64_t nextSeed() {
@@ -582,6 +553,86 @@ private:
     uint64_t testSeed;
     int index = 0;
 };
+
+
+template<typename T>
+class AssertVec256{
+public:
+
+AssertVec256(const std::string &info, TestSeed seed, const T &expected, const T &actual, std::initializer_list<T> arguments):
+additionalInfo(info), testSeed(seed), exp(expected), act(actual), args(arguments){ 
+}
+
+AssertVec256(const std::string &info, TestSeed seed, const T &expected, const T &actual):
+additionalInfo(info), testSeed(seed),  exp(expected), act(actual){ 
+}
+
+AssertVec256(const std::string &info, const T &expected, const T &actual):
+additionalInfo(info), exp(expected), act(actual), hasSeed(false){ 
+}
+ 
+std::string operator()(int index) const{
+    std::stringstream stream;
+    stream <<"Failure Details:\n";  
+    stream<< additionalInfo<<"\n";
+    if(hasSeed){
+        stream <<"Test Seed to reproduce: "<< testSeed<<"\n";
+    }
+    if(args.size()>0){
+        stream<<"Arguments:\n";
+        for(auto &x: args){
+            stream<<"#\t "<<x<<"\n";
+        }
+    }
+    stream<<"Expected:\n#\t"<< exp <<"\nActual:\n#\t"<<act;
+    stream<<"\nFirst mismatch Index: "<<index;
+    return stream.str();
+}
+
+bool check(bool bitwise = false, bool check_absError = false, ValueType<T> absError = {}) const {
+    using VT = ValueType<T>;
+    constexpr auto sizeX = T::size();
+    CACHE_ALIGN VT expArr[sizeX];
+    CACHE_ALIGN VT actArr[sizeX];
+    exp.store(expArr);
+    act.store(actArr);
+    if (bitwise) {
+        for (int i = 0; i < sizeX; i++) {
+            CmpHelper<VT>::bitCheck(actArr[i], expArr[i], i, *this);
+            if (::testing::Test::HasFailure()) {
+                 return true;
+            }
+        }
+    }
+    else if (check_absError) {
+        for (int i = 0; i < sizeX; i++) {
+            CmpHelper<VT>::nearCheck(actArr[i], expArr[i], absError, i, *this);
+            if (::testing::Test::HasFailure()) {
+                 return true;
+            }
+        }
+    }
+    else {
+        for (int i = 0; i < sizeX; i++) {
+            CmpHelper<VT>::eqCheck(actArr[i], expArr[i], i, *this);
+            if (::testing::Test::HasFailure()) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+ 
+private:
+  std::string additionalInfo;
+  TestSeed testSeed;
+  T exp;
+  T act;
+  std::vector<T> args; 
+  bool hasSeed= true;
+
+};
+
 
 template <typename T, typename U = typename CmpHelper<T>::cmpType, bool is_floating_point = std::is_floating_point<U>::value>
 struct ValueGen {
@@ -673,12 +724,8 @@ int getTrialCount(int test_trials, int domains_size) {
     trialCount = test_trials < 1 ? trial_default : test_trials;
     if (domains_size > 1) {
         trialCount = trialCount / domains_size;
-        trialCount = trialCount < 1 ? 1 : trialCount;
-        std::cout << "Total Trial Count:" << trialCount * domains_size << std::endl;
-    }
-    else {
-        std::cout << "Total Trial Count:" << trialCount << std::endl;
-    }
+        trialCount = trialCount < 1 ? 1 : trialCount; 
+    } 
     return trialCount;
 }
 
@@ -709,6 +756,7 @@ private:
     // if domains is empty we will test default
     std::vector<CheckWithinDomains<U>> domains;
     std::vector<CustomCheck<T>> customCheck;
+    // its not used for now
     bool specialCheck = false;
     bool bitwise = false;  // test bitlevel
     size_t trials = 0;
@@ -725,8 +773,8 @@ public:
         _case.specialCheck = checkSpecialValues;
         return *this;
     }
-    TestCaseBuilder<T, U>& setRandomSeed(uint64_t seed) {
-        _case.testSeed = TestSeed(seed);
+    TestCaseBuilder<T, U>& setTestSeed(TestSeed seed) {
+        _case.testSeed = seed;
         return *this;
     }
     TestCaseBuilder<T, U>& setTrialCount(size_t trial_count) {
@@ -754,7 +802,7 @@ public:
 
 template< typename T, typename Op1, typename Op2, typename Filter = std::nullptr_t>
 void test_unary(
-    std::string testName,
+    std::string testNameInfo,
     Op1 expectedFunction,
     Op2 actualFunction, const TestingCase<T>& testCase, Filter filter = {}) {
     using vec_type = T;
@@ -770,13 +818,12 @@ void test_unary(
     auto domains_size = domains.size();
     auto test_trials = testCase.getTrialCount();
     int trialCount = getTrialCount<UVT>(test_trials, domains_size); 
-    TestSeed seed = testCase.getTestSeed();
-    std::cout << "Test Seed: " << seed << std::endl;
+    TestSeed seed = testCase.getTestSeed(); 
     for (const CheckWithinDomains<UVT>& dmn : domains) {
         size_t dmn_argc = dmn.ArgsDomain.size();
         UVT start = dmn_argc > 0 ? dmn.ArgsDomain[0].start : default_start;
         UVT end = dmn_argc > 0 ? dmn.ArgsDomain[0].end : default_end;
-        std::cout << dmn << std::endl;
+
         ValueGen<VT> generator(start, end, seed.nextSeed());
         for (int trial = 0; trial < trialCount; trial++) {
             for (int k = 0; k < el_count; k++) {
@@ -789,15 +836,9 @@ void test_unary(
             auto input = vec_type::loadu(vals);
             auto actual = actualFunction(input);
             auto vec_expected = vec_type::loadu(expected);
-            std::function<std::string(int i)> detail = [testName, input, actual, vec_expected](int i) {
-                std::stringstream stream;
-                stream << testName << ": {\n" << input << "\nvec_exp:" << vec_expected << "\nvec_act:" << actual << "\n}";
-                return stream.str();
-            };
-            AssertVec256(vec_expected, actual, detail, bitwise, dmn.CheckWithTolerance, dmn.ToleranceError);
-            if (::testing::Test::HasFailure()) {
-                return;
-            }
+            AssertVec256<vec_type> vecAssert(testNameInfo, seed, vec_expected, actual, {input});
+            if(vecAssert.check(bitwise, dmn.CheckWithTolerance, dmn.ToleranceError)) return;
+             
         }// trial 
     }
     for (auto& custom : testCase.getCustomChecks()) {
@@ -806,65 +847,15 @@ void test_unary(
             auto input = vec_type{ args[0] };
             auto actual = actualFunction(input);
             auto vec_expected = vec_type{ custom.expectedResult };
-            std::function<std::string(int i)> detail = [testName, input, actual, vec_expected](int i) {
-                std::stringstream stream;
-                stream << testName << ": {\n" << input << "\nvec_exp:" << vec_expected << "\nvec_act:" << actual << "\n}";
-                return stream.str();
-            };
-            AssertVec256(vec_expected, actual, detail);
+            AssertVec256<vec_type> vecAssert(testNameInfo, seed, vec_expected, actual, {input});
+            if(vecAssert.check()) return;
         }
     }
 }
 
-template<typename T>
-T getDefaultTolerance() {
-    return static_cast<T>(0.0);
-}
-
-template<>
-float getDefaultTolerance() {
-    return 1.e-5f;
-}
-
-template<>
-double getDefaultTolerance() {
-    return 1.e-9;
-}
-
-template< typename T, typename Op1, typename Op2, typename Filter = std::nullptr_t>
-void
-test_unary(
-    std::string testName,
-    Op1 expectedFunction,
-    Op2 actualFunction, bool bitwise = false,
-    Filter filter = {}, bool checkWithTolerance = false, bool testSpecialValues = false, size_t trials = 0) {
-    using UVT = UvalueType<T>;
-    TestingCase<T> testCase;
-    if (!bitwise && std::is_floating_point<UVT>::value) {
-        //for float types lets add manual ranges  
-        UVT tolerance = getDefaultTolerance<UVT>();
-        testCase = TestingCase<T>::getBuilder()
-            .set(bitwise, testSpecialValues)
-            .addDomain(CheckWithinDomains<UVT>{ { {(UVT)-10, (UVT)10}}, checkWithTolerance, tolerance})
-            .addDomain(CheckWithinDomains<UVT>{ { {(UVT)10, (UVT)100 }}, checkWithTolerance, tolerance})
-            .addDomain(CheckWithinDomains<UVT>{ { {(UVT)100, (UVT)1000 }}, checkWithTolerance, tolerance})
-            .addDomain(CheckWithinDomains<UVT>{ { {(UVT)-100, (UVT)-10 }}, checkWithTolerance, tolerance})
-            .addDomain(CheckWithinDomains<UVT>{ { {(UVT)-1000, (UVT)-100 }}, checkWithTolerance, tolerance})
-            .addDomain(CheckWithinDomains<UVT>{ {}, checkWithTolerance, tolerance})
-            .setTrialCount(trials);
-    }
-    else {
-        testCase = TestingCase<T>::getBuilder()
-            .set(bitwise, testSpecialValues)
-            .addDomain(CheckWithinDomains<UVT>{})
-            .setTrialCount(trials);
-    }
-    test_unary<T, Op1, Op2, Filter>(testName, expectedFunction, actualFunction, testCase, filter);
-}
-
 template< typename T, typename Op1, typename Op2, typename Filter = std::nullptr_t>
 void test_binary(
-    std::string testName,
+    std::string testNameInfo,
     Op1 expectedFunction,
     Op2 actualFunction, const TestingCase<T>& testCase, Filter filter = {}) {
     using vec_type = T;
@@ -882,14 +873,13 @@ void test_binary(
     auto test_trials = testCase.getTrialCount();
     int trialCount = getTrialCount<UVT>(test_trials, domains_size); 
     TestSeed seed = testCase.getTestSeed();
-    std::cout << "Test Seed: " << seed << std::endl;
     for (const CheckWithinDomains<UVT>& dmn : testCase.getDomains()) {
         size_t dmn_argc = dmn.ArgsDomain.size();
         UVT start0 = dmn_argc > 0 ? dmn.ArgsDomain[0].start : default_start;
         UVT end0 = dmn_argc > 0 ? dmn.ArgsDomain[0].end : default_end;
         UVT start1 = dmn_argc > 1 ? dmn.ArgsDomain[1].start : default_start;
         UVT end1 = dmn_argc > 1 ? dmn.ArgsDomain[1].end : default_end;
-        std::cout << dmn << std::endl;
+
         ValueGen<VT> generator0(start0, end0, seed.nextSeed());
         ValueGen<VT> generator1(start1, end1, seed.nextSeed());
         for (int trial = 0; trial < trialCount; trial++) {
@@ -905,15 +895,8 @@ void test_binary(
             auto input1 = vec_type::loadu(vals1);
             auto actual = actualFunction(input0, input1);
             auto vec_expected = vec_type::loadu(expected);
-            std::function<std::string(int i)> detail = [testName, input0, input1, actual, vec_expected](int i) {
-                std::stringstream stream;
-                stream << testName << ": {\n" << input0 << "," << input1 << "\nvec_exp:" << vec_expected << "\nvec_act:" << actual << "\n}";
-                return stream.str();
-            };
-            AssertVec256(vec_expected, actual, detail, bitwise, dmn.CheckWithTolerance, dmn.ToleranceError);
-            if (::testing::Test::HasFailure()) {
-                return;
-            }
+            AssertVec256<vec_type> vecAssert(testNameInfo, seed, vec_expected, actual, {input0, input1});
+            if(vecAssert.check(bitwise, dmn.CheckWithTolerance, dmn.ToleranceError))return;
         }// trial 
     }
     for (auto& custom : testCase.getCustomChecks()) {
@@ -923,50 +906,16 @@ void test_binary(
             auto input1 = args.size() > 1 ? vec_type{ args[1] } : vec_type{ args[0] };
             auto actual = actualFunction(input0, input1);
             auto vec_expected = vec_type(custom.expectedResult);
-            std::function<std::string(int i)> detail = [testName, input0, input1, actual, vec_expected](int i) {
-                std::stringstream stream;
-                stream << testName << ": {\n" << input0 << "," << input1 << "\nvec_exp:" << vec_expected << "\nvec_act:" << actual << "\n}";
-                return stream.str();
-            };
-            AssertVec256(vec_expected, actual, detail);
+            AssertVec256<vec_type> vecAssert(testNameInfo, seed, vec_expected, actual, {input0, input1});
+            if(vecAssert.check()) return;
         }
     }
 }
 
-template< typename T, typename Op1, typename Op2, typename Filter = std::nullptr_t>
-void
-test_binary(
-    std::string testName,
-    Op1 expectedFunction,
-    Op2 actualFunction, bool bitwise = false,
-    Filter filter = {}, bool checkWithTolerance = false, bool testSpecialValues = false, size_t trials = 0) {
-    using UVT = UvalueType<T>;
-    TestingCase<T> testCase;
-    if (!bitwise && std::is_floating_point<UVT>::value) {
-        //for float types lets add manual ranges  
-        UVT tolerance = getDefaultTolerance<UVT>();
-        testCase = TestingCase<T>::getBuilder()
-            .set(bitwise, testSpecialValues)
-            .addDomain(CheckWithinDomains<UVT>{ { {(UVT)-10, (UVT)10}, { (UVT)-10, (UVT)10 }}, checkWithTolerance, tolerance})
-            .addDomain(CheckWithinDomains<UVT>{ { {(UVT)10, (UVT)100 }, { (UVT)-10, (UVT)100 }}, checkWithTolerance, tolerance})
-            .addDomain(CheckWithinDomains<UVT>{ { {(UVT)100, (UVT)1000 }, { (UVT)-100, (UVT)1000 }}, checkWithTolerance, tolerance})
-            .addDomain(CheckWithinDomains<UVT>{ { {(UVT)-100, (UVT)-10 }, { (UVT)-100, (UVT)10 }}, checkWithTolerance, tolerance})
-            .addDomain(CheckWithinDomains<UVT>{ { {(UVT)-1000, (UVT)-100 }, { (UVT)-1000, (UVT)100 }}, checkWithTolerance, tolerance})
-            .addDomain(CheckWithinDomains<UVT>{ {}, checkWithTolerance, tolerance})
-            .setTrialCount(trials);
-    }
-    else {
-        testCase = TestingCase<T>::getBuilder()
-            .set(bitwise, testSpecialValues)
-            .addDomain(CheckWithinDomains<UVT>{})
-            .setTrialCount(trials);
-    }
-    test_binary<T, Op1, Op2, Filter>(testName, expectedFunction, actualFunction, testCase, filter);
-}
 
 template< typename T, typename Op1, typename Op2, typename Filter = std::nullptr_t>
 void test_ternary(
-    std::string testName,
+    std::string testNameInfo,
     Op1 expectedFunction,
     Op2 actualFunction, const TestingCase<T>& testCase, Filter filter = {}) {
     using vec_type = T;
@@ -985,7 +934,6 @@ void test_ternary(
     auto test_trials = testCase.getTrialCount();
     int trialCount = getTrialCount<UVT>(test_trials, domains_size);
     TestSeed seed = testCase.getTestSeed();
-    std::cout << "Test Seed: " << seed << std::endl;
     for (const CheckWithinDomains<UVT>& dmn : testCase.getDomains()) {
         size_t dmn_argc = dmn.ArgsDomain.size();
         UVT start0 = dmn_argc > 0 ? dmn.ArgsDomain[0].start : default_start;
@@ -997,7 +945,7 @@ void test_ternary(
         ValueGen<VT> generator0(start0, end0, seed.nextSeed());
         ValueGen<VT> generator1(start1, end1, seed.nextSeed());
         ValueGen<VT> generator2(start2, end2, seed.nextSeed());
-        std::cout << dmn << std::endl;
+
         for (int trial = 0; trial < trialCount; trial++) {
             for (int k = 0; k < el_count; k++) {
                 vals0[k] = generator0.get();
@@ -1013,31 +961,10 @@ void test_ternary(
             auto input2 = vec_type::loadu(vals2);
             auto actual = actualFunction(input0, input1, input2);
             auto vec_expected = vec_type::loadu(expected);
-            std::function<std::string(int i)> detail = [testName, input0, input1, input2, actual, vec_expected](int i) {
-                std::stringstream stream;
-                stream << testName << ": {\n" << input0 << "," << input1 << "," << input2 << "\nvec_exp:" << vec_expected << "\nvec_act:" << actual << "\n}";
-                return stream.str();
-            };
-            AssertVec256(vec_expected, actual, detail, bitwise, dmn.CheckWithTolerance, dmn.ToleranceError);
-            if (::testing::Test::HasFailure()) {
-                return;
-            }
+            AssertVec256<vec_type> vecAssert(testNameInfo, seed, vec_expected, actual, {input0, input1, input2});
+            if(vecAssert.check(bitwise, dmn.CheckWithTolerance, dmn.ToleranceError)) return;
         }// trial 
     }
-}
-
-template< typename T, typename Op1, typename Op2, typename Filter = std::nullptr_t>
-void
-test_ternary(
-    std::string testName,
-    Op1 expectedFunction,
-    Op2 actualFunction, bool bitwise = false,
-    Filter filter = {}, bool testSpecialValues = false, size_t trials = 0) {
-    TestingCase<T> testCase = TestingCase<T>::getBuilder()
-        .set(bitwise, testSpecialValues)
-        .addDomain(CheckWithinDomains<UvalueType<T>>{})
-        .setTrialCount(trials);
-    test_ternary<T, Op1, Op2, Filter>(testName, expectedFunction, actualFunction, testCase, filter);
 }
 
 template <typename T, typename Op>
@@ -1224,3 +1151,86 @@ int32_t widening_subtract(T val, T b) {
     return static_cast<int32_t>(val) - static_cast<int32_t>(b);
 }
 
+
+//default testing case
+template<typename T>
+T getDefaultTolerance() {
+    return static_cast<T>(0.0);
+}
+
+template<>
+float getDefaultTolerance() {
+    return 1.e-5f;
+}
+
+template<>
+double getDefaultTolerance() {
+    return 1.e-9;
+}
+
+template<typename T>
+TestingCase<T> createDefaultUnaryTestCase(TestSeed seed= TestSeed(), bool bitwise = false, bool checkWithTolerance = false, size_t trials = 0) {
+    using UVT = UvalueType<T>;
+    TestingCase<T> testCase;
+    if (!bitwise && std::is_floating_point<UVT>::value) {
+        //for float types lets add manual ranges  
+        UVT tolerance = getDefaultTolerance<UVT>();
+        testCase = TestingCase<T>::getBuilder()
+            .set(bitwise, false)
+            .addDomain(CheckWithinDomains<UVT>{ { {(UVT)-10, (UVT)10}}, checkWithTolerance, tolerance})
+            .addDomain(CheckWithinDomains<UVT>{ { {(UVT)10, (UVT)100 }}, checkWithTolerance, tolerance})
+            .addDomain(CheckWithinDomains<UVT>{ { {(UVT)100, (UVT)1000 }}, checkWithTolerance, tolerance})
+            .addDomain(CheckWithinDomains<UVT>{ { {(UVT)-100, (UVT)-10 }}, checkWithTolerance, tolerance})
+            .addDomain(CheckWithinDomains<UVT>{ { {(UVT)-1000, (UVT)-100 }}, checkWithTolerance, tolerance})
+            .addDomain(CheckWithinDomains<UVT>{ {}, checkWithTolerance, tolerance})
+            .setTrialCount(trials)
+            .setTestSeed(seed);
+    }
+    else {
+        testCase = TestingCase<T>::getBuilder()
+            .set(bitwise, false)
+            .addDomain(CheckWithinDomains<UVT>{})
+            .setTrialCount(trials)
+            .setTestSeed(seed);            
+    }
+    return testCase;
+}
+
+template<typename T>
+TestingCase<T> createDefaultBinaryTestCase(TestSeed seed= TestSeed(), bool bitwise = false, bool checkWithTolerance = false, size_t trials = 0) {
+    using UVT = UvalueType<T>;
+    TestingCase<T> testCase;
+    if (!bitwise && std::is_floating_point<UVT>::value) {
+        //for float types lets add manual ranges  
+        UVT tolerance = getDefaultTolerance<UVT>();
+        testCase = TestingCase<T>::getBuilder()
+            .set(bitwise, false)
+            .addDomain(CheckWithinDomains<UVT>{ { {(UVT)-10, (UVT)10}, { (UVT)-10, (UVT)10 }}, checkWithTolerance, tolerance})
+            .addDomain(CheckWithinDomains<UVT>{ { {(UVT)10, (UVT)100 }, { (UVT)-10, (UVT)100 }}, checkWithTolerance, tolerance})
+            .addDomain(CheckWithinDomains<UVT>{ { {(UVT)100, (UVT)1000 }, { (UVT)-100, (UVT)1000 }}, checkWithTolerance, tolerance})
+            .addDomain(CheckWithinDomains<UVT>{ { {(UVT)-100, (UVT)-10 }, { (UVT)-100, (UVT)10 }}, checkWithTolerance, tolerance})
+            .addDomain(CheckWithinDomains<UVT>{ { {(UVT)-1000, (UVT)-100 }, { (UVT)-1000, (UVT)100 }}, checkWithTolerance, tolerance})
+            .addDomain(CheckWithinDomains<UVT>{ {}, checkWithTolerance, tolerance})
+            .setTrialCount(trials)
+            .setTestSeed(seed);
+    }
+    else {
+        testCase = TestingCase<T>::getBuilder()
+            .set(bitwise, false)
+            .addDomain(CheckWithinDomains<UVT>{})
+            .setTrialCount(trials)
+            .setTestSeed(seed);
+    }
+    return testCase;
+}
+
+
+template<typename T>
+TestingCase<T> createDefaultTernaryTestCase(TestSeed seed = TestSeed(), bool bitwise = false, bool checkWithTolerance = false, size_t trials = 0) {
+    TestingCase<T> testCase = TestingCase<T>::getBuilder()
+        .set(bitwise, false)
+        .addDomain(CheckWithinDomains<UvalueType<T>>{})
+        .setTrialCount(trials)
+        .setTestSeed(seed);
+    return testCase;
+}
