@@ -1923,7 +1923,7 @@ void testFutures() {
     ASSERT_EQ(sat2, 1);
     f1->setErrorIfNeeded(
         std::make_exception_ptr(c10::ivalue::Future::FutureError("Dup")));
-    ASSERT_TRUE(strcmp(f1->try_retrieve_error_message(), "Failed") == 0);
+    ASSERT_TRUE(strcmp(f1->try_retrieve_error_message().c_str(), "Failed") == 0);
     ASSERT_EQ(sat1, 1);
     ASSERT_EQ(sat2, 1);
   }

@@ -911,7 +911,8 @@ auto Engine::execute(
 
   execute_with_graph_task(graph_task, graph_root);
   // Avoid a refcount bump for the Future, since we check for refcount in
-  // DistEngine.
+  // DistEngine (see TORCH_INTERNAL_ASSERT(futureGrads.use_count() == 1)
+  // in dist_engine.cpp).
   auto& fut = graph_task->future_result_;
   fut->wait();
   return fut->value().toTensorVector();

@@ -388,9 +388,9 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
   }
 
   // Tries to retrieve the error message from std::exception_ptr.
-  const char* try_retrieve_error_message() {
-    std::unique_lock<std::mutex> lock(mutex_);
+  std::string try_retrieve_error_message() {
     TORCH_CHECK(hasError(), "No error present on the future.");
+    std::unique_lock<std::mutex> lock(mutex_);
     try {
       std::rethrow_exception(eptr_);
     } catch (const std::exception& e) {
