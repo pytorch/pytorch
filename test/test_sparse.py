@@ -1762,12 +1762,7 @@ class TestSparse(TestCase):
             size=[4, 5, 2],
             device=self.device
         )
-        true_dense = torch.sparse_coo_tensor(
-            indices=torch.tensor([[1, 3], [2, 4]]),
-            values=torch.tensor([[1.0, 3.0], [5.0, 7.0]]),
-            size=[4, 5, 2],
-            device=self.device
-        ).to_dense()
+        true_dense = input_coalesced.to_dense()
         self._test_abs_absolute(input_coalesced, true_dense)
 
         if self.is_uncoalesced:
@@ -1778,7 +1773,7 @@ class TestSparse(TestCase):
                 size=[3, ],
                 device=self.device
             )
-            self._test_abs_absolute(input_uncoalesced, torch.tensor([3.0, 4.0, 2.5]))
+            self._test_abs_absolute(input_uncoalesced, torch.tensor([3.0, -4.0, -2.5]))
 
             # test on empty sparse tensor
             input_uncoalesced = torch.sparse_coo_tensor(
@@ -1816,7 +1811,6 @@ class TestSparse(TestCase):
         # y.backward(x0)
         # self.assertEqual(dense_tensor.grad, sparse_tensor.grad.to_dense())
 
-
     def test_sign(self):
         input_coalesced = torch.sparse_coo_tensor(
             indices=torch.tensor([[0, 1, 2, 3]]),
@@ -1833,13 +1827,8 @@ class TestSparse(TestCase):
             size=[4, 5, 2],
             device=self.device
         )
-        true_dense = torch.sparse_coo_tensor(
-            indices=torch.tensor([[1, 3], [2, 4]]),
-            values=torch.tensor([[1.0, 3.0], [5.0, 7.0]]),
-            size=[4, 5, 2],
-            device=self.device
-        ).to_dense()
-        self._test_abs_absolute(input_coalesced, true_dense)
+        true_dense = input_coalesced.to_dense()
+        self._test_sign(input_coalesced, true_dense)
 
         if self.is_uncoalesced:
             # test uncoalesced input
