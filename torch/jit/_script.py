@@ -935,28 +935,6 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
         return fn
 
 
-def is_scripting():
-    r"""
-    Function that returns True when in compilation and False otherwise. This
-    is useful especially with the @unused decorator to leave code in your
-    model that is not yet TorchScript compatible.
-    .. testcode::
-
-        import torch
-
-        @torch.jit.unused
-        def unsupported_linear_op(x):
-            return x
-
-        def linear(x):
-            if not torch.jit.is_scripting():
-                return torch.linear(x)
-            else:
-                return unsupported_linear_op(x)
-    """
-    return False
-
-
 # overloads are registered in _jit_internal and compiled here so that _overload
 # can be used in nn/functional.py without an import cycle
 
@@ -1068,9 +1046,6 @@ def _recursive_compile_class(obj, loc):
     _compile_and_register_class(obj, rcb, _qual_name)
 
 
-_register_builtin(is_scripting, "aten::is_scripting")
-
-
 class CompilationUnit(object):
     def __init__(self, lang=None, _frames_up=0):
         self._c = torch._C.CompilationUnit()
@@ -1095,3 +1070,4 @@ def _unwrap_optional(x):
 
 
 _register_builtin(_unwrap_optional, "aten::_unwrap_optional")
+_register_builtin(_jit_internal.is_scripting, "aten::is_scripting")

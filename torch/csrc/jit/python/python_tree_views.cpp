@@ -83,6 +83,12 @@ void initTreeViewBindings(PyObject* module) {
             self.highlight(stream);
             return stream.str();
           })
+      .def("__repr__", [](const SourceRange& self) { return self.str(); })
+      .def(
+          "__str__",
+          [](const SourceRange& self) {
+            return "SourceRange at:\n" + self.str();
+          })
       .def_property_readonly("start", &SourceRange::start)
       .def_property_readonly("end", &SourceRange::end);
   py::class_<SourceRangeFactory>(m, "SourceRangeFactory")

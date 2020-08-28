@@ -30,6 +30,7 @@ from jit.test_module_interface import TestModuleInterface  # noqa: F401
 from jit.test_onnx_export import TestONNXExport  # noqa: F401
 from jit.test_with import TestWith  # noqa: F401
 from jit.test_enum import TestEnum, TestEnumFeatureGuard  # noqa: F401
+from jit.test_profiler import TestProfiler  # noqa: F401
 
 # Torch
 from torch import Tensor
@@ -5268,7 +5269,6 @@ a")
             # this triggers 2 bailouts
             self.assertEqual(def_in_one_branch(a, True), 3.0)
 
-
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "skip if profiling isn't enabled")
     def test_maxpool_guard_elimination(self):
         @torch.jit.script
@@ -5667,6 +5667,16 @@ a")
 
         ast = torch.jit.frontend.get_jit_def(fn, fn.__name__)
         self.assertExpected(str(ast))
+
+    def test_python_frontend_source_range(self):
+        def fn():
+            raise Exception("hello")
+        ast = torch.jit.frontend.get_jit_def(fn, fn.__name__)
+        FileCheck().check("SourceRange at:") \
+                   .check("def fn():") \
+                   .check("~~~~~~~~~...  <--- HERE") \
+                   .check('raise Exception("hello")') \
+                   .run(str(ast.range()))
 
     def test_python_frontend_py3(self):
         def fn():
@@ -12393,7 +12403,7 @@ a")
                                     "supported in TorchScript"):
             @torch.jit.script
             def unknown_op(x):
-                torch.set_grad_enabled(True)
+                torch.set_anomaly_enabled(True)
                 return x
 
     def test_exceptions(self):
