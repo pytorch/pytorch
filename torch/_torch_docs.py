@@ -8767,7 +8767,7 @@ add_docstr(torch.quantize_per_tensor,
            r"""
 quantize_per_tensor(input, scale, zero_point, dtype) -> Tensor
 
-Converts a float tensor to quantized tensor with given scale and zero point.
+Converts a float tensor to a quantized tensor with given scale and zero point.
 
 Arguments:
     input (Tensor): float tensor to quantize
@@ -8792,7 +8792,7 @@ add_docstr(torch.quantize_per_channel,
            r"""
 quantize_per_channel(input, scales, zero_points, axis, dtype) -> Tensor
 
-Converts a float tensor to per-channel quantized tensor with given scales and zero points.
+Converts a float tensor to a per-channel quantized tensor with given scales and zero points.
 
 Arguments:
     input (Tensor): float tensor to quantize
