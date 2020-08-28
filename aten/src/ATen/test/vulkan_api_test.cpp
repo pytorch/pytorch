@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 
-#ifdef VULKAN_API_TEST
+#ifdef USE_VULKAN_API
 
 #include <ATen/native/vulkan/api/api.h>
 
@@ -13,4 +13,4 @@ TEST(VulkanAPITest, Context) {
 
 } // namespace
 
-#endif /* VULKAN_API_TEST */
+#endif /* USE_VULKAN_API */
