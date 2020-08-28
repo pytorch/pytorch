@@ -388,8 +388,6 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${TOOLS_PATH}/autograd/templates/TraceType.cpp"
     "${TOOLS_PATH}/autograd/templates/Functions.h"
     "${TOOLS_PATH}/autograd/templates/Functions.cpp"
-    "${TOOLS_PATH}/autograd/templates/ManualFunctions.h"
-    "${TOOLS_PATH}/autograd/templates/ManualFunctions.cpp"
     "${TOOLS_PATH}/autograd/templates/python_functions.h"
     "${TOOLS_PATH}/autograd/templates/python_functions.cpp"
     "${TOOLS_PATH}/autograd/templates/python_variable_methods.cpp"
@@ -455,6 +453,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     list(APPEND TORCH_SRCS
       ${TORCH_SRC_DIR}/csrc/autograd/TraceTypeManual.cpp
       ${TORCH_SRC_DIR}/csrc/autograd/VariableTypeManual.cpp
+      ${TORCH_SRC_DIR}/csrc/autograd/FunctionsManual.cpp
     )
   endif()
 
