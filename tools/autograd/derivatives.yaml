@@ -912,6 +912,10 @@
 - name: logit(Tensor self, float? eps=None) -> Tensor
   self: "GradMode::is_enabled() ? infinitely_differentiable_logit_backward(grad, self, eps) : logit_backward(grad, self, eps)"
 
+- name: logit_backward(Tensor grad_output, Tensor self, float? eps=None) -> Tensor
+  grad_output: not_implemented("logit_backward.grad")
+  self: not_implemented("logit_backward.self")
+
 - name: sign(Tensor self) -> Tensor
   self: zeros_like(grad, at::MemoryFormat::Preserve)
 
