@@ -394,9 +394,6 @@ Tensor dot_batching_rule(const Tensor& self, const Tensor& other) {
 }
 
 Tensor bmm_batching_rule(const Tensor& self, const Tensor& other) {
-  auto self_batched = isBatchedTensor(self);
-  auto other_batched = isBatchedTensor(other);
-
   TORCH_CHECK(/*logical*/self.dim() == 3 && /*logical*/other.dim() == 3,
       "bmm(self, other): Shape mismatch: expected 3D `self` "
       "(got `self` of size ", self.sizes(), ") ",
