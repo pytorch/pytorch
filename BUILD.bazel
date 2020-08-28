@@ -34,7 +34,6 @@ header_template_rule(
     substitutions = {
         "cmakedefine": "define",
         "#define FEATURE_TORCH_MOBILE": "/* #undef FEATURE_TORCH_MOBILE */",
-        "#define USE_STATIC_DISPATCH": "/* #undef USE_STATIC_DISPATCH */",
         "#define C10_USE_NUMA": "/* #undef C10_USE_NUMA */",
     },
 )

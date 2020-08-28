@@ -74,7 +74,12 @@ class DispatcherArgument:
 class LegacyDispatcherArgument:
     type: str
     name: str
-    # has defaults, smh
+    # Legacy dispatcher arguments have defaults for some reasons (e.g.,
+    # the function prototypes in CPUType.h are defaulted).  There isn't
+    # really any good reason to do this, as these functions are only
+    # ever called from a context where all defaulted arguments are
+    # guaranteed to be given explicitly.
+    # TODO: Remove this
     default: Optional[str]
     argument: Union[Argument, TensorOptionsArguments]
 

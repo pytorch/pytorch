@@ -139,6 +139,12 @@ def concatMap(func: Callable[[T], Sequence[S]], xs: Sequence[T]) -> Iterator[S]:
 #
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
+# Most functions in this section are curried: they consist of a function
+# that takes some parameters (e.g., what is to be generated) which itself
+# returns a function that actually maps NativeFunction to the code
+# to be generated.  This pattern makes it convenient to use map, concatMap
+# and similar functional combinators.
+
 # Many of these functions share logic for defining both the definition
 # and declaration (for example, the function signature is the same), so
 # we organize them into one function that takes a Target to say which
@@ -147,23 +153,46 @@ Target = Enum('Target', ('DEFINITION', 'DECLARATION', 'REGISTRATION'))
 
 # Generates {dispatch}Type.cpp and {dispatch}Type.h (e.g., CPUType.cpp
 # and CPUType.h).  This function is also reused to implement per-operator
-# registration
+# registration.  It also generates TypeDefault.cpp and TypeDefault.h when
+# dispatch is None.
 #
 # {dispatch}Type.cpp
 #   - The primary function of this file is to register all of the
-#     dispatch-specific
+#     implementations for the given dispatch key to the dispatcher,
+#     so they are available for use in PyTorch.  If dispatch is
+#     None, we generate schema (def) registrations and catchall
+#     registrations.
+#   - The secondary function of this file is to generate a wrapper
+#     around functions.  In CPUType these wrappers do nothing
+#     (and should be removed), but in other cases they handle
+#     DeviceGuard. A small extra benefit of wrappers is they
+#     are not overloaded, so they can be used in the registration
+#     API without having to disambiguate which overload you want
+#     (as would be the case if you directly registered native::
+#     functions).
 #
 # {dispatch}Type.h
 #   - In principle, this file shouldn't exist at all; historically,
 #     it existed so that we could directly access these functions
 #     outside of the registration API for the implementation of
 #     static dispatch.  Should be deleted now!
+#
+# This function is also used for a secondary purpose: the registration
+# logic is also reused to implement per-operator registration.
 def compute_type_method(
     dispatch: Optional[str], *,
-    target: Target, op_registration_whitelist: Optional[Set[str]], def_only: bool = False
+    target: Target,
+    # Which operators to actually generate code for.  If None, generate
+    # code for all operators
+    op_registration_whitelist: Optional[Set[str]],
+    # Only valid for generating registrations.  If True, only generate
+    # def() invocations (for schema registration); do not generate
+    # any impl() invocations for, e.g., catch-all kernels
+    def_only: bool = False
 ) -> Callable[[NativeFunction], Optional[str]]:
+
     if def_only:
-        assert target is Target.REGISTRATION
+        assert target is Target.REGISTRATION and dispatch is None
 
     @with_native_function
     def func(f: NativeFunction) -> Optional[str]:
@@ -307,6 +336,9 @@ def compute_type_method(
 
     return func
 
+# Generates Function.cpp and Function.h.  These files provide the
+# functional public C++ API, and the scaffolding to call into
+# the dispatcher from these functions.  See also compute_tensor_method.
 def compute_function(*, target: Target) -> Callable[[NativeFunction], Optional[str]]:
     @with_native_function
     def go(f: NativeFunction) -> Optional[str]:
@@ -343,6 +375,9 @@ def compute_function(*, target: Target) -> Callable[[NativeFunction], Optional[s
 """
     return go
 
+# Generates TensorBody.h (sic) and TensorMethods.cpp.  These files provide the
+# object-oriented (method-based) public C++ API, and the scaffolding to call into
+# the dispatcher from these functions.  See also compute_function.
 def compute_tensor_method(*, target: Target) -> Callable[[NativeFunction], Optional[str]]:
     @with_native_function
     def go(f: NativeFunction) -> Optional[str]:
@@ -382,10 +417,17 @@ def compute_tensor_method(*, target: Target) -> Callable[[NativeFunction], Optio
 
     return go
 
+# Generates ATenOpList.cpp, a runtime accessible list of all aten
+# operators.
+# TODO: This was historically used to help some JIT interop code
+# figure out whether or not to treat aten namespace'd operators
+# one way or another, we should reevaluate if this is actually needed.
 @with_native_function
 def compute_aten_op(f: NativeFunction) -> str:
     return f'{{"aten::{f.func.name.name}", "{f.func.name.overload_name}"}},'
 
+# Generates NativeFunctions.h, a list of forward declarations of all
+# actual kernel definitions we keep in aten/src/ATen/native/
 @with_native_function
 def compute_native_function_declaration(f: NativeFunction) -> List[str]:
     if f.dispatch is None:
@@ -409,6 +451,9 @@ def compute_native_function_declaration(f: NativeFunction) -> List[str]:
 
     return rs
 
+# Generates BackendSelectRegister.cpp, a series of kernels which provide
+# specialized computation of dispatch key for operator signatures which cannot
+# be easily done automatically using templating.
 def compute_backend_select(*, target: Target) -> Callable[[NativeFunction], Optional[str]]:
     @with_native_function
     def go(f: NativeFunction) -> Optional[str]:
@@ -509,11 +554,14 @@ def pythonify_default(s: str) -> object:
 # the removal of TH).  These days, it's mostly the same thing as
 # the C++ API argument type, except that Tensor and Tensor?
 # arguments simply present as Tensor.
+#
+# TODO: Get rid of dynamic_type, after getting tools/autograd
+# to use the new codegen framework
 def dynamic_type(t: Type) -> str:
-    # Note we don't use t.is_tensor_like() here because it would
-    # also include Tensor[]
     if isinstance(t, OptionalType):
         return dynamic_type(t.elem)
+    # Note we don't use t.is_tensor_like() here because it would
+    # also include Tensor[]
     if str(t) == 'Tensor':
         return 'Tensor'
     return cpp.argumenttype_type(t, mutable=False)
@@ -771,6 +819,9 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
 def _read_template(template_fn: str) -> CodeTemplate:
     return CodeTemplate.from_file(template_fn)
 
+# A small abstraction for writing out generated files and keeping track
+# of what files have been written (so you can write out a list of output
+# files)
 class FileManager:
     install_dir: str
     template_dir: str
