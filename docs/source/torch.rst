@@ -261,9 +261,11 @@ Pointwise Ops
     asin
     arcsin
     asinh
+    arcsinh
     atan
     arctan
     atanh
+    arctanh
     atan2
     bitwise_not
     bitwise_and
@@ -336,6 +338,10 @@ Reduction Ops
 
     argmax
     argmin
+    amax
+    amin
+    max
+    min
     dist
     logsumexp
     mean
@@ -376,8 +382,8 @@ Comparison Ops
     kthvalue
     le
     lt
-    max
-    min
+    maximum
+    minimum
     ne
     sort
     topk
