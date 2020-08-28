@@ -1301,10 +1301,11 @@ AT_ERROR("symeig: MAGMA library not found in "
   magma_int_t n = magma_int_cast(self.size(-1), "n");
 
   auto self_data = self.data_ptr<scalar_t>();
-  scalar_t *wr;
-  scalar_t *wi;
-  ALLOCATE_ARRAY(wr, scalar_t, n);
-  ALLOCATE_ARRAY(wi, scalar_t, n);
+
+  eigvals.resize_({2, n});
+  auto eigvals_data = eigvals.data_ptr<scalar_t>();
+  scalar_t *wr = eigvals_data;
+  scalar_t *wi = eigvals_data+n;
 
   scalar_t *vr_data = NULL;
   magma_int_t ldvr = 1;
@@ -1326,13 +1327,7 @@ AT_ERROR("symeig: MAGMA library not found in "
     magmaEig<scalar_t>(MagmaNoVec, jobvr, n, self_data, n, wr, wi, NULL, 1, vr_data, ldvr, work_data, lwork, info_ptr);
   }
 
-  // copy the results into the eigvals tensor
-  eigvals.resize_({2, n});
-  auto eigvals_data = eigvals.data_ptr<scalar_t>();
-  // XXX antocuni: it looks wrong to use memcpy for this, nobody else is using
-  // it in this file. What is the "proper" alternative?
-  std::memcpy(eigvals_data, wr, n*sizeof(scalar_t));
-  std::memcpy(eigvals_data+n, wi, n*sizeof(scalar_t));
+  // transpose the wr and wi columns
   eigvals.transpose_(0, 1);
 
   // TODO: copy the result in case jobvr==MagmaVec
