@@ -5606,12 +5606,9 @@ The Heaviside step function is defined as:
     \end{cases}
 """ + r"""
 
-When :attr:`values` is a tensor, the shapes of :attr:`input`
-and :attr:`values` must be :ref:`broadcastable <broadcasting-semantics>`.
-
 Args:
     {input}
-    values (Tensor): The values to sample from where :attr:`input` is zero.
+    values (Tensor): The values to use where :attr:`input` is zero.
 
 Keyword arguments:
     {out}
