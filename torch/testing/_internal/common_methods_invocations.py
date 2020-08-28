@@ -1120,6 +1120,8 @@ def method_tests():
         ('masked_scatter', (M, M), (bernoulli_scalar(), (M, M)), 'scalar'),
         ('masked_scatter', (M, M), (bernoulli_scalar(), (M, M)),
          'scalar_broadcast_rhs'),
+        ('maximum', (S, S), ((S, S),)),
+        ('minimum', (S, S), ((S, S),)),
         ('resize_', (S, S, S), (torch.Size([S * S, S])), 'fewer_dims'),
         ('resize_', (), (dont_convert(()),), 'scalar'),
         ('resize_', (), (torch.Size([1, 1, 1])), 'scalar_to_dims'),
