@@ -1246,7 +1246,7 @@ def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa
                 return _VF.frobenius_norm(input, dim=(), keepdim=keepdim)  # type: ignore
         if isinstance(p, int):
             _dim = [i for i in range(ndim)]  # noqa: C416 TODO: rewrite as list(range(m))
-            return _VF.norm(input, p, dim=_dim, keepdim=keepdim)
+            return _VF.norm(input, p, dim=_dim, keepdim=keepdim)  # type: ignore
         if isinstance(p, float):
             _dim = [i for i in range(ndim)]  # noqa: C416 TODO: rewrite as list(range(m))
             return _VF.norm(input, p, dim=_dim, keepdim=keepdim)  # type: ignore
