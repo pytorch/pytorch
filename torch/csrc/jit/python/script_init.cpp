@@ -177,6 +177,45 @@ void checkOverloadDecl(const Decl& new_decl, const Decl& old_decl) {
         old_params[i].ident());
   }
 }
+
+c10::optional<IValue> tryCalculateDefaultParam(
+    const Argument& arg,
+    const py::object& def_value) {
+  auto n = arg.N();
+  auto list_type = arg.type()->cast<ListType>();
+  try {
+    if (n && *n > 0 && list_type) {
+      // BroadcastingList, allow default values T for arg types List[T]
+      return toIValue(def_value, list_type->getElementType());
+    } else {
+      return toIValue(def_value, arg.type());
+    }
+  } catch (...) {
+    return c10::nullopt;
+  }
+}
+
+// An overloaded function may have a default that does not subtype all overloads
+// @overload
+// def foo(x: str)
+// def foo(x=1)
+FunctionDefaults calcOverloadedFunctionDefaults(
+    const FunctionSchema& schema,
+    const FunctionDefaults& defaults) {
+  FunctionDefaults updated_defaults;
+  for (const auto& arg : schema.arguments()) {
+    const std::string& arg_name = arg.name();
+    auto value = defaults.find(arg_name);
+    if (value == defaults.end()) {
+      continue;
+    }
+    auto maybe_ivalue = tryCalculateDefaultParam(arg, value->second);
+    if (maybe_ivalue) {
+      updated_defaults[arg_name] = value->second;
+    }
+  }
+  return updated_defaults;
+}
 } // namespace
 
 bool checkMutableFunctionDefault(const py::object& def_arg) {
@@ -208,9 +247,47 @@ void checkMutableFunctionDefault(
   }
 }
 
+FunctionSchema getSchemaWithNameAndDefaults(
+    const SourceRange& range,
+    const FunctionSchema& schema,
+    const at::optional<std::string>& new_name,
+    const FunctionDefaults& default_args) {
+  std::vector<Argument> new_args;
+  for (auto& arg : schema.arguments()) {
+    auto it = default_args.find(arg.name());
+    if (it != default_args.end()) {
+      checkMutableFunctionDefault(range, arg, it->second);
+      c10::optional<IValue> value = tryCalculateDefaultParam(arg, it->second);
+      if (!value) {
+        ErrorReport error(range);
+        error << "Expected a default value of type " << arg.type()->repr_str()
+              << " on parameter \"" << arg.name() << "\".";
+        if (arg.is_inferred_type()) {
+          error << "Because \"" << arg.name()
+                << "\" was not annotated with an explicit type "
+                << "it is assumed to be type 'Tensor'.";
+        }
+        throw error;
+      }
+      new_args.emplace_back(
+          arg.name(), arg.type(), arg.N(), *value, arg.kwarg_only());
+    } else {
+      new_args.push_back(arg);
+    }
+  }
+  return FunctionSchema(
+      new_name.value_or(schema.name()),
+      schema.overload_name(),
+      new_args,
+      schema.returns(),
+      schema.is_vararg(),
+      schema.is_varret());
+}
+
 static Decl mergeDefaultsAndExtraParametersToOverloadDecl(
     const Decl& overload_decl,
-    const Decl& impl_decl) {
+    const Decl& impl_decl,
+    const FunctionDefaults& defaults) {
   std::vector<Param> adjusted_params;
   const auto& overload_params = overload_decl.params();
   const auto& impl_params = impl_decl.params();
@@ -239,6 +316,12 @@ static Decl mergeDefaultsAndExtraParametersToOverloadDecl(
     adjusted_params.push_back(overload_params[i]);
   }
   for (size_t i = overload_params.size(); i < impl_params.size(); ++i) {
+    if (!defaults.count(impl_params[i].ident().name())) {
+      throw ErrorReport(impl_decl.range())
+          << "Expected to find default parameter on argument"
+          << impl_params[i].ident().name()
+          << " because it is not defined on the overloaded declaration";
+    }
     if (!impl_params[i].type().present()) {
       throw ErrorReport(impl_decl.range())
           << "Parameters not specified on the overloaded declaration must have a type annotation in the implementation function."
@@ -257,6 +340,7 @@ static StrongFunctionPtr script_compile_overloaded_function(
     const Decl& overload_decl,
     const Def& implementation_def,
     ResolutionCallback rcb,
+    const FunctionDefaults& implementation_defaults,
     const py::object& signature) {
   if (signature.is(py::none())) {
     throw ErrorReport(overload_decl.range())
@@ -264,7 +348,7 @@ static StrongFunctionPtr script_compile_overloaded_function(
   }
 
   auto adjusted_decl = mergeDefaultsAndExtraParametersToOverloadDecl(
-      overload_decl, implementation_def.decl());
+      overload_decl, implementation_def.decl(), implementation_defaults);
   auto new_def = implementation_def.withDecl(adjusted_decl);
   auto cu = get_python_cu();
   auto defined_functions = cu->define(
@@ -277,6 +361,13 @@ static StrongFunctionPtr script_compile_overloaded_function(
       true);
   TORCH_INTERNAL_ASSERT(defined_functions.size() == 1);
   auto& defined = defined_functions[0];
+  FunctionDefaults updated_defaults = calcOverloadedFunctionDefaults(
+      defined->getSchema(), implementation_defaults);
+  defined->setSchema(getSchemaWithNameAndDefaults(
+      new_def.range(),
+      defined->getSchema(),
+      new_def.name().name(),
+      updated_defaults));
   StrongFunctionPtr ret(std::move(cu), defined);
   didFinishEmitFunction(ret);
   return ret;
@@ -1154,7 +1245,12 @@ void initJitScriptBindings(PyObject* module) {
          const py::object& signature) {
         const auto name = c10::QualifiedName(qualname);
         return script_compile_overloaded_function(
-            name, overload_decl, implementation_def, std::move(rcb), signature);
+            name,
+            overload_decl,
+            implementation_def,
+            std::move(rcb),
+            implementation_defaults,
+            signature);
       });
   m.def(
       "_replace_overloaded_method_decl",

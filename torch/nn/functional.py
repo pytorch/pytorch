@@ -1509,7 +1509,7 @@ def softmax(input, dim=None, _stacklevel=3, dtype=None):
     return ret
 
 
-def gumbel_softmax(logits, tau=1, hard=False, eps=1e-10, dim=-1):
+def gumbel_softmax(logits, tau=1.0, hard=False, eps=1e-10, dim=-1):
     # type: (Tensor, float, bool, float, int) -> Tensor
     r"""
     Samples from the Gumbel-Softmax distribution (`Link 1`_  `Link 2`_) and optionally discretizes.
@@ -1845,7 +1845,7 @@ def embedding(input, weight, padding_idx=None, max_norm=None, norm_type=2.,
     return torch.embedding(weight, input, padding_idx, scale_grad_by_freq, sparse)
 
 
-def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
+def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2.0,
                   scale_grad_by_freq=False, mode='mean', sparse=False,
                   per_sample_weights=None, include_last_offset=False):
     # type: (Tensor, Tensor, Optional[Tensor], Optional[float], float, bool, str, bool, Optional[Tensor], bool) -> Tensor
@@ -2684,7 +2684,7 @@ def mse_loss(input, target, size_average=None, reduce=None, reduction='mean'):
     return ret
 
 
-def margin_ranking_loss(input1, input2, target, margin=0, size_average=None,
+def margin_ranking_loss(input1, input2, target, margin=0.0, size_average=None,
                         reduce=None, reduction='mean'):
     # type: (Tensor, Tensor, Tensor, float, Optional[bool], Optional[bool], str) -> Tensor
     r"""margin_ranking_loss(input1, input2, target, margin=0, size_average=None, reduce=None, reduction='mean') -> Tensor
@@ -2800,7 +2800,7 @@ def multilabel_soft_margin_loss(input, target, weight=None, size_average=None,
     return ret
 
 
-def cosine_embedding_loss(input1, input2, target, margin=0, size_average=None,
+def cosine_embedding_loss(input1, input2, target, margin=0.0, size_average=None,
                           reduce=None, reduction='mean'):
     # type: (Tensor, Tensor, Tensor, float, Optional[bool], Optional[bool], str) -> Tensor
     r"""cosine_embedding_loss(input1, input2, target, margin=0, size_average=None, reduce=None, reduction='mean') -> Tensor
@@ -3496,7 +3496,7 @@ def affine_grid(theta, size, align_corners=None):
     return torch.affine_grid_generator(theta, size, align_corners)
 
 
-def _pad(input, pad, mode='constant', value=0):
+def _pad(input, pad, mode='constant', value=0.0):
     # type: (Tensor, List[int], str, float) -> Tensor
     r"""Pads tensor.
 
@@ -3716,7 +3716,7 @@ Examples:
 """)
 
 
-def triplet_margin_loss(anchor, positive, negative, margin=1.0, p=2, eps=1e-6, swap=False, size_average=None,
+def triplet_margin_loss(anchor, positive, negative, margin=1.0, p=2.0, eps=1e-6, swap=False, size_average=None,
                         reduce=None, reduction="mean"):
     # type: (Tensor, Tensor, Tensor, float, float, float, bool, Optional[bool], Optional[bool], str) -> Tensor
     r"""
@@ -3737,7 +3737,7 @@ def triplet_margin_loss(anchor, positive, negative, margin=1.0, p=2, eps=1e-6, s
                                      swap, reduction_enum)
 
 
-def normalize(input, p=2, dim=1, eps=1e-12, out=None):
+def normalize(input, p=2.0, dim=1, eps=1e-12, out=None):
     # type: (Tensor, float, int, float, Optional[Tensor]) -> Tensor
     r"""Performs :math:`L_p` normalization of inputs over specified dimension.
 

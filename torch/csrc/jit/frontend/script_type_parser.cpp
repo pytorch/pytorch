@@ -218,15 +218,18 @@ TypePtr ScriptTypeParser::parseType(const std::string& str) {
 }
 
 bool checkMutableFunctionDefault(const IValue& def) {
-  if (def.isList() || def.isGenericDict()) {
-    return true;
-  }
+  // TODO: Renable.
+  // if (def.isList() || def.isGenericDict()) {
+  //   return true;
+  // }
 
-  if (def.isTuple()) {
-    for (auto& elem : def.toTuple()->elements()) {
-      return checkMutableFunctionDefault(elem);
-    }
-  }
+  // if (def.isTuple()) {
+  //   for (auto& elem : def.toTuple()->elements()) {
+  //     if(checkMutableFunctionDefault(elem)) {
+  //       return true;
+  //     }
+  //   }
+  // }
 
   return false;
 }
@@ -257,6 +260,37 @@ std::vector<IValue> ScriptTypeParser::evaluateDefaults(
   std::vector<IValue> default_values;
   if (default_exprs.empty())
     return default_values;
+
+  // If any default argument type is BroadcastList, the expression
+  // will be default value will be expanded into a list later.
+  // Use their type contained in the list for evaluating defaults
+  // instead.
+  std::vector<Expr> modified_types;
+  modified_types.reserve(default_types.size());
+  for (auto& ty : default_types) {
+    auto parsed = parseBroadcastList(ty);
+    if (!parsed) {
+      modified_types.emplace_back(ty);
+    } else {
+      auto parsed_type = parsed->first;
+      bool wrap_optional = false;
+      if (auto opt = parsed_type->cast<OptionalType>()) {
+        wrap_optional = true;
+        parsed_type = opt->getElementType();
+      }
+
+      if (auto list = parsed_type->cast<ListType>()) {
+        auto modified_type = wrap_optional
+            ? OptionalType::create(list->getElementType())
+            : list->getElementType();
+        modified_types.emplace_back(
+            Var::create(r, Ident::create(r, modified_type->annotation_str())));
+      } else {
+        TORCH_INTERNAL_ASSERT("Expected BroadcastList but got ", parsed_type->repr_str());
+      }
+    }
+  }
+
   // To evaluate the default expressions, we create a graph with no inputs,
   // and whose returns are the default values we need.
   // We then run constant prop on this graph and check the results are
@@ -267,7 +301,7 @@ std::vector<IValue> ScriptTypeParser::evaluateDefaults(
   auto tuple_type = Subscript::create(
       r,
       Var::create(r, Ident::create(r, "Tuple")),
-      List<Expr>::create(r, default_types));
+      List<Expr>::create(r, modified_types));
   auto blank_decl = Decl::create(
       r, List<Param>::create(r, {}), Maybe<Expr>::create(r, tuple_type));
 

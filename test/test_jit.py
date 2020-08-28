@@ -2254,11 +2254,14 @@ graph(%Ra, %Rb):
     def test_function_default_values(self):
         outer_var = torch.tensor(20)
         outer_var2 = torch.tensor(30)
-        a = torch.tensor(0.5)
-        b = torch.tensor(10)
 
         @torch.jit.script
-        def simple_fn(x, a=a, b=b, c=outer_var + outer_var2):
+        def simple_fn(
+            x,
+            a: Tensor = torch.tensor(0.5),
+            b: Tensor = torch.tensor(10),
+            c: Tensor = torch.tensor(20) + torch.tensor(30)
+        ):
             return x + a + b + c
 
         self.assertEqual(
@@ -2268,11 +2271,8 @@ graph(%Ra, %Rb):
             simple_fn(torch.ones(1), torch.tensor(1), torch.tensor(3), torch.tensor(4)),
             torch.ones(1) + 1 + 3 + 4)
 
-        outer_c = torch.tensor(9)
-        outer_flag = torch.tensor(False)
-
         @torch.jit.script
-        def bool_fn(x, a=outer_c, flag=outer_flag):
+        def bool_fn(x, a: Tensor = torch.tensor(9), flag: Tensor = torch.tensor(False)):
             if bool(flag):
                 result = x
             else:
@@ -2299,13 +2299,13 @@ graph(%Ra, %Rb):
 
         self.assertEqual(hints(torch.ones(1)), torch.ones(1) + 0.5 + 10)
 
-        with self.assertRaisesRegex(RuntimeError, "Expected a default value"):
-
+        with self.assertRaisesRegex(RuntimeError, "was annotated as having type .* but is actually of type"):
             @torch.jit.script
             def hints_bad_types(x, a=10, b=0.5):  # noqa: T484
                 # type: (Tensor, float, int) -> Tensor
                 return x + a + b
-        with self.assertRaisesRegex(RuntimeError, "Expected a default value"):
+
+        with self.assertRaisesRegex(RuntimeError, "was annotated as having type .* but is actually of type"):
             @torch.jit.script
             def bad_no_optional(x=None):
                 # type: (Dict[str, int]) -> Dict[str, int]
@@ -2313,28 +2313,26 @@ graph(%Ra, %Rb):
 
 
     def test_module_default_values(self):
-        four = torch.tensor(4)
-
         class Test(torch.jit.ScriptModule):
             def __init__(self):
                 super(Test, self).__init__()
 
             @torch.jit.script_method
-            def forward(self, input, other=four):
+            def forward(self, input, other: Tensor = torch.tensor(4)):
                 return input + other
 
         t = Test()
         self.assertEqual(t(torch.ones(1)), torch.ones(1) + 4)
 
+    @unittest.skip("TODO: Renable")
     def test_mutable_default_values(self):
         with self.assertRaisesRegex(Exception, "Mutable default parameters"):
             @torch.jit.script
-            def foo(x=(1, [])):
-                # type: (Tuple[int, List[Tensor]])
+            def foo(x: Tuple[int, List[Tensor]] = (1, [])):
                 return x
 
         class Test(torch.nn.Module):
-            def forward(self, input=[]):  # noqa: B006
+            def forward(self, input: List[Tensor] = []):  # noqa: B006
                 return input
 
         with self.assertRaisesRegex(Exception, "Mutable default parameters"):
@@ -2642,7 +2640,7 @@ class TestScript(JitTestCase):
         CONSTANTS.cN format used in the output of the `code` property.
         """
         @torch.jit.script
-        def foo(x=torch.ones(1)):
+        def foo(x: Tensor = torch.ones(1)):
             return x
 
         class Moddy(torch.nn.Module):
@@ -2663,7 +2661,7 @@ class TestScript(JitTestCase):
         Check that the `code_with_constants` property correctly works on restoration after save() + load()
         """
         @torch.jit.script
-        def foo(x=torch.ones(1)):
+        def foo(x: Tensor = torch.ones(1)):
             return x
 
         class Moddy(torch.nn.Module):
