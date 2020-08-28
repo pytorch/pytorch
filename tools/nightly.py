@@ -483,7 +483,7 @@ def _can_link(platform, source_dir, target_dir):
     if platform.startswith("win"):
         return False
     src = os.path.join(source_dir, "__nightly_test__")
-    trg = os.path.join(source_dir, "__nightky_test__")
+    trg = os.path.join(target_dir, "__nightky_test__")
     try:
         with open(src, "w"):
             pass
