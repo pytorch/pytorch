@@ -27,7 +27,7 @@ def patched_getline(*args, **kwargs):
     return _orig_getlines(*args, **kwargs)
 linecache.getlines = patched_getline
 
-def deserialize_graphmodule(root : torch.nn.Module, src : str):
+def deserialize_graphmodule(root : torch.nn.Module, src : str) -> torch.nn.Module:
     """
     Deserialize a GraphModule given the original `root` module and the generated
     `forward()` source code (`src`). This will exec() the source of the forward
@@ -35,7 +35,7 @@ def deserialize_graphmodule(root : torch.nn.Module, src : str):
     to the original code. Then it symbolically traces through it to get the
     GraphModule
     """
-    root = copy.deepcopy(root)
+    root = copy.copy(root)
     from .symbolic_trace import symbolic_trace
     gbls: Dict[str, Any] = {
         'torch': torch
