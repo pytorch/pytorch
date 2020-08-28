@@ -139,9 +139,6 @@ endif()
 # Add HIP to the CMAKE Module Path
 set(CMAKE_MODULE_PATH ${HIP_PATH}/cmake ${CMAKE_MODULE_PATH})
 
-# Disable Asserts In Code (Can't use asserts on HIP stack.)
-add_definitions(-DNDEBUG)
-
 macro(find_package_and_print_version PACKAGE_NAME)
   find_package("${PACKAGE_NAME}" ${ARGN})
   message("${PACKAGE_NAME} VERSION: ${${PACKAGE_NAME}_VERSION}")
@@ -149,6 +146,14 @@ endmacro()
 
 # Find the HIP Package
 find_package_and_print_version(HIP 1.0)
+
+if (HIP_VERSION VERSION_LESS "3.7")
+  # Disable Asserts In Code (Can't use asserts on HIP stack.)
+  add_definitions(-DNDEBUG)
+  message("HIP VERSION < 3.7; disablng asserts")
+else()
+  message("HIP VERSION >= 3.7; enabling asserts")
+endif()
 
 if(HIP_FOUND)
   set(PYTORCH_FOUND_HIP TRUE)
@@ -176,7 +181,7 @@ if(HIP_FOUND)
   execute_process(COMMAND dpkg -l COMMAND grep hsakmt-roct COMMAND awk "{print $2 \" VERSION: \" $3}")
   execute_process(COMMAND dpkg -l COMMAND grep rocr-dev COMMAND awk "{print $2 \" VERSION: \" $3}")
   execute_process(COMMAND dpkg -l COMMAND grep -w hcc COMMAND awk "{print $2 \" VERSION: \" $3}")
-  execute_process(COMMAND dpkg -l COMMAND grep hip_base COMMAND awk "{print $2 \" VERSION: \" $3}")
+  execute_process(COMMAND dpkg -l COMMAND grep hip-base COMMAND awk "{print $2 \" VERSION: \" $3}")
   execute_process(COMMAND dpkg -l COMMAND grep hip_hcc COMMAND awk "{print $2 \" VERSION: \" $3}")
 
   message("\n***** Library versions from cmake find_package *****\n")
