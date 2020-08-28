@@ -1203,7 +1203,7 @@ class TestVmapBatchedGradient(TestCase):
     #       that should be differentiated.
     # batch_size: the batch dim size for the batched grad
     #
-    # NB: we only test computing batched gradients are in the second gradient
+    # NB: we only test computing batched gradients in the second gradient
     # computation. One specific use case that does this is computing the hessian
     # matrix of a scalar-valued function; this is useful in Bayesian Logistic
     # Regression.
@@ -1217,8 +1217,8 @@ class TestVmapBatchedGradient(TestCase):
         first_grads = torch.autograd.grad(outputs, differentiable(args), ones,
                                           create_graph=True)
         first_grads = differentiable(first_grads)
-        if len(first_grads) == 0:
-            return  # None of the grads actually depend on the input
+        self.assertNotEqual(
+            len(first_grads), 0, "None of the first grads depend on the input!")
 
         batched_vectors = tuple(construct_v(grad, batch_size) for grad in first_grads)
 
