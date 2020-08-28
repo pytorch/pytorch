@@ -261,9 +261,11 @@ Pointwise Ops
     asin
     arcsin
     asinh
+    arcsinh
     atan
     arctan
     atanh
+    arctanh
     atan2
     bitwise_not
     bitwise_and
