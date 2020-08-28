@@ -11876,45 +11876,6 @@ class TestNNDeviceType(NNTestCase):
             for p, pe in zip(test_model.parameters(), ref_model.parameters()):
                 self.assertEqual(p.grad.to(devices[0]), pe.grad)
 
-    def test_elu_inplace_overlap(self, device):
-        x = torch.randn((1, 6), device=device).expand((6, 6))
-        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
-            F.elu(x, inplace=True)
-        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
-            F.elu_(x)
-
-    def test_hardswish_inplace_overlap(self, device):
-        x = torch.randn((1, 6), device=device).expand((6, 6))
-        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
-            F.hardswish(x, inplace=True)
-
-    def test_silu_inplace_overlap(self, device):
-        x = torch.randn((1, 6), device=device).expand((6, 6))
-        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
-            F.silu(x, inplace=True)
-
-    def test_softplus_inplace_overlap(self, device):
-        x = torch.randn((1, 6), device=device).expand((6, 6))
-        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
-            F.softplus(x, out=x)
-
-    def test_softshrink_inplace_overlap(self, device):
-        x = torch.randn((1, 6), device=device).expand((6, 6))
-        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
-            F.softshrink(x, out=x)
-
-    def test_leaky_relu_inplace_overlap(self, device):
-        x = torch.randn((1, 6), device=device).expand((6, 6))
-        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
-            F.leaky_relu(x, inplace=True)
-        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
-            F.leaky_relu_(x)
-
-    def test_threshold_inplace_overlap(self, device):
-        # Inplace threshold is okay, because it is idempotent
-        x = torch.randn((1, 6), device=device).expand((6, 6))
-        F.threshold(x, 0.5, 0.5, inplace=True)
-        F.threshold_(x, 0.5, 0.5)
 
 class TestModuleGlobalHooks(TestCase):
 
