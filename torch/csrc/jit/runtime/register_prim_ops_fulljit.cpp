@@ -63,7 +63,7 @@ RegisterOperators reg(
            };
          },
          aliasAnalysisSpecialCase()),
-     Operator(         
+     Operator(
          prim::FallbackGraph,
          [](const Node* node) -> Operation {
            return [](Stack* stack) {

@@ -1199,21 +1199,22 @@ void testThreadLocalDebugInfo() {
 }
 
 void testFallbackGraphs() {
-
-
-  static const auto nestGraphIntoFallbackGraph = [](const std::shared_ptr<Graph>& graph) {
-    ProfilingRecord::removeProfileCounter(graph->block());
-    auto fallback =
-        createFallbackGraph(graph->block(), graph->inputs(), graph.get());
-    graph->prependNode(fallback);
-    for (size_t i = 0; i < graph->outputs().size(); i++) {
-      graph->outputs()[i]->replaceAllUsesWith(fallback->output(i));
-      fallback->output(i)->copyMetadata(graph->outputs()[i]);
-    }
-    for (auto it = graph->block()->nodes().rbegin(); it != fallback->iterator(); it++) {
-      it.destroyCurrent();
-    }
-  };
+  static const auto nestGraphIntoFallbackGraph =
+      [](const std::shared_ptr<Graph>& graph) {
+        ProfilingRecord::removeProfileCounter(graph->block());
+        auto fallback =
+            createFallbackGraph(graph->block(), graph->inputs(), graph.get());
+        graph->prependNode(fallback);
+        for (size_t i = 0; i < graph->outputs().size(); i++) {
+          graph->outputs()[i]->replaceAllUsesWith(fallback->output(i));
+          fallback->output(i)->copyMetadata(graph->outputs()[i]);
+        }
+        for (auto it = graph->block()->nodes().rbegin();
+             it != fallback->iterator();
+             it++) {
+          it.destroyCurrent();
+        }
+      };
 
   auto x = at::randn({1}, at::kCPU);
   auto y = at::randn({1}, at::kCPU);
@@ -1267,8 +1268,6 @@ void testFallbackGraphs() {
         .check("(Tensor) = prim::CallFunction")
         ->run(*opt_graph);
   }
-
-
 }
 
 void testAutogradProfiler() {
