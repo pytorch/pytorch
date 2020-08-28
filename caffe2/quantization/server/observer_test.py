@@ -32,6 +32,12 @@ dnnlowp_pybind11.ObserveHistogramOfOutput("test_net.hist", 1)
 workspace.CreateNet(net)
 workspace.RunNet(net)
 
+
+workspace.FeedBlob("X", X)
+workspace.FeedBlob("W", W)
+workspace.FeedBlob("b", b)
+
 dnnlowp_pybind11.AddOutputColumnMaxHistogramObserver(
-    net._net.name, "test_net._col_max_hist", ["X", "W"]
+    net._net.name, "test_net._col_max_hist", ["Y"]
 )
+workspace.RunNet(net)

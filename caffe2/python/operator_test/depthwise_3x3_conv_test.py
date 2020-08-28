@@ -6,7 +6,7 @@ from __future__ import unicode_literals
 import numpy as np
 import caffe2.python.hypothesis_test_util as hu
 from caffe2.python import core, dyndep, utils, workspace
-from hypothesis import given
+from hypothesis import given, settings
 import hypothesis.strategies as st
 
 
@@ -20,6 +20,7 @@ class Depthwise3x3ConvOpsTest(hu.HypothesisTestCase):
            engine=st.sampled_from(["DEPTHWISE_3x3"]),
            use_bias=st.booleans(),
            **hu.gcs)
+    @settings(deadline=10000)
     def test_convolution_gradients(self, pad, kernel, size,
                                    channels, batch_size,
                                    order, engine, use_bias, gc, dc):

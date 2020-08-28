@@ -11,7 +11,7 @@ from caffe2.python.operator_test.fused_nbit_rowwise_test_helper import (
     _compress_uniform_simplified,
     param_search_greedy,
 )
-from hypothesis import assume, given
+from hypothesis import assume, given, settings
 
 
 # Eigen/Python round 0.5 away from 0, Numpy rounds to even
@@ -205,6 +205,7 @@ def ErrorThresholdRow(X, bit_rate):
 
 class TestNBitFakeFused(hu.HypothesisTestCase):
     @given(bit_rate=st.sampled_from([2, 4]))
+    @settings(deadline=1000)
     def testNBit(self, bit_rate):
         # uncomment for debugging
         # np.random.seed(0)
@@ -270,6 +271,7 @@ class TestNBitFakeFused(hu.HypothesisTestCase):
 
 class TestNBitGreedyFused(hu.HypothesisTestCase):
     @given(bit_rate=st.sampled_from([2, 4]))
+    @settings(deadline=None, max_examples=50)
     def testNBit(self, bit_rate):
         # uncomment for debugging
         # np.random.seed(0)

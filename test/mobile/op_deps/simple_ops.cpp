@@ -2,7 +2,6 @@
 
 #include <iostream>
 
-#include <ATen/core/op_registration/hacky_wrapper_for_legacy_signatures.h>
 #include <c10/core/TensorOptions.h>
 #include <torch/library.h>
 
@@ -105,7 +104,7 @@ TORCH_LIBRARY_IMPL(_test, CPU, m) {
   );
   m.impl("GG",
          torch::dispatch(DispatchKey::CPU,
-                         c10::impl::hacky_wrapper_for_legacy_signatures(TORCH_FN((GG_op))))
+                         TORCH_FN((GG_op)))
   );
   m.impl("HH",
     [] (Tensor a) -> Tensor {

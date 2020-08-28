@@ -190,7 +190,7 @@ def _onnx_opset_unsupported_detailed(op_name, current_opset, supported_opset, re
                        'opset {}. {}. Please try opset version {}.'.format(op_name, current_opset, reason, supported_opset))
 
 
-def _black_list_in_opset(name):
+def _block_list_in_opset(name):
     def symbolic_fn(*args, **kwargs):
         raise RuntimeError("ONNX export failed on {}, which is not implemented for opset {}. "
                            "Try exporting with other opset versions."
@@ -452,6 +452,13 @@ def _flatten_helper(g, input, start_dim, end_dim, dim):
     final_shape = g.op("Concat", *slices, axis_i=0)
     from torch.onnx.symbolic_opset9 import _reshape_from_tensor
     return _reshape_from_tensor(g, input, final_shape)
+
+def _is_split_static(split_size_or_sizes, _outputs):
+    if _outputs is None:
+        return False
+    if _is_value(split_size_or_sizes) and split_size_or_sizes.node().kind() != 'onnx::Constant':
+        return False
+    return True
 
 # ---------------------------------------------------------------------
 # ONNX operator version

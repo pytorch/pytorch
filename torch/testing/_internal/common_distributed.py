@@ -1,5 +1,6 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
+from multiprocessing import Manager
 import os
 import sys
 import tempfile
@@ -71,6 +72,19 @@ def skip_if_not_multigpu(func):
 
     return wrapper
 
+def require_n_gpus_for_nccl_backend(n, backend):
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            if backend == "nccl" and torch.cuda.device_count() < n:
+                message = "Need at least {} CUDA devices".format(n)
+                TEST_SKIPS["multi-gpu"] = TestSkip(75, message)
+                sys.exit(TEST_SKIPS['multi-gpu'].exit_code)
+            else:
+                return func(*args, **kwargs)
+        return wrapper
+
+    return decorator
 
 def skip_if_lt_x_gpu(x):
     def decorator(func):
@@ -247,6 +261,12 @@ class MultiProcessTestCase(TestCase):
         return self.id().split(".")[-1]
 
     def _start_processes(self, proc):
+        test_skips_manager = Manager()
+        test_skips = test_skips_manager.dict()
+        global TEST_SKIPS
+        test_skips.update(TEST_SKIPS)
+        TEST_SKIPS = test_skips
+
         self.processes = []
         for rank in range(int(self.world_size)):
             process = proc(

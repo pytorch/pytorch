@@ -309,7 +309,7 @@ struct CompleteArgumentSpec {
     return data.data() + ninputs;
   }
   size_t hash_code; // precomputed on construction
-  int32_t ninputs;
+  size_t ninputs;
   // layout is ninputs of TensorPOD (each 64-bit) followed by their size and
   // stride info for 3 tensors:
   // [t0POD][t1POD][t2POD]...

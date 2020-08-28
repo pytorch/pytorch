@@ -3,6 +3,7 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <torch/csrc/jit/codegen/cuda/dispatch.h>
+#include <torch/csrc/jit/codegen/cuda/lower_thread_predicate.h>
 
 #include <iostream>
 
@@ -12,10 +13,42 @@ namespace fuser {
 
 class Fusion;
 
+// Hierarchal dispatch functions for handle
 class Statement;
-
-class Val;
 class Expr;
+class Val;
+
+// Vals
+class IterDomain;
+class TensorDomain;
+class TensorView;
+class Bool;
+class Float;
+class Half;
+class Int;
+class NamedScalar;
+
+// Exprs
+class Split;
+class Merge;
+class UnaryOp;
+class BinaryOp;
+class TernaryOp;
+class ReductionOp;
+class BroadcastOp;
+
+// Kernel IR
+namespace kir {
+
+class Bool;
+class Float;
+class Half;
+class Int;
+class NamedScalar;
+
+class IterDomain;
+class TensorDomain;
+class TensorView;
 
 class UnaryOp;
 class BinaryOp;
@@ -23,22 +56,14 @@ class TernaryOp;
 class ReductionOp;
 class BroadcastOp;
 
+class TensorIndex;
+class Allocate;
 class ForLoop;
 class IfThenElse;
+class GridReduction;
+class Sync;
 
-class TensorDomain;
-class TensorView;
-class IterDomain;
-class TensorIndex;
-
-class Split;
-class Merge;
-
-class Bool;
-class Float;
-class Half;
-class Int;
-class Add;
+} // namespace kir
 
 /*
  * Define pretty printing functions for all nodes. handle is used so we can take
@@ -56,9 +81,6 @@ class TORCH_CUDA_API IRPrinter : public OptInConstDispatch {
   // Track the indentation size for pretty printing
   int indent_size = 0;
 
-  // Handle value mapping
-  bool follow_val_map = true;
-
   // Indent the generated code
   void indent() {
     for (int i = 0; i < indent_size; i++)
@@ -69,7 +91,10 @@ class TORCH_CUDA_API IRPrinter : public OptInConstDispatch {
     indent_size = 0;
   }
 
-  void printHeader(Fusion* fusion, const std::string& kernel_name_);
+  void printHeader(
+      Fusion* fusion,
+      const std::string& kernel_name_,
+      const std::vector<Val*>& global_buffers);
 
   IRPrinter(std::ostream& _os) : os(_os) {}
 
@@ -93,7 +118,7 @@ class TORCH_CUDA_API IRPrinter : public OptInConstDispatch {
   void handle(const TensorDomain*) override;
   void handle(const TensorView*) override;
   void handle(const IterDomain*) override;
-  void handle(const TensorIndex*) override;
+  void handle(const kir::TensorIndex*) override;
 
   void handle(const Bool*) override;
   void handle(const Float*) override;
@@ -107,9 +132,27 @@ class TORCH_CUDA_API IRPrinter : public OptInConstDispatch {
   void handle(const ReductionOp*) override;
   void handle(const BroadcastOp*) override;
 
-  void handle(const ForLoop*) override;
-  void handle(const IfThenElse*) override;
-  void handle(const Allocate*) override;
+  void handle(const kir::Bool*) override;
+  void handle(const kir::Float*) override;
+  void handle(const kir::Half*) override;
+  void handle(const kir::Int*) override;
+  void handle(const kir::NamedScalar*) override;
+
+  void handle(const kir::IterDomain*) override;
+  void handle(const kir::TensorDomain*) override;
+  void handle(const kir::TensorView*) override;
+
+  void handle(const kir::UnaryOp*) override;
+  void handle(const kir::BinaryOp*) override;
+  void handle(const kir::TernaryOp*) override;
+  void handle(const kir::ReductionOp*) override;
+  void handle(const kir::BroadcastOp*) override;
+
+  void handle(const kir::GridReduction*) override;
+  void handle(const kir::ForLoop*) override;
+  void handle(const kir::IfThenElse*) override;
+  void handle(const kir::Allocate*) override;
+  void handle(const kir::Sync*) override;
 
   void handle(const Split*) override;
   void handle(const Merge*) override;
@@ -125,7 +168,13 @@ class TORCH_CUDA_API IRPrinter : public OptInConstDispatch {
 
   void printKernel(
       const std::vector<Expr*>& exprs,
-      const std::string& kernel_name);
+      const std::string& kernel_name,
+      const std::vector<Val*>& global_buffers);
+
+ private:
+  std::unique_ptr<ThreadPredicateMap> thread_predicates_;
+
+  const ThreadPredicateMap& getThreadPredicateMap();
 };
 
 TORCH_CUDA_API std::ostream& operator<<(

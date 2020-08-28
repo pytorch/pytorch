@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <array>
 #include <functional>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -249,8 +250,9 @@ class SpatialBNOp : public Operator<Context> {
       T* beta) {
     const T a = T(1) - static_cast<T>(momentum_);
     const T b = static_cast<T>(momentum_);
-    const T unbias_scale =
-        static_cast<T>(reduce_size) / static_cast<T>(reduce_size - 1);
+    const T unbias_scale = reduce_size == 1
+        ? std::numeric_limits<T>::infinity()
+        : static_cast<T>(reduce_size) / static_cast<T>(reduce_size - 1);
     math::Axpby<T, T, Context>(C, a, mean, b, running_mean, &context_);
     math::Axpby<T, T, Context>(
         C, a * unbias_scale, var, b, running_var, &context_);

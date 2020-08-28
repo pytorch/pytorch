@@ -51,10 +51,6 @@ struct TypeHash {
 class Fusion;
 class TensorView;
 
-namespace cuda {
-class CudaKernel;
-}
-
 // Fusion Guard is our "context manager". It holds the actrive fusion and allows
 // it to be accessed anywhere through FusionGuard::getCurFusion().
 class TORCH_CUDA_API FusionGuard {
@@ -62,8 +58,7 @@ class TORCH_CUDA_API FusionGuard {
   Fusion* prev_fusion;
 
   // Set the active fusion so it can be manipulated.
-  FusionGuard(Fusion* fusion);
-  FusionGuard(const cuda::CudaKernel* cuda_kernel);
+  explicit FusionGuard(Fusion* fusion);
 
   ~FusionGuard();
 
@@ -79,11 +74,11 @@ class ExprSort : public IterVisitor {
   void handle(Expr* expr) override;
 
  public:
+  static std::vector<Expr*> getExprs(Fusion* fusion, bool from_outputs_only);
+
   static std::vector<Expr*> getExprs(
       Fusion* fusion,
-      bool from_outputs_only,
-      bool breadth_first,
-      bool respect_compute_at);
+      const std::vector<Val*>& from);
 };
 
 class InputsOf : public IterVisitor {
@@ -145,22 +140,15 @@ class TORCH_CUDA_API Fusion final {
   /*
    * Return a list of topologically sorted expressions. We can start
    * by only traversing back from registered outputs, or from all terminating
-   * Vals. Can also select depth first traversal, or breadth first.1
+   * Vals.
    *
    * from_outputs_only:
    *   True - Sort from DAG associated with registered outputs
    *   False - Sort from all terminating Vals.
-   * breadth_first :
-   *   False - Sort from depth first traversal
-   *   True - Sort from breadth first traversal - Not Implemented Yet!
-   *
-   * TODO: Implement breadth_first
    */
-  std::vector<Expr*> exprs(
-      bool from_outputs_only = false,
-      bool breadth_first = false,
-      bool respect_compute_at = false);
+  std::vector<Expr*> exprs(bool from_outputs_only = false);
 
+  // Return a vector of fusion inputs that feed this Val
   std::unordered_set<Val*> inputsOf(Val* val);
 
   // Assert that all leaves found from outputs are registered as an input.
@@ -168,9 +156,6 @@ class TORCH_CUDA_API Fusion final {
 
   // Print this fusion to cout.
   void print();
-
-  // Print value mapping
-  void printValuesMap();
 
   // Print Arith exprs used in outputs
   void printMath();
@@ -190,6 +175,13 @@ class TORCH_CUDA_API Fusion final {
 
   // Register stmt with this fusion.
   StmtNameType registerStatement(Statement* stmt);
+
+  // Lowered nodes
+  StmtNameType registerLoweredVal(Val* val);
+  StmtNameType registerLoweredExpr(Expr* expr);
+
+  // Lowered counterpart to inFusion()
+  bool inKernelIr(const Statement* stmt) const;
 
   // Check if val is used in this fusion. Not equivelent to DCE
   bool used(Val* val) const;
@@ -219,20 +211,6 @@ class TORCH_CUDA_API Fusion final {
   bool hasGridReduction();
   size_t gridReductionTempBufferSize();
 
-  void setValuesMap(std::unordered_map<Val*, Val*> values_map) {
-    values_map_ = std::move(values_map);
-  }
-
-  Val* loweredVal(Val* value) const {
-    auto it = values_map_.find(value);
-    return it != values_map_.end() ? it->second : value;
-  }
-
-  const Val* loweredVal(const Val* value) const {
-    auto it = values_map_.find(const_cast<Val*>(value));
-    return it != values_map_.end() ? it->second : value;
-  }
-
   const auto& inputs() const {
     return inputs_;
   }
@@ -240,6 +218,8 @@ class TORCH_CUDA_API Fusion final {
   const auto& outputs() const {
     return outputs_;
   }
+
+  std::vector<Val*> getTerminatingOutputs();
 
   bool hasInput(const Val* val) const;
   bool hasOutput(const Val* val) const;
@@ -260,27 +240,23 @@ class TORCH_CUDA_API Fusion final {
   std::deque<Val*> val_deque_;
   std::unordered_set<Expr*> expr_set_;
 
-  // map from valtype to individual name counters
-  std::unordered_map<ValType, StmtNameType, TypeHash> val_type_name_map_ = {
-      {ValType::TensorView, 0},
-      {ValType::TensorDomain, 0},
-      {ValType::IterDomain, 0},
-      {ValType::Scalar, 0}};
+  // Values names counters
+  std::unordered_map<ValType, StmtNameType, TypeHash> val_type_name_map_;
 
-  // Generic counters
-  StmtNameType val_name_counter_ = 0;
+  // Expression names counter
   StmtNameType expr_name_counter_ = 0;
 
   // Dependency tracking for Vals. Where did it come from? Where is it used?
   std::unordered_map<Val*, Expr*> origin_;
   std::unordered_map<Val*, std::unordered_set<Expr*>> uses_;
 
-  // Map a subset of values to the lowered equivalent (ex. sizes)
-  std::unordered_map<Val*, Val*> values_map_;
-
   // Fusion inputs and outputs
   std::vector<Val*> inputs_;
   std::vector<Val*> outputs_;
+
+  // Lowered IR
+  std::unordered_set<Val*> lowered_val_set_;
+  std::unordered_set<Expr*> lowered_expr_set_;
 };
 
 } // namespace fuser

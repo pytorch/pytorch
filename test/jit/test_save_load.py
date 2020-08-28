@@ -515,9 +515,6 @@ class TestSaveLoad(JitTestCase):
         self.assertTrue((a == 2.).all())
         self.assertTrue((b == 1.).all())
 
-        with self.assertRaisesRegex(RuntimeError, ".+is currently unsupported.+"):
-            current_module(2)
-
     # Tests that torch.full behavior which is the same from prior versions
     #   to version 5 is preserved.
     # NOTE: while torch.full in eager PyTorch accepts a requires_grad argument,

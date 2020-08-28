@@ -527,24 +527,24 @@ void OnnxExporter::CopyCaffe2ArgToOnnxAttr(
   }
 }
 
-bool OnnxExporter::IsBlackListed(const caffe2::Argument& arg) {
+bool OnnxExporter::IsBlockListed(const caffe2::Argument& arg) {
   const static std::unordered_map<std::string, std::unordered_set<std::string>>
-      kBlackListString = {{"order", {"NCHW"}}};
+      kBlockListString = {{"order", {"NCHW"}}};
   const static std::unordered_map<std::string, std::unordered_set<int64_t>>
-      kBlackListInt = {{"cudnn_exhaustive_search", {0, 1}},
+      kBlockListInt = {{"cudnn_exhaustive_search", {0, 1}},
                        {"use_cudnn", {0, 1}},
                        {"exhaustive_search", {0, 1}},
                        {"is_test", {0, 1}},
                        {"broadcast", {0, 1}}};
 
   if (arg.has_i()) {
-    const auto it = kBlackListInt.find(arg.name());
-    if (it != kBlackListInt.end()) {
+    const auto it = kBlockListInt.find(arg.name());
+    if (it != kBlockListInt.end()) {
       return it->second.count(arg.i());
     }
   } else if (arg.has_s()) {
-    const auto it = kBlackListString.find(arg.name());
-    if (it != kBlackListString.end()) {
+    const auto it = kBlockListString.find(arg.name());
+    if (it != kBlockListString.end()) {
       return it->second.count(arg.s());
     }
   }
@@ -586,7 +586,7 @@ ConvertedResult OnnxExporter::CommonCaffe2OpToOnnxNodes(
     node.add_output(o);
   }
   for (const auto& a : def.arg()) {
-    if (!IsBlackListed(a)) {
+    if (!IsBlockListed(a)) {
       auto* attr = node.add_attribute();
       CopyCaffe2ArgToOnnxAttr(attr, def.type(), a);
     }

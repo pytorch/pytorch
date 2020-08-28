@@ -413,6 +413,13 @@ struct MakeNextFunctionList : IterArgs<MakeNextFunctionList> {
       next_edges.emplace_back();
     }
   }
+  void operator()(const c10::optional<Variable>& variable) {
+    if (variable.has_value() && variable->defined()) {
+      next_edges.push_back(impl::gradient_edge(*variable));
+    } else {
+      next_edges.emplace_back();
+    }
+  }
 };
 } // namespace detail
 

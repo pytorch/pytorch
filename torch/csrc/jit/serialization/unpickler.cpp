@@ -59,6 +59,7 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
       case IntType::Kind:
       case NoneType::Kind:
       case GeneratorType::Kind:
+      case QuantizerType::Kind:
       case BoolType::Kind:
       case VarType::Kind:
       case CapsuleType::Kind:
@@ -623,6 +624,7 @@ void Unpickler::rebuildTensor(bool quantized) {
           result = at::_empty_affine_quantized(
               {0}, storage_tensor.options(), q_scale, q_zero_point);
         } break;
+        case at::kPerChannelAffineFloatQParams:
         case at::kPerChannelAffine: {
           const auto& scales = qparams.at(1).toTensor();
           const auto& zero_points = qparams.at(2).toTensor();

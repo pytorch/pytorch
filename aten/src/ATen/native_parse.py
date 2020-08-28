@@ -89,6 +89,10 @@ def type_argument_translations(arg):
         raise RuntimeError("Please use float and not double. "
                            "See [temp translations] for details.")
     # Enables int[x] by translating to legacy IntArrayRef[x]. See [temp translations]
+    elif re.match(r'int\[(\d+)\]\?', t):
+        match = re.match(r'int\[(\d+)\]\?', t)
+        t = 'IntArrayRef'
+        size = int(match.group(1))
     elif re.match(r'int\[(\d+)\]', t):
         match = re.match(r'int\[(\d+)\]', t)
         t = 'IntArrayRef'
@@ -379,6 +383,11 @@ def parse_return_arguments(return_decl, inplace, func_decl):
                     "Return Tensor of function \"{}\" flagged as inplace needs to be " \
                     "annotated as mutable".format(func_decl['func'])
                 argument_dict['name'] = 'self'
+            elif t == "TensorList" and inplace:
+                assert annotation and annotation.endswith("!"), \
+                    "Return TensorList of function \"{}\" flagged as inplace needs to be " \
+                    "annotated as mutable".format(func_decl['func'])
+                argument_dict['name'] = 'self'
             else:
                 argument_dict['name'] = 'result' if not multiple_args else 'result' + str(arg_idx)
         argument_dict['output'] = True
@@ -413,9 +422,6 @@ def propagate_field_names(output_arguments, return_arguments):
         for i, r in enumerate(return_arguments):
             if 'field_name' in r:
                 output_arguments[i]['field_name'] = r['field_name']
-
-def is_named_tensor_only(declaration):
-    return any(['Dimname' in arg['type'] for arg in declaration['arguments']])
 
 
 def run(paths):

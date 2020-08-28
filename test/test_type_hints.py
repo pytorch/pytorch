@@ -8,7 +8,7 @@ import os
 import inspect
 
 try:
-    import mypy.api
+    import mypy.api  # type: ignore
     HAVE_MYPY = True
 except ImportError:
     HAVE_MYPY = False
@@ -204,12 +204,38 @@ class TestTypeHints(TestCase):
             self.skipTest("Typeannotations in numpy-1.20.0-dev are broken")
 
         cwd = os.getcwd()
+        # TODO: Would be better not to chdir here, this affects the entire
+        # process!
         os.chdir(repo_rootdir)
-        (stdout, stderr, result) = mypy.api.run([
-            '--check-untyped-defs',
-            '--follow-imports', 'silent',
-        ])
-        os.chdir(cwd)
+        try:
+            (stdout, stderr, result) = mypy.api.run([
+                '--check-untyped-defs',
+                '--follow-imports', 'silent',
+            ])
+        finally:
+            os.chdir(cwd)
+        if result != 0:
+            self.fail("mypy failed: {}".format(stdout))
+
+    @unittest.skipIf(not HAVE_MYPY, "need mypy")
+    def test_run_mypy_strict(self):
+        """
+        Runs mypy over all files specified in mypy-strict.ini
+        """
+        test_dir = os.path.dirname(os.path.realpath(__file__))
+        repo_rootdir = os.path.join(test_dir, '..')
+        mypy_inifile = os.path.join(repo_rootdir, 'mypy-strict.ini')
+        if not os.path.exists(mypy_inifile):
+            self.skipTest("Can't find PyTorch MyPy strict config file")
+
+        cwd = os.getcwd()
+        os.chdir(repo_rootdir)
+        try:
+            (stdout, stderr, result) = mypy.api.run([
+                '--config', mypy_inifile,
+            ])
+        finally:
+            os.chdir(cwd)
         if result != 0:
             self.fail("mypy failed: {}".format(stdout))
 

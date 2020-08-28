@@ -1,9 +1,46 @@
 #include <test/cpp/jit/test_base.h>
 #include <test/cpp/jit/test_utils.h>
+
+#include <ATen/core/qualified_name.h>
+#include <torch/csrc/jit/frontend/resolver.h>
+#include <torch/csrc/jit/serialization/import.h>
+#include <torch/csrc/jit/serialization/import_source.h>
 #include <torch/torch.h>
 
 namespace torch {
 namespace jit {
+
+static const auto moduleInterfaceSrc = R"JIT(
+class OneInterface(ModuleInterface):
+    def one(self, x: Tensor, y: Tensor) -> Tensor:
+        pass
+)JIT";
+
+static const std::vector<std::string> subModuleMethodsSrc = {R"JIT(
+def one(self, x: Tensor, y: Tensor) -> Tensor:
+    return self.attr * x + y + 1
+
+def forward(self, x: Tensor) -> Tensor:
+    return self.attr + x
+)JIT"};
+
+static const auto parentForward = R"JIT(
+def forward(self, x: Tensor) -> Tensor:
+    return self.subMod1.one(x, x) + self.subMod2.one(x, x)
+)JIT";
+
+static void import_libs(
+    std::shared_ptr<CompilationUnit> cu,
+    const std::string& class_name,
+    const std::shared_ptr<Source>& src,
+    const std::vector<at::IValue>& tensor_table) {
+  SourceImporter si(
+      cu,
+      &tensor_table,
+      [&](const std::string& name) -> std::shared_ptr<Source> { return src; },
+      /*version=*/2);
+  si.loadType(QualifiedName(class_name));
+}
 
 void testModuleClone() {
   auto cu = std::make_shared<CompilationUnit>();
@@ -32,6 +69,50 @@ void testModuleClone() {
   // but different instances
   ASSERT_EQ(Module(p2.attr("c1").toObject()).attr(attr_name).toInt(), 2);
   ASSERT_EQ(Module(p2.attr("c2").toObject()).attr(attr_name).toInt(), 3);
+}
+
+void testModuleCloneWithModuleInterface() {
+  auto cu = std::make_shared<CompilationUnit>();
+
+  // define a initial module with two submods share same interface
+  Module parentMod("parentMod", cu);
+  Module subMod1("subMod1", cu);
+  Module subMod2("subMod2", cu);
+
+  std::vector<at::IValue> constantTable;
+  import_libs(
+      cu,
+      "__torch__.OneInterface",
+      std::make_shared<Source>(moduleInterfaceSrc),
+      constantTable);
+
+  auto v1 = IValue(2);
+  subMod1.register_attribute("attr", IntType::get(), v1, false);
+
+  auto v2 = IValue(4);
+  subMod2.register_attribute("attr", IntType::get(), v2, false);
+
+  for (const std::string& method : subModuleMethodsSrc) {
+    subMod1.define(method, nativeResolver());
+    subMod2.define(method, nativeResolver());
+  }
+
+  parentMod.register_attribute(
+      "subMod1",
+      cu->get_interface("__torch__.OneInterface"),
+      subMod1._ivalue());
+  parentMod.register_attribute(
+      "subMod2",
+      cu->get_interface("__torch__.OneInterface"),
+      subMod2._ivalue());
+
+  parentMod.define(parentForward, nativeResolver());
+
+  Module clonedMod = parentMod.clone();
+
+  // clone will copy both type and data, therefore we'll have a
+  // different type
+  ASSERT_NE(clonedMod.type(), parentMod.type());
 }
 
 void testModuleCopy() {
