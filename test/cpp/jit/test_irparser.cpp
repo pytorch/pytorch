@@ -338,6 +338,24 @@ graph(%a : Float(*, *, device=cpu),
   return (%a)
 )IR");
   }
+  {
+    auto graph = std::make_shared<Graph>();
+    parseIR(
+        R"IR(
+graph():
+  %d : int[] = prim::Constant[value=[1,2,3]]()
+  return (%d)
+)IR",
+        &*graph);
+    Node* n = graph->outputs()[0]->node();
+    AT_ASSERT(n->kind() == prim::Constant);
+    AT_ASSERT(n->kindOf(attr::value) == AttributeKind::ival);
+    const auto& genericList = n->ival(attr::value).toList();
+    std::vector<int> int_vals;
+    for (const IValue& ival : genericList) {
+      int_vals.push_back(ival.toInt());
+    }
+  }
 }
 } // namespace jit
 } // namespace torch
