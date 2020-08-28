@@ -1,4 +1,4 @@
-#include <ATen/native/vulkan/api/api.h>
+#include <ATen/native/vulkan/ops/Library.h>
 #include <ATen/native/vulkan/VulkanOpaqueTensorImpl.h>
 #include <torch/library.h>
 
