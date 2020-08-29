@@ -2105,10 +2105,6 @@ class AbstractTestCases:
                         val = random.random()
                         dst2 = dst.clone()
 
-                        if dt == torch.half:
-                            self.assertRaises(RuntimeError, lambda: dst.masked_fill_(mask, val))
-                            continue
-
                         dst.masked_fill_(mask, val)
                         for i in range(num_dest):
                             if mask[i]:
@@ -2122,7 +2118,7 @@ class AbstractTestCases:
                         dst2.masked_fill_((dst2 > 0).to(dtype), val)
                         self.assertEqual(dst, dst2, atol=0, rtol=0)
 
-                self.assertEqual(len(w), 34)
+                self.assertEqual(len(w), 36)
 
                 warn = 'masked_fill_ received a mask with dtype torch.uint8,'
                 for wi in w:
@@ -12263,10 +12259,6 @@ class TestTorchDeviceType(TestCase):
             x = torch.tensor([1, 2, 3, 4], device=device, dtype=dt)
             b = torch.tensor([2], device=device, dtype=dt)
 
-            if dt == torch.half and device == 'cpu':
-                self.assertRaises(RuntimeError, lambda: x.lt(2))
-                continue
-
             if dt == torch.bool:
                 # torch.bool is a special case and is being tested later
                 # in this test
@@ -12562,10 +12554,6 @@ class TestTorchDeviceType(TestCase):
             num_src = 10
             src = torch.tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0], dtype=dtype, device=device)
             mask = torch.randint(2, (num_src,), device=device, dtype=maskType)
-
-            if dtype == torch.half and torch.device(device).type == 'cpu':
-                self.assertRaises(RuntimeError, lambda: src.masked_select(mask))
-                continue
 
             with warnings.catch_warnings(record=True) as w:
                 dst = src.masked_select(mask)
@@ -18748,7 +18736,7 @@ class TestViewOps(TestCase):
         self.assertEqual(res.shape, torch.Size([0]))
 
     @onlyOnCPUAndCUDA
-    @dtypes(*torch.testing.get_all_complex_dtypes())
+    @dtypes(*torch.testing.get_all_complex_dtypes(include_complex32=True))
     def test_view_as_real(self, device, dtype):
         def fn(contiguous_input=True):
             t = torch.randn(3, 4, dtype=dtype, device=device)
@@ -18756,7 +18744,11 @@ class TestViewOps(TestCase):
             res = torch.view_as_real(input)
             self.assertEqual(res[:, :, 0], input.real)
             self.assertEqual(res[:, :, 1], input.imag)
-            self.assertTrue(self.is_view_of(t, res))
+            # TODO: Add torch.ComplexHalfStorage
+            if dtype != torch.complex32:
+                self.assertTrue(self.is_view_of(t, res))
+            else:
+                self.assertRaises(RuntimeError, lambda: self.is_view_of(t, res))
 
         fn()
         fn(contiguous_input=False)
@@ -18764,13 +18756,21 @@ class TestViewOps(TestCase):
         # tensor with zero elements
         x = torch.tensor([], dtype=dtype, device=device)
         res = torch.view_as_real(x)
-        self.assertTrue(self.is_view_of(x, res))
+        # TODO: Add torch.ComplexHalfStorage
+        if dtype != torch.complex32:
+            self.assertTrue(self.is_view_of(x, res))
+        else:
+            self.assertRaises(RuntimeError, lambda: self.is_view_of(x, res))
         self.assertEqual(res.shape, torch.Size([0, 2]))
 
         # tensor with zero dim
         x = torch.tensor(2 + 3j, dtype=dtype, device=device)
         res = torch.view_as_real(x)
-        self.assertTrue(self.is_view_of(x, res))
+        # TODO: Add torch.ComplexHalfStorage
+        if dtype != torch.complex32:
+            self.assertTrue(self.is_view_of(x, res))
+        else:
+            self.assertRaises(RuntimeError, lambda: self.is_view_of(x, res))
         self.assertEqual(res.shape, torch.Size([2]))
 
     @onlyOnCPUAndCUDA
