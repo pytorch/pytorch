@@ -138,9 +138,9 @@ class ConstraintRegistry(object):
         # Look up by Constraint subclass.
         try:
             factory = self._registry[type(constraint)]
-        except KeyError:
+        except KeyError as e:
             raise NotImplementedError(
-                'Cannot transform {} constraints'.format(type(constraint).__name__))
+                'Cannot transform {} constraints'.format(type(constraint).__name__)) from e
         return factory(constraint)
 
 
