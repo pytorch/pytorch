@@ -306,6 +306,11 @@ class CAFFE2_API Tensor {
     return impl_->is_conjugate();
   }
 
+  // TODO: do I need to add this method directly on the Tensor to implement conj_view() in UnaryOps?
+  inline void set_conjugate(bool conjugate) const {
+    impl_->set_conjugate(conjugate);
+  }
+
   /// Returns a `Tensor`'s layout. Defined in Type.h
   Layout layout() const noexcept;
 

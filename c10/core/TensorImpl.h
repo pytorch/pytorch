@@ -588,7 +588,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
 
   /**
-   * Whether or not the imaginary part of the tensor should be conjugated
+   * Whether or not the imaginary part of the tensor should be negated
    */
   inline bool is_conjugate() const {
     return conjugate_;
@@ -600,9 +600,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   void set_conjugate(bool value) {
     conjugate_ = value;
     if (conjugate_)
-      key_set_ = key_set_.add(DispatchKey::Named);
+      key_set_ = key_set_.add(DispatchKey::Conjugate);
     else
-      key_set_ = key_set_.remove(DispatchKey::Named);
+      key_set_ = key_set_.remove(DispatchKey::Conjugate);
   }
 
   /**
@@ -1737,6 +1737,8 @@ protected:
   bool reserved_ = false;
 
   // Whether or not to conjugate the imaginary part of the tensor
+  // TODO: is there a reason that we need this bool?
+  // Doesn't the existence of the conjugate dispatch key give us everything we need?
   bool conjugate_ = false;
 
 };

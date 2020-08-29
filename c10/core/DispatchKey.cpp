@@ -68,6 +68,9 @@ const char* toString(DispatchKey t) {
     case DispatchKey::Named:
       return "Named";
 
+    case DispatchKey::Conjugate:
+      return "Conjugate";
+
     case DispatchKey::Autograd:
       return "Autograd";
 
