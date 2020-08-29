@@ -9845,6 +9845,35 @@ class TestNNDeviceType(NNTestCase):
         check([[1, 2]], (2, 1, 1, 2, False, False), [[2, 1]])
         check([[1, 2]], (2, 2, 1, 2, False, True), [[2, 2]])
 
+        empty_tensor = torch.empty((2, 0, 1), dtype=torch.float32)
+        check(empty_tensor, (1, None, 0, 1, False, False), empty_tensor)
+
+    @onlyCPU
+    @dtypes(torch.float, torch.double)
+    def test_max_pool1d(self, device, dtype):
+        # FIXME For now compare against max_pool1d with indices
+        def check(x, *args, **kwargs):
+            model = torch.nn.MaxPool1d(*args, **kwargs)
+            ref_model = torch.nn.MaxPool1d(*args, **kwargs, return_indices=True)
+            tensor = torch.tensor(x, device=device, dtype=dtype)
+            self.assertEqual(model(tensor), ref_model(tensor)[0])
+
+        sizes = [random.sample(range(8, 128), 3) for _ in range(3)]
+        kernel_sizes = random.sample(range(1, 5), 3)
+        strides = random.sample(range(1, 5), 3)
+        dilations = random.sample(range(1, 5), 3)
+        ceil_modes = [True, False]
+
+        for size, kernel_size, stride, dilation, ceil_mode in \
+                itertools.product(sizes, kernel_sizes, strides, dilations, ceil_modes):
+            padding = random.sample(range(0, math.floor(kernel_size / 2) + 1), 1)
+            check(torch.randn(size), kernel_size, stride, padding, dilation, ceil_mode=ceil_mode)
+
+        # Non-contiguous test
+        tensor = torch.randn(5, 151, 33)[::2, ::3, ::2]
+        check(tensor, 3, 2, 1, 2, ceil_mode=True)
+        check(tensor.transpose(1, 2), 3, 2, 1, 2, ceil_mode=True)
+
     @onlyCUDA
     def test_max_pool2d(self, device):
         def helper(n, c, h, w, ks):

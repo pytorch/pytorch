@@ -2,6 +2,7 @@
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/MaxPooling.h>
+#include <ATen/native/Pool.h>
 
 namespace at {
 namespace native {
@@ -9,23 +10,6 @@ namespace native {
 DEFINE_DISPATCH(max_pool1d_stub);
 
 namespace {
-
-// Compute the output size for the given pooling parameters
-inline int64_t output_size(
-    int64_t input_size,
-    int64_t kernel_size,
-    int64_t stride,
-    int64_t padding,
-    int64_t dilation,
-    bool ceil_mode) {
-  // Effective input size (with padding) - effective kernel size (with dilation)
-  int64_t num = input_size + 2 * padding - dilation * (kernel_size - 1) - 1;
-  // Ensure that the last kernel window in ceil mode is not entirely off bounds
-  if (ceil_mode && stride - dilation * (kernel_size - 1) <= num % stride) {
-    return at::divup(num, stride) + 1;
-  }
-  return num / stride + 1;
-}
 
 Tensor max_pool1d_impl(
     const Tensor& self,
@@ -87,7 +71,7 @@ Tensor max_pool1d_impl(
   TORCH_CHECK(
       DJ > 0, "max_pool1d() dilation must be greater than zero, but got ", DJ);
 
-  const int64_t OW = output_size(IW, KW, SJ, PJ, DJ, ceil_mode);
+  const int64_t OW = pooling_output_shape(IW, KW, PJ, SJ, DJ, ceil_mode);
   TORCH_CHECK(OW >= 0, "max_pool1d() Invalid computed output size: ", OW);
   Tensor output = at::empty({NB, NC, OW}, self.options());
 
