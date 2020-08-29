@@ -46,7 +46,7 @@ def add_arguments_utils(parser: argparse.ArgumentParser) -> argparse.ArgumentPar
     )
     parser.add_argument(
         "--interested-folder",
-        help="Final report will be only about these folders and its sub-folders; for example: caff2/c10 ;by default: obtained from buck-patterns",
+        help="Final report will be only about these folders and its sub-folders; for example: caff2/c10;",
         nargs="+",
         default=None,
     )

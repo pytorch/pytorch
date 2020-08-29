@@ -80,7 +80,9 @@ def parse_json(json_file: str) -> List[CoverageRecord]:
         tests_type["partial"].add(json_file)
     else:
         tests_type["fail"].add(json_file)
-        raise Exception("Fail to do code coverage! Fail to load json file: ", json_file)
+        raise RuntimeError(
+            "Fail to do code coverage! Fail to load json file: ", json_file
+        )
     cov_type = get_cov_type()
     check_compiler_type(cov_type)
     if cov_type == "CLANG":
@@ -103,7 +105,7 @@ def parse_jsons(test_list: TestList, interested_folders: List[str]) -> None:
                 json_file = os.path.join(path, file_name)
                 try:
                     coverage_records = parse_json(json_file)
-                except:
+                except RuntimeError:
                     print_error("Fail to load json file: ", json_file)
                     continue
                 # collect information from each target's export file and merge them together:

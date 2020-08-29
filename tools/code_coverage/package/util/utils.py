@@ -1,9 +1,8 @@
 import os
 import shutil
-import subprocess
 import sys
 import time
-from typing import Any, List
+from typing import Any
 
 from .setting import LOG_DIR, PROFILE_DIR, TestList, TestPlatform, TestType
 

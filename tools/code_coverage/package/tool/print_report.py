@@ -163,7 +163,7 @@ def print_file_oriented_report(
             str(item[3]).rjust(10),
             file=summary_file,
         )
-    # TODO use ".f"
+
     print(
         f"summary percentage:{round(1.0 * covered_summary / total_summary * 100, 2)}%"
     )

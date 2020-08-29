@@ -1,6 +1,6 @@
 import subprocess
 
-from ..util.setting import TestPlatform, TestType
+from ..util.setting import TestPlatform
 from ..util.utils import print_error
 
 
