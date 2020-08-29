@@ -2456,7 +2456,7 @@ class RpcTest(RpcAgentTestFixture):
 
     @dist_init
     def test_wait_all_timeout(self):
-        expected_error = get_timeout_error_regex(dist_utils.TEST_CONFIG.rpc_backend_name)
+        expected_error = self.get_timeout_error_regex()
         with self.assertRaisesRegex(RuntimeError, expected_error):
             with rpc.wait_all():
                 self.assertTrue(_thread_local_var.future_list == [])
