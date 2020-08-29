@@ -33,9 +33,9 @@ void testFuserPass_1() {
 #if 0
   // We should not be able to fuse across the in-place operation here.
   testing::FileCheck()
-      .check("tensorexpr::Group_0")
+      .check("prim::TensorExprGroup_0")
       ->check("aten::add_")
-      ->check("tensorexpr::Group_1")
+      ->check("prim::TensorExprGroup_1")
       ->run(*g);
 #endif
 }
@@ -60,7 +60,7 @@ void testFuserPass_2() {
   // We should not be able to fuse across the in-place operation here.
   testing::FileCheck()
       .check("aten::add_")
-      ->check("tensorexpr::Group_0")
+      ->check("prim::TensorExprGroup_0")
       ->run(*g);
 }
 
@@ -79,7 +79,7 @@ void testFuserPass_3() {
     FuseTensorExprs(g, /* min_group_size= */ 2);
 
     // We should not create a fusion group since its size would be too small
-    testing::FileCheck().check_not("tensorexpr::Group")->run(*g);
+    testing::FileCheck().check_not("prim::TensorExprGroup")->run(*g);
   }
   {
     auto g = std::make_shared<Graph>();
@@ -89,7 +89,7 @@ void testFuserPass_3() {
     FuseTensorExprs(g, /* min_group_size= */ 1);
 
     // We should create a fusion group since its size is above the threshold
-    testing::FileCheck().check("tensorexpr::Group")->run(*g);
+    testing::FileCheck().check("prim::TensorExprGroup")->run(*g);
   }
 }
 
