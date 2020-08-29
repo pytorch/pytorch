@@ -699,6 +699,12 @@ Example::
     tensor([ 0.1599, -1.1534, -0.9435, -0.8990 ])
 """.format(**common_args))
 
+add_docstr(torch.arcsinh, r"""
+arcsinh(input, *, out=None) -> Tensor
+
+Alias for :func:`torch.asinh`.
+""")
+
 add_docstr(torch.atan, r"""
 atan(input, *, out=None) -> Tensor
 
@@ -758,8 +764,7 @@ Example::
     tensor([ 0.9833,  0.0811, -1.9743, -1.4151])
 """.format(**common_args))
 
-add_docstr(torch.atanh,
-           r"""
+add_docstr(torch.atanh, r"""
 atanh(input, *, out=None) -> Tensor
 
 Returns a new tensor with the inverse hyperbolic tangent of the elements of :attr:`input`.
@@ -786,6 +791,12 @@ Example::
     >>> torch.atanh(a)
     tensor([ -1.7253, 0.3060, -1.2899, -0.1893 ])
 """.format(**common_args))
+
+add_docstr(torch.arctanh, r"""
+arctanh(input, *, out=None) -> Tensor
+
+Alias for :func:`torch.atanh`.
+""")
 
 add_docstr(torch.baddbmm,
            r"""
@@ -4225,6 +4236,46 @@ Example::
     tensor([3, 2, 4])
 """.format(**common_args))
 
+add_docstr(torch.amax,
+           r"""
+amax(input, dim, keepdim=False, *, out=None) -> Tensor
+
+Returns the maximum value of each slice of the :attr:`input` tensor in the given
+dimension(s) :attr:`dim`.
+
+.. note::
+    The difference between ``max``/``min`` and ``amax``/``amin`` is:
+        - ``amax``/``amin`` supports reducing on multiple dimensions,
+        - ``amax``/``amin`` does not return indices,
+        - ``amax``/``amin`` evenly distributes gradient between equal values,
+          while ``max(dim)``/``min(dim)`` propagates gradient only to a single
+          index in the source tensor.
+
+If :attr:`keepdim is ``True``, the output tensors are of the same size
+as :attr:`input` except in the dimension(s) :attr:`dim` where they are of size 1.
+Otherwise, :attr:`dim`s are squeezed (see :func:`torch.squeeze`), resulting
+in the output tensors having fewer dimension than :attr:`input`.
+
+Args:
+    {input}
+    {dim}
+    {keepdim}
+
+Keyword args:
+  {out}
+
+Example::
+
+    >>> a = torch.randn(4, 4)
+    >>> a
+    tensor([[ 0.8177,  1.4878, -0.2491,  0.9130],
+            [-0.7158,  1.1775,  2.0992,  0.4817],
+            [-0.0053,  0.0164, -1.3738, -0.0507],
+            [ 1.9700,  1.1106, -1.0318, -1.0816]])
+    >>> torch.amax(a, 1)
+    tensor([1.4878, 2.0992, 0.0164, 1.9700])
+""".format(**multi_dim_common))
+
 add_docstr(torch.argmax,
            r"""
 argmax(input) -> LongTensor
@@ -4233,6 +4284,8 @@ Returns the indices of the maximum value of all elements in the :attr:`input` te
 
 This is the second value returned by :meth:`torch.max`. See its
 documentation for the exact semantics of this method.
+
+.. note:: If there are multiple minimal values then the indices of the first minimal value are returned.
 
 Args:
     {input}
@@ -4528,6 +4581,46 @@ Example::
     tensor([1, 0, -1])
 """.format(**common_args))
 
+add_docstr(torch.amin,
+           r"""
+amin(input, dim, keepdim=False, *, out=None) -> Tensor
+
+Returns the minimum value of each slice of the :attr:`input` tensor in the given
+dimension(s) :attr:`dim`.
+
+.. note::
+    The difference between ``max``/``min`` and ``amax``/``amin`` is:
+        - ``amax``/``amin`` supports reducing on multiple dimensions,
+        - ``amax``/``amin`` does not return indices,
+        - ``amax``/``amin`` evenly distributes gradient between equal values,
+          while ``max(dim)``/``min(dim)`` propagates gradient only to a single
+          index in the source tensor.
+
+If :attr:`keepdim` is ``True``, the output tensors are of the same size as
+:attr:`input` except in the dimension(s) :attr:`dim` where they are of size 1.
+Otherwise, :attr:`dim`s are squeezed (see :func:`torch.squeeze`), resulting in
+the output tensors having fewer dimensions than :attr:`input`.
+
+Args:
+    {input}
+    {dim}
+    {keepdim}
+
+Keyword args:
+  {out}
+
+Example::
+
+    >>> a = torch.randn(4, 4)
+    >>> a
+    tensor([[ 0.6451, -0.4866,  0.2987, -1.3312],
+            [-0.5744,  1.2980,  1.8397, -0.2713],
+            [ 0.9128,  0.9214, -1.7268, -0.2995],
+            [ 0.9023,  0.4853,  0.9075, -1.6165]])
+    >>> torch.amin(a, 1)
+    tensor([-1.3312, -0.5744, -1.7268, -1.6165])
+""".format(**multi_dim_common))
+
 add_docstr(torch.argmin,
            r"""
 argmin(input) -> LongTensor
@@ -4536,6 +4629,8 @@ Returns the indices of the minimum value of all elements in the :attr:`input` te
 
 This is the second value returned by :meth:`torch.min`. See its
 documentation for the exact semantics of this method.
+
+.. note:: If there are multiple minimal values then the indices of the first minimal value are returned.
 
 Args:
     {input}
@@ -8763,7 +8858,7 @@ add_docstr(torch.quantize_per_tensor,
            r"""
 quantize_per_tensor(input, scale, zero_point, dtype) -> Tensor
 
-Converts a float tensor to quantized tensor with given scale and zero point.
+Converts a float tensor to a quantized tensor with given scale and zero point.
 
 Arguments:
     input (Tensor): float tensor to quantize
@@ -8788,7 +8883,7 @@ add_docstr(torch.quantize_per_channel,
            r"""
 quantize_per_channel(input, scales, zero_points, axis, dtype) -> Tensor
 
-Converts a float tensor to per-channel quantized tensor with given scales and zero points.
+Converts a float tensor to a per-channel quantized tensor with given scales and zero points.
 
 Arguments:
     input (Tensor): float tensor to quantize
