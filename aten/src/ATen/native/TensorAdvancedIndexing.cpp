@@ -701,7 +701,6 @@ static Tensor & masked_select_out_impl_cpu(Tensor & result, const Tensor & self,
               "masked_select: expected BoolTensor or ByteTensor for mask");
   TORCH_CHECK(self.scalar_type() == result.scalar_type(),
               "masked_select(): self and result must have the same scalar type");
-  at::assert_no_internal_overlap(result);
 
   at::assert_no_internal_overlap(result);
   at::assert_no_partial_overlap(result, self);
