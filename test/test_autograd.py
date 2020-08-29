@@ -2765,8 +2765,8 @@ class TestAutograd(TestCase):
 
         last_end = 0
         names = ['aten::mul', 'aten::to', 'aten::empty_strided', 'aten::copy_',
-                 'aten::empty', 'aten::add', 'aten::to', 'aten::empty_strided',
-                 'aten::copy_', 'aten::empty']
+                 'aten::add', 'aten::to', 'aten::empty_strided',
+                 'aten::copy_']
         top_level_names = ['aten::mul', 'aten::add']
         top_level_iter = iter(top_level_names)
         self.assertEqual(len(p.function_events), len(names))
