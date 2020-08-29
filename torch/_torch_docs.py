@@ -699,6 +699,12 @@ Example::
     tensor([ 0.1599, -1.1534, -0.9435, -0.8990 ])
 """.format(**common_args))
 
+add_docstr(torch.arcsinh, r"""
+arcsinh(input, *, out=None) -> Tensor
+
+Alias for :func:`torch.asinh`.
+""")
+
 add_docstr(torch.atan, r"""
 atan(input, *, out=None) -> Tensor
 
@@ -758,8 +764,7 @@ Example::
     tensor([ 0.9833,  0.0811, -1.9743, -1.4151])
 """.format(**common_args))
 
-add_docstr(torch.atanh,
-           r"""
+add_docstr(torch.atanh, r"""
 atanh(input, *, out=None) -> Tensor
 
 Returns a new tensor with the inverse hyperbolic tangent of the elements of :attr:`input`.
@@ -786,6 +791,12 @@ Example::
     >>> torch.atanh(a)
     tensor([ -1.7253, 0.3060, -1.2899, -0.1893 ])
 """.format(**common_args))
+
+add_docstr(torch.arctanh, r"""
+arctanh(input, *, out=None) -> Tensor
+
+Alias for :func:`torch.atanh`.
+""")
 
 add_docstr(torch.baddbmm,
            r"""
@@ -4234,6 +4245,8 @@ Returns the indices of the maximum value of all elements in the :attr:`input` te
 This is the second value returned by :meth:`torch.max`. See its
 documentation for the exact semantics of this method.
 
+.. note:: If there are multiple minimal values then the indices of the first minimal value are returned.
+
 Args:
     {input}
 
@@ -4536,6 +4549,8 @@ Returns the indices of the minimum value of all elements in the :attr:`input` te
 
 This is the second value returned by :meth:`torch.min`. See its
 documentation for the exact semantics of this method.
+
+.. note:: If there are multiple minimal values then the indices of the first minimal value are returned.
 
 Args:
     {input}
@@ -8763,7 +8778,7 @@ add_docstr(torch.quantize_per_tensor,
            r"""
 quantize_per_tensor(input, scale, zero_point, dtype) -> Tensor
 
-Converts a float tensor to quantized tensor with given scale and zero point.
+Converts a float tensor to a quantized tensor with given scale and zero point.
 
 Arguments:
     input (Tensor): float tensor to quantize
@@ -8788,7 +8803,7 @@ add_docstr(torch.quantize_per_channel,
            r"""
 quantize_per_channel(input, scales, zero_points, axis, dtype) -> Tensor
 
-Converts a float tensor to per-channel quantized tensor with given scales and zero points.
+Converts a float tensor to a per-channel quantized tensor with given scales and zero points.
 
 Arguments:
     input (Tensor): float tensor to quantize
