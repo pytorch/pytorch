@@ -302,6 +302,8 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
       GRAPH_DUMP("Forward graph:", gradient.f);
       GRAPH_DUMP("Backward graph:", gradient.df);
       runDiffGraphPasses(gradient.f);
+      // replaces fallback graphs inserted by TE Fuser
+      replaceFallbackGraphWithFallbackFunction(gradient.f->block());
       packGradient(gradient, dnode);
       GRAPH_DEBUG("Finished optimizing diff node ", idx++);
     }
@@ -382,12 +384,21 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(
   std::lock_guard<std::mutex> lock(compile_mutex);
   GRAPH_DEBUG("Running ProfilingGraphExecutorImpl ", this);
 
+  // if tensorExprFuserEnabled() returns true we need to persist the very first
+  // time ProfilingGraphExecutorImpl is called, so we can update it correctly
+  // for fallback functions in ProfilingGraphExecutorImpl Else,
+  // getPlanFor(remaining_bailout_depth) is corrected and persisted by the Code
+  // object in interpreter.
+  if (!remaining_bailout_depth_.has_value() || !tensorExprFuserEnabled()) {
+    remaining_bailout_depth_ = remaining_bailout_depth;
+  }
+
   if (optimized_plan_) {
     return *optimized_plan_;
   }
 
   // simple executor
-  if (remaining_bailout_depth == 0) {
+  if (*remaining_bailout_depth_ == 0) {
     auto copy = graph->copy();
     runProfilingInsensitiveOptimizations(copy);
     GRAPH_DUMP("Optimized SimpleExecutor Graph : ", copy);
@@ -399,13 +410,12 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(
   if (!pr_) {
     auto copy = graph->copy();
     runProfilingInsensitiveOptimizations(copy);
-    if (remaining_bailout_depth == getBailoutDepth()) {
+    if (*remaining_bailout_depth_ == getBailoutDepth()) {
       PeelProfilingLoops(copy);
     }
     pr_ = ProfilingRecord::instrumentGraph(copy);
-    auto pr_copy = pr_->graph()->copy();
-    GRAPH_DUMP("Profiled Graph: ", pr_copy);
-    profiling_plan_ = ExecutionPlan(pr_copy, function_name_);
+    GRAPH_DUMP("Profiled Graph: ", pr_->graph());
+    profiling_plan_ = ExecutionPlan(pr_->graph(), function_name_);
     // fall-through
   }
 
@@ -417,9 +427,13 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(
   auto copy = pr_->graph()->copy();
   ProfilingRecord::removeProfileCounter(copy->block());
   runProfilingOptimizations(copy);
+  // replaces a fallback graph inserted by
+  // specialize_autogradzero if one exists
+  replaceFallbackGraphWithFallbackFunction(copy->block());
+  GRAPH_DUMP("Optimized Graph: ", copy);
   // cache
   optimized_plan_ =
-      ExecutionPlan(copy, function_name_, remaining_bailout_depth);
+      ExecutionPlan(copy, function_name_, *remaining_bailout_depth_);
   return *optimized_plan_;
 }
 
@@ -429,6 +443,97 @@ GraphExecutorState ProfilingGraphExecutorImpl::getDebugState() {
   auto opt_plan = *optimized_plan_;
   state.execution_plans.emplace(ArgumentSpec{0, 0}, opt_plan);
   return state;
+}
+
+void replaceBlockWithFallbackGraph(Block* b) {
+  auto graph = std::make_shared<Graph>();
+  auto value_map = [](Value* v) { return v; };
+  graph->block()->cloneFrom(b, value_map);
+  auto fallback = b->owningGraph()->create(
+      prim::FallbackGraph, b->inputs(), b->outputs().size());
+  fallback->g_(attr::Subgraph, graph);
+  b->prependNode(fallback);
+
+  for (size_t i = 0; i < b->outputs().size(); i++) {
+    fallback->output(i)->setType(b->outputs()[i]->type());
+    fallback->output(i)->copyMetadata(b->outputs()[i]);
+    b->replaceOutput(i, fallback->output(i));
+  }
+
+  for (auto it = b->nodes().rbegin(); it != fallback->iterator(); it++) {
+    it.destroyCurrent();
+  }
+}
+
+static Function* createFallbackPathFunction(
+    Block* b,
+    const std::string& function_name) {
+  auto value_map = [](Value* v) { return v; };
+  auto graph = std::make_shared<Graph>();
+  graph->block()->cloneFrom(b, value_map);
+
+  auto otypes = c10::fmap(
+      graph->return_node()->inputs(), [](Value* v) { return v->type(); });
+  // a GraphFunction call only have one output, so all the outputs
+  // need to be packed into a tuple
+  auto tuple_type = TupleType::create(otypes);
+  auto return_tuple = graph->createTuple(graph->return_node()->inputs());
+  graph->appendNode(return_tuple);
+  for (int i = static_cast<int>(graph->outputs().size()) - 1; i >= 0; i--) {
+    graph->eraseOutput(i);
+  }
+  graph->registerOutput(return_tuple->output());
+  return new GraphFunction(function_name, graph, nullptr);
+}
+
+Node* insertFallbackFunctionCall(
+    Graph* graph,
+    Function* func,
+    ArrayRef<Value*> inputs) {
+  auto tuple_type = func->graph()->return_node()->input(0)->type();
+  Value* fn_constant = graph->insertNode(graph->create(prim::Constant))
+                           ->s_(attr::name, func->name())
+                           ->i_(Symbol::attr("fallback"), 1)
+                           ->output()
+                           ->setType(FunctionType::create(func));
+  std::vector<Value*> func_call_inputs = {fn_constant};
+  func_call_inputs.insert(func_call_inputs.end(), inputs.begin(), inputs.end());
+  Value* result =
+      graph->insertNode(graph->create(prim::CallFunction, func_call_inputs))
+          ->output()
+          ->setType(tuple_type);
+
+  auto fun_unpack_tuple = graph->insertNode(graph->createTupleUnpack(result));
+  return fun_unpack_tuple;
+}
+
+void ProfilingGraphExecutorImpl::replaceFallbackGraphWithFallbackFunction(
+    Block* b) {
+  Stack s;
+  for (auto it = b->nodes().begin(); it != b->nodes().end();) {
+    if (it->kind() == prim::FallbackGraph) {
+      auto fallback_func = createFallbackPathFunction(
+          it->g(attr::Subgraph)->block(), "fallback_function");
+      TORCH_INTERNAL_ASSERT(*remaining_bailout_depth_ > 0);
+      GRAPH_DEBUG(
+          "getPlanFor for", getHeader(*it), " ", *remaining_bailout_depth_);
+      fallback_func->get_executor().getPlanFor(
+          s, *remaining_bailout_depth_ - 1);
+      fallback_functions_.emplace_back(fallback_func);
+      WithInsertPoint wip{*it};
+      auto function_call = insertFallbackFunctionCall(
+          b->owningGraph(), fallback_func, it->inputs());
+      for (size_t i = 0; i < function_call->outputs().size(); i++) {
+        it->output(i)->replaceAllUsesWith(function_call->output(i));
+      }
+      it.destroyCurrent();
+    } else {
+      for (Block* ib : it->blocks()) {
+        replaceFallbackGraphWithFallbackFunction(ib);
+      }
+      it++;
+    }
+  }
 }
 
 } // namespace jit
