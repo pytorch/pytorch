@@ -74,6 +74,16 @@ struct CAFFE2_API OperandInfo {
     validate();
   }
 
+  explicit OperandInfo(Tensor t, bool use_in_promotion)
+      : tensor(std::move(t)), use_in_promotion(use_in_promotion) {
+    if (tensor.defined()) {
+      device = tensor.device();
+      target_dtype = tensor.scalar_type();
+      current_dtype = target_dtype;
+    }
+    validate();
+  }
+
   /// Stride after broadcasting. The stride is in bytes, not number of elements.
   StrideVector stride_bytes;
 
@@ -111,6 +121,8 @@ struct CAFFE2_API OperandInfo {
   bool is_output = false;
 
   bool is_read_write = false;
+
+  bool use_in_promotion = true;
 
   void validate() {
     TORCH_CHECK(
@@ -415,15 +427,17 @@ public:
   C10_DISABLE_COPY_AND_ASSIGN(TensorIteratorConfig);
 
   /// Construction
-  TensorIteratorConfig& add_output(const Tensor& output) {
+  TensorIteratorConfig& add_output(const Tensor& output, bool participate_promotion = true) {
     TORCH_INTERNAL_ASSERT(num_inputs_ == 0);
     tensors_.emplace_back(output);
+    promotion_flags_.emplace_back(participate_promotion);
     num_outputs_++;
     return *this;
   }
 
-  TensorIteratorConfig& add_input(const Tensor& input) {
+  TensorIteratorConfig& add_input(const Tensor& input, bool participate_promotion = true) {
     tensors_.emplace_back(input);
+    promotion_flags_.emplace_back(participate_promotion);
     num_inputs_++;
     return *this;
   }
@@ -548,6 +562,7 @@ public:
 
 private:
   SmallVector<Tensor, 4> tensors_;
+  SmallVector<bool, 4> promotion_flags_;
   int num_outputs_ = 0;
   int num_inputs_ = 0;
 

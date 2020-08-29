@@ -123,6 +123,13 @@ void TensorIterator::compute_types(const TensorIteratorConfig& config) {
     // Validates that all inputs have type information, and that
     //   if an output is missing type information that we can infer
     //   the device it should be allocated on.
+
+    // Skip if operand is not to be used in
+    // type promotion computation.
+    if (!op.use_in_promotion) {
+      continue;
+    }
+
     if (!op.is_type_defined()) {
       TORCH_INTERNAL_ASSERT(op.is_output, "Found type undefined input tensor!");
       if (config.static_dtype_and_device_.has_value()) {
@@ -262,7 +269,7 @@ void TensorIterator::compute_types(const TensorIteratorConfig& config) {
     }
 
     // Promotes inputs by creating temporaries of the correct dtype
-      if (config.promote_inputs_to_common_dtype_ && !op.is_output && op.current_dtype != common_dtype_) {
+      if (config.promote_inputs_to_common_dtype_ && !op.is_output && op.current_dtype != common_dtype_ && op.use_in_promotion) {
         op.original_tensor = op.tensor;
         op.tensor = op.tensor.to(common_dtype_);
         op.current_dtype = common_dtype_;
@@ -768,7 +775,7 @@ TensorIterator TensorIterator::reduce_op(Tensor& out1, Tensor& out2, const Tenso
 
 void TensorIterator::populate_operands(TensorIteratorConfig& config) {
   for (int i = 0; i < config.tensors_.size(); i++) {
-    operands_.emplace_back(std::move(config.tensors_[i]));
+    operands_.emplace_back(std::move(config.tensors_[i]), config.promotion_flags_[i]);
   }
   num_outputs_ = config.num_outputs_;
 }

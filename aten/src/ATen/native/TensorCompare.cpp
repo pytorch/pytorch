@@ -247,13 +247,13 @@ Tensor _s_where(const Tensor& condition, const Tensor& self, const Tensor& other
   auto iter = at::TensorIteratorConfig()
     .set_check_mem_overlap(true)
     .add_output(ret)
-    .add_input(condition)
+    .add_input(condition, /*use_in_promotion*/ false)
     .add_input(self)
     .add_input(other)
     .promote_inputs_to_common_dtype(true)
     .cast_common_dtype_to_outputs(true)
     .build();
-  where_kernel(iter.device_type(), iter, condition.scalar_type());
+  where_kernel(iter.device_type(), iter, iter.dtype());
   return ret;
 }
 
