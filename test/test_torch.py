@@ -19662,7 +19662,7 @@ def generate_test_function(cls,
         self.assertEqual(cpu_args, device_args, atol=precision, rtol=0, exact_dtype=False)
         self.assertEqual(cpu_result, device_result, atol=precision, rtol=0, exact_dtype=False)
 
-        # run the function version
+        # check method matches with function
         if self_position >= 0:
             cpu_args.insert(self_position, cpu_tensor)
             device_args.insert(self_position, device_tensor)
@@ -19671,7 +19671,7 @@ def generate_test_function(cls,
             self.assertEqual(cpu_result, cpu_function_result, atol=precision, rtol=0)
             self.assertEqual(device_result, device_function_result, atol=precision, rtol=0)
 
-        # run the out version
+        # check method matches with function(out)
         if test_out:
             bad_value = math.nan if dtype.is_floating_point or dtype.is_complex else 666
             cpu_out = torch.full_like(cpu_result, bad_value)
