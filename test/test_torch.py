@@ -16152,17 +16152,26 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         for m in [0, 1, 25]:
             for n in [0, 1, 10]:
                 for k in [0, 1, 8]:
+                    if False and dtype.is_complex:  # bug to be fixed in another PR
+                        alpha = 1.2 + 0.3j
+                        beta = 0.5 + 1.6j
+                    else:
+                        alpha = 1.2
+                        beta = 0.8
                     M = torch.randn(n, m, device=device, dtype=dtype)
                     m1 = torch.randn(n, k, device=device, dtype=dtype)
                     m2 = torch.randn(k, m, device=device, dtype=dtype)
-                    res1 = torch.addmm(M, m1, m2)
-                    res2 = torch.zeros(n, m, device=device, dtype=dtype)
-                    res2 += M
+                    res1 = torch.addmm(M, m1, m2, alpha=alpha, beta=beta)
+                    res2 = torch.full_like(res1, math.nan)
+                    torch.addmm(M, m1, m2, alpha=alpha, beta=beta, out=res2)
+                    res3 = (beta * M).cpu().tolist()
                     for i in range(n):
                         for j in range(m):
                             for l in range(k):
-                                res2[i, j] += m1[i, l] * m2[l, j]
+                                res3[i][j] += (alpha * m1[i, l] * m2[l, j]).item()
+                    res3 = torch.tensor(res3, device=device, dtype=dtype).view_as(res1)
                     self.assertEqual(res1, res2)
+                    self.assertEqual(res1, res3)
 
     @onlyCPU
     @dtypes(*(torch.testing.get_all_complex_dtypes() + [torch.float, torch.double]))
