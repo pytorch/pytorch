@@ -25,17 +25,18 @@ Benchmarking LSTMs...
 $ python -m fastrnns.bench --fuser=te --group=rnns --sep " | "
 ```
 
-Namespace(cnns=None, cuda_pointwise_block_count=None, cuda_pointwise_block_size=None, cuda_pointwise_loop_level=None, device='cuda', executor=None, fuser='te', group=['rnns'], hiddenSize=512, inputSize=512, miniBatch=64, nloops=100, numLayers=1, print_json=None, rnns=None, sep=' ', seqLength=100, variable_lstms=False, warmup=10)
+Namespace(cnns=None, cuda_pointwise_block_count=None, cuda_pointwise_block_size=None, cuda_pointwise_loop_level=None, device='cuda', executor=None, fuser='te', group=['rnns'], hiddenSize=512, inputSize=512, miniBatch=64, nloops=100, numLayers=1, print_json=None, rnns=None, sep=' | ', seqLength=100, variable_lstms=False, warmup=10)
 
 Benchmarking LSTMs...
 
-|            name |         avg_fwd  |        std_fwd   |      info_fwd    |      avg_bwd     |     std_bwd      |   info_bwd |
-|           :---: |            :---: |            :---: |            :---: |            :---: |            :---: |  :---:     |
-|           cudnn |           11.58  |        0.05633   |          None    |         17.9     |      0.2226      |       None |
-|            aten |           25.77  |         0.1117   |          None    |        30.46     |       2.006      |       None |
-|             jit |           17.11  |          1.067   |          None    |        54.39     |       9.064      |       None |
-|      jit_premul |           15.32  |         0.9256   |          None    |        53.49     |       7.958      |       None |
-| jit_premul_bias |            15.2  |         0.1849   |          None    |        48.74     |       6.442      |       None |
-|      jit_simple |           16.43  |         0.3517   |          None    |        53.16     |       7.327      |       None |
-|  jit_multilayer |           17.27  |          1.018   |          None    |        56.31     |       8.865      |       None |
-|              py |           41.06  |          7.026   |          None    |        56.39     |       10.65      |       None |
+|             name |          avg_fwd |          std_fwd |         info_fwd |          avg_bwd |          std_bwd |         info_bwd |
+|            :---: |            :---: |            :---: |            :---: |            :---: |            :---: |  :---:           |
+|            cudnn |            11.48 |          0.05617 |             None |            17.74 |           0.2205 |             None |
+|             aten |             25.7 |           0.1008 |             None |            29.79 |            1.587 |             None |
+|              jit |            16.21 |           0.5401 |             None |             53.5 |            9.683 |             None |
+|       jit_premul |             14.4 |           0.3058 |             None |               52 |            8.515 |             None |
+|  jit_premul_bias |            14.68 |          0.05764 |             None |            48.01 |             6.98 |             None |
+|       jit_simple |            15.69 |           0.2142 |             None |            51.19 |            8.201 |             None |
+|   jit_multilayer |            16.36 |           0.9769 |             None |            54.47 |            8.833 |             None |
+|               py |             38.6 |            5.308 |             None |            51.96 |            7.255 |             None |
+
