@@ -224,7 +224,12 @@ void runDiffGraphPasses(std::shared_ptr<Graph>& graph) {
     // TupleConstruct / TupleUnpack pairs can still be present at this point
     // and must be removed for fusion.
     LowerSimpleTuples(graph);
-    GRAPH_DUMP("After LowerSimpleTuples, before BatchMM", graph);
+    GRAPH_DUMP(
+        "After LowerSimpleTuples, before RemoveProfileNodesAndSpecializeTypes",
+        graph);
+    RemoveProfileNodesAndSpecializeTypes(graph);
+    GRAPH_DUMP(
+        "After RemoveProfileNodesAndSpecializeTypes, before BatchMM", graph);
 
     // Rewrite subgraphs with many MMs into expressions that batch them.
     BatchMM(graph);
@@ -259,7 +264,12 @@ void runNoGradOptimizations(std::shared_ptr<Graph>& graph) {
     // TupleConstruct / TupleUnpack pairs can still be present at this point
     // and must be removed for fusion.
     LowerSimpleTuples(graph);
-    GRAPH_DUMP("After LowerSimpleTuples, before BatchMM", graph);
+    GRAPH_DUMP(
+        "After LowerSimpleTuples, before RemoveProfileNodesAndSpecializeTypes",
+        graph);
+    RemoveProfileNodesAndSpecializeTypes(graph);
+    GRAPH_DUMP(
+        "After RemoveProfileNodesAndSpecializeTypes, before BatchMM", graph);
 
     // Rewrite subgraphs with many MMs into expressions that batch them.
     BatchMM(graph);
