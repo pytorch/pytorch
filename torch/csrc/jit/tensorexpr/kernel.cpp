@@ -1704,6 +1704,7 @@ TensorExprKernel::ReductionInfo TensorExprKernel::getReductionInfo(
 void TensorExprKernel::compile() {
   KernelScope kernelScope(&kernelArena_);
 
+  GRAPH_DUMP("TensorExprKernel::compile graph", graph_);
   // Bind inputs to buffers.
   nInputs_ = graph_->inputs().size();
   for (auto const& input : graph_->inputs()) {
@@ -1763,6 +1764,17 @@ TensorExprKernel::TensorExprKernel(const std::shared_ptr<Graph>& subgraph)
 }
 
 void TensorExprKernel::run(Stack& stack) {
+  GRAPH_DUMP("TensorExprKernel::run graph", graph_);
+  size_t n = graph_->inputs().size();
+  for (size_t i = 0; i < n; i++) {
+    const IValue& iv = stack[stack.size() - n + i];
+    if (iv.isTensor() && !iv.toTensor().defined()) {
+      GRAPH_DEBUG("Input ", i, ", undefined tensor type.");
+    } else {
+      GRAPH_DEBUG("Input ", i, ", type: ", *iv.type());
+    }
+  }
+  GRAPH_DEBUG("Stmt:\n", std::to_string(codegen_->stmt()), "\n");
   if (!fallbackAllowed()) {
     runKernel(stack);
     return;
