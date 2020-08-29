@@ -94,18 +94,9 @@ if sys.platform == 'win32':
                 err.strerror += ' Error adding "{}" to the DLL directories.'.format(dll_path)
                 raise err
 
-    try:
-        ctypes.CDLL('vcruntime140.dll')
-        ctypes.CDLL('msvcp140.dll')
-        if cuda_version not in ('9.2', '10.0'):
-            ctypes.CDLL('vcruntime140_1.dll')
-    except OSError:
-        print('''Microsoft Visual C++ Redistributable is not installed, this may lead to the DLL load failure.
-                 It can be downloaded at https://aka.ms/vs/16/release/vc_redist.x64.exe''')
+    def load_library_with_flags(dll, flags=0x00001100):
+        global path_patched
 
-    dlls = glob.glob(os.path.join(th_dll_path, '*.dll'))
-    path_patched = False
-    for dll in dlls:
         is_loaded = False
         if with_load_library_flags:
             res = kernel32.LoadLibraryExW(dll, None, 0x00001100)
@@ -125,6 +116,26 @@ if sys.platform == 'win32':
                 err = ctypes.WinError(ctypes.get_last_error())
                 err.strerror += ' Error loading "{}" or one of its dependencies.'.format(dll)
                 raise err
+
+    try:
+        load_library_with_flags('vcruntime140.dll')
+        load_library_with_flags('msvcp140.dll')
+        if cuda_version not in ('9.2', '10.0'):
+            load_library_with_flags('vcruntime140_1.dll')
+    except OSError:
+        print('''Microsoft Visual C++ Redistributable is not installed, this may lead to the DLL load failure.
+                 It can be downloaded at https://aka.ms/vs/16/release/vc_redist.x64.exe''')
+
+    try:
+        load_library_with_flags('libiomp5md.dll')
+    except OSError:
+        print('''Intel OpenMP is not installed, this may lead to the DLL load failure. 
+                 Please install it using `pip install intel-openmp`.''')
+
+    dlls = glob.glob(os.path.join(th_dll_path, '*.dll'))
+    path_patched = False
+    for dll in dlls:
+        load_library_with_flags(dll)
 
     kernel32.SetErrorMode(prev_error_mode)
 
