@@ -1775,6 +1775,20 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(ScatterModel(), input=(input, indices))
 
     @skipIfUnsupportedMinOpsetVersion(9)
+    def test_scatter_with_scalar_different_types(self):
+        # Tests the case when scalar src (updates values) type is different
+        # from self type. Happens only with scalar src - PyTorch does not
+        # allow this when src is a tensor.
+        class ScatterModel(torch.nn.Module):
+            def forward(self, input, indices):
+                values = 1.0
+                return input.scatter(1, indices, values)
+
+        input = torch.tensor([[0., 0., 0.], [0., 0., 0.], [0., 0., 0.]], dtype=torch.float32)
+        indices = torch.tensor([[1, 0], [0, 1], [0, 1]], dtype=torch.int64)
+        self.run_test(ScatterModel(), input=(input, indices))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_scatter(self):
         class ScatterModel(torch.nn.Module):
             def forward(self, input, indices, values):
@@ -3820,6 +3834,34 @@ class TestONNXRuntime(unittest.TestCase):
 
         input = torch.randn(2, 5, 7, dtype=torch.float64)
         self.run_test(Celu(), (input,))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_where(self):
+        class Model(torch.nn.Module):
+            def forward(self, cond, input, other):
+                return torch.where(cond, input, other)
+
+        x = torch.randint(0, 1, (2, 3, 4), dtype=torch.bool)
+        y = torch.randn(2, 1, 4)
+        z = torch.ones(2, 3, 1)
+        self.run_test(Model(), (x, y, z))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_where_condition(self):
+        class Model1(torch.nn.Module):
+            def forward(self, input):
+                return torch.stack(torch.where(input > 0.5), dim=1)
+
+        x = torch.randint(0, 2, (2, 3, 4), dtype=bool)
+        self.run_test(Model1(), (x))
+
+        class Model2(torch.nn.Module):
+            def forward(self, input, other):
+                return torch.stack(torch.where(input > other), dim=1)
+
+        x = torch.randint(0, 1, (2, 3, 4), dtype=bool)
+        y = torch.randint(1, 2, (2, 3, 4), dtype=bool)
+        self.run_test(Model2(), (x, y))
 
     def test_empty_branch(self):
         class EmptyBranchModel(torch.jit.ScriptModule):
