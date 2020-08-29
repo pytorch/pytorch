@@ -317,6 +317,8 @@ class TestQuantizeFxOps(QuantizationTestCase):
         self._test_quantized_binary_op_impl(
             operator.mul, operator.imul, torch.ops.quantized.mul)
 
+    @skipIfNoFBGEMM
+    def test_quantized_add_relu(self):
         self._test_quantized_binary_op_relu_impl(
             operator.add, operator.iadd, torch.ops.quantized.add_relu)
 
