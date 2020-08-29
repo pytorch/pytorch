@@ -3613,17 +3613,6 @@
   use_c10_dispatcher: full
   variants: function
 
-- func: heaviside.out(Tensor self, Tensor values, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU, CUDA: heaviside_out
-
-- func: heaviside(Tensor self, Tensor values) -> Tensor
-  use_c10_dispatcher: full
-  variants: function, method
-
-- func: heaviside_(Tensor(a!) self, Tensor values) -> Tensor(a!)
-  variants: method
-
 # For C++ only, until we have conversion from C++ numbers to Tensor
 - func: rsub.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
   use_c10_dispatcher: full
@@ -7346,6 +7335,22 @@
   variants: function, method
 
 - func: ger.out(Tensor self, Tensor vec2, *, Tensor(a!) out) -> Tensor(a!)
+
+- func: linalg_norm(Tensor self, Scalar? ord=None, int[]? dim=None, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+  python_module: linalg
+  variants: function
+
+- func: linalg_norm.ord_str(Tensor self, str ord, int[]? dim=None, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+  python_module: linalg
+  variants: function
+
+- func: linalg_norm.out(Tensor self, Scalar? ord=None, int[]? dim=None, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+  python_module: linalg
+  variants: function
+
+- func: linalg_norm.ord_str_out(Tensor self, str ord, int[]? dim=None, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+  python_module: linalg
+  variants: function
 
 ## Functions that are only for testing
 # It is undocumented and should not be used outside of tests.

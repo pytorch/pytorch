@@ -1535,20 +1535,6 @@ hardshrink(lambd=0.5) -> Tensor
 See :func:`torch.nn.functional.hardshrink`
 """)
 
-add_docstr_all('heaviside',
-               r"""
-heaviside(values) -> Tensor
-
-See :func:`torch.heaviside`
-""")
-
-add_docstr_all('heaviside_',
-               r"""
-heaviside_(values) -> Tensor
-
-In-place version of :meth:`~Tensor.heaviside`
-""")
-
 add_docstr_all('histc',
                r"""
 histc(bins=100, min=0, max=0) -> Tensor
