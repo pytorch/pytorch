@@ -13532,7 +13532,7 @@ class TestTorchDeviceType(TestCase):
         def fn(torchfn, *args, test_out=False, **kwargs):
             def call_torch_fn(*args, **kwarg):
                 return torchfn(*tuple(torch.randn(shape, device=device) if isinstance(shape, tuple) else shape
-                                    for shape in args), **kwargs)
+                                      for shape in args), **kwargs)
             result = call_torch_fn(*args, **kwarg)
             if not test_out:
                 return result
