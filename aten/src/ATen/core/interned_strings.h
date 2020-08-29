@@ -175,6 +175,7 @@ namespace c10 {
   _(aten, clip_)                     \
   _(aten, det)                       \
   _(aten, linalg_det)                \
+  _(aten, linalg_norm)               \
   _(aten, append)                    \
   _(aten, item)                      \
   _(aten, format)                    \
