@@ -13537,7 +13537,7 @@ class TestTorchDeviceType(TestCase):
             if not test_out:
                 return result
             else:
-                out = torch.ones_like(result)
+                out = torch.full_like(result, math.nan)
                 out1 = call_torch_fn(*args, **kwargs, out=out)
                 return out
 
