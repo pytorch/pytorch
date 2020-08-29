@@ -132,13 +132,13 @@ if sys.platform == 'win32':
         if cuda_version not in ('9.2', '10.0'):
             load_library_with_flags('vcruntime140_1.dll')
     except OSError:
-        print('''Microsoft Visual C++ Redistributable is not installed, this may lead to the DLL load failure.
+        print('''Microsoft Visual C++ Redistributable is not installed, which may lead to the DLL load failure.
                  It can be downloaded at https://aka.ms/vs/16/release/vc_redist.x64.exe''')
 
     try:
         load_library_with_flags('libiomp5md.dll')
     except OSError:
-        print('''Intel OpenMP is not installed, this may lead to the DLL load failure. 
+        print('''Intel OpenMP is not installed, which may lead to the DLL load failure. 
                  Please install it using `pip install intel-openmp`.''')
 
     dlls = glob.glob(os.path.join(th_dll_path, '*.dll'))
