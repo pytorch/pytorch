@@ -114,7 +114,8 @@ static void ReplaceAddWithConcat(Block* b) {
       auto in1 = it->input(0)->node();
       auto in2 = it->input(1)->node();
       TypePtr elem = in2->output()->type()->cast<ListType>()->getElementType();
-      //if ((in1->kind() == prim::ListConstruct || in1->kind() == aten::list) && (in2->kind() == prim::ListConstruct || in2->kind() == aten::list)) {
+      // if ((in1->kind() == prim::ListConstruct || in1->kind() == aten::list)
+      // && (in2->kind() == prim::ListConstruct || in2->kind() == aten::list)) {
       if (elem->cast<IntType>()) {
         Node* concat_node = b->owningGraph()->create(onnx::Concat, 1);
         concat_node->i_(attr::axis, 0);
