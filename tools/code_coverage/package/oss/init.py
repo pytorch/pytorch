@@ -1,6 +1,5 @@
 import argparse
 import os
-import sys
 from typing import List, Optional, Tuple
 
 from ..util.setting import (
@@ -58,7 +57,7 @@ def initialization() -> Tuple[Option, TestList, List[str]]:
 def add_arguments_oss(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
     parser.add_argument(
         "--run-only",
-        help="only run certain test(s), for example: atest test_nn.py. If this argument is not specified, will run both cpp tests in build/bin and python test run_test.py",
+        help="only run certain test(s), for example: atest test_nn.py.",
         nargs="*",
         default=None,
     )

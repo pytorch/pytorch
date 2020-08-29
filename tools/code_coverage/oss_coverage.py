@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-
 import time
 
 from package.oss.cov_json import get_json_report
