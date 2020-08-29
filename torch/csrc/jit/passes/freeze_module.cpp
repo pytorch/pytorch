@@ -482,6 +482,9 @@ class AttributePropagator {
     if (node->kind() != prim::GetAttr) {
       return;
     }
+    if (!node->output()->type()->cast<ClassType>()) {
+      return;
+    }
     auto name = node->s(attr::name);
     auto input = node->inputs()[0];
     if (!findConstantAttr(input, name, attrModule, graph)) {

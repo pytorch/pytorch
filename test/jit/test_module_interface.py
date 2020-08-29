@@ -646,7 +646,6 @@ class TestModuleInterface(JitTestCase):
         m = torch.jit.script(MainModule())
         m.eval()
         mf = torch._C._freeze_module(m._c, freezeInterfaces = True)
-        mf.dump(True, True, True)
 
     def test_module_apis_interface(self):
         @torch.jit.interface
