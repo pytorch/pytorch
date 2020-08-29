@@ -164,18 +164,17 @@ class Optimizer(object):
             update_group(g, ng) for g, ng in zip(groups, saved_groups)]
         self.__setstate__({'state': state, 'param_groups': param_groups})
 
-    def zero_grad(self, set_to_none=False):
+    def zero_grad(self, set_to_none: bool = False):
         r"""Set the gradients of all optimized :class:`torch.Tensor` s to zero.
 
         Arguments:
             set_to_none (bool): instead of setting to zero, set the grad to None.
-                This will in general have lower memory footprint, but using this
-                comes with caveats, to name a few:
+                This is will in general have lower memory footprint, and can modestly improve performance.
+                However, it changes certain behaviors. For example:
                 1. When user tries to access the gradient value and perform manual ops on it.
                 A None attribute or a Tensor full of 0s will be different.
-                2. User can no longer rely on checking if `.grad` is None to see if a tensor
-                is touched in the backward pass
-                3. `nn.optim` optimizers have a different behavior if the gradient is 0 or None
+                2. If the user requests `zero_grad(set_to_none=True)` followed by a backward pass, `.grad` s are guaranteed to be None for params that did not receive a gradient.
+                3. `torch.optim` optimizers have a different behavior if the gradient is 0 or None
                 (in one case it does the step with a gradient of 0 and in the other it skip
                 the step altogether).
         """
@@ -183,7 +182,6 @@ class Optimizer(object):
             for p in group['params']:
                 if p.grad is not None:
                     if set_to_none:
-                        p.grad.detach_()
                         p.grad = None
                     else:
                         if p.grad.grad_fn is not None:

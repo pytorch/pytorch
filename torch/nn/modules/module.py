@@ -1313,8 +1313,9 @@ class Module:
             p.requires_grad_(requires_grad)
         return self
 
-    def zero_grad(self, set_to_none=False) -> None:
-        r"""Sets gradients of all model parameters to zero.
+    def zero_grad(self, set_to_none: bool = False) -> None:
+        r"""Sets gradients of all model parameters to zero. See similar function
+        under `torch.optimizer` for more contexts.
 
         Arguments:
             set_to_none (bool): instead of setting to zero, set the grad to None.
@@ -1329,7 +1330,6 @@ class Module:
         for p in self.parameters():
             if p.grad is not None:
                 if set_to_none:
-                    p.grad.detach_()
                     p.grad = None
                 else:
                     if p.grad.grad_fn is not None:
