@@ -54,7 +54,7 @@ def get_source_lines_and_file(obj, error_msg=None):
                "available. Original error: {}".format(obj, e))
         if error_msg:
             msg += '\n' + error_msg
-        raise OSError(msg)
+        raise OSError(msg) from None
 
     return sourcelines, file_lineno, filename
 
