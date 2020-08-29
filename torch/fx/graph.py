@@ -128,12 +128,6 @@ class Graph:
         i = self._used_names[op] = self._used_names[op] + 1
         return f'{op}_{i}'
 
-    def get_param(self, name: str) -> Node:
-        return self.create_node('get_param', name)
-
-    def placeholder(self, name: str) -> Node:
-        return self.create_node('placeholder', target=name, name=name.replace('*', ''))
-
     def python_code(self, root_module: str) -> Tuple[str, str, List[str]]:
         free_vars: List[str] = []
         body: List[str] = []
