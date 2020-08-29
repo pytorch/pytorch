@@ -13533,11 +13533,13 @@ class TestTorchDeviceType(TestCase):
             def call_torch_fn(*args, **kwarg):
                 return torchfn(*tuple(torch.randn(shape, device=device) if isinstance(shape, tuple) else shape
                                       for shape in args), **kwargs)
-            result = call_torch_fn(*args, **kwarg)
+            result = call_torch_fn(*args, **kwargs)
             if not test_out:
                 return result
             else:
-                return call_torch_fn(*args, **kwarg, out=torch.ones_like(result))
+                out = torch.ones_like(result)
+                call_torch_fn(*args, **kwargs, out=out)
+                return out
 
         # mm, addmm
         self.assertEqual((0, 0), fn(torch.mm, (0, 0), (0, 0)).shape)
