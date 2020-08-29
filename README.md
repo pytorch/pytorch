@@ -91,7 +91,7 @@ PyTorch is not a Python binding into a monolithic C++ framework.
 It is built to be deeply integrated into Python.
 You can use it naturally like you would use [NumPy](https://www.numpy.org/) / [SciPy](https://www.scipy.org/) / [scikit-learn](https://scikit-learn.org) etc.
 You can write your new neural network layers in Python itself, using your favorite libraries
-and use packages such as Cython and Numba.
+and use packages such as [Cython](https://cython.org/) and [Numba](http://numba.pydata.org/).
 Our goal is to not reinvent the wheel where appropriate.
 
 ### Imperative Experiences
@@ -105,7 +105,7 @@ We hope you never spend hours debugging your code because of bad stack traces or
 ### Fast and Lean
 
 PyTorch has minimal framework overhead. We integrate acceleration libraries
-such as [Intel MKL](https://software.intel.com/mkl) and NVIDIA (cuDNN, NCCL) to maximize speed.
+such as [Intel MKL](https://software.intel.com/mkl) and NVIDIA ([cuDNN](https://developer.nvidia.com/cudnn), [NCCL](https://developer.nvidia.com/nccl)) to maximize speed.
 At the core, its CPU and GPU Tensor and neural network backends
 (TH, THC, THNN, THCUNN) are mature and have been tested for years.
 
@@ -135,7 +135,7 @@ Commands to install from binaries via Conda or pip wheels are on our website:
 [https://pytorch.org](https://pytorch.org)
 
 
-#### NVIDIA Jetson platforms
+#### NVIDIA Jetson Platforms
 
 Python wheels for NVIDIA's Jetson Nano, Jetson TX2, and Jetson AGX Xavier are available via the following URLs:
 
@@ -342,7 +342,8 @@ Three pointers to get you started:
 * forums: discuss implementations, research, etc. https://discuss.pytorch.org
 * GitHub issues: bug reports, feature requests, install issues, RFCs, thoughts, etc.
 * Slack: The [PyTorch Slack](https://pytorch.slack.com/) hosts a primary audience of moderate to experienced PyTorch users and developers for general chat, online discussions, collaboration etc. If you are a beginner looking for help, the primary medium is [PyTorch Forums](https://discuss.pytorch.org). If you need a slack invite, please fill this form: https://goo.gl/forms/PP1AGvNHpSaJP8to1
-* newsletter: no-noise, one-way email newsletter with important announcements about pytorch. You can sign-up here: https://eepurl.com/cbG0rv
+* newsletter: no-noise, one-way email newsletter with important announcements about PyTorch. You can sign-up here: https://eepurl.com/cbG0rv
+* Facebook page: important announcements about PyTorch. https://www.facebook.com/pytorch
 * for brand guidelines, please visit our website at [pytorch.org](https://pytorch.org/)
 
 ## Releases and Contributing

@@ -1,10 +1,12 @@
 #include <torch/nn/modules/transformerlayer.h>
+#include <torch/nn/modules/transformercoder.h>
 
 namespace F = torch::nn::functional;
 
 namespace torch {
 namespace nn {
 
+// ========================TransformerEncoderLayerImpl=========================
 TransformerEncoderLayerImpl::TransformerEncoderLayerImpl(
   const TransformerEncoderLayerOptions& options_) : options(options_) {
   reset();
@@ -142,7 +144,6 @@ void TransformerDecoderLayerImpl::reset_parameters() {
   self_attn->_reset_parameters();
   // dropout1->reset_parameters();
   norm1->reset_parameters();
-  // TODO xinyu: standardrize reset_parameters virtual funcs
   multihead_attn->_reset_parameters();
   // dropout2->reset_parameters();
   norm2->reset_parameters();
@@ -151,28 +152,6 @@ void TransformerDecoderLayerImpl::reset_parameters() {
   linear2->reset_parameters();
   // dropout3->reset_paramteres();
   norm3->reset_parameters();
-}
-
-// By default contained sub-modules are printed.
-// TODO: The pretty print needs to be implemented along with python
-// implementation, currently using the default print.
-void TransformerDecoderLayerImpl::pretty_print(std::ostream& stream) const {
-  // stream << "(d_model=" << options.d_model()
-  //    << ", nhead=" << options.nhead()
-  //    << ", dim_feedforward=" << options.dim_feedforward()
-  //    << ", dropout=" << options.dropout()
-  //    << ", self_attn=torch::nn::MultiheadAttention()"
-  //    << ", dropout1=torch::nn::Dropout()"
-  //    << ", norm1=torch::nn::LayerNorm()"
-  //    << ", multihead_attn=torch::nn::MultiheadAttention()"
-  //    << ", dropout2=torch::nn::Dropout()"
-  //    << ", norm2=torch::nn::LayerNorm()"
-  //    << ", linear1=torch::nn::Linear()"
-  //    << ", dropout=torch::nn::Dropout()"
-  //    << ", linear2=torch::nn::Linear()"
-  //    << ", dropout3=torch::nn::Dropout()"
-  //    << ", norm3=torch::nn::LayerNorm()"
-  //    << ")";
 }
 
 ///Pass the inputs (and mask) through the decoder layer.
@@ -222,6 +201,67 @@ Tensor TransformerDecoderLayerImpl::activation(const Tensor& input){
       torch::enumtype::get_enum_name(options.activation()));
   }
 }
+
+
+// ========================TransformerEncoderImpl=========================
+TransformerEncoderImpl::TransformerEncoderImpl(
+  TransformerEncoderOptions options_) : options(std::move(options_)) {
+  reset();
+}
+
+void TransformerEncoderImpl::reset() {
+  layers = this->register_module("layers", ModuleList());
+  for (int64_t i = 0; i < options.num_layers(); ++i) {
+    layers->push_back(options.encoder_layer()->clone());
+  }
+
+  if (!options.norm().is_empty()) {
+    norm = options.norm().clone();
+    this->register_module("norm", norm.ptr());
+  }
+}
+
+void TransformerEncoderImpl::reset_parameters() {
+  TORCH_CHECK(
+    layers->size() == options.num_layers(),
+    "TransformerEncoder should have", options.num_layers(), " encoder layers, but got ", layers->size());
+
+  size_t num_layers = layers->size();
+  for (size_t i = 0; i < num_layers; ++i) {
+    layers->at<TransformerEncoderLayerImpl>(i).reset_parameters();
+  }
+  // a. No way to know whether module in AnyModule has api to reset_parameters, so replace instead
+  // b. Allow user to add/delete normalization module when reset parameters
+  if (!norm.is_empty()) {
+    this->unregister_module("norm");
+    norm = AnyModule();
+  }
+  if (!options.norm().is_empty()) {
+    norm = options.norm().clone();
+    this->register_module("norm", norm.ptr());
+  }
+}
+
+Tensor TransformerEncoderImpl::forward(
+  const Tensor& src,
+  const Tensor& src_mask,
+  const Tensor& src_key_padding_mask ) {
+
+  size_t num_layers = layers->size();
+  Tensor output;
+  if (num_layers > 0) {
+    output = layers->at<TransformerEncoderLayerImpl>(0).forward(src, src_mask, src_key_padding_mask);
+  }
+  for (size_t i = 1; i < num_layers; ++i) {
+    output = layers->at<TransformerEncoderLayerImpl>(i).forward(output, src_mask, src_key_padding_mask);
+  }
+
+  if (!norm.is_empty()) {
+    output = norm.forward<Tensor>(num_layers == 0 ? src : output);
+  }
+  return output;
+}
+
 
 } // namespace nn
 } // namespace torch

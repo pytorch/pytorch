@@ -42,7 +42,7 @@ except ImportError:
     CodeTemplate = import_module('code_template', 'aten/src/ATen/code_template.py').CodeTemplate
 
 #
-# declarations blacklist
+# declarations blocklist
 # We skip codegen for these functions, for various reasons.
 # Future PRs will categorize this list and eliminate or hoist
 # them out of eager-only codegen.
@@ -57,8 +57,7 @@ SKIP_PYTHON_BINDINGS = [
     '_arange.*', '_range.*', '_linspace.*', '_logspace.*',
     '_sparse_add_out', '_sparse_div.*', '_sparse_mul.*', '_sparse_sub.*', '_sparse_dense_add_out',
     'index', 'unique_dim_consecutive',
-    '_indexCopy_', 'max_values', 'min_values',
-    '_cumsum.*', '_cumprod.*', '_sum.*', '_prod.*',
+    '_indexCopy_', '_cumsum.*', '_cumprod.*', '_sum.*', '_prod.*',
     '_th_.*', '_thnn_.*',
     'arange.*', 'range.*', '_solve.*', '_inverse.*',
     'full(_out)?',
@@ -302,6 +301,7 @@ UNPACK_WITH_SIZE_METHODS = {
     'TensorList': 'tensorlist_n<{}>',
     'DimnameList': 'dimnamelist',
     'IntArrayRef': 'intlist',
+    'c10::optional<IntArrayRef>': 'intlistOptional',
 }
 
 UNPACK_WITH_DEFAULT_METHODS = {
@@ -1228,7 +1228,10 @@ def get_schema_formal(arg, is_python_method):
 
     size = arg.get('size')
     if size is not None:
-        typename = '{}[{}]'.format(typename, size)
+        if typename.endswith('?'):
+            typename = '{}[{}]?'.format(typename[:-1], size)
+        else:
+            typename = '{}[{}]'.format(typename, size)
 
     # default
     default = arg.get('default')

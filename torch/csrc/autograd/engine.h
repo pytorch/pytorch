@@ -246,8 +246,8 @@ struct ReadyQueue {
  public:
   // incrementOutstandingTasks indicates whether or not we should increment
   // 'outstanding_tasks_' for the associated GraphTask. This should mostly
-  // always be true, see the doc for 'enqueue_blocked_task_on_cpu' for when we
-  // might set this to false.
+  // always be true and is only set false in certain cases (see docs for
+  // DistEngine.execute_graph_task_until_ready_queue_empty)
   void push(NodeTask item, bool incrementOutstandingTasks = true);
   void pushShutdownTask();
   NodeTask pop();

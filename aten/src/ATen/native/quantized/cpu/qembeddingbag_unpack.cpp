@@ -87,12 +87,11 @@ Tensor qembeddingbag_byte_unpack(const Tensor& packed_weight) {
   return output;
 }
 
-Tensor qembeddingbag_4bit_unpack(const Tensor& packed_weight) {
+Tensor _qembeddingbag_nbit_unpack_helper(const Tensor& packed_weight, int BIT_RATE) {
   const auto input_rows = packed_weight.size(0);
   const auto input_columns = packed_weight.size(1);
   const auto* input_data = packed_weight.data_ptr<uint8_t>();
-  constexpr int NUM_ELEM_PER_BYTE = 2;
-  constexpr int BIT_RATE = 4;
+  int NUM_ELEM_PER_BYTE = 8/BIT_RATE;
 
   // The last 4 bytes per row are two fp16 scale and zero_point.
   // The rest of input_columns is the number of values in the original row.
@@ -126,6 +125,30 @@ Tensor qembeddingbag_4bit_unpack(const Tensor& packed_weight) {
   return output;
 }
 
+// De-quantizes the result of the qembeddingbag_4bit_prepack operator.
+// The input is expected to first have quantized values,
+// then 2-byte fp16 scale and 2-byte zero_offset.
+// The output is a matrix containing only the values, but de-quantized.
+// De-quantization is performed by multiplying each value by its
+// row's scale and zero_point parameters. The de-quantized values
+// will thus not be exactly equal to the original, un-quantized
+// floating point values.
+Tensor qembeddingbag_4bit_unpack(const Tensor& packed_weight) {
+  return _qembeddingbag_nbit_unpack_helper(packed_weight, 4 /*BIT_RATE*/);
+}
+
+// De-quantizes the result of the qembeddingbag_2bit_prepack operator.
+// The input is expected to first have quantized values,
+// then 2-byte fp16 scale and 2-byte zero_offset.
+// The output is a matrix containing only the values, but de-quantized.
+// De-quantization is performed by multiplying each value by its
+// row's scale and zero_point parameters. The de-quantized values
+// will thus not be exactly equal to the original, un-quantized
+// floating point values.
+Tensor qembeddingbag_2bit_unpack(const Tensor& packed_weight) {
+  return _qembeddingbag_nbit_unpack_helper(packed_weight, 2 /*BIT_RATE*/);
+}
+
 class QEmbeddingUnpackWeights final {
  public:
   static at::Tensor run(
@@ -137,6 +160,7 @@ class QEmbeddingUnpackWeights final {
 TORCH_LIBRARY_IMPL(quantized, CPU, m) {
   m.impl("embedding_bag_byte_unpack", qembeddingbag_byte_unpack);
   m.impl("embedding_bag_4bit_unpack", qembeddingbag_4bit_unpack);
+  m.impl("embedding_bag_2bit_unpack", qembeddingbag_2bit_unpack);
 }
 
 TORCH_LIBRARY_IMPL(quantized, CatchAll, m) {

@@ -572,10 +572,10 @@ Vec256<float> inline clamp_min(const Vec256<float>& a, const Vec256<float>& min)
 
 template <>
 Vec256<float> inline operator&(const Vec256<float>& a, const Vec256<float>& b) {
-  float32x4_t r0 = vreinterpretq_u32_f32(vandq_u32(
+  float32x4_t r0 = vreinterpretq_f32_u32(vandq_u32(
       vreinterpretq_u32_f32(a.get_low()),
       vreinterpretq_u32_f32(b.get_low())));
-  float32x4_t r1 = vreinterpretq_u32_f32(vandq_u32(
+  float32x4_t r1 = vreinterpretq_f32_u32(vandq_u32(
       vreinterpretq_u32_f32(a.get_high()),
       vreinterpretq_u32_f32(b.get_high())));
   return Vec256<float>(r0, r1);
@@ -583,10 +583,10 @@ Vec256<float> inline operator&(const Vec256<float>& a, const Vec256<float>& b) {
 
 template <>
 Vec256<float> inline operator|(const Vec256<float>& a, const Vec256<float>& b) {
-  float32x4_t r0 = vreinterpretq_u32_f32(vorrq_u32(
+  float32x4_t r0 = vreinterpretq_f32_u32(vorrq_u32(
       vreinterpretq_u32_f32(a.get_low()),
       vreinterpretq_u32_f32(b.get_low())));
-  float32x4_t r1 = vreinterpretq_u32_f32(vorrq_u32(
+  float32x4_t r1 = vreinterpretq_f32_u32(vorrq_u32(
       vreinterpretq_u32_f32(a.get_high()),
       vreinterpretq_u32_f32(b.get_high())));
   return Vec256<float>(r0, r1);
@@ -594,10 +594,10 @@ Vec256<float> inline operator|(const Vec256<float>& a, const Vec256<float>& b) {
 
 template <>
 Vec256<float> inline operator^(const Vec256<float>& a, const Vec256<float>& b) {
-  float32x4_t r0 = vreinterpretq_u32_f32(veorq_u32(
+  float32x4_t r0 = vreinterpretq_f32_u32(veorq_u32(
       vreinterpretq_u32_f32(a.get_low()),
       vreinterpretq_u32_f32(b.get_low())));
-  float32x4_t r1 = vreinterpretq_u32_f32(veorq_u32(
+  float32x4_t r1 = vreinterpretq_f32_u32(veorq_u32(
       vreinterpretq_u32_f32(a.get_high()),
       vreinterpretq_u32_f32(b.get_high())));
   return Vec256<float>(r0, r1);

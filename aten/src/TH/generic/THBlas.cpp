@@ -14,28 +14,6 @@ TH_EXTERNC void dcopy_(int *n, double *x, int *incx, double *y, int *incy);
 TH_EXTERNC void scopy_(int *n, float *x, int *incx, float *y, int *incy);
 TH_EXTERNC void daxpy_(int *n, double *a, double *x, int *incx, double *y, int *incy);
 TH_EXTERNC void saxpy_(int *n, float *a, float *x, int *incx, float *y, int *incy);
-TH_EXTERNC double ddot_(int *n, double *x, int *incx, double *y, int *incy);
-#ifdef BLAS_USE_CBLAS_DOT
-TH_EXTERNC float cblas_sdot(const int n, const float *x, const int incx, const float *y, const int incy);
-TH_EXTERNC void cblas_cdotu_sub(const int n, const void *x, const int incx, const void *y, const int incy, void *dotu);
-TH_EXTERNC void cblas_zdotu_sub(const int n, const void *x, const int incx, const void *y, const int incy, void *dotu);
-
-#ifndef THBlas_cblas_dot_
-#define THBlas_cblas_dot_
-static inline ffloat sdot_(const int *n, const float *x, const int *incx, const float *y, const int *incy)
-{
-  return cblas_sdot(*n, x, *incx, y, *incy);
-}
-static inline void cdotu_(std::complex<float> *res, int *n, std::complex<float> *x, int *incx, std::complex<float> *y, int *incy) {
-  cblas_cdotu_sub(*n, x, *incx, y, *incy, res);
-}
-static inline void zdotu_(std::complex<double> *res, int *n, std::complex<double> *x, int *incx, std::complex<double> *y, int *incy) {
-  cblas_zdotu_sub(*n, x, *incx, y, *incy, res);
-}
-#endif
-#else
-TH_EXTERNC ffloat sdot_(int *n, float *x, int *incx, float *y, int *incy);
-#endif
 TH_EXTERNC void dger_(int *m, int *n, double *alpha, double *x, int *incx, double *y, int *incy, double *a, int *lda);
 TH_EXTERNC void sger_(int *m, int *n, float *alpha, float *x, int *incx, float *y, int *incy, float *a, int *lda);
 
