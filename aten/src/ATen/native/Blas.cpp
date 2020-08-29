@@ -54,7 +54,7 @@ Tensor &addmv_out(Tensor& result, const Tensor &self, const Tensor &mat, const T
     "size mismatch, get ", self_.size(0), ", ", mat.size(0), "x", mat.size(1), ",", vec.size(0));
 
   if (mat.numel() == 0) {
-    if (beta.toDouble() == 0.0) {
+    if (beta.toComplexDouble() == 0.0) {
       result.zero_();
     } else {
       at::native::mul_out(result, self, at::native::scalar_tensor(beta, at::device(at::kCPU).dtype(self.scalar_type())));
