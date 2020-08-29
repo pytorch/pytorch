@@ -338,10 +338,6 @@ Reduction Ops
 
     argmax
     argmin
-    amax
-    amin
-    max
-    min
     dist
     logsumexp
     mean
@@ -382,7 +378,9 @@ Comparison Ops
     kthvalue
     le
     lt
+    max
     maximum
+    min
     minimum
     ne
     sort
