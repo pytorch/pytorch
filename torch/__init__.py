@@ -99,7 +99,7 @@ if sys.platform == 'win32':
 
         is_loaded = False
         if with_load_library_flags:
-            res = kernel32.LoadLibraryExW(dll, None, 0x00001100)
+            res = kernel32.LoadLibraryExW(dll, None, flags)
             last_error = ctypes.get_last_error()
             if res is None and last_error != 126:
                 err = ctypes.WinError(last_error)
