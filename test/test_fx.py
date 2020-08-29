@@ -320,10 +320,10 @@ class TestFX(JitTestCase):
             # Add placeholders for fn inputs
             placeholder_nodes = []
             for name in fn_input_names:
-                placeholder_nodes.append(graph.placeholder(name))
+                placeholder_nodes.append(graph.create_node('placeholder', name))
 
             # Get the interpreter object
-            interpreter_node = graph.get_param('interpreter')
+            interpreter_node = graph.create_node('get_param', 'interpreter')
 
             # Add a node to call the interpreter instance
             output_node = graph.create_node(
@@ -365,6 +365,24 @@ class TestFX(JitTestCase):
         m_g = symbolic_trace(m)
         for node in m_g.graph.nodes:
             self.assertTrue(node.name != "getattr")
+
+    def test_node_tagging(self):
+        class TaggingDelegate(DefaultDelegate):
+            def create_node(self, kind : str, target : Union[str, Callable],
+                            args : Tuple[Any], kwargs : Dict[str, Any], name : Optional[str] = None) -> Node:
+                n = super().create_node(kind, target, args, kwargs, name)
+                n.tag = 'foo'
+                return n
+
+        class M(torch.nn.Module):
+            def forward(self, a, b):
+                return a + b
+
+        m = M()
+        g = symbolic_trace(m, TaggingDelegate).graph
+        for n in g.nodes:
+            self.assertTrue(hasattr(n, 'tag'))
+            self.assertEqual(n.tag, 'foo')
 
 
 if __name__ == '__main__':
