@@ -2,10 +2,10 @@
 
 #include <ATen/core/jit_type.h>
 #include <ATen/core/stack.h>
+#include <c10/util/hash.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/ir/ir.h>
-#include <c10/util/hash.h>
 #include <iostream>
 #include <vector>
 
@@ -72,7 +72,8 @@ static_assert(
 
 struct ArgumentSpec {
   ArgumentSpec(size_t num_flat_tensor_inputs, size_t num_flat_optional_inputs) {
-    hash_code = c10::hash_combine(num_flat_tensor_inputs, num_flat_optional_inputs);
+    hash_code =
+        c10::hash_combine(num_flat_tensor_inputs, num_flat_optional_inputs);
     tensor_args.reserve(num_flat_tensor_inputs);
     optional_presence.reserve(num_flat_optional_inputs);
   }
