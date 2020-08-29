@@ -5591,40 +5591,6 @@ Example::
 
 """.format(**common_args))
 
-add_docstr(torch.heaviside,
-           r"""
-heaviside(input, values, *, out=None) -> Tensor
-
-Computes the Heaviside step function for each element in :attr:`input`.
-The Heaviside step function is defined as:
-
-.. math::
-    \text{{heaviside}}(input, values) = \begin{cases}
-        \0, & \text{if input < 0}\\
-        \values, & \text{if input == 0}\\
-        \1, & \text{if input > 0}
-    \end{cases}
-""" + r"""
-
-Args:
-    {input}
-    values (Tensor): The values to use where :attr:`input` is zero.
-
-Keyword arguments:
-    {out}
-
-Example::
-
-    >>> input = torch.tensor([-1.5, 0, 2.0])
-    >>> values = torch.tensor([0.5])
-    >>> torch.heaviside(input, values)
-    tensor([0.0000, 0.5000, 1.0000])
-    >>> values = torch.tensor([1.2, -2.0, 3.5])
-    >>> torch.heaviside(input, values)
-    tensor([0., -2., 1.])
-
-""".format(**common_args))
-
 add_docstr(torch.rand,
            r"""
 rand(*size, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
