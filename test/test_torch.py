@@ -13530,7 +13530,7 @@ class TestTorchDeviceType(TestCase):
     def test_blas_empty(self, device):
 
         def fn(torchfn, *args, test_out=False, **kwargs):
-            def call_torch_fn(*args, **kwarg):
+            def call_torch_fn(*args, **kwargs):
                 return torchfn(*tuple(torch.randn(shape, device=device) if isinstance(shape, tuple) else shape
                                       for shape in args), **kwargs)
             result = call_torch_fn(*args, **kwargs)
@@ -13538,7 +13538,7 @@ class TestTorchDeviceType(TestCase):
                 return result
             else:
                 out = torch.ones_like(result)
-                call_torch_fn(*args, **kwargs, out=out)
+                out1 = call_torch_fn(*args, **kwargs, out=out)
                 return out
 
         # mm, addmm
