@@ -165,7 +165,6 @@ Tensor& remainder_(Tensor& self, const Tensor& other) {
 
 Tensor& true_divide_out(Tensor& result, const Tensor& self, const Tensor& divisor) {
   TensorIterator iter = TensorIteratorConfig()
-     .set_check_mem_overlap(true)
      .add_output(result)
      .add_input(self)
      .add_input(divisor)
