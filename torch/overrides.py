@@ -221,8 +221,6 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.all: lambda input, dim=None: -1,
         torch.allclose: lambda input, other, trol=1e-05, atol=1e-08, equal_nan=False: -1,
         torch.alpha_dropout: lambda input, p, train, inplace=False: -1,
-        torch.amax: lambda input, dim=None: -1,
-        torch.amin: lambda input, dim=None: -1,
         torch.angle: lambda input, out=None: -1,
         torch.any: lambda input, dim=None, keepdim=False, out=None: -1,
         torch.argmax: lambda input: -1,

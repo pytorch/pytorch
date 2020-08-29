@@ -294,10 +294,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
 
             def forward(self, x, y):
                 x = self.conv1(x)
-                if self.is_scalar:
-                    y = 3
-                else:
-                    y = self.conv2(y)
+                y = 3 if self.is_scalar else self.conv2(y)
                 x = self.op(x, y)
                 return x
 
@@ -341,15 +338,10 @@ class TestQuantizeFxOps(QuantizationTestCase):
 
             def forward(self, x, y):
                 x = self.conv1(x)
-                if self.is_scalar:
-                    y = 3
-                else:
-                    y = self.conv2(y)
+                y = 3 if self.is_scalar else self.conv2(y)
                 x = self.op(x, y)
-                if self.is_functional_relu:
-                    x = self.relu(x, self.is_inplace_relu)
-                else:
-                    x = self.relu(x)
+                x = self.relu(x, self.is_inplace_relu) if \
+                    self.is_functional_relu else self.relu(x)
                 return x
 
         data = (torch.rand((1, 2, 5, 5), dtype=torch.float),
@@ -363,16 +355,20 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 data, quant_type, quantized_node)
 
     @skipIfNoFBGEMM
-    def test_quantized_binary_op(self):
+    def test_quantized_add(self):
         self._test_quantized_binary_op_impl(
             operator.add, operator.iadd, torch.ops.quantized.add)
+
+    @skipIfNoFBGEMM
+    def test_quantized_mul(self):
         self._test_quantized_binary_op_impl(
             operator.mul, operator.imul, torch.ops.quantized.mul)
 
-    @skipIfNoFBGEMM
-    def test_quantized_binary_op_relu(self):
         self._test_quantized_binary_op_relu_impl(
             operator.add, operator.iadd, torch.ops.quantized.add_relu)
+
+    @skipIfNoFBGEMM
+    def test_quantized_mul_relu(self):
         self._test_quantized_binary_op_relu_impl(
             operator.mul, operator.imul, torch.ops.quantized.mul_relu)
 
