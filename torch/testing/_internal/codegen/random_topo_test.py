@@ -308,7 +308,7 @@ def runTest(seed, args):
                 print("val size: ", out.size())
     except Exception as err:
         raise Exception("Testing script failure with error message {0}\n\trepro by running:\n\t{1}".format(
-            str(err), reproString(seed, args)))
+            str(err), reproString(seed, args))) from None
     try:
         traced_model = torch.jit.trace(random_topology_test, (seed_tensor, *tensor_list))
         if DEBUG_PRINT:
@@ -325,12 +325,12 @@ def runTest(seed, args):
                 print("jit output: ", jit_oo)
                 print("diff ", jit_oo - oo)
                 raise WrongResultException()
-    except WrongResultException:
+    except WrongResultException as err:
         raise Exception("cuda fuser gives wrong results, repro by running:\n"
-                        "\t{0}".format(reproString(seed, args)))
+                        "\t{0}".format(reproString(seed, args))) from err
     except Exception as err:
         raise Exception("something in cuda fuser went wrong {0}\n\trepro by running:\n\t{1}".format(
-            str(err), reproString(seed, args)))
+            str(err), reproString(seed, args))) from None
 
 
 def parse_args():
