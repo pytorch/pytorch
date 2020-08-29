@@ -16094,43 +16094,55 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         for use_out, row_major, incx, incy, lda_tail in product((False, True), (False, True), (1, 2), (1, 2), (0, 1)):
             _test(use_out, row_major, incx, incy, lda_tail)
 
-    @slowTest
-    @onlyCPU
-    def test_addmm(self, device):
-        dtypes = {
+    @dtypesIfCUDA(*torch.testing.get_all_complex_dtypes(), *torch.testing.get_all_fp_dtypes(include_bfloat16=False))
+    @dtypes(*torch.testing.get_all_complex_dtypes(), *torch.testing.get_all_fp_dtypes())
+    def test_addmm(self, device, dtype):
+        prec = {
             torch.double: 1e-8,
             torch.float: 1e-4,
             torch.bfloat16: 1e-1,
             torch.half: 1e-1,
             torch.cfloat: 1e-4,
             torch.cdouble: 1e-8
-        }
-        for dtype, prec in dtypes.items():
-            M = torch.randn(10, 25).to(device=device, dtype=dtype)
-            m1 = torch.randn(10, 50).to(device=device, dtype=dtype)
-            m2 = torch.randn(50, 25).to(device=device, dtype=dtype)
-            res1 = torch.addmm(M, m1, m2)
-            res2 = torch.zeros(10, 25, device=device, dtype=dtype)
-            res2 += M
-            for i in range(10):
-                for j in range(25):
-                    for k in range(50):
-                        res2[i, j] += m1[i, k] * m2[k, j]
-            self.assertEqual(res1, res2, atol=prec, rtol=0)
+        }[dtype]
+
+        if False and dtype.is_complex:  # bug to be fixed in another PR
+            alpha = 1.2 + 0.3j
+            beta = 0.5 + 1.6j
+        else:
+            alpha = 1.2
+            beta = 0.8
+
+        M = torch.randn(10, 25).to(device=device, dtype=dtype)
+        m1 = torch.randn(10, 50).to(device=device, dtype=dtype)
+        m2 = torch.randn(50, 25).to(device=device, dtype=dtype)
+        res1 = torch.addmm(M, m1, m2, alpha=alpha, beta=beta)
+        res2 = torch.full_like(res1, math.nan)
+        torch.addmm(M, m1, m2, alpha=alpha, beta=beta, out=res2)
+        res3 = (beta * M).cpu().tolist()
+        for i in range(10):
+            for j in range(25):
+                for k in range(50):
+                    res3[i][j] += alpha * m1[i, k] * m2[k, j]
+        res3 = torch.tensor(res3, device=device, dtype=dtype)
+        self.assertEqual(res1, res2, atol=prec, rtol=0)
+        self.assertEqual(res1, res3, atol=prec, rtol=0)
 
         # Test 0-strided
-        for dtype, prec in dtypes.items():
-            M = torch.randn(10, 1).to(device=device, dtype=dtype).expand(10, 25)
-            m1 = torch.randn(10, 1).to(device=device, dtype=dtype).expand(10, 50)
-            m2 = torch.randn(50, 25).to(device=device, dtype=dtype)
-            res1 = torch.addmm(M, m1, m2)
-            res2 = torch.zeros(10, 25, device=device, dtype=dtype)
-            res2 += M
-            for i in range(10):
-                for j in range(25):
-                    for k in range(50):
-                        res2[i, j] += m1[i, k] * m2[k, j]
-            self.assertEqual(res1, res2, atol=prec, rtol=0)
+        M = torch.randn(10, 1).to(device=device, dtype=dtype).expand(10, 25)
+        m1 = torch.randn(10, 1).to(device=device, dtype=dtype).expand(10, 50)
+        m2 = torch.randn(50, 25).to(device=device, dtype=dtype)
+        res1 = torch.addmm(M, m1, m2, alpha=alpha, beta=beta)
+        res2 = torch.full_like(res1, math.nan)
+        torch.addmm(M, m1, m2, alpha=alpha, beta=beta, out=res2)
+        res3 = (beta * M).cpu().tolist()
+        for i in range(10):
+            for j in range(25):
+                for k in range(50):
+                    res3[i][j] += alpha * m1[i, k] * m2[k, j]
+        res3 = torch.tensor(res3, device=device, dtype=dtype)
+        self.assertEqual(res1, res2, atol=prec, rtol=0)
+        self.assertEqual(res1, res3, atol=prec, rtol=0)
 
     @dtypes(torch.float, torch.double)
     @dtypesIfCUDA(*([torch.float, torch.double] +
