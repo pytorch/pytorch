@@ -403,6 +403,7 @@ void TensorIterator::compute_types(const TensorIteratorConfig& config) {
       // Casts to outputs by creating temporaries of the correct dtype (if needed)
       if (config.cast_common_dtype_to_outputs_ && op.is_output && op.current_dtype != common_dtype_) {
         op.original_tensor = op.tensor;
+        AutoNonVariableTypeMode non_variable_type_mode;
         op.tensor = at::native::empty_like(
             op.tensor,
             op.tensor.options().dtype(common_dtype_),
@@ -1105,6 +1106,7 @@ bool TensorIterator::fast_set_up(const TensorIteratorConfig& config) {
           auto& op = operands_[i];
           if (!op.tensor.defined()) {
             TORCH_INTERNAL_ASSERT(op.is_type_defined(), "no type for operand", i);
+            AutoNonVariableTypeMode non_variable_type_mode;
             op.tensor = at::native::empty(shape_, op.options(), MemoryFormat::ChannelsLast);
             op.current_dtype = op.target_dtype;
           } else if (op.will_resize) {
