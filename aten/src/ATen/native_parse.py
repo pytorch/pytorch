@@ -383,6 +383,11 @@ def parse_return_arguments(return_decl, inplace, func_decl):
                     "Return Tensor of function \"{}\" flagged as inplace needs to be " \
                     "annotated as mutable".format(func_decl['func'])
                 argument_dict['name'] = 'self'
+            elif t == "TensorList" and inplace:
+                assert annotation and annotation.endswith("!"), \
+                    "Return TensorList of function \"{}\" flagged as inplace needs to be " \
+                    "annotated as mutable".format(func_decl['func'])
+                argument_dict['name'] = 'self'
             else:
                 argument_dict['name'] = 'result' if not multiple_args else 'result' + str(arg_idx)
         argument_dict['output'] = True
