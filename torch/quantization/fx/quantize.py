@@ -910,7 +910,7 @@ class Quantizer:
                         qparam_full_path = key + str(i)
                         if parent_name:
                             qparam_full_path = parent_name + '.' + qparam_full_path
-                        inputs.append(self.quantized_graph.get_param(qparam_full_path))
+                        inputs.append(self.quantized_graph.create_node('get_param', qparam_full_path))
                     quant_env[node.name] = self.quantized_graph.create_node('call_function', quantize_op, inputs, {})
                     continue
             # dequantize inputs for the node that are not quantized

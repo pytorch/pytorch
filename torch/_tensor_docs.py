@@ -2079,13 +2079,6 @@ max(dim=None, keepdim=False) -> Tensor or (Tensor, Tensor)
 See :func:`torch.max`
 """)
 
-add_docstr_all('amax',
-               r"""
-amax(dim=None, keepdim=False) -> Tensor
-
-See :func:`torch.amax`
-""")
-
 add_docstr_all('maximum',
                r"""
 maximum(other) -> Tensor
@@ -2119,13 +2112,6 @@ add_docstr_all('min',
 min(dim=None, keepdim=False) -> Tensor or (Tensor, Tensor)
 
 See :func:`torch.min`
-""")
-
-add_docstr_all('amin',
-               r"""
-amin(dim=None, keepdim=False) -> Tensor
-
-See :func:`torch.amin`
 """)
 
 add_docstr_all('minimum',
