@@ -302,7 +302,9 @@ class FunctionSchema:
                 "Must return as many arguments as there are out arguments"
         if self.name.name.inplace:
             # TODO: fixme
-            if str(self.name) not in ['_amp_non_finite_check_and_unscale_']:
+            if str(self.name) not in [
+                    '_amp_non_finite_check_and_unscale_',
+                    '_foreach_add_.Scalar']:
                 assert len(self.returns) == 1
 
     def is_out_fn(self) -> bool:
