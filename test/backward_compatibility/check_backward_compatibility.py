@@ -26,6 +26,7 @@ allow_list = [
     # Internal, profiler-specific ops
     ("profiler::_call_end_callbacks_on_jit_fut*", datetime.date(9999, 1, 1)),
     ("profiler::_record_function_enter", datetime.date(9999, 1, 1)),
+    ("tensorexpr::Group", datetime.date(2020, 9, 9)),
     ("aten::append*", datetime.date(2020, 4, 15)),
     ("aten::_min", datetime.date(2020, 9, 9)),
     ("aten::_max", datetime.date(2020, 9, 9)),
