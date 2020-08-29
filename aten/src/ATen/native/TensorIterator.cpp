@@ -16,7 +16,7 @@ using loop2d_t = TensorIterator::loop2d_t;
 using StrideVector = TensorIterator::StrideVector;
 
 /// Construction
-TensorIteratorConfig& TensorIteratorConfig::add_output(const Tensor& output, bool participate_promotion = true) {
+TensorIteratorConfig& TensorIteratorConfig::add_output(const Tensor& output, bool participate_promotion) {
   TORCH_INTERNAL_ASSERT(num_inputs_ == 0);
   tensors_.emplace_back(output);
   promotion_flags_.emplace_back(participate_promotion);
@@ -24,7 +24,7 @@ TensorIteratorConfig& TensorIteratorConfig::add_output(const Tensor& output, boo
   return *this;
 }
 
-TensorIteratorConfig& TensorIteratorConfig::add_input(const Tensor& input, bool participate_promotion = true) {
+TensorIteratorConfig& TensorIteratorConfig::add_input(const Tensor& input, bool participate_promotion) {
   tensors_.emplace_back(input);
   promotion_flags_.emplace_back(participate_promotion);
   num_inputs_++;
@@ -228,7 +228,7 @@ void TensorIterator::reorder_dimensions(const TensorIteratorConfig& config) {
 ScalarType TensorIterator::compute_common_dtype() {
   at::native::ResultTypeState state = {};
   for (const auto& op : operands_) {
-    if (op.is_output) {
+    if (op.is_output || !op.use_in_promotion) {
       continue;
     }
 

@@ -421,8 +421,8 @@ public:
   C10_DISABLE_COPY_AND_ASSIGN(TensorIteratorConfig);
 
   /// Construction
-  TensorIteratorConfig& add_output(const Tensor& output, bool participate_promotion);
-  TensorIteratorConfig& add_input(const Tensor& input, bool participate_promotion);
+  TensorIteratorConfig& add_output(const Tensor& output, bool participate_promotion = true);
+  TensorIteratorConfig& add_input(const Tensor& input, bool participate_promotion = true);
   TensorIteratorConfig& set_check_mem_overlap(bool check_mem_overlap);
 
   // Sets the check_all_same_dtype_ flag, which is true by default
