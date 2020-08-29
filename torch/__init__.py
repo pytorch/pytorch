@@ -94,8 +94,17 @@ if sys.platform == 'win32':
                 err.strerror += ' Error adding "{}" to the DLL directories.'.format(dll_path)
                 raise err
 
-    def load_library_with_flags(dll, flags=0x00001100):
+    def load_library_with_flags(dll, flags=None):
         global path_patched
+
+        if flags is None:
+            if os.path.isabs(dll):
+                # LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS
+                # LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR only applies to absolute paths
+                flags = 0x00001100
+            else:
+                # LOAD_LIBRARY_SEARCH_DEFAULT_DIRS
+                flags = 0x00001000
 
         is_loaded = False
         if with_load_library_flags:
