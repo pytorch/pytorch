@@ -938,7 +938,7 @@ Tensor& heaviside_out(Tensor& result, const Tensor& self, const Tensor& values) 
   TORCH_CHECK(self.dtype() == values.dtype() &&  result.dtype() == self.dtype(),
               "heaviside is not yet implemented for tensors with different dtypes.");
 
-  auto iter = TensorIterator::binary_op(result, self, values, /*check_mem_overlap=*/true);
+  auto iter = TensorIterator::binary_op(result, self, values);
   heaviside_stub(iter.device_type(), iter);
   return result;
 }
