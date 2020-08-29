@@ -435,7 +435,7 @@ def _check_trace(
                     + running_what
                     + " with test inputs.\nException:\n"
                     + indent(str(e))
-                )
+                ) from e
 
         has_warned = [False]
 
