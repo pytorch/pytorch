@@ -1,26 +1,25 @@
 #pragma once
 
-#include <ATen/native/vulkan/api/Common.h>
-#include <ATen/native/vulkan/api/Resource.h>
+#include <ATen/native/vulkan/ops/Common.h>
+#include <ATen/native/vulkan/VulkanOpaqueTensorImpl.h>
 
 namespace at {
 namespace native {
 namespace vulkan {
-namespace api {
+namespace ops {
 
 class vTensor final {
  public:
   vTensor();
   explicit vTensor(IntArrayRef sizes);
-  // vTensor(const vTensor&) = delete;
-  // vTensor& operator=(const vTensor&) = delete;
-  ~vTensor() = default;
 
  private:
-  Resource::Image image_;
+  api::Resource::Image image_;
 };
 
-} // namespace api
+using vTensorImpl = VulkanOpaqueTensorImpl<vTensor>;
+
+} // namespace ops
 } // namespace vulkan
 } // namespace native
 } // namespace at
