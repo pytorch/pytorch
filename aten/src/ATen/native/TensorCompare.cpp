@@ -124,7 +124,6 @@ Tensor& isposinf_out(Tensor& result, const Tensor& self) {
   } else {
     auto iter = TensorIteratorConfig()
       .check_all_same_dtype(false)
-      .set_check_mem_overlap(true)
       .add_output(result)
       .add_input(self)
       .build();
@@ -149,7 +148,6 @@ Tensor& isneginf_out(Tensor& result, const Tensor& self) {
   } else {
     auto iter = TensorIteratorConfig()
       .check_all_same_dtype(false)
-      .set_check_mem_overlap(true)
       .add_output(result)
       .add_input(self)
       .build();

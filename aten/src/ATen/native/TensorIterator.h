@@ -416,6 +416,11 @@ public:
   // If true, inputs are checked for partial overlap with the outputs and
   // outputs are checked for internal overlap (e.g. broadcasted views). An error
   // is raised if unacceptable overlap is detected.
+  // If you're migrating an existing operator to using TensorIterator, please
+  // consider if the previous implementation checked memory overlap. If it did
+  // not, and if the operator is idempotent (for example, Tensor.fill_(0)), then
+  // checking memory overlap is BC-breaking. Please don't check memory overlap
+  // in that case.
   TensorIteratorConfig& set_check_mem_overlap(bool check_mem_overlap);
 
   // Sets the check_all_same_dtype_ flag, which is true by default
