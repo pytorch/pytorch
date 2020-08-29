@@ -322,7 +322,7 @@ void RequestCallbackNoPython::processRpc(
             [responseFuture, messageId, rref, whenValueSet]() {
               if (whenValueSet->hasError()) {
                 responseFuture->setError(
-                    whenValueSet->try_retrieve_error_message());
+                    whenValueSet->tryRetrieveErrorMessage());
                 return;
               }
               try {

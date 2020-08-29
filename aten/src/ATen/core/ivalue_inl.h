@@ -312,7 +312,8 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
       // log errors and thats why we have this log here.
       LOG(INFO)
           << "Skipping setting following error on the Future since "
-          << "it is already marked completed (this is not neccessarily an error)";
+          << "it is already marked completed (this is not neccessarily an error): "
+          << tryRetrieveErrorMessageInternal(eptr);
       return;
     } else {
       setErrorInternal(std::move(eptr), lock);
@@ -379,16 +380,10 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
   }
 
   // Tries to retrieve the error message from std::exception_ptr.
-  std::string try_retrieve_error_message() {
+  std::string tryRetrieveErrorMessage() {
     TORCH_CHECK(hasError(), "No error present on the future.");
     std::unique_lock<std::mutex> lock(mutex_);
-    try {
-      std::rethrow_exception(eptr_);
-    } catch (const std::exception& e) {
-      return e.what();
-    } catch (...) {
-      return "Unknown Exception Type";
-    }
+    return tryRetrieveErrorMessageInternal(eptr_);
   }
 
   // Check if the current future has completed
@@ -434,6 +429,17 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
     finished_cv_.notify_all();
     for (auto& callback : cbs) {
       callback();
+    }
+  }
+
+  // Tries to retrieve the error message from std::exception_ptr.
+  std::string tryRetrieveErrorMessageInternal(std::exception_ptr eptr) {
+    try {
+      std::rethrow_exception(eptr);
+    } catch (const std::exception& e) {
+      return e.what();
+    } catch (...) {
+      return "Unknown Exception Type";
     }
   }
 

@@ -142,7 +142,7 @@ TEST(IValueTest, FutureExceptions) {
   f3->setError(std::make_exception_ptr(err));
   ASSERT_EQ(calledTimes, 1);
   ASSERT_TRUE(f3->hasError());
-  ASSERT_EQ(f3->try_retrieve_error_message(), std::string("My Error"));
+  ASSERT_EQ(f3->tryRetrieveErrorMessage(), std::string("My Error"));
 }
 
 TEST(IValueTest, ValueEquality) {

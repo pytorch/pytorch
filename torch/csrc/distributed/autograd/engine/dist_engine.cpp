@@ -400,7 +400,7 @@ std::shared_ptr<rpc::FutureMessage> DistEngine::runEngineAndAccumulateGradients(
               "Error on Node ",
               DistAutogradContainer::getInstance().getWorkerId(),
               ": ",
-              futureGrads->try_retrieve_error_message());
+              futureGrads->tryRetrieveErrorMessage());
           accumulateGradFuture->setError(errorMsg);
           return;
         }

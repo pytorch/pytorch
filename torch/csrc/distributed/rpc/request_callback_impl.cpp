@@ -418,7 +418,7 @@ void RequestCallbackImpl::processPythonRRefFetchCall(
                             int64_t messageId) mutable {
     auto whenValueSet = rref->getFuture();
     if (whenValueSet->hasError()) {
-      responseFuture->setError(whenValueSet->try_retrieve_error_message());
+      responseFuture->setError(whenValueSet->tryRetrieveErrorMessage());
       return;
     }
     try {
