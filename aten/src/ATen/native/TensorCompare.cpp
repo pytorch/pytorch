@@ -243,7 +243,7 @@ std::vector<Tensor> where(const Tensor& condition) {
 }
 
 Tensor _s_where(const Tensor& condition, const Tensor& self, const Tensor& other) {
-  Tensor ret = at::empty(self.sizes(), self.options());
+  Tensor ret;
   auto iter = at::TensorIteratorConfig()
     .set_check_mem_overlap(true)
     .add_output(ret)
@@ -253,8 +253,8 @@ Tensor _s_where(const Tensor& condition, const Tensor& self, const Tensor& other
     .promote_inputs_to_common_dtype(true)
     .cast_common_dtype_to_outputs(true)
     .build();
-  where_kernel(iter.device_type(), iter, iter.dtype());
-  return ret;
+  where_kernel(iter.device_type(), iter, condition.scalar_type());
+  return iter.output();
 }
 
 std::tuple<Tensor, Tensor> mode(const Tensor& self, int64_t dim, bool keepdim) {
