@@ -123,6 +123,9 @@ bool ivaluesEqual(const IValue& a1, const IValue& a2) {
     }
     return true;
   }
+  if (a1.isEnum()) {
+    return a1.toEnumHolder() == a2.toEnumHolder();
+  }
   TORCH_INTERNAL_ASSERT(false);
 }
 

@@ -44,6 +44,12 @@ TORCH_API bool isScalar(Value* v);
 // Check if value is the input of the graph
 TORCH_API bool hitGraphInput(Value* value);
 
+// Converts a mangled name, such as
+//   __torch__.torch.nn.quantized.modules.conv.___torch_mangle_7.Conv2d
+// into an unmangled name, such as
+//   __torch__.torch.nn.quantized.modules.conv.Conv2d
+TORCH_API std::string removeTorchMangle(const std::string& orig_name);
+
 // Return the module name that corresponds to the value.
 TORCH_API c10::optional<std::string> getModuleName(Value* value);
 

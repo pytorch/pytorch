@@ -23,17 +23,17 @@ executors:
   windows-with-nvidia-gpu:
     machine:
       resource_class: windows.gpu.nvidia.medium
-      image: windows-server-2019-nvidia:stable
+      image: windows-server-2019-nvidia:canary
       shell: bash.exe
 
   windows-xlarge-cpu-with-nvidia-cuda:
     machine:
       resource_class: windows.xlarge
-      image: windows-server-2019-vs2019:stable
+      image: windows-server-2019-vs2019:canary
       shell: bash.exe
 
   windows-medium-cpu-with-nvidia-cuda:
     machine:
       resource_class: windows.medium
-      image: windows-server-2019-vs2019:stable
+      image: windows-server-2019-vs2019:canary
       shell: bash.exe

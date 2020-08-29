@@ -32,7 +32,7 @@ class MapToRange(ModelLayer):
 
         self.handler = self.create_param(
             param_name='handler',
-            shape=None,
+            shape=[],
             initializer=('LongIndexCreate', {'max_elements': self.max_index}),
             optimizer=model.NoOptim
         )

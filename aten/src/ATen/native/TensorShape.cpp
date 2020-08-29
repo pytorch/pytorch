@@ -1137,6 +1137,53 @@ Tensor& stack_out(Tensor& result, TensorList tensors, int64_t dim) {
   return at::cat_out(result, get_stack_inputs(tensors, dim), dim);
 }
 
+Tensor hstack(TensorList tensors) {
+  TORCH_CHECK(tensors.size() > 0,
+           "hstack expects a non-empty TensorList");
+  auto rep = at::atleast_1d(tensors);
+  if (rep[0].dim() == 1) {
+    return at::cat(rep, 0);
+  }
+  return at::cat(rep, 1);
+}
+
+Tensor& hstack_out(Tensor& result, TensorList tensors) {
+  TORCH_CHECK(tensors.size() > 0,
+           "hstack expects a non-empty TensorList");
+  auto rep = at::atleast_1d(tensors);
+  if (rep[0].dim() == 1) {
+    return at::cat_out(result, rep, 0);
+  }
+  return at::cat_out(result, rep, 1);
+}
+
+Tensor vstack(TensorList tensors) {
+  TORCH_CHECK(tensors.size() > 0,
+           "vstack expects a non-empty TensorList");
+  auto rep = at::atleast_2d(tensors);
+  return at::cat(rep, 0);
+}
+
+Tensor& vstack_out(Tensor& result, TensorList tensors) {
+  TORCH_CHECK(tensors.size() > 0,
+           "vstack expects a non-empty TensorList");
+  auto rep = at::atleast_2d(tensors);
+  return at::cat_out(result, rep, 0);
+}
+
+Tensor dstack(TensorList tensors) {
+  TORCH_CHECK(tensors.size() > 0,
+           "dstack expects a non-empty TensorList");
+  auto rep = at::atleast_3d(tensors);
+  return at::cat(rep, 2);
+}
+Tensor& dstack_out(Tensor& result, TensorList tensors) {
+  TORCH_CHECK(tensors.size() > 0,
+           "dstack expects a non-empty TensorList");
+  auto rep = at::atleast_3d(tensors);
+  return at::cat_out(result, rep, 2);
+}
+
 static inline Tensor & sparse_transpose_(Tensor & self, int64_t dim0, int64_t dim1) {
   int64_t nsparse_dim = self.sparse_dim();
   TORCH_CHECK(dim0 < nsparse_dim && dim1 < nsparse_dim,
@@ -1529,6 +1576,48 @@ Tensor flatten(const Tensor& self, DimnameList dims, Dimname out_dim) {
         "in Tensor", self.names());
   }
   return native::flatten(self, *dims.begin(), *(dims.end() - 1), out_dim);
+}
+
+Tensor unflatten(const Tensor& self, int64_t dim, IntArrayRef sizes, c10::optional<DimnameList> names) {
+  dim = maybe_wrap_dim(dim, self.dim());
+
+  TORCH_CHECK(sizes.size() > 0, "unflatten: sizes must be non-empty");
+  TORCH_INTERNAL_ASSERT(!names || names->size() == sizes.size());
+
+  auto numel = std::accumulate(sizes.begin(), sizes.end(), 1, std::multiplies<int64_t>());
+  if (self.has_names()) {
+    TORCH_CHECK(numel == self.size(dim),
+      "unflatten: Provided sizes ", sizes, " don't multiply up to the size of dim ", 
+      dim, " (", self.names()[dim], ": ", self.size(dim), ") in Tensor", self.names());
+    TORCH_CHECK(names, "unflatten: input is a named tensor but no names were given for unflattened sizes");
+  } else {
+    TORCH_CHECK(numel == self.size(dim),
+      "unflatten: Provided sizes ", sizes, " don't multiply up to the size of dim ",
+      dim, " (", self.size(dim), ") in the input tensor");
+  }
+
+  DimVector shape(self.sizes().begin(), self.sizes().end());
+  shape.erase(shape.begin() + dim);
+  shape.insert(shape.begin() + dim, sizes.begin(), sizes.end());
+
+  Tensor result;
+  {
+    NoNamesGuard guard;
+    result = self.view(shape);
+  }
+
+  if (names) {
+    auto outnames = self.names().vec();
+    outnames.erase(outnames.begin() + dim);
+    outnames.insert(outnames.begin() + dim, names->begin(), names->end());
+    at::internal_set_names_inplace(result, outnames);
+  }
+
+  return result;
+}
+
+Tensor unflatten(const Tensor& self, Dimname dim, IntArrayRef sizes, DimnameList names) {
+  return native::unflatten(self, dimname_to_position(self, dim), sizes, names);
 }
 
 Tensor view_as(const Tensor& self, const Tensor& other) {

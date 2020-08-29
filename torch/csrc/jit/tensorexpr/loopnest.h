@@ -39,9 +39,14 @@ class TORCH_API LoopNest {
   void splitWithTail(For* f, int factor, For** outer, For** inner, For** tail);
   void splitWithMask(For* f, int factor, For** outer, For** inner);
   void reorderAxis(For* a, For* b);
+  static void unroll(For* f, Stmt** unrolled);
+  static void normalize(For* f, For** normalized);
 
   void setGPUBlockIndex(For* f, int idx);
   void setGPUThreadIndex(For* f, int idx);
+  void setBufferMap(
+      For* f,
+      const std::unordered_map<std::string, const Buf*>& map);
 
   // Insert a temporary computation of statement S in the scope of loop AT.
   // S is assumed to be a Store or a Block containing a Store. Along with the

@@ -5,7 +5,7 @@ from __future__ import unicode_literals
 
 import unittest
 import hypothesis.strategies as st
-from hypothesis import given
+from hypothesis import given, settings
 import numpy as np
 from caffe2.python import core, workspace
 import caffe2.python.hypothesis_test_util as hu
@@ -22,6 +22,7 @@ class ChannelShuffleTest(hu.HypothesisTestCase):
            pad=st.integers(0, 3),
            kernel=st.integers(3, 5),
            **mu.gcs)
+    @settings(max_examples=10, deadline=None)
     def test_channel_shuffle(self, size, input_channels, batch_size, group, stride, pad, kernel, gc, dc):
         op = core.CreateOperator(
             "ChannelShuffle",

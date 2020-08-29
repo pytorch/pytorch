@@ -146,14 +146,10 @@ TENSOR_METHOD_DEFINITION = CodeTemplate("""\
 
 // ${schema_string}
 ${return_type} Tensor::${api_name}(${method_formals}) const {
-#ifdef USE_STATIC_DISPATCH
-    ${static_dispatch_method_body}
-#else
     static auto op = c10::Dispatcher::singleton()
         .findSchemaOrThrow("aten::${operator_name}", "${overload_name}")
         .typed<${tensor_method_cpp_signature}>();
     return op.call(${tensor_method_actuals});
-#endif
 }
 """)
 
@@ -172,43 +168,11 @@ FUNCTION_DEFINITION = CodeTemplate("""\
 
 // ${schema_string}
 ${return_type} ${api_name}(${formals}) {
-#ifdef USE_STATIC_DISPATCH
-    ${static_dispatch_function_body}
-#else
     static auto op = c10::Dispatcher::singleton()
         .findSchemaOrThrow("aten::${operator_name}", "${overload_name}")
         .typed<${function_cpp_signature}>();
     return op.call(${function_actuals});
-#endif
 }
-""")
-
-# In order to rely on the linker to strip unused ops, it requires us to dispatch statically
-# in Functions.h and TensorMethods.cpp.
-#
-# NB: The default body also needs to apply a variable guard, as in some
-# situations what we think is a default body actually does have an
-# explicit derivative, and thereby would have gotten unwrapped by
-# the time you get to the implementation.
-STATIC_DISPATCH_FUNCTION_DEFAULT_BODY = CodeTemplate("""\
-at::AutoNonVariableTypeMode _var_guard(true);
-${return_call} TypeDefault::${type_wrapper_name}(${actuals});
-""")
-
-STATIC_DISPATCH_FUNCTION_SWITCH_BODY = CodeTemplate("""\
-at::AutoNonVariableTypeMode _var_guard(true);
-${dispatch_key_init}
-switch (dispatchKeyToBackend(${dispatch_key_var_name})) {
-    ${static_dispatch_function_cases}
-    default:
-        AT_ERROR("${api_name} not implemented for ", at::toString(${dispatch_key_var_name}));
-}
-""")
-
-STATIC_DISPATCH_FUNCTION_SWITCH_CASE = CodeTemplate("""\
-case Backend::${backend}:
-    ${return_call} ${backend}Type::${type_wrapper_name}(${actuals});
-    break;
 """)
 
 IFDEF_BLOCK = CodeTemplate("""\
@@ -245,10 +209,6 @@ scalar_types = [
     ('ComplexFloat', 'ComplexFloat', 'ComplexDouble', False),
     ('ComplexDouble', 'ComplexDouble', 'ComplexDouble', False),
 ]
-
-static_dispatch_backends = ['CPU', 'QuantizedCPU', 'Vulkan']
-static_dispatch_backends_ifdef_guard = {'Vulkan' : 'USE_VULKAN'}
-
 
 class NYIError(Exception):
     """Indicates we don't support this declaration yet"""
@@ -1077,8 +1037,10 @@ def create_generic(top_env, declarations):
 
     def process_native(option):
         # type: (FunctionOption) -> Optional[OutputDeclaration]
-        assert option['python_module'] == '' or option['python_module'] == 'nn', \
-            "Found python_module of {} for decl {}, but only \'\' string or \'nn\' are supported".format(
+        valid_modules = {'nn', 'fft', 'linalg'}
+        assert (option['python_module'] == '' or
+                option['python_module'] in valid_modules), \
+            "Found python_module of {} for decl {}, but only \'\' string, \'nn\' and \'fft\' are supported".format(
                 option['python_module'], option['name'])
         use_optional_tensors_in_cpp_frontend = option['use_c10_dispatcher'] == 'full'
         formals = native_get_formals(option, False, use_optional_tensors_in_cpp_frontend)
@@ -1134,44 +1096,6 @@ def create_generic(top_env, declarations):
 
             method_actuals = maybe_unwrap_optional_tensors(option, formals, option['method_actuals'])
 
-            if isinstance(type_method_dispatch, dict):
-                static_dispatch_function_cases = []
-                # NB: As this code is currently written, there will NEVER be
-                # a backend generated for variable dispatch.  There is nothing
-                # stopping us from actually implementing this, however, if you
-                # really wanted variable on mobile, there's nothing stopping
-                # you from implementing this (however, you would have an
-                # annoying phase problem, since code generation for variable
-                # happens in tools/ which happens later than here.)
-                #
-                # If you pass in a variable to the dispatch, and variable is
-                # enabled, this switch will fail.  This is intentional: you
-                # probably need to disable variable globally in the mobile
-                # calling code.
-                for backend in static_dispatch_backends:
-                    if backend in type_method_dispatch:
-                        static_dispatch_function_case = STATIC_DISPATCH_FUNCTION_SWITCH_CASE.substitute(
-                            option,
-                            backend=backend,
-                            backend_function=type_method_dispatch[backend],
-                            actuals=method_actuals)
-                        if (backend in static_dispatch_backends_ifdef_guard):
-                            static_dispatch_function_cases.append(IFDEF_BLOCK.substitute(
-                                option,
-                                ifdef_guard=static_dispatch_backends_ifdef_guard[backend],
-                                content=static_dispatch_function_case))
-                        else:
-                            static_dispatch_function_cases.append(static_dispatch_function_case)
-
-                static_dispatch_method_body = STATIC_DISPATCH_FUNCTION_SWITCH_BODY.substitute(
-                    option,
-                    dispatch_key_var_name=dispatch_key_var_name,
-                    dispatch_key_init=dispatch_key_init,
-                    static_dispatch_function_cases=static_dispatch_function_cases)
-            else:
-                static_dispatch_method_body = STATIC_DISPATCH_FUNCTION_DEFAULT_BODY.substitute(
-                    option, actuals=method_actuals)
-
             # See NOTE[UnboxedOnly]
             if option['use_c10_dispatcher'] == 'full':
                 tensor_method_actuals = option['schema_order_method_actuals']
@@ -1182,13 +1106,12 @@ def create_generic(top_env, declarations):
                 tensor_method_cpp_signature = option['cpp_signature']
 
             method_definition = TENSOR_METHOD_DEFINITION.substitute(
-                option, static_dispatch_method_body=static_dispatch_method_body,
+                option,
                 tensor_method_actuals=tensor_method_actuals,
                 tensor_method_cpp_signature=tensor_method_cpp_signature
             )
             return FunctionCode(
-                declaration=TENSOR_METHOD_DECLARATION.substitute(
-                    option, static_dispatch_method_body=static_dispatch_method_body),
+                declaration=TENSOR_METHOD_DECLARATION.substitute(option),
                 definition=method_definition)
 
         def gen_namespace_function(option, multidispatch_formals):
@@ -1202,31 +1125,6 @@ def create_generic(top_env, declarations):
 
             actuals = maybe_unwrap_optional_tensors(option, formals, option['actuals'])
 
-            if isinstance(type_method_dispatch, dict):
-                static_dispatch_function_cases = []
-                for backend in static_dispatch_backends:
-                    if backend in type_method_dispatch:
-                        static_dispatch_function_case = STATIC_DISPATCH_FUNCTION_SWITCH_CASE.substitute(
-                            option,
-                            backend=backend,
-                            backend_function=type_method_dispatch[backend],
-                            actuals=actuals)
-                        if (backend in static_dispatch_backends_ifdef_guard):
-                            static_dispatch_function_cases.append(IFDEF_BLOCK.substitute(
-                                option,
-                                ifdef_guard=static_dispatch_backends_ifdef_guard[backend],
-                                content=static_dispatch_function_case))
-                        else:
-                            static_dispatch_function_cases.append(static_dispatch_function_case)
-                static_dispatch_function_body = STATIC_DISPATCH_FUNCTION_SWITCH_BODY.substitute(
-                    option,
-                    dispatch_key_var_name=dispatch_key_var_name,
-                    dispatch_key_init=dispatch_key_init,
-                    static_dispatch_function_cases=static_dispatch_function_cases)
-            else:
-                static_dispatch_function_body = STATIC_DISPATCH_FUNCTION_DEFAULT_BODY.substitute(
-                    option, actuals=actuals)
-
             # See NOTE[UnboxedOnly]
             if option['use_c10_dispatcher'] == 'full':
                 function_actuals = option['schema_order_actuals']
@@ -1237,7 +1135,7 @@ def create_generic(top_env, declarations):
                 function_cpp_signature = option['cpp_signature']
 
             fn_definition = FUNCTION_DEFINITION.substitute(
-                option, static_dispatch_function_body=static_dispatch_function_body,
+                option,
                 function_actuals=function_actuals,
                 function_cpp_signature=function_cpp_signature)
 
@@ -1286,6 +1184,8 @@ def create_generic(top_env, declarations):
             schema_registration_code=SCHEMA_REGISTRATION.substitute(option)))
         if isinstance(type_method_dispatch, dict):
             abstract = True
+            # Having manual_kernel_registration for an abstract method doesn't make sense.
+            assert not option['manual_kernel_registration']
         else:
             top_env['type_method_declarations'].append(NATIVE_DISPATCH_DECLARATION.substitute(option))
             top_env['type_method_definitions'].append(NATIVE_DISPATCH_DEFINITION_DEFAULT.substitute(option))
@@ -1576,10 +1476,15 @@ def create_derived(backend_type_env, declarations):
             env = nested_dict(option, backend_type_env)
             body = emit_body(env, option, option['backend_types'][backend])  # type: ignore
             option['type_definition_body'] = body
+            # These type ignores arise from the fact that a nested_dict
+            # technically isn't a Mapping, as it doesn't implement
+            # enough methods.  I could fix this with a Protocol but
+            # then I need typing_extensions which isn't currently
+            # a build dep.
             legacy_th_declarations.append(
-                LEGACY_TH_DECLARATION.substitute(env))
+                LEGACY_TH_DECLARATION.substitute(env))  # type: ignore
             legacy_th_definitions.append(
-                LEGACY_TH_DEFINITION.substitute(env))
+                LEGACY_TH_DEFINITION.substitute(env))  # type: ignore
 
     def process_native(option):
         # type: (FunctionOption) -> None
@@ -1587,6 +1492,9 @@ def create_derived(backend_type_env, declarations):
         env = nested_dict(option, backend_type_env)
 
         if isinstance(dispatch, dict):
+            # If we're here, then our native_functions.yaml entry has dispatch configuration.
+            # Having manual kernel registration doesn't make sense.
+            assert not option['manual_kernel_registration']
             backend = backend_type_env['Backend']
             if backend in option['backend_types']:
 

@@ -294,15 +294,19 @@ Tensor & detach_(Tensor & self) {
 // Unfortunately, this setup doesn't work in NonVariableTypeMode because that will
 // skip past variable kernels. So for ops that we want to use in NonVariableTypeMode
 // (and that don't use dispatch), we register them as catch-all kernels instead.
+// Invariant:
+// - Ops registered to catchAll below must match `MANUAL_CATCHALL` set in tools/autograd/gen_variable_type.py.
+//   and they have manual_kernel_registration=True in native_functions.yaml.
+// - Ops registered to DispatchKey::Autograd below must be included in `MANUAL_AUTOGRAD` in tools/autograd/gen_variable_type.py
 static auto registry = torch::RegisterOperators()
   .op(torch::RegisterOperators::options()
     .schema("aten::resize_(Tensor(a!) self, int[] size, *, MemoryFormat? memory_format=None) -> Tensor(a!)")
     .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-    .impl_unboxedOnlyKernel<decltype(VariableType::resize_), &VariableType::resize_>(DispatchKey::Autograd))
+    .kernel<decltype(VariableType::resize_), &VariableType::resize_>(DispatchKey::Autograd))
   .op(torch::RegisterOperators::options()
     .schema("aten::resize_as_(Tensor(a!) self, Tensor the_template, *, MemoryFormat? memory_format=None) -> Tensor(a!)")
     .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-    .impl_unboxedOnlyKernel<decltype(VariableType::resize_as_), &VariableType::resize_as_>(DispatchKey::Autograd))
+    .kernel<decltype(VariableType::resize_as_), &VariableType::resize_as_>(DispatchKey::Autograd))
   .op(torch::RegisterOperators::options()
     .schema("aten::detach(Tensor(a) self) -> Tensor(a)")
     .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
@@ -310,11 +314,11 @@ static auto registry = torch::RegisterOperators()
   .op(torch::RegisterOperators::options()
     .schema("aten::detach_(Tensor(a!) self) -> Tensor(a!)")
     .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-    .impl_unboxedOnlyKernel<decltype(VariableType::detach_), &VariableType::detach_>(DispatchKey::Autograd))
+    .kernel<decltype(VariableType::detach_), &VariableType::detach_>(DispatchKey::Autograd))
   .op(torch::RegisterOperators::options()
     .schema("aten::copy_(Tensor(a!) self, Tensor src, bool non_blocking=False) -> Tensor(a!)")
     .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
-    .impl_unboxedOnlyKernel<decltype(VariableType::copy_), &VariableType::copy_>(DispatchKey::Autograd))
+    .kernel<decltype(VariableType::copy_), &VariableType::copy_>(DispatchKey::Autograd))
   .op(torch::RegisterOperators::options()
     .schema("aten::backward(Tensor self, Tensor? gradient=None, bool? retain_graph=None, bool create_graph=False) -> ()")
     .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
@@ -324,8 +328,8 @@ static auto registry = torch::RegisterOperators()
     // tensor argument.
     // TODO Once callBoxed() supports optional tensor arguments, we can enable `use_c10_dispatcher: full` for backward()
     //      and remove the backend Autograd kernel here, only leaving the catch-all kernel.
-    .impl_unboxedOnlyKernel<decltype(VariableType::backward), &VariableType::backward>(DispatchKey::Autograd)
-    .impl_unboxedOnlyCatchAllKernel<decltype(VariableType::backward), &VariableType::backward>())
+    .kernel<decltype(VariableType::backward), &VariableType::backward>(DispatchKey::Autograd)
+    .catchAllKernel<decltype(VariableType::backward), &VariableType::backward>())
   .op(torch::RegisterOperators::options()
     .schema("aten::set_data(Tensor(a!) self, Tensor new_data) -> ()")
     .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)
@@ -355,8 +359,8 @@ static auto registry = torch::RegisterOperators()
     // tensor argument.
     // TODO Once callBoxed() supports mutable tensor arguments, we can enable `use_c10_dispatcher: full` for requires_grad_()
     //      and remove the backend Autograd kernel here, only leaving the catch-all kernel.
-    .impl_unboxedOnlyKernel<decltype(VariableType::requires_grad_), &VariableType::requires_grad_>(DispatchKey::Autograd)
-    .impl_unboxedOnlyCatchAllKernel<decltype(VariableType::requires_grad_), &VariableType::requires_grad_>())
+    .kernel<decltype(VariableType::requires_grad_), &VariableType::requires_grad_>(DispatchKey::Autograd)
+    .catchAllKernel<decltype(VariableType::requires_grad_), &VariableType::requires_grad_>())
   .op(torch::RegisterOperators::options()
     .schema("aten::retain_grad(Tensor(a!) self) -> ()")
     .aliasAnalysis(AliasAnalysisKind::FROM_SCHEMA)

@@ -52,6 +52,13 @@ encode the operation history. Every new function requires you to implement 2 met
     mark any input that is modified inplace by the forward function.
   - :meth:`~torch.autograd.function._ContextMethodMixin.mark_non_differentiable` must
     be used to tell the engine if an output is not differentiable.
+  - :meth:`~torch.autograd.function._ContextMethodMixin.set_materialize_grads` can be
+    used to tell the autograd engine to optimize gradient computations in the cases where
+    the output does not depend on the input by not materializing grad tensors given to backward
+    function. That is, if set to False, None object in python or "undefined tensor" (tensor x for
+    which x.defined() is False) in C++ will not be converted to a tensor filled with zeros prior
+    to calling backward. However, supporting this optimization means your custom autograd function
+    has to handle gradients that are represented in this way and is thus opt-in. Default value is True.
 
 .. note::
 
@@ -119,6 +126,26 @@ non-Tensor arguments::
 
         @staticmethod
         def backward(ctx, grad_output):
+            # We return as many input gradients as there were arguments.
+            # Gradients of non-Tensor arguments to forward must be None.
+            return grad_output * ctx.constant, None
+
+And here, we optimize the above example by calling set_materialize_grads(False)::
+
+    class MulConstant(Function):
+        @staticmethod
+        def forward(ctx, tensor, constant):
+            ctx.set_materialize_grads(False)
+            ctx.constant = constant
+            return tensor * constant
+
+        @staticmethod
+        def backward(ctx, grad_output):
+            # Here we must handle None grad_output tensor. In this case we
+            # can skip unnecessary computations and just return None.
+            if grad_output is None:
+                return None, None
+
             # We return as many input gradients as there were arguments.
             # Gradients of non-Tensor arguments to forward must be None.
             return grad_output * ctx.constant, None
@@ -444,6 +471,64 @@ are :class:`ScalarTensor` instances::
 Also see the ``MetadataTensor`` example below for another variation on this
 pattern but instead always returns a ``MetadataTensor`` to propagate metadata
 through operations in the :mod:`torch` API.
+
+The ``__torch_function__`` protocol is designed for full coverage of the API,
+partial coverage may lead to undesirable results, in particular, certain
+functions raising a ``TypeError``. This is especially true for subclasses,
+where all three of `torch.add`, `torch.Tensor.__add__` and `torch.Tensor.add`
+must be covered, even if they return exactly the same result. Failing to do
+this may also lead to infinite recursion. If one requires the implementation
+of a function from ``torch.Tensor`` subclasses, they must use
+``super().__torch_function__`` inside their implementation.
+
+
+Subclassing ``torch.Tensor``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+As of version 1.7.0, methods and functions applied on ``torch.Tensor`` subclasses
+will return subclass instances instead of ``torch.Tensor`` instances::
+
+  >>> class SubTensor(torch.Tensor):
+  ...     pass
+  >>> type(torch.add(SubTensor([0]), SubTensor([1]))).__name__
+  'SubTensor'
+  >>> type(torch.add(SubTensor([0]), torch.Tensor([1]))).__name__
+  'SubTensor'
+
+If multiple subclasses exist, the lowest one in the hierarchy will be chosen by
+default. If there is no unique way to determine such a case, then a
+``TypeError`` is raised::
+
+  >>> type(torch.add(SubTensor2([0]), SubTensor([1]))).__name__
+  'SubTensor2'
+  >>> type(torch.add(SubTensor2([0]), torch.Tensor([1]))).__name__
+  'SubTensor2'
+  >>> torch.add(SubTensor([0]), OtherSubTensor([1]))
+  Traceback (most recent call last):
+    File "<stdin>", line 1, in <module>
+  TypeError: no implementation found for 'torch.add' on types that implement __torch_function__: [SubTensor, OtherSubTensor]
+
+If one wishes to have a global override for all tensor methods, one can use
+``__torch_function__``. Here is an example that logs all function/method
+calls::
+
+  class LoggingTensor(torch.Tensor):
+      @classmethod
+      def __torch_function__(cls, func, types, args=(), kwargs=None):
+          logging.info(f"func: {func.__name__}, args: {args!r}, kwargs: {kwargs!r}")
+          if kwargs is None:
+              kwargs = {}
+          return super().__torch_function__(func, types, args, kwargs)
+
+However, if one instead wishes to override a method on the Tensor subclass,
+there one can do so either by directly overriding the method (by defining
+it for a subclass), or by using ``__torch_function__`` and matching with
+``func``.
+
+One should be careful within ``__torch_function__`` for subclasses to always
+call ``super().__torch_function__(func, ...)`` instead of ``func`` directly,
+as was the case before version 1.7.0. Failing to do this may cause ``func``
+to recurse back into ``__torch_function__`` and therefore cause infinite
+recursion.
 
 Extending :mod:`torch` with a :class:`Tensor` wrapper type
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

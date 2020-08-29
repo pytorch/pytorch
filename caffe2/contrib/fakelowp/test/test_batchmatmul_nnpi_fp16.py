@@ -20,34 +20,31 @@ core.GlobalInit(["caffe2", "--caffe2_log_level=-3", "--glow_global_fp16=1"])
 
 class TestBatchMatMul(serial.SerializedTestCase):
     @given(
-        #C=0, #st.integers(min_value=0, max_value=3),  # number of batch dims
-        M=st.integers(min_value=1, max_value=10),
-        K=st.integers(min_value=1, max_value=10),
-        N=st.integers(min_value=1, max_value=10),
+        C=st.integers(min_value=1, max_value=10),
+        M=st.integers(min_value=1, max_value=50),
+        K=st.integers(min_value=1, max_value=512),
+        N=st.integers(min_value=1, max_value=50),
         rand_seed=st.integers(0, 65534),
         trans_a=st.booleans(),
         trans_b=st.booleans(),
         run_ints=st.booleans()
     )
-    def test_batch_matmul(self, M, K, N, rand_seed, trans_a, trans_b, run_ints):
+    @settings(deadline=None, max_examples=100)
+    def test_batch_matmul(self, M, K, N, C, rand_seed, trans_a, trans_b, run_ints):
         np.random.seed(rand_seed)
         workspace.ResetWorkspace()
-        C = 0  # TODO
-        batch_dims = np.random.randint(
-            low=1,
-            high=3,
-            size=C,
-            dtype=np.int64).tolist()
+
+        batch_dims = [C]
 
         if run_ints:
-            X = np.random.randint(low=1, high=3, size=((1, M, K))).astype(np.float32)
+            X = np.random.randint(low=1, high=3, size=((C, M, K))).astype(np.float32)
         else:
             X = 100 * (np.random.rand(*(batch_dims + [M, K])).astype(np.float32) - 0.5)
         if trans_a:
             X = X.swapaxes(-1, -2)
 
         if run_ints:
-            Y = np.random.randint(low=1, high=3, size=((1, K, N))).astype(np.float32)
+            Y = np.random.randint(low=1, high=3, size=((C, K, N))).astype(np.float32)
         else:
             Y = 100 * (np.random.rand(*(batch_dims + [K, N])).astype(np.float32) - 0.5)
         if trans_b:
@@ -64,7 +61,9 @@ class TestBatchMatMul(serial.SerializedTestCase):
         )
 
         pred_net_ref = core.Net("pred_net_ref")
-        pred_net_ref.BatchMatMulFP16Acc16Fake(
+
+        # Reference updated to fp16 with fp32 accumulation
+        pred_net_ref.BatchMatMulFP16Acc32Fake(
             ["X", "Y"], ['out'], trans_a=trans_a, trans_b=trans_b)
 
         print("dims", batch_dims, X.shape, Y.shape)
@@ -90,14 +89,16 @@ class TestBatchMatMul(serial.SerializedTestCase):
         workspace.RunNet(pred_net_ref)
         out_c2_fakefp16 = workspace.FetchBlob('out')
 
-        diff = np.abs((out_c2_fakefp16 - out_glow) / (out_c2_fakefp16 + 1e-8))
-        rowdiff = np.max(diff, axis=1)
+        diff = np.abs(out_c2_fakefp16 - out_glow)
 
         if not np.allclose(out_glow, out_c2_fakefp16):
             print_test_debug_info("bmm", {
                 "seed": rand_seed,
                 "m": M, "k": K,
-                "n": N, "X": X, "Y": Y,
+                "n": N, "X": X.shape, "Y": Y.shape,
+                "trans_a": trans_a,
+                "trans_b": trans_b,
+                "run_ints": run_ints,
                 "out_glow": out_glow,
                 "out_c2_fakefp16": out_c2_fakefp16,
                 "diff": diff

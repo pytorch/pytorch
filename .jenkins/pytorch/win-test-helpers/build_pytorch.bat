@@ -39,6 +39,7 @@ popd
 
 if "%CUDA_VERSION%" == "9" goto cuda_build_9
 if "%CUDA_VERSION%" == "10" goto cuda_build_10
+if "%CUDA_VERSION%" == "11" goto cuda_build_11
 goto cuda_build_end
 
 :cuda_build_9
@@ -52,6 +53,13 @@ goto cuda_build_common
 
 set CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v10.1
 set CUDA_PATH_V10_1=%CUDA_PATH%
+
+goto cuda_build_common
+
+:cuda_build_11
+
+set CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.0
+set CUDA_PATH_V11_0=%CUDA_PATH%
 
 goto cuda_build_common
 

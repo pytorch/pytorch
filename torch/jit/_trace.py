@@ -974,7 +974,7 @@ def is_tracing():
     Returns ``True`` in tracing (if a function is called during the tracing of
     code with ``torch.jit.trace``) and ``False`` otherwise.
     """
-    return torch._C._is_tracing
+    return torch._C._is_tracing()
 
 
 class TracedModule(ScriptModule):

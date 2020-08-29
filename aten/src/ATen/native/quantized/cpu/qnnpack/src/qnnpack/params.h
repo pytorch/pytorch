@@ -577,7 +577,7 @@ struct pytorch_qnnp_parameters {
 extern "C" {
 #endif
 
-extern PYTORCH_QNNP_INTERNAL struct pytorch_qnnp_parameters pytorch_qnnp_params;
+extern struct pytorch_qnnp_parameters pytorch_qnnp_params;
 
 #ifdef __cplusplus
 }

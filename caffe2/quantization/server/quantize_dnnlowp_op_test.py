@@ -5,7 +5,7 @@ import hypothesis.strategies as st
 import numpy as np
 from caffe2.python import core, dyndep, workspace
 from caffe2.quantization.server import dnnlowp_pybind11
-from hypothesis import given
+from hypothesis import given, settings
 
 
 dyndep.InitOpsLibrary("//caffe2/caffe2/quantization/server:dnnlowp_ops")
@@ -13,8 +13,12 @@ workspace.GlobalInit(["caffe2", "--caffe2_omp_num_threads=11"])
 
 
 class DNNLowPQuantizeOpTest(hu.HypothesisTestCase):
-    @given(size=st.integers(1024, 2048), is_empty=st.booleans(), **hu.gcs_cpu_only)
-    def test_dnnlowp_quantize(self, size, is_empty, gc, dc):
+    @given(size=st.integers(1024, 2048),
+           is_empty=st.booleans(),
+           absorb=st.booleans(),
+           **hu.gcs_cpu_only)
+    @settings(max_examples=10, deadline=None)
+    def test_dnnlowp_quantize(self, size, is_empty, absorb, gc, dc):
         if is_empty:
             size = 0
         min_ = -10.0
@@ -47,7 +51,10 @@ class DNNLowPQuantizeOpTest(hu.HypothesisTestCase):
                 device_option=gc,
             )
             net.Proto().op.extend([quantize_2])
-
+            if absorb:
+                net_str = dnnlowp_pybind11.freeze_quantization_params(
+                    net.Proto().SerializeToString())
+                net.Proto().ParseFromString(net_str)
             workspace.FeedBlob("X", X, device_option=gc)
             workspace.RunNetOnce(net)
             X_q = workspace.FetchInt8Blob("X_q")[0]

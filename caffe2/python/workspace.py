@@ -40,6 +40,7 @@ Workspaces = C.workspaces
 BenchmarkNet = C.benchmark_net
 BenchmarkNetOnce = C.benchmark_net_once
 GetStats = C.get_stats
+CreateOfflineTensor = C.create_offline_tensor
 
 operator_tracebacks = defaultdict(dict)
 

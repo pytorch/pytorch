@@ -59,13 +59,15 @@ void replaceConvBiasWithGetAttr(Module& module) {
 
 void addBiasForConvIfNone(Module& module, const std::string& pattern_name) {
   auto t = module.type()->expect<ClassType>();
-  auto real_typename = t->name()->qualifiedName();
-  if (real_typename.size() >= pattern_name.size() &&
-      (0 ==
-       real_typename.compare(
-           real_typename.size() - pattern_name.size(),
-           pattern_name.size(),
-           pattern_name))) {
+
+  const std::string real_typename = t->name()->qualifiedName();
+  const std::string demangled_typename = removeTorchMangle(real_typename);
+  bool is_floating_point_conv =
+      ((demangled_typename == "__torch__.torch.nn.modules.conv.Conv1d") ||
+       (demangled_typename == "__torch__.torch.nn.modules.conv.Conv2d") ||
+       (demangled_typename == "__torch__.torch.nn.modules.conv.Conv3d"));
+
+  if (is_floating_point_conv) {
     if (!t->hasAttribute("bias")) {
       auto optional_tensor_type = OptionalType::create(TensorType::get());
       t->addAttribute("bias", optional_tensor_type, true);

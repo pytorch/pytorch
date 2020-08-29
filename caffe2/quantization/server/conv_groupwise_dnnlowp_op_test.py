@@ -12,7 +12,7 @@ from caffe2.quantization.server.dnnlowp_test_utils import (
     generate_conv_inputs,
     run_conv_or_fc,
 )
-from hypothesis import assume, given
+from hypothesis import assume, given, settings
 
 
 dyndep.InitOpsLibrary("//caffe2/caffe2/quantization/server:dnnlowp_ops")
@@ -37,6 +37,7 @@ class GroupWiseDNNLowPOpConvTest(hu.HypothesisTestCase):
         preserve_weight_sparsity=st.booleans(),
         **hu.gcs_cpu_only
     )
+    @settings(max_examples=10, deadline=None)
     def test_groupwise_dnnlowp_conv_int(
         self,
         stride,
@@ -185,6 +186,7 @@ class GroupWiseDNNLowPOpConvTest(hu.HypothesisTestCase):
         order=st.sampled_from(["NCHW", "NHWC"]),
         **hu.gcs_cpu_only
     )
+    @settings(max_examples=10, deadline=None)
     def test_groupwise_dnnlowp_conv_relu_int(
         self,
         stride,

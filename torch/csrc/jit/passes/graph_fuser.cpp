@@ -140,7 +140,7 @@ struct GraphFuser {
     return gf->isFusableDefault(n, gf->strict_fuser_check_);
   };
   Symbol kind_ = prim::FusionGroup;
-  bool strict_fuser_check_;
+  bool strict_fuser_check_ = false;
 
   // nvrtc has a limit on the number of arguments allowed in a CUDA kernel.
   // The specific limit is a function of constant memory size, amount available

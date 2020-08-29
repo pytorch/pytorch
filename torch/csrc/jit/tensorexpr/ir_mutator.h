@@ -42,6 +42,7 @@ class Intrinsics;
 class FunctionCall;
 class Allocate;
 class Free;
+class Let;
 class Cond;
 class Stmt;
 class Term;
@@ -101,6 +102,7 @@ class TORCH_API IRMutator {
 
   virtual Stmt* mutate(const Allocate* v);
   virtual Stmt* mutate(const Free* v);
+  virtual Stmt* mutate(const Let* v);
   virtual Stmt* mutate(const Cond* v);
 
  protected:
