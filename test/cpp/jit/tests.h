@@ -19,6 +19,7 @@ namespace jit {
   _(CreateAutodiffSubgraphs)                      \
   _(CustomOperators)                              \
   _(CustomOperatorAliasing)                       \
+  _(TemplatedOperatorCreator)                     \
   _(IValueKWargs)                                 \
   _(CustomFusion)                                 \
   _(SchemaMatching)                               \
@@ -33,6 +34,7 @@ namespace jit {
   _(TopologicalIndex)                             \
   _(TopologicalMove)                              \
   _(SubgraphUtils)                                \
+  _(SubgraphUtilsVmap)                            \
   _(AliasAnalysis)                                \
   _(ContainerAliasing)                            \
   _(AliasRegistration)                            \
@@ -48,6 +50,7 @@ namespace jit {
   _(ClassParser)                                  \
   _(UnifyTypes)                                   \
   _(Profiler)                                     \
+  _(FallbackGraphs)                               \
   _(InsertAndEliminateRedundantGuards)            \
   _(LoopPeeler)                                   \
   _(InsertBailOuts)                               \
