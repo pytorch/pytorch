@@ -416,18 +416,16 @@ class AbstractTestCases:
                         for contiguous in [True, False]:
                             x1 = get_tensor((height, width), dt1, device, contiguous)
                             x2 = get_tensor((height, width), dt2, device, contiguous)
-                            if dt1 != dt2:
-                                self.assertRaisesRegex(RuntimeError, "expected scalar type", lambda: torch.where(x1 == 1, x1, x2))
+
+                            if x1.is_floating_point():
+                                condition = (x1 < 0.5)
+                            elif x1.is_complex():
+                                condition = (x1.abs() < 0.5)
                             else:
-                                if x1.is_floating_point():
-                                    condition = (x1 < 0.5)
-                                elif x1.is_complex():
-                                    condition = (x1.abs() < 0.5)
-                                else:
-                                    condition = (x1 == 1)
-                                expected = condition.to(x1.dtype) * x1 + (~condition).to(x2.dtype) * x2
-                                result = torch.where(condition, x1, x2)
-                                self.assertEqual(expected, result)
+                                condition = (x1 == 1)
+                            expected = condition.to(x1.dtype) * x1 + (~condition).to(x2.dtype) * x2
+                            result = torch.where(condition, x1, x2)
+                            self.assertEqual(expected, result)
 
         def test_all_any_with_dim(self):
             def test(x):
@@ -17978,19 +17976,6 @@ else:
             return True
         return False
 
-    @onlyOnCPUAndCUDA
-    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False) +
-              torch.testing.get_all_complex_dtypes()))
-    def test_where_scalar_invalid_combination_raises(self, device, dtype):
-
-        def checkRaises(scalar_type, dtype, condition, x, scalar_1):
-            if not self._where_valid_scalar_tensor_combination(scalar_type, dtype):
-                # Note: This should fail once `where` supports type promotion.
-                with self.assertRaisesRegex(RuntimeError, "expected scalar type"):
-                    torch.where(condition, x, scalar_1)
-
-        self._test_where_scalar_template(device, dtype, checkRaises)
-
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False) +
               torch.testing.get_all_complex_dtypes()))
     def test_where_scalar_valid_combination(self, device, dtype):
@@ -18012,35 +17997,50 @@ else:
 
         self._test_where_scalar_template(device, dtype, checkResult)
 
-    # As the test fails with Runtime Error not raised on XLA
-    @onlyOnCPUAndCUDA
-    def test_where_scalar_scalar(self, device):
-        # Scalar-Scalar Version
-        height = 5
-        width = 5
-        default_dtype = torch.get_default_dtype()
-        for test_default_dtype in [torch.float, torch.double]:
-            torch.set_default_dtype(test_default_dtype)
-            for scalar_type_1 in [int, float, complex]:
-                for scalar_type_2 in [int, float, complex]:
-                    x1 = scalar_type_1(random.random() * random.randint(10, 20))
-                    x2 = scalar_type_2(random.random() * random.randint(20, 30))
-                    condition = torch.randn(height, width, device=device) > 0.5
-                    if scalar_type_1 != scalar_type_2:
-                        self.assertRaisesRegex(RuntimeError, "expected scalar type", lambda: torch.where(condition, x1, x2))
-                    else:
-                        def get_dtype(scalar_type):
-                            complex_dtype = torch.complex64 if torch.float == torch.get_default_dtype() else torch.complex128
-                            type_map = {int: torch.long, float: torch.get_default_dtype(), complex: complex_dtype}
-                            return type_map[scalar_type]
-                        expected = torch.zeros((height, width), dtype=get_dtype(scalar_type_1))
-                        expected[condition] = x1
-                        expected[~condition] = x2
-                        result = torch.where(condition, x1, x2)
-                        self.assertEqual(expected, result)
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_where_vs_numpy(self, device):
+        for with_extremal in [True, False]:
+            for ndims in range(0, 4):
+                for contiguous in [True, False]:
+                    for dt1, dt2 in permutations(torch.testing.get_all_math_dtypes(device), r=2):
+                        shape = self._rand_shape(ndims, min_size=5, max_size=10)
 
-        # Reset the original dtype
-        torch.set_default_dtype(default_dtype)
+                        exact_dtype = True
+
+                        # Since numpy defaults to `double` precision while torch to `float`
+                        # Below we verify that the expected result type agrees with `torch.result_type`
+                        divergent_dtypes = [(torch.int32, torch.float32), (torch.int32, torch.complex64),
+                                            (torch.int64, torch.float32), (torch.int64, torch.complex64)]
+
+                        if self.device_type != 'cpu':
+                            divergent_dtypes += [(torch.int16, torch.float16),
+                                                 (torch.int32, torch.float16),
+                                                 (torch.int64, torch.float16)]
+
+                        if (dt1, dt2) in divergent_dtypes or (dt2, dt1) in divergent_dtypes :
+                            exact_dtype = False
+
+                        x = self._generate_input(shape, dt1, device, with_extremal)
+                        y = self._generate_input(shape, dt2, device, with_extremal)
+
+                        if not contiguous:
+                            x = x.T
+                            y = y.T
+
+                        if dt1.is_complex:
+                            condition = x.abs() > 0.5
+                        else:
+                            condition = x > 0.5
+
+                        cond_np = condition.cpu().numpy()
+                        y_np = y.cpu().numpy()
+                        self.compare_with_numpy(lambda x: torch.where(condition, x, y),
+                                                lambda x: np.where(cond_np, x, y_np), x, exact_dtype=exact_dtype)
+                        self.compare_with_numpy(lambda x: torch.where(condition, y, x),
+                                                lambda x: np.where(cond_np, y_np, x), x, exact_dtype=exact_dtype)
+
+                        # Verify that dtype same as expected from torch's promotion rules.
+                        self.assertEqual(torch.where(condition, x, y).dtype, torch.result_type(x, y))
 
     @dtypes(torch.int64, torch.float, torch.complex128)
     def test_movedim_invalid(self, device, dtype):
