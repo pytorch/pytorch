@@ -11933,7 +11933,7 @@ class TestTorchDeviceType(TestCase):
             torch_op = torch.std
             numpy_op = np.std
         else:
-            assert False, "Unknown op {0}".format(op)
+            self.fail("Unknown op!")
 
         numpy_result = numpy_op(a, **numpy_kwargs)
 
@@ -11950,7 +11950,7 @@ class TestTorchDeviceType(TestCase):
                 torch_result = torch_op(input, dim, unbiased, keepdim, out=out)
             except RuntimeError:
                 return
-            assert False
+            self.fail("Failed to hit RuntimeError!")
 
         self.assertEqual(torch_result, numpy_result, exact_dtype=False)
 
