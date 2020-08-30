@@ -6505,8 +6505,7 @@ Example::
     torch.Size([2, 2, 1, 2])
 """.format(**common_args))
 
-add_docstr(torch.std,
-           r"""
+add_docstr(torch.std, r"""
 std(input, unbiased=True) -> Tensor
 
 Returns the standard-deviation of all elements in the :attr:`input` tensor.
@@ -6526,7 +6525,7 @@ Example::
     >>> torch.std(a)
     tensor(0.5130)
 
-.. function:: std(input, dim, unbiased=True, keepdim=False, out=None) -> Tensor
+.. function:: std(input, dim, unbiased=True, keepdim=False, *, out=None) -> Tensor
 
 Returns the standard-deviation of each row of the :attr:`input` tensor in the
 dimension :attr:`dim`. If :attr:`dim` is a list of dimensions,
@@ -6542,6 +6541,8 @@ Args:
     {dim}
     unbiased (bool): whether to use the unbiased estimation or not
     {keepdim}
+
+Keyword args:
     {out}
 
 Example::
@@ -7544,8 +7545,7 @@ Example::
             [ 4]])
 """.format(**common_args))
 
-add_docstr(torch.var,
-           r"""
+add_docstr(torch.var, r"""
 var(input, unbiased=True) -> Tensor
 
 Returns the variance of all elements in the :attr:`input` tensor.
@@ -7566,7 +7566,7 @@ Example::
     tensor(0.2455)
 
 
-.. function:: var(input, dim, keepdim=False, unbiased=True, out=None) -> Tensor
+.. function:: var(input, dim, unbiased=True, keepdim=False, *, out=None) -> Tensor
 
 Returns the variance of each row of the :attr:`input` tensor in the given
 dimension :attr:`dim`.
@@ -7581,6 +7581,8 @@ Args:
     {dim}
     {keepdim}
     unbiased (bool): whether to use the unbiased estimation or not
+
+Keyword args:
     {out}
 
 Example::
