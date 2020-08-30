@@ -59,8 +59,9 @@ def quantize(quantizer, node):
 # new_name will be an unused attribute name on module, e.g. `_observer_1`
 def get_new_attr_name_with_prefix(prefix):
     def get_new_attr_name(module):
+        def get_attr_name(i):
+            return prefix + str(i)
         i = 0
-        get_attr_name = lambda i: prefix + str(i)
         attr_name = get_attr_name(i)
         while hasattr(module, attr_name):
             i += 1
@@ -979,6 +980,7 @@ class Quantizer:
                     nodes_to_fold.reverse()
                     prepacking_graph = Graph()
                     env = {}
+
                     def load_arg(a):
                         return map_arg(a, lambda node: env[node.name])
                     for node_to_fold in nodes_to_fold:
@@ -992,6 +994,7 @@ class Quantizer:
         # remove folded nodes and replace the prepacking node with getattr
         folded_graph = Graph()
         env = {}
+
         def load_arg(a):
             return map_arg(a, lambda node: env[node.name])
         get_new_packed_weight_name = get_new_attr_name_with_prefix('_fx_pass_packed_weight_')
