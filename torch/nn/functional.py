@@ -3961,69 +3961,53 @@ def _pad_circular(input, padding):
     # Only in cases where padding values are > 0 are when additional copying
     # is required.
 
-    def calc_pad_begin(size, padding):
-        """Calculates indices for padding the beginning of the tensor.
-
-        Args:
-            size (int): Size of dimension of padded tensor.
-            padding (tuple): Length 2 tuple containing padding values for
-                beginning and end of tensor.
-
-        Returns:
-            src_idx (tuple): Start and end indices for slicing source.
-            dest_idx (tuple): Start and end indices for slicing destination.
-        """
-        padding1 = max(padding[1], 0)
-        src_idx = (size - padding[0] - padding1, size - padding1)
-        dest_idx = (0, padding[0])
-        return src_idx, dest_idx
-
-    def calc_pad_end(size, padding):
-        """Calculates indices for padding the end of the tensor.
-
-        Args:
-            size (int): Size of dimension of padded tensor.
-            padding (tuple): Length 2 tuple containing padding values for
-                beginning and end of tensor.
-
-        Returns:
-            src_idx (tuple): Start and end indices for slicing source.
-            dest_idx (tuple): Start and end indices for slicing destination.
-        """
-        padding0 = max(padding[0], 0)
-        src_idx = (padding0, padding0 + padding[1])
-        dest_idx = (size - padding[1], size)
-        return src_idx, dest_idx
-
     # Pad first dimension (depth)
     if padding[-2] > 0:
-        src_idx, dest_idx = calc_pad_begin(out_shape[2], padding[-2:])
-        out[:, :, dest_idx[0]:dest_idx[1]] = out[:, :, src_idx[0]:src_idx[1]]
+        i0 = out_shape[2] - padding[-2] - max(padding[-1], 0)
+        i1 = out_shape[2] - max(padding[-1], 0)
+        o0 = 0
+        o1 = padding[-2]
+        out[:, :, o0:o1] = out[:, :, i0:i1]
     if padding[-1] > 0:
-        src_idx, dest_idx = calc_pad_end(out_shape[2], padding[-2:])
-        out[:, :, dest_idx[0]:dest_idx[1]] = out[:, :, src_idx[0]:src_idx[1]]
+        i0 = max(padding[-2], 0)
+        i1 = max(padding[-2], 0) + padding[-1]
+        o0 = out_shape[2] - padding[-1]
+        o1 = out_shape[2]
+        out[:, :, o0:o1] = out[:, :, i0:i1]
 
     # Pad second dimension (height)
     if len(padding) > 2:
         if padding[-4] > 0:
-            src_idx, dest_idx = calc_pad_begin(out_shape[3], padding[-4:-2])
-            out[:, :, :, dest_idx[0]:dest_idx[1]] = \
-                out[:, :, :, src_idx[0]:src_idx[1]]
+            i0 = out_shape[3] - padding[-4] - max(padding[-3], 0)
+            i1 = out_shape[3] - max(padding[-3], 0)
+            o0 = 0
+            o1 = padding[-4]
+            out[:, :, :, o0:o1] = \
+                out[:, :, :, i0:i1]
         if padding[-3] > 0:
-            src_idx, dest_idx = calc_pad_end(out_shape[3], padding[-4:-2])
-            out[:, :, :, dest_idx[0]:dest_idx[1]] = \
-                out[:, :, :, src_idx[0]:src_idx[1]]
+            i0 = max(padding[-4], 0)
+            i1 = max(padding[-4], 0) + padding[-3]
+            o0 = out_shape[3] - padding[-3]
+            o1 = out_shape[3]
+            out[:, :, :, o0:o1] = \
+                out[:, :, :, i0:i1]
 
     # Pad third dimension (width)
     if len(padding) > 4:
         if padding[-6] > 0:
-            src_idx, dest_idx = calc_pad_begin(out_shape[4], padding[-6:-4])
-            out[:, :, :, :, dest_idx[0]:dest_idx[1]] = \
-                out[:, :, :, :, src_idx[0]:src_idx[1]]
+            i0 = out_shape[4] - padding[-6] - max(padding[-5], 0)
+            i1 = out_shape[4] - max(padding[-5], 0)
+            o0 = 0
+            o1 = padding[-6]
+            out[:, :, :, :, o0:o1] = \
+                out[:, :, :, :, i0:i1]
         if padding[-5] > 0:
-            src_idx, dest_idx = calc_pad_end(out_shape[4], padding[-6:-4])
-            out[:, :, :, :, dest_idx[0]:dest_idx[1]] = \
-                out[:, :, :, :, src_idx[0]:src_idx[1]]
+            i0 = max(padding[-6], 0)
+            i1 = max(padding[-6], 0) + padding[-5]
+            o0 = out_shape[4] - padding[-5]
+            o1 = out_shape[4]
+            out[:, :, :, :, o0:o1] = \
+                out[:, :, :, :, i0:i1]
 
     return out
 
