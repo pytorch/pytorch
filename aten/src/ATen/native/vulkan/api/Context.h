@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/native/vulkan/api/Common.h>
+#include <ATen/native/vulkan/api/Shader.h>
 
 namespace at {
 namespace native {
@@ -39,6 +40,10 @@ class C10_EXPORT Context final {
     return queue_;
   }
 
+  inline Shader& shader() {
+    return shader_;
+  }
+
  private:
   class Debug final {
    public:
@@ -58,6 +63,7 @@ class C10_EXPORT Context final {
   uint32_t compute_queue_family_index_;
   Handle<VkDevice, decltype(&VK_DELETER(Device))> device_;
   VkQueue queue_;
+  Shader shader_;
 };
 
 C10_EXPORT bool available();
