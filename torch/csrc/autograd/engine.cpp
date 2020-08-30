@@ -454,8 +454,8 @@ void GraphTask::mark_as_completed_and_run_post_processing() {
   if (future_completed_.exchange(true)) {
     // Future is already marked complete, or being marked as such.
     // In case the marking complete is only in progress, we add a
-    // waitNoThrow() to guarantee the future is marked complete on exit.
-    future_result_->waitNoThrow();
+    // wait() to guarantee the future is marked complete on exit.
+    future_result_->wait();
     return;
   }
 
@@ -871,7 +871,13 @@ auto Engine::execute(const edge_list& roots,
     graph_task->init_to_execute(*graph_root, outputs);
   }
 
-  return execute_with_graph_task(graph_task, graph_root)->wait();
+  execute_with_graph_task(graph_task, graph_root);
+  // Avoid a refcount bump for the Future, since we check for refcount in
+  // DistEngine (see TORCH_INTERNAL_ASSERT(futureGrads.use_count() == 1)
+  // in dist_engine.cpp).
+  auto& fut = graph_task->future_result_;
+  fut->wait();
+  return fut->value().toTensorVector();
 }
 
 void Engine::initialize_device_threads_pool() {
@@ -882,7 +888,7 @@ void Engine::initialize_device_threads_pool() {
   std::call_once(start_device_threads_flag_, &Engine::start_device_threads, this);
 }
 
-std::shared_ptr<FutureVariableList> Engine::execute_with_graph_task(
+std::shared_ptr<at::ivalue::Future> Engine::execute_with_graph_task(
     const std::shared_ptr<GraphTask>& graph_task,
     std::shared_ptr<Node> graph_root) {
   initialize_device_threads_pool();

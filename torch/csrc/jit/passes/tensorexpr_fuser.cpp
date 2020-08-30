@@ -15,8 +15,22 @@
 namespace torch {
 namespace jit {
 
+bool isSupportedForBlock(Node* node) {
+  switch (node->kind()) {
+    case aten::add:
+    case aten::mul:
+      return true;
+    default:
+      return false;
+  }
+}
+
 namespace tensorexpr {
 bool isSupported(Node* node) {
+  // For Block codegen we allow limited ops.
+  if (tensorexpr::getTEGenerateBlockCode()) {
+    return isSupportedForBlock(node);
+  }
   // TODO:
   switch (node->kind()) {
     case aten::add:
@@ -68,6 +82,7 @@ bool isSupported(Node* node) {
     case aten::addcmul:
     case aten::neg:
     case aten::reciprocal:
+    case aten::sum:
     case aten::expm1:
     case aten::lgamma:
     case aten::unsqueeze:
@@ -101,6 +116,7 @@ bool isSupported(Node* node) {
       return false;
   }
 }
+
 } // namespace tensorexpr
 
 static bool texpr_fuser_enabled_ = false;
@@ -672,6 +688,11 @@ class TensorExprFuser {
 
 void FuseTensorExprs(std::shared_ptr<Graph>& graph, size_t min_group_size) {
   GRAPH_DUMP("Before TExprFuser: ", graph);
+
+  // Temporary change for Block code generation.
+  if (tensorexpr::getTEGenerateBlockCode()) {
+    min_group_size = 1;
+  }
 
   // Get rid of dead code so that we don't waste effort fusing it.
   EliminateDeadCode(graph);
