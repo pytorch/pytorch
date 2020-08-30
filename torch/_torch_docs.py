@@ -283,6 +283,9 @@ and :attr:`out` will be a :math:`(n \times p)` tensor.
 
 .. math::
     out = \beta\ \text{input} + \alpha\ (\sum_{i=0}^{b-1} \text{batch1}_i \mathbin{@} \text{batch2}_i)
+
+If :attr:`beta` is 0, then :attr:`input` will be ignored, and `nan` and `inf` in
+it will not be propagated.
 """ + r"""
 For inputs of type `FloatTensor` or `DoubleTensor`, arguments :attr:`beta` and :attr:`alpha`
 must be real numbers, otherwise they should be integers.
@@ -411,6 +414,9 @@ and :attr:`out` will be a :math:`(n \times p)` tensor.
 
 .. math::
     \text{out} = \beta\ \text{input} + \alpha\ (\text{mat1}_i \mathbin{@} \text{mat2}_i)
+
+If :attr:`beta` is 0, then :attr:`input` will be ignored, and `nan` and `inf` in
+it will not be propagated.
 """ + r"""
 For inputs of type `FloatTensor` or `DoubleTensor`, arguments :attr:`beta` and
 :attr:`alpha` must be real numbers, otherwise they should be integers.
@@ -453,6 +459,9 @@ size `m`, then :attr:`input` must be
 
 .. math::
     \text{out} = \beta\ \text{input} + \alpha\ (\text{mat} \mathbin{@} \text{vec})
+
+If :attr:`beta` is 0, then :attr:`input` will be ignored, and `nan` and `inf` in
+it will not be propagated.
 """ + r"""
 For inputs of type `FloatTensor` or `DoubleTensor`, arguments :attr:`beta` and
 :attr:`alpha` must be real numbers, otherwise they should be integers
@@ -489,6 +498,9 @@ outer product between :attr:`vec1` and :attr:`vec2` and the added matrix
 
 .. math::
     \text{out} = \beta\ \text{input} + \alpha\ (\text{vec1} \otimes \text{vec2})
+
+If :attr:`beta` is 0, then :attr:`input` will be ignored, and `nan` and `inf` in
+it will not be propagated.
 """ + r"""
 If :attr:`vec1` is a vector of size `n` and :attr:`vec2` is a vector
 of size `m`, then :attr:`input` must be
@@ -818,6 +830,9 @@ same as the scaling factors used in :meth:`torch.addbmm`.
 
 .. math::
     \text{out}_i = \beta\ \text{input}_i + \alpha\ (\text{batch1}_i \mathbin{@} \text{batch2}_i)
+
+If :attr:`beta` is 0, then :attr:`input` will be ignored, and `nan` and `inf` in
+it will not be propagated.
 """ + r"""
 For inputs of type `FloatTensor` or `DoubleTensor`, arguments :attr:`beta` and
 :attr:`alpha` must be real numbers, otherwise they should be integers.
