@@ -210,11 +210,10 @@ Tensor empty(IntArrayRef size, const TensorOptions& options_, c10::optional<c10:
   }
 
   auto memory_format = options.memory_format_opt().value_or(MemoryFormat::Contiguous);
-  //for contiguous format restride was done in set_sizes_contiguous
-  if (memory_format != MemoryFormat::Contiguous) {
+  //for contiguous format restride was done in set_sizes_contiguous, restride cases that did not go there
+  if ((size.size()==1 && size[0]==0) || memory_format != MemoryFormat::Contiguous) {
       tensor.unsafeGetTensorImpl()->empty_tensor_restride(memory_format);
   }
-
   return tensor;
 }
 
@@ -725,6 +724,7 @@ Tensor randperm(int64_t n, const TensorOptions& options) {
 Tensor randperm(int64_t n, c10::optional<Generator> generator, const TensorOptions& options) {
   auto tensor = at::empty(n, options);
   return at::randperm_out(tensor, n, generator);
+
 }
 
 Tensor& randperm_out(Tensor& result, int64_t n) {
