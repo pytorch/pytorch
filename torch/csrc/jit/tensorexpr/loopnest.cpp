@@ -708,19 +708,15 @@ LoopNest::LoopNest(const std::vector<Tensor*>& output_tensors)
 
 Stmt* LoopNest::lowerToStmt(Tensor* t) {
   Function* f = t->function();
+  if (f->ndim() == 0) {
+    throw malformed_input("Tensor lowered to zero dimensions");
+  }
+
   // TODO: Support multiple-output functions
   Stmt* body = f->ElementStmt(0);
 
   stmt_to_tensor_[body] = t;
   tensor_to_stmt_[t] = body;
-
-  if (f->ndim() == 0) {
-    return body;
-  }
-
-  if (f->ndim() == 0) {
-    throw malformed_input("Tensor lowered to zero dimensions");
-  }
 
   const Expr* initializer = t->initializer();
   if (initializer) {
@@ -916,10 +912,13 @@ void LoopNest::splitWithTail(
     For** outer,
     For** inner,
     For** tail) {
-  Block* p = dynamic_cast<Block*>(f->get_parent());
+  // TODO: handle the case where factor is larger than f's size.
   if (!f) {
     throw malformed_input("splitWithTail attempted on null loop", f);
-  } else if (!p) {
+  }
+
+  Block* p = dynamic_cast<Block*>(f->get_parent());
+  if (!p) {
     throw malformed_input("splitWithTail attempted on loop with no parent", p);
   }
 

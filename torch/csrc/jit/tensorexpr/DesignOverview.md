@@ -68,7 +68,7 @@ Expr represents a node in the abstract syntax tree of a tensor expression. Leaf 
 4) a computational expression `body` (of `Expr` type)
 
 ## Buffer
-`Buffer`s are essentially `Tensor`s without a `body` - they represent an indexed access to "tensors" that is outsied the tensor-expression system.
+`Buffer`s are essentially `Tensor`s without a `body` - they represent an indexed access to "tensors" that is outside of the tensor-expression system.
 `Buffer` is a bundle of
 1) a `Var` defining which buffer this `Buffer` expression is defining
 2) a list of indices `args` (each of them is `Var`)
