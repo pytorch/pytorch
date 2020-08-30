@@ -21,7 +21,7 @@ Tensor empty_mkldnn(IntArrayRef sizes, const TensorOptions& options, c10::option
 #else
 
 Tensor empty_mkldnn(IntArrayRef sizes, const TensorOptions& options, c10::optional<c10::MemoryFormat> optional_memory_format) {
-  AT_ERROR("empty_mkldnn: MKL-DNN build is disabled");
+  TORCH_CHECK(false, "empty_mkldnn: MKL-DNN build is disabled");
 }
 
 #endif // AT_MKLDNN_ENABLED()
