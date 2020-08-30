@@ -80,6 +80,14 @@ alias_infos = (
               lambda d: torch.clamp(torch.randn(20, device=d), -1, 1)),
     AliasInfo('arctanh_', torch.Tensor.arctanh_, 'atanh_', torch.Tensor.atanh_,
               lambda d: torch.clamp(torch.randn(20, device=d), -1, 1)),
+    AliasInfo('subtract', torch.subtract, 'sub', torch.sub,
+              lambda d: torch.randn(20, device=d),
+              get_args=lambda d: (torch.randn(20, device=d),),
+              decorators=(onlyCPU,)),
+    AliasInfo('subtract_', torch.Tensor.subtract_, 'sub_', torch.Tensor.sub_,
+              lambda d: torch.randn(20, device=d),
+              get_args=lambda d: (torch.randn(20, device=d),),
+              decorators=(onlyCPU,)),
 )
 
 # Placeholder test class for validating that aliases are correctly
