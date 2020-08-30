@@ -6,7 +6,7 @@ PyTorch is a Python package that provides two high-level features:
 - Tensor computation (like NumPy) with strong GPU acceleration
 - Deep neural networks built on a tape-based autograd system
 
-You can reuse your favorite Python packages such as NumPy, SciPy, and Cython to extend PyTorch when needed.
+You can reuse your favourite Python packages such as NumPy, SciPy, and Cython to extend PyTorch when needed.
 
 - [More about PyTorch](#more-about-pytorch)
 - [Installation](#installation)
@@ -90,7 +90,7 @@ You get the best of speed and flexibility for your crazy research.
 PyTorch is not a Python binding into a monolithic C++ framework.
 It is built to be deeply integrated into Python.
 You can use it naturally like you would use [NumPy](https://www.numpy.org/) / [SciPy](https://www.scipy.org/) / [scikit-learn](https://scikit-learn.org) etc.
-You can write your new neural network layers in Python itself, using your favorite libraries
+You can write your new neural network layers in Python itself, using your favourite libraries
 and use packages such as [Cython](https://cython.org/) and [Numba](http://numba.pydata.org/).
 Our goal is to not reinvent the wheel where appropriate.
 
@@ -122,7 +122,7 @@ Writing new neural network modules, or interfacing with PyTorch's Tensor API was
 and with minimal abstractions.
 
 You can write new neural network layers in Python using the torch API
-[or your favorite NumPy-based libraries such as SciPy](https://pytorch.org/tutorials/advanced/numpy_extensions_tutorial.html).
+[or your favourite NumPy-based libraries such as SciPy](https://pytorch.org/tutorials/advanced/numpy_extensions_tutorial.html).
 
 If you want to write your layers in C/C++, we provide a convenient extension API that is efficient and with minimal boilerplate.
 No wrapper code needs to be written. You can see [a tutorial here](https://pytorch.org/tutorials/advanced/cpp_extension.html) and [an example here](https://github.com/pytorch/extension-cpp).
@@ -255,7 +255,7 @@ python setup.py install
 
 ##### Adjust Build Options (Optional)
 
-You can adjust the configuration of cmake variables optionally (without building first), by doing
+You can adjust the configuration of CMake variables optionally (without building first), by doing
 the following. For example, adjusting the pre-detected directories for CuDNN or BLAS can be done
 with such a step.
 
@@ -321,7 +321,7 @@ on [our website](https://pytorch.org/previous-versions).
 
 Three-pointers to get you started:
 - [Tutorials: get you started with understanding and using PyTorch](https://pytorch.org/tutorials/)
-- [Examples: easy to understand pytorch code across all domains](https://github.com/pytorch/examples)
+- [Examples: easy to understand PyTorch code across all domains](https://github.com/pytorch/examples)
 - [The API Reference](https://pytorch.org/docs/)
 - [Glossary](https://github.com/pytorch/pytorch/blob/master/GLOSSARY.md)
 
@@ -359,7 +359,7 @@ To learn more about making a contribution to Pytorch, please see our [Contributi
 
 ## The Team
 
-PyTorch is a community-driven project with several skillful engineers and researchers contributing to it.
+PyTorch is a community-driven project with several skilful engineers and researchers contributing to it.
 
 PyTorch is currently maintained by [Adam Paszke](https://apaszke.github.io/), [Sam Gross](https://github.com/colesbury), [Soumith Chintala](http://soumith.ch) and [Gregory Chanan](https://github.com/gchanan) with major contributions coming from hundreds of talented individuals in various forms and means.
 A non-exhaustive but growing list needs to mention: Trevor Killeen, Sasank Chilamkurthy, Sergey Zagoruyko, Adam Lerer, Francisco Massa, Alykhan Tejani, Luca Antiga, Alban Desmaison, Andreas Koepf, James Bradbury, Zeming Lin, Yuandong Tian, Guillaume Lample, Marat Dukhan, Natalia Gimelshein, Christian Sarofeen, Martin Raison, Edward Yang, Zachary Devito.
@@ -368,4 +368,4 @@ Note: this project is unrelated to [hughperkins/pytorch](https://github.com/hugh
 
 ## License
 
-PyTorch is a BSD-style licensed, as found in the [LICENSE](LICENSE) file.
+PyTorch is a BSD-style license, as found in the [LICENSE](LICENSE) file.
