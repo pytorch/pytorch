@@ -240,8 +240,8 @@ class TestQuantizeFxOps(QuantizationTestCase):
         class Op(torch.nn.Module):
             def __init__(self, is_inplace, is_scalar):
                 super(Op, self).__init__()
-                self.conv1 = torch.nn.Conv2d(2, 2, 2).float()
-                self.conv2 = torch.nn.Conv2d(2, 2, 2).float()
+                self.conv1 = torch.nn.Conv2d(2, 1, 1).float()
+                self.conv2 = torch.nn.Conv2d(2, 1, 1).float()
                 self.is_scalar = is_scalar
                 self.op = ibinary_op if is_inplace else binary_op
 
@@ -264,8 +264,8 @@ class TestQuantizeFxOps(QuantizationTestCase):
         #         x = self.op(x, y)
         #         return x
 
-        data = (torch.randn(1, 2, 3, 3, dtype=torch.float),
-                torch.randn(1, 2, 3, 3, dtype=torch.float))
+        data = (torch.randn(1, 2, 2, 2, dtype=torch.float),
+                torch.randn(1, 2, 2, 2, dtype=torch.float))
         quantized_node = ns.call_function(quantized_op)
         options = itertools.product([True, False], [True, False], self.static_quant_types)
         for is_inplace, is_scalar, quant_type in options:
@@ -277,17 +277,14 @@ class TestQuantizeFxOps(QuantizationTestCase):
             def __init__(self, is_inplace, is_functional_relu,
                          is_inplace_relu, is_scalar):
                 super(OpRelu, self).__init__()
-                self.conv1 = torch.nn.Conv2d(2, 2, 2).float()
-                self.conv2 = torch.nn.Conv2d(2, 2, 2).float()
+                self.conv1 = torch.nn.Conv2d(2, 1, 1).float()
+                self.conv2 = torch.nn.Conv2d(2, 1, 1).float()
                 self.op = ibinary_op if is_inplace else binary_op
                 self.is_functional_relu = is_functional_relu
                 self.is_inplace_relu = is_inplace_relu
                 self.is_scalar = is_scalar
-
-                if self.is_functional_relu:
-                    self.relu = F.relu
-                else:
-                    self.relu = torch.nn.ReLU(self.is_inplace_relu)
+                self.relu = F.relu if self.is_functional_relu \
+                    else torch.nn.ReLU(self.is_inplace_relu)
 
             def forward(self, x, y):
                 x = self.conv1(x)
@@ -297,8 +294,8 @@ class TestQuantizeFxOps(QuantizationTestCase):
                     self.is_functional_relu else self.relu(x)
                 return x
 
-        data = (torch.rand((1, 2, 5, 5), dtype=torch.float),
-                torch.rand((1, 2, 5, 5), dtype=torch.float))
+        data = (torch.rand((1, 2, 2, 2), dtype=torch.float),
+                torch.rand((1, 2, 2, 2), dtype=torch.float))
         quantized_node = ns.call_function(quantized_op)
         options = itertools.product(
             [True, False], [True, False], [True, False], [True, False], self.static_quant_types)
