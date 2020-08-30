@@ -6,7 +6,6 @@
 #include <ATen/native/TypeProperties.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/native/Resize.h>
-#include <ATen/core/grad_mode.h>
 
 namespace at {
 
@@ -465,6 +464,7 @@ void TensorIterator::allocate_or_resize_outputs() {
           // it is faster because it avoids allocating 0 size tensor and
           // resizing and restriding it
           AutoNonVariableTypeMode non_variable_type_mode;
+          const DeviceGuard device_guard(op.options().device());
           op.tensor = at::native::empty(tensor_shape, op.options());
         } else {
           at::native::resize_output(op.tensor, tensor_shape);
@@ -1092,6 +1092,7 @@ bool TensorIterator::fast_set_up(const TensorIteratorConfig& config) {
           if (!op.tensor.defined()) {
             TORCH_INTERNAL_ASSERT(op.is_type_defined(), "no type for operand", i);
             AutoNonVariableTypeMode non_variable_type_mode;
+            const DeviceGuard device_guard(op.options().device());
             op.tensor = at::native::empty(shape_, op.options(), MemoryFormat::Contiguous);
             op.current_dtype = op.target_dtype;
           } else if (op.will_resize) {
@@ -1107,6 +1108,7 @@ bool TensorIterator::fast_set_up(const TensorIteratorConfig& config) {
           if (!op.tensor.defined()) {
             TORCH_INTERNAL_ASSERT(op.is_type_defined(), "no type for operand", i);
             AutoNonVariableTypeMode non_variable_type_mode;
+            const DeviceGuard device_guard(op.options().device());
             op.tensor = at::native::empty(shape_, op.options(), MemoryFormat::ChannelsLast);
             op.current_dtype = op.target_dtype;
           } else if (op.will_resize) {
