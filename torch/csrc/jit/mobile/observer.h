@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/util/ThreadLocalDebugInfo.h>
+#include <torch/csrc/jit/mobile/import.h>
 #include <string>
 
 namespace torch {
@@ -72,7 +73,7 @@ class MobileModuleObserver {
   virtual void onCancelRunMethod(const std::string&) {}
   virtual void onFailRunMethod(const std::string&) {}
   virtual void onEnterLoadModel() {}
-  virtual void onExitLoadModel(const std::string&) {}
+  virtual void onExitLoadModel(const jit::mobile::Module&) {}
   virtual void onFailLoadModel(const std::string&) {}
 };
 
