@@ -49,51 +49,59 @@ void gpu_kernel_with_index(at::Tensor &output, func_t f) {
 namespace at {
 namespace native {
 
-Tensor& linspace_cuda_out(Tensor& result, Scalar start, Scalar end, int64_t steps) {
-  TORCH_CHECK(steps >= 0, "number of steps must be non-negative");
+Tensor& linspace_cuda_out(Tensor& result, Scalar start, Scalar end, c10::optional<int64_t> steps) {
+  const auto steps_ = steps.value_or(100);
+  TORCH_CHECK(steps_ >= 0, "number of steps must be non-negative");
+
+  if (!steps.has_value()) {
+    TORCH_WARN_ONCE(
+      "Not providing a value for linspace's steps is deprecated and will "
+      "throw a runtime error in a future release. This warning will appear "
+      "only once per process.");
+  }
 
   if (result.numel() != steps) {
-    result.resize_({steps});
+    result.resize_({steps_});
   }
   bool is_contiguous = result.is_contiguous();
   Tensor r = !is_contiguous ? at::empty_like(result, LEGACY_CONTIGUOUS_MEMORY_FORMAT) : result;
 
-  if (steps == 0) {
+  if (steps_ == 0) {
     // skip
-  } else if (steps == 1) {
+  } else if (steps_ == 1) {
     r.fill_(start);
   } else if (isIntegralType(r.scalar_type(), 0)) {
     AT_DISPATCH_INTEGRAL_TYPES(r.scalar_type(), "linspace_cuda", [&]() {
       scalar_t scalar_start = start.to<scalar_t>();
       scalar_t scalar_end = end.to<scalar_t>();
       // Cast `end` and `start` to `float`, since range can be larger than scalar_t for integral types
-      float step = (static_cast<float>(scalar_end) - static_cast<float>(scalar_start)) / (steps - 1);
-      const int64_t halfway = steps / 2;
-      gpu_kernel_with_index(r, [scalar_start, scalar_end, steps, step, halfway]GPU_LAMBDA(int64_t ind) -> scalar_t {
+      float step = (static_cast<float>(scalar_end) - static_cast<float>(scalar_start)) / (steps_ - 1);
+      const int64_t halfway = steps_ / 2;
+      gpu_kernel_with_index(r, [scalar_start, scalar_end, steps_, step, halfway]GPU_LAMBDA(int64_t ind) -> scalar_t {
         if (ind < halfway) {
           return scalar_start + (step * ind);
         }
 
-        return scalar_end - step * (steps - ind - 1);
+        return scalar_end - step * (steps_ - ind - 1);
       });
     });
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(r.scalar_type(), "linspace_cuda", [&]() {
       scalar_t scalar_start = start.to<scalar_t>();
       scalar_t scalar_end = end.to<scalar_t>();
-      scalar_t step = (scalar_end - scalar_start) / static_cast<scalar_t>(steps - 1);
-      const int64_t halfway = steps / 2;
-      gpu_kernel_with_index(r, [scalar_start, scalar_end, steps, step, halfway]GPU_LAMBDA(int64_t ind) -> scalar_t {
+      scalar_t step = (scalar_end - scalar_start) / static_cast<scalar_t>(steps_ - 1);
+      const int64_t halfway = steps_ / 2;
+      gpu_kernel_with_index(r, [scalar_start, scalar_end, steps_, step, halfway]GPU_LAMBDA(int64_t ind) -> scalar_t {
         if (ind < halfway) {
           return scalar_start + (step * ind);
         }
 
-        return scalar_end - step * (steps - ind - 1);
+        return scalar_end - step * (steps_ - ind - 1);
       });
     });
   }
 
-  if(!is_contiguous) {
+  if (!is_contiguous) {
     result.copy_(r);
   }
 
@@ -101,31 +109,39 @@ Tensor& linspace_cuda_out(Tensor& result, Scalar start, Scalar end, int64_t step
   return result;
 }
 
-Tensor& logspace_cuda_out(Tensor& result, Scalar start, Scalar end, int64_t steps, double base) {
-  TORCH_CHECK(steps >= 0, "number of steps must be non-negative");
+Tensor& logspace_cuda_out(Tensor& result, Scalar start, Scalar end, c10::optional<int64_t> steps, double base) {
+  const auto steps_ = steps.value_or(100);
+  TORCH_CHECK(steps_ >= 0, "number of steps must be non-negative");
 
-  if (result.numel() != steps) {
-    result.resize_({steps});
+  if (!steps.has_value()) {
+    TORCH_WARN_ONCE(
+      "Not providing a value for logspace's steps is deprecated and will "
+      "throw a runtime error in a future release. This warning will appear "
+      "only once per process.");
+  }
+
+  if (result.numel() != steps_) {
+    result.resize_({steps_});
   }
   bool is_contiguous = result.is_contiguous();
   Tensor r = !is_contiguous ? at::empty_like(result, LEGACY_CONTIGUOUS_MEMORY_FORMAT) : result;
 
-  if (steps == 0) {
+  if (steps_ == 0) {
     // skip
-  } else if (steps == 1) {
+  } else if (steps_ == 1) {
     r.fill_(std::pow(base, start.to<double>()));
   } else if (isIntegralType(r.scalar_type(), 0)) {
     AT_DISPATCH_INTEGRAL_TYPES(r.scalar_type(), "logspace_cuda", [&]() {
       float scalar_base = static_cast<float>(base); // Use float to avoid promotion to double
       scalar_t scalar_start = start.to<scalar_t>();
       scalar_t scalar_end = end.to<scalar_t>();
-      float step = static_cast<float>(scalar_end - scalar_start) / (steps - 1);
-      const int64_t halfway = steps / 2;
-      gpu_kernel_with_index(r, [scalar_start, scalar_end, scalar_base, steps, step, halfway]GPU_LAMBDA(int64_t ind) -> scalar_t {
+      float step = static_cast<float>(scalar_end - scalar_start) / (steps_ - 1);
+      const int64_t halfway = steps_ / 2;
+      gpu_kernel_with_index(r, [scalar_start, scalar_end, scalar_base, steps_, step, halfway]GPU_LAMBDA(int64_t ind) -> scalar_t {
         if (ind < halfway) {
           return std::pow(scalar_base, scalar_start + step * ind);
         }
-        return std::pow(scalar_base, scalar_end - step * (steps - ind - 1));
+        return std::pow(scalar_base, scalar_end - step * (steps_ - ind - 1));
       });
     });
   } else {
@@ -133,18 +149,18 @@ Tensor& logspace_cuda_out(Tensor& result, Scalar start, Scalar end, int64_t step
       scalar_t scalar_base = static_cast<scalar_t>(base);
       scalar_t scalar_start = start.to<scalar_t>();
       scalar_t scalar_end = end.to<scalar_t>();
-      scalar_t step = (scalar_end - scalar_start) / static_cast<scalar_t>(steps - 1);
-      const int64_t halfway = steps / 2;
-      gpu_kernel_with_index(r, [scalar_start, scalar_end, scalar_base, steps, step, halfway]GPU_LAMBDA(int64_t ind) -> scalar_t {
+      scalar_t step = (scalar_end - scalar_start) / static_cast<scalar_t>(steps_ - 1);
+      const int64_t halfway = steps_ / 2;
+      gpu_kernel_with_index(r, [scalar_start, scalar_end, scalar_base, steps_, step, halfway]GPU_LAMBDA(int64_t ind) -> scalar_t {
         if (ind < halfway) {
           return std::pow(scalar_base, scalar_start + step * ind);
         }
-        return std::pow(scalar_base, scalar_end - step * (steps - ind - 1));
+        return std::pow(scalar_base, scalar_end - step * (steps_ - ind - 1));
       });
     });
   }
 
-  if(!is_contiguous) {
+  if (!is_contiguous) {
     result.copy_(r);
   }
 

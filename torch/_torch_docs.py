@@ -3556,6 +3556,11 @@ equally spaced points between :attr:`start` and :attr:`end`.
 
 The output tensor is 1-D of size :attr:`steps`.
 
+.. warning::
+    Not providing a value for :attr:`steps` is deprecated, and in a future release
+    :attr:`steps` will not have a default value.
+
+
 Args:
     start (float): the starting value for the set of points
     end (float): the ending value for the set of points
@@ -3845,6 +3850,10 @@ logarithmically spaced with base :attr:`base` between
 :math:`{{\text{{base}}}}^{{\text{{start}}}}` and :math:`{{\text{{base}}}}^{{\text{{end}}}}`.
 
 The output tensor is 1-D of size :attr:`steps`.
+
+.. warning::
+    Not providing a value for :attr:`steps` is deprecated, and in a future release
+    :attr:`steps` will not have a default value.
 
 Args:
     start (float): the starting value for the set of points
