@@ -338,9 +338,7 @@ static PyObject * THPVariable_float_scalar(PyObject* self, PyObject* args) {
 static PyObject * THPVariable_complex_scalar(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
   if (check_has_torch_function(self)) {
-    HANDLE_TH_ERRORS
     return handle_torch_function(self, "__complex__");
-    END_HANDLE_TH_ERRORS
   }
   jit::tracer::warn("Converting a tensor to a Python complex", jit::tracer::WARN_PYTHON_DATAFLOW);
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
