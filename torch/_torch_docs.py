@@ -6707,6 +6707,40 @@ Example::
     (tensor([0.9110, 0.8197, 1.2552, 1.0608]), tensor([-0.6871,  0.6229,  0.2169, -0.9058]))
 """.format(**multi_dim_common))
 
+add_docstr(torch.sub, r"""
+sub(input, other, *, alpha=1, out=None) -> Tensor
+
+Subtracts :attr:`other`, scaled by :attr:`alpha`, from :attr:`input`.
+
+.. math::
+    \text{{out}}_i = \text{{input}}_i - \text{{alpha}} \times \text{{other}}_i
+""" + r"""
+
+Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`, 
+:ref:`type promotion <type-promotion-doc>`, and integer, float, and complex inputs.
+
+Args:
+    {input}
+    other (Tensor or Scalar): the tensor or scalar to subtract from :attr:`input`
+
+Keyword args:
+    alpha (Scalar): the scalar multiplier for :attr:`other`
+    {out}
+
+Example::
+
+    >>> a = torch.tensor((1, 2))
+    >>> b = torch.tensor((0, 1))
+    >>> torch.sub(a, b, alpha=2)
+    tensor([1, 0])
+""".format(**common_args))
+
+add_docstr(torch.subtract, r"""
+subtract(input, other, *, alpha=1, out=None) -> Tensor
+
+Alias for :func:`torch.sub`.
+""")
+
 add_docstr(torch.sum,
            r"""
 sum(input, dtype=None) -> Tensor
