@@ -5,7 +5,9 @@ CONFIG_TREE_DATA = [
     ("xenial", [
         ("rocm", [
             ("3.5.1", [
-                X("3.6"),
+                ("3.6", [
+                    ('build_only', [XImportant(True)]),
+                ]),
             ]),
         ]),
         ("gcc", [
