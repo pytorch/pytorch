@@ -24,22 +24,10 @@ namespace torchpy {
 
 // TODO fix symbol visibility issue
 // https://stackoverflow.com/questions/2828738/c-warning-declared-with-greater-visibility-than-the-type-of-its-field
-class PyModule {
- public:
-  PyModule(py::object model);
-  ~PyModule();
-
-  void thread_begin();
-  void thread_end();
-  at::Tensor forward(at::Tensor input);
-
- private:
-  py::object _model_forward;
-  std::map<std::thread::id, PyThreadState*> _thread_states;
-};
 
 void init();
 void finalize();
 
-const PyModule load(const char* filename);
+bool load(const char* filename);
+at::Tensor forward(at::Tensor input);
 }

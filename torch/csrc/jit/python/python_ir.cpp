@@ -220,8 +220,9 @@ void initPythonIRBindings(PyObject* module_) {
             db.dump();
           })
       // *******************************************************************************************************
-      // TODO - these .def() calls were segfaulting either when dlopening libinterpreter or when importing torch
-      // presumably there is something onnx related missing from my libinterpreter objects recipe...
+      // TODO - these .def() calls were segfaulting either when dlopening
+      // libinterpreter or when importing torch presumably there is something
+      // onnx related missing from my libinterpreter objects recipe...
       // *******************************************************************************************************
       // .def(
       //     "_export_onnx",
@@ -260,10 +261,12 @@ void initPythonIRBindings(PyObject* module_) {
       //         auto t = kv.second;
       //         size_t copy_bytes = t.element_size() * t.numel();
       //         // TODO: this is an unnecessary copy. In theory we can directly
-      //         // return the map from identifier to Tensor, but we need some API
+      //         // return the map from identifier to Tensor, but we need some
+      //         API
       //         // in Python to get raw `bytes` containing the raw tensor data.
       //         python_serialized_export_map[kv.first] =
-      //             py::bytes(static_cast<const char*>(t.data_ptr()), copy_bytes);
+      //             py::bytes(static_cast<const char*>(t.data_ptr()),
+      //             copy_bytes);
       //       }
       //       return std::make_tuple(
       //           py::bytes(graph), python_serialized_export_map);

@@ -301,19 +301,20 @@ void testLiteInterpreterBuiltinFunction() {
 }
 
 namespace {
-static auto reg =
-    torch::class_<TorchBindLiteInterpreterTestStruct>(
-        "_TorchScriptTesting",
-        "_LiteInterpreterTest")
-        .def("get", &TorchBindLiteInterpreterTestStruct::get)
-        .def_pickle(
-            // __getattr__
-            [](const c10::intrusive_ptr<TorchBindLiteInterpreterTestStruct>&
-                   self) -> int64_t { return 0; },
-            // __setattr__
-            [](int64_t state) {
-              return c10::make_intrusive<TorchBindLiteInterpreterTestStruct>();
-            });
+// static auto reg =
+//     torch::class_<TorchBindLiteInterpreterTestStruct>(
+//         "_TorchScriptTesting",
+//         "_LiteInterpreterTest")
+//         .def("get", &TorchBindLiteInterpreterTestStruct::get)
+//         .def_pickle(
+//             // __getattr__
+//             [](const c10::intrusive_ptr<TorchBindLiteInterpreterTestStruct>&
+//                    self) -> int64_t { return 0; },
+//             // __setattr__
+//             [](int64_t state) {
+//               return
+//               c10::make_intrusive<TorchBindLiteInterpreterTestStruct>();
+//             });
 
 } // namespace
 

@@ -19,7 +19,9 @@ from torch._six import builtins
 from torch._utils_internal import get_source_lines_and_file
 from torch.futures import Future
 from typing import Tuple, List, Dict, Optional, Union, Any, TypeVar, Generic, Callable  # noqa: F401
-from typing_extensions import Final
+
+# TODO fix this
+# from typing_extensions import Final
 
 # Wrapper functions that can call either of 2 functions depending on a boolean
 # argument
@@ -690,8 +692,11 @@ if torch.distributed.rpc.is_available():
         return getattr(ann, "__origin__", None) is RRef
 
 def is_final(ann):
-    return ann.__module__ == 'typing_extensions' and \
-        (getattr(ann, '__origin__', None) is Final)
+    return ann.__module__ == 'typing_extensions'
+
+    # TODO fixme
+    #  and \
+    #    (getattr(ann, '__origin__', None) is Final)
 
 # allows BroadcastingList instance to be subscriptable
 class BroadcastingListCls(object):

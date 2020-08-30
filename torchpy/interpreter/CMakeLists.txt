@@ -16,7 +16,7 @@ SET_SOURCE_FILES_PROPERTIES(
 )
 
 # Build cpython
-SET(PYTHON_LIB_DIR "${PYTHON_SOURCE_DIR}/lib/")
+SET(PYTHON_LIB_DIR "${PYTHON_SOURCE_DIR}/lib")
 SET(PYTHON_LIB "${PYTHON_LIB_DIR}/libpython3.7m.a")
 add_custom_command(
    OUTPUT ${PYTHON_MODULES} ${PYTHON_LIB}
@@ -27,10 +27,13 @@ add_custom_command(
    VERBATIM
 )
 
+# TODO install pip packages needed by torch in this python
+# typing_extensions
+
 # Generate a header that lets interpreter init set up python sys path 
 # to point to the cpython built above
 SET(PYTORCH_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../")
-SET(PY_PATH_STRING "import sys; sys.path = ['', '${PYTHON_LIB_DIR}/python37.zip', '${PYTHON_LIB_DIR}/python3.7', '${PYTHON_LIB_DIR}/lib-dynload', '${PYTHON_LIB_DIR}/site-packages', '${PYTORCH_ROOT}']")
+SET(PY_PATH_STRING "import sys; sys.path = ['', '${PYTHON_LIB_DIR}/python37.zip', '${PYTHON_LIB_DIR}/python3.7', '${PYTHON_LIB_DIR}/python3.7/lib-dynload', '${PYTHON_LIB_DIR}/python3.7/site-packages', '${PYTORCH_ROOT}']")
 add_custom_command(
     OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/python_path.h
     COMMAND echo "#define PY_PATH_STRING \"${PY_PATH_STRING}\"" > ${CMAKE_CURRENT_SOURCE_DIR}/python_path.h
@@ -59,5 +62,5 @@ set(INTERPRETER_TEST_SOURCES
 )
 add_executable(interpreter_test ${INTERPRETER_TEST_SOURCES})
 target_include_directories(interpreter_test PRIVATE ${INTERPRETER_DIR})
-target_link_libraries(interpreter_test PUBLIC gtest dl torch)
+target_link_libraries(interpreter_test PUBLIC gtest dl shm torch)
 target_link_libraries(interpreter_test PUBLIC protobuf::libprotobuf-lite)

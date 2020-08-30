@@ -11,8 +11,7 @@ int main(int argc, char* argv[]) {
   return rc;
 }
 
-TEST(Interpreter, Hello)
-{
+TEST(Interpreter, Hello) {
   Interpreter interp;
   interp.run_some_python("print('hello from first interpeter!')");
 

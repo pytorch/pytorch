@@ -71,7 +71,7 @@ SET(TORCH_OBJS
     ${TORCH_PYTHON_DIR}/csrc/cuda/python_nccl.cpp.o
     ${TORCH_PYTHON_DIR}/csrc/cuda/Module.cpp.o
     ${TORCH_PYTHON_DIR}/csrc/cuda/Storage.cpp.o
-    ${TORCH_PYTHON_DIR}/csrc/CudaIPCTypes.cpp.o
+    # ${TORCH_PYTHON_DIR}/csrc/CudaIPCTypes.cpp.o
     ${TORCH_PYTHON_DIR}/csrc/MemoryFormat.cpp.o
     ${TORCH_PYTHON_DIR}/csrc/Layout.cpp.o
     ${TORCH_PYTHON_DIR}/csrc/PtrWrapper.cpp.o

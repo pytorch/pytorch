@@ -4,7 +4,8 @@ from torch.utils import set_module
 
 # These are imported so users can access them from the `torch.jit` module
 from torch._jit_internal import (
-    Final,
+    # TODO fix this
+    # Final,
     Future,
     _overload,
     _overload_method,

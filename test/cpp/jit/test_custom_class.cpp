@@ -74,83 +74,85 @@ at::Tensor take_an_instance(const c10::intrusive_ptr<PickleTester>& instance) {
   return torch::zeros({instance->vals.back(), 4});
 }
 
-TORCH_LIBRARY(_TorchScriptTesting, m) {
-  m.class_<Foo>("_Foo")
-      .def(torch::init<int64_t, int64_t>())
-      // .def(torch::init<>())
-      .def("info", &Foo::info)
-      .def("increment", &Foo::increment)
-      .def("add", &Foo::add)
-      .def("combine", &Foo::combine);
+// TORCH_LIBRARY(_TorchScriptTesting, m) {
+//   m.class_<Foo>("_Foo")
+//       .def(torch::init<int64_t, int64_t>())
+//       // .def(torch::init<>())
+//       .def("info", &Foo::info)
+//       .def("increment", &Foo::increment)
+//       .def("add", &Foo::add)
+//       .def("combine", &Foo::combine);
 
-  m.class_<NoInit>("_NoInit").def(
-      "get_x", [](const c10::intrusive_ptr<NoInit>& self) { return self->x; });
+//   m.class_<NoInit>("_NoInit").def(
+//       "get_x", [](const c10::intrusive_ptr<NoInit>& self) { return self->x;
+//       });
 
-  m.class_<MyStackClass<std::string>>("_StackString")
-      .def(torch::init<std::vector<std::string>>())
-      .def("push", &MyStackClass<std::string>::push)
-      .def("pop", &MyStackClass<std::string>::pop)
-      .def("clone", &MyStackClass<std::string>::clone)
-      .def("merge", &MyStackClass<std::string>::merge)
-      .def_pickle(
-          [](const c10::intrusive_ptr<MyStackClass<std::string>>& self) {
-            return self->stack_;
-          },
-          [](std::vector<std::string> state) { // __setstate__
-            return c10::make_intrusive<MyStackClass<std::string>>(
-                std::vector<std::string>{"i", "was", "deserialized"});
-          })
-      .def("return_a_tuple", &MyStackClass<std::string>::return_a_tuple)
-      .def(
-          "top",
-          [](const c10::intrusive_ptr<MyStackClass<std::string>>& self)
-              -> std::string { return self->stack_.back(); })
-      .def(
-          "__str__",
-          [](const c10::intrusive_ptr<MyStackClass<std::string>>& self) {
-            std::stringstream ss;
-            ss << "[";
-            for (size_t i = 0; i < self->stack_.size(); ++i) {
-              ss << self->stack_[i];
-              if (i != self->stack_.size() - 1) {
-                ss << ", ";
-              }
-            }
-            ss << "]";
-            return ss.str();
-          });
-  // clang-format off
-        // The following will fail with a static assert telling you you have to
-        // take an intrusive_ptr<MyStackClass> as the first argument.
-        // .def("foo", [](int64_t a) -> int64_t{ return 3;});
-  // clang-format on
+//   m.class_<MyStackClass<std::string>>("_StackString")
+//       .def(torch::init<std::vector<std::string>>())
+//       .def("push", &MyStackClass<std::string>::push)
+//       .def("pop", &MyStackClass<std::string>::pop)
+//       .def("clone", &MyStackClass<std::string>::clone)
+//       .def("merge", &MyStackClass<std::string>::merge)
+//       .def_pickle(
+//           [](const c10::intrusive_ptr<MyStackClass<std::string>>& self) {
+//             return self->stack_;
+//           },
+//           [](std::vector<std::string> state) { // __setstate__
+//             return c10::make_intrusive<MyStackClass<std::string>>(
+//                 std::vector<std::string>{"i", "was", "deserialized"});
+//           })
+//       .def("return_a_tuple", &MyStackClass<std::string>::return_a_tuple)
+//       .def(
+//           "top",
+//           [](const c10::intrusive_ptr<MyStackClass<std::string>>& self)
+//               -> std::string { return self->stack_.back(); })
+//       .def(
+//           "__str__",
+//           [](const c10::intrusive_ptr<MyStackClass<std::string>>& self) {
+//             std::stringstream ss;
+//             ss << "[";
+//             for (size_t i = 0; i < self->stack_.size(); ++i) {
+//               ss << self->stack_[i];
+//               if (i != self->stack_.size() - 1) {
+//                 ss << ", ";
+//               }
+//             }
+//             ss << "]";
+//             return ss.str();
+//           });
+//   // clang-format off
+//         // The following will fail with a static assert telling you you have
+//         to
+//         // take an intrusive_ptr<MyStackClass> as the first argument.
+//         // .def("foo", [](int64_t a) -> int64_t{ return 3;});
+//   // clang-format on
 
-  m.class_<PickleTester>("_PickleTester")
-      .def(torch::init<std::vector<int64_t>>())
-      .def_pickle(
-          [](c10::intrusive_ptr<PickleTester> self) { // __getstate__
-            return std::vector<int64_t>{1, 3, 3, 7};
-          },
-          [](std::vector<int64_t> state) { // __setstate__
-            return c10::make_intrusive<PickleTester>(std::move(state));
-          })
-      .def(
-          "top",
-          [](const c10::intrusive_ptr<PickleTester>& self) {
-            return self->vals.back();
-          })
-      .def("pop", [](const c10::intrusive_ptr<PickleTester>& self) {
-        auto val = self->vals.back();
-        self->vals.pop_back();
-        return val;
-      });
+//   m.class_<PickleTester>("_PickleTester")
+//       .def(torch::init<std::vector<int64_t>>())
+//       .def_pickle(
+//           [](c10::intrusive_ptr<PickleTester> self) { // __getstate__
+//             return std::vector<int64_t>{1, 3, 3, 7};
+//           },
+//           [](std::vector<int64_t> state) { // __setstate__
+//             return c10::make_intrusive<PickleTester>(std::move(state));
+//           })
+//       .def(
+//           "top",
+//           [](const c10::intrusive_ptr<PickleTester>& self) {
+//             return self->vals.back();
+//           })
+//       .def("pop", [](const c10::intrusive_ptr<PickleTester>& self) {
+//         auto val = self->vals.back();
+//         self->vals.pop_back();
+//         return val;
+//       });
 
-  m.def(
-      "take_an_instance(__torch__.torch.classes._TorchScriptTesting._PickleTester x) -> Tensor Y",
-      take_an_instance);
-  // test that schema inference is ok too
-  m.def("take_an_instance_inferred", take_an_instance);
-}
+//   m.def(
+//       "take_an_instance(__torch__.torch.classes._TorchScriptTesting._PickleTester
+//       x) -> Tensor Y", take_an_instance);
+//   // test that schema inference is ok too
+//   m.def("take_an_instance_inferred", take_an_instance);
+// }
 
 } // namespace
 
