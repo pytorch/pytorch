@@ -272,20 +272,27 @@ void CudaPrinter::visit(const Load* v) {
       os() << "__half2float(" << *v->base_handle() << "[" << *v->flat_index()
            << "])";
     }
-  } else {
-    // Detects whether the load target is also a store target.
-    // TODO: this is currently too wide. It detects whether a store-target
-    // exists within the program. In fact, this check is only necessary within a
-    // kernel.
-    if (v->indices().empty()) {
-      os() << *v->base_handle();
-    } else if (!cuda_analysis_->is_buf_store_target(v->buf())) {
-      // Cuda __ldg can only be applied on read-only buffers.
-      os() << "__ldg(" << *v->base_handle() << " + " << *v->flat_index() << ")";
-    } else {
-      os() << *v->base_handle() << "[" << *v->flat_index() << "]";
-    }
+    return;
   }
+  // Detects whether the load target is also a store target.
+  // TODO: this is currently too wide. It detects whether a store-target
+  // exists within the program. In fact, this check is only necessary within a
+  // kernel.
+  if (v->indices().empty()) {
+    os() << *v->base_handle();
+    return;
+  }
+  if (v->dtype().scalar_type() == ScalarType::Bool) {
+    // There's no __ldg overload for bool.
+    os() << *v->base_handle() << "[" << *v->flat_index() << "]";
+    return;
+  }
+  if (cuda_analysis_->is_buf_store_target(v->buf())) {
+    // Cuda __ldg can only be applied on read-only buffers.
+    os() << *v->base_handle() << "[" << *v->flat_index() << "]";
+    return;
+  }
+  os() << "__ldg(" << *v->base_handle() << " + " << *v->flat_index() << ")";
 }
 
 // TODO: maybe this should be a more shared location?

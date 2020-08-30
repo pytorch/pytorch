@@ -89,6 +89,7 @@ Indexing, Slicing, Joining, Mutating Ops
     hstack
     index_select
     masked_select
+    movedim
     narrow
     nonzero
     reshape
@@ -250,6 +251,7 @@ Pointwise Ops
     abs
     absolute
     acos
+    arccos
     acosh
     arccosh
     add
@@ -257,8 +259,10 @@ Pointwise Ops
     addcmul
     angle
     asin
+    arcsin
     asinh
     atan
+    arctan
     atanh
     atan2
     bitwise_not
@@ -279,6 +283,7 @@ Pointwise Ops
     erfinv
     exp
     expm1
+    fix
     floor
     floor_divide
     fmod
@@ -301,6 +306,7 @@ Pointwise Ops
     mul
     mvlgamma
     neg
+    negative
     nextafter
     polygamma
     pow
@@ -479,6 +485,7 @@ BLAS and LAPACK Operations
     matmul
     matrix_power
     matrix_rank
+    matrix_exp
     mm
     mv
     orgqr

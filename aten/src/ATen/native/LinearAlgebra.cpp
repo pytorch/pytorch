@@ -700,6 +700,537 @@ Tensor& matmul_out(Tensor &result, const Tensor & tensor1, const Tensor & tensor
   return result;
 }
 
+// helper methods for matrix_exp
+namespace {
+
+template <typename scalar_t, int ROW, int COL>
+using array2d = std::array<std::array<scalar_t, COL>, ROW>;
+
+// we consider 6 Taylor expansions of degree
+// 1, 2, 4, 8, 12, 18
+constexpr int total_n_degs = 6;
+
+Tensor operator_1_norm(const Tensor& tensor) {
+  return std::get<0>(tensor.abs().sum(-2).max(-1));
+}
+
+// Allocates a buffers of uninitialized or zero values
+// of shape [n_copies, a.size()]
+Tensor _allocate_buffer(const Tensor& a, int n_copies, bool is_zero = false) {
+  auto res = at::empty(
+    {n_copies, a.size(0), a.size(1), a.size(2)},
+    a.options().memory_format(at::MemoryFormat::Contiguous)
+  );
+  
+  if (is_zero) {
+    res.zero_();
+  }
+
+  return res;
+}
+
+// Makes `buffer` to store `num_matrices` number of matrices needed for
+// compute the matrix exponentials of different orders, i.e.
+// first `num_matrices` matrices from the list l := {I, A, A^2, A^3, A^6}
+// in a contiguous block of memory such that
+// buffer[0, ...] = l[0], // I
+// buffer[1, ...] = l[1], // A
+// ...
+// buffer[num_matrices - 1, ...] = l[num_matries - 1]
+void _fill_matrix_powers(Tensor& buffer, const Tensor& a, int num_matrices) {
+  auto a_sizes_minus_last = a.sizes().vec();
+  a_sizes_minus_last.pop_back();
+  // fill I
+  buffer.select(0, 0).copy_(
+    at::diag_embed(
+      at::ones({1}, buffer.options())
+        .expand(a_sizes_minus_last)
+    )
+  );
+
+  // fill a
+  buffer.select(0, 1).copy_(a);
+
+  // fill a^2
+  if (2 <= num_matrices - 1) {
+    at::native::matmul(
+      buffer.select(0, 2), // out for a^2
+      buffer.select(0, 1),
+      buffer.select(0, 1)
+    );
+  }
+
+  // fill a^3
+  if (3 <= num_matrices - 1) {
+    at::native::matmul(
+      buffer.select(0, 3), // out for a^3
+      buffer.select(0, 1),
+      buffer.select(0, 2)
+    );
+  }
+
+  // fill a^6
+  if (4 <= num_matrices - 1) {
+    at::native::matmul(
+      buffer.select(0, 4),
+      buffer.select(0, 3),
+      buffer.select(0, 3)
+    );
+  }
+}
+
+inline Tensor _move_memory_if_cuda_input(
+  const Tensor& mem,
+  const Tensor& in
+) {
+  return (in.device().type() == at::kCUDA)
+    ? mem.to(at::device_of(in).value())
+    : mem;
+}
+
+// convert a 1D blob to a 2D Tensor of size [1, blob.size()]
+// such that blob.device() == in.device())
+// designed to be used with _compute_linear_combination
+template <typename scalar_t>
+inline Tensor _blob_to_Tensor(
+  std::initializer_list<scalar_t> blob,
+  const Tensor& in
+) {
+  // we convert to void* expecitly because begin() returns
+  // a pointer to a constant.
+  // Blob is assumed to be a 1D array, that is why
+  // we also insert a fake dimension so that the result could directly
+  // be used in _compute_linear_combination
+  auto tensor = at::from_blob((void*)blob.begin(), blob.size(), in.dtype())
+    .unsqueeze(0);
+  return _move_memory_if_cuda_input(tensor, in);
+}
+
+// I + A
+Tensor compute_T1(const Tensor& A) {
+  // 2 for {I, A}
+  auto As = _allocate_buffer(A, 2);
+  _fill_matrix_powers(As, A, 2);
+  return As.sum(0);
+}
+
+// I + A + A^2 / 2
+Tensor compute_T2(const Tensor& A) {
+  auto As = _allocate_buffer(A, 3);
+  // 3 for {I, A, A^2}
+  _fill_matrix_powers(As, A, 3);
+  As.select(0, 2).div_(2.0);
+  return As.sum(0);
+}
+
+// I + A + A^2 * (I / 2 + A / 6 + A^2 / 24)
+template <typename scalar_t>
+Tensor compute_T4(const Tensor& A) {
+  auto As = _allocate_buffer(A, 4);
+  // 3 for {I, A, A^2}
+  _fill_matrix_powers(As, A, 3);
+  
+  at::native::matmul(
+    // output for A^2 * (I / 2 + A / 6 + A^2 / 24)
+    As.select(0, 3),
+    // contains A^2
+    As.select(0, 2),
+    // computes (I / 2 + A / 6 + A^2 / 24)
+    at::native::_compute_linear_combination(
+      As.narrow(0, 0, 3),
+      _blob_to_Tensor<scalar_t>({1 / 2.0, 1 / 6.0, 1 / 24.0}, A)
+    )
+  );
+
+  // I + A + A^2 * (I / 2 + A / 6 + A^2 / 24)
+  return at::native::_compute_linear_combination(
+    As, _blob_to_Tensor<scalar_t>({1.0, 1.0, 0.0, 1.0}, A)
+  );
+}
+
+template <typename scalar_t>
+Tensor compute_T8(const Tensor& A) {
+  constexpr scalar_t sqrt_177 = 0.1330413469565007072504e+2;
+  constexpr scalar_t x3 = 2. / 3.;
+  constexpr scalar_t x1 = x3 * ((1. + sqrt_177) / 88.);
+  constexpr scalar_t x2 = x3 * ((1. + sqrt_177) / 352.);
+  constexpr scalar_t x4 = (-271. + 29. * sqrt_177) / (315. * x3);
+  constexpr scalar_t x5 = (-11. + 11. * sqrt_177) / (1260. * x3);
+  constexpr scalar_t x6 = (-99. + 11. * sqrt_177) / (5040. * x3);
+  constexpr scalar_t x7 = (89. - sqrt_177) / (5040. * x3);
+  constexpr scalar_t y2 = (857. - 58. * sqrt_177) / 630.;
+
+  auto As = _allocate_buffer(A, 5);
+  // 3 for {I, A, A^2}
+  _fill_matrix_powers(As, A, 3);
+
+  // A4 =  A2 * (x1 * A + x2 * A2)
+  at::native::matmul(
+    // output for A4
+    As.select(0, 3),
+    // As.select(0, 2) = A^2
+    As.select(0, 2),
+    at::native::_compute_linear_combination(
+      // extract {A, A^2} from As
+      As.narrow(0, 1, 2),
+      _blob_to_Tensor<scalar_t>({x1, x2}, A)
+    )
+  );
+
+  // A8 = (x3 * A2 + A4) * (x4 * I + x5 * A + x6 * A2 + x7 * A4)
+  at::native::matmul(
+    // output for A8
+    As.select(0, 4),
+    // x3 * A2 + A4
+    at::native::_compute_linear_combination(
+      As.narrow(0, 2, 2),
+      _blob_to_Tensor<scalar_t>({x3, 1.0}, A)
+    ),
+    at::native::_compute_linear_combination(
+      As.narrow(0, 0, 4),
+      _blob_to_Tensor<scalar_t>({x4, x5, x6, x7}, A)
+    )
+  );
+
+  // return I + A + y2 * A2 + A8;
+  return at::native::_compute_linear_combination(
+    As,
+    _blob_to_Tensor<scalar_t>({1.0, 1.0, y2, 0.0, 1.0}, A)
+  );
+}
+
+template <typename scalar_t>
+Tensor compute_T12(const Tensor& A) {
+  constexpr int num_prods = 4;
+  array2d<scalar_t, num_prods, num_prods> b = {{
+    {
+      9.0198e-16,
+      0.46932117595418237389,
+      -0.20099424927047284052,
+      -0.04623946134063071740
+    },
+    {
+      5.31597895759871264183,
+      1.19926790417132231573,
+      0.01179296240992997031,
+      0.01108844528519167989
+    },
+    {
+      0.18188869982170434744,
+      0.05502798439925399070,
+      0.09351590770535414968,
+      0.00610700528898058230
+    },
+    {
+      -2.0861320e-13,
+      -0.13181061013830184015,
+      -0.02027855540589259079,
+      -0.00675951846863086359
+    }
+  }};
+
+  // gather coefficients `b` from above into a tensor,
+  // and move them to device `device_of(A)`
+  auto bs = at::from_blob(
+    reinterpret_cast<void*>(&b),
+    {num_prods, num_prods},
+    {num_prods, 1},
+    A.dtype()
+  );
+  bs = _move_memory_if_cuda_input(bs, A);
+
+  auto As = _allocate_buffer(A, num_prods);
+  _fill_matrix_powers(As, A, num_prods);
+
+  auto Bs = at::native::_compute_linear_combination(As, bs);
+
+  // compute A6
+  Bs.select(0, 2).add_(at::native::matmul(
+    // tmp buffer for this matrix product
+    As.select(0, 0),
+    Bs.select(0, 3),
+    Bs.select(0, 3)
+  ));
+
+  return Bs.select(0,0).add_(at::native::matmul(
+    // tmp buffer for this matrix product
+    As.select(0, 0),
+    Bs.select(0, 1).add_(Bs.select(0, 2)),
+    Bs.select(0, 2)
+  ));
+}
+
+template <typename scalar_t>
+Tensor compute_T18(const Tensor& A) {
+  constexpr int num_prods = 5;
+  array2d<scalar_t, num_prods, num_prods> b = {{
+    {
+      0.,
+      -1.00365581030144618291e-01,
+      -8.02924648241156932449e-03,
+      -8.92138498045729985177e-04,
+      0.
+    },
+    {
+      0.,
+      3.97849749499645077844e-01,
+      1.36783778460411720168e+00,
+      4.98289622525382669416e-01,
+      -6.37898194594723280150e-04
+    },
+    {
+      -1.09676396052962061844e+01,
+      1.68015813878906206114e+00,
+      5.71779846478865511061e-02,
+      -6.98210122488052056106e-03,
+      3.34975017086070470649e-05
+    },
+    {
+      -9.04316832390810593223e-02,
+      -6.76404519071381882256e-02,
+      6.75961301770459654925e-02,
+      2.95552570429315521194e-02,
+      -1.39180257516060693404e-05
+    },
+    {
+      0.,
+      0.,
+      -9.23364619367118555360e-02,
+      -1.69364939002081722752e-02,
+      -1.40086798182036094347e-05
+    }
+  }};
+
+  // gather coefficients `b` from above into a tensor,
+  // and move them to device `device_of(A)`
+  auto bs = at::from_blob(
+    reinterpret_cast<void*>(&b),
+    {num_prods, num_prods},
+    {num_prods, 1},
+    A.dtype()
+  );
+  bs = _move_memory_if_cuda_input(bs, A);
+
+  auto As = _allocate_buffer(A, num_prods);
+  _fill_matrix_powers(As, A, num_prods);
+
+  auto Bs = at::native::_compute_linear_combination(As, bs);
+
+  // compute A9
+  Bs.select(0, 3).add_(at::native::matmul(
+    // tmp buffer for this matrix product
+    As.select(0, 0),
+    Bs.select(0, 0),
+    Bs.select(0, 4))
+  );
+
+  return Bs.select(0, 1).add_(at::native::matmul(
+    // tmp buffer for this matrix product
+    As.select(0, 0),
+    Bs.select(0, 2).add_(Bs.select(0, 3)),
+    Bs.select(0, 3)
+  ));
+}
+
+template <typename scalar_t>
+void compute_T18_scale_square(
+  Tensor& mexp_out,
+  const Tensor& a,
+  const Tensor& norm,
+  scalar_t theta
+) {
+  // Scale
+  const auto s = at::max(
+    at::zeros_like(norm),
+    at::ceil(at::log2(norm / theta))
+  ).unsqueeze(-1).unsqueeze(-1).to(at::kLong);
+  const auto pow2s = at::pow(2, s);
+  const auto a_scaled = a / pow2s;
+
+  // Square
+  auto mexp_scaled = at::native::compute_T18<scalar_t>(a_scaled);
+  auto s_cpu = (s.device().type() == at::kCPU)
+    ? s : s.to(at::kCPU);
+  for (int64_t i = 0; i < mexp_scaled.size(0); ++i) {
+    auto s_val = s_cpu.select(0, i).template item<int64_t>();
+    auto mexp = mexp_scaled.select(0, i);
+    for (int64_t p = 0; p < s_val; ++p) {
+      mexp = at::matmul(mexp, mexp);
+    }
+    mexp_out.select(0, i).copy_(mexp);
+  }
+}
+
+template <typename scalar_t>
+Tensor mexp_impl(
+  const Tensor& a,
+  std::array<scalar_t, total_n_degs> thetas,
+  bool compute_highest_degree_approx = false
+) {
+  auto res = at::empty_like(a);
+  const auto norm = operator_1_norm(a);
+  // `norm_cpu` is used to decide which Tensors require which approximation
+  // based on their norm. This decision takes place on CPU.
+  // It requires moving data back and forth between devices when `a` is on CUDA,
+  // but at the cost of only one sigle CPU-CUDA synchronization (instead of 6),
+  // and better performance overall (benchmarked).
+  const auto norm_cpu = (a.device().type() == at::kCUDA)
+    ? norm.to(at::kCPU) : norm;
+
+  if (!compute_highest_degree_approx) {
+    constexpr std::array<
+      Tensor(*)(const Tensor&),
+      total_n_degs - 1> 
+    compute_Ts = {
+      compute_T1, compute_T2, compute_T4<scalar_t>,
+      compute_T8<scalar_t>, compute_T12<scalar_t>
+    };
+
+    for (int i = 0; i < total_n_degs - 1; ++i) {
+      auto norm_lower_bound = (i == 0) ? static_cast<scalar_t>(-1) : thetas[i - 1];
+      auto norm_upper_bound = thetas[i];
+      // nonzero returns a 2D tensor, hence squeeze(-1) to make it 1D
+      auto idx_curr_norm_interval = (
+        (norm_lower_bound < norm_cpu) * (norm_cpu <= norm_upper_bound)
+      ).nonzero().squeeze(-1);
+
+      if (idx_curr_norm_interval.numel()) {
+        auto idx_to_device = _move_memory_if_cuda_input(
+          idx_curr_norm_interval, a
+        );
+        auto sub_a = at::index_select(a, 0, idx_to_device);
+        res.index_put_({idx_to_device}, compute_Ts[i](sub_a));
+      }
+    }
+
+    // nonzero returns a 2D tensor, hence squeeze(-1) to make it 1D
+    auto idx_large_norm = (norm_cpu >= thetas[total_n_degs - 2])
+      .nonzero().squeeze(-1);
+
+    if (idx_large_norm.numel()) {
+      auto idx_to_device = _move_memory_if_cuda_input(
+        idx_large_norm, a
+      );
+      auto a_large_norm = at::index_select(a, 0, idx_to_device);
+      auto large_norm_subset = at::index_select(norm, 0, idx_to_device);
+      auto mexp_out = at::empty_like(a_large_norm);
+
+      compute_T18_scale_square(
+        mexp_out,
+        a_large_norm,
+        large_norm_subset,
+        thetas[total_n_degs - 1]
+      );
+      res.index_put_({idx_large_norm}, mexp_out);
+    }
+
+    return res;
+  }
+
+  compute_T18_scale_square(
+    res, a, norm,
+    thetas[total_n_degs - 1]
+  );
+
+  return res;
+}
+
+// matrix exponential
+Tensor mexp(const Tensor& a, bool compute_highest_degree_approx = false) {
+  // squash batch dimensions to one dimension for simplicity
+  const auto a_3d = a.view({-1, a.size(-2), a.size(-1)});
+
+  if (a.scalar_type() == at::ScalarType::Float
+      || a.scalar_type() == at::ScalarType::ComplexFloat) {
+    constexpr std::array<float, total_n_degs> thetas_float = {
+      1.192092800768788e-07, // deg 1
+      5.978858893805233e-04, // deg 2
+      5.116619363445086e-02, // deg 4
+      5.800524627688768e-01, // deg 8
+      1.461661507209034e+00, // deg 12
+      3.010066362817634e+00  // deg 18
+    };
+
+    return mexp_impl<float>(a_3d, thetas_float, compute_highest_degree_approx)
+      .view(a.sizes());
+  }
+  else { // if Double or ComplexDouble
+    constexpr std::array<double, total_n_degs> thetas_double = {
+      2.220446049250313e-16, // deg 1
+      2.580956802971767e-08, // deg 2
+      3.397168839976962e-04, // deg 4
+      4.991228871115323e-02, // deg 8
+      2.996158913811580e-01, // deg 12
+      1.090863719290036e+00  // deg 18
+    };
+
+    return mexp_impl<double>(a_3d, thetas_double, compute_highest_degree_approx)
+      .view(a.sizes());
+  }
+}
+
+// Based on:
+//
+// Mathias, Roy. 
+// A Chain Rule for Matrix Functions and Applications.
+// SIAM J. Matrix Anal. Appl. 17 (1996): 610-620.
+//
+template <typename func_t>
+Tensor backward_analytic_function_of_a_matrix(
+    const Tensor& self, const Tensor& grad,
+    const func_t& function_of_a_matrix
+  ) {
+  auto self_transposed = self.transpose(-2, -1);
+  auto self_transposed_sizes = self_transposed.sizes().vec();
+  self_transposed_sizes[self.dim() - 2] <<= 1;
+  self_transposed_sizes[self.dim() - 1] <<= 1;
+
+  auto n = self_transposed.size(-1);
+  auto meta_grad = at::zeros(self_transposed_sizes, grad.options());
+  meta_grad.narrow(-2, 0, n).narrow(-1, 0, n).copy_(self_transposed);
+  meta_grad.narrow(-2, n, n).narrow(-1, n, n).copy_(self_transposed);
+  meta_grad.narrow(-2, 0, n).narrow(-1, n, n).copy_(grad);
+
+  auto grad_input = function_of_a_matrix(meta_grad)
+    .narrow(-2, 0, n).narrow(-1, n, n);
+  return grad_input;
+}
+
+};
+
+// Computes the matrix exponential for a given batch of squared matrices.
+// The implementaion is based on:
+//
+// Bader, P.; Blanes, S.; Casas, F.
+// Computing the Matrix Exponential with an Optimized Taylor Polynomial Approximation.
+// Mathematics 2019, 7, 1174.
+//
+Tensor matrix_exp(const Tensor& a) {
+  TORCH_CHECK(a.dim() >= 2 
+          && (at::isFloatingType(a.scalar_type()) 
+           || at::isComplexType(a.scalar_type())),
+              "matrix_exp(", a.scalar_type(), "{", a.sizes(), "}): expected a tensor "
+              "of floating or complex types with dim at least 2");
+  TORCH_CHECK(a.size(-1) == a.size(-2),
+              "matrix_exp(", a.scalar_type(), "{", a.sizes(), "}): expected a tensor "
+              "of squared matrices");
+
+  if (a.size(-1) == 1) {
+    return a.exp();
+  }
+
+  return mexp(a);
+}
+
+Tensor matrix_exp_backward(const Tensor& self, const Tensor& grad) {
+  return backward_analytic_function_of_a_matrix(
+    self, grad,
+    [](const Tensor& a) {
+      return a.matrix_exp();
+    }
+  );
+}
+
 Tensor matrix_power(const Tensor& a, int64_t n) {
   TORCH_CHECK(a.dim() >= 2 && (at::isFloatingType(a.scalar_type()) || at::isComplexType(a.scalar_type())),
               "matrix_power(", a.scalar_type(), "{", a.sizes(), "}): expected a tensor "

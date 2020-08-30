@@ -571,6 +571,18 @@ class TestHub(TestCase):
         self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
                          SUM_OF_HUB_EXAMPLE)
 
+    # Test the default zipfile serialization format produced by >=1.6 release.
+    @retry(URLError, tries=3, skip_after_retries=True)
+    def test_load_zip_1_6_checkpoint(self):
+        hub_model = hub.load(
+            'ailzhang/torchhub_example',
+            'mnist_zip_1_6',
+            pretrained=True,
+            verbose=False)
+        self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
+                         SUM_OF_HUB_EXAMPLE)
+
+
     def test_hub_dir(self):
         with tempfile.TemporaryDirectory('hub_dir') as dirname:
             torch.hub.set_dir(dirname)
