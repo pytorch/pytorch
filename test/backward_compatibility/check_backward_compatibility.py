@@ -68,6 +68,7 @@ allow_list = [
     ("aten::linalg_outer.out", datetime.date(2020, 8, 30)),
     ("aten::_compute_linear_combination", datetime.date(2020, 9, 1)),
     ("__getstate__", datetime.date(2020, 9, 1), "Conv[23]dPackedParams"),
+    ("aten::_foreach_add_.Scalar", datetime.date(2020, 10, 1)),
 ]
 
 
