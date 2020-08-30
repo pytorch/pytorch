@@ -103,6 +103,45 @@ class TestTEFuser(JitTestCase):
         FileCheck().check("aten::abs").check("aten::mul").run(str(fusion_groups[0]))
 
     @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
+    def test_sum_simple(self):
+        def func(x):
+            return x.sum() * 2
+
+        a = torch.tensor(list(x for x in range(0, 15)), dtype=torch.float, device='cpu')
+        a = a.reshape(5, 3)
+        scripted = self.checkScript(func, (a,))
+        graph = scripted.graph_for(a)
+        fusion_groups = self.findFusionGroups(graph)
+        self.assertEqual(len(fusion_groups), 1)
+        self.assertEqual(scripted(a), func(a))
+
+    @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
+    def test_sum_dim(self):
+        def func(x):
+            return x.sum((0, )) * 2
+
+        a = torch.tensor(list(x for x in range(0, 15)), dtype=torch.float, device='cpu')
+        a = a.reshape(5, 3)
+        scripted = self.checkScript(func, (a,))
+        graph = scripted.graph_for(a)
+        fusion_groups = self.findFusionGroups(graph)
+        self.assertEqual(len(fusion_groups), 1)
+        self.assertEqual(scripted(a), func(a))
+
+    @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
+    def test_sum_keepdim_cast(self):
+        def func(x):
+            return x.sum((0, ), keepdim=True, dtype=torch.double) * 2
+
+        a = torch.tensor(list(x for x in range(0, 15)), dtype=torch.float, device='cpu')
+        a = a.reshape(5, 3)
+        scripted = self.checkScript(func, (a,))
+        graph = scripted.graph_for(a)
+        fusion_groups = self.findFusionGroups(graph)
+        self.assertEqual(len(fusion_groups), 1)
+        self.assertEqual(scripted(a), func(a))
+
+    @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
     def test_abs_cpu(self):
         self._test_fused_abs()
 
