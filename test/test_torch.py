@@ -13517,9 +13517,17 @@ class TestTorchDeviceType(TestCase):
     @skipCUDAIfRocm
     def test_blas_empty(self, device):
 
-        def fn(torchfn, *args, **kwargs):
-            return torchfn(*tuple(torch.randn(shape, device=device) if isinstance(shape, tuple) else shape
-                                  for shape in args), **kwargs)
+        def fn(torchfn, *args, test_out=False, **kwargs):
+            def call_torch_fn(*args, **kwargs):
+                return torchfn(*tuple(torch.randn(shape, device=device) if isinstance(shape, tuple) else shape
+                                      for shape in args), **kwargs)
+            result = call_torch_fn(*args, **kwargs)
+            if not test_out:
+                return result
+            else:
+                out = torch.full_like(result, math.nan)
+                out1 = call_torch_fn(*args, **kwargs, out=out)
+                return out
 
         # mm, addmm
         self.assertEqual((0, 0), fn(torch.mm, (0, 0), (0, 0)).shape)
@@ -13527,18 +13535,24 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual((5, 0), fn(torch.mm, (5, 0), (0, 0)).shape)
         self.assertEqual((3, 0), fn(torch.mm, (3, 2), (2, 0)).shape)
         self.assertEqual(torch.zeros((5, 6), device=device), fn(torch.mm, (5, 0), (0, 6)))
+        self.assertEqual(torch.zeros((5, 6), device=device), fn(torch.mm, (5, 0), (0, 6), test_out=True))
 
         self.assertEqual((0, 0), fn(torch.addmm, (0, 0), (0, 0), (0, 0)).shape)
-        self.assertEqual((5, 6), fn(torch.addmm, (5, 6), (5, 0), (0, 6)).shape)
         self.assertEqual((0, 1), fn(torch.addmm, (1, ), (0, 17), (17, 1)).shape)
+        t = torch.randn((5, 6), device=device)
+        self.assertEqual(t, fn(torch.addmm, t, (5, 0), (0, 6)))
+        self.assertEqual(t, fn(torch.addmm, t, (5, 0), (0, 6), test_out=True))
 
         # mv, addmv
         self.assertEqual((0,), fn(torch.mv, (0, 0), (0,)).shape)
         self.assertEqual((0,), fn(torch.mv, (0, 2), (2,)).shape)
         self.assertEqual(torch.zeros((3,), device=device), fn(torch.mv, (3, 0), (0,)))
+        self.assertEqual(torch.zeros((3,), device=device), fn(torch.mv, (3, 0), (0,), test_out=True))
 
         self.assertEqual((0,), fn(torch.addmv, (0,), (0, 0), (0,)).shape)
-        self.assertEqual((3,), fn(torch.addmv, (3,), (3, 0), (0,)).shape)
+        t = torch.randn((3,), device=device)
+        self.assertEqual(t, fn(torch.addmv, t, (3, 0), (0,)))
+        self.assertEqual(t, fn(torch.addmv, t, (3, 0), (0,), test_out=True))
 
         # ger, addr
         self.assertEqual((0, 0), fn(torch.ger, (0,), (0,)).shape)
@@ -13554,6 +13568,7 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual((3, 0, 5), fn(torch.bmm, (3, 0, 0), (3, 0, 5)).shape)
         self.assertEqual((0, 5, 6), fn(torch.bmm, (0, 5, 0), (0, 0, 6)).shape)
         self.assertEqual(torch.zeros((3, 5, 6), device=device), fn(torch.bmm, (3, 5, 0), (3, 0, 6)))
+        self.assertEqual(torch.zeros((3, 5, 6), device=device), fn(torch.bmm, (3, 5, 0), (3, 0, 6), test_out=True))
 
         self.assertEqual((0, 0, 0), fn(torch.baddbmm, (0, 0, 0), (0, 0, 0), (0, 0, 0)).shape)
         self.assertEqual((3, 0, 5), fn(torch.baddbmm, (3, 0, 5), (3, 0, 0), (3, 0, 5)).shape)
@@ -13561,21 +13576,27 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual((3, 5, 6), fn(torch.baddbmm, (3, 5, 6), (3, 5, 0), (3, 0, 6)).shape)
         c = torch.arange(30, dtype=torch.float32, device=device).reshape(3, 2, 5)
         self.assertEqual(-2 * c, fn(torch.baddbmm, c, (3, 2, 0), (3, 0, 5), beta=-2))  # Issue #33467
+        self.assertEqual(-2 * c, fn(torch.baddbmm, c, (3, 2, 0), (3, 0, 5), beta=-2, test_out=True))  # Issue #33467
 
         # addbmm
         self.assertEqual((0, 0), fn(torch.addbmm, (0, 0), (0, 0, 0), (0, 0, 0)).shape)
         self.assertEqual((0, 5), fn(torch.addbmm, (0, 5), (3, 0, 0), (3, 0, 5)).shape)
-        self.assertEqual((5, 6), fn(torch.addbmm, (5, 6), (0, 5, 0), (0, 0, 6)).shape)
+        t = torch.randn((5, 6), device=device)
+        self.assertEqual(t, fn(torch.addbmm, t, (0, 5, 0), (0, 0, 6)))
+        self.assertEqual(t, fn(torch.addbmm, t, (0, 5, 0), (0, 0, 6), test_out=True))
 
         # matmul
         self.assertEqual(torch.tensor(0., device=device), fn(torch.matmul, (0,), (0,)))
+        self.assertEqual(torch.tensor(0., device=device), fn(torch.matmul, (0,), (0,), test_out=True))
         self.assertEqual((0, 0), fn(torch.matmul, (0, 0), (0, 0)).shape)
         self.assertEqual((0, 0, 0), fn(torch.matmul, (0, 0, 0), (0, 0, 0)).shape)
         self.assertEqual((5, 0, 0), fn(torch.matmul, (5, 0, 0), (5, 0, 0)).shape)
         self.assertEqual(torch.zeros((5, 3, 4), device=device), fn(torch.matmul, (5, 3, 0), (5, 0, 4)))
+        self.assertEqual(torch.zeros((5, 3, 4), device=device), fn(torch.matmul, (5, 3, 0), (5, 0, 4), test_out=True))
 
         # dot
         self.assertEqual(torch.tensor(0., device=device), fn(torch.dot, (0,), (0,)))
+        self.assertEqual(torch.tensor(0., device=device), fn(torch.dot, (0,), (0,), test_out=True))
 
         if torch._C.has_lapack:
             # lu
