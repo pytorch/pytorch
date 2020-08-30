@@ -214,6 +214,10 @@ namespace c10 {
   _(aten, list)                      \
   _(aten, wait)                      \
   _(aten, save)                      \
+  _(aten, sub)                       \
+  _(aten, sub_)                      \
+  _(aten, subtract)                  \
+  _(aten, subtract_)                 \
   _(aten, keys)                      \
   _(aten, ord)                       \
   _(aten, chr)                       \

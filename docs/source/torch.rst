@@ -325,6 +325,8 @@ Pointwise Ops
     sinh
     sqrt
     square
+    sub
+    subtract
     tan
     tanh
     true_divide
