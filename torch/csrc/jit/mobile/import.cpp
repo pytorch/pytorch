@@ -397,7 +397,7 @@ mobile::Module _load_for_mobile(
     BytecodeDeserializer deserializer(std::move(reader));
     mobile::Module result = deserializer.deserialize(std::move(device));
     if (observer) {
-      observer->onExitLoadModel(result);
+      observer->onExitLoadModel(result.metadata());
     }
     return result;
   } catch (const std::exception& ex) {

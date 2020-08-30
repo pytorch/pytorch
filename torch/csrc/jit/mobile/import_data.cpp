@@ -181,7 +181,7 @@ mobile::Module _load_data(
     mobile::Module result = mobile::Module(
         deserializer.deserialize(std::move(device)).toObject(), mcu);
     if (observer) {
-      observer->onExitLoadModel(result);
+      observer->onExitLoadModel(result.metadata());
     }
     return result;
   } catch (const std::exception& ex) {
