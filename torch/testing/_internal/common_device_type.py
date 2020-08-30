@@ -225,7 +225,7 @@ class DeviceTypeTestBase(TestCase):
 
     # Creates device-specific tests.
     @classmethod
-    def instantiate_test(cls, generic_cls, name, test):
+    def instantiate_test(cls, name, test, *, generic_cls=None):
 
         def instantiate_test_helper(cls, name, *, test, dtype, op):
 
@@ -417,11 +417,11 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
                     test = test.__func__
                 assert inspect.isfunction(test), "Couldn't extract function from '{0}'".format(name)
 
-                # XLA-compat shim (XLA's instantiate_test takes 2 args)
+                # XLA-compat shim (XLA's instantiate_test takes doesn't take generic_cls)
                 sig = inspect.signature(device_type_test_class.instantiate_test)
                 if len(sig.parameters) == 3:
                     # Instantiates the device-specific tests
-                    device_type_test_class.instantiate_test(generic_test_class, name, copy.deepcopy(test))
+                    device_type_test_class.instantiate_test(name, copy.deepcopy(test), generic_cls=generic_test_class)
                 else:
                     device_type_test_class.instantiate_test(name, copy.deepcopy(test))
             else:  # Ports non-test member

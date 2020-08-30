@@ -69,22 +69,24 @@ class TestGradients(TestCase):
         samples = op.sample_inputs(device, dtype, requires_grad=True)
         for sample in samples:
             partial_fn = partial(variant, **sample.kwargs)
-            if check is gradcheck:
-                self.assertTrue(check(partial_fn, (sample.input,) + sample.args,
-                                      check_grad_dtypes=True))
+            if check == 'gradcheck':
+                self.assertTrue(gradcheck(partial_fn, (sample.input,) + sample.args,
+                                          check_grad_dtypes=True))
+            elif check == 'gradgradcheck':
+                self.assertTrue(gradgradcheck(partial_fn, (sample.input,) + sample.args,
+                                              gen_non_contig_grad_outputs=False,
+                                              check_grad_dtypes=True))
+                self.assertTrue(gradgradcheck(partial_fn, (sample.input,) + sample.args,
+                                              gen_non_contig_grad_outputs=True,
+                                              check_grad_dtypes=True))
             else:
-                self.assertTrue(check(partial_fn, (sample.input,) + sample.args,
-                                      gen_non_contig_grad_outputs=False,
-                                      check_grad_dtypes=True))
-                self.assertTrue(check(partial_fn, (sample.input,) + sample.args,
-                                      gen_non_contig_grad_outputs=True,
-                                      check_grad_dtypes=True))
+                self.assertTrue(False, msg="Unknown check requested!")
 
     def _grad_test_helper(self, device, dtype, op, variant):
-        return self._check_helper(device, dtype, op, variant, gradcheck)
+        return self._check_helper(device, dtype, op, variant, 'gradcheck')
 
     def _gradgrad_test_helper(self, device, dtype, op, variant):
-        return self._check_helper(device, dtype, op, variant, gradgradcheck)
+        return self._check_helper(device, dtype, op, variant, 'gradgradcheck')
 
     # Tests that gradients are computed correctly
     @dtypes(torch.double, torch.cdouble)
@@ -115,7 +117,7 @@ class TestGradients(TestCase):
 
     @dtypes(torch.double, torch.cdouble)
     @ops(op_db)
-    def test_inplace_gradgrd(self, device, dtype, op):
+    def test_inplace_gradgrad(self, device, dtype, op):
         self._gradgrad_test_helper(device, dtype, op, self._get_safe_inplace(op.get_inplace()))
 
 
