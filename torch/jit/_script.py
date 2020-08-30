@@ -470,7 +470,7 @@ if _enabled:
 
         def save(self, *args, **kwargs):
             r"""
-            save(f, _extra_files=ExtraFilesMap{})
+            save(f, _extra_files={})
 
             See :func:`torch.jit.save <torch.jit.save>` for details.
             """
