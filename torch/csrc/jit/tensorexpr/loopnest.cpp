@@ -906,6 +906,60 @@ void LoopNest::prepareForCodegen() {
   root_stmt_ = insertAllocFree(root_stmt_);
 }
 
+void LoopNest::slice(For* f, const Expr* factor, For** head, For** tail) {
+  if (!f) {
+    throw malformed_input("slice attempted on null loop", f);
+  }
+
+  Block* p = dynamic_cast<Block*>(f->get_parent());
+  if (!p) {
+    throw malformed_input("slice attempted on loop with no parent", p);
+  }
+
+  const Expr* head_end = new Add(f->start(), factor);
+  *head = new For(f->var(), f->start(), head_end, Stmt::clone(f->body()), f->loop_options());
+  *tail = new For(f->var(), head_end, f->stop(), Stmt::clone(f->body()), f->loop_options());
+
+  p->replace_stmt(f, *head);
+  p->insert_stmt_after(*tail, *head);
+
+  // TODO: record history of transformations
+}
+
+void LoopNest::sliceHead(For* f, int factor, For** head, For** tail) {
+  // TODO: handle the case where factor is larger than f's size.
+  if (dynamic_cast<const IntImm*>(f->start()) &&
+      dynamic_cast<const IntImm*>(f->stop())) {
+    int start_val = dynamic_cast<const IntImm*>(f->start())->value();
+    int stop_val = dynamic_cast<const IntImm*>(f->stop())->value();
+    int size_val = stop_val - start_val;
+    if (factor == size_val) {
+      *head = f;
+      *tail = nullptr;
+      return;
+    }
+  }
+  slice(f, new IntImm(factor), head, tail);
+}
+
+void LoopNest::sliceTail(For* f, int factor, For** head, For** tail) {
+  // TODO: handle the case where factor is larger than f's size.
+  if (dynamic_cast<const IntImm*>(f->start()) &&
+      dynamic_cast<const IntImm*>(f->stop())) {
+    int start_val = dynamic_cast<const IntImm*>(f->start())->value();
+    int stop_val = dynamic_cast<const IntImm*>(f->stop())->value();
+    int size_val = stop_val - start_val;
+    if (factor == size_val) {
+      *head = nullptr;
+      *tail = f;
+      return;
+    }
+  }
+  const Expr* size = new Sub(f->stop(), f->start());
+  const Expr* head_factor = new Sub(size, new IntImm(factor));
+  slice(f, head_factor, head, tail);
+}
+
 void LoopNest::splitWithTail(
     For* f,
     int factor,

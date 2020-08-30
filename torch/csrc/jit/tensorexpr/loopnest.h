@@ -36,6 +36,8 @@ class TORCH_API LoopNest {
   void computeInline(Stmt* s);
   void computeInlineWithRandom(Stmt* s);
   void prepareForCodegen();
+  void sliceHead(For* f, int factor, For** head, For** tail);
+  void sliceTail(For* f, int factor, For** head, For** tail);
   void splitWithTail(For* f, int factor, For** outer, For** inner, For** tail);
   void splitWithMask(For* f, int factor, For** outer, For** inner);
   void reorderAxis(For* a, For* b);
@@ -63,6 +65,7 @@ class TORCH_API LoopNest {
       const std::vector<Tensor*>& tensors);
   Stmt* lowerToStmt(Tensor* t);
   Stmt* insertAllocFree(Stmt* stmt);
+  void slice(For* f, const Expr* factor, For** head, For** tail);
 
   std::unordered_set<Function*> inlined_functions_;
   std::unordered_set<Function*> inlined_random_functions_;
