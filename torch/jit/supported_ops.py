@@ -130,9 +130,9 @@ def _is_math_fn(fn):
 def _get_torchscript_builtins():
     functions = []
     builtins = filter(lambda fn: not _is_math_fn(fn[0]), _get_builtins_helper())
-    builtins = list(builtins)
+    builtins_list = list(builtins)
     # Iterate over the specially added builtins
-    for fn, _builtin_name in builtins:
+    for fn, _builtin_name in builtins_list:
         mod = inspect.getmodule(fn)
         builtin = _find_builtin(fn)
         if builtin is not None:
@@ -147,9 +147,9 @@ def _get_torchscript_builtins():
 def _get_math_builtins():
     functions = []
     builtins = filter(lambda fn: _is_math_fn(fn[0]), _get_builtins_helper())
-    builtins = list(builtins)
+    builtins_list = list(builtins)
     # Iterate over the specially added builtins
-    for fn, _builtin_name in builtins:
+    for fn, _builtin_name in builtins_list:
         mod = inspect.getmodule(fn)
         builtin = _find_builtin(fn)
         if builtin is not None:
@@ -249,12 +249,12 @@ def _get_global_builtins():
             table_row = '":any:`{}`", "{}"'.format(fn, schemaless_op_explanations[fn])
             schemaless_ops.append(table_row)
 
-    schematized_ops = '\n'.join(schematized_ops)
-    schemaless_ops = '\n'.join(schemaless_ops)
-    magic_methods_rows = '\n'.join(magic_methods_rows)
-    schematized_ops = textwrap.indent(schematized_ops, '\t')
-    schemaless_ops = textwrap.indent(schemaless_ops, '\t')
-    magic_methods_rows = textwrap.indent(magic_methods_rows, '\t')
+    schematized_ops_str = '\n'.join(schematized_ops)
+    schemaless_ops_str = '\n'.join(schemaless_ops)
+    magic_methods_rows_str = '\n'.join(magic_methods_rows)
+    schematized_ops_str = textwrap.indent(schematized_ops_str, '\t')
+    schemaless_ops_str = textwrap.indent(schemaless_ops_str, '\t')
+    magic_methods_rows_str = textwrap.indent(magic_methods_rows_str, '\t')
     section = """
 The functions in the following table are supported but do not have a static schema
 

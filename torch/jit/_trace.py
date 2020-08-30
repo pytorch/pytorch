@@ -9,18 +9,21 @@ functionalities in `torch.jit`.
 """
 import torch
 
+import copy
 import os
 import contextlib
 import functools
 import warnings
 import inspect
 import re
+from typing import Set
 
 from torch.jit._state import _python_cu, _enabled
 from torch.jit._script import ScriptModule, _CachedForward, script
 from torch._jit_internal import _qualified_name
 from torch.autograd import function
 from torch import _jit_internal
+from torch.nn import Module
 
 _flatten = torch._C._jit_flatten
 _unflatten = torch._C._jit_unflatten
@@ -29,6 +32,9 @@ _unflatten = torch._C._jit_unflatten
 def _create_interpreter_name_lookup_fn(frames_up=1):
     def _get_interpreter_name_for_var(var):
         frame = inspect.currentframe()
+        if not frame:
+            raise RuntimeError("failed to inspect frame")
+
         i = 0
         while i < frames_up + 1:
             frame = frame.f_back
@@ -51,7 +57,7 @@ def _unique_state_dict(module, keep_vars=False):
     # as values, and deduplicate the params using Parameters and Buffers
     state_dict = module.state_dict(keep_vars=True)
     filtered_dict = type(state_dict)()
-    seen_ids = set()
+    seen_ids: Set[int] = set()
     for k, v in state_dict.items():
         if id(v) in seen_ids:
             continue
@@ -429,12 +435,12 @@ def _check_trace(
                 outs = [out for out in outs if isinstance(out, torch.Tensor)]
                 return outs
             except Exception as e:
+                graph_diff_errors, tensor_compare_errors = graph_diagnostic_info()
+                msg = f"encountered an exception while running the {running_what} with test inputs.\nException:\n{indent(str(e))}"
                 raise TracingCheckError(
-                    *graph_diagnostic_info(),
-                    extra_msg="Encountered an exception while running the "
-                    + running_what
-                    + " with test inputs.\nException:\n"
-                    + indent(str(e))
+                    graph_diff_errors,
+                    tensor_compare_errors,
+                    extra_msg=msg,
                 )
 
         has_warned = [False]
@@ -1097,11 +1103,11 @@ def _script_if_tracing(fn):
             # Not tracing, don't do anything
             return fn(*args, **kwargs)
 
-        compiled_fn = script(wrapper.__original_fn)
+        compiled_fn = script(wrapper.__original_fn)  # type: ignore
         return compiled_fn(*args, **kwargs)
 
-    wrapper.__original_fn = fn
-    wrapper.__script_if_tracing_wrapper = True
+    wrapper.__original_fn = fn  # type: ignore
+    wrapper.__script_if_tracing_wrapper = True  # type: ignore
 
     return wrapper
 

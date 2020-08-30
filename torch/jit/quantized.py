@@ -269,7 +269,7 @@ class QuantizedRNNBase(torch.jit.ScriptModule):
         if dtype != torch.int8 and dtype != torch.float16:
             raise RuntimeError('Unsupported dtype: {}'.format(dtype))
 
-        self.all_weights = []
+        self.all_weights = []  # type: ignore
         for layer in range(self.num_layers):
             for direction in range(num_directions):
                 layer_input_size = self.input_size if layer == 0 else self.hidden_size * num_directions

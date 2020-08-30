@@ -12,6 +12,8 @@ import inspect
 import copy
 import pickle
 import warnings
+from typing import Any, Callable, Dict
+
 
 import torch
 import torch._jit_internal as _jit_internal
@@ -165,7 +167,7 @@ class OrderedModuleDict(OrderedDictWrapper):
 class ScriptMeta(type):
     def __init__(cls, name, bases, attrs):  # noqa: B902
         # Aggregate all the ScriptMethods and constants from superclasses
-        cls._methods = {}
+        cls._methods: Dict[str, Callable[..., Any]] = {}
         cls._constants_set = set(getattr(cls, "__constants__", ()))
         for base in reversed(bases):
             for k, v in getattr(base, "_methods", {}).items():
@@ -261,7 +263,7 @@ if _enabled:
     # did nothing __getattr__ would not be called. Instead we'd get nn.Module.forward
     # which always throws an exception.
 
-    class ScriptModule(with_metaclass(ScriptMeta, Module)):
+    class ScriptModule(with_metaclass(ScriptMeta, Module)):  # type: ignore
         """
         ``ScriptModule``s wrap a C++ ``torch::jit::Module``. ``ScriptModule``s
         contain methods, attributes, parameters, and
@@ -723,12 +725,12 @@ if _enabled:
 
 else:
     # TODO MAKE SURE THAT DISABLING WORKS
-    class ScriptModule(torch.nn.Module):
-        def __init__(self):
+    class ScriptModule(torch.nn.Module):  # type: ignore
+        def __init__(self, arg=None):
             super(ScriptModule, self).__init__()
 
-    class RecursiveScriptModule(ScriptModule):
-        def __init__(self):
+    class RecursiveScriptModule(ScriptModule):  # type: ignore
+        def __init__(self, arg=None):
             super().__init__()
 
 
