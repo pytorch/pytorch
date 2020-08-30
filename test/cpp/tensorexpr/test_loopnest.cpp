@@ -134,7 +134,8 @@ void assertForRange(For* f, int expected_start, int expected_stop) {
 }
 
 void testExprSliceHeadWhenFactorEqualsSize() {
-  // When factor equals the For loop's original size, keep using the original For loop.
+  // When factor equals the For loop's original size, keep using the original
+  // For loop.
   KernelScope kernel_scope;
   auto func = [](const ExprHandle& x) {
     return ExprHandle(1.0f) + cast<float>(x);
@@ -195,7 +196,8 @@ void testExprSliceHead() {
 }
 
 void testExprSliceTailWhenFactorEqualsSize() {
-  // When factor equals the For loop's original size, keep using the original For loop.
+  // When factor equals the For loop's original size, keep using the original
+  // For loop.
   KernelScope kernel_scope;
   auto func = [](const ExprHandle& x) {
     return ExprHandle(1.0f) + cast<float>(x);
