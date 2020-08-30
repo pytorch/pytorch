@@ -6463,6 +6463,25 @@ class TestTorchDeviceType(TestCase):
         with self.assertRaisesRegex(RuntimeError, "nanprod does not support complex inputs"):
             torch.nanprod(x)
 
+    @onlyOnCPUAndCUDA
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False)))
+    def test_nanprod_vs_numpy(self, device, dtype):
+        self._test_sum_reduction_vs_numpy(torch.nanprod, np.nanprod, device, dtype)
+        self._test_sum_reduction_vs_numpy(torch.nanprod, np.nanprod, device, dtype, with_extremal=True)
+        self._test_sum_reduction_vs_numpy(torch.nanprod, np.nanprod, device, dtype, with_keepdim=True)
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_nanprod_out_dtype(self, device):
+        dtypes = list(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False))
+        for inp_dtype, out_dtype in combinations(dtypes, 2):
+            shape = self._rand_shape(random.randint(2, 5), min_size=5, max_size=10)
+            x = self._generate_input(shape, inp_dtype, device, with_extremal=False)
+            torch_fn = partial(torch.nanprod, dtype=out_dtype)
+            np_out_dtype = torch_to_numpy_dtype_dict[out_dtype]
+            np_fn = partial(np.nanprod, dtype=np_out_dtype)
+            self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None)
+
     @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
     @dtypes(torch.float)
     def test_isfinite_isinf_isnan(self, device, dtype):
