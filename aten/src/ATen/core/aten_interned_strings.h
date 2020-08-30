@@ -23,8 +23,6 @@ _(aten, _abs) \
 _(aten, _addmv) \
 _(aten, _addr) \
 _(aten, _arange) \
-_(aten, _asinh) \
-_(aten, _atanh) \
 _(aten, _argmax) \
 _(aten, _argmin) \
 _(aten, _baddbmm_mkl) \
@@ -656,8 +654,6 @@ _(aten, stft) \
 _(aten, storage_offset) \
 _(aten, stride) \
 _(aten, strides) \
-_(aten, sub) \
-_(aten, sub_) \
 _(aten, rsub) \
 _(aten, sum) \
 _(aten, sum_to_size) \

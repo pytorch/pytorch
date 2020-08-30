@@ -122,11 +122,15 @@ def parse_args(*arg_descriptors):
     def decorator(fn):
         fn._arg_descriptors = arg_descriptors
 
-        def wrapper(g, *args):
+        def wrapper(g, *args, **kwargs):
             # some args may be optional, so the length may be smaller
             assert len(arg_descriptors) >= len(args)
             args = [_parse_arg(arg, arg_desc) for arg, arg_desc in zip(args, arg_descriptors)]
-            return fn(g, *args)
+            # only support _outputs in kwargs
+            assert len(kwargs) <= 1
+            if len(kwargs) == 1:
+                assert '_outputs' in kwargs
+            return fn(g, *args, **kwargs)
         # In Python 2 functools.wraps chokes on partially applied functions, so we need this as a workaround
         try:
             wrapper = wraps(fn)(wrapper)
