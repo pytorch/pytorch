@@ -186,7 +186,16 @@ Tensor irfft(const Tensor& self, const int64_t signal_ndim, const bool normalize
 
 Tensor stft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop_lengthOpt,
             const optional<int64_t> win_lengthOpt, const Tensor& window,
-            const bool normalized, const bool onesided) {
+            const bool normalized, const c10::optional<bool> onesidedOpt,
+            const c10::optional<bool> return_complex) {
+  auto write_opt = [](auto & SS, const auto & opt_val) -> decltype(auto) {
+                     if (opt_val) {
+                       SS << *opt_val;
+                     } else {
+                       SS << "None";
+                     }
+                     return SS;
+                   };
   #define REPR(SS) \
     SS << "stft(" << self.toString() << self.sizes() << ", n_fft=" << n_fft \
        << ", hop_length=" << hop_length << ", win_length=" << win_length \
@@ -196,15 +205,22 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop
     } else { \
       SS << "None"; \
     } \
-    SS << ", normalized=" << normalized << ", onesided=" << onesided << ")"
+    SS << ", normalized=" << normalized << ", onesided="; \
+    write_opt(SS, onesidedOpt) << ", return_complex="; \
+    write_opt(SS, return_complex) << ')'
 
   // default_init hop_length and win_length
   auto hop_length = hop_lengthOpt.value_or(n_fft >> 2);
   auto win_length = win_lengthOpt.value_or(n_fft);
 
-  if (!at::isFloatingType(self.scalar_type()) || self.dim() > 2 || self.dim() < 1) {
+  if (!at::isFloatingType(self.scalar_type()) && !at::isComplexType(self.scalar_type())) {
     std::ostringstream ss;
-    REPR(ss) << ": expected a 1D or 2D tensor of floating types";
+    REPR(ss) << ": expected a tensor of floating point or complex values";
+    AT_ERROR(ss.str());
+  }
+  if (self.dim() > 2 || self.dim() < 1) {
+    std::ostringstream ss;
+    REPR(ss) << ": expected a 1D or 2D tensor";
     AT_ERROR(ss.str());
   }
   Tensor input = self;
@@ -240,11 +256,12 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop
   auto window_ = window;
   if (win_length < n_fft) {
     // pad center
-    window_ = at::zeros({n_fft}, self.options());
     auto left = (n_fft - win_length) / 2;
     if (window.defined()) {
+      window_ = at::zeros({n_fft}, window.options());
       window_.narrow(0, left, win_length).copy_(window);
     } else {
+      window_ = at::zeros({n_fft}, self.options());
       window_.narrow(0, left, win_length).fill_(1);
     }
   }
@@ -257,10 +274,25 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop
   if (window_.defined()) {
     input = input.mul(window_);
   }
-  // rfft and transpose to get (batch x fft_size x num_frames)
-  auto out = input.rfft(1, normalized, onesided).transpose_(1, 2);
+
+  // FFT and transpose to get (batch x fft_size x num_frames)
+  const bool complex_fft = input.is_complex();
+  const auto onesided = onesidedOpt.value_or(!complex_fft);
+  Tensor out;
+  if (complex_fft) {
+    TORCH_CHECK(!onesided, "Cannot have onesided output if window or input is complex");
+    out = at::native::fft(at::view_as_real(input), 1, normalized);
+  } else {
+    out = at::native::rfft(input, 1, normalized, onesided);
+  }
+  out.transpose_(1, 2);
+
   if (self.dim() == 1) {
-    return out.squeeze_(0);
+    out.squeeze_(0);
+  }
+
+  if (return_complex.value_or(complex_fft)) {
+    return at::view_as_complex(out);
   } else {
     return out;
   }
@@ -268,8 +300,17 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop
 
 Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop_lengthOpt,
              const optional<int64_t> win_lengthOpt, const Tensor& window,
-             const bool center, const bool normalized, const bool onesided,
-             const optional<int64_t> lengthOpt) {
+             const bool center, const bool normalized, const c10::optional<bool> onesidedOpt,
+             const optional<int64_t> lengthOpt, const c10::optional<bool> return_complex) {
+  auto write_opt = [](auto & SS, const auto & opt_val) -> decltype(auto) {
+                     if (opt_val) {
+                       SS << *opt_val;
+                     } else {
+                       SS << "None";
+                     }
+                     return SS;
+                   };
+
   #define REPR(SS) \
     SS << "istft(" << self.toString() << self.sizes() << ", n_fft=" << n_fft \
        << ", hop_length=" << hop_length << ", win_length=" << win_length \
@@ -279,26 +320,24 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> ho
     } else { \
       SS << "None"; \
     } \
-    SS << ", center=" << center << ", normalized=" << normalized << ", onesided=" << onesided << ", length="; \
-    if (lengthOpt.has_value()) { \
-      SS << lengthOpt.value(); \
-    } else { \
-      SS << "None"; \
-    } \
-    SS << ")"
+    SS << ", center=" << center << ", normalized=" << normalized << ", onesided="; \
+    write_opt(SS, onesidedOpt) << ", length="; \
+    write_opt(SS, lengthOpt) << ", return_complex="; \
+    write_opt(SS, return_complex) << ") "
 
   // default_init hop_length and win_length
   const auto hop_length = hop_lengthOpt.value_or(n_fft >> 2);
   const auto win_length = win_lengthOpt.value_or(n_fft);
 
-  const auto input_dim = self.dim();
-  const auto n_frames = self.size(-2);
-  const auto fft_size = self.size(-3);
+  Tensor input = self.is_complex() ? at::view_as_real(self) : self;
+  const auto input_dim = input.dim();
+  const auto n_frames = input.size(-2);
+  const auto fft_size = input.size(-3);
 
   const auto expected_output_signal_len = n_fft + hop_length * (n_frames - 1);
 
-  const auto options = at::device(self.device()).dtype(self.dtype());
-  if (self.numel() == 0) {
+  const auto options = at::device(input.device()).dtype(input.dtype());
+  if (input.numel() == 0) {
     std::ostringstream ss;
     REPR(ss) << ": input tensor cannot be empty.";
     AT_ERROR(ss.str());
@@ -308,12 +347,13 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> ho
     REPR(ss) << ": expected a tensor with 3 or 4 dimensions, but got " << input_dim;
     AT_ERROR(ss.str());
   }
- if (self.size(-1) != 2) {
+  if (input.size(-1) != 2) {
     std::ostringstream ss;
     REPR(ss) << ": expected the last dimension to be 2 (corresponding to real and imaginary parts), but got " << self.size(-1);
     AT_ERROR(ss.str());
   }
 
+  const bool onesided = onesidedOpt.value_or(fft_size != n_fft);
   if (onesided) {
     if (n_fft / 2 + 1 != fft_size) {
       std::ostringstream ss;
@@ -355,13 +395,20 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> ho
     TORCH_INTERNAL_ASSERT(window_tmp.size(0) == n_fft);
   }
 
-  Tensor input = self;
   if (input_dim == 3) {
     input = input.unsqueeze(0);
   }
 
   input = input.transpose(1, 2);  // size: (channel, n_frames, fft_size, 2)
-  input = at::native::irfft(input, 1, normalized, onesided, {n_fft, });  // size: (channel, n_frames, n_fft)
+
+  const bool complex_input = self.is_complex();
+  if (!onesided && return_complex.value_or(complex_input)) {
+    TORCH_CHECK(!onesided, "Cannot have onesided output if window or input is complex");
+    input = at::native::ifft(input, 1, normalized);  // size: (channel, n_frames, n_fft)
+    input = at::view_as_complex(input);
+  } else {
+    input = at::native::irfft(input, 1, normalized, onesided, {n_fft,});  // size: (channel, n_frames, n_fft)
+  }
   TORCH_INTERNAL_ASSERT(input.size(2) == n_fft);
 
   Tensor y_tmp = input * window_tmp.view({1, 1, n_fft});  // size: (channel, n_frames, n_fft)
