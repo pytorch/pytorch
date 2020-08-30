@@ -21,7 +21,7 @@ torch._C._jit_set_profiling_mode(True)
 from torch.testing._internal.common_utils import run_tests, IS_SANDCASTLE, ProfilingMode, GRAPH_EXECUTOR, \
     enable_profiling_mode_for_profiling_tests
 from torch.testing._internal.jit_utils import JitTestCase, _inline_everything, \
-    RUN_CUDA, RUN_CUDA_HALF, RUN_CUDA_MULTI_GPU
+    RUN_CUDA, RUN_CUDA_HALF, RUN_CUDA_MULTI_GPU, warmup_backward
 
 from textwrap import dedent
 from itertools import product, permutations
@@ -37,27 +37,12 @@ def strip_profiling_nodes(nodes):
     profiling_opcodes = set(['prim::BailoutTemplate', 'prim::BailOut'])
     return [n for n in nodes if n.kind() not in profiling_opcodes]
 
-
-def warmup_backward(f, *args):
-    profiling_count = 2
-    results = []
-    for i in range(profiling_count):
-        if len(args) > 0:
-            r = torch.autograd.grad(f, *args)
-            results.append(r)
-        else:
-            f.backward(retain_graph=True)
-
-    return results
-
-
 def warmup_forward(f, *args):
     profiling_count = 2
     for i in range(profiling_count):
         results = f(*args)
 
     return results
-
 
 class TestTEFuser(JitTestCase):
     def setUp(self):
@@ -116,6 +101,45 @@ class TestTEFuser(JitTestCase):
         fusion_groups = self.findFusionGroups(graph)
         self.assertEqual(len(fusion_groups), 1)
         FileCheck().check("aten::abs").check("aten::mul").run(str(fusion_groups[0]))
+
+    @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
+    def test_sum_simple(self):
+        def func(x):
+            return x.sum() * 2
+
+        a = torch.tensor(list(x for x in range(0, 15)), dtype=torch.float, device='cpu')
+        a = a.reshape(5, 3)
+        scripted = self.checkScript(func, (a,))
+        graph = scripted.graph_for(a)
+        fusion_groups = self.findFusionGroups(graph)
+        self.assertEqual(len(fusion_groups), 1)
+        self.assertEqual(scripted(a), func(a))
+
+    @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
+    def test_sum_dim(self):
+        def func(x):
+            return x.sum((0, )) * 2
+
+        a = torch.tensor(list(x for x in range(0, 15)), dtype=torch.float, device='cpu')
+        a = a.reshape(5, 3)
+        scripted = self.checkScript(func, (a,))
+        graph = scripted.graph_for(a)
+        fusion_groups = self.findFusionGroups(graph)
+        self.assertEqual(len(fusion_groups), 1)
+        self.assertEqual(scripted(a), func(a))
+
+    @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
+    def test_sum_keepdim_cast(self):
+        def func(x):
+            return x.sum((0, ), keepdim=True, dtype=torch.double) * 2
+
+        a = torch.tensor(list(x for x in range(0, 15)), dtype=torch.float, device='cpu')
+        a = a.reshape(5, 3)
+        scripted = self.checkScript(func, (a,))
+        graph = scripted.graph_for(a)
+        fusion_groups = self.findFusionGroups(graph)
+        self.assertEqual(len(fusion_groups), 1)
+        self.assertEqual(scripted(a), func(a))
 
     @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
     def test_abs_cpu(self):

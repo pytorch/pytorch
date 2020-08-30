@@ -23,8 +23,6 @@ _(aten, _abs) \
 _(aten, _addmv) \
 _(aten, _addr) \
 _(aten, _arange) \
-_(aten, _asinh) \
-_(aten, _atanh) \
 _(aten, _argmax) \
 _(aten, _argmin) \
 _(aten, _baddbmm_mkl) \
@@ -903,12 +901,14 @@ _(attr, max_val) \
 _(attr, max_values) \
 _(attr, maximum_indices) \
 _(attr, maxnorm) \
+_(attr, maximum) \
 _(attr, mean) \
 _(attr, median) \
 _(attr, min) \
 _(attr, min_indices) \
 _(attr, min_val) \
 _(attr, minlength) \
+_(attr, minimum) \
 _(attr, mode) \
 _(attr, momentum) \
 _(attr, n) \
