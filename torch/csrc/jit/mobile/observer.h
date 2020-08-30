@@ -1,7 +1,7 @@
 #pragma once
 
 #include <c10/util/ThreadLocalDebugInfo.h>
-#include <torch/csrc/jit/mobile/import.h>
+#include <torch/csrc/jit/mobile/module.h>
 #include <string>
 
 namespace torch {
