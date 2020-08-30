@@ -50,7 +50,7 @@ def convert_to_onnx(model, input=None, opset_version=9, example_outputs=None,
     ort_sess = onnxruntime.InferenceSession(f.getvalue())
     return ort_sess
 
-def run_ort(f, input):
+def run_ort(ort_sess, input):
     input_copy = copy.deepcopy(input)
     input, _ = torch.jit._flatten(input_copy)
     inputs = list(map(to_numpy, input))
