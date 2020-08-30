@@ -3,7 +3,7 @@
 #include <functional>
 #include <vector>
 
-namespace torch {
+namespace c10 {
 
 // NOTE: hash_combine is based on implementation from Boost
 //
@@ -36,35 +36,38 @@ inline size_t hash_combine(size_t seed, size_t value) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// torch::hash implementation
+// c10::hash implementation
 ////////////////////////////////////////////////////////////////////////////////
 
 namespace _hash_detail {
 
-// Use template argument deduction to shorten calls to torch::hash
-template<typename T>
+// Use template argument deduction to shorten calls to c10::hash
+template <typename T>
 size_t simple_get_hash(const T& o);
 
-template<typename T, typename V>
-using type_if_not_enum = typename std::enable_if<!std::is_enum<T>::value, V>::type;
+template <typename T, typename V>
+using type_if_not_enum =
+    typename std::enable_if<!std::is_enum<T>::value, V>::type;
 
-// Use SFINAE to dispatch to std::hash if possible, cast enum types to int automatically,
-// and fall back to T::hash otherwise.
-// NOTE: C++14 added support for hashing enum types to the standard, and some compilers
-// implement it even when C++14 flags aren't specified. This is why we have to disable
-// this overload if T is an enum type (and use the one below in this case).
-template<typename T>
-auto dispatch_hash(const T& o) -> decltype(std::hash<T>()(o), type_if_not_enum<T, size_t>()) {
+// Use SFINAE to dispatch to std::hash if possible, cast enum types to int
+// automatically, and fall back to T::hash otherwise. NOTE: C++14 added support
+// for hashing enum types to the standard, and some compilers implement it even
+// when C++14 flags aren't specified. This is why we have to disable this
+// overload if T is an enum type (and use the one below in this case).
+template <typename T>
+auto dispatch_hash(const T& o)
+    -> decltype(std::hash<T>()(o), type_if_not_enum<T, size_t>()) {
   return std::hash<T>()(o);
 }
 
-template<typename T>
-typename std::enable_if<std::is_enum<T>::value, size_t>::type dispatch_hash(const T& o) {
+template <typename T>
+typename std::enable_if<std::is_enum<T>::value, size_t>::type dispatch_hash(
+    const T& o) {
   using R = typename std::underlying_type<T>::type;
   return std::hash<R>()(static_cast<R>(o));
 }
 
-template<typename T>
+template <typename T>
 auto dispatch_hash(const T& o) -> decltype(T::hash(o), size_t()) {
   return T::hash(o);
 }
@@ -72,7 +75,7 @@ auto dispatch_hash(const T& o) -> decltype(T::hash(o), size_t()) {
 } // namespace _hash_detail
 
 // Hasher struct
-template<typename T>
+template <typename T>
 struct hash {
   size_t operator()(const T& o) const {
     return _hash_detail::dispatch_hash(o);
@@ -80,17 +83,18 @@ struct hash {
 };
 
 // Specialization for std::tuple
-template<typename... Types>
+template <typename... Types>
 struct hash<std::tuple<Types...>> {
-  template<size_t idx, typename... Ts>
+  template <size_t idx, typename... Ts>
   struct tuple_hash {
     size_t operator()(const std::tuple<Ts...>& t) const {
-      return hash_combine(_hash_detail::simple_get_hash(std::get<idx>(t)),
-                          tuple_hash<idx-1, Ts...>()(t));
+      return hash_combine(
+          _hash_detail::simple_get_hash(std::get<idx>(t)),
+          tuple_hash<idx - 1, Ts...>()(t));
     }
   };
 
-  template<typename... Ts>
+  template <typename... Ts>
   struct tuple_hash<0, Ts...> {
     size_t operator()(const std::tuple<Ts...>& t) const {
       return _hash_detail::simple_get_hash(std::get<0>(t));
@@ -98,16 +102,16 @@ struct hash<std::tuple<Types...>> {
   };
 
   size_t operator()(const std::tuple<Types...>& t) const {
-    return tuple_hash<sizeof...(Types)-1, Types...>()(t);
+    return tuple_hash<sizeof...(Types) - 1, Types...>()(t);
   }
 };
 
 // Specialization for std::vector
-template<typename T>
+template <typename T>
 struct hash<std::vector<T>> {
   size_t operator()(const std::vector<T>& v) const {
     size_t seed = 0;
-    for (const auto & elem : v) {
+    for (const auto& elem : v) {
       seed = hash_combine(seed, _hash_detail::simple_get_hash(elem));
     }
     return seed;
@@ -116,23 +120,23 @@ struct hash<std::vector<T>> {
 
 namespace _hash_detail {
 
-template<typename T>
+template <typename T>
 size_t simple_get_hash(const T& o) {
-  return torch::hash<T>()(o);
+  return c10::hash<T>()(o);
 }
 
 } // namespace _hash_detail
 
 // Use this function to actually hash multiple things in one line.
-// Dispatches to torch::hash, so it can hash containers.
+// Dispatches to c10::hash, so it can hash containers.
 // Example:
 //
 // static size_t hash(const MyStruct& s) {
 //   return get_hash(s.member1, s.member2, s.member3);
 // }
-template<typename... Types>
+template <typename... Types>
 size_t get_hash(const Types&... args) {
-  return torch::hash<decltype(std::tie(args...))>()(std::tie(args...));
+  return c10::hash<decltype(std::tie(args...))>()(std::tie(args...));
 }
 
-} // namespace torch
+} // namespace c10

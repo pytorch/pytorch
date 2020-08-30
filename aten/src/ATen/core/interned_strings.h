@@ -95,6 +95,7 @@ namespace c10 {
   _(prim, Guard)                     \
   _(prim, BailOut)                   \
   _(prim, TypeCheck)                 \
+  _(prim, FallbackGraph)             \
   _(prim, FusedConcat)               \
   _(prim, ConstantChunk)             \
   _(prim, MMTreeReduce)              \
@@ -130,6 +131,7 @@ namespace c10 {
   _(prim, GetAttr)                   \
   _(prim, HasAttr)                   \
   _(prim, profile)                   \
+  _(prim, profile_optional)          \
   _(prim, AddStatValue)              \
   _(prim, TimePoint)                 \
   _(prim, CallFunction)              \
@@ -156,16 +158,25 @@ namespace c10 {
   _(aten, asin_)                     \
   _(aten, arcsin)                    \
   _(aten, arcsin_)                   \
+  _(aten, asinh)                     \
+  _(aten, asinh_)                    \
+  _(aten, arcsinh)                   \
+  _(aten, arcsinh_)                  \
   _(aten, atan)                      \
   _(aten, atan_)                     \
   _(aten, arctan)                    \
   _(aten, arctan_)                   \
+  _(aten, atanh)                     \
+  _(aten, atanh_)                    \
+  _(aten, arctanh)                   \
+  _(aten, arctanh_)                  \
   _(aten, clamp)                     \
   _(aten, clamp_)                    \
   _(aten, clip)                      \
   _(aten, clip_)                     \
   _(aten, det)                       \
   _(aten, linalg_det)                \
+  _(aten, linalg_norm)               \
   _(aten, append)                    \
   _(aten, item)                      \
   _(aten, format)                    \
@@ -293,6 +304,8 @@ namespace c10 {
   _(attr, inplace)                   \
   _(attr, input_as_shape)            \
   _(attr, is_zero)                   \
+  _(attr, num_none)                  \
+  _(attr, num_present)               \
   _(attr, perm)                      \
   _(attr, sizes)                     \
   _(attr, starts)                    \
