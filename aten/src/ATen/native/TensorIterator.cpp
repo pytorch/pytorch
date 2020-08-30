@@ -16,10 +16,10 @@ using loop2d_t = TensorIterator::loop2d_t;
 using StrideVector = TensorIterator::StrideVector;
 
 /// Construction
-TensorIteratorConfig& TensorIteratorConfig::add_output(const Tensor& output, bool participate_promotion) {
+TensorIteratorConfig& TensorIteratorConfig::add_output(const Tensor& output) {
   TORCH_INTERNAL_ASSERT(num_inputs_ == 0);
   tensors_.emplace_back(output);
-  promotion_flags_.emplace_back(participate_promotion);
+  promotion_flags_.emplace_back(false);
   num_outputs_++;
   return *this;
 }
@@ -272,12 +272,6 @@ void TensorIterator::compute_types(const TensorIteratorConfig& config) {
     // Validates that all inputs have type information, and that
     //   if an output is missing type information that we can infer
     //   the device it should be allocated on.
-
-    // Skip if operand is not to be used in
-    // type promotion computation.
-    if (!op.use_in_promotion) {
-      continue;
-    }
 
     if (!op.is_type_defined()) {
       TORCH_INTERNAL_ASSERT(op.is_output, "Found type undefined input tensor!");
