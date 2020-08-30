@@ -9,7 +9,8 @@ TORCH_API Node* createFallbackGraph(
     ArrayRef<Value*> inputs,
     Graph* g);
 
-TORCH_API void replaceBlockWithFallbackGraph(Block* b);
+TORCH_API void replaceBlockWithFallbackGraph(Block* b, ArrayRef<Value*> inputs);
+TORCH_API void replaceGraphWithFallbackGraph(std::shared_ptr<Graph> orig);
 
 struct ProfilingGraphExecutorImpl : public GraphExecutorImplBase {
   ProfilingGraphExecutorImpl(

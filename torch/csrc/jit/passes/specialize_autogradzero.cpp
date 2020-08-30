@@ -1,8 +1,9 @@
-#include <torch/csrc/jit/passes/specialize_autogradzero.h>
 #include <c10/util/Exception.h>
+#include <jit/runtime/profiling_graph_executor_impl.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/clear_undefinedness.h>
+#include <torch/csrc/jit/passes/specialize_autogradzero.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 
 namespace torch {
@@ -112,6 +113,7 @@ struct AutogradZeroSpecializer {
     replaceBlockInputsWithGraphInputs(true_block);
     false_block->cloneFrom(graph_->block(), value_map);
     replaceBlockInputsWithGraphInputs(false_block);
+    replaceGraphWithFallbackGraph(graph_);
 
     WithInsertPoint wip{graph_->block()->param_node()->next()};
     Value* none_val = graph_->insertConstant(IValue());
