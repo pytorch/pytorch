@@ -3,6 +3,7 @@
 #include <ATen/native/vulkan/api/Common.h>
 #include <ATen/native/vulkan/api/Descriptor.h>
 #include <ATen/native/vulkan/api/Pipeline.h>
+#include <ATen/native/vulkan/api/Resource.h>
 #include <ATen/native/vulkan/api/Shader.h>
 
 namespace at {
@@ -54,6 +55,10 @@ class C10_EXPORT Context final {
     return descriptor_;
   }
 
+  inline Resource& resource() {
+    return resource_;
+  }
+
  private:
   class Debug final {
    public:
@@ -76,6 +81,7 @@ class C10_EXPORT Context final {
   Shader shader_;
   Pipeline pipeline_;
   Descriptor descriptor_;
+  Resource resource_;
 };
 
 C10_EXPORT bool available();

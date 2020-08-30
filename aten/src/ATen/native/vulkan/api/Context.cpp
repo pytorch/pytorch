@@ -260,7 +260,8 @@ Context::Context(const bool enable_validation_layers)
       queue_(acquire_queue(device(), compute_queue_family_index_)),
       shader_(device()),
       pipeline_(device()),
-      descriptor_(device()) {
+      descriptor_(device()),
+      resource_(instance(), physical_device(), device()) {
 }
 
 Context::Debug::Debug(const VkInstance instance)
