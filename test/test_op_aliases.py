@@ -68,6 +68,18 @@ alias_infos = (
               lambda d: 10 * torch.randn(20, device=d)),
     AliasInfo('fix_', torch.Tensor.fix_, 'trunc_', torch.Tensor.trunc_,
               lambda d: 10 * torch.randn(20, device=d)),
+    AliasInfo('negative', torch.negative, 'neg', torch.neg,
+              lambda d: 10 * torch.randn(20, device=d)),
+    AliasInfo('negative_', torch.Tensor.negative_, 'neg_', torch.Tensor.neg_,
+              lambda d: 10 * torch.randn(20, device=d)),
+    AliasInfo('arcsinh', torch.arcsinh, 'asinh', torch.asinh,
+              lambda d: torch.randn(20, device=d)),
+    AliasInfo('arcsinh_', torch.Tensor.arcsinh_, 'asinh_', torch.Tensor.asinh_,
+              lambda d: torch.randn(20, device=d)),
+    AliasInfo('arctanh', torch.arctanh, 'atanh', torch.atanh,
+              lambda d: torch.clamp(torch.randn(20, device=d), -1, 1)),
+    AliasInfo('arctanh_', torch.Tensor.arctanh_, 'atanh_', torch.Tensor.atanh_,
+              lambda d: torch.clamp(torch.randn(20, device=d), -1, 1)),
 )
 
 # Placeholder test class for validating that aliases are correctly

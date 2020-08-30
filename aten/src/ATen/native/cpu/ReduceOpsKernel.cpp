@@ -302,7 +302,7 @@ static void argmax_kernel_impl(TensorIterator &iter) {
     binary_kernel_reduce(
       iter,
       ArgMaxOps<scalar_t>{},
-      std::pair<scalar_t, int64_t>(lower_bound<scalar_t>(), -1));
+      std::pair<scalar_t, int64_t>(lower_bound<scalar_t>(), 0));
   });
 }
 
@@ -311,7 +311,7 @@ static void argmin_kernel_impl(TensorIterator &iter) {
     binary_kernel_reduce(
       iter,
       ArgMinOps<scalar_t>{},
-      std::pair<scalar_t, int64_t>(upper_bound<scalar_t>(), -1));
+      std::pair<scalar_t, int64_t>(upper_bound<scalar_t>(), 0));
   });
 }
 

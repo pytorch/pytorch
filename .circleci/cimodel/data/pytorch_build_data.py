@@ -10,8 +10,8 @@ CONFIG_TREE_DATA = [
         ]),
         ("gcc", [
             ("5.4", [  # All this subtree rebases to master and then build
-                XImportant("3.6"),
                 ("3.6", [
+                    ("important", [X(True)]),
                     ("parallel_tbb", [X(True)]),
                     ("parallel_native", [X(True)]),
                 ]),
@@ -69,7 +69,11 @@ CONFIG_TREE_DATA = [
             ]),
         ]),
         ("gcc", [
-            ("9", [XImportant("3.8")]),
+            ("9", [
+                ("3.8", [
+                    ("coverage", [XImportant(True)]),
+                ]),
+            ]),
         ]),
     ]),
 ]
@@ -145,7 +149,8 @@ class ExperimentalFeatureConfigNode(TreeConfigNode):
             "libtorch": LibTorchConfigNode,
             "important": ImportantConfigNode,
             "build_only": BuildOnlyConfigNode,
-            "cuda_gcc_override": CudaGccOverrideConfigNode
+            "cuda_gcc_override": CudaGccOverrideConfigNode,
+            "coverage": CoverageConfigNode,
         }
         return next_nodes[experimental_feature]
 
@@ -227,6 +232,15 @@ class BuildOnlyConfigNode(TreeConfigNode):
 
     def init2(self, node_name):
         self.props["build_only"] = node_name
+
+    def child_constructor(self):
+        return ExperimentalFeatureConfigNode
+
+
+class CoverageConfigNode(TreeConfigNode):
+
+    def init2(self, node_name):
+        self.props["is_coverage"] = node_name
 
     def child_constructor(self):
         return ExperimentalFeatureConfigNode

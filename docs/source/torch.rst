@@ -261,9 +261,11 @@ Pointwise Ops
     asin
     arcsin
     asinh
+    arcsinh
     atan
     arctan
     atanh
+    arctanh
     atan2
     bitwise_not
     bitwise_and
@@ -306,6 +308,7 @@ Pointwise Ops
     mul
     mvlgamma
     neg
+    negative
     nextafter
     polygamma
     pow
@@ -377,7 +380,9 @@ Comparison Ops
     le
     lt
     max
+    maximum
     min
+    minimum
     ne
     sort
     topk
