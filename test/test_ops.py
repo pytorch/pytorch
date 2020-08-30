@@ -1,6 +1,4 @@
 from functools import partial, wraps
-from copy import deepcopy
-from itertools import product
 
 import torch
 
@@ -62,40 +60,63 @@ class TestGradients(TestCase):
 
         return _fn
 
+    def _check_helper(self, device, dtype, op, variant, check):
+        if variant is None:
+            self.skipTest("Skipped! Variant not implemented.")
+        if not op.supports_dtype(dtype, torch.device(device).type):
+            self.skipTest("Skipped! ", op.name, ' does not support dtype ', str(dtype))
+
+        samples = op.sample_inputs(device, dtype, requires_grad=True)
+        for sample in samples:
+            partial_fn = partial(variant, **sample.kwargs)
+            if check is gradcheck:
+                self.assertTrue(check(partial_fn, (sample.input,) + sample.args,
+                                      check_grad_dtypes=True))
+            else:
+                self.assertTrue(check(partial_fn, (sample.input,) + sample.args,
+                                      gen_non_contig_grad_outputs=False,
+                                      check_grad_dtypes=True))
+                self.assertTrue(check(partial_fn, (sample.input,) + sample.args,
+                                      gen_non_contig_grad_outputs=True,
+                                      check_grad_dtypes=True))
+
+    def _grad_test_helper(self, device, dtype, op, variant):
+        return self._check_helper(device, dtype, op, variant, gradcheck)
+
+    def _gradgrad_test_helper(self, device, dtype, op, variant):
+        return self._check_helper(device, dtype, op, variant, gradgradcheck)
+
     # Tests that gradients are computed correctly
     @dtypes(torch.double, torch.cdouble)
     @ops(op_db)
-    def test_grad(self, device, dtype, op):
-        if not op.supports_dtype(dtype, torch.device(device).type):
-            self.skipTest("Skipped!")
+    def test_fn_grad(self, device, dtype, op):
+        self._grad_test_helper(device, dtype, op, op.get_op())
 
-        variants = (op.get_op(),
-                    op.get_method(),
-                    self._get_safe_inplace(op.get_inplace()))
-        samples = op.sample_inputs(device, dtype, requires_grad=True)
-        for variant, sample in product(variants, samples):
-            sample_copy = deepcopy(sample)
-            partial_fn = partial(variant, **sample_copy.kwargs)
-            self.assertTrue(gradcheck(partial_fn, (sample_copy.input,) + sample_copy.args))
+    @dtypes(torch.double, torch.cdouble)
+    @ops(op_db)
+    def test_method_grad(self, device, dtype, op):
+        self._grad_test_helper(device, dtype, op, op.get_method())
+
+    @dtypes(torch.double, torch.cdouble)
+    @ops(op_db)
+    def test_inplace_grad(self, device, dtype, op):
+        self._grad_test_helper(device, dtype, op, self._get_safe_inplace(op.get_inplace()))
 
     # Test that gradients of gradients are computed correctly
     @dtypes(torch.double, torch.cdouble)
     @ops(op_db)
-    def test_gradgrad(self, device, dtype, op):
-        if not op.supports_dtype(dtype, torch.device(device).type):
-            self.skipTest("Skipped!")
+    def test_fn_gradgrad(self, device, dtype, op):
+        self._gradgrad_test_helper(device, dtype, op, op.get_op())
 
-        variants = (op.get_op(),
-                    op.get_method(),
-                    self._get_safe_inplace(op.get_inplace()))
-        samples = op.sample_inputs(device, dtype, requires_grad=True)
-        for variant, sample in product(variants, samples):
-            sample_copy = deepcopy(sample)
-            partial_fn = partial(variant, **sample.kwargs)
-            self.assertTrue(gradgradcheck(partial_fn, (sample.input,) + sample.args,
-                                          gen_non_contig_grad_outputs=False))
-            self.assertTrue(gradgradcheck(partial_fn, (sample.input,) + sample.args,
-                                          gen_non_contig_grad_outputs=True))
+    @dtypes(torch.double, torch.cdouble)
+    @ops(op_db)
+    def test_method_gradgrad(self, device, dtype, op):
+        self._gradgrad_test_helper(device, dtype, op, op.get_method())
+
+    @dtypes(torch.double, torch.cdouble)
+    @ops(op_db)
+    def test_inplace_gradgrd(self, device, dtype, op):
+        self._gradgrad_test_helper(device, dtype, op, self._get_safe_inplace(op.get_inplace()))
 
 
 instantiate_device_type_tests(TestOpInfo, globals())

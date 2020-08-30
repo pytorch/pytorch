@@ -1429,6 +1429,10 @@ def make_tensor(size, device: torch.device, dtype: torch.dtype, *,
        For unsigned types the values are between 0 and 9, and for complex
        dtypes the real and imaginary parts are each between -9 and 9,
        independently."""
+
+    assert low is None or low < 9, "low value too high!"
+    assert high is None or high > -9, "high value too low!"
+
     if dtype is torch.bool:
         return torch.randint(0, 2, size, device=device, dtype=dtype)
 

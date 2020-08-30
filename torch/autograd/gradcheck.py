@@ -205,7 +205,8 @@ def gradcheck(
     raise_exception: bool = True,
     check_sparse_nnz: bool = False,
     nondet_tol: float = 0.0,
-    check_undefined_grad: bool = True
+    check_undefined_grad: bool = True,
+    check_grad_dtypes: bool = False
 ) -> bool:
     r"""Check gradients computed via small finite differences against analytical
     gradients w.r.t. tensors in :attr:`inputs` that are of floating point or complex type
@@ -310,7 +311,7 @@ def gradcheck(
         if not correct_grad_sizes:
             return fail_test('Analytical gradient has incorrect size')
 
-        if not correct_grad_types:
+        if not correct_grad_types and check_grad_dtypes:
             return fail_test('Gradient has dtype mismatch')
 
         for j, (a, n) in enumerate(zip(analytical, numerical)):
@@ -413,7 +414,8 @@ def gradgradcheck(
     gen_non_contig_grad_outputs: bool = False,
     raise_exception: bool = True,
     nondet_tol: float = 0.0,
-    check_undefined_grad: bool = True
+    check_undefined_grad: bool = True,
+    check_grad_dtypes: bool = False
 ) -> bool:
     r"""Check gradients of gradients computed via small finite differences
     against analytical gradients w.r.t. tensors in :attr:`inputs` and
@@ -491,4 +493,5 @@ def gradgradcheck(
         return grad_inputs
 
     return gradcheck(new_func, tupled_inputs + tupled_grad_outputs, eps, atol, rtol, raise_exception,
-                     nondet_tol=nondet_tol, check_undefined_grad=check_undefined_grad)
+                     nondet_tol=nondet_tol, check_undefined_grad=check_undefined_grad,
+                     check_grad_dtypes=check_grad_dtypes)
