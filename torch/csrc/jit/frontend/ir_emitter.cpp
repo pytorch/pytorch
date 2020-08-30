@@ -57,7 +57,7 @@ struct Refinement {
 struct RefinementSet {
   // When a comparison like x is None is made, we associate type refinements
   // with its true value and its false value. If a boolean that has refinements
-  // associated with it is used in a conditional of an if statememt, the true
+  // associated with it is used in a conditional of an if statement, the true
   // and false refinements are inserted into the corresponding blocks
   using Refinements = std::vector<Refinement>;
 
@@ -205,7 +205,7 @@ static std::shared_ptr<MagicMethod> makeMagic(
 // The Environment keeps track of two tables, one for values which are not first
 // class and a type table for values which are. When a first class value
 // is set in the environment, we emit a prim::Store which sets the
-// name of the variable to approriate type, and when a first-class value is
+// name of the variable to appropriate type, and when a first-class value is
 // referenced we emit a prim::Load that generates a value of the appropriate
 // type.
 //
@@ -700,7 +700,7 @@ struct to_ir {
           def.range(), Expr(Compound::create(TK_NONE, def.range(), {}))));
     } else {
       // if we haven't seen any return statements, but the graph block exits
-      // (the funciton always throws) then we accept the declared return type if
+      // (the function always throws) then we accept the declared return type if
       // it exists or set it to none
       if (def_stack_.back().merged_return_type_ == nullptr) {
         def_stack_.back().merged_return_type_ =
@@ -1414,7 +1414,7 @@ struct to_ir {
     // the scope of the if statement (all variables are scoped to the function).
     // Script is a subset of python: we consider variables to be in scope
     // as long as there is a definition of the variable along all paths
-    // through the if statemnent
+    // through the if statement
     // ----
     // if ...:
     //   a =
