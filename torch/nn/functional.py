@@ -3895,10 +3895,13 @@ def _pad_circular(input, padding):
 
     for idx, size in enumerate(paddable_shape):
         # Only supports wrapping around once
-        assert padding[-(idx * 2 + 1)] <= size
-        assert padding[-(idx * 2 + 2)] <= size
+        assert padding[-(idx * 2 + 1)] <= size, \
+            "Padding value causes wrapping around more than once."
+        assert padding[-(idx * 2 + 2)] <= size, \
+            "Padding value causes wrapping around more than once."
         # Negative padding should not result in negative sizes
-        assert (padding[-(idx * 2 + 1)] + padding[-(idx * 2 + 2)] + size) >= 0
+        assert padding[-(idx * 2 + 1)] + padding[-(idx * 2 + 2)] + size >= 0, \
+            "Negative padding value is resulting in an empty dimension."
 
     # Get shape of padded tensor
     out_shape = in_shape[:2]
