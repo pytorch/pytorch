@@ -421,7 +421,7 @@ public:
   C10_DISABLE_COPY_AND_ASSIGN(TensorIteratorConfig);
 
   /// Construction
-  TensorIteratorConfig& add_output(const Tensor& output, bool participate_promotion = true);
+  TensorIteratorConfig& add_output(const Tensor& output, bool participate_promotion = false);
   TensorIteratorConfig& add_input(const Tensor& input, bool participate_promotion = true);
   TensorIteratorConfig& set_check_mem_overlap(bool check_mem_overlap);
 
