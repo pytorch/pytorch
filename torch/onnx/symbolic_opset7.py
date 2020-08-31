@@ -47,7 +47,6 @@ def min(g, self, dim_or_y=None, keepdim=None):
 def repeat(g, self, repeats):
     if not sym_help._is_value(repeats):
         repeats = g.op("Constant", value_t=torch.LongTensor(repeats))
-        
     if sym_help._is_packed_list(repeats):  
         repeat_size_len = len(sym_help._unpack_list(repeats))
     else:
