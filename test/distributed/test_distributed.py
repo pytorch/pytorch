@@ -2680,19 +2680,22 @@ class _DistTestBase(object):
 
     @require_backend({"nccl", "gloo"})
     @require_n_gpus_for_nccl_backend(int(os.environ["WORLD_SIZE"]), os.environ["BACKEND"])
-    def test_broadcast_object(self):
-        objects = collectives_object_test_list
+    def test_broadcast_object_list(self):
         src_rank = 0
-        for i in range(len(objects)):
-            obj = objects[i] if self.rank == src_rank else None
-            ret = dist.broadcast_object(obj, src=src_rank)
-            self.assertEqual(ret, objects[i])
-            # inputs from non-src rank are ignored
-            obj = (
-                objects[i] if self.rank == src_rank else objects[(i + 1) % len(objects)]
-            )
-            ret = dist.broadcast_object(obj, src=src_rank)
-            self.assertEqual(ret, objects[i])
+        objects = collectives_object_test_list if self.rank == src_rank else [None for _ in collectives_object_test_list]
+
+        # Single object test
+        single_obj_list = [objects[0]]
+        if self.rank != src_rank:
+            self.assertNotEqual(single_obj_list[0], collectives_object_test_list[0])
+        dist.broadcast_object_list(single_obj_list, src=0)
+        self.assertEqual(single_obj_list[0], collectives_object_test_list[0])
+
+        # Multiple input objects test
+        if self.rank != src_rank:
+            self.assertNotEqual(objects, collectives_object_test_list)
+        dist.broadcast_object_list(objects, src=0)
+        self.assertEqual(objects, collectives_object_test_list)
 
 
 if BACKEND == "gloo" or BACKEND == "nccl":
