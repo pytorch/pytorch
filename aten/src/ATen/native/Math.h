@@ -114,13 +114,40 @@ Date:  February 1996
 #undef CENTRAL_RANGE
 
 /*
- * The following function comes with the following copyright notice.
- * It has been released under the BSD license.
+ * Note [3-Clause BSD License for the Cephes Math Library]
+ * Code derived from implementations in the Cephes Math Library should mention its derivation and reference
+ * this note (ex. 'This function is derived from the implementation of X in the Cephes Math Library. See note
+ * [3-Clause BSD License for the Cephes Math Library]. The license is:
+ * Copyright (c) 2018, Steven Moshier
+ * All rights reserved.
  *
- * Cephes Math Library Release 2.8:  June, 2000
- * Copyright 1984, 1987, 1992, 2000 by Stephen L. Moshier
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
+ * * Redistributions of source code must retain the above copyright
+ * notice, this list of conditions and the following disclaimer.
+ * * Redistributions in binary form must reproduce the above copyright
+ * notice, this list of conditions and the following disclaimer in the
+ * documentation and/or other materials provided with the distribution.
+ * * Neither the name of the nor the
+ * names of its contributors may be used to endorse or promote products
+ * derived from this software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ * DISCLAIMED. IN NO EVENT SHALL Steven Moshier BE LIABLE FOR ANY
+ * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+ * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+ * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+ * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+/*
+ * This function is derived from the implementation of the zeta function in the Cephes Math Library.
+ * See note [3-Clause BSD License for the Cephes Math Library].
+ */
 static inline double zeta(double x, double q) {
   static double MACHEP = 1.11022302462515654042E-16;
   static double A[] = {
@@ -244,14 +271,11 @@ static inline float trigamma(float x) {
   result += (1 + 1 / (2*x) + ixx * (1.f/6 - ixx * (1.f/30 - ixx * (1.f/42)))) / x;
   return sign * result;
 }
-/*
- * The following function comes with the following copyright notice.
- * It has been released under the BSD license.
- *
- * Cephes Math Library Release 2.8:  June, 2000
- * Copyright 1984, 1987, 1992, 2000 by Stephen L. Moshier
- */
 
+/*
+ * This function is derived from the implementation of the digamma function in the Cephes Math Library.
+ * See note [3-Clause BSD License for the Cephes Math Library].
+ */
 static inline double calc_digamma(double x) {
   static double PSI_10 = 2.25175258906672110764;
   if (x == 0) {
@@ -296,11 +320,8 @@ static inline double calc_digamma(double x) {
 }
 
 /*
- * The following function comes with the following copyright notice.
- * It has been released under the BSD license.
- *
- * Cephes Math Library Release 2.8:  June, 2000
- * Copyright 1984, 1987, 1992, 2000 by Stephen L. Moshier
+ * This function is derived from the implementation of the digamma function in the Cephes Math Library.
+ * See note [3-Clause BSD License for the Cephes Math Library].
  */
 static inline float calc_digamma(float x) {
   static float PSI_10 = 2.25175258906672110764f;
@@ -386,11 +407,8 @@ calc_gcd(T a, T b) {
 }
 
 /*
- * The following function has been modified from code that comes with the following copyright notice.
- *
- * Cephes Math Library Release 2.0:  April, 1987
- * Copyright 1985, 1987 by Stephen L. Moshier
- * Direct inquiries to 30 Frost Street, Cambridge, MA 02140
+ * This function is derived from the implementation of the chbevl function in the Cephes Math Library.
+ * See note [3-Clause BSD License for the Cephes Math Library].
  *
  * Evaluates the series
  *
@@ -428,14 +446,13 @@ static inline T chbevl(T x, T array[], size_t len) {
 }
 
 /*
- * The following function has been modified from code that comes with the following copyright notice.
+ * This function is derived from the implementation of the i0 function in the Cephes Math Library.
+ * See note [3-Clause BSD License for the Cephes Math Library].
  *
- * Cephes Math Library Release 2.8:  June, 2000
- * Copyright 1984, 1987, 2000 by Stephen L. Moshier
- *
- * Returns modified Bessel function of order zero of the argument.
- * The range is partitioned into the two intervals [0,8] and (8, infinity). Chebyshev polynomial expansions are employed
- * in each interval.
+ * Computes an approximation of the zeroth order modified Bessel function of the first kind.
+ * The approximation is actually two (sub)approximations, both using a Chebyshev polynomial expansion.
+ * One approximates the function over [0, 8], and the other over (8, infinity). This function takes the absolute value
+ * of all inputs to convert them into the domain of the approximation.
  */
 template <typename T>
 static inline T calc_i0(T _x) {

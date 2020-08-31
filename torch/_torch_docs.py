@@ -3102,7 +3102,7 @@ add_docstr(torch.i0,
            r"""
 i0(input, *, out=None) -> Tensor
 
-Computes the modified Bessel function of the first kind, order 0, for each element of :attr:`input`.
+Computes the zeroth order modified Bessel function of the first kind for each element of :attr:`input`.
 
 .. math::
     \text{out}_{i} = I_0(\text{input}_{i}) = \sum_{k=0}^{\infty} \frac{(\text{input}_{i}^2/4)^k}{(k!)^2}
