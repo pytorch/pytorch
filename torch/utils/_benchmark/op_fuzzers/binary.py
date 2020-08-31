@@ -105,7 +105,7 @@ class BinaryOpFuzzer(Fuzzer):
                     probability_contiguous=0.75,
                     min_elements=_MIN_ELEMENTS[scale],
                     max_elements=32 * 1024 ** 2,
-                    max_allocation_bytes=2 * 1024**3,  # 2 GB
+                    max_allocation_bytes=2 * 1024 ** 3,  # 2 GB
                     dim_parameter="dim",
                     dtype=dtype,
                     cuda=cuda,
@@ -115,7 +115,7 @@ class BinaryOpFuzzer(Fuzzer):
                     size=("y_k0", "y_k1", "y_k2"),
                     steps=("y_step_0", "y_step_1", "y_step_2"),
                     probability_contiguous=0.75,
-                    max_allocation_bytes=2 * 1024**3,  # 2 GB
+                    max_allocation_bytes=2 * 1024 ** 3,  # 2 GB
                     dim_parameter="dim",
                     dtype=dtype,
                     cuda=cuda,
@@ -127,11 +127,6 @@ class BinaryOpFuzzer(Fuzzer):
     @staticmethod
     def structure_params(params: dict):
         params = params.copy()
-        params.pop("random_value")
-        for k in list(params.keys()):
-            if k.startswith("k_any") or k.startswith("k_pow2"):
-                params.pop(k)
-        dim = params.pop("dim")
         params[X_SIZE] = tuple(params.pop(i) for i in ("k0", "k1", "k2"))[:dim]
         params["x_steps"] = tuple(params.pop(i) for i in ("x_step_0", "x_step_1", "x_step_2"))[:dim]
         params[Y_SIZE] = tuple(params.pop(i) for i in ("y_k0", "y_k1", "y_k2"))[:dim]

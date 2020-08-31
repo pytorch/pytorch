@@ -3,17 +3,35 @@ import torch
 
 from torch.utils._benchmark import Fuzzer, FuzzedParameter, ParameterAlias, FuzzedTensor
 
+SMALL = "small"
+MEDIUM = "medium"
+LARGE = "large"
 
-_MIN_DIM_SIZE = 16
-_MAX_DIM_SIZE = 16 * 1024 ** 2
-_POW_TWO_SIZES = tuple(2 ** i for i in range(
-    int(np.log2(_MIN_DIM_SIZE)),
-    int(np.log2(_MAX_DIM_SIZE)) + 1,
-))
+X_SIZE = "x_size"
+
+_MIN_DIM_SIZE = 8
+_MAX_DIM_SIZE = {
+    SMALL: 128,
+    MEDIUM: 1024,
+    LARGE: 16 * 1024 ** 2,
+}
+_POW_TWO_SIZES = {
+    scale : tuple(2 ** i for i in range(
+        int(np.log2(_MIN_DIM_SIZE)),
+        int(np.log2(max_size)) + 1,
+    ))
+    for scale, max_size in _MAX_DIM_SIZE.items()
+}
+_MIN_ELEMENTS = {
+    SMALL: 0,
+    MEDIUM: 128,
+    LARGE: 4 * 1024,
+}
 
 
 class UnaryOpFuzzer(Fuzzer):
-    def __init__(self, seed, dtype=torch.float32, cuda=False):
+    def __init__(self, seed, dtype=torch.float32, cuda=False, scale=LARGE):
+        assert scale in (SMALL, MEDIUM, LARGE)
         super().__init__(
             parameters=[
                 # Dimensionality of x. (e.g. 1D, 2D, or 3D.)
@@ -31,7 +49,7 @@ class UnaryOpFuzzer(Fuzzer):
                     FuzzedParameter(
                         name=f"k_any_{i}",
                         minval=_MIN_DIM_SIZE,
-                        maxval=_MAX_DIM_SIZE,
+                        maxval=_MAX_DIM_SIZE[scale],
                         distribution="loguniform",
                     ) for i in range(3)
                 ],
