@@ -22,7 +22,7 @@ from torch.fx.graph import (
 )
 
 from .pattern_utils import (
-    matches,
+    is_match,
     register_quant_pattern,
     get_quant_patterns,
     register_dynamic_pattern,
@@ -927,7 +927,7 @@ class Quantizer:
         for node in reversed(graph.nodes):
             if node.name not in match_map and node.name not in all_matched:
                 for pattern, value in patterns.items():
-                    if matches(modules, node, pattern):
+                    if is_match(modules, node, pattern):
                         matched = []
                         record_match(pattern, node, matched)
                         for n in matched:

@@ -12,7 +12,7 @@ from torch.fx.graph import (
 from ..fuse_modules import OP_LIST_TO_FUSER_METHOD
 
 from .pattern_utils import (
-    matches,
+    is_match,
     register_fusion_pattern,
     get_fusion_patterns,
 )
@@ -169,7 +169,7 @@ class Fuser:
         for node in reversed(graph.nodes):
             if node.name not in match_map:
                 for pattern, value in patterns.items():
-                    if matches(modules, node, pattern):
+                    if is_match(modules, node, pattern):
                         apply_match(pattern, node, (node, value(self, node)))
 
         return match_map
