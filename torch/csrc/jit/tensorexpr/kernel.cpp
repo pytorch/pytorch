@@ -18,6 +18,7 @@ static int te_cuda_pointwise_loop_levels = -1;
 static int te_cuda_pointwise_block_count = -1;
 static int te_cuda_pointwise_block_size = -1;
 static bool fallback_allowed = false;
+static bool te_generate_block_code = false;
 
 bool setFallbackAllowed(bool value) {
   bool old_value = fallback_allowed;
@@ -46,6 +47,13 @@ int& getTECudaPointwiseBlockCount() {
 
 int& getTECudaPointwiseBlockSize() {
   return te_cuda_pointwise_block_size;
+}
+
+// TODO: Remove this global var
+// Ideally Block code gen should be decided
+// based on device type in tensor.
+bool& getTEGenerateBlockCode() {
+  return te_generate_block_code;
 }
 
 } // namespace tensorexpr
@@ -1214,7 +1222,8 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
 }
 
 void TensorExprKernel::flattenTensors(BackendType backendType) {
-  if (backendType != BackendType::kCudaCodeGen) {
+  if (backendType != BackendType::kCudaCodeGen &&
+      backendType != BackendType::kBlockCodeGen) {
     // We only need to flatten for GPU, for other backends just use the same
     // tensors.
     flatTensorOutputs_ = tensorOutputs_;
@@ -1264,9 +1273,11 @@ Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
   torch::jit::tensorexpr::LoopNest l(flatTensorOutputs_);
   GRAPH_DEBUG("Original Stmt:\n", std::to_string(l.root_stmt()), "\n");
 
+  bool hasReduction = NodeFinder<ReduceOp>::find(l.root_stmt()).size() != 0;
+
   // Compute non-output tensors_ inline
   for (auto& p : tensors_) {
-    if (!l.hasLoopBodyFor(p.second)) {
+    if (!l.hasLoopBodyFor(p.second) || hasReduction) {
       continue;
     }
     Stmt* loop = l.getLoopBodyFor(p.second);
@@ -1323,12 +1334,36 @@ Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
     }
   }
 
-  bool allowVectorization =
-      NodeFinder<ReduceOp>::find(l.root_stmt()).size() == 0;
+  if (backendType == kBlockCodeGen) {
+    auto block_analysis = std::make_unique<CreateBufferMap>();
+    for (size_t i = 0; i < flatTensorOutputs_.size(); i++) {
+      const int default_fp16_blocksize = 16;
+      const int default_uint8_blocksize = 32;
+      int blockSize = default_fp16_blocksize;
+      // We only handle looplevels == 2 for now
+      Tensor* tensor = flatTensorOutputs_[i];
+      // Run Block analysis to get multi dim buffer info
+      auto root_stmt = l.root_stmt();
+      root_stmt->accept(block_analysis.get());
+
+      if (tensor->buf()->dtype().scalar_type() == ScalarType::Byte) {
+        blockSize = default_uint8_blocksize;
+      }
+      l.computeInline(l.getLoopBodyFor(tensorOutputs_[i]));
+      For* outer;
+      For* inner;
+      std::vector<For*> loops = l.getLoopStmtsFor(tensor);
+      TORCH_INTERNAL_ASSERT(loops.size() > 0, "loops should not be empty");
+      l.splitWithMask(loops[0], blockSize, &outer, &inner);
+      l.setGPUBlockIndex(outer, 0);
+      l.setGPUThreadIndex(inner, 0);
+      l.setBufferMap(outer, block_analysis->getBufferMap());
+    }
+  }
 
   l.prepareForCodegen();
 
-  if (backendType == kLLVMCodeGen && allowVectorization) {
+  if (backendType == kLLVMCodeGen && !hasReduction) {
     std::vector<For*> innerLoops;
     std::vector<For*> worklist;
 
@@ -1408,6 +1443,8 @@ std::string TensorExprKernel::getCodeGenName(BackendType backendType) {
       return "llvm_codegen";
     case kSimpleIREval:
       return "simple_ir_eval";
+    case kBlockCodeGen:
+      return "block_codegen";
     default:
       throw std::runtime_error(
           "invalid backend type: " +
@@ -1529,6 +1566,8 @@ TensorExprKernel::BackendType TensorExprKernel::inferBackendTypeFromDevice(
   BackendType backendType = BackendType::kUninitialized;
   if (device.type() == at::kCUDA) {
     backendType = kCudaCodeGen;
+  } else if (device.type() == at::kCPU && getTEGenerateBlockCode()) {
+    backendType = kBlockCodeGen;
   } else if (device.type() == at::kCPU) {
 #ifdef TORCH_ENABLE_LLVM
     backendType = kLLVMCodeGen;
@@ -1658,15 +1697,12 @@ TensorExprKernel::ReductionInfo TensorExprKernel::getReductionInfo(
   // aten::sum takes the input tensor named self.
   auto sizes = sizesForValue(node->namedInput(attr::self));
   const auto inputs = node->inputs();
+  int rank = sizes.size();
   if (inputs.size() > 2) {
+    auto nodeAxes = getReductionAxes(node);
     // Canonicalize axes: wrap around, sort and make unique.
-    auto axesValue = node->namedInput(attr::dim);
-    TORCH_INTERNAL_ASSERT(axesValue->node()->kind() == prim::ListConstruct);
-    for (auto axisNode : axesValue->node()->inputs()) {
-      int rank = sizes.size();
-      int axis = at::maybe_wrap_dim(
-          constant(axisNode).AsNode<IntImm>()->value(), rank);
-      axes.push_back(axis);
+    for (auto axis : nodeAxes) {
+      axes.push_back(at::maybe_wrap_dim(axis, rank));
     }
     std::sort(axes.begin(), axes.end());
     axes.erase(std::unique(axes.begin(), axes.end()), axes.end());
@@ -1701,9 +1737,31 @@ TensorExprKernel::ReductionInfo TensorExprKernel::getReductionInfo(
   return {reductionDims, outputDims, axes, keepdim, dtype};
 }
 
+std::vector<int64_t> TensorExprKernel::getReductionAxes(
+    const torch::jit::Node* node) {
+  std::vector<int64_t> axes;
+  auto axesNode = node->namedInput(attr::dim)->node();
+  // There are two possible representations for reduction axes:
+  //   1. A prim::ListConstruct of integer constants.
+  //   2. A prim::Constant list of integer ival's.
+  // We need to handle both of them.
+  if (axesNode->kind() == prim::ListConstruct) {
+    for (auto axisNode : axesNode->inputs()) {
+      axes.push_back(constant(axisNode).AsNode<IntImm>()->value());
+    }
+    return axes;
+  }
+  TORCH_INTERNAL_ASSERT(axesNode->kind() == prim::Constant);
+  TORCH_INTERNAL_ASSERT(axesNode->kindOf(attr::value) == AttributeKind::ival);
+  const auto& genericList = axesNode->ival(attr::value).toList();
+  for (const IValue axisNode : genericList) {
+    axes.push_back(axisNode.toInt());
+  }
+  return axes;
+}
+
 void TensorExprKernel::compile() {
   KernelScope kernelScope(&kernelArena_);
-
   // Bind inputs to buffers.
   nInputs_ = graph_->inputs().size();
   for (auto const& input : graph_->inputs()) {
@@ -1740,7 +1798,6 @@ void TensorExprKernel::compile() {
   device_ = pickDeviceType(graph_->inputs());
   BackendType backendType = inferBackendTypeFromDevice(device_);
   Stmt* stmt = generateStmt(backendType);
-
   // Set up formal params (inputs, then outputs) for kernel.
   std::vector<CodeGen::BufferArg> params = prepareBufferArgs();
 
