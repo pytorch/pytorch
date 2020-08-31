@@ -218,7 +218,7 @@ static void addmm_impl_cpu_(
     return;
   }
 
-  if (beta.to<double>() != 0.0 && !self.is_same(result)) {
+  if (beta.toComplexDouble() != 0.0 && !self.is_same(result)) {
     result.copy_(self);
   }
 
