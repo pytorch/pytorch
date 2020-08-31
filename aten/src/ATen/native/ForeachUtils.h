@@ -14,11 +14,26 @@ void verify_list(TensorList tensors) {
   }
 }
 
+void verify_list(TensorList tensors1, TensorList tensors2) {
+  TORCH_CHECK(tensors1.size() > 0, "Tensor list must have at least one tensor.");
+  TORCH_CHECK(tensors2.size() > 0, "Tensor list must have at least one tensor.");
+  TORCH_CHECK(tensors1.size() == tensors2.size(), "Tensor lists must have the same number of tensors, got ", tensors1.size(), " and ", tensors2.size());
+
+  auto expected_dtype = tensors1[0].dtype();
+
+  for (int i = 0; i < tensors1.size(); i++) {
+    TORCH_CHECK(tensors1[i].dtype() == expected_dtype, "All tensors in the tensor list must have the same dtype.");
+    TORCH_CHECK(tensors2[i].dtype() == expected_dtype, "All tensors in the tensor list must have the same dtype.");
+    TORCH_CHECK(tensors1[i].sizes() == tensors2[i].sizes(), "Corresponding tensors in lists must have the same size, got ", tensors1[i].sizes(), " and ", tensors2[i].sizes());
+  }
+}
+
 // To go via 'fast' path, several conditions must be satisfied
 // - All tensors must have strided layout
 // - All tensors must be non-overlapping and dense
+// - All tensors must be on the same device
 // - Resulting tensor must have the same dtype as the input one
-bool check_fast_route(TensorList tensors, Scalar scalar) {
+bool can_use_fast_route(TensorList tensors, Scalar scalar) {
   TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
   auto expected_device = tensors[0].device();
 
@@ -54,21 +69,7 @@ bool check_fast_route(TensorList tensors, Scalar scalar) {
   return true;
 }
 
-void verify_list(TensorList tensors1, TensorList tensors2) {
-  TORCH_CHECK(tensors1.size() > 0, "Tensor list must have at least one tensor.");
-  TORCH_CHECK(tensors2.size() > 0, "Tensor list must have at least one tensor.");
-  TORCH_CHECK(tensors1.size() == tensors2.size(), "Tensor lists must have the same number of tensors.");
-
-  auto expected_dtype = tensors1[0].dtype();
-
-  for (int i = 0; i < tensors1.size(); i++) {
-    TORCH_CHECK(tensors1[i].dtype() == expected_dtype, "All tensors in the tensor list must have the same dtype.");
-    TORCH_CHECK(tensors2[i].dtype() == expected_dtype, "All tensors in the tensor list must have the same dtype.");
-    TORCH_CHECK(tensors1[i].sizes() == tensors2[i].sizes(), "Corresponding tensors in lists must have the same size.");
-  }
-}
-
-bool check_fast_route(TensorList tensors1, TensorList tensors2) {
+bool can_use_fast_route(TensorList tensors1, TensorList tensors2) {
   auto expected_device = tensors1[0].device();
 
   for (int64_t i = 0; i < tensors1.size(); i++) {
