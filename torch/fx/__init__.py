@@ -64,7 +64,7 @@ The semantics are as follows:
 GraphModule automatically generates Python code for the operations it symbolically observed:
 
 ```
-print(gm.src)
+print(gm.code)
 ```
 
 ```
