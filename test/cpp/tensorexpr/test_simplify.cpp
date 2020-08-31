@@ -1009,6 +1009,32 @@ void testSimplifySubs() {
   }
 }
 
+void testSimplifyDiv() {
+  KernelScope kernel_scope;
+  VarHandle x("x", kInt);
+
+  {
+    ExprHandle body = ExprHandle(0) / x;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_IMM_WITH_VAL(Int, simplified.node(), 0);
+  }
+
+  {
+    ExprHandle body = x / 1;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_VAR_WITH_NAME(simplified.node(), "x");
+  }
+
+  {
+    ExprHandle body = x / x;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_IMM_WITH_VAL(Int, simplified.node(), 1);
+  }
+}
+
 // Test that mixing ops together simplifies as expected.
 void testSimplifyMultiOp() {
   KernelScope kernel_scope;

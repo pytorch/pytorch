@@ -5,9 +5,7 @@ from .qconfig import *
 from .fake_quantize import *
 from .fuse_modules import fuse_modules
 from .stubs import *
-from .quant_type import *
 from .quantize_jit import *
-from .quantize_fx import *
 
 def default_eval_fn(model, calib_data):
     r"""
@@ -22,12 +20,8 @@ _all__ = [
     # Top level API for eager mode quantization
     'quantize', 'quantize_dynamic', 'quantize_qat',
     'prepare', 'convert', 'prepare_qat',
-    # Top level API for graph mode quantization on TorchScript
+    # Top level API for graph mode quantization
     'quantize_jit', 'quantize_dynamic_jit',
-    # Top level API for graph mode quantization on GraphModule(torch.fx)
-    'fuse_fx', 'quantize_fx',  # TODO: add quantize_dynamic_fx
-    'prepare_fx', 'prepare_dynamic_fx', 'convert_fx',
-    'QuantType',  # quantization type
     # Sub functions for `prepare` and `swap_module`
     'propagate_qconfig_', 'add_quant_dequant', 'add_observer_', 'swap_module',
     'default_eval_fn', 'get_observer_dict',
