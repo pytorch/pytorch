@@ -16,7 +16,7 @@ CONFIG_TREE_DATA = [
                     ("important", [X(True)]),
                     ("parallel_tbb", [X(True)]),
                     ("parallel_native", [X(True)]),
-                    ("pure_torch", [X(True)]),
+                    ("pure_torch", [XImportant(True)]),
                 ]),
             ]),
             # TODO: bring back libtorch test
@@ -167,7 +167,7 @@ class PureTorchConfigNode(TreeConfigNode):
         self.props["is_pure_torch"] = node_name
 
     def child_constructor(self):
-        return ExperimentalFeatureConfigNode
+        return ImportantConfigNode
 
 
 class XlaConfigNode(TreeConfigNode):
