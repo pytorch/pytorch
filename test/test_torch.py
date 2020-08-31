@@ -4084,10 +4084,17 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             for tensor, value in zip(ok, ok_values):
                 self.assertEqual(int(tensor), int(value))
                 self.assertEqual(float(tensor), float(value))
+                self.assertEqual(complex(tensor), complex(value))
+
+            self.assertEqual(complex(torch.tensor(1.5j)), 1.5j)
 
             for tensor in not_ok:
                 self.assertRaises(ValueError, lambda: int(tensor))
                 self.assertRaises(ValueError, lambda: float(tensor))
+                self.assertRaises(ValueError, lambda: complex(tensor))
+
+            self.assertRaises(RuntimeError, lambda: float(torch.tensor(1.5j)))
+            self.assertRaises(RuntimeError, lambda: int(torch.tensor(1.5j)))
 
         def test_offset_scalar_cast(self):
             x = torch.Tensor([1, 2, 3])
@@ -13677,8 +13684,12 @@ class TestTorchDeviceType(TestCase):
         mat = torch.ones((2, 0), dtype=dtype, device=device)
         vec = torch.ones((0,), dtype=dtype, device=device)
         out = torch.empty((2,), dtype=dtype, device=device)
-        alpha = 6
-        beta = 3
+        if dtype.is_complex:
+            alpha = 6 + 7j
+            beta = 3 + 4j
+        else:
+            alpha = 6
+            beta = 3
         self.assertEqual(torch.full((2,), beta * value, dtype=dtype, device=device),
                          torch.addmv(input=input, mat=mat, vec=vec, alpha=alpha, beta=beta))
         self.assertEqual(torch.full((2,), beta * value, dtype=dtype, device=device),
@@ -17931,13 +17942,19 @@ else:
             test(y, True)
             test(z, True)
 
-    def test_multinomial_empty(self, device):
-        probs = torch.ones(0, 3)
-        num_samples = 1
+    def _test_multinomial_empty(self, device, replacement, num_samples):
+        probs = torch.ones(0, 3, device=device)
         expected = torch.empty(0, num_samples, dtype=torch.int64)
-        for replacement in (True, False):
-            out = torch.multinomial(probs, num_samples=num_samples, replacement=replacement)
-            self.assertEqual(out, expected)
+        out = torch.multinomial(probs, num_samples=num_samples, replacement=replacement)
+        self.assertEqual(out, expected)
+
+    def test_multinomial_empty_w_replacement(self, device):
+        self._test_multinomial_empty(device, True, 1)
+        self._test_multinomial_empty(device, True, 2)
+
+    def test_multinomial_empty_wo_replacement(self, device):
+        self._test_multinomial_empty(device, False, 1)
+        self._test_multinomial_empty(device, False, 2)
 
     def _generate_input(self, shape, dtype, device, with_extremal):
         if shape == ():

@@ -28,7 +28,7 @@ def make_jacobian(input, num_out, extra_dim_if_complex=False):
         if not input.requires_grad:
             return None
         shape = (input.nelement(), num_out)
-        # two dimensions to store dout_dx, dout_dy for an input x + yj
+        # two dimensions to store dout_dz_conj, dout_dz for an input z = x + yj
         if input.is_complex() and extra_dim_if_complex:
             shape = shape + (2, )
         return torch.zeros(shape, dtype=input.dtype)
@@ -71,7 +71,7 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
 
     def update_jacobians(x, idx, d, d_idx, is_mkldnn=False):
 
-        def compute_gradient(delta=eps):
+        def compute_gradient(delta):
             def fn_out():
                 if not is_mkldnn:
                     # x is a view into input and so this works
@@ -89,20 +89,18 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
             r = (outb - outa) / (2 * eps)
             return r.detach().reshape(-1)
 
-        ds_dx = compute_gradient(delta=eps)
+        ds_dx = compute_gradient(eps)
         if x.is_complex():
-            ds_dy = compute_gradient(delta=(eps * 1j))
+            ds_dy = compute_gradient(eps * 1j)
             # conjugate wirtinger derivative
-            d[d_idx][:, 0] = 0.5 * (ds_dx + ds_dy * 1j)
+            d[d_idx, :, 0] = 0.5 * (ds_dx + ds_dy * 1j)
             # wirtinger derivative
-            d[d_idx][:, 1] = 0.5 * (ds_dx - ds_dy * 1j)
+            d[d_idx, :, 1] = 0.5 * (ds_dx - ds_dy * 1j)
         else:
             d[d_idx] = ds_dx
 
     # TODO: compare structure
     for x_tensor, d_tensor in zip(x_tensors, j_tensors):
-        is_complex = x_tensor.dtype.is_complex
-
         if x_tensor.is_sparse:
             def get_stride(size):
                 dim = len(size)
@@ -304,7 +302,7 @@ def gradcheck(
         for i, o in enumerate(func_out):
             def fn(input):
                 return _as_tuple(func(*input))[i]
-            numerical = get_numerical_jacobian(fn, tupled_inputs, eps=eps)[0]
+            numerical = get_numerical_jacobian(fn, tupled_inputs, eps=eps)
             for n in numerical:
                 if torch.ne(n, 0).sum() > 0:
                     return fail_test('Numerical gradient for function expected to be zero')
@@ -324,13 +322,17 @@ def gradcheck(
 
         if out_is_complex:
             # analytical vjp with v = 1.0j
-            analytical_with_imag_v, reentrant_with_imag_v, correct_grad_sizes_ \
+            analytical_with_imag_v, reentrant_with_imag_v, \
+                correct_grad_sizes_with_imag_v \
                 = get_analytical_jacobian(tupled_inputs, o, nondet_tol=nondet_tol, v=1j)
 
-        if not correct_grad_sizes or (out_is_complex and not correct_grad_sizes_):
+        if not correct_grad_sizes:
             return fail_test('Analytical gradient has incorrect size')
 
-        def checkIfNumericalAnalyticAreClose(a, n, error_str=''):
+        if out_is_complex and not correct_grad_sizes_with_imag_v:
+            return fail_test('Analytical gradient (calculated using complex valued grad output) has incorrect size')
+
+        def checkIfNumericalAnalyticAreClose(a, n, j, error_str=''):
             if not torch.allclose(a, n, rtol, atol):
                 return fail_test(error_str + 'Jacobian mismatch for output %d with respect to input %d,\n'
                                  'numerical:%s\nanalytical:%s\n' % (i, j, n, a))
@@ -341,28 +343,38 @@ def gradcheck(
             if a.numel() != 0 or n.numel() != 0:
                 if inp.is_complex():
                     # C -> R, C -> C
-                    checkIfNumericalAnalyticAreClose(a, n[:, :, 0] + n[:, :, 1].conj(),
+                    checkIfNumericalAnalyticAreClose(a, n[:, :, 0] + n[:, :, 1].conj(), j,
                                                      "Real value(s) of Conjugate Wirtinger derivative \
-                                                     (Re(ds/dx + ds/dy * 1j)) failed to compare equal.")
+                                                      (Re(ds/dx + ds/dy * 1j) failed to compare equal. ")
                     if o.is_complex():
                         # C -> C
                         a_with_imag_v = analytical_with_imag_v[j]
-                        checkIfNumericalAnalyticAreClose(a_with_imag_v, -1j * n[:, :, 0] + 1j * n[:, :, 1].conj(),
+                        checkIfNumericalAnalyticAreClose(a_with_imag_v, -1j * n[:, :, 0] + 1j * n[:, :, 1].conj(), j,
                                                          "Imaginary value(s) of Conjugate Wirtinger derivative \
-                                                         (Im(ds/dx + ds/dy * 1j)) failed to compare equal.")
+                                                         (Im(ds/dx + ds/dy * 1j)) failed to compare equal. ")
                 else:
                     # R -> R, R -> C
-                    checkIfNumericalAnalyticAreClose(a, n)
+                    checkIfNumericalAnalyticAreClose(a, n, j)
                     if o.is_complex():
                         # R -> C
                         a_with_imag_v = analytical_with_imag_v[j]
-                        checkIfNumericalAnalyticAreClose(a_with_imag_v, -1j * 0.5 * n + 1j * 0.5 * n.conj())
+                        # numerical jacobian value = -1j * 0.5 * n + 1j * 0.5 * n.conj() = 0
+                        if torch.ne(a_with_imag_v, 0).sum() > 0:
+                            return fail_test('Analytical gradient for output %d with respect to input %d for '
+                                             'grad_output = 1 + 1j expected to be zero.' % (i, j))
 
-        if not reentrant or (out_is_complex and not reentrant_with_imag_v):
-            return fail_test('Backward is not reentrant, i.e., running backward with same '
-                             'input and grad_output multiple times gives different values, '
-                             'although analytical gradient matches numerical gradient. '
-                             'The tolerance for nondeterminism was {}.'.format(nondet_tol))
+        def not_reentrant_error(error_str=''):
+            error_msg = "Backward" + error_str + " is not reentrant, i.e., running backward with same \
+                        input and grad_output multiple times gives different values, \
+                        although analytical gradient matches numerical gradient. \
+                        The tolerance for nondeterminism was {}.".format(nondet_tol)
+            return fail_test(error_msg)
+
+        if not reentrant:
+            not_reentrant_error()
+
+        if out_is_complex and not reentrant_with_imag_v:
+            not_reentrant_error(' (calculated using complex valued grad output)')
 
     # check if the backward multiplies by grad_output
     output = _differentiable_outputs(func(*tupled_inputs))
