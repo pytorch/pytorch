@@ -997,6 +997,10 @@ def gt(g, input, other):
 
 
 def gt_impl(g, input, other):
+    if input.type().scalarType() is not None and input.type().scalarType() == 'Bool' and \
+            other.type().scalarType() is not None and other.type().scalarType() == 'Bool':
+        input = g.op("Cast", input, to_i=sym_help.cast_pytorch_to_onnx['Int'])
+        other = g.op("Cast", other, to_i=sym_help.cast_pytorch_to_onnx['Int'])
     return g.op("Greater", input, other)
 
 
@@ -1005,6 +1009,10 @@ def lt(g, input, other):
 
 
 def lt_impl(g, input, other):
+    if input.type().scalarType() is not None and input.type().scalarType() == 'Bool' and \
+            other.type().scalarType() is not None and other.type().scalarType() == 'Bool':
+        input = g.op("Cast", input, to_i=sym_help.cast_pytorch_to_onnx['Int'])
+        other = g.op("Cast", other, to_i=sym_help.cast_pytorch_to_onnx['Int'])
     return g.op("Less", input, other)
 
 
@@ -1060,10 +1068,14 @@ def __lshift_(g, self, other):
     return lshift
 
 
-def where(g, condition, self, other):
+@parse_args('v', 'v', 'v', 'i')
+def where(g, condition, self=None, other=None, _outputs=None):
     # Assumes that torch.where's first argument takes only Bool and Byte tensors.
-    if condition.type().scalarType() != 'Bool': 
+    if condition.type().scalarType() != 'Bool':
         condition = g.op("Cast", condition, to_i=sym_help.cast_pytorch_to_onnx['Bool'])
+    if self is None:
+        condition = torch.onnx.symbolic_opset9.nonzero(g, condition)
+        return unbind(g, condition, g.op("Constant", value_t=torch.tensor(1)), _outputs)
     return g.op("Where", condition, self, other)
 
 
@@ -2115,10 +2127,15 @@ def argmin(g, input, dim, keepdim):
 
 @parse_args('v', 'i', 'v', 'v')
 def scatter(g, self, dim, index, src):
+    src_type = src.type().scalarType()
     src = sym_help._maybe_get_scalar(src)
     if sym_help._is_value(src):
         return g.op("Scatter", self, index, src, axis_i=dim)
     else:
+        # Check if scalar 'src' has same type as self (PyTorch allows different
+        # type for scalar src (but not when src is tensor)). If not, insert Cast node.
+        if self.type().scalarType() != src_type:
+            src = g.op("Cast", src, to_i=sym_help.cast_pytorch_to_onnx[self.type().scalarType()])
         return g.op("Scatter", self, index, expand_as(g, src, index), axis_i=dim)
 
 
