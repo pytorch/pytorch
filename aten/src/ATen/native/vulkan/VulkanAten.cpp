@@ -163,7 +163,7 @@ Tensor avg_pool2d(
   return new_with_vtensor_vulkan(std::move(y), self.options());
 }
 
-at::Tensor max_pool2d(
+Tensor max_pool2d(
     const at::Tensor& self,
     const IntArrayRef kernel_size,
     const IntArrayRef stride,
