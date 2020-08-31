@@ -48,20 +48,20 @@ class GraphModule(torch.nn.Module):
     def _generate_forward(self) -> None:
         body, result, free_variables = self.graph.python_code(root_module='self')
         body = '\n'.join('    ' + line for line in body.split('\n')) + '\n'
-        self.src = f"""\
+        self.code = f"""\
 def forward(self, {', '.join(free_variables)}):
     self = self.root
 {body}
     return {result}
 """
-        # print(self.src)
+        # print(self.code)
         # install forward into the classes dictionary, this is what normally happens in the
         # 'class' statement
         # __new__ ensured that each instance has its own class
         gbls: Dict[str, Any] = {
             'torch': torch
         }
-        exec_with_source(self.src, gbls)
+        exec_with_source(self.code, gbls)
         cls = type(self)
         for k, v in gbls.items():
             setattr(cls, k, v)
