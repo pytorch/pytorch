@@ -40,7 +40,7 @@ static const char* data_type2string(DataType t) {
     case DataType::Half:
       return "__half";
     case DataType::Int:
-      return "size_t";
+      return "int64_t";
     case DataType::Null:
       return "nullptr";
     default:
@@ -64,6 +64,16 @@ static const char* val_type2string(ValType t) {
       return "Scalar";
     case ValType::NamedScalar:
       return "NamedScalar";
+    case ValType::KirIterDomain:
+      return "KirIterDomain";
+    case ValType::KirNamedScalar:
+      return "KirNamedScalar";
+    case ValType::KirScalar:
+      return "KirScalar";
+    case ValType::KirTensorDomain:
+      return "KirTensorDomain";
+    case ValType::KirTensorView:
+      return "KirTensorView";
     default:
       break;
   }
@@ -81,6 +91,8 @@ static const char* expr_type2string(ExprType t) {
       return "TernaryOp";
     case ExprType::ReductionOp:
       return "ReductionOp";
+    case ExprType::GridReduction:
+      return "GridReduction";
     case ExprType::BroadcastOp:
       return "BroadcastOp";
     case ExprType::ForLoop:
@@ -89,10 +101,22 @@ static const char* expr_type2string(ExprType t) {
       return "IfThenElse";
     case ExprType::Allocate:
       return "Allocate";
+    case ExprType::Sync:
+      return "SyncThreads";
     case ExprType::Split:
       return "Split";
     case ExprType::Merge:
       return "Merge";
+    case ExprType::KirUnaryOp:
+      return "KirUnaryOp";
+    case ExprType::KirBinaryOp:
+      return "KirBinaryOp";
+    case ExprType::KirTernaryOp:
+      return "KirTernaryOp";
+    case ExprType::KirReductionOp:
+      return "KirReductionOp";
+    case ExprType::KirBroadcastOp:
+      return "KirBroadcastOp";
     default:
       break;
   }
@@ -304,11 +328,11 @@ static const char* parallel_type2string(ParallelType t) {
     case ParallelType::TIDx:
       return "threadIdx.x";
     case ParallelType::Vectorize:
-      return "Vectorize";
+      return "V";
     case ParallelType::Unroll:
-      return "Unroll";
+      return "U";
     case ParallelType::Serial:
-      return "Serial";
+      return "S";
     default:
       break;
   }
@@ -331,21 +355,20 @@ static const char* memory_type2string(MemoryType t) {
   return nullptr;
 }
 
-static DataType at_type2data_type(at::ScalarType t) {
+static const char* iter_type2string(IterType t) {
   switch (t) {
-    case at::ScalarType::Bool:
-      return DataType::Bool;
-    case at::ScalarType::Float:
-      return DataType::Float;
-    case at::ScalarType::Half:
-      return DataType::Half;
-    case at::ScalarType::Int:
-      return DataType::Int;
+    case IterType::Iteration:
+      return "i";
+    case IterType::Reduction:
+      return "r";
+    case IterType::BroadcastWithStride:
+      return "sb";
+    case IterType::BroadcastWithoutStride:
+      return "b";
     default:
-      break;
+      TORCH_INTERNAL_ASSERT(false, "No string found for IterDomain type.");
+      return nullptr;
   }
-  TORCH_INTERNAL_ASSERT(false, "No data type found for scalar type.");
-  return DataType::Null;
 }
 
 static const char* thread_size2string(ParallelType t) {
@@ -402,55 +425,71 @@ bool is_logical_op(const BinaryOpType& bot) {
 }
 
 DataType aten_to_data_type(const at::ScalarType& scalar_type) {
-  return at_type2data_type(scalar_type);
+  switch (scalar_type) {
+    case at::ScalarType::Bool:
+      return DataType::Bool;
+    case at::ScalarType::Float:
+      return DataType::Float;
+    case at::ScalarType::Half:
+      return DataType::Half;
+    case at::ScalarType::Long:
+      return DataType::Int;
+    default:
+      TORCH_INTERNAL_ASSERT(false, "No data type found for scalar type.");
+      return DataType::Null;
+  }
 }
 
-TORCH_CUDA_API std::ostream& operator<<(
-    std::ostream& out,
-    const ValType vtype) {
+at::ScalarType data_type_to_aten(const DataType& data_type) {
+  switch (data_type) {
+    case DataType::Bool:
+      return at::ScalarType::Bool;
+    case DataType::Float:
+      return at::ScalarType::Float;
+    case DataType::Half:
+      return at::ScalarType::Half;
+    case DataType::Int:
+      return at::ScalarType::Long;
+    default:
+      TORCH_INTERNAL_ASSERT(false, "No data type found for scalar type.");
+      return at::ScalarType::Undefined;
+  }
+}
+
+std::ostream& operator<<(std::ostream& out, const ValType vtype) {
   return out << val_type2string(vtype);
 }
 
-TORCH_CUDA_API std::ostream& operator<<(
-    std::ostream& out,
-    const DataType dtype) {
+std::ostream& operator<<(std::ostream& out, const DataType dtype) {
   return out << data_type2string(dtype);
 }
 
-TORCH_CUDA_API std::ostream& operator<<(
-    std::ostream& out,
-    const ExprType etype) {
+std::ostream& operator<<(std::ostream& out, const ExprType etype) {
   return out << expr_type2string(etype);
 }
 
-TORCH_CUDA_API std::ostream& operator<<(
-    std::ostream& out,
-    const UnaryOpType uotype) {
+std::ostream& operator<<(std::ostream& out, const UnaryOpType uotype) {
   return out << unary_op_type2string(uotype);
 }
 
-TORCH_CUDA_API std::ostream& operator<<(
-    std::ostream& out,
-    const BinaryOpType botype) {
+std::ostream& operator<<(std::ostream& out, const BinaryOpType botype) {
   return out << binary_op_type2string(botype);
 }
 
-TORCH_CUDA_API std::ostream& operator<<(
-    std::ostream& out,
-    const TernaryOpType totype) {
+std::ostream& operator<<(std::ostream& out, const TernaryOpType totype) {
   return out << ternary_op_type2string(totype);
 }
 
-TORCH_CUDA_API std::ostream& operator<<(
-    std::ostream& out,
-    const ParallelType ptype) {
+std::ostream& operator<<(std::ostream& out, const ParallelType ptype) {
   return out << stringifyThread(ptype);
 }
 
-TORCH_CUDA_API std::ostream& operator<<(
-    std::ostream& out,
-    const MemoryType mtype) {
+std::ostream& operator<<(std::ostream& out, const MemoryType mtype) {
   return out << memory_type2string(mtype);
+}
+
+TORCH_CUDA_API std::ostream& operator<<(std::ostream& out, const IterType bt) {
+  return out << iter_type2string(bt);
 }
 
 TORCH_CUDA_API c10::optional<std::string> inline_op_str(
@@ -460,8 +499,7 @@ TORCH_CUDA_API c10::optional<std::string> inline_op_str(
                         : c10::nullopt;
 }
 
-TORCH_CUDA_API c10::optional<std::string> inline_op_str(
-    const BinaryOpType botype) {
+c10::optional<std::string> inline_op_str(const BinaryOpType botype) {
   const char* str = binary_op_type_inline_op2string(botype);
   return str != nullptr ? c10::optional<std::string>(std::string(str))
                         : c10::nullopt;
@@ -475,7 +513,7 @@ std::string stringifyThread(const ParallelType ptype) {
   return parallel_type2string(ptype);
 }
 
-TORCH_CUDA_API c10::optional<std::string> cast_func_str(
+c10::optional<std::string> cast_func_str(
     const std::pair<DataType, DataType>& cast) {
   const char* str = supported_casts2string(cast);
   return str != nullptr ? c10::optional<std::string>(std::string(str))

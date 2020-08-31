@@ -492,6 +492,24 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
                                         operator_export_type, google_printer,
                                         val_keep_init_as_ip, custom_opsets, val_add_node_names)
 
+def _diagnose_export(model, args, f, verbose=False, training=TrainingMode.EVAL,
+                     input_names=None, output_names=None, opset_version=None, dynamic_axes=None):
+    from torch.onnx.symbolic_helper import _default_onnx_opset_version, _set_opset_version
+    if opset_version is None:
+        opset_version = _default_onnx_opset_version
+    _set_opset_version(opset_version)
+    # operator_export_type is set ro ONNX_FALLTHROUGH by default so that if an op is not supported
+    # in ONNX, fall through will occur and export the operator as is, as a custom ONNX op.
+    operator_export_type = OperatorExportTypes.ONNX_FALLTHROUGH
+    with select_model_mode_for_export(model, training):
+        graph, params_dict, torch_out = _model_to_graph(model, args, verbose, input_names,
+                                                        output_names, operator_export_type)
+    # The output 'unsupported_ops' will contain the names of all the ops that are not supported in ONNX
+    unsupported_ops = list()
+    for node in graph.nodes():
+        if node.kind().split(':')[0] not in ['onnx', 'prim']:
+            unsupported_ops.append(node.kind())
+    return graph, unsupported_ops
 
 # NOTE: the output `torch_out` will contain the output tensors resulting from
 # the trace of a Module. In the case that a torch.nn.ScriptModule is passed in,
@@ -985,6 +1003,12 @@ def _validate_dynamic_axes(dynamic_axes, model, input_names, output_names):
                 else:
                     value_dict[x] = str(key) + '_dynamic_axes_' + str(i + 1)
             dynamic_axes[key] = value_dict
+
+def _add_block(node, input_node, op_name, **kwargs):
+    new_block = node.addBlock()
+    new_node = new_block.addNode(input_node, op_name)
+    for k, v in kwargs.items():
+        _add_attribute(new_node, k, v, False)
 
 torch._C.Graph.op = _graph_op
 torch._C.Graph.at = _graph_at

@@ -51,7 +51,6 @@ class TORCH_CUDA_API IrCloner : private OptInConstDispatch {
   void handle(const TensorDomain*) override;
   void handle(const TensorView*) override;
   void handle(const IterDomain*) override;
-  void handle(const TensorIndex*) override;
 
   void handle(const Bool*) override;
   void handle(const Float*) override;
@@ -65,12 +64,31 @@ class TORCH_CUDA_API IrCloner : private OptInConstDispatch {
   void handle(const BroadcastOp*) override;
   void handle(const ReductionOp*) override;
 
-  void handle(const ForLoop*) override;
-  void handle(const IfThenElse*) override;
-  void handle(const Allocate*) override;
-
   void handle(const Split*) override;
   void handle(const Merge*) override;
+
+  void handle(const kir::Bool*) override;
+  void handle(const kir::Float*) override;
+  void handle(const kir::Half*) override;
+  void handle(const kir::Int*) override;
+  void handle(const kir::NamedScalar*) override;
+
+  void handle(const kir::IterDomain*) override;
+  void handle(const kir::TensorDomain*) override;
+  void handle(const kir::TensorView*) override;
+
+  void handle(const kir::UnaryOp*) override;
+  void handle(const kir::BinaryOp*) override;
+  void handle(const kir::TernaryOp*) override;
+  void handle(const kir::ReductionOp*) override;
+  void handle(const kir::BroadcastOp*) override;
+
+  void handle(const kir::TensorIndex*) override;
+  void handle(const kir::Allocate*) override;
+  void handle(const kir::Sync*) override;
+  void handle(const kir::ForLoop*) override;
+  void handle(const kir::IfThenElse*) override;
+  void handle(const kir::GridReduction*) override;
 
  private:
   // The destination Fusion container

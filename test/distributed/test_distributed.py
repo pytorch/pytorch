@@ -22,7 +22,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.testing._internal.common_utils import TestCase, run_tests, find_free_port
 from torch.nn.parallel.distributed import _dump_DDP_relevant_env_vars
-from torch.distributed.distributed_c10d import _get_default_group
+from torch.distributed.distributed_c10d import _get_default_group, AllreduceOptions, GroupMember
 from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
 from torch._utils_internal import TEST_MASTER_PORT as MASTER_PORT
 from torch.testing._internal.common_distributed import (
@@ -847,6 +847,43 @@ class _DistTestBase(object):
         group, group_id, rank = self._init_full_group_test()
         self._test_reduce_helper(group, group_id, rank, dist.ReduceOp.MAX, -1, 10, 10)
 
+    @skip_if_no_gpu
+    @require_backend({"gloo", "nccl"})
+    def test_all_reduce_result_cuda(self):
+        group, group_id, rank = self._init_global_test()
+        rank_to_GPU = self._init_multigpu_helper()
+        for src in group:
+            if rank == src:
+                tensor = _build_tensor(src + 1, 2)
+            else:
+                tensor = _build_tensor(src + 1, 10)
+            tensor = tensor.cuda(rank_to_GPU[rank][0])
+
+            opts = AllreduceOptions()
+            opts.reduceOp = dist.ReduceOp.SUM
+
+            if group_id == GroupMember.WORLD:
+                work = _get_default_group().allreduce([tensor], opts)
+            else:
+                work = group_id.allreduce([tensor], opts)
+
+            # Calling result right the work is finished should throw exception.
+           #  Here we have a race condition, we may not assume the work is not
+           # finished by the time we run next lines.
+            throws_exception = False
+            try:
+                work.result()
+            except RuntimeError:
+                throws_exception = True
+            EXPECT_TRUE(throws_exception or work.is_completed())
+
+            work.wait()
+
+            result = work.result()
+            expected_value = 2 + (10 * (len(group) - 1))
+            self.assertEqual(result, [_build_tensor(src + 1, expected_value)])
+        self._barrier()
+
     # ALL REDUCE
     def _test_all_reduce_helper(
         self,
@@ -1574,15 +1611,16 @@ class _DistTestBase(object):
         self._barrier()
 
     @unittest.skipIf(
-        BACKEND != "mpi", "Only MPI supports CPU all_to_all_single"
+        BACKEND != "mpi" and BACKEND != "gloo",
+        "Only MPI and Gloo support CPU all_to_all_single"
     )
     def test_all_to_all_single_equal_split(self):
         group, group_id, rank = self._init_global_test()
         self._test_all_to_all_single_equal_split_helper(group, group_id, rank)
 
-    @unittest.skip("NCCL A2A is not enabled for OSS builds")
+    @unittest.skipIf(BACKEND == "nccl", "NCCL A2A is not enabled for OSS builds")
     @unittest.skipIf(
-        BACKEND != "nccl", "Only Nccl supports CUDA all_to_all_single"
+        BACKEND != "gloo", "Only Gloo supports CUDA all_to_all_single"
     )
     @skip_if_no_gpu
     @skip_if_rocm
@@ -1598,15 +1636,16 @@ class _DistTestBase(object):
         )
 
     @unittest.skipIf(
-        BACKEND != "mpi", "Only MPI supports CPU all_to_all_single"
+        BACKEND != "mpi" and BACKEND != "gloo",
+        "Only MPI and Gloo support CPU all_to_all_single"
     )
     def test_all_to_all_single_unequal_split(self):
         group, group_id, rank = self._init_global_test()
         self._test_all_to_all_single_unequal_split_helper(group, group_id, rank)
 
-    @unittest.skip("NCCL A2A is not enabled for OSS builds")
+    @unittest.skipIf(BACKEND == "nccl", "NCCL A2A is not enabled for OSS builds")
     @unittest.skipIf(
-        BACKEND != "nccl", "Only Nccl supports CUDA all_to_all_single"
+        BACKEND != "gloo", "Only Gloo supports CUDA all_to_all_single"
     )
     @skip_if_no_gpu
     @skip_if_rocm
@@ -1627,16 +1666,17 @@ class _DistTestBase(object):
         self._test_all_to_all_helper(group, group_id, rank)
 
     @unittest.skipIf(
-        BACKEND != "mpi", "Only MPI supports CPU all_to_all_single"
+        BACKEND != "mpi" and BACKEND != "gloo",
+        "Only MPI and Gloo support CPU all_to_all_single"
     )
     @skip_if_small_worldsize
     def test_all_to_all_single_equal_split_group(self):
         group, group_id, rank = self._init_group_test()
         self._test_all_to_all_single_equal_split_helper(group, group_id, rank)
 
-    @unittest.skip("NCCL A2A is not enabled for OSS builds")
+    @unittest.skipIf(BACKEND == "nccl", "NCCL A2A is not enabled for OSS builds")
     @unittest.skipIf(
-        BACKEND != "nccl", "Only Nccl supports CUDA all_to_all_single"
+        BACKEND != "gloo", "Only Gloo supports CUDA all_to_all_single"
     )
     @skip_if_no_gpu
     @skip_if_rocm
@@ -1653,16 +1693,17 @@ class _DistTestBase(object):
         )
 
     @unittest.skipIf(
-        BACKEND != "mpi", "Only MPI supports CPU all_to_all_single"
+        BACKEND != "mpi" and BACKEND != "gloo",
+        "Only MPI and Gloo support CPU all_to_all_single"
     )
     @skip_if_small_worldsize
     def test_all_to_all_single_unequal_split_group(self):
         group, group_id, rank = self._init_group_test()
         self._test_all_to_all_single_unequal_split_helper(group, group_id, rank)
 
-    @unittest.skip("NCCL A2A is not enabled for OSS builds")
+    @unittest.skipIf(BACKEND == "nccl", "NCCL A2A is not enabled for OSS builds")
     @unittest.skipIf(
-        BACKEND != "nccl", "Only Nccl supports CUDA all_to_all_single"
+        BACKEND != "gloo", "Only Gloo supports CUDA all_to_all_single"
     )
     @skip_if_no_gpu
     @skip_if_rocm
@@ -1685,15 +1726,16 @@ class _DistTestBase(object):
         self._test_all_to_all_helper(group, group_id, rank)
 
     @unittest.skipIf(
-        BACKEND != "mpi", "Only MPI supports CPU all_to_all_single"
+        BACKEND != "mpi" and BACKEND != "gloo",
+        "Only MPI and Gloo support CPU all_to_all_single"
     )
     def test_all_to_all_single_equal_split_full_group(self):
         group, group_id, rank = self._init_full_group_test()
         self._test_all_to_all_single_equal_split_helper(group, group_id, rank)
 
-    @unittest.skip("NCCL A2A is not enabled for OSS builds")
+    @unittest.skipIf(BACKEND == "nccl", "NCCL A2A is not enabled for OSS builds")
     @unittest.skipIf(
-        BACKEND != "nccl", "Only Nccl supports CUDA all_to_all_single"
+        BACKEND != "gloo", "Only Gloo supports CUDA all_to_all_single"
     )
     @skip_if_no_gpu
     @skip_if_rocm
@@ -1709,15 +1751,16 @@ class _DistTestBase(object):
         )
 
     @unittest.skipIf(
-        BACKEND != "mpi", "Only MPI supports CPU all_to_all_single"
+        BACKEND != "mpi" and BACKEND != "gloo",
+        "Only MPI and Gloo support CPU all_to_all_single"
     )
     def test_all_to_all_single_unequal_split_full_group(self):
         group, group_id, rank = self._init_full_group_test()
         self._test_all_to_all_single_unequal_split_helper(group, group_id, rank)
 
-    @unittest.skip("NCCL A2A is not enabled for OSS builds")
+    @unittest.skipIf(BACKEND == "nccl", "NCCL A2A is not enabled for OSS builds")
     @unittest.skipIf(
-        BACKEND != "nccl", "Only Nccl supports CUDA all_to_all_single"
+        BACKEND != "gloo", "Only Gloo supports CUDA all_to_all_single"
     )
     @skip_if_no_gpu
     @skip_if_rocm

@@ -560,6 +560,39 @@ void testLiteInterpreterDuplicatedClassTypeModuleInfo() {
   AT_ASSERT(module_debug_info_set == expected_result);
 }
 
+void testLiteInterpreterEval() {
+  std::vector<torch::jit::IValue> inputs;
+
+  Module m("m");
+  m.define(R"(
+    def __init__(self, x):
+      self.training = True
+
+    def forward(self, input):
+      return torch.dropout(input, 1.0, self.training)
+  )");
+
+  inputs.push_back(torch::ones({1, 1, 28, 28}));
+  m.eval();
+  auto outputref = m.forward(inputs).toTensor();
+
+  // save m in training mode to make sure that mobile eval() will correctly
+  // change back to eval mode
+  m.train();
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+  mobile::Module bc = _load_for_mobile(ss);
+  bc.eval();
+  IValue res;
+  for (int i = 0; i < 3; ++i) {
+    res = bc.run_method("forward", inputs);
+  }
+  auto output = res.toTensor();
+  AT_ASSERT(outputref.dim() == output.dim());
+  AT_ASSERT(
+      outputref[0][0][0][0].item<int>() == output[0][0][0][0].item<int>());
+}
+
 namespace {
 static auto reg =
     torch::class_<TorchBindLiteInterpreterTestStruct>(

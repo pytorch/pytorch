@@ -1574,6 +1574,49 @@ class TestAutograd(TestCase):
         self.assertEqual(y.grad, grad[1])
         self.assertEqual(z.grad, grad[2])
 
+    def test_hstack(self):
+        x = torch.randn(10, 10, requires_grad=True)
+        y = torch.randn(10, 10, requires_grad=True)
+        z = torch.randn(10, 10, requires_grad=True)
+        stacked = torch.hstack([x, y, z])
+        grad = torch.randn(10, 30)
+        stacked.backward(grad)
+        self.assertEqual(x.grad, grad[:, 0:10])
+        self.assertEqual(y.grad, grad[:, 10:20])
+        self.assertEqual(z.grad, grad[:, 20:30])
+
+        x = torch.randn(10, requires_grad=True)
+        y = torch.randn(10, requires_grad=True)
+        z = torch.randn(10, requires_grad=True)
+        stacked = torch.hstack([x, y, z])
+        grad = torch.randn(30)
+        stacked.backward(grad)
+        self.assertEqual(x.grad, grad[0:10])
+        self.assertEqual(y.grad, grad[10:20])
+        self.assertEqual(z.grad, grad[20:30])
+
+    def test_vstack(self):
+        x = torch.randn(10, 10, requires_grad=True)
+        y = torch.randn(10, 10, requires_grad=True)
+        z = torch.randn(10, 10, requires_grad=True)
+        stacked = torch.vstack([x, y, z])
+        grad = torch.randn(30, 10)
+        stacked.backward(grad)
+        self.assertEqual(x.grad, grad[0:10])
+        self.assertEqual(y.grad, grad[10:20])
+        self.assertEqual(z.grad, grad[20:30])
+
+    def test_dstack(self):
+        x = torch.randn(10, 10, requires_grad=True)
+        y = torch.randn(10, 10, requires_grad=True)
+        z = torch.randn(10, 10, requires_grad=True)
+        stacked = torch.dstack([x, y, z])
+        grad = torch.randn(10, 10, 3)
+        stacked.backward(grad)
+        self.assertEqual(x.grad, grad[:, :, 0])
+        self.assertEqual(y.grad, grad[:, :, 1])
+        self.assertEqual(z.grad, grad[:, :, 2])
+
     def test_unbind(self):
         stacked = torch.randn(3, 10, 10, requires_grad=True)
         x, y, z = stacked.unbind()
@@ -5803,12 +5846,13 @@ class TestAutogradFunctional(TestCase):
 # Generic device type autograd tests.
 class TestAutogradDeviceType(TestCase):
 
-    def test_min_max_median_backprops_to_single_value(self, device):
+    def test_min_max_median_backprops_to_all_values(self, device):
         for f in [torch.min, torch.max, torch.median]:
             x = torch.tensor([1., 0., 1., 0., 1., 0.], device=device, requires_grad=True)
             y = f(x)
             y.backward()
             self.assertEqual(x.grad.sum(), 1.)
+            self.assertEqual((x.grad == 1 / 3).sum(), 3)
 
     # skip this test if running on rocm, because in cdist
     # we use __shfl_down_sync on CUDA for fast reduction
