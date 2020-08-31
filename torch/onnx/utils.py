@@ -866,8 +866,7 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
         else:
             raise RuntimeError("ONNX export failed on an operator with unrecognized namespace {}::{}. "
                                "If you are trying to export a custom operator, make sure you registered "
-                               "it with the right domain and version. "
-                               "Otherwise, please report a bug.".format(ns, op_name))
+                               "it with the right domain and version.".format(ns, op_name))
     except RuntimeError:
         if operator_export_type == OperatorExportTypes.ONNX_FALLTHROUGH:
             return None
