@@ -1203,7 +1203,7 @@ def emit_body(declaration):
         for derivative in fw_derivatives:
             res = derivative['out_arg']
 
-            if_stmt = " or ".join([FW_DERIVATIVE_CHECK_TEMPLATE.substitute(req_inp=inp['name'])
+            if_stmt = " || ".join([FW_DERIVATIVE_CHECK_TEMPLATE.substitute(req_inp=inp['name'])
                                    for inp in differentiable_inputs if inp['name'] in derivative['required_inputs']])
             if not if_stmt:
                 # Handle functions like stack
