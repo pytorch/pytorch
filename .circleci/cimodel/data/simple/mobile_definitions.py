@@ -57,11 +57,6 @@ WORKFLOW_DATA = [
         [DOCKER_REQUIREMENT_ASAN],
         ["build"]
     ),
-    MobileJob(
-        DOCKER_IMAGE_ASAN,
-        [DOCKER_REQUIREMENT_ASAN],
-        ["custom", "build", "static"]
-    ),
 
     # Use LLVM-DEV toolchain in android-ndk-r19c docker image
     MobileJob(
