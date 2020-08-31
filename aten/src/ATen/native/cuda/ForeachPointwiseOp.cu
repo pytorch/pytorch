@@ -41,9 +41,9 @@ std::vector<Tensor> foreach_tensor_addcdiv_cuda(TensorList input, TensorList ten
     TORCH_CHECK(input.size() ==  tensors1.size(), "Tensor lists must be of the same length.");
     TORCH_CHECK(tensors1.size() ==  tensors2.size(), "Tensor lists must be of the same length.");
 
-    if (!check_fast_route(input, scalar) ||
-        !check_fast_route(tensors1, tensors2) ||
-        !check_fast_route(input, tensors1)) {
+    if (!can_use_fast_route(input, scalar) ||
+        !can_use_fast_route(tensors1, tensors2) ||
+        !can_use_fast_route(input, tensors1)) {
         return at::native::foreach_tensor_addcdiv_slow(input, tensors1, tensors2, scalar);
     }
 
@@ -55,9 +55,9 @@ void foreach_tensor_addcdiv_cuda_(TensorList input, TensorList tensors1, TensorL
     TORCH_CHECK(input.size() ==  tensors1.size(), "Tensor lists must be of the same length.");
     TORCH_CHECK(tensors1.size() ==  tensors2.size(), "Tensor lists must be of the same length.");
 
-    if (!check_fast_route(input, scalar) ||
-        !check_fast_route(tensors1, tensors2) ||
-        !check_fast_route(input, tensors1)) {
+    if (!can_use_fast_route(input, scalar) ||
+        !can_use_fast_route(tensors1, tensors2) ||
+        !can_use_fast_route(input, tensors1)) {
         at::native::foreach_tensor_addcdiv_slow_(input, tensors1, tensors2, scalar);
     }
 
@@ -69,9 +69,9 @@ std::vector<Tensor> foreach_tensor_addcmul_cuda(TensorList input, TensorList ten
     TORCH_CHECK(input.size() ==  tensors1.size(), "Tensor lists must be of the same length.");
     TORCH_CHECK(tensors1.size() ==  tensors2.size(), "Tensor lists must be of the same length.");
 
-    if (!check_fast_route(input, scalar) ||
-        !check_fast_route(tensors1, tensors2) ||
-        !check_fast_route(input, tensors1)) {
+    if (!can_use_fast_route(input, scalar) ||
+        !can_use_fast_route(tensors1, tensors2) ||
+        !can_use_fast_route(input, tensors1)) {
         return at::native::foreach_tensor_addcmul_slow(input, tensors1, tensors2, scalar);
     }
 
@@ -83,9 +83,9 @@ void foreach_tensor_addcmul_cuda_(TensorList input, TensorList tensors1, TensorL
     TORCH_CHECK(input.size() ==  tensors1.size(), "Tensor lists must be of the same length.");
     TORCH_CHECK(tensors1.size() ==  tensors2.size(), "Tensor lists must be of the same length.");
 
-    if (!check_fast_route(input, scalar) ||
-        !check_fast_route(tensors1, tensors2) ||
-        !check_fast_route(input, tensors1)) {
+    if (!can_use_fast_route(input, scalar) ||
+        !can_use_fast_route(tensors1, tensors2) ||
+        !can_use_fast_route(input, tensors1)) {
         at::native::foreach_tensor_addcmul_slow_(input, tensors1, tensors2, scalar);
     }
 
