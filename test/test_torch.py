@@ -16218,6 +16218,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                         torch.half: 1e-1, torch.cfloat: 1e-4, torch.cdouble: 1e-8})
     @dtypesIfCUDA(*torch.testing.get_all_complex_dtypes(), *torch.testing.get_all_fp_dtypes(include_bfloat16=False))
     @dtypes(*torch.testing.get_all_complex_dtypes(), *torch.testing.get_all_fp_dtypes())
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_addmm(self, device, dtype):
         M = torch.randn(10, 25).to(device=device, dtype=dtype)
         m1 = torch.randn(10, 50).to(device=device, dtype=dtype)
@@ -16234,6 +16235,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @dtypesIfCUDA(*([torch.float, torch.double] +
                     ([] if TEST_WITH_ROCM else torch.testing.get_all_complex_dtypes())))
     @tf32_on_and_off(0.005)
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_addmm_sizes(self, device, dtype):
         for m in [0, 1, 25]:
             for n in [0, 1, 10]:
