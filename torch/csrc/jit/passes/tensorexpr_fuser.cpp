@@ -1,3 +1,4 @@
+#include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <ATen/record_function.h>
 #include <jit/runtime/profiling_graph_executor_impl.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
