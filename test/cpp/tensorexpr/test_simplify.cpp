@@ -197,6 +197,122 @@ void testConstantFoldWithVar() {
   }
 }
 
+void testConditionalSelectFoldSimple() {
+  KernelScope kernel_scope;
+  ExprHandle a(3.0f);
+  ExprHandle b(4.0f);
+  ExprHandle c(3.0f);
+  {
+    ExprHandle f = (a > b);
+
+    ExprHandle newF = IRSimplifier::simplify(f);
+    ASSERT_NE(newF.AsNode<IntImm>(), nullptr);
+    ASSERT_EQ(newF.AsNode<IntImm>()->value(), 0);
+
+    SimpleIRExprEval eval(newF);
+    ASSERT_EQ(eval.value<int>(), 0);
+  }
+  {
+    ExprHandle f = (a < b);
+
+    ExprHandle newF = IRSimplifier::simplify(f);
+    ASSERT_NE(newF.AsNode<IntImm>(), nullptr);
+    ASSERT_EQ(newF.AsNode<IntImm>()->value(), 1);
+
+    SimpleIRExprEval eval(newF);
+    ASSERT_EQ(eval.value<int>(), 1);
+  }
+  {
+    ExprHandle f = (a == c);
+
+    ExprHandle newF = IRSimplifier::simplify(f);
+    ASSERT_NE(newF.AsNode<IntImm>(), nullptr);
+    ASSERT_EQ(newF.AsNode<IntImm>()->value(), 1);
+
+    SimpleIRExprEval eval(newF);
+    ASSERT_EQ(eval.value<int>(), 1);
+  }
+  {
+    ExprHandle f = (a != c);
+
+    ExprHandle newF = IRSimplifier::simplify(f);
+    ASSERT_NE(newF.AsNode<IntImm>(), nullptr);
+    ASSERT_EQ(newF.AsNode<IntImm>()->value(), 0);
+
+    SimpleIRExprEval eval(newF);
+    ASSERT_EQ(eval.value<int>(), 0);
+  }
+}
+
+void testConditionalSelectFoldTwoLayer() {
+  KernelScope kernel_scope;
+  ExprHandle a(3.0f);
+  ExprHandle b(2.0f);
+  ExprHandle c(2.0f);
+  ExprHandle d(1.0f);
+  {
+    ExprHandle f = (a + b < c + d);
+
+    ExprHandle newF = IRSimplifier::simplify(f);
+    ASSERT_NE(newF.AsNode<IntImm>(), nullptr);
+    ASSERT_EQ(newF.AsNode<IntImm>()->value(), 0);
+
+    SimpleIRExprEval eval(newF);
+    ASSERT_EQ(eval.value<int>(), 0);
+  }
+  {
+    ExprHandle f = (a + b > c + d);
+
+    ExprHandle newF = IRSimplifier::simplify(f);
+    ASSERT_NE(newF.AsNode<IntImm>(), nullptr);
+    ASSERT_EQ(newF.AsNode<IntImm>()->value(), 1);
+
+    SimpleIRExprEval eval(newF);
+    ASSERT_EQ(eval.value<int>(), 1);
+  }
+  {
+    ExprHandle f = (a + d == b + c);
+
+    ExprHandle newF = IRSimplifier::simplify(f);
+    ASSERT_NE(newF.AsNode<IntImm>(), nullptr);
+    ASSERT_EQ(newF.AsNode<IntImm>()->value(), 1);
+
+    SimpleIRExprEval eval(newF);
+    ASSERT_EQ(eval.value<int>(), 1);
+  }
+  {
+    ExprHandle f = (a + d != b + c);
+
+    ExprHandle newF = IRSimplifier::simplify(f);
+    ASSERT_NE(newF.AsNode<IntImm>(), nullptr);
+    ASSERT_EQ(newF.AsNode<IntImm>()->value(), 0);
+
+    SimpleIRExprEval eval(newF);
+    ASSERT_EQ(eval.value<int>(), 0);
+  }
+}
+
+void testConditionalSelectFoldWithVar() {
+  KernelScope kernel_scope;
+  VarHandle x("x", kFloat);
+  ExprHandle f = x < 4.f;
+
+  ExprHandle newF = IRSimplifier::simplify(f);
+  const IntImm* folded = newF.AsNode<IntImm>();
+  ASSERT_EQ(folded, nullptr);
+
+  {
+    SimpleIRExprEval eval(newF);
+    eval.bindVar(x, ExprHandle(3.f));
+    ASSERT_EQ(eval.value<int>(), 1);
+  }
+  {
+    SimpleIRExprEval eval(newF);
+    eval.bindVar(x, ExprHandle(5.f));
+    ASSERT_EQ(eval.value<int>(), 0);
+  }
+}
+
 void testUnFoldableExpr() {
   KernelScope kernel_scope;
   VarHandle x("x", kFloat);
@@ -1384,12 +1500,33 @@ void testSimplifyRoundModPattern() {
   }
 
   {
+    // Reverse order.
+    // x%y + (x/y)*y => x.
+    VarHandle x("x", kInt);
+    VarHandle y("y", kInt);
+    ExprHandle body = (x % y) + ((x / y) * y);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_VAR_WITH_NAME(simplified.node(), "x");
+  }
+
+  {
     // Non opaque denominator.
     // (x / (4+y)) * (4+y)) + (x % (y + 4)) => x.
     VarHandle x("x", kInt);
     VarHandle y("y", kInt);
     ExprHandle body = ((x / (ExprHandle(4) + y)) * (ExprHandle(4) + y)) +
         (x % (y + ExprHandle(4)));
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_VAR_WITH_NAME(simplified.node(), "x");
+  }
+
+  {
+    // Reverse order.
+    // (x % (y + 4)) + (x / (4+y)) * (4+y)) => x.
+    VarHandle x("x", kInt);
+    VarHandle y("y", kInt);
+    ExprHandle body = (x % (y + ExprHandle(4))) +
+        ((x / (ExprHandle(4) + y)) * (ExprHandle(4) + y));
     ExprHandle simplified = IRSimplifier::simplify(body);
     IS_VAR_WITH_NAME(simplified.node(), "x");
   }
@@ -1430,6 +1567,35 @@ void testSimplifyRoundModPattern() {
     IS_NODE_WITH_NAME(Div, simplified.node(), div);
     IS_VAR_WITH_NAME(div->lhs(), "x");
     IS_IMM_WITH_VAL(Int, div->rhs(), 2);
+  }
+
+  {
+    // Numerator and denominator.
+    // ((2*x)/(2*y) * (2*y)) + ((2*x) % (2*y)) => 2 * x.
+    VarHandle x("x", kInt);
+    VarHandle y("y", kInt);
+    ExprHandle body =
+        (((ExprHandle(2) * x) / (ExprHandle(2) * y)) * (ExprHandle(2) * y)) +
+        ((ExprHandle(2) * x) % (ExprHandle(2) * y));
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Mul, simplified.node(), mul);
+    IS_IMM_WITH_VAL(Int, mul->lhs(), 2);
+    IS_VAR_WITH_NAME(mul->rhs(), "x");
+  }
+
+  {
+    // Reverse order.
+    // ((2*x) % (2*y)) + ((2*x)/(2*y) * (2*y)) => 2 * x.
+    VarHandle x("x", kInt);
+    VarHandle y("y", kInt);
+    ExprHandle body = ((ExprHandle(2) * x) % (ExprHandle(2) * y)) +
+        (((ExprHandle(2) * x) / (ExprHandle(2) * y)) * (ExprHandle(2) * y));
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_NODE_WITH_NAME(Mul, simplified.node(), mul);
+    IS_IMM_WITH_VAL(Int, mul->lhs(), 2);
+    IS_VAR_WITH_NAME(mul->rhs(), "x");
   }
 
   {
@@ -1622,6 +1788,26 @@ void testSimplifyRoundModPatternMultivar() {
     IS_NODE_WITH_NAME(Mod, add->rhs(), zMod);
     IS_VAR_WITH_NAME(zMod->lhs(), "z");
     IS_IMM_WITH_VAL(Int, zMod->rhs(), 8);
+  }
+
+  {
+    // Compound.
+    // (x + (z + 512 * y) % 16) + 16 * ((z + 512 * y) / 16)  => x + (z + 512 *
+    // y).
+    VarHandle x("x", kInt);
+    VarHandle y("y", kInt);
+    VarHandle z("z", kInt);
+
+    ExprHandle body = x + (z + ExprHandle(512) * y) % ExprHandle(16) +
+        ExprHandle(16) * ((z + ExprHandle(512) * y) / ExprHandle(16));
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Add, simplified.node(), add);
+    IS_VAR_WITH_NAME(add->lhs(), "x");
+    IS_NODE_WITH_NAME(Add, add->rhs(), add2);
+    IS_VAR_WITH_NAME(add2->lhs(), "z");
+    IS_NODE_WITH_NAME(Mul, add2->rhs(), mul);
+    IS_IMM_WITH_VAL(Int, mul->lhs(), 512);
+    IS_VAR_WITH_NAME(mul->rhs(), "y");
   }
 }
 

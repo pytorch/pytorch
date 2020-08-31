@@ -111,9 +111,11 @@ class FakeQuantize(Module):
     @torch.jit.export
     def extra_repr(self):
         return 'fake_quant_enabled={}, observer_enabled={},\
-            scale={}, zero_point={}'.format(
+            quant_min={}, quant_max={}, dtype={}, qscheme={}, ch_axis={}, \
+        scale={}, zero_point={}'.format(
             self.fake_quant_enabled, self.observer_enabled,
-            self.scale, self.zero_point)
+            self.quant_min, self.quant_max,
+            self.dtype, self.qscheme, self.ch_axis, self.scale, self.zero_point)
 
     def _save_to_state_dict(self, destination, prefix, keep_vars):
         # We cannot currently register scalar values as buffers, so need to manually

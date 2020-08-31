@@ -7,6 +7,8 @@ from torch.onnx import utils, OperatorExportTypes, TrainingMode
 from torch.onnx.symbolic_helper import _set_opset_version, _set_operator_export_type
 import torch.utils.cpp_extension
 from test_pytorch_common import skipIfUnsupportedMinOpsetVersion
+import caffe2.python.onnx.backend as backend
+from verify import verify
 
 import torchvision
 
@@ -58,6 +60,23 @@ class TestUtilityFuns(TestCase):
         assert "Provided key invalid_name1 for dynamic axes is not a valid input/output name" in messages
         assert "Provided key invalid_name2 for dynamic axes is not a valid input/output name" in messages
         assert len(messages) == 2
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_split_to_slice(self):
+        class SplitModule(torch.nn.Module):
+            def forward(self, x, y, t):
+                splits = (x.size(1), y.size(1))
+                out, out2 = torch.split(t, splits, dim=1)
+                return out, out2
+
+        _set_opset_version(self.opset_version)
+        _set_operator_export_type(OperatorExportTypes.ONNX)
+        x = torch.randn(2, 3)
+        y = torch.randn(2, 4)
+        t = torch.randn(2, 7)
+        graph, _, _ = utils._model_to_graph(SplitModule(), (x, y, t))
+        for node in graph.nodes():
+            assert node.kind() != "onnx::SplitToSequence"
 
     def test_constant_fold_transpose(self):
         class TransposeModule(torch.nn.Module):
@@ -501,6 +520,25 @@ class TestUtilityFuns(TestCase):
         # verify that the model state is preserved
         assert model.training == old_state
 
+    def test_diagnose_export_mode(self):
+        class MyModule(torch.nn.Module):
+            def forward(self, x):
+                return torch.cumsum(x, dim=0)
+
+        model = MyModule()
+        x = torch.randn(2, 3, 4)
+        f = io.BytesIO()
+
+        # run export in diagnose mode
+        graph, unsupported_ops = torch.onnx._diagnose_export(model, (x,), f,
+                                                             opset_version=9)
+        iter = graph.nodes()
+        assert next(iter).kind() == "onnx::Constant"
+        assert next(iter).kind() == "prim::Constant"
+        assert next(iter).kind() == "aten::cumsum"
+        assert len(unsupported_ops) == 1
+        assert unsupported_ops == ['aten::cumsum']
+
     def test_dropout_training(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -635,6 +673,27 @@ class TestUtilityFuns(TestCase):
         iter = graph.nodes()
         assert next(iter).kind() == "prim::ListConstruct"
 
+    def test_custom_layer_tuple(self):
+        class CustomFunction(torch.autograd.Function):
+            @staticmethod
+            def symbolic(g, input):
+                return g.op('CustomNamespace::Custom', input, outputs=2)
+
+            @staticmethod
+            def forward(ctx, input):
+                return input, input
+
+        class Custom(torch.nn.Module):
+            def forward(self, input):
+                return CustomFunction.apply(input)
+
+        model = Custom()
+        batch = torch.FloatTensor(1, 3)
+
+        graph, _, _ = utils._model_to_graph(model, batch)
+        iter = graph.nodes()
+        assert next(iter).kind() == "CustomNamespace::Custom"
+
     @skipIfUnsupportedMinOpsetVersion(12)
     def test_dropout_training_zero(self):
         class MyModule(torch.nn.Module):
@@ -676,6 +735,39 @@ class TestUtilityFuns(TestCase):
         ratio_ort = np.sum(ort_mask) / nb_elements
 
         np.testing.assert_allclose(ratio_pytorch, ratio_ort, rtol=0.01, atol=0.01)
+
+    def test_unused_initializers(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super(Model, self).__init__()
+                self.conv2 = torch.nn.ConvTranspose2d(16, 33, (3, 5), stride=(2, 1), padding=(4, 2), dilation=(1, 1))
+                self.k_proj = torch.nn.Linear(5, 5, bias=True)
+
+            def forward(self, x):
+                x = self.conv2(x)
+                return x
+
+        x = torch.randn(20, 16, 50, 100)
+        _set_opset_version(self.opset_version)
+        _set_operator_export_type(OperatorExportTypes.ONNX)
+        _, params_dict, __ = utils._model_to_graph(Model(), (x, ), do_constant_folding=False,
+                                                   operator_export_type=OperatorExportTypes.ONNX)
+
+        assert len(params_dict) == 2
+
+    def test_modifying_params(self):
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super(MyModel, self).__init__()
+                self.param = torch.nn.Parameter(torch.tensor([2.0]))
+
+            def forward(self, x):
+                y = x * x
+                self.param.data.add_(1.0)
+                return y
+
+        x = torch.tensor([1, 2])
+        verify(MyModel(), x, backend, do_constant_folding=False)
 
     def test_fuse_conv_bn(self):
         class Fuse(torch.nn.Module):
@@ -771,7 +863,7 @@ class TestUtilityFuns(TestCase):
                           opset_version=self.opset_version, training=torch.onnx.TrainingMode.TRAINING)
         ort_sess = onnxruntime.InferenceSession(f.getvalue())
         ort_inputs = {ort_sess.get_inputs()[0].name: x.cpu().numpy()}
-        ort_outs1 = ort_sess.run(None, ort_inputs)      
+        ort_outs1 = ort_sess.run(None, ort_inputs)
         f = io.BytesIO()
         torch.onnx.export(model, (x,), f,
                           opset_version=self.opset_version, training=torch.onnx.TrainingMode.EVAL)

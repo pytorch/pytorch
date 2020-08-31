@@ -59,6 +59,10 @@ bool operator==(const ivalue::EnumHolder& lhs, const ivalue::EnumHolder& rhs) {
 }
 
 const std::string ivalue::EnumHolder::qualifiedClassName() const {
+  return type_->qualifiedClassName().qualifiedName();
+}
+
+const std::string ivalue::EnumHolder::unqualifiedClassName() const {
   return type_->qualifiedClassName().name();
 }
 
@@ -104,6 +108,8 @@ TypePtr IValue::type() const {
       return toTuple()->type();
     case Tag::Generator:
       return GeneratorType::get();
+    case Tag::Quantizer:
+      return QuantizerType::get();
     case Tag::Enum:
       return toEnumHolder()->type();
   }
@@ -273,6 +279,7 @@ IValue IValue::equals(const IValue& rhs) const {
     case Tag::PyObject:
     case Tag::Capsule:
     case Tag::Generator:
+    case Tag::Quantizer:
       return ptrEqual(lhs, rhs);
     case Tag::Enum:
       return lhs.toEnumHolder()->is(*rhs.toEnumHolder());
@@ -446,8 +453,11 @@ std::ostream& IValue::repr(
     }
     case IValue::Tag::GenericDict:
       return printMaybeAnnotatedDict(out, v, formatter);
-    case IValue::Tag::Enum:
-      return out << v.toEnumHolder();
+    case IValue::Tag::Enum: {
+      auto enum_holder = v.toEnumHolder();
+      return out << enum_holder->qualifiedClassName() << "." <<
+          enum_holder->name();
+    }
     default:
       TORCH_INTERNAL_ASSERT(false, "repr() not defined on: ", v.tagKind());
   }
@@ -514,16 +524,19 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
     }
     case IValue::Tag::Generator:
       return out << "Generator";
+    case IValue::Tag::Quantizer:
+      return out << "Quantizer";
     case IValue::Tag::Object: {
       // TODO we should attempt to call __str__ if the object defines it.
       auto obj = v.toObject();
       // print this out the way python would do it
       return out << "<" << obj->name() << " object at " << obj.get() << ">";
     }
-    case IValue::Tag::Enum:
+    case IValue::Tag::Enum: {
       auto enum_holder = v.toEnumHolder();
-      return out << "Enum<" << enum_holder->qualifiedClassName() << "." <<
+      return out << "Enum<" << enum_holder->unqualifiedClassName() << "." <<
           enum_holder->name() << ">";
+    }
 
   }
   AT_ERROR("Tag not found: ", v.tagKind());

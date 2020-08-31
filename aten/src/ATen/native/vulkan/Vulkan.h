@@ -85,7 +85,7 @@ const VContext& context();
 class VBuffer;
 class VImage;
 
-using ImageSize = std::array<uint32_t, 3>;
+using ImageSize = std::array<int32_t, 3>;
 struct ImageSizes {
   ImageSize imageSize;
   ImageSize dataSize;
@@ -125,6 +125,8 @@ class VulkanTensor final {
 
   bool can_be_image() const;
   bool has_image() const;
+
+  void sync_image_to_buffer() const;
 
   // if imageSizes argument is not specified:
   // Allocates VImage of sizes{W,H,NC4} and fills it from tensor VBuffer if it
@@ -250,11 +252,11 @@ class VBuffer final {
                    VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER};
   }
 
-  MapMemory map() {
+  MapMemory map() const {
     return MapMemory{context().device(), bufferMemory_, 0, bufferSizeBytes_};
   }
 
-  void copy_from_device_to_host(void* outputData, int64_t size);
+  void copy_from_device_to_host(void* outputData, int64_t size) const;
   void copy_from_host_to_device(const void* data, int64_t size);
   void set_zeros();
 
@@ -274,6 +276,10 @@ class VBuffer final {
       VkCommandBuffer commandBuffer,
       VkDeviceSize offset,
       VkDeviceSize size) const;
+
+  inline VkBuffer vkbuffer() const {
+    return buffer_;
+  }
 
  private:
   VkDeviceSize bufferSizeBytes_;
@@ -367,6 +373,13 @@ void copy_image_to_buffer(
     VBuffer& buffer,
     bool addBufferMemoryBarrierForHost = false);
 
+void copy_buffer_to_buffer(
+    const VBuffer& srcBuffer,
+    VBuffer& dstBuffer,
+    VkDeviceSize size,
+    VkDeviceSize srcOffset = 0,
+    VkDeviceSize dstOffset = 0);
+
 VkDescriptorSetLayoutBinding descriptorSetLayoutBinding(
     uint32_t binding,
     VkDescriptorType descriptorType);
@@ -389,6 +402,11 @@ void createDescriptorSetLayoutSinglePool(
     VkDescriptorSetLayout* descrSetLayout,
     VkDescriptorPool* descrPool,
     VkDescriptorSet* descrSet);
+
+void allocateCommandBuffer(VkDevice device, VkCommandBuffer* commandBuffer);
+void beginCommandBuffer(VkCommandBuffer commandBuffer);
+void endCommandBuffer(VkCommandBuffer commandBuffer);
+void submitAndWaitCommandBuffer(VkDevice device, VkCommandBuffer commandBuffer);
 
 struct WorkGroupSize {
   uint32_t x;

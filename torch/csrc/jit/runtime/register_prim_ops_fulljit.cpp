@@ -36,12 +36,39 @@ RegisterOperators reg(
          },
          aliasAnalysisSpecialCase()),
      Operator(
+         prim::profile_optional,
+         [](const Node* node) -> Operation {
+           auto callback = node->cast<ProfileOptionalOp>()->getCallback();
+           return [](Stack* stack) {
+             AT_ERROR(
+                 "Must be lowered to Interpreter's PROFILE instruction"); // NOLINT
+           };
+         },
+         aliasAnalysisSpecialCase()),
+     Operator(
          prim::FusionGroup,
          [](const Node* node) -> Operation {
            const auto key = registerFusion(node);
            return [key](Stack* stack) {
              RECORD_FUNCTION("FusionGroup", std::vector<c10::IValue>());
              runFusion(key, *stack);
+           };
+         },
+         aliasAnalysisSpecialCase()),
+     Operator(
+         prim::TypeCheck /* (...)  -> (..., bool) */,
+         [](const Node * /* node */) -> Operation {
+           return [](Stack* /* stack */) {
+             AT_ERROR("prim::TypeCheck not yet implemented"); // NOLINT
+           };
+         },
+         aliasAnalysisSpecialCase()),
+     Operator(
+         prim::FallbackGraph,
+         [](const Node* node) -> Operation {
+           return [](Stack* stack) {
+             AT_ERROR(
+                 "Must be converted to prim::FunctionCall by replaceFallbackGraphWithFallbackFunction"); // NOLINT
            };
          },
          aliasAnalysisSpecialCase()),
@@ -175,14 +202,6 @@ RegisterOperators reg(
            bool b;
            pop(stack, b);
            push(stack, at::scalar_to_tensor(b));
-         },
-         aliasAnalysisFromSchema()),
-     Operator(
-         "aten::str(t elem) -> str",
-         [](Stack* stack) {
-           std::stringstream ss;
-           ss << pop(stack);
-           push(stack, ss.str());
          },
          aliasAnalysisFromSchema()),
      Operator(
@@ -734,6 +753,10 @@ RegisterOperators reg2({
         listSort<bool>,
         aliasAnalysisFromSchema()),
     Operator(
+        "aten::sort.str(str[](a!) self, bool reverse=False) -> ()",
+        listSort<std::string>,
+        aliasAnalysisFromSchema()),
+    Operator(
         "aten::sorted.int(int[](a) input) -> (int[])",
         listCopyAndSort<int64_t>,
         aliasAnalysisFromSchema()),
@@ -749,6 +772,11 @@ RegisterOperators reg2({
         "aten::sorted.bool(bool[](a) input) -> (bool[])",
         listCopyAndSort<bool>,
         aliasAnalysisFromSchema()),
+    Operator(
+        "aten::sorted.str(str[](a) input) -> (str[])",
+        listCopyAndSort<std::string>,
+        aliasAnalysisFromSchema()),
+
     Operator(
         "aten::eq.float_list(float[] a, float[] b) -> bool",
         listEq<double>,
@@ -1136,7 +1164,7 @@ Function* checkSortSchema(const c10::TypePtr& list_element_type) {
               << "returns a bool";
   } else {
     error_str << "To sort a list of " << list_element_type->repr_str()
-              << " must be of Tensors, ints, floats, bools or "
+              << " must be of Tensors, ints, floats, bools, strs or "
               << "a User Defined Class that defines the __lt__ compare method"
               << ", got list of " << list_element_type->repr_str() << "\n";
   }
