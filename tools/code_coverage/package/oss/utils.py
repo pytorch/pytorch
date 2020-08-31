@@ -2,7 +2,7 @@ import os
 import subprocess
 from typing import List
 
-from ..util.setting import SCRIPT_FOLDER, TestType
+from ..util.setting import TOOL_FOLDER, TestType
 from ..util.utils import print_error, remove_file
 
 
@@ -40,7 +40,10 @@ def get_llvm_tool_path() -> str:
 
 
 def get_pytorch_folder() -> str:
-    return os.environ.get("PYTORCH_FOLDER", SCRIPT_FOLDER)
+    # TOOL_FOLDER in oss: pytorch/tools/code_coverage
+    return os.environ.get(
+        "PYTORCH_FOLDER", os.path.join(TOOL_FOLDER, os.path.pardir, os.path.pardir)
+    )
 
 
 def get_cov_type() -> str:

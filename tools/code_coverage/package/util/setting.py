@@ -6,13 +6,13 @@ from typing import Dict, List, Set
 # <project folder>
 HOME_DIR = os.environ["HOME"]
 setting_file_path = os.path.realpath(__file__)
-SCRIPT_FOLDER = os.path.join(
+TOOL_FOLDER = os.path.join(
     os.path.dirname(setting_file_path), os.path.pardir, os.path.pardir
 )
 
 
 # <profile folder>
-PROFILE_DIR = os.path.join(SCRIPT_FOLDER, "profile")
+PROFILE_DIR = os.path.join(TOOL_FOLDER, "profile")
 JSON_FOLDER_BASE_DIR = os.path.join(PROFILE_DIR, "json")
 MERGED_FOLDER_BASE_DIR = os.path.join(PROFILE_DIR, "merged")
 SUMMARY_FOLDER_DIR = os.path.join(PROFILE_DIR, "summary")
