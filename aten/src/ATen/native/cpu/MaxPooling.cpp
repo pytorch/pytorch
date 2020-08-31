@@ -14,12 +14,13 @@ inline void max_pool1d_kernel(
     const scalar_t* C10_RESTRICT ip,
     const PoolingParams1D& p) {
   for (int64_t kj = 0; kj < p.KW; ++kj) {
-    int64_t oj = p.valid_kernel_start(kj);
-    int64_t oe = p.valid_kernel_end(kj);
-    int64_t ij = oj * p.SJ + kj * p.DJ - p.PJ;
+    int64_t oj = p.valid_output_start(kj);
+    int64_t oe = p.valid_output_end(kj);
+    int64_t ij = p.index(kj, oj);
     for (; oj < oe; ++oj, ij += p.SJ) {
-      bool update_max = std::isnan(ip[ij]) || op[oj] < ip[ij];
-      op[oj] = update_max ? ip[ij] : op[oj];
+      scalar_t val = ip[ij];
+      bool update_max = std::isnan(val) || op[oj] < val;
+      op[oj] = update_max ? val : op[oj];
     }
   }
 }

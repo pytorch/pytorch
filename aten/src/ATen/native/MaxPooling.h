@@ -18,15 +18,20 @@ struct PoolingParams1D {
   int64_t PJ; // Column padding
   int64_t DJ; // Column dilation
 
+  // Return index of input element for the given kernel and output index
+  inline int64_t index(int64_t kj, int64_t oj) const {
+    return oj * SJ + kj * DJ - PJ;
+  }
+
   // Return index of first output within bounds for this kernel index
-  inline int64_t valid_kernel_start(int64_t kj) const {
-    int64_t ij = kj * DJ - PJ;
+  inline int64_t valid_output_start(int64_t kj) const {
+    int64_t ij = index(kj, 0);;
     return ij < 0 ? at::divup(-ij, SJ) : 0;
   }
 
   // Return index one past last output within bounds for this kernel index
-  inline int64_t valid_kernel_end(int64_t kj) const {
-    int64_t ij = (OW - 1) * SJ + kj * DJ - PJ;
+  inline int64_t valid_output_end(int64_t kj) const {
+    int64_t ij = index(kj, OW - 1);
     return ij >= IW ? OW - at::divup(ij - (IW - 1), SJ) : OW;
   }
 };
