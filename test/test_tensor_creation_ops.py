@@ -748,7 +748,8 @@ class TestTensorCreation(TestCase):
         with self.maybeWarnsRegex(UserWarning, "Not providing a value for .+"):
             op(0, 50, device=device, dtype=dtype)
         with self.maybeWarnsRegex(UserWarning, "Not providing a value for .+"):
-            op(0, 50, device=device, dtype=dtype, out=torch.empty(0, device=device, dtype=dtype))
+            out = torch.empty(0, device=device, dtype=dtype)
+            op(0, 50, device=device, dtype=dtype, out=out)
 
     @dtypes(torch.float)
     def test_linspace_steps_warning(self, device, dtype):
