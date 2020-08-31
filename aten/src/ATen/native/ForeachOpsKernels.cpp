@@ -27,8 +27,7 @@ std::vector<Tensor> foreach_tensor_add_list_kernel_slow(TensorList tensors1, Ten
 
   std::vector<Tensor> result;
   for (int i = 0; i < tensors1.size(); i++) {
-    auto temp = tensors1[i].add(tensors2[i]);
-    result.emplace_back(temp);
+    result.emplace_back(tensors1[i].add(tensors2[i]));
   }
 
   return result;

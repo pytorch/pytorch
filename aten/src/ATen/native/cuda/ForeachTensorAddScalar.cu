@@ -7,7 +7,7 @@ namespace at { namespace native {
 std::vector<Tensor> foreach_tensor_add_scalar_kernel_cuda(TensorList tensors, Scalar scalar) {
     verify_list(tensors);
 
-    if (!check_fast_route(tensors, scalar)) {
+    if (!can_use_fast_route(tensors, scalar)) {
         return at::native::foreach_tensor_add_scalar_kernel_slow(tensors, scalar);
     }
 
@@ -29,7 +29,7 @@ std::vector<Tensor> foreach_tensor_add_scalar_kernel_cuda(TensorList tensors, Sc
 void foreach_tensor_add_scalar_kernel_cuda_(TensorList tensors, Scalar scalar) {
     verify_list(tensors);
 
-    if (!check_fast_route(tensors, scalar)) {
+    if (!can_use_fast_route(tensors, scalar)) {
         return at::native::foreach_tensor_add_scalar_kernel_slow_(tensors, scalar);
     }
 

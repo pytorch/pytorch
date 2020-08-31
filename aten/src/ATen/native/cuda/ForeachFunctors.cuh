@@ -36,7 +36,6 @@ struct AddScalarFunctor_ {
                 }
             }
             else {
-                // Non-divergent exit condition for __syncthreads, not necessary here
                 for(int i_start = 0; i_start < n && i_start < chunk_size; i_start += blockDim.x * kILP) {
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
@@ -96,7 +95,6 @@ struct AddScalarFunctor {
                 }
             }
             else {
-                // Non-divergent exit condition for __syncthreads, not necessary here
                 for(int i_start = 0; i_start < n && i_start < chunk_size; i_start += blockDim.x * kILP) {
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
@@ -156,7 +154,6 @@ struct AddListFunctor_ {
                 }
             }
             else {
-                // Non-divergent exit condition for __syncthreads, not necessary here
                 for(int i_start = 0; i_start < n && i_start < chunk_size; i_start += blockDim.x * kILP) {
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
@@ -222,7 +219,6 @@ struct AddListFunctor {
                 }
             }
             else {
-                // Non-divergent exit condition for __syncthreads, not necessary here
                 for(int i_start = 0; i_start < n && i_start < chunk_size; i_start += blockDim.x * kILP) {
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
