@@ -13,10 +13,13 @@ torch::class_<EmbeddingPackedParamsBase> register_embedding_params();
 
 at::Tensor PackedEmbeddingBagWeight::embeddingbag_byte(
     const at::Tensor& indices,
-    const at::Tensor& offsets,
+    const c10::optional<at::Tensor>& offsets_in,
     bool sparse,
     const c10::optional<at::Tensor>& per_sample_weights_,
     bool include_last_offset) {
+
+  TORCH_CHECK(offsets_in.has_value(), "embedding_bag_byte_rowwise_offsets expects offsets to be set");
+  auto offsets = offsets_in.value();
   auto offsets_data = offsets.data_ptr<int64_t>();
   const auto indices_data = indices.data_ptr<int64_t>();
 
@@ -403,7 +406,7 @@ class QEmbeddingBag final {
   static at::Tensor run(
       const c10::intrusive_ptr<EmbeddingPackedParamsBase>& packed_weight,
       const Tensor& indices,
-      const Tensor& offsets,
+      const c10::optional<Tensor>& offsets,
       const bool /* scale_grad_by_freq */,
       const int64_t /* mode */,
       bool sparse,

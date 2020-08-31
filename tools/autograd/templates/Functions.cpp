@@ -726,20 +726,15 @@ Tensor _fused_dropout_backward(Tensor grad, Tensor mask, double p1m) {
   }
 }
 
-Tensor select_first_equal_backward(Tensor grad, const Tensor & input, const Tensor & value) {
-  auto grad_input = at::zeros_like(input);
-
-  // find indices of the first element for which input[idx] == value
-  auto first_value_idx = (input == value).nonzero().select(0, 0);
-
-  if (grad_input.dim() == 0) {
-    grad_input.copy_(grad);
+Tensor evenly_distribute_backward(Tensor grad, const Tensor & input, const Tensor & value) {
+  auto mask = (input == value);
+  auto count = mask.sum();
+  auto grad_input = grad / count;
+  if (input.is_cuda()) {
+    return mask * grad_input;
+  } else {
+    return at::zeros_like(input).masked_fill_(mask, grad_input);
   }
-  else {
-    grad_input.index_put_(at::chunk(first_value_idx, grad_input.dim()), grad);
-  }
-
-  return grad_input;
 }
 
 Tensor index_select_backward(Tensor grad, int64_t dim, Tensor indices, IntArrayRef sizes, bool keepdim) {

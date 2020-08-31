@@ -22,6 +22,7 @@ from pt import ( # noqa
     qtensor_method_test,
     quantization_test,
     qunary_test,
+    qembedding_pack_test,
 )
 
 

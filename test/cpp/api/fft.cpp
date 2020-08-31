@@ -1,9 +1,18 @@
 #include <gtest/gtest.h>
 
 #include <torch/torch.h>
+#include <test/cpp/api/support.h>
+
+
+// Tests that the fft function can be called as usual
+TEST(FFTTest, unclobbered_fft) {
+    auto t = torch::randn({64, 2}, torch::dtype(torch::kDouble));
+    torch::fft(t, 1);
+}
+
+// Clobbers torch::fft the function with torch::fft the namespace
 #include <torch/fft.h>
 
-#include <test/cpp/api/support.h>
 
 // Naive DFT of a 1 dimensional tensor
 torch::Tensor naive_dft(torch::Tensor x, bool forward=true) {
