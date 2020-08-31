@@ -16209,30 +16209,31 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             alpha = 1.2
             beta = 0.8
 
+        M = None
+        m1 = None
+        m2 = None
+
+        def run_test():
+            res1 = torch.addmm(M, m1, m2, alpha=alpha, beta=beta)
+            res2 = torch.full_like(res1, math.nan)
+            torch.addmm(M, m1, m2, alpha=alpha, beta=beta, out=res2)
+            res3 = (beta * M).to(numpy_dtype).cpu().numpy() + alpha * (
+                m1.to(numpy_dtype).cpu().numpy() @ m2.to(numpy_dtype).cpu().numpy())
+            res3 = torch.from_numpy(res3).to(dtype)
+            self.assertEqual(res1, res2)
+            self.assertEqual(res1, res3)
+
+
         M = torch.randn(10, 25).to(device=device, dtype=dtype)
         m1 = torch.randn(10, 50).to(device=device, dtype=dtype)
         m2 = torch.randn(50, 25).to(device=device, dtype=dtype)
-        res1 = torch.addmm(M, m1, m2, alpha=alpha, beta=beta)
-        res2 = torch.full_like(res1, math.nan)
-        torch.addmm(M, m1, m2, alpha=alpha, beta=beta, out=res2)
-        res3 = (beta * M).to(numpy_dtype).cpu().numpy() + alpha * (
-            m1.to(numpy_dtype).cpu().numpy() @ m2.to(numpy_dtype).cpu().numpy())
-        res3 = torch.from_numpy(res3).to(dtype)
-        self.assertEqual(res1, res2)
-        self.assertEqual(res1, res3)
+        run_test()
 
         # Test 0-strided
         M = torch.randn(10, 1).to(device=device, dtype=dtype).expand(10, 25)
         m1 = torch.randn(10, 1).to(device=device, dtype=dtype).expand(10, 50)
         m2 = torch.randn(50, 25).to(device=device, dtype=dtype)
-        res1 = torch.addmm(M, m1, m2, alpha=alpha, beta=beta)
-        res2 = torch.full_like(res1, math.nan)
-        torch.addmm(M, m1, m2, alpha=alpha, beta=beta, out=res2)
-        res3 = (beta * M).to(numpy_dtype).cpu().numpy() + alpha * (
-            m1.to(numpy_dtype).cpu().numpy() @ m2.to(numpy_dtype).cpu().numpy())
-        res3 = torch.from_numpy(res3).to(dtype)
-        self.assertEqual(res1, res2)
-        self.assertEqual(res1, res3)
+        run_test()
 
     @dtypes(torch.float, torch.double)
     @dtypesIfCUDA(*([torch.float, torch.double] +
