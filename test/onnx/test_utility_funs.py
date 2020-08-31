@@ -27,7 +27,7 @@ skip = unittest.skip
 
 class TestUtilityFuns(TestCase):
     opset_version = 9
-    use_new_jit_passes = True
+    use_new_jit_passes = False
 
     def setUp(self):
         torch.manual_seed(0)
@@ -939,6 +939,18 @@ TestUtilityFuns_opset11 = type(str("TestUtilityFuns_opset11"),
 TestUtilityFuns_opset12 = type(str("TestUtilityFuns_opset12"),
                                (TestCase,),
                                dict(TestUtilityFuns.__dict__, opset_version=12))
+
+# opset 11 tests
+TestUtilityFuns_opset9_new_jit_API = type(str("TestUtilityFuns_opset9_new_jit_API"),
+                                          (TestCase,),
+                                          dict(TestUtilityFuns.__dict__, opset_version=9,
+                                          use_new_jit_passes=True))
+
+# opset 12 tests
+TestUtilityFuns_opset12_new_jit_API = type(str("TestUtilityFuns_opset12_new_jit_API"),
+                                           (TestCase,),
+                                           dict(TestUtilityFuns.__dict__, opset_version=12,
+                                           use_new_jit_passes=True))
 
 
 if __name__ == '__main__':
