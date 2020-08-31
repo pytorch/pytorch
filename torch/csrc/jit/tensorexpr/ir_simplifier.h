@@ -24,7 +24,6 @@ namespace tensorexpr {
 
 // A bunch of helpers for determine the Dtype of the output of a multi argument
 // Term or Polynomial.
-namespace {
 template <class ExprType>
 Dtype promoteTypesVec(const Expr* s, std::vector<const ExprType*>& v) {
   Dtype t = s->dtype();
@@ -86,7 +85,7 @@ Dtype promoteTypesVar(const ExprType* e, Args... es) {
 }
 
 // Creates a new Expr of the given type with the provided lhs and rhs.
-static const Expr* newBinaryOpOfType(
+inline const Expr* newBinaryOpOfType(
     IRNodeType expr_type,
     const Expr* lhs,
     const Expr* rhs,
@@ -123,7 +122,7 @@ static const Expr* newBinaryOpOfType(
 // Uses the evaluator to fold an Expression with constant terms.
 // E.g. evaluateOp(Add(3, 4)) => 7.
 // Expr v must not have any unbound Vars.
-static Expr* evaluateOp(const Expr* v) {
+inline Expr* evaluateOp(const Expr* v) {
   ExprHandle handle(v);
   ExprEval<SimpleIREvaluator> eval(handle);
 
@@ -141,8 +140,6 @@ static Expr* evaluateOp(const Expr* v) {
   }
   return nullptr;
 }
-
-} // namespace
 
 // A Term represents a grouping of Exprs through multiplication.
 // E.g. product(scalar, *variables).
@@ -414,8 +411,7 @@ class TORCH_API PolynomialTransformer : public IRSimplifierBase {
   static const Expr* simplify(const Expr* e);
   static ExprHandle simplify(const ExprHandle& e);
   static Stmt* simplify(Stmt* e);
-
-}; // namespace tensorexpr
+};
 
 // Expands Terms and Polynomial expressions into primitive operations.
 // Does some simple factorization and reordering.

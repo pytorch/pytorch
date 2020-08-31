@@ -36,7 +36,7 @@ void foreach_tensor_list_op_(TensorList tensors1, TensorList tensors2, Scalar al
 
 std::vector<Tensor> foreach_tensor_add_list_kernel_cuda(TensorList tensors1, TensorList tensors2, Scalar alpha) {
     verify_list(tensors1, tensors2);
-    if (!check_fast_route(tensors1, tensors2)) {
+    if (!can_use_fast_route(tensors1, tensors2)) {
         return at::native::foreach_tensor_add_list_kernel_slow(tensors1, tensors2, alpha);
     }
 
@@ -46,7 +46,7 @@ std::vector<Tensor> foreach_tensor_add_list_kernel_cuda(TensorList tensors1, Ten
 void foreach_tensor_add_list_kernel_cuda_(TensorList tensors1, TensorList tensors2, Scalar alpha) {
     verify_list(tensors1, tensors2);
 
-    if (!check_fast_route(tensors1, tensors2)) {
+    if (!can_use_fast_route(tensors1, tensors2)) {
         return at::native::foreach_tensor_add_list_kernel_slow_(tensors1, tensors2, alpha);
     }
 
@@ -56,7 +56,7 @@ void foreach_tensor_add_list_kernel_cuda_(TensorList tensors1, TensorList tensor
 std::vector<Tensor> foreach_tensor_sub_list_kernel_cuda(TensorList tensors1, TensorList tensors2, Scalar alpha) {
     verify_list(tensors1, tensors2);
 
-    if (!check_fast_route(tensors1, tensors2)) {
+    if (!can_use_fast_route(tensors1, tensors2)) {
         return at::native::foreach_tensor_sub_list_kernel_slow(tensors1, tensors2, alpha);
     }
 
@@ -66,7 +66,7 @@ std::vector<Tensor> foreach_tensor_sub_list_kernel_cuda(TensorList tensors1, Ten
 void foreach_tensor_sub_list_kernel_cuda_(TensorList tensors1, TensorList tensors2, Scalar alpha) {
     verify_list(tensors1, tensors2);
 
-    if (!check_fast_route(tensors1, tensors2)) {
+    if (!can_use_fast_route(tensors1, tensors2)) {
         return at::native::foreach_tensor_sub_list_kernel_slow_(tensors1, tensors2, alpha);
     }
 
@@ -76,7 +76,7 @@ void foreach_tensor_sub_list_kernel_cuda_(TensorList tensors1, TensorList tensor
 std::vector<Tensor> foreach_tensor_mul_list_kernel_cuda(TensorList tensors1, TensorList tensors2) {
     verify_list(tensors1, tensors2);
 
-    if (!check_fast_route(tensors1, tensors2)) {
+    if (!can_use_fast_route(tensors1, tensors2)) {
         return at::native::foreach_tensor_mul_list_kernel_slow(tensors1, tensors2);
     }
 
@@ -86,7 +86,7 @@ std::vector<Tensor> foreach_tensor_mul_list_kernel_cuda(TensorList tensors1, Ten
 void foreach_tensor_mul_list_kernel_cuda_(TensorList tensors1, TensorList tensors2) {
     verify_list(tensors1, tensors2);
 
-    if (!check_fast_route(tensors1, tensors2)) {
+    if (!can_use_fast_route(tensors1, tensors2)) {
         return at::native::foreach_tensor_mul_list_kernel_slow_(tensors1, tensors2);
     }
 
@@ -96,7 +96,7 @@ void foreach_tensor_mul_list_kernel_cuda_(TensorList tensors1, TensorList tensor
 std::vector<Tensor> foreach_tensor_div_list_kernel_cuda(TensorList tensors1, TensorList tensors2) {
     verify_list(tensors1, tensors2);
 
-    if (!check_fast_route(tensors1, tensors2)) {
+    if (!can_use_fast_route(tensors1, tensors2)) {
         return at::native::foreach_tensor_div_list_kernel_slow(tensors1, tensors2);
     }
 
@@ -106,7 +106,7 @@ std::vector<Tensor> foreach_tensor_div_list_kernel_cuda(TensorList tensors1, Ten
 void foreach_tensor_div_list_kernel_cuda_(TensorList tensors1, TensorList tensors2) {
     verify_list(tensors1, tensors2);
 
-    if (!check_fast_route(tensors1, tensors2)) {
+    if (!can_use_fast_route(tensors1, tensors2)) {
         return at::native::foreach_tensor_div_list_kernel_slow_(tensors1, tensors2);
     }
 
