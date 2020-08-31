@@ -180,8 +180,8 @@ def _get_group_rank(group, rank):
         raise RuntimeError("The given group does not exist")
     try:
         group_rank = _pg_group_ranks[group][rank]
-    except KeyError as e:
-        raise RuntimeError("The global rank is not part of the group") from e
+    except KeyError:
+        raise RuntimeError(f"The global rank {rank} is not part of the group {group}") from None
     return group_rank
 
 
