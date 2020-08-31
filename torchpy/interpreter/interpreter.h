@@ -1,11 +1,30 @@
 #pragma once
+#include <ATen/ATen.h>
 #include <assert.h>
 #include <dlfcn.h>
 #include <unistd.h>
 #include <experimental/filesystem>
 #include <fstream>
+#include <iostream>
 #include <string>
+#include <thread>
+#include <vector>
 #include "interpreter_impl.h"
+
+// TODO fix symbol visibility issue
+// https://stackoverflow.com/questions/2828738/c-warning-declared-with-greater-visibility-than-the-type-of-its-field
+class Model {
+ public:
+  Model();
+  ~Model();
+
+  at::Tensor forward(at::Tensor input);
+
+  int id;
+
+ private:
+  static std::atomic<int> s_id;
+};
 
 class Interpreter : public InterpreterImpl {
  private:
@@ -53,3 +72,8 @@ class Interpreter : public InterpreterImpl {
   }
   Interpreter(const Interpreter&) = delete;
 };
+
+void init();
+void finalize();
+
+const Model load(const char* filename);
