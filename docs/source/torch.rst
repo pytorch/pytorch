@@ -369,7 +369,9 @@ Comparison Ops
     eq
     equal
     ge
+    greater_equal
     gt
+    greater
     isclose
     isfinite
     isinf
@@ -379,12 +381,15 @@ Comparison Ops
     isreal
     kthvalue
     le
+    less_equal
     lt
+    less
     max
     maximum
     min
     minimum
     ne
+    not_equal
     sort
     topk
 

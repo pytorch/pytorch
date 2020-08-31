@@ -324,12 +324,16 @@ view of a storage and defines numeric operations on it.
    .. automethod:: gcd_
    .. automethod:: ge
    .. automethod:: ge_
+   .. automethod:: greater_equal
+   .. automethod:: greater_equal_
    .. automethod:: geometric_
    .. automethod:: geqrf
    .. automethod:: ger
    .. automethod:: get_device
    .. automethod:: gt
    .. automethod:: gt_
+   .. automethod:: greater
+   .. automethod:: greater_
    .. automethod:: half
    .. automethod:: hardshrink
    .. automethod:: histc
@@ -374,6 +378,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: lcm_
    .. automethod:: le
    .. automethod:: le_
+   .. automethod:: less_equal
+   .. automethod:: less_equal_
    .. automethod:: lerp
    .. automethod:: lerp_
    .. automethod:: lgamma
@@ -405,6 +411,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: lstsq
    .. automethod:: lt
    .. automethod:: lt_
+   .. automethod:: less
+   .. automethod:: less_
    .. automethod:: lu
    .. automethod:: lu_solve
    .. automethod:: as_subclass
@@ -438,6 +446,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: ndimension
    .. automethod:: ne
    .. automethod:: ne_
+   .. automethod:: not_equal
+   .. automethod:: not_equal_
    .. automethod:: neg
    .. automethod:: neg_
    .. automethod:: negative

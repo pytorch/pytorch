@@ -2905,6 +2905,12 @@ Example::
     tensor([[True, True], [False, True]])
 """.format(**common_args))
 
+add_docstr(torch.greater_equal, r"""
+greater_equal(input, other, *, out=None) -> Tensor
+
+Alias for :func:`torch.ge`.
+""")
+
 add_docstr(torch.geqrf,
            r"""
 geqrf(input, *, out=None) -> (Tensor, Tensor)
@@ -3080,6 +3086,12 @@ Example::
     >>> torch.gt(torch.tensor([[1, 2], [3, 4]]), torch.tensor([[1, 1], [4, 4]]))
     tensor([[False, True], [False, False]])
 """.format(**common_args))
+
+add_docstr(torch.greater, r"""
+greater(input, other, *, out=None) -> Tensor
+
+Alias for :func:`torch.gt`.
+""")
 
 add_docstr(torch.histc,
            r"""
@@ -3511,6 +3523,12 @@ Example::
     >>> torch.le(torch.tensor([[1, 2], [3, 4]]), torch.tensor([[1, 1], [4, 4]]))
     tensor([[True, False], [True, True]])
 """.format(**common_args))
+
+add_docstr(torch.less_equal, r"""
+less_equal(input, other, *, out=None) -> Tensor
+
+Alias for :func:`torch.le`.
+""")
 
 add_docstr(torch.lerp,
            r"""
@@ -4039,6 +4057,12 @@ Example::
     >>> torch.lt(torch.tensor([[1, 2], [3, 4]]), torch.tensor([[1, 1], [4, 4]]))
     tensor([[False, False], [True, False]])
 """.format(**common_args))
+
+add_docstr(torch.less, r"""
+less(input, other, *, out=None) -> Tensor
+
+Alias for :func:`torch.lt`.
+""")
 
 add_docstr(torch.lu_solve,
            r"""
@@ -5062,6 +5086,12 @@ Example::
     >>> torch.ne(torch.tensor([[1, 2], [3, 4]]), torch.tensor([[1, 1], [4, 4]]))
     tensor([[False, True], [True, False]])
 """.format(**common_args))
+
+add_docstr(torch.not_equal, r"""
+not_equal(input, other, *, out=None) -> Tensor
+
+Alias for :func:`torch.ne`.
+""")
 
 add_docstr(torch.neg,
            r"""
@@ -6716,7 +6746,7 @@ Subtracts :attr:`other`, scaled by :attr:`alpha`, from :attr:`input`.
     \text{{out}}_i = \text{{input}}_i - \text{{alpha}} \times \text{{other}}_i
 """ + r"""
 
-Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`, 
+Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
 :ref:`type promotion <type-promotion-doc>`, and integer, float, and complex inputs.
 
 Args:

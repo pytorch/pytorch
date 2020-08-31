@@ -704,12 +704,28 @@ Tensor& lt_out(Tensor& result, const Tensor& self, Scalar other) { return compar
 Tensor lt(const Tensor& self, Scalar other) { return comparison_op(self, other, static_cast<OutFunc>(at::lt_out)); }
 Tensor& lt_(Tensor& self, Scalar other) { return comparison_op_(self, other, static_cast<OutFunc>(at::lt_out)); }
 
+// less, alias for torch.lt
+Tensor& less_out(Tensor& result, const Tensor& self, const Tensor& other) { return at::lt_out(result, self, other); }
+Tensor less(const Tensor& self, const Tensor& other) { return self.lt(other); }
+Tensor& less_(Tensor& self, const Tensor& other) { return self.lt_(other); }
+Tensor& less_out(Tensor& result, const Tensor& self, Scalar other) { return at::lt_out(result, self, other); }
+Tensor less(const Tensor& self, Scalar other) { return self.lt(other); }
+Tensor& less_(Tensor& self, Scalar other) { return self.lt_(other); }
+
 Tensor& le_out(Tensor& result, const Tensor& self, const Tensor& other) { return comparison_op_out(result, self, other, le_stub); }
 Tensor le(const Tensor& self, const Tensor& other) { return comparison_op(self, other, static_cast<OutFunc>(at::le_out)); }
 Tensor& le_(Tensor& self, const Tensor& other) { return comparison_op_(self, other, static_cast<OutFunc>(at::le_out)); }
 Tensor& le_out(Tensor& result, const Tensor& self, Scalar other) { return comparison_op_out(result, self, other, static_cast<OutFunc>(at::le_out)); }
 Tensor le(const Tensor& self, Scalar other) { return comparison_op(self, other, static_cast<OutFunc>(at::le_out)); }
 Tensor& le_(Tensor& self, Scalar other) { return comparison_op_(self, other, static_cast<OutFunc>(at::le_out)); }
+
+// less_equal, alias for torch.le
+Tensor& less_equal_out(Tensor& result, const Tensor& self, const Tensor& other) { return at::le_out(result, self, other); }
+Tensor less_equal(const Tensor& self, const Tensor& other) { return self.le(other); }
+Tensor& less_equal_(Tensor& self, const Tensor& other) { return self.le_(other); }
+Tensor& less_equal_out(Tensor& result, const Tensor& self, Scalar other) { return at::le_out(result, self, other); }
+Tensor less_equal(const Tensor& self, Scalar other) { return self.le(other); }
+Tensor& less_equal_(Tensor& self, Scalar other) { return self.le_(other); }
 
 Tensor& gt_out(Tensor& result, const Tensor& self, const Tensor& other) { return comparison_op_out(result, self, other, gt_stub); }
 Tensor gt(const Tensor& self, const Tensor& other) { return comparison_op(self, other, static_cast<OutFunc>(at::gt_out)); }
@@ -718,12 +734,28 @@ Tensor& gt_out(Tensor& result, const Tensor& self, Scalar other) { return compar
 Tensor gt(const Tensor& self, Scalar other) { return comparison_op(self, other, static_cast<OutFunc>(at::gt_out)); }
 Tensor& gt_(Tensor& self, Scalar other) { return comparison_op_(self, other, static_cast<OutFunc>(at::gt_out)); }
 
+// greater, alias for torch.gt
+Tensor& greater_out(Tensor& result, const Tensor& self, const Tensor& other) { return at::gt_out(result, self, other); }
+Tensor greater(const Tensor& self, const Tensor& other) { return self.gt(other); }
+Tensor& greater_(Tensor& self, const Tensor& other) { return self.gt_(other); }
+Tensor& greater_out(Tensor& result, const Tensor& self, Scalar other) { return at::gt_out(result, self, other); }
+Tensor greater(const Tensor& self, Scalar other) { return self.gt(other); }
+Tensor& greater_(Tensor& self, Scalar other) { return self.gt_(other); }
+
 Tensor& ge_out(Tensor& result, const Tensor& self, const Tensor& other) { return comparison_op_out(result, self, other, ge_stub); }
 Tensor ge(const Tensor& self, const Tensor& other) { return comparison_op(self, other, static_cast<OutFunc>(at::ge_out)); }
 Tensor& ge_(Tensor& self, const Tensor& other) { return comparison_op_(self, other, static_cast<OutFunc>(at::ge_out)); }
 Tensor& ge_out(Tensor& result, const Tensor& self, Scalar other) { return comparison_op_out(result, self, other, static_cast<OutFunc>(at::ge_out)); }
 Tensor ge(const Tensor& self, Scalar other) { return comparison_op(self, other, static_cast<OutFunc>(at::ge_out)); }
 Tensor& ge_(Tensor& self, Scalar other) { return comparison_op_(self, other, static_cast<OutFunc>(at::ge_out)); }
+
+// greater_equal, alias for torch.ge
+Tensor& greater_equal_out(Tensor& result, const Tensor& self, const Tensor& other) { return at::ge_out(result, self, other); }
+Tensor greater_equal(const Tensor& self, const Tensor& other) { return self.ge(other); }
+Tensor& greater_equal_(Tensor& self, const Tensor& other) { return self.ge_(other); }
+Tensor& greater_equal_out(Tensor& result, const Tensor& self, Scalar other) { return at::ge_out(result, self, other); }
+Tensor greater_equal(const Tensor& self, Scalar other) { return self.ge(other); }
+Tensor& greater_equal_(Tensor& self, Scalar other) { return self.ge_(other); }
 
 Tensor& eq_out(Tensor& result, const Tensor& self, const Tensor& other) { return comparison_op_out(result, self, other, eq_stub); }
 Tensor eq(const Tensor& self, const Tensor& other) { return comparison_op(self, other, static_cast<OutFunc>(at::eq_out)); }
@@ -738,6 +770,14 @@ Tensor& ne_(Tensor& self, const Tensor& other) { return comparison_op_(self, oth
 Tensor& ne_out(Tensor& result, const Tensor& self, Scalar other) { return comparison_op_out(result, self, other, static_cast<OutFunc>(at::ne_out)); }
 Tensor ne(const Tensor& self, Scalar other) { return comparison_op(self, other, static_cast<OutFunc>(at::ne_out)); }
 Tensor& ne_(Tensor& self, Scalar other) { return comparison_op_(self, other, static_cast<OutFunc>(at::ne_out)); }
+
+// not_equal, alias for torch.ne
+Tensor& not_equal_out(Tensor& result, const Tensor& self, const Tensor& other) { return at::ne_out(result, self, other); }
+Tensor not_equal(const Tensor& self, const Tensor& other) { return self.ne(other); }
+Tensor& not_equal_(Tensor& self, const Tensor& other) { return self.ne_(other); }
+Tensor& not_equal_out(Tensor& result, const Tensor& self, Scalar other) { return at::ne_out(result, self, other); }
+Tensor not_equal(const Tensor& self, Scalar other) { return self.ne(other); }
+Tensor& not_equal_(Tensor& self, Scalar other) { return self.ne_(other); }
 
 Tensor& logical_and_out(Tensor& result, const Tensor& self, const Tensor& other) { return comparison_op_out(result, self, other, logical_and_stub); }
 Tensor logical_and(const Tensor& self, const Tensor& other) { return comparison_op(self, other, static_cast<OutFunc>(at::logical_and_out)); }
