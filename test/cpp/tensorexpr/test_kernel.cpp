@@ -327,12 +327,11 @@ void testKernelSumOneAxis() {
   // Test lowering of sum on one axis.
   const auto graph_template = R"IR(
       graph(%0 : Float(5:3,3:1, device=cpu)):
-        %1 : int = prim::Constant[value=${dim}]()
-        %2 : int[] = prim::ListConstruct(%1)
-        %3 : bool = prim::Constant[value=${keepdim}]()
-        %4 : ${dtype}
-        %5 : Tensor = aten::sum(%0, %2, %3, %4)
-        return (%5))IR";
+        %1 : int[] = prim::Constant[value=[${dim}]]()
+        %2 : bool = prim::Constant[value=${keepdim}]()
+        %3 : ${dtype}
+        %4 : Tensor = aten::sum(%0, %1, %2, %3)
+        return (%4))IR";
   auto a = iotaTensor({5, 3}, TensorOptions(kCPU).dtype(at::kFloat));
 
   for (int dim = -a.dim(); dim < a.dim(); ++dim) {

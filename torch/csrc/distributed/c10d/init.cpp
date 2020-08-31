@@ -205,13 +205,17 @@ They are used in specifying strategies for reduction collectives, e.g.,
       .def_readwrite("rootRank", &::c10d::BroadcastOptions::rootRank)
       .def_readwrite("rootTensor", &::c10d::BroadcastOptions::rootTensor)
       .def_readwrite("timeout", &::c10d::BroadcastOptions::timeout)
+#ifdef USE_C10D_NCCL
       .def_readwrite("cudaStreams", &::c10d::BroadcastOptions::cudaStreams);
+#endif
 
   py::class_<::c10d::AllreduceOptions>(module, "AllreduceOptions")
       .def(py::init<>())
       .def_readwrite("reduceOp", &::c10d::AllreduceOptions::reduceOp)
       .def_readwrite("timeout", &::c10d::AllreduceOptions::timeout)
+#ifdef USE_C10D_NCCL
       .def_readwrite("cudaStreams", &::c10d::AllreduceOptions::cudaStreams);
+#endif
 
   py::class_<::c10d::AllreduceCoalescedOptions>(
       module, "AllreduceCoalescedOptions")
@@ -225,12 +229,16 @@ They are used in specifying strategies for reduction collectives, e.g.,
       .def_readwrite("rootRank", &::c10d::ReduceOptions::rootRank)
       .def_readwrite("rootTensor", &::c10d::ReduceOptions::rootTensor)
       .def_readwrite("timeout", &::c10d::ReduceOptions::timeout)
+#ifdef USE_C10D_NCCL
       .def_readwrite("cudaStreams", &::c10d::ReduceOptions::cudaStreams);
+#endif
 
   py::class_<::c10d::AllgatherOptions>(module, "AllgatherOptions")
       .def(py::init<>())
       .def_readwrite("timeout", &::c10d::AllgatherOptions::timeout)
+#ifdef USE_C10D_NCCL
       .def_readwrite("cudaStreams", &::c10d::AllgatherOptions::cudaStreams);
+#endif
 
   py::class_<::c10d::GatherOptions>(module, "GatherOptions")
       .def(py::init<>())
@@ -246,7 +254,9 @@ They are used in specifying strategies for reduction collectives, e.g.,
       .def(py::init<>())
       .def_readwrite("reduceOp", &::c10d::ReduceScatterOptions::reduceOp)
       .def_readwrite("timeout", &::c10d::ReduceScatterOptions::timeout)
+#ifdef USE_C10D_NCCL
       .def_readwrite("cudaStreams", &::c10d::ReduceScatterOptions::cudaStreams);
+#endif
 
   py::class_<::c10d::BarrierOptions>(module, "BarrierOptions")
       .def(py::init<>())
@@ -255,7 +265,9 @@ They are used in specifying strategies for reduction collectives, e.g.,
   py::class_<::c10d::AllToAllOptions>(module, "AllToAllOptions")
       .def(py::init<>())
       .def_readwrite("timeout", &::c10d::AllToAllOptions::timeout)
+#ifdef USE_C10D_NCCL
       .def_readwrite("cudaStreams", &::c10d::AllToAllOptions::cudaStreams);
+#endif
 
   auto store =
       py::class_<::c10d::Store, std::shared_ptr<::c10d::Store>, PythonStore>(
@@ -755,10 +767,10 @@ They are used in specifying strategies for reduction collectives, e.g.,
                 execution and it does not wait for the entire operation to complete on GPU. Note that
                 ``FutureNCCL``  does not support ``NCCL_BLOCKING_WAIT`` flag or NCCL's ``barrier()``.
                 In addition, if a callback function was added by ``fut.then()``, it will wait until
-                ``WorkNCCL``'s NCCL streams synchronize with a new stream from device's stream pool and
-                invoke the callback inline after running the callback on the new stream. ``fut.then()``
-                will return another ``FutureNCCL`` that holds the return value of the callback and the
-                stream that runs the callback.
+                ``WorkNCCL``'s NCCL streams synchronize with ``ProcessGroupNCCL``'s dedicated callback
+                stream and invoke the callback inline after running the callback on the callback stream.
+                ``fut.then()`` will return another ``FutureNCCL`` that holds the return value of the
+                callback and a ``CUDAEvent`` that recorded the callback stream.
 
                 Note that ``fut.done()`` returns if the enire operation is completed on the GPU.
            )");
