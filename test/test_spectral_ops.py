@@ -40,11 +40,11 @@ def _hermitian_conj(x, dim):
     idx_neg = list(idx)
     idx_neg[dim] = slice(-mid, None)
     idx_pos = idx
-    idx_pos[dim] = slice(1, mid+1)
+    idx_pos[dim] = slice(1, mid + 1)
 
     out[idx_pos] = x[idx_neg].flip(dim)
     out[idx_neg] = x[idx_pos].flip(dim)
-    if (2*mid + 1 < x.size(dim)):
+    if (2 * mid + 1 < x.size(dim)):
         idx[dim] = mid + 1
         out[idx] = x[idx]
     return out.conj()
@@ -53,7 +53,7 @@ def _hermitian_conj(x, dim):
 def _complex_istft(x, *args, **kwargs):
     # Decompose into Hermitian (FFT of real) and anti-Hermitian (FFT of imaginary)
     n_fft = x.size(-2)
-    slc = (Ellipsis, slice(None, n_fft//2 + 1), slice(None))
+    slc = (Ellipsis, slice(None, n_fft // 2 + 1), slice(None))
 
     hconj = _hermitian_conj(x, dim=-2)
     x_hermitian = (x + hconj) / 2
@@ -68,12 +68,13 @@ def stft_definition(x, hop_length, window):
     X = torch.empty((n_fft, (x.numel() - n_fft + hop_length) // hop_length),
                     device=x.device, dtype=torch.cdouble)
     for m in range(X.size(1)):
-        if m*hop_length + n_fft > x.numel():
+        start = m * hop_length
+        if start + n_fft > x.numel():
             slc = torch.empty(n_fft, device=x.device, dtype=x.dtype)
-            tmp = x[m*hop_length:]
+            tmp = x[start:]
             slc[:tmp.numel()] = tmp
         else:
-            slc = x[m*hop_length: m*hop_length + n_fft]
+            slc = x[start: start + n_fft]
         X[:, m] = torch.fft.fft(slc * window)
     return X
 

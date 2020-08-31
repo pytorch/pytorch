@@ -1,7 +1,6 @@
 from typing import (
     Tuple, Optional, Union, Any, Sequence, TYPE_CHECKING
 )
-import warnings
 
 import torch
 import torch.nn.functional as F
@@ -393,11 +392,11 @@ expanding the :math:`i` :sup:`th` input over dimensions defined by other inputs.
     return _VF.meshgrid(tensors)  # type: ignore
 
 
-def stft(input: Tensor, n_fft: int, hop_length: Optional[int] =None,
-         win_length: Optional[int] =None, window: Optional[Tensor] =None,
-         center: bool =True, pad_mode: str ='reflect', normalized: bool =False,
-         onesided: Optional[bool] =None, *,
-         return_complex: Optional[bool] =None) -> Tensor:
+def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
+         win_length: Optional[int] = None, window: Optional[Tensor] = None,
+         center: bool = True, pad_mode: str = 'reflect', normalized: bool = False,
+         onesided: Optional[bool] = None, *,
+         return_complex: Optional[bool] = None) -> Tensor:
     r"""Short-time Fourier transform (STFT).
 
     Ignoring the optional batch dimension, this method computes the following
@@ -506,11 +505,11 @@ def stft(input: Tensor, n_fft: int, hop_length: Optional[int] =None,
     return _VF.stft(input, n_fft, hop_length, win_length, window,  # type: ignore
                     normalized, onesided, return_complex=return_complex)
 
-def istft(input: Tensor, n_fft: int, hop_length: Optional[int] =None,
-          win_length: Optional[int] =None, window: Optional[Tensor] =None,
-          center: bool =True, normalized: bool =False,
-          onesided: Optional[bool] =None, length: Optional[int] =None, *,
-          return_complex: bool =False) -> Tensor:
+def istft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
+          win_length: Optional[int] = None, window: Optional[Tensor] = None,
+          center: bool = True, normalized: bool = False,
+          onesided: Optional[bool] = None, length: Optional[int] = None, *,
+          return_complex: bool = False) -> Tensor:
     r"""Inverse short time Fourier Transform. This is expected to be the inverse of :func:`~torch.stft`.
     It has the same parameters (+ additional optional parameter of :attr:`length`) and it should return the
     least squares estimation of the original signal. The algorithm will check using the NOLA condition (

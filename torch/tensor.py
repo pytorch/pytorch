@@ -395,10 +395,10 @@ class Tensor(torch._C._TensorBase):
         else:
             return LU, pivots
 
-    def stft(self, n_fft: int, hop_length: Optional[int] =None,
-             win_length: Optional[int] =None, window: 'Optional[Tensor]' =None,
-             center: bool =True, pad_mode: str ='reflect', normalized: bool =False,
-             onesided: Optional[bool] =None, *, return_complex: Optional[bool] =None):
+    def stft(self, n_fft: int, hop_length: Optional[int] = None,
+             win_length: Optional[int] = None, window: 'Optional[Tensor]' = None,
+             center: bool = True, pad_mode: str = 'reflect', normalized: bool = False,
+             onesided: Optional[bool] = None, *, return_complex: Optional[bool] = None):
         r"""See :func:`torch.stft`
 
         .. warning::
@@ -416,11 +416,11 @@ class Tensor(torch._C._TensorBase):
         return torch.stft(self, n_fft, hop_length, win_length, window, center,
                           pad_mode, normalized, onesided, return_complex=return_complex)
 
-    def istft(self, n_fft: int, hop_length: Optional[int] =None,
-              win_length: Optional[int] =None, window: 'Optional[Tensor]' =None,
-              center: bool =True, normalized: bool =False,
-              onesided: Optional[bool] =None, length: Optional[int] =None, *,
-              return_complex: bool =False):
+    def istft(self, n_fft: int, hop_length: Optional[int] = None,
+              win_length: Optional[int] = None, window: 'Optional[Tensor]' = None,
+              center: bool = True, normalized: bool = False,
+              onesided: Optional[bool] = None, length: Optional[int] = None, *,
+              return_complex: bool = False):
         r"""See :func:`torch.istft`"""
         relevant_args = (self,)
         from torch.overrides import has_torch_function, handle_torch_function
