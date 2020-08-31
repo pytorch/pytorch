@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_cloner.h>
 #include <torch/csrc/jit/codegen/cuda/ir_printer.h>
+#include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 
@@ -23,35 +24,6 @@ FusionGuard::~FusionGuard() {
 
 Fusion* FusionGuard::getCurFusion() {
   return ACTIVE_FUSION;
-}
-
-void ExprSort::handle(Expr* expr) {
-  exprs.push_back(expr);
-}
-
-std::vector<Expr*> ExprSort::getExprs(Fusion* fusion, bool from_outputs_only) {
-  ExprSort es;
-  es.traverse(fusion, from_outputs_only);
-  return es.exprs;
-}
-
-std::vector<Expr*> ExprSort::getExprs(
-    Fusion* fusion,
-    const std::vector<Val*>& from) {
-  ExprSort es;
-  es.traverseFrom(fusion, from, false);
-  return es.exprs;
-}
-
-void InputsOf::handle(Val* v) {
-  if (FusionGuard::getCurFusion()->origin(v) == nullptr)
-    inputs.emplace(v);
-}
-
-std::unordered_set<Val*> InputsOf::output(Fusion* fusion, Val* output_) {
-  InputsOf io;
-  io.traverseFrom(FusionGuard::getCurFusion(), {output_}, false);
-  return io.inputs;
 }
 
 void swap(Fusion& a, Fusion& b) noexcept {
