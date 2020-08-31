@@ -14,7 +14,10 @@ if not dist.is_available():
     sys.exit(0)
 
 
-INIT_METHOD_TEMPLATE = "file://{file_name}"
+if sys.platform == 'win32':
+    INIT_METHOD_TEMPLATE = "file:///{file_name}"
+else:
+    INIT_METHOD_TEMPLATE = "file://{file_name}"
 
 
 def dist_init(old_test_method=None, setup_rpc=True, clean_shutdown=True,
