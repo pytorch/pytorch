@@ -24,8 +24,15 @@ class TORCH_API Module {
   Module(
       c10::intrusive_ptr<c10::ivalue::Object> object,
       std::shared_ptr<CompilationUnit> cu)
-      : object_(object), cu_(std::move(cu)){};
-  Module() {}
+      : object_(object),
+        metadata_(std::unordered_map<std::string, std::string>()),
+        cu_(std::move(cu)) {}
+  Module(
+      c10::intrusive_ptr<c10::ivalue::Object> object,
+      std::unordered_map<std::string, std::string> metadata,
+      std::shared_ptr<CompilationUnit> cu)
+      : object_(object), metadata_(std::move(metadata)), cu_(std::move(cu)) {}
+  Module() = default;
   c10::IValue run_method(const std::string& method_name, Stack stack);
   c10::IValue forward(std::vector<c10::IValue> inputs) {
     return run_method("forward", std::move(inputs));
@@ -51,9 +58,13 @@ class TORCH_API Module {
   }
   /// True if the module is in training mode.
   bool is_training() const;
+  const std::unordered_map<std::string, std::string> metadata() const {
+    return metadata_;
+  }
 
  private:
   c10::intrusive_ptr<c10::ivalue::Object> object_;
+  std::unordered_map<std::string, std::string> metadata_;
   std::shared_ptr<CompilationUnit> cu_;
 };
 } // namespace mobile
