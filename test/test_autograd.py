@@ -5930,13 +5930,13 @@ class TestAutogradForwardMode(TestCase):
 
     def test_print(self):
         a = torch.rand(3)
-        self.assertFalse("_fw_grad:" in str(a))
+        self.assertFalse("_fw_grad=" in str(a))
 
         a._fw_grad = torch.rand(3)
-        self.assertTrue("_fw_grad:" in str(a))
+        self.assertTrue("_fw_grad=" in str(a))
 
         a._fw_grad = None
-        self.assertTrue("_fw_grad:" in str(a))
+        self.assertFalse("_fw_grad=" in str(a))
 
 
 # Generic device type autograd tests.
