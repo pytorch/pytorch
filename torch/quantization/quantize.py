@@ -261,7 +261,7 @@ def quantize_dynamic(model, qconfig_spec=None, dtype=torch.qint8,
     If `qconfig` is provided, the `dtype` argument is ignored.
 
     Args:
-        module: input model
+        model: input model
         qconfig_spec: Either:
 
             - A dictionary that maps from name or type of submodule to quantization
