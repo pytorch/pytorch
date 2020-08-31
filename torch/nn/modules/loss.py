@@ -1320,10 +1320,7 @@ class TripletMarginLossWithDistance(_Loss):
     def __init__(self, distance_function: Optional[Callable[[Tensor, Tensor], Tensor]] = None, is_similarity_function: bool = False,
                  margin: float = 1.0, swap: bool = False, reduction: str = 'mean'):
         super(TripletMarginLossWithDistance, self).__init__(size_average=None, reduce=None, reduction=reduction)
-        if distance_function is None:
-            self.distance_function = PairwiseDistance()
-        else:
-            self.distance_function = distance_function
+        self.distance_function = distance_function if distance_function is not None else PairwiseDistance()
         self.is_similarity_function = is_similarity_function
         self.margin = margin
         self.swap = swap
@@ -1346,9 +1343,9 @@ class TripletMarginLossWithDistance(_Loss):
                     negative_dist = torch.min(negative_dist, swap_dist)
 
             if self.is_similarity_function:
-                output = torch.clamp(self.margin - positive_dist + negative_dist, min=0.0)
+                output = torch.clamp(negative_dist - positive_dist + self.margin, min=0.0)
             else:
-                output = torch.clamp(self.margin + positive_dist - negative_dist, min=0.0)
+                output = torch.clamp(positive_dist - negative_dist + self.margin, min=0.0)
             reduction_enum = _Reduction.get_enum(self.reduction)
 
             if reduction_enum == 1:

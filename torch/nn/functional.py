@@ -11,7 +11,7 @@ from .modules import utils
 from .modules.utils import _single, _pair, _triple, _list_with_default
 from . import grad  # noqa: F401
 from torch import _VF
-from .._jit_internal import boolean_dispatch, List, Optional, _overload
+from .._jit_internal import boolean_dispatch, Callable, List, Optional, _overload
 from ..overrides import has_torch_function, handle_torch_function
 
 
@@ -3737,17 +3737,26 @@ def triplet_margin_loss(anchor, positive, negative, margin=1.0, p=2, eps=1e-6, s
                                      swap, reduction_enum)
 
 
-def triplet_margin_loss_with_distance(anchor, positive, negative, distance_function=None, is_similarity_function=False,
-                                      margin=1.0, swap=False, reduction="mean"):
-    # type: (Tensor, Tensor, Tensor, Optional[Callable[[Tensor, Tensor], Tensor]], bool, float, bool, str) -> Tensor
+def triplet_margin_loss_with_distance(anchor: Tensor, positive: Tensor, negative: Tensor,
+                                      distance_function: Optional[Callable[[Tensor, Tensor], Tensor]] = None,
+                                      is_similarity_function: bool = False, margin: float = 1.0,
+                                      swap: bool = False, reduction: str = "mean"):
     r"""
     See :class:`~torch.nn.TripletMarginLossWithDistance` for details
     """
     if torch.jit.is_scripting():
-        raise NotImplementedError("F.triplet_margin_loss_with_distance does not support JIT. "
-                                  "Please use nn.TripletMarginLossWithDistance instead.")
-    if distance_function is None:
-        distance_function = pairwise_distance
+        raise NotImplementedError("F.triplet_margin_loss_with_distance does not support JIT: "
+                                  "Callables cannot be scripted unless they are properties of "
+                                  "a module. Please use nn.TripletMarginLossWithDistance instead.")
+
+    tens_ops = (anchor, positive, negative)
+    if any([type(t) is not Tensor for t in tens_ops]) and has_torch_function(tens_ops):
+        return handle_torch_function(
+            triplet_margin_loss_with_distance, tens_ops, anchor, positive, negative,
+            distance_function=distance_function, is_similarity_function=is_similarity_function,
+            margin=margin, swap=swap, reduction=reduction)
+
+    distance_function = distance_function if distance_function is not None else pairwise_distance
 
     positive_dist = distance_function(anchor, positive)
     negative_dist = distance_function(anchor, negative)
@@ -3760,9 +3769,9 @@ def triplet_margin_loss_with_distance(anchor, positive, negative, distance_funct
             negative_dist = torch.min(negative_dist, swap_dist)
 
     if is_similarity_function:
-        output = torch.clamp(margin - positive_dist + negative_dist, min=0.0)
+        output = torch.clamp(negative_dist - positive_dist + margin, min=0.0)
     else:
-        output = torch.clamp(margin + positive_dist - negative_dist, min=0.0)
+        output = torch.clamp(positive_dist - negative_dist + margin, min=0.0)
     reduction_enum = _Reduction.get_enum(reduction)
 
     if reduction_enum == 1:
