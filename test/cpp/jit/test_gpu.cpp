@@ -1116,34 +1116,27 @@ void testGPU_FusionParser() {
   // 2. use a fuzzy compare (ignore non-significant whitespaces for example)
   const std::string expected_kernel = R"(
 __global__ void CUDAGeneratedKernel(Tensor<float, 1> T0, Tensor<float, 1> T1, Tensor<float, 1> T3){
-  float T2[4];
-  if ( ( ( ( ( ( blockIdx.x * 4 ) + ( 4 - 1 ) ) * 128 ) + threadIdx.x ) < T0.size[0] ) ) {
-    for(size_t i6 = 0; i6 < 4; ++i6 ) {
+  float T2[1];
+  if ( ( ( ( ( ( blockIdx.x * 1 ) + ( 1 - 1 ) ) * 128 ) + threadIdx.x ) < T0.size[0] ) ) {
+    for(size_t i6 = 0; i6 < 1; ++i6 ) {
       T2[ i6 ]
-         = T0[ ( ( ( ( blockIdx.x * 4 ) + i6 ) * 128 ) + threadIdx.x ) ]
-         * T1[ ( ( ( ( blockIdx.x * 4 ) + i6 ) * 128 ) + threadIdx.x ) ];
+         = T0[ ( ( ( ( blockIdx.x * 1 ) + i6 ) * 128 ) + threadIdx.x ) ]
+         * T1[ ( ( ( ( blockIdx.x * 1 ) + i6 ) * 128 ) + threadIdx.x ) ];
+      T3[ ( ( ( ( blockIdx.x * 1 ) + i6 ) * 128 ) + threadIdx.x ) ]
+         = T2[ i6 ]
+         * T0[ ( ( ( ( blockIdx.x * 1 ) + i6 ) * 128 ) + threadIdx.x ) ];
     }
   } else {
-    for(size_t i6 = 0; i6 < 4; ++i6 ) {
-      if ( ( ( ( ( ( blockIdx.x * 4 ) + i6 ) * 128 ) + threadIdx.x ) < T0.size[0] ) ) {
+    for(size_t i6 = 0; i6 < 1; ++i6 ) {
+      if ( ( ( ( ( ( blockIdx.x * 1 ) + i6 ) * 128 ) + threadIdx.x ) < T0.size[0] ) ) {
         T2[ i6 ]
-           = T0[ ( ( ( ( blockIdx.x * 4 ) + i6 ) * 128 ) + threadIdx.x ) ]
-           * T1[ ( ( ( ( blockIdx.x * 4 ) + i6 ) * 128 ) + threadIdx.x ) ];
+           = T0[ ( ( ( ( blockIdx.x * 1 ) + i6 ) * 128 ) + threadIdx.x ) ]
+           * T1[ ( ( ( ( blockIdx.x * 1 ) + i6 ) * 128 ) + threadIdx.x ) ];
       }
-    }
-  }
-  if ( ( ( ( ( ( blockIdx.x * 4 ) + ( 4 - 1 ) ) * 128 ) + threadIdx.x ) < T0.size[0] ) ) {
-    for(size_t i13 = 0; i13 < 4; ++i13 ) {
-      T3[ ( ( ( ( blockIdx.x * 4 ) + i13 ) * 128 ) + threadIdx.x ) ]
-         = T2[ i13 ]
-         * T0[ ( ( ( ( blockIdx.x * 4 ) + i13 ) * 128 ) + threadIdx.x ) ];
-    }
-  } else {
-    for(size_t i13 = 0; i13 < 4; ++i13 ) {
-      if ( ( ( ( ( ( blockIdx.x * 4 ) + i13 ) * 128 ) + threadIdx.x ) < T0.size[0] ) ) {
-        T3[ ( ( ( ( blockIdx.x * 4 ) + i13 ) * 128 ) + threadIdx.x ) ]
-           = T2[ i13 ]
-           * T0[ ( ( ( ( blockIdx.x * 4 ) + i13 ) * 128 ) + threadIdx.x ) ];
+      if ( ( ( ( ( ( blockIdx.x * 1 ) + i6 ) * 128 ) + threadIdx.x ) < T0.size[0] ) ) {
+        T3[ ( ( ( ( blockIdx.x * 1 ) + i6 ) * 128 ) + threadIdx.x ) ]
+           = T2[ i6 ]
+           * T0[ ( ( ( ( blockIdx.x * 1 ) + i6 ) * 128 ) + threadIdx.x ) ];
       }
     }
   }
@@ -1803,9 +1796,6 @@ void testGPU_FusionComputeAtCommonConsumer1() {
   computeAtTarget->split(0, 128);
   tv1->computeAt(computeAtTarget, 1);
 
-  fusion.printMath();
-  fusion.printKernel();
-
   TensorView* affected_tensors[] = {tv1, tv2, tv3, tv4};
   for (auto tv : affected_tensors) {
     TORCH_CHECK(tv->nDims() == computeAtTarget->nDims());
@@ -1885,8 +1875,6 @@ void testGPU_FusionComputeAtCommonConsumer2() {
   // between tv1 and tv3, computed at tv5, which we call the common
   // consumer.
   tv1->computeAt(computeAtTarget, 1);
-
-  fusion.printKernel();
 
   // All tensors should have the same dimenionality as the target
   for (Val* val : fusion.vals()) {
@@ -1976,8 +1964,6 @@ void testGPU_FusionComputeAtCommonConsumer3() {
   // tensors are specified as outputs.
 
   tv1->computeAt(computeAtTarget, 1);
-
-  fusion.printKernel();
 
   // All tensors should have the same dimenionality as the target
   for (Val* val : fusion.vals()) {
