@@ -53,6 +53,11 @@ VulkanTensor reshape_copy(
     const VulkanTensor& input,
     std::vector<int64_t> shape);
 
+VulkanTensor cat(
+    VulkanTensor& output,
+    ArrayRef<VulkanTensor> inputs,
+    int64_t dim);
+
 void add(
     VulkanTensor& output,
     const VulkanTensor& input0,

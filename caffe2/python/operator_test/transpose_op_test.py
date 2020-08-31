@@ -3,7 +3,7 @@ from __future__ import division
 from __future__ import print_function
 
 from caffe2.python import core, workspace
-from hypothesis import given
+from hypothesis import given, settings
 
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
@@ -14,8 +14,9 @@ import unittest
 
 
 class TestTransposeOp(serial.SerializedTestCase):
-    @serial.given(
+    @given(
         X=hu.tensor(dtype=np.float32), use_axes=st.booleans(), **hu.gcs)
+    @settings(deadline=None, max_examples=50)
     def test_transpose(self, X, use_axes, gc, dc):
         ndim = len(X.shape)
         axes = np.arange(ndim)
@@ -39,6 +40,7 @@ class TestTransposeOp(serial.SerializedTestCase):
         self.assertGradientChecks(gc, op, [X], 0, [0])
 
     @given(M=st.integers(10, 200), N=st.integers(10, 200), **hu.gcs)
+    @settings(max_examples=10, deadline=None)
     def test_transpose_large_matrix(self, M, N, gc, dc):
         op = core.CreateOperator("Transpose", ["X"], ["Y"], device_option=gc)
         X = np.random.rand(M, N).astype(np.float32) - 0.5

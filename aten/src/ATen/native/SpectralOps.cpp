@@ -18,6 +18,15 @@
 
 namespace at { namespace native {
 
+// torch.fft.fft, analogous to NumPy's numpy.fft.fft
+Tensor fft_fft(const Tensor& self) {
+  TORCH_CHECK(self.is_complex(), "Expected a complex tensor.");
+  TORCH_CHECK(self.dim() == 1, "Expected a 1D tensor.");
+
+  auto result = at::fft(at::view_as_real(self), 1, false);
+  return at::view_as_complex(result);
+}
+
 // This is a pass-through wrapper function that does the size check and
 // inferences. The actual forward implementation function is called
 // at::_fft_with_size which dispatches to _fft_cufft (CUDA) or _fft_mkl (CPU).
@@ -358,16 +367,22 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> ho
   Tensor y_tmp = input * window_tmp.view({1, 1, n_fft});  // size: (channel, n_frames, n_fft)
   y_tmp = y_tmp.transpose(1, 2);  // size: (channel, n_fft, frame)
 
-  const Tensor eye = at::native::eye(n_fft, options).unsqueeze(1);
-  Tensor y = at::conv_transpose1d(y_tmp, eye,
-                                  /*bias*/ Tensor(),
-                                  /*stride*/ {hop_length,},
-                                  /*padding*/{0,});  // size: (channel, n_frames, n_fft)
+  Tensor y = at::col2im(y_tmp,
+                                  /*output_size*/ {1, (n_frames - 1) * hop_length + n_fft},
+                                  /*kernel_size*/ {1, n_fft},
+                                  /*dilation*/    {1, 1},
+                                  /*padding*/     {0, 0},
+                                  /*stride*/      {1, hop_length}
+                                 ).squeeze(2);
   window_tmp = window_tmp.pow(2).view({n_fft, 1}).repeat({1, n_frames}).unsqueeze(0);  // size: (1, n_fft, n_frames)
-  Tensor window_envelop = at::conv_transpose1d(window_tmp, eye,
-                                               /*bias*/ Tensor(),
-                                               /*stride*/ {hop_length, },
-                                               /*padding*/{0, });  // size: (1, 1, expected_output_signal_len)
+  Tensor window_envelop = at::col2im(window_tmp,
+                                  /*output_size*/ {1, (n_frames - 1) * hop_length + n_fft},
+                                  /*kernel_size*/ {1, n_fft},
+                                  /*dilation*/    {1, 1},
+                                  /*padding*/     {0, 0},
+                                  /*stride*/      {1, hop_length}
+                                 ).squeeze(2); // size: (1, 1, expected_output_signal_len)
+
   TORCH_INTERNAL_ASSERT(expected_output_signal_len == y.size(2));
   TORCH_INTERNAL_ASSERT(expected_output_signal_len == window_envelop.size(2));
 

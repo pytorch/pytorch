@@ -28,9 +28,10 @@ class ConvTest(hu.HypothesisTestCase):
            training_mode=st.booleans(),
            group=st.integers(1, 2),
            **mu.gcs)
+    @settings(max_examples=10, deadline=None)
     def test_convolution(self, stride, pad, kernel, size,
-                             input_channels, output_channels,
-                             batch_size, use_bias, training_mode, group, gc, dc):
+                         input_channels, output_channels,
+                         batch_size, use_bias, training_mode, group, gc, dc):
         training = 1 if training_mode else 0
         op = core.CreateOperator(
             "Conv",
@@ -44,8 +45,7 @@ class ConvTest(hu.HypothesisTestCase):
         )
         X = np.random.rand(
             batch_size, input_channels * group, size, size).astype(np.float32) - 0.5
-        w = np.random.rand(
-                output_channels * group, input_channels, kernel, kernel) \
+        w = np.random.rand(output_channels * group, input_channels, kernel, kernel) \
             .astype(np.float32) - 0.5
         b = np.random.rand(output_channels * group).astype(np.float32) - 0.5
 
@@ -55,6 +55,8 @@ class ConvTest(hu.HypothesisTestCase):
         if training_mode:
             for i in range(len(inputs)):
                 self.assertGradientChecks(gc, op, inputs, i, [0], threshold=0.01)
+
+    @settings(max_examples=10, deadline=None)
     @given(stride=st.integers(1, 3),
            pad=st.integers(0, 3),
            size=st.integers(8, 10),

@@ -8,6 +8,8 @@
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/python_anomaly_mode.h>
 #include <torch/csrc/autograd/python_function.h>
+#include <ATen/BatchedTensorImpl.h>
+#include <ATen/VmapMode.h>
 #include <pybind11/pybind11.h>
 
 #ifndef _WIN32
@@ -97,7 +99,7 @@ variable_list PythonEngine::execute(
   }
 }
 
-std::shared_ptr<FutureVariableList> PythonEngine::execute_with_graph_task(
+std::shared_ptr<at::ivalue::Future> PythonEngine::execute_with_graph_task(
     const std::shared_ptr<GraphTask>& graph_task,
     std::shared_ptr<Node> graph_root) {
   try {
@@ -143,6 +145,13 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
   THPUtils_assert(num_tensors == num_gradients, "got %ld tensors and %ld "
       "gradients", num_tensors, num_gradients);
 
+  // The user either called autograd.backward(...) or autograd.grad(...) to get here
+  bool backward_api_called = inputs == nullptr;
+  TORCH_CHECK(!backward_api_called || at::impl::VmapMode::current_vmap_level() == 0,
+      "backward() called inside torch.vmap. This is not supported, "
+      "please call backward() outside torch.vmap or instead use "
+      "torch.autograd.grad inside torch.vmap");
+
   edge_list roots;
   roots.reserve(num_tensors);
   variable_list grads;
@@ -152,6 +161,12 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
     THPUtils_assert(THPVariable_Check(_tensor), "element %d of tensors "
         "tuple is not a Tensor", i);
     auto& variable = ((THPVariable*)_tensor)->cdata;
+    TORCH_CHECK(!isBatchedTensor(variable),
+        "torch.autograd.grad(outputs, inputs, grad_outputs) called inside ",
+        "torch.vmap. We do not support the case where any outputs are ",
+        "vmapped tensors (output ", i, " is being vmapped over). Please "
+        "call autograd.grad() outside torch.vmap or file a bug report "
+        "with your use case.")
     if(variable.is_complex()) {
       TORCH_WARN_ONCE("Complex backward is not fully supported yet and could lead to wrong ",
                       "gradients for functions we have not fixed yet");
@@ -181,7 +196,7 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
   }
 
   std::vector<Edge> output_edges;
-  if (inputs != nullptr) {
+  if (!backward_api_called) {
     int num_inputs = PyTuple_GET_SIZE(inputs);
     output_edges.reserve(num_inputs);
     for (int i = 0; i < num_inputs; ++i) {
@@ -189,6 +204,12 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
       THPUtils_assert(THPVariable_Check(input),
           "all inputs have to be Tensors, but got %s", THPUtils_typename(input));
       THPVariable *input_var = (THPVariable*)input;
+      TORCH_CHECK(!isBatchedTensor(input_var->cdata),
+          "torch.autograd.grad(outputs, inputs, grad_outputs) called inside ",
+          "torch.vmap. We do not support the case where any inputs are ",
+          "vmapped tensors (input ", i, " is being vmapped over). Please "
+          "call autograd.grad() outside torch.vmap or file a bug report "
+          "with your use case.")
       const auto output_nr = input_var->cdata.output_nr();
       auto grad_fn = input_var->cdata.grad_fn();
       if (!grad_fn) {
@@ -211,7 +232,7 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
     outputs = engine.execute(roots, grads, keep_graph, create_graph, output_edges);
   }
 
-  if (inputs != nullptr) {
+  if (!backward_api_called) {
     int num_inputs = PyTuple_GET_SIZE(inputs);
     THPObjectPtr py_outputs {PyTuple_New(num_inputs)};
     if (!py_outputs) return nullptr;

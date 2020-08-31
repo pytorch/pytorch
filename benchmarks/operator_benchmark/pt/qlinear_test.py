@@ -10,37 +10,11 @@ import torch
 import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
 
+from . import configs
 
 """
 Microbenchmarks for Quantized Linear operators.
 """
-
-# Configs for qlinear
-qlinear_configs = op_bench.config_list(
-    attrs=[
-        # matches floating point liner
-        [1, 1, 1],
-        [4, 256, 128],
-        [16, 512, 256],
-        # other
-        [1024, 1024, 1024],
-        [64, 320, 800],
-        [64, 512, 768],
-        [16, 512, 256],
-        [128, 128, 128],
-        [256, 256, 512],
-        [6400, 141, 15],
-        [6400, 141, 8],
-        [16, 2504, 211],
-        [16, 1434, 369],
-        [1, 3496, 1024],
-        [16, 512, 256],
-        [1, 3456, 1600],
-    ],
-    attr_names=["N", "IN", "OUT"],  # M, K, N
-    tags=["short"],
-)
-
 
 class _QLinearBenchmarkBase(op_bench.TorchBenchmarkBase):
     def init(self, N, IN, OUT, linear_under_test):
@@ -62,21 +36,21 @@ class _QLinearBenchmarkBase(op_bench.TorchBenchmarkBase):
         return self.qlinear(self.input)
 
 class QLinearBenchmark(_QLinearBenchmarkBase):
-    def init(self, N, IN, OUT):
+    def init(self, N, IN, OUT, device):
         super(QLinearBenchmark, self).init(N, IN, OUT, nnq.Linear(IN, OUT))
         self.input = self.qX
         self.set_module_name("QLinear")
 
 
 class QDynamicLinearBenchmark(_QLinearBenchmarkBase):
-    def init(self, N, IN, OUT):
+    def init(self, N, IN, OUT, device):
         super(QDynamicLinearBenchmark, self).init(N, IN, OUT, nnqd.Linear(IN, OUT))
         self.input = self.X
         self.set_module_name("QDynamicLinear")
 
 
-op_bench.generate_pt_test(qlinear_configs, QLinearBenchmark)
-op_bench.generate_pt_test(qlinear_configs, QDynamicLinearBenchmark)
+op_bench.generate_pt_test(configs.remove_cuda(configs.linear_configs_short + configs.linear_configs_long), QLinearBenchmark)
+op_bench.generate_pt_test(configs.remove_cuda(configs.linear_configs_short + configs.linear_configs_long), QDynamicLinearBenchmark)
 
 
 if __name__ == "__main__":

@@ -404,6 +404,7 @@ struct CAFFE2_API IValue final {
   c10::intrusive_ptr<ivalue::ConstantString> toString() &&;
   c10::intrusive_ptr<ivalue::ConstantString> toString() const &;
   const std::string& toStringRef() const;
+  c10::optional<std::reference_wrapper<const std::string>> toOptionalStringRef() const;
 
   // DoubleList
   bool isDoubleList() const;

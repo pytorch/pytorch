@@ -285,7 +285,14 @@ def sub_diagonal_foo(a, b, c=None):
 
 # The dispatch table for SubDiagonalTensor's __torch_function__ implementation.
 HANDLED_FUNCTIONS_TENSOR_LIKE = {}
-HANDLED_FUNCTIONS_WRAPPERS = {}
+
+
+# Note: _triggered wrapper
+# Dict that wraps the implementations from get_testing_overrides into another
+# function with a _triggered slot/flag. The triggered flag is set when the
+# implementation is called.
+WRAPPED_TRIGGERED_IMPLS = {}
+
 
 def triggered_wrapper(f):
     @functools.wraps(f)
@@ -324,7 +331,8 @@ def generate_tensor_like_torch_implementations():
         # decorate the overrides with implements_tensor_like if it's not a
         # torch.Tensor method
         wrapped = triggered_wrapper(override)
-        HANDLED_FUNCTIONS_WRAPPERS[func] = wrapped
+        # See note: "_triggered wrapper"
+        WRAPPED_TRIGGERED_IMPLS[func] = wrapped
         if is_tensor_method_or_property(func):
             implements_sub(func)(wrapped)
         else:
@@ -549,6 +557,7 @@ def generate_tensor_like_override_tests(cls):
                     t = t[:-1]
                 if t == 'Tensor':
                     if arg['name'] == 'self' and is_tensor_method_or_property(func):
+                        # See "Note: properties and __get__"
                         func = func.__get__(instance_gen())
                         continue
                     func_args.append(instance_gen())
@@ -590,8 +599,9 @@ def generate_tensor_like_override_tests(cls):
             # ret is None for certain protocols, e.g., `__weakref__` and `__setitem__`
             # This is currently the best check but doesn't work for, for example,
             # Tensor.__add__ because it redirects to Tensor.add.
+            # See note "_triggered wrapper"
             if ret is None:
-                self.assertTrue(HANDLED_FUNCTIONS_WRAPPERS[func]._triggered)
+                self.assertTrue(WRAPPED_TRIGGERED_IMPLS[func]._triggered)
                 return
 
             self.assertEqual(ret, -1)
@@ -601,6 +611,7 @@ def generate_tensor_like_override_tests(cls):
     for func, override in get_testing_overrides().items():
         test_method = test_generator(func, override)
         if func.__name__ == "__get__":
+            # Note: properties and __get__
             # __get__ is part of the descriptor protocol.
             # https://docs.python.org/3/howto/descriptor.html
             # This is used for properties of the form

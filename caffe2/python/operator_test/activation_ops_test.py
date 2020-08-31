@@ -5,7 +5,7 @@ from __future__ import unicode_literals
 
 import numpy as np
 
-from hypothesis import given, assume
+from hypothesis import given, assume, settings
 import hypothesis.strategies as st
 
 from caffe2.python import core, workspace
@@ -19,8 +19,9 @@ import unittest
 
 
 class TestActivations(serial.SerializedTestCase):
-    @serial.given(X=hu.tensor(), in_place=st.booleans(),
+    @given(X=hu.tensor(), in_place=st.booleans(),
                   engine=st.sampled_from(["", "CUDNN"]), **mu.gcs)
+    @settings(deadline=10000)
     def test_relu(self, X, in_place, engine, gc, dc):
         if gc == mu.mkl_do:
             in_place = False
@@ -98,7 +99,7 @@ class TestActivations(serial.SerializedTestCase):
             grad_reference=relu_grad_ref)
 
     @serial.given(X=hu.tensor(elements=hu.floats(-3.0, 3.0)),
-                  n=st.floats(min_value=0.5, max_value=2.0),
+                  n=hu.floats(min_value=0.5, max_value=2.0),
                   in_place=st.booleans(), **hu.gcs)
     def test_relu_n(self, X, n, in_place, gc, dc):
         op = core.CreateOperator(
@@ -125,7 +126,7 @@ class TestActivations(serial.SerializedTestCase):
                                   ensure_outputs_are_inferred=True)
 
     @serial.given(X=hu.tensor(),
-                  alpha=st.floats(min_value=0.1, max_value=2.0),
+                  alpha=hu.floats(min_value=0.1, max_value=2.0),
                   in_place=st.booleans(), engine=st.sampled_from(["", "CUDNN"]),
                   **hu.gcs)
     def test_elu(self, X, alpha, in_place, engine, gc, dc):
@@ -151,12 +152,13 @@ class TestActivations(serial.SerializedTestCase):
         self.assertGradientChecks(gc, op, [X], 0, [0], stepsize=1e-2, ensure_outputs_are_inferred=True)
 
     @given(X=hu.tensor(min_dim=4, max_dim=4),
-           alpha=st.floats(min_value=0.1, max_value=2.0),
+           alpha=hu.floats(min_value=0.1, max_value=2.0),
            inplace=st.booleans(),
            shared=st.booleans(),
            order=st.sampled_from(["NCHW", "NHWC"]),
            seed=st.sampled_from([20, 100]),
            **hu.gcs)
+    @settings(deadline=10000)
     def test_prelu(self, X, alpha, inplace, shared, order, seed, gc, dc):
         np.random.seed(seed)
         W = np.random.randn(
@@ -194,7 +196,7 @@ class TestActivations(serial.SerializedTestCase):
             self.assertGradientChecks(gc, op, [X, W], 1, [0], stepsize=1e-2, ensure_outputs_are_inferred=True)
 
     @serial.given(X=hu.tensor(),
-                  alpha=st.floats(min_value=0.1, max_value=2.0),
+                  alpha=hu.floats(min_value=0.1, max_value=2.0),
                   inplace=st.booleans(),
                   **hu.gcs)
     def test_leaky_relu(self, X, alpha, inplace, gc, dc):
@@ -241,6 +243,7 @@ class TestActivations(serial.SerializedTestCase):
     @given(X=hu.tensor(),
            fast_gelu=st.booleans(),
            **hu.gcs)
+    @settings(deadline=1000)
     def test_gelu(self, X, fast_gelu, gc, dc):
         op = core.CreateOperator(
             "Gelu",

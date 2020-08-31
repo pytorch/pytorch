@@ -12,7 +12,7 @@ from caffe2.quantization.server.dnnlowp_test_utils import (
     avoid_vpmaddubsw_overflow_fc,
     check_quantized_results_close,
 )
-from hypothesis import given
+from hypothesis import given, settings
 
 
 dyndep.InitOpsLibrary("//caffe2/caffe2/quantization/server:dnnlowp_ops")
@@ -28,6 +28,7 @@ class DNNLowPBatchMatMulOpTest(hu.HypothesisTestCase):
         batch_size=st.integers(0, 4),
         **hu.gcs_cpu_only
     )
+    @settings(deadline=10000)
     def test_dnnlowp_batch_matmul_int(self, m, n, k, batch_size, gc, dc):
         # A and B have scale 1, so exactly represented after quantization
         A_min = -77
@@ -123,6 +124,7 @@ class DNNLowPBatchMatMulOpTest(hu.HypothesisTestCase):
         out_quantized=st.booleans(),
         **hu.gcs_cpu_only
     )
+    @settings(deadline=1000)
     def test_dnnlowp_batch_matmul_int_constant_B(
         self, m, n, k, C_1, C_2, A_quantized, B_quantized, out_quantized, gc, dc
     ):
