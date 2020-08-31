@@ -488,6 +488,11 @@ class TensorExprFuser {
       GRAPH_UPDATE("Merging ", getHeader(n));
       SubgraphUtils::mergeNodeIntoSubgraph(n, fusion_group);
       // mergeNodeIntoSubgraphAndUpdateAliasing(n, fusion_group);
+      // TODO: Use that ^ call instead, but currently if fails with:
+      //  $  python -m fastrnns.bench --fuser=te --group=rnns --rnns jit
+      //
+      // RuntimeError: vmap.count(existing_values.at(i)) INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/tensorexpr_fuser.cpp":263, please report a bug to PyTorch.
+      // Exception raised from aliasingSafeSubgraphMerge at ../torch/csrc/jit/passes/tensorexpr_fuser.cpp:263 (most recent call first):
     }
     return fusion_group;
   }
