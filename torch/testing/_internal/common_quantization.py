@@ -79,9 +79,6 @@ class NodeSpec:
 
         return self.op == other.op and self.target == other.target
 
-    def __repr__(self):
-        return repr(self.op) + " " + repr(self.target)
-
 def test_only_eval_fn(model, calib_data):
     r"""
     Default evaluation function takes a torch.utils.data.Dataset or a list of
@@ -548,21 +545,15 @@ class QuantizationTestCase(TestCase):
 
         if expected_node_occurrence is not None:
             for expected_node, occurrence in expected_node_occurrence.items():
-                if occurrence != 0:
-                    self.assertTrue(
-                        expected_node in nodes_in_graph,
-                        'Check failed for node:' + str(expected_node) +
-                        ' not found')
-                    self.assertTrue(
-                        nodes_in_graph[expected_node] == occurrence,
-                        'Check failed for node:' + str(expected_node) +
-                        ' Expected occurrence:' + str(occurrence) +
-                        ' Found occurrence:' + str(nodes_in_graph[expected_node]))
-                else:
-                    self.assertTrue(
-                        expected_node not in nodes_in_graph,
-                        'Check failed for node:' + str(expected_node) +
-                        ' expected no occurrence but found')
+                self.assertTrue(
+                    expected_node in nodes_in_graph,
+                    'Check failed for node:' + str(expected_node) +
+                    ' not found')
+                self.assertTrue(
+                    nodes_in_graph[expected_node] == occurrence,
+                    'Check failed for node:' + str(expected_node) +
+                    ' Expected occurrence:' + str(occurrence) +
+                    ' Found occurrence:' + str(nodes_in_graph[expected_node]))
 
         if expected_node_list is not None:
             cur_index = 0
@@ -595,8 +586,7 @@ class QuantizationTestCase(TestCase):
                            expected_node=None,
                            expected_node_occurrence=None,
                            expected_node_list=None,
-                           debug=False,
-                           print_debug_info=False):
+                           debug=False):
         """ Quantizes model with graph mode quantization on fx and check if the
         quantized model contains the quantized_node
 
@@ -645,7 +635,7 @@ class QuantizationTestCase(TestCase):
         self.assertEqual((result - result_debug).abs().max(), 0), \
             'Expecting debug and non-debug option to produce identical result'
 
-        if print_debug_info:
+        if debug:
             print()
             print('quant type:', quant_type)
             print('origianl graph module:', type(model))
@@ -654,9 +644,8 @@ class QuantizationTestCase(TestCase):
             print('quantized graph module:', type(qgraph))
             self.printGraphModule(qgraph)
             print()
-        qgraph_to_check = qgraph_debug if debug else qgraph
         self.checkGraphModuleNodes(
-            qgraph_to_check, expected_node, expected_node_occurrence, expected_node_list)
+            qgraph, expected_node, expected_node_occurrence, expected_node_list)
 
 # Below are a series of neural net models to use in testing quantization
 # Single layer models
