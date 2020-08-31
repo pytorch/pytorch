@@ -558,6 +558,19 @@ bool Fusion::hasGridReduction() {
   return false;
 }
 
+bool Fusion::hasBlockBroadcast() {
+  for (auto expr : exprs(true)) {
+    for (auto out : expr->outputs()) {
+      if (out->getValType() == ValType::TensorView) {
+        if (out->as<TensorView>()->hasBlockBroadcast()) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
 bool Fusion::hasBroadcast() {
   for (auto expr : exprs(true))
     for (auto out : expr->outputs())

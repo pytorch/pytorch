@@ -45,10 +45,6 @@ class TORCH_CUDA_API GpuLower {
     return static_smem_allocations_;
   }
 
-  bool hasBlockBroadcast() {
-    return has_block_broadcast_;
-  }
-
   // Converts a Fusion IR value into the Kernel IR equivalent
   //
   // TODO(kir): revisit this interface
@@ -84,9 +80,6 @@ class TORCH_CUDA_API GpuLower {
 
   // List of static shared memory buffers
   std::vector<kir::Allocate*> static_smem_allocations_;
-
-  // Check if kernel has shared memory broadcast op
-  bool has_block_broadcast_;
 
   // Lowered IR
   std::vector<Expr*> lowered_exprs_;
