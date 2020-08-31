@@ -149,6 +149,7 @@ namespace jit {
   _(SimplifyAdds)                           \
   _(SimplifyMuls)                           \
   _(SimplifySubs)                           \
+  _(SimplifyDiv)                            \
   _(SimplifyMultiOp)                        \
   _(SimplifyManyOps)                        \
   _(SimplifyFactorization)                  \

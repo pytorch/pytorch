@@ -115,6 +115,8 @@ void IRVisitor::visit(const AtomicAdd* v) {
   v->value()->accept(this);
 }
 
+void IRVisitor::visit(const SyncThreads* v) {}
+
 void IRVisitor::visit(const Block* v) {
   for (Stmt* s : *v) {
     s->accept(this);
