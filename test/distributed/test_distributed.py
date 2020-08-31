@@ -49,6 +49,16 @@ class Foo:
     def __eq__(self, other):
         return self.__dict__ == other.__dict__
 
+f = Foo(10)
+f.bar = 1
+
+collectives_object_test_list = [
+    {"key1": 3, "key2": 4, "key3": {"nested": True}},
+    f,
+    "foo",
+    [1, 2, True, "string", [4, 5, "nested"]],
+]
+
 
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
@@ -2592,16 +2602,7 @@ class _DistTestBase(object):
     @require_backend({"nccl", "gloo"})
     @require_n_gpus_for_nccl_backend(int(os.environ["WORLD_SIZE"]), os.environ["BACKEND"])
     def test_allgather_object(self):
-        # Ensure stateful objects can be allgathered
-        f = Foo(10)
-        f.bar = 1
-        gather_objects = [
-            {"key1": 3, "key2": 4, "key3": {"nested": True}},
-            f,
-            "foo",
-            [1, 2, True, "string", [4, 5, "nested"]],
-        ]
-
+        gather_objects = collectives_object_test_list
         output_gathered = [None for _ in range(dist.get_world_size())]
         dist.all_gather_object(
             output_gathered, gather_objects[self.rank % len(gather_objects)]
@@ -2626,14 +2627,7 @@ class _DistTestBase(object):
     @unittest.skipIf(BACKEND == "nccl", "NCCL does not support gather")
     def test_gather_object(self):
         # Ensure stateful objects can be gathered
-        f = Foo(10)
-        f.bar = 1
-        gather_objects = [
-            {"key1": 3, "key2": 4, "key3": {"nested": True}},
-            f,
-            "example_string",
-            [1, 2, True, "string", [4, 5, "nested"]],
-        ]
+        gather_objects = collectives_object_test_list
         output_gathered = [None for _ in range(dist.get_world_size())]
         gather_on_rank = 0
         my_rank = dist.get_rank()
@@ -2683,6 +2677,22 @@ class _DistTestBase(object):
                 else None,
                 dst=gather_on_rank,
             )
+
+    @require_backend({"nccl", "gloo"})
+    @require_n_gpus_for_nccl_backend(int(os.environ["WORLD_SIZE"]), os.environ["BACKEND"])
+    def test_broadcast_object(self):
+        objects = collectives_object_test_list
+        src_rank = 0
+        for i in range(len(objects)):
+            obj = objects[i] if self.rank == src_rank else None
+            ret = dist.broadcast_object(obj, src=src_rank)
+            self.assertEqual(ret, objects[i])
+            # inputs from non-src rank are ignored
+            obj = (
+                objects[i] if self.rank == src_rank else objects[(i + 1) % len(objects)]
+            )
+            ret = dist.broadcast_object(obj, src=src_rank)
+            self.assertEqual(ret, objects[i])
 
 
 if BACKEND == "gloo" or BACKEND == "nccl":

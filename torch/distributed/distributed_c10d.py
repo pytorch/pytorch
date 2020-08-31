@@ -1319,6 +1319,67 @@ def gather_object(obj, object_gather_list=None, dst=0, group=group.WORLD):
         tensor_size = object_size_list[i]
         object_gather_list[i] = _tensor_to_object(tensor, tensor_size)
 
+def broadcast_object(obj, src, group=group.WORLD):
+    """
+    Broadcasts picklable object ``obj`` to the whole group. Similar to
+    :func:`broadcast`, but Python objects can be passed in. Note that the object
+    must be picklable in order to be broadcasted.
+
+    Arguments:
+        obj (Any): Input object to broadcast. Must be picklable. This argument
+            is ignored on ranks which are not the ``src`` rank.
+        src (int): Source rank from which to broadcast ``obj``.
+        group: (ProcessGroup, optional): The process group to work on.
+
+    Returns:
+        ``None``, if rank is not part of ``group``. Otherwise, will return the
+        broadcasted object.
+
+    .. note:: Note that this API differs slightly from the broadcast collective
+        since it does not provide an ``async_op`` handle and thus will be a
+        blocking call, and returns the object instead of setting the value in
+        an argument.
+
+    .. warning::
+        :func:`broadcast_object` uses ``pickle`` module implicitly, which is
+        known to be insecure. It is possible to construct malicious pickle data
+        which will execute arbitrary code during unpickling. Only call this
+        function with data you trust.
+    """
+    if _rank_not_in_group(group):
+        return
+
+    my_rank = get_rank()
+    # Serialize to tensor on src rank.
+    if my_rank == src:
+        input_tensor, local_size = _object_to_tensor(obj)
+    else:
+        local_size = torch.LongTensor([0])
+    group_backend = get_backend(group)
+    is_nccl_backend = group_backend == Backend.NCCL
+    if is_nccl_backend:
+        if my_rank == src:
+            input_tensor = input_tensor.to(my_rank)
+        local_size = local_size.to(my_rank)
+    # Broadcast object size to all ranks since broadcast of the object tensor
+    # needs same-sized tensors.
+    broadcast(local_size, src, group)
+    # Each rank allocates tennsor of local_size size
+    if my_rank != src:
+        input_tensor = torch.ByteTensor(local_size.item())
+        if is_nccl_backend:
+            input_tensor = input_tensor.to(my_rank)
+
+    # Now all ranks call broadcast with same-sized tensor, after call input_tensor
+    # will contain serialized object representation on all ranks.
+    broadcast(input_tensor, src, group)
+    # For non-src ranks, deserialize tensor back to object.
+    if my_rank != src:
+        input_tensor = input_tensor.type(torch.ByteTensor)
+        return _tensor_to_object(input_tensor, local_size.item())
+    else:
+        return obj
+
 
 def all_gather(tensor_list,
                tensor,
