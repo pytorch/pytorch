@@ -180,7 +180,23 @@ PyObject* c10d_init(PyObject* _unused) {
           [](::c10d::Reducer& reducer, const torch::autograd::Variable& output)
               -> void { reducer.prepare_for_backward({output}); },
           py::call_guard<py::gil_scoped_release>())
-      .def("get_backward_stats", &::c10d::Reducer::get_backward_stats);
+      .def("get_backward_stats", &::c10d::Reducer::get_backward_stats)
+      .def("_rebuild_buckets", &::c10d::Reducer::rebuild_buckets)
+      .def(
+          "get_bucket_tensors",
+          &::c10d::Reducer::get_bucket_tensors,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_push_all_rebuilt_params",
+          &::c10d::Reducer::push_rebuilt_params_for_all_indices,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_set_forward_pass_work_handle",
+          &::c10d::Reducer::set_forward_pass_work_handle,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_get_local_used_maps",
+          &::c10d::Reducer::get_local_used_maps_on_device);
 
   py::enum_<::c10d::ReduceOp>(module, "ReduceOp", R"(
 An enum-like class for available reduction operations: ``SUM``, ``PRODUCT``,
@@ -749,10 +765,10 @@ They are used in specifying strategies for reduction collectives, e.g.,
                 execution and it does not wait for the entire operation to complete on GPU. Note that
                 ``FutureNCCL``  does not support ``NCCL_BLOCKING_WAIT`` flag or NCCL's ``barrier()``.
                 In addition, if a callback function was added by ``fut.then()``, it will wait until
-                ``WorkNCCL``'s NCCL streams synchronize with a new stream from device's stream pool and
-                invoke the callback inline after running the callback on the new stream. ``fut.then()``
-                will return another ``FutureNCCL`` that holds the return value of the callback and the
-                stream that runs the callback.
+                ``WorkNCCL``'s NCCL streams synchronize with ``ProcessGroupNCCL``'s dedicated callback
+                stream and invoke the callback inline after running the callback on the callback stream.
+                ``fut.then()`` will return another ``FutureNCCL`` that holds the return value of the
+                callback and a ``CUDAEvent`` that recorded the callback stream.
 
                 Note that ``fut.done()`` returns if the enire operation is completed on the GPU.
            )");
@@ -773,12 +789,16 @@ They are used in specifying strategies for reduction collectives, e.g.,
       // function as a c10::ArrayRef.
       [](std::shared_ptr<::c10d::ProcessGroup> process_group,
          std::vector<at::Tensor> tensors, // NOLINT
-         size_t buffer_size) {
-        broadcast_coalesced(std::move(process_group), tensors, buffer_size);
+         size_t buffer_size,
+         int rank) {
+        broadcast_coalesced(
+            std::move(process_group), tensors, buffer_size, rank);
       },
       py::arg("process_group"),
       py::arg("tensors"),
       py::arg("buffer_size"),
+      // The source of truth rank to broadcast the tensors from.
+      py::arg("src") = 0,
       py::call_guard<py::gil_scoped_release>());
 
   module.def(

@@ -202,7 +202,7 @@ binary_ops = ('add', 'sub', 'mul', 'div', 'pow', 'lshift', 'rshift', 'mod', 'tru
               )
 comparison_ops = ('eq', 'ne', 'ge', 'gt', 'lt', 'le')
 unary_ops = ('neg', 'abs', 'invert')
-to_py_type_ops = ('bool', 'float', 'long', 'index', 'int', 'nonzero')
+to_py_type_ops = ('bool', 'float', 'complex', 'long', 'index', 'int', 'nonzero')
 all_ops = binary_ops + comparison_ops + unary_ops + to_py_type_ops
 
 
@@ -224,13 +224,13 @@ def sig_for_ops(opname):
     elif name in unary_ops:
         return ['def {}(self) -> Tensor: ...'.format(opname)]
     elif name in to_py_type_ops:
-        if name in {'bool', 'float'}:
+        if name in {'bool', 'float', 'complex'}:
             tname = name
         elif name == 'nonzero':
             tname = 'bool'
         else:
             tname = 'int'
-        if tname in {'float', 'int', 'bool'}:
+        if tname in {'float', 'int', 'bool', 'complex'}:
             tname = 'builtins.' + tname
         return ['def {}(self) -> {}: ...'.format(opname, tname)]
     else:

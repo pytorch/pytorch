@@ -240,8 +240,8 @@ class TestQuantizeFxOps(QuantizationTestCase):
         class Op(torch.nn.Module):
             def __init__(self, is_inplace, is_scalar):
                 super(Op, self).__init__()
-                self.conv1 = torch.nn.Conv2d(2, 2, 2).float()
-                self.conv2 = torch.nn.Conv2d(2, 2, 2).float()
+                self.conv1 = torch.nn.Conv2d(1, 1, 1).float()
+                self.conv2 = torch.nn.Conv2d(1, 1, 1).float()
                 self.is_scalar = is_scalar
                 self.op = ibinary_op if is_inplace else binary_op
 
@@ -264,60 +264,63 @@ class TestQuantizeFxOps(QuantizationTestCase):
         #         x = self.op(x, y)
         #         return x
 
-        data = (torch.randn(1, 2, 3, 3, dtype=torch.float),
-                torch.randn(1, 2, 3, 3, dtype=torch.float))
+        data = (torch.randn(1, 1, 1, 1, dtype=torch.float),
+                torch.randn(1, 1, 1, 1, dtype=torch.float))
         quantized_node = ns.call_function(quantized_op)
-        options = itertools.product([True, False], [True, False], self.static_quant_types)
-        for is_inplace, is_scalar, quant_type in options:
+        options = itertools.product([True, False], [True, False])
+        quant_type = QuantType.STATIC
+        for is_inplace, is_scalar in options:
             self.checkGraphModeFxOp(
                 Op(is_inplace, is_scalar), data, quant_type, quantized_node)
 
     def _test_quantized_binary_op_relu_impl(self, binary_op, ibinary_op, quantized_op):
         class OpRelu(torch.nn.Module):
             def __init__(self, is_inplace, is_functional_relu,
-                         is_inplace_relu, is_scalar):
+                         is_scalar):
                 super(OpRelu, self).__init__()
-                self.conv1 = torch.nn.Conv2d(2, 2, 2).float()
-                self.conv2 = torch.nn.Conv2d(2, 2, 2).float()
+                self.conv1 = torch.nn.Conv2d(1, 1, 1).float()
+                self.conv2 = torch.nn.Conv2d(1, 1, 1).float()
                 self.op = ibinary_op if is_inplace else binary_op
                 self.is_functional_relu = is_functional_relu
-                self.is_inplace_relu = is_inplace_relu
                 self.is_scalar = is_scalar
-
-                if self.is_functional_relu:
-                    self.relu = F.relu
-                else:
-                    self.relu = torch.nn.ReLU(self.is_inplace_relu)
+                self.relu = F.relu if self.is_functional_relu \
+                    else torch.nn.ReLU()
 
             def forward(self, x, y):
                 x = self.conv1(x)
                 y = 3 if self.is_scalar else self.conv2(y)
                 x = self.op(x, y)
-                x = self.relu(x, self.is_inplace_relu) if \
-                    self.is_functional_relu else self.relu(x)
+                x = self.relu(x)
                 return x
 
-        data = (torch.rand((1, 2, 5, 5), dtype=torch.float),
-                torch.rand((1, 2, 5, 5), dtype=torch.float))
+        data = (torch.rand((1, 1, 1, 1), dtype=torch.float),
+                torch.rand((1, 1, 1, 1), dtype=torch.float))
+        quant_type = QuantType.STATIC
         quantized_node = ns.call_function(quantized_op)
         options = itertools.product(
-            [True, False], [True, False], [True, False], [True, False], self.static_quant_types)
-        for is_inplace_op, is_functional_relu, is_inplace_relu, is_scalar, quant_type in options:
+            [True, False], [True, False], [True, False])
+        for is_inplace_op, is_functional_relu, is_scalar in options:
             self.checkGraphModeFxOp(
-                OpRelu(is_inplace_op, is_functional_relu, is_inplace_relu, is_scalar),
+                OpRelu(is_inplace_op, is_functional_relu, is_scalar),
                 data, quant_type, quantized_node)
 
     @skipIfNoFBGEMM
-    def test_quantized_binary_op(self):
+    def test_quantized_add(self):
         self._test_quantized_binary_op_impl(
             operator.add, operator.iadd, torch.ops.quantized.add)
+
+    @skipIfNoFBGEMM
+    def test_quantized_mul(self):
         self._test_quantized_binary_op_impl(
             operator.mul, operator.imul, torch.ops.quantized.mul)
 
     @skipIfNoFBGEMM
-    def test_quantized_binary_op_relu(self):
+    def test_quantized_add_relu(self):
         self._test_quantized_binary_op_relu_impl(
             operator.add, operator.iadd, torch.ops.quantized.add_relu)
+
+    @skipIfNoFBGEMM
+    def test_quantized_mul_relu(self):
         self._test_quantized_binary_op_relu_impl(
             operator.mul, operator.imul, torch.ops.quantized.mul_relu)
 

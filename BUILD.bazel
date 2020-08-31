@@ -106,17 +106,19 @@ cc_test(
     ],
 )
 
+# TODO: refactor this into its own library (but how to make
+# a binary based off of a module in a library?)
 py_binary(
     name = "gen",
-    srcs = ["aten/src/ATen/gen.py"],
+    srcs = ["tools/setup_helpers/gen.py"],
+    deps = [
+        ":tools_codegen"
+    ],
 )
 
 genrule(
     name = "generated_cpp",
     srcs = [
-        "aten/src/ATen/Declarations.cwrap",
-        "aten/src/THCUNN/generic/THCUNN.h",
-        "aten/src/ATen/nn.yaml",
         "aten/src/ATen/native/native_functions.yaml",
     ] + glob(["aten/src/ATen/templates/**"]),
     outs = [
@@ -126,8 +128,6 @@ genrule(
         "aten/src/ATen/CPUType.cpp",
         "aten/src/ATen/Functions.h",
         "aten/src/ATen/Functions.cpp",
-        "aten/src/ATen/LegacyTHFunctionsCPU.h",
-        "aten/src/ATen/LegacyTHFunctionsCPU.cpp",
         "aten/src/ATen/NativeFunctions.h",
         "aten/src/ATen/MkldnnCPUType.h",
         "aten/src/ATen/MkldnnCPUType.cpp",
@@ -141,14 +141,13 @@ genrule(
         "aten/src/ATen/core/TensorMethods.cpp",
         "aten/src/ATen/core/ATenOpList.cpp",
     ],
-    cmd = "$(location :gen) --source-path aten/src/ATen --install_dir `dirname $(location aten/src/ATen/Declarations.yaml)` aten/src/ATen/Declarations.cwrap aten/src/THCUNN/generic/THCUNN.h aten/src/ATen/nn.yaml aten/src/ATen/native/native_functions.yaml",
+    cmd = "$(location :gen) --source-path aten/src/ATen --install_dir `dirname $(location aten/src/ATen/Declarations.yaml)`",
     tools = [":gen"],
 )
 
 py_library(
-    name = "code_template",
-    srcs = ["aten/src/ATen/code_template.py"],
-    imports = ["aten"],
+    name = "tools_codegen",
+    srcs = glob(["tools/codegen/**/*.py"]),
 )
 
 py_library(
@@ -158,7 +157,7 @@ py_library(
         "tools/autograd/*.yaml",
         "tools/autograd/templates/*",
     ]),
-    deps = [":code_template"],
+    deps = [":tools_codegen"],
 )
 
 py_library(

@@ -31,7 +31,7 @@ from test_jit import backward_graph, all_backward_graphs, get_lstm_inputs, get_m
 
 from torch.testing._internal.te_utils import CudaCodeGenExecuted
 
-FUSION_GROUP = 'tensorexpr::Group'
+FUSION_GROUP = 'prim::TensorExprGroup'
 
 def strip_profiling_nodes(nodes):
     profiling_opcodes = set(['prim::BailoutTemplate', 'prim::BailOut'])
@@ -101,6 +101,45 @@ class TestTEFuser(JitTestCase):
         fusion_groups = self.findFusionGroups(graph)
         self.assertEqual(len(fusion_groups), 1)
         FileCheck().check("aten::abs").check("aten::mul").run(str(fusion_groups[0]))
+
+    @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
+    def test_sum_simple(self):
+        def func(x):
+            return x.sum() * 2
+
+        a = torch.tensor(list(x for x in range(0, 15)), dtype=torch.float, device='cpu')
+        a = a.reshape(5, 3)
+        scripted = self.checkScript(func, (a,))
+        graph = scripted.graph_for(a)
+        fusion_groups = self.findFusionGroups(graph)
+        self.assertEqual(len(fusion_groups), 1)
+        self.assertEqual(scripted(a), func(a))
+
+    @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
+    def test_sum_dim(self):
+        def func(x):
+            return x.sum((0, )) * 2
+
+        a = torch.tensor(list(x for x in range(0, 15)), dtype=torch.float, device='cpu')
+        a = a.reshape(5, 3)
+        scripted = self.checkScript(func, (a,))
+        graph = scripted.graph_for(a)
+        fusion_groups = self.findFusionGroups(graph)
+        self.assertEqual(len(fusion_groups), 1)
+        self.assertEqual(scripted(a), func(a))
+
+    @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
+    def test_sum_keepdim_cast(self):
+        def func(x):
+            return x.sum((0, ), keepdim=True, dtype=torch.double) * 2
+
+        a = torch.tensor(list(x for x in range(0, 15)), dtype=torch.float, device='cpu')
+        a = a.reshape(5, 3)
+        scripted = self.checkScript(func, (a,))
+        graph = scripted.graph_for(a)
+        fusion_groups = self.findFusionGroups(graph)
+        self.assertEqual(len(fusion_groups), 1)
+        self.assertEqual(scripted(a), func(a))
 
     @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
     def test_abs_cpu(self):
