@@ -115,7 +115,7 @@ TEST(VulkanTest, add_) {
 }
 
 TEST(VulkanTest, mulScalar) {
-  if (!at::vulkan::is_available())
+  if (!at::is_vulkan_available())
     return;
   auto t_in = at::rand({3, 2, 2, 3}, at::device(at::kCPU).dtype(at::kFloat));
   const float other = 3.14;
@@ -133,7 +133,7 @@ TEST(VulkanTest, mulScalar) {
 }
 
 TEST(VulkanTest, addScalar) {
-  if (!at::vulkan::is_available())
+  if (!at::is_vulkan_available())
     return;
   auto t_in = at::rand({3, 2, 2, 3}, at::device(at::kCPU).dtype(at::kFloat));
   float* data = t_in.data_ptr<float>();
@@ -728,7 +728,7 @@ TEST(VulkanTest, reshape2) {
 }
 
 TEST(VulkanTest, tensor5d) {
-  if (!at::vulkan::is_available())
+  if (!at::is_vulkan_available())
     return;
 
   auto t_in =
@@ -737,7 +737,7 @@ TEST(VulkanTest, tensor5d) {
 }
 
 TEST(VulkanTest, tensor5d_transpose) {
-  if (!at::vulkan::is_available())
+  if (!at::is_vulkan_available())
     return;
 
   auto t_in =
@@ -761,7 +761,7 @@ TEST(VulkanTest, tensor5d_transpose) {
 }
 
 TEST(VulkanTest, view) {
-  if (!at::vulkan::is_available())
+  if (!at::is_vulkan_available())
     return;
 
   auto t_in =
@@ -780,7 +780,7 @@ TEST(VulkanTest, view) {
 }
 
 TEST(VulkanTest, slice) {
-  if (!at::vulkan::is_available())
+  if (!at::is_vulkan_available())
     return;
 
   auto t_in =
@@ -804,7 +804,7 @@ TEST(VulkanTest, slice) {
 }
 
 TEST(VulkanTest, select) {
-  if (!at::vulkan::is_available())
+  if (!at::is_vulkan_available())
     return;
 
   auto t_in =
@@ -828,7 +828,7 @@ TEST(VulkanTest, select) {
 }
 
 TEST(VulkanTest, unsqueeze) {
-  if (!at::vulkan::is_available())
+  if (!at::is_vulkan_available())
     return;
 
   auto t_in =
@@ -852,7 +852,7 @@ TEST(VulkanTest, unsqueeze) {
 }
 
 TEST(VulkanTest, cat) {
-  if (!at::vulkan::is_available())
+  if (!at::is_vulkan_available())
     return;
 
   auto t_in0 =
@@ -895,7 +895,7 @@ TEST(VulkanTest, max_pool2d) {
 }
 
 TEST(VulkanTest, avg_pool2d) {
-  if (!at::vulkan::is_available())
+  if (!at::is_vulkan_available())
     return;
 
   auto t_in =

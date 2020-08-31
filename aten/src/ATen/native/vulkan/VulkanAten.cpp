@@ -380,10 +380,10 @@ Tensor mul_scalar(const Tensor& self, Scalar other) {
 }
 
 Tensor select(const Tensor& self, int64_t dim, int64_t index) {
-  auto sliced = slice(self, dim, index, index + 1, 1);
+  auto sliced = vulkan::aten::slice(self, dim, index, index + 1, 1);
   auto sizes = self.sizes().vec();
   sizes.erase(sizes.begin() + dim);
-  return reshape(sliced, sizes);
+  return vulkan::aten::reshape(sliced, sizes);
 }
 
 Tensor unsqueeze(const Tensor& self, int64_t dim) {
