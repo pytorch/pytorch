@@ -21,7 +21,7 @@ from torch.fx.graph import (
     map_arg,
 )
 
-from .patterns import (
+from .pattern_utils import (
     matches,
     get_quant_patterns,
     get_dynamic_quant_patterns,
