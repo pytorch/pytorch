@@ -15657,6 +15657,10 @@ def add_nn_module_test(*args, **kwargs):
             if torch.is_tensor(input):
                 input = (input,)
             input = input + (kwargs['target_fn'](),)
+        elif 'target' in kwargs:
+            if torch.is_tensor(input):
+                input = (input,)
+            input = input + (kwargs['target'],)
 
         args_variable, kwargs_variable = create_input(input)
         f_args_variable = deepcopy(unpack_variables(args_variable))
