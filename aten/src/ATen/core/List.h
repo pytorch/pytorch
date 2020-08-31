@@ -71,6 +71,11 @@ public:
     return iterator_->toStringRef();
   }
 
+  template<class _T = T>
+  std::enable_if_t<std::is_same<c10::optional<std::string>, T>::value && std::is_same<_T, T>::value, c10::optional<std::reference_wrapper<const std::string>>> toOptionalStringRef() {
+    return iterator_->toOptionalStringRef();
+  }
+
   friend void swap<T, Iterator>(ListElementReference&& lhs, ListElementReference&& rhs);
 
 private:

@@ -1,4 +1,5 @@
 load("@rules_cc//cc:defs.bzl", "cc_library")
+load("@//third_party:substitution.bzl", "template_rule")
 
 LIBUV_COMMON_SRCS = [
     "third_party/libuv/src/fs-poll.c",
@@ -70,6 +71,16 @@ proto_library(
 cc_proto_library(
     name = "tensorpipe_protos",
     deps = [":tensorpipe_proto_source"],
+)
+
+template_rule(
+    name = "tensorpipe_header_template",
+    src = "tensorpipe/tensorpipe.h.in",
+    out = "tensorpipe/tensorpipe.h",
+    substitutions = {
+        "cmakedefine01 TENSORPIPE_HAS_SHM_TRANSPORT": "define TENSORPIPE_HAS_SHM_TRANSPORT 0",
+        "cmakedefine01 TENSORPIPE_HAS_CMA_CHANNEL": "define TENSORPIPE_HAS_CMA_CHANNEL 0",
+    },
 )
 
 cc_library(

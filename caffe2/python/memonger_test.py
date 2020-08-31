@@ -38,7 +38,7 @@ class MemongerTest(hu.HypothesisTestCase):
            batch_size=st.integers(min_value=1, max_value=10),
            do=st.sampled_from(hu.device_options),
            algo=st.sampled_from(memonger.AssignmentAlgorithm))
-    @settings(max_examples=5, timeout=120)
+    @settings(max_examples=5, deadline=None)
     def test_simple_memonger(self, input_dim, output_dim, batch_size, do, algo):
         m = model_helper.ModelHelper()
         fc1 = brew.fc(m, "data", "fc1", dim_in=input_dim, dim_out=output_dim)
@@ -91,7 +91,7 @@ class MemongerTest(hu.HypothesisTestCase):
            output_dim=st.integers(min_value=1, max_value=10),
            batch_size=st.integers(min_value=1, max_value=10),
            do=st.sampled_from(hu.device_options))
-    @settings(max_examples=5, timeout=120)
+    @settings(max_examples=5, deadline=None)
     def test_fast_memonger(self, input_dim, output_dim, batch_size, do):
         m = model_helper.ModelHelper()
         fc1 = brew.fc(m, "data", "fc1", dim_in=input_dim, dim_out=output_dim)
@@ -274,6 +274,7 @@ class MemongerTest(hu.HypothesisTestCase):
     @given(input_dim=st.integers(min_value=4, max_value=4),
            output_dim=st.integers(min_value=4, max_value=4),
            batch_size=st.integers(min_value=4, max_value=4))
+    @settings(deadline=1000)
     def test_gradient_optim_tree(self, input_dim, output_dim, batch_size):
         m = model_helper.ModelHelper()
         with core.NameScope("name_x"):
@@ -331,6 +332,7 @@ class MemongerTest(hu.HypothesisTestCase):
     @given(input_dim=st.integers(min_value=4, max_value=4),
            output_dim=st.integers(min_value=4, max_value=4),
            batch_size=st.integers(min_value=4, max_value=4))
+    @settings(deadline=1000)
     def test_forward_optim_tree_daggy(self, input_dim, output_dim, batch_size):
         m = model_helper.ModelHelper()
         m.Proto().type = "dag"
@@ -387,6 +389,7 @@ class MemongerTest(hu.HypothesisTestCase):
     @given(input_dim=st.integers(min_value=4, max_value=4),
            output_dim=st.integers(min_value=4, max_value=4),
            batch_size=st.integers(min_value=4, max_value=4))
+    @settings(deadline=10000)
     def test_forward_optim_tree_harder(self, input_dim, output_dim, batch_size):
         m = model_helper.ModelHelper()
         m.net.Proto().type = "dag"

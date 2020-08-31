@@ -6,7 +6,7 @@ from __future__ import unicode_literals
 from caffe2.python import brew, core, workspace
 from caffe2.python.model_helper import ModelHelper
 from functools import partial
-from hypothesis import given
+from hypothesis import given, settings
 
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
@@ -66,7 +66,8 @@ def _layer_norm_grad_ref(axis, gout_full, norm, mean_full, stdev_full, X_full):
 
 
 class TestLayerNormOp(serial.SerializedTestCase):
-    @serial.given(X=hu.tensor(min_dim=2), **hu.gcs)
+    @given(X=hu.tensor(min_dim=2), **hu.gcs)
+    @settings(deadline=10000)
     def test_layer_norm_grad_op(self, X, gc, dc):
         axis = np.random.randint(0, len(X.shape))
         epsilon = 1e-4
@@ -141,6 +142,7 @@ class TestLayerNormOp(serial.SerializedTestCase):
            eps=st.floats(1e-5, 1e-3),
            elementwise_affine=st.booleans(),
            **hu.gcs)
+    @settings(deadline=10000)
     def test_layer_norm_grad(
             self, M, N, axis, eps, elementwise_affine, gc, dc):
         op = core.CreateOperator(
@@ -171,6 +173,7 @@ class TestLayerNormOp(serial.SerializedTestCase):
            eps=st.floats(1e-5, 1e-3),
            elementwise_affine=st.booleans(),
            **hu.gcs)
+    @settings(deadline=10000)
     def test_layer_norm_op_c10(self, X, eps, elementwise_affine, gc, dc):
         axis = np.random.randint(0, len(X.shape))
 
@@ -319,6 +322,7 @@ class TestLayerNormOp(serial.SerializedTestCase):
            eps=st.floats(1e-5, 1e-3),
            elementwise_affine=st.booleans(),
            **hu.gcs)
+    @settings(deadline=1000)
     def test_layer_norm_op_jit(self, X, eps, elementwise_affine, gc, dc):
         @torch.jit.script
         def jit_layer_norm(X, gamma=None, beta=None, axis=1, eps=1e-5,

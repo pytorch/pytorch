@@ -1,15 +1,41 @@
 #pragma once
 
+#ifdef USE_TENSORPIPE
+
 #include <atomic>
 #include <thread>
-
-#include <tensorpipe/tensorpipe.h>
 
 #include <c10/core/thread_pool.h>
 #include <c10d/PrefixStore.hpp>
 #include <c10d/ProcessGroup.hpp>
 #include <c10d/Store.hpp>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
+
+// Forward-declare the TensorPipe classes we need, to avoid including its
+// headers in PyTorch's ones and thus have it become a public dependency.
+
+namespace tensorpipe {
+
+class Context;
+class Error;
+class Listener;
+class Message;
+class Pipe;
+
+namespace transport {
+class Context;
+namespace uv {
+class Context;
+} // namespace uv
+} // namespace transport
+
+namespace channel {
+class Context;
+} // namespace channel
+
+using DeviceMap = std::unordered_map<c10::DeviceIndex, c10::DeviceIndex>;
+
+} // namespace tensorpipe
 
 namespace torch {
 namespace distributed {
@@ -41,11 +67,13 @@ struct TensorPipeRpcBackendOptions : public RpcBackendOptions {
       optional<std::vector<std::string>> transports,
       optional<std::vector<std::string>> channels,
       float rpc_timeout,
-      std::string init_method)
+      std::string init_method,
+      std::unordered_map<std::string, tensorpipe::DeviceMap> device_maps = {})
       : RpcBackendOptions(rpc_timeout, init_method),
         numWorkerThreads(numWorkerThreads),
         transports(std::move(transports)),
-        channels(std::move(channels)) {
+        channels(std::move(channels)),
+        deviceMaps(std::move(device_maps)) {
     TORCH_CHECK(
         numWorkerThreads > 0,
         "num_worker_threads must be positive, got ",
@@ -70,9 +98,23 @@ struct TensorPipeRpcBackendOptions : public RpcBackendOptions {
     }
   }
 
+  void setDeviceMap(
+      const std::string& workerName,
+      const tensorpipe::DeviceMap& deviceMap) {
+    auto iter = deviceMaps.find(workerName);
+    if (iter == deviceMaps.end()) {
+      deviceMaps[workerName] = deviceMap;
+    } else {
+      for (auto& entry : deviceMap) {
+        iter->second[entry.first] = entry.second;
+      }
+    }
+  }
+
   int numWorkerThreads;
   const optional<std::vector<std::string>> transports;
   const optional<std::vector<std::string>> channels;
+  std::unordered_map<std::string, tensorpipe::DeviceMap> deviceMaps;
 };
 
 // Struct to track the network source metrics
@@ -101,7 +143,8 @@ class TensorPipeAgent : public RpcAgent {
       worker_id_t selfId,
       int worldSize,
       std::shared_ptr<c10d::ProcessGroup> processGroup,
-      TensorPipeRpcBackendOptions opts);
+      TensorPipeRpcBackendOptions opts,
+      std::unique_ptr<RequestCallback> cb);
 
   TensorPipeAgent(const TensorPipeAgent&) = delete;
   TensorPipeAgent& operator=(const TensorPipeAgent&) = delete;
@@ -123,6 +166,11 @@ class TensorPipeAgent : public RpcAgent {
   const WorkerInfo& getWorkerInfo(const std::string& workerName) const override;
   const WorkerInfo& getWorkerInfo(worker_id_t workerId) const override;
   std::vector<WorkerInfo> getWorkerInfos() const override;
+  void setReverseDeviceMaps(
+      const std::unordered_map<std::string, tensorpipe::DeviceMap>&
+          reverseDeviceMaps) {
+    reverseDeviceMaps_ = reverseDeviceMaps;
+  }
 
   std::unordered_map<std::string, std::string> getMetrics() override;
 
@@ -138,10 +186,6 @@ class TensorPipeAgent : public RpcAgent {
 
   static std::string guessUvAddress(
       tensorpipe::transport::uv::Context& uvContext);
-
-#ifdef TP_ENABLE_SHM
-  static std::string createUniqueShmAddr();
-#endif
 
  private:
   // Populates workerIdToInfo_ and workerNameToInfo_ using addressStore_
@@ -212,6 +256,7 @@ class TensorPipeAgent : public RpcAgent {
   };
 
   const TensorPipeRpcBackendOptions opts_;
+  std::unordered_map<std::string, tensorpipe::DeviceMap> reverseDeviceMaps_;
 
   ThreadPool threadPool_;
   std::shared_ptr<tensorpipe::Context> context_;
@@ -322,3 +367,5 @@ class TensorPipeAgent : public RpcAgent {
 } // namespace rpc
 } // namespace distributed
 } // namespace torch
+
+#endif // USE_TENSORPIPE
