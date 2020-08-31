@@ -614,9 +614,7 @@ class QuantizationTestCase(TestCase):
         fused = fuse(original)
 
         quantizer = Quantizer()
-        # TODO: uncommon after we make per channel observer work in the flow
-        # qconfig_dict = {'': get_default_qconfig(torch.backends.quantized.engine)}
-        qconfig_dict = {'' : default_qconfig}
+        qconfig_dict = {'': get_default_qconfig(torch.backends.quantized.engine)}
         if quant_type == QuantType.DYNAMIC:
             prepared = quantizer.prepare_dynamic(fused, qconfig_dict)
         else:

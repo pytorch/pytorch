@@ -48,6 +48,12 @@ DEFINE_DISPATCH(lcm_stub);
 DEFINE_DISPATCH(hypot_stub);
 DEFINE_DISPATCH(nextafter_stub);
 
+static Tensor wrapped_scalar_tensor(Scalar scalar) {
+  auto tensor = scalar_to_tensor(scalar);
+  tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
+  return tensor;
+}
+
 Tensor& add_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar alpha) {
   auto iter = TensorIterator::binary_op(result, self, other);
   alpha_check(iter.dtype(), alpha);
@@ -275,6 +281,35 @@ Tensor& sub_(Tensor& self, const Tensor& other, Scalar alpha) {
   return native::sub_out(self, self, other, alpha);
 }
 
+Tensor sub(const Tensor& self, Scalar other, Scalar alpha) {
+  return native::sub(self, wrapped_scalar_tensor(other), alpha);
+}
+
+Tensor& sub_(Tensor& self, Scalar other, Scalar alpha) {
+  return native::sub_(self, wrapped_scalar_tensor(other), alpha);
+}
+
+// subtract, alias for sub
+Tensor& subtract_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar alpha) {
+  return at::sub_out(result, self, other, alpha);
+}
+
+Tensor subtract(const Tensor& self, const Tensor& other, Scalar alpha) {
+  return self.sub(other, alpha);
+}
+
+Tensor& subtract_(Tensor& self, const Tensor& other, Scalar alpha) {
+  return self.sub_(other, alpha);
+}
+
+Tensor subtract(const Tensor& self, Scalar other, Scalar alpha) {
+  return self.sub(other, alpha);
+}
+
+Tensor& subtract_(Tensor& self, Scalar other, Scalar alpha) {
+  return self.sub_(other, alpha);
+}
+
 Tensor& sigmoid_backward_out(Tensor& result, const Tensor& grad_output, const Tensor& output) {
   auto iter = TensorIterator::binary_op(result, grad_output, output);
   sigmoid_backward_stub(iter.device_type(), iter);
@@ -346,12 +381,6 @@ Tensor& atan2_(Tensor& self, const Tensor& other) {
 // types (int, float, etc.) to Tensor (only to Scalar). They're not exposed
 // to Python.
 
-static Tensor wrapped_scalar_tensor(Scalar scalar) {
-  auto tensor = scalar_to_tensor(scalar);
-  tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
-  return tensor;
-}
-
 static void check_convert(Scalar scalar, ScalarType scalarType) {
   // Validate that is possible to convert scalar to tensor dtype without overflow
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::Bool, at::ScalarType::BFloat16, at::ScalarType::Half, scalarType, "check_convert", [&]{
@@ -416,14 +445,6 @@ Tensor mul(const Tensor& self, Scalar other) {
 
 Tensor& mul_(Tensor& self, Scalar other) {
   return native::mul_(self, wrapped_scalar_tensor(other));
-}
-
-Tensor sub(const Tensor& self, Scalar other, Scalar alpha) {
-  return native::sub(self, wrapped_scalar_tensor(other), alpha);
-}
-
-Tensor& sub_(Tensor& self, Scalar other, Scalar alpha) {
-  return native::sub_(self, wrapped_scalar_tensor(other), alpha);
 }
 
 Tensor rsub(const Tensor& self, Scalar other, Scalar alpha) {
