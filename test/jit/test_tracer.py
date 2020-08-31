@@ -1317,8 +1317,6 @@ class TestTracer(JitTestCase):
         check(traced.foo)
         expected_names = ['addOne']
         check(traced)
-        print(traced.foo.forward.graph)
-
 
     def test_trace_autograd_function(self):
         class TestFunc(torch.autograd.Function):
