@@ -184,11 +184,15 @@ def _rebuild_qtensor(storage, storage_offset, size, stride, quantizer_params, re
     if qscheme == torch.per_tensor_affine:
         _, scale, zero_point = quantizer_params
         tensor = torch._empty_affine_quantized(size, scale=scale, zero_point=zero_point, dtype=storage.dtype)
-    elif qscheme == torch.per_channel_affine:
+    elif qscheme in (torch.per_channel_affine, torch.per_channel_affine_float_qparams):
         _, scales, zero_points, axis = quantizer_params
         if type(scales) is list and type(zero_points) is list:
-            scales = torch.tensor(scales, dtype=torch.double)
-            zero_points = torch.tensor(zero_points, dtype=torch.long)
+            if qscheme == torch.per_channel_affine:
+                scales = torch.tensor(scales, dtype=torch.double)
+                zero_points = torch.tensor(zero_points, dtype=torch.long)
+            else:
+                scales = torch.tensor(scales, dtype=torch.float)
+                zero_points = torch.tensor(zero_points, dtype=torch.float)
         tensor = torch._empty_per_channel_affine_quantized(
             size, scales=scales, zero_points=zero_points, axis=axis, dtype=storage.dtype)
     else:
@@ -417,6 +421,10 @@ class ExceptionWrapper(object):
             # makes stack traces unreadable. It will not be changed in Python
             # (https://bugs.python.org/issue2651), so we work around it.
             msg = KeyErrorMessage(msg)
+        elif getattr(self.exc_type, "message", None):
+            # Some exceptions have first argument as non-str but explicitly
+            # have message field
+            raise self.exc_type(message=msg)
         raise self.exc_type(msg)
 
 

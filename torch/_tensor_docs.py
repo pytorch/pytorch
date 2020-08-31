@@ -202,6 +202,18 @@ acos_() -> Tensor
 In-place version of :meth:`~Tensor.acos`
 """)
 
+add_docstr_all('arccos', r"""
+arccos() -> Tensor
+
+See :func:`torch.arccos`
+""")
+
+add_docstr_all('arccos_', r"""
+arccos_() -> Tensor
+
+In-place version of :meth:`~Tensor.arccos`
+""")
+
 add_docstr_all('acosh',
                r"""
 acosh() -> Tensor
@@ -214,6 +226,18 @@ add_docstr_all('acosh_',
 acosh_() -> Tensor
 
 In-place version of :meth:`~Tensor.acosh`
+""")
+
+add_docstr_all('arccosh', r"""
+acosh() -> Tensor
+
+See :func:`torch.arccosh`
+""")
+
+add_docstr_all('arccosh_', r"""
+acosh_() -> Tensor
+
+In-place version of :meth:`~Tensor.arccosh`
 """)
 
 add_docstr_all('add',
@@ -495,6 +519,18 @@ asin_() -> Tensor
 In-place version of :meth:`~Tensor.asin`
 """)
 
+add_docstr_all('arcsin', r"""
+arcsin() -> Tensor
+
+See :func:`torch.arcsin`
+""")
+
+add_docstr_all('arcsin_', r"""
+arcsin_() -> Tensor
+
+In-place version of :meth:`~Tensor.arcsin`
+""")
+
 add_docstr_all('asinh', r"""
 asinh() -> Tensor
 
@@ -508,50 +544,82 @@ asinh_() -> Tensor
 In-place version of :meth:`~Tensor.asinh`
 """)
 
+add_docstr_all('arcsinh', r"""
+arcsinh() -> Tensor
+
+See :func:`torch.arcsinh`
+""")
+
+add_docstr_all('arcsinh_', r"""
+arcsinh_() -> Tensor
+
+In-place version of :meth:`~Tensor.arcsinh`
+""")
+
 add_docstr_all('as_strided', r"""
 as_strided(size, stride, storage_offset=0) -> Tensor
 
 See :func:`torch.as_strided`
 """)
 
-add_docstr_all('atan',
-               r"""
+add_docstr_all('atan', r"""
 atan() -> Tensor
 
 See :func:`torch.atan`
 """)
 
-add_docstr_all('atan2',
-               r"""
-atan2(other) -> Tensor
-
-See :func:`torch.atan2`
-""")
-
-add_docstr_all('atan2_',
-               r"""
-atan2_(other) -> Tensor
-
-In-place version of :meth:`~Tensor.atan2`
-""")
-
-add_docstr_all('atan_',
-               r"""
+add_docstr_all('atan_', r"""
 atan_() -> Tensor
 
 In-place version of :meth:`~Tensor.atan`
 """)
 
-add_docstr_all('atanh',
-               r"""
+add_docstr_all('arctan', r"""
+arctan() -> Tensor
+
+See :func:`torch.arctan`
+""")
+
+add_docstr_all('arctan_', r"""
+arctan_() -> Tensor
+
+In-place version of :meth:`~Tensor.arctan`
+""")
+
+add_docstr_all('atan2', r"""
+atan2(other) -> Tensor
+
+See :func:`torch.atan2`
+""")
+
+add_docstr_all('atan2_', r"""
+atan2_(other) -> Tensor
+
+In-place version of :meth:`~Tensor.atan2`
+""")
+
+add_docstr_all('atanh', r"""
 atanh() -> Tensor
 
 See :func:`torch.atanh`
 """)
 
-add_docstr_all('atanh_',
-               r"""
+add_docstr_all('atanh_', r"""
+atanh_(other) -> Tensor
+
 In-place version of :meth:`~Tensor.atanh`
+""")
+
+add_docstr_all('arctanh', r"""
+arctanh() -> Tensor
+
+See :func:`torch.arctanh`
+""")
+
+add_docstr_all('arctanh_', r"""
+arctanh_(other) -> Tensor
+
+In-place version of :meth:`~Tensor.arctanh`
 """)
 
 add_docstr_all('baddbmm',
@@ -799,21 +867,10 @@ clip_(min, max) -> Tensor
 Alias for :meth:`~Tensor.clamp_`.
 """)
 
-add_docstr_all('clone',
-               r"""
-clone(memory_format=torch.preserve_format) -> Tensor
+add_docstr_all('clone', r"""
+clone(*, memory_format=torch.preserve_format) -> Tensor
 
-Returns a copy of the :attr:`self` tensor. The copy has the same size and data
-type as :attr:`self`.
-
-.. note::
-
-    This function is differentiable and so gradients will flow back to the original
-    Tensor. If you want to get a Tensor that is independent from the point of view
-    of the autograd, see :meth:`~Tensor.detach`.
-
-Args:
-    {memory_format}
+See :func:`torch.clone`
 """.format(**common_args))
 
 add_docstr_all('contiguous',
@@ -1747,8 +1804,8 @@ add_docstr_all('is_set_to',
                r"""
 is_set_to(tensor) -> bool
 
-Returns True if this object refers to the same ``THTensor`` object from the
-Torch C API as the given tensor.
+Returns True if both tensors are pointing to the exact same memory (same
+storage, offset, size and stride).
 """)
 
 add_docstr_all('item', r"""
@@ -2008,11 +2065,25 @@ matrix_power(n) -> Tensor
 See :func:`torch.matrix_power`
 """)
 
+add_docstr_all('matrix_exp',
+               r"""
+matrix_exp() -> Tensor
+
+See :func:`torch.matrix_exp`
+""")
+
 add_docstr_all('max',
                r"""
 max(dim=None, keepdim=False) -> Tensor or (Tensor, Tensor)
 
 See :func:`torch.max`
+""")
+
+add_docstr_all('maximum',
+               r"""
+maximum(other) -> Tensor
+
+See :func:`torch.maximum`
 """)
 
 add_docstr_all('argmax',
@@ -2043,6 +2114,13 @@ min(dim=None, keepdim=False) -> Tensor or (Tensor, Tensor)
 See :func:`torch.min`
 """)
 
+add_docstr_all('minimum',
+               r"""
+minimum(other) -> Tensor
+
+See :func:`torch.minimum`
+""")
+
 add_docstr_all('argmin',
                r"""
 argmin(dim=None, keepdim=False) -> LongTensor
@@ -2062,6 +2140,12 @@ add_docstr_all('mode',
 mode(dim=None, keepdim=False) -> (Tensor, LongTensor)
 
 See :func:`torch.mode`
+""")
+
+add_docstr_all('movedim', r"""
+movedim(source, destination) -> Tensor
+
+See :func:`torch.movedim`
 """)
 
 add_docstr_all('mul',
@@ -2163,11 +2247,25 @@ neg() -> Tensor
 See :func:`torch.neg`
 """)
 
+add_docstr_all('negative',
+               r"""
+negative() -> Tensor
+
+See :func:`torch.negative`
+""")
+
 add_docstr_all('neg_',
                r"""
 neg_() -> Tensor
 
 In-place version of :meth:`~Tensor.neg`
+""")
+
+add_docstr_all('negative_',
+               r"""
+negative_() -> Tensor
+
+In-place version of :meth:`~Tensor.negative`
 """)
 
 add_docstr_all('nelement',
@@ -2240,7 +2338,6 @@ ormqr(input2, input3, left=True, transpose=False) -> Tensor
 
 See :func:`torch.ormqr`
 """)
-
 
 add_docstr_all('permute',
                r"""
@@ -3482,11 +3579,25 @@ trunc() -> Tensor
 See :func:`torch.trunc`
 """)
 
+add_docstr_all('fix',
+               r"""
+fix() -> Tensor
+
+See :func:`torch.fix`.
+""")
+
 add_docstr_all('trunc_',
                r"""
 trunc_() -> Tensor
 
 In-place version of :meth:`~Tensor.trunc`
+""")
+
+add_docstr_all('fix_',
+               r"""
+fix_() -> Tensor
+
+In-place version of :meth:`~Tensor.fix`
 """)
 
 add_docstr_all('type',

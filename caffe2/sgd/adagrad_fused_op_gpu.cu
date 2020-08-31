@@ -1076,6 +1076,10 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientExactOp final
             << "CUDARowWiseSparseAdagradFusedWithSparseLengthSumGradientOp"
             << " weight_decay_=" << weight_decay_;
 
+    CAFFE_ENFORCE(
+        round_option_ == STOCHASTIC || round_option_ == NEAREST,
+        "round_option_ should be either NEAREST or STOCHATIC");
+
     const T decay = this->template GetSingleArgument<T>("decay", 1.0f);
     CAFFE_ENFORCE_EQ(decay, 1.0, "Decay is not supported for SparseAdagradOp");
   }
@@ -1200,12 +1204,12 @@ class CUDARowWiseSparseAdagradFusedWithSparseLengthsSumGradientExactOp final
 
     // 0: nearest rounding
     // 1: stochastic rounding
-    if (round_option_) {
+    if (round_option_ == STOCHASTIC) {
       seed.x = default_rng_seed_val;
       seed.y = maxThreads * block_size;
     }
 
-    if (round_option_) {
+    if (round_option_ == STOCHASTIC) {
       rowwise_sparse_adagrad_fused_length_sum_gradient_dedup_kernel<
           IndexType,
           TParam,

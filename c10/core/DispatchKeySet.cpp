@@ -2,6 +2,18 @@
 
 namespace c10 {
 
+static DispatchKeySet autograd_dispatch_keys{
+  DispatchKey::Autograd,
+  DispatchKey::AutogradXLA,
+  DispatchKey::PrivateUse1_PreAutograd,
+  DispatchKey::PrivateUse2_PreAutograd,
+  DispatchKey::PrivateUse3_PreAutograd,
+};
+
+DispatchKeySet AutogradDispatchKeys() {
+  return autograd_dispatch_keys;
+}
+
 std::string toString(DispatchKeySet ts) {
   std::stringstream ss;
   ss << ts;
