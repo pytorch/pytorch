@@ -241,8 +241,8 @@ class TestQuantizeFxOps(QuantizationTestCase):
         class Op(torch.nn.Module):
             def __init__(self, is_inplace, is_scalar):
                 super(Op, self).__init__()
-                self.conv1 = torch.nn.Conv2d(2, 1, 1).float()
-                self.conv2 = torch.nn.Conv2d(2, 1, 1).float()
+                self.conv1 = torch.nn.Conv2d(1, 1, 1).float()
+                self.conv2 = torch.nn.Conv2d(1, 1, 1).float()
                 self.is_scalar = is_scalar
                 self.op = ibinary_op if is_inplace else binary_op
 
@@ -265,8 +265,8 @@ class TestQuantizeFxOps(QuantizationTestCase):
         #         x = self.op(x, y)
         #         return x
 
-        data = (torch.randn(1, 2, 2, 2, dtype=torch.float),
-                torch.randn(1, 2, 2, 2, dtype=torch.float))
+        data = (torch.randn(1, 1, 1, 1, dtype=torch.float),
+                torch.randn(1, 1, 1, 1, dtype=torch.float))
         quantized_node = ns.call_function(quantized_op)
         options = itertools.product([True, False], [True, False])
         quant_type = QuantType.STATIC
@@ -279,8 +279,8 @@ class TestQuantizeFxOps(QuantizationTestCase):
             def __init__(self, is_inplace, is_functional_relu,
                          is_scalar):
                 super(OpRelu, self).__init__()
-                self.conv1 = torch.nn.Conv2d(2, 1, 1).float()
-                self.conv2 = torch.nn.Conv2d(2, 1, 1).float()
+                self.conv1 = torch.nn.Conv2d(1, 1, 1).float()
+                self.conv2 = torch.nn.Conv2d(1, 1, 1).float()
                 self.op = ibinary_op if is_inplace else binary_op
                 self.is_functional_relu = is_functional_relu
                 self.is_scalar = is_scalar
@@ -294,8 +294,8 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 x = self.relu(x)
                 return x
 
-        data = (torch.rand((1, 2, 2, 2), dtype=torch.float),
-                torch.rand((1, 2, 2, 2), dtype=torch.float))
+        data = (torch.rand((1, 1, 1, 1), dtype=torch.float),
+                torch.rand((1, 1, 1, 1), dtype=torch.float))
         quant_type = QuantType.STATIC
         quantized_node = ns.call_function(quantized_op)
         options = itertools.product(
