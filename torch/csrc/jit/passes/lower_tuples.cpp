@@ -21,6 +21,7 @@ std::unordered_set<Symbol> supported_ops = {
     prim::TupleSlice,
     prim::Param,
     prim::Return,
+    prim::PythonOp,
 };
 
 void removeTupleNodes(Node* n, bool must_remove_tuples) {

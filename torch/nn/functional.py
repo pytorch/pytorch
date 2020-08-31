@@ -12,7 +12,7 @@ from .modules.utils import _single, _pair, _triple, _list_with_default
 from . import grad  # noqa: F401
 from torch import _VF
 from .._jit_internal import boolean_dispatch, List, Optional, _overload
-from .._overrides import has_torch_function, handle_torch_function
+from ..overrides import has_torch_function, handle_torch_function
 
 
 Tensor = torch.Tensor
@@ -1716,11 +1716,11 @@ def silu(input, inplace=False):
         \text{silu}(x) = x * \sigma(x), \text{where } \sigma(x) \text{ is the logistic sigmoid.}
 
     .. note::
-        See `Gaussian Error Linear Units (GELUs) <https://arxiv.org/abs/1606.08415>`_ 
-        where the SiLU (Sigmoid Linear Unit) was originally coined, and see 
-        `Sigmoid-Weighted Linear Units for Neural Network Function Approximation 
-        in Reinforcement Learning <https://arxiv.org/abs/1702.03118>`_ and `Swish: 
-        a Self-Gated Activation Function <https://arxiv.org/abs/1710.05941v1>`_ 
+        See `Gaussian Error Linear Units (GELUs) <https://arxiv.org/abs/1606.08415>`_
+        where the SiLU (Sigmoid Linear Unit) was originally coined, and see
+        `Sigmoid-Weighted Linear Units for Neural Network Function Approximation
+        in Reinforcement Learning <https://arxiv.org/abs/1702.03118>`_ and `Swish:
+        a Self-Gated Activation Function <https://arxiv.org/abs/1710.05941v1>`_
         where the SiLU was experimented with later.
 
     See :class:`~torch.nn.SiLU` for more details.
@@ -2575,17 +2575,6 @@ def binary_cross_entropy_with_logits(input, target, weight=None, size_average=No
     return torch.binary_cross_entropy_with_logits(input, target, weight, pos_weight, reduction_enum)
 
 
-def _pointwise_loss(lambd, lambd_optimized, input, target, reduction='mean'):
-    if target.requires_grad:
-        d = lambd(input, target)
-        if reduction == 'none':
-            return d
-        return torch.mean(d) if reduction == 'mean' else torch.sum(d)
-    else:
-        expanded_input, expanded_target = torch.broadcast_tensors(input, target)
-        return lambd_optimized(expanded_input, expanded_target, _Reduction.get_enum(reduction))
-
-
 def _smooth_l1_loss(input, target, delta=1.):
     # type: (Tensor, Tensor, float) -> Tensor
     t = torch.abs(input - target)
@@ -2613,6 +2602,7 @@ def smooth_l1_loss(input, target, size_average=None, reduce=None, reduction='mea
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
     if target.requires_grad:
+        _Reduction.get_enum(reduction)  # throw an error if reduction is invalid
         ret = _smooth_l1_loss(input, target, delta=delta)
         if reduction != 'none':
             ret = torch.mean(ret) if reduction == 'mean' else torch.sum(ret)
@@ -2644,6 +2634,7 @@ def l1_loss(input, target, size_average=None, reduce=None, reduction='mean'):
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
     if target.requires_grad:
+        _Reduction.get_enum(reduction)  # throw an error if reduction is invalid
         ret = torch.abs(input - target)
         if reduction != 'none':
             ret = torch.mean(ret) if reduction == 'mean' else torch.sum(ret)
@@ -2675,6 +2666,7 @@ def mse_loss(input, target, size_average=None, reduce=None, reduction='mean'):
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
     if target.requires_grad:
+        _Reduction.get_enum(reduction)  # throw an error if reduction is invalid
         ret = (input - target) ** 2
         if reduction != 'none':
             ret = torch.mean(ret) if reduction == 'mean' else torch.sum(ret)
@@ -3329,6 +3321,9 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros', align_corner
         When using the CUDA backend, this operation may induce nondeterministic
         behaviour in its backward pass that is not easily switched off.
         Please see the notes on :doc:`/notes/randomness` for background.
+
+    Note:
+        NaN values in :attr:`grid` would be interpreted as ``-1``.
 
     Args:
         input (Tensor): input of shape :math:`(N, C, H_\text{in}, W_\text{in})` (4-D case)

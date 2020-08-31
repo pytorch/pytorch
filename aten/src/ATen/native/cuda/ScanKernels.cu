@@ -200,10 +200,18 @@ void scan_dim_with_indices(const Tensor& self, Tensor& values, Tensor& indices, 
   Tensor self_ = self.contiguous();
   Tensor values_ = values.contiguous();
   Tensor indices_ = indices.contiguous();
+  bool copy_values = !values.is_contiguous();
+  bool copy_indices = !indices.is_contiguous();
    if (dim == ndim - 1) {
-     scan_innermost_dim_with_indices<scalar_t>(self, values, indices, init, binary_op);
+     scan_innermost_dim_with_indices<scalar_t>(self_, values_, indices_, init, binary_op);
    } else {
-     scan_outer_dim_with_indices<scalar_t>(self, values, indices, dim, init, binary_op);
+     scan_outer_dim_with_indices<scalar_t>(self_, values_, indices_, dim, init, binary_op);
+   }
+   if (copy_values){
+     values.copy_(values_);
+   }
+   if (copy_indices){
+     indices.copy_(indices_);
    }
 }
 

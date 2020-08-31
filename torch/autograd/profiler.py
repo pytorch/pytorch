@@ -123,9 +123,8 @@ class EventList(list):
             top_level_events_only(bool, optional): Boolean flag to determine the
                 selection of events to display. If true, the profiler will only
                 display events at top level like top-level invocation of python
-                `lstm`, python `add` or other functions, nested events like cpu/cuda
-                ops events like `EmbeddingBagBackward`, `_embedding_bag_backward` are
-                omitted for profiler result readability.
+                `lstm`, python `add` or other functions, nested events like low-level
+                cpu/cuda ops events are omitted for profiler result readability.
 
         Returns:
             A string containing the table.
@@ -243,19 +242,6 @@ class EventList(list):
             total_stat.key = None
         total_stat.key = 'Total'
         return total_stat
-
-    def without_nested_events(self):
-        """
-        Returns:
-            A new EventList object where all nested events have been
-        deleted.
-        """
-        result = set(self)
-        for event in self:
-            for child in event.cpu_children:
-                result.discard(child)
-
-        return EventList(result)
 
 
 class profile(object):
@@ -379,11 +365,6 @@ class profile(object):
             top_level_events_only=top_level_events_only
         )
     table.__doc__ = EventList.table.__doc__
-
-    def without_nested_events(self):
-        self._check_finish()
-        return self.function_events.without_nested_events()
-    table.__doc__ = EventList.without_nested_events.__doc__
 
     def export_chrome_trace(self, path):
         self._check_finish()
@@ -680,7 +661,8 @@ class FunctionEvent(FormattedTimesMixin):
     """Profiling information about a single function."""
     def __init__(
             self, id, node_id, name, thread, cpu_start, cpu_end, input_shapes=None,
-            cpu_memory_usage=0, cuda_memory_usage=0, is_async=False, is_remote=True):
+            cpu_memory_usage=0, cuda_memory_usage=0, is_async=False, is_remote=True,
+            sequence_nr=-1):
         self.id = id
         self.node_id = node_id
         self.name = name
@@ -695,6 +677,7 @@ class FunctionEvent(FormattedTimesMixin):
         self.cuda_memory_usage = cuda_memory_usage
         self.is_async = is_async
         self.is_remote = is_remote
+        self.sequence_nr = sequence_nr
 
     def append_kernel(self, name, device, start, end):
         self.kernels.append(Kernel(name, device, Interval(start, end)))
@@ -760,7 +743,7 @@ class FunctionEvent(FormattedTimesMixin):
         return (
             '<FunctionEvent id={} node_id={} cpu_time={} cpu_start={} cpu_end={} '
             'cpu_children={} cuda_time={} name={} thread={} input_shapes={} '
-            'cpu_memory_usage={} cuda_memory_usage={} is_async={} is_remote={}>'.format(
+            'cpu_memory_usage={} cuda_memory_usage={} is_async={} is_remote={} seq_nr={}>'.format(
                 self.id,
                 self.node_id,
                 self.cpu_time_str,
@@ -775,6 +758,7 @@ class FunctionEvent(FormattedTimesMixin):
                 self.cuda_memory_usage,
                 self.is_async,
                 self.is_remote,
+                self.sequence_nr,
             )
         )
 
@@ -968,6 +952,7 @@ def parse_cpu_trace(thread_records):
                     cuda_memory_usage=cuda_memory_usage,
                     is_async=is_async,
                     is_remote=is_remote_event,
+                    sequence_nr=start.sequence_nr(),
                 )
                 # note: async events have only cpu total time
                 if not is_async and start.has_cuda():

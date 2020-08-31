@@ -12,8 +12,7 @@ namespace native {
 // Use REGISTER_DISPATCH to run CPU and CUDA backend.
 DEFINE_DISPATCH(fake_quant_tensor_stub);
 DEFINE_DISPATCH(fake_quant_grad_tensor_stub);
-DEFINE_DISPATCH(fake_quant_grad_learnable_scale_tensor_stub);
-DEFINE_DISPATCH(fake_quant_grad_learnable_zero_point_tensor_stub);
+DEFINE_DISPATCH(fake_quant_grad_learnable_tensor_stub);
 
 /* Fake-quantizes the 'inputs' tensor.
 Args:
@@ -145,6 +144,7 @@ std::tuple<Tensor, Tensor, Tensor> _fake_quantize_learnable_per_tensor_affine_ba
         \end{cases}
   */
   float scale_val = scale[0].item<float>();
+  float inv_scale_val = 1.0f / scale_val;
   int64_t zero_point_val = native::_get_zero_point_from_tensor(zero_point, quant_min, quant_max, false);
 
   TORCH_CHECK(dY.scalar_type() == ScalarType::Float);
@@ -164,16 +164,19 @@ std::tuple<Tensor, Tensor, Tensor> _fake_quantize_learnable_per_tensor_affine_ba
   }
 
   auto dX = at::empty_like(X, X.options(), MemoryFormat::Preserve);
-  fake_quant_grad_tensor_stub(
-    X.device().type(), dX, X, dY, scale_val, zero_point_val, quant_min, quant_max);
-
   auto dScale_vec = at::empty_like(X, X.options(), MemoryFormat::Preserve);
-  fake_quant_grad_learnable_scale_tensor_stub(
-    scale.device().type(), dScale_vec, X, dY, scale_val, zero_point_val, quant_min, quant_max);
-
   auto dZeroPoint_vec = at::empty_like(X, X.options(), MemoryFormat::Preserve);
-  fake_quant_grad_learnable_zero_point_tensor_stub(
-    zero_point.device().type(), dZeroPoint_vec, X, dY, scale_val, zero_point_val, quant_min, quant_max);
+
+  auto iter = TensorIteratorConfig()
+    .add_output(dX)
+    .add_output(dScale_vec)
+    .add_output(dZeroPoint_vec)
+    .add_input(X)
+    .add_input(dY)
+    .build();
+
+  fake_quant_grad_learnable_tensor_stub(
+    X.device().type(), iter, scale_val, inv_scale_val, zero_point_val, quant_min, quant_max);
 
   // The total sums over the scale and zero point gradient vectors are what will be returned in the end.
   auto dScale = dScale_vec.sum().unsqueeze(0).to(scale.device());

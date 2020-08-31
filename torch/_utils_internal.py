@@ -2,6 +2,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 
 import os
 import inspect
+import tempfile
 
 # this arbitrary-looking assortment of functionality is provided here
 # to have a central place for overrideable behavior. The motivating
@@ -23,7 +24,10 @@ def get_file_path_2(*path_components):
 
 
 def get_writable_path(path):
-    return path
+    if os.access(path, os.W_OK):
+        return path
+    return tempfile.mkdtemp(suffix=os.path.basename(path))
+
 
 
 def prepare_multiprocessing_environment(path):

@@ -2,9 +2,6 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
 #include <tuple>
-#ifdef USE_VULKAN
-#include <ATen/native/vulkan/VulkanAten.h>
-#endif
 
 
 namespace at {
@@ -109,6 +106,7 @@ namespace {
     at::Tensor const& input,
     IntArrayRef output_size)
   {
+    TORCH_CHECK(output_size.size() == 2, "adaptive_avg_pool2d: output_size must be 2");
     for (int64_t i = 0; i < input.ndimension(); i++) {
       TORCH_CHECK(input.size(i) > 0,
         "adaptive_avg_pooling2d(): expected input to have non-empty spatial dimensions, "
@@ -325,14 +323,11 @@ namespace {
   }
 
   Tensor adaptive_avg_pool2d(at::Tensor const& input, IntArrayRef output_size) {
+    TORCH_CHECK(output_size.size() == 2, "adaptive_avg_pool2d: output_size must be 2");
+
     if (input.is_mkldnn()) {
       return at::mkldnn_adaptive_avg_pool2d(input, output_size);
     }
-#ifdef USE_VULKAN
-    if (input.is_vulkan()) {
-      return at::native::vulkan_adaptive_avg_pool2d(input, output_size);
-    }
-#endif
 
     // TODO: fastpath for Channels_last should be explored later;
     if (input.suggest_memory_format() == at::MemoryFormat::Contiguous && !input.is_quantized() && output_size[0] == 1 && output_size[1] == 1) {

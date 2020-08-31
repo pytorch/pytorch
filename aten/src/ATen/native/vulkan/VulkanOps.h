@@ -31,6 +31,33 @@ void adaptive_avg_pool2d(
     const int64_t IN,
     const int64_t IC);
 
+void max_pool2d(
+    VulkanTensor& output,
+    const VulkanTensor& input,
+    const int iH,
+    const int iW,
+    const int oH,
+    const int oW,
+    const int _n,
+    const int _c,
+    const int kH,
+    const int kW,
+    const int dH,
+    const int dW,
+    const int padH,
+    const int padW,
+    const int dilationH,
+    const int dilationW);
+
+VulkanTensor reshape_copy(
+    const VulkanTensor& input,
+    std::vector<int64_t> shape);
+
+VulkanTensor cat(
+    VulkanTensor& output,
+    ArrayRef<VulkanTensor> inputs,
+    int64_t dim);
+
 void add(
     VulkanTensor& output,
     const VulkanTensor& input0,
