@@ -15,7 +15,7 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-constexpr int kUnrollFactor = 4;
+constexpr int kUnrollFactor = 1;
 
 namespace {
 
@@ -173,9 +173,11 @@ bool scheduleFusion(Fusion* fusion, const at::ArrayRef<c10::IValue> inputs) {
       TensorView* out_tv = output->as<TensorView>();
       for (Val* inp : fusion->inputsOf(output)) {
         if (inp->getValType().value() == ValType::TensorView)
-          inp->as<TensorView>()->computeAt(out_tv, 1);
+          inp->as<TensorView>()->computeAt(out_tv, -1);
       }
       out_tv->axis(0)->parallelize(ParallelType::BIDx);
+      out_tv->axis(1)->parallelize(ParallelType::Unroll);
+      out_tv->axis(2)->parallelize(ParallelType::TIDx);
     }
 
     // Run through all values, unroll, and bind their axes
@@ -185,15 +187,19 @@ bool scheduleFusion(Fusion* fusion, const at::ArrayRef<c10::IValue> inputs) {
         continue;
       TensorView* tv = val->as<TensorView>();
 
-      // Should be true for all intermediates, but if one isn't hooked
-      // up right, skip it and hope for the best for now
-      if (!disable_unroll && tv->nDims() == 3) {
-        tv->axis(-2)->parallelize(ParallelType::Unroll);
-        tv->axis(-1)->parallelize(ParallelType::TIDx);
-      } else {
-        if (tv->nDims() == 2)
-          tv->axis(-1)->parallelize(ParallelType::TIDx);
-      }
+      // Disabling below as currently unrolling doesn't make a lot of sense as
+      // we don't extract global loads/reads out of intermediate logic.
+      //
+      // Below check should be true for all intermediates, but if one isn't
+      // hooked up right, skip it and hope for the best for now
+      //
+      // if (!disable_unroll && tv->nDims() == 3) {
+      //   tv->axis(-2)->parallelize(ParallelType::Unroll);
+      //   tv->axis(-1)->parallelize(ParallelType::TIDx);
+      // } else {
+      //   if (tv->nDims() == 2)
+      //     tv->axis(-1)->parallelize(ParallelType::TIDx);
+      // }
     }
     TensorView* out0 = fusion->outputs()[0]->as<TensorView>();
     int ndim = (int)out0->nDims();
