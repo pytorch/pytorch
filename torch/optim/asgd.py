@@ -32,46 +32,19 @@ class ASGD(Optimizer):
                         weight_decay=weight_decay)
         super(ASGD, self).__init__(params, defaults)
 
-    def v1(self):
-        for group in self.param_groups:
-            for p in group['params']:
-                if p.grad is None:
-                    continue
-                grad = p.grad
-                if grad.is_sparse:
-                    raise RuntimeError('ASGD does not support sparse gradients')
-                state = self.state[p]
+    @torch.no_grad()
+    def step(self, closure=None):
+        """Performs a single optimization step.
 
-                # State initialization
-                if len(state) == 0:
-                    state['step'] = 0
-                    state['eta'] = group['lr']
-                    state['mu'] = 1
-                    state['ax'] = torch.zeros_like(p, memory_format=torch.preserve_format)
+        Arguments:
+            closure (callable, optional): A closure that reevaluates the model
+                and returns the loss.
+        """
+        loss = None
+        if closure is not None:
+            with torch.enable_grad():
+                loss = closure()
 
-                state['step'] += 1
-
-                if group['weight_decay'] != 0:
-                    grad = grad.add(p, alpha=group['weight_decay'])
-
-                # decay term
-                p.mul_(1 - group['lambd'] * state['eta'])
-
-                # update parameter
-                p.add_(grad, alpha=-state['eta'])
-
-                # averaging
-                if state['mu'] != 1:
-                    state['ax'].add_(p.sub(state['ax']).mul(state['mu']))
-                else:
-                    state['ax'].copy_(p)
-
-                # update eta and mu
-                state['eta'] = (group['lr'] /
-                                math.pow((1 + group['lambd'] * group['lr'] * state['step']), group['alpha']))
-                state['mu'] = 1 / max(1, state['step'] - group['t0'])
-
-    def v2(self):
         grads = []
         params_with_grad = []
         states = []
@@ -106,19 +79,6 @@ class ASGD(Optimizer):
             # update parameter
             torch._foreach_add_(params_with_grad, grads, alpha=-state['eta'])
 
-
-            # FIX!!!! 
-            # FIX!!!! 
-            # FIX!!!! 
-            # FIX!!!! 
-            # FIX!!!! 
-            # FIX!!!! # FIX!!!! 
-            # FIX!!!! 
-            # FIX!!!! 
-
-            # FIX!!!! 
-            # FIX!!!! 
-            # FIX!!!! 
             # averaging
             for i in range(len(states)):
                 if states[i]['mu'] != 1:
@@ -131,20 +91,5 @@ class ASGD(Optimizer):
                 state['eta'] = (group['lr'] /
                                 math.pow((1 + group['lambd'] * group['lr'] * state['step']), group['alpha']))
                 state['mu'] = 1 / max(1, state['step'] - group['t0'])
-
-    @torch.no_grad()
-    def step(self, closure=None):
-        """Performs a single optimization step.
-
-        Arguments:
-            closure (callable, optional): A closure that reevaluates the model
-                and returns the loss.
-        """
-        loss = None
-        if closure is not None:
-            with torch.enable_grad():
-                loss = closure()
-
-        self.v2()
  
         return loss
