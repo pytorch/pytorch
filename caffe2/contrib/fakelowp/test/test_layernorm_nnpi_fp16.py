@@ -31,7 +31,7 @@ class LayerNorm(serial.SerializedTestCase):
            epsilon=st.floats(min_value=1e-4, max_value=1e-3),
            elementwise_affine=st.booleans())
     @settings(max_examples=100, deadline=None)
-    def test_layernorm(self, seed, batch_size, size, epsilon, elementwise_affine):
+    def Skip_test_layernorm(self, seed, batch_size, size, epsilon, elementwise_affine):
         np.random.seed(seed)
         # Reset the workspace
         workspace.ResetWorkspace()

@@ -86,5 +86,14 @@ def skipIfUnsupportedOpsetVersion(unsupported_opset_versions):
         return wrapper
     return skip_dec
 
+def skipIfONNXShapeInference(onnx_shape_inference):
+    def skip_dec(func):
+        def wrapper(self):
+            if self.onnx_shape_inference is onnx_shape_inference:
+                raise unittest.SkipTest("Skip verify test for unsupported opset_version")
+            return func(self)
+        return wrapper
+    return skip_dec
+
 def flatten(x):
     return tuple(function._iter_filter(lambda o: isinstance(o, torch.Tensor))(x))

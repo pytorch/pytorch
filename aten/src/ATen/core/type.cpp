@@ -212,7 +212,7 @@ AnyEnumTypePtr AnyEnumType::get() {
   return value;
 }
 
-c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2) {
+c10::optional<TypePtr> unifyTypesImpl(const TypePtr& t1, const TypePtr& t2) {
   // check direct subtyping relation
   if (t1->isSubtypeOf(t2)) {
     return t2;
@@ -285,6 +285,16 @@ c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2) {
   }
 
   return c10::nullopt;
+}
+
+c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2, bool default_to_any) {
+  auto unified = unifyTypesImpl(t1, t2);
+
+  if (default_to_any && !unified) {
+    return AnyType::get();
+  }
+
+  return unified;
 }
 
 c10::optional<TypePtr> unifyTypeList(

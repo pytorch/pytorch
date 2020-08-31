@@ -318,6 +318,7 @@ struct CanEmitInline {
         // instruction stack
         // by the later BailOut in createBailoutBlock and its jf_index
         // will become invalid.
+        v->node()->kind() != prim::TensorExprGroup &&
         v->node()->kind() != prim::CudaFusionGroup &&
         v->node()->kind() != prim::FusionGroup &&
         v->node()->kind() != prim::BailOut && v->uses().size() == 1 &&
@@ -754,7 +755,14 @@ struct CodeImpl {
   void emitProfile(Node* node) {
     emitLoadInputs(node->inputs());
     insertInstruction(PROFILE_OP, profile_function_table_.size());
-    profile_function_table_.push_back(node->cast<ProfileOp>()->getCallback());
+    if (node->cast<ProfileOp>()) {
+      profile_function_table_.push_back(node->cast<ProfileOp>()->getCallback());
+    } else if (node->cast<ProfileOptionalOp>()) {
+      profile_function_table_.push_back(
+          node->cast<ProfileOptionalOp>()->getCallback());
+    } else {
+      TORCH_INTERNAL_ASSERT(false);
+    }
   }
 
   void emitGetAttr(Node* node) {
@@ -902,6 +910,7 @@ struct CodeImpl {
       case prim::BailOut:
         emitBailOut(node);
         break;
+      case prim::profile_optional:
       case prim::profile:
         emitProfile(node);
         break;
@@ -1370,7 +1379,6 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             // Check every input's shape against profiled (expected) shape.
             for (i = 0; i < num_inputs; i++) {
               auto& input = peek(stack, i, num_inputs);
-              TORCH_INTERNAL_ASSERT(input.isTensor());
               auto t = input.toTensor();
               const TypePtr& expected = af.types[inst.X + i];
               auto expected_type = expected->cast<TensorType>();
