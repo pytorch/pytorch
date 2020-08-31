@@ -427,7 +427,6 @@ Tensor mean(
 }
 
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
-<<<<<<< HEAD
   m.impl_UNBOXED("empty.memory_format", at::native::vulkan::aten::empty);
   m.impl("empty_strided", TORCH_FN(at::native::vulkan::aten::empty_strided));
   m.impl("add.Tensor", TORCH_FN(at::native::vulkan::aten::add));
