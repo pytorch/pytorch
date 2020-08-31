@@ -392,11 +392,10 @@ void insertQuantizationOps(
     }
     return;
   }
-  if (qparam_names.size() == 0) {
-    // For observers that does not have qparams, like Placeholder Observer
-    observer_out->replaceAllUsesWith(original_val);
-    return;
-  }
+  TORCH_CHECK(qparam_names.size() != 0,
+              "Unexpected number of qparams, please make sure PlaceHolder "
+              "is configured correctly");
+
   if (quant_type == QuantType::DYNAMIC) {
     if (getObserverDtype(module, observer_out) == at::ScalarType::Half) {
       dequant = insertFP16CastOps(g, observer_out);

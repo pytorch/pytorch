@@ -428,26 +428,6 @@ void custom_fp16_gemm_strided_batched(
     float* C,
     const int C_stride,
     CPUContext* context) {
-  if (!use_acc_fp16 && (!use_custom_acc32 || !use_temp_accumulator)) {
-    math::GemmStridedBatched<float, CPUContext>(
-        trans_A,
-        trans_B,
-        batch_size,
-        M,
-        N,
-        K,
-        alpha,
-        A,
-        A_stride,
-        B,
-        B_stride,
-        beta,
-        C,
-        C_stride,
-        context);
-    return;
-  }
-
   // loop over matrices in the batch
   for (int i = 0; i < batch_size; ++i) {
     if (use_acc_fp16) {
@@ -465,7 +445,6 @@ void custom_fp16_gemm_strided_batched(
           use_temp_accumulator);
 
     } else {
-      CAFFE_ENFORCE(use_custom_acc32 && use_temp_accumulator);
       custom_fp16_gemm_with_trans(
           trans_A,
           trans_B,
