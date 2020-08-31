@@ -346,6 +346,7 @@ def instantiate_configs():
             and cuda_version is None
             and parallel_backend is None
             and not is_vulkan
+            and not is_pure_torch
             and compiler_name == "gcc"
             and fc.find_prop("compiler_version") == "5.4"
         ):
