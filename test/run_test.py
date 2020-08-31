@@ -140,6 +140,7 @@ SLOW_TESTS = [
     'distributed/test_distributed',
     'distributed/rpc/test_process_group_agent',
     'distributed/rpc/test_tensorpipe_agent',
+    'distributed/algorithms/ddp_comm_hooks/test_ddp_hooks',
     'test_cuda',
     'test_cuda_primary_ctx',
     'test_cpp_extensions_aot_ninja',

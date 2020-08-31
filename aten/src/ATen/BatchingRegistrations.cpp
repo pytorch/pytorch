@@ -426,6 +426,8 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("pow.Tensor_Scalar", unary_pointwise_batching_rule<TensorScalarType, at::pow, Scalar>);
   m.impl("pow.Scalar", pow_scalar_Tensor_batching_rule);
 
+  m.impl("sigmoid_backward", binary_pointwise_batching_rule<TensorTensorType, at::sigmoid_backward>);
+
   // for at::result_type, call the native::result_type implementation.
   // We don't have to do anything special because native::result_type operates
   // on the logical shape of the tensors.
