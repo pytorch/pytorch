@@ -61,7 +61,7 @@ VkInstance create_instance(const bool enable_validation_layers) {
         instance_layer_properties.data()));
 
     constexpr const char* const requested_instance_layers[]{
-        "VK_LAYER_LUNARG_api_dump",
+        // "VK_LAYER_LUNARG_api_dump",
         "VK_LAYER_KHRONOS_validation",
     };
 

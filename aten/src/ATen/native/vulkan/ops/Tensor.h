@@ -11,13 +11,21 @@ namespace ops {
 class vTensor final {
  public:
   vTensor();
-  explicit vTensor(IntArrayRef sizes);
+  vTensor(IntArrayRef sizes, const TensorOptions& options);
+
+  api::Resource::Buffer buffer();
+  api::Resource::Image image();
 
  private:
+  c10::SmallVector<int64_t, 4u> sizes_;
+  TensorOptions options_;
+  api::Resource::Buffer staging_;
+  api::Resource::Buffer buffer_;
   api::Resource::Image image_;
 };
 
 using vTensorImpl = VulkanOpaqueTensorImpl<vTensor>;
+void verify(const TensorOptions& options);
 
 } // namespace ops
 } // namespace vulkan
