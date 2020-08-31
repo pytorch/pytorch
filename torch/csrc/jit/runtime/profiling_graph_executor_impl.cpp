@@ -476,6 +476,11 @@ void replaceBlockWithFallbackGraph(Block* b, ArrayRef<Value*> inputs) {
   fallback->g_(attr::Subgraph, graph);
   b->prependNode(fallback);
 
+  for (size_t i = 0; i < inputs.size(); i++) {
+    graph->inputs()[i]->setType(inputs[i]->type());
+    graph->inputs()[i]->copyMetadata(inputs[i]);
+  }
+
   for (size_t i = 0; i < b->outputs().size(); i++) {
     fallback->output(i)->setType(b->outputs()[i]->type());
     fallback->output(i)->copyMetadata(b->outputs()[i]);
