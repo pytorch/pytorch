@@ -7,12 +7,14 @@ namespace at { namespace native {
 std::vector<Tensor> foreach_tensor_add_list_kernel_cuda(TensorList tensors1, TensorList tensors2) {
     verify_list(tensors1, tensors2);
 
-    if (!check_fast_route(tensors1, tensors2)) {
+    if (!can_use_fast_route(tensors1, tensors2)) {
         return at::native::foreach_tensor_add_list_kernel_slow(tensors1, tensors2);
     }
 
     std::vector<std::vector<at::Tensor>> tensor_lists; 
     std::vector<at::Tensor> vec_res;
+    vec_res.reserve(tensors1.size());
+
     for (const auto& t: tensors1) {
         vec_res.emplace_back(at::native::empty_like(t));
     }
@@ -31,7 +33,7 @@ std::vector<Tensor> foreach_tensor_add_list_kernel_cuda(TensorList tensors1, Ten
 void foreach_tensor_add_list_kernel_cuda_(TensorList tensors1, TensorList tensors2) {
     verify_list(tensors1, tensors2);
 
-    if (!check_fast_route(tensors1, tensors2)) {
+    if (!can_use_fast_route(tensors1, tensors2)) {
         return at::native::foreach_tensor_add_list_kernel_slow_(tensors1, tensors2);
     }
 

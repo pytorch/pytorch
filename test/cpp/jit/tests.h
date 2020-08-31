@@ -50,6 +50,7 @@ namespace jit {
   _(ClassParser)                                  \
   _(UnifyTypes)                                   \
   _(Profiler)                                     \
+  _(FallbackGraphs)                               \
   _(InsertAndEliminateRedundantGuards)            \
   _(LoopPeeler)                                   \
   _(InsertBailOuts)                               \
