@@ -277,21 +277,19 @@ Tensor& add_(Tensor& self, const Tensor& other, Scalar alpha) {
   return self;
 }
 
-Tensor vulkan_add_scalar(const Tensor& self, Scalar other, Scalar alpha) {
+Tensor add_scalar(const Tensor& self, Scalar other, Scalar alpha) {
   const auto& x = vtensor_from_vulkan(self);
   const float s = other.to<float>();
   const float a = alpha.to<float>();
   VulkanTensor output{self.sizes().vec()};
-  output.allocate_storage();
   vulkan::detail::add(output, x, s * a);
   return new_with_vtensor_vulkan(std::move(output), self.options());
 }
 
-Tensor vulkan_mul_scalar(const Tensor& self, Scalar other) {
+Tensor mul_scalar(const Tensor& self, Scalar other) {
   const auto& x = vtensor_from_vulkan(self);
   const float s = other.to<float>();
   VulkanTensor output{self.sizes().vec()};
-  output.allocate_storage();
   vulkan::detail::mul(output, x, s);
   return new_with_vtensor_vulkan(std::move(output), self.options());
 }
@@ -443,8 +441,8 @@ TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
   m.impl("max_pool2d", TORCH_FN(at::native::vulkan::aten::max_pool2d));
   m.impl("reshape", TORCH_FN(at::native::vulkan::aten::reshape));
   m.impl("_cat", TORCH_FN(at::native::vulkan::aten::cat));
-  m.impl("mul.Scalar", TORCH_FN(vulkan_mul_scalar));
-  m.impl("add.Scalar", TORCH_FN(vulkan_add_scalar));
+  m.impl("mul.Scalar", TORCH_FN(mul_scalar));
+  m.impl("add.Scalar", TORCH_FN(add_scalar));
   m.impl_UNBOXED(
       "convolution_overrideable", at::native::vulkan::aten::convolution);
   m.impl_UNBOXED("hardtanh_", at::native::vulkan::aten::hardtanh_);
