@@ -23,7 +23,7 @@ It’s an integrated tool. You can use this tool to build, run, and generate bot
     * File-Level: The coverage for each file you are interested in
     * Line-Level: The coverage for each line in each file you are interested in
 * *More complex but flexible options:*
-    * Use different stages like --build, --run, --summary to achieve more flexible functionality
+    * Use different stages like *--build, --run, --summary* to achieve more flexible functionality
 
 ## How to use
 
@@ -34,7 +34,7 @@ If you are not familiar with the procedure of generating code coverage report by
 ## Examples
 
 First step is to set some experimental value.
-```
+```bash
 # pytorch folder, by default all the c++ binaries are in build/bin/
 export PYTORCH_FOLDER=...
 # make sure llvm-cov is available, by default it is /usr/local/opt/llvm/bin
@@ -42,15 +42,15 @@ export LLVM_TOOL_PATH=...
 ```
 
 then command will run all the tests in `build/bin/` and `test/` folder
-```
+```bash
 python oss_coverage.py
 ```
 Most times you don't want collect coverage for the entire Pytorch folder, use --interested-folder to report coverage only over the folder you want:
-```
+```bash
 python oss_coverage.py --interested-folder=aten
 ```
 Then, still in most cases, if you only run one or several test(s):
-```
+```bash
 python oss_coverage.py --run-only=atest
 python oss_coverage.py --run-only atest basic test_nn.py
 ```
