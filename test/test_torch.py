@@ -4084,10 +4084,17 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             for tensor, value in zip(ok, ok_values):
                 self.assertEqual(int(tensor), int(value))
                 self.assertEqual(float(tensor), float(value))
+                self.assertEqual(complex(tensor), complex(value))
+
+            self.assertEqual(complex(torch.tensor(1.5j)), 1.5j)
 
             for tensor in not_ok:
                 self.assertRaises(ValueError, lambda: int(tensor))
                 self.assertRaises(ValueError, lambda: float(tensor))
+                self.assertRaises(ValueError, lambda: complex(tensor))
+
+            self.assertRaises(RuntimeError, lambda: float(torch.tensor(1.5j)))
+            self.assertRaises(RuntimeError, lambda: int(torch.tensor(1.5j)))
 
         def test_offset_scalar_cast(self):
             x = torch.Tensor([1, 2, 3])
