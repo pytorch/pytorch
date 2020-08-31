@@ -304,10 +304,6 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   # Generate files
   set(TOOLS_PATH "${TORCH_ROOT}/tools")
 
-  configure_file("${TORCH_ROOT}/aten/src/ATen/common_with_cwrap.py"
-    "${TOOLS_PATH}/shared/cwrap_common.py"
-    COPYONLY)
-
   configure_file("${TORCH_SRC_DIR}/_utils_internal.py"
     "${TOOLS_PATH}/shared/_utils_internal.py"
     COPYONLY)
@@ -464,6 +460,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   if(NOT INTERN_BUILD_MOBILE)
     list(APPEND TORCH_SRCS
       ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/serialization/onnx.cpp
       ${TORCH_SRC_DIR}/csrc/jit/serialization/export.cpp
       ${TORCH_SRC_DIR}/csrc/jit/serialization/export_module.cpp
       ${TORCH_SRC_DIR}/csrc/jit/serialization/import_legacy.cpp
