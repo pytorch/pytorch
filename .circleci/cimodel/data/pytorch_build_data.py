@@ -16,6 +16,7 @@ CONFIG_TREE_DATA = [
                     ("important", [X(True)]),
                     ("parallel_tbb", [X(True)]),
                     ("parallel_native", [X(True)]),
+                    ("pure_pytorch", [X(True)]),
                 ]),
             ]),
             # TODO: bring back libtorch test
@@ -153,8 +154,20 @@ class ExperimentalFeatureConfigNode(TreeConfigNode):
             "build_only": BuildOnlyConfigNode,
             "cuda_gcc_override": CudaGccOverrideConfigNode,
             "coverage": CoverageConfigNode,
+            "pure_pytorch": PurePytorchConfigNode,
         }
         return next_nodes[experimental_feature]
+
+
+class PurePytorchConfigNode(TreeConfigNode):
+    def modify_label(self, label):
+        return "PURE_TORCH=" + str(label)
+
+    def init2(self, node_name):
+        self.props["is_pure_torch"] = node_name
+
+    def child_constructor(self):
+        return ExperimentalFeatureConfigNode
 
 
 class XlaConfigNode(TreeConfigNode):

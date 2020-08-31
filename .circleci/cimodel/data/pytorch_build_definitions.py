@@ -23,6 +23,7 @@ class Conf:
     # (from https://github.com/pytorch/pytorch/pull/17323#discussion_r259453608)
     is_xla: bool = False
     is_vulkan: bool = False
+    is_pure_torch: bool = False
     restrict_phases: Optional[List[str]] = None
     gpu_resource: Optional[str] = None
     dependent_tests: List = field(default_factory=list)
@@ -50,6 +51,8 @@ class Conf:
             leading.append("vulkan")
         if self.is_libtorch and not for_docker:
             leading.append("libtorch")
+        if self.is_pure_torch and not for_docker:
+            leading.append("pure_torch")
         if self.parallel_backend is not None and not for_docker:
             leading.append(self.parallel_backend)
 
@@ -260,6 +263,7 @@ def instantiate_configs():
         compiler_version = fc.find_prop("compiler_version")
         is_xla = fc.find_prop("is_xla") or False
         is_asan = fc.find_prop("is_asan") or False
+        is_pure_torch = fc.find_prop("is_pure_torch") or False
         is_vulkan = fc.find_prop("is_vulkan") or False
         parms_list_ignored_for_docker_image = []
 
@@ -326,6 +330,7 @@ def instantiate_configs():
             rocm_version,
             is_xla,
             is_vulkan,
+            is_pure_torch,
             restrict_phases,
             gpu_resource,
             is_libtorch=is_libtorch,
