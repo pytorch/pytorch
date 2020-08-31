@@ -25,6 +25,15 @@ VALGRIND=${VALGRIND:=ON}
 ./NamedTensor_test
 ./cpu_generator_test
 ./vmap_test
+
+vec256_tests=$(find . -maxdepth 1 -executable -name 'vec256_test*')
+for vec256_exec in $vec256_tests
+do
+  echo $vec256_exec
+done
+
+exit
+
 if [[ -x ./cudnn_test ]]; then
   ./cudnn_test
 fi
