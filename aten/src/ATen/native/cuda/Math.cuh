@@ -191,18 +191,16 @@ static inline C10_HOST_DEVICE scalar_t calc_gcd(scalar_t a_in, scalar_t b_in) {
  * For licensing information and documentation, please refer to the the cpu implementation located in "ATen/native/Math.h".
  */
 template <typename scalar_t>
-static inline C10_HOST_DEVICE scalar_t chbevl(scalar_t _x, const scalar_t array[], size_t len) {
-  using accscalar_t = at::acc_type<scalar_t, true>;
-  accscalar_t x = static_cast<accscalar_t>(_x);
-  accscalar_t b0, b1, b2;
+static inline C10_HOST_DEVICE scalar_t chbevl(scalar_t x, const scalar_t array[], size_t len) {
+  scalar_t b0, b1, b2;
 
-  b0 = static_cast<accscalar_t>(array[0]);
+  b0 = array[0];
   b1 = 0;
 
   for (size_t i = 1; i < len; ++i)  {
     b2 = b1;
     b1 = b0;
-    b0 = x * b1 - b2 + static_cast<accscalar_t>(array[i]);
+    b0 = x * b1 - b2 + array[i];
   }
 
   return static_cast<scalar_t>(0.5 * (b0 - b2));
@@ -213,15 +211,14 @@ static inline C10_HOST_DEVICE scalar_t chbevl(scalar_t _x, const scalar_t array[
  */
 template <typename scalar_t>
 static inline C10_HOST_DEVICE scalar_t calc_i0(scalar_t _x) {
-  using accscalar_t = at::acc_type<scalar_t, true>;
-  accscalar_t x = ::abs(static_cast<accscalar_t>(_x));
+  scalar_t x = ::abs(_x);
 
   /* Chebyshev coefficients for exp(-x) I0(x)
    * in the interval [0,8].
    *
    * lim(x->0){ exp(-x) I0(x) } = 1.
    */
-  const accscalar_t A[] = {
+  const scalar_t A[] = {
     -4.41534164647933937950E-18,
     3.33079451882223809783E-17,
     -2.43127984654795469359E-16,
@@ -259,7 +256,7 @@ static inline C10_HOST_DEVICE scalar_t calc_i0(scalar_t _x) {
    *
    * lim(x->inf){ exp(-x) sqrt(x) I0(x) } = 1/sqrt(2pi).
    */
-  const accscalar_t B[] = {
+  const scalar_t B[] = {
     -7.23318048787475395456E-18,
     -4.83050448594418207126E-18,
     4.46562142029675999901E-17,
@@ -288,11 +285,11 @@ static inline C10_HOST_DEVICE scalar_t calc_i0(scalar_t _x) {
   };
 
   if (x <= 8.0) {
-    accscalar_t y = static_cast<accscalar_t>((x / 2.0) - 2.0);
+    scalar_t y = static_cast<scalar_t>((x / 2.0) - 2.0);
     return static_cast<scalar_t>(::exp(x) * chbevl(y, A, 30));
   }
 
-  return static_cast<scalar_t>(::exp(x) * chbevl(static_cast<accscalar_t>(32.0 / x - 2.0), B, 25) / ::sqrt(x));
+  return static_cast<scalar_t>(::exp(x) * chbevl(static_cast<scalar_t>(32.0 / x - 2.0), B, 25) / ::sqrt(x));
 }
 
 }
