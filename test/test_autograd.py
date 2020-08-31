@@ -5926,6 +5926,19 @@ class TestAutogradFunctional(TestCase):
         self.assertEqual(vhp, torch.mm(v.unsqueeze(0), hes).squeeze(0))
 
 
+class TestAutogradForwardMode(TestCase):
+
+    def test_print(self):
+        a = torch.rand(3)
+        self.assertFalse("_fw_grad:" in str(a))
+
+        a._fw_grad = torch.rand(3)
+        self.assertTrue("_fw_grad:" in str(a))
+
+        a._fw_grad = None
+        self.assertTrue("_fw_grad:" in str(a))
+
+
 # Generic device type autograd tests.
 class TestAutogradDeviceType(TestCase):
 
