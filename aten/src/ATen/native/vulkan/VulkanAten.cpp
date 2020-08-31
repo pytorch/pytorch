@@ -389,7 +389,7 @@ Tensor select(const Tensor& self, int64_t dim, int64_t index) {
 Tensor unsqueeze(const Tensor& self, int64_t dim) {
   auto sizes = self.sizes().vec();
   sizes.insert(sizes.begin() + dim, 1);
-  return reshape(self, sizes);
+  return vulkan::aten::reshape(self, sizes);
 }
 
 Tensor convolution(
