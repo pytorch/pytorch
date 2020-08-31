@@ -317,7 +317,7 @@ Collective functions
 
 .. autofunction:: broadcast
 
-.. autofunction:: broadcast_object
+.. autofunction:: broadcast_object_list
 
 .. autofunction:: all_reduce
 
