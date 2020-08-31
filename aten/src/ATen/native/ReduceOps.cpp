@@ -424,7 +424,7 @@ static Tensor squeeze_multiple(const Tensor& self, IntArrayRef dims) {
 static Tensor& logsumexp_out_impl(Tensor& result, const Tensor& self, IntArrayRef dims, bool keepdim) {
   // can't take max of empty tensor
   if (self.numel() != 0) {
-    auto maxes = at::max_values(self, dims, true);
+    auto maxes = at::amax(self, dims, true);
     auto maxes_squeezed = (keepdim ? maxes : squeeze_multiple(maxes, dims));
     maxes_squeezed.masked_fill_(maxes_squeezed.abs() == INFINITY, 0);
     at::sum_out(result, at::exp(self - maxes), dims, keepdim);
@@ -631,40 +631,30 @@ Tensor &any_out(Tensor &result, const Tensor &self, int64_t dim, bool keepdim) {
   }
 }
 
-Tensor min_values(const Tensor& self, IntArrayRef dims, bool keepdim) {
-  if (dims.size() == 1) {
-    return std::get<0>(self.min(dims[0], keepdim));
-  } else {
-    Tensor result = at::empty({0}, self.options());
-    ScalarType dtype = get_dtype(result, self, {}, true);
-    auto iter = make_reduction("min_values", result, self, dims, keepdim, dtype);
-    TORCH_CHECK(iter.numel() > 0, "min_values on a tensor with no elements is not defined.");
-    min_values_stub(iter.device_type(), iter);
-    return result;
-  }
+Tensor &amin_out(Tensor& result, const Tensor& self, IntArrayRef dim, bool keepdim) {
+  TORCH_CHECK(self.scalar_type() == result.scalar_type(), "Illegal dtype for self, and out:", self.scalar_type(), result.scalar_type());
+  auto iter = make_reduction("amin", result, self, dim, keepdim, self.scalar_type());
+  TORCH_CHECK(iter.numel() > 0, "operation does not have an identity");
+  min_values_stub(iter.device_type(), iter);
+  return result;
 }
 
-Tensor max_values(const Tensor& self, IntArrayRef dims, bool keepdim) {
-  if (dims.size() == 1) {
-    return std::get<0>(self.max(dims[0], keepdim));
-  } else {
-    Tensor result = at::empty({0}, self.options());
-    ScalarType dtype = get_dtype(result, self, {}, true);
-    auto iter = make_reduction("max_values", result, self, dims, keepdim, dtype);
-    TORCH_CHECK(iter.numel() > 0, "max_values on a tensor with no elements is not defined.");
-    max_values_stub(iter.device_type(), iter);
-    return result;
-  }
+Tensor amin(const Tensor& self, IntArrayRef dim, bool keepdim) {
+  Tensor result = at::empty({0}, self.options());
+  return at::amin_out(result, self, dim, keepdim);
 }
 
-Tensor min_values(const Tensor& self, DimnameList dims, bool keepdim) {
-  TORCH_CHECK(false, "NYI: min_values with names");
-  return at::min_values(self, dimnames_to_positions(self, dims), keepdim);
+Tensor &amax_out(Tensor& result, const Tensor& self, IntArrayRef dim, bool keepdim) {
+  TORCH_CHECK(self.scalar_type() == result.scalar_type(), "Illegal dtype for self, and out:", self.scalar_type(), result.scalar_type());
+  auto iter = make_reduction("amax", result, self, dim, keepdim, self.scalar_type());
+  TORCH_CHECK(iter.numel() > 0, "operation does not have an identity");
+  max_values_stub(iter.device_type(), iter);
+  return result;
 }
 
-Tensor max_values(const Tensor& self, DimnameList dims, bool keepdim) {
-  TORCH_CHECK(false, "NYI: max_values with names");
-  return at::max_values(self, dimnames_to_positions(self, dims), keepdim);
+Tensor amax(const Tensor& self, IntArrayRef dim, bool keepdim) {
+  Tensor result = at::empty({0}, self.options());
+  return at::amax_out(result, self, dim, keepdim);
 }
 
 Tensor& argmax_out(Tensor& result, const Tensor& self, c10::optional<int64_t> dim, bool keepdim) {
