@@ -31,7 +31,7 @@ from test_jit import backward_graph, all_backward_graphs, get_lstm_inputs, get_m
 
 from torch.testing._internal.te_utils import CudaCodeGenExecuted
 
-FUSION_GROUP = 'tensorexpr::Group'
+FUSION_GROUP = 'prim::TensorExprGroup'
 
 def strip_profiling_nodes(nodes):
     profiling_opcodes = set(['prim::BailoutTemplate', 'prim::BailOut'])

@@ -351,8 +351,8 @@ def build_deps():
 
     # Use copies instead of symbolic files.
     # Windows has very poor support for them.
-    sym_files = ['tools/shared/cwrap_common.py', 'tools/shared/_utils_internal.py']
-    orig_files = ['aten/src/ATen/common_with_cwrap.py', 'torch/_utils_internal.py']
+    sym_files = ['tools/shared/_utils_internal.py']
+    orig_files = ['torch/_utils_internal.py']
     for sym_file, orig_file in zip(sym_files, orig_files):
         same = False
         if os.path.exists(sym_file):
@@ -368,7 +368,7 @@ def build_deps():
 ################################################################################
 
 # the list of runtime dependencies required by this built package
-install_requires = ['future', 'typing_extensions']
+install_requires = ['future', 'typing_extensions', 'dataclasses']
 
 missing_pydep = '''
 Missing build dependency: Unable to `import {importname}`.
