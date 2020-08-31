@@ -111,6 +111,11 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   at::ScalarType scalar_type = self_.scalar_type();
 
   if (mat1.numel() == 0) {
+    // By definition, when beta==0, values in self should be ignored. nans and infs
+    // should not propagate
+    if (beta.toComplexDouble() == 0.) {
+      return result.zero_();
+    }
     return at::native::mul_out(result, self, at::native::scalar_tensor(beta, at::device(at::kCPU).dtype(self.scalar_type())));
   }
 
