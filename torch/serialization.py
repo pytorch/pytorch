@@ -752,7 +752,7 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
             if _is_zipfile(f):
                 # .zip is used for torch.jit.save and will throw an un-pickling error here
                 raise RuntimeError(
-                    "{filename} is a zip archive (did you mean to use torch.jit.load()?)".format(filename=f.name)) from e
+                    f"{f.name} is a zip archive (did you mean to use torch.jit.load()?)") from None
             # if not a tarfile, reset file offset and proceed
             f.seek(0)
 
