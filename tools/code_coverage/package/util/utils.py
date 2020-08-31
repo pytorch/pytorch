@@ -80,9 +80,18 @@ def get_raw_profiles_folder() -> str:
     return os.environ.get("RAW_PROFILES_FOLDER", os.path.join(PROFILE_DIR, "raw"))
 
 
-# TODO auto detect
-def get_cov_type() -> str:
-    return os.environ.get("COMPILER_TYPE", "CLANG")
+def get_cov_type(platform: TestPlatform) -> str:
+    if platform == TestPlatform.OSS:
+        from package.oss.utils import get_cov_type
+
+        cov_type = get_cov_type()
+    else:
+        from caffe2.fb.code_coverage.tool.package.fbcode.utils import get_cov_type
+
+        cov_type = get_cov_type()
+
+    check_compiler_type(cov_type)
+    return cov_type
 
 
 def get_test_name_from_whole_path(path: str) -> str:

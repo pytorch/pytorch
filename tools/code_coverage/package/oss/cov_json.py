@@ -2,8 +2,8 @@ import time
 
 from ..tool import clang_coverage, gcc_coverage
 from ..util.setting import Option, TestList, TestPlatform
-from ..util.utils import check_compiler_type, get_cov_type, print_time
-from .init import gcc_export_init
+from ..util.utils import check_compiler_type, print_time
+from .init import gcc_export_init, get_cov_type
 from .run import clang_run, gcc_run
 
 
