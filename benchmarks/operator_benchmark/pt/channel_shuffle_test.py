@@ -12,10 +12,10 @@ import torch
 
 # Configs for PT channel_shuffle operator
 channel_shuffle_long_configs = op_bench.cross_product_configs(
-    batch_size=[1, 2, 4],
-    channels_per_group=[16, 32, 64],
-    height=[16, 32, 64],
-    width=[16, 32, 64],
+    batch_size=[1, 2, 4, 8, 16],
+    channels_per_group=[16, 32, 64, 128],
+    height=[16, 32, 64, 128],
+    width=[16, 32, 64, 128],
     groups=[2, 4, 8, 16],
     channel_last=[True, False],
     tags=["long"]
@@ -30,7 +30,10 @@ channel_shuffle_short_configs = op_bench.config_list(
         [4, 32, 32, 32, 4],
         [4, 64, 64, 64, 4],
         [8, 64, 64, 64, 8],
+        [8, 128, 128, 128, 8],
         [16, 64, 64, 64, 16],
+        [16, 128, 128, 128, 16],
+        [16, 256, 256, 256, 16],
     ],
     cross_product_configs={
         "channel_last": [True, False],
