@@ -510,7 +510,7 @@ def istft(input: Tensor, n_fft: int, hop_length: Optional[int] =None,
           win_length: Optional[int] =None, window: Optional[Tensor] =None,
           center: bool =True, normalized: bool =False,
           onesided: Optional[bool] =None, length: Optional[int] =None, *,
-          return_complex: Optional[bool] =None) -> Tensor:
+          return_complex: bool =False) -> Tensor:
     r"""Inverse short time Fourier Transform. This is expected to be the inverse of :func:`~torch.stft`.
     It has the same parameters (+ additional optional parameter of :attr:`length`) and it should return the
     least squares estimation of the original signal. The algorithm will check using the NOLA condition (
@@ -559,9 +559,10 @@ def istft(input: Tensor, n_fft: int, hop_length: Optional[int] =None,
         length (Optional[int]): The amount to trim the signal by (i.e. the
             original signal length). (Default: whole signal)
         return_complex (Optional[bool]):
-            Whether the output should be complex, or if the input should be assumed to derive from a real signal and window.
-            Note that if ``onesided=False``, the output is always real.
-            (Default: ``True`` if :attr:`input` has complex dtype)
+            Whether the output should be complex, or if the input should be
+            assumed to derive from a real signal and window.
+            Note that this is incompatible with ``onesided=True``.
+            (Default: ``False``)
 
     Returns:
         Tensor: Least squares estimation of the original signal of size (..., signal_length)

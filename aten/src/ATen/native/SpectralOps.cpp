@@ -278,6 +278,12 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop
   // FFT and transpose to get (batch x fft_size x num_frames)
   const bool complex_fft = input.is_complex();
   const auto onesided = onesidedOpt.value_or(!complex_fft);
+
+  if (!complex_fft && !return_complex.has_value()) {
+    TORCH_WARN("stft will return complex tensors by default in future, use"
+               " return_complex=False to preserve the current output format.");
+  }
+
   Tensor out;
   if (complex_fft) {
     TORCH_CHECK(!onesided, "Cannot have onesided output if window or input is complex");
@@ -301,7 +307,7 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop
 Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop_lengthOpt,
              const optional<int64_t> win_lengthOpt, const Tensor& window,
              const bool center, const bool normalized, const c10::optional<bool> onesidedOpt,
-             const optional<int64_t> lengthOpt, const c10::optional<bool> return_complex) {
+             const optional<int64_t> lengthOpt, const bool return_complex) {
   auto write_opt = [](auto & SS, const auto & opt_val) -> decltype(auto) {
                      if (opt_val) {
                        SS << *opt_val;
@@ -322,8 +328,7 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> ho
     } \
     SS << ", center=" << center << ", normalized=" << normalized << ", onesided="; \
     write_opt(SS, onesidedOpt) << ", length="; \
-    write_opt(SS, lengthOpt) << ", return_complex="; \
-    write_opt(SS, return_complex) << ") "
+    write_opt(SS, lengthOpt) << ", return_complex=" << return_complex << ") "
 
   // default_init hop_length and win_length
   const auto hop_length = hop_lengthOpt.value_or(n_fft >> 2);
@@ -401,12 +406,13 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> ho
 
   input = input.transpose(1, 2);  // size: (channel, n_frames, fft_size, 2)
 
-  const bool complex_input = self.is_complex();
-  if (!onesided && return_complex.value_or(complex_input)) {
+  if (return_complex) {
     TORCH_CHECK(!onesided, "Cannot have onesided output if window or input is complex");
     input = at::native::ifft(input, 1, normalized);  // size: (channel, n_frames, n_fft)
     input = at::view_as_complex(input);
   } else {
+    TORCH_CHECK(!window.defined() || !window.is_complex(),
+                "Complex windows are incompatible with return_complex=False");
     input = at::native::irfft(input, 1, normalized, onesided, {n_fft,});  // size: (channel, n_frames, n_fft)
   }
   TORCH_INTERNAL_ASSERT(input.size(2) == n_fft);

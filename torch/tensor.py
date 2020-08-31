@@ -420,7 +420,7 @@ class Tensor(torch._C._TensorBase):
               win_length: Optional[int] =None, window: 'Optional[Tensor]' =None,
               center: bool =True, normalized: bool =False,
               onesided: Optional[bool] =None, length: Optional[int] =None, *,
-              return_complex: Optional[bool] =None):
+              return_complex: bool =False):
         r"""See :func:`torch.istft`"""
         relevant_args = (self,)
         from torch.overrides import has_torch_function, handle_torch_function

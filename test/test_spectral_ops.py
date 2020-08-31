@@ -453,7 +453,8 @@ class TestFFT(TestCase):
 
             x_roundtrip = torch.istft(
                 x_stft, n_fft=n_fft, hop_length=hop_length, window=window,
-                center=True, normalized=normalized, length=x.size(-1))
+                center=True, normalized=normalized, length=x.size(-1),
+                return_complex=True)
             self.assertEqual(x_stft.dtype, torch.cdouble)
 
             if not dtype.is_complex:
@@ -541,7 +542,8 @@ class TestFFT(TestCase):
             expected = _complex_istft(x, n_fft, hop_length=hop_length,
                                       center=center, normalized=normalized)
             actual = torch.istft(x, n_fft, hop_length=hop_length,
-                                 center=center, normalized=normalized)
+                                 center=center, normalized=normalized,
+                                 return_complex=True)
             self.assertEqual(expected, actual)
 
     @skipCUDAIfRocm
