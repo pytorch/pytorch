@@ -32,6 +32,12 @@ if NO_MULTIPROCESSING_SPAWN:
 NO_NCCL = not hasattr(c10d, "ProcessGroupNCCL")
 
 
+if sys.platform == 'win32':
+    LOOPBACK = 'Ethernet'
+else:
+    LOOPBACK = 'lo'
+
+
 class ProcessGroupShareTensorTest(TestCase):
 
     world_size = 2
@@ -39,7 +45,7 @@ class ProcessGroupShareTensorTest(TestCase):
     @classmethod
     def opts(cls, threads=2):
         opts = c10d.ProcessGroupGloo.Options()
-        opts.devices = [c10d.ProcessGroupGloo.create_device(interface="lo")]
+        opts.devices = [c10d.ProcessGroupGloo.create_device(interface=LOOPBACK)]
         opts.timeout = 5.0
         opts.threads = threads
         return opts
