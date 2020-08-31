@@ -2575,17 +2575,6 @@ def binary_cross_entropy_with_logits(input, target, weight=None, size_average=No
     return torch.binary_cross_entropy_with_logits(input, target, weight, pos_weight, reduction_enum)
 
 
-def _pointwise_loss(lambd, lambd_optimized, input, target, reduction='mean'):
-    if target.requires_grad:
-        d = lambd(input, target)
-        if reduction == 'none':
-            return d
-        return torch.mean(d) if reduction == 'mean' else torch.sum(d)
-    else:
-        expanded_input, expanded_target = torch.broadcast_tensors(input, target)
-        return lambd_optimized(expanded_input, expanded_target, _Reduction.get_enum(reduction))
-
-
 def _smooth_l1_loss(input, target, delta=1.):
     # type: (Tensor, Tensor, float) -> Tensor
     t = torch.abs(input - target)

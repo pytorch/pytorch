@@ -139,7 +139,7 @@ c10::intrusive_ptr<JitFuture> wrapFutureMessageInJitFuture(
           auto futureResponseMessage = wp.lock();
           if (futureResponseMessage->hasError()) {
             jitFuture->setError(
-                std::make_exception_ptr(futureResponseMessage->error()));
+                std::make_exception_ptr(*futureResponseMessage->error()));
           } else {
             jitFuture->markCompleted(
                 toIValue(futureResponseMessage->constValue()));

@@ -133,7 +133,7 @@ void DistAutogradContext::addOutstandingRpc(
         lock.unlock();
         if (!graphTask_->future_completed_.exchange(true)) {
           graphTask_->future_result_->setErrorIfNeeded(
-              std::make_exception_ptr(futureMessage.error()));
+              std::make_exception_ptr(*futureMessage.error()));
         }
       } else {
         LOG(WARNING) << "Ignoring error since GraphTask is no longer valid: "
