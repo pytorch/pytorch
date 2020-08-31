@@ -2,7 +2,7 @@
 
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/NativeFunctions.h>
-#if defined(USE_XNNPACK)
+#ifdef C10_MOBILE
 #include <ATen/native/xnnpack/Engine.h>
 #endif
 #include <c10/util/Exception.h>
@@ -26,7 +26,7 @@ Tensor channel_shuffle(const Tensor& self, int64_t groups) {
              "Number of channels must be divisible by groups. Got ",
              c, " channels and ", groups, " groups.");
 
-#if defined(USE_XNNPACK)
+#ifdef C10_MOBILE
   if (self.is_contiguous(MemoryFormat::ChannelsLast) &&
       xnnpack::use_channel_shuffle(self, groups)) {
     return xnnpack::channel_shuffle(self, groups);
