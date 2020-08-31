@@ -1233,12 +1233,29 @@ class RpcTest(RpcAgentTestFixture):
             self.assertEqual(1, len(record_function_remote_event))
             record_function_remote_event = record_function_remote_event[0]
             self.assertEqual(record_function_remote_event.node_id, dst_rank)
-            # The record function block CPU time should be greater than the
-            # sum of remotely profiled ops since they are executed in that block.
             remaining_remote_events = {
                 evt for evt in function_events if evt.node_id == dst_rank
             } - {record_function_remote_event}
-            remote_ops_time = sum(evt.cpu_time_total for evt in remaining_remote_events)
+            # These ops are created by the hack of casting record_function to a
+            # tensor, so they should not count in the actual UDF profiled time.
+            # TODO remove after https://github.com/pytorch/pytorch/issues/43868
+            # is resolved.
+            remote_events_denylist = [
+                "aten::zeros",
+                "aten::empty",
+                "aten::zero_",
+                "aten::fill_",
+            ]
+            remote_ops_time = sum(
+                evt.cpu_time_total
+                for evt in remaining_remote_events
+                if not any(
+                    [
+                        rf_entry_event in evt.name
+                        for rf_entry_event in remote_events_denylist
+                    ]
+                )
+            )
             self.assertGreaterEqual(
                 record_function_remote_event.cpu_time_total, remote_ops_time
             )
