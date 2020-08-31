@@ -95,13 +95,13 @@ TEST(FFTTest, rfft) {
 }
 
 TEST(FFTTest, rfft_irfft) {
-  auto t = torch::randn(127, torch::kDouble);
+  auto t = torch::randn(128, torch::kDouble);
   auto T = torch::fft::rfft(t);
-  ASSERT_EQ(T.size(0), 64);
+  ASSERT_EQ(T.size(0), 65);
   ASSERT_EQ(T.scalar_type(), torch::kComplexDouble);
 
   auto t_round_trip = torch::fft::irfft(T);
-  ASSERT_EQ(t_round_trip.size(0), 127);
+  ASSERT_EQ(t_round_trip.size(0), 128);
   ASSERT_EQ(t_round_trip.scalar_type(), torch::kDouble);
   ASSERT_TRUE(torch::allclose(t, t_round_trip));
 }
@@ -116,7 +116,7 @@ TEST(FFTTest, ihfft) {
 TEST(FFTTest, hfft_ihfft) {
   auto t = torch::randn(64, torch::kComplexDouble);
   t[0] = .5; // Must be purely real to satisfy hermitian symmetry
-  auto T = torch::fft::hfft(t);
+  auto T = torch::fft::hfft(t, 127);
   ASSERT_EQ(T.size(0), 127);
   ASSERT_EQ(T.scalar_type(), torch::kDouble);
 
