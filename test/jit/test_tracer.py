@@ -1299,6 +1299,27 @@ class TestTracer(JitTestCase):
         imported = self.getExportImportCopy(traced)
         check(imported.foo)
 
+        class WrapperExports(torch.nn.Module):
+            def __init__(self):
+                super(WrapperExports, self).__init__()
+                self.foo = Foo()
+
+            @torch.jit.export
+            def addOne(self, x):
+                return x + 1
+
+            def forward(self, x):
+                return self.foo(x)
+
+        f = WrapperExports()
+
+        traced = torch.jit.trace(f, (torch.rand(3, 4),))
+        check(traced.foo)
+        expected_names = ['addOne']
+        check(traced)
+        print(traced.foo.forward.graph)
+
+
     def test_trace_autograd_function(self):
         class TestFunc(torch.autograd.Function):
             @staticmethod

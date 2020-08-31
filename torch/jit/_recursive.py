@@ -48,6 +48,20 @@ def make_stub_from_method(nn_module, method_name):
     # even though we requested a stub for `forward`.
     return make_stub(func, method_name)
 
+
+def make_stubs_from_exported_methods(mod):
+    stubs = []
+    for name in dir(mod):
+        item = getattr(mod, name, None)
+        if (
+            _jit_internal.get_torchscript_modifier(item)
+            is _jit_internal.FunctionModifiers.EXPORT
+        ):
+            stubs.append(make_stub_from_method(mod, name))
+
+    return stubs
+
+
 # base types that can be constants
 # in addition, tuples and lists of these base types are also considered constants
 # If you edit this list, then you also need to edit the handlers in
@@ -291,7 +305,7 @@ def create_methods_from_stubs(concrete_type, stubs):
     defaults = [get_default_args(m.original_method) for m in stubs]
     concrete_type._create_methods(defs, rcbs, defaults)
 
-def create_script_module(nn_module, stubs_fn, share_types=True):
+def create_script_module(nn_module, stubs_fn, submodule_stubs_fn=None, share_types=True):
     """
     Creates a new ScriptModule from an nn.Module
 
@@ -314,9 +328,9 @@ def create_script_module(nn_module, stubs_fn, share_types=True):
         concrete_type_builder = infer_concrete_type_builder(nn_module)
         concrete_type_builder.set_poisoned()
         concrete_type = concrete_type_builder.build()
-    return create_script_module_impl(nn_module, concrete_type, stubs_fn)
+    return create_script_module_impl(nn_module, concrete_type, stubs_fn, submodule_stubs_fn)
 
-def create_script_module_impl(nn_module, concrete_type, stubs_fn):
+def create_script_module_impl(nn_module, concrete_type, stubs_fn, submodule_stubs_fn=None):
     """
     Convert an nn.Module to a RecursiveScriptModule.
 
@@ -348,8 +362,13 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
             elif isinstance(orig_value, torch.jit.ScriptModule):
                 scripted = orig_value
             else:
-                # use the default recursive rule to compile the module
-                scripted = create_script_module_impl(orig_value, sub_concrete_type, infer_methods_to_compile)
+                # default submodule use default recursive rule to compile the submodule
+                submod_stubs_fn = infer_methods_to_compile
+                # if caller provide a specific submodule rule, use it to compile submodule instead
+                if submodule_stubs_fn is not None:
+                    submod_stubs_fn = submodule_stubs_fn
+
+                scripted = create_script_module_impl(orig_value, sub_concrete_type, submod_stubs_fn)
 
             cpp_module.setattr(name, scripted)
             script_module._modules[name] = scripted
