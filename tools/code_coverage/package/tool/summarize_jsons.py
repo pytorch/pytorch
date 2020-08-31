@@ -156,7 +156,6 @@ def update_coverage(
         uncovered_range = record["uncovered_lines"]
         # transform file name: remote/13223/caffe2/aten -> caffe2/aten
         file_path = transform_file_name(file_path, interested_folders, platform)
-
         # if file not exists, add it into dictionary
         if file_path not in covered_lines:
             covered_lines[file_path] = set()
