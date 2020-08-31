@@ -3166,7 +3166,7 @@
     CPU: roll_cpu
     CUDA: roll_cuda
 
-# default int[] value [0,1] should not add space after comma, since native_parse.py uses ', ' to split args
+# default int[] value [0,1] should not add space after comma, since codegen parser uses ', ' to split args
 
 - func: rot90(Tensor self, int k=1, int[] dims=[0,1]) -> Tensor
   use_c10_dispatcher: full
@@ -5773,7 +5773,7 @@
     CPU: foreach_tensor_add_scalar_kernel_slow
     CUDA: foreach_tensor_add_scalar_kernel_cuda
 
-- func: _foreach_add_.Scalar(Tensor[](a!) self, Scalar scalar) -> ()
+- func: _foreach_add_.Scalar(Tensor(a!)[] self, Scalar scalar) -> ()
   device_guard: False
   variants: function
   dispatch:
