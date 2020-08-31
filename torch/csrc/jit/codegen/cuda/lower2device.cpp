@@ -19,31 +19,44 @@ namespace {
 // TODO(kir): revisit this
 thread_local GpuLower* active_gpu_lower = nullptr;
 
-class GridReductionBuffers : OptOutDispatch {
+class BuffersExtractor : OptOutDispatch {
  public:
-  static std::vector<kir::Allocate*> getGlobalAllocs(
-      const std::vector<Expr*>& exprs) {
-    GridReductionBuffers fgr;
+  BuffersExtractor(
+      const std::vector<Expr*>& exprs,
+      ThreadPredicateMap& _thread_predicates)
+      : thread_predicates_(_thread_predicates), has_block_broadcast_(false) {
     for (auto expr : exprs) {
-      fgr.handle(expr);
+      handle(expr);
     }
-    return fgr.global_allocations_;
   }
 
-  static std::vector<kir::Allocate*> getSyncAllocs(
-      const std::vector<Expr*>& exprs) {
-    GridReductionBuffers fgr;
-    for (auto expr : exprs) {
-      fgr.handle(expr);
-    }
-    return fgr.sync_allocations_;
+  std::vector<kir::Allocate*> getGlobalAllocs() {
+    return global_allocations_;
+  }
+
+  std::vector<kir::Allocate*> getSyncAllocs() {
+    return sync_allocations_;
+  }
+
+  std::vector<kir::Allocate*> getDynamicAllocs() {
+    return dynamic_allocations_;
+  }
+
+  std::vector<kir::Allocate*> getStaticAllocs() {
+    return static_allocations_;
+  }
+
+  bool hasBlockBroadcast() {
+    return has_block_broadcast_;
   }
 
  private:
+  ThreadPredicateMap& thread_predicates_;
+  bool has_block_broadcast_;
   std::vector<kir::Allocate*> global_allocations_;
   std::vector<kir::Allocate*> sync_allocations_;
-
-  GridReductionBuffers() = default;
+  std::vector<kir::Allocate*> dynamic_allocations_;
+  std::vector<kir::Allocate*> static_allocations_;
 
   void handle(Expr* expr) final {
     OptOutDispatch::handle(expr);
@@ -65,9 +78,29 @@ class GridReductionBuffers : OptOutDispatch {
     }
   }
 
+  void handle(kir::BroadcastOp* bop) final {
+    const ir_utils::ParallelTypeBitmap domains =
+        ir_utils::getParallelBroadcastDomains(bop->out(), thread_predicates_);
+    const bool thread_x = domains.get(ParallelType::TIDx);
+    const bool thread_y = domains.get(ParallelType::TIDy);
+    const bool thread_z = domains.get(ParallelType::TIDz);
+    const bool block_broadcast_needed = thread_x || thread_y || thread_z;
+    has_block_broadcast_ |= block_broadcast_needed;
+  }
+
   void handle(kir::GridReduction* gr) final {
     global_allocations_.push_back(gr->reduction_buffer());
     sync_allocations_.push_back(gr->sync_buffer());
+  }
+
+  void handle(kir::Allocate* a) final {
+    if (a->getMemoryType() == MemoryType::Shared) {
+      if (a->size()->isConstScalar()) {
+        static_allocations_.push_back(a);
+      } else {
+        dynamic_allocations_.push_back(a);
+      }
+    }
   }
 };
 
@@ -181,8 +214,12 @@ void GpuLower::lower() {
   lowered_exprs_ = indexed_loops;
 
   // Get allocations
-  global_allocations_ = GridReductionBuffers::getGlobalAllocs(lowered_exprs_);
-  sync_allocations_ = GridReductionBuffers::getSyncAllocs(lowered_exprs_);
+  BuffersExtractor be(lowered_exprs_, preds);
+  global_allocations_ = be.getGlobalAllocs();
+  sync_allocations_ = be.getSyncAllocs();
+  dynamic_smem_allocations_ = be.getDynamicAllocs();
+  static_smem_allocations_ = be.getStaticAllocs();
+  has_block_broadcast_ = be.hasBlockBroadcast();
 }
 
 // Traverse through the fusion and print CUDA code associated with it
@@ -204,8 +241,10 @@ std::ostream& GpuLower::printKernel(
       global_tensors.begin(),
       [](kir::Allocate* alloc) { return alloc->buffer(); });
 
+  bool hasDynamicSmem = dynamic_smem_allocations_.size() > 0;
+
   IRPrinter irp(os);
-  irp.printKernel(lowered_exprs_, kernel_name, global_tensors);
+  irp.printKernel(lowered_exprs_, kernel_name, global_tensors, hasDynamicSmem);
   return os;
 }
 
@@ -335,6 +374,11 @@ class TORCH_CUDA_API GpuLower::KernelIrMapper : private OptInConstDispatch {
 Val* GpuLower::lowerValue(const Val* val) {
   TORCH_INTERNAL_ASSERT(active_gpu_lower != nullptr);
   KernelIrMapper kir_mapper(active_gpu_lower);
+  return kir_mapper.lower(val);
+}
+
+Val* GpuLower::getLowerValue(const Val* val) {
+  KernelIrMapper kir_mapper(this);
   return kir_mapper.lower(val);
 }
 

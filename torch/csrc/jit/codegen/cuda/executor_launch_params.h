@@ -24,9 +24,14 @@ class TORCH_CUDA_API LaunchParams {
         bdimy_(bdimy),
         bdimz_(bdimz) {}
 
+  void setSmem(int64_t smem) {
+    smem_ = smem;
+  }
+
   int64_t smem() const {
     return smem_;
   }
+
   int64_t nBlocks() const {
     return gdimx_ * gdimy_ * gdimz_;
   }

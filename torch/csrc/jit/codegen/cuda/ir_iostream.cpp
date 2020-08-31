@@ -40,7 +40,8 @@ void IRPrinter::handle(const Expr* e) {
 void IRPrinter::printHeader(
     Fusion* fusion,
     const std::string& kernel_name_,
-    const std::vector<Val*>& global_buffers) {
+    const std::vector<Val*>& global_buffers,
+    bool hasDynamicSmem) {
   os << "__global__ void " << kernel_name_ << "(";
 
   std::vector<Val*> vals;
@@ -89,17 +90,38 @@ void IRPrinter::printHeader(
 
   os << "){\n";
   indent_size++;
+
   if (fusion->hasRNG()) {
     indent();
     os << "int idx = blockIdx.x*blockDim.x + threadIdx.x;\n";
     indent();
     os << "Philox rnd(seed, idx, offset);\n";
   }
-  if (fusion->hasBlockReduction() || fusion->hasGridReduction()) {
+
+  // Dynamic Shared Memory
+  const bool hasWorkspace =
+      fusion->hasBlockReduction() || fusion->hasGridReduction();
+  if (hasDynamicSmem || hasWorkspace) {
     indent();
-    // TODO: Dynamic sizing possible? blockReduce originally used 1024
-    // values of a given type
-    os << "__shared__ float shared_mem[1024];\n";
+    os << "alignas(";
+    os << dataTypeSize(fusion->getMaximumSmemDataType());
+    os << ") extern __shared__ char array[];\n";
+  }
+
+  if (hasDynamicSmem) {
+    indent();
+    os << "unsigned offset = 0;\n";
+  }
+
+  if (hasWorkspace) {
+    indent();
+    os << "void* shared_mem = array;\n";
+    if (hasDynamicSmem) {
+      indent();
+      os << "offset += ((blockDim.x * blockDim.y * blockDim.z) * sizeof(";
+      os << fusion->getMaximumSmemDataType();
+      os << "));\n";
+    }
   }
 }
 
@@ -160,6 +182,7 @@ void IRPrinter::handle(const TensorView* tv) {
 void IRPrinter::handle(const IterDomain* id) {
   os << id->getIterType();
   os << id->getParallelType();
+  os << id->name();
   os << "{";
   if (!id->start()->isZeroInt()) {
     print_inline(id->start());
@@ -337,6 +360,7 @@ void IRPrinter::handle(const kir::NamedScalar* i) {
 void IRPrinter::handle(const kir::IterDomain* id) {
   os << id->getIterType();
   os << id->getParallelType();
+  os << id->name();
   os << "{";
   if (!id->start()->isZeroInt()) {
     print_inline(id->start());
@@ -352,8 +376,10 @@ void IRPrinter::handle(const kir::TensorDomain*) {
   TORCH_INTERNAL_ASSERT(false, "Unreachable");
 }
 
-void IRPrinter::handle(const kir::TensorView*) {
-  TORCH_INTERNAL_ASSERT(false, "Unreachable");
+void IRPrinter::handle(const kir::TensorView* tv) {
+  // This should never be reachable, but the current codebase assumes
+  // kir::TensorView can be printable for debugging messages.
+  os << "KT" << tv->name();
 }
 
 static bool isTV(const Val* val) {
@@ -673,7 +699,7 @@ void IRPrinter::handle(const kir::ReductionOp* rop) {
     os << ", ";
     os << "reduction_" << op_type << "_" << d_type;
     os << ", threadIdx, blockDim";
-    os << ", reinterpret_cast<" << d_type << "*>(shared_mem)";
+    os << ", static_cast<" << d_type << "*>(shared_mem)";
     os << ");\n";
   }
 }
@@ -728,7 +754,7 @@ void IRPrinter::handle(const kir::GridReduction* gr) {
   os << "reduction_" << op_type << "_" << d_type;
   os << ", &T" << work_buffer->name() << "[0]";
   os << ", T" << sync_buffer->name() << "";
-  os << ", reinterpret_cast<" << d_type << "*>(shared_mem)";
+  os << ", static_cast<" << d_type << "*>(shared_mem)";
   os << ");\n";
 }
 
@@ -758,6 +784,7 @@ void IRPrinter::handle(const kir::BroadcastOp* bop) {
       !grid_broadcast_needed, "Parallel broadcast across blocks not supported");
 
   if (block_broadcast_needed) {
+    auto d_type = bop->out()->getDataType().value();
     indent();
     os << "broadcast::blockBroadcast<";
     os << (thread_x ? "true" : "false") << ", ";
@@ -767,6 +794,7 @@ void IRPrinter::handle(const kir::BroadcastOp* bop) {
     handle(bop->out());
     os << ", ";
     handle(bop->in());
+    os << ", static_cast<" << d_type << "*>(shared_mem)";
     os << ");\n";
   } else {
     indent();
@@ -848,15 +876,42 @@ void IRPrinter::handle(const kir::Allocate* a) {
         os << "// Allocate global tensor ";
         break;
       case MemoryType::Shared:
-        os << "__shared__ ";
+        if (a->size()->isConstScalar()) {
+          // Static Shared Memory
+          os << "__shared__ ";
+        }
         break;
       case MemoryType::Local:
         break;
     }
-    os << a->buffer_type();
-    os << " T" << tv->name() << "[";
-    print_inline(a->size());
-    os << "];\n";
+
+    // Dynamic Shared Memory
+    if (tv->getMemoryType() == MemoryType::Shared &&
+        !a->size()->isConstScalar()) {
+      // Align Offset Position
+      os << "offset = alignBufferSize(offset,";
+      os << dataTypeSize(a->buffer_type());
+      os << ");\n";
+      // Shared Memory Pointer
+      indent();
+      os << a->buffer_type() << "* ";
+      os << "T" << tv->name();
+      os << " = reinterpret_cast<" << a->buffer_type() << "*>";
+      os << "(array + offset);\n";
+      // Increment Offset Position
+      indent();
+      os << "offset += (";
+      print_inline(a->size());
+      os << " * sizeof(";
+      os << a->buffer_type();
+      os << "));\n";
+    } else {
+      os << a->buffer_type();
+      os << " T" << tv->name() << "[";
+      print_inline(a->size());
+      os << "];\n";
+    }
+
   } else {
     os << a->buffer_type() << " ";
     handle(a->buffer());
@@ -936,7 +991,8 @@ void IRPrinter::printReductionOps(Fusion* fusion) {
 void IRPrinter::printKernel(
     const std::vector<Expr*>& exprs,
     const std::string& kernel_name,
-    const std::vector<Val*>& global_buffers) {
+    const std::vector<Val*>& global_buffers,
+    bool hasDynamicSmem) {
   Fusion* fusion = FusionGuard::getCurFusion();
   if (exprs.empty())
     return;
@@ -945,7 +1001,7 @@ void IRPrinter::printKernel(
       "Incorrect fusion set during printKernel.");
 
   printReductionOps(fusion);
-  printHeader(fusion, kernel_name, global_buffers);
+  printHeader(fusion, kernel_name, global_buffers, hasDynamicSmem);
 
   for (auto* expr : exprs) {
     handle(expr);

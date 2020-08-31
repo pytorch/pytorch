@@ -94,7 +94,8 @@ class TORCH_CUDA_API IRPrinter : public OptInConstDispatch {
   void printHeader(
       Fusion* fusion,
       const std::string& kernel_name_,
-      const std::vector<Val*>& global_buffers);
+      const std::vector<Val*>& global_buffers,
+      bool hasDynamicSmem);
 
   IRPrinter(std::ostream& _os) : os(_os) {}
 
@@ -169,7 +170,8 @@ class TORCH_CUDA_API IRPrinter : public OptInConstDispatch {
   void printKernel(
       const std::vector<Expr*>& exprs,
       const std::string& kernel_name,
-      const std::vector<Val*>& global_buffers);
+      const std::vector<Val*>& global_buffers,
+      bool hasDynamicSmem);
 
  private:
   std::unique_ptr<ThreadPredicateMap> thread_predicates_;

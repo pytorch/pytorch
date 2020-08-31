@@ -7,6 +7,11 @@ namespace torch {
 namespace jit {
 namespace fuser {
 
+// Common Functions
+constexpr int64_t ceilDiv(int64_t a, int64_t b) {
+  return (a + b - 1) / b;
+}
+
 // Simple mixin for suppressing copy & move operations, ex:
 //
 //  class Foo : public NonCopyable {

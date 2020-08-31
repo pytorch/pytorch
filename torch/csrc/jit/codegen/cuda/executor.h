@@ -23,6 +23,12 @@ struct TORCH_CUDA_API CompileOptions {
 
 class TORCH_CUDA_API FusionExecutor : public NonCopyable {
  public:
+  void compileFusionFromStr(
+      Fusion* fusion,
+      const std::string& code,
+      const std::string& name,
+      int id,
+      CompileOptions options = CompileOptions());
   void compileFusion(Fusion* fusion, CompileOptions options = CompileOptions());
 
   std::vector<at::Tensor> runFusion(
@@ -60,6 +66,12 @@ class TORCH_CUDA_API FusionExecutor : public NonCopyable {
       const at::ArrayRef<IValue>& aten_inputs,
       const LaunchParams& launch_constraints,
       EvaluationContext& ec);
+
+  uint64_t computeSharedMemory(
+      EvaluationContext& ec,
+      const std::vector<kir::Allocate*>& buffers,
+      bool align_padding = false,
+      uint64_t total = 0);
 
   std::vector<at::Tensor> allocGlobalVals(EvaluationContext& ec);
 

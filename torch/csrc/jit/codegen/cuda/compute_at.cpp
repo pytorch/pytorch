@@ -20,11 +20,10 @@ ComputeAtData::ComputeAtData(TensorView* tv)
 void ComputeAtData::clearPass() {
   // If the last pass set a position, update the new_compute_at_position if
   // latest position would be greater than previously set.
-  auto pass_pos = current_traversal_position_set ? current_traversal_position
-                                                 : new_compute_at_position;
-
-  new_compute_at_position =
-      pass_pos > new_compute_at_position ? pass_pos : new_compute_at_position;
+  if (current_traversal_position_set &&
+      current_traversal_position > new_compute_at_position) {
+    new_compute_at_position = current_traversal_position;
+  }
 
   current_traversal_position_set = false;
   current_traversal_position = 0;
@@ -52,13 +51,14 @@ void ComputeAtData::setPassPosition(unsigned int pos) {
 }
 
 unsigned int ComputeAtData::getNewPosition() const {
-  // If the last pass set a position, update the new_compute_at_position if
-  // latest position would be greater than previously set.
-  auto pass_pos = current_traversal_position_set ? current_traversal_position
-                                                 : new_compute_at_position;
-
-  return pass_pos > new_compute_at_position ? pass_pos
-                                            : new_compute_at_position;
+  // If the last pass set a position, return the latest position if
+  // it would be greater than previously set.
+  if (current_traversal_position_set &&
+      current_traversal_position > new_compute_at_position) {
+    return current_traversal_position;
+  } else {
+    return new_compute_at_position;
+  }
 }
 
 void ComputeAtData::validateNewComputeAt() const {
@@ -80,6 +80,20 @@ void ComputeAtData::validateNewComputeAt() const {
       " with a computeAt position of ",
       original_compute_at_position,
       ".");
+}
+
+void ComputeAtData::setComputeAtDomain(TensorDomain* td) {
+  if (new_compute_at_domain_ != original_domain_) {
+    TORCH_INTERNAL_ASSERT(
+        *new_compute_at_domain_ == *td,
+        "TensorDomain, ",
+        td,
+        ", does not match with the previously set domain of ",
+        tv_ref_,
+        ", which is ",
+        new_compute_at_domain_);
+  }
+  new_compute_at_domain_ = td;
 }
 
 namespace {
@@ -160,6 +174,9 @@ void ComputeAt::run(
     // Check all dependency chains, select the next TV after producer towards
     // consumer. These are the TVs we're going to actually call computeAt on.
     for (const auto& tv_chain : all_chains) {
+      // When a chain only has two tensors, they must be the producer,
+      // which is an input, and the consumer. There is nothing we need
+      // to do for such chains.
       if (tv_chain.size() > 2) {
         // Make sure we only add once, but we want to add in a determinsitic
         // order
@@ -421,9 +438,6 @@ ComputeAt::ComputeAt(
     : producer_(_producer),
       consumer_(_consumer),
       consumer_position_(_consumer_position) {
-  if (consumer_position_ < 0)
-    consumer_position_ += consumer_->nDims();
-
   TORCH_INTERNAL_ASSERT(
       consumer_position_ >= 0 && consumer_position_ <= consumer_->nDims(),
       "Invalid computeAt axis, received ",

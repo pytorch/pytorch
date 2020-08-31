@@ -262,7 +262,7 @@ TensorIndex::TensorIndex(
 }
 
 Sync::Sync() : Expr(ExprType::Sync) {
-  name_ = FusionGuard::getCurFusion()->registerExpr(this);
+  name_ = FusionGuard::getCurFusion()->registerLoweredExpr(this);
 }
 
 void Scope::insert_before(Expr* ref, Expr* expr) {
@@ -386,8 +386,7 @@ Allocate::Allocate(Val* buffer, MemoryType memory_type, Val* size)
     }
   }
 
-  if ((memory_type_ == MemoryType::Local ||
-       memory_type_ == MemoryType::Shared)) {
+  if (memory_type_ == MemoryType::Local) {
     if (!size_->isConstScalar()) {
       TORCH_INTERNAL_ASSERT(
           false,

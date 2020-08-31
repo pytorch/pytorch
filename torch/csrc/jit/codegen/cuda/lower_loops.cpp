@@ -42,7 +42,7 @@ Expr* LoopNestGenerator::pushAlloc(TensorView* tv) {
         local_dim->isBroadcast()) {
       continue;
     }
-    alloc_dims.push_back(compute_at_dim->extent());
+    alloc_dims.push_back(compute_at_dim->rawExtent());
   }
 
   // Multiply all the dimensions we're going to use for the allocation together
@@ -62,10 +62,22 @@ Expr* LoopNestGenerator::pushAlloc(TensorView* tv) {
   const auto alloc =
       new kir::Allocate(lowered_tv, lowered_tv->getMemoryType(), size);
 
-  if (alloc_loop != nullptr) {
-    alloc_loop->body().insert(0, alloc);
-  } else {
-    lowered_exprs.insert(lowered_exprs.begin(), alloc);
+  // Track Shared Memory Allocation Nodes
+  bool hasDynamicSmemAlloc = false;
+  if (tv->getMemoryType() == MemoryType::Shared) {
+    if (!size->isConstScalar()) {
+      hasDynamicSmemAlloc = true;
+      dynamic_smem_.push_front(alloc);
+    }
+  }
+
+  // Place the allocation
+  if (!hasDynamicSmemAlloc) {
+    if (alloc_loop != nullptr) {
+      alloc_loop->body().insert(0, alloc);
+    } else {
+      lowered_exprs.insert(lowered_exprs.begin(), alloc);
+    }
   }
 
   return alloc;
@@ -656,7 +668,7 @@ void LoopNestGenerator::generate(const std::vector<Expr*>& exprs) {
   FusionGuard fg(fusion_);
 
   // Identify all shared memory TensorViews
-  // Initialize Modified status
+  // Insert into shared_memory map <tv, modify status>
   for (auto v : fusion_->vals()) {
     if (v->getValType().value() == ValType::TensorView) {
       if (v->as<TensorView>()->getMemoryType() == MemoryType::Shared) {
@@ -673,6 +685,11 @@ void LoopNestGenerator::generate(const std::vector<Expr*>& exprs) {
 
   for (auto* expr : reordered) {
     handle(expr);
+  }
+
+  // Insert Dynamic Shared Memory at beginning of kernel
+  for (auto smem_alloc : dynamic_smem_) {
+    lowered_exprs.insert(lowered_exprs.begin(), smem_alloc);
   }
 }
 

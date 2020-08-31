@@ -384,6 +384,11 @@ class TORCH_CUDA_API TensorDomain : public Val {
 
   TensorDomain(const TensorDomain* src, IrCloner* ir_cloner);
 
+  bool operator==(const TensorDomain& other) const;
+  bool operator!=(const TensorDomain& other) const {
+    return !(*this == other);
+  }
+
   std::vector<IterDomain*>::size_type nDims() const {
     return domain_.size();
   }

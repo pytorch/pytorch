@@ -153,6 +153,11 @@ namespace jit {
   _(GPU_FusionCompoundOps)                          \
   _(GPU_FusionCastOps)                              \
   _(GPU_FusionAdvancedComputeAt)                    \
+  _(GPU_FusionComputeAtMultiConsumers)              \
+  _(GPU_FusionComputeAtCommonConsumer1)             \
+  _(GPU_FusionComputeAtCommonConsumer2)             \
+  _(GPU_FusionComputeAtCommonConsumer3)             \
+  _(GPU_FusionComputeAtNoCommonConsumer)            \
   _(GPU_FusionScalarInputs)                         \
   _(GPU_FusionRFactorReplay)                        \
   _(GPU_FusionReduction)                            \
@@ -201,6 +206,9 @@ namespace jit {
   _(GPU_FusionSmemReduce)                           \
   _(GPU_FusionSmemBlockGemm)                        \
   _(GPU_FusionSmemBlockGemmCache)                   \
+  _(GPU_FusionSmemDynamicReductionSymbolic)         \
+  _(GPU_FusionSmemDynamicReductionSymbolicArg)      \
+  _(GPU_FusionSmemDynamicPwiseMulSymbolicArg)       \
   _(GPU_FusionConstCheck)                           \
   _(GPU_FusionSymbolicReduction)                    \
   _(GPU_FusionUnrollWithAlloc)                      \
@@ -216,7 +224,8 @@ namespace jit {
   _(GPU_FusionTraversalOrder7)                      \
   _(GPU_FusionBranches)                             \
   _(GPU_FusionThreadPredicate)                      \
-  _(GPU_FusionLSTMCell)
+  _(GPU_FusionLSTMCell)                             \
+  _(GPU_FusionComputeAtMultiBCast)
 #else
 #define TH_FORALL_TESTS_CUDA(_) \
   _(ArgumentSpec)               \
