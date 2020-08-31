@@ -108,9 +108,6 @@ env
 # macOS dir files
 .DS_Store
 
-# Symbolic files
-tools/shared/cwrap_common.py
-
 # Ninja files
 .ninja_deps
 .ninja_log
