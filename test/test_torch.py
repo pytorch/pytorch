@@ -16194,11 +16194,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         for use_out, row_major, incx, incy, lda_tail in product((False, True), (False, True), (1, 2), (1, 2), (0, 1)):
             _test(use_out, row_major, incx, incy, lda_tail)
 
-    @precisionOverride({torch.double: 1e-8, torch.float: 1e-4, torch.bfloat16: 0.6,
-                        torch.half: 1e-1, torch.cfloat: 1e-4, torch.cdouble: 1e-8})
-    @dtypesIfCUDA(*torch.testing.get_all_complex_dtypes(), *torch.testing.get_all_fp_dtypes(include_bfloat16=False))
-    @dtypes(*torch.testing.get_all_complex_dtypes(), *torch.testing.get_all_fp_dtypes())
-    def test_addmm(self, device, dtype):
+    def _test_addmm(self, M, m1, m2):
+        dtype = M.dtype
         numpy_dtype = dtype
         if dtype in {torch.bfloat16}:
             numpy_dtype = torch.float
@@ -16208,61 +16205,43 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         else:
             alpha = 1.2
             beta = 0.8
+        res1 = torch.addmm(M, m1, m2, alpha=alpha, beta=beta)
+        res2 = torch.full_like(res1, math.nan)
+        torch.addmm(M, m1, m2, alpha=alpha, beta=beta, out=res2)
+        res3 = (beta * M).to(numpy_dtype).cpu().numpy() + alpha * (
+            m1.to(numpy_dtype).cpu().numpy() @ m2.to(numpy_dtype).cpu().numpy())
+        res3 = torch.from_numpy(res3).to(dtype)
+        self.assertEqual(res1, res2)
+        self.assertEqual(res1, res3)
 
-        M = None
-        m1 = None
-        m2 = None
-
-        def run_test():
-            res1 = torch.addmm(M, m1, m2, alpha=alpha, beta=beta)
-            res2 = torch.full_like(res1, math.nan)
-            torch.addmm(M, m1, m2, alpha=alpha, beta=beta, out=res2)
-            res3 = (beta * M).to(numpy_dtype).cpu().numpy() + alpha * (
-                m1.to(numpy_dtype).cpu().numpy() @ m2.to(numpy_dtype).cpu().numpy())
-            res3 = torch.from_numpy(res3).to(dtype)
-            self.assertEqual(res1, res2)
-            self.assertEqual(res1, res3)
-
-
+    @precisionOverride({torch.double: 1e-8, torch.float: 1e-4, torch.bfloat16: 0.6,
+                        torch.half: 1e-1, torch.cfloat: 1e-4, torch.cdouble: 1e-8})
+    @dtypesIfCUDA(*torch.testing.get_all_complex_dtypes(), *torch.testing.get_all_fp_dtypes(include_bfloat16=False))
+    @dtypes(*torch.testing.get_all_complex_dtypes(), *torch.testing.get_all_fp_dtypes())
+    def test_addmm(self, device, dtype):
         M = torch.randn(10, 25).to(device=device, dtype=dtype)
         m1 = torch.randn(10, 50).to(device=device, dtype=dtype)
         m2 = torch.randn(50, 25).to(device=device, dtype=dtype)
-        run_test()
+        self._test_addmm(M, m1, m2)
 
         # Test 0-strided
         M = torch.randn(10, 1).to(device=device, dtype=dtype).expand(10, 25)
         m1 = torch.randn(10, 1).to(device=device, dtype=dtype).expand(10, 50)
         m2 = torch.randn(50, 25).to(device=device, dtype=dtype)
-        run_test()
+        self._test_addmm(M, m1, m2)
 
     @dtypes(torch.float, torch.double)
     @dtypesIfCUDA(*([torch.float, torch.double] +
                     ([] if TEST_WITH_ROCM else torch.testing.get_all_complex_dtypes())))
     @tf32_on_and_off(0.005)
     def test_addmm_sizes(self, device, dtype):
-        numpy_dtype = dtype
-        if dtype in {torch.bfloat16}:
-            numpy_dtype = torch.float
-        if dtype.is_complex:
-            alpha = 1.2 + 0.3j
-            beta = 0.5 + 1.6j
-        else:
-            alpha = 1.2
-            beta = 0.8
         for m in [0, 1, 25]:
             for n in [0, 1, 10]:
                 for k in [0, 1, 8]:
                     M = torch.randn(n, m, device=device, dtype=dtype)
                     m1 = torch.randn(n, k, device=device, dtype=dtype)
                     m2 = torch.randn(k, m, device=device, dtype=dtype)
-                    res1 = torch.addmm(M, m1, m2, alpha=alpha, beta=beta)
-                    res2 = torch.full_like(res1, math.nan)
-                    torch.addmm(M, m1, m2, alpha=alpha, beta=beta, out=res2)
-                    res3 = (beta * M).to(numpy_dtype).cpu().numpy() + alpha * (
-                        m1.to(numpy_dtype).cpu().numpy() @ m2.to(numpy_dtype).cpu().numpy())
-                    res3 = torch.from_numpy(res3).to(dtype)
-                    self.assertEqual(res1, res2)
-                    self.assertEqual(res1, res3)
+                    self._test_addmm(M, m1, m2)
 
     @onlyCPU
     @dtypes(*(torch.testing.get_all_complex_dtypes() + [torch.float, torch.double]))
