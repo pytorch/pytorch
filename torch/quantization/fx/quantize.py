@@ -33,15 +33,7 @@ from .utils import _parent_name
 
 from abc import ABC, abstractmethod
 import copy
-import enum
 import operator
-
-# Quantization type (dynamic quantization, static quantization).
-# Should match the c++ enum in quantization_type.h
-class QuantType(enum.IntEnum):
-    DYNAMIC = 0
-    STATIC = 1
-    QAT = 2
 
 # ------------------------
 # Helper Functions
@@ -59,6 +51,23 @@ def quantize_node(node, activation_post_process):
 
 def quantize(quantizer, node):
     quantize_node(node, quantizer.activation_post_process_map[node.name])
+
+# Returns a function that can get a new attribute name for module with given prefix
+# for example,
+# >> get_new_observer_name = get_new_attr_name_with_prefix('_observer')
+# >> new_name = get_new_observer_name(module)
+# new_name will be an unused attribute name on module, e.g. `_observer_1`
+def get_new_attr_name_with_prefix(prefix):
+    def get_new_attr_name(module):
+        def get_attr_name(i):
+            return prefix + str(i)
+        i = 0
+        attr_name = get_attr_name(i)
+        while hasattr(module, attr_name):
+            i += 1
+            attr_name = get_attr_name(i)
+        return attr_name
+    return get_new_attr_name
 
 # A dictionary for querying the weight index for a given op
 WEIGHT_INDEX_DICT = {
@@ -256,14 +265,14 @@ class ConvRelu(QuantizeHandler):
                 # pack weight
                 weight = load_arg(quantized=True)(self.conv_node.args[1])
                 other_args = load_arg(quantized=False)(self.conv_node.args[2:])
-                prepack_args = [weight] + list(other_args)
+                prepack_args = tuple([weight] + list(other_args))
                 packed_weight = quantizer.quantized_graph.create_node(
                     'call_function', torch.ops.quantized.conv2d_prepack, prepack_args, {})
                 # construct conv input
                 conv_input = load_arg(quantized=True)(self.conv_node.args[0])
                 activation_post_process = quantizer.activation_post_process_map[self.conv_node.name]
                 scale, zero_point, _ = get_qparams(activation_post_process)
-                qconv_args = [conv_input, packed_weight, scale, zero_point]
+                qconv_args = (conv_input, packed_weight, scale, zero_point)
                 kwargs = load_arg(quantized=False)(self.conv_node.kwargs)
                 return quantizer.quantized_graph.create_node(
                     'call_function', torch.ops.quantized.conv2d, qconv_args, kwargs)
@@ -326,12 +335,16 @@ class LinearReLU(QuantizeHandler):
                     linear_out,
                     quantizer.activation_post_process_map[self.linear_node.name])
             else:
+                # TODO: this code can be merged with dynamic linear code
+                # linear args
+                # (x, weight, bias, ...)
                 args = load_arg(quantized=[0, 1])(self.linear_node.args)
                 kwargs = load_arg(quantized=False)(self.linear_node.kwargs)
                 # pack weight
                 weight = load_arg(quantized=True)(self.linear_node.args[1])
                 bias = None
-                other_args = load_arg(quantized=False)(self.linear_node.args[1:])
+                # all args after bias, including bias
+                other_args = load_arg(quantized=False)(self.linear_node.args[2:])
                 if len(self.linear_node.args) > 2:
                     bias = load_arg(quantized=False)(self.linear_node.args[2])
                     other_args = other_args[1:]  # remove the bias argument
@@ -340,7 +353,7 @@ class LinearReLU(QuantizeHandler):
                         'expect bias provided as a keyword argument when it is not a positional argument'
                     bias = kwargs['bias']
                     kwargs.pop('bias')
-                prepack_args = [weight, bias]
+                prepack_args = (weight, bias)
                 packed_weight = quantizer.quantized_graph.create_node(
                     'call_function', torch.ops.quantized.linear_prepack, prepack_args, {})
                 # construct linear input
@@ -348,7 +361,7 @@ class LinearReLU(QuantizeHandler):
                 activation_post_process = \
                     quantizer.activation_post_process_map[self.linear_node.name]
                 scale, zero_point, _ = get_qparams(activation_post_process)
-                qlinear_args = [linear_input, packed_weight, scale, zero_point]
+                qlinear_args = (linear_input, packed_weight, scale, zero_point)
                 return quantizer.quantized_graph.create_node(
                     'call_function', torch.ops.quantized.linear, qlinear_args, kwargs)
 
@@ -383,8 +396,8 @@ class BatchNorm(QuantizeHandler):
             load_arg(quantized=False)(self.bn_node.kwargs))
 
 ARGS_TO_SKIP = {
-    torch.ops.quantized.hardswish: ['inplace'],
-    torch.ops.quantized.instance_norm:
+    torch._ops.ops.quantized.hardswish: ['inplace'],
+    torch._ops.ops.quantized.instance_norm:
     ['running_mean', 'running_var', 'use_input_stats', 'momentum'],
 }
 @register_quant_pattern(torch.nn.ELU)
@@ -570,13 +583,14 @@ class DynamicLinear(QuantizeHandler):
                 return quantizer.quantized_graph.create_node(
                     'call_function', torch.nn.functional.linear, args, kwargs)
             else:
-                # quantize and dequantize weight
-                args = load_arg(quantized=[1])(self.linear_node.args)
-                kwargs = load_arg(quantized=False)(self.linear_node.kwargs)
-                # pack weight
-                weight = load_arg(quantized=True)(self.linear_node.args[1])
+                # linear args:
+                # (x, weight, bias)
+                # quantize weight
+                quantized_weight = load_arg(quantized=True)(self.linear_node.args[1])
                 bias = None
-                other_args = load_arg(quantized=False)(self.linear_node.args[1:])
+                # all args after bias, including bias
+                other_args = load_arg(quantized=False)(self.linear_node.args[2:])
+                kwargs = load_arg(quantized=False)(self.linear_node.kwargs)
                 if len(self.linear_node.args) > 2:
                     bias = load_arg(quantized=False)(self.linear_node.args[2])
                     other_args = other_args[1:]  # remove the bias argument
@@ -585,14 +599,22 @@ class DynamicLinear(QuantizeHandler):
                         'expect bias provided as a keyword argument when it is not a positional argument'
                     bias = kwargs['bias']
                     kwargs.pop('bias')
-                prepack_args = [weight, bias]
+                prepack_args = (quantized_weight, bias)
+                # pack weight
                 packed_weight = quantizer.quantized_graph.create_node(
                     'call_function', torch.ops.quantized.linear_prepack, prepack_args, {})
                 # construct dynamic linear input
-                linear_input = load_arg(quantized=False)(self.linear_node.args[0])
-                qdynamic_linear_args = [linear_input, packed_weight]
+                non_quantized_input = load_arg(quantized=False)(self.linear_node.args[0])
+                qdynamic_linear_args = (non_quantized_input, packed_weight)
                 return quantizer.quantized_graph.create_node(
                     'call_function', torch.ops.quantized.linear_dynamic, qdynamic_linear_args, kwargs)
+
+
+# weight prepacking ops
+WEIGHT_PREPACK_OPS = {
+    torch._ops.ops.quantized.linear_prepack,
+    torch._ops.ops.quantized.conv2d_prepack,
+}
 
 class Quantizer:
     def __init__(self):
@@ -621,15 +643,16 @@ class Quantizer:
             elif node.op == 'call_module':
                 self.qconfig_map[node.name] = get_qconfig(self.modules[node.target])
 
-    def _prepare(self, model, qconfig_dict, inplace, quant_type):
+    def _prepare(self, model, qconfig_dict, inplace, is_dynamic_quant):
+        assert not inplace, 'inplace prepare is not supported yet'
         input_root = model.root
         if not inplace:
             input_root = copy.deepcopy(input_root)
 
         input_graph = model.graph
-        self.quant_type = quant_type
+        self.is_dynamic_quant = is_dynamic_quant
         # TODO: allow user specified patterns
-        if self.quant_type == QuantType.DYNAMIC:
+        if self.is_dynamic_quant:
             self.patterns = get_dynamic_quant_patterns()
         else:
             self.patterns = get_quant_patterns()
@@ -664,16 +687,7 @@ class Quantizer:
             if node.name in observed:
                 continue
 
-            def get_new_observer_name(parent_module):
-                i = 0
-
-                def get_observer_name(i):
-                    return 'activation_post_process_' + str(i)
-                observer_name = get_observer_name(i)
-                while hasattr(parent_module, observer_name):
-                    i += 1
-                    observer_name = get_observer_name(i)
-                return observer_name
+            get_new_observer_name = get_new_attr_name_with_prefix('activation_post_process_')
             root_node, _, obj, qconfig = matches.get(node.name, (None, None, None, None))
             if root_node is None:
                 env[node.name] = observed_graph.node_copy(node, load_arg)
@@ -688,7 +702,7 @@ class Quantizer:
                     observed.add(node.name)
 
                 # don't need to insert observer for output in dynamic quantization
-                if self.quant_type == QuantType.DYNAMIC:
+                if self.is_dynamic_quant:
                     continue
 
                 if isinstance(obj, CopyNode):
@@ -725,22 +739,44 @@ class Quantizer:
                     observed.add(node.name)
         observed_graph.output(load_arg(input_graph.result))
 
-        return GraphModule(input_root, observed_graph)
+        observed = GraphModule(input_root, observed_graph)
+        self.save_state(observed)
+        return observed
+
+    def save_state(self, observed):
+        observed._activation_post_process_map = self.activation_post_process_map
+        observed._patterns = self.patterns
+        observed._qconfig_map = self.qconfig_map
+
+    def restore_state(self, observed):
+        err_msg = 'please make sure the model is produced by prepare'
+        assert hasattr(observed, '_activation_post_process_map'), 'did not found ' + \
+            '_activation_post_process attribute ' + err_msg
+        assert hasattr(observed, '_patterns'), 'did not found ' + \
+            '_patterns attribute ' + err_msg
+        assert hasattr(observed, '_qconfig_map'), 'did not found ' + \
+            '_qconfig_map attribute ' + err_msg
+        self.activation_post_process_map = observed._activation_post_process_map
+        self.patterns = observed._patterns
+        self.qconfig_map = observed._qconfig_map
 
     def prepare(self, model, qconfig_dict, inplace=False):
-        return self._prepare(model, qconfig_dict, inplace, quant_type=QuantType.STATIC)
+        return self._prepare(model, qconfig_dict, inplace, is_dynamic_quant=False)
 
     def prepare_dynamic(self, model, qconfig_dict, inplace=False):
-        return self._prepare(model, qconfig_dict, inplace, quant_type=QuantType.DYNAMIC)
+        return self._prepare(model, qconfig_dict, inplace, is_dynamic_quant=True)
 
-    def convert(self, observed, inplace=False, debug=False):
-        assert self.activation_post_process_map is not None
+    def _convert(self, observed, inplace=False, debug=False, is_dynamic_quant=False):
+        assert not inplace, 'inplace convert is not supported yet'
+        self.restore_state(observed)
+        self.is_dynamic_quant = is_dynamic_quant
         # move to cpu since we only have quantized cpu kernels
         observed.eval().cpu()
         observed_root = observed.root
         observed_graph = observed.graph
         if not inplace:
             observed_root = copy.deepcopy(observed_root)
+
         self.modules = dict(observed_root.named_modules())
 
         matches = self._find_matches(observed.graph, self.modules, self.patterns)
@@ -833,7 +869,8 @@ class Quantizer:
                         'CopyNode of type ' + node.op + ' is not handled'
                     quantized = is_quantized(node.args[0])
 
-                if self.quant_type == QuantType.DYNAMIC:
+                # output of dynamic quantization is not quantized
+                if self.is_dynamic_quant:
                     quantized = False
 
                 if quantized:
@@ -857,11 +894,21 @@ class Quantizer:
                     parent_name = ''
 
                     scale, zero_point = observer_module.calculate_qparams()
-                    # TODO: per channel
-                    scale = float(scale)
-                    zero_point = int(zero_point)
                     dtype = observer_module.dtype
-                    qparams = {'_scale_': scale, '_zero_point_': zero_point, '_dtype_': dtype}
+
+                    def is_per_channel(qscheme):
+                        return qscheme == torch.per_channel_affine or \
+                            qscheme == torch.per_channel_symmetric
+
+                    if is_per_channel(observer_module.qscheme):
+                        ch_axis = int(observer_module.ch_axis)
+                        qparams = {'_scale_': scale, '_zero_point_': zero_point, '_axis': ch_axis, '_dtype_': dtype}
+                        quantize_op = torch.quantize_per_channel
+                    else:
+                        scale = float(scale)
+                        zero_point = int(zero_point)
+                        qparams = {'_scale_': scale, '_zero_point_': zero_point, '_dtype_': dtype}
+                        quantize_op = torch.quantize_per_tensor
                     i = 0
 
                     def noattr(module, qparams, i):
@@ -884,8 +931,8 @@ class Quantizer:
                         qparam_full_path = key + str(i)
                         if parent_name:
                             qparam_full_path = parent_name + '.' + qparam_full_path
-                        inputs.append(self.quantized_graph.get_param(qparam_full_path))
-                    quant_env[node.name] = self.quantized_graph.create_node('call_function', torch.quantize_per_tensor, inputs, {})
+                        inputs.append(self.quantized_graph.create_node('get_param', qparam_full_path))
+                    quant_env[node.name] = self.quantized_graph.create_node('call_function', quantize_op, tuple(inputs), {})
                     continue
             # dequantize inputs for the node that are not quantized
             env[node.name] = self.quantized_graph.node_copy(node, load_non_quantized)
@@ -899,6 +946,84 @@ class Quantizer:
         for n in to_be_removed:
             delattr(observed_root, n)
         return GraphModule(observed_root, self.quantized_graph)
+
+    # Trace back from the weight node util we hit getattr, reconstruct the graph module
+    # with the traced nodes and run the graph module to pack the weight. then replace
+    # the original chain of ops with the packed weight.
+    def _fold_weight(self, quantized):
+        def collect_nodes_to_fold(node):
+            nodes = [node]
+            frontier = [node]
+            while frontier:
+                node = frontier.pop()
+                all_args = list(node.args) + list(node.kwargs.values())
+                for arg in all_args:
+                    if not isinstance(arg, Node):
+                        continue
+                    if arg.op == 'placeholder':
+                        # hit input, can't fold in this case
+                        return None
+                    nodes.append(arg)
+                    if not (arg.op == 'call_function' and arg.target == getattr):
+                        frontier.append(arg)
+            return nodes
+
+        packed_weights = dict()
+        # map from folded node name to the prepacked weight name
+        folded_nodes = dict()
+        # get packed weights
+        for node in quantized.graph.nodes:
+            if node.op == 'call_function' and node.target in WEIGHT_PREPACK_OPS:
+                nodes_to_fold = collect_nodes_to_fold(node)
+                if nodes_to_fold is not None:
+                    # since we traced back from weight node to getattrr
+                    nodes_to_fold.reverse()
+                    prepacking_graph = Graph()
+                    env = {}
+
+                    def load_arg(a):
+                        return map_arg(a, lambda node: env[node.name])
+                    for node_to_fold in nodes_to_fold:
+                        env[node_to_fold.name] = prepacking_graph.node_copy(node_to_fold, load_arg)
+                        folded_nodes[node_to_fold.name] = node
+                    prepacking_graph.output(load_arg(node.name))
+                    prepacking_module = GraphModule(quantized.root, prepacking_graph)
+                    packed_weight = prepacking_module()
+                    packed_weights[node.name] = packed_weight
+
+        # remove folded nodes and replace the prepacking node with getattr
+        folded_graph = Graph()
+        env = {}
+
+        def load_arg(a):
+            return map_arg(a, lambda node: env[node.name])
+        get_new_packed_weight_name = get_new_attr_name_with_prefix('_fx_pass_packed_weight_')
+        quantized_root = quantized.root
+        quantized_graph = quantized.graph
+        for node in quantized_graph.nodes:
+            prepack_node = folded_nodes.get(node.name, None)
+            if prepack_node is node:
+                packed_weight = packed_weights[node.name]
+                # add a prepacked attribute to root
+                packed_weight_name = get_new_packed_weight_name(quantized_root)
+                setattr(quantized_root, packed_weight_name, packed_weight)
+                # replace prepack node with a getattr node
+                env[node.name] = folded_graph.create_node(
+                    'get_param', packed_weight_name, (), {})
+            elif prepack_node is not None:
+                # remove the foled node
+                continue
+            else:
+                # copy other nodes
+                env[node.name] = folded_graph.node_copy(node, load_arg)
+        folded_graph.output(load_arg(quantized_graph.result))
+        return GraphModule(quantized_root, folded_graph)
+
+    def convert(self, observed, inplace=False, debug=False, is_dynamic=False):
+        quantized = self._convert(observed, inplace, debug, is_dynamic)
+        if not debug:
+            quantized = self._fold_weight(quantized)
+        return quantized
 
     def _find_matches(self, graph, modules, patterns):
         match_map = {}  # node name -> (root_node, match_value?)
@@ -941,7 +1066,7 @@ class Quantizer:
                     for i, node_arg in enumerate(node.args):
                         if arg is node_arg and i in WEIGHT_INDEX_DICT[node.target]:
                             is_weight = True
-                if self.quant_type != QuantType.DYNAMIC or is_weight:
+                if (not self.is_dynamic_quant) or is_weight:
                     # overwrite previous quant config
                     quants[arg.name] = (DefaultQuant(self, arg), qconfig, is_weight)
             return visit_arg

@@ -45,15 +45,6 @@ Tensor toLegacyFwGrad(const c10::optional<Tensor>& t) {
   return t.has_value() ? t->fw_grad() : Tensor();
 }
 
-bool any_variable_defined(variable_list& variables) {
-  for (auto variable : variables) {
-    if (variable.defined()) {
-      return true;
-    }
-  }
-  return false;
-}
-
 void copy_range(variable_list& out, IndexRange range, const Tensor & t) {
   AT_ASSERT(range.second <= out.size());
   AT_ASSERTM(range.second - range.first == 1, "inconsistent range for Tensor output");
@@ -102,6 +93,30 @@ static Tensor wrapped_scalar_tensor(Scalar scalar) {
   auto tensor = scalar_to_tensor(scalar);
   tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
   return tensor;
+}
+
+static Tensor restore_reduced_dims(const Tensor &output, IntArrayRef dims, bool keepdim) {
+  if (keepdim) {
+    return output;
+  }
+  int64_t total_dims = output.dim() + dims.size();
+  std::vector<int64_t> target_shape(total_dims, 0);
+  for (int64_t i : dims) {
+    if (i < 0) {
+      i = total_dims + i;
+    }
+    target_shape[i] = 1;
+  }
+  int64_t j = 0;
+  for (int64_t i : output.sizes()) {
+    while (target_shape[j] > 0) j++;
+    target_shape[j++] = i;
+  }
+  return output.reshape(target_shape);
+}
+
+static Tensor scale_grad_by_count(const Tensor &grad, const Tensor &mask, IntArrayRef dims) {
+  return (grad / mask.sum(dims, true)) * mask;
 }
 
 std::tuple<Tensor, Tensor> _euclidean_dist_backward(const Tensor & grad, const Tensor & x1, const Tensor & x2, const Tensor & res) {
@@ -2777,6 +2792,15 @@ Tensor _cudnn_ctc_loss_backward(const Tensor& grad_out, const Tensor& loss, cons
   } else {
     return raw_grad * grad_out.unsqueeze(0).unsqueeze(2);
   }
+}
+
+bool any_variable_defined(variable_list& variables) {
+  for (auto variable : variables) {
+    if (variable.defined()) {
+      return true;
+    }
+  }
+  return false;
 }
 
 } // namespace details
