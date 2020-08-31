@@ -106,6 +106,30 @@ static Tensor wrapped_scalar_tensor(Scalar scalar) {
   return tensor;
 }
 
+static Tensor restore_reduced_dims(const Tensor &output, IntArrayRef dims, bool keepdim) {
+  if (keepdim) {
+    return output;
+  }
+  int64_t total_dims = output.dim() + dims.size();
+  std::vector<int64_t> target_shape(total_dims, 0);
+  for (int64_t i : dims) {
+    if (i < 0) {
+      i = total_dims + i;
+    }
+    target_shape[i] = 1;
+  }
+  int64_t j = 0;
+  for (int64_t i : output.sizes()) {
+    while (target_shape[j] > 0) j++;
+    target_shape[j++] = i;
+  }
+  return output.reshape(target_shape);
+}
+
+static Tensor scale_grad_by_count(const Tensor &grad, const Tensor &mask, IntArrayRef dims) {
+  return (grad / mask.sum(dims, true)) * mask;
+}
+
 std::tuple<Tensor, Tensor> _euclidean_dist_backward(const Tensor & grad, const Tensor & x1, const Tensor & x2, const Tensor & res) {
   if (!grad.defined()) {
     return std::tuple<Tensor, Tensor>(Tensor(), Tensor());
@@ -1994,68 +2018,127 @@ Tensor symeig_backward(const std::vector<torch::autograd::Variable> &grads, cons
   return result.add(result.transpose(-2, -1)).mul_(0.5);
 }
 
-// We refer Walter, S.F and Lehmann, L., Algorithmic Differentiation of Linear
-// Algebra Functions with Application in Optimum Experimental Design (Extended Version)
-// The derivative for the QR decomposition is adapted from Eq. 42 of the
-// above reference.
+
+
 Tensor qr_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
-                   bool some, const Tensor& Q, const Tensor& R) {
-  auto grad_Q = grads[0];
-  auto grad_R = grads[1];
-  TORCH_CHECK(R.size(-2) == R.size(-1),
-              "The derivative when R is non-square is not implemented. ");
+                   bool some, const Tensor& q, const Tensor& r){
+  auto square_deep_case_backward = [](const Tensor& grad_Q,
+                                      const Tensor& grad_R,
+                                      const Tensor& A,
+                                      const Tensor& Q,
+                                      const Tensor& R) -> Tensor {
+    // For square and deep (tall) case we refer
+    // Walter, S.F and Lehmann, L., Algorithmic Differentiation of Linear
+    // Algebra Functions with Application in Optimum Experimental Design
+    // (Extended Version) The derivative for the QR decomposition is adapted
+    // from Eq. 42 of the above reference.
 
-  // Compute R (R')^{T}
-  Tensor R_term;
-  if (grad_R.defined()) {
-    R_term = at::matmul(R, grad_R.transpose(-2, -1));
-  } else {
-    // R is ... x N x N, grad_R is ... x N x N and grad_R.T is ... x N x N
-    R_term = at::zeros_like(R, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  }
-
-  // Compute Q^{T} Q'
-  Tensor Q_term;
-  if (grad_Q.defined()) {
-    Q_term = at::matmul(Q.transpose(-2, -1), grad_Q);
-  } else {
-    // Q is ... x M x N, Q.T is ... x N x M and grad_Q is ... x M x N
-    Q_term = at::zeros_like(R, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  }
-
-  // We want to compute: (rhs_solve_1 . R^{-T})
-  // Note that (rhs_solve_1 . R^{-T}) = (R^{-1} . rhs_solve_1^{T})^{T}
-  // Since R is upper triangular, we can do this using
-  // triangular_solve(rhs_solve_1^{T}, R)^{T}
-  auto rhs_solve_1 = R_term - R_term.transpose(-2, -1) + Q_term - Q_term.transpose(-2, -1);
-  rhs_solve_1 = at::tril(rhs_solve_1, /*k=*/-1);
-  Tensor solve_soln_1;
-  std::tie(solve_soln_1, std::ignore) = at::triangular_solve(rhs_solve_1.transpose(-2, -1), R,
-                                                             /*upper=*/true, /*transpose=*/false,
-                                                             /*unitriangular=*/false);
-  Tensor grad_A;
-  if (grad_R.defined()) {
-    grad_A = at::matmul(Q, solve_soln_1.transpose(-2, -1) + grad_R);
-  } else {
-    grad_A = at::matmul(Q, solve_soln_1.transpose(-2, -1));
-  }
-
-  // Successive computations involve computation of QQ^{T} which is identity when A is square
-  if (self.size(-1) != self.size(-2)) {
-    Tensor rhs_solve_2;
-    // We use the same trick from above for this computation
-    if (grad_Q.defined()) {
-      rhs_solve_2 = grad_Q - at::matmul(Q, Q_term);
+    // Compute R (R')^{T}
+    Tensor R_term;
+    if (grad_R.defined()) {
+      R_term = at::matmul(R, grad_R.transpose(-2, -1));
     } else {
-      rhs_solve_2 = -at::matmul(Q, Q_term);
+      // R is ... x N x N, grad_R is ... x N x N and grad_R.T is ... x N x N
+      R_term = at::zeros_like(R, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     }
-    Tensor solve_soln_2;
-    std::tie(solve_soln_2, std::ignore) = at::triangular_solve(rhs_solve_2.transpose(-2, -1), R,
+
+    // Compute Q^{T} Q'
+    Tensor Q_term;
+    if (grad_Q.defined()) {
+      Q_term = at::matmul(Q.transpose(-2, -1), grad_Q);
+    } else {
+      // Q is ... x M x N, Q.T is ... x N x M and grad_Q is ... x M x N
+      Q_term = at::zeros_like(R, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    }
+
+    // We want to compute: (rhs_solve_1 . R^{-T})
+    // Note that (rhs_solve_1 . R^{-T}) = (R^{-1} . rhs_solve_1^{T})^{T}
+    // Since R is upper triangular, we can do this using
+    // triangular_solve(rhs_solve_1^{T}, R)^{T}
+    auto rhs_solve_1 =
+        R_term - R_term.transpose(-2, -1) + Q_term - Q_term.transpose(-2, -1);
+    rhs_solve_1 = at::tril(rhs_solve_1, /*k=*/-1);
+    Tensor solve_soln_1;
+    std::tie(solve_soln_1, std::ignore) = at::triangular_solve(
+        rhs_solve_1.transpose(-2, -1),
+        R,
+        /*upper=*/true,
+        /*transpose=*/false,
+        /*unitriangular=*/false);
+    Tensor grad_A;
+    if (grad_R.defined()) {
+      grad_A = at::matmul(Q, solve_soln_1.transpose(-2, -1) + grad_R);
+    } else {
+      grad_A = at::matmul(Q, solve_soln_1.transpose(-2, -1));
+    }
+
+    // Successive computations involve computation of QQ^{T} which is identity when A is square
+    if (A.size(-1) != A.size(-2)) {
+      Tensor rhs_solve_2;
+      // We use the same trick from above for this computation
+      if (grad_Q.defined()) {
+        rhs_solve_2 = grad_Q - at::matmul(Q, Q_term);
+      } else {
+        rhs_solve_2 = -at::matmul(Q, Q_term);
+      }
+      Tensor solve_soln_2;
+      std::tie(solve_soln_2, std::ignore) = at::triangular_solve(rhs_solve_2.transpose(-2, -1), R,
                                                                /*upper=*/true, /*transpose=*/false,
                                                                /*unitriangular=*/false);
-    grad_A.add_(solve_soln_2.transpose(-2, -1));
+      grad_A.add_(solve_soln_2.transpose(-2, -1));
+    }
+    return grad_A;
+  };
+
+  auto m = self.size(-2);
+  auto n = self.size(-1);
+
+  TORCH_CHECK(
+      ((m <= n && (!some)) || some),
+      "The derivative is not implemented when nrows > ncols and complete QR. ");
+
+  auto grad_Q = grads[0];
+  auto grad_R = grads[1];
+
+ if (m >= n) {
+    return square_deep_case_backward(grad_Q, grad_R, self, q, r);
+  } else {
+    // For wide (m < n) input matrices A,  partition A = [X|Y] and R = [U|V]
+    // X and U are square full rank matrices. We will partition grads,
+    // grad_R = [grad_U | grad_V] and grad_A = [grad_X | grad_Y].
+    // To obtain grad_X we reuse the gradient formula from the square case.
+    // Formulae: grad_X = square_case_grad(grad_Q_prime, grad_U, Q, U),
+    // where grad_Q_prime = grad_Q + Y @ grad_V.T
+    // and grad_Y = Q @ grad_V.
+    // Then concatenate grads to get grad_A = [grad_X | grad_Y].
+
+    auto Y = self.narrow(-1, m, n - m);
+    auto U = r.narrow(-1, 0, m);
+    Tensor grad_Y, grad_X, grad_V, grad_Q_prime;
+
+    if (grad_R.defined()) {
+      grad_V = grad_R.narrow(-1, m, n - m);
+      // reuse grad_R to store grad_U
+      grad_R = grad_R.narrow(-1, 0, m);
+      // grad_Q_prime starts with the value of Y @ grad_V.T
+      grad_Q_prime = at::matmul(Y, grad_V.transpose(-2, -1));
+    } else {
+      // when grad_R is not defined then grad_V and grad_Q_prime
+      // get initialized with zeros
+      grad_V = at::zeros_like(Y, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+      grad_Q_prime = at::zeros_like(q, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    }
+
+    if (grad_Q.defined()) {
+      // add the grad_Q term into grad_Q_prime when defined o/w is 0
+      grad_Q_prime = grad_Q_prime + grad_Q;
+    }
+    // Calculate grad_X using the helper. Grad_R contains the grad_U value
+    grad_X = square_deep_case_backward(grad_Q_prime, grad_R, self, q, U);
+    grad_Y = at::matmul(q, grad_V);
+    // Concatenate grad_X and grad_Y to get grad_A.
+    return at::cat({grad_X, grad_Y}, -1);
   }
-  return grad_A;
 }
 
 // Invertible case is derived from Jacobi's formula, and also can be found at:

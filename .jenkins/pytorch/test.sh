@@ -13,7 +13,7 @@ echo "Testing pytorch"
 
 if [ -n "${IN_CIRCLECI}" ]; then
   # TODO move this to docker
-  pip_install unittest-xml-reporting
+  pip_install unittest-xml-reporting coverage
 
   if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda10.1-* ]]; then
     # TODO: move this to Docker
@@ -30,6 +30,9 @@ if [ -n "${IN_CIRCLECI}" ]; then
   if [[ "$BUILD_ENVIRONMENT" == *-slow-* ]]; then
     export PYTORCH_TEST_WITH_SLOW=1
     export PYTORCH_TEST_SKIP_FAST=1
+  fi
+  if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
+    export PYTORCH_COLLECT_COVERAGE=1
   fi
 fi
 
@@ -118,7 +121,7 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX2-* ]]; then
   export ATEN_CPU_CAPABILITY=avx
 fi
 
-if [ -n "$CIRCLE_PULL_REQUEST" ]; then
+if ([ -n "$CIRCLE_PULL_REQUEST" ] && [[ "$BUILD_ENVIRONMENT" != *coverage* ]]); then
   DETERMINE_FROM=$(mktemp)
   file_diff_from_base "$DETERMINE_FROM"
 fi
@@ -397,4 +400,10 @@ else
   test_distributed
   test_benchmarks
   test_rpc
+  if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
+    pushd test
+    echo "Generating XML coverage report"
+    time python -mcoverage xml
+    popd
+  fi
 fi
