@@ -29,7 +29,7 @@ VALGRIND=${VALGRIND:=ON}
 vec256_tests=$(find . -maxdepth 1 -executable -name 'vec256_test*')
 for vec256_exec in $vec256_tests
 do
-  echo $vec256_exec
+  $vec256_exec
 done
 
 exit
