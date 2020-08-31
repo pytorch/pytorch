@@ -43,6 +43,10 @@ def get_pytorch_folder() -> str:
     return os.environ.get("PYTORCH_FOLDER", SCRIPT_FOLDER)
 
 
+def get_cov_type() -> str:
+    return os.environ.get("COMPILER_TYPE", "GCC")
+
+
 def clean_up_gcda() -> None:
     gcda_files = get_gcda_files()
     for item in gcda_files:
