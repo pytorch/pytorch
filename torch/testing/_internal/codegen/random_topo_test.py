@@ -329,8 +329,8 @@ def runTest(seed, args):
         raise Exception("cuda fuser gives wrong results, repro by running:\n"
                         "\t{0}".format(reproString(seed, args))) from err
     except Exception as err:
-        raise Exception("something in cuda fuser went wrong {0}\n\trepro by running:\n\t{1}".format(
-            str(err), reproString(seed, args))) from None
+        raise Exception(f"something in cuda fuser went wrong, repro by running:\n"
+                        "\t{0}".format(reproString(seed, args))) from err
 
 
 def parse_args():
