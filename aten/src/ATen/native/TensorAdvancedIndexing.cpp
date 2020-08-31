@@ -54,6 +54,7 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/MemoryOverlap.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/Copy.h>
@@ -352,6 +353,10 @@ Tensor& index_add_cpu_(Tensor & self, int64_t dim, const Tensor & index, const T
               "index_add_(): Indexing dim ", dim, " is out of bounds of tensor");
   TORCH_CHECK(numel == (source.dim() == 0 ? 1 : source.size(dim)),
               "index_add_(): Number of indices should be equal to self.size(dim)");
+
+  at::assert_no_internal_overlap(self);
+  at::assert_no_partial_overlap(self, index);
+  at::assert_no_partial_overlap(self, source);
 
   auto index_contig = index.contiguous();
   auto index_data = index_contig.data_ptr<int64_t>();

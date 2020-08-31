@@ -418,9 +418,11 @@ view of a storage and defines numeric operations on it.
    .. automethod:: matrix_power
    .. automethod:: matrix_exp
    .. automethod:: max
+   .. automethod:: maximum
    .. automethod:: mean
    .. automethod:: median
    .. automethod:: min
+   .. automethod:: minimum
    .. automethod:: mm
    .. automethod:: mode
    .. automethod:: movedim
@@ -438,6 +440,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: ne_
    .. automethod:: neg
    .. automethod:: neg_
+   .. automethod:: negative
+   .. automethod:: negative_
    .. automethod:: nelement
    .. automethod:: nextafter
    .. automethod:: nextafter_
@@ -514,6 +518,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: sinh_
    .. automethod:: asinh
    .. automethod:: asinh_
+   .. automethod:: arcsinh
+   .. automethod:: arcsinh_
    .. automethod:: size
    .. automethod:: slogdet
    .. automethod:: solve
@@ -535,6 +541,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: stride
    .. automethod:: sub
    .. automethod:: sub_
+   .. automethod:: subtract
+   .. automethod:: subtract_
    .. automethod:: sum
    .. automethod:: sum_to_size
    .. automethod:: svd
@@ -550,6 +558,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: tanh_
    .. automethod:: atanh
    .. automethod:: atanh_
+   .. automethod:: arctanh
+   .. automethod:: arctanh_
    .. automethod:: tolist
    .. automethod:: topk
    .. automethod:: to_sparse

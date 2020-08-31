@@ -23,8 +23,6 @@ _(aten, _abs) \
 _(aten, _addmv) \
 _(aten, _addr) \
 _(aten, _arange) \
-_(aten, _asinh) \
-_(aten, _atanh) \
 _(aten, _argmax) \
 _(aten, _argmin) \
 _(aten, _baddbmm_mkl) \
@@ -519,7 +517,6 @@ _(aten, native_resize_as) \
 _(aten, native_tensor) \
 _(aten, native_zero) \
 _(aten, ne) \
-_(aten, neg) \
 _(aten, nextafter) \
 _(aten, bitwise_and) \
 _(aten, bitwise_not) \
@@ -657,8 +654,6 @@ _(aten, stft) \
 _(aten, storage_offset) \
 _(aten, stride) \
 _(aten, strides) \
-_(aten, sub) \
-_(aten, sub_) \
 _(aten, rsub) \
 _(aten, sum) \
 _(aten, sum_to_size) \
@@ -904,12 +899,14 @@ _(attr, max_val) \
 _(attr, max_values) \
 _(attr, maximum_indices) \
 _(attr, maxnorm) \
+_(attr, maximum) \
 _(attr, mean) \
 _(attr, median) \
 _(attr, min) \
 _(attr, min_indices) \
 _(attr, min_val) \
 _(attr, minlength) \
+_(attr, minimum) \
 _(attr, mode) \
 _(attr, momentum) \
 _(attr, n) \
