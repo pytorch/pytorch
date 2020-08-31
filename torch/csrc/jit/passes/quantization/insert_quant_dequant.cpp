@@ -392,9 +392,10 @@ void insertQuantizationOps(
     }
     return;
   }
-  TORCH_CHECK(qparam_names.size() != 0,
-              "Unexpected number of qparams, please make sure PlaceHolder "
-              "is configured correctly");
+  TORCH_CHECK(
+      qparam_names.size() != 0,
+      "Unexpected number of qparams, please make sure PlaceHolder "
+      "is configured correctly");
 
   if (quant_type == QuantType::DYNAMIC) {
     if (getObserverDtype(module, observer_out) == at::ScalarType::Half) {
