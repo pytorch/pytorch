@@ -19671,15 +19671,15 @@ def generate_test_function(cls,
             self.assertEqual(cpu_result, cpu_function_result, atol=precision, rtol=0)
             self.assertEqual(device_result, device_function_result, atol=precision, rtol=0)
 
-        # check method matches with function(out)
-        if test_out:
-            bad_value = math.nan if dtype.is_floating_point or dtype.is_complex else 666
-            cpu_out = torch.full_like(cpu_result, bad_value)
-            device_out = torch.full_like(device_result, bad_value)
-            getattr(torch, op_str)(*cpu_args, out=cpu_out)
-            getattr(torch, op_str)(*device_args, out=device_out)
-            self.assertEqual(cpu_result, cpu_out, atol=precision, rtol=0)
-            self.assertEqual(device_result, device_out, atol=precision, rtol=0)
+            # check method matches with function(out)
+            if test_out:
+                bad_value = math.nan if dtype.is_floating_point or dtype.is_complex else 666
+                cpu_out = torch.full_like(cpu_result, bad_value)
+                device_out = torch.full_like(device_result, bad_value)
+                getattr(torch, op_str)(*cpu_args, out=cpu_out)
+                getattr(torch, op_str)(*device_args, out=device_out)
+                self.assertEqual(cpu_result, cpu_out, atol=precision, rtol=0)
+                self.assertEqual(device_result, device_out, atol=precision, rtol=0)
 
     test_name = "test_" + op_str + subtest_str
     assert not hasattr(cls, test_name), "{0} already in TestDevicePrecision".format(test_name)
