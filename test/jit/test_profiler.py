@@ -86,3 +86,20 @@ class TestProfiler(JitTestCase):
 
         # other outputs should not be specialized
         FileCheck().check("Tensor = prim::If").run(g)
+
+    def test_aliasing_merge(self):
+        @torch.jit.script
+        def foo(a, b):
+            c = a * b
+            d = c * b
+            d.add_(b)
+            e = d * b
+            return d + e
+
+        x = torch.ones(1)
+        y = torch.ones(1)
+        foo(x, y)
+        b = foo(x, y)
+        g = torch.jit.last_executed_optimized_graph()
+        self.assertEqual(len(list(g.findAllNodes("prim::TypeCheck"))), 2)
+        FileCheck().check("TensorExpr").check("aten::add_").check("TensorExpr").run(g)
