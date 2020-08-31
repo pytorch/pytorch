@@ -161,10 +161,16 @@ class Reducer {
     // Views into contents for each grad.  Each view will be created with
     // layout (sizes + strides) matching the grad's expected layout
     // ("Gradient Layout Contract" in torch/csrc/autograd/AccumulateGrad.h).
-    // grad.copy_(bucket_views[i]) and
-    // bucket_views[i].copy_(grad)
+    // `bucket_views_in[i].copy_(grad)` and
+    // `grad.copy_(bucket_views_out[i])`
     // provide convenient ways to move grad data in/out of contents.
-    std::vector<at::Tensor> bucket_views;
+    // The reason we keep to states for bucket_views is that if DDP
+    // communication hook was registered, `bucket_views_out` could be
+    // re-initialized with the value of hook's `future_work`. We still need to
+    // keep a separate view reference to replica's original contents for
+    // `bucket_views_in[i].copy_(grad)` call.
+    std::vector<at::Tensor> bucket_views_in;
+    std::vector<at::Tensor> bucket_views_out;
 
     // Variables that contribute to this bucket replica. Use refcounted value
     // here so that we can easily unflatten the bucket contents into the
@@ -187,13 +193,21 @@ class Reducer {
   };
 
   // This function is called inside `initialize_buckets` and
-  // `finalize_backward`. The function call in `initialize_bucket` creates views
-  // into the contents tensor for each variable's grad. Views serve as entry
-  // points to copy_ each grad's data in/out of the flat contents tensor. The
-  // function call in `finalize_backward` happens only if DDP communication hook
-  // was registered to recrate views with the result of `future_work`. Before
-  // `finalize_backward` call, views must be cleared.
-  void initialize_bucketviews(BucketReplica& replica, at::Tensor& contents);
+  // `finalize_backward`. The function call in `initialize_bucket` creates both
+  // views_in and views_out into the contents tensor for each variable's grad.
+  // Views serve as entry points to copy_ each grad's data in/out of the flat
+  // contents tensor. The function call in `finalize_backward` happens only if
+  // DDP communication hook was registered to recrate just views_out with the
+  // result of `future_work`. If called from `finalize_backward`,
+  // `initialize_bucket_views` will not modify `bucket_views_in`. This will keep
+  // `bucket_views_in` referring to replica's contents and
+  // `bucket_view_in.copy_(grad)` call inside reducer's
+  // `mark_variable_ready_dense` will work as expected. Note that before the
+  // call in `finalize_backward`, views_out must be cleared.
+  void initialize_bucket_views(
+      BucketReplica& replica,
+      at::Tensor& contents,
+      bool populate_bucket_views_in);
 
   // A bucket holds N bucket replicas (1 per model replica).
   //
