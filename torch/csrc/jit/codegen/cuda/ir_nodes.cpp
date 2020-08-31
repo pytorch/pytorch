@@ -632,6 +632,12 @@ bool TensorDomain::hasGridReduction() const {
   });
 }
 
+bool TensorDomain::hasBlockBroadcast() const {
+  return std::any_of(domain_.begin(), domain_.end(), [](IterDomain* id) {
+    return id->isBroadcast() && id->isThreadDim();
+  });
+}
+
 bool TensorDomain::hasBroadcast() const {
   return no_bcast_domain_.size() != domain_.size();
 }

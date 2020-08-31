@@ -173,6 +173,7 @@ class TORCH_CUDA_API Fusion final {
   bool hasReduction();
   bool hasBlockReduction();
   bool hasGridReduction();
+  bool hasBlockBroadcast();
   bool hasBroadcast();
   DataType getMaximumSmemDataType();
   size_t gridReductionTempBufferSize();

@@ -219,7 +219,6 @@ void GpuLower::lower() {
   sync_allocations_ = be.getSyncAllocs();
   dynamic_smem_allocations_ = be.getDynamicAllocs();
   static_smem_allocations_ = be.getStaticAllocs();
-  has_block_broadcast_ = be.hasBlockBroadcast();
 }
 
 // Traverse through the fusion and print CUDA code associated with it
