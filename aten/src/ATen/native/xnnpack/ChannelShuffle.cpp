@@ -76,9 +76,13 @@ Tensor channel_shuffle(
       xnn_status_success == create_status,
       "xnn_create_channel_shuffle_nc_x32 failed!");
 
+  int64_t batch_size = input_padded_contig_nhwc.size(Layout::Activation4D::batch) *
+                       input_padded_contig_nhwc.size(Layout::Activation4D::height) *
+                       input_padded_contig_nhwc.size(Layout::Activation4D::width);
+
   const xnn_status setup_status = xnn_setup_channel_shuffle_nc_x32(
       channel_shuffle_op,                                           // operator
-      input_padded_contig_nhwc.size(Layout::Activation4D::batch),   // batch_size
+      batch_size,                                                   // batch_size
       input_padded_contig_nhwc.data_ptr<float>(),                   // input
       output_padded_contig_nhwc.data_ptr<float>(),                  // output
       caffe2::pthreadpool_());                                      // threadpool
