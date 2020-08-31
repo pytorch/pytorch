@@ -335,6 +335,9 @@ int THPVariable_set_grad(THPVariable *self, PyObject *py_grad, void *unused)
 PyObject *THPVariable_get_fw_grad(THPVariable *self, void *unused)
 {
   HANDLE_TH_ERRORS
+  if (check_has_torch_function((PyObject *)self)) {
+    return handle_torch_function_getter(self, "_fw_grad");
+  }
   return THPVariable_Wrap(self->cdata.fw_grad());
   END_HANDLE_TH_ERRORS
 }
@@ -342,6 +345,9 @@ PyObject *THPVariable_get_fw_grad(THPVariable *self, void *unused)
 int THPVariable_set_fw_grad(THPVariable *self, PyObject *py_fw_grad, void *unused)
 {
   HANDLE_TH_ERRORS
+  if (check_has_torch_function((PyObject *)self)) {
+    return handle_torch_function_setter(self, "_fw_grad", py_fw_grad);
+  }
   auto& var = self->cdata;
   if (!py_fw_grad || py_fw_grad == Py_None) {
     var.reset_fw_grad();

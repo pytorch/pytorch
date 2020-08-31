@@ -95,7 +95,7 @@ static Tensor wrapped_scalar_tensor(Scalar scalar) {
   return tensor;
 }
 
-static Tensor restore_reduced_dims(const Tensor &output, IntArrayRef dims, bool keepdim) {
+Tensor restore_reduced_dims(const Tensor &output, IntArrayRef dims, bool keepdim) {
   if (keepdim) {
     return output;
   }
@@ -115,7 +115,7 @@ static Tensor restore_reduced_dims(const Tensor &output, IntArrayRef dims, bool 
   return output.reshape(target_shape);
 }
 
-static Tensor scale_grad_by_count(const Tensor &grad, const Tensor &mask, IntArrayRef dims) {
+Tensor scale_grad_by_count(const Tensor &grad, const Tensor &mask, IntArrayRef dims) {
   return (grad / mask.sum(dims, true)) * mask;
 }
 
