@@ -3737,15 +3737,14 @@ def triplet_margin_loss(anchor, positive, negative, margin=1.0, p=2, eps=1e-6, s
                                      swap, reduction_enum)
 
 
-def triplet_margin_loss_with_distance(anchor: Tensor, positive: Tensor, negative: Tensor,
-                                      distance_function: Optional[Callable[[Tensor, Tensor], Tensor]] = None,
-                                      is_similarity_function: bool = False, margin: float = 1.0,
-                                      swap: bool = False, reduction: str = "mean"):
+def triplet_margin_loss_with_distance(anchor, positive, negative, distance_function=None, is_similarity_function=False,
+                                      margin=1.0, swap=False, reduction="mean"):
+    # type: (Tensor, Tensor, Tensor, Optional[Callable[[Tensor, Tensor], Tensor]], bool, float, bool, str) -> Tensor
     r"""
     See :class:`~torch.nn.TripletMarginLossWithDistance` for details
     """
     if torch.jit.is_scripting():
-        raise NotImplementedError("F.triplet_margin_loss_with_distance does not support JIT: "
+        raise NotImplementedError("F.triplet_margin_loss_with_distance does not support JIT scripting: "
                                   "Callables cannot be scripted unless they are properties of "
                                   "a module. Please use nn.TripletMarginLossWithDistance instead.")
 
