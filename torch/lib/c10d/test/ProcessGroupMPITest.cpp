@@ -332,26 +332,80 @@ void testSendRecv(bool recvAnysource, int iter = 10000) {
   }
 }
 
-int main(int argc, char** argv) {
+class ProcessGroupMPITest : public ::testing::Test {
+ protected:
+  void SetUp() override {
 #ifdef MPIEXEC
-  // If we are within an openmpi mpirun, then skip the exec
-  if (!std::getenv("OMPI_COMM_WORLD_SIZE")) {
-    std::cout << "Execute mpiexec from: " << STR(MPIEXEC) << std::endl;
-    execl(STR(MPIEXEC), "-np 2", argv[0], (char*)nullptr);
+    // If we are within an openmpi mpirun, then skip the exec
+    if (!std::getenv("OMPI_COMM_WORLD_SIZE")) {
+      std::cout << "Execute mpiexec from: " << STR(MPIEXEC) << std::endl;
+      execl(STR(MPIEXEC), "-np 2", argv[0], (char*)nullptr);
+    }
+#endif
   }
 
-  testAllreduce();
-  testBroadcast();
-  testReduce();
-  testAllgather();
-  testGather();
-  testScatter();
-  testSendRecv(false);
-  testSendRecv(true);
-
-  std::cout << "Test successful" << std::endl;
+  void skipTest() {
+#ifdef MPIEXEC
+    return false;
 #else
-  std::cout << "MPI executable not found, skipping test" << std::endl;
+    std::cout << "MPI executable not found, skipping test" << std::endl;
+    return true;
 #endif
-  return EXIT_SUCCESS;
+  }
+};
+
+TEST_F(ProcessGroupMPITest, testAllreduce) {
+  if (skipTest()) {
+    return;
+  }
+  testAllreduce();
+}
+
+TEST_F(ProcessGroupMPITest, testBroadcast) {
+  if (skipTest()) {
+    return;
+  }
+  testBroadcast();
+}
+
+TEST_F(ProcessGroupMPITest, testReduce) {
+  if (skipTest()) {
+    return;
+  }
+  testReduce();
+}
+
+TEST_F(ProcessGroupMPITest, testAllgather) {
+  if (skipTest()) {
+    return;
+  }
+  testAllgather();
+}
+
+TEST_F(ProcessGroupMPITest, testGather) {
+  if (skipTest()) {
+    return;
+  }
+  testGather();
+}
+
+TEST_F(ProcessGroupMPITest, testScatter) {
+  if (skipTest()) {
+    return;
+  }
+  testScatter();
+}
+
+TEST_F(ProcessGroupMPITest, testSendRecv) {
+  if (skipTest()) {
+    return;
+  }
+  testSendRecv(false);
+}
+
+TEST_F(ProcessGroupMPITest, testSendRecvAnySrc) {
+  if (skipTest()) {
+    return;
+  }
+  testSendRecv(true);
 }

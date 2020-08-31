@@ -35,5 +35,5 @@ endif()
 
 if(USE_C10D_MPI)
   add_definitions(-DMPIEXEC=${MPIEXEC})
-  c10d_add_test(ProcessGroupMPITest.cpp c10d)
+  c10d_add_test(ProcessGroupMPITest.cpp c10d gtest_main)
 endif()
