@@ -707,6 +707,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.stft: (lambda input, n_fft, hop_length=None, win_length=None, window=None, center=True,
                      pad_mode='reflect', normalized=False, onesided=True: -1),
         torch.sub: lambda input, other, out=None: -1,
+        torch.subtract: lambda input, other, out=None: -1,
         torch.sum: lambda input, dim=None: -1,
         torch.nansum: lambda input, dim=None: -1,
         torch.svd: lambda input, some=True, compute_uv=True, out=None: -1,
