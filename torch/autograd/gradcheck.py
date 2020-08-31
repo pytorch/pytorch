@@ -61,6 +61,25 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
     x_tensors = iter_tensors(target, True)
     j_tensors = iter_tensors(jacobian)
 
+    def compute_gradient(x, idx, is_mkldnn=False):
+
+        def fn_out():
+            if not is_mkldnn:
+                # x is a view into input and so this works
+                return fn(input).clone()
+            else:
+                # convert the dense tensor back to have mkldnn layout
+                return fn([x.to_mkldnn()])
+
+        orig = x[idx].item()
+        x[idx] = orig - eps
+        outa = fn_out()
+        x[idx] = orig + eps
+        outb = fn_out()
+        x[idx] = orig
+        r = (outb - outa) / (2 * eps)
+        return r.detach().reshape(-1)
+
     # TODO: compare structure
     for x_tensor, d_tensor in zip(x_tensors, j_tensors):
         is_complex = x_tensor.dtype.is_complex
@@ -90,14 +109,7 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
                 for x_idx in product(*[range(m) for m in x_values.size()[1:]]):
                     indices = x_indices[i].tolist() + list(x_idx)
                     d_idx = sum(indices[k] * x_stride[k] for k in range(len(x_size)))
-                    orig = x_value[x_idx].item()
-                    x_value[x_idx] = orig - eps
-                    outa = fn(input).clone()
-                    x_value[x_idx] = orig + eps
-                    outb = fn(input).clone()
-                    x_value[x_idx] = orig
-                    r = (outb - outa) / (2 * eps)
-                    d_tensor[d_idx] = r.detach().reshape(-1)
+                    d_tensor[d_idx] = compute_gradient(x_value, x_idx)
         elif x_tensor.layout == torch._mkldnn:
             # Use .data here to get around the version check
             x_tensor = x_tensor.data
@@ -108,30 +120,12 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
                 # this is really inefficient, but without indexing implemented, there's
                 # not really a better way than converting back and forth
                 x_tensor_dense = x_tensor.to_dense()
-                orig = x_tensor_dense[x_idx].item()
-
-                x_tensor_dense[x_idx] = orig - eps
-                x_tensor_mkl = x_tensor_dense.to_mkldnn()
-                outa = fn([x_tensor_mkl])
-
-                x_tensor_dense[x_idx] = orig + eps
-                x_tensor_mkl = x_tensor_dense.to_mkldnn()
-                outb = fn([x_tensor_mkl])
-
-                r = (outb - outa) / (2 * eps)
-                d_tensor[d_idx] = r.detach().reshape(-1)
+                d_tensor[d_idx] = compute_gradient(x_tensor_dense, x_idx, is_mkldnn=True)
         else:
             # Use .data here to get around the version check
             x_tensor = x_tensor.data
             for d_idx, x_idx in enumerate(product(*[range(m) for m in x_tensor.size()])):
-                orig = x_tensor[x_idx].item()
-                x_tensor[x_idx] = orig - eps
-                outa = fn(input).clone()
-                x_tensor[x_idx] = orig + eps
-                outb = fn(input).clone()
-                x_tensor[x_idx] = orig
-                r = (outb - outa) / (2 * eps)
-                d_tensor[d_idx] = r.detach().reshape(-1)
+                d_tensor[d_idx] = compute_gradient(x_tensor, x_idx)
 
     return jacobian
 

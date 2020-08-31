@@ -53,6 +53,20 @@
 namespace torch {
 namespace jit {
 
+EnableProfilingGuard::EnableProfilingGuard() {
+  auto& profiling_mode = getProfilingMode();
+  old_profiling_mode = profiling_mode;
+  profiling_mode = true;
+  auto& executor_mode = getExecutorMode();
+  old_executor_mode = executor_mode;
+  executor_mode = true;
+}
+
+EnableProfilingGuard::~EnableProfilingGuard() {
+  getProfilingMode() = old_profiling_mode;
+  getExecutorMode() = old_executor_mode;
+}
+
 namespace {
 c10::AliasAnalysisKind aliasAnalysisInternalSpecialCase() {
   return AliasAnalysisKind::INTERNAL_SPECIAL_CASE;
@@ -588,7 +602,7 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
     GRAPH_DUMP("After Inline, before LowerGradOf", opt_graph);
     LowerGradOf(*opt_graph);
     GRAPH_DUMP("After LowerGradOf, before specializeAutogradZero", opt_graph);
-    specializeAutogradZero(*opt_graph);
+    specializeAutogradZero(opt_graph);
     GRAPH_DUMP(
         "After specializeAutogradZero, before LowerSimpleTuples", opt_graph);
     LowerSimpleTuples(opt_graph);

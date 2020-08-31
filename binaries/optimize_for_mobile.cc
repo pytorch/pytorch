@@ -16,54 +16,71 @@
 
 #include <string>
 
+#include "torch/script.h"
 #include "torch/csrc/jit/api/module.h"
 #include "torch/csrc/jit/passes/vulkan_rewrite.h"
 #include "torch/csrc/jit/passes/xnnpack_rewrite.h"
 #include "torch/csrc/jit/serialization/import.h"
+#include "torch/csrc/jit/serialization/export.h"
 
-C10_DEFINE_string(model, "", "The given torch script model to transform.");
+C10_DEFINE_string(model, "", "The torch script model to optimize.");
 C10_DEFINE_string(
     output,
     "",
     "Name of the output model to be saved.");
-C10_DEFINE_bool(
-    save_for_mobile,
-    false,
-    "Save the model with bytecode format compatible with lite inteprter.");
-C10_DEFINE_bool(vulkan, false, "Vulkan optimize_for_mobile");
+C10_DEFINE_string(backend, "", "The backend to be optimized");
 
 int main(int argc, char** argv) {
   c10::SetUsageMessage(
-    "Run speed benchmark for pytorch model.\n"
-    "Example usage:\n"
+    "\nRun optimization pass for pytorch model. Example usage:\n"
     "./optimize_for_mobile"
     " --model=<model_file>"
-    " --output=<output_file_name>");
+    " [--output=<output_file_name>]"
+    " [--backend=<cpu|vulkan>]"
+  );
+
   if (!c10::ParseCommandLineFlags(&argc, &argv)) {
     std::cerr << "Failed to parse command line flags!" << std::endl;
+    std::cout << c10::UsageMessage() << std::endl;
     return 1;
   }
 
-  CAFFE_ENFORCE(FLAGS_model != "", "Valid input must be provided.");
+  CAFFE_ENFORCE(FLAGS_model != "", c10::UsageMessage());
 
   std::string output_model_name =
-    FLAGS_model.substr(0, FLAGS_model.find(".")) + "_mobile_optimized.pt";
+    FLAGS_model.substr(0, FLAGS_model.find(".")) + "_optimized.bc";
 
   if (FLAGS_output != "") {
     output_model_name = FLAGS_output;
   }
 
   auto module = torch::jit::load(FLAGS_model);
-
-  auto optimized_module = FLAGS_vulkan
-      ? torch::jit::vulkanOptimizeForMobile(module)
-      : torch::jit::optimizeForMobile(module);
-
-  if (FLAGS_save_for_mobile) {
-    optimized_module._save_for_mobile(output_model_name);
-  } else {
-    optimized_module.save(output_model_name);
+  auto ops = torch::jit::export_opnames(module);
+  std::cout << "\npt_operator_library(" << std::endl;
+  std::cout << "\tname = \"old_op_library\"," << std::endl;
+  std::cout << "\tops = [" << std::endl;
+  for (auto const& op: ops) {
+    std::cout << "\t\t\"" << op << "\"," << std::endl;
   }
+  std::cout << "\t],\n)\n" << std::endl;
 
+  torch::jit::Module optimized_module;
+  if (FLAGS_backend == "" || FLAGS_backend == "cpu") {
+    optimized_module = torch::jit::optimizeForMobile(module);
+  } else if (FLAGS_backend == "vulkan") {
+    optimized_module = torch::jit::vulkanOptimizeForMobile(module);
+  } else {
+    CAFFE_ENFORCE(false, "Unknown backend: " + FLAGS_backend);
+  }
+  auto new_ops = torch::jit::export_opnames(optimized_module);
+  std::cout << "\npt_operator_library(" << std::endl;
+  std::cout << "\tname = \"new_op_library\"," << std::endl;
+  std::cout << "\tops = [" << std::endl;
+  for (auto const& op: new_ops) {
+    std::cout << "\t\t\"" << op << "\"," << std::endl;
+  }
+  std::cout << "\t],\n)\n" << std::endl;
+  optimized_module._save_for_mobile(output_model_name);
+  std::cout << "The optimized model for lite interpreter was saved to " << output_model_name << std::endl;
   return 0;
 }
