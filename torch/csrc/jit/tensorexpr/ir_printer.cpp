@@ -473,6 +473,11 @@ void IRPrinter::visit(const AtomicAdd* v) {
   os() << std::endl;
 }
 
+void IRPrinter::visit(const SyncThreads* v) {
+  emitIndent();
+  os() << "__syncthreads();\n";
+}
+
 void IRPrinter::emitIndent() {
   os() << std::setw(2 * indent_) << "";
 }
