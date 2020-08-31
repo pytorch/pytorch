@@ -13,7 +13,6 @@ from ..util.setting import (
 from ..util.utils import (
     clean_up,
     create_folder,
-    get_cov_type,
     print_log,
     raise_no_test_found_exception,
     remove_file,
@@ -22,6 +21,7 @@ from ..util.utils import (
 from ..util.utils_init import add_arguments_utils, create_folders, get_options
 from .utils import (
     clean_up_gcda,
+    get_cov_type,
     get_llvm_tool_path,
     get_oss_binary_folder,
     get_pytorch_folder,
