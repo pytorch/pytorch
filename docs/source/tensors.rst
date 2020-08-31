@@ -194,8 +194,6 @@ view of a storage and defines numeric operations on it.
    .. automethod:: addr
    .. automethod:: addr_
    .. automethod:: allclose
-   .. automethod:: amax
-   .. automethod:: amin
    .. automethod:: angle
    .. automethod:: apply_
    .. automethod:: argmax
@@ -543,6 +541,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: stride
    .. automethod:: sub
    .. automethod:: sub_
+   .. automethod:: subtract
+   .. automethod:: subtract_
    .. automethod:: sum
    .. automethod:: sum_to_size
    .. automethod:: svd

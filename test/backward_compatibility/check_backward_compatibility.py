@@ -18,6 +18,13 @@ from torch._C import parse_schema
 #     believe you can land your diff before then.
 #
 # Allowlist entries can be removed after the date listed on them passes.
+#
+# Allowlist item format:
+# [
+#   0: function name regex
+#   1: date until which the allowlist entry is valid
+#   2: (optional) function argument regex
+# ]
 allow_list = [
     ("c10_experimental", datetime.date(2222, 1, 1)),
     # We export some functions and classes for test_jit.py directly from libtorch.so,
@@ -29,10 +36,6 @@ allow_list = [
     ("aten::append*", datetime.date(2020, 4, 15)),
     ("aten::_min", datetime.date(2020, 9, 9)),
     ("aten::_max", datetime.date(2020, 9, 9)),
-    ("aten::amax", datetime.date(2020, 10, 9)),
-    ("aten::amin", datetime.date(2020, 10, 9)),
-    ("aten::min_values", datetime.date(2020, 10, 9)),
-    ("aten::max_values", datetime.date(2020, 10, 9)),
     ("aten::split_with_sizes", datetime.date(2020, 7, 29)),
     ("aten::eq", datetime.date(2020, 7, 30)),
     ("aten::log", datetime.date(2020, 7, 30)),
@@ -64,6 +67,7 @@ allow_list = [
     ("aten::linalg_outer", datetime.date(2020, 8, 30)),
     ("aten::linalg_outer.out", datetime.date(2020, 8, 30)),
     ("aten::_compute_linear_combination", datetime.date(2020, 9, 1)),
+    ("__getstate__", datetime.date(2020, 9, 1), "Conv[23]dPackedParams"),
 ]
 
 
@@ -73,6 +77,10 @@ def allow_listed(schema, allow_list):
             continue
         regexp = re.compile(item[0])
         if regexp.search(schema.name):
+            if len(item) > 2:
+                # if arguments regex is present, use it
+                regexp_args = re.compile(item[2])
+                return bool(regexp_args.search(str(schema)))
             return True
     return False
 
