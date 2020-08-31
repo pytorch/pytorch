@@ -308,7 +308,7 @@ def runTest(seed, args):
                 print("val size: ", out.size())
     except Exception as err:
         raise Exception("Testing script failure with error message {0}\n\trepro by running:\n\t{1}".format(
-            str(err), reproString(seed, args))) from None
+            str(err), reproString(seed, args))) from err
     try:
         traced_model = torch.jit.trace(random_topology_test, (seed_tensor, *tensor_list))
         if DEBUG_PRINT:
