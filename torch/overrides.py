@@ -783,6 +783,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor._cdata.__get__: lambda self: -1,
         Tensor.grad.__get__: lambda self: -1,
         Tensor._grad.__get__: lambda self: -1,
+        Tensor._fw_grad.__get__: lambda self: -1,
         Tensor._grad_fn.__get__: lambda self: -1,
         Tensor.grad_fn.__get__: lambda self: -1,
         Tensor._version.__get__: lambda self: -1,
