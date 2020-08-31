@@ -708,15 +708,15 @@ LoopNest::LoopNest(const std::vector<Tensor*>& output_tensors)
 
 Stmt* LoopNest::lowerToStmt(Tensor* t) {
   Function* f = t->function();
-  if (f->ndim() == 0) {
-    throw malformed_input("Tensor lowered to zero dimensions");
-  }
-
   // TODO: Support multiple-output functions
   Stmt* body = f->ElementStmt(0);
 
   stmt_to_tensor_[body] = t;
   tensor_to_stmt_[t] = body;
+
+  if (f->ndim() == 0) {
+    return body;
+  }
 
   const Expr* initializer = t->initializer();
   if (initializer) {
