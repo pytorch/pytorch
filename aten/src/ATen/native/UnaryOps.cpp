@@ -205,13 +205,6 @@ Tensor imag(const Tensor& self) {
 Tensor& conj_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, conj_stub); }
 Tensor conj(const Tensor& self) { return unary_op_impl(self, at::conj_out); }
 
-Tensor conj_materialize(const Tensor& self) {
-  // this function assumes that the tensor input has it's conjugate bit set
-  Tensor self_conjugated = self.conj();
-  self_conjugated.set_conjugate(false);
-  return self_conjugated;
-}
-
 Tensor conj_view(const Tensor& self) {
  Tensor self_;
   auto impl = c10::make_intrusive<TensorImpl>(
