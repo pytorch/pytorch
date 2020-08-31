@@ -56,6 +56,27 @@ def get_new_attr_name_with_prefix(prefix):
         return attr_name
     return get_new_attr_name
 
+# Starting from a target node, trace back until we hit input or
+# getattr node. This is used to extract the chain of operators
+# starting from getattr to the target node
+def collect_nodes_to_fold(node):
+    nodes = [node]
+    frontier = [node]
+    while frontier:
+        node = frontier.pop()
+        all_args = list(node.args) + list(node.kwargs.values())
+        for arg in all_args:
+            if not isinstance(arg, Node):
+                continue
+            if arg.op == 'placeholder':
+                # hit input, can't fold in this case
+                return None
+            nodes.append(arg)
+            if not (arg.op == 'call_function' and arg.target == getattr):
+                frontier.append(arg)
+    return nodes
+
+
 # A dictionary for querying the weight index for a given op
 WEIGHT_INDEX_DICT = {
     torch.nn.functional.conv2d : [1],
@@ -403,23 +424,6 @@ class Quantizer:
     # with the traced nodes and run the graph module to pack the weight. then replace
     # the original chain of ops with the packed weight.
     def _fold_weight(self, quantized):
-        def collect_nodes_to_fold(node):
-            nodes = [node]
-            frontier = [node]
-            while frontier:
-                node = frontier.pop()
-                all_args = list(node.args) + list(node.kwargs.values())
-                for arg in all_args:
-                    if not isinstance(arg, Node):
-                        continue
-                    if arg.op == 'placeholder':
-                        # hit input, can't fold in this case
-                        return None
-                    nodes.append(arg)
-                    if not (arg.op == 'call_function' and arg.target == getattr):
-                        frontier.append(arg)
-            return nodes
-
         packed_weights = dict()
         # map from folded node name to the prepacked weight name
         folded_nodes = dict()
