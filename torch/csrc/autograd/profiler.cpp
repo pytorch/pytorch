@@ -3,6 +3,9 @@
 #include <torch/csrc/jit/frontend/code_template.h>
 
 #include <torch/csrc/jit/runtime/operator.h>
+#include <torch/csrc/python_headers.h>
+#include <torch/csrc/utils/pybind.h>
+#include <torch/csrc/utils/python_strings.h>
 
 #include <ATen/core/op_registration/op_registration.h>
 #include <torch/library.h>
@@ -24,27 +27,27 @@ namespace torch { namespace autograd { namespace profiler {
 
 namespace {
 
-  enum EventIValueIdx {
-    KIND = 0,
-    NAME,
-    THREAD_ID,
-    HANDLE,
-    NODE_ID,
-    CPU_MEM_USAGE,
-    CPU_NS,
-    CUDA_RECORDED,
-    CUDA_MEM_USAGE,
-    CUDA_DEVICE,
-    CUDA_US,
-    NUM_EVENT_IVALUE_IDX // must be last in list
-  };
+enum EventIValueIdx {
+  KIND = 0,
+  NAME,
+  THREAD_ID,
+  HANDLE,
+  NODE_ID,
+  CPU_MEM_USAGE,
+  CPU_NS,
+  CUDA_RECORDED,
+  CUDA_MEM_USAGE,
+  CUDA_DEVICE,
+  CUDA_US,
+  NUM_EVENT_IVALUE_IDX // must be last in list
+};
 
-  enum ProfilerIValueIdx {
-    STATE = 0,
-    REPORT_INPUT_SHAPES,
-    PROFILE_MEMORY,
-    NUM_PROFILER_CFG_IVALUE_IDX // must be last in list
-  };
+enum ProfilerIValueIdx {
+  STATE = 0,
+  REPORT_INPUT_SHAPES,
+  PROFILE_MEMORY,
+  NUM_PROFILER_CFG_IVALUE_IDX // must be last in list
+};
 
 CUDAStubs default_stubs;
 constexpr CUDAStubs* default_stubs_addr = &default_stubs;
@@ -202,31 +205,42 @@ struct ProfilerThreadLocalState
   }
 
   void pushRange(
-      const at::StringView& name,
+      const at::RecordFunction& fn,
       const char* msg = "",
-      int64_t sequence_nr = -1,
-      std::vector<std::vector<int64_t>>&& shapes = {},
-      at::RecordFunctionHandle handle = 0) {
+      std::vector<std::vector<int64_t>>&& shapes = {}) {
     if (config_.state == ProfilerState::Disabled) {
       return;
     }
     if (config_.state == ProfilerState::NVTX) {
       cuda_stubs->nvtxRangePushA(getNvtxStr(
-          name, msg, sequence_nr, shapes).c_str());
+          fn.name(), msg, fn.seqNr(), shapes).c_str());
     } else {
       Event evt(EventKind::PushRange,
-          name,
+          fn.name(),
           at::RecordFunction::currentThreadId(),
           config_.state == ProfilerState::CUDA,
-          handle,
+          fn.handle(),
           std::move(shapes),
           at::RecordFunction::getDefaultNodeId());
-      evt.setSequenceNr(sequence_nr);
+      evt.setSequenceNr(fn.seqNr());
+
+      if (config_.with_source) {
+        setSourceLocation(evt, fn);
+
+        /*std::cerr << "===" << std::endl;
+        std::cerr << fn.name() << ", seq: " << fn.seqNr() << ", scope: " << (int)fn.scope() << ", thread: " << fn.threadId() << std::endl;
+        auto loc = evt.sourceLocation();
+        std::cerr << "ts: " << loc.ts_location << std::endl << "python: " << std::endl;
+        for (auto& line : loc.py_stack) {
+          std::cerr << "   " << line << std::endl;
+        }*/
+      }
+
       getEventList().record(std::move(evt));
     }
   }
 
-  void popRange(uint64_t thread_id, at::RecordFunctionHandle handle) {
+  void popRange(const at::RecordFunction& fn) {
     if (config_.state == ProfilerState::Disabled) {
       return;
     }
@@ -241,9 +255,9 @@ struct ProfilerThreadLocalState
           at::StringView(""),
           at::RecordFunction::currentThreadId(),
           config_.state == ProfilerState::CUDA,
-          handle);
+          fn.handle());
       evt.setNodeId(at::RecordFunction::getDefaultNodeId());
-      getEventList(thread_id).record(std::move(evt));
+      getEventList(fn.threadId()).record(std::move(evt));
     }
   }
 
@@ -274,6 +288,66 @@ struct ProfilerThreadLocalState
   }
 
  private:
+  void setSourceLocation(Event& evt, const at::RecordFunction& fn) {
+    std::lock_guard<std::mutex> guard(state_mutex_);
+    if (fn.scope() == at::RecordScope::BACKWARD_FUNCTION) {
+      // if that's a backward function then take the source location
+      // from the corresponding function
+      auto fwd_pair = std::make_pair(fn.seqNr(), fn.forwardThreadId());
+      auto it = fwd_source_locs_.find(fwd_pair);
+      if (it != fwd_source_locs_.end()) {
+        evt.setSourceLocation(it->second);
+      }
+      // in some cases we won't find the corr. forward node (e.g. GraphRoot)
+    } else {
+      auto ts_loc = torchScriptCallSite();
+      auto py_stack = pythonCallstack();
+
+      evt.setSourceLocation(EventSourceLocation{ts_loc, py_stack});
+      // if there's a sequence number, save the location for the backward node
+      if (fn.seqNr() >= 0) {
+        fwd_source_locs_[std::make_pair(fn.seqNr(), fn.threadId())] = evt.sourceLocation();
+      }
+    }
+  }
+
+  std::string torchScriptCallSite() {
+    std::stringstream loc;
+    auto call_info = jit::currentCallSite();
+    if (call_info) {
+      auto& range = call_info->source_range;
+      if (range.source()) {
+        auto& src = range.source();
+        if (src && src->filename()) {
+          auto line = src->starting_line_no() +
+              src->lineno_for_offset(range.start());
+
+          loc << *(src->filename()) << "(" << line << "): " << call_info->function_name;
+        }
+      }
+    }
+    return loc.str();
+  }
+
+  std::vector<std::string> pythonCallstack() {
+    std::vector<std::string> py_stack;
+
+    PyGILState_STATE gil_state = PyGILState_Ensure();
+    PyFrameObject* frame = PyEval_GetFrame();
+    while (frame != nullptr) {
+      std::stringstream sstr;
+      int line = PyCode_Addr2Line(frame->f_code, frame->f_lasti);
+      std::string filename = THPUtils_unpackString(frame->f_code->co_filename);
+      std::string funcname = THPUtils_unpackString(frame->f_code->co_name);
+      sstr << filename << "(" << line << "): " << funcname;
+      py_stack.push_back(sstr.str());
+      frame = frame->f_back;
+    }
+    PyGILState_Release(gil_state);
+
+    return py_stack;
+  }
+
   std::string getNvtxStr(
       const at::StringView& name,
       const char* msg,
@@ -332,9 +406,22 @@ struct ProfilerThreadLocalState
   std::unordered_map<uint64_t, std::shared_ptr<RangeEventList>>
       event_lists_map_;
 
-  ProfilerConfig config_ = ProfilerConfig(ProfilerState::Disabled, false, false);
+  ProfilerConfig config_ = ProfilerConfig(ProfilerState::Disabled);
   at::CallbackHandle handle_ = 0;
   c10::optional<std::vector<std::vector<Event>>> remoteProfiledEvents_;
+
+  // Map that saves the source locations of the forward functions,
+  // used to get the corresponding forward location instead of 'backward'
+  // for the backward function nodes;
+  // forward function is identified by a sequence number and a thread id
+  struct PairHash {
+    template <class First, class Second>
+    std::size_t operator()(const std::pair<First, Second>& pair) const {
+      return std::hash<First>()(pair.first) ^ std::hash<Second>()(pair.second);
+    }
+  };
+  std::unordered_map<std::pair<int64_t, uint64_t>, EventSourceLocation, PairHash>
+      fwd_source_locs_;
 };
 
 ProfilerThreadLocalState* getProfilerTLSState() {
@@ -368,10 +455,9 @@ void pushProfilingCallbacks() {
               inputSizes.emplace_back();
             }
           }
-          state_ptr->pushRange(
-              fn.name(), msg, fn.seqNr(), std::move(inputSizes), fn.handle());
+          state_ptr->pushRange(fn, msg, std::move(inputSizes));
         } else {
-          state_ptr->pushRange(fn.name(), msg, fn.seqNr(), {}, fn.handle());
+          state_ptr->pushRange(fn, msg, {});
         }
       },
       [](const at::RecordFunction& fn) {
@@ -379,7 +465,7 @@ void pushProfilingCallbacks() {
         if (!state_ptr || state_ptr->config().state == ProfilerState::Disabled) {
           return;
         }
-        state_ptr->popRange(fn.getStartCallbacksThreadId(), fn.handle());
+        state_ptr->popRange(fn);
       })
     .needsInputs(state_ptr->config().report_input_shapes)
     .needsIds(true));
@@ -639,10 +725,7 @@ RecordProfile::RecordProfile(const std::string& filename)
 }
 
 void RecordProfile::init() {
-  enableProfiler(ProfilerConfig(
-      ProfilerState::CPU,
-      /* report_input_shapes */ false,
-      /* profile_memory */ false));
+  enableProfiler(ProfilerConfig(ProfilerState::CPU));
 }
 
 RecordProfile::~RecordProfile() {

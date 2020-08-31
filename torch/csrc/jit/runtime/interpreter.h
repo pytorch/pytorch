@@ -5,6 +5,7 @@
 
 #include <ATen/ThreadLocalState.h>
 #include <ATen/core/ivalue.h>
+#include <torch/csrc/jit/frontend/source_range.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 namespace at {
@@ -64,8 +65,15 @@ struct TORCH_API Code {
   friend std::ostream& operator<<(std::ostream& out, const Code& code);
 };
 
+struct TORCH_API CallSiteInfo {
+  SourceRange source_range;
+  std::string function_name;
+};
+
 struct InterpreterState {
-  TORCH_API InterpreterState(const Code& code);
+  TORCH_API InterpreterState(
+      const Code& code,
+      c10::optional<CallSiteInfo> call_info = c10::nullopt);
   TORCH_API void run(Stack& stack);
   c10::intrusive_ptr<Future> runAsync(Stack& stack);
   c10::intrusive_ptr<Future> getFuture();
@@ -125,6 +133,9 @@ struct InterpreterContinuation {
 // this will cause the TensorType to have requires_grad=False.
 TORCH_API at::TensorTypePtr tensorTypeInCurrentExecutionContext(
     const at::Tensor& t);
+
+// current thread local operator/method source range
+TORCH_API c10::optional<CallSiteInfo> currentCallSite();
 
 } // namespace jit
 } // namespace torch

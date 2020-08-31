@@ -7,6 +7,7 @@
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/grad_mode.h>
+#include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/api/function_impl.h>
@@ -411,6 +412,26 @@ struct BailoutBlock {
   size_t jf_instruction_index; // this node gets patched to jump here on failure
   std::vector<Instruction> instructions; // ends in a TAIL_CALL
 };
+
+thread_local c10::optional<CallSiteInfo> tls_call_info_;
+struct TLSCallInfoGuard {
+  TLSCallInfoGuard() {
+    prev_call_info_ = tls_call_info_;
+  }
+  TLSCallInfoGuard(const c10::optional<CallSiteInfo>& call_info) {
+    prev_call_info_ = tls_call_info_;
+    tls_call_info_ = call_info;
+  }
+  ~TLSCallInfoGuard() {
+    tls_call_info_ = prev_call_info_;
+  }
+
+ private:
+  c10::optional<CallSiteInfo> prev_call_info_;
+};
+c10::optional<CallSiteInfo> currentCallSite() {
+  return tls_call_info_;
+}
 
 struct CodeImpl {
   friend struct InterpreterState;
@@ -996,8 +1017,10 @@ struct CodeImpl {
 
 // InterpreterState state that and used to compute a Code
 struct InterpreterStateImpl : c10::intrusive_ptr_target {
-  InterpreterStateImpl(const Code& code) {
-    enterFrame(code, 0);
+  InterpreterStateImpl(
+      const Code& code,
+      c10::optional<CallSiteInfo> call_info = c10::nullopt) {
+    enterFrame(code, 0, call_info);
   }
 
  private:
@@ -1044,28 +1067,62 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
 
     // RecordFunction object associated with this frame
     std::unique_ptr<at::RecordFunction> record_function;
+
     // symbol table for a frame
     ShapeSymbolTable symbols2dims;
+
+    // call site source range
+    c10::optional<CallSiteInfo> call_info;
   };
 
   // saved-by-value stuff that can exist on the stack inside runInterpreter
   struct ActiveFrame {
     size_t pc;
     Instruction* instructions;
+    Node** instructions_source;
     IValue* constants;
     Operation* operators;
     Function** functions;
     std::function<void(std::vector<IValue>&)>* profile_functions;
     TypePtr* types;
 
-    ActiveFrame(const Frame& frame)
+    ActiveFrame(Frame& frame, Stack& stack)
         : pc(frame.pc),
           instructions(frame.function->instructions_.data()),
+          instructions_source(frame.function->instructions_source_.data()),
           constants(frame.function->constant_table_.data()),
           operators(frame.function->operator_table_.data()),
           functions(frame.function->function_table_.data()),
           profile_functions(frame.function->profile_function_table_.data()),
-          types(frame.function->type_table_.data()) {}
+          types(frame.function->type_table_.data()) {
+      // set the current call site info to the call site of the frame
+      // (e.g. function/method call, fork, etc)
+      tls_call_info_ = frame.call_info;
+
+      // if that's the first time we activate the frame, start
+      // the record function
+      if (frame.pc == 0) {
+        checkAndStartRecordFunction(frame, stack);
+      }
+    }
+
+   private:
+    static void checkAndStartRecordFunction(Frame& frame, Stack& stack) {
+      if (!frame.record_function &&
+          at::hasCallbacks() &&
+          at::isRecordFunctionEnabled()) {
+        auto rec_fn = std::make_unique<at::RecordFunction>(
+            at::RecordScope::TORCHSCRIPT_FUNCTION);
+        if (rec_fn->active) {
+          if (rec_fn->needs_inputs) {
+            rec_fn->before(frame.function->function_name_, last(stack, frame.function->n_inputs));
+          } else {
+            rec_fn->before(frame.function->function_name_);
+          }
+          frame.record_function = std::move(rec_fn);
+        }
+      }
+    }
   };
 
   std::vector<Frame> frames;
@@ -1075,10 +1132,13 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     return c10::intrusive_ptr<InterpreterStateImpl>::reclaim(this);
   }
 
-  void enterFrame(const Code& code, size_t base_pointer) {
+  void enterFrame(
+      const Code& code,
+      size_t base_pointer,
+      c10::optional<CallSiteInfo> call_info = c10::nullopt) {
     frames.emplace_back(Frame{code.pImpl, 0, base_pointer, c10::nullopt});
+    frames.back().call_info = call_info;
     registers.resize(registers.size() + code.pImpl->register_size_);
-    // frames.back().function->dump(std::cout);
   }
 
   void leaveFrame() {
@@ -1110,7 +1170,11 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     ++af->pc;
   }
 
-  void runGraphFunction(Stack& stack, Function* fn, ActiveFrame* af) {
+  void runGraphFunction(
+      Stack& stack,
+      Function* fn,
+      ActiveFrame* af,
+      c10::optional<CallSiteInfo> call_info = c10::nullopt) {
     const Code& code =
         // consider passing
         // `frames.back().function->remaining_bailout_depth_` into
@@ -1123,20 +1187,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             .getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts())
             .code;
     frames.back().pc = af->pc + 1;
-    enterFrame(code, stack.size() - code.num_inputs());
-    if (at::hasCallbacks() && at::isRecordFunctionEnabled()) {
-      auto rec_fn = std::make_unique<at::RecordFunction>(
-          at::RecordScope::TORCHSCRIPT_FUNCTION);
-      if (rec_fn->active) {
-        if (rec_fn->needs_inputs) {
-          rec_fn->before(fn->name(), last(stack, code.num_inputs()));
-        } else {
-          rec_fn->before(fn->name());
-        }
-        frames.back().record_function = std::move(rec_fn);
-      }
-    }
-    *af = ActiveFrame(frames.back());
+    enterFrame(code, stack.size() - code.num_inputs(), call_info);
+    *af = ActiveFrame(frames.back(), stack);
   }
 
   bool runImpl(Stack& stack) {
@@ -1152,11 +1204,18 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
       stack_start_ = 0;
     }
 
-    ActiveFrame af(frames.back());
+    // restore original TLS values after the interpreter loop is finished
+    TLSCallInfoGuard g;
+
+    ActiveFrame af(frames.back(), stack);
     try {
       while (true) {
         // std::cout << "RUNNING ";
         // frames.back().function->dump(std::cout, af.pc);
+        Node* node = af.instructions_source[af.pc];
+        CallSiteInfo call_info {
+            node->sourceRange(),
+            frames.back().function->function_name_};
         Instruction inst = af.instructions[af.pc];
         switch (inst.op) {
           case ENTER: {
@@ -1173,17 +1232,21 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             push(stack, IValue());
             push(stack, IValue());
             push(stack, IValue());
-            runGraphFunction(stack, &f, &af);
+            runGraphFunction(stack, &f, &af, call_info);
           } break;
-          case OP:
+          case OP: {
+            TLSCallInfoGuard g(call_info);
             af.operators[inst.X](&stack);
             ++af.pc;
             break;
-          case OPN:
+          }
+          case OPN: {
             stack.push_back(inst.N);
+            TLSCallInfoGuard g(call_info);
             af.operators[inst.X](&stack);
             ++af.pc;
             break;
+          }
           case LOAD:
             stack.emplace_back(reg(inst.X));
             ++af.pc;
@@ -1256,7 +1319,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             if (!fn->isGraphFunction()) {
               runBuiltinFunction(stack, fn, &af);
             } else {
-              runGraphFunction(stack, fn, &af);
+              runGraphFunction(stack, fn, &af, call_info);
             }
           } break;
           case INTERFACE_CALL: {
@@ -1280,13 +1343,13 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             if (!function.isGraphFunction()) {
               runBuiltinFunction(stack, &function, &af);
             } else {
-              runGraphFunction(stack, &function, &af);
+              runGraphFunction(stack, &function, &af, call_info);
             }
           } break;
           case RET:
             if (frames.size() > 1) {
               leaveFrame();
-              af = ActiveFrame(frames.back());
+              af = ActiveFrame(frames.back(), stack);
               break;
             }
             if (future_) {
@@ -1437,8 +1500,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             }
             stack.resize(base_pointer + num_inputs);
             leaveFrame();
-            enterFrame(code, base_pointer);
-            af = ActiveFrame(frames.back());
+            enterFrame(code, base_pointer, call_info);
+            af = ActiveFrame(frames.back(), stack);
           } break;
           case LIST_UNPACK: {
             listUnpack(stack, inst.X);
@@ -1484,7 +1547,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             InterpreterState forked_interpreter(
                 forked_fn->get_executor()
                     .getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts())
-                    .code);
+                    .code,
+                call_info);
             InterpreterContinuation continuation(
                 forked_interpreter,
                 Stack(stack.end() - inst.N, stack.end()),
@@ -1669,8 +1733,10 @@ size_t Code::register_size() const {
   return pImpl->register_size_;
 }
 
-InterpreterState::InterpreterState(const Code& code)
-    : pImpl(c10::make_intrusive<InterpreterStateImpl>(code)) {}
+InterpreterState::InterpreterState(
+    const Code& code,
+    c10::optional<CallSiteInfo> call_info)
+    : pImpl(c10::make_intrusive<InterpreterStateImpl>(code, call_info)){}
 InterpreterState::~InterpreterState() = default;
 
 void InterpreterState::run(Stack& stack) {

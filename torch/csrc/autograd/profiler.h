@@ -98,15 +98,18 @@ enum class C10_API_ENUM ProfilerState {
 struct TORCH_API ProfilerConfig {
   ProfilerConfig(
       ProfilerState state,
-      bool report_input_shapes,
-      bool profile_memory)
+      bool report_input_shapes = false,
+      bool profile_memory = false,
+      bool with_source = false)
       : state(state),
         report_input_shapes(report_input_shapes),
-        profile_memory(profile_memory) {}
+        profile_memory(profile_memory),
+        with_source(with_source) {}
   ~ProfilerConfig();
   ProfilerState state;
   bool report_input_shapes;
   bool profile_memory;
+  bool with_source;
 
   // Returns IValues corresponding to ProfilerConfig struct, to be used for
   // serialization.
@@ -115,6 +118,11 @@ struct TORCH_API ProfilerConfig {
   // Reconstructs a ProfilerConfig from IValues given by toIValue.
   static ProfilerConfig fromIValue(const at::IValue& profilerConfigIValue);
 
+};
+
+struct EventSourceLocation {
+  std::string ts_location;
+  std::vector<std::string> py_stack;
 };
 
 enum class C10_API_ENUM EventKind : uint16_t {
@@ -276,8 +284,16 @@ struct TORCH_API Event final {
     sequence_nr_ = sequence_nr;
   }
 
-  int64_t sequence_nr() const {
+  int64_t sequenceNr() const {
     return sequence_nr_;
+  }
+
+  const EventSourceLocation& sourceLocation() const {
+    return source_location_;
+  }
+
+  void setSourceLocation(const EventSourceLocation& source_location) {
+    source_location_ = source_location;
   }
 
  private:
@@ -296,6 +312,8 @@ struct TORCH_API Event final {
   bool is_remote_ = false;
   int64_t cuda_us_ = -1;
   int64_t sequence_nr_ = -1;
+
+  EventSourceLocation source_location_;
 };
 
 // a linked-list of fixed sized vectors, to avoid

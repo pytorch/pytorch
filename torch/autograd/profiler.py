@@ -194,7 +194,7 @@ class EventList(list):
             f.truncate()
             f.write("]")
 
-    def key_averages(self, group_by_input_shapes=False):
+    def key_averages(self, group_by_input_shapes=False, group_by_source=False):
         """Averages all function events over their keys.
 
         @param group_by_input_shapes The key would become
@@ -203,19 +203,24 @@ class EventList(list):
         the most and may help with dimension specific optimizations or
         choosing best candidates for quantization (aka fitting a roof line)
 
+        @param group_by_source Group by operator source filename and line
+
         Returns:
             An EventList containing FunctionEventAvg objects.
         """
         self.populate_cpu_children()
         stats = defaultdict(FunctionEventAvg)
 
-        def get_key(event, group_by_input_shapes):
-            if not group_by_input_shapes:
-                return (event.key, event.node_id)
-            return (event.key, str(event.input_shapes), event.node_id)
+        def get_key(event, group_by_input_shapes, group_by_source):
+            key = [str(event.key), str(event.node_id)]
+            if group_by_input_shapes:
+                key += [str(event.input_shapes)]
+            if group_by_source:
+                key += [str(event.src_location)]
+            return tuple(key)
         for evt in self:
-            stats[get_key(evt, group_by_input_shapes)].add(
-                evt, group_by_input_shapes)
+            stats[get_key(evt, group_by_input_shapes, group_by_source)].add(evt)
+
         return EventList(stats.values(), use_cuda=self._use_cuda, profile_memory=self._profile_memory)
 
     def total_average(self):
@@ -260,8 +265,11 @@ class profile(object):
 
         profile_memory (bool, optional): Whether to report memory usage, default: ``False``
 
+        with_source (bool, optional): record source information for the ops
+
     .. warning:
-        Enabling memory profiling incurs additional profiler overhead
+        Enabling memory profiling or source attribution incurs additional profiler
+        overhead
 
     .. warning:
         This context managers should not be called recursively, i.e. no nested
@@ -297,7 +305,8 @@ class profile(object):
             enabled=True,
             use_cuda=False,
             record_shapes=False,
-            profile_memory=False):
+            profile_memory=False,
+            with_source=False):
         self.enabled = enabled
         self.use_cuda = use_cuda
         self.function_events = None
@@ -306,6 +315,7 @@ class profile(object):
         self.entered = False
         self.record_shapes = record_shapes
         self.profile_memory = profile_memory
+        self.with_source = with_source
 
     def __enter__(self):
         if not self.enabled:
@@ -316,7 +326,11 @@ class profile(object):
         profiler_kind = torch.autograd.ProfilerState.CUDA if self.use_cuda \
             else torch.autograd.ProfilerState.CPU
 
-        config = torch.autograd.ProfilerConfig(profiler_kind, self.record_shapes, self.profile_memory)
+        config = torch.autograd.ProfilerConfig(
+            profiler_kind,
+            self.record_shapes,
+            self.profile_memory,
+            self.with_source)
         torch.autograd._enable_profiler(config)
         return self
 
@@ -325,7 +339,7 @@ class profile(object):
             return
         records = torch.autograd._disable_profiler()
         self.function_events = EventList(
-            parse_cpu_trace(records),
+            parse_event_records(records),
             use_cuda=self.use_cuda,
             profile_memory=self.profile_memory)
         return False
@@ -357,9 +371,9 @@ class profile(object):
         return self.function_events.export_chrome_trace(path)
     export_chrome_trace.__doc__ = EventList.export_chrome_trace.__doc__
 
-    def key_averages(self, group_by_input_shape=False):
+    def key_averages(self, group_by_input_shape=False, group_by_source=False):
         self._check_finish()
-        return self.function_events.key_averages(group_by_input_shape)
+        return self.function_events.key_averages(group_by_input_shape, group_by_source)
     key_averages.__doc__ = EventList.key_averages.__doc__
 
     def total_average(self):
@@ -550,8 +564,8 @@ class emit_nvtx(object):
             torch.autograd.ProfilerConfig(
                 torch.autograd.ProfilerState.NVTX,
                 self.record_shapes,
-                False
-            )
+                False,
+                False)
         )
         return self
 
@@ -647,8 +661,8 @@ class FunctionEvent(FormattedTimesMixin):
     """Profiling information about a single function."""
     def __init__(
             self, id, node_id, name, thread, cpu_start, cpu_end, input_shapes=None,
-            cpu_memory_usage=0, cuda_memory_usage=0, is_async=False, is_remote=True,
-            sequence_nr=-1):
+            src_location=None, cpu_memory_usage=0, cuda_memory_usage=0, is_async=False,
+            is_remote=True, sequence_nr=-1):
         self.id = id
         self.node_id = node_id
         self.name = name
@@ -658,6 +672,7 @@ class FunctionEvent(FormattedTimesMixin):
         self.count = 1
         self.cpu_children = []
         self.input_shapes = input_shapes
+        self.src_location = src_location
         self.cpu_memory_usage = cpu_memory_usage
         self.cuda_memory_usage = cuda_memory_usage
         self.is_async = is_async
@@ -717,7 +732,7 @@ class FunctionEvent(FormattedTimesMixin):
     def __repr__(self):
         return (
             '<FunctionEvent id={} node_id={} cpu_time={} cpu_start={} cpu_end={} '
-            'cpu_children={} cuda_time={} name={} thread={} input_shapes={} '
+            'cpu_children={} cuda_time={} name={} thread={} input_shapes={} src_location={}'
             'cpu_memory_usage={} cuda_memory_usage={} is_async={} is_remote={} seq_nr={}>'.format(
                 self.id,
                 self.node_id,
@@ -729,6 +744,7 @@ class FunctionEvent(FormattedTimesMixin):
                 self.name,
                 self.thread,
                 str(self.input_shapes),
+                self.src_location,
                 self.cpu_memory_usage,
                 self.cuda_memory_usage,
                 self.is_async,
@@ -750,12 +766,13 @@ class FunctionEventAvg(FormattedTimesMixin):
         self.cuda_time_total = 0
         self.self_cpu_time_total = 0
         self.input_shapes = None
+        self.src_location = None
         self.cpu_memory_usage = 0
         self.cuda_memory_usage = 0
         self.self_cpu_memory_usage = 0
         self.self_cuda_memory_usage = 0
 
-    def add(self, other, group_by_input_shapes=False):
+    def add(self, other):
         if self.key is None:
             # First function being recorded as part of FunctionEventAvg, propagate
             # fields.
@@ -763,13 +780,17 @@ class FunctionEventAvg(FormattedTimesMixin):
             self.node_id = other.node_id
             self.is_async = other.is_async
             self.is_remote = other.is_remote
-            if group_by_input_shapes:
-                self.input_shapes = other.input_shapes
+            if other.input_shapes:
+                if self.input_shapes:
+                    assert self.input_shapes == other.input_shapes
+                else:
+                    self.input_shapes = other.input_shapes
+            if other.src_location:
+                if self.src_location:
+                    assert self.src_location == other.src_location
+                else:
+                    self.src_location = other.src_location
 
-        assert (
-            not group_by_input_shapes or
-            other.input_shapes == self.input_shapes
-        )
         assert isinstance(other, (FunctionEvent, FunctionEventAvg))
         assert other.key == self.key
         self.cpu_time_total += other.cpu_time_total
@@ -788,13 +809,14 @@ class FunctionEventAvg(FormattedTimesMixin):
     def __repr__(self):
         return (
             '<FunctionEventAvg key={} self_cpu_time={} cpu_time={} '
-            'cuda_time={} input_shapes={}> '
-            'cpu_memory_usage={} cuda_memory_usage={}'.format(
+            'cuda_time={} input_shapes={} src_location={}'
+            'cpu_memory_usage={} cuda_memory_usage={}>'.format(
                 self.key,
                 self.self_cpu_time_total_str,
                 self.cpu_time_str,
                 self.cuda_time_str,
                 str(self.input_shapes),
+                self.src_location,
                 self.cpu_memory_usage,
                 self.cuda_memory_usage,
             )
@@ -813,13 +835,38 @@ class StringTable(defaultdict):
         return self[key]
 
 
-################################################################################
-# CPU checkpoints
+def get_source_location(record):
+    ts_loc = record.ts_location().strip()
+    if len(ts_loc) > 0:
+        return ts_loc
+    # heuristically figure user script source location
+    # using python callstack
+    filtered_entries = [
+        ("autograd/__init__", "_make_grads"),
+        ("autograd/__init__", "backward"),
+        ("torch/tensor", "backward"),
+        ("_internal/common_utils", "prof_callable"),
+        ("_internal/common_utils", "prof_func_call"),
+        ("_internal/common_utils", "prof_meth_call"),
+    ]
+    def should_filter(line):
+        for entry in filtered_entries:
+            if entry[0] in line and entry[1] in line:
+                return True
+        return False
 
-def parse_cpu_trace(thread_records):
+    for line in record.py_stack():
+        line = line.strip()
+        if len(line) == 0:
+            continue
+        if not should_filter(line):
+            return line
+    return None
+
+def parse_event_records(thread_records):
     def get_record_key(record):
         """
-        Returns a tuple to be used by parse_cpu_trace for correlating start and
+        Returns a tuple to be used by parse_event_records for correlating start and
         end records.
         """
         return (record.handle(), record.node_id())
@@ -919,6 +966,7 @@ def parse_cpu_trace(thread_records):
                     cpu_start=start_record.cpu_elapsed_us(start),
                     cpu_end=start_record.cpu_elapsed_us(record),
                     input_shapes=start.shapes(),
+                    src_location = get_source_location(start),
                     cpu_memory_usage=cpu_memory_usage,
                     cuda_memory_usage=cuda_memory_usage,
                     is_async=is_async,
@@ -1055,9 +1103,13 @@ def build_table(
 
     has_input_shapes = any(
         [event.input_shapes is not None for event in events])
+    has_src_location = any(
+        [event.src_location is not None for event in events])
+
     name_column_width = max([len(evt.key) for evt in events]) + 4
     DEFAULT_COLUMN_WIDTH = 15
     SHAPES_COLUMN_WIDTH = 45
+    SRC_COLUMN_WIDTH = 55
 
     headers = [
         'Name',
@@ -1109,6 +1161,10 @@ def build_table(
     if has_input_shapes:
         headers.append('Input Shapes')
         add_column(SHAPES_COLUMN_WIDTH)
+
+    if has_src_location:
+        headers.append('Source Location')
+        add_column(SRC_COLUMN_WIDTH)
 
     row_format = row_format[0]
     header_sep = header_sep[0]
@@ -1175,6 +1231,9 @@ def build_table(
             row_values.append(evt.node_id)
         if has_input_shapes:
             row_values.append(str(evt.input_shapes)[:SHAPES_COLUMN_WIDTH])
+        if has_src_location:
+            loc = evt.src_location
+            row_values.append((str(loc) if loc else "")[:SRC_COLUMN_WIDTH])
         append(row_format.format(*row_values))
 
     append(header_sep)

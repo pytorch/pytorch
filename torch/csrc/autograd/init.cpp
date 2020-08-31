@@ -37,7 +37,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .value("NVTX", ProfilerState::NVTX);
 
   py::class_<ProfilerConfig>(m, "ProfilerConfig")
-      .def(py::init<ProfilerState, bool, bool>());
+      .def(py::init<ProfilerState, bool, bool, bool>());
 
   py::class_<Event>(m, "ProfilerEvent")
       .def("kind", &Event::kind)
@@ -53,7 +53,13 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .def("handle", &Event::handle)
       .def("node_id", &Event::node_id)
       .def("is_remote", &Event::isRemote)
-      .def("sequence_nr", &Event::sequence_nr);
+      .def("sequence_nr", &Event::sequenceNr)
+      .def("ts_location", [](const Event& e) {
+        return e.sourceLocation().ts_location;
+      })
+      .def("py_stack", [](const Event& e) {
+        return e.sourceLocation().py_stack;
+      });
 
   m.def("_enable_profiler", enableProfiler);
   m.def("_disable_profiler", disableProfiler);

@@ -18,7 +18,7 @@ except ImportError:
 @unittest.skipIf(TEST_WITH_ASAN, "Cannot test with ASAN")
 @unittest.skipIf(IS_WINDOWS, "Test is flaky on Windows")
 @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
-class TestProfiler_cuda(TestCase):
+class TestProfilerCUDA(TestCase):
     def test_mem_leak(self):
         """Checks that there's no memory leak when using profiler with CUDA
         """
@@ -43,6 +43,49 @@ class TestProfiler_cuda(TestCase):
             max_diff = max(max_diff, last_rss[idx] - last_rss[idx - 1])
         self.assertTrue(not (is_increasing and max_diff > 100 * 1024),
                         msg='memory usage is increasing, {}'.format(str(last_rss)))
+
+class TestProfiler(TestCase):
+    def test_source(self):
+        """Checks that source code attribution works for eager, TS and autograd mode
+        """
+        # avoid automatic inlining
+        prev_opt = torch._C._get_graph_executor_optimize()
+        torch._C._set_graph_executor_optimize(False)
+
+        @torch.jit.script
+        def ts_method_2(x, y):
+            return x + y
+
+        @torch.jit.script
+        def ts_method_1(x, y, z):
+            a = x + z
+            w = ts_method_2(x, y) + a
+            return w.sum()
+
+        with profile(record_shapes=False, with_source=True) as p:
+            x = torch.randn(10, 10, requires_grad=True)
+            y = torch.randn(10, 10, requires_grad=True)
+            z = x + y
+            w = ts_method_1(x, y, z)
+            v = 2 * w
+            v.backward()
+
+        for e in p.function_events:
+            if "aten::add" in e.name or "AddBackward" in e.name:
+                self.assertTrue("test_profiler" in e.src_location)
+                self.assertTrue(
+                    "test_source" in e.src_location or
+                    "ts_method_1" in e.src_location or
+                    "ts_method_2" in e.src_location)
+
+        print(p.key_averages(
+            group_by_input_shape=False,
+            group_by_source=True).table(
+            sort_by="self_cpu_time_total", row_limit=-1))
+
+
+        torch._C._set_graph_executor_optimize(prev_opt)
+
 
 if __name__ == '__main__':
     run_tests()
