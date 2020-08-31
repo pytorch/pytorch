@@ -93,6 +93,72 @@ class TestXNNPACKOps(TestCase):
         xnnpack_result = torch.ops.prepacked.conv2d_clamp_run(input_data, packed_weight_bias)
         torch.testing.assert_allclose(ref_result, xnnpack_result, rtol=1e-2, atol=1e-3)
 
+    @given(batch_size=st.integers(1, 3),
+           input_channels_per_group=st.integers(1, 32),
+           height=st.integers(5, 64),
+           width=st.integers(5, 64),
+           output_channels_per_group=st.integers(1, 32),
+           groups=st.integers(1, 16),
+           kernel_h=st.integers(1, 7),
+           kernel_w=st.integers(1, 7),
+           stride_h=st.integers(1, 2),
+           stride_w=st.integers(1, 2),
+           pad_h=st.integers(0, 2),
+           pad_w=st.integers(0, 2),
+           output_pad_h=st.integers(0, 2),
+           output_pad_w=st.integers(0, 2),
+           dilation=st.integers(1, 2),
+           use_bias=st.booleans(),
+           format=st.sampled_from([None, torch.preserve_format, torch.contiguous_format, torch.channels_last]))
+    def test_conv2d_transpose(self,
+                              batch_size,
+                              input_channels_per_group,
+                              height,
+                              width,
+                              output_channels_per_group,
+                              groups,
+                              kernel_h,
+                              kernel_w,
+                              stride_h,
+                              stride_w,
+                              pad_h,
+                              pad_w,
+                              output_pad_h,
+                              output_pad_w,
+                              dilation,
+                              use_bias,
+                              format):
+        input_channels = input_channels_per_group * groups
+        output_channels = output_channels_per_group * groups
+        kernels = (kernel_h, kernel_w)
+        strides = (stride_h, stride_w)
+        paddings = (pad_h, pad_w)
+        output_paddings = (output_pad_h, output_pad_w)
+        dilations = (dilation, dilation)
+        assume(height + 2 * paddings[0]
+               >= dilations[0] * (kernels[0] - 1) + 1)
+        assume(width + 2 * paddings[1]
+               >= dilations[1] * (kernels[1] - 1) + 1)
+        assume((output_pad_h < stride_h) and (output_pad_h < dilation))
+        assume((output_pad_w < stride_w) and (output_pad_w < dilation))
+
+        input_data = torch.rand((batch_size, input_channels, height, width))
+        if (format is not None):
+            input_data = input_data.contiguous(memory_format=format)
+        weight = torch.rand((input_channels, output_channels_per_group, kernel_h, kernel_w))
+        bias = None
+        if use_bias:
+            bias = torch.rand((output_channels))
+
+        # Note that groups/dilation is in reverse order from conv2d
+        ref_result = F.conv_transpose2d(input_data, weight, bias,
+                                        strides, paddings, output_paddings, groups, dilation)
+        packed_weight_bias = torch.ops.prepacked.conv2d_transpose_clamp_prepack(weight, bias,
+                                                                                strides, paddings,
+                                                                                output_paddings, dilations,
+                                                                                groups)
+        xnnpack_result = torch.ops.prepacked.conv2d_transpose_clamp_run(input_data, packed_weight_bias)
+        torch.testing.assert_allclose(ref_result.contiguous(), xnnpack_result.contiguous(), rtol=1e-2, atol=1e-3)
 
 @unittest.skipUnless(torch.backends.xnnpack.enabled,
                      " XNNPACK must be enabled for these tests."
@@ -224,6 +290,114 @@ class TestXNNPACKSerDes(TestCase):
                                                   strides, paddings, dilations, groups))
         scripted_conv2d_clamp_prepacked = torch.jit.script(Conv2DPrePacked(
             weight, bias, strides, paddings, dilations, groups))
+        ref_result = scripted_conv2d(input_data)
+        xnnpack_result = scripted_conv2d_clamp_prepacked(input_data)
+        torch.testing.assert_allclose(ref_result, xnnpack_result, rtol=1e-2, atol=1e-3)
+
+        # Serialize the modules and then deserialize
+        input_data = torch.rand((batch_size, input_channels, height, width))
+        if (format is not None):
+            input_data = input_data.contiguous(memory_format=format)
+        buffer = io.BytesIO()
+        torch.jit.save(scripted_conv2d, buffer)
+        buffer.seek(0)
+        deserialized_conv2d = torch.jit.load(buffer)
+        buffer = io.BytesIO()
+        torch.jit.save(scripted_conv2d_clamp_prepacked, buffer)
+        buffer.seek(0)
+        deserialized_conv2d_clamp_prepacked = torch.jit.load(buffer)
+        ref_result = deserialized_conv2d(input_data)
+        xnnpack_result = deserialized_conv2d_clamp_prepacked(input_data)
+        torch.testing.assert_allclose(ref_result, xnnpack_result, rtol=1e-2, atol=1e-3)
+
+    @given(batch_size=st.integers(0, 3),
+           input_channels_per_group=st.integers(1, 32),
+           height=st.integers(5, 64),
+           width=st.integers(5, 64),
+           output_channels_per_group=st.integers(1, 32),
+           groups=st.integers(1, 16),
+           kernel_h=st.integers(1, 7),
+           kernel_w=st.integers(1, 7),
+           stride_h=st.integers(1, 2),
+           stride_w=st.integers(1, 2),
+           pad_h=st.integers(0, 2),
+           pad_w=st.integers(0, 2),
+           output_pad_h=st.integers(0, 2),
+           output_pad_w=st.integers(0, 2),
+           dilation=st.integers(1, 2),
+           use_bias=st.booleans(),
+           format=st.sampled_from([None, torch.preserve_format, torch.contiguous_format, torch.channels_last]))
+    def test_conv2d_transpose(self,
+                              batch_size,
+                              input_channels_per_group,
+                              height,
+                              width,
+                              output_channels_per_group,
+                              groups,
+                              kernel_h,
+                              kernel_w,
+                              stride_h,
+                              stride_w,
+                              pad_h,
+                              pad_w,
+                              output_pad_h,
+                              output_pad_w,
+                              dilation,
+                              use_bias,
+                              format):
+        class Conv2DT(torch.nn.Module):
+            def __init__(self, weight, bias, strides, paddings, output_paddings, dilations, groups):
+                super(Conv2DT, self).__init__()
+                self.weight = weight
+                self.bias = bias
+                self.strides = strides
+                self.paddings = paddings
+                self.output_paddings = output_paddings
+                self.dilations = dilations
+                self.groups = groups
+
+            def forward(self, x):
+                return F.conv_transpose2d(x, self.weight, self.bias,
+                                          self.strides, self.paddings, self.output_paddings, self.groups, self.dilations)
+
+        class Conv2DTPrePacked(torch.nn.Module):
+            def __init__(self, weight, bias, strides, paddings, output_paddings, dilations, groups):
+                super(Conv2DTPrePacked, self).__init__()
+                self.packed_weight_bias = torch.ops.prepacked.conv2d_transpose_clamp_prepack(weight, bias,
+                                                                                             strides, paddings,
+                                                                                             output_paddings,
+                                                                                             dilations, groups)
+
+            def forward(self, x):
+                return torch.ops.prepacked.conv2d_transpose_clamp_run(x, self.packed_weight_bias)
+
+        input_channels = input_channels_per_group * groups
+        output_channels = output_channels_per_group * groups
+        kernels = (kernel_h, kernel_w)
+        strides = (stride_h, stride_w)
+        paddings = (pad_h, pad_w)
+        output_paddings = (output_pad_h, output_pad_w)
+        dilations = (dilation, dilation)
+        assume(height + 2 * paddings[0] >=
+               dilations[0] * (kernels[0] - 1) + 1)
+        assume(width + 2 * paddings[1] >=
+               dilations[1] * (kernels[1] - 1) + 1)
+        assume((output_pad_h < stride_h) and (output_pad_h < dilation))
+        assume((output_pad_w < stride_w) and (output_pad_w < dilation))
+
+        input_data = torch.rand((batch_size, input_channels, height, width))
+        if (format is not None):
+            input_data = input_data.contiguous(memory_format=format)
+        weight = torch.rand((input_channels, output_channels_per_group, kernel_h, kernel_w))
+        bias = None
+        if use_bias:
+            bias = torch.rand((output_channels))
+
+        scripted_conv2d = torch.jit.script(Conv2DT(weight, bias,
+                                                   strides, paddings,
+                                                   output_paddings, dilations, groups))
+        scripted_conv2d_clamp_prepacked = torch.jit.script(Conv2DTPrePacked(
+            weight, bias, strides, paddings, output_paddings, dilations, groups))
         ref_result = scripted_conv2d(input_data)
         xnnpack_result = scripted_conv2d_clamp_prepacked(input_data)
         torch.testing.assert_allclose(ref_result, xnnpack_result, rtol=1e-2, atol=1e-3)
@@ -454,14 +628,17 @@ class TestXNNPACKRewritePass(TestCase):
         kernel_h = kernel_w = 3
         stride_h = stride_w = 1
         pad_h = pad_w = 1
+        output_pad_h = output_pad_w = 0
         dilation = 1
         input_channels = input_channels_per_group * groups
         output_channels = output_channels_per_group * groups
         kernels = (kernel_h, kernel_w)
         strides = (stride_h, stride_w)
         paddings = (pad_h, pad_w)
+        output_paddings = (output_pad_h, output_pad_w)
         dilations = (dilation, dilation)
         conv_weight_shape = (output_channels, input_channels_per_group, kernel_h, kernel_w)
+        conv_transpose_weight_shape = (input_channels, output_channels_per_group, kernel_h, kernel_w)
         conv_bias_shape = (output_channels)
 
         class Conv2D(torch.nn.Module):
@@ -478,11 +655,33 @@ class TestXNNPACKRewritePass(TestCase):
                 return F.conv2d(x, self.weight, self.bias,
                                 self.strides, self.paddings, self.dilations, self.groups)
 
+        class Conv2DT(torch.nn.Module):
+            def __init__(self):
+                super(Conv2DT, self).__init__()
+                self.weight = torch.nn.Parameter(torch.Tensor(torch.rand(conv_transpose_weight_shape)), requires_grad=False)
+                self.bias = torch.nn.Parameter(torch.Tensor(torch.rand(conv_bias_shape)), requires_grad=False)
+                self.strides = strides
+                self.paddings = paddings
+                self.output_paddings = output_paddings
+                self.dilations = dilations
+                self.groups = groups
+
+            def forward(self, x):
+                return F.conv_transpose2d(x, self.weight, self.bias,
+                                          self.strides, self.paddings, self.output_paddings, self.groups, self.dilations)
+
+
         data_shape = (batch_size, input_channels, height, width)
         pattern_count_map = {"Tensor = aten::conv2d": -1,
                              "prepacked::conv2d_clamp_prepack": 1,
                              "prepacked::conv2d_clamp_run": 1}
         TestXNNPACKRewritePass.validate_transformed_module(Conv2D(), pattern_count_map, data_shape)
+
+        transpose_data_shape = (batch_size, input_channels, height, width)
+        transpose_pattern_count_map = {"Tensor = aten::conv_transpose2d": -1,
+                                       "prepacked::conv2d_transpose_clamp_prepack": 1,
+                                       "prepacked::conv2d_transpose_clamp_run": 1}
+        TestXNNPACKRewritePass.validate_transformed_module(Conv2DT(), transpose_pattern_count_map, data_shape)
 
         input_data = torch.rand((batch_size, input_channels, height, width))
         conv_weight = torch.rand((output_channels, input_channels_per_group, kernel_h, kernel_w))
