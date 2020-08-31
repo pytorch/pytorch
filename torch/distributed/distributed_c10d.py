@@ -1319,6 +1319,7 @@ def gather_object(obj, object_gather_list=None, dst=0, group=group.WORLD):
         tensor_size = object_size_list[i]
         object_gather_list[i] = _tensor_to_object(tensor, tensor_size)
 
+
 def broadcast_object(obj, src, group=group.WORLD):
     """
     Broadcasts picklable object ``obj`` to the whole group. Similar to
