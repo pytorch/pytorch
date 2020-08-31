@@ -97,6 +97,16 @@
 # like 'grad_output', and (2) the gradient to multiply with is always
 # called 'grad' (even though it really is a grad-grad).
 #
+# You can also add forward derivative definition by defining a formula for
+# a returned value (in general "result" if the name is not specified). This
+# formula works the same way as the backward one and advanced implementations
+# should also be placed in the FunctionsManual file.
+# Note that the forward derivative can be automatically generated in two cases:
+#     - if your function is linear (NOT affine or multi-linear), then you can
+#       specify so by just using the string "auto_linear" for the formula.
+#     - if your function is applied element wise (and has a single input), you
+#       can specify so by just using the string "element_wise" for the formula.
+#
 # NB: There are a number of gradient definitions in here which are bogus
 # (implemented using zeros_like).  These gradients are (hopefully) not
 # used by our frontend.  You MUST check the frontend code; search for
