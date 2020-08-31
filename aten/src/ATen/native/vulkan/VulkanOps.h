@@ -65,6 +65,18 @@ void avg_pool2d(
     const int padH,
     const int padW);
 
+VulkanTensor transpose(
+    const VulkanTensor& input,
+    const int64_t dim0,
+    const int64_t dim1);
+
+VulkanTensor slice(
+    const VulkanTensor& input,
+    const int64_t dim,
+    const int64_t start,
+    const int64_t end,
+    const int64_t step);
+
 VulkanTensor reshape_copy(
     const VulkanTensor& input,
     std::vector<int64_t> shape);
