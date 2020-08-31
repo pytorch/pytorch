@@ -155,7 +155,7 @@ def parse_type_line(type_line, rcb, loc):
     try:
         ret_ann = eval(ret_ann_str, {}, EvalEnv(rcb))  # noqa: P204
     except (NameError, SyntaxError) as e:
-        raise RuntimeError("Failed to parse the return type of a type annotation: {}".format(str(e))) from e
+        raise RuntimeError("Failed to parse the return type of a type annotation") from e
 
     arg_types = [ann_to_type(ann, loc) for ann in arg_ann]
     return arg_types, ann_to_type(ret_ann, loc)
