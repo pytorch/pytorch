@@ -257,7 +257,12 @@ Context::Context(const bool enable_validation_layers)
       physical_device_limits_(query_physical_device_physical_device_limits(physical_device())),
       compute_queue_family_index_(query_compute_queue_family_index(physical_device())),
       device_(create_device(physical_device(), compute_queue_family_index_), &VK_DELETER(Device)),
-      queue_(acquire_queue(device(), compute_queue_family_index_)) {
+      queue_(acquire_queue(device(), compute_queue_family_index_)),
+      command_(device()),
+      shader_(device()),
+      pipeline_(device()),
+      descriptor_(device()),
+      resource_(instance(), physical_device(), device()) {
 }
 
 Context::Debug::Debug(const VkInstance instance)
