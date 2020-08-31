@@ -72,8 +72,3 @@ class Interpreter : public InterpreterImpl {
   }
   Interpreter(const Interpreter&) = delete;
 };
-
-void init();
-void finalize();
-
-const Model load(const char* filename);

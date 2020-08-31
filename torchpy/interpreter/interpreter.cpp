@@ -190,7 +190,6 @@ extern "C" void initialize_interface(InterpreterImpl* s) {
 #undef INITIALIZE_MEMBER
 }
 
-
 static size_t load_model(const char* filename) {
   PyGILState_STATE gstate = PyGILState_Ensure();
   // PyEval_RestoreThread(mainThreadState); // Acquire GIL, resume our state

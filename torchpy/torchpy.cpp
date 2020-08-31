@@ -5,39 +5,49 @@
 #include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <iostream>
+#include <memory>
 #include <mutex>
 #include <thread>
 #include "interpreter.h"
 
 namespace torchpy {
 
-std::vector<Interpreter> interpreters;
+std::vector<std::shared_ptr<Interpreter>> interpreters;
+std::mutex interpreters_mtx;
+size_t num_interpreters = 4;
 
 void init() {
-  // interpreters.push_back(Interpreter());
-
-  // // Make loader importable
-  // for (auto interp : interpreters) {
-  //   interp.run_some_python("import sys; sys.path.append('torchpy')");
-  // }
+  for (size_t i = 0; i < num_interpreters; i++) {
+    interpreters.push_back(std::make_shared<Interpreter>());
+  }
 }
 
 void finalize() {
   interpreters.clear();
 }
 
-bool load(const char* filename) {
+size_t load(const char* filename) {
   // for now just load all models into all interpreters
   // eventually, we'll share/dedup tensor data
-  // for (auto interp : interpreters) {
-  // interp.load_model(filename);
-  // }
-  return true;
+  size_t model_id;
+  for (auto interp : interpreters) {
+    model_id = interp->load_model(filename);
+  }
+  return model_id;
 }
 
-at::Tensor forward(at::Tensor input) {
-  // at::Tensor output = interpreters[0].forward(input);
-  // return output;
-  return input;
+at::Tensor forward(size_t model_id, at::Tensor input) {
+  interpreters_mtx.lock();
+  auto interp = interpreters.back();
+  interpreters.pop_back();
+  interpreters_mtx.unlock();
+
+  at::Tensor output = interp->forward_model(model_id, input);
+
+  interpreters_mtx.lock();
+  interpreters.push_back(interp);
+  interpreters_mtx.unlock();
+
+  return output;
 }
 } // namespace torchpy
