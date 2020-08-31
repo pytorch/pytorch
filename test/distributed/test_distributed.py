@@ -868,14 +868,14 @@ class _DistTestBase(object):
                 work = group_id.allreduce([tensor], opts)
 
             # Calling result right the work is finished should throw exception.
-           #  Here we have a race condition, we may not assume the work is not
-           # finished by the time we run next lines.
+            # Here we have a race condition, we may not assume the work is not
+            # finished by the time we run next lines.
             throws_exception = False
             try:
                 work.result()
             except RuntimeError:
                 throws_exception = True
-            EXPECT_TRUE(throws_exception or work.is_completed())
+            self.assertTrue(throws_exception or work.is_completed())
 
             work.wait()
 
