@@ -481,8 +481,7 @@ class TensorExprFuser {
 
     for (auto n : nodes_to_merge) {
       GRAPH_UPDATE("Merging ", getHeader(n));
-      SubgraphUtils::mergeNodeIntoSubgraph(n, fusion_group);
-      // mergeNodeIntoSubgraphAndUpdateAliasing(n, fusion_group);
+      mergeNodeIntoSubgraphAndUpdateAliasing(n, fusion_group);
     }
     return fusion_group;
   }

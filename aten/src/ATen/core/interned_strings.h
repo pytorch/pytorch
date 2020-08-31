@@ -215,6 +215,10 @@ namespace c10 {
   _(aten, list)                      \
   _(aten, wait)                      \
   _(aten, save)                      \
+  _(aten, sub)                       \
+  _(aten, sub_)                      \
+  _(aten, subtract)                  \
+  _(aten, subtract_)                 \
   _(aten, keys)                      \
   _(aten, ord)                       \
   _(aten, chr)                       \
@@ -280,6 +284,7 @@ namespace c10 {
   _(onnx, SequenceConstruct)         \
   _(onnx, SequenceEmpty)             \
   _(onnx, SequenceInsert)            \
+  _(onnx, SequenceErase)             \
   _(onnx, ConcatFromSequence)        \
   _(onnx, Identity)                  \
   _(onnx, SoftmaxCrossEntropyLoss)   \
