@@ -748,7 +748,7 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
         # only if offset is zero we can attempt the legacy tar file loader
         try:
             return legacy_load(f)
-        except tarfile.TarError as e:
+        except tarfile.TarError:
             if _is_zipfile(f):
                 # .zip is used for torch.jit.save and will throw an un-pickling error here
                 raise RuntimeError(
