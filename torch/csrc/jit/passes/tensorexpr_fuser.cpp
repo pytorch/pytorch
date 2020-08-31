@@ -81,6 +81,7 @@ bool isSupported(Node* node) {
     case aten::addcmul:
     case aten::neg:
     case aten::reciprocal:
+    case aten::sum:
     case aten::expm1:
     case aten::lgamma:
     case aten::unsqueeze:
