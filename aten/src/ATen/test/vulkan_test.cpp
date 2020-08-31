@@ -115,7 +115,7 @@ TEST(VulkanTest, add_) {
 }
 
 TEST(VulkanTest, mulScalar) {
-  if (!at::vulkan::is_available())
+  if (!at::is_vulkan_available())
     return;
   auto t_in = at::rand({3, 2, 2, 3}, at::device(at::kCPU).dtype(at::kFloat));
   const float other = 3.14;
@@ -133,7 +133,7 @@ TEST(VulkanTest, mulScalar) {
 }
 
 TEST(VulkanTest, addScalar) {
-  if (!at::vulkan::is_available())
+  if (!at::is_vulkan_available())
     return;
   auto t_in = at::rand({3, 2, 2, 3}, at::device(at::kCPU).dtype(at::kFloat));
   float* data = t_in.data_ptr<float>();
