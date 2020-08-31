@@ -2576,6 +2576,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(LenModel(), x, input_names=['input'], dynamic_axes={'input': {0: 'seq'}},
                       test_with_inputs=(torch.randn(5, 5),))
 
+    @skipIfUnsupportedMinOpsetVersion(9)
     def test_len_list(self):
         class LenListModel(torch.jit.ScriptModule):
             @torch.jit.script_method
