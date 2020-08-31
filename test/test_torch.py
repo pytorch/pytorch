@@ -13677,8 +13677,12 @@ class TestTorchDeviceType(TestCase):
         mat = torch.ones((2, 0), dtype=dtype, device=device)
         vec = torch.ones((0,), dtype=dtype, device=device)
         out = torch.empty((2,), dtype=dtype, device=device)
-        alpha = 6
-        beta = 3
+        if dtype.is_complex:
+            alpha = 6 + 7j
+            beta = 3 + 4j
+        else:
+            alpha = 6
+            beta = 3
         self.assertEqual(torch.full((2,), beta * value, dtype=dtype, device=device),
                          torch.addmv(input=input, mat=mat, vec=vec, alpha=alpha, beta=beta))
         self.assertEqual(torch.full((2,), beta * value, dtype=dtype, device=device),
