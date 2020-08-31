@@ -1,10 +1,9 @@
 #include <torch/csrc/jit/mobile/function.h>
+#include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/mobile/interpreter.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/runtime/operator.h>
-#include <torch/csrc/jit/runtime/vararg_functions.h>
 #include <torch/custom_class_detail.h>
-#include <torch/library.h>
 
 namespace torch {
 namespace jit {
@@ -29,7 +28,8 @@ void Function::append_instruction(OpCode op, int X, int N) {
 
 bool Function::append_operator(
     const std::string& name,
-    const std::string& overload_name) {
+    const std::string& overload_name,
+    int64_t model_version) {
   // Keep the original opname in code_
   code_->op_names_.emplace_back(name, overload_name);
   auto opname = code_->op_names_.back();
@@ -47,6 +47,19 @@ bool Function::append_operator(
     } else {
       return false;
     }
+  }
+
+  if (model_version == 0x3L &&
+      model_version < caffe2::serialize::kProducedBytecodeVersion &&
+      opname == c10::OperatorName("aten::_convolution", "")) {
+    // A default-value argument will be added in
+    // https://github.com/pytorch/pytorch/pull/40737. This wrapper is used to
+    // handle backward compatibility, where there is no default bool value in
+    // old models.
+    fn = [fn](Stack& stack) {
+      stack.push_back(true);
+      fn(stack);
+    };
   }
 
   code_->operators_.emplace_back(fn);
