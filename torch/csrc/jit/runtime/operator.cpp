@@ -239,6 +239,9 @@ bool printerHasSpecialCaseFor(Symbol sym) {
       prim::MMBatchSide, // used as an optimization
       prim::Store, // used in interpreter only
       prim::profile, // used in interpreter only
+      prim::profile_optional, // used in interpreter only
+      prim::TypeCheck, // used in interpreter only
+      prim::FallbackGraph, // converted into prim::CallFunction
 
   };
 
@@ -293,6 +296,8 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::GetAttr,
       prim::SetAttr,
       prim::profile,
+      prim::profile_optional,
+      prim::TypeCheck,
       prim::Print,
       prim::CallFunction,
       prim::CallMethod,
@@ -303,6 +308,7 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::rpc_async,
       prim::Enter,
       prim::Exit,
+      prim::FallbackGraph,
   };
 
   // Operators that should not be used by alias analysis

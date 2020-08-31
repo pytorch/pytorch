@@ -61,6 +61,23 @@ class TestUtilityFuns(TestCase):
         assert "Provided key invalid_name2 for dynamic axes is not a valid input/output name" in messages
         assert len(messages) == 2
 
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_split_to_slice(self):
+        class SplitModule(torch.nn.Module):
+            def forward(self, x, y, t):
+                splits = (x.size(1), y.size(1))
+                out, out2 = torch.split(t, splits, dim=1)
+                return out, out2
+
+        _set_opset_version(self.opset_version)
+        _set_operator_export_type(OperatorExportTypes.ONNX)
+        x = torch.randn(2, 3)
+        y = torch.randn(2, 4)
+        t = torch.randn(2, 7)
+        graph, _, _ = utils._model_to_graph(SplitModule(), (x, y, t))
+        for node in graph.nodes():
+            assert node.kind() != "onnx::SplitToSequence"
+
     def test_constant_fold_transpose(self):
         class TransposeModule(torch.nn.Module):
             def forward(self, x):
@@ -503,6 +520,25 @@ class TestUtilityFuns(TestCase):
         # verify that the model state is preserved
         assert model.training == old_state
 
+    def test_diagnose_export_mode(self):
+        class MyModule(torch.nn.Module):
+            def forward(self, x):
+                return torch.cumsum(x, dim=0)
+
+        model = MyModule()
+        x = torch.randn(2, 3, 4)
+        f = io.BytesIO()
+
+        # run export in diagnose mode
+        graph, unsupported_ops = torch.onnx._diagnose_export(model, (x,), f,
+                                                             opset_version=9)
+        iter = graph.nodes()
+        assert next(iter).kind() == "onnx::Constant"
+        assert next(iter).kind() == "prim::Constant"
+        assert next(iter).kind() == "aten::cumsum"
+        assert len(unsupported_ops) == 1
+        assert unsupported_ops == ['aten::cumsum']
+
     def test_dropout_training(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -827,7 +863,7 @@ class TestUtilityFuns(TestCase):
                           opset_version=self.opset_version, training=torch.onnx.TrainingMode.TRAINING)
         ort_sess = onnxruntime.InferenceSession(f.getvalue())
         ort_inputs = {ort_sess.get_inputs()[0].name: x.cpu().numpy()}
-        ort_outs1 = ort_sess.run(None, ort_inputs)      
+        ort_outs1 = ort_sess.run(None, ort_inputs)
         f = io.BytesIO()
         torch.onnx.export(model, (x,), f,
                           opset_version=self.opset_version, training=torch.onnx.TrainingMode.EVAL)
