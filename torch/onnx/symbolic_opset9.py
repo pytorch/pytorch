@@ -1725,8 +1725,8 @@ def to(g, self, *args):
 
 def repeat(g, self, repeats):
     dtype = 4  # int64
-    shape_ = ones_like(g, repeats, dtype)
-    self = expand(g, self, shape_, None)
+    shape_ = sym_help._ones_like_helper(g, repeats, dtype, None, None)
+    self = g.op("Expand", self, shape_)
     return g.op("Tile", self, repeats)
 
 
