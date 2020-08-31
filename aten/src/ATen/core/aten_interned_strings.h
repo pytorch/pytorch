@@ -142,8 +142,10 @@ _(aten, _th_median) \
 _(aten, _th_mode) \
 _(aten, _th_prod) \
 _(aten, _th_sigmoid) \
+_(aten, _th_std) \
 _(aten, _th_sum) \
 _(aten, _th_tanh) \
+_(aten, _th_var) \
 _(aten, _thnn_fused_gru_cell) \
 _(aten, _thnn_fused_gru_cell_backward) \
 _(aten, _thnn_fused_lstm_cell) \

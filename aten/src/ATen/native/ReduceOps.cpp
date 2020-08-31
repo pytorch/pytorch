@@ -876,6 +876,14 @@ Tensor var(const Tensor& self, bool unbiased) {
   if (trivial_return.has_value()) {
     return trivial_return.value();
   }
+
+  // NOTE: CPU performance significantly regressed when attempting to port to ATen, 
+  //   so this dispatches differently based on device type. 
+  //   See https://github.com/pytorch/pytorch/pull/43858.
+  if (self.device().type() == kCPU) {
+    return at::_var(self, unbiased);
+  }
+
   Tensor result = at::empty({0}, self.options());
   return std_var_out(result, self, std::vector<int64_t>{}, unbiased, false, false);
 }
@@ -900,6 +908,14 @@ Tensor std(const Tensor& self, bool unbiased) {
   if (trivial_return.has_value()) {
     return trivial_return.value();
   }
+
+  // NOTE: CPU performance significantly regressed when attempting to port to ATen, 
+  //   so this dispatches differently based on device type. 
+  //   See https://github.com/pytorch/pytorch/pull/43858.
+  if (self.device().type() == kCPU) {
+    return at::_std(self, unbiased);
+  }
+
   Tensor result = at::empty({0}, self.options());
   return std_var_out(result, self, std::vector<int64_t>{}, unbiased, false, true);
 }

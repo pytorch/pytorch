@@ -11955,7 +11955,8 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(torch_result, numpy_result, exact_dtype=False)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    @dtypesIfCUDA(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    @dtypes(torch.float, torch.double)
     def test_var_vs_numpy(self, device, dtype):
         _size = (20, 20)
 
@@ -11967,7 +11968,8 @@ class TestTorchDeviceType(TestCase):
             self._compare_std_var_with_numpy('var', device, dtype, *test_case)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    @dtypesIfCUDA(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    @dtypes(torch.float, torch.double)
     def test_std_vs_numpy(self, device, dtype):
         _size = (20, 20)
 
