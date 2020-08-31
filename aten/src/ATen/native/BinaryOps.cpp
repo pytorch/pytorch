@@ -7,6 +7,7 @@
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/TensorIterator.h>
+#include <ATen/native/TypeProperties.h>
 
 #include <torch/library.h>
 
@@ -214,28 +215,15 @@ Tensor& true_divide_(Tensor& self, const Tensor& divisor) {
 }
 
 Tensor& floor_divide_out(Tensor& result, const Tensor& self, const Tensor& other) {
-  auto iter = TensorIterator::binary_op(result, self, other);
-  div_stub(iter.device_type(), iter);
-
-  if (result.is_floating_point()) {
-    result.trunc_();
-  }
-
+  auto r = self.true_divide(other).floor_();
+  result.resize_(r.sizes().vec());
+  result.copy_(r);
   return result;
 }
 
 Tensor floor_divide(const Tensor& self, const Tensor& other) {
-  Tensor result;
-  auto iter = TensorIterator::binary_op(result, self, other);
-
-  div_stub(iter.device_type(), iter);
-
-  auto out = iter.output();
-  if (out.is_floating_point()) {
-    out.trunc_();
-  }
-
-  return out;
+  const auto result_dtype = at::native::result_type(TensorList{self, other});
+  return self.true_divide(other).floor_().to(result_dtype);
 }
 
 Tensor& floor_divide_(Tensor& self, const Tensor& other) {

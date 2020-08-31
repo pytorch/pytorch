@@ -16449,6 +16449,29 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         res = scale * x
         self.assertEqual(res, expected.to(dtype), atol=0., rtol=0.)
 
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_floor_divide_vs_numpy(self, device):
+        x_float = torch.randn(100, device=device, dtype=torch.float32) * 200
+        x_long = torch.randint(-100, 100, (100,), device=device, dtype=torch.int64)
+        y_pos_float = torch.arange(1, 101, device=device, dtype=torch.float32)
+        y_neg_float = torch.arange(-100, 0, device=device, dtype=torch.float32)
+        y_pos_long = torch.arange(1, 101, device=device, dtype=torch.int64)
+        y_neg_long = torch.arange(-100, 0, device=device, dtype=torch.int64)
+
+        for dividend, divisor in product((x_float, x_long),
+                                         (y_pos_float, y_neg_float,
+                                          y_pos_long, y_neg_long)):
+            torch_result = dividend // divisor
+
+            result_type = torch.result_type(dividend, divisor)
+            out = torch.empty(0, device=device, dtype=result_type)
+            torch_result_out = torch.floor_divide(dividend, divisor, out=out)
+
+            np_result = dividend.cpu().numpy() // divisor.cpu().numpy()
+
+            self.assertEqual(torch_result, np_result)
+            self.assertEqual(out, torch_result)
+
     @dtypesIfCUDA(*set(torch.testing.get_all_math_dtypes('cuda')) - {torch.complex64, torch.complex128})
     @dtypes(*set(torch.testing.get_all_math_dtypes('cpu')) - {torch.complex64, torch.complex128})
     def test_floor_divide_tensor(self, device, dtype):
@@ -16456,7 +16479,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         y = torch.arange(1, 11, dtype=dtype, device=device)
 
         z = x // y
-        z_alt = torch.trunc(x.double() / y.double()).to(dtype)
+        z_alt = torch.floor(x.double() / y.double()).to(dtype)
 
         self.assertEqual(z.dtype, x.dtype)
         self.assertEqual(z, z_alt)
@@ -16467,7 +16490,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         x = torch.randn(100, device=device).mul(10).to(dtype)
 
         z = x // 3
-        z_alt = torch.tensor([math.trunc(v.item() / 3.) for v in x], dtype=x.dtype, device=device)
+        z_alt = torch.tensor([v.item() // 3. for v in x], dtype=x.dtype, device=device)
 
         self.assertEqual(z.dtype, x.dtype)
         self.assertEqual(z, z_alt)
@@ -17427,14 +17450,6 @@ else:
         y = torch.tensor(1, device=device)
         with self.assertRaisesRegex(RuntimeError, 'zero-dimensional.*cannot be concatenated'):
             torch.cat([x, y])
-
-    @onlyCPU
-    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
-    def test_div_zero(self, device, dtype):
-        a = torch.tensor([0, 1], dtype=dtype, device=device)
-        b = torch.tensor([0, 1], dtype=dtype, device=device)
-        with self.assertRaisesRegex(RuntimeError, 'ZeroDivisionError'):
-            a // b
 
     @onlyCPU
     def test_cat_bad_input_sizes(self, device):

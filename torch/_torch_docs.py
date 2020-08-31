@@ -2694,20 +2694,26 @@ Example::
     tensor([-1.,  1., -1., -1.])
 """.format(**common_args))
 
-add_docstr(torch.floor_divide,
-           r"""
+add_docstr(torch.floor_divide, r"""
 floor_divide(input, other, *, out=None) -> Tensor
 
-Return the division of the inputs rounded down to the nearest integer. See :func:`torch.div`
-for type promotion and broadcasting rules.
+Computes the floor of :attr:`input` divided by :attr:`other`.
 
 .. math::
     \text{{out}}_i = \left\lfloor \frac{{\text{{input}}_i}}{{\text{{other}}_i}} \right\rfloor
 
 """ + r"""
+
+Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
+:ref:`type promotion <type-promotion-doc>`, and integer and float inputs.
+
+.. note:: Floor division in PyTorch is like floor division in Python
+          and Numpy. It is different from integer division in C++, which
+          truncates the quotient instead of taking its floor.
+
 Args:
-    input (Tensor): the numerator tensor
-    other (Tensor or Scalar): the denominator
+    input (Tensor): the dividend
+    other (Tensor or Scalar): the divisor
 
 Keyword args:
     {out}
@@ -6716,7 +6722,7 @@ Subtracts :attr:`other`, scaled by :attr:`alpha`, from :attr:`input`.
     \text{{out}}_i = \text{{input}}_i - \text{{alpha}} \times \text{{other}}_i
 """ + r"""
 
-Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`, 
+Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
 :ref:`type promotion <type-promotion-doc>`, and integer, float, and complex inputs.
 
 Args:
