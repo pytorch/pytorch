@@ -291,7 +291,7 @@ Tensor& sgn_out(Tensor& result, const Tensor& self) {
   }
 }
 
-Tensor sgn(const Tensor& self) { return unary_op_impl_(self, at::sgn_out); }
+Tensor sgn(const Tensor& self) { return unary_op_impl(self, at::sgn_out); }
 Tensor& sgn_(Tensor& self) { return unary_op_impl_(self, at::sgn_out); }
 
 Tensor& sin_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, sin_stub); }
