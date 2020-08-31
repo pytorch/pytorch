@@ -52,7 +52,8 @@ void testAllreduce(int iter = 1000) {
     auto data = allTensors[i][0].data<float>();
     for (auto j = 0; j < allTensors[i][0].numel(); ++j) {
       if (data[j] != expected) {
-        throw std::runtime_error("BOOM!");
+        EXPECT_EQ(data[j], expected)
+            << "Allreduce ouputs do not match expected outputs";
       }
     }
   }
@@ -88,7 +89,8 @@ void testBroadcast(int iter = 10000) {
     auto data = allTensors[i][0].data<float>();
     for (auto j = 0; j < allTensors[i][0].numel(); ++j) {
       if (data[j] != expected) {
-        throw std::runtime_error("BOOM!");
+        EXPECT_EQ(data[j], expected)
+            << "Broadcast ouputs do not match expected outputs";
       }
     }
   }
@@ -123,7 +125,8 @@ void testReduce(int iter = 10000) {
       auto data = allTensors[i][0].data<float>();
       for (auto j = 0; j < allTensors[i][0].numel(); ++j) {
         if (data[j] != expected) {
-          throw std::runtime_error("BOOM!");
+          EXPECT_EQ(data[j], expected)
+              << "Reduce ouputs do not match expected outputs";
         }
       }
     }
@@ -167,7 +170,8 @@ void testAllgather(int iter = 10000) {
       auto data = allOutputTensors[i][0][j].data<float>();
       for (auto k = 0; k < allOutputTensors[i][0][j].numel(); ++k) {
         if (data[k] != expected) {
-          throw std::runtime_error("BOOM!");
+          EXPECT_EQ(data[k], expected)
+              << "Allgather ouputs do not match expected outputs";
         }
       }
     }
@@ -216,7 +220,8 @@ void testGather(int iter = 10000) {
         auto data = allOutputTensors[i][0][j].data<float>();
         for (auto k = 0; k < allOutputTensors[i][0][j].numel(); ++k) {
           if (data[k] != expected) {
-            throw std::runtime_error("BOOM!");
+            EXPECT_EQ(data[k], expected)
+                << "Gather ouputs do not match expected outputs";
           }
         }
       }
@@ -266,7 +271,8 @@ void testScatter(int iter = 1) {
       auto data = allTensors[i][0].data<float>();
       for (auto k = 0; k < allTensors[i][0].numel(); ++k) {
         if (data[k] != expected) {
-          throw std::runtime_error("BOOM!");
+          EXPECT_EQ(data[k], expected)
+              << "Scatter ouputs do not match expected outputs";
         }
       }
     }
@@ -325,7 +331,8 @@ void testSendRecv(bool recvAnysource, int iter = 10000) {
       auto data = allTensors[i][0].data<float>();
       for (auto j = 0; j < allTensors[i][0].numel(); ++j) {
         if (data[j] != expected) {
-          throw std::runtime_error("BOOM!");
+          EXPECT_EQ(data[j], expected)
+              << "SendRecv ouputs do not match expected outputs";
         }
       }
     }
@@ -338,7 +345,7 @@ class ProcessGroupMPITest : public ::testing::Test {
 #ifdef MPIEXEC
     // If we are within an openmpi mpirun, then skip the exec
     if (!std::getenv("OMPI_COMM_WORLD_SIZE")) {
-      std::cout << "Execute mpiexec from: " << STR(MPIEXEC) << std::endl;
+      LOG(INFO) << "Execute mpiexec from: " << STR(MPIEXEC);
       execl(STR(MPIEXEC), "-np 2", argv[0], (char*)nullptr);
     }
 #endif
@@ -348,7 +355,7 @@ class ProcessGroupMPITest : public ::testing::Test {
 #ifdef MPIEXEC
     return false;
 #else
-    std::cout << "MPI executable not found, skipping test" << std::endl;
+    LOG(INFO) << "MPI executable not found, skipping test";
     return true;
 #endif
   }
