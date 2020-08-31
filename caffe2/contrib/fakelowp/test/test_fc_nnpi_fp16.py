@@ -4,7 +4,6 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 import numpy as np
-import time
 import unittest
 
 import caffe2.python.fakelowp.init_shared_libs  # noqa
@@ -24,6 +23,7 @@ GLOW_MATMUL_RTOL = 0
 
 class FCTest(serial.SerializedTestCase):
     @given(seed=st.integers(0, 65534))
+    @settings(deadline=None)
     def test_clip(self, seed):
         np.random.seed(seed)
         m, n, k = 8, 8, 8
@@ -76,15 +76,18 @@ class FCTest(serial.SerializedTestCase):
         Y_glow = workspace.FetchBlob("Y")
         np.testing.assert_allclose(Y_glow, np.full((m, n), 65504.0, dtype))
 
-    @given(seed=st.integers(0, 65534))
-    def test_fc_exercise(self, seed):
+    @given(
+        m=st.integers(4, 50),
+        k=st.integers(4, 50),
+        n=st.integers(4, 50),
+        seed=st.integers(0, 65534)
+    )
+    @settings(deadline=None)
+    def test_fc_exercise(self, m, k, n, seed):
         """ Test that the matmul engine is working, this doesn't test
             precision
         """
         np.random.seed(seed)
-        m = np.random.randint(low=4, high=50)
-        k = np.random.randint(low=4, high=50)
-        n = np.random.randint(low=4, high=50)
         dtype = np.float32
         pred_net = caffe2_pb2.NetDef()
         pred_net.name = "pred"
@@ -130,18 +133,24 @@ class FCTest(serial.SerializedTestCase):
             workspace.RunNet(pred_net.name)
             Y_c2 = workspace.FetchBlob('Y')
             if not np.allclose(Y_c2, Y_glow):
-                print_test_debug_info("fc",
-                    {"seed": seed, "m": m, "k": k, "n": n, "X": X0, "W0": W0,
-                      "b0": b0, "Y_glow": Y_glow, "Y_c2": Y_c2,
-                     "diff": np.abs((Y_c2 - Y_glow) / Y_c2)})
+                print_test_debug_info("fc", {
+                    "seed": seed,
+                    "m": m,
+                    "k": k,
+                    "n": n,
+                    "X": X0,
+                    "W0": W0,
+                    "b0": b0,
+                    "Y_glow": Y_glow,
+                    "Y_c2": Y_c2,
+                    "diff": np.abs((Y_c2 - Y_glow) / Y_c2)})
                 assert(0)
 
-    @given(seed=st.integers(0, 65534))
-    def test_fc_numeric_cases(self, seed):
+    @settings(deadline=None, max_examples=1)
+    def test_fc_numeric_cases(self):
         """ Test numerics, use examples found from the unit test.
             Use Fp16FCAcc16NNPI as a reference.
         """
-        np.random.seed(seed)
         m = 1
         k = 20
         n = 1
@@ -163,7 +172,7 @@ class FCTest(serial.SerializedTestCase):
         pred_net_ref.external_output.append("Y")
         pred_net_ref.op.add().CopyFrom(
             core.CreateOperator(
-                "Fp16FCAcc16NNPI",
+                "Fp16FCAcc32NNPI",
                 ["X", "W0", "b0"],
                 ["Y"],
             )
@@ -194,37 +203,37 @@ class FCTest(serial.SerializedTestCase):
             1 if o.type == "Onnxifi" else 0 for o in pred_net_onnxified.op)
         np.testing.assert_equal(num_onnxified_ops, 1)
 
-        X0 = np.random.rand(m, k).astype(dtype) - 0.5
-        workspace.FeedBlob("X", X0)
+        X_inputs = [
+            np.array([[
+                -2.94921875e-01, -3.58642578e-01, -1.92871094e-01,
+                2.81250000e-01, -1.30126953e-01, 2.32696533e-02,
+                -4.55566406e-01, -2.31811523e-01, -1.95190430e-01,
+                -7.76977539e-02, -1.29394531e-01, 2.94677734e-01,
+                8.96453857e-04, 4.97314453e-01, -6.07604980e-02,
+                2.55371094e-01, 3.49853516e-01, -1.37695312e-01,
+                2.95410156e-01, -3.67187500e-01]], dtype=np.float32),
+            np.array([[
+                -0.4494629, -0.22192383, -0.1640625, 0.11480713,
+                -0.09851074, -0.02084351,
+                0.19091797, -0.17468262, -0.47485352, 0.07489014,
+                0.03897095, 0.00197601,
+                0.02835083, -0.27294922, 0.26757812, -0.20996094,
+                -0.31103516, -0.41601562,
+                0.09918213, -0.07696533]], dtype=np.float32),
+            np.array([[
+                0.01150513, -0.20507812, 0.46704102, 0.00906372,
+                0.19848633, 0.3720703,
+                0.46557617, -0.47436523, -0.35107422, -0.0362854,
+                -0.20812988, 0.41918945,
+                0.09716797, 0.19897461, 0.3876953, -0.0165863,
+                0.23535156, 0.29956055,
+                0.24389648, -0.23486328]], dtype=np.float32)
+        ]
+
+        # keep onnxifi happy by feeding something with a shape
+        workspace.FeedBlob("X", X_inputs[0])
         workspace.CreateNet(pred_net_onnxified)
         workspace.CreateNet(pred_net_ref)
-
-        X_inputs = [
-            np.array([[-2.94921875e-01, -3.58642578e-01, -1.92871094e-01,
-                        2.81250000e-01,
-                       -1.30126953e-01, 2.32696533e-02, -4.55566406e-01,
-                        -2.31811523e-01,
-                       -1.95190430e-01, -7.76977539e-02, -1.29394531e-01,
-                        2.94677734e-01,
-                       8.96453857e-04, 4.97314453e-01, -6.07604980e-02,
-                        2.55371094e-01,
-                       3.49853516e-01, -1.37695312e-01, 2.95410156e-01,
-                        -3.67187500e-01]], dtype=np.float32),
-            np.array([[-0.4494629, -0.22192383, -0.1640625, 0.11480713,
-                        -0.09851074, -0.02084351,
-                       0.19091797, -0.17468262, -0.47485352, 0.07489014,
-                        0.03897095, 0.00197601,
-                       0.02835083, -0.27294922, 0.26757812, -0.20996094,
-                       -0.31103516, -0.41601562,
-                       0.09918213, -0.07696533]], dtype=np.float32),
-            np.array([[0.01150513, -0.20507812, 0.46704102, 0.00906372,
-                        0.19848633, 0.3720703,
-                       0.46557617, -0.47436523, -0.35107422, -0.0362854,
-                        -0.20812988, 0.41918945,
-                       0.09716797, 0.19897461, 0.3876953, -0.0165863,
-                        0.23535156, 0.29956055,
-                       0.24389648, -0.23486328]], dtype=np.float32)
-        ]
 
         for i in range(len(X_inputs)):
             workspace.FeedBlob("X", X_inputs[i])
@@ -239,23 +248,33 @@ class FCTest(serial.SerializedTestCase):
 
             n_offenders = np.count_nonzero(rowdiff[rowdiff > GLOW_MATMUL_RTOL])
             if n_offenders > 0:
-                print_test_debug_info("fc",
-                    {"seed": seed, "iter": i, "m": m, "k": k, "n": n, "X": X0,
-                     "W0": W0, "b0": b0, "Y_glow": Y_glow, "Y_c2": Y_c2, 
-                     "diff": diff, "rowdiff": rowdiff})
+                print_test_debug_info("fc", {
+                    "seed": seed,
+                    "iter": i,
+                    "m": m,
+                    "k": k,
+                    "n": n,
+                    "X": X0,
+                    "W0": W0,
+                    "b0": b0,
+                    "Y_glow": Y_glow,
+                    "Y_c2": Y_c2,
+                    "diff": diff,
+                    "rowdiff": rowdiff})
                 assert(0)
 
-    @given(seed=st.integers(0, 65535))
-    @settings(max_examples=5)
-    def test_fc_num0(self, seed):
+    @settings(deadline=None)
+    @given(
+        m=st.integers(1, 50),
+        k=st.integers(1, 1000),
+        n=st.integers(1, 50),
+        seed=st.integers(0, 65534),
+        use_packed=st.integers(0, 2)
+    )
+    def test_fc_num0(self, seed, m, k, n, use_packed):
         """ Test numerics, fix a dimension and determine the ranges of error.
             Use Fp16FCAcc16 as a reference.
         """
-        np.random.seed(seed)
-        m = np.random.randint(low=4, high=50)
-        k = np.random.randint(low=4, high=1000)
-        n = np.random.randint(low=4, high=50)
-        use_packed = np.random.randint(2)
         W = "W_packed" if use_packed else "W0"
         dtype = np.float32
         pred_net = caffe2_pb2.NetDef()
@@ -275,7 +294,7 @@ class FCTest(serial.SerializedTestCase):
         pred_net_ref.external_output.append("Y")
         pred_net_ref.op.add().CopyFrom(
             core.CreateOperator(
-                "Fp16FCAcc16NNPI",
+                "Fp16FCAcc32NNPI",
                 ["X", W, "b0"],
                 ["Y"],
             )
@@ -311,28 +330,32 @@ class FCTest(serial.SerializedTestCase):
         workspace.CreateNet(pred_net_onnxified)
         workspace.CreateNet(pred_net_ref)
 
-        num_iterations = 10
-        for _ in range(num_iterations):
-            X0 = 100 * (np.random.rand(m, k) - 0.5).\
-                astype(np.float16).astype(np.float32)
-            workspace.FeedBlob("X", X0)
-            # Run Glow net
-            workspace.RunNet(pred_net_onnxified.name)
-            Y_glow = workspace.FetchBlob('Y')
-            # Run caffe2 net
-            workspace.RunNet(pred_net_ref.name)
-            Y_c2 = workspace.FetchBlob('Y')
+        workspace.RunNet(pred_net_onnxified.name)
+        Y_glow = workspace.FetchBlob('Y')
 
-            diff = np.abs((Y_c2 - Y_glow) / (Y_c2 + 1e-8))
-            rowdiff = np.max(diff, axis=1)
+        # Run caffe2 net
+        workspace.RunNet(pred_net_ref.name)
+        Y_c2 = workspace.FetchBlob('Y')
 
-            n_offenders = np.count_nonzero(rowdiff[rowdiff > GLOW_MATMUL_RTOL])
-            if n_offenders > 0:
-                print_test_debug_info("fc",
-                    {"seed": seed, "iter": _, "m": m, "k": k, "n": n, "X": X0,
-                     "W0": W0, "b0": b0, "Y_glow": Y_glow, "Y_c2": Y_c2, 
-                     "diff": diff, "rowdiff": rowdiff})
-                assert(0)
+        diff = np.abs((Y_c2 - Y_glow) / (Y_c2 + 1e-8))
+        rowdiff = np.max(diff, axis=1)
+
+        n_offenders = np.count_nonzero(rowdiff[rowdiff > GLOW_MATMUL_RTOL])
+        if n_offenders > 0:
+            print_test_debug_info("fc", {
+                "seed": seed,
+                "use_packed": use_packed,
+                "m": m,
+                "k": k,
+                "n": n,
+                "X": X0.shape,
+                "W0": W0.shape,
+                "b0": b0.shape,
+                "Y_glow": Y_glow,
+                "Y_c2": Y_c2,
+                "diff": diff,
+                "rowdiff": rowdiff})
+            assert(0)
 
 if __name__ == '__main__':
     unittest.main()

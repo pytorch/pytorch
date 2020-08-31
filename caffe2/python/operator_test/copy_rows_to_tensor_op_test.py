@@ -5,7 +5,7 @@ import logging
 import caffe2.python.hypothesis_test_util as hu
 import numpy as np
 from caffe2.python import core
-from hypothesis import given, strategies as st
+from hypothesis import given, settings, strategies as st
 
 
 logger = logging.getLogger(__name__)
@@ -52,6 +52,7 @@ class TestCopyRowsToTensor(hu.HypothesisTestCase):
         )
 
     @given(input_tensor=get_input_tensors(), **hu.gcs_cpu_only)
+    @settings(deadline=10000)
     def test_copy_rows_to_tensor_invalid_input(self, input_tensor, gc, dc):
         input_tensor = np.array(input_tensor).astype(np.float32)
         height = np.shape(input_tensor)[0]

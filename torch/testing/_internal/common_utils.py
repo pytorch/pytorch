@@ -389,7 +389,7 @@ def skipIfRocm(fn):
 
 # This decorator can be used for API tests that call torch.set_deterministic().
 # When the test is finished, it will restore the previous deterministic flag
-# setting. Also, if CUDA >= 10.2, this will set the environment variable 
+# setting. Also, if CUDA >= 10.2, this will set the environment variable
 # CUBLAS_WORKSPACE_CONFIG=:4096:8 so that the error associated with that setting
 # is not thrown during the test unless the test changes that variable on purpose.
 # The previous CUBLAS_WORKSPACE_CONFIG setting will also be restored once the
@@ -674,7 +674,7 @@ try:
             derandomize=True,
             suppress_health_check=[hypothesis.HealthCheck.too_slow],
             database=None,
-            max_examples=100,
+            max_examples=50,
             verbosity=hypothesis.Verbosity.normal))
     hypothesis.settings.register_profile(
         "dev",
@@ -906,7 +906,8 @@ class TestCase(expecttest.TestCase):
     #   arguments then wrap the function in a lambda or pass a partial function.
     # TODO: support bfloat16 comparisons
     # TODO: add args/kwargs for passing to assertEqual (e.g. rtol, atol)
-    def compare_with_numpy(self, torch_fn, np_fn, tensor_like, device=None, dtype=None):
+    def compare_with_numpy(self, torch_fn, np_fn, tensor_like,
+                           device=None, dtype=None, **kwargs):
         assert TEST_NUMPY
         assert dtype is not torch.bfloat16
 
@@ -931,7 +932,7 @@ class TestCase(expecttest.TestCase):
                 #   for example, the array has negative strides.
                 np_result = torch.from_numpy(np_result.copy())
 
-        self.assertEqual(np_result, torch_result)
+        self.assertEqual(np_result, torch_result, **kwargs)
 
     # Some analysis of tolerance by logging tests from test_torch.py can be found
     # in https://github.com/pytorch/pytorch/pull/32538.

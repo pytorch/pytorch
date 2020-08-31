@@ -137,14 +137,18 @@ class class_ {
   ///
   /// Currently, both the `get_state` and `set_state` callables must be
   /// C++ lambda expressions. They should have the following signatures,
-  /// where `CurClass` is the class you're registering and `T` is some object
+  /// where `CurClass` is the class you're registering and `T1` is some object
   /// that encapsulates the state of the object.
   ///
-  ///     __getstate__(intrusive_ptr<CurClass>) -> T
-  ///     __setstate__(T) -> intrusive_ptr<CurClass>
+  ///     __getstate__(intrusive_ptr<CurClass>) -> T1
+  ///     __setstate__(T2) -> intrusive_ptr<CurClass>
   ///
-  /// `T` must be an object that is convertable to IValue by the same rules
+  /// `T1` must be an object that is convertable to IValue by the same rules
   /// for custom op/method registration.
+  ///
+  /// For the common case, T1 == T2. T1 can also be a subtype of T2. An
+  /// example where it makes sense for T1 and T2 to differ is if __setstate__
+  /// handles legacy formats in a backwards compatible way.
   ///
   /// Example:
   ///
@@ -207,16 +211,17 @@ class class_ {
         getstate_schema.returns().size() == 1,
         "__getstate__ should return exactly one value for serialization. Got: ",
         format_getstate_schema());
+
     auto ser_type = getstate_schema.returns().at(0).type();
     auto setstate_schema = classTypePtr->getMethod("__setstate__").getSchema();
     auto arg_type = setstate_schema.arguments().at(1).type();
     TORCH_CHECK(
-        (*arg_type == *ser_type),
-        "__setstate__'s argument should be the same type as the "
-        "return value of __getstate__. Got ",
-        arg_type->repr_str(),
+        ser_type->isSubtypeOf(arg_type),
+        "__getstate__'s return type should be a subtype of "
+        "input argument of __setstate__. Got ",
+        ser_type->repr_str(),
         " but expected ",
-        ser_type->repr_str());
+        arg_type->repr_str());
 
     return *this;
   }
@@ -261,11 +266,6 @@ class class_ {
 ///     IValue custom_class_iv = torch::make_custom_class<MyClass>(3, "foobarbaz");
 template <typename CurClass, typename... CtorArgs>
 c10::IValue make_custom_class(CtorArgs&&... args) {
-  if (!c10::isCustomClassRegistered<c10::intrusive_ptr<CurClass>>()) {
-    throw c10::Error(
-        "Trying to instantiate a class that isn't a registered custom class.",
-        "");
-  }
   auto userClassInstance = c10::make_intrusive<CurClass>(std::forward<CtorArgs>(args)...);
   return c10::IValue(std::move(userClassInstance));
 }

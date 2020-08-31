@@ -449,17 +449,21 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
 #undef IMM_VISIT
 
   TORCH_API void visit(const Block* v) override {
-    for (const auto& pair : v->varBindings()) {
-      bindVar(pair.first, pair.second);
-    }
-
+    const Block* last = scope_;
+    scope_ = v;
     for (Stmt* s : v->stmts()) {
       s->accept(this);
     }
 
-    for (const auto& pair : v->varBindings()) {
-      eval_context_.erase(pair.first);
+    auto it = var_by_scope_.find(v);
+    if (it != var_by_scope_.end()) {
+      for (const Expr* v : it->second) {
+        eval_context_.erase(v);
+      }
+      var_by_scope_.erase(it);
     }
+
+    scope_ = last;
   }
 
   TORCH_API void visit(const Var* v) override {
@@ -752,6 +756,11 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
     buffer_mapping_.erase(buffer_var);
   }
 
+  void visit(const Let* v) override {
+    var_by_scope_[scope_].push_back(v->var());
+    bindVar(v->var(), v->value());
+  }
+
   void visit(const Cond* v) override {
     v->condition()->accept(this);
     if (value().as<int>()) {
@@ -853,7 +862,9 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
   }
 
   Value value_;
+  const Block* scope_;
   std::unordered_map<const Expr*, Value> eval_context_;
+  std::unordered_map<const Block*, std::vector<const Expr*>> var_by_scope_;
   std::unordered_map<const Var*, void*> buffer_mapping_;
   std::unordered_map<const Var*, std::unique_ptr<std::vector<int>>>
       internal_buffers_;

@@ -266,7 +266,7 @@ if(CAFFE2_USE_CUDNN)
   if(CUDNN_STATIC AND NOT WIN32)
     set_property(
         TARGET caffe2::cudnn PROPERTY INTERFACE_LINK_LIBRARIES
-        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a";dl)
+        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a" dl)
     # Lines below use target_link_libraries because we support cmake 3.5+.
     # For cmake 3.13+, target_link_options to set INTERFACE_LINK_OPTIONS would be better.
     # https://cmake.org/cmake/help/v3.5/command/target_link_libraries.html warns

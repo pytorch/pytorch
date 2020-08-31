@@ -48,7 +48,7 @@ static Tensor permuteBatchDimsToFront(BatchedTensorImpl* batched) {
 }
 
 VmapPhysicalView MultiBatchVmapTransform::logicalToPhysical(const Tensor& logical_tensor) {
-  auto* batched = maybeGetBatched(logical_tensor);
+  auto* batched = maybeGetBatchedImpl(logical_tensor);
   TORCH_INTERNAL_ASSERT(
       batched,
       "logicalToPhysical(tensor) should only be passed a BatchedTensor");
@@ -115,7 +115,7 @@ void VmapPhysicalView::makeLogicalFromPhysicalListInplace(std::vector<Tensor>& p
 // bitset of vmap levels that were present in the tensor.
 static std::pair<Tensor,std::bitset<kVmapNumLevels>>
 getPhysicalTensorAndLevels(const Tensor& self) {
-  auto* batched = maybeGetBatched(self);
+  auto* batched = maybeGetBatchedImpl(self);
   if (batched) {
     return {permuteBatchDimsToFront(batched), createLevelsBitset(batched->bdims())};
   }
@@ -200,7 +200,7 @@ MultiBatchVmapTransform::logicalToPhysical(TensorList logical_tensors) {
   // Figure out all of the collective vmap levels in `logical_tensors`.
   std::bitset<kVmapNumLevels> collective_levels;
   for (const auto& logical_tensor : logical_tensors) {
-    auto* batched = maybeGetBatched(logical_tensor);
+    auto* batched = maybeGetBatchedImpl(logical_tensor);
     if (batched) {
       collective_levels |= createLevelsBitset(batched->bdims());
     }
@@ -250,7 +250,7 @@ getLevelsAndLargestLogicalDim(TensorList logical_tensors) {
   std::bitset<kVmapNumLevels> levels;
   int64_t largest_logical_dim = -1;
   for (const auto& tensor : logical_tensors) {
-    auto* batched = maybeGetBatched(tensor);
+    auto* batched = maybeGetBatchedImpl(tensor);
     if (batched) {
       levels = levels | createLevelsBitset(batched->bdims());
     }

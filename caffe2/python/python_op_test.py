@@ -5,7 +5,7 @@ from __future__ import unicode_literals
 from caffe2.python import core, workspace
 from caffe2.python.core import CreatePythonOperator
 import caffe2.python.hypothesis_test_util as hu
-from hypothesis import given
+from hypothesis import given, settings
 import hypothesis.strategies as st
 import numpy as np
 import six
@@ -148,6 +148,7 @@ class PythonOpTest(hu.HypothesisTestCase):
     @given(x=hu.tensor(),
            n=st.integers(min_value=1, max_value=20),
            w=st.integers(min_value=1, max_value=20))
+    @settings(deadline=1000)
     def test_multithreaded_evaluation(self, x, n, w):
         def f(inputs, outputs):
             outputs[0].reshape(inputs[0].shape)
@@ -167,6 +168,7 @@ class PythonOpTest(hu.HypothesisTestCase):
             np.testing.assert_almost_equal(x, y)
 
     @given(x=hu.tensor(), in_place=st.booleans(), **hu.gcs)
+    @settings(deadline=10000)
     def test_gradient(self, x, in_place, gc, dc):
         def f(inputs, outputs):
             outputs[0].reshape(inputs[0].shape)
@@ -186,6 +188,7 @@ class PythonOpTest(hu.HypothesisTestCase):
         self.assertDeviceChecks(dc, op, [x], [0])
 
     @given(inputs=hu.tensors(n=2), **hu.gcs)
+    @settings(deadline=10000)
     def test_gradient_multiple(self, inputs, gc, dc):
         (x1, x2) = inputs
 
@@ -212,6 +215,7 @@ class PythonOpTest(hu.HypothesisTestCase):
         self.assertDeviceChecks(dc, op, [x1, x2], [0, 1])
 
     @given(inputs=hu.tensors(n=3), **hu.gcs)
+    @settings(deadline=10000)
     def test_gradient_multiple_with_indices(self, inputs, gc, dc):
         (x1, x2, x3) = inputs
 

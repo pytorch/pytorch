@@ -149,10 +149,55 @@ struct CAFFE2_API PerChannelAffineQuantizer : public AffineQuantizer {
         axis() == other_per_channel_affine->axis();
   }
 
- private:
+ protected:
   Tensor scales_;
   Tensor zero_points_;
   const int64_t axis_;
+};
+
+/**
+ * PerChannelAffineFloatQParamsQuantizer is the same as PerChannelAffineQuantizer
+ * except that it expects both scale and zero point to be floating point values.
+ *
+ * This quantizer uses the kPerChannelAffineFloatQParams qscheme which is a variant of
+ * kPerChannelAffine.
+ *
+ * The quantize equation in this case looks like -
+ * Xq = (Xf - zero_point) * inv_scale, where inv_scale = 1.0/scale
+ *
+ * Note: Usage of floating point zero point is useful in cases where 0 doesn't need to
+ * be exactly represented in the quantized space. We can get additional precision by
+ * using floating point values for zero point.
+ */
+struct CAFFE2_API PerChannelAffineFloatQParamsQuantizer : public PerChannelAffineQuantizer {
+  explicit PerChannelAffineFloatQParamsQuantizer(
+      ScalarType scalar_type,
+      Tensor scales,
+      Tensor zero_points,
+      int64_t axis)
+      : PerChannelAffineQuantizer(scalar_type,
+        scales,
+        zero_points,
+        axis) {}
+
+  QScheme qscheme() const override {
+    return kPerChannelAffineFloatQParams;
+  }
+
+  Tensor quantize(Tensor tensor) override;
+  Tensor dequantize(Tensor tensor) override;
+
+  bool equalTo(QuantizerPtr other) override {
+    if (!other.get() || other->qscheme() != kPerChannelAffineFloatQParams) {
+      return false;
+    }
+    auto* other_per_channel_float_qparams =
+        static_cast<PerChannelAffineFloatQParamsQuantizer*>(other.get());
+    return scalar_type() == other_per_channel_float_qparams->scalar_type() &&
+        scales().equal(other_per_channel_float_qparams->scales()) &&
+        zero_points().equal(other_per_channel_float_qparams->zero_points()) &&
+        axis() == other_per_channel_float_qparams->axis();
+  }
 };
 
 // This is an internal utility function for getting at the QTensorImpl,

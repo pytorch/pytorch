@@ -160,6 +160,9 @@ def scatter(tensor, devices=None, chunk_sizes=None, dim=0, streams=None, *, out=
           into equal chunks.
         dim (int, optional): A dimension along which to chunk :attr:`tensor`.
           Default: ``0``.
+        streams (Iterable[Stream], optional): an iterable of Streams, among
+          which to execute the scatter. If not specified, the default stream will
+          be utilized.
         out (Sequence[Tensor], optional, keyword-only): the GPU tensors to
           store output results. Sizes of these tensors must match that of
           :attr:`tensor`, except for :attr:`dim`, where the total size must
