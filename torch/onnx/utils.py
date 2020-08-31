@@ -509,6 +509,24 @@ def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, 
                                         operator_export_type, google_printer,
                                         val_keep_init_as_ip, custom_opsets, val_add_node_names)
 
+def _diagnose_export(model, args, f, verbose=False, training=TrainingMode.EVAL,
+                     input_names=None, output_names=None, opset_version=None, dynamic_axes=None):
+    from torch.onnx.symbolic_helper import _default_onnx_opset_version, _set_opset_version
+    if opset_version is None:
+        opset_version = _default_onnx_opset_version
+    _set_opset_version(opset_version)
+    # operator_export_type is set ro ONNX_FALLTHROUGH by default so that if an op is not supported
+    # in ONNX, fall through will occur and export the operator as is, as a custom ONNX op.
+    operator_export_type = OperatorExportTypes.ONNX_FALLTHROUGH
+    with select_model_mode_for_export(model, training):
+        graph, params_dict, torch_out = _model_to_graph(model, args, verbose, input_names,
+                                                        output_names, operator_export_type)
+    # The output 'unsupported_ops' will contain the names of all the ops that are not supported in ONNX
+    unsupported_ops = list()
+    for node in graph.nodes():
+        if node.kind().split(':')[0] not in ['onnx', 'prim']:
+            unsupported_ops.append(node.kind())
+    return graph, unsupported_ops
 
 # NOTE: the output `torch_out` will contain the output tensors resulting from
 # the trace of a Module. In the case that a torch.nn.ScriptModule is passed in,
@@ -524,7 +542,9 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
             opset_version=None, _retain_param_name=False, do_constant_folding=True,
             strip_doc_string=True, dynamic_axes=None, keep_initializers_as_inputs=None,
             fixed_batch_size=False, custom_opsets=None, add_node_names=True,
-            enable_onnx_checker=True, use_external_data_format=False, use_new_jit_passes=False):
+            enable_onnx_checker=True, use_external_data_format=False,
+            onnx_shape_inference=False, use_new_jit_passes=False):
+
     if isinstance(model, torch.nn.DataParallel):
         raise ValueError('torch.nn.DataParallel is not supported by ONNX '
                          'exporter, please use \'attribute\' module to '
@@ -534,6 +554,9 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
     assert __IN_ONNX_EXPORT is False
     __IN_ONNX_EXPORT = True
     try:
+        from torch.onnx.symbolic_helper import _set_onnx_shape_inference
+        _set_onnx_shape_inference(onnx_shape_inference)
+
         from torch.onnx.symbolic_helper import _default_onnx_opset_version, _set_opset_version
         from torch.onnx.symbolic_helper import _set_operator_export_type
         if opset_version is None:
@@ -763,6 +786,12 @@ def _graph_op(g, opname, *raw_args, **kwargs):
 
     args = list(const_if_tensor(arg) for arg in raw_args)
     n = g.insertNode(_newNode(g, opname, outputs, *args, **kwargs))
+
+    from torch.onnx.symbolic_helper import _onnx_shape_inference
+    if _onnx_shape_inference:
+        from torch.onnx.symbolic_helper import _export_onnx_opset_version as opset_version
+        torch._C._jit_pass_onnx_node_shape_type_inference(n, opset_version)
+
     if outputs == 1:
         return n.output()
     return tuple(o for o in n.outputs())
@@ -858,6 +887,10 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
                     new_block = new_node.addBlock()
                     torch._C._jit_pass_onnx_block(b, new_block, operator_export_type, env)
                 new_op_outputs = torch._C._jit_pass_fixup_onnx_controlflow_node(new_node, opset_version)
+                # Process Loop and If after subblock is converted.
+                from torch.onnx.symbolic_helper import _onnx_shape_inference
+                if _onnx_shape_inference:
+                    torch._C._jit_pass_onnx_node_shape_type_inference(new_node, opset_version)
                 return new_op_outputs
             else:
                 symbolic_name = 'prim_' + op_name
