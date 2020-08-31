@@ -1,11 +1,27 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/native/cuda/ForeachUtils.cuh>
 #include <c10/cuda/CUDAGuard.h>
+#include <ATen/native/cuda/Loops.cuh>
+#include <ATen/native/cuda/MemoryAccess.cuh>
 
 namespace at { namespace native {
 
 namespace {
+
+static constexpr int64_t kILP = 4;
+static constexpr int64_t kChunkSize = 65536;
+static constexpr int64_t kBlockSize = 512;
+
+template<typename T>
+__device__ __forceinline__ bool is_aligned(T* p){
+  return ((uint64_t)p) % (kILP * sizeof(T)) == 0;
+}
+
+template<typename T>
+__device__ __forceinline__ void load_store(T* dst, T* src, int dst_offset, int src_offset){
+  using LT = at::native::memory::aligned_vector<T, kILP>;
+  ((LT*)dst)[dst_offset] = ((LT*)src)[src_offset];
+}
 
 // TensorListMetadata has to be < 4KB - the limit for kernel launch argument
 static constexpr int depth_to_max_tensors[5] = {110, 64, 48, 36, 30};
