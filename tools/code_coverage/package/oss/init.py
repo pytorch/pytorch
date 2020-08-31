@@ -117,7 +117,7 @@ def get_interested_folder(arg_interested_folder: Optional[List[str]]) -> List[st
         # if this argument is specified, just return itself
         return arg_interested_folder
     else:
-        return [""]
+        return []
 
 
 def gcc_export_init():
