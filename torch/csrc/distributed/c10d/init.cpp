@@ -749,10 +749,10 @@ They are used in specifying strategies for reduction collectives, e.g.,
                 execution and it does not wait for the entire operation to complete on GPU. Note that
                 ``FutureNCCL``  does not support ``NCCL_BLOCKING_WAIT`` flag or NCCL's ``barrier()``.
                 In addition, if a callback function was added by ``fut.then()``, it will wait until
-                ``WorkNCCL``'s NCCL streams synchronize with a new stream from device's stream pool and
-                invoke the callback inline after running the callback on the new stream. ``fut.then()``
-                will return another ``FutureNCCL`` that holds the return value of the callback and the
-                stream that runs the callback.
+                ``WorkNCCL``'s NCCL streams synchronize with ``ProcessGroupNCCL``'s dedicated callback
+                stream and invoke the callback inline after running the callback on the callback stream.
+                ``fut.then()`` will return another ``FutureNCCL`` that holds the return value of the
+                callback and a ``CUDAEvent`` that recorded the callback stream.
 
                 Note that ``fut.done()`` returns if the enire operation is completed on the GPU.
            )");
