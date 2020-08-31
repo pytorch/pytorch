@@ -139,7 +139,7 @@ struct TORCH_API KernelSpec {
   bool has_random_;
   mutable std::mutex mutex_;
   mutable std::
-      unordered_map<ArgSpec, std::shared_ptr<FusedKernel>, torch::hash<ArgSpec>>
+      unordered_map<ArgSpec, std::shared_ptr<FusedKernel>, c10::hash<ArgSpec>>
           kernels_;
 };
 
