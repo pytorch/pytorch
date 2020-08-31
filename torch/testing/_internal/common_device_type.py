@@ -165,6 +165,20 @@ except ImportError:
 # you should check if it's available and (if it is) add it to this list.
 device_type_test_bases = []
 
+def _construct_test_name(test_name, op, device_type, dtype):
+    if op is not None:
+        test_name += "_" + op.name
+
+    test_name += "_" + device_type
+
+    if dtype is not None:
+        if isinstance(dtype, (list, tuple)):
+            for d in dtype:
+                test_name += "_" + str(d).split('.')[1]
+        else:
+            test_name += "_" + str(dtype).split('.')[1]
+
+    return test_name
 
 class DeviceTypeTestBase(TestCase):
     device_type = 'generic_device_type'
@@ -215,21 +229,20 @@ class DeviceTypeTestBase(TestCase):
 
         def instantiate_test_helper(cls, name, *, test, dtype, op):
 
+            # wraps test with op decorators
+            if op is not None and op.decorators is not None:
+                for decorator in op.decorators:
+                    test = decorator(test)
+
             # Constructs the test's name
-            test_name = name
-            if op is not None:
-                test_name += "_" + op.name
-            test_name += "_" + cls.device_type
-            if dtype is not None:
-                if isinstance(dtype, (list, tuple)):
-                    for d in dtype:
-                        test_name += "_" + str(d).split('.')[1]
-                else:
-                    test_name += "_" + str(dtype).split('.')[1]
+            test_name = _construct_test_name(name, op, cls.device_type, dtype)
 
             # Constructs the test
             @wraps(test)
-            def instantiated_test(self, test=test, dtype=dtype, op=op):
+            def instantiated_test(self, name=name, test=test, dtype=dtype, op=op):
+                if op is not None and op.should_skip(name, self.device_type, dtype):
+                    self.skipTest("Skipped!")
+
                 device_arg = cls.get_primary_device()
                 if hasattr(test, 'num_required_devices'):
                     device_arg = cls.get_all_devices()
@@ -246,11 +259,6 @@ class DeviceTypeTestBase(TestCase):
                     self.precision = guard_precision
 
                 return result
-
-            # wraps with op decorators
-            if op is not None and op.decorators is not None:
-                for decorator in op.decorators:
-                    instantiated_test = decorator(instantiated_test)
 
             assert not hasattr(cls, test_name), "Redefinition of test {0}".format(test_name)
             setattr(cls, test_name, instantiated_test)
@@ -275,7 +283,6 @@ class DeviceTypeTestBase(TestCase):
                 # Inverts dtypes if the function wants unsupported dtypes
                 if test.unsupported_dtypes_only is True:
                     dtypes = [d for d in get_all_dtypes() if d not in dtypes]
-
                 dtypes = dtypes if dtypes is not None else (None,)
                 for dtype in dtypes:
                     instantiate_test_helper(cls,
