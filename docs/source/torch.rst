@@ -75,6 +75,7 @@ Creation Ops
     dequantize
     complex
     polar
+    heaviside
 
 Indexing, Slicing, Joining, Mutating Ops
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -340,6 +341,10 @@ Reduction Ops
 
     argmax
     argmin
+    amax
+    amin
+    max
+    min
     dist
     logsumexp
     mean
@@ -380,9 +385,7 @@ Comparison Ops
     kthvalue
     le
     lt
-    max
     maximum
-    min
     minimum
     ne
     sort
@@ -517,5 +520,6 @@ Utilities
     compiled_with_cxx11_abi
     result_type
     can_cast
-
     promote_types
+    set_deterministic
+    is_deterministic
