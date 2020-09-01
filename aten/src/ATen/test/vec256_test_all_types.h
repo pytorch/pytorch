@@ -313,41 +313,51 @@ void filter_int_minimum(T& val) {
 }
 
 template <typename T>
-std::enable_if_t<is_complex<T>::value, void> filter_op(T& a, T& b, bool minus)
+std::enable_if_t<is_complex<T>::value, void> filter_add_overflow(T& a, T& b)
 {
     //missing for complex
 }
 
 template <typename T>
-std::enable_if_t < !is_complex<T>::value, void > filter_op(T& a, T& b, bool minus) {
+std::enable_if_t<is_complex<T>::value, void> filter_sub_overflow(T& a, T& b)
+{
+    //missing for complex
+}
+
+template <typename T>
+std::enable_if_t < !is_complex<T>::value, void> filter_add_overflow(T& a, T& b) {
+    if (std::is_integral<T>::value == false) return;
     T max = std::numeric_limits<T>::max();
     T min = std::numeric_limits<T>::min();
-    if (minus) {
-        if (b == min) b = min + 1;
-        b = -b;
-    }
-    bool sgn1 = a > 0;
-    bool sgn2 = b > 0;
-    if (sgn1 == sgn2) {
-        if (sgn1 && a > max - b) {
-            a = max - b;
-        }
-        else if (!sgn1 && a < min - b) {
+    // min <= (a +b) <= max;
+    // min - b <= a  <= max - b 
+    if(b <0){
+        if(a < min - b){
             a = min - b;
         }
-    }
+    }else{
+        if( a > max - b){
+            a = max - b;
+        }
+    } 
 }
 
 template <typename T>
-void filter_add_overflow(T& val1, T& val2) {
+std::enable_if_t < !is_complex<T>::value, void> filter_sub_overflow(T& a, T& b) {
     if (std::is_integral<T>::value == false) return;
-    return filter_op(val1, val2, false);
-}
-
-template <typename T>
-void filter_minus_overflow(T& val1, T& val2) {
-    if (std::is_integral<T>::value == false) return;
-    return filter_op(val1, val2, true);
+    T max = std::numeric_limits<T>::max();
+    T min = std::numeric_limits<T>::min();
+    // min <= (a-b) <= max;
+    // min + b <= a  <= max +b 
+    if(b <0){
+        if(a > max +b){
+            a = max +b;
+        }
+    }else{
+        if( a < min +b){
+            a = min + b;
+        }
+    } 
 }
 
 template <typename T>
@@ -382,12 +392,11 @@ filter_mult_overflow(T& val1, T& val2) {
 
 template <typename T>
 std::enable_if_t<!is_complex<T>::value, void>
-filter_div_ub(T& val1, T& val2) {
-    if (std::is_integral<T>::value == false) return;
+filter_div_ub(T& val1, T& val2) { 
     if (is_zero(val2)) {
         val2 = 1;
     }
-    else if (val1 == std::numeric_limits<T>::min() && val2 == -1) {
+    else if (std::is_integral<T>::value && val1 == std::numeric_limits<T>::min() && val2 == -1) {
         val2 = 1;
     }
 }
