@@ -8,7 +8,6 @@ CUDA_VERSIONS = [
 ]
 
 ROCM_VERSIONS = [
-    "3.5.1",
     "3.7",
 ]
 

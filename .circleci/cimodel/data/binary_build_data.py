@@ -54,7 +54,7 @@ CONFIG_TREE_DATA = OrderedDict(
     )),
     # Skip CUDA-9.2 builds on Windows
     windows=(
-        [v for v in dimensions.GPU_VERSIONS if v not in ['cuda92', 'cuda110', "rocm3.5.1"]],
+        [v for v in dimensions.GPU_VERSIONS if v not in ['cuda92', 'cuda110', "rocm3.7"]],
         OrderedDict(
             wheel=dimensions.STANDARD_PYTHON_VERSIONS,
             conda=dimensions.STANDARD_PYTHON_VERSIONS,
