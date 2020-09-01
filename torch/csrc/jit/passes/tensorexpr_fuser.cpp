@@ -403,7 +403,7 @@ class TensorExprFuser {
         debugDumpFusionGroup(
             "Trying to merge into the previous fusion group: ",
             prev_fusion_group);
-        if (canMerge(prev_fusion_group, fusion_group)) {
+        if (false && canMerge(prev_fusion_group, fusion_group)) {
           prev_fusion_group = tryMerge(prev_fusion_group, fusion_group);
           debugDumpFusionGroup(
               "Successfully merged into the previous fusion group: ",
