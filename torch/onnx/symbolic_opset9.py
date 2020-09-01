@@ -138,6 +138,9 @@ def floor_divide(g, self, other):
     return out
 
 
+def floordiv(g, self, other):
+    return floor_divide(g, self, other)
+
 # Division where both inputs are cast to floating types
 # If both inputs are floating, performs div as usual
 # If only one input is a floating type, the other input is cast to its type
@@ -997,6 +1000,10 @@ def gt(g, input, other):
 
 
 def gt_impl(g, input, other):
+    if input.type().scalarType() is not None and input.type().scalarType() == 'Bool' and \
+            other.type().scalarType() is not None and other.type().scalarType() == 'Bool':
+        input = g.op("Cast", input, to_i=sym_help.cast_pytorch_to_onnx['Int'])
+        other = g.op("Cast", other, to_i=sym_help.cast_pytorch_to_onnx['Int'])
     return g.op("Greater", input, other)
 
 
@@ -1005,6 +1012,10 @@ def lt(g, input, other):
 
 
 def lt_impl(g, input, other):
+    if input.type().scalarType() is not None and input.type().scalarType() == 'Bool' and \
+            other.type().scalarType() is not None and other.type().scalarType() == 'Bool':
+        input = g.op("Cast", input, to_i=sym_help.cast_pytorch_to_onnx['Int'])
+        other = g.op("Cast", other, to_i=sym_help.cast_pytorch_to_onnx['Int'])
     return g.op("Less", input, other)
 
 
@@ -1060,10 +1071,14 @@ def __lshift_(g, self, other):
     return lshift
 
 
-def where(g, condition, self, other):
+@parse_args('v', 'v', 'v', 'i')
+def where(g, condition, self=None, other=None, _outputs=None):
     # Assumes that torch.where's first argument takes only Bool and Byte tensors.
-    if condition.type().scalarType() != 'Bool': 
+    if condition.type().scalarType() != 'Bool':
         condition = g.op("Cast", condition, to_i=sym_help.cast_pytorch_to_onnx['Bool'])
+    if self is None:
+        condition = torch.onnx.symbolic_opset9.nonzero(g, condition)
+        return unbind(g, condition, g.op("Constant", value_t=torch.tensor(1)), _outputs)
     return g.op("Where", condition, self, other)
 
 
@@ -1613,26 +1628,39 @@ def eye(g, n, m, dtype=None, layout=None, device=None, pin_memory=False):
     tensor = zeros(g, shape, dtype, layout, device)
     return g.op("EyeLike", tensor)
 
-@parse_args('v', 'v', 'v', 'v', 'i')
-def slice(g, self, dim, start, end, step):
-    if step != 1:
-        _unimplemented("slice", "step!=1 is currently not supported")
-    if start.node().kind() != 'onnx::Constant' or \
-            end.node().kind() != 'onnx::Constant' or dim.node().kind() != 'onnx::Constant':
-        if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX:
-            raise RuntimeError('Unsupported: ONNX export of Slice with dynamic inputs. DynamicSlice '
-                               'is a deprecated experimental op. Please use statically allocated '
-                               'variables or export to a higher opset version.')
+
+def slice(g, self, *args):
+    if len(args) == 4:
+        # aten::slice(Tensor self, int dim, int start, int end, int step) -> Tensor
+        dim, start, end, step = args
+        step = _parse_arg(step, 'i')
+        if step != 1:
+            raise RuntimeError("step!=1 is currently not supported")
+        if start.node().kind() != 'onnx::Constant' or \
+                end.node().kind() != 'onnx::Constant' or dim.node().kind() != 'onnx::Constant':
+            if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX:
+                raise RuntimeError('Unsupported: ONNX export of Slice with dynamic inputs. DynamicSlice '
+                                   'is a deprecated experimental op. Please use statically allocated '
+                                   'variables or export to a higher opset version.')
+            else:
+                start_unsqueezed = g.op("Unsqueeze", start, axes_i=[0])
+                end_unsqueezed = g.op("Unsqueeze", end, axes_i=[0])
+                dim_unsqueezed = g.op("Unsqueeze", dim, axes_i=[0])
+                return g.op("DynamicSlice", self, start_unsqueezed, end_unsqueezed, dim_unsqueezed)
         else:
-            start_unsqueezed = g.op("Unsqueeze", start, axes_i=[0])
-            end_unsqueezed = g.op("Unsqueeze", end, axes_i=[0])
-            dim_unsqueezed = g.op("Unsqueeze", dim, axes_i=[0])
-            return g.op("DynamicSlice", self, start_unsqueezed, end_unsqueezed, dim_unsqueezed)
-    else:
+            start = _parse_arg(start, 'i')
+            end = _parse_arg(end, 'i')
+            dim = _parse_arg(dim, 'i')
+            return sym_help._slice_helper(g, self, axes=[dim], starts=[start], ends=[end])
+    elif len(args) == 3:
+        # aten::slice(t[] l, int start, int end, int step) -> t[]
+        start, end, step = args
+        dim = 0
         start = _parse_arg(start, 'i')
         end = _parse_arg(end, 'i')
-        dim = _parse_arg(dim, 'i')
         return sym_help._slice_helper(g, self, axes=[dim], starts=[start], ends=[end])
+    else:
+        raise NotImplementedError("Unknown aten::slice signature")
 
 
 @parse_args('v', 'f', 'f')

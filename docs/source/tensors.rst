@@ -194,6 +194,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: addr
    .. automethod:: addr_
    .. automethod:: allclose
+   .. automethod:: amax
+   .. automethod:: amin
    .. automethod:: angle
    .. automethod:: apply_
    .. automethod:: argmax
@@ -332,6 +334,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: gt_
    .. automethod:: half
    .. automethod:: hardshrink
+   .. automethod:: heaviside
    .. automethod:: histc
    .. automethod:: hypot
    .. automethod:: hypot_
@@ -518,6 +521,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: sinh_
    .. automethod:: asinh
    .. automethod:: asinh_
+   .. automethod:: arcsinh
+   .. automethod:: arcsinh_
    .. automethod:: size
    .. automethod:: slogdet
    .. automethod:: solve
@@ -539,6 +544,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: stride
    .. automethod:: sub
    .. automethod:: sub_
+   .. automethod:: subtract
+   .. automethod:: subtract_
    .. automethod:: sum
    .. automethod:: sum_to_size
    .. automethod:: svd
@@ -554,6 +561,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: tanh_
    .. automethod:: atanh
    .. automethod:: atanh_
+   .. automethod:: arctanh
+   .. automethod:: arctanh_
    .. automethod:: tolist
    .. automethod:: topk
    .. automethod:: to_sparse

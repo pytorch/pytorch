@@ -42,7 +42,7 @@ from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, NewCrit
     module_tests, criterion_tests, new_criterion_tests, loss_reference_fns, \
     ctcloss_reference, new_module_tests
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes, \
-    dtypesIfCUDA, skipCUDAIfNoCudnn, skipCUDAIfCudnnVersionLessThan, onlyCUDA, \
+    dtypesIfCUDA, skipCUDAIfNoCudnn, skipCUDAIfCudnnVersionLessThan, onlyCUDA, onlyCPU, \
     skipCUDAIfRocm, skipCUDAIf, skipCUDAIfNotRocm, largeCUDATensorTest, onlyOnCPUAndCUDA, \
     deviceCountAtLeast, expectedAlertNondeterministic, largeTensorTest
 from torch.nn import MultiheadAttention
@@ -9736,6 +9736,49 @@ class TestNNDeviceType(NNTestCase):
                     output = m(sigmoid(input), target)
                     verify_reduction_scalars(input, reduction, output)
 
+    # verify that bogus reduction strings are errors
+    @onlyOnCPUAndCUDA
+    def test_invalid_reduction_strings(self, device):
+        input = torch.randn(3, 5, requires_grad=True, device=device)
+        target = torch.tensor([1, 0, 4], device=device)
+
+        for reduction in ['none', 'invalid']:
+            def v(fn):
+                if reduction == 'invalid':
+                    self.assertRaises(ValueError, lambda: fn())
+                else:
+                    fn()
+
+            v(lambda: F.nll_loss(input, target, reduction=reduction))
+            v(lambda: F.cross_entropy(input, target, reduction=reduction))
+            v(lambda: F.multi_margin_loss(input, target, reduction=reduction))
+
+            v(lambda: F.kl_div(input, input, reduction=reduction))
+            v(lambda: F.smooth_l1_loss(input, input, reduction=reduction))
+            v(lambda: F.l1_loss(input, input, reduction=reduction))
+            v(lambda: F.mse_loss(input, input, reduction=reduction))
+            v(lambda: F.hinge_embedding_loss(input, input, reduction=reduction))
+            v(lambda: F.poisson_nll_loss(input, input, reduction=reduction))
+            v(lambda: F.binary_cross_entropy_with_logits(input, input, reduction=reduction))
+
+            zeros = torch.zeros_like(input).to(torch.int64)
+            v(lambda: F.multilabel_soft_margin_loss(input, zeros, reduction=reduction))
+            v(lambda: F.multilabel_margin_loss(input, zeros, reduction=reduction))
+
+            v(lambda: F.triplet_margin_loss(input, input, input, reduction=reduction))
+            v(lambda: F.margin_ranking_loss(input, input, input.sign(), reduction=reduction))
+            v(lambda: F.cosine_embedding_loss(input, input, input[:, 0].sign(), reduction=reduction))
+
+            log_probs = torch.randn(50, 16, 20, requires_grad=True, device=device).log_softmax(2)
+            targets = torch.randint(1, 20, (16, 30), dtype=torch.long, device=device)
+            input_lengths = torch.full((16,), 50, dtype=torch.long, device=device)
+            target_lengths = torch.randint(10, 30, (16,), dtype=torch.long, device=device)
+            v(lambda: F.ctc_loss(log_probs, targets, input_lengths, target_lengths, reduction=reduction))
+
+            # FIXME: should we allow derivatives on these?
+            v(lambda: F.binary_cross_entropy(torch.sigmoid(input), input.detach(), reduction=reduction))
+            v(lambda: F.soft_margin_loss(input, input.sign().detach(), reduction=reduction))
+
     # We don't want to make propagating NaN a hard requirement on ops, but for
     # these easy ones, we should make them do so.
     def test_nonlinearity_propagate_nan(self, device):
@@ -9809,6 +9852,70 @@ class TestNNDeviceType(NNTestCase):
         helper(4, 8, 7, 7, 3, padding=2, stride=1)
         helper(10, 512, 31, 31, 3, stride=2)
         helper(1, 129, 8, 8, 3, stride=2)
+
+    @onlyCPU
+    @dtypes(torch.float)
+    def test_max_pool1d_errors(self, device, dtype):
+        def check(x, args, message):
+            model = torch.nn.MaxPool1d(*args)
+            with self.assertRaisesRegex(RuntimeError, r'max_pool1d\(\) ' + message):
+                model(torch.tensor(x, device=device, dtype=dtype))
+
+        # Pooling args: (kernel_size, stride, padding, dilation, return_indices, ceil_mode)
+        check(0, (1,), "input tensor must have 2 or 3 dimensions but got 0")
+        check([], (1,), "input tensor must have 2 or 3 dimensions but got 1")
+        check([[]], (1, 0), "stride must be greater than zero, but got 0")
+        check([[]], (1, 1, -1), "padding must be non-negative, but got -1")
+        check([[]], (1, 1, 2), "padding should be at most half of kernel size, but got padding=2 and kernel_size=1")
+        check([[]], (1, 1, 0, 0), "dilation must be greater than zero, but got 0")
+        check([[]], (5, 1, 0, 1), "Invalid computed output size: -4")
+
+    @onlyCPU
+    @dtypes(torch.float, torch.double)
+    def test_max_pool1d_corner_cases(self, device, dtype):
+        def check(x, args, expected):
+            model = torch.nn.MaxPool1d(*args)
+            tensor = torch.tensor(x, device=device, dtype=dtype)
+            self.assertEqual(model(tensor), torch.tensor(expected, device=device, dtype=dtype))
+
+        # Pooling args: (kernel_size, stride, padding, dilation, return_indices, ceil_mode)
+        check([[]], (1, None, 0, 1, False, False), [[]])
+        check([[[]]], (1, None, 0, 1, False, False), [[[]]])
+        check([[[]]], (2, 1, 1, 2, False, True), [[[]]])
+        check([[1]], (1, None, 0, 1, False, False), [[1]])
+        check([[1]], (2, None, 1, 2, False, False), [[float('-inf')]])
+        check([[1], [1]], (2, None, 1, 2, False, False), [[float('-inf')], [float('-inf')]])
+        check([[1, 2]], (2, 1, 1, 2, False, False), [[2, 1]])
+        check([[1, 2]], (2, 2, 1, 2, False, True), [[2, 2]])
+
+        empty_tensor = torch.empty((2, 0, 1), dtype=torch.float32)
+        check(empty_tensor, (1, None, 0, 1, False, False), empty_tensor)
+
+    @onlyCPU
+    @dtypes(torch.float, torch.double)
+    def test_max_pool1d(self, device, dtype):
+        # FIXME For now compare against max_pool1d with indices
+        def check(x, *args, **kwargs):
+            model = torch.nn.MaxPool1d(*args, **kwargs)
+            ref_model = torch.nn.MaxPool1d(*args, **kwargs, return_indices=True)
+            tensor = torch.tensor(x, device=device, dtype=dtype)
+            self.assertEqual(model(tensor), ref_model(tensor)[0])
+
+        sizes = [random.sample(range(8, 128), 3) for _ in range(3)]
+        kernel_sizes = random.sample(range(1, 5), 3)
+        strides = random.sample(range(1, 5), 3)
+        dilations = random.sample(range(1, 5), 3)
+        ceil_modes = [True, False]
+
+        for size, kernel_size, stride, dilation, ceil_mode in \
+                itertools.product(sizes, kernel_sizes, strides, dilations, ceil_modes):
+            padding = random.sample(range(0, math.floor(kernel_size / 2) + 1), 1)
+            check(torch.randn(size), kernel_size, stride, padding, dilation, ceil_mode=ceil_mode)
+
+        # Non-contiguous test
+        tensor = torch.randn(5, 151, 33)[::2, ::3, ::2]
+        check(tensor, 3, 2, 1, 2, ceil_mode=True)
+        check(tensor.transpose(1, 2), 3, 2, 1, 2, ceil_mode=True)
 
     @onlyCUDA
     def test_max_pool2d(self, device):
@@ -11328,14 +11435,21 @@ class TestNNDeviceType(NNTestCase):
             for num_dim in [1, 2, 3]:
                 fn_name = '{}max_pool{}d'.format(adaptive, num_dim)
                 fn = getattr(F, fn_name)
+
                 x = torch.full([1, 1] + num_dim * [3], nan, device=device, dtype=dtype, requires_grad=True)
                 res = fn(x, 1 if adaptive else 3)
                 res.backward(torch.randn_like(res))
+                self.assertTrue(math.isnan(res.item()))
+                x.requires_grad_(False)
+                res = fn(x, 1 if adaptive else 3)
                 self.assertTrue(math.isnan(res.item()))
 
                 x2 = torch.full([1, 1] + num_dim * [3], -inf, device=device, dtype=dtype, requires_grad=True)
                 res2 = fn(x2, 1 if adaptive else 3)
                 res2.backward(torch.randn_like(res2))
+                self.assertTrue(math.isinf(res2.item()))
+                x2.requires_grad_(False)
+                res2 = fn(x2, 1 if adaptive else 3)
                 self.assertTrue(math.isinf(res2.item()))
 
     @onlyOnCPUAndCUDA
@@ -11373,12 +11487,12 @@ class TestNNDeviceType(NNTestCase):
                 fn_name = '{}_pool{}d'.format(op, num_dim)
                 fn = getattr(F, fn_name)
                 x = torch.ones([1, 2] + num_dim * [4], device=device, dtype=torch.float)
-                self.assertRaisesRegex(RuntimeError, "stride should not be zero",
+                self.assertRaisesRegex(RuntimeError, r"stride should not be zero|stride must be greater than zero",
                                        lambda: fn(x, kernel_size=2, stride=0))
 
                 fn_module_name = '{}Pool{}d'.format(op.title(), num_dim)
                 fn_module = getattr(nn, fn_module_name)(kernel_size=2, stride=0)
-                self.assertRaisesRegex(RuntimeError, "stride should not be zero",
+                self.assertRaisesRegex(RuntimeError, r"stride should not be zero|stride must be greater than zero",
                                        lambda: fn_module(x))
 
     @dtypesIfCUDA(*ALL_TENSORTYPES2)
@@ -11401,6 +11515,10 @@ class TestNNDeviceType(NNTestCase):
         for op in ('max', 'avg'):
             for num_dim in [1, 2, 3]:
                 fn_name = '{}_pool{}d'.format(op, num_dim)
+                if op == 'max':
+                    # New implementation without indices supports empty tensors
+                    # TODO(Heitor) change once with_indices code is updated
+                    fn_name += '_with_indices'
                 fn = getattr(F, fn_name)
                 # use a configuration that gives zero outputs only
                 # when doing a correct floor division by the stride

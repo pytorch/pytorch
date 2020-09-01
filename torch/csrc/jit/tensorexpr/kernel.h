@@ -149,6 +149,9 @@ class TORCH_API TensorExprKernel {
   // Get the reduction info for the given node, based on properties and inputs.
   ReductionInfo getReductionInfo(const torch::jit::Node* node);
 
+  // Get the reduction axes for the given node, based on properties and inputs.
+  std::vector<int64_t> getReductionAxes(const torch::jit::Node* node);
+
  private:
   struct ShapeArg {
     size_t idx;

@@ -1525,7 +1525,7 @@ def _run_ninja_build(build_directory: str, verbose: bool, error_prefix: str) -> 
                 stderr=subprocess.STDOUT,
                 cwd=build_directory,
                 env=env)
-    except subprocess.CalledProcessError:
+    except subprocess.CalledProcessError as e:
         # Python 2 and 3 compatible way of getting the error object.
         _, error, _ = sys.exc_info()
         # error.output contains the stdout and stderr of the build attempt.
@@ -1534,7 +1534,7 @@ def _run_ninja_build(build_directory: str, verbose: bool, error_prefix: str) -> 
         # mypy thinks it's Optional[BaseException] and doesn't narrow
         if hasattr(error, 'output') and error.output:  # type: ignore
             message += ": {}".format(error.output.decode())  # type: ignore
-        raise RuntimeError(message)
+        raise RuntimeError(message) from e
 
 
 def _import_module_from_library(module_name, path, is_python_module):

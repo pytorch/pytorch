@@ -2,6 +2,7 @@ import torch
 import unittest
 import operator
 import numbers
+import pickle
 from torch.fx import symbolic_trace, Proxy, Node, GraphModule, DefaultDelegate
 
 from fx.quantization import Quantizer
@@ -16,6 +17,10 @@ try:
 except ImportError:
     HAS_TORCHVISION = False
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
+
+class SimpleTest(torch.nn.Module):
+    def forward(self, x):
+        return torch.relu(x + 3.0)
 
 class TestFX(JitTestCase):
     def checkGraphModule(self, m: torch.nn.Module, args, kwargs=None):
@@ -320,10 +325,10 @@ class TestFX(JitTestCase):
             # Add placeholders for fn inputs
             placeholder_nodes = []
             for name in fn_input_names:
-                placeholder_nodes.append(graph.placeholder(name))
+                placeholder_nodes.append(graph.create_node('placeholder', name))
 
             # Get the interpreter object
-            interpreter_node = graph.get_param('interpreter')
+            interpreter_node = graph.create_node('get_param', 'interpreter')
 
             # Add a node to call the interpreter instance
             output_node = graph.create_node(
@@ -366,6 +371,65 @@ class TestFX(JitTestCase):
         for node in m_g.graph.nodes:
             self.assertTrue(node.name != "getattr")
 
+    def test_node_tagging(self):
+        class TaggingDelegate(DefaultDelegate):
+            def create_node(self, kind : str, target : Union[str, Callable],
+                            args : Tuple[Any], kwargs : Dict[str, Any], name : Optional[str] = None) -> Node:
+                n = super().create_node(kind, target, args, kwargs, name)
+                n.tag = 'foo'
+                return n
+
+        class M(torch.nn.Module):
+            def forward(self, a, b):
+                return a + b
+
+        m = M()
+        g = symbolic_trace(m, TaggingDelegate).graph
+        for n in g.nodes:
+            self.assertTrue(hasattr(n, 'tag'))
+            self.assertEqual(n.tag, 'foo')
+
+    def test_tensor_attribute(self):
+        class TensorAttribute(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.tensor = torch.rand(3, 4)
+
+            def forward(self, x):
+                return torch.nn.functional.linear(x, self.tensor)
+
+        ta = TensorAttribute()
+        traced = symbolic_trace(ta)
+        traced(torch.rand(4, 4))
+
+        class WrapperForQualname(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.ta = TensorAttribute()
+
+            def forward(self, x):
+                return torch.nn.functional.linear(x, self.ta.tensor)
+
+        wfq = WrapperForQualname()
+        traced2 = symbolic_trace(wfq)
+        traced2(torch.rand(4, 4))
+
+    def test_tensor_constant(self):
+        class ConstTensor(torch.nn.Module):
+            def forward(self, x):
+                return torch.nn.functional.linear(x, torch.zeros(3, 4))
+
+        ct = ConstTensor()
+        traced = symbolic_trace(ct)
+        traced(torch.rand(4, 4))
+
+    def test_pickle_graphmodule(self):
+        st = SimpleTest()
+        traced = symbolic_trace(st)
+        pickled = pickle.dumps(traced)
+        loaded = pickle.loads(pickled)
+        x = torch.rand(3, 4)
+        self.assertEqual(loaded(x), traced(x))
 
 if __name__ == '__main__':
     run_tests()

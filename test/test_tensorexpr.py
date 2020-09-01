@@ -874,11 +874,10 @@ class TestTensorExprFuser(BaseTestClass):
             test_lgamma,
             test_reciprocal,
             test_neg,
-            # TODO: properly handle NaNs in Max/Min and reenable these tests:
-            # test_threshold,
-            # test_relu,
-            # test_tanh,
-            # test_sigmoid,
+            test_threshold,
+            test_relu,
+            test_tanh,
+            test_sigmoid,
         }
         device_options = ["cpu", "cuda"] if torch.cuda.is_available() else ['cpu']
 
@@ -939,9 +938,9 @@ class TestTensorExprFuser(BaseTestClass):
         x = torch.tensor([np.nan])
         y = torch.tensor([1.0])
 
-        assert not np.isnan(tmin(x, y).item())
+        assert np.isnan(tmin(x, y).item())
         assert np.isnan(tmin(y, x).item())
-        assert not np.isnan(tmax(x, y).item())
+        assert np.isnan(tmax(x, y).item())
         assert np.isnan(tmax(y, x).item())
 
 
