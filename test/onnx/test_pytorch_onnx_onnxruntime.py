@@ -902,6 +902,16 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.randn(2, 3, 4)
         self.run_test(FloorDivModule(), (x, y))
 
+    @enableScriptTest()
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_floordiv(self):
+        class FloordivModule(torch.nn.Module):
+            def forward(self, x):
+                return x.new_zeros(x.size(2) // x.size(1))
+
+        x = torch.randn(2, 3, 4)
+        self.run_test(FloordivModule(), (x,))
+
     def test_true_div(self):
         class TrueDivModule(torch.nn.Module):
             def forward(self, x, y):
@@ -1000,9 +1010,19 @@ class TestONNXRuntime(unittest.TestCase):
         class DynamicSliceModel(torch.jit.ScriptModule):
             @torch.jit.script_method
             def forward(self, x):
-                return x[1:x.size(0)]
+                return x[1:x.size(1)]
 
         x = torch.rand(1, 2)
+        self.run_test(DynamicSliceModel(), x)
+
+    @enableScriptTest()
+    @skipIfUnsupportedMinOpsetVersion(10)
+    def test_slice_dynamic_shape_script(self):
+        class DynamicSliceModel(torch.nn.Module):
+            def forward(self, x):
+                return x.new_zeros(x.shape[1:x.size(2)])
+
+        x = torch.rand(1, 2, 3, 4)
         self.run_test(DynamicSliceModel(), x)
 
     @skipIfUnsupportedMinOpsetVersion(10)
@@ -2859,6 +2879,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3, 4)
         self.run_test(Zero_(), x)
 
+    @enableScriptTest()
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_new_zero(self):
         class Zero_(torch.nn.Module):
