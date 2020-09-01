@@ -832,7 +832,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                     self._shutdown_worker(worker_id)
             if len(failed_workers) > 0:
                 pids_str = ', '.join(str(w.pid) for w in failed_workers)
-                raise RuntimeError('DataLoader worker (pid(s) {}) exited unexpectedly'.format(pids_str))
+                raise RuntimeError('DataLoader worker (pid(s) {}) exited unexpectedly'.format(pids_str)) from e
             if isinstance(e, queue.Empty):
                 return (False, None)
             import tempfile
@@ -852,7 +852,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                         " limit using `ulimit -n` in the shell or change the"
                         " sharing strategy by calling"
                         " `torch.multiprocessing.set_sharing_strategy('file_system')`"
-                        " at the beginning of your code")
+                        " at the beginning of your code") from None
             raise
 
 # NOTE [ DataLoader on Linux and open files limit ]
