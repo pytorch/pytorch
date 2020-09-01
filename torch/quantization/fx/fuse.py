@@ -124,7 +124,7 @@ class ModuleReLUFusion():
         return quantizer.fused_graph.node_copy(self.module_node, load_arg)
 
 class Fuser:
-    def fuse_conv_bn(self, model, inplace=False):
+    def fuse(self, model, inplace=False):
         input_root = model.root
         if not inplace:
             input_root = copy.deepcopy(input_root)
@@ -173,7 +173,3 @@ class Fuser:
                         apply_match(pattern, node, (node, value(self, node)))
 
         return match_map
-
-def fuse(graph_module, inplace=False):
-    fuser = Fuser()
-    return fuser.fuse_conv_bn(graph_module, inplace)
