@@ -3,6 +3,9 @@ from torch.quantization.default_mappings import (
     DEFAULT_MODULE_MAPPING,
     DEFAULT_OPERATOR_MAPPING,
 )
+from torch.fx.graph import (
+    Node,
+)
 from .pattern_utils import (
     register_quant_pattern,
     register_dynamic_quant_pattern,
