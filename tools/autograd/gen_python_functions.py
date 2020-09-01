@@ -35,11 +35,7 @@ import re
 from .gen_variable_type import should_trace
 from .utils import write, is_tensor_method
 
-try:
-    from src.ATen.code_template import CodeTemplate
-except ImportError:
-    from tools.shared.module_loader import import_module
-    CodeTemplate = import_module('code_template', 'aten/src/ATen/code_template.py').CodeTemplate
+from tools.codegen.code_template import CodeTemplate
 
 #
 # declarations blocklist
