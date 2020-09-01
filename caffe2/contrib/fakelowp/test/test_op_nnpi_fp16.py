@@ -13,7 +13,7 @@ from caffe2.python import core
 from caffe2.python import workspace
 from caffe2.python.onnx.onnxifi import onnxifi_caffe2_net
 from caffe2.python.fakelowp.test_utils import print_test_debug_info
-from caffe2.python.oss.fakelowp.test_utils import compute_ulp_error
+from caffe2.python.fakelowp.test_utils import compute_ulp_error
 import caffe2.python.serialized_test.serialized_test_util as serial
 
 core.GlobalInit(["caffe2", "--caffe2_log_level=-3", "--glow_global_fp16=1"])
@@ -122,7 +122,7 @@ class ArithmeticOpsTest(serial.SerializedTestCase):
 
 
 class UnaryOpTest(serial.SerializedTestCase):
-    @settings(deadline=1000)
+    @settings(deadline=None)
     def _test_unary_op(self, opname, X, rtol=1e-5, atol=1e-8):
         workspace.ResetWorkspace()
 
@@ -236,7 +236,7 @@ class UnaryOpTest(serial.SerializedTestCase):
     # Once hypothesis.testing version is updated, we can re-enable
     # testing with different hypothesis examples.
     @settings(deadline=None)
-    def Skip_test_logit(self):
+    def test_logit(self):
         workspace.ResetWorkspace()
         n = 1
         m = 15361
@@ -251,7 +251,7 @@ class UnaryOpTest(serial.SerializedTestCase):
                 'Logit',
                 ['X'],
                 ['Y'],
-                eps=1e-8)
+                eps=1e-6)
         )
         ref_net = caffe2_pb2.NetDef()
         ref_net.name = "ref"
@@ -262,7 +262,7 @@ class UnaryOpTest(serial.SerializedTestCase):
                 'LogitFakeFp16NNPI',
                 ['X'],
                 ['Y'],
-                eps=1e-8)
+                eps=1e-6)
         )
         print("REF NET = {}".format(ref_net))
 

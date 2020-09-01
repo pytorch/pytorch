@@ -24,6 +24,16 @@ namespace at {
 namespace native {
 namespace {
 
+void check_tensor_memory_format(const Tensor& ref, const Tensor& other) {
+  TORCH_CHECK(
+      ref.is_contiguous(ref.suggest_memory_format()),
+      "Quantized tensor should be contiguous");
+  TORCH_CHECK(
+      other.is_contiguous(ref.suggest_memory_format()),
+      "Float tensor should be contiguous "
+      "in same memory format as quantizd tensor");
+}
+
 // ****************** HEY YOU! YES YOU! Read this! ********************
 //
 // Please read the README.md in this directory before editing this file
@@ -2265,7 +2275,6 @@ void quantized_normalize_kernel(
               auto dqXVec = qXVec.dequantize(x_fake_scale_vec, x_zp_vec,
                   x_fake_scale_zp_neg_premul_vec);
               for (int dqXVecIdx = 0; dqXVecIdx < dqXVec.size(); dqXVecIdx++) {
-                int64_t vecVecStartIdx = vecStartIdx + dqXVecIdx * kFloatVLen;
                 dqXVec[dqXVecIdx] =
                   (dqXVec[dqXVecIdx] - layer_mean_div_scale_xVec) *
                     gamma_p_vec + beta_vec;
@@ -2330,6 +2339,7 @@ void quantize_tensor_per_tensor_affine_cpu(
     int64_t zero_point) {
   AT_DISPATCH_QINT_TYPES(
       qtensor.scalar_type(), "quantize_tensor_per_tensor_affine_cpu", [&]() {
+        check_tensor_memory_format(rtensor, qtensor);
         const float* rd = rtensor.data_ptr<float>();
         auto qd = reinterpret_cast<underlying_t*>(qtensor.data_ptr<scalar_t>());
         fbgemm::TensorQuantizationParams qparams;
@@ -2358,6 +2368,7 @@ void dequantize_tensor_per_tensor_affine_cpu(
     int64_t zero_point) {
   AT_DISPATCH_QINT_TYPES(
       qtensor.scalar_type(), "dequantize_tensor_per_tensor_affine_cpu", [&]() {
+        check_tensor_memory_format(qtensor, rtensor);
         const auto* qd =
             reinterpret_cast<const underlying_t*>(qtensor.data_ptr<scalar_t>());
         fbgemm::TensorQuantizationParams qparams;
@@ -2480,8 +2491,7 @@ void quantize_tensor_per_tensor_affine_cpu(
 #if defined(__ARM_NEON__) || defined(__aarch64__)
   AT_DISPATCH_QINT_TYPES(
       qtensor.scalar_type(), "quantize_tensor_per_tensor_affine_cpu", [&]() {
-        TORCH_CHECK(
-            rtensor.is_contiguous(), "Float tensor should be contiguous");
+        check_tensor_memory_format(rtensor, qtensor);
         const float* const rdata = rtensor.data_ptr<float>();
         quantize_tensor_arm<scalar_t>(
             rdata, qtensor, rtensor.numel(), scale, zero_point);
@@ -2490,8 +2500,7 @@ void quantize_tensor_per_tensor_affine_cpu(
   // Fallback path
   AT_DISPATCH_QINT_TYPES(
       qtensor.scalar_type(), "quantize_tensor_per_tensor_affine_cpu", [&]() {
-        TORCH_CHECK(
-            rtensor.is_contiguous(), "Float tensor should be contiguous");
+        check_tensor_memory_format(rtensor, qtensor);
         const float* const rdata = rtensor.data_ptr<float>();
         auto qdata = qtensor.data_ptr<scalar_t>();
         auto numel = rtensor.numel();
@@ -2509,6 +2518,7 @@ void dequantize_tensor_per_tensor_affine_cpu(
     int64_t zero_point) {
   AT_DISPATCH_QINT_TYPES(
       qtensor.scalar_type(), "dequantize_tensor_per_tensor_affine_cpu", [&]() {
+      check_tensor_memory_format(qtensor, rtensor);
         const auto* qd = qtensor.data_ptr<scalar_t>();
         float* rd = rtensor.data_ptr<float>();
         auto numel = qtensor.numel();
@@ -2526,6 +2536,15 @@ void quantize_tensor_per_channel_affine_cpu(
     Tensor scales,
     Tensor zero_points,
     int64_t axis) {
+  // TODO: channels last kernel can be made faster.
+  // For contiguous tensors, e.g. NCHW, arbitrary axis can be used.
+  // For channels_last/3d however axis == 0 or 1.
+  // Since current implemntation on channels_last format does not
+  // cover per channel quant with arbitrary axis value, it is better
+  // to check and fail.
+  TORCH_CHECK(rtensor.is_contiguous() || (axis <=1),
+      "If tensor is channels_last contig then per channel quantization "
+      "is supported only for axis = 0 or 1.");
   AT_DISPATCH_QINT_TYPES(
       qtensor.scalar_type(), "quantize_tensor_per_channel_affine_cpu", [&]() {
         int64_t batches = size_to_dim_(axis, rtensor.sizes());
@@ -2534,19 +2553,91 @@ void quantize_tensor_per_channel_affine_cpu(
         int64_t channel = rtensor.size(axis);
         auto scales_data = scales.data_ptr<double>();
         auto zero_points_data = zero_points.data_ptr<int64_t>();
+        check_tensor_memory_format(rtensor, qtensor);
         const float* rdata = rtensor.data_ptr<float>();
         auto qdata = qtensor.data_ptr<scalar_t>();
-        for (auto b = 0; b < batches; ++b) {
-          for (auto c = 0; c < channel; ++c) {
+        if (axis == 1 && (rtensor.is_contiguous(MemoryFormat::ChannelsLast) ||
+            rtensor.is_contiguous(MemoryFormat::ChannelsLast3d))) {
+          // This code handles per channel quant when axis = 1 and
+          // channels_last contig.
+          // If axis = 0 and channels_last contig, implementation
+          // for channels first (NCHW) works.
+          for (auto b = 0; b < batches; ++b) {
             for (auto e = 0; e < elements_per_channel; ++e) {
-              auto i = b * channel * elements_per_channel +
-                  c * elements_per_channel + e;
-              qdata[i] = quantize_val<scalar_t>(
-                  scales_data[c], zero_points_data[c], rdata[i]);
+              for (auto c = 0; c < channel; ++c) {
+                auto i = b * channel * elements_per_channel + e * channel + c;
+                qdata[i] = quantize_val<scalar_t>(
+                    scales_data[c], zero_points_data[c], rdata[i]);
+              }
+            }
+          }
+        } else {
+          for (auto b = 0; b < batches; ++b) {
+            for (auto c = 0; c < channel; ++c) {
+              for (auto e = 0; e < elements_per_channel; ++e) {
+                auto i = b * channel * elements_per_channel +
+                    c * elements_per_channel + e;
+                qdata[i] = quantize_val<scalar_t>(
+                    scales_data[c], zero_points_data[c], rdata[i]);
+              }
             }
           }
         }
       });
+}
+
+template<typename T, typename N, typename Q>
+void dequantize_per_channel_affine_kernel(
+      Tensor qtensor,
+      Tensor rtensor,
+      Tensor scales,
+      Tensor zero_points,
+      int64_t axis) {
+
+  // For contiguous tensors, e.g. NCHW, arbitrary axis can be used.
+  // For channels_last/3d however axis == 0 or 1.
+  // Since current implemntation on channels_last format does not
+  // cover per channel quant with arbitrary axis value, it is better
+  // to check and fail.
+  TORCH_CHECK(rtensor.is_contiguous() || (axis <=1),
+      "If tensor is channels_last contig then per channel quantization "
+      "is supported only for axis = 0 or 1.");
+  int64_t batches = size_to_dim_(axis, rtensor.sizes());
+  int64_t elements_per_channel =
+      size_from_dim_(axis + 1, rtensor.sizes());
+  int64_t channel = rtensor.size(axis);
+  auto scales_data = scales.data_ptr<T>();
+  auto zero_points_data = zero_points.data_ptr<N>();
+  check_tensor_memory_format(qtensor, rtensor);
+  const auto* qd = qtensor.data_ptr<Q>();
+  float* rd = rtensor.data_ptr<float>();
+  if (axis == 1 && (rtensor.is_contiguous(MemoryFormat::ChannelsLast) ||
+      rtensor.is_contiguous(MemoryFormat::ChannelsLast3d))) {
+    for (auto b = 0; b < batches; ++b) {
+      for (auto e = 0; e < elements_per_channel; ++e) {
+        for (auto c = 0; c < channel; ++c) {
+          auto i = b * channel * elements_per_channel + e * channel + c;
+          // We need to convert the qint8 value to float to ensure the
+          // subtraction subexpression returns a float
+          rd[i] = (static_cast<float>(qd[i].val_) - zero_points_data[c]) *
+              scales_data[c];
+        }
+      }
+    }
+  } else {
+    for (auto b = 0; b < batches; ++b) {
+      for (auto c = 0; c < channel; ++c) {
+        for (auto e = 0; e < elements_per_channel; ++e) {
+          auto i = b * channel * elements_per_channel +
+              c * elements_per_channel + e;
+          // We need to convert the qint8 value to float to ensure the
+          // subtraction subexpression returns a float
+          rd[i] = (static_cast<float>(qd[i].val_) - zero_points_data[c]) *
+              scales_data[c];
+        }
+      }
+    }
+  }
 }
 
 void dequantize_tensor_per_channel_affine_cpu(
@@ -2557,26 +2648,71 @@ void dequantize_tensor_per_channel_affine_cpu(
     int64_t axis) {
   AT_DISPATCH_QINT_TYPES(
       qtensor.scalar_type(), "dequantize_tensor_per_channel_affine_cpu", [&]() {
+        dequantize_per_channel_affine_kernel<double, int64_t, scalar_t>(qtensor, rtensor, scales, zero_points, axis);
+      });
+}
+
+// quantize stubs for floating point scale and zero_point.
+void quantize_tensor_per_channel_float_qparams_cpu(
+    Tensor rtensor,
+    Tensor qtensor,
+    Tensor scales,
+    Tensor zero_points,
+    int64_t axis) {
+  // For contiguous tensors, e.g. NCHW, arbitrary axis can be used.
+  // For channels_last/3d however axis == 0 or 1.
+  // Since current implemntation on channels_last format does not
+  // cover per channel quant with arbitrary axis value, it is better
+  // to check and fail.
+  TORCH_CHECK(rtensor.is_contiguous() || (axis <=1),
+      "If tensor is channels_last contig then per channel quantization "
+      "is supported only for axis = 0 or 1.");
+  AT_DISPATCH_QINT_TYPES(
+      qtensor.scalar_type(), "quantize_tensor_per_channel_float_qparams_cpu", [&]() {
         int64_t batches = size_to_dim_(axis, rtensor.sizes());
         int64_t elements_per_channel =
             size_from_dim_(axis + 1, rtensor.sizes());
         int64_t channel = rtensor.size(axis);
-        auto scales_data = scales.data_ptr<double>();
-        auto zero_points_data = zero_points.data_ptr<int64_t>();
-        const auto* qd = qtensor.data_ptr<scalar_t>();
-        float* rd = rtensor.data_ptr<float>();
-        for (auto b = 0; b < batches; ++b) {
-          for (auto c = 0; c < channel; ++c) {
+        auto scales_data = scales.data_ptr<float>();
+        auto zero_points_data = zero_points.data_ptr<float>();
+        check_tensor_memory_format(rtensor, qtensor);
+        const float* rdata = rtensor.data_ptr<float>();
+        auto qdata = qtensor.data_ptr<scalar_t>();
+        if (axis == 1 && (rtensor.is_contiguous(MemoryFormat::ChannelsLast) ||
+            rtensor.is_contiguous(MemoryFormat::ChannelsLast3d))) {
+          for (auto b = 0; b < batches; ++b) {
             for (auto e = 0; e < elements_per_channel; ++e) {
-              auto i = b * channel * elements_per_channel +
-                  c * elements_per_channel + e;
-              // We need to convert the qint8 value to float to ensure the
-              // subtraction subexpression returns a float
-              rd[i] = (static_cast<float>(qd[i].val_) - zero_points_data[c]) *
-                  scales_data[c];
+              for (auto c = 0; c < channel; ++c) {
+                auto i = b * channel * elements_per_channel + e * channel + c;
+                qdata[i] = quantize_val_float_qparams<scalar_t>(
+                    scales_data[c], zero_points_data[c], rdata[i]);
+              }
+            }
+          }
+        } else {
+          for (auto b = 0; b < batches; ++b) {
+            for (auto c = 0; c < channel; ++c) {
+              for (auto e = 0; e < elements_per_channel; ++e) {
+                auto i = b * channel * elements_per_channel +
+                    c * elements_per_channel + e;
+                qdata[i] = quantize_val_float_qparams<scalar_t>(
+                    scales_data[c], zero_points_data[c], rdata[i]);
+              }
             }
           }
         }
+      });
+}
+
+void dequantize_tensor_per_channel_float_qparams_cpu(
+    Tensor qtensor,
+    Tensor rtensor,
+    Tensor scales,
+    Tensor zero_points,
+    int64_t axis) {
+  AT_DISPATCH_QINT_TYPES(
+      qtensor.scalar_type(), "dequantize_tensor_per_channel_float_qparams_cpu", [&]() {
+        dequantize_per_channel_affine_kernel<float, float, scalar_t>(qtensor, rtensor, scales, zero_points, axis);
       });
 }
 
@@ -2586,6 +2722,8 @@ REGISTER_DISPATCH(dequantize_tensor_per_channel_affine_stub,
                   &dequantize_tensor_per_channel_affine_cpu);
 REGISTER_DISPATCH(dequantize_tensor_per_tensor_affine_stub,
                   &dequantize_tensor_per_tensor_affine_cpu);
+REGISTER_DISPATCH(dequantize_tensor_per_channel_float_qparams_stub,
+                  &dequantize_tensor_per_channel_float_qparams_cpu);
 REGISTER_DISPATCH(fake_quant_grad_learnable_tensor_stub,
                   &fake_quantize_learnable_tensor_grad_kernel_cpu);
 REGISTER_DISPATCH(fake_quant_grad_per_channel_stub,
@@ -2629,6 +2767,9 @@ REGISTER_DISPATCH(
 REGISTER_DISPATCH(
     quantize_tensor_per_channel_affine_stub,
     &quantize_tensor_per_channel_affine_cpu);
+REGISTER_DISPATCH(
+    quantize_tensor_per_channel_float_qparams_stub,
+    &quantize_tensor_per_channel_float_qparams_cpu);
 REGISTER_DISPATCH(quantized_normalize_stub, &quantized_normalize_kernel);
 REGISTER_DISPATCH(qupsample_bilinear2d_nhwc_stub,
                   &qupsample_bilinear2d_nhwc_kernel);

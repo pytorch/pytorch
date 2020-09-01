@@ -2,6 +2,7 @@
 
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
+#include <ATen/core/qualified_name.h>
 #include <ATen/core/stack.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/pytypes.h>
@@ -79,6 +80,17 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
     return fut->completed();
   }
 
+  py::object value() {
+    // acquiring GIL as toPyObject creates new py::object
+    // without grabbing the GIL.
+    py::gil_scoped_acquire acquire;
+    py::object py_obj = toPyObject(fut->value());
+    if (unwrap_func) {
+      (*unwrap_func)(py_obj);
+    }
+    return py_obj;
+  }
+
   py::object wait() {
     fut->wait();
     if (jit::tracer::isTracing()) {
@@ -88,16 +100,7 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
       auto output = graph->insert(aten::wait, {fut_val});
       jit::tracer::setValueTrace(fut->value(), output);
     }
-    {
-      // acquiring GIL as toPyObject creates new py::object
-      // without grabbing the GIL.
-      py::gil_scoped_acquire acquire;
-      py::object py_obj = toPyObject(fut->value());
-      if (unwrap_func) {
-        (*unwrap_func)(py_obj);
-      }
-      return py_obj;
-    }
+    return value();
   }
 
   // The py::function cb arg must take a std::shared_ptr<PythonFutureWrapper>
@@ -291,9 +294,9 @@ inline InferredType tryToInferType(py::handle input) {
   py::bool_ isEnumValue = py::isinstance(input, enum_type);
   if (py::cast<bool>(isEnumValue)) {
     auto enum_class = input.attr("__class__");
-    auto enum_type =
-        py::cast<TypePtr>(py::module::import("torch.jit.annotations")
-                              .attr("try_ann_to_type")(enum_class, py::none()));
+    auto enum_type = py::cast<TypePtr>(
+        py::module::import("torch.jit.annotations")
+            .attr("try_ann_to_type")(enum_class, SourceRange()));
     return InferredType(enum_type);
   }
 
@@ -822,6 +825,19 @@ inline IValue returnToIValue(const TypePtr& type, py::handle object) {
   }
 }
 
+inline py::object getScriptedClassOrError(const std::string& name) {
+  auto py_class = py::module::import("torch.jit._state")
+                      .attr("_get_script_class")(name.c_str());
+  if (py_class.is_none()) {
+    std::stringstream err;
+    err << "Unknown reference to ScriptClass ";
+    err << name;
+    err << ". (Did you forget to import it?)";
+    throw std::runtime_error(err.str());
+  }
+  return py_class;
+}
+
 inline py::object toPyObject(IValue ivalue) {
   if (ivalue.isNone()) {
     return py::none();
@@ -900,15 +916,7 @@ inline py::object toPyObject(IValue ivalue) {
     }
     const auto classType = pyCu->get_class(c10::QualifiedName(obj->name()));
     AT_ASSERT(classType);
-    auto pyClass = py::module::import("torch.jit._state")
-                       .attr("_get_script_class")(obj->name());
-    if (pyClass.is_none()) {
-      std::stringstream err;
-      err << "Unknown reference to ScriptClass ";
-      err << obj->name();
-      err << ". Did you forget to import it?)";
-      throw std::runtime_error(err.str());
-    }
+    auto pyClass = getScriptedClassOrError(obj->name());
     auto pyObj = pyClass.attr("__new__")(pyClass);
 
     const auto numAttrs = classType->numAttributes();
@@ -927,6 +935,12 @@ inline py::object toPyObject(IValue ivalue) {
     return py::cast(ivalue.toCapsule());
   } else if (ivalue.isFuture()) {
     return py::cast(std::make_shared<PythonFutureWrapper>(ivalue.toFuture()));
+  } else if (ivalue.isEnum()) {
+    auto enum_holder = ivalue.toEnumHolder();
+    auto qualified_class_name = enum_holder->qualifiedClassName();
+
+    auto py_class = getScriptedClassOrError(qualified_class_name);
+    return py_class.attr(enum_holder->name().c_str());
   } else if (ivalue.isRRef()) {
 #ifdef USE_DISTRIBUTED
     return py::cast(torch::distributed::rpc::PyRRef(

@@ -13,7 +13,7 @@ namespace at { namespace native {
 DEFINE_DISPATCH(where_kernel);
 DEFINE_DISPATCH(max_stub);
 DEFINE_DISPATCH(min_stub);
-DEFINE_DISPATCH(_min_max_val_stub);
+DEFINE_DISPATCH(_aminmax_stub);
 DEFINE_DISPATCH(isposinf_stub);
 DEFINE_DISPATCH(isneginf_stub);
 
@@ -349,7 +349,7 @@ std::tuple<Tensor, Tensor> min(const Tensor& self, int64_t dim, bool keepdim) {
   }
 }
 
-static std::tuple<Tensor &, Tensor &> _min_max_val_out_impl(Tensor& min, Tensor& max,
+static std::tuple<Tensor &, Tensor &> _aminmax_out_impl(Tensor& min, Tensor& max,
                                                   const Tensor& self, int64_t dim, bool keepdim) {
   TORCH_CHECK(!self.is_complex(), "max is not yet implemented for complex tensors.");
   TORCH_CHECK(self.device().type() == DeviceType::CPU || self.device().type() == DeviceType::CUDA,
@@ -365,23 +365,21 @@ static std::tuple<Tensor &, Tensor &> _min_max_val_out_impl(Tensor& min, Tensor&
   dim = maybe_wrap_dim(dim, self.dim());
   if (_dimreduce_return_trivial_no_ident(min, self, dim, keepdim, "min") &&
       _dimreduce_return_trivial_no_ident(max, self, dim, keepdim, "max")) {
-    AT_ASSERT(min.dim() == 0);
-    AT_ASSERT(max.dim() == 0);
     return std::forward_as_tuple(min, max);
   } else {
-    _min_max_val_stub(self.device().type(), min, max, self, dim, keepdim);
+    _aminmax_stub(self.device().type(), min, max, self, dim, keepdim);
     return std::tuple<Tensor &, Tensor &>{min, max};
   }
 }
 
-std::tuple<Tensor, Tensor> _min_max_val(const Tensor& self, int64_t dim, bool keepdim) {
+std::tuple<Tensor, Tensor> _aminmax(const Tensor& self, int64_t dim, bool keepdim) {
   TORCH_CHECK(!self.is_complex(), "min_max is not yet implemented for complex tensors.");
   TORCH_CHECK(!self.is_quantized(), "min is not yet implemented for quantized tensors.");
 
   Tensor min = at::empty({0}, self.options());
   Tensor max = at::empty({0}, self.options());
 
-  auto result = _min_max_val_out_impl(min, max, self, dim, keepdim);
+  auto result = _aminmax_out_impl(min, max, self, dim, keepdim);
   return result;
 }
 

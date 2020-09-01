@@ -31,10 +31,6 @@ if(NOT USE_VULKAN_SHADERC_RUNTIME)
 
     set(GLSLC_PATH "${ANDROID_NDK}/shader-tools/${ANDROID_NDK_HOST_SYSTEM_NAME}/glslc")
   else()
-    if(NOT DEFINED ENV{VULKAN_SDK})
-      message(FATAL_ERROR "USE_VULKAN requires environment var VULKAN_SDK set")
-    endif()
-
     find_program(
       GLSLC_PATH glslc
       PATHS

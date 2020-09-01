@@ -31,9 +31,9 @@ void testFuserPass_1() {
 
   // We should not be able to fuse across the in-place operation here.
   testing::FileCheck()
-      .check("tensorexpr::Group_0")
+      .check("prim::TensorExprGroup_0")
       ->check("aten::add_")
-      ->check("tensorexpr::Group_1")
+      ->check("prim::TensorExprGroup_1")
       ->run(*g);
 }
 
@@ -57,9 +57,37 @@ void testFuserPass_2() {
   // We should not be able to fuse across the in-place operation here.
   testing::FileCheck()
       .check("aten::add_")
-      ->check("tensorexpr::Group_0")
+      ->check("prim::TensorExprGroup_0")
       ->run(*g);
 }
 
+void testFuserPass_3() {
+  KernelScope kernel_scope;
+  const auto graph_string = R"IR(
+    graph(%x : Float(128:1, device=cpu),
+          %y : Float(128:1, device=cpu)):
+      %r : Float(128:1, device=cpu) = aten::mul(%x, %y)
+      return (%r))IR";
+  {
+    auto g = std::make_shared<Graph>();
+    torch::jit::parseIR(graph_string, g.get());
+
+    g->lint();
+    FuseTensorExprs(g, /* min_group_size= */ 2);
+
+    // We should not create a fusion group since its size would be too small
+    testing::FileCheck().check_not("prim::TensorExprGroup")->run(*g);
+  }
+  {
+    auto g = std::make_shared<Graph>();
+    torch::jit::parseIR(graph_string, g.get());
+
+    g->lint();
+    FuseTensorExprs(g, /* min_group_size= */ 1);
+
+    // We should create a fusion group since its size is above the threshold
+    testing::FileCheck().check("prim::TensorExprGroup")->run(*g);
+  }
+}
 } // namespace jit
 } // namespace torch

@@ -143,7 +143,7 @@ static void max_kernel_impl(
   });
 }
 
-static void _min_max_val_kernel_impl(
+static void _aminmax_kernel_impl(
     Tensor& min_result,
     Tensor& max_result,
     const Tensor& self,
@@ -156,7 +156,7 @@ static void _min_max_val_kernel_impl(
     "Expect min and max dtype ", self.scalar_type(),
     " but got ", min_result.scalar_type(), " and ", max_result.scalar_type());
 
-  AT_DISPATCH_ALL_TYPES_AND(ScalarType::Bool, self.scalar_type(), "_min_max_val_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES_AND(ScalarType::Bool, self.scalar_type(), "_aminmax_cpu", [&] {
     compare_base_kernel<scalar_t, scalar_t>(min_result, max_result, self, wrap_dim, keepdim, [&] (
       scalar_t* min_result_data, scalar_t* max_result_data,
       const scalar_t* self_data, auto self_dim_stride) {
@@ -174,10 +174,6 @@ static void _min_max_val_kernel_impl(
             }
           } else if (!(value <= max_number)) {
             max_number = value;
-            if (_isnan<scalar_t>(value)) {
-              min_number = value;
-              break;
-            }
           }
         }
         *min_result_data = min_number;
@@ -221,7 +217,7 @@ static void isneginf_kernel_impl(TensorIterator& iter) {
 
 REGISTER_DISPATCH(max_stub, &max_kernel_impl);
 REGISTER_DISPATCH(min_stub, &min_kernel_impl);
-REGISTER_DISPATCH(_min_max_val_stub, &_min_max_val_kernel_impl);
+REGISTER_DISPATCH(_aminmax_stub, &_aminmax_kernel_impl);
 REGISTER_DISPATCH(where_kernel, &where_kernel_impl);
 REGISTER_DISPATCH(isposinf_stub, &isposinf_kernel_impl);
 REGISTER_DISPATCH(isneginf_stub, &isneginf_kernel_impl);

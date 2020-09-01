@@ -2,7 +2,9 @@
 
 #include <ATen/native/Activation.h>
 
-#include <math.h>
+#include <cmath>
+
+#include <thrust/tuple.h>
 
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
@@ -15,10 +17,8 @@
 #include <ATen/native/cuda/Loops.cuh>
 #include <c10/cuda/CUDAMathCompat.h>
 
-#include <thrust/tuple.h>
-
-
-namespace at { namespace native {
+namespace at {
+namespace native {
 
 // -----------------------------------
 // prelu forward
@@ -29,10 +29,7 @@ void prelu_cuda_kernel_share_weights(
   Tensor& result,
   const scalar_t* weight_data)
 {
-  at::TensorIterator iter = TensorIteratorConfig()
-      .add_output(result)
-      .add_input(input)
-      .build();
+  auto iter = TensorIterator::unary_op(result, input);
 
   at::native::gpu_kernel(iter,
     [weight_data] GPU_LAMBDA (scalar_t input_val) {
@@ -478,6 +475,43 @@ void hardsigmoid_backward_kernel(TensorIterator& iter) {
   });
 }
 
+void silu_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::Half,
+      at::ScalarType::BFloat16,
+      iter.dtype(),
+      "silu_cuda",
+      [&]() {
+        gpu_kernel(
+            iter,
+            [] GPU_LAMBDA(scalar_t x) -> scalar_t {
+              using T_ACC = acc_type<scalar_t, true>;
+              const T_ACC x_acc = static_cast<T_ACC>(x);
+              return x_acc / (T_ACC(1) + c10::cuda::compat::exp(-x_acc));
+            });
+      });
+}
+
+void silu_backward_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::Half,
+      at::ScalarType::BFloat16,
+      iter.dtype(),
+      "silu_backward_cuda",
+      [&]() {
+        gpu_kernel(
+            iter,
+            [] GPU_LAMBDA(scalar_t dy, scalar_t x) -> scalar_t {
+              using T_ACC = acc_type<scalar_t, true>;
+              const T_ACC dy_acc = static_cast<T_ACC>(dy);
+              const T_ACC x_acc = static_cast<T_ACC>(x);
+              const T_ACC s_acc =
+                  T_ACC(1) / (T_ACC(1) + c10::cuda::compat::exp(-x_acc));
+              return dy_acc * s_acc * (T_ACC(1) + x_acc * (T_ACC(1) - s_acc));
+            });
+      });
+}
+
 } // namespace
 
 Tensor gelu_cuda(const Tensor& self) {
@@ -503,7 +537,16 @@ static Tensor threshold_out_cuda(
     Scalar value,
     const Tensor& other) {
   Tensor result = opt_result.value_or(Tensor());
-  auto iter = TensorIterator::binary_op(result, self, other);
+  auto iter = TensorIteratorConfig()
+    .set_check_mem_overlap(false)  // threshold is idempotent, so overlap is okay
+    .add_output(result)
+    .add_input(self)
+    .add_input(other)
+    .allow_cpu_scalars(true)
+    .promote_inputs_to_common_dtype(true)
+    .cast_common_dtype_to_outputs(true)
+    .enforce_safe_casting_to_output(true)
+    .build();
   threshold_kernel(iter, threshold, value);
   return iter.output();
 }
@@ -540,5 +583,8 @@ REGISTER_DISPATCH(hardsigmoid_stub, &hardsigmoid_kernel);
 REGISTER_DISPATCH(hardsigmoid_backward_stub, &hardsigmoid_backward_kernel);
 REGISTER_DISPATCH(softplus_stub, &softplus_kernel);
 REGISTER_DISPATCH(softplus_backward_stub, &softplus_backward_kernel);
+REGISTER_DISPATCH(silu_stub, &silu_kernel);
+REGISTER_DISPATCH(silu_backward_stub, &silu_backward_kernel);
 
-}}  // namespace at::native
+} // namespace native
+} // namespace at
