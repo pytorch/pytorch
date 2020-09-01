@@ -196,7 +196,7 @@ namespace {
         using vec = TypeParam;
         using UVT = UvalueType<TypeParam>;
         auto test_case =  TestingCase<vec>::getBuilder()
-            .addDomain(CheckWithinDomains<UVT>{ { {-100, 100}}, true, 1.e-3f})
+            .addDomain(CheckWithinDomains<UVT>{ { {0, 100}}, true, 1.e-3f})
             .setTrialCount(200)
             .setTestSeed(TestSeed());
         test_unary<vec>(
@@ -402,13 +402,25 @@ namespace {
             [](const vec& v) { return v.erfinv(); },
             createDefaultUnaryTestCase<vec>(TestSeed(), false, true));
     }
+
+
+
     TYPED_TEST(LGamma, LGamma) {
         using vec = TypeParam;
+        using UVT = UvalueType<vec>;
+        UVT tolerance = getDefaultTolerance<UVT>();
+        // double: 2e+305  float: 4e+36 (https://sleef.org/purec.xhtml#eg)
+        UVT maxCorrect = std::is_same<UVT,float>::value? (UVT)4e+36 : (UVT)2e+305;
+        TestingCase<vec> testCase = TestingCase<vec>::getBuilder()
+            .addDomain(CheckWithinDomains<UVT>{ { {(UVT)-100, (UVT)0}}, true, tolerance}) 
+            .addDomain(CheckWithinDomains<UVT>{ { {(UVT)0, (UVT)1000 }}, true, tolerance})
+            .addDomain(CheckWithinDomains<UVT>{ { {(UVT)1000, maxCorrect }}, true, tolerance}) 
+            .setTestSeed(TestSeed());      
         test_unary<vec>(
             NAME_INFO(lgamma),
             RESOLVE_OVERLOAD(std::lgamma),
             [](vec v) { return v.lgamma(); },
-            createDefaultUnaryTestCase<vec>(TestSeed(), false, true));
+            testCase);
     }
     TYPED_TEST(InverseTrigonometricReal, ATan2) {
         using vec = TypeParam;
@@ -503,7 +515,7 @@ namespace {
                 return v0 - v1;
             },
             createDefaultBinaryTestCase<vec>(TestSeed()),
-            RESOLVE_OVERLOAD(filter_minus_overflow));
+            RESOLVE_OVERLOAD(filter_sub_overflow));
     }
     TYPED_TEST(Arithmetics, Multiplication) {
         using vec = TypeParam;
@@ -923,7 +935,11 @@ namespace {
             //generate vals
             for (int j = 0; j < vec::size(); j++) {
                 qint_vals[j] = generator.get();
-                qint_b[j] = generator.get();
+                qint_b[j] = generator.get(); 
+                if(std::is_same<underlying,int>::value){
+                    //filter overflow cases
+                    filter_sub_overflow(qint_vals[j], qint_b[j]);
+                } 
             }
             //get expected
             int index = 0;
