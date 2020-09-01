@@ -5,6 +5,7 @@ import functools
 import warnings
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import TEST_WITH_ROCM
+import types
 
 class TestVmapAPI(TestCase):
     def test_non_tensor_output_raises(self):
@@ -675,32 +676,94 @@ def _vmap_test(self, op, inputs, in_dims=0, out_dims=0,
     result_as_tuple = (result,) if op_has_single_return else result
     self.assertTrue(result[0].requires_grad)
 
-class TestVmapOperators(TestCase):
+def should_allow_vmap_fallback_usage(fn):
+    return getattr(fn, '_allow_vmap_fallback_usage', False)
+
+def allowVmapFallbackUsage(fn):
+    fn._allow_vmap_fallback_usage = True
+    return fn
+
+# All tests of TestVmapBase check that the slow vmap fallback is never invoked.
+# This is so that we can incrementally add batching rules for operators to
+# replace the slow vmap fallback path for said operators. To skip this check,
+# please use the allowVmapFallbackUsage decorator.
+#
+# NB: Don't add tests to TestVmapBase directly, unless you want them to run
+# on every subclass of TestVmapBase. Add them to e.g. TestVmapOperators.
+#
+# NB: TestVmapBase is a nested class. This prevents test runners from picking
+# it up and running it.
+class Namespace:
+    class TestVmapBase(TestCase):
+        def __init__(self, method_name='runTest'):
+            super().__init__(method_name)
+
+            test_method = getattr(self, method_name, None)
+            if test_method is None:
+                return
+
+            if not should_allow_vmap_fallback_usage(test_method):
+                setattr(self, method_name,
+                        self._wrap_method_with_vmap_fallback_check(test_method))
+
+        def _wrap_method_with_vmap_fallback_check(self, method):
+            msg = (
+                'Expected the test to not invoke the vmap fallback path, i.e., '
+                'all of the operators being tested in this test should have batching '
+                'rules implemented. If you are intentionally testing something to '
+                'do with the fallback path, use allowVmapFallbackUsage. Otherwise, '
+                'please make sure that batching rules are implemented for the '
+                'operator(s) being tested.'
+            )
+
+            @functools.wraps(method)
+            def wrapper(self, *args, **kwargs):
+                regex = r'falling back to slow \(for loop and stack\) implementation'
+                with warnings.catch_warnings(record=True) as wa:
+                    warnings.simplefilter('always')
+                    method(*args, **kwargs)
+                    for captured_warning in wa:
+                        self.assertNotRegex(str(captured_warning.message), regex, msg)
+            return types.MethodType(wrapper, self)
+
+        @allowVmapFallbackUsage
+        def test_vmap_fallback_check_ok(self):
+            # One day we'll implement a batching rule for torch.var_mean.
+            # When that happens, please change the example to use an
+            # operator that doesn't have a batching rule implemented.
+            op_using_fallback = torch.var_mean
+            vmap(op_using_fallback)(torch.rand(3))
+
+        def test_vmap_fallback_check(self):
+            @self._wrap_method_with_vmap_fallback_check
+            def no_fallback(self):
+                pass
+
+            # One day we'll implement a batching rule for torch.var_mean.
+            # When that happens, please change the example to use an
+            # operator that doesn't have a batching rule implemented.
+            op_using_fallback = torch.var_mean
+
+            @self._wrap_method_with_vmap_fallback_check
+            def uses_fallback(self):
+                vmap(op_using_fallback)(torch.rand(3))
+
+            no_fallback(self)
+
+            with self.assertRaises(AssertionError):
+                uses_fallback(self)
+
+
+class TestVmapOperators(Namespace.TestVmapBase):
     def _vmap_test(self, *args, **kwargs):
         return _vmap_test(self, *args, **kwargs)
 
     def _vmap_view_test(self, *args, **kwargs):
         self._vmap_test(*args, **kwargs, check_view=True)
 
-    def _assert_doesnt_use_vmap_fallback(self, vmap_args, inputs):
-        regex = r'falling back to slow \(for loop and stack\) implementation'
-        with warnings.catch_warnings(record=True) as wa:
-            result = vmap(*vmap_args)(*inputs)
-            for captured_warning in wa:
-                self.assertNotRegex(str(captured_warning.message), regex)
-
-    def test_assert_doesnt_use_vmap_fallback(self):
-        with self.assertRaises(AssertionError):
-            # One day we'll implement a batching rule for torch.var_mean.
-            # When that happens, please change the example to use an
-            # operator that doesn't have a batching rule implemented.
-            self._assert_doesnt_use_vmap_fallback([torch.var_mean], [torch.rand(3)])
-
     def _test_unary(self, op, getter, device):
         test = self._vmap_test
         B0, B1 = 7, 11
-
-        self._assert_doesnt_use_vmap_fallback([op], [getter([B0], device)])
 
         # Single vmap, various in_dims / out_dims
         test(op, [getter([B0, 3], device)])
@@ -774,9 +837,6 @@ class TestVmapOperators(TestCase):
         for op, getter in cases:
             device = 'cpu'
             B0, B1 = 7, 11
-
-            self._assert_doesnt_use_vmap_fallback(
-                [op], (getter([B0], device), getter([B0], device)))
 
             # Single vmap: op(Tensor, Tensor)
             test(op, (getter([B0, 3], device), getter([B0, 3], device)))
@@ -1175,7 +1235,7 @@ def differentiable(args):
     return tuple(arg for arg in as_tuple(args)
                  if isinstance(arg, torch.Tensor) and arg.requires_grad)
 
-class TestVmapBatchedGradient(TestCase):
+class TestVmapBatchedGradient(Namespace.TestVmapBase):
     def _vmap_test(self, *args, **kwargs):
         return _vmap_test(self, *args, **kwargs)
 
@@ -1233,18 +1293,9 @@ class TestVmapBatchedGradient(TestCase):
                         check_propagates_grad=False)
 
     def test_sigmoid(self, device):
-        # Maybe we can make the "check that the slow fallback was not invoked"
-        # into a context manager, because it's used a lot. I'll leave that for
-        # future work.
-        regex = r'falling back to slow \(for loop and stack\) implementation'
-        with warnings.catch_warnings(record=True) as wa:
-            warnings.simplefilter('always')
-            x = torch.randn(2, 3, requires_grad=True, device=device)
-            self._batched_grad_test(Tensor.sigmoid, (x,), {})
-            self._batched_grad_grad_test(Tensor.sigmoid, (x,), {})
-
-            for captured_warning in wa:
-                self.assertNotRegex(str(captured_warning.message), regex)
+        x = torch.randn(2, 3, requires_grad=True, device=device)
+        self._batched_grad_test(Tensor.sigmoid, (x,), {})
+        self._batched_grad_grad_test(Tensor.sigmoid, (x,), {})
 
 instantiate_device_type_tests(
     TestVmapBatchedGradient,
