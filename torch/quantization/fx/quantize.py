@@ -27,13 +27,11 @@ from .pattern_utils import (
     get_dynamic_quant_patterns,
 )
 
-from quantization_patterns import *
+from .quantization_patterns import *
 
 from .utils import _parent_name
 
-from abc import ABC, abstractmethod
 import copy
-import operator
 
 # ------------------------
 # Helper Functions
@@ -58,8 +56,13 @@ def get_new_attr_name_with_prefix(prefix):
 
 # Starting from a target node, trace back until we hit input or
 # getattr node. This is used to extract the chain of operators
-# starting from getattr to the target node
-def collect_nodes_to_fold(node):
+# starting from getattr to the target node, for example
+# def forward(self, x):
+#     observed = self.observer(self.weight)
+#     return F.linear(x, observed)
+# collect_producer_nodes(observed) will return all nodes that produces
+# the observed node.
+def collect_producer_nodes(node):
     nodes = [node]
     frontier = [node]
     while frontier:
@@ -75,6 +78,23 @@ def collect_nodes_to_fold(node):
             if not (arg.op == 'call_function' and arg.target == getattr):
                 frontier.append(arg)
     return nodes
+
+# Construct a graph module from extracted producer nodes
+# from `collect_producer_nodes` function
+def graph_module_from_producer_nodes(root, producer_nodes):
+    # since we traced back from node to getattrr
+    producer_nodes.reverse()
+    graph = Graph()
+    env = {}
+
+    def load_arg(a):
+        return map_arg(a, lambda node: env[node.name])
+    for producer_node in producer_nodes:
+        env[producer_node.name] = graph.node_copy(producer_node, load_arg)
+    graph.output(load_arg(node.name))
+    graph_module = GraphModule(root, graph)
+    return graph_module
+
 
 
 # A dictionary for querying the weight index for a given op
@@ -430,20 +450,13 @@ class Quantizer:
         # get packed weights
         for node in quantized.graph.nodes:
             if node.op == 'call_function' and node.target in WEIGHT_PREPACK_OPS:
-                nodes_to_fold = collect_nodes_to_fold(node)
+                nodes_to_fold = collect_producer_nodes(node)
                 if nodes_to_fold is not None:
-                    # since we traced back from weight node to getattrr
-                    nodes_to_fold.reverse()
-                    prepacking_graph = Graph()
-                    env = {}
-
-                    def load_arg(a):
-                        return map_arg(a, lambda node: env[node.name])
                     for node_to_fold in nodes_to_fold:
-                        env[node_to_fold.name] = prepacking_graph.node_copy(node_to_fold, load_arg)
                         folded_nodes[node_to_fold.name] = node
-                    prepacking_graph.output(load_arg(node.name))
-                    prepacking_module = GraphModule(quantized.root, prepacking_graph)
+
+                    prepacking_module = graph_module_from_producer_nodes(
+                        quantized.root, nodes_to_fold)
                     packed_weight = prepacking_module()
                     packed_weights[node.name] = packed_weight
 
