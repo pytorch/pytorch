@@ -7,6 +7,7 @@
 #include <unistd.h>
 
 #include <c10d/ProcessGroupMPI.hpp>
+#include <gtest/gtest.h>
 
 #define STR_HELPER(x) #x
 #define STR(x) STR_HELPER(x)
