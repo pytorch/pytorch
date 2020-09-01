@@ -254,8 +254,8 @@ void OwnerRRef::setValue(IValue&& value) {
   future_->markCompleted(value);
 }
 
-void OwnerRRef::setError(const std::string& error) {
-  future_->setErrorIfNeeded(error);
+void OwnerRRef::setError(std::exception_ptr eptr) {
+  future_->setErrorIfNeeded(std::move(eptr));
 }
 
 std::ostream& operator<<(std::ostream& os, const RRef& rref) {
