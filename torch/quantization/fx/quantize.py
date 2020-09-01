@@ -52,15 +52,17 @@ def get_new_attr_name_with_prefix(prefix):
         return attr_name
     return get_new_attr_name
 
-# Starting from a target node, trace back until we hit input or
-# getattr node. This is used to extract the chain of operators
-# starting from getattr to the target node, for example
-# def forward(self, x):
-#     observed = self.observer(self.weight)
-#     return F.linear(x, observed)
-# collect_producer_nodes(observed) will return all nodes that produces
-# the observed node.
 def collect_producer_nodes(node):
+   r''' Starting from a target node, trace back until we hit inpu or
+   getattr node. This is used to extract the chain of operators
+   starting from getattr to the target node, for example
+   def forward(self, x):
+     observed = self.observer(self.weight)
+     return F.linear(x, observed)
+   collect_producer_nodes(observed) will either return a list of nodes that produces
+   the observed node or None if we can't extract a self contained graph without
+   free variables(inputs of the forward function).
+   '''
     nodes = [node]
     frontier = [node]
     while frontier:
@@ -83,6 +85,8 @@ def graph_module_from_producer_nodes(root, producer_nodes):
     Args:
       root: the root module for the original graph
       producer_nodes: a list of nodes we use to construct the graph
+    Return:
+      A graph module constructed from the producer nodes
     '''
     assert len(producer_nodes) > 0, 'list of producer nodes can not be empty'
     # since we traced back from node to getattrr
