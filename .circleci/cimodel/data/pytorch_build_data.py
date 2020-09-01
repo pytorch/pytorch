@@ -16,7 +16,7 @@ CONFIG_TREE_DATA = [
                     ("important", [X(True)]),
                     ("parallel_tbb", [X(True)]),
                     ("parallel_native", [X(True)]),
-                    ("pure_torch", [XImportant(True)]),
+                    ("pure_torch", [X(True)]),
                 ]),
             ]),
             # TODO: bring back libtorch test
