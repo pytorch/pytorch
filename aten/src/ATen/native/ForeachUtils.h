@@ -5,7 +5,10 @@ namespace at {
 namespace native {
 namespace {
 
-void verify_list(TensorList tensors) {
+// Set of foreach API restrictions
+// - All tensors must be of the same dtype
+// - All corresponding tensors must be of the same size
+void check_foreach_api_restrictions(TensorList tensors) {
   TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
   auto expected_dtype = tensors[0].dtype();
 
@@ -14,7 +17,7 @@ void verify_list(TensorList tensors) {
   }
 }
 
-void verify_list(TensorList tensors1, TensorList tensors2) {
+void check_foreach_api_restrictions(TensorList tensors1, TensorList tensors2) {
   TORCH_CHECK(tensors1.size() > 0, "Tensor list must have at least one tensor.");
   TORCH_CHECK(tensors2.size() > 0, "Tensor list must have at least one tensor.");
   TORCH_CHECK(tensors1.size() == tensors2.size(), "Tensor lists must have the same number of tensors, got ", tensors1.size(), " and ", tensors2.size());
