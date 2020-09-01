@@ -1110,7 +1110,7 @@ class Quantizer:
         returns the input and output nodes which need to be quantized.
 
         Outputs a map of
-          node_name -> (DefaultQuant instance, qconfig)
+          node_name -> (QuantizeHandler instance (always DefaultQuant), qconfig)
         """
         quants = {}
 
