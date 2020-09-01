@@ -308,6 +308,8 @@ class BufferDict:
 
 # Defined in torch/csrc/jit/python/python_ir.cpp
 # TorchType is equivalent to torch.Type/Torch._C.Type
+# We do not use `Type` here because this would clash with
+# typing.Type.
 class TorchType:  
     ...
 
