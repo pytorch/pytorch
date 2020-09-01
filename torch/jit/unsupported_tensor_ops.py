@@ -35,8 +35,8 @@ def _gen_unsupported_methods_properties():
             else:
                 properties.append(attr)
 
-    mapped_methods = map(lambda x: "\t*  :meth:`~torch.Tensor." + x + r"`", mapped_methods)
-    mapped_properties = map(lambda x: "\t*  :attr:`~torch.Tensor." + x + r"`", mapped_properties)
+    mapped_methods = map(lambda x: "\t*  :meth:`~torch.Tensor." + x + r"`", methods)
+    mapped_properties = map(lambda x: "\t*  :attr:`~torch.Tensor." + x + r"`", properties)
     return "\n".join(mapped_methods), "\n".join(mapped_properties)
 
 

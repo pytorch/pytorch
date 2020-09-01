@@ -37,10 +37,10 @@ def _emit_schema(mod, name, schema, arg_start=0, padding=4):
         qualified_name = name
     else:
         qualified_name = "{}.{}".format(mod, name)
-    schema = "{}({}) -> {}".format(qualified_name,
+    schema_str = "{}({}) -> {}".format(qualified_name,
                                    _emit_args(len(qualified_name) + 1 + padding, schema.arguments[arg_start:]),
                                    _emit_rets(schema.returns))
-    return schema
+    return schema_str
 
 def _get_tensor_ops():
     def is_tensor_method(schema):
@@ -76,7 +76,11 @@ def _get_nn_functional_ops():
             # Ignore non-functions and internal methods
             continue
 
-        if 'torch.nn.functional' not in inspect.getmodule(attr).__name__:
+        attr_module = inspect.getmodule(attr)
+        if not attr_module:
+            raise RuntimeError(f'Module for {attr} not found')
+
+        if 'torch.nn.functional' not in attr_module.__name__:
             # Ignore functions from outside torch.nn.functional
             continue
 
@@ -106,6 +110,9 @@ def _get_builtins_helper():
     builtins = []
     for fn, _builtin_name in torch.jit._builtins._builtin_ops:
         mod = inspect.getmodule(fn)
+        if not mod:
+            raise RuntimeError(f'Module for {fn} not found')
+
         if not hasattr(fn, '__name__'):
             # typing classes
             continue
@@ -124,6 +131,9 @@ def _get_builtins_helper():
 
 def _is_math_fn(fn):
     mod = inspect.getmodule(fn)
+    if not mod:
+        raise RuntimeError(f'Module for {fn} not found')
+
     return mod.__name__ == 'math'
 
 
@@ -134,6 +144,8 @@ def _get_torchscript_builtins():
     # Iterate over the specially added builtins
     for fn, _builtin_name in builtins_list:
         mod = inspect.getmodule(fn)
+        if not mod:
+            raise RuntimeError(f'Module for {fn} not found')
         builtin = _find_builtin(fn)
         if builtin is not None:
             schemas = torch._C._jit_get_schemas_for_operator(builtin)
@@ -151,12 +163,14 @@ def _get_math_builtins():
     # Iterate over the specially added builtins
     for fn, _builtin_name in builtins_list:
         mod = inspect.getmodule(fn)
+        if not mod:
+            raise RuntimeError(f'Module for {fn} not found')
         builtin = _find_builtin(fn)
         if builtin is not None:
             schemas = torch._C._jit_get_schemas_for_operator(builtin)
             for schema in schemas:
-                schema = _emit_schema(mod.__name__, fn.__name__, schema)
-                if 'Tensor' in schema:
+                schema_str = _emit_schema(mod.__name__, fn.__name__, schema)
+                if 'Tensor' in schema_str:
                     # Skip Tensor ops that have the same name as math functions
                     # (they will show up in the tensor methods section)
                     continue

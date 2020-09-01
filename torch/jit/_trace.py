@@ -16,7 +16,7 @@ import functools
 import warnings
 import inspect
 import re
-from typing import Set
+from typing import Any, Dict, Optional, Set
 
 from torch.jit._state import _python_cu, _enabled
 from torch.jit._script import ScriptModule, _CachedForward, script
@@ -812,7 +812,7 @@ def trace(
     return traced
 
 
-_trace_module_map = None
+_trace_module_map: Optional[Dict[Any, Any]] = None
 
 
 def trace_module(
@@ -918,15 +918,16 @@ def trace_module(
 
     old_module_map = torch.jit._trace._trace_module_map
     try:
-        torch.jit._trace._trace_module_map = {}
+        trace_module_map: Dict[torch.nn.Module, str] = {}
 
         def register_submods(mod, prefix):
             for name, child in mod.named_children():
                 submod_qualname = prefix + "." + name
-                torch.jit._trace._trace_module_map[child] = submod_qualname
+                trace_module_map[child] = submod_qualname
                 register_submods(child, submod_qualname)
 
-        torch.jit._trace._trace_module_map["__module"] = mod
+        trace_module_map["__module"] = mod
+        torch.jit._trace._trace_module_map = trace_module_map
         register_submods(mod, "__module")
 
         module = make_module(mod, _module_class, _compilation_unit)
