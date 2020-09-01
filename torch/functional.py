@@ -395,7 +395,7 @@ expanding the :math:`i` :sup:`th` input over dimensions defined by other inputs.
 def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
          win_length: Optional[int] = None, window: Optional[Tensor] = None,
          center: bool = True, pad_mode: str = 'reflect', normalized: bool = False,
-         onesided: Optional[bool] = None, *,
+         onesided: Optional[bool] = None,
          return_complex: Optional[bool] = None) -> Tensor:
     r"""Short-time Fourier transform (STFT).
 
@@ -503,12 +503,12 @@ def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
         input = F.pad(input.view(extended_shape), (pad, pad), pad_mode)
         input = input.view(input.shape[-signal_dim:])
     return _VF.stft(input, n_fft, hop_length, win_length, window,  # type: ignore
-                    normalized, onesided, return_complex=return_complex)
+                    normalized, onesided, return_complex)
 
 def istft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
           win_length: Optional[int] = None, window: Optional[Tensor] = None,
           center: bool = True, normalized: bool = False,
-          onesided: Optional[bool] = None, length: Optional[int] = None, *,
+          onesided: Optional[bool] = None, length: Optional[int] = None,
           return_complex: bool = False) -> Tensor:
     r"""Inverse short time Fourier Transform. This is expected to be the inverse of :func:`~torch.stft`.
     It has the same parameters (+ additional optional parameter of :attr:`length`) and it should return the
@@ -573,11 +573,8 @@ def istft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
                 window=window, center=center, normalized=normalized, onesided=onesided,
                 length=length)
 
-    if return_complex is None:
-        warnings.warn("return_complex will become a required argument in future")
-
     return _VF.istft(input, n_fft, hop_length, win_length, window, center,  # type: ignore
-                     normalized, onesided, length, return_complex=return_complex)
+                     normalized, onesided, length, return_complex)
 
 
 del torch.unique_dim

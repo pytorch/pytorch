@@ -183,19 +183,20 @@ Tensor irfft(const Tensor& self, const int64_t signal_ndim, const bool normalize
               normalized, onesided);
 }
 
+template <typename Stream, typename T>
+static Stream& write_opt(Stream& SS, const optional<T>& value) {
+  if (value) {
+    SS << *value;
+  } else {
+    SS << "None";
+  }
+  return SS;
+}
 
 Tensor stft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop_lengthOpt,
             const optional<int64_t> win_lengthOpt, const Tensor& window,
-            const bool normalized, const c10::optional<bool> onesidedOpt,
-            const c10::optional<bool> return_complex) {
-  auto write_opt = [](auto & SS, const auto & opt_val) -> decltype(auto) {
-                     if (opt_val) {
-                       SS << *opt_val;
-                     } else {
-                       SS << "None";
-                     }
-                     return SS;
-                   };
+            const bool normalized, const optional<bool> onesidedOpt,
+            const optional<bool> return_complexOpt) {
   #define REPR(SS) \
     SS << "stft(" << self.toString() << self.sizes() << ", n_fft=" << n_fft \
        << ", hop_length=" << hop_length << ", win_length=" << win_length \
@@ -207,11 +208,17 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop
     } \
     SS << ", normalized=" << normalized << ", onesided="; \
     write_opt(SS, onesidedOpt) << ", return_complex="; \
-    write_opt(SS, return_complex) << ')'
+    write_opt(SS, return_complexOpt) << ") "
 
   // default_init hop_length and win_length
   auto hop_length = hop_lengthOpt.value_or(n_fft >> 2);
   auto win_length = win_lengthOpt.value_or(n_fft);
+  const bool return_complex = return_complexOpt.value_or(
+      self.is_complex() || (window.defined() && window.is_complex()));
+  if (!return_complexOpt && !return_complex) {
+    TORCH_WARN("stft will return complex tensors by default in future, use"
+               " return_complex=False to preserve the current output format.");
+  }
 
   if (!at::isFloatingType(self.scalar_type()) && !at::isComplexType(self.scalar_type())) {
     std::ostringstream ss;
@@ -279,11 +286,6 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop
   const bool complex_fft = input.is_complex();
   const auto onesided = onesidedOpt.value_or(!complex_fft);
 
-  if (!complex_fft && !return_complex.has_value()) {
-    TORCH_WARN("stft will return complex tensors by default in future, use"
-               " return_complex=False to preserve the current output format.");
-  }
-
   Tensor out;
   if (complex_fft) {
     TORCH_CHECK(!onesided, "Cannot have onesided output if window or input is complex");
@@ -297,7 +299,7 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop
     out.squeeze_(0);
   }
 
-  if (return_complex.value_or(complex_fft)) {
+  if (return_complex) {
     return at::view_as_complex(out);
   } else {
     return out;
@@ -308,15 +310,6 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> ho
              const optional<int64_t> win_lengthOpt, const Tensor& window,
              const bool center, const bool normalized, const c10::optional<bool> onesidedOpt,
              const optional<int64_t> lengthOpt, const bool return_complex) {
-  auto write_opt = [](auto & SS, const auto & opt_val) -> decltype(auto) {
-                     if (opt_val) {
-                       SS << *opt_val;
-                     } else {
-                       SS << "None";
-                     }
-                     return SS;
-                   };
-
   #define REPR(SS) \
     SS << "istft(" << self.toString() << self.sizes() << ", n_fft=" << n_fft \
        << ", hop_length=" << hop_length << ", win_length=" << win_length \
@@ -459,6 +452,23 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> ho
   return y;
 
   #undef REPR
+}
+
+Tensor stft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop_lengthOpt,
+            const optional<int64_t> win_lengthOpt, const Tensor& window,
+            const bool normalized, const optional<bool> onesidedOpt) {
+  return at::native::stft(
+      self, n_fft, hop_lengthOpt, win_lengthOpt, window, normalized, onesidedOpt,
+      /*return_complex=*/c10::nullopt);
+}
+
+Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop_lengthOpt,
+             const optional<int64_t> win_lengthOpt, const Tensor& window,
+             const bool center, const bool normalized, const optional<bool> onesidedOpt,
+             const optional<int64_t> lengthOpt) {
+  return at::native::istft(
+      self, n_fft, hop_lengthOpt, win_lengthOpt, window, center, normalized,
+      onesidedOpt, lengthOpt, /*return_complex=*/false);
 }
 
 }} // at::native

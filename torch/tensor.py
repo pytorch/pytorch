@@ -398,7 +398,7 @@ class Tensor(torch._C._TensorBase):
     def stft(self, n_fft: int, hop_length: Optional[int] = None,
              win_length: Optional[int] = None, window: 'Optional[Tensor]' = None,
              center: bool = True, pad_mode: str = 'reflect', normalized: bool = False,
-             onesided: Optional[bool] = None, *, return_complex: Optional[bool] = None):
+             onesided: Optional[bool] = None, return_complex: Optional[bool] = None):
         r"""See :func:`torch.stft`
 
         .. warning::
@@ -419,7 +419,7 @@ class Tensor(torch._C._TensorBase):
     def istft(self, n_fft: int, hop_length: Optional[int] = None,
               win_length: Optional[int] = None, window: 'Optional[Tensor]' = None,
               center: bool = True, normalized: bool = False,
-              onesided: Optional[bool] = None, length: Optional[int] = None, *,
+              onesided: Optional[bool] = None, length: Optional[int] = None,
               return_complex: bool = False):
         r"""See :func:`torch.istft`"""
         relevant_args = (self,)
