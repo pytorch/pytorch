@@ -452,13 +452,10 @@ GraphExecutorState ProfilingGraphExecutorImpl::getDebugState() {
 void replaceBlockWithFallbackGraph(Block* b, ArrayRef<Value*> inputs) {
   auto graph = std::make_shared<Graph>();
 
-  // we are copying the block inside If or prim::Loop
-  // otherwise we are copying the whole graph
-  // we need to differentiate the two cases
-  // because cloneFrom automatically adds
-  // inputs if we are copying graph's block
-  // and we will need the inputs from a user
-  // otherwise
+  // we are copying the block inside If or prim::Loop otherwise we are copying
+  // the whole graph we need to differentiate the two cases  because cloneFrom
+  // automatically adds inputs if we are copying graph's block and we will
+  //  need the inputs from a user otherwise
   if (b->owningNode() != nullptr) {
     std::unordered_map<Value*, Value*> input_mapping;
     auto value_map = [&input_mapping](Value* v) { return input_mapping[v]; };
