@@ -933,6 +933,36 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test(vmap(vmap(op, in_dims=(2, None, None)), in_dims=(0, None, None)),
              (torch.rand(B1, 2, B0, 5, B2), [0, 1], [1, 0]), in_dims=(2, None, None))
 
+    def test_mv(self):
+        op = torch.mv
+        test = self._vmap_test
+        B0, B1 = 7, 11
+
+        # shape mismatch
+        msg = "Shape mismatch"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            vmap(op)(torch.randn(B0, 2, 2, 2), torch.randn(B0, 2))
+        with self.assertRaisesRegex(RuntimeError, msg):
+            vmap(op, in_dims=(0, None))(torch.randn(B0, 2, 2), torch.randn(2, 2))
+        with self.assertRaisesRegex(RuntimeError, msg):
+            vmap(op, in_dims=(None, 0))(torch.randn(2, 2), torch.randn(B0, 2, 2))
+
+        # left arg is vmapped
+        test(op, (torch.rand(B0, 2, 5), torch.rand(5)), in_dims=(0, None))
+        test(vmap(op, in_dims=(0, None)), (torch.rand(B1, B0, 2, 5), torch.rand(5)),
+             in_dims=(1, None))
+
+        # right arg is vmapped
+        test(op, (torch.rand(2, 5), torch.rand(B0, 5)), in_dims=(None, 0))
+        test(vmap(op, in_dims=(None, 0)), (torch.rand(2, 5), torch.rand(B1, B0, 5)),
+             in_dims=(None, 1))
+
+        # both args are vmapped
+        test(op, (torch.rand(B0, 2, 5), torch.rand(B0, 5)))
+        test(vmap(op), (torch.rand(B1, B0, 2, 5), torch.rand(B0, B1, 5)), in_dims=(1, 0))
+        test(vmap(op, in_dims=(0, None)),
+             (torch.rand(B1, 2, 5), torch.rand(B0, 5)), in_dims=(None, 0))
+
     def test_narrow(self):
         op = torch.narrow
         test = self._vmap_view_test
