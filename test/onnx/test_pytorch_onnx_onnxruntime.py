@@ -935,6 +935,34 @@ class TestONNXRuntime(unittest.TestCase):
 
         torch.set_default_dtype(prev_default)
 
+    # In scripting x, y do not carry shape and dtype info.
+    # The following test only works when onnx shape inference is enabled.
+    @skipIfONNXShapeInference(False)
+    def test_true_div_script(self):
+        class TrueDivModule(torch.nn.Module):
+            def forward(self, x, y):
+                # Add transpose to hide shape/type information
+                # Otherwise shape and type is still avaiable from input.
+                x = x.transpose(1, 2)
+                y = y.transpose(1, 2)
+                return torch.true_divide(x, y)
+
+        x = torch.randn(2, 3, 4).to(torch.int)
+        y = torch.arange(1, 2 * 3 * 4 + 1).reshape(2, 3, 4).to(torch.int)
+
+        prev_default = torch.get_default_dtype()
+
+        torch.set_default_dtype(torch.float)
+        self.run_test(torch.jit.script(TrueDivModule()), (x, y))
+
+        torch.set_default_dtype(torch.double)
+        self.run_test(torch.jit.script(TrueDivModule()), (x, y))
+
+        torch.set_default_dtype(prev_default)
+        x = torch.randn(2, 3, 4).to(torch.int)
+        y = torch.arange(1, 2 * 3 * 4 + 1).reshape(2, 3, 4).to(torch.double)
+        self.run_test(torch.jit.script(TrueDivModule()), (x, y))
+
     def test_slice_trace(self):
         class MyModule(torch.nn.Module):
             def forward(self, x):
