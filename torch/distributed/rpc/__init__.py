@@ -1,11 +1,11 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
-import numbers
-import sys
-
 import torch
 import torch.distributed as dist
+import threading
 
+_init_counter = 0
+_init_counter_lock = threading.Lock()
 
 def is_available():
     return hasattr(torch._C, "_rpc_init")
@@ -15,22 +15,29 @@ if is_available() and not torch._C._rpc_init():
     raise RuntimeError("Failed to initialize torch.distributed.rpc")
 
 
+
+
 if is_available():
     from . import api, backend_registry, functions, _set_profiler_node_id
     from . import (
-        _enable_jit_rref_pickle,
         _disable_jit_rref_pickle,
+        _enable_jit_rref_pickle,
+        _set_and_start_rpc_agent,
     )  # noqa: F401
     from .api import *  # noqa: F401
+    from .options import TensorPipeRpcBackendOptions  # noqa: F401
     from .backend_registry import BackendType
     from .server_process_global_profiler import (
         _server_process_global_profile,
     )
     import torch.distributed.autograd as dist_autograd
 
+    import numbers
+
+
     def init_rpc(
         name,
-        backend=BackendType.PROCESS_GROUP,
+        backend=BackendType.TENSORPIPE,
         rank=-1,
         world_size=None,
         rpc_backend_options=None,
@@ -43,8 +50,8 @@ if is_available():
         Arguments:
             backend (BackendType, optional): The type of RPC backend
                 implementation. Supported values include
-                ``BackendType.PROCESS_GROUP`` (the default) and
-                ``BackendType.TENSORPIPE``. See :ref:`rpc-backends` for more
+                ``BackendType.TENSORPIPE`` (the default) and
+                ``BackendType.PROCESS_GROUP``. See :ref:`rpc-backends` for more
                 information.
             name (str): a globally unique name of this node. (e.g.,
                 ``Trainer3``, ``ParameterServer2``, ``Master``, ``Worker1``)
@@ -81,6 +88,12 @@ if is_available():
         )
         store, _, _ = next(rendezvous_iterator)
 
+        # Use a PrefixStore to distinguish multiple invocations.
+        with _init_counter_lock:
+            global _init_counter
+            store = dist.PrefixStore(str('rpc_prefix_{}'.format(_init_counter)), store)
+            _init_counter += 1
+
         # Initialize autograd before RPC since _init_rpc_backend guarantees all
         # processes sync via the store. If we initialize autograd after RPC,
         # there could be a race where some nodes might have initialized autograd
@@ -91,7 +104,52 @@ if is_available():
 
         _set_profiler_node_id(rank)
         # Initialize RPC.
-        api._init_rpc_backend(backend, store, name, rank, world_size, rpc_backend_options)
+        _init_rpc_backend(backend, store, name, rank, world_size, rpc_backend_options)
+
+
+    def _validate_rpc_args(backend, store, name, rank, world_size, rpc_backend_options):
+        type_mapping = {
+            backend: backend_registry.BackendType,
+            store: dist.Store,
+            name: str,
+            rank: numbers.Integral,
+            world_size: numbers.Integral,
+            rpc_backend_options: RpcBackendOptions,
+        }
+        for arg, arg_type in type_mapping.items():
+            if not isinstance(arg, arg_type):
+                raise RuntimeError(
+                    "Argument {} must be of type {} but got type {}".format(
+                        arg, arg_type, type(arg)
+                    )
+                )
+
+
+    def _init_rpc_backend(
+        backend=backend_registry.BackendType.TENSORPIPE,
+        store=None,
+        name=None,
+        rank=-1,
+        world_size=-1,
+        rpc_backend_options=None,
+    ):
+
+        _validate_rpc_args(backend, store, name, rank, world_size, rpc_backend_options)
+
+        if _is_current_rpc_agent_set():
+            raise RuntimeError("RPC is already initialized")
+
+        # Initialize RPC.
+        rpc_agent = backend_registry.init_backend(
+            backend,
+            store=store,
+            name=name,
+            rank=rank,
+            world_size=world_size,
+            rpc_backend_options=rpc_backend_options,
+        )
+
+        api._init_rpc_states(rpc_agent)
 
 
     @api._require_initialized
