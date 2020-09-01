@@ -188,20 +188,20 @@ class TestForeach(TestCase):
             torch._foreach_add_(tensors1, tensors2)
 
         # different devices
-        tensor1 = torch.zeros(10, 10, device="cuda:0")
-        tensor2 = torch.ones(10, 10, device="cuda:1")
-        with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device, but found at least two devices, cuda:0 and cuda:1!"):
-            torch._foreach_add([tensor1], [tensor2])
-
-        with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device, but found at least two devices, cuda:0 and cuda:1!"):
-            torch._foreach_add_([tensor1], [tensor2])
+        if torch.cuda.is_available():
+            tensor1 = torch.zeros(10, 10, device="cuda:0")
+            tensor2 = torch.ones(10, 10, device="cuda:1")
+            with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device, but found at least two devices, cuda:0 and cuda:1!"):
+                torch._foreach_add([tensor1], [tensor2])
+            with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device, but found at least two devices, cuda:0 and cuda:1!"):
+                torch._foreach_add_([tensor1], [tensor2])
 
         # Coresponding tensors with different sizes 
         tensors1 = [torch.zeros(10, 10, device=device) for _ in range(10)]
         tensors2 = [torch.ones(11, 11, device=device) for _ in range(10)]
-        with self.assertRaisesRegex(RuntimeError, "Corresponding tensors in lists must have the same size, got \[10, 10\] and \[11, 11\]"):
+        with self.assertRaisesRegex(RuntimeError, r"Corresponding tensors in lists must have the same size, got \[10, 10\] and \[11, 11\]"):
             torch._foreach_add(tensors1, tensors2)
-        with self.assertRaisesRegex(RuntimeError, "Corresponding tensors in lists must have the same size, got \[10, 10\] and \[11, 11\]"):
+        with self.assertRaisesRegex(RuntimeError, r"Corresponding tensors in lists must have the same size, got \[10, 10\] and \[11, 11\]"):
             torch._foreach_add_(tensors1, tensors2)
 
     # Ops with list
