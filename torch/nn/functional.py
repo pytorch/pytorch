@@ -2575,14 +2575,14 @@ def binary_cross_entropy_with_logits(input, target, weight=None, size_average=No
     return torch.binary_cross_entropy_with_logits(input, target, weight, pos_weight, reduction_enum)
 
 
-def _smooth_l1_loss(input, target, delta=1.):
-    # type: (Tensor, Tensor, float) -> Tensor
+def _smooth_l1_loss(input, target):
+    # type: (Tensor, Tensor) -> Tensor
     t = torch.abs(input - target)
-    return torch.where(t < delta, 0.5 * t ** 2, t * delta - (0.5 * delta ** 2))
+    return torch.where(t < 1, 0.5 * t ** 2, t - 0.5)
 
 
-def smooth_l1_loss(input, target, size_average=None, reduce=None, reduction='mean', delta=1.):
-    # type: (Tensor, Tensor, Optional[bool], Optional[bool], str, float) -> Tensor
+def smooth_l1_loss(input, target, size_average=None, reduce=None, reduction='mean'):
+    # type: (Tensor, Tensor, Optional[bool], Optional[bool], str) -> Tensor
     r"""Function that uses a squared term if the absolute
     element-wise error falls below 1 and an L1 term otherwise.
 
@@ -2603,7 +2603,7 @@ def smooth_l1_loss(input, target, size_average=None, reduce=None, reduction='mea
         reduction = _Reduction.legacy_get_string(size_average, reduce)
     if target.requires_grad:
         _Reduction.get_enum(reduction)  # throw an error if reduction is invalid
-        ret = _smooth_l1_loss(input, target, delta=delta)
+        ret = _smooth_l1_loss(input, target)
         if reduction != 'none':
             ret = torch.mean(ret) if reduction == 'mean' else torch.sum(ret)
     else:
