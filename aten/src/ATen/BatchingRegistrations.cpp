@@ -314,6 +314,29 @@ Tensor pow_scalar_Tensor_batching_rule(Scalar other, const Tensor& self) {
   return makeBatched(output_physical, BatchDims(old_bdims.begin(), old_bdims.end()));
 }
 
+// I am quite sad that we need to register operators with exploded TensorOptions,
+// even though the native:: implementations can use TensorOptions&.
+// This also makes it hard to metaprogram: i.e., we can't use
+// unary_pointwise_batching_rule<..., at::to> because at::to takes TensorOptions& (!!)
+Tensor to_dtype_layout_batching_rule(
+    const Tensor& self,
+    optional<ScalarType> dtype,
+    optional<Layout> layout,
+    optional<Device> device,
+    optional<bool> pin_memory,
+    bool non_blocking, bool copy,
+    optional<MemoryFormat> memory_format) {
+  auto options = TensorOptions()
+    .dtype(dtype)
+    .layout(layout)
+    .device(device)
+    .pinned_memory(pin_memory);
+  auto* input_batched = unsafeGetBatchedImpl(self);
+  auto output_physical = input_batched->value().to(options, non_blocking, copy, memory_format);
+  auto old_bdims = input_batched->bdims();
+  return makeBatched(output_physical, BatchDims(old_bdims.begin(), old_bdims.end()));
+}
+
 TORCH_LIBRARY_IMPL(_, Batched, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&batchedTensorForLoopFallback>());
 }
@@ -399,6 +422,7 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   TO_BATCHING_RULE("to.device", Device, ScalarType, bool, bool, optional<MemoryFormat>)
   TO_BATCHING_RULE("to.dtype", ScalarType, bool, bool, optional<MemoryFormat>)
   TO_BATCHING_RULE("to.other", const Tensor&, bool, bool, optional<MemoryFormat>)
+  m.impl("to.dtype_layout", to_dtype_layout_batching_rule);
 #undef TO_BATCHING_RULE
 
   using TensorTensorType = Tensor (*)(const Tensor&, const Tensor&);
