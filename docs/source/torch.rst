@@ -75,6 +75,7 @@ Creation Ops
     dequantize
     complex
     polar
+    heaviside
 
 Indexing, Slicing, Joining, Mutating Ops
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -261,9 +262,11 @@ Pointwise Ops
     asin
     arcsin
     asinh
+    arcsinh
     atan
     arctan
     atanh
+    arctanh
     atan2
     bitwise_not
     bitwise_and
@@ -324,6 +327,8 @@ Pointwise Ops
     sinh
     sqrt
     square
+    sub
+    subtract
     tan
     tanh
     true_divide
@@ -337,6 +342,10 @@ Reduction Ops
 
     argmax
     argmin
+    amax
+    amin
+    max
+    min
     dist
     logsumexp
     mean
@@ -377,9 +386,7 @@ Comparison Ops
     kthvalue
     le
     lt
-    max
     maximum
-    min
     minimum
     ne
     sort

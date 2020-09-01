@@ -393,9 +393,12 @@
   self: norm_backward(grad, self - other, p, result)
   other: -norm_backward(grad, self - other, p, result)
 
+# The backward formula is done in this order to improve numerical stability
+# of the higher order derivatives, see https://github.com/pytorch/pytorch/issues/43414
+# Note that we don't use "result" because saving it would be BC-breaking when it is used in an inplace operation later
 - name: div.Tensor(Tensor self, Tensor other) -> Tensor
   self: grad / other
-  other: -grad * self / (other * other)
+  other: -grad * (self / other) / other
 
 - name: div.Scalar(Tensor self, Scalar other) -> Tensor
   self: grad / other
@@ -714,6 +717,12 @@
 - name: minimum(Tensor self, Tensor other) -> Tensor
   self: grad.clone().masked_fill_(self >= other, 0)
   other: grad.clone().masked_fill_(self < other, 0)
+
+- name: amax(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor
+  self: scale_grad_by_count(restore_reduced_dims(grad, dim, keepdim), restore_reduced_dims(result, dim, keepdim) == self, dim)
+
+- name: amin(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor
+  self: scale_grad_by_count(restore_reduced_dims(grad, dim, keepdim), restore_reduced_dims(result, dim, keepdim) == self, dim)
 
 - name: mm(Tensor self, Tensor mat2) -> Tensor
   self: mm_mat1_backward(grad, mat2, self, 1)
