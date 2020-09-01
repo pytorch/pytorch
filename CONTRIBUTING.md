@@ -59,9 +59,6 @@ PyTorch, see the [Contributing Guide](docs/source/community/contribution_guide.r
 
 ## Developing PyTorch
 
-A full set of instructions on installing PyTorch from source is here:
-https://github.com/pytorch/pytorch#from-source
-
 To develop PyTorch on your machine, here are some tips:
 
 1. Uninstall all existing PyTorch installs:
@@ -91,6 +88,8 @@ If you want to have no-op incremental rebuilds (which are fast), see the section
 
 3. Install PyTorch in `develop` mode:
 
+A full set of instructions on installing PyTorch from source is here:
+https://github.com/pytorch/pytorch#from-source
 
 The change you have to make is to replace
 

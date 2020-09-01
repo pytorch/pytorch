@@ -217,15 +217,13 @@ Library& Library::_fallback(CppFunction&& f) & {
     "this fallback function globally, please define a separate block:\n\n",
     "    TORCH_LIBRARY_IMPL(_, ", *dispatch_key, ", m) { m.fallback(...); }\n\n",
     ERROR_CONTEXT);
-  for (auto k : c10::getRuntimeDispatchKeys(*dispatch_key)) {
-    registrars_.emplace_back(
-      c10::Dispatcher::singleton().registerFallback(
-        k,
-        std::move(f.func_),
-        debugString(std::move(f.debug_), file_, line_)
-      )
-    );
-  }
+  registrars_.emplace_back(
+    c10::Dispatcher::singleton().registerFallback(
+      *dispatch_key,
+      std::move(f.func_),
+      debugString(std::move(f.debug_), file_, line_)
+    )
+  );
   return *this;
 }
 

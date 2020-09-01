@@ -13,7 +13,7 @@ inline std::vector<c10::IValue> makeStack(Inputs&&... inputs) {
   return {std::forward<Inputs>(inputs)...};
 }
 
-inline at::Tensor dummyTensor(c10::DispatchKeySet ks, bool requires_grad=false) {
+inline at::Tensor dummyTensor(c10::DispatchKeySet ks) {
   auto* allocator = c10::GetCPUAllocator();
   int64_t nelements = 1;
   auto dtype = caffe2::TypeMeta::Make<float>();
@@ -24,18 +24,11 @@ inline at::Tensor dummyTensor(c10::DispatchKeySet ks, bool requires_grad=false) 
       allocator->allocate(size_bytes),
       allocator,
       /*resizable=*/true);
-  at::Tensor t = at::detail::make_tensor<c10::TensorImpl>(storage_impl, ks, dtype);
-  // TODO: We add this to simulate the ideal case where we only have Autograd backend keys
-  //       on Tensor when it requires grad. But currently Autograd keys are added in TensorImpl
-  //       constructor by default.
-  if (!requires_grad) {
-    t.unsafeGetTensorImpl()->remove_autograd_key();
-  }
-  return t;
+  return at::detail::make_tensor<c10::TensorImpl>(storage_impl, ks, dtype);
 }
 
-inline at::Tensor dummyTensor(c10::DispatchKey dispatch_key, bool requires_grad=false) {
-  return dummyTensor(c10::DispatchKeySet(dispatch_key), requires_grad);
+inline at::Tensor dummyTensor(c10::DispatchKey dispatch_key) {
+  return dummyTensor(c10::DispatchKeySet(dispatch_key));
 }
 
 template<class... Args>

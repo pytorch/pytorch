@@ -194,18 +194,15 @@ class TestDispatch(TestCase):
             lambda m: m.def_("foo(Tensor x) -> Tensor"),
             # m.impl("test_def", [](const Tensor& x) { return x })
             lambda m: m.impl_t_t("foo"),
-            # m.impl("test_def", kCPU, [](const Tensor& x) { return x })
-            lambda m: m.impl_t_t("foo", dispatch="cpu"),
-            # m.impl("test_def", kAutogradCPU, [](const Tensor& x) { return x })
-            lambda m: m.impl_t_t("foo", dispatch="autogradcpu")
+            # m.impl("test_def", kAutograd, [](const Tensor& x) { return x })
+            lambda m: m.impl_t_t("foo", dispatch="autograd")
         ])
         self.assertExpectedInline(r, '''\
 name: test::foo
 schema: test::foo(Tensor x) -> (Tensor)
 debug: registered at /dev/null:0
 alias analysis kind: FROM_SCHEMA
-CPU: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
-AutogradCPU: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
+Autograd: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 catchall: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 ''')
 
@@ -224,18 +221,15 @@ catchall: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
         r = self.commute("foo", [
             # m.def("foo", [](const Tensor & x) { return x })
             lambda m: m.def_name_t_t("foo"),
-            # m.impl("foo", torch::kCPU, [](const Tensor & x) { return x })
-            lambda m: m.impl_t_t("foo", "cpu"),
-            # m.impl("foo", torch::kAutogradCPU, [](const Tensor & x) { return x })
-            lambda m: m.impl_t_t("foo", "autogradcpu")
+            # m.impl("foo", torch::kAutograd, [](const Tensor & x) { return x })
+            lambda m: m.impl_t_t("foo", "autograd")
         ])
         self.assertExpectedInline(r, '''\
 name: test::foo
 schema: test::foo(Tensor _0) -> (Tensor _0)
 debug: registered at /dev/null:0
 alias analysis kind: CONSERVATIVE
-CPU: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
-AutogradCPU: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
+Autograd: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 catchall: default_def_name_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 ''')
 
@@ -255,16 +249,13 @@ alias analysis kind: FROM_SCHEMA
         r = self.commute("foo", [
             # m.impl("foo", [](const Tensor& x) { return x })
             lambda m: m.impl_t_t("foo"),
-            # m.impl("foo", torch::kCPU, [](const Tensor& x) { return x })
-            lambda m: m.impl_t_t("foo", "cpu"),
-            # m.impl("foo", torch::kAutogradCPU, [](const Tensor& x) { return x })
-            lambda m: m.impl_t_t("foo", "autogradcpu")
+            # m.impl("foo", torch::kAutograd, [](const Tensor& x) { return x })
+            lambda m: m.impl_t_t("foo", "autograd")
         ])
         self.assertExpectedInline(r, '''\
 name: test::foo
 schema: (none)
-CPU: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
-AutogradCPU: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
+Autograd: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 catchall: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 ''')
 

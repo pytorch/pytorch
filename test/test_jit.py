@@ -5677,9 +5677,8 @@ a")
         ast = torch.jit.frontend.get_jit_def(fn, fn.__name__)
         FileCheck().check("SourceRange at:") \
                    .check("def fn():") \
-                   .check("~~~~~~~~~") \
+                   .check("~~~~~~~~~...  <--- HERE") \
                    .check('raise Exception("hello")') \
-                   .check('~~~~~~~~~~~~~~~~~ <--- HERE') \
                    .run(str(ast.range()))
 
     def test_python_frontend_py3(self):
