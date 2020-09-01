@@ -584,4 +584,8 @@ class ProcessGroupNCCL : public ProcessGroup {
   std::vector<std::shared_ptr<at::cuda::CUDAStream>> futureNCCLCallbackStreams_;
 };
 
+struct NCCLAllreduceOptions : public AllreduceOptions {
+  std::vector<at::cuda::CUDAStream> cudaStreams = {};
+};
+
 } // namespace c10d
