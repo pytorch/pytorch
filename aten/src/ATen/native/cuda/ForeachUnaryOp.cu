@@ -42,7 +42,7 @@ struct Exp {
 };
 
 std::vector<Tensor> foreach_tensor_exp_cuda(TensorList tensors) {
-    verify_list(tensors);
+    check_foreach_api_restrictions(tensors);
 
     if (!can_use_fast_route(tensors)) {
         return at::native::foreach_tensor_exp_slow(tensors);
@@ -52,7 +52,7 @@ std::vector<Tensor> foreach_tensor_exp_cuda(TensorList tensors) {
 }
 
 void foreach_tensor_exp_cuda_(TensorList tensors) {
-    verify_list(tensors);
+    check_foreach_api_restrictions(tensors);
 
     if (!can_use_fast_route(tensors)) {
         return at::native::foreach_tensor_exp_slow_(tensors);
@@ -62,7 +62,7 @@ void foreach_tensor_exp_cuda_(TensorList tensors) {
 }
 
 std::vector<Tensor> foreach_tensor_sqrt_cuda(TensorList tensors) {
-    verify_list(tensors);
+    check_foreach_api_restrictions(tensors);
 
     if (!can_use_fast_route(tensors)) {
         return at::native::foreach_tensor_sqrt_slow(tensors);
@@ -73,7 +73,7 @@ std::vector<Tensor> foreach_tensor_sqrt_cuda(TensorList tensors) {
 }
 
 void foreach_tensor_sqrt_cuda_(TensorList tensors) {
-    verify_list(tensors);
+    check_foreach_api_restrictions(tensors);
 
     if (!can_use_fast_route(tensors)) {
         return at::native::foreach_tensor_sqrt_slow_(tensors);
