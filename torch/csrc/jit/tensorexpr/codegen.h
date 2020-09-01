@@ -49,6 +49,14 @@ class TORCH_API CodeGen {
     return device_;
   }
 
+  // This function returns the generated code as
+  // a string. Currently only implemented for Block.
+  // TODO. Rename this, as we can return other than string
+  // and implement for other backends.
+  virtual std::string getCodeText() {
+    return ("");
+  }
+
   virtual void call(const std::vector<CallArg>& args) = 0;
 
  private:

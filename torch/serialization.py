@@ -105,7 +105,7 @@ def check_module_version_greater_or_equal(module, req_version_tuple, error_if_ma
             module.__name__, module.__version__, str(req_version_tuple)
         )
         if error_if_malformed:
-            raise RuntimeError(message)
+            raise RuntimeError(message) from e
         else:
             warnings.warn(message + ', but continuing assuming that requirement is met')
             requirement_is_met = True
@@ -752,7 +752,7 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
             if _is_zipfile(f):
                 # .zip is used for torch.jit.save and will throw an un-pickling error here
                 raise RuntimeError(
-                    "{filename} is a zip archive (did you mean to use torch.jit.load()?)".format(filename=f.name))
+                    f"{f.name} is a zip archive (did you mean to use torch.jit.load()?)") from None
             # if not a tarfile, reset file offset and proceed
             f.seek(0)
 
