@@ -374,6 +374,7 @@ _(aten, hspmm) \
 _(aten, hstack) \
 _(aten, hypot) \
 _(aten, i0) \
+_(aten, i0_) \
 _(aten, ifft) \
 _(aten, index) \
 _(aten, index_add) \

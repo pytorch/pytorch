@@ -260,7 +260,7 @@ C10_DEVICE scalar_t sample_binomial(scalar_t count, scalar_t prob, BaseSampler<a
 
 /*
  * This function is derived from the implementation of the digamma function in the Cephes Math Library.
- * See note [3-Clause BSD License for the Cephes Math Library] in "ATen/native/Math.h".
+ * See note [3-Clause BSD License for the Cephes Math Library] in ATen/native/Math.h.
  */
 template<typename scalar_t, typename accscalar_t>
 C10_DEVICE static inline scalar_t digamma_one(scalar_t x) {

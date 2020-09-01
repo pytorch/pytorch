@@ -16876,7 +16876,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         expected = np.nextafter(a.cpu().numpy(), b.cpu().numpy())
         self.assertEqual(actual, expected, atol=0, rtol=0)
 
-    def _i0_helper(self, t, dtype):
+    def _i0_helper(self, t):
+        dtype = t.dtype
         actual = torch.i0(t)
         if dtype is torch.bfloat16:
             t = t.to(torch.float32)
@@ -16888,7 +16889,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     def _i0_range_helper(self, range, device, dtype):
         for r in (range, -range):
             t = torch.rand(1000, device=device).to(dtype) * r
-            self._i0_helper(t, dtype)
+            self._i0_helper(t)
 
     @dtypesIfCUDA(torch.float16, torch.float32, torch.float64)
     @dtypesIfCPU(torch.bfloat16, torch.float32, torch.float64)
@@ -16920,7 +16921,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
     def test_i0_special(self, device, dtype):
         t = torch.tensor([], device=device, dtype=dtype)
-        self._i0_helper(t, dtype)
+        self._i0_helper(t)
 
         t = torch.tensor([inf, -inf, nan], device=device, dtype=dtype)
         self.assertTrue(torch.i0(t).isnan().all())
