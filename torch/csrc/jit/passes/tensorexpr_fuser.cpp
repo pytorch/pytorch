@@ -468,11 +468,7 @@ class TensorExprFuser {
   }
 
   bool canFuseOnDevice(Value* v) {
-    auto it = typeinfo_map_.find(v);
-    if (it == typeinfo_map_.end()) {
-      return false;
-    }
-    auto type = it->second->cast<TensorType>();
+    auto type = v->type()->cast<TensorType>();
     if (!type) {
       return true;
     }
