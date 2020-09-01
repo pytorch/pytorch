@@ -308,9 +308,8 @@ Node* insertEmbeddingBagOps(Node* observer, const std::string& op_name) {
   // We expect that the output of the weight observer will be consumed by the
   // embedding_bag operator.
   for (const Use& use : uses) {
-    if (matchCallFuncToUse(use, "embedding_bag", 2)) {
-      embedding_bag_float_op = use.user;
-    } else if (matchAtenFuncToUse(use, "embedding_bag", 0)) {
+    if (matchCallFuncToUse(use, "embedding_bag", 2) ||
+        matchAtenFuncToUse(use, "embedding_bag", 0)) {
       embedding_bag_float_op = use.user;
     }
   }
@@ -332,7 +331,7 @@ Node* insertEmbeddingBagOps(Node* observer, const std::string& op_name) {
   if (is_aten_op) {
     TORCH_CHECK(
         inputs_size == 8,
-        "Expecting FP EmbeddingBag operator to have 11 inputs");
+        "Expecting FP aten::embedding_bag operator to have 8 inputs");
     // input 0 is the output of prepack op.
     // Last input is added after we account for extra input in 4-bit case.
     for (auto i = 1; i < inputs_size - 1; ++i) {
@@ -341,7 +340,7 @@ Node* insertEmbeddingBagOps(Node* observer, const std::string& op_name) {
   } else {
     TORCH_CHECK(
         inputs_size == 11,
-        "Expecting FP EmbeddingBag operator to have 11 inputs");
+        "Expecting F.embedding_bag operator to have 11 inputs");
     qembedding_bag_inputs.push_back(embedding_bag_inputs[1]); // indices
     qembedding_bag_inputs.push_back(embedding_bag_inputs[3]); // offsets
     qembedding_bag_inputs.push_back(
