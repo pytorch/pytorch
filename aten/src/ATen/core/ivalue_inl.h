@@ -300,26 +300,23 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
     markCompleted(IValue {});
   }
 
-  virtual void setError(std::string err) {
-    setError(FutureError(std::move(err)));
-  }
-
-  void setError(FutureError&& error) {
+  void setError(std::exception_ptr eptr) {
     std::unique_lock<std::mutex> lock(mutex_);
-    setErrorInternal(std::move(error), lock);
+    setErrorInternal(std::move(eptr), lock);
   }
 
-  void setErrorIfNeeded(std::string errorMsg) {
+  void setErrorIfNeeded(std::exception_ptr eptr) {
     std::unique_lock<std::mutex> lock(mutex_);
     if (completed_) {
       // This should be rare and shouldn't cause log spew. Its important to
       // log errors and thats why we have this log here.
-      LOG(INFO) << "Skipping setting following error on the Future since " <<
-        "it is already marked completed (this is not neccessarily an error): "
-        << errorMsg;
+      LOG(INFO)
+          << "Skipping setting following error on the Future since "
+          << "it is already marked completed (this is not neccessarily an error): "
+          << tryRetrieveErrorMessageInternal(eptr);
       return;
     } else {
-      setErrorInternal(FutureError(std::move(errorMsg)), lock);
+      setErrorInternal(std::move(eptr), lock);
     }
   }
 
@@ -327,8 +324,8 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
   virtual IValue value() {
     std::unique_lock<std::mutex> lock(mutex_);
     AT_ASSERT(completed());
-    if (error_) {
-      throw *error_;
+    if (eptr_) {
+      std::rethrow_exception(eptr_);
     }
     return value_;
   }
@@ -338,7 +335,7 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
   virtual const IValue& constValue() {
     std::unique_lock<std::mutex> lock(mutex_);
     AT_ASSERT(completed());
-    AT_ASSERT(!error_);
+    AT_ASSERT(!eptr_);
     return value_;
   }
 
@@ -375,11 +372,18 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
           try {
             fut->markCompleted(cb());
           } catch (std::exception& e) {
-            fut->setError(e.what());
+            fut->setError(std::current_exception());
           }
         },
         std::move(callback)));
     return fut;
+  }
+
+  // Tries to retrieve the error message from std::exception_ptr.
+  std::string tryRetrieveErrorMessage() {
+    TORCH_CHECK(hasError(), "No error present on the future.");
+    std::unique_lock<std::mutex> lock(mutex_);
+    return tryRetrieveErrorMessageInternal(eptr_);
   }
 
   // Check if the current future has completed
@@ -389,17 +393,17 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
 
   virtual bool hasValue() const {
     std::unique_lock<std::mutex> lock(mutex_);
-    return completed_ && !error_;
+    return completed_ && !eptr_;
   }
 
   bool hasError() const {
     std::unique_lock<std::mutex> lock(mutex_);
-    return error_ ? true : false;
+    return eptr_ ? true : false;
   }
 
-  c10::optional<FutureError> error() const {
+  std::exception_ptr exception_ptr() const {
     std::unique_lock<std::mutex> lock(mutex_);
-    return error_;
+    return eptr_;
   }
 
   CAFFE2_API friend std::ostream& operator<<(
@@ -412,11 +416,11 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
 
  private:
   void setErrorInternal(
-      FutureError error,
+      std::exception_ptr eptr,
       std::unique_lock<std::mutex>& lock) {
     AT_ASSERT(!completed());
     completed_ = true;
-    error_ = std::move(error);
+    eptr_ = std::move(eptr);
 
     std::vector<std::function<void(void)>> cbs;
     cbs.swap(callbacks_);
@@ -428,6 +432,17 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
     }
   }
 
+  // Tries to retrieve the error message from std::exception_ptr.
+  std::string tryRetrieveErrorMessageInternal(std::exception_ptr eptr) {
+    try {
+      std::rethrow_exception(eptr);
+    } catch (const std::exception& e) {
+      return e.what();
+    } catch (...) {
+      return "Unknown Exception Type";
+    }
+  }
+
   mutable std::mutex mutex_;
   std::atomic_bool completed_ = {false}; // is this future complete
   std::condition_variable finished_cv_;
@@ -435,7 +450,7 @@ struct C10_EXPORT ivalue::Future : c10::intrusive_ptr_target {
   IValue value_; // when finished the value
   TypePtr type_;
   std::vector<std::function<void(void)>> callbacks_;
-  c10::optional<FutureError> error_;
+  std::exception_ptr eptr_;
 };
 
 // Input is a list of Futures with the same target type.
