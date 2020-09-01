@@ -4823,36 +4823,6 @@ class CriterionTest(TestBase):
         test_case.check_criterion_jacobian(module, input, target)
         self._do_extra_tests(test_case, module, input, target)
 
-    def test_cuda(self, test_case):
-        if not TEST_CUDA or not self.should_test_cuda:
-            raise unittest.SkipTest('Excluded from CUDA tests')
-        try:
-            cpu_input = self._get_input()
-            type_map = {
-                'torch.DoubleTensor': torch.cuda.FloatTensor,
-            }
-            gpu_input = to_gpu(cpu_input, type_map=type_map)
-
-            cpu_target = self._get_target()
-            gpu_target = to_gpu(cpu_target, type_map=type_map)
-
-            cpu_module = self.constructor(*self.constructor_args)
-            gpu_module = self.constructor(*self.constructor_args).float().cuda()
-
-            cpu_output = test_case._forward_criterion(cpu_module, cpu_input, cpu_target)
-            gpu_output = test_case._forward_criterion(gpu_module, gpu_input, gpu_target)
-            test_case.assertEqual(cpu_output, gpu_output, atol=4e-4, rtol=0)
-
-            gradOutput = torch.randn(())
-            cpu_gradInput = test_case._backward_criterion(cpu_module, cpu_input, cpu_target, gradOutput)
-            gpu_gradInput = test_case._backward_criterion(gpu_module, gpu_input, gpu_target, gradOutput)
-            test_case.assertEqual(cpu_gradInput, gpu_gradInput, atol=4e-4, rtol=0)
-        except NotImplementedError:
-            pass
-
-    def _do_extra_tests(self, test_case, module, input, target):
-        pass
-
 
 class InputVariableMixin(object):
     def _get_input(self):
