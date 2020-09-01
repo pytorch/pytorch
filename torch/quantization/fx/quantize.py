@@ -606,8 +606,8 @@ class Quantizer:
         # for example,
         # {
         #   '': Model(...),
-        #   'linear': torch.nn.Linear(...),
-        #   'linear.weight_fake_quant': torch.nn.PerChannelMinMaxObserver(...),
+        #   'linear': Linear(...),
+        #   'linear.weight_fake_quant': PerChannelMinMaxObserver(...),
         # }
         self.modules = None
         # mapping from observer node name to observer instance
