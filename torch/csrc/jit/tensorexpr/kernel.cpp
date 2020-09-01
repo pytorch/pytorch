@@ -37,6 +37,17 @@ bool fallbackAllowed() {
   return true;
 }
 
+bool fallbackEnforced() {
+  static const char* enable_c_str = std::getenv("PYTORCH_TENSOREXPR_FALLBACK");
+  if (!enable_c_str) {
+    return fallback_allowed;
+  }
+  if (std::string(enable_c_str) == "2") {
+    return true;
+  }
+  return false;
+}
+
 int& getTECudaPointwiseLoopLevels() {
   return te_cuda_pointwise_loop_levels;
 }
@@ -1821,6 +1832,10 @@ TensorExprKernel::TensorExprKernel(const std::shared_ptr<Graph>& subgraph)
 }
 
 void TensorExprKernel::run(Stack& stack) {
+  if (fallbackEnforced()) {
+    fallback(stack);
+    return;
+  }
   if (!fallbackAllowed()) {
     runKernel(stack);
     return;
