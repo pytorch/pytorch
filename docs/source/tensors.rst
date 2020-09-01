@@ -334,6 +334,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: gt_
    .. automethod:: half
    .. automethod:: hardshrink
+   .. automethod:: heaviside
    .. automethod:: histc
    .. automethod:: hypot
    .. automethod:: hypot_
