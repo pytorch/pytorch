@@ -255,7 +255,12 @@ class TensorExprFuser {
       Value* new_value = placeholder_node->insertOutput(i)->copyMetadata(
           to_merge->outputs().at(i));
       aliasDb_->replaceWithNewValue(existing, new_value);
-      existing_values.push_back(existing);
+
+      if (to_merge->hasAttribute(attr::Subgraph)) {
+        existing_values.push_back(SubgraphUtils::getSubgraph(to_merge)->outputs().at(i));
+      } else {
+       existing_values.push_back(existing);
+      }
     }
     std::unordered_map<Value*, Value*> vmap;
     Node* fusion_group = merge_fn(vmap);
