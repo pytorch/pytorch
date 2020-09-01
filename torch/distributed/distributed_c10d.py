@@ -1336,7 +1336,7 @@ def broadcast_object_list(object_list, src, group=group.WORLD):
 
     Returns:
         ``None``. If rank is part of the group, ``object_list`` will contain the
-        broadcasted tensors from ``src`` rank.
+        broadcasted objects from ``src`` rank.
 
     .. note:: Note that this API differs slightly from the broadcast collective
         since it does not provide an ``async_op`` handle and thus will be a
