@@ -928,7 +928,19 @@ class Quantizer:
         return GraphModule(observed_root, self.quantized_graph)
 
     def _find_matches(self, graph, modules, patterns):
-        match_map = {}  # node name -> (root_node, match_value?)
+        """
+        Inputs:
+          - graph: an fx.Graph object
+          - modules: a mapping of fully qualified module name to instance,
+              for example, {'foo': ModuleFoo, ...}
+          - patterns: a mapping from a tuple of nodes in reverse order to
+              uninitialized QuantizeHandler subclass.
+
+        Outputs a map of
+          node_name ->
+            (node, matched_values, QuantizeHandler instance, qconfig)
+        """
+        match_map = {}
         all_matched = set()
 
         def record_match(pattern, node, matched):
@@ -955,6 +967,14 @@ class Quantizer:
         return match_map
 
     def _find_quants(self, graph, matches):
+        """
+        Inputs:
+          - graph: an fx.Graph object
+          - matches: output of self._find_matches function
+
+        Outputs a map of
+          node_name -> (DefaultQuant instance, qconfig)
+        """
         quants = {}
 
         def visit(node, qconfig):
