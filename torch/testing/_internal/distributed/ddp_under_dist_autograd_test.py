@@ -566,16 +566,25 @@ class DdpComparisonTest(RpcAgentTestFixture):
             )
 
     @skip_if_lt_x_gpu(NUM_TRAINERS)
+    @requires_gloo()
+    @dist_init
+    def test_ddp_dist_autograd_local_vs_remote_gpu_gloo(self):
+        self._test_ddp_dist_autograd_local_vs_remote_gpu("gloo")
+
+    @skip_if_lt_x_gpu(NUM_TRAINERS)
     @requires_nccl()
     @dist_init
-    def test_ddp_dist_autograd_local_vs_remote_gpu(self):
+    def test_ddp_dist_autograd_local_vs_remote_gpu_nccl(self):
+        self._test_ddp_dist_autograd_local_vs_remote_gpu("nccl")
+
+    def _test_ddp_dist_autograd_local_vs_remote_gpu(self, backend):
         # Each trainer uses a different random seed. Otherwise, they are going
         # to have exactly the same initial model parameters, input, and
         # therefore grads. That means the grads will be the same before and
         # after DDP's all-reduce.
         torch.manual_seed(self.rank)
         dist.init_process_group(
-            backend="gloo",
+            backend=backend,
             init_method="file://{}".format(self.file_name),
             world_size=self.world_size,
             rank=self.rank)

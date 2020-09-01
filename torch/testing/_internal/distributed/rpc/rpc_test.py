@@ -1,5 +1,6 @@
 import concurrent.futures
 import contextlib
+import copy
 import json
 import sys
 from threading import Lock
@@ -21,7 +22,11 @@ from torch.distributed.rpc.internal import (
     _internal_rpc_pickler,
     _build_rpc_profiling_key,
 )
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.nn.parallel import DistributedDataParallel
+from torch.testing._internal.common_distributed import (
+    skip_if_lt_x_gpu,
+    requires_nccl,
+)
 from torch.testing._internal.common_utils import IS_MACOS, load_tests
 from torch.testing._internal.dist_utils import (
     dist_init,
@@ -4086,3 +4091,53 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
         )
 
         self.assertEqual(rref.to_here(), torch.ones(2).to(1))
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_with_ddp(self):
+        # Each trainer uses a different random seed. Otherwise, they are going
+        # to have exactly the same initial model parameters, input, and
+        # therefore grads. That means the grads will be the same before and
+        # after DDP's all-reduce.
+        torch.manual_seed(self.rank)
+
+        options = self.rpc_backend_options
+        dst = worker_name((self.rank + 1) % self.world_size)
+
+        # Forward pass.
+        options.set_device_map(dst, {self.rank: (self.rank + 1) % self.world_size})
+        # Backward pass.
+        reverse_rank = (self.rank - 1 + self.world_size) % self.world_size
+        options.set_device_map(worker_name(reverse_rank), {self.rank: reverse_rank})
+
+        rpc.init_rpc(
+            name=worker_name(self.rank),
+            backend=self.rpc_backend,
+            rank=self.rank,
+            world_size=self.world_size,
+            rpc_backend_options=options,
+        )
+
+        initialize_pg(self.init_method, self.rank, self.world_size, backend="nccl")
+
+        # Run local model.
+        t = torch.rand((10, 10), device=self.rank, requires_grad=True)
+        fc_layer1 = torch.nn.Linear(10, 5)
+        ddp_model = DistributedDataParallel(fc_layer1.cuda(self.rank), device_ids=[self.rank])
+        out = ddp_model(torch.add(t, t))
+        out.sum().backward()
+
+        fc_layer2 = copy.deepcopy(fc_layer1)
+        ddp_model = DistributedDataParallel(fc_layer2.cuda(self.rank), device_ids=[self.rank])
+        dist.barrier()
+
+        # Run distributed model.
+        with dist_autograd.context() as context_id:
+            res = rpc.rpc_sync(dst, torch.add, args=(t, t))
+            rpc.api._wait_all_workers()
+            out = ddp_model(res)
+            dist_autograd.backward(context_id, [out.sum()])
+            self.assertEqual(t.grad, dist_autograd.get_gradients(context_id)[t])
+            self.assertEqual(fc_layer1.weight.grad, dist_autograd.get_gradients(context_id)[fc_layer2.weight])
+
+        rpc.shutdown()

@@ -160,13 +160,13 @@ def wait_until_owners_and_forks_on_rank(num_owners, num_forks, rank, timeout=20)
             )
 
 
-def initialize_pg(init_method, rank, world_size):
+def initialize_pg(init_method, rank, world_size, backend="gloo"):
     # This is for tests using `dist.barrier`.
     # For `RpcAgent` other than `ProcessGroupAgent`,
     # no `_default_pg` is initialized.
     if not dist.is_initialized():
         dist.init_process_group(
-            backend="gloo",
+            backend=backend,
             init_method=init_method,
             rank=rank,
             world_size=world_size,
