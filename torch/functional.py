@@ -71,6 +71,49 @@ def broadcast_tensors(*tensors):
     return _VF.broadcast_tensors(tensors)  # type: ignore
 
 
+def broadcast_shape(*shapes):
+    r"""
+
+    Similar to :func:`broadcast_tensors` but for shapes.
+
+    This is roughly equivalent to
+    `torch.broadcast_tensors(*map(torch.empty, shapes)).shape`
+    but avoids the need create to intermediate tensors. This is useful for
+    broadcasting tensors of common batch shape but different rightmost shape,
+    e.g. to broadcast mean vectors with covariance matrices.
+
+    Example::
+
+        >>> mean = torch.randn(30, 3)
+        >>> cov = torch.eye(20, 1, 3, 3)
+        >>> batch_shape = torch.broadcast_shape(mean.shape[:-1], cov.shape[:-2])
+        >>> batch_shape
+        torch.Size([20, 30])
+        >>> a = mean.expand(batch_shape + (-1,))
+        >>> b = cov.expand(batch_shape + (-1, -1))
+
+    Args:
+        \*shapes (torch.Size): Shapes of tensors.
+
+    Returns:
+        shape (torch.Size): A shape compatible with all input shapes.
+
+    Raises:
+        RuntimeError: If shapes are incompatible.
+    """
+    result = [1] * max(map(len, shapes))
+    for shape in shapes:
+        for i in range(-1, -1 - len(shape), -1):
+            if shape[i] == 1 or shape[i] == result[i]:
+                continue
+            if result[i] != 1:
+                raise RuntimeError("The size of shape a ({}) must match the "
+                                   "size of shape b ({}) at non-singleton dimension {}"
+                                   .format(result[i], shape[i], i))
+            result[i] = shape[i]
+    return torch.Size(result)
+
+
 def split(tensor, split_size_or_sections, dim=0):
     r"""Splits the tensor into chunks. Each chunk is a view of the original tensor.
 
