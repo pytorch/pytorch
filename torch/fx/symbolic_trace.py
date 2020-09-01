@@ -170,7 +170,7 @@ class DefaultDelegate(DelegateBase):
                     i += 1
                 setattr(self.root, qualname, a)
 
-            return self.graph.get_param(qualname)
+            return self.get_param(qualname)
         return super().create_arg(a)
 
 
