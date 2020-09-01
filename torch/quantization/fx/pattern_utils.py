@@ -1,4 +1,3 @@
-
 import torch
 import sys
 from collections import OrderedDict
@@ -14,25 +13,27 @@ def register_fusion_pattern(pattern):
 def get_fusion_patterns():
     return FUSION_PATTERNS
 
-# pattern for both static quantization and qat
 QUANTIZATION_PATTERNS = OrderedDict()
+# Register pattern for both static quantization and qat
 def register_quant_pattern(pattern):
     def insert(fn):
         QUANTIZATION_PATTERNS[pattern] = fn
         return fn
     return insert
 
+# Get patterns for both static quantization and qat
 def get_quant_patterns():
     return QUANTIZATION_PATTERNS
 
-# pattern for dynamic quantization
 DYNAMIC_QUANTIZATION_PATTERNS = OrderedDict()
-def register_dynamic_pattern(pattern):
+# Register pattern for dynamic quantization
+def register_dynamic_quant_pattern(pattern):
     def insert(fn):
         DYNAMIC_QUANTIZATION_PATTERNS[pattern] = fn
         return fn
     return insert
 
+# Get patterns for dynamic quantization
 def get_dynamic_quant_patterns():
     return DYNAMIC_QUANTIZATION_PATTERNS
 
@@ -46,7 +47,6 @@ def get_dynamic_quant_patterns():
 # need to put the fusion patterns before single patterns. For example, add_relu should be registered come before relu.
 # decorators are applied in the reverse order we see. Also when we match the nodes in the graph with these patterns,
 # we'll start from the last node of the graph and traverse back.
-
 
 def matches(modules, node, pattern, max_uses=sys.maxsize):
     """ Matches a node in fx against a pattern
