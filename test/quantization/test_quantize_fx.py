@@ -16,8 +16,6 @@ from torch.quantization import (
     prepare_fx,
     convert_fx,
     quantize_dynamic_fx,
-    prepare_dynamic_fx,
-    convert_dynamic_fx,
 )
 
 from torch.quantization import (
