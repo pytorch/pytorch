@@ -24,6 +24,13 @@ from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 
 
+if sys.platform == 'win32':
+    recv_rpc_backward_method_name = "class torch::distributed::autograd::RecvRpcBackward"
+    accumulate_grad_method_name = "struct torch::autograd::AccumulateGrad"
+else:
+    recv_rpc_backward_method_name = "torch::distributed::autograd::RecvRpcBackward"
+    accumulate_grad_method_name = "torch::autograd::AccumulateGrad"
+
 # Right now we test up to 3-layer nested rpc calls.
 # rpc_done[1] and ctx_ids[1] represent rpc is done in prev rank, and context id
 # sent from prev rank respectively.
@@ -275,10 +282,10 @@ class DistAutogradTest(RpcAgentTestFixture):
         self.assertEqual(2, len(next_funcs))
 
         # We should now hit t1 and t2 in the autograd graph.
-        self.assertEqual("torch::autograd::AccumulateGrad", next_funcs[0][0].name())
+        self.assertEqual(accumulate_grad_method_name, next_funcs[0][0].name())
         self.assertEqual(t1, next_funcs[0][0].variable)
         self.assertEqual(0, next_funcs[0][1])
-        self.assertEqual("torch::autograd::AccumulateGrad", next_funcs[1][0].name())
+        self.assertEqual(accumulate_grad_method_name, next_funcs[1][0].name())
         self.assertEqual(t2, next_funcs[1][0].variable)
         self.assertEqual(0, next_funcs[1][1])
 
@@ -306,10 +313,10 @@ class DistAutogradTest(RpcAgentTestFixture):
         next_funcs = add_backward_fn.next_functions
         self.assertEqual(2, len(next_funcs))
         self.assertEqual(
-            "torch::distributed::autograd::RecvRpcBackward", next_funcs[0][0].name()
+            recv_rpc_backward_method_name, next_funcs[0][0].name()
         )
         self.assertEqual(
-            "torch::distributed::autograd::RecvRpcBackward", next_funcs[1][0].name()
+            recv_rpc_backward_method_name, next_funcs[1][0].name()
         )
         self.assertEqual(next_funcs[0][0], next_funcs[1][0])
 
@@ -336,10 +343,10 @@ class DistAutogradTest(RpcAgentTestFixture):
         next_funcs = list(send_functions.values())[0].next_functions
         self.assertEqual(2, len(next_funcs))
         self.assertEqual(
-            "torch::distributed::autograd::RecvRpcBackward", next_funcs[0][0].name()
+            recv_rpc_backward_method_name, next_funcs[0][0].name()
         )
         self.assertEqual(
-            "torch::distributed::autograd::RecvRpcBackward", next_funcs[1][0].name()
+            recv_rpc_backward_method_name, next_funcs[1][0].name()
         )
         self.assertEqual(next_funcs[0][0], next_funcs[1][0])
 
@@ -349,7 +356,7 @@ class DistAutogradTest(RpcAgentTestFixture):
         next_funcs = list(send_functions.values())[1].next_functions
         self.assertEqual(1, len(next_funcs))
         self.assertEqual(
-            "torch::distributed::autograd::RecvRpcBackward", next_funcs[0][0].name()
+            recv_rpc_backward_method_name, next_funcs[0][0].name()
         )
 
     def _test_graph(self, fn, exec_mode):
@@ -700,7 +707,7 @@ class DistAutogradTest(RpcAgentTestFixture):
             idx = 0
             for i in range(len(next_funcs)):
                 self.assertEqual(
-                    "torch::autograd::AccumulateGrad", next_funcs[i][0].name()
+                    accumulate_grad_method_name, next_funcs[i][0].name()
                 )
                 self.assertEqual(tensors[i], next_funcs[i][0].variable)
 

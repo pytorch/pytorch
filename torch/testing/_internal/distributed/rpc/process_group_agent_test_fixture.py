@@ -26,7 +26,8 @@ class ProcessGroupRpcAgentTestFixture(RpcAgentTestFixture):
             "Encountered exception in ProcessGroupAgent::listenLoop()",
             "Exception in thread pool task",
             "Connection reset by peer",
-            "Connection closed by peer"
+            "Connection closed by peer",
+            "RPC ran for more than \d+(\d+)* milliseconds and timed out"
         ]
         return "|".join(["({})".format(error_str) for error_str in error_regexes])
 
