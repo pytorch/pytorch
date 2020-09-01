@@ -29,11 +29,11 @@ This part will introduce about the arguments you can use when run this tool. The
 We have two different compilers, `gcc` and `clang`, and this tool supports both. But it is recommended to use `gcc` because it's much faster and use less disk place. The examples will also be divided to two parts, for `gcc` and `clang`.
 
 ## Preparation
-The first step is to [build *Pytorch* from source](https://github.com/pytorch/pytorch#from-source) with `CODE_COVERAGE` option `ON`. Besides, you may also want to set `BUILD_TEST` option `ON` to get the test binaries.
+The first step is to [build *Pytorch* from source](https://github.com/pytorch/pytorch#from-source) with `CODE_COVERAGE` option `ON`. You may also want to set `BUILD_TEST` option `ON` to get the test binaries. Besides, if you are under `gcc` compiler, to get accurate result, it is recommended to also select `CMAKE_BUILD_CONFIG=Debug`.
 See: [how to adjust build options](https://github.com/pytorch/pytorch#adjust-build-options-optional) for reference. Following is one way to adjust build option:
 ```
 # in build/ folder (all build artifacts must in `build/` folder)
-cmake .. -DCODE_COVERAGE=ON -DBUILD_TEST=ON
+cmake .. -DCODE_COVERAGE=ON -DBUILD_TEST=ON -DCMAKE_BUILD_CONFIG=Debug
 ```
 
 
@@ -69,8 +69,43 @@ By default, the tool will run all tests in `build/bin` folder (by running all ex
 python oss_coverage.py
 ```
 
-### For more complex arguments and functionality
-*To Be Done*
+### For more complex arguments and functionalities
+#### GCC
+The code coverage with `gcc` compiler can be divided into 3 step:
+1. run the tests: `--run`
+2. run `gcov` to get json report: `--export`
+3. summarize it to human readable file report and line report: `--summary`
+
+By default all steps will be run, but you can specify only run one of them. Following is some usage scenario:
+
+**1. Interested in different folder**
+`—summary` is useful when you have different interested folder. For example,
+```bash
+# after run this command
+python oss_coverage.py --run-only=atest --interested-folder=aten
+# you may then want to learn atest's coverage over c10, instead of running the test again, you can:
+python oss_coverage.py --run-only=atest --interested-folder=c10 --summary
+```
+
+
+**2. Run tests yourself**
+When you are developing a new feature, you may first run the tests yourself to make sure the implementation is all right and then want to learn its coverage. But sometimes the test take very long time and you don't want to wait to run it again when doing code coverage. In this case, you can use these arguments to accerate your development (make sure you build pytorch with the coverage option!):
+```
+# run tests when you are devloping a new feature, assume the the test is `test_nn.py`
+python oss_coverage.py --run-only=test_nn.py
+# or you can run it yourself
+cd test/ && python test_nn.py
+# then you want to learn about code coverage, you can just run:
+python oss_coverage.py --run-only=test_nn.py --export --summary
+```
+
+### CLANG
+The steps for `clang` is very similar to `gcc`, but the export stage is divided into two step:
+1. run the tests: `--run`
+2. run `gcov` to get json report: `--merge` `--export`
+3. summarize it to human readable file report and line report: `--summary`
+
+Therefore, just replace `--export` in `gcc` examples with `--merge` and `--export`, you will find it work!
 
 ## Reference
 
