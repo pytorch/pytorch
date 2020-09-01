@@ -4940,7 +4940,7 @@ class TestNN(NNTestCase):
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
         torch.testing.assert_allclose(result, ref_output)
 
-    def test_transformerdecoderlayer_and_decoder(self):
+    def test_transformerdecoderlayer(self):
         # this is a deterministic test for TransformerDecoderLayer
         d_model = 4
         nhead = 2
