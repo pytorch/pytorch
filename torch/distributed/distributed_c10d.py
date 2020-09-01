@@ -1179,7 +1179,7 @@ def all_gather_object(object_list, obj, group=group.WORLD):
 
     Arguments:
         object_list (list[Any]): Output list. It should be correctly sized as the
-        size of the group for this collective and will contain the output.
+            size of the group for this collective and will contain the output.
         object (Any): Pickable Python object to be broadcast from current process.
         group (ProcessGroup, optional): The process group to work on
 
@@ -1247,10 +1247,10 @@ def gather_object(obj, object_gather_list=None, dst=0, group=group.WORLD):
     Arguments:
         obj (Any): Input object. Must be picklable.
         object_gather_list (list[Any]): Output list. On the ``dst`` rank, it
-        should be correctly sized as the size of the group for this collective
-        and will contain the output. Must be ``None`` on non-dst ranks. Default
-        is None.
-        dst (int, optional): Destination rank (default is 0)
+            should be correctly sized as the size of the group for this
+            collective and will contain the output. Must be ``None`` on non-dst
+            ranks. (default is ``None``)
+        dst (int, optional): Destination rank. (default is 0)
         group: (ProcessGroup, optional): The process group to work on.
 
     Returns:

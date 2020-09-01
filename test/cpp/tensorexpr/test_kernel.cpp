@@ -372,7 +372,7 @@ void testKernelSumOneAxis() {
 void testKernelSumMultipleAxes() {
   // Test lowering of sum on multiple axes.
   const auto graph_template = R"IR(
-      graph(%0 : Float(5:72,3:24,4:6,6:1, device=cpu)):
+      graph(%0 : Float(2:18,3:6,2:3,3:1, device=cpu)):
         %1 : int = prim::Constant[value=${dim1}]()
         %2 : int = prim::Constant[value=${dim2}]()
         %3 : int[] = prim::ListConstruct(%1, %2)
@@ -380,44 +380,37 @@ void testKernelSumMultipleAxes() {
         %5 : ${dtype}
         %6 : Tensor = aten::sum(%0, %3, %4, %5)
         return (%6))IR";
-  auto a = iotaTensor({5, 3, 4, 6}, TensorOptions(kCPU).dtype(at::kFloat));
+  auto a = iotaTensor({2, 3, 2, 3}, TensorOptions(kCPU).dtype(at::kFloat));
 
   // Only iterate over positive values of axes to keep the running time
   // reasonable, since the number of pairs is quadratic.
   for (int dim1 = 0; dim1 < a.dim(); ++dim1) {
-    for (int dim2 = 0; dim2 < a.dim(); ++dim2) {
+    for (int dim2 = dim1 + 1; dim2 < a.dim(); ++dim2) {
       for (bool keepdim : {false, true}) {
-        for (auto scalar_type : {ScalarType::None, ScalarType::Double}) {
-          KernelScope kernel_scope;
-          TemplateEnv env;
-          env.d("dim1", dim1);
-          env.d("dim2", dim2);
-          env.d("keepdim", keepdim);
-          env.s("dtype", dtypeConstant(scalar_type));
-          const auto graph_string = format(graph_template, env);
+        KernelScope kernel_scope;
+        TemplateEnv env;
+        env.d("dim1", dim1);
+        env.d("dim2", dim2);
+        env.d("keepdim", keepdim);
+        env.s("dtype", dtypeConstant(ScalarType::None));
+        const auto graph_string = format(graph_template, env);
 
-          auto graph = std::make_shared<Graph>();
-          parseIR(graph_string, &*graph);
+        auto graph = std::make_shared<Graph>();
+        parseIR(graph_string, &*graph);
 
-          auto o = at::empty({}, TensorOptions(kCPU));
-          c10::optional<c10::ScalarType> dtype;
-          if (scalar_type != ScalarType::None) {
-            dtype = static_cast<c10::ScalarType>(scalar_type);
-          }
-          auto ref = a.sum(
-              IntArrayRef{dim1, dim2}, /*keepdim=*/keepdim, /*dtype=*/dtype);
-          TensorExprKernel k(graph);
-          std::vector<at::Tensor> inputs = {a};
-          Stmt* s = k.getCodeGenStmt();
-          // TODO: verify stmt
+        auto o = at::empty({}, TensorOptions(kCPU));
+        auto ref = a.sum(IntArrayRef{dim1, dim2}, /*keepdim=*/keepdim);
+        TensorExprKernel k(graph);
+        std::vector<at::Tensor> inputs = {a};
+        Stmt* s = k.getCodeGenStmt();
+        // TODO: verify stmt
 
-          std::vector<IValue> stack = fmap<IValue>(inputs);
-          k.run(stack);
-          o = stack[0].toTensor();
-          ASSERT_EQ(o.sizes(), ref.sizes());
-          ASSERT_EQ(o.dtype(), ref.dtype());
-          ASSERT_TRUE(at::allclose(o, ref));
-        }
+        std::vector<IValue> stack = fmap<IValue>(inputs);
+        k.run(stack);
+        o = stack[0].toTensor();
+        ASSERT_EQ(o.sizes(), ref.sizes());
+        ASSERT_EQ(o.dtype(), ref.dtype());
+        ASSERT_TRUE(at::allclose(o, ref));
       }
     }
   }

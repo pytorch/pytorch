@@ -14,6 +14,7 @@
 #include <torch/csrc/jit/passes/graph_fuser.h>
 #include <torch/csrc/jit/passes/guard_elimination.h>
 #include <torch/csrc/jit/passes/inline_autodiff_subgraphs.h>
+#include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/inplace_check.h>
 #include <torch/csrc/jit/passes/insert_guards.h>
 #include <torch/csrc/jit/passes/loop_unrolling.h>
@@ -321,8 +322,14 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
 void ProfilingGraphExecutorImpl::runProfilingInsensitiveOptimizations(
     std::shared_ptr<Graph>& graph) {
   GRAPH_DUMP(
-      "Before ClearProfilingInformation (beginning of runProfilingInsensitiveOptimizations)",
+      "Before inlining (beginning of runProfilingInsensitiveOptimizations)",
       graph);
+  // TODO: maybe this can go later in pipeline / directly in autodiff forward
+  // creation
+  if (getGraphExecutorOptimize()) {
+    Inline(*graph);
+  }
+  GRAPH_DUMP("After inlining, before ClearProfilingInformation", graph);
   ClearProfilingInformation(graph);
   GRAPH_DUMP("After ClearProfilingInformation, before LowerGradOf", graph);
   LowerGradOf(*graph);
@@ -410,9 +417,6 @@ ExecutionPlan ProfilingGraphExecutorImpl::getPlanFor(
   if (!pr_) {
     auto copy = graph->copy();
     runProfilingInsensitiveOptimizations(copy);
-    if (*remaining_bailout_depth_ == getBailoutDepth()) {
-      PeelProfilingLoops(copy);
-    }
     pr_ = ProfilingRecord::instrumentGraph(copy);
     GRAPH_DUMP("Profiled Graph: ", pr_->graph());
     profiling_plan_ = ExecutionPlan(pr_->graph(), function_name_);
