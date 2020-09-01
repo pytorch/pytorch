@@ -2901,12 +2901,14 @@ class TestQuantizeDynamicJitOps(QuantizationTestCase):
                 self.embedding1 = torch.nn.EmbeddingBag(num_embeddings=10,
                                                         embedding_dim=12,
                                                         include_last_offset=True,
+                                                        sparse=False,
                                                         _weight=weights,
                                                         mode='sum')
 
                 self.embedding2 = torch.nn.EmbeddingBag(num_embeddings=10,
                                                         embedding_dim=12,
                                                         include_last_offset=True,
+                                                        sparse=False,
                                                         _weight=weights,
                                                         mode='sum')
 
@@ -2917,21 +2919,26 @@ class TestQuantizeDynamicJitOps(QuantizationTestCase):
 
         weights = torch.randn(10, 12, dtype=torch.float32)
         module = M(weights)
-        m = torch.jit.script(module)
+
         indices = torch.tensor([9, 6, 5, 7, 8, 8, 9, 2, 8, 6, 6, 9, 1, 6, 8, 8, 3, 2, 3, 6, 3, 6, 5, 7, 0, 8, 4, 6, 5, 8, 2, 3])
         offsets = torch.tensor([0, 19, 20, 28, 28, 32])
-
-        from torch.quantization import QConfigDynamic, PlaceholderObserver
-        int4_dynamic_qconfig = QConfigDynamic(activation=PlaceholderObserver.with_args(dtype=torch.float,
-                                                                                       custom_op_name="embedding_bag_4bit"),
-                                              weight=PlaceholderObserver.with_args(custom_op_name="embedding_bag_4bit"))
-        int8_dynamic_qconfig = QConfigDynamic(activation=PlaceholderObserver.with_args(dtype=torch.float,
-                                                                                       custom_op_name="embedding_bag_byte"),
-                                              weight=PlaceholderObserver.with_args(custom_op_name="embedding_bag_byte"))
-        m = quantize_dynamic_jit(m, {'embedding1' : int4_dynamic_qconfig, 'embedding2' : int8_dynamic_qconfig})
-        FileCheck().check("quantized::embedding_bag_4bit_rowwise_offsets") \
-                   .check_next("quantized::embedding_bag_byte_rowwise_offsets") \
-                   .run(m.graph)
+        dummy_inputs = (indices, offsets, indices, offsets)
+        for trace in [True, False]:
+            if trace:
+                m = torch.jit.trace(module, dummy_inputs)
+            else:
+                m = torch.jit.script(module)
+            from torch.quantization import QConfigDynamic, PlaceholderObserver
+            int4_dynamic_qconfig = QConfigDynamic(activation=PlaceholderObserver.with_args(dtype=torch.float,
+                                                                                           custom_op_name="embedding_bag_4bit"),
+                                                  weight=PlaceholderObserver.with_args(custom_op_name="embedding_bag_4bit"))
+            int8_dynamic_qconfig = QConfigDynamic(activation=PlaceholderObserver.with_args(dtype=torch.float,
+                                                                                           custom_op_name="embedding_bag_byte"),
+                                                  weight=PlaceholderObserver.with_args(custom_op_name="embedding_bag_byte"))
+            m = quantize_dynamic_jit(m, {'embedding1' : int4_dynamic_qconfig, 'embedding2' : int8_dynamic_qconfig})
+            FileCheck().check("quantized::embedding_bag_4bit_rowwise_offsets") \
+                       .check_next("quantized::embedding_bag_byte_rowwise_offsets") \
+                       .run(m.graph)
 
 class TestQuantizeJit(QuantizationTestCase):
     @override_qengines
