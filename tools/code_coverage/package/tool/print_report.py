@@ -118,18 +118,19 @@ def print_total_program_time(start_time: float, summary_file: IO) -> None:
 
 def print_file_summary(
     covered_summary: int, total_summary: int, summary_file: IO
-) -> None:
+) -> float:
     # print summary first
     try:
-        coverage_percentage = round(1.0 * covered_summary / total_summary * 100, 2)
+        coverage_percentage = 100.0 * covered_summary / total_summary
     except ZeroDivisionError:
-        raise ZeroDivisionError(
-            "Failed to generate coverage report, please check if json profiles are valid in profile/json"
-        )
+        coverage_percentage = 0
     print(
-        f"SUMMARY\ncovered: {covered_summary}\nuncovered: {total_summary}\npercentage: {coverage_percentage}%\n\n",
+        f"SUMMARY\ncovered: {covered_summary}\nuncovered: {total_summary}\npercentage: {coverage_percentage:.2f}%\n\n",
         file=summary_file,
     )
+    if coverage_percentage == 0:
+        print("Coverage is 0, Please check if json profiles are valid")
+    return coverage_percentage
 
 
 def print_file_oriented_report(
@@ -143,7 +144,9 @@ def print_file_oriented_report(
     coverage_only: List[str],
     program_start_time: float,
 ) -> None:
-    print_file_summary(covered_summary, total_summary, summary_file)
+    coverage_percentage = print_file_summary(
+        covered_summary, total_summary, summary_file
+    )
     print_total_program_time(program_start_time, summary_file)
     # print test condition (interested folder / tests that are successsful or failed)
     print_test_condition(
@@ -164,9 +167,7 @@ def print_file_oriented_report(
             file=summary_file,
         )
 
-    print(
-        f"summary percentage:{round(1.0 * covered_summary / total_summary * 100, 2)}%"
-    )
+    print(f"summary percentage:{coverage_percentage:.2f}%")
 
 
 def file_oriented_report(
