@@ -12,8 +12,10 @@ namespace at { namespace native {
 Tensor & masked_fill__cuda(Tensor& self, const Tensor & mask, Scalar value) {
   auto maybe_outnames = namedinference::broadcast_to_outnames(self, mask, "masked_fill_");
   if (at::has_internal_overlap(self) == MemOverlap::YES) {
-    TORCH_WARN("Use of masked_fill_ on expanded tensors is deprecated. "
-               "Please clone() the tensor before performing this operation.");
+    TORCH_WARN(
+      "Use of masked_fill_ on expanded tensors is deprecated. "
+      "Please clone() the tensor before performing this operation. "
+      "This also applies to advanced indexing e.g. tensor[mask] = scalar");
   }
   at::assert_no_partial_overlap(self, mask);
 
@@ -35,8 +37,10 @@ Tensor & masked_fill__cuda(Tensor& self, const Tensor & mask, Scalar value) {
 Tensor & masked_fill__cuda(Tensor& self, const Tensor & mask, const Tensor & value) {
   auto maybe_outnames = namedinference::broadcast_to_outnames(self, mask, "masked_fill_");
   if (at::has_internal_overlap(self) == MemOverlap::YES) {
-    TORCH_WARN("Use of masked_fill_ on expanded tensors is deprecated. "
-               "Please clone() the tensor before performing this operation.");
+    TORCH_WARN(
+      "Use of masked_fill_ on expanded tensors is deprecated. "
+      "Please clone() the tensor before performing this operation. "
+      "This also applies to advanced indexing e.g. tensor[mask] = scalar");
   }
   at::assert_no_partial_overlap(self, mask);
 

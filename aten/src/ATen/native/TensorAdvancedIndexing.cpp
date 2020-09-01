@@ -294,8 +294,10 @@ Tensor & _index_put_impl_(Tensor & self, TensorList indices, const Tensor & valu
   }
 
   if (at::has_internal_overlap(self) == MemOverlap::YES) {
-    TORCH_WARN("Use of index_put_ on expanded tensors is deprecated. "
-               "Please clone() the tensor before performing this operation.");
+    TORCH_WARN(
+      "Use of index_put_ on expanded tensors is deprecated. "
+      "Please clone() the tensor before performing this operation. "
+      "This also applies to advanced indexing e.g. tensor[indices] = tensor");
   }
   at::assert_no_partial_overlap(self, value);
 
@@ -644,8 +646,10 @@ static Tensor & masked_fill_impl_cpu(Tensor & self, const Tensor & mask, Scalar 
   }
 
   if (at::has_internal_overlap(self) == MemOverlap::YES) {
-    TORCH_WARN("Use of masked_fill_ on expanded tensors is deprecated. "
-               "Please clone() the tensor before performing this operation.");
+    TORCH_WARN(
+      "Use of masked_fill_ on expanded tensors is deprecated. "
+      "Please clone() the tensor before performing this operation. "
+      "This also applies to advanced indexing e.g. tensor[mask] = scalar");
   }
   at::assert_no_partial_overlap(self, mask);
 
