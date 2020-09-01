@@ -21,7 +21,7 @@ LINKING_DIMENSIONS = [
 
 DEPS_INCLUSION_DIMENSIONS = [
     "with-deps",
-    "without-deps",
+    # "without-deps",
 ]
 
 
@@ -76,7 +76,7 @@ LINUX_GCC_CONFIG_VARIANTS = OrderedDict(
     manywheel=['devtoolset7'],
     conda=['devtoolset7'],
     libtorch=[
-        # "devtoolset7",
+        "devtoolset7",
         "gcc5.4_cxx11-abi",
     ],
 )
