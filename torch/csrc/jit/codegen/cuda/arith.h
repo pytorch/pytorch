@@ -48,14 +48,10 @@ TORCH_CUDA_API TensorView* reductionOp(
 TORCH_CUDA_API Val* neg(Val* v);
 TORCH_CUDA_API TensorView* neg(TensorView* v);
 
-// BINARY OPERATIONS
-// add
-/*
- * Broadcasts v1 based on bool vector. Size of broadcast bool vector should be
- * the number of dims desired in the broadcasted tensor. This vector should be
- * true if output dim should be a broadcasted dim, and false if it is not a
- * broadcasted dim. Number of false entires must match the number of input dims.
- */
+// Broadcasts v1 based on bool vector. Size of broadcast bool vector should be
+// the number of dims desired in the broadcasted tensor. This vector should be
+// true if output dim should be a broadcasted dim, and false if it is not a
+// broadcasted dim. Number of false entires must match the number of input dims.
 TORCH_CUDA_API TensorView* broadcast(
     TensorView* inp,
     const std::vector<bool>& is_broadcast_dim);

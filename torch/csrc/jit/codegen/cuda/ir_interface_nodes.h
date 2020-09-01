@@ -27,7 +27,7 @@ class TORCH_CUDA_API Bool : public Val {
 
   Bool() : Val(ValType::Scalar, DataType::Bool), maybe_value_{c10::nullopt} {}
 
-  Bool(bool _value)
+  explicit Bool(bool _value)
       : Val(ValType::Scalar, DataType::Bool), maybe_value_{_value} {}
 
   Bool(const Bool* src, IrCloner* ir_cloner);
@@ -67,7 +67,7 @@ class TORCH_CUDA_API Float : public Val {
 
   Float() : Val(ValType::Scalar, DataType::Float), maybe_value_{c10::nullopt} {}
 
-  Float(ScalarType _value)
+  explicit Float(ScalarType _value)
       : Val(ValType::Scalar, DataType::Float), maybe_value_{_value} {}
 
   Float(const Float* src, IrCloner* ir_cloner);
@@ -105,7 +105,7 @@ class TORCH_CUDA_API Half : public Val {
 
   Half() : Val(ValType::Scalar, DataType::Half), maybe_value_{c10::nullopt} {}
 
-  Half(float _value)
+  explicit Half(float _value)
       : Val(ValType::Scalar, DataType::Half), maybe_value_{_value} {}
 
   Half(const Half* src, IrCloner* ir_cloner);
@@ -142,7 +142,7 @@ class TORCH_CUDA_API Int : public Val {
 
   Int() : Val(ValType::Scalar, DataType::Int), maybe_value_{c10::nullopt} {}
 
-  Int(ScalarType _value)
+  explicit Int(ScalarType _value)
       : Val(ValType::Scalar, DataType::Int), maybe_value_{_value} {}
 
   Int(const Int* src, IrCloner* ir_cloner);
@@ -174,24 +174,30 @@ class TransformReplay;
 class TransformIter;
 class OptOutMutator;
 class LoopNestGenerator;
-class GPULower;
 
-/*
- * TensorView is our primitive Tensor Type used in code generation. It can be
- * thought of as representing physical memory, however, its dimensionality is
- * modifed as split/merge/computeAt functions are called. The history of
- * these transformations are kept and used for generating actual code referncing
- * physical memory. Generally when users are thinking of code generation in
- * reference to a Tensor, this is the class they should be interacting with.
- *
- * The reason we need both TensorView and TensorDomain is that we need to have a
- * record of both what is being computed and how it is being computed. For
- * Example we may have the operation: TV3[I, J, K] = TV2[I, J, K] + TV1[I, J, K]
- * The mathematical operationss here are on the tensor views TV1, TV2, and TV3.
- * This operation is a pointwise operation. To compute this pointwise operation
- * we iterate over the 3D TensorDomain [I, J, K], where K is the fastest
- * changing dimension.
- */
+namespace ir_utils {
+class TVDomainGuard;
+}
+
+// TensorView is our primitive Tensor Type used in code generation. It can be
+// thought of as representing physical memory, however, its dimensionality is
+// modifed as split/merge/computeAt functions are called. The history of
+// these transformations are kept and used for generating actual code referncing
+// physical memory. Generally when users are thinking of code generation in
+// reference to a Tensor, this is the class they should be interacting with.
+//
+// The reason we need both TensorView and TensorDomain is that we need to have a
+// record of both what is being computed and how it is being computed. For
+// example we may have the operation: TV3[I, J, K] = TV2[I, J, K] + TV1[I, J, K]
+// The mathematical operations here are on the tensor views TV1, TV2, and TV3.
+// This operation is a pointwise operation. To compute this pointwise operation
+// we iterate over the 3D TensorDomain [I, J, K], where K is the fastest
+// changing dimension.
+//
+// TODO: Need to work on the const model for TensorView, making all functions
+// that should be const, const. Gave this a try but expanded really quickly.
+// getComputeAtAxis not being const because it can return a TV that some expect
+// to be non-const is the biggest headache.
 class TORCH_CUDA_API TensorView : public Val {
  public:
   ~TensorView() = default;
@@ -219,6 +225,19 @@ class TORCH_CUDA_API TensorView : public Val {
   bool hasBlockReduction() const;
   bool hasGridReduction() const;
   bool hasBroadcast() const;
+  bool hasRFactor() const;
+
+  c10::optional<unsigned int> getReductionAxis() const;
+
+  const std::vector<IterDomain*>& getRootDomain() const;
+
+  const std::vector<IterDomain*>& getRFactorDomain() const;
+
+  // If rfactor domain exists in domain() return it, otherwise return root
+  // domain.
+  const std::vector<IterDomain*>& getMaybeRFactorDomain() const;
+
+  IterDomain* axis(int pos) const;
 
   // Is there an active computeAt TensorView/Axis
   bool hasComputeAt() const {
@@ -232,8 +251,6 @@ class TORCH_CUDA_API TensorView : public Val {
 
   size_t nDims() const;
 
-  IterDomain* axis(int pos) const;
-
   // Return compute at axis relative to this domain
   unsigned int getThisComputeAtAxis() const {
     return this_compute_at_axis_;
@@ -244,17 +261,25 @@ class TORCH_CUDA_API TensorView : public Val {
     return relative_compute_at_axis_;
   }
 
+  // Return position in compute_at_view that lines up with this->axis(pos)?
+  int getComputeAtRelPos(int pos);
+
   // Will check if an axis is inside computeAtAxis and will fetch the reference
   // to be used in code generation.
-  std::pair<IterDomain*, TensorView*> getComputeAtAxis(int pos) {
+  std::pair<int, TensorView*> getComputeAtPos(int pos) {
+    pos = normalizeAxisPos(pos);
     TORCH_INTERNAL_ASSERT(
         nDims() > 0, "Tried to access a computeAt axis in a 0-dim TensorView");
     if (!hasComputeAt() || getThisComputeAtAxis() <= (unsigned int)pos)
-      return std::pair<IterDomain*, TensorView*>(axis(pos), this);
-    return compute_at_view_->getComputeAtAxis(getComputeAtRelPos(pos));
+      return std::make_pair(pos, this);
+    return compute_at_view_->getComputeAtPos(getComputeAtRelPos(pos));
   }
 
-  const std::vector<IterDomain*>& getRootDomain() const;
+  std::pair<IterDomain*, TensorView*> getComputeAtAxis(int pos) {
+    const auto computeAtPos = getComputeAtPos(pos);
+    return std::make_pair(
+        computeAtPos.second->axis(computeAtPos.first), computeAtPos.second);
+  }
 
   // Compute this TensorView relative to another tensor at axis
   TensorView* computeAt(TensorView* consumer, int axis);
@@ -268,6 +293,12 @@ class TORCH_CUDA_API TensorView : public Val {
   // Split "axis" into 2 axes where the inner axes is size of "factor"
   // and outer axis is size axis.size() / factor
   TensorView* split(int axis, unsigned int factor);
+
+  // Split "axis" into 2 axes where the inner axes is size of "factor"
+  // and outer axis is size axis.size() / factor. Factor can be a symbolic
+  // value instead of constant. This requires setting the symbolic value as an
+  // input, or using a parallel dim from NamedScalar::getParallelDim
+  TensorView* split(int axis, Val* factor);
 
   // Merge axis_o and axis_i into 1 IterDomain
   TensorView* merge(int axis_o, int axis_i);
@@ -300,16 +331,28 @@ class TORCH_CUDA_API TensorView : public Val {
   //
   TensorView* rFactor(const std::vector<int>& axes);
 
+  // Create a TensorView before the original tensor. A common use case is to
+  // write results into shared memory or registers before moving to global
+  // memory. Analogous to TVM Cache_Write
+  TensorView* cache_before();
+
+  // Create a TensorView after the original tensor. A common use case is to
+  // read tensor into shared memory or registers. Analogous to TVM Cache_Read
+  TensorView* cache_after();
+
   MemoryType getMemoryType() const {
     return memory_type_;
   }
+
+  void setMemoryType(MemoryType mt);
 
   friend TORCH_CUDA_API TransformReplay;
   friend TORCH_CUDA_API OptOutMutator;
   friend TORCH_CUDA_API LoopNestGenerator;
   friend ComputeAt;
   friend void IrFixComputeAt(Fusion*);
-  friend void IrAdjustMemoryTypes(Fusion* fusion);
+  friend void adjustMemoryTypes(Fusion* fusion);
+  friend class ir_utils::TVDomainGuard;
 
  protected:
   // Make an exact copy of this tensor (similar to clone()), however, also grabs
@@ -331,23 +374,29 @@ class TORCH_CUDA_API TensorView : public Val {
   // computeAt with outputs relative to eachother
   void setComputeAt(TensorView* computeAtView, int thisPos, int relPos);
 
-  void setMemoryType(MemoryType mt) {
-    memory_type_ = mt;
-    bool is_inp_or_out =
-        this->fusion()->hasInput(this) || this->fusion()->hasOutput(this);
-    if (is_inp_or_out)
-      TORCH_INTERNAL_ASSERT(
-          mt == MemoryType::Global,
-          "Tried to set an input or output to the fusion to a non-global memory type.");
+ private:
+  int normalizeAxisPos(int pos) const {
+    if (pos < 0) {
+      pos += nDims();
+    }
+    return pos;
   }
 
- private:
-  // Make a copy of the domain (used for Tensor based constructor), likely to be
-  // removed soon.
-  void copyDomain(const TensorDomain* td);
+  // In Cache Before, for the origin expr of the original tensor,
+  // we create a new operation where the original tensor is replaced
+  // with the new cache tensor. This function creates a new expr
+  // given the consumer, the output of the expression.
+  void createExprConsumer(Expr* expr, TensorView* consumer);
 
-  // Return position in compute_at_view that lines up with this->axis(pos)?
-  int getComputeAtRelPos(int pos);
+  // In Cache After, for all the uses of the original tensor, we create
+  // a new operation where the original tensor is replaced with the new
+  // cache tensor. This function creates a new expr given a producer,
+  // an input for the expression.
+  void createExprProducer(
+      Expr* expr,
+      TensorView* current,
+      TensorView* producer);
+
   void setThisComputeAtAxis();
 
  private:

@@ -2,6 +2,7 @@
 
 - [Contributing to PyTorch](#contributing-to-pytorch)
 - [Developing PyTorch](#developing-pytorch)
+  - [Nightly Checkout & Pull](#nightly-checkout--pull)
 - [Codebase structure](#codebase-structure)
 - [Unit testing](#unit-testing)
   - [Better local unit tests with pytest](#better-local-unit-tests-with-pytest)
@@ -58,6 +59,9 @@ PyTorch, see the [Contributing Guide](docs/source/community/contribution_guide.r
 
 ## Developing PyTorch
 
+A full set of instructions on installing PyTorch from source is here:
+https://github.com/pytorch/pytorch#from-source
+
 To develop PyTorch on your machine, here are some tips:
 
 1. Uninstall all existing PyTorch installs:
@@ -87,8 +91,6 @@ If you want to have no-op incremental rebuilds (which are fast), see the section
 
 3. Install PyTorch in `develop` mode:
 
-A full set of instructions on installing PyTorch from source is here:
-https://github.com/pytorch/pytorch#from-source
 
 The change you have to make is to replace
 
@@ -120,6 +122,39 @@ You do not need to repeatedly install after modifying Python files.
 
 In case you want to reinstall, make sure that you uninstall PyTorch first by running `pip uninstall torch`
 and `python setup.py clean`. Then you can install in `develop` mode again.
+
+## Nightly Checkout & Pull
+
+The `tools/nightly.py` script is provided to ease pure Python development of
+PyTorch. This uses `conda` and `git` to check out the nightly development
+version of PyTorch and installs pre-built binaries into the current repository.
+This is like a development or editable install, but without needing the ability
+to compile any C++ code.
+
+You can use this script to check out a new nightly branch with the following:
+
+```bash
+./tools/nightly.py checkout -b my-nightly-branch
+conda activate pytorch-deps
+```
+
+Or if you would like to re-use an existing conda environment, you can pass in
+the regular environment parameters (`--name` or `--prefix`):
+
+```bash
+./tools/nightly.py checkout -b my-nightly-branch -n my-env
+conda activate my-env
+```
+
+You can also use this tool to pull the nightly commits into the current branch:
+
+```bash
+./tools/nightly.py pull -n my-env
+conda activate my-env
+```
+
+Pulling will reinstall the PyTorch dependencies as well as the nightly binaries
+into the repo directory.
 
 ## Codebase structure
 
