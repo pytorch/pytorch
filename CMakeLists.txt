@@ -121,9 +121,14 @@ option(BUILD_BINARY "Build C++ binaries" OFF)
 option(BUILD_DOCS "Build Caffe2 documentation" OFF)
 option(BUILD_CUSTOM_PROTOBUF "Build and use Caffe2's own protobuf under third_party" ON)
 option(BUILD_PYTHON "Build Python binaries" ON)
-option(BUILD_CAFFE2_OPS "Build Caffe2 operators" ON)
+option(BUILD_CAFFE2 "Master flag to build Caffe2" ON)
+cmake_dependent_option(
+    BUILD_CAFFE2_OPS "Build Caffe2 operators" ON
+    "BUILD_CAFFE2" OFF)
+cmake_dependent_option(
+    BUILD_CAFFE2_MOBILE "Build libcaffe2 for mobile (deprecating)" OFF
+    "BUILD_CAFFE2" OFF)
 option(BUILD_SHARED_LIBS "Build libcaffe2.so" ON)
-option(BUILD_CAFFE2_MOBILE "Build libcaffe2 for mobile (deprecating)" OFF)
 cmake_dependent_option(
     CAFFE2_LINK_LOCAL_PROTOBUF "If set, build protobuf inside libcaffe2.so." ON
     "BUILD_SHARED_LIBS AND BUILD_CUSTOM_PROTOBUF" OFF)
@@ -774,7 +779,11 @@ else()
 endif()
 
 # ---[ Modules
-add_subdirectory(modules)
+# If master flag for buildling Caffe2 is disabled, we also disable the
+# build for Caffe2 related operator modules.
+if(BUILD_CAFFE2)
+  add_subdirectory(modules)
+endif()
 
 # ---[ Binaries
 # Binaries will be built after the Caffe2 main libraries and the modules
