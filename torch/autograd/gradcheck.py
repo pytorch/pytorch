@@ -340,7 +340,9 @@ def gradcheck(
                 return fail_test(error_str + 'Jacobian mismatch for output %d with respect to input %d,\n'
                                  'numerical:%s\nanalytical:%s\n' % (i, j, n, a))
 
-        for j, (a, n, inp) in enumerate(zip(analytical, numerical, tupled_inputs)):
+        inp_tensors = iter_tensors(tupled_inputs, True)
+
+        for j, (a, n, inp) in enumerate(zip(analytical, numerical, inp_tensors)):
             if a.numel() != 0 or n.numel() != 0:
                 if inp.is_complex():
                     # C -> R, C -> C
