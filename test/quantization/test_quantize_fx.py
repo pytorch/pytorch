@@ -163,8 +163,12 @@ class TestQuantizeFx(QuantizationTestCase):
         original = symbolic_trace(m)
         qconfig = default_dynamic_qconfig
         qconfig_dict = {'': qconfig}
-        quantized = quantize_dynamic_fx(original, qconfig_dict)
-        print(quantized.src)
+        quantized = quantize_dynamic_fx(original, qconfig_dict, debug=True)
+        qparams = (quantized.root._scale_0, quantized.root._zero_point_0)
+        weight_obs = qconfig.weight()
+        weight_obs(quantized.root.weight)
+        ref_qparams = weight_obs.calculate_qparams()
+        self.assertEqual(qparams, ref_qparams)
 
 
 class TestQuantizeFxOps(QuantizationTestCase):

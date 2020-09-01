@@ -77,9 +77,14 @@ def collect_producer_nodes(node):
                 frontier.append(arg)
     return nodes
 
-# Construct a graph module from extracted producer nodes
-# from `collect_producer_nodes` function
 def graph_module_from_producer_nodes(root, producer_nodes):
+    r''' Construct a graph module from extracted producer nodes
+    from `collect_producer_nodes` function
+    Args:
+      root: the root module for the original graph
+      producer_nodes: a list of nodes we use to construct the graph
+    '''
+    assert len(producer_nodes) > 0, 'list of producer nodes can not be empty'
     # since we traced back from node to getattrr
     producer_nodes.reverse()
     graph = Graph()
@@ -89,7 +94,7 @@ def graph_module_from_producer_nodes(root, producer_nodes):
         return map_arg(a, lambda node: env[node.name])
     for producer_node in producer_nodes:
         env[producer_node.name] = graph.node_copy(producer_node, load_arg)
-    graph.output(load_arg(node.name))
+    graph.output(load_arg(producer_nodes[-1].name))
     graph_module = GraphModule(root, graph)
     return graph_module
 
