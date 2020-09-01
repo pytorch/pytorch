@@ -24,7 +24,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.testing._internal.common_utils import TestCase, run_tests, find_free_port
 from torch.nn.parallel.distributed import _dump_DDP_relevant_env_vars
-from torch.distributed.distributed_c10d import _get_default_group
+from torch.distributed.distributed_c10d import _get_default_group, AllreduceOptions, GroupMember
 from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
 from torch._utils_internal import TEST_MASTER_PORT as MASTER_PORT
 from torch.testing._internal.common_distributed import (
@@ -856,6 +856,45 @@ class _DistTestBase(object):
     def test_reduce_full_group_max(self):
         group, group_id, rank = self._init_full_group_test()
         self._test_reduce_helper(group, group_id, rank, dist.ReduceOp.MAX, -1, 10, 10)
+
+    @skip_if_no_gpu
+    @require_backend({"gloo", "nccl"})
+    def test_all_reduce_result_cuda(self):
+        group, group_id, rank = self._init_global_test()
+        rank_to_GPU = self._init_multigpu_helper()
+        for src in group:
+            if rank == src:
+                tensor = _build_tensor(src + 1, 2)
+            else:
+                tensor = _build_tensor(src + 1, 10)
+            tensor = tensor.cuda(rank_to_GPU[rank][0])
+
+            opts = AllreduceOptions()
+            opts.reduceOp = dist.ReduceOp.SUM
+
+            if group_id == GroupMember.WORLD:
+                work = _get_default_group().allreduce([tensor], opts)
+            else:
+                work = group_id.allreduce([tensor], opts)
+
+            # Calling result right the work is finished should throw exception.
+            # Here we have a race condition, we may not assume the work is not
+            # finished by the time we run next lines.
+            try:
+                with self.assertRaisesRegex(
+                        RuntimeError,
+                        "Expected isCompleted.. to be true, but got false"):
+                    work.result()
+            except AssertionError:
+                # Exception was not raised, ensure is_completed()
+                self.assertTrue(work.is_completed())
+
+            work.wait()
+
+            result = work.result()
+            expected_value = 2 + (10 * (len(group) - 1))
+            self.assertEqual(result, [_build_tensor(src + 1, expected_value)])
+        self._barrier()
 
     # ALL REDUCE
     def _test_all_reduce_helper(

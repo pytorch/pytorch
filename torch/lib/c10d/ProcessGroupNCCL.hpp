@@ -90,6 +90,9 @@ class ProcessGroupNCCL : public ProcessGroup {
     // It actually returns a FutureNCCL object which is a sub class Future.
     c10::intrusive_ptr<c10::ivalue::Future> getFuture() override;
 
+
+    std::vector<at::Tensor> result() override;
+
    protected:
     // The cached list of CUDA devices to operate on
     std::vector<at::Device> devices_;
@@ -224,10 +227,6 @@ class ProcessGroupNCCL : public ProcessGroup {
       value_ = std::move(value);
     }
 
-    void setError(std::string err) override {
-      error_ = FutureError(std::move(err));
-    }
-
     // Just returns FutureNCCL's value after wait returns.
     at::IValue value() override {
       TORCH_INTERNAL_ASSERT(hasValue(), "FutureNCCL's value is None.")
@@ -279,7 +278,7 @@ class ProcessGroupNCCL : public ProcessGroup {
               // records callback's stream.
               (*thenFutCudaEvents)[0].record(*futureNCCLCallbackStream_);
             } catch (const std::exception& e) {
-              fut->setError(e.what());
+              fut->setError(std::current_exception());
             }
           },
           std::move(callback)));

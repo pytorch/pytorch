@@ -86,7 +86,7 @@ def forward(self, {', '.join(free_variables)}):
             setattr(cls, k, v)
 
     def __reduce__(self):
-        return (deserialize_graphmodule, (self.root, self.src))
+        return (deserialize_graphmodule, (self.root, self.code))
 
 # workarounds for issues in __torch_function__
 
