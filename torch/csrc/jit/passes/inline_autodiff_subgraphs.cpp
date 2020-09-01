@@ -2,6 +2,7 @@
 
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/update_differentiable_graph_requires_grad.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 
 namespace torch {
@@ -13,7 +14,7 @@ namespace jit {
 bool canRunWithAutograd(Node* node) {
   auto kind = node->kind();
   return kind != prim::FusionGroup && kind != prim::CudaFusionGroup &&
-      (kind.is_aten() || kind.is_prim());
+      kind != prim::TensorExprGroup && (kind.is_aten() || kind.is_prim());
 }
 
 namespace {
@@ -45,6 +46,11 @@ graph_node_list::iterator scanNode(Node* node, size_t threshold) {
     return next_node;
   }
 
+  // now that we inline the graph, we are no longer detaching input tensors,
+  // so the profiles will have outdated requires_grad=False.
+  // conservatively update them to maybe requiring grad, bc we might create
+  // autodiff graphs when the tensors maybe require grad
+  UpdateDifferentiableGraphRequiresGrad(subgraph, c10::nullopt);
   SubgraphUtils::unmergeSubgraph(node);
   return next_node;
 }

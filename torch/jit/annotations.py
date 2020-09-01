@@ -32,7 +32,7 @@ class Module(object):
         try:
             return self.members[name]
         except KeyError:
-            raise RuntimeError("Module {} has no member called {}".format(self.name, name))
+            raise RuntimeError("Module {} has no member called {}".format(self.name, name)) from None
 
 
 class EvalEnv(object):
@@ -147,7 +147,7 @@ def parse_type_line(type_line, rcb, loc):
     try:
         arg_ann = eval(arg_ann_str, {}, EvalEnv(rcb))  # noqa: P204
     except (NameError, SyntaxError) as e:
-        raise RuntimeError("Failed to parse the argument list of a type annotation: {}".format(str(e)))
+        raise RuntimeError("Failed to parse the argument list of a type annotation") from e
 
     if not isinstance(arg_ann, tuple):
         arg_ann = (arg_ann,)
@@ -155,7 +155,7 @@ def parse_type_line(type_line, rcb, loc):
     try:
         ret_ann = eval(ret_ann_str, {}, EvalEnv(rcb))  # noqa: P204
     except (NameError, SyntaxError) as e:
-        raise RuntimeError("Failed to parse the return type of a type annotation: {}".format(str(e)))
+        raise RuntimeError("Failed to parse the return type of a type annotation") from e
 
     arg_types = [ann_to_type(ann, loc) for ann in arg_ann]
     return arg_types, ann_to_type(ret_ann, loc)
@@ -168,10 +168,14 @@ def get_type_line(source):
     lines = source.split('\n')
     lines = [(line_num, line) for line_num, line in enumerate(lines)]
     type_lines = list(filter(lambda line: type_comment in line[1], lines))
+    # `type: ignore` comments may be needed in JIT'ed functions for mypy, due
+    # to the hack in torch/_VF.py.
+    type_lines = list(filter(lambda line: not line[1].endswith("# type: ignore"),
+                             type_lines))
     lines_with_type = list(filter(lambda line: 'type' in line[1], lines))
 
     if len(type_lines) == 0:
-        type_pattern = re.compile('#[\t ]*type[\t ]*:')
+        type_pattern = re.compile('#[\t ]*type[\t ]*(?!: ignore$):')
         wrong_type_lines = list(filter(lambda line: type_pattern.search(line[1]), lines))
         if len(wrong_type_lines) > 0:
             raise RuntimeError("The annotation prefix in line " + str(wrong_type_lines[0][0])
@@ -194,8 +198,11 @@ def get_type_line(source):
         elif type_comment in line:
             parameter_type_lines.append(line)
     if return_line is None:
-        raise RuntimeError("Return type line '# type: (...) -> ...' not found on multiline "
-                           "type annotation\n(See PEP 484 https://www.python.org/dev/peps/pep-0484/#suggested-syntax-for-python-2-7-and-straddling-code)")  # noqa
+        raise RuntimeError(
+            "Return type line '# type: (...) -> ...' not found on multiline "
+            "type annotation\nfor type lines:\n" +
+            '\n'.join([line[1] for line in type_lines]) +
+            "\n(See PEP 484 https://www.python.org/dev/peps/pep-0484/#suggested-syntax-for-python-2-7-and-straddling-code)")  # noqa
 
     def get_parameter_type(line):
         item_type = line[line.find(type_comment) + len(type_comment):]
@@ -221,7 +228,7 @@ def split_type_line(type_line):
     try:
         arrow_pos = type_line.index('->')
     except ValueError:
-        raise RuntimeError("Syntax error in type annotation (cound't find `->`)")
+        raise RuntimeError("Syntax error in type annotation (cound't find `->`)") from None
     return type_line[start_offset:arrow_pos].strip(), type_line[arrow_pos + 2:].strip()
 
 
