@@ -188,7 +188,6 @@ class TensorExprFuser {
   TensorExprFuser(std::shared_ptr<Graph> graph, size_t min_group_size)
       : graph_(std::move(graph)), min_group_size_(min_group_size) {}
 
-
   void removeTensorTypeSpecialization(Value* v) {
     if (!v->type()->cast<TensorType>()) {
       return;

@@ -520,5 +520,6 @@ Utilities
     compiled_with_cxx11_abi
     result_type
     can_cast
-
     promote_types
+    set_deterministic
+    is_deterministic
