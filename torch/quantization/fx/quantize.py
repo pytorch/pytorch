@@ -599,6 +599,19 @@ class Quantizer:
         # mapping from matched node to activation_post_process
         # must be filled before convert
         self.activation_post_process_map = None
+        # mapping from node name to qconfig that should be used for that node
+        # filled out for a model during _generate_qconfig_map
+        self.qconfig_map = None
+        # mapping from fully qualified module name to module instance
+        # for example,
+        # {
+        #   '': Model(...),
+        #   'linear': torch.nn.Linear(...),
+        #   'linear.weight_fake_quant': torch.nn.PerChannelMinMaxObserver(...),
+        # }
+        self.modules = None
+        # mapping from observer node name to observer instance
+        self.activation_post_process_map = None
 
     def _qat_swap_modules(self, root):
         convert(root, mapping=DEFAULT_QAT_MODULE_MAPPING, inplace=True, remove_qconfig=False)
