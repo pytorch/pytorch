@@ -515,16 +515,38 @@ public:
   // These overloads cover cases when a SelectiveStr (see Note [Selective build])
   // has been disabled at compile time.  In that case, don't generate any code
   // referencing the passed in functions at all.
-  template <typename Schema>
+//  template <typename Schema>
   Library& def(detail::SelectiveStr<false>) & { return *this; }
+//  template <typename Schema>
+  Library& def(detail::SelectiveStr<true> raw_schema) & {
+    return def(raw_schema.operator const char *());
+  }
   template <typename Func>
   Library& def(detail::SelectiveStr<false>, Func&& raw_f) & { return *this; }
+  template <typename Func>
+  Library& def(detail::SelectiveStr<true> raw_name_or_schema, Func&& raw_f) & {
+    return def(raw_name_or_schema.operator const char *(), raw_f);
+  }
+
   template <typename Func>
   Library& impl(detail::SelectiveStr<false>, Func&& raw_f) & { return *this; }
   template <typename Dispatch, typename Func>
   Library& impl(detail::SelectiveStr<false>, Dispatch&& key, Func&& raw_f) & { return *this; }
   template <typename Func>
   Library& impl_UNBOXED(detail::SelectiveStr<false> name, Func* raw_f) & { return *this; }
+
+  template <typename Func>
+  Library& impl(detail::SelectiveStr<true> name, Func&& raw_f) & {
+    return impl(name.operator const char*(), raw_f);
+  }
+  template <typename Dispatch, typename Func>
+  Library& impl(detail::SelectiveStr<true> name, Dispatch&& key, Func&& raw_f) & {
+    return impl(name.operator const char*(), key, raw_f);
+  }
+  template <typename Func>
+  Library& impl_UNBOXED(detail::SelectiveStr<true> name, Func* raw_f) & {
+    return impl_UNBOXED(name.operator const char*(), raw_f);
+  }
 
   /// Register a fallback implementation for all operators which will be used
   /// if there is not a specific implementation for an operator available.
