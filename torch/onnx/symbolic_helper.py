@@ -365,13 +365,6 @@ def _scatter_helper(g, self, dim, index, src):
         from torch.onnx.symbolic_opset11 import scatter
     return scatter(g, self, dim, index, src)
 
-def _ones_like_helper(g, input, dtype, layout, device):
-    if _export_onnx_opset_version <= 8:
-        from torch.onnx.symbolic_opset8 import ones_like
-        return ones_like(g, input, dtype, None, None)
-    else:
-        from torch.onnx.symbolic_opset9 import ones_like
-        return ones_like(g, input, dtype)
 
 def _arange_cast_helper(g, end, start=None, step=None, dtype=None):
     def _is_all_integral(scalars):
