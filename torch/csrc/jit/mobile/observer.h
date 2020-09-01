@@ -68,7 +68,9 @@ class MobileModuleObserver {
  public:
   virtual ~MobileModuleObserver() = default;
 
-  virtual void onEnterRunMethod(const std::string&, const std::string&) {}
+  virtual void onEnterRunMethod(
+      const std::unordered_map<std::string, std::string>&,
+      const std::string&) {}
   virtual void onExitRunMethod() {}
   virtual void onCancelRunMethod(const std::string&) {}
   virtual void onFailRunMethod(const std::string&) {}
