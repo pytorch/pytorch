@@ -110,16 +110,13 @@ static void ReplaceAddWithConcat(Block* b) {
       FuseWithListUnpack(child_block);
     }
     if (it->kind() == aten::add) {
-      auto in1 = it->input(0)->node();
-      auto in2 = it->input(1)->node();
-      if (!in1->output()->type()->cast<ListType>() ||
-          !in2->output()->type()->cast<ListType>()) {
+      if (!it->input(0)->type()->cast<ListType>() ||
+          !it->input(1)->type()->cast<ListType>()) {
         continue;
       }
 
-      TypePtr elem = in2->output()->type()->cast<ListType>()->getElementType();
+      TypePtr elem = it->input(0)->type()->cast<ListType>()->getElementType();
       if (elem->cast<IntType>()) {
-        std::cout << in1->kind() << " " << in2->kind();
         Node* concat_node = b->owningGraph()->create(onnx::Concat, 1);
         concat_node->i_(attr::axis, 0);
         concat_node->insertBefore(*it);
