@@ -231,6 +231,7 @@ class DistributedDataParallel(Module):
         parameters.
 
     Example::
+
         >>> import torch.distributed.autograd as dist_autograd
         >>> from torch.nn.parallel import DistributedDataParallel as DDP
         >>> from torch import optim
@@ -713,7 +714,7 @@ class DistributedDataParallel(Module):
             of :class:`torch.nn.parallel.distributed.DistributedDataParallel`,
             which means that a single process works on a single GPU.
 
-        ..warning::
+        .. warning::
             This module currently does not support custom distributed collective
             operations in the forward pass, such as ``SyncBatchNorm`` or other
             custom defined collectives in the model's forward pass.
@@ -731,7 +732,7 @@ class DistributedDataParallel(Module):
                 ``world_size`` even when we encounter uneven inputs. If you set
                 this to ``False``, we divide the gradient by the remaining
                 number of nodes. This ensures parity with training on a smaller
-                world_size although it also means the uneven inputs would
+                ``world_size`` although it also means the uneven inputs would
                 contribute more towards the global gradient. Typically, you
                 would want to set this to ``True`` for cases where the last few
                 inputs of your training job are uneven. In extreme cases, where
@@ -744,6 +745,7 @@ class DistributedDataParallel(Module):
 
 
         Example::
+
           >>>  import torch
           >>>  import torch.distributed as dist
           >>>  import os
