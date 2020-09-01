@@ -358,7 +358,7 @@ def _create_jit_graph(model, args, _retain_param_name, use_new_jit_passes):
 
             in_vars, in_desc = torch.jit._flatten(tuple(args) + tuple(params))
             graph = _propagate_and_assign_input_shapes(
-                method_graph, tuple(in_vars), False, propagate)
+                method_graph, tuple(in_vars), False, False)
         except AttributeError as e:
             raise RuntimeError('\'forward\' method must be a script method') from e
     elif isinstance(model, torch.jit.ScriptFunction):
