@@ -33,15 +33,7 @@ from .utils import _parent_name
 
 from abc import ABC, abstractmethod
 import copy
-import enum
 import operator
-
-# Quantization type (dynamic quantization, static quantization).
-# Should match the c++ enum in quantization_type.h
-class QuantType(enum.IntEnum):
-    DYNAMIC = 0
-    STATIC = 1
-    QAT = 2
 
 # ------------------------
 # Helper Functions
@@ -383,8 +375,8 @@ class BatchNorm(QuantizeHandler):
             load_arg(quantized=False)(self.bn_node.kwargs))
 
 ARGS_TO_SKIP = {
-    torch.ops.quantized.hardswish: ['inplace'],
-    torch.ops.quantized.instance_norm:
+    torch._ops.ops.quantized.hardswish: ['inplace'],
+    torch._ops.ops.quantized.instance_norm:
     ['running_mean', 'running_var', 'use_input_stats', 'momentum'],
 }
 @register_quant_pattern(torch.nn.ELU)
@@ -621,15 +613,16 @@ class Quantizer:
             elif node.op == 'call_module':
                 self.qconfig_map[node.name] = get_qconfig(self.modules[node.target])
 
-    def _prepare(self, model, qconfig_dict, inplace, quant_type):
+    def _prepare(self, model, qconfig_dict, inplace, is_dynamic_quant):
+        assert not inplace, 'inplace prepare is not supported yet'
         input_root = model.root
         if not inplace:
             input_root = copy.deepcopy(input_root)
 
         input_graph = model.graph
-        self.quant_type = quant_type
+        self.is_dynamic_quant = is_dynamic_quant
         # TODO: allow user specified patterns
-        if self.quant_type == QuantType.DYNAMIC:
+        if self.is_dynamic_quant:
             self.patterns = get_dynamic_quant_patterns()
         else:
             self.patterns = get_quant_patterns()
@@ -688,7 +681,7 @@ class Quantizer:
                     observed.add(node.name)
 
                 # don't need to insert observer for output in dynamic quantization
-                if self.quant_type == QuantType.DYNAMIC:
+                if self.is_dynamic_quant:
                     continue
 
                 if isinstance(obj, CopyNode):
@@ -725,22 +718,44 @@ class Quantizer:
                     observed.add(node.name)
         observed_graph.output(load_arg(input_graph.result))
 
-        return GraphModule(input_root, observed_graph)
+        observed = GraphModule(input_root, observed_graph)
+        self.save_state(observed)
+        return observed
+
+    def save_state(self, observed):
+        observed._activation_post_process_map = self.activation_post_process_map
+        observed._patterns = self.patterns
+        observed._qconfig_map = self.qconfig_map
+
+    def restore_state(self, observed):
+        err_msg = 'please make sure the model is produced by prepare'
+        assert hasattr(observed, '_activation_post_process_map'), 'did not found ' + \
+            '_activation_post_process attribute ' + err_msg
+        assert hasattr(observed, '_patterns'), 'did not found ' + \
+            '_patterns attribute ' + err_msg
+        assert hasattr(observed, '_qconfig_map'), 'did not found ' + \
+            '_qconfig_map attribute ' + err_msg
+        self.activation_post_process_map = observed._activation_post_process_map
+        self.patterns = observed._patterns
+        self.qconfig_map = observed._qconfig_map
 
     def prepare(self, model, qconfig_dict, inplace=False):
-        return self._prepare(model, qconfig_dict, inplace, quant_type=QuantType.STATIC)
+        return self._prepare(model, qconfig_dict, inplace, is_dynamic_quant=False)
 
     def prepare_dynamic(self, model, qconfig_dict, inplace=False):
-        return self._prepare(model, qconfig_dict, inplace, quant_type=QuantType.DYNAMIC)
+        return self._prepare(model, qconfig_dict, inplace, is_dynamic_quant=True)
 
-    def convert(self, observed, inplace=False, debug=False):
-        assert self.activation_post_process_map is not None
+    def convert(self, observed, inplace=False, debug=False, is_dynamic_quant=False):
+        assert not inplace, 'inplace convert is not supported yet'
+        self.restore_state(observed)
+        self.is_dynamic_quant = is_dynamic_quant
         # move to cpu since we only have quantized cpu kernels
         observed.eval().cpu()
         observed_root = observed.root
         observed_graph = observed.graph
         if not inplace:
             observed_root = copy.deepcopy(observed_root)
+
         self.modules = dict(observed_root.named_modules())
 
         matches = self._find_matches(observed.graph, self.modules, self.patterns)
@@ -833,7 +848,8 @@ class Quantizer:
                         'CopyNode of type ' + node.op + ' is not handled'
                     quantized = is_quantized(node.args[0])
 
-                if self.quant_type == QuantType.DYNAMIC:
+                # output of dynamic quantization is not quantized
+                if self.is_dynamic_quant:
                     quantized = False
 
                 if quantized:
@@ -951,7 +967,7 @@ class Quantizer:
                     for i, node_arg in enumerate(node.args):
                         if arg is node_arg and i in WEIGHT_INDEX_DICT[node.target]:
                             is_weight = True
-                if self.quant_type != QuantType.DYNAMIC or is_weight:
+                if (not self.is_dynamic_quant) or is_weight:
                     # overwrite previous quant config
                     quants[arg.name] = (DefaultQuant(self, arg), qconfig, is_weight)
             return visit_arg

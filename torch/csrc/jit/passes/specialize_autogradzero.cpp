@@ -98,7 +98,6 @@ struct AutogradZeroSpecializer {
     }
     for (Node* n : profiled_opt_uses) {
       n->output()->replaceAllUsesWith(v);
-      // n->destroy();
     }
   }
 
@@ -147,7 +146,7 @@ struct AutogradZeroSpecializer {
 
       state_[inp] = *pttp->undefined() ? State::Zero : State::Nonzero;
       auto check = graph_->insert(prim::AutogradAnyNonZero, {inp});
-      if (!*pttp->undefined()) {
+      if (*pttp->undefined()) {
         check = graph_->insert(aten::__not__, {check});
       }
       checks.push_back(check);
