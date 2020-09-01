@@ -224,9 +224,19 @@ def gather(g, self, dim, index, sparse_grad=False):
 
 @parse_args('v', 'i', 'v', 'v')
 def scatter(g, self, dim, index, src):
+    from torch.onnx.symbolic_opset9 import expand_as
     if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
         return g.op("ATen", self, dim, index, src, operator_s="scatter")
-    return g.op("ScatterElements", self, index, src, axis_i=dim)
+    src_type = src.type().scalarType()
+    src = sym_help._maybe_get_scalar(src)
+    if sym_help._is_value(src):
+        return g.op("ScatterElements", self, index, src, axis_i=dim)
+    else:
+        # Check if scalar 'src' has same type as self (PyTorch allows different
+        # type for scalar src (but not when src is tensor)). If not, insert Cast node.
+        if self.type().scalarType() != src_type:
+            src = g.op("Cast", src, to_i=sym_help.cast_pytorch_to_onnx[self.type().scalarType()])
+        return g.op("ScatterElements", self, index, expand_as(g, src, index), axis_i=dim)
 
 
 @parse_args('v', 'i', 'none')
@@ -278,6 +288,19 @@ def __getitem_(g, self, i):
 def append(g, self, tensor):
     return g.op("SequenceInsert", self, tensor)
 
+
+def add(g, self, other, alpha=None):
+    if sym_help._is_value(self) and sym_help._is_tensor_list(self):
+        tensor_list_node = other.node()
+        if tensor_list_node.kind() != "prim::ListConstruct":
+            return _unimplemented("add", "does not support adding dynamic tensor list to another")
+        tensors = sym_help._unpack_list(other)
+        l = self
+        for t in tensors:
+            l = g.op("SequenceInsert", l, t)
+        return l
+
+    return torch.onnx.symbolic_opset9.add(g, self, other, alpha)
 
 def insert(g, self, pos, tensor):
     return g.op("SequenceInsert", self, tensor, pos)
@@ -355,12 +378,41 @@ def round(g, self):
     return g.op("Round", self)
 
 
-@parse_args('v', 'v', 'i')
-def split_with_sizes(g, self, split_sizes, dim):
-    if sym_help._is_value(split_sizes) and split_sizes.node().kind() == 'prim::ListConstruct':
-        return g.op("SplitToSequence", self, split_sizes, axis_i=dim)
+@parse_args('v', 'v', 'i', 'i')
+def split(g, self, split_size_or_sizes, dim, _outputs=None):
+    if not sym_help._is_split_static(split_size_or_sizes, _outputs):
+        split_out = g.op("SplitToSequence", self, split_size_or_sizes, axis_i=dim)
+        if _outputs is None:
+            return split_out
+        # Convert to multiple slice nodes iff number of splits and number of outputs are statically known.
+        if sym_help._is_packed_list(split_size_or_sizes) and len(sym_help._unpack_list(split_size_or_sizes)) == _outputs:
+            split_sizes = [g.op("Unsqueeze", v, axes_i=[0]) for v in sym_help._unpack_list(split_size_or_sizes)]
+            start = g.op("Constant", value_t=torch.tensor([0], dtype=torch.long))
+            end = split_sizes[0]
+            axis = g.op("Constant", value_t=torch.tensor([dim], dtype=torch.long))
+            res = []
+            for i in range(_outputs):
+                res.append(g.op("Slice", self, start, end, axis))
+                start = end
+                end = g.op("Add", start, end)
+            return res
+        return [g.op("SequenceAt", split_out, g.op("Constant", value_t=torch.tensor([i], dtype=torch.long)))
+                for i in range(_outputs)]
     else:
-        return torch.onnx.symbolic_opset9.split_with_sizes(g, self, split_sizes, dim)
+        return torch.onnx.symbolic_opset9.split(g, self, split_size_or_sizes, dim, _outputs)
+
+
+@parse_args('v', 'v', 'i', 'i')
+def split_with_sizes(g, self, split_sizes, dim, _outputs=None):
+    return split(g, self, split_sizes, dim, _outputs)
+
+
+@parse_args('v', 'i', 'i')
+def unbind(g, self, dim=0, _outputs=None):
+    if _outputs is None:
+        return g.op("SplitToSequence", self, g.op("Constant", value_t=torch.tensor(1, dtype=torch.long)), axis_i=dim, keepdims_i=0)
+    else:
+        return torch.onnx.symbolic_opset9.unbind(g, self, dim, _outputs)
 
 
 # Generate paddings in ONNX order based on pad in pytorch.
@@ -475,14 +527,21 @@ def size(g, self, dim=None):
 
 def squeeze(g, self, dim=None):
     if dim is None:
-        dims = []
-        for i, size in enumerate(self.type().sizes()):
-            if size == 1:
-                dims.append(i)
-    else:
-        dims = [sym_help._get_const(dim, 'i', 'dim')]
-    return g.op("Squeeze", self, axes_i=dims)
+        return g.op("Squeeze", self)
 
+    dim = sym_help._get_const(dim, 'i', 'dim')
+
+    # create 'cond' node (condition is shape[i]==1)
+    dim_constant = g.op("Constant", value_t=torch.tensor([dim]))
+    size = sym_help._size_helper(g, self, dim_constant)
+    const_one = g.op("Constant", value_t=torch.ones(1, dtype=torch.int64))
+    cond = g.op("Equal", size, const_one)
+    # create the 'If' node and add the 'then' and 'else' blocks to it.
+    if_node_outputs = g.op("If", cond)
+    if_node = if_node_outputs.node()
+    torch.onnx.utils._add_block(if_node, self, "onnx::Squeeze", axes_i=[dim])
+    torch.onnx.utils._add_block(if_node, self, "onnx::Identity")
+    return if_node_outputs
 
 @parse_args('v', 'i')
 def unsqueeze(g, self, dim):

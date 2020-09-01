@@ -8,8 +8,18 @@ namespace {
 
 // map from op alias -> normalized op
 static const std::unordered_map<Symbol, Symbol> alias_map = {
-    {aten::absolute, aten::abs},
-    {aten::absolute_, aten::abs_},
+    {aten::absolute, aten::abs},   {aten::absolute_, aten::abs_},
+    {aten::clip, aten::clamp},     {aten::clip_, aten::clamp_},
+    {aten::linalg_det, aten::det}, {aten::outer, aten::ger},
+    {aten::arccos, aten::acos},    {aten::arccos_, aten::acos_},
+    {aten::arcsin, aten::asin},    {aten::arcsin_, aten::asin_},
+    {aten::arctan, aten::atan},    {aten::arctan_, aten::atan_},
+    {aten::arccosh, aten::acosh},  {aten::arccosh_, aten::acosh_},
+    {aten::arcsinh, aten::asinh},  {aten::arcsinh_, aten::asinh_},
+    {aten::arctanh, aten::atanh},  {aten::arctanh_, aten::atanh_},
+    {aten::fix, aten::trunc},      {aten::fix_, aten::trunc_},
+    {aten::negative, aten::neg},   {aten::negative_, aten::neg_},
+    {aten::subtract, aten::sub},   {aten::subtract_, aten::sub_},
 };
 
 void replaceNodeWithNewSymbol(Node* node, Symbol new_symbol) {

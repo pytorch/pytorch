@@ -7,17 +7,19 @@ from caffe2.python import core
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
 import hypothesis.strategies as st
+from hypothesis import given, settings
 import numpy as np
 
 
 class TestClipTensorByScalingOp(serial.SerializedTestCase):
 
-    @serial.given(n=st.integers(5, 8), d=st.integers(2, 4),
+    @given(n=st.integers(5, 8), d=st.integers(2, 4),
            threshold=st.floats(0.1, 10),
            additional_threshold=st.floats(0.1, 10),
            use_additional_threshold=st.booleans(),
            inplace=st.booleans(),
            **hu.gcs_cpu_only)
+    @settings(deadline=1000)
     def test_clip_tensor_by_scaling(self, n, d, threshold, additional_threshold,
                                     use_additional_threshold, inplace, gc, dc):
 

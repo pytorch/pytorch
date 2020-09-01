@@ -51,6 +51,22 @@ namespace std {
     throw std::runtime_error("std::nexttoward is not present on older Android");
   }
 
+  // TODO: this function needs to be implemented and tested. Currently just throw an error.
+  inline float hypot(float x, float y) {
+    throw std::runtime_error("std::hypot is not implemented on older Android");
+  }
+  inline double hypot(double x, double y) {
+    throw std::runtime_error("std::hypot is not implemented on older Android");
+  }
+
+  // TODO: this function needs to be implemented and tested. Currently just throw an error.
+  inline float nextafter(float x, float y) {
+    throw std::runtime_error("std::nextafter is not implemented on older Android");
+  }
+  inline double nextafter(double x, double y) {
+    throw std::runtime_error("std::nextafter is not implemented on older Android");
+  }
+
   // Define integral versions the same way as more recent libstdc++
   template<typename T> typename std::enable_if<std::is_integral<T>::value, double>::type acosh(T x) { return __builtin_acosh(x); }
   template<typename T> typename std::enable_if<std::is_integral<T>::value, double>::type asinh(T x) { return __builtin_asinh(x); }

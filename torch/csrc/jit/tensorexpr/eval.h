@@ -226,11 +226,35 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
   }
 
   template <typename T>
-  Value binary_op(
-      const Value& lhs,
-      const Value& rhs,
-      IRNodeType op_type,
-      bool option = false) {
+  typename std::enable_if_t<std::is_floating_point<T>::value, T> max_value(
+      T a,
+      T b) {
+    return std::isnan(a) ? a : (std::isnan(b) ? b : (a < b ? b : a));
+  }
+
+  template <typename T>
+  typename std::enable_if_t<!std::is_floating_point<T>::value, T> max_value(
+      T a,
+      T b) {
+    return a < b ? b : a;
+  }
+
+  template <typename T>
+  typename std::enable_if_t<std::is_floating_point<T>::value, T> min_value(
+      T a,
+      T b) {
+    return std::isnan(a) ? a : (std::isnan(b) ? b : (a < b ? a : b));
+  }
+
+  template <typename T>
+  typename std::enable_if_t<!std::is_floating_point<T>::value, T> min_value(
+      T a,
+      T b) {
+    return a < b ? a : b;
+  }
+
+  template <typename T>
+  Value binary_op(const Value& lhs, const Value& rhs, IRNodeType op_type) {
     std::vector<T> lhs_v = lhs.as_vec<T>();
     std::vector<T> rhs_v = rhs.as_vec<T>();
     std::vector<T> result_v(lhs_v.size());
@@ -252,30 +276,10 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
           result_v[i] = mod_value(lhs_v[i], rhs_v[i]);
           break;
         case IRNodeType::kMax:
-          if (option) {
-            // Propagate NaNs
-            if (is_floating_point(lhs.dtype().scalar_type()) &&
-                is_floating_point(rhs.dtype().scalar_type())) {
-              result_v[i] = lhs_v[i];
-            } else if (std::isnan((float)rhs_v[i])) {
-              result_v[i] = rhs_v[i];
-            }
-          } else {
-            result_v[i] = lhs_v[i] > rhs_v[i] ? lhs_v[i] : rhs_v[i];
-          }
+          result_v[i] = max_value(lhs_v[i], rhs_v[i]);
           break;
         case IRNodeType::kMin:
-          if (option) {
-            // Propagate NaNs
-            if (is_floating_point(lhs.dtype().scalar_type()) &&
-                is_floating_point(rhs.dtype().scalar_type())) {
-              result_v[i] = lhs_v[i];
-            } else if (std::isnan((float)rhs_v[i])) {
-              result_v[i] = rhs_v[i];
-            }
-          } else {
-            result_v[i] = lhs_v[i] < rhs_v[i] ? lhs_v[i] : rhs_v[i];
-          }
+          result_v[i] = min_value(lhs_v[i], rhs_v[i]);
           break;
         default:
           // TODO: change to a proper error report
@@ -449,17 +453,21 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
 #undef IMM_VISIT
 
   TORCH_API void visit(const Block* v) override {
-    for (const auto& pair : v->varBindings()) {
-      bindVar(pair.first, pair.second);
-    }
-
+    const Block* last = scope_;
+    scope_ = v;
     for (Stmt* s : v->stmts()) {
       s->accept(this);
     }
 
-    for (const auto& pair : v->varBindings()) {
-      eval_context_.erase(pair.first);
+    auto it = var_by_scope_.find(v);
+    if (it != var_by_scope_.end()) {
+      for (const Expr* v : it->second) {
+        eval_context_.erase(v);
+      }
+      var_by_scope_.erase(it);
     }
+
+    scope_ = last;
   }
 
   TORCH_API void visit(const Var* v) override {
@@ -752,6 +760,11 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
     buffer_mapping_.erase(buffer_var);
   }
 
+  void visit(const Let* v) override {
+    var_by_scope_[scope_].push_back(v->var());
+    bindVar(v->var(), v->value());
+  }
+
   void visit(const Cond* v) override {
     v->condition()->accept(this);
     if (value().as<int>()) {
@@ -853,7 +866,9 @@ class SimpleIREvaluator : public CodeGen, public IRVisitor {
   }
 
   Value value_;
+  const Block* scope_;
   std::unordered_map<const Expr*, Value> eval_context_;
+  std::unordered_map<const Block*, std::vector<const Expr*>> var_by_scope_;
   std::unordered_map<const Var*, void*> buffer_mapping_;
   std::unordered_map<const Var*, std::unique_ptr<std::vector<int>>>
       internal_buffers_;

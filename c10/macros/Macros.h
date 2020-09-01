@@ -333,7 +333,7 @@ __host__ __device__
 
 #if defined(__CUDA_ARCH__)
 #if defined(_MSC_VER) && defined(__CUDACC__)
-#define CONSTEXPR_EXCEPT_WIN_CUDA
+#define CONSTEXPR_EXCEPT_WIN_CUDA const
 #define C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA __host__
 #else
 #define CONSTEXPR_EXCEPT_WIN_CUDA constexpr
@@ -341,7 +341,7 @@ __host__ __device__
 #endif
 #else
 #if defined(_MSC_VER) && defined(__CUDACC__)
-#define CONSTEXPR_EXCEPT_WIN_CUDA
+#define CONSTEXPR_EXCEPT_WIN_CUDA const
 #define C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA
 #else
 #define CONSTEXPR_EXCEPT_WIN_CUDA constexpr

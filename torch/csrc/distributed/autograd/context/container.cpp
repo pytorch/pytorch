@@ -41,8 +41,16 @@ DistAutogradContainer& DistAutogradContainer::init(int64_t worker_id) {
 
   auto& container = getInstanceInternal();
   TORCH_CHECK(
-      !container.initialized_,
-      "Container is already initialized! Cannot initialize it twice!");
+      !container.initialized_ || (worker_id == container.worker_id_),
+      "Container is already initialized with worker_id: ",
+      container.worker_id_,
+      ", cannot initialize with different worker_id: ",
+      worker_id);
+
+  if (container.initialized_) {
+    LOG(INFO) << "DistAutogradContainer is already initialized";
+    return container;
+  }
 
   container.worker_id_ = worker_id;
   container.next_context_id_ = static_cast<int64_t>(worker_id)

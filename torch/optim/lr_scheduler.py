@@ -1167,13 +1167,13 @@ class OneCycleLR(_LRScheduler):
             raise ValueError("You must define either total_steps OR (epochs AND steps_per_epoch)")
         elif total_steps is not None:
             if total_steps <= 0 or not isinstance(total_steps, int):
-                raise ValueError("Expected non-negative integer total_steps, but got {}".format(total_steps))
+                raise ValueError("Expected positive integer total_steps, but got {}".format(total_steps))
             self.total_steps = total_steps
         else:
             if epochs <= 0 or not isinstance(epochs, int):
-                raise ValueError("Expected non-negative integer epochs, but got {}".format(epochs))
+                raise ValueError("Expected positive integer epochs, but got {}".format(epochs))
             if steps_per_epoch <= 0 or not isinstance(steps_per_epoch, int):
-                raise ValueError("Expected non-negative integer steps_per_epoch, but got {}".format(steps_per_epoch))
+                raise ValueError("Expected positive integer steps_per_epoch, but got {}".format(steps_per_epoch))
             self.total_steps = epochs * steps_per_epoch
         self.step_size_up = float(pct_start * self.total_steps) - 1
         self.step_size_down = float(self.total_steps - self.step_size_up) - 1
