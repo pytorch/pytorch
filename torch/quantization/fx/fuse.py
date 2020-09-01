@@ -1,7 +1,3 @@
-from torch.fx import (
-    GraphModule,
-)
-
 from torch.fx.graph import (
     Graph,
     map_arg,
