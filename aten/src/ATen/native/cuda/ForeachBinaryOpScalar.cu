@@ -6,7 +6,7 @@ namespace at { namespace native {
 
 template<template<class> class Op>
 std::vector<Tensor> foreach_binary_op(TensorList tensors, Scalar scalar) {
-    verify_list(tensors);
+    check_foreach_api_restrictions(tensors);
 
     std::vector<std::vector<at::Tensor>> tensor_lists; 
     std::vector<at::Tensor> vec_res;
@@ -25,7 +25,7 @@ std::vector<Tensor> foreach_binary_op(TensorList tensors, Scalar scalar) {
 
 template<template<class> class Op>
 void foreach_binary_op_(TensorList tensors, Scalar scalar) {
-    verify_list(tensors);
+    check_foreach_api_restrictions(tensors);
 
     std::vector<std::vector<at::Tensor>> tensor_lists; 
     tensor_lists.emplace_back(std::move(tensors.vec()));
@@ -36,7 +36,7 @@ void foreach_binary_op_(TensorList tensors, Scalar scalar) {
 }
 
 std::vector<Tensor> foreach_tensor_add_scalar_kernel_cuda(TensorList tensors, Scalar scalar) {
-    verify_list(tensors);
+    check_foreach_api_restrictions(tensors);
 
     if (!can_use_fast_route(tensors, scalar)) {
         return at::native::foreach_tensor_add_scalar_kernel_slow(tensors, scalar);
@@ -46,7 +46,7 @@ std::vector<Tensor> foreach_tensor_add_scalar_kernel_cuda(TensorList tensors, Sc
 }
 
 void foreach_tensor_add_scalar_kernel_cuda_(TensorList tensors, Scalar scalar) {
-    verify_list(tensors);
+    check_foreach_api_restrictions(tensors);
 
     if (!can_use_fast_route(tensors, scalar)) {
         return at::native::foreach_tensor_add_scalar_kernel_slow_(tensors, scalar);
@@ -56,7 +56,7 @@ void foreach_tensor_add_scalar_kernel_cuda_(TensorList tensors, Scalar scalar) {
 }
 
 std::vector<Tensor> foreach_tensor_sub_scalar_kernel_cuda(TensorList tensors, Scalar scalar) {
-    verify_list(tensors);
+    check_foreach_api_restrictions(tensors);
 
     if (!can_use_fast_route(tensors, scalar)) {
         return at::native::foreach_tensor_sub_scalar_kernel_slow(tensors, scalar);
@@ -66,7 +66,7 @@ std::vector<Tensor> foreach_tensor_sub_scalar_kernel_cuda(TensorList tensors, Sc
 }
 
 void foreach_tensor_sub_scalar_kernel_cuda_(TensorList tensors, Scalar scalar) {
-    verify_list(tensors);
+    check_foreach_api_restrictions(tensors);
 
     if (!can_use_fast_route(tensors, scalar)) {
         return at::native::foreach_tensor_sub_scalar_kernel_slow_(tensors, scalar);
@@ -76,7 +76,7 @@ void foreach_tensor_sub_scalar_kernel_cuda_(TensorList tensors, Scalar scalar) {
 }
 
 std::vector<Tensor> foreach_tensor_mul_scalar_kernel_cuda(TensorList tensors, Scalar scalar) {
-    verify_list(tensors);
+    check_foreach_api_restrictions(tensors);
 
     if (!can_use_fast_route(tensors, scalar)) {
         return at::native::foreach_tensor_mul_scalar_kernel_slow(tensors, scalar);
@@ -86,7 +86,7 @@ std::vector<Tensor> foreach_tensor_mul_scalar_kernel_cuda(TensorList tensors, Sc
 }
 
 void foreach_tensor_mul_scalar_kernel_cuda_(TensorList tensors, Scalar scalar) {
-    verify_list(tensors);
+    check_foreach_api_restrictions(tensors);
 
     if (!can_use_fast_route(tensors, scalar)) {
         return at::native::foreach_tensor_mul_scalar_kernel_slow_(tensors, scalar);
@@ -96,7 +96,7 @@ void foreach_tensor_mul_scalar_kernel_cuda_(TensorList tensors, Scalar scalar) {
 }
 
 std::vector<Tensor> foreach_tensor_div_scalar_kernel_cuda(TensorList tensors, Scalar scalar) {
-    verify_list(tensors);
+    check_foreach_api_restrictions(tensors);
 
     if (!can_use_fast_route(tensors, scalar)) {
         return at::native::foreach_tensor_div_scalar_kernel_slow(tensors, scalar);
@@ -106,7 +106,7 @@ std::vector<Tensor> foreach_tensor_div_scalar_kernel_cuda(TensorList tensors, Sc
 }
 
 void foreach_tensor_div_scalar_kernel_cuda_(TensorList tensors, Scalar scalar) {
-    verify_list(tensors);
+    check_foreach_api_restrictions(tensors);
 
     if (!can_use_fast_route(tensors, scalar)) {
         return at::native::foreach_tensor_div_scalar_kernel_slow_(tensors, scalar);
