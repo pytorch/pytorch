@@ -15110,29 +15110,21 @@ class TestTorchDeviceType(TestCase):
             if dim is None:
                 return torch._min_max(x)[0]
             else:
-                # note: torch._aminmax does not calculate indices, so
-                #   we use indices from torch.min to be able to reuse the testing code
-                min_v, _max_v = torch._aminmax(x, dim, keepdims)
-                _min_v, min_i = torch.min(x, dim, keepdims)
-                return (min_v, min_i)
+                return torch._aminmax(x, dim, keepdims)[0]
 
         def _max_wrapper(x, dim=None, keepdims=False):
             if dim is None:
                 return torch._min_max(x)[1]
             else:
-                # note: torch._aminmax does not calculate indices, so
-                #   we use indices from torch.max to be able to reuse the testing code
-                _min_v, max_v = torch._aminmax(x, dim, keepdims)
-                _max_v, max_i = torch.max(x, dim, keepdims)
-                return (max_v, max_i)
+                return torch._aminmax(x, dim, keepdims)[1]
 
         if self.device_type == "cuda":
             # TODO: enable indices for cuda
-            self._test_minmax_helper(_min_wrapper, np.min, device, dtype, skip_indices=True)
-            self._test_minmax_helper(_max_wrapper, np.max, device, dtype, skip_indices=True)
+            self._test_minmax_helper(_min_wrapper, np.amin, device, dtype, skip_indices=True)
+            self._test_minmax_helper(_max_wrapper, np.amax, device, dtype, skip_indices=True)
         else:
-            self._test_minmax_helper(_min_wrapper, np.min, device, dtype)
-            self._test_minmax_helper(_max_wrapper, np.max, device, dtype)
+            self._test_minmax_helper(_min_wrapper, np.amin, device, dtype)
+            self._test_minmax_helper(_max_wrapper, np.amax, device, dtype)
 
     @dtypes(*product(torch.testing.get_all_dtypes(include_complex=False), torch.testing.get_all_dtypes(include_complex=False)))
     def test_maximum_minimum_type_promotion(self, device, dtypes):
