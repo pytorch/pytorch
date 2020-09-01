@@ -91,22 +91,18 @@ def _quantize_fx(model, qconfig_dict, run_fn=None, run_args=None, inplace=False,
 
     if is_dynamic_quant:
         model = prepare_dynamic_fx(model, qconfig_dict, inplace)
-        # TODO: change inplace to True since the model is already copied in
-        # prepare
-        model = convert_dynamic_fx(model, False, debug)
+        model = convert_dynamic_fx(model, inplace=True, debug=debug)
     else:
         assert run_fn, "Must provide calibration function for post training static quantization"
         assert run_args, "Must provide calibration dataset for post training static quantization"
         model = prepare_fx(model, qconfig_dict, inplace)
         run_fn(model, *run_args)
-        # TODO: change inplace to True since the model is already copied in
-        # prepare
-        model = convert_fx(model, False, debug)
+        model = convert_fx(model, inplace=True, debug=debug)
 
     return model
 
 
-def quantize_fx(model, qconfig_dict, run_fn, run_args, inplace=False, debug=False):
+def quantize_static_fx(model, qconfig_dict, run_fn, run_args, inplace=False, debug=False):
     r"""Quantize the input float symbolically traced GraphModule model with
     post training static quantization
 

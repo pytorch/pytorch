@@ -15,6 +15,7 @@ from torch.quantization import (
     fuse_fx,
     prepare_fx,
     convert_fx,
+    quantize_static_fx,
     quantize_dynamic_fx,
     prepare_dynamic_fx,
     convert_dynamic_fx,
@@ -41,6 +42,10 @@ from torch.testing._internal.common_quantization import (
 from torch.testing._internal.common_distributed import skip_if_not_multigpu
 
 from torch.testing._internal.common_quantization import NodeSpec as ns
+
+from torch.testing._internal.common_quantization import (
+    test_only_eval_fn,
+)
 
 import itertools
 import operator
@@ -169,6 +174,26 @@ class TestQuantizeFx(QuantizationTestCase):
         weight_obs(quantized.root.weight)
         ref_qparams = weight_obs.calculate_qparams()
         self.assertEqual(qparams, ref_qparams)
+
+    def test_inplace_option(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 3)
+
+            def forward(self, x):
+                return self.conv(x)
+
+        model = symbolic_trace(M().eval())
+        qconfig_dict = {'': default_qconfig}
+        non_inplace_model = quantize_static_fx(
+            model, qconfig_dict, test_only_eval_fn, [self.img_data_2d], inplace=False)
+        inplace_model = model
+        quantize_static_fx(
+            inplace_model, qconfig_dict, test_only_eval_fn, [self.img_data_2d], inplace=True)
+        non_inplace_res = non_inplace_model(self.img_data_2d[0][0])
+        inplace_res = inplace_model(self.img_data_2d[0][0])
+        self.assertEqual(non_inplace_res, inplace_res)
 
 
 class TestQuantizeFxOps(QuantizationTestCase):

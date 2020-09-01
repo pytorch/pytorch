@@ -144,10 +144,9 @@ class Quantizer:
                 self.qconfig_map[node.name] = get_qconfig(self.modules[node.target])
 
     def _prepare(self, model, qconfig_dict, inplace, is_dynamic_quant):
-        assert not inplace, 'inplace prepare is not supported yet'
-        input_root = model.root
         if not inplace:
-            input_root = copy.deepcopy(input_root)
+            model = copy.deepcopy(model)
+        input_root = model.root
 
         input_graph = model.graph
         self.is_dynamic_quant = is_dynamic_quant
@@ -239,9 +238,9 @@ class Quantizer:
                     observed.add(node.name)
         observed_graph.output(load_arg(input_graph.result))
 
-        observed = GraphModule(input_root, observed_graph)
-        self.save_state(observed)
-        return observed
+        model.__init__(input_root, observed_graph)
+        self.save_state(model)
+        return model
 
     def save_state(self, observed):
         observed._activation_post_process_map = self.activation_post_process_map
@@ -282,26 +281,24 @@ class Quantizer:
                             weight_observer_module()
         return
 
-    def _convert(self, observed, inplace=False, debug=False, is_dynamic_quant=False):
-        assert not inplace, 'inplace convert is not supported yet'
-        self.restore_state(observed)
+    def _convert(self, model, inplace=False, debug=False, is_dynamic_quant=False):
+        if not inplace:
+            model = copy.deepcopy(model)
+        self.restore_state(model)
         self.is_dynamic_quant = is_dynamic_quant
         # run weight observers before inserting quant dequant nodes
         # for dynamic quantization
         if self.is_dynamic_quant:
-            self._run_weight_observers(observed)
+            self._run_weight_observers(model)
 
         # move to cpu since we only have quantized cpu kernels
-        observed.eval().cpu()
-        observed_root = observed.root
-        observed_graph = observed.graph
-        if not inplace:
-            observed_root = copy.deepcopy(observed_root)
+        model.eval().cpu()
+        model_root = model.root
+        model_graph = model.graph
+        self.modules = dict(model_root.named_modules())
 
-        self.modules = dict(observed_root.named_modules())
-
-        matches = self._find_matches(observed.graph, self.modules, self.patterns)
-        quants = self._find_quants(observed.graph, matches)
+        matches = self._find_matches(model.graph, self.modules, self.patterns)
+        quants = self._find_quants(model.graph, matches)
         self.quantized_graph = Graph()
         env = {}
         quant_env = {}
@@ -376,7 +373,7 @@ class Quantizer:
                 else:
                     raise Exception("partially quantized inputs in list not handled yet")
 
-        for node in observed_graph.nodes:
+        for node in model_graph.nodes:
             root_node, matched, obj, qconfig = matches.get(node.name, (None, None, None, None))
             if root_node is node:
                 result = obj.convert(self, node, load_arg)
@@ -458,15 +455,16 @@ class Quantizer:
             # dequantize inputs for the node that are not quantized
             env[node.name] = self.quantized_graph.node_copy(node, load_non_quantized)
 
-        self.quantized_graph.output(load_non_quantized(observed_graph.result))
+        self.quantized_graph.output(load_non_quantized(model_graph.result))
 
         to_be_removed = []
-        for name, _ in observed_root.named_modules():
+        for name, _ in model_root.named_modules():
             if name.split('.')[-1].startswith('activation_post_process_'):
                 to_be_removed.append(name)
         for n in to_be_removed:
-            delattr(observed_root, n)
-        return GraphModule(observed_root, self.quantized_graph)
+            delattr(model_root, n)
+        model.__init__(model_root, self.quantized_graph)
+        return model
 
     # Trace back from the weight node util we hit getattr, reconstruct the graph module
     # with the traced nodes and run the graph module to pack the weight. then replace
@@ -514,10 +512,11 @@ class Quantizer:
                 # copy other nodes
                 env[node.name] = folded_graph.node_copy(node, load_arg)
         folded_graph.output(load_arg(quantized_graph.result))
-        return GraphModule(quantized_root, folded_graph)
+        quantized.__init__(quantized_root, folded_graph)
+        return quantized
 
-    def convert(self, observed, inplace=False, debug=False, is_dynamic=False):
-        quantized = self._convert(observed, inplace, debug, is_dynamic)
+    def convert(self, model, inplace=False, debug=False, is_dynamic=False):
+        quantized = self._convert(model, inplace, debug, is_dynamic)
         if not debug:
             quantized = self._fold_weight(quantized)
         return quantized

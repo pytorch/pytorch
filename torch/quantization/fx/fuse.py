@@ -17,9 +17,9 @@ from .fusion_patterns import *  # noqa: F401
 import copy
 class Fuser:
     def fuse(self, model, inplace=False):
-        input_root = model.root
         if not inplace:
-            input_root = copy.deepcopy(input_root)
+            model = copy.deepcopy(model)
+        input_root = model.root
         input_graph = model.graph
         self.modules = dict(input_root.named_modules())
 
@@ -41,7 +41,9 @@ class Fuser:
             # node matched in patterns and is not root is removed here
 
         self.fused_graph.output(load_arg(input_graph.result))
-        return GraphModule(input_root, self.fused_graph)
+        # inplace modification
+        model.__init__(input_root, self.fused_graph)
+        return model
 
     def _find_matches(self, root, graph, patterns):
         modules = dict(root.named_modules())
