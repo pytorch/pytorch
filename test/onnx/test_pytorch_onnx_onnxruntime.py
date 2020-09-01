@@ -942,7 +942,7 @@ class TestONNXRuntime(unittest.TestCase):
         class TrueDivModule(torch.nn.Module):
             def forward(self, x, y):
                 # Add transpose to hide shape/type information
-                # Otherwise shape and type is still avaiable from input.
+                # Otherwise shape and type are still avaiable from input.
                 x = x.transpose(1, 2)
                 y = y.transpose(1, 2)
                 return torch.true_divide(x, y)
@@ -952,12 +952,20 @@ class TestONNXRuntime(unittest.TestCase):
 
         prev_default = torch.get_default_dtype()
 
+        # 1. x,y are int, and output is float.
+        #    This can be handled by the default case, where both are cast to float.
+        #    It works even if type of x, y are unknown.
         torch.set_default_dtype(torch.float)
         self.run_test(torch.jit.script(TrueDivModule()), (x, y))
 
+        # 2. x,y are int, and output is double.
+        #    This can be handled by the default case, where both are cast to double.
+        #    It works even if type of x, y are unknown.
         torch.set_default_dtype(torch.double)
         self.run_test(torch.jit.script(TrueDivModule()), (x, y))
 
+        # 3. x is int, y is double, and output is double.
+        #    This can only be handled when both type of x and y are known.
         torch.set_default_dtype(prev_default)
         x = torch.randn(2, 3, 4).to(torch.int)
         y = torch.arange(1, 2 * 3 * 4 + 1).reshape(2, 3, 4).to(torch.double)
