@@ -8,11 +8,26 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <type_traits>
+#include <unordered_map>
 
 namespace torch {
 namespace jit {
 namespace fuser {
 namespace cuda {
+
+// Note, the uniqueness of the ide generated for a given input set is only local
+// to the instance of `InputsIdLookup`.
+class InputsIdLookup {
+ public:
+  // encode each unique input sets to an unique id;
+  size_t getCode(const at::ArrayRef<IValue>& inputs);
+
+ private:
+  size_t current_id_ = 1;
+
+  // TODO: change this to a trie for efficiency;
+  std::unordered_map<std::string, size_t> encoding_lookup_;
+};
 
 // [ Note -- 2 level cache implementation ]
 //
@@ -65,7 +80,8 @@ class FusionExecutorCache {
 
   // Execute fusion graph with given inputs, create `FusionExecutor` as needed;
   std::vector<at::Tensor> runFusionWithInputs(
-      const at::ArrayRef<IValue>& inputs);
+      const at::ArrayRef<IValue>& inputs,
+      size_t unique_id);
 
  private:
   // device_ where compiled binaries are loaded on & inputs are expected to
@@ -102,6 +118,9 @@ class FusionExecutorCache {
   std::unique_ptr<FusionExecutor> pw_fusion_executor_cache_;
   std::unordered_map<ReductionParams, FusionExecutor, ReductionParamsHash>
       red_fusion_executor_cache_;
+
+  // short cut to FusionExecutor for input set encoded with id;
+  std::unordered_map<size_t, FusionExecutor*> code_to_fe_lookup_;
 };
 
 class GraphCache {
@@ -146,7 +165,6 @@ class GraphCache {
         const at::ArrayRef<IValue>& inputs,
         const std::vector<size_t>& reduction_axes);
 
-    // bool operator==(const InputsRequirement& other);
     bool complyWith(const InputsRequirement& expect);
 
     // helper function used at run-time to check whether a common permutation is
@@ -157,7 +175,7 @@ class GraphCache {
   // construct FusionExecutorCache per InputsRequirement.
   // This function makes sure that we properly insert both `input_stacks_` and
   // `fe_cache_` at the same time.
-  FusionExecutorCache* createFusionExecutorCache(
+  FusionExecutorCache* appendFusionExecutorCache(
       const InputsRequirement& input_stack);
 
  private:
@@ -166,10 +184,16 @@ class GraphCache {
   // TODO: poor name, we should use `eliminated_axes_` instead;
   at::DimVector reduction_axes_;
 
+  // short cut to index of stack for input set encoded with id;
+  std::unordered_map<size_t, size_t> code_to_index_lookup_;
+
   // TODO: we should really hash instead of iterative check. Optimize later...
   //       unordered_map<InputsRequirement, FusionExecutorCache>;
   std::vector<InputsRequirement> input_stacks_;
   std::vector<std::unique_ptr<FusionExecutorCache>> fe_cache_;
+
+  // inputs to unique_id lookup table;
+  InputsIdLookup inputs_id_lookup_;
 };
 
 } // namespace cuda

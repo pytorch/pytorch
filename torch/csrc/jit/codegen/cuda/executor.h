@@ -36,21 +36,44 @@ class TORCH_CUDA_API FusionExecutor : public NonCopyable {
   std::vector<at::Tensor> runFusion(
       const at::ArrayRef<IValue>& inputs,
       const std::vector<at::Tensor>& outputs,
-      const LaunchParams& launch_constraints = LaunchParams());
+      const LaunchParams& launch_constraints = LaunchParams(),
+      const c10::optional<size_t>& opt_code = c10::nullopt);
 
   std::vector<at::Tensor> runFusion(
       const at::ArrayRef<IValue>& inputs,
-      const LaunchParams& launch_constraints = LaunchParams()) {
-    return runFusion(inputs, {}, launch_constraints);
+      const LaunchParams& launch_constraints = LaunchParams(),
+      const c10::optional<size_t>& opt_code = c10::nullopt) {
+    return runFusion(inputs, {}, launch_constraints, opt_code);
   }
 
   // function to query whether a `FusionExecutor` has a compiled kernel to
   // execute
   bool compiled() const {
-    return compiled_;
+    return fusion_id_ != -1;
+  };
+
+  // TODO: strides would also be important when we handle permutations in
+  //       codegen.
+  // struct used to hold necessary information to launch compiled kernel on a
+  // given input set.
+  struct ExecutorEntry {
+    bool init = false;
+    LaunchParams launch_params;
+    std::vector<std::vector<int64_t>> output_sizes;
+    std::vector<at::ScalarType> output_types;
+    std::vector<std::vector<int64_t>> empty_buffer_sizes;
+    std::vector<at::ScalarType> empty_buffer_types;
+    std::vector<std::vector<int64_t>> zero_buffer_sizes;
+    std::vector<at::ScalarType> zero_buffer_types;
+    uint64_t rand_offset;
   };
 
  private:
+  struct GlobalBuffers {
+    std::vector<at::Tensor> empty_buffers;
+    std::vector<at::Tensor> zero_buffers;
+  };
+
   std::string kernelName() const {
     std::stringstream ss;
     ss << "kernel" << fusion_id_;
@@ -75,13 +98,13 @@ class TORCH_CUDA_API FusionExecutor : public NonCopyable {
       bool align_padding = false,
       uint64_t total = 0);
 
-  std::vector<at::Tensor> allocGlobalVals(EvaluationContext& ec);
+  // return a pair of vector of tensors, where tensors in the first vector are
+  // not initialized, while the second vector contains zero-initiliazed tensors
+  GlobalBuffers allocGlobalVals(EvaluationContext& ec);
 
   std::vector<at::Tensor> allocOutputs(EvaluationContext& ec);
 
  private:
-  bool compiled_ = false;
-
   Fusion fusion_;
 
   bool has_block_reductions = false;
@@ -100,6 +123,10 @@ class TORCH_CUDA_API FusionExecutor : public NonCopyable {
   static int fusion_id_counter_;
 
   GpuLower lowered_;
+
+  // lookup table to take short cut to retrieve recorded information in order to
+  // launch kernels without re-inference parameters.
+  std::unordered_map<size_t, ExecutorEntry> executor_entry_lookup_;
 };
 
 } // namespace cuda

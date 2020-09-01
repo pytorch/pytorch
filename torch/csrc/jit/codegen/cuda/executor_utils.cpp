@@ -135,8 +135,6 @@ void validateKernelInputs(
     Fusion* fusion,
     const at::ArrayRef<IValue>& inputs,
     c10::Device device) {
-  // This is necessary as we were traversing the fusion graph later in the check
-  FusionGuard fg(fusion);
   // Check inputs
   TORCH_INTERNAL_ASSERT(
       inputs.size() == fusion->inputs().size(),
@@ -315,7 +313,6 @@ NvrtcFunction nvrtcCompile(
   const char* disable_fma = getenv("PYTORCH_CUDA_FUSER_DISABLE_FMA");
   // int disable_fma_flag = disable_fma ? atoi(disable_fma) : 0;
   if (disable_fma && atoi(disable_fma)) {
-    printf("disabling fmad\n");
     args.push_back("--fmad=false");
   }
 
