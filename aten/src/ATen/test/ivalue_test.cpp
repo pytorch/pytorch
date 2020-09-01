@@ -139,10 +139,10 @@ TEST(IValueTest, FutureExceptions) {
     }
   });
   ivalue::Future::FutureError err("My Error");
-  f3->setError(std::move(err));
+  f3->setError(std::make_exception_ptr(err));
   ASSERT_EQ(calledTimes, 1);
   ASSERT_TRUE(f3->hasError());
-  ASSERT_EQ(std::string(f3->error()->what()), std::string("My Error"));
+  ASSERT_EQ(f3->tryRetrieveErrorMessage(), std::string("My Error"));
 }
 
 TEST(IValueTest, ValueEquality) {
