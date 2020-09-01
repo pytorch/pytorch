@@ -380,11 +380,11 @@ void testKernelSumAllAxes() {
     parseIR(graph_string, &*graph);
 
     auto o = at::empty({}, TensorOptions(kCPU));
-    c10::optional<c10::ScalarType> dtype;
+    c10::ScalarType dtype;
     if (scalar_type != ScalarType::None) {
       dtype = static_cast<c10::ScalarType>(scalar_type);
     }
-    auto ref = a.sum(/*dtype=*/dtype);
+    auto ref = a.sum(c10::nullopt, false, /*dtype=*/dtype);
     TensorExprKernel k(graph);
     std::vector<at::Tensor> inputs = {a};
     Stmt* s = k.getCodeGenStmt();

@@ -2959,18 +2959,18 @@
   variants: function, method
   device_guard: False
 
-- func: sum(Tensor self, *, ScalarType? dtype=None) -> Tensor
-  use_c10_dispatcher: full
-  variants: function, method
+# - func: sum(Tensor self, ScalarType dtype) -> Tensor
+#   use_c10_dispatcher: full
+#   variants: function, method
 
-- func: sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+- func: sum.dim_IntList(Tensor self, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
 
 - func: sum.dim_DimnameList(Tensor self, Dimname[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
 
-- func: sum.IntList_out(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+- func: sum.IntList_out(Tensor self, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
 
 - func: sum.DimnameList_out(Tensor self, Dimname[1] dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
 

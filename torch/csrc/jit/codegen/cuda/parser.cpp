@@ -483,7 +483,7 @@ class IrParser {
 
     {
       auto ptr_op = getOperatorForLiteral(
-          "aten::sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, int? dtype=None) -> (Tensor)");
+          "aten::sum.dim_IntList(Tensor self, int[1]? dim=None, bool keepdim=False, *, int? dtype=None) -> (Tensor)");
       registerParseRule(
           ptr_op,
           [](const Node* node,

@@ -6,6 +6,7 @@
 #include <ATen/WrapDimUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/native/ReduceOpsUtils.h>
+#include <ATen/native/Resize.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/native/TensorDimApply.h>
@@ -264,31 +265,50 @@ static ScalarType get_dtype(Tensor& result, const Tensor& self, optional<ScalarT
   return src_type;
 }
 
-Tensor& sum_out(Tensor& result, const Tensor& self, IntArrayRef dim,
+Tensor& sum_out(Tensor& result, const Tensor& self, c10::optional<IntArrayRef> opt_dim,
                        bool keepdim, optional<ScalarType> opt_dtype) {
   ScalarType dtype = get_dtype(result, self, opt_dtype, true);
-  auto iter = make_reduction("sum", result, self, dim, keepdim, dtype);
-  if (iter.numel() == 0) {
-    result.zero_();
+  if (opt_dim.has_value() && opt_dim.value().size() == 0) {
+    result.resize_as_(self);
+    result.copy_(self);
+
   } else {
-    sum_stub(iter.device_type(), iter);
+    auto iter = make_reduction("sum", result, self, opt_dim.value_or(IntArrayRef({})), keepdim, dtype);
+    if (iter.numel() == 0) {
+      result.zero_();
+    } else {
+      sum_stub(iter.device_type(), iter);
+    }
   }
   return result;
 }
 
-Tensor sum(const Tensor &self, c10::optional<ScalarType> dtype) {
-  return at::native::sum(self, std::vector<int64_t>{}, false, dtype);
-}
-Tensor sum(const Tensor& self, IntArrayRef dim, bool keepdim, c10::optional<ScalarType> dtype) {
-  Tensor result;
-  return at::native::sum_out(result, self, dim, keepdim, dtype);
+// Tensor sum(const Tensor &self, ScalarType dtype) {
+//   return at::native::sum(self, c10::nullopt, false, dtype);
+// }
+
+Tensor sum(const Tensor& self, c10::optional<IntArrayRef> opt_dim, bool keepdim, c10::optional<ScalarType> dtype) {
+  TensorOptions options;
+  options.dtype(self.dtype()).device(self.device());
+  Tensor result = at::empty({0}, options);
+  return at::native::sum_out(result, self, opt_dim, keepdim, dtype);
 }
 Tensor sum(const Tensor& self, DimnameList dim, bool keepdim, c10::optional<ScalarType> dtype) {
+  // TODO: dim=None gets dispatched to this function, and the following if statement checks for that.
+  //       Need to find out how to make dim=None dispatch to the correct function in the first place.
+  if (dim.size() == 1 && dim[0].type() == NameType::WILDCARD) {
+    return at::sum(self, c10::nullopt, keepdim, dtype);
+  }
   return at::sum(self, dimnames_to_positions(self, dim), keepdim, dtype);
 }
 
 Tensor& sum_out(Tensor& result, const Tensor& self, DimnameList dim,
                 bool keepdim, optional<ScalarType> opt_dtype) {
+  // TODO: dim=None gets dispatched to this function, and the following if statement checks for that.
+  //       Need to find out how to make dim=None dispatch to the correct function in the first place.
+  if (dim.size() == 1 && dim[0].type() == NameType::WILDCARD) {
+    return at::sum_out(result, self, c10::nullopt, keepdim, opt_dtype);
+  }
   return at::sum_out(result, self, dimnames_to_positions(self, dim), keepdim, opt_dtype);
 }
 

@@ -48,9 +48,9 @@ namespace at {
 // if not use the same mechanism. In order to accomplish that we might have to
 // do some refactoring.
 
-Tensor sum_batching_rule(const Tensor& self, IntArrayRef dims, bool keepdim, optional<ScalarType> dtype) {
+Tensor sum_batching_rule(const Tensor& self, optional<IntArrayRef> opt_dims, bool keepdim, optional<ScalarType> dtype) {
   auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
-  auto dims_physical = self_physical.getPhysicalDims(dims);
+  auto dims_physical = opt_dims.has_value() ? self_physical.getPhysicalDims(opt_dims.value()) : opt_dims;
   auto result = at::sum(self_physical.tensor(), dims_physical, keepdim, dtype);
   return self_physical.newLogicalFromPhysical(result);
 }

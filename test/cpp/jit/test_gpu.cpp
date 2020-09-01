@@ -2857,7 +2857,7 @@ void testGPU_FusionReduction5() {
   fe.compileFusion(&fusion);
   auto outputs = fe.runFusion({input});
 
-  auto aten_output = input.sum({1, 2});
+  auto aten_output = input.sum(std::vector<int64_t>({1, 2}));
   TORCH_CHECK(aten_output.allclose(outputs[0]));
 }
 
@@ -4252,7 +4252,7 @@ void testGPU_FusionGridReduction6() {
   fe.compileFusion(&fusion);
   fe.runFusion({input}, {cg_output});
 
-  auto aten_output = input.sum({1, 2});
+  auto aten_output = input.sum(std::vector<int64_t>({1, 2}));
   TORCH_CHECK(aten_output.allclose(cg_output));
 }
 

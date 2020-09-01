@@ -438,7 +438,7 @@ TORCH_LIBRARY_IMPL(aten, Named, m) {
   m.impl("sub.out", CppFunction::makeFallthrough());
   m.impl("sub_.Scalar", CppFunction::makeFallthrough());
   m.impl("sub_.Tensor", CppFunction::makeFallthrough());
-  m.impl("sum", CppFunction::makeFallthrough());
+  // m.impl("sum", CppFunction::makeFallthrough());
   m.impl("sum.DimnameList_out", CppFunction::makeFallthrough());
   m.impl("sum.IntList_out", CppFunction::makeFallthrough());
   m.impl("sum.dim_DimnameList", CppFunction::makeFallthrough());

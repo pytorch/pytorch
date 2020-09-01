@@ -1254,7 +1254,7 @@ class ShapePropagator {
     static const register_formula_for
         all_reduce_ops_with_integer_upcast_and_dtype{
             {
-                "aten::sum(Tensor self, *, int? dtype) -> Tensor",
+                // "aten::sum(Tensor self, *, int? dtype) -> Tensor",
                 "aten::prod(Tensor self, *, int? dtype) -> Tensor",
             },
             [](Node* node) -> type_vec_t {
@@ -2007,13 +2007,9 @@ class ShapePropagator {
       node->output()->setType(
           tp->withSizesStrides(sizes, tp->strides().concrete_sizes().value()));
       return true;
-    } else if (node->matches(
-                   "aten::sum(Tensor self, *, int? dtype) -> Tensor")) {
-      node->output()->setType(tensor_types.at(0)->withSizes({}));
-      return true;
     } else if (
         node->matches(
-            "aten::sum(Tensor self, int[] dim, bool keepdim, *, int? dtype) -> Tensor",
+            "aten::sum(Tensor self, int[1]? dim, bool keepdim, *, int? dtype) -> Tensor",
             /*const_inputs=*/{attr::dim, attr::keepdim})) {
       auto& tp = tensor_types.at(0);
       auto sizes = tp->sizes().concrete_sizes().value();

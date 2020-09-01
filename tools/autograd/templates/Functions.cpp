@@ -261,16 +261,21 @@ Tensor unsqueeze_multiple(const Tensor & t, IntArrayRef dim, size_t n_dims) {
     return res;
 }
 
-Tensor sum_backward(const Tensor & grad, IntArrayRef sizes, IntArrayRef dims, bool keepdim) {
-  if (!keepdim && sizes.size() > 0) {
-    if (dims.size()==1) {
-      return grad.unsqueeze(dims[0]).expand(sizes);
+Tensor sum_backward(const Tensor & grad, IntArrayRef sizes, optional<IntArrayRef> opt_dim, bool keepdim) {
+  if (opt_dim.has_value()) {
+    if (!keepdim && sizes.size() > 0) {
+      IntArrayRef& dims = opt_dim.value();
+      if (dims.size()==1) {
+        return grad.unsqueeze(dims[0]).expand(sizes);
+      } else {
+        Tensor res = unsqueeze_multiple(grad, dims, sizes.size());
+        return res.expand(sizes);
+      }
     } else {
-      Tensor res = unsqueeze_multiple(grad, dims, sizes.size());
-      return res.expand(sizes);
+      return grad.expand(sizes);
     }
   } else {
-    return grad.expand(sizes);
+    return grad;
   }
 }
 

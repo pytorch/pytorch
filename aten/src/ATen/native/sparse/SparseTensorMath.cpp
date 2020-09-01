@@ -1201,7 +1201,7 @@ Tensor _sparse_sum(const SparseTensor& input) {
 Tensor _sparse_sum(const SparseTensor& input, ScalarType dtype) {
   // don't have to do a conversion to the correct dtype first
   // just need to setup the accumulator correctly
-  return input.coalesce().values().sum(dtype);
+  return input.coalesce().values().sum(c10::nullopt, false, dtype);
 }
 
 Tensor _sparse_sum(const SparseTensor& input, IntArrayRef dims_to_sum, ScalarType dtype) {
