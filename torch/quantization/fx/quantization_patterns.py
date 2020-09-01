@@ -7,6 +7,8 @@ from .pattern_utils import (
     register_quant_pattern,
     register_dynamic_quant_pattern,
 )
+from .utils import _parent_name
+
 from abc import ABC, abstractmethod
 import operator
 
