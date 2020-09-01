@@ -10,10 +10,11 @@ import torch.multiprocessing as mp
 from torch.fx import symbolic_trace
 
 # graph mode quantization based on fx
-from torch.quantization._quantize_fx import (
-    Quantizer,
-    fuse,
+from torch.quantization import (
     QuantType,
+    fuse_fx,
+    prepare_fx,
+    convert_fx,
 )
 
 from torch.quantization import (
@@ -654,11 +655,10 @@ class TestQuantizeFxOps(QuantizationTestCase):
         m = M()
         original = symbolic_trace(m)
         # nothing to fuse so skipping the fuse step
-        quantizer = Quantizer()
         qconfig_dict = {'': default_qconfig}
-        prepared = quantizer.prepare(original, qconfig_dict)
+        prepared = prepare_fx(original, qconfig_dict)
         # not runnable
-        quantized = quantizer.convert(prepared)
+        quantized = convert_fx(prepared)
 
         # This checks that the dequantize from the output of first conv
         # is being propagated to the end, so that we don't insert extra
@@ -750,11 +750,10 @@ class TestQuantizeFxOps(QuantizationTestCase):
         m = M()
         original = symbolic_trace(m)
         # nothing to fuse so skipping the fuse step
-        quantizer = Quantizer()
         qconfig_dict = {'': default_qconfig}
-        prepared = quantizer.prepare(original, qconfig_dict)
+        prepared = prepare_fx(original, qconfig_dict)
         # not runnable
-        quantized = quantizer.convert(prepared)
+        quantized = convert_fx(prepared)
 
         # This checks that the dequantize from the output of first conv
         # is being propagated to the end, so that we don't insert extra
@@ -817,9 +816,8 @@ class TestQuantizeFxModels(QuantizationTestCase):
         if mode != 'static':
             model.train()
 
-        graph_module = fuse(graph_module)
-        quantizer = Quantizer()
-        prepared = quantizer.prepare(graph_module, qconfig_dict)
+        graph_module = fuse_fx(graph_module)
+        prepared = prepare_fx(graph_module, qconfig_dict)
 
         if mode == 'ddp':
             mp.spawn(run_ddp,
@@ -837,7 +835,7 @@ class TestQuantizeFxModels(QuantizationTestCase):
 
         # print('after observation root:', prepared.root)
 
-        qgraph = quantizer.convert(prepared)
+        qgraph = convert_fx(prepared)
         # print('after quantization root:', qgraph.root)
         # print('after quantization code:', qgraph.src)
         qgraph.eval()
