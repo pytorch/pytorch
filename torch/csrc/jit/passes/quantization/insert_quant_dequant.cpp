@@ -392,6 +392,11 @@ void insertQuantizationOps(
     }
     return;
   }
+  TORCH_CHECK(
+      qparam_names.size() != 0,
+      "Unexpected number of qparams, please make sure PlaceHolder "
+      "Observer is configured correctly");
+
   if (quant_type == QuantType::DYNAMIC) {
     if (getObserverDtype(module, observer_out) == at::ScalarType::Half) {
       dequant = insertFP16CastOps(g, observer_out);
@@ -410,7 +415,6 @@ void insertQuantizationOps(
         insertQuantDequantNodes(self, observer, qparam_names, quantize_func);
   }
   observer_out->replaceAllUsesWith(original_val);
-
   original_val->replaceAllUsesAfterNodeWith(dequant, dequant->output());
 }
 

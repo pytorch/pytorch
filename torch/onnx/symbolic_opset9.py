@@ -138,6 +138,9 @@ def floor_divide(g, self, other):
     return out
 
 
+def floordiv(g, self, other):
+    return floor_divide(g, self, other)
+
 # Division where both inputs are cast to floating types
 # If both inputs are floating, performs div as usual
 # If only one input is a floating type, the other input is cast to its type

@@ -56,7 +56,7 @@ Tensor &addmv_out(Tensor& result, const Tensor &self, const Tensor &mat, const T
   if (mat.numel() == 0) {
     // By definition, when beta==0, values in self should be ignored. nans and infs
     // should not propagate
-    if (beta.toDouble() == 0.0) {
+    if (beta.toComplexDouble() == 0.0) {
       result.zero_();
     } else {
       at::native::mul_out(result, self, at::native::scalar_tensor(beta, at::device(at::kCPU).dtype(self.scalar_type())));
