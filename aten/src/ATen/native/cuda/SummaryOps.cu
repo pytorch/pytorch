@@ -147,7 +147,7 @@ __global__ void kernelHistogram1D(
          SHARED_MEM,                                                       \
          getCurrentCUDAStream()>>>(                    \
           aInfo, pInfo, bInfo, nbins, minvalue, maxvalue, totalElements, WEIGHTS_OP);        \
-  AT_ASSERTM(cudaGetLastError() == cudaSuccess, "kernelHistogram1D failed");
+  TORCH_INTERNAL_ASSERT(cudaGetLastError() == cudaSuccess, "kernelHistogram1D failed");
 
 #define HANDLE_SWITCH_CASE(mType, getOp)                                   \
   switch (mType) {                                                         \
@@ -165,7 +165,7 @@ inline int64_t getFreeGlobalMemory() {
   // no need to use `cudaSetDevice`
   size_t free_mem, total_mem;
   cudaMemGetInfo(&free_mem, &total_mem);
-  AT_ASSERTM(
+  TORCH_INTERNAL_ASSERT(
       cudaGetLastError() == cudaSuccess,
       "CUDA_tensor_histogram failed to get free global memory");
   return static_cast<int64_t>(free_mem);

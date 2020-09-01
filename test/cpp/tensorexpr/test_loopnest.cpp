@@ -1706,5 +1706,267 @@ void testUnrollWithLet() {
   }
 }
 
+void testNormalizeStartPositive() {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int x = 50; x < 100; x++) {
+  //     A[x] = B[x];
+  //     B[x] = x * 2;
+  //   }
+  const int kTotalSize = 50;
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kInt);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kInt);
+  VarHandle x("x", kInt);
+  auto for_body =
+      Block::make({Store::make(a_buf, {x}, Load::make(kInt, b_buf, {x}, 1), 1),
+                   Store::make(b_buf, {x}, x * 2)});
+  auto for_stmt = For::make(x, 50, 100, for_body);
+  Block::make({for_stmt});
+
+  For* normalized = nullptr;
+  LoopNest::normalize(for_stmt, &normalized);
+
+  auto result = IRSimplifier::simplify(normalized);
+  std::ostringstream oss;
+  oss << *result;
+  const std::string& expected_ir =
+      R"IR(
+        # CHECK: for (int x = 0; x < 50; x++) {
+        # CHECK:   A[x + 50] = B[x + 50];
+        # CHECK:   B[x + 50] = 2 * (x + 50);
+      )IR";
+  torch::jit::testing::FileCheck().run(expected_ir, oss.str());
+}
+
+void testNormalizeStartNegative() {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int x = -50; x < 100; x++) {
+  //     A[x + 50] = B[x + 50];
+  //     B[x + 50] = x * 2;
+  //   }
+  const int kTotalSize = 150;
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kInt);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kInt);
+  VarHandle x("x", kInt);
+  auto for_body = Block::make(
+      {Store::make(a_buf, {x + 50}, Load::make(kInt, b_buf, {x + 50}, 1), 1),
+       Store::make(b_buf, {x + 50}, x * 2)});
+  auto for_stmt = For::make(x, -50, 100, for_body);
+  Block::make({for_stmt});
+
+  For* normalized = nullptr;
+  LoopNest::normalize(for_stmt, &normalized);
+
+  auto result = IRSimplifier::simplify(normalized);
+  std::ostringstream oss;
+  oss << *result;
+  const std::string& expected_ir =
+      R"IR(
+        # CHECK: for (int x = 0; x < 150; x++) {
+        # CHECK:   A[x] = B[x];
+        # CHECK:   B[x] = 2 * (x - 50);
+      )IR";
+  torch::jit::testing::FileCheck().run(expected_ir, oss.str());
+}
+
+void testNormalizeStartZero() {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int x = 0; x < 100; x++) {
+  //     A[x] = B[x];
+  //     B[x] = x * 2;
+  //   }
+  // Should not be modified.
+
+  const int kTotalSize = 100;
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kInt);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kInt);
+  VarHandle x("x", kInt);
+  auto for_body =
+      Block::make({Store::make(a_buf, {x}, Load::make(kInt, b_buf, {x}, 1), 1),
+                   Store::make(b_buf, {x}, x * 2)});
+  auto for_stmt = For::make(x, 0, 100, for_body);
+  Block::make({for_stmt});
+
+  For* normalized = nullptr;
+  LoopNest::normalize(for_stmt, &normalized);
+
+  auto result = IRSimplifier::simplify(normalized);
+  std::ostringstream oss;
+  oss << *result;
+  const std::string& expected_ir =
+      R"IR(
+        # CHECK: for (int x = 0; x < 100; x++) {
+        # CHECK:   A[x] = B[x];
+        # CHECK:   B[x] = 2 * x;
+      )IR";
+  torch::jit::testing::FileCheck().run(expected_ir, oss.str());
+}
+
+void testNormalizeStartVariable() {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int x = y; x < 100; x++) {
+  //     A[x] = B[x];
+  //     B[x] = x * 2;
+  //   }
+  // Should not be modified.
+
+  const int kTotalSize = 100;
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kInt);
+  BufHandle b_buf("B", {ExprHandle(kTotalSize)}, kInt);
+  VarHandle x("x", kInt);
+  VarHandle y("y", kInt);
+  auto for_body =
+      Block::make({Store::make(a_buf, {x}, Load::make(kInt, b_buf, {x}, 1), 1),
+                   Store::make(b_buf, {x}, x * 2)});
+  auto for_stmt = For::make(x, y, 100, for_body);
+  Block::make({for_stmt});
+
+  For* normalized = nullptr;
+  LoopNest::normalize(for_stmt, &normalized);
+
+  auto result = IRSimplifier::simplify(normalized);
+  std::ostringstream oss;
+  oss << *result;
+  const std::string& expected_ir =
+      R"IR(
+        # CHECK: for (int x = y; x < 100; x++) {
+        # CHECK:   A[x] = B[x];
+        # CHECK:   B[x] = 2 * x;
+      )IR";
+  torch::jit::testing::FileCheck().run(expected_ir, oss.str());
+}
+
+void testNormalizeOnNestedOuterLoop() {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int x = 50; x < 100; x++) {
+  //     for (int y = 10; y < 100; y++) {
+  //       A[x] = A[x] + B[y] + y * 2;
+  //     }
+  //   }
+
+  BufHandle a_buf("A", {ExprHandle(50)}, kInt);
+  BufHandle b_buf("B", {ExprHandle(100)}, kInt);
+  VarHandle x("x", kInt);
+  VarHandle y("y", kInt);
+  auto inner_for_body = Store::make(
+      a_buf,
+      {x},
+      Load::make(a_buf, {x}, 1) + Load::make(b_buf, {y}, 1) + y * 2,
+      1);
+  auto inner_for = For::make(y, 10, 100, inner_for_body);
+  auto for_stmt = For::make(x, 50, 100, inner_for);
+  Block::make({for_stmt});
+
+  For* normalized = nullptr;
+  LoopNest::normalize(for_stmt, &normalized);
+
+  auto result = IRSimplifier::simplify(normalized);
+  std::ostringstream oss;
+  oss << *result;
+  const std::string& expected_ir =
+      R"IR(
+        # CHECK: for (int x = 0; x < 50; x++) {
+        # CHECK:   for (int y = 10; y < 100; y++) {
+        # CHECK:     A[x + 50] = ((B[y]) + (A[x + 50])) + 2 * y;
+      )IR";
+  torch::jit::testing::FileCheck().run(expected_ir, oss.str());
+}
+
+void testNormalizeOnNestedInnerLoop() {
+  KernelScope kernel_scope;
+
+  // Input IR:
+  //   for (int x = 50; x < 100; x++) {
+  //     for (int y = 10; y < 100; y++) {
+  //       A[x] = A[x] + B[y] + y * 2;
+  //     }
+  //   }
+
+  BufHandle a_buf("A", {ExprHandle(50)}, kInt);
+  BufHandle b_buf("B", {ExprHandle(100)}, kInt);
+  VarHandle x("x", kInt);
+  VarHandle y("y", kInt);
+  auto inner_for_body = Store::make(
+      a_buf,
+      {x},
+      Load::make(a_buf, {x}, 1) + Load::make(b_buf, {y}, 1) + y * 2,
+      1);
+  auto inner_for = For::make(y, 10, 100, inner_for_body);
+  auto for_stmt = For::make(x, 50, 100, inner_for);
+  Block::make({for_stmt});
+
+  For* normalized = nullptr;
+  LoopNest::normalize(inner_for, &normalized);
+
+  auto result = IRSimplifier::simplify(for_stmt);
+  std::ostringstream oss;
+  oss << *result;
+  const std::string& expected_ir =
+      R"IR(
+        # CHECK: for (int x = 50; x < 100; x++) {
+        # CHECK:   for (int y = 0; y < 90; y++) {
+        # CHECK:     A[x] = (((B[y + 10]) + (A[x])) + 2 * y) + 20;
+      )IR";
+  torch::jit::testing::FileCheck().run(expected_ir, oss.str());
+}
+
+void testNormalizeAndSplitWithTail() {
+  KernelScope kernel_scope;
+
+  // Create a dummy tensor to construct LoopNest.
+  ExprHandle n(100);
+  Buffer a(BufHandle("a", {n}, kFloat));
+  Tensor* b =
+      Compute("b", {{n, "i"}}, [&](const VarHandle& i) { return a(i); });
+  LoopNest l({b});
+
+  // Input IR:
+  //   for (int x = 5; x < 10; x++) {
+  //     A[x] = x * 2;
+  //   }
+  const int kTotalSize = 5;
+  BufHandle a_buf("A", {ExprHandle(kTotalSize)}, kInt);
+  VarHandle x("x", kInt);
+  auto for_stmt = For::make(x, 5, 10, Store::make(a_buf, {x}, x * 2));
+  Block::make({for_stmt});
+
+  For* normalized = nullptr;
+  LoopNest::normalize(for_stmt, &normalized);
+
+  For* x_outer;
+  For* x_inner;
+  For* x_tail;
+  l.splitWithTail(normalized, 10, &x_outer, &x_inner, &x_tail);
+
+  auto x_outer_result = IRSimplifier::simplify(x_outer);
+  std::ostringstream oss_outer;
+  oss_outer << *x_outer_result;
+  const std::string& expected_outer_ir =
+      R"IR(
+        # CHECK: {
+        # CHECK: }
+      )IR";
+  torch::jit::testing::FileCheck().run(expected_outer_ir, oss_outer.str());
+
+  auto x_tail_result = IRSimplifier::simplify(x_tail);
+  std::ostringstream oss_tail;
+  oss_tail << *x_tail_result;
+  const std::string& expected_tail_ir =
+      R"IR(
+        # CHECK: for (int x_tail = 0; x_tail < 5; x_tail++) {
+        # CHECK:   A[x_tail + 5] = 2 * (x_tail + 5);
+      )IR";
+  torch::jit::testing::FileCheck().run(expected_tail_ir, oss_tail.str());
+}
+
 } // namespace jit
 } // namespace torch

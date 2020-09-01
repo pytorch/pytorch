@@ -27,7 +27,7 @@ def assert_dicts_equal(dict_0, dict_1):
 def run(n, stmt, fuzzer_cls):
     float_iter = fuzzer_cls(seed=0, dtype=torch.float32).take(n)
     int_iter = fuzzer_cls(seed=0, dtype=torch.int32).take(n)
-    results = []
+    raw_results = []
     for i, (float_values, int_values) in enumerate(zip(float_iter, int_iter)):
         float_tensors, float_tensor_params, float_params = float_values
         int_tensors, int_tensor_params, int_params = int_values
@@ -58,13 +58,13 @@ def run(n, stmt, fuzzer_cls):
             steps = float_tensor_params[name]["steps"]
             steps_str = str(steps) if sum(steps) > len(steps) else ""
             descriptions.append((name, shape_str, order_str, steps_str))
-        results.append((float_measurement, int_measurement, descriptions))
+        raw_results.append((float_measurement, int_measurement, descriptions))
 
         print(f"\r{i + 1} / {n}", end="")
     print()
 
     parsed_results, name_len, shape_len, order_len, steps_len = [], 0, 0, 0, 0
-    for float_measurement, int_measurement, descriptions in results:
+    for float_measurement, int_measurement, descriptions in raw_results:
         t_float = float_measurement.median * 1e6
         t_int = int_measurement.median * 1e6
         rel_diff = abs(t_float - t_int) / (t_float + t_int) * 2

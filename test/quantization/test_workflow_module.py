@@ -280,11 +280,14 @@ class TestObserver(QuantizationTestCase):
         self.assertEqual(ref[0], qparams[0])
         self.assertEqual(ref[1], qparams[1])
 
+
     @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),
-           qscheme=st.sampled_from((torch.per_channel_affine, torch.per_channel_symmetric)),
+           qscheme=st.sampled_from((torch.per_channel_affine, torch.per_channel_symmetric, torch.per_channel_affine_float_qparams)),
            ch_axis=st.sampled_from((0, 1, 2, 3)), reduce_range=st.booleans())
     def test_per_channel_observers(self, qdtype, qscheme, ch_axis, reduce_range):
         # reduce_range cannot be true for symmetric quantization with uint8
+        if qscheme == torch.per_channel_affine_float_qparams:
+            reduce_range = False
         if qdtype == torch.quint8 and qscheme == torch.per_channel_symmetric:
             reduce_range = False
         ObserverList = [PerChannelMinMaxObserver(reduce_range=reduce_range,
@@ -337,6 +340,12 @@ class TestObserver(QuantizationTestCase):
                 [-26, -128],
                 [-35, -58],
             ]
+            per_channel_affine_float_qparams_ref_scales = [
+                [0.0196, 0.0471],
+                [0.0353, 0.0196],
+                [0.0392, 0.0235],
+                [0.0431, 0.0431],
+            ]
             per_channel_affine_quint8_zp = [[0, 85], [113, 0], [102, 0], [93, 70]]
 
             self.assertEqual(myobs.min_vals, ref_min_vals[ch_axis])
@@ -344,6 +353,9 @@ class TestObserver(QuantizationTestCase):
             if qscheme == torch.per_channel_symmetric:
                 ref_scales = per_channel_symmetric_ref_scales[ch_axis]
                 ref_zero_points = [0, 0] if qdtype is torch.qint8 else [128, 128]
+            elif qscheme == torch.per_channel_affine_float_qparams:
+                ref_scales = per_channel_affine_float_qparams_ref_scales[ch_axis]
+                ref_zero_points = [-1 * ref_min_vals[ch_axis][i] / ref_scales[i] for i in range(len(ref_scales))]
             else:
                 ref_scales = per_channel_affine_ref_scales[ch_axis]
                 ref_zero_points = (
@@ -355,9 +367,12 @@ class TestObserver(QuantizationTestCase):
             if reduce_range:
                 ref_scales = [s * 255 / 127 for s in ref_scales]
                 ref_zero_points = [math.floor(z / 2) for z in ref_zero_points]
+            self.assertTrue(torch.allclose(qparams[0], torch.tensor(ref_scales, dtype=qparams[0].dtype), atol=0.0001))
+            if qscheme == torch.per_channel_affine_float_qparams:
+                self.assertTrue(torch.allclose(qparams[1], torch.tensor(ref_zero_points, dtype=qparams[1].dtype), atol=1))
+            else:
+                self.assertTrue(torch.allclose(qparams[1], torch.tensor(ref_zero_points, dtype=qparams[1].dtype)))
 
-            self.assertTrue(torch.allclose(qparams[0], torch.tensor(ref_scales, dtype=qparams[0].dtype)))
-            self.assertTrue(torch.allclose(qparams[1], torch.tensor(ref_zero_points, dtype=qparams[1].dtype)))
 
             # Test for serializability
             state_dict = myobs.state_dict()
@@ -373,6 +388,7 @@ class TestObserver(QuantizationTestCase):
             self.assertEqual(myobs.min_vals, loaded_obs.min_vals)
             self.assertEqual(myobs.max_vals, loaded_obs.max_vals)
             self.assertEqual(myobs.calculate_qparams(), loaded_obs.calculate_qparams())
+
 
     def test_observer_scriptable(self):
         obs_list = [MinMaxObserver(), MovingAverageMinMaxObserver(), MinMaxDynamicQuantObserver()]
