@@ -109,8 +109,8 @@ class DataLoader(Generic[T_co]):
         worker_init_fn (callable, optional): If not ``None``, this will be called on each
             worker subprocess with the worker id (an int in ``[0, num_workers - 1]``) as
             input, after seeding and before data loading. (default: ``None``)
-        prefetch_factor (int, optional, keyword-only arg): Number of sample loaded 
-            in advance by each worker. ``2`` means there will be a total of 
+        prefetch_factor (int, optional, keyword-only arg): Number of sample loaded
+            in advance by each worker. ``2`` means there will be a total of
             2 * num_workers samples prefetched across all workers. (default: ``2``)
 
 
@@ -152,9 +152,9 @@ class DataLoader(Generic[T_co]):
                  shuffle: bool = False, sampler: Optional[Sampler[int]] = None,
                  batch_sampler: Optional[Sampler[Sequence[int]]] = None,
                  num_workers: int = 0, collate_fn: _collate_fn_t = None,
-                 pin_memory: bool = False, drop_last: bool = False, 
+                 pin_memory: bool = False, drop_last: bool = False,
                  timeout: float = 0, worker_init_fn: _worker_init_fn_t = None,
-                 multiprocessing_context=None, generator=None, 
+                 multiprocessing_context=None, generator=None,
                  *, prefetch_factor: int = 2):
         torch._C._log_api_usage_once("python.data_loader")  # type: ignore
 
@@ -797,7 +797,8 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
         else:
             self._data_queue = self._worker_result_queue
 
-        _utils.signal_handling._set_worker_pids(id(self), tuple(w.pid for w in self._workers))
+        # .pid can be None only before process is spawned (not the case, so ignore)
+        _utils.signal_handling._set_worker_pids(id(self), tuple(w.pid for w in self._workers))  # type: ignore
         _utils.signal_handling._set_SIGCHLD_handler()
         self._worker_pids_set = True
 
@@ -831,7 +832,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                     self._shutdown_worker(worker_id)
             if len(failed_workers) > 0:
                 pids_str = ', '.join(str(w.pid) for w in failed_workers)
-                raise RuntimeError('DataLoader worker (pid(s) {}) exited unexpectedly'.format(pids_str))
+                raise RuntimeError('DataLoader worker (pid(s) {}) exited unexpectedly'.format(pids_str)) from e
             if isinstance(e, queue.Empty):
                 return (False, None)
             import tempfile
@@ -851,7 +852,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                         " limit using `ulimit -n` in the shell or change the"
                         " sharing strategy by calling"
                         " `torch.multiprocessing.set_sharing_strategy('file_system')`"
-                        " at the beginning of your code")
+                        " at the beginning of your code") from None
             raise
 
 # NOTE [ DataLoader on Linux and open files limit ]

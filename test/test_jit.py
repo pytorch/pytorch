@@ -26,11 +26,11 @@ from jit.test_python_ir import TestPythonIr  # noqa: F401
 from jit.test_functional_blocks import TestFunctionalBlocks  # noqa: F401
 from jit.test_remove_mutation import TestRemoveMutation  # noqa: F401
 from jit.test_torchbind import TestTorchbind  # noqa: F401
-from jit.test_op_normalization import TestOpNormalization  # noqa: F401
 from jit.test_module_interface import TestModuleInterface  # noqa: F401
 from jit.test_onnx_export import TestONNXExport  # noqa: F401
 from jit.test_with import TestWith  # noqa: F401
 from jit.test_enum import TestEnum, TestEnumFeatureGuard  # noqa: F401
+from jit.test_profiler import TestProfiler  # noqa: F401
 
 # Torch
 from torch import Tensor
@@ -55,7 +55,7 @@ from torch.testing._internal.common_utils import run_tests, IS_WINDOWS, TEST_WIT
 from torch.testing._internal.jit_utils import JitTestCase, enable_cpu_fuser, disable_autodiff_subgraph_inlining, \
     _trace, enable_cpu_fuser_if, do_input_map, get_execution_plan, \
     execWrapper, _inline_everything, _tmp_donotuse_dont_inline_everything, \
-    RUN_CUDA, op_alias_mappings
+    RUN_CUDA
 from torch.testing._internal.jit_metaprogramming_utils import create_script_fn, nn_functional_tests, get_script_args, \
     get_call, script_template, EXCLUDE_SCRIPT, additional_module_tests, EXCLUDE_SCRIPT_MODULES, \
     get_nn_module_name_from_kwargs, script_method_template, create_traced_fn
@@ -1199,6 +1199,56 @@ graph(%Ra, %Rb):
           return (%z)""", m._c._get_method("forward").graph)
 
         FileCheck().check("my::matched_conv_bn").run(m._c._get_method("forward").graph)
+
+    def test_reconstruct_scopes(self):
+        class SubModule(torch.nn.Module):
+            def __init__(self):
+                super(SubModule, self).__init__()
+
+            def bar(self, x):
+                return x + x
+
+            def forward(self, x):
+                return x * self.bar(x)
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.sub = SubModule()
+
+            def forward(self, x):
+                return self.sub(x) + x
+
+        traced = torch.jit.trace(MyModule(), torch.zeros(1))
+        g = traced.graph
+        torch._C._jit_pass_inline(g)
+        torch._C._jit_pass_reconstruct_scopes(traced._c, g)
+        FileCheck().check("scope: top(MyModule).sub(SubModule).forward").run(g)
+
+    def test_reconstruct_scopes_duplicated_class_types(self):
+        class SubModule(torch.nn.Module):
+            def __init__(self):
+                super(SubModule, self).__init__()
+
+            def forward(self, x):
+                return x + 2
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+                self.sub1 = SubModule()
+                self.sub2 = SubModule()
+
+            def forward(self, x):
+                return self.sub1(x) + self.sub2(x)
+
+        traced = torch.jit.trace(MyModule(), torch.zeros(1))
+        g = traced.graph
+        torch._C._jit_pass_inline(g)
+        torch._C._jit_pass_reconstruct_scopes(traced._c, g)
+        FileCheck().check_dag("scope: top(MyModule).sub1(SubModule).forward")  \
+                   .check_dag("scope: top(MyModule).sub2(SubModule).forward")  \
+                   .run(g)
 
     def test_expand_quantlint(self):
         pass
@@ -4359,6 +4409,12 @@ a")
         def foo(strs: List[str]):
             return sorted(strs)
 
+        FileCheck() \
+            .check("graph") \
+            .check_next("str[] = aten::sorted") \
+            .check_next("return") \
+            .run(str(foo.graph))
+
         inputs = ["str3", "str2", "str1"]
         self.assertEqual(foo(inputs), sorted(inputs))
 
@@ -5215,7 +5271,6 @@ a")
             # this triggers 2 bailouts
             self.assertEqual(def_in_one_branch(a, True), 3.0)
 
-
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "skip if profiling isn't enabled")
     def test_maxpool_guard_elimination(self):
         @torch.jit.script
@@ -5335,6 +5390,7 @@ a")
 
 
     @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.SIMPLE, "Simple Executor doesn't use requires_grad information")
+    @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.PROFILING, "Peeling is now disabled")
     def test_requires_grad_loop(self):
         @torch.jit.script
         def test(x, y, z):
@@ -5614,6 +5670,16 @@ a")
 
         ast = torch.jit.frontend.get_jit_def(fn, fn.__name__)
         self.assertExpected(str(ast))
+
+    def test_python_frontend_source_range(self):
+        def fn():
+            raise Exception("hello")
+        ast = torch.jit.frontend.get_jit_def(fn, fn.__name__)
+        FileCheck().check("SourceRange at:") \
+                   .check("def fn():") \
+                   .check("~~~~~~~~~...  <--- HERE") \
+                   .check('raise Exception("hello")') \
+                   .run(str(ast.range()))
 
     def test_python_frontend_py3(self):
         def fn():
@@ -8420,7 +8486,7 @@ a")
 
         with self.assertRaisesRegex(
                 TypeError,
-                "Linear' object for attribute 'invalid' is not a valid constant"):
+                "Linear' object in attribute 'Foo.invalid' is not a valid constant"):
             Foo()
 
         class Foo2(torch.jit.ScriptModule):
@@ -12340,7 +12406,7 @@ a")
                                     "supported in TorchScript"):
             @torch.jit.script
             def unknown_op(x):
-                torch.set_grad_enabled(True)
+                torch.set_anomaly_enabled(True)
                 return x
 
     def test_exceptions(self):
@@ -15438,7 +15504,7 @@ def add_autograd_test(
 
                 # alias annotation testing
                 if is_inplace and test_name not in EXCLUDE_SCRIPT:
-                    check_alias_annotation(op_alias_mappings.get(name, name), (self_variable,) + args_variable, kwargs_variable)
+                    check_alias_annotation(name, (self_variable,) + args_variable, kwargs_variable)
 
             check(name)
             inplace_name = name + '_'

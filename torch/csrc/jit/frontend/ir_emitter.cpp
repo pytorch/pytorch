@@ -57,7 +57,7 @@ struct Refinement {
 struct RefinementSet {
   // When a comparison like x is None is made, we associate type refinements
   // with its true value and its false value. If a boolean that has refinements
-  // associated with it is used in a conditional of an if statememt, the true
+  // associated with it is used in a conditional of an if statement, the true
   // and false refinements are inserted into the corresponding blocks
   using Refinements = std::vector<Refinement>;
 
@@ -205,7 +205,7 @@ static std::shared_ptr<MagicMethod> makeMagic(
 // The Environment keeps track of two tables, one for values which are not first
 // class and a type table for values which are. When a first class value
 // is set in the environment, we emit a prim::Store which sets the
-// name of the variable to approriate type, and when a first-class value is
+// name of the variable to appropriate type, and when a first-class value is
 // referenced we emit a prim::Load that generates a value of the appropriate
 // type.
 //
@@ -700,7 +700,7 @@ struct to_ir {
           def.range(), Expr(Compound::create(TK_NONE, def.range(), {}))));
     } else {
       // if we haven't seen any return statements, but the graph block exits
-      // (the funciton always throws) then we accept the declared return type if
+      // (the function always throws) then we accept the declared return type if
       // it exists or set it to none
       if (def_stack_.back().merged_return_type_ == nullptr) {
         def_stack_.back().merged_return_type_ =
@@ -996,7 +996,17 @@ struct to_ir {
       result_type = merged_result_type.value();
     }
     AT_ASSERT(result_type);
+
     def_stack_.back().merged_return_type_ = result_type;
+
+    // If the annotated return type is Any and the result type is not Any,
+    // cast the result to Any to facilitate type unification between return
+    // statements on different code paths (e.g. different branches of an if,
+    // body and containing scope of a loop).
+    if (result_type == AnyType::get() && result->type() != AnyType::get()) {
+      result = graph->insertUncheckedCast(result, result_type);
+    }
+
     graph->insertNode(graph->create(prim::ReturnStmt, {result}, 0));
     exit_blocks.insert(environment_stack->block());
   }
@@ -1404,7 +1414,7 @@ struct to_ir {
     // the scope of the if statement (all variables are scoped to the function).
     // Script is a subset of python: we consider variables to be in scope
     // as long as there is a definition of the variable along all paths
-    // through the if statemnent
+    // through the if statement
     // ----
     // if ...:
     //   a =
@@ -3746,6 +3756,61 @@ CompilationUnit::CompilationUnit(const std::string& source)
   define(c10::nullopt, source, nativeResolver(), nullptr);
 }
 
+// This pair represents a pair of functions (getter and setter) obtained from
+// compiling a Property.
+struct CompilationUnit::PropertyPair
+    : public std::pair<std::unique_ptr<Function>, std::unique_ptr<Function>> {
+  PropertyPair(
+      std::unique_ptr<Function> getter,
+      std::unique_ptr<Function> setter) {
+    TORCH_INTERNAL_ASSERT(getter, "Property pair must have defined getter")
+    this->first = std::move(getter);
+    this->second = std::move(setter);
+  }
+
+  std::unique_ptr<Function>& getGetter() {
+    return this->first;
+  }
+
+  std::unique_ptr<Function>& getSetter() {
+    return this->second;
+  }
+};
+
+CompilationUnit::PropertyPair CompilationUnit::define_property(
+    const c10::optional<c10::QualifiedName>& prefix,
+    const Property& prop,
+    const ResolverPtr& resolver,
+    const Self* self,
+    const std::unordered_map<std::string, Function*>& function_table,
+    bool shouldMangle) const {
+  // self must be defined because properties are features of classes and
+  // modules.
+  TORCH_INTERNAL_ASSERT(self);
+
+  // Compile the getter function.
+  std::unique_ptr<Function> getter_fn = define(
+      prefix, prop.getter(), resolver, self, function_table, shouldMangle);
+
+  // Compile the setter function if it exists.
+  std::unique_ptr<Function> setter_fn = nullptr;
+  if (prop.setter().present()) {
+    setter_fn = define(
+        prefix,
+        prop.setter().get(),
+        resolver,
+        self,
+        function_table,
+        shouldMangle);
+  }
+
+  // Add the property to the class type definition.
+  self->getClassType()->addProperty(
+      prop.name().name(), getter_fn.get(), setter_fn.get());
+
+  return PropertyPair(std::move(getter_fn), std::move(setter_fn));
+}
+
 std::unique_ptr<Function> CompilationUnit::define(
     const c10::optional<QualifiedName>& prefix,
     const Def& def,
@@ -3794,41 +3859,70 @@ std::unique_ptr<Function> CompilationUnit::define(
 }
 
 std::vector<Function*> CompilationUnit::define(
-    const c10::optional<QualifiedName>& prefix,
+    const c10::optional<c10::QualifiedName>& prefix,
+    const std::vector<Property>& properties,
+    const std::vector<ResolverPtr>& propResolvers,
     const std::vector<Def>& definitions,
-    const std::vector<ResolverPtr>& resolvers,
+    const std::vector<ResolverPtr>& defResolvers,
     const Self* self,
     bool shouldMangle) {
-  TORCH_INTERNAL_ASSERT(definitions.size() == resolvers.size());
+  TORCH_INTERNAL_ASSERT(definitions.size() == defResolvers.size());
+  TORCH_INTERNAL_ASSERT(properties.size() == propResolvers.size());
   std::vector<Function*> functions;
   std::unordered_map<std::string, Function*> function_table;
+
+  // Records fn in function_table, functions and with register_function.
+  // This is done several times below, so this lambda helps avoid repeating
+  // code.
+  auto record_function = [&](std::unique_ptr<Function> fn) {
+    function_table[fn->name()] = fn.get();
+    functions.emplace_back(fn.get());
+    this->register_function(std::move(fn));
+  };
+
+  for (size_t i = 0; i < properties.size(); i++) {
+    PropertyPair property_fns = define_property(
+        prefix,
+        properties[i],
+        propResolvers[i],
+        self,
+        function_table,
+        shouldMangle);
+
+    auto& getter_fn = property_fns.getGetter();
+    auto& setter_fn = property_fns.getSetter();
+
+    record_function(std::move(getter_fn));
+
+    if (setter_fn) {
+      record_function(std::move(setter_fn));
+    }
+  }
 
   for (size_t i = 0; i < definitions.size(); i++) {
     auto fn = define(
         prefix,
         definitions[i],
-        resolvers[i],
+        defResolvers[i],
         self,
         function_table,
         shouldMangle);
-    const auto& name = fn->name();
-    function_table[name] = fn.get();
-    functions.push_back(fn.get());
-    register_function(std::move(fn));
+
+    record_function(std::move(fn));
   }
 
   // We need to compile `__init__` first, since it can determine what attributes
   // are available to other methods. So reorder the definitions accordingly.
-  for (size_t i = 0; i < definitions.size(); i++) {
-    const auto& def = definitions[i];
-    if (def.name().name() == "__init__") {
-      functions[i]->ensure_defined();
+  for (auto& kv : function_table) {
+    if (kv.first == "__init__") {
+      kv.second->ensure_defined();
     }
   }
 
   for (Function* function : functions) {
     function->ensure_defined();
   }
+
   return functions;
 }
 
@@ -3845,7 +3939,13 @@ std::vector<Function*> CompilationUnit::define(
     definitions.push_back(def);
     resolvers.push_back(resolver);
   }
-  return define(prefix, definitions, resolvers, self);
+  return define(
+      prefix,
+      /*properties=*/{},
+      /*propResolvers=*/{},
+      definitions,
+      resolvers,
+      self);
 }
 
 void runCleanupPasses(std::shared_ptr<Graph>& to_clean) {

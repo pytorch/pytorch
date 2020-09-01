@@ -10,7 +10,7 @@ Tensor _add_batch_dim(const Tensor& self, int64_t batch_dim, int64_t level) {
 }
 
 static bool has_level(const Tensor& self, int64_t level) {
-  const auto* batched = maybeGetBatched(self);
+  const auto* batched = maybeGetBatchedImpl(self);
   if (!batched) {
     return false;
   }
@@ -118,7 +118,7 @@ Tensor _remove_batch_dim(const Tensor& self, int64_t level, int64_t batch_size, 
   }
 
   // Must be batched if has_level(self, /*any_level*/)
-  const auto* batched = maybeGetBatched(self);
+  const auto* batched = maybeGetBatchedImpl(self);
   TORCH_INTERNAL_ASSERT(batched != nullptr);
 
   Tensor self_without_bdim;

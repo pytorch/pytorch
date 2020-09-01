@@ -154,7 +154,6 @@ def load_aten_declarations(path):
         if has_tensoroptions_argument(declaration):
             declaration['schema_order_args'] = [process_schema_order_arg(arg) for arg in declaration['schema_order_args']]
         declaration['api_name'] = declaration['name']
-        # NB: keep this in sync with common_with_cwrap.py
         if declaration.get('overload_name'):
             declaration['type_wrapper_name'] = "{}_{}".format(
                 declaration['name'], declaration['overload_name'])
@@ -296,6 +295,8 @@ def gen_autograd_python(aten_path, out, autograd_dir):
     gen_python_functions.gen_py_nn_functions(
         out, aten_decls, template_path)
     gen_python_functions.gen_py_fft_functions(
+        out, aten_decls, template_path)
+    gen_python_functions.gen_py_linalg_functions(
         out, aten_decls, template_path)
 
 

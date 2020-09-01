@@ -23,6 +23,7 @@ class TestSpatialBN(hu.HypothesisTestCase):
            epsilon=st.floats(min_value=1e-5, max_value=1e-2),
            inplace=st.sampled_from([True, False]),
            **mu.gcs)
+    @settings(deadline=1000)
     def test_spatialbn_test_mode(
             self, size, input_channels, batch_size, seed, order, epsilon,
             inplace, gc, dc):
@@ -101,6 +102,7 @@ class TestSpatialBN(hu.HypothesisTestCase):
            order=st.sampled_from(["NCHW"]),
            epsilon=st.floats(min_value=1e-5, max_value=1e-2),
            **mu.gcs)
+    @settings(deadline=None, max_examples=50)
     def test_spatialbn_train_mode_gradient_check(
             self, size, input_channels, batch_size, seed, order, epsilon,
             gc, dc):

@@ -7,7 +7,7 @@ import hypothesis.strategies as st
 import numpy as np
 
 from caffe2.python import core
-from hypothesis import given
+from hypothesis import given, settings
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
 
@@ -140,6 +140,7 @@ class TestTopK(serial.SerializedTestCase):
 
     @given(bs=st.integers(1, 3), n=st.integers(100, 10000),
            flatten_indices=st.booleans(), **hu.gcs)
+    @settings(deadline=1000)
     def test_top_k_4(self, bs, n, flatten_indices, gc, dc):
         k = np.random.randint(n // 3, 3 * n // 4)
         X = np.random.rand(bs, n).astype(dtype=np.float32)
@@ -176,6 +177,7 @@ class TestTopK(serial.SerializedTestCase):
 
     @given(bs=st.integers(1, 3), n=st.integers(1, 5000),
            flatten_indices=st.booleans(), **hu.gcs)
+    @settings(deadline=1000)
     def test_top_k_6(self, bs, n, flatten_indices, gc, dc):
         k = n
         X = np.random.rand(bs, n).astype(dtype=np.float32)
@@ -214,6 +216,7 @@ class TestTopK(serial.SerializedTestCase):
 
     @given(X=hu.tensor(dtype=np.float32), k=st.integers(1, 5),
            axis=st.integers(-1, 5), **hu.gcs)
+    @settings(deadline=10000)
     def test_top_k_grad(self, X, k, axis, gc, dc):
         dims = X.shape
         if axis >= len(dims):

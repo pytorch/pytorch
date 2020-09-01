@@ -198,11 +198,11 @@ binary_ops = ('add', 'sub', 'mul', 'div', 'pow', 'lshift', 'rshift', 'mod', 'tru
               'radd', 'rsub', 'rmul', 'rtruediv', 'rfloordiv', 'rpow',          # reverse arithmetic
               'and', 'or', 'xor',                   # logic
               'iadd', 'iand', 'idiv', 'ilshift', 'imul',
-              'ior', 'irshift', 'isub', 'itruediv', 'ixor',  # inplace ops
+              'ior', 'irshift', 'isub', 'ixor',  # inplace ops
               )
 comparison_ops = ('eq', 'ne', 'ge', 'gt', 'lt', 'le')
 unary_ops = ('neg', 'abs', 'invert')
-to_py_type_ops = ('bool', 'float', 'long', 'index', 'int', 'nonzero')
+to_py_type_ops = ('bool', 'float', 'complex', 'long', 'index', 'int', 'nonzero')
 all_ops = binary_ops + comparison_ops + unary_ops + to_py_type_ops
 
 
@@ -224,13 +224,13 @@ def sig_for_ops(opname):
     elif name in unary_ops:
         return ['def {}(self) -> Tensor: ...'.format(opname)]
     elif name in to_py_type_ops:
-        if name in {'bool', 'float'}:
+        if name in {'bool', 'float', 'complex'}:
             tname = name
         elif name == 'nonzero':
             tname = 'bool'
         else:
             tname = 'int'
-        if tname in {'float', 'int', 'bool'}:
+        if tname in {'float', 'int', 'bool', 'complex'}:
             tname = 'builtins.' + tname
         return ['def {}(self) -> {}: ...'.format(opname, tname)]
     else:
@@ -547,6 +547,7 @@ def gen_pyi(declarations_path, out):
         'requires_grad_': ['def requires_grad_(self, mode: _bool=True) -> Tensor: ...'],
         'element_size': ['def element_size(self) -> _int: ...'],
         'dim': ['def dim(self) -> _int: ...'],
+        'nonzero': ['def nonzero(self, *, as_tuple: _bool=...) -> Tensor: ...'],
         'numel': ['def numel(self) -> _int: ...'],
         'ndimension': ['def ndimension(self) -> _int: ...'],
         'nelement': ['def nelement(self) -> _int: ...'],

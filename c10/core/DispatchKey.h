@@ -202,7 +202,7 @@ enum class DispatchKey : uint8_t {
   // operator, which you're trying to skip).  In PreAutograd implementations,
   // you are responsible for handling autograd yourself, or deferring to other
   // operators which support autograd.
-  XLAPreAutograd,
+  AutogradXLA,
 
   // Autocasting precedes VariableTypeId, to ensure casts are autograd-exposed
   // and inputs are saved for backward in the post-autocast type.
@@ -222,6 +222,10 @@ enum class DispatchKey : uint8_t {
   // This is the dispatch key for BatchedTensorImpl, which is used to implement
   // batching rules for vmap.
   Batched,
+
+  // When we are inside a vmap, all tensors dispatch on this key.
+  // See Note: [DispatchKey::VmapMode usage] for more details.
+  VmapMode,
 
   // TESTING: This is intended to be a generic testing tensor type id.
   // Don't use it for anything real; its only acceptable use is within a single

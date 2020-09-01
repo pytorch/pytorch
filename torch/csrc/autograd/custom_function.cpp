@@ -234,6 +234,10 @@ void AutogradContext::mark_non_differentiable(const variable_list &outputs) {
   }
 }
 
+void AutogradContext::set_materialize_grads(bool value) {
+  materialize_grads_ = value;
+}
+
 const std::unordered_set<at::TensorImpl*>& AutogradContext::get_and_bump_dirty() const {
   for (auto& var : dirty_inputs_) {
     var->bump_version();

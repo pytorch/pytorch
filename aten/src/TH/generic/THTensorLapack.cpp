@@ -409,27 +409,32 @@ void THTensor_(geqrf)(THTensor *ra_, THTensor *rtau_, THTensor *a)
 void THTensor_(orgqr)(THTensor *ra_, THTensor *a, THTensor *tau)
 {
   if (a == NULL) a = ra_;
-  THArgCheck(THTensor_nDimension(a) == 2, 1, "A should be 2 dimensional");
-  THArgCheck(!a->is_empty(), 1, "A should not be empty");
+  THArgCheck(THTensor_nDimension(a) == 2, 1, "'input' should be 2 dimensional");
+  THArgCheck(!a->is_empty(), 1, "'input' should not be empty");
 
   THTensor *ra__ = NULL;
   ra__ = THTensor_(cloneColumnMajor)(ra_, a);
 
   int m = THTensor_(size)(ra__, 0);
+  int n = THTensor_(size)(ra__, 1);
   int k = THTensor_sizeLegacyNoScalars(tau, 0);
+
+  THArgCheck(m >= n, 1, "input.size(0) must be greater than or equal to input.size(1)");
+  THArgCheck(n >= k, 1, "input.size(1) must be greater than or equal to input2.size(0)");
+
   int lda = m;
 
   /* Dry-run to query the suggested size of the workspace. */
   int info = 0;
   scalar_t wkopt = 0;
-  THLapack_(orgqr)(m, k, k, ra__->data<scalar_t>(), lda,
+  THLapack_(orgqr)(m, n, k, ra__->data<scalar_t>(), lda,
                    tau->data<scalar_t>(),
                    &wkopt, -1, &info);
 
   /* Allocate the workspace and call LAPACK to do the real work. */
   int lwork = (int)wkopt;
   THTensor *work = THTensor_(newWithSize1d)(lwork);
-  THLapack_(orgqr)(m, k, k, ra__->data<scalar_t>(), lda,
+  THLapack_(orgqr)(m, n, k, ra__->data<scalar_t>(), lda,
                    tau->data<scalar_t>(),
                    work->data<scalar_t>(), lwork, &info);
 
