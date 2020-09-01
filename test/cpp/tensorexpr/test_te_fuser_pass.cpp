@@ -29,15 +29,12 @@ void testFuserPass_1() {
   g->lint();
   FuseTensorExprs(g);
 
-  // TODO: Fix alias-info handling in the fuser pass and reenable the test:
-#if 0
   // We should not be able to fuse across the in-place operation here.
   testing::FileCheck()
       .check("prim::TensorExprGroup_0")
       ->check("aten::add_")
       ->check("prim::TensorExprGroup_1")
       ->run(*g);
-#endif
 }
 
 void testFuserPass_2() {
