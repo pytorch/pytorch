@@ -1198,6 +1198,15 @@ def all_gather_object(object_list, obj, group=group.WORLD):
         known to be insecure. It is possible to construct malicious pickle data
         which will execute arbitrary code during unpickling. Only call this
         function with data you trust.
+
+    Example::
+        >>> # Note: Process group initialization omitted on each rank.
+        >>> import torch.distributed as dist
+        >>> gather_objects = ["foo", 12, {1: 2}] # any picklable object
+        >>> output = [None for _ in gather_objects]
+        >>> dist.all_gather_object(output, gather_objects[dist.get_rank()])
+        >>> output
+        ['foo', 12, {1: 2}]
     """
     if _rank_not_in_group(group):
         return
@@ -1268,6 +1277,20 @@ def gather_object(obj, object_gather_list=None, dst=0, group=group.WORLD):
         known to be insecure. It is possible to construct malicious pickle data
         which will execute arbitrary code during unpickling. Only call this
         function with data you trust.
+
+    Example::
+        >>> # Note: Process group initialization omitted on each rank.
+        >>> import torch.distributed as dist
+        >>> gather_objects = ["foo", 12, {1: 2}] # any picklable object
+        >>> output = [None for _ in gather_objects]
+        >>> dist.gather_object(
+            gather_objects[dist.get_rank()],
+            output if dist.get_rank() == 0 else None,
+            dst=0
+            )
+        >>> # On rank 0
+        >>> output
+        ['foo', 12, {1: 2}]
     """
     if _rank_not_in_group(group):
         return
@@ -1347,6 +1370,17 @@ def broadcast_object_list(object_list, src, group=group.WORLD):
         is known to be insecure. It is possible to construct malicious pickle
         data which will execute arbitrary code during unpickling. Only call this
         function with data you trust.
+
+    Example::
+        >>> # Note: Process group initialization omitted on each rank.
+        >>> import torch.distributed as dist
+        >>> if dist.get_rank() == 0:
+        >>>     objects = ["foo", 12, {1: 2}] # any picklable object
+        >>> else:
+        >>>     objects = [None, None, None]
+        >>> dist.broadcast_object_list(objects, src=0)
+        >>> broadcast_objects
+        ['foo', 12, {1: 2}]
     """
     if _rank_not_in_group(group):
         return
@@ -1419,6 +1453,19 @@ def scatter_object_list(
         is known to be insecure. It is possible to construct malicious pickle
         data which will execute arbitrary code during unpickling. Only call this
         function with data you trust.
+
+    Example::
+        >>> # Note: Process group initialization omitted on each rank.
+        >>> import torch.distributed as dist
+        >>> if dist.get_rank() == 0:
+        >>>     objects = ["foo", 12, {1: 2}] # any picklable object
+        >>> else:
+        >>>     objects = [None, None, None]
+        >>> output_list = [None]
+        >>> dist.scatter_object_list(output_list, objects, src=0)
+        >>> # Rank i gets objects[i]. For example, on rank 2:
+        >>> output_list
+        [{1: 2}]
     """
     if _rank_not_in_group(group):
         return
