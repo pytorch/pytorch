@@ -722,7 +722,7 @@ Tensor _allocate_buffer(const Tensor& a, int n_copies, bool is_zero = false) {
     {n_copies, a.size(0), a.size(1), a.size(2)},
     a.options().memory_format(at::MemoryFormat::Contiguous)
   );
-  
+
   if (is_zero) {
     res.zero_();
   }
@@ -830,7 +830,7 @@ Tensor compute_T4(const Tensor& A) {
   auto As = _allocate_buffer(A, 4);
   // 3 for {I, A, A^2}
   _fill_matrix_powers(As, A, 3);
-  
+
   at::native::matmul(
     // output for A^2 * (I / 2 + A / 6 + A^2 / 24)
     As.select(0, 3),
@@ -1081,7 +1081,7 @@ Tensor mexp_impl(
   if (!compute_highest_degree_approx) {
     constexpr std::array<
       Tensor(*)(const Tensor&),
-      total_n_degs - 1> 
+      total_n_degs - 1>
     compute_Ts = {
       compute_T1, compute_T2, compute_T4<scalar_t>,
       compute_T8<scalar_t>, compute_T12<scalar_t>
@@ -1172,7 +1172,7 @@ Tensor mexp(const Tensor& a, bool compute_highest_degree_approx = false) {
 
 // Based on:
 //
-// Mathias, Roy. 
+// Mathias, Roy.
 // A Chain Rule for Matrix Functions and Applications.
 // SIAM J. Matrix Anal. Appl. 17 (1996): 610-620.
 //
@@ -1207,8 +1207,8 @@ Tensor backward_analytic_function_of_a_matrix(
 // Mathematics 2019, 7, 1174.
 //
 Tensor matrix_exp(const Tensor& a) {
-  TORCH_CHECK(a.dim() >= 2 
-          && (at::isFloatingType(a.scalar_type()) 
+  TORCH_CHECK(a.dim() >= 2
+          && (at::isFloatingType(a.scalar_type())
            || at::isComplexType(a.scalar_type())),
               "matrix_exp(", a.scalar_type(), "{", a.sizes(), "}): expected a tensor "
               "of floating or complex types with dim at least 2");
@@ -1290,8 +1290,10 @@ Tensor frobenius_norm(const Tensor& self, IntArrayRef dim, bool keepdim) {
   TORCH_CHECK(dim_[0] != dim_[1], "Expected dims to be different, got ", dim, " instead");
   if (self.is_complex()){
     return at::sqrt(at::sum(at::real(self.conj() * self), dim_, keepdim));
-  } else {
+  } else if ((self != 0).any().item<bool>()) {
     return at::sqrt(at::sum((self * self), dim_, keepdim));
+  } else {
+    return at::sum((self * self), dim_, keepdim);
   }
 }
 
