@@ -4,7 +4,6 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <torch/csrc/jit/codegen/cuda/ir_base_nodes.h>
-#include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
 
 #include <unordered_map>
 #include <unordered_set>
@@ -13,14 +12,6 @@
 namespace torch {
 namespace jit {
 namespace fuser {
-
-// https://stackoverflow.com/questions/18837857/cant-use-enum-class-as-unordered-map-key
-struct TypeHash {
-  template <typename T>
-  std::size_t operator()(T t) const {
-    return static_cast<std::size_t>(t);
-  }
-};
 
 /*
  * Usage: FusionGuard and Fusion are required user interfaces for any operation
@@ -63,32 +54,6 @@ class TORCH_CUDA_API FusionGuard {
   ~FusionGuard();
 
   static Fusion* getCurFusion();
-};
-
-// Expr sort will take a fusion and return a topologically sorted list of
-// expressions.
-class ExprSort : public IterVisitor {
- private:
-  std::vector<Expr*> exprs;
-
-  void handle(Expr* expr) override;
-
- public:
-  static std::vector<Expr*> getExprs(Fusion* fusion, bool from_outputs_only);
-
-  static std::vector<Expr*> getExprs(
-      Fusion* fusion,
-      const std::vector<Val*>& from);
-};
-
-class InputsOf : public IterVisitor {
- private:
-  std::unordered_set<Val*> inputs;
-
-  void handle(Val* v) final;
-
- public:
-  static std::unordered_set<Val*> output(Fusion* fusion, Val* output_);
 };
 
 /*
@@ -208,6 +173,7 @@ class TORCH_CUDA_API Fusion final {
   bool hasReduction();
   bool hasBlockReduction();
   bool hasGridReduction();
+  bool hasBlockBroadcast();
   bool hasBroadcast();
   DataType getMaximumSmemDataType();
   size_t gridReductionTempBufferSize();

@@ -23,7 +23,9 @@ struct TORCH_CUDA_API CompileOptions {
 
 class TORCH_CUDA_API FusionExecutor : public NonCopyable {
  public:
-  void compileFusionFromStr(
+  // Unsafe compilation that's useful for debugging kernels, iterating over
+  // slight modifications of a generated kernel
+  void debugCompileFusionFromStr(
       Fusion* fusion,
       const std::string& code,
       const std::string& name,
@@ -82,8 +84,12 @@ class TORCH_CUDA_API FusionExecutor : public NonCopyable {
 
   Fusion fusion_;
 
-  CompileOptions options_;
+  bool has_block_reductions = false;
+  bool has_grid_reductions = false;
+  bool has_block_broadcasts = false;
 
+  CompileOptions options_;
+  size_t max_device_smem = std::numeric_limits<size_t>().max();
   executor_utils::NvrtcFunction compiled_kernel_;
 
   // State of the fusion that's important

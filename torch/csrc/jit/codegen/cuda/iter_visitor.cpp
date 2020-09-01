@@ -10,32 +10,6 @@ namespace fuser {
 
 /* ITER VISITOR */
 
-std::vector<Statement*> IterVisitor::next(Statement* stmt) {
-  if (stmt->isVal()) {
-    return next(stmt->as<Val>());
-  } else if (stmt->isExpr()) {
-    return next(stmt->as<Expr>());
-  } else {
-    TORCH_INTERNAL_ASSERT(
-        false, "IterVisitor could not detect type in next_dispatch.");
-  }
-}
-
-std::vector<Statement*> IterVisitor::next(Val* v) {
-  FusionGuard::getCurFusion()->assertInFusion(v, "Cannot traverse val, ");
-  if (FusionGuard::getCurFusion()->origin(v) != nullptr) {
-    return {FusionGuard::getCurFusion()->origin(v)};
-  }
-  return {};
-}
-
-std::vector<Statement*> IterVisitor::next(Expr* expr) {
-  FusionGuard::getCurFusion()->assertInFusion(expr, "Cannot traverse expr, ");
-  std::vector<Statement*> next_stmts{expr->inputs().begin(),
-                                     expr->inputs().end()};
-  return next_stmts;
-}
-
 namespace {
 
 // Remove any stmt in stmts that is in visited
@@ -494,6 +468,35 @@ std::unordered_set<Val*> DependencyCheck::getAllValsBetween(
     const std::unordered_set<Val*>& dependencies,
     const std::vector<Val*>& of) {
   return Dependencies::getAllVals(dependencies, of);
+}
+
+void ExprSort::handle(Expr* expr) {
+  exprs.push_back(expr);
+}
+
+std::vector<Expr*> ExprSort::getExprs(Fusion* fusion, bool from_outputs_only) {
+  ExprSort es;
+  es.traverse(fusion, from_outputs_only);
+  return es.exprs;
+}
+
+std::vector<Expr*> ExprSort::getExprs(
+    Fusion* fusion,
+    const std::vector<Val*>& from) {
+  ExprSort es;
+  es.traverseFrom(fusion, from, false);
+  return es.exprs;
+}
+
+void InputsOf::handle(Val* v) {
+  if (FusionGuard::getCurFusion()->origin(v) == nullptr)
+    inputs.emplace(v);
+}
+
+std::unordered_set<Val*> InputsOf::output(Fusion* fusion, Val* output_) {
+  InputsOf io;
+  io.traverseFrom(FusionGuard::getCurFusion(), {output_}, false);
+  return io.inputs;
 }
 
 } // namespace fuser

@@ -1,5 +1,5 @@
-
 #include <torch/csrc/jit/codegen/cuda/lower_validation.h>
+#include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 #include <torch/csrc/jit/codegen/cuda/transform_replay.h>
 #include <torch/csrc/jit/codegen/cuda/type.h>

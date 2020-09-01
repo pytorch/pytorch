@@ -4,6 +4,7 @@
 
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_base_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/ir_internal_nodes.h>
 
 #include <torch/csrc/jit/ir/ir.h>
 
@@ -224,6 +225,7 @@ class TORCH_CUDA_API TensorView : public Val {
   bool hasReduction() const;
   bool hasBlockReduction() const;
   bool hasGridReduction() const;
+  bool hasBlockBroadcast() const;
   bool hasBroadcast() const;
   bool hasRFactor() const;
 
