@@ -27,6 +27,7 @@ class TCPStoreDaemon {
   void getHandler(int socket) const;
   void checkHandler(int socket) const;
   void getNumKeysHandler(int socket) const;
+  void deleteHandler(int socket);
   void waitHandler(int socket);
 
   bool checkKeys(const std::vector<std::string>& keys) const;
@@ -61,6 +62,8 @@ class TCPStore : public Store {
   std::vector<uint8_t> get(const std::string& key) override;
 
   int64_t add(const std::string& key, int64_t value) override;
+
+  void deleteKey(const std::string& key) override;
 
   bool check(const std::vector<std::string>& keys) override;
 

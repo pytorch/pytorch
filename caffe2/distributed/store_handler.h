@@ -47,6 +47,11 @@ class CAFFE2_API StoreHandler {
   virtual int64_t getNumKeys() = 0;
 
   /*
+   * Removes the specified key from the store.
+   */
+  virtual void deleteKey(const std::string& key) = 0;
+
+  /*
    * Check if a keys exist in the store.
    */
   virtual bool check(const std::vector<std::string>& names) = 0;

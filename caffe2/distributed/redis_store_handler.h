@@ -25,6 +25,8 @@ class CAFFE2_API RedisStoreHandler : public StoreHandler {
 
   virtual int64_t getNumKeys() override;
 
+  virtual void deleteKey(const std::string& key) override;
+
   virtual bool check(const std::vector<std::string>& names) override;
 
   virtual void wait(

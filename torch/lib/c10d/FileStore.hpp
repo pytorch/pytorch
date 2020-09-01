@@ -23,6 +23,8 @@ class FileStore : public Store {
 
   int64_t getNumKeys() override;
 
+  void deleteKey(const std::string& key) override;
+
   bool check(const std::vector<std::string>& keys) override;
 
   void wait(const std::vector<std::string>& keys) override;

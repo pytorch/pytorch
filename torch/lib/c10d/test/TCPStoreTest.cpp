@@ -40,6 +40,10 @@ void testHelper(const std::string& prefix = "") {
     // We expect 5 keys since 3 are added above, 'counter' is added by the
     // helper thread, and the init key to coordinate workers.
     EXPECT_EQ(numKeys, 5);
+
+    serverStore->deleteKey("key0");
+    numKeys = serverStore->getNumKeys();
+    EXPECT_EQ(numKeys, 4);
   });
 
   // Hammer on TCPStore
