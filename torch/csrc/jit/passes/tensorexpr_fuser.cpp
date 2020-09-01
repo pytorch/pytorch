@@ -403,7 +403,7 @@ class TensorExprFuser {
         debugDumpFusionGroup(
             "Trying to merge into the previous fusion group: ",
             prev_fusion_group);
-        if (canMerge(prev_fusion_group, fusion_group)) {
+        if (false && canMerge(prev_fusion_group, fusion_group)) {
           prev_fusion_group = tryMerge(prev_fusion_group, fusion_group);
           debugDumpFusionGroup(
               "Successfully merged into the previous fusion group: ",
@@ -501,8 +501,13 @@ class TensorExprFuser {
   bool allShapesAreKnown(Node* node) {
     // TODO: Relax the checks to support dynamic shapes
     for (Value* input : node->inputs()) {
-      if (input->type()->cast<TensorType>() && !input->isCompleteTensor()) {
-        return false;
+      if (input->type()->cast<TensorType>()) {
+        if (!input->isCompleteTensor()) {
+          return false;
+        }
+        if (*input->type()->cast<TensorType>()->dim() == 0) {
+          return false;
+        }
       }
     }
     return true;
