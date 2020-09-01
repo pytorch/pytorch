@@ -2,6 +2,8 @@ import torch
 from .pattern_utils import (
     register_fusion_pattern,
 )
+from .utils import _parent_name
+from ..fuse_modules import OP_LIST_TO_FUSER_METHOD
 
 # ---------------------
 # Fusion Patterns

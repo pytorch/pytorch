@@ -27,13 +27,11 @@ from .pattern_utils import (
     get_dynamic_quant_patterns,
 )
 
-from quantization_patterns import *
+from .quantization_patterns import *
 
 from .utils import _parent_name
 
-from abc import ABC, abstractmethod
 import copy
-import operator
 
 # ------------------------
 # Helper Functions

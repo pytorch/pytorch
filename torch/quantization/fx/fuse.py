@@ -1,5 +1,3 @@
-import torch
-
 from torch.fx import (
     GraphModule,
 )
@@ -9,16 +7,12 @@ from torch.fx.graph import (
     map_arg,
 )
 
-from ..fuse_modules import OP_LIST_TO_FUSER_METHOD
-
 from .pattern_utils import (
     matches,
     get_fusion_patterns,
 )
 
-from fusion_patterns import *
-
-from .utils import _parent_name
+from .fusion_patterns import *  # noqa: F401
 
 import copy
 class Fuser:

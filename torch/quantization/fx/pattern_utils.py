@@ -27,7 +27,7 @@ def get_quant_patterns():
 
 DYNAMIC_QUANTIZATION_PATTERNS = OrderedDict()
 # Register pattern for dynamic quantization
-def register_dynamic_pattern(pattern):
+def register_dynamic_quant_pattern(pattern):
     def insert(fn):
         DYNAMIC_QUANTIZATION_PATTERNS[pattern] = fn
         return fn

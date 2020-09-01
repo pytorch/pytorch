@@ -1,8 +1,10 @@
 import torch
 from .pattern_utils import (
     register_quant_pattern,
-    register_dynamic_quant_patttern,
+    register_dynamic_quant_pattern,
 )
+from abc import ABC, abstractmethod
+import operator
 
 # ------------------------
 # Helper Functions
@@ -505,8 +507,8 @@ class DefaultQuant(QuantizeHandler):
         return quantize(quantizer, node)
 
 # 2. Post Training Dynamic Quantizatoin Patterns
-@register_dynamic_pattern(torch.nn.Linear)
-@register_dynamic_pattern(torch.nn.functional.linear)
+@register_dynamic_quant_pattern(torch.nn.Linear)
+@register_dynamic_quant_pattern(torch.nn.functional.linear)
 class DynamicLinear(QuantizeHandler):
     def __init__(self, quantizer, node):
         super().__init__(quantizer, node)
