@@ -2,6 +2,7 @@
 
 #include <ATen/native/quantized/cpu/conv_packed_params.h>
 #include <ATen/native/quantized/cpu/packed_params.h>
+#include <ATen/native/quantized/cpu/embedding_packed_params.h>
 #include <torch/custom_class.h>
 
 torch::class_<LinearPackedParamsBase> register_linear_params();
@@ -11,11 +12,13 @@ torch::class_<ConvPackedParamsBase<kSpatialDim>> register_conv_params();
 
 extern template torch::class_<ConvPackedParamsBase<2>> register_conv_params<2>();
 extern template torch::class_<ConvPackedParamsBase<3>> register_conv_params<3>();
+torch::class_<EmbeddingPackedParamsBase> register_embedding_params();
 
 TORCH_LIBRARY(quantized, m) {
   register_linear_params();
   register_conv_params<2>();
   register_conv_params<3>();
+  register_embedding_params();
 
   m.def("add(Tensor qa, Tensor qb, float scale, int zero_point) -> Tensor qc");
   m.def("add.out(Tensor qa, Tensor qb, Tensor(a!) out) -> Tensor(a!) out");
@@ -86,12 +89,17 @@ TORCH_LIBRARY(quantized, m) {
   m.def("conv3d_dilation(__torch__.torch.classes.quantized.Conv3dPackedParamsBase packed_weights) -> int[]");
   m.def("conv3d_groups(__torch__.torch.classes.quantized.Conv3dPackedParamsBase packed_weights) -> int");
   m.def("elu(Tensor self, float output_scale, int output_zero_point, Scalar alpha=1, Scalar scale=1, Scalar input_scale=1) -> Tensor");
+  m.def("embedding_bag_prepack(Tensor weight) -> __torch__.torch.classes.quantized.EmbeddingPackedParamsBase W_prepack");
+  m.def("embedding_bag_unpack(__torch__.torch.classes.quantized.EmbeddingPackedParamsBase W_prepack) -> Tensor W_origin");
   m.def("embedding_bag_byte_prepack(Tensor weight) -> Tensor");
   m.def("embedding_bag_byte_unpack(Tensor weight) -> Tensor");
   m.def("embedding_bag_4bit_prepack(Tensor weight) -> Tensor");
   m.def("embedding_bag_4bit_unpack(Tensor weight) -> Tensor");
-  m.def("embedding_bag_byte_rowwise_offsets(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq=False, int mode=0, bool sparse=False, Tensor? per_sample_weights=None, bool include_last_offset=False) -> Tensor");
-  m.def("embedding_bag_4bit_rowwise_offsets(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq=False, int mode=0, bool sparse=False, Tensor? per_sample_weights=None, Tensor? compressed_indices_mapping=None, bool include_last_offset=False) -> Tensor");
+  m.def("embedding_bag_2bit_prepack(Tensor weight) -> Tensor");
+  m.def("embedding_bag_2bit_unpack(Tensor weight) -> Tensor");
+  m.def("embedding_bag_byte_rowwise_offsets(Tensor weight, Tensor indices, Tensor? offsets=None, bool scale_grad_by_freq=False, int mode=0, bool sparse=False, Tensor? per_sample_weights=None, bool include_last_offset=False) -> Tensor");
+  m.def("embedding_bag_4bit_rowwise_offsets(Tensor weight, Tensor indices, Tensor? offsets=None, bool scale_grad_by_freq=False, int mode=0, bool sparse=False, Tensor? per_sample_weights=None, Tensor? compressed_indices_mapping=None, bool include_last_offset=False) -> Tensor");
+  m.def("embedding_bag_byte(__torch__.torch.classes.quantized.EmbeddingPackedParamsBase weight, Tensor indices, Tensor? offsets=None, bool scale_grad_by_freq=False, int mode=0, bool sparse=False, Tensor? per_sample_weights=None, Tensor? compressed_indices_mapping=None, bool include_last_offset=False) -> Tensor");
   m.def("celu(Tensor self, float output_scale, int output_zero_point, Scalar alpha=1) -> Tensor");
   m.def("hardswish(Tensor input, float output_scale, int output_zero_point) -> Tensor");
   m.def("group_norm(Tensor input, int num_groups, Tensor? weight, Tensor? bias, float eps, float output_scale, int output_zero_point) -> Tensor");

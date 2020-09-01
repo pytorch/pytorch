@@ -4,8 +4,10 @@ import collections
 from datetime import timedelta
 import enum
 
+import torch
 import torch.distributed as dist
 
+from . import api
 from . import constants as rpc_constants
 
 
@@ -21,8 +23,8 @@ def _backend_type_repr(self):
 _backend_type_doc = """
     An enum class of available backends.
 
-    PyTorch ships with two builtin backends: ``BackendType.PROCESS_GROUP`` and
-    ``BackendType.TENSORPIPE``. Additional ones can be registered using the
+    PyTorch ships with two builtin backends: ``BackendType.TENSORPIPE`` and
+    ``BackendType.PROCESS_GROUP``. Additional ones can be registered using the
     :func:`~torch.distributed.rpc.backend_registry.register_backend` function.
 """
 
@@ -171,6 +173,57 @@ def _tensorpipe_construct_rpc_backend_options_handler(
     )
 
 
+# detect if any worker has invalid device_map configurations, and return
+# names of failed workers
+def _tensorpipe_check_device_maps(agent, device_maps):
+    if device_maps is None:
+        device_maps = {}
+
+    def check_one_worker(name, device_maps, all_device_counts):
+        device_count = all_device_counts[name]
+        wrong_worker_names = set(device_maps) - set(all_device_counts)
+        if wrong_worker_names:
+            raise ValueError(f"Wrong worker names: {wrong_worker_names}")
+        for worker_name in all_device_counts:
+            remote_device_count = all_device_counts[worker_name]
+            if worker_name in device_maps:
+                device_map = device_maps[worker_name]
+                key_set = set(device_map.keys())
+                val_set = set(device_map.values())
+                if not all([
+                    len(device_map) == len(key_set),
+                    len(device_map) == len(val_set),  # check 1-to-1 mapping
+                    min(key_set) >= 0,
+                    max(key_set) < device_count,  # check local range
+                    min(val_set) >= 0,
+                    max(val_set) < remote_device_count  # check remote range
+                ]):
+                    raise ValueError(
+                        f"Invalid device_map configuration on {name}:\n"
+                        f"device_maps = {device_maps}"
+                    )
+
+    gathered = api._all_gather([torch.cuda.device_count(), device_maps])
+    all_device_counts = {name: gathered[name][0] for name in gathered}
+    all_device_maps = {name: gathered[name][1] for name in gathered}
+    for worker_name in all_device_maps:
+        worker_device_maps = all_device_maps[worker_name]
+        check_one_worker(worker_name, worker_device_maps, all_device_counts)
+
+    # passed all checked, construct reverse mapping for return values
+    reverse_device_maps = {}
+    local_name = api.get_worker_info().name
+    for worker_name in all_device_maps:
+        remote_device_maps = all_device_maps[worker_name]
+        if local_name in remote_device_maps:
+            remote_device_map = remote_device_maps[local_name]
+            reverse_device_maps[worker_name] = {
+                remote_device_map[k]: k for k in remote_device_map
+            }
+
+    agent._set_reverse_device_maps(reverse_device_maps)
+
+
 def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_options):
     from . import TensorPipeRpcBackendOptions
     from . import TensorPipeAgent
@@ -194,9 +247,19 @@ def _tensorpipe_init_backend_handler(store, name, rank, world_size, rpc_backend_
     group = _init_process_group(store, rank, world_size)
 
     # TODO: add try-except and destroy _agent in all processes if any fails.
-    return TensorPipeAgent(
+    agent = TensorPipeAgent(
         store, name, rank, world_size, group, rpc_backend_options
     )
+
+    api._init_rpc_states(agent)
+
+    try:
+        _tensorpipe_check_device_maps(agent, rpc_backend_options.device_maps)
+    except Exception:
+        api.shutdown()
+        raise
+
+    return agent
 
 
 register_backend(

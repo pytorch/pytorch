@@ -1090,6 +1090,23 @@ class TestDistributions(TestCase):
             expected = scipy.stats.nbinom(total_count.cpu().numpy(), 1 - probs.cpu().numpy()).logpmf(sample)
             self.assertEqual(log_prob, expected, atol=1e-4, rtol=0)
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    def test_zero_excluded_binomial(self):
+        vals = Binomial(total_count=torch.tensor(1.0).cuda(),
+                        probs=torch.tensor(0.9).cuda()
+                        ).sample(torch.Size((100000000,)))
+        self.assertTrue((vals >= 0).all())
+        vals = Binomial(total_count=torch.tensor(1.0).cuda(),
+                        probs=torch.tensor(0.1).cuda()
+                        ).sample(torch.Size((100000000,)))
+        self.assertTrue((vals < 2).all())
+        vals = Binomial(total_count=torch.tensor(1.0).cuda(),
+                        probs=torch.tensor(0.5).cuda()
+                        ).sample(torch.Size((10000,)))
+        # vals should be roughly half zeroes, half ones
+        assert (vals == 0.0).sum() > 4000
+        assert (vals == 1.0).sum() > 4000
+
     def test_multinomial_1d(self):
         total_count = 10
         p = torch.tensor([0.1, 0.2, 0.3], requires_grad=True)

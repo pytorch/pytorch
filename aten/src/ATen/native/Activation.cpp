@@ -30,6 +30,8 @@ DEFINE_DISPATCH(softshrink_stub);
 DEFINE_DISPATCH(shrink_backward_stub);
 DEFINE_DISPATCH(leaky_relu_stub);
 DEFINE_DISPATCH(leaky_relu_backward_stub);
+DEFINE_DISPATCH(silu_stub);
+DEFINE_DISPATCH(silu_backward_stub);
 
 Tensor hardtanh(const Tensor& self, Scalar min, Scalar max) {
   return at::clamp(self, min, max);
@@ -195,20 +197,31 @@ Tensor & celu_(Tensor & self, Scalar alpha) {
 }
 
 Tensor silu(const Tensor& self) {
-  return self * at::sigmoid(self);
+  Tensor result = at::empty({0}, self.options());
+  at::silu_out(result, self);
+  return result;
 }
 
 Tensor& silu_(Tensor& self) {
-  return self.mul_(at::sigmoid(self));
+  return at::silu_out(self, self);
 }
 
 Tensor& silu_out(Tensor& result, const Tensor& self) {
-  return at::mul_out(result, self, at::sigmoid(self));
+  TORCH_CHECK(
+      result.dtype() == self.dtype(),
+      "Output Tensor should have the same type as in Input Tensor.")
+  auto iter = TensorIterator::unary_op(result, self);
+  silu_stub(iter.device_type(), iter);
+  return result;
 }
 
-Tensor silu_backward(const Tensor& grad, const Tensor& self) {
-  auto self_sigmoid = at::sigmoid(self);
-  return grad * (self_sigmoid * (1 + self * (1 - self_sigmoid)));
+Tensor silu_backward(
+    const Tensor& grad_output,
+    const Tensor& input) {
+  Tensor grad_input = at::empty({0}, input.options());
+  auto iter = TensorIterator::binary_op(grad_input, grad_output, input);
+  silu_backward_stub(iter.device_type(), iter);
+  return grad_input;
 }
 
 template <typename scalar_t>
@@ -359,7 +372,16 @@ static Tensor threshold_out(
     Scalar value,
     const Tensor& other) {
   Tensor result = opt_result.value_or(Tensor());
-  auto iter = TensorIterator::binary_op(result, self, other);
+  auto iter = TensorIteratorConfig()
+    .set_check_mem_overlap(false)  // threshold is idempotent, so overlap is okay
+    .add_output(result)
+    .add_input(self)
+    .add_input(other)
+    .allow_cpu_scalars(true)
+    .promote_inputs_to_common_dtype(true)
+    .cast_common_dtype_to_outputs(true)
+    .enforce_safe_casting_to_output(true)
+    .build();
   threshold_stub(iter.device_type(), iter, threshold, value);
   return iter.output();
 }

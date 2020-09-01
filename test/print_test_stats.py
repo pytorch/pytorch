@@ -3,8 +3,12 @@
 # Read and print test results statistics
 from xml.dom import minidom
 from glob import glob
-import os.path as osp
+import json
+import os
+import time
+
 import datetime
+import requests
 
 class TestCase:
     def __init__(self, dom):
@@ -63,7 +67,7 @@ def parse_report(path):
         yield TestCase(test_case)
 
 def parse_reports(folder):
-    reports = glob(osp.join(folder, '**', '*.xml'), recursive=True)
+    reports = glob(os.path.join(folder, '**', '*.xml'), recursive=True)
     tests_by_class = dict()
     for report in reports:
         for test_case in parse_report(report):
@@ -72,6 +76,54 @@ def parse_reports(folder):
                 tests_by_class[class_name] = TestSuite(class_name)
             tests_by_class[class_name].append(test_case)
     return tests_by_class
+
+def build_message(test_case):
+    return {
+        "normal": {
+            "build_pr": os.environ.get("CIRCLE_PR_NUMBER"),
+            "build_tag": os.environ.get("CIRCLE_TAG"),
+            "build_sha1": os.environ.get("CIRCLE_SHA1"),
+            "build_branch": os.environ.get("CIRCLE_BRANCH"),
+            "test_suite_name": test_case.class_name,
+            "test_case_name": test_case.name,
+        },
+        "int": {
+            "time": int(time.time()),
+            "test_total_count": 1,
+            "test_total_time": int(test_case.time * 1000),
+            "test_failed_count": 1 if test_case.failed > 0 else 0,
+            "test_skipped_count": 1 if test_case.skipped > 0 else 0,
+            "test_errored_count": 1 if test_case.errored > 0 else 0,
+        },
+    }
+
+def send_report(reports):
+    access_token = os.environ.get("SCRIBE_GRAPHQL_ACCESS_TOKEN")
+
+    if not access_token:
+        print("No scribe access token provided, skip sending report!")
+        return
+    print("Scribe access token provided, sending report...")
+    url = "https://graph.facebook.com/scribe_logs"
+    r = requests.post(
+        url,
+        data={
+            "access_token": access_token,
+            "logs": json.dumps(
+                [
+                    {
+                        "category": "perfpipe_pytorch_test_times",
+                        "message": json.dumps(build_message(test_case)),
+                        "line_escape": False,
+                    }
+                    for name in sorted(reports.keys())
+                    for test_case in reports[name].test_cases
+                ]
+            ),
+        },
+    )
+    print("Scribe report status: {}".format(r.text))
+    r.raise_for_status()
 
 if __name__ == '__main__':
     import sys
@@ -83,6 +135,8 @@ if __name__ == '__main__':
     if len(reports) == 0:
         print(f"No test reports found in {sys.argv[1]}")
         sys.exit(0)
+
+    send_report(reports)
 
     longest_tests = []
     total_time = 0

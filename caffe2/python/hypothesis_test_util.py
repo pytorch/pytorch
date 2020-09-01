@@ -110,7 +110,7 @@ hypothesis.settings.register_profile(
         derandomize=True,
         suppress_health_check=[hypothesis.HealthCheck.too_slow],
         database=None,
-        max_examples=100,
+        max_examples=50,
         min_satisfying_examples=1,
         verbosity=hypothesis.Verbosity.verbose,
         deadline=1000))

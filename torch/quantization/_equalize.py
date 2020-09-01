@@ -127,10 +127,10 @@ def converged(curr_modules, prev_modules, threshold=1e-4):
     if curr_modules.keys() != prev_modules.keys():
         raise ValueError("The keys to the given mappings must have the same set of names of modules")
 
-    summed_norms = 0
+    summed_norms = torch.tensor(0.)
     if None in prev_modules.values():
         return False
     for name in curr_modules.keys():
         difference = curr_modules[name].weight.sub(prev_modules[name].weight)
         summed_norms += torch.norm(difference)
-    return summed_norms < threshold
+    return bool(summed_norms < threshold)
