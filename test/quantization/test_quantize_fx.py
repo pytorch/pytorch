@@ -15,10 +15,14 @@ from torch.quantization import (
     fuse_fx,
     prepare_fx,
     convert_fx,
+    quantize_dynamic_fx,
+    prepare_dynamic_fx,
+    convert_dynamic_fx,
 )
 
 from torch.quantization import (
     default_qconfig,
+    default_dynamic_qconfig,
     default_qat_qconfig,
     prepare,
     prepare_qat,
@@ -141,6 +145,27 @@ class TestQuantizeFx(QuantizationTestCase):
                 expected_node=quantized_node,
                 expected_node_occurrence=node_occurrence,
                 debug=True)
+
+    @skipIfNoFBGEMM
+    def test_dynamic_quant_weight_observer(self):
+        ''' Test that weight observer is run in convert step
+        '''
+
+        class M(torch.nn.Module):
+            def __init__(self, weight):
+                super().__init__()
+                self.weight = torch.nn.Parameter(weight)
+
+            def forward(self, x):
+                return F.linear(x, self.weight)
+
+        m = M(torch.rand(1, 1)).eval()
+        original = symbolic_trace(m)
+        qconfig = default_dynamic_qconfig
+        qconfig_dict = {'': qconfig}
+        quantized = quantize_dynamic_fx(original, qconfig_dict)
+        print(quantized.src)
+
 
 class TestQuantizeFxOps(QuantizationTestCase):
     """Unit tests for individual ops
