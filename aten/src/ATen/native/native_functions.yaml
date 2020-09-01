@@ -3166,7 +3166,7 @@
     CPU: roll_cpu
     CUDA: roll_cuda
 
-# default int[] value [0,1] should not add space after comma, since native_parse.py uses ', ' to split args
+# default int[] value [0,1] should not add space after comma, since codegen parser uses ', ' to split args
 
 - func: rot90(Tensor self, int k=1, int[] dims=[0,1]) -> Tensor
   use_c10_dispatcher: full
@@ -3630,6 +3630,17 @@
 - func: rsub.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
   use_c10_dispatcher: full
   variants: function
+
+- func: heaviside.out(Tensor self, Tensor values, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: heaviside_out
+
+- func: heaviside(Tensor self, Tensor values) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+
+- func: heaviside_(Tensor(a!) self, Tensor values) -> Tensor(a!)
+  variants: method
 
 # For C++ only, until we have conversion from C++ numbers to Tensor
 - func: rsub.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
@@ -5773,7 +5784,7 @@
     CPU: foreach_tensor_add_scalar_kernel_slow
     CUDA: foreach_tensor_add_scalar_kernel_cuda
 
-- func: _foreach_add_.Scalar(Tensor[](a!) self, Scalar scalar) -> ()
+- func: _foreach_add_.Scalar(Tensor(a!)[] self, Scalar scalar) -> ()
   device_guard: False
   variants: function
   dispatch:
