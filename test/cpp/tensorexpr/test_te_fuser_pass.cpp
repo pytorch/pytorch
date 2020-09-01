@@ -112,8 +112,8 @@ void testFuserPass_4() {
   // The %x and %y computations are completely independent and yet we should put
   // them into a single fusion group rather than having two separate ones.
   testing::FileCheck()
-      .check("tensorexpr::Group_0")
-      ->check_not("tensorexpr::Group_1")
+      .check("prim::TensorExprGroup_0")
+      ->check_not("prim::TensorExprGroup_1")
       ->run(*g);
 }
 

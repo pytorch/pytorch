@@ -98,7 +98,6 @@ struct AutogradZeroSpecializer {
     }
     for (Node* n : profiled_opt_uses) {
       n->output()->replaceAllUsesWith(v);
-      // n->destroy();
     }
   }
 
