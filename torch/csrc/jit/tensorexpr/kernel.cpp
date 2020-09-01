@@ -853,7 +853,8 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
 
     case aten::relu: {
       return computeOneOperand("aten_relu", v, [](const ExprHandle& a) {
-        return Max::make(a, 0, false);
+        auto zero = Cast::make(a.dtype(), 0);
+        return ifThenElse(CompareSelect::make(a, zero, kLT), zero, a);
       });
     } break;
 
@@ -1081,7 +1082,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
           [](const ExprHandle& a,
              const ExprHandle& threshold,
              const ExprHandle& value) {
-            return ifThenElse(CompareSelect::make(a, threshold, kGT), a, value);
+            return ifThenElse(CompareSelect::make(a, threshold, kLE), value, a);
           });
     } break;
 
