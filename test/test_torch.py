@@ -16151,8 +16151,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @precisionOverride({torch.bfloat16: 1e-0, torch.float: 1e-4, torch.double: 1e-8,
                         torch.cfloat: 1e-4, torch.cdouble: 1e-8})
     @dtypesIfCUDA(torch.half, torch.float, torch.double, torch.cfloat, torch.cdouble)
-    @dtypesIfCPU(torch.bfloat16, torch.float, torch.double, torch.cfloat, torch.cdouble)
-    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    @dtypes(torch.bfloat16, torch.float, torch.double, torch.cfloat, torch.cdouble)
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_addmv(self, device, dtype):
         t = torch.randn(10, device=device).to(dtype)
