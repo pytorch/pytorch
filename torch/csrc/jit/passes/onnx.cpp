@@ -217,22 +217,8 @@ void BlockToONNX(
         type = type->withScalarType(new_tensor_type->scalarType());
       }
       return type;
-    } else {
-      return new_type;
     }
-
-    // if (old_tensor_type && old_tensor_type->scalarType().has_value()) {
-    //   if (new_tensor_type && new_tensor_type->sizes().isComplete()) {
-    //     TypePtr old_type_with_sizes = old_tensor_type->withSizes(new_tensor_type->sizes().concrete_sizes().value());
-    //     return old_type_with_sizes;
-    //   }
-    //   return old_type;
-    // }
-    // if (new_tensor_type && new_tensor_type->scalarType().has_value()) {
-    //   return new_type;
-    // }
-
-    // return old_type;
+    return new_type;
   };
 
   // Put the new outputs in our environment map, and copy the type from the
