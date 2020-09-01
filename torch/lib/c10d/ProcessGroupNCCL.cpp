@@ -918,10 +918,12 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce(
     const AllreduceOptions& opts) {
   check_gpu_tensors(tensors);
 
+  const NCCLAllreduceOptions& nopts = dynamic_cast<const NCCLAllreduceOptions&>(opts);
+
   return collective(
       tensors,
       tensors,
-      opts.cudaStreams,
+      nopts.cudaStreams,
       [&](at::Tensor& input,
           at::Tensor& output,
           ncclComm_t comm,
