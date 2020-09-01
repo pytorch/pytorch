@@ -5776,7 +5776,8 @@ class TestTorchDeviceType(TestCase):
 
     @onlyOnCPUAndCUDA
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False)))
+    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_half=False, include_bfloat16=False)))
+    @dtypesIfCUDA(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False)))
     def test_nanprod_vs_numpy(self, device, dtype):
         self._test_sum_reduction_vs_numpy(torch.nanprod, np.nanprod, device, dtype)
         self._test_sum_reduction_vs_numpy(torch.nanprod, np.nanprod, device, dtype, with_extremal=True)
