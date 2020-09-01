@@ -155,7 +155,9 @@ void TransformerDecoderLayerImpl::reset_parameters() {
 }
 
 ///Pass the inputs (and mask) through the decoder layer.
-Tensor TransformerDecoderLayerImpl::forward(Tensor tgt, const Tensor& memory,
+Tensor TransformerDecoderLayerImpl::forward(
+  Tensor tgt,
+  const Tensor& memory,
   const Tensor& tgt_mask,
   const Tensor& memory_mask,
   const Tensor& tgt_key_padding_mask,
@@ -262,6 +264,83 @@ Tensor TransformerEncoderImpl::forward(
   return output;
 }
 
+// ========================TransformerDecoderImpl=========================
+TransformerDecoderImpl::TransformerDecoderImpl(
+  TransformerDecoderOptions options_ ) : options(std::move(options_)){
+  reset();
+}
+
+void TransformerDecoderImpl::reset() {
+
+  layers = this->register_module("layers", ModuleList());
+  for (int64_t i = 0; i < options.num_layers(); ++i) {
+    layers->push_back(options.decoder_layer()->clone());
+  }
+
+  if (!options.norm().is_empty()) {
+    norm = options.norm().clone();
+    this->register_module("norm", norm.ptr());
+  }
+}
+
+void TransformerDecoderImpl::reset_parameters() {
+
+  TORCH_CHECK(layers->size() == options.num_layers(),
+    "TransformerDecoder should have", options.num_layers(),
+    " decoder layers, but got ", layers->size());
+
+  size_t num_layers = layers->size();
+  for (size_t i = 0; i < num_layers; ++i) {
+    layers->at<TransformerDecoderLayerImpl>(i).reset_parameters();
+  }
+  // a. No way to know whether module in AnyModule has api to reset_parameters, so replace instead
+  // b. Allow user to add/delete normalization module when reset parameters
+  if (!norm.is_empty()) {
+    this->unregister_module("norm");
+    norm = AnyModule();
+  }
+  if (!options.norm().is_empty()) {
+    norm = options.norm().clone();
+    this->register_module("norm", norm.ptr());
+  }
+
+}
+
+Tensor TransformerDecoderImpl::forward(
+  const Tensor& tgt,
+  const Tensor& memory,
+  const Tensor& tgt_mask,
+  const Tensor& memory_mask,
+  const Tensor& tgt_key_padding_mask,
+  const Tensor& memory_key_padding_mask){
+
+  size_t num_layers = layers->size();
+  Tensor output;
+  if (num_layers > 0) {
+    output = layers->at<TransformerDecoderLayerImpl>(0).forward(
+      tgt,
+      memory,
+      tgt_mask,
+      memory_mask,
+      tgt_key_padding_mask,
+      memory_key_padding_mask);
+  }
+  for (size_t i = 1; i < num_layers; ++i) {
+    output = layers->at<TransformerDecoderLayerImpl>(i).forward(
+      output,
+      memory,
+      tgt_mask,
+      memory_mask,
+      tgt_key_padding_mask,
+      memory_key_padding_mask);
+  }
+
+  if (!norm.is_empty()) {
+    output = norm.forward<Tensor>(num_layers == 0 ? tgt : output);
+  }
+
+  return output;
+}
 
 } // namespace nn
 } // namespace torch
