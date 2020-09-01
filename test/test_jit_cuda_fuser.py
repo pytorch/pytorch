@@ -550,9 +550,8 @@ class TestCudaFuser(JitTestCase):
         jit_o = t_jit(x, y)
         jit_o = t_jit(x, y)
         o = t(x, y)
-        for oo, jit_oo in zip(o, jit_o):
-            self.assertEqual(oo.dtype, jit_oo.dtype)
-            self.assertEqual(oo, jit_oo)
+        self.assertEqual(o.dtype, jit_o.dtype)
+        self.assertEqual(o, jit_o)
         self.assertGraphContains(t_jit.graph_for(x, y), FUSION_GROUP)
 
     # end-2-end test of permutation & contiguity handling in integration.
@@ -595,11 +594,10 @@ class TestCudaFuser(JitTestCase):
         jit_o = t_jit(x, y)
         jit_o = t_jit(x, y)
         o = t(x, y)
-        for oo, jit_oo in zip(o, jit_o):
-            self.assertEqual(oo.dtype, jit_oo.dtype)
-            # numerical issues here due to our scheduling.
-            # can't use `self.assertEqual(oo, jit_oo)`
-            self.assertTrue(self._compare("comparing output failed", oo, jit_oo, 1e-4))
+        self.assertEqual(o.dtype, jit_o.dtype)
+        # numerical issues here due to our scheduling.
+        # can't use `self.assertEqual(o, jit_o)`
+        self.assertTrue(self._compare("comparing output failed", o, jit_o, 1e-4))
         self.assertGraphContains(t_jit.graph_for(x, y), FUSION_GROUP)
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
@@ -651,9 +649,8 @@ class TestCudaFuser(JitTestCase):
         jit_o = t_jit(x, y, z)
         jit_o = t_jit(x, y, z)
         o = t(x, y, z)
-        for oo, jit_oo in zip(o, jit_o):
-            self.assertEqual(oo.dtype, jit_oo.dtype)
-            self.assertEqual(oo, jit_oo)
+        self.assertEqual(o.dtype, jit_o.dtype)
+        self.assertEqual(o, jit_o)
         self.assertGraphContains(t_jit.graph_for(x, y, z), FUSION_GROUP)
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
@@ -676,9 +673,8 @@ class TestCudaFuser(JitTestCase):
         jit_o = t_jit(x, y, z)
         jit_o = t_jit(x, y, z)
         o = t(x, y, z)
-        for oo, jit_oo in zip(o, jit_o):
-            self.assertEqual(oo.dtype, jit_oo.dtype)
-            self.assertEqual(oo, jit_oo)
+        self.assertEqual(o.dtype, jit_o.dtype)
+        self.assertEqual(o, jit_o)
         self.assertGraphContains(t_jit.graph_for(x, y, z), FUSION_GROUP)
 
 
