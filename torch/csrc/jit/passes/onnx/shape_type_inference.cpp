@@ -90,11 +90,9 @@ bool IsSupportedNode(const Node* n) {
     return false;
   }
 
-  // NOTE: should be able to run. At this stage the subgraph has already completed shape inferencing.
   // Skip when block size is zero. This is when the node is first created, doesn't have subblocks attached yet.
+  // Run shape inference for these nodes when the subgraph has already completed shape inferencing.
   if ((node_kind == ::c10::onnx::Loop || node_kind == ::c10::onnx::If) && n->blocks().size() == 0) {
-    // TODO: Support Loop & If shape inference by propagating input shape to
-    // block input.
     return false;
   }
 
