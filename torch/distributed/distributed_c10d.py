@@ -1284,9 +1284,9 @@ def gather_object(obj, object_gather_list=None, dst=0, group=group.WORLD):
         >>> gather_objects = ["foo", 12, {1: 2}] # any picklable object
         >>> output = [None for _ in gather_objects]
         >>> dist.gather_object(
-            gather_objects[dist.get_rank()],
-            output if dist.get_rank() == 0 else None,
-            dst=0
+                gather_objects[dist.get_rank()],
+                output if dist.get_rank() == 0 else None,
+                dst=0
             )
         >>> # On rank 0
         >>> output
