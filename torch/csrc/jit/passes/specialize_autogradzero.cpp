@@ -98,7 +98,6 @@ struct AutogradZeroSpecializer {
     }
     for (Node* n : profiled_opt_uses) {
       n->output()->replaceAllUsesWith(v);
-      n->destroy();
     }
   }
 
@@ -114,7 +113,7 @@ struct AutogradZeroSpecializer {
     false_block->cloneFrom(graph_->block(), value_map);
     replaceBlockInputsWithGraphInputs(false_block);
 
-    WithInsertPoint wip{graph_->block()};
+    WithInsertPoint wip{graph_->block()->param_node()->next()};
     Value* none_val = graph_->insertConstant(IValue());
     std::vector<Value*> checks;
 
