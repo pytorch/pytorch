@@ -2697,6 +2697,26 @@ class _DistTestBase(object):
         dist.broadcast_object_list(objects, src=0)
         self.assertEqual(objects, collectives_object_test_list)
 
+    @require_backend({"gloo"})
+    @unittest.skipIf(BACKEND == "nccl", "NCCL does not support scatter")
+    def test_scatter_object_list(self):
+        src_rank = 0
+        scatter_list = (
+            collectives_object_test_list
+            if self.rank == src_rank
+            else [None for _ in collectives_object_test_list]
+        )
+        scatter_list = scatter_list[: int(os.environ["WORLD_SIZE"])]
+        output_obj_list = [None]
+        dist.scatter_object_list(output_obj_list, scatter_list, src=src_rank)
+        self.assertEqual(output_obj_list[0], collectives_object_test_list[self.rank])
+        # Ensure errors are raised upon incorrect arguments.
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Expected argument scatter_object_output_list to be a list of size at least 1.",
+        ):
+            dist.scatter_object_list([], scatter_list, src=src_rank)
+
 
 if BACKEND == "gloo" or BACKEND == "nccl":
     WORLD_SIZE = os.environ["WORLD_SIZE"]
