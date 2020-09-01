@@ -43,6 +43,15 @@ struct GraphExecutorState {
   std::unordered_map<ArgumentSpec, ExecutionPlan> execution_plans;
 };
 
+struct TORCH_API EnableProfilingGuard {
+  EnableProfilingGuard();
+  ~EnableProfilingGuard();
+
+ private:
+  bool old_executor_mode = false;
+  bool old_profiling_mode = false;
+};
+
 struct GraphExecutorImplBase;
 struct TORCH_API GraphExecutor {
   GraphExecutor() = default;
