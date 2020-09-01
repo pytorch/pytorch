@@ -59,7 +59,8 @@ void FusionExecutor::debugCompileFusionFromStr(
   has_random_ = fusion->hasRNG();
   lowered_ = GpuLower(&fusion_);
   compiled_kernel_ = executor_utils::nvrtcCompile(code, name, fusion_id_);
-  compiled_ = true;
+  TORCH_INTERNAL_ASSERT(
+      fusion_id_ > 0, "assign a fusion_id_ <= 0 is not accepted.");
 }
 
 void FusionExecutor::compileFusion(Fusion* fusion, CompileOptions options) {
