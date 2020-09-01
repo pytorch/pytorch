@@ -4,7 +4,7 @@
 
 // The manual function definitions that used to be here are now in torch/csrc/autograd/FunctionsManual.cpp
 // This speeds up re-compilation and allow to share these implementations so that they can be
-// used for forward formulas as well.
+// used for forward mode AD formulas as well.
 
 using namespace torch::autograd::generated::details;
 using at::Tensor;
