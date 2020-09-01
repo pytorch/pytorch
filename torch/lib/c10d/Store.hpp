@@ -32,6 +32,8 @@ class Store {
 
   virtual bool check(const std::vector<std::string>& keys) = 0;
 
+  virtual int64_t getNumKeys() = 0;
+
   virtual void wait(const std::vector<std::string>& keys) = 0;
 
   virtual void wait(

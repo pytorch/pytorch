@@ -76,6 +76,11 @@ int64_t RedisStoreHandler::add(const std::string& name, int64_t value) {
   return reply->integer;
 }
 
+int64_t RedisStoreHandler::getNumKeys() {
+  CHECK(false) << "add not implemented for FileStoreHandler";
+  return 0;
+}
+
 bool RedisStoreHandler::check(const std::vector<std::string>& names) {
   std::vector<std::string> args;
   args.push_back("EXISTS");

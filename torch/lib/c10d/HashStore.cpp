@@ -77,6 +77,10 @@ int64_t HashStore::add(const std::string& key, int64_t i) {
   return ti;
 }
 
+int64_t HashStore::getNumKeys() {
+  throw std::runtime_error("Not Implemented");
+}
+
 bool HashStore::check(const std::vector<std::string>& keys) {
   std::unique_lock<std::mutex> lock(m_);
   for (const auto& key : keys) {

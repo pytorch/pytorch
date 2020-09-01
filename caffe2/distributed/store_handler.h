@@ -42,6 +42,11 @@ class CAFFE2_API StoreHandler {
   virtual int64_t add(const std::string& name, int64_t value) = 0;
 
   /*
+   * Returns the number of keys in this store.
+   */
+  virtual int64_t getNumKeys() = 0;
+
+  /*
    * Check if a keys exist in the store.
    */
   virtual bool check(const std::vector<std::string>& names) = 0;

@@ -36,6 +36,10 @@ void testHelper(const std::string& prefix = "") {
     c10d::test::check(*serverStore, "key0", "value0");
     c10d::test::check(*serverStore, "key1", "value1");
     c10d::test::check(*serverStore, "key2", "value2");
+    auto numKeys = serverStore->getNumKeys();
+    // We expect 5 keys since 3 are added above, 'counter' is added by the
+    // helper thread, and the init key to coordinate workers.
+    EXPECT_EQ(numKeys, 5);
   });
 
   // Hammer on TCPStore
