@@ -388,21 +388,7 @@ void CudaPrinter::visit(const AtomicAdd* v) {
 }
 
 void CudaPrinter::visit(const Max* v) {
-  auto dtype = v->dtype().scalar_type();
-  switch (dtype) {
-    case ScalarType::Half:
-      // doing Half math in float.
-    case ScalarType::Float:
-      os() << "fmaxf";
-      break;
-    case ScalarType::Double:
-      os() << "fmax";
-      break;
-    default:
-      os() << "max";
-      break;
-  }
-  os() << "(";
+  os() << "maximum(";
   v->lhs()->accept(this);
   os() << ",";
   v->rhs()->accept(this);
@@ -410,21 +396,7 @@ void CudaPrinter::visit(const Max* v) {
 }
 
 void CudaPrinter::visit(const Min* v) {
-  auto dtype = v->dtype().scalar_type();
-  switch (dtype) {
-    case ScalarType::Half:
-      // doing Half math in float.
-    case ScalarType::Float:
-      os() << "fminf";
-      break;
-    case ScalarType::Double:
-      os() << "fmin";
-      break;
-    default:
-      os() << "min";
-      break;
-  }
-  os() << "(";
+  os() << "minimum(";
   v->lhs()->accept(this);
   os() << ",";
   v->rhs()->accept(this);
@@ -831,6 +803,23 @@ static std::ostream& operator<<(
   return out;
 }
 
+static const char* resource_string = R"(
+#define NAN __int_as_float(0x7fffffff)
+#define POS_INFINITY __int_as_float(0x7f800000)
+#define NEG_INFINITY __int_as_float(0xff800000)
+
+template<typename T>
+T maximum(T a, T b) {
+  return isnan(a) ? a : (a > b ? a : b);
+}
+
+template<typename T>
+T minimum(T a, T b) {
+  return isnan(a) ? a : (a < b ? a : b);
+}
+
+)";
+
 void CudaCodeGen::Initialize() {
   // TODO: handle multiple kernels.
   // TODO: handle dynamic dimension.
@@ -846,9 +835,8 @@ void CudaCodeGen::Initialize() {
       std::make_unique<CudaPrinter>(&oss_, cuda_analysis_.get(), has_random_);
   metavar_rewriter_ = std::make_unique<GPUMetaVarRewriter>();
 
-  os() << "#define NAN __int_as_float(0x7fffffff)\n"
-          "#define POS_INFINITY __int_as_float(0x7f800000)\n"
-          "#define NEG_INFINITY __int_as_float(0xff800000)\n";
+  os() << resource_string;
+
   if (has_random_) {
     os() << philox_random_string << std::endl;
   }
