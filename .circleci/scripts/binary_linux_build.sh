@@ -19,4 +19,4 @@ else
 fi
 
 # Build the package
-SKIP_ALL_TESTS=1 stdbuf -i0 -o0 -e0 "${DIR}/binary_builds/${build_script}"
+SKIP_ALL_TESTS=1 stdbuf -i0 -o0 -e0 "${DIR}/binary_builds/linux/${build_script}"
