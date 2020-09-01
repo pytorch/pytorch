@@ -128,7 +128,7 @@ class TestVmapAPI(TestCase):
 
         # The fallback doesn't support TensorList
         with self.assertRaisesRegex(RuntimeError, 'Batching rule not implemented'):
-            vmap(lambda t: torch.stack([t]))(tensor)
+            vmap(lambda t: torch.atleast_1d([t]))(tensor)
 
         # Don't support non-tensor returns. This is a limitation of vmap;
         # functions that don't return tensors must be special cased
@@ -906,6 +906,25 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test(vmap(op, in_dims=(0, None)),
              (torch.rand(B1, 2, 3, 5), torch.rand(B0, 2, 5, 3)), in_dims=(None, 0))
 
+    def test_cat(self):
+        test = self._vmap_test
+        B0, B1 = 5, 7
+
+        # Quick hack b/c vmap can't accept a list of tensors as an argument
+        def get_op(dim):
+            def op(*tensors):
+                return torch.cat(tensors, dim=dim)
+            return op
+
+        test(get_op(0), (torch.rand(B0, 2), torch.rand(B0, 3)))
+        test(get_op(0), (torch.rand(2), torch.rand(B0, 3)), in_dims=(None, 0))
+        test(get_op(0), (torch.rand(2, 17), torch.rand(3, 17, B0)), in_dims=(None, 2))
+        test(get_op(-1), (torch.rand(17, 2), torch.rand(17, 3, B0)), in_dims=(None, 2))
+        test(vmap(get_op(0), in_dims=(0, None)),
+             (torch.rand(B1, 2), torch.rand(B0, 3)), in_dims=(None, 0))
+        test(vmap(get_op(0), in_dims=(0, 0)),
+             (torch.rand(B1, 2), torch.rand(B0, B1, 3)), in_dims=(None, 0))
+
     def test_chunk(self):
         test = self._vmap_view_test
         op = torch.chunk
@@ -1073,6 +1092,26 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test(op, (torch.rand(2, B0, 5), 1, 1), in_dims=(1, None, None))
         test(vmap(lambda t: op(t, 1, 1)), (torch.rand(B1, 2, B0, 5),), in_dims=2)
         test(vmap(vmap(lambda t: op(t, 1, 1), in_dims=1)), (torch.rand(B1, 2, B0, B2, 5),), in_dims=2)
+
+    def test_stack(self):
+        test = self._vmap_test
+        B0, B1 = 5, 7
+
+        # Quick hack b/c vmap can't accept a list of tensors as an argument
+        def get_op(dim):
+            def op(*tensors):
+                return torch.stack(tensors, dim=dim)
+            return op
+
+        test(get_op(0), (torch.rand(B0, 3), torch.rand(B0, 3)))
+        test(get_op(0), (torch.rand(3), torch.rand(B0, 3)), in_dims=(None, 0))
+        test(get_op(0), (torch.rand(2, 17), torch.rand(2, 17, B0)), in_dims=(None, 2))
+        test(get_op(-1), (torch.rand(2, 17), torch.rand(2, 17, B0)), in_dims=(None, 2))
+        test(vmap(get_op(0), in_dims=(0, None)),
+             (torch.rand(B1, 2), torch.rand(B0, 2)), in_dims=(None, 0))
+        test(vmap(get_op(0), in_dims=(0, 0)),
+             (torch.rand(B1, 2), torch.rand(B0, B1, 2)), in_dims=(None, 0))
+
 
     def test_slice(self):
         test = self._vmap_view_test

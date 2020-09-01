@@ -432,6 +432,30 @@ Tensor mm_batching_rule(const Tensor& self, const Tensor& other) {
   TORCH_INTERNAL_ASSERT(false, "either self or other must be a BatchedTensor");
 }
 
+Tensor cat_batching_rule(TensorList tensors, int64_t dim) {
+  auto physical_views = MultiBatchVmapTransform::logicalToPhysical(tensors);
+  auto physical_tensors = fmap(
+      physical_views, [](const VmapPhysicalView& view) -> Tensor { return view.tensor(); });
+  TORCH_INTERNAL_ASSERT(
+      tensors.size() > 0, "The dispatcher should not have dispatched here otherwise.");
+  auto result = at::cat(physical_tensors, physical_views[0].getPhysicalDim(dim));
+  return physical_views[0].newLogicalFromPhysical(result);
+}
+
+Tensor stack_batching_rule(TensorList tensors, int64_t dim) {
+  auto physical_views = MultiBatchVmapTransform::logicalToPhysical(tensors);
+  auto physical_tensors = fmap(
+      physical_views, [](const VmapPhysicalView& view) -> Tensor { return view.tensor(); });
+  TORCH_INTERNAL_ASSERT(
+      tensors.size() > 0, "The dispatcher should not have dispatched here otherwise.");
+  // NB: stack wraps the dimensionality to (logical dim + 1), so we have to
+  // manually handle that here.
+  auto dim_physical =
+      physical_views[0].numBatchDims() + maybe_wrap_dim(dim, /*logical*/tensors[0].dim() + 1);
+  auto result = at::stack(physical_tensors, dim_physical);
+  return physical_views[0].newLogicalFromPhysical(result);
+}
+
 // I am quite sad that we need to register operators with exploded TensorOptions,
 // even though the native:: implementations can use TensorOptions&.
 // This also makes it hard to metaprogram: i.e., we can't use
@@ -586,6 +610,10 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("dot", dot_batching_rule);
   m.impl("bmm", bmm_batching_rule);
   m.impl("mm", mm_batching_rule);
+
+  // cat/stack
+  m.impl("cat", cat_batching_rule);
+  m.impl("stack", stack_batching_rule);
 }
 
 } // namespace at
