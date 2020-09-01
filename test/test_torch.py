@@ -13423,17 +13423,19 @@ class TestTorchDeviceType(TestCase):
         y = torch.rand((6,), device=device)
         ind = torch.tensor([0, 2, 3], device=device)
         value = torch.rand((3,), device=device)
-        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+        with self.assertWarnsRegex(UserWarning, 'expanded tensors'):
             x.index_put_((ind,), value)
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            y.index_put_((ind,), y[0])
 
     def test_masked_fill_mem_overlap(self, device):
         x = torch.rand((1,), device=device).expand((6,))
         mask = torch.tensor([True, False, True, True, False, False], device=device)
-        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+        with self.assertWarnsRegex(UserWarning, 'expanded tensors'):
             x.masked_fill_(mask, 0.)
 
         fill_val = torch.tensor(0., device=device)
-        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+        with self.assertWarnsRegex(UserWarning, 'expanded tensors'):
             x.masked_fill_(mask, fill_val)
 
     def test_masked_select_mem_overlap(self, device):
