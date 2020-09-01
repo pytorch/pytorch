@@ -1074,5 +1074,26 @@ def _unwrap_optional(x):
     return x
 
 
+def capture_global_constant_value(name):
+    call_stack = inspect.stack()
+    caller_frame = inspect.stack()[1]
+    caller_module = inspect.getmodule(caller_frame[0])
+
+    if not hasattr(caller_module, name):
+        raise RuntimeError(caller_module.__name__ + " doesn't have a global variable named: " + name)
+    value = getattr(caller_module, name)
+
+    if caller_module.__name__.startswith("__main__"):
+        normalized_module_name = "__torch__" + caller_module.__name__[len("__main__")]
+    else:
+        normalized_module_name = "__torch__." + caller_module.__name__
+
+    torch._C._capture_global_const_value(normalized_module_name + "." + name, value)
+
+
+def reset_captured_global_constant_values_registry():
+    torch._C._reset_captured_global_constant_values_registry()
+
+
 _register_builtin(_unwrap_optional, "aten::_unwrap_optional")
 _register_builtin(_jit_internal.is_scripting, "aten::is_scripting")

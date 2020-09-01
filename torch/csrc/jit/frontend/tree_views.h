@@ -582,7 +582,7 @@ struct Global : public Stmt {
   explicit Global(const TreeRef& tree) : Stmt(tree) {
     tree_->match(TK_GLOBAL);
   }
-  List<Ident> names() {
+  List<Ident> names() const {
     return List<Ident>(subtree(0));
   }
   static Global create(const SourceRange& range, const List<Ident>& names) {

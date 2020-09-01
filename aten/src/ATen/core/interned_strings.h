@@ -33,6 +33,7 @@ namespace c10 {
   _(prim, Eval)                      \
   _(prim, Expand) /* onnx */         \
   _(prim, FusionGroup)               \
+  _(prim, CapturedGlobalConstVal)    \
   _(prim, CudaFusionGroup)           \
   _(prim, FunctionalGraph)           \
   _(prim, DifferentiableGraph)       \

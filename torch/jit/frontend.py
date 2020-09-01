@@ -13,6 +13,7 @@ from torch._C._jit_tree_views import (
     ListLiteral, TupleLiteral, DictLiteral, Const,
     StringLiteral, ListComp, Attribute, BinOp, UnaryOp,
     SliceExpr, Subscript, TernaryIf, With, WithItem, Property,
+    Global
 )
 from torch._utils_internal import get_source_lines_and_file
 
@@ -322,6 +323,20 @@ class StmtBuilder(Builder):
         ast.Div: '/',
         ast.Mod: '%',
     }
+
+    @staticmethod
+    def build_Global(ctx, stmt):
+        r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + len("global"))
+
+        curr_offset = stmt.col_offset + len("global ")
+        idents = []
+        for name in stmt.names:
+            name_range = ctx.make_range(stmt.lineno, curr_offset, curr_offset + len(name))
+            idents.append(Ident(name_range, name))
+            # FIXME: is there a better way to calculate ranges of each name?
+            curr_offset += (len(name) + len(", "))
+
+        return Global(r, idents)
 
     @staticmethod
     def build_Expr(ctx, stmt):

@@ -19,6 +19,7 @@
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/python/python_tracer.h>
+#include <torch/csrc/jit/runtime/captured_global_values_registry.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/logging.h>
 #include <torch/csrc/jit/serialization/export.h>
@@ -1251,6 +1252,16 @@ void initJitScriptBindings(PyObject* module) {
         TORCH_INTERNAL_ASSERT(name.name() == def.name().name());
         return script_compile_function(name, def, defaults, std::move(rcb));
       });
+  m.def(
+      "_capture_global_const_value",
+      [](const std::string& qualname, const py::object& value) {
+        // Using AnyType so that JIT will try to infer its type.
+        CapturedGlobalValuesRegistry::get().registerValue(
+            qualname, std::move(toIValue(value, AnyType::get())));
+      });
+  m.def("_reset_captured_global_constant_values_registry", []() {
+    CapturedGlobalValuesRegistry::get().clear();
+  });
   m.def(
       "_jit_script_compile_overload",
       [](const std::string& qualname,

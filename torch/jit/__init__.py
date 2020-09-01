@@ -24,6 +24,8 @@ from torch.jit._script import (
     CompilationUnit,
     ScriptFunction,
     _unwrap_optional,
+    capture_global_constant_value,
+    reset_captured_global_constant_values_registry,
 )
 from torch.jit._trace import (
     trace,

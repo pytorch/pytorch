@@ -1064,6 +1064,9 @@ struct to_ir {
         case TK_WITH:
           emitWith(With(stmt));
           break;
+        case TK_GLOBAL:
+          emitGlobal(Global(stmt));
+          break;
         default:
           throw ErrorReport(stmt)
               << "Unrecognized statement kind " << kindToString(stmt.kind());
@@ -1769,6 +1772,22 @@ struct to_ir {
     auto cond = stmt.cond();
     auto emit_body = [&]() { emitStatements(stmt.body()); };
     emitLoopCommon(stmt.range(), emit_body, nullptr, {}, cond);
+  }
+
+  void emitGlobal(const Global& stmt) {
+    for (auto id : stmt.names()) {
+      const auto& qual_name = method.qualname().prefix() + "." + id.name();
+      auto name_const = graph->insertConstant(IValue(qual_name), id.range());
+
+      auto name_value = NamedValue(id.range(), "variable_name", name_const);
+      auto fetched_value = emitBuiltinCall(
+          id.range(), *graph, prim::CapturedGlobalConstVal, {name_value}, {});
+      environment_stack->setSugaredVar(
+          id.range(),
+          id.name(),
+          std::make_shared<SimpleValue>(fetched_value),
+          AnyType::get());
+    }
   }
 
   void emitWith(const With& stmt) {

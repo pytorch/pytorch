@@ -216,6 +216,7 @@ core_sources_full = [
     "torch/csrc/jit/python/update_graph_executor_opt.cpp",
     "torch/csrc/jit/runtime/argument_spec.cpp",
     "torch/csrc/jit/runtime/autodiff.cpp",
+    "torch/csrc/jit/runtime/captured_global_values_registry.cpp",
     "torch/csrc/jit/runtime/graph_executor.cpp",
     "torch/csrc/jit/runtime/interpreter.cpp",
     "torch/csrc/jit/runtime/logging.cpp",

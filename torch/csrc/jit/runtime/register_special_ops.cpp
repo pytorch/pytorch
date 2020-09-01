@@ -7,6 +7,7 @@
 #include <torch/csrc/api/include/torch/utils.h>
 #include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/runtime/captured_global_values_registry.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
@@ -435,6 +436,21 @@ RegisterOperators reg({
         },
         aliasAnalysisConservative()),
 });
+
+Operation createCapturedGlobalConstValue() {
+  CapturedGlobalValuesRegistry& registry = CapturedGlobalValuesRegistry::get();
+  return [&registry](Stack* stack) {
+    auto name = pop(stack).toStringRef();
+    push(stack, registry.getValueOrThrow(name));
+  };
+}
+RegisterOperators CapturedGlobalValueRegistryOps({
+    torch::jit::Operator(
+        "prim::CapturedGlobalConstVal(str name) -> Any",
+        createCapturedGlobalConstValue(),
+        aliasAnalysisFromSchema()),
+});
+
 } // namespace
 } // namespace jit
 } // namespace torch
