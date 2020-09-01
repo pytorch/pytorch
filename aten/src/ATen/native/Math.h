@@ -430,7 +430,8 @@ calc_gcd(T a, T b) {
  * required is x -> 2(2ab/x - b - a)/(b-a).  If b is infinity, this becomes x -> 4a/x - 1.
  */
 template <typename T>
-static inline T chbevl(T x, T array[], size_t len) {
+static inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
+ chbevl(T x, T array[], size_t len) {
   T b0, b1, b2;
 
   b0 = array[0];
@@ -455,7 +456,8 @@ static inline T chbevl(T x, T array[], size_t len) {
  * of all inputs to convert them into the domain of the approximation.
  */
 template <typename T>
-static inline T calc_i0(T _x) {
+static inline typename std::enable_if<std::is_floating_point<T>::value, T>::type
+calc_i0(T _x) {
   T x = std::abs(_x);
   /* Chebyshev coefficients for exp(-x) I0(x)
    * in the interval [0,8].
@@ -535,3 +537,5 @@ static inline T calc_i0(T _x) {
 
   return static_cast<T>(std::exp(x) * chbevl(static_cast<T>(32.0 / x - 2.0), B, 25) / std::sqrt(x));
 }
+
+inline c10::BFloat16 calc_i0(c10::BFloat16 a) { return calc_i0(static_cast<float>(a)); }

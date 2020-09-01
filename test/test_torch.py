@@ -16647,7 +16647,6 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @dtypesIfCUDA(torch.float16, torch.float32, torch.float64)
     @dtypesIfCPU(torch.bfloat16, torch.float32, torch.float64)
     @dtypes(torch.float32, torch.float64)
-    @precisionOverride({torch.float16: 5e-3})
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
     def test_i0_range1(self, device, dtype):
         # This tests the domain for i0 for which float16 does not overflow
@@ -16656,7 +16655,6 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
     @dtypesIfCPU(torch.bfloat16, torch.float32, torch.float64)
     @dtypes(torch.float32, torch.float64)
-    @precisionOverride({torch.bfloat16: 3e-2})
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
     def test_i0_range2(self, device, dtype):
         # This tests the domain for i0 for which float32 and bfloat16 does not overflow
