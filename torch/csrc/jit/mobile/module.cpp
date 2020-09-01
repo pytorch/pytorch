@@ -11,14 +11,6 @@ namespace jit {
 std::ostream& operator<<(std::ostream& out, Instruction inst);
 namespace mobile {
 
-const c10::QualifiedName& Function::qualname() const {
-  return name_;
-}
-
-const std::string& Function::name() const {
-  return name_.name();
-}
-
 void CompilationUnit::register_function(std::unique_ptr<Function> fn) {
   methods_.emplace_back(std::move(fn));
 }
@@ -44,7 +36,7 @@ c10::IValue Module::run_method(const std::string& method_name, Stack stack) {
   at::DebugInfoGuard guard(at::DebugInfoKind::MOBILE_RUNTIME_INFO, debug_info);
 
   auto m = find_method(method_name);
-  if (m == nullptr) {
+  if (m == c10::nullopt) {
     if (observer) {
       std::string cancellation_reason =
           "Method '" + method_name + "' is not defined";
@@ -53,7 +45,6 @@ c10::IValue Module::run_method(const std::string& method_name, Stack stack) {
     AT_ERROR("Method '", method_name, "' is not defined.");
   }
   try {
-    stack.insert(stack.begin(), object_);
     m->run(stack);
     c10::IValue result = stack.front();
     if (observer) {
@@ -75,13 +66,13 @@ c10::IValue Module::run_method(const std::string& method_name, Stack stack) {
   }
 }
 
-Function* Module::find_method(const std::string& basename) const {
+c10::optional<Method> Module::find_method(const std::string& basename) const {
   for (auto& fn : cu_->methods()) {
     if (fn->name() == basename) {
-      return fn.get();
+      return c10::make_optional<Method>(Method(_ivalue(), fn.get()));
     }
   }
-  return nullptr;
+  return c10::nullopt;
 }
 
 namespace {
@@ -159,6 +150,22 @@ bool Module::is_training() const {
   }
   return true;
 }
+
+Method::Method(
+    c10::intrusive_ptr<c10::ivalue::Object> owner,
+    Function* function)
+    : owner_(std::move(owner)), function_(function) {}
+
+void Method::run(Stack& stack) {
+  stack.insert(stack.begin(), owner_);
+  function_->run(stack);
+}
+
+c10::IValue Method::operator()(std::vector<IValue> stack) {
+  stack.insert(stack.begin(), owner_);
+  return (*function_)(stack);
+}
+
 } // namespace mobile
 } // namespace jit
 } // namespace torch

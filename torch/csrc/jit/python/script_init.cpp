@@ -1055,7 +1055,7 @@ void initJitScriptBindings(PyObject* module) {
           "find_method",
           [](mobile::Module& m, const std::string& method_name) {
             auto method = m.find_method(method_name);
-            return method != nullptr;
+            return method != c10::nullopt;
           },
           py::arg("method_name"))
       .def(
