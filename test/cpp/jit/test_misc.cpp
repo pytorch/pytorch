@@ -1251,8 +1251,7 @@ void testFallbackGraphs() {
         auto opt_graph = lastExecutedOptimizedGraph();
         // this is safe to do since we are done profiling
         ProfilingRecord::removeProfileCounter(opt_graph->block());
-        replaceBlockWithFallbackGraph(opt_graph->block());
-        GRAPH_DUMP("replaceBlockWithFallbackGraph:", opt_graph);
+        replaceBlockWithFallbackGraph(opt_graph->block(), opt_graph->inputs());
         auto it = opt_graph->block()->nodes().begin();
         ASSERT_EQ(it->kind(), prim::FallbackGraph);
         auto fallback = *it++;
