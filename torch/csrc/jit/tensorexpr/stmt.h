@@ -543,9 +543,19 @@ class TORCH_API LoopOptions {
     return gpu_block_index_ == IDX_UNSET && gpu_thread_index_ == IDX_UNSET;
   }
 
+  void set_buffer_mapping(
+      const std::unordered_map<std::string, const Buf*>& map) {
+    map_input_to_tensor_bufs_ = map;
+  }
+
+  std::unordered_map<std::string, const Buf*> get_buffer_mapping() const {
+    return map_input_to_tensor_bufs_;
+  }
+
  private:
   int gpu_block_index_{IDX_UNSET};
   int gpu_thread_index_{IDX_UNSET};
+  std::unordered_map<std::string, const Buf*> map_input_to_tensor_bufs_;
 };
 
 class TORCH_API For : public StmtNode<For> {
@@ -639,6 +649,10 @@ class TORCH_API For : public StmtNode<For> {
     loop_options_.set_gpu_thread_index(thread_index);
   }
 
+  void set_buffer_map(const std::unordered_map<std::string, const Buf*>& map) {
+    loop_options_.set_buffer_mapping(map);
+  }
+
   For* cloneWithNewBody(Stmt* body) const {
     return new For(var_, start_, stop_, body, loop_options_);
   }
@@ -688,6 +702,11 @@ class AtomicAdd : public StmtNode<AtomicAdd> {
   const Buf* buf_;
   std::vector<const Expr*> indices_;
   const Expr* value_;
+};
+
+class SyncThreads : public StmtNode<SyncThreads> {
+ public:
+  SyncThreads() {}
 };
 
 } // namespace tensorexpr
