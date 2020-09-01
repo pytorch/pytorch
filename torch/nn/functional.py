@@ -2575,17 +2575,6 @@ def binary_cross_entropy_with_logits(input, target, weight=None, size_average=No
     return torch.binary_cross_entropy_with_logits(input, target, weight, pos_weight, reduction_enum)
 
 
-def _pointwise_loss(lambd, lambd_optimized, input, target, reduction='mean'):
-    if target.requires_grad:
-        d = lambd(input, target)
-        if reduction == 'none':
-            return d
-        return torch.mean(d) if reduction == 'mean' else torch.sum(d)
-    else:
-        expanded_input, expanded_target = torch.broadcast_tensors(input, target)
-        return lambd_optimized(expanded_input, expanded_target, _Reduction.get_enum(reduction))
-
-
 def _smooth_l1_loss(input, target, delta=1.):
     # type: (Tensor, Tensor, float) -> Tensor
     t = torch.abs(input - target)
@@ -2613,6 +2602,7 @@ def smooth_l1_loss(input, target, size_average=None, reduce=None, reduction='mea
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
     if target.requires_grad:
+        _Reduction.get_enum(reduction)  # throw an error if reduction is invalid
         ret = _smooth_l1_loss(input, target, delta=delta)
         if reduction != 'none':
             ret = torch.mean(ret) if reduction == 'mean' else torch.sum(ret)
@@ -2644,6 +2634,7 @@ def l1_loss(input, target, size_average=None, reduce=None, reduction='mean'):
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
     if target.requires_grad:
+        _Reduction.get_enum(reduction)  # throw an error if reduction is invalid
         ret = torch.abs(input - target)
         if reduction != 'none':
             ret = torch.mean(ret) if reduction == 'mean' else torch.sum(ret)
@@ -2675,6 +2666,7 @@ def mse_loss(input, target, size_average=None, reduce=None, reduction='mean'):
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
     if target.requires_grad:
+        _Reduction.get_enum(reduction)  # throw an error if reduction is invalid
         ret = (input - target) ** 2
         if reduction != 'none':
             ret = torch.mean(ret) if reduction == 'mean' else torch.sum(ret)
