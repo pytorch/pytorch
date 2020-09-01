@@ -226,6 +226,9 @@ def gradcheck(
 
     The check between numerical and analytical gradients uses :func:`~torch.allclose`.
 
+    For functions with complex output, the gradients are computed using :attr:`grad_output`
+    values 1 and 1j.
+
     .. note::
         The default values are designed for :attr:`input` of double precision.
         This check will likely fail if :attr:`input` is of less precision, e.g.,
