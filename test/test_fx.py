@@ -384,6 +384,39 @@ class TestFX(JitTestCase):
             self.assertTrue(hasattr(n, 'tag'))
             self.assertEqual(n.tag, 'foo')
 
+    def test_tensor_attribute(self):
+        class TensorAttribute(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.tensor = torch.rand(3, 4)
+
+            def forward(self, x):
+                return torch.nn.functional.linear(x, self.tensor)
+
+        ta = TensorAttribute()
+        traced = symbolic_trace(ta)
+        traced(torch.rand(4, 4))
+
+        class WrapperForQualname(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.ta = TensorAttribute()
+
+            def forward(self, x):
+                return torch.nn.functional.linear(x, self.ta.tensor)
+
+        wfq = WrapperForQualname()
+        traced2 = symbolic_trace(wfq)
+        traced2(torch.rand(4, 4))
+
+    def test_tensor_constant(self):
+        class ConstTensor(torch.nn.Module):
+            def forward(self, x):
+                return torch.nn.functional.linear(x, torch.zeros(3, 4))
+
+        ct = ConstTensor()
+        traced = symbolic_trace(ct)
+        traced(torch.rand(4, 4))
 
 if __name__ == '__main__':
     run_tests()
