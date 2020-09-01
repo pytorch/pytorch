@@ -33,9 +33,9 @@ void testFuserPass_1() {
 #if 0
   // We should not be able to fuse across the in-place operation here.
   testing::FileCheck()
-      .check("prim::TensorExprGroup_0")
+      .check("prim::TensorExprGroup_")
       ->check("aten::add_")
-      ->check("prim::TensorExprGroup_1")
+      ->check("prim::TensorExprGroup_")
       ->run(*g);
 #endif
 }

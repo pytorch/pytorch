@@ -154,6 +154,13 @@ def doAutodiffCheck(testname):
         return False
     return True
 
+if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
+    EXCLUDE_SCRIPT_MODULES.update({
+        'test_nn_LocalResponseNorm_1d',
+        'test_nn_LPPool2d',
+        'test_nn_LPPool2d_norm',
+    })
+
 torch._C._jit_set_profiling_executor(GRAPH_EXECUTOR != ProfilingMode.LEGACY)
 # even though FULL_PROFILER should be our default
 # we haven't tested every single test in this file
@@ -5677,8 +5684,9 @@ a")
         ast = torch.jit.frontend.get_jit_def(fn, fn.__name__)
         FileCheck().check("SourceRange at:") \
                    .check("def fn():") \
-                   .check("~~~~~~~~~...  <--- HERE") \
+                   .check("~~~~~~~~~") \
                    .check('raise Exception("hello")') \
+                   .check('~~~~~~~~~~~~~~~~~ <--- HERE') \
                    .run(str(ast.range()))
 
     def test_python_frontend_py3(self):

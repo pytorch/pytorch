@@ -1,11 +1,13 @@
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <ATen/record_function.h>
+#include <jit/runtime/profiling_graph_executor_impl.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/pass_manager.h>
 #include <torch/csrc/jit/passes/remove_redundant_profiles.h>
+#include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/operator_options.h>
@@ -653,6 +655,7 @@ class TensorExprFuser {
     for (Value* output : subgraph_outputs) {
       false_block->registerOutput(output);
     }
+    replaceBlockWithFallbackGraph(false_block, fusion_group->inputs());
 
     // Fill in the true block. It has all inputs type-checked and its
     // body should be the fusion group node.
