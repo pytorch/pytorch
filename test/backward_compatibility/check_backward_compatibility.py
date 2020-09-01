@@ -25,6 +25,8 @@ from torch._C import parse_schema
 #   1: date until which the allowlist entry is valid
 #   2: (optional) function argument regex
 # ]
+#
+# NB: function name DOES NOT include overload name!
 allow_list = [
     ("c10_experimental", datetime.date(2222, 1, 1)),
     # We export some functions and classes for test_jit.py directly from libtorch.so,
@@ -33,6 +35,7 @@ allow_list = [
     # Internal, profiler-specific ops
     ("profiler::_call_end_callbacks_on_jit_fut*", datetime.date(9999, 1, 1)),
     ("profiler::_record_function_enter", datetime.date(9999, 1, 1)),
+    ("tensorexpr::Group", datetime.date(2020, 9, 9)),
     ("aten::append*", datetime.date(2020, 4, 15)),
     ("aten::_min", datetime.date(2020, 9, 9)),
     ("aten::_max", datetime.date(2020, 9, 9)),
@@ -69,9 +72,11 @@ allow_list = [
     ("aten::gcd", datetime.date(2020, 7, 30)),
     ("aten::unflatten", datetime.date(2020, 8, 14)),
     ("aten::linalg_outer", datetime.date(2020, 8, 30)),
+    # WARNING: overload name here doesn't do anything
     ("aten::linalg_outer.out", datetime.date(2020, 8, 30)),
     ("aten::_compute_linear_combination", datetime.date(2020, 9, 1)),
     ("__getstate__", datetime.date(2020, 9, 1), "Conv[23]dPackedParams"),
+    ("aten::_foreach_add_", datetime.date(2020, 10, 1)),
 ]
 
 
