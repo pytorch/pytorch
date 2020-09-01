@@ -77,22 +77,23 @@ def parse_reports(folder):
             tests_by_class[class_name].append(test_case)
     return tests_by_class
 
-def build_message(test_suite):
+def build_message(test_case):
     return {
         "normal": {
             "build_pr": os.environ.get("CIRCLE_PR_NUMBER"),
             "build_tag": os.environ.get("CIRCLE_TAG"),
             "build_sha1": os.environ.get("CIRCLE_SHA1"),
             "build_branch": os.environ.get("CIRCLE_BRANCH"),
-            "test_name": test_suite.name,
+            "test_suite_name": test_case.class_name,
+            "test_case_name": test_case.name,
         },
         "int": {
             "time": int(time.time()),
-            "test_total_count": len(test_suite.test_cases),
-            "test_total_time": int(test_suite.total_time * 1000),
-            "test_failed_count": test_suite.failed_count,
-            "test_skipped_count": test_suite.skipped_count,
-            "test_errored_count": test_suite.errored_count,
+            "test_total_count": 1,
+            "test_total_time": int(test_case.time * 1000),
+            "test_failed_count": 1 if test_case.failed > 0 else 0,
+            "test_skipped_count": 1 if test_case.skipped > 0 else 0,
+            "test_errored_count": 1 if test_case.errored > 0 else 0,
         },
     }
 
@@ -112,10 +113,11 @@ def send_report(reports):
                 [
                     {
                         "category": "perfpipe_pytorch_test_times",
-                        "message": json.dumps(build_message(reports[name])),
+                        "message": json.dumps(build_message(test_case)),
                         "line_escape": False,
                     }
                     for name in sorted(reports.keys())
+                    for test_case in reports[name].test_cases
                 ]
             ),
         },

@@ -922,7 +922,7 @@
   self: zeros_like(grad, at::MemoryFormat::Preserve)
 
 - name: sgn(Tensor self) -> Tensor
-  self: sgn_backward(grad, self)
+  self: sgn_backward(result, grad, self)
 
 - name: sin(Tensor self) -> Tensor
   self: grad * self.cos()
