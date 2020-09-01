@@ -916,7 +916,7 @@ void LoopNest::slice(For* f, const Expr* factor, For** head, For** tail) {
     throw malformed_input("slice attempted on loop with no parent", p);
   }
 
-  const Expr* head_end = new Add(f->start(), factor);
+  const Expr* head_end = new Min(new Add(f->start(), factor), f->stop(), true);
   *head = new For(
       f->var(),
       f->start(),
@@ -933,13 +933,12 @@ void LoopNest::slice(For* f, const Expr* factor, For** head, For** tail) {
 }
 
 void LoopNest::sliceHead(For* f, int factor, For** head, For** tail) {
-  // TODO: handle the case where factor is larger than f's size.
   if (dynamic_cast<const IntImm*>(f->start()) &&
       dynamic_cast<const IntImm*>(f->stop())) {
     int start_val = dynamic_cast<const IntImm*>(f->start())->value();
     int stop_val = dynamic_cast<const IntImm*>(f->stop())->value();
     int size_val = stop_val - start_val;
-    if (factor == size_val) {
+    if (factor >= size_val) {
       *head = f;
       *tail = nullptr;
       return;
@@ -949,20 +948,20 @@ void LoopNest::sliceHead(For* f, int factor, For** head, For** tail) {
 }
 
 void LoopNest::sliceTail(For* f, int factor, For** head, For** tail) {
-  // TODO: handle the case where factor is larger than f's size.
   if (dynamic_cast<const IntImm*>(f->start()) &&
       dynamic_cast<const IntImm*>(f->stop())) {
     int start_val = dynamic_cast<const IntImm*>(f->start())->value();
     int stop_val = dynamic_cast<const IntImm*>(f->stop())->value();
     int size_val = stop_val - start_val;
-    if (factor == size_val) {
+    if (factor >= size_val) {
       *head = nullptr;
       *tail = f;
       return;
     }
   }
   const Expr* size = new Sub(f->stop(), f->start());
-  const Expr* head_factor = new Sub(size, new IntImm(factor));
+  const Expr* head_factor =
+      new Max(new IntImm(0), new Sub(size, new IntImm(factor)), true);
   slice(f, head_factor, head, tail);
 }
 
@@ -972,7 +971,6 @@ void LoopNest::splitWithTail(
     For** outer,
     For** inner,
     For** tail) {
-  // TODO: handle the case where factor is larger than f's size.
   if (!f) {
     throw malformed_input("splitWithTail attempted on null loop", f);
   }
@@ -1263,7 +1261,7 @@ void LoopNest::unroll(For* f, Stmt** unrolled) {
   p->replace_stmt(f, *unrolled);
 }
 
-void LoopNest::normalize(For* f, For** normalized) {
+void LoopNest::normalize(For* f, For** normalized, bool startMustBeConstant) {
   if (!f) {
     throw malformed_input("normalize attempted on null loop");
   }
@@ -1272,17 +1270,19 @@ void LoopNest::normalize(For* f, For** normalized) {
     throw malformed_input("normalize attempted on loop with no parent");
   }
 
-  if (!f->start()->isConstant()) {
+  if (startMustBeConstant && !f->start()->isConstant()) {
     // Do not normalize when the loop start is not a constant.
     *normalized = f;
     return;
   }
 
-  int start_idx = immediateAs<int>(f->start());
-  if (start_idx == 0) {
-    // No need to normalize in this case.
-    *normalized = f;
-    return;
+  if (dynamic_cast<const IntImm*>(f->start())) {
+    int start_idx = immediateAs<int>(f->start());
+    if (start_idx == 0) {
+      // No need to normalize in this case.
+      *normalized = f;
+      return;
+    }
   }
 
   auto for_body_normalized = Substitute(

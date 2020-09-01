@@ -123,6 +123,12 @@ void testExprSimple02() {
   }
 }
 
+Block* getSimplifiedBody(const LoopNest& l) {
+  Stmt* stmt = l.root_stmt();
+  Stmt* simplified = IRSimplifier::simplify(stmt);
+  return dynamic_cast<Block*>(simplified);
+}
+
 void assertForRange(For* f, int expected_start, int expected_stop) {
   ASSERT_NE(f, nullptr);
   const IntImm* start = dynamic_cast<const IntImm*>(f->start());
@@ -131,6 +137,18 @@ void assertForRange(For* f, int expected_start, int expected_stop) {
   const IntImm* stop = dynamic_cast<const IntImm*>(f->stop());
   ASSERT_NE(stop, nullptr);
   ASSERT_EQ(stop->value(), expected_stop);
+}
+
+void assertForRanges(
+    Block* body,
+    const std::vector<std::pair<int, int>>& start_stops) {
+  ASSERT_EQ(body->nstmts(), start_stops.size());
+
+  auto it = body->begin();
+  for (size_t i = 0; i < start_stops.size(); i++, it++) {
+    For* loop = dynamic_cast<For*>(*it);
+    assertForRange(loop, start_stops[i].first, start_stops[i].second);
+  }
 }
 
 void testExprSliceHeadWhenFactorEqualsSize() {
@@ -150,13 +168,27 @@ void testExprSliceHeadWhenFactorEqualsSize() {
   ASSERT_EQ(head, loops[0]);
   ASSERT_EQ(tail, nullptr);
 
-  Stmt* stmt = l.root_stmt();
-  Stmt* simplified = IRSimplifier::simplify(stmt);
-  Block* body = dynamic_cast<Block*>(simplified);
-  ASSERT_EQ(body->nstmts(), 1);
+  Block* body = getSimplifiedBody(l);
+  assertForRanges(body, {{0, 10}});
+}
 
-  For* loop = dynamic_cast<For*>(*body->begin());
-  assertForRange(loop, 0, 10);
+void testExprSliceHeadWhenFactorLargerThanSize() {
+  KernelScope kernel_scope;
+  auto func = [](const ExprHandle& x) {
+    return ExprHandle(1.0f) + cast<float>(x);
+  };
+  Tensor* tensor = Compute("f", {{10, "x"}}, func);
+  LoopNest l({tensor});
+  For* head;
+  For* tail;
+  std::vector<For*> loops = l.getLoopStmtsFor(tensor);
+  l.sliceHead(loops[0], 100, &head, &tail);
+
+  ASSERT_EQ(head, loops[0]);
+  ASSERT_EQ(tail, nullptr);
+
+  Block* body = getSimplifiedBody(l);
+  assertForRanges(body, {{0, 10}});
 }
 
 void testExprSliceHead() {
@@ -169,7 +201,6 @@ void testExprSliceHead() {
   For* head;
   For* tail;
   std::vector<For*> loops = l.getLoopStmtsFor(tensor);
-  l.setGPUBlockIndex(loops[0], LoopOptions::IDX_X);
   l.sliceHead(loops[0], 4, &head, &tail);
 
   ASSERT_NE(head, nullptr);
@@ -177,22 +208,33 @@ void testExprSliceHead() {
   ASSERT_NE(tail, nullptr);
   ASSERT_NE(tail, loops[0]);
 
-  ASSERT_TRUE(head->loop_options().is_gpu_block_index());
-  ASSERT_EQ(head->loop_options().gpu_block_index(), LoopOptions::IDX_X);
-  ASSERT_TRUE(tail->loop_options().is_gpu_block_index());
-  ASSERT_EQ(tail->loop_options().gpu_block_index(), LoopOptions::IDX_X);
+  Block* body = getSimplifiedBody(l);
+  assertForRanges(body, {{0, 4}, {4, 10}});
+}
 
-  Stmt* stmt = l.root_stmt();
-  Stmt* simplified = IRSimplifier::simplify(stmt);
-  Block* body = dynamic_cast<Block*>(simplified);
-  ASSERT_EQ(body->nstmts(), 2);
-  auto biter = body->begin();
+void testExprSliceHeadWithNonZeroStart() {
+  KernelScope kernel_scope;
+  auto func = [](const ExprHandle& x) {
+    return ExprHandle(1.0f) + cast<float>(x);
+  };
+  Tensor* tensor = Compute("f", {{10, "x"}}, func);
+  LoopNest l({tensor});
+  std::vector<For*> loops = l.getLoopStmtsFor(tensor);
 
-  For* loop = dynamic_cast<For*>(*biter++);
-  assertForRange(loop, 0, 4);
+  For* head;
+  For* tail;
+  l.sliceTail(loops[0], 4, &head, &tail);
+  // head: [0, 6)
+  // tail: [6, 10)
 
-  loop = dynamic_cast<For*>(*biter);
-  assertForRange(loop, 4, 10);
+  For* tail_head;
+  For* tail_tail;
+  l.sliceHead(tail, 2, &tail_head, &tail_tail);
+  // tail_head: [6, 8)
+  // tail_tail: [8, 10)
+
+  Block* body = getSimplifiedBody(l);
+  assertForRanges(body, {{0, 6}, {6, 8}, {8, 10}});
 }
 
 void testExprSliceTailWhenFactorEqualsSize() {
@@ -212,13 +254,29 @@ void testExprSliceTailWhenFactorEqualsSize() {
   ASSERT_EQ(head, nullptr);
   ASSERT_EQ(tail, loops[0]);
 
-  Stmt* stmt = l.root_stmt();
-  Stmt* simplified = IRSimplifier::simplify(stmt);
-  Block* body = dynamic_cast<Block*>(simplified);
-  ASSERT_EQ(body->nstmts(), 1);
+  Block* body = getSimplifiedBody(l);
+  assertForRanges(body, {{0, 10}});
+}
 
-  For* loop = dynamic_cast<For*>(*body->begin());
-  assertForRange(loop, 0, 10);
+void testExprSliceTailWhenFactorLargerThanSize() {
+  // When factor equals the For loop's original size, keep using the original
+  // For loop.
+  KernelScope kernel_scope;
+  auto func = [](const ExprHandle& x) {
+    return ExprHandle(1.0f) + cast<float>(x);
+  };
+  Tensor* tensor = Compute("f", {{10, "x"}}, func);
+  LoopNest l({tensor});
+  For* head;
+  For* tail;
+  std::vector<For*> loops = l.getLoopStmtsFor(tensor);
+  l.sliceTail(loops[0], 100, &head, &tail);
+
+  ASSERT_EQ(head, nullptr);
+  ASSERT_EQ(tail, loops[0]);
+
+  Block* body = getSimplifiedBody(l);
+  assertForRanges(body, {{0, 10}});
 }
 
 void testExprSliceTail() {
@@ -231,7 +289,6 @@ void testExprSliceTail() {
   For* head;
   For* tail;
   std::vector<For*> loops = l.getLoopStmtsFor(tensor);
-  l.setGPUBlockIndex(loops[0], LoopOptions::IDX_X);
   l.sliceTail(loops[0], 4, &head, &tail);
 
   ASSERT_NE(head, nullptr);
@@ -239,22 +296,8 @@ void testExprSliceTail() {
   ASSERT_NE(tail, nullptr);
   ASSERT_NE(tail, loops[0]);
 
-  ASSERT_TRUE(head->loop_options().is_gpu_block_index());
-  ASSERT_EQ(head->loop_options().gpu_block_index(), LoopOptions::IDX_X);
-  ASSERT_TRUE(tail->loop_options().is_gpu_block_index());
-  ASSERT_EQ(tail->loop_options().gpu_block_index(), LoopOptions::IDX_X);
-
-  Stmt* stmt = l.root_stmt();
-  Stmt* simplified = IRSimplifier::simplify(stmt);
-  Block* body = dynamic_cast<Block*>(simplified);
-  ASSERT_EQ(body->nstmts(), 2);
-  auto biter = body->begin();
-
-  For* loop = dynamic_cast<For*>(*biter++);
-  assertForRange(loop, 0, 6);
-
-  loop = dynamic_cast<For*>(*biter);
-  assertForRange(loop, 6, 10);
+  Block* body = getSimplifiedBody(l);
+  assertForRanges(body, {{0, 6}, {6, 10}});
 }
 
 void testExprSplitAndSlice() {
@@ -285,9 +328,6 @@ void testExprSplitAndSlice() {
   For* outer_tail;
   l.sliceHead(outer, 2, &outer_head, &outer_tail);
 
-  Stmt* stmt = l.root_stmt();
-  Stmt* simplified = IRSimplifier::simplify(stmt);
-  Block* body = dynamic_cast<Block*>(simplified);
   // for (int x_outer = 0; x_outer < 2; x_outer++) {
   //   for (int x_inner = 0; x_inner < 19; x_inner++) {
   //     f[21 * x_outer + x_inner] = 1.f + float(21 * x_outer + x_inner);
@@ -307,41 +347,86 @@ void testExprSplitAndSlice() {
   // for (int x_tail = 0; x_tail < 16; x_tail++) {
   //   f[x_tail + 84] = 1.f + float(x_tail + 84);
   // }
-  ASSERT_EQ(body->nstmts(), 3);
+  Block* body = getSimplifiedBody(l);
+  assertForRanges(body, {{0, 2}, {2, 4}, {0, 16}});
+
   auto biter = body->begin();
 
-  outer_head = dynamic_cast<For*>(*biter++);
-  assertForRange(outer_head, 0, 2);
-  {
-    // Inside outer_head.
-    Block* body = outer_head->body();
-    ASSERT_EQ(body->nstmts(), 2);
-    auto biter = body->begin();
+  For* loop = dynamic_cast<For*>(*biter++);
+  assertForRanges(loop->body(), {{0, 19}, {19, 21}});
 
-    For* inner_head = dynamic_cast<For*>(*biter++);
-    assertForRange(inner_head, 0, 19);
+  loop = dynamic_cast<For*>(*biter);
+  assertForRanges(loop->body(), {{0, 19}, {19, 21}});
+}
 
-    For* inner_tail = dynamic_cast<For*>(*biter);
-    assertForRange(inner_tail, 19, 21);
-  }
+void testExprSliceAndNormalize() {
+  // 0: sliceHead
+  // 1: normalize tail
+  KernelScope kernel_scope;
+  auto func = [](const ExprHandle& x) {
+    return ExprHandle(1.0f) + cast<float>(x);
+  };
+  Tensor* tensor = Compute("f", {{10, "x"}}, func);
+  LoopNest l({tensor});
+  std::vector<For*> loops = l.getLoopStmtsFor(tensor);
 
-  outer_tail = dynamic_cast<For*>(*biter++);
-  assertForRange(outer_tail, 2, 4);
-  {
-    // Inside outer_tail.
-    Block* body = outer_tail->body();
-    ASSERT_EQ(body->nstmts(), 2);
-    auto biter = body->begin();
+  For* head;
+  For* tail;
+  l.sliceHead(loops[0], 2, &head, &tail);
+  // head: [0, 2)
+  // tail: [2, 10)
 
-    For* inner_head = dynamic_cast<For*>(*biter++);
-    assertForRange(inner_head, 0, 19);
+  For* normalized_tail;
+  LoopNest::normalize(tail, &normalized_tail, false);
+  // normalized_tail: [0, 8)
 
-    For* inner_tail = dynamic_cast<For*>(*biter);
-    assertForRange(inner_tail, 19, 21);
-  }
+  Block* body = getSimplifiedBody(l);
+  assertForRanges(body, {{0, 2}, {0, 8}});
+}
 
-  tail = dynamic_cast<For*>(*biter);
-  assertForRange(tail, 0, 16);
+template <typename T>
+T evalExpr(const ExprHandle& expr, const VarHandle& var, T value) {
+  ExprEval<SimpleIREvaluator> eval(expr, {var});
+  return eval.value<T>(value);
+}
+
+void testExprSliceWithVariableDimension() {
+  auto testWithDimension =
+      [](int dimension,
+         const std::vector<std::pair<int, int>>& expected_for_ranges) {
+        KernelScope kernel_scope;
+        VarHandle dim("dim", kInt);
+        Tensor* tensor =
+            Compute("f", {{dim, "x"}}, [](const ExprHandle& x) { return x; });
+        LoopNest l({tensor});
+        std::vector<For*> loops = l.getLoopStmtsFor(tensor);
+
+        For* head;
+        For* tail;
+        l.sliceHead(loops[0], 2, &head, &tail);
+
+        For* tail_head;
+        For* tail_tail;
+        l.sliceTail(tail, 2, &tail_head, &tail_tail);
+
+        Block* body = getSimplifiedBody(l);
+        ASSERT_EQ(expected_for_ranges.size(), 3);
+        auto it = body->begin();
+        for (auto& start_stop : expected_for_ranges) {
+          For* loop = dynamic_cast<For*>(*it++);
+          int start = evalExpr<int>(ExprHandle(loop->start()), dim, dimension);
+          int stop = evalExpr<int>(ExprHandle(loop->stop()), dim, dimension);
+          ASSERT_EQ(start, start_stop.first);
+          ASSERT_EQ(stop, start_stop.second);
+        }
+      };
+
+  testWithDimension(1, {{0, 1}, {1, 1}, {1, 1}});
+  testWithDimension(2, {{0, 2}, {2, 2}, {2, 2}});
+  testWithDimension(3, {{0, 2}, {2, 2}, {2, 3}});
+  testWithDimension(4, {{0, 2}, {2, 2}, {2, 4}});
+  testWithDimension(5, {{0, 2}, {2, 3}, {3, 5}});
+  testWithDimension(10, {{0, 2}, {2, 8}, {8, 10}});
 }
 
 void testExprSplitWithTail() {
