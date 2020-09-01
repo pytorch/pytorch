@@ -134,11 +134,13 @@ class Future(object):
 
 # Defined in torch/csrc/jit/passes/xnnpack_rewrite.h
 class MobileOptimizerType:
-    CONV_BN_FUSION: MobileOptimizerType
-    INSERT_FOLD_PREPACK_OPS: MobileOptimizerType
-    REMOVE_DROPOUT: MobileOptimizerType
-    FUSE_ADD_RELU: MobileOptimizerType
-    HOIST_CONV_PACKED_PARAMS: MobileOptimizerType
+    ...
+
+CONV_BN_FUSION: MobileOptimizerType
+INSERT_FOLD_PREPACK_OPS: MobileOptimizerType
+REMOVE_DROPOUT: MobileOptimizerType
+FUSE_ADD_RELU: MobileOptimizerType
+HOIST_CONV_PACKED_PARAMS: MobileOptimizerType
 
 def fork(*args: Any, **kwargs: Any) -> Future: ...
 def wait(fut: Future) -> Any: ...
@@ -309,19 +311,33 @@ class BufferDict:
 class TorchType:  
     ...
 
+R = TypeVar('R', bound=TorchType)
+
+# common base for all types that have a single sub element
+# e.g. Future[R], Option[R], List[R]
+class SingleElementType(TorchType):
+    ...
+
+class NamedType(TorchType):
+    ...
+
+class NumberType(TorchType):
+    @classmethod
+    def get(cls) -> NumberType: ...
+
 class TensorType(TorchType):
     @classmethod
     def get(cls) -> TensorType: ...
 
-class IntType(TorchType):
+class IntType(NumberType):
     @classmethod
     def get(cls) -> IntType: ...
 
-class BoolType(TorchType):
+class BoolType(NumberType):
     @classmethod
     def get(cls) -> IntType: ...
 
-class ListType(TorchType, Generic[T]):
+class ListType(SingleElementType, Generic[R]):
     def __init__(self, type: TorchType): ...
     @classmethod
     def ofInts(cls) -> ListType[IntType]: ...
@@ -329,12 +345,13 @@ class ListType(TorchType, Generic[T]):
     def ofTensors(cls) -> ListType[TensorType]: ...
     @classmethod
     def ofFloats(cls) -> ListType[BoolType]: ...
-    def getElementType(self: ListType[T]) -> T: ...
+    def getElementType(self: ListType[R]) -> R: ...
 
-class TupleType(TorchType, Tuple[TorchType, ...]):
+class TupleType(NamedType, Tuple[TupleType, ...]):
     def __init__(self, type: List[TorchType]): ...
+    def elements(self) -> List[TorchType]: ...
 
-class OptionalType(TorchType):
+class OptionalType(SingleElementType, Generic[R]):
     def __init__(self, type: TorchType): ...
 
 
