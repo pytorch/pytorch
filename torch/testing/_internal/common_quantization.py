@@ -28,7 +28,6 @@ from torch.fx import symbolic_trace
 # graph mode quantization based on fx
 from torch.quantization import (
     QuantType,
-    fuse_fx,
     prepare_fx,
     prepare_dynamic_fx,
     convert_fx,
@@ -624,7 +623,6 @@ class QuantizationTestCase(TestCase):
         else:
             model.eval()
         original = symbolic_trace(model)
-        fused = fuse_fx(original)
 
         qconfig_dict = {'': get_default_qconfig(torch.backends.quantized.engine)}
         if quant_type == QuantType.DYNAMIC:
@@ -634,7 +632,7 @@ class QuantizationTestCase(TestCase):
             prepare = prepare_fx
             convert = convert_fx
 
-        prepared = prepare(fused, qconfig_dict)
+        prepared = prepare(original, qconfig_dict)
         prepared(*inputs)
         qgraph = convert(prepared)
         qgraph_debug = convert(prepared, debug=True)
