@@ -121,10 +121,14 @@ option(BUILD_BINARY "Build C++ binaries" OFF)
 option(BUILD_DOCS "Build Caffe2 documentation" OFF)
 option(BUILD_CUSTOM_PROTOBUF "Build and use Caffe2's own protobuf under third_party" ON)
 option(BUILD_PYTHON "Build Python binaries" ON)
-option(BUILD_CAFFE2_OPS "Build Caffe2 operators" ON)
+option(BUILD_CAFFE2 "Master flag to build Caffe2" ON)
+cmake_dependent_option(
+    BUILD_CAFFE2_OPS "Build Caffe2 operators" ON
+    "BUILD_CAFFE2" OFF)
+cmake_dependent_option(
+    BUILD_CAFFE2_MOBILE "Build libcaffe2 for mobile (deprecating)" OFF
+    "BUILD_CAFFE2" OFF)
 option(BUILD_SHARED_LIBS "Build libcaffe2.so" ON)
-option(BUILD_CAFFE2_MOBILE "Build libcaffe2 for mobile (deprecating)" OFF)
-option(USE_STATIC_DISPATCH "Use static dispatch for ATen operators" OFF)
 cmake_dependent_option(
     CAFFE2_LINK_LOCAL_PROTOBUF "If set, build protobuf inside libcaffe2.so." ON
     "BUILD_SHARED_LIBS AND BUILD_CUSTOM_PROTOBUF" OFF)
@@ -135,6 +139,7 @@ option(BUILD_TEST "Build C++ test binaries (need gtest and gbenchmark)" OFF)
 option(BUILD_MOBILE_BENCHMARKS "Build C++ test binaries for mobile (ARM) targets(need gtest and gbenchmark)" OFF)
 option(BUILD_MOBILE_TEST "Build C++ test binaries for mobile (ARM) targets(need gtest and gbenchmark)" OFF)
 option(BUILD_JNI "Build JNI bindings" OFF)
+option(BUILD_MOBILE_AUTOGRAD "Build autograd function in mobile build (in development)" OFF)
 cmake_dependent_option(
     INSTALL_TEST "Install test binaries if BUILD_TEST is on" ON
     "BUILD_TEST" OFF)
@@ -357,6 +362,10 @@ if(MSVC)
   list(APPEND CUDA_NVCC_FLAGS "-Xcompiler /w -w")
 endif(MSVC)
 
+list(APPEND CUDA_NVCC_FLAGS "-Xfatbin" "-compress-all")
+list(APPEND CUDA_NVCC_FLAGS_DEBUG "-Xfatbin" "-compress-all")
+list(APPEND CUDA_NVCC_FLAGS_RELWITHDEBINFO "-Xfatbin" "-compress-all")
+
 if(NOT MSVC)
   list(APPEND CUDA_NVCC_FLAGS_DEBUG "-g" "-lineinfo" "--source-in-ptx")
   list(APPEND CUDA_NVCC_FLAGS_RELWITHDEBINFO "-g" "-lineinfo" "--source-in-ptx")
@@ -393,6 +402,11 @@ if(INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE)
   if(NOT BUILD_SHARED_LIBS AND NOT "${SELECTED_OP_LIST}" STREQUAL "")
     string(APPEND CMAKE_CXX_FLAGS " -DNO_EXPORT")
   endif()
+  if(BUILD_MOBILE_AUTOGRAD)
+    set(INTERN_DISABLE_AUTOGRAD OFF)
+  else()
+    set(INTERN_DISABLE_AUTOGRAD ON)
+  endif()
   set(BUILD_PYTHON OFF)
   set(BUILD_CAFFE2_OPS OFF)
   set(USE_DISTRIBUTED OFF)
@@ -401,7 +415,6 @@ if(INTERN_BUILD_MOBILE AND NOT BUILD_CAFFE2_MOBILE)
   set(USE_FBGEMM OFF)
   set(USE_QNNPACK OFF)
   set(INTERN_DISABLE_ONNX ON)
-  set(INTERN_DISABLE_AUTOGRAD ON)
   set(INTERN_USE_EIGEN_BLAS ON)
   # Disable developing mobile interpreter for actual mobile build.
   # Enable it elsewhere to capture build error.
@@ -766,7 +779,11 @@ else()
 endif()
 
 # ---[ Modules
-add_subdirectory(modules)
+# If master flag for buildling Caffe2 is disabled, we also disable the
+# build for Caffe2 related operator modules.
+if(BUILD_CAFFE2)
+  add_subdirectory(modules)
+endif()
 
 # ---[ Binaries
 # Binaries will be built after the Caffe2 main libraries and the modules
