@@ -5185,7 +5185,7 @@ class TestNN(NNTestCase):
                     x = torch.cos(torch.arange(0, sz).float().view(shape))
                     p.data.copy_(x)
 
-            return layer;
+            return layer
 
         # this is a deterministic test for TransformerEncoder
         activation = "relu"
@@ -5290,7 +5290,8 @@ class TestNN(NNTestCase):
         np.testing.assert_allclose(result, ref_output, atol=1e-5)
 
         # test case 3, multiple layers with norm
-        norm = nn.LayerNorm(4)  # d_model = 4
+        # d_model = 4
+        norm = nn.LayerNorm(4)
         model = nn.TransformerEncoder(encoder_layer, 2, norm=norm).to(device)
         result = model(encoder_input, src_key_padding_mask=mask)
         ref_output = torch.Tensor(
@@ -5353,7 +5354,7 @@ class TestNN(NNTestCase):
                     x = torch.cos(torch.arange(0, sz).float().view(shape))
                     p.data.copy_(x)
 
-            return layer;
+            return layer
 
         # this is a deterministic test for TransformerDecoder
         activation = "relu"
@@ -5562,7 +5563,8 @@ class TestNN(NNTestCase):
         np.testing.assert_allclose(result, ref_output, atol=1e-5)
 
         # multiple layers with norm
-        norm = nn.LayerNorm(4) #d_model = 4
+        # d_model = 4
+        norm = nn.LayerNorm(4)
         model = nn.TransformerDecoder(decoder_layer, 2, norm=norm).to(device)
 
         # deterministic input
@@ -5613,7 +5615,7 @@ class TestNN(NNTestCase):
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
         np.testing.assert_allclose(result, ref_output, atol=1e-5)
 
-        #gelu activation test cases
+        # gelu activation test cases
         activation = "gelu"
         use_cuda = torch.cuda.is_available()
         device = torch.device("cuda" if use_cuda else "cpu")
