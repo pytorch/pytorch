@@ -32,7 +32,7 @@ class Module(object):
         try:
             return self.members[name]
         except KeyError:
-            raise RuntimeError("Module {} has no member called {}".format(self.name, name))
+            raise RuntimeError("Module {} has no member called {}".format(self.name, name)) from None
 
 
 class EvalEnv(object):
@@ -147,7 +147,7 @@ def parse_type_line(type_line, rcb, loc):
     try:
         arg_ann = eval(arg_ann_str, {}, EvalEnv(rcb))  # noqa: P204
     except (NameError, SyntaxError) as e:
-        raise RuntimeError("Failed to parse the argument list of a type annotation: {}".format(str(e)))
+        raise RuntimeError("Failed to parse the argument list of a type annotation") from e
 
     if not isinstance(arg_ann, tuple):
         arg_ann = (arg_ann,)
@@ -155,7 +155,7 @@ def parse_type_line(type_line, rcb, loc):
     try:
         ret_ann = eval(ret_ann_str, {}, EvalEnv(rcb))  # noqa: P204
     except (NameError, SyntaxError) as e:
-        raise RuntimeError("Failed to parse the return type of a type annotation: {}".format(str(e)))
+        raise RuntimeError("Failed to parse the return type of a type annotation") from e
 
     arg_types = [ann_to_type(ann, loc) for ann in arg_ann]
     return arg_types, ann_to_type(ret_ann, loc)
@@ -228,7 +228,7 @@ def split_type_line(type_line):
     try:
         arrow_pos = type_line.index('->')
     except ValueError:
-        raise RuntimeError("Syntax error in type annotation (cound't find `->`)")
+        raise RuntimeError("Syntax error in type annotation (cound't find `->`)") from None
     return type_line[start_offset:arrow_pos].strip(), type_line[arrow_pos + 2:].strip()
 
 

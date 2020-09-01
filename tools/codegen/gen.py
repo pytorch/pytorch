@@ -495,7 +495,11 @@ DispatchKeySet _dk_set = DispatchKeySet(options.computeDispatchKey()) | c10::det
     .findSchemaOrThrow("aten::{f.func.name.name}", "{f.func.name.overload_name}")
     .typed<{dispatcher_returns_type} ({', '.join(a.type for a in dispatcher_args)})>();
   {compute_dk}
-  return op.callWithDispatchKey(_dk, {', '.join(a.expr for a in dispatcher_exprs)});
+  DispatchKey _autograd_dk = c10::getAutogradKeyFromBackend(_dk);
+  // This trick allows calling Autograd backend kernel first and then backend kernel,
+  // without adding another AutogradBackendSelect dispatch key.
+  DispatchKey _current_dk = at::impl::variable_excluded_from_dispatch() ? _dk : _autograd_dk;
+  return op.callWithDispatchKey(_current_dk, {', '.join(a.expr for a in dispatcher_exprs)});
 }}
 """
         elif target is Target.REGISTRATION:
