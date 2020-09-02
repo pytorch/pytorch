@@ -538,4 +538,5 @@ calc_i0(T _x) {
   return static_cast<T>(std::exp(x) * chbevl(static_cast<T>(32.0 / x - 2.0), B, 25) / std::sqrt(x));
 }
 
+// Upcast bfloat16 input to float for numerical accuracy purposes
 inline c10::BFloat16 calc_i0(c10::BFloat16 a) { return calc_i0(static_cast<float>(a)); }

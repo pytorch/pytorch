@@ -16877,31 +16877,35 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         self.assertEqual(actual, expected, atol=0, rtol=0)
 
     def _i0_helper(self, t):
+        # Test by comparing to scipy
         dtype = t.dtype
         actual = torch.i0(t)
         if dtype is torch.bfloat16:
             t = t.to(torch.float32)
         expected = scipy.special.i0(t.cpu().numpy())
+        # Casting down for dtype float16 is required since scipy upcasts to float32
         if dtype is torch.bfloat16 or dtype is torch.float16:
             expected = torch.from_numpy(expected).to(dtype)
         self.assertEqual(actual, expected)
 
     def _i0_range_helper(self, range, device, dtype):
+        # i0 tests are broken up by the domain for which the function does not overflow for each dtype
+        # This is done to ensure that the function performs well across all possible input values, without worrying
+        # about inf or nan possibilities
         for r in (range, -range):
             t = torch.rand(1000, device=device).to(dtype) * r
             self._i0_helper(t)
 
-    @dtypesIfCUDA(torch.float16, torch.float32, torch.float64)
-    @dtypesIfCPU(torch.bfloat16, torch.float32, torch.float64)
-    @dtypes(torch.float32, torch.float64)
+    @dtypesIfCUDA(*([torch.float16, torch.float32, torch.float64] + ([torch.bfloat16] if TEST_WITH_ROCM else [])))
+    @dtypes(torch.bfloat16, torch.float32, torch.float64)
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
     def test_i0_range1(self, device, dtype):
         # This tests the domain for i0 for which float16 does not overflow
         # The domain is (-13.25, 13.25)
         self._i0_range_helper(13.25, device, dtype)
 
-    @dtypesIfCPU(torch.bfloat16, torch.float32, torch.float64)
-    @dtypes(torch.float32, torch.float64)
+    @dtypesIfCUDA(*([torch.float32, torch.float64] + ([torch.bfloat16] if TEST_WITH_ROCM else [])))
+    @dtypes(torch.bfloat16, torch.float32, torch.float64)
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
     def test_i0_range2(self, device, dtype):
         # This tests the domain for i0 for which float32 and bfloat16 does not overflow
@@ -16915,9 +16919,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         # The domain is (-709.75, 709.75)
         self._i0_range_helper(709.75, device, dtype)
 
-    @dtypesIfCUDA(torch.float16, torch.float32, torch.float64)
-    @dtypesIfCPU(torch.bfloat16, torch.float32, torch.float64)
-    @dtypes(torch.float32, torch.float64)
+    @dtypesIfCUDA(*([torch.float16, torch.float32, torch.float64] + ([torch.bfloat16] if TEST_WITH_ROCM else [])))
+    @dtypes(torch.bfloat16, torch.float32, torch.float64)
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
     def test_i0_special(self, device, dtype):
         t = torch.tensor([], device=device, dtype=dtype)
