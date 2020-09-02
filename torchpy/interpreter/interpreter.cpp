@@ -139,15 +139,12 @@ void thread_enter() {
   std::thread::id my_tid = std::this_thread::get_id();
   if (thread_states.find(my_tid) == thread_states.end()) {
     if (my_tid == mainThreadId || thread_states.size() == 0) {
-      std::cout << "Bootstrap main tread state for tid " << my_tid << std::endl;
       thread_states[my_tid] = mainThreadState;
 
     } else {
-      std::cout << "Create new thread state for tid " << my_tid << std::endl;
       thread_states[my_tid] = PyThreadState_New(interpreterState);
     }
   } else {
-    std::cout << "Found thread state for tid " << my_tid << std::endl;
   }
   PyThreadState* myThreadState = thread_states[my_tid];
   assert(myThreadState != nullptr);
@@ -182,7 +179,6 @@ __attribute__((constructor)) void init() {
   mainThreadState = PyThreadState_Get();
   interpreterState = mainThreadState->interp;
   mainThreadId = std::this_thread::get_id();
-  std::cout << "init() tid " << mainThreadId << std::endl;
   assert(interpreterState != nullptr);
   PyEval_ReleaseThread(mainThreadState);
 }
@@ -241,7 +237,6 @@ static size_t load_model(const char* filename) {
       std::string(filename) + std::string("')");
   py::exec(code);
 
-  std::cout << "loaded model " << my_tid << std::endl;
   auto id = ++s_id;
 
   thread_exit();
@@ -254,20 +249,14 @@ static at::Tensor forward_model(size_t model_id, at::Tensor input) {
   {
     std::thread::id my_tid = std::this_thread::get_id();
     assert(PyGILState_Check() == 1);
-    std::cout << "forward_model enter " << my_tid << std::endl;
-    // auto forward = forwards[model_id];
-    py::exec("print('py: calling forward!', model.forward)");
     auto forward = py::globals()["model"].attr("forward");
-    std::cout << "found forward! " << my_tid << std::endl;
 
     py::object py_output = forward(input);
-    std::cout << "called forward!!" << std::endl;
     // TODO is this going to leak?
     // added it to prevent crash wehn using 'output' tensor in callee of
     // forward()
     py_output.inc_ref();
     output = py::cast<at::Tensor>(py_output);
-    std::cout << "forward_model exit" << std::endl;
   }
   thread_exit();
 

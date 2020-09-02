@@ -21,14 +21,12 @@ void compare_torchpy_jit(const char* model_filename, at::Tensor input) {
   ASSERT_TRUE(ref_output.equal(output));
 }
 
-// TODO reenable
-TEST(TorchpyTest, DISABLED_SimpleModel) {
+TEST(TorchpyTest, SimpleModel) {
   compare_torchpy_jit(
       "torchpy/example/simple.pt", torch::ones(at::IntArrayRef({10, 20})));
 }
 
-TEST(TorchpyTest, DISABLED_ResNet) {
-  // Loader is broken
+TEST(TorchpyTest, ResNet) {
   compare_torchpy_jit(
       "torchpy/example/resnet.pt",
       torch::ones(at::IntArrayRef({1, 3, 224, 224})));

@@ -28,17 +28,13 @@ void finalize() {
   interpreters.clear();
 }
 
-const char* g_filename;
-
 size_t load(const char* filename) {
   // for now just load all models into all interpreters
   // eventually, we'll share/dedup tensor data
-  size_t model_id = 0;
-  g_filename = filename;
-  // for (auto interp : interpreters) {
-  //   model_id = interp->load_model(filename);
-  //   std::cout << "interp got model_id " << model_id << std::endl;
-  // }
+  size_t model_id;
+  for (auto interp : interpreters) {
+    model_id = interp->load_model(filename);
+  }
   return model_id;
 }
 
@@ -48,14 +44,7 @@ at::Tensor forward(size_t model_id, at::Tensor input) {
   interpreters.pop_back();
   interpreters_mtx.unlock();
 
-  std::cout << "load " << g_filename << ", interp_id " << interp->id
-            << std::endl;
-  interp->load_model(g_filename);
-  std::cout << "forward for model_id " << model_id << ", interp_id "
-            << interp->id << std::endl;
   at::Tensor output = interp->forward_model(model_id, input);
-  std::cout << "finished forward for model_id " << model_id << ", interp_id "
-            << interp->id << std::endl;
 
   interpreters_mtx.lock();
   interpreters.push_back(interp);
