@@ -110,8 +110,6 @@ def _get_builtins_helper():
     builtins = []
     for fn, _builtin_name in torch.jit._builtins._builtin_ops:
         mod = inspect.getmodule(fn)
-        if not mod:
-            raise RuntimeError(f'Module for {fn} not found')
 
         if not hasattr(fn, '__name__'):
             # typing classes
