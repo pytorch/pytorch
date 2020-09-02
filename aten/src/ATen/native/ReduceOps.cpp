@@ -1037,4 +1037,14 @@ bool cpu_equal(const Tensor& self, const Tensor& other) {
   return result.load();
 }
 
+// This is the backward function for max.dim, mode.dim, topk.dim, etc.
+Tensor select_index_backward(const Tensor& grad, int64_t dim, const Tensor& indices, IntArrayRef sizes, bool keepdim) {
+  if (!keepdim && sizes.size() > 0) {
+    auto grad_ = grad.unsqueeze(dim);
+    auto indices_ = indices.unsqueeze(dim);
+    return at::zeros(sizes, grad_.options()).scatter_(dim, indices_, grad_);
+  }
+  return at::zeros(sizes, grad.options()).scatter_(dim, indices, grad);
+}
+
 }} // namespace at::native
