@@ -72,12 +72,11 @@ class Conf(object):
                 branches_list=["postnightly"],
             )
         else:
-            if self.os != "windows" or self.cuda_version != "110":
-                filter_branch = r"/.*/"
-                job_def["filters"] = branch_filters.gen_filter_dict(
-                    branches_list=[filter_branch],
-                    tags_list=[branch_filters.RC_PATTERN],
-                )
+            filter_branch = r"/.*/"
+            job_def["filters"] = branch_filters.gen_filter_dict(
+                branches_list=[filter_branch],
+                tags_list=[branch_filters.RC_PATTERN],
+            )
         if self.libtorch_variant:
             job_def["libtorch_variant"] = miniutils.quote(self.libtorch_variant)
         if phase == "test":
