@@ -101,19 +101,13 @@ class ONNXTracedModule(torch.nn.Module):
         outs = []
 
         def wrapper(*args):
-            in_args: List[torch.Tensor] = []
-            for i in range(len(in_vars)):
-                if not isinstance(args[i], torch.Tensor):
-                    raise RuntimeError("Expected Tensor input")
-                in_args.append(args[i])
-
-            trace_inputs = _unflatten(in_args, in_desc)
+            trace_inputs = _unflatten(args[: len(in_vars)], in_desc)  # type: ignore
 
             ret_inputs.append(
                 tuple(x.clone(memory_format=torch.preserve_format) for x in args)
             )
             if self._return_inputs_states:
-                inputs_states.append(_unflatten(in_args, in_desc))
+                inputs_states.append(_unflatten(args[: len(in_vars)], in_desc))  # type: ignore
             outs.append(self.inner(*trace_inputs))
             if self._return_inputs_states:
                 inputs_states[0] = (inputs_states[0], trace_inputs)
