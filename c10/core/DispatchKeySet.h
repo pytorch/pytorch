@@ -120,6 +120,44 @@ public:
 private:
   DispatchKeySet(uint64_t repr) : repr_(repr) {}
   uint64_t repr_ = 0;
+
+public:
+  // STL iterator for DispatchKeySet. Iterates from the first DispatchKey to the
+  // NumDispatchKey enum. The iterate is only invalidated by the destruction of
+  // the underlying DispatchKeySet as the iterator stores a pointer to the raw
+  // represenation of the DispatchKeySet.
+  class iterator {
+   public:
+    using self_type = iterator;
+    using iterator_category = std::input_iterator_tag;
+    using value_type = bool;
+    using difference_type = ptrdiff_t;
+    using pointer = const bool*;
+    using reference = const bool&;
+
+    iterator(const uint64_t *data_ptr, uint8_t i=1) : data_ptr_(data_ptr), i_(i) {}
+
+    self_type& operator++() { i_++; return *this; }
+    self_type operator++(int) { self_type i =  *this; i_++; return i; }
+
+    bool operator==(const self_type& rhs) const { return i_ == rhs.i_; }
+    bool operator!=(const self_type& rhs) const { return i_ != rhs.i_; }
+    bool operator*() const {return static_cast<bool> (*data_ptr_ & 1ULL << (i_ - 1)); }
+
+   private:
+    const uint64_t *data_ptr_;
+    uint8_t i_;
+  };
+
+ public:
+  // DispatchKey ID of 0 is undefined and cannot be set, so the iterator starts
+  // at the 1st DispatchKey rather than the 0th.
+  iterator begin() const { return iterator(&repr_, static_cast<uint8_t>(1)); }
+
+  // We do not need to iterate beyond NumDispatchKeys so we will treat this as
+  // the end. NumDispatchKeys will always be strictly less than 64.
+  iterator end() const { return iterator(&repr_, static_cast<uint8_t>(DispatchKey::NumDispatchKeys)); }
+
 };
 
 C10_API std::string toString(DispatchKeySet);
