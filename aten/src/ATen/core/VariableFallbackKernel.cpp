@@ -28,6 +28,7 @@ using c10::KernelFunction;
 
 namespace {
 
+// Register fallthrough for Autograd backends dispatch keys
 TORCH_LIBRARY_IMPL(_, Autograd, m) {
   m.fallback(torch::CppFunction::makeFallthrough());
 }

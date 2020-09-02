@@ -13478,7 +13478,7 @@ class TestTorchDeviceType(TestCase):
             ("addcdiv", True, True, 'cpu'),
             ("addcdiv", True, True, 'cuda'),
             ("lerp", True, True, 'cpu'),
-            ("lerp", False, False, 'cuda')
+            ("lerp", True, True, 'cuda')
         ]
 
         for (fn, has_input_output_mem_overlap_check,
@@ -13527,6 +13527,90 @@ class TestTorchDeviceType(TestCase):
             x[:-1] <<= x[1:]
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             x[:-1] >>= x[1:]
+
+    def test_bernoulli_mem_overlap(self, device):
+        x = torch.rand((1,), device=device).expand((6,))
+
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            x.bernoulli_()
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            x.bernoulli_(p=0.1)
+        p = torch.rand(6, device=device)
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            x.bernoulli_(p=p)
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            torch.bernoulli(torch.rand_like(x), out=x)
+
+    def test_index_put_mem_overlap(self, device):
+        x = torch.rand((1,), device=device).expand((6,))
+        y = torch.rand((6,), device=device)
+        ind = torch.tensor([0, 2, 3], device=device)
+        value = torch.rand((3,), device=device)
+        with self.assertWarnsRegex(UserWarning, 'expanded tensors'):
+            x.index_put_((ind,), value)
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            y.index_put_((ind,), y[0])
+
+    def test_masked_fill_mem_overlap(self, device):
+        x = torch.rand((1,), device=device).expand((6,))
+        mask = torch.tensor([True, False, True, True, False, False], device=device)
+        with self.assertWarnsRegex(UserWarning, 'expanded tensors'):
+            x.masked_fill_(mask, 0.)
+
+        fill_val = torch.tensor(0., device=device)
+        with self.assertWarnsRegex(UserWarning, 'expanded tensors'):
+            x.masked_fill_(mask, fill_val)
+
+    def test_masked_select_mem_overlap(self, device):
+        x = torch.rand((1,), device=device).expand((3,))
+        y = torch.rand((6,), device=device)
+        mask = torch.tensor([True, False, True, True, False, False], device=device)
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            torch.masked_select(y, mask, out=x)
+
+    def test_masked_scatter_mem_overlap(self, device):
+        x = torch.rand((1,), device=device).expand((6,))
+        src = torch.rand((3,), device=device)
+        mask = torch.tensor([True, False, True, True, False, False], device=device)
+
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            x.masked_scatter_(mask, src)
+
+    def test_index_select_mem_overlap(self, device):
+        x = torch.rand((1, 6), device=device).expand((2, 6))
+        y = torch.rand((3, 6), device=device)
+        ind = torch.tensor([0, 1], dtype=torch.int64, device=device)
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            torch.index_select(y, 1, ind, out=x)
+
+    def test_cat_mem_overlap(self, device):
+        x = torch.rand((1, 3), device=device).expand((6, 3))
+        y = torch.rand((3, 3), device=device)
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            torch.cat([y, y], out=x)
+
+    def test_scatter_mem_overlap(self, device):
+        x = torch.rand((1,), device=device).expand((6,))
+        src = torch.rand((3,), device=device)
+        ind = torch.tensor([0, 2, 3], device=device, dtype=torch.int64)
+
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            x.scatter_(0, ind, src)
+
+    def test_gather_mem_overlap(self, device):
+        x = torch.rand((1,), device=device).expand((3,))
+        src = torch.rand((6,), device=device)
+        ind = torch.tensor([0, 2, 3], device=device, dtype=torch.int64)
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            torch.gather(src, 0, ind, out=x)
+
+    def test_linlogspace_mem_overlap(self, device):
+        x = torch.rand(1, device=device).expand(10)
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            torch.linspace(1, 10, 10, out=x)
+
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            torch.logspace(1, 10, 10, out=x)
 
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     def test_int_pow(self, device):
@@ -14855,6 +14939,35 @@ class TestTorchDeviceType(TestCase):
             tensor = torch.HalfTensor(array).to(device)
             for i in range(len(array)):
                 self.assertEqual(tensor[i], array[i])
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_numpy_scalar_cmp(self, device, dtype):
+        if dtype.is_complex:
+            tensors = (torch.tensor(complex(1, 3), dtype=dtype, device=device),
+                       torch.tensor([complex(1, 3), 0, 2j], dtype=dtype, device=device),
+                       torch.tensor([[complex(3, 1), 0], [-1j, 5]], dtype=dtype, device=device))
+        else:
+            tensors = (torch.tensor(3, dtype=dtype, device=device),
+                       torch.tensor([1, 0, -3], dtype=dtype, device=device),
+                       torch.tensor([[3, 0, -1], [3, 5, 4]], dtype=dtype, device=device))
+
+        for tensor in tensors:
+            if dtype == torch.bfloat16:
+                with self.assertRaises(TypeError):
+                    np_array = tensor.cpu().numpy()
+                continue
+
+            np_array = tensor.cpu().numpy()
+            for t, a in product((tensor.flatten()[0], tensor.flatten()[0].item()),
+                                (np_array.flatten()[0], np_array.flatten()[0].item())):
+                self.assertEqual(t, a)
+                if dtype == torch.complex64 and torch.is_tensor(t) and type(a) == np.complex64:
+                    # TODO: Imaginary part is dropped in this case. Need fix.
+                    # https://github.com/pytorch/pytorch/issues/43579
+                    self.assertFalse(t == a)
+                else:
+                    self.assertTrue(t == a)
 
     def test_dlpack_conversion(self, device):
         x = torch.randn(1, 2, 3, 4, device=device, dtype=torch.float)
@@ -19461,6 +19574,8 @@ def _wrap_maybe_warns(regex):
 # - cpu_dtype_list (=[]), a list of torch dtypes to test the op(s) on cpu
 # - make_inplace_variant (=True), if true the inplace version of the op (op_) is also tested
 # - decorators (=[]), a list of decorators to apply to the test
+# - self_position (=-1), the position of self in the arg list, -1 means skip function check
+# - test_out (=False), whether to test the out= version of the operator
 tensor_op_tests = [
     ('add', '', _small_3d, lambda t, d: [_number(3.14, 3, t)], 1e-2),
     ('add', 'tensor', _small_3d, lambda t, d: [_small_3d(t, d)], 1e-2),
@@ -19528,7 +19643,7 @@ tensor_op_tests = [
         1e-1, 1e-5, _types2, _cpu_types, True,
         [_wrap_maybe_warns("This overload of addcmul_? is deprecated")]),
     ('addmm', '', _medium_2d, lambda t, d: [_medium_2d(t, d), _medium_2d(t, d)],
-        1e-1, 1e-1, 1e-4, _float_types2, _cpu_types, True, [tf32_on_and_off(0.005)]),
+        1e-1, 1e-1, 1e-4, _float_types2, _cpu_types, True, [tf32_on_and_off(0.005)], 0, True),
     ('addmm', 'scalar', _medium_2d,
         lambda t, d: [_number(0.4, 2, t), _medium_2d(t, d), _medium_2d(t, d)],
         1e-1, 1e-1, 1e-4, _float_types2, _cpu_types, True,
@@ -19539,7 +19654,7 @@ tensor_op_tests = [
         [tf32_on_and_off(0.005), _wrap_maybe_warns("This overload of addmm_? is deprecated")]),
     ('addmv', '', _medium_1d, lambda t, d: [_medium_2d(t, d), _medium_1d(t, d)],
         1e-2, 1e-1, 1e-4, _float_types2 + _complex_types_skip_rocm, _cpu_types,
-        True, [tf32_on_and_off(0.005)]),
+        True, [tf32_on_and_off(0.005)], 0, True),
     ('addmv', 'scalar', _medium_1d,
         lambda t, d: [_number(0.4, 2, t), _medium_2d(t, d), _medium_1d(t, d)],
         1e-2, 1e-1, 1e-4, _float_types2 + _complex_types_skip_rocm, _cpu_types, True,
@@ -19828,7 +19943,9 @@ def generate_test_function(cls,
                            float_precision,
                            dtype_list,
                            dtype_cpu_list,
-                           decorators) -> None:
+                           decorators,
+                           self_position,
+                           test_out) -> None:
     def fn(self, device, dtype) -> None:
         # Generates the CPU inputs
         # Note: CPU tensors are never torch.half
@@ -19860,6 +19977,25 @@ def generate_test_function(cls,
         self.assertEqual(cpu_args, device_args, atol=precision, rtol=0, exact_dtype=False)
         self.assertEqual(cpu_result, device_result, atol=precision, rtol=0, exact_dtype=False)
 
+        # check method matches with function
+        if self_position >= 0:
+            cpu_args.insert(self_position, cpu_tensor)
+            device_args.insert(self_position, device_tensor)
+            cpu_function_result = getattr(torch, op_str)(*cpu_args)
+            device_function_result = getattr(torch, op_str)(*device_args)
+            self.assertEqual(cpu_result, cpu_function_result, atol=precision, rtol=0)
+            self.assertEqual(device_result, device_function_result, atol=precision, rtol=0)
+
+            # check method matches with function(out)
+            if test_out:
+                bad_value = math.nan if dtype.is_floating_point or dtype.is_complex else 666
+                cpu_out = torch.full_like(cpu_result, bad_value)
+                device_out = torch.full_like(device_result, bad_value)
+                getattr(torch, op_str)(*cpu_args, out=cpu_out)
+                getattr(torch, op_str)(*device_args, out=device_out)
+                self.assertEqual(cpu_result, cpu_out, atol=precision, rtol=0)
+                self.assertEqual(device_result, device_out, atol=precision, rtol=0)
+
     test_name = "test_" + op_str + subtest_str
     assert not hasattr(cls, test_name), "{0} already in TestDevicePrecision".format(test_name)
 
@@ -19889,18 +20025,22 @@ def generate_tensor_op_tests(cls) -> None:
                dtype_list=_types,
                dtype_cpu_list=_cpu_types,
                make_inplace_variant=True,
-               decorators=None):
+               decorators=None,
+               self_position=-1,
+               test_out=False):
         if subtest_str:
             subtest_str = '_' + subtest_str
 
         generate_test_function(cls, op_str, subtest_str, tensor_ctor, arg_ctor, half_precision,
-                               bfloat16_precision, float_precision, dtype_list, dtype_cpu_list, decorators)
+                               bfloat16_precision, float_precision, dtype_list, dtype_cpu_list,
+                               decorators, self_position, test_out)
 
         if make_inplace_variant:
             op_str = op_str + '_'
             subtest_str = 'inplace' + subtest_str
             generate_test_function(cls, op_str, subtest_str, tensor_ctor, arg_ctor, half_precision,
-                                   bfloat16_precision, float_precision, dtype_list, dtype_cpu_list, decorators)
+                                   bfloat16_precision, float_precision, dtype_list, dtype_cpu_list,
+                                   decorators, -1, False)
 
     for test in tensor_op_tests:
         caller(cls, *test)

@@ -396,9 +396,8 @@ mobile::Module _load_for_mobile(
     auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
     BytecodeDeserializer deserializer(std::move(reader));
     mobile::Module result = deserializer.deserialize(std::move(device));
-    std::string name = result.name();
     if (observer) {
-      observer->onExitLoadModel(name);
+      observer->onExitLoadModel(result.metadata());
     }
     return result;
   } catch (const std::exception& ex) {
