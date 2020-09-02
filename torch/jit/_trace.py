@@ -433,9 +433,8 @@ def _check_trace(
                     *graph_diagnostic_info(),
                     extra_msg="Encountered an exception while running the "
                     + running_what
-                    + " with test inputs.\nException:\n"
-                    + indent(str(e))
-                )
+                    + " with test inputs."
+                ) from e
 
         has_warned = [False]
 

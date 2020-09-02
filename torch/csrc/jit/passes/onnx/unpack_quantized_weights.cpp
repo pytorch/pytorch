@@ -134,6 +134,8 @@ Node* createInt(int64_t i, std::shared_ptr<Graph>& graph) {
   return const_node;
 }
 
+enum class QuantizedParamsType { CONV, LINEAR };
+
 // This is called before the onnx pass. Using pattern matching we
 // find the relevant nodes and extract the packed_params. The packed_params are
 // passed to the appropriate unpack function using c10::Dispatcher. We insert
@@ -143,7 +145,8 @@ void unpackQuantizedWeightsHelper(
     std::shared_ptr<Graph>& graph,
     std::map<std::string, IValue>& paramsDict,
     const std::string& pattern,
-    const std::string& unpack_fn) {
+    const std::string& unpack_fn,
+    QuantizedParamsType params_type) {
   Graph pattern_graph;
   std::unordered_map<std::string, Value*> vmap;
   parseIR(pattern, &pattern_graph, vmap);
@@ -160,83 +163,101 @@ void unpackQuantizedWeightsHelper(
       throw std::runtime_error(
           "getValues: Quantized weight value not found amongst constant parameters.");
     }
-    at::Tensor unpacked_weight;      // field 1
-    c10::optional<at::Tensor> bias;  // field 2
-    const int64_t field_3_idx = 2;
-    const int64_t field_4_idx = 3;
-    const int64_t field_5_idx = 4;
-    const int64_t field_6_idx = 5;
-    c10::optional<torch::List<int64_t>> stride, padding, output_padding,
-                                        dilation;
+    at::Tensor unpacked_weight;
+    c10::optional<at::Tensor> bias;
+    constexpr int64_t stride_idx = 2;
+    constexpr int64_t padding_idx = 3;
+    constexpr int64_t dilation_idx = 4;
+    constexpr int64_t groups_idx = 5;
+    c10::optional<torch::List<int64_t>> stride, padding, dilation,
+                                        output_padding;
     c10::optional<int64_t> groups;
-    c10::optional<bool> transposed;
+    c10::optional<int64_t> transpose;
+
+    torch::List<int64_t> stride_int, padding_int, dilation_int,
+                         output_padding_int;
+    int64_t groups_int;
+    int64_t transpose_int;
 
     if (itr->second.isTuple()) {
       // Pre-unpacked weights. Comes from Conv/Linear weights which are
       // stored as bound C++ classes.
       auto ser_tup = itr->second.toTuple();
-      unpacked_weight = ser_tup->elements()[0].toTensor();
-      bias = ser_tup->elements()[1].toOptional<at::Tensor>();
-      // conv only parameters
-      // The serialization tuple is defined here:
-      // - aten/src/ATen/native/quantized/cpu/serialization_versions.h
-      if (ser_tup->elements().size() > 2) {
-        int64_t version = 1;
-        auto field_6_tensor = ser_tup->elements()[field_6_idx].toTensor();
-        if (field_6_tensor.size(0) > 1) {
-          version = field_6_tensor[0].item<int64_t>();
+
+      if (params_type == QuantizedParamsType::CONV &&
+          ser_tup->elements()[0].isString()) {
+        auto elements = ser_tup->elements();
+        auto version = elements[0].toStringRef();
+        TORCH_INTERNAL_ASSERT(version == "2", "Unknown serialization version");
+        std::vector<at::Tensor> non_optional = elements[1].toTensorVector();
+
+        at::Tensor conv_params_packed = non_optional[0];
+        unpacked_weight = non_optional[1];
+
+        const int64_t kSpatialDim = conv_params_packed[0].item<int64_t>();
+        // skip kSpatialDim
+        int64_t idx = 1;
+        for (int i = 0; i < kSpatialDim; ++i) {
+          stride_int.emplace_back(conv_params_packed[idx].item<int64_t>());
+          idx++;
         }
-
-        auto field_3_ivalue = ser_tup->elements()[field_3_idx].toListRef();
-        auto field_4_ivalue = ser_tup->elements()[field_4_idx].toListRef();
-        auto field_5_ivalue = ser_tup->elements()[field_5_idx].toListRef();
-
-        torch::List<int64_t> stride_int, padding_int, output_padding_int,
-                             dilation_int;
-        int64_t groups_int;
-        bool transposed_bool;
-
-        if (version == 1) {
-          for (const auto& s : field_3_ivalue) {
-            stride_int.emplace_back(s.toTensor()[0].item<int64_t>());
-          }
-          for (const auto& p : field_4_ivalue) {
-            padding_int.emplace_back(p.toTensor()[0].item<int64_t>());
-          }
-          for (const auto& d : field_5_ivalue) {
-            dilation_int.emplace_back(d.toTensor()[0].item<int64_t>());
-          }
-          groups_int = field_6_tensor.item<int64_t>();
-        } else if (version == 2) {
-          auto stride_tensor = field_3_ivalue.at(0).toTensor();
-          for (int idx = 0; idx < stride_tensor.size(0); ++idx) {
-            stride_int.emplace_back(stride_tensor[idx].item<int64_t>());
-          }
-          auto padding_tensor = field_3_ivalue.at(1).toTensor();
-          for (int idx = 0; idx < padding_tensor.size(0); ++idx) {
-            padding_int.emplace_back(padding_tensor[idx].item<int64_t>());
-          }
-          auto output_padding_tensor = field_3_ivalue.at(2).toTensor();
-          for (int idx = 0; idx < output_padding_tensor.size(0); ++idx) {
-            output_padding_int.emplace_back(
-              output_padding_tensor[idx].item<int64_t>());
-          }
-          auto dilation_tensor = field_3_ivalue.at(3).toTensor();
-          for (int idx = 0; idx < dilation_tensor.size(0); ++idx) {
-            dilation_int.emplace_back(dilation_tensor[idx].item<int64_t>());
-          }
-          groups_int = field_6_tensor[1].item<int64_t>();
-          transposed_bool = field_6_tensor[2].item<bool>();
-        } else {
-          TORCH_CHECK(false, "Unsupported version ", version);
+        for (int i = 0; i < kSpatialDim; ++i) {
+          padding_int.emplace_back(conv_params_packed[idx].item<int64_t>());
+          idx++;
         }
+        for (int i = 0; i < kSpatialDim; ++i) {
+          dilation_int.emplace_back(conv_params_packed[idx].item<int64_t>());
+          idx++;
+        }
+        for (int i = 0; i < kSpatialDim; ++i) {
+          output_padding_int.emplace_back(
+            conv_params_packed[idx].item<int64_t>());
+          idx++;
+        }
+        groups_int = conv_params_packed[idx].item<int64_t>();
+        idx++;
+        transpose_int = conv_params_packed[idx].item<int64_t>();
+        idx++;
+        TORCH_INTERNAL_ASSERT(
+            idx == conv_params_packed.numel(),
+            "Unexpected length of conv_params_packed, expected ",
+            idx,
+            " got ",
+            conv_params_packed.numel());
+
+        torch::List<c10::IValue> optional = elements[2].toList();
+        bias = optional.get(0).toOptional<at::Tensor>();
 
         stride = stride_int;
         padding = padding_int;
-        output_padding = output_padding_int;
         dilation = dilation_int;
         groups = groups_int;
-        transposed = transposed_bool;
+        transpose = transpose_int;
+      } else { // Legacy
+        unpacked_weight = ser_tup->elements()[0].toTensor();
+        bias = ser_tup->elements()[1].toOptional<at::Tensor>();
+        // conv only parameters
+        if (ser_tup->elements().size() > 2) {
+          auto stride_ivalue = ser_tup->elements()[stride_idx].toListRef();
+          auto padding_ivalue = ser_tup->elements()[padding_idx].toListRef();
+          auto dilation_ivalue = ser_tup->elements()[dilation_idx].toListRef();
+          auto groups_ivalue = ser_tup->elements()[groups_idx];
+
+          for (const auto& s : stride_ivalue) {
+            stride_int.emplace_back(s.toTensor()[0].item<int64_t>());
+          }
+          for (const auto& p : padding_ivalue) {
+            padding_int.emplace_back(p.toTensor()[0].item<int64_t>());
+          }
+          for (const auto& d : dilation_ivalue) {
+            dilation_int.emplace_back(d.toTensor()[0].item<int64_t>());
+          }
+          groups_int = groups_ivalue.toTensor()[0].item<int64_t>();
+          stride = stride_int;
+          padding = padding_int;
+          dilation = dilation_int;
+          groups = groups_int;
+        }
       }
     } else {
       TORCH_INTERNAL_ASSERT(itr->second.isTensor());
@@ -320,22 +341,14 @@ void unpackQuantizedWeightsHelper(
     c2_bias->insertBefore(qlinear_node);
     qlinear_node->insertInput(2, c2_bias->output());
 
-    // add conv arguments:
-    // stride, padding, output_padding, dilation, groups, transposed
-    // output_padding and transposed are only added for conv_transpose
+    // add conv arguments: stride, padding, dilation, groups
     if (stride.has_value() && padding.has_value() && dilation.has_value() &&
         groups.has_value()) {
       std::vector<c10::optional<torch::List<int64_t>>> conv_ints_args;
-      size_t arg_offset = 3;
       conv_ints_args.push_back(stride);
       conv_ints_args.push_back(padding);
-      if (transposed.value()) {
-        TORCH_CHECK(output_padding.has_value(),
-                    "transposed_conv must have output_padding");
-        conv_ints_args.push_back(output_padding);
-        arg_offset = 4;
-      }
       conv_ints_args.push_back(dilation);
+      const size_t arg_offset = 3;
       for (size_t i = 0; i < conv_ints_args.size(); ++i) {
         Node* ints_node =
             createIntTuple(conv_ints_args[i].value().vec(), graph);
@@ -344,12 +357,7 @@ void unpackQuantizedWeightsHelper(
       }
       Node* groups_node = createInt(groups.value(), graph);
       groups_node->insertBefore(qlinear_node);
-      qlinear_node->insertInput(field_6_idx + 1, groups_node->output());
-      if (transposed.value()) {
-        Node* transposed_node = createInt(transposed.value(), graph);
-        transposed_node->insertBefore(qlinear_node);
-        qlinear_node->insertInput(field_6_idx + 2, transposed_node->output());
-      }
+      qlinear_node->insertInput(groups_idx + 1, groups_node->output());
     }
     auto b = graph->block();
     auto valsToParamsMap = buildValueToParamsMap(b, paramsDict);
@@ -380,15 +388,35 @@ void UnpackQuantizedWeights(
         %r = quantized::conv3d_relu(%input, %packed_params, %scale, %zero_point)
         return (%r) )";
   unpackQuantizedWeightsHelper(
-      graph, paramsDict, qlinear, "quantized::linear_unpack");
+      graph,
+      paramsDict,
+      qlinear,
+      "quantized::linear_unpack",
+      QuantizedParamsType::LINEAR);
   unpackQuantizedWeightsHelper(
-      graph, paramsDict, qconv2d, "quantized::conv2d_unpack");
+      graph,
+      paramsDict,
+      qconv2d,
+      "quantized::conv2d_unpack",
+      QuantizedParamsType::CONV);
   unpackQuantizedWeightsHelper(
-      graph, paramsDict, qconv2d_relu, "quantized::conv2d_unpack");
+      graph,
+      paramsDict,
+      qconv2d_relu,
+      "quantized::conv2d_unpack",
+      QuantizedParamsType::CONV);
   unpackQuantizedWeightsHelper(
-      graph, paramsDict, qconv3d, "quantized::conv3d_unpack");
+      graph,
+      paramsDict,
+      qconv3d,
+      "quantized::conv3d_unpack",
+      QuantizedParamsType::CONV);
   unpackQuantizedWeightsHelper(
-      graph, paramsDict, qconv3d_relu, "quantized::conv3d_unpack");
+      graph,
+      paramsDict,
+      qconv3d_relu,
+      "quantized::conv3d_unpack",
+      QuantizedParamsType::CONV);
 }
 
 // Caffe2 expects quantized ops to be in NHWC format while pytorch inputs are in

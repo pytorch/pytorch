@@ -14,10 +14,14 @@ class BroadcastWork {
  public:
   BroadcastWork(
       const std::shared_ptr<c10d::ProcessGroup>& process_group,
-      std::vector<at::Tensor> bucket_tensors)
+      std::vector<at::Tensor> bucket_tensors,
+      int root_rank = 0)
       : bucket_tensors_(std::move(bucket_tensors)),
-        flat_tensor_({torch::utils::flatten_dense_tensors(bucket_tensors_)}),
-        work_(process_group->broadcast(flat_tensor_)) {}
+        flat_tensor_({torch::utils::flatten_dense_tensors(bucket_tensors_)}) {
+    BroadcastOptions broadcastOptions;
+    broadcastOptions.rootRank = root_rank;
+    work_ = process_group->broadcast(flat_tensor_, broadcastOptions);
+  }
 
   void finish() {
     work_->wait();
@@ -51,7 +55,8 @@ class BroadcastWork {
 void broadcast_coalesced(
     std::shared_ptr<c10d::ProcessGroup> process_group,
     at::TensorList tensors,
-    size_t buffer_size) {
+    size_t buffer_size,
+    int rank) {
   // Coalesce tensors into buckets taking into account the maximum buffer size.
   // This routine is multi-device aware, so the tensors can be split across
   // multiple devices and can contain a mix of CPU and CUDA tensors.
@@ -71,7 +76,7 @@ void broadcast_coalesced(
       in_flight.pop_front();
     }
 
-    in_flight.emplace_back(process_group, c10::fmap(bucket, lookup));
+    in_flight.emplace_back(process_group, c10::fmap(bucket, lookup), rank);
   }
 
   while (!in_flight.empty()) {
