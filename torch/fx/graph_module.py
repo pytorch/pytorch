@@ -1,7 +1,6 @@
 import torch
 import torch.overrides
 import linecache
-import copy
 from typing import Type, Dict, List, Any
 from .graph import Graph
 
@@ -27,6 +26,14 @@ def patched_getline(*args, **kwargs):
     return _orig_getlines(*args, **kwargs)
 linecache.getlines = patched_getline
 
+def forward_from_src(src : str):
+    gbls: Dict[str, Any] = {
+        'torch': torch
+    }
+    exec_with_source(src, gbls)
+    return gbls['forward']
+
+
 def deserialize_graphmodule(root : torch.nn.Module, src : str) -> torch.nn.Module:
     """
     Deserialize a GraphModule given the original `root` module and the generated
@@ -35,19 +42,16 @@ def deserialize_graphmodule(root : torch.nn.Module, src : str) -> torch.nn.Modul
     to the original code. Then it symbolically traces through it to get the
     GraphModule
     """
-    class Dummy(torch.nn.Module):
+    # We create a dummy class here because symbolic_trace pulls the forward()
+    # function off of the class, rather than the instance
+    class CodeOnlyModule(torch.nn.Module):
         def __init__(self, root, src):
             super().__init__()
             self.root = root
-            gbls: Dict[str, Any] = {
-                'torch': torch
-            }
-            exec_with_source(src, gbls)
-            cls = type(self)
-            cls.forward = gbls['forward']
+    CodeOnlyModule.forward = forward_from_src(src)
 
     from .symbolic_trace import symbolic_trace
-    return symbolic_trace(Dummy(root, src))
+    return symbolic_trace(CodeOnlyModule(root, src))
 
 class GraphModule(torch.nn.Module):
     def __new__(cls: 'Type[GraphModule]', *args, **kwargs):
@@ -76,16 +80,8 @@ def forward(self, {', '.join(free_variables)}):
 {body}
     return {result}
 """
-        # print(self.code)
-        # install forward into the classes dictionary, this is what normally happens in the
-        # 'class' statement
-        # __new__ ensured that each instance has its own class
-        gbls: Dict[str, Any] = {
-            'torch': torch
-        }
-        exec_with_source(self.code, gbls)
         cls = type(self)
-        cls.forward = gbls['forward']
+        cls.forward = forward_from_src(self.code)
 
     def __reduce__(self):
         return (deserialize_graphmodule, (self.root, self.code))
