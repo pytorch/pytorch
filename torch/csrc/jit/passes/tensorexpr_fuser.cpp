@@ -454,12 +454,25 @@ class TensorExprFuser {
       return false;
     }
     auto subgraph = SubgraphUtils::getSubgraph(n);
-    size_t num_modes = blockSize(subgraph->block());
-    if (num_modes < min_group_size_) {
+    size_t num_nodes = blockSize(subgraph->block());
+    if (num_nodes < min_group_size_) {
       GRAPH_UPDATE("Fusion group is too small, unmerging: ", *n);
       SubgraphUtils::unmergeSubgraph(n);
       return true;
     }
+    bool seen_tensor = false;
+    for (Value * input : n->inputs()) {
+      if (input->type()->cast<TensorType>()) {
+        seen_tensor = true;
+        break;
+      }
+    }
+    if (!seen_tensor) {
+      GRAPH_UPDATE("Fusion group is doesn't have tensor inputs, unmerging: ", *n);
+      SubgraphUtils::unmergeSubgraph(n);
+      return true;
+    }
+
     return false;
   }
 
