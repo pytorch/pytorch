@@ -41,9 +41,7 @@ def deserialize_graphmodule(root : torch.nn.Module, src : str) -> torch.nn.Modul
         'torch': torch
     }
     exec_with_source(src, gbls)
-    cls = type(root)
-    for k, v in gbls.items():
-        setattr(root, k, v)
+    setattr(root, 'forward', gbls['forward'])
     return symbolic_trace(root)
 
 class GraphModule(torch.nn.Module):
@@ -82,8 +80,7 @@ def forward(self, {', '.join(free_variables)}):
         }
         exec_with_source(self.code, gbls)
         cls = type(self)
-        for k, v in gbls.items():
-            setattr(cls, k, v)
+        setattr(cls, 'forward', gbls['forward'])
 
     def __reduce__(self):
         return (deserialize_graphmodule, (self.root, self.code))
