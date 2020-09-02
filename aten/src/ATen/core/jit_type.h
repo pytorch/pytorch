@@ -544,7 +544,7 @@ struct CAFFE2_API VaryingShape {
     return dims.size();
   }
 
-  const c10::optional<ListOfOptionalElements>& sizes() const {
+  CAFFE2_API const c10::optional<ListOfOptionalElements>& sizes() const {
     return dims_;
   }
 
