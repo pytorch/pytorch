@@ -710,7 +710,7 @@ public abstract class Tensor {
     MemoryFormat memoryFormat = MemoryFormat.CONTIGUOUS;
     if (MemoryFormat.CHANNELS_LAST.jniCode == memoryFormatCode) {
       memoryFormat = MemoryFormat.CHANNELS_LAST;
-    } else if(MemoryFormat.CHANNELS_LAST_3D.jniCode == memoryFormatCode) {
+    } else if (MemoryFormat.CHANNELS_LAST_3D.jniCode == memoryFormatCode) {
       memoryFormat = MemoryFormat.CHANNELS_LAST_3D;
     }
 

@@ -356,10 +356,10 @@ public abstract class PytorchTestBase {
     Tensor inputNHWC = Tensor.fromBlob(dataNHWC, inputShape, MemoryFormat.CHANNELS_LAST);
 
     long[] weightShape = new long[] {3, 3, 1, 1};
-    long[] dataWeightNCHW = new long[] {2, 0, 0, 0, 1, 0, 0, 0, -1};
-    Tensor wNCHW = Tensor.fromBlob(dataWeightNCHW, weightShape, MemoryFormat.CONTIGUOUS);
-    long[] dataWeightNHWC = new long[] {2, 0, 0, 0, 1, 0, 0, 0, -1};
-    Tensor wNHWC = Tensor.fromBlob(dataWeightNHWC, weightShape, MemoryFormat.CHANNELS_LAST);
+    long[] dataWeightOIHW = new long[] {2, 0, 0, 0, 1, 0, 0, 0, -1};
+    Tensor wNCHW = Tensor.fromBlob(dataWeightOIHW, weightShape, MemoryFormat.CONTIGUOUS);
+    long[] dataWeightOHWI = new long[] {2, 0, 0, 0, 1, 0, 0, 0, -1};
+    Tensor wNHWC = Tensor.fromBlob(dataWeightOHWI, weightShape, MemoryFormat.CHANNELS_LAST);
 
     final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
 
