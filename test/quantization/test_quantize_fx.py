@@ -300,13 +300,12 @@ class TestQuantizeFxOps(QuantizationTestCase):
             3: ns.call_module(nniq.ConvReLU3d),
         }
         for dim, quant_type in options:
-            for orig_m in [ConvNdRelu(dim, True),
-                           ConvNdRelu(dim, False),
-                           ConvNdFunctionalRelu(dim),
-                           ConvNdInplaceFunctionalRelu(dim)]:
-                conv_name = "conv{}d".format(dim)
-                m = self.checkGraphModeFxOp(
-                    orig_m, self.img_data_dict[dim], quant_type,
+            for m in [ConvNdRelu(dim, True),
+                      ConvNdRelu(dim, False),
+                      ConvNdFunctionalRelu(dim),
+                      ConvNdInplaceFunctionalRelu(dim)]:
+                self.checkGraphModeFxOp(
+                    m, self.img_data_dict[dim], quant_type,
                     quantized_nodes[dim])
 
 
