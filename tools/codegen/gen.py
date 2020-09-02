@@ -251,38 +251,15 @@ def compute_type_method(
 
                 has_tensor_options = any(isinstance(a.argument, TensorOptionsArguments) for a in args)
 
-                # TODO: There is probably a simpler version of this that
-                # works just as well.
-                if f.device_guard and (dispatch is None or 'Vulkan' == dispatch) and has_tensor_options:
-                    cuda_guard = """\
-    const DeviceGuard device_guard(options.device());
-"""
-                    # See Note [Byte-for-byte compatibility]
-                    if dispatch is not None:
-                        cuda_guard = f"\n{cuda_guard}"
-                elif f.device_guard and dispatch is not None and 'CUDA' in dispatch and has_tensor_options:
-                    cuda_guard = """\
-    globalContext().lazyInitCUDA();
-    const DeviceGuard device_guard(options.device());
-"""
-                elif f.device_guard and device_of is not None:
-                    cuda_guard = f"""\
-    const OptionalDeviceGuard device_guard(device_of({device_of}));
-"""
-                    # See Note [Byte-for-byte compatibility]
-                    if dispatch is not None:
-                        cuda_guard = f"\n{cuda_guard}"
+                if f.device_guard and dispatch is not None and 'CUDA' in dispatch and has_tensor_options:
+                    cuda_guard = "globalContext().lazyInitCUDA();"
                 else:
-                    cuda_guard = """\
-    // DeviceGuard omitted
-"""
-                    # See Note [Byte-for-byte compatibility]
-                    if dispatch is not None:
-                        cuda_guard = f"\n{cuda_guard}"
+                    cuda_guard = ""
 
             return f"""\
 {returns_type} {name}({args_str}) {{
-{cuda_guard}{return_kw}{impl_name}({args_exprs_str});
+    {cuda_guard}
+    {return_kw}{impl_name}({args_exprs_str});
 }}
 """
 
@@ -514,6 +491,74 @@ DispatchKeySet _dk_set = DispatchKeySet(options.computeDispatchKey()) | c10::det
         else:
             assert_never(target)
     return go
+
+def compute_device_guard(*, target: Target) -> Callable[[NativeFunction], Optional[str]]:
+    @with_native_function
+    def go(f: NativeFunction) -> Optional[str]:
+        name = legacy_dispatcher.name(f.func)
+        legacy_dispatcher_returns_type = legacy_dispatcher.returns_type(f.func.returns)
+        legacy_dispatcher_args = legacy_dispatcher.arguments(f.func)
+
+        legacy_dispatcher_tensor_args = [
+            a for a in legacy_dispatcher_args
+            if isinstance(a.argument, Argument) and a.argument.type.is_tensor_like()
+        ]
+
+        dispatcher_returns_type = dispatcher.returns_type(f.func.returns)
+        dispatcher_args = dispatcher.arguments(f.func)
+        dispatcher_exprs = dispatcher.legacydispatcherarguments_exprs(legacy_dispatcher_args)
+
+        self_args = (a for a in f.func.arguments if a.name == "self")
+
+        # There is precedence for which argument we use to do
+        # device guard.  This describes the precedence order.
+        candidate_args = itertools.chain(self_args, f.func.out_arguments, f.func.arguments)
+
+        # Only tensor like arguments are eligible
+        device_of = next((f'{a.name}' for a in candidate_args if a.type.is_tensor_like()), None)
+
+        has_tensor_options = any(isinstance(a.argument, TensorOptionsArguments) for a in legacy_dispatcher_args)
+
+        has_device_guard = f.device_guard and (has_tensor_options or device_of is not None)
+
+        if target is Target.DEFINITION:
+            if not has_device_guard:
+                return None
+
+            if has_tensor_options:
+                guard = "const DeviceGuard device_guard(options.device());"
+            elif device_of is not None:
+                guard = f"const OptionalDeviceGuard device_guard(device_of({device_of}));"
+            else:
+                raise AssertionError()
+
+            # TODO: factor out the idiom for redispatching
+            return f"""\
+// aten::{f.func}
+{legacy_dispatcher_returns_type} {name}({', '.join(a.str_with_default() for a in legacy_dispatcher_args)}) {{
+  {guard}
+  c10::impl::ExcludeDispatchKeyGuard(c10::DispatchKey::DeviceGuard);
+  static auto op = c10::Dispatcher::singleton()
+    .findSchemaOrThrow("aten::{f.func.name.name}", "{f.func.name.overload_name}")
+    .typed<{dispatcher_returns_type} ({', '.join(a.type for a in dispatcher_args)})>();
+  return op.call({', '.join(a.expr for a in dispatcher_exprs)});
+}}
+"""
+        elif target is Target.REGISTRATION:
+            if not has_device_guard:
+                return f"""m.impl("aten::{f.func.name}", torch::CppFunction::makeFallthrough());"""
+            elif local.use_c10_dispatcher() is UseC10Dispatcher.full:
+                return f"""m.impl("aten::{f.func.name}",
+          c10::impl::hacky_wrapper_for_legacy_signatures<{dispatcher_returns_type} ({', '.join(a.type for a in dispatcher_args)})>(
+            TORCH_FN({name})));"""
+            else:
+                return f"""m.impl_UNBOXED("aten::{f.func.name}", {name});"""
+        elif target is Target.DECLARATION:
+            raise AssertionError()
+        else:
+            assert_never(target)
+    return go
+
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #
@@ -1051,6 +1096,12 @@ def main() -> None:
             list(mapMaybe(compute_backend_select(target=Target.DEFINITION), native_functions)),
         'backend_select_function_registrations':
             list(mapMaybe(compute_backend_select(target=Target.REGISTRATION), native_functions)),
+    })
+    cpu_fm.write('DeviceGuardRegister.cpp', lambda: {
+        'device_guard_function_definitions':
+            list(mapMaybe(compute_device_guard(target=Target.DEFINITION), native_functions)),
+        'device_guard_function_registrations':
+            list(mapMaybe(compute_device_guard(target=Target.REGISTRATION), native_functions)),
     })
 
     if options.force_schema_registration:
