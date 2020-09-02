@@ -7,7 +7,9 @@
 #include <torch/csrc/jit/mobile/import_data.h>
 #include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/mobile/optim/sgd.h>
+#include <torch/csrc/jit/mobile/sequential.h>
 #include <torch/csrc/jit/serialization/import.h>
+#include <torch/data/dataloader.h>
 #include <torch/torch.h>
 
 // Tests go in torch::jit
@@ -234,6 +236,36 @@ void testLiteSGD() {
     }
   }
   AT_ASSERT(parameters[0].item<float>() == bc_parameters[0].item<float>());
+}
+
+namespace {
+struct DummyDataset : torch::data::datasets::Dataset<DummyDataset, int> {
+  explicit DummyDataset(size_t size = 100) : size_(size) {}
+
+  int get(size_t index) override {
+    return 1 + index;
+  }
+  torch::optional<size_t> size() const override {
+    return size_;
+  }
+
+  size_t size_;
+};
+} // namespace
+
+void testLiteSequentialSampler() {
+  // test that sampler can be used with dataloader
+  const int kBatchSize = 10;
+  auto data_loader =
+      torch::data::make_data_loader<torch::data::samplers::SequentialSampler>(
+          DummyDataset(25), kBatchSize);
+  int i = 1;
+  for (const auto& batch : *data_loader) {
+    for (const auto& example : batch) {
+      AT_ASSERT(i == example);
+      i++;
+    }
+  }
 }
 
 } // namespace jit

@@ -30,8 +30,8 @@ class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
         device_maps (Dict[str, Dict]): Device placement mappings from this
             worker to the callee. Key is the callee worker name and value the
             dictionary (``Dict`` of ``int``, ``str``, or ``torch.device``) that
-            maps this worker's device to the callee worker's device to the
-            callee worker's device. (default: ``None``)
+            maps this worker's devices to the callee worker's devices.
+            (default: ``None``)
     """
     def __init__(
         self,
