@@ -171,8 +171,8 @@ class Optimizer(object):
             set_to_none (bool): instead of setting to zero, set the grad to None.
                 This will in general have lower memory footprint, and can modestly improve performance.
                 However, it changes certain behaviors. For example:
-                1. When user tries to access the gradient value and perform manual ops on it.
-                A None attribute or a Tensor full of 0s will be different.
+                1. When user tries to access the gradient value and perform manual ops on it,
+                a None attribute or a Tensor full of 0s will be different.
                 2. If the user requests `zero_grad(set_to_none=True)` followed by a backward pass, `.grad` s
                 are guaranteed to be None for params that did not receive a gradient.
                 3. `torch.optim` optimizers have a different behavior if the gradient is 0 or None
