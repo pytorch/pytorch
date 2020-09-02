@@ -2458,6 +2458,35 @@ Example::
     tensor(7)
 """)
 
+add_docstr(torch.vdot,
+           r"""
+vdot(input, other, *, out=None) -> Tensor
+
+Computes the dot product (inner product) of two tensors. The vdot(a, b) function
+handles complex numbers differently than dot(a, b). If the first argument is complex,
+the complex conjugate of the first argument is used for the calculation of the dot product.
+
+.. note:: This function does not :ref:`broadcast <broadcasting-semantics>`.
+
+Args:
+    input (Tensor): first tensor in the dot product. Its conjugate is used if it's complex.
+    other (Tensor): second tensor in the dot product.
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> torch.vdot(torch.tensor([2, 3]), torch.tensor([2, 1]))
+    tensor(7)
+    >>> a = torch.tensor((1 +2j, 3 - 1j))
+    >>> b = torch.tensor((2 +1j, 4 - 0j))
+    >>> torch.vdot(a, b)
+    tensor([16.+1.j])
+    >>> torch.vdot(b, a)
+    tensor([16.-1.j])
+""".format(**common_args))
+
 add_docstr(torch.eig,
            r"""
 eig(input, eigenvectors=False, *, out=None) -> (Tensor, Tensor)
