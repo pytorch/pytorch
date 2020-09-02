@@ -32,8 +32,8 @@ class C10_EXPORT Context final {
     return physical_device_;
   }
 
-  inline const VkPhysicalDeviceLimits& physical_device_limits() const {
-    return physical_device_limits_;
+  inline const VkPhysicalDeviceProperties& physical_device_properties() const {
+    return physical_device_properties_;
   }
 
   inline VkDevice device() const {
@@ -79,7 +79,7 @@ class C10_EXPORT Context final {
   Handle<VkInstance, decltype(&VK_DELETER(Instance))> instance_;
   Handle<VkDebugReportCallbackEXT, Debug> debug_report_callback_;
   VkPhysicalDevice physical_device_;
-  VkPhysicalDeviceLimits physical_device_limits_;
+  VkPhysicalDeviceProperties physical_device_properties_;
   uint32_t compute_queue_family_index_;
   Handle<VkDevice, decltype(&VK_DELETER(Device))> device_;
   VkQueue queue_;
