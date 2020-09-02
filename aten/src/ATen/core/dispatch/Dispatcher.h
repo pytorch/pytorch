@@ -135,6 +135,7 @@ public:
   Return redispatch(const TypedOperatorHandle<Return (Args...)>& op, DispatchKey currentDispatchKey, Args... args) const;
 
   // Invoke an operator via the boxed calling convention using an IValue stack
+  template<bool Profile=false>
   void callBoxed(const OperatorHandle& op, Stack* stack) const;
 
   // ------------------------------------------------------------------------
@@ -288,8 +289,9 @@ public:
     return TypedOperatorHandle<FuncType>(operatorIterator_);
   }
 
+  template <bool Profile=false>
   void callBoxed(Stack* stack) const {
-    c10::Dispatcher::singleton().callBoxed(*this, stack);
+    c10::Dispatcher::singleton().callBoxed<Profile>(*this, stack);
   }
 
 private:
@@ -405,6 +407,7 @@ inline Return Dispatcher::redispatch(const TypedOperatorHandle<Return (Args...)>
   return kernel.template call<Return, Args...>(op, std::forward<Args>(args)...);
 }
 
+template<bool Profile>
 inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const {
   // note: this doesn't need the mutex because write operations on the list keep iterators intact.
   const auto& entry = op.operatorIterator_->op;
