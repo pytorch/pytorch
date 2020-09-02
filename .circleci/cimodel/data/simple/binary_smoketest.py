@@ -153,6 +153,9 @@ WORKFLOW_DATA = [
         "binary_windows_conda_3_7_cu110_test",
         is_master_only=False,
         requires=["binary_windows_conda_3_7_cu110_build"],
+        extra_props={
+            "executor": "windows-with-nvidia-gpu",
+        },
     ),
     SmoketestJob(
         "binary_windows_test",
@@ -161,6 +164,9 @@ WORKFLOW_DATA = [
         "binary_windows_wheel_3_7_cu110_test",
         is_master_only=False,
         requires=["binary_windows_wheel_3_7_cu110_build"],
+        extra_props={
+            "executor": "windows-with-nvidia-gpu",
+        },
     ),
     SmoketestJob(
         "binary_windows_test",
@@ -169,6 +175,9 @@ WORKFLOW_DATA = [
         "binary_windows_libtorch_3_7_cu110_debug_test",
         is_master_only=False,
         requires=["binary_windows_libtorch_3_7_cu110_debug_build"],
+        extra_props={
+            "executor": "windows-with-nvidia-gpu",
+        },
     ),
     SmoketestJob(
         "binary_windows_test",
@@ -177,6 +186,9 @@ WORKFLOW_DATA = [
         "binary_windows_libtorch_3_7_cu110_release_test",
         is_master_only=False,
         requires=["binary_windows_libtorch_3_7_cu110_release_build"],
+        extra_props={
+            "executor": "windows-with-nvidia-gpu",
+        },
     ),
     SmoketestJob(
         "binary_windows_build",

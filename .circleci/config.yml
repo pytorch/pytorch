@@ -7071,21 +7071,25 @@ workflows:
           name: binary_windows_libtorch_3_7_cu110_release_build
       - binary_windows_test:
           build_environment: conda 3.7 cu110
+          executor: windows-with-nvidia-gpu
           name: binary_windows_conda_3_7_cu110_test
           requires:
             - binary_windows_conda_3_7_cu110_build
       - binary_windows_test:
           build_environment: wheel 3.7 cu110
+          executor: windows-with-nvidia-gpu
           name: binary_windows_wheel_3_7_cu110_test
           requires:
             - binary_windows_wheel_3_7_cu110_build
       - binary_windows_test:
           build_environment: libtorch 3.7 cu110 debug
+          executor: windows-with-nvidia-gpu
           name: binary_windows_libtorch_3_7_cu110_debug_test
           requires:
             - binary_windows_libtorch_3_7_cu110_debug_build
       - binary_windows_test:
           build_environment: libtorch 3.7 cu110 release
+          executor: windows-with-nvidia-gpu
           name: binary_windows_libtorch_3_7_cu110_release_test
           requires:
             - binary_windows_libtorch_3_7_cu110_release_build
