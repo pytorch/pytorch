@@ -180,9 +180,8 @@ mobile::Module _load_data(
     auto mcu = std::make_shared<mobile::CompilationUnit>();
     mobile::Module result = mobile::Module(
         deserializer.deserialize(std::move(device)).toObject(), mcu);
-    std::string name = result.name();
     if (observer) {
-      observer->onExitLoadModel(name);
+      observer->onExitLoadModel(result.metadata());
     }
     return result;
   } catch (const std::exception& ex) {
