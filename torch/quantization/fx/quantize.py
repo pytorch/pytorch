@@ -332,7 +332,7 @@ class Quantizer:
 
         def load_x(n):
             assert n.name in env or n.name in quant_env, \
-                'node ' + n.name + ' does not exist in either of then environment'
+                'node ' + n.name + ' does not exist in either environment'
             if n.name in quant_env:
                 return quant_env[n.name]
             else:
