@@ -139,6 +139,8 @@ def _slice(g, input, axes, starts, ends, steps=None, dynamic_slice=False):
     if dynamic_slice:
         starts = g.op("Unsqueeze", starts, axes_i=[0])
         ends = g.op("Unsqueeze", ends, axes_i=[0])
+        if isinstance(axes, int):
+            axes = g.op("Constant", value_t=torch.tensor(axes))
         axes = g.op("Unsqueeze", axes, axes_i=[0])
     else:
         assert len(starts) == len(ends)
@@ -156,10 +158,21 @@ def _slice(g, input, axes, starts, ends, steps=None, dynamic_slice=False):
     return g.op("Slice", input, starts, ends, axes, steps)
 
 
-@parse_args('v', 'v', 'v', 'v', 'i')
-def slice(g, self, dim, start, end, step):
+def slice(g, self, *args):
+    if len(args) == 4:
+        # aten::slice(Tensor self, int dim, int start, int end, int step) -> Tensor
+        dim, start, end, step = args
+    elif len(args) == 3:
+        # aten::slice(t[] l, int start, int end, int step) -> t[]
+        start, end, step = args
+        dim = 0
+    else:
+        raise NotImplementedError("Unknown aten::slice signature")
+
+    step = sym_help._parse_arg(step, 'i')
     if (start.node().kind() != 'onnx::Constant' or
-       end.node().kind() != 'onnx::Constant' or dim.node().kind() != 'onnx::Constant'):
+       (not isinstance(end, int) and end.node().kind() != 'onnx::Constant') or
+       (not isinstance(dim, int) and dim.node().kind() != 'onnx::Constant')):
         dynamic_slice = True
     else:
         start = [sym_help._parse_arg(start, 'i')]
