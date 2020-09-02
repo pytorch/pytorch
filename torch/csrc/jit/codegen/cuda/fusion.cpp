@@ -233,20 +233,21 @@ void Fusion::addInput(Val* const input) {
 
   if (input->getValType().value() == ValType::TensorView) {
     auto tv = input->as<TensorView>();
-    if (tv->hasReduction())
+    if (tv->hasReduction()) {
       TORCH_WARN_ONCE(
           "Registered input ",
           input,
           " has a reduction axis, but this does nothing in the fusion.");
+    }
+    tv->setMemoryType(MemoryType::Global);
   }
 
-  TORCH_CHECK(
+  TORCH_INTERNAL_ASSERT(
       input->getOrigin() == nullptr,
       input,
       " cannot be registered as an input as it is used as an output of an expression (",
       input->getOrigin(),
       ").");
-
   inputs_.push_back(input);
 }
 
@@ -254,13 +255,15 @@ void Fusion::addOutput(Val* const output) {
   assertInFusion(output, "Cannot register output ");
   if (output->getValType().value() == ValType::TensorView) {
     auto tv = output->as<TensorView>();
-    if (TensorDomain::hasBroadcast(tv->getRootDomain()))
+    if (TensorDomain::hasBroadcast(tv->getRootDomain())) {
       // Go to the root as we can merge bcast and
       // non-bcast dims, making a non-bcast dim.
-      TORCH_CHECK( // Should we warn instead?
+      TORCH_INTERNAL_ASSERT( // Should we warn instead?
           false,
           output,
           " cannot be registered as an output as it has a broadcast axis.");
+    }
+    tv->setMemoryType(MemoryType::Global);
   }
   outputs_.push_back(output);
 }

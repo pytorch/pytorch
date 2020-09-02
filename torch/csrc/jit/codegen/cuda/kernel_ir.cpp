@@ -366,11 +366,16 @@ Val* TensorIndex::index(int i) const {
   return indices_[i];
 }
 
-Allocate::Allocate(Val* buffer, MemoryType memory_type, Val* size)
+Allocate::Allocate(
+    Val* buffer,
+    MemoryType memory_type,
+    Val* size,
+    bool zero_init)
     : Expr(ExprType::Allocate),
       buffer_(buffer),
       memory_type_(memory_type),
-      size_(size) {
+      size_(size),
+      zero_init_(zero_init) {
   if (size_ != nullptr) {
     TORCH_INTERNAL_ASSERT(
         size_->isOneInt() ||
@@ -378,7 +383,10 @@ Allocate::Allocate(Val* buffer, MemoryType memory_type, Val* size)
         "Cannot allocate a non-TensorView buffer with a size != 1, received buffer: ",
         buffer_);
   } else {
-    TORCH_CHECK(buffer_->getValType().value() == ValType::KirTensorView);
+    TORCH_INTERNAL_ASSERT(
+        buffer_->getValType().value() == ValType::KirTensorView);
+    TORCH_INTERNAL_ASSERT(
+        buffer_->as<TensorView>()->getMemoryType() == memory_type_);
     const auto domain = buffer_->as<TensorView>()->domain();
     size_ = domain->nDims() == 0 ? new Int(1) : domain->axis(0)->extent();
     for (size_t i = 1; i < domain->nDims(); i++) {

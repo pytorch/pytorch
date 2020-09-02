@@ -209,7 +209,10 @@ class TORCH_CUDA_API TensorView : public Val {
   TensorView(TensorView&& other) = delete;
   TensorView& operator=(TensorView&& other) = delete;
 
-  TensorView(TensorDomain* _domain, DataType dtype);
+  TensorView(
+      TensorDomain* _domain,
+      DataType dtype,
+      MemoryType mtype = MemoryType::Local);
 
   TensorView(const std::shared_ptr<c10::TensorType>& tensor_type);
 
@@ -407,7 +410,7 @@ class TORCH_CUDA_API TensorView : public Val {
   // compute at axis in compute at view
   unsigned int relative_compute_at_axis_ = 0;
   unsigned int this_compute_at_axis_ = 0;
-  MemoryType memory_type_ = MemoryType::Global;
+  MemoryType memory_type_ = MemoryType::Local;
 };
 
 } // namespace fuser

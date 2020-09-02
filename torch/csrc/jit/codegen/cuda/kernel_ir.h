@@ -300,7 +300,7 @@ class TORCH_CUDA_API TensorView : public Val {
 
  private:
   TensorDomain* domain_ = nullptr;
-  MemoryType memory_type_ = MemoryType::Global;
+  MemoryType memory_type_ = MemoryType::Local;
 
   // TODO(kir): remove temporary hack
   const fuser::TensorView* fuser_tv_ = nullptr;
@@ -474,7 +474,8 @@ class TORCH_CUDA_API Allocate : public Expr {
   explicit Allocate(
       Val* buffer,
       MemoryType memory_type = MemoryType::Local,
-      Val* size = nullptr);
+      Val* size = nullptr,
+      bool zero_init = false);
 
   Val* buffer() const {
     return buffer_;
@@ -488,6 +489,10 @@ class TORCH_CUDA_API Allocate : public Expr {
     return size_;
   }
 
+  bool zeroInit() const {
+    return zero_init_;
+  }
+
   DataType buffer_type() const {
     return buffer_->getDataType().value();
   }
@@ -496,6 +501,7 @@ class TORCH_CUDA_API Allocate : public Expr {
   Val* buffer_ = nullptr;
   MemoryType memory_type_ = MemoryType::Local;
   Val* size_ = nullptr;
+  bool zero_init_ = false;
 };
 
 // Sync represents __syncthreads barrier for block level coordination.

@@ -67,8 +67,9 @@ void IRPrinter::printHeader(
         break;
       case ValType::KirTensorView:
         os << "Tensor<" << val->getDataType().value() << ", "
-           << kir::TensorDomain::noReductions(
-                  val->as<kir::TensorView>()->domain()->rootDomain())
+           << TensorDomain::noReductions(val->as<kir::TensorView>()
+                                             ->fuserTv()
+                                             ->getMaybeRFactorDomain())
                   .size()
            << "> T" << val->name();
         break;

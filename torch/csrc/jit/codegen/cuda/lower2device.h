@@ -33,10 +33,6 @@ class TORCH_CUDA_API GpuLower {
     return global_allocations_;
   }
 
-  std::vector<kir::Allocate*> sync_allocations() {
-    return sync_allocations_;
-  }
-
   std::vector<kir::Allocate*> dynamic_allocations() {
     return dynamic_smem_allocations_;
   }
@@ -64,16 +60,10 @@ class TORCH_CUDA_API GpuLower {
   // tensors to reference the runtime structure containing sizes.
   void buildSizesMap();
 
-  // Adjust memory types to make sure they are valid
-  void adjustMemoryTypes();
-
  private:
-  // List of global buffers (not including buffers for grid syncronization)
+  // List of global buffers
+  // Allocate nodes track if it needs to be initialized to 0
   std::vector<kir::Allocate*> global_allocations_;
-
-  // List of syncronization buffers that must be initialized to 0 when running
-  // the fusion
-  std::vector<kir::Allocate*> sync_allocations_;
 
   // List of dynamic shared memory buffers
   std::vector<kir::Allocate*> dynamic_smem_allocations_;
