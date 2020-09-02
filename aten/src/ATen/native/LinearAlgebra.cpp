@@ -1290,10 +1290,15 @@ Tensor frobenius_norm(const Tensor& self, IntArrayRef dim, bool keepdim) {
   TORCH_CHECK(dim_[0] != dim_[1], "Expected dims to be different, got ", dim, " instead");
   if (self.is_complex()){
     return at::sqrt(at::sum(at::real(self.conj() * self), dim_, keepdim));
-  } else if ((self != 0).any().item<bool>()) {
-    return at::sqrt(at::sum((self * self), dim_, keepdim));
+  }
+
+  auto sum = at::sum((self * self), dim_, keepdim);
+  auto mask = sum == 0;
+  if (mask.any().item<bool>()) {
+    auto offset = at::zeros_like(sum).masked_fill_(mask, 1);
+    return at::sqrt(sum + offset) - offset;
   } else {
-    return at::sum((self * self), dim_, keepdim);
+    return at::sqrt(sum);
   }
 }
 
