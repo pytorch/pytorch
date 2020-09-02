@@ -2941,6 +2941,74 @@ class TestQuantizeDynamicJitOps(QuantizationTestCase):
                        .check_next("quantized::embedding_bag_byte_rowwise_offsets") \
                        .run(m.graph)
 
+    def test_interface_with_fork(self):
+        class SubModule(torch.nn.Module):
+            def __init__(self):
+                super(SubModule, self).__init__()
+                self.embedding1 = torch.nn.EmbeddingBag(num_embeddings=10,
+                                                        embedding_dim=12,
+                                                        include_last_offset=True,
+                                                        sparse=False,
+                                                        mode='sum')
+
+            def forward(self, x, y):
+                return self.embedding1(x, y)
+
+        class OrigMod(torch.nn.Module):
+            def __init__(self):
+                super(OrigMod, self).__init__()
+                self.embedding1 = torch.nn.EmbeddingBag(num_embeddings=10,
+                                                        embedding_dim=12,
+                                                        include_last_offset=True,
+                                                        sparse=False,
+                                                        mode='sum')
+
+            def forward(self, x, y):
+                return self.embedding1(x, y)
+
+        @torch.jit.interface
+        class ModInterface(torch.nn.Module):
+            def forward(self, x, y):
+                # type:  (Tensor, Tensor) -> Tensor
+                pass
+
+        class TestModule(torch.nn.Module):
+            proxy_mod : ModInterface
+
+            def __init__(self):
+                super(TestModule, self).__init__()
+                self.proxy_mod = OrigMod()
+                self.sub = SubModule()
+
+            def forward(self, x, y):
+                a = self.proxy_mod(x, y)
+                b = self.sub(x, y)
+                return b
+
+        class MainModule(torch.nn.Module):
+            def __init__(self):
+                super(MainModule, self).__init__()
+                self.test = TestModule()
+
+            def forward(self, x, y):
+                fut = torch.jit._fork(self.test.forward, x, y)
+                z = torch.jit._wait(fut)
+                return z
+
+        indices = torch.tensor([9, 6, 5, 7, 8, 8, 9, 2, 8, 6, 6, 9, 1, 6, 8, 8, 3, 2, 3, 6, 3, 6, 5, 7, 0, 8, 4, 6, 5, 8, 2, 3])
+        offsets = torch.tensor([0, 19, 20, 28, 28, 32])
+        m = torch.jit.trace(MainModule(), (indices, offsets))
+        m.eval()
+
+        int8_qconfig = QConfig(activation=PlaceholderObserver.with_args(dtype=torch.float,
+                                                                        custom_op_name="embedding_bag_byte"),
+                               weight=PlaceholderObserver.with_args(custom_op_name="embedding_bag_byte"))
+
+        m = prepare_jit(m, {'' : int8_qconfig})
+        m = convert_jit(m)
+        FileCheck().check("quantized::embedding_bag_byte_rowwise_offsets") \
+                   .run(m.graph)
+
 class TestQuantizeJit(QuantizationTestCase):
     @override_qengines
     def test_single_linear(self):
