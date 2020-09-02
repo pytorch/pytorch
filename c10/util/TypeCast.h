@@ -11,7 +11,7 @@ namespace c10 {
 
 template<typename dest_t, typename src_t>
 struct needs_real {
-  constexpr static bool value = (is_complex_t<src_t>::value && !is_complex_t<dest_t>::value);
+  constexpr static bool value = (is_complex<src_t>::value && !is_complex<dest_t>::value);
 };
 
 template<bool, typename src_t>

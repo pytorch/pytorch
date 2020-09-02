@@ -1987,7 +1987,8 @@ void testFutures() {
     int sat1 = 0;
     int sat2 = 0;
     f1->addCallback([&]() { ++sat1; });
-    f1->setError("Failed");
+    f1->setError(
+        std::make_exception_ptr(c10::ivalue::Future::FutureError("Failed")));
     ASSERT_EQ(sat1, 1);
     ASSERT_TRUE(f1->completed());
     ASSERT_TRUE(f1->hasError());
@@ -2001,8 +2002,9 @@ void testFutures() {
     f1->addCallback([&]() { ++sat2; });
     ASSERT_EQ(sat1, 1);
     ASSERT_EQ(sat2, 1);
-    f1->setErrorIfNeeded("Dup");
-    ASSERT_TRUE(strcmp(f1->error()->what(), "Failed") == 0);
+    f1->setErrorIfNeeded(
+        std::make_exception_ptr(c10::ivalue::Future::FutureError("Dup")));
+    ASSERT_TRUE(strcmp(f1->tryRetrieveErrorMessage().c_str(), "Failed") == 0);
     ASSERT_EQ(sat1, 1);
     ASSERT_EQ(sat2, 1);
   }
@@ -2082,7 +2084,8 @@ void testFutures() {
     futures.push_back(s4);
     auto c5 = collectAll(futures);
     ASSERT_FALSE(c5->completed());
-    s4->setError("Failed");
+    s4->setError(
+        std::make_exception_ptr(c10::ivalue::Future::FutureError("Failed")));
     ASSERT_TRUE(c5->completed());
     ASSERT_EQ(c5->value().toList().size(), 4);
     try {
