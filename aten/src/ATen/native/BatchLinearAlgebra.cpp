@@ -1166,17 +1166,6 @@ static void apply_lstsq(Tensor& B, Tensor& A) {
 #ifndef USE_LAPACK
   AT_ERROR("lstsq: LAPACK library not found in compilation");
 #else
-  if(B.dim() == 1) {
-    B.unsqueeze_(1);
-  }
-  if (!B.is_contiguous()) {
-    B = B.contiguous();
-  }
-  if (A.size(0) < A.size(1)) {
-    B.resize_({A.size(1), B.size(1)});
-  }
-  A = cloneBatchedColumnMajor(A);
-  B = cloneBatchedColumnMajor(B);
 
   int m, n, nrhs, lda, ldb, info, lwork;
   scalar_t wkopt = 0.0;
@@ -1213,7 +1202,18 @@ std::tuple<Tensor, Tensor> lstsq(const Tensor& B, const Tensor& A) {
       "at dim 0, but A has ", A.size(0), " rows and B has ", B.size(0), " rows");
 
   Tensor B_working = B.clone();
-  Tensor A_working = A.clone();
+  if(B_working.dim() == 1) {
+    B_working.unsqueeze_(1);
+  }
+  if (!B_working.is_contiguous()) {
+    B_working = B_working.contiguous();
+  }
+  if (A.size(0) < A.size(1)) {
+    B_working.resize_({A.size(1), B_working.size(1)});
+  }
+  Tensor A_working = cloneBatchedColumnMajor(A);
+  B_working = cloneBatchedColumnMajor(B_working);
+
   AT_DISPATCH_FLOATING_TYPES(B.scalar_type(), "lstsq_cpu", [&] {
     apply_lstsq<scalar_t>(B_working, A_working);
   });
