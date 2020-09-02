@@ -5220,16 +5220,14 @@ class TestNN(NNTestCase):
                                    [[2.416246, 0.017512, -0.610712, -0.082961],
                                     [2.422901, 0.024187, -0.606178, -0.074929]]]
                                   ).to(device)
-        result = result.detach().numpy()
-        ref_output = ref_output.detach().numpy()
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        np.testing.assert_allclose(result, ref_output, atol=1e-5)
+        torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
+
         # all 0
         mask = torch.zeros([2, 5]).to(device) == 1
         result = model(encoder_input, src_key_padding_mask=mask)
-        result = result.detach().numpy()
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        np.testing.assert_allclose(result, ref_output, atol=1e-5)
+        torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
         mask[0, 1] = 1
         mask[1, 3] = 1
         mask[1, 4] = 1
@@ -5245,10 +5243,8 @@ class TestNN(NNTestCase):
                                    [[2.416531, 0.017498, -0.610513, -0.083181],
                                     [2.4242, 0.024653, -0.605266, -0.074959]]]
                                   ).to(device)
-        result = result.detach().numpy()
-        ref_output = ref_output.detach().numpy()
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        np.testing.assert_allclose(result, ref_output, atol=1e-5)
+        torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
 
         # test case 2, multiple layers no norm
         model = nn.TransformerEncoder(encoder_layer, 2).to(device)
@@ -5265,10 +5261,8 @@ class TestNN(NNTestCase):
              [[2.419019, 0.017442, -0.608761, -0.084989],
               [2.419075, 0.017449, -0.608722, -0.085014]]]
         ).to(device)
-        result = result.detach().numpy()
-        ref_output = ref_output.detach().numpy()
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        np.testing.assert_allclose(result, ref_output, atol=1e-5)
+        torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
 
         model = nn.TransformerEncoder(encoder_layer, 6).to(device)
         result = model(encoder_input, src_key_padding_mask=mask)
@@ -5284,10 +5278,8 @@ class TestNN(NNTestCase):
              [[2.419101, 0.017453, -0.608703, -0.085025],
               [2.419101, 0.017453, -0.608704, -0.085025]]]
         ).to(device)
-        result = result.detach().numpy()
-        ref_output = ref_output.detach().numpy()
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        np.testing.assert_allclose(result, ref_output, atol=1e-5)
+        torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
 
         # test case 3, multiple layers with norm
         # d_model = 4
@@ -5306,10 +5298,8 @@ class TestNN(NNTestCase):
              [[1.695946, -0.357632, -0.893095, -0.445220],
               [1.695952, -0.357637, -0.893065, -0.445251]]]
         ).to(device)
-        result = result.detach().numpy()
-        ref_output = ref_output.detach().numpy()
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        np.testing.assert_allclose(result, ref_output, atol=1e-5)
+        torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
 
         model = nn.TransformerEncoder(encoder_layer, 6, norm=norm).to(device)
         result = model(encoder_input, src_key_padding_mask=mask)
@@ -5325,10 +5315,9 @@ class TestNN(NNTestCase):
              [[1.695955, -0.357639, -0.893051, -0.445265],
               [1.695955, -0.357639, -0.893051, -0.445265]]]
         ).to(device)
-        result = result.detach().numpy()
-        ref_output = ref_output.detach().numpy()
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        np.testing.assert_allclose(result, ref_output, atol=1e-5)
+        torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
+
 
     def test_transformerdecoder(self):
         def get_a_test_layer(use_cuda, activation):
@@ -5371,24 +5360,20 @@ class TestNN(NNTestCase):
         result = model(decoder_input, memory_input)
         ref_output = torch.Tensor(
             [[[2.314351, 0.094805, -0.671322, 0.101977]]]).to(device)
-        result = result.detach().numpy()
-        ref_output = ref_output.detach().numpy()
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        np.testing.assert_allclose(result, ref_output, atol=1e-5)
+        torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
 
         # deterministic input
         decoder_input = torch.Tensor([[[9, 10, 11, 12]],
                                      [[11, 12, 13, 14]]]).to(device)
         memory_input = torch.Tensor([[[1, 2, 3, 4]]]).to(device)
         result = model(decoder_input, memory_input)
-        result = result.detach().numpy()
         ref_output = torch.Tensor(
             [[[2.422245, 0.051716, -0.606338, -0.024756]],
              [[2.422245, 0.051716, -0.606338, -0.024756]]]
         ).to(device)
-        ref_output = ref_output.detach().numpy()
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        np.testing.assert_allclose(result, ref_output, atol=1e-5)
+        torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
 
         # deterministic input
         decoder_input = torch.Tensor([[[1, 2, 3, 4]],
@@ -5400,10 +5385,8 @@ class TestNN(NNTestCase):
             [[[2.343536, 0.085561, -0.654954, 0.074991]],
              [[2.343536, 0.085561, -0.654954, 0.074991]]]
         ).to(device)
-        result = result.detach().numpy()
-        ref_output = ref_output.detach().numpy()
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        np.testing.assert_allclose(result, ref_output, atol=1e-5)
+        torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
 
         # deterministic input
         decoder_input = torch.Tensor([[[0.4517, 0.6793, 0.5313, 0.0034],
@@ -5432,10 +5415,8 @@ class TestNN(NNTestCase):
                                    [[2.431934, 0.028196, -0.599802, -0.073809],
                                     [2.432306, 0.028858, -0.599542, -0.072846]]]
                                   ).to(device)
-        result = result.detach().numpy()
-        ref_output = ref_output.detach().numpy()
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        np.testing.assert_allclose(result, ref_output, atol=1e-5)
+        torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
 
         # key_padding_mask
         key_padding_mask = torch.zeros(2, 3).to(device) == 1
@@ -5449,10 +5430,8 @@ class TestNN(NNTestCase):
                                    [[2.431934, 0.028196, -0.599802, -0.073809],
                                     [2.432306, 0.028858, -0.599542, -0.072846]]]
                                   ).to(device)
-        result = result.detach().numpy()
-        ref_output = ref_output.detach().numpy()
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        np.testing.assert_allclose(result, ref_output, atol=1e-5)
+        torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
 
         # key_padding_mask
         key_padding_mask[0, 2] = 1
@@ -5468,10 +5447,8 @@ class TestNN(NNTestCase):
                                    [[2.432278, 0.028152, -0.599555, -0.074139],
                                     [2.432659, 0.029244, -0.599294, -0.072382]]]
                                   ).to(device)
-        result = result.detach().numpy()
-        ref_output = ref_output.detach().numpy()
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        np.testing.assert_allclose(result, ref_output, atol=1e-5)
+        torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
 
         # memory_key_padding_mask
         key_padding_mask = torch.zeros(2, 5).to(device) == 1
@@ -5485,10 +5462,8 @@ class TestNN(NNTestCase):
                                    [[2.431934, 0.028196, -0.599802, -0.073809],
                                     [2.432306, 0.028858, -0.599542, -0.072846]]]
                                   ).to(device)
-        result = result.detach().numpy()
-        ref_output = ref_output.detach().numpy()
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        np.testing.assert_allclose(result, ref_output, atol=1e-5)
+        torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
 
         # memory_key_padding_mask
         key_padding_mask[0, 4] = 1
@@ -5504,10 +5479,8 @@ class TestNN(NNTestCase):
                                    [[2.431515, 0.027687, -0.600096, -0.074459],
                                     [2.433075, 0.028543, -0.598987, -0.073985]]]
                                   ).to(device)
-        result = result.detach().numpy()
-        ref_output = ref_output.detach().numpy()
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        np.testing.assert_allclose(result, ref_output, atol=1e-5)
+        torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
 
         # multiple layers no norm
         model = nn.TransformerDecoder(decoder_layer, 2).to(device)
@@ -5518,10 +5491,8 @@ class TestNN(NNTestCase):
         result = model(decoder_input, memory_input)
         ref_output = torch.Tensor(
             [[[2.31316, 0.0950293, -0.671995, 0.102802]]]).to(device)
-        result = result.detach().numpy()
-        ref_output = ref_output.detach().numpy()
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        np.testing.assert_allclose(result, ref_output, atol=1e-5)
+        torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
 
         # multiple layers no norm
         model = nn.TransformerDecoder(decoder_layer, 6).to(device)
@@ -5554,10 +5525,8 @@ class TestNN(NNTestCase):
              [[2.42794, 0.026164, -0.60263, -0.0747591],
               [2.43113, 0.0279516, -0.600376, -0.0736896]]]
         ).to(device)
-        result = result.detach().numpy()
-        ref_output = ref_output.detach().numpy()
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        np.testing.assert_allclose(result, ref_output, atol=1e-5)
+        torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
 
         # multiple layers with norm
         # d_model = 4
@@ -5570,10 +5539,8 @@ class TestNN(NNTestCase):
         result = model(decoder_input, memory_input)
         ref_output = torch.Tensor(
             [[[1.66166, -0.326986, -1.01466, -0.320017]]]).to(device)
-        result = result.detach().numpy()
-        ref_output = ref_output.detach().numpy()
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        np.testing.assert_allclose(result, ref_output, atol=1e-5)
+        torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
 
         # multiple layers with norm
         model = nn.TransformerDecoder(decoder_layer, 6, norm=norm).to(device)
@@ -5606,10 +5573,8 @@ class TestNN(NNTestCase):
              [[1.69559, -0.357291, -0.894741, -0.443553],
               [1.69571, -0.357363, -0.894154, -0.444196]]]
         ).to(device)
-        result = result.detach().numpy()
-        ref_output = ref_output.detach().numpy()
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
-        np.testing.assert_allclose(result, ref_output, atol=1e-5)
+        torch.testing.assert_allclose(result, ref_output, rtol=1e-7, atol=1e-5)
 
         # gelu activation test cases
         activation = "gelu"
@@ -5681,6 +5646,7 @@ class TestNN(NNTestCase):
               [2.42240309, 0.0354595, -0.60659063, -0.05378816]]]).to(device)
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
         torch.testing.assert_allclose(result, ref_output)
+
 
     @unittest.skipIf(not (TEST_CUDNN and TEST_MULTIGPU), 'CUDNN or multi-gpu not available')
     def test_cudnn_rnn_dropout_states_device(self):
