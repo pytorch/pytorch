@@ -407,17 +407,15 @@ c10::optional<ReductionParams> scheduleReduction(
     red_tv->merge(-2, -1);
   }
 
-  EvaluationContext eval_context(
-      executor_utils::bindInputs(fusion_inputs, fusion));
+  StatefulExpressionEvaluator evaluator(
+      executor_utils::statefulBindInputs(fusion_inputs, fusion));
 
   // Evaluate Dimensions of Reduction TensorView
   auto red_ids = red_tv->domain()->domain();
   TORCH_INTERNAL_ASSERT(
       red_ids.size() == 2, "We coalesced all dimensions into 2 previously.");
-  const auto red_outputs =
-      ExpressionEvaluator::evaluate(red_ids[0]->extent(), &eval_context);
-  const auto red_elems =
-      ExpressionEvaluator::evaluate(red_ids[1]->extent(), &eval_context);
+  const auto red_outputs = evaluator.inferValue(red_ids[0]->extent());
+  const auto red_elems = evaluator.inferValue(red_ids[1]->extent());
   TORCH_INTERNAL_ASSERT(
       red_outputs != c10::nullopt,
       "The number of reduction outputs is expected.");

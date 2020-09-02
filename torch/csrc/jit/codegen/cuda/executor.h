@@ -88,21 +88,20 @@ class TORCH_CUDA_API FusionExecutor : public NonCopyable {
   std::string getStructuredCode(const std::string& kernel);
 
   LaunchParams computeLaunchParams(
-      const at::ArrayRef<IValue>& aten_inputs,
       const LaunchParams& launch_constraints,
-      EvaluationContext& ec);
+      StatefulExpressionEvaluator& see);
 
   uint64_t computeSharedMemory(
-      EvaluationContext& ec,
+      StatefulExpressionEvaluator& see,
       const std::vector<kir::Allocate*>& buffers,
       bool align_padding = false,
       uint64_t total = 0);
 
   // return a pair of vector of tensors, where tensors in the first vector are
   // not initialized, while the second vector contains zero-initiliazed tensors
-  GlobalBuffers allocGlobalVals(EvaluationContext& ec);
+  GlobalBuffers allocGlobalVals(StatefulExpressionEvaluator& see);
 
-  std::vector<at::Tensor> allocOutputs(EvaluationContext& ec);
+  std::vector<at::Tensor> allocOutputs(StatefulExpressionEvaluator& see);
 
  private:
   Fusion fusion_;
@@ -113,6 +112,7 @@ class TORCH_CUDA_API FusionExecutor : public NonCopyable {
 
   CompileOptions options_;
   size_t max_device_smem = std::numeric_limits<size_t>().max();
+  size_t static_smem_size = 0;
   executor_utils::NvrtcFunction compiled_kernel_;
 
   // State of the fusion that's important
