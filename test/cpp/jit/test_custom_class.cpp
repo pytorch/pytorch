@@ -30,6 +30,10 @@ struct Foo : torch::CustomClassHolder {
   ~Foo() {
     // std::cout<<"Destroying object with values: "<<x<<' '<<y<<std::endl;
   }
+
+  static int64_t printXAddY(int64_t x, int64_t y) {
+    return x + y;
+  }
 };
 
 struct NoInit : torch::CustomClassHolder {
@@ -228,7 +232,8 @@ TORCH_LIBRARY(_TorchScriptTesting, m) {
       .def("info", &Foo::info)
       .def("increment", &Foo::increment)
       .def("add", &Foo::add)
-      .def("combine", &Foo::combine);
+      .def("combine", &Foo::combine)
+      .def_static("printXAddY", &Foo::printXAddY);
 
   m.class_<NoInit>("_NoInit").def(
       "get_x", [](const c10::intrusive_ptr<NoInit>& self) { return self->x; });

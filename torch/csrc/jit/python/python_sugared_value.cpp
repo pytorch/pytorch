@@ -910,6 +910,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     auto qualname = c10::QualifiedName(qualifiedName);
 
     if (auto classType = pyCu->get_class(qualname)) {
+      LOG(ERROR) << "pyobj is class" << classType->repr_str();
       return std::make_shared<PythonClassValue>(classType, obj);
     } else {
       // If we can't get the source code for the type, it's implemented in C and
@@ -946,6 +947,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
       return std::make_shared<FunctionValue>(std::move(compiled_fns));
     }
 
+    LOG(ERROR) << "trying to recursively compile func: " << obj;
     auto compiled_fn = py::module::import("torch.jit._recursive")
                            .attr("try_compile_fn")(obj, loc);
     if (auto callee = as_function(compiled_fn)) {

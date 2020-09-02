@@ -3,6 +3,8 @@
 #include <torch/csrc/jit/frontend/tree_views.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
+#include <memory>
+#include "ATen/core/builtin_function.h"
 
 namespace torch {
 namespace jit {
@@ -610,11 +612,16 @@ std::shared_ptr<SugaredValue> ClassValue::attr(
     const SourceRange& loc,
     Function& m,
     const std::string& field) {
-  if (field != "__new__") {
+
+  LOG(ERROR) << "ClassValue::attr class type: " << type_->repr_str() << " field: " << field << " has it?: " << type_->hasMethod(field);
+  if (field == "__new__") {
+    return SpecialFormValue::create(prim::CreateObject);
+  } else if(auto func = type_->findMethod(field)) {
+    return std::make_shared<FunctionValue>(func);
+  } else {
     throw ErrorReport(loc) << "Tried to lookup unknown attribute on class "
                            << type_->annotation_str();
   }
-  return SpecialFormValue::create(prim::CreateObject);
 }
 
 std::shared_ptr<SugaredValue> NamedTupleConstructor::call(

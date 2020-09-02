@@ -20,6 +20,9 @@ void inlineCalls(Block* block) {
         auto function_constant = cur->input(0)->node();
         auto fun_type =
             function_constant->output()->type()->expect<FunctionType>();
+        if (!fun_type->function()->isGraphFunction()) {
+          continue;
+        }
         cur->removeInput(0);
         GRAPH_UPDATE(
             "Inlining function '", fun_type->function()->name(), "' to ", *cur);

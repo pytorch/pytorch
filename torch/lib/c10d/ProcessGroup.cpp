@@ -1,3 +1,4 @@
+#include <bits/stdint-intn.h>
 #include <c10d/ProcessGroup.hpp>
 
 #include <c10/util/Logging.h>
