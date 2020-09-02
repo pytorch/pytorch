@@ -6,11 +6,6 @@ namespace vulkan {
 namespace ops {
 namespace {
 
-bool is_uma() {
-  return VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU ==
-      api::context().physical_device_properties.deviceType;
-}
-
 VkFormat convert(const caffe2::TypeMeta dtype) {
   switch (c10::typeMetaToScalarType(dtype)) {
     case kFloat:
@@ -26,12 +21,13 @@ VkFormat convert(const caffe2::TypeMeta dtype) {
 }
 
 api::Resource::Buffer allocate_staging(
+    api::Context* const context,
     const IntArrayRef sizes,
     const TensorOptions& options) {
-  TORCH_INTERNAL_ASSERT(!sizes.empty(), "Invalid Vulkan tensor size!");
+  TORCH_CHECK(!sizes.empty(), "Invalid Vulkan tensor size!");
   verify(options);
 
-  return api::context().resource().pool.allocate(
+  return context->resource().pool.allocate(
       api::Resource::Buffer::Descriptor{
         std::accumulate(
             sizes.cbegin(),
@@ -44,26 +40,27 @@ api::Resource::Buffer allocate_staging(
           VMA_MEMORY_USAGE_CPU_ONLY,
         },
       });
-
 }
 
 api::Resource::Buffer maybe_allocate_staging(
+    api::Context* const context,
     const IntArrayRef sizes,
     const TensorOptions& options) {
-  if (is_uma()) {
+  if (context->adapter().is_unified_memory_architecture()) {
     return api::Resource::Buffer{};
   }
 
-  return allocate_staging(sizes, options);
+  return allocate_staging(context, sizes, options);
 }
 
 api::Resource::Buffer allocate_buffer(
+    api::Context* const context,
     const IntArrayRef sizes,
     const TensorOptions& options) {
-  TORCH_INTERNAL_ASSERT(!sizes.empty(), "Invalid Vulkan tensor size!");
+  TORCH_CHECK(!sizes.empty(), "Invalid Vulkan tensor size!");
   verify(options);
 
-  return api::context().resource().pool.allocate(
+  return context->resource().pool.allocate(
       api::Resource::Buffer::Descriptor{
         std::accumulate(
             sizes.cbegin(),
@@ -73,23 +70,27 @@ api::Resource::Buffer allocate_buffer(
         // Usage
         {
           VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-            (is_uma() ? 0u : VK_BUFFER_USAGE_TRANSFER_DST_BIT),
+            (context->adapter().is_unified_memory_architecture() ?
+                0u :
+                VK_BUFFER_USAGE_TRANSFER_DST_BIT),
           VMA_MEMORY_USAGE_GPU_ONLY,
         },
       });
 }
 
 api::Resource::Buffer maybe_allocate_buffer(
+    api::Context* const context,
     const IntArrayRef sizes,
     const TensorOptions& options) {
   if (sizes.size() <= 4u) {
     return api::Resource::Buffer{};
   }
 
-  return allocate_buffer(sizes, options);
+  return allocate_buffer(context, sizes, options);
 }
 
 api::Resource::Image allocate_image(
+    api::Context* const context,
     const IntArrayRef sizes,
     const TensorOptions& options) {
   verify(options);
@@ -128,7 +129,7 @@ api::Resource::Image allocate_image(
 
   const VkFormat format = convert(options.dtype());
 
-  return api::context().resource().pool.allocate(
+  return context->resource().pool.allocate(
       api::Resource::Image::Descriptor{
         VK_IMAGE_TYPE_3D,
         format,
@@ -139,7 +140,9 @@ api::Resource::Image allocate_image(
         },
         // Usage
         {
-          VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT,
+          VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+            VK_IMAGE_USAGE_SAMPLED_BIT |
+            VK_IMAGE_USAGE_STORAGE_BIT,
           VMA_MEMORY_USAGE_GPU_ONLY,
         },
         // View
@@ -151,28 +154,29 @@ api::Resource::Image allocate_image(
 }
 
 api::Resource::Image maybe_allocate_image(
+    api::Context* const context,
     const IntArrayRef sizes,
     const TensorOptions& options) {
   if (sizes.size() > 4u) {
     return api::Resource::Image{};
   }
 
-  return allocate_image(sizes, options);
+  return allocate_image(context, sizes, options);
 }
 
 } // namespace
 
-vTensor::vTensor()
-  : buffer_{},
-    image_{} {
-}
+// vTensor::vTensor()
+//   : buffer_{},
+//     image_{} {
+// }
 
-vTensor::vTensor(const IntArrayRef sizes, const TensorOptions& options)
-  : sizes_(sizes.cbegin(), sizes.cend()),
-    options_(options),
-    buffer_(maybe_allocate_buffer(sizes, options)),
-    image_(maybe_allocate_image(sizes, options)) {
-}
+// vTensor::vTensor(const IntArrayRef sizes, const TensorOptions& options)
+//   : sizes_(sizes.cbegin(), sizes.cend()),
+//     options_(options),
+//     buffer_(maybe_allocate_buffer(sizes, options)),
+//     image_(maybe_allocate_image(sizes, options)) {
+// }
 
 void verify(const TensorOptions& options) {
   TORCH_CHECK(
