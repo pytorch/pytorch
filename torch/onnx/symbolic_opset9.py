@@ -1109,9 +1109,9 @@ def log_softmax(g, input, dim, dtype=None):
     return return_op
 
 
-@parse_args('v', 'v', 'v', 'is', 'is', 'is', 'i', 'is', 'i', 'i', 'i', 'i', 'i')
+@parse_args('v', 'v', 'v', 'is', 'is', 'is', 'i', 'is', 'i', 'i', 'i', 'i')
 def _convolution(g, input, weight, bias, stride, padding, dilation,
-                 transposed, output_padding, groups, benchmark, deterministic, cudnn_enabled, allow_tf32):
+                 transposed, output_padding, groups, benchmark, deterministic, cudnn_enabled):
     weight_size = weight.type().sizes()
 
     args = [input, weight]
@@ -1145,32 +1145,32 @@ def _convolution(g, input, weight, bias, stride, padding, dilation,
 
 @parse_args('v', 'v', 'v', 'is', 'is', 'is', 'i')
 def conv1d(g, input, weight, bias, stride, padding, dilation, groups):
-    return _convolution(g, input, weight, bias, stride, padding, dilation, False, (), groups, None, None, None, None)
+    return _convolution(g, input, weight, bias, stride, padding, dilation, False, (), groups, None, None, None)
 
 
 @parse_args('v', 'v', 'v', 'is', 'is', 'is', 'i')
 def conv2d(g, input, weight, bias, stride, padding, dilation, groups):
-    return _convolution(g, input, weight, bias, stride, padding, dilation, False, (), groups, None, None, None, None)
+    return _convolution(g, input, weight, bias, stride, padding, dilation, False, (), groups, None, None, None)
 
 
 @parse_args('v', 'v', 'v', 'is', 'is', 'is', 'i')
 def conv3d(g, input, weight, bias, stride, padding, dilation, groups):
-    return _convolution(g, input, weight, bias, stride, padding, dilation, False, (), groups, None, None, None, None)
+    return _convolution(g, input, weight, bias, stride, padding, dilation, False, (), groups, None, None, None)
 
 
 @parse_args('v', 'v', 'v', 'is', 'is', 'is', 'i', 'is')
 def conv_transpose1d(g, input, weight, bias, stride, padding, output_padding, groups, dilation):
-    return _convolution(g, input, weight, bias, stride, padding, dilation, True, output_padding, groups, None, None, None, None)
+    return _convolution(g, input, weight, bias, stride, padding, dilation, True, output_padding, groups, None, None, None)
 
 
 @parse_args('v', 'v', 'v', 'is', 'is', 'is', 'i', 'is')
 def conv_transpose2d(g, input, weight, bias, stride, padding, output_padding, groups, dilation):
-    return _convolution(g, input, weight, bias, stride, padding, dilation, True, output_padding, groups, None, None, None, None)
+    return _convolution(g, input, weight, bias, stride, padding, dilation, True, output_padding, groups, None, None, None)
 
 
 @parse_args('v', 'v', 'v', 'is', 'is', 'is', 'i', 'is')
 def conv_transpose3d(g, input, weight, bias, stride, padding, output_padding, groups, dilation):
-    return _convolution(g, input, weight, bias, stride, padding, dilation, True, output_padding, groups, None, None, None, None)
+    return _convolution(g, input, weight, bias, stride, padding, dilation, True, output_padding, groups, None, None, None)
 
 
 @parse_args('v', 'v', 'v', 'v', 'v', 'i', 'f', 'f', 'i')
@@ -2249,7 +2249,23 @@ def arange(g, *args):
             dtype = 4  # default to int64
         return dtype
 
-    if len(args) == 5:
+    if len(args) == 2:
+        # aten::arange(Scalar end, Tensor out)
+        end = g.op("Unsqueeze", args[0], axes_i=[0])
+        dtype = 4  # default to int64
+        arange_tensor = g.op("Squeeze", nonzero(g, ones(g, end, dtype, None, None)), axes_i=[1])
+        return g.op("Cast", arange_tensor, to_i=sym_help.scalar_type_to_onnx[dtype])
+    elif len(args) == 4:
+        # aten::arange(Scalar start, Scalar end, Scalar step, Tensor out)
+        dtype = 4  # default to int64
+        step = g.op("Unsqueeze", args[2], axes_i=[0])
+        end = g.op("Unsqueeze", args[1], axes_i=[0])
+        start = g.op("Unsqueeze", args[0], axes_i=[0])
+        range_tensor = g.op("Div", g.op("Sub", end, start), step)
+        arange_tensor = g.op("Squeeze", nonzero(g, ones(g, range_tensor, None, None, None)), axes_i=[1])
+        arange_tensor = g.op("Add", g.op("Mul", arange_tensor, step), start)
+        return g.op("Cast", arange_tensor, to_i=sym_help.scalar_type_to_onnx[dtype])
+    elif len(args) == 5:
         # aten::arange(Scalar end, ScalarType dtype, Layout, Device, bool pin_memory)
         dtype = _get_arange_dtype(args[1])
         end = g.op("Unsqueeze", args[0], axes_i=[0])
