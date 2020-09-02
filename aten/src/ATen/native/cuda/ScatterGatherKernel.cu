@@ -141,6 +141,7 @@ struct cuda_scatter_gather_base_kernel {
       : restride_dim(src, dim, index_sizes);
 
     auto iter = TensorIteratorConfig()
+      .set_check_mem_overlap(false)
       .check_all_same_dtype(false)
       .resize_outputs(false)
       .add_output(self_restrided)
@@ -247,6 +248,7 @@ struct cuda_scatter_fill_base_kernel {
     auto self_restrided = restride_dim(self, dim, index_sizes);
 
     auto iter = TensorIteratorConfig()
+      .set_check_mem_overlap(false)
       .check_all_same_dtype(false)
       .resize_outputs(false)
       .add_output(self_restrided)
