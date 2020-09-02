@@ -11,6 +11,7 @@ from quantization.test_quantized_op import TestQNNPackOps  # noqa: F401
 from quantization.test_quantized_op import TestQuantizedLinear  # noqa: F401
 from quantization.test_quantized_op import TestQuantizedConv  # noqa: F401
 from quantization.test_quantized_op import TestDynamicQuantizedLinear  # noqa: F401
+from quantization.test_quantized_op import TestDynamicQuantizedRNNOp  # noqa: F401
 from quantization.test_quantized_op import TestComparatorOps  # noqa: F401
 from quantization.test_quantized_op import TestPadding  # noqa: F401
 from quantization.test_quantized_op import TestQuantizedEmbeddingBag  # noqa: F401
