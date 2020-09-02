@@ -224,10 +224,6 @@ class ProcessGroupNCCL : public ProcessGroup {
       value_ = std::move(value);
     }
 
-    void setError(std::string err) override {
-      error_ = FutureError(std::move(err));
-    }
-
     // Just returns FutureNCCL's value after wait returns.
     at::IValue value() override {
       TORCH_INTERNAL_ASSERT(hasValue(), "FutureNCCL's value is None.")
@@ -279,7 +275,7 @@ class ProcessGroupNCCL : public ProcessGroup {
               // records callback's stream.
               (*thenFutCudaEvents)[0].record(*futureNCCLCallbackStream_);
             } catch (const std::exception& e) {
-              fut->setError(e.what());
+              fut->setError(std::current_exception());
             }
           },
           std::move(callback)));
