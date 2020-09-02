@@ -379,14 +379,14 @@ UNBOXED_TRACE_DISPATCH = CodeTemplate("""\
 static auto op = c10::Dispatcher::singleton()
     .findSchemaOrThrow("aten::${operator_name}", "${overload_name}")
     .typed<${return_type} (${arg_types})>();
-${assign_return_values}op.redispatch(${trace_dispatch_args});
+${assign_return_values}c10::Dispatcher::singleton().redispatch<${ret_and_arg_types}>(${trace_dispatch_args});
 """)
 TRACE_DISPATCH = CodeTemplate("""\
 static auto op = c10::Dispatcher::singleton()
     .findSchemaOrThrow("aten::${operator_name}", "${overload_name}")
     .typed<${return_type} (${schema_order_arg_types})>();
-${assign_return_values}op
-    .redispatch(${schema_order_trace_dispatch_args});
+${assign_return_values}c10::Dispatcher::singleton()
+    .redispatch<${schema_order_ret_and_arg_types}>(${schema_order_trace_dispatch_args});
 """)
 
 
@@ -744,8 +744,8 @@ def emit_trace_body(declaration):
     schema_order_ret_and_arg_types = ', '.join(
         [declaration['return_type']] + [a['type'] for a in declaration['schema_order_arguments']])
 
-    trace_dispatch_args = ['c10::DispatchKey::Tracer'] + declaration['args']
-    schema_order_trace_dispatch_args = ['c10::DispatchKey::Tracer'] + declaration['schema_order_args']
+    trace_dispatch_args = ['op', 'c10::DispatchKey::Tracer'] + declaration['args']
+    schema_order_trace_dispatch_args = ['op', 'c10::DispatchKey::Tracer'] + declaration['schema_order_args']
     assign_return_values = '{} = '.format(tie_return_values) if not modifies_arguments and not returns_void else ''
     if declaration['use_c10_dispatcher'] == 'full':
         call = TRACE_DISPATCH.substitute(

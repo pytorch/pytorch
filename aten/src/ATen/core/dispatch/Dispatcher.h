@@ -118,12 +118,12 @@ public:
   //
   // ------------------------------------------------------------------------
 
-  template<bool Profile, class Return, class... Args>
+  template<class Return, class... Args>
   Return call(const TypedOperatorHandle<Return (Args...)>& op, Args... args) const;
 
   // Like call, but override the default DispatchKey calculation code,
   // instead dispatching straight to the provided DispatchKey
-  template<bool Profile, class Return, class... Args>
+  template<class Return, class... Args>
   Return callWithDispatchKey(const TypedOperatorHandle<Return (Args...)>& op, DispatchKey dispatchKey, Args... args) const;
 
   // Like call, but intended for use in a redispatch: you are currently
@@ -131,11 +131,10 @@ public:
   // you now want to redispatch to the next dispatch key in the chain.
   // This will mask out the current key *and all previous keys* from the
   // eligible set, and reinvoke the dispatcher.
-  template<bool Profile, class Return, class... Args>
+  template<class Return, class... Args>
   Return redispatch(const TypedOperatorHandle<Return (Args...)>& op, DispatchKey currentDispatchKey, Args... args) const;
 
   // Invoke an operator via the boxed calling convention using an IValue stack
-  template<bool Profile=false>
   void callBoxed(const OperatorHandle& op, Stack* stack) const;
 
   // ------------------------------------------------------------------------
@@ -289,9 +288,8 @@ public:
     return TypedOperatorHandle<FuncType>(operatorIterator_);
   }
 
-  template <bool Profile=false>
   void callBoxed(Stack* stack) const {
-    c10::Dispatcher::singleton().callBoxed<Profile>(*this, stack);
+    c10::Dispatcher::singleton().callBoxed(*this, stack);
   }
 
 private:
@@ -321,19 +319,12 @@ public:
   TypedOperatorHandle(const TypedOperatorHandle&) = default;
   TypedOperatorHandle& operator=(const TypedOperatorHandle&) = default;
 
-  template <bool Profile = true>
   Return call(Args... args) const {
-    return c10::Dispatcher::singleton().call<Profile, Return, Args...>(*this, std::forward<Args>(args)...);
+    return c10::Dispatcher::singleton().call<Return, Args...>(*this, std::forward<Args>(args)...);
   }
 
-  template <bool Profile = true>
   Return callWithDispatchKey(DispatchKey dispatchKey, Args... args) const {
-    return c10::Dispatcher::singleton().callWithDispatchKey<Profile, Return, Args...>(*this, dispatchKey, std::forward<Args>(args)...);
-  }
-
-  template <bool Profile = true>
-  Return redispatch(DispatchKey currentDispatchKey, Args... args) const {
-    return c10::Dispatcher::singleton().callWithDispatchKey<Profile, Return, Args...>(*this, currentDispatchKey, std::forward<Args>(args)...);
+    return c10::Dispatcher::singleton().callWithDispatchKey<Return, Args...>(*this, dispatchKey, std::forward<Args>(args)...);
   }
 
 private:
@@ -346,7 +337,7 @@ namespace detail {
 template<class... Args> inline void unused_arg_(const Args&...) {}
 }
 
-template<bool Profile, class Return, class... Args>
+template<class Return, class... Args>
 inline Return Dispatcher::callWithDispatchKey(const TypedOperatorHandle<Return(Args...)>& op, DispatchKey dispatchKey, Args... args) const {
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
   // No alias dispatch key is allowed at runtime.
@@ -354,28 +345,26 @@ inline Return Dispatcher::callWithDispatchKey(const TypedOperatorHandle<Return(A
   const KernelFunction& kernel = op.operatorIterator_->op.lookup(dispatchKey);
 
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
-  if (Profile) {
-    // Check if we need to run callbacks registered with RecordFunction
-    // If true and callbacks need inputs, we box the arguments and pass
-    // them into the callbacks and also into the kernel call
+  // Check if we need to run callbacks registered with RecordFunction
+  // If true and callbacks need inputs, we box the arguments and pass
+  // them into the callbacks and also into the kernel call
 
-    // Note: for perf reasons we wouldn't want to pass arguments into
-    // the function call or prematurely box them
-    at::RecordFunction guard(at::RecordScope::FUNCTION);
-    if (C10_UNLIKELY(guard.active)) {
-      if (shouldRecord(dispatchKey) && op.operatorIterator_->op.isObserved()) {
-        int64_t seq_num = -1;
-        // Setting sequence number in the Autograd case to associate
-        // the forward range with the coresponding Autograd's node
-        if (isIncludedInAlias(dispatchKey, DispatchKey::Autograd) && at::GradMode::is_enabled()) {
-          seq_num = at::sequence_number::peek();
-        }
-        if (guard.needs_inputs) {
-          torch::jit::Stack stack = impl::BoxedKernelWrapper<Return(Args...)>::boxArgs(args...);
-          guard.before(op.schema().name(), stack, seq_num);
-        } else {
-          guard.before(op.schema().name(), seq_num);
-        }
+  // Note: for perf reasons we wouldn't want to pass arguments into
+  // the function call or prematurely box them
+  at::RecordFunction guard(at::RecordScope::FUNCTION);
+  if (C10_UNLIKELY(guard.active)) {
+    if (shouldRecord(dispatchKey) && op.operatorIterator_->op.isObserved()) {
+      int64_t seq_num = -1;
+      // Setting sequence number in the Autograd case to associate
+      // the forward range with the coresponding Autograd's node
+      if (isIncludedInAlias(dispatchKey, DispatchKey::Autograd) && at::GradMode::is_enabled()) {
+        seq_num = at::sequence_number::peek();
+      }
+      if (guard.needs_inputs) {
+        torch::jit::Stack stack = impl::BoxedKernelWrapper<Return(Args...)>::boxArgs(args...);
+        guard.before(op.schema().name(), stack, seq_num);
+      } else {
+        guard.before(op.schema().name(), seq_num);
       }
     }
   }
@@ -383,7 +372,7 @@ inline Return Dispatcher::callWithDispatchKey(const TypedOperatorHandle<Return(A
   return kernel.template call<Return, Args...>(op, std::forward<Args>(args)...);
 }
 
-template<bool Profile, class Return, class... Args>
+template<class Return, class... Args>
 inline Return Dispatcher::call(const TypedOperatorHandle<Return(Args...)>& op, Args... args) const {
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
   auto dispatchKey = op.operatorIterator_->op.dispatchKeyExtractor()
@@ -391,10 +380,10 @@ inline Return Dispatcher::call(const TypedOperatorHandle<Return(Args...)>& op, A
       DispatchKeySet::FULL,
       args...
     );
-  return callWithDispatchKey<Profile, Return, Args...>(op, dispatchKey, args...);
+  return callWithDispatchKey<Return, Args...>(op, dispatchKey, args...);
 }
 
-template<bool Profile, class Return, class... Args>
+template<class Return, class... Args>
 inline Return Dispatcher::redispatch(const TypedOperatorHandle<Return (Args...)>& op, DispatchKey currentDispatchKey, Args... args) const {
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
   auto dispatchKey = op.operatorIterator_->op.dispatchKeyExtractor()
@@ -407,7 +396,6 @@ inline Return Dispatcher::redispatch(const TypedOperatorHandle<Return (Args...)>
   return kernel.template call<Return, Args...>(op, std::forward<Args>(args)...);
 }
 
-template<bool Profile>
 inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const {
   // note: this doesn't need the mutex because write operations on the list keep iterators intact.
   const auto& entry = op.operatorIterator_->op;
@@ -415,20 +403,18 @@ inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const 
   const auto& kernel = entry.lookup(dispatchKey);
 
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
-  if (Profile) {
-    // using already existing stack to record function execution in observers
-    at::RecordFunction guard(at::RecordScope::FUNCTION);
-    if (C10_UNLIKELY(guard.active)) {
-      if (shouldRecord(dispatchKey) && entry.isObserved()) {
-        int64_t seq_num = -1;
-        if (isIncludedInAlias(dispatchKey, DispatchKey::Autograd) && at::GradMode::is_enabled()) {
-          seq_num = at::sequence_number::peek();
-        }
-        if (guard.needs_inputs) {
-          guard.before(op.schema().name(), *stack, seq_num);
-        } else {
-          guard.before(op.schema().name(), seq_num);
-        }
+  // using already existing stack to record function execution in observers
+  at::RecordFunction guard(at::RecordScope::FUNCTION);
+  if (C10_UNLIKELY(guard.active)) {
+    if (shouldRecord(dispatchKey) && entry.isObserved()) {
+      int64_t seq_num = -1;
+      if (isIncludedInAlias(dispatchKey, DispatchKey::Autograd) && at::GradMode::is_enabled()) {
+        seq_num = at::sequence_number::peek();
+      }
+      if (guard.needs_inputs) {
+        guard.before(op.schema().name(), *stack, seq_num);
+      } else {
+        guard.before(op.schema().name(), seq_num);
       }
     }
   }
