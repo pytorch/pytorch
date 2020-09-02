@@ -74,11 +74,11 @@ TensorView* makeTensorWithContig(
 }
 
 void checkIntValue(
-    const EvaluationContext* eval_context,
+    StatefulExpressionEvaluator& evaluator,
     Val* val,
     Int::ScalarType expected_value) {
   TORCH_CHECK(val->isAnInt());
-  const auto actual_value = ExpressionEvaluator::evaluate(val, eval_context);
+  const auto actual_value = evaluator.inferValue(val);
   TORCH_CHECK(actual_value.has_value());
   TORCH_CHECK(actual_value.value() == expected_value);
 }
@@ -163,16 +163,16 @@ void testGPU_FusionExprEvalConstants() {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
-  EvaluationContext eval_context(&fusion);
+  StatefulExpressionEvaluator evaluator(&fusion);
 
   auto* a = new Int(7);
   auto* b = new Int(3);
 
-  checkIntValue(&eval_context, neg(a), -7);
-  checkIntValue(&eval_context, add(a, b), 10);
-  checkIntValue(&eval_context, neg(mul(sub(a, b), div(a, b))), -8);
-  checkIntValue(&eval_context, mod(a, b), 1);
-  checkIntValue(&eval_context, ceilDiv(a, b), 3);
+  checkIntValue(evaluator, neg(a), -7);
+  checkIntValue(evaluator, add(a, b), 10);
+  checkIntValue(evaluator, neg(mul(sub(a, b), div(a, b))), -8);
+  checkIntValue(evaluator, mod(a, b), 1);
+  checkIntValue(evaluator, ceilDiv(a, b), 3);
 }
 
 // Evaluate basic scalar operations with bound values
@@ -180,7 +180,7 @@ void testGPU_FusionExprEvalBindings() {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
-  EvaluationContext eval_context(&fusion);
+  StatefulExpressionEvaluator evaluator(&fusion);
 
   auto* a = new Int();
   auto* b = new Int();
@@ -189,35 +189,35 @@ void testGPU_FusionExprEvalBindings() {
   auto* e = new Int(0);
 
   // trying to evaluate before binding should give empty results
-  TORCH_CHECK(!ExpressionEvaluator::evaluate(a, &eval_context).has_value());
-  TORCH_CHECK(!ExpressionEvaluator::evaluate(d, &eval_context).has_value());
+  TORCH_CHECK(!evaluator.inferValue(a).has_value());
+  TORCH_CHECK(!evaluator.inferValue(d).has_value());
 
-  eval_context.bind(a, 7);
-  eval_context.bind(b, 3);
+  evaluator.safeBind(a, 7);
+  evaluator.safeBind(b, 3);
 
   // can't bind to the results of expressions
-  ASSERT_ANY_THROW(eval_context.bind(c, 100));
+  ASSERT_ANY_THROW(evaluator.safeBind(c, 100));
 
   // can't bind to concrete values
-  ASSERT_ANY_THROW(eval_context.bind(e, 100));
+  ASSERT_ANY_THROW(evaluator.safeBind(e, 100));
 
-  checkIntValue(&eval_context, c, 10);
-  checkIntValue(&eval_context, sub(a, b), 4);
-  checkIntValue(&eval_context, mod(a, b), 1);
-  checkIntValue(&eval_context, ceilDiv(a, b), 3);
-  checkIntValue(&eval_context, d, -4);
+  checkIntValue(evaluator, c, 10);
+  checkIntValue(evaluator, sub(a, b), 4);
+  checkIntValue(evaluator, mod(a, b), 1);
+  checkIntValue(evaluator, ceilDiv(a, b), 3);
+  checkIntValue(evaluator, d, -4);
 
   // Reset evaluation context
-  eval_context = EvaluationContext(&fusion);
+  evaluator = StatefulExpressionEvaluator(&fusion);
 
-  eval_context.bind(a, 2);
-  eval_context.bind(b, 5);
+  evaluator.safeBind(a, 2);
+  evaluator.safeBind(b, 5);
 
-  checkIntValue(&eval_context, c, 7);
-  checkIntValue(&eval_context, sub(a, b), -3);
-  checkIntValue(&eval_context, mod(a, b), 2);
-  checkIntValue(&eval_context, ceilDiv(a, b), 1);
-  checkIntValue(&eval_context, d, -2);
+  checkIntValue(evaluator, c, 7);
+  checkIntValue(evaluator, sub(a, b), -3);
+  checkIntValue(evaluator, mod(a, b), 2);
+  checkIntValue(evaluator, ceilDiv(a, b), 1);
+  checkIntValue(evaluator, d, -2);
 }
 
 // Evaluate expressions in a simple IR
@@ -248,8 +248,8 @@ void testGPU_FusionExprEvalBasic() {
   tv2->axis(-1)->parallelize(ParallelType::TIDx);
   tv3->axis(-1)->parallelize(ParallelType::TIDx);
 
-  // 1. Create an evaluation context
-  EvaluationContext eval_context(&fusion);
+  // 1. Create an evaluator
+  StatefulExpressionEvaluator evaluator(&fusion);
 
   // 2. Bind values
   //
@@ -259,21 +259,21 @@ void testGPU_FusionExprEvalBasic() {
   //  (ex. `tv0->getRootDomain()[0]->extent()`
   //   instead of `tv0->axis(0)->extent()`)
   //
-  eval_context.bind(tv0->getRootDomain()[0]->extent(), 6);
-  eval_context.bind(tv0->getRootDomain()[1]->extent(), 128);
-  eval_context.bind(tv1->getRootDomain()[0]->extent(), 6);
-  eval_context.bind(tv1->getRootDomain()[1]->extent(), 128);
+  evaluator.safeBind(tv0->getRootDomain()[0]->extent(), 6);
+  evaluator.safeBind(tv0->getRootDomain()[1]->extent(), 128);
+  evaluator.safeBind(tv1->getRootDomain()[0]->extent(), 6);
+  evaluator.safeBind(tv1->getRootDomain()[1]->extent(), 128);
 
   // 3. Evaluate and check result values
   TORCH_CHECK(tv2->domain()->nDims() == 3);
-  checkIntValue(&eval_context, tv2->axis(0)->rawExtent(), 2);
-  checkIntValue(&eval_context, tv2->axis(1)->rawExtent(), 4);
-  checkIntValue(&eval_context, tv2->axis(2)->rawExtent(), 128);
+  checkIntValue(evaluator, tv2->axis(0)->rawExtent(), 2);
+  checkIntValue(evaluator, tv2->axis(1)->rawExtent(), 4);
+  checkIntValue(evaluator, tv2->axis(2)->rawExtent(), 128);
 
   TORCH_CHECK(tv3->domain()->nDims() == 3);
-  checkIntValue(&eval_context, tv3->axis(0)->rawExtent(), 2);
-  checkIntValue(&eval_context, tv3->axis(1)->rawExtent(), 4);
-  checkIntValue(&eval_context, tv3->axis(2)->rawExtent(), 128);
+  checkIntValue(evaluator, tv3->axis(0)->rawExtent(), 2);
+  checkIntValue(evaluator, tv3->axis(1)->rawExtent(), 4);
+  checkIntValue(evaluator, tv3->axis(2)->rawExtent(), 128);
 }
 
 // Evaluate expressions in a more complex IR
@@ -299,33 +299,33 @@ void testGPU_FusionExprEvalComplex() {
   tv6->split(0, 5);
   tv5->merge(0);
 
-  // 1. Create an evaluation context
-  EvaluationContext eval_context(&fusion);
+  // 1. Create an evaluator
+  StatefulExpressionEvaluator evaluator(&fusion);
 
   // 2. Bind values
-  eval_context.bind(tv0->getRootDomain()[0]->extent(), 129);
-  eval_context.bind(tv0->getRootDomain()[1]->extent(), 127);
+  evaluator.safeBind(tv0->getRootDomain()[0]->extent(), 129);
+  evaluator.safeBind(tv0->getRootDomain()[1]->extent(), 127);
 
   // Evaluate and check extent values
   TORCH_CHECK(tv0->domain()->nDims() == 2);
-  checkIntValue(&eval_context, tv0->axis(0)->rawExtent(), 129);
-  checkIntValue(&eval_context, tv0->axis(1)->rawExtent(), 127);
+  checkIntValue(evaluator, tv0->axis(0)->rawExtent(), 129);
+  checkIntValue(evaluator, tv0->axis(1)->rawExtent(), 127);
 
   TORCH_CHECK(tv3->domain()->nDims() == 2);
-  checkIntValue(&eval_context, tv3->axis(0)->rawExtent(), 129);
-  checkIntValue(&eval_context, tv3->axis(1)->rawExtent(), 127);
+  checkIntValue(evaluator, tv3->axis(0)->rawExtent(), 129);
+  checkIntValue(evaluator, tv3->axis(1)->rawExtent(), 127);
 
   TORCH_CHECK(tv4->domain()->nDims() == 2);
-  checkIntValue(&eval_context, tv4->axis(0)->rawExtent(), 129);
-  checkIntValue(&eval_context, tv4->axis(1)->rawExtent(), 127);
+  checkIntValue(evaluator, tv4->axis(0)->rawExtent(), 129);
+  checkIntValue(evaluator, tv4->axis(1)->rawExtent(), 127);
 
   TORCH_CHECK(tv5->domain()->nDims() == 1);
-  checkIntValue(&eval_context, tv5->axis(0)->rawExtent(), 16383);
+  checkIntValue(evaluator, tv5->axis(0)->rawExtent(), 16383);
 
   TORCH_CHECK(tv6->domain()->nDims() == 3);
-  checkIntValue(&eval_context, tv6->axis(0)->rawExtent(), 26);
-  checkIntValue(&eval_context, tv6->axis(1)->rawExtent(), 5);
-  checkIntValue(&eval_context, tv6->axis(2)->rawExtent(), 127);
+  checkIntValue(evaluator, tv6->axis(0)->rawExtent(), 26);
+  checkIntValue(evaluator, tv6->axis(1)->rawExtent(), 5);
+  checkIntValue(evaluator, tv6->axis(2)->rawExtent(), 127);
 }
 
 // Evaluate expressions post lowering
@@ -365,27 +365,27 @@ void testGPU_FusionExprEvalPostLower() {
   gpulw.printKernel(kernel);
 
   // 1. Create an evaluation context
-  EvaluationContext eval_context(&fusion);
+  StatefulExpressionEvaluator evaluator(&fusion);
 
   // 2. Bind values
-  eval_context.bind(tv0->getRootDomain()[0]->extent(), 6);
-  eval_context.bind(tv0->getRootDomain()[1]->extent(), 128);
-  eval_context.bind(tv1->getRootDomain()[0]->extent(), 6);
-  eval_context.bind(tv1->getRootDomain()[1]->extent(), 128);
+  evaluator.safeBind(tv0->getRootDomain()[0]->extent(), 6);
+  evaluator.safeBind(tv0->getRootDomain()[1]->extent(), 128);
+  evaluator.safeBind(tv1->getRootDomain()[0]->extent(), 6);
+  evaluator.safeBind(tv1->getRootDomain()[1]->extent(), 128);
 
   // 3. Evaluate and check result values
   TORCH_CHECK(tv2->domain()->nDims() == 3);
-  checkIntValue(&eval_context, tv2->axis(0)->rawExtent(), 2);
-  checkIntValue(&eval_context, tv2->axis(1)->rawExtent(), 4);
-  checkIntValue(&eval_context, tv2->axis(2)->rawExtent(), 128);
+  checkIntValue(evaluator, tv2->axis(0)->rawExtent(), 2);
+  checkIntValue(evaluator, tv2->axis(1)->rawExtent(), 4);
+  checkIntValue(evaluator, tv2->axis(2)->rawExtent(), 128);
 
   TORCH_CHECK(tv3->domain()->nDims() == 3);
-  checkIntValue(&eval_context, tv3->axis(0)->rawExtent(), 2);
-  checkIntValue(&eval_context, tv3->axis(1)->rawExtent(), 4);
-  checkIntValue(&eval_context, tv3->axis(2)->rawExtent(), 128);
+  checkIntValue(evaluator, tv3->axis(0)->rawExtent(), 2);
+  checkIntValue(evaluator, tv3->axis(1)->rawExtent(), 4);
+  checkIntValue(evaluator, tv3->axis(2)->rawExtent(), 128);
 
-  checkIntValue(&eval_context, bid_x, 2);
-  checkIntValue(&eval_context, tid_x, 128);
+  checkIntValue(evaluator, bid_x, 2);
+  checkIntValue(evaluator, tid_x, 128);
 }
 
 void testGPU_FusionClear() {

@@ -176,34 +176,16 @@ void validateKernelOutputs(
   }
 }
 
-void safeBind(
-    EvaluationContext& ec,
-    const Val* value,
-    Int::ScalarType concrete_value) {
-  auto already_concrete_val = ec.concreteValue(value);
-
-  if (already_concrete_val.has_value()) {
-    TORCH_INTERNAL_ASSERT(
-        concrete_value == already_concrete_val.value(),
-        "Tried to bind ",
-        value,
-        " to ",
-        " concrete value, but it's already set to ",
-        already_concrete_val.value());
-  } else {
-    ec.bind(value, concrete_value);
-  }
-}
-
-EvaluationContext bindInputs(
+StatefulExpressionEvaluator statefulBindInputs(
     const at::ArrayRef<IValue>& aten_inputs,
-    Fusion* fusion) {
+    Fusion* fusion,
+    GpuLower* lower) {
   TORCH_INTERNAL_ASSERT(
       fusion->inputs().size() == aten_inputs.size(),
       "Something went wrong configuring launch. Inputs no longer match.");
 
   auto fusion_inputs = fusion->inputs();
-  EvaluationContext eval_context(fusion);
+  StatefulExpressionEvaluator evaluator(fusion);
 
   // This should probably move to EvaluationContext as we may want to bind
   // input values frequently. Bind fusion input values to runtime values.
@@ -222,54 +204,18 @@ EvaluationContext bindInputs(
           "Something went wrong configuring launch. Inputs no longer match.");
 
       for (size_t dim = 0; dim < root_dom.size(); dim++) {
-        safeBind(
-            eval_context, root_dom[dim]->extent(), aten_tensor.sizes()[dim]);
+        evaluator.safeBind(
+            root_dom[dim]->extent(), aten_tensor.sizes()[dim], lower);
       }
+    } else if (
+        fusion->inputs()[i]->getValType().value() == ValType::Scalar &&
+        fusion->inputs()[i]->getDataType().value() == DataType::Int) {
+      TORCH_INTERNAL_ASSERT(
+          aten_inputs[i].type()->kind() == c10::TypeKind::IntType);
+      evaluator.safeBind(fusion->inputs()[i], aten_inputs[i].toInt(), lower);
     }
   }
-  return eval_context;
-}
-
-EvaluationContext bindInputs(
-    const at::ArrayRef<IValue>& aten_inputs,
-    Fusion* fusion,
-    GpuLower* lowered) {
-  TORCH_INTERNAL_ASSERT(
-      fusion->inputs().size() == aten_inputs.size(),
-      "Something went wrong configuring launch. Inputs no longer match.");
-
-  auto fusion_inputs = fusion->inputs();
-  EvaluationContext eval_context(fusion);
-
-  // This should probably move to EvaluationContext as we may want to bind
-  // input values frequently. Bind fusion input values to runtime values.
-  for (size_t i = 0; i < fusion->inputs().size(); i++) {
-    if (fusion->inputs()[i]->getValType() == ValType::TensorView) {
-      TensorView* cg_tensor = fusion->inputs()[i]->as<TensorView>();
-
-      TORCH_INTERNAL_ASSERT(
-          aten_inputs[i].isTensor(),
-          "Something went wrong configuring launch. Inputs no longer match.");
-
-      auto aten_tensor = aten_inputs[i].toTensor();
-      auto root_dom = TensorDomain::noReductions(cg_tensor->getRootDomain());
-      TORCH_INTERNAL_ASSERT(
-          aten_tensor.ndimension() == root_dom.size(),
-          "Something went wrong configuring launch. Inputs no longer match.");
-
-      for (size_t dim = 0; dim < root_dom.size(); dim++) {
-        auto extent = root_dom[dim]->extent();
-        safeBind(eval_context, extent, aten_tensor.sizes()[dim]);
-        if (!extent->isConstScalar()) {
-          safeBind(
-              eval_context,
-              lowered->getLowerValue(extent),
-              aten_tensor.sizes()[dim]);
-        }
-      }
-    }
-  }
-  return eval_context;
+  return evaluator;
 }
 
 NvrtcFunction nvrtcCompile(

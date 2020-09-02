@@ -73,6 +73,7 @@ void FusionExecutor::compileFusion(Fusion* fusion, CompileOptions options) {
         "Output types from fusions that are not tensors are not supported at this point.");
   }
 
+  // Clone the fusion so we can store it
   fusion_ = *fusion;
   FusionGuard fg(&fusion_);
   options_ = options;
@@ -92,9 +93,9 @@ void FusionExecutor::compileFusion(Fusion* fusion, CompileOptions options) {
   const auto structured_code = getStructuredCode(kernel);
 
   if (lowered_.static_allocations().size() > 0) {
-    EvaluationContext evaluation_context(&fusion_);
+    StatefulExpressionEvaluator static_evaluator(&fusion_);
     unsigned static_smem_size =
-        computeSharedMemory(evaluation_context, lowered_.static_allocations());
+        computeSharedMemory(static_evaluator, lowered_.static_allocations());
     TORCH_INTERNAL_ASSERT(
         static_smem_size < max_device_smem,
         "The static shared memory allocation is larger than available memory.");
@@ -112,12 +113,12 @@ namespace {
 
 at::Tensor inferAndAlloc(
     const TensorView* tv,
-    EvaluationContext& ec,
+    StatefulExpressionEvaluator& see,
     const CompileOptions& options,
     bool zero_init = false) {
   std::vector<int64_t> sizes;
   for (auto id : TensorDomain::noReductions(tv->getMaybeRFactorDomain())) {
-    auto inferred_val = ExpressionEvaluator::evaluate(id->rawExtent(), &ec);
+    auto inferred_val = see.inferValue(id->rawExtent());
     TORCH_INTERNAL_ASSERT(
         inferred_val.has_value(),
         "Could not launch kernel as program could not infer ",
@@ -143,19 +144,19 @@ at::Tensor inferAndAlloc(
 } // namespace
 
 uint64_t FusionExecutor::computeSharedMemory(
-    EvaluationContext& ec,
+    StatefulExpressionEvaluator& see,
     const std::vector<kir::Allocate*>& buffers,
     bool align_padding,
     uint64_t total) {
   for (auto smem_alloc : buffers) {
-    auto inferred_size = ExpressionEvaluator::evaluate(smem_alloc->size(), &ec);
-    if (inferred_size.has_value()) {
+    auto inferred_val = see.inferValue(smem_alloc->size());
+    if (inferred_val.has_value()) {
       const uint64_t data_size = dataTypeSize(smem_alloc->buffer_type());
       // Add padding to align dynamic shared memory
       if (align_padding) {
         total = ceilDiv(total, data_size) * data_size;
       }
-      total += inferred_size.value() * data_size;
+      total += inferred_val.value() * data_size;
     } else {
       TORCH_INTERNAL_ASSERT(
           false,
@@ -169,9 +170,8 @@ uint64_t FusionExecutor::computeSharedMemory(
 }
 
 LaunchParams FusionExecutor::computeLaunchParams(
-    const at::ArrayRef<IValue>& aten_inputs,
     const LaunchParams& launch_constraints,
-    EvaluationContext& ec) {
+    StatefulExpressionEvaluator& see) {
   LaunchParams launch_params;
 
   // Grab all values that are actually used in the fusion
@@ -208,8 +208,7 @@ LaunchParams FusionExecutor::computeLaunchParams(
       if (launch_constraints.hasDim(p_type)) {
         auto parallel_ids = entry.second;
         for (auto parallel_id : parallel_ids) {
-          auto inferred_val =
-              ExpressionEvaluator::evaluate(parallel_id->rawExtent(), &ec);
+          auto inferred_val = see.inferValue(parallel_id->rawExtent());
           if (inferred_val.has_value()) {
             // This value could have been inferred, make sure it was set right.
             TORCH_CHECK(
@@ -223,14 +222,10 @@ LaunchParams FusionExecutor::computeLaunchParams(
                 launch_constraints.getDim(p_type));
           } else {
             // Bind the launch constraint into our evaluation context
-            executor_utils::safeBind(
-                ec,
+            see.safeBind(
                 parallel_id->rawExtent(),
-                launch_constraints.getDim(entry.first));
-            executor_utils::safeBind(
-                ec,
-                lowered_.getLowerValue(parallel_id->rawExtent()),
-                launch_constraints.getDim(entry.first));
+                launch_constraints.getDim(entry.first),
+                &lowered_);
             launch_params.bind(launch_constraints.getDim(p_type), p_type);
           }
         }
@@ -243,7 +238,7 @@ LaunchParams FusionExecutor::computeLaunchParams(
     auto p_type = entry.first;
     auto parallel_ids = entry.second;
     for (auto parallel_id : parallel_ids) {
-      auto val = ExpressionEvaluator::evaluate(parallel_id->rawExtent(), &ec);
+      auto val = see.inferValue(parallel_id->rawExtent());
       TORCH_INTERNAL_ASSERT(
           val,
           "Tried to evaluate the extent of ",
@@ -264,10 +259,10 @@ LaunchParams FusionExecutor::computeLaunchParams(
   }
 
   uint64_t dynamic_smem_size = computeSharedMemory(
-      ec, lowered_.dynamic_allocations(), true, reduction_broadcast_workspace);
+      see, lowered_.dynamic_allocations(), true, reduction_broadcast_workspace);
 
   uint64_t static_smem_size =
-      computeSharedMemory(ec, lowered_.static_allocations());
+      computeSharedMemory(see, lowered_.static_allocations());
 
   TORCH_INTERNAL_ASSERT(
       (dynamic_smem_size + static_smem_size) < max_device_smem,
@@ -278,30 +273,39 @@ LaunchParams FusionExecutor::computeLaunchParams(
 }
 
 FusionExecutor::GlobalBuffers FusionExecutor::allocGlobalVals(
-    EvaluationContext& ec) {
+    StatefulExpressionEvaluator& see) {
   GlobalBuffers global_buffers;
   for (auto alloc : lowered_.global_allocations()) {
     TORCH_INTERNAL_ASSERT(
         alloc->buffer()->getValType() == ValType::KirTensorView,
         "Cannot allocate global buffers that are not tensors.");
-    global_buffers.empty_buffers.push_back(inferAndAlloc(
-        alloc->buffer()->as<kir::TensorView>()->fuserTv(),
-        ec,
-        options_,
-        alloc->zeroInit()));
+    if (!alloc->zeroInit()) {
+      global_buffers.empty_buffers.push_back(inferAndAlloc(
+          alloc->buffer()->as<kir::TensorView>()->fuserTv(),
+          see,
+          options_,
+          false));
+    } else {
+      global_buffers.zero_buffers.push_back(inferAndAlloc(
+          alloc->buffer()->as<kir::TensorView>()->fuserTv(),
+          see,
+          options_,
+          true));
+    }
   }
 
   return global_buffers;
 }
 
-std::vector<at::Tensor> FusionExecutor::allocOutputs(EvaluationContext& ec) {
+std::vector<at::Tensor> FusionExecutor::allocOutputs(
+    StatefulExpressionEvaluator& see) {
   std::vector<at::Tensor> outputs;
   for (auto output : fusion_.outputs()) {
     TORCH_INTERNAL_ASSERT(
         output->getValType() == ValType::TensorView,
         "Cannot allocate outputs that are not tensors.");
     outputs.push_back(
-        inferAndAlloc(output->as<TensorView>(), ec, options_, false));
+        inferAndAlloc(output->as<TensorView>(), see, options_, false));
   }
   return outputs;
 }
@@ -366,20 +370,19 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
     //   2. `executor_entry` is not initialized
     executor_utils::validateKernelInputs(&fusion_, inputs, options_.device);
 
-    EvaluationContext evaluation_context =
-        executor_utils::bindInputs(inputs, &fusion_, &lowered_);
+    StatefulExpressionEvaluator evaluator =
+        executor_utils::statefulBindInputs(inputs, &fusion_, &lowered_);
 
-    launch_params =
-        computeLaunchParams(inputs, launch_constraints, evaluation_context);
+    launch_params = computeLaunchParams(launch_constraints, evaluator);
 
     if (outputs.empty() || outputs.size() != fusion_.outputs().size()) {
-      alloced_outputs = allocOutputs(evaluation_context);
+      alloced_outputs = allocOutputs(evaluator);
+    } else {
+      executor_utils::validateKernelOutputs(
+          &fusion_, alloced_outputs, options_.device);
     }
 
-    executor_utils::validateKernelOutputs(
-        &fusion_, alloced_outputs, options_.device);
-
-    global_buffers = allocGlobalVals(evaluation_context);
+    global_buffers = allocGlobalVals(evaluator);
 
     if (has_random_) {
       // NOTE: this is how we map offset to PW kernels in order to have
