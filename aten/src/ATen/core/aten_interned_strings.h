@@ -368,6 +368,7 @@ _(aten, hardsigmoid_backward) \
 _(aten, hardtanh) \
 _(aten, hardtanh_backward) \
 _(aten, hardtanh_forward) \
+_(aten, heaviside) \
 _(aten, hinge_embedding_loss) \
 _(aten, histc) \
 _(aten, hspmm) \
@@ -655,8 +656,6 @@ _(aten, stft) \
 _(aten, storage_offset) \
 _(aten, stride) \
 _(aten, strides) \
-_(aten, sub) \
-_(aten, sub_) \
 _(aten, rsub) \
 _(aten, sum) \
 _(aten, sum_to_size) \
