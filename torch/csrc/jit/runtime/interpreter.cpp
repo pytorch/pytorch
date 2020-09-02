@@ -1571,7 +1571,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     formatStackTrace(ss);
     ss << "RuntimeError: " << msg << "\n";
     if (future_) {
-      future_->setError(Future::FutureError(ss.str()));
+      future_->setError(std::make_exception_ptr(Future::FutureError(ss.str())));
     } else if (is_jit_exception) {
       throw JITException(ss.str());
     } else {

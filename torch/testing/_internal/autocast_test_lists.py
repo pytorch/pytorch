@@ -61,8 +61,12 @@ class AutocastTestLists(object):
 
         # The remaining lists organize ops that autocast treats explicitly.
         self.torch_fp16 = [
+            # deprecated _convolution
             ("_convolution", conv_args_fp32[1] + bias_fp32 + ((1, 1), (0, 0), (1, 1), False,
                                                               (0, 0), 1, False, True, True)),
+            # the current  _convolution
+            ("_convolution", conv_args_fp32[1] + bias_fp32 + ((1, 1), (0, 0), (1, 1), False,
+                                                              (0, 0), 1, False, True, True, True)),
             ("_convolution_nogroup", conv_args_fp32[1] + bias_fp32 + ((1, 1), (0, 0), (1, 1), False, (0, 0))),
             ("conv1d", conv_args_fp32[0]),
             ("conv2d", conv_args_fp32[1]),
@@ -72,13 +76,17 @@ class AutocastTestLists(object):
             ("conv_transpose2d", conv_args_fp32[1], TEST_WITH_ROCM),
             ("conv_transpose3d", conv_args_fp32[2], TEST_WITH_ROCM),
             ("convolution", conv_args_fp32[1] + bias_fp32 + ((1, 1), (0, 0), (1, 1), False, (0, 0), 1)),
-            # cudnn_convolutions with bias
+            # deprecated cudnn_convolutions with bias
             ("cudnn_convolution", conv_args_fp32[1] + bias_fp32 + ((0, 0), (1, 1), (1, 1), 1, False, True), TEST_WITH_ROCM),
             ("cudnn_convolution_transpose", conv_args_fp32[1] + bias_fp32 + ((0, 0), (0, 0), (1, 1),
                                                                              (1, 1), 1, False, True), TEST_WITH_ROCM),
-            # cudnn_convolutions with no bias
+            # deprecated cudnn_convolutions with no allow_tf32 flag
             ("cudnn_convolution", conv_args_fp32[1] + ((0, 0), (1, 1), (1, 1), 1, False, True), TEST_WITH_ROCM),
             ("cudnn_convolution_transpose", conv_args_fp32[1] + ((0, 0), (0, 0), (1, 1), (1, 1), 1, False, True), TEST_WITH_ROCM),
+            # the current cudnn_convolutions
+            ("cudnn_convolution", conv_args_fp32[1] + ((0, 0), (1, 1), (1, 1), 1, False, True, True), TEST_WITH_ROCM),
+            ("cudnn_convolution_transpose", conv_args_fp32[1] + ((0, 0), (0, 0), (1, 1),
+                                                                 (1, 1), 1, False, True, True), TEST_WITH_ROCM),
             ("prelu", pointwise0_fp32 + element0_fp32),
             ("addmm", mat1_fp32 + mat2_fp32 + mat3_fp32),
             ("addmv", pointwise0_fp32 + mat2_fp32 + pointwise1_fp32),
