@@ -215,7 +215,8 @@ void replaceConvolutionWithAtenConv(std::shared_ptr<Graph>& graph) {
   rewriter_conv2d_transpose.runOnGraph(graph, filter_conv2d_transpose);
   SubgraphRewriter rewriter_conv3d;
   rewriter_conv3d.RegisterRewritePattern(convolution, conv3d);
-  rewriter_conv3d.RegisterRewritePattern(convolution_deprecated, conv3d_for_deprecated_conv);
+  rewriter_conv3d.RegisterRewritePattern(
+      convolution_deprecated, conv3d_for_deprecated_conv);
   rewriter_conv3d.runOnGraph(graph, filter_conv3d);
 }
 
