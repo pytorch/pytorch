@@ -72,7 +72,7 @@ def parse_arguments(
     args = parser.parse_args()
     # get option
     options = get_options(args)
-    return (options, args.interested_folder, args.run_only, args.clean)
+    return (options, args.interest_only, args.run_only, args.clean)
 
 
 def get_test_list_by_type(
