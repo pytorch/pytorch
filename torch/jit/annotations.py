@@ -292,11 +292,14 @@ def try_ann_to_type(ann, loc):
         value = try_ann_to_type(ann.__args__[1], loc)
         return DictType(key, value)
     if is_optional(ann):
+        print(ann)
+        print(ann.__args__)
         if issubclass(ann.__args__[1], type(None)):
-            valid_type = try_ann_to_type(ann.__args__[0], loc)
+            contained = ann.__args__[0]
         else:
-            valid_type = try_ann_to_type(ann.__args__[1], loc)
-        assert valid_type, "Unsupported annotation {} could not be resolved.".format(repr(ann))
+            contained = ann.__args__[1]
+        valid_type = try_ann_to_type(contained, loc)
+        assert valid_type, "Unsupported annotation {} could not be resolved.".format(repr(contained))
         return OptionalType(valid_type)
     if torch.distributed.rpc.is_available() and is_rref(ann):
         return RRefType(try_ann_to_type(ann.__args__[0], loc))
