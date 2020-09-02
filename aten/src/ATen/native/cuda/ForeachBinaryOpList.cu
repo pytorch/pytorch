@@ -34,84 +34,30 @@ void foreach_tensor_list_op_(TensorList tensors1, TensorList tensors2) {
     });
 }
 
-std::vector<Tensor> foreach_tensor_add_list_kernel_cuda(TensorList tensors1, TensorList tensors2) {
-    check_foreach_api_restrictions(tensors1, tensors2);
-
-    if (!can_use_fast_route(tensors1, tensors2)) {
-        return at::native::foreach_tensor_add_list_kernel_slow(tensors1, tensors2);
-    }
-
-    return foreach_tensor_list_op<std::plus>(tensors1, tensors2);
+#define FOREACH_BINARY_OP_LIST(NAME, OP)                                                                    \
+void foreach_tensor_##NAME##_list_kernel_cuda_(TensorList tensors1, TensorList tensors2) {                  \
+    check_foreach_api_restrictions(tensors1, tensors2);                                                     \
+                                                                                                            \
+    if (!can_use_fast_route(tensors1, tensors2)) {                                                          \
+        return at::native::foreach_tensor_##NAME##_list_kernel_slow_(tensors1, tensors2);                   \
+    }                                                                                                       \
+                                                                                                            \
+    foreach_tensor_list_op_<OP>(tensors1, tensors2);                                                        \
+}                                                                                                           \
+                                                                                                            \
+std::vector<Tensor> foreach_tensor_##NAME##_list_kernel_cuda(TensorList tensors1, TensorList tensors2) {    \
+    check_foreach_api_restrictions(tensors1, tensors2);                                                     \
+                                                                                                            \
+    if (!can_use_fast_route(tensors1, tensors2)) {                                                          \
+        return at::native::foreach_tensor_##NAME##_list_kernel_slow(tensors1, tensors2);                    \
+    }                                                                                                       \
+                                                                                                            \
+    return foreach_tensor_list_op<OP>(tensors1, tensors2);                                                  \
 }
 
-void foreach_tensor_add_list_kernel_cuda_(TensorList tensors1, TensorList tensors2) {
-    check_foreach_api_restrictions(tensors1, tensors2);
-
-    if (!can_use_fast_route(tensors1, tensors2)) {
-        return at::native::foreach_tensor_add_list_kernel_slow_(tensors1, tensors2);
-    }
-
-    foreach_tensor_list_op_<std::plus>(tensors1, tensors2);
-}
-
-std::vector<Tensor> foreach_tensor_sub_list_kernel_cuda(TensorList tensors1, TensorList tensors2) {
-    check_foreach_api_restrictions(tensors1, tensors2);
-
-    if (!can_use_fast_route(tensors1, tensors2)) {
-        return at::native::foreach_tensor_sub_list_kernel_slow(tensors1, tensors2);
-    }
-
-    return foreach_tensor_list_op<std::minus>(tensors1, tensors2);
-}
-
-void foreach_tensor_sub_list_kernel_cuda_(TensorList tensors1, TensorList tensors2) {
-    check_foreach_api_restrictions(tensors1, tensors2);
-
-    if (!can_use_fast_route(tensors1, tensors2)) {
-        return at::native::foreach_tensor_sub_list_kernel_slow_(tensors1, tensors2);
-    }
-
-    foreach_tensor_list_op_<std::minus>(tensors1, tensors2);
-}
-
-std::vector<Tensor> foreach_tensor_mul_list_kernel_cuda(TensorList tensors1, TensorList tensors2) {
-    check_foreach_api_restrictions(tensors1, tensors2);
-
-    if (!can_use_fast_route(tensors1, tensors2)) {
-        return at::native::foreach_tensor_mul_list_kernel_slow(tensors1, tensors2);
-    }
-
-    return foreach_tensor_list_op<std::multiplies>(tensors1, tensors2);
-}
-
-void foreach_tensor_mul_list_kernel_cuda_(TensorList tensors1, TensorList tensors2) {
-    check_foreach_api_restrictions(tensors1, tensors2);
-
-    if (!can_use_fast_route(tensors1, tensors2)) {
-        return at::native::foreach_tensor_mul_list_kernel_slow_(tensors1, tensors2);
-    }
-
-    foreach_tensor_list_op_<std::multiplies>(tensors1, tensors2);
-}
-
-std::vector<Tensor> foreach_tensor_div_list_kernel_cuda(TensorList tensors1, TensorList tensors2) {
-    check_foreach_api_restrictions(tensors1, tensors2);
-
-    if (!can_use_fast_route(tensors1, tensors2)) {
-        return at::native::foreach_tensor_div_list_kernel_slow(tensors1, tensors2);
-    }
-
-    return foreach_tensor_list_op<std::divides>(tensors1, tensors2);
-}
-
-void foreach_tensor_div_list_kernel_cuda_(TensorList tensors1, TensorList tensors2) {
-    check_foreach_api_restrictions(tensors1, tensors2);
-
-    if (!can_use_fast_route(tensors1, tensors2)) {
-        return at::native::foreach_tensor_div_list_kernel_slow_(tensors1, tensors2);
-    }
-
-    foreach_tensor_list_op_<std::divides>(tensors1, tensors2);
-}
+FOREACH_BINARY_OP_LIST(add, std::plus);
+FOREACH_BINARY_OP_LIST(sub, std::minus);
+FOREACH_BINARY_OP_LIST(mul, std::multiplies);
+FOREACH_BINARY_OP_LIST(div, std::divides);
 
 }} // namespace at::native
