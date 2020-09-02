@@ -194,8 +194,6 @@ template <typename scalar_t>
 static inline C10_HOST_DEVICE scalar_t chbevl(scalar_t _x, const scalar_t array[], size_t len) {
   using accscalar_t = at::acc_type<scalar_t, true>;
 
-  // Upcast input for numerical accuracy purposes
-  // Needed for accurate results if input is bfloat16 or float16
   accscalar_t x = static_cast<accscalar_t>(_x);
   accscalar_t b0, b1, b2;
 
@@ -218,7 +216,8 @@ template <typename scalar_t>
 static inline C10_HOST_DEVICE scalar_t calc_i0(scalar_t _x) {
   using accscalar_t = at::acc_type<scalar_t, true>;
 
-  // Cast bfloat16 values to float for numerical accuracy purposes
+  // Upcast input for numerical accuracy purposes
+  // Needed for accurate results if input is bfloat16 or float16
   accscalar_t x = ::abs(static_cast<accscalar_t>(_x));
 
   /* Chebyshev coefficients for exp(-x) I0(x)
