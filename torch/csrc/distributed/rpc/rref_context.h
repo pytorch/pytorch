@@ -31,6 +31,10 @@ c10::intrusive_ptr<RRef> TORCH_API finishCreatingOwnerRRef(
 using torch::utils::Future;
 
 // Manages RRef lifetime and keeps track of RRef forks.
+// Move TORCH_API from class to individual functions, since TORCH_API
+// will be defined as __declspec(dllimport) when compiling with MSVC,
+// and we have thread_local variables defined in class RRefContext
+// which are not allowed to added __declspec(dllimport).
 class RRefContext {
  public:
   TORCH_API static RRefContext& getInstance();
