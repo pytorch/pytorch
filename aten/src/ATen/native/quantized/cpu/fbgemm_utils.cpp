@@ -1,13 +1,11 @@
 #include <ATen/ATen.h>
+#include <ATen/native/TensorFactories.h>
 
 #include <ATen/native/quantized/cpu/conv_packed_params.h>
-#include <ATen/native/quantized/cpu/embedding_packed_params.h>
+#include <ATen/native/quantized/cpu/conv_serialization.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/packed_params.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
-#include <ATen/native/quantized/cpu/serialization_versions.h>
-#include <ATen/native/TensorFactories.h>
-
 #include <ATen/quantized/QTensorImpl.h>
 #include <ATen/quantized/Quantizer.h>
 
@@ -15,7 +13,9 @@
 #include <c10/core/TensorOptions.h>
 
 #include <torch/custom_class.h>
-#include <torch/custom_class.h>
+
+#include <ATen/native/quantized/cpu/embedding_packed_params.h>
+#include <ATen/native/quantized/cpu/packed_params.h>
 
 torch::class_<LinearPackedParamsBase> register_linear_params();
 torch::class_<EmbeddingPackedParamsBase> register_embedding_params();
@@ -218,13 +218,23 @@ CAFFE2_API torch::class_<ConvPackedParamsBase<kSpatialDim>> register_conv_params
     torch::class_<ConvPackedParamsBase<kSpatialDim>>(
         "quantized", "Conv" + c10::to_string(kSpatialDim) + "dPackedParamsBase")
     .def_pickle(
+        /*
         [](const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>& params)
-        -> at::native::serialization::ConvPackedParamsSerializationType { // __getstate__
-          return at::native::serialization::conv_packed_params<kSpatialDim>(params);
+        -> ConvParamsSerializationType { // __getstate__
+          return serialize_conv<kSpatialDim>(params);
         },
-        [](at::native::serialization::ConvPackedParamsSerializationType state)
+        */
+        // TODO (#43649): switch this to serialize_conv
+        [](const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>& params)
+        -> ConvParamsSerializationTypeLegacy { // __getstate__
+          return serialize_conv_legacy<kSpatialDim>(params);
+        },
+        // __setstate__ takes c10::IValue because we support parsing historical
+        // serialization versions.
+        [](c10::IValue v)
         -> c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> { // __setstate__
-          return at::native::serialization::conv_packed_params<kSpatialDim>(state);
+          ConvParamsSerializationType state = parse_conv_serialized_state<kSpatialDim>(v);
+          return deserialize_conv<kSpatialDim>(state);
         })
     .def("weight", [](const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>& self) {
                      at::Tensor weight;
