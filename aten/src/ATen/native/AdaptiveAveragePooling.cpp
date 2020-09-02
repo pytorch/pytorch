@@ -333,8 +333,15 @@ namespace {
       // in this case, adaptive pooling is just computing mean over hw
       // dimensions, which can be done more efficiently
       Tensor out = input.mean({-1, -2});
-      return input.dim() == 3 ? out.resize_({input.size(0), 1, 1}, input.suggest_memory_format())
-                              : out.resize_({input.size(0), input.size(1), 1, 1}, input.suggest_memory_format());
+      const int n = input.size(0);
+      const int c = input.size(1);
+      const int ndim = input.dim();
+      out = (ndim == 3) ? out.view({n, 1, 1}) : out.view({n, c, 1, 1});
+      if (input.suggest_memory_format() == at::MemoryFormat::ChannelsLast) {
+        out.unsafeGetTensorImpl()->set_stride(ndim-1, c);
+        out.unsafeGetTensorImpl()->set_stride(ndim-2, c);
+      }
+      return out;
     } else {
       return _adaptive_avg_pool2d(input, output_size);
     }

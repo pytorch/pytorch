@@ -9815,7 +9815,7 @@ class TestNNDeviceType(NNTestCase):
 
     def test_adaptive_avg_pool2d_output_size_one(self, device):
         def helper(size, memory_format):
-            x = torch.randint(1, 10, size, dtype=torch.float, device=device)
+            x = torch.randint(1, 10, size, dtype=torch.float, device=device, requires_grad=True)
             if memory_format == 'non_contiguous':
                 x = x[::2, ::2, ::2, ::2]
             else:
@@ -9824,6 +9824,8 @@ class TestNNDeviceType(NNTestCase):
             net = torch.nn.AdaptiveAvgPool2d((1, 1))
             out = net(x)
             ref_out = x.contiguous().mean((-1, -2)).view((x.size(0), x.size(1), 1, 1))
+
+            out.sum().backward()    # make sure it doesn't crash
 
             self.assertEqual(out, ref_out)
             if memory_format == torch.channels_last:
