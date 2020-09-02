@@ -1163,10 +1163,12 @@ Tensor& lu_solve_out(Tensor& result, const Tensor& self, const Tensor& LU_data, 
 
 template <typename scalar_t>
 static void apply_lstsq(Tensor& B, Tensor& A) {
+#ifndef USE_LAPACK
+  AT_ERROR("lstsq: LAPACK library not found in compilation");
+#else
   if(B.dim() == 1) {
     B.unsqueeze_(1);
   }
-
   int m, n, nrhs, lda, ldb, info, lwork;
   scalar_t wkopt = 0.0;
   lwork = -1; // work length
@@ -1197,6 +1199,7 @@ static void apply_lstsq(Tensor& B, Tensor& A) {
   auto work = work_tensor.data_ptr<scalar_t>();
 
   lapackGels<scalar_t>('N', m, n, nrhs, A_data, lda, B_data, ldb, work, lwork, &info);
+#endif
 }
 
 std::tuple<Tensor, Tensor> lstsq(const Tensor& B, const Tensor& A) {
