@@ -1099,6 +1099,19 @@ class TestTEFuser(JitTestCase):
             num_grads = 1 if i > 0 else 0
             self.assertEqual(len([n for n in backward.nodes() if n.kind() == 'aten::_grad_sum_to_size']), num_grads)
 
+    def test_disabled(self):
+        old_cpu_fuser_state = torch._C._jit_can_fuse_on_cpu()
+        torch._C._jit_override_can_fuse_on_cpu(False)
+
+        def fn(a):
+            return a ** 2 + a
+
+        x = torch.randn(4, dtype=torch.float, device="cpu")
+        s = self.checkScript(fn, (x,))
+        g = s.graph_for(x)
+        self.assertEqual(len(self.findFusionGroups(g)), 0)
+
+        torch._C._jit_override_can_fuse_on_cpu(old_cpu_fuser_state)
 
 if __name__ == '__main__':
     run_tests()
