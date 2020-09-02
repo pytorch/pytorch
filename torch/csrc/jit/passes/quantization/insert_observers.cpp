@@ -1170,7 +1170,8 @@ bool InsertObserversHelper::valueNeedsToBeQuantized(
   // of the quantizable function.
   if (quant_type_ == QuantType::STATIC) {
     // Check whether producer is quantizable
-    if (nodeQuantizable(v->node()) || isPropagateQuantOp(v->node())) {
+    if (!isWeightOnlyStaticQuantOp(v->node()) &&
+        (nodeQuantizable(v->node()) || isPropagateQuantOp(v->node()))) {
       return true;
     }
   }
