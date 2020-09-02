@@ -89,7 +89,7 @@ ProcessGroup::~ProcessGroup() {}
 
 // This is introduced so that implementors of ProcessGroup would not need to
 // have this implmentation.
-std::shared_ptr<ProcessGroup::Work> ProcessGroup::allgather_coalesced(
+c10::intrusive_ptr<ProcessGroup::Work> ProcessGroup::allgather_coalesced(
     std::vector<std::vector<at::Tensor>>& /* usused */,
     std::vector<at::Tensor>& /* usused */,
     const AllgatherOptions& /* usused */) {

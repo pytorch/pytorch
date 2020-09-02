@@ -425,7 +425,7 @@ std::vector<std::vector<at::Tensor>> Reducer::get_bucket_tensors() const {
 }
 
 void Reducer::set_forward_pass_work_handle(
-    std::shared_ptr<c10d::ProcessGroup::Work> forwardPassWorkHandle,
+    c10::intrusive_ptr<c10d::ProcessGroup::Work> forwardPassWorkHandle,
     at::Tensor& tensor,
     bool useStaticWorldSize) {
   std::lock_guard<std::mutex> lock(mutex_);

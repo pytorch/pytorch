@@ -93,7 +93,7 @@ class AsyncInputIsOutputTest : public AsyncTest {
     }
   }
 
-  void wait(std::shared_ptr<ProcessGroup::Work>& work) {
+  void wait(c10::intrusive_ptr<ProcessGroup::Work>& work) {
     at::cuda::CUDAMultiStreamGuard guard(streams_);
     work->wait();
   }
@@ -125,7 +125,7 @@ class AsyncAllreduceTest : public AsyncInputIsOutputTest {
   AsyncAllreduceTest(const std::string& path, int numTensors)
       : AsyncInputIsOutputTest(path, numTensors) {}
 
-  std::shared_ptr<c10d::ProcessGroup::Work> run() {
+  c10::intrusive_ptr<c10d::ProcessGroup::Work> run() {
     // For the duration of this function, make THC use our streams
     at::cuda::CUDAMultiStreamGuard guard(streams_);
 
@@ -151,7 +151,7 @@ class AsyncBroadcastTest : public AsyncInputIsOutputTest {
   AsyncBroadcastTest(const std::string& path, int numTensors)
       : AsyncInputIsOutputTest(path, numTensors) {}
 
-  std::shared_ptr<c10d::ProcessGroup::Work> run(int rootRank, int rootTensor) {
+  c10::intrusive_ptr<c10d::ProcessGroup::Work> run(int rootRank, int rootTensor) {
     // For the duration of this function, make THC use our streams
     at::cuda::CUDAMultiStreamGuard guard(streams_);
 
@@ -180,7 +180,7 @@ void runAsyncAllreduceTest(
     size_t numProcesses = 4,
     size_t numTensors = 2) {
   auto tests = initialize<AsyncAllreduceTest>(path, numProcesses, numTensors);
-  std::vector<std::shared_ptr<c10d::ProcessGroup::Work>> work(numProcesses);
+  std::vector<c10::intrusive_ptr<c10d::ProcessGroup::Work>> work(numProcesses);
   for (size_t i = 0; i < numProcesses; i++) {
     work[i] = tests[i].run();
   }
@@ -214,7 +214,7 @@ void runAsyncBroadcastTest(
   // Try every permutation of root rank and root tensor
   for (size_t rootRank = 0; rootRank < numProcesses; rootRank++) {
     for (size_t rootTensor = 0; rootTensor < numTensors; rootTensor++) {
-      std::vector<std::shared_ptr<c10d::ProcessGroup::Work>> work(numProcesses);
+      std::vector<c10::intrusive_ptr<c10d::ProcessGroup::Work>> work(numProcesses);
       for (size_t i = 0; i < numProcesses; i++) {
         work[i] = tests[i].run(rootRank, rootTensor);
       }

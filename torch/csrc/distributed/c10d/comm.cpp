@@ -1,6 +1,7 @@
 #include <torch/csrc/distributed/c10d/comm.h>
 
 #include <deque>
+#include "c10/util/intrusive_ptr.h"
 
 #include <ATen/core/functional.h>
 #include <torch/csrc/distributed/c10d/reducer.h>
@@ -46,7 +47,7 @@ class BroadcastWork {
   std::vector<at::Tensor> flat_tensor_;
 
   // The broadcast work that is kicked off upon construction.
-  std::shared_ptr<c10d::ProcessGroup::Work> work_;
+  c10::intrusive_ptr<c10d::ProcessGroup::Work> work_;
 };
 
 } // namespace
