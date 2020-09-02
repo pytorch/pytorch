@@ -5,7 +5,6 @@
 #include <test/cpp/api/support.h>
 
 using namespace torch::nn;
-using namespace torch::test;
 
 struct TransformerTest : torch::test::SeedingFixture {};
 

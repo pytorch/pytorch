@@ -98,7 +98,7 @@ def get_static_quant_module_mapping():
     '''
     return STATIC_QUANT_MODULE_MAPPING
 
-def get_static_quantized_module_class(float_module_class):
+def get_static_quant_module_class(float_module_class):
     ''' Get the statically quantized module class corresponding to
     the floating point module class
     '''
@@ -107,13 +107,13 @@ def get_static_quantized_module_class(float_module_class):
         'Floating point module class {}'.format(float_module_class) + \
         ' does not have a corresponding quantized module class'
 
-def register_qat_module_class(module_class, qat_module_class):
+def register_qat_module_class(float_module_class, qat_module_class):
     ''' Register a mapping from float module class to qat module class,
     qat module class must have from_float defined as a class method
     '''
-    assert hasattr(quantized_module_class, 'from_float'), 'from_float must be defined' + \
+    assert hasattr(qat_module_class, 'from_float'), 'from_float must be defined' + \
         ' in qat module type'
-    QAT_MODULE_MAPPING[module_class] = qat_module_class
+    QAT_MODULE_MAPPING[float_module_class] = qat_module_class
 
 def get_qat_module_mapping():
     ''' Get module mapping for quantization aware training
@@ -128,7 +128,7 @@ def register_dynamic_quant_module_class(module_class, dynamic_quant_module_class
         ' in dynamically quantized module type'
     DYNAMIC_QUANT_MODULE_MAPPING[module_class] = dynamic_quant_module_class
 
-def get_dynamic_module_mapping():
+def get_dynamic_quant_module_mapping():
     ''' Get module mapping for post training dynamic quantization
     '''
     return DYNAMIC_QUANT_MODULE_MAPPING

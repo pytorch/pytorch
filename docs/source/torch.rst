@@ -510,6 +510,7 @@ BLAS and LAPACK Operations
     lobpcg
     trapz
     triangular_solve
+    vdot
 
 Utilities
 ----------------------------------

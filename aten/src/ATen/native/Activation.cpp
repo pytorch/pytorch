@@ -799,7 +799,6 @@ Tensor log_sigmoid(const Tensor & self) {
 Tensor log_sigmoid_backward_cpu(const Tensor& grad_output, const Tensor& input, const Tensor& buffer) {
   Tensor grad_input;
   auto iter = at::TensorIteratorConfig()
-    .set_check_mem_overlap(true)
     .add_output(grad_input)
     .add_input(input)
     .add_input(buffer)
@@ -815,7 +814,6 @@ Tensor& log_sigmoid_backward_out_cpu(
     const Tensor& input,
     const Tensor& buffer) {
   auto iter = TensorIteratorConfig()
-    .set_check_mem_overlap(true)
     .add_output(grad_input)
     .add_input(input)
     .add_input(buffer)
