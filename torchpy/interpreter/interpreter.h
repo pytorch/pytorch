@@ -41,6 +41,9 @@ class Interpreter : public InterpreterImpl {
     void* initialize_interface = dlsym(handle_, "initialize_interface");
     assert(initialize_interface);
     ((void (*)(InterpreterImpl*))initialize_interface)(this);
+
+    this->startup();
+
     // the actual torch loading process is not thread safe, by doing it
     // in the constructor before we have multiple worker threads, then we
     // ensure it doesn't race.

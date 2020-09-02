@@ -175,25 +175,28 @@ __attribute__((constructor)) void init() {
   Py_Initialize();
   PyRun_SimpleString(PY_PATH_STRING);
   PyRun_SimpleString(finder);
-  // mainThreadState = PyEval_SaveThread(); // save our state, release GIL
+}
+
+static void startup() {
+  mainThreadId = std::this_thread::get_id();
   mainThreadState = PyThreadState_Get();
   interpreterState = mainThreadState->interp;
-  mainThreadId = std::this_thread::get_id();
   assert(interpreterState != nullptr);
   PyEval_ReleaseThread(mainThreadState);
 }
 
 static void teardown() {
-  // thread_enter();
-  // TODO this function needs to handle being called from a crashed thread of
-  // during overall shutdown what should the convention be? should not iterate
-  // threadstates here probably. forwards.clear();
+  std::thread::id my_tid = std::this_thread::get_id();
+  assert(my_tid == mainThreadId);
+  PyEval_RestoreThread(mainThreadState);
 
-  // for (auto it = thread_states.begin(); it != thread_states.end(); it++) {
-  // PyThreadState_Clear(it->second);
-  // PyThreadState_Delete(it->second);
-  // }
-  // thread_states.clear();
+  for (auto it = thread_states.begin(); it != thread_states.end(); it++) {
+    if (my_tid != it->first) {
+      PyThreadState_Clear(it->second);
+      PyThreadState_Delete(it->second);
+    }
+  }
+  thread_states.clear();
 
   if (Py_FinalizeEx() < 0) {
     std::cout << "IT BROKE SO WE ARE EXITING\n";

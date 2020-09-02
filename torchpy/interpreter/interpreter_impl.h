@@ -4,6 +4,7 @@
 static size_t load_model(const char* model_file);
 static at::Tensor forward_model(size_t model_id, at::Tensor input);
 static void run_some_python(const char* code);
+static void startup();
 static void teardown();
 static void run_python_file(const char* code);
 
@@ -11,6 +12,7 @@ static void run_python_file(const char* code);
   _(load_model)                       \
   _(forward_model)                    \
   _(run_some_python)                  \
+  _(startup)                          \
   _(teardown)                         \
   _(run_python_file)
 
@@ -19,5 +21,3 @@ struct InterpreterImpl {
   FOREACH_INTERFACE_FUNCTION(DEFINE_POINTER)
 #undef DEFINE_POINTER
 };
-
-static std::atomic<size_t> s_interpreter_id;
