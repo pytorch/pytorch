@@ -23,6 +23,7 @@ from torch.quantization import (
     fuse_modules,
     quantize_jit,
     quantize_dynamic_jit,
+    PlaceholderObserver,
 )
 
 # torch.quantization.quantize_jit
@@ -2928,7 +2929,6 @@ class TestQuantizeDynamicJitOps(QuantizationTestCase):
                 m = torch.jit.trace(module, dummy_inputs)
             else:
                 m = torch.jit.script(module)
-            from torch.quantization import QConfig, PlaceholderObserver
             int4_qconfig = QConfig(activation=PlaceholderObserver.with_args(dtype=torch.float,
                                                                             custom_op_name="embedding_bag_4bit"),
                                    weight=PlaceholderObserver.with_args(custom_op_name="embedding_bag_4bit"))
