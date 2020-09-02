@@ -41,6 +41,7 @@
 #include <torch/csrc/jit/passes/onnx/prepare_inplace_ops_for_onnx.h>
 #include <torch/csrc/jit/passes/onnx/preprocess_for_onnx.h>
 #include <torch/csrc/jit/passes/onnx/scalar_type_analysis.h>
+#include <torch/csrc/jit/passes/onnx/shape_type_inference.h>
 #include <torch/csrc/jit/passes/onnx/unpack_quantized_weights.h>
 #include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/passes/quantization/dedup_module_uses.h>
@@ -185,6 +186,7 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_onnx_prepare_inplace_ops_for_onnx",
           PrepareInplaceOpsForONNX)
+      .def("_jit_pass_onnx_node_shape_type_inference", ONNXShapeTypeInference)
       .def("_jit_pass_fuse", FuseGraph)
       .def(
           "_jit_pass_dce",
@@ -554,6 +556,18 @@ void initJITBindings(PyObject* module) {
       .def("_jit_texpr_fuser_enabled", &tensorExprFuserEnabled)
       .def("_jit_texpr_fallback_allowed", &tensorexpr::fallbackAllowed)
       .def("_jit_texpr_set_fallback_allowed", &tensorexpr::setFallbackAllowed)
+      .def(
+          "_jit_set_te_generate_block_code",
+          [](bool gen_block_code) {
+            using namespace torch::jit::tensorexpr;
+            return getTEGenerateBlockCode() = gen_block_code;
+          })
+      .def(
+          "_jit_get_te_generate_block_code",
+          []() -> bool {
+            using namespace torch::jit::tensorexpr;
+            return getTEGenerateBlockCode();
+          })
       .def(
           "_jit_pass_fuse_tensorexprs",
           [](std::shared_ptr<Graph>& g) { return FuseTensorExprs(g); })
