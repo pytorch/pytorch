@@ -3140,9 +3140,14 @@ class _DistTestBase(object):
             else [None for _ in collectives_object_test_list]
         )
         scatter_list = scatter_list[: int(os.environ["WORLD_SIZE"])]
+        i = 0
+        while len(scatter_list) < int(os.environ["WORLD_SIZE"]):
+            scatter_list.append(scatter_list[i])
+            i+=1
+
         output_obj_list = [None]
         dist.scatter_object_list(output_obj_list, scatter_list, src=src_rank)
-        self.assertEqual(output_obj_list[0], collectives_object_test_list[self.rank])
+        self.assertEqual(output_obj_list[0], collectives_object_test_list[self.rank % len(collectives_object_test_list)])
         # Ensure errors are raised upon incorrect arguments.
         with self.assertRaisesRegex(
             RuntimeError,
