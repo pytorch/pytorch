@@ -121,6 +121,7 @@ class TestForeach(TestCase):
                    torch.tensor([1], dtype=torch.long, device=device)]
         self.assertRaises(RuntimeError, lambda: torch._foreach_add(tensors, 1))
 
+    @deviceCountAtLeast(2)
     def test_add_list_error_cases(self, device):
         tensors1 = []
         tensors2 = []
