@@ -208,7 +208,7 @@ void BlockToONNX(
     auto new_tensor_type = new_type->cast<TensorType>();
     auto old_tensor_type = old_type->cast<TensorType>();
 
-    if (old_tensor_type) {
+    if (new_tensor_type && old_tensor_type) {
       auto type = old_tensor_type;
       if (new_tensor_type && new_tensor_type->sizes().isComplete()) {
         type = type->withSizes(new_tensor_type->sizes().concrete_sizes().value());
@@ -218,6 +218,19 @@ void BlockToONNX(
       }
       return type;
     }
+
+    if (old_tensor_type) {
+      return old_type;
+    }
+
+    auto old_list_type = old_type->cast<ListType>();
+    if (new_tensor_type && old_list_type) {
+      if (new_tensor_type->sizes().isComplete()) {
+        return new_type;
+      }
+      return old_type;
+    }
+
     return new_type;
   };
 
