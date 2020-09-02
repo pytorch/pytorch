@@ -19,7 +19,8 @@ from torch.testing._internal.common_utils import TestCase, to_gpu, freeze_rng_st
     TEST_WITH_ROCM, _assertGradAndGradgradChecks
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import expectedAlertNondeterministic
-from torch.autograd.gradcheck import get_numerical_jacobian, iter_tensors
+from torch.autograd.gradcheck import get_numerical_jacobian, iter_tensors, \
+    gradcheck, gradgradcheck
 from torch.autograd import Variable
 import torch.backends.cudnn
 
@@ -4861,7 +4862,7 @@ class CriterionTest(TestBase):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.should_test_cuda = kwargs.get('test_cuda', True)
-        self.check_forward_only = kwargs.get('check_forward_only', True)
+        self.check_forward_only = kwargs.get('check_forward_only', False)
 
     def _get_target(self):
         return self._get_arg('target', True)
