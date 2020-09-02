@@ -244,21 +244,21 @@ class Quantizer:
         return model
 
     def save_state(self, observed):
-        observed.root._activation_post_process_map = self.activation_post_process_map
-        observed.root._patterns = self.patterns
-        observed.root._qconfig_map = self.qconfig_map
+        observed._activation_post_process_map = self.activation_post_process_map
+        observed._patterns = self.patterns
+        observed._qconfig_map = self.qconfig_map
 
     def restore_state(self, observed):
         err_msg = 'please make sure the model is produced by prepare'
-        assert hasattr(observed.root, '_activation_post_process_map'), 'did not found ' + \
+        assert hasattr(observed, '_activation_post_process_map'), 'did not found ' + \
             '_activation_post_process attribute ' + err_msg
-        assert hasattr(observed.root, '_patterns'), 'did not found ' + \
+        assert hasattr(observed, '_patterns'), 'did not found ' + \
             '_patterns attribute ' + err_msg
-        assert hasattr(observed.root, '_qconfig_map'), 'did not found ' + \
+        assert hasattr(observed, '_qconfig_map'), 'did not found ' + \
             '_qconfig_map attribute ' + err_msg
-        self.activation_post_process_map = observed.root._activation_post_process_map
-        self.patterns = observed.root._patterns
-        self.qconfig_map = observed.root._qconfig_map
+        self.activation_post_process_map = observed._activation_post_process_map
+        self.patterns = observed._patterns
+        self.qconfig_map = observed._qconfig_map
 
     def prepare(self, model, qconfig_dict, inplace=False):
         return self._prepare(model, qconfig_dict, inplace, is_dynamic_quant=False)
@@ -286,11 +286,11 @@ class Quantizer:
         return
 
     def _convert(self, model, inplace=False, debug=False, is_dynamic_quant=False):
+        self.restore_state(model)
         if not inplace:
             print('before copy model.graph:', model.code)
             model = copy.deepcopy(model)
             print('after copy model.graph:', model.code)
-        self.restore_state(model)
         self.is_dynamic_quant = is_dynamic_quant
         # run weight observers before inserting quant dequant nodes
         # for dynamic quantization
