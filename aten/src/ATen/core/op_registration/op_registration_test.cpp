@@ -1692,7 +1692,7 @@ TEST(NewOperatorRegistrationTest, BackendSelectRedispatchesToCPU) {
   m.impl("fn", c10::DispatchKey::BackendSelect, [&](const Tensor& x) {
      backend_generic_called = true;
      auto op = c10::Dispatcher::singleton().findSchema({"test::fn", ""}).value().typed<Tensor (const Tensor&)>();
-     return op.redispatch(c10::DispatchKey::BackendSelect, x);
+     return c10::Dispatcher::singleton().redispatch<Tensor, const Tensor&>(op, c10::DispatchKey::BackendSelect, x);
    });
 
   auto op = Dispatcher::singleton().findSchema({"test::fn", ""});
