@@ -170,7 +170,6 @@ Ops that can autocast to ``float32``
 ``renorm``,
 ``tan``,
 ``triplet_margin_loss``
-``triplet_margin_loss_with_distance``
 
 Ops that promote to the widest input type
 """""""""""""""""""""""""""""""""""""""""
