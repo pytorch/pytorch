@@ -80,8 +80,9 @@ def is_per_tensor(qscheme):
         qscheme == torch.per_tensor_symmetric
 
 def is_per_channel(qscheme):
-    return qscheme == torch.per_channel_affine or \
-        qscheme == torch.per_channel_symmetric
+    return qscheme in [torch.per_channel_affine, \
+                       torch.per_channel_affine_float_qparams, \
+                       torch.per_channel_symettric]
 
 def get_per_tensor_qparams(activation_post_process):
     assert is_per_tensor(activation_post_process.qscheme), 'Only per tensor quantization is supported'
@@ -99,7 +100,7 @@ def get_quantize_op_and_qparams(activation_post_process):
     dtype = activation_post_process.dtype
     if is_per_channel(activation_post_process.qscheme):
         ch_axis = int(activation_post_process.ch_axis)
-        qparams = {'_scale_': scale, '_zero_point_': zero_point, '_axis': ch_axis, '_dtype_': dtype}
+        qparams = {'_scale_': scale, '_zero_point_': zero_point, '_axis_': ch_axis, '_dtype_': dtype}
         quantize_op = torch.quantize_per_channel
     else:
         scale = float(scale)
@@ -108,24 +109,31 @@ def get_quantize_op_and_qparams(activation_post_process):
         quantize_op = torch.quantize_per_tensor
     return quantize_op, qparams
 
-def quantize_node(parent_module, graph, node, activation_post_process):
-    def noattr(module, qparams, i):
+def quantize_node(root_module, graph, node, activation_post_process):
+    ''' Add quantization nodes for given node to graph
+    with the qparams calculated from activation_post_process module
+    e.g. Given input `node` in `node = self.conv(x)`, insert node:
+    `quantized_node = torch.quantize_per_tensor(x, self._scale_0, self._zer_point_0, self._dtype_0)`
+    where self._scale_0, self._zero_point_0 and self._dtype_0 are
+    calculated from `activation_post_process`
+    '''
+    def module_has_qparams_attr_with_index(module, qparams, i):
         for name in qparams.keys():
             if hasattr(module, name + str(i)):
-                return False
-            return True
+                return True
+        return False
 
-    def get_next_i(module, qparams):
-        i = 0
-        while not noattr(module, qparams, i):
-            i += 1
-        return i
+    def get_next_qparams_idx(module, qparams):
+        idx = 0
+        while module_has_qparams_attr_with_index(module, qparams, idx):
+            idx += 1
+        return idx
 
     quantize_op, qparams = get_quantize_op_and_qparams(activation_post_process)
-    i = get_next_i(parent_module, qparams)
+    idx = get_next_qparams_idx(root_module, qparams)
     inputs = [node]
     for key, value in qparams.items():
-        setattr(parent_module, key + str(i), value)
-        qparam_full_path = key + str(i)
+        setattr(root_module, key + str(idx), value)
+        qparam_full_path = key + str(idx)
         inputs.append(graph.create_node('get_param', qparam_full_path))
     return graph.create_node('call_function', quantize_op, tuple(inputs), {})
