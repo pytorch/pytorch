@@ -216,6 +216,12 @@ def verify(model, args, loss_fn=torch.sum, devices=None):
     # should be possible to check if our execution actually obeyed the 'devices'
     # the user provided.
 
+    # TODO: Consider adding a utility function to torch.jit to test
+    # for this case
+    if not isinstance(model, torch._C.CompiledFunction):  # type: ignore
+        raise TypeError(
+            "Cannot verify an uncompiled module.  Add @torch.jit.compile to compile it"
+        )
     is_module = isinstance(model, Module)
 
     if not isinstance(args, tuple):
