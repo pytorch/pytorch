@@ -77,27 +77,6 @@ bool can_use_fast_route(TensorList tensors, Scalar scalar) {
   return true;
 }
 
-bool can_use_fast_route(TensorList tensors) {
-  TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
-  auto expected_device = tensors[0].device();
-
-   for (auto t : tensors) {
-    if (t.layout() != at::kStrided) {
-      return false;
-    }
-
-    if (!t.is_non_overlapping_and_dense()) {
-      return false;
-    }
-
-    if (t.device() != expected_device) {
-      return false;
-    }
-  }
-
-  return true;
-}
-
 bool can_use_fast_route(TensorList tensors1, TensorList tensors2) {
   auto expected_device = tensors1[0].device();
 
@@ -125,6 +104,27 @@ bool can_use_fast_route(TensorList tensors1, TensorList tensors2) {
 
     if (!tensors1[i].is_non_overlapping_and_dense() || 
         !tensors2[i].is_non_overlapping_and_dense()) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+bool can_use_fast_route(TensorList tensors) {
+  TORCH_CHECK(tensors.size() > 0, "Tensor list must have at least one tensor.");
+  auto expected_device = tensors[0].device();
+
+   for (auto t : tensors) {
+    if (t.layout() != at::kStrided) {
+      return false;
+    }
+
+    if (!t.is_non_overlapping_and_dense()) {
+      return false;
+    }
+
+    if (t.device() != expected_device) {
       return false;
     }
   }
