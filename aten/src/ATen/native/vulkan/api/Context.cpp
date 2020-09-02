@@ -9,11 +9,11 @@ namespace api {
 namespace {
 
 struct Configuration final {
-#ifndef DEBUG
-  static constexpr bool kEnableValidationLayers = false;
-#else
+// #ifndef DEBUG
+//   static constexpr bool kEnableValidationLayers = false;
+// #else
   static constexpr bool kEnableValidationLayers = true;
-#endif
+// #endif
 };
 
 VKAPI_ATTR VkBool32 VKAPI_CALL debug_report_callback_fn(
@@ -173,11 +173,11 @@ VkPhysicalDevice acquire_physical_device(const VkInstance instance) {
   return devices[0];
 }
 
-VkPhysicalDeviceLimits query_physical_device_physical_device_limits(
+VkPhysicalDeviceProperties query_physical_device_physical_device_properties(
     const VkPhysicalDevice physical_device) {
   VkPhysicalDeviceProperties physical_device_properties{};
   vkGetPhysicalDeviceProperties(physical_device, &physical_device_properties);
-  return physical_device_properties.limits;
+  return physical_device_properties;
 }
 
 uint32_t query_compute_queue_family_index(const VkPhysicalDevice physical_device) {
@@ -254,7 +254,7 @@ Context::Context(const bool enable_validation_layers)
           create_debug_report_callback(instance(), enable_validation_layers),
           Debug(instance())),
       physical_device_(acquire_physical_device(instance())),
-      physical_device_limits_(query_physical_device_physical_device_limits(physical_device())),
+      physical_device_properties_(query_physical_device_physical_device_properties(physical_device())),
       compute_queue_family_index_(query_compute_queue_family_index(physical_device())),
       device_(create_device(physical_device(), compute_queue_family_index_), &VK_DELETER(Device)),
       queue_(acquire_queue(device(), compute_queue_family_index_)),
