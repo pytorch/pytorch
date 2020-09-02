@@ -1205,6 +1205,12 @@ if(USE_ROCM)
   target_include_directories(torch_hip INTERFACE $<INSTALL_INTERFACE:include>)
 endif()
 
+if(BUILD_STATIC_RUNTIME_BENCHMARK)
+  add_subdirectory(${TORCH_ROOT}/benchmarks/static_runtime ${PROJECT_BINARY_DIR}/bin)
+  add_executable(static_runtime_bench "${STATIC_RUNTIME_BENCHMARK_SRCS}")
+  target_link_libraries(static_runtime_bench torch_library benchmark)
+endif()
+
 if(BUILD_MOBILE_BENCHMARK)
   foreach(benchmark_src ${ATen_MOBILE_BENCHMARK_SRCS})
     get_filename_component(benchmark_name ${benchmark_src} NAME_WE)
