@@ -93,9 +93,9 @@ def get_per_tensor_qparams(activation_post_process):
     return scale, zero_point, dtype
 
 def get_quantize_op_and_qparams(activation_post_process):
-   ''' Given an activation_post_process module,
-   return quantize op(e.g. quantize_per_tensor) and a dictionary
-   of extracted qparams from the module
+    ''' Given an activation_post_process module,
+    return quantize op(e.g. quantize_per_tensor) and a dictionary
+    of extracted qparams from the module
     '''
     scale, zero_point = activation_post_process.calculate_qparams()
     dtype = activation_post_process.dtype
