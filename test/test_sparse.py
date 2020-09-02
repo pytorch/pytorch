@@ -1619,6 +1619,53 @@ class TestSparse(TestCase):
         test_shape([0, 3, 4], [3, 4, 5, 6], [0])
         test_shape([2, 3, 4], [0, 4, 5, 6], [9, 12])
 
+    def test_empty_like(self):
+        # tests https://github.com/pytorch/pytorch/issues/43699
+
+        def _test_empty_like(sparse_tensor):
+            result = torch.empty_like(input_coalesced, memory_format=torch.preserve_format)
+            self.assertEqual(result.shape, input_coalesced.shape)
+            self.assertEqual(result.dtype, input_coalesced.dtype)
+            self.assertEqual(result.device, input_coalesced.device)
+            self.assertEqual(result.sparse_dim(), input_coalesced.sparse_dim())
+            self.assertEqual(result.dense_dim(), input_coalesced.dense_dim())
+
+        input_coalesced = torch.sparse_coo_tensor(
+            indices=torch.tensor([[0, 1, 2]]),
+            values=torch.tensor([3.0, -4.0, 5.0]),
+            size=[3, ],
+            device=self.device
+        )
+        _test_empty_like(input_coalesced)
+        
+        # hybrid sparse input
+        input_coalesced = torch.sparse_coo_tensor(
+            indices=torch.tensor([[1, 3], [2, 4]]),
+            values=torch.tensor([[-1.0, 3.0], [-5.0, 7.0]]),
+            size=[4, 5, 2],
+            device=self.device
+        )
+        _test_empty_like(input_coalesced)
+        
+        if self.is_uncoalesced:
+            # test uncoalesced input
+            input_uncoalesced = torch.sparse_coo_tensor(
+                indices=torch.tensor([[0], [1], [2], [0], [1], [2]]).transpose(1, 0),
+                values=torch.tensor([2.0, -3.0, -4.0, 1.0, -1.0, 1.5]),
+                size=[3, ],
+                device=self.device
+            )
+            _test_empty_like(input_uncoalesced)
+
+            # test on empty sparse tensor
+            input_uncoalesced = torch.sparse_coo_tensor(
+                indices=torch.zeros([2, 0]),
+                values=torch.zeros([0, 5, 5, 5, 5, 5, 5, 0]),
+                size=[0, 0, 5, 5, 5, 5, 5, 5, 0],
+                device=self.device
+            )
+            _test_empty_like(input_uncoalesced)
+
     def _test_narrow(self, input, narrow_args):
         expected = input.to_dense().narrow(*narrow_args)
         self.assertEqual(expected, input.narrow_copy(*narrow_args).to_dense())
