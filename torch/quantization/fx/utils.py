@@ -80,8 +80,8 @@ def is_per_tensor(qscheme):
         qscheme == torch.per_tensor_symmetric
 
 def is_per_channel(qscheme):
-    return qscheme in [torch.per_channel_affine, \
-                       torch.per_channel_affine_float_qparams, \
+    return qscheme in [torch.per_channel_affine,
+                       torch.per_channel_affine_float_qparams,
                        torch.per_channel_symettric]
 
 def get_per_tensor_qparams(activation_post_process):
@@ -92,10 +92,11 @@ def get_per_tensor_qparams(activation_post_process):
     dtype = activation_post_process.dtype
     return scale, zero_point, dtype
 
-# given an activation_post_process module,
-# return quantize op(e.g. quantize_per_tensor) and a dictionary
-# of extracted qparams from the module
 def get_quantize_op_and_qparams(activation_post_process):
+   ''' Given an activation_post_process module,
+   return quantize op(e.g. quantize_per_tensor) and a dictionary
+   of extracted qparams from the module
+    '''
     scale, zero_point = activation_post_process.calculate_qparams()
     dtype = activation_post_process.dtype
     if is_per_channel(activation_post_process.qscheme):
