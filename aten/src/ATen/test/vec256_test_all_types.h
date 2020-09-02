@@ -16,10 +16,13 @@
 #define CACHE_LINE 32
 #if defined(__GNUC__)
 #define CACHE_ALIGN __attribute__((aligned(CACHE_LINE)))
+#define not_inline __attribute__((noinline))
 #elif defined(_WIN32)
 #define CACHE_ALIGN __declspec(align(CACHE_LINE))
+#define not_inline __declspec(noinline) 
 #else
 CACHE_ALIGN #define
+#define not_inline
 #endif
 
 #undef NAME_INFO
@@ -273,7 +276,6 @@ std::enable_if_t<!std::is_floating_point<T>::value, bool> check_both_inf(T x,
     T y) {
     return false;
 }
-
 
 template<class T> struct is_complex : std::false_type {};
 
@@ -739,7 +741,9 @@ public:
     
     std::string getDetail(int index) const
     {
+        using UVT = UvalueType<T>;
         std::stringstream stream;
+        stream.precision(std::numeric_limits<UVT>::max_digits10);
         stream << "Failure Details:\n";
         stream << additionalInfo << "\n";
         if (hasSeed)
@@ -947,7 +951,6 @@ void test_binary(
     }
 }
 
-
 template< typename T, typename Op1, typename Op2, typename Filter = std::nullptr_t>
 void test_ternary(
     std::string testNameInfo,
@@ -1010,6 +1013,26 @@ T func_cmp(Op call, T v0, T v1) {
     return bit_cast<T>(ret);
 }
 
+struct PreventFma
+{
+    not_inline float sub(float a, float b)
+    {
+        return a - b;
+    }
+    not_inline double sub(double a, double b)
+    {
+        return a - b;
+    }
+    not_inline float add(float a, float b)
+    {
+        return a + b;
+    }
+    not_inline double add(double a, double b)
+    {
+        return a + b;
+    }
+};
+
 template <typename T>
 std::enable_if_t<!is_complex<T>::value, T> local_log2(T x) {
     return std::log2(x);
@@ -1064,8 +1087,14 @@ std::enable_if_t<is_complex<Complex<T>>::value, Complex<T>> local_multiply(Compl
     rr = fma(x_imag, neg_imag, rr);
     ii = fma(x_real, y_imag, ii);
 #else
-    T rr = x_real * y_real - x_imag * y_imag;
-    T ii = x_real * y_imag + x_imag * y_real;
+    // replicate order
+    PreventFma noFma;
+    T ac = x_real * y_real;
+    T bd = x_imag * y_imag;
+    T ad = x_real * y_imag;
+    T bc = x_imag * (-y_real);
+    T rr = noFma.sub(ac, bd);
+    T ii = noFma.sub(ad, bc); 
 #endif
     return Complex<T>(rr, ii);
 #endif
@@ -1184,7 +1213,6 @@ int32_t widening_subtract(T val, T b) {
     return static_cast<int32_t>(val) - static_cast<int32_t>(b);
 }
 
-
 //default testing case
 template<typename T>
 T getDefaultTolerance() {
@@ -1256,7 +1284,6 @@ TestingCase<T> createDefaultBinaryTestCase(TestSeed seed= TestSeed(), bool bitwi
     }
     return testCase;
 }
-
 
 template<typename T>
 TestingCase<T> createDefaultTernaryTestCase(TestSeed seed = TestSeed(), bool bitwise = false, bool checkWithTolerance = false, size_t trials = 0) {
