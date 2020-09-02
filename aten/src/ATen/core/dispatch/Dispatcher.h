@@ -412,18 +412,20 @@ inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const 
   const auto& kernel = entry.lookup(dispatchKey);
 
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
-  // using already existing stack to record function execution in observers
-  at::RecordFunction guard(at::RecordScope::FUNCTION);
-  if (C10_UNLIKELY(guard.active)) {
-    if (shouldRecord(dispatchKey) && entry.isObserved()) {
-      int64_t seq_num = -1;
-      if (isIncludedInAlias(dispatchKey, DispatchKey::Autograd) && at::GradMode::is_enabled()) {
-        seq_num = at::sequence_number::peek();
-      }
-      if (guard.needs_inputs) {
-        guard.before(op.schema().name(), *stack, seq_num);
-      } else {
-        guard.before(op.schema().name(), seq_num);
+  if (Profile) {
+    // using already existing stack to record function execution in observers
+    at::RecordFunction guard(at::RecordScope::FUNCTION);
+    if (C10_UNLIKELY(guard.active)) {
+      if (shouldRecord(dispatchKey) && entry.isObserved()) {
+        int64_t seq_num = -1;
+        if (isIncludedInAlias(dispatchKey, DispatchKey::Autograd) && at::GradMode::is_enabled()) {
+          seq_num = at::sequence_number::peek();
+        }
+        if (guard.needs_inputs) {
+          guard.before(op.schema().name(), *stack, seq_num);
+        } else {
+          guard.before(op.schema().name(), seq_num);
+        }
       }
     }
   }
