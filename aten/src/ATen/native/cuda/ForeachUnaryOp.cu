@@ -1,6 +1,6 @@
 #include <ATen/Dispatch.h>
-#include <ATen/native/cuda/ForeachUtils.cuh>
-#include <ATen/native/cuda/MultiTensorApply.cuh>
+#include <ATen/native/ForeachUtils.h>
+#include <ATen/native/cuda/ForeachFunctors.cuh>
 
 namespace at { namespace native {
 
@@ -31,55 +31,33 @@ void foreach_unary_op_(TensorList tensors) {
     });
 }
 
-template<typename T>
-struct Sqrt {
-    __device__ T operator()(T t) const { return std::sqrt(t); }
-};
-
-template<typename T>
-struct Exp {
-    __device__ T operator()(T t) const { return std::exp(t); }
-};
-
-std::vector<Tensor> foreach_tensor_exp_cuda(TensorList tensors) {
-    check_foreach_api_restrictions(tensors);
-
-    if (!check_fast_route(tensors)) {
-        return at::native::foreach_tensor_exp_slow(tensors);
-    }
-    
-    return foreach_unary_op<Exp>(tensors);
+#define FOREACH_UNARY_OP(NAME, NAME1)                                          \
+template<typename T>                                                    \
+struct NAME1 {                                                           \
+    __device__ T operator()(T t) const { return std::NAME(t); }         \
+};                                                                      \
+                                                                        \
+std::vector<Tensor> foreach_tensor_##NAME##_cuda(TensorList tensors) {  \
+    check_foreach_api_restrictions(tensors);                            \
+                                                                        \
+    if (!can_use_fast_route(tensors)) {                                 \
+        return at::native::foreach_tensor_##NAME##_slow(tensors);       \
+    }                                                                   \
+                                                                        \
+    return foreach_unary_op<NAME1>(tensors);                             \
+}                                                                       \
+                                                                        \
+void foreach_tensor_##NAME##_cuda_(TensorList tensors) {                \
+    check_foreach_api_restrictions(tensors);                            \
+                                                                        \
+    if (!can_use_fast_route(tensors)) {                                 \
+        return at::native::foreach_tensor_##NAME##_slow_(tensors);      \
+    }                                                                   \
+                                                                        \
+    foreach_unary_op_<NAME1>(tensors);                                   \
 }
 
-void foreach_tensor_exp_cuda_(TensorList tensors) {
-    check_foreach_api_restrictions(tensors);
-
-    if (!check_fast_route(tensors)) {
-        return at::native::foreach_tensor_exp_slow_(tensors);
-    }
-
-    foreach_unary_op_<Exp>(tensors);
-}
-
-std::vector<Tensor> foreach_tensor_sqrt_cuda(TensorList tensors) {
-    check_foreach_api_restrictions(tensors);
-
-    if (!check_fast_route(tensors)) {
-        return at::native::foreach_tensor_sqrt_slow(tensors);
-    }
-
-    return foreach_unary_op_<Sqrt>(tensors);
-
-}
-
-void foreach_tensor_sqrt_cuda_(TensorList tensors) {
-    check_foreach_api_restrictions(tensors);
-
-    if (!check_fast_route(tensors)) {
-        return at::native::foreach_tensor_sqrt_slow_(tensors);
-    }
-
-    foreach_unary_op_<Sqrt>(tensors);
-}
+FOREACH_UNARY_OP(exp, Exp);
+FOREACH_UNARY_OP(sqrt, Sqrt);
 
 }} // namespace at::native

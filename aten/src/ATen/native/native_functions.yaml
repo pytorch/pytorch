@@ -5885,7 +5885,7 @@
     CPU: foreach_tensor_exp_slow
     CUDA: foreach_tensor_exp_cuda
 
-- func: _foreach_exp_(Tensor[](a!) self) -> ()
+- func: _foreach_exp_(Tensor(a!)[] self) -> ()
   device_guard: False
   variants: function
   dispatch:
@@ -5899,7 +5899,7 @@
     CPU: foreach_tensor_sqrt_slow
     CUDA: foreach_tensor_sqrt_cuda
 
-- func: _foreach_sqrt_(Tensor[](a!) self) -> ()
+- func: _foreach_sqrt_(Tensor(a!)[] self) -> ()
   device_guard: False
   variants: function
   dispatch:
