@@ -68,3 +68,11 @@ add_executable(interpreter_test ${INTERPRETER_TEST_SOURCES})
 target_include_directories(interpreter_test PRIVATE ${INTERPRETER_DIR})
 target_link_libraries(interpreter_test PUBLIC gtest dl shm torch)
 target_link_libraries(interpreter_test PUBLIC protobuf::libprotobuf-lite)
+
+set(INTERPRETER_APP_SOURCES
+  ${INTERPRETER_DIR}/app_main.cpp
+)
+add_executable(interpreter_app ${INTERPRETER_APP_SOURCES})
+target_include_directories(interpreter_app PRIVATE ${INTERPRETER_DIR})
+target_link_libraries(interpreter_app PUBLIC dl shm torch)
+target_link_libraries(interpreter_app PUBLIC protobuf::libprotobuf-lite)
