@@ -230,14 +230,14 @@ class TORCH_API ProcessGroupAgent : public RpcAgent {
   // Lock and shared ptr to currently pending work, set in listenloop() and
   // interruptible in shutdown().
   std::mutex recvWorkMutex_;
-  std::shared_ptr<c10d::ProcessGroup::Work> recvWork_;
+  c10::intrusive_ptr<c10d::ProcessGroup::Work> recvWork_;
   // Map of dst rank to current oustanding sends that we are waiting on. In the
   // case of a call to ::shutdown() while we are still waiting on these sends,
   // the pending sends contained in this map will be aborted, allowing the
   // waiting thread to be unblocked.
   std::unordered_map<
       worker_id_t,
-      std::set<std::shared_ptr<c10d::ProcessGroup::Work>>>
+      std::set<c10::intrusive_ptr<c10d::ProcessGroup::Work>>>
       currentPendingSends_;
   // Lock to serialize access to the above map.
   std::mutex pendingSendMutex_;

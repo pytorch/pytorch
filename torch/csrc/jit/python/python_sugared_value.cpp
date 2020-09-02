@@ -404,7 +404,7 @@ std::shared_ptr<SugaredValue> SugaredDict::attr(
   TORCH_INTERNAL_ASSERT(false);
 }
 
-std::shared_ptr<SugaredEnumClass> SugaredEnumClass::create(
+std::shared_ptr<SugaredEnumClass> createSugaredEnumClassFromObj(
     const py::object& obj,
     Function& m,
     const SourceRange& loc) {
@@ -413,43 +413,7 @@ std::shared_ptr<SugaredEnumClass> SugaredEnumClass::create(
   TORCH_INTERNAL_ASSERT(!annotation_type.is_none());
   auto type = py::cast<TypePtr>(annotation_type);
   auto enum_type = type->expect<EnumType>();
-
-  std::map<std::string, SugaredValuePtr> enum_values;
-  auto enum_values_list = py::cast<py::list>(obj);
-
-  auto enum_value_ivalues = c10::impl::GenericList(enum_type);
-  for (auto enum_value : enum_values_list) {
-    auto enum_name = enum_value.attr("name").cast<std::string>();
-    auto enum_sugared_value =
-        toSugaredValue(py::reinterpret_steal<py::object>(enum_value), m, loc);
-    enum_values.insert(std::make_pair(enum_name, enum_sugared_value));
-    enum_value_ivalues.push_back(toIValue(enum_value, enum_type));
-  }
-
-  IValue enum_value_list_ivalues(enum_value_ivalues);
-  auto enum_values_list_constant = std::make_shared<SimpleValue>(
-      m.graph()->insertConstant(enum_value_list_ivalues, loc));
-
-  return std::make_shared<SugaredEnumClass>(
-      enum_values, enum_values_list_constant, enum_type);
-}
-
-std::shared_ptr<SugaredValue> SugaredEnumClass::attr(
-    const SourceRange& loc,
-    Function& /*m*/,
-    const std::string& field) {
-  auto it = enum_values_.find(field);
-  if (it == enum_values_.end()) {
-    throw ErrorReport(loc) << enum_type_->repr_str() << "'"
-                           << " has no attribute '" << field << "'";
-  }
-  return it->second;
-}
-
-SugaredValuePtr SugaredEnumClass::iter(
-    const SourceRange& /*loc*/,
-    Function& /*m*/) {
-  return enum_values_list_constant_;
+  return std::make_shared<SugaredEnumClass>(enum_type);
 }
 
 // helper function for instantiating a SugaredValue from an IValue
@@ -929,7 +893,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   }
 
   if (isEnumClass(obj)) {
-    return SugaredEnumClass::create(obj, m, loc);
+    return createSugaredEnumClassFromObj(obj, m, loc);
   }
 
   auto enum_type = py::module::import("enum").attr("Enum");
@@ -946,6 +910,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     auto qualname = c10::QualifiedName(qualifiedName);
 
     if (auto classType = pyCu->get_class(qualname)) {
+      LOG(ERROR) << "pyobj is class" << classType->repr_str();
       return std::make_shared<PythonClassValue>(classType, obj);
     } else {
       // If we can't get the source code for the type, it's implemented in C and
@@ -982,6 +947,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
       return std::make_shared<FunctionValue>(std::move(compiled_fns));
     }
 
+    LOG(ERROR) << "trying to recursively compile func: " << obj;
     auto compiled_fn = py::module::import("torch.jit._recursive")
                            .attr("try_compile_fn")(obj, loc);
     if (auto callee = as_function(compiled_fn)) {

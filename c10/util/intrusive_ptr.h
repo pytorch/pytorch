@@ -518,6 +518,12 @@ class weak_intrusive_ptr final {
     return operator=<TTarget, NullType>(rhs);
   }
 
+  weak_intrusive_ptr& operator=(const intrusive_ptr<TTarget, NullType>& rhs) & noexcept {
+    weak_intrusive_ptr tmp(rhs);
+    swap(tmp);
+    return *this;
+  }
+
   template <class From, class FromNullType>
       weak_intrusive_ptr& operator=(
           const weak_intrusive_ptr<From, NullType>& rhs) & {

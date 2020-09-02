@@ -6,7 +6,7 @@
 struct EmbeddingPackedParamsBase : public torch::jit::CustomClassHolder {
   virtual at::Tensor embeddingbag_byte(
     const at::Tensor& indices,
-    const at::Tensor& offsets,
+    const c10::optional<at::Tensor>& offsets,
     bool sparse,
     const c10::optional<at::Tensor>& per_sample_weights_,
     bool include_last_offset) = 0;

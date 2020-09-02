@@ -1,8 +1,10 @@
+#include <bits/stdint-intn.h>
 #include <torch/csrc/python_headers.h>
 
 #include <c10d/FileStore.hpp>
 #include <c10d/HashStore.hpp>
 #include <c10d/ProcessGroup.hpp>
+#include "c10/util/intrusive_ptr.h"
 
 #ifdef USE_C10D_GLOO
 #include <c10d/ProcessGroupGloo.hpp>
@@ -50,6 +52,9 @@ std::vector<std::string> split(char separator, const std::string& string) {
 
 template <typename T>
 using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
+
+template <typename T>
+using intrusive_ptr_class_ = py::class_<T, c10::intrusive_ptr<T>>;
 
 // PythonStore is a pybind11 trampoline class to allow a Python
 // class to inherit from c10d.Store and implement its interface.
@@ -181,7 +186,23 @@ PyObject* c10d_init(PyObject* _unused) {
           [](::c10d::Reducer& reducer, const torch::autograd::Variable& output)
               -> void { reducer.prepare_for_backward({output}); },
           py::call_guard<py::gil_scoped_release>())
-      .def("get_backward_stats", &::c10d::Reducer::get_backward_stats);
+      .def("get_backward_stats", &::c10d::Reducer::get_backward_stats)
+      .def("_rebuild_buckets", &::c10d::Reducer::rebuild_buckets)
+      .def(
+          "get_bucket_tensors",
+          &::c10d::Reducer::get_bucket_tensors,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_push_all_rebuilt_params",
+          &::c10d::Reducer::push_rebuilt_params_for_all_indices,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_set_forward_pass_work_handle",
+          &::c10d::Reducer::set_forward_pass_work_handle,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_get_local_used_maps",
+          &::c10d::Reducer::get_local_used_maps_on_device);
 
   py::enum_<::c10d::ReduceOp>(module, "ReduceOp", R"(
 An enum-like class for available reduction operations: ``SUM``, ``PRODUCT``,
@@ -738,21 +759,24 @@ They are used in specifying strategies for reduction collectives, e.g.,
                 >>> ddp_model._register_comm_hook(state = None, hook = allreduce)
 
             .. warning ::
-                ``get_future`` API supports only NCCL backend. The ``torch._C.Future`` object
-                returned by this API can be used in ``DistributedDataParallel._register_comm_hook``,
-                but it is subject to some subtle differences compared to ``torch.futures.Future``
-                due to compromises made for performance reasons.
+                ``get_future`` API supports only NCCL backend and single-process single-device mode.
+                The ``torch._C.Future`` object returned by this API can be used in
+                ``DistributedDataParallel._register_comm_hook``, but it is subject to some subtle
+                differences compared to ``torch.futures.Future`` due to compromises made for performance
+                reasons.
 
                 In the example above, ``allreduce`` work will be done on GPU using NCCL backend,
                 ``fut.wait()`` will return after synchronizing the appropriate NCCL streams
                 with PyTorch's default device streams to ensure we can have asynchronous CUDA
-                execution and it does not wait for the entire operation to complete on GPU.
-                If ``NCCL_BLOCKING_WAIT`` is enabled, in that case, it would wait for the entire
-                operation to complete before returning. In addition, if a callback function was
-                added by ``fut.then()``, it will wait until WorkNCCL's wait returns and invoke
-                the callback inline.
+                execution and it does not wait for the entire operation to complete on GPU. Note that
+                ``FutureNCCL``  does not support ``NCCL_BLOCKING_WAIT`` flag or NCCL's ``barrier()``.
+                In addition, if a callback function was added by ``fut.then()``, it will wait until
+                ``WorkNCCL``'s NCCL streams synchronize with ``ProcessGroupNCCL``'s dedicated callback
+                stream and invoke the callback inline after running the callback on the callback stream.
+                ``fut.then()`` will return another ``FutureNCCL`` that holds the return value of the
+                callback and a ``CUDAEvent`` that recorded the callback stream.
 
-                Note that ``fut.done()`` returns if the work was completed on the GPU.
+                Note that ``fut.done()`` returns if the enire operation is completed on the GPU.
            )");
 
   module.def(
@@ -771,12 +795,16 @@ They are used in specifying strategies for reduction collectives, e.g.,
       // function as a c10::ArrayRef.
       [](std::shared_ptr<::c10d::ProcessGroup> process_group,
          std::vector<at::Tensor> tensors, // NOLINT
-         size_t buffer_size) {
-        broadcast_coalesced(std::move(process_group), tensors, buffer_size);
+         size_t buffer_size,
+         int rank) {
+        broadcast_coalesced(
+            std::move(process_group), tensors, buffer_size, rank);
       },
       py::arg("process_group"),
       py::arg("tensors"),
       py::arg("buffer_size"),
+      // The source of truth rank to broadcast the tensors from.
+      py::arg("src") = 0,
       py::call_guard<py::gil_scoped_release>());
 
   module.def(
@@ -835,6 +863,30 @@ They are used in specifying strategies for reduction collectives, e.g.,
 
   Py_RETURN_TRUE;
 }
+
+// TorchBind bindings
+static auto store_torchbind =
+  torch::class_<::c10d::Store>("dist_c10d", "Store");
+
+static auto fileStore_torchbind =
+  torch::class_<::c10d::FileStore>("dist_c10d", "FileStore")
+    .def(torch::init<std::string, int64_t>());
+
+// Torchbind the ProcessGroup to make it available in TorchScript
+static auto processGroupWork_torchbind =
+  torch::class_<::c10d::ProcessGroup::Work>("dist_c10d", "Work")
+    .def(torch::init<>())
+    .def("is_completed", &::c10d::ProcessGroup::Work::isCompleted)
+    .def("is_success", &::c10d::ProcessGroup::Work::isSuccess)
+    .def("source_rank", &::c10d::ProcessGroup::Work::sourceRank)
+    .def("synchronize", &::c10d::ProcessGroup::Work::synchronize);
+
+static auto processGroup_torchbind =
+  torch::class_<::c10d::ProcessGroup>("dist_c10d", "ProcessGroup");
+
+static auto processGroupGloo_torchbind =
+  torch::class_<::c10d::ProcessGroupGloo>("dist_c10d", "ProcessGroupGloo")
+    .def(torch::init<std::shared_ptr<::c10d::Store>, )
 
 } // namespace
 

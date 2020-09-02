@@ -41,6 +41,7 @@
 #include <torch/csrc/jit/passes/onnx/prepare_inplace_ops_for_onnx.h>
 #include <torch/csrc/jit/passes/onnx/preprocess_for_onnx.h>
 #include <torch/csrc/jit/passes/onnx/scalar_type_analysis.h>
+#include <torch/csrc/jit/passes/onnx/shape_type_inference.h>
 #include <torch/csrc/jit/passes/onnx/unpack_quantized_weights.h>
 #include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/passes/quantization/dedup_module_uses.h>
@@ -185,6 +186,7 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_onnx_prepare_inplace_ops_for_onnx",
           PrepareInplaceOpsForONNX)
+      .def("_jit_pass_onnx_node_shape_type_inference", ONNXShapeTypeInference)
       .def("_jit_pass_fuse", FuseGraph)
       .def(
           "_jit_pass_dce",
@@ -258,11 +260,14 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_fold_convbn", &FoldConvBatchNorm)
       .def(
           "_freeze_module",
-          [](Module& module, std::vector<std::string>& preservedAttrs) {
-            return freeze_module(module, preservedAttrs);
+          [](Module& module,
+             std::vector<std::string>& preservedAttrs,
+             bool freezeInterfaces) {
+            return freeze_module(module, preservedAttrs, freezeInterfaces);
           },
           py::arg("module"),
-          py::arg("preservedAttrs") = std::vector<std::string>())
+          py::arg("preservedAttrs") = std::vector<std::string>(),
+          py::arg("freezeInterfaces") = true)
       .def("_jit_pass_fuse_linear", &FuseLinear)
       .def(
           "_jit_pass_fuse_add_relu",
@@ -552,6 +557,18 @@ void initJITBindings(PyObject* module) {
       .def("_jit_texpr_fallback_allowed", &tensorexpr::fallbackAllowed)
       .def("_jit_texpr_set_fallback_allowed", &tensorexpr::setFallbackAllowed)
       .def(
+          "_jit_set_te_generate_block_code",
+          [](bool gen_block_code) {
+            using namespace torch::jit::tensorexpr;
+            return getTEGenerateBlockCode() = gen_block_code;
+          })
+      .def(
+          "_jit_get_te_generate_block_code",
+          []() -> bool {
+            using namespace torch::jit::tensorexpr;
+            return getTEGenerateBlockCode();
+          })
+      .def(
           "_jit_pass_fuse_tensorexprs",
           [](std::shared_ptr<Graph>& g) { return FuseTensorExprs(g); })
       .def(
@@ -562,6 +579,16 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_pass_remove_dropout",
           [](script::Module& module) { return removeDropout(module); })
+      .def(
+          "_jit_pass_transform_conv1d_to_conv2d",
+          [](std::shared_ptr<Graph>& graph) {
+            return transformConv1dToConv2d(graph);
+          })
+      .def(
+          "_jit_pass_transform_conv1d_to_conv2d",
+          [](script::Module& module) {
+            return transformConv1dToConv2d(module);
+          })
       .def(
           "_jit_pass_insert_prepacked_ops",
           [](std::shared_ptr<Graph>& graph) {
@@ -972,6 +999,10 @@ void initJITBindings(PyObject* module) {
           "done",
           // Intentionally not releasing GIL
           &PythonFutureWrapper::done)
+      .def(
+          "value",
+          &PythonFutureWrapper::value,
+          py::call_guard<py::gil_scoped_release>())
       .def(
           "wait",
           &PythonFutureWrapper::wait,

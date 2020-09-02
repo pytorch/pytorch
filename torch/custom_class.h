@@ -118,6 +118,14 @@ class class_ {
     return *this;
   }
 
+  template <typename Func>
+  class_& def_static(std::string name, Func f) {
+    // auto wrapped_f = detail::wrap_func<CurClass, Func>(std::move(f));
+    std::string copy_name = name;
+    defineMethod(std::move(name), std::move(f));
+    LOG(ERROR) << "ClassType: " << classTypePtr->repr_str() << " def_static, has method?" << classTypePtr->hasMethod(copy_name);
+    return *this;
+  }
   /// This is an unsafe method registration API added for adding custom JIT backend support via custom
   /// C++ classes. It is not for general purpose use.
   class_& _def_unboxed(std::string name, std::function<void(jit::Stack&)> func, c10::FunctionSchema schema) {
@@ -137,14 +145,18 @@ class class_ {
   ///
   /// Currently, both the `get_state` and `set_state` callables must be
   /// C++ lambda expressions. They should have the following signatures,
-  /// where `CurClass` is the class you're registering and `T` is some object
+  /// where `CurClass` is the class you're registering and `T1` is some object
   /// that encapsulates the state of the object.
   ///
-  ///     __getstate__(intrusive_ptr<CurClass>) -> T
-  ///     __setstate__(T) -> intrusive_ptr<CurClass>
+  ///     __getstate__(intrusive_ptr<CurClass>) -> T1
+  ///     __setstate__(T2) -> intrusive_ptr<CurClass>
   ///
-  /// `T` must be an object that is convertable to IValue by the same rules
+  /// `T1` must be an object that is convertable to IValue by the same rules
   /// for custom op/method registration.
+  ///
+  /// For the common case, T1 == T2. T1 can also be a subtype of T2. An
+  /// example where it makes sense for T1 and T2 to differ is if __setstate__
+  /// handles legacy formats in a backwards compatible way.
   ///
   /// Example:
   ///
@@ -207,16 +219,17 @@ class class_ {
         getstate_schema.returns().size() == 1,
         "__getstate__ should return exactly one value for serialization. Got: ",
         format_getstate_schema());
+
     auto ser_type = getstate_schema.returns().at(0).type();
     auto setstate_schema = classTypePtr->getMethod("__setstate__").getSchema();
     auto arg_type = setstate_schema.arguments().at(1).type();
     TORCH_CHECK(
-        (*arg_type == *ser_type),
-        "__setstate__'s argument should be the same type as the "
-        "return value of __getstate__. Got ",
-        arg_type->repr_str(),
+        ser_type->isSubtypeOf(arg_type),
+        "__getstate__'s return type should be a subtype of "
+        "input argument of __setstate__. Got ",
+        ser_type->repr_str(),
         " but expected ",
-        ser_type->repr_str());
+        arg_type->repr_str());
 
     return *this;
   }
