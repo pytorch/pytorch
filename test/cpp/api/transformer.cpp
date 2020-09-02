@@ -5,7 +5,6 @@
 #include <test/cpp/api/support.h>
 
 using namespace torch::nn;
-using namespace torch::test;
 
 struct TransformerTest : torch::test::SeedingFixture {};
 
@@ -163,14 +162,17 @@ void transformer_decoder_layer_test_helper(bool is_cuda){
   torch::TensorOptions tensor_options = torch::TensorOptions()
     .dtype(torch::kFloat32).device(device);
 
-  TransformerDecoderLayer model =
-    get_a_test_layer<TransformerDecoderLayer, TransformerDecoderLayerOptions>(tensor_options);
+  TransformerDecoderLayer model = get_a_test_layer<
+    TransformerDecoderLayer,
+    TransformerDecoderLayerOptions>(tensor_options);
 
   // deterministic input
-  at::Tensor decoder_input = torch::tensor({{{20, 30, 40, 50}}}, tensor_options);
-  at::Tensor memory_input = torch::tensor({{{60, 70, 80, 90}}}, tensor_options);
-  at::Tensor result = model(decoder_input, memory_input).detach();
-  at::Tensor ref_output = torch::tensor(
+  torch::Tensor decoder_input = torch::tensor({{{20, 30, 40, 50}}},
+                                           tensor_options);
+  torch::Tensor memory_input = torch::tensor({{{60, 70, 80, 90}}},
+                                          tensor_options);
+  torch::Tensor result = model(decoder_input, memory_input).detach();
+  torch::Tensor ref_output = torch::tensor(
     {{{2.314351, 0.094805, -0.671322, 0.101977}}},
     tensor_options);
   ASSERT_EQ(result.sizes().size(),ref_output.sizes().size());
@@ -235,9 +237,9 @@ void transformer_decoder_layer_test_helper(bool is_cuda){
                               /*equal_nan=*/true));
 
   // key_padding_mask
-  at::Tensor t_mask = {};
-  at::Tensor m_mask = {};
-  at::Tensor key_padding_mask = torch::zeros({2, 3}, tensor_options) == 1;
+  torch::Tensor t_mask = {};
+  torch::Tensor m_mask = {};
+  torch::Tensor key_padding_mask = torch::zeros({2, 3}, tensor_options) == 1;
   result = model(decoder_input, memory_input, t_mask, m_mask,
                  key_padding_mask).detach();
   ref_output = torch::tensor({{{2.430065, 0.027862, -0.601136, -0.073096},
@@ -269,7 +271,7 @@ void transformer_decoder_layer_test_helper(bool is_cuda){
                               /*equal_nan=*/true));
 
   // memory_key_padding_mask
-  at::Tensor t_key_padding_mask = {};
+  torch::Tensor t_key_padding_mask = {};
   key_padding_mask = torch::zeros({2, 5}, tensor_options) == 1;
   result = model(decoder_input, memory_input, t_mask, m_mask,
                  t_key_padding_mask, key_padding_mask).detach();
@@ -317,17 +319,18 @@ void transformer_decoder_layer_test_helper_gelu(bool is_cuda) {
   torch::TensorOptions tensor_options = torch::TensorOptions()
     .dtype(torch::kFloat32).device(device);
 
-  TransformerDecoderLayer model =
-    get_a_test_layer<TransformerDecoderLayer, TransformerDecoderLayerOptions>(tensor_options);
+  TransformerDecoderLayer model = get_a_test_layer<
+    TransformerDecoderLayer,
+    TransformerDecoderLayerOptions>(tensor_options);
   model.get()->options.activation(torch::kGELU);
 
   // deterministic input
-  at::Tensor decoder_input = torch::tensor({{{20, 30, 40, 50}}},
+  torch::Tensor decoder_input = torch::tensor({{{20, 30, 40, 50}}},
                                            tensor_options);
-  at::Tensor memory_input = torch::tensor({{{60, 70, 80, 90}}},
+  torch::Tensor memory_input = torch::tensor({{{60, 70, 80, 90}}},
                                           tensor_options);
-  at::Tensor result = model(decoder_input, memory_input).detach();
-  at::Tensor ref_output = torch::tensor(
+  torch::Tensor result = model(decoder_input, memory_input).detach();
+  torch::Tensor ref_output = torch::tensor(
     {{{2.306435, 0.095946, -0.675796, 0.10687}}},
     tensor_options);
   ASSERT_EQ(result.sizes().size(),ref_output.sizes().size());
@@ -595,5 +598,492 @@ TEST_F(TransformerTest, PrettyPrintTransformerDecoderLayer) {
       "  (linear2): torch::nn::Linear(in_features=2048, out_features=4, bias=true)\n"
       "  (dropout3): torch::nn::Dropout(p=0.1, inplace=false)\n"
       "  (norm3): torch::nn::LayerNorm([4], eps=1e-05, elementwise_affine=true)\n"
+      ")");
+}
+
+void transformer_decoder_test_helper(bool is_cuda) {
+  // this is a deterministic test for TransformerDecoder
+  torch::Device device = is_cuda ? torch::kCUDA : torch::kCPU;
+  torch::TensorOptions tensor_options =
+    torch::TensorOptions().dtype(torch::kFloat32).device(device);
+
+  TransformerDecoderLayer decoder_layer = get_a_test_layer<
+    TransformerDecoderLayer,
+    TransformerDecoderLayerOptions>(tensor_options);
+
+  TransformerDecoder model(TransformerDecoderOptions(decoder_layer, 1));
+  if (is_cuda) {
+    model->to(torch::kCUDA);
+  }
+
+
+  torch::Tensor decoder_input = torch::tensor({{{20, 30, 40, 50}}},
+                                           tensor_options);
+  torch::Tensor memory_input = torch::tensor({{{60, 70, 80, 90}}},
+                                          tensor_options);
+  torch::Tensor result = model(decoder_input, memory_input).detach();
+  torch::Tensor ref_output = torch::tensor(
+    {{{2.314351, 0.094805, -0.671322, 0.101977}}},
+    tensor_options);
+  ASSERT_EQ(result.sizes().size(),ref_output.sizes().size());
+  ASSERT_TRUE(torch::allclose(result, ref_output, 1e-7, 1e-5,
+                              /*equal_nan=*/true));
+
+// deterministic input
+  decoder_input = torch::tensor({{{9, 10, 11, 12}},
+                                 {{11, 12, 13, 14}}}, tensor_options);
+  memory_input = torch::tensor({{{1, 2, 3, 4}}}, tensor_options);
+  result = model(decoder_input, memory_input).detach();
+  ref_output = torch::tensor({{{2.422245,  0.051716, -0.606338, -0.024756}},
+                              {{2.422245,  0.051716, -0.606338, -0.024756}}},
+                              tensor_options);
+  ASSERT_EQ(result.sizes().size(),ref_output.sizes().size());
+  ASSERT_TRUE(torch::allclose(result, ref_output, 1e-7, 1e-5,
+                              /*equal_nan=*/true));
+
+  // deterministic input
+  decoder_input = torch::tensor({{{1, 2, 3, 4}},
+                                 {{5, 6, 7, 8}}}, tensor_options);
+  memory_input = torch::tensor({{{9, 10, 11, 12}},
+                                {{11, 12, 13, 14}}}, tensor_options);
+  result = model(decoder_input, memory_input).detach();
+  ref_output = torch::tensor({{{2.343536,  0.085561, -0.654954, 0.074991}},
+                              {{2.343536,  0.085561, -0.654954, 0.074991}}},
+                              tensor_options);
+  ASSERT_EQ(result.sizes().size(),ref_output.sizes().size());
+  ASSERT_TRUE(torch::allclose(result, ref_output, 1e-7, 1e-5,
+                              /*equal_nan=*/true));
+
+
+   // deterministic input
+  decoder_input = torch::tensor({{{0.4517, 0.6793, 0.5313, 0.0034},
+                                  {0.2678, 0.3677, 0.4459, 0.7166}},
+                                 {{0.8100, 0.3716, 0.4096, 0.1976},
+                                  {0.6958, 0.8844, 0.6081, 0.8315}},
+                                 {{0.0494, 0.9343, 0.5955, 0.3830},
+                                  {0.5404, 0.3464, 0.9378, 0.6200}}},
+                                  tensor_options);
+  memory_input = torch::tensor({{{0.7462, 0.6653, 0.5679, 0.4891},
+                                 {0.5387, 0.1655, 0.3565, 0.0471}},
+                                {{0.8335, 0.2799, 0.5031, 0.2947},
+                                 {0.1402, 0.0318, 0.7636, 0.1346}},
+                                {{0.6333, 0.9344, 0.1376, 0.9938},
+                                 {0.8924, 0.2872, 0.6692, 0.2944}},
+                                {{0.9897, 0.6915, 0.3154, 0.1733},
+                                 {0.8645, 0.3513, 0.3064, 0.0767}},
+                                {{0.8117, 0.2366, 0.4838, 0.7881},
+                                 {0.3718, 0.4945, 0.9511, 0.0864}}},
+                                 tensor_options);
+  result = model(decoder_input, memory_input).detach();
+  ref_output = torch::tensor({{{2.430065, 0.027862, -0.601136, -0.073096},
+                               {2.431935, 0.028907, -0.599809, -0.072488}},
+                              {{2.428457, 0.027053, -0.602275, -0.073462},
+                               {2.431970, 0.029387, -0.599789, -0.071621}},
+                              {{2.431934, 0.028196, -0.599802, -0.073809},
+                               {2.432306, 0.028858, -0.599542, -0.072846}}},
+                               tensor_options);
+  ASSERT_EQ(result.sizes().size(),ref_output.sizes().size());
+  ASSERT_TRUE(torch::allclose(result, ref_output, 1e-7, 1e-5,
+                              /*equal_nan=*/true));
+
+  // key_padding_mask
+  torch::Tensor t_mask = {};
+  torch::Tensor m_mask = {};
+  torch::Tensor key_padding_mask = torch::zeros({2, 3}, tensor_options) == 1;
+  result = model(decoder_input, memory_input, t_mask, m_mask,
+                 key_padding_mask).detach();
+  ref_output = torch::tensor({{{2.430065, 0.027862, -0.601136, -0.073096},
+                               {2.431935, 0.028907, -0.599809, -0.072488}},
+                              {{2.428457, 0.027053, -0.602275, -0.073462},
+                               {2.431970, 0.029387, -0.599789, -0.071621}},
+                              {{2.431934, 0.028196, -0.599802, -0.073809},
+                               {2.432306, 0.028858, -0.599542, -0.072846}}},
+                               tensor_options);
+  ASSERT_EQ(result.sizes().size(),ref_output.sizes().size());
+  ASSERT_TRUE(torch::allclose(result, ref_output, 1e-7, 1e-5,
+                              /*equal_nan=*/true));
+
+  // key_padding_mask
+  key_padding_mask[0][2] = 1;
+  key_padding_mask[1][1] = 1;
+  key_padding_mask[1][2] = 1;
+  result = model(decoder_input, memory_input, t_mask, m_mask,
+                 key_padding_mask).detach();
+  ref_output = torch::tensor({{{2.430025, 0.027643, -0.601164, -0.073476},
+                               {2.4323, 0.029375, -0.599553, -0.071881}},
+                              {{2.428523, 0.026838, -0.602226, -0.07391},
+                               {2.432634, 0.029842, -0.599318, -0.071253}},
+                              {{2.432278, 0.028152, -0.599555, -0.074139},
+                               {2.432659, 0.029244, -0.599294, -0.072382}}},
+                               tensor_options);
+  ASSERT_EQ(result.sizes().size(),ref_output.sizes().size());
+  ASSERT_TRUE(torch::allclose(result, ref_output, 1e-7, 1e-5,
+                              /*equal_nan=*/true));
+
+  // memory_key_padding_mask
+  torch::Tensor t_key_padding_mask = {};
+  key_padding_mask = torch::zeros({2, 5}, tensor_options) == 1;
+  result = model(decoder_input, memory_input, t_mask, m_mask,
+                 t_key_padding_mask, key_padding_mask).detach();
+  ref_output = torch::tensor({{{2.430065, 0.027862, -0.601136, -0.073096},
+                               {2.431935, 0.028907, -0.599809, -0.072488}},
+                              {{2.428457, 0.027053, -0.602275, -0.073462},
+                               {2.431970, 0.029387, -0.599789, -0.071621}},
+                              {{2.431934, 0.028196, -0.599802, -0.073809},
+                               {2.432306, 0.028858, -0.599542, -0.072846}}},
+                               tensor_options);
+  ASSERT_EQ(result.sizes().size(),ref_output.sizes().size());
+  ASSERT_TRUE(torch::allclose(result, ref_output, 1e-7, 1e-5,
+                              /*equal_nan=*/true));
+
+  // memory_key_padding_mask
+  key_padding_mask[0][4] = 1;
+  key_padding_mask[1][3] = 1;
+  key_padding_mask[1][4] = 1;
+  result = model(decoder_input, memory_input, t_mask, m_mask,
+                 t_key_padding_mask, key_padding_mask).detach();
+  ref_output = torch::tensor({{{2.429757, 0.027358, -0.601351, -0.073816},
+                               {2.432692, 0.028583, -0.599263, -0.073634}},
+                              {{2.428247, 0.02662, -0.602419, -0.074123},
+                               {2.432657, 0.029055, -0.599293, -0.072732}},
+                              {{2.431515, 0.027687, -0.600096, -0.074459},
+                               {2.433075, 0.028543, -0.598987, -0.073985}}},
+                               tensor_options);
+  ASSERT_EQ(result.sizes().size(),ref_output.sizes().size());
+  ASSERT_TRUE(torch::allclose(result, ref_output, 1e-7, 1e-5,
+                              /*equal_nan=*/true));
+
+  // multiple layers no norm
+  model = TransformerDecoder(TransformerDecoderOptions(decoder_layer, 2));
+  if (is_cuda) {
+    model->to(torch::kCUDA);
+  }
+
+  decoder_input = torch::tensor({{{20, 30, 40, 50}}}, tensor_options);
+  memory_input = torch::tensor({{{60, 70, 80, 90}}}, tensor_options);
+  result = model(decoder_input, memory_input).detach();
+  ref_output = torch::tensor(
+    {{{2.31316, 0.0950293, -0.671995, 0.102802}}},
+    tensor_options);
+  ASSERT_EQ(result.sizes().size(),ref_output.sizes().size());
+  ASSERT_TRUE(torch::allclose(result, ref_output, 1e-7, 1e-5,
+                              /*equal_nan=*/true));
+
+  // multiple layers no norm
+  model = TransformerDecoder(TransformerDecoderOptions(decoder_layer, 6));
+  if (is_cuda) {
+    model->to(torch::kCUDA);
+  }
+   // deterministic input
+  decoder_input = torch::tensor({{{0.4517, 0.6793, 0.5313, 0.0034},
+                                  {0.2678, 0.3677, 0.4459, 0.7166}},
+                                 {{0.8100, 0.3716, 0.4096, 0.1976},
+                                  {0.6958, 0.8844, 0.6081, 0.8315}},
+                                 {{0.0494, 0.9343, 0.5955, 0.3830},
+                                  {0.5404, 0.3464, 0.9378, 0.6200}}},
+                                  tensor_options);
+  memory_input = torch::tensor({{{0.7462, 0.6653, 0.5679, 0.4891},
+                                 {0.5387, 0.1655, 0.3565, 0.0471}},
+                                {{0.8335, 0.2799, 0.5031, 0.2947},
+                                 {0.1402, 0.0318, 0.7636, 0.1346}},
+                                {{0.6333, 0.9344, 0.1376, 0.9938},
+                                 {0.8924, 0.2872, 0.6692, 0.2944}},
+                                {{0.9897, 0.6915, 0.3154, 0.1733},
+                                 {0.8645, 0.3513, 0.3064, 0.0767}},
+                                {{0.8117, 0.2366, 0.4838, 0.7881},
+                                 {0.3718, 0.4945, 0.9511, 0.0864}}},
+                                 tensor_options);
+  result = model(decoder_input, memory_input).detach();
+  ref_output = torch::tensor({{{2.42794, 0.026164, -0.60263, -0.0747591},
+                               {2.43113, 0.0279516, -0.600376, -0.0736896}},
+                              {{2.42794, 0.026164, -0.60263, -0.0747591},
+                               {2.43113, 0.0279516, -0.600376, -0.0736896}},
+                              {{2.42794, 0.026164, -0.60263, -0.0747591},
+                               {2.43113, 0.0279516, -0.600376, -0.0736896}}},
+                               tensor_options);
+  ASSERT_EQ(result.sizes().size(),ref_output.sizes().size());
+  ASSERT_TRUE(torch::allclose(result, ref_output, 1e-7, 1e-5,
+                              /*equal_nan=*/true));
+
+
+  // multiple layers with norm
+  LayerNorm norm(LayerNormOptions({decoder_layer.get()->options.d_model()}));
+  model = TransformerDecoder(
+    TransformerDecoderOptions(decoder_layer, 2).norm(AnyModule(norm)));
+  if (is_cuda) {
+    model->to(torch::kCUDA);
+  }
+
+  decoder_input = torch::tensor({{{20, 30, 40, 50}}}, tensor_options);
+  memory_input = torch::tensor({{{60, 70, 80, 90}}}, tensor_options);
+  result = model(decoder_input, memory_input).detach();
+  ref_output = torch::tensor(
+    {{{1.66166, -0.326986, -1.01466, -0.320017}}},
+    tensor_options);
+  ASSERT_EQ(result.sizes().size(),ref_output.sizes().size());
+  ASSERT_TRUE(torch::allclose(result, ref_output, 1e-7, 1e-5,
+                              /*equal_nan=*/true));
+
+  // multiple layers with norm
+  model = TransformerDecoder(
+    TransformerDecoderOptions(decoder_layer, 6).norm(AnyModule(norm)));
+  if (is_cuda) {
+    model->to(torch::kCUDA);
+  }
+   // deterministic input
+  decoder_input = torch::tensor({{{0.4517, 0.6793, 0.5313, 0.0034},
+                                  {0.2678, 0.3677, 0.4459, 0.7166}},
+                                 {{0.8100, 0.3716, 0.4096, 0.1976},
+                                  {0.6958, 0.8844, 0.6081, 0.8315}},
+                                 {{0.0494, 0.9343, 0.5955, 0.3830},
+                                  {0.5404, 0.3464, 0.9378, 0.6200}}},
+                                  tensor_options);
+  memory_input = torch::tensor({{{0.7462, 0.6653, 0.5679, 0.4891},
+                                 {0.5387, 0.1655, 0.3565, 0.0471}},
+                                {{0.8335, 0.2799, 0.5031, 0.2947},
+                                 {0.1402, 0.0318, 0.7636, 0.1346}},
+                                {{0.6333, 0.9344, 0.1376, 0.9938},
+                                 {0.8924, 0.2872, 0.6692, 0.2944}},
+                                {{0.9897, 0.6915, 0.3154, 0.1733},
+                                 {0.8645, 0.3513, 0.3064, 0.0767}},
+                                {{0.8117, 0.2366, 0.4838, 0.7881},
+                                 {0.3718, 0.4945, 0.9511, 0.0864}}},
+                                 tensor_options);
+  result = model(decoder_input, memory_input).detach();
+  ref_output = torch::tensor({{{1.69559, -0.357291, -0.894741, -0.443553},
+                               {1.69571, -0.357363, -0.894154, -0.444196}},
+                              {{1.69559, -0.357291, -0.894741, -0.443553},
+                               {1.69571, -0.357363, -0.894154, -0.444196}},
+                              {{1.69559, -0.357291, -0.894741, -0.443553},
+                               {1.69571, -0.357363, -0.894154, -0.444196}}},
+                               tensor_options);
+  ASSERT_EQ(result.sizes().size(),ref_output.sizes().size());
+  ASSERT_TRUE(torch::allclose(result, ref_output, 1e-7, 1e-5,
+                              /*equal_nan=*/true));
+
+  //gelu activation test cases
+  decoder_layer.get()->options.activation(torch::kGELU);
+  model = TransformerDecoder(TransformerDecoderOptions(decoder_layer, 1));
+  if (is_cuda) {
+    model->to(torch::kCUDA);
+  }
+
+  // deterministic input
+  decoder_input = torch::tensor({{{20, 30, 40, 50}}},
+                                           tensor_options);
+  memory_input = torch::tensor({{{60, 70, 80, 90}}},
+                                          tensor_options);
+  result = model(decoder_input, memory_input).detach();
+  ref_output = torch::tensor(
+    {{{2.306435, 0.095946, -0.675796, 0.10687}}},
+    tensor_options);
+  ASSERT_EQ(result.sizes().size(),ref_output.sizes().size());
+  ASSERT_TRUE(torch::allclose(result, ref_output, 1e-7, 1e-5,
+                              /*equal_nan=*/true));
+
+  // deterministic input
+  decoder_input = torch::tensor({{{9, 10, 11, 12}},
+                                 {{11, 12, 13, 14}}},
+                                 tensor_options);
+  memory_input = torch::tensor({{{1, 2, 3, 4}}}, tensor_options);
+  result = model(decoder_input, memory_input).detach();
+  ref_output = torch::tensor({{{2.415448, 0.054389, -0.610932, -0.0156613}},
+                              {{2.415448, 0.054389, -0.610932, -0.0156613}}},
+                              tensor_options);
+  ASSERT_EQ(result.sizes().size(),ref_output.sizes().size());
+  ASSERT_TRUE(torch::allclose(result, ref_output, 1e-7, 1e-5,
+                              /*equal_nan=*/true));
+
+  // deterministic input
+  decoder_input = torch::tensor({{{1, 2, 3, 4}},
+                                 {{5, 6, 7, 8}}},
+                                 tensor_options);
+  memory_input = torch::tensor({{{9, 10, 11, 12}},
+                                {{11, 12, 13, 14}}},
+                                tensor_options);
+  result = model(decoder_input, memory_input).detach();
+  ref_output = torch::tensor({{{2.338531, 0.087709, -0.65776, 0.080646}},
+                              {{2.338531, 0.087709, -0.65776, 0.080646}}},
+                              tensor_options);
+  ASSERT_EQ(result.sizes().size(),ref_output.sizes().size());
+  ASSERT_TRUE(torch::allclose(result, ref_output, 1e-7, 1e-5,
+                              /*equal_nan=*/true));
+
+  // deterministic input
+  decoder_input = torch::tensor({{{0.4517, 0.6793, 0.5313, 0.0034},
+                                  {0.2678, 0.3677, 0.4459, 0.7166}},
+                                 {{0.8100, 0.3716, 0.4096, 0.1976},
+                                  {0.6958, 0.8844, 0.6081, 0.8315}},
+                                 {{0.0494, 0.9343, 0.5955, 0.3830},
+                                  {0.5404, 0.3464, 0.9378, 0.6200}}},
+                                 tensor_options);
+  memory_input = torch::tensor({{{0.7462, 0.6653, 0.5679, 0.4891},
+                                 {0.5387, 0.1655, 0.3565, 0.0471}},
+                                {{0.8335, 0.2799, 0.5031, 0.2947},
+                                 {0.1402, 0.0318, 0.7636, 0.1346}},
+                                {{0.6333, 0.9344, 0.1376, 0.9938},
+                                 {0.8924, 0.2872, 0.6692, 0.2944}},
+                                {{0.9897, 0.6915, 0.3154, 0.1733},
+                                 {0.8645, 0.3513, 0.3064, 0.0767}},
+                                {{0.8117, 0.2366, 0.4838, 0.7881},
+                                 {0.3718, 0.4945, 0.9511, 0.0864}}},
+                                tensor_options);
+  result = model(decoder_input, memory_input).detach();
+  ref_output = torch::tensor(
+    {{{2.42049104, 0.03443088, -0.60793706, -0.05436271},
+     {2.42210631, 0.03546578, -0.60679895, -0.05357488}},
+    {{2.41907674, 0.0336104, -0.60892977, -0.05490462},
+     {2.42216881, 0.03586554, -0.6067524, -0.05289126}},
+    {{2.42205716, 0.03488046, -0.60683681, -0.05460596},
+     {2.42240309, 0.0354595, -0.60659063, -0.05378816}}},
+    tensor_options);
+  ASSERT_EQ(result.sizes().size(),ref_output.sizes().size());
+  ASSERT_TRUE(torch::allclose(result, ref_output, 1e-7, 1e-5,
+                              /*equal_nan=*/true));
+
+  // Multiple layers no norm
+  model = TransformerDecoder(TransformerDecoderOptions(decoder_layer, 6));
+  if (is_cuda) {
+    model->to(torch::kCUDA);
+  }
+  decoder_input = torch::tensor({{{0.4517, 0.6793, 0.5313, 0.0034},
+                                  {0.2678, 0.3677, 0.4459, 0.7166}},
+                                 {{0.8100, 0.3716, 0.4096, 0.1976},
+                                  {0.6958, 0.8844, 0.6081, 0.8315}},
+                                 {{0.0494, 0.9343, 0.5955, 0.3830},
+                                  {0.5404, 0.3464, 0.9378, 0.6200}}},
+                                 tensor_options);
+  memory_input = torch::tensor({{{0.7462, 0.6653, 0.5679, 0.4891},
+                                 {0.5387, 0.1655, 0.3565, 0.0471}},
+                                {{0.8335, 0.2799, 0.5031, 0.2947},
+                                 {0.1402, 0.0318, 0.7636, 0.1346}},
+                                {{0.6333, 0.9344, 0.1376, 0.9938},
+                                 {0.8924, 0.2872, 0.6692, 0.2944}},
+                                {{0.9897, 0.6915, 0.3154, 0.1733},
+                                 {0.8645, 0.3513, 0.3064, 0.0767}},
+                                {{0.8117, 0.2366, 0.4838, 0.7881},
+                                 {0.3718, 0.4945, 0.9511, 0.0864}}},
+                                tensor_options);
+  result = model(decoder_input, memory_input).detach();
+  ref_output = torch::tensor({{{2.41859, 0.0328114, -0.609269, -0.0560386},
+                               {2.42138, 0.034598, -0.607316, -0.0546574}},
+                              {{2.41859, 0.0328114, -0.609269, -0.0560386},
+                               {2.42138, 0.034598, -0.607316, -0.0546574}},
+                              {{2.41859, 0.0328114, -0.609269, -0.0560386},
+                               {2.42138, 0.034598, -0.607316, -0.0546574}}},
+                              tensor_options);
+  ASSERT_EQ(result.sizes().size(),ref_output.sizes().size());
+  ASSERT_TRUE(torch::allclose(result, ref_output, 1e-7, 1e-5,
+                              /*equal_nan=*/true));
+
+  // Multiple layers with norm
+  norm = LayerNorm(LayerNormOptions({decoder_layer.get()->options.d_model()}));
+  model = TransformerDecoder(TransformerDecoderOptions(decoder_layer, 6)
+    .norm(AnyModule(norm)));
+  if (is_cuda) {
+    model->to(torch::kCUDA);
+  }
+
+  decoder_input = torch::tensor({{{0.4517, 0.6793, 0.5313, 0.0034},
+                                  {0.2678, 0.3677, 0.4459, 0.7166}},
+                                 {{0.8100, 0.3716, 0.4096, 0.1976},
+                                  {0.6958, 0.8844, 0.6081, 0.8315}},
+                                 {{0.0494, 0.9343, 0.5955, 0.3830},
+                                  {0.5404, 0.3464, 0.9378, 0.6200}}},
+                                 tensor_options);
+  memory_input = torch::tensor({{{0.7462, 0.6653, 0.5679, 0.4891},
+                                 {0.5387, 0.1655, 0.3565, 0.0471}},
+                                {{0.8335, 0.2799, 0.5031, 0.2947},
+                                 {0.1402, 0.0318, 0.7636, 0.1346}},
+                                {{0.6333, 0.9344, 0.1376, 0.9938},
+                                 {0.8924, 0.2872, 0.6692, 0.2944}},
+                                {{0.9897, 0.6915, 0.3154, 0.1733},
+                                 {0.8645, 0.3513, 0.3064, 0.0767}},
+                                {{0.8117, 0.2366, 0.4838, 0.7881},
+                                 {0.3718, 0.4945, 0.9511, 0.0864}}},
+                                tensor_options);
+  result = model(decoder_input, memory_input).detach();
+  ref_output = torch::tensor({{{1.69298, -0.355163, -0.906375, -0.431439},
+                               {1.69305, -0.355195, -0.906062, -0.431791}},
+                              {{1.69298, -0.355163, -0.906375, -0.431439},
+                               {1.69305, -0.355195, -0.906062, -0.431791}},
+                              {{1.69298, -0.355163, -0.906375, -0.431439},
+                               {1.69305, -0.355195, -0.906062, -0.431791}}},
+                             tensor_options);
+  ASSERT_EQ(result.sizes().size(),ref_output.sizes().size());
+  ASSERT_TRUE(torch::allclose(result, ref_output, 1e-7, 1e-5,
+                              /*equal_nan=*/true));
+
+}
+
+TEST_F(TransformerTest, TransformerDecoder) {
+  transformer_decoder_test_helper(false);
+}
+
+TEST_F(TransformerTest, TransformerDecoder_CUDA) {
+  transformer_decoder_test_helper(true);
+}
+
+
+TEST_F(TransformerTest, PrettyPrintTransformerDecoder) {
+  LayerNorm norm = LayerNorm(LayerNormOptions({4}));
+  TransformerDecoderOptions options(
+    TransformerDecoderOptions(
+      TransformerDecoderLayerOptions(4, 2),2).norm(AnyModule(norm)));
+  ASSERT_EQ(
+      c10::str(TransformerDecoder(options)),
+      "torch::nn::TransformerDecoderImpl(\n"
+      "  (layers): torch::nn::ModuleList(\n"
+      "    (0): torch::nn::TransformerDecoderLayerImpl(\n"
+      "      (self_attn): torch::nn::MultiheadAttention(\n"
+      "        (out_proj): torch::nn::Linear(in_features=4, out_features=4,"
+      " bias=true)\n"
+      "      )\n"
+      "      (dropout1): torch::nn::Dropout(p=0.1, inplace=false)\n"
+      "      (norm1): torch::nn::LayerNorm([4], eps=1e-05,"
+      " elementwise_affine=true)\n"
+      "      (multihead_attn): torch::nn::MultiheadAttention(\n"
+      "        (out_proj): torch::nn::Linear(in_features=4, out_features=4,"
+      " bias=true)\n"
+      "      )\n"
+      "      (dropout2): torch::nn::Dropout(p=0.1, inplace=false)\n"
+      "      (norm2): torch::nn::LayerNorm([4], eps=1e-05,"
+      " elementwise_affine=true)\n"
+      "      (linear1): torch::nn::Linear(in_features=4, out_features=2048,"
+      " bias=true)\n"
+      "      (dropout): torch::nn::Dropout(p=0.1, inplace=false)\n"
+      "      (linear2): torch::nn::Linear(in_features=2048, out_features=4,"
+      " bias=true)\n"
+      "      (dropout3): torch::nn::Dropout(p=0.1, inplace=false)\n"
+      "      (norm3): torch::nn::LayerNorm([4], eps=1e-05,"
+      " elementwise_affine=true)\n"
+      "    )\n"
+      "    (1): torch::nn::TransformerDecoderLayerImpl(\n"
+      "      (self_attn): torch::nn::MultiheadAttention(\n"
+      "        (out_proj): torch::nn::Linear(in_features=4, out_features=4,"
+      " bias=true)\n"
+      "      )\n"
+      "      (dropout1): torch::nn::Dropout(p=0.1, inplace=false)\n"
+      "      (norm1): torch::nn::LayerNorm([4], eps=1e-05,"
+      " elementwise_affine=true)\n"
+      "      (multihead_attn): torch::nn::MultiheadAttention(\n"
+      "        (out_proj): torch::nn::Linear(in_features=4, out_features=4,"
+      " bias=true)\n"
+      "      )\n"
+      "      (dropout2): torch::nn::Dropout(p=0.1, inplace=false)\n"
+      "      (norm2): torch::nn::LayerNorm([4], eps=1e-05,"
+      " elementwise_affine=true)\n"
+      "      (linear1): torch::nn::Linear(in_features=4, out_features=2048,"
+      " bias=true)\n"
+      "      (dropout): torch::nn::Dropout(p=0.1, inplace=false)\n"
+      "      (linear2): torch::nn::Linear(in_features=2048, out_features=4,"
+      " bias=true)\n"
+      "      (dropout3): torch::nn::Dropout(p=0.1, inplace=false)\n"
+      "      (norm3): torch::nn::LayerNorm([4], eps=1e-05,"
+      " elementwise_affine=true)\n"
+      "    )\n"
+      "  )\n"
+      "  (norm): torch::nn::LayerNorm([4], eps=1e-05,"
+      " elementwise_affine=true)\n"
       ")");
 }
