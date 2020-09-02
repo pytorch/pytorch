@@ -266,9 +266,12 @@ class Quantizer:
     def prepare_dynamic(self, model, qconfig_dict, inplace=False):
         return self._prepare(model, qconfig_dict, inplace, is_dynamic_quant=True)
 
-    # Extract the subgraph that produces the weight for dynamically quantized node
-    # and run the subgraph to observe the weight
     def _run_weight_observers(self, observed):
+        r''' Extract the subgraph that produces the weight for dynamically quantized
+        node and run the subgraph to observe the weight.
+        Note that the observers of dynamically quantized modules are run during
+        the conversion step.
+        '''
         for node in observed.graph.nodes:
             if node.op == 'call_function' and node.target in WEIGHT_INDEX_DICT:
                 for i, node_arg in enumerate(node.args):
