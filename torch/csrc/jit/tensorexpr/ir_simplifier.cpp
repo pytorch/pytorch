@@ -949,6 +949,21 @@ const Expr* PolynomialTransformer::mutate(const Div* v) {
     return new Div(lhs_new, rhs_new);
   }
 
+  // If the numerator is zero, so is the result.
+  if (lhs_new->isConstant() && immediateEquals(lhs_new, 0)) {
+    return lhs_new;
+  }
+
+  // If the denominator is one, return numerator.
+  if (rhs_new->isConstant() && immediateEquals(rhs_new, 1)) {
+    return lhs_new;
+  }
+
+  // If numberator and denominator are equal the result is 1.
+  if (hasher_.hash(lhs_new) == hasher_.hash(rhs_new)) {
+    return getImmediateByType(v->dtype(), 1);
+  }
+
   if (auto ret = factorizeDivision(lhs_new, rhs_new)) {
     return ret;
   }
