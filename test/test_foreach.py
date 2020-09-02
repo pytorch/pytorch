@@ -1,7 +1,7 @@
 import torch
 import unittest
 from torch.testing._internal.common_utils import TestCase, run_tests
-from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes, deviceCountAtLeast
+from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes
 
 class TestForeach(TestCase):
     @dtypes(*torch.testing.get_all_dtypes())
