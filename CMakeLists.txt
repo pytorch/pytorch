@@ -609,6 +609,21 @@ if(USE_ASAN)
     string(APPEND CMAKE_LINKER_FLAGS_DEBUG " -fsanitize=address")
 endif()
 
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
+  include(CheckCSourceCompiles)
+  check_c_source_compiles("#include <arm_neon.h>
+int main() {
+  float a[] = {1.0, 1.0};
+  vld1q_f32_x2(a);
+  return 0;
+}" HAS_VLD1)
+
+  if(NOT HAS_VLD1)
+    string(APPEND CMAKE_CXX_FLAGS " -DMISSING_ARM_VLD1")
+  endif()
+endif()
+
+
 # Add code coverage flags to supported compilers
 if(CODE_COVERAGE)
   if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
