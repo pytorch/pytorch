@@ -44,8 +44,6 @@ Tensor _th_trace(const Tensor & self);
 Tensor & _th_addr_out(Tensor & result, const Tensor & self, const Tensor & vec1, const Tensor & vec2, Scalar beta, Scalar alpha);
 Tensor _th_addr(const Tensor & self, const Tensor & vec1, const Tensor & vec2, Scalar beta, Scalar alpha);
 Tensor & _th_addr_(Tensor & self, const Tensor & vec1, const Tensor & vec2, Scalar beta, Scalar alpha);
-std::tuple<Tensor &,Tensor &> _th_gels_out(Tensor & res1, Tensor & res2, const Tensor & self, const Tensor & A);
-std::tuple<Tensor,Tensor> _th_gels(const Tensor & self, const Tensor & A);
 std::tuple<Tensor &,Tensor &> _th_eig_out(Tensor & res1, Tensor & res2, const Tensor & self, bool eigenvectors);
 std::tuple<Tensor,Tensor> _th_eig(const Tensor & self, bool eigenvectors);
 Tensor & _th_potri_out(Tensor & output, const Tensor & self, bool upper);

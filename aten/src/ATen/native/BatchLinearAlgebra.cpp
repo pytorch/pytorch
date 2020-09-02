@@ -84,6 +84,11 @@ extern "C" void zgetrs_(char *trans, int *n, int *nrhs, std::complex<double> *a,
 extern "C" void cgetrs_(char *trans, int *n, int *nrhs, std::complex<float> *a, int *lda, int *ipiv, std::complex<float> *b, int *ldb, int *info);
 extern "C" void dgetrs_(char *trans, int *n, int *nrhs, double *a, int *lda, int *ipiv, double *b, int *ldb, int *info);
 extern "C" void sgetrs_(char *trans, int *n, int *nrhs, float *a, int *lda, int *ipiv, float *b, int *ldb, int *info);
+
+// gels
+extern "C" void dgels_(char *trans, int *m, int *n, int *nrhs, double *a, int *lda, double *b, int *ldb, double *work, int *lwork, int *info);
+extern "C" void sgels_(char *trans, int *m, int *n, int *nrhs, float *a, int *lda, float *b, int *ldb, float *work, int *lwork, int *info);
+
 #endif
 
 namespace at {
@@ -126,6 +131,8 @@ void lapackSvd(char jobz, int m, int n, scalar_t *a, int lda,
 template<class scalar_t>
 void lapackLuSolve(char trans, int n, int nrhs, scalar_t *a, int lda, int *ipiv, scalar_t *b, int ldb, int *info);
 
+template<class scalar_t>
+void lapackGels(char trans, int m, int n, int nrhs, scalar_t *a, int lda, scalar_t *b, int ldb, scalar_t *work, int lwork, int *info);
 
 template<> void lapackSolve<c10::complex<double>>(int n, int nrhs, c10::complex<double> *a, int lda, int *ipiv, c10::complex<double> *b, int ldb, int *info) {
   zgesv_(&n, &nrhs, reinterpret_cast<std::complex<double>*>(a), &lda, ipiv, reinterpret_cast<std::complex<double>*>(b), &ldb, info);
@@ -299,6 +306,14 @@ template<> void lapackLuSolve<double>(char trans, int n, int nrhs, double *a, in
 
 template<> void lapackLuSolve<float>(char trans, int n, int nrhs, float *a, int lda, int *ipiv, float *b, int ldb, int *info) {
   sgetrs_(&trans, &n, &nrhs, a, &lda, ipiv, b, &ldb, info);
+}
+
+template<> void lapackGels<double>(char trans, int m, int n, int nrhs, double *a, int lda, double *b, int ldb, double *work, int lwork, int *info) {
+  dgels_(&trans, &m, &n, &nrhs, a, &lda, b, &ldb, work, &lwork, info);
+}
+
+template<> void lapackGels<float>(char trans, int m, int n, int nrhs, float *a, int lda, float *b, int ldb, float*work, int lwork, int *info) {
+  sgels_(&trans, &m, &n, &nrhs, a, &lda, b, &ldb, work, &lwork, info);
 }
 #endif
 
@@ -1142,6 +1157,74 @@ Tensor& lu_solve_out(Tensor& result, const Tensor& self, const Tensor& LU_data, 
   Tensor result_tmp = at::lu_solve(self, LU_data, LU_pivots);
   result.resize_as_(result_tmp).copy_(result_tmp);
   return result;
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ lstsq ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+template <typename scalar_t>
+static void apply_lstsq(Tensor& B, Tensor& A) {
+  if(B.dim() == 1) {
+    B.unsqueeze_(1);
+  }
+
+  int m, n, nrhs, lda, ldb, info, lwork;
+  scalar_t wkopt = 0.0;
+  lwork = -1; // work length
+  m = A.size(0);
+  n = A.size(1);
+  nrhs = B.size(1);
+  info = 0;
+  lda = m;
+  ldb = (m > n) ? m : n;
+
+  if (!B.is_contiguous()) {
+    B = B.contiguous();
+  }
+  if (m < n) {
+    B.resize_({n, nrhs});
+  }
+
+  B = cloneBatchedColumnMajor(B);
+  A = cloneBatchedColumnMajor(A);
+  auto B_data = B.data_ptr<scalar_t>();
+  auto A_data = A.data_ptr<scalar_t>();
+
+  // get info how much space is needed
+  lapackGels<scalar_t>('N', m, n, nrhs, A_data, lda, B_data, ldb, &wkopt, lwork, &info);
+
+  lwork = static_cast<int>(wkopt);
+  Tensor work_tensor = at::empty({lwork}, A.options().dtype());
+  auto work = work_tensor.data_ptr<scalar_t>();
+
+  lapackGels<scalar_t>('N', m, n, nrhs, A_data, lda, B_data, ldb, work, lwork, &info);
+}
+
+std::tuple<Tensor, Tensor> lstsq(const Tensor& B, const Tensor& A) {
+  TORCH_CHECK(A.dim() == 2, "A should have 1 or 2 "
+      "dimensions, but has ", A.dim());
+  TORCH_CHECK(A.size(-1) != 0, "A should not be empty");
+  TORCH_CHECK(B.dim() == 1 || B.dim() == 2, "B should have 1 or 2 "
+      "dimensions, but has ", B.dim());
+  TORCH_CHECK(B.size(-1) != 0, "B should not be empty");
+
+  TORCH_CHECK(A.size(0) == B.size(0), "Expected A and B to have same size "
+      "at dim 0, but A has ", A.size(0), " rows and B has ", B.size(0), " rows");
+
+  Tensor B_working = B.clone();
+  Tensor A_working = A.clone();
+  AT_DISPATCH_FLOATING_TYPES(B.scalar_type(), "lstsq_cpu", [&] {
+    apply_lstsq<scalar_t>(B_working, A_working);
+  });
+
+  return std::tuple<Tensor, Tensor>(B_working, A_working);
+}
+
+std::tuple<Tensor&,Tensor&> lstsq_out(Tensor& B_out, Tensor& A_out, const Tensor& B, const Tensor&A) {
+  Tensor A_tmp, B_tmp;
+  std::tie(B_tmp, A_tmp) = native::lstsq(B, A);
+  A_out.resize_as_(A_tmp).copy_(A_tmp);
+  B_out.resize_as_(B_tmp).copy_(B_tmp);
+  return std::tuple<Tensor&, Tensor&>(A_out, B_out);
 }
 
 }}  // namespace at::native
