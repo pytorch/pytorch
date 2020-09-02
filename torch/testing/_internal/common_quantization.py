@@ -7,13 +7,12 @@ r"""Importing this file includes common utility methods and base clases for
 checking quantization api and properties of resulting modules.
 """
 
-import copy
-import io
-import functools
 import torch
 import torch.nn as nn
 import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
+import torch.distributed as dist
+
 from torch.testing._internal.common_utils import TestCase
 from torch.quantization import QuantWrapper, QuantStub, DeQuantStub, \
     default_qconfig, default_dynamic_qconfig, default_per_channel_qconfig, QConfig, default_observer, default_weight_observer, \
@@ -27,11 +26,20 @@ from torch.quantization.default_mappings import (
 from torch.fx import symbolic_trace
 
 # graph mode quantization based on fx
-from torch.quantization._quantize_fx import (
-    Quantizer,
+from torch.quantization import (
     QuantType,
-    fuse,
+    fuse_fx,
+    prepare_fx,
+    prepare_dynamic_fx,
+    convert_fx,
+    convert_dynamic_fx,
 )
+
+import copy
+import io
+import functools
+import time
+import os
 
 import unittest
 import numpy as np
@@ -71,6 +79,9 @@ class NodeSpec:
 
         return self.op == other.op and self.target == other.target
 
+    def __repr__(self):
+        return repr(self.op) + " " + repr(self.target)
+
 def test_only_eval_fn(model, calib_data):
     r"""
     Default evaluation function takes a torch.utils.data.Dataset or a list of
@@ -100,6 +111,85 @@ def test_only_train_fn(model, train_data, loss_fn=_default_loss_fn):
             total += target.size(0)
             correct += (predicted == target).sum().item()
     return train_loss, correct, total
+
+class AverageMeter(object):
+    """Computes and stores the average and current value"""
+    def __init__(self, name, fmt=':f'):
+        self.name = name
+        self.fmt = fmt
+        self.reset()
+
+    def reset(self):
+        self.val = 0
+        self.avg = 0
+        self.sum = 0
+        self.count = 0
+
+    def update(self, val, n=1):
+        self.val = val
+        self.sum += val * n
+        self.count += n
+        self.avg = self.sum / self.count
+
+    def __str__(self):
+        fmtstr = '{name} {val' + self.fmt + '} ({avg' + self.fmt + '})'
+        return fmtstr.format(**self.__dict__)
+
+
+def accuracy(output, target, topk=(1,)):
+    """Computes the accuracy over the k top predictions for the specified values of k"""
+    with torch.no_grad():
+        maxk = max(topk)
+        batch_size = target.size(0)
+
+        _, pred = output.topk(maxk, 1, True, True)
+        pred = pred.t()
+        correct = pred.eq(target.view(1, -1).expand_as(pred))
+
+        res = []
+        for k in topk:
+            correct_k = correct[:k].view(-1).float().sum(0, keepdim=True)
+            res.append(correct_k.mul_(100.0 / batch_size))
+        return res
+
+def train_one_epoch(model, criterion, optimizer, data_loader, device, ntrain_batches):
+    model.train()
+    cnt = 0
+    for image, target in data_loader:
+        start_time = time.time()
+        print('.', end='')
+        cnt += 1
+        image, target = image.to(device), target.to(device)
+        output = model(image)
+        loss = criterion(output, target)
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+        acc1, acc5 = accuracy(output, target, topk=(1, 5))
+        if cnt >= ntrain_batches:
+            return
+    return
+
+def ddp_setup(rank, world_size):
+    os.environ['MASTER_ADDR'] = 'localhost'
+    os.environ['MASTER_PORT'] = '12355'
+
+    # initialize the process group
+    dist.init_process_group("gloo", rank=rank, world_size=world_size)
+
+def ddp_cleanup():
+    dist.destroy_process_group()
+
+def run_ddp(rank, world_size, prepared):
+    ddp_setup(rank, world_size)
+    prepared.cuda()
+    prepared = torch.nn.parallel.DistributedDataParallel(prepared, device_ids=[rank])
+    prepared.to(rank)
+    model_with_ddp = prepared
+    optimizer = torch.optim.SGD(model_with_ddp.parameters(), lr=0.0001)
+    train_one_epoch(model_with_ddp, criterion, optimizer, dataset, rank, 1)
+    ddp_cleanup()
+
 
 def convert_dynamic(module):
     convert(module, DEFAULT_DYNAMIC_MODULE_MAPPING, inplace=True)
@@ -175,6 +265,13 @@ def skipIfNoFBGEMM(fn):
         else:
             fn(*args, **kwargs)
     return wrapper
+
+try:
+    import torchvision  # noqa: F401
+    HAS_TORCHVISION = True
+except ImportError:
+    HAS_TORCHVISION = False
+skip_if_no_torchvision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 def get_script_module(model, tracing, data):
     return torch.jit.trace(model, data) if tracing else torch.jit.script(model)
@@ -451,15 +548,21 @@ class QuantizationTestCase(TestCase):
 
         if expected_node_occurrence is not None:
             for expected_node, occurrence in expected_node_occurrence.items():
-                self.assertTrue(
-                    expected_node in nodes_in_graph,
-                    'Check failed for node:' + str(expected_node) +
-                    ' not found')
-                self.assertTrue(
-                    nodes_in_graph[expected_node] == occurrence,
-                    'Check failed for node:' + str(expected_node) +
-                    ' Expected occurrence:' + str(occurrence) +
-                    ' Found occurrence:' + str(nodes_in_graph[expected_node]))
+                if occurrence != 0:
+                    self.assertTrue(
+                        expected_node in nodes_in_graph,
+                        'Check failed for node:' + str(expected_node) +
+                        ' not found')
+                    self.assertTrue(
+                        nodes_in_graph[expected_node] == occurrence,
+                        'Check failed for node:' + str(expected_node) +
+                        ' Expected occurrence:' + str(occurrence) +
+                        ' Found occurrence:' + str(nodes_in_graph[expected_node]))
+                else:
+                    self.assertTrue(
+                        expected_node not in nodes_in_graph,
+                        'Check failed for node:' + str(expected_node) +
+                        ' expected no occurrence but found')
 
         if expected_node_list is not None:
             cur_index = 0
@@ -492,7 +595,8 @@ class QuantizationTestCase(TestCase):
                            expected_node=None,
                            expected_node_occurrence=None,
                            expected_node_list=None,
-                           debug=False):
+                           debug=False,
+                           print_debug_info=False):
         """ Quantizes model with graph mode quantization on fx and check if the
         quantized model contains the quantized_node
 
@@ -520,20 +624,20 @@ class QuantizationTestCase(TestCase):
         else:
             model.eval()
         original = symbolic_trace(model)
-        fused = fuse(original)
+        fused = fuse_fx(original)
 
-        quantizer = Quantizer()
-        # TODO: uncommon after we make per channel observer work in the flow
-        # qconfig_dict = {'': get_default_qconfig(torch.backends.quantized.engine)}
-        qconfig_dict = {'' : default_qconfig}
+        qconfig_dict = {'': get_default_qconfig(torch.backends.quantized.engine)}
         if quant_type == QuantType.DYNAMIC:
-            prepared = quantizer.prepare_dynamic(fused, qconfig_dict)
+            prepare = prepare_dynamic_fx
+            convert = convert_dynamic_fx
         else:
-            prepared = quantizer.prepare(fused, qconfig_dict)
+            prepare = prepare_fx
+            convert = convert_fx
 
+        prepared = prepare(fused, qconfig_dict)
         prepared(*inputs)
-        qgraph = quantizer.convert(prepared)
-        qgraph_debug = quantizer.convert(prepared, debug=True)
+        qgraph = convert(prepared)
+        qgraph_debug = convert(prepared, debug=True)
 
         result = qgraph(*inputs)
         result_debug = qgraph_debug(*inputs)
@@ -541,7 +645,7 @@ class QuantizationTestCase(TestCase):
         self.assertEqual((result - result_debug).abs().max(), 0), \
             'Expecting debug and non-debug option to produce identical result'
 
-        if debug:
+        if print_debug_info:
             print()
             print('quant type:', quant_type)
             print('origianl graph module:', type(model))
@@ -550,8 +654,9 @@ class QuantizationTestCase(TestCase):
             print('quantized graph module:', type(qgraph))
             self.printGraphModule(qgraph)
             print()
+        qgraph_to_check = qgraph_debug if debug else qgraph
         self.checkGraphModuleNodes(
-            qgraph, expected_node, expected_node_occurrence, expected_node_list)
+            qgraph_to_check, expected_node, expected_node_occurrence, expected_node_list)
 
 # Below are a series of neural net models to use in testing quantization
 # Single layer models
