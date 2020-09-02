@@ -198,7 +198,7 @@ class Quantizer:
                     observer_name = get_new_observer_name(input_root)
                     setattr(input_root, observer_name, observer)
                     self.activation_post_process_map[node.name] = observer
-                    env[node.name] = observed_graph.create_node('call_module', observer_name, [load_arg(node)], {})
+                    env[node.name] = observed_graph.create_node('call_module', observer_name, (load_arg(node),), {})
                     observed.add(node.name)
 
                 # don't need to insert observer for output in dynamic quantization
@@ -235,7 +235,7 @@ class Quantizer:
                 if qconfig is not None:
                     self.activation_post_process_map[node.name] = qconfig.weight() if is_weight else qconfig.activation()
                     setattr(input_root, observer_name, self.activation_post_process_map[node.name])
-                    env[node.name] = observed_graph.create_node('call_module', observer_name, [load_arg(node)], {})
+                    env[node.name] = observed_graph.create_node('call_module', observer_name, (load_arg(node),), {})
                     observed.add(node.name)
         observed_graph.output(load_arg(input_graph.result))
 
@@ -266,10 +266,34 @@ class Quantizer:
     def prepare_dynamic(self, model, qconfig_dict, inplace=False):
         return self._prepare(model, qconfig_dict, inplace, is_dynamic_quant=True)
 
+    def _run_weight_observers(self, observed):
+        r''' Extract the subgraph that produces the weight for dynamically quantized
+        node and run the subgraph to observe the weight.
+        Note that the observers of dynamically quantized modules are run during
+        the conversion step.
+        '''
+        for node in observed.graph.nodes:
+            if node.op == 'call_function' and node.target in WEIGHT_INDEX_DICT:
+                for i, node_arg in enumerate(node.args):
+                    if i in WEIGHT_INDEX_DICT[node.target]:
+                        # node_arg is weight
+                        weight_observer_nodes = collect_producer_nodes(node_arg)
+                        if weight_observer_nodes is not None:
+                            weight_observer_module = graph_module_from_producer_nodes(
+                                observed.root, weight_observer_nodes)
+                            # run the weight observer
+                            weight_observer_module()
+        return
+
     def _convert(self, observed, inplace=False, debug=False, is_dynamic_quant=False):
         assert not inplace, 'inplace convert is not supported yet'
         self.restore_state(observed)
         self.is_dynamic_quant = is_dynamic_quant
+        # run weight observers before inserting quant dequant nodes
+        # for dynamic quantization
+        if self.is_dynamic_quant:
+            self._run_weight_observers(observed)
+
         # move to cpu since we only have quantized cpu kernels
         observed.eval().cpu()
         observed_root = observed.root
