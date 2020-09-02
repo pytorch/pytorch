@@ -445,6 +445,11 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     list(APPEND TORCH_SRCS ${MOBILE_SRCS})
   endif()
 
+  # This one needs to be unconditionally added as Functions.cpp is also unconditionally added
+  list(APPEND TORCH_SRCS
+    ${TORCH_SRC_DIR}/csrc/autograd/FunctionsManual.cpp
+  )
+
   if(NOT INTERN_DISABLE_AUTOGRAD)
     list(APPEND TORCH_SRCS
       ${TORCH_SRC_DIR}/csrc/autograd/TraceTypeManual.cpp
