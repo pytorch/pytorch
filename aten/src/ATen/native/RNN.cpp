@@ -1797,7 +1797,8 @@ return_type name( \
       _packed_w_ih, \
       _packed_w_hh, \
       b_ih, \
-      b_hh); \
+      b_hh, \
+      true); \
   return cell_type{}( \
       input, prepare_hx_fn(hx), params); \
 }
