@@ -5385,7 +5385,7 @@ class TestNN(NNTestCase):
         ref_output = torch.Tensor(
             [[[2.422245, 0.051716, -0.606338, -0.024756]],
              [[2.422245, 0.051716, -0.606338, -0.024756]]]
-            ).to(device)
+        ).to(device)
         ref_output = ref_output.detach().numpy()
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
         np.testing.assert_allclose(result, ref_output, atol=1e-5)
@@ -5399,7 +5399,7 @@ class TestNN(NNTestCase):
         ref_output = torch.Tensor(
             [[[2.343536, 0.085561, -0.654954, 0.074991]],
              [[2.343536, 0.085561, -0.654954, 0.074991]]]
-            ).to(device)
+        ).to(device)
         result = result.detach().numpy()
         ref_output = ref_output.detach().numpy()
         self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
