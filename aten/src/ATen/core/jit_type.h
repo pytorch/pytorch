@@ -545,7 +545,7 @@ struct CAFFE2_API VaryingShape {
   }
 
 #if defined(_MSC_VER) && defined(_DEBUG)
-  __forceinline
+  __declspec(noinline)
 #endif
   const c10::optional<ListOfOptionalElements>& sizes() const {
     return dims_;
