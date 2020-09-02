@@ -149,10 +149,10 @@ namespace {
     TYPED_TEST(Rounding, Round) {
         using vec = TypeParam;
         using UVT = UvalueType<TypeParam>;
-        ValueType<vec> case1 = -658.5f;
-        ValueType<vec> exp1 = -658.f;
-        ValueType<vec> case2 = -657.5f;
-        ValueType<vec> exp2 = -658.f;
+        UVT case1 = -658.5f;
+        UVT exp1 = -658.f;
+        UVT case2 = -657.5f;
+        UVT exp2 = -658.f;
         auto test_case = TestingCase<vec>::getBuilder()
             .addDomain(CheckWithinDomains<UVT>{ { {-1000, 1000}} })
             .addCustom({ {case1},exp1 })
@@ -560,8 +560,8 @@ namespace {
         using VT = ValueType<TypeParam>;
         test_binary<vec>(
             NAME_INFO(bit_and),
-            local_and<VT>,
-            [](const vec& v0, const vec& v1) { return v0 & v1; },
+            RESOLVE_OVERLOAD(local_and),
+            [](const vec &v0, const vec &v1) { return v0 & v1; },
             createDefaultBinaryTestCase<vec>(TestSeed(), true));
     }
     TYPED_TEST(Bitwise, BitOr) {
@@ -569,8 +569,8 @@ namespace {
         using VT = ValueType<TypeParam>;
         test_binary<vec>(
             NAME_INFO(bit_or),
-            local_or<VT>,
-            [](const vec& v0, const vec& v1) { return v0 | v1; },
+            RESOLVE_OVERLOAD(local_or),
+            [](const vec &v0, const vec &v1) { return v0 | v1; },
             createDefaultBinaryTestCase<vec>(TestSeed(), true));
     }
     TYPED_TEST(Bitwise, BitXor) {
@@ -578,8 +578,8 @@ namespace {
         using VT = ValueType<TypeParam>;
         test_binary<vec>(
             NAME_INFO(bit_xor),
-            local_xor<VT>,
-            [](const vec& v0, const vec& v1) { return v0 ^ v1; },
+            RESOLVE_OVERLOAD(local_xor),
+            [](const vec &v0, const vec &v1) { return v0 ^ v1; },
             createDefaultBinaryTestCase<vec>(TestSeed(), true));
     }
     TYPED_TEST(Comparison, Equal) {
