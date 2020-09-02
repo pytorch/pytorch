@@ -4373,6 +4373,7 @@ new_criterion_tests = [
         reference_fn=lambda i, t, il, tl, m:
             ctcloss_reference(i, t, il, tl, blank=14, reduction=get_reduction(m)),
         desc='lengths_intlists',
+        check_forward_only=True,
         check_sum_reduction=True,
         check_gradgrad=False,
         check_half=False,
@@ -4403,6 +4404,7 @@ new_criterion_tests = [
         reference_fn=lambda i, t, il, tl, m:
             ctcloss_reference(i, t, il, tl, blank=14, reduction=get_reduction(m)),
         desc='lengths_tensors',
+        check_forward_only=True,
         check_sum_reduction=True,
         check_gradgrad=False,
         check_half=False,
@@ -4431,6 +4433,7 @@ new_criterion_tests = [
         target_fn=lambda: torch.randint(1, 15, (3, 30), dtype=torch.int),
         reference_fn=lambda i, t, il, tl, m:
             ctcloss_reference(i, t, il, tl, blank=0, reduction=get_reduction(m)),
+        check_forward_only=True,
         check_sum_reduction=True,
         check_gradgrad=False,
         check_half=False,
@@ -4448,6 +4451,7 @@ new_criterion_tests = [
         target_fn=lambda: torch.randint(1, 15, (3, 30), dtype=torch.int),
         reference_fn=lambda i, t, il, tl, m:
             ctcloss_reference(i, t, il, tl, blank=0, reduction=get_reduction(m)),
+        check_forward_only=True,
         check_sum_reduction=True,
         check_gradgrad=False,
         check_half=False,
@@ -4463,6 +4467,7 @@ new_criterion_tests = [
         target_fn=lambda: torch.randint(1, 15, (3, 30), dtype=torch.int),
         reference_fn=lambda i, t, il, tl, m:
             ctcloss_reference(i, t, il, tl, blank=0, reduction=get_reduction(m)),
+        check_forward_only=True,
         check_sum_reduction=True,
         check_gradgrad=False,
         check_half=False,
