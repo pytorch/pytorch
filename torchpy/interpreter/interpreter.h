@@ -11,18 +11,6 @@
 #include <vector>
 #include "interpreter_impl.h"
 
-class Model {
- public:
-  Model();
-  ~Model();
-
-  at::Tensor forward(at::Tensor input);
-
-  int id;
-
- private:
-  static std::atomic<int> s_id;
-};
 
 class Interpreter : public InterpreterImpl {
  private:
@@ -30,8 +18,7 @@ class Interpreter : public InterpreterImpl {
   void* handle_;
 
  public:
-  size_t id;
-  Interpreter() : handle_(nullptr), id(s_interpreter_id++) {
+  Interpreter() : handle_(nullptr) {
     char library_name[L_tmpnam];
     library_name_ = library_name;
     std::tmpnam(library_name);

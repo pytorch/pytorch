@@ -184,7 +184,6 @@ __attribute__((constructor)) void init() {
 }
 
 static void teardown() {
-  std::cout << "teardown!" << std::endl;
   // thread_enter();
   // TODO this function needs to handle being called from a crashed thread of
   // during overall shutdown what should the convention be? should not iterate

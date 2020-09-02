@@ -16,8 +16,6 @@ std::vector<std::shared_ptr<Interpreter>> interpreters;
 std::mutex interpreters_mtx;
 size_t num_interpreters = 4;
 
-static std::atomic<size_t> s_interpreter_id;
-
 void init() {
   for (size_t i = 0; i < num_interpreters; i++) {
     interpreters.push_back(std::make_shared<Interpreter>());
