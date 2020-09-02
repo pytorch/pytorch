@@ -333,8 +333,8 @@ namespace {
       // in this case, adaptive pooling is just computing mean over hw
       // dimensions, which can be done more efficiently
       Tensor out = input.mean({-1, -2});
-      return input.dim() == 3 ? out.view({input.size(0), 1, 1})
-                              : out.view({input.size(0), input.size(1), 1, 1});
+      return input.dim() == 3 ? out.resize_({input.size(0), 1, 1}, input.suggest_memory_format())
+                              : out.resize_({input.size(0), input.size(1), 1, 1}, input.suggest_memory_format());
     } else {
       return _adaptive_avg_pool2d(input, output_size);
     }

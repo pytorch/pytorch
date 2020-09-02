@@ -9826,6 +9826,14 @@ class TestNNDeviceType(NNTestCase):
             ref_out = x.contiguous().mean((-1, -2)).view((x.size(0), x.size(1), 1, 1))
 
             self.assertEqual(out, ref_out)
+            if memory_format == torch.channels_last:
+                self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+                c = out.size(1)
+                self.assertEqual(out.stride(), [c, 1, c, c])
+            else:
+                self.assertTrue(out.is_contiguous())
+                c = out.size(1)
+                self.assertEqual(out.stride(), [c, 1, 1, 1])
 
         for mf in (torch.contiguous_format, torch.channels_last, 'non_contiguous'):
             helper((2, 3, 6, 6), mf)
