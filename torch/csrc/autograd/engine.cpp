@@ -375,6 +375,7 @@ auto Engine::thread_main(const std::shared_ptr<GraphTask>& graph_task) -> void {
           // queue_callback() to find the target GraphTask to append final
           // callbacks.
           GraphTaskGuard guard(local_graph_task);
+          NodeGuard ndguard(task.fn_);
           evaluate_function(local_graph_task, task.fn_.get(), task.inputs_, local_graph_task->cpu_ready_queue_);
         } catch (std::exception& e) {
           thread_on_exception(local_graph_task, task.fn_, e);
@@ -441,7 +442,7 @@ void Engine::thread_on_exception(
     std::shared_ptr<GraphTask> graph_task,
     const std::shared_ptr<Node>& fn,
     std::exception& e) {
-  graph_task->set_exception(e, fn);
+  graph_task->set_exception(std::current_exception(), fn);
 }
 
 bool GraphTask::completed() {
@@ -454,8 +455,8 @@ void GraphTask::mark_as_completed_and_run_post_processing() {
   if (future_completed_.exchange(true)) {
     // Future is already marked complete, or being marked as such.
     // In case the marking complete is only in progress, we add a
-    // waitNoThrow() to guarantee the future is marked complete on exit.
-    future_result_->waitNoThrow();
+    // wait() to guarantee the future is marked complete on exit.
+    future_result_->wait();
     return;
   }
 
@@ -472,7 +473,7 @@ void GraphTask::mark_as_completed_and_run_post_processing() {
     lock.unlock();
     future_result_->markCompleted(std::move(vars));
   } catch (std::exception& e) {
-    future_result_->setErrorIfNeeded(e.what());
+    future_result_->setErrorIfNeeded(std::current_exception());
   }
 }
 
@@ -522,11 +523,11 @@ void GraphTask::set_exception_without_signal(const std::shared_ptr<Node>& fn) {
 }
 
 void GraphTask::set_exception(
-    std::exception& e,
+    std::exception_ptr eptr,
     const std::shared_ptr<Node>& fn) {
   set_exception_without_signal(fn);
   if (!future_completed_.exchange(true)) {
-    future_result_->setError(e.what());
+    future_result_->setError(std::move(eptr));
   }
 }
 
@@ -871,7 +872,13 @@ auto Engine::execute(const edge_list& roots,
     graph_task->init_to_execute(*graph_root, outputs);
   }
 
-  return execute_with_graph_task(graph_task, graph_root)->wait();
+  execute_with_graph_task(graph_task, graph_root);
+  // Avoid a refcount bump for the Future, since we check for refcount in
+  // DistEngine (see TORCH_INTERNAL_ASSERT(futureGrads.use_count() == 1)
+  // in dist_engine.cpp).
+  auto& fut = graph_task->future_result_;
+  fut->wait();
+  return fut->value().toTensorVector();
 }
 
 void Engine::initialize_device_threads_pool() {
@@ -882,7 +889,7 @@ void Engine::initialize_device_threads_pool() {
   std::call_once(start_device_threads_flag_, &Engine::start_device_threads, this);
 }
 
-std::shared_ptr<FutureVariableList> Engine::execute_with_graph_task(
+std::shared_ptr<at::ivalue::Future> Engine::execute_with_graph_task(
     const std::shared_ptr<GraphTask>& graph_task,
     std::shared_ptr<Node> graph_root) {
   initialize_device_threads_pool();
