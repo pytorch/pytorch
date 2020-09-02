@@ -475,6 +475,8 @@ class TensorExprFuser {
       return false;
     }
 
+    // Ensure the node is a tensor operation. We fuse only tensor operations
+    bool hasTensorInput = false;
     // Don't include nodes whose inputs are tensor constants - we cannot handle
     // them at the moment.
     // TODO: actually support tensor constants and remove this.
@@ -483,8 +485,10 @@ class TensorExprFuser {
           input->type()->cast<TensorType>()) {
         return false;
       }
+      hasTensorInput = hasTensorInput || input->type()->cast<TensorType>();
     }
-    return tensorexpr::isSupported(node);
+
+    return hasTensorInput && tensorexpr::isSupported(node);
   }
 
 #define REQ(cond)                           \
