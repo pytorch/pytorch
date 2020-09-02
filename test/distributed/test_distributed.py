@@ -2,6 +2,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import copy
 import errno
 import fcntl
+import itertools
 import math
 import os
 import random
@@ -13,6 +14,7 @@ from contextlib import contextmanager
 from datetime import timedelta
 from functools import reduce, wraps
 from io import StringIO
+from typing import Union, NamedTuple
 
 import torch
 import torch.cuda
@@ -92,6 +94,14 @@ class Net(nn.Module):
         x = self.relu(self.fc2(x))
         x = self.fc3(x)
         return F.softmax(x, dim=1)
+
+class Task(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.p = nn.Parameter(torch.ones(2, 2))
+
+    def forward(self, x):
+        return self.p + x
 
 
 class BatchNormNet(nn.Module):
@@ -2684,6 +2694,428 @@ class _DistTestBase(object):
                 dst=gather_on_rank,
             )
 
+    def validate_net_equivalence(self, net):
+        # Helper to validate synchronization of nets across ranks.
+        net_module_states = list(net.module.state_dict().values())
+        # Check that all tensors in module's state_dict() are equal.
+        for t in net_module_states:
+            tensor_list = [
+                torch.zeros_like(t) for _ in range(dist.get_world_size())
+            ]
+            dist.all_gather(tensor_list, t)
+            for tensor in tensor_list:
+                self.assertEqual(tensor, t)
+
+    @require_backend({"gloo", "nccl"})
+    @require_backends_available({"gloo", "nccl"})
+    @skip_if_lt_x_gpu(2)
+    @skip_if_rocm
+    def test_ddp_sync_params_and_buffers(self):
+        # Test that after calling _sync_params_and_buffers, models across ranks
+        # are the same and are equal to the model on the input rank.
+        dim = 2
+        rank = self.rank
+        rank_to_broadcast = 1
+        # Seed to ensure that ranks are initialized with different initial models.
+        torch.manual_seed(rank)
+        model = nn.Linear(dim, dim, bias=False)
+        net = torch.nn.parallel.DistributedDataParallel(
+            model.cuda(rank), device_ids=[self.rank], bucket_cap_mb=1
+        )
+        new_model = nn.Linear(dim, dim, bias=False).cuda(rank)
+        net.module = copy.deepcopy(new_model)
+        # Assert params are different
+        net_module_states = list(net.module.state_dict().values())
+        for t in net_module_states:
+            tensor_list = [
+                torch.zeros_like(t) for _ in range(dist.get_world_size())
+            ]
+            dist.all_gather(tensor_list, t)
+            for i, tensor in enumerate(tensor_list):
+                if i == rank:
+                    self.assertEqual(t, tensor)
+                else:
+                    # tensor from another rank should be different.
+                    self.assertNotEqual(t, tensor)
+
+        net._sync_params_and_buffers(authoritative_rank=rank_to_broadcast)
+        # Now all model params should be the same.
+        self.validate_net_equivalence(net)
+        # Since the network params were broadcast from rank_to_broadcast, validate that
+        # they are the same as new_model on rank_to_broadcast.
+        if rank == rank_to_broadcast:
+            expected_states = new_model.state_dict().values()
+            for t, expected in zip(net_module_states, expected_states):
+                self.assertEqual(t, expected)
+
+    @require_backend({"gloo", "nccl"})
+    @require_backends_available({"gloo", "nccl"})
+    @skip_if_lt_x_gpu(2)
+    @skip_if_rocm
+    def test_ddp_grad_div_uneven_inputs(self):
+        # Test gradient division during training with join() API. If
+        # divide_by_initial_world_size=False, we scale by the effective world
+        # size when allreducing grads.
+        dim = 5
+        batch = 1
+        grad_scale = 50
+        rank = self.rank
+        model = nn.Linear(dim, dim, bias=False)
+        inp = torch.ones(batch, dim, device=self.rank) * grad_scale
+        net = torch.nn.parallel.DistributedDataParallel(
+            model.cuda(rank), device_ids=[self.rank], bucket_cap_mb=1
+        )
+        n_iters = 3
+        if self.rank > 0:
+            n_iters += 2
+
+        with net.join(divide_by_initial_world_size=False):
+            for _ in range(n_iters):
+                loss = net(inp).sum()
+                loss.backward()
+                # The grad is always expected_grad, since we divide by the number
+                # of currently active processes and inactive processes contribute
+                # zero gradient. If we kept dividing by static initial world
+                # size as processes leave, the grad would be smaller.
+                expected_grad = torch.ones(dim, dim, device=self.rank) * grad_scale
+                param = list(net.parameters())[0]
+                self.assertEqual(expected_grad, param.grad)
+                # Avoid accumulating grads so that it's the same every iteration
+                net.zero_grad()
+                torch.cuda.synchronize(device=self.rank)
+
+        # If divide_by_initial_world_size=True (default), we always scale grads
+        # by the initial world_size.
+        with net.join(divide_by_initial_world_size=True):
+            for i in range(n_iters):
+                loss = net(inp).sum()
+                loss.backward()
+                effective_ws = dist.get_world_size()
+                if i >= 3:
+                    effective_ws -= 1
+                expected_grad = (
+                    torch.ones(dim, dim, device=self.rank) * grad_scale * effective_ws
+                ) / dist.get_world_size()
+                param = list(net.parameters())[0]
+                self.assertEqual(expected_grad, param.grad)
+                # Avoid accumulating grad so that it's the same every iteration.
+                net.zero_grad()
+                torch.cuda.synchronize(device=self.rank)
+
+    @require_backend({"gloo", "nccl"})
+    @require_backends_available({"gloo", "nccl"})
+    @skip_if_lt_x_gpu(2)
+    @skip_if_rocm
+    def test_ddp_join_model_equivalence(self):
+        # Verifies equivalence with model training locally and with DDP under
+        # the join context manager.
+        batch = 3
+        dim = 10
+        learning_rate = 0.03
+        model = nn.Linear(dim, dim, bias=False)
+        inp = torch.rand(batch, dim, device=self.rank)
+        local_model = copy.deepcopy(model)
+        local_model = local_model.cuda(self.rank)
+        rank_to_iter_mapping = {rank : 2 * (rank + 1) for rank in range(dist.get_world_size())}
+        # run local model
+        local_iters = sum(rank_to_iter_mapping.values())
+        local_optim = torch.optim.SGD(local_model.parameters(), lr=learning_rate)
+        for _ in range(local_iters):
+            local_optim.zero_grad()
+            out = local_model(inp)
+            loss = out.sum()
+            loss.backward()
+            local_optim.step()
+
+        # run DDP model with join API
+        num_iters = rank_to_iter_mapping[self.rank]
+        net = torch.nn.parallel.DistributedDataParallel(
+            model.cuda(self.rank), device_ids=[self.rank]
+        )
+        ddp_optim = torch.optim.SGD(
+            model.parameters(), lr=learning_rate * dist.get_world_size()
+        )
+        with net.join():
+            for i in range(num_iters):
+                ddp_optim.zero_grad()
+                out = net(inp)
+                loss = out.sum()
+                loss.backward()
+                torch.cuda.synchronize(device=self.rank)
+                ddp_optim.step()
+
+        # Validate model state dicts are equal
+        for (_, local_tensor), (_, dist_tensor) in zip(
+            local_model.state_dict().items(), net.module.state_dict().items()
+        ):
+            self.assertEqual(local_tensor, dist_tensor)
+
+    def _run_uneven_inputs_test(
+        self, test_case, iteration_mapping, find_unused_params,
+    ):
+        model = test_case.model
+        inp = test_case.inp
+        rank = self.rank
+        # Ensure all outsanding GPU work is comlete so this test runs independently.
+        torch.cuda.synchronize()
+        # Bucket_cap_mb is intentionally low to test allreduce scheduling when
+        # there are many buckets.
+        net = torch.nn.parallel.DistributedDataParallel(
+            model.cuda(rank),
+            device_ids=[rank],
+            bucket_cap_mb=1,
+            find_unused_parameters=find_unused_params,
+        )
+
+        # Determine num iters for this rank via the passed in mapping.
+        num_iters = iteration_mapping[rank]
+        with net.join():
+            for _ in range(num_iters):
+                if isinstance(inp, tuple):
+                    loss = net(*inp).sum()
+                else:
+                    loss = net(inp).sum()
+                loss.backward()
+                self._model_step(net)
+                # Ensure completion of GPU kernels (including allreduce). If the
+                # join API is not properly implemented, then this should hang
+                # since the allreduce will hang.
+                torch.cuda.synchronize(device=rank)
+
+        # Ensure completion of all GPU kernels.
+        torch.cuda.synchronize(device=rank)
+        self.assertTrue(net._authoritative_rank)
+        # All ranks should have agreed on the same authoritative_rank!
+        final_rank_tensor = torch.tensor([net._authoritative_rank], device=self.rank)
+        tensor_list = [
+            torch.zeros_like(final_rank_tensor)
+            for _ in range(dist.get_world_size())
+        ]
+        dist.all_gather(tensor_list, final_rank_tensor)
+        max_rank = dist.get_world_size() - 1
+        self.assertSetEqual({max_rank}, set(tensor.item() for tensor in tensor_list))
+        # Ensure that all models are the same across ranks after all have joined.
+        self.validate_net_equivalence(net)
+        dist.barrier()
+
+    @require_backend({"gloo", "nccl"})
+    @require_backends_available({"gloo", "nccl"})
+    @skip_if_lt_x_gpu(2)
+    @skip_if_rocm
+    def test_ddp_uneven_inputs(self):
+        class DDPUnevenTestInput(NamedTuple):
+            name: str
+            model: nn.Module
+            inp: Union[torch.tensor, tuple]
+
+        dim = 1000
+        batch = 1
+        # Create a variety of models to run uneven input tests on.
+        large_model = nn.Sequential(
+            nn.Conv2d(1, 20, 5),
+            nn.ReLU(),
+            nn.Conv2d(20, 32, 5),
+            nn.ReLU(),
+            nn.Conv2d(32, 256, 5),
+            nn.ReLU(),
+        )
+        small_model = nn.Linear(dim, dim, bias=False)
+        bn_net = BatchNormNet()
+
+        class UnusedParamModule(nn.Module):
+            def __init__(self, unused_params_rank):
+                super().__init__()
+                self.t0 = Task()
+                self.t1 = Task()
+                self.unused_params_rank = unused_params_rank
+
+            def task_parameters(self):
+                return (self.t0.p, self.t1.p)
+
+            def forward(self, x, rank):
+                return (
+                    self.t1(self.t0(x))
+                    if rank != self.unused_params_rank
+                    else self.t1(x)
+                )
+
+        unjoined_rank_with_unused_params_model = UnusedParamModule(1)
+        joined_rank_with_unused_params_model = UnusedParamModule(0)
+
+        rank = self.rank
+        models_to_test = [
+            # Network with batchnorm
+            DDPUnevenTestInput(
+                name="batch_norm_net", model=bn_net, inp=torch.ones(batch, 2, device=rank)
+            ),
+            DDPUnevenTestInput(
+                name="large_conv_model",
+                model=large_model,
+                inp=torch.ones(batch, batch, dim, dim, device=rank),
+            ),
+            DDPUnevenTestInput(
+                name="small_model",
+                model=small_model,
+                inp=torch.ones(batch, dim, device=rank),
+            ),
+            # Unused parameter test where rank that does not join early has unused params
+            DDPUnevenTestInput(
+                name="unjoined_rank_with_unused_params_model",
+                model=unjoined_rank_with_unused_params_model,
+                inp=(torch.ones(batch, 2, device=rank), rank),
+            ),
+            # Unused parameter test where rank that does join early has unused params
+            DDPUnevenTestInput(
+                name="joined_rank_with_unused_params_model",
+                model=joined_rank_with_unused_params_model,
+                inp=(torch.ones(batch, 2, device=rank), rank),
+            ),
+        ]
+
+        # Add resnet model if we have torchvision installed.
+        if HAS_TORCHVISION:
+            resnet_model = torchvision.models.resnet50()
+            models_to_test.append(
+                DDPUnevenTestInput(
+                    name="resnet_model",
+                    model=resnet_model,
+                    inp=torch.ones(1, 3, 1000, 1000),
+                )
+            )
+
+        # 0 iteration tests for when one process does not train model at all, so
+        # we must shadow the broadcast calls made when rebuilding buckets.
+        baseline_num_iters = [0, 5]
+        iteration_offsets = [2, 3, 10]
+        num_uneven_ranks = [1]
+        if dist.get_world_size() > 2:
+            num_uneven_ranks.append(2)
+        iteration_mappings = []
+        # Generate rank : num_iters mappings for various uneven input scenarios.
+        # This includes cases where rank 0 joins early and all other ranks join
+        # later, and scenarios where multiple ranks join early, but at different
+        # iterations, and later ranks join later.
+        for num_early_join_ranks in num_uneven_ranks:
+            for baseline_iter in baseline_num_iters:
+                for offset in iteration_offsets:
+                    mapping = {
+                        rank: baseline_iter for rank in range(0, num_early_join_ranks)
+                    }
+                    # if num_early_join_ranks > 1, ranks > 0 that will join early
+                    # iterate offset//2 more times than rank 0, to test nodes
+                    # depleting inputs at different times.
+                    if num_early_join_ranks > 1:
+                        for rank in mapping.keys():
+                            if rank > 0:
+                                mapping[rank] += offset // 2
+                    mapping.update(
+                        {
+                            rank: baseline_iter + offset
+                            for rank in range(
+                                num_early_join_ranks, dist.get_world_size()
+                            )
+                        }
+                    )
+                    iteration_mappings.append(mapping)
+
+        for (test_case, iteration_mapping) in itertools.product(
+            models_to_test, iteration_mappings
+        ):
+            if self.rank == 0:
+                print(
+                    f"Running test: {test_case.name} with iteration mapping {iteration_mapping}"
+                )
+            self._run_uneven_inputs_test(
+                test_case,
+                iteration_mapping,
+                find_unused_params=("unused_params_model" in test_case.name),
+            )
+
+    @require_backend({"gloo", "nccl"})
+    @require_backends_available({"gloo", "nccl"})
+    @skip_if_lt_x_gpu(2)
+    @skip_if_rocm
+    def test_ddp_uneven_input_join_disable(self):
+        # tests that if net.join() with enable=False is specified, DDP works as
+        # expected with even inputs.
+        torch.manual_seed(self.rank)
+        net = torch.nn.parallel.DistributedDataParallel(
+            torch.nn.Linear(1, 1).cuda(self.rank), device_ids=[self.rank]
+        )
+        inp = torch.ones(1) * self.rank
+        n_iters = 5
+        world_size = dist.get_world_size()
+        with net.join(enable=False):
+            for _ in range(n_iters):
+                # Clear grads
+                grad = net.module.weight.grad
+                if grad is not None:
+                    grad.requires_grad_(False)
+                    grad.zero_()
+                out = net(inp)
+                loss = out.sum()
+                loss.backward()
+                # Validate gradients to ensure that we divide by the correct
+                # world_size when join mode is disabled.
+                expected_grad = sum(i for i in range(world_size)) / world_size
+                self.assertEqual(
+                    net.module.weight.grad.item(), expected_grad
+                )
+
+        self.assertFalse(net.ddp_join_enabled)
+        self.validate_net_equivalence(net)
+
+    @require_backend({"gloo", "nccl"})
+    @require_backends_available({"gloo", "nccl"})
+    @skip_if_lt_x_gpu(2)
+    @skip_if_rocm
+    def test_ddp_uneven_input_exception(self):
+        # Tests that exceptions during training are correctly propagated by the
+        # context manager.
+        error_str = "Intentional error"
+
+        class ExceptionModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param = nn.Parameter(torch.ones(1, requires_grad=True))
+
+            def forward(self, _):
+                raise ValueError(error_str)
+
+        exception_module = ExceptionModule()
+        net = torch.nn.parallel.DistributedDataParallel(
+            exception_module.cuda(self.rank), device_ids=[self.rank]
+        )
+        inp = torch.ones(1)
+        with self.assertRaisesRegex(ValueError, error_str):
+            with net.join():
+                out = net(inp)
+                loss = out.sum()
+                loss.backward()
+
+    @require_backend({"gloo", "nccl"})
+    @require_backends_available({"gloo", "nccl"})
+    @skip_if_lt_x_gpu(4)
+    @skip_if_rocm
+    def test_ddp_uneven_inputs_replicated_error(self):
+        # Tests that the context manager errors out in SPMD mode.
+        group = dist.new_group([0, 1])
+        if self.rank < 2:
+            model = nn.Linear(1, 1, bias=False)
+            rank_to_device = {0: [0, 1], 1: [2, 3]}
+
+            devices = rank_to_device[self.rank]
+            net = torch.nn.parallel.DistributedDataParallel(
+                model.cuda(devices[0]), device_ids=devices, process_group=group
+            )
+            with self.assertRaisesRegex(
+                ValueError, r"DDP join\(\) API does not support Single-Process Multi-GPU"
+            ):
+                with net.join():
+                    pass
+        # We need a barrier since otherwise non-participating processes exit too early
+        # and cause a timeout.
+        self._barrier(timeout=60)
 
 if BACKEND == "gloo" or BACKEND == "nccl":
     WORLD_SIZE = os.environ["WORLD_SIZE"]

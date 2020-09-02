@@ -19,13 +19,14 @@ OP_LIST_TO_FUSER_METHOD : Dict[Tuple, Union[nn.Sequential, Callable]] = {
 }
 
 def register_fuser_method(op_list, fuser_method):
-    r''' Register a fuser method for a tuple of ops, will be called
+    ''' Register a fuser method for a tuple of ops, will be called
     during fusion step
     '''
     assert isinstance(op_list, tuple), 'op list must be a tuple'
     OP_LIST_TO_FUSER_METHOD[op_list] = fuser_method
 
 def get_fuser_method(op_list):
-    r''' Get fuser method for the given list of module types
+    ''' Get fuser method for the given list of module types,
+    return None if fuser method does not exist
     '''
-    return OP_LIST_FUSER_METHOD.get(op_list)
+    return OP_LIST_FUSER_METHOD.get(op_list, None)

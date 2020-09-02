@@ -78,7 +78,7 @@ _INCLUDE_QCONFIG_PROPAGATE_LIST = {
 }
 
 # mapping from floating point function or torch ops to quantized ops
-DEFAULT_OPERATOR_MAPPING = {
+FLOAT_TO_QUANTIZED_OPERATOR_MAPPING = {
     F.elu: torch._ops.ops.quantized.elu,
     F.hardswish: torch._ops.ops.quantized.hardswish,
     F.instance_norm: torch._ops.ops.quantized.instance_norm,
@@ -86,7 +86,7 @@ DEFAULT_OPERATOR_MAPPING = {
 }
 
 def register_static_quant_module_mapping(module_class, static_quant_module_class):
-    r''' Register a mapping from float module class to quantized module class,
+    ''' Register a mapping from float module class to quantized module class,
     quantized module class must have from_float defined as a class method
     '''
     assert hasattr(static_quant_module_class, 'from_float'), 'from_float must be defined' + \
@@ -94,10 +94,18 @@ def register_static_quant_module_mapping(module_class, static_quant_module_class
     STATIC_QUANT_MODULE_MAPPING[module_class] = static_quant_module_class
 
 def get_static_quant_module_mapping():
+    ''' Get module mapping for post training static quantization
+    '''
     return STATIC_QUANT_MODULE_MAPPING
 
+def get_static_quantized_module_class(float_module_class):
+    ''' Get the statically quantized module class corresponding to
+    the floating point module class
+    '''
+    return STATIC_QUANT_MODULE_MAPPING.get(float_module_class)
+
 def register_qat_module_mapping(module_class, qat_module_class):
-    r''' Register a mapping from float module class to qat module class,
+    ''' Register a mapping from float module class to qat module class,
     qat module class must have from_float defined as a class method
     '''
     assert hasattr(quantized_module_class, 'from_float'), 'from_float must be defined' + \
@@ -105,24 +113,25 @@ def register_qat_module_mapping(module_class, qat_module_class):
     QAT_MODULE_MAPPING[module_class] = qat_module_class
 
 def get_qat_module_mapping():
+    ''' Get module mapping for quantization aware training
+    '''
     return QAT_MODULE_MAPPING
 
 def register_dynamic_quant_module_mapping(module_class, dynamic_quant_module_class):
-    r''' Register a mapping from float module class to dynamically quantized module class,
+    ''' Register a mapping from float module class to dynamically quantized module class,
     dynamic quant module class must have from_float defined as a class method
     '''
     assert hasattr(dynamic_quant_module_class, 'from_float'), 'from_float must be defined' + \
         ' in dynamically quantized module type'
     DYNAMIC_QUANT_MODULE_MAPPING[module_class] = dynamic_quant_module_class
 
-def get_qat_module_mapping():
-    return QAT_MODULE_MAPPING
-
 def get_dynamic_module_mapping():
+    ''' Get module mapping for post training dynamic quantization
+    '''
     return DYNAMIC_QUANT_MODULE_MAPPING
 
 def get_qconfig_propagation_list():
-    r''' Get the list of module types that we'll attach qconfig
+    ''' Get the list of module types that we'll attach qconfig
     attribute to in prepare
     '''
     QCONFIG_PROPAGATE_MODULE_CLASS_LIST = (
@@ -135,7 +144,7 @@ def get_qconfig_propagation_list():
     return QCONFIG_PROPAGATE_MODULE_CLASS_LIST
 
 def get_compare_output_module_list():
-    r''' Get list of module class types that we will record output
+    ''' Get list of module class types that we will record output
     in numeric suite
     '''
     NUMERIC_SUITE_COMPARE_MODEL_OUTPUT_MODULE_LIST = (
@@ -148,3 +157,13 @@ def get_compare_output_module_list():
         | _INCLUDE_QCONFIG_PROPAGATE_LIST
     ) - _EXCLUDE_QCONFIG_PROPAGATE_LIST
     return NUMERIC_SUITE_COMPARE_MODEL_OUTPUT_MODULE_LIST
+
+def register_operator_mapping(float_op, quantized_op):
+    ''' Register a mapping from floating point ops(torch or functional) to quantized op
+    '''
+    FLOAT_TO_QUANTIZED_OPERATOR_MAPPING[float_op] = quantized_op
+
+def get_quantized_op(float_op)
+    ''' Get the quantized operator corresponding to the float operator
+    '''
+    return FLOAT_TO_QUANTIZED_OPERATOR_MAPPING.get(float_op)
