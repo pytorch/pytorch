@@ -1,41 +1,44 @@
-import numpy as np
 import torch
+from torch.utils._benchmark import FuzzedParameter, FuzzedTensor, Fuzzer, ParameterAlias
+from torch.utils._benchmark.op_fuzzers import constants
 
-from torch.utils._benchmark import Fuzzer, FuzzedParameter, ParameterAlias, FuzzedTensor
-
-SMALL = "small"
-MEDIUM = "medium"
-LARGE = "large"
 
 X_SIZE = "x_size"
 
-_MIN_DIM_SIZE = 8
-_MAX_DIM_SIZE = {
-    SMALL: 128,
-    MEDIUM: 1024,
-    LARGE: 16 * 1024 ** 2,
-}
-_POW_TWO_SIZES = {
-    scale : tuple(2 ** i for i in range(
-        int(np.log2(_MIN_DIM_SIZE)),
-        int(np.log2(max_size)) + 1,
-    ))
-    for scale, max_size in _MAX_DIM_SIZE.items()
-}
-_MIN_ELEMENTS = {
-    SMALL: 0,
-    MEDIUM: 128,
-    LARGE: 4 * 1024,
-}
-
 
 class UnaryOpFuzzer(Fuzzer):
-    def __init__(self, seed, dtype=torch.float32, cuda=False, scale=LARGE):
-        assert scale in (SMALL, MEDIUM, LARGE)
+    def __init__(
+        self,
+        seed,
+        dtype=torch.float32,
+        cuda=False,
+        scale=constants.Scale.LARGE,
+        dim=None,
+        pow_2_fraction=0.2,
+        max_elements=32 * 1024 ** 2,
+    ):
+        assert scale in (
+            constants.Scale.SMALL,
+            constants.Scale.MEDIUM,
+            constants.Scale.LARGE,
+        )
+        if dim is None:
+            dim = {1: 0.3, 2: 0.4, 3: 0.3}
+        elif isinstance(dim, int):
+            assert dim >= 1
+            dim = {dim: 1}
+        elif isinstance(dim, dict):
+            assert all(isinstance(k, int) and k >= 1 for k in dim.keys())
+        maxdim = max(dim.keys())
+
         super().__init__(
             parameters=[
-                # Dimensionality of x. (e.g. 1D, 2D, or 3D.)
-                FuzzedParameter("dim", distribution={1: 0.3, 2: 0.4, 3: 0.3}, strict=True),
+                # Dimensionality of x. (e.g. 1D, 2D, etc.)
+                FuzzedParameter(
+                    "dim",
+                    distribution=dim,
+                    strict=True,
+                ),
 
                 # Shapes for `x`.
                 #   It is important to test all shapes, however
@@ -48,26 +51,31 @@ class UnaryOpFuzzer(Fuzzer):
                 [
                     FuzzedParameter(
                         name=f"k_any_{i}",
-                        minval=_MIN_DIM_SIZE,
-                        maxval=_MAX_DIM_SIZE[scale],
+                        minval=constants.MIN_DIM_SIZE,
+                        maxval=constants.MAX_DIM_SIZE[scale],
                         distribution="loguniform",
-                    ) for i in range(3)
+                    )
+                    for i in range(maxdim)
                 ],
                 [
                     FuzzedParameter(
                         name=f"k_pow2_{i}",
-                        distribution={size: 1. / len(_POW_TWO_SIZES) for size in _POW_TWO_SIZES}
-                    ) for i in range(3)
+                        distribution=constants.pow_2_values(
+                            constants.MIN_DIM_SIZE, constants.MAX_DIM_SIZE[scale]
+                        ),
+                    )
+                    for i in range(maxdim)
                 ],
                 [
                     FuzzedParameter(
                         name=f"k{i}",
                         distribution={
-                            ParameterAlias(f"k_any_{i}"): 0.8,
-                            ParameterAlias(f"k_pow2_{i}"): 0.2,
+                            ParameterAlias(f"k_any_{i}"): 1 - pow_2_fraction,
+                            ParameterAlias(f"k_pow2_{i}"): pow_2_fraction,
                         },
                         strict=True,
-                    ) for i in range(3)
+                    )
+                    for i in range(maxdim)
                 ],
 
                 # Steps for `x`. (Benchmarks strided memory access.)
@@ -75,25 +83,38 @@ class UnaryOpFuzzer(Fuzzer):
                     FuzzedParameter(
                         name=f"x_step_{i}",
                         distribution={1: 0.8, 2: 0.06, 4: 0.06, 8: 0.04, 16: 0.04},
-                    ) for i in range(3)
+                    )
+                    for i in range(maxdim)
                 ],
 
                 # Repeatable entropy for downstream applications.
-                FuzzedParameter(name="random_value", minval=0, maxval=2 ** 32 - 1, distribution="uniform"),
+                FuzzedParameter(
+                    name="random_value",
+                    minval=0,
+                    maxval=2 ** 32 - 1,
+                    distribution="uniform",
+                ),
             ],
             tensors=[
                 FuzzedTensor(
                     name="x",
-                    size=("k0", "k1", "k2"),
-                    steps=("x_step_0", "x_step_1", "x_step_2"),
+                    size=tuple(f"k{i}" for i in range(maxdim)),
+                    steps=tuple(f"x_step_{i}" for i in range(maxdim)),
                     probability_contiguous=0.75,
-                    min_elements=4 * 1024,
-                    max_elements=32 * 1024 ** 2,
-                    max_allocation_bytes=2 * 1024**3,  # 2 GB
+                    min_elements=constants.MIN_ELEMENTS[scale],
+                    max_elements=max_elements,
+                    max_allocation_bytes=2 * 1024 ** 3,  # 2 GB
                     dim_parameter="dim",
                     dtype=dtype,
                     cuda=cuda,
-                ),
+                )
             ],
             seed=seed,
         )
+
+    @staticmethod
+    def structure_params(params: dict):
+        params = params.copy()
+        dim = params.pop("dim")
+        params[X_SIZE] = tuple(params.pop(f"k{i}") for i in range(dim))
+        return params
