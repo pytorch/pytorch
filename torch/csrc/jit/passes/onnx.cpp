@@ -6,6 +6,7 @@
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/onnx/shape_type_inference.h>
 #include <torch/csrc/jit/python/python_ir.h>
 #include <torch/csrc/utils/pybind.h>
 #include <sstream>
@@ -195,45 +196,6 @@ void BlockToONNX(
     env[input] = n;
   }
 
-  // Merge ONNX inferred type with existing type.
-  // If inferred type is sequence, overwrite old type because it is more compatible
-  // with ONNX shape inference.
-  // If inferred type is tensor type, merge the two types, with inferred type having
-  // higher precedence.
-  auto mergeOutputTypes = [](TypePtr old_type, TypePtr new_type) -> TypePtr {
-    auto new_list_type = new_type->cast<ListType>();
-    if (new_list_type) {
-      return new_type;
-    }
-    auto new_tensor_type = new_type->cast<TensorType>();
-    auto old_tensor_type = old_type->cast<TensorType>();
-
-    if (new_tensor_type && old_tensor_type) {
-      auto type = old_tensor_type;
-      if (new_tensor_type && new_tensor_type->sizes().isComplete()) {
-        type = type->withSizes(new_tensor_type->sizes().concrete_sizes().value());
-      }
-      if (new_tensor_type && new_tensor_type->scalarType().has_value()) {
-        type = type->withScalarType(new_tensor_type->scalarType());
-      }
-      return type;
-    }
-
-    if (old_tensor_type) {
-      return old_type;
-    }
-
-    auto old_list_type = old_type->cast<ListType>();
-    if (new_tensor_type && old_list_type) {
-      if (new_tensor_type->sizes().isComplete()) {
-        return new_type;
-      }
-      return old_type;
-    }
-
-    return new_type;
-  };
-
   // Put the new outputs in our environment map, and copy the type from the
   // input graph if they were not set by the symbolic. This is called only
   // with results of symbolic call (not for nodes that are just cloned).
@@ -259,7 +221,7 @@ void BlockToONNX(
         //
         // If onnx shape inference is turned on, the new outputs will have
         // types inferred, and they will be merged with the old types.
-        outputs[i]->setType(mergeOutputTypes(old->type(), outputs[i]->type()));
+        outputs[i]->setType(MergeInferredType(old->type(), outputs[i]->type()));
 
         // Copy over source location and scope information to all nodes
         // created by the symbolic

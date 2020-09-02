@@ -13,6 +13,55 @@ namespace {
 namespace onnx_torch = ::torch::onnx;
 namespace onnx = ::ONNX_NAMESPACE;
 
+// Return a new TypePtr, merging ONNX inferred type with existing type.
+// The inferred type will take higher precedence, since it is produced by ONNX shape inference,
+// and is more compatible with ONNX.
+// In cases where ONNX shape inference fails to produce an inferred type, or produces
+// inferred type that is incomplete, refer to existing type and fill in the gap that
+// is missing.
+// Currently the following cases are supported.
+//  1. existing type: Tensor[], inferred type: Tensor[]
+//    For list of tensors, existing type does not store datatype nor shape for inner tensor.
+//    Thus inferred type always contain more information, and is returned.
+//  2. existing type: Tensor, inferred type: Tensor
+//    Fill in missing info (shape, data type) for inferred type from existing type.
+//  3. existing type: Scalar[], inferred type: Tensor
+//    ONNX represents list of scalars by 1-d Tensor. Return inferred type since it is more compatible
+//    with ONNX.
+TypePtr MergeInferredType(TypePtr existing_type, TypePtr inferred_type) {
+  auto new_list_type = inferred_type->cast<ListType>();
+  if (new_list_type) {
+    return inferred_type;
+  }
+  auto new_tensor_type = inferred_type->cast<TensorType>();
+  auto old_tensor_type = existing_type->cast<TensorType>();
+
+  if (new_tensor_type && old_tensor_type) {
+    auto type = old_tensor_type;
+    if (new_tensor_type && new_tensor_type->sizes().isComplete()) {
+      type = type->withSizes(new_tensor_type->sizes().concrete_sizes().value());
+    }
+    if (new_tensor_type && new_tensor_type->scalarType().has_value()) {
+      type = type->withScalarType(new_tensor_type->scalarType());
+    }
+    return type;
+  }
+
+  if (old_tensor_type) {
+    return existing_type;
+  }
+
+  auto old_list_type = existing_type->cast<ListType>();
+  if (new_tensor_type && old_list_type) {
+    if (new_tensor_type->sizes().isComplete()) {
+      return inferred_type;
+    }
+    return existing_type;
+  }
+
+  return inferred_type;
+}
+
 TensorTypePtr TorchTensorTypeFromONNX(
     const onnx::TypeProto_Tensor& onnx_tensor_type) {
   c10::optional<at::ScalarType> scalar_type;
@@ -99,11 +148,10 @@ bool IsSupportedNode(const Node* n) {
   return true;
 }
 
-Node* CloneNodeForInference(Node* n, std::shared_ptr<Graph> n_graph) {
-  // Clone the node n for the new graph.
+// Clone the node n for the new graph.
+Node* CloneNodeToGraph(Node* n, std::shared_ptr<Graph> n_graph) {
   auto clone_node = n_graph->createClone(n, [&n_graph](Value* v) {
     auto v_n = v->node();
-    // TODO: Need to handle ListConstruct (or bail out if any non-onnx node appears in input)
     if (v_n->kind() == ::c10::onnx::Constant) {
       // Clone the input if it is constant.
       auto constant_n = n_graph->insertNode(
@@ -250,7 +298,7 @@ void ONNXShapeTypeInference(Node* n, int opset_version) {
   // Create a Graph containing only the single node n.
   // This graph is later converted to ONNX to run shape inference.
   auto n_graph = std::make_shared<Graph>();
-  auto clone_node = CloneNodeForInference(n, n_graph);
+  auto clone_node = CloneNodeToGraph(n, n_graph);
   n_graph->insertNode(clone_node);
   // Register all node outputs as graph outputs.
   for (auto output : clone_node->outputs()) {
