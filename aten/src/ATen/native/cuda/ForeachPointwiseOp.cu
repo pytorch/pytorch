@@ -36,60 +36,38 @@ void foreach_pointwise_op_(TensorList input, TensorList tensors1, TensorList ten
     });
 }
 
-std::vector<Tensor> foreach_tensor_addcdiv_cuda(TensorList input, TensorList tensors1, TensorList tensors2, Scalar scalar) {
-    TORCH_CHECK(input.size() > 0, "Tensor list must have at least one tensor.");
-    TORCH_CHECK(input.size() ==  tensors1.size(), "Tensor lists must be of the same length.");
-    TORCH_CHECK(tensors1.size() ==  tensors2.size(), "Tensor lists must be of the same length.");
 
-    if (!check_fast_route(input, scalar) ||
-        !check_fast_route(tensors1, tensors2) ||
-        !check_fast_route(input, tensors1)) {
-        return at::native::foreach_tensor_addcdiv_slow(input, tensors1, tensors2, scalar);
-    }
-
-    return foreach_pointwise_op<std::divides>(input, tensors1, tensors2, scalar);
+#define FOREACH_UNARY_OP(NAME, OP)                      \
+std::vector<Tensor> foreach_tensor_##NAME##_cuda(TensorList input, TensorList tensors1, TensorList tensors2, Scalar scalar) {  \
+    TORCH_CHECK(input.size() > 0, "Tensor list must have at least one tensor.");                                               \
+    TORCH_CHECK(input.size() ==  tensors1.size(), "Tensor lists must be of the same length.");                                 \
+    TORCH_CHECK(tensors1.size() ==  tensors2.size(), "Tensor lists must be of the same length.");                              \
+                                                                                                                               \
+    if (!can_use_fast_route(input, scalar) ||                                                                                  \
+        !can_use_fast_route(tensors1, tensors2) ||                                                                             \
+        !can_use_fast_route(input, tensors1)) {                                                                                \
+        return at::native::foreach_tensor_##NAME##_slow(input, tensors1, tensors2, scalar);                                    \
+    }                                                                                                                          \
+                                                                                                                               \
+    return foreach_pointwise_op<OP>(input, tensors1, tensors2, scalar);                                                        \
+}                                                                                                                              \
+                                                                                                                               \
+void foreach_tensor_##NAME##_cuda_(TensorList input, TensorList tensors1, TensorList tensors2, Scalar scalar) {                \
+    TORCH_CHECK(input.size() > 0, "Tensor list must have at least one tensor.");                                               \
+    TORCH_CHECK(input.size() ==  tensors1.size(), "Tensor lists must be of the same length.");                                 \
+    TORCH_CHECK(tensors1.size() ==  tensors2.size(), "Tensor lists must be of the same length.");                              \
+                                                                                                                               \
+    if (!can_use_fast_route(input, scalar) ||                                                                                  \
+        !can_use_fast_route(tensors1, tensors2) ||                                                                             \
+        !can_use_fast_route(input, tensors1)) {                                                                                \
+        at::native::foreach_tensor_##NAME##_slow_(input, tensors1, tensors2, scalar);                                          \
+    }                                                                                                                          \
+                                                                                                                               \
+    foreach_pointwise_op_<OP>(input, tensors1, tensors2, scalar);                                                              \
 }
 
-void foreach_tensor_addcdiv_cuda_(TensorList input, TensorList tensors1, TensorList tensors2, Scalar scalar) {
-    TORCH_CHECK(input.size() > 0, "Tensor list must have at least one tensor.");
-    TORCH_CHECK(input.size() ==  tensors1.size(), "Tensor lists must be of the same length.");
-    TORCH_CHECK(tensors1.size() ==  tensors2.size(), "Tensor lists must be of the same length.");
 
-    if (!check_fast_route(input, scalar) ||
-        !check_fast_route(tensors1, tensors2) ||
-        !check_fast_route(input, tensors1)) {
-        at::native::foreach_tensor_addcdiv_slow_(input, tensors1, tensors2, scalar);
-    }
-
-    foreach_pointwise_op_<std::divides>(input, tensors1, tensors2, scalar);
-}
-
-std::vector<Tensor> foreach_tensor_addcmul_cuda(TensorList input, TensorList tensors1, TensorList tensors2, Scalar scalar) {
-    TORCH_CHECK(input.size() > 0, "Tensor list must have at least one tensor.");
-    TORCH_CHECK(input.size() ==  tensors1.size(), "Tensor lists must be of the same length.");
-    TORCH_CHECK(tensors1.size() ==  tensors2.size(), "Tensor lists must be of the same length.");
-
-    if (!check_fast_route(input, scalar) ||
-        !check_fast_route(tensors1, tensors2) ||
-        !check_fast_route(input, tensors1)) {
-        return at::native::foreach_tensor_addcmul_slow(input, tensors1, tensors2, scalar);
-    }
-
-    return foreach_pointwise_op<std::multiplies>(input, tensors1, tensors2, scalar);
-}
-
-void foreach_tensor_addcmul_cuda_(TensorList input, TensorList tensors1, TensorList tensors2, Scalar scalar) {
-    TORCH_CHECK(input.size() > 0, "Tensor list must have at least one tensor.");
-    TORCH_CHECK(input.size() ==  tensors1.size(), "Tensor lists must be of the same length.");
-    TORCH_CHECK(tensors1.size() ==  tensors2.size(), "Tensor lists must be of the same length.");
-
-    if (!check_fast_route(input, scalar) ||
-        !check_fast_route(tensors1, tensors2) ||
-        !check_fast_route(input, tensors1)) {
-        at::native::foreach_tensor_addcmul_slow_(input, tensors1, tensors2, scalar);
-    }
-
-    foreach_pointwise_op_<std::multiplies>(input, tensors1, tensors2, scalar);
-}
+FOREACH_UNARY_OP(addcmul, std::multiplies);
+FOREACH_UNARY_OP(addcdiv, std::divides);
 
 }} // namespace at::native
