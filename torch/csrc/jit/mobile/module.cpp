@@ -34,12 +34,17 @@ Function* CompilationUnit::find_function(const c10::QualifiedName& qn) {
 
 c10::IValue Module::run_method(const std::string& method_name, Stack stack) {
   auto observer = torch::observerConfig().getModuleObserver();
+  auto module_metadata = metadata();
   if (observer) {
-    observer->onEnterRunMethod(name(), method_name);
+    observer->onEnterRunMethod(module_metadata, method_name);
   }
 
   auto debug_info = std::make_shared<MobileDebugInfo>();
-  debug_info->setModelName(name());
+  if (module_metadata.find("model_name") != module_metadata.end()) {
+    debug_info->setModelName(module_metadata.at("model_name"));
+  } else {
+    debug_info->setModelName(name());
+  }
   debug_info->setMethodName(method_name);
   at::DebugInfoGuard guard(at::DebugInfoKind::MOBILE_RUNTIME_INFO, debug_info);
 
