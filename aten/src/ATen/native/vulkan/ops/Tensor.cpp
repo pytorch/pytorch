@@ -6,6 +6,11 @@ namespace vulkan {
 namespace ops {
 namespace {
 
+bool is_uma() {
+  return VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU ==
+      api::context().physical_device_properties.deviceType;
+}
+
 VkFormat convert(const caffe2::TypeMeta dtype) {
   switch (c10::typeMetaToScalarType(dtype)) {
     case kFloat:
@@ -18,6 +23,38 @@ VkFormat convert(const caffe2::TypeMeta dtype) {
   }
 
   return VK_FORMAT_UNDEFINED;
+}
+
+api::Resource::Buffer allocate_staging(
+    const IntArrayRef sizes,
+    const TensorOptions& options) {
+  TORCH_INTERNAL_ASSERT(!sizes.empty(), "Invalid Vulkan tensor size!");
+  verify(options);
+
+  return api::context().resource().pool.allocate(
+      api::Resource::Buffer::Descriptor{
+        std::accumulate(
+            sizes.cbegin(),
+            sizes.cend(),
+            1,
+            std::multiplies<int64_t>()),
+        // Usage
+        {
+          VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+          VMA_MEMORY_USAGE_CPU_ONLY,
+        },
+      });
+
+}
+
+api::Resource::Buffer maybe_allocate_staging(
+    const IntArrayRef sizes,
+    const TensorOptions& options) {
+  if (is_uma()) {
+    return api::Resource::Buffer{};
+  }
+
+  return allocate_staging(sizes, options);
 }
 
 api::Resource::Buffer allocate_buffer(
@@ -35,7 +72,8 @@ api::Resource::Buffer allocate_buffer(
             std::multiplies<int64_t>()),
         // Usage
         {
-          VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+          VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+            (is_uma() ? 0u : VK_BUFFER_USAGE_TRANSFER_DST_BIT),
           VMA_MEMORY_USAGE_GPU_ONLY,
         },
       });
