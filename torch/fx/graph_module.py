@@ -35,17 +35,19 @@ def deserialize_graphmodule(root : torch.nn.Module, src : str) -> torch.nn.Modul
     to the original code. Then it symbolically traces through it to get the
     GraphModule
     """
-    root = copy.copy(root)
+    class Dummy(torch.nn.Module):
+        def __init__(self, root, src):
+            super().__init__()
+            self.root = root
+            gbls: Dict[str, Any] = {
+                'torch': torch
+            }
+            exec_with_source(src, gbls)
+            cls = type(self)
+            cls.forward = gbls['forward']
+
     from .symbolic_trace import symbolic_trace
-    gbls: Dict[str, Any] = {
-        'torch': torch
-    }
-    exec_with_source(src, gbls)
-    cls = type(root)
-    # for k, v in gbls.items():
-    #     setattr(root, k, v)
-    root.forward = gbls['forward']
-    return symbolic_trace(root)
+    return symbolic_trace(Dummy(root, src))
 
 class GraphModule(torch.nn.Module):
     def __new__(cls: 'Type[GraphModule]', *args, **kwargs):
@@ -83,8 +85,6 @@ def forward(self, {', '.join(free_variables)}):
         }
         exec_with_source(self.code, gbls)
         cls = type(self)
-        # for k, v in gbls.items():
-        #     setattr(cls, k, v)
         cls.forward = gbls['forward']
 
     def __reduce__(self):

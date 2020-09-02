@@ -1,5 +1,5 @@
 import inspect
-from types import CodeType, FunctionType
+from types import CodeType, FunctionType, MethodType
 from typing import Any, Callable, Dict, Optional, Tuple, Union, List
 import torch
 
