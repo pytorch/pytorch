@@ -13478,7 +13478,7 @@ class TestTorchDeviceType(TestCase):
             ("addcdiv", True, True, 'cpu'),
             ("addcdiv", True, True, 'cuda'),
             ("lerp", True, True, 'cpu'),
-            ("lerp", False, False, 'cuda')
+            ("lerp", True, True, 'cuda')
         ]
 
         for (fn, has_input_output_mem_overlap_check,
@@ -13527,6 +13527,90 @@ class TestTorchDeviceType(TestCase):
             x[:-1] <<= x[1:]
         with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
             x[:-1] >>= x[1:]
+
+    def test_bernoulli_mem_overlap(self, device):
+        x = torch.rand((1,), device=device).expand((6,))
+
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            x.bernoulli_()
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            x.bernoulli_(p=0.1)
+        p = torch.rand(6, device=device)
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            x.bernoulli_(p=p)
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            torch.bernoulli(torch.rand_like(x), out=x)
+
+    def test_index_put_mem_overlap(self, device):
+        x = torch.rand((1,), device=device).expand((6,))
+        y = torch.rand((6,), device=device)
+        ind = torch.tensor([0, 2, 3], device=device)
+        value = torch.rand((3,), device=device)
+        with self.assertWarnsRegex(UserWarning, 'expanded tensors'):
+            x.index_put_((ind,), value)
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            y.index_put_((ind,), y[0])
+
+    def test_masked_fill_mem_overlap(self, device):
+        x = torch.rand((1,), device=device).expand((6,))
+        mask = torch.tensor([True, False, True, True, False, False], device=device)
+        with self.assertWarnsRegex(UserWarning, 'expanded tensors'):
+            x.masked_fill_(mask, 0.)
+
+        fill_val = torch.tensor(0., device=device)
+        with self.assertWarnsRegex(UserWarning, 'expanded tensors'):
+            x.masked_fill_(mask, fill_val)
+
+    def test_masked_select_mem_overlap(self, device):
+        x = torch.rand((1,), device=device).expand((3,))
+        y = torch.rand((6,), device=device)
+        mask = torch.tensor([True, False, True, True, False, False], device=device)
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            torch.masked_select(y, mask, out=x)
+
+    def test_masked_scatter_mem_overlap(self, device):
+        x = torch.rand((1,), device=device).expand((6,))
+        src = torch.rand((3,), device=device)
+        mask = torch.tensor([True, False, True, True, False, False], device=device)
+
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            x.masked_scatter_(mask, src)
+
+    def test_index_select_mem_overlap(self, device):
+        x = torch.rand((1, 6), device=device).expand((2, 6))
+        y = torch.rand((3, 6), device=device)
+        ind = torch.tensor([0, 1], dtype=torch.int64, device=device)
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            torch.index_select(y, 1, ind, out=x)
+
+    def test_cat_mem_overlap(self, device):
+        x = torch.rand((1, 3), device=device).expand((6, 3))
+        y = torch.rand((3, 3), device=device)
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            torch.cat([y, y], out=x)
+
+    def test_scatter_mem_overlap(self, device):
+        x = torch.rand((1,), device=device).expand((6,))
+        src = torch.rand((3,), device=device)
+        ind = torch.tensor([0, 2, 3], device=device, dtype=torch.int64)
+
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            x.scatter_(0, ind, src)
+
+    def test_gather_mem_overlap(self, device):
+        x = torch.rand((1,), device=device).expand((3,))
+        src = torch.rand((6,), device=device)
+        ind = torch.tensor([0, 2, 3], device=device, dtype=torch.int64)
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            torch.gather(src, 0, ind, out=x)
+
+    def test_linlogspace_mem_overlap(self, device):
+        x = torch.rand(1, device=device).expand(10)
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            torch.linspace(1, 10, 10, out=x)
+
+        with self.assertRaisesRegex(RuntimeError, 'unsupported operation'):
+            torch.logspace(1, 10, 10, out=x)
 
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     def test_int_pow(self, device):
@@ -14855,6 +14939,35 @@ class TestTorchDeviceType(TestCase):
             tensor = torch.HalfTensor(array).to(device)
             for i in range(len(array)):
                 self.assertEqual(tensor[i], array[i])
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_numpy_scalar_cmp(self, device, dtype):
+        if dtype.is_complex:
+            tensors = (torch.tensor(complex(1, 3), dtype=dtype, device=device),
+                       torch.tensor([complex(1, 3), 0, 2j], dtype=dtype, device=device),
+                       torch.tensor([[complex(3, 1), 0], [-1j, 5]], dtype=dtype, device=device))
+        else:
+            tensors = (torch.tensor(3, dtype=dtype, device=device),
+                       torch.tensor([1, 0, -3], dtype=dtype, device=device),
+                       torch.tensor([[3, 0, -1], [3, 5, 4]], dtype=dtype, device=device))
+
+        for tensor in tensors:
+            if dtype == torch.bfloat16:
+                with self.assertRaises(TypeError):
+                    np_array = tensor.cpu().numpy()
+                continue
+
+            np_array = tensor.cpu().numpy()
+            for t, a in product((tensor.flatten()[0], tensor.flatten()[0].item()),
+                                (np_array.flatten()[0], np_array.flatten()[0].item())):
+                self.assertEqual(t, a)
+                if dtype == torch.complex64 and torch.is_tensor(t) and type(a) == np.complex64:
+                    # TODO: Imaginary part is dropped in this case. Need fix.
+                    # https://github.com/pytorch/pytorch/issues/43579
+                    self.assertFalse(t == a)
+                else:
+                    self.assertTrue(t == a)
 
     def test_dlpack_conversion(self, device):
         x = torch.randn(1, 2, 3, 4, device=device, dtype=torch.float)
