@@ -1,7 +1,7 @@
 import torch
 import unittest
 from torch.testing._internal.common_utils import TestCase, run_tests
-from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes
+from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes, deviceCountAtLeast
 
 class TestForeach(TestCase):
     @dtypes(*torch.testing.get_all_dtypes())
@@ -121,7 +121,6 @@ class TestForeach(TestCase):
                    torch.tensor([1], dtype=torch.long, device=device)]
         self.assertRaises(RuntimeError, lambda: torch._foreach_add(tensors, 1))
 
-    @deviceCountAtLeast(2)
     def test_add_list_error_cases(self, device):
         tensors1 = []
         tensors2 = []
@@ -157,7 +156,7 @@ class TestForeach(TestCase):
             torch._foreach_add_(tensors1, tensors2)
 
         # different devices
-        if torch.cuda.is_available():
+        if torch.cuda.is_available() and torch.cuda.device_count() == 2::
             tensor1 = torch.zeros(10, 10, device="cuda:0")
             tensor2 = torch.ones(10, 10, device="cuda:1")
             with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
