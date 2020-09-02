@@ -83,6 +83,8 @@ void FusionExecutor::compileFusion(Fusion* fusion, CompileOptions options) {
   max_device_smem =
       at::cuda::getDeviceProperties(options.device.index())->sharedMemPerBlock;
 
+  setUsedTVs();
+
   fusion_id_ = ++fusion_id_counter_;
   has_random_ = fusion->hasRNG();
   has_block_reductions = fusion_.hasBlockReduction();
@@ -137,7 +139,9 @@ at::Tensor inferAndAlloc(
     return at::zeros(isizes, tensor_options);
   } else {
     c10::IntArrayRef isizes(sizes);
-    return at::empty(isizes, tensor_options);
+    // Non Variable type guard for empty_cuda call
+    at::AutoNonVariableTypeMode non_variable_type_mode;
+    return at::native::empty_cuda(isizes, tensor_options);
   }
 }
 
@@ -174,26 +178,18 @@ LaunchParams FusionExecutor::computeLaunchParams(
     StatefulExpressionEvaluator& see) {
   LaunchParams launch_params;
 
-  // Grab all values that are actually used in the fusion
-  auto unordered_vals = DependencyCheck::getAllValsBetween(
-      {fusion_.inputs().begin(), fusion_.inputs().end()}, fusion_.outputs());
-
   // Lets collect all IterDomains that are bound to a thread binding
   std::unordered_map<ParallelType, std::vector<IterDomain*>, TypeHash>
       parallel_iter_domains;
-
-  for (auto val : unordered_vals) {
-    if (val->getValType().value() == ValType::TensorView) {
-      TensorView* tv = val->as<TensorView>();
-      for (auto id : tv->domain()->domain()) {
-        if (id->isThread() && !id->isBroadcast()) {
-          if (parallel_iter_domains.find(id->getParallelType()) !=
-              parallel_iter_domains.end()) {
-            parallel_iter_domains.at(id->getParallelType()).push_back(id);
-          } else {
-            parallel_iter_domains[id->getParallelType()] =
-                std::vector<IterDomain*>({id});
-          }
+  for (auto tv : getUsedTVs()) {
+    for (auto id : tv->domain()->domain()) {
+      if (id->isThread() && !id->isBroadcast()) {
+        if (parallel_iter_domains.find(id->getParallelType()) !=
+            parallel_iter_domains.end()) {
+          parallel_iter_domains.at(id->getParallelType()).push_back(id);
+        } else {
+          parallel_iter_domains[id->getParallelType()] =
+              std::vector<IterDomain*>({id});
         }
       }
     }
@@ -308,6 +304,17 @@ std::vector<at::Tensor> FusionExecutor::allocOutputs(
         inferAndAlloc(output->as<TensorView>(), see, options_, false));
   }
   return outputs;
+}
+
+void FusionExecutor::setUsedTVs() {
+  used_tvs_.clear();
+  auto used_vals = DependencyCheck::getAllValsBetween(
+      {fusion_.inputs().begin(), fusion_.inputs().end()}, fusion_.outputs());
+  for (auto val : used_vals) {
+    if (val->getValType().value() == ValType::TensorView) {
+      used_tvs_.push_back(val->as<TensorView>());
+    }
+  }
 }
 
 std::vector<at::Tensor> FusionExecutor::runFusion(

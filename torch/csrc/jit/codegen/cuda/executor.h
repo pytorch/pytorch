@@ -103,6 +103,12 @@ class TORCH_CUDA_API FusionExecutor : public NonCopyable {
 
   std::vector<at::Tensor> allocOutputs(StatefulExpressionEvaluator& see);
 
+  void setUsedTVs();
+
+  const std::vector<TensorView*>& getUsedTVs() const {
+    return used_tvs_;
+  };
+
  private:
   Fusion fusion_;
 
@@ -114,6 +120,9 @@ class TORCH_CUDA_API FusionExecutor : public NonCopyable {
   size_t max_device_smem = std::numeric_limits<size_t>().max();
   size_t static_smem_size = 0;
   executor_utils::NvrtcFunction compiled_kernel_;
+
+  // TensorViews actually used in the kernel.
+  std::vector<TensorView*> used_tvs_;
 
   // State of the fusion that's important
   bool has_random_ = false;
