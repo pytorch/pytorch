@@ -16,7 +16,7 @@ import functools
 import warnings
 import inspect
 import re
-from typing import Any, Dict, Optional, Set
+from typing import Any, Dict, List, Optional, Set
 
 from torch.jit._state import _python_cu, _enabled
 from torch.jit._script import ScriptModule, _CachedForward, script
@@ -38,6 +38,8 @@ def _create_interpreter_name_lookup_fn(frames_up=1):
         i = 0
         while i < frames_up + 1:
             frame = frame.f_back
+            if not frame:
+                raise RuntimeError("failed to get frame")
             i += 1
 
         f_locals = frame.f_locals
@@ -88,7 +90,7 @@ class ONNXTracedModule(torch.nn.Module):
         self._return_inputs = return_inputs
         self._return_inputs_states = return_inputs_states
 
-    def forward(self, *args):
+    def forward(self, *args: torch.Tensor):
         in_vars, in_desc = _flatten(args)
         # NOTE: use full state, because we need it for BatchNorm export
         # This differs from the compiler path, which doesn't support it at the moment.
@@ -99,13 +101,19 @@ class ONNXTracedModule(torch.nn.Module):
         outs = []
 
         def wrapper(*args):
-            trace_inputs = _unflatten(args[: len(in_vars)], in_desc)
+            in_args: List[torch.Tensor] = []
+            for i in range(len(in_vars)):
+                if not isinstance(args[i], torch.Tensor):
+                    raise RuntimeError("Expected Tensor input")
+                in_args.append(args[i])
+
+            trace_inputs = _unflatten(in_args, in_desc)
 
             ret_inputs.append(
                 tuple(x.clone(memory_format=torch.preserve_format) for x in args)
             )
             if self._return_inputs_states:
-                inputs_states.append(_unflatten(args[: len(in_vars)], in_desc))
+                inputs_states.append(_unflatten(in_args, in_desc))
             outs.append(self.inner(*trace_inputs))
             if self._return_inputs_states:
                 inputs_states[0] = (inputs_states[0], trace_inputs)
@@ -208,12 +216,6 @@ def verify(model, args, loss_fn=torch.sum, devices=None):
     # should be possible to check if our execution actually obeyed the 'devices'
     # the user provided.
 
-    # TODO: Consider adding a utility function to torch.jit to test
-    # for this case
-    if not isinstance(model, torch._C.CompiledFunction):
-        raise TypeError(
-            "Cannot verify an uncompiled module.  Add @torch.jit.compile to compile it"
-        )
     is_module = isinstance(model, Module)
 
     if not isinstance(args, tuple):
@@ -441,7 +443,7 @@ def _check_trace(
                     graph_diff_errors,
                     tensor_compare_errors,
                     extra_msg=msg,
-                )
+                ) from e
 
         has_warned = [False]
 
@@ -918,7 +920,7 @@ def trace_module(
 
     old_module_map = torch.jit._trace._trace_module_map
     try:
-        trace_module_map: Dict[torch.nn.Module, str] = {}
+        trace_module_map: Dict[Any, Any] = {}
 
         def register_submods(mod, prefix):
             for name, child in mod.named_children():
@@ -1003,7 +1005,7 @@ class TracedModule(ScriptModule):
         class QualnameWrapper(torch.nn.Module):
             pass
 
-        QualnameWrapper._jit_override_qualname = torch._jit_internal._qualified_name(
+        QualnameWrapper._jit_override_qualname = torch._jit_internal._qualified_name(  # type: ignore
             type(orig)
         )
 

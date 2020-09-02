@@ -9,8 +9,6 @@ import torch
 import os
 import weakref
 
-from typing import Any, List
-
 class EnabledProxy:
     """Stores whether the JIT is enabled or not.
 

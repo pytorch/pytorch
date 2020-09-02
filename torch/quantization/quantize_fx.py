@@ -1,6 +1,6 @@
 from .fx import Fuser  # noqa: F401
 from .fx import Quantizer  # noqa: F401
-from torch.fx import GraphModule
+from torch.fx import GraphModule  # type: ignore
 
 def _check_is_graph_module(model):
     if not isinstance(model, GraphModule):

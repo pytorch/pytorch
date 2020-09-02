@@ -12,7 +12,7 @@ import inspect
 import copy
 import pickle
 import warnings
-from typing import Any, Callable, Dict
+from typing import Any, Dict
 
 
 import torch
@@ -33,8 +33,8 @@ from torch.jit._state import (
     _set_jit_overload_cache,
 )
 
-torch._C.ScriptMethod.graph_for = _graph_for
-torch._C.ScriptFunction.graph_for = _graph_for
+torch._C.ScriptMethod.graph_for = _graph_for  # type: ignore
+torch._C.ScriptFunction.graph_for = _graph_for  # type: ignore
 ScriptFunction = torch._C.ScriptFunction
 ScriptFunction.__doc__ = """
 Functionally equivalent to a :class:`ScriptModule`, but represents a single
@@ -47,7 +47,7 @@ if _enabled:
     Attribute = collections.namedtuple("Attribute", ["value", "type"])
 else:
 
-    def Attribute(value, type):
+    def Attribute(value, type):  # type: ignore
         return value
 
 
@@ -167,7 +167,7 @@ class OrderedModuleDict(OrderedDictWrapper):
 class ScriptMeta(type):
     def __init__(cls, name, bases, attrs):  # noqa: B902
         # Aggregate all the ScriptMethods and constants from superclasses
-        cls._methods: Dict[str, Callable[..., Any]] = {}
+        cls._methods: Dict[str, Any] = {}
         cls._constants_set = set(getattr(cls, "__constants__", ()))
         for base in reversed(bases):
             for k, v in getattr(base, "_methods", {}).items():
@@ -213,13 +213,13 @@ class ScriptMeta(type):
                 for name in ("_parameters", "_buffers", "_modules"):
                     delattr(self, name)
 
-        cls.__init__ = init_then_script
+        cls.__init__ = init_then_script  # type: ignore
         return super(ScriptMeta, cls).__init__(name, bases, attrs)
 
 
 class _CachedForward(object):
     def __get__(self, obj, cls):
-        return self.__getattr__("forward")
+        return self.__getattr__("forward")  # type: ignore
 
 
 class ScriptWarning(Warning):
@@ -404,7 +404,7 @@ if _enabled:
             Arguments:
                 cpp_module: The C++ module that this RecursiveScriptModule will be rebuilt around.
             """
-            self.__init__(cpp_module)
+            self.__init__(cpp_module)  # type: ignore
 
             # Copy the concrete type from the C++ module to this ScriptModule.
             self._concrete_type = torch._C.ConcreteModuleType.from_jit_type(
@@ -619,7 +619,7 @@ if _enabled:
         # it is not overriden, we call into the nn.Module __dir__ method
         def __dir__(self):
             self_method = self.__dir__
-            if self_method.__func__ == get_function_from_type(
+            if self_method.__func__ == get_function_from_type(  # type: ignore
                 RecursiveScriptModule, "__dir__"
             ):
                 return super(RecursiveScriptModule, self).__dir__()
@@ -630,7 +630,7 @@ if _enabled:
         # class throws if it isn't overriden, we define __bool__ to preserve default behavior
         def __bool__(self):
             self_method = self.__bool__
-            if self_method.__func__ == get_function_from_type(
+            if self_method.__func__ == get_function_from_type(  # type: ignore
                 RecursiveScriptModule, "__bool__"
             ):
                 return True
@@ -727,7 +727,7 @@ else:
     # TODO MAKE SURE THAT DISABLING WORKS
     class ScriptModule(torch.nn.Module):  # type: ignore
         def __init__(self, arg=None):
-            super(ScriptModule, self).__init__()
+            super().__init__()
 
     class RecursiveScriptModule(ScriptModule):  # type: ignore
         def __init__(self, arg=None):

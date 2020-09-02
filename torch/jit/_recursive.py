@@ -411,12 +411,12 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
         # Wrap the original to propagate docstrings and such.
         # TODO: we don't currently do this functions that are recursively
         # compiled, we should.
-        script_method = functools.wraps(stub.original_method)(script_method)
+        wrapped_script_method = functools.wraps(stub.original_method)(script_method)  # type: ignore
 
         # Add the methods to the script_module directly. This ensures they will
         # be found first when `name` is looked up (as opposed to the stubs or
         # nn.Module.forward)
-        script_module.__dict__[name] = script_method
+        script_module.__dict__[name] = wrapped_script_method
 
 
     # copy over python methods to script module if they aren't defined on the script module

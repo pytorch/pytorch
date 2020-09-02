@@ -1,6 +1,7 @@
 import torch
 import torch.overrides
 import linecache
+import copy
 from typing import Type, Dict, List, Any
 from .graph import Graph
 
@@ -26,6 +27,24 @@ def patched_getline(*args, **kwargs):
     return _orig_getlines(*args, **kwargs)
 linecache.getlines = patched_getline
 
+def deserialize_graphmodule(root : torch.nn.Module, src : str) -> torch.nn.Module:
+    """
+    Deserialize a GraphModule given the original `root` module and the generated
+    `forward()` source code (`src`). This will exec() the source of the forward
+    onto the root module to create a well-formed Module with code analogous
+    to the original code. Then it symbolically traces through it to get the
+    GraphModule
+    """
+    root = copy.copy(root)
+    from .symbolic_trace import symbolic_trace
+    gbls: Dict[str, Any] = {
+        'torch': torch
+    }
+    exec_with_source(src, gbls)
+    cls = type(root)
+    for k, v in gbls.items():
+        setattr(root, k, v)
+    return symbolic_trace(root)
 
 class GraphModule(torch.nn.Module):
     def __new__(cls: 'Type[GraphModule]', *args, **kwargs):
@@ -65,6 +84,9 @@ def forward(self, {', '.join(free_variables)}):
         cls = type(self)
         for k, v in gbls.items():
             setattr(cls, k, v)
+
+    def __reduce__(self):
+        return (deserialize_graphmodule, (self.root, self.code))
 
 # workarounds for issues in __torch_function__
 
