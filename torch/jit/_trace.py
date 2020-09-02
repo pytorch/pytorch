@@ -16,7 +16,7 @@ import functools
 import warnings
 import inspect
 import re
-from typing import Any, Dict, Optional, Set
+from typing import Any, Dict, List, Optional, Set
 
 from torch.jit._state import _python_cu, _enabled
 from torch.jit._script import ScriptModule, _CachedForward, script
@@ -101,13 +101,19 @@ class ONNXTracedModule(torch.nn.Module):
         outs = []
 
         def wrapper(*args):
-            trace_inputs = _unflatten(args[: len(in_vars)], in_desc)  # type: ignore
+            in_args: List[torch.Tensor] = []
+            for i in range(len(in_vars)):
+                if not isinstance(args[i], torch.Tensor):
+                    raise RuntimeError('Expected Tensor argument')
+                in_args.append(args[i])
+
+            trace_inputs = _unflatten(in_args, in_desc)
 
             ret_inputs.append(
                 tuple(x.clone(memory_format=torch.preserve_format) for x in args)
             )
             if self._return_inputs_states:
-                inputs_states.append(_unflatten(args[: len(in_vars)], in_desc))  # type: ignore
+                inputs_states.append(_unflatten(in_args, in_desc))
             outs.append(self.inner(*trace_inputs))
             if self._return_inputs_states:
                 inputs_states[0] = (inputs_states[0], trace_inputs)
