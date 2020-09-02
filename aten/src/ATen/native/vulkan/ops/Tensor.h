@@ -61,7 +61,7 @@ namespace ops {
 class vTensor final {
  public:
   vTensor();
-  vTensor(IntArrayRef sizes, const TensorOptions& options);
+  vTensor(api::Context* context, IntArrayRef sizes, const TensorOptions& options);
 
   /*
     Access
@@ -101,11 +101,12 @@ class vTensor final {
   VkImage image(Access::Flags access);
 
  private:
+  api::Resource::Image image_;
+  api::Resource::Buffer buffer_;
+  api::Resource::Buffer staging_;
+  api::Context* context_;
   c10::SmallVector<int64_t, 4u> sizes_;
   TensorOptions options_;
-  api::Resource::Buffer staging_;
-  api::Resource::Buffer buffer_;
-  api::Resource::Image image_;
 };
 
 using vTensorImpl = VulkanOpaqueTensorImpl<vTensor>;
