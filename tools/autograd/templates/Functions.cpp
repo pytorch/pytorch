@@ -307,7 +307,7 @@ Tensor nanprod_backward(const Tensor& grad, const Tensor& input, const Tensor& r
   } else if (zero_idx.size(0) > 1) {
     return at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   } else {
-    return prod_safe_zeros_backward(grad, input.contiguous().view(-1), 0).view_as(input);
+    return prod_safe_zeros_backward(grad, input.contiguous().view(-1), 0).view_as(input) * input.isnan().logical_not();
   }
 }
 
@@ -328,7 +328,7 @@ Tensor nanprod_backward(Tensor grad, const Tensor& input, Tensor result, int64_t
     Tensor nans_replace = at::where(at::isnan(input), at::tensor(1, at::TensorOptions().dtype(input.dtype()).device(input.device())), input);
     return (grad * result) / nans_replace * input.isnan().logical_not();
   } else {
-    return prod_safe_zeros_backward(grad, input, dim);
+    return prod_safe_zeros_backward(grad, input, dim) * input.isnan().logical_not();
   }
 }
 
