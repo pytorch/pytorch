@@ -2883,7 +2883,7 @@ class TestONNXRuntime(unittest.TestCase):
     def test_new_empty(self):
         class Emtpy(torch.nn.Module):
             def forward(self, x):
-                return x.new_empty(x.shape[0]).fill_(0), x.new_empty(x.shape[0], dtype=torch.long).fill_(0)
+                return x.new_empty(x.shape[0]).fill_(0), x.new_empty(x.shape[0], dtype=torch.long) * 0
 
         x = torch.randn(2, 3, 4)
         self.run_test(Emtpy(), x)
