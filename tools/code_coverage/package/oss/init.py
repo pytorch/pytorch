@@ -46,7 +46,7 @@ def initialization() -> Tuple[Option, TestList, List[str]]:
     # get test lists
     test_list = get_test_list(args_run_only)
     # get interested folder -- final report will only over these folders
-    interested_folders = get_interested_folder(args_interested_folder)
+    interested_folders = empty_list_if_none(args_interested_folder)
     # print initialization information
     print_init_info()
     # remove last time's log
@@ -72,7 +72,7 @@ def parse_arguments(
     args = parser.parse_args()
     # get option
     options = get_options(args)
-    return (options, args.interested_folder, args.run_only, args.clean)
+    return (options, args.interest_only, args.run_only, args.clean)
 
 
 def get_test_list_by_type(
@@ -112,12 +112,11 @@ def get_test_list(run_only: Optional[List[str]]) -> TestList:
     return test_list
 
 
-def get_interested_folder(arg_interested_folder: Optional[List[str]]) -> List[str]:
-    if arg_interested_folder is not None:
-        # if this argument is specified, just return itself
-        return arg_interested_folder
-    else:
-        return [""]
+def empty_list_if_none(arg_interested_folder: Optional[List[str]]) -> List[str]:
+    if arg_interested_folder is None:
+        return []
+    # if this argument is specified, just return itself
+    return arg_interested_folder
 
 
 def gcc_export_init():
