@@ -580,7 +580,7 @@ class _ConvTransposeNd(_ConvNd):
             groups, bias, padding_mode)
 
     def _output_padding(self, input, output_size, stride, padding, kernel_size, dilation):
-        # type: (Tensor, Optional[List[int]], List[int], List[int], List[int]) -> List[int]
+        # type: (Tensor, Optional[List[int]], List[int], List[int], List[int], List[int]) -> List[int]
         if output_size is None:
             ret = _single(self.output_padding)  # converting to list if was not already
         else:
