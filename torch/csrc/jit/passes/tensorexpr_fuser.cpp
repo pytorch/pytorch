@@ -464,8 +464,13 @@ class TensorExprFuser {
   bool allShapesAreKnown(Node* node) {
     // TODO: Relax the checks to support dynamic shapes
     for (Value* input : node->inputs()) {
-      if (input->type()->cast<TensorType>() && !input->isCompleteTensor()) {
-        return false;
+      if (input->type()->cast<TensorType>()) {
+        if (!input->isCompleteTensor()) {
+          return false;
+        }
+        if (*input->type()->cast<TensorType>()->dim() == 0) {
+          return false;
+        }
       }
     }
     return true;

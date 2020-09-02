@@ -89,5 +89,24 @@ void testFuserPass_3() {
     testing::FileCheck().check("prim::TensorExprGroup")->run(*g);
   }
 }
+
+void testFuserPass_0DimInput() {
+  KernelScope kernel_scope;
+  const auto graph_string = R"IR(
+    graph(%x : Float(device=cuda),
+          %y : Float(device=cuda)):
+      %one : int = prim::Constant[value=1]()
+      %a : Float(device=cuda) = aten::mul(%x, %y)
+      %b : Float(device=cuda) = aten::add(%x, %a, %one)
+      return (%b))IR";
+  auto g = std::make_shared<Graph>();
+  torch::jit::parseIR(graph_string, g.get());
+
+  g->lint();
+  FuseTensorExprs(g);
+
+  // We should not fuse 0-dim tensors
+  testing::FileCheck().check_not("prim::TensorExprGroup")->run(*g);
+}
 } // namespace jit
 } // namespace torch
