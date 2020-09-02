@@ -1247,7 +1247,7 @@ def emit_body(declaration):
                 res += FW_DERIVATIVE_FORBID_LIST_TEMPLATE.substitute(arg=inp["name"], cond=cond, msg=get_msg())
 
         if len(to_check) > 0:
-            cond = " or ".join(to_check)
+            cond = " || ".join(to_check)
             res += FW_DERIVATIVE_FORBID_TEMPLATE.substitute(cond=cond, msg=get_msg())
         return res
 
