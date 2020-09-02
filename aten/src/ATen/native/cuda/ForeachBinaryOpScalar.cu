@@ -35,84 +35,30 @@ void foreach_binary_op_(TensorList tensors, Scalar scalar) {
     });
 }
 
-std::vector<Tensor> foreach_tensor_add_scalar_kernel_cuda(TensorList tensors, Scalar scalar) {
-    check_foreach_api_restrictions(tensors);
-
-    if (!can_use_fast_route(tensors, scalar)) {
-        return at::native::foreach_tensor_add_scalar_kernel_slow(tensors, scalar);
-    }
-
-    return foreach_binary_op<std::plus>(tensors, scalar);
+#define FOREACH_BINARY_OP_SCALAR(NAME, OP)                                                          \
+void foreach_tensor_##NAME##_scalar_kernel_cuda_(TensorList tensors, Scalar scalar) {               \
+    check_foreach_api_restrictions(tensors);                                                        \
+                                                                                                    \
+    if (!can_use_fast_route(tensors, scalar)) {                                                     \
+        return at::native::foreach_tensor_##NAME##_scalar_kernel_slow_(tensors, scalar);            \
+    }                                                                                               \
+                                                                                                    \
+    foreach_binary_op_<OP>(tensors, scalar);                                                        \
+}                                                                                                   \
+                                                                                                    \
+std::vector<Tensor> foreach_tensor_##NAME##_scalar_kernel_cuda(TensorList tensors, Scalar scalar) { \
+    check_foreach_api_restrictions(tensors);                                                        \
+                                                                                                    \
+    if (!can_use_fast_route(tensors, scalar)) {                                                     \
+        return at::native::foreach_tensor_##NAME##_scalar_kernel_slow(tensors, scalar);             \
+    }                                                                                               \
+                                                                                                    \
+    return foreach_binary_op<OP>(tensors, scalar);                                                  \
 }
 
-void foreach_tensor_add_scalar_kernel_cuda_(TensorList tensors, Scalar scalar) {
-    check_foreach_api_restrictions(tensors);
-
-    if (!can_use_fast_route(tensors, scalar)) {
-        return at::native::foreach_tensor_add_scalar_kernel_slow_(tensors, scalar);
-    }
-
-    foreach_binary_op_<std::plus>(tensors, scalar);
-}
-
-std::vector<Tensor> foreach_tensor_sub_scalar_kernel_cuda(TensorList tensors, Scalar scalar) {
-    check_foreach_api_restrictions(tensors);
-
-    if (!can_use_fast_route(tensors, scalar)) {
-        return at::native::foreach_tensor_sub_scalar_kernel_slow(tensors, scalar);
-    }
-
-    return foreach_binary_op<std::minus>(tensors, scalar);
-}
-
-void foreach_tensor_sub_scalar_kernel_cuda_(TensorList tensors, Scalar scalar) {
-    check_foreach_api_restrictions(tensors);
-
-    if (!can_use_fast_route(tensors, scalar)) {
-        return at::native::foreach_tensor_sub_scalar_kernel_slow_(tensors, scalar);
-    }
-
-    foreach_binary_op_<std::minus>(tensors, scalar);
-}
-
-std::vector<Tensor> foreach_tensor_mul_scalar_kernel_cuda(TensorList tensors, Scalar scalar) {
-    check_foreach_api_restrictions(tensors);
-
-    if (!can_use_fast_route(tensors, scalar)) {
-        return at::native::foreach_tensor_mul_scalar_kernel_slow(tensors, scalar);
-    }
-
-    return foreach_binary_op<std::multiplies>(tensors, scalar);
-}
-
-void foreach_tensor_mul_scalar_kernel_cuda_(TensorList tensors, Scalar scalar) {
-    check_foreach_api_restrictions(tensors);
-
-    if (!can_use_fast_route(tensors, scalar)) {
-        return at::native::foreach_tensor_mul_scalar_kernel_slow_(tensors, scalar);
-    }
-
-    foreach_binary_op_<std::multiplies>(tensors, scalar);
-}
-
-std::vector<Tensor> foreach_tensor_div_scalar_kernel_cuda(TensorList tensors, Scalar scalar) {
-    check_foreach_api_restrictions(tensors);
-
-    if (!can_use_fast_route(tensors, scalar)) {
-        return at::native::foreach_tensor_div_scalar_kernel_slow(tensors, scalar);
-    }
-
-    return foreach_binary_op<std::divides>(tensors, scalar);
-}
-
-void foreach_tensor_div_scalar_kernel_cuda_(TensorList tensors, Scalar scalar) {
-    check_foreach_api_restrictions(tensors);
-
-    if (!can_use_fast_route(tensors, scalar)) {
-        return at::native::foreach_tensor_div_scalar_kernel_slow_(tensors, scalar);
-    }
-
-    foreach_binary_op_<std::divides>(tensors, scalar);
-}
+FOREACH_BINARY_OP_SCALAR(add, std::plus);
+FOREACH_BINARY_OP_SCALAR(sub, std::minus);
+FOREACH_BINARY_OP_SCALAR(mul, std::multiplies);
+FOREACH_BINARY_OP_SCALAR(div, std::divides);
 
 }} // namespace at::native
