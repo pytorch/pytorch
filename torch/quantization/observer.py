@@ -383,7 +383,7 @@ class MinMaxObserver(_ObserverBase):
         r"""Records the running minimum and maximum of ``x``."""
         x = x_orig.detach()  # avoid keeping autograd tape
         x = x.to(self.min_val.dtype)
-        min_val_cur, max_val_cur = torch._min_max(x)
+        min_val_cur, max_val_cur = torch._aminmax(x)
         min_val = torch.min(min_val_cur, self.min_val)
         max_val = torch.max(max_val_cur, self.max_val)
         self.min_val.copy_(min_val)
@@ -478,9 +478,9 @@ class MovingAverageMinMaxObserver(MinMaxObserver):
         min_val = self.min_val
         max_val = self.max_val
         if min_val == float('inf') and max_val == float('-inf'):
-            min_val, max_val = torch._min_max(x)
+            min_val, max_val = torch._aminmax(x)
         else:
-            min_val_cur, max_val_cur = torch._min_max(x)
+            min_val_cur, max_val_cur = torch._aminmax(x)
             min_val = min_val + self.averaging_constant * (min_val_cur - min_val)
             max_val = max_val + self.averaging_constant * (max_val_cur - max_val)
         self.min_val.resize_(min_val.shape)
@@ -630,9 +630,9 @@ class PerChannelMinMaxObserver(_ObserverBase):
         y = y.to(self.min_vals.dtype)
         y = torch.flatten(y, start_dim=1)
         if min_vals.numel() == 0 or max_vals.numel() == 0:
-            min_vals, max_vals = torch._min_max_val(y, 1)
+            min_vals, max_vals = torch._aminmax(y, 1)
         else:
-            min_vals_cur, max_vals_cur = torch._min_max_val(y, 1)
+            min_vals_cur, max_vals_cur = torch._aminmax(y, 1)
             min_vals = torch.min(min_vals_cur, min_vals)
             max_vals = torch.max(max_vals_cur, max_vals)
         self.min_vals.resize_(min_vals.shape)
@@ -714,9 +714,9 @@ class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
         y = x.permute(tuple(new_axis_list))
         y = torch.flatten(y, start_dim=1)
         if min_vals.numel() == 0 or max_vals.numel() == 0:
-            min_vals, max_vals = torch._min_max_val(y, 1)
+            min_vals, max_vals = torch._aminmax(y, 1)
         else:
-            min_vals_cur, max_vals_cur = torch._min_max_val(y, 1)
+            min_vals_cur, max_vals_cur = torch._aminmax(y, 1)
             min_vals = min_vals + self.averaging_constant * (min_vals_cur - min_vals)
             max_vals = max_vals + self.averaging_constant * (max_vals_cur - max_vals)
         self.min_vals.resize_(min_vals.shape)
