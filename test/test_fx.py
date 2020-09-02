@@ -436,6 +436,7 @@ class TestFX(JitTestCase):
     def test_deepcopy_graphmodule_with_transform(self):
         st = SimpleTest()
         traced = symbolic_trace(st)
+
         def transform(traced):
             new_graph = copy.deepcopy(traced.graph)
             delegate = torch.fx.DefaultDelegate(traced.root, new_graph)
