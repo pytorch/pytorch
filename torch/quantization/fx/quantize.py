@@ -20,7 +20,7 @@ from torch.fx.graph import (
 )
 
 from .pattern_utils import (
-    matches,
+    is_match,
     get_quant_patterns,
     get_dynamic_quant_patterns,
 )
@@ -340,28 +340,32 @@ class Quantizer:
 
         def load_arg(quantized):
             """
-            if quantized is a list, then arg should be a list and the args with corresponding
-            indexes will be quantized
-            if quantized is a boolean, then all args will be quantized/not quantized
-            if quantized is None, then we'll load the node as long as it exists
+            Input: quantized, which can be None, list, boolean or tuple
+              - if quantized is a list or tuple, then arg should be a list and the args with corresponding
+                indexes will be quantized
+              - if quantized is a boolean, then all args will be quantized/not quantized
+              - if quantized is None, then we'll load the node as long as it exists
+
+            Output: fn which takes arg_or_args, and loads them from the corresponding
+              environment depending on the value of quantized.
             """
             assert quantized is None or isinstance(quantized, (tuple, list, bool)), type(quantized)
 
-            def load_arg_impl(arg):
+            def load_arg_impl(arg_or_args):
                 if quantized is None:
-                    return map_arg(arg, load_x)
+                    return map_arg(arg_or_args, load_x)
                 if isinstance(quantized, bool):
-                    return map_arg(arg, load_quantized if quantized else load_non_quantized)
+                    return map_arg(arg_or_args, load_quantized if quantized else load_non_quantized)
                 elif isinstance(quantized, (tuple, list)):
-                    assert isinstance(arg, (tuple, list)), arg
-                    loaded_arg = []
+                    assert isinstance(arg_or_args, (tuple, list)), arg_or_args
+                    loaded_args = []
                     # for now, we only support quantizing positional arguments
-                    for i, a in enumerate(arg):
+                    for i, a in enumerate(arg_or_args):
                         if i in quantized:
-                            loaded_arg.append(map_arg(a, load_quantized))
+                            loaded_args.append(map_arg(a, load_quantized))
                         else:
-                            loaded_arg.append(map_arg(a, load_non_quantized))
-                    return type(arg)(loaded_arg)
+                            loaded_args.append(map_arg(a, load_non_quantized))
+                    return type(arg_or_args)(loaded_args)
             return load_arg_impl
 
         def is_quantized(node):
@@ -508,7 +512,7 @@ class Quantizer:
         for node in reversed(graph.nodes):
             if node.name not in match_map and node.name not in all_matched:
                 for pattern, value in patterns.items():
-                    if matches(modules, node, pattern):
+                    if is_match(modules, node, pattern):
                         matched = []
                         record_match(pattern, node, matched)
                         for n in matched:
