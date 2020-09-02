@@ -362,6 +362,28 @@ class TestTEFuser(JitTestCase):
         ge = self.checkScript(fn, inputs)
         self.assertAllFused(ge.graph_for(*inputs))
 
+    def test_minmax(self):
+        def tmax(a, b):
+            return torch.max(2 * a, b)
+
+        def tmin(a, b):
+            return torch.min(2 * a, b)
+
+        a = torch.randn(4, 4, dtype=torch.float)
+        b = torch.randn(4, 4, dtype=torch.float)
+        nan = torch.tensor(float('nan'), dtype=torch.float)
+
+        devices = ["cpu"]
+        if torch.cuda.is_available():
+            devices.append("cuda")
+        for f, inputs, device in product(
+                (tmax, tmin),
+                ([a, b], [a, nan], [b, nan]),
+                devices):
+            inputs = [t.to(device) for t in inputs]
+            s = self.checkScript(f, inputs)
+            self.assertAllFused(s.graph_for(*inputs))
+
     # TODO: reenable the test after backwards passes start working in PE
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @unittest.skip("temporarily disable")
