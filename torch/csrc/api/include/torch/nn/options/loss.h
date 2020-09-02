@@ -388,6 +388,49 @@ using TripletMarginLossFuncOptions = TripletMarginLossOptions;
 
 // ============================================================================
 
+/// Options for the `TripletMarginLossWithDistance` module.
+///
+/// Example:
+/// ```
+/// TripletMarginLossWithDistance model(TripletMarginLossWithDistanceOptions().margin(3).swap(false));
+/// ```
+struct TORCH_API TripletMarginLossWithDistanceOptions {
+  typedef c10::variant<enumtype::kNone, enumtype::kMean, enumtype::kSum> reduction_t;
+  typedef std::function<Tensor(const Tensor&, const Tensor&)> distance_function_t;
+
+  /// Specifies a metric function that quantifies the relationship
+  /// between two Tensors. Default: nullopt
+  TORCH_ARG(c10::optional<distance_function_t>, distance_function) = c10::nullopt;
+  /// Specifies whether the optional metric function is a similarity metric, i.e.,
+  /// larger values indicate that the Tensors are more similar. Default: False
+  TORCH_ARG(bool, is_similarity_function) = false;
+  /// Specifies the threshold for which the distance of a negative sample must
+  /// reach in order to incur zero loss. Default: 1
+  TORCH_ARG(double, margin) = 1.0;
+  /// The distance swap is described in detail in the paper Learning shallow
+  /// convolutional feature descriptors with triplet losses by V. Balntas,
+  /// E. Riba et al. Default: False
+  TORCH_ARG(bool, swap) = false;
+  /// Specifies the reduction to apply to the output. Default: Mean
+  TORCH_ARG(reduction_t, reduction) = torch::kMean;
+};
+
+namespace functional {
+/// Options for `torch::nn::functional::triplet_margin_loss_with_distance`.
+///
+/// See the documentation for `torch::nn::TripletMarginLossWithDistanceOptions` class to learn what
+/// arguments are supported.
+///
+/// Example:
+/// ```
+/// namespace F = torch::nn::functional;
+/// F::triplet_margin_loss_with_distance(anchor, positive, negative, F::TripletMarginLossWithDistanceFuncOptions().margin(1.0));
+/// ```
+using TripletMarginLossWithDistanceFuncOptions = TripletMarginLossWithDistanceOptions;
+} // namespace functional
+
+// ============================================================================
+
 /// Options for the `CTCLoss` module.
 ///
 /// Example:

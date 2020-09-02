@@ -180,6 +180,35 @@ Tensor TripletMarginLossImpl::forward(
 
 // ============================================================================
 
+TripletMarginLossWithDistanceImpl::TripletMarginLossWithDistanceImpl(
+    const TripletMarginLossWithDistanceOptions& options_)
+    : options(options_) {}
+
+void TripletMarginLossWithDistanceImpl::reset() {}
+
+void TripletMarginLossWithDistanceImpl::pretty_print(std::ostream& stream) const {
+  stream << "torch::nn::TripletMarginLossWithDistance(margin=" << options.margin()
+         << std::boolalpha << ", swap=" << options.swap() << ", is_similarity_function="
+         << options.is_similarity_function() << ")";
+}
+
+Tensor TripletMarginLossWithDistanceImpl::forward(
+    const Tensor& anchor,
+    const Tensor& positive,
+    const Tensor& negative) {
+  return F::detail::triplet_margin_loss_with_distance(
+    anchor,
+    positive,
+    negative,
+    options.distance_function(),
+    options.is_similarity_function(),
+    options.margin(),
+    options.swap(),
+    options.reduction());
+}
+
+// ============================================================================
+
 MultiLabelMarginLossImpl::MultiLabelMarginLossImpl(
     const torch::nn::MultiLabelMarginLossOptions& options_)
     : options(options_) {}
@@ -223,9 +252,9 @@ void SmoothL1LossImpl::pretty_print(std::ostream& stream) const {
 Tensor SmoothL1LossImpl::forward(const Tensor& input, const Tensor& target) {
   return F::detail::smooth_l1_loss(input, target, options.reduction());
 }
-  
+
 // ============================================================================
-  
+
 CTCLossImpl::CTCLossImpl(const CTCLossOptions& options_) : options(options_) {}
 
 void CTCLossImpl::reset() {}

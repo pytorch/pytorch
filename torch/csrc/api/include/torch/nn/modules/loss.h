@@ -309,7 +309,7 @@ struct TORCH_API SmoothL1LossImpl : public Cloneable<SmoothL1LossImpl> {
 TORCH_MODULE(SmoothL1Loss);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ MultiLabelMarginLoss ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  
+
 /// Creates a criterion that optimizes a multi-class multi-classification
 /// hinge loss (margin-based loss) between input :math:`x` (a 2D mini-batch `Tensor`)
 /// and output :math:`y` (which is a 2D `Tensor` of target class indices).
@@ -421,9 +421,9 @@ TORCH_MODULE(MultiLabelSoftMarginLoss);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ TripletMarginLoss ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Creates a criterion that measures the triplet loss given an input
-/// tensors :math:`x1`, :math:`x2`, :math:`x3` and a margin with a value greater 
+/// tensors :math:`x1`, :math:`x2`, :math:`x3` and a margin with a value greater
 /// than :math:`0`. This is used for measuring a relative similarity between
-/// samples. A triplet is composed by `a`, `p` and `n` (i.e., `anchor`, 
+/// samples. A triplet is composed by `a`, `p` and `n` (i.e., `anchor`,
 /// `positive examples` and `negative examples` respectively). The
 /// shapes of all input tensors should be :math:`(N, D)`.
 /// See https://pytorch.org/docs/master/nn.html#torch.nn.TripletMarginLoss to learn
@@ -460,6 +460,48 @@ struct TORCH_API TripletMarginLossImpl : public Cloneable<TripletMarginLossImpl>
 /// See the documentation for `ModuleHolder` to learn about PyTorch's
 /// module storage semantics.
 TORCH_MODULE(TripletMarginLoss);
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ TripletMarginLossWithDistance ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Creates a criterion that measures the triplet loss given input
+/// tensors :math:`a`, :math:`p`, and :math:`n` (representing anchor,
+/// positive, and negative examples, respectively); and a real-valued function
+/// between them.
+/// See https://pytorch.org/docs/master/nn.html#torch.nn.TripletMarginLossWithDistance to learn
+/// about the exact behavior of this module.
+///
+/// See the documentation for `torch::nn::TripletMarginLossWithDistanceOptions` class to learn what
+/// constructor arguments are supported for this module.
+///
+/// Example:
+/// ```
+/// TripletMarginLossWithDistance model(TripletMarginLossWithDistanceOptions().margin(3).swap(false));
+/// ```
+struct TORCH_API TripletMarginLossWithDistanceImpl : public Cloneable<TripletMarginLossWithDistanceImpl> {
+  explicit TripletMarginLossWithDistanceImpl(
+      const TripletMarginLossWithDistanceOptions& options_ = {});
+
+  void reset() override;
+
+  /// Pretty prints the `TripletMarginLossWithDistance` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  Tensor forward(
+      const Tensor& anchor,
+      const Tensor& positive,
+      const Tensor& negative);
+
+  /// The options with which this `Module` was constructed.
+  TripletMarginLossWithDistanceOptions options;
+};
+
+/// A `ModuleHolder` subclass for `TripletMarginLossWithDistanceImpl`.
+/// See the documentation for `TripletMarginLossWithDistanceImpl` class to learn what methods it
+/// provides, and examples of how to use `TripletMarginLossWithDistance` with
+/// `torch::nn::TripletMarginLossWithDistanceOptions`.
+/// See the documentation for `ModuleHolder` to learn about PyTorch's
+/// module storage semantics.
+TORCH_MODULE(TripletMarginLossWithDistance);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ CTCLoss ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -626,9 +668,9 @@ TORCH_MODULE(NLLLoss);
 struct TORCH_API CrossEntropyLossImpl : public Cloneable<CrossEntropyLossImpl> {
   explicit CrossEntropyLossImpl(
       const CrossEntropyLossOptions& options_ = {});
-    
+
   void reset() override;
-    
+
   /// Pretty prints the `CrossEntropyLoss` module into the given `stream`.
   void pretty_print(std::ostream& stream) const override;
 

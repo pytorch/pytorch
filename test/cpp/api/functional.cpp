@@ -670,6 +670,98 @@ TEST_F(FunctionalTest, TripletMarginLoss) {
   ASSERT_TRUE(output.allclose(expected, 1e-04));
 }
 
+TEST_F(FunctionalTest, TripletMarginLossWithDistanceDefaultParity) {
+  /// Check that if we use torch::pairwise_distance with the default
+  /// TripletMarginLoss options as our distance function, the outputs
+  /// are equal (i.e., equal under defaults).
+  auto basicOptions = F::TripletMarginLossFuncOptions();
+  auto distanceOptions = F::TripletMarginLossWithDistanceFuncOptions();
+
+  auto anchor = torch::randn({100, 128}, torch::dtype(torch::kFloat).requires_grad(true));
+  auto positive = torch::randn({100, 128}, torch::dtype(torch::kFloat).requires_grad(true));
+  auto negative =
+      torch::randn({100, 128}, torch::dtype(torch::kFloat).requires_grad(true));
+
+  auto basicOutput =
+      F::triplet_margin_loss(anchor, positive, negative, basicOptions);
+  auto distanceOutput = F::triplet_margin_loss_with_distance(
+      anchor, positive, negative, distanceOptions);
+
+  ASSERT_TRUE(distanceOutput.allclose(basicOutput));
+
+  distanceOutput.backward();
+  ASSERT_EQ(anchor.sizes(), anchor.grad().sizes());
+  ASSERT_EQ(positive.sizes(), positive.grad().sizes());
+  ASSERT_EQ(negative.sizes(), negative.grad().sizes());
+}
+
+TEST_F(FunctionalTest, TripletMarginLossWithDistance) {
+  /// Check that TripletMarginLoss and TripletMarginLossWithDistance
+  /// behave analogously irrespective of flags.
+  auto defaultBasicOptions = F::TripletMarginLossFuncOptions();
+  auto pairwise_distance = [&](const torch::Tensor& x, const torch::Tensor& y) {
+    return torch::pairwise_distance(
+        x, y, defaultBasicOptions.p(), defaultBasicOptions.eps());
+  };
+  auto pairwise_similarity = [&](const torch::Tensor& x,
+                                 const torch::Tensor& y) {
+    return 1.0 -
+        torch::pairwise_distance(
+               x, y, defaultBasicOptions.p(), defaultBasicOptions.eps());
+  };
+  std::vector<std::tuple<
+      F::TripletMarginLossWithDistanceFuncOptions::distance_function_t,
+      bool>>
+      distance_functions = {std::make_tuple(pairwise_distance, false),
+                            std::make_tuple(pairwise_similarity, true)};
+
+  std::vector<F::TripletMarginLossWithDistanceFuncOptions::reduction_t>
+      reductions = {torch::kSum, torch::kMean, torch::kSum};
+  std::vector<float> margins = {1.0, 1.5};
+  std::vector<bool> swaps = {true, false};
+
+  for (auto& funcPair : distance_functions) {
+    for (auto& reduction : reductions) {
+      for (auto& margin : margins) {
+        for (const auto& swap : swaps) {
+          auto basicOptions = F::TripletMarginLossFuncOptions()
+                                  .reduction(reduction)
+                                  .margin(margin)
+                                  .swap(swap);
+          auto distanceOptions =
+              F::TripletMarginLossWithDistanceFuncOptions()
+                  .distance_function(std::get<0>(funcPair))
+                  .is_similarity_function(std::get<1>(funcPair))
+                  .reduction(reduction)
+                  .margin(margin)
+                  .swap(swap);
+
+          auto anchor = torch::randn(
+              {100, 128}, torch::dtype(torch::kFloat).requires_grad(true));
+          auto positive = torch::randn(
+              {100, 128}, torch::dtype(torch::kFloat).requires_grad(true));
+          auto negative = torch::randn(
+              {100, 128}, torch::dtype(torch::kFloat).requires_grad(true));
+
+          auto basicOutput =
+              F::triplet_margin_loss(anchor, positive, negative, basicOptions);
+          auto distanceOutput = F::triplet_margin_loss_with_distance(
+              anchor, positive, negative, distanceOptions);
+
+          ASSERT_TRUE(distanceOutput.allclose(basicOutput));
+
+          // handle for torch::kNone reduction
+          auto sum = distanceOutput.sum();
+          distanceOutput.backward();
+          ASSERT_EQ(anchor.sizes(), anchor.grad().sizes());
+          ASSERT_EQ(positive.sizes(), positive.grad().sizes());
+          ASSERT_EQ(negative.sizes(), negative.grad().sizes());
+        }
+      }
+    }
+  }
+}
+
 TEST_F(FunctionalTest, NLLLoss) {
   auto input = torch::tensor({{-0.1315, -3.1315, -2.5315},
                               {-3.7038, -0.1038, -2.6038},

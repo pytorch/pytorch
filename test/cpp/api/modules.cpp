@@ -2085,6 +2085,100 @@ TEST_F(ModulesTest, TripletMarginLoss) {
   ASSERT_EQ(anchor.sizes(), anchor.grad().sizes());
 }
 
+TEST_F(ModulesTest, TripletMarginLossWithDistanceDefaultParity) {
+  /// Check that if we use torch::pairwise_distance with the default
+  /// TripletMarginLoss options as our distance function, the outputs
+  /// are equal (i.e., equal under defaults).
+  auto basicOptions = TripletMarginLossOptions();
+  auto distanceOptions = TripletMarginLossWithDistanceOptions();
+
+  auto anchor = torch::randn({100, 128}, torch::dtype(torch::kFloat).requires_grad(true));
+  auto positive = torch::randn({100, 128}, torch::dtype(torch::kFloat).requires_grad(true));
+  auto negative =
+      torch::randn({100, 128}, torch::dtype(torch::kFloat).requires_grad(true));
+
+  TripletMarginLoss basicLoss(basicOptions);
+  TripletMarginLossWithDistance distanceLoss(distanceOptions);
+
+  auto basicOutput = basicLoss->forward(anchor, positive, negative);
+  auto distanceOutput = distanceLoss->forward(anchor, positive, negative);
+
+  ASSERT_TRUE(distanceOutput.allclose(basicOutput));
+
+  distanceOutput.backward();
+  ASSERT_EQ(anchor.sizes(), anchor.grad().sizes());
+  ASSERT_EQ(positive.sizes(), positive.grad().sizes());
+  ASSERT_EQ(negative.sizes(), negative.grad().sizes());
+}
+
+TEST_F(ModulesTest, TripletMarginLossWithDistance) {
+  /// Check that TripletMarginLoss and TripletMarginLossWithDistance
+  /// behave analogously irrespective of flags.
+  auto defaultBasicOptions = TripletMarginLossOptions();
+  auto pairwise_distance = [&](const torch::Tensor& x, const torch::Tensor& y) {
+    return torch::pairwise_distance(
+        x, y, defaultBasicOptions.p(), defaultBasicOptions.eps());
+  };
+  auto pairwise_similarity = [&](const torch::Tensor& x,
+                                 const torch::Tensor& y) {
+    return 1.0 -
+        torch::pairwise_distance(
+               x, y, defaultBasicOptions.p(), defaultBasicOptions.eps());
+  };
+  std::vector<std::tuple<
+      TripletMarginLossWithDistanceOptions::distance_function_t,
+      bool>>
+      distance_functions = {std::make_tuple(pairwise_distance, false),
+                            std::make_tuple(pairwise_similarity, true)};
+
+  std::vector<TripletMarginLossWithDistanceOptions::reduction_t>
+      reductions = {torch::kSum, torch::kMean, torch::kSum};
+  std::vector<float> margins = {1.0, 1.5};
+  std::vector<bool> swaps = {true, false};
+
+  for (auto& funcPair : distance_functions) {
+    for (auto& reduction : reductions) {
+      for (auto& margin : margins) {
+        for (const auto& swap : swaps) {
+          auto basicOptions = TripletMarginLossOptions()
+                                  .reduction(reduction)
+                                  .margin(margin)
+                                  .swap(swap);
+          auto distanceOptions =
+              TripletMarginLossWithDistanceOptions()
+                  .distance_function(std::get<0>(funcPair))
+                  .is_similarity_function(std::get<1>(funcPair))
+                  .reduction(reduction)
+                  .margin(margin)
+                  .swap(swap);
+
+          auto anchor = torch::randn(
+              {100, 128}, torch::dtype(torch::kFloat).requires_grad(true));
+          auto positive = torch::randn(
+              {100, 128}, torch::dtype(torch::kFloat).requires_grad(true));
+          auto negative = torch::randn(
+              {100, 128}, torch::dtype(torch::kFloat).requires_grad(true));
+
+          TripletMarginLoss basicLoss(basicOptions);
+          TripletMarginLossWithDistance distanceLoss(distanceOptions);
+
+          auto basicOutput = basicLoss->forward(anchor, positive, negative);
+          auto distanceOutput = distanceLoss->forward(anchor, positive, negative);
+
+          ASSERT_TRUE(distanceOutput.allclose(basicOutput));
+
+          // handle for torch::kNone reduction
+          auto sum = distanceOutput.sum();
+          distanceOutput.backward();
+          ASSERT_EQ(anchor.sizes(), anchor.grad().sizes());
+          ASSERT_EQ(positive.sizes(), positive.grad().sizes());
+          ASSERT_EQ(negative.sizes(), negative.grad().sizes());
+        }
+      }
+    }
+  }
+}
+
 TEST_F(ModulesTest, NLLLoss) {
   NLLLoss loss;
   auto input = torch::tensor({{-0.1315, -3.1315, -2.5315},
@@ -3529,9 +3623,9 @@ TEST_F(ModulesTest, PrettyPrintIdentity) {
 }
 
 TEST_F(ModulesTest, PrettyPrintFlatten) {
-  ASSERT_EQ(c10::str(Flatten()), 
+  ASSERT_EQ(c10::str(Flatten()),
     "torch::nn::Flatten(start_dim=1, end_dim=-1)");
-  ASSERT_EQ(c10::str(Flatten(FlattenOptions().start_dim(2).end_dim(4))), 
+  ASSERT_EQ(c10::str(Flatten(FlattenOptions().start_dim(2).end_dim(4))),
     "torch::nn::Flatten(start_dim=2, end_dim=4)");
 }
 
@@ -4392,6 +4486,33 @@ TEST_F(ModulesTest, PrettyPrintTripletMarginLoss) {
   ASSERT_EQ(
       c10::str(TripletMarginLoss(TripletMarginLossOptions().margin(3).p(2).eps(1e-06).swap(false))),
       "torch::nn::TripletMarginLoss(margin=3, p=2, eps=1e-06, swap=false)");
+}
+
+TEST_F(ModulesTest, PrettyPrintTripletMarginLossWithDistance) {
+  auto distanceOptions = TripletMarginLossWithDistanceOptions()
+                             .distance_function([&](const torch::Tensor& x,
+                                                    const torch::Tensor& y) {
+                               return torch::pairwise_distance(x, y, 2.0, 1e-6);
+                             })
+                             .margin(1.5)
+                             .swap(true)
+                             .reduction(torch::kMean);
+  ASSERT_EQ(
+      c10::str(TripletMarginLossWithDistance(distanceOptions)),
+      "torch::nn::TripletMarginLossWithDistance(margin=1.5, swap=true, is_similarity_function=false)");
+}
+
+TEST_F(ModulesTest, PrettyPrintTripletMarginLossWithDistanceSimilarity) {
+  auto distanceOptions = TripletMarginLossWithDistanceOptions()
+                             .distance_function([&](const torch::Tensor& x,
+                                                    const torch::Tensor& y) {
+                               return 1.0 - torch::pairwise_distance(x, y, 2.0, 1e-6);
+                             })
+                             .reduction(torch::kMean)
+                             .is_similarity_function(true);
+  ASSERT_EQ(
+      c10::str(TripletMarginLossWithDistance(distanceOptions)),
+      "torch::nn::TripletMarginLossWithDistance(margin=1, swap=false, is_similarity_function=true)");
 }
 
 TEST_F(ModulesTest, PrettyPrintNLLLoss) {
