@@ -30,14 +30,14 @@ _all__ = [
     'prepare_fx', 'prepare_dynamic_fx', 'convert_fx',
     'QuantType',  # quantization type
     # custom module APIs
-    'register_static_quant_module_mapping',
+    'register_static_quant_module_class',
     'get_static_quant_module_mapping', 'get_static_quant_module_class',
-    'register_dynamic_quant_module_mapping',
+    'register_dynamic_quant_module_class',
     'get_dynamic_quant_module_mapping',
-    'register_qat_module_mapping', 'get_qat_module_mapping',
+    'register_qat_module_class', 'get_qat_module_mapping',
     'get_qconfig_propagation_list',
     'get_compare_output_module_list',
-    'register_operator_mapping', 'get_quantized_op',
+    'register_quantized_operator', 'get_quantized_operator',
     # Sub functions for `prepare` and `swap_module`
     'propagate_qconfig_', 'add_quant_dequant', 'add_observer_', 'swap_module',
     'default_eval_fn', 'get_observer_dict',

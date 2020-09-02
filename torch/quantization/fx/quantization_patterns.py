@@ -4,7 +4,7 @@ from torch.fx.graph import (
 )
 from ..quantization_mappings import (
     get_static_quant_module_class,
-    get_quantized_op,
+    get_quantized_operator,
 )
 from .pattern_utils import (
     register_quant_pattern,
@@ -393,7 +393,7 @@ class DefaultNode(QuantizeHandler):
             scale = float(scale)
             zero_point = int(zero_point)
 
-            quantized_op = get_quantized_op(node.target)
+            quantized_op = get_quantized_operator(node.target)
             args = load_arg(quantized=[0])(node.args)
             kwargs = load_arg(quantized=False)(node.kwargs)
             kwargs.update({'output_scale': scale, 'output_zero_point': zero_point})
@@ -413,7 +413,7 @@ class ELU(QuantizeHandler):
         scale, zero_point = activation_post_process.calculate_qparams()
         scale = float(scale)
         zero_point = int(zero_point)
-        quantized_op = get_quantized_op(node.target)
+        quantized_op = get_quantized_operator(node.target)
         args = load_arg(quantized=[0])(node.args)
         kwargs = load_arg(quantized=False)(node.kwargs)
         kwargs.update({'output_scale': scale, 'output_zero_point': zero_point})

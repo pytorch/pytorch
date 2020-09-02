@@ -85,7 +85,7 @@ FLOAT_TO_QUANTIZED_OPERATOR_MAPPING = {
     F.layer_norm: torch._ops.ops.quantized.layer_norm,
 }
 
-def register_static_quant_module_mapping(module_class, static_quant_module_class):
+def register_static_quant_module_class(module_class, static_quant_module_class):
     ''' Register a mapping from float module class to quantized module class,
     quantized module class must have from_float defined as a class method
     '''
@@ -107,7 +107,7 @@ def get_static_quantized_module_class(float_module_class):
         'Floating point module class {}'.format(float_module_class) + \
         ' does not have a corresponding quantized module class'
 
-def register_qat_module_mapping(module_class, qat_module_class):
+def register_qat_module_class(module_class, qat_module_class):
     ''' Register a mapping from float module class to qat module class,
     qat module class must have from_float defined as a class method
     '''
@@ -120,7 +120,7 @@ def get_qat_module_mapping():
     '''
     return QAT_MODULE_MAPPING
 
-def register_dynamic_quant_module_mapping(module_class, dynamic_quant_module_class):
+def register_dynamic_quant_module_class(module_class, dynamic_quant_module_class):
     ''' Register a mapping from float module class to dynamically quantized module class,
     dynamic quant module class must have from_float defined as a class method
     '''
@@ -161,12 +161,12 @@ def get_compare_output_module_list():
     ) - _EXCLUDE_QCONFIG_PROPAGATE_LIST
     return NUMERIC_SUITE_COMPARE_MODEL_OUTPUT_MODULE_LIST
 
-def register_operator_mapping(float_op, quantized_op):
+def register_quantized_operator(float_op, quantized_op):
     ''' Register a mapping from floating point ops(torch or functional) to quantized op
     '''
     FLOAT_TO_QUANTIZED_OPERATOR_MAPPING[float_op] = quantized_op
 
-def get_quantized_op(float_op)
+def get_quantized_operator(float_op):
     ''' Get the quantized operator corresponding to the float operator
     '''
     quantized_op = FLOAT_TO_QUANTIZED_OPERATOR_MAPPING.get(float_op, None)

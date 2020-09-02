@@ -317,7 +317,7 @@ def quantize_dynamic(model, qconfig_spec=None, dtype=torch.qint8,
         qconfig_spec = dict(zip(qconfig_spec, itertools.repeat(default_qconfig)))
 
     if mapping is None:
-x        mapping = get_dynamic_quant_module_mapping()
+        mapping = get_dynamic_quant_module_mapping()
 
     if not inplace:
         model = copy.deepcopy(model)
