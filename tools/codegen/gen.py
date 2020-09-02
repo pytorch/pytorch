@@ -537,7 +537,7 @@ def compute_device_guard(*, target: Target) -> Callable[[NativeFunction], Option
 // aten::{f.func}
 {legacy_dispatcher_returns_type} {name}({', '.join(a.str_with_default() for a in legacy_dispatcher_args)}) {{
   {guard}
-  c10::impl::ExcludeDispatchKeyGuard(c10::DispatchKey::DeviceGuard);
+  c10::impl::ExcludeDispatchKeyGuard guard(c10::DispatchKey::DeviceGuard);
   static auto op = c10::Dispatcher::singleton()
     .findSchemaOrThrow("aten::{f.func.name.name}", "{f.func.name.overload_name}")
     .typed<{dispatcher_returns_type} ({', '.join(a.type for a in dispatcher_args)})>();
