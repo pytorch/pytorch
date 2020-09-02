@@ -474,7 +474,7 @@ class TensorExprFuser {
     }
     auto device = type->device();
     if (!device) {
-      return true;
+      return false;
     }
     if (device->is_cpu()) {
       return canFuseOnCPU();
