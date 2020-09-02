@@ -134,7 +134,6 @@ SparseTensor& neg_out_sparse(SparseTensor& r, const SparseTensor& t) {
 }
 
 SparseTensor& neg_sparse_(SparseTensor& t) {
-  TORCH_CHECK(t.is_coalesced(), "abs: in-place on uncoalesced tensors is not supported");
   return neg_out_sparse(t, t);
 }
 
