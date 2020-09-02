@@ -4,6 +4,7 @@ import operator
 import numbers
 import pickle
 from torch.fx import symbolic_trace, Proxy, Node, GraphModule, DefaultDelegate
+from torch.fx.proxy import TraceError
 
 from fx.quantization import Quantizer
 
@@ -430,6 +431,40 @@ class TestFX(JitTestCase):
         loaded = pickle.loads(pickled)
         x = torch.rand(3, 4)
         self.assertEqual(loaded(x), traced(x))
+
+    def test_unpack_list_better_error(self):
+        class SomeArgs(torch.nn.Module):
+            def forward(self, a, b):
+                return torch.rand(3, 4)
+
+        class UnpacksList(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.sa = SomeArgs()
+
+            def forward(self, x : list):
+                return self.sa(*x)
+
+        ul = UnpacksList()
+        with self.assertRaisesRegex(TraceError, 'Proxy object cannot be unpacked as function argument'):
+            symbolic_trace(ul)
+
+    def test_unpack_dict_better_error(self):
+        class SomeKwargs(torch.nn.Module):
+            def forward(self, x=3, y=4):
+                return torch.rand(3, 4)
+
+        class UnpacksDict(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.sk = SomeKwargs()
+
+            def forward(self, x : dict):
+                return self.sk(**x)
+
+        ud = UnpacksDict()
+        with self.assertRaisesRegex(TraceError, 'Proxy object cannot be unpacked as function argument'):
+            symbolic_trace(ud)
 
 if __name__ == '__main__':
     run_tests()

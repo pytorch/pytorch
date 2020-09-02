@@ -67,7 +67,7 @@ def prepare_dynamic_fx(graph_module, qconfig_dict, inplace=False):
     """
     return _prepare_fx(graph_module, qconfig_dict, inplace, True)
 
-def _convert_fx(graph_module, inplace=False, debug=False, is_dynamic_quant=False):
+def _convert_fx(graph_module, inplace, debug, is_dynamic_quant):
     _check_is_graph_module(graph_module)
     quantizer = Quantizer()
     return quantizer.convert(graph_module, inplace, debug, is_dynamic_quant)
@@ -91,12 +91,14 @@ def _quantize_fx(model, qconfig_dict, run_fn=None, run_args=None, inplace=False,
 
     if is_dynamic_quant:
         model = prepare_dynamic_fx(model, qconfig_dict, inplace)
+        # inplace is True since the inplace option is already applied in previous step
         model = convert_dynamic_fx(model, inplace=True, debug=debug)
     else:
         assert run_fn, "Must provide calibration function for post training static quantization"
         assert run_args, "Must provide calibration dataset for post training static quantization"
         model = prepare_fx(model, qconfig_dict, inplace)
         run_fn(model, *run_args)
+        # inplace is True since the inplace option is already applied in previous step
         model = convert_fx(model, inplace=True, debug=debug)
 
     return model
