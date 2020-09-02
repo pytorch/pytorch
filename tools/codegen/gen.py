@@ -541,7 +541,7 @@ def compute_device_guard(*, target: Target) -> Callable[[NativeFunction], Option
   static auto op = c10::Dispatcher::singleton()
     .findSchemaOrThrow("aten::{f.func.name.name}", "{f.func.name.overload_name}")
     .typed<{dispatcher_returns_type} ({', '.join(a.type for a in dispatcher_args)})>();
-  return op.call</* Profile */ false>({', '.join(a.expr for a in dispatcher_exprs)});
+  return op.call({', '.join(a.expr for a in dispatcher_exprs)});
 }}
 """
         elif target is Target.REGISTRATION:
