@@ -192,7 +192,7 @@ bool RequestCallbackNoPython::processScriptRemoteCallOp(
     } catch (const std::exception& e) {
       // Don't throw in this call, but rather transfer the exception
       // to the rref.
-      ownerRRef->setError(e.what());
+      ownerRRef->setError(std::current_exception());
       postProcessing();
       return true;
     }
@@ -321,7 +321,8 @@ void RequestCallbackNoPython::processRpc(
         whenValueSet->addCallback(
             [responseFuture, messageId, rref, whenValueSet]() {
               if (whenValueSet->hasError()) {
-                responseFuture->setError(whenValueSet->error()->what());
+                responseFuture->setError(
+                    whenValueSet->tryRetrieveErrorMessage());
                 return;
               }
               try {
