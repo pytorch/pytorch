@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/native/vulkan/api/Common.h>
+#include <ATen/native/vulkan/api/Adapter.h>
 #include <ATen/native/vulkan/api/Command.h>
 #include <ATen/native/vulkan/api/Descriptor.h>
 #include <ATen/native/vulkan/api/Pipeline.h>
@@ -21,26 +22,24 @@ namespace api {
 
 class C10_EXPORT Context final {
  public:
-  explicit Context(bool enable_validation_layers);
+  explicit Context(const Adapter& adapter);
+  Context(const Context&) = delete;
+  Context(Context&&) = default;
+  Context& operator=(const Context&) = delete;
+  Context& operator=(Context&&) = default;
   ~Context() = default;
 
-  inline VkInstance instance() const {
-    return instance_.get();
-  }
-
-  inline VkPhysicalDevice physical_device() const {
-    return physical_device_;
-  }
-
-  inline const VkPhysicalDeviceLimits& physical_device_limits() const {
-    return physical_device_limits_;
+  inline const Adapter& adapter() const {
+    return adapter_;
   }
 
   inline VkDevice device() const {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(device_);
     return device_.get();
   }
 
   inline VkQueue queue() const {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(queue_);
     return queue_;
   }
 
@@ -65,22 +64,8 @@ class C10_EXPORT Context final {
   }
 
  private:
-  class Debug final {
-   public:
-    explicit Debug(VkInstance instance);
-    void operator()(VkDebugReportCallbackEXT debug_report_callback) const;
-
-   private:
-    VkInstance instance_;
-  };
-
- private:
   // Construction and destruction order matters.  Do not move members around.
-  Handle<VkInstance, decltype(&VK_DELETER(Instance))> instance_;
-  Handle<VkDebugReportCallbackEXT, Debug> debug_report_callback_;
-  VkPhysicalDevice physical_device_;
-  VkPhysicalDeviceLimits physical_device_limits_;
-  uint32_t compute_queue_family_index_;
+  Adapter adapter_;
   Handle<VkDevice, decltype(&VK_DELETER(Device))> device_;
   VkQueue queue_;
   Command command_;
@@ -90,7 +75,6 @@ class C10_EXPORT Context final {
   Resource resource_;
 };
 
-C10_EXPORT bool available();
 C10_EXPORT Context& context();
 
 } // namespace api

@@ -6,9 +6,13 @@
 
 namespace {
 
+TEST(VulkanAPITest, Runtime) {
+  const auto kMode = at::native::vulkan::api::Runtime::Type::Debug;
+  ASSERT_NO_THROW(at::native::vulkan::api::Runtime{kMode});
+}
+
 TEST(VulkanAPITest, Context) {
-  constexpr bool kDebug = true;
-  ASSERT_NO_THROW(at::native::vulkan::api::Context{kDebug});
+  ASSERT_NO_THROW(at::native::vulkan::api::context());
 }
 
 } // namespace
