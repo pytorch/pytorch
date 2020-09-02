@@ -91,6 +91,12 @@ class EventList(list):
                         current_events.pop()
                     else:
                         parent.append_cpu_child(event)
+                        assert (
+                            event.cpu_parent is None
+                        ), "There is already a CPU parent event for {}".format(
+                            event.key
+                        )
+                        event.set_cpu_parent(parent)
                         break
 
                 current_events.append(event)
@@ -105,7 +111,7 @@ class EventList(list):
     def cpu_children_populated(self):
         return self._cpu_children_populated
 
-    def table(self, sort_by=None, row_limit=100, header=None):
+    def table(self, sort_by=None, row_limit=100, header=None, top_level_events_only=False):
         """Prints an EventList as a nicely formatted table.
 
         Arguments:
@@ -114,6 +120,11 @@ class EventList(list):
                 Valid keys include: ``cpu_time``, ``cuda_time``, ``cpu_time_total``,
                 ``cuda_time_total``, ``cpu_memory_usage``, ``cuda_memory_usage``,
                 ``self_cpu_memory_usage``, ``self_cuda_memory_usage``, ``count``.
+            top_level_events_only(bool, optional): Boolean flag to determine the
+                selection of events to display. If true, the profiler will only
+                display events at top level like top-level invocation of python
+                `lstm`, python `add` or other functions, nested events like low-level
+                cpu/cuda ops events are omitted for profiler result readability.
 
         Returns:
             A string containing the table.
@@ -124,7 +135,8 @@ class EventList(list):
             row_limit=row_limit,
             header=header,
             use_cuda=self._use_cuda,
-            profile_memory=self._profile_memory)
+            profile_memory=self._profile_memory,
+            top_level_events_only=top_level_events_only)
 
     def export_chrome_trace(self, path):
         """Exports an EventList as a Chrome tracing tools file.
@@ -346,10 +358,12 @@ class profile(object):
             raise RuntimeError("can't export a trace that didn't finish running")
         self.function_events.populate_cpu_children()
 
-    def table(self, sort_by=None, row_limit=100, header=None):
+    def table(self, sort_by=None, row_limit=100, header=None, top_level_events_only=False):
         self._check_finish()
         return self.function_events.table(
-            sort_by=sort_by, row_limit=row_limit, header=header)
+            sort_by=sort_by, row_limit=row_limit, header=header,
+            top_level_events_only=top_level_events_only
+        )
     table.__doc__ = EventList.table.__doc__
 
     def export_chrome_trace(self, path):
@@ -657,6 +671,7 @@ class FunctionEvent(FormattedTimesMixin):
         self.kernels = []
         self.count = 1
         self.cpu_children = []
+        self.cpu_parent = None
         self.input_shapes = input_shapes
         self.cpu_memory_usage = cpu_memory_usage
         self.cuda_memory_usage = cuda_memory_usage
@@ -675,6 +690,16 @@ class FunctionEvent(FormattedTimesMixin):
         """
         assert(isinstance(child, FunctionEvent))
         self.cpu_children.append(child)
+
+    def set_cpu_parent(self, parent):
+        """Set the immediate CPU parent of type FunctionEvent
+
+        One profiling FunctionEvent should have only one CPU parent such that
+        the child's range interval is completely inside the parent's. We use
+        this connection to determine the event is from top-level op or not.
+        """
+        assert(isinstance(parent, FunctionEvent))
+        self.cpu_parent = parent
 
     # Note: async events don't have children, are not used when computing 'self'
     # metrics of other events, have only total cpu time
@@ -754,6 +779,8 @@ class FunctionEventAvg(FormattedTimesMixin):
         self.cuda_memory_usage = 0
         self.self_cpu_memory_usage = 0
         self.self_cuda_memory_usage = 0
+        self.cpu_children = None
+        self.cpu_parent = None
 
     def add(self, other, group_by_input_shapes=False):
         if self.key is None:
@@ -763,6 +790,8 @@ class FunctionEventAvg(FormattedTimesMixin):
             self.node_id = other.node_id
             self.is_async = other.is_async
             self.is_remote = other.is_remote
+            self.cpu_parent = other.cpu_parent
+            self.cpu_children = other.cpu_children
             if group_by_input_shapes:
                 self.input_shapes = other.input_shapes
 
@@ -1043,7 +1072,8 @@ def build_table(
         header=None,
         row_limit=100,
         use_cuda=True,
-        profile_memory=False):
+        profile_memory=False,
+        top_level_events_only=False):
     """Prints a summary of events (which can be a list of FunctionEvent or FunctionEventAvg)."""
     if len(events) == 0:
         return ""
@@ -1128,13 +1158,22 @@ def build_table(
     if header is not None:
         append('=' * line_length)
         append(header)
+    if top_level_events_only:
+        append('=' * line_length)
+        append('This report only display top-level ops statistics')
     append(header_sep)
     append(row_format.format(*headers))
 
     append(header_sep)
-    if row_limit > 0:
-        events = events[:row_limit]
+
+    event_limit = 0
     for evt in events:
+        if event_limit == row_limit:
+            break
+        if top_level_events_only and evt.cpu_parent is not None:
+            continue
+        else:
+            event_limit += 1
         row_values = [
             evt.key,  # Name
             # Self CPU total, 0 for async events. %
