@@ -449,69 +449,6 @@ GraphExecutorState ProfilingGraphExecutorImpl::getDebugState() {
   return state;
 }
 
-void replaceBlockWithFallbackGraph(Block* b, ArrayRef<Value*> inputs) {
-  auto graph = std::make_shared<Graph>();
-
-  // we are copying the block inside If or prim::Loop otherwise we are copying
-  // the whole graph we need to differentiate the two cases  because cloneFrom
-  // automatically adds inputs if we are copying graph's block and we will
-  //  need the inputs from a user otherwise
-  if (b->owningNode() != nullptr) {
-    std::unordered_map<Value*, Value*> input_mapping;
-    auto value_map = [&input_mapping](Value* v) { return input_mapping[v]; };
-    for (auto inp : inputs) {
-      input_mapping[inp] = graph->block()->addInput();
-    }
-    graph->block()->cloneFrom(b, value_map);
-  } else {
-    auto value_map = [](Value* v) { return v; };
-    graph->block()->cloneFrom(b, value_map);
-  }
-
-  auto fallback = b->owningGraph()->create(
-      prim::FallbackGraph, inputs, b->outputs().size());
-  fallback->g_(attr::Subgraph, graph);
-  b->prependNode(fallback);
-
-  for (size_t i = 0; i < inputs.size(); i++) {
-    graph->inputs()[i]->setType(inputs[i]->type());
-    graph->inputs()[i]->copyMetadata(inputs[i]);
-  }
-
-  for (size_t i = 0; i < b->outputs().size(); i++) {
-    fallback->output(i)->setType(b->outputs()[i]->type());
-    fallback->output(i)->copyMetadata(b->outputs()[i]);
-    b->replaceOutput(i, fallback->output(i));
-  }
-
-  ProfilingRecord::removeProfilingNodes(graph->block());
-
-  for (auto it = b->nodes().rbegin(); it != fallback->iterator(); it++) {
-    it.destroyCurrent();
-  }
-}
-
-static Function* createFallbackPathFunction(
-    Block* b,
-    const std::string& function_name) {
-  auto value_map = [](Value* v) { return v; };
-  auto graph = std::make_shared<Graph>();
-  graph->block()->cloneFrom(b, value_map);
-
-  auto otypes = c10::fmap(
-      graph->return_node()->inputs(), [](Value* v) { return v->type(); });
-  // a GraphFunction call only have one output, so all the outputs
-  // need to be packed into a tuple
-  auto tuple_type = TupleType::create(otypes);
-  auto return_tuple = graph->createTuple(graph->return_node()->inputs());
-  graph->appendNode(return_tuple);
-  for (int i = static_cast<int>(graph->outputs().size()) - 1; i >= 0; i--) {
-    graph->eraseOutput(i);
-  }
-  graph->registerOutput(return_tuple->output());
-  return new GraphFunction(function_name, graph, nullptr);
-}
-
 Node* insertFallbackFunctionCall(
     Graph* graph,
     Function* func,
@@ -531,6 +468,27 @@ Node* insertFallbackFunctionCall(
 
   auto fun_unpack_tuple = graph->insertNode(graph->createTupleUnpack(result));
   return fun_unpack_tuple;
+}
+
+Function* createFallbackPathFunction(
+    Block* b,
+    const std::string& function_name) {
+  auto value_map = [](Value* v) { return v; };
+  auto graph = std::make_shared<Graph>();
+  graph->block()->cloneFrom(b, value_map);
+
+  auto otypes = c10::fmap(
+      graph->return_node()->inputs(), [](Value* v) { return v->type(); });
+  // a GraphFunction call only have one output, so all the outputs
+  // need to be packed into a tuple
+  auto tuple_type = TupleType::create(otypes);
+  auto return_tuple = graph->createTuple(graph->return_node()->inputs());
+  graph->appendNode(return_tuple);
+  for (int i = static_cast<int>(graph->outputs().size()) - 1; i >= 0; i--) {
+    graph->eraseOutput(i);
+  }
+  graph->registerOutput(return_tuple->output());
+  return new GraphFunction(function_name, graph, nullptr);
 }
 
 void ProfilingGraphExecutorImpl::replaceFallbackGraphWithFallbackFunction(
