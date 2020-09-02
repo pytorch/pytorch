@@ -131,13 +131,9 @@ jobs:
             time python setup.py --cmake-only build
 
             # Generate ATen files.
-            time python aten/src/ATen/gen.py \
+            time python -m tools.codegen.gen \
               -s aten/src/ATen \
-              -d build/aten/src/ATen \
-              aten/src/ATen/Declarations.cwrap \
-              aten/src/THCUNN/generic/THCUNN.h \
-              aten/src/ATen/nn.yaml \
-              aten/src/ATen/native/native_functions.yaml
+              -d build/aten/src/ATen
 
             # Generate PyTorch files.
             time python tools/setup_helpers/generate_code.py            \
