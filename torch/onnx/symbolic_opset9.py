@@ -1528,7 +1528,7 @@ def empty_like(g, input, dtype=None, layout=None, device=None, pin_memory=False,
 
 
 def new_empty(g, self, sizes, dtype, layout, device, pin_memory=False):
-    if sym_help._is_none(dtype) and self.isCompleteTensor():
+    if dtype is None and self.isCompleteTensor():
         dtype = self.type().scalarType()
         dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
     return empty(g, sizes, dtype, layout, device, pin_memory)
@@ -1580,9 +1580,8 @@ def zeros_like(g, input, dtype=None, layout=None, device=None, pin_memory=False,
                 value_t=torch.tensor([0], dtype=sym_help.scalar_type_to_pytorch_type[dtype]))
 
 
-@parse_args('v', 'v', 'i', 'v', 'v', 'v')
 def new_zeros(g, self, sizes, dtype, layout, device, pin_memory=False):
-    if sym_help._is_none(dtype) and self.isCompleteTensor():
+    if dtype is None and self.isCompleteTensor():
         dtype = self.type().scalarType()
         dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
     return zeros(g, sizes, dtype, layout, device, pin_memory)
@@ -1633,7 +1632,7 @@ def full_like(g, input, fill_value, dtype=None, layout=None, device=None, pin_me
 
 
 def new_full(g, self, size, fill_value, dtype, layout, device, pin_memory=False):
-    if sym_help._is_none(dtype) and self.isCompleteTensor():
+    if dtype is None and self.isCompleteTensor():
         dtype = self.type().scalarType()
         dtype = sym_help.scalar_type_to_onnx.index(sym_help.cast_pytorch_to_onnx[dtype])
     return full(g, size, fill_value, dtype, layout, device, pin_memory)
