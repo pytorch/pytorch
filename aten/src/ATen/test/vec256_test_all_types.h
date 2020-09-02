@@ -13,7 +13,6 @@
 #include <math.h>
 #include <float.h>
 #include <algorithm>
-#include <initializer_list>
 #define CACHE_LINE 32
 #if defined(__GNUC__)
 #define CACHE_ALIGN __attribute__((aligned(CACHE_LINE)))
@@ -64,6 +63,93 @@ using vqint = VecType<c10::qint32>;
 template <typename T>
 using ValueType = typename T::value_type;
 
+template <int N>
+struct BitStr
+{
+    using type = uintmax_t;
+};
+
+template <>
+struct BitStr<8>
+{
+    using type = uint64_t;
+};
+
+template <>
+struct BitStr<4>
+{
+    using type = uint32_t;
+};
+
+template <>
+struct BitStr<2>
+{
+    using type = uint16_t;
+};
+
+template <>
+struct BitStr<1>
+{
+    using type = uint8_t;
+};
+
+template <typename T>
+using BitType = typename BitStr<sizeof(T)>::type;
+
+template<typename T>
+struct VecTypeHelper{
+    using holdType = typename T::value_type;
+    using memStorageType = typename T::value_type;
+    static constexpr size_t holdCount= T::size(); 
+    static constexpr size_t unitStorageCount = 1;
+};
+
+template<>
+struct VecTypeHelper<vcomplex>{
+    using holdType = Complex<float>;
+    using memStorageType = float;
+    static constexpr size_t holdCount = vcomplex::size();
+    static constexpr size_t unitStorageCount = 2;
+};
+
+template<>
+struct VecTypeHelper<vcomplexDbl>{
+    using holdType = Complex<double>;
+    using memStorageType = double;
+    static constexpr size_t holdCount = vcomplexDbl::size();
+    static constexpr size_t unitStorageCount = 2;
+};
+
+template<>
+struct VecTypeHelper<vqint8>{
+    using holdType = c10::qint8;
+    using memStorageType = typename c10::qint8::underlying;
+    static constexpr size_t holdCount = vqint8::size();
+    static constexpr size_t unitStorageCount = 1;
+};
+
+template<>
+struct VecTypeHelper<vquint8>{
+    using holdType = c10::quint8;
+    using memStorageType = typename c10::quint8::underlying;
+    static constexpr size_t holdCount= vquint8::size(); 
+    static constexpr size_t unitStorageCount = 1;
+};
+
+template<>
+struct VecTypeHelper<vqint>{
+    using holdType = c10::qint32;
+    using memStorageType = typename c10::qint32::underlying;
+    static constexpr size_t holdCount= vqint::size(); 
+    static constexpr size_t unitStorageCount = 1;
+};
+
+template <typename T>
+using UholdType = typename VecTypeHelper<T>::holdType;
+
+template <typename T>
+using UvalueType = typename VecTypeHelper<T>::memStorageType;
+
 template <class T, size_t N>
 constexpr size_t size(T(&)[N]) {
     return N;
@@ -102,31 +188,6 @@ typename std::enable_if_t<
     return filter(first, second, third);
 }
 
-template <int N>
-struct BitStr {
-    using type = uintmax_t;
-};
-
-template <>
-struct BitStr<8> {
-    using type = uint64_t;
-};
-
-template <>
-struct BitStr<4> {
-    using type = uint32_t;
-};
-
-template <>
-struct BitStr<2> {
-    using type = uint16_t;
-};
-
-template <>
-struct BitStr<1> {
-    using type = uint8_t;
-};
-
 template <typename T>
 struct DomainRange {
     T start;  // start [
@@ -135,8 +196,8 @@ struct DomainRange {
 
 template <typename T>
 struct CustomCheck {
-    std::vector<T> Args;
-    T expectedResult;
+    std::vector<UholdType<T>> Args;
+    UholdType<T> expectedResult;
 };
 
 template <typename T>
@@ -401,146 +462,6 @@ filter_div_ub(T& val1, T& val2) {
     }
 }
 
-template<typename T>
-struct CmpHelper {
-    using cmpType = T;
-    static constexpr int size() { return 1; }
-    static void bitCheck(const T& act, const T& exp, int i, const std::function<std::string(int index)>& get_details) {
-        using bit_rep = typename BitStr<sizeof(T)>::type;
-        bit_rep b_exp = bit_cast<bit_rep>(exp);
-        bit_rep b_act = bit_cast<bit_rep>(act);
-        ASSERT_EQ(b_exp, b_act) << (get_details ? get_details(i) : "");
-    }
-    static void nearCheck(const T& act, const T& exp, const T& absErr, int i, const std::function<std::string(int index)>& get_details) {
-    }
-    static void eqCheck(const T& act, const T& exp, int i, const std::function<std::string(int index)>& get_details) {
-        ASSERT_EQ(act, exp) << (get_details ? get_details(i) : "");
-    }
-};
-
-template<>
-struct CmpHelper<double> {
-    using cmpType = double;
-    static constexpr int size() { return 1; }
-    static void bitCheck(const double& act, const double& exp, int i, const std::function<std::string(int index)>& get_details) {
-        using bit_rep = typename BitStr<sizeof(double)>::type;
-        bit_rep b_exp = bit_cast<bit_rep>(exp);
-        bit_rep b_act = bit_cast<bit_rep>(act);
-        ASSERT_EQ(b_exp, b_act) << (get_details ? get_details(i) : "");
-    }
-    static void nearCheck(const double& act, const double& exp, const double& absErr, int i, const std::function<std::string(int index)>& get_details) {
-        if (!(check_both_nan(exp, act))) {
-            ASSERT_EQ(nearlyEqual(exp, act, absErr), true) << exp << " " << act << "\n" << (get_details ? get_details(i) : "");
-        }
-    }
-    static void eqCheck(const double& act, const double& exp, int i, const std::function<std::string(int index)>& get_details) {
-        if (!(check_both_nan(exp, act))) {
-            ASSERT_DOUBLE_EQ(exp, act) << (get_details ? get_details(i) : "");
-        }
-    }
-};
-
-template<>
-struct CmpHelper<float> {
-    using cmpType = float;
-    static constexpr int size() { return 1; }
-    static void bitCheck(const float& act, const float& exp, int i, const std::function<std::string(int index)>& get_details) {
-        using bit_rep = typename BitStr<sizeof(float)>::type;
-        bit_rep b_exp = bit_cast<bit_rep>(exp);
-        bit_rep b_act = bit_cast<bit_rep>(act);
-        ASSERT_EQ(b_exp, b_act) << (get_details ? get_details(i) : "");
-    }
-    static void nearCheck(const float& act, const float& exp, const float& absErr, int i, const std::function<std::string(int index)>& get_details) {
-        if (!(check_both_nan(exp, act))) {
-            ASSERT_EQ(nearlyEqual(exp, act, absErr), true) << exp << " " << act << "\n" << (get_details ? get_details(i) : "");
-        }
-    }
-    static void eqCheck(const float& act, const float& exp, int i, const std::function<std::string(int index)>& get_details) {
-        if (!(check_both_nan(exp, act))) {
-            ASSERT_FLOAT_EQ(exp, act) << (get_details ? get_details(i) : "");
-        }
-    }
-};
-
-template<>
-struct CmpHelper<Complex<double>> {
-    using cmpType = double;
-    static constexpr int size() { return 2; }
-    static void bitCheck(const Complex<double>& act, const Complex<double>& exp, int i,const std::function<std::string(int index)>& get_details) {
-        using bit_rep = typename BitStr<sizeof(double)>::type;
-        bit_rep b_expReal = bit_cast<bit_rep>(exp.real());
-        bit_rep b_actReal = bit_cast<bit_rep>(act.real());
-        ASSERT_EQ(b_expReal, b_actReal) << (get_details ? get_details(i) : "");
-        bit_rep b_expI = bit_cast<bit_rep>(exp.imag());
-        bit_rep b_actI = bit_cast<bit_rep>(act.imag());
-        ASSERT_EQ(b_expI, b_actI) << (get_details ? get_details(i) : "");
-    }
-    static void nearCheck(const Complex<double>& act, const Complex<double>& exp, const Complex<double>& absErr, int i,const std::function<std::string(int index)>& get_details) {
-        if (!(check_both_nan(exp.real(), act.real()))) {
-            ASSERT_EQ(nearlyEqual(exp.real(), act.real(), absErr.real()), true) << exp.real() << " " << act.real() << "\n" << (get_details ? get_details(i) : "");
-        }
-        if (!(check_both_nan(exp.imag(), act.imag()))) {
-            ASSERT_EQ(nearlyEqual(exp.imag(), act.imag(), absErr.real()), true) << exp.imag() << " " << act.imag() << "\n" << (get_details ? get_details(i) : "");
-        }
-    }
-    static void eqCheck(const Complex<double>& act, const Complex<double>& exp, int i,const std::function<std::string(int index)>& get_details) {
-        if (!(check_both_nan(exp.real(), act.real()))) {
-            ASSERT_DOUBLE_EQ(exp.real(), act.real()) << (get_details ? get_details(i) : "");
-        }
-        if (!(check_both_nan(exp.imag(), act.imag()))) {
-            ASSERT_DOUBLE_EQ(exp.imag(), act.imag()) << (get_details ? get_details(i) : "");
-        }
-    }
-};
-
-template<>
-struct CmpHelper<Complex<float>> {
-    using cmpType = float;
-    static constexpr int size() { return 2; }
-    static void bitCheck(const Complex<float>& act, const Complex<float>& exp, int i, const std::function<std::string(int index)>& get_details) {
-        using bit_rep = typename BitStr<sizeof(float)>::type;
-        bit_rep b_expReal = bit_cast<bit_rep>(exp.real());
-        bit_rep b_actReal = bit_cast<bit_rep>(act.real());
-        ASSERT_EQ(b_expReal, b_actReal) << (get_details ? get_details(i) : "");
-        bit_rep b_expI = bit_cast<bit_rep>(exp.imag());
-        bit_rep b_actI = bit_cast<bit_rep>(act.imag());
-        ASSERT_EQ(b_expI, b_actI) << (get_details ? get_details(i) : "");
-    }
-    static void nearCheck(const Complex<float>& act, const Complex<float>& exp, const Complex<float>& absErr, int i,const std::function<std::string(int index)>& get_details) {
-        if (!(check_both_nan(exp.real(), act.real()))) {
-            ASSERT_EQ(nearlyEqual(exp.real(), act.real(), absErr.real()), true) << exp.real() << " " << act.real() << "\n" << (get_details ? get_details(i) : "");;
-        }
-        if (!(check_both_nan(exp.imag(), act.imag()))) {
-            ASSERT_EQ(nearlyEqual(exp.imag(), act.imag(), absErr.real()), true) << exp.imag() << " " << act.imag() << "\n" << (get_details ? get_details(i) : "");;
-        }
-    }
-    static void eqCheck(const Complex<float>& act, const Complex<float>& exp, int i,const std::function<std::string(int index)>& get_details) {
-        if (!(check_both_nan(exp.real(), act.real()))) {
-            ASSERT_FLOAT_EQ(exp.real(), act.real()) << (get_details ? get_details(i) : "");
-        }
-        if (!(check_both_nan(exp.imag(), act.imag()))) {
-            ASSERT_FLOAT_EQ(exp.imag(), act.imag()) << (get_details ? get_details(i) : "");
-        }
-    }
-};
-//to extract underline type from complex<float>
-
-template <typename T>
-using UvalueType = typename CmpHelper<ValueType<T>>::cmpType;
-
-template <typename T>
-using UnitType = typename CmpHelper<T>::cmpType;
-
-template <typename T>
-using BitType = typename BitStr<sizeof(T)>::type;
-
-template <typename T>
-using BitValueType = typename BitStr<sizeof(ValueType<T>)>::type;
-
-template <typename T>
-using BitUvalueType = typename BitStr<sizeof(UvalueType<T>)>::type;
-
-
 struct TestSeed {
     TestSeed() : testSeed( std::chrono::high_resolution_clock::now().time_since_epoch().count()){
     }
@@ -562,158 +483,123 @@ private:
     int index = 0;
 };
 
-
-template<typename T>
-class AssertVec256{
-public:
-
-AssertVec256(const std::string &info, TestSeed seed, const T &expected, const T &actual, std::initializer_list<T> arguments):
-additionalInfo(info), testSeed(seed), exp(expected), act(actual), args(arguments){ 
-}
-
-AssertVec256(const std::string &info, TestSeed seed, const T &expected, const T &actual):
-additionalInfo(info), testSeed(seed),  exp(expected), act(actual){ 
-}
-
-AssertVec256(const std::string &info, const T &expected, const T &actual):
-additionalInfo(info), exp(expected), act(actual), hasSeed(false){ 
-}
- 
-std::string operator()(int index) const{
-    std::stringstream stream;
-    stream <<"Failure Details:\n";  
-    stream<< additionalInfo<<"\n";
-    if(hasSeed){
-        stream <<"Test Seed to reproduce: "<< testSeed<<"\n";
-    }
-    if(args.size()>0){
-        stream<<"Arguments:\n";
-        for(auto &x: args){
-            stream<<"#\t "<<x<<"\n";
-        }
-    }
-    stream<<"Expected:\n#\t"<< exp <<"\nActual:\n#\t"<<act;
-    stream<<"\nFirst mismatch Index: "<<index;
-    return stream.str();
-}
-
-bool check(bool bitwise = false, bool check_absError = false, ValueType<T> absError = {}) const {
-    using VT = ValueType<T>;
-    constexpr auto sizeX = T::size();
-    CACHE_ALIGN VT expArr[sizeX];
-    CACHE_ALIGN VT actArr[sizeX];
-    exp.store(expArr);
-    act.store(actArr);
-    if (bitwise) {
-        for (int i = 0; i < sizeX; i++) {
-            CmpHelper<VT>::bitCheck(actArr[i], expArr[i], i, *this);
-            if (::testing::Test::HasFailure()) {
-                 return true;
-            }
-        }
-    }
-    else if (check_absError) {
-        for (int i = 0; i < sizeX; i++) {
-            CmpHelper<VT>::nearCheck(actArr[i], expArr[i], absError, i, *this);
-            if (::testing::Test::HasFailure()) {
-                 return true;
-            }
-        }
-    }
-    else {
-        for (int i = 0; i < sizeX; i++) {
-            CmpHelper<VT>::eqCheck(actArr[i], expArr[i], i, *this);
-            if (::testing::Test::HasFailure()) {
-                return true;
-            }
-        }
-    }
-    return false;
-}
- 
-private:
-  std::string additionalInfo;
-  TestSeed testSeed;
-  T exp;
-  T act;
-  std::vector<T> args; 
-  bool hasSeed= true;
-
-};
-
-
-template <typename T, typename U = typename CmpHelper<T>::cmpType, bool is_floating_point = std::is_floating_point<U>::value>
-struct ValueGen {
+template <typename T, bool is_floating_point = std::is_floating_point<T>::value, bool is_complex = is_complex<T>::value>
+struct ValueGen
+{
     std::uniform_int_distribution<int64_t> dis;
     std::mt19937 gen;
-    ValueGen() :ValueGen(std::numeric_limits<U>::min(), std::numeric_limits<U>::max()) {
+    ValueGen() : ValueGen(std::numeric_limits<T>::min(), std::numeric_limits<T>::max())
+    {
     }
-    ValueGen(uint64_t seed) : ValueGen(std::numeric_limits<U>::min(), std::numeric_limits<U>::max(), seed) {
-    } 
-    ValueGen(U start, U stop, uint64_t seed = TestSeed()) {
+    ValueGen(uint64_t seed) : ValueGen(std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed)
+    {
+    }
+    ValueGen(T start, T stop, uint64_t seed = TestSeed())
+    {
         gen = std::mt19937(seed);
         dis = std::uniform_int_distribution<int64_t>(start, stop);
     }
-    T get() {
-        return (T)dis(gen);
+    T get()
+    {
+        return static_cast<T>(dis(gen));
     }
 };
 
-template<typename T, typename U>
-struct ValueGen<T, U, true> {
+template <typename T>
+struct ValueGen<T, true, false>
+{
     std::mt19937 gen;
-    std::normal_distribution<U> normal;
+    std::normal_distribution<T> normal;
     std::uniform_int_distribution<int> roundChance;
-    U _start;
-    U _stop;
+    T _start;
+    T _stop;
     bool use_sign_change = false;
     bool use_round = true;
-    ValueGen(): ValueGen(std::numeric_limits<U>::min(), std::numeric_limits<U>::max()) {
+    ValueGen() : ValueGen(std::numeric_limits<T>::min(), std::numeric_limits<T>::max())
+    {
     }
-    ValueGen(uint64_t seed) : ValueGen(std::numeric_limits<U>::min(), std::numeric_limits<U>::max(), seed) {
+    ValueGen(uint64_t seed) : ValueGen(std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed)
+    {
     }
-    ValueGen(U start, U stop, uint64_t seed = TestSeed()) {
+    ValueGen(T start, T stop, uint64_t seed = TestSeed())
+    {
         gen = std::mt19937(seed);
-        U mean = start * (U)0.5 + stop * (U)0.5;
-        //make it  normal +-3sigma  
-        U divRange = (U)(6.0);
-        U stdev = std::abs(stop / divRange - start / divRange);
-        normal = std::normal_distribution<U>{ mean,stdev };
+        T mean = start * static_cast<T>(0.5) + stop * static_cast<T>(0.5);
+        //make it  normal +-3sigma
+        T divRange = static_cast<T>(6.0);
+        T stdev = std::abs(stop / divRange - start / divRange);
+        normal = std::normal_distribution<T>{mean, stdev};
         // in real its hard to get rounded value
         // so we will force it by  uniform chance
         roundChance = std::uniform_int_distribution<int>(0, 5);
         _start = start;
         _stop = stop;
     }
-    
-template<typename ST = T, typename SU = U>
-    std::enable_if_t<std::is_same<ST, SU>::value, T>
-        get() {
+    T get()
+    {
         T a = normal(gen);
         //make rounded value ,too
         auto rChoice = roundChance(gen);
-        if (rChoice == 1) a = std::round(a);
-        if (a < _start) return nextafter(_start, _stop);
-        if (a >= _stop) return nextafter(_stop, _start);
+        if (rChoice == 1)
+            a = std::round(a);
+        if (a < _start)
+            return nextafter(_start, _stop);
+        if (a >= _stop)
+            return nextafter(_stop, _start);
         return a;
     }
-    //complex
-    
-template<typename ST = T, typename SU = U>
-    std::enable_if_t<!std::is_same<ST, SU>::value, T>
-        get() {
-        U a = normal(gen);
-        U b = normal(gen);
+};
+
+template <typename T>
+struct ValueGen<Complex<T>, false, true>
+{
+    std::mt19937 gen;
+    std::normal_distribution<T> normal;
+    std::uniform_int_distribution<int> roundChance;
+    T _start;
+    T _stop;
+    bool use_sign_change = false;
+    bool use_round = true;
+    ValueGen() : ValueGen(std::numeric_limits<T>::min(), std::numeric_limits<T>::max())
+    {
+    }
+    ValueGen(uint64_t seed) : ValueGen(std::numeric_limits<T>::min(), std::numeric_limits<T>::max(), seed)
+    {
+    }
+    ValueGen(T start, T stop, uint64_t seed = TestSeed())
+    {
+        gen = std::mt19937(seed);
+        T mean = start * static_cast<T>(0.5) + stop * static_cast<T>(0.5);
+        //make it  normal +-3sigma
+        T divRange = static_cast<T>(6.0);
+        T stdev = std::abs(stop / divRange - start / divRange);
+        normal = std::normal_distribution<T>{mean, stdev};
+        // in real its hard to get rounded value
+        // so we will force it by  uniform chance
+        roundChance = std::uniform_int_distribution<int>(0, 5);
+        _start = start;
+        _stop = stop;
+    }
+    Complex<T> get()
+    {
+        T a = normal(gen);
+        T b = normal(gen);
         //make rounded value ,too
         auto rChoice = roundChance(gen);
         rChoice = rChoice & 3;
-        if (rChoice & 1) a = std::round(a);
-        if (rChoice & 2) b = std::round(b);
-        if (a < _start) a = nextafter(_start, _stop);
-        else if (a >= _stop) a = nextafter(_stop, _start);
-        if (b < _start) b = nextafter(_start, _stop);
-        else if (b >= _stop) b = nextafter(_stop, _start);
-        return T(a, b);
+        if (rChoice & 1)
+            a = std::round(a);
+        if (rChoice & 2)
+            b = std::round(b);
+        if (a < _start)
+            a = nextafter(_start, _stop);
+        else if (a >= _stop)
+            a = nextafter(_stop, _start);
+        if (b < _start)
+            b = nextafter(_start, _stop);
+        else if (b >= _stop)
+            b = nextafter(_stop, _start);
+        return Complex<T>(a, b);
     }
 };
 
@@ -807,6 +693,136 @@ public:
     }
     operator TestingCase<T, U> && () { return std::move(_case); }
 };
+ 
+template <typename T>
+class AssertVec256
+{
+public:
+    AssertVec256(const std::string &info, TestSeed seed, const T &expected, const T &actual, const T &input0)
+        : additionalInfo(info), testSeed(seed), exp(expected), act(actual), arg0(input0), argSize(1)
+    {
+    }
+    AssertVec256(const std::string &info, TestSeed seed, const T &expected, const T &actual, const T &input0, const T &input1)
+        : additionalInfo(info), testSeed(seed), exp(expected), act(actual), arg0(input0), arg1(input1), argSize(2)
+    {
+    }
+    AssertVec256(const std::string &info, TestSeed seed, const T &expected, const T &actual, const T &input0, const T &input1, const T &input2)
+        : additionalInfo(info), testSeed(seed), exp(expected), act(actual), arg0(input0), arg1(input1), arg2(input2), argSize(3)
+    {
+    }
+    AssertVec256(const std::string &info, TestSeed seed, const T &expected, const T &actual) : additionalInfo(info), testSeed(seed), exp(expected), act(actual)
+    {
+    }
+    AssertVec256(const std::string &info, const T &expected, const T &actual) : additionalInfo(info), exp(expected), act(actual), hasSeed(false)
+    {
+    }
+    
+    std::string getDetail(int index) const
+    {
+        std::stringstream stream;
+        stream << "Failure Details:\n";
+        stream << additionalInfo << "\n";
+        if (hasSeed)
+        {
+            stream << "Test Seed to reproduce: " << testSeed << "\n";
+        }
+        if (argSize > 0)
+        {
+            stream << "Arguments:\n";
+            stream << "#\t " << arg0 << "\n";
+            if (argSize == 2)
+            {
+                stream << "#\t " << arg1 << "\n";
+            }
+            if (argSize == 3)
+            {
+                stream << "#\t " << arg2 << "\n";
+            }
+        }
+        stream << "Expected:\n#\t" << exp << "\nActual:\n#\t" << act;
+        stream << "\nFirst mismatch Index: " << index;
+        return stream.str();
+    }
+
+    bool check(bool bitwise = false, bool check_absError = false, ValueType<T> absError = {}) const
+    {
+        using UVT = UvalueType<T>;
+        using BVT = BitType<UVT>;
+        UVT absErr = std::abs(absError);
+        constexpr auto sizeX = VecTypeHelper<T>::holdCount * VecTypeHelper<T>::unitStorageCount;
+        constexpr auto unitStorageCount = VecTypeHelper<T>::unitStorageCount;
+        CACHE_ALIGN UVT expArr[sizeX];
+        CACHE_ALIGN UVT actArr[sizeX];
+        exp.store(expArr);
+        act.store(actArr);
+        if (bitwise)
+        {
+            for (size_t i = 0; i < sizeX; i++)
+            {
+                BVT b_exp = bit_cast<BVT>(expArr[i]);
+                BVT b_act = bit_cast<BVT>(actArr[i]);
+                EXPECT_EQ(b_exp, b_act) << getDetail(i / unitStorageCount);
+                if (::testing::Test::HasFailure())
+                    return true;
+            }
+        }
+        else if (check_absError)
+        {
+            for (size_t i = 0; i < sizeX; i++)
+            {
+                if (std::is_floating_point<UVT>::value)
+                {
+                    if (!check_both_nan(expArr[i], actArr[i])){
+                        EXPECT_EQ(nearlyEqual(expArr[i], actArr[i], absErr), true) << expArr[i]<<"!="<< actArr[i]<<"\n"<< getDetail(i / unitStorageCount);
+                    }
+                }
+                else
+                {
+                    EXPECT_EQ(expArr[i], actArr[i]) << getDetail(i / unitStorageCount);
+                }
+                if (::testing::Test::HasFailure())
+                    return true;
+            }
+        }
+        else
+        {
+            for (size_t i = 0; i < sizeX; i++)
+            {
+                if (std::is_same<UVT, float>::value)
+                {
+                    if (!check_both_nan(expArr[i], actArr[i])){
+                        EXPECT_FLOAT_EQ(expArr[i], actArr[i]) << getDetail(i / unitStorageCount);
+                    }
+                }
+                else if (std::is_same<UVT, double>::value)
+                {
+                    if (!check_both_nan(expArr[i], actArr[i]))
+                    {
+                        EXPECT_DOUBLE_EQ(expArr[i], actArr[i]) << getDetail(i / unitStorageCount);
+                    }
+                }
+                else
+                {
+                    EXPECT_EQ(expArr[i], actArr[i]) << getDetail(i / unitStorageCount);
+                }
+                if (::testing::Test::HasFailure())
+                    return true;
+            }
+        }
+        return false;
+    }
+
+private:
+    std::string additionalInfo;
+    TestSeed testSeed;
+    T exp;
+    T act;
+    T arg0;
+    T arg1;
+    T arg2;
+    int argSize = 0;
+    bool hasSeed = true;
+};
 
 template< typename T, typename Op1, typename Op2, typename Filter = std::nullptr_t>
 void test_unary(
@@ -844,7 +860,7 @@ void test_unary(
             auto input = vec_type::loadu(vals);
             auto actual = actualFunction(input);
             auto vec_expected = vec_type::loadu(expected);
-            AssertVec256<vec_type> vecAssert(testNameInfo, seed, vec_expected, actual, {input});
+            AssertVec256<vec_type> vecAssert(testNameInfo, seed, vec_expected, actual, input);
             if(vecAssert.check(bitwise, dmn.CheckWithTolerance, dmn.ToleranceError)) return;
              
         }// trial 
@@ -855,7 +871,7 @@ void test_unary(
             auto input = vec_type{ args[0] };
             auto actual = actualFunction(input);
             auto vec_expected = vec_type{ custom.expectedResult };
-            AssertVec256<vec_type> vecAssert(testNameInfo, seed, vec_expected, actual, {input});
+            AssertVec256<vec_type> vecAssert(testNameInfo, seed, vec_expected, actual, input);
             if(vecAssert.check()) return;
         }
     }
@@ -903,7 +919,7 @@ void test_binary(
             auto input1 = vec_type::loadu(vals1);
             auto actual = actualFunction(input0, input1);
             auto vec_expected = vec_type::loadu(expected);
-            AssertVec256<vec_type> vecAssert(testNameInfo, seed, vec_expected, actual, {input0, input1});
+            AssertVec256<vec_type> vecAssert(testNameInfo, seed, vec_expected, actual, input0, input1);
             if(vecAssert.check(bitwise, dmn.CheckWithTolerance, dmn.ToleranceError))return;
         }// trial 
     }
@@ -914,7 +930,7 @@ void test_binary(
             auto input1 = args.size() > 1 ? vec_type{ args[1] } : vec_type{ args[0] };
             auto actual = actualFunction(input0, input1);
             auto vec_expected = vec_type(custom.expectedResult);
-            AssertVec256<vec_type> vecAssert(testNameInfo, seed, vec_expected, actual, {input0, input1});
+            AssertVec256<vec_type> vecAssert(testNameInfo, seed, vec_expected, actual, input0, input1);
             if(vecAssert.check()) return;
         }
     }
@@ -969,7 +985,7 @@ void test_ternary(
             auto input2 = vec_type::loadu(vals2);
             auto actual = actualFunction(input0, input1, input2);
             auto vec_expected = vec_type::loadu(expected);
-            AssertVec256<vec_type> vecAssert(testNameInfo, seed, vec_expected, actual, {input0, input1, input2});
+            AssertVec256<vec_type> vecAssert(testNameInfo, seed, vec_expected, actual, input0, input1, input2);
             if(vecAssert.check(bitwise, dmn.CheckWithTolerance, dmn.ToleranceError)) return;
         }// trial 
     }
@@ -989,11 +1005,11 @@ std::enable_if_t<!is_complex<T>::value, T> local_log2(T x) {
 }
 
 template <typename T>
-std::enable_if_t<is_complex<T>::value, T> local_log2(T x) {
+std::enable_if_t<is_complex<Complex<T>>::value, Complex<T>> local_log2(Complex<T> x) {
     T ret = std::log(x);
-    UnitType<T> real = ret.real() / std::log((UnitType<T>)2);
-    UnitType<T> imag = ret.imag() / std::log((UnitType<T>)2);
-    return T(real, imag);
+    T real = ret.real() / std::log(static_cast<T>(2));
+    T imag = ret.imag() / std::log(static_cast<T>(2));
+    return Complex<T>(real, imag);
 }
 
 template <typename T>
@@ -1002,15 +1018,15 @@ std::enable_if_t<!is_complex<T>::value, T> local_abs(T x) {
 }
 
 template <typename T>
-std::enable_if_t<is_complex<T>::value, T> local_abs(T x) {
+std::enable_if_t<is_complex<Complex<T>>::value, Complex<T>> local_abs(Complex<T> x) {
 #if defined(CPU_CAPABILITY_DEFAULT)
     return std::abs(x);
 #else
-    UnitType<T> real = x.real();
-    UnitType<T> imag = x.imag();
-    UnitType<T> rr = real * real;
-    UnitType<T> ii = imag * imag;
-    return T{ std::sqrt(rr + ii), 0 };
+    T real = x.real();
+    T imag = x.imag();
+    T rr = real * real;
+    T ii = imag * imag;
+    return Complex<T>(std::sqrt(rr + ii), 0);
 #endif
 }
 
@@ -1020,27 +1036,27 @@ std::enable_if_t<!is_complex<T>::value, T> local_multiply(T x, T y) {
 }
 
 template <typename T>
-std::enable_if_t<is_complex<T>::value, T> local_multiply(T x, T y) {
+std::enable_if_t<is_complex<Complex<T>>::value, Complex<T>> local_multiply(Complex<T> x, Complex<T> y) {
 #if defined(CPU_CAPABILITY_DEFAULT)
     return x * y;
 #else
     //(a + bi)  * (c + di) = (ac - bd) + (ad + bc)i
-    UnitType<T> x_real = x.real();
-    UnitType<T> x_imag = x.imag();
-    UnitType<T> y_real = y.real();
-    UnitType<T> y_imag = y.imag();
+    T x_real = x.real();
+    T x_imag = x.imag();
+    T y_real = y.real();
+    T y_imag = y.imag();
 #if defined(CPU_CAPABILITY_VSX)
     //check multiplication considerin swap and fma
-    UnitType<T> rr = x_real * y_real;
-    UnitType<T> ii = x_imag * y_real;
-    UnitType<T> neg_imag = -y_imag;
+    T rr = x_real * y_real;
+    T ii = x_imag * y_real;
+    T neg_imag = -y_imag;
     rr = fma(x_imag, neg_imag, rr);
     ii = fma(x_real, y_imag, ii);
 #else
-    UnitType<T> rr = x_real * y_real - x_imag * y_imag;
-    UnitType<T> ii = x_real * y_imag + x_imag * y_real;
+    T rr = x_real * y_real - x_imag * y_imag;
+    T ii = x_real * y_imag + x_imag * y_real;
 #endif
-    return T{ rr, ii };
+    return Complex<T>(rr, ii);
 #endif
 }
 
@@ -1052,18 +1068,18 @@ local_and(const T& val0, const T& val1) {
     return bit_cast<T> (ret);
 }
 
-template<typename T>
-std::enable_if_t<is_complex<T>::value, T>
-local_and(const T& val0, const T& val1) {
-    using UVT = UnitType<T>;
-    using bit_rep = BitUvalueType<T>;
-    UVT real1 = val0.real();
-    UVT imag1 = val0.imag();
-    UVT real2 = val1.real();
-    UVT imag2 = val1.imag();
+template <typename T>
+std::enable_if_t<is_complex<Complex<T>>::value, Complex<T>>
+local_and(const Complex<T> &val0, const Complex<T> &val1)
+{
+    using bit_rep = BitType<T>;
+    T real1 = val0.real();
+    T imag1 = val0.imag();
+    T real2 = val1.real();
+    T imag2 = val1.imag();
     bit_rep real_ret = bit_cast<bit_rep>(real1) & bit_cast<bit_rep>(real2);
     bit_rep imag_ret = bit_cast<bit_rep>(imag1) & bit_cast<bit_rep>(imag2);
-    return T(bit_cast<UVT> (real_ret), bit_cast<UVT>(imag_ret));
+    return Complex<T>(bit_cast<T>(real_ret), bit_cast<T>(imag_ret));
 }
 
 template<typename T>
@@ -1075,17 +1091,16 @@ local_or(const T& val0, const T& val1) {
 }
 
 template<typename T>
-std::enable_if_t<is_complex<T>::value, T>
-local_or(const T& val0, const T& val1) {
-    using UVT = UnitType<T>;
-    using bit_rep = BitUvalueType<T>;
-    UVT real1 = val0.real();
-    UVT imag1 = val0.imag();
-    UVT real2 = val1.real();
-    UVT imag2 = val1.imag();
+std::enable_if_t<is_complex<Complex<T>>::value, Complex<T>>
+local_or(const Complex<T>& val0, const Complex<T>& val1) { 
+    using bit_rep = BitType<T>;
+    T real1 = val0.real();
+    T imag1 = val0.imag();
+    T real2 = val1.real();
+    T imag2 = val1.imag();
     bit_rep real_ret = bit_cast<bit_rep>(real1) | bit_cast<bit_rep>(real2);
     bit_rep imag_ret = bit_cast<bit_rep>(imag1) | bit_cast<bit_rep>(imag2);
-    return T(bit_cast<UVT> (real_ret), bit_cast<UVT> (imag_ret));
+    return Complex<T>(bit_cast<T> (real_ret), bit_cast<T>(imag_ret));
 }
 
 template<typename T>
@@ -1097,17 +1112,16 @@ local_xor(const T& val0, const T& val1) {
 }
 
 template<typename T>
-std::enable_if_t<is_complex<T>::value, T>
-local_xor(const T& val0, const T& val1) {
-    using UVT = UnitType<T>;
-    using bit_rep = BitUvalueType<T>;
-    UVT real1 = val0.real();
-    UVT imag1 = val0.imag();
-    UVT real2 = val1.real();
-    UVT imag2 = val1.imag();
+std::enable_if_t<is_complex<Complex<T>>::value, Complex<T>>
+local_xor(const Complex<T>& val0, const Complex<T>& val1) { 
+    using bit_rep = BitType<T>;
+    T real1 = val0.real();
+    T imag1 = val0.imag();
+    T real2 = val1.real();
+    T imag2 = val1.imag();
     bit_rep real_ret = bit_cast<bit_rep>(real1) ^ bit_cast<bit_rep>(real2);
     bit_rep imag_ret = bit_cast<bit_rep>(imag1) ^ bit_cast<bit_rep>(imag2);
-    return T(bit_cast<UVT> (real_ret), bit_cast<UVT> (imag_ret));
+    return Complex<T>(bit_cast<T> (real_ret), bit_cast<T>(imag_ret));
 }
 
 template <typename T>
