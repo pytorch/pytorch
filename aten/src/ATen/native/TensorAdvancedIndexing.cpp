@@ -272,6 +272,7 @@ Tensor index(const Tensor & self, TensorList indices) {
 
 Tensor& index_out(Tensor& result, const Tensor & self, TensorList indices) {
   TORCH_CHECK_INDEX(indices.size() <= (size_t)self.dim(), "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
+  at::assert_no_internal_overlap(result);
 
   auto info = make_info(self, indices);
   auto iter = make_index_out_iterator(info, result);
@@ -291,6 +292,15 @@ Tensor & _index_put_impl_(Tensor & self, TensorList indices, const Tensor & valu
       index_put_accum_stub(self.device().type(), self, indices, value, unsafe);
       return self;
   }
+
+  if (at::has_internal_overlap(self) == MemOverlap::YES) {
+    TORCH_WARN(
+      "Use of index_put_ on expanded tensors is deprecated. "
+      "Please clone() the tensor before performing this operation. "
+      "This also applies to advanced indexing e.g. tensor[indices] = tensor");
+  }
+  at::assert_no_partial_overlap(self, value);
+
   auto info = make_info(self, indices);
   auto iter = make_index_put_iterator(info, value);
   index_put_stub(iter.device_type(), iter, info.indexed_sizes, info.indexed_strides, accumulate);
@@ -429,6 +439,7 @@ Tensor & index_select_out_cpu_(Tensor & result, const Tensor & self, int64_t dim
               "index_select(): self and result must have the same scalar type");
   TORCH_CHECK(dim == 0 || dim < self.dim(),
               "index_select(): Indexing dim ", dim, " is out of bounds of tensor");
+  at::assert_no_internal_overlap(result);
 
   auto result_size = self.sizes().vec();
   if (self.dim() > 0) {
@@ -634,7 +645,16 @@ static Tensor & masked_fill_impl_cpu(Tensor & self, const Tensor & mask, Scalar 
             "please use a mask with dtype torch.bool instead.");
   }
 
+  if (at::has_internal_overlap(self) == MemOverlap::YES) {
+    TORCH_WARN(
+      "Use of masked_fill_ on expanded tensors is deprecated. "
+      "Please clone() the tensor before performing this operation. "
+      "This also applies to advanced indexing e.g. tensor[mask] = scalar");
+  }
+  at::assert_no_partial_overlap(self, mask);
+
   auto iter = TensorIteratorConfig()
+    .set_check_mem_overlap(false)  // deprecated, but not a hard error
     .check_all_same_dtype(false)
     .resize_outputs(false)
     .add_output(self)
@@ -698,6 +718,10 @@ static Tensor & masked_select_out_impl_cpu(Tensor & result, const Tensor & self,
               "masked_select: expected BoolTensor or ByteTensor for mask");
   TORCH_CHECK(self.scalar_type() == result.scalar_type(),
               "masked_select(): self and result must have the same scalar type");
+
+  at::assert_no_internal_overlap(result);
+  at::assert_no_partial_overlap(result, self);
+  at::assert_no_partial_overlap(result, mask);
 
   if (mask.dtype() == at::ScalarType::Byte) {
     TORCH_WARN("masked_select received a mask with dtype torch.uint8, this behavior is now deprecated," \
