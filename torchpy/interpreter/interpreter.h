@@ -11,8 +11,6 @@
 #include <vector>
 #include "interpreter_impl.h"
 
-// TODO fix symbol visibility issue
-// https://stackoverflow.com/questions/2828738/c-warning-declared-with-greater-visibility-than-the-type-of-its-field
 class Model {
  public:
   Model();
@@ -32,7 +30,8 @@ class Interpreter : public InterpreterImpl {
   void* handle_;
 
  public:
-  Interpreter() : handle_(nullptr) {
+  size_t id;
+  Interpreter() : handle_(nullptr), id(s_interpreter_id++) {
     char library_name[L_tmpnam];
     library_name_ = library_name;
     std::tmpnam(library_name);

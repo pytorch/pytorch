@@ -19,3 +19,5 @@ struct InterpreterImpl {
   FOREACH_INTERFACE_FUNCTION(DEFINE_POINTER)
 #undef DEFINE_POINTER
 };
+
+static std::atomic<size_t> s_interpreter_id;

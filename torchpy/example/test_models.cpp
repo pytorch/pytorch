@@ -21,7 +21,8 @@ void compare_torchpy_jit(const char* model_filename, at::Tensor input) {
   ASSERT_TRUE(ref_output.equal(output));
 }
 
-TEST(TorchpyTest, SimpleModel) {
+// TODO reenable
+TEST(TorchpyTest, DISABLED_SimpleModel) {
   compare_torchpy_jit(
       "torchpy/example/simple.pt", torch::ones(at::IntArrayRef({10, 20})));
 }

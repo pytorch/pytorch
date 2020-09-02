@@ -100,7 +100,7 @@ SET(TORCH_OBJS
     ${TORCH_PYTHON_DIR}/__/test/cpp/jit/test_mobile_type_parser.cpp.o
     ${TORCH_PYTHON_DIR}/__/test/cpp/jit/test_subgraph_rewriter.cpp.o
     ${TORCH_PYTHON_DIR}/__/test/cpp/jit/test_argument_spec.cpp.o
-    ${TORCH_PYTHON_DIR}/__/test/cpp/jit/test_backend.cpp.o
+    # ${TORCH_PYTHON_DIR}/__/test/cpp/jit/test_backend.cpp.o
     ${TORCH_PYTHON_DIR}/__/test/cpp/jit/test_autodiff.cpp.o
     ${TORCH_PYTHON_DIR}/__/test/cpp/jit/test_class_parser.cpp.o
     ${TORCH_PYTHON_DIR}/__/test/cpp/jit/test_code_template.cpp.o

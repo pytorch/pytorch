@@ -51,6 +51,10 @@ set(INTERPRETER_LIB_SOURCES
 )
 add_library(interpreter
   ${INTERPRETER_LIB_SOURCES})
+target_compile_options(
+    interpreter PRIVATE 
+    -fvisibility=hidden
+)
 target_include_directories(interpreter PRIVATE ${INTERPRETER_DIR})
 target_link_libraries(interpreter PRIVATE -L${PYTHON_LIB_DIR} libpython3.7m.a)
 target_link_libraries(interpreter PRIVATE crypt crypto ssl pthread dl util m ffi lzma readline nsl ncursesw panelw) # for python builtins

@@ -15,6 +15,7 @@
 #include <thread>
 
 namespace py = pybind11;
+using namespace py::literals;
 
 // TODO this should come from cmake
 #define DEBUG 1
@@ -106,6 +107,13 @@ static wchar_t* program;
 FOREACH_LIBRARY(DECLARE_LIBRARY_INIT)
 #undef DECLARE_LIBRARY_INIT
 
+extern "C" __attribute__((visibility("default"))) void initialize_interface(
+    InterpreterImpl* s) {
+#define INITIALIZE_MEMBER(func) s->func = func;
+  FOREACH_INTERFACE_FUNCTION(INITIALIZE_MEMBER)
+#undef INITIALIZE_MEMBER
+}
+
 const char* finder = R"RAW(
 import sys
 class F:
@@ -116,18 +124,41 @@ class F:
 sys.meta_path.insert(0, F())
 
 # make loader importable
-sys.path.append('torchpy')
 )RAW";
 
 extern "C" PyObject* initModule(void);
-/**
- * These functions each run inside their own copy of an interpreter, so
- * acquiring the gil here is the same as locking just that interpreter.
- *
- */
-// PyThreadState* mainThreadState = NULL;
+
+std::map<std::thread::id, PyThreadState*> thread_states;
+PyThreadState* mainThreadState = NULL;
+PyInterpreterState* interpreterState = NULL;
+std::thread::id mainThreadId;
 static std::atomic<size_t> s_id;
 std::map<size_t, py::object> forwards;
+
+void thread_enter() {
+  std::thread::id my_tid = std::this_thread::get_id();
+  if (thread_states.find(my_tid) == thread_states.end()) {
+    if (my_tid == mainThreadId || thread_states.size() == 0) {
+      std::cout << "Bootstrap main tread state for tid " << my_tid << std::endl;
+      thread_states[my_tid] = mainThreadState;
+
+    } else {
+      std::cout << "Create new thread state for tid " << my_tid << std::endl;
+      thread_states[my_tid] = PyThreadState_New(interpreterState);
+    }
+  } else {
+    std::cout << "Found thread state for tid " << my_tid << std::endl;
+  }
+  PyThreadState* myThreadState = thread_states[my_tid];
+  assert(myThreadState != nullptr);
+  PyEval_RestoreThread(myThreadState); // Acquires GIL
+}
+
+void thread_exit() {
+  std::thread::id my_tid = std::this_thread::get_id();
+  PyThreadState* myThreadState = thread_states[my_tid];
+  PyEval_ReleaseThread(myThreadState); // Releases GIL
+}
 
 __attribute__((constructor)) void init() {
   // some dependency in mkl requires this...
@@ -147,12 +178,28 @@ __attribute__((constructor)) void init() {
   Py_Initialize();
   PyRun_SimpleString(PY_PATH_STRING);
   PyRun_SimpleString(finder);
-  PyEval_ReleaseThread(PyThreadState_Get());
+  // mainThreadState = PyEval_SaveThread(); // save our state, release GIL
+  mainThreadState = PyThreadState_Get();
+  interpreterState = mainThreadState->interp;
+  mainThreadId = std::this_thread::get_id();
+  std::cout << "init() tid " << mainThreadId << std::endl;
+  assert(interpreterState != nullptr);
+  PyEval_ReleaseThread(mainThreadState);
 }
-static void teardown() {
-  PyGILState_Ensure();
 
-  forwards.clear();
+static void teardown() {
+  std::cout << "teardown!" << std::endl;
+  // thread_enter();
+  // TODO this function needs to handle being called from a crashed thread of
+  // during overall shutdown what should the convention be? should not iterate
+  // threadstates here probably. forwards.clear();
+
+  // for (auto it = thread_states.begin(); it != thread_states.end(); it++) {
+  // PyThreadState_Clear(it->second);
+  // PyThreadState_Delete(it->second);
+  // }
+  // thread_states.clear();
+
   if (Py_FinalizeEx() < 0) {
     std::cout << "IT BROKE SO WE ARE EXITING\n";
     exit(120);
@@ -163,17 +210,17 @@ static void teardown() {
 __attribute__((destructor)) void deinit() {}
 
 static void run_some_python(const char* code) {
-  PyGILState_STATE gstate = PyGILState_Ensure();
+  thread_enter();
 
   if (PyRun_SimpleString(code) == -1) {
     throw std::runtime_error("python eval failed\n");
   }
 
-  PyGILState_Release(gstate);
+  thread_exit();
 }
 
 static void run_python_file(const char* code) {
-  PyGILState_STATE gstate = PyGILState_Ensure();
+  thread_enter();
 
   FILE* f = fopen(code, "r");
   if (PyRun_SimpleFile(f, code) == -1) {
@@ -181,46 +228,49 @@ static void run_python_file(const char* code) {
   }
   fclose(f);
 
-  PyGILState_Release(gstate);
+  thread_exit();
 }
 
-extern "C" void initialize_interface(InterpreterImpl* s) {
-#define INITIALIZE_MEMBER(func) s->func = func;
-  FOREACH_INTERFACE_FUNCTION(INITIALIZE_MEMBER)
-#undef INITIALIZE_MEMBER
-}
 
 static size_t load_model(const char* filename) {
-  PyGILState_STATE gstate = PyGILState_Ensure();
-  // PyEval_RestoreThread(mainThreadState); // Acquire GIL, resume our state
-  // assert(PyGILState_Check() == 1);
+  thread_enter();
+  assert(PyGILState_Check() == 1);
+  std::thread::id my_tid = std::this_thread::get_id();
 
-  auto loader = py::module::import("loader");
-  auto load = loader.attr("load");
+  std::string code = std::string("model = torch.jit.load('") +
+      std::string(filename) + std::string("')");
+  py::exec(code);
 
-  auto py_model = load(filename);
-  auto forward = py_model.attr("forward");
+  std::cout << "loaded model " << my_tid << std::endl;
   auto id = ++s_id;
-  forwards[id] = forward;
 
-  // mainThreadState = PyEval_SaveThread(); // save our state, release GIL
-  PyGILState_Release(gstate);
+  thread_exit();
   return id;
 }
 
 static at::Tensor forward_model(size_t model_id, at::Tensor input) {
   at::Tensor output;
-  PyGILState_STATE gil_state = PyGILState_Ensure();
+  thread_enter();
   {
-    auto forward = forwards[model_id];
+    std::thread::id my_tid = std::this_thread::get_id();
+    assert(PyGILState_Check() == 1);
+    std::cout << "forward_model enter " << my_tid << std::endl;
+    // auto forward = forwards[model_id];
+    py::exec("print('py: calling forward!', model.forward)");
+    auto forward = py::globals()["model"].attr("forward");
+    std::cout << "found forward! " << my_tid << std::endl;
+
     py::object py_output = forward(input);
+    std::cout << "called forward!!" << std::endl;
     // TODO is this going to leak?
     // added it to prevent crash wehn using 'output' tensor in callee of
     // forward()
     py_output.inc_ref();
     output = py::cast<at::Tensor>(py_output);
+    std::cout << "forward_model exit" << std::endl;
   }
-  PyGILState_Release(gil_state);
+  thread_exit();
 
   return output;
+  // return input;
 }
