@@ -536,6 +536,11 @@ VaryingShape<T> VaryingShape<T>::merge(const VaryingShape<T>& other) const {
   return VaryingShape<T>(std::move(dims));
 }
 
+template <typename T>
+const c10::optional<ListOfOptionalElements>& VaryingShape<T>::sizes() const {
+  return dims_;
+}
+
 VaryingShape<int64_t> TensorType::sizes() const {
   if (!sizes_.rank()) {
     return VaryingShape<int64_t>();
