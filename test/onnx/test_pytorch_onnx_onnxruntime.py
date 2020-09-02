@@ -1555,7 +1555,6 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.randn(16, 16, requires_grad=True)
         self.run_test(MyModel(), (x, y))
 
-    @disableScriptTest()
     def test_interpolate_adaptive_pooling_error(self):
         x = torch.randn(1, 2, 6, requires_grad=True)
         with self.assertRaises(RuntimeError) as cm:
