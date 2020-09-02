@@ -139,19 +139,19 @@ def instantiate_configs():
 
     config_list = []
 
-    root = get_root()
-    found_configs = conf_tree.dfs(root)
-    for fc in found_configs:
-        c = Conf(
-            language=fc.find_prop("language_version"),
-            distro=fc.find_prop("distro_version"),
-            compilers=fc.find_prop("compiler_version"),
-            build_only=fc.find_prop("build_only"),
-            test_only=fc.find_prop("test_only"),
-            is_important=fc.find_prop("important"),
-        )
+    # root = get_root()
+    # found_configs = conf_tree.dfs(root)
+    # for fc in found_configs:
+    #     c = Conf(
+    #         language=fc.find_prop("language_version"),
+    #         distro=fc.find_prop("distro_version"),
+    #         compilers=fc.find_prop("compiler_version"),
+    #         build_only=fc.find_prop("build_only"),
+    #         test_only=fc.find_prop("test_only"),
+    #         is_important=fc.find_prop("important"),
+    #     )
 
-        config_list.append(c)
+    #     config_list.append(c)
 
     return config_list
 
