@@ -407,6 +407,10 @@
   self: grad * tensor
   tensor: grad * self
 
+- name: vdot(Tensor self, Tensor other) -> Tensor
+  self: 'not_implemented("vdot: self")'
+  other: 'not_implemented("vdot: other")'
+
 - name: _fused_dropout(Tensor self, float p, Generator? generator=None) -> (Tensor, Tensor)
   self: _fused_dropout_backward(grad, result1, p)
 
