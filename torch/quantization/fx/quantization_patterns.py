@@ -196,8 +196,6 @@ class ConvRelu(QuantizeHandler):
                 self.conv.activation_post_process = quantizer.activation_post_process_map[node.name]
             # 2. select quantized class
             qconv_cls = get_static_quant_module_class(type(self.conv))
-            assert qconv_cls is not None, \
-                'unhandled conv type:{}'.format(type(self.conv))
             quantized = qconv_cls.from_float(self.conv)
             parent_name, name = _parent_name(self.conv_node.target)
             setattr(quantizer.modules[parent_name], name, quantized)
@@ -345,8 +343,6 @@ class BatchNorm(QuantizeHandler):
         else:
             self.bn.activation_post_process = activation_post_process
         qbn_cls = get_static_quant_module_class(type(self.bn))
-        assert qbn_cls is not None, \
-            'unhandled bn type:{}'.format(type(self.bn))
         quantized = qbn_cls.from_float(self.bn)
         parent_name, name = _parent_name(self.bn_node.target)
         setattr(quantizer.modules[parent_name], name, quantized)

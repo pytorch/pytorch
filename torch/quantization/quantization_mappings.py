@@ -102,7 +102,10 @@ def get_static_quantized_module_class(float_module_class):
     ''' Get the statically quantized module class corresponding to
     the floating point module class
     '''
-    return STATIC_QUANT_MODULE_MAPPING.get(float_module_class)
+    quantized_module_class = STATIC_QUANT_MODULE_MAPPING.get(float_module_class, None)
+    assert quantized_module_class is not None, \
+        'Floating point module class {}'.format(float_module_class) + \
+        ' does not have a corresponding quantized module class'
 
 def register_qat_module_mapping(module_class, qat_module_class):
     ''' Register a mapping from float module class to qat module class,
@@ -166,4 +169,7 @@ def register_operator_mapping(float_op, quantized_op):
 def get_quantized_op(float_op)
     ''' Get the quantized operator corresponding to the float operator
     '''
-    return FLOAT_TO_QUANTIZED_OPERATOR_MAPPING.get(float_op)
+    quantized_op = FLOAT_TO_QUANTIZED_OPERATOR_MAPPING.get(float_op, None)
+    assert quantized_op is not None, \
+        'Operator {} does not have corresponding quantized op'.format(float_op)
+    return quantized_op
