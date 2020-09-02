@@ -9823,9 +9823,7 @@ class TestNNDeviceType(NNTestCase):
 
             net = torch.nn.AdaptiveAvgPool2d((1, 1))
             out = net(x)
-            ref_out = x.mean((-1, -2)).view((x.size(0), x.size(1), 1, 1))
-            if device == 'cuda':
-                torch.cuda.synchronize()
+            ref_out = x.contiguous().mean((-1, -2)).view((x.size(0), x.size(1), 1, 1))
 
             self.assertEqual(out, ref_out)
 
