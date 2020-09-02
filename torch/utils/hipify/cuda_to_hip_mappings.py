@@ -6163,9 +6163,9 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
             ("rocblas_ddot_batched", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED),
         ),
         ("cublasCdotu", ("rocblas_cdotu", CONV_MATH_FUNC, API_BLAS)),
-        ("cublasCdotc", ("rocblas_cdotc", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED)),
+        ("cublasCdotc", ("rocblas_cdotc", CONV_MATH_FUNC, API_BLAS)),
         ("cublasZdotu", ("rocblas_zdotu", CONV_MATH_FUNC, API_BLAS)),
-        ("cublasZdotc", ("rocblas_zdotc", CONV_MATH_FUNC, API_BLAS, HIP_UNSUPPORTED)),
+        ("cublasZdotc", ("rocblas_zdotc", CONV_MATH_FUNC, API_BLAS)),
         ("cublasSscal", ("rocblas_sscal", CONV_MATH_FUNC, API_BLAS)),
         (
             "cublasSscalBatched",
