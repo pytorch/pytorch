@@ -173,6 +173,7 @@ class TestQuantizeFx(QuantizationTestCase):
         ref_qparams = weight_obs.calculate_qparams()
         self.assertEqual(qparams, ref_qparams)
 
+    @skipIfNoFBGEMM
     def test_inplace_option(self):
         class M(torch.nn.Module):
             def __init__(self):
