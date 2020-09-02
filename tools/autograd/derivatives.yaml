@@ -330,8 +330,8 @@
   self: grad
 
 - name: complex(Tensor real, Tensor imag) -> Tensor
-  real: not_implemented("complex real")
-  imag: not_implemented("complex imag")
+  real: at::real(grad)
+  imag: at::zeros_like(at::real(grad))
 
 - name: polar(Tensor abs, Tensor angle) -> Tensor
   abs: not_implemented("polar abs")
@@ -1109,7 +1109,7 @@
   self: at::view_as_complex(grad.contiguous()) # gx0 + 1j * gx1
 
 - name: view_as_complex(Tensor(a) self) -> Tensor(a)
-  self: at::view_as_real(grad.contiguous()) # [gx, gy]
+  self: view_as_complex_backward(grad) # [gx, 0]
 
 - name: _s_where(Tensor condition, Tensor self, Tensor other) -> Tensor
   condition: non_differentiable

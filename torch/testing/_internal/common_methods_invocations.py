@@ -473,6 +473,7 @@ def method_tests():
         ('imag', (S, S, S), NO_ARGS, 'complex'),
         ('view_as_real', (S, S, S), NO_ARGS, 'complex'),
         ('view_as_complex', (S, S, 2), NO_ARGS),
+        ('complex', (S, S, S), ((S, S, S),), ''),
         ('abs', (S, S, S), NO_ARGS, '', (True,)),
         ('abs', (), NO_ARGS, 'scalar', (True,)),
         ('clamp', (S, S, S), (0, 1), '', (True,)),
@@ -1472,6 +1473,7 @@ def exclude_tensor_method(name, test_name):
         'test_view_as_real_complex',
         'test_real_complex',
         'test_imag_complex',
+        'test_complex'
     }
     # there are no out-of-place tensor equivalents for these
     exclude_outplace_tensor_method = {

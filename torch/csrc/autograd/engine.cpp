@@ -605,10 +605,7 @@ void validate_outputs(
       grad = at::sum_to(std::move(grad), metadata.shape());
     }
 
-    bool input_is_complex = isComplexType(c10::typeMetaToScalarType(metadata.options().dtype()));
-    bool grad_is_complex = isComplexType(grad.scalar_type());
-
-    TORCH_CHECK(isFloatingType(grad.scalar_type()) || (input_is_complex == grad_is_complex));
+    TORCH_CHECK(isFloatingType(grad.scalar_type()) || isComplexType(grad.scalar_type()));
     if (c10::typeMetaToScalarType(metadata.options().dtype()) != grad.scalar_type()) {
       grad = grad.to(c10::typeMetaToScalarType(metadata.options().dtype()));
     }

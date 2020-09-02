@@ -1005,6 +1005,12 @@ Tensor infinitely_differentiable_logit_backward(
   }
 }
 
+Tensor view_as_complex_backward(Tensor grad) {
+  auto grad_real = at::real(grad);
+  auto result = at::complex(grad_real, at::zeros_like(grad_real));
+  return at::view_as_real(result);
+}
+
 Tensor kl_div_double_backward_grad_output(const Tensor & grad, const Tensor & input, const Tensor & target, int64_t reduction, bool log_target) {
   auto result = kl_div_backward(grad, input, target, at::Reduction::None, log_target);
   if (reduction == at::Reduction::Mean) {
