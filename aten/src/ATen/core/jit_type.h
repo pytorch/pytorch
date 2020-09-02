@@ -507,7 +507,7 @@ struct CAFFE2_API SymbolicShape {
 };
 
 template <typename T>
-struct CAFFE2_API VaryingShape {
+struct VaryingShape {
   using ListOfOptionalElements = std::vector<c10::optional<T>>;
   VaryingShape(const std::vector<T>& vec)
       : VaryingShape(ListOfOptionalElements(vec.begin(), vec.end())) {}
@@ -544,9 +544,11 @@ struct CAFFE2_API VaryingShape {
     return dims.size();
   }
 
-  const c10::optional<ListOfOptionalElements>& sizes() const;
+  const c10::optional<ListOfOptionalElements>& sizes() const {
+    return dims_;
+  }
 
-  VaryingShape merge(const VaryingShape& other) const;
+  CAFFE2_API VaryingShape merge(const VaryingShape& other) const;
 
   c10::optional<std::vector<T>> concrete_sizes() const {
     if (!dims_) {
