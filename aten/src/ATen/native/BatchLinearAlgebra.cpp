@@ -3616,4 +3616,74 @@ Tensor& lu_solve_out(const Tensor& self, const Tensor& LU_data, const Tensor& LU
   return result;
 }
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ lstsq ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+template <typename scalar_t>
+static void apply_lstsq(Tensor& B, Tensor& A) {
+#ifndef USE_LAPACK
+  AT_ERROR("lstsq: LAPACK library not found in compilation");
+#else
+
+  int m, n, nrhs, lda, ldb, info, lwork;
+  scalar_t wkopt = 0.0;
+  lwork = -1; // work length
+  m = A.size(0);
+  n = A.size(1);
+  nrhs = B.size(1);
+  info = 0;
+  lda = m;
+  ldb = (m > n) ? m : n;
+
+  auto B_data = B.data_ptr<scalar_t>();
+  auto A_data = A.data_ptr<scalar_t>();
+
+  // get info how much space is needed
+  lapackGels<scalar_t>('N', m, n, nrhs, A_data, lda, B_data, ldb, &wkopt, lwork, &info);
+
+  lwork = static_cast<int>(wkopt);
+  Tensor work_tensor = at::empty({lwork}, A.options().dtype());
+  auto work = work_tensor.data_ptr<scalar_t>();
+
+  lapackGels<scalar_t>('N', m, n, nrhs, A_data, lda, B_data, ldb, work, lwork, &info);
+#endif
+}
+
+std::tuple<Tensor, Tensor> lstsq(const Tensor& B, const Tensor& A) {
+  TORCH_CHECK(A.dim() == 2, "A should have 2 dimensions, but has ", A.dim());
+  TORCH_CHECK(A.size(-1) != 0, "A should not be empty");
+  TORCH_CHECK(B.dim() == 1 || B.dim() == 2, "B should have 1 or 2 "
+      "dimensions, but has ", B.dim());
+  TORCH_CHECK(B.size(-1) != 0, "B should not be empty");
+
+  TORCH_CHECK(A.size(0) == B.size(0), "Expected A and B to have same size "
+      "at dim 0, but A has ", A.size(0), " rows and B has ", B.size(0), " rows");
+
+  Tensor B_working = B.clone();
+  if(B_working.dim() == 1) {
+    B_working.unsqueeze_(1);
+  }
+  if (!B_working.is_contiguous()) {
+    B_working = B_working.contiguous();
+  }
+  if (A.size(0) < A.size(1)) {
+    B_working.resize_({A.size(1), B_working.size(1)});
+  }
+  Tensor A_working = cloneBatchedColumnMajor(A);
+  B_working = cloneBatchedColumnMajor(B_working);
+
+  AT_DISPATCH_FLOATING_TYPES(B.scalar_type(), "lstsq_cpu", [&] {
+    apply_lstsq<scalar_t>(B_working, A_working);
+  });
+
+  return std::tuple<Tensor, Tensor>(B_working, A_working);
+}
+
+std::tuple<Tensor&,Tensor&> lstsq_out(Tensor& B_out, Tensor& A_out, const Tensor& B, const Tensor& A) {
+  Tensor A_tmp, B_tmp;
+  std::tie(B_tmp, A_tmp) = native::lstsq(B, A);
+  A_out.resize_as_(A_tmp).copy_(A_tmp);
+  B_out.resize_as_(B_tmp).copy_(B_tmp);
+  return std::tuple<Tensor&, Tensor&>(A_out, B_out);
+}
+
 }}  // namespace at::native
