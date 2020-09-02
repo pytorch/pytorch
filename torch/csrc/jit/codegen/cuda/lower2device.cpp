@@ -34,10 +34,6 @@ class BuffersExtractor : OptOutDispatch {
     return global_allocations_;
   }
 
-  std::vector<kir::Allocate*> getSyncAllocs() {
-    return sync_allocations_;
-  }
-
   std::vector<kir::Allocate*> getDynamicAllocs() {
     return dynamic_allocations_;
   }
@@ -54,7 +50,6 @@ class BuffersExtractor : OptOutDispatch {
   ThreadPredicateMap& thread_predicates_;
   bool has_block_broadcast_;
   std::vector<kir::Allocate*> global_allocations_;
-  std::vector<kir::Allocate*> sync_allocations_;
   std::vector<kir::Allocate*> dynamic_allocations_;
   std::vector<kir::Allocate*> static_allocations_;
 
@@ -88,18 +83,20 @@ class BuffersExtractor : OptOutDispatch {
     has_block_broadcast_ |= block_broadcast_needed;
   }
 
-  void handle(kir::GridReduction* gr) final {
-    global_allocations_.push_back(gr->reduction_buffer());
-    sync_allocations_.push_back(gr->sync_buffer());
-  }
-
   void handle(kir::Allocate* a) final {
-    if (a->getMemoryType() == MemoryType::Shared) {
-      if (a->size()->isConstScalar()) {
-        static_allocations_.push_back(a);
-      } else {
-        dynamic_allocations_.push_back(a);
-      }
+    switch (a->getMemoryType()) {
+      case MemoryType::Global:
+        global_allocations_.push_back(a);
+        break;
+      case MemoryType::Shared:
+        if (a->size()->isConstScalar()) {
+          static_allocations_.push_back(a);
+        } else {
+          dynamic_allocations_.push_back(a);
+        }
+        break;
+      case MemoryType::Local:
+        break;
     }
   }
 };
@@ -161,19 +158,6 @@ void GpuLower::buildSizesMap() {
   }
 }
 
-void GpuLower::adjustMemoryTypes() {
-  for (auto val : fusion_->deterministic_vals()) {
-    if (ir_utils::isTV(val)) {
-      auto tv = val->as<TensorView>();
-      if (fusion_->hasInput(tv) || fusion_->hasOutput(tv)) {
-        tv->setMemoryType(MemoryType::Global);
-      } else if (tv->getMemoryType() == MemoryType::Global) {
-        tv->setMemoryType(MemoryType::Local);
-      }
-    }
-  }
-}
-
 void GpuLower::lower() {
   TORCH_INTERNAL_ASSERT(fusion_ != nullptr);
   TORCH_INTERNAL_ASSERT(
@@ -194,7 +178,6 @@ void GpuLower::lower() {
   // prepare for lowering
   validateIr(fusion_);
   buildSizesMap();
-  adjustMemoryTypes();
 
   // Compute thread predicates
   ThreadPredicateMap preds(fusion_);
@@ -216,7 +199,6 @@ void GpuLower::lower() {
   // Get allocations
   BuffersExtractor be(lowered_exprs_, preds);
   global_allocations_ = be.getGlobalAllocs();
-  sync_allocations_ = be.getSyncAllocs();
   dynamic_smem_allocations_ = be.getDynamicAllocs();
   static_smem_allocations_ = be.getStaticAllocs();
 }
@@ -230,8 +212,6 @@ std::ostream& GpuLower::printKernel(
   std::vector<kir::Allocate*> allocs;
   allocs.insert(
       allocs.end(), global_allocations_.begin(), global_allocations_.end());
-  allocs.insert(
-      allocs.end(), sync_allocations_.begin(), sync_allocations_.end());
 
   std::vector<Val*> global_tensors(allocs.size(), nullptr);
   std::transform(

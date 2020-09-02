@@ -5934,6 +5934,94 @@ void testGPU_FusionSmemDynamicPwiseMulSymbolicArg() {
       aten_output.sub(outputs[0]).abs().max());
 }
 
+void testGPU_FusionGlobalIntermediate() {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  // Set up your input tensor views
+  TensorView* tv0 = makeDummyTensor(2);
+  TensorView* tv1 = reductionOp(BinaryOpType::Add, {1}, new Float(0), tv0);
+  fusion.addInput(tv0);
+  fusion.addOutput(tv1);
+  // tv1[I0, R1] = tv0[I0, I1]
+
+  // Interface should just be a direct split with a Parallel type. We can
+  // include the parallelize call if we do this.
+  tv1->split(1, NamedScalar::getParallelDim(ParallelType::TIDx));
+  // tv1[I0, R1o, R1i{BIDx}] = tv0[I0, I1]
+
+  TensorView* tv2 = tv1->rFactor({2});
+  tv2->setMemoryType(MemoryType::Global);
+  // tv2[I0, R1oo, Ir1i{BIDx}] = tv0[I0, I1]
+  // tv1[I0,        R1i{BIDx}] = tv2[I0, R1oo, Ir1i{BIDx}]
+
+  tv0->computeAt(tv1, 1);
+
+  tv2->axis(-1)->parallelize(ParallelType::TIDx);
+  tv1->axis(0)->parallelize(ParallelType::BIDx);
+
+  constexpr int numel_x = 65000, numel_y = 1024;
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor input = at::rand({numel_x, numel_y}, options);
+
+  // How many threads to use for the block reduction
+  constexpr int runtime_threadIdx_dim = 128;
+
+  torch::jit::fuser::cuda::FusionExecutor executor;
+  executor.compileFusion(&fusion);
+  auto outputs = executor.runFusion(
+      {input},
+      torch::jit::fuser::cuda::LaunchParams(
+          -1, -1, -1, runtime_threadIdx_dim, -1, -1));
+
+  auto aten_output = input.sum({1});
+  TORCH_CHECK(
+      aten_output.allclose(outputs[0], 1e-5, 1e-5),
+      "Error of: ",
+      aten_output.sub(outputs[0]).abs().max());
+}
+
+void testGPU_FusionGlobalIntermediateDefaultSchedule() {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  TensorView* tv0 = makeDummyTensor(2);
+  TensorView* tv1 = makeDummyTensor(2);
+  TensorView* tv2 = makeDummyTensor(2);
+  TensorView* tv3 = makeDummyTensor(2);
+  TensorView* tv4 = sub(tv2, tv3);
+  TensorView* tv5 = add(tv1, tv4);
+  TensorView* tv6 = sub(tv5, tv0);
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+  fusion.addInput(tv2);
+  fusion.addInput(tv3);
+  fusion.addOutput(tv6);
+  // t6 = ((t1 + (t2 - t3)) - t0)
+
+  tv4->setMemoryType(MemoryType::Global);
+  tv5->setMemoryType(MemoryType::Global);
+  tv6->setMemoryType(MemoryType::Global);
+
+  constexpr int M = 32, N = 810;
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor in0 = at::rand({M, N}, options);
+  at::Tensor in1 = at::rand({M, N}, options);
+  at::Tensor in2 = at::rand({M, N}, options);
+  at::Tensor in3 = at::rand({M, N}, options);
+
+  torch::jit::fuser::cuda::FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto outputs = fe.runFusion({in0, in1, in2, in3});
+
+  at::Tensor aten_output = (in1 + (in2 - in3)) - in0;
+  TORCH_CHECK(
+      aten_output.allclose(outputs[0], 1e-5, 1e-5),
+      "Error of: ",
+      aten_output.sub(outputs[0]).abs().sum());
+}
+
 void testGPU_FusionConstCheck() {
   Fusion fusion;
   FusionGuard fg(&fusion);

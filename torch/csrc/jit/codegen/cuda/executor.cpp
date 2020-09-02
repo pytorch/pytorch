@@ -116,7 +116,7 @@ at::Tensor inferAndAlloc(
     const CompileOptions& options,
     bool zero_init = false) {
   std::vector<int64_t> sizes;
-  for (auto id : TensorDomain::noReductions(tv->getRootDomain())) {
+  for (auto id : TensorDomain::noReductions(tv->getMaybeRFactorDomain())) {
     auto inferred_val = ExpressionEvaluator::evaluate(id->rawExtent(), &ec);
     TORCH_INTERNAL_ASSERT(
         inferred_val.has_value(),
@@ -288,15 +288,7 @@ FusionExecutor::GlobalBuffers FusionExecutor::allocGlobalVals(
         alloc->buffer()->as<kir::TensorView>()->fuserTv(),
         ec,
         options_,
-        false));
-  }
-
-  for (auto alloc : lowered_.sync_allocations()) {
-    TORCH_INTERNAL_ASSERT(
-        alloc->buffer()->getValType() == ValType::KirTensorView,
-        "Cannot allocate global buffers that are not tensors.");
-    global_buffers.zero_buffers.push_back(inferAndAlloc(
-        alloc->buffer()->as<kir::TensorView>()->fuserTv(), ec, options_, true));
+        alloc->zeroInit()));
   }
 
   return global_buffers;
