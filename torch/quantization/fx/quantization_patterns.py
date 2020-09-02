@@ -207,8 +207,9 @@ class ConvRelu(QuantizeHandler):
                 kwargs = load_arg(quantized=False)(self.conv_node.kwargs)
                 conv_out = quantizer.quantized_graph.create_node(
                     'call_function', torch.nn.functional.conv2d, args, kwargs)
+                root_module = quantizer.modules['']
                 return quantize_node(
-                    quantizer.quantized_graph, conv_out, quantizer.activation_post_process_map[self.conv_node.name])
+                    root_module, quantizer.quantized_graph, conv_out, quantizer.activation_post_process_map[self.conv_node.name])
             else:
                 assert len(self.conv_node.args) == 7, \
                     'only conv2d calls with all arguments specified is support right now in debug=False option'
@@ -282,7 +283,9 @@ class LinearReLU(QuantizeHandler):
                 kwargs = load_arg(quantized=False)(self.linear_node.kwargs)
                 linear_out = quantizer.quantized_graph.create_node(
                     'call_function', torch.nn.functional.linear, args, kwargs)
+                root_module = quantizer.modules['']
                 return quantize_node(
+                    root_module,
                     quantizer.quantized_graph,
                     linear_out,
                     quantizer.activation_post_process_map[self.linear_node.name])
@@ -505,8 +508,9 @@ class CopyNode(QuantizeHandler):
 class DefaultQuant(QuantizeHandler):
     def convert(self, quantizer, node):
         assert self.all_nodes
+        root_module = quantizer.modules['']
         return quantize_node(
-            quantizer.modules[''],
+            root_module,
             quantizer.quantized_graph,
             node, quantizer.activation_post_process_map[node.name])
 
