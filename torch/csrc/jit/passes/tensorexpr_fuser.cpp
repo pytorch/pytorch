@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/pass_manager.h>
+#include <torch/csrc/jit/passes/remove_redundant_profiles.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/operator_options.h>
@@ -134,11 +135,6 @@ bool tensorExprFuserEnabled() {
   return true;
 }
 
-const Symbol& getTensorExprSymbol() {
-  static Symbol s = Symbol::fromQualString("tensorexpr::Group");
-  return s;
-}
-
 struct nodesComparator {
   bool operator()(Node* a, Node* b) const {
     return a->isAfter(b);
@@ -150,30 +146,152 @@ class TensorExprFuser {
   TensorExprFuser(std::shared_ptr<Graph> graph, size_t min_group_size)
       : graph_(std::move(graph)), min_group_size_(min_group_size) {}
 
+  // TODO: if a value has differently typed uses, temporarrily insert a node
+  // specializing the type for each use and later remove, instead of bailing
+  bool profiledWithDifferentTypes(Value* v) {
+    std::vector<TypePtr> types;
+    for (const auto& use : v->uses()) {
+      if (use.user->kind() == prim::profile) {
+        types.push_back(use.user->ty(attr::profiled_type));
+      }
+    }
+    for (size_t i = 1; i < types.size(); ++i) {
+      if (types.at(i - 1) != types.at(i)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  void removeProfileNodesAndSpecializeTypes(Block* b) {
+    for (auto it = b->nodes().begin(); it != b->nodes().end(); it++) {
+      if (it->kind() == prim::profile) {
+        GRAPH_DEBUG("Removing prim::profile: %", it->output()->debugName());
+        it->output()->replaceAllUsesWith(it->input());
+        if (!profiledWithDifferentTypes(it->input())) {
+          it->input()->setType(it->ty(attr::profiled_type));
+        } else {
+          GRAPH_DEBUG(
+              "Ignoring value with differently typed profiles :%",
+              it->output()->debugName());
+        }
+        it.destroyCurrent();
+      } else {
+        for (Block* ib : it->blocks()) {
+          removeProfileNodesAndSpecializeTypes(ib);
+        }
+      }
+    }
+  }
+
+  void removeTensorTypeSpecialization(Value* v) {
+    if (!v->type()->cast<TensorType>()) {
+      return;
+    }
+    // Constants & TensorExprGroup will always produce specialized tensor type,
+    // TypeCheck are inserted by this pass and only used by fusion groups that
+    // insert proper guards
+    if (v->node()->kind() == prim::Constant ||
+        v->node()->kind() == prim::TypeCheck ||
+        v->node()->kind() == prim::TensorExprGroup) {
+      return;
+    }
+    v->setType(TensorType::get());
+  }
+
+  void removeTensorTypeSpecializations(Block* block) {
+    for (Value* v : block->inputs()) {
+      removeTensorTypeSpecialization(v);
+    }
+    for (Node* n : block->nodes()) {
+      for (Block* b : n->blocks()) {
+        removeTensorTypeSpecializations(b);
+      }
+      for (Value* v : n->outputs()) {
+        removeTensorTypeSpecialization(v);
+      }
+    }
+  }
+
   void run() {
     aliasDb_ = torch::make_unique<AliasDb>(graph_);
-    fillTypeInfoMap(graph_->block());
-    printTypeInfoMap();
-    removeProfilingNodes(graph_->block());
-    printTypeInfoMap();
-    GRAPH_DUMP("After removing profiling nodes: ", graph_);
+    RemoveRedundantProfiles(graph_);
+    GRAPH_DUMP("After removing redundant profile nodes: ", graph_);
+    removeProfileNodesAndSpecializeTypes(graph_->block());
+    GRAPH_DUMP(
+        "After removing profiling nodes and specializing types: ", graph_);
     createFusionGroups(graph_->block());
-    printTypeInfoMap();
     GRAPH_DUMP("After creating fusion groups: ", graph_);
     guardFusionGroups(graph_->block());
+    GRAPH_DUMP("After guarding fusion groups: ", graph_);
+    removeTensorTypeSpecializations(graph_->block());
+    GRAPH_DUMP("After removing tensor type specializations: ", graph_);
   }
 
  private:
-  Node* getOrCreateTensorExprSubgraph(Node* n) {
-    if (n->hasAttribute(attr::Subgraph) && n->kind() == getTensorExprSymbol()) {
-      return n;
+  // Merges `to_merge` into a subgraph by executing merge_fn.
+  // merge_fn takes in map that will be filled with the mapping b/w
+  // to_merge's outputs and the corresponding values in the subgraph.
+  // merge_fn returns the merged-into subgraph
+  Node* aliasingSafeSubgraphMerge(
+      Node* to_merge,
+      const std::function<Node*(std::unordered_map<Value*, Value*>&)>&
+          merge_fn) {
+    // When we merge a node into a subgraph, the new subgraph outputs
+    // have the same aliasing properties as the original node's outputs.
+    // Here we create a placeholder node, transfer the aliasing properties
+    // to the placeholder, execute the merge, and transfer the aliasing
+    // properties to the appropriate fusion group outputs
+    Node* placeholder_node =
+        graph_->insertNode(graph_->create(prim::Uninitialized, 0));
+    std::vector<Value*> existing_values;
+    for (size_t i = 0; i < to_merge->outputs().size(); ++i) {
+      Value* existing = to_merge->outputs().at(i);
+      Value* new_value = placeholder_node->insertOutput(i)->copyMetadata(
+          to_merge->outputs().at(i));
+      aliasDb_->replaceWithNewValue(existing, new_value);
+      existing_values.push_back(existing);
     }
     std::unordered_map<Value*, Value*> vmap;
+    Node* fusion_group = merge_fn(vmap);
+    for (size_t i = 0; i < existing_values.size(); ++i) {
+      TORCH_INTERNAL_ASSERT(vmap.count(existing_values.at(i)));
+      Value* subgraph_value = vmap[existing_values.at(i)];
+      auto subgraph = SubgraphUtils::getSubgraph(fusion_group);
+      size_t subgraph_output_index = 0;
+      for (; subgraph_output_index < subgraph->outputs().size();
+           ++subgraph_output_index) {
+        if (subgraph->outputs().at(subgraph_output_index) == subgraph_value) {
+          break;
+        }
+      }
+      if (subgraph_output_index != subgraph->outputs().size()) {
+        aliasDb_->replaceWithNewValue(
+            placeholder_node->outputs().at(i),
+            fusion_group->outputs().at(subgraph_output_index));
+      }
+    }
+    placeholder_node->destroy();
+    return fusion_group;
+  }
+
+  Node* getOrCreateTensorExprSubgraph(Node* n) {
+    if (n->hasAttribute(attr::Subgraph) && n->kind() == prim::TensorExprGroup) {
+      return n;
+    }
     GRAPH_UPDATE("Creating a tensorexpr::Group node from: ", *n);
-    auto te_group =
-        SubgraphUtils::createSingletonSubgraph(n, getTensorExprSymbol(), vmap);
-    updateTypeinfoMapWithVmap(vmap);
-    return te_group;
+    return aliasingSafeSubgraphMerge(
+        n, [&](std::unordered_map<Value*, Value*>& vmap) {
+          return SubgraphUtils::createSingletonSubgraph(
+              n, prim::TensorExprGroup, vmap);
+        });
+  }
+
+  void mergeNodeIntoSubgraphAndUpdateAliasing(Node* n, Node* subgraph) {
+    aliasingSafeSubgraphMerge(n, [&](std::unordered_map<Value*, Value*>& vmap) {
+      SubgraphUtils::mergeNodeIntoSubgraph(n, subgraph, vmap);
+      return subgraph;
+    });
   }
 
   // Add unvisited input nodes to the queue for further merging into the fusion
@@ -225,45 +343,17 @@ class TensorExprFuser {
       updateQueue(fusion_group, queue, visited_nodes);
     }
 
-    // Update typeinfo for inputs and outputs of the fusion group
-    if (fusion_group->kind() == getTensorExprSymbol()) {
-      auto subgraph = SubgraphUtils::getSubgraph(fusion_group);
-      for (size_t idx = 0; idx < subgraph->inputs().size(); idx++) {
-        if (typeinfo_map_.count(subgraph->inputs()[idx])) {
-          auto ty = typeinfo_map_[subgraph->inputs()[idx]];
-          typeinfo_map_[fusion_group->input(idx)] = ty;
-          subgraph->inputs()[idx]->setType(ty);
-          GRAPH_DEBUG(
-              "TYPEINFO ADD: %",
-              fusion_group->input(idx)->debugName(),
-              " --> ",
-              *ty);
-        }
-      }
-      for (size_t idx = 0; idx < subgraph->outputs().size(); idx++) {
-        if (typeinfo_map_.count(subgraph->outputs()[idx])) {
-          auto ty = typeinfo_map_[subgraph->outputs()[idx]];
-          typeinfo_map_[fusion_group->output(idx)] = ty;
-          GRAPH_DEBUG(
-              "TYPEINFO ADD: %",
-              fusion_group->output(idx)->debugName(),
-              " --> ",
-              *ty);
-        }
-      }
-    }
-
     return fusion_group;
   }
 
   static void debugDumpFusionGroup(const std::string& msg, Node* n) {
     GRAPH_DEBUG(msg, *n);
-    if (n->kind() == getTensorExprSymbol()) {
+    if (n->kind() == prim::TensorExprGroup) {
       GRAPH_DEBUG(*n->g(attr::Subgraph));
     }
   }
 
-  // Merge fusible nodes into subgraphs in tensorexpr::Group nodes.
+  // Merge fusible nodes into subgraphs in prim::TensorExprGroup nodes.
   void createFusionGroups(Block* block) {
     std::vector<Node*> fusion_groups;
     auto reverse_iter = block->nodes().reverse();
@@ -318,7 +408,7 @@ class TensorExprFuser {
   }
 
   bool inlineIfTooSmall(Node* n) {
-    if (n->kind() != getTensorExprSymbol()) {
+    if (n->kind() != prim::TensorExprGroup) {
       return false;
     }
     auto subgraph = SubgraphUtils::getSubgraph(n);
@@ -329,17 +419,6 @@ class TensorExprFuser {
       return true;
     }
     return false;
-  }
-
-  void updateTypeinfoMapWithVmap(
-      const std::unordered_map<Value*, Value*>& vmap) {
-    for (const auto& kv : vmap) {
-      if (typeinfo_map_.count(kv.first)) {
-        auto ty = typeinfo_map_.at(kv.first);
-        typeinfo_map_[kv.second] = ty;
-        GRAPH_DEBUG("TYPEINFO UPDATE: %", kv.second->debugName(), " --> ", *ty);
-      }
-    }
   }
 
   Node* tryMerge(Node* fusion_group, Node* to_merge) {
@@ -372,27 +451,15 @@ class TensorExprFuser {
 
     for (auto n : nodes_to_merge) {
       GRAPH_UPDATE("Merging ", getHeader(n));
-      std::unordered_map<Value*, Value*> vmap;
-      SubgraphUtils::mergeNodeIntoSubgraph(n, fusion_group, vmap);
-      updateTypeinfoMapWithVmap(vmap);
+      mergeNodeIntoSubgraphAndUpdateAliasing(n, fusion_group);
     }
     return fusion_group;
-  }
-
-  bool allShapesAreKnown(Value* v) {
-    if (!v->type()->cast<TensorType>()) {
-      return true;
-    }
-    if (typeinfo_map_.count(v)) {
-      return typeinfo_map_.at(v)->isComplete();
-    }
-    return v->isCompleteTensor();
   }
 
   bool allShapesAreKnown(Node* node) {
     // TODO: Relax the checks to support dynamic shapes
     for (Value* input : node->inputs()) {
-      if (!allShapesAreKnown(input)) {
+      if (input->type()->cast<TensorType>() && !input->isCompleteTensor()) {
         return false;
       }
     }
@@ -433,7 +500,7 @@ class TensorExprFuser {
     // Symbolic checks
     REQ(canHandle(producer));
     TORCH_INTERNAL_ASSERT(
-        canHandle(consumer) || consumer->kind() == getTensorExprSymbol());
+        canHandle(consumer) || consumer->kind() == prim::TensorExprGroup);
 
     // Alias checks
     REQ(aliasDb_->couldMoveBeforeTopologically(producer, consumer));
@@ -448,7 +515,7 @@ class TensorExprFuser {
     }
 
     if (!consumer->hasAttribute(attr::Subgraph) &&
-        consumer->kind() != getTensorExprSymbol()) {
+        consumer->kind() != prim::TensorExprGroup) {
       // Don't initiate a fusion group from prim::ListConstruct
       REQ(consumer->kind() != prim::ListConstruct);
       REQ(consumer->kind() != aten::slice);
@@ -473,62 +540,25 @@ class TensorExprFuser {
   }
 #undef REQ
 
-  void fillTypeInfoMap(Block* block) {
-    for (Node* n : block->nodes()) {
-      if (n->kind() == prim::profile) {
-        if (auto tensor_ty = n->ty(attr::profiled_type)->cast<TensorType>()) {
-          GRAPH_DEBUG(
-              "TYPEINFO ADD: %", n->input()->debugName(), " --> ", *tensor_ty);
-          typeinfo_map_[n->input()] = tensor_ty;
-        }
-      }
-
-      for (Block* b : n->blocks()) {
-        fillTypeInfoMap(b);
-      }
-    }
-  }
-  void printTypeInfoMap() {
-    GRAPH_DEBUG("Typeinfo map:");
-    for (const auto& kv : typeinfo_map_) {
-      // GRAPH_DEBUG("%", kv.first->debugName(), " --> ", *kv.second);
-      GRAPH_DEBUG("%??? --> ", *kv.second);
-    }
-  }
-
-  void removeProfilingNodes(Block* b) {
-    for (auto it = b->nodes().begin(); it != b->nodes().end(); it++) {
-      if (it->kind() == prim::profile) {
-        GRAPH_DEBUG("TYPEINFO ERASE: %", it->output()->debugName());
-        typeinfo_map_.erase(it->output());
-        it->output()->replaceAllUsesWith(it->input());
-        it.destroyCurrent();
-      } else {
-        for (Block* ib : it->blocks()) {
-          removeProfilingNodes(ib);
-        }
-      }
-    }
-  }
-
   void guardFusionGroup(Node* fusion_group) {
     GRAPH_DEBUG("Inserting a typecheck guard for a node", *fusion_group);
     auto subgraph = SubgraphUtils::getSubgraph(fusion_group);
 
     // Fixup types of the subgraph inputs
     std::vector<Value*> inputs_to_check;
-    for (size_t idx = 0; idx < subgraph->inputs().size(); idx++) {
-      // TODO: If a type of the input was explicitly set in IR (in constrast to
-      // us expecting it from a hint given by a prim::profile node), we don't
-      // need to check that input in the typecheck.
-
+    for (Value* input : fusion_group->inputs()) {
       // We only check inputs of the fusion group and expect NNC to infer
       // intermediates and outputs shapes
-      if (typeinfo_map_.count(subgraph->inputs()[idx])) {
-        subgraph->inputs()[idx]->setType(
-            typeinfo_map_.at(subgraph->inputs()[idx]));
-        inputs_to_check.push_back(fusion_group->input(idx));
+      if (!input->type()->cast<TensorType>()) {
+        continue;
       }
+
+      // fusion outputs are already guarded
+      if (input->node()->kind() == prim::Constant ||
+          input->node()->kind() == prim::FusionGroup) {
+        continue;
+      }
+      inputs_to_check.push_back(input);
     }
     if (!inputs_to_check.size()) {
       return;
@@ -550,21 +580,17 @@ class TensorExprFuser {
             ->insertBefore(fusion_group);
     Value* typecheck_result = typecheck_node->output(inputs_to_check.size());
 
-    // Fixup types of the typecheck node outputs
     std::unordered_map<Value*, Value*> typechecked_inputs;
-    size_t output_idx = 0;
-    for (size_t idx = 0; idx < subgraph->inputs().size(); idx++) {
-      if (typeinfo_map_.count(subgraph->inputs()[idx])) {
-        typechecked_inputs[fusion_group->input(idx)] =
-            typecheck_node->output(output_idx);
-        typecheck_node->output(output_idx++)
-            ->setType(typeinfo_map_.at(subgraph->inputs()[idx]));
-      } else if (
-          auto tt = subgraph->inputs()[idx]->type()->cast<TensorType>()) {
-        TORCH_INTERNAL_ASSERT(tt->isComplete());
-      }
+    for (size_t i = 0; i < typecheck_node->inputs().size(); ++i) {
+      typechecked_inputs[typecheck_node->input(i)] = typecheck_node->output(i);
     }
+
+    // Fixup types of the typecheck node outputs, which are used by the op in
+    // execution
     typecheck_node->output(inputs_to_check.size())->setType(BoolType::get());
+    for (size_t i = 0; i < typecheck_node->inputs().size(); ++i) {
+      typecheck_node->output(i)->setType(typecheck_node->input(i)->type());
+    }
 
     // Insert if
     auto versioning_if =
@@ -608,7 +634,7 @@ class TensorExprFuser {
       for (Block* b : n->blocks()) {
         guardFusionGroups(b);
       }
-      if (n->kind() == getTensorExprSymbol()) {
+      if (n->kind() == prim::TensorExprGroup) {
         fusion_groups.push_back(n);
       }
     }
@@ -616,13 +642,6 @@ class TensorExprFuser {
       guardFusionGroup(fusion_group);
     }
   }
-
-  // A typeinfo map hold profile information (which currently is a type
-  // information for the values in the graph). In the beginning the values
-  // represented in the map are the values from the original graph for which we
-  // had prim::profile nodes. As we start constructing fusion groups, we start
-  // adding values from subgraphs of these groups into the map as well.
-  std::unordered_map<Value*, TensorTypePtr> typeinfo_map_;
 
   std::shared_ptr<Graph> graph_;
   std::unique_ptr<AliasDb> aliasDb_ = nullptr;
@@ -672,9 +691,9 @@ Operation createTensorExprOp(const Node* node) {
 
 RegisterOperators TensorExprOps({
     torch::jit::Operator(
-        getTensorExprSymbol(),
+        prim::TensorExprGroup,
         createTensorExprOp,
-        AliasAnalysisKind::PURE_FUNCTION),
+        AliasAnalysisKind::INTERNAL_SPECIAL_CASE),
 });
 
 } // namespace jit
