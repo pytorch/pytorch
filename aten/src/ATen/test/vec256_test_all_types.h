@@ -253,8 +253,7 @@ To bit_cast_ptr(T* p, size_t N = sizeof(To)) noexcept {
 template <typename T>
 std::enable_if_t<std::is_floating_point<T>::value, bool> check_both_nan(T x,
     T y) {
-    return std::isnan(x) && std::isnan(y);  //(std::fpclassify(x) == FP_NAN &&
-                                      //std::fpclassify(y) == FP_NAN);
+    return std::isnan(x) && std::isnan(y);
 }
 
 template <typename T>
@@ -262,6 +261,19 @@ std::enable_if_t<!std::is_floating_point<T>::value, bool> check_both_nan(T x,
     T y) {
     return false;
 }
+
+template <typename T>
+std::enable_if_t<std::is_floating_point<T>::value, bool> check_both_inf(T x,
+    T y) {
+    return std::isinf(x) && std::isinf(y);
+}
+
+template <typename T>
+std::enable_if_t<!std::is_floating_point<T>::value, bool> check_both_inf(T x,
+    T y) {
+    return false;
+}
+
 
 template<class T> struct is_complex : std::false_type {};
 
@@ -284,8 +296,10 @@ T safe_fpt_division(T f1, T f2)
 }
 
 template<class T>
-bool nearlyEqual(T a, T b, T tolerance) {
-    if (std::isinf(a) && std::isinf(b)) return true;
+std::enable_if_t<std::is_floating_point<T>::value, bool>
+nearlyEqual(T a, T b, T tolerance) {
+    if (check_both_inf<T>(a,b)) return true;
+    if (check_both_nan<T>(a, b)) return true;
     T absA = std::abs(a);
     T absB = std::abs(b);
     T diff = std::abs(a - b);
@@ -295,6 +309,12 @@ bool nearlyEqual(T a, T b, T tolerance) {
     T d1 = safe_fpt_division<T>(diff, absB);
     T d2 = safe_fpt_division<T>(diff, absA);
     return (d1 <= tolerance) || (d2 <= tolerance);
+}
+
+template<class T>
+std::enable_if_t<!std::is_floating_point<T>::value, bool>
+nearlyEqual(T a, T b, T tolerance) {
+    return a == b;
 }
 
 template <typename T>
@@ -770,16 +790,7 @@ public:
         {
             for (size_t i = 0; i < sizeX; i++)
             {
-                if (std::is_floating_point<UVT>::value)
-                {
-                    if (!check_both_nan(expArr[i], actArr[i])){
-                        EXPECT_EQ(nearlyEqual(expArr[i], actArr[i], absErr), true) << expArr[i]<<"!="<< actArr[i]<<"\n"<< getDetail(i / unitStorageCount);
-                    }
-                }
-                else
-                {
-                    EXPECT_EQ(expArr[i], actArr[i]) << getDetail(i / unitStorageCount);
-                }
+                EXPECT_EQ(nearlyEqual<UVT>(expArr[i], actArr[i], absErr), true) << expArr[i]<<"!="<< actArr[i]<<"\n"<< getDetail(i / unitStorageCount);      
                 if (::testing::Test::HasFailure())
                     return true;
             }
