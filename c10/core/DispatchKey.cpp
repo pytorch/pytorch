@@ -63,29 +63,32 @@ const char* toString(DispatchKey t) {
     case DispatchKey::Meta:
       return "Meta";
 
+    case DispatchKey::Autograd:
+      return "Autograd";
+    case DispatchKey::AutogradCPU:
+      return "AutogradCPU";
+    case DispatchKey::AutogradCUDA:
+      return "AutogradCUDA";
+    case DispatchKey::AutogradXLA:
+      return "AutogradXLA";
+    case DispatchKey::AutogradPrivateUse1:
+      return "AutogradPrivateUse1";
+    case DispatchKey::AutogradPrivateUse2:
+      return "AutogradPrivateUse2";
+    case DispatchKey::AutogradPrivateUse3:
+      return "AutogradPrivateUse3";
+    case DispatchKey::AutogradOther:
+      return "AutogradOther";
     case DispatchKey::BackendSelect:
       return "BackendSelect";
     case DispatchKey::Named:
       return "Named";
 
-    case DispatchKey::Autograd:
-      return "Autograd";
-
     case DispatchKey::Tracer:
       return "Tracer";
 
-    case DispatchKey::AutogradXLA:
-      return "AutogradXLA";
-
     case DispatchKey::Autocast:
       return "Autocast";
-
-    case DispatchKey::PrivateUse1_PreAutograd:
-      return "PrivateUse1_PreAutograd";
-    case DispatchKey::PrivateUse2_PreAutograd:
-      return "PrivateUse2_PreAutograd";
-    case DispatchKey::PrivateUse3_PreAutograd:
-      return "PrivateUse3_PreAutograd";
 
     case DispatchKey::Batched:
       return "Batched";
@@ -106,6 +109,25 @@ const char* toString(DispatchKey t) {
 
 std::ostream& operator<<(std::ostream& str, DispatchKey rhs) {
   return str << toString(rhs);
+}
+
+DispatchKey getAutogradKeyFromBackend(DispatchKey t) {
+  switch (t) {
+    case DispatchKey::CPU:
+      return DispatchKey::AutogradCPU;
+    case DispatchKey::CUDA:
+      return DispatchKey::AutogradCUDA;
+    case DispatchKey::XLA:
+      return DispatchKey::AutogradXLA;
+    case DispatchKey::PrivateUse1:
+      return DispatchKey::AutogradPrivateUse1;
+    case DispatchKey::PrivateUse2:
+      return DispatchKey::AutogradPrivateUse2;
+    case DispatchKey::PrivateUse3:
+      return DispatchKey::AutogradPrivateUse3;
+    default:
+      return DispatchKey::AutogradOther;
+  }
 }
 
 } // namespace c10

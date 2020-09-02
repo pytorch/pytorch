@@ -160,7 +160,6 @@ static void _aminmax_kernel_impl(
     compare_base_kernel<scalar_t, scalar_t>(min_result, max_result, self, wrap_dim, keepdim, [&] (
       scalar_t* min_result_data, scalar_t* max_result_data,
       const scalar_t* self_data, auto self_dim_stride) {
-        using value_t = typename c10::scalar_value_type<scalar_t>::type;
         scalar_t min_number = self_data[0];
         scalar_t max_number = self_data[0];
         for (int64_t i = 0; i < self_dim_size; ++i) {
