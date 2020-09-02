@@ -676,6 +676,12 @@ void hashValue(Stack* stack) {
   push(stack, int64_t(hash));
 }
 
+void hashGenericIValue(Stack* stack) {
+  auto value = pop(stack);
+  auto hash = (int64_t)IValue::HashAliasedIValue()(value);
+  push(stack, hash);
+}
+
 // As described in https://docs.python.org/3/library/functions.html#round
 // When a number is exactly halfway between two integers, python builtin round
 // function will round to even number. We use round(x/2)*2 to handle the
@@ -1121,8 +1127,8 @@ RegisterOperators reg2({
 
     DEFINE_DIVMOD_MIXED_OP(int, float),
     DEFINE_DIVMOD_MIXED_OP(float, int),
-
 #undef DEFINE_DIVMOD_MIXED_OP
+
     Operator(
         "aten::hash.str(str t) -> int",
         hashValue<std::string>,
@@ -1134,6 +1140,10 @@ RegisterOperators reg2({
     Operator(
         "aten::hash.float(float t) -> int",
         hashValue<double>,
+        aliasAnalysisFromSchema()),
+    Operator(
+        "aten::hash.generic(t value) -> int",
+        hashGenericIValue,
         aliasAnalysisFromSchema()),
 });
 

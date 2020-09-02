@@ -15170,6 +15170,20 @@ a")
         input = torch.ones(2, 2)
         self.assertEqual(input, parameter_script(input))
 
+    def test_hash_tuple(self):
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super(TestModule, self).__init__()
+
+            def forward(self, ids: Tuple[int, int]) -> int:
+                return hash(ids)
+
+        # We don't guarantee the return of `hash` is the same across eager and
+        # Python, but it should not throw.
+        scripted_module = torch.jit.script(TestModule())
+        scripted_module((1, 2))
+
+
 
 # known to be failing in tracer
 EXCLUDE_TRACED = {
