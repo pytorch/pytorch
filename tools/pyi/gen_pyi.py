@@ -680,6 +680,10 @@ def gen_pyi(declarations_path, out):
 
     write(out, 'torch/_C/__init__.pyi', TORCH_C_TYPE_STUBS, env)
     write(out, 'torch/_C/_VariableFunctions.pyi', TORCH_C_VARIABLE_FUNCTIONS_TYPE_STUBS, env)
+
+    if not os.path.exists('torch/_VF'):
+        os.mkdir('torch/_VF')
+
     write(out, 'torch/_VF/__init__.pyi', TORCH_C_VARIABLE_FUNCTIONS_TYPE_STUBS, env)
     gen_nn_pyi(out)
 
