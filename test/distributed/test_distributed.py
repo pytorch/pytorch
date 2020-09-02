@@ -3143,7 +3143,7 @@ class _DistTestBase(object):
         i = 0
         while len(scatter_list) < int(os.environ["WORLD_SIZE"]):
             scatter_list.append(scatter_list[i])
-            i+=1
+            i += 1
 
         output_obj_list = [None]
         dist.scatter_object_list(output_obj_list, scatter_list, src=src_rank)
