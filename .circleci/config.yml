@@ -788,6 +788,50 @@ jobs:
             .jenkins/pytorch/win-test.sh
       - store_test_results:
           path: test/test-reports
+  pytorch_linux_aarch64_build:
+    machine:
+      image: ubuntu-1604:202007-01
+    resource_class: xlarge
+    steps:
+      - checkout
+      - run:
+          name: Install ts & unbuffer
+          no_output_timeout: "10m"
+          command: |
+            set -e
+            sudo apt-get update
+            sudo apt-get -y install expect moreutils
+      - run:
+          name: Register Binary Formats
+          no_output_timeout: "10m"
+          command: docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
+      - run:
+          name: Prepare AARCH64 Ubuntu 18.04 docker images
+          no_output_timeout: "10m"
+          command: |
+            set -e
+            time docker pull arm64v8/ubuntu:bionic
+            export id=$(docker run -t -d arm64v8/ubuntu:bionic)
+            docker exec -i "$id" apt-get update
+            docker exec -i "$id" apt-get install -y ninja-build g++ git cmake libopenblas-dev python3-dev
+            docker exec -i "$id" apt-get install -y python3-yaml python3-setuptools python3-wheel python3-numpy python3-pip
+            docker exec -i "$id" pip3 install dataclasses
+            echo "id=${id}" >> "${BASH_ENV}"
+      - run:
+          name: Checking out submodules
+          no_output_timeout: "10m"
+          command: |
+            git submodule sync && git submodule update -q --init --recursive
+            docker cp /home/circleci/project $id:/
+      - run:
+          name: Build AARCH64 wheel
+          no_output_timeout: "10m"
+          command: |
+            set -e
+            unbuffer docker exec -i -w /project "$id" python3 setup.py bdist_wheel
+            docker cp $id:/project/dist .
+      - store_artifacts:
+          path: /home/circleci/project/dist
   binary_linux_build:
     <<: *binary_linux_build_params
     steps:
@@ -6892,6 +6936,8 @@ workflows:
           build_environment: "pytorch-linux-bionic-rocm3.7-py3.6-build"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-bionic-rocm3.7-py3.6"
           resource_class: xlarge
+      - pytorch_linux_aarch64_build:
+          name: pytorch_linux_aarch64_bionic_build
       - pytorch_macos_10_13_py3_build:
           name: pytorch_macos_10_13_py3_build
       - pytorch_macos_10_13_py3_test:

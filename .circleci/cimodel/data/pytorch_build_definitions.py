@@ -421,4 +421,5 @@ def get_workflow_jobs():
         for conf in conf_options.get_dependents():
             x.append(conf.gen_workflow_job("test"))
 
+    x.append({'pytorch_linux_aarch64_build': {'name': 'pytorch_linux_aarch64_bionic_build'}})
     return x
