@@ -314,8 +314,8 @@ class FunctionSchema:
                     '_foreach_div_.List',
                     '_foreach_exp_',
                     '_foreach_sqrt_',
-                    '_foreach_addcdiv_',
-                    '_foreach_addcmul_']:
+                    '_foreach_addcmul_',
+                    '_foreach_addcdiv_']:
                 assert len(self.returns) == 1
 
     def is_out_fn(self) -> bool:
