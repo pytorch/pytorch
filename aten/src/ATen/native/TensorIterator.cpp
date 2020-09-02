@@ -461,6 +461,7 @@ void TensorIterator::allocate_or_resize_outputs() {
           // can just return contiguous output
           // it is faster because it avoids allocating 0 size tensor and
           // resizing and restriding it
+          const DeviceGuard device_guard(op.options().device());
           op.tensor = at::empty(tensor_shape, op.options());
         } else {
           at::native::resize_output(op.tensor, tensor_shape);
@@ -1089,6 +1090,7 @@ bool TensorIterator::fast_set_up(const TensorIteratorConfig& config) {
           auto& op = operands_[i];
           if (!op.tensor.defined()) {
             TORCH_INTERNAL_ASSERT(op.is_type_defined(), "no type for operand", i);
+            const DeviceGuard device_guard(op.options().device());
             op.tensor = at::empty(shape_, op.options(), MemoryFormat::Contiguous);
             op.current_dtype = op.target_dtype;
           } else if (op.will_resize) {
@@ -1103,6 +1105,7 @@ bool TensorIterator::fast_set_up(const TensorIteratorConfig& config) {
           auto& op = operands_[i];
           if (!op.tensor.defined()) {
             TORCH_INTERNAL_ASSERT(op.is_type_defined(), "no type for operand", i);
+            const DeviceGuard device_guard(op.options().device());
             op.tensor = at::empty(shape_, op.options(), MemoryFormat::ChannelsLast);
             op.current_dtype = op.target_dtype;
           } else if (op.will_resize) {
