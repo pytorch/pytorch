@@ -483,5 +483,19 @@ class TestFX(JitTestCase):
         with self.assertRaisesRegex(TraceError, 'Proxy object cannot be unpacked as function argument'):
             symbolic_trace(ud)
 
+    def test_torch_custom_ops(self):
+        class M(torch.nn.Module):
+            def forward(self, a):
+                b = torch.ops.aten.sigmoid(a)
+                c = torch.ops.aten.cat([a, b])
+                return torch.ops.aten.cat((c, c))
+        m = M()
+        input = torch.randn(3)
+        ref_out = m(input)
+        gm = symbolic_trace(m)
+        out = gm(input)
+        self.assertEqual(out, ref_out)
+
+
 if __name__ == '__main__':
     run_tests()
