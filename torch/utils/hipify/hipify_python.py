@@ -173,7 +173,7 @@ def preprocess(
     stats = {"unsupported_calls": [], "kernel_launches": []}
 
     for filepath in all_files:
-        result = preprocessor(output_directory, filepath, stats, hip_clang_launch, is_pytorch_extension, clean_ctx)
+        result = preprocessor(output_directory, filepath, all_files, stats, hip_clang_launch, is_pytorch_extension, clean_ctx)
 
         # Show what happened
         if show_progress:
@@ -651,7 +651,7 @@ RE_ANGLE_HEADER = re.compile(r'#include <([^>]+)>')
 RE_THC_GENERIC_FILE = re.compile(r'#define THC_GENERIC_FILE "([^"]+)"')
 RE_CU_SUFFIX = re.compile(r'\.cu\b')  # be careful not to pick up .cuh
 
-def preprocessor(output_directory, filepath, stats, hip_clang_launch, is_pytorch_extension, clean_ctx):
+def preprocessor(output_directory, filepath, all_files, stats, hip_clang_launch, is_pytorch_extension, clean_ctx):
     """ Executes the CUDA -> HIP conversion on the specified file. """
     fin_path = os.path.join(output_directory, filepath)
     with open(fin_path, 'r', encoding='utf-8') as fin:
@@ -679,6 +679,7 @@ def preprocessor(output_directory, filepath, stats, hip_clang_launch, is_pytorch
     def mk_repl(templ):
         def repl(m):
             f = m.group(1)
+            dirpath, filename = os.path.split(f)
             if (
                 f.startswith("ATen/cuda")
                 or f.startswith("ATen/native/cuda")
@@ -687,7 +688,7 @@ def preprocessor(output_directory, filepath, stats, hip_clang_launch, is_pytorch
                 or f.startswith("THC/")
                 or f.startswith("THCUNN/")
                 or (f.startswith("THC") and not f.startswith("THCP"))
-            ):
+            ) or (is_pytorch_extension and any(filename in s for s in all_files)):
                 return templ.format(get_hip_file_path(m.group(1)))
             return m.group(0)
         return repl
