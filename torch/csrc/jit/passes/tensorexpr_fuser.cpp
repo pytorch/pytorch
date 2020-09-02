@@ -183,47 +183,48 @@ void RemoveProfileNodesAndSpecializeTypes(std::shared_ptr<Graph>& graph) {
   removeProfileNodesAndSpecializeTypes(graph->block());
 }
 
+void removeTensorTypeSpecialization(Value* v) {
+  if (!v->type()->cast<TensorType>()) {
+    return;
+  }
+  // Constants & TensorExprGroup will always produce specialized tensor type,
+  // TypeCheck are inserted by this pass and only used by fusion groups that
+  // insert proper guards
+  if (v->node()->kind() == prim::Constant ||
+      v->node()->kind() == prim::TypeCheck ||
+      v->node()->kind() == prim::TensorExprGroup) {
+    return;
+  }
+  v->setType(TensorType::get());
+}
+
+void removeTensorTypeSpecializations(Block* block) {
+  for (Value* v : block->inputs()) {
+    removeTensorTypeSpecialization(v);
+  }
+  for (Node* n : block->nodes()) {
+    for (Block* b : n->blocks()) {
+      removeTensorTypeSpecializations(b);
+    }
+    for (Value* v : n->outputs()) {
+      removeTensorTypeSpecialization(v);
+    }
+  }
+}
+
+void RemoveTensorTypeSpecializations(std::shared_ptr<Graph>& graph) {
+  removeTensorTypeSpecializations(graph->block());
+}
+
 class TensorExprFuser {
  public:
   TensorExprFuser(std::shared_ptr<Graph> graph, size_t min_group_size)
       : graph_(std::move(graph)), min_group_size_(min_group_size) {}
 
-  void removeTensorTypeSpecialization(Value* v) {
-    if (!v->type()->cast<TensorType>()) {
-      return;
-    }
-    // Constants & TensorExprGroup will always produce specialized tensor type,
-    // TypeCheck are inserted by this pass and only used by fusion groups that
-    // insert proper guards
-    if (v->node()->kind() == prim::Constant ||
-        v->node()->kind() == prim::TypeCheck ||
-        v->node()->kind() == prim::TensorExprGroup) {
-      return;
-    }
-    v->setType(TensorType::get());
-  }
-
-  void removeTensorTypeSpecializations(Block* block) {
-    for (Value* v : block->inputs()) {
-      removeTensorTypeSpecialization(v);
-    }
-    for (Node* n : block->nodes()) {
-      for (Block* b : n->blocks()) {
-        removeTensorTypeSpecializations(b);
-      }
-      for (Value* v : n->outputs()) {
-        removeTensorTypeSpecialization(v);
-      }
-    }
-  }
-
   void run() {
     aliasDb_ = torch::make_unique<AliasDb>(graph_);
     RemoveRedundantProfiles(graph_);
     GRAPH_DUMP("After removing redundant profile nodes: ", graph_);
-    removeProfileNodesAndSpecializeTypes(graph_->block());
-    GRAPH_DUMP(
-        "After removing profiling nodes and specializing types: ", graph_);
     createFusionGroups(graph_->block());
     GRAPH_DUMP("After creating fusion groups: ", graph_);
     guardFusionGroups(graph_->block());
