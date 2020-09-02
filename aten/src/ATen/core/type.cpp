@@ -537,7 +537,7 @@ VaryingShape<T> VaryingShape<T>::merge(const VaryingShape<T>& other) const {
 }
 
 template <typename T>
-const c10::optional<ListOfOptionalElements>& VaryingShape<T>::sizes() const {
+const c10::optional<std::vector<c10::optional<T>>>& VaryingShape<T>::sizes() const {
   return dims_;
 }
 
