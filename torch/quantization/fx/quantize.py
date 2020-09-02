@@ -422,10 +422,9 @@ class Quantizer:
                         quant_env[node.name] = quant_env[prev_node.name]
                         continue
                     # replace activation post process with quantization ops
-                    parent_name = ''
-                    parent_module = self.modules[parent_name]
+                    root_module = self.modules['']
                     quant_env[node.name] = quantize_node(
-                        parent_module, self.quantized_graph,
+                        root_module, self.quantized_graph,
                         load_non_quantized(node.args[0]), observer_module)
                     continue
             # dequantize inputs for the node that are not quantized
