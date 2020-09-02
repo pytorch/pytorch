@@ -81,9 +81,10 @@ graph(%a : Tensor, %b : Tensor, %c : Tensor):
   std::unordered_map<Value*, Value*> vmap2;
   Value* new_tanh_out = new_tanh->output();
   SubgraphUtils::mergeNodeIntoSubgraph(subgraph1, subgraph2, vmap2);
-  // vmap should have 4 entries, since we moved 4 values into the graph (the
+  // vmap should have 6 entries, since we moved 4 values into the graph (the
   // values correspond to the original values '%a', '%b', '%x', and '%y').
-  ASSERT_EQ(vmap2.size(), 4);
+  // and we map the node outputs for '%x' and '%y'
+  ASSERT_EQ(vmap2.size(), 6);
 
   // Check that after mergeNodeIntoSubgraph we can still access the node
   // corresponding to the original node, even if the toMerge node had a subgraph
