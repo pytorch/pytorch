@@ -27,7 +27,7 @@ def patched_getline(*args, **kwargs):
     return _orig_getlines(*args, **kwargs)
 linecache.getlines = patched_getline
 
-def forward_from_src(src : str):
+def _forward_from_src(src : str):
     gbls: Dict[str, Any] = {
         'torch': torch
     }
@@ -37,11 +37,10 @@ def forward_from_src(src : str):
 
 def deserialize_graphmodule(body : dict) -> torch.nn.Module:
     """
-    Deserialize a GraphModule given the original `root` module and the generated
-    `forward()` source code (`src`). This will exec() the source of the forward
-    onto the root module to create a well-formed Module with code analogous
-    to the original code. Then it symbolically traces through it to get the
-    GraphModule
+    Deserialize a GraphModule given the dictionary of the original module,
+    using the code to reconstruct the graph. We delete the actual graph before
+    saving the dictionary so that changes to the in-memory graph format do not
+    get serialized.
     """
     # We create a dummy class here because symbolic_trace pulls the forward()
     # function off of the class, rather than the instance
@@ -50,7 +49,7 @@ def deserialize_graphmodule(body : dict) -> torch.nn.Module:
             super().__init__()
             self.__dict__ = body
 
-    CodeOnlyModule.forward = forward_from_src(body['code'])
+    CodeOnlyModule.forward = _forward_from_src(body['code'])
 
     from .symbolic_trace import symbolic_trace, DefaultDelegate
 
@@ -99,6 +98,7 @@ class GraphModule(torch.nn.Module):
         self.training = root.training
         for node in graph.nodes:
             if node.op in ['get_param', 'call_module']:
+                assert isinstance(node.target, str)
                 _copy_attr(root, self, node.target)
         self.graph = graph
         self._generate_forward()
@@ -112,10 +112,12 @@ def forward(self, {', '.join(free_variables)}):
     return {result}
 """
         cls = type(self)
-        cls.forward = forward_from_src(self.code)
+        cls.forward = _forward_from_src(self.code)
 
     def __reduce__(self):
-        return (deserialize_graphmodule, (self.__dict__,))
+        dict_without_graph = self.__dict__.copy()
+        del dict_without_graph['graph']
+        return (deserialize_graphmodule, (dict_without_graph,))
 
     # because __reduce__ is defined for serialization,
     # we need to define deepcopy otherwise it will call __reduce__
