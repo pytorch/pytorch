@@ -36,7 +36,9 @@ class TORCH_API LoopNest {
   void computeInline(Stmt* s);
   void computeInlineWithRandom(Stmt* s);
   void prepareForCodegen();
+  // LoopOptions are not propagated.
   void sliceHead(For* f, int factor, For** head, For** tail);
+  // LoopOptions are not propagated.
   void sliceTail(For* f, int factor, For** head, For** tail);
   void splitWithTail(For* f, int factor, For** outer, For** inner, For** tail);
   void splitWithMask(For* f, int factor, For** outer, For** inner);

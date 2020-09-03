@@ -921,10 +921,9 @@ void LoopNest::slice(For* f, const Expr* factor, For** head, For** tail) {
       f->var(),
       f->start(),
       head_end,
-      Stmt::clone(f->body()),
-      f->loop_options());
+      Stmt::clone(f->body()));
   *tail = new For(
-      f->var(), head_end, f->stop(), Stmt::clone(f->body()), f->loop_options());
+      f->var(), head_end, f->stop(), Stmt::clone(f->body()));
 
   p->replace_stmt(f, *head);
   p->insert_stmt_after(*tail, *head);
