@@ -138,7 +138,8 @@ c10::intrusive_ptr<JitFuture> wrapFutureMessageInJitFuture(
         at::wrapPropagateTLSState<void>([jitFuture, wp]() {
           auto futureResponseMessage = wp.lock();
           if (futureResponseMessage->hasError()) {
-            jitFuture->setError(futureResponseMessage->error()->what());
+            jitFuture->setError(
+                std::make_exception_ptr(*futureResponseMessage->error()));
           } else {
             jitFuture->markCompleted(
                 toIValue(futureResponseMessage->constValue()));
@@ -154,7 +155,8 @@ c10::intrusive_ptr<JitFuture> wrapFutureMessageInJitFuture(
         at::wrapPropagateTLSState<void>([wp, jitFuture]() {
           auto futureResponseMessage = wp.lock();
           if (futureResponseMessage->hasError()) {
-            jitFuture->setError(futureResponseMessage->error()->what());
+            jitFuture->setError(
+                std::make_exception_ptr(*futureResponseMessage->error()));
           } else {
             jitFuture->markCompleted(IValue());
           }
