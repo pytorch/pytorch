@@ -106,16 +106,17 @@ void quickselect(
   }
 
   scalar_t pivot = first[std::distance(first, last) >> 1];
-  scalar_t* mid1 =
-      std::partition(first, last, [=](scalar_t x) { return x < pivot; });
-  scalar_t* mid2 =
-      std::partition(mid1, last, [=](scalar_t x) { return x == pivot; });
+  scalar_t* mid1 = std::partition(
+      first, last, [pivot](scalar_t elem) { return elem < pivot; });
+  scalar_t* mid2 = std::partition(
+      mid1, last, [pivot](scalar_t elem) { return elem == pivot; });
 
   int64_t mid1_r = std::distance(start, mid1);
   int64_t mid2_r = std::distance(start, mid2);
 
-  quickselect(start, first, mid1, begin, std::lower_bound(begin, end, mid1_r));
-  quickselect(start, mid2, last, std::lower_bound(begin, end, mid2_r), end);
+  auto lt_end = std::lower_bound(begin, end, mid1_r);
+  quickselect(start, first, mid1, begin, lt_end);
+  quickselect(start, mid2, last, std::lower_bound(lt_end, end, mid2_r), end);
 }
 
 void quantile_cpu_impl(
@@ -144,6 +145,8 @@ void quantile_cpu_impl(
   }
 
   int64_t q_size = q.numel();
+  int64_t in_stride = in.stride(0);
+  int64_t out_stride = out.stride(0);
 
   AT_DISPATCH_FLOATING_TYPES(in.scalar_type(), "quantile_cpu_impl", [&] {
     scalar_t* const OP = out.data_ptr<scalar_t>();
@@ -167,11 +170,11 @@ void quantile_cpu_impl(
     }
 
     at::parallel_for(0, in.size(0), 0, [&](int64_t begin, int64_t end) {
-      scalar_t* ip = IP + begin * in.size(1);
-      for (int64_t it = begin; it < end; ++it, ip += in.size(1)) {
-        quickselect(ip, ip, ip + in.size(1), kths.begin(), kths.end());
+      scalar_t* ip = IP + begin * in_stride;
+      for (int64_t it = begin; it < end; ++it, ip += in_stride) {
+        quickselect(ip, ip, ip + in_stride, kths.begin(), kths.end());
         scalar_t* op = OP + it;
-        for (int64_t i = 0; i < q_size; ++i, op += out.stride(0)) {
+        for (int64_t i = 0; i < q_size; ++i, op += out_stride) {
           *op = ip[rb[i]] + w[i] * (ip[ra[i]] - ip[rb[i]]);
         }
       }
