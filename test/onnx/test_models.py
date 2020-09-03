@@ -208,18 +208,22 @@ class TestModels(TestCase):
 
         self.exportTest(toC(qat_resnet50), toC(x))
 
+    @disableScriptTest()
     def test_googlenet(self):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(toC(googlenet()), toC(x), rtol=1e-3, atol=1e-5)
 
+    @disableScriptTest()
     def test_mnasnet(self):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(toC(mnasnet1_0()), toC(x), rtol=1e-3, atol=1e-5)
 
+    @disableScriptTest()
     def test_mobilenet(self):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(toC(mobilenet_v2()), toC(x), rtol=1e-3, atol=1e-5)
 
+    @disableScriptTest()
     def test_shufflenet(self):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(toC(shufflenet_v2_x1_0()), toC(x), rtol=1e-3, atol=1e-5)
@@ -234,14 +238,17 @@ class TestModels(TestCase):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(toC(deeplabv3_resnet101()), toC(x), rtol=1e-3, atol=1e-5)
 
+    @disableScriptTest()
     def test_r3d_18_video(self):
         x = Variable(torch.randn(1, 3, 4, 112, 112).fill_(1.0))
         self.exportTest(toC(r3d_18()), toC(x), rtol=1e-3, atol=1e-5)
 
+    @disableScriptTest()
     def test_mc3_18_video(self):
         x = Variable(torch.randn(1, 3, 4, 112, 112).fill_(1.0))
         self.exportTest(toC(mc3_18()), toC(x), rtol=1e-3, atol=1e-5)
 
+    @disableScriptTest()
     def test_r2plus1d_18_video(self):
         x = Variable(torch.randn(1, 3, 4, 112, 112).fill_(1.0))
         self.exportTest(toC(r2plus1d_18()), toC(x), rtol=1e-3, atol=1e-5)
