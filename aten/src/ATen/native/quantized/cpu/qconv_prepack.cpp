@@ -19,14 +19,16 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeight<
         c10::optional<at::Tensor> bias,
         torch::List<int64_t> stride,
         torch::List<int64_t> padding,
+        torch::List<int64_t> output_padding,
         torch::List<int64_t> dilation,
-        int64_t groups) {
+        int64_t groups,
+        bool transpose) {
+  TORCH_CHECK(!transpose, "FBGEMM doesn't support transpose packing yet!");
   TORCH_CHECK(
       weight.ndimension() == kSpatialDim + 2,
       "Weights are expected to have ",
       kSpatialDim + 2,
       " dimensions");
-
   TORCH_CHECK(
       stride.size() == kSpatialDim,
       "stride should contain ",
@@ -45,8 +47,10 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeight<
       " elements for ",
       kSpatialDim,
       "D convolution.");
-  const int output_channels = weight.size(0);
-  const int input_channels_per_group = weight.size(1);
+  const int input_channels = transpose ? weight.size(0)
+                                       : weight.size(1) * groups;
+  const int output_channels = transpose ? weight.size(1) * groups
+                                        : weight.size(0);
   const int kernel_d = kSpatialDim == 2 ? 1 : weight.size(2);
   const int kernel_h = weight.size(kSpatialDim);
   const int kernel_w = weight.size(kSpatialDim + 1);
@@ -58,7 +62,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeight<
   const fbgemm::conv_param_t<kSpatialDim> conv_p =
       at::native::fbgemm_utils::MakeFbgemmConvParam<kSpatialDim>(
           1, // dummy batch size
-          input_channels_per_group * groups, // input channels
+          input_channels,
           output_channels,
           kSpatialDim == 2 ? std::vector<int>{28, 28} // dummy image size
                            : std::vector<int>{28, 28, 28},
@@ -98,6 +102,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeight<
   // fbgemm::col_offsets_with_zero_pt_s8acc32_ref) please note that offsets
   // include the sum of columns as well as the scalar term weight_zero_point *
   // KDim
+  const int input_channels_per_group = input_channels / groups;
   const int output_channels_per_group = output_channels / groups;
   const int inner_size =
       kernel_d * kernel_h * kernel_w * input_channels_per_group;
@@ -143,8 +148,10 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeight<
           bias_contig,
           stride,
           padding,
+          output_padding,
           dilation,
           groups,
+          transpose,
           col_offsets,
           kSpatialDim == 2 ? std::vector<int64_t>{kernel_h, kernel_w}
                            : std::vector<int64_t>{kernel_d, kernel_h, kernel_w},
@@ -166,28 +173,42 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsQnnp<
         c10::optional<at::Tensor> bias_in,
         torch::List<int64_t> stride,
         torch::List<int64_t> padding,
+        torch::List<int64_t> output_padding,
         torch::List<int64_t> dilation,
-        int64_t groups) {
+        int64_t groups,
+        bool transpose) {
+  TORCH_CHECK(kSpatialDim == 2, "QNNPACK packing only supports 2D ",
+              "convolution.");
   TORCH_CHECK(
-      weight.ndimension() == 4,
-      "quantized::conv2d_prepack (qnnpack): Weights are expected to have 4 "
-      "dimensions");
+      weight.ndimension() == kSpatialDim + 2,
+      "quantized::conv_prepack (qnnpack): Weights are expected to have ",
+      kSpatialDim + 2, "dimensions");
   TORCH_CHECK(
-      stride.size() == 2,
-      "quantized::conv2d_prepack (qnnpack): 2D convolution only");
+      stride.size() == kSpatialDim,
+      "quantized::conv_prepack (qnnpack): ",
+      kSpatialDim, "D convolution expects stride to have ",
+      kSpatialDim, " elements.");
   TORCH_CHECK(
-      padding.size() == 2,
-      "quantized::conv2d_prepack (qnnpack): Specify top/left padding only. "
-      "bottom/right padding assumed to be equal to top/left");
+      padding.size() == kSpatialDim,
+      "quantized::conv_prepack (qnnpack): Specify top/left input padding "
+      "only. bottom/right padding assumed to be equal to top/left");
   TORCH_CHECK(
-      dilation.size() == 2,
-      " quantized::conv2d_prepack (qnnpack): 2D convolution only");
+      output_padding.size() == kSpatialDim,
+      "quantized::conv_prepack (qnnpack): Specify top/left output padding "
+      "only. bottom/right padding assumed to be equal to top/left");
+  TORCH_CHECK(
+      dilation.size() == kSpatialDim,
+      "quantized::conv_prepack (qnnpack): ",
+      kSpatialDim, "D convolution expects dilation to have ",
+      kSpatialDim, " elements.");
 
   at::native::initQNNPACK();
 
   // QNNPACK expects weights to be of the format {out_c, kH, kW, in_c/groups},
   // but PyTorch lays them out as {out_c, in_c/groups, kH, kW}
-  const size_t out_ch = weight.size(0);
+  // (or for ConvTranspose {in_c, out_c/groups, kH, kW})
+  const size_t out_ch_idx = transpose ? 1 : 0;
+  const size_t out_ch = weight.size(out_ch_idx);
   const uint32_t kernel_h = weight.size(2);
   const uint32_t kernel_w = weight.size(3);
 
@@ -215,7 +236,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsQnnp<
   std::vector<uint8_t> w_zero_points;
   at::Tensor  w_scales;
   std::tie(w_zero_points, w_scales) =
-      make_zero_points_and_scales_tensor(weight_contig);
+      make_zero_points_and_scales_tensor(weight_contig, transpose, groups);
   // We set the pre-packed conv weights to nullptr below as we call pre-pack
   // during the first invocation of operator run. Refer to qconv.cpp for more
   // details. TODO Update to actually call pre-pack here once bias is removed
@@ -228,8 +249,10 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsQnnp<
               bias_fp32.contiguous(), /* fp32 bias */
               stride,
               padding,
+              output_padding,
               dilation,
               groups,
+              transpose,
               c10::nullopt, /* input_scale */
               {kernel_h, kernel_w},
               w_scales,
@@ -248,18 +271,39 @@ namespace {
 template <int kSpatialDim = 2>
 class QConvPackWeightInt8 final {
  public:
-  static c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> run(
+  static c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> run_conv(
       Tensor weight,
       c10::optional<Tensor> bias,
       torch::List<int64_t> stride,
       torch::List<int64_t> padding,
       torch::List<int64_t> dilation,
       int64_t groups) {
+    torch::List<int64_t> output_padding;
+    output_padding.reserve(kSpatialDim);
+    for (int idx = 0; idx < kSpatialDim; ++idx) {
+      output_padding.push_back((int64_t)0);
+    }
+    return _run(weight, bias, stride, padding, output_padding, dilation, groups,
+                false);
+  }
+
+ private:
+  static c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> _run(
+      Tensor weight,
+      c10::optional<Tensor> bias,
+      torch::List<int64_t> stride,
+      torch::List<int64_t> padding,
+      torch::List<int64_t> output_padding,
+      torch::List<int64_t> dilation,
+      int64_t groups,
+      bool transpose) {
     auto& ctx = at::globalContext();
 #ifdef USE_FBGEMM
     if (ctx.qEngine() == at::QEngine::FBGEMM) {
+      TORCH_CHECK(!transpose, "FBGEMM doesn't support transpose packing yet!");
       return PackedConvWeight<kSpatialDim>::prepack(
-          weight, bias, stride, padding, dilation, groups);
+          weight, bias, stride, padding, output_padding, dilation, groups,
+          transpose);
     }
 #endif
 
@@ -270,7 +314,8 @@ class QConvPackWeightInt8 final {
           "quantized::conv_prepack (qnnpack): QNNPACK only supports Conv1d "
           "and Conv2d now.");
       return PackedConvWeightsQnnp<kSpatialDim>::prepack(
-          weight, bias, stride, padding, dilation, groups);
+          weight, bias, stride, padding, output_padding, dilation, groups,
+          transpose);
     }
 #endif
 
@@ -283,31 +328,49 @@ class QConvPackWeightInt8 final {
 
 class QConv1dPackWeightInt8 final {
  public:
-  static c10::intrusive_ptr<ConvPackedParamsBase<2>> run(
+  static c10::intrusive_ptr<ConvPackedParamsBase<2>> run_conv(
       Tensor weight,
       c10::optional<Tensor> bias,
       torch::List<int64_t> stride,
       torch::List<int64_t> padding,
       torch::List<int64_t> dilation,
       int64_t groups) {
+    const torch::List<int64_t> output_padding({0});
+    return _run(weight, bias, stride, padding, output_padding, dilation, groups,
+                false);
+  }
+
+ private:
+  static c10::intrusive_ptr<ConvPackedParamsBase<2>> _run(
+      Tensor weight,
+      c10::optional<Tensor> bias,
+      torch::List<int64_t> stride,
+      torch::List<int64_t> padding,
+      torch::List<int64_t> output_padding,
+      torch::List<int64_t> dilation,
+      int64_t groups,
+      bool transpose) {
     auto& ctx = at::globalContext();
     if (weight.dim() == 3) {
       weight = weight.unsqueeze(quant_utils::kConv1dSqueezeDim + 2);
     }
     stride = quant_utils::MakeArgForConv1d(stride, 1);
     padding = quant_utils::MakeArgForConv1d(padding, 0);
+    output_padding = quant_utils::MakeArgForConv1d(output_padding, 0);
     dilation = quant_utils::MakeArgForConv1d(dilation, 1);
 #ifdef USE_FBGEMM
     if (ctx.qEngine() == at::QEngine::FBGEMM) {
       return PackedConvWeight<2>::prepack(
-          weight, bias, stride, padding, dilation, groups);
+          weight, bias, stride, padding, output_padding, dilation, groups,
+          transpose);
     }
 #endif
 
 #ifdef USE_PYTORCH_QNNPACK
     if (ctx.qEngine() == at::QEngine::QNNPACK) {
       return PackedConvWeightsQnnp<2>::prepack(
-          weight, bias, stride, padding, dilation, groups);
+          weight, bias, stride, padding, output_padding, dilation, groups,
+          transpose);
     }
 #endif
     TORCH_CHECK(
@@ -319,14 +382,14 @@ class QConv1dPackWeightInt8 final {
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
   // conv_prepack is deprecated, please use conv2d_prepack for 2D conv.
-  m.impl("conv_prepack", TORCH_FN(QConvPackWeightInt8<2>::run));
-  m.impl("conv1d_prepack", TORCH_FN(QConv1dPackWeightInt8::run));
-  m.impl("conv2d_prepack", TORCH_FN(QConvPackWeightInt8<2>::run));
-  m.impl("conv3d_prepack", TORCH_FN(QConvPackWeightInt8<3>::run));
+  m.impl("conv_prepack", TORCH_FN(QConvPackWeightInt8<2>::run_conv));
+  m.impl("conv1d_prepack", TORCH_FN(QConv1dPackWeightInt8::run_conv));
+  m.impl("conv2d_prepack", TORCH_FN(QConvPackWeightInt8<2>::run_conv));
+  m.impl("conv3d_prepack", TORCH_FN(QConvPackWeightInt8<3>::run_conv));
 }
 
 TORCH_LIBRARY_IMPL(_quantized, QuantizedCPU, m) {
-  m.impl("conv2d_prepack", TORCH_FN(QConvPackWeightInt8<2>::run));
+  m.impl("conv2d_prepack", TORCH_FN(QConvPackWeightInt8<2>::run_conv));
 }
 
 } // namespace
