@@ -1152,7 +1152,7 @@ class TestTEFuser(JitTestCase):
             torch.int16,
             torch.int32,
             torch.int64,
-            # torch.float16,
+            torch.float16,
             torch.float32,
             torch.float64,
             torch.bool,
@@ -1202,7 +1202,6 @@ class TestTEFuser(JitTestCase):
             "cuda",
         ]
         for dtype, op, device in product(dtypes, unary_ops, devices):
-            print("Running:", dtype, op.__name__, device)
             try:
                 x = rand(dtype, device)
                 fn = apply(op)
@@ -1211,7 +1210,6 @@ class TestTEFuser(JitTestCase):
                 # If eager mode doesn't support a dtype/op/device combo,
                 # neither does the fuser.  Catch everything to avoid needing to
                 # guess what errors might be thrown by eager.
-                print("Not supported (eager):", dtype, op.__name__, device)
                 continue
             t = torch.jit.trace(fn, (x,))
             self.assertEqual(ref, t(x))
