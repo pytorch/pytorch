@@ -191,8 +191,8 @@ class TestFX(JitTestCase):
         a = resnet(ip)
         b = res_graph(ip)
         c = res_script(ip)
-        assert torch.allclose(a, b)
-        assert torch.allclose(a, c)
+        self.assertEqual(a, b)
+        self.assertEqual(a, c)
 
         quantizer = Quantizer(res_graph)
 
@@ -206,7 +206,7 @@ class TestFX(JitTestCase):
         e = qgraph_script(ip)
 
         assert (a - d).abs().max() < 2
-        assert torch.allclose(d, e)
+        self.assertEqual(d, e)
 
     def test_unpack(self):
         class M(torch.nn.Module):
@@ -439,11 +439,10 @@ class TestFX(JitTestCase):
 
         def transform(traced):
             new_graph = copy.deepcopy(traced.graph)
-            delegate = torch.fx.DefaultDelegate(traced.root, new_graph)
-            relu_out = delegate.create_node(
-                kind='call_method', target='neg', args=(new_graph.result,), kwargs={})
+            relu_out = new_graph.create_node(
+                op='call_method', target='neg', args=(new_graph.result,), kwargs={})
             new_graph.output(relu_out)
-            return GraphModule(traced.root, new_graph)
+            return GraphModule(traced, new_graph)
         transformed = transform(traced)
         copied = copy.deepcopy(transformed)
         x = torch.randn(3, 4)

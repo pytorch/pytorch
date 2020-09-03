@@ -168,7 +168,7 @@ class Quantizer:
 
     def _prepare(self, model, qconfig_dict, inplace, is_dynamic_quant):
         assert not inplace, 'inplace prepare is not supported yet'
-        input_root = model.root
+        input_root = model
         if not inplace:
             input_root = copy.deepcopy(input_root)
 
@@ -303,7 +303,7 @@ class Quantizer:
                         weight_observer_nodes = collect_producer_nodes(node_arg)
                         if weight_observer_nodes is not None:
                             weight_observer_module = graph_module_from_producer_nodes(
-                                observed.root, weight_observer_nodes)
+                                observed, weight_observer_nodes)
                             # run the weight observer
                             weight_observer_module()
         return
@@ -319,7 +319,7 @@ class Quantizer:
 
         # move to cpu since we only have quantized cpu kernels
         observed.eval().cpu()
-        observed_root = observed.root
+        observed_root = observed
         observed_graph = observed.graph
         if not inplace:
             observed_root = copy.deepcopy(observed_root)
@@ -514,7 +514,7 @@ class Quantizer:
                         folded_nodes[node_to_fold.name] = node
 
                     prepacking_module = graph_module_from_producer_nodes(
-                        quantized.root, nodes_to_fold)
+                        quantized, nodes_to_fold)
                     packed_weight = prepacking_module()
                     packed_weights[node.name] = packed_weight
 
@@ -525,7 +525,7 @@ class Quantizer:
         def load_arg(a):
             return map_arg(a, lambda node: env[node.name])
         get_new_packed_weight_name = get_new_attr_name_with_prefix('_fx_pass_packed_weight_')
-        quantized_root = quantized.root
+        quantized_root = quantized
         quantized_graph = quantized.graph
         for node in quantized_graph.nodes:
             prepack_node = folded_nodes.get(node.name, None)
