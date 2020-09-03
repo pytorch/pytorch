@@ -528,7 +528,7 @@ class TestUtilityFuns(TestCase):
 
         # run export in diagnose mode
         graph, unsupported_ops = torch.onnx._find_missing_ops_onnx_export(model, (x,), f,
-                                                             opset_version=9)
+                                                                          opset_version=9)
         iter = graph.nodes()
         assert next(iter).kind() == "onnx::Constant"
         assert next(iter).kind() == "prim::Constant"
