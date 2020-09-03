@@ -186,7 +186,7 @@ void CudaPrinter::visit(const For* v) {
 }
 
 void CudaPrinter::visit(const Cast* v) {
-  os() << cudaDtypeCppString(v->dtype());
+  os() << "(" << cudaDtypeCppString(v->dtype()) << ")";
   os() << "(";
   v->src_value()->accept(this);
   os() << ")";
@@ -208,6 +208,9 @@ void CudaPrinter::visit(const Intrinsics* v) {
 
   if (returnType == ScalarType::Half || returnType == ScalarType::Float) {
     func_name = func_name + "f";
+  }
+  if (v->op_type() == IntrinsicsOp::kFabs && is_integral(returnType)) {
+    func_name = "abs";
   }
 
   os() << func_name << "(";
