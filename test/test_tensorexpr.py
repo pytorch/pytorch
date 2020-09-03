@@ -15,8 +15,8 @@ class BaseTestClass(unittest.TestCase):
 
         self.old_cpu_fuser_state = torch._C._jit_can_fuse_on_cpu()
         self.old_gpu_fuser_state = torch._C._jit_can_fuse_on_gpu()
-        torch._C._jit_override_can_fuse_on_cpu(False)
-        torch._C._jit_override_can_fuse_on_gpu(False)
+        torch._C._jit_override_can_fuse_on_cpu(True)
+        torch._C._jit_override_can_fuse_on_gpu(True)
         self.texpr_fuser_state = torch._C._jit_texpr_fuser_enabled()
         torch._C._jit_set_texpr_fuser_enabled(True)
 

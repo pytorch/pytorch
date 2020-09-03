@@ -136,6 +136,7 @@ cmake_dependent_option(
     CAFFE2_USE_MSVC_STATIC_RUNTIME "Using MSVC static runtime libraries" ON
     "NOT BUILD_SHARED_LIBS" OFF)
 option(BUILD_TEST "Build C++ test binaries (need gtest and gbenchmark)" OFF)
+option(BUILD_STATIC_RUNTIME_BENCHMARK "Build C++ binaries for static runtime benchmarks (need gbenchmark)" OFF)
 option(BUILD_MOBILE_BENCHMARKS "Build C++ test binaries for mobile (ARM) targets(need gtest and gbenchmark)" OFF)
 option(BUILD_MOBILE_TEST "Build C++ test binaries for mobile (ARM) targets(need gtest and gbenchmark)" OFF)
 option(BUILD_JNI "Build JNI bindings" OFF)
@@ -608,6 +609,21 @@ if(USE_ASAN)
     string(APPEND CMAKE_CXX_FLAGS_DEBUG " -fsanitize=address")
     string(APPEND CMAKE_LINKER_FLAGS_DEBUG " -fsanitize=address")
 endif()
+
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
+  include(CheckCSourceCompiles)
+  check_c_source_compiles("#include <arm_neon.h>
+int main() {
+  float a[] = {1.0, 1.0};
+  vld1q_f32_x2(a);
+  return 0;
+}" HAS_VLD1)
+
+  if(NOT HAS_VLD1)
+    string(APPEND CMAKE_CXX_FLAGS " -DMISSING_ARM_VLD1")
+  endif()
+endif()
+
 
 # Add code coverage flags to supported compilers
 if(CODE_COVERAGE)
