@@ -331,7 +331,7 @@
 
 - name: complex(Tensor real, Tensor imag) -> Tensor
   real: at::real(grad)
-  imag: at::zeros_like(at::real(grad))
+  imag: at::imag(grad)
 
 - name: polar(Tensor abs, Tensor angle) -> Tensor
   abs: not_implemented("polar abs")

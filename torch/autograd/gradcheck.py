@@ -89,7 +89,7 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3, v=1.0):
             # wirtinger derivative
             w_d = 0.5 * (ds_dx - ds_dy * 1j)
             d[d_idx] = v.conjugate() * conj_w_d + v * w_d.conj()
-        elif ds_dx.is_complex(): # R -> C
+        elif ds_dx.is_complex():  # R -> C
             dL_dz_conj = 0.5 * (v.conjugate() * ds_dx + v * ds_dx.conj())
             d[d_idx] = torch.real(dL_dz_conj)
         else:
@@ -335,7 +335,7 @@ def gradcheck(
         if not correct_grad_types and check_grad_dtypes:
             return fail_test('Gradient has dtype mismatch')
 
-        if not correct_grad_types_with_imag_v and check_grad_dtypes:
+        if out_is_complex and not correct_grad_types_with_imag_v and check_grad_dtypes:
             return fail_test('Gradient (calculated using complex valued grad output) has dtype mismatch')
 
         if not correct_grad_sizes:
@@ -358,8 +358,8 @@ def gradcheck(
                     a_with_imag_v = analytical_with_imag_v[j]
                     n_with_imag_v = numerical_with_imag_v[j]
                     checkIfNumericalAnalyticAreClose(a_with_imag_v, n_with_imag_v, j,
-                                                        "Imaginary value(s) of Conjugate Wirtinger derivative \
-                                                        (Im(ds/dx + ds/dy * 1j)) failed to compare equal. ")
+                                                     "Imaginary value(s) of Conjugate Wirtinger derivative \
+                                                     (Im(ds/dx + ds/dy * 1j)) failed to compare equal. ")
                 if inp.is_complex():
                     # C -> R, C -> C
                     checkIfNumericalAnalyticAreClose(a, n, j,
