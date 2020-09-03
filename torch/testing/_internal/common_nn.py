@@ -19,7 +19,8 @@ from torch.testing._internal.common_utils import TestCase, to_gpu, freeze_rng_st
     TEST_WITH_ROCM, _assertGradAndGradgradChecks
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import expectedAlertNondeterministic
-from torch.autograd.gradcheck import get_numerical_jacobian, iter_tensors
+from torch.autograd.gradcheck import get_numerical_jacobian, iter_tensors, \
+    gradcheck, gradgradcheck
 from torch.autograd import Variable
 import torch.backends.cudnn
 
@@ -4372,6 +4373,7 @@ new_criterion_tests = [
         reference_fn=lambda i, t, il, tl, m:
             ctcloss_reference(i, t, il, tl, blank=14, reduction=get_reduction(m)),
         desc='lengths_intlists',
+        check_forward_only=True,
         check_sum_reduction=True,
         check_gradgrad=False,
         check_half=False,
@@ -4402,6 +4404,7 @@ new_criterion_tests = [
         reference_fn=lambda i, t, il, tl, m:
             ctcloss_reference(i, t, il, tl, blank=14, reduction=get_reduction(m)),
         desc='lengths_tensors',
+        check_forward_only=True,
         check_sum_reduction=True,
         check_gradgrad=False,
         check_half=False,
@@ -4430,6 +4433,7 @@ new_criterion_tests = [
         target_fn=lambda: torch.randint(1, 15, (3, 30), dtype=torch.int),
         reference_fn=lambda i, t, il, tl, m:
             ctcloss_reference(i, t, il, tl, blank=0, reduction=get_reduction(m)),
+        check_forward_only=True,
         check_sum_reduction=True,
         check_gradgrad=False,
         check_half=False,
@@ -4447,6 +4451,7 @@ new_criterion_tests = [
         target_fn=lambda: torch.randint(1, 15, (3, 30), dtype=torch.int),
         reference_fn=lambda i, t, il, tl, m:
             ctcloss_reference(i, t, il, tl, blank=0, reduction=get_reduction(m)),
+        check_forward_only=True,
         check_sum_reduction=True,
         check_gradgrad=False,
         check_half=False,
@@ -4462,6 +4467,7 @@ new_criterion_tests = [
         target_fn=lambda: torch.randint(1, 15, (3, 30), dtype=torch.int),
         reference_fn=lambda i, t, il, tl, m:
             ctcloss_reference(i, t, il, tl, blank=0, reduction=get_reduction(m)),
+        check_forward_only=True,
         check_sum_reduction=True,
         check_gradgrad=False,
         check_half=False,
@@ -4566,10 +4572,10 @@ class NNTestCase(TestCase):
                 PRECISION
             )
 
-    def check_criterion_jacobian(self, criterion, input, target):
+    def check_criterion_jacobian(self, criterion, input, target, extra_args):
         eps = 1e-6
-        self._forward_criterion(criterion, input, target)
-        analytical_d_x = self._backward_criterion(criterion, input, target)
+        self._forward_criterion(criterion, input, target, extra_args=extra_args)
+        analytical_d_x = self._backward_criterion(criterion, input, target, extra_args=extra_args)
         numerical_d_x = deepcopy(analytical_d_x)
 
         input_t = iter_tensors(input)
@@ -4580,9 +4586,9 @@ class NNTestCase(TestCase):
             for i in range(x.nelement()):
                 original = x[i].item()
                 x[i] = original + eps
-                fx1 = self._forward_criterion(criterion, input, target)
+                fx1 = self._forward_criterion(criterion, input, target, extra_args=extra_args)
                 x[i] = original - eps
-                fx2 = self._forward_criterion(criterion, input, target)
+                fx2 = self._forward_criterion(criterion, input, target, extra_args=extra_args)
                 deriv = (fx1 - fx2) / (2. * eps)
                 d_x[i] = float(deriv)
                 x[i] = original
@@ -4854,41 +4860,6 @@ class ModuleTest(TestBase):
                 raise
 
 
-class CriterionTest(TestBase):
-
-    _required_arg_names = TestBase._required_arg_names.union({'target'})
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.should_test_cuda = kwargs.get('test_cuda', True)
-        self.check_forward_only = kwargs.get('check_forward_only', True)
-
-    def _get_target(self):
-        return self._get_arg('target', True)
-
-    def __call__(self, test_case):
-        module = self.constructor(*self.constructor_args)
-        input = self._get_input()
-
-        # Check that these methods don't raise errors
-        module.__repr__()
-        str(module)
-
-        target = self._get_target()
-
-        if self.reference_fn is not None:
-            out = test_case._forward_criterion(module, input, target, extra_args=self.extra_args)
-            ref_args = (deepcopy(input), deepcopy(target)) + self.extra_args + (module,)
-            expected_out = self.reference_fn(*ref_args)
-            test_case.assertEqual(out, expected_out)
-
-        if self.check_forward_only:
-            return
-
-        test_case.check_criterion_jacobian(module, input, target)
-        self._do_extra_tests(test_case, module, input, target)
-
-
 class InputVariableMixin(object):
     def _get_input(self):
         input = TestBase._get_input(self, False)
@@ -5061,16 +5032,42 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
         return self._get_arg('constructor_args', False)
 
 
-class NewCriterionTest(InputVariableMixin, CriterionTest):
+class CriterionTest(InputVariableMixin, TestBase):
     # TODO: check that criterions don't ignore grad_output
+
+    _required_arg_names = TestBase._required_arg_names.union({'target'})
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.should_test_cuda = kwargs.get('test_cuda', True)
+        self.check_forward_only = kwargs.get('check_forward_only', False)
         self.check_gradgrad = kwargs.get('check_gradgrad', True)
         self.check_half = kwargs.get('check_half', True)
         self.check_bfloat16 = kwargs.get('check_bfloat16', False)
         self.convert_target = kwargs.get('convert_target', True)
         self.test_cpu = kwargs.get('test_cpu', True)
+
+    def __call__(self, test_case):
+        module = self.constructor(*self.constructor_args)
+        input = self._get_input()
+
+        # Check that these methods don't raise errors
+        module.__repr__()
+        str(module)
+
+        target = self._get_target()
+
+        if self.reference_fn is not None:
+            out = test_case._forward_criterion(module, input, target, extra_args=self.extra_args)
+            ref_args = (deepcopy(input), deepcopy(target)) + self.extra_args + (module,)
+            expected_out = self.reference_fn(*ref_args)
+            test_case.assertEqual(out, expected_out)
+
+        if self.check_forward_only:
+            return
+
+        test_case.check_criterion_jacobian(module, input, target, extra_args=self.extra_args)
+        self._do_extra_tests(test_case, module, input, target)
 
     def _do_extra_tests(self, test_case, module, input, target):
         if not self.check_gradgrad:
