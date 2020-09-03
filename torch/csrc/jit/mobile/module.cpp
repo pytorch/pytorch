@@ -65,18 +65,29 @@ c10::IValue Module::run_method(const std::string& method_name, Stack stack) {
       observer->onExitRunMethod();
     }
     return result;
-  } catch (const std::exception& ex) {
+  } catch (c10::Error& error) {
     if (observer) {
-      observer->onFailRunMethod(
-          "Error occured during model running entry point: " +
-          (std::string)ex.what());
+      observer->onFailRunMethod(error.what());
     }
-    TORCH_CHECK(false, ex.what());
+    TORCH_RETHROW(error);
   } catch (...) {
-    if (observer) {
-      observer->onFailRunMethod("unknown exception");
+    auto currentException = std::current_exception();
+    try {
+      if (!currentException) {
+        TORCH_CHECK(false, "Unknown exception");
+      } else {
+        try {
+          std::rethrow_exception(currentException);
+        } catch (const std::exception& e) {
+          TORCH_CHECK(false, e.what());
+        }
+      }
+    } catch (c10::Error& error) {
+      if (observer) {
+        observer->onFailRunMethod(error.what());
+      }
+      TORCH_RETHROW(error);
     }
-    TORCH_CHECK(false, "unknown exception");
   }
 }
 
