@@ -1,5 +1,6 @@
-#include <torch/csrc/jit/runtime/static/ops.h>
+#include <ATen/NativeFunctions.h>
 #include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/runtime/static/ops.h>
 
 namespace torch {
 namespace jit {
@@ -8,7 +9,8 @@ bool canRunOutOfPlace(Node* n) {
   auto str = std::string(n->kind().toQualString());
   if ((str == "aten::add") || (str == "aten::mul") || (str == "aten::addmm") ||
       (str == "aten::bmm") || (str == "aten::sigmoid") ||
-      (str == "aten::cat")) {
+      (str == "aten::cat") || (str == "aten::transpose") ||
+      (str == "aten::flatten")) {
     return true;
   }
   return false;
@@ -106,7 +108,7 @@ std::function<void(StaticRuntime::ConstantMap&)> getOutOfPlaceOperation(
         ws.emplace(out, create_empty_from(in0_tl[0]));
       }
       auto out_t = ws.at(out).toTensor();
-      at::native::cat_out(out_t, in0_tl, in1_i);
+      at::native::_cat_out_cpu(out_t, in0_tl, in1_i);
     };
   } else if (n->kind() == c10::Symbol::fromQualString("aten::sigmoid")) {
     auto out = n->outputs().at(0);
@@ -118,6 +120,28 @@ std::function<void(StaticRuntime::ConstantMap&)> getOutOfPlaceOperation(
       }
       auto out_t = ws.at(out).toTensor();
       at::native::sigmoid_out(out_t, in0_t);
+    };
+  } else if (n->kind() == c10::Symbol::fromQualString("aten::transpose")) {
+    auto out = n->outputs().at(0);
+    auto in0 = n->inputs().at(0);
+    auto in1 = n->inputs().at(1);
+    auto in2 = n->inputs().at(2);
+    return [=](StaticRuntime::ConstantMap& ws) {
+      auto in0_t = ws.at(in0).toTensor();
+      auto in1_i = ws.at(in1).toInt();
+      auto in2_i = ws.at(in2).toInt();
+      ws[out] = at::native::transpose(in0_t, in1_i, in2_i);
+    };
+  } else if (n->kind() == c10::Symbol::fromQualString("aten::flatten")) {
+    auto out = n->outputs().at(0);
+    auto in0 = n->inputs().at(0);
+    auto in1 = n->inputs().at(1);
+    auto in2 = n->inputs().at(2);
+    return [=](StaticRuntime::ConstantMap& ws) {
+      auto in0_t = ws.at(in0).toTensor();
+      auto in1_i = ws.at(in1).toInt();
+      auto in2_i = ws.at(in2).toInt();
+      ws[out] = at::native::flatten(in0_t, in1_i, in2_i);
     };
   }
 
