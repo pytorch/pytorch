@@ -1,4 +1,5 @@
 #include <test/cpp/tensorexpr/test_base.h>
+#include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
@@ -11,7 +12,20 @@ namespace jit {
 
 using namespace torch::jit::tensorexpr;
 
+struct WithCPUFuser {
+  WithCPUFuser() : cpuFuserEnabled(canFuseOnCPU()) {
+    overrideCanFuseOnCPU(true);
+  }
+
+  ~WithCPUFuser() {
+    overrideCanFuseOnCPU(cpuFuserEnabled);
+  }
+
+  bool cpuFuserEnabled;
+};
+
 void testFuserPass_1() {
+  WithCPUFuser cf;
   KernelScope kernel_scope;
   const auto graph_string = R"IR(
     graph(%0 : Float(128:1, device=cpu),
@@ -29,18 +43,16 @@ void testFuserPass_1() {
   g->lint();
   FuseTensorExprs(g);
 
-  // TODO: Fix alias-info handling in the fuser pass and reenable the test:
-#if 0
   // We should not be able to fuse across the in-place operation here.
   testing::FileCheck()
       .check("prim::TensorExprGroup_")
       ->check("aten::add_")
       ->check("prim::TensorExprGroup_")
       ->run(*g);
-#endif
 }
 
 void testFuserPass_2() {
+  WithCPUFuser cf;
   KernelScope kernel_scope;
   const auto graph_string = R"IR(
     graph(%0 : Float(128:1, device=cpu),
@@ -65,6 +77,7 @@ void testFuserPass_2() {
 }
 
 void testFuserPass_3() {
+  WithCPUFuser cf;
   KernelScope kernel_scope;
   const auto graph_string = R"IR(
     graph(%x : Float(128:1, device=cpu),
@@ -93,29 +106,23 @@ void testFuserPass_3() {
   }
 }
 
-void testFuserPass_4() {
+void testFuserPass_0DimInput() {
   KernelScope kernel_scope;
   const auto graph_string = R"IR(
-    graph(%a : Float(128:1, device=cpu),
-          %b : Float(128:1, device=cpu),
-          %c : Float(128:1, device=cpu),
-          %d : Float(128:1, device=cpu)):
-      %x : Float(128:1, device=cpu) = aten::mul(%a, %b)
-      %y : Float(128:1, device=cpu) = aten::mul(%c, %d)
-      return (%x, %y))IR";
+    graph(%x : Float(device=cuda),
+          %y : Float(device=cuda)):
+      %one : int = prim::Constant[value=1]()
+      %a : Float(device=cuda) = aten::mul(%x, %y)
+      %b : Float(device=cuda) = aten::add(%x, %a, %one)
+      return (%b))IR";
   auto g = std::make_shared<Graph>();
   torch::jit::parseIR(graph_string, g.get());
 
   g->lint();
-  FuseTensorExprs(g, /* min_group_size= */ 1);
+  FuseTensorExprs(g);
 
-  // The %x and %y computations are completely independent and yet we should put
-  // them into a single fusion group rather than having two separate ones.
-  testing::FileCheck()
-      .check("prim::TensorExprGroup_0")
-      ->check_not("prim::TensorExprGroup_1")
-      ->run(*g);
+  // We should not fuse 0-dim tensors
+  testing::FileCheck().check_not("prim::TensorExprGroup")->run(*g);
 }
-
 } // namespace jit
 } // namespace torch
