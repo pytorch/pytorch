@@ -3734,6 +3734,13 @@ var(dim=None, unbiased=True, keepdim=False) -> Tensor
 See :func:`torch.var`
 """)
 
+add_docstr_all('vdot',
+               r"""
+dot(other) -> Tensor
+
+See :func:`torch.vdot`
+""")
+
 add_docstr_all('view',
                r"""
 view(*shape) -> Tensor
