@@ -188,8 +188,81 @@ struct cuda_scatter_gather_base_kernel {
     auto index_size = is_scatter_like ? self_dim_size : src_dim_size;
     auto index_stride = is_scatter_like ? self_dim_stride : src_dim_stride;
 
+
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
       at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
+      iter.dtype(),
+      method_name, [&] {
+        using dtype = typename std::conditional<cast_to_opaque,
+          OpaqueType<sizeof(scalar_t)>, scalar_t>::type;
+
+        _cuda_scatter_gather_internal_kernel<is_scatter_like, dtype>()(
+          iter, index_size, index_stride, f
+        );
+      }
+    );
+  }
+
+  void operator()(
+    Tensor& self, int64_t dim,
+    const Tensor& index, const Tensor& src,
+    const std::string& method_name,
+    const ReduceMultiply& f
+  ) {
+    // no-op if index is empty
+    if (index.numel() == 0) {
+      return;
+    }
+    at::assert_no_internal_overlap(self);
+
+    dim = maybe_wrap_dim(dim, self.dim());
+
+    scatter_gather_dtype_check(method_name, self, index, src);
+    if (is_scatter_like) {
+      scatter_shape_check(self, dim, index, src);
+    }
+    else {
+      gather_shape_check(self, dim, index, src);
+    }
+
+    auto index_sizes = ensure_nonempty_vec(index.sizes().vec());
+    auto self_strides = ensure_nonempty_vec(self.strides().vec());
+    auto src_strides = ensure_nonempty_vec(src.strides().vec());
+
+    // restride self and src such that
+    // self.shape = src.shape = index.shape
+    //
+    // restride stride[dim] such that
+    // if (is_scatter_like) self.stride[dim] = 0
+    // else src.stride[dim] = 0
+    auto self_restrided = is_scatter_like ?
+        restride_dim(self, dim, index_sizes)
+      : self.as_strided(index_sizes, self_strides);
+    auto src_restrided = is_scatter_like ?
+        src.as_strided(index_sizes, src_strides)
+      : restride_dim(src, dim, index_sizes);
+
+    auto iter = TensorIteratorConfig()
+      .set_check_mem_overlap(false)
+      .check_all_same_dtype(false)
+      .resize_outputs(false)
+      .add_output(self_restrided)
+      .add_input(src_restrided)
+      .add_input(index)
+      .build();
+
+    auto self_dim_stride = ensure_nonempty_stride(self, dim);
+    auto self_dim_size = ensure_nonempty_size(self, dim);
+
+    auto src_dim_stride = ensure_nonempty_stride(src, dim);
+    auto src_dim_size = ensure_nonempty_size(src, dim);
+
+    auto index_size = is_scatter_like ? self_dim_size : src_dim_size;
+    auto index_stride = is_scatter_like ? self_dim_stride : src_dim_stride;
+
+
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::Half, at::ScalarType::BFloat16,
       iter.dtype(),
       method_name, [&] {
         using dtype = typename std::conditional<cast_to_opaque,
@@ -296,8 +369,7 @@ struct cuda_scatter_fill_base_kernel {
         using dtype = typename std::conditional<cast_to_opaque,
           OpaqueType<sizeof(scalar_t)>, scalar_t>::type;
 
-        auto src_scalar_val = src.to
-          <scalar_t>();
+        auto src_scalar_val = src.to<scalar_t>();
         auto src_val = *(dtype*)&src_scalar_val;
 
         _cuda_scatter_fill_internal_kernel<dtype>()(
@@ -305,7 +377,58 @@ struct cuda_scatter_fill_base_kernel {
         );
       }
     );
+  }
 
+  void operator()(
+    Tensor& self, int64_t dim,
+    const Tensor& index, Scalar src,
+    const std::string& method_name,
+    const ReduceMultiply& f
+  ) {
+    // no-op if index is empty
+    if (index.numel() == 0) {
+      return;
+    }
+    at::assert_no_internal_overlap(self);
+
+    dim = maybe_wrap_dim(dim, self.dim());
+
+    scatter_gather_dtype_check(method_name, self, index);
+    scatter_shape_check(self, dim, index);
+
+    auto index_sizes = ensure_nonempty_vec(index.sizes().vec());
+
+    // restride self such that
+    // self.shape = index.shape and
+    // self.stride[dim] = 0
+    auto self_restrided = restride_dim(self, dim, index_sizes);
+
+    auto iter = TensorIteratorConfig()
+      .set_check_mem_overlap(false)
+      .check_all_same_dtype(false)
+      .resize_outputs(false)
+      .add_output(self_restrided)
+      .add_input(index)
+      .build();
+
+    auto index_size = ensure_nonempty_size(self, dim);
+    auto index_stride = ensure_nonempty_stride(self, dim);
+
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::Half, at::ScalarType::BFloat16,
+      iter.dtype(),
+      method_name, [&] {
+        using dtype = typename std::conditional<cast_to_opaque,
+          OpaqueType<sizeof(scalar_t)>, scalar_t>::type;
+
+        auto src_scalar_val = src.to<scalar_t>();
+        auto src_val = *(dtype*)&src_scalar_val;
+
+        _cuda_scatter_fill_internal_kernel<dtype>()(
+          iter, src_val, index_size, index_stride, f
+        );
+      }
+    );
   }
 }; // struct cuda_scatter_fill_base_kernel
 

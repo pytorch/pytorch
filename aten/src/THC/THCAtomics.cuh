@@ -283,15 +283,6 @@ static inline __device__ void atomicAdd(bool *address, bool val) {
 
 // Atomic multiplication implementation.
 
-// This needs to exist since we use GPU atomics in the scatter/gather
-// functionality and it cannot be specialized for only certain types
-// since it must handle things like assignment operations for generic
-// tensors.
-template<typename T>
-inline __device__ void gpuAtomicMul(T * address, T val) {
-  CUDA_KERNEL_ASSERT(0);
-}
-
 inline __device__ at::Half gpuAtomicMul(at::Half * address, at::Half val) {
   return AtomicFPOp<at::Half>()(address, val,
                                 [](at::Half bsum, at::Half val) {
