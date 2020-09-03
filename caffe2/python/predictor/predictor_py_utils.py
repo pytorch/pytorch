@@ -152,6 +152,10 @@ def SetPreLoadBlobs(meta_net_def, pre_load_blobs):
     for blob in pre_load_blobs:
         meta_net_def.preLoadBlobs.append(blob)
 
+def SetRequestOnlyEmbeddings(meta_net_def, request_only_embeddings):
+    for blob in request_only_embeddings:
+        meta_net_def.requestOnlyEmbeddings.append(blob)
+
 def GetBlobsOrder(meta_net_def):
     return meta_net_def.blobsOrder
 
