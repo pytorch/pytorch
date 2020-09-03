@@ -1213,7 +1213,7 @@ void LoopNest::normalize(For* f, For** normalized) {
     throw malformed_input("normalize attempted on loop with no parent");
   }
 
-  if (dynamic_cast<const IntImm*>(f->start())) {
+  if (f->start()->isConstant()) {
     int start_idx = immediateAs<int>(f->start());
     if (start_idx == 0) {
       // No need to normalize in this case.
