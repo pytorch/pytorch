@@ -2011,6 +2011,18 @@
 - func: matrix_exp_backward(Tensor self, Tensor grad) -> Tensor
   use_c10_dispatcher: full
 
+- func: _aminmax(Tensor self) -> (Tensor, Tensor)
+  use_c10_dispatcher: full
+  variants: function
+  dispatch:
+    CPU, CUDA: _aminmax_all
+
+- func: _aminmax.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor, Tensor)
+  use_c10_dispatcher: full
+  variants: function
+  dispatch:
+    CPU, CUDA: _aminmax
+
 - func: _compute_linear_combination(Tensor input, Tensor coefficients) -> Tensor
   dispatch:
     CPU, CUDA: _compute_linear_combination
@@ -5569,13 +5581,6 @@
 - func: min.other(Tensor self, Tensor other) -> Tensor
   use_c10_dispatcher: full
   variants: method, function
-
-# Return: (Tensor min, Tensor max)
-- func: _min_max(Tensor self) -> (Tensor, Tensor)
-  use_c10_dispatcher: full
-  variants: function
-  dispatch:
-    CPU: _min_max
 
 - func: median(Tensor self) -> Tensor
   use_c10_dispatcher: full

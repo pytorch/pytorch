@@ -82,7 +82,7 @@ def is_per_tensor(qscheme):
 def is_per_channel(qscheme):
     return qscheme in [torch.per_channel_affine,
                        torch.per_channel_affine_float_qparams,
-                       torch.per_channel_symettric]
+                       torch.per_channel_symmetric]
 
 def get_per_tensor_qparams(activation_post_process):
     assert is_per_tensor(activation_post_process.qscheme), 'Only per tensor quantization is supported'
