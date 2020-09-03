@@ -1,6 +1,7 @@
 from .fx import Fuser  # noqa: F401
 from .fx import Quantizer  # noqa: F401
 from torch.fx import GraphModule
+from .fx.utils import graph_pretty_str  # noqa: F401
 
 def _check_is_graph_module(model):
     if not isinstance(model, GraphModule):
@@ -45,7 +46,7 @@ def prepare_fx(graph_module, qconfig_dict, inplace=False):
 def prepare_static_fx(graph_module, qconfig_dict, inplace=False):
     assert not graph_module.training, 'prepare_static_fx only works for models in ' + \
         'eval mode'
-    return prepare_fx(graph_moduel, qconfig_dict, inplace)
+    return prepare_fx(graph_module, qconfig_dict, inplace)
 
 def prepare_qat_fx(graph_module, qconfig_dict, inplace=False):
     r""" Prepare a model for quantization aware training
@@ -60,7 +61,7 @@ def prepare_qat_fx(graph_module, qconfig_dict, inplace=False):
     """
     assert graph_module.training, 'prepare_qat_fx only works for models in ' + \
         'train mode'
-    return prepare_fx(graph_moduel, qconfig_dict, inplace)
+    return prepare_fx(graph_module, qconfig_dict, inplace)
 
 def prepare_dynamic_fx(graph_module, qconfig_dict, inplace=False):
     r""" Prepare a model for post training dynamic quantization

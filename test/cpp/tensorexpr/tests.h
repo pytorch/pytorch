@@ -149,6 +149,7 @@ namespace jit {
   _(SimplifyAdds)                           \
   _(SimplifyMuls)                           \
   _(SimplifySubs)                           \
+  _(SimplifyDiv)                            \
   _(SimplifyMultiOp)                        \
   _(SimplifyManyOps)                        \
   _(SimplifyFactorization)                  \
@@ -348,10 +349,10 @@ namespace jit {
   _(LLVMElemwiseLog10Float)                \
   _(LLVMElemwiseMaxInt)                    \
   _(LLVMElemwiseMinInt)                    \
-  _(LLVMElemwiseMaxNumFloat)               \
-  _(LLVMElemwiseMaxNumNaNFloat)            \
-  _(LLVMElemwiseMinNumFloat)               \
-  _(LLVMElemwiseMinNumNaNFloat)            \
+  _(LLVMElemwiseMaxFloat)                  \
+  _(LLVMElemwiseMaxNaNFloat)               \
+  _(LLVMElemwiseMinFloat)                  \
+  _(LLVMElemwiseMinNaNFloat)               \
   _(LLVMCompareSelectIntEQ)                \
   _(LLVMCompareSelectFloatEQ)              \
   _(LLVMStoreFloat)                        \

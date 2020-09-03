@@ -10,7 +10,7 @@ std::vector<Tensor> foreach_tensor_##NAME##_scalar_kernel_slow(TensorList tensor
   std::vector<Tensor> result;                                                                             \
   result.reserve(tensors.size());                                                                         \
   for (const auto& t: tensors) {                                                                          \
-    result.emplace_back(t.NAME(scalar));                                                              \
+    result.emplace_back(t.NAME(scalar));                                                                  \
   }                                                                                                       \
                                                                                                           \
   return result;                                                                                          \
@@ -20,7 +20,7 @@ void foreach_tensor_##NAME##_scalar_kernel_slow_(TensorList tensors, Scalar scal
   check_foreach_api_restrictions(tensors);                                                                \
                                                                                                           \
   for (auto& t: tensors) {                                                                                \
-    t.NAME##_(scalar);                                                                                  \
+    t.NAME##_(scalar);                                                                                    \
   }                                                                                                       \
 }                                                                                                         \
                                                                                                           \
@@ -30,7 +30,7 @@ std::vector<Tensor> foreach_tensor_##NAME##_list_kernel_slow(TensorList tensors1
   std::vector<Tensor> result;                                                                             \
   result.reserve(tensors1.size());                                                                        \
   for (int i = 0; i < tensors1.size(); i++) {                                                             \
-    result.emplace_back(tensors1[i].NAME(tensors2[i]));                                               \
+    result.emplace_back(tensors1[i].NAME(tensors2[i]));                                                   \
   }                                                                                                       \
                                                                                                           \
   return result;                                                                                          \
@@ -39,8 +39,8 @@ std::vector<Tensor> foreach_tensor_##NAME##_list_kernel_slow(TensorList tensors1
 void foreach_tensor_##NAME##_list_kernel_slow_(TensorList tensors1, TensorList tensors2) {                \
   check_foreach_api_restrictions(tensors1, tensors2);                                                     \
                                                                                                           \
-  for (int i = 0; i < tensors1.size(); i++) {                                                              \
-    tensors1[i].NAME##_(tensors2[i]);                                                                   \
+  for (int i = 0; i < tensors1.size(); i++) {                                                             \
+    tensors1[i].NAME##_(tensors2[i]);                                                                     \
   }                                                                                                       \
 }
 

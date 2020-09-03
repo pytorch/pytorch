@@ -5,15 +5,15 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 
 class TestForeach(TestCase):
     bin_ops = [
-        torch._foreach_add, 
+        torch._foreach_add,
         torch._foreach_add_,
         torch._foreach_sub,
         torch._foreach_sub_,
-        torch._foreach_mul, 
-        torch._foreach_mul_, 
-        torch._foreach_div, 
+        torch._foreach_mul,
+        torch._foreach_mul_,
+        torch._foreach_div,
         torch._foreach_div_,
-        ]
+    ]
 
     # Unary ops
     @dtypes(*[torch.float, torch.double, torch.complex64, torch.complex128])
@@ -189,7 +189,7 @@ class TestForeach(TestCase):
             torch._foreach_add_(tensors1, tensors2)
 
         # different devices
-        if torch.cuda.is_available():
+        if torch.cuda.is_available() and torch.cuda.device_count() == 2:
             tensor1 = torch.zeros(10, 10, device="cuda:0")
             tensor2 = torch.ones(10, 10, device="cuda:1")
             with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
@@ -205,46 +205,54 @@ class TestForeach(TestCase):
         with self.assertRaisesRegex(RuntimeError, r", got \[10, 10\] and \[11, 11\]"):
             torch._foreach_add_(tensors1, tensors2)
 
-    # Ops with list
+    def get_test_data(self, device, dtype, N):
+        if dtype in [torch.bfloat16, torch.bool]:
+            tensors1 = [torch.randn(N, N, device=device).to(dtype) for _ in range(N)]
+            tensors2 = [torch.randn(N, N, device=device).to(dtype) for _ in range(N)]
+        elif dtype in torch.testing.get_all_int_dtypes():
+            tensors1 = [torch.randint(1, 100, (N, N), device=device, dtype=dtype) for _ in range(N)]
+            tensors2 = [torch.randint(1, 100, (N, N), device=device, dtype=dtype) for _ in range(N)]
+        else:
+            tensors1 = [torch.randn(N, N, device=device, dtype=dtype) for _ in range(N)]
+            tensors2 = [torch.randn(N, N, device=device, dtype=dtype) for _ in range(N)]
+
+        return tensors1, tensors2
+
+    def _test_bin_op_list(self, device, dtype, foreach_op, foreach_op_, torch_op, N=20):
+        tensors1, tensors2 = self.get_test_data(device, dtype, N)
+
+        expected = [torch_op(tensors1[i], tensors2[i]) for i in range(N)]
+        res = foreach_op(tensors1, tensors2)
+        foreach_op_(tensors1, tensors2)
+        self.assertEqual(res, tensors1)
+        self.assertEqual(tensors1, expected)
+
     @dtypes(*torch.testing.get_all_dtypes())
-    def test_bin_op_list(self, device, dtype):
+    def test_add_list(self, device, dtype):
+        self._test_bin_op_list(device, dtype, torch._foreach_add, torch._foreach_add_, torch.add)
+
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_sub_list(self, device, dtype):
         if dtype == torch.bool:
+            with self.assertRaisesRegex(RuntimeError, "Subtraction, the `-` operator, with two bool tensors is not supported."):
+                self._test_bin_op_list(device, dtype, torch._foreach_sub, torch._foreach_sub_, torch.sub)
+        else:
+            self._test_bin_op_list(device, dtype, torch._foreach_sub, torch._foreach_sub_, torch.sub)
+
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_mul_list(self, device, dtype):
+        self._test_bin_op_list(device, dtype, torch._foreach_mul, torch._foreach_mul_, torch.mul)
+
+    @dtypes(*torch.testing.get_all_dtypes())
+    def test_div_list(self, device, dtype):
+        if dtype in torch.testing.integral_types_and(torch.bool):
+            with self.assertRaisesRegex(RuntimeError, "Integer division of tensors using div or / is no longer"):
+                self._test_bin_op_list(device, dtype, torch._foreach_div, torch._foreach_div_, torch.div)
+            with self.assertRaisesRegex(RuntimeError, "Integer division of tensors using div or / is no longer"):
+                self._test_bin_op_list(device, dtype, torch._foreach_div, torch._foreach_div_, torch.div)
             return
 
-        tensors1 = [torch.zeros(20, 20, device=device, dtype=dtype) for _ in range(20)]
-        tensors2 = [torch.ones(20, 20, device=device, dtype=dtype) for _ in range(20)]
-
-        # add
-        res = torch._foreach_add(tensors1, tensors2)
-        torch._foreach_add_(tensors1, tensors2)
-        self.assertEqual(res, tensors1)
-        self.assertEqual(tensors1, [torch.ones(20, 20, device=device, dtype=dtype) for _ in range(20)])
-
-        # sub
-        res = torch._foreach_sub(tensors1, tensors2)
-        torch._foreach_sub_(tensors1, tensors2)
-        self.assertEqual(res, tensors1)
-        self.assertEqual(tensors1, [torch.zeros(20, 20, device=device, dtype=dtype) for _ in range(20)])
-
-        # mul
-        res = torch._foreach_mul(tensors1, tensors2)
-        torch._foreach_mul_(tensors1, tensors2)
-        self.assertEqual(res, tensors1)
-        self.assertEqual(tensors1, [torch.zeros(20, 20, device=device, dtype=dtype) for _ in range(20)])
-
-        # div
-        torch._foreach_add_(tensors1, 4)
-        torch._foreach_add_(tensors2, 1)
-        if device != 'cuda:0' and dtype in [torch.int8, torch.int16, torch.int32, torch.int64, torch.uint8]:
-            # Integer division of tensors using div or / is no longer supported
-            self.assertRaises(RuntimeError, lambda: torch._foreach_div(tensors1, tensors2))
-            self.assertRaises(RuntimeError, lambda: torch._foreach_div_(tensors1, tensors2))
-            return
-
-        res = torch._foreach_div(tensors1, tensors2)
-        torch._foreach_div_(tensors1, tensors2)
-        self.assertEqual(res, tensors1)
-        self.assertEqual(tensors1, [torch.ones(20, 20, device=device, dtype=dtype).mul(2) for _ in range(20)])
+        self._test_bin_op_list(device, dtype, torch._foreach_div, torch._foreach_div_, torch.div)
 
     def test_bin_op_list_error_cases(self, device):
         tensors1 = []

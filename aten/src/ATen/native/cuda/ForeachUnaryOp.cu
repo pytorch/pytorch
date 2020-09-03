@@ -31,9 +31,9 @@ void foreach_unary_op_(TensorList tensors) {
     });
 }
 
-#define FOREACH_UNARY_OP(NAME, NAME1)                                          \
+#define FOREACH_UNARY_OP(NAME, NAME1)                                   \
 template<typename T>                                                    \
-struct NAME1 {                                                           \
+struct NAME1 {                                                          \
     __device__ T operator()(T t) const { return std::NAME(t); }         \
 };                                                                      \
                                                                         \
@@ -44,7 +44,7 @@ std::vector<Tensor> foreach_tensor_##NAME##_cuda(TensorList tensors) {  \
         return at::native::foreach_tensor_##NAME##_slow(tensors);       \
     }                                                                   \
                                                                         \
-    return foreach_unary_op<NAME1>(tensors);                             \
+    return foreach_unary_op<NAME1>(tensors);                            \
 }                                                                       \
                                                                         \
 void foreach_tensor_##NAME##_cuda_(TensorList tensors) {                \
@@ -54,7 +54,7 @@ void foreach_tensor_##NAME##_cuda_(TensorList tensors) {                \
         return at::native::foreach_tensor_##NAME##_slow_(tensors);      \
     }                                                                   \
                                                                         \
-    foreach_unary_op_<NAME1>(tensors);                                   \
+    foreach_unary_op_<NAME1>(tensors);                                  \
 }
 
 FOREACH_UNARY_OP(exp, Exp);
