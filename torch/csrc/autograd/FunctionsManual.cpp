@@ -774,9 +774,13 @@ Tensor trace_backward(const Tensor & grad, IntArrayRef sizes) {
 }
 
 Tensor sgn_backward(Tensor result, Tensor grad, Tensor self) {
-  // [grad / abs(z) - Re(grad/self) * result
-  auto abs = at::abs(self);
-  return at::where(abs == 0.0, at::zeros({}, grad.options()), (grad/abs - (at::real(grad/self) * result)));
+  if (self.is_complex()) {
+    // vjp = grad / abs(self) - Re(grad/self) * result
+    auto abs = at::abs(self);
+    return at::where(abs == 0.0, at::zeros({}, grad.options()), (grad/abs - (at::real(grad/self) * result)));
+  } else {
+    return at::zeros_like(grad, at::MemoryFormat::Preserve);
+  }
 }
 
 Tensor var_backward(const Tensor & grad, const Tensor & self, bool unbiased) {

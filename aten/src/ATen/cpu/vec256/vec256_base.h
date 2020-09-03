@@ -241,7 +241,7 @@ public:
   }
 
   template <typename other_t_sgn = T,
-            typename std::enable_if<c10::is_complex_t<other_t_sgn>::value, int>::type = 0>
+            typename std::enable_if<c10::is_complex<other_t_sgn>::value, int>::type = 0>
   Vec256<T> sgn() const {
     return map(at::native::sgn_impl);
   }
