@@ -510,18 +510,18 @@ class TensorExprFuser {
       // TODO: add support for tensor constants.
       return false;
     }
-    // if (!allShapesAreKnown(node)) {
-    //  return false;
-    //}
+    if (!allShapesAreKnown(node)) {
+      return false;
+    }
 
     // Don't include nodes whose inputs are tensor constants - we cannot handle
     // them at the moment.
     // TODO: actually support tensor constants and remove this.
     for (Value* input : node->inputs()) {
-      // if (input->node()->kind() == prim::Constant &&
-      //    input->type()->cast<TensorType>()) {
-      //  return false;
-      //}
+      if (input->node()->kind() == prim::Constant &&
+          input->type()->cast<TensorType>()) {
+        return false;
+      }
     }
     return tensorexpr::isSupported(node);
   }

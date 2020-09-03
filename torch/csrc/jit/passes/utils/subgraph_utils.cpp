@@ -193,8 +193,7 @@ void mergeNodeIntoSubgraph(
     if (inputsMap.count(input) == 0) {
       // Clone constants inside the subgraph instead of referencing them, to
       // enable more optimizations
-      auto value = toIValue(input);
-      if (value && !value->isTensor()) {
+      if (auto value = toIValue(input)) {
         auto nv = subgraph->insertConstant(*value);
         nv->setType(input->type()); // Need to retain type information on Nones
         inputsMap[input] = nv;
