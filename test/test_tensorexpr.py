@@ -666,18 +666,6 @@ class TestTensorExprFuser(BaseTestClass):
             c = torch.pow(torch.add(x, y), 2.0)
             return c
 
-        def test_sigmoid_backward(x, y):
-            x_2 = torch.mul(x, x)
-            c = torch.sigmoid(x_2)
-            torch.autograd.backward(c, y)
-            return c.detach()
-
-        def test_tanh_backward(x, y):
-            x_2 = torch.mul(x, x)
-            c = torch.tanh(x_2)
-            torch.autograd.backward(c, y)
-            return c.detach()
-
         def test_type_as(x, y):
             return x.type_as(torch.add(x, y))
 
@@ -696,9 +684,6 @@ class TestTensorExprFuser(BaseTestClass):
             test_sub,
             test_remainder,
             test_pow,
-            # to fix the backward path, need script instead of trace
-            # test_sigmoid_backward,
-            # test_tanh_backward,
             test_type_as,
         }
         device_options = ["cpu", "cuda"] if torch.cuda.is_available() else ['cpu']

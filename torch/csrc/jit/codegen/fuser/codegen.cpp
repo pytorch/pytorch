@@ -254,8 +254,6 @@ static std::string encodeRHS(const Node* n) {
       {aten::where, "(${0} ? ${1} : ${2})"},
 
       // simple derivatives
-      {aten::_sigmoid_backward, "${0} * ${1} * (1.f - ${1})"},
-      {aten::_tanh_backward, "${0} * (1.f - ${1} * ${1})"},
   };
 
   TemplateEnv env;

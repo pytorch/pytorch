@@ -227,9 +227,7 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
     case aten::pow:
     case aten::fmod:
     case aten::remainder:
-    case aten::atan2:
-    case aten::_sigmoid_backward:
-    case aten::_tanh_backward: {
+    case aten::atan2: {
       std::vector<std::vector<ExprHandle>> shapes;
       for (size_t idx = 0; idx < 2; idx++) {
         torch::jit::Value* inp = v->node()->input(idx);
@@ -1191,24 +1189,6 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
             }
 
             return tensorOrConstant(n->inputs()[0], indices);
-          });
-    }
-
-    case aten::_sigmoid_backward: {
-      return computeTwoOperand(
-          "aten_sigmoid_backward",
-          v,
-          [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return lhs * rhs * (ExprHandle(1.0f) - rhs);
-          });
-    }
-
-    case aten::_tanh_backward: {
-      return computeTwoOperand(
-          "aten_tanh_backward",
-          v,
-          [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return lhs * (ExprHandle(1.0f) - rhs * rhs);
           });
     }
 

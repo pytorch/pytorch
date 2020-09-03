@@ -104,8 +104,6 @@ namespace jit {
   _(ATenmaxFloat)                           \
   _(ATenminInt)                             \
   _(ATenminFloat)                           \
-  _(ATen_sigmoid_backward)                  \
-  _(ATen_tanh_backward)                     \
   _(ATenreciprocal)                         \
   _(ATenreluInt)                            \
   _(ATenreluFloat)                          \
