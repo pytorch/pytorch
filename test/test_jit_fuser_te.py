@@ -1158,9 +1158,9 @@ class TestTEFuser(JitTestCase):
             "cuda",
         ]
         for dtype, op, device in product(dtypes, unary_ops, devices):
-            x = rand(dtype, device)
-            fn = apply(op)
             try:
+                x = rand(dtype, device)
+                fn = apply(op)
                 ref = fn(x)
             except Exception:
                 # If eager mode doesn't support a dtype/op/device combo,
