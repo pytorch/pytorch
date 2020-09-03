@@ -192,13 +192,13 @@ class Quantizer:
 
         env = {}
         observed_graph = Graph()
-        observed = set()
+        observed_node_names_set = set()
 
         def load_arg(a):
             return map_arg(a, lambda node: env[node.name])
 
         for node in input_graph.nodes:
-            if node.name in observed:
+            if node.name in observed_node_names_set:
                 continue
 
             get_new_observer_name = get_new_attr_name_with_prefix('activation_post_process_')
@@ -213,7 +213,7 @@ class Quantizer:
                     setattr(input_root, observer_name, observer)
                     self.activation_post_process_map[node.name] = observer
                     env[node.name] = observed_graph.create_node('call_module', observer_name, (load_arg(node),), {})
-                    observed.add(node.name)
+                    observed_node_names_set.add(node.name)
                     if device:
                         getattr(input_root, observer_name).to(device)
 
@@ -230,15 +230,15 @@ class Quantizer:
 
                     def is_observed(input_arg):
                         if isinstance(input_arg, Node):
-                            return input_arg.name in observed
+                            return input_arg.name in observed_node_names_set
                         elif isinstance(input_arg, list):
                             return all(map(is_observed, input_arg))
                     # propagate observed property from input
                     if is_observed(node.args[0]):
-                        observed.add(node.name)
+                        observed_node_names_set.add(node.name)
                 elif (isinstance(obj, Add) or isinstance(obj, Mul)) and not obj.all_nodes:
-                    if node.args[0].name in observed:
-                        observed.add(node.name)
+                    if node.args[0].name in observed_node_names_set:
+                        observed_node_names_set.add(node.name)
                 elif qconfig is not None and obj.all_nodes:
                     # observer for outputs
                     new_observer = qconfig.activation()
@@ -248,7 +248,7 @@ class Quantizer:
             else:
                 env[node.name] = observed_graph.node_copy(node, load_arg)
 
-            if node.name not in observed and node.name in quants:
+            if node.name not in observed_node_names_set and node.name in quants:
                 observer_name = get_new_observer_name(input_root)
                 _, qconfig, is_weight = quants[node.name]
                 if qconfig is not None:
@@ -261,12 +261,12 @@ class Quantizer:
                     self.activation_post_process_map[node.name] = new_observer
                     setattr(input_root, observer_name, self.activation_post_process_map[node.name])
                     env[node.name] = observed_graph.create_node('call_module', observer_name, (load_arg(node),), {})
-                    observed.add(node.name)
+                    observed_node_names_set.add(node.name)
         observed_graph.output(load_arg(input_graph.result))
 
-        observed = GraphModule(input_root, observed_graph)
-        self.save_state(observed)
-        return observed
+        observed_module = GraphModule(input_root, observed_graph)
+        self.save_state(observed_module)
+        return observed_module
 
     def save_state(self, observed):
         observed._activation_post_process_map = self.activation_post_process_map
