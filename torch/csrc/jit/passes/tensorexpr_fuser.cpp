@@ -1,6 +1,6 @@
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <ATen/record_function.h>
-#include <jit/runtime/profiling_graph_executor_impl.h>
+#include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
@@ -11,6 +11,7 @@
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/operator_options.h>
+#include <torch/csrc/jit/runtime/profiling_graph_executor_impl.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 #include <torch/csrc/utils/memory.h>
 
@@ -33,90 +34,113 @@ bool isSupported(Node* node) {
   if (tensorexpr::getTEGenerateBlockCode()) {
     return isSupportedForBlock(node);
   }
-  // TODO:
-  switch (node->kind()) {
-    case aten::add:
-    case aten::_cast_Float:
-    case aten::type_as:
-    case aten::sub:
-    case aten::mul:
-    case aten::div:
-    case aten::eq:
-    case aten::ne:
-    case aten::ge:
-    case aten::gt:
-    case aten::le:
-    case aten::lt:
-    case aten::pow:
-    case aten::clamp:
-    case aten::lerp:
-    case aten::log10:
-    case aten::log:
-    case aten::log2:
-    case aten::exp:
-    case aten::erf:
-    case aten::erfc:
-    case aten::fmod:
-    case aten::cos:
-    case aten::sin:
-    case aten::tan:
-    case aten::acos:
-    case aten::asin:
-    case aten::atan:
-    case aten::atan2:
-    case aten::cosh:
-    case aten::sinh:
-    case aten::tanh:
-    case aten::sqrt:
-    case aten::rsqrt:
-    case aten::abs:
-    case aten::floor:
-    case aten::ceil:
-    case aten::round:
-    case aten::trunc:
-    case aten::threshold:
-    case aten::remainder:
-    case prim::ConstantChunk:
-    case aten::cat:
-    case prim::ListConstruct:
-    case aten::sigmoid:
-    case aten::relu:
-    case aten::addcmul:
-    case aten::neg:
-    case aten::reciprocal:
-    case aten::sum:
-    case aten::expm1:
-    case aten::lgamma:
-    case aten::unsqueeze:
-    case aten::frac:
-    // TODO: uncomment once we can handle rand+broadcasts
-    // case aten::rand_like:
-    case aten::_sigmoid_backward:
-    case aten::_tanh_backward:
-    case aten::__and__:
-    case aten::__or__:
-    case aten::__xor__:
-    case aten::__lshift__:
-    case aten::__rshift__:
-    case aten::where:
-      return true;
-    // Operators that can be both elementwise or reductions:
-    case aten::min:
-    case aten::max:
-      if (node->inputs().size() != 2) {
-        return false;
-      }
-      if (!node->inputs()[0]->type()->cast<TensorType>() ||
-          !node->inputs()[1]->type()->cast<TensorType>()) {
-        return false;
-      }
-      return true;
-    case aten::slice:
-      // TODO: Shape inference is not implemented for this op yet
-      return false;
-    default:
-      return false;
+
+  static const OperatorSet supported_operator_set{
+      "aten::add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor",
+      "aten::add.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor",
+      "aten::_cast_Float(Tensor self, bool non_blocking) -> Tensor",
+      "aten::type_as(Tensor self, Tensor other) -> Tensor",
+      "aten::sub.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor",
+      "aten::sub.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor",
+      "aten::mul.Tensor(Tensor self, Tensor other) -> Tensor",
+      "aten::mul.Scalar(Tensor self, Scalar other) -> Tensor",
+      "aten::div.Tensor(Tensor self, Tensor other) -> Tensor",
+      "aten::div.Scalar(Tensor self, Scalar other) -> Tensor",
+      "aten::eq(Tensor self, Tensor other) -> Tensor",
+      "aten::eq(Tensor self, Scalar other) -> Tensor",
+      "aten::ne(Tensor self, Tensor other) -> Tensor",
+      "aten::ne(Tensor self, Scalar other) -> Tensor",
+      "aten::ge(Tensor self, Tensor other) -> Tensor",
+      "aten::ge(Tensor self, Scalar other) -> Tensor",
+      "aten::gt(Tensor self, Tensor other) -> Tensor",
+      "aten::gt(Tensor self, Scalar other) -> Tensor",
+      "aten::le(Tensor self, Tensor other) -> Tensor",
+      "aten::le(Tensor self, Scalar other) -> Tensor",
+      "aten::lt(Tensor self, Tensor other) -> Tensor",
+      "aten::lt(Tensor self, Scalar other) -> Tensor",
+      "aten::pow.Tensor_Scalar(Tensor self, Scalar exponent) -> Tensor",
+      "aten::pow.Tensor_Tensor(Tensor self, Tensor exponent) -> Tensor",
+      // TODO : do we support pow.Scalar ?
+      "aten::pow.Scalar(Scalar self, Tensor exponent) -> Tensor",
+      "aten::clamp(Tensor self, Scalar? min=None, Scalar? max=None) -> Tensor",
+      "aten::lerp.Scalar(Tensor self, Tensor end, Scalar weight) -> Tensor",
+      "aten::lerp.Tensor(Tensor self, Tensor end, Tensor weight) -> Tensor",
+      "aten::log10(Tensor self) -> Tensor",
+      "aten::log(Tensor self) -> Tensor",
+      "aten::log2(Tensor self) -> Tensor",
+      // TODO: log1p
+      "aten::exp(Tensor self) -> Tensor",
+      "aten::erf(Tensor self) -> Tensor",
+      "aten::erfc(Tensor self) -> Tensor",
+      "aten::fmod.Scalar(Tensor self, Scalar other) -> Tensor",
+      "aten::fmod.Tensor(Tensor self, Tensor other) -> Tensor",
+      "aten::cos(Tensor self) -> Tensor",
+      "aten::sin(Tensor self) -> Tensor",
+      "aten::tan(Tensor self) -> Tensor",
+      "aten::acos(Tensor self) -> Tensor",
+      "aten::asin(Tensor self) -> Tensor",
+      "aten::atan(Tensor self) -> Tensor",
+      "aten::atan2(Tensor self, Tensor other) -> Tensor",
+      "aten::cosh(Tensor self) -> Tensor",
+      "aten::sinh(Tensor self) -> Tensor",
+      "aten::tanh(Tensor self) -> Tensor",
+      "aten::sqrt(Tensor self) -> Tensor",
+      "aten::rsqrt(Tensor self) -> Tensor",
+      "aten::abs(Tensor self) -> Tensor",
+      "aten::floor(Tensor self) -> Tensor",
+      "aten::ceil(Tensor self) -> Tensor",
+      "aten::round(Tensor self) -> Tensor",
+      "aten::trunc(Tensor self) -> Tensor",
+      "aten::threshold(Tensor self, Scalar threshold, Scalar value) -> Tensor",
+      "aten::remainder.Scalar(Tensor self, Scalar other) -> Tensor",
+      "aten::remainder.Tensor(Tensor self, Tensor other) -> Tensor",
+      "aten::cat(Tensor[] tensors, int dim=0) -> Tensor",
+      "aten::sigmoid(Tensor self) -> Tensor",
+      "aten::relu(Tensor self) -> Tensor",
+      "aten::addcmul(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor",
+      "aten::neg(Tensor self) -> Tensor",
+      "aten::reciprocal(Tensor self) -> Tensor",
+      "aten::sum(Tensor self, *, ScalarType? dtype=None) -> Tensor",
+      "aten::sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor",
+      "aten::expm1(Tensor self) -> Tensor",
+      "aten::unsqueeze(Tensor(a) self, int dim) -> Tensor(a)",
+      "aten::frac(Tensor self) -> Tensor",
+      // TODO: uncomment once we can handle rand+broadcasts
+      // case aten::rand_like:
+      "aten::__and__.Scalar(Tensor self, Scalar other) -> Tensor",
+      "aten::__and__.Tensor(Tensor self, Tensor other) -> Tensor",
+      "aten::__or__.Scalar(Tensor self, Scalar other) -> Tensor",
+      "aten::__or__.Tensor(Tensor self, Tensor other) -> Tensor",
+      "aten::__xor__.Scalar(Tensor self, Scalar other) -> Tensor",
+      "aten::__xor__.Tensor(Tensor self, Tensor other) -> Tensor",
+      "aten::__lshift__.Scalar(Tensor self, Scalar other) -> Tensor",
+      "aten::__lshift__.Tensor(Tensor self, Tensor other) -> Tensor",
+      "aten::__rshift__.Scalar(Tensor self, Scalar other) -> Tensor",
+      "aten::__rshift__.Tensor(Tensor self, Tensor other) -> Tensor",
+      "aten::where.self(Tensor condition, Tensor self, Tensor other) -> Tensor",
+      "aten::where.ScalarSelf(Tensor condition, Scalar self, Tensor other) -> Tensor",
+      "aten::where.ScalarOther(Tensor condition, Tensor self, Scalar other) -> Tensor",
+      "aten::where.Scalar(Tensor condition, Scalar self, Scalar other) -> Tensor",
+      "aten::where(Tensor condition) -> Tensor[]",
+      // TODO: enable other min/max variants, operators that can be both
+      // elementwise or reductions:
+      "aten::min.other(Tensor self, Tensor other) -> Tensor",
+      "aten::max.other(Tensor self, Tensor other) -> Tensor",
+      // TODO: enable slice, shape inference is not implemented for this op yet
+  };
+
+  if (node->isMemberOf(supported_operator_set)) {
+    return true;
   }
+
+  // unschematized ops
+  switch (node->kind()) {
+    case prim::ConstantChunk:
+    case prim::ListConstruct:
+      return true;
+  }
+
+  return false;
 }
 
 } // namespace tensorexpr
@@ -185,48 +209,48 @@ void RemoveProfileNodesAndSpecializeTypes(std::shared_ptr<Graph>& graph) {
   removeProfileNodesAndSpecializeTypes(graph->block());
 }
 
+void removeTensorTypeSpecialization(Value* v) {
+  if (!v->type()->cast<TensorType>()) {
+    return;
+  }
+  // Constants & TensorExprGroup will always produce specialized tensor type,
+  // TypeCheck are inserted by this pass and only used by fusion groups that
+  // insert proper guards
+  if (v->node()->kind() == prim::Constant ||
+      v->node()->kind() == prim::TypeCheck ||
+      v->node()->kind() == prim::TensorExprGroup) {
+    return;
+  }
+  v->setType(TensorType::get());
+}
+
+void removeTensorTypeSpecializations(Block* block) {
+  for (Value* v : block->inputs()) {
+    removeTensorTypeSpecialization(v);
+  }
+  for (Node* n : block->nodes()) {
+    for (Block* b : n->blocks()) {
+      removeTensorTypeSpecializations(b);
+    }
+    for (Value* v : n->outputs()) {
+      removeTensorTypeSpecialization(v);
+    }
+  }
+}
+
+void RemoveTensorTypeSpecializations(std::shared_ptr<Graph>& graph) {
+  removeTensorTypeSpecializations(graph->block());
+}
+
 class TensorExprFuser {
  public:
   TensorExprFuser(std::shared_ptr<Graph> graph, size_t min_group_size)
       : graph_(std::move(graph)), min_group_size_(min_group_size) {}
 
-
-  void removeTensorTypeSpecialization(Value* v) {
-    if (!v->type()->cast<TensorType>()) {
-      return;
-    }
-    // Constants & TensorExprGroup will always produce specialized tensor type,
-    // TypeCheck are inserted by this pass and only used by fusion groups that
-    // insert proper guards
-    if (v->node()->kind() == prim::Constant ||
-        v->node()->kind() == prim::TypeCheck ||
-        v->node()->kind() == prim::TensorExprGroup) {
-      return;
-    }
-    v->setType(TensorType::get());
-  }
-
-  void removeTensorTypeSpecializations(Block* block) {
-    for (Value* v : block->inputs()) {
-      removeTensorTypeSpecialization(v);
-    }
-    for (Node* n : block->nodes()) {
-      for (Block* b : n->blocks()) {
-        removeTensorTypeSpecializations(b);
-      }
-      for (Value* v : n->outputs()) {
-        removeTensorTypeSpecialization(v);
-      }
-    }
-  }
-
   void run() {
     aliasDb_ = torch::make_unique<AliasDb>(graph_);
     RemoveRedundantProfiles(graph_);
     GRAPH_DUMP("After removing redundant profile nodes: ", graph_);
-    removeProfileNodesAndSpecializeTypes(graph_->block());
-    GRAPH_DUMP(
-        "After removing profiling nodes and specializing types: ", graph_);
     createFusionGroups(graph_->block());
     GRAPH_DUMP("After creating fusion groups: ", graph_);
     guardFusionGroups(graph_->block());
@@ -257,12 +281,7 @@ class TensorExprFuser {
       Value* new_value = placeholder_node->insertOutput(i)->copyMetadata(
           to_merge->outputs().at(i));
       aliasDb_->replaceWithNewValue(existing, new_value);
-
-      if (to_merge->hasAttribute(attr::Subgraph)) {
-        existing_values.push_back(SubgraphUtils::getSubgraph(to_merge)->outputs().at(i));
-      } else {
-       existing_values.push_back(existing);
-      }
+      existing_values.push_back(existing);
     }
     std::unordered_map<Value*, Value*> vmap;
     Node* fusion_group = merge_fn(vmap);
@@ -369,7 +388,6 @@ class TensorExprFuser {
   void createFusionGroups(Block* block) {
     std::vector<Node*> fusion_groups;
     auto reverse_iter = block->nodes().reverse();
-    Node* prev_fusion_group = nullptr;
     for (auto it = reverse_iter.begin(); it != reverse_iter.end();) {
       Node* n = *it;
       GRAPH_DEBUG("Considering node:", *n)
@@ -392,38 +410,9 @@ class TensorExprFuser {
       }
 
       Node* fusion_group = createFusionGroup(n);
-      debugDumpFusionGroup("Fusion group constructed: ", fusion_group);
-
-      // Try merging the just created fusion group into the previous one.
-      // If it did not work, then put the previous fusion group into
-      // fusion_groups vector - we will not touch it anymore in this loop.
-      // If merging suceeded, save the merged group as the "previous" fusion
-      // group so that we can try to merge the next one into it.
-      if (prev_fusion_group) {
-        debugDumpFusionGroup(
-            "Trying to merge into the previous fusion group: ",
-            prev_fusion_group);
-        if (false && canMerge(prev_fusion_group, fusion_group)) {
-          prev_fusion_group = tryMerge(prev_fusion_group, fusion_group);
-          debugDumpFusionGroup(
-              "Successfully merged into the previous fusion group: ",
-              prev_fusion_group);
-        } else {
-          GRAPH_DEBUG("Cannot merge into the previous fusion group");
-          fusion_groups.push_back(prev_fusion_group);
-          prev_fusion_group = fusion_group;
-        }
-      } else {
-        prev_fusion_group = fusion_group;
-      }
-      it = prev_fusion_group->reverseIterator();
+      fusion_groups.push_back(fusion_group);
+      it = fusion_group->reverseIterator();
       it++;
-    }
-
-    // We were adding groups into the vector lagging by one - catch up with
-    // adding the last one
-    if (prev_fusion_group) {
-      fusion_groups.push_back(prev_fusion_group);
     }
 
     for (Node* n : fusion_groups) {
@@ -454,25 +443,12 @@ class TensorExprFuser {
       return false;
     }
     auto subgraph = SubgraphUtils::getSubgraph(n);
-    size_t num_nodes = blockSize(subgraph->block());
-    if (num_nodes < min_group_size_) {
+    size_t num_modes = blockSize(subgraph->block());
+    if (num_modes < min_group_size_) {
       GRAPH_UPDATE("Fusion group is too small, unmerging: ", *n);
       SubgraphUtils::unmergeSubgraph(n);
       return true;
     }
-    bool seen_tensor = false;
-    for (Value * input : n->inputs()) {
-      if (input->type()->cast<TensorType>()) {
-        seen_tensor = true;
-        break;
-      }
-    }
-    if (!seen_tensor) {
-      GRAPH_UPDATE("Fusion group is doesn't have tensor inputs, unmerging: ", *n);
-      SubgraphUtils::unmergeSubgraph(n);
-      return true;
-    }
-
     return false;
   }
 
@@ -526,6 +502,34 @@ class TensorExprFuser {
     return true;
   }
 
+  bool canFuseOnDevice(Value* v) {
+    auto type = v->type()->cast<TensorType>();
+    if (!type) {
+      return true;
+    }
+    auto device = type->device();
+    if (!device) {
+      return false;
+    }
+    if (device->is_cpu()) {
+      return canFuseOnCPU();
+    } else if (device->is_cuda()) {
+      return canFuseOnGPU();
+    }
+    throw std::runtime_error("Unknown device");
+  }
+
+  bool isFusableOnDevice(Node* node) {
+    for (const auto& output : node->outputs()) {
+      if (output->uses().size() > 0) {
+        if (!canFuseOnDevice(output)) {
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+
   bool canHandle(Node* node) {
     if (node->kind() == prim::Constant) {
       // TODO: add support for tensor constants.
@@ -558,9 +562,9 @@ class TensorExprFuser {
     REQ(consumer->owningBlock() == producer->owningBlock());
 
     // Symbolic checks
-    REQ(canHandle(producer) || producer->kind() == prim::TensorExprGroup);
+    REQ(canHandle(producer));
     TORCH_INTERNAL_ASSERT(
-        canHandle(consumer) || consumer->kind() == prim::TensorExprGroup);
+        consumer->kind() == prim::TensorExprGroup || canHandle(consumer));
 
     // Alias checks
     REQ(aliasDb_->couldMoveBeforeTopologically(producer, consumer));
@@ -590,10 +594,20 @@ class TensorExprFuser {
       REQ(producer->input(0)->node()->kind() == prim::ListConstruct);
       REQ(producer->input(0)->uses().size() == 1);
       REQ(producer->input(1)->node()->kind() == prim::Constant);
+      auto const& listConstruct = producer->input(0)->node();
+      for (auto const& input : listConstruct->inputs()) {
+        REQ(isFusableOnDevice(input->node()));
+      }
     } else if (consumer->kind() == aten::cat) {
       REQ(consumer->input(0)->node()->kind() == prim::ListConstruct);
       REQ(consumer->input(0)->uses().size() == 1);
       REQ(consumer->input(1)->node()->kind() == prim::Constant);
+      auto const& listConstruct = consumer->input(0)->node();
+      for (auto const& input : listConstruct->inputs()) {
+        REQ(isFusableOnDevice(input->node()));
+      }
+    } else {
+      REQ(isFusableOnDevice(producer));
     }
 
     return true;
