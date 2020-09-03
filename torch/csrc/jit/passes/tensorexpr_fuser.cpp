@@ -33,90 +33,117 @@ bool isSupported(Node* node) {
   if (tensorexpr::getTEGenerateBlockCode()) {
     return isSupportedForBlock(node);
   }
-  // TODO:
-  switch (node->kind()) {
-    case aten::add:
-    case aten::_cast_Float:
-    case aten::type_as:
-    case aten::sub:
-    case aten::mul:
-    case aten::div:
-    case aten::eq:
-    case aten::ne:
-    case aten::ge:
-    case aten::gt:
-    case aten::le:
-    case aten::lt:
-    case aten::pow:
-    case aten::clamp:
-    case aten::lerp:
-    case aten::log10:
-    case aten::log:
-    case aten::log2:
-    case aten::exp:
-    case aten::erf:
-    case aten::erfc:
-    case aten::fmod:
-    case aten::cos:
-    case aten::sin:
-    case aten::tan:
-    case aten::acos:
-    case aten::asin:
-    case aten::atan:
-    case aten::atan2:
-    case aten::cosh:
-    case aten::sinh:
-    case aten::tanh:
-    case aten::sqrt:
-    case aten::rsqrt:
-    case aten::abs:
-    case aten::floor:
-    case aten::ceil:
-    case aten::round:
-    case aten::trunc:
-    case aten::threshold:
-    case aten::remainder:
-    case prim::ConstantChunk:
-    case aten::cat:
-    case prim::ListConstruct:
-    case aten::sigmoid:
-    case aten::relu:
-    case aten::addcmul:
-    case aten::neg:
-    case aten::reciprocal:
-    case aten::sum:
-    case aten::expm1:
-    case aten::lgamma:
-    case aten::unsqueeze:
-    case aten::frac:
-    // TODO: uncomment once we can handle rand+broadcasts
-    // case aten::rand_like:
-    case aten::_sigmoid_backward:
-    case aten::_tanh_backward:
-    case aten::__and__:
-    case aten::__or__:
-    case aten::__xor__:
-    case aten::__lshift__:
-    case aten::__rshift__:
-    case aten::where:
-      return true;
-    // Operators that can be both elementwise or reductions:
-    case aten::min:
-    case aten::max:
-      if (node->inputs().size() != 2) {
-        return false;
-      }
-      if (!node->inputs()[0]->type()->cast<TensorType>() ||
-          !node->inputs()[1]->type()->cast<TensorType>()) {
-        return false;
-      }
-      return true;
-    case aten::slice:
-      // TODO: Shape inference is not implemented for this op yet
-      return false;
-    default:
-      return false;
+
+  // clang-format off
+  // breaks up the schema strings so they are no longer discoverable with ctrl-F
+  static const OperatorSet supported_operator_set{
+      "aten::add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor",
+      "aten::add.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor",
+      "aten::_cast_Float(Tensor self, bool non_blocking) -> Tensor",
+      "aten::type_as(Tensor self, Tensor other) -> Tensor",
+      "aten::sub.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor",
+      "aten::sub.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor",
+      "aten::mul.Tensor(Tensor self, Tensor other) -> Tensor",
+      "aten::mul.Scalar(Tensor self, Scalar other) -> Tensor",
+      "aten::div.Tensor(Tensor self, Tensor other) -> Tensor",
+      "aten::div.Scalar(Tensor self, Scalar other) -> Tensor",
+      "aten::eq.Tensor(Tensor self, Tensor other) -> Tensor",
+      "aten::eq.Scalar(Tensor self, Scalar other) -> Tensor",
+      "aten::ne.Tensor(Tensor self, Tensor other) -> Tensor",
+      "aten::ne.Scalar(Tensor self, Scalar other) -> Tensor",
+      "aten::ge.Tensor(Tensor self, Tensor other) -> Tensor",
+      "aten::ge.Scalar(Tensor self, Scalar other) -> Tensor",
+      "aten::gt.Tensor(Tensor self, Tensor other) -> Tensor",
+      "aten::gt.Scalar(Tensor self, Scalar other) -> Tensor",
+      "aten::le.Tensor(Tensor self, Tensor other) -> Tensor",
+      "aten::le.Scalar(Tensor self, Scalar other) -> Tensor",
+      "aten::lt.Tensor(Tensor self, Tensor other) -> Tensor",
+      "aten::lt.Scalar(Tensor self, Scalar other) -> Tensor",
+      "aten::pow.Tensor_Scalar(Tensor self, Scalar exponent) -> Tensor",
+      "aten::pow.Tensor_Tensor(Tensor self, Tensor exponent) -> Tensor",
+      // TODO : do we support pow.Scalar ?
+      "aten::pow.Scalar(Scalar self, Tensor exponent) -> Tensor",
+      // TODO: support clamp_min, clamp_max
+      "aten::clamp(Tensor self, Scalar? min=None, Scalar? max=None) -> Tensor",
+      "aten::lerp.Scalar(Tensor self, Tensor end, Scalar weight) -> Tensor",
+      "aten::lerp.Tensor(Tensor self, Tensor end, Tensor weight) -> Tensor",
+      "aten::log10(Tensor self) -> Tensor",
+      "aten::log(Tensor self) -> Tensor",
+      "aten::log2(Tensor self) -> Tensor",
+      // TODO: log1p
+      "aten::exp(Tensor self) -> Tensor",
+      "aten::erf(Tensor self) -> Tensor",
+      "aten::erfc(Tensor self) -> Tensor",
+      "aten::fmod.Scalar(Tensor self, Scalar other) -> Tensor",
+      "aten::fmod.Tensor(Tensor self, Tensor other) -> Tensor",
+      "aten::cos(Tensor self) -> Tensor",
+      "aten::sin(Tensor self) -> Tensor",
+      "aten::tan(Tensor self) -> Tensor",
+      "aten::acos(Tensor self) -> Tensor",
+      "aten::asin(Tensor self) -> Tensor",
+      "aten::atan(Tensor self) -> Tensor",
+      "aten::atan2(Tensor self, Tensor other) -> Tensor",
+      "aten::cosh(Tensor self) -> Tensor",
+      "aten::sinh(Tensor self) -> Tensor",
+      "aten::tanh(Tensor self) -> Tensor",
+      "aten::sqrt(Tensor self) -> Tensor",
+      "aten::rsqrt(Tensor self) -> Tensor",
+      "aten::abs(Tensor self) -> Tensor",
+      "aten::floor(Tensor self) -> Tensor",
+      "aten::ceil(Tensor self) -> Tensor",
+      "aten::round(Tensor self) -> Tensor",
+      "aten::trunc(Tensor self) -> Tensor",
+      "aten::threshold(Tensor self, Scalar threshold, Scalar value) -> Tensor",
+      "aten::remainder.Scalar(Tensor self, Scalar other) -> Tensor",
+      "aten::remainder.Tensor(Tensor self, Tensor other) -> Tensor",
+      "aten::cat(Tensor[] tensors, int dim=0) -> Tensor",
+      "aten::sigmoid(Tensor self) -> Tensor",
+      "aten::relu(Tensor self) -> Tensor",
+      "aten::addcmul(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor",
+      "aten::neg(Tensor self) -> Tensor",
+      "aten::reciprocal(Tensor self) -> Tensor",
+      "aten::sum(Tensor self, *, ScalarType? dtype=None) -> Tensor",
+      "aten::sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor",
+      "aten::expm1(Tensor self) -> Tensor",
+      "aten::unsqueeze(Tensor(a) self, int dim) -> Tensor(a)",
+      "aten::frac(Tensor self) -> Tensor",
+      // TODO: uncomment once we can handle rand+broadcasts
+      // "aten::rand_like(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
+      "aten::__and__.Scalar(Tensor self, Scalar other) -> Tensor",
+      "aten::__and__.Tensor(Tensor self, Tensor other) -> Tensor",
+      "aten::__or__.Scalar(Tensor self, Scalar other) -> Tensor",
+      "aten::__or__.Tensor(Tensor self, Tensor other) -> Tensor",
+      "aten::__xor__.Scalar(Tensor self, Scalar other) -> Tensor",
+      "aten::__xor__.Tensor(Tensor self, Tensor other) -> Tensor",
+      "aten::__lshift__.Scalar(Tensor self, Scalar other) -> Tensor",
+      "aten::__lshift__.Tensor(Tensor self, Tensor other) -> Tensor",
+      "aten::__rshift__.Scalar(Tensor self, Scalar other) -> Tensor",
+      "aten::__rshift__.Tensor(Tensor self, Tensor other) -> Tensor",
+      "aten::where.self(Tensor condition, Tensor self, Tensor other) -> Tensor",
+      "aten::where.ScalarSelf(Tensor condition, Scalar self, Tensor other) -> Tensor",
+      "aten::where.ScalarOther(Tensor condition, Tensor self, Scalar other) -> Tensor",
+      "aten::where.Scalar(Tensor condition, Scalar self, Scalar other) -> Tensor",
+      "aten::where(Tensor condition) -> Tensor[]",
+      // TODO: enable other min/max variants, operators that can be both
+      // elementwise or reductions:
+      "aten::min.other(Tensor self, Tensor other) -> Tensor",
+      "aten::max.other(Tensor self, Tensor other) -> Tensor",
+      // TODO: enable slice, shape inference is not implemented for this op yet
+  };
+  // clang-format on
+
+  if (node->isMemberOf(supported_operator_set)) {
+    return true;
   }
+
+  // unschematized ops
+  switch (node->kind()) {
+    case prim::ConstantChunk:
+    case prim::ListConstruct:
+      return true;
+  }
+
+  return false;
 }
 
 } // namespace tensorexpr
