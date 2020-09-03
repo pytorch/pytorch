@@ -408,16 +408,17 @@ ProcessGroupNCCL::ProcessGroupNCCL(
         "Invalid value for environment variable: " +
         std::string(NCCL_BLOCKING_WAIT));
   }
-
-  // If single-process single-device mode, WorkNCCL::getFuture is supported,
-  // so get a dedicated stream for each device to run FutureNCCL then callbacks.
-  // Depending on the device index of collective outputs, WorkNCCL passes
+  // If single-process single-device mode, WorkNCCL::getFuture is supported.
+  // Depending on the device index of collective outputs, WorkNCCL will pass
   // the corresponding device's then callback stream to FutureNCCL.
+  // For each device we first put a nullptr as a placeholder. Depending on the
+  // device of the NCCL collective's outputs, we later set the callback stream
+  // of the corresponding device inside ProcessGroupNCCL::getNCCLComm if not set
+  // before.
   futureNCCLCallbackStreams_.reserve(c10::cuda::device_count());
   for (int device_index = 0; device_index < c10::cuda::device_count();
        device_index++) {
-    futureNCCLCallbackStreams_.push_back(std::make_shared<at::cuda::CUDAStream>(
-        at::cuda::getStreamFromPool(device_index)));
+    futureNCCLCallbackStreams_.push_back(nullptr);
   }
 
 #ifdef ENABLE_NCCL_ERROR_CHECKING
@@ -649,12 +650,21 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
     // GPU world size and GPU rank
     int numRanks = getSize() * devices.size();
     int rank = getRank() * devices.size() + i;
+    // Get the device index
+    int deviceIndex = devices[i].index();
 
-    gpuGuard.set_index(devices[i].index());
+    gpuGuard.set_index(deviceIndex);
     ncclComms[i] = NCCLComm::create(numRanks, rank, ncclID);
 
     // Creates the NCCL streams
     streamVal.push_back(at::cuda::getStreamFromPool());
+
+    // If not set before, get a dedicated stream for the device to run
+    // FutureNCCL then callbacks.
+    if (futureNCCLCallbackStreams_[deviceIndex] == nullptr) {
+      futureNCCLCallbackStreams_[deviceIndex] =
+          std::make_shared<at::cuda::CUDAStream>(at::cuda::getStreamFromPool());
+    }
   }
 
   C10D_NCCL_CHECK(ncclGroupEnd());
