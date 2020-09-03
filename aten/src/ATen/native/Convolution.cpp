@@ -986,12 +986,7 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward(
         gOt = gOt.contiguous();
       }
       // Compute conv
-      if (params.transposed) {
-        gw_conv_params.transposed = false;
-        gWt = at::_convolution(gOt, ggIt, Tensor(), gw_conv_params.stride, gw_conv_params.padding, gw_conv_params.dilation, gw_conv_params.transposed, gw_conv_params.output_padding, gw_conv_params.groups, gw_conv_params.benchmark, gw_conv_params.deterministic, gw_conv_params.cudnn_enabled, gw_conv_params.allow_tf32);
-      } else {
-        gWt = at::_convolution(ggIt, gOt, Tensor(), gw_conv_params.stride, gw_conv_params.padding, gw_conv_params.dilation, gw_conv_params.transposed, gw_conv_params.output_padding, gw_conv_params.groups, gw_conv_params.benchmark, gw_conv_params.deterministic, gw_conv_params.cudnn_enabled, gw_conv_params.allow_tf32);
-      }
+      gWt = at::_convolution(ggIt, gOt, Tensor(), gw_conv_params.stride, gw_conv_params.padding, gw_conv_params.dilation, gw_conv_params.transposed, gw_conv_params.output_padding, gw_conv_params.groups, gw_conv_params.benchmark, gw_conv_params.deterministic, gw_conv_params.cudnn_enabled, gw_conv_params.allow_tf32);
 
       // Transpose gW to match chan_in and chan_out
       gW = gWt.transpose(0, 1);
