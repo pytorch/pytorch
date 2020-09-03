@@ -5145,8 +5145,8 @@ class CriterionTest(InputVariableMixin, TestBase):
             # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
             test_case.assertEqualIgnoreType(cpu_gradInput, gpu_gradInput,
                                             atol=1e-1 if dtype in {torch.half, torch.bfloat16} else 4e-4, rtol=0)
-        except NotImplementedError:
-            pass
+        except NotImplementedError as e:
+            raise AssertionError("received error", e)
 
     def _get_target(self):
         return self._get_arg('target', False)
