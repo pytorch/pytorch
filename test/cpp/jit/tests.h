@@ -209,6 +209,8 @@ namespace jit {
   _(GPU_FusionSmemDynamicReductionSymbolic)         \
   _(GPU_FusionSmemDynamicReductionSymbolicArg)      \
   _(GPU_FusionSmemDynamicPwiseMulSymbolicArg)       \
+  _(GPU_FusionGlobalIntermediate)                   \
+  _(GPU_FusionGlobalIntermediateDefaultSchedule)    \
   _(GPU_FusionConstCheck)                           \
   _(GPU_FusionSymbolicReduction)                    \
   _(GPU_FusionUnrollWithAlloc)                      \

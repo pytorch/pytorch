@@ -32,14 +32,16 @@ std::string kernelPreamble() {
 
 namespace {
 
+// return false if arg's type, number of dimensions, and device, doesn't match
+// param and provided c10:device
 bool validateKernelArgTensor(
     const at::Tensor& arg,
     const Val* param,
-    c10::Device device,
+    const c10::Device& device,
     std::stringstream& msg) {
   // Arg is a tensor. Param must be a tensor too.
   if (*param->getValType() != ValType::TensorView) {
-    msg << "Argument is a tensor, but the parameter is not.";
+    msg << "Argument is a tensor, but the parameter is not.\n";
     return false;
   }
 
@@ -54,12 +56,13 @@ bool validateKernelArgTensor(
   // check as necessary.
   if (arg_dim > param_dim) {
     msg << "Argument tensor's rank is " << arg_dim << ", but the parameter is "
-        << param_dim;
+        << param_dim << "\n";
     return false;
   }
 
   if (arg.device() != device) {
-    msg << "Argument is on device that is not compiled for";
+    msg << "Argument is on device that is not compiled for."
+        << "\n";
     return false;
   }
   // Check element type
@@ -77,22 +80,24 @@ bool validateKernelArgTensor(
       match = param_data_type == DataType::Bool;
       break;
     default:
-      msg << "Argument element type, " << arg_data_type
-          << ", is not supported.";
+      msg << "Argument element type, " << arg_data_type << ", is not supported."
+          << "\n";
       return false;
   }
   if (!match)
     msg << "Argument element type is " << arg_data_type
-        << ", but the parameter is " << param_data_type;
+        << ", but the parameter is " << param_data_type << "\n";
   return match;
 }
 
+// Return false if  arg_type doesn't match the type in param
 bool validateKernelArgScalar(
     const c10::TypePtr& arg_type,
     const Val* param,
     std::stringstream& msg) {
   if (!param->isScalar()) {
-    msg << "Argument is a scalar, but the parameter is not.";
+    msg << "Argument is a scalar, but the parameter is not."
+        << "\n";
     return false;
   }
   DataType param_type = *param->getDataType();
@@ -112,20 +117,22 @@ bool validateKernelArgScalar(
   }
   if (!match) {
     msg << "Argument type is " << *arg_type << ", but the parameter is "
-        << param_type;
+        << param_type << "\n";
   }
   return match;
 }
 
+// Return false if arg and param don't match up and if arg's device (if a
+// tensor) doesn't match provided device
 bool validateKernelArg(
     const c10::IValue& arg,
     const Val* param,
-    c10::Device device,
+    const c10::Device& device,
     std::stringstream& msg) {
-  if (arg.type()->kind() != c10::TypeKind::TensorType) {
-    return validateKernelArgScalar(arg.type(), param, msg);
-  } else {
+  if (arg.isTensor()) {
     return validateKernelArgTensor(arg.toTensor(), param, device, msg);
+  } else {
+    return validateKernelArgScalar(arg.type(), param, msg);
   }
 }
 
@@ -134,30 +141,29 @@ bool validateKernelArg(
 void validateKernelInputs(
     Fusion* fusion,
     const at::ArrayRef<IValue>& inputs,
-    c10::Device device) {
+    const c10::Device& device) {
   // This is necessary as we were traversing the fusion graph later in the check
   FusionGuard fg(fusion);
   // Check inputs
   TORCH_INTERNAL_ASSERT(
       inputs.size() == fusion->inputs().size(),
       "Wrong number of kernel inputs.");
+
+  std::stringstream msg;
+  bool mismatch = false;
   for (size_t i = 0; i < inputs.size(); ++i) {
     const IValue& arg = inputs[i];
     const Val* param = fusion->inputs()[i];
-    std::stringstream msg;
-    TORCH_INTERNAL_ASSERT(
-        validateKernelArg(arg, param, device, msg),
-        "Input argument at position ",
-        i,
-        " is invalid; ",
-        msg.str());
+    mismatch = !validateKernelArg(arg, param, device, msg) || mismatch;
   }
+  TORCH_INTERNAL_ASSERT(
+      !mismatch, "Found one or more invalid arguments: ", msg.str());
 }
 
 void validateKernelOutputs(
     Fusion* fusion,
     const std::vector<at::Tensor>& outputs,
-    c10::Device device) {
+    const c10::Device& device) {
   TORCH_INTERNAL_ASSERT(
       fusion->outputs().size() != 0,
       "Kernel should have at least one output tensor.");
@@ -165,47 +171,28 @@ void validateKernelOutputs(
   TORCH_INTERNAL_ASSERT(
       outputs.size() == fusion->outputs().size(),
       "Wrong number of kernel outputs.");
+
+  std::stringstream msg;
+  bool mismatch = false;
   for (size_t i = 0; i < outputs.size(); ++i) {
     const at::Tensor& arg = outputs[i];
     const Val* param = fusion->outputs()[i];
-    std::stringstream msg;
-    TORCH_INTERNAL_ASSERT(
-        validateKernelArgTensor(arg, param, device, msg),
-        "Output argument at position ",
-        i,
-        " is invalid; ",
-        msg.str());
+    mismatch = !validateKernelArg(arg, param, device, msg) || mismatch;
   }
+  TORCH_INTERNAL_ASSERT(
+      !mismatch, "Found one or more invalid arguments: ", msg.str());
 }
 
-void safeBind(
-    EvaluationContext& ec,
-    const Val* value,
-    Int::ScalarType concrete_value) {
-  auto already_concrete_val = ec.concreteValue(value);
-
-  if (already_concrete_val.has_value()) {
-    TORCH_INTERNAL_ASSERT(
-        concrete_value == already_concrete_val.value(),
-        "Tried to bind ",
-        value,
-        " to ",
-        " concrete value, but it's already set to ",
-        already_concrete_val.value());
-  } else {
-    ec.bind(value, concrete_value);
-  }
-}
-
-EvaluationContext bindInputs(
+StatefulExpressionEvaluator statefulBindInputs(
     const at::ArrayRef<IValue>& aten_inputs,
-    Fusion* fusion) {
+    Fusion* fusion,
+    GpuLower* lower) {
   TORCH_INTERNAL_ASSERT(
       fusion->inputs().size() == aten_inputs.size(),
       "Something went wrong configuring launch. Inputs no longer match.");
 
   auto fusion_inputs = fusion->inputs();
-  EvaluationContext eval_context(fusion);
+  StatefulExpressionEvaluator evaluator(fusion);
 
   // This should probably move to EvaluationContext as we may want to bind
   // input values frequently. Bind fusion input values to runtime values.
@@ -224,54 +211,18 @@ EvaluationContext bindInputs(
           "Something went wrong configuring launch. Inputs no longer match.");
 
       for (size_t dim = 0; dim < root_dom.size(); dim++) {
-        safeBind(
-            eval_context, root_dom[dim]->extent(), aten_tensor.sizes()[dim]);
+        evaluator.safeBind(
+            root_dom[dim]->extent(), aten_tensor.sizes()[dim], lower);
       }
+    } else if (
+        fusion->inputs()[i]->getValType().value() == ValType::Scalar &&
+        fusion->inputs()[i]->getDataType().value() == DataType::Int) {
+      TORCH_INTERNAL_ASSERT(
+          aten_inputs[i].type()->kind() == c10::TypeKind::IntType);
+      evaluator.safeBind(fusion->inputs()[i], aten_inputs[i].toInt(), lower);
     }
   }
-  return eval_context;
-}
-
-EvaluationContext bindInputs(
-    const at::ArrayRef<IValue>& aten_inputs,
-    Fusion* fusion,
-    GpuLower* lowered) {
-  TORCH_INTERNAL_ASSERT(
-      fusion->inputs().size() == aten_inputs.size(),
-      "Something went wrong configuring launch. Inputs no longer match.");
-
-  auto fusion_inputs = fusion->inputs();
-  EvaluationContext eval_context(fusion);
-
-  // This should probably move to EvaluationContext as we may want to bind
-  // input values frequently. Bind fusion input values to runtime values.
-  for (size_t i = 0; i < fusion->inputs().size(); i++) {
-    if (fusion->inputs()[i]->getValType() == ValType::TensorView) {
-      TensorView* cg_tensor = fusion->inputs()[i]->as<TensorView>();
-
-      TORCH_INTERNAL_ASSERT(
-          aten_inputs[i].isTensor(),
-          "Something went wrong configuring launch. Inputs no longer match.");
-
-      auto aten_tensor = aten_inputs[i].toTensor();
-      auto root_dom = TensorDomain::noReductions(cg_tensor->getRootDomain());
-      TORCH_INTERNAL_ASSERT(
-          aten_tensor.ndimension() == root_dom.size(),
-          "Something went wrong configuring launch. Inputs no longer match.");
-
-      for (size_t dim = 0; dim < root_dom.size(); dim++) {
-        auto extent = root_dom[dim]->extent();
-        safeBind(eval_context, extent, aten_tensor.sizes()[dim]);
-        if (!extent->isConstScalar()) {
-          safeBind(
-              eval_context,
-              lowered->getLowerValue(extent),
-              aten_tensor.sizes()[dim]);
-        }
-      }
-    }
-  }
-  return eval_context;
+  return evaluator;
 }
 
 NvrtcFunction nvrtcCompile(
@@ -315,7 +266,6 @@ NvrtcFunction nvrtcCompile(
   const char* disable_fma = getenv("PYTORCH_CUDA_FUSER_DISABLE_FMA");
   // int disable_fma_flag = disable_fma ? atoi(disable_fma) : 0;
   if (disable_fma && atoi(disable_fma)) {
-    printf("disabling fmad\n");
     args.push_back("--fmad=false");
   }
 

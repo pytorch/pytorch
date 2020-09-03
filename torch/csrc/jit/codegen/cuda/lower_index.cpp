@@ -217,16 +217,21 @@ void IndexLowering::handle(ReductionOp* rop) {
 
     IterDomain* buffer_id = new IterDomain(new Int(0), buffer_size);
     TensorView* reduce_buffer_tv = new TensorView(
-        new TensorDomain({buffer_id}), out->getDataType().value());
+        new TensorDomain({buffer_id}),
+        out->getDataType().value(),
+        MemoryType::Global);
 
     IterDomain* sync_id = new IterDomain(new Int(0), sync_size);
-    TensorView* reduce_sync_tv =
-        new TensorView(new TensorDomain({sync_id}), DataType::Int);
+    TensorView* reduce_sync_tv = new TensorView(
+        new TensorDomain({sync_id}), DataType::Int, MemoryType::Global);
 
     const auto reduce_buffer = new kir::Allocate(
-        kir::lowerValue(reduce_buffer_tv), MemoryType::Global);
-    const auto sync_buffer =
-        new kir::Allocate(kir::lowerValue(reduce_sync_tv), MemoryType::Global);
+        kir::lowerValue(reduce_buffer_tv), reduce_sync_tv->getMemoryType());
+    const auto sync_buffer = new kir::Allocate(
+        kir::lowerValue(reduce_sync_tv),
+        reduce_sync_tv->getMemoryType(),
+        nullptr,
+        true);
 
     const auto grid_reduction_op = block_reduction_op == nullptr
         ? new kir::ReductionOp(

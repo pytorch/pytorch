@@ -3,9 +3,6 @@
 #include <torch/csrc/jit/codegen/cuda/scheduler.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 
-// TODO: This class is dead at the moment, but we need to figure out a generic
-// cacheing system that will suite our needs.
-
 namespace torch {
 namespace jit {
 namespace fuser {
@@ -185,6 +182,36 @@ at::DimVector inversePermutation(
 
 } // namespace
 
+size_t InputsIdLookup::getCode(const at::ArrayRef<IValue>& inputs) {
+  std::stringstream encoded_inputs;
+  for (const auto& input : inputs) {
+    if (input.isTensor()) {
+      auto input_tensor = input.toTensor();
+
+      encoded_inputs << ";";
+      auto sep = "";
+      for (auto size : input_tensor.sizes()) {
+        encoded_inputs << sep << size;
+        sep = ",";
+      }
+      encoded_inputs << "@";
+      sep = "";
+      for (auto stride : input_tensor.strides()) {
+        encoded_inputs << sep << stride;
+        sep = ",";
+      }
+    } else {
+      // encode s for scalar;
+      encoded_inputs << ";s";
+    }
+  }
+  auto& iter = encoding_lookup_[encoded_inputs.str()];
+  if (iter == 0) {
+    iter = current_id_++;
+  }
+  return iter;
+}
+
 FusionExecutorCache::FusionExecutorCache(
     std::unique_ptr<Fusion>&& fusion,
     at::Device device)
@@ -193,49 +220,57 @@ FusionExecutorCache::FusionExecutorCache(
   has_reduction_ = fusion_->hasReduction();
 }
 
-// TODO: dummy cache
 std::vector<at::Tensor> FusionExecutorCache::runFusionWithInputs(
-    const at::ArrayRef<IValue>& inputs) {
-  // caching strategy is different for pw-fusion and reduction-fusion.
-  if (has_reduction_) {
-    // copy the fusion, since each FusionExecutor needs to manipulate the fusion
-    // in order to generate kernel.
-    Fusion fusion = *fusion_;
-    FusionGuard fg(&fusion);
-    TensorView* red_tv = nullptr;
-    for (auto expr : fusion.exprs()) {
-      if (expr->getExprType().has_value() &&
-          expr->getExprType().value() == ExprType::ReductionOp) {
-        red_tv = expr->outputs()[0]->as<TensorView>();
-        break;
+    const at::ArrayRef<IValue>& inputs,
+    size_t unique_id) {
+  if (code_to_fe_lookup_.count(unique_id) == 0) {
+    // enter when we get a new input set. We need to search for compatible
+    // entries in cached `FusionExecutor` or compile new one as needed.
+
+    // caching strategy is different for pw-fusion and reduction-fusion.
+    if (has_reduction_) {
+      // copy the fusion, since each FusionExecutor needs to manipulate the
+      // fusion in order to generate kernel.
+      Fusion fusion = *fusion_;
+      TensorView* red_tv = nullptr;
+      for (auto expr : fusion.exprs()) {
+        if (expr->getExprType().has_value() &&
+            expr->getExprType().value() == ExprType::ReductionOp) {
+          red_tv = expr->outputs()[0]->as<TensorView>();
+          break;
+        }
       }
+      auto reduction_params = scheduleReduction(&fusion, inputs, red_tv);
+      TORCH_INTERNAL_ASSERT(
+          reduction_params.has_value(),
+          "reduction schedule failed in `scheduleReduction`");
+      auto fusion_executor =
+          &red_fusion_executor_cache_[reduction_params.value()];
+      if (!fusion_executor->compiled()) {
+        // This means we have not found a previously generated kernel that's
+        // compatible with the new reduction params. We need to finish codegen.
+        CompileOptions options;
+        options.device = device_;
+        fusion_executor->compileFusion(&fusion, options);
+      }
+      // record new short cut to `FusionExecutor`
+      code_to_fe_lookup_[unique_id] = fusion_executor;
+    } else {
+      if (!pw_fusion_executor_cache_) {
+        pw_fusion_executor_cache_ = std::make_unique<FusionExecutor>();
+        CompileOptions options;
+        options.device = device_;
+        // no need to copy fusion_, as we are not generating more than 1 kernel
+        // for PW.
+        scheduleFusion(fusion_.get(), inputs);
+        pw_fusion_executor_cache_->compileFusion(fusion_.get(), options);
+      }
+      // record new short cut to `FusionExecutor`
+      code_to_fe_lookup_[unique_id] = pw_fusion_executor_cache_.get();
     }
-    auto reduction_params = scheduleReduction(&fusion, inputs, red_tv);
-    TORCH_INTERNAL_ASSERT(
-        reduction_params.has_value(),
-        "reduction schedule failed in `scheduleReduction`");
-    auto& fusion_executor =
-        red_fusion_executor_cache_[reduction_params.value()];
-    if (!fusion_executor.compiled()) {
-      // This means we have not found a previously generated kernel that's
-      // compatible with the new reduction params. We need to finish codegen.
-      CompileOptions options;
-      options.device = device_;
-      fusion_executor.compileFusion(&fusion, options);
-    }
-    return fusion_executor.runFusion(inputs);
-  } else {
-    if (!pw_fusion_executor_cache_) {
-      pw_fusion_executor_cache_ = std::make_unique<FusionExecutor>();
-      CompileOptions options;
-      options.device = device_;
-      // no need to copy fusion_, as we are not generating more than 1 kernel
-      // for PW.
-      scheduleFusion(fusion_.get(), inputs);
-      pw_fusion_executor_cache_->compileFusion(fusion_.get(), options);
-    }
-    return pw_fusion_executor_cache_->runFusion(inputs);
   }
+  return code_to_fe_lookup_[unique_id]->runFusion(
+      inputs, LaunchParams(), unique_id);
 }
 
 GraphCache::InputsRequirement::InputsRequirement(
@@ -384,7 +419,7 @@ bool GraphCache::InputsRequirement::complyWith(
   return true;
 }
 
-FusionExecutorCache* GraphCache::createFusionExecutorCache(
+FusionExecutorCache* GraphCache::appendFusionExecutorCache(
     const InputsRequirement& input_stack) {
   input_stacks_.emplace_back(input_stack);
   std::shared_ptr<Graph> parsing_graph = graph_->copy();
@@ -514,50 +549,71 @@ GraphCache::GraphCache(std::shared_ptr<Graph> graph)
   // compile a kernel if we have enough information from graph (profiling
   // record)
   if (IsNewExecutorEnabled()) {
-    createFusionExecutorCache(
+    appendFusionExecutorCache(
         InputsRequirement(graph_, toVector(reduction_axes_)));
   }
 }
 
 std::vector<at::Tensor> GraphCache::runGraphWithInputs(
     const at::ArrayRef<IValue>& inputs) {
-  InputsRequirement input_stack(inputs, toVector(reduction_axes_));
+  // get unique id `unique_id` for given input set `inputs`;
+  const size_t unique_id = inputs_id_lookup_.getCode(inputs);
+
   FusionExecutorCache* fusion_executor_cache = nullptr;
 
-  // TODO: hash indexing;
-  for (size_t i = 0; i < fe_cache_.size(); i++) {
-    if (input_stack.complyWith(input_stacks_[i])) {
-      fusion_executor_cache = fe_cache_[i].get();
-      break;
+  if (code_to_index_lookup_.count(unique_id) == 0) {
+    InputsRequirement input_stack(inputs, toVector(reduction_axes_));
+    for (size_t i = 0; i < fe_cache_.size(); i++) {
+      if (input_stack.complyWith(input_stacks_[i])) {
+        // found compliable fe_cache_ entry
+        fusion_executor_cache = fe_cache_[i].get();
+        // record short cut to designated fusion executor
+        code_to_index_lookup_[unique_id] = i;
+        break;
+      }
     }
+    if (!fusion_executor_cache) {
+      // This is the ugly bit, each level of cache has their own entry. At this
+      // point, we are creating an instance of FusionExecutorCache as well as a
+      // cache entry for GraphCache;
+      // But we are not creating any cache entry for nested structures. We only
+      // create cache entry below when we later call
+      // `fusion_executor_cache->runFusionWithInputs`
+      fusion_executor_cache = appendFusionExecutorCache(input_stack);
+      // record short cut to designated fusion executor
+      code_to_index_lookup_[unique_id] = fe_cache_.size() - 1;
+    }
+  } else {
+    // take short cut to designated fusion executor
+    fusion_executor_cache = fe_cache_[code_to_index_lookup_[unique_id]].get();
   }
-  if (!fusion_executor_cache) {
-    fusion_executor_cache = createFusionExecutorCache(input_stack);
-  }
+  InputsRequirement* input_requirement =
+      &input_stacks_[code_to_index_lookup_[unique_id]];
 
   // GraphCache need to permute inputs/outputs to accommodate dimension
   // coalescing
-  if (input_stack.requiresPermutation()) {
+  if (input_requirement->requiresPermutation()) {
     std::vector<IValue> permuted_inputs;
     permuted_inputs.reserve(inputs.size());
     for (const auto& input : inputs) {
       if (input.isTensor()) {
         permuted_inputs.emplace_back(
-            input.toTensor().permute(input_stack.input_permutation_));
+            input.toTensor().permute(input_requirement->input_permutation_));
       } else {
         permuted_inputs.emplace_back(input);
       }
     }
-    auto outputs = fusion_executor_cache->runFusionWithInputs(permuted_inputs);
+    auto outputs =
+        fusion_executor_cache->runFusionWithInputs(permuted_inputs, unique_id);
     std::vector<at::Tensor> permuted_outputs;
     permuted_outputs.reserve(outputs.size());
     for (const auto& output : outputs) {
       permuted_outputs.emplace_back(
-          output.permute(input_stack.output_permutation_));
+          output.permute(input_requirement->output_permutation_));
     }
     return permuted_outputs;
   } else {
-    return fusion_executor_cache->runFusionWithInputs(inputs);
+    return fusion_executor_cache->runFusionWithInputs(inputs, unique_id);
   }
 }
 
