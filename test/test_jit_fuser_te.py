@@ -105,7 +105,8 @@ class TestTEFuser(JitTestCase):
     @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
     def test_sum_simple(self):
         def func(x):
-            return x.sum() * 2
+            x2 = x * x
+            return x2.sum()
 
         a = torch.tensor(list(x for x in range(0, 15)), dtype=torch.float, device='cpu')
         a = a.reshape(5, 3)
