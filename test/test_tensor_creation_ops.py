@@ -716,18 +716,19 @@ class TestTensorCreation(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @precisionOverride({torch.float: 1e-8, torch.double: 1e-10})
-    @dtypes(torch.float, torch.double)
+    @dtypes(*(torch.testing.get_all_fp_dtypes(include_half=False, include_bfloat16=False) +
+              torch.testing.get_all_complex_dtypes()))
     def test_linspace_vs_numpy(self, device, dtype):
-        start = -0.0316082797944545745849609375
-        end = .0315315723419189453125
+        start = -0.0316082797944545745849609375 + (0.8888888888j if dtype.is_complex else 0)
+        end = .0315315723419189453125 + (0.444444444444j if dtype.is_complex else 0)
 
         for steps in [1, 2, 3, 5, 11, 256, 257, 2**22]:
             t = torch.linspace(start, end, steps, device=device, dtype=dtype)
             a = np.linspace(start, end, steps, dtype=torch_to_numpy_dtype_dict[dtype])
             t = t.cpu()
             self.assertEqual(t, torch.from_numpy(a))
-            self.assertTrue(t[0] == a[0])
-            self.assertTrue(t[steps - 1] == a[steps - 1])
+            self.assertTrue(t[0].item() == a[0])
+            self.assertTrue(t[steps - 1].item() == a[steps - 1])
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @precisionOverride({torch.float: 1e-6, torch.double: 1e-10})
@@ -887,8 +888,8 @@ class TestTensorCreation(TestCase):
         bfloat16_tensor = torch.arange(0, 6, step=2, dtype=torch.bfloat16, device=device)
         self.assertEqual(ref_tensor, bfloat16_tensor)
 
-    @dtypes(torch.int8, torch.short, torch.int, torch.long, torch.float, torch.double)
-    @dtypesIfCUDA(torch.int8, torch.short, torch.int, torch.long, torch.half, torch.float, torch.double)
+    @dtypes(*torch.testing.get_all_dtypes(include_bool=False, include_half=False))
+    @dtypesIfCUDA(*torch.testing.get_all_dtypes(include_bool=False, include_half=True))
     def test_linspace(self, device, dtype):
         _from = random.random()
         to = _from + random.random()
@@ -906,7 +907,7 @@ class TestTensorCreation(TestCase):
                              torch.tensor(list(range(10, 2001)), device=device, dtype=dtype))
 
         # Vectorization on non-contiguous tensors
-        if dtype != torch.int8:  # int8 is too small for this test
+        if dtype not in (torch.int8, torch.uint8):  # int8 and uint8 are too small for this test
             res = torch.rand(3, 3, 1000, device=device).to(dtype)
             res = res.permute(2, 0, 1)
             torch.linspace(0, 1000 * 3 * 3, 1000 * 3 * 3, out=res)
@@ -920,8 +921,9 @@ class TestTensorCreation(TestCase):
         self.assertEqual(torch.linspace(0, 1, 0, device=device, dtype=dtype).numel(), 0, atol=0, rtol=0)
 
         # Check linspace for generating the correct output for each dtype.
-        expected_lin = torch.tensor([-100. + .5 * i for i in range(401)], device=device, dtype=torch.double)
-        actual_lin = torch.linspace(-100, 100, 401, device=device, dtype=dtype)
+        start = 0 if dtype == torch.uint8 else -100
+        expected_lin = torch.tensor([start + .5 * i for i in range(401)], device=device, dtype=torch.double)
+        actual_lin = torch.linspace(start, start + 200, 401, device=device, dtype=dtype)
         # If on GPU, allow for minor error depending on dtype.
         tol = 0.
         if device != 'cpu':
@@ -939,10 +941,18 @@ class TestTensorCreation(TestCase):
                          torch.tensor((2, 1, 0), device=device, dtype=dtype),
                          atol=0, rtol=0)
 
+        # Create non-complex tensor from complex numbers
+        if not dtype.is_complex:
+            self.assertRaises(RuntimeError, lambda: torch.linspace(1j, 2j, 3, device=device, dtype=dtype))
+
         # Check for race condition (correctness when applied on a large tensor).
-        if dtype not in (torch.int8, torch.uint8, torch.int16, torch.half):
-            y = torch.linspace(0, 1000000 - 1, 1000000, device=device, dtype=dtype)
-            cond = y[:-1] < y[1:]
+        if dtype not in (torch.int8, torch.uint8, torch.int16, torch.half, torch.bfloat16):
+            y = torch.linspace(0, 999999 + (999999j if dtype.is_complex else 0),
+                               1000000, device=device, dtype=dtype)
+            if dtype.is_complex:
+                cond = torch.logical_and(y[:-1].real < y[1:].real, y[:-1].imag < y[1:].imag)
+            else:
+                cond = y[:-1] < y[1:]
             correct = all(cond)
             self.assertTrue(correct)
 
@@ -950,6 +960,15 @@ class TestTensorCreation(TestCase):
         x = torch.zeros(2, 3, device=device, dtype=dtype)
         y = torch.linspace(0, 3, 4, out=x.narrow(1, 1, 2), dtype=dtype)
         self.assertEqual(x, torch.tensor(((0, 0, 1), (0, 2, 3)), device=device, dtype=dtype), atol=0, rtol=0)
+
+    def test_linspace_deduction(self, device):
+        # Test deduction from input parameters.
+        self.assertEqual(torch.linspace(1, 2, device=device).dtype, torch.float32)
+        self.assertEqual(torch.linspace(1., 2, device=device).dtype, torch.float32)
+        self.assertEqual(torch.linspace(1., -2., device=device).dtype, torch.float32)
+        # TODO: Need fix
+        with self.assertRaises(RuntimeError):
+            torch.linspace(1j, -2j, device=device)
 
     # The implementation of linspace+logspace goes through a different path
     # when the steps arg is equal to 0 or 1. For other values of `steps`
@@ -972,14 +991,12 @@ class TestTensorCreation(TestCase):
     # See NOTE [Linspace+Logspace precision override]
     @skipCPUIf(True, "compares with CPU")
     @precisionOverride({torch.half: 0.0039 + LINSPACE_LOGSPACE_EXTRA_EPS})
-    @dtypesIfCUDA(torch.half, torch.float, torch.double)
-    @dtypes(torch.float, torch.double)
+    @dtypesIfCUDA(*(torch.testing.get_all_fp_dtypes() + torch.testing.get_all_complex_dtypes()))
     def test_linspace_device_vs_cpu(self, device, dtype):
         self._test_linspace(device, dtype, steps=10)
 
     @skipCPUIf(True, "compares with CPU")
-    @dtypesIfCUDA(torch.half, torch.float, torch.double)
-    @dtypes(torch.float, torch.double)
+    @dtypesIfCUDA(*(torch.testing.get_all_fp_dtypes() + torch.testing.get_all_complex_dtypes()))
     def test_linspace_special_steps(self, device, dtype):
         for steps in self.LINSPACE_LOGSPACE_SPECIAL_STEPS:
             self._test_linspace(device, dtype, steps=steps)
