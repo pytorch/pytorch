@@ -194,6 +194,7 @@ const std::unordered_set<std::string>& TvmTransformer::getSupportedOps() {
       "DotProduct",
       "EnsureCPUOutput",
       "ExpandDims",
+      "FbFCPacked",
       "FC",
       "FCTransposed",
       "Flatten",
