@@ -1,4 +1,5 @@
 #include <test/cpp/tensorexpr/test_base.h>
+#include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
@@ -11,7 +12,20 @@ namespace jit {
 
 using namespace torch::jit::tensorexpr;
 
+struct WithCPUFuser {
+  WithCPUFuser() : cpuFuserEnabled(canFuseOnCPU()) {
+    overrideCanFuseOnCPU(true);
+  }
+
+  ~WithCPUFuser() {
+    overrideCanFuseOnCPU(cpuFuserEnabled);
+  }
+
+  bool cpuFuserEnabled;
+};
+
 void testFuserPass_1() {
+  WithCPUFuser cf;
   KernelScope kernel_scope;
   const auto graph_string = R"IR(
     graph(%0 : Float(128:1, device=cpu),
@@ -38,6 +52,7 @@ void testFuserPass_1() {
 }
 
 void testFuserPass_2() {
+  WithCPUFuser cf;
   KernelScope kernel_scope;
   const auto graph_string = R"IR(
     graph(%0 : Float(128:1, device=cpu),
@@ -62,6 +77,7 @@ void testFuserPass_2() {
 }
 
 void testFuserPass_3() {
+  WithCPUFuser cf;
   KernelScope kernel_scope;
   const auto graph_string = R"IR(
     graph(%x : Float(128:1, device=cpu),
