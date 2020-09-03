@@ -1269,8 +1269,8 @@ class TripletMarginWithDistanceLoss(_Loss):
     where :math:`N` is the batch size; :math:`d` is a nonnegative, real-valued function
     quantifying the relationship between two tensors, referred to as `distance_function`;
     and :math:`margin` is a non-negative margin between the positive and negative
-    distances that is required for a 0 loss.  The input tensors have :math:`N` elements
-    each and can be of any shape that the distance function can handle.
+    distances that is required for the loss to be 0.  The input tensors have :math:`N`
+    elements each and can be of any shape that the distance function can handle.
 
     If :attr:`reduction` is not ``'none'``
     (default ``'mean'``), then:
@@ -1292,14 +1292,15 @@ class TripletMarginWithDistanceLoss(_Loss):
             quantifies the relationship between two tensors. If not specified,
             `nn.PairwiseDistance` will be used.  Default: ``None``
         is_similarity_function (bool, optional): Whether `distance_function` represents a
-            similarity metric, i.e., larger values are closer. If True, computes the difference of
+            similarity metric, i.e., larger values mean closer tensors. Otherwise, it is a distance
+            metric, i.e., smaller values mean closer tensors. If True, computes the difference of
             distances as :math:`d(a_i, n_i) - d(a_i, p_i)` so that larger loss values occur
             when the negative example is more similar to the anchor than the positive example
             is. Default: ``False``
         margin (float, optional): A non-negative margin representing the minimum difference
-            between the positive and negative distances required for a 0 loss. Larger margins
-            penalize cases where the negative examples are not distant enough from the anchors,
-            relative to the positives. Default: :math:`1`.
+            between the positive and negative distances required for the loss to be 0. Larger
+            margins penalize cases where the negative examples are not distant enough from the
+            anchors, relative to the positives. Default: :math:`1`.
         swap (bool, optional): Whether to use the distance swap described in the paper
             `Learning shallow convolutional feature descriptors with triplet losses` by
             V. Balntas, E. Riba et al. If True, and if the positive example is closer to the
@@ -1338,7 +1339,7 @@ class TripletMarginWithDistanceLoss(_Loss):
     >>> output = triplet_loss(anchor, positive, negative)
     >>> output.backward()
     >>>
-    >>> # User-defined Similarity Function
+    >>> # User-defined Distance Function
     >>> def l_infinity(x1, x2):
     >>>     return torch.max(torch.abs(x1 - x2), dim=1).values
     >>>
