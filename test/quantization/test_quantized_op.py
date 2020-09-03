@@ -2932,7 +2932,7 @@ class TestQuantizedEmbeddingBag(TestCase):
                                                rtol=1e-2)
 
 
-class TestQuantizedConv(unittest.TestCase):
+class TestQuantizedConv(TestCase):
     def _test_qconv_unpack_impl(self, qconv_prepack_fn, qconv_unpack_fn, inputs,
                                 strides, i_pads, o_pads, channelwise):
         (X_data, W_data, bias_data, groups, transposed) = inputs
@@ -3124,6 +3124,9 @@ class TestQuantizedConv(unittest.TestCase):
             pads: {pads}, o_pads: {o_pads}, dilations: {dilations},
             groups: {groups}, y_s: {Y_scale}, y_zp: {Y_zero_point}''')
 
+        # Return the quantized data for later reuse
+        return X_q, W_q, bias_float
+
     """Tests the correctness of quantized convolution op."""
     @given(batch_size=st.integers(1, 3),
            input_channels_per_group=st.sampled_from([2, 4, 5, 8, 16, 32]),
@@ -3261,13 +3264,37 @@ class TestQuantizedConv(unittest.TestCase):
             dilation=dilations,
             bias=use_bias
         )
-        self._test_qconv_impl(
+        X_q, W_q, bias_float = self._test_qconv_impl(
             qconv, qconv_prepack, conv_op, batch_size,
             input_channels_per_group, (width, ),
             output_channels_per_group, groups, kernels, strides, pads, o_pads,
             dilations, X_scale, X_zero_point, W_scale, W_zero_point,
             Y_scale, Y_zero_point, use_bias, use_relu=False,
             use_channelwise=False, use_transpose=True)
+
+        # Test the module implementation
+        qconv_op = torch.nn.quantized.ConvTranspose1d(
+            in_channels=input_channels,
+            out_channels=output_channels,
+            kernel_size=kernels,
+            stride=strides,
+            padding=pads,
+            output_padding=o_pads,
+            groups=groups,
+            dilation=dilations,
+            bias=use_bias
+        )
+        qconv_op.scale = Y_scale
+        qconv_op.zero_point = Y_zero_point
+        qconv_op.set_weight_bias(W_q, bias_float)
+
+        Y_dq_ref = conv_op(X_q.dequantize())
+        Y_q_ref = torch.quantize_per_tensor(Y_dq_ref, scale=Y_scale,
+                                            zero_point=Y_zero_point,
+                                            dtype=torch.quint8)
+        Y_q = qconv_op(X_q)
+        self.assertEqual(Y_q_ref, Y_q)
+
 
     """Tests the correctness of quantized convolution op."""
     @given(batch_size=st.integers(1, 3),
@@ -3341,13 +3368,36 @@ class TestQuantizedConv(unittest.TestCase):
             dilation=dilations,
             bias=use_bias
         )
-        self._test_qconv_impl(
+        X_q, W_q, bias_float = self._test_qconv_impl(
             qconv, qconv_prepack, conv_op, batch_size,
             input_channels_per_group, (height, width),
             output_channels_per_group, groups, kernels, strides, pads, o_pads,
             dilations, X_scale, X_zero_point, W_scale, W_zero_point,
             Y_scale, Y_zero_point, use_bias, use_relu=False,
             use_channelwise=False, use_transpose=True)
+
+        # Test the module implementation
+        qconv_op = torch.nn.quantized.ConvTranspose2d(
+            in_channels=input_channels,
+            out_channels=output_channels,
+            kernel_size=kernels,
+            stride=strides,
+            padding=pads,
+            output_padding=o_pads,
+            groups=groups,
+            dilation=dilations,
+            bias=use_bias
+        )
+        qconv_op.scale = Y_scale
+        qconv_op.zero_point = Y_zero_point
+        qconv_op.set_weight_bias(W_q, bias_float)
+
+        Y_dq_ref = conv_op(X_q.dequantize())
+        Y_q_ref = torch.quantize_per_tensor(Y_dq_ref, scale=Y_scale,
+                                            zero_point=Y_zero_point,
+                                            dtype=torch.quint8)
+        Y_q = qconv_op(X_q)
+        self.assertEqual(Y_q_ref, Y_q)
 
     @given(
         inputs=hu.tensor_conv(
