@@ -906,7 +906,12 @@ void LoopNest::prepareForCodegen() {
   root_stmt_ = insertAllocFree(root_stmt_);
 }
 
-void LoopNest::slice(For* f, const Expr* factor, For** head, For** tail) {
+void LoopNest::slice(
+    bool slice_head,
+    For* f,
+    const Expr* factor,
+    For** head,
+    For** tail) {
   if (!f) {
     throw malformed_input("slice attempted on null loop", f);
   }
@@ -938,7 +943,26 @@ void LoopNest::sliceHead(For* f, int factor, For** head, For** tail) {
       return;
     }
   }
-  slice(f, new IntImm(factor), head, tail);
+
+  if (!f) {
+    throw malformed_input("sliceHead attempted on null loop", f);
+  }
+
+  Block* p = dynamic_cast<Block*>(f->get_parent());
+  if (!p) {
+    throw malformed_input("sliceHead attempted on loop with no parent", p);
+  }
+
+  const Expr* head_end =
+      new Min(new Add(f->start(), new IntImm(factor)), f->stop(), true);
+  *head = new For(f->var(), f->start(), head_end, Stmt::clone(f->body()));
+  *tail = new For(
+      f->var(), head_end, f->stop(), Stmt::clone(f->body()), f->loop_options());
+
+  p->replace_stmt(f, *head);
+  p->insert_stmt_after(*tail, *head);
+
+  // TODO: record history of transformations
 }
 
 void LoopNest::sliceTail(For* f, int factor, For** head, For** tail) {
@@ -953,10 +977,30 @@ void LoopNest::sliceTail(For* f, int factor, For** head, For** tail) {
       return;
     }
   }
-  const Expr* size = new Sub(f->stop(), f->start());
-  const Expr* head_factor =
-      new Max(new IntImm(0), new Sub(size, new IntImm(factor)), true);
-  slice(f, head_factor, head, tail);
+
+  if (!f) {
+    throw malformed_input("sliceTail attempted on null loop", f);
+  }
+
+  Block* p = dynamic_cast<Block*>(f->get_parent());
+  if (!p) {
+    throw malformed_input("sliceTail attempted on loop with no parent", p);
+  }
+
+  const Expr* tail_start =
+      new Max(new IntImm(0), new Sub(f->stop(), new IntImm(factor)));
+  *head = new For(
+      f->var(),
+      f->start(),
+      tail_start,
+      Stmt::clone(f->body()),
+      f->loop_options());
+  *tail = new For(f->var(), tail_start, f->stop(), Stmt::clone(f->body()));
+
+  p->replace_stmt(f, *head);
+  p->insert_stmt_after(*tail, *head);
+
+  // TODO: record history of transformations
 }
 
 void LoopNest::splitWithTail(
