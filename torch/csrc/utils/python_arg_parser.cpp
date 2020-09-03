@@ -194,22 +194,18 @@ auto handle_torch_function(PyObject* self, const std::string& func_name, PyObjec
   return ret.release().ptr();
 }
 
-auto handle_torch_function(PythonArgs &r, PyObject* self, PyObject* args, PyObject* kwargs, PyObject* torch_api, const char* module_name) -> PyObject* {
-  py::object torch_api_function = PyObject_FastGetAttrString(torch_api, (char*)r.get_func_name().c_str());
-  TORCH_INTERNAL_ASSERT(torch_api_function.ptr() != nullptr, "torch API function must exist");
-  py::object ret;
-  py::tuple args_ = combine_self_args(self, args);
+auto handle_torch_function_no_python_arg_parser(const std::vector<py::handle> &overloaded_args, PyObject* args, PyObject* kwargs, const char* func_name, PyObject* torch_api_function, const char* module_name) -> PyObject* {
   // overloaded_args already all have unique types
   std::vector<py::object> overloaded_types;
-  overloaded_types.reserve(r.signature.overloaded_args.size());
-  for (auto &arg : r.signature.overloaded_args) {
+  overloaded_types.reserve(overloaded_args.size());
+  for (auto &arg : overloaded_args) {
     overloaded_types.push_back(py::reinterpret_borrow<py::object>((PyObject *) Py_TYPE(arg.ptr())));
   }
   py::tuple py_types = py::cast(overloaded_types);
-
-  for (auto &arg : r.signature.overloaded_args) {
+  py::object ret;
+  for (auto &arg : overloaded_args) {
     py::object torch_function = PyObject_FastGetAttrString(arg.ptr(), "__torch_function__");
-    ret = py::reinterpret_steal<py::object>(PyObject_CallFunctionObjArgs(torch_function.ptr(), torch_api_function.ptr(), py_types.ptr(), args_.ptr(), kwargs, NULL));
+    ret = py::reinterpret_steal<py::object>(PyObject_CallFunctionObjArgs(torch_function.ptr(), torch_api_function, py_types.ptr(), args, kwargs, NULL));
     if (ret.ptr() != Py_NotImplemented) {
       // Return the reference to the result. This also covers the case where ret
       // is NULL and __torch_function__ raised an exception, which we throw below
@@ -225,11 +221,11 @@ auto handle_torch_function(PythonArgs &r, PyObject* self, PyObject* args, PyObje
     // all __torch_function__ implementations in overloaded_args
     // returned NotImplemented, so we raise a TypeError.
     std::stringstream ss;
-    ss << "no implementation found for '" << module_name << "." << r.get_func_name()
+    ss << "no implementation found for '" << module_name << "." << func_name
        << "' on types that implement __torch_function__: [";
-    for (auto &arg : r.signature.overloaded_args) {
+    for (auto &arg : overloaded_args) {
       ss << arg.ptr()->ob_type->tp_name;
-      if (!arg.is(r.signature.overloaded_args.back())) {
+      if (!arg.is(overloaded_args.back())) {
         ss << ", ";
       }
       else {
@@ -241,6 +237,21 @@ auto handle_torch_function(PythonArgs &r, PyObject* self, PyObject* args, PyObje
     throw python_error();
   }
   return ret.release().ptr();
+}
+
+auto handle_torch_function(PythonArgs &r, PyObject* self, PyObject* args, PyObject* kwargs, PyObject* torch_api, const char* module_name) -> PyObject* {
+  py::object torch_api_function = PyObject_FastGetAttrString(torch_api, (char*)r.get_func_name().c_str());
+  TORCH_INTERNAL_ASSERT(torch_api_function.ptr() != nullptr, "torch API function must exist");
+  py::object ret;
+  py::tuple args_ = combine_self_args(self, args);
+  // overloaded_args already all have unique types
+  std::vector<py::object> overloaded_types;
+  overloaded_types.reserve(r.signature.overloaded_args.size());
+  for (auto &arg : r.signature.overloaded_args) {
+    overloaded_types.push_back(py::reinterpret_borrow<py::object>((PyObject *) Py_TYPE(arg.ptr())));
+  }
+  py::tuple py_types = py::cast(overloaded_types);
+  return handle_torch_function_no_python_arg_parser(r.signature.overloaded_args, args_.ptr(), kwargs, r.get_func_name().c_str(), torch_api_function.ptr(), module_name);
 }
 
 auto handle_torch_function(PythonArgs &r, PyObject* args, PyObject* kwargs, PyObject* torch_api, const char* module_name) -> PyObject*
@@ -276,7 +287,7 @@ auto handle_torch_function(PythonArgs &r, PyObject* args, PyObject* kwargs, PyOb
  *  described in NEP-0018:
  *  https://numpy.org/neps/nep-0018-array-function-protocol.html
  *
- *  'overloaded_args' is a reference to a vector of pybind11 handles
+ *  'overloaded_args' is a raw pointer to a vector of pybind11 handles
  *  that have distinct __torch_function__ implementations, in order of calling
  *  precedence.
  *
@@ -288,9 +299,9 @@ auto handle_torch_function(PythonArgs &r, PyObject* args, PyObject* kwargs, PyOb
  *
  */
 
-void append_overloaded_arg(std::vector<py::handle> &overloaded_args, PyObject* obj) {
+void append_overloaded_arg(std::vector<py::handle>* overloaded_args, PyObject* obj) {
   bool class_not_seen_yet = true;
-  for (auto &arg : overloaded_args) {
+  for (auto &arg : *overloaded_args) {
     if (Py_TYPE(obj) == Py_TYPE(arg.ptr())) {
       // obj is the same type as another parameter we've seen in a prior
       // iteration of the loop over parameters so we already have an entry
@@ -301,9 +312,9 @@ void append_overloaded_arg(std::vector<py::handle> &overloaded_args, PyObject* o
     }
   }
   if (class_not_seen_yet) {
-    int arg_index = overloaded_args.size();
+    int arg_index = overloaded_args->size();
     for (int j = 0; j < arg_index; j++) {
-      if (PyObject_IsInstance(obj, (PyObject*)(Py_TYPE(overloaded_args[j].ptr())))) {
+      if (PyObject_IsInstance(obj, (PyObject*)(Py_TYPE((*overloaded_args)[j].ptr())))) {
         // obj is a subclass of another object we've seen already so its
         // __torch_function__ should be called first, therefore we
         // insert it into overloaded_args before the superclass
@@ -314,11 +325,11 @@ void append_overloaded_arg(std::vector<py::handle> &overloaded_args, PyObject* o
     // add object to overloaded_args. If it's a subclass of another class
     // we've already seen it will be inserted before the superclass,
     // otherwise it will be inserted at the end of the array
-    overloaded_args.insert(overloaded_args.begin() + arg_index, obj);
+    overloaded_args->insert(overloaded_args->begin() + arg_index, obj);
   }
 }
 
-static auto check_tensor_or_overload(PyObject* obj, std::vector<py::handle> &overloaded_args) -> bool {
+bool is_tensor_and_append_overloaded(PyObject* obj, std::vector<py::handle>* overloaded_args) {
   if (THPVariable_CheckExact(obj)) {
     // torch.Tensor instances (not subclasses)
     return true;
@@ -336,12 +347,31 @@ static auto check_tensor_or_overload(PyObject* obj, std::vector<py::handle> &ove
   return false;
 }
 
+bool is_tensor_list_and_append_overloaded(PyObject* obj, std::vector<py::handle>* overloaded_args, int argnum, bool throw_error) {
+  auto tuple = six::isTuple(obj);
+  if (!(tuple || PyList_Check(obj))) {
+    return false;
+  }
+  auto size = tuple ? PyTuple_GET_SIZE(obj) : PyList_GET_SIZE(obj);
+  for (size_t idx = 0; idx < size; idx++) {
+    PyObject* iobj = tuple ? PyTuple_GET_ITEM(obj, idx) : PyList_GET_ITEM(obj, idx);
+    if (!is_tensor_and_append_overloaded(iobj, overloaded_args)) {
+      if (throw_error) {
+        throw TypeError("expected Tensor as element %d in argument %d, but got %s",
+            static_cast<int>(idx), argnum, Py_TYPE(iobj)->tp_name);
+      }
+      return false;
+    }
+  }
+  return true;
+}
+
 // argnum is needed for raising the TypeError, it's used in the error message.
 auto FunctionParameter::check(PyObject* obj, std::vector<py::handle> &overloaded_args, int argnum) -> bool
 {
   switch (type_) {
     case ParameterType::TENSOR: {
-      if (check_tensor_or_overload(obj, overloaded_args)) {
+      if (is_tensor_and_append_overloaded(obj, &overloaded_args)) {
         return true;
       }
       return allow_numbers_as_tensors && THPUtils_checkScalar(obj);
@@ -381,19 +411,7 @@ auto FunctionParameter::check(PyObject* obj, std::vector<py::handle> &overloaded
       return size == 1 && THPUtils_checkDimname(obj);
     }
     case ParameterType::TENSOR_LIST: {
-      auto tuple = six::isTuple(obj);
-      if (!(tuple || PyList_Check(obj))) {
-        return false;
-      }
-      auto size = tuple ? PyTuple_GET_SIZE(obj) : PyList_GET_SIZE(obj);
-      for (auto idx = 0; idx < size; idx++) {
-        PyObject* iobj = tuple ? PyTuple_GET_ITEM(obj, idx) : PyList_GET_ITEM(obj, idx);
-        if (!check_tensor_or_overload(iobj, overloaded_args)) {
-          throw TypeError("expected Tensor as element %d in argument %d, but got %s",
-                          idx, argnum, Py_TYPE(iobj)->tp_name);
-        }
-      }
-      return true;
+      return is_tensor_list_and_append_overloaded(obj, &overloaded_args, argnum, true /* throw_error */);
     }
     case ParameterType::INT_LIST: {
       if (PyTuple_Check(obj) || PyList_Check(obj)) {
@@ -744,7 +762,7 @@ bool FunctionSignature::parse(PyObject* self, PyObject* args, PyObject* kwargs, 
 
   int i = 0;
   if (self != nullptr && !THPVariable_CheckExact(self) && check_has_torch_function(self)) {
-    append_overloaded_arg(this->overloaded_args, self);
+    append_overloaded_arg(&this->overloaded_args, self);
   }
   for (auto& param : params) {
     PyObject* obj = nullptr;
