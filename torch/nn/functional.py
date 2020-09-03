@@ -3733,12 +3733,12 @@ def triplet_margin_loss_with_distance(anchor, positive, negative, distance_funct
                                       margin=1.0, swap=False, reduction="mean"):
     # type: (Tensor, Tensor, Tensor, Optional[Callable[[Tensor, Tensor], Tensor]], bool, float, bool, str) -> Tensor
     r"""
-    See :class:`~torch.nn.TripletMarginLossWithDistance` for details
+    See :class:`~torch.nn.TripletMarginLossWithDistance` for details.
+    Note: does not support JIT scripting.
     """
     if torch.jit.is_scripting():
         raise NotImplementedError("F.triplet_margin_loss_with_distance does not support JIT scripting: "
-                                  "Callables cannot be scripted unless they are properties of "
-                                  "a module. Please use nn.TripletMarginLossWithDistance instead.")
+                                  "functions requiring Callables cannot be scripted.")
 
     tens_ops = (anchor, positive, negative)
     if any([type(t) is not Tensor for t in tens_ops]) and has_torch_function(tens_ops):
@@ -3763,8 +3763,8 @@ def triplet_margin_loss_with_distance(anchor, positive, negative, distance_funct
         output = torch.clamp(negative_dist - positive_dist + margin, min=0.0)
     else:
         output = torch.clamp(positive_dist - negative_dist + margin, min=0.0)
-    reduction_enum = _Reduction.get_enum(reduction)
 
+    reduction_enum = _Reduction.get_enum(reduction)
     if reduction_enum == 1:
         return output.mean()
     elif reduction_enum == 2:

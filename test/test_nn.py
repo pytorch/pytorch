@@ -12074,38 +12074,47 @@ class TestNNDeviceType(NNTestCase):
         # implementations of triplet margin loss (``nn.TripletMarginLoss`
         # and `F.triplet_margin_loss`) under *default args*.
 
-        anchor = torch.randn(5, 10, device=device, requires_grad=True)
-        positive = torch.randn(5, 10, device=device, requires_grad=True)
-        negative = torch.randn(5, 10, device=device, requires_grad=True)
+        for extra_args in \
+                itertools.product((0.5, 1, 1.5), (True, False), ('none', 'mean', 'sum')):
+            kwargs = {'margin': extra_args[0], 'swap': extra_args[1], 'reduction': extra_args[2]}
 
-        # functional grad and parity check
-        self.assertTrue(gradcheck(lambda a, p, n: F.triplet_margin_loss_with_distance(
-            a, p, n), (anchor, positive, negative)))
-        self.assertEqual(F.triplet_margin_loss_with_distance(anchor, positive, negative),
-                         F.triplet_margin_loss(anchor, positive, negative))
+            anchor = torch.randn(5, 10, device=device, requires_grad=True)
+            positive = torch.randn(5, 10, device=device, requires_grad=True)
+            negative = torch.randn(5, 10, device=device, requires_grad=True)
 
-        # module grad and parity check
-        loss_base = nn.TripletMarginLoss()
-        loss_test = nn.TripletMarginLossWithDistance()
-        self.assertTrue(gradcheck(lambda a, p, n: loss_test(
-            a, p, n), (anchor, positive, negative)))
-        self.assertEqual(loss_test(anchor, positive, negative),
-                         loss_base(anchor, positive, negative))
+            # Test forward, functional
+            expected = F.triplet_margin_loss(anchor, positive, negative, **kwargs)
+            actual = F.triplet_margin_loss_with_distance(anchor, positive, negative, **kwargs)
+            self.assertEqual(actual, expected, rtol=1e-6, atol=1e-6)
+
+            # Test forward, module
+            loss_ref = nn.TripletMarginLoss(**kwargs)
+            loss_op = nn.TripletMarginLossWithDistance(**kwargs)
+            self.assertEqual(loss_op(anchor, positive, negative),
+                             loss_ref(anchor, positive, negative),
+                             rtol=1e-6, atol=1e-6)
+
+            # Test backward
+            self.assertTrue(gradcheck(lambda a, p, n: F.triplet_margin_loss_with_distance(
+                a, p, n, **kwargs), (anchor, positive, negative)))
+            self.assertTrue(gradcheck(lambda a, p, n: loss_op(a, p, n),
+                                                      (anchor, positive, negative)))
 
     def test_triplet_margin_loss_with_distance(self, device):
-        # Test for `nn.TripletMarginLossWithDistance` and
-        # `F.triplet_margin_loss_with_distance`.  Checks
-        # for parity against the respective non-distance-agnostic
-        # implementations of triplet margin loss (`nn.TripletMarginLoss`
-        # and `F.triplet_margin_loss`).
+        # Test for parity between `nn.TripletMarginLossWithDistance` and
+        # `F.triplet_margin_loss_with_distance`.
 
         def pairwise_similarity(x, y):
             return 1.0 - F.pairwise_distance(x, y)
         pairwise_distance = nn.PairwiseDistance()
-        distance_functions = ((pairwise_similarity, True), (pairwise_distance, False))
+        def cosine_distance(x, y):
+            return 1.0 - F.cosine_similarity(x, y)
+        cosine_similarity = nn.CosineSimilarity()
+        distance_functions = ((pairwise_similarity, True), (pairwise_distance, False),
+                              (cosine_similarity, True), (cosine_distance, False))
 
-        reductions = ('mean', 'none')
-        margins = (1.0, 1.5)
+        reductions = ('mean', 'none', 'sum')
+        margins = (1.0, 1.5, 0.5)
         swaps = (True, False)
 
         for (distance_fn, is_similarity_fn), reduction, margin, swap \
@@ -12114,27 +12123,29 @@ class TestNNDeviceType(NNTestCase):
             positive = torch.randn(5, 10, device=device, requires_grad=True)
             negative = torch.randn(5, 10, device=device, requires_grad=True)
 
-            # functional: standard gradient check
+            # Test backward
             self.assertTrue(gradcheck(lambda a, p, n: F.triplet_margin_loss_with_distance(
-                a, p, n, distance_function=distance_fn), (anchor, positive, negative)))
-            # functional: parity check
-            self.assertEqual(F.triplet_margin_loss_with_distance(anchor, positive, negative,
-                                                                 distance_function=distance_fn,
-                                                                 is_similarity_function=is_similarity_fn,
-                                                                 reduction=reduction, margin=margin, swap=swap),
-                             F.triplet_margin_loss(anchor, positive, negative,
-                                                   reduction=reduction, margin=margin, swap=swap))
-
-            loss_base = nn.TripletMarginLoss(reduction=reduction, margin=margin, swap=swap)
-            loss_test = nn.TripletMarginLossWithDistance(distance_function=distance_fn,
+                a, p, n, distance_function=distance_fn, is_similarity_function=is_similarity_fn,
+                reduction=reduction, margin=margin, swap=swap),
+                (anchor, positive, negative)))
+            loss_op = nn.TripletMarginLossWithDistance(distance_function=distance_fn,
                                                          is_similarity_function=is_similarity_fn,
                                                          reduction=reduction, margin=margin, swap=swap)
-            # module: standard gradient check
-            self.assertTrue(gradcheck(lambda a, p, n: loss_test(
+            self.assertTrue(gradcheck(lambda a, p, n: loss_op(
                 a, p, n), (anchor, positive, negative)))
-            # module: parity check
-            self.assertEqual(loss_test(anchor, positive, negative),
-                             loss_base(anchor, positive, negative))
+            traced_loss_op = torch.jit.trace(loss_op, (anchor, positive, negative))
+            self.assertTrue(gradcheck(lambda a, p, n: traced_loss_op(
+                a, p, n), (anchor, positive, negative)))
+
+            # Test forward parity
+            functional = F.triplet_margin_loss_with_distance(anchor, positive, negative,
+                                                             distance_function=distance_fn,
+                                                             is_similarity_function=is_similarity_fn,
+                                                             reduction=reduction, margin=margin, swap=swap)
+            modular = loss_op(anchor, positive, negative)
+            traced = traced_loss_op(anchor, positive, negative)
+            self.assertEqual(functional, modular, atol=1e-6, rtol=1e-6)
+            self.assertEqual(traced, modular, atol=1e-6, rtol=1e-6)
 
 
 class TestModuleGlobalHooks(TestCase):

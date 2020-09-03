@@ -1,7 +1,5 @@
 import warnings
 
-import torch
-
 from .distance import PairwiseDistance
 from .module import Module
 from .. import functional as F
@@ -1221,8 +1219,8 @@ class TripletMarginLoss(_Loss):
 
     Shape:
         - Input: :math:`(N, D)` where :math:`D` is the vector dimension.
-        - Output: If :attr:`reduction` is ``'none'``, then a tensor of shape :math:`(N)`,
-            or a scalar otherwise.
+        - Output: A Tensor of shape :math:`(N)` if :attr:`reduction` is ``'none'``, or a scalar
+            otherwise.
 
     >>> triplet_loss = nn.TripletMarginLoss(margin=1.0, p=2)
     >>> anchor = torch.randn(100, 128, requires_grad=True)
@@ -1256,8 +1254,10 @@ class TripletMarginLoss(_Loss):
 class TripletMarginLossWithDistance(_Loss):
     r"""Creates a criterion that measures the triplet loss given input
     tensors :math:`a`, :math:`p`, and :math:`n` (representing anchor,
-    positive, and negative examples, respectively); and a real-valued function
-    between them.
+    positive, and negative examples, respectively); and a nonnegative,
+    real-valued function ("distance function") used to compute the relationship
+    between the anchor and positive examples ("positive distance") and the
+    anchor and negative examples ("negative distance").
 
     The unreduced loss (i.e., with `reduction` set to `'none'`)
     can be described as:
@@ -1266,11 +1266,11 @@ class TripletMarginLossWithDistance(_Loss):
         \ell(a, p, n) = L = \{l_1,\dots,l_N\}^\top, \quad
         l_i = \max \{d(a_i, p_i) - d(a_i, n_i) + {\rm margin}, 0\}
 
-    where :math:`N` is the batch size; :math:`d` is a real-valued function quantifying
-    the separation between two tensors, referred to as `distance_function`;
-    and :math:`margin` is a non-negative margin enforced between the positive and
-    negative distances.  The input tensors have :math:`N` elements each and can be of
-    any shape that the distance function can handle.
+    where :math:`N` is the batch size; :math:`d` is a nonnegative, real-valued function
+    quantifying the relationship between two tensors, referred to as `distance_function`;
+    and :math:`margin` is a non-negative margin between the positive and negative
+    distances that is required for a 0 loss.  The input tensors have :math:`N` elements
+    each and can be of any shape that the distance function can handle.
 
     If :attr:`reduction` is not ``'none'``
     (default ``'mean'``), then:
@@ -1285,18 +1285,21 @@ class TripletMarginLossWithDistance(_Loss):
     See also :class:`~torch.nn.TripletMarginLoss`, which computes the triplet
     loss for input tensors using the :math:`l_p` distance as the distance function.
 
+    Note: does not support JIT scripting.
+
     Args:
-        distance_function (callable, optional): A distance function between two Tensors which,
-            if specified, will be used instead of the pairwise distance. If not specified,
+        distance_function (callable, optional): A nonnegative, real-valued function that
+            quantifies the relationship between two tensors. If not specified,
             `nn.PairwiseDistance` will be used.  Default: ``None``
         is_similarity_function (bool, optional): Whether `distance_function` represents a
-            similarity metric, i.e., larger is closer. If True, computes the difference of
+            similarity metric, i.e., larger values are closer. If True, computes the difference of
             distances as :math:`d(a_i, n_i) - d(a_i, p_i)` so that larger loss values occur
             when the negative example is more similar to the anchor than the positive example
             is. Default: ``False``
-        margin (float, optional): A non-negative margin enforced between the positive and
-            negative distances. Larger margins penalize cases where the negative examples
-            are not distant enough from the anchors, relative to the positives. Default: :math:`1`.
+        margin (float, optional): A non-negative margin representing the minimum difference
+            between the positive and negative distances required for a 0 loss. Larger margins
+            penalize cases where the negative examples are not distant enough from the anchors,
+            relative to the positives. Default: :math:`1`.
         swap (bool, optional): Whether to use the distance swap described in the paper
             `Learning shallow convolutional feature descriptors with triplet losses` by
             V. Balntas, E. Riba et al. If True, and if the positive example is closer to the
@@ -1311,10 +1314,10 @@ class TripletMarginLossWithDistance(_Loss):
     Shape:
         - Input: :math:`(N, *)` where :math:`*` represents any number of additional dimensions
             as supported by the distance function.
-        - Output: If :attr:`reduction` is ``'none'``, then a tensor of shape :math:`(N)`,
-            or a scalar otherwise.
+        - Output: A Tensor of shape :math:`(N)` if :attr:`reduction` is ``'none'``, or a scalar
+            otherwise.
 
-    Example::
+    Examples::
 
     >>> # Initialize embeddings
     >>> embedding = nn.Embedding(1000, 128)
@@ -1361,34 +1364,10 @@ class TripletMarginLossWithDistance(_Loss):
         self.swap = swap
 
     def forward(self, anchor: Tensor, positive: Tensor, negative: Tensor) -> Tensor:
-        if not torch.jit.is_scripting():
-            return F.triplet_margin_loss_with_distance(anchor, positive, negative,
-                                                       distance_function=self.distance_function,
-                                                       is_similarity_function=self.is_similarity_function,
-                                                       margin=self.margin, swap=self.swap, reduction=self.reduction)
-        else:
-            positive_dist = self.distance_function(anchor, positive)
-            negative_dist = self.distance_function(anchor, negative)
-
-            if self.swap:
-                swap_dist = self.distance_function(positive, negative)
-                if self.is_similarity_function:
-                    negative_dist = torch.max(negative_dist, swap_dist)
-                else:
-                    negative_dist = torch.min(negative_dist, swap_dist)
-
-            if self.is_similarity_function:
-                output = torch.clamp(negative_dist - positive_dist + self.margin, min=0.0)
-            else:
-                output = torch.clamp(positive_dist - negative_dist + self.margin, min=0.0)
-            reduction_enum = _Reduction.get_enum(self.reduction)
-
-            if reduction_enum == 1:
-                return output.mean()
-            elif reduction_enum == 2:
-                return output.sum()
-            else:
-                return output
+        return F.triplet_margin_loss_with_distance(anchor, positive, negative,
+                                                   distance_function=self.distance_function,
+                                                   is_similarity_function=self.is_similarity_function,
+                                                   margin=self.margin, swap=self.swap, reduction=self.reduction)
 
 
 class CTCLoss(_Loss):
