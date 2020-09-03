@@ -5,9 +5,10 @@ import warnings
 import os
 import re
 import torch
-from .._jit_internal import List, BroadcastingList1, BroadcastingList2, \
-    BroadcastingList3, Tuple, is_tuple, is_list, Dict, is_dict, Optional, \
+from .._jit_internal import List, Tuple, is_tuple, is_list, Dict, is_dict, Optional, \
     is_optional, _qualified_name, Any, Future, is_future, is_ignored_fn
+from .._jit_internal import BroadcastingList1, BroadcastingList2, BroadcastingList3  # type: ignore
+
 from torch._C import TensorType, TupleType, FloatType, IntType, \
     ListType, StringType, DictType, BoolType, OptionalType, ClassType, InterfaceType, AnyType, NoneType, \
     DeviceObjType, FutureType, EnumType
@@ -16,7 +17,7 @@ from torch._C import TensorType, TupleType, FloatType, IntType, \
 from textwrap import dedent
 from torch._six import builtins
 from torch._utils_internal import get_source_lines_and_file
-
+from typing import Type
 
 if torch.distributed.rpc.is_available():
     from .._jit_internal import RRef, is_rref
@@ -145,7 +146,7 @@ def parse_type_line(type_line, rcb, loc):
     arg_ann_str, ret_ann_str = split_type_line(type_line)
 
     try:
-        arg_ann = eval(arg_ann_str, {}, EvalEnv(rcb))  # noqa: P204
+        arg_ann = eval(arg_ann_str, {}, EvalEnv(rcb))  # type: ignore # noqa: P204
     except (NameError, SyntaxError) as e:
         raise RuntimeError("Failed to parse the argument list of a type annotation") from e
 
@@ -153,7 +154,7 @@ def parse_type_line(type_line, rcb, loc):
         arg_ann = (arg_ann,)
 
     try:
-        ret_ann = eval(ret_ann_str, {}, EvalEnv(rcb))  # noqa: P204
+        ret_ann = eval(ret_ann_str, {}, EvalEnv(rcb))  # type: ignore # noqa: P204
     except (NameError, SyntaxError) as e:
         raise RuntimeError("Failed to parse the return type of a type annotation") from e
 
@@ -255,12 +256,12 @@ def try_real_annotations(fn, loc):
 
 # Finds common type for enum values belonging to an Enum class. If not all
 # values have the same type, AnyType is returned.
-def get_enum_value_type(e: enum.Enum, loc):
-    enum_values = list(e)
+def get_enum_value_type(e: Type[enum.Enum], loc):
+    enum_values: List[enum.Enum] = list(e)
     if not enum_values:
         raise ValueError("No enum values defined for: '{}'".format(e.__class__))
 
-    types = set([type(v.value) for v in enum_values])
+    types = {type(v.value) for v in enum_values}
     ir_types = [try_ann_to_type(t, loc) for t in types]
 
     # If Enum values are of different types, an exception will be raised here.
