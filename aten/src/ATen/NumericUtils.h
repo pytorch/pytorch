@@ -34,7 +34,7 @@ inline C10_HOST_DEVICE bool _isnan(T val) {
 }
 
 template <typename T,
-          typename std::enable_if<c10::is_complex_t<T>::value, int>::type = 0>
+          typename std::enable_if<c10::is_complex<T>::value, int>::type = 0>
 inline bool _isnan(T val) {
   return std::isnan(val.real()) || std::isnan(val.imag());
 }

@@ -42,6 +42,7 @@ def libtorch_generated_sources(gencode_pattern):
     ]] + [
         "torch/csrc/autograd/TraceTypeManual.cpp",
         "torch/csrc/autograd/VariableTypeManual.cpp",
+        "torch/csrc/autograd/FunctionsManual.cpp",
     ]
 
 # copied from https://github.com/pytorch/pytorch/blob/master/aten/src/ATen/core/CMakeLists.txt
@@ -162,6 +163,7 @@ core_sources_full = [
     "torch/csrc/jit/passes/constant_propagation.cpp",
     "torch/csrc/jit/passes/create_autodiff_subgraphs.cpp",
     "torch/csrc/jit/passes/dead_code_elimination.cpp",
+    "torch/csrc/jit/passes/remove_redundant_profiles.cpp",
     "torch/csrc/jit/passes/decompose_ops.cpp",
     "torch/csrc/jit/passes/erase_number_types.cpp",
     "torch/csrc/jit/passes/fixup_trace_scope_blocks.cpp",
@@ -196,6 +198,7 @@ core_sources_full = [
     "torch/csrc/jit/passes/requires_grad_analysis.cpp",
     "torch/csrc/jit/passes/shape_analysis.cpp",
     "torch/csrc/jit/passes/specialize_autogradzero.cpp",
+    "torch/csrc/jit/passes/update_differentiable_graph_requires_grad.cpp",
     "torch/csrc/jit/passes/subgraph_rewrite.cpp",
     "torch/csrc/jit/passes/tensorexpr_fuser.cpp",
     "torch/csrc/jit/passes/utils/memory_dag.cpp",
@@ -311,6 +314,7 @@ libtorch_cmake_sources = libtorch_core_sources + libtorch_core_jit_sources
 libtorch_extra_sources = libtorch_core_jit_sources + [
     "torch/csrc/autograd/TraceTypeManual.cpp",
     "torch/csrc/autograd/VariableTypeManual.cpp",
+    "torch/csrc/autograd/FunctionsManual.cpp",
     "torch/csrc/jit/api/module_save.cpp",
     "torch/csrc/jit/codegen/fuser/cpu/fused_kernel.cpp",
     "torch/csrc/jit/mobile/export_data.cpp",
