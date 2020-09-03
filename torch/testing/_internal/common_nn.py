@@ -4572,10 +4572,10 @@ class NNTestCase(TestCase):
                 PRECISION
             )
 
-    def check_criterion_jacobian(self, criterion, input, target):
+    def check_criterion_jacobian(self, criterion, input, target, extra_args):
         eps = 1e-6
-        self._forward_criterion(criterion, input, target)
-        analytical_d_x = self._backward_criterion(criterion, input, target)
+        self._forward_criterion(criterion, input, target, extra_args=extra_args)
+        analytical_d_x = self._backward_criterion(criterion, input, target, extra_args=extra_args)
         numerical_d_x = deepcopy(analytical_d_x)
 
         input_t = iter_tensors(input)
@@ -4586,9 +4586,9 @@ class NNTestCase(TestCase):
             for i in range(x.nelement()):
                 original = x[i].item()
                 x[i] = original + eps
-                fx1 = self._forward_criterion(criterion, input, target)
+                fx1 = self._forward_criterion(criterion, input, target, extra_args=extra_args)
                 x[i] = original - eps
-                fx2 = self._forward_criterion(criterion, input, target)
+                fx2 = self._forward_criterion(criterion, input, target, extra_args=extra_args)
                 deriv = (fx1 - fx2) / (2. * eps)
                 d_x[i] = float(deriv)
                 x[i] = original
@@ -4891,7 +4891,7 @@ class CriterionTest(TestBase):
         if self.check_forward_only:
             return
 
-        test_case.check_criterion_jacobian(module, input, target)
+        test_case.check_criterion_jacobian(module, input, target, extra_args=self.extra_args)
         self._do_extra_tests(test_case, module, input, target)
 
 
