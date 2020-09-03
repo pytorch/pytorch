@@ -5,14 +5,14 @@ from torch._utils import _accumulate
 from torch import randperm
 # No 'default_generator' in torch/__init__.pyi
 from torch import default_generator  # type: ignore
-from typing import TypeVar, Generic, Iterable, Iterator, Sequence, List, Optional, Tuple
+from typing import TypeVar, Generic, Iterable, Iterator, Sequence, List, Optional, Tuple, Sized
 from ... import Tensor, Generator
 
 T_co = TypeVar('T_co', covariant=True)
 T = TypeVar('T')
 
 
-class Dataset(Generic[T_co]):
+class Dataset(Generic[T_co], Sized):
     r"""An abstract class representing a :class:`Dataset`.
 
     All datasets that represent a map from keys to data samples should subclass
