@@ -2897,6 +2897,26 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.randn(1, 2, 3)
         self.run_test(Size(), (x, y))
 
+        class Array(torch.nn.Module):
+            def forward(self, x, y):
+                arr1 = [x.shape[0], x.shape[1], 2]
+                arr2 = [y.shape[0], y.shape[1]]
+                return x.new_zeros(arr1 + arr2)
+
+        x = torch.randn(2, 3, 4)
+        y = torch.randn(1, 2, 3)
+        self.run_test(Array(), (x, y))
+
+        class List(torch.nn.Module):
+            def forward(self, x, y):
+                l1 = list(x.shape)
+                l2 = list(y.shape)
+                return x.new_zeros(l1 + l2)
+
+        x = torch.randn(2, 3, 4)
+        y = torch.randn(1, 2, 3)
+        self.run_test(List(), (x, y))   
+
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_inplace_fill(self):
         class Fill_(torch.nn.Module):
