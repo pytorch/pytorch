@@ -2748,7 +2748,9 @@
   - name: aten::is_floating_point
   - name: aten::is_leaf
   - name: aten::is_nonzero
+  - name: aten::matmul
   - name: aten::mul_
+  - name: aten::permute
   - name: aten::resize_
   - name: aten::select
   - name: aten::size
@@ -2756,6 +2758,7 @@
   - name: aten::to
   - name: aten::transpose
   - name: aten::transpose_
+  - name: aten::view
   - name: aten::zero_
 - name: aten::broadcast_tensors
   depends:
@@ -2812,10 +2815,12 @@
   - name: aten::max
   - name: aten::min
   - name: aten::narrow
+  - name: aten::permute
   - name: aten::select
   - name: aten::size
   - name: aten::sparse_dim
   - name: aten::to
+  - name: aten::view
   - name: aten::zero_
 - name: aten::cauchy_
   depends:
@@ -3636,13 +3641,19 @@
   - name: aten::dot
   - name: aten::empty
   - name: aten::eq
+  - name: aten::expand
   - name: aten::fill_
   - name: aten::is_floating_point
   - name: aten::is_leaf
   - name: aten::is_nonzero
+  - name: aten::matmul
+  - name: aten::permute
   - name: aten::resize_
+  - name: aten::squeeze
   - name: aten::stride
   - name: aten::to
+  - name: aten::unsqueeze
+  - name: aten::view
 - name: aten::dropout
   depends:
   - name: aten::_fused_dropout
@@ -6229,9 +6240,13 @@
   - name: aten::unsqueeze_
 - name: aten::max_pool1d
   depends:
+  - name: aten::contiguous
+  - name: aten::empty
   - name: aten::eq
   - name: aten::is_nonzero
   - name: aten::max_pool1d_with_indices
+  - name: aten::size
+  - name: aten::squeeze_
 - name: aten::max_pool1d_with_indices
   depends:
   - name: aten::eq
@@ -6538,10 +6553,14 @@
   - name: aten::is_floating_point
   - name: aten::is_leaf
   - name: aten::is_nonzero
+  - name: aten::matmul
   - name: aten::mm
+  - name: aten::permute
+  - name: aten::squeeze
   - name: aten::to
   - name: aten::transpose
   - name: aten::transpose_
+  - name: aten::view
 - name: aten::mode
   depends:
   - name: aten::_mode
@@ -6713,7 +6732,9 @@
   - name: aten::is_floating_point
   - name: aten::is_leaf
   - name: aten::is_nonzero
+  - name: aten::matmul
   - name: aten::mv
+  - name: aten::permute
   - name: aten::q_scale
   - name: aten::q_zero_point
   - name: aten::qscheme
@@ -6721,8 +6742,11 @@
   - name: aten::resize_as_
   - name: aten::set_quantizer_
   - name: aten::size
+  - name: aten::squeeze
   - name: aten::stride
   - name: aten::to
+  - name: aten::unsqueeze
+  - name: aten::view
   - name: aten::zero_
 - name: aten::mvlgamma
   depends:
@@ -8945,12 +8969,15 @@
   depends:
   - name: aten::cat
   - name: aten::eq
+  - name: aten::expand
   - name: aten::is_floating_point
   - name: aten::is_leaf
   - name: aten::is_nonzero
+  - name: aten::permute
   - name: aten::stack
   - name: aten::to
   - name: aten::unsqueeze
+  - name: aten::view
 - name: aten::startswith
   depends:
   - name: aten::eq

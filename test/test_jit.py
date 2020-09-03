@@ -15196,7 +15196,7 @@ a")
 
     def test_rescripting_loaded_modules(self):
         class InnerSubmod(nn.Module):
-            my_constant: torch.jit.Final[int]
+            __constants__ = ['my_constant']
 
             def __init__(self):
                 super().__init__()
