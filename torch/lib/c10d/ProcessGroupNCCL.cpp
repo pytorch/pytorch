@@ -246,8 +246,7 @@ ProcessGroupNCCL::WorkNCCL::~WorkNCCL() {}
 
 bool ProcessGroupNCCL::WorkNCCL::isCompleted() {
   checkAndSetException();
-  bool result = exception() || finishedGPUExecutionInternal();
-  return result;
+  return exception() || finishedGPUExecutionInternal();
 }
 
 bool ProcessGroupNCCL::WorkNCCL::isSuccess() const {
@@ -781,11 +780,6 @@ std::vector<at::Tensor> flatten_for_scatter_gather(
 std::shared_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
     std::vector<at::Device> devices) {
   return std::make_shared<ProcessGroupNCCL::WorkNCCL>(devices);
-}
-
-std::vector<at::Tensor> ProcessGroupNCCL::WorkNCCL::result() {
-  TORCH_CHECK(isCompleted());
-  return *outputs_;
 }
 
 c10::intrusive_ptr<c10::ivalue::Future> ProcessGroupNCCL::WorkNCCL::
