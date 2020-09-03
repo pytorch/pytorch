@@ -16342,6 +16342,9 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @dtypes(torch.bfloat16, torch.float, torch.double, torch.cfloat, torch.cdouble)
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_addmv(self, device, dtype):
+        # have to use torch.randn(...).to(bfloat16) instead of
+        # torch.randn(..., dtype=bfloat16). randn does not support
+        # bfloat16 yet.
         t = torch.randn(10, device=device).to(dtype)
         m = torch.randn(10, 100, device=device).to(dtype)
         v = torch.randn(100, device=device).to(dtype)
@@ -16415,15 +16418,14 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
         # Test transpose
         for t1, t2, t3, t4 in product([True, False], repeat=4):
-            M = torch.randn(10, 25, device=device).to(dtype)
-            m1 = torch.randn(10, 50, device=device).to(dtype)
-            m2 = torch.randn(50, 25, device=device).to(dtype)
-            if t1:
-                M = M.t().clone(memory_format=torch.contiguous_format).t()
-            if t2:
-                m1 = m1.t().clone(memory_format=torch.contiguous_format).t()
-            if t3:
-                m2 = m2.t().clone(memory_format=torch.contiguous_format).t()
+            def maybe_transpose(cond, m):
+                if not cond:
+                    return m
+                return m.t().clone(memory_format=torch.contiguous_format).t()
+
+            M = maybe_transpose(t1, torch.randn(10, 25, device=device).to(dtype))
+            m1 = maybe_transpose(t2, torch.randn(10, 50, device=device).to(dtype))
+            m2 = maybe_transpose(t3, torch.randn(50, 25, device=device).to(dtype))
             self._test_addmm_addmv(torch.addmm, M, m1, m2, transpose_out=t4)
 
     @dtypes(torch.float, torch.double)
