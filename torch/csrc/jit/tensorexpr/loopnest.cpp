@@ -958,7 +958,8 @@ void LoopNest::sliceHead(For* f, int factor, For** head, For** tail) {
   *head = new For(f->var(), f->start(), head_end, Stmt::clone(f->body()));
   *tail = new For(
       f->var(), head_end, f->stop(), Stmt::clone(f->body()), f->loop_options());
-  if (f->loop_options().is_gpu_block_index() || f->loop_options().is_gpu_thread_index()) {
+  if (f->loop_options().is_gpu_block_index() ||
+      f->loop_options().is_gpu_thread_index()) {
     LoopNest::normalize(*tail, tail, false);
   }
 
@@ -998,7 +999,8 @@ void LoopNest::sliceTail(For* f, int factor, For** head, For** tail) {
       tail_start,
       Stmt::clone(f->body()),
       f->loop_options());
-  if (f->loop_options().is_gpu_block_index() || f->loop_options().is_gpu_thread_index()) {
+  if (f->loop_options().is_gpu_block_index() ||
+      f->loop_options().is_gpu_thread_index()) {
     LoopNest::normalize(*head, head, false);
   }
   *tail = new For(f->var(), tail_start, f->stop(), Stmt::clone(f->body()));
