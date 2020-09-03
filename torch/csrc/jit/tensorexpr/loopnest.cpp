@@ -992,7 +992,7 @@ void LoopNest::sliceTail(For* f, int factor, For** head, For** tail) {
   }
 
   const Expr* tail_start =
-      new Max(new IntImm(0), new Sub(f->stop(), new IntImm(factor)));
+      new Max(new IntImm(0), new Sub(f->stop(), new IntImm(factor)), true);
   *head = new For(
       f->var(),
       f->start(),
