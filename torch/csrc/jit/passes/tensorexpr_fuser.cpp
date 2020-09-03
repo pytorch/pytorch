@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <ATen/record_function.h>
+#include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
@@ -466,6 +467,34 @@ class TensorExprFuser {
     return true;
   }
 
+  bool canFuseOnDevice(Value* v) {
+    auto type = v->type()->cast<TensorType>();
+    if (!type) {
+      return true;
+    }
+    auto device = type->device();
+    if (!device) {
+      return false;
+    }
+    if (device->is_cpu()) {
+      return canFuseOnCPU();
+    } else if (device->is_cuda()) {
+      return canFuseOnGPU();
+    }
+    throw std::runtime_error("Unknown device");
+  }
+
+  bool isFusableOnDevice(Node* node) {
+    for (const auto& output : node->outputs()) {
+      if (output->uses().size() > 0) {
+        if (!canFuseOnDevice(output)) {
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+
   bool canHandle(Node* node) {
     if (node->kind() == prim::Constant) {
       // TODO: add support for tensor constants.
@@ -500,7 +529,7 @@ class TensorExprFuser {
     // Symbolic checks
     REQ(canHandle(producer));
     TORCH_INTERNAL_ASSERT(
-        canHandle(consumer) || consumer->kind() == prim::TensorExprGroup);
+        consumer->kind() == prim::TensorExprGroup || canHandle(consumer));
 
     // Alias checks
     REQ(aliasDb_->couldMoveBeforeTopologically(producer, consumer));
@@ -530,10 +559,20 @@ class TensorExprFuser {
       REQ(producer->input(0)->node()->kind() == prim::ListConstruct);
       REQ(producer->input(0)->uses().size() == 1);
       REQ(producer->input(1)->node()->kind() == prim::Constant);
+      auto const& listConstruct = producer->input(0)->node();
+      for (auto const& input : listConstruct->inputs()) {
+        REQ(isFusableOnDevice(input->node()));
+      }
     } else if (consumer->kind() == aten::cat) {
       REQ(consumer->input(0)->node()->kind() == prim::ListConstruct);
       REQ(consumer->input(0)->uses().size() == 1);
       REQ(consumer->input(1)->node()->kind() == prim::Constant);
+      auto const& listConstruct = consumer->input(0)->node();
+      for (auto const& input : listConstruct->inputs()) {
+        REQ(isFusableOnDevice(input->node()));
+      }
+    } else {
+      REQ(isFusableOnDevice(producer));
     }
 
     return true;
