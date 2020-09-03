@@ -289,7 +289,7 @@ These built-in functions use the schema
 ::
 
 {}
-    """.format(schemaless_ops, magic_methods_rows, schematized_ops)
+    """.format(schemaless_ops_str, magic_methods_rows_str, schematized_ops_str)
 
     return "Python Built-in Functions", section
 
