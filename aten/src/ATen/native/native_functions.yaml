@@ -5575,7 +5575,7 @@
   use_c10_dispatcher: full
   variants: function
   dispatch:
-    CPU: _min_max
+    CPU, CUDA: _min_max
 
 - func: median(Tensor self) -> Tensor
   use_c10_dispatcher: full
