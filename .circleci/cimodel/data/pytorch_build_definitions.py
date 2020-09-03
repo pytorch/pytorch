@@ -191,7 +191,7 @@ def gen_dependent_configs(xenial_parent_config):
             restrict_phases=["test"],
             gpu_resource=gpu,
             parent_build=xenial_parent_config,
-            is_important=xenial_parent_config.is_important,
+            is_important=False,
         )
 
         configs.append(c)
@@ -353,7 +353,7 @@ def instantiate_configs():
         ):
             c.dependent_tests = gen_docs_configs(c)
 
-        if cuda_version == "10.1" and python_version == "3.6" and not is_libtorch:
+        if cuda_version == "10.2" and python_version == "3.6" and not is_libtorch:
             c.dependent_tests = gen_dependent_configs(c)
 
         if (
