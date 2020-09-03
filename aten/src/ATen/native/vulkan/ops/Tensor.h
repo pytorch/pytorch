@@ -107,10 +107,28 @@ class vTensor final {
   api::Context* context_;
   c10::SmallVector<int64_t, 4u> sizes_;
   TensorOptions options_;
+
+  struct {
+    uint32_t image : 1u;
+    uint32_t buffer : 1u;
+    uint32_t staging : 1u;
+  } dirty;
 };
 
 using vTensorImpl = VulkanOpaqueTensorImpl<vTensor>;
 void verify(const TensorOptions& options);
+
+//
+// Impl
+//
+
+// template<typename Type, typename Pointer>
+// api::Resource::Memory::Data<Pointer> vTensor::host() const {
+// }
+
+// template<typename Type, typename Pointer>
+// api::Resource::Memory::Data<Pointer> vTensor::host() {
+// }
 
 } // namespace ops
 } // namespace vulkan

@@ -69,7 +69,8 @@ api::Resource::Buffer allocate_buffer(
             std::multiplies<int64_t>()),
         // Usage
         {
-          VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+          VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
             (context->adapter().is_unified_memory_architecture() ?
                 0u :
                 VK_BUFFER_USAGE_TRANSFER_DST_BIT),
@@ -82,10 +83,7 @@ api::Resource::Buffer maybe_allocate_buffer(
     api::Context* const context,
     const IntArrayRef sizes,
     const TensorOptions& options) {
-  if (sizes.size() <= 4u) {
-    return api::Resource::Buffer{};
-  }
-
+  // Always need a buffer.
   return allocate_buffer(context, sizes, options);
 }
 
@@ -127,12 +125,10 @@ api::Resource::Image allocate_image(
           "Only Tensors with 1 <= dim <= 4 can be represented as a Vulkan Image!");
   }
 
-  const VkFormat format = convert(options.dtype());
-
   return context->resource().pool.allocate(
       api::Resource::Image::Descriptor{
         VK_IMAGE_TYPE_3D,
-        format,
+        convert(options.dtype()),
         {
           width,
           height,
@@ -148,7 +144,7 @@ api::Resource::Image allocate_image(
         // View
         {
           VK_IMAGE_VIEW_TYPE_3D,
-          format,
+          convert(options.dtype()),
         },
       });
 }
@@ -166,17 +162,26 @@ api::Resource::Image maybe_allocate_image(
 
 } // namespace
 
-// vTensor::vTensor()
-//   : buffer_{},
-//     image_{} {
-// }
+vTensor::vTensor()
+  : image_{},
+    buffer_{},
+    staging_{},
+    context_{},
+    dirty{} {
+}
 
-// vTensor::vTensor(const IntArrayRef sizes, const TensorOptions& options)
-//   : sizes_(sizes.cbegin(), sizes.cend()),
-//     options_(options),
-//     buffer_(maybe_allocate_buffer(sizes, options)),
-//     image_(maybe_allocate_image(sizes, options)) {
-// }
+vTensor::vTensor(
+    api::Context* const context,
+    const IntArrayRef sizes,
+    const TensorOptions& options)
+  : image_(maybe_allocate_image(context, sizes, options)),
+    buffer_(maybe_allocate_buffer(context, sizes, options)),
+    staging_(maybe_allocate_staging(context, sizes, options)),
+    context_(context),
+    sizes_(sizes.cbegin(), sizes.cend()),
+    options_(options),
+    dirty{} {
+}
 
 void verify(const TensorOptions& options) {
   TORCH_CHECK(
