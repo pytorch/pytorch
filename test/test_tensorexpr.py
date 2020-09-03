@@ -15,8 +15,8 @@ class BaseTestClass(unittest.TestCase):
 
         self.old_cpu_fuser_state = torch._C._jit_can_fuse_on_cpu()
         self.old_gpu_fuser_state = torch._C._jit_can_fuse_on_gpu()
-        torch._C._jit_override_can_fuse_on_cpu(False)
-        torch._C._jit_override_can_fuse_on_gpu(False)
+        torch._C._jit_override_can_fuse_on_cpu(True)
+        torch._C._jit_override_can_fuse_on_gpu(True)
         self.texpr_fuser_state = torch._C._jit_texpr_fuser_enabled()
         torch._C._jit_set_texpr_fuser_enabled(True)
 
@@ -874,11 +874,10 @@ class TestTensorExprFuser(BaseTestClass):
             test_lgamma,
             test_reciprocal,
             test_neg,
-            # TODO: properly handle NaNs in Max/Min and reenable these tests:
-            # test_threshold,
-            # test_relu,
-            # test_tanh,
-            # test_sigmoid,
+            test_threshold,
+            test_relu,
+            test_tanh,
+            test_sigmoid,
         }
         device_options = ["cpu", "cuda"] if torch.cuda.is_available() else ['cpu']
 
@@ -939,9 +938,9 @@ class TestTensorExprFuser(BaseTestClass):
         x = torch.tensor([np.nan])
         y = torch.tensor([1.0])
 
-        assert not np.isnan(tmin(x, y).item())
+        assert np.isnan(tmin(x, y).item())
         assert np.isnan(tmin(y, x).item())
-        assert not np.isnan(tmax(x, y).item())
+        assert np.isnan(tmax(x, y).item())
         assert np.isnan(tmax(y, x).item())
 
 
@@ -1280,6 +1279,26 @@ class TestTensorExprFuser(BaseTestClass):
             scripted = torch.jit.script(test)
             scripted(x)
             assert torch.equal(scripted(x), test(x))
+
+    def test_simple_add(self):
+        val = torch._C._jit_get_te_generate_block_code()
+        torch._C._jit_set_te_generate_block_code(True)
+        fall_bk = torch._C._jit_texpr_fallback_allowed()
+        torch._C._jit_texpr_set_fallback_allowed(True)
+
+        def simple(a, b):
+            return torch.add(a, b)
+
+        a = torch.ones(256, 256)
+        b = torch.ones(256, 256)
+        traced = torch.jit.trace(simple,
+                                 (torch.ones(256, 256), torch.ones(256, 256)))
+        f = traced(a, b)
+        f_test = np.full((256, 256), 2, dtype=float)
+        np.testing.assert_allclose(f.numpy(), f_test)
+        torch._C._jit_set_te_generate_block_code(val)
+        torch._C._jit_texpr_set_fallback_allowed(fall_bk)
+
 
 if __name__ == '__main__':
     unittest.main()

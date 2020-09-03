@@ -1,4 +1,5 @@
 #include <test/cpp/tensorexpr/test_base.h>
+#include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
@@ -11,7 +12,20 @@ namespace jit {
 
 using namespace torch::jit::tensorexpr;
 
+struct WithCPUFuser {
+  WithCPUFuser() : cpuFuserEnabled(canFuseOnCPU()) {
+    overrideCanFuseOnCPU(true);
+  }
+
+  ~WithCPUFuser() {
+    overrideCanFuseOnCPU(cpuFuserEnabled);
+  }
+
+  bool cpuFuserEnabled;
+};
+
 void testFuserPass_1() {
+  WithCPUFuser cf;
   KernelScope kernel_scope;
   const auto graph_string = R"IR(
     graph(%0 : Float(128:1, device=cpu),
@@ -31,13 +45,14 @@ void testFuserPass_1() {
 
   // We should not be able to fuse across the in-place operation here.
   testing::FileCheck()
-      .check("tensorexpr::Group_0")
+      .check("prim::TensorExprGroup_0")
       ->check("aten::add_")
-      ->check("tensorexpr::Group_1")
+      ->check("prim::TensorExprGroup_1")
       ->run(*g);
 }
 
 void testFuserPass_2() {
+  WithCPUFuser cf;
   KernelScope kernel_scope;
   const auto graph_string = R"IR(
     graph(%0 : Float(128:1, device=cpu),
@@ -57,11 +72,12 @@ void testFuserPass_2() {
   // We should not be able to fuse across the in-place operation here.
   testing::FileCheck()
       .check("aten::add_")
-      ->check("tensorexpr::Group_0")
+      ->check("prim::TensorExprGroup_0")
       ->run(*g);
 }
 
 void testFuserPass_3() {
+  WithCPUFuser cf;
   KernelScope kernel_scope;
   const auto graph_string = R"IR(
     graph(%x : Float(128:1, device=cpu),
@@ -76,7 +92,7 @@ void testFuserPass_3() {
     FuseTensorExprs(g, /* min_group_size= */ 2);
 
     // We should not create a fusion group since its size would be too small
-    testing::FileCheck().check_not("tensorexpr::Group")->run(*g);
+    testing::FileCheck().check_not("prim::TensorExprGroup")->run(*g);
   }
   {
     auto g = std::make_shared<Graph>();
@@ -86,7 +102,7 @@ void testFuserPass_3() {
     FuseTensorExprs(g, /* min_group_size= */ 1);
 
     // We should create a fusion group since its size is above the threshold
-    testing::FileCheck().check("tensorexpr::Group")->run(*g);
+    testing::FileCheck().check("prim::TensorExprGroup")->run(*g);
   }
 }
 } // namespace jit

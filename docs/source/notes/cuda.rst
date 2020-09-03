@@ -68,14 +68,19 @@ TF32 tensor cores are designed to achieve better performance on matmul and convo
 `torch.float32` tensors by truncating input data to have 10 bits of mantissa, and accumulating
 results with FP32 precision, maintaining FP32 dynamic range.
 
-matmul and convolutions are controlled separately, and their corresponding flag can be accessed at:
+matmuls and convolutions are controlled separately, and their corresponding flags can be accessed at:
 
 .. code:: python
 
   # The flag below controls whether to allow TF32 on matmul. This flag defaults to True.
   torch.backends.cuda.matmul.allow_tf32 = True
 
-  # The allow_tf32 flag for convolutions is not implemented yet
+  # The flag below controls whether to allow TF32 on cuDNN. This flag defaults to True.
+  torch.backends.cudnn.allow_tf32 = True
+
+Note that besides matmuls and convolutions themselves, functions and nn modules that internally uses
+matmuls or convolutions are also affected. These include `nn.Linear`, `nn.Conv*`, cdist, tensordot,
+affine grid and grid sample, adaptive log softmax, GRU and LSTM.
 
 To get an idea of the precision and speed, see the example code below:
 
@@ -107,7 +112,7 @@ is needed, users can disable TF32 by:
 .. code:: python
 
   torch.backends.cuda.matmul.allow_tf32 = False
-  # disabling of TF32 for cuDNN is not implemented yet
+  torch.backends.cudnn.allow_tf32 = False
 
 For more information about TF32, see:
 
