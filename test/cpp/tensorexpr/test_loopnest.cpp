@@ -151,6 +151,44 @@ void assertForRanges(
   }
 }
 
+void testExprSliceHeadWithLoopOptions() {
+  KernelScope kernel_scope;
+  auto func = [](const ExprHandle& x) {
+    return ExprHandle(1.0f) + cast<float>(x);
+  };
+  Tensor* tensor = Compute("f", {{10, "x"}}, func);
+  LoopNest l({tensor});
+  For* head;
+  For* tail;
+  std::vector<For*> loops = l.getLoopStmtsFor(tensor);
+  l.setGPUBlockIndex(loops[0], LoopOptions::IDX_Y);
+  l.sliceHead(loops[0], 2, &head, &tail);
+
+  ASSERT_TRUE(tail->loop_options().is_gpu_block_index());
+  ASSERT_EQ(tail->loop_options().gpu_block_index(), LoopOptions::IDX_Y);
+
+  ASSERT_TRUE(head->loop_options().isDefault());
+}
+
+void testExprSliceTailWithLoopOptions() {
+  KernelScope kernel_scope;
+  auto func = [](const ExprHandle& x) {
+    return ExprHandle(1.0f) + cast<float>(x);
+  };
+  Tensor* tensor = Compute("f", {{10, "x"}}, func);
+  LoopNest l({tensor});
+  For* head;
+  For* tail;
+  std::vector<For*> loops = l.getLoopStmtsFor(tensor);
+  l.setGPUBlockIndex(loops[0], LoopOptions::IDX_Y);
+  l.sliceTail(loops[0], 2, &head, &tail);
+
+  ASSERT_TRUE(head->loop_options().is_gpu_block_index());
+  ASSERT_EQ(head->loop_options().gpu_block_index(), LoopOptions::IDX_Y);
+
+  ASSERT_TRUE(tail->loop_options().isDefault());
+}
+
 void testExprSliceHeadWhenFactorEqualsSize() {
   // When factor equals the For loop's original size, keep using the original
   // For loop.

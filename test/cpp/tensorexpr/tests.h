@@ -43,10 +43,12 @@ namespace jit {
   _(ExprSliceHead)                          \
   _(ExprSliceHeadWhenFactorEqualsSize)      \
   _(ExprSliceHeadWhenFactorLargerThanSize)  \
+  _(ExprSliceHeadWithLoopOptions)           \
   _(ExprSliceHeadWithNonZeroStart)          \
   _(ExprSliceTail)                          \
   _(ExprSliceTailWhenFactorEqualsSize)      \
   _(ExprSliceTailWhenFactorLargerThanSize)  \
+  _(ExprSliceTailWithLoopOptions)           \
   _(ExprSliceAndNormalize)                  \
   _(ExprSliceWithVariableDimension)         \
   _(ExprSplitAndSlice)                      \
