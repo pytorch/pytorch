@@ -108,4 +108,48 @@ class Test(torch.jit.ScriptModule):
         # type: (str) -> str
         return input + input + input
 
+    @torch.jit.script_method
+    def newEmptyShapeWithItem(self, input):
+        return torch.tensor([int(input.item())])[0]
+
+    @torch.jit.script_method
+    def testAliasWithOffset(self):
+        # type: () -> List[Tensor]
+        x = torch.tensor([100, 200])
+        a = [x[0], x[1]]
+        return a
+
+    @torch.jit.script_method
+    def testNonContiguous(self):
+        x = torch.tensor([100, 200, 300])[::2]
+        assert not x.is_contiguous()
+        assert x[0] == 100
+        assert x[1] == 300
+        return x
+
+    @torch.jit.script_method
+    def conv2d(self, x, w, toChannelsLast):
+        # type: (Tensor, Tensor, bool) -> Tensor
+        r = torch.nn.functional.conv2d(x, w)
+        if (toChannelsLast):
+            r = r.contiguous(memory_format=torch.channels_last)
+        else:
+            r = r.contiguous()
+        return r
+
+    @torch.jit.script_method
+    def contiguous(self, x):
+        # type: (Tensor) -> Tensor
+        return x.contiguous()
+
+    @torch.jit.script_method
+    def contiguousChannelsLast(self, x):
+        # type: (Tensor) -> Tensor
+        return x.contiguous(memory_format=torch.channels_last)
+
+    @torch.jit.script_method
+    def contiguousChannelsLast3d(self, x):
+        # type: (Tensor) -> Tensor
+        return x.contiguous(memory_format=torch.channels_last_3d)
+
 scriptAndSave(Test(), "test.pt")
