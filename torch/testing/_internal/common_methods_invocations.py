@@ -391,6 +391,7 @@ def method_tests():
         ('__rsub__', (S, S, S), (3.14,), 'constant', (True, 'aten::rsub')),
         ('__rsub__', (), (3.14,), 'scalar_constant', (True, 'aten::rsub')),
         ('mul', (S, S, S), ((S, S, S),), '', (True,)),
+        ('mul', (S, S, S), (torch.randn(S, S, S, dtype=torch.cdouble),), 'c_rhs', (True,)),
         ('mul', (), ((),), 'scalar', (True,)),
         ('mul', (S, S, S), ((S, S),), 'broadcast_rhs', (True,)),
         ('mul', (S, S), ((S, S, S),), 'broadcast_lhs', (True,)),
@@ -399,6 +400,9 @@ def method_tests():
         ('mul', (), ((S, S, S),), 'scalar_broadcast_lhs', (True,)),
         ('mul', (S, S, S), (3.14,), 'constant', (True,)),
         ('mul', (), (3.14,), 'scalar_constant', (True,)),
+        # TODO: enable these tests @anjali411
+        # ('mul', (S, S, S), (3.14j,), 'imaginary_constant', (True,)),
+        # ('mul', (), (3.14j,), 'imaginary_scalar_constant', (True,)),
         ('__rmul__', (S, S, S), (3.14,), 'constant', (True, 'aten::mul')),
         ('__rmul__', (), (3.14,), 'scalar_constant', (True, 'aten::mul')),
         ('div', (S, S, S), (torch.rand(S, S, S) + 0.1,), '', (True,)),

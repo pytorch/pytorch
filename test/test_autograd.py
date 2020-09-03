@@ -4660,7 +4660,7 @@ complex_list = ['t', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone'
                 'repeat', 'expand', 'flip', 'fliplr', 'flipud', 'rot90', 'transpose',
                 'permute', 'squeeze', 'unsqueeze', 'resize', 'resize_as', 'tril', 'triu',
                 'chunk', 'split', 'split_with_sizes', 'repeat', 'expand', 'zero_', 'round',
-                'eq_', 'ne_', 'add', '__radd__', 'sum', 'conj'] + separate_complex_tests
+                'eq_', 'ne_', 'add', '__radd__', 'sum', 'conj', 'sin', 'cos', 'mul', 'sinh', 'cosh'] + separate_complex_tests
 
 # TODO: add the commented tests back after updating the formula based on tensorflow definition - @anjali411
 # complex_list += ['fill_', 'sin', 'cos', '__rmul__', '__rdiv__', 'mul', 'tanh']

@@ -341,10 +341,10 @@
   self: grad.conj()
 
 - name: cos(Tensor self) -> Tensor
-  self: grad * -self.sin()
+  self: grad * -self.sin().conj()
 
 - name: cosh(Tensor self) -> Tensor
-  self: grad * self.sinh()
+  self: grad * self.sinh().conj()
 
 - name: count_nonzero.dim_IntList(Tensor self, int[] dim) -> Tensor
   self: not_implemented("count_nonzero")
@@ -733,11 +733,11 @@
   self: index_select_backward(grad, dim, indices, self.sizes(), keepdim)
 
 - name: mul.Tensor(Tensor self, Tensor other) -> Tensor
-  self: grad * other
-  other: grad * self
+  self: grad * other.conj()
+  other: grad * self.conj()
 
 - name: mul.Scalar(Tensor self, Scalar other) -> Tensor
-  self: grad * other
+  self: mul_scalar_backward(self, grad, other)
 
 - name: mv(Tensor self, Tensor vec) -> Tensor
   self: grad.ger(vec)
@@ -926,10 +926,10 @@
   self: zeros_like(grad, at::MemoryFormat::Preserve)
 
 - name: sin(Tensor self) -> Tensor
-  self: grad * self.cos()
+  self: grad * self.cos().conj()
 
 - name: sinh(Tensor self) -> Tensor
-  self: grad * self.cosh()
+  self: grad * self.cosh().conj()
 
 - name: slice.Tensor(Tensor(a) self, int dim=0, int start=0, int end=9223372036854775807, int step=1) -> Tensor(a)
   self: slice_backward(grad, self.sizes(), dim, start, end, step)

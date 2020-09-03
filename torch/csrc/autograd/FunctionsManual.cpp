@@ -211,6 +211,18 @@ Tensor mvlgamma_backward(Tensor grad, const Tensor & self, int64_t p) {
   return grad * args.digamma_().sum(-1);
 }
 
+Tensor mul_scalar_backward(Tensor grad, Tensor self, Scalar other) {
+  auto scalar_as_tensor = at::scalar_to_tensor(other);
+  auto result = grad * scalar_as_tensor.conj();
+  // only real valued gradient should be propagated for real tensors
+  if (!self.is_complex() && result.is_complex()) {
+    // R -> C
+    result = at::real(result);
+  }
+
+  return result;
+}
+
 Tensor permute_backwards(const Tensor & grad, IntArrayRef fwd_dims) {
   // invert the permutation
   auto ndims = fwd_dims.size();
