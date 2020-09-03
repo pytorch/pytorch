@@ -92,9 +92,10 @@ def testNonContiguous(self):
     return x
 
 def conv2d(self, x, w, toChannelsLast):
-    r = torch.nn.functional.conv2d(x, w)
+    r = torch.conv2d(x, w)
     if (toChannelsLast):
-        r = r.contiguous(memory_format=torch.channels_last)
+        # memory_format=torch.channels_last
+        r = r.contiguous(memory_format=2)
     else:
         r = r.contiguous()
     return r
@@ -103,7 +104,9 @@ def contiguous(self, x):
     return x.contiguous()
 
 def contiguousChannelsLast(self, x):
-    return x.contiguous(memory_format=torch.channels_last)
+    # memory_format=torch.channels_last
+    return x.contiguous(memory_format=2)
 
 def contiguousChannelsLast3d(self, x):
-    return x.contiguous(memory_format=torch.channels_last_3d)
+    # memory_format=torch.channels_last_3d
+    return x.contiguous(memory_format=3)
