@@ -244,9 +244,6 @@ m.impl("${unqual_operator_name_with_overload}",
 UNPACK_TENSOR = CodeTemplate("""\
 auto${ref} ${arg_name}_ = unpack${suffix}(${arg_name}, "${arg_name}", ${arg_pos});""")
 
-UNPACK_OPTIONS = CodeTemplate("""\
-auto ${arg_name}_ = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);""")
-
 LEGACY_UNPACK_OPTIONS = CodeTemplate("""\
 auto ${arg_name}_ = TensorOptions(${arg_name});""")
 
@@ -1230,7 +1227,12 @@ def unpack_args(env, declaration):
     body = []
     unpacked_args = []
     unpacked_args_simple_type = {}
-    for i, arg in enumerate(declaration['arguments']):
+    if declaration['use_c10_dispatcher'] == 'full':
+        arguments = declaration['schema_order_arguments']
+    else:
+        assert declaration['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
+        arguments = declaration['arguments']
+    for i, arg in enumerate(arguments):
         if not requires_unpack(arg):
             unpacked_args.append(arg['name'])
             unpacked_args_simple_type[arg['name']] = arg['simple_type']
@@ -1252,11 +1254,9 @@ def unpack_args(env, declaration):
             # Okay, we are abusing the definition of 'unpack' here a bit,
             # although it's still getting the non-variable from the variable
             # (in this case via TensorOptions rather than Variable/Tensor).
-            if declaration['use_c10_dispatcher'] == 'full':
-                body.append(UNPACK_OPTIONS.substitute(arg_name=arg['name']))
-            else:
-                declaration['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper'
-                body.append(LEGACY_UNPACK_OPTIONS.substitute(arg_name=arg['name']))
+            assert declaration['use_c10_dispatcher'] == 'with_codegenerated_unboxing_wrapper', \
+                "VariableKernel shouldn't take TensorOptions if the op is c10-full"
+            body.append(LEGACY_UNPACK_OPTIONS.substitute(arg_name=arg['name']))
 
         unpacked_args.append(arg['name'] + '_')
         unpacked_args_simple_type[arg['name'] + '_'] = arg['simple_type']
