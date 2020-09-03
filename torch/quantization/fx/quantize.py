@@ -103,6 +103,20 @@ def graph_module_from_producer_nodes(root, producer_nodes):
     return graph_module
 
 
+def assert_and_get_unique_device(module):
+    """
+    Returns the unique device for a module, or None if no device is found.
+    Throws an error if multiple devices are detected.
+    """
+    devices = {p.device for p in module.parameters()} | \
+        {p.device for p in module.buffers()}
+    assert len(devices) <= 1, (
+        "prepare only works with cpu or single-device CUDA modules, "
+        "but got devices {}".format(devices)
+    )
+    device = next(iter(devices)) if len(devices) > 0 else None
+    return device
+
 
 # A dictionary for querying the weight index for a given op
 WEIGHT_INDEX_DICT = {
@@ -194,12 +208,14 @@ class Quantizer:
             elif root_node is node:
                 env[node.name] = observed_graph.node_copy(node, load_arg)
 
-                def insert_observer(node, observer):
+                def insert_observer(node, observer, device):
                     observer_name = get_new_observer_name(input_root)
                     setattr(input_root, observer_name, observer)
                     self.activation_post_process_map[node.name] = observer
                     env[node.name] = observed_graph.create_node('call_module', observer_name, (load_arg(node),), {})
                     observed.add(node.name)
+                    if device:
+                        getattr(input_root, observer_name).to(device)
 
                 # don't need to insert observer for output in dynamic quantization
                 if self.is_dynamic_quant:
@@ -225,7 +241,10 @@ class Quantizer:
                         observed.add(node.name)
                 elif qconfig is not None and obj.all_nodes:
                     # observer for outputs
-                    insert_observer(node, qconfig.activation())
+                    new_observer = qconfig.activation()
+                    # respect device affinity when adding observers
+                    device = assert_and_get_unique_device(input_root)
+                    insert_observer(node, new_observer, device)
             else:
                 env[node.name] = observed_graph.node_copy(node, load_arg)
 
@@ -233,7 +252,13 @@ class Quantizer:
                 observer_name = get_new_observer_name(input_root)
                 _, qconfig, is_weight = quants[node.name]
                 if qconfig is not None:
-                    self.activation_post_process_map[node.name] = qconfig.weight() if is_weight else qconfig.activation()
+                    new_observer = \
+                        qconfig.weight() if is_weight else qconfig.activation()
+                    # respect device affinity when adding observers
+                    device = assert_and_get_unique_device(input_root)
+                    if device:
+                        new_observer.to(device)
+                    self.activation_post_process_map[node.name] = new_observer
                     setattr(input_root, observer_name, self.activation_post_process_map[node.name])
                     env[node.name] = observed_graph.create_node('call_module', observer_name, (load_arg(node),), {})
                     observed.add(node.name)
