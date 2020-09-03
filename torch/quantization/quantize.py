@@ -196,8 +196,8 @@ def prepare(model, inplace=False, white_list=None,
     if not inplace:
         model = copy.deepcopy(model)
     qconfig_propagation_list = white_list
-    if propagate_qconfig_list is None:
-        qconfig_propagation_list = get_qconfig_propagation_list
+    if qconfig_propagation_list is None:
+        qconfig_propagation_list = get_qconfig_propagation_list()
     propagate_qconfig_(model, qconfig_dict=None)
 
     # sanity check common API misusage
@@ -240,7 +240,7 @@ def quantize(model, run_fn, run_args, mapping=None, inplace=False):
         Quantized model.
     """
     if mapping is None:
-        mapping = get_static_module_mapping()
+        mapping = get_static_quant_module_mapping()
     if not inplace:
         model = copy.deepcopy(model)
     model.eval()

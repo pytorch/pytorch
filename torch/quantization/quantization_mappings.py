@@ -60,7 +60,7 @@ QAT_MODULE_MAPPING = {
 }
 
 # Map for swapping dynamic modules
-DYNAMIC_MODULE_MAPPING = {
+DYNAMIC_QUANT_MODULE_MAPPING = {
     nn.Linear: nnqd.Linear,
     nn.LSTM: nnqd.LSTM,
     nn.LSTMCell: nnqd.LSTMCell,

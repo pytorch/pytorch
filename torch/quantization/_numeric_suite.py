@@ -394,8 +394,7 @@ def prepare_model_outputs(
     float_module,
     q_module,
     Logger=OutputLogger,
-    white_list=DEFAULT_NUMERIC_SUITE_COMPARE_MODEL_OUTPUT_WHITE_LIST,
-):
+    white_list=None):
     r"""Prepare the model by attaching the logger to both float module
     and quantized module if they are in the white_list.
 
@@ -405,6 +404,10 @@ def prepare_model_outputs(
         Logger: type of logger to be attached to float_module and q_module
         white_list: list of module types to attach logger
     """
+    compare_output_module_list = white_list
+    if compare_output_module_list:
+        compare_output_module_list = get_compare_output_module_list()
+
     qconfig_debug = torch.quantization.QConfig(activation=Logger, weight=None)
     float_module.qconfig = qconfig_debug
     prepare(float_module, inplace=True, white_list=white_list)
@@ -412,7 +415,7 @@ def prepare_model_outputs(
     prepare(
         q_module,
         inplace=True,
-        white_list=white_list,
+        white_list=compare_output_module_list,
         observer_non_leaf_module_list=NON_LEAF_MODULE_TO_ADD_OBSERVER_WHITE_LIST,
     )
 
