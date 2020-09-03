@@ -128,7 +128,10 @@ TypePtr ConcreteModuleType::getJitType() const {
   return jitType_;
 }
 
-py::object ConcreteModuleType::getPyClass() const {
+c10::optional<py::object> ConcreteModuleType::getPyClass() const {
+  if (!data_.pyClass_) {
+    return c10::nullopt;
+  }
   return data_.pyClass_;
 }
 
