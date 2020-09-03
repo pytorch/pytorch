@@ -961,47 +961,28 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward(
 
     // Disable groups as they are handled separately
     auto groups = gw_conv_params.groups;
-    gw_conv_params.groups = 1;
     std::swap(gw_conv_params.dilation, gw_conv_params.stride);
 
     // Transpose gO and ggI to accumulate over batch
     auto gOt = gO.transpose(0, 1);
-    auto ggIt = ggI.transpose(0, 1);
+    Tensor ggIt;
+    if (groups == 1)
+      ggIt = ggI.transpose(0, 1);
+    else
+      ggIt = ggI;
 
     Tensor gWt;
     // Compute conv
     if (input.numel() != 0) {
-      if (groups == 1) {
-
-        if (gOt.is_cuda()) {
-          gOt = gOt.contiguous();
-        }
-        // Compute conv
-        if (params.transposed) {
-          gw_conv_params.transposed = false;
-          gWt = at::_convolution(gOt, ggIt, Tensor(), gw_conv_params.stride, gw_conv_params.padding, gw_conv_params.dilation, gw_conv_params.transposed, gw_conv_params.output_padding, gw_conv_params.groups, gw_conv_params.benchmark, gw_conv_params.deterministic, gw_conv_params.cudnn_enabled);
-        } else {
-          gWt = at::_convolution(ggIt, gOt, Tensor(), gw_conv_params.stride, gw_conv_params.padding, gw_conv_params.dilation, gw_conv_params.transposed, gw_conv_params.output_padding, gw_conv_params.groups, gw_conv_params.benchmark, gw_conv_params.deterministic, gw_conv_params.cudnn_enabled);
-        }
+      if (gOt.is_cuda()) {
+        gOt = gOt.contiguous();
+      }
+      // Compute conv
+      if (params.transposed) {
+        gw_conv_params.transposed = false;
+        gWt = at::_convolution(gOt, ggIt, Tensor(), gw_conv_params.stride, gw_conv_params.padding, gw_conv_params.dilation, gw_conv_params.transposed, gw_conv_params.output_padding, gw_conv_params.groups, gw_conv_params.benchmark, gw_conv_params.deterministic, gw_conv_params.cudnn_enabled);
       } else {
-        std::vector<Tensor> gWt_list(groups);
-        for (int g = 0; g < groups; ++g) {
-          auto ggIt_g = subvariable(ggIt, 0, groups, g);
-          auto gOt_g = subvariable(gOt, 0, groups, g);
-          if (gOt_g.is_cuda()) {
-            gOt_g = gOt_g.contiguous();
-          }
-
-          // Compute conv
-          if (params.transposed) {
-            gw_conv_params.transposed = false;
-            gWt_list[g] = at::_convolution(gOt_g, ggIt_g, Tensor(), gw_conv_params.stride, gw_conv_params.padding, gw_conv_params.dilation, gw_conv_params.transposed, gw_conv_params.output_padding, gw_conv_params.groups, gw_conv_params.benchmark, gw_conv_params.deterministic, gw_conv_params.cudnn_enabled);
-          } else {
-            gWt_list[g] = at::_convolution(ggIt_g, gOt_g, Tensor(), gw_conv_params.stride, gw_conv_params.padding, gw_conv_params.dilation, gw_conv_params.transposed, gw_conv_params.output_padding, gw_conv_params.groups, gw_conv_params.benchmark, gw_conv_params.deterministic, gw_conv_params.cudnn_enabled);
-          }
-        }
-
-        gWt = at::cat(gWt_list, 1);
+        gWt = at::_convolution(ggIt, gOt, Tensor(), gw_conv_params.stride, gw_conv_params.padding, gw_conv_params.dilation, gw_conv_params.transposed, gw_conv_params.output_padding, gw_conv_params.groups, gw_conv_params.benchmark, gw_conv_params.deterministic, gw_conv_params.cudnn_enabled);
       }
 
       // Transpose gW to match chan_in and chan_out
