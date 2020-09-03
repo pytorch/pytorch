@@ -158,7 +158,7 @@ void testFuserPass_UnknownShapes() {
   g->lint();
   FuseTensorExprs(g);
 
-  // Test that we're not starting fusion groups from nodes with unfusible device
+  // Test that we're not generating fusion groups when shapes are not known
   testing::FileCheck().check_not("prim::TensorExprGroup")->run(*g);
 }
 } // namespace jit
