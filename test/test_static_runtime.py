@@ -150,13 +150,13 @@ class TestStaticRuntime(TestCase):
             acc_top = top_l_acc(top_inp)[0]
             torch.testing.assert_allclose(acc_top, ref_top)
 
-    # def test_trivial_graph(self):
-    #     s = torch.full((2, 2), 2)
-    #     tg = torch.jit.script(trivial_graph)
-    #     o_ref = tg(s, s, s)
-    #     tg_a = StaticRuntime(tg)
-    #     o_test = tg_a(s, s, s)[0]
-    #     torch.testing.assert_allclose(o_ref, o_test)
+    def test_trivial_graph(self):
+        s = torch.full((2, 2), 2)
+        tg = torch.jit.script(trivial_graph)
+        o_ref = tg(s, s, s)
+        tg_a = StaticRuntime(tg)
+        o_test = tg_a(s, s, s)[0]
+        torch.testing.assert_allclose(o_ref, o_test)
 
 
 if __name__ == "__main__":
