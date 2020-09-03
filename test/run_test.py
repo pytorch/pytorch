@@ -48,6 +48,7 @@ TESTS = [
     'test_native_functions',
     'test_nn',
     'test_numba_integration',
+    'test_ops',
     'test_optim',
     'test_mobile_optimizer',
     'test_xnnpack_integration',

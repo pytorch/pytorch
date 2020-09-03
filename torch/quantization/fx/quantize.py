@@ -121,6 +121,29 @@ class Quantizer:
         # mapping from matched node to activation_post_process
         # must be filled before convert
         self.activation_post_process_map = None
+        # mapping from node name to qconfig that should be used for that node
+        # filled out for a model during _generate_qconfig_map
+        self.qconfig_map = None
+        # mapping from fully qualified module name to module instance
+        # for example,
+        # {
+        #   '': Model(...),
+        #   'linear': Linear(...),
+        #   'linear.weight_fake_quant': PerChannelMinMaxObserver(...),
+        # }
+        self.modules = None
+        # mapping from a tuple of nodes in reverse order to uninitialized
+        #   QuantizeHandler subclass. For example,
+        # {
+        #   # match a single node
+        #   (<class 'torch.nn.modules.conv.Conv3d'>:
+        #     <class 'torch.quantization.fx.quantize.ConvRelu'>),
+        #   # match multiple nodes in reverse order
+        #   ((<function relu at 0x7f766a7360d0>, <built-in function add>):
+        #     <class 'torch.quantization.fx.quantize.Add'>),
+        # }
+        self.patterns = None
+
 
     def _qat_swap_modules(self, root):
         convert(root, mapping=DEFAULT_QAT_MODULE_MAPPING, inplace=True, remove_qconfig=False)
