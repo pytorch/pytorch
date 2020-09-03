@@ -1778,7 +1778,12 @@ add_docstr(torch.conj,
            r"""
 conj(input, *, out=None) -> Tensor
 
-Computes the element-wise conjugate of the given :attr:`input` tensor.
+Computes the element-wise conjugate of the given :attr:`input` tensor. If :attr`input` has a non-complex dtype,
+this function just returns :attr:`input`.
+
+.. warning:: In the future, :func:`torch.conj` may return a non-writeable view for an :attr:`input` of
+             non-complex dtype. It's recommended that programs not modify the tensor returned by :func:`torch.conj`
+             when :attr:`input` is of non-complex dtype to be compatible with this change.
 
 .. math::
     \text{out}_{i} = conj(\text{input}_{i})
@@ -6860,7 +6865,7 @@ Subtracts :attr:`other`, scaled by :attr:`alpha`, from :attr:`input`.
     \text{{out}}_i = \text{{input}}_i - \text{{alpha}} \times \text{{other}}_i
 """ + r"""
 
-Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`, 
+Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
 :ref:`type promotion <type-promotion-doc>`, and integer, float, and complex inputs.
 
 Args:

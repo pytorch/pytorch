@@ -513,6 +513,12 @@ class DefaultQuant(QuantizeHandler):
         assert self.all_nodes
         return quantize(quantizer, node)
 
+class CustomModule(QuantizeHandler):
+    def convert(self, quantizer, node, load_arg, debug=False):
+        assert node.op == 'call_module'
+        activation_post_process = quantizer.activation_post_process_map[node.name]
+
+
 # 2. Post Training Dynamic Quantizatoin Patterns
 @register_dynamic_quant_pattern(torch.nn.Linear)
 @register_dynamic_quant_pattern(torch.nn.functional.linear)
