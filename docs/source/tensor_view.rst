@@ -53,7 +53,7 @@ For reference, here’s a full list of view ops in PyTorch:
 - :meth:`~torch.Tensor.diagonal`
 - :meth:`~torch.Tensor.expand`
 - :meth:`~torch.Tensor.expand_as`
-- :func:`~torch.movedim`
+- :meth:`~torch.Tensor.movedim`
 - :meth:`~torch.Tensor.narrow`
 - :meth:`~torch.Tensor.permute`
 - :meth:`~torch.Tensor.select`
@@ -63,8 +63,8 @@ For reference, here’s a full list of view ops in PyTorch:
 - :attr:`~torch.Tensor.T`
 - :attr:`~torch.Tensor.real`
 - :attr:`~torch.Tensor.imag`
-- :func:`~torch.Tensor.view_as_real`
-- :func:`~torch.Tensor.view_as_imag`
+- :meth:`~torch.Tensor.view_as_real`
+- :meth:`~torch.Tensor.view_as_imag`
 - :meth:`~torch.Tensor.unflatten`
 - :meth:`~torch.Tensor.unfold`
 - :meth:`~torch.Tensor.unsqueeze`

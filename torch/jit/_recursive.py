@@ -4,6 +4,7 @@ import collections
 import textwrap
 import functools
 import warnings
+from typing import Dict, List, Set, Type
 
 import torch._jit_internal as _jit_internal
 from torch.jit.frontend import get_default_args, get_jit_def
@@ -54,19 +55,19 @@ def make_stub_from_method(nn_module, method_name):
 # ConstantValue in jit/script/init.cpp
 _constant_types = (bool, float, int, str, type(None), torch.device, torch.layout, torch.dtype)
 
-def _get_valid_constant(attr, v):
+def _get_valid_constant(attr, v, owner_type):
     if isinstance(v, _constant_types):
         return v
     elif isinstance(v, tuple) or isinstance(v, list):
-        return tuple(_get_valid_constant(attr, x) for x in v)
+        return tuple(_get_valid_constant(attr, x, owner_type) for x in v)
     constants = ", ".join(torch.typename(typ) for typ in _constant_types)
     raise TypeError(textwrap.dedent("""
-        '{}' object for attribute '{}' is not a valid constant.
+        '{}' object in attribute '{}.{}' is not a valid constant.
         Valid constants are:
         1. a nn.ModuleList
         2. a value of type {{{}}}
         3. a list or tuple of (2)
-        """.format(torch.typename(type(v)), attr, constants)))
+        """.format(torch.typename(type(v)), owner_type, attr, constants)))
 
 
 class SourceContext(torch._C._jit_tree_views.SourceRangeFactory):
@@ -172,7 +173,7 @@ def infer_concrete_type_builder(nn_module):
                           "Consider removing it.".format(name))
             continue
         value = getattr(nn_module, name)
-        concrete_type_builder.add_constant(name, _get_valid_constant(name, value))
+        concrete_type_builder.add_constant(name, _get_valid_constant(name, value, type(nn_module).__name__))
         added_names.add(name)
 
     # populate overloads
@@ -250,6 +251,9 @@ def infer_concrete_type_builder(nn_module):
     return concrete_type_builder
 
 class ConcreteTypeStore(object):
+    type_store: Dict[Type[Module], List[torch._C.ConcreteModuleType]]
+    methods_compiled: Set[torch._C.ConcreteModuleType]
+
     def __init__(self):
         # Python module type => List[ConcreteModuleType)]
         self.type_store = {}
@@ -407,12 +411,12 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
         # Wrap the original to propagate docstrings and such.
         # TODO: we don't currently do this functions that are recursively
         # compiled, we should.
-        script_method = functools.wraps(stub.original_method)(script_method)
+        wrapped_script_method = functools.wraps(stub.original_method)(script_method)  # type: ignore
 
         # Add the methods to the script_module directly. This ensures they will
         # be found first when `name` is looked up (as opposed to the stubs or
         # nn.Module.forward)
-        script_module.__dict__[name] = script_method
+        script_module.__dict__[name] = wrapped_script_method
 
 
     # copy over python methods to script module if they aren't defined on the script module
@@ -464,7 +468,7 @@ def get_overload_annotations(mod):
 def get_overload_name_mapping(overload_info):
     # Same format as __overloads__
     # original function => [overload names]
-    overload_name_mappings = {}
+    overload_name_mappings: Dict[str, List[str]] = {}
     for orig_fn, overloads in overload_info.items():
         original_name = orig_fn.__name__
         if original_name not in overload_name_mappings:
@@ -505,7 +509,7 @@ def infer_methods_to_compile(nn_module):
     """
     check_module_initialized(nn_module)
 
-    methods = []
+    methods: List[str] = []
     if hasattr(nn_module, 'forward') and not _jit_internal.is_ignored_fn(nn_module.forward):
         forward_func = getattr(nn_module.forward, "__func__", None)
         module_forward = get_function_from_type(torch.nn.Module, "forward")
@@ -535,7 +539,7 @@ def infer_methods_to_compile(nn_module):
 
     # Unique the methods. We don't want to use a set to store the methods because it
     # introduces non-determinism to compile order.
-    uniquer = set()
+    uniquer: Set[str] = set()
     uniqued_methods = []
     for name in filtered_methods:
         if name in uniquer:
@@ -642,7 +646,7 @@ def lazy_bind(concrete_type, unbound_method):
         return method(*args)
 
     # make the lazy binding method "look like" the original method
-    lazy_binding_method.original_fn = unbound_method
+    lazy_binding_method.original_fn = unbound_method  # type: ignore
     lazy_binding_method.__name__ = unbound_method.__name__
     torch._jit_internal.copy_torchscript_modifier(unbound_method, lazy_binding_method)
 

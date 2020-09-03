@@ -1,10 +1,9 @@
 #include <torch/csrc/jit/mobile/function.h>
+#include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/mobile/interpreter.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/runtime/operator.h>
-#include <torch/csrc/jit/runtime/vararg_functions.h>
 #include <torch/custom_class_detail.h>
-#include <torch/library.h>
 
 namespace torch {
 namespace jit {
@@ -13,6 +12,14 @@ char const* toString(OpCode op);
 namespace mobile {
 Function::Function(c10::QualifiedName name)
     : name_(name), code_(std::make_shared<Code>()) {}
+
+const c10::QualifiedName& Function::qualname() const {
+  return name_;
+}
+
+const std::string& Function::name() const {
+  return name_.name();
+}
 
 void Function::append_instruction(OpCode op, int X, int N) {
   TORCH_CHECK(
@@ -29,7 +36,8 @@ void Function::append_instruction(OpCode op, int X, int N) {
 
 bool Function::append_operator(
     const std::string& name,
-    const std::string& overload_name) {
+    const std::string& overload_name,
+    int64_t model_version) {
   // Keep the original opname in code_
   code_->op_names_.emplace_back(name, overload_name);
   auto opname = code_->op_names_.back();
@@ -47,6 +55,19 @@ bool Function::append_operator(
     } else {
       return false;
     }
+  }
+
+  if (model_version == 0x3L &&
+      model_version < caffe2::serialize::kProducedBytecodeVersion &&
+      opname == c10::OperatorName("aten::_convolution", "")) {
+    // A default-value argument will be added in
+    // https://github.com/pytorch/pytorch/pull/40737. This wrapper is used to
+    // handle backward compatibility, where there is no default bool value in
+    // old models.
+    fn = [fn](Stack& stack) {
+      stack.push_back(true);
+      fn(stack);
+    };
   }
 
   code_->operators_.emplace_back(fn);
@@ -89,6 +110,12 @@ std::string Function::get_module_debug_info(size_t pc) const {
 bool Function::run(Stack& stack) const {
   InterpreterState interp_state(code_);
   return interp_state.run(stack);
+}
+
+c10::IValue Function::operator()(Stack& stack) {
+  InterpreterState interp_state(code_);
+  interp_state.run(stack);
+  return stack.front();
 }
 
 } // namespace mobile
