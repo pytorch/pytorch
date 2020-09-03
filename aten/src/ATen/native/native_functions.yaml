@@ -2026,7 +2026,7 @@
 
 - func: max.names_dim_max(Tensor self, Dimname dim, bool keepdim=False, *, Tensor(a!) max, Tensor(b!) max_values) -> (Tensor(a!) values, Tensor(b!) indices)
 
-- func: select_index_backward(Tensor grad, int dim, Tensor indices, int[] sizes, bool keepdim) -> Tensor
+- func: value_selecting_reduction_backward(Tensor grad, int dim, Tensor indices, int[] sizes, bool keepdim) -> Tensor
   use_c10_dispatcher: full
   variants: function
   device_guard: False

@@ -1037,8 +1037,11 @@ bool cpu_equal(const Tensor& self, const Tensor& other) {
   return result.load();
 }
 
-// This is the backward function for max.dim, mode.dim, topk.dim, etc.
-Tensor select_index_backward(const Tensor& grad, int64_t dim, const Tensor& indices, IntArrayRef sizes, bool keepdim) {
+// max(dim), min(dim), topk(dim), mode(dim), are examples of reduction
+// functions that select values. value_selecting_reduction_backward is the
+// backward function for those operators; it propagates the grad to the
+// specific value locations referred to at `indices`.
+Tensor value_selecting_reduction_backward(const Tensor& grad, int64_t dim, const Tensor& indices, IntArrayRef sizes, bool keepdim) {
   if (!keepdim && sizes.size() > 0) {
     auto grad_ = grad.unsqueeze(dim);
     auto indices_ = indices.unsqueeze(dim);
