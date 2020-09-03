@@ -284,10 +284,7 @@ Stmt* RegisterizerReplacer::mutate(const Block* v) {
     let = new Let(
         var_,
         new Load(
-            info_->buf->base_handle()->dtype(),
-            info_->buf,
-            info_->indices,
-            new IntImm(1)));
+            info_->buf->dtype(), info_->buf, info_->indices, new IntImm(1)));
   } else {
     let = new Let(var_, initializer_->value());
   }
