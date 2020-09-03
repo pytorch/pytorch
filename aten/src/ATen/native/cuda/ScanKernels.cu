@@ -361,7 +361,7 @@ template <
     int num_threads_x,
     int num_threads_y,
     class BinaryFunction>
-__global__ typename std::enable_if<!c10::is_complex_t<T>::value, void>::type
+__global__ typename std::enable_if<!c10::is_complex<T>::value, void>::type
 tensor_kernel_scan_innermost_dim(
     T* tgt_,
     T* src_,
@@ -381,7 +381,7 @@ template <
     int num_threads_x,
     int num_threads_y,
     class BinaryFunction>
-__global__ typename std::enable_if<c10::is_complex_t<T>::value, void>::type
+__global__ typename std::enable_if<c10::is_complex<T>::value, void>::type
 tensor_kernel_scan_innermost_dim(
     T* tgt_,
     T* src_,

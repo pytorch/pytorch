@@ -357,6 +357,10 @@ class TestOptim(TestCase):
         )
         with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 0: 1.0"):
             optim.SparseAdam(None, lr=1e-2, betas=(1.0, 0.0))
+        with self.assertRaisesRegex(ValueError, "SparseAdam requires dense parameter tensors"):
+            optim.SparseAdam([torch.zeros(3, layout=torch.sparse_coo)])
+        with self.assertRaisesRegex(ValueError, "SparseAdam requires dense parameter tensors"):
+            optim.SparseAdam([{"params": [torch.zeros(3, layout=torch.sparse_coo)]}])
 
     # ROCm precision is too low to pass this test
     @skipIfRocm
