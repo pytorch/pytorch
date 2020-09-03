@@ -5032,7 +5032,7 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
         return self._get_arg('constructor_args', False)
 
 
-class NewCriterionTest(InputVariableMixin, TestBase):
+class CriterionTest(InputVariableMixin, TestBase):
     # TODO: check that criterions don't ignore grad_output
 
     _required_arg_names = TestBase._required_arg_names.union({'target'})

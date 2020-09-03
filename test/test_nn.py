@@ -38,7 +38,7 @@ from torch.testing._internal.common_utils import freeze_rng_state, run_tests, Te
     get_function_arglist, load_tests, repeat_test_for_types, ALL_TENSORTYPES, \
     ALL_TENSORTYPES2, TemporaryFileName, TEST_WITH_UBSAN, IS_PPC
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, TEST_CUDNN_VERSION
-from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, NewCriterionTest, \
+from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, CriterionTest, \
     module_tests, criterion_tests, new_criterion_tests, loss_reference_fns, \
     ctcloss_reference, new_module_tests
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes, \
@@ -8742,7 +8742,7 @@ for test_params in module_tests + new_module_tests:
 for test_params in criterion_tests + new_criterion_tests:
     name = test_params.pop('module_name')
     test_params['constructor'] = getattr(nn, name)
-    test = NewCriterionTest(**test_params)
+    test = CriterionTest(**test_params)
     decorator = test_params.pop('decorator', None)
     add_test(test, decorator)
     if 'check_sum_reduction' in test_params:
@@ -8757,7 +8757,7 @@ for test_params in criterion_tests + new_criterion_tests:
             return sum_reduction_constructor
 
         test_params['constructor'] = gen_sum_reduction_constructor(test_params['constructor'])
-        test = NewCriterionTest(**test_params)
+        test = CriterionTest(**test_params)
         add_test(test, decorator)
 
 
