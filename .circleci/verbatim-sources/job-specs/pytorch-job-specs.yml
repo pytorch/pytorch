@@ -19,6 +19,9 @@ jobs:
           if [[ "${DOCKER_IMAGE}" == *rocm* ]]; then
             export DOCKER_TAG="ab1632df-fa59-40e6-8c23-98e004f61148"
           fi
+          if [[ ${BUILD_ENVIRONMENT} == *"pure_torch"* ]]; then
+            echo 'BUILD_CAFFE2=OFF' >> "${BASH_ENV}"
+          fi
           if [[ ${BUILD_ENVIRONMENT} == *"paralleltbb"* ]]; then
             echo 'ATEN_THREADING=TBB' >> "${BASH_ENV}"
             echo 'USE_TBB=1' >> "${BASH_ENV}"
