@@ -15,6 +15,28 @@ class TestForeach(TestCase):
         torch._foreach_div_,
     ]
 
+    def _get_test_data(self, device, dtype, N):
+        if dtype in [torch.bfloat16, torch.bool]:
+            tensors1 = [torch.randn(N, N, device=device).to(dtype) for _ in range(N)]
+            tensors2 = [torch.randn(N, N, device=device).to(dtype) for _ in range(N)]
+        elif dtype in torch.testing.get_all_int_dtypes():
+            tensors1 = [torch.randint(1, 100, (N, N), device=device, dtype=dtype) for _ in range(N)]
+            tensors2 = [torch.randint(1, 100, (N, N), device=device, dtype=dtype) for _ in range(N)]
+        else:
+            tensors1 = [torch.randn(N, N, device=device, dtype=dtype) for _ in range(N)]
+            tensors2 = [torch.randn(N, N, device=device, dtype=dtype) for _ in range(N)]
+
+        return tensors1, tensors2
+
+    def _test_bin_op_list(self, device, dtype, foreach_op, foreach_op_, torch_op, N=20):
+        tensors1, tensors2 = self._get_test_data(device, dtype, N)
+
+        expected = [torch_op(tensors1[i], tensors2[i]) for i in range(N)]
+        res = foreach_op(tensors1, tensors2)
+        foreach_op_(tensors1, tensors2)
+        self.assertEqual(res, tensors1)
+        self.assertEqual(tensors1, expected)
+
     # Unary ops
     @dtypes(*[torch.float, torch.double, torch.complex64, torch.complex128])
     def test_sqrt(self, device, dtype):
@@ -189,7 +211,7 @@ class TestForeach(TestCase):
             torch._foreach_add_(tensors1, tensors2)
 
         # different devices
-        if torch.cuda.is_available() and torch.cuda.device_count() == 2:
+        if torch.cuda.is_available() and torch.cuda.device_count() > 1:
             tensor1 = torch.zeros(10, 10, device="cuda:0")
             tensor2 = torch.ones(10, 10, device="cuda:1")
             with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
@@ -204,28 +226,6 @@ class TestForeach(TestCase):
             torch._foreach_add(tensors1, tensors2)
         with self.assertRaisesRegex(RuntimeError, r", got \[10, 10\] and \[11, 11\]"):
             torch._foreach_add_(tensors1, tensors2)
-
-    def get_test_data(self, device, dtype, N):
-        if dtype in [torch.bfloat16, torch.bool]:
-            tensors1 = [torch.randn(N, N, device=device).to(dtype) for _ in range(N)]
-            tensors2 = [torch.randn(N, N, device=device).to(dtype) for _ in range(N)]
-        elif dtype in torch.testing.get_all_int_dtypes():
-            tensors1 = [torch.randint(1, 100, (N, N), device=device, dtype=dtype) for _ in range(N)]
-            tensors2 = [torch.randint(1, 100, (N, N), device=device, dtype=dtype) for _ in range(N)]
-        else:
-            tensors1 = [torch.randn(N, N, device=device, dtype=dtype) for _ in range(N)]
-            tensors2 = [torch.randn(N, N, device=device, dtype=dtype) for _ in range(N)]
-
-        return tensors1, tensors2
-
-    def _test_bin_op_list(self, device, dtype, foreach_op, foreach_op_, torch_op, N=20):
-        tensors1, tensors2 = self.get_test_data(device, dtype, N)
-
-        expected = [torch_op(tensors1[i], tensors2[i]) for i in range(N)]
-        res = foreach_op(tensors1, tensors2)
-        foreach_op_(tensors1, tensors2)
-        self.assertEqual(res, tensors1)
-        self.assertEqual(tensors1, expected)
 
     @dtypes(*torch.testing.get_all_dtypes())
     def test_add_list(self, device, dtype):
@@ -246,8 +246,6 @@ class TestForeach(TestCase):
     @dtypes(*torch.testing.get_all_dtypes())
     def test_div_list(self, device, dtype):
         if dtype in torch.testing.integral_types_and(torch.bool):
-            with self.assertRaisesRegex(RuntimeError, "Integer division of tensors using div or / is no longer"):
-                self._test_bin_op_list(device, dtype, torch._foreach_div, torch._foreach_div_, torch.div)
             with self.assertRaisesRegex(RuntimeError, "Integer division of tensors using div or / is no longer"):
                 self._test_bin_op_list(device, dtype, torch._foreach_div, torch._foreach_div_, torch.div)
             return

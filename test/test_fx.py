@@ -3,6 +3,7 @@ import unittest
 import operator
 import numbers
 import pickle
+import copy
 from torch.fx import symbolic_trace, Proxy, Node, GraphModule, DefaultDelegate
 from torch.fx.proxy import TraceError
 
@@ -432,6 +433,22 @@ class TestFX(JitTestCase):
         x = torch.rand(3, 4)
         self.assertEqual(loaded(x), traced(x))
 
+    def test_deepcopy_graphmodule_with_transform(self):
+        st = SimpleTest()
+        traced = symbolic_trace(st)
+
+        def transform(traced):
+            new_graph = copy.deepcopy(traced.graph)
+            delegate = torch.fx.DefaultDelegate(traced.root, new_graph)
+            relu_out = delegate.create_node(
+                kind='call_method', target='neg', args=(new_graph.result,), kwargs={})
+            new_graph.output(relu_out)
+            return GraphModule(traced.root, new_graph)
+        transformed = transform(traced)
+        copied = copy.deepcopy(transformed)
+        x = torch.randn(3, 4)
+        self.assertEqual(copied(x), transformed(x))
+
     def test_unpack_list_better_error(self):
         class SomeArgs(torch.nn.Module):
             def forward(self, a, b):
@@ -465,6 +482,20 @@ class TestFX(JitTestCase):
         ud = UnpacksDict()
         with self.assertRaisesRegex(TraceError, 'Proxy object cannot be unpacked as function argument'):
             symbolic_trace(ud)
+
+    def test_torch_custom_ops(self):
+        class M(torch.nn.Module):
+            def forward(self, a):
+                b = torch.ops.aten.sigmoid(a)
+                c = torch.ops.aten.cat([a, b])
+                return torch.ops.aten.cat((c, c))
+        m = M()
+        input = torch.randn(3)
+        ref_out = m(input)
+        gm = symbolic_trace(m)
+        out = gm(input)
+        self.assertEqual(out, ref_out)
+
 
 if __name__ == '__main__':
     run_tests()

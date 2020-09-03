@@ -13,13 +13,10 @@ from verify import verify
 import torchvision
 
 import onnx
-import onnxruntime  # noqa
 
 import io
 import copy
 import unittest
-
-import numpy as np
 
 
 skip = unittest.skip
@@ -539,29 +536,6 @@ class TestUtilityFuns(TestCase):
         assert len(unsupported_ops) == 1
         assert unsupported_ops == ['aten::cumsum']
 
-    def test_dropout_training(self):
-        class MyModule(torch.nn.Module):
-            def __init__(self):
-                super(MyModule, self).__init__()
-                self.dropout = torch.nn.Dropout(0.4)
-
-            def forward(self, x):
-                dropout = self.dropout(x)
-                return dropout
-
-        model = MyModule()
-        x = torch.randn(10, 3, 128, 128)
-
-        model.train()
-
-        f = io.BytesIO()
-        torch.onnx.export(model, (x,), f,
-                          opset_version=self.opset_version, training=torch.onnx.TrainingMode.TRAINING)
-        ort_sess = onnxruntime.InferenceSession(f.getvalue())
-        ort_inputs = {ort_sess.get_inputs()[0].name: x.cpu().numpy()}
-        ort_outs = ort_sess.run(None, ort_inputs)
-        assert x != ort_outs[0]
-
     def test_aten_fallthrough(self):
         # Test aten export of op with no symbolic
         class Module(torch.nn.Module):
@@ -694,48 +668,6 @@ class TestUtilityFuns(TestCase):
         iter = graph.nodes()
         assert next(iter).kind() == "CustomNamespace::Custom"
 
-    @skipIfUnsupportedMinOpsetVersion(12)
-    def test_dropout_training_zero(self):
-        class MyModule(torch.nn.Module):
-            def __init__(self):
-                super(MyModule, self).__init__()
-                self.dropout = torch.nn.Dropout(0.5)
-
-            def forward(self, x):
-                dropout = self.dropout(x)
-                return dropout
-
-        torch.manual_seed(0)
-        onnxruntime.set_seed(0)
-
-        model = MyModule()
-
-        # ensure there are no zeros in the input
-        x = torch.randn(10, 3, 128, 128)
-        y = x.numpy()
-        y_mask = np.where(y == 0, 1, y)
-        input = torch.from_numpy(y_mask)
-        nb_elements = torch.numel(input)
-
-        model.train()
-
-        f = io.BytesIO()
-        torch.onnx.export(model, (input,), f,
-                          opset_version=self.opset_version, training=torch.onnx.TrainingMode.TRAINING)
-        ort_sess = onnxruntime.InferenceSession(f.getvalue())
-        ort_inputs = {ort_sess.get_inputs()[0].name : input.cpu().numpy()}
-        ort_outs = ort_sess.run(None, ort_inputs)
-        y = model(input)
-        output = y.cpu().numpy()
-
-        ort_mask = np.where(ort_outs[0] != 0, 1, 0)
-        pyt_mask = np.where(output != 0, 1, 0)
-
-        ratio_pytorch = np.sum(pyt_mask) / nb_elements
-        ratio_ort = np.sum(ort_mask) / nb_elements
-
-        np.testing.assert_allclose(ratio_pytorch, ratio_ort, rtol=0.01, atol=0.01)
-
     def test_unused_initializers(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -799,79 +731,6 @@ class TestUtilityFuns(TestCase):
         for node in graph.nodes():
             assert node.kind() != "onnx::BatchNormalization"
 
-    def test_conv_bn(self):
-        class MyModule(torch.nn.Module):
-            def __init__(self):
-                super(MyModule, self).__init__()
-                self.conv = torch.nn.Conv2d(3, 16, kernel_size=1, stride=2, padding=3, bias=True)
-                self.bn = torch.nn.BatchNorm2d(16, affine=True)
-
-            def forward(self, x):
-                x = self.conv(x)
-                bn = self.bn(x)
-                return bn
-
-        model = MyModule()
-        x = torch.randn(10, 3, 128, 128)
-
-        f = io.BytesIO()
-        torch.onnx.export(model, (x,), f,
-                          opset_version=self.opset_version, training=torch.onnx.TrainingMode.TRAINING)
-        ort_sess = onnxruntime.InferenceSession(f.getvalue())
-        ort_inputs = {ort_sess.get_inputs()[0].name: x.cpu().numpy()}
-        ort_outs1 = ort_sess.run(None, ort_inputs)
-
-        f = io.BytesIO()
-        torch.onnx.export(model, (x,), f,
-                          opset_version=self.opset_version, training=torch.onnx.TrainingMode.EVAL)
-        ort_sess = onnxruntime.InferenceSession(f.getvalue())
-        ort_inputs = {ort_sess.get_inputs()[0].name: x.cpu().numpy()}
-        ort_outs2 = ort_sess.run(None, ort_inputs)
-        [np.testing.assert_allclose(ort_out1, ort_out2, atol=1e-7, rtol=0.001) for ort_out1, ort_out2 in zip(ort_outs1, ort_outs2)]
-
-    def test_multiple_conv_bn(self):
-        class MyModule(torch.nn.Module):
-            def __init__(self):
-                super(MyModule, self).__init__()
-                self.conv1 = torch.nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3, bias=False)
-                self.conv2 = torch.nn.Conv2d(64, 2, kernel_size=1, stride=1, padding=0, bias=False)
-                self.conv3 = torch.nn.Conv2d(2, 2, kernel_size=3, stride=1, padding=1, bias=False)
-                self.bn = torch.nn.BatchNorm2d(64)
-                self.bn2 = torch.nn.BatchNorm2d(2)
-                self.relu = torch.nn.ReLU(inplace=True)
-                self.maxpool = torch.nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
-
-
-            def forward(self, x):
-                x = self.conv1(x)
-                x = self.bn(x)
-                x = self.relu(x)
-                x = self.maxpool(x)
-                x = self.conv2(x)
-                x = self.bn2(x)
-                x = self.relu(x)
-                x = self.conv3(x)
-                x = self.bn2(x)
-                x = self.relu(x)
-                return x
-
-        model = MyModule()
-        x = torch.randn(2, 3, 224, 224)
-
-        f = io.BytesIO()
-        torch.onnx.export(model, (x,), f,
-                          opset_version=self.opset_version, training=torch.onnx.TrainingMode.TRAINING)
-        ort_sess = onnxruntime.InferenceSession(f.getvalue())
-        ort_inputs = {ort_sess.get_inputs()[0].name: x.cpu().numpy()}
-        ort_outs1 = ort_sess.run(None, ort_inputs)
-        f = io.BytesIO()
-        torch.onnx.export(model, (x,), f,
-                          opset_version=self.opset_version, training=torch.onnx.TrainingMode.EVAL)
-        ort_sess = onnxruntime.InferenceSession(f.getvalue())
-        ort_inputs = {ort_sess.get_inputs()[0].name: x.cpu().numpy()}
-        ort_outs2 = ort_sess.run(None, ort_inputs)
-        [np.testing.assert_allclose(ort_out1, ort_out2, atol=1e-7, rtol=0.001) for ort_out1, ort_out2 in zip(ort_outs1, ort_outs2)]
-
     def test_onnx_function_substitution_pass(self):
 
         @torch.jit.script
@@ -899,6 +758,7 @@ class TestUtilityFuns(TestCase):
         for node in graph.nodes():
             assert node.kind() != "prim::Constant"
         assert len(list(graph.nodes())) == 2  # onnx::Sub and onnx::Add nodes only.
+
 
 # opset 10 tests
 TestUtilityFuns_opset10 = type(str("TestUtilityFuns_opset10"),
