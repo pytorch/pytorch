@@ -252,8 +252,6 @@ static std::string encodeRHS(const Node* n) {
 
       // where
       {aten::where, "(${0} ? ${1} : ${2})"},
-
-      // simple derivatives
   };
 
   TemplateEnv env;
