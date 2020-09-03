@@ -38,12 +38,8 @@ class TORCH_CUDA_API StatefulExpressionEvaluator : private OptOutDispatch {
   void print() const;
 
  private:
-  std::unordered_map<const Val*, Int::ScalarType> bindings_;
-  Fusion* fusion_ = nullptr;
-
   using OptOutDispatch::handle;
 
- private:
   void handle(Expr* expr) override {
     switch (expr->getExprType().value()) {
       case ExprType::UnaryOp:
@@ -75,6 +71,10 @@ class TORCH_CUDA_API StatefulExpressionEvaluator : private OptOutDispatch {
   void handle(kir::BinaryOp*) override;
 
   c10::optional<Int::ScalarType> maybeHandle(Val*);
+
+ private:
+  std::unordered_map<const Val*, Int::ScalarType> bindings_;
+  Fusion* fusion_ = nullptr;
 };
 
 } // namespace fuser
