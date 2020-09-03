@@ -36,7 +36,7 @@ class SwishBench(benchmark.Benchmark):
             sol_count = (1 + 1) + (1 + 1)
             algorithmic_count = (3 + 1) + (3 + 1)
 
-        buffer_size = self.M * self.N * 4
+        buffer_size = self.M * self.N
         return {
             "sol": buffer_size * sol_count,
             "algorithmic": buffer_size * algorithmic_count,

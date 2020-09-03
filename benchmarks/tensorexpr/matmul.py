@@ -40,7 +40,6 @@ class MatMulBench(benchmark.Benchmark):
             + self.B * self.M * self.N
             + self.B * self.N * self.K
         )
-        buffer_size *= 4
         return {
             "sol": buffer_size * sol_count,
             "algorithmic": buffer_size * algorithmic_count,

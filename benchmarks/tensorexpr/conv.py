@@ -41,13 +41,12 @@ class ConvImplBench(benchmark.Benchmark):
             algorithmic_count = {"i": 1 + (1 + 1), "o": 1 + (1 + 1), "k": 1 + (1 + 1)}
 
         buffer_size = {
-            "i": self.N * self.iC * self.H * self.W * 4,
-            "o": self.N * self.oC * self.H * self.W * 4,
+            "i": self.N * self.iC * self.H * self.W,
+            "o": self.N * self.oC * self.H * self.W,
             "k": self.oC
             * (self.iC / self.groups)
             * self.kernel_size
-            * self.kernel_size
-            * 4,
+            * self.kernel_size,
         }
         sol_size = 0
         algorithmic_size = 0

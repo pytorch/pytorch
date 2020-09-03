@@ -15,13 +15,13 @@ class ElementBench(benchmark.Benchmark):
     unary_op_np_func = None
     split_input = True
 
-    def __init__(self, mode, device, N):
-        super().__init__(mode, device)
+    def __init__(self, mode, device, dtype, N):
+        super().__init__(mode, device, dtype)
         self.N = N
-        self.d1 = self.rand([N], device=device, requires_grad=self.requires_grad)
-        self.d2 = self.rand([N], device=device, requires_grad=self.requires_grad)
-        self.d3 = self.rand([N], device=device, requires_grad=self.requires_grad)
-        self.d4 = self.rand([N], device=device, requires_grad=self.requires_grad)
+        self.d1 = self.rand([N], device=device, dtype=dtype, requires_grad=self.requires_grad)
+        self.d2 = self.rand([N], device=device, dtype=dtype, requires_grad=self.requires_grad)
+        self.d3 = self.rand([N], device=device, dtype=dtype, requires_grad=self.requires_grad)
+        self.d4 = self.rand([N], device=device, dtype=dtype, requires_grad=self.requires_grad)
         self.inputs = [self.d1, self.d2, self.d3, self.d4]
         self.deterministic = "rand" not in self.op_str
 
@@ -88,7 +88,7 @@ class ElementBench(benchmark.Benchmark):
                 sol_count = 1
                 algorithmic_count = 1
 
-        buffer_size = self.N * 4
+        buffer_size = self.N
         return {
             "sol": buffer_size * sol_count,
             "algorithmic": buffer_size * algorithmic_count,
