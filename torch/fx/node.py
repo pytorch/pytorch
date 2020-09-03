@@ -21,8 +21,9 @@ Argument = Optional[Union[
 ]]
 
 class Node:
-    def __init__(self, graph: 'Graph', name: str, op: str, target: Target, 
-                 args: Tuple[Argument, ...], kwargs: Dict[str, Argument]) -> None:
+    def __init__(self, graph: 'Graph', name: str, op: str, target: Target,
+                 args: Tuple[Argument, ...], kwargs: Dict[str, Argument],
+                 module_qualname : Optional[str] = None) -> None:
         self.graph = graph
         self.name = name  # unique name of value being created
         self.op = op  # the kind of operation = placeholder|call_method|call_module|call_function|getattr
@@ -31,6 +32,7 @@ class Node:
         self.args = args
         self.kwargs = kwargs
         self.uses = 0
+        self.module_qualname = module_qualname
 
     def __repr__(self) -> str:
         return self.name

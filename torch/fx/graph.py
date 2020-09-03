@@ -78,17 +78,19 @@ class Graph:
     def create_node(self, op: str, target: Target,
                     args: Optional[Tuple[Argument, ...]] = None,
                     kwargs: Optional[Dict[str, Argument]] = None,
-                    name: Optional[str] = None):
+                    name: Optional[str] = None,
+                    module_qualname : Optional[str] = None):
         assert op in ('call_function', 'call_method', 'get_param', 'call_module', 'placeholder')
         args = () if args is None else args
         kwargs = {} if kwargs is None else kwargs
         self._mark_uses(args)
         self._mark_uses(kwargs)
-        n = Node(self, name if name is not None else self._name(target), op, target, args, kwargs)
+        n = Node(self, name if name is not None else self._name(target), op, target, args, kwargs, module_qualname)
         self.nodes.append(n)
         return n
 
-    def node_copy(self, node: Node, arg_transform: Callable[[Node], Argument] = lambda x: x) -> Node:
+    def node_copy(self, node: Node, arg_transform: Callable[[Node], Argument] = lambda x: x,
+                  qualname_transform: Callable[[str], str] = lambda x: x) -> Node:
         """ copy a node from one graph into another. arg_transform needs to transform arguments from the graph of node
             to the graph of self"""
         args = map_arg(node.args, arg_transform)
@@ -100,7 +102,9 @@ class Graph:
             name = node.name
         else:
             name = self._name(node.name)
-        return self.create_node(node.op, node.target, args, kwargs, name)
+        target = qualname_transform(node.target) if isinstance(node.target, str) else node.target
+        module_qualname = qualname_transform(node.module_qualname)
+        return self.create_node(node.op, target, args, kwargs, name, module_qualname)
 
     def output(self, result: Argument):
         self.result = result

@@ -43,12 +43,15 @@ def _patch_function(fn: FunctionType, nargs: int) -> FunctionType:
     # so we can't call this function normally, otherwise it would try to unpack them
     # instead, let's make python think that args and kwargs are normay variables
 
+curr_module_qualname : Optional[str] = None
+
 class DelegateBase:
     def __init__(self, graph: Graph):
         self.graph = graph
 
     def create_node(self, kind : str, target : Union[str, Callable],
-                    args : Tuple[Argument, ...], kwargs : Dict[str, Argument], name : Optional[str] = None) -> Node:
+                    args : Tuple[Argument, ...], kwargs : Dict[str, Argument], name : Optional[str] = None,
+                    module_qualname : Optional[str] = None) -> Node:
         """
         Inserts a graph node given target, args, kwargs, and name.
 
@@ -56,7 +59,9 @@ class DelegateBase:
         modification of values used in node creation. For example, one might
         want to disallow in-place operations from being recorded.
         """
-        return self.graph.create_node(kind, target, args, kwargs, name)
+        global curr_module_qualname
+        return self.graph.create_node(kind, target, args, kwargs, name,
+                                      module_qualname if module_qualname else curr_module_qualname)
 
     def placeholder(self, name):
         """
@@ -208,12 +213,26 @@ def symbolic_trace(root : torch.nn.Module, delegate_class=DefaultDelegate) -> Gr
 
     orig_call = torch.nn.Module.__call__
 
+    class ModuleHierarchyCtxMgr:
+        def __init__(self, target : str):
+            self.target = target
+
+        def __enter__(self):
+            global curr_module_qualname
+            self.orig = curr_module_qualname
+            curr_module_qualname = self.target
+
+        def __exit__(self, type, value, tb):
+            global curr_module_qualname
+            curr_module_qualname = self.orig
+
     def module_call_wrapper(mod, *args, **kwargs):
-        if not delegate.is_leaf_module(mod):
-            return orig_call(mod, *args, **kwargs)
-        else:
-            target = _find_module(root, mod)
-            return _create_proxy(delegate, 'call_module', target, args, kwargs)
+        target = _find_module(root, mod)
+        with ModuleHierarchyCtxMgr(target):
+            if not delegate.is_leaf_module(mod):
+                return orig_call(mod, *args, **kwargs)
+            else:
+                return _create_proxy(delegate, 'call_module', target, args, kwargs)
     try:
         torch.nn.Module.__call__ = module_call_wrapper
         graph.output(delegate.create_arg(fn(*args)))
