@@ -32,6 +32,8 @@ bool isSupported(Node* node) {
     return isSupportedForBlock(node);
   }
 
+  // clang-format off
+  // breaks up the schema strings so they are no longer discoverable with ctrl-F
   static const OperatorSet supported_operator_set{
       "aten::add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor",
       "aten::add.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor",
@@ -43,22 +45,23 @@ bool isSupported(Node* node) {
       "aten::mul.Scalar(Tensor self, Scalar other) -> Tensor",
       "aten::div.Tensor(Tensor self, Tensor other) -> Tensor",
       "aten::div.Scalar(Tensor self, Scalar other) -> Tensor",
-      "aten::eq(Tensor self, Tensor other) -> Tensor",
-      "aten::eq(Tensor self, Scalar other) -> Tensor",
-      "aten::ne(Tensor self, Tensor other) -> Tensor",
-      "aten::ne(Tensor self, Scalar other) -> Tensor",
-      "aten::ge(Tensor self, Tensor other) -> Tensor",
-      "aten::ge(Tensor self, Scalar other) -> Tensor",
-      "aten::gt(Tensor self, Tensor other) -> Tensor",
-      "aten::gt(Tensor self, Scalar other) -> Tensor",
-      "aten::le(Tensor self, Tensor other) -> Tensor",
-      "aten::le(Tensor self, Scalar other) -> Tensor",
-      "aten::lt(Tensor self, Tensor other) -> Tensor",
-      "aten::lt(Tensor self, Scalar other) -> Tensor",
+      "aten::eq.Tensor(Tensor self, Tensor other) -> Tensor",
+      "aten::eq.Scalar(Tensor self, Scalar other) -> Tensor",
+      "aten::ne.Tensor(Tensor self, Tensor other) -> Tensor",
+      "aten::ne.Scalar(Tensor self, Scalar other) -> Tensor",
+      "aten::ge.Tensor(Tensor self, Tensor other) -> Tensor",
+      "aten::ge.Scalar(Tensor self, Scalar other) -> Tensor",
+      "aten::gt.Tensor(Tensor self, Tensor other) -> Tensor",
+      "aten::gt.Scalar(Tensor self, Scalar other) -> Tensor",
+      "aten::le.Tensor(Tensor self, Tensor other) -> Tensor",
+      "aten::le.Scalar(Tensor self, Scalar other) -> Tensor",
+      "aten::lt.Tensor(Tensor self, Tensor other) -> Tensor",
+      "aten::lt.Scalar(Tensor self, Scalar other) -> Tensor",
       "aten::pow.Tensor_Scalar(Tensor self, Scalar exponent) -> Tensor",
       "aten::pow.Tensor_Tensor(Tensor self, Tensor exponent) -> Tensor",
       // TODO : do we support pow.Scalar ?
       "aten::pow.Scalar(Scalar self, Tensor exponent) -> Tensor",
+      // TODO: support clamp_min, clamp_max
       "aten::clamp(Tensor self, Scalar? min=None, Scalar? max=None) -> Tensor",
       "aten::lerp.Scalar(Tensor self, Tensor end, Scalar weight) -> Tensor",
       "aten::lerp.Tensor(Tensor self, Tensor end, Tensor weight) -> Tensor",
@@ -103,7 +106,9 @@ bool isSupported(Node* node) {
       "aten::unsqueeze(Tensor(a) self, int dim) -> Tensor(a)",
       "aten::frac(Tensor self) -> Tensor",
       // TODO: uncomment once we can handle rand+broadcasts
-      // case aten::rand_like:
+      // "aten::rand_like(Tensor self, *, ScalarType? dtype=None, Layout?
+      // layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat?
+      // memory_format=None) -> Tensor",
       "aten::__and__.Scalar(Tensor self, Scalar other) -> Tensor",
       "aten::__and__.Tensor(Tensor self, Tensor other) -> Tensor",
       "aten::__or__.Scalar(Tensor self, Scalar other) -> Tensor",
@@ -125,6 +130,7 @@ bool isSupported(Node* node) {
       "aten::max.other(Tensor self, Tensor other) -> Tensor",
       // TODO: enable slice, shape inference is not implemented for this op yet
   };
+  // clang-format on
 
   if (node->isMemberOf(supported_operator_set)) {
     return true;
