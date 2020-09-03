@@ -1231,6 +1231,15 @@
 
 - func: dot.out(Tensor self, Tensor tensor, *, Tensor(a!) out) -> Tensor(a!)
 
+- func: vdot(Tensor self, Tensor other) -> Tensor
+  use_c10_dispatcher: full
+  variants: function, method
+  dispatch:
+    CPU: vdot
+    CUDA: vdot_cuda
+
+- func: vdot.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+
 - func: einsum(str equation, Tensor[] tensors) -> Tensor
   use_c10_dispatcher: full
 
