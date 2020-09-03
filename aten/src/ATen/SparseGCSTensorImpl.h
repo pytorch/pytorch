@@ -21,7 +21,12 @@ struct CAFFE2_API SparseGCSTensorImpl : public TensorImpl {
 
   // strides of the first half of the split dimensions.
   std::vector<int64_t> strides0_;
-  std::vector<int64_t> strides1_, dims0_, dims1_;
+  // strides of the second half of the split dimensions.
+  std::vector<int64_t> strides1_;
+  // dims of the first half of the split dimensions.
+  std::vector<int64_t> dims0_;
+  // dims of the second half of the split dimensions.
+  std::vector<int64_t> dims1_;
   // Dimension at which we split the tensor dimensions into two groups for reduction to
   // a 2D GCS tensor.
   int64_t rsplit_dim_;           
@@ -30,9 +35,16 @@ struct CAFFE2_API SparseGCSTensorImpl : public TensorImpl {
   
   void resize_and_clear_(int64_t nnz_size, int64_t ptr_size, int64_t redux_size, ArrayRef<int64_t> size);
 
-  void set_member_tensors_unsafe(const Tensor& pointers, const Tensor& indices, const Tensor& values, const Tensor& reduction,
+  void set_member_tensors_unsafe(const Tensor& pointers, const Tensor& indices,
+                                 const Tensor& values, const Tensor& reduction,
                                  const Scalar& fill_value);
 
+  std::vector<int64_t> strides0() const { return strides0_; }
+  std::vector<int64_t> strides1() const { return strides1_; }
+  std::vector<int64_t> dims0() const { return dims0_; }
+  std::vector<int64_t> dims1() const { return dims1_; }
+  int64_t rsplit_dim() const { return rsplit_dim_; }
+  
   Tensor pointers() const { return pointers_; }
   Tensor indices() const { return indices_; }
   Tensor values() const { return values_; }

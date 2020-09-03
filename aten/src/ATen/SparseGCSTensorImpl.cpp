@@ -75,8 +75,11 @@ void SparseGCSTensorImpl::set_member_tensors_unsafe(const Tensor& pointers, cons
   rsplit_dim_ = reduction_accessor[reduction_.size(0)-1];
     
   dims0_.resize(rsplit_dim_);
+  strides0_.resize(rsplit_dim_);
+  
   dims1_.resize(sizes_.size() - rsplit_dim_);
-
+  strides1_.resize(sizes_.size() - rsplit_dim_);
+  
   for (int i = 0; i < rsplit_dim_; ++i) { dims0_[i] = i; }
   for (int i = 0; i < sizes_.size() - rsplit_dim_; ++i) { dims1_[i] = i + rsplit_dim_; }
 

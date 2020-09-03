@@ -21,6 +21,22 @@ Tensor& add_sparse_gcs_(Tensor& self, const Tensor& other, Scalar alpha) {
   return at::add_out(self, self, other, alpha);  // redispatch!
 }
 
+int64_t gcs_to_dense_convert(int64_t iptr, int64_t icol, Tensor& values,
+                             const SparseTensor& src) {
+  int64_t drow, dcol;
+  std::vector<int64_t> dense_indices;
+  auto strides0 = get_sparse_impl<SparseGCSTensorImpl>(src)->strides0();
+  auto strides1 = get_sparse_impl<SparseGCSTensorImpl>(src)->strides1();
+  auto dims0 = get_sparse_impl<SparseGCSTensorImpl>(src)->dims0();
+  auto dims1 = get_sparse_impl<SparseGCSTensorImpl>(src)->dims1();
+  
+  for (int i = 0; i < dims0.size(); ++i) {
+    dense_indices.push_back(int(iptr/strides0[i]) % dims0[i]);
+  }
+  std::cout << "dense indices: " << dense_indices << std::endl;
+  return iptr;
+}
+
 Tensor& add_out_dense_sparse_gcs_cpu(Tensor& out, const Tensor& dense, const SparseTensor& src, Scalar alpha) {
   AT_ASSERT(!out.is_sparse());
   AT_ASSERT(!dense.is_sparse());
@@ -45,7 +61,7 @@ Tensor& add_out_dense_sparse_gcs_cpu(Tensor& out, const Tensor& dense, const Spa
   out.resize_as_(dense);
   Tensor resultBuffer = out;
   Tensor valuesBuffer = src_values.to(commonDtype);
-
+  
   if (out.scalar_type() != commonDtype) {
     resultBuffer = dense.to(commonDtype);
   } else if (!is_same_tensor(out, dense)) {
@@ -64,13 +80,16 @@ Tensor& add_out_dense_sparse_gcs_cpu(Tensor& out, const Tensor& dense, const Spa
       int64_t start_index = pointers_accessor[iptr];
       int64_t end_index = pointers_accessor[iptr + 1];
       int64_t nindices = end_index - start_index;
-      int64_t index;
+      int64_t icol;
+      int64_t index = valuesBuffer.storage_offset();
       
       for (int i = start_index; i < end_index; ++i) {
-        index = indices_accessor[i];
+        icol = indices_accessor[i];
       }
     }
   });
+
+  gcs_to_dense_convert(21, 16, valuesBuffer, src);
   
   return out;
 }
