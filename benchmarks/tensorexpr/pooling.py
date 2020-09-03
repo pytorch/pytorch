@@ -32,7 +32,7 @@ class PoolingBench(benchmark.Benchmark):
             sol_count = (1 + 1) + (1 + 1)
             algorithmic_count = (1 + 1) + (2 + 1)
 
-        buffer_size = self.N * self.C * self.H * self.W * 4
+        buffer_size = self.N * self.C * self.H * self.W
         return {
             "sol": buffer_size * sol_count,
             "algorithmic": buffer_size * algorithmic_count,
