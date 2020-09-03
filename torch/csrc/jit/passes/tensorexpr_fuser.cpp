@@ -536,6 +536,17 @@ class TensorExprFuser {
           input->type()->cast<TensorType>()) {
         return false;
       }
+      if (auto const& tt = input->type()->cast<TensorType>()) {
+        auto st = tt->scalarType();
+        if (!st) {
+          // All tensor types should be known.
+          return false;
+        }
+        if (c10::isComplexType(*st) || c10::isQIntType(*st) ||
+            *st == c10::ScalarType::BFloat16) {
+          return false;
+        }
+      }
     }
     return tensorexpr::isSupported(node);
   }
