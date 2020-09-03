@@ -19,7 +19,8 @@ from torch.testing._internal.common_utils import TestCase, to_gpu, freeze_rng_st
     TEST_WITH_ROCM, _assertGradAndGradgradChecks
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import expectedAlertNondeterministic
-from torch.autograd.gradcheck import get_numerical_jacobian, iter_tensors
+from torch.autograd.gradcheck import get_numerical_jacobian, iter_tensors, \
+    gradcheck, gradgradcheck
 from torch.autograd import Variable
 import torch.backends.cudnn
 
@@ -4372,6 +4373,7 @@ new_criterion_tests = [
         reference_fn=lambda i, t, il, tl, m:
             ctcloss_reference(i, t, il, tl, blank=14, reduction=get_reduction(m)),
         desc='lengths_intlists',
+        check_forward_only=True,
         check_sum_reduction=True,
         check_gradgrad=False,
         check_half=False,
@@ -4402,6 +4404,7 @@ new_criterion_tests = [
         reference_fn=lambda i, t, il, tl, m:
             ctcloss_reference(i, t, il, tl, blank=14, reduction=get_reduction(m)),
         desc='lengths_tensors',
+        check_forward_only=True,
         check_sum_reduction=True,
         check_gradgrad=False,
         check_half=False,
@@ -4430,6 +4433,7 @@ new_criterion_tests = [
         target_fn=lambda: torch.randint(1, 15, (3, 30), dtype=torch.int),
         reference_fn=lambda i, t, il, tl, m:
             ctcloss_reference(i, t, il, tl, blank=0, reduction=get_reduction(m)),
+        check_forward_only=True,
         check_sum_reduction=True,
         check_gradgrad=False,
         check_half=False,
@@ -4447,6 +4451,7 @@ new_criterion_tests = [
         target_fn=lambda: torch.randint(1, 15, (3, 30), dtype=torch.int),
         reference_fn=lambda i, t, il, tl, m:
             ctcloss_reference(i, t, il, tl, blank=0, reduction=get_reduction(m)),
+        check_forward_only=True,
         check_sum_reduction=True,
         check_gradgrad=False,
         check_half=False,
@@ -4462,6 +4467,7 @@ new_criterion_tests = [
         target_fn=lambda: torch.randint(1, 15, (3, 30), dtype=torch.int),
         reference_fn=lambda i, t, il, tl, m:
             ctcloss_reference(i, t, il, tl, blank=0, reduction=get_reduction(m)),
+        check_forward_only=True,
         check_sum_reduction=True,
         check_gradgrad=False,
         check_half=False,
@@ -4861,7 +4867,7 @@ class CriterionTest(TestBase):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.should_test_cuda = kwargs.get('test_cuda', True)
-        self.check_forward_only = kwargs.get('check_forward_only', True)
+        self.check_forward_only = kwargs.get('check_forward_only', False)
 
     def _get_target(self):
         return self._get_arg('target', True)
