@@ -1345,9 +1345,6 @@ std::tuple<Tensor,Tensor> eig_cuda(const Tensor & self, bool eigenvectors) {
   squareCheckInputs(self);
   int64_t n = self.size(-1);
 
-  // XXX antocuni: this has been copied from _symeig_helper, but is it
-  // possible to reach this code path at all? I don't think it's possible to
-  // have a square matrix with self.numel() == 0
   if (self.numel() == 0) {
     auto eigvals = at::empty({n}, self.options());
     return std::tuple<Tensor, Tensor>(eigvals, at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT));
