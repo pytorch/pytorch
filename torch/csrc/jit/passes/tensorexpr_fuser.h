@@ -17,6 +17,10 @@ TORCH_API void FuseTensorExprs(
 TORCH_API void setTensorExprFuserEnabled(bool val);
 TORCH_API bool tensorExprFuserEnabled();
 
+TORCH_API void RemoveProfileNodesAndSpecializeTypes(
+    std::shared_ptr<Graph>& graph);
+TORCH_API void RemoveTensorTypeSpecializations(std::shared_ptr<Graph>& graph);
+
 namespace tensorexpr {
 TORCH_API bool isSupported(Node* node);
 }

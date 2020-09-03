@@ -216,7 +216,7 @@ public:
     return ret;
   }
   template <typename other_t_abs = T,
-            typename std::enable_if<!is_floating_point<other_t_abs>::value && !c10::is_complex_t<other_t_abs>::value, int>::type = 0>
+            typename std::enable_if<!is_floating_point<other_t_abs>::value && !c10::is_complex<other_t_abs>::value, int>::type = 0>
   Vec256<T> abs() const {
     // other_t_abs is for SFINAE and clarity. Make sure it is not changed.
     static_assert(std::is_same<other_t_abs, T>::value, "other_t_abs must be T");
@@ -232,7 +232,7 @@ public:
     return map([](T x) -> T { return std::abs(x); });
   }
   template <typename complex_t_abs = T,
-            typename std::enable_if<c10::is_complex_t<complex_t_abs>::value, int>::type = 0>
+            typename std::enable_if<c10::is_complex<complex_t_abs>::value, int>::type = 0>
   Vec256<T> abs() const {
     // complex_t_abs is for SFINAE and clarity. Make sure it is not changed.
     static_assert(std::is_same<complex_t_abs, T>::value, "complex_t_abs must be T");
@@ -247,56 +247,56 @@ public:
   }
 
   template <typename other_t_angle = T,
-            typename std::enable_if<!c10::is_complex_t<other_t_angle>::value, int>::type = 0>
+            typename std::enable_if<!c10::is_complex<other_t_angle>::value, int>::type = 0>
   Vec256<T> angle() const {
     // other_t_angle is for SFINAE and clarity. Make sure it is not changed.
     static_assert(std::is_same<other_t_angle, T>::value, "other_t_angle must be T");
     return Vec256(0);
   }
   template <typename complex_t_angle = T,
-            typename std::enable_if<c10::is_complex_t<complex_t_angle>::value, int>::type = 0>
+            typename std::enable_if<c10::is_complex<complex_t_angle>::value, int>::type = 0>
   Vec256<T> angle() const {
     // complex_t_angle is for SFINAE and clarity. Make sure it is not changed.
     static_assert(std::is_same<complex_t_angle, T>::value, "complex_t_angle must be T");
     return map([](T x) { return static_cast<T>(std::arg(x)); });
   }
   template <typename other_t_real = T,
-            typename std::enable_if<!c10::is_complex_t<other_t_real>::value, int>::type = 0>
+            typename std::enable_if<!c10::is_complex<other_t_real>::value, int>::type = 0>
   Vec256<T> real() const {
     // other_t_real is for SFINAE and clarity. Make sure it is not changed.
     static_assert(std::is_same<other_t_real, T>::value, "other_t_real must be T");
     return *this;
   }
   template <typename complex_t_real = T,
-            typename std::enable_if<c10::is_complex_t<complex_t_real>::value, int>::type = 0>
+            typename std::enable_if<c10::is_complex<complex_t_real>::value, int>::type = 0>
   Vec256<T> real() const {
     // complex_t_real is for SFINAE and clarity. Make sure it is not changed.
     static_assert(std::is_same<complex_t_real, T>::value, "complex_t_real must be T");
     return map([](T x) { return static_cast<T>(x.real()); });
   }
   template <typename other_t_imag = T,
-            typename std::enable_if<!c10::is_complex_t<other_t_imag>::value, int>::type = 0>
+            typename std::enable_if<!c10::is_complex<other_t_imag>::value, int>::type = 0>
   Vec256<T> imag() const {
     // other_t_imag is for SFINAE and clarity. Make sure it is not changed.
     static_assert(std::is_same<other_t_imag, T>::value, "other_t_imag must be T");
     return Vec256(0);
   }
   template <typename complex_t_imag = T,
-            typename std::enable_if<c10::is_complex_t<complex_t_imag>::value, int>::type = 0>
+            typename std::enable_if<c10::is_complex<complex_t_imag>::value, int>::type = 0>
   Vec256<T> imag() const {
     // complex_t_imag is for SFINAE and clarity. Make sure it is not changed.
     static_assert(std::is_same<complex_t_imag, T>::value, "complex_t_imag must be T");
     return map([](T x) { return static_cast<T>(x.imag()); });
   }
   template <typename other_t_conj = T,
-            typename std::enable_if<!c10::is_complex_t<other_t_conj>::value, int>::type = 0>
+            typename std::enable_if<!c10::is_complex<other_t_conj>::value, int>::type = 0>
   Vec256<T> conj() const {
     // other_t_conj is for SFINAE and clarity. Make sure it is not changed.
     static_assert(std::is_same<other_t_conj, T>::value, "other_t_conj must be T");
     return *this;
   }
   template <typename complex_t_conj = T,
-            typename std::enable_if<c10::is_complex_t<complex_t_conj>::value, int>::type = 0>
+            typename std::enable_if<c10::is_complex<complex_t_conj>::value, int>::type = 0>
   Vec256<T> conj() const {
     // complex_t_conj is for SFINAE and clarity. Make sure it is not changed.
     static_assert(std::is_same<complex_t_conj, T>::value, "complex_t_conj must be T");
@@ -358,14 +358,14 @@ public:
     return map(std::log1p);
   }
   template <typename other_t_log2 = T,
-            typename std::enable_if<!c10::is_complex_t<other_t_log2>::value, int>::type = 0>
+            typename std::enable_if<!c10::is_complex<other_t_log2>::value, int>::type = 0>
   Vec256<T> log2() const {
     // other_t_log2 is for SFINAE and clarity. Make sure it is not changed.
     static_assert(std::is_same<other_t_log2, T>::value, "other_t_log2 must be T");
     return map(std::log2);
   }
   template <typename complex_t_log2 = T,
-            typename std::enable_if<c10::is_complex_t<complex_t_log2>::value, int>::type = 0>
+            typename std::enable_if<c10::is_complex<complex_t_log2>::value, int>::type = 0>
   Vec256<T> log2() const {
     // complex_t_log2 is for SFINAE and clarity. Make sure it is not changed.
     static_assert(std::is_same<complex_t_log2, T>::value, "complex_t_log2 must be T");
@@ -529,7 +529,7 @@ template <class T> Vec256<T> inline operator||(
 // Implements the IEEE 754 201X `maximum` operation, which propagates NaN if
 // either input is a NaN.
 template <class T,
-          typename std::enable_if<!c10::is_complex_t<T>::value, int>::type = 0>
+          typename std::enable_if<!c10::is_complex<T>::value, int>::type = 0>
 Vec256<T> inline maximum(const Vec256<T> &a, const Vec256<T> &b) {
   Vec256<T> c = Vec256<T>();
   for (int i = 0; i != Vec256<T>::size(); i++) {
@@ -545,7 +545,7 @@ Vec256<T> inline maximum(const Vec256<T> &a, const Vec256<T> &b) {
 }
 
 template <class T,
-          typename std::enable_if<c10::is_complex_t<T>::value, int>::type = 0>
+          typename std::enable_if<c10::is_complex<T>::value, int>::type = 0>
 Vec256<T> inline maximum(const Vec256<T> &a, const Vec256<T> &b) {
   Vec256<T> c = Vec256<T>();
   for (int i = 0; i != Vec256<T>::size(); i++) {
@@ -572,7 +572,7 @@ inline T maximum(const T& a, const T& b) {
 // Implements the IEEE 754 201X `minimum` operation, which propagates NaN if
 // either input is a NaN.
 template <class T,
-          typename std::enable_if<!c10::is_complex_t<T>::value, int>::type = 0>
+          typename std::enable_if<!c10::is_complex<T>::value, int>::type = 0>
 Vec256<T> inline minimum(const Vec256<T> &a, const Vec256<T> &b) {
   Vec256<T> c = Vec256<T>();
   for (int i = 0; i != Vec256<T>::size(); i++) {
@@ -588,7 +588,7 @@ Vec256<T> inline minimum(const Vec256<T> &a, const Vec256<T> &b) {
 }
 
 template <class T,
-          typename std::enable_if<c10::is_complex_t<T>::value, int>::type = 0>
+          typename std::enable_if<c10::is_complex<T>::value, int>::type = 0>
 Vec256<T> inline minimum(const Vec256<T> &a, const Vec256<T> &b) {
   Vec256<T> c = Vec256<T>();
   for (int i = 0; i != Vec256<T>::size(); i++) {
@@ -614,7 +614,7 @@ inline T minimum(const T& a, const T& b) {
 
 // To save BC, it will not propagate NaN based on IEEE 754 201X
 template <class T,
-          typename std::enable_if<!c10::is_complex_t<T>::value, int>::type = 0>
+          typename std::enable_if<!c10::is_complex<T>::value, int>::type = 0>
 Vec256<T> inline clamp(const Vec256<T> &a, const Vec256<T> &min_vec, const Vec256<T> &max_vec) {
   Vec256<T> c = Vec256<T>();
   for (int i = 0; i != Vec256<T>::size(); i++) {
@@ -624,7 +624,7 @@ Vec256<T> inline clamp(const Vec256<T> &a, const Vec256<T> &min_vec, const Vec25
 }
 
 template <class T,
-          typename std::enable_if<c10::is_complex_t<T>::value, int>::type = 0>
+          typename std::enable_if<c10::is_complex<T>::value, int>::type = 0>
 Vec256<T> inline clamp(const Vec256<T> &a, const Vec256<T> &min_vec, const Vec256<T> &max_vec) {
   Vec256<T> c = Vec256<T>();
   for (int i = 0; i != Vec256<T>::size(); i++) {
@@ -634,7 +634,7 @@ Vec256<T> inline clamp(const Vec256<T> &a, const Vec256<T> &min_vec, const Vec25
 }
 
 template <class T,
-          typename std::enable_if<!c10::is_complex_t<T>::value, int>::type = 0>
+          typename std::enable_if<!c10::is_complex<T>::value, int>::type = 0>
 Vec256<T> inline clamp_max(const Vec256<T> &a, const Vec256<T> &max_vec) {
   Vec256<T> c = Vec256<T>();
   for (int i = 0; i != Vec256<T>::size(); i++) {
@@ -644,7 +644,7 @@ Vec256<T> inline clamp_max(const Vec256<T> &a, const Vec256<T> &max_vec) {
 }
 
 template <class T,
-          typename std::enable_if<c10::is_complex_t<T>::value, int>::type = 0>
+          typename std::enable_if<c10::is_complex<T>::value, int>::type = 0>
 Vec256<T> inline clamp_max(const Vec256<T> &a, const Vec256<T> &max_vec) {
   Vec256<T> c = Vec256<T>();
   for (int i = 0; i != Vec256<T>::size(); i++) {
@@ -654,7 +654,7 @@ Vec256<T> inline clamp_max(const Vec256<T> &a, const Vec256<T> &max_vec) {
 }
 
 template <class T,
-          typename std::enable_if<!c10::is_complex_t<T>::value, int>::type = 0>
+          typename std::enable_if<!c10::is_complex<T>::value, int>::type = 0>
 Vec256<T> inline clamp_min(const Vec256<T> &a, const Vec256<T> &min_vec) {
   Vec256<T> c = Vec256<T>();
   for (int i = 0; i != Vec256<T>::size(); i++) {
@@ -664,7 +664,7 @@ Vec256<T> inline clamp_min(const Vec256<T> &a, const Vec256<T> &min_vec) {
 }
 
 template <class T,
-          typename std::enable_if<c10::is_complex_t<T>::value, int>::type = 0>
+          typename std::enable_if<c10::is_complex<T>::value, int>::type = 0>
 Vec256<T> inline clamp_min(const Vec256<T> &a, const Vec256<T> &min_vec) {
   Vec256<T> c = Vec256<T>();
   for (int i = 0; i != Vec256<T>::size(); i++) {
