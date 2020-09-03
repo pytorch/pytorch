@@ -16430,31 +16430,89 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                                 res2[i, j] += m1[i, l] * m2[l, j]
                     self.assertEqual(res1, res2)
 
-    @onlyCPU
-    @dtypes(*(torch.testing.get_all_complex_dtypes() + [torch.float, torch.double]))
-    def test_dot(self, device, dtype):
-        v1 = torch.randn(100, dtype=dtype, device=device)
-        v2 = torch.randn(100, dtype=dtype, device=device)
-        res1 = torch.dot(v1, v2)
-        res2 = 0
-        for i, j in zip(v1, v2):
-            res2 += i * j
-        self.assertEqual(res1, res2)
-        out = torch.randn((), dtype=dtype, device=device)
-        torch.dot(v1, v2, out=out)
-        self.assertEqual(res1, out)
+    def _test_dot_vdot_vs_numpy(self, device, dtype, torch_fn, np_fn):
+        def compare_with_numpy_bin_op(torch_fn, np_fn, x, y):
+            y_np = y.cpu().numpy()
 
-        # Test 0-strided
-        v1 = torch.randn(1, dtype=dtype, device=device).expand(100)
-        v2 = torch.randn(100, dtype=dtype, device=device)
-        res1 = torch.dot(v1, v2)
-        res2 = 0
-        for i, j in zip(v1, v2):
-            res2 += i * j
-        self.assertEqual(res1, res2)
+            # `compare_with_numpy` takes care of moving `x` to correct device for calling np_fn.
+            self.compare_with_numpy(lambda inp: torch_fn(inp, y), lambda inp: np_fn(inp, y_np), x)
+
+        # Use this tensor for out variant tests.
         out = torch.randn((), dtype=dtype, device=device)
-        torch.dot(v1, v2, out=out)
-        self.assertEqual(res1, out)
+
+        def compare_out_variant(torch_fn, x, y):
+            torch_fn(v1, v2, out=out)
+            self.assertEqual(torch_fn(v1, v2), out)
+
+        for _ in range(10):
+            numel = random.randint(10, 1000)
+            v1 = torch.randn(numel, dtype=dtype, device=device)
+            v2 = torch.randn(numel, dtype=dtype, device=device)
+            compare_with_numpy_bin_op(torch_fn, np_fn, v1, v2)
+            compare_out_variant(torch_fn, v1, v2)
+
+            # Test 0-strided
+            v3 = torch.randn(1, dtype=dtype, device=device).expand(numel)
+            compare_with_numpy_bin_op(torch_fn, np_fn, v1, v3)
+            compare_out_variant(torch_fn, v1, v3)
+
+            compare_with_numpy_bin_op(torch_fn, np_fn, v3, v1)
+            compare_out_variant(torch_fn, v3, v1)
+
+            # Test stride greater than 1
+            v4 = torch.randn(numel, numel, dtype=dtype, device=device)[:, numel - 1]
+            compare_with_numpy_bin_op(torch_fn, np_fn, v1, v4)
+            compare_out_variant(torch_fn, v1, v4)
+
+            compare_with_numpy_bin_op(torch_fn, np_fn, v4, v1)
+            compare_out_variant(torch_fn, v4, v1)
+
+    @precisionOverride({torch.cfloat: 1e-4, torch.float32: 5e-5})
+    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    def test_dot_vs_numpy(self, device, dtype):
+        self._test_dot_vdot_vs_numpy(device, dtype, torch.dot, np.dot)
+
+    @precisionOverride({torch.cfloat: 1e-4, torch.float32: 5e-5})
+    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    def test_vdot_vs_numpy(self, device, dtype):
+        self._test_dot_vdot_vs_numpy(device, dtype, torch.vdot, np.vdot)
+
+    def _test_dot_vdot_invalid_args(self, device, torch_fn, complex_dtypes=False):
+        if complex_dtypes:
+            x = torch.randn(1, dtype=torch.cfloat, device=device)
+            y = torch.randn(3, dtype=torch.cdouble, device=device)
+        else:
+            x = torch.randn(1, dtype=torch.float, device=device)
+            y = torch.randn(3, dtype=torch.double, device=device)
+
+        with self.assertRaisesRegex(RuntimeError,
+                                    'dot : expected both vectors to have same dtype'):
+            torch_fn(x, y)
+
+        with self.assertRaisesRegex(RuntimeError,
+                                    '1D tensors expected'):
+            torch_fn(x.reshape(1, 1), y)
+
+        with self.assertRaisesRegex(RuntimeError,
+                                    'inconsistent tensor size'):
+            torch_fn(x.expand(9), y.to(x.dtype))
+
+        if self.device_type != 'cpu':
+            x_cpu = x.expand(3).cpu()
+
+            with self.assertRaisesRegex(RuntimeError,
+                                        'expected all tensors to be on the same device'):
+                torch_fn(x_cpu, y.to(x.dtype))
+
+    @onlyOnCPUAndCUDA
+    def test_vdot_invalid_args(self, device):
+        self._test_dot_vdot_invalid_args(device, torch.vdot)
+        self._test_dot_vdot_invalid_args(device, torch.vdot, complex_dtypes=True)
+
+    @onlyOnCPUAndCUDA
+    def test_dot_invalid_args(self, device):
+        self._test_dot_vdot_invalid_args(device, torch.dot)
+        self._test_dot_vdot_invalid_args(device, torch.dot, complex_dtypes=True)
 
     @onlyCPU
     @slowTest
