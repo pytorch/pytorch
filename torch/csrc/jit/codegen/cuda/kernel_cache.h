@@ -150,7 +150,8 @@ class GraphCache {
 
     // common permutation order used for dimension coalescing;
     at::DimVector input_permutation_;
-    at::DimVector output_permutation_;
+    at::DimVector pw_output_permutation_;
+    at::DimVector reduction_output_permutation_;
 
     // construct InputsRequirement from `Graph`, this is used for constructing
     // `GraphCache` entry using profiling record
@@ -170,6 +171,12 @@ class GraphCache {
     // helper function used at run-time to check whether a common permutation is
     // present, this is used to take the short-cut to skip permutation logic.
     bool requiresPermutation();
+
+    // extract permutation for input output tensor from accumulcated tensor type
+    // pointer on all inputs;
+    void extractPermutation(
+        const TensorTypePtr& acc_type,
+        const std::vector<size_t>& reduction_axes);
   };
 
   // construct FusionExecutorCache per InputsRequirement.

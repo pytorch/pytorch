@@ -631,6 +631,43 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING and GRAPH_EXECUTOR !=
                      ProfilingMode.LEGACY, "Requires fusion optimization pass to be effective")
+    def test_reduction_multiple_output(self):
+        torch._C._jit_set_bailout_depth(2)
+
+        def t(x: torch.Tensor, y: torch.Tensor, scale: float, z: torch.Tensor):
+            o = torch.mul(x, y)
+            o = torch.mul(o, scale)
+            out1 = torch.mul(o, z)
+            out2 = torch.sum(out1, dim=[2])
+            return out1, out2
+
+        t_jit = torch.jit.script(t)
+        x = torch.randn(8, 4, 10, 16, dtype=torch.float, device="cuda")
+        y = torch.randn(8, 4, 10, 16, dtype=torch.float, device="cuda")
+        z = torch.randn(8, 4, 10, 16, dtype=torch.float, device="cuda")
+        scale = 0.5
+        jit_o = t_jit(x, y, scale, z)
+        jit_o = t_jit(x, y, scale, z)
+        o = t(x, y, scale, z)
+        for oo, jit_oo in zip(o, jit_o):
+            self.assertEqual(oo.dtype, jit_oo.dtype)
+            self.assertEqual(oo, jit_oo)
+        self.assertGraphContains(t_jit.graph_for(x, y, scale, z), FUSION_GROUP)
+
+        x = x.to(memory_format=torch.channels_last)
+        y = y.to(memory_format=torch.channels_last)
+        z = z.to(memory_format=torch.channels_last)
+        jit_o = t_jit(x, y, scale, z)
+        jit_o = t_jit(x, y, scale, z)
+        o = t(x, y, scale, z)
+        for oo, jit_oo in zip(o, jit_o):
+            self.assertEqual(oo.dtype, jit_oo.dtype)
+            self.assertEqual(oo, jit_oo)
+        self.assertGraphContains(t_jit.graph_for(x, y, scale, z), FUSION_GROUP)
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING and GRAPH_EXECUTOR !=
+                     ProfilingMode.LEGACY, "Requires fusion optimization pass to be effective")
     @skipIfRocm
     def test_pw_single_reduction_partition(self):
         sizes = [8, 8, 8]
