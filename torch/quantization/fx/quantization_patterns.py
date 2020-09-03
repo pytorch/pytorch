@@ -19,11 +19,6 @@ from .utils import (
 from abc import ABC, abstractmethod
 import operator
 
-# ------------------------
-# Helper Functions
-# ------------------------
-def quantize(quantizer, node):
-    return
 # -------------------------
 # Pattern Registrations
 # -------------------------

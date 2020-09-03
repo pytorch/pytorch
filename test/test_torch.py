@@ -19061,6 +19061,12 @@ class TestViewOps(TestCase):
         else:
             return x.transpose(dim0, dim1)
 
+    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes()))
+    def test_conj_self(self, device, dtype):
+        t = torch.ones(5, 5, device=device)
+        s = t.conj()
+        self.assertTrue(s is t)
+
     @onlyOnCPUAndCUDA
     def test_view_as_complex(self, device):
         def fn(contiguous_input=True, dim0=0, dim1=1):
