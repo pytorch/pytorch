@@ -1022,7 +1022,7 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward(
         if (gO.is_cuda()) {
           gO = gO.contiguous();
         }
-        gI = at::_convolution(gO, ggW, Tensor(), gi_conv_params.stride, gi_conv_params.padding, gi_conv_params.dilation, gi_conv_params.transposed, gi_conv_params.output_padding, gi_conv_params.groups, gi_conv_params.benchmark, gi_conv_params.deterministic, gi_conv_params.cudnn_enabled, params.allow_tf32);
+        gI = at::_convolution(gO, ggW, Tensor(), gi_conv_params.stride, gi_conv_params.padding, gi_conv_params.dilation, gi_conv_params.transposed, gi_conv_params.output_padding, gi_conv_params.groups, gi_conv_params.benchmark, gi_conv_params.deterministic, gi_conv_params.cudnn_enabled, gi_conv_params.allow_tf32);
 
         // narrow gI to only relevant portion
         // we do it this way because negative output_padding is not supported
@@ -1038,7 +1038,6 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward(
         }
       } else {
         auto groups = gi_conv_params.groups;
-        gi_conv_params.groups = 1;
         // swap stride and dilation
         std::swap(gi_conv_params.dilation, gi_conv_params.stride);
 
@@ -1070,28 +1069,10 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward(
           }
         }
 
-        Tensor gIt;
-        if (params.groups == 1) {
-          if (gOt.is_cuda()) {
-            gOt = gOt.contiguous();
-          }
-
-          gIt = at::_convolution(ggWt, gOt, Tensor(), gi_conv_params.stride, gi_conv_params.padding, gi_conv_params.dilation, gi_conv_params.transposed, gi_conv_params.output_padding, gi_conv_params.groups, gi_conv_params.benchmark, gi_conv_params.deterministic, gi_conv_params.cudnn_enabled, params.allow_tf32);
-        } else {
-          std::vector<Tensor> gIt_list(params.groups);
-          for (int g = 0; g < groups; ++g) {
-            auto ggWt_g = subvariable(ggWt, 1, groups, g);
-            auto gOt_g = subvariable(gOt, 0, groups, g);
-            if (gOt_g.is_cuda()) {
-              gOt_g = gOt_g.contiguous();
-            }
-
-            gIt_list[g] = at::_convolution(ggWt_g, gOt_g, Tensor(), gi_conv_params.stride, gi_conv_params.padding, gi_conv_params.dilation, gi_conv_params.transposed, gi_conv_params.output_padding, gi_conv_params.groups, gi_conv_params.benchmark, gi_conv_params.deterministic, gi_conv_params.cudnn_enabled, params.allow_tf32);
-          }
-
-          gIt = at::cat(gIt_list, 0);
+        if (gOt.is_cuda()) {
+          gOt = gOt.contiguous();
         }
-
+        Tensor gIt = at::_convolution(ggWt, gOt, Tensor(), gi_conv_params.stride, gi_conv_params.padding, gi_conv_params.dilation, gi_conv_params.transposed, gi_conv_params.output_padding, gi_conv_params.groups, gi_conv_params.benchmark, gi_conv_params.deterministic, gi_conv_params.cudnn_enabled, gi_conv_params.allow_tf32);
         gI = gIt.transpose(0, 1);
       }
     }
