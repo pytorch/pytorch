@@ -19,7 +19,9 @@ class TestProfiler(JitTestCase):
         self.prev_profiling = torch._C._jit_set_profiling_mode(True)
         self.inline_autodiff = torch._C._debug_set_autodiff_subgraph_inlining(False)
         self.texpr_fuser_state = torch._C._jit_texpr_fuser_enabled()
+        self.can_fuse_on_cpu = torch._C._jit_can_fuse_on_cpu()
         torch._C._jit_set_texpr_fuser_enabled(True)
+        torch._C._jit_override_can_fuse_on_cpu(True)
         self.default_dtype = torch.get_default_dtype()
         torch.set_default_dtype(torch.double)
 
@@ -29,6 +31,7 @@ class TestProfiler(JitTestCase):
         torch._C._jit_set_profiling_mode(self.prev_profiling)
         torch._C._debug_set_autodiff_subgraph_inlining(self.inline_autodiff)
         torch._C._jit_set_texpr_fuser_enabled(self.texpr_fuser_state)
+        torch._C._jit_override_can_fuse_on_cpu(self.can_fuse_on_cpu)
         torch.set_default_dtype(self.default_dtype)
 
     def test_specialize_backward(self):
