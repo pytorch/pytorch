@@ -355,7 +355,8 @@ void EncoderBase::EncodeValueInfo(
     auto elem_type = list_type->getElementType();
     if (TensorTypePtr inner_node_type = elem_type->cast<TensorType>()) {
       onnx::TypeProto* onnx_type = v->mutable_type();
-      onnx::TypeProto_Sequence* sequence_type = onnx_type->mutable_sequence_type();
+      onnx::TypeProto_Sequence* sequence_type =
+          onnx_type->mutable_sequence_type();
       onnx::TypeProto_Tensor* tensor_type =
           sequence_type->mutable_elem_type()->mutable_tensor_type();
       tensorTypeToONNXType(inner_node_type, tensor_type);

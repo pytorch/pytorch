@@ -1,7 +1,7 @@
 #include <torch/csrc/jit/passes/onnx/fixup_onnx_controlflow.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/onnx/peephole.h>
-#include <torch/csrc/jit/jit_log.h>
 
 namespace torch {
 namespace jit {

@@ -188,7 +188,9 @@ void BlockToONNX(
     return it->second;
   };
 
-  GRAPH_DEBUG("BlockToONNX: graph of old block: ", old_block->owningGraph()->toString());
+  GRAPH_DEBUG(
+      "BlockToONNX: graph of old block: ",
+      old_block->owningGraph()->toString());
 
   // Initialize context and environment
   for (auto input : old_block->inputs()) {

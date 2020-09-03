@@ -9,25 +9,22 @@
 namespace torch {
 namespace jit {
 
-namespace {
-namespace onnx_torch = ::torch::onnx;
-namespace onnx = ::ONNX_NAMESPACE;
-
 // Return a new TypePtr, merging ONNX inferred type with existing type.
-// The inferred type will take higher precedence, since it is produced by ONNX shape inference,
-// and is more compatible with ONNX.
-// In cases where ONNX shape inference fails to produce an inferred type, or produces
-// inferred type that is incomplete, refer to existing type and fill in the gap that
-// is missing.
+// The inferred type will take higher precedence, since it is produced by ONNX
+// shape inference, and is more compatible with ONNX. In cases where ONNX shape
+// inference fails to produce an inferred type, or produces inferred type that
+// is incomplete, refer to existing type and fill in the gap that is missing.
 // Currently the following cases are supported.
 //  1. existing type: Tensor[], inferred type: Tensor[]
-//    For list of tensors, existing type does not store datatype nor shape for inner tensor.
-//    Thus inferred type always contain more information, and is returned.
+//    For list of tensors, existing type does not store datatype nor shape for
+//    inner tensor. Thus inferred type always contain more information, and is
+//    returned.
 //  2. existing type: Tensor, inferred type: Tensor
-//    Fill in missing info (shape, data type) for inferred type from existing type.
+//    Fill in missing info (shape, data type) for inferred type from existing
+//    type.
 //  3. existing type: Scalar[], inferred type: Tensor
-//    ONNX represents list of scalars by 1-d Tensor. Return inferred type since it is more compatible
-//    with ONNX.
+//    ONNX represents list of scalars by 1-d Tensor. Return inferred type since
+//    it is more compatible with ONNX.
 TypePtr MergeInferredType(TypePtr existing_type, TypePtr inferred_type) {
   auto new_list_type = inferred_type->cast<ListType>();
   if (new_list_type) {
@@ -61,6 +58,10 @@ TypePtr MergeInferredType(TypePtr existing_type, TypePtr inferred_type) {
 
   return inferred_type;
 }
+
+namespace {
+namespace onnx_torch = ::torch::onnx;
+namespace onnx = ::ONNX_NAMESPACE;
 
 TensorTypePtr TorchTensorTypeFromONNX(
     const onnx::TypeProto_Tensor& onnx_tensor_type) {
@@ -139,9 +140,11 @@ bool IsSupportedNode(const Node* n) {
     return false;
   }
 
-  // Skip when block size is zero. This is when the node is first created, doesn't have subblocks attached yet.
-  // Run shape inference for these nodes when the subgraph has already completed shape inferencing.
-  if ((node_kind == ::c10::onnx::Loop || node_kind == ::c10::onnx::If) && n->blocks().size() == 0) {
+  // Skip when block size is zero. This is when the node is first created,
+  // doesn't have subblocks attached yet. Run shape inference for these nodes
+  // when the subgraph has already completed shape inferencing.
+  if ((node_kind == ::c10::onnx::Loop || node_kind == ::c10::onnx::If) &&
+      n->blocks().size() == 0) {
     return false;
   }
 
@@ -158,9 +161,11 @@ Node* CloneNodeToGraph(Node* n, std::shared_ptr<Graph> n_graph) {
           n_graph->createClone(v_n, [](Value* v) { return v; }));
       return constant_n->output();
     } else if (v_n->kind() == ::c10::prim::ListConstruct) {
-      // In jit/passes/onnx/peephole.cpp::eraseListConstruct, prim::ListConstruct is converted to
-      // onnx::Concat. The conversion should eventually be moved to symbolic. For now, treat this operator
-      // as special case, and change from list type to tensor type. The scalar type is preserved.
+      // In jit/passes/onnx/peephole.cpp::eraseListConstruct,
+      // prim::ListConstruct is converted to onnx::Concat. The conversion should
+      // eventually be moved to symbolic. For now, treat this operator as
+      // special case, and change from list type to tensor type. The scalar type
+      // is preserved.
       TypePtr elem = v->type()->cast<ListType>()->getElementType();
       c10::optional<at::ScalarType> scalar_type = c10::nullopt;
       if (elem->cast<IntType>()) {
@@ -202,7 +207,8 @@ bool IsGraphValidForInference(std::shared_ptr<Graph> graph) {
   for (auto in : graph->inputs()) {
     if (auto t_type = in->type()->cast<TensorType>()) {
       if (!t_type->scalarType().has_value()) {
-        GRAPH_UPDATE("Input ", in->debugName(), " is tensor type, but miss datatype.");
+        GRAPH_UPDATE(
+            "Input ", in->debugName(), " is tensor type, but miss datatype.");
         return false;
       }
     } else if (auto s_type = in->type()->cast<ListType>()) {
@@ -212,7 +218,8 @@ bool IsGraphValidForInference(std::shared_ptr<Graph> graph) {
           continue;
         }
       }
-      GRAPH_UPDATE("Input ", in->debugName(), " is sequence type, but miss datatype.");
+      GRAPH_UPDATE(
+          "Input ", in->debugName(), " is sequence type, but miss datatype.");
       return false;
     }
   }
@@ -291,7 +298,8 @@ void UpdateOutputTypeByONNXProto(
 } // namespace
 
 void ONNXShapeTypeInference(Node* n, int opset_version) {
-  GRAPH_UPDATE("Running ONNX shape inference for node: ", n->kind().toDisplayString());
+  GRAPH_UPDATE(
+      "Running ONNX shape inference for node: ", n->kind().toDisplayString());
   if (!IsSupportedNode(n)) {
     return;
   }
@@ -306,7 +314,8 @@ void ONNXShapeTypeInference(Node* n, int opset_version) {
   }
 
   GRAPH_DEBUG("Original torch graph: ", n->owningGraph()->toString());
-  GRAPH_DEBUG("Cloned torch graph to run shape inference: ", n_graph->toString());
+  GRAPH_DEBUG(
+      "Cloned torch graph to run shape inference: ", n_graph->toString());
 
   if (!IsGraphValidForInference(n_graph)) {
     GRAPH_UPDATE("Skipping ONNX shape inference for this node.");
@@ -325,7 +334,8 @@ void ONNXShapeTypeInference(Node* n, int opset_version) {
   GRAPH_DEBUG("ONNX graph after shape inference: ", prettyPrint(model_proto));
 
   UpdateOutputTypeByONNXProto(n, clone_node, model_proto);
-  GRAPH_DEBUG("Torch graph after shape inference:", n->owningGraph()->toString());
+  GRAPH_DEBUG(
+      "Torch graph after shape inference:", n->owningGraph()->toString());
 }
 
 } // namespace jit
