@@ -466,7 +466,7 @@ namespace {
     TYPED_TEST(Interleave, Interleave) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
-        constexpr size_t N = vec::size() * 2;
+        constexpr auto N = vec::size() * 2LL;
         CACHE_ALIGN VT vals[N];
         CACHE_ALIGN VT interleaved[N];
         auto seed = TestSeed();
@@ -476,15 +476,15 @@ namespace {
         }
         copy_interleave(vals, interleaved);
         auto a = vec::loadu(vals);
-        auto b = vec::loadu(vals + N / 2);
+        auto b = vec::loadu(vals + vec::size());
         auto cc = interleave2(a, b);
         AssertVec256<vec>(NAME_INFO(Interleave FirstHalf), std::get<0>(cc), vec::loadu(interleaved)).check(true);
-        AssertVec256<vec>(NAME_INFO(Interleave SecondHalf), std::get<1>(cc), vec::loadu(interleaved +  N / 2)).check(true);
+        AssertVec256<vec>(NAME_INFO(Interleave SecondHalf), std::get<1>(cc), vec::loadu(interleaved + vec::size())).check(true);
     }
     TYPED_TEST(Interleave, DeInterleave) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
-        constexpr size_t N = vec::size() * 2;
+        constexpr auto N = vec::size() * 2LL;
         CACHE_ALIGN VT vals[N];
         CACHE_ALIGN VT interleaved[N];
         auto seed = TestSeed();
@@ -495,10 +495,10 @@ namespace {
         copy_interleave(vals, interleaved);
         // test interleaved with vals this time
         auto a = vec::loadu(interleaved);
-        auto b = vec::loadu(interleaved + N / 2);
+        auto b = vec::loadu(interleaved + vec::size());
         auto cc = deinterleave2(a, b);
         AssertVec256<vec>(NAME_INFO(DeInterleave FirstHalf), std::get<0>(cc), vec::loadu(vals)).check(true);
-        AssertVec256<vec>(NAME_INFO(DeInterleave SecondHalf), std::get<1>(cc), vec::loadu(vals +  N / 2)).check(true);
+        AssertVec256<vec>(NAME_INFO(DeInterleave SecondHalf), std::get<1>(cc), vec::loadu(vals + vec::size())).check(true);
     }
     TYPED_TEST(Arithmetics, Plus) {
         using vec = TypeParam;
@@ -530,7 +530,7 @@ namespace {
         test_binary<vec>(
             NAME_INFO(mult),
             RESOLVE_OVERLOAD(local_multiply),
-            [](const vec& v0, const vec& v1) { return v0 * v1; },
+            [](const vec &v0, const vec &v1) { return v0 * v1; },
             createDefaultBinaryTestCase<vec>(TestSeed(), false, true),
             RESOLVE_OVERLOAD(filter_mult_overflow));
     }
@@ -784,7 +784,7 @@ namespace {
         CACHE_ALIGN VT b[vec::size()];
         CACHE_ALIGN VT expected_val[vec::size()];
         blend_init(a, b);
-        constexpr int64_t power_sets = 1 << (vec::size());
+        constexpr int64_t power_sets = 1LL << (vec::size());
         test_blend<vec, VT, power_sets - 1>(expected_val, a, b);
     }
     TEST(ComplexTests, TestComplexFloatImagRealConj) {
@@ -815,11 +815,11 @@ namespace {
         typename vec::float_vec_return_type  float_ret;
         auto seed = TestSeed();
         //zero point
-        ValueGen<int> generator_zp(min_val, max_val, seed.nextSeed());
+        ValueGen<int> generator_zp(min_val, max_val, seed);
         //scale
-        ValueGen<float> generator_sc(1.f, 15.f, seed.nextSeed());
+        ValueGen<float> generator_sc(1.f, 15.f, seed.add(1));
         //value
-        ValueGen<float> gen(min_val * 2.f, max_val * 2.f, seed.nextSeed());
+        ValueGen<float> gen(min_val * 2.f, max_val * 2.f, seed.add(2));
         for (int i = 0; i < trials; i++) {
             float scale = generator_sc.get();
             float inv_scale = 1.0f / static_cast<float>(scale);
@@ -848,14 +848,13 @@ namespace {
         constexpr int max_val = is_large ? 2199 : std::numeric_limits<underlying>::max();
         CACHE_ALIGN float unit_exp_vals[vfloat::size()];
         CACHE_ALIGN underlying qint_vals[vec::size()];
-        typename vec::float_vec_return_type  expected_float_ret;
 #if  defined(CHECK_DEQUANT_WITH_LOW_PRECISION)
         std::cout << "Dequant will be tested with relative error " << 1.e-3f << std::endl;
 #endif
         auto seed = TestSeed();
-        ValueGen<int> generator(min_val, max_val, seed.nextSeed());
+        ValueGen<int> generator(min_val, max_val, seed.add(1));
         //scale
-        ValueGen<float> generator_sc(1.f, 15.f, seed.nextSeed());
+        ValueGen<float> generator_sc(1.f, 15.f, seed.add(2));
         for (int i = 0; i < trials; i++) {
             float scale = generator_sc.get();
             int32_t zero_point_val = generator.get();
@@ -869,19 +868,15 @@ namespace {
             }
             //get expected
             int index = 0;
+            auto qint_vec = vec::loadu(qint_vals);
+            auto actual_float_ret = qint_vec.dequantize(vf_scale, vf_zp, vf_scale_zp);
             for (int j = 0; j < vec::float_num_vecs(); j++) {
                 for (auto& v : unit_exp_vals) {
                     v = dequantize_val(scale, zero_point_val, qint_vals[index]);
                     index++;
                 }
-                vfloat vf = vfloat::loadu(unit_exp_vals);
-                expected_float_ret[j] = vf;
-            }
-            auto qint_vec = vec::loadu(qint_vals);
-            auto actual_float_ret = qint_vec.dequantize(vf_scale, vf_zp, vf_scale_zp);
-            for (int j = 0; j < vec::float_num_vecs(); j++) {
-                auto expected = expected_float_ret[j];
-                auto actual = actual_float_ret[j];
+                vfloat expected = vfloat::loadu(unit_exp_vals);
+                const auto &actual = actual_float_ret[j];
 #if  defined(CHECK_DEQUANT_WITH_LOW_PRECISION)
                 if(AssertVec256<vfloat>(NAME_INFO(DeQuantize), seed, expected, actual).check( false, true, 1.e-3f)) return;
 #else
@@ -902,11 +897,11 @@ namespace {
         typename vec::int_vec_return_type  int_ret;
         auto seed = TestSeed();
         //zero point
-        ValueGen<int32_t> generator_zp(min_val, max_val, seed.nextSeed());
+        ValueGen<int32_t> generator_zp(min_val, max_val, seed);
         //scale
-        ValueGen<float> generator_sc(1.f, 15.f, seed.nextSeed());
+        ValueGen<float> generator_sc(1.f, 15.f, seed.add(1));
         //value
-        ValueGen<int32_t> gen(-65535, 65535, seed.nextSeed());
+        ValueGen<int32_t> gen(-65535, 65535, seed.add(2));
         for (int i = 0; i < trials; i++) {
             float multiplier = 1.f / (generator_sc.get());
             auto zero_point_val = generator_zp.get();
@@ -922,7 +917,9 @@ namespace {
             }
             auto expected = vec::loadu(expected_qint_vals);
             auto actual = vec::requantize_from_int(int_ret, multiplier, zero_point_val);
-            if(AssertVec256<vec>(NAME_INFO(ReQuantizeFromInt), seed, expected, actual).check()) return;
+            if (AssertVec256<vec>(NAME_INFO(ReQuantizeFromInt), seed, expected, actual).check()) {
+                return;
+            }
         } //trials;
     }
     TYPED_TEST(QuantizationTests, WideningSubtract) {
@@ -948,21 +945,17 @@ namespace {
                     filter_sub_overflow(qint_vals[j], qint_b[j]);
                 } 
             }
-            //get expected
             int index = 0;
-            for (int j = 0; j < vec::int_num_vecs(); j++) {
-                for (auto& v : unit_exp_vals) {
-                    v = widening_subtract(qint_vals[index], qint_b[index]);
-                    index++;
-                }
-                expected_int_ret[j] = vqint::loadu(unit_exp_vals);
-            }
             auto qint_vec = vec::loadu(qint_vals);
             auto qint_vec_b = vec::loadu(qint_b);
             auto actual_int_ret = qint_vec.widening_subtract(qint_vec_b);
             for (int j = 0; j < vec::float_num_vecs(); j++) {
-                auto expected = expected_int_ret[j];
-                auto actual = actual_int_ret[j];
+                for (auto& v : unit_exp_vals) {
+                    v = widening_subtract(qint_vals[index], qint_b[index]);
+                    index++;
+                }
+                auto expected = vqint::loadu(unit_exp_vals);
+                const auto &actual = actual_int_ret[j];
                 if(AssertVec256<vqint>(NAME_INFO(WideningSubtract), seed, expected, actual).check()) return;
             }
         } //trials;
