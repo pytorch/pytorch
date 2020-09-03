@@ -977,11 +977,7 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward(
 
     // Transpose gO and ggI to accumulate over batch
     auto gOt = gO.transpose(0, 1);
-    Tensor ggIt;
-    if (groups == 1)
-      ggIt = ggI.transpose(0, 1);
-    else
-      ggIt = ggI;
+    auto ggIt = groups == 1 ? ggI.transpose(0, 1) : ggI;
 
     Tensor gWt;
     // Compute conv
