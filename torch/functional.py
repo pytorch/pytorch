@@ -76,21 +76,26 @@ def broadcast_shape(*shapes):
 
     Similar to :func:`broadcast_tensors` but for shapes.
 
-    This is roughly equivalent to
-    `torch.broadcast_tensors(*map(torch.empty, shapes)).shape`
+    This is equivalent to
+    `torch.broadcast_tensors(*map(torch.empty, shapes))[0].shape`
     but avoids the need create to intermediate tensors. This is useful for
     broadcasting tensors of common batch shape but different rightmost shape,
     e.g. to broadcast mean vectors with covariance matrices.
 
     Example::
 
-        >>> mean = torch.randn(30, 3)
-        >>> cov = torch.eye(20, 1, 3, 3)
-        >>> batch_shape = torch.broadcast_shape(mean.shape[:-1], cov.shape[:-2])
+        >>> scalar = torch.randn(30)      # a batched scalar
+        >>> vector = torch.eye(20, 1, 3)  # a batched vector of length 3
+        >>> batch_shape = torch.broadcast_shape(scalar.shape,
+        ...                                     vector.shape[:-1])
         >>> batch_shape
         torch.Size([20, 30])
-        >>> a = mean.expand(batch_shape + (-1,))
-        >>> b = cov.expand(batch_shape + (-1, -1))
+        >>> s = scalar.expand(batch_shape)
+        >>> v = vector.expand(batch_shape + (-1,))
+        >>> s.shape
+        torch.Size([20, 30])
+        >>> v.shape
+        torch.Size([20, 30, 3])
 
     Args:
         \*shapes (torch.Size): Shapes of tensors.
