@@ -18,7 +18,8 @@ namespace SubgraphUtils {
 // `n` is destroyed.
 //
 // Returns the new subgraph node.
-// An optional argument 'vmap' could be used to retrieve value mappings.
+// An optional argument 'vmap' could be used to retrieve value mappings
+// Values will be mapped to their new subgraph values
 TORCH_API Node* createSingletonSubgraph(Node* n, Symbol subgraphKind);
 TORCH_API Node* createSingletonSubgraph(
     Node* n,
@@ -29,6 +30,7 @@ TORCH_API Node* createSingletonSubgraph(
 // subgraphs are merged.
 // `toMerge` is destroyed.
 // An optional argument 'vmap' could be used to retrieve value mappings.
+// Values will be mapped to their new subgraph values
 TORCH_API void mergeNodeIntoSubgraph(Node* toMerge, Node* subgraphNode);
 TORCH_API void mergeNodeIntoSubgraph(
     Node* toMerge,

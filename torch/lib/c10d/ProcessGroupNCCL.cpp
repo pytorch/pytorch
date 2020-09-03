@@ -615,9 +615,7 @@ void ProcessGroupNCCL::workCleanupLoop() {
       if (work->isCompleted()) {
         // Handle Exceptions on failed GPU operations and remove completed
         // workNCCL objects from work vector.
-        if (work->finishedGPUExecution()) {
-          work->handleNCCLGuard();
-        }
+        work->handleNCCLGuard();
         it = workList_.erase(it);
       } else {
         // Increment the iterator if the current WorkNCCL object is not
