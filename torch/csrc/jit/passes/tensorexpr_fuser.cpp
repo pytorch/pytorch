@@ -106,9 +106,7 @@ bool isSupported(Node* node) {
       "aten::unsqueeze(Tensor(a) self, int dim) -> Tensor(a)",
       "aten::frac(Tensor self) -> Tensor",
       // TODO: uncomment once we can handle rand+broadcasts
-      // "aten::rand_like(Tensor self, *, ScalarType? dtype=None, Layout?
-      // layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat?
-      // memory_format=None) -> Tensor",
+      // "aten::rand_like(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
       "aten::__and__.Scalar(Tensor self, Scalar other) -> Tensor",
       "aten::__and__.Tensor(Tensor self, Tensor other) -> Tensor",
       "aten::__or__.Scalar(Tensor self, Scalar other) -> Tensor",
