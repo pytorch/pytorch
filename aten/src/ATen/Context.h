@@ -112,14 +112,78 @@ class CAFFE2_API Context {
   void setBenchmarkCuDNN(bool);
   bool deterministicCuDNN() const;
   void setDeterministicCuDNN(bool);
+
+  // Note [Enabling Deterministic Operations]
+  // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  // Operations in PyTorch that normally act nondeterministically, but have an alternate
+  // deterministic implementation, should satisfy the following requirements:
+  //
+  // * Include this comment: "See Note [Enabling Deterministic Operations]"
+  //
+  // * Check the value of `at::globalContext().deterministic()` to toggle between
+  //   nondeterministic and deterministic implementations.
+  //
+  // * Have an entry in the list of PyTorch operations that toggle between nondeterministic
+  //   and deterministic implementations, in the docstring of `set_deterministic()`
+  //   in torch/__init__.py
+  //
+  // `example_func()` below shows an example of toggling between nondeterministic and
+  // deterministic implementations:
+  //
+  //    void example_func() {
+  //      // See Note [Enabling Deterministic Operations]
+  //      if (at::globalContext().deterministic()) {
+  //        example_func_deterministic();
+  //      } else {
+  //        example_func_nondeterministic();
+  //      }
+  //    }
+
   bool deterministic() const;
   void setDeterministic(bool);
+
+  // Note [Writing Nondeterministic Operations]
+  // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  // Operations in PyTorch that act nondeterministically and do not have an alternate
+  // deterministic implementation should satisfy the following requirements:
+  //
+  // * Include this comment: "See Note [Writing Nondeterministic Operations]"
+  //
+  // * Include a comment explaining why the operation is nondeterministic.
+  //
+  // * Throw an error when `Context::deterministic()` is true. Most of the time, this
+  //   should be accomplished by calling `at::globalContext().alertNotDeterminstic()`.
+  //   However, if the nondeterministic behavior is caused by the CuBLAS workspace
+  //   configuration in CUDA >= 10.2,
+  //   `at::globalContext().alertCuBLASConfigNotDeterministic()` should
+  //   be called instead (in this case, a comment explaining why the operation is
+  //   nondeterministic is not necessary). See below for details on these methods.
+  //
+  // * Have an entry in the list of nondeterministic PyTorch operations in the
+  //   docstring of `set_deterministic()` in torch/__init__.py
+  //
+  // `example_func()` below shows an example of the comments and error-throwing code
+  // for a nondeterministic operation:
+  //
+  //    void example_func() {
+  //      // See Note [Writing Nondeterministic Operations]
+  //      // Nondeterministic because <reason>
+  //      at::globalContext().alertNondeterministic("example_func");
+  //      ...
+  //    }
+
+  // Throws an error if `Context::deterministic()` is true
   void alertNotDeterministic(c10::string_view const& caller);
+
+  // Throws an error if `Context::deterministic()` is true, CUDA >= 10.2, and
+  // CUBLAS_WORKSPACE_CONFIG is not set to either ":16:8" or ":4096:8". For more details:
+  // https://docs.nvidia.com/cuda/cublas/index.html#cublasApi_reproducibility
+  void alertCuBLASConfigNotDeterministic();
+
   bool allowTF32CuDNN() const;
   void setAllowTF32CuDNN(bool);
   bool allowTF32CuBLAS() const;
   void setAllowTF32CuBLAS(bool);
-  void alertCuBLASConfigNotDeterministic();
   at::QEngine qEngine() const;
   void setQEngine(at::QEngine e);
   const std::vector<at::QEngine>& supportedQEngines() const;
