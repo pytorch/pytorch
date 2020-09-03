@@ -12098,7 +12098,7 @@ class TestNNDeviceType(NNTestCase):
             self.assertTrue(gradcheck(lambda a, p, n: F.triplet_margin_loss_with_distance(
                 a, p, n, **kwargs), (anchor, positive, negative)))
             self.assertTrue(gradcheck(lambda a, p, n: loss_op(a, p, n),
-                                                      (anchor, positive, negative)))
+                            (anchor, positive, negative)))
 
     def test_triplet_margin_loss_with_distance(self, device):
         # Test for parity between `nn.TripletMarginLossWithDistance` and
@@ -12107,6 +12107,7 @@ class TestNNDeviceType(NNTestCase):
         def pairwise_similarity(x, y):
             return 1.0 - F.pairwise_distance(x, y)
         pairwise_distance = nn.PairwiseDistance()
+
         def cosine_distance(x, y):
             return 1.0 - F.cosine_similarity(x, y)
         cosine_similarity = nn.CosineSimilarity()
@@ -12129,8 +12130,8 @@ class TestNNDeviceType(NNTestCase):
                 reduction=reduction, margin=margin, swap=swap),
                 (anchor, positive, negative)))
             loss_op = nn.TripletMarginLossWithDistance(distance_function=distance_fn,
-                                                         is_similarity_function=is_similarity_fn,
-                                                         reduction=reduction, margin=margin, swap=swap)
+                                                       is_similarity_function=is_similarity_fn,
+                                                       reduction=reduction, margin=margin, swap=swap)
             self.assertTrue(gradcheck(lambda a, p, n: loss_op(
                 a, p, n), (anchor, positive, negative)))
             traced_loss_op = torch.jit.trace(loss_op, (anchor, positive, negative))
