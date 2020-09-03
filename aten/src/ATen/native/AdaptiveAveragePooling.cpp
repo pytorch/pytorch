@@ -332,14 +332,12 @@ namespace {
     if (!input.is_quantized() && output_size[0] == 1 && output_size[1] == 1) {
       // in this case, adaptive pooling is just computing mean over hw
       // dimensions, which can be done more efficiently
-      Tensor out = input.mean({-1, -2});
-      const int n = input.size(0);
-      const int c = input.size(1);
-      const int ndim = input.dim();
-      out = (ndim == 3) ? out.view({n, 1, 1}) : out.view({n, c, 1, 1});
+      Tensor out = input.mean({-1, -2}, /* keepdim = */ true);
       if (input.suggest_memory_format() == at::MemoryFormat::ChannelsLast) {
-        out.unsafeGetTensorImpl()->set_stride(ndim-1, c);
-        out.unsafeGetTensorImpl()->set_stride(ndim-2, c);
+        // assert ndim == 4, since ndim = 3 doesn't give channels_last
+        const int n = input.size(0);
+        const int c = input.size(1);
+        out.as_strided_({n, c, 1, 1}, {c, 1, c, c});
       }
       return out;
     } else {
