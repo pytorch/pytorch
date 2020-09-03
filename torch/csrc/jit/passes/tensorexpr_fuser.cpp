@@ -16,6 +16,8 @@
 namespace torch {
 namespace jit {
 
+static bool texpr_reductions_enabled = false;
+
 bool isSupportedForBlock(Node* node) {
   switch (node->kind()) {
     case aten::add:
@@ -83,7 +85,6 @@ bool isSupported(Node* node) {
     case aten::addcmul:
     case aten::neg:
     case aten::reciprocal:
-    case aten::sum:
     case aten::expm1:
     case aten::lgamma:
     case aten::unsqueeze:
@@ -113,6 +114,8 @@ bool isSupported(Node* node) {
     case aten::slice:
       // TODO: Shape inference is not implemented for this op yet
       return false;
+    case aten::sum:
+      return texpr_reductions_enabled;
     default:
       return false;
   }
@@ -121,6 +124,7 @@ bool isSupported(Node* node) {
 } // namespace tensorexpr
 
 static bool texpr_fuser_enabled_ = false;
+
 void setTensorExprFuserEnabled(bool val) {
   texpr_fuser_enabled_ = val;
 }
@@ -134,6 +138,16 @@ bool tensorExprFuserEnabled() {
     return false;
   }
   return true;
+}
+
+bool setTexprReductionsEnabled(bool value) {
+  bool old_value = texpr_reductions_enabled;
+  texpr_reductions_enabled = value;
+  return old_value;
+}
+
+bool texprReductionsEnabled() {
+  return texpr_reductions_enabled;
 }
 
 struct nodesComparator {
