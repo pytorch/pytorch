@@ -15217,15 +15217,22 @@ class TestTorchDeviceType(TestCase):
     @dtypesIfCPU(torch.float, torch.double)
     @dtypesIfCUDA(torch.half, torch.float)
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
-    def test_minmax(self, device, dtype):
-        if self.device_type == "cuda":
-            # FIXME when minmax is implemented on cuda
-            with self.assertRaises(RuntimeError):
-                self._test_minmax_helper(lambda x: torch._min_max(x)[0], np.min, device, dtype, skip_indices=True)
-            return
+    def test_aminmax(self, device, dtype):
 
-        self._test_minmax_helper(lambda x: torch._min_max(x)[0], np.min, device, dtype, skip_indices=True)
-        self._test_minmax_helper(lambda x: torch._min_max(x)[1], np.max, device, dtype, skip_indices=True)
+        def _amin_wrapper(x, dim=None, keepdims=False):
+            if dim is None:
+                return torch._aminmax(x)[0]
+            else:
+                return torch._aminmax(x, dim, keepdims)[0]
+
+        def _amax_wrapper(x, dim=None, keepdims=False):
+            if dim is None:
+                return torch._aminmax(x)[1]
+            else:
+                return torch._aminmax(x, dim, keepdims)[1]
+
+        self._test_minmax_helper(_amin_wrapper, np.amin, device, dtype)
+        self._test_minmax_helper(_amax_wrapper, np.amax, device, dtype)
 
     @dtypes(*product(torch.testing.get_all_dtypes(include_complex=False), torch.testing.get_all_dtypes(include_complex=False)))
     def test_maximum_minimum_type_promotion(self, device, dtypes):
