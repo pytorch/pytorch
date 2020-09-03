@@ -74,25 +74,30 @@ void StatefulExpressionEvaluator::print() const {
   std::cout << "--------------------\n\n";
 }
 
-inline c10::optional<Int::ScalarType> StatefulExpressionEvaluator::getValue(
+c10::optional<Int::ScalarType> StatefulExpressionEvaluator::getValue(
     Val* value) {
   TORCH_INTERNAL_ASSERT(
       value->isAnInt(),
       "Expressoin Evaluation does not support values other than integers at this time.");
 
-  auto v_type = value->getValType().value();
-  bool is_named_scalar =
-      v_type == ValType::NamedScalar || v_type == ValType::KirNamedScalar;
-
-  if (!is_named_scalar && value->as<Int>()->value().has_value()) {
-    return value->as<Int>()->value();
+  switch (value->getValType().value()) {
+    case ValType::Scalar:
+      if (value->as<Int>()->value().has_value()) {
+        return value->as<Int>()->value();
+      }
+      break;
+    case ValType::KirScalar:
+      if (value->as<kir::Int>()->value().has_value()) {
+        return value->as<kir::Int>()->value();
+      }
+      break;
+    default:
+      break;
   }
 
-  auto it = bindings_.find(value);
-  if (it != bindings_.end()) {
-    return c10::optional<Int::ScalarType>(it->second);
-  }
-  return c10::nullopt;
+  const auto it = bindings_.find(value);
+  return it != bindings_.end() ? c10::optional<Int::ScalarType>(it->second)
+                               : c10::nullopt;
 }
 
 c10::optional<Int::ScalarType> StatefulExpressionEvaluator::maybeHandle(
