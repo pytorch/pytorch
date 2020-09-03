@@ -3,6 +3,7 @@
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/ivalue.h>
 #include <torch/csrc/jit/api/module.h>
+#include <torch/csrc/jit/codegen/fuser/arg_spec.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/inliner.h>
@@ -54,6 +55,7 @@ class ProcessedNode {
   Node* node_;
   c10::optional<Operation> op_;
   c10::optional<std::function<void(StaticRuntime::ConstantMap&)>> fn_;
+  mutable std::unordered_map<uint64_t, Operation> compiled_;
 };
 
 } // namespace jit
