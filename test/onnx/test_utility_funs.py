@@ -530,7 +530,7 @@ class TestUtilityFuns(TestCase):
         f = io.BytesIO()
 
         # run export in diagnose mode
-        graph, unsupported_ops = torch.onnx._diagnose_export(model, (x,), f,
+        graph, unsupported_ops = torch.onnx._find_missing_ops_onnx_export(model, (x,), f,
                                                              opset_version=9)
         iter = graph.nodes()
         assert next(iter).kind() == "onnx::Constant"
