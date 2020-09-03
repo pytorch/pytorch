@@ -1578,9 +1578,6 @@ Tensor _lu_solve_helper_cuda(const Tensor& self, const Tensor& LU_data, const Te
   return self_working_copy;
 }
 
-
-
-
 }}  // namespace at::native
 
 #undef ALLOCATE_ARRAY
