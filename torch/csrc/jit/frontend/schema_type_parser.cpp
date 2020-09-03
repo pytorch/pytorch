@@ -186,11 +186,13 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
   TypePtr tensor_type;
   c10::optional<c10::Device> device;
   c10::optional<bool> requires_grad;
-  // Parse a type with either known sizes, unknown sizes, a mix of known and
-  // unknown sizes, or known sizes with strides. The type might also have
-  // requires_grad and/or device option. Examples of types we're handling here:
+  // Parse a type with either no ranks, known ranks with sizes, ranks with
+  // unknown sizes, a mix of ranks with known and unknown sizes, or ranks with
+  // known sizes and strides. The type might also have requires_grad and/or
+  // device option. Examples of types we're handling here:
   //   Long(10:48,8:6,6:1, requires_grad=0, device=cuda:1)
   //   Float(10, *, 20, device=cuda:1)
+  //   Float(requires_grad=1)
   std::vector<c10::optional<int64_t>> dims;
   bool seen_strides = false;
   std::vector<int64_t> strides;
@@ -228,7 +230,7 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
     // Parsing ranks, supports mix of sized and unsized ranks, or, just strided
     // ranks
     if (L.cur().kind == '*') {
-      dims.push_back(c10::nullopt);
+      dims.emplace_back(c10::nullopt);
       L.next();
       if (L.cur().kind == ':') {
         throw ErrorReport(L.cur()) << "Strides for unsized ranks not supported";
@@ -238,7 +240,7 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
     const std::string& num = L.expect(TK_NUMBER).text();
     std::string::size_type num_len;
     size_t dim = c10::stoi(num, &num_len);
-    dims.push_back(dim);
+    dims.emplace_back(dim);
     if (seen_strides || L.cur().kind == ':') {
       L.expect(':');
       seen_strides = true;
