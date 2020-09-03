@@ -533,13 +533,11 @@ void ProcessGroupNCCL::ncclCommWatchdogInternal() {
           LOG(INFO) << "Received NCCL errors for communicators in the cache";
 
           LOG(INFO) << "Aborting communicators that received errors";
-          // We should not abort the communicators if we are performing a
-          // non-blocking wait(). The reason for this is that if we abort the
-          // nccl communicator, wait() might not throw exceptions and
-          // subsequent operations might run on garbage results.
-          // The current model is that when we call wait(), subsequent
-          // operations only run after this work is done or we hang forever
-          // waiting for the operation to complete.
+          // We abort NCCL communicators that have received errors from this
+          // thread, and exceptions are set on the corresponding work objects.
+          // The workCleanupThread will then loop through the unfinished
+          // collectives and throw exceptions if an exception has been set on
+          // any of the work objects from this thread.
           for (const auto& ncclComm : ncclComms) {
             ncclComm->ncclCommAbort();
             // Note that we don't remove the aborted communicators from the
