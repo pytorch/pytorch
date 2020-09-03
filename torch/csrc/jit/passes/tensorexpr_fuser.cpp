@@ -9,6 +9,7 @@
 #include <torch/csrc/jit/passes/remove_redundant_profiles.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
+#include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/operator_options.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 #include <torch/csrc/utils/memory.h>
@@ -662,6 +663,7 @@ class TensorExprFuser {
     for (Value* output : subgraph_outputs) {
       false_block->registerOutput(output);
     }
+    replaceBlockWithFallbackGraph(false_block, fusion_group->inputs());
 
     // Fill in the true block. It has all inputs type-checked and its
     // body should be the fusion group node.
