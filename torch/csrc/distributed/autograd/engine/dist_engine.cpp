@@ -389,29 +389,31 @@ std::shared_ptr<rpc::FutureMessage> DistEngine::runEngineAndAccumulateGradients(
   // future that waits for all gradient accumulation to finish.
   auto accumulateGradFuture = std::make_shared<rpc::FutureMessage>();
 
-  futureGrads->addCallback([autogradContext, outputEdges, accumulateGradFuture, &futureGrads]() {
-    if (futureGrads->hasError()) {
-      // Don't accumulate gradients if we receive an error.
-      // We must add the node information here since DistEngine::execute
-      // waits on accumulateGradFuture and will throw an exception once we
-      // set the error below.
-      std::string errorMsg = c10::str(
-          "Error on Node ",
-          DistAutogradContainer::getInstance().getWorkerId(),
-          ": ",
-          futureGrads->error()->what());
-      accumulateGradFuture->setError(errorMsg);
-      return;
-    }
+  futureGrads->addCallback(
+      [autogradContext, outputEdges, accumulateGradFuture, &futureGrads]() {
+        if (futureGrads->hasError()) {
+          // Don't accumulate gradients if we receive an error.
+          // We must add the node information here since DistEngine::execute
+          // waits on accumulateGradFuture and will throw an exception once we
+          // set the error below.
+          std::string errorMsg = c10::str(
+              "Error on Node ",
+              DistAutogradContainer::getInstance().getWorkerId(),
+              ": ",
+              futureGrads->tryRetrieveErrorMessage());
+          accumulateGradFuture->setError(errorMsg);
+          return;
+        }
 
-    try {
-      const variable_list& grads = futureGrads->constValue().toTensorVector();
-      TORCH_INTERNAL_ASSERT(grads.size() == outputEdges.size());
-      accumulateGradFuture->markCompleted(rpc::Message());
-    } catch (std::exception& e) {
-      accumulateGradFuture->setErrorIfNeeded(e.what());
-    }
-  });
+        try {
+          const variable_list& grads =
+              futureGrads->constValue().toTensorVector();
+          TORCH_INTERNAL_ASSERT(grads.size() == outputEdges.size());
+          accumulateGradFuture->markCompleted(rpc::Message());
+        } catch (std::exception& e) {
+          accumulateGradFuture->setErrorIfNeeded(e.what());
+        }
+      });
 
   return accumulateGradFuture;
 }
