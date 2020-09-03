@@ -5948,6 +5948,34 @@
     CPU: foreach_tensor_sqrt_slow_
     CUDA: foreach_tensor_sqrt_cuda_
 
+- func: _foreach_addcdiv_(Tensor(a!)[] self, Tensor[] tensor1, Tensor[] tensor2, Scalar value=1) -> ()
+  device_guard: False
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_addcdiv_slow_
+    CUDA: foreach_tensor_addcdiv_cuda_
+
+- func: _foreach_addcmul_(Tensor(a!)[] self, Tensor[] tensor1, Tensor[] tensor2, Scalar value=1) -> ()
+  device_guard: False
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_addcmul_slow_
+    CUDA: foreach_tensor_addcmul_cuda_
+
+- func: _foreach_addcdiv(Tensor[] input, Tensor[] tensor1, Tensor[] tensor2, Scalar value=1) -> Tensor[]
+  device_guard: False
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_addcdiv_slow
+    CUDA: foreach_tensor_addcdiv_cuda
+
+- func: _foreach_addcmul(Tensor[] input, Tensor[] tensor1, Tensor[] tensor2, Scalar value=1) -> Tensor[]
+  device_guard: False
+  variants: function
+  dispatch:
+    CPU: foreach_tensor_addcmul_slow
+    CUDA: foreach_tensor_addcmul_cuda
+
 - func: _mode(Tensor self, int dim=-1, bool keepdim=False) -> (Tensor, Tensor)
   use_c10_dispatcher: full
   dispatch:
