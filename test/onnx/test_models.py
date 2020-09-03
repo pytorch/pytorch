@@ -3,6 +3,12 @@ from torchvision.models.inception import inception_v3
 from torchvision.models.densenet import densenet121
 from torchvision.models.resnet import resnet50
 from torchvision.models.vgg import vgg16, vgg16_bn, vgg19, vgg19_bn
+from torchvision.models.googlenet import googlenet
+from torchvision.models.mnasnet import mnasnet1_0
+from torchvision.models.mobilenet import mobilenet_v2
+from torchvision.models import shufflenet_v2_x1_0
+from torchvision.models.segmentation.segmentation import fcn_resnet101, deeplabv3_resnet101
+from torchvision.models.video import r3d_18, mc3_18, r2plus1d_18
 
 from model_defs.mnist import MNIST
 from model_defs.squeezenet import SqueezeNet
@@ -10,6 +16,7 @@ from model_defs.super_resolution import SuperResolutionNet
 from model_defs.srresnet import SRResNet
 from model_defs.dcgan import _netD, _netG, weights_init, bsz, imgsz, nz
 from model_defs.op_test import DummyNet, ConcatNet, PermuteNet, PReluNet, FakeQuantNet
+from model_defs.emb_seq import EmbeddingNetwork1, EmbeddingNetwork2
 
 from test_pytorch_common import TestCase, run_tests, skipIfNoLapack, skipIfUnsupportedMinOpsetVersion
 
@@ -67,6 +74,14 @@ class TestModels(TestCase):
     def test_permute(self):
         x = Variable(torch.randn(BATCH_SIZE, 3, 10, 12))
         self.exportTest(PermuteNet(), x)
+
+    def test_embedding_sequential_1(self):
+        x = Variable(torch.randint(0, 10, (BATCH_SIZE, 3)))
+        self.exportTest(EmbeddingNetwork1(), x)
+
+    def test_embedding_sequential_2(self):
+        x = Variable(torch.randint(0, 10, (BATCH_SIZE, 3)))
+        self.exportTest(EmbeddingNetwork2(), x)
 
     @unittest.skip("This model takes too much memory")
     def test_srresnet(self):
@@ -179,6 +194,44 @@ class TestModels(TestCase):
         qat_resnet50.apply(torch.quantization.disable_observer)
 
         self.exportTest(toC(qat_resnet50), toC(x))
+
+    def test_googlenet(self):
+        x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
+        self.exportTest(toC(googlenet()), toC(x), rtol=1e-3, atol=1e-5)
+
+    def test_mnasnet(self):
+        x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
+        self.exportTest(toC(mnasnet1_0()), toC(x), rtol=1e-3, atol=1e-5)
+
+    def test_mobilenet(self):
+        x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
+        self.exportTest(toC(mobilenet_v2()), toC(x), rtol=1e-3, atol=1e-5)
+
+    def test_shufflenet(self):
+        x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
+        self.exportTest(toC(shufflenet_v2_x1_0()), toC(x), rtol=1e-3, atol=1e-5)
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_fcn(self):
+        x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
+        self.exportTest(toC(fcn_resnet101()), toC(x), rtol=1e-3, atol=1e-5)
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_deeplab(self):
+        x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
+        self.exportTest(toC(deeplabv3_resnet101()), toC(x), rtol=1e-3, atol=1e-5)
+
+    def test_r3d_18_video(self):
+        x = Variable(torch.randn(1, 3, 4, 112, 112).fill_(1.0))
+        self.exportTest(toC(r3d_18()), toC(x), rtol=1e-3, atol=1e-5)
+
+    def test_mc3_18_video(self):
+        x = Variable(torch.randn(1, 3, 4, 112, 112).fill_(1.0))
+        self.exportTest(toC(mc3_18()), toC(x), rtol=1e-3, atol=1e-5)
+
+    def test_r2plus1d_18_video(self):
+        x = Variable(torch.randn(1, 3, 4, 112, 112).fill_(1.0))
+        self.exportTest(toC(r2plus1d_18()), toC(x), rtol=1e-3, atol=1e-5)
 
 if __name__ == '__main__':
     run_tests()

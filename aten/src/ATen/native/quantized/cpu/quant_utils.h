@@ -5,6 +5,35 @@
 #include <cmath>
 
 namespace quant_utils {
+namespace {
+  float RawUint16ToFp16(unsigned short value) {
+    // Convert raw 16 bits half precision floating point number
+    // to single precision floating point number.
+    const unsigned short sign_bits = value >> 15;
+    const unsigned short exponent_bits = value >> 10 & 0x1f;
+    const unsigned short significand_bits = value & 0x3ff;
+
+    const float sign = sign_bits ? -1 : 1;
+    const float significand =
+        1 + significand_bits * 0.0009765625f; // 0.0009765625f = 0x1p-10 = 2^-10;
+    const float exponent = exponent_bits - 0xf;
+
+    return sign * std::ldexp(significand, exponent);
+}
+
+template <typename T>
+bool CheckAndSaturate(T max_val, T* element) {
+  if (*element > max_val) {
+    *element = max_val;
+    return true;
+  }
+  if (*element < -max_val) {
+    *element = -max_val;
+    return true;
+  }
+  return false;
+}
+}
 using namespace std;
 // A structure to hold quantization parameters 'scale' and 'zero_point'.
 // The meaning of these values is as the constants in the quantization equation
@@ -134,6 +163,23 @@ static torch::List<int64_t> MakeArgForConv1d(const torch::List<int64_t>& arg,
   }
   result[kConv1dSqueezeDim] = base_value;
   return result;
+}
+
+// The range for using FP16 quantization of weights requires that the elements
+// should be in the range of [5.96e-8, 65504]. If it is out of range, then the
+// number will be saturated to max or min representable values by FP16.
+inline void HandleWeightsSaturation(int64_t N, float* weight) {
+  const float kFp16Max = RawUint16ToFp16(0x7BFF);
+  bool found_out_of_range = false;
+  for (int64_t i = 0; i < N; ++i) {
+    bool saturate = CheckAndSaturate<float>(kFp16Max, weight + i);
+    if (saturate) {
+      found_out_of_range = true;
+    }
+  }
+  if (found_out_of_range) {
+    TORCH_WARN("FOUND weight out of range ");
+  }
 }
 
 } // namespace quant_utils

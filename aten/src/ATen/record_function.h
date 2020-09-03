@@ -10,12 +10,7 @@
 namespace at {
 
 // Kind of record function scope;
-// workaround for the older GCC versions:
-#ifndef _MSC_VER
-#  pragma GCC diagnostic push
-#  pragma GCC diagnostic ignored "-Wattributes"
-#endif
-enum class TORCH_API RecordScope : uint8_t {
+enum class C10_API_ENUM RecordScope : uint8_t {
   // c10/ATen ops, autograd nodes
   FUNCTION = 0,
   // TorchScript functions, methods
@@ -24,9 +19,6 @@ enum class TORCH_API RecordScope : uint8_t {
   USER_SCOPE,
   NUM_SCOPES, // must be the last in the list
 };
-#ifndef _MSC_VER
-#  pragma GCC diagnostic pop
-#endif
 
 } // namespace at
 
@@ -122,9 +114,6 @@ struct TORCH_API RecordFunction {
     return scope_;
   }
 
-  // Current returns the currently active RecordFunction in this thread.
-  static RecordFunction* current();
-
   // Returns logical thread_id for the current thread
   static uint64_t currentThreadId();
 
@@ -159,12 +148,6 @@ struct TORCH_API RecordFunction {
     before(fn, current_sequence_nr);
   }
 
-  // Internal, only for the use within RECORD_FUNCTION macro
-  // (i.e. stack based RecordFunctions with scope lifetime);
-  // sets this function as the current() thread local function;
-  // original value of current() is restored in destructor/end
-  void _setCurrent();
-
   // Calls end callbacks
   void end();
 
@@ -186,21 +169,15 @@ struct TORCH_API RecordFunction {
   /// Whether any of the picked callbacks require inputs
   bool needs_inputs = false;
 
+  // In cases when RecordFunction might be active but we chose not to
+  // use the observers (e.g. operator is not observed), this boolean
+  // flag is used to check whether the start callbacks were called
+  bool called_start_callbacks_ = false;
+
  private:
   StringView name_;
   int64_t sequence_nr_ = -1;
   std::vector<c10::IValue> inputs_;
-
-  // parent_ points to the parent RecordFunction and must out live this;
-  // only to be used together with RECORD_FUNCTION macro
-  // (with stack based RecordFunction instances with scope lifetime)
-  RecordFunction* parent_ = nullptr;
-
-  // is_current_ true means that this record function updates thread local
-  // current record function pointer;
-  // true only in case of scope-based record functions, i.e.
-  // RECORD_FUNCTION macro
-  bool is_current_ = false;
 
   // Kind of scope this RecordFunction is observing
   const RecordScope scope_;
@@ -321,7 +298,6 @@ class TORCH_API RecordFunctionCallback {
 #define RECORD_FUNCTION_WITH_SCOPE(scope, fn, inputs, ...) \
   at::RecordFunction guard(scope); \
   if (guard.active) { \
-    guard._setCurrent(); \
     if (guard.needs_inputs) { \
       guard.before(fn, inputs, ##__VA_ARGS__); \
     } else { \

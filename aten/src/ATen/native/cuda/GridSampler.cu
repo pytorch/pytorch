@@ -15,40 +15,39 @@ using at::native::detail::GridSamplerInterpolation;
 using at::native::detail::GridSamplerPadding;
 
 namespace {
-  template <typename scalar_t>
+  template <typename scalar_t, typename index_t>
   C10_LAUNCH_BOUNDS_1(1024)
   __global__ void grid_sampler_2d_kernel(
-      const int nthreads,
-      TensorInfo<scalar_t, int> input,
-      TensorInfo<scalar_t, int> grid,
-      TensorInfo<scalar_t, int> output,
+      const index_t nthreads,
+      TensorInfo<scalar_t, index_t> input,
+      TensorInfo<scalar_t, index_t> grid,
+      TensorInfo<scalar_t, index_t> output,
       const GridSamplerInterpolation interpolation_mode,
       const GridSamplerPadding padding_mode,
       bool align_corners) {
+    index_t C = input.sizes[1];
+    index_t inp_H = input.sizes[2];
+    index_t inp_W = input.sizes[3];
+    index_t out_H = grid.sizes[1];
+    index_t out_W = grid.sizes[2];
+    index_t inp_sN = input.strides[0];
+    index_t inp_sC = input.strides[1];
+    index_t inp_sH = input.strides[2];
+    index_t inp_sW = input.strides[3];
+    index_t grid_sN = grid.strides[0];
+    index_t grid_sH = grid.strides[1];
+    index_t grid_sW = grid.strides[2];
+    index_t grid_sCoor = grid.strides[3];
+    index_t out_sN = output.strides[0];
+    index_t out_sC = output.strides[1];
+    index_t out_sH = output.strides[2];
+    index_t out_sW = output.strides[3];
 
-    int C = input.sizes[1];
-    int inp_H = input.sizes[2];
-    int inp_W = input.sizes[3];
-    int out_H = grid.sizes[1];
-    int out_W = grid.sizes[2];
-    int inp_sN = input.strides[0];
-    int inp_sC = input.strides[1];
-    int inp_sH = input.strides[2];
-    int inp_sW = input.strides[3];
-    int grid_sN = grid.strides[0];
-    int grid_sH = grid.strides[1];
-    int grid_sW = grid.strides[2];
-    int grid_sCoor = grid.strides[3];
-    int out_sN = output.strides[0];
-    int out_sC = output.strides[1];
-    int out_sH = output.strides[2];
-    int out_sW = output.strides[3];
-
-    CUDA_KERNEL_LOOP(index, nthreads) {
-      const int w = index % out_W;
-      const int h = (index / out_W) % out_H;
-      const int n = index / (out_H * out_W);
-      const int grid_offset = n * grid_sN + h * grid_sH + w * grid_sW;
+    CUDA_KERNEL_LOOP_TYPE(index, nthreads, index_t) {
+      const index_t w = index % out_W;
+      const index_t h = (index / out_W) % out_H;
+      const index_t n = index / (out_H * out_W);
+      const index_t grid_offset = n * grid_sN + h * grid_sH + w * grid_sW;
 
       // get the corresponding input x, y co-ordinates from grid
       scalar_t ix = grid.data[grid_offset];
@@ -59,14 +58,14 @@ namespace {
 
       if (interpolation_mode == GridSamplerInterpolation::Bilinear) {
         // get NE, NW, SE, SW pixel values from (x, y)
-        int ix_nw = static_cast<int>(::floor(ix));
-        int iy_nw = static_cast<int>(::floor(iy));
-        int ix_ne = ix_nw + 1;
-        int iy_ne = iy_nw;
-        int ix_sw = ix_nw;
-        int iy_sw = iy_nw + 1;
-        int ix_se = ix_nw + 1;
-        int iy_se = iy_nw + 1;
+        index_t ix_nw = static_cast<index_t>(::floor(ix));
+        index_t iy_nw = static_cast<index_t>(::floor(iy));
+        index_t ix_ne = ix_nw + 1;
+        index_t iy_ne = iy_nw;
+        index_t ix_sw = ix_nw;
+        index_t iy_sw = iy_nw + 1;
+        index_t ix_se = ix_nw + 1;
+        index_t iy_se = iy_nw + 1;
 
         // get surfaces to each neighbor:
         scalar_t nw = (ix_se - ix)    * (iy_se - iy);
@@ -77,7 +76,7 @@ namespace {
         // calculate bilinear weighted pixel value and set output pixel
         auto inp_ptr_NC = input.data + n * inp_sN;
         auto out_ptr_NCHW = output.data + n * out_sN + h * out_sH + w * out_sW;
-        for (int c = 0; c < C; ++c, inp_ptr_NC += inp_sC, out_ptr_NCHW += out_sC) {
+        for (index_t c = 0; c < C; ++c, inp_ptr_NC += inp_sC, out_ptr_NCHW += out_sC) {
           *out_ptr_NCHW = static_cast<scalar_t>(0);
           if (within_bounds_2d(iy_nw, ix_nw, inp_H, inp_W)) {
             *out_ptr_NCHW += inp_ptr_NC[iy_nw * inp_sH + ix_nw * inp_sW] * nw;
@@ -93,13 +92,13 @@ namespace {
           }
         }
       } else if (interpolation_mode == GridSamplerInterpolation::Nearest) {
-        int ix_nearest = static_cast<int>(::round(ix));
-        int iy_nearest = static_cast<int>(::round(iy));
+        index_t ix_nearest = static_cast<index_t>(::round(ix));
+        index_t iy_nearest = static_cast<index_t>(::round(iy));
 
         // assign nearest neighor pixel value to output pixel
         auto inp_ptr_NC = input.data + n * inp_sN;
         auto out_ptr_NCHW = output.data + n * out_sN + h * out_sH + w * out_sW;
-        for (int c = 0; c < C; ++c, inp_ptr_NC += inp_sC, out_ptr_NCHW += out_sC) {
+        for (index_t c = 0; c < C; ++c, inp_ptr_NC += inp_sC, out_ptr_NCHW += out_sC) {
           if (within_bounds_2d(iy_nearest, ix_nearest, inp_H, inp_W)) {
             *out_ptr_NCHW = inp_ptr_NC[iy_nearest * inp_sH + ix_nearest * inp_sW];
           } else {
@@ -110,46 +109,46 @@ namespace {
     }
   }
 
-  template <typename scalar_t>
+  template <typename scalar_t, typename index_t>
   C10_LAUNCH_BOUNDS_1(1024)
   __global__ void grid_sampler_3d_kernel(
-      const int nthreads,
-      TensorInfo<scalar_t, int> input,
-      TensorInfo<scalar_t, int> grid,
-      TensorInfo<scalar_t, int> output,
+      const index_t nthreads,
+      TensorInfo<scalar_t, index_t> input,
+      TensorInfo<scalar_t, index_t> grid,
+      TensorInfo<scalar_t, index_t> output,
       const GridSamplerInterpolation interpolation_mode,
       const GridSamplerPadding padding_mode,
       bool align_corners) {
 
-    int C = input.sizes[1];
-    int inp_D = input.sizes[2];
-    int inp_H = input.sizes[3];
-    int inp_W = input.sizes[4];
-    int out_D = grid.sizes[1];
-    int out_H = grid.sizes[2];
-    int out_W = grid.sizes[3];
-    int inp_sN = input.strides[0];
-    int inp_sC = input.strides[1];
-    int inp_sD = input.strides[2];
-    int inp_sH = input.strides[3];
-    int inp_sW = input.strides[4];
-    int grid_sN = grid.strides[0];
-    int grid_sD = grid.strides[1];
-    int grid_sH = grid.strides[2];
-    int grid_sW = grid.strides[3];
-    int grid_sCoor = grid.strides[4];
-    int out_sN = output.strides[0];
-    int out_sC = output.strides[1];
-    int out_sD = output.strides[2];
-    int out_sH = output.strides[3];
-    int out_sW = output.strides[4];
+    index_t C = input.sizes[1];
+    index_t inp_D = input.sizes[2];
+    index_t inp_H = input.sizes[3];
+    index_t inp_W = input.sizes[4];
+    index_t out_D = grid.sizes[1];
+    index_t out_H = grid.sizes[2];
+    index_t out_W = grid.sizes[3];
+    index_t inp_sN = input.strides[0];
+    index_t inp_sC = input.strides[1];
+    index_t inp_sD = input.strides[2];
+    index_t inp_sH = input.strides[3];
+    index_t inp_sW = input.strides[4];
+    index_t grid_sN = grid.strides[0];
+    index_t grid_sD = grid.strides[1];
+    index_t grid_sH = grid.strides[2];
+    index_t grid_sW = grid.strides[3];
+    index_t grid_sCoor = grid.strides[4];
+    index_t out_sN = output.strides[0];
+    index_t out_sC = output.strides[1];
+    index_t out_sD = output.strides[2];
+    index_t out_sH = output.strides[3];
+    index_t out_sW = output.strides[4];
 
-    CUDA_KERNEL_LOOP(index, nthreads) {
-      const int w = index % out_W;
-      const int h = (index / out_W) % out_H;
-      const int d = (index / (out_H * out_W)) % out_D;
-      const int n = index / (out_D * out_H * out_W);
-      const int grid_offset = n * grid_sN + d * grid_sD + h * grid_sH + w * grid_sW;
+    CUDA_KERNEL_LOOP_TYPE(index, nthreads, index_t) {
+      const index_t w = index % out_W;
+      const index_t h = (index / out_W) % out_H;
+      const index_t d = (index / (out_H * out_W)) % out_D;
+      const index_t n = index / (out_D * out_H * out_W);
+      const index_t grid_offset = n * grid_sN + d * grid_sD + h * grid_sH + w * grid_sW;
 
       // get the corresponding input x, y, z co-ordinates from grid
       scalar_t ix = grid.data[grid_offset];
@@ -164,37 +163,37 @@ namespace {
         // get corner pixel values from (x, y, z)
         // for 4d, we used north-east-south-west
         // for 5d, we add top-bottom
-        int ix_tnw = static_cast<int>(::floor(ix));
-        int iy_tnw = static_cast<int>(::floor(iy));
-        int iz_tnw = static_cast<int>(::floor(iz));
+        index_t ix_tnw = static_cast<index_t>(::floor(ix));
+        index_t iy_tnw = static_cast<index_t>(::floor(iy));
+        index_t iz_tnw = static_cast<index_t>(::floor(iz));
 
-        int ix_tne = ix_tnw + 1;
-        int iy_tne = iy_tnw;
-        int iz_tne = iz_tnw;
+        index_t ix_tne = ix_tnw + 1;
+        index_t iy_tne = iy_tnw;
+        index_t iz_tne = iz_tnw;
 
-        int ix_tsw = ix_tnw;
-        int iy_tsw = iy_tnw + 1;
-        int iz_tsw = iz_tnw;
+        index_t ix_tsw = ix_tnw;
+        index_t iy_tsw = iy_tnw + 1;
+        index_t iz_tsw = iz_tnw;
 
-        int ix_tse = ix_tnw + 1;
-        int iy_tse = iy_tnw + 1;
-        int iz_tse = iz_tnw;
+        index_t ix_tse = ix_tnw + 1;
+        index_t iy_tse = iy_tnw + 1;
+        index_t iz_tse = iz_tnw;
 
-        int ix_bnw = ix_tnw;
-        int iy_bnw = iy_tnw;
-        int iz_bnw = iz_tnw + 1;
+        index_t ix_bnw = ix_tnw;
+        index_t iy_bnw = iy_tnw;
+        index_t iz_bnw = iz_tnw + 1;
 
-        int ix_bne = ix_tnw + 1;
-        int iy_bne = iy_tnw;
-        int iz_bne = iz_tnw + 1;
+        index_t ix_bne = ix_tnw + 1;
+        index_t iy_bne = iy_tnw;
+        index_t iz_bne = iz_tnw + 1;
 
-        int ix_bsw = ix_tnw;
-        int iy_bsw = iy_tnw + 1;
-        int iz_bsw = iz_tnw + 1;
+        index_t ix_bsw = ix_tnw;
+        index_t iy_bsw = iy_tnw + 1;
+        index_t iz_bsw = iz_tnw + 1;
 
-        int ix_bse = ix_tnw + 1;
-        int iy_bse = iy_tnw + 1;
-        int iz_bse = iz_tnw + 1;
+        index_t ix_bse = ix_tnw + 1;
+        index_t iy_bse = iy_tnw + 1;
+        index_t iz_bse = iz_tnw + 1;
 
         // get surfaces to each neighbor:
         scalar_t tnw = (ix_bse - ix)    * (iy_bse - iy)    * (iz_bse - iz);
@@ -208,7 +207,7 @@ namespace {
 
         auto inp_ptr_NC = input.data + n * inp_sN;
         auto out_ptr_NCDHW = output.data + n * out_sN + d * out_sD + h * out_sH + w * out_sW;
-        for (int c = 0; c < C; ++c, inp_ptr_NC += inp_sC, out_ptr_NCDHW += out_sC) {
+        for (index_t c = 0; c < C; ++c, inp_ptr_NC += inp_sC, out_ptr_NCDHW += out_sC) {
           //   (c, iz_tnw, iy_tnw, ix_tnw) * tnw + (c, iz_tne, iy_tne, ix_tne) * tne
           // + (c, iz_tsw, iy_tsw, ix_tsw) * tsw + (c, iz_tse, iy_tse, ix_tse) * tse
           // + (c, iz_bnw, iy_bnw, ix_bnw) * bnw + (c, iz_bne, iy_bne, ix_bne) * bne
@@ -240,14 +239,14 @@ namespace {
           }
         }
       } else if (interpolation_mode == GridSamplerInterpolation::Nearest) {
-        int ix_nearest = static_cast<int>(::round(ix));
-        int iy_nearest = static_cast<int>(::round(iy));
-        int iz_nearest = static_cast<int>(::round(iz));
+        index_t ix_nearest = static_cast<index_t>(::round(ix));
+        index_t iy_nearest = static_cast<index_t>(::round(iy));
+        index_t iz_nearest = static_cast<index_t>(::round(iz));
 
         // assign nearest neighor pixel value to output pixel
         auto inp_ptr_NC = input.data + n * inp_sN;
         auto out_ptr_NCDHW = output.data + n * out_sN + d * out_sD + h * out_sH + w * out_sW;
-        for (int c = 0; c < C; ++c, inp_ptr_NC += inp_sC, out_ptr_NCDHW += out_sC) {
+        for (index_t c = 0; c < C; ++c, inp_ptr_NC += inp_sC, out_ptr_NCDHW += out_sC) {
           if (within_bounds_3d(iz_nearest, iy_nearest, ix_nearest, inp_D, inp_H, inp_W)) {
             *out_ptr_NCDHW = inp_ptr_NC[iz_nearest * inp_sD + iy_nearest * inp_sH + ix_nearest * inp_sW];
           } else {
@@ -258,47 +257,47 @@ namespace {
     }
   }
 
-  template <typename scalar_t>
+  template <typename scalar_t, typename index_t>
   C10_LAUNCH_BOUNDS_1(1024)
   __global__ void grid_sampler_2d_backward_kernel(
-      const int nthreads,
-      TensorInfo<scalar_t, int> grad_output,
-      TensorInfo<scalar_t, int> input,
-      TensorInfo<scalar_t, int> grid,
-      TensorInfo<scalar_t, int> grad_input,  // initialized to zeros
-      TensorInfo<scalar_t, int> grad_grid,   // initialized to empty
+      const index_t nthreads,
+      TensorInfo<scalar_t, index_t> grad_output,
+      TensorInfo<scalar_t, index_t> input,
+      TensorInfo<scalar_t, index_t> grid,
+      TensorInfo<scalar_t, index_t> grad_input,  // initialized to zeros
+      TensorInfo<scalar_t, index_t> grad_grid,   // initialized to empty
       const GridSamplerInterpolation interpolation_mode,
       const GridSamplerPadding padding_mode,
       bool align_corners) {
 
-    int C = input.sizes[1];
-    int inp_H = input.sizes[2];
-    int inp_W = input.sizes[3];
-    int out_H = grid.sizes[1];
-    int out_W = grid.sizes[2];
-    int inp_sN = input.strides[0];
-    int inp_sC = input.strides[1];
-    int inp_sH = input.strides[2];
-    int inp_sW = input.strides[3];
-    int grid_sN = grid.strides[0];
-    int grid_sH = grid.strides[1];
-    int grid_sW = grid.strides[2];
-    int grid_sCoor = grid.strides[3];
-    int gOut_sN = grad_output.strides[0];
-    int gOut_sC = grad_output.strides[1];
-    int gOut_sH = grad_output.strides[2];
-    int gOut_sW = grad_output.strides[3];
-    int gInp_sN = grad_input.strides[0];
-    int gInp_sC = grad_input.strides[1];
-    int gInp_sH = grad_input.strides[2];
-    int gInp_sW = grad_input.strides[3];
-    int gGrid_sW = grad_grid.strides[2];
+    index_t C = input.sizes[1];
+    index_t inp_H = input.sizes[2];
+    index_t inp_W = input.sizes[3];
+    index_t out_H = grid.sizes[1];
+    index_t out_W = grid.sizes[2];
+    index_t inp_sN = input.strides[0];
+    index_t inp_sC = input.strides[1];
+    index_t inp_sH = input.strides[2];
+    index_t inp_sW = input.strides[3];
+    index_t grid_sN = grid.strides[0];
+    index_t grid_sH = grid.strides[1];
+    index_t grid_sW = grid.strides[2];
+    index_t grid_sCoor = grid.strides[3];
+    index_t gOut_sN = grad_output.strides[0];
+    index_t gOut_sC = grad_output.strides[1];
+    index_t gOut_sH = grad_output.strides[2];
+    index_t gOut_sW = grad_output.strides[3];
+    index_t gInp_sN = grad_input.strides[0];
+    index_t gInp_sC = grad_input.strides[1];
+    index_t gInp_sH = grad_input.strides[2];
+    index_t gInp_sW = grad_input.strides[3];
+    index_t gGrid_sW = grad_grid.strides[2];
 
-    CUDA_KERNEL_LOOP(index, nthreads) {
-      const int w = index % out_W;
-      const int h = (index / out_W) % out_H;
-      const int n = index / (out_H * out_W);
-      const int grid_offset = n * grid_sN + h * grid_sH + w * grid_sW;
+    CUDA_KERNEL_LOOP_TYPE(index, nthreads, index_t) {
+      const index_t w = index % out_W;
+      const index_t h = (index / out_W) % out_H;
+      const index_t n = index / (out_H * out_W);
+      const auto grid_offset = n * grid_sN + h * grid_sH + w * grid_sW;
 
       // get the corresponding input x, y co-ordinates from grid
       scalar_t ix = grid.data[grid_offset];
@@ -311,14 +310,14 @@ namespace {
 
       if (interpolation_mode == GridSamplerInterpolation::Bilinear) {
         // get NE, NW, SE, SW pixel values from (x, y)
-        int ix_nw = static_cast<int>(::floor(ix));
-        int iy_nw = static_cast<int>(::floor(iy));
-        int ix_ne = ix_nw + 1;
-        int iy_ne = iy_nw;
-        int ix_sw = ix_nw;
-        int iy_sw = iy_nw + 1;
-        int ix_se = ix_nw + 1;
-        int iy_se = iy_nw + 1;
+        index_t ix_nw = static_cast<index_t>(::floor(ix));
+        index_t iy_nw = static_cast<index_t>(::floor(iy));
+        index_t ix_ne = ix_nw + 1;
+        index_t iy_ne = iy_nw;
+        index_t ix_sw = ix_nw;
+        index_t iy_sw = iy_nw + 1;
+        index_t ix_se = ix_nw + 1;
+        index_t iy_se = iy_nw + 1;
 
         // get surfaces to each neighbor:
         scalar_t nw = (ix_se - ix)    * (iy_se - iy);
@@ -330,7 +329,7 @@ namespace {
         scalar_t *gOut_ptr_NCHW = grad_output.data + n * gOut_sN + h * gOut_sH + w * gOut_sW;
         scalar_t *gInp_ptr_NC = grad_input.data + n * gInp_sN;
         scalar_t *inp_ptr_NC = input.data + n * inp_sN;
-        for (int c = 0; c < C; ++c, inp_ptr_NC += inp_sC, gInp_ptr_NC += gInp_sC, gOut_ptr_NCHW += gOut_sC) {
+        for (index_t c = 0; c < C; ++c, inp_ptr_NC += inp_sC, gInp_ptr_NC += gInp_sC, gOut_ptr_NCHW += gOut_sC) {
           scalar_t gOut = *gOut_ptr_NCHW;
 
           // calculate and set grad_input
@@ -370,13 +369,13 @@ namespace {
         gGrid_ptr_NHW[0] = gix_mult * gix;
         gGrid_ptr_NHW[1] = giy_mult * giy;
       } else if (interpolation_mode == GridSamplerInterpolation::Nearest) {
-        int ix_nearest = static_cast<int>(::round(ix));
-        int iy_nearest = static_cast<int>(::round(iy));
+        index_t ix_nearest = static_cast<index_t>(::round(ix));
+        index_t iy_nearest = static_cast<index_t>(::round(iy));
 
         // assign nearest neighor pixel value to output pixel
         scalar_t *gOut_ptr_NCHW = grad_output.data + n * gOut_sN + h * gOut_sH + w * gOut_sW;
         scalar_t *gInp_ptr_NC = grad_input.data + n * gInp_sN;
-        for (int c = 0; c < C; ++c, gInp_ptr_NC += gInp_sC, gOut_ptr_NCHW += gOut_sC) {
+        for (index_t c = 0; c < C; ++c, gInp_ptr_NC += gInp_sC, gOut_ptr_NCHW += gOut_sC) {
           // calculate and set grad_input
           safe_add_2d(gInp_ptr_NC, iy_nearest, ix_nearest, gInp_sH, gInp_sW, inp_H, inp_W, *gOut_ptr_NCHW);
         }
@@ -392,54 +391,54 @@ namespace {
     }
   }
 
-  template <typename scalar_t>
+  template <typename scalar_t, typename index_t>
   C10_LAUNCH_BOUNDS_1(1024)
   __global__ void grid_sampler_3d_backward_kernel(
-      const int nthreads,
-      TensorInfo<scalar_t, int> grad_output,
-      TensorInfo<scalar_t, int> input,
-      TensorInfo<scalar_t, int> grid,
-      TensorInfo<scalar_t, int> grad_input,  // initialized to zeros
-      TensorInfo<scalar_t, int> grad_grid,   // initialized to empty
+      const index_t nthreads,
+      TensorInfo<scalar_t, index_t> grad_output,
+      TensorInfo<scalar_t, index_t> input,
+      TensorInfo<scalar_t, index_t> grid,
+      TensorInfo<scalar_t, index_t> grad_input,  // initialized to zeros
+      TensorInfo<scalar_t, index_t> grad_grid,   // initialized to empty
       const GridSamplerInterpolation interpolation_mode,
       const GridSamplerPadding padding_mode,
       bool align_corners) {
 
-    int C = input.sizes[1];
-    int inp_D = input.sizes[2];
-    int inp_H = input.sizes[3];
-    int inp_W = input.sizes[4];
-    int out_D = grid.sizes[1];
-    int out_H = grid.sizes[2];
-    int out_W = grid.sizes[3];
-    int inp_sN = input.strides[0];
-    int inp_sC = input.strides[1];
-    int inp_sD = input.strides[2];
-    int inp_sH = input.strides[3];
-    int inp_sW = input.strides[4];
-    int grid_sN = grid.strides[0];
-    int grid_sD = grid.strides[1];
-    int grid_sH = grid.strides[2];
-    int grid_sW = grid.strides[3];
-    int grid_sCoor = grid.strides[4];
-    int gOut_sN = grad_output.strides[0];
-    int gOut_sC = grad_output.strides[1];
-    int gOut_sD = grad_output.strides[2];
-    int gOut_sH = grad_output.strides[3];
-    int gOut_sW = grad_output.strides[4];
-    int gInp_sN = grad_input.strides[0];
-    int gInp_sC = grad_input.strides[1];
-    int gInp_sD = grad_input.strides[2];
-    int gInp_sH = grad_input.strides[3];
-    int gInp_sW = grad_input.strides[4];
-    int gGrid_sW = grad_grid.strides[3];
+    index_t C = input.sizes[1];
+    index_t inp_D = input.sizes[2];
+    index_t inp_H = input.sizes[3];
+    index_t inp_W = input.sizes[4];
+    index_t out_D = grid.sizes[1];
+    index_t out_H = grid.sizes[2];
+    index_t out_W = grid.sizes[3];
+    index_t inp_sN = input.strides[0];
+    index_t inp_sC = input.strides[1];
+    index_t inp_sD = input.strides[2];
+    index_t inp_sH = input.strides[3];
+    index_t inp_sW = input.strides[4];
+    index_t grid_sN = grid.strides[0];
+    index_t grid_sD = grid.strides[1];
+    index_t grid_sH = grid.strides[2];
+    index_t grid_sW = grid.strides[3];
+    index_t grid_sCoor = grid.strides[4];
+    index_t gOut_sN = grad_output.strides[0];
+    index_t gOut_sC = grad_output.strides[1];
+    index_t gOut_sD = grad_output.strides[2];
+    index_t gOut_sH = grad_output.strides[3];
+    index_t gOut_sW = grad_output.strides[4];
+    index_t gInp_sN = grad_input.strides[0];
+    index_t gInp_sC = grad_input.strides[1];
+    index_t gInp_sD = grad_input.strides[2];
+    index_t gInp_sH = grad_input.strides[3];
+    index_t gInp_sW = grad_input.strides[4];
+    index_t gGrid_sW = grad_grid.strides[3];
 
-    CUDA_KERNEL_LOOP(index, nthreads) {
-      const int w = index % out_W;
-      const int h = (index / out_W) % out_H;
-      const int d = (index / (out_H * out_W)) % out_D;
-      const int n = index / (out_D * out_H * out_W);
-      const int grid_offset = n * grid_sN + d * grid_sD + h * grid_sH + w * grid_sW;
+    CUDA_KERNEL_LOOP_TYPE(index, nthreads, index_t) {
+      const index_t w = index % out_W;
+      const index_t h = (index / out_W) % out_H;
+      const index_t d = (index / (out_H * out_W)) % out_D;
+      const index_t n = index / (out_D * out_H * out_W);
+      const auto grid_offset = n * grid_sN + d * grid_sD + h * grid_sH + w * grid_sW;
 
       // get the corresponding input x, y, z co-ordinates from grid
       scalar_t ix = grid.data[grid_offset];
@@ -456,37 +455,37 @@ namespace {
         // get corner pixel values from (x, y, z)
         // for 4d, we used north-east-south-west
         // for 5d, we add top-bottom
-        int ix_tnw = static_cast<int>(::floor(ix));
-        int iy_tnw = static_cast<int>(::floor(iy));
-        int iz_tnw = static_cast<int>(::floor(iz));
+        index_t ix_tnw = static_cast<index_t>(::floor(ix));
+        index_t iy_tnw = static_cast<index_t>(::floor(iy));
+        index_t iz_tnw = static_cast<index_t>(::floor(iz));
 
-        int ix_tne = ix_tnw + 1;
-        int iy_tne = iy_tnw;
-        int iz_tne = iz_tnw;
+        index_t ix_tne = ix_tnw + 1;
+        index_t iy_tne = iy_tnw;
+        index_t iz_tne = iz_tnw;
 
-        int ix_tsw = ix_tnw;
-        int iy_tsw = iy_tnw + 1;
-        int iz_tsw = iz_tnw;
+        index_t ix_tsw = ix_tnw;
+        index_t iy_tsw = iy_tnw + 1;
+        index_t iz_tsw = iz_tnw;
 
-        int ix_tse = ix_tnw + 1;
-        int iy_tse = iy_tnw + 1;
-        int iz_tse = iz_tnw;
+        index_t ix_tse = ix_tnw + 1;
+        index_t iy_tse = iy_tnw + 1;
+        index_t iz_tse = iz_tnw;
 
-        int ix_bnw = ix_tnw;
-        int iy_bnw = iy_tnw;
-        int iz_bnw = iz_tnw + 1;
+        index_t ix_bnw = ix_tnw;
+        index_t iy_bnw = iy_tnw;
+        index_t iz_bnw = iz_tnw + 1;
 
-        int ix_bne = ix_tnw + 1;
-        int iy_bne = iy_tnw;
-        int iz_bne = iz_tnw + 1;
+        index_t ix_bne = ix_tnw + 1;
+        index_t iy_bne = iy_tnw;
+        index_t iz_bne = iz_tnw + 1;
 
-        int ix_bsw = ix_tnw;
-        int iy_bsw = iy_tnw + 1;
-        int iz_bsw = iz_tnw + 1;
+        index_t ix_bsw = ix_tnw;
+        index_t iy_bsw = iy_tnw + 1;
+        index_t iz_bsw = iz_tnw + 1;
 
-        int ix_bse = ix_tnw + 1;
-        int iy_bse = iy_tnw + 1;
-        int iz_bse = iz_tnw + 1;
+        index_t ix_bse = ix_tnw + 1;
+        index_t iy_bse = iy_tnw + 1;
+        index_t iz_bse = iz_tnw + 1;
 
         // get surfaces to each neighbor:
         scalar_t tnw = (ix_bse - ix)    * (iy_bse - iy)    * (iz_bse - iz);
@@ -503,7 +502,7 @@ namespace {
         scalar_t *gInp_ptr_NC = grad_input.data + n * gInp_sN;
         scalar_t *inp_ptr_NC = input.data + n * inp_sN;
         // calculate bilinear weighted pixel value and set output pixel
-        for (int c = 0; c < C; ++c, gOut_ptr_NCDHW += gOut_sC, gInp_ptr_NC += gInp_sC, inp_ptr_NC += inp_sC) {
+        for (index_t c = 0; c < C; ++c, gOut_ptr_NCDHW += gOut_sC, gInp_ptr_NC += gInp_sC, inp_ptr_NC += inp_sC) {
           scalar_t gOut = *gOut_ptr_NCDHW;
 
           // calculate and set grad_input
@@ -576,14 +575,14 @@ namespace {
         gGrid_ptr_NDHW[1] = giy_mult * giy;
         gGrid_ptr_NDHW[2] = giz_mult * giz;
       } else if (interpolation_mode == GridSamplerInterpolation::Nearest) {
-        int ix_nearest = static_cast<int>(::round(ix));
-        int iy_nearest = static_cast<int>(::round(iy));
-        int iz_nearest = static_cast<int>(::round(iz));
+        auto ix_nearest = static_cast<index_t>(::round(ix));
+        auto iy_nearest = static_cast<index_t>(::round(iy));
+        auto iz_nearest = static_cast<index_t>(::round(iz));
 
         // assign nearest neighor pixel value to output pixel
         scalar_t *gOut_ptr_NCDHW = grad_output.data + n * gOut_sN + d * gOut_sD + h * gOut_sH + w * gOut_sW;
         scalar_t *gInp_ptr_NC = grad_input.data + n * gInp_sN;
-        for (int c = 0; c < C; ++c, gOut_ptr_NCDHW += gOut_sC, gInp_ptr_NC += gInp_sC) {
+        for (index_t c = 0; c < C; ++c, gOut_ptr_NCDHW += gOut_sC, gInp_ptr_NC += gInp_sC) {
           // calculate and set grad_input
           safe_add_3d(gInp_ptr_NC, iz_nearest, iy_nearest, ix_nearest,
                       gInp_sD, gInp_sH, gInp_sW, inp_D, inp_H, inp_W, *gOut_ptr_NCDHW);
@@ -607,21 +606,35 @@ Tensor grid_sampler_2d_cuda(const Tensor& input, const Tensor& grid,
                             int64_t interpolation_mode, int64_t padding_mode,
                             bool align_corners) {
   auto N = input.size(0);
+  auto C = input.size(1);
   auto H = grid.size(1);
   auto W = grid.size(2);
-  auto output = at::empty({N, input.size(1), H, W}, input.options());
-  int count = static_cast<int>(N * H * W);
+  auto output = at::empty({N, C, H, W}, input.options());
+  int64_t count = N * H * W;
   if (count > 0) {
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "grid_sampler_2d_cuda", [&] {
-      grid_sampler_2d_kernel<scalar_t>
-        <<<GET_BLOCKS(count), CUDA_NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
-          count,
-          getTensorInfo<scalar_t, int>(input),
-          getTensorInfo<scalar_t, int>(grid),
-          getTensorInfo<scalar_t, int>(output),
-          static_cast<GridSamplerInterpolation>(interpolation_mode),
-          static_cast<GridSamplerPadding>(padding_mode),
-          align_corners);
+      if (canUse32BitIndexMath(input) && canUse32BitIndexMath(grid) &&
+          canUse32BitIndexMath(output)) {
+        grid_sampler_2d_kernel<scalar_t>
+          <<<GET_BLOCKS(count), CUDA_NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
+            static_cast<int>(count),
+            getTensorInfo<scalar_t, int>(input),
+            getTensorInfo<scalar_t, int>(grid),
+            getTensorInfo<scalar_t, int>(output),
+            static_cast<GridSamplerInterpolation>(interpolation_mode),
+            static_cast<GridSamplerPadding>(padding_mode),
+            align_corners);
+      } else {
+        grid_sampler_2d_kernel<scalar_t>
+          <<<GET_BLOCKS(count), CUDA_NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
+            count,
+            getTensorInfo<scalar_t, int64_t>(input),
+            getTensorInfo<scalar_t, int64_t>(grid),
+            getTensorInfo<scalar_t, int64_t>(output),
+            static_cast<GridSamplerInterpolation>(interpolation_mode),
+            static_cast<GridSamplerPadding>(padding_mode),
+            align_corners);
+      }
     });
   }
   return output;
@@ -636,18 +649,31 @@ Tensor grid_sampler_3d_cuda(const Tensor& input, const Tensor& grid,
   auto H = grid.size(2);
   auto W = grid.size(3);
   auto output = at::empty({N, input.size(1), D, H, W}, input.options());
-  int count = static_cast<int>(N * D * H * W);
+  int64_t count = N * D * H * W;
   if (count > 0) {
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "grid_sampler_2d_cuda", [&] {
+      if (canUse32BitIndexMath(input) && canUse32BitIndexMath(grid) &&
+          canUse32BitIndexMath(output)) {
+        grid_sampler_3d_kernel<scalar_t>
+          <<<GET_BLOCKS(count), CUDA_NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
+            static_cast<int>(count),
+            getTensorInfo<scalar_t, int>(input),
+            getTensorInfo<scalar_t, int>(grid),
+            getTensorInfo<scalar_t, int>(output),
+            static_cast<GridSamplerInterpolation>(interpolation_mode),
+            static_cast<GridSamplerPadding>(padding_mode),
+            align_corners);
+      } else {
       grid_sampler_3d_kernel<scalar_t>
         <<<GET_BLOCKS(count), CUDA_NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
           count,
-          getTensorInfo<scalar_t, int>(input),
-          getTensorInfo<scalar_t, int>(grid),
-          getTensorInfo<scalar_t, int>(output),
+          getTensorInfo<scalar_t, int64_t>(input),
+          getTensorInfo<scalar_t, int64_t>(grid),
+          getTensorInfo<scalar_t, int64_t>(output),
           static_cast<GridSamplerInterpolation>(interpolation_mode),
           static_cast<GridSamplerPadding>(padding_mode),
           align_corners);
+      }
     });
   }
   return output;
@@ -658,25 +684,42 @@ std::tuple<Tensor, Tensor>
 grid_sampler_2d_backward_cuda(const Tensor& grad_output, const Tensor& input,
                               const Tensor& grid, int64_t interpolation_mode,
                               int64_t padding_mode, bool align_corners) {
+  // Nondeterministic because of atomicAdd usage
+  globalContext().alertNotDeterministic("grid_sampler_2d_backward_cuda");
   auto N = input.size(0);
   auto H = grid.size(1);
   auto W = grid.size(2);
   auto grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   auto grad_grid = at::empty_like(grid, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  int count = static_cast<int>(N * H * W);
+  int64_t count = N * H * W;
   if (count > 0) {
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "grid_sampler_2d_backward_cuda", [&] {
-      grid_sampler_2d_backward_kernel<scalar_t>
-        <<<GET_BLOCKS(count), CUDA_NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
-          count,
-          getTensorInfo<scalar_t, int>(grad_output),
-          getTensorInfo<scalar_t, int>(input),
-          getTensorInfo<scalar_t, int>(grid),
-          getTensorInfo<scalar_t, int>(grad_input),
-          getTensorInfo<scalar_t, int>(grad_grid),
-          static_cast<GridSamplerInterpolation>(interpolation_mode),
-          static_cast<GridSamplerPadding>(padding_mode),
-          align_corners);
+      if (canUse32BitIndexMath(input) && canUse32BitIndexMath(grid) &&
+          canUse32BitIndexMath(grad_output)) {
+        grid_sampler_2d_backward_kernel<scalar_t>
+          <<<GET_BLOCKS(count), CUDA_NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
+            static_cast<int>(count),
+            getTensorInfo<scalar_t, int>(grad_output),
+            getTensorInfo<scalar_t, int>(input),
+            getTensorInfo<scalar_t, int>(grid),
+            getTensorInfo<scalar_t, int>(grad_input),
+            getTensorInfo<scalar_t, int>(grad_grid),
+            static_cast<GridSamplerInterpolation>(interpolation_mode),
+            static_cast<GridSamplerPadding>(padding_mode),
+            align_corners);
+      } else {
+        grid_sampler_2d_backward_kernel<scalar_t>
+          <<<GET_BLOCKS(count), CUDA_NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
+            count,
+            getTensorInfo<scalar_t, int64_t>(grad_output),
+            getTensorInfo<scalar_t, int64_t>(input),
+            getTensorInfo<scalar_t, int64_t>(grid),
+            getTensorInfo<scalar_t, int64_t>(grad_input),
+            getTensorInfo<scalar_t, int64_t>(grad_grid),
+            static_cast<GridSamplerInterpolation>(interpolation_mode),
+            static_cast<GridSamplerPadding>(padding_mode),
+            align_corners);
+      }
     });
   }
   return std::make_tuple(grad_input, grad_grid);
@@ -687,26 +730,43 @@ std::tuple<Tensor, Tensor>
 grid_sampler_3d_backward_cuda(const Tensor& grad_output, const Tensor& input,
                               const Tensor& grid, int64_t interpolation_mode, int64_t padding_mode,
                               bool align_corners) {
+  // Nondeterministic because of atomicAdd usage
+  globalContext().alertNotDeterministic("grid_sampler_3d_backward_cuda");
   auto N = input.size(0);
   auto D = grid.size(1);
   auto H = grid.size(2);
   auto W = grid.size(3);
   auto grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   auto grad_grid = at::empty_like(grid, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  int count = static_cast<int>(N * D * H * W);
+  int64_t count = N * D * H * W;
   if (count > 0) {
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "grid_sampler_3d_backward_cuda", [&] {
-      grid_sampler_3d_backward_kernel<scalar_t>
-        <<<GET_BLOCKS(count), CUDA_NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
-          count,
-          getTensorInfo<scalar_t, int>(grad_output),
-          getTensorInfo<scalar_t, int>(input),
-          getTensorInfo<scalar_t, int>(grid),
-          getTensorInfo<scalar_t, int>(grad_input),
-          getTensorInfo<scalar_t, int>(grad_grid),
-          static_cast<GridSamplerInterpolation>(interpolation_mode),
-          static_cast<GridSamplerPadding>(padding_mode),
-          align_corners);
+      if (canUse32BitIndexMath(input) && canUse32BitIndexMath(grid) &&
+          canUse32BitIndexMath(grad_output)) {
+        grid_sampler_3d_backward_kernel<scalar_t>
+          <<<GET_BLOCKS(count), CUDA_NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
+            static_cast<int>(count),
+            getTensorInfo<scalar_t, int>(grad_output),
+            getTensorInfo<scalar_t, int>(input),
+            getTensorInfo<scalar_t, int>(grid),
+            getTensorInfo<scalar_t, int>(grad_input),
+            getTensorInfo<scalar_t, int>(grad_grid),
+            static_cast<GridSamplerInterpolation>(interpolation_mode),
+            static_cast<GridSamplerPadding>(padding_mode),
+            align_corners);
+      } else {
+        grid_sampler_3d_backward_kernel<scalar_t>
+          <<<GET_BLOCKS(count), CUDA_NUM_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
+            count,
+            getTensorInfo<scalar_t, int64_t>(grad_output),
+            getTensorInfo<scalar_t, int64_t>(input),
+            getTensorInfo<scalar_t, int64_t>(grid),
+            getTensorInfo<scalar_t, int64_t>(grad_input),
+            getTensorInfo<scalar_t, int64_t>(grad_grid),
+            static_cast<GridSamplerInterpolation>(interpolation_mode),
+            static_cast<GridSamplerPadding>(padding_mode),
+            align_corners);
+      }
     });
   }
   return std::make_tuple(grad_input, grad_grid);

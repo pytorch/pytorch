@@ -50,7 +50,6 @@ Creating TorchScript Code
     wait
     ScriptModule
     ScriptFunction
-    freeze
     save
     load
     ignore
@@ -205,8 +204,8 @@ Disable JIT for Debugging
 
 Setting the environment variable ``PYTORCH_JIT=0`` will disable all script
 and tracing annotations. If there is hard-to-debug error in one of your
-TorchScript model, you can use this flag to force everything to run using native
-Python. Since TorchScript (scripting and tracing) are disabled with this flag,
+TorchScript models, you can use this flag to force everything to run using native
+Python. Since TorchScript (scripting and tracing) is disabled with this flag,
 you can use tools like ``pdb`` to debug the model code.  For example::
 
     @torch.jit.script
@@ -236,6 +235,7 @@ and we will be able to step into the :func:`@torch.jit.script
 TorchScript compiler for a specific function, see
 :func:`@torch.jit.ignore <torch.jit.ignore>`.
 
+.. _inspecting-code:
 
 Inspecting Code
 ~~~~~~~~~~~~~~~
@@ -287,6 +287,8 @@ You can use this to ensure TorchScript (tracing or scripting) has captured
 your model code correctly.
 
 
+.. _interpreting-graphs:
+
 Interpreting Graphs
 ~~~~~~~~~~~~~~~~~~~
 TorchScript also has a representation at a lower level than the code pretty-
@@ -317,7 +319,7 @@ including control flow operators for loops and conditionals. As an example:
 
     ...
 
-``graph`` follows the same rules described in the `inspecting-code` section
+``graph`` follows the same rules described in the :ref:`inspecting-code` section
 with regard to ``forward`` method lookup.
 
 The example script above produces the graph::

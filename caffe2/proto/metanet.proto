@@ -45,4 +45,5 @@ message MetaNetDef {
   repeated string blobsOrder = 6;
   repeated string preLoadBlobs = 7;
   optional TensorBoundShapes tensorBoundShapes = 8;
+  repeated string requestOnlyEmbeddings = 9;
 }

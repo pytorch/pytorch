@@ -70,7 +70,6 @@ set(TORCH_PYTHON_INCLUDE_DIRECTORIES
 
     ${TORCH_ROOT}/third_party/gloo
     ${TORCH_ROOT}/third_party/onnx
-    ${TORCH_ROOT}/third_party/tensorpipe
     ${pybind11_INCLUDE_DIRS}
 
     ${TORCH_SRC_DIR}/csrc
@@ -88,6 +87,8 @@ set(TORCH_PYTHON_LINK_LIBRARIES
 
 set(TORCH_PYTHON_COMPILE_DEFINITIONS)
 
+set(TORCH_PYTHON_PUBLIC_COMPILE_DEFINITIONS)
+
 set(TORCH_PYTHON_COMPILE_OPTIONS)
 
 set(TORCH_PYTHON_LINK_FLAGS "")
@@ -98,7 +99,7 @@ if(MSVC)
     if(BUILD_TEST)
       list(APPEND TORCH_PYTHON_LINK_LIBRARIES onnx_library)
     endif(BUILD_TEST)
-    if(NOT ${CMAKE_BUILD_TYPE} MATCHES "Release")
+    if(NOT CMAKE_BUILD_TYPE MATCHES "Release")
       string(APPEND TORCH_PYTHON_LINK_FLAGS " /DEBUG:FULL")
     endif()
 elseif(APPLE)
@@ -166,6 +167,10 @@ if(USE_DISTRIBUTED)
       endif()
       list(APPEND TORCH_PYTHON_LINK_LIBRARIES c10d)
       list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_C10D)
+      if(USE_TENSORPIPE)
+        list(APPEND TORCH_PYTHON_LINK_LIBRARIES tensorpipe)
+        list(APPEND TORCH_PYTHON_PUBLIC_COMPILE_DEFINITIONS USE_TENSORPIPE)
+      endif()
     endif()
 endif()
 
@@ -173,7 +178,6 @@ if(USE_NCCL)
     list(APPEND TORCH_PYTHON_SRCS
       ${TORCH_SRC_DIR}/csrc/cuda/python_nccl.cpp)
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_NCCL)
-    list(APPEND TORCH_PYTHON_INCLUDE_DIRECTORIES ${NCCL_INCLUDE_DIRS})
 endif()
 
 # In the most recent CMake versions, a new 'TRANSFORM' subcommand of 'list' allows much of the boilerplate of defining the lists
@@ -261,6 +265,8 @@ target_compile_definitions(torch_python PRIVATE "-DTHP_BUILD_MAIN_LIB")
 target_link_libraries(torch_python ${TORCH_PYTHON_LINK_LIBRARIES})
 
 target_compile_definitions(torch_python PRIVATE ${TORCH_PYTHON_COMPILE_DEFINITIONS})
+
+target_compile_definitions(torch_python PUBLIC ${TORCH_PYTHON_PUBLIC_COMPILE_DEFINITIONS})
 
 target_compile_options(torch_python PRIVATE ${TORCH_PYTHON_COMPILE_OPTIONS})
 

@@ -33,6 +33,8 @@ class TORCH_API ThreadLocalState {
   // RecordFunction TLS callbacks
   RecordFunctionCallbacks callbacks_;
 
+  bool observers_enabled_ = false;
+
 #if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
   bool keep_grad_mode_ = true;
   bool grad_mode_enabled_;

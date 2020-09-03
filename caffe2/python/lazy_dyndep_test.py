@@ -5,7 +5,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from hypothesis import given
+from hypothesis import given, settings
 import hypothesis.strategies as st
 from multiprocessing import Process
 
@@ -60,6 +60,7 @@ class TestLazyDynDepAllCompare(hu.HypothesisTestCase):
     @given(
         d=st.integers(1, 5), n=st.integers(2, 11), num_procs=st.integers(1, 8)
     )
+    @settings(deadline=10000)
     def test_allcompare(self, d, n, num_procs):
         dims = []
         for _ in range(d):
@@ -112,6 +113,20 @@ class TestLazyDynDepError(unittest.TestCase):
             lazy_dyndep.SetErrorHandler(handlernoop)
             lazy_dyndep.RegisterOpsLibrary("@/caffe2/caffe2/distributed:file_store_handler_ops")
             core.RefreshRegisteredOperators()
+
+    def test_workspacecreatenet(self):
+        from caffe2.python import workspace, lazy_dyndep
+        import tempfile
+
+        with tempfile.NamedTemporaryFile() as f:
+            lazy_dyndep.RegisterOpsLibrary(f.name)
+            called = False
+
+            def handler(e):
+                raise ValueError("test")
+            lazy_dyndep.SetErrorHandler(handler)
+            with self.assertRaises(ValueError, msg="test"):
+                workspace.CreateNet("fake")
 
 
 if __name__ == "__main__":

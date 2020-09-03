@@ -14,6 +14,7 @@ class CheckpointTest(test_util.TestCase):
     """A simple test case to make sure that the checkpoint behavior is correct.
     """
 
+    @unittest.skipIf("LevelDB" not in core.C.registered_dbs(), "Need LevelDB")
     def testCheckpoint(self):
         temp_root = tempfile.mkdtemp()
         net = core.Net("test_checkpoint")

@@ -91,6 +91,12 @@ class EventList(list):
                         current_events.pop()
                     else:
                         parent.append_cpu_child(event)
+                        assert (
+                            event.cpu_parent is None
+                        ), "There is already a CPU parent event for {}".format(
+                            event.key
+                        )
+                        event.set_cpu_parent(parent)
                         break
 
                 current_events.append(event)
@@ -105,7 +111,7 @@ class EventList(list):
     def cpu_children_populated(self):
         return self._cpu_children_populated
 
-    def table(self, sort_by=None, row_limit=100, header=None):
+    def table(self, sort_by=None, row_limit=100, header=None, top_level_events_only=False):
         """Prints an EventList as a nicely formatted table.
 
         Arguments:
@@ -114,6 +120,11 @@ class EventList(list):
                 Valid keys include: ``cpu_time``, ``cuda_time``, ``cpu_time_total``,
                 ``cuda_time_total``, ``cpu_memory_usage``, ``cuda_memory_usage``,
                 ``self_cpu_memory_usage``, ``self_cuda_memory_usage``, ``count``.
+            top_level_events_only(bool, optional): Boolean flag to determine the
+                selection of events to display. If true, the profiler will only
+                display events at top level like top-level invocation of python
+                `lstm`, python `add` or other functions, nested events like low-level
+                cpu/cuda ops events are omitted for profiler result readability.
 
         Returns:
             A string containing the table.
@@ -124,7 +135,8 @@ class EventList(list):
             row_limit=row_limit,
             header=header,
             use_cuda=self._use_cuda,
-            profile_memory=self._profile_memory)
+            profile_memory=self._profile_memory,
+            top_level_events_only=top_level_events_only)
 
     def export_chrome_trace(self, path):
         """Exports an EventList as a Chrome tracing tools file.
@@ -346,10 +358,12 @@ class profile(object):
             raise RuntimeError("can't export a trace that didn't finish running")
         self.function_events.populate_cpu_children()
 
-    def table(self, sort_by=None, row_limit=100, header=None):
+    def table(self, sort_by=None, row_limit=100, header=None, top_level_events_only=False):
         self._check_finish()
         return self.function_events.table(
-            sort_by=sort_by, row_limit=row_limit, header=header)
+            sort_by=sort_by, row_limit=row_limit, header=header,
+            top_level_events_only=top_level_events_only
+        )
     table.__doc__ = EventList.table.__doc__
 
     def export_chrome_trace(self, path):
@@ -647,7 +661,8 @@ class FunctionEvent(FormattedTimesMixin):
     """Profiling information about a single function."""
     def __init__(
             self, id, node_id, name, thread, cpu_start, cpu_end, input_shapes=None,
-            cpu_memory_usage=0, cuda_memory_usage=0, is_async=False, is_remote=True):
+            cpu_memory_usage=0, cuda_memory_usage=0, is_async=False, is_remote=True,
+            sequence_nr=-1):
         self.id = id
         self.node_id = node_id
         self.name = name
@@ -656,11 +671,13 @@ class FunctionEvent(FormattedTimesMixin):
         self.kernels = []
         self.count = 1
         self.cpu_children = []
+        self.cpu_parent = None
         self.input_shapes = input_shapes
         self.cpu_memory_usage = cpu_memory_usage
         self.cuda_memory_usage = cuda_memory_usage
         self.is_async = is_async
         self.is_remote = is_remote
+        self.sequence_nr = sequence_nr
 
     def append_kernel(self, name, device, start, end):
         self.kernels.append(Kernel(name, device, Interval(start, end)))
@@ -668,11 +685,21 @@ class FunctionEvent(FormattedTimesMixin):
     def append_cpu_child(self, child):
         """Append a CPU child of type FunctionEvent.
 
-        One is supposed to append only dirrect children to the event to have
+        One is supposed to append only direct children to the event to have
         correct self cpu time being reported.
         """
         assert(isinstance(child, FunctionEvent))
         self.cpu_children.append(child)
+
+    def set_cpu_parent(self, parent):
+        """Set the immediate CPU parent of type FunctionEvent
+
+        One profiling FunctionEvent should have only one CPU parent such that
+        the child's range interval is completely inside the parent's. We use
+        this connection to determine the event is from top-level op or not.
+        """
+        assert(isinstance(parent, FunctionEvent))
+        self.cpu_parent = parent
 
     # Note: async events don't have children, are not used when computing 'self'
     # metrics of other events, have only total cpu time
@@ -716,7 +743,7 @@ class FunctionEvent(FormattedTimesMixin):
         return (
             '<FunctionEvent id={} node_id={} cpu_time={} cpu_start={} cpu_end={} '
             'cpu_children={} cuda_time={} name={} thread={} input_shapes={} '
-            'cpu_memory_usage={} cuda_memory_usage={} is_async={} is_remote={}>'.format(
+            'cpu_memory_usage={} cuda_memory_usage={} is_async={} is_remote={} seq_nr={}>'.format(
                 self.id,
                 self.node_id,
                 self.cpu_time_str,
@@ -731,6 +758,7 @@ class FunctionEvent(FormattedTimesMixin):
                 self.cuda_memory_usage,
                 self.is_async,
                 self.is_remote,
+                self.sequence_nr,
             )
         )
 
@@ -751,6 +779,8 @@ class FunctionEventAvg(FormattedTimesMixin):
         self.cuda_memory_usage = 0
         self.self_cpu_memory_usage = 0
         self.self_cuda_memory_usage = 0
+        self.cpu_children = None
+        self.cpu_parent = None
 
     def add(self, other, group_by_input_shapes=False):
         if self.key is None:
@@ -760,6 +790,8 @@ class FunctionEventAvg(FormattedTimesMixin):
             self.node_id = other.node_id
             self.is_async = other.is_async
             self.is_remote = other.is_remote
+            self.cpu_parent = other.cpu_parent
+            self.cpu_children = other.cpu_children
             if group_by_input_shapes:
                 self.input_shapes = other.input_shapes
 
@@ -832,9 +864,9 @@ def parse_cpu_trace(thread_records):
     filtered_out_names = [
         "profiler::_record_function_enter",
         "profiler::_record_function_exit",
-        "is_leaf",
-        "output_nr",
-        "_version",
+        "aten::is_leaf",
+        "aten::output_nr",
+        "aten::_version",
     ]
 
     # cuda start events and the overall profiler start event don't happen
@@ -896,9 +928,9 @@ def parse_cpu_trace(thread_records):
             elif record.kind() == 'pop':
                 assert (
                     record_key in range_starts
-                ), """Expected record (name={}) with key {} to exist in range_starts.
+                ), """Expected record with key {} to exist in range_starts.
                     This means that the pop event did not have a corresponding push.""".format(
-                    record.name(), record_key
+                    record_key
                 )
 
                 start = range_starts[record_key]
@@ -920,16 +952,18 @@ def parse_cpu_trace(thread_records):
                     cuda_memory_usage=cuda_memory_usage,
                     is_async=is_async,
                     is_remote=is_remote_event,
+                    sequence_nr=start.sequence_nr(),
                 )
                 # note: async events have only cpu total time
                 if not is_async and start.has_cuda():
                     cuda_start = adjusted_time(start, cuda_records)
                     cuda_end = adjusted_time(record, cuda_records)
-                    fe.append_kernel(
-                        start.name(),
-                        start.device(),
-                        cuda_start,
-                        cuda_end)
+                    if (cuda_end - cuda_start) > 0:
+                        fe.append_kernel(
+                            start.name(),
+                            start.device(),
+                            cuda_start,
+                            cuda_end)
                 functions.append(fe)
                 del range_starts[record_key]
                 del cpu_memory_allocs[record_key]
@@ -1038,7 +1072,8 @@ def build_table(
         header=None,
         row_limit=100,
         use_cuda=True,
-        profile_memory=False):
+        profile_memory=False,
+        top_level_events_only=False):
     """Prints a summary of events (which can be a list of FunctionEvent or FunctionEventAvg)."""
     if len(events) == 0:
         return ""
@@ -1123,13 +1158,22 @@ def build_table(
     if header is not None:
         append('=' * line_length)
         append(header)
+    if top_level_events_only:
+        append('=' * line_length)
+        append('This report only display top-level ops statistics')
     append(header_sep)
     append(row_format.format(*headers))
 
     append(header_sep)
-    if row_limit > 0:
-        events = events[:row_limit]
+
+    event_limit = 0
     for evt in events:
+        if event_limit == row_limit:
+            break
+        if top_level_events_only and evt.cpu_parent is not None:
+            continue
+        else:
+            event_limit += 1
         row_values = [
             evt.key,  # Name
             # Self CPU total, 0 for async events. %

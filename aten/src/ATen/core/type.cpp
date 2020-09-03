@@ -9,6 +9,13 @@
 
 namespace c10 {
 
+TypeVerbosity type_verbosity() {
+  static const char* c_verbosity = std::getenv("PYTORCH_JIT_TYPE_VERBOSITY");
+  static TypeVerbosity verbosity = c_verbosity ?
+    static_cast<TypeVerbosity>(c10::stoi(c_verbosity)) : TypeVerbosity::Default;
+  return verbosity;
+}
+
 std::ostream& operator<<(std::ostream & out, const Type & t) {
   if (auto value = t.cast<TensorType>()) {
     if  (value->scalarType().has_value()) {
@@ -24,7 +31,8 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
           value->strides().isComplete() && value->strides().size() == ndim;
 
       out << "(";
-      for (size_t i = 0; i < *ndim; ++i) {
+      size_t i = 0;
+      for (i = 0; i < *ndim; ++i) {
         if (i > 0) {
           out << ", ";
         }
@@ -33,8 +41,23 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
         } else {
           out << "*";
         }
-        if (has_valid_strides_info) {
+        if (has_valid_strides_info &&
+            type_verbosity() >= TypeVerbosity::TypeAndStride) {
           out << ":" << *value->strides()[i];
+        }
+      }
+      if (type_verbosity() >= TypeVerbosity::Full) {
+        if (value->requiresGrad()) {
+          if (i++ > 0) {
+            out << ", ";
+          }
+          out << "requires_grad=" << *value->requiresGrad();
+        }
+        if (value->device()) {
+          if (i++ > 0) {
+            out << ", ";
+          }
+          out << "device=" << *value->device();
         }
       }
       out << ")";
@@ -112,6 +135,10 @@ GeneratorTypePtr GeneratorType::get() {
   static auto value = GeneratorType::create();
   return value;
 }
+QuantizerTypePtr QuantizerType::get() {
+  static auto value = QuantizerType::create();
+  return value;
+}
 QSchemeTypePtr QSchemeType::get() {
   static auto value = QSchemeType::create();
   return value;
@@ -180,7 +207,12 @@ AnyClassTypePtr AnyClassType::get() {
   return value;
 }
 
-c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2) {
+AnyEnumTypePtr AnyEnumType::get() {
+  static auto value = AnyEnumType::create();
+  return value;
+}
+
+c10::optional<TypePtr> unifyTypesImpl(const TypePtr& t1, const TypePtr& t2) {
   // check direct subtyping relation
   if (t1->isSubtypeOf(t2)) {
     return t2;
@@ -253,6 +285,16 @@ c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2) {
   }
 
   return c10::nullopt;
+}
+
+c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2, bool default_to_any) {
+  auto unified = unifyTypesImpl(t1, t2);
+
+  if (default_to_any && !unified) {
+    return AnyType::get();
+  }
+
+  return unified;
 }
 
 c10::optional<TypePtr> unifyTypeList(
@@ -1313,6 +1355,22 @@ std::shared_ptr<const CompilationUnit> ClassType::compilation_unit() const {
   return cu;
 }
 
+c10::optional<ClassType::Property> ClassType::getProperty(const std::string& name) {
+  for (auto& prop : properties_) {
+    if (name == prop.name) {
+      return prop;
+    }
+  }
+
+  return c10::nullopt;
+}
+
+void ClassType::addProperty(const std::string& name, torch::jit::Function* getter, torch::jit::Function* setter) {
+  TORCH_INTERNAL_ASSERT(!getProperty(name), "Property named ", name, " already exists!");
+  properties_.push_back({name, getter, setter});
+}
+
+
 static bool containsAny(const TypePtr& type) {
   std::vector<TypePtr> to_scan = { type };
   while (!to_scan.empty()) {
@@ -1351,6 +1409,11 @@ SymbolicShape SymbolicShape::merge(const SymbolicShape& other) const {
     dims.push_back(merge_primitive((*dims_)[i], (*other.dims_)[i]));
   }
   return SymbolicShape(std::move(dims));
+}
+
+bool EnumType::isSubtypeOfExt(const TypePtr rhs, std::ostream* why_not) const {
+  return rhs->kind() == TypeKind::AnyType ||
+      rhs->kind() == TypeKind::AnyEnumType || *this == *rhs;
 }
 
 } // namespace c10

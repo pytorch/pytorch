@@ -177,6 +177,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: absolute_
    .. automethod:: acos
    .. automethod:: acos_
+   .. automethod:: arccos
+   .. automethod:: arccos_
    .. automethod:: add
    .. automethod:: add_
    .. automethod:: addbmm
@@ -192,6 +194,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: addr
    .. automethod:: addr_
    .. automethod:: allclose
+   .. automethod:: amax
+   .. automethod:: amin
    .. automethod:: angle
    .. automethod:: apply_
    .. automethod:: argmax
@@ -199,11 +203,15 @@ view of a storage and defines numeric operations on it.
    .. automethod:: argsort
    .. automethod:: asin
    .. automethod:: asin_
+   .. automethod:: arcsin
+   .. automethod:: arcsin_
    .. automethod:: as_strided
    .. automethod:: atan
+   .. automethod:: atan_
+   .. automethod:: arctan
+   .. automethod:: arctan_
    .. automethod:: atan2
    .. automethod:: atan2_
-   .. automethod:: atan_
    .. automethod:: backward
       :noindex:
    .. automethod:: baddbmm
@@ -233,6 +241,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: chunk
    .. automethod:: clamp
    .. automethod:: clamp_
+   .. automethod:: clip
+   .. automethod:: clip_
    .. automethod:: clone
    .. automethod:: contiguous
    .. automethod:: copy_
@@ -244,6 +254,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: count_nonzero
    .. automethod:: acosh
    .. automethod:: acosh_
+   .. automethod:: arccosh
+   .. automethod:: arccosh_
    .. automethod:: cpu
    .. automethod:: cross
    .. automethod:: cuda
@@ -292,6 +304,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: expand
    .. automethod:: expand_as
    .. automethod:: exponential_
+   .. automethod:: fix
+   .. automethod:: fix_
    .. automethod:: fft
    .. automethod:: fill_
    .. automethod:: flatten
@@ -320,7 +334,10 @@ view of a storage and defines numeric operations on it.
    .. automethod:: gt_
    .. automethod:: half
    .. automethod:: hardshrink
+   .. automethod:: heaviside
    .. automethod:: histc
+   .. automethod:: hypot
+   .. automethod:: hypot_
    .. automethod:: ifft
    .. automethod:: index_add_
    .. automethod:: index_add
@@ -339,6 +356,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: isclose
    .. automethod:: isfinite
    .. automethod:: isinf
+   .. automethod:: isposinf
+   .. automethod:: isneginf
    .. automethod:: isnan
    .. automethod:: is_contiguous
    .. automethod:: is_complex
@@ -351,6 +370,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: is_signed
    .. autoattribute:: is_sparse
    .. automethod:: istft
+   .. automethod:: isreal
    .. automethod:: item
    .. automethod:: kthvalue
    .. automethod:: lcm
@@ -399,18 +419,23 @@ view of a storage and defines numeric operations on it.
    .. automethod:: masked_select
    .. automethod:: matmul
    .. automethod:: matrix_power
+   .. automethod:: matrix_exp
    .. automethod:: max
+   .. automethod:: maximum
    .. automethod:: mean
    .. automethod:: median
    .. automethod:: min
+   .. automethod:: minimum
    .. automethod:: mm
    .. automethod:: mode
+   .. automethod:: movedim
    .. automethod:: mul
    .. automethod:: mul_
    .. automethod:: multinomial
    .. automethod:: mv
    .. automethod:: mvlgamma
    .. automethod:: mvlgamma_
+   .. automethod:: nansum
    .. automethod:: narrow
    .. automethod:: narrow_copy
    .. automethod:: ndimension
@@ -418,7 +443,11 @@ view of a storage and defines numeric operations on it.
    .. automethod:: ne_
    .. automethod:: neg
    .. automethod:: neg_
+   .. automethod:: negative
+   .. automethod:: negative_
    .. automethod:: nelement
+   .. automethod:: nextafter
+   .. automethod:: nextafter_
    .. automethod:: nonzero
    .. automethod:: norm
    .. automethod:: normal_
@@ -426,6 +455,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: numpy
    .. automethod:: orgqr
    .. automethod:: ormqr
+   .. automethod:: outer
    .. automethod:: permute
    .. automethod:: pin_memory
    .. automethod:: pinverse
@@ -437,6 +467,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: put_
    .. automethod:: qr
    .. automethod:: qscheme
+   .. automethod:: quantile
    .. automethod:: q_scale
    .. automethod:: q_zero_point
    .. automethod:: q_per_channel_scales
@@ -483,12 +514,15 @@ view of a storage and defines numeric operations on it.
    .. automethod:: sigmoid_
    .. automethod:: sign
    .. automethod:: sign_
+   .. automethod:: signbit
    .. automethod:: sin
    .. automethod:: sin_
    .. automethod:: sinh
    .. automethod:: sinh_
    .. automethod:: asinh
    .. automethod:: asinh_
+   .. automethod:: arcsinh
+   .. automethod:: arcsinh_
    .. automethod:: size
    .. automethod:: slogdet
    .. automethod:: solve
@@ -510,6 +544,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: stride
    .. automethod:: sub
    .. automethod:: sub_
+   .. automethod:: subtract
+   .. automethod:: subtract_
    .. automethod:: sum
    .. automethod:: sum_to_size
    .. automethod:: svd
@@ -525,6 +561,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: tanh_
    .. automethod:: atanh
    .. automethod:: atanh_
+   .. automethod:: arctanh
+   .. automethod:: arctanh_
    .. automethod:: tolist
    .. automethod:: topk
    .. automethod:: to_sparse
@@ -551,6 +589,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: unsqueeze_
    .. automethod:: values
    .. automethod:: var
+   .. automethod:: vdot
    .. automethod:: view
    .. automethod:: view_as
    .. automethod:: where

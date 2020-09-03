@@ -1,5 +1,8 @@
 import ast
+import enum
 import inspect
+import warnings
+import os
 import re
 import torch
 from .._jit_internal import List, BroadcastingList1, BroadcastingList2, \
@@ -7,7 +10,8 @@ from .._jit_internal import List, BroadcastingList1, BroadcastingList2, \
     is_optional, _qualified_name, Any, Future, is_future, is_ignored_fn
 from torch._C import TensorType, TupleType, FloatType, IntType, \
     ListType, StringType, DictType, BoolType, OptionalType, ClassType, InterfaceType, AnyType, NoneType, \
-    DeviceObjType, FutureType
+    DeviceObjType, FutureType, EnumType
+
 
 from textwrap import dedent
 from torch._six import builtins
@@ -28,7 +32,7 @@ class Module(object):
         try:
             return self.members[name]
         except KeyError:
-            raise RuntimeError("Module {} has no member called {}".format(self.name, name))
+            raise RuntimeError("Module {} has no member called {}".format(self.name, name)) from None
 
 
 class EvalEnv(object):
@@ -143,7 +147,7 @@ def parse_type_line(type_line, rcb, loc):
     try:
         arg_ann = eval(arg_ann_str, {}, EvalEnv(rcb))  # noqa: P204
     except (NameError, SyntaxError) as e:
-        raise RuntimeError("Failed to parse the argument list of a type annotation: {}".format(str(e)))
+        raise RuntimeError("Failed to parse the argument list of a type annotation") from e
 
     if not isinstance(arg_ann, tuple):
         arg_ann = (arg_ann,)
@@ -151,7 +155,7 @@ def parse_type_line(type_line, rcb, loc):
     try:
         ret_ann = eval(ret_ann_str, {}, EvalEnv(rcb))  # noqa: P204
     except (NameError, SyntaxError) as e:
-        raise RuntimeError("Failed to parse the return type of a type annotation: {}".format(str(e)))
+        raise RuntimeError("Failed to parse the return type of a type annotation") from e
 
     arg_types = [ann_to_type(ann, loc) for ann in arg_ann]
     return arg_types, ann_to_type(ret_ann, loc)
@@ -164,10 +168,14 @@ def get_type_line(source):
     lines = source.split('\n')
     lines = [(line_num, line) for line_num, line in enumerate(lines)]
     type_lines = list(filter(lambda line: type_comment in line[1], lines))
+    # `type: ignore` comments may be needed in JIT'ed functions for mypy, due
+    # to the hack in torch/_VF.py.
+    type_lines = list(filter(lambda line: not line[1].endswith("# type: ignore"),
+                             type_lines))
     lines_with_type = list(filter(lambda line: 'type' in line[1], lines))
 
     if len(type_lines) == 0:
-        type_pattern = re.compile('#[\t ]*type[\t ]*:')
+        type_pattern = re.compile('#[\t ]*type[\t ]*(?!: ignore$):')
         wrong_type_lines = list(filter(lambda line: type_pattern.search(line[1]), lines))
         if len(wrong_type_lines) > 0:
             raise RuntimeError("The annotation prefix in line " + str(wrong_type_lines[0][0])
@@ -190,8 +198,11 @@ def get_type_line(source):
         elif type_comment in line:
             parameter_type_lines.append(line)
     if return_line is None:
-        raise RuntimeError("Return type line '# type: (...) -> ...' not found on multiline "
-                           "type annotation\n(See PEP 484 https://www.python.org/dev/peps/pep-0484/#suggested-syntax-for-python-2-7-and-straddling-code)")  # noqa
+        raise RuntimeError(
+            "Return type line '# type: (...) -> ...' not found on multiline "
+            "type annotation\nfor type lines:\n" +
+            '\n'.join([line[1] for line in type_lines]) +
+            "\n(See PEP 484 https://www.python.org/dev/peps/pep-0484/#suggested-syntax-for-python-2-7-and-straddling-code)")  # noqa
 
     def get_parameter_type(line):
         item_type = line[line.find(type_comment) + len(type_comment):]
@@ -217,7 +228,7 @@ def split_type_line(type_line):
     try:
         arrow_pos = type_line.index('->')
     except ValueError:
-        raise RuntimeError("Syntax error in type annotation (cound't find `->`)")
+        raise RuntimeError("Syntax error in type annotation (cound't find `->`)") from None
     return type_line[start_offset:arrow_pos].strip(), type_line[arrow_pos + 2:].strip()
 
 
@@ -240,6 +251,29 @@ def try_real_annotations(fn, loc):
                  for p in sig.parameters.values()]
     return_type = ann_to_type(as_ann(sig.return_annotation), loc)
     return arg_types, return_type
+
+
+# Finds common type for enum values belonging to an Enum class. If not all
+# values have the same type, AnyType is returned.
+def get_enum_value_type(e: enum.Enum, loc):
+    enum_values = list(e)
+    if not enum_values:
+        raise ValueError("No enum values defined for: '{}'".format(e.__class__))
+
+    types = set([type(v.value) for v in enum_values])
+    ir_types = [try_ann_to_type(t, loc) for t in types]
+
+    # If Enum values are of different types, an exception will be raised here.
+    # Even though Python supports this case, we chose to not implement it to
+    # avoid overcomplicate logic here for a rare use case. Please report a
+    # feature request if you find it necessary.
+    return torch._C.unify_type_list(ir_types)
+
+
+# Guards against using Enum support in JIT before the feature is complete.
+# TODO(gmagogsfm): remove this check once Enum support is complete.
+def is_enum_support_enabled() -> bool:
+    return os.environ.get('EXPERIMENTAL_ENUM_SUPPORT', "0") == "1"
 
 
 def try_ann_to_type(ann, loc):
@@ -286,10 +320,18 @@ def try_ann_to_type(ann, loc):
         return DeviceObjType.get()
     if ann is torch.dtype:
         return IntType.get()  # dtype not yet bound in as its own type
+    if inspect.isclass(ann) and issubclass(ann, enum.Enum):
+        if not is_enum_support_enabled():
+            warnings.warn("Enum support is work in progress, enum class {}"
+                          " is not compiled".format(ann))
+            return None
+        if not hasattr(ann, "__torch_script_class__"):
+            torch.jit._script._recursive_compile_class(ann, loc)
+        return EnumType(_qualified_name(ann), get_enum_value_type(ann, loc), list(ann))
     if inspect.isclass(ann):
         if hasattr(ann, "__torch_script_class__"):
             return ClassType(_qualified_name(ann))
-        ignored_builtin_classes = (torch.nn.Module, tuple, list)
+        ignored_builtin_classes = (torch.nn.Module, tuple, list, Exception)
         if torch._jit_internal.can_compile_class(ann) and not issubclass(ann, ignored_builtin_classes):
             torch.jit._script._recursive_compile_class(ann, loc)
             return ClassType(_qualified_name(ann))

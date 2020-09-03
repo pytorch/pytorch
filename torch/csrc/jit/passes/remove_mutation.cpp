@@ -35,10 +35,39 @@ struct MutationRemover {
         !(v->node()->kind() == prim::Param);
   }
 
+  bool isSpecialMappedOp(Node* n) {
+    return n->matches("aten::zero_(Tensor(a!) self) -> Tensor(a!)") ||
+        n->matches(
+            "aten::fill_.Scalar(Tensor(a!) self, Scalar value) -> Tensor(a!)");
+  }
+
+  Node* createSpecialMappedOp(Node* n) {
+    WithInsertPoint guard(n);
+    auto inputs = n->inputs();
+    Node* new_node;
+    if (n->matches(
+            "aten::fill_.Scalar(Tensor(a!) self, Scalar value) -> Tensor(a!)")) {
+      new_node =
+          graph_->insert(aten::full_like, {inputs.at(0), inputs.at(1)})->node();
+    } else if (n->matches("aten::zero_(Tensor(a!) self) -> Tensor(a!)")) {
+      new_node = graph_->insert(aten::zeros_like, {n->inputs().at(0)})->node();
+    } else {
+      TORCH_INTERNAL_ASSERT(false);
+    }
+    new_node->copyMetadata(n);
+    new_node->output()->setType(n->output()->type());
+    return new_node;
+  }
+
   bool inplaceOpVariant(Node* n) {
     if (!n->kind().is_aten()) {
       return false;
     }
+
+    if (isSpecialMappedOp(n)) {
+      return true;
+    }
+
     auto name = n->schema().name();
     bool inplace_op = name.at(name.size() - 1) == '_';
     if (!inplace_op) {
@@ -181,15 +210,21 @@ struct MutationRemover {
         continue;
       }
 
-      auto schema_name = node->schema().name();
-      auto new_schema = schema_name.substr(0, schema_name.size() - 1);
-      auto new_node = graph_->create(Symbol::fromQualString(new_schema), 1);
-      new_node->copyMetadata(node);
-      new_node->insertBefore(node);
-      for (Value* input : node->inputs()) {
-        new_node->addInput(input);
+      Node* new_node;
+      if (isSpecialMappedOp(node)) {
+        new_node = createSpecialMappedOp(node);
+      } else {
+        auto schema_name = node->schema().name();
+        auto new_schema = schema_name.substr(0, schema_name.size() - 1);
+        new_node = graph_->create(Symbol::fromQualString(new_schema), 1);
+        new_node->copyMetadata(node);
+        new_node->insertBefore(node);
+        for (Value* input : node->inputs()) {
+          new_node->addInput(input);
+        }
+        new_node->output()->setType(node->output()->type());
       }
-      new_node->output()->setType(node->output()->type());
+
       mutated_value->replaceAllUsesAfterNodeWith(node, new_node->output());
       node->output()->replaceAllUsesWith(new_node->output());
 

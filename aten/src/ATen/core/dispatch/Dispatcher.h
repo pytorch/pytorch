@@ -1,12 +1,18 @@
 #pragma once
 
+#include <ATen/SequenceNumber.h>
+#include <ATen/core/boxing/KernelFunction.h>
+#include <ATen/core/boxing/impl/boxing.h>
 #include <ATen/core/dispatch/OperatorEntry.h>
 #include <ATen/core/dispatch/CppSignature.h>
 #include <ATen/core/dispatch/RegistrationHandleRAII.h>
+#include <ATen/record_function.h>
 #include <c10/util/Exception.h>
 #include <c10/util/LeftRight.h>
 #include <mutex>
 #include <list>
+
+#include <ATen/core/grad_mode.h>
 
 namespace c10 {
 
@@ -198,6 +204,13 @@ public:
 
   void checkInvariants() const;
 
+  /* Check if operator calls with a given dispatch key
+   * need to be observed with RecordFunction.
+   */
+  inline bool shouldRecord(DispatchKey dispatch_key) const {
+    return dispatch_key != DispatchKey::BackendSelect;
+  }
+
 private:
   Dispatcher();
 
@@ -327,7 +340,35 @@ template<class... Args> inline void unused_arg_(const Args&...) {}
 template<class Return, class... Args>
 inline Return Dispatcher::callWithDispatchKey(const TypedOperatorHandle<Return(Args...)>& op, DispatchKey dispatchKey, Args... args) const {
   detail::unused_arg_(args...);  // workaround for a false-positive warning about unused parameters in gcc 5
+  // No alias dispatch key is allowed at runtime.
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!c10::isAliasDispatchKey(dispatchKey));
   const KernelFunction& kernel = op.operatorIterator_->op.lookup(dispatchKey);
+
+#ifndef PYTORCH_DISABLE_PER_OP_PROFILING
+  // Check if we need to run callbacks registered with RecordFunction
+  // If true and callbacks need inputs, we box the arguments and pass
+  // them into the callbacks and also into the kernel call
+
+  // Note: for perf reasons we wouldn't want to pass arguments into
+  // the function call or prematurely box them
+  at::RecordFunction guard(at::RecordScope::FUNCTION);
+  if (C10_UNLIKELY(guard.active)) {
+    if (shouldRecord(dispatchKey) && op.operatorIterator_->op.isObserved()) {
+      int64_t seq_num = -1;
+      // Setting sequence number in the Autograd case to associate
+      // the forward range with the coresponding Autograd's node
+      if (isIncludedInAlias(dispatchKey, DispatchKey::Autograd) && at::GradMode::is_enabled()) {
+        seq_num = at::sequence_number::peek();
+      }
+      if (guard.needs_inputs) {
+        torch::jit::Stack stack = impl::BoxedKernelWrapper<Return(Args...)>::boxArgs(args...);
+        guard.before(op.schema().name(), stack, seq_num);
+      } else {
+        guard.before(op.schema().name(), seq_num);
+      }
+    }
+  }
+#endif  // PYTORCH_DISABLE_PER_OP_PROFILING
   return kernel.template call<Return, Args...>(op, std::forward<Args>(args)...);
 }
 
@@ -350,7 +391,9 @@ inline Return Dispatcher::redispatch(const TypedOperatorHandle<Return (Args...)>
       DispatchKeySet(DispatchKeySet::FULL_AFTER, currentDispatchKey),
       args...
     );
-  return callWithDispatchKey<Return, Args...>(op, dispatchKey, args...);
+  // do not use RecordFunction on redispatch
+  const KernelFunction& kernel = op.operatorIterator_->op.lookup(dispatchKey);
+  return kernel.template call<Return, Args...>(op, std::forward<Args>(args)...);
 }
 
 inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const {
@@ -358,6 +401,24 @@ inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const 
   const auto& entry = op.operatorIterator_->op;
   auto dispatchKey = entry.dispatchKeyExtractor().getDispatchKeyBoxed(stack);
   const auto& kernel = entry.lookup(dispatchKey);
+
+#ifndef PYTORCH_DISABLE_PER_OP_PROFILING
+  // using already existing stack to record function execution in observers
+  at::RecordFunction guard(at::RecordScope::FUNCTION);
+  if (C10_UNLIKELY(guard.active)) {
+    if (shouldRecord(dispatchKey) && entry.isObserved()) {
+      int64_t seq_num = -1;
+      if (isIncludedInAlias(dispatchKey, DispatchKey::Autograd) && at::GradMode::is_enabled()) {
+        seq_num = at::sequence_number::peek();
+      }
+      if (guard.needs_inputs) {
+        guard.before(op.schema().name(), *stack, seq_num);
+      } else {
+        guard.before(op.schema().name(), seq_num);
+      }
+    }
+  }
+#endif  // PYTORCH_DISABLE_PER_OP_PROFILING
   kernel.callBoxed(op, stack);
 }
 

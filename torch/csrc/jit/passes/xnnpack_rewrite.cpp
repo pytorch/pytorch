@@ -9,6 +9,8 @@
 #include <torch/csrc/jit/passes/fuse_linear.h>
 #include <torch/csrc/jit/passes/fuse_relu.h>
 #include <torch/csrc/jit/passes/graph_rewrite_helper.h>
+#include <torch/csrc/jit/passes/hoist_conv_packed_params.h>
+#include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/prepack_folding.h>
 #include <torch/csrc/jit/passes/remove_dropout.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
@@ -17,6 +19,55 @@
 
 namespace torch {
 namespace jit {
+
+namespace {
+
+void replaceConv1dWithConv2d(std::shared_ptr<Graph>& graph) {
+  std::string conv_1d_pattern = R"(
+    graph(%input, %weight, %bias, %stride:int[], %padding:int[], %dilation:int[], %groups:int):
+        %r = aten::conv1d(%input, %weight, %bias, %stride, %padding, %dilation, %groups)
+        return (%r) )";
+
+  std::string conv_2d_pattern = R"(
+    graph(%input, %weight, %bias, %stride:int[], %padding:int[], %dilation:int[], %groups:int):
+        %zero : int = prim::Constant[value=0]()
+        %one : int = prim::Constant[value=1]()
+        %stride_w : int = prim::ListUnpack(%stride)
+        %stride_2d : int[] = prim::ListConstruct(%one, %stride_w)
+        %padding_w : int = prim::ListUnpack(%padding)
+        %padding_2d : int[] = prim::ListConstruct(%zero, %padding_w)
+        %dilation_w : int = prim::ListUnpack(%dilation)
+        %dilation_2d : int[] = prim::ListConstruct(%one, %dilation_w)
+        %two : int = prim::Constant[value=2]()
+        %input_2d : Tensor = aten::unsqueeze(%input, %two)
+        %weight_2d : Tensor = aten::unsqueeze(%weight, %two)
+        %output_2d = aten::conv2d(
+            %input_2d, %weight_2d, %bias, %stride_2d, %padding_2d, %dilation_2d, %groups)
+        %output : Tensor = aten::squeeze(%output_2d, %two)
+        return (%output) )";
+
+  SubgraphRewriter rewriter;
+  rewriter.RegisterRewritePattern(conv_1d_pattern, conv_2d_pattern);
+  rewriter.runOnGraph(graph);
+}
+
+} // namespace
+
+void transformConv1dToConv2d(std::shared_ptr<Graph>& graph) {
+  // Replace _convolution with conv1d and conv2d
+  graph_rewrite_helper::replaceConvolutionWithAtenConv(graph);
+  replaceConv1dWithConv2d(graph);
+}
+
+void transformConv1dToConv2d(script::Module& module) {
+  for (auto& method : module.get_methods()) {
+    auto graph = method.graph();
+    transformConv1dToConv2d(graph);
+  }
+  for (script::Module m : module.children()) {
+    transformConv1dToConv2d(m);
+  }
+}
 
 #ifdef USE_XNNPACK
 
@@ -92,6 +143,26 @@ void insertPrePackedConv2dOp(std::shared_ptr<Graph>& graph) {
   rewriter.RegisterRewritePattern(
       conv_2d_pattern, prepacked_ops_conv2d_pattern);
   rewriter.runOnGraph(graph);
+
+  std::string conv_2d_transpose_pattern = R"(
+      graph(%input, %weight, %bias, %stride:int[], %padding:int[], %dilation:int[],
+          %output_padding:int[], %groups:int):
+        %r = aten::conv_transpose2d(%input, %weight, %bias, %stride, %padding, %output_padding, %groups, %dilation)
+        return (%r) )";
+
+  std::string prepacked_ops_conv2d_transpose_pattern = R"(
+    graph(%input, %weight, %bias, %stride:int[], %padding:int[], %dilation:int[], %output_padding:int[], %groups:int):
+        %output_min_max : None = prim::Constant()
+        %packed_weight_bias = prepacked::conv2d_transpose_clamp_prepack(
+            %weight, %bias, %stride, %padding, %output_padding, %dilation, %groups,
+            %output_min_max, %output_min_max)
+        %r = prepacked::conv2d_transpose_clamp_run(%input, %packed_weight_bias)
+        return (%r) )";
+
+  SubgraphRewriter transpose_rewriter;
+  transpose_rewriter.RegisterRewritePattern(
+      conv_2d_transpose_pattern, prepacked_ops_conv2d_transpose_pattern);
+  transpose_rewriter.runOnGraph(graph);
 }
 
 void fuseHardtanhWithPackedOps(std::shared_ptr<Graph>& graph) {
@@ -270,23 +341,27 @@ void FoldPrePackingOps(script::Module& m) {
     return (
         (n->kind() ==
          Symbol::fromQualString("prepacked::linear_clamp_prepack")) ||
-        n->kind() == Symbol::fromQualString("prepacked::conv2d_clamp_prepack"));
+        n->kind() ==
+            Symbol::fromQualString("prepacked::conv2d_clamp_prepack") ||
+        n->kind() ==
+            Symbol::fromQualString(
+                "prepacked::conv2d_transpose_clamp_prepack"));
   };
   PrePackingOpsFolder(m, filter_fn, "prepack_folding");
 }
 
 script::Module optimizeForMobile(
     const script::Module& m,
-    const std::set<MobileOptimizerType>& optimization_blacklist,
+    const std::set<MobileOptimizerType>& optimization_blocklist,
     const std::vector<std::string>& preserved_methods) {
   auto cloned_module = m.clone();
   cloned_module.eval();
 
-  if (!optimization_blacklist.count(MobileOptimizerType::CONV_BN_FUSION)) {
+  if (!optimization_blocklist.count(MobileOptimizerType::CONV_BN_FUSION)) {
     cloned_module = FoldConvBatchNorm(cloned_module);
   }
 
-  if (!optimization_blacklist.count(
+  if (!optimization_blocklist.count(
           MobileOptimizerType::INSERT_FOLD_PREPACK_OPS)) {
     insertPrePackedOps(cloned_module);
     cloned_module = freeze_module(cloned_module, preserved_methods);
@@ -294,16 +369,25 @@ script::Module optimizeForMobile(
     FoldPrePackingOps(cloned_module);
   }
 
+  if (!optimization_blocklist.count(
+          MobileOptimizerType::HOIST_CONV_PACKED_PARAMS)) {
+    // freeze again in case it was not done in previous optional passes
+    cloned_module = freeze_module(cloned_module, preserved_methods);
+    HoistConvPackedParams(cloned_module);
+    // and freeze yet again to remove the empty QuantizedConv modules
+    cloned_module = freeze_module(cloned_module, preserved_methods);
+  }
+
   // Run canonical optimizations post freezing
   // since freezing inlines the graph. Otherwise we
   // will have to explicitly call Inlining pass.
   runCanonicalOptimizations(cloned_module);
 
-  if (!optimization_blacklist.count(MobileOptimizerType::REMOVE_DROPOUT)) {
+  if (!optimization_blocklist.count(MobileOptimizerType::REMOVE_DROPOUT)) {
     removeDropout(cloned_module);
   }
 
-  if (!optimization_blacklist.count(MobileOptimizerType::FUSE_ADD_RELU)) {
+  if (!optimization_blocklist.count(MobileOptimizerType::FUSE_ADD_RELU)) {
     FuseAddRelu(cloned_module);
   }
 
@@ -334,10 +418,10 @@ void FoldPrePackingOps(script::Module& m) {
 
 script::Module optimizeForMobile(
     const script::Module& module,
-    const std::set<MobileOptimizerType>& blacklist,
+    const std::set<MobileOptimizerType>& blocklist,
     const std::vector<std::string>& preserved_methods) {
   TORCH_INTERNAL_ASSERT(
-      "Mobile optimizaiton only available with XNNPACK at the moment. "
+      "Mobile optimization only available with XNNPACK at the moment. "
       "XNNPACK is not enabled. Please build with USE_XNNPACK=1");
   return module;
 }

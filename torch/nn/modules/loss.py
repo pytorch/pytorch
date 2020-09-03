@@ -296,11 +296,11 @@ class PoissonNLLLoss(_Loss):
 
 
 class KLDivLoss(_Loss):
-    r"""The `Kullback-Leibler divergence`_ Loss
+    r"""The Kullback-Leibler divergence loss measure
 
-    KL divergence is a useful distance measure for continuous distributions
-    and is often useful when performing direct regression over the space of
-    (discretely sampled) continuous output distributions.
+    `Kullback-Leibler divergence`_ is a useful distance measure for continuous
+    distributions and is often useful when performing direct regression over
+    the space of (discretely sampled) continuous output distributions.
 
     As with :class:`~torch.nn.NLLLoss`, the `input` given is expected to contain
     *log-probabilities* and is not restricted to a 2D Tensor.
@@ -330,8 +330,7 @@ class KLDivLoss(_Loss):
     are averaged over batch dimension only. ``'mean'`` mode's behavior will be changed to the same as
     ``'batchmean'`` in the next major release.
 
-    .. _Kullback-Leibler divergence:
-        https://en.wikipedia.org/wiki/Kullback-Leibler_divergence
+    .. _`kullback-leibler divergence`: https://en.wikipedia.org/wiki/Kullback-Leibler_divergence
 
     Args:
         size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
@@ -1080,9 +1079,19 @@ class MarginRankingLoss(_Loss):
             specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
 
     Shape:
-        - Input: :math:`(N, D)` where `N` is the batch size and `D` is the size of a sample.
-        - Target: :math:`(N)`
+        - Input1: :math:`(N)` where `N` is the batch size.
+        - Input2: :math:`(N)`, same shape as the Input1.
+        - Target: :math:`(N)`, same shape as the inputs.
         - Output: scalar. If :attr:`reduction` is ``'none'``, then :math:`(N)`.
+
+    Examples::
+
+        >>> loss = nn.MarginRankingLoss()
+        >>> input1 = torch.randn(3, requires_grad=True)
+        >>> input2 = torch.randn(3, requires_grad=True)
+        >>> target = torch.randn(3).sign()
+        >>> output = loss(input1, input2, target)
+        >>> output.backward()
     """
     __constants__ = ['margin', 'reduction']
     margin: float

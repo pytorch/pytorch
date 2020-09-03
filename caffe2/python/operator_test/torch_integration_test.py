@@ -8,7 +8,7 @@ import torch
 import unittest
 
 from caffe2.python import core, workspace
-from hypothesis import given
+from hypothesis import given, settings
 from scipy.stats import norm
 
 
@@ -837,6 +837,72 @@ class TorchIntegration(hu.HypothesisTestCase):
         )
         torch.testing.assert_allclose(expected_output, actual_output.cpu())
 
+    def test_percentile(self):
+        original_values = np.array([[3., 5., 3], [5., 1., 6.]]).astype(np.float32)
+        value_to_pct = np.array([[3, 0.2], [5, 0.5], [1, 0.3], [3, 0.6]]).astype(np.float32)
+        lengths = np.array([2, 1, 1]).astype(np.int32)
+
+        def _percentile_ref(original_values, value_to_pct, lengths):
+            ref_op = core.CreateOperator('Percentile', ["original_values", "value_to_pct", "lengths"], ["Y"])
+            workspace.FeedBlob("original_values", original_values)
+            workspace.FeedBlob("value_to_pct", value_to_pct)
+            workspace.FeedBlob("lengths", lengths)
+            workspace.RunOperatorOnce(ref_op)
+            return workspace.FetchBlob("Y")
+
+        expected_output = _percentile_ref(original_values, value_to_pct, lengths)
+        actual_output = torch.ops._caffe2.Percentile(
+            torch.tensor(original_values), torch.Tensor(value_to_pct), torch.Tensor(lengths).int()
+        )
+        torch.testing.assert_allclose(expected_output, actual_output.cpu())
+
+    def test_batch_bucket_one_hot_op(self):
+        data = np.array([[2, 3], [4, 1], [2, 5]]).astype(np.float32)
+        lengths = np.array([2, 3]).astype(np.int32)
+        boundaries = np.array([0.1, 2.5, 1, 3.1, 4.5]).astype(np.float32)
+
+        def _batch_bucket_one_hot_ref(data, lengths, boundaries):
+            ref_op = core.CreateOperator('BatchBucketOneHot', ["data", "lengths", "boundaries"], ["Y"])
+            workspace.FeedBlob("data", data)
+            workspace.FeedBlob("lengths", lengths)
+            workspace.FeedBlob("boundaries", boundaries)
+            workspace.RunOperatorOnce(ref_op)
+            return workspace.FetchBlob("Y")
+
+        expected_output = _batch_bucket_one_hot_ref(data, lengths, boundaries)
+        actual_output = torch.ops._caffe2.BatchBucketOneHot(
+            torch.tensor(data), torch.Tensor(lengths).int(), torch.Tensor(boundaries)
+        )
+        torch.testing.assert_allclose(expected_output, actual_output.cpu())
+
+    @given(lengths_0=st.integers(1, 10), lengths_1=st.integers(1, 10))
+    @settings(deadline=1000)
+    def test_merge_id_lists(self, lengths_0, lengths_1):
+        def _merge_id_lists(lengths, values):
+            ref_op = core.CreateOperator(
+                'MergeIdLists',
+                ["lengths_0", "values_0", "lengths_1", "values_1"],
+                ["merged_lengths", "merged_values"]
+            )
+            workspace.FeedBlob("lengths_0", lengths[0])
+            workspace.FeedBlob("values_0", values[0])
+            workspace.FeedBlob("lengths_1", lengths[1])
+            workspace.FeedBlob("values_1", values[1])
+            workspace.RunOperatorOnce(ref_op)
+            return workspace.FetchBlob("merged_lengths"), workspace.FetchBlob("merged_values")
+
+        lengths = [np.array([lengths_0]).astype(np.int32), np.array([lengths_1]).astype(np.int32)]
+        values = [
+            np.random.choice(np.arange(0, 10), size=lengths_0, replace=False).astype(np.int32),
+            np.random.choice(np.arange(10, 20), size=lengths_1, replace=False).astype(np.int32)
+        ]
+
+        expected_merged_lengths, expected_merged_values = _merge_id_lists(lengths, values)
+        output_merged_lengths, output_merged_values = torch.ops._caffe2.MergeIdLists(
+            [torch.tensor(lengths[0]), torch.tensor(values[0]), torch.tensor(lengths[1]), torch.tensor(values[1])]
+        )
+        torch.testing.assert_allclose(expected_merged_lengths, output_merged_lengths)
+        torch.testing.assert_allclose(expected_merged_values, output_merged_values)
 
 
 if __name__ == '__main__':

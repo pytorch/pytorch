@@ -12,7 +12,7 @@ from .modules.utils import _single, _pair, _triple, _list_with_default
 from . import grad  # noqa: F401
 from torch import _VF
 from .._jit_internal import boolean_dispatch, List, Optional, _overload
-from .._overrides import has_torch_function, handle_torch_function
+from ..overrides import has_torch_function, handle_torch_function
 
 
 Tensor = torch.Tensor
@@ -1083,18 +1083,26 @@ def feature_alpha_dropout(input, p=0.5, training=False, inplace=False):
             else _VF.feature_alpha_dropout(input, p, training))
 
 
-def threshold(input, threshold, value, inplace=False):
+def _threshold(input, threshold, value, inplace=False):
     # type: (Tensor, float, float, bool) -> Tensor
     r"""Thresholds each element of the input Tensor.
 
     See :class:`~torch.nn.Threshold` for more details.
     """
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(
+                _threshold, (input,), input, threshold, value, inplace=inplace)
     if inplace:
         result = _VF.threshold_(input, threshold, value)
     else:
         result = _VF.threshold(input, threshold, value)
     return result
 
+# We define this function as _threshold because it takes an argument
+# named threshold, which clobbers the recursive reference to the
+# function needed for __torch_function__ support
+threshold = _threshold
 
 threshold_ = _add_docstr(_VF.threshold_, r"""
 threshold_(input, threshold, value) -> Tensor
@@ -1659,7 +1667,7 @@ def linear(input, weight, bias=None):
 
     Shape:
 
-        - Input: :math:`(N, *, in\_features)` where `*` means any number of
+        - Input: :math:`(N, *, in\_features)` N is the batch size, `*` means any number of
           additional dimensions
         - Weight: :math:`(out\_features, in\_features)`
         - Bias: :math:`(out\_features)`
@@ -1708,11 +1716,11 @@ def silu(input, inplace=False):
         \text{silu}(x) = x * \sigma(x), \text{where } \sigma(x) \text{ is the logistic sigmoid.}
 
     .. note::
-        See `Gaussian Error Linear Units (GELUs) <https://arxiv.org/abs/1606.08415>`_ 
-        where the SiLU (Sigmoid Linear Unit) was originally coined, and see 
-        `Sigmoid-Weighted Linear Units for Neural Network Function Approximation 
-        in Reinforcement Learning <https://arxiv.org/abs/1702.03118>`_ and `Swish: 
-        a Self-Gated Activation Function <https://arxiv.org/abs/1710.05941v1>`_ 
+        See `Gaussian Error Linear Units (GELUs) <https://arxiv.org/abs/1606.08415>`_
+        where the SiLU (Sigmoid Linear Unit) was originally coined, and see
+        `Sigmoid-Weighted Linear Units for Neural Network Function Approximation
+        in Reinforcement Learning <https://arxiv.org/abs/1702.03118>`_ and `Swish:
+        a Self-Gated Activation Function <https://arxiv.org/abs/1710.05941v1>`_
         where the SiLU was experimented with later.
 
     See :class:`~torch.nn.SiLU` for more details.
@@ -1941,10 +1949,14 @@ def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
 
     if input.dim() == 2:
         if offsets is not None:
+            type_str = "<unknown>"
+            # TODO: Remove this once script supports type() calls
+            if not torch.jit.is_scripting():
+                type_str = str(type(offsets))
             raise ValueError("if input is 2D, then offsets has to be None"
                              ", as input is treated is a mini-batch of"
                              " fixed length sequences. However, found "
-                             "offsets of type {}".format(type(offsets)))
+                             "offsets of type {}".format(type_str))
         offsets = torch.arange(0, input.numel(), input.size(1),
                                dtype=torch.long, device=input.device)
 
@@ -2068,6 +2080,10 @@ def layer_norm(input, normalized_shape, weight=None, bias=None, eps=1e-5):
 
     See :class:`~torch.nn.LayerNorm` for details.
     """
+    if not torch.jit.is_scripting():
+        if type(input) is not Tensor and has_torch_function((input,)):
+            return handle_torch_function(
+                layer_norm, (input,), input, normalized_shape, weight=weight, bias=bias, eps=eps)
     return torch.layer_norm(input, normalized_shape, weight, bias, eps,
                             torch.backends.cudnn.enabled)
 
@@ -2559,17 +2575,6 @@ def binary_cross_entropy_with_logits(input, target, weight=None, size_average=No
     return torch.binary_cross_entropy_with_logits(input, target, weight, pos_weight, reduction_enum)
 
 
-def _pointwise_loss(lambd, lambd_optimized, input, target, reduction='mean'):
-    if target.requires_grad:
-        d = lambd(input, target)
-        if reduction == 'none':
-            return d
-        return torch.mean(d) if reduction == 'mean' else torch.sum(d)
-    else:
-        expanded_input, expanded_target = torch.broadcast_tensors(input, target)
-        return lambd_optimized(expanded_input, expanded_target, _Reduction.get_enum(reduction))
-
-
 def _smooth_l1_loss(input, target):
     # type: (Tensor, Tensor) -> Tensor
     t = torch.abs(input - target)
@@ -2597,6 +2602,7 @@ def smooth_l1_loss(input, target, size_average=None, reduce=None, reduction='mea
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
     if target.requires_grad:
+        _Reduction.get_enum(reduction)  # throw an error if reduction is invalid
         ret = _smooth_l1_loss(input, target)
         if reduction != 'none':
             ret = torch.mean(ret) if reduction == 'mean' else torch.sum(ret)
@@ -2628,6 +2634,7 @@ def l1_loss(input, target, size_average=None, reduce=None, reduction='mean'):
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
     if target.requires_grad:
+        _Reduction.get_enum(reduction)  # throw an error if reduction is invalid
         ret = torch.abs(input - target)
         if reduction != 'none':
             ret = torch.mean(ret) if reduction == 'mean' else torch.sum(ret)
@@ -2659,6 +2666,7 @@ def mse_loss(input, target, size_average=None, reduce=None, reduction='mean'):
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
     if target.requires_grad:
+        _Reduction.get_enum(reduction)  # throw an error if reduction is invalid
         ret = (input - target) ** 2
         if reduction != 'none':
             ret = torch.mean(ret) if reduction == 'mean' else torch.sum(ret)
@@ -3314,6 +3322,9 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros', align_corner
         behaviour in its backward pass that is not easily switched off.
         Please see the notes on :doc:`/notes/randomness` for background.
 
+    Note:
+        NaN values in :attr:`grid` would be interpreted as ``-1``.
+
     Args:
         input (Tensor): input of shape :math:`(N, C, H_\text{in}, W_\text{in})` (4-D case)
                         or :math:`(N, C, D_\text{in}, H_\text{in}, W_\text{in})` (5-D case)
@@ -3431,7 +3442,7 @@ def affine_grid(theta, size, align_corners=None):
         Up to version 1.2.0, all grid points along a unit dimension were
         considered arbitrarily to be at ``-1``.
         From version 1.3.0, under ``align_corners = True`` all grid points
-        along a unit dimension are condsidered to be at ```0``
+        along a unit dimension are considered to be at ```0``
         (the center of the input image).
     """
     if not torch.jit.is_scripting():

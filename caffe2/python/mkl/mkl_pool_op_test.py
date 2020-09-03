@@ -23,7 +23,7 @@ class MKLPoolTest(hu.HypothesisTestCase):
            batch_size=st.integers(1, 3),
            method=st.sampled_from(["MaxPool", "AveragePool"]),
            **mu.gcs)
-    @settings(max_examples=2, timeout=100)
+    @settings(max_examples=2, deadline=100)
     def test_mkl_pooling(self, stride, pad, kernel, size,
                          input_channels, batch_size,
                          method, gc, dc):

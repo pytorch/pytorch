@@ -39,10 +39,20 @@ if [ ! -d "$ANDROID_NDK" ]; then
   exit 1
 fi
 
+if [ -z "$PYTHON" ]; then
+  PYTHON=python
+  PYTHON_VERSION_MAJOR=$($PYTHON -c 'import sys; print(sys.version_info[0])')
+  if [ "${PYTHON_VERSION_MAJOR}" -le 2 ]; then
+    echo "Default python executable is Python-2, trying to use python3 alias"
+    PYTHON=python3
+  fi
+fi
+
 ANDROID_NDK_PROPERTIES="$ANDROID_NDK/source.properties"
 [ -f "$ANDROID_NDK_PROPERTIES" ] && ANDROID_NDK_VERSION=$(sed -n 's/^Pkg.Revision[^=]*= *\([0-9]*\)\..*$/\1/p' "$ANDROID_NDK_PROPERTIES")
 
 echo "Bash: $(/bin/bash --version | head -1)"
+echo "Python: $($PYTHON -c 'import sys; print(sys.version)')"
 echo "Caffe2 path: $CAFFE2_ROOT"
 echo "Using Android NDK at $ANDROID_NDK"
 echo "Android NDK version: $ANDROID_NDK_VERSION"
@@ -51,9 +61,8 @@ CMAKE_ARGS=()
 
 if [ -z "${BUILD_CAFFE2_MOBILE:-}" ]; then
   # Build PyTorch mobile
-  CMAKE_ARGS+=("-DUSE_STATIC_DISPATCH=ON")
-  CMAKE_ARGS+=("-DCMAKE_PREFIX_PATH=$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')")
-  CMAKE_ARGS+=("-DPYTHON_EXECUTABLE=$(python -c 'import sys; print(sys.executable)')")
+  CMAKE_ARGS+=("-DCMAKE_PREFIX_PATH=$($PYTHON -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')")
+  CMAKE_ARGS+=("-DPYTHON_EXECUTABLE=$($PYTHON -c 'import sys; print(sys.executable)')")
   CMAKE_ARGS+=("-DBUILD_CUSTOM_PROTOBUF=OFF")
   # custom build with selected ops
   if [ -n "${SELECTED_OP_LIST}" ]; then

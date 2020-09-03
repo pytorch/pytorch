@@ -431,7 +431,7 @@ if _enabled:
         def graph(self):
             r"""
             Returns a string representation of the internal graph for the
-            ``forward`` method. See `interpreting-graphs`_ for details.
+            ``forward`` method. See :ref:`interpreting-graphs` for details.
             """
             return self.forward.graph
 
@@ -440,7 +440,7 @@ if _enabled:
             r"""
             Returns a string representation of the internal graph for the
             ``forward`` method. This graph will be preprocessed to inline all function and method calls.
-            See `interpreting-graphs`_ for details.
+            See :ref:`interpreting-graphs` for details.
             """
             return self.forward.inlined_graph
 
@@ -448,8 +448,8 @@ if _enabled:
         def code(self):
             r"""
             Returns a pretty-printed representation (as valid Python syntax) of
-            the internal graph for the ``forward`` method. See `inspecting-code`_
-            for details.
+            the internal graph for the ``forward`` method. See
+            :ref:`inspecting-code` for details.
             """
             return self.forward.code
 
@@ -463,14 +463,14 @@ if _enabled:
             [1] a ConstMap following the CONSTANT.cN format of the output in [0].
             The indices in the [0] output are keys to the underlying constant's values.
 
-            See `inspecting-code`_ for details.
+            See :ref:`inspecting-code` for details.
             """
             r = self.forward.code_with_constants
             return (r[0], ConstMap(r[1]))
 
         def save(self, *args, **kwargs):
             r"""
-            save(f, _extra_files=ExtraFilesMap{})
+            save(f, _extra_files={})
 
             See :func:`torch.jit.save <torch.jit.save>` for details.
             """
@@ -668,7 +668,7 @@ if _enabled:
             cls, predicate=lambda x: inspect.isfunction(x) or inspect.ismethod(x)
         )
 
-    _compiled_methods_whitelist = {
+    _compiled_methods_allowlist = {
         "forward",
         "register_buffer",
         "register_parameter",
@@ -716,7 +716,7 @@ if _enabled:
             continue
         if (
             name not in RecursiveScriptModule.__dict__
-            and name not in _compiled_methods_whitelist
+            and name not in _compiled_methods_allowlist
         ):
             setattr(RecursiveScriptModule, method.__name__, _make_fail(name))
 
@@ -935,28 +935,6 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None):
         return fn
 
 
-def is_scripting():
-    r"""
-    Function that returns True when in compilation and False otherwise. This
-    is useful especially with the @unused decorator to leave code in your
-    model that is not yet TorchScript compatible.
-    .. testcode::
-
-        import torch
-
-        @torch.jit.unused
-        def unsupported_linear_op(x):
-            return x
-
-        def linear(x):
-            if not torch.jit.is_scripting():
-                return torch.linear(x)
-            else:
-                return unsupported_linear_op(x)
-    """
-    return False
-
-
 # overloads are registered in _jit_internal and compiled here so that _overload
 # can be used in nn/functional.py without an import cycle
 
@@ -1068,9 +1046,6 @@ def _recursive_compile_class(obj, loc):
     _compile_and_register_class(obj, rcb, _qual_name)
 
 
-_register_builtin(is_scripting, "aten::is_scripting")
-
-
 class CompilationUnit(object):
     def __init__(self, lang=None, _frames_up=0):
         self._c = torch._C.CompilationUnit()
@@ -1095,3 +1070,4 @@ def _unwrap_optional(x):
 
 
 _register_builtin(_unwrap_optional, "aten::_unwrap_optional")
+_register_builtin(_jit_internal.is_scripting, "aten::is_scripting")

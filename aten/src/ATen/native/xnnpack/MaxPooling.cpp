@@ -2,7 +2,7 @@
 
 #include <ATen/native/Pool.h>
 #include <ATen/native/xnnpack/Common.h>
-#include <ATen/native/xnnpack/Factory.h>
+#include <ATen/native/utils/Factory.h>
 #include <ATen/native/xnnpack/Pooling.h>
 
 namespace at {
@@ -160,11 +160,12 @@ Tensor max_pool2d(
     dilation_,
   };
 
-  const Tensor input_padded_contig_nhwc = allocate_padded_contiguous_if_needed(
-      input,
-      MemoryFormat::ChannelsLast);
+  const Tensor input_padded_contig_nhwc =
+      mobile::allocate_padded_contiguous_if_needed(
+          input,
+          MemoryFormat::ChannelsLast);
 
-  Tensor output_padded_contig_nhwc = empty_with_tail_padding(
+  Tensor output_padded_contig_nhwc = mobile::empty_with_tail_padding(
       {
         input_padded_contig_nhwc.size(Layout::Activation4D::batch),
         input_padded_contig_nhwc.size(Layout::Activation4D::channels),
@@ -207,6 +208,8 @@ Tensor max_pool2d(
       output_max,                                                     // output_max
       0u,                                                             // flags
       &max_pool_op);                                                  // operator
+
+  Operator max_pool_scoped_op(max_pool_op);
 
   TORCH_CHECK(
       xnn_status_success == create_status,

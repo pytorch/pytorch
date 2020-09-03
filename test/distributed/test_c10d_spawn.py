@@ -20,12 +20,12 @@ from torch.testing._internal.common_utils import NO_MULTIPROCESSING_SPAWN, TEST_
 load_tests = load_tests
 
 if not c10d.is_available():
-    print('c10d not available, skipping tests')
+    print('c10d not available, skipping tests', file=sys.stderr)
     sys.exit(0)
 
 
 if NO_MULTIPROCESSING_SPAWN:
-    print('spawn not available, skipping tests')
+    print('spawn not available, skipping tests', file=sys.stderr)
     sys.exit(0)
 
 

@@ -1,6 +1,7 @@
 #include <c10/util/Metaprogramming.h>
 #include <c10/test/util/Macros.h>
 #include <gtest/gtest.h>
+#include <cstdlib>
 
 
 using namespace c10::guts;
@@ -215,6 +216,242 @@ namespace test_filter_map {
         EXPECT_EQ(0, result[1]->copy_count);
         EXPECT_EQ(0, result[1]->move_count);
     }
+}
+
+namespace test_tuple_elements {
+  // note: not testing empty selection, as some compilers will raise
+  // "parameter set but not used" in tuple_elements(). a good example
+  // of the friction that comes with using these tools
+
+  TEST(MetaprogrammingTest, TupleElements_subsetSelection) {
+    auto x = std::make_tuple(0, "HEY", 2.0);
+    auto y = tuple_elements(x, std::index_sequence<0, 2>());
+    auto z = std::make_tuple(0, 2.0);
+    EXPECT_EQ(y, z);
+  }
+
+  TEST(MetaprogrammingTest, TupleElements_reorderSelection) {
+    auto x = std::make_tuple(0, "HEY", 2.0);
+    auto y = tuple_elements(x, std::index_sequence<0, 2, 1>());
+    auto z = std::make_tuple(0, 2.0, "HEY");
+    EXPECT_EQ(y, z);
+  }
+}
+
+namespace test_tuple_take {
+  // note: not testing empty prefix, see note on empty selection above.
+
+  TEST(MetaprogrammingTest, TupleTake_nonemptyPrefix) {
+    auto x = std::make_tuple(0, "HEY", 2.0);
+    auto y = tuple_take<std::tuple<int, const char*, double>, 2>(x);
+    auto z = std::make_tuple(0, "HEY");
+    EXPECT_EQ(y, z);
+  }
+
+  TEST(MetaprogrammingTest, TupleTake_fullPrefix) {
+    auto x = std::make_tuple(0, "HEY", 2.0);
+    auto y = tuple_take<std::tuple<int, const char*, double>, 3>(x);
+    EXPECT_EQ(x, y);
+  }
+}
+
+namespace test_tuple_map {
+  TEST(MetaprogrammingTest, TupleMap_simple) {
+    auto result = tuple_map(std::tuple<int32_t, int32_t, int32_t>(3, 4, 5), [] (int32_t a) -> int16_t {return a+1;});
+    static_assert(std::is_same<std::tuple<int16_t, int16_t, int16_t>, decltype(result)>::value, "");
+    EXPECT_EQ(4, std::get<0>(result));
+    EXPECT_EQ(5, std::get<1>(result));
+    EXPECT_EQ(6, std::get<2>(result));
+  }
+
+  TEST(MetaprogrammingTest, TupleMap_mapperTakesDifferentButConvertibleType) {
+    auto result = tuple_map(std::tuple<int32_t, int32_t, int32_t>(3, 4, 5), [] (int64_t a) -> int16_t {return a+1;});
+    static_assert(std::is_same<std::tuple<int16_t, int16_t, int16_t>, decltype(result)>::value, "");
+    EXPECT_EQ(4, std::get<0>(result));
+    EXPECT_EQ(5, std::get<1>(result));
+    EXPECT_EQ(6, std::get<2>(result));
+  }
+
+  TEST(MetaprogrammingTest, TupleMap_mapperTakesConstRef) {
+    auto result = tuple_map(std::tuple<int32_t, int32_t, int32_t>(3, 4, 5), [] (const int32_t& a) -> int16_t {return a+1;});
+    static_assert(std::is_same<std::tuple<int16_t, int16_t, int16_t>, decltype(result)>::value, "");
+    EXPECT_EQ(4, std::get<0>(result));
+    EXPECT_EQ(5, std::get<1>(result));
+    EXPECT_EQ(6, std::get<2>(result));
+  }
+
+  TEST(MetaprogrammingTest, TupleMap_mapsToDifferentTypes) {
+    struct Mapper {
+      std::string operator()(int32_t a) const {
+        return std::to_string(a);
+      }
+      int32_t operator()(const std::string& a) const {
+        return atoi(a.c_str());
+      }
+    };
+    auto result = tuple_map(std::tuple<int32_t, std::string>(3, "4"), Mapper());
+    static_assert(std::is_same<std::tuple<std::string, int32_t>, decltype(result)>::value, "");
+    EXPECT_EQ("3", std::get<0>(result));
+    EXPECT_EQ(4, std::get<1>(result));
+  }
+
+  TEST(MetaprogrammingTest, TupleMap_differentiatesLRValueReferences) {
+    struct Mapper {
+      std::string operator()(std::string&& a) const {
+        return "moved";
+      }
+      std::string operator()(const std::string& a) const {
+        return "copied";
+      }
+    };
+    std::string str1, str2;
+    auto result = tuple_map(std::tuple<const std::string&, std::string&&>(str1, std::move(str2)), Mapper());
+    static_assert(std::is_same<std::tuple<std::string, std::string>, decltype(result)>::value, "");
+    EXPECT_EQ("copied", std::get<0>(result));
+    EXPECT_EQ("moved", std::get<1>(result));
+  }
+
+  TEST(MetaprogrammingTest, TupleMap_canWorkWithMovableOnlyType) {
+    auto result = tuple_map(std::tuple<MovableOnly>(MovableOnly(7)), [] (MovableOnly a) { return a; });
+    static_assert(std::is_same<std::tuple<MovableOnly>, decltype(result)>::value, "");
+    EXPECT_EQ(MovableOnly(7), std::get<0>(result));
+  }
+
+  TEST(MetaprogrammingTest, TupleMap_doesntUnecessarilyCopyValues) {
+    auto result = tuple_map(std::tuple<CopyCounting>(CopyCounting()), [] (CopyCounting a) { return a; });
+    static_assert(std::is_same<std::tuple<CopyCounting>, decltype(result)>::value, "");
+    EXPECT_EQ(4, std::get<0>(result).move_count);
+    EXPECT_EQ(0, std::get<0>(result).copy_count);
+  }
+
+  TEST(MetaprogrammingTest, TupleMap_doesntUnecessarilyMoveValues) {
+    CopyCounting a;
+    auto result = tuple_map(std::tuple<CopyCounting&&>(std::move(a)), [] (CopyCounting&& a) -> CopyCounting&& { return std::move(a); });
+    static_assert(std::is_same<std::tuple<CopyCounting&&>, decltype(result)>::value, "");
+    EXPECT_EQ(&a, &std::get<0>(result));
+    EXPECT_EQ(0, std::get<0>(result).move_count);
+    EXPECT_EQ(0, std::get<0>(result).copy_count);
+  }
+
+  TEST(MetaprogrammingTest, TupleMap_canBeUsedWithAutoLambdas) {
+    struct A final {
+      int32_t func() {
+        return 5;
+      }
+    };
+    struct B final {
+      std::string func() {
+        return "5";
+      }
+    };
+    auto result = tuple_map(std::make_tuple(A(), B()), [] (auto a) { return a.func(); });
+    static_assert(std::is_same<std::tuple<int32_t, std::string>, decltype(result)>::value, "");
+    EXPECT_EQ(5, std::get<0>(result));
+    EXPECT_EQ("5", std::get<1>(result));
+  }
+}
+
+namespace test_tuple_concat {
+  TEST(MetaprogrammingTest, TupleConcat_zerotuples) {
+    auto result = tuple_concat();
+    static_assert(std::is_same<std::tuple<>, decltype(result)>::value, "");
+  }
+
+  TEST(MetaprogrammingTest, TupleConcat_oneemptytuple) {
+    auto result = tuple_concat(std::tuple<>());
+    static_assert(std::is_same<std::tuple<>, decltype(result)>::value, "");
+  }
+
+  TEST(MetaprogrammingTest, TupleConcat_onenonemptytuple) {
+    auto result = tuple_concat(std::tuple<int64_t>(3));
+    static_assert(std::is_same<std::tuple<int64_t>, decltype(result)>::value, "");
+    EXPECT_EQ(3, std::get<0>(result));
+  }
+
+  TEST(MetaprogrammingTest, TupleConcat_twotuples) {
+    auto result = tuple_concat(std::tuple<int64_t, std::string>(3, "4"), std::tuple<double, int16_t>(2.3, 15));
+    static_assert(std::is_same<std::tuple<int64_t, std::string, double, int16_t>, decltype(result)>::value, "");
+    EXPECT_EQ(3, std::get<0>(result));
+    EXPECT_EQ("4", std::get<1>(result));
+    EXPECT_EQ(2.3, std::get<2>(result));
+    EXPECT_EQ(15, std::get<3>(result));
+  }
+
+  TEST(MetaprogrammingTest, TupleConcat_threetuples) {
+    auto result = tuple_concat(std::tuple<int64_t, std::string>(3, "4"), std::tuple<double, int16_t>(2.3, 15), std::tuple<std::string, float>("5", 3.2));
+    static_assert(std::is_same<std::tuple<int64_t, std::string, double, int16_t, std::string, float>, decltype(result)>::value, "");
+    EXPECT_EQ(3, std::get<0>(result));
+    EXPECT_EQ("4", std::get<1>(result));
+    EXPECT_EQ(2.3, std::get<2>(result));
+    EXPECT_EQ(15, std::get<3>(result));
+    EXPECT_EQ("5", std::get<4>(result));
+    EXPECT_EQ(static_cast<float>(3.2), std::get<5>(result));
+  }
+
+  TEST(MetaprogrammingTest, TupleConcat_emptytupleatbeginning) {
+    auto result = tuple_concat(std::tuple<>(), std::tuple<double, int16_t>(2.3, 15), std::tuple<std::string, float>("5", 3.2));
+    static_assert(std::is_same<std::tuple<double, int16_t, std::string, float>, decltype(result)>::value, "");
+    EXPECT_EQ(2.3, std::get<0>(result));
+    EXPECT_EQ(15, std::get<1>(result));
+    EXPECT_EQ("5", std::get<2>(result));
+    EXPECT_EQ(static_cast<float>(3.2), std::get<3>(result));
+  }
+
+  TEST(MetaprogrammingTest, TupleConcat_emptytupleinmiddle) {
+    auto result = tuple_concat(std::tuple<double, int16_t>(2.3, 15), std::tuple<>(), std::tuple<std::string, float>("5", 3.2));
+    static_assert(std::is_same<std::tuple<double, int16_t, std::string, float>, decltype(result)>::value, "");
+    EXPECT_EQ(2.3, std::get<0>(result));
+    EXPECT_EQ(15, std::get<1>(result));
+    EXPECT_EQ("5", std::get<2>(result));
+    EXPECT_EQ(static_cast<float>(3.2), std::get<3>(result));
+  }
+
+  TEST(MetaprogrammingTest, TupleConcat_emptytupleatend) {
+    auto result = tuple_concat(std::tuple<double, int16_t>(2.3, 15), std::tuple<std::string, float>("5", 3.2), std::tuple<>());
+    static_assert(std::is_same<std::tuple<double, int16_t, std::string, float>, decltype(result)>::value, "");
+    EXPECT_EQ(2.3, std::get<0>(result));
+    EXPECT_EQ(15, std::get<1>(result));
+    EXPECT_EQ("5", std::get<2>(result));
+    EXPECT_EQ(static_cast<float>(3.2), std::get<3>(result));
+  }
+
+  TEST(MetaprogrammingTest, TupleConcat_workswithreferencesandpointers) {
+    double val1 = 2.3;
+    int16_t val2 = 15;
+    std::string val3 = "hello";
+    float val4 = 3.2;
+    auto result = tuple_concat(std::tuple<double&, const int16_t&>(val1, val2), std::tuple<std::string&&, float*>(std::move(val3), &val4));
+    static_assert(std::is_same<std::tuple<double&, const int16_t&, std::string&&, float*>, decltype(result)>::value, "");
+    EXPECT_EQ(2.3, std::get<0>(result));
+    EXPECT_EQ(&val1, &std::get<0>(result));
+    EXPECT_EQ(15, std::get<1>(result));
+    EXPECT_EQ(&val2, &std::get<1>(result));
+    EXPECT_EQ("hello", std::get<2>(result));
+    EXPECT_EQ(&val3, &std::get<2>(result));
+    EXPECT_EQ(static_cast<float>(3.2), *std::get<3>(result));
+    EXPECT_EQ(&val4, std::get<3>(result));
+  }
+
+  TEST(MetaprogrammingTest, TupleConcat_worksWithMovableOnlyTypes) {
+    auto result = tuple_concat(std::tuple<MovableOnly, MovableOnly>(1, 2), std::tuple<MovableOnly>(3));
+    static_assert(std::is_same<std::tuple<MovableOnly, MovableOnly, MovableOnly>, decltype(result)>::value, "");
+    EXPECT_EQ(MovableOnly(1), std::get<0>(result));
+    EXPECT_EQ(MovableOnly(2), std::get<1>(result));
+    EXPECT_EQ(MovableOnly(3), std::get<2>(result));
+  }
+
+  TEST(MetaprogrammingTest, TupleConcat_doesntCopyMoreThanNecessary) {
+    auto result = tuple_concat(std::tuple<CopyCounting, CopyCounting>(CopyCounting(), CopyCounting()), std::tuple<CopyCounting>(CopyCounting()), std::tuple<CopyCounting>(CopyCounting()));
+    static_assert(std::is_same<std::tuple<CopyCounting, CopyCounting, CopyCounting, CopyCounting>, decltype(result)>::value, "");
+    EXPECT_EQ(0, std::get<0>(result).copy_count);
+    EXPECT_EQ(0, std::get<1>(result).copy_count);
+    EXPECT_EQ(0, std::get<2>(result).copy_count);
+    EXPECT_EQ(0, std::get<3>(result).copy_count);
+    EXPECT_EQ(2, std::get<0>(result).move_count);
+    EXPECT_EQ(2, std::get<1>(result).move_count);
+    EXPECT_EQ(2, std::get<2>(result).move_count);
+    EXPECT_EQ(2, std::get<3>(result).move_count);
+  }
 }
 
 }

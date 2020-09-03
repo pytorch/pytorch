@@ -64,6 +64,9 @@ static inline bool allIntegral(std::initializer_list<std::reference_wrapper<Scal
 
 } // namespace
 
+DEFINE_DISPATCH(complex_stub);
+DEFINE_DISPATCH(polar_stub);
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ arange ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor arange(Scalar end, const TensorOptions& options) {
@@ -96,6 +99,69 @@ Tensor& arange_out(Tensor& result, Scalar start, Scalar end) {
 
 Tensor _dim_arange(const Tensor& like, int64_t dim) {
   return at::arange(like.size(dim), like.options().dtype(at::kLong));
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ complex / polar ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+void complex_check_floating(const Tensor& a, const Tensor& b) {
+  TORCH_CHECK((a.scalar_type() == kFloat || a.scalar_type() == kDouble) &&
+              (b.scalar_type() == kFloat || b.scalar_type() == kDouble),
+              "Expected both inputs to be Float or Double tensors but got ",
+              a.scalar_type(), " and ", b.scalar_type());
+}
+
+void complex_check_dtype(
+    const Tensor& result,
+    const Tensor& a,
+    const Tensor& b) {
+  complex_check_floating(a, b);
+  TORCH_CHECK(a.scalar_type() == b.scalar_type(),
+              "Expected object of scalar type ", a.scalar_type(),
+              " but got scalar type ", b.scalar_type(), " for second argument");
+  TORCH_CHECK(result.scalar_type() == toComplexType(a.scalar_type()),
+              "Expected object of scalar type ", toComplexType(a.scalar_type()),
+              " but got scalar type ", result.scalar_type(),
+              " for argument 'out'");
+}
+
+Tensor& complex_out(Tensor& result, const Tensor& real, const Tensor& imag) {
+  complex_check_dtype(result, real, imag);
+  auto iter = TensorIteratorConfig()
+      .add_output(result)
+      .add_input(real)
+      .add_input(imag)
+      .check_all_same_dtype(false)
+      .build();
+  complex_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor complex(const Tensor& real, const Tensor& imag) {
+  complex_check_floating(real, imag);
+  c10::TensorOptions options = real.options();
+  options = options.dtype(toComplexType(real.scalar_type()));
+  Tensor result = at::empty(0, options);
+  return at::complex_out(result, real, imag);
+}
+
+Tensor& polar_out(Tensor& result, const Tensor& abs, const Tensor& angle) {
+  complex_check_dtype(result, abs, angle);
+  auto iter = TensorIteratorConfig()
+      .add_output(result)
+      .add_input(abs)
+      .add_input(angle)
+      .check_all_same_dtype(false)
+      .build();
+  polar_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor polar(const Tensor& abs, const Tensor& angle) {
+  complex_check_floating(abs, angle);
+  c10::TensorOptions options = abs.options();
+  options = options.dtype(toComplexType(abs.scalar_type()));
+  Tensor result = at::empty(0, options);
+  return at::polar_out(result, abs, angle);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ empty ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -354,18 +420,17 @@ TensorOptions infer_full_options(
   const TensorOptions& options) {
 
   if (!options.has_dtype()) {
-    if (fill_value.isIntegral(true)) {
-      TORCH_CHECK(false,
-        "Providing a bool or integral fill value without setting the optional ",
-        "`dtype` or `out` arguments is currently unsupported. In PyTorch 1.7, ",
-        "when `dtype` and `out` are not set a bool fill value will ",
-        "return a tensor of torch.bool dtype, and an integral fill value ",
-        "will return a tensor of torch.long dtype.");
+    if (fill_value.isBoolean()) {
+      return options.dtype(at::kBool);
+    } else if (fill_value.isIntegral(false)) {
+      return options.dtype(at::kLong);
     } else if (fill_value.isComplex()) {
       auto scalar_type = (get_default_dtype() == ScalarType::Double) ?
                             ScalarType::ComplexDouble :
                             ScalarType::ComplexFloat;
       return options.dtype(scalar_type);
+    } else {
+      return options.dtype(get_default_dtype());
     }
   }
 

@@ -19,6 +19,7 @@ import tempfile
 
 from caffe2.proto import caffe2_pb2
 from caffe2.python import scope, utils
+from caffe2.python.lazy import TriggerLazyImport
 
 import caffe2.python._import_c_extension as C
 
@@ -39,6 +40,7 @@ Workspaces = C.workspaces
 BenchmarkNet = C.benchmark_net
 BenchmarkNetOnce = C.benchmark_net_once
 GetStats = C.get_stats
+CreateOfflineTensor = C.create_offline_tensor
 
 operator_tracebacks = defaultdict(dict)
 
@@ -172,6 +174,7 @@ def ResetWorkspace(root_folder=None):
 
 
 def CreateNet(net, overwrite=False, input_blobs=None):
+    TriggerLazyImport()
     if input_blobs is None:
         input_blobs = []
     for input_blob in input_blobs:

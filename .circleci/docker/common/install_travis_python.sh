@@ -49,26 +49,7 @@ if [ -n "$TRAVIS_PYTHON_VERSION" ]; then
 
   pip --version
 
-  if [[ "$TRAVIS_PYTHON_VERSION" == nightly ]]; then
-      # These two packages have broken Cythonizations uploaded
-      # to PyPi, see:
-      #
-      #  - https://github.com/numpy/numpy/issues/10500
-      #  - https://github.com/yaml/pyyaml/issues/117
-      #
-      # Furthermore, the released version of Cython does not
-      # have these issues fixed.
-      #
-      # While we are waiting on fixes for these, we build
-      # from Git for now.  Feel free to delete this conditional
-      # branch if things start working again (you may need
-      # to do this if these packages regress on Git HEAD.)
-      as_jenkins pip install git+https://github.com/cython/cython.git
-      as_jenkins pip install git+https://github.com/numpy/numpy.git
-      as_jenkins pip install git+https://github.com/yaml/pyyaml.git
-  else
-      as_jenkins pip install numpy pyyaml
-  fi
+  as_jenkins pip install numpy pyyaml
 
   as_jenkins pip install \
       future \
@@ -76,7 +57,8 @@ if [ -n "$TRAVIS_PYTHON_VERSION" ]; then
       protobuf \
       pytest \
       pillow \
-      typing
+      typing \
+      dataclasses
 
   as_jenkins pip install mkl mkl-devel
 

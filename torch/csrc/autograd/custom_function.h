@@ -90,7 +90,7 @@ struct TORCH_API Function {
 /// Context to save information during `forward` that can be accessed in `backward`
 /// in custom autograd operations (see `torch::autograd::Function` for details).
 struct TORCH_API AutogradContext {
-  AutogradContext() = default;
+  AutogradContext() : materialize_grads_(true) {}
   AutogradContext(const AutogradContext &other) = delete;
   AutogradContext& operator=(const AutogradContext& other) = delete;
 
@@ -107,6 +107,9 @@ struct TORCH_API AutogradContext {
   /// Marks outputs in the list as not requiring gradients. This should be called
   /// at most once from inside of `forward` and all arguments should be outputs.
   void mark_non_differentiable(const variable_list &outputs);
+  // Sets whether undefined output grad tensors should be expanded to tensors
+  // full of zeros before calling backward function. Default value is true.
+  void set_materialize_grads(bool value);
 
   /// Get the list of variables that were saved in `forward` using
   /// `save_for_backward()`. Before returning them to the user, a check is made to
@@ -120,6 +123,7 @@ private:
   std::unordered_set<at::TensorImpl*> dirty_inputs_;
   std::vector<torch::autograd::SavedVariable> saved_variables_;
   variable_list to_save_;
+  bool materialize_grads_;
 
   // The CppNode in the autograd graph that owns this AutogradContext. We need a
   // weak_ptr to avoid a refcycle. Since grad_fn_ owns this AutogradContext, it
@@ -253,7 +257,7 @@ variable_list CppNode<T>::apply(variable_list&& inputs) {
   variable_list backward_inputs;
   backward_inputs.reserve(num_inputs);
   for (int i = 0 ; i < num_inputs; ++i) {
-    if (inputs[i].defined()) {
+    if (inputs[i].defined() || !ctx_.materialize_grads_) {
       backward_inputs.emplace_back(inputs[i]);
     } else {
       backward_inputs.emplace_back(output_info_[i].zeros(_device_guard));
@@ -303,16 +307,7 @@ variable_list CppNode<T>::apply(variable_list&& inputs) {
       }
       continue;
     }
-    if (!outputs[i].defined()) {
-      auto& info = input_info_[results.size()];
-      if (info.requires_grad) {
-        results.emplace_back(info.zeros(_device_guard));
-      } else {
-        results.emplace_back();
-      }
-    } else {
-      results.emplace_back(outputs[i]);
-    }
+    results.emplace_back(outputs[i]);
   }
   return results;
 }

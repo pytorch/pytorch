@@ -5,7 +5,7 @@ TODO: Refactor circleci/cimodel/data/binary_build_data.py to generate this file
 
  NB: If you modify this file, you need to also modify
  the binary_and_smoke_tests_on_pr variable in
- pytorch-ci-hud to adjust the list of whitelisted builds
+ pytorch-ci-hud to adjust the allowed build list
  at https://github.com/ezyang/pytorch-ci-hud/blob/master/src/BuildHistoryDisplay.js
 
  Note:

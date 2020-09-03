@@ -22,7 +22,8 @@ These options are configured by the constructor arguments of a
     DataLoader(dataset, batch_size=1, shuffle=False, sampler=None,
                batch_sampler=None, num_workers=0, collate_fn=None,
                pin_memory=False, drop_last=False, timeout=0,
-               worker_init_fn=None)
+               worker_init_fn=None, *, prefetch_factor=2,
+               persistent_workers=False)
 
 The sections below describe in details the effects and usages of these options.
 

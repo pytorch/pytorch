@@ -93,8 +93,10 @@ std::ostream& operator<<(
       out << l.delim;
     }
     printValueRef(out, n);
-    out << " : ";
-    out << *n->type();
+    if (c10::type_verbosity() >= c10::TypeVerbosity::Type) {
+      out << " : ";
+      out << *n->type();
+    }
   }
   return out;
 }
@@ -1595,6 +1597,21 @@ Node* Graph::createTupleSlice(Value* tup, int64_t beg, int64_t end) {
   return n;
 }
 
+Node* Graph::createEnumName(Value* e) {
+  e->type()->expect<EnumType>();
+  assert(e->type()->cast<EnumType>());
+  auto n = create(prim::EnumName, {e});
+  n->output()->setType(StringType::get());
+  return n;
+}
+
+Node* Graph::createEnumValue(Value* e) {
+  auto enum_type = e->type()->expect<EnumType>();
+  auto n = create(prim::EnumValue, {e});
+  n->output()->setType(enum_type->getValueType());
+  return n;
+}
+
 Node* Graph::createList(const TypePtr& elem_type, at::ArrayRef<Value*> values) {
   auto n = create(prim::ListConstruct, values);
   for (const auto& v : values) {
@@ -1956,8 +1973,19 @@ void ProfileOp::cloneFrom(Node* other_) {
   auto other = other_->cast<ProfileOp>();
   this->callback_ = other->getCallback();
 }
+
 Node* ProfileOp::allocNewInstance(Graph* g) {
   return new ProfileOp(g, {nullptr});
+}
+
+void ProfileOptionalOp::cloneFrom(Node* other_) {
+  Node::cloneFrom(other_);
+  auto other = other_->cast<ProfileOptionalOp>();
+  this->callback_ = other->getCallback();
+}
+
+Node* ProfileOptionalOp::allocNewInstance(Graph* g) {
+  return new ProfileOptionalOp(g, {nullptr});
 }
 
 TypePtr NamedValue::type() const {
@@ -1969,6 +1997,7 @@ TypePtr NamedValue::type() const {
 }
 
 constexpr Symbol ProfileOp::Kind;
+constexpr Symbol ProfileOptionalOp::Kind;
 
 OperatorSet::OperatorSet(std::initializer_list<const char*> sig_literals) {
   for (const char* sig : sig_literals) {

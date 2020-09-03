@@ -22,7 +22,7 @@ def _create_module(module_cls, args, kwargs, module_interface_cls=None):
     module = module_cls(*args, **kwargs)
     if not isinstance(module, nn.Module):
         raise ValueError(
-            "Expect `module_cls(*args, **kwargs)` returns an instancee of <class nn.Module>, "
+            "Expect `module_cls(*args, **kwargs)` returns an instance of <class nn.Module>, "
             f"but it returns an instance of {type(module)}."
         )
     if module_interface_cls is not None:
@@ -50,7 +50,7 @@ class _RemoteModule(nn.Module):
         The arguments of ``forward_async`` and ``forward`` are the same as
         the ``forward`` method of the module returned by the ``module_cls``.
 
-        For example, if ``module_cls`` returns an instace of ``nn.Linear``,
+        For example, if ``module_cls`` returns an instance of ``nn.Linear``,
         that has ``forward`` method signature, ``def forward(input: Tensor) -> Tensor:``,
         the generated ``RemoteModule`` will have 2 methods in signature of
         ``def forward(input: Tensor) -> Tensor:`` and
@@ -156,7 +156,7 @@ class RemoteModule(_RemoteModule):
         The arguments of ``forward_async`` and ``forward`` are the same as
         the ``forward`` method of the module returned by the ``module_cls``.
 
-        For example, if ``module_cls`` returns an instace of ``nn.Linear``,
+        For example, if ``module_cls`` returns an instance of ``nn.Linear``,
         that has ``forward`` method signature, ``def forward(input: Tensor) -> Tensor:``,
         the generated ``RemoteModule`` will have 2 methods in signature of
         ``def forward(input: Tensor) -> Tensor:`` and

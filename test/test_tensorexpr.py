@@ -5,7 +5,7 @@ import unittest
 
 from torch.testing._internal.common_utils import suppress_warnings, num_profiled_runs
 
-from te_utils import CudaCodeGenCreated, CudaCodeGenExecuted, \
+from torch.testing._internal.te_utils import CudaCodeGenCreated, CudaCodeGenExecuted, \
     LLVMCodeGenExecuted, SimpleIREvalExecuted
 
 class BaseTestClass(unittest.TestCase):
@@ -15,8 +15,8 @@ class BaseTestClass(unittest.TestCase):
 
         self.old_cpu_fuser_state = torch._C._jit_can_fuse_on_cpu()
         self.old_gpu_fuser_state = torch._C._jit_can_fuse_on_gpu()
-        torch._C._jit_override_can_fuse_on_cpu(False)
-        torch._C._jit_override_can_fuse_on_gpu(False)
+        torch._C._jit_override_can_fuse_on_cpu(True)
+        torch._C._jit_override_can_fuse_on_gpu(True)
         self.texpr_fuser_state = torch._C._jit_texpr_fuser_enabled()
         torch._C._jit_set_texpr_fuser_enabled(True)
 
@@ -453,7 +453,7 @@ class TestTensorExprFuser(BaseTestClass):
             return c
 
         traced = torch.jit.trace(easy, (torch.zeros(1024), torch.zeros(1024)))
-        aa = np.array(1024, dtype=int)
+        aa = np.empty([1024], dtype=np.int32)
         aa.fill(5)
         a = torch.from_numpy(aa)
         b = torch.zeros(1024, dtype=torch.int32)
@@ -479,7 +479,7 @@ class TestTensorExprFuser(BaseTestClass):
             return c
 
         traced = torch.jit.trace(easy, (torch.zeros(1024), torch.zeros(1024)))
-        aa = np.array(1024, dtype=int)
+        aa = np.empty([1024], dtype=np.int32)
         aa.fill(5)
         a = torch.from_numpy(aa)
         b = torch.zeros(1024, dtype=torch.int32)
@@ -856,7 +856,6 @@ class TestTensorExprFuser(BaseTestClass):
             test_cosh,
             test_tan,
             test_atan,
-            test_tanh,
             test_sqrt,
             test_floor,
             test_ceil,
@@ -873,11 +872,12 @@ class TestTensorExprFuser(BaseTestClass):
             test_erfc,
             test_frac,
             test_lgamma,
-            test_sigmoid,
             test_reciprocal,
-            test_threshold,
             test_neg,
+            test_threshold,
             test_relu,
+            test_tanh,
+            test_sigmoid,
         }
         device_options = ["cpu", "cuda"] if torch.cuda.is_available() else ['cpu']
 
@@ -886,7 +886,7 @@ class TestTensorExprFuser(BaseTestClass):
                 rand_a = torch.rand(1024, device=dev)
                 rand_b = torch.rand(1024, device=dev)
                 ins = 20 * torch.rand(1024, device=dev)
-                cc = np.array(1024, dtype=float)
+                cc = np.empty([1024], dtype=np.float32)
                 cc.fill(np.nan)
                 nans = torch.from_numpy(cc).to(dev)
                 traced = torch.jit.trace(torch_fn, (ins, ins))
@@ -897,7 +897,12 @@ class TestTensorExprFuser(BaseTestClass):
                 traced = torch.jit.trace(torch_fn, (ins, ins))
                 x = traced(nans, rand_b)
                 y = torch_fn(nans, rand_b)
-                np.testing.assert_allclose(x.cpu().numpy(), y.cpu().numpy())
+                try:
+                    np.testing.assert_allclose(x.cpu().numpy(), y.cpu().numpy())
+                except AssertionError:
+                    # Print extra info before exiting:
+                    print("Failed on dev=", dev, "function=", torch_fn)
+                    np.testing.assert_allclose(x.cpu().numpy(), y.cpu().numpy())
 
 
     def test_rand_like(self):
@@ -933,9 +938,9 @@ class TestTensorExprFuser(BaseTestClass):
         x = torch.tensor([np.nan])
         y = torch.tensor([1.0])
 
-        assert not np.isnan(tmin(x, y).item())
+        assert np.isnan(tmin(x, y).item())
         assert np.isnan(tmin(y, x).item())
-        assert not np.isnan(tmax(x, y).item())
+        assert np.isnan(tmax(x, y).item())
         assert np.isnan(tmax(y, x).item())
 
 
@@ -1025,6 +1030,7 @@ class TestTensorExprFuser(BaseTestClass):
     def test_cat_cuda(self):
         self._test_cat('cuda')
 
+    @unittest.skip("temporarily disable")
     def test_scalar(self):
         @torch.jit.script
         def test_float(x, y, z, a, b):
@@ -1066,6 +1072,7 @@ class TestTensorExprFuser(BaseTestClass):
 #    r = test(x, y, z)
 #    assert llvm.elapsed_value == 1 or interp.elapsed_value() > 1
 
+    @unittest.skip("no shape inference for aten::slice yet")
     def test_slice(self):
         def easy(x, y):
             a = x[0:512:2]
@@ -1237,6 +1244,7 @@ class TestTensorExprFuser(BaseTestClass):
         np.testing.assert_allclose(x.numpy(), y.numpy())
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @unittest.skip("temporarily disable")
     def test_unused(self):
         def test(x, y):
             return x * x + torch.rand_like(y)
@@ -1259,6 +1267,38 @@ class TestTensorExprFuser(BaseTestClass):
         cx = CudaCodeGenExecuted()
         assert torch.allclose(scripted(a), 2 * a)
         assert cx.elapsed_value() == 1
+
+    def test_mask(self):
+        devices = ["cuda", "cpu"] if torch.cuda.is_available() else ["cpu"]
+
+        def test(x):
+            return x.unsqueeze(1) == 0
+
+        for d in devices:
+            x = torch.rand(4, device=d) > 0.5
+            scripted = torch.jit.script(test)
+            scripted(x)
+            assert torch.equal(scripted(x), test(x))
+
+    def test_simple_add(self):
+        val = torch._C._jit_get_te_generate_block_code()
+        torch._C._jit_set_te_generate_block_code(True)
+        fall_bk = torch._C._jit_texpr_fallback_allowed()
+        torch._C._jit_texpr_set_fallback_allowed(True)
+
+        def simple(a, b):
+            return torch.add(a, b)
+
+        a = torch.ones(256, 256)
+        b = torch.ones(256, 256)
+        traced = torch.jit.trace(simple,
+                                 (torch.ones(256, 256), torch.ones(256, 256)))
+        f = traced(a, b)
+        f_test = np.full((256, 256), 2, dtype=float)
+        np.testing.assert_allclose(f.numpy(), f_test)
+        torch._C._jit_set_te_generate_block_code(val)
+        torch._C._jit_texpr_set_fallback_allowed(fall_bk)
+
 
 if __name__ == '__main__':
     unittest.main()

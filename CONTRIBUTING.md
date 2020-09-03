@@ -2,6 +2,7 @@
 
 - [Contributing to PyTorch](#contributing-to-pytorch)
 - [Developing PyTorch](#developing-pytorch)
+  - [Nightly Checkout & Pull](#nightly-checkout--pull)
 - [Codebase structure](#codebase-structure)
 - [Unit testing](#unit-testing)
   - [Better local unit tests with pytest](#better-local-unit-tests-with-pytest)
@@ -37,12 +38,12 @@
 
 ## Contributing to PyTorch
 
-Thank you for your interest in contributing to PyTorch! Before you begin writing code, it is important 
+Thank you for your interest in contributing to PyTorch! Before you begin writing code, it is important
 that you share your intention to contribute with the team, based on the type of contribution:
 
 1. You want to propose a new feature and implement it.
-    - Post about your intended feature in an [issue](https://github.com/pytorch/pytorch/issues), 
-    and we shall discuss the design and implementation. Once we agree that the plan looks good, 
+    - Post about your intended feature in an [issue](https://github.com/pytorch/pytorch/issues),
+    and we shall discuss the design and implementation. Once we agree that the plan looks good,
     go ahead and implement it.
 2. You want to implement a feature or bug-fix for an outstanding issue.
     - Search for your issue in the [PyTorch issue list](https://github.com/pytorch/pytorch/issues).
@@ -57,6 +58,9 @@ to PyTorch.  For more non-technical guidance about how to contribute to
 PyTorch, see the [Contributing Guide](docs/source/community/contribution_guide.rst).
 
 ## Developing PyTorch
+
+A full set of instructions on installing PyTorch from source is here:
+https://github.com/pytorch/pytorch#from-source
 
 To develop PyTorch on your machine, here are some tips:
 
@@ -87,8 +91,6 @@ If you want to have no-op incremental rebuilds (which are fast), see the section
 
 3. Install PyTorch in `develop` mode:
 
-A full set of instructions on installing PyTorch from source is here:
-https://github.com/pytorch/pytorch#from-source
 
 The change you have to make is to replace
 
@@ -120,6 +122,39 @@ You do not need to repeatedly install after modifying Python files.
 
 In case you want to reinstall, make sure that you uninstall PyTorch first by running `pip uninstall torch`
 and `python setup.py clean`. Then you can install in `develop` mode again.
+
+## Nightly Checkout & Pull
+
+The `tools/nightly.py` script is provided to ease pure Python development of
+PyTorch. This uses `conda` and `git` to check out the nightly development
+version of PyTorch and installs pre-built binaries into the current repository.
+This is like a development or editable install, but without needing the ability
+to compile any C++ code.
+
+You can use this script to check out a new nightly branch with the following:
+
+```bash
+./tools/nightly.py checkout -b my-nightly-branch
+conda activate pytorch-deps
+```
+
+Or if you would like to re-use an existing conda environment, you can pass in
+the regular environment parameters (`--name` or `--prefix`):
+
+```bash
+./tools/nightly.py checkout -b my-nightly-branch -n my-env
+conda activate my-env
+```
+
+You can also use this tool to pull the nightly commits into the current branch:
+
+```bash
+./tools/nightly.py pull -n my-env
+conda activate my-env
+```
+
+Pulling will reinstall the PyTorch dependencies as well as the nightly binaries
+into the repo directory.
 
 ## Codebase structure
 
@@ -205,6 +240,10 @@ and `python setup.py clean`. Then you can install in `develop` mode again.
 
 ## Unit testing
 
+`hypothesis` is required to run the tests, `mypy` is an optional dependency,
+and `pytest` may help run tests more selectively. All these packages can be
+installed with `conda` or `pip`.
+
 PyTorch's testing is located under `test/`. Run the entire test suite with
 
 ```bash
@@ -238,7 +277,7 @@ To build the documentation:
 
 1. Build and install PyTorch
 
-2. Install the prequesities
+2. Install the prerequisites
 
 ```bash
 cd docs
@@ -508,23 +547,24 @@ In the PyTorch project, currently only the latter method of masquerading as
 the compiler via symlinks works for CUDA compilation.
 
 Here are the instructions for installing ccache from source (tested at commit
-`7abac8f` of the `ccache` repo):
+`3c302a7` of the `ccache` repo):
 
 ```bash
-# install and export ccache
+#!/bin/bash
+
 if ! ls ~/ccache/bin/ccache
 then
+    set -ex
     sudo apt-get update
-    sudo apt-get install -y automake autoconf
-    sudo apt-get install -y asciidoc
+    sudo apt-get install -y cmake
     mkdir -p ~/ccache
-    pushd /tmp
+    pushd ~/ccache
     rm -rf ccache
     git clone https://github.com/ccache/ccache.git
-    pushd ccache
-    ./autogen.sh
-    ./configure
-    make install prefix=~/ccache
+    mkdir -p ccache/build
+    pushd ccache/build
+    cmake -DCMAKE_INSTALL_PREFIX=${HOME}/ccache -DENABLE_TESTING=OFF -DZSTD_FROM_INTERNET=ON ..
+    make -j$(nproc) install
     popd
     popd
 

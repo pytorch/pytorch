@@ -109,7 +109,7 @@ class GeneratedFileCleaner:
             for d in self.dirs_to_clean[::-1]:
                 os.rmdir(d)
 
-def matched_files_iter(root_path, includes=('*',), ignores=(), extensions=(), out_of_place_only=False):
+def matched_files_iter(root_path, includes=('*',), ignores=(), extensions=(), out_of_place_only=False, is_pytorch_extension=False):
     def _fnmatch(filepath, patterns):
         return any(fnmatch.fnmatch(filepath, pattern) for pattern in patterns)
 
@@ -122,7 +122,7 @@ def matched_files_iter(root_path, includes=('*',), ignores=(), extensions=(), ou
     # This is a very rough heuristic; really, we want to avoid scanning
     # any file which is not checked into source control, but this script
     # needs to work even if you're in a Git or Hg checkout, so easier to
-    # just blacklist the biggest time sinks that won't matter in the
+    # just block the biggest time sinks that won't matter in the
     # end.
     for (abs_dirpath, dirs, filenames) in os.walk(root_path, topdown=True):
         rel_dirpath = os.path.relpath(abs_dirpath, root_path)
@@ -143,10 +143,11 @@ def matched_files_iter(root_path, includes=('*',), ignores=(), extensions=(), ou
                 and (not _fnmatch(filepath, ignores))
                 and (match_extensions(filepath) or filepath in exact_matches)
             ):
-                if not is_pytorch_file(filepath) and not is_caffe2_gpu_file(filepath):
-                    continue
-                if out_of_place_only and not is_out_of_place(filepath):
-                    continue
+                if not is_pytorch_extension:  # for pytorch extensions, consider all files
+                    if not is_pytorch_file(filepath) and not is_caffe2_gpu_file(filepath):
+                        continue
+                    if out_of_place_only and not is_out_of_place(filepath):
+                        continue
                 yield filepath
 
 
@@ -360,7 +361,7 @@ def processKernelLaunches(string, stats):
 def find_closure_group(input_string, start, group):
     """Generalization for finding a balancing closure group
 
-         if group = ["(", ")"], then finds the first balanced parantheses.
+         if group = ["(", ")"], then finds the first balanced parentheses.
          if group = ["{", "}"], then finds the first balanced bracket.
 
     Given an input string, a starting position in the input string, and the group type,
@@ -847,7 +848,8 @@ def hipify(
 
     all_files = list(matched_files_iter(output_directory, includes=includes,
                                         ignores=ignores, extensions=extensions,
-                                        out_of_place_only=out_of_place_only))
+                                        out_of_place_only=out_of_place_only,
+                                        is_pytorch_extension=is_pytorch_extension))
     all_files_set = set(all_files)
     all_files += [f for f in extra_files if f not in all_files_set]
 

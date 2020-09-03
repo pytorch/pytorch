@@ -123,12 +123,18 @@ void BoundShapeInferencer::Initialize(
 void BoundShapeInferencer::InferOps(
     const OperatorDef& op,
     caffe2::Workspace* /* ws */) {
-  if (op.type() == "SparseLengthsSum" ||
-      op.type() == "SparseLengthsSumFused8BitRowwise" ||
-      op.type() == "SparseLengthsWeightedSum" ||
-      op.type() == "SparseLengthsWeightedSumFused8BitRowwise" ||
-      op.type() == "SparseLengthsSumFused4BitRowwise" ||
-      op.type() == "SparseLengthsWeightedSumFused4BitRowwise") {
+  const static std::unordered_set<std::string> kSlsOps = {
+      "SparseLengthsSum",
+      "SparseLengthsSumFused8BitRowwise",
+      "SparseLengthsWeightedSum",
+      "SparseLengthsWeightedSumFused8BitRowwise",
+      "SparseLengthsSumFused4BitRowwise",
+      "SparseLengthsWeightedSumFused4BitRowwise",
+      "SparseLengthsSum4BitRowwiseSparse",
+      "SparseLengthsWeightedSum4BitRowwiseSparse",
+      "SparseLengthsSum8BitRowwiseSparse",
+      "SparseLengthsWeightedSum8BitRowwiseSparse"};
+  if (kSlsOps.count(op.type())) {
     InferSparseLengthsSum(op);
   } else if (op.type() == "Add" || op.type() == "Mul") {
     InferElementwiseOp(op);
@@ -226,16 +232,18 @@ TensorShape& BoundShapeInferencer::CheckAndSetTensorBoundShape(
     std::vector<int64_t> bound_dims,
     TensorProto::DataType type,
     bool is_quantized,
-    bool allow_existing_shape) {
+    bool allow_existing_shape,
+    float scale,
+    int offset) {
   auto rt = shape_info_.emplace(name, ShapeInfo());
   ShapeInfo& shape_info = rt.first->second;
   TensorShape& shape = shape_info.shape;
   if (is_quantized) {
     shape_info.is_quantized = true;
     shape_info.q_info.scale.clear();
-    shape_info.q_info.scale.push_back(1);
+    shape_info.q_info.scale.push_back(scale);
     shape_info.q_info.offset.clear();
-    shape_info.q_info.offset.push_back(0);
+    shape_info.q_info.offset.push_back(offset);
     shape_info.q_info.axis = 1;
   }
   // If the shape information exists in shape_info_ already
@@ -346,18 +354,32 @@ void BoundShapeInferencer::InferSparseLengthsSum(const OperatorDef& op) {
       op.input(0),
       "needs to be 2D");
 
-  int weight = (op.type() == "SparseLengthsWeightedSum" ||
-                op.type() == "SparseLengthsWeightedSumFused8BitRowwise" ||
-                op.type() == "SparseLengthsWeightedSumFused4BitRowwise")
+  const int weight =
+      (op.type() == "SparseLengthsWeightedSum" ||
+       op.type() == "SparseLengthsWeightedSumFused8BitRowwise" ||
+       op.type() == "SparseLengthsWeightedSumFused4BitRowwise" ||
+       op.type() == "SparseLengthsWeightedSum4BitRowwiseSparse" ||
+       op.type() == "SparseLengthsWeightedSum8BitRowwiseSparse")
       ? 1
       : 0;
 
-  const bool is4bit = op.type() == "SparseLengthsSumFused4BitRowwise" ||
-      op.type() == "SparseLengthsWeightedSumFused4BitRowwise";
+  const bool is4bit =
+      (op.type() == "SparseLengthsSumFused4BitRowwise" ||
+       op.type() == "SparseLengthsWeightedSumFused4BitRowwise" ||
+       op.type() == "SparseLengthsWeightedSum4BitRowwiseSparse" ||
+       op.type() == "SparseLengthsSum4BitRowwiseSparse");
+
+  const bool isSparse =
+      (op.type() == "SparseLengthsSum4BitRowwiseSparse" ||
+       op.type() == "SparseLengthsWeightedSum4BitRowwiseSparse" ||
+       op.type() == "SparseLengthsSum8BitRowwiseSparse" ||
+       op.type() == "SparseLengthsWeightedSum8BitRowwiseSparse");
 
   if (weight) {
-    CAFFE_ENFORCE_EQ(
-        op.input_size(), 4, "SparseLengthsWeightedSum must have 4 inputs");
+    CAFFE_ENFORCE_GE(
+        op.input_size(),
+        4,
+        "SparseLengthsWeightedSum(Sparse) must have 4 or 5 inputs");
     SetTensorBoundShapeIfNotExist(
         op.input(weight),
         {TensorBoundShape_DimType_BATCH_OF_FEATURE_MAX_DEFAULT},
@@ -388,7 +410,9 @@ void BoundShapeInferencer::InferSparseLengthsSum(const OperatorDef& op) {
   // If the op is SparseLengthsSumFused8BitRowwise, we need to extract 4 bytes
   // for fp32 scale and 4 bytes for fp32 bias (https://fburl.com/t6dp9tsc)
   if (op.type() == "SparseLengthsSumFused8BitRowwise" ||
-      op.type() == "SparseLengthsWeightedSumFused8BitRowwise") {
+      op.type() == "SparseLengthsWeightedSumFused8BitRowwise" ||
+      op.type() == "SparseLengthsSum8BitRowwiseSparse" ||
+      op.type() == "SparseLengthsWeightedSum8BitRowwiseSparse") {
     output_dim1 -= 8;
   }
   // If the op is SparseLengthsSumFused4BitRowwise, we need to extract 2 bytes
@@ -603,7 +627,9 @@ void BoundShapeInferencer::InferConcat(const OperatorDef& op) {
 }
 
 void BoundShapeInferencer::InferFC(const OperatorDef& op) {
-  CAFFE_ENFORCE_EQ(op.input_size(), 3, "FC has to have 3 inputs");
+  CAFFE_ENFORCE(
+      op.input_size() == 3 || op.input_size() == 4,
+      "FC has to have 3 or 4 inputs");
   const auto w_it = shape_info_.find(op.input(1));
   CAFFE_ENFORCE(
       w_it != shape_info_.end(),
@@ -620,6 +646,9 @@ void BoundShapeInferencer::InferFC(const OperatorDef& op) {
   const ShapeInfo& b_shape_info = b_it->second;
   bool fp16 = (op.type() == "FbFCPacked");
   bool int8_fc = (op.type() == "Int8FC" || op.engine() == "DNNLOWP");
+  float scale = 1;
+  int offset = 0;
+
   auto x_it = shape_info_.find(op.input(0));
   if (x_it == shape_info_.end()) {
     // We don't have a hint at the x input we try to deduce it from weight
@@ -653,12 +682,24 @@ void BoundShapeInferencer::InferFC(const OperatorDef& op) {
     } else {
       w_data_type = w_shape.data_type();
     }
+
+    if (int8_fc) {
+      scale = helper.GetSingleArgument<float>("Y_scale", 1);
+      offset = helper.GetSingleArgument<int>("Y_zero_point", 0);
+    }
     // Note: for FbFCPacked, weight is fp16 but activations are in fp32
     CheckAndSetTensorBoundShape(
-        op.input(0), dimTypes, dims, w_data_type, int8_fc ? true : false);
+        op.input(0),
+        dimTypes,
+        dims,
+        w_data_type,
+        int8_fc ? true : false,
+        false,
+        scale,
+        offset);
   } else {
     ShapeInfo& x_shape_info = x_it->second;
-    if (x_shape_info.getDimType(0) != TensorBoundShape_DimType_BATCH) {
+    if (x_shape_info.getDimType(0) == TensorBoundShape_DimType_UNKNOWN) {
       CAFFE_ENFORCE_GE(x_shape_info.shape.dims_size(), 1);
       x_shape_info.shape.set_dims(0, spec_.max_batch_size);
       x_shape_info.setDimType(0, TensorBoundShape_DimType_BATCH);
@@ -668,6 +709,16 @@ void BoundShapeInferencer::InferFC(const OperatorDef& op) {
   // Standard shape inference for outputs
   std::vector<TensorShape> input_shapes{
       shape_info_[op.input(0)].shape, w_shape_info.shape, b_shape_info.shape};
+  if (op.input_size() == 4) {
+    const auto quant_param_it = shape_info_.find(op.input(3));
+    CAFFE_ENFORCE(
+        quant_param_it != shape_info_.end(),
+        "Shape of quant_param input of FC ",
+        op.input(3),
+        " needs to be presented");
+    const ShapeInfo& quant_param_shape_info = quant_param_it->second;
+    input_shapes.emplace_back(quant_param_shape_info.shape);
+  }
   std::vector<TensorShape> output_shapes = InferOutput(op, input_shapes);
   CAFFE_ENFORCE_EQ(output_shapes.size(), 1);
   TensorProto::DataType output_data_type;
@@ -678,13 +729,24 @@ void BoundShapeInferencer::InferFC(const OperatorDef& op) {
   } else {
     output_data_type = output_shapes.front().data_type();
   }
+
+  if (int8_fc) {
+    ArgumentHelper helper(op);
+
+    scale = helper.GetSingleArgument<float>("Y_scale", 1);
+    offset = helper.GetSingleArgument<int>("Y_zero_point", 0);
+  }
+
   CheckAndSetTensorBoundShape(
       op.output(0),
       setDimTypeWithFirst(
           TensorBoundShape_DimType_BATCH, output_shapes.front().dims().size()),
       ConvertToVec(output_shapes[0].dims()),
       output_data_type,
-      int8_fc ? true : false);
+      int8_fc ? true : false,
+      false,
+      scale,
+      offset);
 }
 
 // Infers shapes for operators which are used to transform non-quantized
@@ -793,27 +855,44 @@ void BoundShapeInferencer::InferCommonOp(const OperatorDef& op) {
   // First, we need to check that all the input shape/types are already
   // presented
   try {
+    const static std::unordered_set<std::string>
+        types_with_independent_output_shape = {"Int8GenQuantParams",
+                                               "Int8QuantSchemeBlobFill"};
     std::vector<TensorShape> input_shapes;
     for (const auto& input : op.input()) {
       const auto it = shape_info_.find(input);
-      if (it == shape_info_.end()) {
+      if (it == shape_info_.end() &&
+          !types_with_independent_output_shape.count(op.type())) {
         LOG(WARNING) << "Cannot find shape info for " << input << ". Skipping "
                      << op.type();
         return;
       }
-      input_shapes.emplace_back(it->second.shape);
+      if (types_with_independent_output_shape.count(op.type())) {
+        TensorShape input_shape;
+        input_shapes.emplace_back(std::move(input_shape));
+
+      } else {
+        input_shapes.emplace_back(it->second.shape);
+      }
     }
 
     const OpSchema* schema = OpSchemaRegistry::Schema(op.type());
     CAFFE_ENFORCE(schema);
     std::vector<TensorShape> output_shapes;
     output_shapes = schema->InferTensor(op, input_shapes);
-    bool is_quantized =
-        !(op.type().compare(0, 4, "Int8")) && (op.type() != "Int8Dequantize");
+    bool is_quantized = !(op.type().compare(0, 4, "Int8")) &&
+        (op.type() != "Int8Dequantize") &&
+        (op.type() != "Int8QuantSchemeBlobFill") &&
+        (op.type() != "Int8GenQuantParams");
+    float scale = 1;
+    int offset = 0;
+
     TensorProto::DataType infered_data_type = TensorProto::UNDEFINED;
     if (is_quantized) {
       const static std::map<std::string, int> type_info_from_input = {
           {"Int8Quantize", -1}, // Force this op's output to be uint8
+          {"Int8FCPackWeight", 0},
+          {"Int8ConvPackWeight", 0},
           {"Int8ConvRelu", 1},
           {"Int8MaxPool", 0},
           {"Int8AveragePool", 0},
@@ -831,6 +910,11 @@ void BoundShapeInferencer::InferCommonOp(const OperatorDef& op) {
         CAFFE_ENFORCE(target < input_shapes.size());
         infered_data_type = input_shapes[target].data_type();
       }
+
+      // Extract output scale and offset
+      ArgumentHelper helper(op);
+      scale = helper.GetSingleArgument<float>("Y_scale", 1);
+      offset = helper.GetSingleArgument<int>("Y_zero_point", 0);
     } else if (op.type() == "Int8Dequantize") {
       infered_data_type = TensorProto::FLOAT;
     }
@@ -848,7 +932,10 @@ void BoundShapeInferencer::InferCommonOp(const OperatorDef& op) {
           setDimTypeWithFirst(current_dim_type_, shape.dims().size()),
           ConvertToVec(shape.dims()),
           infered_data_type,
-          is_quantized);
+          is_quantized,
+          false,
+          scale,
+          offset);
     }
   } catch (const caffe2::EnforceNotMet& e) {
     LOG(ERROR) << "Enforce not met while inferring shapes for " << op.type()

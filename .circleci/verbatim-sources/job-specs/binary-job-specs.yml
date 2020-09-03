@@ -1,41 +1,12 @@
   binary_linux_build:
     <<: *binary_linux_build_params
     steps:
-    # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - checkout
+    - calculate_docker_image_tag
     - run:
         <<: *binary_checkout
     - run:
         <<: *binary_populate_env
-    - run:
-        name: Install unbuffer and ts
-        command: |
-            set -eux -o pipefail
-            source /env
-            OS_NAME=`awk -F= '/^NAME/{print $2}' /etc/os-release`
-            if [[ "$OS_NAME" == *"CentOS Linux"* ]]; then
-              retry yum -q -y install epel-release
-              retry yum -q -y install expect moreutils
-            elif [[ "$OS_NAME" == *"Ubuntu"* ]]; then
-              retry apt-get update
-              retry apt-get -y install expect moreutils
-              retry conda install -y -c eumetsat expect
-              retry conda install -y cmake
-            fi
-    - run:
-        name: Update compiler to devtoolset7
-        command: |
-            set -eux -o pipefail
-            source /env
-            if [[ "$DESIRED_DEVTOOLSET" == 'devtoolset7' ]]; then
-              source "/builder/update_compiler.sh"
-
-              # Env variables are not persisted into the next step
-              echo "export PATH=$PATH" >> /env
-              echo "export LD_LIBRARY_PATH=$LD_LIBRARY_PATH" >> /env
-            else
-              echo "Not updating compiler"
-            fi
     - run:
         name: Build
         no_output_timeout: "1h"
@@ -52,10 +23,9 @@
         command: |
             source /env
             cd /pytorch && export COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
-            pip3 install requests && \
+            python3 -mpip install requests && \
             SCRIBE_GRAPHQL_ACCESS_TOKEN=${SCRIBE_GRAPHQL_ACCESS_TOKEN} \
             python3 /pytorch/.circleci/scripts/upload_binary_size_to_scuba.py || exit 0
-
     - persist_to_workspace:
         root: /
         paths: final_pkgs
@@ -71,11 +41,10 @@
   binary_linux_test:
     <<: *binary_linux_test_upload_params
     machine:
-        image: ubuntu-1604:201903-01
+        image: ubuntu-1604:202007-01
     steps:
     # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
     - checkout
-    # TODO: We shouldn't attach the workspace multiple times
     - attach_workspace:
         at: /home/circleci/project
     - setup_linux_system_environment
@@ -91,25 +60,41 @@
     - run:
         <<: *binary_run_in_docker
 
-  binary_linux_upload:
-    <<: *binary_linux_test_upload_params
-    machine:
-        image: ubuntu-1604:201903-01
+  binary_upload:
+    parameters:
+      package_type:
+        type: string
+        description: "What type of package we are uploading (eg. wheel, libtorch, conda)"
+        default: "wheel"
+      upload_subfolder:
+        type: string
+        description: "What subfolder to put our package into (eg. cpu, cudaX.Y, etc.)"
+        default: "cpu"
+    docker:
+      - image: continuumio/miniconda3
+    environment:
+      - DRY_RUN: disabled
+      - PACKAGE_TYPE: "<< parameters.package_type >>"
+      - UPLOAD_SUBFOLDER: "<< parameters.upload_subfolder >>"
     steps:
-    # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-    - checkout
-    - setup_linux_system_environment
-    - setup_ci_environment
-    - attach_workspace:
-        at: /home/circleci/project
-    - run:
-        <<: *binary_populate_env
-    - run:
-        <<: *binary_install_miniconda
-    - run:
-        name: Upload
-        no_output_timeout: "1h"
-        command: .circleci/scripts/binary_linux_upload.sh
+      - attach_workspace:
+          at: /tmp/workspace
+      - checkout
+      - designate_upload_channel
+      - run:
+          name: Install dependencies
+          no_output_timeout: "1h"
+          command: |
+            conda install -yq anaconda-client
+            pip install -q awscli
+      - run:
+          name: Do upload
+          no_output_timeout: "1h"
+          command: |
+            AWS_ACCESS_KEY_ID="${PYTORCH_BINARY_AWS_ACCESS_KEY_ID}" \
+              AWS_SECRET_ACCESS_KEY="${PYTORCH_BINARY_AWS_SECRET_ACCESS_KEY}" \
+              ANACONDA_API_TOKEN="${CONDA_PYTORCHBOT_TOKEN}" \
+              .circleci/scripts/binary_upload.sh
 
   # Nighlty build smoke tests defaults
   # These are the second-round smoke tests. These make sure that the binaries are
@@ -119,9 +104,10 @@
   smoke_linux_test:
     <<: *binary_linux_test_upload_params
     machine:
-      image: ubuntu-1604:201903-01
+      image: ubuntu-1604:202007-01
     steps:
     - checkout
+    - calculate_docker_image_tag
     - setup_linux_system_environment
     - setup_ci_environment
     - run:
@@ -207,30 +193,6 @@
     - persist_to_workspace:
         root: /Users/distiller/project
         paths: final_pkgs
-
-  binary_mac_upload: &binary_mac_upload
-    <<: *binary_mac_params
-    macos:
-      xcode: "9.4.1"
-    steps:
-    # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-    - checkout
-    - run:
-        <<: *binary_checkout
-    - run:
-        <<: *binary_populate_env
-    - brew_update
-    - run:
-        <<: *binary_install_miniconda
-    - attach_workspace: # TODO - we can `cp` from ~/workspace
-        at: /Users/distiller/project
-    - run:
-        name: Upload
-        no_output_timeout: "10m"
-        command: |
-          script="/Users/distiller/project/pytorch/.circleci/scripts/binary_macos_upload.sh"
-          cat "$script"
-          source "$script"
 
   binary_ios_build:
     <<: *pytorch_ios_params
@@ -329,28 +291,6 @@
         command: |
           set -eux -o pipefail
           script="/c/w/p/.circleci/scripts/binary_windows_test.sh"
-          cat "$script"
-          source "$script"
-
-  binary_windows_upload:
-    <<: *binary_windows_params
-    docker:
-      - image: continuumio/miniconda
-    steps:
-    # See Note [Workspace for CircleCI scripts] in job-specs-setup.yml
-    - checkout
-    - attach_workspace:
-        at: /root/workspace
-    - run:
-        <<: *binary_checkout
-    - run:
-        <<: *binary_populate_env
-    - run:
-        name: Upload
-        no_output_timeout: "10m"
-        command: |
-          set -eux -o pipefail
-          script="/pytorch/.circleci/scripts/binary_windows_upload.sh"
           cat "$script"
           source "$script"
 

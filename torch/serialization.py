@@ -105,7 +105,7 @@ def check_module_version_greater_or_equal(module, req_version_tuple, error_if_ma
             module.__name__, module.__version__, str(req_version_tuple)
         )
         if error_if_malformed:
-            raise RuntimeError(message)
+            raise RuntimeError(message) from e
         else:
             warnings.warn(message + ', but continuing assuming that requirement is met')
             requirement_is_met = True
@@ -334,7 +334,7 @@ def save(obj, f: Union[str, os.PathLike, BinaryIO],
          pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL, _use_new_zipfile_serialization=True) -> None:
     """Saves an object to a disk file.
 
-    See also: :ref:`recommend-saving-models`
+    See also: `saving-loading-tensors`
 
     Args:
         obj: saved object
@@ -752,7 +752,7 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
             if _is_zipfile(f):
                 # .zip is used for torch.jit.save and will throw an un-pickling error here
                 raise RuntimeError(
-                    "{filename} is a zip archive (did you mean to use torch.jit.load()?)".format(filename=f.name))
+                    f"{f.name} is a zip archive (did you mean to use torch.jit.load()?)") from None
             # if not a tarfile, reset file offset and proceed
             f.seek(0)
 
@@ -859,8 +859,4 @@ def _load(zip_file, map_location, pickle_module, **pickle_load_args):
 
 
 def _is_torchscript_zip(zip_file):
-    for file_name in zip_file.get_all_records():
-        parts = file_name.split(os.sep)
-        if len(parts) > 1 and parts[1] == 'constants.pkl':
-            return True
-    return False
+    return 'constants.pkl' in zip_file.get_all_records()
