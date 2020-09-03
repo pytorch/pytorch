@@ -483,10 +483,10 @@ Loss functions
 
 .. autofunction:: triplet_margin_loss
 
-:hidden:`triplet_margin_loss_with_distance`
+:hidden:`triplet_margin_with_distance_loss`
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. autofunction:: triplet_margin_loss_with_distance
+.. autofunction:: triplet_margin_with_distance_loss
 
 Vision functions
 ----------------

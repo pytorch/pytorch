@@ -269,7 +269,7 @@ Loss Functions
     nn.CosineEmbeddingLoss
     nn.MultiMarginLoss
     nn.TripletMarginLoss
-    nn.TripletMarginLossWithDistance
+    nn.TripletMarginWithDistanceLoss
 
 Vision Layers
 ----------------

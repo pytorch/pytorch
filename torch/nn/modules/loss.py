@@ -1192,7 +1192,7 @@ class TripletMarginLoss(_Loss):
     .. math::
         d(x_i, y_i) = \left\lVert {\bf x}_i - {\bf y}_i \right\rVert_p
 
-    See also :class:`~torch.nn.TripletMarginLossWithDistance`, which computes the
+    See also :class:`~torch.nn.TripletMarginWithDistanceLoss`, which computes the
     triplet margin loss for input tensors using a custom distance function.
 
     Args:
@@ -1251,7 +1251,7 @@ class TripletMarginLoss(_Loss):
                                      eps=self.eps, swap=self.swap, reduction=self.reduction)
 
 
-class TripletMarginLossWithDistance(_Loss):
+class TripletMarginWithDistanceLoss(_Loss):
     r"""Creates a criterion that measures the triplet loss given input
     tensors :math:`a`, :math:`p`, and :math:`n` (representing anchor,
     positive, and negative examples, respectively); and a nonnegative,
@@ -1329,12 +1329,12 @@ class TripletMarginLossWithDistance(_Loss):
     >>> negative = embedding(negative_ids)
     >>>
     >>> # Built-in Distance Function
-    >>> triplet_loss = nn.TripletMarginLossWithDistance(distance_function=nn.PairwiseDistance())
+    >>> triplet_loss = nn.TripletMarginWithDistanceLoss(distance_function=nn.PairwiseDistance())
     >>> output = triplet_loss(anchor, positive, negative)
     >>> output.backward()
     >>>
     >>> # Built-in Similarity Function
-    >>> triplet_loss = nn.TripletMarginLossWithDistance(distance_function=nn.CosineSimilarity(), is_similarity_function=True)
+    >>> triplet_loss = nn.TripletMarginWithDistanceLoss(distance_function=nn.CosineSimilarity(), is_similarity_function=True)
     >>> output = triplet_loss(anchor, positive, negative)
     >>> output.backward()
     >>>
@@ -1342,7 +1342,7 @@ class TripletMarginLossWithDistance(_Loss):
     >>> def l_infinity(x1, x2):
     >>>     return torch.max(torch.abs(x1 - x2), dim=1).values
     >>>
-    >>> triplet_loss = nn.TripletMarginLossWithDistance(distance_function=l_infinity, margin=1.5)
+    >>> triplet_loss = nn.TripletMarginWithDistanceLoss(distance_function=l_infinity, margin=1.5)
     >>> output = triplet_loss(anchor, positive, negative)
     >>> output.backward()
 
@@ -1357,14 +1357,14 @@ class TripletMarginLossWithDistance(_Loss):
 
     def __init__(self, distance_function: Optional[Callable[[Tensor, Tensor], Tensor]] = None, is_similarity_function: bool = False,
                  margin: float = 1.0, swap: bool = False, reduction: str = 'mean'):
-        super(TripletMarginLossWithDistance, self).__init__(size_average=None, reduce=None, reduction=reduction)
+        super(TripletMarginWithDistanceLoss, self).__init__(size_average=None, reduce=None, reduction=reduction)
         self.distance_function = distance_function if distance_function is not None else PairwiseDistance()
         self.is_similarity_function = is_similarity_function
         self.margin = margin
         self.swap = swap
 
     def forward(self, anchor: Tensor, positive: Tensor, negative: Tensor) -> Tensor:
-        return F.triplet_margin_loss_with_distance(anchor, positive, negative,
+        return F.triplet_margin_with_distance_loss(anchor, positive, negative,
                                                    distance_function=self.distance_function,
                                                    is_similarity_function=self.is_similarity_function,
                                                    margin=self.margin, swap=self.swap, reduction=self.reduction)

@@ -3729,21 +3729,21 @@ def triplet_margin_loss(anchor, positive, negative, margin=1.0, p=2, eps=1e-6, s
                                      swap, reduction_enum)
 
 
-def triplet_margin_loss_with_distance(anchor, positive, negative, distance_function=None, is_similarity_function=False,
+def triplet_margin_with_distance_loss(anchor, positive, negative, distance_function=None, is_similarity_function=False,
                                       margin=1.0, swap=False, reduction="mean"):
     # type: (Tensor, Tensor, Tensor, Optional[Callable[[Tensor, Tensor], Tensor]], bool, float, bool, str) -> Tensor
     r"""
-    See :class:`~torch.nn.TripletMarginLossWithDistance` for details.
+    See :class:`~torch.nn.TripletMarginWithDistanceLoss` for details.
     Note: does not support JIT scripting.
     """
     if torch.jit.is_scripting():
-        raise NotImplementedError("F.triplet_margin_loss_with_distance does not support JIT scripting: "
+        raise NotImplementedError("F.triplet_margin_with_distance_loss does not support JIT scripting: "
                                   "functions requiring Callables cannot be scripted.")
 
     tens_ops = (anchor, positive, negative)
     if any([type(t) is not Tensor for t in tens_ops]) and has_torch_function(tens_ops):
         return handle_torch_function(
-            triplet_margin_loss_with_distance, tens_ops, anchor, positive, negative,
+            triplet_margin_with_distance_loss, tens_ops, anchor, positive, negative,
             distance_function=distance_function, is_similarity_function=is_similarity_function,
             margin=margin, swap=swap, reduction=reduction)
 

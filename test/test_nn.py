@@ -12067,9 +12067,9 @@ class TestNNDeviceType(NNTestCase):
         F.threshold(x, 0.5, 0.5, inplace=True)
         F.threshold_(x, 0.5, 0.5)
 
-    def test_triplet_margin_loss_with_distance_default_parity(self, device):
-        # Test for `nn.TripletMarginLossWithDistance` and
-        # `F.triplet_margin_loss_with_distance`.  Checks
+    def test_triplet_margin_with_distance_loss_default_parity(self, device):
+        # Test for `nn.TripletMarginWithDistanceLoss` and
+        # `F.triplet_margin_with_distance_loss`.  Checks
         # for parity against the respective non-distance-agnostic
         # implementations of triplet margin loss (``nn.TripletMarginLoss`
         # and `F.triplet_margin_loss`) under *default args*.
@@ -12084,25 +12084,25 @@ class TestNNDeviceType(NNTestCase):
 
             # Test forward, functional
             expected = F.triplet_margin_loss(anchor, positive, negative, **kwargs)
-            actual = F.triplet_margin_loss_with_distance(anchor, positive, negative, **kwargs)
+            actual = F.triplet_margin_with_distance_loss(anchor, positive, negative, **kwargs)
             self.assertEqual(actual, expected, rtol=1e-6, atol=1e-6)
 
             # Test forward, module
             loss_ref = nn.TripletMarginLoss(**kwargs)
-            loss_op = nn.TripletMarginLossWithDistance(**kwargs)
+            loss_op = nn.TripletMarginWithDistanceLoss(**kwargs)
             self.assertEqual(loss_op(anchor, positive, negative),
                              loss_ref(anchor, positive, negative),
                              rtol=1e-6, atol=1e-6)
 
             # Test backward
-            self.assertTrue(gradcheck(lambda a, p, n: F.triplet_margin_loss_with_distance(
+            self.assertTrue(gradcheck(lambda a, p, n: F.triplet_margin_with_distance_loss(
                 a, p, n, **kwargs), (anchor, positive, negative)))
             self.assertTrue(gradcheck(lambda a, p, n: loss_op(a, p, n),
                             (anchor, positive, negative)))
 
-    def test_triplet_margin_loss_with_distance(self, device):
-        # Test for parity between `nn.TripletMarginLossWithDistance` and
-        # `F.triplet_margin_loss_with_distance`.
+    def test_triplet_margin_with_distance_loss(self, device):
+        # Test for parity between `nn.TripletMarginWithDistanceLoss` and
+        # `F.triplet_margin_with_distance_loss`.
 
         def pairwise_similarity(x, y):
             return 1.0 - F.pairwise_distance(x, y)
@@ -12125,11 +12125,11 @@ class TestNNDeviceType(NNTestCase):
             negative = torch.randn(5, 10, device=device, requires_grad=True)
 
             # Test backward
-            self.assertTrue(gradcheck(lambda a, p, n: F.triplet_margin_loss_with_distance(
+            self.assertTrue(gradcheck(lambda a, p, n: F.triplet_margin_with_distance_loss(
                 a, p, n, distance_function=distance_fn, is_similarity_function=is_similarity_fn,
                 reduction=reduction, margin=margin, swap=swap),
                 (anchor, positive, negative)))
-            loss_op = nn.TripletMarginLossWithDistance(distance_function=distance_fn,
+            loss_op = nn.TripletMarginWithDistanceLoss(distance_function=distance_fn,
                                                        is_similarity_function=is_similarity_fn,
                                                        reduction=reduction, margin=margin, swap=swap)
             self.assertTrue(gradcheck(lambda a, p, n: loss_op(
@@ -12139,7 +12139,7 @@ class TestNNDeviceType(NNTestCase):
                 a, p, n), (anchor, positive, negative)))
 
             # Test forward parity
-            functional = F.triplet_margin_loss_with_distance(anchor, positive, negative,
+            functional = F.triplet_margin_with_distance_loss(anchor, positive, negative,
                                                              distance_function=distance_fn,
                                                              is_similarity_function=is_similarity_fn,
                                                              reduction=reduction, margin=margin, swap=swap)
