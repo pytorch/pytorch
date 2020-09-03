@@ -114,7 +114,8 @@ bool Function::run(Stack& stack) const {
 
 c10::IValue Function::operator()(Stack& stack) {
   InterpreterState interp_state(code_);
-  return interp_state.run(stack);
+  interp_state.run(stack);
+  return stack.front();
 }
 
 } // namespace mobile
