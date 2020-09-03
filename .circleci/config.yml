@@ -477,8 +477,11 @@ jobs:
         command: |
           set -e
           # TODO: Remove this after we figure out why rocm tests are failing
-          if [[ "${DOCKER_IMAGE}" == *rocm* ]]; then
+          if [[ "${DOCKER_IMAGE}" == *rocm3.5* ]]; then
             export DOCKER_TAG="ab1632df-fa59-40e6-8c23-98e004f61148"
+          fi
+          if [[ "${DOCKER_IMAGE}" == *rocm3.7* ]]; then
+            export DOCKER_TAG="1045c7b891104cb4fd23399eab413b6213e48aeb"
           fi
           if [[ ${BUILD_ENVIRONMENT} == *"pure_torch"* ]]; then
             echo 'BUILD_CAFFE2=OFF' >> "${BASH_ENV}"
@@ -554,8 +557,11 @@ jobs:
           set -e
           export PYTHONUNBUFFERED=1
           # TODO: Remove this after we figure out why rocm tests are failing
-          if [[ "${DOCKER_IMAGE}" == *rocm* ]]; then
+          if [[ "${DOCKER_IMAGE}" == *rocm3.5* ]]; then
             export DOCKER_TAG="ab1632df-fa59-40e6-8c23-98e004f61148"
+          fi
+          if [[ "${DOCKER_IMAGE}" == *rocm3.7* ]]; then
+            export DOCKER_TAG="1045c7b891104cb4fd23399eab413b6213e48aeb"
           fi
           # See Note [Special build images]
           output_image=${DOCKER_IMAGE}:${DOCKER_TAG}-${CIRCLE_SHA1}
@@ -6090,13 +6096,6 @@ workflows:
           name: "docker-pytorch-linux-bionic-rocm3.7-py3.6"
           image_name: "pytorch-linux-bionic-rocm3.7-py3.6"
       - pytorch_linux_build:
-          name: pytorch_linux_xenial_rocm3_5_1_py3_6_build
-          requires:
-            - "docker-pytorch-linux-xenial-rocm3.5.1-py3.6"
-          build_environment: "pytorch-linux-xenial-rocm3.5.1-py3.6-build"
-          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-rocm3.5.1-py3.6"
-          resource_class: xlarge
-      - pytorch_linux_build:
           name: pytorch_linux_xenial_py3_6_gcc5_4_build
           requires:
             - "docker-pytorch-linux-xenial-py3.6-gcc5.4"
@@ -6482,6 +6481,13 @@ workflows:
           build_environment: "pytorch-linux-bionic-py3.8-gcc9-coverage_test"
           docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-bionic-py3.8-gcc9"
           resource_class: large
+      - pytorch_linux_build:
+          name: pytorch_linux_bionic_rocm3_7_py3_6_build
+          requires:
+            - "docker-pytorch-linux-bionic-rocm3.7-py3.6"
+          build_environment: "pytorch-linux-bionic-rocm3.7-py3.6-build"
+          docker_image: "308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-bionic-rocm3.7-py3.6"
+          resource_class: xlarge
       - pytorch_macos_10_13_py3_build:
           name: pytorch_macos_10_13_py3_build
       - pytorch_macos_10_13_py3_test:
