@@ -231,6 +231,13 @@ class _ObserverBase(ObserverBase):
             return torch.tensor([1.0]), torch.tensor([0])
 
         if min_val.dim() == 0 or max_val.dim() == 0:
+            if min_val == float('inf') and max_val == float('-inf'):
+                warnings.warn(
+                    "must run observer before calling calculate_qparams.\
+                                        Returning default scale and zero point "
+                )
+                return torch.tensor([1.0]), torch.tensor([0])
+
             assert min_val <= max_val, "min {} should be less than max {}".format(
                 min_val, max_val
             )
@@ -364,8 +371,8 @@ class MinMaxObserver(_ObserverBase):
                                              reduce_range=reduce_range,
                                              quant_min=quant_min,
                                              quant_max=quant_max)
-        self.register_buffer('min_val', torch.tensor([]))
-        self.register_buffer('max_val', torch.tensor([]))
+        self.register_buffer('min_val', torch.tensor(float('inf')))
+        self.register_buffer('max_val', torch.tensor(float('-inf')))
         if self.qscheme == torch.per_tensor_symmetric and \
            self.reduce_range and \
            self.dtype == torch.quint8:
@@ -376,16 +383,8 @@ class MinMaxObserver(_ObserverBase):
         r"""Records the running minimum and maximum of ``x``."""
         x = x_orig.detach()  # avoid keeping autograd tape
         x = x.to(self.min_val.dtype)
-        min_val = self.min_val
-        max_val = self.max_val
-        if min_val.numel() == 0 or max_val.numel() == 0:
-            min_val = torch.min(x)
-            max_val = torch.max(x)
-        else:
-            min_val = torch.min(torch.min(x), min_val)
-            max_val = torch.max(torch.max(x), max_val)
-        self.min_val.resize_(min_val.shape)
-        self.max_val.resize_(max_val.shape)
+        min_val = torch.min(torch.min(x), self.min_val)
+        max_val = torch.max(torch.max(x), self.max_val)
         self.min_val.copy_(min_val)
         self.max_val.copy_(max_val)
         return x_orig
@@ -477,14 +476,12 @@ class MovingAverageMinMaxObserver(MinMaxObserver):
         x = x.to(self.min_val.dtype)
         min_val = self.min_val
         max_val = self.max_val
-        if min_val.numel() == 0 or max_val.numel() == 0:
+        if min_val == float('inf') and max_val == float('-inf'):
             min_val = torch.min(x)
             max_val = torch.max(x)
         else:
             min_val = min_val + self.averaging_constant * (torch.min(x) - min_val)
             max_val = max_val + self.averaging_constant * (torch.max(x) - max_val)
-        self.min_val.resize_(min_val.shape)
-        self.max_val.resize_(max_val.shape)
         self.min_val.copy_(min_val)
         self.max_val.copy_(max_val)
         return x_orig
@@ -514,7 +511,7 @@ class MinMaxDynamicQuantObserver(MinMaxObserver):
     def calculate_qparams(self):
         r"""Calculates the quantization parameters."""
 
-        if self.max_val.numel() == 0 or self.min_val.numel() == 0:
+        if self.max_val == float('-inf') and self.min_val == float('inf'):
             return torch.tensor([1.0]), torch.tensor([0])
 
         assert self.min_val <= self.max_val, "min {} should be less than max {}".format(
