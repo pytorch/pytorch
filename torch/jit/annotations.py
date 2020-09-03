@@ -32,7 +32,7 @@ class Module(object):
         try:
             return self.members[name]
         except KeyError:
-            raise RuntimeError("Module {} has no member called {}".format(self.name, name)) from None
+            raise RuntimeError(f"Module {self.name} has no member called {name}") from None
 
 
 class EvalEnv(object):
@@ -130,7 +130,7 @@ def check_fn(fn, loc):
     py_ast = ast.parse(source)
     if len(py_ast.body) == 1 and isinstance(py_ast.body[0], ast.ClassDef):
         raise torch.jit.frontend.FrontendError(
-            loc, "Cannot instantiate class '{}' in a script function".format(py_ast.body[0].name))
+            loc, f"Cannot instantiate class '{py_ast.body[0].name}' in a script function")
     if len(py_ast.body) != 1 or not isinstance(py_ast.body[0], ast.FunctionDef):
         raise torch.jit.frontend.FrontendError(loc, "Expected a single top-level function")
 
@@ -258,7 +258,7 @@ def try_real_annotations(fn, loc):
 def get_enum_value_type(e: enum.Enum, loc):
     enum_values = list(e)
     if not enum_values:
-        raise ValueError("No enum values defined for: '{}'".format(e.__class__))
+        raise ValueError(f"No enum values defined for: '{e.__class__}'")
 
     types = set([type(v.value) for v in enum_values])
     ir_types = [try_ann_to_type(t, loc) for t in types]
@@ -324,8 +324,8 @@ def try_ann_to_type(ann, loc):
         return IntType.get()  # dtype not yet bound in as its own type
     if inspect.isclass(ann) and issubclass(ann, enum.Enum):
         if not is_enum_support_enabled():
-            warnings.warn("Enum support is work in progress, enum class {}"
-                          " is not compiled".format(ann))
+            warnings.warn(f"Enum support is work in progress, enum class {ann}"
+                          " is not compiled")
             return None
         if not hasattr(ann, "__torch_script_class__"):
             torch.jit._script._recursive_compile_class(ann, loc)
@@ -348,7 +348,7 @@ def ann_to_type(ann, loc):
     the_type = try_ann_to_type(ann, loc)
     if the_type is not None:
         return the_type
-    raise ValueError("Unknown type annotation: '{}'".format(ann))
+    raise ValueError(f"Unknown type annotation: '{ann}'")
 
 
 __all__ = [
