@@ -1,9 +1,9 @@
 import json
 import os
 import time
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Set, Tuple
 
-from ..util.setting import JSON_FOLDER_BASE_DIR, TestList, TestStatusType
+from ..util.setting import JSON_FOLDER_BASE_DIR, TestList, TestPlatform, TestStatusType
 from ..util.utils import (
     check_compiler_type,
     get_cov_type,
@@ -23,27 +23,49 @@ uncovered_lines: Dict[str, Set[int]] = {}
 tests_type: TestStatusType = {"success": set(), "partial": set(), "fail": set()}
 
 
-def transform_file_name(file_path: str, interested_folders: List[str]) -> Optional[str]:
+def transform_file_name(
+    file_path: str, interested_folders: List[str], platform: TestPlatform
+) -> str:
     remove_patterns: Set[str] = {".DEFAULT.cpp", ".AVX.cpp", ".AVX2.cpp"}
     for pattern in remove_patterns:
         file_path = file_path.replace(pattern, "")
-    # if have interested folder
-    for folder in interested_folders:
-        if folder in file_path:
-            return file_path[file_path.find(folder) :]
-    return ""
+    # if user has specifiled interested folder
+    if interested_folders:
+        for folder in interested_folders:
+            if folder in file_path:
+                return file_path[file_path.find(folder) :]
+    # remove pytorch base folder path
+    if platform == TestPlatform.OSS:
+        from package.oss.utils import get_pytorch_folder
+
+        pytorch_foler = get_pytorch_folder()
+        assert file_path.startswith(pytorch_foler)
+        file_path = file_path[len(pytorch_foler) + 1 :]
+    return file_path
 
 
-def is_intrested_file(file_path: str, interested_folders: List[str]):
+def is_intrested_file(
+    file_path: str, interested_folders: List[str], platform: TestPlatform
+):
     ignored_patterns = ["cuda", "aten/gen_aten", "aten/aten_", "build/"]
     if any([pattern in file_path for pattern in ignored_patterns]):
         return False
 
-    for folder in interested_folders:
-        i_folder = folder if folder.endswith("/") else f"{folder}/"
-        if i_folder in file_path:
-            return True
-    return False
+    # ignore files that are not belong to pytorch
+    if platform == TestPlatform.OSS:
+        from package.oss.utils import get_pytorch_folder
+
+        if not file_path.startswith(get_pytorch_folder()):
+            return False
+    # if user has specifiled interested folder
+    if interested_folders:
+        for folder in interested_folders:
+            intersted_folder_path = folder if folder.endswith("/") else f"{folder}/"
+            if intersted_folder_path in file_path:
+                return True
+        return False
+    else:
+        return True
 
 
 def get_json_obj(json_file: str) -> Tuple[Any, int]:
@@ -85,6 +107,7 @@ def parse_json(json_file: str) -> List[CoverageRecord]:
         )
     cov_type = get_cov_type()
     check_compiler_type(cov_type)
+    coverage_records: List[CoverageRecord] = []
     if cov_type == "CLANG":
         coverage_records = LlvmCoverageParser(json_obj).parse("fbcode")
         # print(coverage_records)
@@ -94,13 +117,18 @@ def parse_json(json_file: str) -> List[CoverageRecord]:
     return coverage_records
 
 
-def parse_jsons(test_list: TestList, interested_folders: List[str]) -> None:
+def parse_jsons(
+    test_list: TestList, interested_folders: List[str], platform: TestPlatform
+) -> None:
     g = os.walk(JSON_FOLDER_BASE_DIR)
 
     for path, _, file_list in g:
         for file_name in file_list:
             if file_name.endswith(".json"):
-                if not related_to_test_list(file_name, test_list):
+                # if compiler is clang, we only analyze related json / when compiler is gcc, we analyze all jsons
+                if get_cov_type() == "CLANG" and not related_to_test_list(
+                    file_name, test_list
+                ):
                     continue
                 json_file = os.path.join(path, file_name)
                 try:
@@ -109,24 +137,25 @@ def parse_jsons(test_list: TestList, interested_folders: List[str]) -> None:
                     print_error("Fail to load json file: ", json_file)
                     continue
                 # collect information from each target's export file and merge them together:
-                update_coverage(coverage_records, interested_folders)
+                update_coverage(coverage_records, interested_folders, platform)
 
 
 def update_coverage(
-    coverage_records: List[CoverageRecord], interested_folders: List[str]
+    coverage_records: List[CoverageRecord],
+    interested_folders: List[str],
+    platform: TestPlatform,
 ) -> None:
     for item in coverage_records:
         # extract information for the record
         record = item.to_dict()
         file_path = record["filepath"]
-        if not is_intrested_file(file_path, interested_folders):
+        if not is_intrested_file(file_path, interested_folders, platform):
             continue
         covered_range = record["covered_lines"]
         uncovered_range = record["uncovered_lines"]
         # transform file name: remote/13223/caffe2/aten -> caffe2/aten
-        file_path = transform_file_name(file_path, interested_folders)
-        if file_path is None:
-            continue
+        file_path = transform_file_name(file_path, interested_folders, platform)
+
         # if file not exists, add it into dictionary
         if file_path not in covered_lines:
             covered_lines[file_path] = set()
@@ -149,10 +178,11 @@ def summarize_jsons(
     test_list: TestList,
     interested_folders: List[str],
     coverage_only: List[str],
+    platform: TestPlatform,
     program_start_time: float,
 ) -> None:
     start_time = time.time()
-    parse_jsons(test_list, interested_folders)
+    parse_jsons(test_list, interested_folders, platform)
     update_set()
     line_oriented_report(
         test_list,
