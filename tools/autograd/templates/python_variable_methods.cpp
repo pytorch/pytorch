@@ -335,6 +335,17 @@ static PyObject * THPVariable_float_scalar(PyObject* self, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * THPVariable_complex_scalar(PyObject* self, PyObject* args) {
+  HANDLE_TH_ERRORS
+  if (check_has_torch_function(self)) {
+    return handle_torch_function(self, "__complex__");
+  }
+  jit::tracer::warn("Converting a tensor to a Python complex", jit::tracer::WARN_PYTHON_DATAFLOW);
+  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+  return wrap(dispatch_to_CComplexDouble(self_));
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject * THPVariable_integral_scalar(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
   if (check_has_torch_function(self)) {
@@ -1133,6 +1144,7 @@ PyMethodDef variable_methods[] = {
   {"__mod__", (PyCFunction)(void(*)(void))TypeError_to_NotImplemented_<THPVariable_remainder>, METH_VARARGS | METH_KEYWORDS, NULL},
   {"__bool__", (PyCFunction)THPVariable_bool_scalar, METH_NOARGS, NULL},
   {"__float__", (PyCFunction)THPVariable_float_scalar, METH_NOARGS, NULL},
+  {"__complex__", (PyCFunction)THPVariable_complex_scalar, METH_NOARGS, NULL},
   {"__int__", (PyCFunction)THPVariable_integral_scalar, METH_NOARGS, NULL},
   {"__long__", (PyCFunction)THPVariable_integral_scalar, METH_NOARGS, NULL},
   {"__index__", (PyCFunction)THPVariable_index_scalar, METH_NOARGS, NULL},
