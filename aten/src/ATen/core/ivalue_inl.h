@@ -9,6 +9,7 @@
 #include <c10/core/TensorImpl.h>
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/util/intrusive_ptr.h>
+#include <c10/util/hash.h>
 #include <ATen/core/Dict.h>
 #include <ATen/core/List.h>
 #include <ATen/core/qualified_name.h>
@@ -223,6 +224,10 @@ struct CAFFE2_API Tuple : c10::intrusive_ptr_target {
     return std::move(elements_);
   }
   std::shared_ptr<TupleType> type() const;
+
+  static size_t hash(const Tuple& t) {
+    return c10::get_hash(t.elements());
+  }
 
   friend bool operator==(const ivalue::Tuple& lhs, const ivalue::Tuple& rhs);
 
