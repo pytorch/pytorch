@@ -204,6 +204,7 @@ const std::unordered_set<std::string>& TvmTransformer::getSupportedOps() {
       "Reshape",
       "ReplaceNaN",
       "Sigmoid",
+      "Slice",
       "Softmax",
       "Split",
       "Sum",
