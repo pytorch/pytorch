@@ -703,6 +703,11 @@ class AtomicAdd : public StmtNode<AtomicAdd> {
   const Expr* value_;
 };
 
+class SyncThreads : public StmtNode<SyncThreads> {
+ public:
+  SyncThreads() {}
+};
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch

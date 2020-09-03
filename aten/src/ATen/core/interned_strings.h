@@ -36,6 +36,7 @@ namespace c10 {
   _(prim, CudaFusionGroup)           \
   _(prim, FunctionalGraph)           \
   _(prim, DifferentiableGraph)       \
+  _(prim, TensorExprGroup)           \
   _(prim, If)                        \
   _(prim, Jump) /* debug */          \
   _(prim, JumpNZ) /* debug */        \
@@ -95,6 +96,7 @@ namespace c10 {
   _(prim, Guard)                     \
   _(prim, BailOut)                   \
   _(prim, TypeCheck)                 \
+  _(prim, FallbackGraph)             \
   _(prim, FusedConcat)               \
   _(prim, ConstantChunk)             \
   _(prim, MMTreeReduce)              \
@@ -175,6 +177,7 @@ namespace c10 {
   _(aten, clip_)                     \
   _(aten, det)                       \
   _(aten, linalg_det)                \
+  _(aten, linalg_norm)               \
   _(aten, append)                    \
   _(aten, item)                      \
   _(aten, format)                    \
@@ -212,6 +215,10 @@ namespace c10 {
   _(aten, list)                      \
   _(aten, wait)                      \
   _(aten, save)                      \
+  _(aten, sub)                       \
+  _(aten, sub_)                      \
+  _(aten, subtract)                  \
+  _(aten, subtract_)                 \
   _(aten, keys)                      \
   _(aten, ord)                       \
   _(aten, chr)                       \
@@ -277,6 +284,7 @@ namespace c10 {
   _(onnx, SequenceConstruct)         \
   _(onnx, SequenceEmpty)             \
   _(onnx, SequenceInsert)            \
+  _(onnx, SequenceErase)             \
   _(onnx, ConcatFromSequence)        \
   _(onnx, Identity)                  \
   _(onnx, SoftmaxCrossEntropyLoss)   \
