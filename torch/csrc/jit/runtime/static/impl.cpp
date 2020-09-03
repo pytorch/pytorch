@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
+#include <torch/csrc/jit/runtime/static/ops.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 
 namespace torch {
@@ -11,48 +12,6 @@ namespace jit {
 
 using c10::DispatchKey;
 using c10::RegisterOperators;
-
-static auto reg =
-    RegisterOperators()
-        .op("static::add(Tensor a, Tensor b) -> Tensor",
-            RegisterOperators::options().kernel(
-                DispatchKey::CPU,
-                [](at::Tensor a, at::Tensor b) -> at::Tensor { return a + b; }))
-        .op("static::mul.a(Tensor a, Tensor b) -> Tensor",
-            RegisterOperators::options().kernel(
-                DispatchKey::CPU,
-                [](at::Tensor a, at::Tensor b) -> at::Tensor { return a * b; }))
-        .op("static::mul.b(Tensor a, int b) -> Tensor",
-            RegisterOperators::options().kernel(
-                DispatchKey::CPU,
-                [](at::Tensor a, int64_t b) -> at::Tensor { return a * b; }));
-
-#define SUPPORTED_OPS(F) \
-  F(aten::__getitem__)   \
-  F(aten::add)           \
-  F(aten::addmm)         \
-  F(aten::bmm)           \
-  F(aten::cat)           \
-  F(aten::clamp)         \
-  F(aten::contiguous)    \
-  F(aten::div)           \
-  F(aten::flatten)       \
-  F(aten::index_put_)    \
-  F(aten::isnan)         \
-  F(aten::matmul)        \
-  F(aten::mul)           \
-  F(aten::permute)       \
-  F(aten::relu)          \
-  F(aten::sigmoid)       \
-  F(aten::size)          \
-  F(aten::softmax)       \
-  F(aten::t)             \
-  F(aten::to)            \
-  F(aten::transpose)     \
-  F(aten::view)          \
-  F(prim::Constant)      \
-  F(prim::ListConstruct) \
-  F(prim::TupleConstruct)
 
 StaticRuntime::StaticRuntime(const torch::jit::Module& m)
     : module_(m.copy()), graph_(nullptr) {
@@ -83,19 +42,6 @@ StaticRuntime::StaticRuntime(const torch::jit::Module& m)
           std::string("Unsupported operation: ") + n->kind().toQualString());
     }
   }
-
-  SubgraphRewriter sr;
-  sr.RegisterRewritePattern(
-      R"IR(
-  graph(%x, %w, %s):
-    %r = aten::add(%x, %w, %s)
-    return (%r))IR",
-      R"IR(
-  graph(%x, %w, %s):
-    %y = static::add(%x, %w)
-    %r = static::mul(%y, %s)
-    return (%r))IR");
-  sr.runOnGraph(graph_);
 
   // remove unused input 0 from graph
   if (graph_->inputs().at(0)->type()->is_module()) {
@@ -157,10 +103,13 @@ ProcessedNode::ProcessedNode(Node* node) : node_(node) {
     CHECK(op.hasOperation());
     op_ = op.getOperation(node);
   }
+  if (canRunOutOfPlace(node)) {
+    fn_ = getOutOfPlaceOperation(node);
+  }
 }
 
 void ProcessedNode::run(StaticRuntime::ConstantMap& workspace) const {
-  if (use_stack_) {
+  if (!fn_) {
     std::vector<IValue> stack;
     const size_t size = node_->inputs().size();
     stack.reserve(size);
@@ -201,7 +150,7 @@ void ProcessedNode::run(StaticRuntime::ConstantMap& workspace) const {
       workspace[node_->outputs()[i]] = stack[i];
     }
   } else {
-    TORCH_CHECK(0, "Non-stack execution not yet implemented");
+    (*fn_)(workspace);
   }
 }
 

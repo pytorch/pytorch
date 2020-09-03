@@ -53,8 +53,7 @@ class ProcessedNode {
  private:
   Node* node_;
   c10::optional<Operation> op_;
-  // if false, we have an optimized version
-  bool use_stack_ = true;
+  c10::optional<std::function<void(StaticRuntime::ConstantMap&)>> fn_;
 };
 
 } // namespace jit
