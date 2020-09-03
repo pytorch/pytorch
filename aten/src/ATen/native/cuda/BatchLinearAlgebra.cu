@@ -1334,7 +1334,11 @@ AT_ERROR("symeig: MAGMA library not found in "
 
 
 std::tuple<Tensor &,Tensor &> eig_cuda_out(Tensor & e, Tensor & v, const Tensor & self, bool eigenvectors) {
-  TORCH_CHECK(0, "eig_cuda_out: hello world ", -1);
+  Tensor vals_tmp, vecs_tmp;
+  std::tie(vals_tmp, vecs_tmp) = eig_cuda(self, eigenvectors);
+  e.resize_as_(vals_tmp).copy_(vals_tmp);
+  v.resize_as_(vecs_tmp).copy_(vecs_tmp);
+  return std::tuple<Tensor&, Tensor&>(e, v);
 }
 
 std::tuple<Tensor,Tensor> eig_cuda(const Tensor & self, bool eigenvectors) {
