@@ -3,6 +3,7 @@ import torch.overrides
 import linecache
 from typing import Type, Dict, List, Any
 from .graph import Graph
+from copy import deepcopy
 
 # normal exec loses the source code, however we can patch
 # the linecache module to still recover it.
@@ -51,8 +52,15 @@ def deserialize_graphmodule(body : dict) -> torch.nn.Module:
 
     CodeOnlyModule.forward = forward_from_src(body['code'])
 
-    from .symbolic_trace import symbolic_trace
-    return symbolic_trace(CodeOnlyModule(body))
+    from .symbolic_trace import symbolic_trace, DefaultDelegate
+
+    # we shouldn't trace into any of the submodules, they were not
+    # because they were not traced in the original GraphModule
+    class KeepModules(DefaultDelegate):
+        def is_leaf_module(self, _: torch.nn.Module) -> bool:
+            return True
+
+    return symbolic_trace(CodeOnlyModule(body), delegate_class=KeepModules)
 
 # copy an attribute value with qualified name 'target' from 'from_module' to 'to_module'
 # This installs empty Modules where none exist yet if they are subpaths of target
@@ -108,6 +116,15 @@ def forward(self, {', '.join(free_variables)}):
 
     def __reduce__(self):
         return (deserialize_graphmodule, (self.__dict__,))
+
+    # because __reduce__ is defined for serialization,
+    # we need to define deepcopy otherwise it will call __reduce__
+    # and cause symbolic tracing to occur every time we try to copy the object
+    def __deepcopy__(self, memo):
+        the_copy = self.__new__(type(self))
+        the_copy.__dict__ = deepcopy(self.__dict__, memo)
+        return the_copy
+
 
 # workarounds for issues in __torch_function__
 
