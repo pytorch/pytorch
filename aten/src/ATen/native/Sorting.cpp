@@ -94,6 +94,30 @@ void quick_select_template(
   } while (1);
 }
 
+template <typename scalar_t>
+void quickselect(
+    scalar_t* start,
+    scalar_t* first,
+    scalar_t* last,
+    typename std::set<int64_t>::iterator begin,
+    typename std::set<int64_t>::iterator end) {
+  if (last <= first || begin == end) {
+    return;
+  }
+
+  scalar_t pivot = first[std::distance(first, last) >> 1];
+  scalar_t* mid1 =
+      std::partition(first, last, [=](scalar_t x) { return x < pivot; });
+  scalar_t* mid2 =
+      std::partition(mid1, last, [=](scalar_t x) { return x == pivot; });
+
+  int64_t mid1_r = std::distance(start, mid1);
+  int64_t mid2_r = std::distance(start, mid2);
+
+  quickselect(start, first, mid1, begin, std::lower_bound(begin, end, mid1_r));
+  quickselect(start, mid2, last, std::lower_bound(begin, end, mid2_r), end);
+}
+
 void quantile_cpu_impl(
     Tensor& out,
     const Tensor& self,
@@ -119,21 +143,36 @@ void quantile_cpu_impl(
     in = self.unsqueeze(-1).transpose_(dim, -1).flatten(0, -2).contiguous();
   }
 
+  int64_t q_size = q.numel();
+
   AT_DISPATCH_FLOATING_TYPES(in.scalar_type(), "quantile_cpu_impl", [&] {
+    scalar_t* const OP = out.data_ptr<scalar_t>();
+    scalar_t* const IP = in.data_ptr<scalar_t>();
+    const scalar_t* const QP = q.data_ptr<scalar_t>();
+
+    std::vector<int64_t> rb(q_size);
+    std::vector<int64_t> ra(q_size);
+    std::vector<scalar_t> w(q_size);
+    std::set<int64_t> kths;
+    for (int64_t i = 0; i < q_size; ++i) {
+      long double rank = QP[i] * (in.size(1) - 1);
+      rb[i] = rank;
+      ra[i] = rank;
+      w[i] = rank - rb[i];
+      kths.insert(rank);
+      if (w[i] > 0) {
+        ra[i] = rank + 1;
+        kths.insert(rank + 1);
+      }
+    }
+
     at::parallel_for(0, in.size(0), 0, [&](int64_t begin, int64_t end) {
-      scalar_t* op = out.data_ptr<scalar_t>() + begin;
-      scalar_t* ip = in.data_ptr<scalar_t>() + begin * in.size(1);
-      scalar_t* qp = q.data_ptr<scalar_t>();
-      for (int64_t it = begin; it < end; ++it, ++op, ip += in.size(1)) {
-        std::sort(ip, ip + in.size(1));
-        for (int64_t i = 0; i < q.numel(); ++i) {
-          auto rank = static_cast<long double>(qp[i]) * (in.size(1) - 1);
-          auto r = static_cast<int64_t>(rank);
-          scalar_t quantile = ip[r];
-          if (rank - r > 0) {
-            quantile += (rank - r) * (ip[r + 1] - quantile);
-          }
-          op[i * out.stride(0)] = quantile;
+      scalar_t* ip = IP + begin * in.size(1);
+      for (int64_t it = begin; it < end; ++it, ip += in.size(1)) {
+        quickselect(ip, ip, ip + in.size(1), kths.begin(), kths.end());
+        scalar_t* op = OP + it;
+        for (int64_t i = 0; i < q_size; ++i, op += out.stride(0)) {
+          *op = ip[rb[i]] + w[i] * (ip[ra[i]] - ip[rb[i]]);
         }
       }
     });
