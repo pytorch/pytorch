@@ -67,15 +67,9 @@ void debugPrint(const TensorTypePtr& type) {
 
 at::DimVector graphReductionAxes(const std::shared_ptr<Graph>& graph) {
   at::DimVector reduction_axes;
+  // TODO: let check that we have only single reduction node in the graph.
   for (const auto& n : graph->nodes()) {
     if (isReductionNode(n)) {
-      // TODO: I think this is enough to detect reduction that's not the output
-      // as well. Since we go in topological order, we would run into
-      // intermediate reduction, if there's any.
-      TORCH_INTERNAL_ASSERT(
-          graph->outputs().size() == 1 && graph->outputs()[0] == n->output(),
-          "support for graph with reduction is limited to single output from reduction node");
-
       // TODO: we should return empty when `keepdim` is True?
       auto dims_list = constant_as<c10::List<int64_t>>(n->input(1));
       TORCH_INTERNAL_ASSERT(
@@ -294,11 +288,7 @@ GraphCache::InputsRequirement::InputsRequirement(
       vec_optional_ttp.emplace_back(c10::nullopt);
     }
   }
-  input_permutation_ = getPermutationPerSortedStride(acc_type);
-  output_permutation_ = inversePermutation(input_permutation_, reduction_axes);
-  TORCH_CHECK(
-      acc_type->device().has_value(), "requires fixed device for all inputs");
-  device_ = acc_type->device();
+  extractPermutation(acc_type, reduction_axes);
 }
 
 GraphCache::InputsRequirement::InputsRequirement(
@@ -325,11 +315,7 @@ GraphCache::InputsRequirement::InputsRequirement(
       vec_optional_ttp.emplace_back(c10::nullopt);
     }
   }
-  input_permutation_ = getPermutationPerSortedStride(acc_type);
-  output_permutation_ = inversePermutation(input_permutation_, reduction_axes);
-  TORCH_CHECK(
-      acc_type->device().has_value(), "requires fixed device for all inputs");
-  device_ = acc_type->device();
+  extractPermutation(acc_type, reduction_axes);
 }
 
 bool GraphCache::InputsRequirement::requiresPermutation() {
@@ -340,10 +326,16 @@ bool GraphCache::InputsRequirement::requiresPermutation() {
     }
   }
   // Check if output agrees
-  const size_t output_rank = output_permutation_.size();
-  for (size_t i = 0; i < output_rank; i++) {
+  const size_t pw_output_rank = pw_output_permutation_.size();
+  for (size_t i = 0; i < pw_output_rank; i++) {
     TORCH_INTERNAL_ASSERT(
-        output_permutation_[i] == (long)i,
+        pw_output_permutation_[i] == (long)i,
+        "permutation of output and input is not consistent");
+  }
+  const size_t reduction_output_rank = reduction_output_permutation_.size();
+  for (size_t i = 0; i < reduction_output_rank; i++) {
+    TORCH_INTERNAL_ASSERT(
+        reduction_output_permutation_[i] == (long)i,
         "permutation of output and input is not consistent");
   }
   return false;
@@ -354,7 +346,8 @@ bool GraphCache::InputsRequirement::complyWith(
     const InputsRequirement& expect) {
   if (device_ != expect.device_ ||
       input_permutation_ != expect.input_permutation_ ||
-      output_permutation_ != expect.output_permutation_ ||
+      pw_output_permutation_ != expect.pw_output_permutation_ ||
+      reduction_output_permutation_ != expect.reduction_output_permutation_ ||
       vec_optional_ttp.size() != expect.vec_optional_ttp.size()) {
     return false;
   }
@@ -417,6 +410,18 @@ bool GraphCache::InputsRequirement::complyWith(
     }
   }
   return true;
+}
+
+void GraphCache::InputsRequirement::extractPermutation(
+    const TensorTypePtr& acc_type,
+    const std::vector<size_t>& reduction_axes) {
+  input_permutation_ = getPermutationPerSortedStride(acc_type);
+  reduction_output_permutation_ =
+      inversePermutation(input_permutation_, reduction_axes);
+  pw_output_permutation_ = inversePermutation(input_permutation_, {});
+  TORCH_CHECK(
+      acc_type->device().has_value(), "requires fixed device for all inputs");
+  device_ = acc_type->device();
 }
 
 FusionExecutorCache* GraphCache::appendFusionExecutorCache(
@@ -495,12 +500,6 @@ FusionExecutorCache* GraphCache::appendFusionExecutorCache(
       // see [ NOTE - reduction in graph ] part 2.
       for (auto n : parsing_graph->nodes()) {
         if (isReductionNode(n)) {
-          // TODO: this is mostly redundant check, but it's compile time, we
-          //       leave it here to be safe;
-          TORCH_INTERNAL_ASSERT(
-              parsing_graph->outputs().size() == 1 &&
-                  parsing_graph->outputs()[0] == n->output(),
-              "supporfor graph with reduction is limited to single output from reduction node");
           auto dims_list = constant_as<c10::List<int64_t>>(n->input(1));
           TORCH_INTERNAL_ASSERT(
               dims_list.has_value(), "reduction axes should be constant");
@@ -537,7 +536,7 @@ GraphCache::GraphCache(std::shared_ptr<Graph> graph)
   // [ NOTE - reduction in graph ]
   //
   // reduction complicates our permutation in integration, it addes two things:
-  // 1. we need to adjust output_permutation_;
+  // 1. we need to adjust xxx_output_permutation_;
   //    because of dimension elimination during permutation (not necessarily,
   //    given the `keepdim` argument.) this needs to be accommodated later when
   //    we added the support.
@@ -608,8 +607,22 @@ std::vector<at::Tensor> GraphCache::runGraphWithInputs(
     std::vector<at::Tensor> permuted_outputs;
     permuted_outputs.reserve(outputs.size());
     for (const auto& output : outputs) {
-      permuted_outputs.emplace_back(
-          output.permute(input_requirement->output_permutation_));
+      // This is to address the issue that not all outputs from a reduction
+      // fusion are reduced tensor; We support intermediate tensors to be output
+      if (output.dim() == input_requirement->pw_output_permutation_.size()) {
+        permuted_outputs.emplace_back(
+            output.permute(input_requirement->pw_output_permutation_));
+      } else if (
+          output.dim() ==
+          input_requirement->reduction_output_permutation_.size()) {
+        permuted_outputs.emplace_back(
+            output.permute(input_requirement->reduction_output_permutation_));
+      } else {
+        TORCH_INTERNAL_ASSERT(
+            false,
+            "Something went wrong with integration permutation, can't find a consistent permutation for output in fusion",
+            *graph_);
+      }
     }
     return permuted_outputs;
   } else {
