@@ -16,7 +16,7 @@ class TestForeach(TestCase):
     ]
 
     def _get_test_data(self, device, dtype, N):
-        if dtype in [torch.bfloat16, torch.bool]:
+        if dtype in [torch.bfloat16, torch.bool, torch.float16]:
             tensors1 = [torch.randn(N, N, device=device).to(dtype) for _ in range(N)]
             tensors2 = [torch.randn(N, N, device=device).to(dtype) for _ in range(N)]
         elif dtype in torch.testing.get_all_int_dtypes():
