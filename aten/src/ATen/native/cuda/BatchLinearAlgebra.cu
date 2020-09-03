@@ -1292,26 +1292,25 @@ std::tuple<Tensor, Tensor> _symeig_helper_cuda(const Tensor& self, bool eigenvec
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ eig ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template <typename scalar_t>
-static void apply_eig(const Tensor& self, Tensor& eigvals, bool eigenvectors, magma_int_t *info_ptr) {
+static void apply_eig(const Tensor& self, bool eigenvectors, Tensor& out_eigvals, Tensor& out_eigvecs, magma_int_t *info_ptr) {
 #ifndef USE_MAGMA
 AT_ERROR("symeig: MAGMA library not found in "
     "compilation. Please rebuild with MAGMA.");
 #else
   magma_vec_t jobvr = eigenvectors ? MagmaVec : MagmaNoVec;
   magma_int_t n = magma_int_cast(self.size(-1), "n");
-
   auto self_data = self.data_ptr<scalar_t>();
 
-  eigvals.resize_({2, n});
-  auto eigvals_data = eigvals.data_ptr<scalar_t>();
-  scalar_t *wr = eigvals_data;
-  scalar_t *wi = eigvals_data+n;
+  out_eigvals.resize_({2, n});
+  auto out_eigvals_data = out_eigvals.data_ptr<scalar_t>();
+  scalar_t *wr = out_eigvals_data;
+  scalar_t *wi = out_eigvals_data+n;
 
   scalar_t *vr_data = NULL;
   magma_int_t ldvr = 1;
   if (jobvr == MagmaVec)
   {
-      ALLOCATE_ARRAY(vr_data, scalar_t, n*n);
+      vr_data = out_eigvecs.data_ptr<scalar_t>();
       ldvr = n;
   }
 
@@ -1327,13 +1326,9 @@ AT_ERROR("symeig: MAGMA library not found in "
     magmaEig<scalar_t>(MagmaNoVec, jobvr, n, self_data, n, wr, wi, NULL, 1, vr_data, ldvr, work_data, lwork, info_ptr);
   }
 
-  // transpose the wr and wi columns
-  eigvals.transpose_(0, 1);
-
-  // TODO: copy the result in case jobvr==MagmaVec
-  //if (jobvr == MagmaVec)
-  //  THCTensor_(copyArray2d)(state, rv_, vr_data, n, n);
-
+  // magmaEig returns column-ordered tensors, turn them into row-ordered
+  out_eigvals.transpose_(0, 1);
+  out_eigvecs.transpose_(0, 1);
 #endif
 }
 
@@ -1361,20 +1356,22 @@ std::tuple<Tensor,Tensor> eig_cuda(const Tensor & self, bool eigenvectors) {
   self_working_copy.transpose_(0, 1); // make it column-ordered, what magmaEig wants
   self_working_copy.copy_(self);
 
-  // tensor holding the result
-  auto eigvals = at::empty(0, self.options().device(at::kCPU), LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  // tensors holding the results
+  auto out_eigvals = at::empty(0, self.options().device(at::kCPU), LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  auto out_eigvecs = eigenvectors
+                     ? at::empty({n, n}, self.options().device(at::kCPU), LEGACY_CONTIGUOUS_MEMORY_FORMAT)
+                     : Tensor();
 
   magma_int_t info;
   AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "eig_cuda", [&]{
-    apply_eig<scalar_t>(self_working_copy, eigvals, eigenvectors, &info);
+    apply_eig<scalar_t>(self_working_copy, eigenvectors, out_eigvals, out_eigvecs, &info);
   });
   singleCheckErrors(info, "eig_cuda");
 
   if (eigenvectors) {
-      TORCH_CHECK(0, "eig_cuda: TODO: if (eigenvectors) ", -1);
-      //return std::tuple<Tensor, Tensor>(eigvals.to(self.device()), self_working_copy);
+      return std::tuple<Tensor, Tensor>(out_eigvals.to(self.device()), out_eigvecs.to(self.device()));
   } else {
-      return std::tuple<Tensor, Tensor>(eigvals.to(self.device()), at::empty({0}, self.options()));
+      return std::tuple<Tensor, Tensor>(out_eigvals.to(self.device()), at::empty({0}, self.options()));
   }
 }
 
