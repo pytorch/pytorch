@@ -89,6 +89,8 @@ def cppargument_exprs(a: CppArgument, *, tensor_options: Optional[CppArgument], 
         else:
             assert process_tensoroptions is None
             return [DispatcherExpr(type='const TensorOptions &', expr=a.name)]
+    elif isinstance(a.argument, ThisArgument):
+        return [DispatcherExpr(type=argument_type(a.argument.argument), expr=a.name)]
     elif isinstance(a.argument, Argument):
         if a.name == 'memory_format' and tensor_options is not None and local.use_c10_dispatcher() is UseC10Dispatcher.full:
             return [DispatcherExpr(
@@ -97,8 +99,6 @@ def cppargument_exprs(a: CppArgument, *, tensor_options: Optional[CppArgument], 
             ]
         else:
             return [DispatcherExpr(type=argument_type(a.argument), expr=a.name)]
-    elif isinstance(a.argument, ThisArgument):
-        return [DispatcherExpr(type=argument_type(a.argument.argument), expr=a.name)]
     else:
         assert_never(a.argument)
 

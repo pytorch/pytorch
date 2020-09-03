@@ -165,7 +165,7 @@ def default_expr(d: str, t: Type) -> str:
     return JIT_TO_CPP_DEFAULT.get(d, d)
 
 # Convert an argument into its C++ API form
-def argument(a: Union[Argument, TensorOptionsArguments, ThisArgument]) -> CppArgument:
+def to_cpp_argument(a: Union[Argument, TensorOptionsArguments, ThisArgument]) -> CppArgument:
     if isinstance(a, Argument):
         return CppArgument(
             type=argument_type(a),
@@ -195,7 +195,7 @@ def argument(a: Union[Argument, TensorOptionsArguments, ThisArgument]) -> CppArg
     else:
         assert_never(a)
 
-def get_arguments(
+def scattered_arguments(
     func: FunctionSchema, *, method: bool = False
 ) -> Sequence[Union[Argument, TensorOptionsArguments, ThisArgument]]:
     args: List[Union[Argument, ThisArgument, TensorOptionsArguments]] = []
@@ -210,7 +210,7 @@ def get_arguments(
 
     return args
 
-def gather_arguments(
+def gathered_arguments(
     func: FunctionSchema, *, method: bool = False
 ) -> Sequence[Union[Argument, TensorOptionsArguments, ThisArgument]]:
     args: List[Union[Argument, ThisArgument, TensorOptionsArguments]] = []
@@ -253,8 +253,7 @@ def gather_arguments(
     return args
 
 # Convert arguments to C++ API form
-def gathered_arguments(func: FunctionSchema, *, method: bool = False) -> Sequence[CppArgument]:
-    return list(map(argument, gather_arguments(func, method=method)))
-
-def arguments(func: FunctionSchema, *, method: bool = False) -> Sequence[CppArgument]:
-    return list(map(argument, get_arguments(func, method=method)))
+def scattered_cpp_arguments(func: FunctionSchema, *, method: bool = False) -> Sequence[CppArgument]:
+    return list(map(to_cpp_argument, scattered_arguments(func, method=method)))
+def gathered_cpp_arguments(func: FunctionSchema, *, method: bool = False) -> Sequence[CppArgument]:
+    return list(map(to_cpp_argument, gathered_arguments(func, method=method)))

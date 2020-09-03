@@ -348,11 +348,13 @@ def compute_function(*, target: Target) -> Callable[[NativeFunction], Optional[s
             return None
 
         name = cpp.name(f.func)
-
         cpp_returns_type = cpp.returns_type(f.func.returns)
-        scattered_cpp_args = cpp.arguments(f.func)
+
+        # scattered_cpp_args: ['dtype', 'layout', 'device', 'pin_memory']
+        # gathered_cpp_args: ['options']
+        scattered_cpp_args = cpp.scattered_cpp_arguments(f.func)
+        gathered_cpp_args = cpp.gathered_cpp_arguments(f.func)
         scattered_cpp_args_str = ', '.join(map(str, scattered_cpp_args))
-        gathered_cpp_args = cpp.gathered_arguments(f.func)
         gathered_cpp_args_str = ', '.join(map(str, gathered_cpp_args))
         scattered_cpp_args_str_no_default = ', '.join(map(lambda a: a.str_no_default(), scattered_cpp_args))
         gathered_cpp_args_str_no_default = ', '.join(map(lambda a: a.str_no_default(), gathered_cpp_args))
@@ -372,7 +374,7 @@ def compute_function(*, target: Target) -> Callable[[NativeFunction], Optional[s
         gathering_dispatcher_exprs_str = ', '.join(map(lambda a: a.expr, gathering_dispatcher_exprs))
 
         if target is Target.DECLARATION:
-            if gathered_cpp_args == scattered_cpp_args:
+            if gathered_cpp_args_str == scattered_cpp_args_str:
                 # There's no TensorOptions
                 result = f"CAFFE2_API {cpp_returns_type} {name}({scattered_cpp_args_str});"
             else:
@@ -389,7 +391,7 @@ def compute_function(*, target: Target) -> Callable[[NativeFunction], Optional[s
         gathered_dispatcher_types_str = ', '.join(map(lambda a: a.type, gathered_dispatcher_exprs))
         gathered_dispatcher_exprs_str = ', '.join(map(lambda a: a.expr, gathered_dispatcher_exprs))
 
-        if gathered_cpp_args == scattered_cpp_args:
+        if gathered_cpp_args_str == scattered_cpp_args_str:
             # There's no TensorOptions
             return f"""
 // aten::{f.func}
@@ -448,32 +450,90 @@ def compute_tensor_method(*, target: Target) -> Callable[[NativeFunction], Optio
 
         name = cpp.name(f.func)
         cpp_returns_type = cpp.returns_type(f.func.returns)
-        cpp_args = cpp.gathered_arguments(f.func, method=True)
-        cpp_args_exclude_this = [a for a in cpp_args if not isinstance(a.argument, ThisArgument)]
-        cpp_args_exclude_this_str = ', '.join(str(a) for a in cpp_args_exclude_this)
+
+        # scattered_cpp_args: ['dtype', 'layout', 'device', 'pin_memory']
+        # gathered_cpp_args: ['options']
+        scattered_cpp_args = cpp.scattered_cpp_arguments(f.func, method=True)
+        gathered_cpp_args = cpp.gathered_cpp_arguments(f.func, method=True)
+
+        scattered_cpp_args_exclude_this = [a for a in scattered_cpp_args if not isinstance(a.argument, ThisArgument)]
+        scattered_cpp_args_exclude_this_str = ', '.join(str(a) for a in scattered_cpp_args_exclude_this)
+        gathered_cpp_args_exclude_this = [a for a in gathered_cpp_args if not isinstance(a.argument, ThisArgument)]
+        gathered_cpp_args_exclude_this_str = ', '.join(str(a) for a in gathered_cpp_args_exclude_this)
+        scattered_cpp_args_exclude_this_no_default_str = ', '.join(a.str_no_default() for a in scattered_cpp_args_exclude_this)
+        gathered_cpp_args_exclude_this_no_default_str = ', '.join(a.str_no_default() for a in gathered_cpp_args_exclude_this)
+
+        # scattered_dispatcher_expr:  ['dtype', 'layout', 'device', 'pin_memory']
+        # gathered_dispatcher_expr:   ['options']
+        # scattering_dispatcher_expr: ['options.dtype_opt()', 'options.layout_opt)', ...]
+        # gathering_dispatcher_expr:  ['TensorOptions().dtype(dtype).layout(layout)...']
+        # TODO gathered_dispatcher_expr and gathering_dispatcher_expr are only needed for non-c10-full ops,
+        #      remove later.
+        scattered_dispatcher_exprs = dispatcher.cpparguments_exprs(scattered_cpp_args, process_tensoroptions=None)
+        gathered_dispatcher_exprs = dispatcher.cpparguments_exprs(gathered_cpp_args, process_tensoroptions=None)
+        scattering_dispatcher_exprs_exclude_this = dispatcher.cpparguments_exprs(gathered_cpp_args_exclude_this, process_tensoroptions='scatter')
+        gathering_dispatcher_exprs_exclude_this = dispatcher.cpparguments_exprs(gathered_cpp_args_exclude_this, process_tensoroptions='gather')
+
+        scattering_dispatcher_exprs_exclude_this_str = ', '.join(map(lambda a: a.expr, scattering_dispatcher_exprs_exclude_this))
+        gathering_dispatcher_exprs_exclude_this_str = ', '.join(map(lambda a: a.expr, gathering_dispatcher_exprs_exclude_this))
 
         if target is Target.DECLARATION:
-            return f"{cpp_returns_type} {name}({cpp_args_exclude_this_str}) const;"
+            if scattered_cpp_args_exclude_this_str == gathered_cpp_args_exclude_this_str:
+                # There's no TensorOptions
+                result = f"{cpp_returns_type} {name}({scattered_cpp_args_exclude_this_str}) const;"
+            else:
+                result = f"{cpp_returns_type} {name}({gathered_cpp_args_exclude_this_str}) const;\n"
+                result += f"{cpp_returns_type} {name}({scattered_cpp_args_exclude_this_no_default_str}) const;"
+
+            return result
 
         assert target is Target.DEFINITION
 
-        if local.use_c10_dispatcher() is UseC10Dispatcher.full:
-            process_tensoroptions = 'scatter'
-        else:
-            process_tensoroptions = None
-        dispatcher_exprs = dispatcher.cpparguments_exprs(cpp_args, process_tensoroptions=process_tensoroptions)
-        cpp_args_exclude_this_str_no_default = ', '.join(a.str_no_default() for a in cpp_args_exclude_this)
         dispatcher_returns_type = dispatcher.returns_type(f.func.returns)
-        dispatcher_types_str = ', '.join(map(lambda a: a.type, dispatcher_exprs))
-        dispatcher_exprs_str = ', '.join(map(lambda a: a.expr, dispatcher_exprs))
+        scattered_dispatcher_types_str = ', '.join(map(lambda a: a.type, scattered_dispatcher_exprs))
+        scattered_dispatcher_exprs_str = ', '.join(map(lambda a: a.expr, scattered_dispatcher_exprs))
+        gathered_dispatcher_types_str = ', '.join(map(lambda a: a.type, gathered_dispatcher_exprs))
+        gathered_dispatcher_exprs_str = ', '.join(map(lambda a: a.expr, gathered_dispatcher_exprs))
 
-        return f"""
+        if scattered_cpp_args_exclude_this_str == gathered_cpp_args_exclude_this_str:
+            # There's no TensorOptions
+            return f"""
 // aten::{f.func}
-{cpp_returns_type} Tensor::{name}({cpp_args_exclude_this_str_no_default}) const {{
+{cpp_returns_type} Tensor::{name}({scattered_cpp_args_exclude_this_no_default_str}) const {{
     static auto op = c10::Dispatcher::singleton()
         .findSchemaOrThrow("aten::{f.func.name.name}", "{f.func.name.overload_name}")
-        .typed<{dispatcher_returns_type} ({dispatcher_types_str})>();
-    return op.call({dispatcher_exprs_str});
+        .typed<{dispatcher_returns_type} ({scattered_dispatcher_types_str})>();
+    return op.call({scattered_dispatcher_exprs_str});
+}}
+"""
+        elif local.use_c10_dispatcher() is UseC10Dispatcher.full:
+            # for c10-full ops, the scattered version is the real op and the gathered version is a proxy
+            # calling into the scattered version
+            return f"""
+// aten::{f.func}
+{cpp_returns_type} Tensor::{name}({scattered_cpp_args_exclude_this_no_default_str}) const {{
+    static auto op = c10::Dispatcher::singleton()
+        .findSchemaOrThrow("aten::{f.func.name.name}", "{f.func.name.overload_name}")
+        .typed<{dispatcher_returns_type} ({scattered_dispatcher_types_str})>();
+    return op.call({scattered_dispatcher_exprs_str});
+}}
+{cpp_returns_type} Tensor::{name}({gathered_cpp_args_exclude_this_no_default_str}) const {{
+    return {name}({scattering_dispatcher_exprs_exclude_this_str});
+}}
+"""
+        else:
+            # for non-c10-full ops, the gathered version is the real op and the scattered version is a proxy
+            # calling into the gathered version
+            return f"""
+// aten::{f.func}
+{cpp_returns_type} Tensor::{name}({gathered_cpp_args_exclude_this_no_default_str}) const {{
+    static auto op = c10::Dispatcher::singleton()
+        .findSchemaOrThrow("aten::{f.func.name.name}", "{f.func.name.overload_name}")
+        .typed<{dispatcher_returns_type} ({gathered_dispatcher_types_str})>();
+    return op.call({gathered_dispatcher_exprs_str});
+}}
+{cpp_returns_type} Tensor::{name}({scattered_cpp_args_exclude_this_no_default_str}) const {{
+    return {name}({gathering_dispatcher_exprs_exclude_this_str});
 }}
 """
 
@@ -817,7 +877,7 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
     kwarg_only_set = set(a.name for a in f.func.kwarg_only_arguments)
     out_arg_set = set(a.name for a in f.func.out_arguments)
 
-    cpp_args = cpp.gathered_arguments(f.func)
+    cpp_args = cpp.gathered_cpp_arguments(f.func)
     arguments = [
         compute_cpp_argument_yaml(
             cpp_a, schema_order=False,
@@ -836,7 +896,7 @@ def compute_declaration_yaml(f: NativeFunction) -> object:
         for a in schema_order_jit_arguments
     ]
 
-    cpp_schema_order_types = [cpp.argument(a).type for a in schema_order_jit_arguments]
+    cpp_schema_order_types = [cpp.to_cpp_argument(a).type for a in schema_order_jit_arguments]
     cpp_returns = cpp.returns_type(f.func.returns)
     schema_order_cpp_signature = f"{cpp_returns} ({', '.join(cpp_schema_order_types)})"
 
