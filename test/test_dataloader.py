@@ -488,15 +488,17 @@ class SynchronizedSeedDataset(SynchronizedDataset):
         return torch.initial_seed()
 
 
-def _test_timeout():
+def _test_timeout(persistent_workers):
     dataset = SleepDataset(10, 3)
-    dataloader = DataLoader(dataset, batch_size=2, num_workers=2, timeout=1)
+    dataloader = DataLoader(dataset, batch_size=2, num_workers=2, timeout=1,
+                            persistent_workers=persistent_workers)
     _ = next(iter(dataloader))
 
 
-def _test_timeout_pin_memory():
+def _test_timeout_pin_memory(persistent_workers):
     dataset = SleepDataset(10, 3)
-    dataloader = DataLoader(dataset, batch_size=2, num_workers=2, timeout=1, pin_memory=True)
+    dataloader = DataLoader(dataset, batch_size=2, num_workers=2, timeout=1, pin_memory=True,
+                            persistent_workers=persistent_workers)
     _ = next(iter(dataloader))
 
 
@@ -566,7 +568,8 @@ class TestProperExitIterableDataset(IterableDataset):
 
 # See TestDataLoader.test_proper_exit for usage
 def _test_proper_exit(is_iterable_dataset, use_workers, pin_memory, exit_method,
-                      hold_iter_reference, loader_setup_event, tester_setup_event):
+                      hold_iter_reference, loader_setup_event, tester_setup_event,
+                      persistent_workers):
     num_workers = 2 if use_workers else 0
 
     if exit_method == 'worker_error' or exit_method == 'worker_kill':
@@ -584,7 +587,8 @@ def _test_proper_exit(is_iterable_dataset, use_workers, pin_memory, exit_method,
 
     loader = DataLoader(ds, batch_size=1, shuffle=False,
                         num_workers=num_workers, pin_memory=pin_memory,
-                        worker_init_fn=set_faulthander_if_available)
+                        worker_init_fn=set_faulthander_if_available,
+                        persistent_workers=persistent_workers)
 
     error_it = 2
 
@@ -615,6 +619,7 @@ def _test_proper_exit(is_iterable_dataset, use_workers, pin_memory, exit_method,
         if i == 0:
             if not hold_iter_reference:
                 del it
+                del loader
             loader_setup_event.set()
             tester_setup_event.wait()
             # ensure that the workers are still alive
@@ -752,6 +757,14 @@ class TestDataLoader(TestCase):
         self.data = torch.randn(100, 2, 3, 5)
         self.labels = torch.randperm(50).repeat(2)
         self.dataset = TensorDataset(self.data, self.labels)
+        self.persistent_workers = False
+
+    def _get_data_loader(self, dataset, **kwargs):
+        persistent_workers = kwargs.get('persistent_workers', self.persistent_workers)
+        if persistent_workers and kwargs.get('num_workers', 0) == 0:
+            persistent_workers = False
+        kwargs['persistent_workers'] = persistent_workers
+        return DataLoader(dataset, **kwargs)
 
     def _test_sequential(self, loader):
         batch_size = loader.batch_size
@@ -813,11 +826,11 @@ class TestDataLoader(TestCase):
 
     def test_error_in_init(self):
         for num_workers in [0, 2]:
-            loader = DataLoader(ErrorIterableDataset(), num_workers=num_workers)
+            loader = self._get_data_loader(ErrorIterableDataset(), num_workers=num_workers)
             with self.assertRaisesRegex(RuntimeError, 'Error in __iter__'):
                 list(iter(loader))
 
-        loader = DataLoader(self.dataset, num_workers=2, worker_init_fn=error_worker_init_fn)
+        loader = self._get_data_loader(self.dataset, num_workers=2, worker_init_fn=error_worker_init_fn)
         with self.assertRaisesRegex(RuntimeError, 'Error in worker_init_fn'):
             list(iter(loader))
 
@@ -869,7 +882,7 @@ except RuntimeError as e:
 """])
 
     def test_invalid_assign_after_init(self):
-        dl = DataLoader(self.dataset)
+        dl = self._get_data_loader(self.dataset)
         for attr in ('batch_size', 'sampler', 'batch_sampler', 'drop_last', 'dataset'):
             def fn():
                 setattr(dl, attr, {})
@@ -877,11 +890,11 @@ except RuntimeError as e:
             self.assertRaises(ValueError, fn)
 
     def test_sequential_nonbatch(self):
-        self._test_sequential(DataLoader(self.dataset, batch_size=None))
+        self._test_sequential(self._get_data_loader(self.dataset, batch_size=None))
 
     def test_sequential_batch(self):
-        self._test_sequential(DataLoader(self.dataset))
-        self._test_sequential(DataLoader(self.dataset, batch_size=2))
+        self._test_sequential(self._get_data_loader(self.dataset))
+        self._test_sequential(self._get_data_loader(self.dataset, batch_size=2))
 
     def test_bulk_loading_nobatch(self):
         n = 35
@@ -890,7 +903,7 @@ except RuntimeError as e:
         sampler = BulkLoadingSampler(ds, batch_size=4)
 
         for num_workers in [0, 4]:
-            dl = DataLoader(ds, num_workers=num_workers, batch_size=None, sampler=sampler, pin_memory=TEST_CUDA)
+            dl = self._get_data_loader(ds, num_workers=num_workers, batch_size=None, sampler=sampler, pin_memory=TEST_CUDA)
             self.assertFalse(dl._auto_collation)
             samples = list(dl)
             self.assertEqual(samples[0].is_pinned(), TEST_CUDA)
@@ -898,23 +911,23 @@ except RuntimeError as e:
 
     def test_growing_dataset(self):
         dataset = [torch.ones(4) for _ in range(4)]
-        dataloader_seq = DataLoader(dataset, shuffle=False)
-        dataloader_shuffle = DataLoader(dataset, shuffle=True)
+        dataloader_seq = self._get_data_loader(dataset, shuffle=False)
+        dataloader_shuffle = self._get_data_loader(dataset, shuffle=True)
         dataset.append(torch.ones(4))
         self.assertEqual(len(dataloader_seq), 5)
         self.assertEqual(len(dataloader_shuffle), 5)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_sequential_pin_memory(self):
-        loader = DataLoader(self.dataset, batch_size=2, pin_memory=True)
+        loader = self._get_data_loader(self.dataset, batch_size=2, pin_memory=True)
         for input, target in loader:
             self.assertTrue(input.is_pinned())
             self.assertTrue(target.is_pinned())
 
     def test_multiple_dataloaders(self):
         for multiprocessing_context in supported_multiprocessing_contexts:
-            loader1_it = iter(DataLoader(self.dataset, num_workers=1))
-            loader2_it = iter(DataLoader(self.dataset, num_workers=2, multiprocessing_context=multiprocessing_context))
+            loader1_it = iter(self._get_data_loader(self.dataset, num_workers=1))
+            loader2_it = iter(self._get_data_loader(self.dataset, num_workers=2, multiprocessing_context=multiprocessing_context))
             next(loader1_it)
             next(loader1_it)
             next(loader2_it)
@@ -948,7 +961,7 @@ except RuntimeError as e:
         else:
             targets = (_test_timeout,)
         for target in targets:
-            p = ErrorTrackingProcess(target=target)
+            p = ErrorTrackingProcess(target=target, args=(self.persistent_workers,))
             p.start()
             p.join(JOIN_TIMEOUT)
             try:
@@ -962,60 +975,60 @@ except RuntimeError as e:
     def test_invalid_ctor_args_combinations(self):
         # general
         with self.assertRaisesRegex(ValueError, "num_workers option should be non-negative"):
-            DataLoader(self.dataset, num_workers=-1)
+            self._get_data_loader(self.dataset, num_workers=-1)
         with self.assertRaisesRegex(ValueError, "timeout option should be non-negative"):
-            DataLoader(self.dataset, timeout=-1)
+            self._get_data_loader(self.dataset, timeout=-1)
 
         # disable auto-batching
         with self.assertRaisesRegex(ValueError,
                                     "batch_size=None option disables auto-batching and is mutually exclusive"):
-            DataLoader(self.dataset, batch_size=None, drop_last=True)
+            self._get_data_loader(self.dataset, batch_size=None, drop_last=True)
 
         if torch.multiprocessing._supports_context:
             valid_ctx = list(torch.multiprocessing.get_all_start_methods())[-1]
             with self.assertRaisesRegex(ValueError, r"multi-process loading \(num_workers > 0\), but got"):
-                DataLoader(self.dataset, num_workers=0, multiprocessing_context=valid_ctx)
+                self._get_data_loader(self.dataset, num_workers=0, multiprocessing_context=valid_ctx)
             with self.assertRaisesRegex(ValueError, "should specify a valid start method in"):
-                DataLoader(self.dataset, num_workers=1, multiprocessing_context='bad')
+                self._get_data_loader(self.dataset, num_workers=1, multiprocessing_context='bad')
             with self.assertRaisesRegex(TypeError, "multiprocessing_context option should be a valid context "):
-                DataLoader(self.dataset, num_workers=1, multiprocessing_context=object())
+                self._get_data_loader(self.dataset, num_workers=1, multiprocessing_context=object())
         else:
             with self.assertRaisesRegex(ValueError, "multiprocessing_context relies on Python >= 3.4"):
-                DataLoader(self.dataset, num_workers=1, multiprocessing_context='fork')
+                self._get_data_loader(self.dataset, num_workers=1, multiprocessing_context='fork')
 
         # map-style
         sampler = torch.utils.data.SequentialSampler(self.dataset)
         batch_sampler = torch.utils.data.BatchSampler(sampler, 3, False)
         with self.assertRaisesRegex(ValueError, "sampler option is mutually exclusive with shuffle"):
-            DataLoader(self.dataset, batch_size=11, sampler=sampler, shuffle=True)
+            self._get_data_loader(self.dataset, batch_size=11, sampler=sampler, shuffle=True)
         with self.assertRaisesRegex(ValueError, "sampler option is mutually exclusive with shuffle"):
-            DataLoader(self.dataset, batch_sampler=batch_sampler, sampler=sampler, shuffle=True)
+            self._get_data_loader(self.dataset, batch_sampler=batch_sampler, sampler=sampler, shuffle=True)
         with self.assertRaisesRegex(ValueError, "sampler option is mutually exclusive with shuffle"):
-            DataLoader(self.dataset, batch_sampler=batch_sampler, sampler=sampler, shuffle=3)
+            self._get_data_loader(self.dataset, batch_sampler=batch_sampler, sampler=sampler, shuffle=3)
         with self.assertRaisesRegex(ValueError, "batch_sampler option is mutually exclusive with"):
-            DataLoader(self.dataset, batch_size=11, batch_sampler=batch_sampler)
+            self._get_data_loader(self.dataset, batch_size=11, batch_sampler=batch_sampler)
         with self.assertRaisesRegex(ValueError, "batch_sampler option is mutually exclusive with"):
-            DataLoader(self.dataset, shuffle=True, batch_sampler=batch_sampler)
+            self._get_data_loader(self.dataset, shuffle=True, batch_sampler=batch_sampler)
         with self.assertRaisesRegex(ValueError, "batch_sampler option is mutually exclusive with"):
-            DataLoader(self.dataset, drop_last=True, batch_sampler=batch_sampler)
+            self._get_data_loader(self.dataset, drop_last=True, batch_sampler=batch_sampler)
         with self.assertRaisesRegex(ValueError, "batch_sampler option is mutually exclusive with"):
-            DataLoader(self.dataset, drop_last=3, batch_sampler=batch_sampler)
+            self._get_data_loader(self.dataset, drop_last=3, batch_sampler=batch_sampler)
 
         # iterable-style
         dataset = CountingIterableDataset(20)
         with self.assertRaisesRegex(ValueError, "DataLoader with IterableDataset: expected unspecified shuffle"):
-            DataLoader(dataset, shuffle=True)
+            self._get_data_loader(dataset, shuffle=True)
         with self.assertRaisesRegex(ValueError, "DataLoader with IterableDataset: expected unspecified shuffle"):
-            DataLoader(dataset, shuffle=3)
+            self._get_data_loader(dataset, shuffle=3)
         with self.assertRaisesRegex(ValueError, "DataLoader with IterableDataset: expected unspecified sampler"):
-            DataLoader(dataset, sampler=torch.utils.data.SequentialSampler(dataset))
+            self._get_data_loader(dataset, sampler=torch.utils.data.SequentialSampler(dataset))
         with self.assertRaisesRegex(ValueError, "DataLoader with IterableDataset: expected unspecified sampler"):
-            DataLoader(dataset, sampler=3)
+            self._get_data_loader(dataset, sampler=3)
         with self.assertRaisesRegex(ValueError, "DataLoader with IterableDataset: expected unspecified batch_sampler"):
-            DataLoader(dataset, batch_sampler=torch.utils.data.BatchSampler(
+            self._get_data_loader(dataset, batch_sampler=torch.utils.data.BatchSampler(
                 torch.utils.data.SequentialSampler(dataset), 3, False))
         with self.assertRaisesRegex(ValueError, "DataLoader with IterableDataset: expected unspecified batch_sampler"):
-            DataLoader(dataset, batch_sampler=3)
+            self._get_data_loader(dataset, batch_sampler=3)
 
     def test_builtin_collection_conversion(self):
         for coll_ty in (list, tuple):
@@ -1023,28 +1036,28 @@ except RuntimeError as e:
                 # map-style dataset
                 dataset = CountingDataset(20)
                 # no auto-batching
-                fetched = coll_ty(DataLoader(dataset, batch_size=None, num_workers=num_workers))
+                fetched = coll_ty(self._get_data_loader(dataset, batch_size=None, num_workers=num_workers))
                 self.assertEqual(fetched, coll_ty(range(20)))
                 # auto-batching
-                fetched = coll_ty(DataLoader(dataset, batch_size=2, num_workers=num_workers))
+                fetched = coll_ty(self._get_data_loader(dataset, batch_size=2, num_workers=num_workers))
                 self.assertEqual(fetched, coll_ty(torch.tensor([i, i + 1]) for i in range(0, 20, 2)))
 
                 # iterable-style dataset
                 dataset = CountingIterableDataset(20)
                 # no auto-batching
-                fetched = coll_ty(DataLoader(dataset, batch_size=None, num_workers=num_workers))
+                fetched = coll_ty(self._get_data_loader(dataset, batch_size=None, num_workers=num_workers))
                 self.assertEqual(fetched, coll_ty(range(20)))
                 # auto-batching
                 # this IterableDataset isn't configured for each worker, so for
                 # the equality test below to be valid, we cannot have more than 1 workers.
                 assert num_workers in [0, 1], "invalid test"
-                fetched = coll_ty(DataLoader(dataset, batch_size=2, num_workers=num_workers))
+                fetched = coll_ty(self._get_data_loader(dataset, batch_size=2, num_workers=num_workers))
                 self.assertEqual(fetched, coll_ty(torch.tensor([i, i + 1]) for i in range(0, 20, 2)))
 
     def test_iterable_style_dataset(self):
         # [no auto-batching] single process loading
         dataset = CountingIterableDataset(20)
-        dataloader = DataLoader(dataset, batch_size=None)
+        dataloader = self._get_data_loader(dataset, batch_size=None)
         fetched = list(dataloader)
         self.assertEqual(len(fetched), 20)
         for i, d in enumerate(fetched):
@@ -1061,9 +1074,9 @@ except RuntimeError as e:
         assert len(sizes_for_all_workers) == num_workers, 'invalid test case'
         for prefetch_factor in [2, 3, 4]:
             dataset = WorkerSpecificIterableDataset(sizes_for_all_workers)
-            dataloader = DataLoader(dataset, num_workers=num_workers, batch_size=None,
-                                    worker_init_fn=set_faulthander_if_available,
-                                    prefetch_factor=prefetch_factor)
+            dataloader = self._get_data_loader(dataset, num_workers=num_workers, batch_size=None,
+                                               worker_init_fn=set_faulthander_if_available,
+                                               prefetch_factor=prefetch_factor)
             dataloader_iter = iter(dataloader)
             fetched = sorted(dataloader_iter)
             for a, b in zip(fetched, expected):
@@ -1075,9 +1088,9 @@ except RuntimeError as e:
             # When loading more than len(dataset) data, after accessing len(dataloader),
             # we should get a warning. See NOTE [ IterableDataset and __len__ ].
             dataset = CountingIterableDataset(20)
-            dataloader = DataLoader(dataset, num_workers=num_workers,
-                                    worker_init_fn=set_faulthander_if_available,
-                                    prefetch_factor=prefetch_factor)
+            dataloader = self._get_data_loader(dataset, num_workers=num_workers,
+                                               worker_init_fn=set_faulthander_if_available,
+                                               prefetch_factor=prefetch_factor)
             it = iter(dataloader)
             for _ in range(40):
                 self.assertNotWarn(lambda: next(it), "Should not warn before accessing len(dataloader)")
@@ -1092,10 +1105,10 @@ except RuntimeError as e:
                     r"but [0-9]+ samples have been fetched\. For multiprocessing data-loading, this",
                         msg="Should always warn after exceeding length"):
                     next(it)
-
         # [no auto-batching] test that workers exit gracefully
         workers = dataloader_iter._workers
         del dataloader_iter
+        del dataloader
         try:
             for w in workers:
                 w.join(JOIN_TIMEOUT)
@@ -1107,7 +1120,7 @@ except RuntimeError as e:
 
         # [auto-batching] single process loading
         dataset = CountingIterableDataset(20)
-        fetched = list(DataLoader(dataset, batch_size=7))
+        fetched = list(self._get_data_loader(dataset, batch_size=7))
         self.assertEqual(len(fetched), 3)
         self.assertEqual(fetched[0].tolist(), list(range(7)))
         self.assertEqual(fetched[1].tolist(), list(range(7, 14)))
@@ -1123,7 +1136,7 @@ except RuntimeError as e:
             # worker 0 should return 0 batches
             # worker 1 should return 1 batches
             # worker 2 should return 3 batches
-            dataloader = DataLoader(dataset, num_workers=num_workers, batch_size=7, prefetch_factor=prefetch_factor)
+            dataloader = self._get_data_loader(dataset, num_workers=num_workers, batch_size=7, prefetch_factor=prefetch_factor)
             dataloader_iter = iter(dataloader)
             fetched = list(dataloader_iter)
             self.assertEqual(len(fetched), 4)
@@ -1133,6 +1146,7 @@ except RuntimeError as e:
             # [auto-batching] test that workers exit gracefully
             workers = dataloader_iter._workers
             del dataloader_iter
+            del dataloader
             try:
                 for w in workers:
                     w.join(JOIN_TIMEOUT)
@@ -1141,10 +1155,9 @@ except RuntimeError as e:
             finally:
                 for w in workers:
                     w.terminate()
-
         # [auto-batching & drop_last] single process loading
         dataset = CountingIterableDataset(20)
-        fetched = list(DataLoader(dataset, batch_size=7, drop_last=True))
+        fetched = list(self._get_data_loader(dataset, batch_size=7, drop_last=True))
         self.assertEqual(len(fetched), 2)
         self.assertEqual(fetched[0].tolist(), list(range(7)))
         self.assertEqual(fetched[1].tolist(), list(range(7, 14)))
@@ -1159,8 +1172,9 @@ except RuntimeError as e:
             # worker 0 should return 0 batches
             # worker 1 should return 1 batches
             # worker 2 should return 3 batches
-            dataloader = DataLoader(dataset, num_workers=num_workers, batch_size=7, drop_last=True,
-                                    worker_init_fn=set_faulthander_if_available, prefetch_factor=prefetch_factor)
+            dataloader = self._get_data_loader(dataset, num_workers=num_workers, batch_size=7, drop_last=True,
+                                               worker_init_fn=set_faulthander_if_available,
+                                               prefetch_factor=prefetch_factor)
             dataloader_iter = iter(dataloader)
             fetched = list(dataloader_iter)
             self.assertEqual(len(fetched), 2)
@@ -1170,6 +1184,7 @@ except RuntimeError as e:
             # [auto-batching & drop_last] test that workers exit gracefully
             workers = dataloader_iter._workers
             del dataloader_iter
+            del dataloader
             try:
                 for w in workers:
                     w.join(JOIN_TIMEOUT)
@@ -1186,7 +1201,7 @@ except RuntimeError as e:
         expected = list(range(20)) + list(range(15))
         for num_workers in [0, 1]:
             for chained_dataset in [dataset1 + dataset2, ChainDataset([dataset1, dataset2])]:
-                fetched = list(DataLoader(chained_dataset, num_workers=num_workers))
+                fetched = list(self._get_data_loader(chained_dataset, num_workers=num_workers))
                 self.assertEqual(len(fetched), len(expected))
                 for e, d in zip(expected, fetched):
                     self.assertIsInstance(d, torch.Tensor)
@@ -1214,18 +1229,18 @@ except RuntimeError as e:
             else:
                 ds_cls = CountingDataset
             self.assertEqual(
-                reference, list(DataLoader(ds_cls(counting_ds_n), multiprocessing_context=ctx, **dl_common_args)))
+                reference, list(self._get_data_loader(ds_cls(counting_ds_n), multiprocessing_context=ctx, **dl_common_args)))
             if ctx is not None:
                 # test ctx object
                 ctx = mp.get_context(ctx)
                 self.assertEqual(
-                    reference, list(DataLoader(ds_cls(counting_ds_n), multiprocessing_context=ctx, **dl_common_args)))
+                    reference, list(self._get_data_loader(ds_cls(counting_ds_n), multiprocessing_context=ctx, **dl_common_args)))
 
     def test_worker_seed(self):
         num_workers = 6
         batch_size = 1
         dataset = SynchronizedSeedDataset(num_workers, batch_size, num_workers)
-        dataloader = DataLoader(dataset, batch_size=batch_size, num_workers=num_workers)
+        dataloader = self._get_data_loader(dataset, batch_size=batch_size, num_workers=num_workers)
         seeds = set()
         for batch in dataloader:
             seeds.add(batch[0])
@@ -1242,8 +1257,8 @@ except RuntimeError as e:
 
     def test_worker_init_fn(self):
         dataset = SeedDataset(4)
-        dataloader = DataLoader(dataset, batch_size=2, num_workers=2,
-                                worker_init_fn=init_fn)
+        dataloader = self._get_data_loader(dataset, batch_size=2, num_workers=2,
+                                           worker_init_fn=init_fn)
         for batch in dataloader:
             self.assertEqual(12345, batch[0])
             self.assertEqual(12345, batch[1])
@@ -1259,13 +1274,13 @@ except RuntimeError as e:
             p.terminate()
 
     def test_shuffle(self):
-        self._test_shuffle(DataLoader(self.dataset, shuffle=True))
+        self._test_shuffle(self._get_data_loader(self.dataset, shuffle=True))
 
     def test_shuffle_batch_none(self):
         self._test_shuffle(DataLoader(self.dataset, batch_size=None, shuffle=True))
 
     def test_shuffle_batch(self):
-        self._test_shuffle(DataLoader(self.dataset, batch_size=2, shuffle=True))
+        self._test_shuffle(self._get_data_loader(self.dataset, batch_size=2, shuffle=True))
 
     def test_shuffle_reproducibility(self):
         for fn in (
@@ -1275,19 +1290,19 @@ except RuntimeError as e:
             self.assertEqual(list(fn()), list(fn()))
 
     def test_sequential_workers(self):
-        self._test_sequential(DataLoader(self.dataset, num_workers=4))
+        self._test_sequential(self._get_data_loader(self.dataset, num_workers=4))
 
     def test_seqential_batch_workers(self):
-        self._test_sequential(DataLoader(self.dataset, batch_size=2, num_workers=4))
+        self._test_sequential(self._get_data_loader(self.dataset, batch_size=2, num_workers=4))
 
     def test_seqential_batch_workers_prefetch(self):
         self._test_sequential(DataLoader(self.dataset, batch_size=2, num_workers=4, prefetch_factor=3))
 
     def test_shuffle_workers(self):
-        self._test_shuffle(DataLoader(self.dataset, shuffle=True, num_workers=4))
+        self._test_shuffle(self._get_data_loader(self.dataset, shuffle=True, num_workers=4))
 
     def test_shuffle_batch_workers(self):
-        self._test_shuffle(DataLoader(self.dataset, batch_size=2, shuffle=True, num_workers=4))
+        self._test_shuffle(self._get_data_loader(self.dataset, batch_size=2, shuffle=True, num_workers=4))
 
     def test_shuffle_batch_workers_prefetch(self):
         self._test_shuffle(DataLoader(self.dataset, batch_size=2, shuffle=True, num_workers=4, prefetch_factor=3))
@@ -1344,13 +1359,13 @@ except RuntimeError as e:
 
         # test with dataloader, batch_size = 1
         batch_size = 1
-        count_num_samples_in_data_loader = len(DataLoader(
+        count_num_samples_in_data_loader = len(self._get_data_loader(
             self.dataset, batch_size=batch_size, sampler=sampler))
         self.assertEqual(num_samples, count_num_samples_in_data_loader)
 
         # test with dataloader, batch_size = 6
         batch_size = 6
-        count_num_samples_in_data_loader = len(DataLoader(
+        count_num_samples_in_data_loader = len(self._get_data_loader(
             self.dataset, batch_size=batch_size, sampler=sampler))
         self.assertEqual(int(math.ceil(float(num_samples) / batch_size)),
                          count_num_samples_in_data_loader)
@@ -1365,7 +1380,7 @@ except RuntimeError as e:
         scanned_data = torch.IntTensor([])
         for i in range(num_processes):
             s = DistributedSampler(data_set, num_processes, i)
-            d_loader = DataLoader(data_set, batch_size=int(num_batches / num_processes), drop_last=True, sampler=s)
+            d_loader = self._get_data_loader(data_set, batch_size=int(num_batches / num_processes), drop_last=True, sampler=s)
             for data in d_loader:
                 scanned_data = torch.cat((scanned_data, data), 0)
 
@@ -1387,7 +1402,7 @@ except RuntimeError as e:
 
     def _test_sampler(self, **kwargs):
         indices = range(2, 12)  # using a regular iterable
-        dl = DataLoader(self.dataset, sampler=indices, batch_size=2, **kwargs)
+        dl = self._get_data_loader(self.dataset, sampler=indices, batch_size=2, **kwargs)
         self.assertEqual(len(dl), 5)
         for i, (input, _target) in enumerate(dl):
             self.assertEqual(len(input), 2)
@@ -1406,7 +1421,7 @@ except RuntimeError as e:
             batches.append(tuple(range(i, i + 2)))
             batches.append(tuple(range(i + 2, i + 5)))
 
-        dl = DataLoader(self.dataset, batch_sampler=batches, **kwargs)
+        dl = self._get_data_loader(self.dataset, batch_sampler=batches, **kwargs)
         self.assertEqual(len(dl), 8)
         for i, (input, _target) in enumerate(dl):
             if i % 2 == 0:
@@ -1426,7 +1441,7 @@ except RuntimeError as e:
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_shuffle_pin_memory(self):
-        loader = DataLoader(self.dataset, batch_size=2, shuffle=True, num_workers=4, pin_memory=True)
+        loader = self._get_data_loader(self.dataset, batch_size=2, shuffle=True, num_workers=4, pin_memory=True)
         for input, target in loader:
             self.assertTrue(input.is_pinned())
             self.assertTrue(target.is_pinned())
@@ -1442,16 +1457,16 @@ except RuntimeError as e:
             def __len__(self):
                 return 1000
 
-        loader = DataLoader(TestDataset(), batch_size=12)
+        loader = self._get_data_loader(TestDataset(), batch_size=12)
         batch = next(iter(loader))
         self.assertIsInstance(batch, torch.DoubleTensor)
         self.assertEqual(batch.size(), torch.Size([12, 2, 3, 4]))
 
     def test_error(self):
-        self._test_error(DataLoader(ErrorDataset(100), batch_size=2, shuffle=True))
+        self._test_error(self._get_data_loader(ErrorDataset(100), batch_size=2, shuffle=True))
 
     def test_error_workers(self):
-        self._test_error(DataLoader(ErrorDataset(41), batch_size=2, shuffle=True, num_workers=4))
+        self._test_error(self._get_data_loader(ErrorDataset(41), batch_size=2, shuffle=True, num_workers=4))
 
     @unittest.skipIf(IS_WINDOWS, "FIXME: stuck test")
     def test_partial_workers(self):
@@ -1462,7 +1477,7 @@ except RuntimeError as e:
             pin_memory_configs = (False,)
 
         for pin_memory in pin_memory_configs:
-            loader = iter(DataLoader(self.dataset, batch_size=2, num_workers=4, pin_memory=pin_memory))
+            loader = iter(self._get_data_loader(self.dataset, batch_size=2, num_workers=4, pin_memory=pin_memory))
             workers = loader._workers
             if pin_memory:
                 pin_memory_thread = loader._pin_memory_thread
@@ -1510,8 +1525,10 @@ except RuntimeError as e:
             # In all cases, all processes should end properly.
             if use_workers:
                 exit_methods = [None, 'loader_error', 'loader_kill', 'worker_error', 'worker_kill']
+                persistent_workers = self.persistent_workers 
             else:
                 exit_methods = [None, 'loader_error', 'loader_kill']
+                persistent_workers = False
 
             for exit_method in exit_methods:
                 if exit_method == 'worker_kill':
@@ -1539,7 +1556,8 @@ except RuntimeError as e:
                 loader_p = ErrorTrackingProcess(target=_test_proper_exit,
                                                 args=(is_iterable_dataset, use_workers, pin_memory,
                                                       exit_method, hold_iter_reference,
-                                                      loader_setup_event, tester_setup_event),
+                                                      loader_setup_event, tester_setup_event,
+                                                      persistent_workers),
                                                 disable_stderr=False)
                 loader_p.start()
                 loader_psutil_p = psutil.Process(loader_p.pid)
@@ -1649,8 +1667,8 @@ except RuntimeError as e:
                 n += 1
             self.assertEqual(n, expected)
         check_len(self.dataset, 100)
-        check_len(DataLoader(self.dataset, batch_size=2), 50)
-        check_len(DataLoader(self.dataset, batch_size=3), 34)
+        check_len(self._get_data_loader(self.dataset, batch_size=2), 50)
+        check_len(self._get_data_loader(self.dataset, batch_size=3), 34)
 
     def test_iterabledataset_len(self):
         class IterableDataset(torch.utils.data.IterableDataset):
@@ -1701,7 +1719,7 @@ except RuntimeError as e:
         }
         for dt, tt in dtypes.items():
             dset = ScalarDataset(dt)
-            loader = DataLoader(dset, batch_size=2)
+            loader = self._get_data_loader(dset, batch_size=2)
             batch = next(iter(loader))
             self.assertIsInstance(batch, tt)
 
@@ -1835,22 +1853,28 @@ class TestDictDataLoader(TestCase):
         self.dataset = DictDataset()
 
     def test_sequential_batch(self):
-        loader = DataLoader(self.dataset, batch_size=2, shuffle=False)
-        batch_size = loader.batch_size
-        for i, sample in enumerate(loader):
-            idx = i * batch_size
-            self.assertEqual(set(sample.keys()), {'a_tensor', 'another_dict'})
-            self.assertEqual(set(sample['another_dict'].keys()), {'a_number'})
+        for persistent_workers in (False, True):
+            if persistent_workers:
+                loader = DataLoader(self.dataset, batch_size=2, shuffle=False,
+                                    persistent_workers=persistent_workers, num_workers=1)
+            else:
+                loader = DataLoader(self.dataset, batch_size=2, shuffle=False,
+                                    persistent_workers=persistent_workers)
+            batch_size = loader.batch_size
+            for i, sample in enumerate(loader):
+                idx = i * batch_size
+                self.assertEqual(set(sample.keys()), {'a_tensor', 'another_dict'})
+                self.assertEqual(set(sample['another_dict'].keys()), {'a_number'})
 
-            t = sample['a_tensor']
-            self.assertEqual(t.size(), torch.Size([batch_size, 4, 2]))
-            self.assertTrue((t[0] == idx).all())
-            self.assertTrue((t[1] == idx + 1).all())
+                t = sample['a_tensor']
+                self.assertEqual(t.size(), torch.Size([batch_size, 4, 2]))
+                self.assertTrue((t[0] == idx).all())
+                self.assertTrue((t[1] == idx + 1).all())
 
-            n = sample['another_dict']['a_number']
-            self.assertEqual(n.size(), torch.Size([batch_size]))
-            self.assertEqual(n[0], idx)
-            self.assertEqual(n[1], idx + 1)
+                n = sample['another_dict']['a_number']
+                self.assertEqual(n.size(), torch.Size([batch_size]))
+                self.assertEqual(n[0], idx)
+                self.assertEqual(n[1], idx + 1)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_pin_memory(self):
@@ -1858,6 +1882,85 @@ class TestDictDataLoader(TestCase):
         for sample in loader:
             self.assertTrue(sample['a_tensor'].is_pinned())
             self.assertTrue(sample['another_dict']['a_number'].is_pinned())
+
+
+class DummyDataset(torch.utils.data.Dataset):
+    def __init__(self):
+        self.data = list(range(10))
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        if torch.is_tensor(idx):
+            idx = idx.tolist()
+        # The persistent workers always maintain the original
+        # dataset through the dataloader lifetime
+        # so the attributes will remain the same as the
+        # first time the workers where spawned (dataloader iteration)
+        assert self.start == 0
+        return self.data[idx]
+
+
+@unittest.skipIf(
+    TEST_WITH_TSAN,
+    "Fails with TSAN with the following error: starting new threads after multi-threaded "
+    "fork is not supported. Dying (set die_after_fork=0 to override)")
+class TestDataLoaderPersistentWorkers(TestDataLoader):
+
+    def setUp(self):
+        super(TestDataLoaderPersistentWorkers, self).setUp()
+        self.persistent_workers = True
+
+    @unittest.skipIf(IS_SANDCASTLE, "subprocess doesn't work in FB internal CI")
+    @unittest.skipIf(IS_WINDOWS, "No 'resource' module on Windows")
+    def test_fd_limit_exceeded(self):
+        # See NOTE [ DataLoader on Linux and open files limit ]
+        import subprocess
+        subprocess.check_output([sys.executable, '-c', """\
+import torch
+import resource
+from torch.utils.data import DataLoader, IterableDataset
+
+class RandomDataset(IterableDataset):
+    def __init__(self, len, size):
+        super(RandomDataset).__init__()
+        self.len = len
+        self.size = size
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if self.len <= 0:
+            raise StopIteration
+        self.len -= 1
+        return torch.randn(self.size)
+
+try:
+    keep_fds_alive = []
+    resource.setrlimit(resource.RLIMIT_NOFILE, (100, 100))
+    for random_t in DataLoader(RandomDataset(200, (2,2)),
+                               num_workers=1, persistent_workers=True):
+      random_t.max(dim=0)
+      keep_fds_alive.append(random_t)
+except RuntimeError as e:
+    assert "ulimit -n" in str(e)
+    assert "set_sharing_strategy" in str(e)
+"""])
+
+    def test_dataset_not_reset(self):
+        dataset = DummyDataset()
+        dataloader = self._get_data_loader(dataset, num_workers=2)
+        dataset.start = 0
+        for i in range(10):
+            for x in dataloader:
+                pass
+            # Changing the start value here doesn't have any effect in the dataset
+            # cached by the workers. since they are not recreated between epochs
+            # and can cache values safely
+            dataset.start = i
+
 
 
 class NamedTupleDataset(Dataset):

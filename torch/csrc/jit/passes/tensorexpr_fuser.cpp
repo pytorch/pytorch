@@ -1,6 +1,6 @@
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <ATen/record_function.h>
-#include <jit/runtime/profiling_graph_executor_impl.h>
+#include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
@@ -11,6 +11,7 @@
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/operator_options.h>
+#include <torch/csrc/jit/runtime/profiling_graph_executor_impl.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 #include <torch/csrc/utils/memory.h>
 
@@ -185,48 +186,48 @@ void RemoveProfileNodesAndSpecializeTypes(std::shared_ptr<Graph>& graph) {
   removeProfileNodesAndSpecializeTypes(graph->block());
 }
 
+void removeTensorTypeSpecialization(Value* v) {
+  if (!v->type()->cast<TensorType>()) {
+    return;
+  }
+  // Constants & TensorExprGroup will always produce specialized tensor type,
+  // TypeCheck are inserted by this pass and only used by fusion groups that
+  // insert proper guards
+  if (v->node()->kind() == prim::Constant ||
+      v->node()->kind() == prim::TypeCheck ||
+      v->node()->kind() == prim::TensorExprGroup) {
+    return;
+  }
+  v->setType(TensorType::get());
+}
+
+void removeTensorTypeSpecializations(Block* block) {
+  for (Value* v : block->inputs()) {
+    removeTensorTypeSpecialization(v);
+  }
+  for (Node* n : block->nodes()) {
+    for (Block* b : n->blocks()) {
+      removeTensorTypeSpecializations(b);
+    }
+    for (Value* v : n->outputs()) {
+      removeTensorTypeSpecialization(v);
+    }
+  }
+}
+
+void RemoveTensorTypeSpecializations(std::shared_ptr<Graph>& graph) {
+  removeTensorTypeSpecializations(graph->block());
+}
+
 class TensorExprFuser {
  public:
   TensorExprFuser(std::shared_ptr<Graph> graph, size_t min_group_size)
       : graph_(std::move(graph)), min_group_size_(min_group_size) {}
 
-
-  void removeTensorTypeSpecialization(Value* v) {
-    if (!v->type()->cast<TensorType>()) {
-      return;
-    }
-    // Constants & TensorExprGroup will always produce specialized tensor type,
-    // TypeCheck are inserted by this pass and only used by fusion groups that
-    // insert proper guards
-    if (v->node()->kind() == prim::Constant ||
-        v->node()->kind() == prim::TypeCheck ||
-        v->node()->kind() == prim::TensorExprGroup) {
-      return;
-    }
-    v->setType(TensorType::get());
-  }
-
-  void removeTensorTypeSpecializations(Block* block) {
-    for (Value* v : block->inputs()) {
-      removeTensorTypeSpecialization(v);
-    }
-    for (Node* n : block->nodes()) {
-      for (Block* b : n->blocks()) {
-        removeTensorTypeSpecializations(b);
-      }
-      for (Value* v : n->outputs()) {
-        removeTensorTypeSpecialization(v);
-      }
-    }
-  }
-
   void run() {
     aliasDb_ = torch::make_unique<AliasDb>(graph_);
     RemoveRedundantProfiles(graph_);
     GRAPH_DUMP("After removing redundant profile nodes: ", graph_);
-    removeProfileNodesAndSpecializeTypes(graph_->block());
-    GRAPH_DUMP(
-        "After removing profiling nodes and specializing types: ", graph_);
     createFusionGroups(graph_->block());
     GRAPH_DUMP("After creating fusion groups: ", graph_);
     guardFusionGroups(graph_->block());
@@ -257,12 +258,7 @@ class TensorExprFuser {
       Value* new_value = placeholder_node->insertOutput(i)->copyMetadata(
           to_merge->outputs().at(i));
       aliasDb_->replaceWithNewValue(existing, new_value);
-
-      if (to_merge->hasAttribute(attr::Subgraph)) {
-        existing_values.push_back(SubgraphUtils::getSubgraph(to_merge)->outputs().at(i));
-      } else {
-       existing_values.push_back(existing);
-      }
+      existing_values.push_back(existing);
     }
     std::unordered_map<Value*, Value*> vmap;
     Node* fusion_group = merge_fn(vmap);
@@ -369,7 +365,6 @@ class TensorExprFuser {
   void createFusionGroups(Block* block) {
     std::vector<Node*> fusion_groups;
     auto reverse_iter = block->nodes().reverse();
-    Node* prev_fusion_group = nullptr;
     for (auto it = reverse_iter.begin(); it != reverse_iter.end();) {
       Node* n = *it;
       GRAPH_DEBUG("Considering node:", *n)
@@ -392,38 +387,9 @@ class TensorExprFuser {
       }
 
       Node* fusion_group = createFusionGroup(n);
-      debugDumpFusionGroup("Fusion group constructed: ", fusion_group);
-
-      // Try merging the just created fusion group into the previous one.
-      // If it did not work, then put the previous fusion group into
-      // fusion_groups vector - we will not touch it anymore in this loop.
-      // If merging suceeded, save the merged group as the "previous" fusion
-      // group so that we can try to merge the next one into it.
-      if (prev_fusion_group) {
-        debugDumpFusionGroup(
-            "Trying to merge into the previous fusion group: ",
-            prev_fusion_group);
-        if (canMerge(prev_fusion_group, fusion_group)) {
-          prev_fusion_group = tryMerge(prev_fusion_group, fusion_group);
-          debugDumpFusionGroup(
-              "Successfully merged into the previous fusion group: ",
-              prev_fusion_group);
-        } else {
-          GRAPH_DEBUG("Cannot merge into the previous fusion group");
-          fusion_groups.push_back(prev_fusion_group);
-          prev_fusion_group = fusion_group;
-        }
-      } else {
-        prev_fusion_group = fusion_group;
-      }
-      it = prev_fusion_group->reverseIterator();
+      fusion_groups.push_back(fusion_group);
+      it = fusion_group->reverseIterator();
       it++;
-    }
-
-    // We were adding groups into the vector lagging by one - catch up with
-    // adding the last one
-    if (prev_fusion_group) {
-      fusion_groups.push_back(prev_fusion_group);
     }
 
     for (Node* n : fusion_groups) {
@@ -501,8 +467,41 @@ class TensorExprFuser {
   bool allShapesAreKnown(Node* node) {
     // TODO: Relax the checks to support dynamic shapes
     for (Value* input : node->inputs()) {
-      if (input->type()->cast<TensorType>() && !input->isCompleteTensor()) {
-        return false;
+      if (input->type()->cast<TensorType>()) {
+        if (!input->isCompleteTensor()) {
+          return false;
+        }
+        if (*input->type()->cast<TensorType>()->dim() == 0) {
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+
+  bool canFuseOnDevice(Value* v) {
+    auto type = v->type()->cast<TensorType>();
+    if (!type) {
+      return true;
+    }
+    auto device = type->device();
+    if (!device) {
+      return false;
+    }
+    if (device->is_cpu()) {
+      return canFuseOnCPU();
+    } else if (device->is_cuda()) {
+      return canFuseOnGPU();
+    }
+    throw std::runtime_error("Unknown device");
+  }
+
+  bool isFusableOnDevice(Node* node) {
+    for (const auto& output : node->outputs()) {
+      if (output->uses().size() > 0) {
+        if (!canFuseOnDevice(output)) {
+          return false;
+        }
       }
     }
     return true;
@@ -540,9 +539,9 @@ class TensorExprFuser {
     REQ(consumer->owningBlock() == producer->owningBlock());
 
     // Symbolic checks
-    REQ(canHandle(producer) || producer->kind() == prim::TensorExprGroup);
+    REQ(canHandle(producer));
     TORCH_INTERNAL_ASSERT(
-        canHandle(consumer) || consumer->kind() == prim::TensorExprGroup);
+        consumer->kind() == prim::TensorExprGroup || canHandle(consumer));
 
     // Alias checks
     REQ(aliasDb_->couldMoveBeforeTopologically(producer, consumer));
@@ -572,10 +571,20 @@ class TensorExprFuser {
       REQ(producer->input(0)->node()->kind() == prim::ListConstruct);
       REQ(producer->input(0)->uses().size() == 1);
       REQ(producer->input(1)->node()->kind() == prim::Constant);
+      auto const& listConstruct = producer->input(0)->node();
+      for (auto const& input : listConstruct->inputs()) {
+        REQ(isFusableOnDevice(input->node()));
+      }
     } else if (consumer->kind() == aten::cat) {
       REQ(consumer->input(0)->node()->kind() == prim::ListConstruct);
       REQ(consumer->input(0)->uses().size() == 1);
       REQ(consumer->input(1)->node()->kind() == prim::Constant);
+      auto const& listConstruct = consumer->input(0)->node();
+      for (auto const& input : listConstruct->inputs()) {
+        REQ(isFusableOnDevice(input->node()));
+      }
+    } else {
+      REQ(isFusableOnDevice(producer));
     }
 
     return true;
