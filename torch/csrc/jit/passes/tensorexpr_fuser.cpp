@@ -131,6 +131,30 @@ bool isSupported(Node* node) {
   // clang-format on
 
   if (node->isMemberOf(supported_operator_set)) {
+    // We only insert guards on Tensor types, so we rely on the output
+    // of a node being uniquely determined by its input types.
+    // bail if any non-Tensor input affects the output type
+    // and cannot be reasoned about statically
+
+    // Value is either an int or a float (can occur from .item())
+    for (Value* v : node->inputs()) {
+      if (v->type()->cast<NumberType>()) {
+        return false;
+      }
+    }
+
+    // non-const dtype / device
+    if (auto index = node->schema().argumentIndexWithName("dtype")) {
+      if (!toIValue(node->input(*index))) {
+        return false;
+      }
+    }
+    if (auto index = node->schema().argumentIndexWithName("device")) {
+      if (!toIValue(node->input(*index))) {
+        return false;
+      }
+    }
+
     return true;
   }
 

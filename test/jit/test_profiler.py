@@ -31,6 +31,29 @@ class TestProfiler(JitTestCase):
         torch._C._jit_set_texpr_fuser_enabled(self.texpr_fuser_state)
         torch.set_default_dtype(self.default_dtype)
 
+    def test_tensor_type_not_determined_by_inputs(self):
+        @torch.jit.script
+        def scalar_type_input(x, y, z):
+            return x + y + 4 + z.item()
+
+        x = torch.tensor([2, 2])
+        scalar_type_input(x, x, torch.tensor(1))
+        scalar_type_input(x, x, torch.tensor(1))
+        scalar_type_input(x, x, torch.tensor(1.0))
+        g = torch.jit.last_executed_optimized_graph()
+        FileCheck().check("TensorExpr").check("Scalar = aten::item").check_next("Tensor = aten::add").check("TensorExpr").run(g)
+
+
+        @torch.jit.script
+        def non_const_dtype(x, y, cond: bool):
+            dtype = torch.int16 if cond else torch.int32
+            return (x + y + 3).sum(dtype=dtype)
+
+        non_const_dtype(x, x, True)
+        non_const_dtype(x, x, True)
+        g = torch.jit.last_executed_optimized_graph()
+        FileCheck().check("TensorExpr").check("TensorExpr").check_not("aten::sum")
+
     def test_specialize_backward(self):
         def test_fuse(a, b):
             c = a * b
