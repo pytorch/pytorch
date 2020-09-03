@@ -1086,7 +1086,7 @@ add_docstr(torch.stack,
            r"""
 stack(tensors, dim=0, *, out=None) -> Tensor
 
-Concatenates sequence of tensors along a new dimension.
+Concatenates a sequence of tensors along a new dimension.
 
 All tensors need to be of the same size.
 
@@ -1778,7 +1778,12 @@ add_docstr(torch.conj,
            r"""
 conj(input, *, out=None) -> Tensor
 
-Computes the element-wise conjugate of the given :attr:`input` tensor.
+Computes the element-wise conjugate of the given :attr:`input` tensor. If :attr`input` has a non-complex dtype,
+this function just returns :attr:`input`.
+
+.. warning:: In the future, :func:`torch.conj` may return a non-writeable view for an :attr:`input` of
+             non-complex dtype. It's recommended that programs not modify the tensor returned by :func:`torch.conj`
+             when :attr:`input` is of non-complex dtype to be compatible with this change.
 
 .. math::
     \text{out}_{i} = conj(\text{input}_{i})
@@ -2075,7 +2080,7 @@ add_docstr(torch.dequantize,
            r"""
 dequantize(tensor) -> Tensor
 
-Given a quantized Tensor, dequantize it and return an fp32 Tensor
+Returns an fp32 Tensor by dequantizing a quantized Tensor
 
 Args:
     tensor (Tensor): A quantized Tensor
@@ -2457,6 +2462,35 @@ Example::
     >>> torch.dot(torch.tensor([2, 3]), torch.tensor([2, 1]))
     tensor(7)
 """)
+
+add_docstr(torch.vdot,
+           r"""
+vdot(input, other, *, out=None) -> Tensor
+
+Computes the dot product (inner product) of two tensors. The vdot(a, b) function
+handles complex numbers differently than dot(a, b). If the first argument is complex,
+the complex conjugate of the first argument is used for the calculation of the dot product.
+
+.. note:: This function does not :ref:`broadcast <broadcasting-semantics>`.
+
+Args:
+    input (Tensor): first tensor in the dot product. Its conjugate is used if it's complex.
+    other (Tensor): second tensor in the dot product.
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> torch.vdot(torch.tensor([2, 3]), torch.tensor([2, 1]))
+    tensor(7)
+    >>> a = torch.tensor((1 +2j, 3 - 1j))
+    >>> b = torch.tensor((2 +1j, 4 - 0j))
+    >>> torch.vdot(a, b)
+    tensor([16.+1.j])
+    >>> torch.vdot(b, a)
+    tensor([16.-1.j])
+""".format(**common_args))
 
 add_docstr(torch.eig,
            r"""
@@ -5787,6 +5821,40 @@ Example::
 
 """.format(**common_args))
 
+add_docstr(torch.heaviside,
+           r"""
+heaviside(input, values, *, out=None) -> Tensor
+
+Computes the Heaviside step function for each element in :attr:`input`.
+The Heaviside step function is defined as:
+
+.. math::
+    \text{{heaviside}}(input, values) = \begin{cases}
+        \0, & \text{if input < 0}\\
+        \values, & \text{if input == 0}\\
+        \1, & \text{if input > 0}
+    \end{cases}
+""" + r"""
+
+Args:
+    {input}
+    values (Tensor): The values to use where :attr:`input` is zero.
+
+Keyword arguments:
+    {out}
+
+Example::
+
+    >>> input = torch.tensor([-1.5, 0, 2.0])
+    >>> values = torch.tensor([0.5])
+    >>> torch.heaviside(input, values)
+    tensor([0.0000, 0.5000, 1.0000])
+    >>> values = torch.tensor([1.2, -2.0, 3.5])
+    >>> torch.heaviside(input, values)
+    tensor([0., -2., 1.])
+
+""".format(**common_args))
+
 add_docstr(torch.rand,
            r"""
 rand(*size, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
@@ -6035,7 +6103,8 @@ the gap between two values in the tensor.
     \text{out}_{i+1} = \text{out}_i + \text{step}.
 """ + r"""
 .. warning::
-    This function is deprecated in favor of :func:`torch.arange`.
+    This function is deprecated and will be removed in a future release because its behavior is inconsistent with
+    Python's range builtin. Instead, use :func:`torch.arange`, which produces values in [start, end).
 
 Args:
     start (float): the starting value for the set of points. Default: ``0``.
@@ -6796,7 +6865,7 @@ Subtracts :attr:`other`, scaled by :attr:`alpha`, from :attr:`input`.
     \text{{out}}_i = \text{{input}}_i - \text{{alpha}} \times \text{{other}}_i
 """ + r"""
 
-Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`, 
+Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
 :ref:`type promotion <type-promotion-doc>`, and integer, float, and complex inputs.
 
 Args:
@@ -9064,7 +9133,7 @@ add_docstr(torch.Generator,
            r"""
 Generator(device='cpu') -> Generator
 
-Creates and returns a generator object which manages the state of the algorithm that
+Creates and returns a generator object that manages the state of the algorithm which
 produces pseudo random numbers. Used as a keyword argument in many :ref:`inplace-random-sampling`
 functions.
 

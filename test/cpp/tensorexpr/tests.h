@@ -246,7 +246,8 @@ namespace jit {
   _(FuserPass_1)                            \
   _(FuserPass_2)                            \
   _(FuserPass_3)                            \
-  _(FuserPass_4)                            \
+  _(FuserPass_0DimInput)                    \
+  _(FuserPass_MergeGroups)                  \
   _(TrainBasic)
 
 #define TH_FORALL_TENSOREXPR_TESTS_LLVM(_) \
@@ -350,10 +351,10 @@ namespace jit {
   _(LLVMElemwiseLog10Float)                \
   _(LLVMElemwiseMaxInt)                    \
   _(LLVMElemwiseMinInt)                    \
-  _(LLVMElemwiseMaxNumFloat)               \
-  _(LLVMElemwiseMaxNumNaNFloat)            \
-  _(LLVMElemwiseMinNumFloat)               \
-  _(LLVMElemwiseMinNumNaNFloat)            \
+  _(LLVMElemwiseMaxFloat)                  \
+  _(LLVMElemwiseMaxNaNFloat)               \
+  _(LLVMElemwiseMinFloat)                  \
+  _(LLVMElemwiseMinNaNFloat)               \
   _(LLVMCompareSelectIntEQ)                \
   _(LLVMCompareSelectFloatEQ)              \
   _(LLVMStoreFloat)                        \

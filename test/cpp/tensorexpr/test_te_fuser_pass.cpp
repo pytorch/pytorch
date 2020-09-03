@@ -1,4 +1,5 @@
 #include <test/cpp/tensorexpr/test_base.h>
+#include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
@@ -11,7 +12,20 @@ namespace jit {
 
 using namespace torch::jit::tensorexpr;
 
+struct WithCPUFuser {
+  WithCPUFuser() : cpuFuserEnabled(canFuseOnCPU()) {
+    overrideCanFuseOnCPU(true);
+  }
+
+  ~WithCPUFuser() {
+    overrideCanFuseOnCPU(cpuFuserEnabled);
+  }
+
+  bool cpuFuserEnabled;
+};
+
 void testFuserPass_1() {
+  WithCPUFuser cf;
   KernelScope kernel_scope;
   const auto graph_string = R"IR(
     graph(%0 : Float(128:1, device=cpu),
@@ -38,6 +52,7 @@ void testFuserPass_1() {
 }
 
 void testFuserPass_2() {
+  WithCPUFuser cf;
   KernelScope kernel_scope;
   const auto graph_string = R"IR(
     graph(%0 : Float(128:1, device=cpu),
@@ -62,6 +77,7 @@ void testFuserPass_2() {
 }
 
 void testFuserPass_3() {
+  WithCPUFuser cf;
   KernelScope kernel_scope;
   const auto graph_string = R"IR(
     graph(%x : Float(128:1, device=cpu),
@@ -90,7 +106,27 @@ void testFuserPass_3() {
   }
 }
 
-void testFuserPass_4() {
+void testFuserPass_0DimInput() {
+  KernelScope kernel_scope;
+  const auto graph_string = R"IR(
+    graph(%x : Float(device=cuda),
+          %y : Float(device=cuda)):
+      %one : int = prim::Constant[value=1]()
+      %a : Float(device=cuda) = aten::mul(%x, %y)
+      %b : Float(device=cuda) = aten::add(%x, %a, %one)
+      return (%b))IR";
+  auto g = std::make_shared<Graph>();
+  torch::jit::parseIR(graph_string, g.get());
+
+  g->lint();
+  FuseTensorExprs(g);
+
+  // We should not fuse 0-dim tensors
+  testing::FileCheck().check_not("prim::TensorExprGroup")->run(*g);
+}
+
+void testFuserPass_MergeGroups() {
+  WithCPUFuser cf;
   KernelScope kernel_scope;
   const auto graph_string = R"IR(
     graph(%a : Float(128:1, device=cpu),
@@ -109,8 +145,8 @@ void testFuserPass_4() {
   // The %x and %y computations are completely independent and yet we should put
   // them into a single fusion group rather than having two separate ones.
   testing::FileCheck()
-      .check("tensorexpr::Group_0")
-      ->check_not("tensorexpr::Group_1")
+      .check("= prim::TensorExprGroup_")
+      ->check_not("= prim::TensorExprGroup_")
       ->run(*g);
 }
 

@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <ATen/record_function.h>
+#include <torch/csrc/jit/codegen/fuser/interface.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
@@ -141,85 +142,90 @@ struct nodesComparator {
   }
 };
 
+// TODO: if a value has differently typed uses, temporarrily insert a node
+// specializing the type for each use and later remove, instead of bailing
+bool profiledWithDifferentTypes(Value* v) {
+  std::vector<TypePtr> types;
+  for (const auto& use : v->uses()) {
+    if (use.user->kind() == prim::profile) {
+      types.push_back(use.user->ty(attr::profiled_type));
+    }
+  }
+  for (size_t i = 1; i < types.size(); ++i) {
+    if (types.at(i - 1) != types.at(i)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+void removeProfileNodesAndSpecializeTypes(Block* b) {
+  for (auto it = b->nodes().begin(); it != b->nodes().end(); it++) {
+    if (it->kind() == prim::profile) {
+      GRAPH_DEBUG("Removing prim::profile: %", it->output()->debugName());
+      it->output()->replaceAllUsesWith(it->input());
+      if (!profiledWithDifferentTypes(it->input())) {
+        it->input()->setType(it->ty(attr::profiled_type));
+      } else {
+        GRAPH_DEBUG(
+            "Ignoring value with differently typed profiles :%",
+            it->output()->debugName());
+      }
+      it.destroyCurrent();
+    } else {
+      for (Block* ib : it->blocks()) {
+        removeProfileNodesAndSpecializeTypes(ib);
+      }
+    }
+  }
+}
+
+void RemoveProfileNodesAndSpecializeTypes(std::shared_ptr<Graph>& graph) {
+  removeProfileNodesAndSpecializeTypes(graph->block());
+}
+
+void removeTensorTypeSpecialization(Value* v) {
+  if (!v->type()->cast<TensorType>()) {
+    return;
+  }
+  // Constants & TensorExprGroup will always produce specialized tensor type,
+  // TypeCheck are inserted by this pass and only used by fusion groups that
+  // insert proper guards
+  if (v->node()->kind() == prim::Constant ||
+      v->node()->kind() == prim::TypeCheck ||
+      v->node()->kind() == prim::TensorExprGroup) {
+    return;
+  }
+  v->setType(TensorType::get());
+}
+
+void removeTensorTypeSpecializations(Block* block) {
+  for (Value* v : block->inputs()) {
+    removeTensorTypeSpecialization(v);
+  }
+  for (Node* n : block->nodes()) {
+    for (Block* b : n->blocks()) {
+      removeTensorTypeSpecializations(b);
+    }
+    for (Value* v : n->outputs()) {
+      removeTensorTypeSpecialization(v);
+    }
+  }
+}
+
+void RemoveTensorTypeSpecializations(std::shared_ptr<Graph>& graph) {
+  removeTensorTypeSpecializations(graph->block());
+}
+
 class TensorExprFuser {
  public:
   TensorExprFuser(std::shared_ptr<Graph> graph, size_t min_group_size)
       : graph_(std::move(graph)), min_group_size_(min_group_size) {}
 
-  // TODO: if a value has differently typed uses, temporarrily insert a node
-  // specializing the type for each use and later remove, instead of bailing
-  bool profiledWithDifferentTypes(Value* v) {
-    std::vector<TypePtr> types;
-    for (const auto& use : v->uses()) {
-      if (use.user->kind() == prim::profile) {
-        types.push_back(use.user->ty(attr::profiled_type));
-      }
-    }
-    for (size_t i = 1; i < types.size(); ++i) {
-      if (types.at(i - 1) != types.at(i)) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  void removeProfileNodesAndSpecializeTypes(Block* b) {
-    for (auto it = b->nodes().begin(); it != b->nodes().end(); it++) {
-      if (it->kind() == prim::profile) {
-        GRAPH_DEBUG("Removing prim::profile: %", it->output()->debugName());
-        it->output()->replaceAllUsesWith(it->input());
-        if (!profiledWithDifferentTypes(it->input())) {
-          it->input()->setType(it->ty(attr::profiled_type));
-        } else {
-          GRAPH_DEBUG(
-              "Ignoring value with differently typed profiles :%",
-              it->output()->debugName());
-        }
-        it.destroyCurrent();
-      } else {
-        for (Block* ib : it->blocks()) {
-          removeProfileNodesAndSpecializeTypes(ib);
-        }
-      }
-    }
-  }
-
-  void removeTensorTypeSpecialization(Value* v) {
-    if (!v->type()->cast<TensorType>()) {
-      return;
-    }
-    // Constants & TensorExprGroup will always produce specialized tensor type,
-    // TypeCheck are inserted by this pass and only used by fusion groups that
-    // insert proper guards
-    if (v->node()->kind() == prim::Constant ||
-        v->node()->kind() == prim::TypeCheck ||
-        v->node()->kind() == prim::TensorExprGroup) {
-      return;
-    }
-    v->setType(TensorType::get());
-  }
-
-  void removeTensorTypeSpecializations(Block* block) {
-    for (Value* v : block->inputs()) {
-      removeTensorTypeSpecialization(v);
-    }
-    for (Node* n : block->nodes()) {
-      for (Block* b : n->blocks()) {
-        removeTensorTypeSpecializations(b);
-      }
-      for (Value* v : n->outputs()) {
-        removeTensorTypeSpecialization(v);
-      }
-    }
-  }
-
   void run() {
     aliasDb_ = torch::make_unique<AliasDb>(graph_);
     RemoveRedundantProfiles(graph_);
     GRAPH_DUMP("After removing redundant profile nodes: ", graph_);
-    removeProfileNodesAndSpecializeTypes(graph_->block());
-    GRAPH_DUMP(
-        "After removing profiling nodes and specializing types: ", graph_);
     createFusionGroups(graph_->block());
     GRAPH_DUMP("After creating fusion groups: ", graph_);
     guardFusionGroups(graph_->block());
@@ -489,8 +495,41 @@ class TensorExprFuser {
   bool allShapesAreKnown(Node* node) {
     // TODO: Relax the checks to support dynamic shapes
     for (Value* input : node->inputs()) {
-      if (input->type()->cast<TensorType>() && !input->isCompleteTensor()) {
-        return false;
+      if (input->type()->cast<TensorType>()) {
+        if (!input->isCompleteTensor()) {
+          return false;
+        }
+        if (*input->type()->cast<TensorType>()->dim() == 0) {
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+
+  bool canFuseOnDevice(Value* v) {
+    auto type = v->type()->cast<TensorType>();
+    if (!type) {
+      return true;
+    }
+    auto device = type->device();
+    if (!device) {
+      return false;
+    }
+    if (device->is_cpu()) {
+      return canFuseOnCPU();
+    } else if (device->is_cuda()) {
+      return canFuseOnGPU();
+    }
+    throw std::runtime_error("Unknown device");
+  }
+
+  bool isFusableOnDevice(Node* node) {
+    for (const auto& output : node->outputs()) {
+      if (output->uses().size() > 0) {
+        if (!canFuseOnDevice(output)) {
+          return false;
+        }
       }
     }
     return true;
@@ -530,7 +569,7 @@ class TensorExprFuser {
     // Symbolic checks
     REQ(canHandle(producer) || producer->kind() == prim::TensorExprGroup);
     TORCH_INTERNAL_ASSERT(
-        canHandle(consumer) || consumer->kind() == prim::TensorExprGroup);
+        consumer->kind() == prim::TensorExprGroup || canHandle(consumer));
 
     // Alias checks
     REQ(aliasDb_->couldMoveBeforeTopologically(producer, consumer));
@@ -560,10 +599,20 @@ class TensorExprFuser {
       REQ(producer->input(0)->node()->kind() == prim::ListConstruct);
       REQ(producer->input(0)->uses().size() == 1);
       REQ(producer->input(1)->node()->kind() == prim::Constant);
+      auto const& listConstruct = producer->input(0)->node();
+      for (auto const& input : listConstruct->inputs()) {
+        REQ(isFusableOnDevice(input->node()));
+      }
     } else if (consumer->kind() == aten::cat) {
       REQ(consumer->input(0)->node()->kind() == prim::ListConstruct);
       REQ(consumer->input(0)->uses().size() == 1);
       REQ(consumer->input(1)->node()->kind() == prim::Constant);
+      auto const& listConstruct = consumer->input(0)->node();
+      for (auto const& input : listConstruct->inputs()) {
+        REQ(isFusableOnDevice(input->node()));
+      }
+    } else {
+      REQ(isFusableOnDevice(producer));
     }
 
     return true;
