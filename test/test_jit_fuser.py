@@ -955,5 +955,6 @@ class TestFuser(JitTestCase):
             num_grads = 1 if i > 0 else 0
             self.assertEqual(len([n for n in backward.nodes() if n.kind() == 'aten::_grad_sum_to_size']), num_grads)
 
+
 if __name__ == '__main__':
     run_tests()
