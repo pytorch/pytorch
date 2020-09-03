@@ -76,7 +76,6 @@ at::Tensor _sparse_addmm_sparse_backward(const at::Tensor& grad, const at::Tenso
 at::Tensor renorm_backward(const at::Tensor & grad, const at::Tensor & self, at::Scalar p, int64_t dim, at::Scalar maxnorm);
 at::Tensor sum_tensorlist(at::TensorList tl);
 at::Tensor repeat_backward(at::Tensor grad, int64_t input_dims, at::IntArrayRef repeats);
-at::Tensor view_as_complex_backward(Tensor grad);
 at::Tensor _fused_dropout_backward(at::Tensor grad, at::Tensor mask, double p1m);
 at::Tensor evenly_distribute_backward(at::Tensor grad, const at::Tensor & input, const at::Tensor & value);
 at::Tensor index_select_backward(at::Tensor grad, int64_t dim, at::Tensor indices, at::IntArrayRef sizes, bool keepdim);

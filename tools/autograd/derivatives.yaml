@@ -337,7 +337,7 @@
   abs: not_implemented("polar abs")
   angle: not_implemented("polar angle")
 
-- name: conj(Tensor self) -> Tensor
+- name: _conj(Tensor self) -> Tensor
   self: grad.conj()
 
 - name: cos(Tensor self) -> Tensor
@@ -1113,7 +1113,7 @@
   self: at::view_as_complex(grad.contiguous()) # gx0 + 1j * gx1
 
 - name: view_as_complex(Tensor(a) self) -> Tensor(a)
-  self: view_as_complex_backward(grad) # [gx, 0]
+  self: at::view_as_real(grad.contiguous()) # [gx, gy]
 
 - name: _s_where(Tensor condition, Tensor self, Tensor other) -> Tensor
   condition: non_differentiable

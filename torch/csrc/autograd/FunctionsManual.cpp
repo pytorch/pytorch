@@ -721,12 +721,6 @@ Tensor repeat_backward(Tensor grad, int64_t input_dims, IntArrayRef repeats) {
   return grad;
 }
 
-Tensor view_as_complex_backward(Tensor grad) {
-  auto grad_real = at::real(grad);
-  auto result = at::complex(grad_real, at::zeros_like(grad_real));
-  return at::view_as_real(result);
-}
-
 // p1m == 1 - p
 Tensor _fused_dropout_backward(Tensor grad, Tensor mask, double p1m) {
   if (grad.requires_grad()) {
