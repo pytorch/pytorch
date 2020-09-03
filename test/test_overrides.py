@@ -774,6 +774,10 @@ class TestGradCheckOverride(TestCase):
         total_used_attrs = a.used_attrs.union(b.used_attrs)
         total_used_calls = a.used_calls.union(b.used_calls)
 
+        # These attributes (and the functions below) may change
+        # if the gradcheck implementation changes. It's best to
+        # aim for attributes that may be commonly present on other
+        # Tensor-likes.
         self.assertEqual(total_used_attrs, {
             'data',
             'dtype',
