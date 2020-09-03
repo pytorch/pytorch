@@ -1357,6 +1357,8 @@ std::tuple<Tensor,Tensor> eig_cuda(const Tensor & self, bool eigenvectors) {
   // copy self to pinned CPU memory
   auto self_working_copy = at::empty(self.sizes(),
                                      at::TensorOptions(at::kCPU).dtype(self.dtype()).pinned_memory(true));
+
+  self_working_copy.transpose_(0, 1); // make it column-ordered, what magmaEig wants
   self_working_copy.copy_(self);
 
   // tensor holding the result
