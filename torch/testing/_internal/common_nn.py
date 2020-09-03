@@ -2115,6 +2115,14 @@ new_module_tests = [
         check_with_long_tensor=True,
     ),
     dict(
+        fullname='Conv3d_groups_40999',
+        constructor=lambda: nn.Conv3d(2, 4, kernel_size=3, groups=2),
+        cpp_constructor_args='torch::nn::Conv3dOptions(2, 4, 3).groups(2)',
+        input_size=(1, 2, 3, 3, 3),
+        cudnn=True,
+        check_with_long_tensor=True,
+    ),
+    dict(
         fullname='Conv3d_dilated',
         constructor=lambda: nn.Conv3d(3, 4, kernel_size=2, dilation=2),
         cpp_constructor_args='torch::nn::Conv3dOptions(3, 4, 2).dilation(2)',
