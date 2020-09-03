@@ -103,3 +103,13 @@ class TestProfiler(JitTestCase):
         g = torch.jit.last_executed_optimized_graph()
         self.assertEqual(len(list(g.findAllNodes("prim::TypeCheck"))), 2)
         FileCheck().check("TensorExpr").check("aten::add_").check("TensorExpr").run(g)
+
+    def test_not_fusing_scalar_ops(self):
+        @torch.jit.script
+        def foo(x: int, y: int):
+            return x + y + 2 + 4 + 5 + 6
+
+        foo(1, 2)
+        foo(2, 3)
+        g = torch.jit.last_executed_optimized_graph()
+        FileCheck().check_not("TensorExpr").run(g)
