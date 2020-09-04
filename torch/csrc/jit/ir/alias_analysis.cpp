@@ -476,6 +476,7 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::CudaFusionGroup:
     case prim::FunctionalGraph:
     case prim::DifferentiableGraph:
+    case prim::FallbackGraph:
       return analyzeSubgraph(node);
     case prim::fork:
       return analyzeFork(node);
@@ -485,6 +486,8 @@ void AliasDb::analyzeImpl(Node* node) {
       return analyzeRpcAsync(node);
     case prim::GradOf:
       return analyzeGradOf(node);
+    // TODO: think more about TensorExpr alias correctness
+    case prim::TensorExprGroup:
     case prim::Constant:
     case prim::AutogradZero:
     case prim::AutogradAdd:
@@ -507,9 +510,12 @@ void AliasDb::analyzeImpl(Node* node) {
     case prim::ListUnpack:
     case prim::PythonOp:
     case prim::GetAttr:
-      if (isFrozen_ && node->kind() == prim::GetAttr &&
-          node->input()->type()->expect<ClassType>()->is_module())
-        return analyzeCreator(node);
+      if (isFrozen_ && node->kind() == prim::GetAttr) {
+        auto& ty = node->input()->type();
+        if (ty->expect<ClassType>()->is_module()) {
+          return analyzeCreator(node);
+        }
+      }
       return analyzeExtractor(node);
     case prim::unchecked_cast:
       return makePointerTo(node->output(), node->input());
@@ -519,11 +525,17 @@ void AliasDb::analyzeImpl(Node* node) {
       return analyzeBroadcastingChunk(node);
     case prim::SetAttr:
       return analyzeSetAttr(node);
+    case prim::profile_optional:
     case prim::profile:
-      if (node->inputs().size() > 0) {
-        makePointerTo(node->output(), node->inputs().at(0));
+      makePointerTo(node->output(), node->inputs().at(0));
+      return;
+    case prim::TypeCheck: {
+      auto num_inputs = node->inputs().size();
+      for (size_t i = 0; i < num_inputs; i++) {
+        makePointerTo(node->outputs().at(i), node->inputs().at(i));
       }
       return;
+    }
     case prim::BailOut:
       TORCH_INTERNAL_ASSERT(
           node->inputs().at(0)->node()->kind() == prim::BailoutTemplate);

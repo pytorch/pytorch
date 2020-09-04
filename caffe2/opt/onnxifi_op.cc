@@ -46,6 +46,9 @@ void setInputTensorDescriptorTypeAndBuffer(
   if (cpu_tensor.template IsType<uint8_t>()) {
     desc->dataType = ONNXIFI_DATATYPE_UINT8;
     desc->buffer = reinterpret_cast<onnxPointer>(cpu_tensor.data<uint8_t>());
+  } else if (cpu_tensor.template IsType<int8_t>()) {
+    desc->dataType = ONNXIFI_DATATYPE_INT8;
+    desc->buffer = reinterpret_cast<onnxPointer>(cpu_tensor.data<int8_t>());
   } else if (cpu_tensor.template IsType<int32_t>()) {
     desc->dataType = ONNXIFI_DATATYPE_INT32;
     desc->buffer = reinterpret_cast<onnxPointer>(cpu_tensor.data<int32_t>());
@@ -143,7 +146,8 @@ void BlobToTensorDescriptor(
        is_external_tensor),
       "Initialization blob ",
       name,
-      " needs to be TensorCPU or Int8TensorCPU or Int8FCDNNLowPPackedWeightBlob Based class");
+      " needs to be TensorCPU or Int8TensorCPU or Int8FCDNNLowPPackedWeightBlob Based class: ",
+      blob->TypeName());
   desc->tag = ONNXIFI_TAG_TENSOR_DESCRIPTOR_V1;
   desc->memoryType = ONNXIFI_MEMORY_TYPE_CPU;
   desc->isOffline = false;
