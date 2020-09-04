@@ -246,8 +246,7 @@ ProcessGroupNCCL::WorkNCCL::~WorkNCCL() {}
 
 bool ProcessGroupNCCL::WorkNCCL::isCompleted() {
   checkAndSetException();
-  bool result = exception() || finishedGPUExecutionInternal();
-  return result;
+  return exception() || finishedGPUExecutionInternal();
 }
 
 bool ProcessGroupNCCL::WorkNCCL::isSuccess() const {
