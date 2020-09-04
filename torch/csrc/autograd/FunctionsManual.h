@@ -55,6 +55,8 @@ at::Tensor reverse_dim(const at::Tensor& t, int64_t dim);
 at::Tensor prod_safe_zeros_backward(const at::Tensor &grad, const at::Tensor& inp, int64_t dim);
 at::Tensor prod_backward(const at::Tensor& grad, const at::Tensor& input, const at::Tensor& result);
 at::Tensor prod_backward(at::Tensor grad, const at::Tensor& input, at::Tensor result, int64_t dim, bool keepdim);
+at::Tensor nanprod_backward(const at::Tensor& grad, const at::Tensor& input, const at::Tensor& result);
+at::Tensor nanprod_backward(at::Tensor grad, const at::Tensor& input, at::Tensor result, int64_t dim, bool keepdim);
 at::Tensor sum_scan_exclusive(const at::Tensor& x, int64_t dim);
 at::Tensor cumprod_backward(const at::Tensor &grad, const at::Tensor &input, int64_t dim);
 at::Tensor cumprod_backward(const at::Tensor &grad, const at::Tensor &input, int64_t dim, optional<ScalarType> dtype);
