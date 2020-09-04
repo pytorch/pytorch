@@ -169,11 +169,15 @@ void unpackQuantizedWeightsHelper(
     constexpr int64_t padding_idx = 3;
     constexpr int64_t dilation_idx = 4;
     constexpr int64_t groups_idx = 5;
-    c10::optional<torch::List<int64_t>> stride, padding, dilation;
+    c10::optional<torch::List<int64_t>> stride, padding, dilation,
+                                        output_padding;
     c10::optional<int64_t> groups;
+    c10::optional<int64_t> transpose;
 
-    torch::List<int64_t> stride_int, padding_int, dilation_int;
+    torch::List<int64_t> stride_int, padding_int, dilation_int,
+                         output_padding_int;
     int64_t groups_int;
+    int64_t transpose_int;
 
     if (itr->second.isTuple()) {
       // Pre-unpacked weights. Comes from Conv/Linear weights which are
@@ -205,14 +209,14 @@ void unpackQuantizedWeightsHelper(
           dilation_int.emplace_back(conv_params_packed[idx].item<int64_t>());
           idx++;
         }
-        // output_padding is not implemented yet, so we skip the entries
         for (int i = 0; i < kSpatialDim; ++i) {
-          // do nothing
+          output_padding_int.emplace_back(
+            conv_params_packed[idx].item<int64_t>());
           idx++;
         }
         groups_int = conv_params_packed[idx].item<int64_t>();
         idx++;
-        // skip transpose
+        transpose_int = conv_params_packed[idx].item<int64_t>();
         idx++;
         TORCH_INTERNAL_ASSERT(
             idx == conv_params_packed.numel(),
@@ -228,7 +232,7 @@ void unpackQuantizedWeightsHelper(
         padding = padding_int;
         dilation = dilation_int;
         groups = groups_int;
-
+        transpose = transpose_int;
       } else { // Legacy
         unpacked_weight = ser_tup->elements()[0].toTensor();
         bias = ser_tup->elements()[1].toOptional<at::Tensor>();

@@ -1292,12 +1292,7 @@ Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
     if (!l.hasLoopBodyFor(p.second) || hasReduction) {
       continue;
     }
-    Stmt* loop = l.getLoopBodyFor(p.second);
-    if (torch::jit::tensorexpr::HasRand(loop).has_rand()) {
-      l.computeInlineWithRandom(loop);
-    } else {
-      l.computeInline(loop);
-    }
+    l.computeInline(p.second->buf());
   }
   if (backendType == kCudaCodeGen) {
     for (size_t i = 0; i < flatTensorOutputs_.size(); i++) {
@@ -1305,7 +1300,7 @@ Stmt* TensorExprKernel::generateStmt(BackendType backendType) {
 
       // For every output tensor we've created a flattened 1D tensor - let's
       // mark the original output tensor with computeInline
-      l.computeInline(l.getLoopBodyFor(tensorOutputs_[i]));
+      l.computeInline(tensorOutputs_[i]->buf());
 
       int loopLevels = getTECudaPointwiseLoopLevels();
       const int kDefaultLoopLevels = 2;
