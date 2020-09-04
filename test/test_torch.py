@@ -13363,6 +13363,8 @@ class TestTorchDeviceType(TestCase):
             ("erfinv", doubles, True, True, 'cuda'),
             ("exp", doubles, True, True, 'cpu'),
             ("exp", doubles, True, True, 'cuda'),
+            ("exp2", doubles, True, True, 'cpu'),
+            ("exp2", doubles, True, True, 'cuda'),
             ("expm1", doubles, True, True, 'cpu'),
             ("expm1", doubles, True, True, 'cuda'),
             ("floor", doubles, True, True, 'cpu'),
@@ -16524,6 +16526,24 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         a = torch.exp(torch.ones(2 ** 31, dtype=dtype, device=device))
         b = torch.exp(torch.ones(1, dtype=dtype, device=device))
         self.assertEqual(a, b.expand(2 ** 31))
+
+    def _unary_op_vs_numpy_template(self, torch_fn, np_fn, device, dtype, with_extremal):
+        for ndim in range(0, 5):
+            shape = self._rand_shape(ndim, min_size=5, max_size=10)
+            x = self._generate_input(shape, dtype, device, with_extremal=with_extremal)
+            self.compare_with_numpy(torch_fn, np_fn, x)
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    @dtypes(torch.half, torch.float, torch.double)
+    def test_exp2_vs_numpy(self, device, dtype):
+        self._unary_op_vs_numpy_template(torch.exp2, np.exp2, device, dtype, False)
+        self._unary_op_vs_numpy_template(torch.exp2, np.exp2, device, dtype, True)
+
+    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_complex_dtypes()))
+    def test_exp2_invalid_dtypes(self, device, dtype):
+        x = torch.ones((2, ), device=device, dtype=dtype)
+        with self.assertRaisesRegex(RuntimeError, "not implemented for"):
+            torch.exp2(x)
 
     @dtypes(torch.float, torch.double)
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
