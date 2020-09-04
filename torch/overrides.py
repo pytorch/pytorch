@@ -339,6 +339,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.erfc: lambda input, out=None: -1,
         torch.erfinv: lambda input, out=None: -1,
         torch.exp: lambda input, out=None: -1,
+        torch.exp2: lambda input, out=None: -1,
         torch.expm1: lambda input, out=None: -1,
         torch.fake_quantize_per_channel_affine: lambda input, scale, zero_point, axis, quant_min, quant_max: -1,
         torch.fake_quantize_per_tensor_affine: lambda input, scale, zero_point, quant_min, quant_max: -1,
