@@ -139,7 +139,10 @@ class _StorageBase(object):
 
 
 def _load_from_bytes(b):
-    return torch.load(io.BytesIO(b))
+    try:
+        return torch.load(io.BytesIO(b))
+    except RuntimeError:
+        return torch.load(io.BytesIO(b), map_location=torch.device('cpu'))
 
 
 _StorageBase.type = _type
