@@ -3,13 +3,6 @@ from cimodel.lib.conf_tree import ConfigNode, X, XImportant
 
 CONFIG_TREE_DATA = [
     ("xenial", [
-        ("rocm", [
-            ("3.5.1", [
-                ("3.6", [
-                    ('build_only', [XImportant(True)]),
-                ]),
-            ]),
-        ]),
         ("gcc", [
             ("5.4", [  # All this subtree rebases to master and then build
                 ("3.6", [
@@ -75,6 +68,13 @@ CONFIG_TREE_DATA = [
             ("9", [
                 ("3.8", [
                     ("coverage", [XImportant(True)]),
+                ]),
+            ]),
+        ]),
+        ("rocm", [
+            ("3.7", [
+                ("3.6", [
+                    ('build_only', [XImportant(True)]),
                 ]),
             ]),
         ]),

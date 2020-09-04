@@ -23,7 +23,7 @@ from ._utils_internal import get_file_path, prepare_multiprocessing_environment,
 from .version import __version__
 from ._six import string_classes as _string_classes
 
-from typing import Set, Type
+from typing import Set, Type, TYPE_CHECKING
 
 __all__ = [
     'typename', 'is_tensor', 'is_storage', 'set_default_tensor_type',
@@ -91,7 +91,7 @@ if sys.platform == 'win32':
             res = kernel32.AddDllDirectory(dll_path)
             if res is None:
                 err = ctypes.WinError(ctypes.get_last_error())
-                err.strerror += ' Error adding "{}" to the DLL directories.'.format(dll_path)
+                err.strerror += f' Error adding "{dll_path}" to the DLL directories.'
                 raise err
 
     try:
@@ -112,7 +112,7 @@ if sys.platform == 'win32':
             last_error = ctypes.get_last_error()
             if res is None and last_error != 126:
                 err = ctypes.WinError(last_error)
-                err.strerror += ' Error loading "{}" or one of its dependencies.'.format(dll)
+                err.strerror += f' Error loading "{dll}" or one of its dependencies.'
                 raise err
             elif res is not None:
                 is_loaded = True
@@ -123,7 +123,7 @@ if sys.platform == 'win32':
             res = kernel32.LoadLibraryW(dll)
             if res is None:
                 err = ctypes.WinError(ctypes.get_last_error())
-                err.strerror += ' Error loading "{}" or one of its dependencies.'.format(dll)
+                err.strerror += f' Error loading "{dll}" or one of its dependencies.'
                 raise err
 
     kernel32.SetErrorMode(prev_error_mode)
@@ -190,7 +190,7 @@ else:
 
 # Appease the type checker; ordinarily this binding is inserted by the
 # torch._C module initialization code in C
-if False:
+if TYPE_CHECKING:
     import torch._C as _C
 
 __all__ += [name for name in dir(_C)
@@ -476,8 +476,11 @@ del manager_path
 # Note that we will see "too many" functions when reexporting this way; there
 # is not a good way to fix this problem.  Perhaps, try to redesign VariableFunctions
 # so that this import is good enough
-if False:
-    from torch._C._VariableFunctions import *
+if TYPE_CHECKING:
+    # Some type signatures pulled in from _VariableFunctions here clash with 
+    # signatures already imported. For now these clashes are ignored; see
+    # PR #43339 for details.  
+    from torch._C._VariableFunctions import *  # type: ignore
 
 for name in dir(_C._VariableFunctions):
     if name.startswith('__'):

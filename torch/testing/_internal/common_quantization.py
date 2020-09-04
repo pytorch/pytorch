@@ -19,7 +19,7 @@ from torch.quantization import QuantWrapper, QuantStub, DeQuantStub, \
     propagate_qconfig_, convert, get_default_qconfig, quantize_dynamic_jit, quantize_jit
 from torch.quantization.default_mappings import (
     DEFAULT_DYNAMIC_MODULE_MAPPING,
-    DEFAULT_QCONFIG_PROPAGATE_WHITE_LIST,
+    DEFAULT_QCONFIG_PROPAGATE_ALLOWED_LIST,
     DEFAULT_QAT_MODULE_MAPPING,
 )
 # symbolic trace
@@ -348,7 +348,7 @@ class QuantizationTestCase(TestCase):
             have observers in preperation for quantization
         """
         if propagate_qconfig_list is None:
-            propagate_qconfig_list = DEFAULT_QCONFIG_PROPAGATE_WHITE_LIST
+            propagate_qconfig_list = DEFAULT_QCONFIG_PROPAGATE_ALLOWED_LIST
         if hasattr(module, 'qconfig') and module.qconfig is not None and \
            len(module._modules) == 0 and not isinstance(module, torch.nn.Sequential) \
            and type(module) in propagate_qconfig_list:
