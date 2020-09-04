@@ -8,6 +8,8 @@
 
 #include <c10/util/Logging.h>
 #include <c10/util/string_utils.h>
+
+#include <torch/csrc/jit/tensorexpr/analysis.h>
 #include <torch/csrc/jit/tensorexpr/bounds_inference.h>
 #include <torch/csrc/jit/tensorexpr/eval.h>
 #include <torch/csrc/jit/tensorexpr/expr.h>
@@ -361,255 +363,6 @@ class Flattener : public IRMutator {
   }
 };
 
-class FunctionInliner : public IRMutator {
- public:
-  FunctionInliner(const std::vector<Function*>& funcs) : funcs_(funcs) {
-    for (Function* func : funcs) {
-      // TODO: Support multiple-output functions
-      if (func->func_vars().size() != 1) {
-        throw unimplemented_lowering();
-      }
-      func_var_set_.insert(func->func_var(0)->base_handle());
-    }
-  }
-
- protected:
-  bool should_inline(Function* func) const {
-    return func_var_set_.count(func->func_var(0)->base_handle()) > 0;
-  }
-
-  // For the target function, insert the caller/callee pair into the replacement
-  // mapping.
-  const Expr* mutate(const FunctionCall* v) override {
-    Function* func = v->tensor()->function();
-    const Buf* buf = v->tensor()->buf();
-    // TODO: Support multiple-output functions
-    if (func->func_vars().size() != 1) {
-      throw unimplemented_lowering();
-    }
-
-    if (should_inline(func)) {
-      // Insert the caller/callee pair into the mapping.
-      for (size_t i = 0; i < buf->ndim(); i++) {
-        const Var* func_callee_arg = dynamic_cast<const Var*>(func->arg(i));
-        const Expr* func_caller_param = v->param(i);
-        auto iter = inline_mapping_.find(func_callee_arg);
-        if (iter != inline_mapping_.end()) {
-          throw std::runtime_error(
-              "Duplicated variables: " + func_callee_arg->name_hint());
-        }
-        inline_mapping_[func_callee_arg] = func_caller_param;
-      }
-
-      // Call the actual replacement.
-      const Expr* body = func->body(v->tensor()->output_index());
-      const Expr* result = body->accept_mutator(this);
-
-      // Remove the caller/callee relationship.
-      for (size_t i = 0; i < buf->ndim(); i++) {
-        const Var* func_callee_arg = dynamic_cast<const Var*>(func->arg(i));
-        auto iter = inline_mapping_.find(func_callee_arg);
-        if (iter == inline_mapping_.end()) {
-          throw std::runtime_error(
-              "Var already removed: " + func_callee_arg->name_hint());
-        }
-        inline_mapping_.erase(iter);
-      }
-      return result;
-    } else {
-      return IRMutator::mutate(v);
-    }
-  }
-
-  // Replace the target variable with the caller expressions.
-  const Expr* mutate(const Var* v) override {
-    auto iter = inline_mapping_.find(v);
-    if (iter == inline_mapping_.end()) {
-      return IRMutator::mutate(v);
-    } else {
-      const Expr* expr = iter->second;
-      // Continue to transform the value from the lookup table.
-      return expr->accept_mutator(this);
-    }
-  }
-
-  // Remove the buffer write the inlined function.
-  Stmt* mutate(const Store* v) override {
-    if (func_var_set_.count(v->base_handle()) > 0) {
-      return nullptr;
-    } else {
-      return IRMutator::mutate(v);
-    }
-  }
-
- private:
-  std::unordered_map<const Var*, const Expr*> inline_mapping_;
-  std::vector<Function*> funcs_;
-  std::unordered_set<const Var*> func_var_set_;
-};
-
-// Inlining for functions containing rand().  Since rand() is stateful we can't
-// simply inline it everywhere, or else we may generate new randoms where we
-// should us a previously generated one.  As a contrived example:
-//   %1 = rand()
-//   %2 = %1 + 1
-//   %3 = %1 - 1
-//   %4 = %2 - %3
-// Fully inlining this expr would, incorrectly, yield:
-//   %4 = (rand() + 1) - (rand() - 1)
-// when in fact the two uses of %1 should cancel.  To avoid this issue, we
-// instead generate:
-//   %4 = (let x = rand(); (x + 1) - (x - 1))
-//
-// The overall approach is to replace every rand() intrinsic with a newly
-// generated variable, and then bind those variables to rand() calls in the
-// body of the innermost control structure.
-class RandomInliner : public FunctionInliner {
- public:
-  explicit RandomInliner(const std::vector<Function*>& funcs)
-      : FunctionInliner(funcs) {}
-
-  using FunctionInliner::mutate;
-
-  // Bind random vars in the true and false branches of a conditional.
-  Stmt* mutate(const Cond* v) override {
-    const Expr* cond = v->condition();
-    Stmt* true_stmt = v->true_stmt();
-    Stmt* false_stmt = v->false_stmt();
-
-    const Expr* cond_new = cond->accept_mutator(this);
-    Stmt* true_new = true_stmt ? true_stmt->accept_mutator(this) : true_stmt;
-    true_new = bind_random_vars(true_new);
-    Stmt* false_new =
-        false_stmt ? false_stmt->accept_mutator(this) : false_stmt;
-    false_new = bind_random_vars(false_new);
-
-    if (cond_new == cond && true_new == true_stmt && false_new == false_stmt) {
-      return const_cast<Cond*>(v); // NOLINT
-    }
-    return new Cond(cond_new, true_new, false_new);
-  }
-
-  // Bind random vars in the innermost loop where they are used.
-  Stmt* mutate(const For* v) override {
-    const Var* var = v->var();
-    const Expr* start = v->start();
-    const Expr* stop = v->stop();
-    Stmt* body = v->body();
-    LoopOptions loop_options = v->loop_options();
-
-    Stmt* orig_body = Stmt::clone(body);
-    Stmt* new_body = orig_body->accept_mutator(this);
-    new_body = bind_random_vars(new_body);
-    if (new_body == orig_body) {
-      return const_cast<For*>(v); // NOLINT
-    }
-    if (new_body == nullptr) {
-      return nullptr;
-    }
-    return new For(var, start, stop, new_body, loop_options);
-  }
-
-  // Inline calls containing rand().  Create a new random variable for each
-  // call being inlined, and remember which function is currently being inlined
-  // so we can look up the right variable to replace it with.
-  const Expr* mutate(const FunctionCall* v) override {
-    if (!should_inline(v->tensor()->function())) {
-      return v;
-    }
-    Function* prev_func = current_func_;
-    current_func_ = v->tensor()->function();
-
-    // Remember the calling args; if we find another call with different args,
-    // bail out because this case is too complicated.
-    auto it = call_args_.find(current_func_);
-    if (it == call_args_.end()) {
-      call_args_.emplace(current_func_, std::cref(v->params()));
-    } else {
-      if (v->params() != it->second.get()) {
-        throw std::runtime_error("Complex indexing pattern in rand() tensor");
-      }
-    }
-
-    // Assign a new random variable for this function, if needed.
-    if (!random_vars_.count(current_func_)) {
-      const std::string& name = current_func_->func_var(0)->name_hint();
-      random_vars_.emplace(current_func_, new Var(name, v->dtype()));
-    }
-    const Expr* result = FunctionInliner::mutate(v);
-    current_func_ = prev_func;
-    return result;
-  }
-
-  // Replace rand() intrinsics.
-  const Expr* mutate(const Intrinsics* v) override {
-    if (v->op_type() != kRand) {
-      return v;
-    }
-    if (!current_func_) {
-      return v;
-    }
-    auto it = random_vars_.find(current_func_);
-    if (it == random_vars_.end()) {
-      return v;
-    }
-    return it->second;
-  }
-
- private:
-  // Emit let statements for all encountered random vars, thenclear them.
-  Stmt* bind_random_vars(Stmt* s) {
-    if (random_vars_.empty()) {
-      return s;
-    }
-
-    Block* b = dynamic_cast<Block*>(s);
-    if (!b) {
-      b = new Block({s});
-    }
-
-    // Make sure theres something in the block, will be simplified out later.
-    if (b->empty()) {
-      b->append_stmt(new Block({}));
-    }
-
-    Stmt* first = b->stmts().front();
-    for (auto const& p : random_vars_) {
-      Var* v = p.second;
-      b->insert_stmt_before(
-          new Let(v, new Intrinsics(kRand, v->dtype())), first);
-    }
-    random_vars_.clear();
-    return b;
-  }
-
-  // Track the function currently being inlined.
-  Function* current_func_ = nullptr;
-
-  // Map functions being inlined to the generated random variable.
-  std::unordered_map<Function*, Var*> random_vars_;
-
-  // Remember arguments of calls containing rand, and force all calls to have
-  // the same argument list.  We use pointer equality of Exprs, which is
-  // extremely strict but works for simple cases.
-  using ArgVec = std::reference_wrapper<const std::vector<const Expr*>>;
-  std::unordered_map<Function*, ArgVec> call_args_;
-};
-
-static Stmt* InjectInlines(
-    Stmt* stmt,
-    const std::vector<Function*>& inlined_funcs) {
-  FunctionInliner inliner(inlined_funcs);
-  Stmt* stmt_old = stmt;
-  Stmt* stmt_new = stmt_old->accept_mutator(&inliner);
-  return stmt_new;
-}
-
-static Stmt* InlineRandom(Stmt* stmt, const std::vector<Function*>& funcs) {
-  RandomInliner inliner(funcs);
-  return stmt->accept_mutator(&inliner);
-}
-
 class DepTracker : public IRVisitor {
  public:
   std::vector<Tensor*> findUsedTensors(Tensor* tensor) {
@@ -741,13 +494,206 @@ Stmt* LoopNest::lowerToStmt(Tensor* t) {
   return body;
 }
 
+class FunctionInliner : public IRMutator {
+ public:
+  FunctionInliner(Store* producer)
+      : buf_(producer->buf()), producer_(producer) {
+    for (auto* i : producer->indices()) {
+      const Var* index_var = dynamic_cast<const Var*>(i);
+      if (index_var == nullptr) {
+        throw std::logic_error("cannot inline Buf with compound indices");
+      }
+      index_vars_.insert(index_var);
+    }
+  }
+
+ protected:
+  // For the target function, insert the caller/callee pair into the replacement
+  // mapping.
+  const Expr* mutate(const FunctionCall* v) override {
+    Function* func = v->tensor()->function();
+    const Buf* buf = v->tensor()->buf();
+    if (buf != buf_) {
+      return IRMutator::mutate(v);
+    }
+
+    // TODO: Support multiple-output functions
+    if (func->func_vars().size() != 1) {
+      throw unimplemented_lowering();
+    }
+
+    std::vector<const Var*> index_vars;
+    for (size_t i = 0; i < buf->ndim(); i++) {
+      const Var* func_callee_arg = dynamic_cast<const Var*>(func->arg(i));
+      const Expr* func_caller_param = v->param(i);
+      auto iter = inline_mapping_.find(func_callee_arg);
+      if (iter != inline_mapping_.end()) {
+        throw std::runtime_error(
+            "Duplicated variables: " + func_callee_arg->name_hint());
+      }
+      inline_mapping_[func_callee_arg] = func_caller_param;
+      index_vars.push_back(func_callee_arg);
+    }
+
+    // Call the actual replacement.
+    const Expr* body = producer_->value();
+    const Expr* result = body->accept_mutator(this);
+
+    // Remove the caller/callee relationship.
+    for (auto* v : index_vars) {
+      for (auto& pair : random_bindings_) {
+        if (pair.second.erase(v)) {
+          const Expr* inlined = inline_mapping_[v];
+          for (auto* nv : VarFinder::find(inlined)) {
+            pair.second.insert(nv);
+          }
+        }
+      }
+      inline_mapping_.erase(v);
+    }
+    return result;
+  }
+
+  // Replace the target variable with the caller expressions.
+  const Expr* mutate(const Var* v) override {
+    auto iter = inline_mapping_.find(v);
+    if (iter == inline_mapping_.end()) {
+      return v;
+    } else {
+      const Expr* expr = iter->second;
+      // Continue to transform the value from the lookup table.
+      return expr->accept_mutator(this);
+    }
+  }
+
+  // Handle random intrinsics which should be cached.
+  const Expr* mutate(const Intrinsics* v) override {
+    if (!in_producer_ || v->op_type() != kRand) {
+      return IRMutator::mutate(v);
+    }
+
+    const std::string& name = buf_->name_hint();
+    Var* new_var = new Var(name, v->dtype());
+    random_bindings_[new Let(new_var, v)] = index_vars_;
+    return new_var;
+  }
+
+  // Remove the buffer write the inlined function.
+  Stmt* mutate(const Store* v) override {
+    if (v == producer_) {
+      in_producer_ = true;
+      producer_ = dynamic_cast<const Store*>(IRMutator::mutate(v));
+      in_producer_ = false;
+      return nullptr;
+    } else {
+      return IRMutator::mutate(v);
+    }
+  }
+
+  // Any Random Instrinsics that were turned into vars must be inserted here.
+  Stmt* mutate(const Block* v) override {
+    std::vector<Stmt*> stmts;
+    for (Stmt* stmt : *v) {
+      Stmt* stmt_new = stmt->accept_mutator(this);
+      if (!stmt_new) {
+        continue;
+      }
+
+      if (stmt == stmt_new) {
+        stmt_new = Stmt::clone(stmt);
+      }
+
+      stmts.push_back(stmt_new);
+    }
+
+    return Block::make(stmts);
+  }
+
+  Stmt* mutate(const For* v) override {
+    For* res = dynamic_cast<For*>(IRMutator::mutate(v));
+    if (!res) {
+      return nullptr;
+    }
+
+    // Find any random bindings that should be inserted in this loops body.
+    std::vector<Let*> bindings_this_loop;
+    const Var* fv = v->var();
+    for (auto& pair : random_bindings_) {
+      auto& index_var = pair.second;
+      if (index_var.erase(fv)) {
+        bindings_this_loop.push_back(pair.first);
+      }
+    }
+
+    for (auto* l : bindings_this_loop) {
+      res->body()->prepend_stmt(l);
+      random_bindings_.erase(l);
+    }
+    return res;
+  }
+
+ private:
+  const Buf* buf_;
+  const Store* producer_;
+
+  // Index Vars present in the producer.
+  std::unordered_set<const Var*> index_vars_;
+
+  std::unordered_map<const Var*, const Expr*> inline_mapping_;
+
+  // In the producer's scope - we need to bind any calls to rand().
+  bool in_producer_ = false;
+  std::unordered_map<Let*, std::unordered_set<const Var*>> random_bindings_;
+};
+
 void LoopNest::computeInline(Stmt* s) {
-  // TODO: check if `s` is a body of a loop
-  inlined_functions_.insert(stmt_to_tensor_.at(s)->function());
+  auto* s_store = dynamic_cast<Store*>(s);
+  if (s_store == nullptr) {
+    throw std::logic_error("Could not find buffer producer to inline");
+  }
+  computeInline(s_store->buf());
 }
 
-void LoopNest::computeInlineWithRandom(Stmt* s) {
-  inlined_random_functions_.insert(stmt_to_tensor_.at(s)->function());
+void LoopNest::computeInline(const Buf* b) {
+  for (auto* t : output_tensors_) {
+    if (b == t->buf()) {
+      throw std::logic_error("Can't inline producers of output Tensors");
+    }
+  }
+
+  // Find producers.
+  Store* relevant_store{nullptr};
+  auto stores = NodeFinder<Store>::find(root_stmt_);
+  for (auto* s : stores) {
+    if (s->buf() == b) {
+      auto reductions = NodeFinder<ReduceOp>::find(s);
+      if (!reductions.empty()) {
+        throw std::logic_error("cannot inline a reduction computation");
+      }
+      if (relevant_store != nullptr) {
+        throw std::logic_error("cannot inline Buf with multiple Tensors");
+      }
+      relevant_store = s;
+    }
+  }
+
+  FunctionInliner inliner(relevant_store);
+  root_stmt_ = root_stmt_->accept_mutator(&inliner);
+
+  // No longer computing this intermediate tensor, so don't alloc it.
+  for (auto* t : intermediate_tensors_) {
+    if (b == t->buf()) {
+      intermediate_tensors_.erase(t);
+      break;
+    }
+  }
+
+  for (auto it = temp_bufs_.begin(); it != temp_bufs_.end(); ++it) {
+    if (b == *it) {
+      temp_bufs_.erase(it);
+      break;
+    }
+  }
 }
 
 // TODO: Unify with DepTracker
@@ -857,11 +803,6 @@ Stmt* LoopNest::insertAllocFree(Stmt* stmt) {
 
   // TODO: Fix the traversal, currently the order is non-deterministic
   for (Tensor* tensor : intermediate_tensors_) {
-    if (inlined_functions_.count(tensor->function()) ||
-        inlined_random_functions_.count(tensor->function())) {
-      // No need to allocate memory for intermediate tensors.
-      continue;
-    }
     if (output_tensors_.count(tensor) > 0) {
       // No need to allocate memory if the tensors are given as input/output.
       continue;
@@ -889,13 +830,6 @@ Stmt* LoopNest::insertAllocFree(Stmt* stmt) {
 }
 
 void LoopNest::prepareForCodegen() {
-  std::vector<Function*> inlined_functions_vec(
-      inlined_functions_.begin(), inlined_functions_.end());
-  std::vector<Function*> inlined_randoms_vec(
-      inlined_random_functions_.begin(), inlined_random_functions_.end());
-  root_stmt_ = InjectInlines(root_stmt_, inlined_functions_vec);
-  root_stmt_ = InlineRandom(root_stmt_, inlined_randoms_vec);
-
   // Expand reduction ops.
   ReductionExpander reduceExpander;
   root_stmt_ = reduceExpander.expand(root_stmt_);
