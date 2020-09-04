@@ -239,10 +239,10 @@ Works only with Python3.\n A few examples:
             for bench_cls in benchmark_classes:
                 if name in bench_cls.module():
                     match_class_name = True
-                    if (not args.input_iter is None) and bench_cls.input_iterable() :
+                    if (args.input_iter is not None) and bench_cls.input_iterable() :
                         run_with_input_iter(bench_cls, args.input_iter, allow_skip=True)
                     else :
-                        if not args.input_iter is None :
+                        if args.input_iter is not None :
                             print("WARNING: Incompatible benchmark class called with input_iter arg: {}".format(name))
                         run_default_configs(bench_cls, allow_skip=True)
 
