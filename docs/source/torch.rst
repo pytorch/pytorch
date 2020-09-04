@@ -285,6 +285,7 @@ Pointwise Ops
     erfc
     erfinv
     exp
+    exp2
     expm1
     fix
     floor

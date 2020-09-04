@@ -2653,6 +2653,26 @@ Example::
     tensor([ 1.,  2.])
 """.format(**common_args))
 
+add_docstr(torch.exp2,
+           r"""
+exp(input, out=None) -> Tensor
+
+Returns a new tensor with the exponential of the elements
+of the input tensor :attr:`input`.
+
+.. math::
+    y_{i} = 2^{x_{i}}
+""" + r"""
+Args:
+    {input}
+    {out}
+
+Example::
+
+    >>> torch.exp2(torch.tensor([0, math.log2(2.), 3, 4]))
+    tensor([ 1.,  2.,  8., 16.])
+""".format(**common_args))
+
 add_docstr(torch.expm1,
            r"""
 expm1(input, *, out=None) -> Tensor
