@@ -2679,6 +2679,28 @@ def cosine_embedding_loss(input1, input2, target, margin=0, size_average=None,
         reduction_enum = _Reduction.get_enum(reduction)
     return torch.cosine_embedding_loss(input1, input2, target, margin, reduction_enum)
 
+def siamese_loss(input1, input2, label, margin=1.0, size_average=None,reduce=None, reduction=None):
+	# type: (tensor, tensor, tensor, float, Optional[bool], Optional[bool], str)
+
+	r"""siamese_loss(input1, input2, label, margin=1.0, reduction) -> Tensor
+
+	See :class: `~torch.nn.SiameseLoss` for details.
+	""" 
+
+	if not torch.jit.is_scripting():
+		tens_ops = (anchor, input2, label)
+		if any([type(t) is not Tensor for t in tens_ops]) and has_torch_function(tens_ops):
+			return handle_torch_function(
+				siamese_loss, tens_ops, input1, input2, label, margin=margin,size_average=size_average, reduce=reduce, reduction=reduction)
+
+	if size_average is not None or reduce is not None:
+		reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
+	else:
+		reduction_enum = _Reduction.get_enum(reduction)
+
+	return torch.siamese_loss(anchor, input2, label, margin)
+
+
 
 def multi_margin_loss(input, target, p=1, margin=1., weight=None, size_average=None,
                       reduce=None, reduction='mean'):
