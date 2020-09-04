@@ -5070,9 +5070,6 @@ class CriterionTest(InputVariableMixin, TestBase):
         self._do_extra_tests(test_case, module, input, target)
 
     def _do_extra_tests(self, test_case, module, input, target):
-        if not self.check_gradgrad:
-            return
-
         test_case.assertFalse(target.requires_grad)
 
         params = tuple(x for x in module.parameters())
@@ -5090,6 +5087,10 @@ class CriterionTest(InputVariableMixin, TestBase):
         # TODO: we don't pass `target` as part of inputs because we don't
         # currently compute the gradient w.r.t. target for loss functions.
         gradcheck(apply_fn, inputs)
+
+        if not self.check_gradgrad:
+            return
+
         gradgradcheck(apply_fn, inputs)
 
     def test_cuda(self, test_case, dtype=None, extra_args=None):

@@ -191,8 +191,8 @@ class TestFX(JitTestCase):
         a = resnet(ip)
         b = res_graph(ip)
         c = res_script(ip)
-        assert torch.allclose(a, b)
-        assert torch.allclose(a, c)
+        self.assertEqual(a, b)
+        self.assertEqual(a, c)
 
         quantizer = Quantizer(res_graph)
 
@@ -206,7 +206,7 @@ class TestFX(JitTestCase):
         e = qgraph_script(ip)
 
         assert (a - d).abs().max() < 2
-        assert torch.allclose(d, e)
+        self.assertEqual(d, e)
 
     def test_unpack(self):
         class M(torch.nn.Module):
@@ -439,11 +439,10 @@ class TestFX(JitTestCase):
 
         def transform(traced):
             new_graph = copy.deepcopy(traced.graph)
-            delegate = torch.fx.DefaultDelegate(traced.root, new_graph)
-            relu_out = delegate.create_node(
-                kind='call_method', target='neg', args=(new_graph.result,), kwargs={})
+            relu_out = new_graph.create_node(
+                op='call_method', target='neg', args=(new_graph.result,), kwargs={})
             new_graph.output(relu_out)
-            return GraphModule(traced.root, new_graph)
+            return GraphModule(traced, new_graph)
         transformed = transform(traced)
         copied = copy.deepcopy(transformed)
         x = torch.randn(3, 4)
@@ -496,6 +495,23 @@ class TestFX(JitTestCase):
         out = gm(input)
         self.assertEqual(out, ref_out)
 
+    def test_pretty_print(self):
+        st = SimpleTest()
+        traced = symbolic_trace(st)
+        printed = str(traced)
+        assert 'GraphModuleImpl()' in printed
+        assert 'torch.relu' in printed
+
+    def test_pretty_print_graph(self):
+        class KwargPrintTest(torch.nn.Module):
+            def forward(self, x):
+                return torch.squeeze(x + 3.0, dim=2)
+        st = KwargPrintTest()
+        traced = symbolic_trace(st)
+        stringed = str(traced.graph)
+        for s in ['args', 'kwargs', 'uses']:
+            assert s in stringed
+
 
     @skipIfNoTorchVision
     def test_module_qualname(self):
@@ -529,7 +545,7 @@ class TestFX(JitTestCase):
 
 
         def extract_module(mod : torch.fx.GraphModule, target_qualname : str) -> torch.fx.GraphModule:
-            target_module : torch.nn.Module = mod.root
+            target_module : torch.nn.Module = mod
             for atom in target_qualname.split('.'):
                 target_module = getattr(target_module, atom)
 
@@ -604,7 +620,7 @@ class TestFX(JitTestCase):
             #       with a callsite to that new submodule =====
 
             base_graph = torch.fx.Graph()
-            base_delegate = torch.fx.DefaultDelegate(mod.root, base_graph)
+            base_delegate = torch.fx.DefaultDelegate(mod, base_graph)
             base_remap_table = {}
 
             callsite_inserted = False
@@ -629,7 +645,7 @@ class TestFX(JitTestCase):
             # NOT GREAT: deepcopy root so we can mutate it and insert our new
             # submodule
 
-            new_root = copy.deepcopy(mod.root)
+            new_root = copy.deepcopy(mod)
             new_root_target = new_root
             for atom in target_qualname.split('.')[:-1]:
                 new_root_target = getattr(new_root_target, atom)

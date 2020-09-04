@@ -198,6 +198,7 @@ const std::unordered_set<std::string>& TvmTransformer::getSupportedOps() {
       "FC",
       "FCTransposed",
       "Flatten",
+      "Fused8BitRowwiseQuantizedToFloat",
       "Logit",
       "MatMul",
       "Mul",
