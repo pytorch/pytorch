@@ -1,6 +1,6 @@
 import torch
 
-from torch._jit_internal import Tuple, Optional, List  # noqa: F401
+from typing import Tuple, Optional, List
 
 from torch import Tensor, _VF  # noqa: F401
 
@@ -269,7 +269,7 @@ class QuantizedRNNBase(torch.jit.ScriptModule):
         if dtype != torch.int8 and dtype != torch.float16:
             raise RuntimeError('Unsupported dtype: {}'.format(dtype))
 
-        self.all_weights = []
+        self.all_weights = []  # type: ignore
         for layer in range(self.num_layers):
             for direction in range(num_directions):
                 layer_input_size = self.input_size if layer == 0 else self.hidden_size * num_directions
@@ -319,8 +319,7 @@ class QuantizedRNNBase(torch.jit.ScriptModule):
     def get_expected_hidden_size(self, input, batch_sizes):
         # type: (Tensor, Optional[Tensor]) -> Tuple[int, int, int]
         if batch_sizes is not None:
-            mini_batch = batch_sizes[0]
-            mini_batch = int(mini_batch)
+            mini_batch = int(batch_sizes[0])
         else:
             mini_batch = input.size(0) if self.batch_first else input.size(1)
         num_directions = 2 if self.bidirectional else 1
