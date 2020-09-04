@@ -5,6 +5,7 @@
 
 
 
+import sys
 import functools
 import inspect
 import logging
@@ -177,7 +178,10 @@ class RNNCell(object):
             extra_inputs = _RectifyNames(extra_input_names)
             extra_inputs = zip(extra_input_names, extra_input_sizes)
 
-        arg_names = inspect.getargspec(self.apply_override).args
+        if sys.version_info > (3,):
+            arg_names = inspect.getfullargspec(self.apply_override).args
+        else:
+            arg_names = inspect.getargspec(self.apply_override).args
         rectified = [input_t, seq_lengths, states, timestep]
         if 'extra_inputs' in arg_names:
             rectified.append(extra_inputs)

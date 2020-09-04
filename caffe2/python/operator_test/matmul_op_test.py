@@ -3,6 +3,7 @@
 
 
 
+import sys
 import inspect
 
 import numpy as np
@@ -167,7 +168,10 @@ class TestBatchMatMul(serial.SerializedTestCase):
         # relaxing the "threshold" for fp16 to 150x of the default
         def relax_fp16_check(check_func, *args, **kwargs):
             # inspect the default "threshold" value in check_func
-            argspec = inspect.getargspec(check_func)
+            if sys.version_info > (3,):
+                argspec, *rest = inspect.getfullargspec(check_func)
+            else:
+                argspec, _, _, _= inspect.getargspec(check_func)
             threshold = argspec.defaults[
                 argspec.args.index('threshold') -
                 (len(argspec.args) - len(argspec.defaults))]

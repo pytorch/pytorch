@@ -101,7 +101,10 @@ class HelperWrapper(object):
                 "Or you can provide it in kwargs as model=<your_model>.")
                 new_kwargs = copy.deepcopy(model.arg_scope)
             func = self._registry[helper_name]
-            var_names, _, varkw, _= inspect.getargspec(func)
+            if sys.version_info > (3,):
+                var_names, _, varkw, *rest = inspect.getfullargspec(func)
+            else:
+                var_names, _, varkw, _= inspect.getargspec(func)
             if varkw is None:
                 # this helper function does not take in random **kwargs
                 new_kwargs = {
