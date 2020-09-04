@@ -184,17 +184,29 @@ mobile::Module _load_data(
       observer->onExitLoadModel(result.metadata());
     }
     return result;
-  } catch (const std::exception& ex) {
+  } catch (c10::Error& error) {
     if (observer) {
-      observer->onFailLoadModel(
-          "Error occured during loading model: " + (std::string)ex.what());
+      observer->onFailLoadModel(error.what());
     }
-    TORCH_CHECK(false, ex.what());
+    TORCH_RETHROW(error);
   } catch (...) {
-    if (observer) {
-      observer->onFailLoadModel("unknown exception");
+    auto currentException = std::current_exception();
+    try {
+      if (!currentException) {
+        TORCH_CHECK(false, "Unknown exception");
+      } else {
+        try {
+          std::rethrow_exception(currentException);
+        } catch (const std::exception& e) {
+          TORCH_CHECK(false, e.what());
+        }
+      }
+    } catch (c10::Error& error) {
+      if (observer) {
+        observer->onFailLoadModel(error.what());
+      }
+      TORCH_RETHROW(error);
     }
-    TORCH_CHECK(false, "unknown exception");
   }
 }
 

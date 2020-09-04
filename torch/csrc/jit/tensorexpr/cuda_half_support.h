@@ -16,9 +16,12 @@ class CudaHalfChecker : public IRVisitor {
 
   void visit(const Load* v) override {
     hasHalf_ |= v->dtype().scalar_type() == ScalarType::Half;
+    IRVisitor::visit(v);
   }
+
   void visit(const Store* v) override {
     hasHalf_ |= v->value()->dtype().scalar_type() == ScalarType::Half;
+    IRVisitor::visit(v);
   }
 
  private:

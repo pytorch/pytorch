@@ -4560,6 +4560,11 @@ for shape in [(1,), ()]:
         self.assertFalse(out.dtype.is_floating_point)
         self.assertFalse(out.requires_grad)
 
+        bins = torch.linspace(0, 1.0, requires_grad=True)
+        vals = torch.rand(5, 5, requires_grad=True)
+        out = torch.bucketize(vals, bins)
+        self.assertFalse(out.dtype.is_floating_point)
+        self.assertFalse(out.requires_grad)
 
 def index_variable(shape, max_indices):
     if not isinstance(shape, tuple):
