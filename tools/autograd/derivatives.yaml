@@ -478,7 +478,7 @@
   self: grad
 
 - name: gather(Tensor self, int dim, Tensor index, *, bool sparse_grad=False) -> Tensor
-  self: "sparse_grad ? at::_gather_sparse_backward(self, dim, index, grad) : at::zeros(self.sizes(), grad.options()).scatter_add_(dim, index, grad)"
+  self: gather_backward(grad, self, dim, index, sparse_grad)
   index: non_differentiable
 
 - name: ge_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
@@ -566,7 +566,7 @@
   values: grad.index(indices)
 
 - name: index_select(Tensor self, int dim, Tensor index) -> Tensor
-  self: at::zeros(self.sizes(), grad.options()).index_add_(dim, index, grad)
+  self: index_select_backward(grad, self.sizes(), dim, index)
   index: non_differentiable
 
 - name: inverse(Tensor self) -> Tensor
@@ -576,7 +576,7 @@
   self: non_differentiable
 
 - name: kthvalue(Tensor self, int k, int dim=-1, bool keepdim=False) -> (Tensor values, Tensor indices)
-  self: index_select_backward(grad, dim, indices, self.sizes(), keepdim)
+  self: value_selecting_reduction_backward(grad, dim, indices, self.sizes(), keepdim)
 
 - name: le_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   self: zeros_like(self)
@@ -674,7 +674,7 @@
   self: matrix_exp_backward(self, grad)
 
 - name: max.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
-  self: index_select_backward(grad, dim, indices, self.sizes(), keepdim)
+  self: value_selecting_reduction_backward(grad, dim, indices, self.sizes(), keepdim)
 
 - name: max(Tensor self) -> Tensor
   self: evenly_distribute_backward(grad, self, result)
@@ -707,10 +707,10 @@
 # The backward implementation is correct in the sense that it returns the
 # subgradient on one side.
 - name: median.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
-  self: index_select_backward(grad, dim, indices, self.sizes(), keepdim)
+  self: value_selecting_reduction_backward(grad, dim, indices, self.sizes(), keepdim)
 
 - name: min.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
-  self: index_select_backward(grad, dim, indices, self.sizes(), keepdim)
+  self: value_selecting_reduction_backward(grad, dim, indices, self.sizes(), keepdim)
 
 - name: min(Tensor self) -> Tensor
   self: evenly_distribute_backward(grad, self, result)
@@ -730,7 +730,7 @@
   mat2: mm_mat2_backward(grad, self, mat2.sizes(), mat2.strides(), 1)
 
 - name: mode(Tensor self, int dim=-1, bool keepdim=False) -> (Tensor values, Tensor indices)
-  self: index_select_backward(grad, dim, indices, self.sizes(), keepdim)
+  self: value_selecting_reduction_backward(grad, dim, indices, self.sizes(), keepdim)
 
 - name: mul.Tensor(Tensor self, Tensor other) -> Tensor
   self: grad * other
@@ -943,7 +943,7 @@
   A: solve_backward_A(grad, self, A, solution)
 
 - name: sort(Tensor self, int dim=-1, bool descending=False) -> (Tensor values, Tensor indices)
-  self: index_select_backward(grad, dim, indices, self.sizes(), true)
+  self: value_selecting_reduction_backward(grad, dim, indices, self.sizes(), true)
   output_differentiability: [True, False]
 
 - name: split.Tensor(Tensor(a) self, int split_size, int dim=0) -> Tensor(a)[]
@@ -1037,7 +1037,7 @@
   self: tanh_backward(grad, result)
 
 - name: topk(Tensor self, int k, int dim=-1, bool largest=True, bool sorted=True) -> (Tensor values, Tensor indices)
-  self: index_select_backward(grad, dim, indices, self.sizes(), true)
+  self: value_selecting_reduction_backward(grad, dim, indices, self.sizes(), true)
   output_differentiability: [True, False]
 
 - name: trace(Tensor self) -> Tensor
