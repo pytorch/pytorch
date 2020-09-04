@@ -117,7 +117,6 @@ void replaceConvolutionWithAtenConv(std::shared_ptr<Graph>& graph) {
       return false;
     }
     return !calc_value_map["transposed"].toBool() &&
-        !calc_value_map["benchmark"].toBool() &&
         !calc_value_map["deterministic"].toBool() &&
         calc_value_map["cudnn_enabled"].toBool() &&
         (calc_value_map["output_padding"].toIntList()[0] == 0);
@@ -132,7 +131,6 @@ void replaceConvolutionWithAtenConv(std::shared_ptr<Graph>& graph) {
       return false;
     }
     return !calc_value_map["transposed"].toBool() &&
-        !calc_value_map["benchmark"].toBool() &&
         !calc_value_map["deterministic"].toBool() &&
         calc_value_map["cudnn_enabled"].toBool() &&
         (calc_value_map["output_padding"].toIntList()[0] == 0) &&
@@ -150,7 +148,6 @@ void replaceConvolutionWithAtenConv(std::shared_ptr<Graph>& graph) {
         }
 
         return calc_value_map["transposed"].toBool() &&
-            !calc_value_map["benchmark"].toBool() &&
             !calc_value_map["deterministic"].toBool() &&
             calc_value_map["cudnn_enabled"].toBool();
       };
@@ -164,7 +161,6 @@ void replaceConvolutionWithAtenConv(std::shared_ptr<Graph>& graph) {
       return false;
     }
     return !calc_value_map["transposed"].toBool() &&
-        !calc_value_map["benchmark"].toBool() &&
         !calc_value_map["deterministic"].toBool() &&
         calc_value_map["cudnn_enabled"].toBool() &&
         (calc_value_map["output_padding"].toIntList()[0] == 0) &&
