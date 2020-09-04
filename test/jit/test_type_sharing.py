@@ -501,3 +501,23 @@ class TestTypeSharing(JitTestCase):
         c = Foo({'bar': A()})
         self.assertDifferentType(a, b)
         self.assertSameType(b, c)
+
+    def test_type_sharing_define_in_init(self):
+        """
+        Tests that types between instances of a ScriptModule
+        subclass that defines methods in its __init__ are not
+        shared.
+        """
+        class A(torch.jit.ScriptModule):
+            def __init__(self, val):
+                super().__init__()
+                self.define(f"""
+                def forward(self) -> int:
+                    return {val}
+                """)
+
+        one = A(1)
+        two = A(2)
+
+        self.assertEquals(one(), 1)
+        self.assertEquals(two(), 2)
