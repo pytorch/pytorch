@@ -31,64 +31,6 @@ Method Module::get_method(const std::string& name) const {
   AT_ERROR("Method '", name, "' is not defined.");
 }
 
-c10::IValue Module::run_method(const std::string& method_name, Stack stack) {
-  auto observer = torch::observerConfig().getModuleObserver();
-  auto module_metadata = metadata();
-  if (observer) {
-    observer->onEnterRunMethod(module_metadata, method_name);
-  }
-
-  auto debug_info = std::make_shared<MobileDebugInfo>();
-  if (module_metadata.find("model_name") != module_metadata.end()) {
-    debug_info->setModelName(module_metadata.at("model_name"));
-  } else {
-    debug_info->setModelName(name());
-  }
-  debug_info->setMethodName(method_name);
-  at::DebugInfoGuard guard(at::DebugInfoKind::MOBILE_RUNTIME_INFO, debug_info);
-
-  auto m = find_method(method_name);
-  if (m == c10::nullopt) {
-    if (observer) {
-      std::string cancellation_reason =
-          "Method '" + method_name + "' is not defined";
-      observer->onCancelRunMethod(cancellation_reason);
-    }
-    AT_ERROR("Method '", method_name, "' is not defined.");
-  }
-  try {
-    m->run(stack);
-    c10::IValue result = stack.front();
-    if (observer) {
-      observer->onExitRunMethod();
-    }
-    return result;
-  } catch (c10::Error& error) {
-    if (observer) {
-      observer->onFailRunMethod(error.what());
-    }
-    TORCH_RETHROW(error);
-  } catch (...) {
-    auto currentException = std::current_exception();
-    try {
-      if (!currentException) {
-        TORCH_CHECK(false, "Unknown exception");
-      } else {
-        try {
-          std::rethrow_exception(currentException);
-        } catch (const std::exception& e) {
-          TORCH_CHECK(false, e.what());
-        }
-      }
-    } catch (c10::Error& error) {
-      if (observer) {
-        observer->onFailRunMethod(error.what());
-      }
-      TORCH_RETHROW(error);
-    }
-  }
-}
-
 c10::optional<Method> Module::find_method(const std::string& basename) const {
   for (auto& fn : cu_->methods()) {
     if (fn->name() == basename) {
