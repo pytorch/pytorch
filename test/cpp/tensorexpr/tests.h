@@ -386,7 +386,8 @@ namespace jit {
   _(CudaLocalMemReduce_1)                  \
   _(CudaTestRand01)                        \
   _(CudaSigmoid)                           \
-  _(CudaHalfCast)
+  _(CudaHalfCast)                          \
+  _(CudaHalfSupport)
 
 #define DECLARE_TENSOREXPR_TEST(name) void test##name();
 TH_FORALL_TENSOREXPR_TESTS(DECLARE_TENSOREXPR_TEST)
