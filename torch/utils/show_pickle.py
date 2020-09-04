@@ -4,7 +4,7 @@ import pickle
 import pprint
 import zipfile
 import fnmatch
-from typing import IO, BinaryIO, Union, Dict
+from typing import IO, BinaryIO, Union
 
 
 class FakeObject(object):

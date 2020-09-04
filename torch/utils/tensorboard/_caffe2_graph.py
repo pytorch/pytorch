@@ -17,7 +17,7 @@ from builtins import bytes
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core, workspace
 
-from typing import Set, Dict, Sequence, Tuple, List
+from typing import Set, Dict, Tuple, List
 
 
 def _make_unique_name(seen: Set[str], name: str, min_version: int = 0):
