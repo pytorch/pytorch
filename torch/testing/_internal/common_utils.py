@@ -1412,7 +1412,10 @@ def retry(ExceptionToCheck, tries=3, delay=3, skip_after_retries=False):
             try:
                 return f(*args, **kwargs)
             except ExceptionToCheck as e:
-                raise unittest.SkipTest(f"Skipping after {tries} consecutive {str(e)}") from e if skip_after_retries else e
+                if skip_after_retries:
+                    raise unittest.SkipTest(f"Skipping after {tries} consecutive {str(e)}") from e
+                else:
+                    raise e
         return f_retry  # true decorator
     return deco_retry
 
