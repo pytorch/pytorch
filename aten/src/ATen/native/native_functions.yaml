@@ -2042,6 +2042,11 @@
 
 - func: max.names_dim_max(Tensor self, Dimname dim, bool keepdim=False, *, Tensor(a!) max, Tensor(b!) max_values) -> (Tensor(a!) values, Tensor(b!) indices)
 
+- func: value_selecting_reduction_backward(Tensor grad, int dim, Tensor indices, int[] sizes, bool keepdim) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+  device_guard: False
+
 - func: amax(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor
   use_c10_dispatcher: full
   variants: function, method
@@ -2752,6 +2757,11 @@
   variants: function, method
   device_guard: False
 
+- func: select_backward(Tensor grad, int[] input_sizes, int dim, int index) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+  device_guard: False
+
 - func: selu(Tensor self) -> Tensor
   use_c10_dispatcher: full
 
@@ -2866,6 +2876,11 @@
 - func: slice.Tensor(Tensor(a) self, int dim=0, int start=0, int end=9223372036854775807, int step=1) -> Tensor(a)
   use_c10_dispatcher: full
   variants: function, method
+  device_guard: False
+
+- func: slice_backward(Tensor grad, int[] input_sizes, int dim, int start, int end, int step) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
   device_guard: False
 
 - func: slogdet(Tensor self) -> (Tensor sign, Tensor logabsdet)
@@ -5105,6 +5120,11 @@
 - func: index_select.dimname(Tensor self, Dimname dim, Tensor index) -> Tensor
   variants: method, function
 
+- func: index_select_backward(Tensor grad, int[] self_sizes, int dim, Tensor index) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+  device_guard: False
+
 - func: masked_select.out(Tensor self, Tensor mask, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU: masked_select_out_cpu
@@ -5143,6 +5163,11 @@
   variants: method, function
   dispatch:
     CPU, CUDA: gather
+
+- func: gather_backward(Tensor grad, Tensor self, int dim, Tensor index, bool sparse_grad) -> Tensor
+  use_c10_dispatcher: full
+  variants: function
+  device_guard: False
 
 - func: gather.dimname_out(Tensor self, Dimname dim, Tensor index, *, bool sparse_grad=False, Tensor(a!) out) -> Tensor(a!)
 

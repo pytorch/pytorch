@@ -108,6 +108,8 @@ namespace jit {
   _(LiteInterpreterEval)                          \
   _(TorchbindIValueAPI)                           \
   _(LiteInterpreterDict)                          \
+  _(LiteInterpreterFindAndRunMethod)              \
+  _(LiteInterpreterFindWrongMethodName)           \
   _(MobileNamedParameters)                        \
   _(MobileSaveLoadData)                           \
   _(MobileSaveLoadParameters)                     \

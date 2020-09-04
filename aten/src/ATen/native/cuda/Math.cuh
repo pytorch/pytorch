@@ -18,7 +18,7 @@ template <typename scalar_t>
 static inline __host__ __device__ scalar_t zeta(scalar_t _x, scalar_t _q) {
   using accscalar_t = at::acc_type<scalar_t, true>;
   static const accscalar_t MACHEP = 1.11022302462515654042E-16;
-  static accscalar_t A[] = {
+  const accscalar_t A[] = {
       12.0,
       -720.0,
       30240.0,
