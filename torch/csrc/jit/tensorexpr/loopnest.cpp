@@ -906,31 +906,6 @@ void LoopNest::prepareForCodegen() {
   root_stmt_ = insertAllocFree(root_stmt_);
 }
 
-void LoopNest::slice(
-    bool slice_head,
-    For* f,
-    const Expr* factor,
-    For** head,
-    For** tail) {
-  if (!f) {
-    throw malformed_input("slice attempted on null loop", f);
-  }
-
-  Block* p = dynamic_cast<Block*>(f->get_parent());
-  if (!p) {
-    throw malformed_input("slice attempted on loop with no parent", p);
-  }
-
-  const Expr* head_end = new Min(new Add(f->start(), factor), f->stop(), true);
-  *head = new For(f->var(), f->start(), head_end, Stmt::clone(f->body()));
-  *tail = new For(f->var(), head_end, f->stop(), Stmt::clone(f->body()));
-
-  p->replace_stmt(f, *head);
-  p->insert_stmt_after(*tail, *head);
-
-  // TODO: record history of transformations
-}
-
 void LoopNest::sliceHead(For* f, int factor, For** head, For** tail) {
   if (dynamic_cast<const IntImm*>(f->start()) &&
       dynamic_cast<const IntImm*>(f->stop())) {
