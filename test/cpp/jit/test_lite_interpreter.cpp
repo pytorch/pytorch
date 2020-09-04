@@ -55,7 +55,7 @@ void testLiteInterpreterAdd() {
   std::vector<IValue> inputs;
   auto minput = 5 * torch::ones({});
   inputs.emplace_back(minput);
-  auto ref = m.get_method("add_it")(minput);
+  auto ref = m.run_method("add_it", minput);
 
   std::stringstream ss;
   m._save_for_mobile(ss);
@@ -188,7 +188,7 @@ void testLiteInterpreterPrim() {
   std::vector<IValue> inputs;
   auto minput = 3.5 * torch::ones({});
   inputs.emplace_back(minput);
-  auto ref = m.get_method("forward")(minput);
+  auto ref = m.run_method("forward", minput);
 
   std::stringstream ss;
   m._save_for_mobile(ss);
@@ -231,7 +231,7 @@ void testLiteInterpreterWrongMethodName() {
   std::vector<IValue> inputs;
   auto minput = 5 * torch::ones({});
   inputs.emplace_back(minput);
-  ASSERT_THROWS_WITH(bc.get_method("forward", inputs))("is not defined");
+  ASSERT_THROWS_WITH(bc.get_method("forward")(inputs), "is not defined");
 }
 
 void testLiteInterpreterSetState() {
@@ -254,7 +254,7 @@ void testLiteInterpreterSetState() {
   std::stringstream ms;
   m.save(ms);
   auto loaded_m = load(ms);
-  auto ref = loaded_m.get_method("forward")(minput);
+  auto ref = loaded_m.run_method("forward", minput);
 
   std::stringstream ss;
   m._save_for_mobile(ss);
@@ -296,7 +296,7 @@ void testLiteInterpreterBuiltinFunction() {
   m._save_for_mobile(ss);
   mobile::Module bc = _load_for_mobile(ss);
   auto res =
-      bc.get_method("forward", std::vector<IValue>{torch::zeros({3)(4})});
+      bc.get_method("forward")(std::vector<IValue>{torch::zeros({3, 4})});
   auto str = res.toStringRef();
   std::string expected = "Hello! Your tensor has 12 elements!";
   AT_ASSERT(str == expected);
@@ -646,7 +646,7 @@ static auto reg =
         .def_pickle(
             // __getattr__
             [](const c10::intrusive_ptr<TorchBindLiteInterpreterTestStruct>&
-                   self) -> int64_t { return 0; },
+            self) -> int64_t { return 0; },
             // __setattr__
             [](int64_t state) {
               return c10::make_intrusive<TorchBindLiteInterpreterTestStruct>();
