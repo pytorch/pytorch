@@ -1126,25 +1126,25 @@ class TestTEFuser(JitTestCase):
 
         torch._C._jit_override_can_fuse_on_cpu(old_cpu_fuser_state)
 
+    def rand(self, dtype, device="cuda"):
+        shape = (4, 4)
+        if dtype == torch.bool:
+            return torch.rand(shape, dtype=torch.float32, device=device) > 0.5
+        elif dtype in [torch.qint8, torch.quint8, torch.qint32]:
+            return torch.quantize_per_tensor(torch.rand(shape, dtype=torch.float32, device=device), .01, 1, dtype=dtype)
+        elif dtype.is_complex:
+            return torch.rand(shape, dtype=dtype, device=device)
+        elif dtype.is_floating_point:
+            return torch.rand(shape, dtype=dtype, device=device)
+        else:
+            # dtype is an integer.
+            return torch.randint(1, 4, shape, dtype=dtype, device=device)
+        raise RuntimeError("Unhandled dtype")
+
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_unary_ops(self):
         def apply(fn):
             return lambda x: fn(2 * x)
-
-        def rand(dtype, device="cuda"):
-            shape = (4, 4)
-            if dtype == torch.bool:
-                return torch.rand(shape, dtype=torch.float32, device=device) > 0.5
-            elif dtype in [torch.qint8, torch.quint8, torch.qint32]:
-                return torch.quantize_per_tensor(torch.rand(shape, dtype=torch.float32, device=device), .01, 1, dtype=dtype)
-            elif dtype.is_complex:
-                return torch.rand(shape, dtype=dtype, device=device)
-            elif dtype.is_floating_point:
-                return torch.rand(shape, dtype=dtype, device=device)
-            else:
-                # dtype is an integer.
-                return torch.randint(0, 100, shape, dtype=dtype, device=device)
-            raise RuntimeError("Unhandled dtype")
 
         dtypes = [
             torch.int8,
@@ -1152,27 +1152,48 @@ class TestTEFuser(JitTestCase):
             torch.int16,
             torch.int32,
             torch.int64,
-            torch.float16,
-            torch.bfloat16,
+            # torch.float16,
             torch.float32,
             torch.float64,
             torch.bool,
-            torch.complex32,
-            torch.complex64,
-            torch.complex128,
-            torch.qint8,
-            torch.quint8,
-            torch.qint32,
         ]
         unary_ops = [
             torch.sigmoid,
+            torch.reciprocal,
+            torch.neg,
+            torch.relu,
+            torch.log,
+            torch.log10,
+            torch.log2,
+            torch.exp,
+            torch.expm1,
+            torch.erf,
+            torch.erfc,
+            torch.cos,
+            torch.sin,
+            torch.tan,
+            torch.acos,
+            torch.asin,
+            torch.cosh,
+            torch.sinh,
+            torch.atan,
+            torch.tanh,
+            torch.sqrt,
+            torch.rsqrt,
+            torch.abs,
+            torch.ceil,
+            torch.floor,
+            torch.round,
+            torch.trunc,
+            torch.frac,
+            torch.lgamma,
         ]
         devices = [
             "cuda",
         ]
         for dtype, op, device in product(dtypes, unary_ops, devices):
             try:
-                x = rand(dtype, device)
+                x = self.rand(dtype, device)
                 fn = apply(op)
                 ref = fn(x)
             except Exception:
@@ -1181,8 +1202,36 @@ class TestTEFuser(JitTestCase):
                 # guess what errors might be thrown by eager.
                 continue
             t = torch.jit.trace(fn, (x,))
-            self.assertEqual(ref, t(x))
+            torch.testing.assert_allclose(ref, t(x))
             self.assertAllFused(t.graph_for(x))
+
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    def test_unsupported_dtypes(self):
+        def fn(x):
+            return x * x + x
+
+        unsupported_dtypes = [
+            torch.bfloat16,
+            torch.complex32,
+            torch.complex64,
+            torch.complex128,
+            torch.qint8,
+            torch.quint8,
+            torch.qint32,
+        ]
+        for dtype in unsupported_dtypes:
+            try:
+                x = self.rand(dtype)
+                ref = fn(x)
+            except Exception:
+                # If eager mode doesn't support a dtype/op/device combo,
+                # neither does the fuser.  Catch everything to avoid needing to
+                # guess what errors might be thrown by eager.
+                continue
+            t = torch.jit.trace(fn, (x,))
+            self.assertEqual(ref, t(x))
+            self.assertEqual(len(self.findFusionGroups(t.graph_for(x))), 0)
+
 
 if __name__ == '__main__':
     run_tests()

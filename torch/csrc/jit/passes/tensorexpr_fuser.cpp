@@ -541,11 +541,9 @@ class TensorExprFuser {
   }
 
   bool isFusableOnDevice(Node* node) {
-    for (const auto& output : node->outputs()) {
-      if (output->uses().size() > 0) {
-        if (!canFuseOnDevice(output)) {
-          return false;
-        }
+    for (const auto& input : node->inputs()) {
+      if (!canFuseOnDevice(input)) {
+        return false;
       }
     }
     return true;
@@ -559,6 +557,9 @@ class TensorExprFuser {
     if (!allShapesAreKnown(node)) {
       return false;
     }
+    if (!isFusableOnDevice(node)) {
+      return false;
+    }
 
     // Don't include nodes whose inputs are tensor constants - we cannot handle
     // them at the moment.
@@ -567,6 +568,17 @@ class TensorExprFuser {
       if (input->node()->kind() == prim::Constant &&
           input->type()->cast<TensorType>()) {
         return false;
+      }
+      if (auto const& tt = input->type()->cast<TensorType>()) {
+        auto st = tt->scalarType();
+        if (!st) {
+          // All tensor types should be known.
+          return false;
+        }
+        if (c10::isComplexType(*st) || c10::isQIntType(*st) ||
+            *st == c10::ScalarType::BFloat16) {
+          return false;
+        }
       }
     }
     return tensorexpr::isSupported(node);
