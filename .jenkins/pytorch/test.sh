@@ -13,7 +13,7 @@ echo "Testing pytorch"
 
 if [ -n "${IN_CIRCLECI}" ]; then
   # TODO move this to docker
-  pip_install unittest-xml-reporting
+  pip_install unittest-xml-reporting coverage
 
   if [[ "$BUILD_ENVIRONMENT" == *-xenial-cuda10.1-* ]]; then
     # TODO: move this to Docker
@@ -25,22 +25,20 @@ if [ -n "${IN_CIRCLECI}" ]; then
     # TODO: move this to Docker
     sudo apt-get -qq update
     sudo apt-get -qq install --allow-downgrades --allow-change-held-packages openmpi-bin libopenmpi-dev
-    sudo apt-get -qq install --no-install-recommends openssh-client openssh-server
-    sudo mkdir -p /var/run/sshd
   fi
 
   if [[ "$BUILD_ENVIRONMENT" == *-slow-* ]]; then
     export PYTORCH_TEST_WITH_SLOW=1
     export PYTORCH_TEST_SKIP_FAST=1
   fi
+  if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
+    export PYTORCH_COLLECT_COVERAGE=1
+  fi
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # Print GPU info
   rocminfo | egrep 'Name:.*\sgfx|Marketing'
-  # TODO: Move this to Docker
-  sudo apt-get -qq update
-  sudo apt-get -qq install --no-install-recommends libsndfile1
 fi
 
 # --user breaks ppc64le builds and these packages are already in ppc64le docker
@@ -123,7 +121,7 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX2-* ]]; then
   export ATEN_CPU_CAPABILITY=avx
 fi
 
-if [ -n "$CIRCLE_PULL_REQUEST" ]; then
+if ([ -n "$CIRCLE_PULL_REQUEST" ] && [[ "$BUILD_ENVIRONMENT" != *coverage* ]]); then
   DETERMINE_FROM=$(mktemp)
   file_diff_from_base "$DETERMINE_FROM"
 fi
@@ -209,6 +207,14 @@ test_libtorch() {
     OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" build/bin/test_api --gtest_output=xml:test/test-reports/cpp-unittest/test_api.xml
     build/bin/test_tensorexpr --gtest_output=xml:test/test-reports/cpp-unittests/test_tensorexpr.xml
     assert_git_not_dirty
+  fi
+}
+
+test_vulkan() {
+  if [[ "$BUILD_ENVIRONMENT" == *vulkan-linux* ]]; then
+    export VK_ICD_FILENAMES=/var/lib/jenkins/swiftshader/build/Linux/vk_swiftshader_icd.json
+    mkdir -p test/test-reports/cpp-vulkan
+    build/bin/vulkan_test --gtest_output=xml:test/test-reports/cpp-vulkan/vulkan_test.xml
   fi
 }
 
@@ -373,6 +379,8 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 ]]; t
   test_custom_script_ops
   test_custom_backend
   test_torch_function_benchmark
+elif [[ "${BUILD_ENVIRONMENT}" == *vulkan-linux* ]]; then
+  test_vulkan
 elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   test_bazel
 elif [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-cuda9.2-cudnn7-py3-gcc5.4* ]]; then
@@ -392,4 +400,10 @@ else
   test_distributed
   test_benchmarks
   test_rpc
+  if [[ "$BUILD_ENVIRONMENT" == *coverage* ]]; then
+    pushd test
+    echo "Generating XML coverage report"
+    time python -mcoverage xml
+    popd
+  fi
 fi

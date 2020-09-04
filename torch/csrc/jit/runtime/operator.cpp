@@ -233,11 +233,15 @@ bool printerHasSpecialCaseFor(Symbol sym) {
       prim::FusedConcat, // optimization pass adds it
       prim::FusionGroup, // optimization pass adds it
       prim::CudaFusionGroup, // optimization pass adds it
+      prim::TensorExprGroup, // optimization pass adds it
       prim::Load, // used in interpreter only
       prim::MMTreeReduce, // used as an optimization
       prim::MMBatchSide, // used as an optimization
       prim::Store, // used in interpreter only
       prim::profile, // used in interpreter only
+      prim::profile_optional, // used in interpreter only
+      prim::TypeCheck, // used in interpreter only
+      prim::FallbackGraph, // converted into prim::CallFunction
 
   };
 
@@ -265,6 +269,7 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::FusionGroup,
       prim::CudaFusionGroup,
       prim::DifferentiableGraph,
+      prim::TensorExprGroup,
       prim::FunctionalGraph,
       prim::Constant,
       prim::Uninitialized,
@@ -292,6 +297,8 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::GetAttr,
       prim::SetAttr,
       prim::profile,
+      prim::profile_optional,
+      prim::TypeCheck,
       prim::Print,
       prim::CallFunction,
       prim::CallMethod,
@@ -303,6 +310,7 @@ bool aliasAnalysisHasSpecialCaseFor(Symbol symbol) {
       prim::rpc_sync,
       prim::Enter,
       prim::Exit,
+      prim::FallbackGraph,
   };
 
   // Operators that should not be used by alias analysis

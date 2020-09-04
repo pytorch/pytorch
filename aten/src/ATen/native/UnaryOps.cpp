@@ -39,8 +39,7 @@ namespace native {
 // operators (more is foreseeable) and is more flexible and elegant than the latter.
 template <typename Stub>
 static inline Tensor& unary_op_impl_out(Tensor& result, const Tensor& self, Stub& stub) {
-  auto iter = TensorIterator::unary_op(result, self,
-    /*check_mem_overlap=*/true);
+  auto iter = TensorIterator::unary_op(result, self);
   stub(iter.device_type(), iter);
   return result;
 }
@@ -61,8 +60,7 @@ static inline Tensor& unary_op_impl_with_complex_to_float_out(Tensor& result, co
 
       // Runs the function complex->complex, as TensorIterator expects
       Tensor complex_result = at::empty({0}, self.options());
-      auto iter = TensorIterator::unary_op(complex_result, self,
-        /*check_mem_overlap=*/true);
+      auto iter = TensorIterator::unary_op(complex_result, self);
       stub(iter.device_type(), iter);
 
       // Copies the complex result to the actual result and returns it
@@ -107,6 +105,11 @@ Tensor& acos_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(
 Tensor acos(const Tensor& self) { return unary_op_impl(self, at::acos_out); }
 Tensor& acos_(Tensor& self) { return unary_op_impl_(self, at::acos_out); }
 
+// arccos, alias for acos
+Tensor& arccos_out(Tensor& result, const Tensor& self) { return at::acos_out(result, self); }
+Tensor arccos(const Tensor& self) { return self.acos(); }
+Tensor& arccos_(Tensor& self) { return self.acos_(); }
+
 static Tensor wrapped_scalar_tensor(Scalar scalar) {
   auto tensor = scalar_to_tensor(scalar);
   tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
@@ -134,9 +137,19 @@ Tensor& asin_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(
 Tensor asin(const Tensor& self) { return unary_op_impl(self, at::asin_out); }
 Tensor& asin_(Tensor& self) { return unary_op_impl_(self, at::asin_out); }
 
+// arcsin, alias of asin
+Tensor& arcsin_out(Tensor& result, const Tensor& self) { return at::asin_out(result, self); }
+Tensor arcsin(const Tensor& self) { return self.asin(); }
+Tensor& arcsin_(Tensor& self) { return self.asin_(); }
+
 Tensor& atan_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, atan_stub); }
 Tensor atan(const Tensor& self) { return unary_op_impl(self, at::atan_out); }
 Tensor& atan_(Tensor& self) { return unary_op_impl_(self, at::atan_out); }
+
+// arctan, alias of atan
+Tensor& arctan_out(Tensor& result, const Tensor& self) { return at::atan_out(result, self); }
+Tensor arctan(const Tensor& self) { return self.atan(); }
+Tensor& arctan_(Tensor& self) { return self.atan_(); }
 
 // Note [Complex abs and angle]
 // Complex inputs to abs and angle return float results by default.
@@ -187,8 +200,18 @@ Tensor imag(const Tensor& self) {
   }
 }
 
-Tensor& conj_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, conj_stub); }
-Tensor conj(const Tensor& self) { return unary_op_impl(self, at::conj_out); }
+Tensor& conj_out(Tensor& result, const Tensor& self) {
+  return unary_op_impl_out(result, self, conj_stub);
+}
+
+Tensor _conj(const Tensor& self) { return unary_op_impl(self, at::conj_out); }
+
+Tensor conj(const Tensor& self) {
+  if (!self.is_complex()) {
+    return self;
+  }
+  return at::_conj(self);
+}
 
 Tensor& bitwise_not_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, bitwise_not_stub); }
 Tensor bitwise_not(const Tensor& self) { return unary_op_impl(self, at::bitwise_not_out); }
@@ -299,9 +322,19 @@ Tensor& asinh_out(Tensor& result, const Tensor& self) { return unary_op_impl_out
 Tensor asinh(const Tensor& self) { return unary_op_impl(self, at::asinh_out); }
 Tensor& asinh_(Tensor& self) { return unary_op_impl_(self, at::asinh_out); }
 
+// arcsinh, alias for asinh
+Tensor& arcsinh_out(Tensor& result, const Tensor& self) { return at::asinh_out(result, self); }
+Tensor arcsinh(const Tensor& self) { return self.asinh(); }
+Tensor& arcsinh_(Tensor& self) { return self.asinh_(); }
+
 Tensor& atanh_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, atanh_stub); }
 Tensor atanh(const Tensor& self) { return unary_op_impl(self, at::atanh_out); }
 Tensor& atanh_(Tensor& self) { return unary_op_impl_(self, at::atanh_out); }
+
+// arctanh, alias for atanh
+Tensor& arctanh_out(Tensor& result, const Tensor& self) { return at::atanh_out(result, self); }
+Tensor arctanh(const Tensor& self) { return self.atanh(); }
+Tensor& arctanh_(Tensor& self) { return self.atanh_(); }
 
 Tensor& sqrt_out(Tensor& result, const Tensor& self) { return unary_op_impl_out(result, self, sqrt_stub); }
 Tensor sqrt(const Tensor& self) { return unary_op_impl(self, at::sqrt_out); }
@@ -318,10 +351,7 @@ Tensor& logit_out(
     Tensor& result,
     const Tensor& self,
     c10::optional<double> eps) {
-  auto iter = TensorIterator::unary_op(
-      result,
-      self,
-      /*check_mem_overlap=*/true);
+  auto iter = TensorIterator::unary_op(result, self);
   logit_stub(iter.device_type(), iter, Scalar(eps ? eps.value() : -1.0));
   return result;
 }
@@ -353,6 +383,11 @@ Tensor& trunc_out(Tensor& result, const Tensor& self) {
 Tensor trunc(const Tensor& self) { return unary_op_impl(self, at::trunc_out); }
 Tensor& trunc_(Tensor& self) { return unary_op_impl_(self, at::trunc_out); }
 
+// Alias for trunc
+Tensor& fix_out(Tensor& result, const Tensor& self) { return at::native::trunc_out(result, self); }
+Tensor fix(const Tensor& self) { return at::native::trunc(self); }
+Tensor& fix_(Tensor& self) { return at::native::trunc_(self); }
+
 Tensor& neg_out(Tensor& result, const Tensor& self) {
   TORCH_CHECK(self.scalar_type() != kBool,
               "Negation, the `-` operator, on a bool tensor is not supported. "
@@ -361,6 +396,10 @@ Tensor& neg_out(Tensor& result, const Tensor& self) {
 }
 Tensor neg(const Tensor& self) { return unary_op_impl(self, at::neg_out); }
 Tensor& neg_(Tensor& self) { return unary_op_impl_(self, at::neg_out); }
+
+Tensor& negative_out(Tensor& result, const Tensor& self) { return at::native::neg_out(result, self); }
+Tensor negative(const Tensor& self) { return at::native::neg(self); }
+Tensor& negative_(Tensor& self) { return at::native::neg_(self); }
 
 Tensor logical_not(const Tensor& self) {
   Tensor result = at::empty({0}, self.options().dtype(kBool));
@@ -374,7 +413,6 @@ Tensor& logical_not_(Tensor& self) {
 Tensor& logical_not_out(Tensor& result, const Tensor& self) {
   TensorIterator iter = TensorIteratorConfig()
     .check_all_same_dtype(false)
-    .set_check_mem_overlap(true)
     .add_output(result)
     .add_input(self)
     .build();
@@ -392,7 +430,6 @@ Tensor& signbit_out(Tensor& result, const Tensor& self) {
   } else {
     TensorIterator iter = TensorIteratorConfig()
       .check_all_same_dtype(false)
-      .set_check_mem_overlap(true)
       .add_output(result)
       .add_input(self)
       .build();
@@ -411,8 +448,7 @@ Tensor& clamp_out(Tensor& result, const Tensor& self, optional<Scalar> min, opti
   if (min && max) {
     TORCH_CHECK(self.layout() == Layout::Strided,
                 "clamp only supports strided layout, got: ", self.layout());
-    auto iter = TensorIterator::unary_op(result, self,
-        /*check_mem_overlap=*/true);
+    auto iter = TensorIterator::unary_op(result, self);
     clamp_stub(iter.device_type(), iter, *min, *max);
   } else if (max) {
     at::clamp_max_out(result, self, *max);
@@ -437,8 +473,7 @@ Tensor& clamp_max_out(Tensor& result, const Tensor& self, Scalar max) {
   TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");
   TORCH_CHECK(self.layout() == Layout::Strided,
               "clamp_max only supports strided layout, got: ", self.layout());
-  auto iter = TensorIterator::unary_op(result, self,
-      /*check_mem_overlap=*/true);
+  auto iter = TensorIterator::unary_op(result, self);
   clamp_max_stub(iter.device_type(), iter, max);
   return result;
 }
@@ -456,8 +491,7 @@ Tensor& clamp_min_out(Tensor& result, const Tensor& self, Scalar min) {
   TORCH_CHECK(!self.is_complex(), "clamp is not yet implemented for complex tensors.");
   TORCH_CHECK(self.layout() == Layout::Strided,
               "clamp_min only supports strided layout, got: ", self.layout());
-  auto iter = TensorIterator::unary_op(result, self,
-      /*check_mem_overlap=*/true);
+  auto iter = TensorIterator::unary_op(result, self);
   clamp_min_stub(iter.device_type(), iter, min);
   return result;
 }
@@ -494,8 +528,7 @@ Tensor& polygamma_(Tensor& self, int64_t n) {
 }
 Tensor& polygamma_out(Tensor& result, int64_t n, const Tensor& self) {
   TORCH_CHECK(n >= 0, "polygamma(n, x) does not support negative n.");
-  auto iter = TensorIterator::unary_op(result, self,
-    /*check_mem_overlap=*/true);
+  auto iter = TensorIterator::unary_op(result, self);
   polygamma_stub(iter.device_type(), iter, n);
   return result;
 }
@@ -539,8 +572,7 @@ Tensor& mvlgamma_(Tensor& self, int64_t p) {
   Tensor& _##op##_out_##prefix(Tensor& result, const Tensor& self) {   \
     checkDeviceType(#op, result, DeviceType::device);                  \
     checkLayout(#op, result, Layout::Strided);                         \
-    auto iter = TensorIterator::unary_op(result, self,                 \
-      /*check_mem_overlap=*/true);                                     \
+    auto iter = TensorIterator::unary_op(result, self);                \
     op##_stub(iter.device_type(), iter);                               \
     return result;                                                     \
   }
