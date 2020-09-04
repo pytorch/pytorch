@@ -12587,7 +12587,7 @@ class TestTorchDeviceType(TestCase):
                     continue
                 input.scatter_(0, index, src, reduce=operation)
                 self.assertEqual(input, result, msg=f"result: {result} input: {input} method: {str(operation)}")
-    
+
     @onlyCUDA
     def test_scatter_reduce_multiply_unsupported_dtypes(self, device):
         height = 2
