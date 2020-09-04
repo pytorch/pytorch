@@ -397,9 +397,7 @@ class TestTEFuser(JitTestCase):
             s = self.checkScript(f, inputs)
             self.assertAllFused(s.graph_for(*inputs))
 
-    # TODO: reenable the test after backwards passes start working in PE
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    @unittest.skip("temporarily disable")
     def test_clamp(self):
         def func2(a, b):
             return torch.clamp(a + b, min=0, max=2)
@@ -860,25 +858,13 @@ class TestTEFuser(JitTestCase):
         FileCheck().check("Chunk").check("aten::sigmoid").check("aten::tanh").run(str(fusion_groups[0]))
 
     @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
-    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/8746")
     def test_lstm_traced_cpu(self):
         inputs = get_lstm_inputs('cpu')
-        try:
-            ge = self.checkTrace(LSTMCellF, inputs)
-            graph = ge.graph_for(*inputs)
-            FileCheck.check("FusionGroup").run(str(graph))
-        except RuntimeError as e:
-            if 'Failed to compile' in e.args[0]:
-                warnings.warn('CPU fuser test has failed! This is not a hard failure, '
-                              'because the kernels sometimes trigger bugs in compilers '
-                              '(most notably GCC 7.2).')
-                raise unittest.SkipTest('Failed to compile')
-            else:
-                raise
+        ge = self.checkTrace(LSTMCellF, inputs)
+        graph = ge.graph_for(*inputs)
+        FileCheck().check("TensorExprGroup").run(str(graph))
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    @unittest.skip("temporarily disable")
-    # TODO: reenable once backward pass starts to work
     def test_milstm_cuda(self):
         inputs = get_milstm_inputs('cuda', training=True)
         module = self.checkScript(MiLSTMCell, inputs)
@@ -891,7 +877,6 @@ class TestTEFuser(JitTestCase):
         warmup_backward((hy + cy).sum())
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    @unittest.skip("rand_like is not supported yet")
     def test_rand_cuda(self):
         class M(torch.jit.ScriptModule):
             __constants__ = ['d']
@@ -930,8 +915,6 @@ class TestTEFuser(JitTestCase):
         self.assertAllFused(ge.graph_for(x, y))
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    # TODO: reenable the test after backwards passes start working in PE
-    @unittest.skip("temporarily disable")
     def test_erf_cuda(self):
         def fn_test_erf(x):
             return F.relu(torch.erf(x) - torch.erfc(x))
@@ -945,7 +928,6 @@ class TestTEFuser(JitTestCase):
                                                          "aten::_size_if_not_equal"))
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    @unittest.skip("rand_like is not supported yet")
     def test_rand_broadcast_cuda(self):
         def fn_test_rand(x, y):
             r = torch.rand_like(y)
@@ -978,7 +960,6 @@ class TestTEFuser(JitTestCase):
         self.assertEqualIgnoreType(out[0, :] + torch.zeros(4, 4, device='cuda'), out)
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    @unittest.skip("rand_like is not supported yet")
     def test_rand_diamond(self):
         def fn_test_diamond(x, y):
             r = torch.rand_like(y)
@@ -1022,7 +1003,7 @@ class TestTEFuser(JitTestCase):
     # fusion group needs to return that constant for its other users.
     # Instead of never pulling constants into the fusion group, we should just
     # be more careful at how we rewrite its users.
-    # TODO: fix that and reenable the test.
+    # TODO: re-enable the test once we correctly handle constants and scalars.
     def test_tensor_scalar_ops_cuda(self):
         def should_fuse(x):
             z = 3.
