@@ -658,5 +658,12 @@ class TestFX(JitTestCase):
         test_input = torch.randn(1, 3, 224, 224)
         self.assertEqual(with_extracted_module(test_input), traced(test_input))
 
+        # Now try it with serializaton
+        pickled = pickle.dumps(traced)
+        loaded = pickle.loads(pickled)
+
+        loaded_with_extracted_module : torch.fx.GraphModule = extract_module(loaded, 'bar.rn')
+        self.assertEqual(loaded_with_extracted_module(test_input), traced(test_input))
+
 if __name__ == '__main__':
     run_tests()

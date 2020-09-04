@@ -135,6 +135,9 @@ class Graph:
     def python_code(self, root_module: str) -> Tuple[str, str, List[str]]:
         free_vars: List[str] = []
         body: List[str] = []
+        def insert_hierarchy_guard(node : Node):
+            if node.module_qualname:
+                body.append(f'with torch.fx.ModuleHierarchyCtxMgr(\'{node.module_qualname}\'):\n    ')
         for node in self.nodes:
             if node.op == 'placeholder':
                 assert isinstance(node.target, str)
@@ -142,12 +145,14 @@ class Graph:
                 continue
             elif node.op == 'call_method':
                 assert isinstance(node.target, str)
+                insert_hierarchy_guard(node)
                 body.append(
                     f'{node.name} = {_format_target(repr(node.args[0]), node.target)}'
                     f'({_format_args(node.args[1:], node.kwargs)})\n')
                 continue
             elif node.op == 'call_function':
                 assert callable(node.target)
+                insert_hierarchy_guard(node)
                 # pretty print operators
                 if node.target.__module__ == '_operator' and node.target.__name__ in magic_methods:
                     assert isinstance(node.args, tuple)
@@ -165,10 +170,12 @@ class Graph:
                 continue
             elif node.op == 'call_module':
                 assert isinstance(node.target, str)
+                insert_hierarchy_guard(node)
                 body.append(f'{node.name} = {_format_target(root_module, node.target)}({_format_args(node.args, node.kwargs)})\n')
                 continue
             elif node.op == 'get_param':
                 assert isinstance(node.target, str)
+                insert_hierarchy_guard(node)
                 body.append(f'{node.name} = {_format_target(root_module, node.target)}\n')
                 continue
             raise NotImplementedError(f'node: {node.op} {node.target}')
@@ -204,7 +211,7 @@ class Graph:
             elif n.op == 'get_param':
                 return f'%{n.name} : [uses={n.uses}]= {n.target}'
             else:
-                return f'%{n.name} : [uses={n.uses}] = {n.op}[target={n.target}](' \
+                return f'%{n.name} : [uses={n.uses}] = {n.op}[target={n.target}, module_qualname={n.module_qualname}](' \
                        f'args = {format_arg(n.args)}, kwargs = {format_arg(n.kwargs)})'
 
 

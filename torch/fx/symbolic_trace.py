@@ -183,6 +183,20 @@ class DefaultDelegate(DelegateBase):
 def _proxy_placeholder(name: str, delegate: DelegateBase) -> Proxy:
     return Proxy(delegate.placeholder(name), delegate)
 
+class ModuleHierarchyCtxMgr:
+    def __init__(self, target : str):
+        self.target = target
+
+    def __enter__(self):
+        global curr_module_qualname
+        self.orig = curr_module_qualname
+        curr_module_qualname = self.target
+        return self
+
+    def __exit__(self, type, value, tb):
+        global curr_module_qualname
+        curr_module_qualname = self.orig
+
 # Symbolic tracing API
 #
 # Given an `nn.Module` instance `root`, this function will return a `GraphModule`
@@ -213,26 +227,13 @@ def symbolic_trace(root : torch.nn.Module, delegate_class=DefaultDelegate) -> Gr
 
     orig_call = torch.nn.Module.__call__
 
-    class ModuleHierarchyCtxMgr:
-        def __init__(self, target : str):
-            self.target = target
-
-        def __enter__(self):
-            global curr_module_qualname
-            self.orig = curr_module_qualname
-            curr_module_qualname = self.target
-
-        def __exit__(self, type, value, tb):
-            global curr_module_qualname
-            curr_module_qualname = self.orig
-
     def module_call_wrapper(mod, *args, **kwargs):
         target = _find_module(root, mod)
-        with ModuleHierarchyCtxMgr(target):
-            if not delegate.is_leaf_module(mod):
+        if not delegate.is_leaf_module(mod):
+            with ModuleHierarchyCtxMgr(target) as hier:
                 return orig_call(mod, *args, **kwargs)
-            else:
-                return _create_proxy(delegate, 'call_module', target, args, kwargs)
+        else:
+            return _create_proxy(delegate, 'call_module', target, args, kwargs)
     try:
         torch.nn.Module.__call__ = module_call_wrapper
         graph.output(delegate.create_arg(fn(*args)))
