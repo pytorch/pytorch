@@ -89,8 +89,7 @@ class TestForeach(TestCase):
     def test_addcmul(self, device, dtype):
         if device == 'cpu':
             if dtype == torch.half:
-                with self.assertRaisesRegex(RuntimeError, 
-                                        r"\"addcmul_cpu_out\" not implemented for \'Half\'"):
+                with self.assertRaisesRegex(RuntimeError, r"\"addcmul_cpu_out\" not implemented for \'Half\'"):
                     self._test_pointwise_op(device, dtype, torch._foreach_addcmul, 
                                             torch._foreach_addcmul_, torch.addcmul)
                 return
@@ -107,8 +106,7 @@ class TestForeach(TestCase):
 
         if device == 'cpu':
             if dtype == torch.half:
-                with self.assertRaisesRegex(RuntimeError, 
-                                        r"\"addcdiv_cpu_out\" not implemented for \'Half\'"):
+                with self.assertRaisesRegex(RuntimeError, r"\"addcdiv_cpu_out\" not implemented for \'Half\'"):
                     self._test_pointwise_op(device, dtype, torch._foreach_addcdiv, 
                                             torch._foreach_addcdiv_, torch.addcdiv)
                 return
