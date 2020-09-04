@@ -496,6 +496,23 @@ class TestFX(JitTestCase):
         out = gm(input)
         self.assertEqual(out, ref_out)
 
+    def test_pretty_print(self):
+        st = SimpleTest()
+        traced = symbolic_trace(st)
+        printed = str(traced)
+        assert 'SimpleTest()' in printed
+        assert 'torch.relu' in printed
+
+    def test_pretty_print_graph(self):
+        class KwargPrintTest(torch.nn.Module):
+            def forward(self, x):
+                return torch.squeeze(x + 3.0, dim=2)
+        st = KwargPrintTest()
+        traced = symbolic_trace(st)
+        stringed = str(traced.graph)
+        for s in ['args', 'kwargs', 'uses']:
+            assert s in stringed
+
 
 if __name__ == '__main__':
     run_tests()
