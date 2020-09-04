@@ -350,8 +350,8 @@ Tensor nanprod_backward(const Tensor& grad, const Tensor& input, const Tensor& r
     if (zero_idx.numel() == 0) {
         Tensor nans_replace = at::where(at::isnan(input), at::Tensor(1, at::TensorOptions().dtype(input.dtype()).device(input.device())), input);
         return (grad * result) / nans_replace * input.isnan().logical_not();
-    } else if (zero_idx.size() > 1) {
-        return at::zeros_like(input, LEGACY_CONTINUOUS_MEMORY_FORMAT);
+    } else if (zero_idx.size(0) > 1) {
+        return at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     } else {
         return prod_safe_zeros_backward(grad, input.contiguous().view(-1), 0).view_as(input) * input.isnan().logical_not();
     }
