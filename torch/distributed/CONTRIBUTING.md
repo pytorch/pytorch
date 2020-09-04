@@ -1,6 +1,6 @@
 # Contributing to PyTorch Distributed
 
-Please go through PyTorch's top level [Contributing Guide](../../CONTRIBUTING.md), before proceeding with this guide.
+Please go through PyTorch's top level [Contributing Guide](../../CONTRIBUTING.md) before proceeding with this guide.
 
 [PyTorch Distributed Overview](https://pytorch.org/tutorials//beginner/dist_overview.html) is a great starting point with a lot of tutorials, documentation and design docs covering PyTorch Distributed. We would highly recommend going through some of that material before you start working on PyTorch Distributed.
 
@@ -40,11 +40,11 @@ The figure below demonstrates the overall architecture of the RPC framework.
 
 ![RPC_ARCH](../../docs/source/_static/img/rpc_arch.png)
 
-The top level APIs for the RPC framework can found in [rpc/api.py](rpc/api.py) and majority of the code is actually written in C++. The pybind entrypoints can be found in [rpc/init.cpp](../torch/csrc/distributed/rpc/init.cpp).
+The top level APIs for the RPC framework can found in [rpc/api.py](rpc/api.py) and majority of the code is actually written in C++. The pybind entrypoints can be found in [rpc/init.cpp](../csrc/distributed/rpc/init.cpp).
 
 The RPC framework consists of several additional components:
 
-### RPC Framwork
+### RPC Agents
 
 The core C++ interface of the RPC framework can be found in [rpc_agent.h](../csrc/distributed/rpc/rpc_agent.h) and the TensorPipe and ProcessGroup implementations can be found at [process_group_agent.h](../csrc/distributed/rpc/process_group_agent.h) and [tensorpipe_agent.h](../csrc/distributed/rpc/tensorpipe_agent.h) respectively.
 
@@ -56,9 +56,9 @@ Most of the APIs for RRefs can be found in [rpc/api.py](rpc/api.py). The C++ int
 
 ### Distributed Autograd
 
-The top level APIs for distributed autograd can be found in [distributed/autograd/__init__.py](autograd/__init__.py) and [distributed/autograd/init.cpp](../torch/csrc/distributed/autograd/init.cpp).
+The top level APIs for distributed autograd can be found in [distributed/autograd/init.py](autograd/__init__.py) and [distributed/autograd/init.cpp](../torch/csrc/distributed/autograd/init.cpp).
 
-The core engine for executing a distributed backward pass can be found in [dist_engine.h](../csrc/distributed/autograd/dist_engine.h)
+The core engine for executing a distributed backward pass can be found in [dist_engine.h](../csrc/distributed/autograd/engine/dist_engine.h)
 
 ### Distributed Optimizer
 
