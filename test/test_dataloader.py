@@ -40,7 +40,7 @@ except ImportError:
     err_msg = ("faulthandler not found. Some data loader tests use it for error "
                "reporting (e.g., TestDataLoader.test_proper_exit).")
     if IS_PYTORCH_CI:
-        raise ImportError(err_msg)
+        raise ImportError(err_msg) from None
     else:
         warnings.warn(err_msg)
 
