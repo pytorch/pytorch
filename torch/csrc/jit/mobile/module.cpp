@@ -24,6 +24,13 @@ Function* CompilationUnit::find_function(const c10::QualifiedName& qn) {
   return nullptr;
 }
 
+Method Module::get_method(const std::string& name) const {
+  if (auto method = find_method(name)) {
+    return *method;
+  }
+  AT_ERROR("Method '", name, "' is not defined.");
+}
+
 c10::IValue Module::run_method(const std::string& method_name, Stack stack) {
   auto observer = torch::observerConfig().getModuleObserver();
   auto module_metadata = metadata();
