@@ -58,7 +58,8 @@ class TestForeach(TestCase):
         self.assertEqual(tensors, expected)
 
     def _test_bin_op_list_alpha(self, device, dtype, foreach_op, foreach_op_, torch_op, N=20):
-        tensors1, tensors2 = self._get_test_data(device, dtype, N)
+        tensors1 = self._get_test_data(device, dtype, N)
+        tensors2 = self._get_test_data(device, dtype, N)
         alpha = 2
 
         expected = [torch_op(tensors1[i], torch.mul(tensors2[i], alpha)) for i in range(N)]
