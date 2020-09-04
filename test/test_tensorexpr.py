@@ -1025,21 +1025,21 @@ class TestTensorExprFuser(BaseTestClass):
             assert llvm.elapsed_value() == 1 or interp.elapsed_value() > 1
 
     def test_loop(self):
-       @torch.jit.script
-       def test(x, y, z):
-       # type: (Tensor, Tensor, int) -> Tensor
-           b = y
-           for i in range(0, z):
-               a = x + y
-               b = b + y
-           return b
+        @torch.jit.script
+        def test(x, y, z):
+            # type: (Tensor, Tensor, int) -> Tensor
+            b = y
+            for i in range(0, z):
+                a = x + y
+                b = b + y
+            return b
 
-       llvm = LLVMCodeGenExecuted()
-       interp = SimpleIREvalExecuted()
-       x, y, z = (torch.zeros(32, 32), torch.ones(32, 32), 4)
-       test(x, y, z)
-       r = test(x, y, z)
-       assert llvm.elapsed_value == 1 or interp.elapsed_value() > 1
+        llvm = LLVMCodeGenExecuted()
+        interp = SimpleIREvalExecuted()
+        x, y, z = (torch.zeros(32, 32), torch.ones(32, 32), 4)
+        test(x, y, z)
+        r = test(x, y, z)
+        assert llvm.elapsed_value == 1 or interp.elapsed_value() > 1
 
     @unittest.skip("no shape inference for aten::slice yet")
     def test_slice(self):
