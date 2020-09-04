@@ -5,6 +5,8 @@ import builtins
 import torch
 import keyword
 
+from collections.abc import Iterable
+
 def _shadows_builtin_name(name: str) -> bool:
     return name in builtins.__dict__ or name in keyword.kwlist
 
@@ -171,6 +173,44 @@ class Graph:
 
         src = ''.join(body)
         return src, str(self.result), free_vars
+
+    def __str__(self) -> str:
+        placeholder_names = []
+        def format_arg(arg) -> str:
+            if isinstance(arg, list):
+                items = ', '.join(format_arg(a) for a in arg)
+                return f'[{items}]'
+            elif isinstance(arg, tuple):
+                items = ', '.join(format_arg(a) for a in arg)
+                maybe_comma = ',' if len(arg) == 1 else ''
+                return f'({items}{maybe_comma})'
+            elif isinstance(arg, dict):
+                items_str = ','.join(f'{k}: {format_arg(v)}' for k, v in arg.items())
+                return f'{{{items_str}}}'
+
+            if isinstance(arg, Node):
+                return '%' + str(arg)
+            else:
+                return str(arg)
+
+        def format_node(n : Node) -> Optional[str]:
+            if n.op == 'placeholder':
+                placeholder_names.append(n.target)
+                return None
+            elif n.op == 'get_param':
+                return f'%{n.name} = {n.target}'
+            else:
+                return f'%{n.name} = {n.op}[target={n.target}](' \
+                       f'args = {format_arg(n.args)}, kwargs = {format_arg(n.kwargs)}, uses={n.uses})'
+
+
+        node_strs = [format_node(node) for node in self.nodes]
+        param_str = ', '.join(placeholder_names)
+        s = f'graph({param_str}):'
+        for node_str in node_strs:
+            if node_str:
+                s += '\n    ' + node_str
+        return s
 
 reflectable_magic_methods = {
     'add': '{} + {}',
