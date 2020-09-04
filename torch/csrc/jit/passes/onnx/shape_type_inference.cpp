@@ -35,8 +35,8 @@ TypePtr MergeInferredType(TypePtr existing_type, TypePtr inferred_type) {
 
   if (new_tensor_type && old_tensor_type) {
     if (!old_tensor_type->device()) {
-      // device not avaible means this is an invalid tensor type (most likely an empty one)
-      // return inferred type directly.
+      // device not avaible means this is an invalid tensor type (most likely an
+      // empty one) return inferred type directly.
       return new_tensor_type;
     }
     auto type = old_tensor_type;
