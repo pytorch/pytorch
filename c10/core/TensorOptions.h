@@ -629,6 +629,8 @@ inline DispatchKey computeDispatchKey(TensorOptions options) {
   return options.computeDispatchKey();
 }
 
+// We deliberately ignore handling AutogradCPU/CUDA/XLA... keys to
+// avoid adding asymmetry in device <--> Autograd dispatch key mapping.
 inline DeviceType computeDeviceType(DispatchKey tid) {
   if (tid == DispatchKey::CPU) {
     return DeviceType::CPU;
@@ -651,8 +653,6 @@ inline DeviceType computeDeviceType(DispatchKey tid) {
   } else if (tid == DispatchKey::MSNPU) {
     return DeviceType::MSNPU;
   } else if (tid == DispatchKey::XLA) {
-    return DeviceType::XLA;
-  } else if (tid == DispatchKey::AutogradXLA) {
     return DeviceType::XLA;
   } else if (tid == DispatchKey::SparseCPU) {
     return DeviceType::CPU;

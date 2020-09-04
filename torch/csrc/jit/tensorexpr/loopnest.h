@@ -1,5 +1,6 @@
 #pragma once
 
+#include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -28,18 +29,24 @@ class TORCH_API LoopNest {
     return root_stmt_;
   }
 
+  // These Tensor-based loop/stmt accessors are valid only as long as no
+  // transformations have been made.
   std::vector<For*> getLoopStmtsFor(Tensor*) const;
   Stmt* getLoopBodyFor(Tensor*) const;
   bool hasLoopBodyFor(Tensor*) const;
 
   void vectorize(Stmt*);
+
   void computeInline(Stmt* s);
-  void computeInlineWithRandom(Stmt* s);
-  void prepareForCodegen();
+  void computeInline(const Buf* b);
+
   void splitWithTail(For* f, int factor, For** outer, For** inner, For** tail);
   void splitWithMask(For* f, int factor, For** outer, For** inner);
+
   void reorderAxis(For* a, For* b);
+
   static void unroll(For* f, Stmt** unrolled);
+  static void normalize(For* f, For** normalized);
 
   void setGPUBlockIndex(For* f, int idx);
   void setGPUThreadIndex(For* f, int idx);
@@ -54,14 +61,18 @@ class TORCH_API LoopNest {
       const Var* reduction_var,
       Block* insertion_point = nullptr /* optional */);
 
+  void setBufferMap(
+      For* f,
+      const std::unordered_map<std::string, const Buf*>& map);
+
+  void prepareForCodegen();
+
  private:
   std::vector<Tensor*> findAllNeededTensors(
       const std::vector<Tensor*>& tensors);
   Stmt* lowerToStmt(Tensor* t);
   Stmt* insertAllocFree(Stmt* stmt);
 
-  std::unordered_set<Function*> inlined_functions_;
-  std::unordered_set<Function*> inlined_random_functions_;
   std::unordered_map<Tensor*, Stmt*> tensor_to_stmt_;
   std::unordered_map<Stmt*, Tensor*> stmt_to_tensor_;
   Stmt* root_stmt_;

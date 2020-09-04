@@ -46,6 +46,13 @@ using SimpleIRExprEval = ExprEval<SimpleIREvaluator>;
     ASSERT_EQ(node_->name_hint(), name);          \
   }
 
+#define IS_RAND(node)                                    \
+  {                                                      \
+    auto* node_ = dynamic_cast<const Intrinsics*>(node); \
+    ASSERT_NE(nullptr, node_);                           \
+    ASSERT_EQ(node_->op_type(), kRand);                  \
+  }
+
 void testConstantFoldSimple() {
   KernelScope kernel_scope;
   ExprHandle a(2.0f);
@@ -197,6 +204,122 @@ void testConstantFoldWithVar() {
   }
 }
 
+void testConditionalSelectFoldSimple() {
+  KernelScope kernel_scope;
+  ExprHandle a(3.0f);
+  ExprHandle b(4.0f);
+  ExprHandle c(3.0f);
+  {
+    ExprHandle f = (a > b);
+
+    ExprHandle newF = IRSimplifier::simplify(f);
+    ASSERT_NE(newF.AsNode<IntImm>(), nullptr);
+    ASSERT_EQ(newF.AsNode<IntImm>()->value(), 0);
+
+    SimpleIRExprEval eval(newF);
+    ASSERT_EQ(eval.value<int>(), 0);
+  }
+  {
+    ExprHandle f = (a < b);
+
+    ExprHandle newF = IRSimplifier::simplify(f);
+    ASSERT_NE(newF.AsNode<IntImm>(), nullptr);
+    ASSERT_EQ(newF.AsNode<IntImm>()->value(), 1);
+
+    SimpleIRExprEval eval(newF);
+    ASSERT_EQ(eval.value<int>(), 1);
+  }
+  {
+    ExprHandle f = (a == c);
+
+    ExprHandle newF = IRSimplifier::simplify(f);
+    ASSERT_NE(newF.AsNode<IntImm>(), nullptr);
+    ASSERT_EQ(newF.AsNode<IntImm>()->value(), 1);
+
+    SimpleIRExprEval eval(newF);
+    ASSERT_EQ(eval.value<int>(), 1);
+  }
+  {
+    ExprHandle f = (a != c);
+
+    ExprHandle newF = IRSimplifier::simplify(f);
+    ASSERT_NE(newF.AsNode<IntImm>(), nullptr);
+    ASSERT_EQ(newF.AsNode<IntImm>()->value(), 0);
+
+    SimpleIRExprEval eval(newF);
+    ASSERT_EQ(eval.value<int>(), 0);
+  }
+}
+
+void testConditionalSelectFoldTwoLayer() {
+  KernelScope kernel_scope;
+  ExprHandle a(3.0f);
+  ExprHandle b(2.0f);
+  ExprHandle c(2.0f);
+  ExprHandle d(1.0f);
+  {
+    ExprHandle f = (a + b < c + d);
+
+    ExprHandle newF = IRSimplifier::simplify(f);
+    ASSERT_NE(newF.AsNode<IntImm>(), nullptr);
+    ASSERT_EQ(newF.AsNode<IntImm>()->value(), 0);
+
+    SimpleIRExprEval eval(newF);
+    ASSERT_EQ(eval.value<int>(), 0);
+  }
+  {
+    ExprHandle f = (a + b > c + d);
+
+    ExprHandle newF = IRSimplifier::simplify(f);
+    ASSERT_NE(newF.AsNode<IntImm>(), nullptr);
+    ASSERT_EQ(newF.AsNode<IntImm>()->value(), 1);
+
+    SimpleIRExprEval eval(newF);
+    ASSERT_EQ(eval.value<int>(), 1);
+  }
+  {
+    ExprHandle f = (a + d == b + c);
+
+    ExprHandle newF = IRSimplifier::simplify(f);
+    ASSERT_NE(newF.AsNode<IntImm>(), nullptr);
+    ASSERT_EQ(newF.AsNode<IntImm>()->value(), 1);
+
+    SimpleIRExprEval eval(newF);
+    ASSERT_EQ(eval.value<int>(), 1);
+  }
+  {
+    ExprHandle f = (a + d != b + c);
+
+    ExprHandle newF = IRSimplifier::simplify(f);
+    ASSERT_NE(newF.AsNode<IntImm>(), nullptr);
+    ASSERT_EQ(newF.AsNode<IntImm>()->value(), 0);
+
+    SimpleIRExprEval eval(newF);
+    ASSERT_EQ(eval.value<int>(), 0);
+  }
+}
+
+void testConditionalSelectFoldWithVar() {
+  KernelScope kernel_scope;
+  VarHandle x("x", kFloat);
+  ExprHandle f = x < 4.f;
+
+  ExprHandle newF = IRSimplifier::simplify(f);
+  const IntImm* folded = newF.AsNode<IntImm>();
+  ASSERT_EQ(folded, nullptr);
+
+  {
+    SimpleIRExprEval eval(newF);
+    eval.bindVar(x, ExprHandle(3.f));
+    ASSERT_EQ(eval.value<int>(), 1);
+  }
+  {
+    SimpleIRExprEval eval(newF);
+    eval.bindVar(x, ExprHandle(5.f));
+    ASSERT_EQ(eval.value<int>(), 0);
+  }
+}
+
 void testUnFoldableExpr() {
   KernelScope kernel_scope;
   VarHandle x("x", kFloat);
@@ -271,6 +394,26 @@ void testHashEquivalence() {
   // Intrinsics sanity check.
   ExprHandle f5 = Intrinsics::make(kSin, x) * Intrinsics::make(kCos, x);
   ASSERT_NE(hasher.hash(f5.node()), (size_t)0);
+}
+
+void testHashEquivalenceRand() {
+  KernelScope kernel_scope;
+  ExprHandle f =
+      Intrinsics::make(kRand, kFloat) + Intrinsics::make(kRand, kInt);
+
+  const Add* root = f.AsNode<Add>();
+  ASSERT_NE(root, nullptr);
+
+  HashProvider hasher;
+  auto hash_f = hasher.hash(f.node());
+  auto hash_l = hasher.hash(root->lhs());
+  auto hash_r = hasher.hash(root->rhs());
+
+  // Root not equal to either branch.
+  ASSERT_NE(hash_f, hash_l);
+  ASSERT_NE(hash_f, hash_r);
+  // and branches are NOT equal.
+  ASSERT_NE(hash_l, hash_r);
 }
 
 void testHashEquivalenceAfterFolding() {
@@ -890,6 +1033,32 @@ void testSimplifySubs() {
     ExprHandle body = (x % y + (x * 2 - x - y * 0) - x + 2) - (x % y);
     ExprHandle simplified = IRSimplifier::simplify(body);
     IS_IMM_WITH_VAL(Int, simplified.node(), 2);
+  }
+}
+
+void testSimplifyDiv() {
+  KernelScope kernel_scope;
+  VarHandle x("x", kInt);
+
+  {
+    ExprHandle body = ExprHandle(0) / x;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_IMM_WITH_VAL(Int, simplified.node(), 0);
+  }
+
+  {
+    ExprHandle body = x / 1;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_VAR_WITH_NAME(simplified.node(), "x");
+  }
+
+  {
+    ExprHandle body = x / x;
+    ExprHandle simplified = IRSimplifier::simplify(body);
+
+    IS_IMM_WITH_VAL(Int, simplified.node(), 1);
   }
 }
 
@@ -2388,6 +2557,40 @@ void testSimplifyEliminateZeroLengthAlloc() {
     Stmt* simplified = IRSimplifier::simplify(block1);
     IS_NODE_WITH_NAME(Block, simplified, block2);
     ASSERT_EQ(block2->nstmts(), 2);
+  }
+}
+
+void testDontSimplifyRand() {
+  KernelScope kernel_scope;
+
+  {
+    // rand() + rand() = rand() + rand() NOT 2 * rand().
+    ExprHandle body =
+        Intrinsics::make(kRand, kInt) + Intrinsics::make(kRand, kInt);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Add, simplified.node(), add);
+    IS_RAND(add->lhs());
+    IS_RAND(add->rhs());
+  }
+
+  {
+    // rand() - rand() = rand() - rand() NOT 0.
+    ExprHandle body =
+        Intrinsics::make(kRand, kFloat) - Intrinsics::make(kRand, kFloat);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Sub, simplified.node(), sub);
+    IS_RAND(sub->lhs());
+    IS_RAND(sub->rhs());
+  }
+
+  {
+    // rand() * rand() = rand() * rand().
+    ExprHandle body =
+        Intrinsics::make(kRand, kInt) * Intrinsics::make(kRand, kInt);
+    ExprHandle simplified = IRSimplifier::simplify(body);
+    IS_NODE_WITH_NAME(Mul, simplified.node(), mul);
+    IS_RAND(mul->lhs());
+    IS_RAND(mul->rhs());
   }
 }
 

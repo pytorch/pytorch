@@ -61,6 +61,25 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
     x_tensors = iter_tensors(target, True)
     j_tensors = iter_tensors(jacobian)
 
+    def compute_gradient(x, idx, is_mkldnn=False):
+
+        def fn_out():
+            if not is_mkldnn:
+                # x is a view into input and so this works
+                return fn(input).clone()
+            else:
+                # convert the dense tensor back to have mkldnn layout
+                return fn([x.to_mkldnn()])
+
+        orig = x[idx].item()
+        x[idx] = orig - eps
+        outa = fn_out()
+        x[idx] = orig + eps
+        outb = fn_out()
+        x[idx] = orig
+        r = (outb - outa) / (2 * eps)
+        return r.detach().reshape(-1)
+
     # TODO: compare structure
     for x_tensor, d_tensor in zip(x_tensors, j_tensors):
         is_complex = x_tensor.dtype.is_complex
@@ -90,14 +109,7 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
                 for x_idx in product(*[range(m) for m in x_values.size()[1:]]):
                     indices = x_indices[i].tolist() + list(x_idx)
                     d_idx = sum(indices[k] * x_stride[k] for k in range(len(x_size)))
-                    orig = x_value[x_idx].item()
-                    x_value[x_idx] = orig - eps
-                    outa = fn(input).clone()
-                    x_value[x_idx] = orig + eps
-                    outb = fn(input).clone()
-                    x_value[x_idx] = orig
-                    r = (outb - outa) / (2 * eps)
-                    d_tensor[d_idx] = r.detach().reshape(-1)
+                    d_tensor[d_idx] = compute_gradient(x_value, x_idx)
         elif x_tensor.layout == torch._mkldnn:
             # Use .data here to get around the version check
             x_tensor = x_tensor.data
@@ -108,30 +120,12 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
                 # this is really inefficient, but without indexing implemented, there's
                 # not really a better way than converting back and forth
                 x_tensor_dense = x_tensor.to_dense()
-                orig = x_tensor_dense[x_idx].item()
-
-                x_tensor_dense[x_idx] = orig - eps
-                x_tensor_mkl = x_tensor_dense.to_mkldnn()
-                outa = fn([x_tensor_mkl])
-
-                x_tensor_dense[x_idx] = orig + eps
-                x_tensor_mkl = x_tensor_dense.to_mkldnn()
-                outb = fn([x_tensor_mkl])
-
-                r = (outb - outa) / (2 * eps)
-                d_tensor[d_idx] = r.detach().reshape(-1)
+                d_tensor[d_idx] = compute_gradient(x_tensor_dense, x_idx, is_mkldnn=True)
         else:
             # Use .data here to get around the version check
             x_tensor = x_tensor.data
             for d_idx, x_idx in enumerate(product(*[range(m) for m in x_tensor.size()])):
-                orig = x_tensor[x_idx].item()
-                x_tensor[x_idx] = orig - eps
-                outa = fn(input).clone()
-                x_tensor[x_idx] = orig + eps
-                outb = fn(input).clone()
-                x_tensor[x_idx] = orig
-                r = (outb - outa) / (2 * eps)
-                d_tensor[d_idx] = r.detach().reshape(-1)
+                d_tensor[d_idx] = compute_gradient(x_tensor, x_idx)
 
     return jacobian
 
@@ -152,6 +146,7 @@ def get_analytical_jacobian(input, output, nondet_tol=0.0):
     flat_grad_output = grad_output.view(-1)
     reentrant = True
     correct_grad_sizes = True
+    correct_grad_types = True
 
     for i in range(flat_grad_output.numel()):
         flat_grad_output.zero_()
@@ -162,6 +157,8 @@ def get_analytical_jacobian(input, output, nondet_tol=0.0):
             for jacobian_x, d_x, x in zip(jacobian_c, grads_input, diff_input_list):
                 if d_x is not None and d_x.size() != x.size():
                     correct_grad_sizes = False
+                elif d_x is not None and d_x.dtype != x.dtype:
+                    correct_grad_types = False
                 elif jacobian_x.numel() != 0:
                     if d_x is None:
                         jacobian_x[:, i].zero_()
@@ -174,7 +171,7 @@ def get_analytical_jacobian(input, output, nondet_tol=0.0):
         if jacobian_x.numel() != 0 and (jacobian_x - jacobian_reentrant_x).abs().max() > nondet_tol:
             reentrant = False
 
-    return jacobian, reentrant, correct_grad_sizes
+    return jacobian, reentrant, correct_grad_sizes, correct_grad_types
 
 
 def _as_tuple(x):
@@ -208,7 +205,8 @@ def gradcheck(
     raise_exception: bool = True,
     check_sparse_nnz: bool = False,
     nondet_tol: float = 0.0,
-    check_undefined_grad: bool = True
+    check_undefined_grad: bool = True,
+    check_grad_dtypes: bool = False
 ) -> bool:
     r"""Check gradients computed via small finite differences against analytical
     gradients w.r.t. tensors in :attr:`inputs` that are of floating point or complex type
@@ -305,11 +303,16 @@ def gradcheck(
         def fn(input):
             return _as_tuple(func(*input))[i]
 
-        analytical, reentrant, correct_grad_sizes = get_analytical_jacobian(tupled_inputs, o, nondet_tol=nondet_tol)
+        analytical, reentrant, correct_grad_sizes, correct_grad_types = get_analytical_jacobian(tupled_inputs,
+                                                                                                o,
+                                                                                                nondet_tol=nondet_tol)
         numerical = get_numerical_jacobian(fn, tupled_inputs, eps=eps)
 
         if not correct_grad_sizes:
             return fail_test('Analytical gradient has incorrect size')
+
+        if not correct_grad_types and check_grad_dtypes:
+            return fail_test('Gradient has dtype mismatch')
 
         for j, (a, n) in enumerate(zip(analytical, numerical)):
             if a.numel() != 0 or n.numel() != 0:
@@ -411,7 +414,8 @@ def gradgradcheck(
     gen_non_contig_grad_outputs: bool = False,
     raise_exception: bool = True,
     nondet_tol: float = 0.0,
-    check_undefined_grad: bool = True
+    check_undefined_grad: bool = True,
+    check_grad_dtypes: bool = False
 ) -> bool:
     r"""Check gradients of gradients computed via small finite differences
     against analytical gradients w.r.t. tensors in :attr:`inputs` and
@@ -489,4 +493,5 @@ def gradgradcheck(
         return grad_inputs
 
     return gradcheck(new_func, tupled_inputs + tupled_grad_outputs, eps, atol, rtol, raise_exception,
-                     nondet_tol=nondet_tol, check_undefined_grad=check_undefined_grad)
+                     nondet_tol=nondet_tol, check_undefined_grad=check_undefined_grad,
+                     check_grad_dtypes=check_grad_dtypes)

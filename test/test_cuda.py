@@ -528,12 +528,18 @@ class TestCuda(TestCase):
         q_copy[1].fill_(10)
         self.assertTrue(q_copy[3], torch.cuda.IntStorage(10).fill_(10))
 
-    def test_allow_tf32_get_set(self):
+    def test_cublas_allow_tf32_get_set(self):
         orig = torch.backends.cuda.matmul.allow_tf32
         self.assertEqual(torch._C._get_cublas_allow_tf32(), orig)
         torch.backends.cuda.matmul.allow_tf32 = not orig
         self.assertEqual(torch._C._get_cublas_allow_tf32(), not orig)
         torch.backends.cuda.matmul.allow_tf32 = orig
+
+    def test_cudnn_allow_tf32_get_set(self):
+        with torch.backends.cudnn.flags(enabled=None, benchmark=None, deterministic=None, allow_tf32=False):
+            self.assertFalse(torch.backends.cudnn.allow_tf32)
+        with torch.backends.cudnn.flags(enabled=None, benchmark=None, deterministic=None, allow_tf32=True):
+            self.assertTrue(torch.backends.cudnn.allow_tf32)
 
     def test_type_conversions(self):
         x = torch.randn(5, 5)
@@ -3018,6 +3024,22 @@ class TestCudaComm(TestCase):
 
         gathered = torch.cuda.comm.gather(results)
         self.assertTrue(gathered.is_contiguous(memory_format=torch.channels_last))
+
+
+    def test_matmul_device_mismatch(self):
+        cpu = torch.rand((10, 10))
+        cuda = cpu.cuda()
+        with self.assertRaisesRegex(RuntimeError, "expected (it|them) to be on GPU"):
+            cpu @ cuda
+        with self.assertRaisesRegex(RuntimeError, "expected (it|them) to be on GPU"):
+            cuda @ cpu
+
+        for s, m1, m2 in product((cpu, cuda), repeat=3):
+            if s.device == m1.device == m2.device:
+                torch.addmm(s, m1, m2)
+            else:
+                with self.assertRaisesRegex(RuntimeError, "expected (it|them) to be on GPU"):
+                    torch.addmm(s, m1, m2)
 
 
 if __name__ == '__main__':

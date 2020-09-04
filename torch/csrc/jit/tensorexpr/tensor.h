@@ -99,9 +99,7 @@ TORCH_API Tensor* Compute(
     const std::vector<DimArg>& dim_args,
     const std::function<ExprHandle(const std::vector<VarHandle>&)>& body_func);
 
-namespace {
-
-static inline void unpack_dim_args(
+inline void unpack_dim_args(
     const std::vector<DimArg>& dim_args,
     std::vector<const Expr*>* dims,
     std::vector<const Var*>* vars) {
@@ -112,7 +110,6 @@ static inline void unpack_dim_args(
     vars->push_back(new Var(dim_arg.name_hint(), kInt));
   }
 }
-} // namespace
 
 // Handle reductions over a Reducer and a body_func which produces values.
 template <typename BodyFunc>
@@ -165,6 +162,15 @@ TORCH_API Tensor* Reduce(
     const std::vector<DimArg>& dim_args,
     const Reducer& reducer,
     const Buffer& buffer,
+    const std::vector<DimArg>& reduce_args);
+
+// Overload for the common case of all dimensions of a prevously Computed
+// Tensor.
+TORCH_API Tensor* Reduce(
+    const std::string& func_name,
+    const std::vector<DimArg>& dim_args,
+    const Reducer& reducer,
+    Tensor* tensor,
     const std::vector<DimArg>& reduce_args);
 
 class FunctionCall : public CallNode<FunctionCall> {
