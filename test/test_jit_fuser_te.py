@@ -4,6 +4,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 import unittest
+import contextlib
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -43,6 +44,14 @@ def warmup_forward(f, *args):
         results = f(*args)
 
     return results
+
+@contextlib.contextmanager
+def texpr_reductions_enabled():
+    old = torch._C._jit_set_texpr_reductions_enabled(True)
+    try:
+        yield
+    finally:
+        torch._C._jit_set_texpr_reductions_enabled(old)
 
 class TestTEFuser(JitTestCase):
     def setUp(self):
@@ -108,39 +117,42 @@ class TestTEFuser(JitTestCase):
             x2 = x * x
             return x2.sum()
 
-        a = torch.tensor(list(x for x in range(0, 15)), dtype=torch.float, device='cpu')
-        a = a.reshape(5, 3)
-        scripted = self.checkScript(func, (a,))
-        graph = scripted.graph_for(a)
-        fusion_groups = self.findFusionGroups(graph)
-        self.assertEqual(len(fusion_groups), 1)
-        self.assertEqual(scripted(a), func(a))
+        with texpr_reductions_enabled():
+            a = torch.tensor(list(x for x in range(0, 15)), dtype=torch.float, device='cpu')
+            a = a.reshape(5, 3)
+            scripted = self.checkScript(func, (a,))
+            graph = scripted.graph_for(a)
+            fusion_groups = self.findFusionGroups(graph)
+            self.assertEqual(len(fusion_groups), 1)
+            self.assertEqual(scripted(a), func(a))
 
     @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
     def test_sum_dim(self):
         def func(x):
             return x.sum((0, )) * 2
 
-        a = torch.tensor(list(x for x in range(0, 15)), dtype=torch.float, device='cpu')
-        a = a.reshape(5, 3)
-        scripted = self.checkScript(func, (a,))
-        graph = scripted.graph_for(a)
-        fusion_groups = self.findFusionGroups(graph)
-        self.assertEqual(len(fusion_groups), 1)
-        self.assertEqual(scripted(a), func(a))
+        with texpr_reductions_enabled():
+            a = torch.tensor(list(x for x in range(0, 15)), dtype=torch.float, device='cpu')
+            a = a.reshape(5, 3)
+            scripted = self.checkScript(func, (a,))
+            graph = scripted.graph_for(a)
+            fusion_groups = self.findFusionGroups(graph)
+            self.assertEqual(len(fusion_groups), 1)
+            self.assertEqual(scripted(a), func(a))
 
     @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
     def test_sum_keepdim_cast(self):
         def func(x):
             return x.sum((0, ), keepdim=True, dtype=torch.double) * 2
 
-        a = torch.tensor(list(x for x in range(0, 15)), dtype=torch.float, device='cpu')
-        a = a.reshape(5, 3)
-        scripted = self.checkScript(func, (a,))
-        graph = scripted.graph_for(a)
-        fusion_groups = self.findFusionGroups(graph)
-        self.assertEqual(len(fusion_groups), 1)
-        self.assertEqual(scripted(a), func(a))
+        with texpr_reductions_enabled():
+            a = torch.tensor(list(x for x in range(0, 15)), dtype=torch.float, device='cpu')
+            a = a.reshape(5, 3)
+            scripted = self.checkScript(func, (a,))
+            graph = scripted.graph_for(a)
+            fusion_groups = self.findFusionGroups(graph)
+            self.assertEqual(len(fusion_groups), 1)
+            self.assertEqual(scripted(a), func(a))
 
     @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
     def test_abs_cpu(self):
@@ -1113,6 +1125,64 @@ class TestTEFuser(JitTestCase):
         self.assertEqual(len(self.findFusionGroups(g)), 0)
 
         torch._C._jit_override_can_fuse_on_cpu(old_cpu_fuser_state)
+
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    def test_unary_ops(self):
+        def apply(fn):
+            return lambda x: fn(2 * x)
+
+        def rand(dtype, device="cuda"):
+            shape = (4, 4)
+            if dtype == torch.bool:
+                return torch.rand(shape, dtype=torch.float32, device=device) > 0.5
+            elif dtype in [torch.qint8, torch.quint8, torch.qint32]:
+                return torch.quantize_per_tensor(torch.rand(shape, dtype=torch.float32, device=device), .01, 1, dtype=dtype)
+            elif dtype.is_complex:
+                return torch.rand(shape, dtype=dtype, device=device)
+            elif dtype.is_floating_point:
+                return torch.rand(shape, dtype=dtype, device=device)
+            else:
+                # dtype is an integer.
+                return torch.randint(0, 100, shape, dtype=dtype, device=device)
+            raise RuntimeError("Unhandled dtype")
+
+        dtypes = [
+            torch.int8,
+            torch.uint8,
+            torch.int16,
+            torch.int32,
+            torch.int64,
+            torch.float16,
+            torch.bfloat16,
+            torch.float32,
+            torch.float64,
+            torch.bool,
+            torch.complex32,
+            torch.complex64,
+            torch.complex128,
+            torch.qint8,
+            torch.quint8,
+            torch.qint32,
+        ]
+        unary_ops = [
+            torch.sigmoid,
+        ]
+        devices = [
+            "cuda",
+        ]
+        for dtype, op, device in product(dtypes, unary_ops, devices):
+            try:
+                x = rand(dtype, device)
+                fn = apply(op)
+                ref = fn(x)
+            except Exception:
+                # If eager mode doesn't support a dtype/op/device combo,
+                # neither does the fuser.  Catch everything to avoid needing to
+                # guess what errors might be thrown by eager.
+                continue
+            t = torch.jit.trace(fn, (x,))
+            self.assertEqual(ref, t(x))
+            self.assertAllFused(t.graph_for(x))
 
 if __name__ == '__main__':
     run_tests()

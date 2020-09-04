@@ -9,7 +9,7 @@ class _ClassNamespace(types.ModuleType):
     def __getattr__(self, attr):
         proxy = torch._C._get_custom_class_python_wrapper(self.name, attr)
         if proxy is None:
-            raise RuntimeError('Class {}.{} not registered!'.format(self.name, attr))
+            raise RuntimeError(f'Class {self.name}.{attr} not registered!')
         return proxy
 
 class _Classes(types.ModuleType):

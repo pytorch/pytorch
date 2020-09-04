@@ -1,12 +1,14 @@
 import numpy as np
 import torch
 import torch.nn.functional as F
+from torch import nn
 import unittest
 
 from torch.testing._internal.common_utils import suppress_warnings, num_profiled_runs
 
 from torch.testing._internal.te_utils import CudaCodeGenCreated, CudaCodeGenExecuted, \
     LLVMCodeGenExecuted, SimpleIREvalExecuted
+
 
 class BaseTestClass(unittest.TestCase):
     def setUp(self):
@@ -28,6 +30,7 @@ class BaseTestClass(unittest.TestCase):
         torch._C._jit_override_can_fuse_on_gpu(self.old_gpu_fuser_state)
         torch._C._jit_override_can_fuse_on_cpu(self.old_cpu_fuser_state)
 
+
 class TestTensorExprFuser(BaseTestClass):
     def test_easy(self):
         def easy(x, y):
@@ -40,7 +43,6 @@ class TestTensorExprFuser(BaseTestClass):
         b = torch.rand(1024)
         x = traced(a, b)
         np.testing.assert_allclose(a.numpy() + b.numpy(), x.numpy())
-
 
     def test_three_arg(self):
         llvm_executed = LLVMCodeGenExecuted()
@@ -65,7 +67,6 @@ class TestTensorExprFuser(BaseTestClass):
             llvm_executed.elapsed_value() >= 1
             or simple_ir_eval_executed.elapsed_value() >= 1
         )
-
 
     def test_four_arg(self):
         def run_addcmul(x, y, z, w):
@@ -92,7 +93,6 @@ class TestTensorExprFuser(BaseTestClass):
             x = traced(rand_a, rand_b, rand_c, rand_d)
             y = run_addcmul(rand_a, rand_b, rand_c, rand_d)
             np.testing.assert_allclose(x.cpu().numpy(), y.cpu().numpy(), atol=1e-6)
-
 
     def test_three_arg_cuda(self):
         if not torch.cuda.is_available():
@@ -124,7 +124,6 @@ class TestTensorExprFuser(BaseTestClass):
         np.testing.assert_allclose(npr, x.cpu().numpy())
         assert cuda_cg_executed.elapsed_value() >= 1
         assert cuda_cg_created.elapsed_value() >= 1
-
 
     def test_broadcast_cuda(self):
         if not torch.cuda.is_available():
@@ -166,7 +165,6 @@ class TestTensorExprFuser(BaseTestClass):
         for test_config in test_configs:
             test_body(*test_config)
 
-
     def test_all_combos(self):
         def easy(x, y, z):
             a = torch.add(x, y)
@@ -192,7 +190,6 @@ class TestTensorExprFuser(BaseTestClass):
         x = traced(a, b, c)
         npr = np_easy(a.numpy(), b.numpy(), c.numpy())
         np.testing.assert_allclose(npr, x.numpy())
-
 
     def test_rank_two(self):
         def easy(x, y, z):
@@ -221,7 +218,6 @@ class TestTensorExprFuser(BaseTestClass):
         npr = np_easy(a.numpy(), b.numpy(), c.numpy())
         np.testing.assert_allclose(npr, x.numpy())
 
-
     def test_broadcast(self):
         def easy(x, y, z):
             a = torch.add(x, y)
@@ -242,7 +238,6 @@ class TestTensorExprFuser(BaseTestClass):
         x = traced(a, b, c)
         npr = np_easy(a.numpy(), b.numpy(), c.numpy())
         np.testing.assert_allclose(npr, x.numpy())
-
 
     def test_broadcast_2(self):
         zero = torch.tensor([0.0], dtype=torch.float)
@@ -266,7 +261,6 @@ class TestTensorExprFuser(BaseTestClass):
         rnp = foo_np(x.numpy(), y.numpy(), z.numpy())
         np.testing.assert_allclose(r, rnp)
 
-
     def test_broadcast_big2(self):
         zero = torch.tensor([0.0], dtype=torch.float)
 
@@ -289,7 +283,6 @@ class TestTensorExprFuser(BaseTestClass):
         rnp = foo_np(x.numpy(), y.numpy(), z.numpy())
         np.testing.assert_allclose(r, rnp)
 
-
     def test_alpha(self):
         def alpha(x):
             aaa = torch.add(x, x, alpha=2.0)
@@ -300,7 +293,6 @@ class TestTensorExprFuser(BaseTestClass):
         a = torch.tensor([1.0])
         x = traced(a)
         np.testing.assert_allclose(a.numpy() + 2.0 * a.numpy(), x.numpy())
-
 
     @suppress_warnings
     def test_constant(self):
@@ -314,7 +306,6 @@ class TestTensorExprFuser(BaseTestClass):
         a = torch.tensor([1.0])
         x = traced(a)
         np.testing.assert_allclose(a.numpy() + 1.0, x.numpy())
-
 
     def test_add_sub(self):
         def easy(x, y, z):
@@ -331,7 +322,6 @@ class TestTensorExprFuser(BaseTestClass):
         c = torch.rand(1024)
         x = traced(a, b, c)
         np.testing.assert_allclose(a.numpy() + b.numpy() - c.numpy(), x.numpy())
-
 
     def test_promotion(self):
         def easy(x, y):
@@ -434,7 +424,6 @@ class TestTensorExprFuser(BaseTestClass):
         x = traced(a, b)
         np.testing.assert_allclose(np.ones(1024), x.numpy())
 
-
     def test_ne(self):
         def easy(x, y):
             c = torch.ne(x, y)
@@ -445,7 +434,6 @@ class TestTensorExprFuser(BaseTestClass):
         b = torch.ones(1024, dtype=torch.int32)
         x = traced(a, b)
         np.testing.assert_allclose(np.ones(1024), x.numpy())
-
 
     def test_ge(self):
         def easy(x, y):
@@ -460,7 +448,6 @@ class TestTensorExprFuser(BaseTestClass):
         x = traced(a, b)
         np.testing.assert_allclose(np.ones(1024), x.numpy())
 
-
     def test_gt(self):
         def easy(x, y):
             c = torch.gt(x, y)
@@ -471,7 +458,6 @@ class TestTensorExprFuser(BaseTestClass):
         b = torch.zeros(1024, dtype=torch.int32)
         x = traced(a, b)
         np.testing.assert_allclose(np.ones(1024), x.numpy())
-
 
     def test_le(self):
         def easy(x, y):
@@ -486,7 +472,6 @@ class TestTensorExprFuser(BaseTestClass):
         x = traced(a, b)
         np.testing.assert_allclose(np.zeros(1024), x.numpy())
 
-
     def test_lt(self):
         def easy(x, y):
             c = torch.lt(x, y)
@@ -500,7 +485,6 @@ class TestTensorExprFuser(BaseTestClass):
             x = traced(a, b)
             np.testing.assert_allclose(np.zeros(1024), x.cpu().numpy())
 
-
     @suppress_warnings
     def test_min_max(self):
         def test(x, y):
@@ -513,7 +497,6 @@ class TestTensorExprFuser(BaseTestClass):
             traced(a, b), np.maximum(np.minimum(a.numpy(), b.numpy()), [4.0])
         )
 
-
     def test_min_max_reduction(self):
         def test(x):
             return torch.min(x) + torch.max(x)
@@ -521,7 +504,6 @@ class TestTensorExprFuser(BaseTestClass):
         traced = torch.jit.trace(test, (torch.zeros(1024)))
         a = 8.0 * torch.rand(1024)
         np.testing.assert_allclose(traced(a), np.amin(a.numpy()) + np.amax(a.numpy()))
-
 
     def test_min_max_reduction2(self):
         def test(x):
@@ -531,7 +513,6 @@ class TestTensorExprFuser(BaseTestClass):
         a = 8.0 * torch.rand(1024)
         np.testing.assert_allclose(traced(a), np.amin(a.numpy()) + np.amax(a.numpy()))
 
-
     def test_min_max_reduction_dim1(self):
         def test(x):
             return torch.min(x, 1)[0] + torch.max(x, 1)[0]
@@ -540,7 +521,6 @@ class TestTensorExprFuser(BaseTestClass):
         a = 8.0 * torch.rand(16, 16)
         np.testing.assert_allclose(traced(a), np.amin(a.numpy(), axis=1) + np.amax(a.numpy(), axis=1))
 
-
     def test_min_max_reduction_dim1_2(self):
         def test(x):
             return torch.min(x, 1)
@@ -548,7 +528,6 @@ class TestTensorExprFuser(BaseTestClass):
         traced = torch.jit.trace(test, (torch.zeros(16, 16)))
         a = 8.0 * torch.rand(16, 16)
         np.testing.assert_allclose(traced(a)[0], np.amin(a.numpy(), axis=1))
-
 
     def test_clamp(self):
         def test(x):
@@ -573,7 +552,6 @@ class TestTensorExprFuser(BaseTestClass):
             an = a.cpu().numpy()
             np.testing.assert_allclose(traced(a).cpu(), np.clip((np.maximum(0, an)), 0, 0.5))
 
-
     def test_reps(self):
         def easy(x, y):
             c = torch.add(x, y)
@@ -587,7 +565,6 @@ class TestTensorExprFuser(BaseTestClass):
             x = traced(a, b)
             np.testing.assert_allclose(np.ones(1024), x.numpy())
 
-
     def test_add_const_rhs(self):
         def test(x):
             return x + 3.0
@@ -596,7 +573,6 @@ class TestTensorExprFuser(BaseTestClass):
         x = torch.rand(4)
         y = traced(x)
         np.testing.assert_allclose(x.numpy() + 3.0, y.numpy())
-
 
     def test_int_output(self):
         def test(x, y, z):
@@ -904,7 +880,6 @@ class TestTensorExprFuser(BaseTestClass):
                     print("Failed on dev=", dev, "function=", torch_fn)
                     np.testing.assert_allclose(x.cpu().numpy(), y.cpu().numpy())
 
-
     def test_rand_like(self):
         devices = ["cuda"] if torch.cuda.is_available() else []
         N = 1 << 16
@@ -924,7 +899,6 @@ class TestTensorExprFuser(BaseTestClass):
             np.testing.assert_allclose(x2_mean, 1. / 3, rtol=2e-2)
             np.testing.assert_allclose(x3_mean, 1. / 4, rtol=2e-2)
 
-
     def test_nans(self):
         def test_max(x, y):
             return torch.max(2 * x, 2 * y)
@@ -942,7 +916,6 @@ class TestTensorExprFuser(BaseTestClass):
         assert np.isnan(tmin(y, x).item())
         assert np.isnan(tmax(x, y).item())
         assert np.isnan(tmax(y, x).item())
-
 
     def test_remainder(self):
         def run_remainder(x, y):
@@ -974,7 +947,6 @@ class TestTensorExprFuser(BaseTestClass):
         y = run_remainder(nans, a)
         np.testing.assert_allclose(x.numpy(), y.numpy())
 
-
     def test_multioutput(self):
         def easy(x):
             b = x + 1
@@ -989,7 +961,6 @@ class TestTensorExprFuser(BaseTestClass):
         cp = bp + bp
         np.testing.assert_allclose(b.numpy(), bp)
         np.testing.assert_allclose(c.numpy(), cp)
-
 
     def test_chunk(self):
         def easy(x):
@@ -1092,7 +1063,6 @@ class TestTensorExprFuser(BaseTestClass):
         # FIXME: interp.elapsed_value() also increments due to simplifier
         assert llvm.elapsed_value() == 1 or interp.elapsed_value() > 1
 
-
     def test_unsqueeze(self):
         def easy(x, y):
             a = torch.unsqueeze(x, 0)
@@ -1112,7 +1082,6 @@ class TestTensorExprFuser(BaseTestClass):
         # FIXME: interp.elapsed_value() also increments due to simplifier
         assert llvm.elapsed_value() == 1 or interp.elapsed_value() > 1
 
-
     def test_transpose(self):
         @torch.jit.script
         def test(x, y, z):
@@ -1128,7 +1097,6 @@ class TestTensorExprFuser(BaseTestClass):
         # FIXME: interp.elapsed_value() also increments due to simplifier
         assert llvm.elapsed_value() == 1 or interp.elapsed_value() > 1
 
-
     def test_sliced_stride(self):
         @torch.jit.script
         def test(x, y, z):
@@ -1143,7 +1111,6 @@ class TestTensorExprFuser(BaseTestClass):
         np.testing.assert_allclose(ref.numpy(), res.numpy())
         # FIXME: interp.elapsed_value() also increments due to simplifier
         assert llvm.elapsed_value() == 1 or interp.elapsed_value() > 1
-
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     @unittest.skip("dynamic shapes are not quite there yet")
@@ -1298,6 +1265,112 @@ class TestTensorExprFuser(BaseTestClass):
         np.testing.assert_allclose(f.numpy(), f_test)
         torch._C._jit_set_te_generate_block_code(val)
         torch._C._jit_texpr_set_fallback_allowed(fall_bk)
+
+    def test_alias_analysis_module(self):
+        class AliasModule(nn.Module):
+            def __init__(self):
+                super(AliasModule, self).__init__()
+                torch.manual_seed(1337)
+                self.a = torch.randn(128, 128)
+                self.b = torch.randn(128, 128)
+                self.c = torch.randn(128, 128)
+
+            def forward(self, x, y, z):
+                z = z + self.a
+                self.b.add_(y)
+                w = z + self.a
+                z = w + x
+                return z
+        x = torch.randn(128, 128)
+
+        def getModule(script):
+            am = AliasModule()
+            if script:
+                return torch.jit.script(am)
+            return am
+
+        am = getModule(False)
+        am_s = getModule(True)
+        ref = am(x, x, x)
+        test = am_s(x, x, x)
+        torch.testing.assert_allclose(ref, test)
+
+        # Now do the aliasing
+        am.a = am.b
+        ref = am(x, x, x)
+
+        am_s.a = am_s.b
+        test = am_s(x, x, x)
+
+        torch.testing.assert_allclose(ref, test)
+
+    def test_alias_analysis_inputs(self):
+        class AliasModule(nn.Module):
+            def __init__(self):
+                super(AliasModule, self).__init__()
+                torch.manual_seed(1337)
+                self.a = torch.randn(128, 128)
+                self.b = torch.randn(128, 128)
+                self.c = torch.randn(128, 128)
+
+            def forward(self, x, y, z):
+                x.add_(y)
+                w = z + self.a
+                z = w + x
+                return z
+
+        def getModule(script):
+            am = AliasModule()
+            if script:
+                return torch.jit.script(am)
+            return am
+        am = getModule(False)
+        am_s = getModule(True)
+
+        torch.manual_seed(1337)
+        x = torch.randn(128, 128)
+        ref = am(x, x, x)
+
+        torch.manual_seed(1337)
+        x = torch.randn(128, 128)
+        test = am_s(x, x, x)
+
+        torch.testing.assert_allclose(ref, test)
+
+    def test_alias_analysis_input_and_module(self):
+        class AliasModule(nn.Module):
+            def __init__(self):
+                super(AliasModule, self).__init__()
+                torch.manual_seed(1337)
+                self.a = torch.randn(128, 128)
+                self.b = torch.randn(128, 128)
+                self.c = torch.randn(128, 128)
+
+            def forward(self, x, y, z):
+                x.add_(y)
+                w = z + self.b
+                z = w + x
+                return z
+
+        def getModule(script):
+            am = AliasModule()
+            if script:
+                return torch.jit.script(am)
+            return am
+        am = getModule(False)
+        am_s = getModule(True)
+
+        torch.manual_seed(1337)
+        x = torch.randn(128, 128)
+        am.b = x
+        ref = am(x, x, x)
+
+        torch.manual_seed(1337)
+        x = torch.randn(128, 128)
+        am_s.b = x
+        test = am_s(x, x, x)
+
+        torch.testing.assert_allclose(ref, test)
 
 
 if __name__ == '__main__':
