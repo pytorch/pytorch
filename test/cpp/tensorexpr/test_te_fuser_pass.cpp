@@ -13,8 +13,8 @@ namespace jit {
 using namespace torch::jit::tensorexpr;
 
 struct WithCPUFuser {
-  WithCPUFuser() : cpuFuserEnabled(canFuseOnCPU()) {
-    overrideCanFuseOnCPU(true);
+  WithCPUFuser(bool val = true) : cpuFuserEnabled(canFuseOnCPU()) {
+    overrideCanFuseOnCPU(val);
   }
 
   ~WithCPUFuser() {
@@ -122,6 +122,43 @@ void testFuserPass_0DimInput() {
   FuseTensorExprs(g);
 
   // We should not fuse 0-dim tensors
+  testing::FileCheck().check_not("prim::TensorExprGroup")->run(*g);
+}
+
+void testFuserPass_UnfusibleDevice() {
+  WithCPUFuser cf(false);
+  KernelScope kernel_scope;
+  const auto graph_string = R"IR(
+    graph(%x : Float(10:1, device=cpu),
+          %y : Float(10:1, device=cpu)):
+      %a : Float(10:1, device=cpu) = aten::mul(%x, %y)
+      return (%a))IR";
+  auto g = std::make_shared<Graph>();
+  torch::jit::parseIR(graph_string, g.get());
+
+  g->lint();
+  FuseTensorExprs(g, /* min_group_size= */ 1);
+
+  // Test that we're not starting fusion groups from nodes with unfusible device
+  testing::FileCheck().check_not("prim::TensorExprGroup")->run(*g);
+}
+
+void testFuserPass_UnknownShapes() {
+  WithCPUFuser cf;
+  KernelScope kernel_scope;
+  const auto graph_string = R"IR(
+    graph(%x : Tensor,
+          %y : Tensor):
+      %a : Tensor = aten::mul(%x, %y)
+      %b : Tensor = aten::mul(%x, %a)
+      return (%a))IR";
+  auto g = std::make_shared<Graph>();
+  torch::jit::parseIR(graph_string, g.get());
+
+  g->lint();
+  FuseTensorExprs(g);
+
+  // Test that we're not generating fusion groups when shapes are not known
   testing::FileCheck().check_not("prim::TensorExprGroup")->run(*g);
 }
 } // namespace jit

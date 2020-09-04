@@ -164,6 +164,15 @@ TORCH_API Tensor* Reduce(
     const Buffer& buffer,
     const std::vector<DimArg>& reduce_args);
 
+// Overload for the common case of all dimensions of a prevously Computed
+// Tensor.
+TORCH_API Tensor* Reduce(
+    const std::string& func_name,
+    const std::vector<DimArg>& dim_args,
+    const Reducer& reducer,
+    Tensor* tensor,
+    const std::vector<DimArg>& reduce_args);
+
 class FunctionCall : public CallNode<FunctionCall> {
  public:
   using BaseClass = CallNode<FunctionCall>;
