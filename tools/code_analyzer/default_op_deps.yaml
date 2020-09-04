@@ -10466,6 +10466,10 @@
   depends:
   - name: aten::eq
   - name: aten::is_nonzero
+- name: quantized::conv2d_output_padding
+  depends:
+  - name: aten::eq
+  - name: aten::is_nonzero
 - name: quantized::conv2d_padding
   depends:
   - name: aten::eq
@@ -10497,6 +10501,10 @@
   depends:
   - name: aten::eq
   - name: aten::is_nonzero
+- name: quantized::conv2d_transpose
+  depends:
+  - name: aten::eq
+  - name: aten::is_nonzero
 - name: quantized::conv2d_unpack
   depends:
   - name: aten::eq
@@ -10513,6 +10521,10 @@
   depends:
   - name: aten::eq
   - name: aten::is_nonzero
+- name: quantized::conv3d_output_padding
+  depends:
+  - name: aten::eq
+  - name: aten::is_nonzero
 - name: quantized::conv3d_padding
   depends:
   - name: aten::eq
@@ -10526,6 +10538,10 @@
   - name: aten::eq
   - name: aten::is_nonzero
 - name: quantized::conv3d_stride
+  depends:
+  - name: aten::eq
+  - name: aten::is_nonzero
+- name: quantized::conv3d_transpose
   depends:
   - name: aten::eq
   - name: aten::is_nonzero
@@ -10552,6 +10568,38 @@
   - name: aten::size
   - name: aten::to
   - name: aten::zeros
+- name: quantized::conv_transpose2d_dilation
+  depends:
+  - name: aten::eq
+  - name: aten::is_nonzero
+- name: quantized::conv_transpose2d_groups
+  depends:
+  - name: aten::eq
+  - name: aten::is_nonzero
+- name: quantized::conv_transpose2d_output_padding
+  depends:
+  - name: aten::eq
+  - name: aten::is_nonzero
+- name: quantized::conv_transpose2d_padding
+  depends:
+  - name: aten::eq
+  - name: aten::is_nonzero
+- name: quantized::conv_transpose2d_prepack
+  depends:
+  - name: aten::eq
+  - name: aten::is_nonzero
+- name: quantized::conv_transpose2d_stride
+  depends:
+  - name: aten::eq
+  - name: aten::is_nonzero
+- name: quantized::conv_transpose2d_transpose
+  depends:
+  - name: aten::eq
+  - name: aten::is_nonzero
+- name: quantized::conv_transpose2d_unpack
+  depends:
+  - name: aten::eq
+  - name: aten::is_nonzero
 - name: quantized::conv_unpack
   depends:
   - name: aten::eq
