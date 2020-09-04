@@ -432,8 +432,15 @@ namespace jit {
   _(CudaHalfSupport)                       \
   _(CudaPrioritizeDependents)              \
   _(CudaMaskBlockDim)                      \
-  _(CudaMaskThreadDim)
-// _(CudaMaskBlockAndThreadDim)
+  _(CudaMaskThreadDim)                     \
+  _(CudaMaskMultiBlockDim)                 \
+  _(CudaMaskBlockAndThreadDim)             \
+  _(CudaMaskMultiDim)                      \
+  _(CudaMaskMultiDimSymbolic)              \
+  _(CudaMaskCompoundInnerLoop)             \
+  _(CudaMaskInnerLoopOneBlock)             \
+  _(CudaMaskMultiDimMultiAxis)             \
+  _(CudaMaskMultiDimMultiLevel)
 
 #define DECLARE_TENSOREXPR_TEST(name) void test##name();
 TH_FORALL_TENSOREXPR_TESTS(DECLARE_TENSOREXPR_TEST)
