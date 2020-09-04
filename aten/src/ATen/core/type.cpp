@@ -940,11 +940,9 @@ TensorTypePtr TensorType::create(
     const VaryingShape<int64_t>& strides,
     c10::optional<bool> requires_grad,
     c10::optional<bool> undefined, bool tensor_contiguity) {
-
-  if(sizes.concrete_sizes().has_value()){
-    TORCH_INTERNAL_ASSERT(
-        !strides.concrete_sizes().has_value() ||
-        sizes.concrete_sizes()->size() == strides.concrete_sizes()->size());
+  if(strides.concrete_sizes() && strides.concrete_sizes().has_value()){
+    // handles case where strides are set
+    TORCH_INTERNAL_ASSERT(sizes.concrete_sizes()->size() == strides.concrete_sizes()->size());
     auto sprops = strides.concrete_sizes().has_value()
       ? computeStrideProps(*sizes.concrete_sizes(), *strides.concrete_sizes(), tensor_contiguity)
       : VaryingShape<Stride>();
@@ -952,11 +950,11 @@ TensorTypePtr TensorType::create(
     return TensorType::create(
       scalar_type, device, symbol_sizes, sprops, requires_grad, undefined);
   } else {
-    // are unsized ranks 
+    // strides are all null, but still have number of strides equal to number of ranks
     TORCH_INTERNAL_ASSERT(sizes.sizes() && sizes.size());
     auto symbol_sizes = SymbolicShape(*sizes.sizes());
     return TensorType::create(
-      scalar_type, device, symbol_sizes, VaryingShape<Stride>(*sizes.size()), requires_grad, undefined); 
+      scalar_type, device, symbol_sizes, VaryingShape<Stride>(*sizes.size()), requires_grad, undefined);
   }
 }
 
