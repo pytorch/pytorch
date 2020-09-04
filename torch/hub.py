@@ -362,8 +362,8 @@ def load_local(hubconf_dir, model, *args, **kwargs):
         a single model with corresponding pretrained weights.
 
     Example:
-        >>> model = torch.hub.load_local(
-                '/local/copy/of/pytorch/vision', 'resnet50', pretrained=True)
+        >>> path = '/some/local/path/pytorch/vision'
+        >>> model = torch.hub.load_local(path, 'resnet50', pretrained=True)
     """
     sys.path.insert(0, hubconf_dir)
 
