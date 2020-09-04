@@ -189,7 +189,7 @@ Works only with Python3.\n A few examples:
 
     def run_with_input_iter(bench_cls, input_iter, allow_skip=True):
         tensor_dim_specs = input_iter.split(',')
-        tensor_dim_specs = [ dim.split(':') for dim in tensor_dim_specs ]
+        tensor_dim_specs = [dim.split(':') for dim in tensor_dim_specs]
 
         configs = []
         for dim in tensor_dim_specs :
