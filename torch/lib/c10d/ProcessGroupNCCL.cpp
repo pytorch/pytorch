@@ -650,8 +650,8 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
 
     // If not set before, get a dedicated stream for the device to run
     // FutureNCCL then callbacks.
+    std::lock_guard<std::mutex> lock(mutex_);
     if (futureNCCLCallbackStreams_[deviceIndex] == nullptr) {
-      std::lock_guard<std::mutex> lock(mutex_);
       futureNCCLCallbackStreams_[deviceIndex] =
           std::make_shared<at::cuda::CUDAStream>(at::cuda::getStreamFromPool());
     }
