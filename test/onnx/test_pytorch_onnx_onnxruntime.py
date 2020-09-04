@@ -2622,6 +2622,19 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(SplitModel(), x)
 
     @skipIfUnsupportedMinOpsetVersion(11)
+    def test_split_size_list_to_slice(self):
+        class SplitModule(torch.nn.Module):
+            def forward(self, x, y, t):
+                splits = (x.size(1), y.size(1))
+                out, out2 = torch.split(t, splits, dim=1)
+                return out, out2
+
+        x = torch.randn(2, 3)
+        y = torch.randn(2, 4)
+        t = torch.randn(2, 7)
+        self.run_test(SplitModule(), (x, y, t))
+
+    @skipIfUnsupportedMinOpsetVersion(11)
     def test_split_dynamic(self):
         class SplitModel(torch.jit.ScriptModule):
             @torch.jit.script_method
