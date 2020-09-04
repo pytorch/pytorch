@@ -1346,7 +1346,7 @@ std::tuple<Tensor,Tensor> eig_cuda(const Tensor & self, bool eigenvectors) {
   int64_t n = self.size(-1);
 
   if (self.numel() == 0) {
-    auto eigvals = at::empty({n}, self.options());
+    auto eigvals = at::empty({n, 2}, self.options());
     return std::tuple<Tensor, Tensor>(eigvals, at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT));
   }
 
