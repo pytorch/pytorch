@@ -1624,6 +1624,7 @@ class TestSparse(TestCase):
 
         def _test_empty_like(sparse_tensor):
             result = torch.empty_like(input_coalesced, memory_format=torch.preserve_format)
+            self.assertTrue(result.is_sparse)
             self.assertEqual(result.shape, input_coalesced.shape)
             self.assertEqual(result.dtype, input_coalesced.dtype)
             self.assertEqual(result.device, input_coalesced.device)
@@ -1637,7 +1638,7 @@ class TestSparse(TestCase):
             device=self.device
         )
         _test_empty_like(input_coalesced)
-        
+
         # hybrid sparse input
         input_coalesced = torch.sparse_coo_tensor(
             indices=torch.tensor([[1, 3], [2, 4]]),
@@ -1646,7 +1647,7 @@ class TestSparse(TestCase):
             device=self.device
         )
         _test_empty_like(input_coalesced)
-        
+
         if self.is_uncoalesced:
             # test uncoalesced input
             input_uncoalesced = torch.sparse_coo_tensor(
