@@ -1804,14 +1804,11 @@
 
 - func: nanprod(Tensor self, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
-  supports_named_tensor: False
 
 - func: nanprod.dim_int(Tensor self, int dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   variants: function, method
-  supports_named_tensor: False
 
 - func: nanprod.int_out(Tensor self, int dim, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
-  supports_named_tensor: False
 
 - func: native_layer_norm(Tensor input, Tensor? weight, Tensor? bias, int M, int N, float eps) -> (Tensor, Tensor, Tensor)
   use_c10_dispatcher: full
