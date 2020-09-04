@@ -20,11 +20,9 @@ namespace at {
 namespace native {
 
 inline static Tensor column_major_identity_matrix_like(const Tensor& self) {
-  int n = cuda_int_cast(self.size(-2), "self.size(-2)");
-  Tensor self_inv = at::eye({n}, self.options()).expand_as(self).contiguous();
-  self_inv.unsafeGetTensorImpl()->set_stride(self.dim()-2, 1); // These two lines set self_inv to column-major
-  self_inv.unsafeGetTensorImpl()->set_stride(self.dim()-1, n);
-  return self_inv;
+  auto size = self.sizes();
+  auto size_slice = IntArrayRef(size.data(), size.size()-1);
+  return at::ones(size_slice, self.options()).diag_embed().transpose(-2, -1);
 }
 
 template <typename scalar_t>
