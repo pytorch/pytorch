@@ -539,13 +539,15 @@ class TestFX(JitTestCase):
 
         # print_nodes(traced.graph)
 
+        # Test extracting a single submodule from the GraphModule
         with_extracted_module : torch.fx.GraphModule = extract_module(traced, 'bar.rn')
         # print(with_extracted_module)
 
         test_input = torch.randn(1, 3, 224, 224)
         self.assertEqual(with_extracted_module(test_input), traced(test_input))
 
-        # Now try it with serializaton
+        # Run the Module through ser/de, then try the same thing again
+        # Should run just fine if our serialization worked properly
         pickled = pickle.dumps(traced)
         loaded = pickle.loads(pickled)
 
@@ -554,8 +556,6 @@ class TestFX(JitTestCase):
         self.assertEqual(loaded_with_extracted_module(test_input), traced(test_input))
 
         # Now try to fully un-inline the Graph.
-        # First, extract all unique Module qualnames
-
         uninlined = fully_outline_module(traced)
 
         # print(uninlined)

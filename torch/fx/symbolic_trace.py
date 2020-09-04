@@ -183,6 +183,10 @@ class DefaultDelegate(DelegateBase):
 def _proxy_placeholder(name: str, delegate: DelegateBase) -> Proxy:
     return Proxy(delegate.placeholder(name), delegate)
 
+# Context manager to specify--for all symbolically traced Nodes within the
+# `with` block, the qualified name of the Module from which those nodes
+# originated. Note that multiple ModuleHierarchyCtxMgr's can be nested
+# reentrantly.
 class ModuleHierarchyCtxMgr:
     def __init__(self, target : str):
         self.target = target

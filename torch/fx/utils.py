@@ -124,6 +124,7 @@ def fully_outline_module(mod : torch.fx.GraphModule) -> torch.fx.GraphModule:
     nodes will appear in nested GraphModules reflecting the original Module
     hierarchy
     """
+    # First, extract all unique Module qualnames
     all_unique_qualnames = set(n.module_qualname for n in mod.graph.nodes if n.module_qualname)
 
     # Split qualnames by atoms
