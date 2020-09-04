@@ -170,12 +170,12 @@ void unpackQuantizedWeightsHelper(
     constexpr int64_t dilation_idx = 4;
     constexpr int64_t groups_idx = 5;
     c10::optional<torch::List<int64_t>> stride, padding, dilation,
-                                        output_padding;
+        output_padding;
     c10::optional<int64_t> groups;
     c10::optional<int64_t> transpose;
 
     torch::List<int64_t> stride_int, padding_int, dilation_int,
-                         output_padding_int;
+        output_padding_int;
     int64_t groups_int;
     int64_t transpose_int;
 
@@ -211,7 +211,7 @@ void unpackQuantizedWeightsHelper(
         }
         for (int i = 0; i < kSpatialDim; ++i) {
           output_padding_int.emplace_back(
-            conv_params_packed[idx].item<int64_t>());
+              conv_params_packed[idx].item<int64_t>());
           idx++;
         }
         groups_int = conv_params_packed[idx].item<int64_t>();
