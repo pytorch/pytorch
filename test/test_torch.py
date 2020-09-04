@@ -6113,8 +6113,8 @@ class TestTorchDeviceType(TestCase):
             test_inverse_helper(_matrices, batches, n)
             test_inverse_helper(_matrices.transpose(-2, -1), batches, n)
             test_inverse_helper(
-                random_fullrank_matrix_distinct_singular_value(n * 2, *batches).to(device)\
-                    .view(-1, n * 2, n * 2)[:, ::2, ::2].view(*batches, n, n),
+                random_fullrank_matrix_distinct_singular_value(n * 2, *batches).to(device)
+                .view(-1, n * 2, n * 2)[:, ::2, ::2].view(*batches, n, n),
                 batches, n
             )
 
