@@ -1,15 +1,15 @@
 import torch
 import torch.nn as nn
-from torch import Tensor  # noqa: F401
-from torch._jit_internal import Optional, List  # noqa: F401
+from torch import Tensor
 from torch.nn.quantized.modules.utils import hide_packed_params_repr
 from torch.nn.quantized.modules.utils import _quantize_weight
 from torch.quantization.qconfig import float_qparams_dynamic_qconfig
+from typing import Optional
 
 class EmbeddingPackedParams(torch.nn.Module):
     _version = 1
 
-    def __init__(self, num_embeddings, embedding_dim, dtype=torch.quint8):
+    def __init__(self, num_embeddings, embedding_dim, dtype=torch.quint8) -> None:
         super(EmbeddingPackedParams, self).__init__()
         self.dtype = dtype
         if self.dtype == torch.quint8:
@@ -23,8 +23,7 @@ class EmbeddingPackedParams(torch.nn.Module):
             raise RuntimeError('Unsupported dtype on dynamic quantized embedding_bag!')
 
     @torch.jit.export
-    def set_weight(self, weight):
-        # type: (torch.Tensor) -> None
+    def set_weight(self, weight: Tensor) -> None:
         if self.dtype == torch.quint8:
             self._packed_weight = torch.ops.quantized.embedding_bag_prepack(weight)
         else:
@@ -136,8 +135,7 @@ class EmbeddingBag(torch.nn.Module):
 
         return extra_repr_str
 
-    def set_weight(self, w):
-        # type: (torch.Tensor) -> None
+    def set_weight(self, w: Tensor) -> None:
         self._packed_params.set_weight(w)
 
     def weight(self):
