@@ -370,16 +370,10 @@ class ScriptModuleSerializer {
 
   void writeCode(const at::NamedTypePtr& root_type) {
     class_deps_.push_back(root_type);
-    // for (size_t i = 0; i < class_deps_.size(); ++i) {
-    //   // note: convertNameType may extend class_deps_, so re-checking
-    //   // .size() is necessary
-    //   convertNamedType(class_deps_[i]);
-    // }
-    for (auto it = class_deps_.begin(); it != class_deps_.end(); ) {
+    for (size_t i = 0; i < class_deps_.size(); ++i) {
       // note: convertNameType may extend class_deps_, so re-checking
       // .size() is necessary
-      convertNamedType(*it);
-      ++it;
+      convertNamedType(class_deps_[i]);
     }
 
     // Mapping of filename => src. We need this because multiple classes may go

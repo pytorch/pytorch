@@ -173,29 +173,17 @@ struct PythonPrintImpl {
   };
 
   // Helper to avoid duplicating class types
-  void registerNamedTypeDependency(const c10::NamedTypePtr& type) {
-    if (deps_table_.find(type) == deps_table_.end()) {
-      deps_table_.emplace(type);
-    }
-  }
-  
-  // Helper to avoid duplicating function types
-  void registerFunctionTypeDependency(const c10::FunctionTypePtr& type) {
-    // Need to do actual equality comparison, not a pointer equality. This is
+  void registerDependency(const c10::NamedTypePtr& type) {
+    // We are actually doing actual equality via , not a pointer equality. This is
     // because for some types (e.g. FunctionType), we may have multiple
     // TypePtr's that represent the same underlying thing.
-    // auto it = std::find_if(
-    //     deps_table_.cbegin(),
-    //     deps_table_.cend(),
-    //     [&](const c10::NamedTypePtr& dep) { return *dep == *type; });
-
     auto it = deps_table_.find(type);
 
     if (it == deps_table_.cend()) {
       deps_table_.emplace(type);
     }
-  }
 
+  }
   // scanValue, scanNode, scanBlock:
   // decide if it is safe to omit the output of a temporary variable,
   // and inline the expression into its use
@@ -677,15 +665,15 @@ struct PythonPrintImpl {
   // Recursively check contained types for any class dependencies
   void registerClassDependencies(const TypePtr& type) {
     if (const auto classType = type->cast<ClassType>()) {
-      registerNamedTypeDependency(classType);
+      registerDependency(classType);
     } else if (const auto tupleType = type->cast<TupleType>()) {
       if (tupleType->name()) {
-        registerNamedTypeDependency(tupleType);
+        registerDependency(tupleType);
       }
     } else if (const auto interfaceType = type->cast<InterfaceType>()) {
-      registerNamedTypeDependency(interfaceType);
+      registerDependency(interfaceType);
     } else if (const auto enumType = type->cast<EnumType>()) {
-      registerNamedTypeDependency(enumType);
+      registerDependency(enumType);
     }
     for (const auto& containedType : type->containedTypes()) {
       registerClassDependencies(containedType);
@@ -935,7 +923,7 @@ struct PythonPrintImpl {
         if (node->outputs().size() == 1 &&
             node->output()->type()->kind() == TypeKind::FunctionType) {
           auto fn = node->output()->type()->expect<FunctionType>();
-          registerFunctionTypeDependency(fn);
+          registerDependency(fn);
           stmt << fn->annotation_str(type_printer_);
         } else if (!node->mustBeNone()) {
           IValue v = toIValue(node->output()).value();
@@ -1065,13 +1053,13 @@ struct PythonPrintImpl {
         stmt << ")";
 
         if (auto selfClass = self->type()->cast<ClassType>()) {
-          registerNamedTypeDependency(selfClass);
+          registerDependency(selfClass);
           const Function& method = selfClass->getMethod(node->s(attr::name));
           TORCH_INTERNAL_ASSERT(
               method.qualname() ==
               QualifiedName(selfClass->name()->qualifiedName(), methodName));
         } else if (auto selfInterface = self->type()->cast<InterfaceType>()) {
-          registerNamedTypeDependency(selfInterface);
+          registerDependency(selfInterface);
         } else {
           TORCH_INTERNAL_ASSERT(
               false, "method call to unhandled type in serialization");
