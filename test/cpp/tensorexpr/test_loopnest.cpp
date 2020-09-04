@@ -164,6 +164,9 @@ void testExprSliceHeadWithLoopOptions() {
   l.setGPUBlockIndex(loops[0], LoopOptions::IDX_Y);
   l.sliceHead(loops[0], 2, &head, &tail);
 
+  Block* body = getSimplifiedBody(l);
+  assertForRanges(body, {{0, 2}, {0, 8}});
+
   ASSERT_TRUE(tail->loop_options().is_gpu_block_index());
   ASSERT_EQ(tail->loop_options().gpu_block_index(), LoopOptions::IDX_Y);
 
@@ -180,13 +183,21 @@ void testExprSliceTailWithLoopOptions() {
   For* head;
   For* tail;
   std::vector<For*> loops = l.getLoopStmtsFor(tensor);
-  l.setGPUBlockIndex(loops[0], LoopOptions::IDX_Y);
-  l.sliceTail(loops[0], 2, &head, &tail);
+  l.sliceTail(loops[0], 4, &head, &tail);
 
-  ASSERT_TRUE(head->loop_options().is_gpu_block_index());
-  ASSERT_EQ(head->loop_options().gpu_block_index(), LoopOptions::IDX_Y);
+  For* tail_head;
+  For* tail_tail;
+  l.setGPUBlockIndex(tail, LoopOptions::IDX_Y);
+  l.sliceTail(tail, 2, &tail_head, &tail_tail);
 
-  ASSERT_TRUE(tail->loop_options().isDefault());
+  Block* body = getSimplifiedBody(l);
+  assertForRanges(body, {{0, 6}, {0, 2}, {8, 10}});
+
+  ASSERT_TRUE(tail_head->loop_options().is_gpu_block_index());
+  ASSERT_EQ(tail_head->loop_options().gpu_block_index(), LoopOptions::IDX_Y);
+
+  ASSERT_TRUE(head->loop_options().isDefault());
+  ASSERT_TRUE(tail_tail->loop_options().isDefault());
 }
 
 void testExprSliceHeadWhenFactorEqualsSize() {
