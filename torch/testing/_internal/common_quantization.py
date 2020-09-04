@@ -527,7 +527,7 @@ class QuantizationTestCase(TestCase):
         """
         nodes_in_graph = dict()
         node_list = []
-        modules = dict(graph_module.root.named_modules())
+        modules = dict(graph_module.named_modules())
         for node in graph_module.graph.nodes:
             n = None
             if node.op == 'call_function' or node.op == 'call_method':
@@ -579,7 +579,7 @@ class QuantizationTestCase(TestCase):
                 str(expected_node_list))
 
     def printGraphModule(self, graph_module, print_str=True):
-        modules = dict(graph_module.root.named_modules())
+        modules = dict(graph_module.named_modules())
         node_infos = []
         for n in graph_module.graph.nodes:
             node_info = ' '.join(map(repr, [n.op, n.name, n.target, n.args, n.kwargs]))
