@@ -501,3 +501,42 @@ class TestTypeSharing(JitTestCase):
         c = Foo({'bar': A()})
         self.assertDifferentType(a, b)
         self.assertSameType(b, c)
+
+    def test_type_sharing_disabled(self):
+        """
+        Test that type sharing can be disabled.
+        """
+        class A(torch.nn.Module):
+            def __init__(self, sub):
+                super().__init__()
+                self.sub = sub
+
+            def forward(self, x):
+                return x
+
+        class B(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return x
+
+        top1 = A(A(B()))
+        top2 = A(A(B()))
+
+        top1_s = torch.jit._recursive.create_script_module(
+            top1,
+            torch.jit._recursive.infer_methods_to_compile,
+            share_types=False,
+        )
+        top2_s = torch.jit._recursive.create_script_module(
+            top2,
+            torch.jit._recursive.infer_methods_to_compile,
+            share_types=False,
+        )
+
+        self.assertDifferentType(top1_s, top2_s)
+        self.assertDifferentType(top1_s, top1_s.sub)
+        self.assertDifferentType(top1_s, top2_s.sub)
+        self.assertDifferentType(top2_s, top2_s.sub)
+        self.assertDifferentType(top2_s, top1_s.sub)

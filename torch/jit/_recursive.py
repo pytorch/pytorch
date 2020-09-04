@@ -75,7 +75,7 @@ class SourceContext(torch._C._jit_tree_views.SourceRangeFactory):
         super(SourceContext, self).__init__(source, filename, file_lineno, leading_whitespace_len)
 
 
-def infer_concrete_type_builder(nn_module):
+def infer_concrete_type_builder(nn_module, share_types=True):
     """
     Build a ConcreteModuleTypeBuilder from an nn.Module. This
     ConcreteModuleType doesn't have a JIT type associated with it yet, it
@@ -136,7 +136,7 @@ def infer_concrete_type_builder(nn_module):
             sub_concrete_type = torch._C.ConcreteModuleType.from_jit_type(attr_type)
         else:
             # otherwise we get the concrete module type for item and add it to concrete_type
-            sub_concrete_type = concrete_type_store.get_or_create_concrete_type(item)
+            sub_concrete_type = get_module_concrete_type(item, share_types)
         concrete_type_builder.add_module(name, sub_concrete_type)
 
         added_names.add(name)
@@ -265,11 +265,6 @@ class ConcreteTypeStore(object):
         Infer a ConcreteType from this `nn.Module` instance. Underlying JIT
         types are re-used if possible.
         """
-        assert isinstance(nn_module, Module)
-        if isinstance(nn_module, torch.jit.ScriptModule) and \
-                hasattr(nn_module, "_concrete_type"):
-            return nn_module._concrete_type
-
         concrete_type_builder = infer_concrete_type_builder(nn_module)
 
         nn_module_type = type(nn_module)
@@ -295,6 +290,36 @@ def create_methods_from_stubs(concrete_type, stubs):
     defaults = [get_default_args(m.original_method) for m in stubs]
     concrete_type._create_methods(defs, rcbs, defaults)
 
+def get_module_concrete_type(nn_module, share_types=True):
+    """
+    Gets a concrete type for nn_modules. If share_types is True, the concrete
+    type is fetched from concrete_type_store. If it is False, a new concrete type
+    is created without first searching concrete_type_store.
+
+    Arguments:
+        nn_module:  The original Python nn.Module that we are creating a ScriptModule for.
+        share_types = Whether to share underlying JIT types between modules (if possible).
+
+    Returns:
+        A concrete type for nn_module.
+    """
+    assert isinstance(nn_module, Module)
+    if isinstance(nn_module, torch.jit.ScriptModule) and \
+            hasattr(nn_module, "_concrete_type"):
+        return nn_module._concrete_type
+
+    if share_types:
+        # Look into the store of cached JIT types
+        concrete_type = concrete_type_store.get_or_create_concrete_type(nn_module)
+    else:
+        # Get a concrete type directly, without trying to re-use an existing JIT
+        # type from the type store.
+        concrete_type_builder = infer_concrete_type_builder(nn_module, share_types)
+        concrete_type_builder.set_poisoned()
+        concrete_type = concrete_type_builder.build()
+
+    return concrete_type
+
 def create_script_module(nn_module, stubs_fn, share_types=True):
     """
     Creates a new ScriptModule from an nn.Module
@@ -309,15 +334,7 @@ def create_script_module(nn_module, stubs_fn, share_types=True):
     """
     assert not isinstance(nn_module, torch.jit.RecursiveScriptModule)
     check_module_initialized(nn_module)
-    if share_types:
-        # Look into the store of cached JIT types
-        concrete_type = concrete_type_store.get_or_create_concrete_type(nn_module)
-    else:
-        # Get a concrete type directly, without trying to re-use an existing JIT
-        # type from the type store.
-        concrete_type_builder = infer_concrete_type_builder(nn_module)
-        concrete_type_builder.set_poisoned()
-        concrete_type = concrete_type_builder.build()
+    concrete_type = get_module_concrete_type(nn_module, share_types)
     return create_script_module_impl(nn_module, concrete_type, stubs_fn)
 
 def create_script_module_impl(nn_module, concrete_type, stubs_fn):
@@ -350,6 +367,7 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
                 # use the interface inference rule to compile the module
                 scripted = interface_script(module_type, orig_value)
             elif isinstance(orig_value, torch.jit.ScriptModule):
+
                 scripted = orig_value
             else:
                 # use the default recursive rule to compile the module
