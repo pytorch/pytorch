@@ -541,11 +541,9 @@ class TensorExprFuser {
   }
 
   bool isFusableOnDevice(Node* node) {
-    for (const auto& output : node->outputs()) {
-      if (output->uses().size() > 0) {
-        if (!canFuseOnDevice(output)) {
-          return false;
-        }
+    for (const auto& input : node->inputs()) {
+      if (!canFuseOnDevice(input)) {
+        return false;
       }
     }
     return true;
@@ -557,6 +555,9 @@ class TensorExprFuser {
       return false;
     }
     if (!allShapesAreKnown(node)) {
+      return false;
+    }
+    if (!isFusableOnDevice(node)) {
       return false;
     }
 
