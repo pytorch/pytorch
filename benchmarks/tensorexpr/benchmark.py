@@ -85,6 +85,11 @@ class Benchmark(object):
         """return the number of scalar operations it takes to finish the tensor op"""
         return None
 
+    @staticmethod
+    def input_iterable():
+        """A benchmark child class should return true if it utilizes the input iter arg"""
+        return False
+
     def dtype_to_bytes(self) :
         import torch
         if self.dtype == torch.float32 :

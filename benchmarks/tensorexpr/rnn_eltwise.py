@@ -2,24 +2,24 @@ from . import benchmark
 import torch
 
 class RNNEltwise(benchmark.Benchmark):
-    def __init__(self, mode, device, b, hs):
-        super().__init__(mode, device)
+    def __init__(self, mode, device, dtype, b, hs):
+        super().__init__(mode, device, dtype)
         self.b = b
         self.hs = hs
         self.input = self.rand(
-            [b, 4 * hs], device=device, requires_grad=self.requires_grad
+            [b, 4 * hs], device=device, dtype=dtype, requires_grad=self.requires_grad
         )
         self.hx = self.rand(
-            [b, 4 * hs], device=device, requires_grad=self.requires_grad
+            [b, 4 * hs], device=device, dtype=dtype, requires_grad=self.requires_grad
         )
         self.cx = self.rand(
-            [b, hs], device=device, requires_grad=self.requires_grad
+            [b, hs], device=device, dtype=dtype, requires_grad=self.requires_grad
         )
         self.b_ih = self.rand(
-            [b, 4 * hs], device=device, requires_grad=self.requires_grad
+            [b, 4 * hs], device=device, dtype=dtype, requires_grad=self.requires_grad
         )
         self.b_hh = self.rand(
-            [b, 4 * hs], device=device, requires_grad=self.requires_grad
+            [b, 4 * hs], device=device, dtype=dtype, requires_grad=self.requires_grad
         )
         self.inputs = [
             self.input,

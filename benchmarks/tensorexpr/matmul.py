@@ -3,14 +3,14 @@ import numpy as np
 
 
 class MatMulBench(benchmark.Benchmark):
-    def __init__(self, mode, device, B, M, N, K):
-        super().__init__(mode, device)
+    def __init__(self, mode, device, dtype, B, M, N, K):
+        super().__init__(mode, device, dtype)
         self.B = B
         self.M = M
         self.N = N
         self.K = K
-        self.d1 = self.rand([B, M, N], device=device, requires_grad=self.requires_grad)
-        self.d2 = self.rand([B, N, K], device=device, requires_grad=self.requires_grad)
+        self.d1 = self.rand([B, M, N], device=device, dtype=dtype, requires_grad=self.requires_grad)
+        self.d2 = self.rand([B, N, K], device=device, dtype=dtype, requires_grad=self.requires_grad)
         self.inputs = [self.d1, self.d2]
 
     def forward(self, d1, d2):

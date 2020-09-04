@@ -2,8 +2,8 @@ from . import benchmark
 
 
 class ConvImplBench(benchmark.Benchmark):
-    def __init__(self, case, mode, device, kernel_size, N, iC, H, W, oC):
-        super().__init__(mode, device)
+    def __init__(self, case, mode, device, dtype, kernel_size, N, iC, H, W, oC):
+        super().__init__(mode, device, dtype)
         self.case = case
         self.kernel_size = kernel_size
         self.N = N

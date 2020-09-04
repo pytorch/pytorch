@@ -82,6 +82,10 @@ class ReduceColBench(ReduceBench):
         return "reduce_col"
 
 class Reduce2DBench(benchmark.Benchmark):
+    '''
+    A benchmark class to validate 2 dimensional reduction performance.
+    Only a simple add is fused to induce the fuser and isolate reduction perf.
+    '''
     def __init__(self, mode, device, dtype, red_dim, dim0, dim1):
         super().__init__(mode, device, dtype)
         self.red_dim = red_dim
@@ -101,18 +105,21 @@ class Reduce2DBench(benchmark.Benchmark):
         return y
 
     def config(self):
-        return [self.dim0, self.dim1]
+        return [self.red_dim, self.dim0, self.dim1]
 
     @staticmethod
     def default_configs():
         return [
-            # [512, 512, 512],
-            [640, 524288],
+            [1, 640, 524288],
         ]
 
     @staticmethod
     def module():
         return "reduce2d"
+
+    @staticmethod
+    def input_iterable() :
+        return True
 
     def memory_workload(self):
         assert self.mode == "fwd", "Only the forward operation is modeled!"
@@ -134,7 +141,6 @@ class Reduce2DInnerBench(Reduce2DBench):
     @staticmethod
     def module():
         return "reduce2d_inner"
-
 
 class Reduce2DOuterBench(Reduce2DBench):
     def __init__(self, mode, device, dtype, dim0, dim1):

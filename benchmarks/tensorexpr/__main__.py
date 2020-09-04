@@ -55,7 +55,9 @@ Works only with Python3.\n A few examples:
         "--input-iter",
         type=str,
         default=None,
-        help="a comma separated list of of Tensor dimensions that includes a start, stop, and increment that can be constant or a power of 2 {start:stop:inc,start:stop:pow2}",
+        help="a comma separated list of of Tensor dimensions that includes a start, \
+              stop, and increment that can be constant or a power of 2 \
+              {start:stop:inc,start:stop:pow2}",
     )
     parser.add_argument(
         "--engine",
@@ -128,6 +130,8 @@ Works only with Python3.\n A few examples:
         torch._C._jit_set_profiling_executor(True)
         torch._C._jit_set_nvfuser_enabled(True)
         torch._C._jit_set_profiling_mode(True)
+    else :
+        raise ValueError("Undefined fuser: {}".format(args.cuda_fuser))
 
     def set_global_threads(num_threads):
         os.environ["OMP_NUM_THREADS"] = str(num_threads)
@@ -161,7 +165,6 @@ Works only with Python3.\n A few examples:
 
     datatypes = args.dtype.split(",")
     for index, dtype in enumerate(datatypes):
-        import torch
         datatypes[index] = getattr(torch, dtype)
         if not datatypes[index] :
             raise AttributeError("DataType: {} is not valid!".format(dtype))
@@ -236,9 +239,11 @@ Works only with Python3.\n A few examples:
             for bench_cls in benchmark_classes:
                 if name in bench_cls.module():
                     match_class_name = True
-                    if not args.input_iter is None :
+                    if (not args.input_iter is None) and bench_cls.input_iterable() :
                         run_with_input_iter(bench_cls, args.input_iter, allow_skip=True)
                     else :
+                        if not args.input_iter is None :
+                            print("WARNING: Incompatible benchmark class called with input_iter arg: {}".format(name))
                         run_default_configs(bench_cls, allow_skip=True)
 
             if match_class_name:
