@@ -102,8 +102,8 @@ class Graph:
             name = node.name
         else:
             name = self._name(node.name)
-        target = qualname_transform(node.target) if isinstance(node.target, str) else node.target
-        module_qualname = qualname_transform(node.module_qualname)
+        target : Union[Callable[..., Any], str] = qualname_transform(node.target) if isinstance(node.target, str) else node.target
+        module_qualname = qualname_transform(node.module_qualname) if node.module_qualname else None
         return self.create_node(node.op, target, args, kwargs, name, module_qualname)
 
     def output(self, result: Argument):
