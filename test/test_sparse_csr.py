@@ -63,8 +63,7 @@ class TestSparseGCS(TestCase):
             dims2 = reduction[l:-1]
 
         strides1 = make_strides(shape[:l])
-        strides2 = make_strides(shape[l-1:-1])
-        # print(f'{shape} {strides1} {strides2} {dims1} {dims2}')
+        strides2 = make_strides(shape[l:])
         # <row>: <list of (colindex, value)>
         col_value = defaultdict(list)
         for index in itertools.product(*map(range, shape)):
@@ -73,6 +72,7 @@ class TestSparseGCS(TestCase):
                 v = v[i]
             if v == fill_value or np.isnan(v):
                 continue
+            print(index)
             p1 = apply_reduction(index, strides1, dims1)
             p2 = apply_reduction(index, strides2, dims2)
             col_value[p1].append((p2, v))
@@ -128,12 +128,13 @@ class TestSparseGCS(TestCase):
 
         self.assertEqual(sparse.to_dense(), ones)
         
-        rand = np.random.randn(100, 100)
+        rand = np.random.randn(4, 6)
         sparse = self.make_sparse_gcs(rand)
 
         self.assertEqual(sparse.to_dense(), rand)
 
-        multi_dim = np.random.randn(10, 8, 50, 20, 300)
+        multi_dim = np.random.randn(3, 2, 2, 2, 6)
+        
         sparse = self.make_sparse_gcs(multi_dim)
 
         self.assertEqual(sparse.to_dense(), multi_dim)

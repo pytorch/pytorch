@@ -21,10 +21,11 @@ Tensor& add_sparse_gcs_(Tensor& self, const Tensor& other, Scalar alpha) {
   return at::add_out(self, self, other, alpha);  // redispatch!
 }
 
-std::vector<int64_t> gcs_to_dense_convert(int64_t iptr, int64_t icol, Tensor& values,
+int64_t gcs_to_dense_convert(int64_t iptr, int64_t icol, Tensor& out,
                              const SparseTensor& src) {
   int64_t drow, dcol;
   std::vector<int64_t> dense_indices;
+  int64_t index = out.storage_offset();
   auto src_impl = get_sparse_impl<SparseGCSTensorImpl>(src);
   
   auto strides0 = src_impl->strides0();
@@ -33,14 +34,14 @@ std::vector<int64_t> gcs_to_dense_convert(int64_t iptr, int64_t icol, Tensor& va
   auto dims1 = src_impl->dims1();
   
   for (int i = 0; i < dims0.size(); ++i) {
-    dense_indices.push_back(int(iptr/strides0[i]) % src.size(i));
+    index += out.stride(i) * (int(iptr/strides0[i]) % src.size(i));
   }
 
   for (int i = 0; i < dims1.size(); ++i) {
-    dense_indices.push_back(int(icol/strides1[i]) % src.size(src_impl->rsplit_dim() + i));
+    index += out.stride(src_impl->rsplit_dim() + i) * (int(icol/strides1[i]) % src.size(src_impl->rsplit_dim() + i));
   }
 
-  return dense_indices;
+  return index;
 }
 
 Tensor& add_out_dense_sparse_gcs_cpu(Tensor& out, const Tensor& dense, const SparseTensor& src, Scalar alpha) {
@@ -87,15 +88,15 @@ Tensor& add_out_dense_sparse_gcs_cpu(Tensor& out, const Tensor& dense, const Spa
       int64_t end_index = pointers_accessor[iptr + 1];
       int64_t nindices = end_index - start_index;
       int64_t icol;
-      int64_t index = valuesBuffer.storage_offset();
-      
+      int64_t index;
+
       for (int i = start_index; i < end_index; ++i) {
         icol = indices_accessor[i];
+        index = gcs_to_dense_convert(iptr, icol, out, src);
+        out_ptr[index] += cast_value * values_accessor[i];
       }
     }
   });
-
-  gcs_to_dense_convert(21, 16, valuesBuffer, src);
   
   return out;
 }
