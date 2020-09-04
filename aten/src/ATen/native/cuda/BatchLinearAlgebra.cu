@@ -1345,6 +1345,7 @@ std::tuple<Tensor &,Tensor &> eig_cuda_out(Tensor & e, Tensor & v, const Tensor 
 }
 
 std::tuple<Tensor,Tensor> eig_cuda(const Tensor & self, bool eigenvectors) {
+  TORCH_CHECK(self.dim() == 2, "A should be 2 dimensional");
   squareCheckInputs(self);
   int64_t n = self.size(-1);
 
