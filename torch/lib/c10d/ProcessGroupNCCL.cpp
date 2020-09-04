@@ -400,25 +400,14 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       store_(store),
       ncclCommCounter_(0),
       terminateWatchdog_(false),
-      opTimeout_(opTimeout) {
+      opTimeout_(opTimeout),
+      futureNCCLCallbackStreams_(c10::cuda::device_count()) {
   try {
     parseNcclBlockingWait();
   } catch (std::exception& e) {
     throw std::runtime_error(
         "Invalid value for environment variable: " +
         std::string(NCCL_BLOCKING_WAIT));
-  }
-  // If single-process single-device mode, WorkNCCL::getFuture is supported.
-  // Depending on the device index of collective outputs, WorkNCCL will pass
-  // the corresponding device's then callback stream to FutureNCCL.
-  // For each device we first put a nullptr as a placeholder. Depending on the
-  // device of the NCCL collective's outputs, we later set the callback stream
-  // of the corresponding device inside ProcessGroupNCCL::getNCCLComm if not set
-  // before.
-  futureNCCLCallbackStreams_.reserve(c10::cuda::device_count());
-  for (int device_index = 0; device_index < c10::cuda::device_count();
-       device_index++) {
-    futureNCCLCallbackStreams_.push_back(nullptr);
   }
 
 #ifdef ENABLE_NCCL_ERROR_CHECKING
@@ -662,6 +651,7 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
     // If not set before, get a dedicated stream for the device to run
     // FutureNCCL then callbacks.
     if (futureNCCLCallbackStreams_[deviceIndex] == nullptr) {
+      std::lock_guard<std::mutex> lock(mutex_);
       futureNCCLCallbackStreams_[deviceIndex] =
           std::make_shared<at::cuda::CUDAStream>(at::cuda::getStreamFromPool());
     }
