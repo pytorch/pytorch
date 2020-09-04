@@ -337,7 +337,7 @@
   abs: not_implemented("polar abs")
   angle: not_implemented("polar angle")
 
-- name: conj(Tensor self) -> Tensor
+- name: _conj(Tensor self) -> Tensor
   self: grad.conj()
 
 - name: cos(Tensor self) -> Tensor
@@ -406,6 +406,10 @@
 - name: dot(Tensor self, Tensor tensor) -> Tensor
   self: grad * tensor
   tensor: grad * self
+
+- name: vdot(Tensor self, Tensor other) -> Tensor
+  self: 'not_implemented("vdot: self")'
+  other: 'not_implemented("vdot: other")'
 
 - name: _fused_dropout(Tensor self, float p, Generator? generator=None) -> (Tensor, Tensor)
   self: _fused_dropout_backward(grad, result1, p)
