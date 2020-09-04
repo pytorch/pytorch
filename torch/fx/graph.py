@@ -1,6 +1,6 @@
 from .node import Node, Argument, Target
 
-from typing import Callable, Any, List, Dict, Optional, Tuple
+from typing import Callable, Any, List, Dict, Optional, Tuple, Union
 import builtins
 import torch
 import keyword
