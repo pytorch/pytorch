@@ -17,6 +17,8 @@
 namespace torch {
 namespace jit {
 
+static bool texpr_reductions_enabled = false;
+
 bool isSupportedForBlock(Node* node) {
   switch (node->kind()) {
     case aten::add:
@@ -102,8 +104,6 @@ bool isSupported(Node* node) {
       "aten::addcmul(Tensor self, Tensor tensor1, Tensor tensor2, *, Scalar value=1) -> Tensor",
       "aten::neg(Tensor self) -> Tensor",
       "aten::reciprocal(Tensor self) -> Tensor",
-      "aten::sum(Tensor self, *, ScalarType? dtype=None) -> Tensor",
-      "aten::sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor",
       "aten::expm1(Tensor self) -> Tensor",
       "aten::unsqueeze(Tensor(a) self, int dim) -> Tensor(a)",
       "aten::frac(Tensor self) -> Tensor",
@@ -130,9 +130,16 @@ bool isSupported(Node* node) {
       "aten::max.other(Tensor self, Tensor other) -> Tensor",
       // TODO: enable slice, shape inference is not implemented for this op yet
   };
+  static const OperatorSet supported_reduction_set{
+      "aten::sum(Tensor self, *, ScalarType? dtype=None) -> Tensor",
+      "aten::sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor",
+  };
   // clang-format on
 
   if (node->isMemberOf(supported_operator_set)) {
+    return true;
+  }
+  if (texpr_reductions_enabled && node->isMemberOf(supported_reduction_set)) {
     return true;
   }
 
@@ -149,6 +156,7 @@ bool isSupported(Node* node) {
 } // namespace tensorexpr
 
 static bool texpr_fuser_enabled_ = false;
+
 void setTensorExprFuserEnabled(bool val) {
   texpr_fuser_enabled_ = val;
 }
@@ -162,6 +170,16 @@ bool tensorExprFuserEnabled() {
     return false;
   }
   return true;
+}
+
+bool setTexprReductionsEnabled(bool value) {
+  bool old_value = texpr_reductions_enabled;
+  texpr_reductions_enabled = value;
+  return old_value;
+}
+
+bool texprReductionsEnabled() {
+  return texpr_reductions_enabled;
 }
 
 struct nodesComparator {
