@@ -1,11 +1,12 @@
 #!/usr/bin/python3
 import types
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, List, Tuple
 
 import torch
 import torch.distributed.rpc as rpc
 from torch import nn
 from torch.distributed.nn.jit import instantiator
+from torch.nn.parameter import Parameter
 
 
 _NON_SCRIPTABLE_REMOTE_MODULE_MODULE = (
@@ -28,6 +29,13 @@ def _create_module(module_cls, args, kwargs, module_interface_cls=None):
     if module_interface_cls is not None:
         module = torch.jit.script(module)
     return rpc.RRef(module, module_interface_cls)
+
+
+def _param_rrefs(module_rref, recurse):
+    ret = []
+    for param in module_rref.local_value().parameters(recurse):
+        ret.append(rpc.RRef(param))
+    return ret
 
 
 class _RemoteModule(nn.Module):
@@ -111,6 +119,8 @@ class _RemoteModule(nn.Module):
         args = args if args is not None else ()
         kwargs = kwargs if kwargs is not None else {}
 
+        self.on = on
+
         if _module_interface_cls is not None:
             # Users reply on this field to know if this generated RemoteModule is TorchScript-able.
             self.is_scriptable = True
@@ -132,9 +142,7 @@ class _RemoteModule(nn.Module):
 
         # Create the module on the remote side.
         self.module_rref = rpc.rpc_sync(
-            on,
-            _create_module,
-            (module_cls, args, kwargs, _module_interface_cls),
+            on, _create_module, (module_cls, args, kwargs, _module_interface_cls)
         )
 
         # Install generated methods.
@@ -142,6 +150,19 @@ class _RemoteModule(nn.Module):
             method_name = method.__name__
             method = torch.jit.export(method)
             setattr(self, method_name, types.MethodType(method, self))
+
+    def remote_parameters(self, recurse: bool = True) -> List[rpc.RRef[Parameter]]:
+        r"""Returns a list of RRefs of remote module parameters.
+        This is typically passed to a distributed optimizer.
+        Args:
+            recurse (bool): if True, then returns parameters of the remote module
+                and all submodules of the remote module.
+                Otherwise, returns only parameters that are direct members of the remote module.
+
+        Returns:
+            A list of RRefs to remote module parameters.
+        """
+        return rpc.rpc_sync(self.on, _param_rrefs, args=(self.module_rref, recurse))
 
 
 class RemoteModule(_RemoteModule):

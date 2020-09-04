@@ -15,10 +15,8 @@ from torch._six import string_classes
 from torch.jit._recursive import wrap_cpp_module
 from torch.serialization import validate_cuda_device
 
-DEFAULT_EXTRA_FILES_MAP = torch._C.ExtraFilesMap()
 
-
-def save(m, f, _extra_files=DEFAULT_EXTRA_FILES_MAP):
+def save(m, f, _extra_files=None):
     r"""
     Save an offline version of this module for use in a separate process. The
     saved module serializes all of the methods, submodules, parameters, and
@@ -74,10 +72,11 @@ def save(m, f, _extra_files=DEFAULT_EXTRA_FILES_MAP):
         torch.jit.save(m, buffer)
 
         # Save with extra files
-        extra_files = torch._C.ExtraFilesMap()
-        extra_files['foo.txt'] = 'bar'
+        extra_files = {'foo.txt': b'bar'}
         torch.jit.save(m, 'scriptmodule.pt', _extra_files=extra_files)
     """
+    if _extra_files is None:
+        _extra_files = {}
     if isinstance(f, str) or isinstance(f, pathlib.Path):
         m.save(f, _extra_files=_extra_files)
     else:
@@ -85,7 +84,7 @@ def save(m, f, _extra_files=DEFAULT_EXTRA_FILES_MAP):
         f.write(ret)
 
 
-def load(f, map_location=None, _extra_files=DEFAULT_EXTRA_FILES_MAP):
+def load(f, map_location=None, _extra_files=None):
     r"""
     Load a :class:`ScriptModule` or :class:`ScriptFunction` previously
     saved with :func:`torch.jit.save <torch.jit.save>`
@@ -133,8 +132,7 @@ def load(f, map_location=None, _extra_files=DEFAULT_EXTRA_FILES_MAP):
         torch.jit.load(buffer, map_location='cpu')
 
         # Load with extra files.
-        extra_files = torch._C.ExtraFilesMap()
-        extra_files['foo.txt'] = 'bar'
+        extra_files = {'foo.txt': ''}  # values will be replaced with data
         torch.jit.load('scriptmodule.pt', _extra_files=extra_files)
         print(extra_files['foo.txt'])
 
@@ -150,11 +148,13 @@ def load(f, map_location=None, _extra_files=DEFAULT_EXTRA_FILES_MAP):
     """
     if isinstance(f, string_classes):
         if not os.path.exists(f):
-            raise ValueError("The provided filename {} does not exist".format(f))
+            raise ValueError("The provided filename {} does not exist".format(f))  # type: ignore
         if os.path.isdir(f):
-            raise ValueError("The provided filename {} is a directory".format(f))
+            raise ValueError("The provided filename {} is a directory".format(f))  # type: ignore
 
     map_location = validate_map_location(map_location)
+    if _extra_files is None:
+        _extra_files = {}
 
     cu = torch._C.CompilationUnit()
     if isinstance(f, str) or isinstance(f, pathlib.Path):

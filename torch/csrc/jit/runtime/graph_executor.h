@@ -43,6 +43,15 @@ struct GraphExecutorState {
   std::unordered_map<ArgumentSpec, ExecutionPlan> execution_plans;
 };
 
+struct TORCH_API EnableProfilingGuard {
+  EnableProfilingGuard();
+  ~EnableProfilingGuard();
+
+ private:
+  bool old_executor_mode = false;
+  bool old_profiling_mode = false;
+};
+
 struct GraphExecutorImplBase;
 struct TORCH_API GraphExecutor {
   GraphExecutor() = default;
@@ -75,6 +84,10 @@ struct TORCH_API GraphExecutor {
  private:
   std::shared_ptr<GraphExecutorImplBase> pImpl;
 };
+
+TORCH_API Node* replaceBlockWithFallbackGraph(
+    Block* b,
+    ArrayRef<Value*> inputs);
 
 // These passes need to run before it is valid to pass to the interpreter
 // regardless of whether sizes have been specialized or not.

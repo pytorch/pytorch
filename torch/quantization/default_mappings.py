@@ -1,6 +1,7 @@
-
+import torch
 from torch import nn
 
+import torch.nn.functional as F
 import torch.nn.intrinsic as nni
 import torch.nn.intrinsic.quantized as nniq
 import torch.nn.intrinsic.qat as nniqat
@@ -47,6 +48,14 @@ DEFAULT_MODULE_MAPPING = {
     nnqat.Conv2d: nnq.Conv2d,
 }
 
+# mapping from floating point function or torch ops to quantized ops
+DEFAULT_OPERATOR_MAPPING = {
+    F.elu: torch._ops.ops.quantized.elu,
+    F.hardswish: torch._ops.ops.quantized.hardswish,
+    F.instance_norm: torch._ops.ops.quantized.instance_norm,
+    F.layer_norm: torch._ops.ops.quantized.layer_norm,
+}
+
 # Map for swapping float module to qat modules
 DEFAULT_QAT_MODULE_MAPPING = {
     nn.Linear: nnqat.Linear,
@@ -64,10 +73,11 @@ DEFAULT_DYNAMIC_MODULE_MAPPING = {
     nn.LSTM: nnqd.LSTM,
     nn.LSTMCell: nnqd.LSTMCell,
     nn.RNNCell: nnqd.RNNCell,
-    nn.GRUCell: nnqd.GRUCell
+    nn.GRUCell: nnqd.GRUCell,
+    nn.EmbeddingBag: nnqd.EmbeddingBag,
 }
 
-# Whitelist for propagating the qconfig
+# Allowed list for propagating the qconfig
 _EXCLUDE_QCONFIG_PROPAGATE_LIST = {
     DeQuantStub,
 }
@@ -75,7 +85,7 @@ _INCLUDE_QCONFIG_PROPAGATE_LIST = {
     nn.Sequential,
 }
 
-DEFAULT_QCONFIG_PROPAGATE_WHITE_LIST = (
+DEFAULT_QCONFIG_PROPAGATE_ALLOWED_LIST = (
     (set(DEFAULT_MODULE_MAPPING.keys()) |
      set(DEFAULT_QAT_MODULE_MAPPING.keys()) |
      set(DEFAULT_DYNAMIC_MODULE_MAPPING.keys()) |
@@ -83,7 +93,7 @@ DEFAULT_QCONFIG_PROPAGATE_WHITE_LIST = (
     _EXCLUDE_QCONFIG_PROPAGATE_LIST
 )
 
-DEFAULT_NUMERIC_SUITE_COMPARE_MODEL_OUTPUT_WHITE_LIST = (
+DEFAULT_NUMERIC_SUITE_COMPARE_MODEL_OUTPUT_ALLOWED_LIST = (
     set(DEFAULT_MODULE_MAPPING.values())
     | set(DEFAULT_QAT_MODULE_MAPPING.values())
     | set(DEFAULT_DYNAMIC_MODULE_MAPPING.values())
