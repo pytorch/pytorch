@@ -4480,7 +4480,6 @@ a")
         inputs = [(1, 2), (0, 2), (1, 3)]
         self.checkScript(foo, (inputs,))
 
-
     def test_tuple_unsortable_element_type(self):
         @torch.jit.script
         def foo():
@@ -4498,7 +4497,25 @@ a")
             return inputs
 
         inputs = [(1, 2), ("foo", "bar")]
-        with self.assertRaisesRegexWithHighlight(RuntimeError, "Different tuple types can not be sorted", "inputs.sort"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "Only values of same type can be compared", "inputs.sort"):
+            foo(inputs)
+
+    def test_tuple_nested_sort(self):
+        def foo(inputs: List[Tuple[int, Tuple[int, str]]]):
+            inputs.sort()
+            return inputs
+
+        inputs = [(1, (2, "foo")), (1, (2, "bar")), (1, (0, "bar"))]
+        self.checkScript(foo, (inputs,))
+
+    def test_tuple_unsortable_nested_diff_type(self):
+        @torch.jit.script
+        def foo(inputs: List[Any]):
+            inputs.sort()
+            return inputs
+
+        inputs = [(1, (2, 3)), (2, ("foo", "bar"))]
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "Only values of same type can be compared", "inputs.sort"):
             foo(inputs)
 
     def test_string_new_line(self):

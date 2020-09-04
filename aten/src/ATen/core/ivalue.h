@@ -30,6 +30,14 @@ using ClassTypePtr = std::shared_ptr<ClassType>;
 
 TORCH_API bool _fastEqualsForContainer(const IValue& lhs, const IValue& rhs);
 
+TORCH_API torch::jit::Function* checkObjectSortSchema(const c10::ClassTypePtr& t, std::stringstream& why_not);
+
+// A comparator that checks ordering of two IValues of same type.
+typedef std::function<bool(const IValue& a, const IValue& b)> IValueComparator;
+
+TORCH_API IValueComparator getLessThanComparator(const IValue& v);
+TORCH_API IValueComparator getGreaterThanComparator(const IValue& v);
+
 namespace ivalue {
 struct Tuple;
 struct Future;
@@ -650,9 +658,6 @@ struct CAFFE2_API IValue final {
       std::ostream& stream,
       std::function<bool(std::ostream&, const IValue& v)> customFormatter)
       const;
-
-  CAFFE2_API friend bool operator<(const IValue& a, const IValue& b);
-  CAFFE2_API friend bool operator>(const IValue& a, const IValue& b);
 
   // Computes an "informal" string representation of an IValue. This should be
   // used for debugging, or servicing `print()`-like functions.
