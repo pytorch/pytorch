@@ -135,6 +135,7 @@ class Graph:
     def python_code(self, root_module: str) -> Tuple[str, str, List[str]]:
         free_vars: List[str] = []
         body: List[str] = []
+
         def insert_hierarchy_guard(node : Node):
             if node.module_qualname:
                 body.append(f'with torch.fx.ModuleHierarchyCtxMgr(\'{node.module_qualname}\'):\n    ')

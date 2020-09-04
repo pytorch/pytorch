@@ -116,6 +116,7 @@ def forward(self, {', '.join(free_variables)}):
 
     def __reduce__(self):
         dict_without_graph = self.__dict__.copy()
+        del dict_without_graph['graph']
         return (deserialize_graphmodule, (dict_without_graph,))
 
     # because __reduce__ is defined for serialization,

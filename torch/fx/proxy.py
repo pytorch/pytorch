@@ -20,7 +20,8 @@ class TraceError(ValueError):
 
 # Unwrap the proxies inside args, and kwargs, create the resulting node
 # and then wrap the result in a proxy.
-def _create_proxy(delegate: 'DelegateBase', op: str, target: Target, args_: Tuple[Any, ...], kwargs_: Dict[str, Any], name=None, module_qualname=None):
+def _create_proxy(delegate: 'DelegateBase', op: str, target: Target, args_: Tuple[Any, ...], kwargs_: Dict[str, Any],
+                  name : Optional[str] = None, module_qualname : Optional[str] = None):
     args = delegate.create_arg(args_)
     kwargs = delegate.create_arg(kwargs_)
     assert isinstance(args, tuple)
