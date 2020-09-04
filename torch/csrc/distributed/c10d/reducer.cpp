@@ -482,8 +482,12 @@ void Reducer::push_rebuilt_params_for_all_indices() {
     for (size_t variable_index = 0; variable_index < variable_count;
          ++variable_index) {
       const auto index = VariableIndex{
+#ifdef _WIN32
+          replica_index, variable_index
+#else
           .replica_index = replica_index,
           .variable_index = variable_index,
+#endif
       };
       push_rebuilt_params(index);
     }
