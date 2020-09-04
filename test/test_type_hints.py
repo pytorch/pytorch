@@ -148,7 +148,7 @@ class TestTypeHints(TestCase):
                     target_is_directory=True
                 )
             except OSError:
-                raise unittest.SkipTest('cannot symlink')
+                raise unittest.SkipTest('cannot symlink') from None
             (stdout, stderr, result) = mypy.api.run([
                 '--follow-imports', 'silent',
                 '--check-untyped-defs',
