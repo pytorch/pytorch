@@ -368,7 +368,7 @@ Tensor nanprod_backward(Tensor grad, const Tensor& input, Tensor result, int64_t
     }
 
     Tensor zero_mask = (input == 0);
-    Tensor slice_zero_count = zero_mask.sum(dim, True);
+    Tensor slice_zero_count = zero_mask.sum(dim, true);
     int64_t total_zeros = slice_zero_count.sum().item<int64_t>();
     if (total_zeros == 0) {
         Tensor nans_replace = at::where(at::isnan(input), at::Tensor(1, at::TensorOptions().dtype(input.dtype()).device(input.device())), input);
