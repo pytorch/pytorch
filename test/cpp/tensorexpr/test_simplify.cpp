@@ -61,7 +61,8 @@ using SimpleIRExprEval = ExprEval<SimpleIREvaluator>;
     name = dynamic_cast<const T*>(node);      \
     ASSERT_NE(nullptr, name);                 \
     IS_VAR_WITH_NAME(name->lhs(), v);         \
-    IS_IMM_WITH_VAL(Int, name->rhs(), c);
+    IS_IMM_WITH_VAL(Int, name->rhs(), c);     \
+  }
 
 #define IS_RAND(node)                                    \
   {                                                      \
