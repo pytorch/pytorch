@@ -70,7 +70,7 @@ static void smooth_l1_backward_cpu_kernel(TensorIterator& iter, Scalar norm, Sca
         auto x = input - target;
         x /= beta_val_vec;
         x = clamp(x, neg_1_vec, pos_1_vec);
-        return  norm_val_vec * x * grad_output;
+        return norm_val_vec * x * grad_output;
       }
     );
   });
