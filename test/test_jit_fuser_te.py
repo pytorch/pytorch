@@ -84,11 +84,28 @@ class TestTEFuser(JitTestCase):
             graph = diff_graphs[0].g('Subgraph')
 
         allowed_nodes = {'prim::Constant', FUSION_GROUP, 'prim::BailoutTemplate',
-                         'prim::BailOut', 'prim::TupleConstruct'} | set(except_for)
-        # TODO: reenable the checks once we have prim::FallBack nodes:
-        # self.assertTrue(all(node.kind() in allowed_nodes for node in graph.nodes()),
-        #                 'got {}'.format(graph))
-        # self.assertTrue([node.kind() for node in graph.nodes()].count(FUSION_GROUP) == 1)
+                         'prim::TupleConstruct', 'prim::If', 'prim::TypeCheck'} | set(except_for)
+
+        if_nodes = [node for node in graph.nodes() if node.kind() == 'prim::If']
+        if_node = if_nodes[0]
+        self.assertTrue(len(if_nodes) == 1)
+        typecheck_nodes = [node for node in graph.nodes() if node.kind() == 'prim::TypeCheck']
+        if len(typecheck_nodes) == 0:
+            self.assertTrue([inp.node().kind() for inp in if_node.inputs() if inp.node().kind()].count('aten::all') == 1)
+            true_block = if_node.blocks().__next__()
+            typecheck_nodes = [node for node in true_block.nodes() if node.kind() == 'prim::TypeCheck']
+            self.assertTrue(all(node.kind() in allowed_nodes for node in true_block.nodes()),
+                            'got {}'.format(graph))
+            self.assertTrue(len(typecheck_nodes) == 1)
+            if_nodes = [node for node in true_block.nodes() if node.kind() == 'prim::If']
+            if_node = if_nodes[0]
+            self.assertTrue(len(if_nodes) == 1)
+
+        true_block = if_node.blocks().__next__()
+        self.assertTrue([node.kind() for node in true_block.nodes()].count(FUSION_GROUP) == 1)
+
+        self.assertTrue(all(node.kind() in allowed_nodes for node in true_block.nodes()),
+                        'got {}'.format(graph))
 
     def findFusionGroups(self, graph):
         result = []
@@ -399,7 +416,6 @@ class TestTEFuser(JitTestCase):
 
     # TODO: reenable the test after backwards passes start working in PE
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    @unittest.skip("temporarily disable")
     def test_clamp(self):
         def func2(a, b):
             return torch.clamp(a + b, min=0, max=2)
@@ -877,8 +893,6 @@ class TestTEFuser(JitTestCase):
                 raise
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    @unittest.skip("temporarily disable")
-    # TODO: reenable once backward pass starts to work
     def test_milstm_cuda(self):
         inputs = get_milstm_inputs('cuda', training=True)
         module = self.checkScript(MiLSTMCell, inputs)
@@ -930,8 +944,6 @@ class TestTEFuser(JitTestCase):
         self.assertAllFused(ge.graph_for(x, y))
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    # TODO: reenable the test after backwards passes start working in PE
-    @unittest.skip("temporarily disable")
     def test_erf_cuda(self):
         def fn_test_erf(x):
             return F.relu(torch.erf(x) - torch.erfc(x))
@@ -1016,7 +1028,6 @@ class TestTEFuser(JitTestCase):
         self.assertAllFused(ge.graph_for(x, y))
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
-    @unittest.skip("temporarily disable")
     # Currently we don't pull constants into fusion groups, because in some
     # cases it could remove the constant from the original graph and now our
     # fusion group needs to return that constant for its other users.
@@ -1029,9 +1040,7 @@ class TestTEFuser(JitTestCase):
             y = x + z
             return x * y
 
-        # XXX: right now we only support fusing scalars if
-        # they're constant (#9940)
-        def should_not_fuse(x, z):
+        def should_fuse_scalar(x, z):
             y = x + int(z)
             return x * y
 
@@ -1046,19 +1055,17 @@ class TestTEFuser(JitTestCase):
             torch.randn(2, 2, dtype=torch.float, device='cuda'),
             torch.tensor(3., dtype=torch.float, device='cuda'),
         ]
-        ge = self.checkScript(should_not_fuse, inputs)
+        ge = self.checkScript(should_fuse_scalar, inputs)
         # Check that the fused graph computes correct results when the scalar
         # input changes.
         inputs = [
             torch.randn(2, 2, dtype=torch.float, device='cuda'),
             torch.tensor(7., dtype=torch.float, device='cuda'),
         ]
-        self.assertEqual(ge(*inputs), should_not_fuse(*inputs))
-        # XXX: The TE fuser supports fusion of non-constant scalars
-        # self.assertGraphContainsExactly(
-        #     ge.graph_for(*inputs), FUSION_GROUP, 0, consider_subgraphs=True)
+        self.assertEqual(ge(*inputs), should_fuse_scalar(*inputs))
+        # The TE fuser supports fusion of non-constant scalars
         self.assertGraphContainsExactly(
-            ge.graph_for(*inputs), FUSION_GROUP, 0, consider_subgraphs=True)
+            ge.graph_for(*inputs), FUSION_GROUP, 1, consider_subgraphs=True)
 
     @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser CPU support for Sandcastle")
     def test_where_and_typing(self):
