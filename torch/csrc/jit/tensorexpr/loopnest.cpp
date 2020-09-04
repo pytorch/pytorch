@@ -933,13 +933,14 @@ void LoopNest::sliceHead(For* f, int factor, For** head, For** tail) {
   *head = new For(f->var(), f->start(), head_end, Stmt::clone(f->body()));
   *tail = new For(
       f->var(), head_end, f->stop(), Stmt::clone(f->body()), f->loop_options());
+
+  p->replace_stmt(f, *head);
+  p->insert_stmt_after(*tail, *head);
+
   if (f->loop_options().is_gpu_block_index() ||
       f->loop_options().is_gpu_thread_index()) {
     LoopNest::normalize(*tail, tail, false);
   }
-
-  p->replace_stmt(f, *head);
-  p->insert_stmt_after(*tail, *head);
 
   // TODO: record history of transformations
 }
@@ -967,21 +968,22 @@ void LoopNest::sliceTail(For* f, int factor, For** head, For** tail) {
   }
 
   const Expr* tail_start =
-      new Max(new IntImm(0), new Sub(f->stop(), new IntImm(factor)), true);
+      new Max(f->start(), new Sub(f->stop(), new IntImm(factor)), true);
   *head = new For(
       f->var(),
       f->start(),
       tail_start,
       Stmt::clone(f->body()),
       f->loop_options());
-  if (f->loop_options().is_gpu_block_index() ||
-      f->loop_options().is_gpu_thread_index()) {
-    LoopNest::normalize(*head, head, false);
-  }
   *tail = new For(f->var(), tail_start, f->stop(), Stmt::clone(f->body()));
 
   p->replace_stmt(f, *head);
   p->insert_stmt_after(*tail, *head);
+
+  if (f->loop_options().is_gpu_block_index() ||
+      f->loop_options().is_gpu_thread_index()) {
+    LoopNest::normalize(*head, head, false);
+  }
 
   // TODO: record history of transformations
 }
@@ -1313,7 +1315,8 @@ void LoopNest::normalize(For* f, For** normalized, bool startMustBeConstant) {
       VarHandle(f->var()),
       ExprHandle(0),
       ExprHandle(f->stop()) - ExprHandle(f->start()),
-      for_body_normalized);
+      for_body_normalized,
+      f->loop_options());
 
   p->replace_stmt(f, *normalized);
 }
