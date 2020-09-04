@@ -26,17 +26,18 @@ Function* CompilationUnit::find_function(const c10::QualifiedName& qn) {
 
 c10::IValue Module::run_method(const std::string& method_name, Stack stack) {
   auto observer = torch::observerConfig().getModuleObserver();
-  auto module_metadata = metadata();
+  /* if the metadata dict doesn't contain "model_name", copy the metadata and
+  set the value of "model_name" as name() */
+  std::unordered_map<std::string, std::string> copied_metadata = metadata();
+  if (metadata().find("model_name") == metadata().end()) {
+    copied_metadata["model_name"] = name();
+  }
   if (observer) {
-    observer->onEnterRunMethod(module_metadata, method_name);
+    observer->onEnterRunMethod(copied_metadata, method_name);
   }
 
   auto debug_info = std::make_shared<MobileDebugInfo>();
-  if (module_metadata.find("model_name") != module_metadata.end()) {
-    debug_info->setModelName(module_metadata.at("model_name"));
-  } else {
-    debug_info->setModelName(name());
-  }
+  debug_info->setModelName(copied_metadata.at("model_name"));
   debug_info->setMethodName(method_name);
   at::DebugInfoGuard guard(at::DebugInfoKind::MOBILE_RUNTIME_INFO, debug_info);
 
