@@ -290,13 +290,10 @@ public:
     return StridedRandomAccessor(this->ptr - offset * this->stride, this->stride);
   }
 
-  // Note that this operator is well-defined when `this` and `other`
-  // represent the same sequences, i.e. when
-  // 1. this.stride == other.stride,
-  // 2. |other - this| / this.stride is an Integer.
+  // Note that here we call BaseType::operator- version
   C10_HOST_DEVICE
   difference_type operator-(const BaseType& other) const {
-    return (static_cast<const BaseType&>(*this) - other) / this->stride;
+    return (static_cast<const BaseType&>(*this) - other);
   }
   // }
 };
