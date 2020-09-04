@@ -1,4 +1,5 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
+from collections import namedtuple
 import copy
 import errno
 import fcntl
@@ -3129,6 +3130,47 @@ class _DistTestBase(object):
             self.assertNotEqual(objects, collectives_object_test_list)
         dist.broadcast_object_list(objects, src=0)
         self.assertEqual(objects, collectives_object_test_list)
+
+    @require_backend({"nccl", "gloo"})
+    @require_n_gpus_for_nccl_backend(int(os.environ["WORLD_SIZE"]), os.environ["BACKEND"])
+    def test_ddp_namedtuple(self):
+        TestNamedTupleInput_0 = namedtuple("NamedTuple", ("a", "b"))
+
+        batch = 5
+        dim = 10
+
+        class TestNamedTupleInput_1(NamedTuple):
+            a: torch.tensor
+            b: torch.tensor
+
+        class NamedTupleModule(torch.nn.Module):
+            def __init__(_self):  # noqa
+                super().__init__()
+                _self.lin = nn.Linear(10, 1)
+
+            def forward(_self, input, expected_type):  # noqa
+                # Without NamedTuple support, this would be of type tuple.
+                self.assertTrue(
+                    isinstance(input, expected_type),
+                    f"Expected type {expected_type} but got {type(input)}",
+                )
+                return _self.lin(torch.mul(input.a, input.b))
+
+        model = torch.nn.parallel.DistributedDataParallel(
+            NamedTupleModule().cuda(self.rank), device_ids=[self.rank],
+        )
+        inp = TestNamedTupleInput_0(
+            torch.rand(batch, dim, device=self.rank),
+            torch.rand(batch, dim, device=self.rank),
+        )
+        # The following would fail if DDP does not propagate NamedTuples correctly.
+        model(inp, type(inp))
+
+        inp = TestNamedTupleInput_1(
+            torch.rand(batch, dim, device=self.rank),
+            torch.rand(batch, dim, device=self.rank),
+        )
+        model(inp, type(inp))
 
 
 if BACKEND == "gloo" or BACKEND == "nccl":

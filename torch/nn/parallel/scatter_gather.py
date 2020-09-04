@@ -1,6 +1,12 @@
 import torch
 from ._functions import Scatter, Gather
 
+def _is_namedtuple(obj):
+    # Check if type was created from collections.namedtuple.
+    return (
+        isinstance(obj, tuple) and hasattr(obj, "_asdict") and hasattr(obj, "_fields")
+    )
+
 
 def scatter(inputs, target_gpus, dim=0):
     r"""
@@ -11,6 +17,11 @@ def scatter(inputs, target_gpus, dim=0):
     def scatter_map(obj):
         if isinstance(obj, torch.Tensor):
             return Scatter.apply(target_gpus, None, dim, obj)
+        if _is_namedtuple(obj):
+            # De-listify the base case output, since scatter(1, [0])
+            # would return ([1]), but for namedtuple(a=1, b=1) we would not
+            # want to reconstruct it as namedtuple(a=[1], b=[1])
+            return [type(obj)(*map(lambda li: li[0], map(scatter_map, obj)))]
         if isinstance(obj, tuple) and len(obj) > 0:
             return list(zip(*map(scatter_map, obj)))
         if isinstance(obj, list) and len(obj) > 0:
