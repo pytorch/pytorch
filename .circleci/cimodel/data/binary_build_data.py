@@ -140,6 +140,10 @@ class LinuxGccConfigNode(ConfigNode):
         if self.find_prop("gcc_config_variant") == 'devtoolset7':
             gpu_versions = filter(lambda x: x != "cuda_90", gpu_versions)
 
+        # XXX disabling conda rocm build since docker images are not there
+        if self.find_prop("package_format") == 'conda':
+            gpu_versions = filter(lambda x: x != "rocm3.7", gpu_versions)
+
         return [ArchConfigNode(self, v) for v in gpu_versions]
 
 

@@ -37,7 +37,9 @@ class Conf(object):
         docker_distro_prefix = miniutils.override(self.pydistro, docker_word_substitution)
 
         # The cpu nightlies are built on the pytorch/manylinux-cuda102 docker image
-        alt_docker_suffix = self.gpu_version or "cuda102"
+        # TODO cuda images should consolidate into tag-base images similar to rocm
+        alt_docker_suffix = "cuda102" if not self.gpu_version else (
+            "rocm:" + self.gpu_version.strip("rocm") if self.gpu_version.startswith("rocm") else self.gpu_version)
         docker_distro_suffix = alt_docker_suffix if self.pydistro != "conda" else (
             "cuda" if alt_docker_suffix.startswith("cuda") else "rocm")
         return miniutils.quote("pytorch/" + docker_distro_prefix + "-" + docker_distro_suffix)

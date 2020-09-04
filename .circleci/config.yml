@@ -2289,7 +2289,7 @@ workflows:
             tags:
               only:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          docker_image: "pytorch/manylinux-rocm3.7"
+          docker_image: "pytorch/manylinux-rocm:3.7"
       - binary_linux_build:
           name: binary_linux_manywheel_3_7m_rocm3_7_devtoolset7_nightly_build
           build_environment: "manywheel 3.7m rocm3.7 devtoolset7"
@@ -2300,7 +2300,7 @@ workflows:
             tags:
               only:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          docker_image: "pytorch/manylinux-rocm3.7"
+          docker_image: "pytorch/manylinux-rocm:3.7"
       - binary_linux_build:
           name: binary_linux_manywheel_3_8m_rocm3_7_devtoolset7_nightly_build
           build_environment: "manywheel 3.8m rocm3.7 devtoolset7"
@@ -2311,7 +2311,7 @@ workflows:
             tags:
               only:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          docker_image: "pytorch/manylinux-rocm3.7"
+          docker_image: "pytorch/manylinux-rocm:3.7"
       - binary_linux_build:
           name: binary_linux_conda_3_6_cpu_devtoolset7_nightly_build
           build_environment: "conda 3.6 cpu devtoolset7"
@@ -2477,39 +2477,6 @@ workflows:
               only:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           docker_image: "pytorch/conda-cuda"
-      - binary_linux_build:
-          name: binary_linux_conda_3_6_rocm3_7_devtoolset7_nightly_build
-          build_environment: "conda 3.6 rocm3.7 devtoolset7"
-          filters:
-            branches:
-              only:
-                - /.*/
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          docker_image: "pytorch/conda-rocm"
-      - binary_linux_build:
-          name: binary_linux_conda_3_7_rocm3_7_devtoolset7_nightly_build
-          build_environment: "conda 3.7 rocm3.7 devtoolset7"
-          filters:
-            branches:
-              only:
-                - /.*/
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          docker_image: "pytorch/conda-rocm"
-      - binary_linux_build:
-          name: binary_linux_conda_3_8_rocm3_7_devtoolset7_nightly_build
-          build_environment: "conda 3.8 rocm3.7 devtoolset7"
-          filters:
-            branches:
-              only:
-                - /.*/
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          docker_image: "pytorch/conda-rocm"
       - binary_linux_build:
           name: binary_linux_libtorch_3_7m_cpu_devtoolset7_nightly_shared-with-deps_build
           build_environment: "libtorch 3.7m cpu devtoolset7"
@@ -2761,7 +2728,7 @@ workflows:
               only:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "shared-with-deps"
-          docker_image: "pytorch/manylinux-rocm3.7"
+          docker_image: "pytorch/manylinux-rocm:3.7"
       - binary_linux_build:
           name: binary_linux_libtorch_3_7m_rocm3_7_devtoolset7_nightly_shared-without-deps_build
           build_environment: "libtorch 3.7m rocm3.7 devtoolset7"
@@ -2773,7 +2740,7 @@ workflows:
               only:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "shared-without-deps"
-          docker_image: "pytorch/manylinux-rocm3.7"
+          docker_image: "pytorch/manylinux-rocm:3.7"
       - binary_linux_build:
           name: binary_linux_libtorch_3_7m_rocm3_7_devtoolset7_nightly_static-with-deps_build
           build_environment: "libtorch 3.7m rocm3.7 devtoolset7"
@@ -2785,7 +2752,7 @@ workflows:
               only:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "static-with-deps"
-          docker_image: "pytorch/manylinux-rocm3.7"
+          docker_image: "pytorch/manylinux-rocm:3.7"
       - binary_linux_build:
           name: binary_linux_libtorch_3_7m_rocm3_7_devtoolset7_nightly_static-without-deps_build
           build_environment: "libtorch 3.7m rocm3.7 devtoolset7"
@@ -2797,7 +2764,7 @@ workflows:
               only:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           libtorch_variant: "static-without-deps"
-          docker_image: "pytorch/manylinux-rocm3.7"
+          docker_image: "pytorch/manylinux-rocm:3.7"
       - binary_linux_build:
           name: binary_linux_libtorch_3_7m_cpu_gcc5_4_cxx11-abi_nightly_shared-with-deps_build
           build_environment: "libtorch 3.7m cpu gcc5.4_cxx11-abi"
@@ -3627,7 +3594,7 @@ workflows:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
             - binary_linux_manywheel_3_6m_rocm3_7_devtoolset7_nightly_build
-          docker_image: "pytorch/manylinux-rocm3.7"
+          docker_image: "pytorch/manylinux-rocm:3.7"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
@@ -3642,7 +3609,7 @@ workflows:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
             - binary_linux_manywheel_3_7m_rocm3_7_devtoolset7_nightly_build
-          docker_image: "pytorch/manylinux-rocm3.7"
+          docker_image: "pytorch/manylinux-rocm:3.7"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
@@ -3657,7 +3624,7 @@ workflows:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           requires:
             - binary_linux_manywheel_3_8m_rocm3_7_devtoolset7_nightly_build
-          docker_image: "pytorch/manylinux-rocm3.7"
+          docker_image: "pytorch/manylinux-rocm:3.7"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
@@ -3877,51 +3844,6 @@ workflows:
           requires:
             - binary_linux_conda_3_8_cu110_devtoolset7_nightly_build
           docker_image: "pytorch/conda-cuda"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
-      - binary_linux_test:
-          name: binary_linux_conda_3_6_rocm3_7_devtoolset7_nightly_test
-          build_environment: "conda 3.6 rocm3.7 devtoolset7"
-          filters:
-            branches:
-              only:
-                - /.*/
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          requires:
-            - binary_linux_conda_3_6_rocm3_7_devtoolset7_nightly_build
-          docker_image: "pytorch/conda-rocm"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
-      - binary_linux_test:
-          name: binary_linux_conda_3_7_rocm3_7_devtoolset7_nightly_test
-          build_environment: "conda 3.7 rocm3.7 devtoolset7"
-          filters:
-            branches:
-              only:
-                - /.*/
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          requires:
-            - binary_linux_conda_3_7_rocm3_7_devtoolset7_nightly_build
-          docker_image: "pytorch/conda-rocm"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
-      - binary_linux_test:
-          name: binary_linux_conda_3_8_rocm3_7_devtoolset7_nightly_test
-          build_environment: "conda 3.8 rocm3.7 devtoolset7"
-          filters:
-            branches:
-              only:
-                - /.*/
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          requires:
-            - binary_linux_conda_3_8_rocm3_7_devtoolset7_nightly_build
-          docker_image: "pytorch/conda-rocm"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
@@ -4249,7 +4171,7 @@ workflows:
           libtorch_variant: "shared-with-deps"
           requires:
             - binary_linux_libtorch_3_7m_rocm3_7_devtoolset7_nightly_shared-with-deps_build
-          docker_image: "pytorch/manylinux-rocm3.7"
+          docker_image: "pytorch/manylinux-rocm:3.7"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
@@ -4265,7 +4187,7 @@ workflows:
           libtorch_variant: "shared-without-deps"
           requires:
             - binary_linux_libtorch_3_7m_rocm3_7_devtoolset7_nightly_shared-without-deps_build
-          docker_image: "pytorch/manylinux-rocm3.7"
+          docker_image: "pytorch/manylinux-rocm:3.7"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
@@ -4281,7 +4203,7 @@ workflows:
           libtorch_variant: "static-with-deps"
           requires:
             - binary_linux_libtorch_3_7m_rocm3_7_devtoolset7_nightly_static-with-deps_build
-          docker_image: "pytorch/manylinux-rocm3.7"
+          docker_image: "pytorch/manylinux-rocm:3.7"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
@@ -4297,7 +4219,7 @@ workflows:
           libtorch_variant: "static-without-deps"
           requires:
             - binary_linux_libtorch_3_7m_rocm3_7_devtoolset7_nightly_static-without-deps_build
-          docker_image: "pytorch/manylinux-rocm3.7"
+          docker_image: "pytorch/manylinux-rocm:3.7"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - binary_linux_test:
@@ -5442,48 +5364,6 @@ workflows:
                 - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
           package_type: conda
           upload_subfolder: cu110
-      - binary_upload:
-          name: binary_linux_conda_3_6_rocm3_7_devtoolset7_nightly_upload
-          context: org-member
-          requires:
-            - binary_linux_conda_3_6_rocm3_7_devtoolset7_nightly_test
-          filters:
-            branches:
-              only:
-                - nightly
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          package_type: conda
-          upload_subfolder: rocm3.7
-      - binary_upload:
-          name: binary_linux_conda_3_7_rocm3_7_devtoolset7_nightly_upload
-          context: org-member
-          requires:
-            - binary_linux_conda_3_7_rocm3_7_devtoolset7_nightly_test
-          filters:
-            branches:
-              only:
-                - nightly
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          package_type: conda
-          upload_subfolder: rocm3.7
-      - binary_upload:
-          name: binary_linux_conda_3_8_rocm3_7_devtoolset7_nightly_upload
-          context: org-member
-          requires:
-            - binary_linux_conda_3_8_rocm3_7_devtoolset7_nightly_test
-          filters:
-            branches:
-              only:
-                - nightly
-            tags:
-              only:
-                - /v[0-9]+(\.[0-9]+)*-rc[0-9]+/
-          package_type: conda
-          upload_subfolder: rocm3.7
       - binary_upload:
           name: binary_linux_libtorch_3_7m_cpu_devtoolset7_nightly_shared-with-deps_upload
           context: org-member
@@ -7782,7 +7662,7 @@ workflows:
             branches:
               only:
                 - postnightly
-          docker_image: "pytorch/manylinux-rocm3.7"
+          docker_image: "pytorch/manylinux-rocm:3.7"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
@@ -7794,7 +7674,7 @@ workflows:
             branches:
               only:
                 - postnightly
-          docker_image: "pytorch/manylinux-rocm3.7"
+          docker_image: "pytorch/manylinux-rocm:3.7"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
@@ -7806,7 +7686,7 @@ workflows:
             branches:
               only:
                 - postnightly
-          docker_image: "pytorch/manylinux-rocm3.7"
+          docker_image: "pytorch/manylinux-rocm:3.7"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
@@ -7981,42 +7861,6 @@ workflows:
               only:
                 - postnightly
           docker_image: "pytorch/conda-cuda"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
-      - smoke_linux_test:
-          name: smoke_linux_conda_3_6_rocm3_7_devtoolset7_nightly
-          build_environment: "conda 3.6 rocm3.7 devtoolset7"
-          requires:
-            - update_s3_htmls
-          filters:
-            branches:
-              only:
-                - postnightly
-          docker_image: "pytorch/conda-rocm"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
-      - smoke_linux_test:
-          name: smoke_linux_conda_3_7_rocm3_7_devtoolset7_nightly
-          build_environment: "conda 3.7 rocm3.7 devtoolset7"
-          requires:
-            - update_s3_htmls
-          filters:
-            branches:
-              only:
-                - postnightly
-          docker_image: "pytorch/conda-rocm"
-          use_cuda_docker_runtime: "1"
-          resource_class: gpu.medium
-      - smoke_linux_test:
-          name: smoke_linux_conda_3_8_rocm3_7_devtoolset7_nightly
-          build_environment: "conda 3.8 rocm3.7 devtoolset7"
-          requires:
-            - update_s3_htmls
-          filters:
-            branches:
-              only:
-                - postnightly
-          docker_image: "pytorch/conda-rocm"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
@@ -8281,7 +8125,7 @@ workflows:
               only:
                 - postnightly
           libtorch_variant: "shared-with-deps"
-          docker_image: "pytorch/manylinux-rocm3.7"
+          docker_image: "pytorch/manylinux-rocm:3.7"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
@@ -8294,7 +8138,7 @@ workflows:
               only:
                 - postnightly
           libtorch_variant: "shared-without-deps"
-          docker_image: "pytorch/manylinux-rocm3.7"
+          docker_image: "pytorch/manylinux-rocm:3.7"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
@@ -8307,7 +8151,7 @@ workflows:
               only:
                 - postnightly
           libtorch_variant: "static-with-deps"
-          docker_image: "pytorch/manylinux-rocm3.7"
+          docker_image: "pytorch/manylinux-rocm:3.7"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
@@ -8320,7 +8164,7 @@ workflows:
               only:
                 - postnightly
           libtorch_variant: "static-without-deps"
-          docker_image: "pytorch/manylinux-rocm3.7"
+          docker_image: "pytorch/manylinux-rocm:3.7"
           use_cuda_docker_runtime: "1"
           resource_class: gpu.medium
       - smoke_linux_test:
