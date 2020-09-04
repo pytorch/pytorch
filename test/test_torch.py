@@ -6918,7 +6918,7 @@ class TestTorchDeviceType(TestCase):
             matrices = random_fullrank_matrix_distinct_singular_value(b, n, n).to(device)
             matrices_inverse = torch.inverse(matrices)
             self.assertEqual(torch.matmul(matrices_inverse, matrices),
-                             torch.eye(b, dtype=torch.float64).to(device).expand_as(matrices))
+                             torch.eye(b, dtype=torch.float64, device=device).expand_as(matrices))
 
         test_inverse_many_batches_helper(5, 256)
         test_inverse_many_batches_helper(3, 512)
