@@ -476,6 +476,8 @@ def method_tests():
         ('expand_as', (S, 1, 1), (torch.rand(S, S, S),), '', (False,)),
         ('exp', (S, S, S), NO_ARGS, '', (True,)),
         ('exp', (), NO_ARGS, 'scalar', (True,)),
+        ('exp2', (S, S, S), NO_ARGS, '', (True,)),
+        ('exp2', (), NO_ARGS, 'scalar', (True,)),
         ('expm1', (S, S, S), NO_ARGS, '', (True,)),
         ('expm1', (), NO_ARGS, 'scalar', (True,)),
         ('erf', torch.rand(S, S, S), NO_ARGS, '', (True,)),
