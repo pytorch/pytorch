@@ -784,7 +784,6 @@ std::shared_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
 }
 
 std::vector<at::Tensor> ProcessGroupNCCL::WorkNCCL::result() {
-  TORCH_CHECK(isCompleted());
   return *outputs_;
 }
 

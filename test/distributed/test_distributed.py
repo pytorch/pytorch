@@ -877,21 +877,28 @@ class _DistTestBase(object):
             else:
                 work = group_id.allreduce([tensor], opts)
 
-            # Calling result right the work is finished should throw exception.
-            # Here we have a race condition, we may not assume the work is not
-            # finished by the time we run next lines.
-            try:
-                with self.assertRaisesRegex(
-                        RuntimeError,
-                        "Expected isCompleted.. to be true, but got false"):
-                    work.result()
-            except AssertionError:
-                # Exception was not raised, ensure is_completed()
-                self.assertTrue(work.is_completed())
 
-            work.wait()
+            if BACKEND == "gloo":
+                # Calling result right the work is finished should throw exception.
+                # Here we have a race condition, we may not assume the work is not
+                # finished by the time we run next lines.
+                try:
+                    with self.assertRaisesRegex(
+                            RuntimeError,
+                            "Work needs to be completed before calling result"):
+                        work.result()
+                except AssertionError:
+                    # Exception was not raised, ensure is_completed()
+                    self.assertTrue(work.is_completed())
 
-            result = work.result()
+                work.wait()
+                result = work.result()
+            else:
+                # In case of NCCL we should be able to retrieve pointer to the result
+                # even before work is finished.
+                result = work.result()
+                work.wait()
+
             expected_value = 2 + (10 * (len(group) - 1))
             self.assertEqual(result, [_build_tensor(src + 1, expected_value)])
         self._barrier()

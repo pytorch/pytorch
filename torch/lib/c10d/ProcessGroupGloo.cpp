@@ -814,7 +814,7 @@ class AsyncAllreduceWork : public ProcessGroupGloo::AsyncWork {
 
 
   std::vector<at::Tensor> result() override {
-    TORCH_CHECK(isCompleted());
+    TORCH_CHECK(isCompleted(), "Work needs to be completed before calling result().");
     return outputs_;
   }
 
