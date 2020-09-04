@@ -12,7 +12,7 @@ T_co = TypeVar('T_co', covariant=True)
 T = TypeVar('T')
 
 
-class Dataset(Generic[T_co], Sized):
+class Dataset(Generic[T_co]):
     r"""An abstract class representing a :class:`Dataset`.
 
     All datasets that represent a map from keys to data samples should subclass
