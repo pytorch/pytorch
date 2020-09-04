@@ -1292,7 +1292,8 @@ std::tuple<Tensor, Tensor> _symeig_helper_cuda(const Tensor& self, bool eigenvec
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ eig ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 template <typename scalar_t>
-static void apply_eig(const Tensor& self, bool eigenvectors, Tensor& out_eigvals, Tensor& out_eigvecs, magma_int_t *info_ptr) {
+static void apply_eig(const Tensor& self, bool eigenvectors, Tensor& out_eigvals, Tensor& out_eigvecs,
+                      int64_t *info_ptr) {
 #ifndef USE_MAGMA
 AT_ERROR("symeig: MAGMA library not found in "
     "compilation. Please rebuild with MAGMA.");
@@ -1317,13 +1318,15 @@ AT_ERROR("symeig: MAGMA library not found in "
   if (n > 0) {
     // call magmaEig once to get the optimal size of work_data
     scalar_t wkopt;
-    magmaEig<scalar_t>(MagmaNoVec, jobvr, n, self_data, n, wr, wi, NULL, 1, vr_data, ldvr, &wkopt, -1, info_ptr);
+    magma_int_t info;
+    magmaEig<scalar_t>(MagmaNoVec, jobvr, n, self_data, n, wr, wi, NULL, 1, vr_data, ldvr, &wkopt, -1, &info);
     magma_int_t lwork = (magma_int_t) wkopt;
 
     // call it a 2nd time to to the actual work
     scalar_t *work_data = nullptr;
     ALLOCATE_ARRAY(work_data, scalar_t, lwork);
-    magmaEig<scalar_t>(MagmaNoVec, jobvr, n, self_data, n, wr, wi, NULL, 1, vr_data, ldvr, work_data, lwork, info_ptr);
+    magmaEig<scalar_t>(MagmaNoVec, jobvr, n, self_data, n, wr, wi, NULL, 1, vr_data, ldvr, work_data, lwork, &info);
+    *info_ptr = info;
   }
 
   // magmaEig returns column-ordered tensors, turn them into row-ordered
@@ -1363,7 +1366,7 @@ std::tuple<Tensor,Tensor> eig_cuda(const Tensor & self, bool eigenvectors) {
                      ? at::empty({n, n}, self.options().device(at::kCPU), LEGACY_CONTIGUOUS_MEMORY_FORMAT)
                      : Tensor();
 
-  magma_int_t info;
+  int64_t info;
   AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "eig_cuda", [&]{
     apply_eig<scalar_t>(self_working_copy, eigenvectors, out_eigvals, out_eigvecs, &info);
   });
