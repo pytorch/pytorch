@@ -15957,6 +15957,25 @@ class TestTorchDeviceType(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.double)
+    def test_eig_out(self, device, dtype):
+        # the out version of torch.eig needs to be tested manually: we can't
+        # use the "test_out=True" parameter to tensor_op_tests because the
+        # signature is irregular (since we have *two* output vectors)
+        t = _make_tensor((10, 10), dtype=dtype, device=device)
+        evals, evecs = torch.eig(t, eigenvectors=True)
+        #
+        # check that the out= version computes the same values as the normal one
+        out_evals = torch.full_like(evals, fill_value=math.nan)
+        out_evecs = torch.full_like(evecs, fill_value=math.nan)
+        evals2, evecs2 = torch.eig(t, eigenvectors=True, out=(out_evals, out_evecs))
+        self.assertIs(evals2, out_evals)
+        self.assertIs(evecs2, out_evecs)
+        self.assertEqual(evals, out_evals)
+        self.assertEqual(evecs, out_evecs)
+
+    @skipCUDAIfNoMagma
+    @skipCPUIfNoLapack
+    @dtypes(torch.double)
     def test_lobpcg_basic(self, device, dtype):
         self._test_lobpcg_method(device, dtype, 'basic')
 
