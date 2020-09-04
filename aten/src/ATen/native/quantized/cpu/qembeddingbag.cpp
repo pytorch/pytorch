@@ -437,6 +437,7 @@ class QEmbedding final {
       bool sparse) {
     const auto offsets_size = indices.numel();
     at::Tensor offsets = at::arange(0, offsets_size, at::kLong);
+    at::Tensor output;
     if (bit_rate == 8) {
       return packed_weight->embeddingbag_byte(
           indices, offsets, sparse, c10::nullopt, false);
@@ -444,6 +445,7 @@ class QEmbedding final {
       TORCH_INTERNAL_ASSERT(
           "Currently only support 8-bit embedding quantization");
     }
+    return output;
   }
 };
 

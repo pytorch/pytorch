@@ -507,7 +507,26 @@ class TestPostTrainingStatic(QuantizationTestCase):
         torch.quantization.convert(model, inplace=True)
         checkHooksIsPresent(model, False)
 
+    def test_quantized_embedding(self):
+        r""" Test the post-training quantization flow, serialization and scripting
+        of embedding modules
+        """
+        model = EmbeddingModule().eval()
+        indices = torch.tensor([9, 6, 5, 7, 8, 8, 9, 2, 8, 6, 6, 9, 1, 6, 8, 8, 3, 2, 3, 6, 3, 6, 5, 7, 0, 8, 4, 6, 5, 8, 2, 3])
+        weights = torch.randn(10, 12, dtype=torch.float32)
+        model.qconfig = float_qparams_dynamic_qconfig
+        prepare(model, inplace=True)
+        convert(model, inplace=True)
+        self.assertTrue('QuantizedEmbedding' in str(model))
+        self.assertEqual(type(model.emb), torch.nn.quantized.Embedding)
+        self.checkScriptable(model, [[indices]], check_save_load=True)
 
+        model = EmbeddingWithLinear().eval()
+        prepare(model, inplace=True)
+        convert(model, inplace=True)
+        self.assertTrue('QuantizedEmbedding' in str(model))
+        self.assertTrue('QuantizedLinear' in str(model))
+        self.checkQuantizedLinear(model.fc)
 
 @skipIfNoFBGEMM
 class TestPostTrainingDynamic(QuantizationTestCase):
@@ -901,26 +920,6 @@ class TestPostTrainingDynamic(QuantizationTestCase):
         self.checkLinear(model.fc)
         self.checkDynamicQuantizedModule(quantized_model.emb, torch.nn.quantized.dynamic.EmbeddingBag, torch.quint8)
 
-    def test_quantized_embedding(self):
-        r""" Test the post-training quantization flow, serialization and scripting
-        of embedding modules
-        """
-        model = EmbeddingModule().eval()
-        indices = torch.tensor([9, 6, 5, 7, 8, 8, 9, 2, 8, 6, 6, 9, 1, 6, 8, 8, 3, 2, 3, 6, 3, 6, 5, 7, 0, 8, 4, 6, 5, 8, 2, 3])
-        weights = torch.randn(10, 12, dtype=torch.float32)
-        model.qconfig = float_qparams_dynamic_qconfig
-        prepare(model, inplace=True)
-        convert(model, inplace=True)
-        self.assertTrue('QuantizedEmbedding' in str(model))
-        self.assertEqual(type(model.emb), torch.nn.quantized.Embedding)
-        self.checkScriptable(model, [[indices]], check_save_load=True)
-
-        model = EmbeddingWithLinear().eval()
-        prepare(model, inplace=True)
-        convert(model, inplace=True)
-        self.assertTrue('QuantizedEmbedding' in str(model))
-        self.assertTrue('QuantizedLinear' in str(model))
-        self.checkQuantizedLinear(model.fc)
 
 class TestQuantizationAwareTraining(QuantizationTestCase):
     def test_manual(self):

@@ -19,7 +19,7 @@ from torch.quantization import QuantWrapper, QuantStub, DeQuantStub, \
     propagate_qconfig_, convert, get_default_qconfig, quantize_dynamic_jit, quantize_jit, float_qparams_dynamic_qconfig
 from torch.quantization.default_mappings import (
     DEFAULT_DYNAMIC_MODULE_MAPPING,
-    DEFAULT_QCONFIG_PROPAGATE_WHITE_LIST,
+    DEFAULT_QCONFIG_PROPAGATE_ALLOWED_LIST,
     DEFAULT_QAT_MODULE_MAPPING,
 )
 # symbolic trace
@@ -348,7 +348,7 @@ class QuantizationTestCase(TestCase):
             have observers in preperation for quantization
         """
         if propagate_qconfig_list is None:
-            propagate_qconfig_list = DEFAULT_QCONFIG_PROPAGATE_WHITE_LIST
+            propagate_qconfig_list = DEFAULT_QCONFIG_PROPAGATE_ALLOWED_LIST
         if hasattr(module, 'qconfig') and module.qconfig is not None and \
            len(module._modules) == 0 and not isinstance(module, torch.nn.Sequential) \
            and type(module) in propagate_qconfig_list:
@@ -657,6 +657,68 @@ class QuantizationTestCase(TestCase):
         qgraph_to_check = qgraph_debug if debug else qgraph
         self.checkGraphModuleNodes(
             qgraph_to_check, expected_node, expected_node_occurrence, expected_node_list)
+
+
+    def checkEmbeddingSerialization(self, qemb, num_embeddings, embedding_dim, indices, offsets, set_qconfig, is_emb_bag):
+        # Test serialization of dynamic EmbeddingBag module using state_dict
+        if is_emb_bag:
+            inputs = [indices, offsets]
+        else:
+            inputs = [indices]
+        emb_dict = qemb.state_dict()
+        b = io.BytesIO()
+        torch.save(emb_dict, b)
+        b.seek(0)
+        loaded_dict = torch.load(b)
+        embedding_unpack = torch.ops.quantized.embedding_bag_unpack
+        # Check unpacked weight values explicitly
+        for key in emb_dict:
+            if isinstance(emb_dict[key], torch._C.ScriptObject):
+                assert isinstance(loaded_dict[key], torch._C.ScriptObject)
+                emb_weight = embedding_unpack(emb_dict[key])
+                loaded_weight = embedding_unpack(loaded_dict[key])
+                self.assertEqual(emb_weight, loaded_weight)
+
+        # Check state dict serialization and torch.save APIs
+        if is_emb_bag:
+            loaded_qemb = nnqd.EmbeddingBag(num_embeddings=num_embeddings, embedding_dim=embedding_dim,
+                                            include_last_offset=True, mode='sum')
+        else:
+            loaded_qemb = nnq.Embedding(num_embeddings=num_embeddings, embedding_dim=embedding_dim)
+        self.check_eager_serialization(qemb, loaded_qemb, inputs)
+
+        loaded_qemb.load_state_dict(loaded_dict)
+        self.assertEqual(embedding_unpack(qemb._packed_params._packed_weight),
+                         embedding_unpack(loaded_qemb._packed_params._packed_weight))
+
+
+        # Test JIT serialization
+        self.checkScriptable(qemb, [inputs], check_save_load=True)
+
+        # Test from_float call
+        if is_emb_bag:
+            float_embedding = torch.nn.EmbeddingBag(num_embeddings=num_embeddings, embedding_dim=embedding_dim,
+                                                    include_last_offset=True, scale_grad_by_freq=False, mode='sum')
+        else:
+            float_embedding = torch.nn.Embedding(num_embeddings=num_embeddings, embedding_dim=embedding_dim)
+
+        if set_qconfig:
+            float_embedding.qconfig = float_qparams_dynamic_qconfig
+
+        prepare_dynamic(float_embedding)
+
+        float_embedding(*inputs)
+        if is_emb_bag:
+            q_embeddingbag = nnqd.EmbeddingBag.from_float(float_embedding)
+            expected_name = "DynamicQuantizedEmbeddingBag"
+        else:
+            q_embeddingbag = nnq.Embedding.from_float(float_embedding)
+            expected_name = "QuantizedEmbedding"
+
+        q_embeddingbag(*inputs)
+
+        self.assertTrue(expected_name in str(q_embeddingbag))
+
 
 # Below are a series of neural net models to use in testing quantization
 # Single layer models
