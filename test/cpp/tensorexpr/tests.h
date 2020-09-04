@@ -246,6 +246,9 @@ namespace jit {
   _(FuserPass_1)                            \
   _(FuserPass_2)                            \
   _(FuserPass_3)                            \
+  _(FuserPass_0DimInput)                    \
+  _(FuserPass_UnfusibleDevice)              \
+  _(FuserPass_UnknownShapes)                \
   _(TrainBasic)
 
 #define TH_FORALL_TENSOREXPR_TESTS_LLVM(_) \
@@ -384,7 +387,8 @@ namespace jit {
   _(CudaSharedMemReduce_1)                 \
   _(CudaLocalMemReduce_1)                  \
   _(CudaTestRand01)                        \
-  _(CudaSigmoid)
+  _(CudaSigmoid)                           \
+  _(CudaHalfCast)
 
 #define DECLARE_TENSOREXPR_TEST(name) void test##name();
 TH_FORALL_TENSOREXPR_TESTS(DECLARE_TENSOREXPR_TEST)

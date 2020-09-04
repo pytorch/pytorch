@@ -19,8 +19,11 @@ class TestProfiler(JitTestCase):
         self.prev_profiling = torch._C._jit_set_profiling_mode(True)
         self.inline_autodiff = torch._C._debug_set_autodiff_subgraph_inlining(False)
         self.texpr_fuser_state = torch._C._jit_texpr_fuser_enabled()
+        self.can_fuse_on_cpu = torch._C._jit_can_fuse_on_cpu()
         torch._C._jit_set_texpr_fuser_enabled(True)
+        torch._C._jit_override_can_fuse_on_cpu(True)
         self.default_dtype = torch.get_default_dtype()
+        self.old_reduction_enabled = torch._C._jit_set_texpr_reductions_enabled(True)
         torch.set_default_dtype(torch.double)
 
 
@@ -29,7 +32,9 @@ class TestProfiler(JitTestCase):
         torch._C._jit_set_profiling_mode(self.prev_profiling)
         torch._C._debug_set_autodiff_subgraph_inlining(self.inline_autodiff)
         torch._C._jit_set_texpr_fuser_enabled(self.texpr_fuser_state)
+        torch._C._jit_override_can_fuse_on_cpu(self.can_fuse_on_cpu)
         torch.set_default_dtype(self.default_dtype)
+        torch._C._jit_set_texpr_reductions_enabled(self.old_reduction_enabled)
 
     def test_tensor_type_not_determined_by_inputs(self):
         @torch.jit.script
@@ -41,6 +46,9 @@ class TestProfiler(JitTestCase):
         scalar_type_input(x, x, torch.tensor(1))
         scalar_type_input(x, x, torch.tensor(1.0))
         g = torch.jit.last_executed_optimized_graph()
+
+        # item & add should not get pulled into the fusion group -
+        # we expect to see Fusion Group (item / add) Fusion Group in ir dump
         FileCheck().check("TensorExpr").check("Scalar = aten::item").check_next("Tensor = aten::add").check("TensorExpr").run(g)
 
 
@@ -52,7 +60,8 @@ class TestProfiler(JitTestCase):
         non_const_dtype(x, x, True)
         non_const_dtype(x, x, True)
         g = torch.jit.last_executed_optimized_graph()
-        FileCheck().check("TensorExpr").check("TensorExpr").check_not("aten::sum")
+        # because dtype is non-const, sum should not get pulled into the Fusion Group
+        FileCheck().check("TensorExpr").check("TensorExpr").check_not("aten::sum").run(g)
 
     def test_specialize_backward(self):
         def test_fuse(a, b):
