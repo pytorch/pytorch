@@ -47,7 +47,23 @@ namespace jit {
   _(SplitWithMaskWithLoopOptions)           \
   _(ScheduleBroadcastAddBuffer)             \
   _(ScheduleFunctionCall01)                 \
+  _(ScheduleInlineSimple)                   \
   _(ScheduleInlineFunc01)                   \
+  _(ScheduleInlineRandom)                   \
+  _(ScheduleInlineRandomUnrelated)          \
+  _(ScheduleInlineRandomLowerDimensions)    \
+  _(ScheduleInlineIntrinsics)               \
+  _(ScheduleInlineRandWithIntrinsics)       \
+  _(ScheduleSplitAThenInline)               \
+  _(ScheduleSplitBThenInline)               \
+  _(ScheduleSplitTwiceThenInline)           \
+  _(ScheduleInlineThenSplit)                \
+  _(ScheduleSplitInlineThenSplit)           \
+  _(ScheduleSplitInlineSimplify)            \
+  _(ScheduleInlineThreeMixedOnce)           \
+  _(ScheduleInlineThreeMixedTwice)          \
+  _(ScheduleInlineThreeMixedInner)          \
+  _(ScheduleInlineThreeMixedSplit)          \
   _(ScheduleFuserStyle)                     \
   _(ScheduleFuserThreeArg)                  \
   _(ScheduleDynamicShape2D)                 \
@@ -61,6 +77,11 @@ namespace jit {
   _(ReduceAnyAll)                           \
   _(ReduceMatmul2D)                         \
   _(ReduceRfactorLike)                      \
+  _(ReduceAsProducer)                       \
+  _(ReduceAsConsumer)                       \
+  _(SplitReduceAxis)                        \
+  _(SplitNonReduceAxis)                     \
+  _(ReorderedReductionInitializer)          \
   _(ReduceRfactor)                          \
   _(Reduce3DRfactorInternal)                \
   _(Reduce3DRfactorInner)                   \
@@ -78,8 +99,9 @@ namespace jit {
   _(ReduceOverSplitMask)                    \
   _(ReduceSplitRfactor)                     \
   _(ReduceOverSplitRfactor)                 \
-  _(SplitReduceAxis)                        \
-  _(SplitNonReduceAxis)                     \
+  _(ReduceInlineReduction)                  \
+  _(ReduceInlineConsumer)                   \
+  _(ReduceInlineReducerInternal)            \
   _(TypeTest01)                             \
   _(TypePropagation)                        \
   _(Cond01)                                 \
@@ -134,6 +156,7 @@ namespace jit {
   _(UnFoldableExpr)                         \
   _(HashSimple)                             \
   _(HashEquivalence)                        \
+  _(HashEquivalenceRand)                    \
   _(HashEquivalenceAfterFolding)            \
   _(HashDifferenceTypes)                    \
   _(HashLargeExpression)                    \
@@ -149,6 +172,7 @@ namespace jit {
   _(SimplifyAdds)                           \
   _(SimplifyMuls)                           \
   _(SimplifySubs)                           \
+  _(SimplifyDiv)                            \
   _(SimplifyMultiOp)                        \
   _(SimplifyManyOps)                        \
   _(SimplifyFactorization)                  \
@@ -175,6 +199,7 @@ namespace jit {
   _(SimplifyEliminateEmptyFor)              \
   _(SimplifyFlattenBlock)                   \
   _(SimplifyEliminateZeroLengthAlloc)       \
+  _(DontSimplifyRand)                       \
   _(RegisterizerSimple)                     \
   _(RegisterizerLoop)                       \
   _(RegisterizerLoopFixedLoad)              \
@@ -239,8 +264,15 @@ namespace jit {
   _(Kernel_2)                               \
   _(Kernel_3)                               \
   _(Kernel_4)                               \
+  _(KernelSumAllAxes)                       \
+  _(KernelSumOneAxis)                       \
+  _(KernelSumMultipleAxes)                  \
   _(FuserPass_1)                            \
   _(FuserPass_2)                            \
+  _(FuserPass_3)                            \
+  _(FuserPass_0DimInput)                    \
+  _(FuserPass_UnfusibleDevice)              \
+  _(FuserPass_UnknownShapes)                \
   _(TrainBasic)
 
 #define TH_FORALL_TENSOREXPR_TESTS_LLVM(_) \
@@ -344,10 +376,10 @@ namespace jit {
   _(LLVMElemwiseLog10Float)                \
   _(LLVMElemwiseMaxInt)                    \
   _(LLVMElemwiseMinInt)                    \
-  _(LLVMElemwiseMaxNumFloat)               \
-  _(LLVMElemwiseMaxNumNaNFloat)            \
-  _(LLVMElemwiseMinNumFloat)               \
-  _(LLVMElemwiseMinNumNaNFloat)            \
+  _(LLVMElemwiseMaxFloat)                  \
+  _(LLVMElemwiseMaxNaNFloat)               \
+  _(LLVMElemwiseMinFloat)                  \
+  _(LLVMElemwiseMinNaNFloat)               \
   _(LLVMCompareSelectIntEQ)                \
   _(LLVMCompareSelectFloatEQ)              \
   _(LLVMStoreFloat)                        \
@@ -379,7 +411,8 @@ namespace jit {
   _(CudaSharedMemReduce_1)                 \
   _(CudaLocalMemReduce_1)                  \
   _(CudaTestRand01)                        \
-  _(CudaSigmoid)
+  _(CudaSigmoid)                           \
+  _(CudaHalfCast)
 
 #define DECLARE_TENSOREXPR_TEST(name) void test##name();
 TH_FORALL_TENSOREXPR_TESTS(DECLARE_TENSOREXPR_TEST)
