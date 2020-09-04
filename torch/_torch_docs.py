@@ -2655,9 +2655,9 @@ Example::
 
 add_docstr(torch.exp2,
            r"""
-exp(input, out=None) -> Tensor
+exp2(input, out=None) -> Tensor
 
-Returns a new tensor with the exponential of the elements
+Returns a new tensor with the 2 raised to the elements
 of the input tensor :attr:`input`.
 
 .. math::
