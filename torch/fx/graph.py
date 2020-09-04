@@ -198,7 +198,7 @@ class Graph:
                 placeholder_names.append(n.target)
                 return None
             elif n.op == 'get_param':
-                return f'%{n.name} : [uses={n.uses}]= {n.target}'
+                return f'%{n.name} : [uses={n.uses}] = {n.target}'
             else:
                 return f'%{n.name} : [uses={n.uses}] = {n.op}[target={n.target}](' \
                        f'args = {format_arg(n.args)}, kwargs = {format_arg(n.kwargs)})'
