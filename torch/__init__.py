@@ -91,7 +91,7 @@ if sys.platform == 'win32':
             res = kernel32.AddDllDirectory(dll_path)
             if res is None:
                 err = ctypes.WinError(ctypes.get_last_error())
-                err.strerror += ' Error adding "{}" to the DLL directories.'.format(dll_path)
+                err.strerror += f' Error adding "{dll_path}" to the DLL directories.'
                 raise err
 
     try:
@@ -112,7 +112,7 @@ if sys.platform == 'win32':
             last_error = ctypes.get_last_error()
             if res is None and last_error != 126:
                 err = ctypes.WinError(last_error)
-                err.strerror += ' Error loading "{}" or one of its dependencies.'.format(dll)
+                err.strerror += f' Error loading "{dll}" or one of its dependencies.'
                 raise err
             elif res is not None:
                 is_loaded = True
@@ -123,7 +123,7 @@ if sys.platform == 'win32':
             res = kernel32.LoadLibraryW(dll)
             if res is None:
                 err = ctypes.WinError(ctypes.get_last_error())
-                err.strerror += ' Error loading "{}" or one of its dependencies.'.format(dll)
+                err.strerror += f' Error loading "{dll}" or one of its dependencies.'
                 raise err
 
     kernel32.SetErrorMode(prev_error_mode)
