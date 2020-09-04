@@ -228,7 +228,7 @@ void Fusion::removeVal(Val* val) {
   delete val;
 }
 
-void Fusion::addInput(Val* const input) {
+void Fusion::addInput(Val* input) {
   assertInFusion(input, "Cannot register input ");
 
   if (input->getValType().value() == ValType::TensorView) {
@@ -251,7 +251,7 @@ void Fusion::addInput(Val* const input) {
   inputs_.push_back(input);
 }
 
-void Fusion::addOutput(Val* const output) {
+void Fusion::addOutput(Val* output) {
   assertInFusion(output, "Cannot register output ");
   if (output->getValType().value() == ValType::TensorView) {
     auto tv = output->as<TensorView>();
