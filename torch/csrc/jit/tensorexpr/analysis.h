@@ -60,6 +60,12 @@ class VarFinder : public IRVisitor {
     return nf.vars();
   }
 
+  static std::unordered_set<const Var*> find(const Expr* e) {
+    VarFinder nf;
+    e->accept(&nf);
+    return nf.vars();
+  }
+
   const std::unordered_set<const Var*>& vars() {
     return vars_;
   }
