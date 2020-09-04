@@ -4143,6 +4143,14 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
 
         self.assertEqual(rref.to_here(), torch.ones(2).to(1))
 
+    @staticmethod
+    def _functional_linear_model(w1, w2, input):
+        return torch.nn.functional.linear(torch.nn.functional.linear(input, w1), w2)
+
+    @staticmethod
+    def _identity(input, dst):
+        return input
+
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
     def test_with_ddp(self):
@@ -4157,7 +4165,7 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
 
         # Forward pass.
         options.set_device_map(dst, {self.rank: (self.rank + 1) % self.world_size})
-        # Backward pass.
+        # Backward pass (Hack until we fix https://github.com/pytorch/pytorch/issues/44170).
         reverse_rank = (self.rank - 1 + self.world_size) % self.world_size
         options.set_device_map(worker_name(reverse_rank), {self.rank: reverse_rank})
 
@@ -4171,24 +4179,51 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture):
 
         initialize_pg(self.init_method, self.rank, self.world_size, backend="nccl")
 
+        w1 = torch.rand((10, 20), device=self.rank, requires_grad=True)
+        w2 = torch.rand((5, 10), device=self.rank, requires_grad=True)
+
+        class LocalModel(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.fc1 = torch.nn.Linear(5, 3).cuda(device)
+                self.fc2 = torch.nn.Linear(3, 1).cuda(device)
+
+            def forward(self, inp):
+                return self.fc2(self.fc1(inp))
+
+        class DistModel(torch.nn.Module):
+            def __init__(self, fc1, fc2, dst):
+                super().__init__()
+                self.fc1 = copy.deepcopy(fc1)
+                self.fc2 = rpc.remote(dst, TensorPipeAgentRpcTest._identity, args=(fc2, dst))
+
+            def forward(self, inp):
+                return self.fc2.rpc_sync().forward(self.fc1(inp))
+
         # Run local model.
-        t = torch.rand((10, 10), device=self.rank, requires_grad=True)
-        fc_layer1 = torch.nn.Linear(10, 5)
-        ddp_model = DistributedDataParallel(fc_layer1.cuda(self.rank), device_ids=[self.rank])
-        out = ddp_model(torch.add(t, t))
+        t = torch.rand((10, 20), device=self.rank, requires_grad=True)
+        local_model = LocalModel(self.rank)
+        ddp_model = DistributedDataParallel(local_model, device_ids=[self.rank])
+        out = ddp_model(TensorPipeAgentRpcTest._functional_linear_model(w1, w2, t))
         out.sum().backward()
 
-        fc_layer2 = copy.deepcopy(fc_layer1)
-        ddp_model = DistributedDataParallel(fc_layer2.cuda(self.rank), device_ids=[self.rank])
-        dist.barrier()
+        dist_model = DistModel(local_model.fc1, local_model.fc2, dst)
+        ddp_model = DistributedDataParallel(dist_model, device_ids=[self.rank])
+        # Need to use `_wait_all_workers` since `dist.barrier()`
+        # causes a deadlock: https://github.com/pytorch/pytorch/issues/44169
+        rpc.api._wait_all_workers()
 
         # Run distributed model.
         with dist_autograd.context() as context_id:
-            res = rpc.rpc_sync(dst, torch.add, args=(t, t))
-            rpc.api._wait_all_workers()
+            res = rpc.rpc_sync(dst, TensorPipeAgentRpcTest._functional_linear_model, args=(w1, w2, t))
             out = ddp_model(res)
+            # Need to use `_wait_all_workers` since `dist.barrier()`
+            # causes a deadlock: https://github.com/pytorch/pytorch/issues/44169
+            rpc.api._wait_all_workers()
             dist_autograd.backward(context_id, [out.sum()])
-            self.assertEqual(t.grad, dist_autograd.get_gradients(context_id)[t])
-            self.assertEqual(fc_layer1.weight.grad, dist_autograd.get_gradients(context_id)[fc_layer2.weight])
+            grads = dist_autograd.get_gradients(context_id)
+            self.assertEqual(t.grad, grads[t])
+            self.assertEqual(w1.grad, grads[w1])
+            self.assertEqual(w2.grad, grads[w2])
 
         rpc.shutdown()
