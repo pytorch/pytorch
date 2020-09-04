@@ -562,32 +562,37 @@ class TestXNNPACKRewritePass(TestCase):
             data_shape,
             prepack_removal=False,
             fuse_clamping_ops=False):
-        module_instance = self
-        scripted_model = torch.jit.script(module_instance)
-        scripted_model.eval()
         input_data = torch.normal(1, 20, size=data_shape)
-        ref_result = scripted_model(input_data)
-        torch._C._jit_pass_insert_prepacked_ops(scripted_model._c)
-        if fuse_clamping_ops or prepack_removal:
-            scripted_model._c = torch._C._freeze_module(scripted_model._c)
-        if fuse_clamping_ops:
-            torch._C._jit_pass_fuse_clamp_w_prepacked_linear_conv(scripted_model._c)
-        if (prepack_removal):
-            torch._C._jit_pass_fold_prepacking_ops(scripted_model._c)
 
-        buffer = io.BytesIO()
-        torch.jit.save(scripted_model, buffer)
-        buffer.seek(0)
-        deserialized_scripted_model = torch.jit.load(buffer)
-        for pattern, v in pattern_count_map.items():
-            if (v == 0):
-                FileCheck().check(pattern).run(deserialized_scripted_model.graph)
-            elif (v == -1):
-                FileCheck().check_not(pattern).run(deserialized_scripted_model.graph)
+        for jit_method in ["script", "trace"]:
+            module_instance = self
+            if jit_method == "script":
+                scripted_model = torch.jit.script(module_instance)
             else:
-                FileCheck().check_count(pattern, v, exactly=True).run(deserialized_scripted_model.graph)
-        xnnpack_result = deserialized_scripted_model(input_data)
-        torch.testing.assert_allclose(ref_result, xnnpack_result, rtol=1e-2, atol=1e-3)
+                scripted_model = torch.jit.trace(module_instance, input_data)
+            scripted_model.eval()
+            ref_result = scripted_model(input_data)
+            torch._C._jit_pass_insert_prepacked_ops(scripted_model._c)
+            if fuse_clamping_ops or prepack_removal:
+                scripted_model._c = torch._C._freeze_module(scripted_model._c)
+            if fuse_clamping_ops:
+                torch._C._jit_pass_fuse_clamp_w_prepacked_linear_conv(scripted_model._c)
+            if (prepack_removal):
+                torch._C._jit_pass_fold_prepacking_ops(scripted_model._c)
+
+            buffer = io.BytesIO()
+            torch.jit.save(scripted_model, buffer)
+            buffer.seek(0)
+            deserialized_scripted_model = torch.jit.load(buffer)
+            for pattern, v in pattern_count_map.items():
+                if (v == 0):
+                    FileCheck().check(pattern).run(deserialized_scripted_model.graph)
+                elif (v == -1):
+                    FileCheck().check_not(pattern).run(deserialized_scripted_model.graph)
+                else:
+                    FileCheck().check_count(pattern, v, exactly=True).run(deserialized_scripted_model.graph)
+            xnnpack_result = deserialized_scripted_model(input_data)
+            torch.testing.assert_allclose(ref_result, xnnpack_result, rtol=1e-2, atol=1e-3)
 
     def test_linear(self):
         data_shape = [2, 3, 32]
@@ -915,43 +920,49 @@ class TestXNNPACKConv1dTransformPass(TestCase):
             pattern_count_transformed_map,
             pattern_count_optimized_map,
             data_shape):
-        module_instance = self
-        scripted_model = torch.jit.script(module_instance)
-        scripted_model.eval()
         input_data = torch.normal(1, 20, size=data_shape)
-        ref_result = scripted_model(input_data)
-        torch._C._jit_pass_transform_conv1d_to_conv2d(scripted_model._c)
-        optimized_scripted_model = optimize_for_mobile(scripted_model)
 
-        buffer = io.BytesIO()
-        torch.jit.save(scripted_model, buffer)
-        buffer.seek(0)
-        deserialized_scripted_model = torch.jit.load(buffer)
-
-        for pattern, v in pattern_count_transformed_map.items():
-            if (v == 0):
-                FileCheck().check(pattern).run(deserialized_scripted_model.graph)
-            elif (v == -1):
-                FileCheck().check_not(pattern).run(deserialized_scripted_model.graph)
+        for jit_method in ["script", "trace"]:
+            module_instance = self
+            if jit_method == "script":
+                scripted_model = torch.jit.script(module_instance)
             else:
-                FileCheck().check_count(pattern, v, exactly=True).run(deserialized_scripted_model.graph)
-        transformed_result = deserialized_scripted_model(input_data)
-        torch.testing.assert_allclose(ref_result, transformed_result, rtol=1e-2, atol=1e-3)
+                scripted_model = torch.jit.trace(module_instance, input_data)
+            scripted_model.eval()
+            ref_result = scripted_model(input_data)
+            torch._C._jit_pass_transform_conv1d_to_conv2d(scripted_model._c)
+            optimized_scripted_model = optimize_for_mobile(scripted_model)
 
-        optimized_buffer = io.BytesIO()
-        torch.jit.save(optimized_scripted_model, optimized_buffer)
-        optimized_buffer.seek(0)
-        deserialized_optimized_scripted_model = torch.jit.load(optimized_buffer)
+            buffer = io.BytesIO()
+            torch.jit.save(scripted_model, buffer)
+            buffer.seek(0)
+            deserialized_scripted_model = torch.jit.load(buffer)
 
-        for pattern, v in pattern_count_optimized_map.items():
-            if (v == 0):
-                FileCheck().check(pattern).run(deserialized_optimized_scripted_model.graph)
-            elif (v == -1):
-                FileCheck().check_not(pattern).run(deserialized_optimized_scripted_model.graph)
-            else:
-                FileCheck().check_count(pattern, v, exactly=True).run(deserialized_optimized_scripted_model.graph)
-        xnnpack_result = deserialized_optimized_scripted_model(input_data)
-        torch.testing.assert_allclose(ref_result, xnnpack_result, rtol=1e-2, atol=1e-3)
+            for pattern, v in pattern_count_transformed_map.items():
+                if (v == 0):
+                    FileCheck().check(pattern).run(deserialized_scripted_model.graph)
+                elif (v == -1):
+                    FileCheck().check_not(pattern).run(deserialized_scripted_model.graph)
+                else:
+                    FileCheck().check_count(pattern, v, exactly=True).run(deserialized_scripted_model.graph)
+            transformed_result = deserialized_scripted_model(input_data)
+            torch.testing.assert_allclose(ref_result, transformed_result, rtol=1e-2, atol=1e-3)
+
+            optimized_buffer = io.BytesIO()
+            torch.jit.save(optimized_scripted_model, optimized_buffer)
+            optimized_buffer.seek(0)
+            deserialized_optimized_scripted_model = torch.jit.load(optimized_buffer)
+
+            for pattern, v in pattern_count_optimized_map.items():
+                if (v == 0):
+                    FileCheck().check(pattern).run(deserialized_optimized_scripted_model.graph)
+                elif (v == -1):
+                    FileCheck().check_not(pattern).run(deserialized_optimized_scripted_model.graph)
+                else:
+                    FileCheck().check_count(pattern, v, exactly=True).run(deserialized_optimized_scripted_model.graph)
+            xnnpack_result = deserialized_optimized_scripted_model(input_data)
+            torch.testing.assert_allclose(ref_result, xnnpack_result, rtol=1e-2, atol=1e-3)
+
 
     def test_conv1d_basic(self):
         batch_size_list = range(1, 3)
