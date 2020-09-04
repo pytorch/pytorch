@@ -281,6 +281,19 @@ void ProfilingRecord::instrumentBlock(Block* block) {
   }
 }
 
+void ProfilingRecord::removeProfilingNodes(Block* b) {
+  for (auto it = b->nodes().begin(); it != b->nodes().end(); it++) {
+    if (it->kind() == prim::profile || it->kind() == prim::profile_optional) {
+      it->output()->replaceAllUsesWith(it->input());
+      it.destroyCurrent();
+    } else {
+      for (Block* ib : it->blocks()) {
+        removeProfilingNodes(ib);
+      }
+    }
+  }
+}
+
 std::unique_ptr<ProfilingRecord> ProfilingRecord::instrumentGraph(
     const std::shared_ptr<Graph>& graph) {
   auto new_g = graph->copy();
