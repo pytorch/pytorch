@@ -106,8 +106,9 @@ static void apply_single_inverse_lib(const Tensor& self, Tensor& self_inv, int64
 Tensor _inverse_helper_cuda_lib(const Tensor& self) {
   Tensor self_working_copy = cloneBatchedColumnMajor(self);
   Tensor self_inv_working_copy = column_major_identity_matrix_like(self_working_copy);
+  const int batch_size = cuda_int_cast(batchCount(self), "batchCount");
 
-  if (self.dim() > 2) {
+  if (self.dim() > 2 && batch_size > 1) {
     Tensor infos = at::zeros({batchCount(self)}, self.options().dtype(kInt));
     AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "inverse_cuda", [&]{
       apply_batched_inverse_lib<scalar_t>(
