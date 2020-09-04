@@ -210,6 +210,8 @@ class Graph:
         for node_str in node_strs:
             if node_str:
                 s += '\n    ' + node_str
+        if self.result:
+            s += f'\n    return {format_arg(self.result)}'
         return s
 
 reflectable_magic_methods = {
