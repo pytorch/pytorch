@@ -29,9 +29,8 @@ class TORCH_API LoopNest {
     return root_stmt_;
   }
 
-  // These Tensor-based loop/stmt accessors are valid only as long as no
-  // transformations have been made.
   std::vector<For*> getLoopStmtsFor(Tensor*) const;
+  std::vector<For*> getLoopStmtsFor(Stmt*) const;
   Stmt* getLoopBodyFor(Tensor*) const;
   bool hasLoopBodyFor(Tensor*) const;
 
@@ -78,8 +77,6 @@ class TORCH_API LoopNest {
   Stmt* lowerToStmt(Tensor* t);
   Stmt* insertAllocFree(Stmt* stmt);
 
-  std::unordered_map<Tensor*, Stmt*> tensor_to_stmt_;
-  std::unordered_map<Stmt*, Tensor*> stmt_to_tensor_;
   Stmt* root_stmt_;
 
   std::unordered_set<Tensor*> output_tensors_;

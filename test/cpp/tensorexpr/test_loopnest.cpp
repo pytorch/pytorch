@@ -2880,9 +2880,8 @@ void testDetectInlineRankMismatch() {
       {{kTotalSize / 2, "i"}, {2, "j"}},
       [&](const VarHandle& i, const VarHandle& j) { return a->call(i, j); });
   LoopNest l({reshape});
-  l.computeInline(l.getLoopBodyFor(a));
   ASSERT_THROWS_WITH(
-      l.prepareForCodegen(),
+      l.computeInline(l.getLoopBodyFor(a)),
       "Buffer indexed access is inconsistent with its rank");
 }
 
