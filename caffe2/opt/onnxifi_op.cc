@@ -46,6 +46,9 @@ void setInputTensorDescriptorTypeAndBuffer(
   if (cpu_tensor.template IsType<uint8_t>()) {
     desc->dataType = ONNXIFI_DATATYPE_UINT8;
     desc->buffer = reinterpret_cast<onnxPointer>(cpu_tensor.data<uint8_t>());
+  } else if (cpu_tensor.template IsType<int8_t>()) {
+    desc->dataType = ONNXIFI_DATATYPE_INT8;
+    desc->buffer = reinterpret_cast<onnxPointer>(cpu_tensor.data<int8_t>());
   } else if (cpu_tensor.template IsType<int32_t>()) {
     desc->dataType = ONNXIFI_DATATYPE_INT32;
     desc->buffer = reinterpret_cast<onnxPointer>(cpu_tensor.data<int32_t>());

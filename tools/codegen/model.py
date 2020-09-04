@@ -304,7 +304,8 @@ class FunctionSchema:
             # TODO: fixme
             if str(self.name) not in [
                     '_amp_non_finite_check_and_unscale_',
-                    '_foreach_add_.Scalar']:
+                    '_foreach_add_.Scalar',
+                    '_foreach_add_.List']:
                 assert len(self.returns) == 1
 
     def is_out_fn(self) -> bool:
