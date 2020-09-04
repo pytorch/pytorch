@@ -16,8 +16,11 @@ jobs:
         command: |
           set -e
           # TODO: Remove this after we figure out why rocm tests are failing
-          if [[ "${DOCKER_IMAGE}" == *rocm* ]]; then
+          if [[ "${DOCKER_IMAGE}" == *rocm3.5* ]]; then
             export DOCKER_TAG="ab1632df-fa59-40e6-8c23-98e004f61148"
+          fi
+          if [[ "${DOCKER_IMAGE}" == *rocm3.7* ]]; then
+            export DOCKER_TAG="1045c7b891104cb4fd23399eab413b6213e48aeb"
           fi
           if [[ ${BUILD_ENVIRONMENT} == *"pure_torch"* ]]; then
             echo 'BUILD_CAFFE2=OFF' >> "${BASH_ENV}"
@@ -93,8 +96,11 @@ jobs:
           set -e
           export PYTHONUNBUFFERED=1
           # TODO: Remove this after we figure out why rocm tests are failing
-          if [[ "${DOCKER_IMAGE}" == *rocm* ]]; then
+          if [[ "${DOCKER_IMAGE}" == *rocm3.5* ]]; then
             export DOCKER_TAG="ab1632df-fa59-40e6-8c23-98e004f61148"
+          fi
+          if [[ "${DOCKER_IMAGE}" == *rocm3.7* ]]; then
+            export DOCKER_TAG="1045c7b891104cb4fd23399eab413b6213e48aeb"
           fi
           # See Note [Special build images]
           output_image=${DOCKER_IMAGE}:${DOCKER_TAG}-${CIRCLE_SHA1}
