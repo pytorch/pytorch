@@ -533,6 +533,10 @@ Tensor index_select_cpu_(const Tensor & self, int64_t dim, const Tensor & index)
   return index_select_out_cpu_(result, self, dim, index);
 }
 
+Tensor index_select_backward(const Tensor& grad, IntArrayRef self_sizes, int64_t dim, const Tensor& index) {
+  return at::zeros(self_sizes, grad.options()).index_add_(dim, index, grad);
+}
+
 Tensor & index_fill_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
   TORCH_CHECK(source.dim() == 0, "index_fill_ only supports a 0-dimensional value tensor, but got tensor "
       "with ", source.dim(), " dimension(s).");
@@ -556,6 +560,13 @@ Tensor & gather_out_cpu_cuda(Tensor & result, const Tensor & self, int64_t dim, 
 Tensor gather(const Tensor & self, int64_t dim, const Tensor & index, bool sparse_grad) {
   Tensor result = at::empty({0}, self.options());
   return gather_out_cpu_cuda(result, self, dim, index, sparse_grad);
+}
+
+Tensor gather_backward(const Tensor& grad, const Tensor& self, int64_t dim, const Tensor& index, bool sparse_grad) {
+  if (sparse_grad) {
+    return at::_gather_sparse_backward(self, dim, index, grad);
+  }
+  return at::zeros(self.sizes(), grad.options()).scatter_add_(dim, index, grad);
 }
 
 Tensor & scatter_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
