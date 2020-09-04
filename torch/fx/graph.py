@@ -173,7 +173,7 @@ class Graph:
         return src, str(self.result), free_vars
 
     def __str__(self) -> str:
-        placeholder_names = []
+        placeholder_names : List[str] = []
 
         def format_arg(arg) -> str:
             if isinstance(arg, list):
@@ -194,13 +194,14 @@ class Graph:
 
         def format_node(n : Node) -> Optional[str]:
             if n.op == 'placeholder':
+                assert isinstance(n.target, str)
                 placeholder_names.append(n.target)
                 return None
             elif n.op == 'get_param':
-                return f'%{n.name} = {n.target}'
+                return f'%{n.name} : [uses={n.uses}]= {n.target}'
             else:
-                return f'%{n.name} = {n.op}[target={n.target}](' \
-                       f'args = {format_arg(n.args)}, kwargs = {format_arg(n.kwargs)}, uses={n.uses})'
+                return f'%{n.name} : [uses={n.uses}] = {n.op}[target={n.target}](' \
+                       f'args = {format_arg(n.args)}, kwargs = {format_arg(n.kwargs)})'
 
 
         node_strs = [format_node(node) for node in self.nodes]
