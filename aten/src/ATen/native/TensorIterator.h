@@ -156,14 +156,10 @@ struct CAFFE2_API TensorIterator {
 
   void foreach_reduced_elt(loop_subiter_t loop, bool parallelize=true);
 
-  static TensorIterator binary_op(Tensor& out, const Tensor& a, const Tensor& b,
-    bool check_mem_overlap = false);
-  static TensorIterator comparison_op(Tensor& out, const Tensor& a, const Tensor& b,
-    bool check_mem_overlap = false);
-  static TensorIterator unary_op(Tensor& out, const Tensor& a,
-    bool check_mem_overlap = false);
-  static TensorIterator nullary_op(Tensor& out,
-    bool check_mem_overlap = false);
+  static TensorIterator binary_op(Tensor& out, const Tensor& a, const Tensor& b);
+  static TensorIterator comparison_op(Tensor& out, const Tensor& a, const Tensor& b);
+  static TensorIterator unary_op(Tensor& out, const Tensor& a);
+  static TensorIterator nullary_op(Tensor& out);
   static TensorIterator reduce_op(Tensor& out, const Tensor& a);
   static TensorIterator reduce_op(Tensor& out1, Tensor& out2, const Tensor& a);
 
@@ -415,6 +411,16 @@ public:
   /// Construction
   TensorIteratorConfig& add_output(const Tensor& output);
   TensorIteratorConfig& add_input(const Tensor& input);
+
+  // Sets the check_mem_overlap_ flag, which is true by default.
+  // If true, inputs are checked for partial overlap with the outputs and
+  // outputs are checked for internal overlap (e.g. broadcasted views). An error
+  // is raised if unacceptable overlap is detected.
+  // If you're migrating an existing operator to using TensorIterator, please
+  // consider if the previous implementation checked memory overlap. If it did
+  // not, and if the operator is idempotent (for example, Tensor.fill_(0)), then
+  // checking memory overlap is BC-breaking. Please don't check memory overlap
+  // in that case.
   TensorIteratorConfig& set_check_mem_overlap(bool check_mem_overlap);
 
   // Sets the check_all_same_dtype_ flag, which is true by default
@@ -480,7 +486,7 @@ private:
 
   c10::optional<DimVector> static_shape_ = c10::nullopt;
   c10::optional<std::pair<ScalarType, Device>> static_dtype_and_device_ = c10::nullopt;
-  bool check_mem_overlap_ = false;
+  bool check_mem_overlap_ = true;
   bool allow_cpu_scalars_ = false;
   bool is_reduction_ = false;
   bool resize_outputs_ = true;

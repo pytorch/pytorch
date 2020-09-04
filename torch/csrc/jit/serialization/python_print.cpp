@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/ir/attributes.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/ir_views.h>
+#include <torch/csrc/jit/ir/type_hashing.h>
 #include <torch/csrc/jit/resource_guard.h>
 
 #include <algorithm>
@@ -183,10 +184,12 @@ struct PythonPrintImpl {
     // Need to do actual equality comparison, not a pointer equality. This is
     // because for some types (e.g. FunctionType), we may have multiple
     // TypePtr's that represent the same underlying thing.
-    auto it = std::find_if(
-        deps_table_.cbegin(),
-        deps_table_.cend(),
-        [&](const c10::NamedTypePtr& dep) { return *dep == *type; });
+    // auto it = std::find_if(
+    //     deps_table_.cbegin(),
+    //     deps_table_.cend(),
+    //     [&](const c10::NamedTypePtr& dep) { return *dep == *type; });
+
+    auto it = deps_table_.find(type);
 
     if (it == deps_table_.cend()) {
       deps_table_.emplace(type);
@@ -1267,12 +1270,12 @@ struct PythonPrintImpl {
 
   PythonPrintImpl(
       std::vector<at::IValue>& constant_table,
-      std::set<c10::NamedTypePtr>& deps_table,
+      std::vector<c10::NamedTypePtr>& deps_table,
       c10::TypePrinter type_printer,
       bool enforce_importable)
       : body_(&source_range_stack_),
         constant_table_(constant_table),
-        deps_table_(deps_table),
+        deps_table_(std::make_move_iterator(deps_table.begin()), std::make_move_iterator(deps_table.end())),
         type_printer_(type_printer),
         enforce_importable_(enforce_importable) {}
 
@@ -1468,7 +1471,7 @@ struct PythonPrintImpl {
 
   // Any NamedTypes (classes, functions, NamedTuples) used are written to this
   // table.
-  std::set<c10::NamedTypePtr>& deps_table_;
+  std::unordered_set<c10::TypePtr, HashType, EqualType> deps_table_;
 
   // A function that, given a named type, returns us the correct string to print
   // for it.
@@ -1484,7 +1487,7 @@ struct PythonPrintImpl {
 
 PythonPrint::PythonPrint(
     std::vector<at::IValue>& constant_table,
-    std::set<c10::NamedTypePtr>& deps_table,
+    std::vector<c10::NamedTypePtr>& deps_table,
     c10::TypePrinter type_printer,
     bool enforce_importable)
     : pImpl(std::make_shared<PythonPrintImpl>(

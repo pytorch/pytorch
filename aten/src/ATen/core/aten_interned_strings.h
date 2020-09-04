@@ -23,8 +23,6 @@ _(aten, _abs) \
 _(aten, _addmv) \
 _(aten, _addr) \
 _(aten, _arange) \
-_(aten, _asinh) \
-_(aten, _atanh) \
 _(aten, _argmax) \
 _(aten, _argmin) \
 _(aten, _baddbmm_mkl) \
@@ -240,6 +238,8 @@ _(aten, clamp_min) \
 _(aten, clone) \
 _(aten, coalesce) \
 _(aten, combinations) \
+_(aten, _conj) \
+_(aten, conj) \
 _(aten, complex) \
 _(aten, polar) \
 _(aten, constant_pad_nd) \
@@ -369,6 +369,7 @@ _(aten, hardsigmoid_backward) \
 _(aten, hardtanh) \
 _(aten, hardtanh_backward) \
 _(aten, hardtanh_forward) \
+_(aten, heaviside) \
 _(aten, hinge_embedding_loss) \
 _(aten, histc) \
 _(aten, hspmm) \
@@ -656,8 +657,6 @@ _(aten, stft) \
 _(aten, storage_offset) \
 _(aten, stride) \
 _(aten, strides) \
-_(aten, sub) \
-_(aten, sub_) \
 _(aten, rsub) \
 _(aten, sum) \
 _(aten, sum_to_size) \

@@ -2,75 +2,122 @@ Reproducibility
 ===============
 
 Completely reproducible results are not guaranteed across PyTorch releases,
-individual commits or different platforms. Furthermore, results need not be
+individual commits, or different platforms. Furthermore, results may not be
 reproducible between CPU and GPU executions, even when using identical seeds.
 
-However, in order to make computations deterministic on your specific problem on
-one specific platform and PyTorch release, there are a couple of steps to take.
+However, there are some steps you can take to limit the number of sources of
+nondeterministic behavior for a specific platform, device, and PyTorch release.
+First, you can control sources of randomness that can cause multiple executions
+of your application to behave differently. Second, you can configure PyTorch
+to avoid using nondeterministic algorithms for some operations, so that multiple
+calls to those operations, given the same inputs, will produce the same result.
 
-There are two pseudorandom number generators involved in PyTorch, which you will
-need to seed manually to make runs reproducible. Furthermore, you should ensure
-that all other libraries your code relies on and which use random numbers also
-use a fixed seed.
+.. warning::
 
-PyTorch
-.......
+    Deterministic operations are often slower than nondeterministic operations, so
+    single-run performance may decrease for your model. However, determinism may
+    save time in development by facilitating experimentation, debugging, and
+    regression testing.
+
+Controlling sources of randomness
+.................................
+
+PyTorch random number generator
+-------------------------------
 You can use :meth:`torch.manual_seed()` to seed the RNG for all devices (both
 CPU and CUDA)::
 
     import torch
     torch.manual_seed(0)
 
-
-There are some PyTorch functions that use CUDA functions that can be a source
-of nondeterminism. One class of such CUDA functions are atomic operations,
-in particular :attr:`atomicAdd`, which can lead to the order of additions being
-nondetermnistic. Because floating-point addition is not perfectly associative
-for floating-point operands, :attr:`atomicAdd` with floating-point operands can
-introduce different floating-point rounding errors on each evaluation, which
-introduces a source of nondeterministic variance (aka noise) in the result.
-
-PyTorch functions that use :attr:`atomicAdd` in the forward kernels include
-:meth:`torch.Tensor.index_add_`, :meth:`torch.Tensor.scatter_add_`,
-:meth:`torch.bincount`.
-
-A number of operations have backwards kernels that use :attr:`atomicAdd`,
-including :meth:`torch.nn.functional.embedding_bag`,
-:meth:`torch.nn.functional.ctc_loss`, :meth:`torch.nn.functional.interpolate`,
-and many forms of pooling, padding, and sampling.
-
-There is currently no simple way of avoiding nondeterminism in these functions.
-
-Additionally, the backward path for :meth:`repeat_interleave` operates
-nondeterministically on the CUDA backend because :meth:`repeat_interleave`
-is implemented using :meth:`index_select`, the backward path for
-which is implemented using :meth:`index_add_`, which is known to operate
-nondeterministically (in the forward direction) on the CUDA backend (see above).
-
-cuDNN
-.....
-When running on the cuDNN backend, two further options must be set::
-
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
-
-On some versions of cuDNN and CUDA, RNN and LSTM may have non-deterministic behavior.
-See :meth:`torch.nn.RNN` and :meth:`torch.nn.LSTM` for details and workarounds.
-
-.. warning::
-
-    Deterministic operation may have a negative single-run performance impact,
-    depending on the composition of your model. Due to different underlying
-    operations, which may be slower, the processing speed (e.g. the number of
-    batches trained per second) may be lower than when the model functions
-    nondeterministically. However, even though single-run speed may be
-    slower, depending on your application determinism may save time by
-    facilitating experimentation, debugging, and regression testing.
-
-Numpy
-.....
-If you or any of the libraries you are using rely on Numpy, you should seed the
-Numpy RNG as well. This can be done with::
+Random number generators in other libraries
+-------------------------------------------
+If you or any of the libraries you are using rely on NumPy, you can seed the global
+NumPy RNG with::
 
     import numpy as np
     np.random.seed(0)
+
+However, some applications and libraries may use NumPy Random Generator objects,
+not the global RNG
+(`<https://numpy.org/doc/stable/reference/random/generator.html>`_), and those will
+need to be seeded consistently as well.
+
+If you are using any other libraries that use random number generators, refer to
+the documentation for those libraries to see how to set consistent seeds for them.
+
+CUDA convolution benchmarking
+-----------------------------
+The cuDNN library, used by CUDA convolution operations, can be a source of nondeterminism
+across multiple executions of an application. When a cuDNN convolution is called with a
+new set of size parameters, an optional feature can run multiple convolution algorithms,
+benchmarking them to find the fastest one. Then, the fastest algorithm will be used
+consistently during the rest of the process for the corresponding set of size parameters.
+Due to benchmarking noise and different hardware, the benchmark may select different
+algorithms on subsequent runs, even on the same machine.
+
+Disabling the benchmarking feature with :code:`torch.backends.cudnn.benchmark = False`
+causes cuDNN to deterministically select an algorithm, possibly at the cost of reduced
+performance.
+
+However, if you do not need reproducibility across multiple executions of your application,
+then performance might improve if the benchmarking feature is enabled with
+:code:`torch.backends.cudnn.benchmark = True`.
+
+Note that this setting is different from the :code:`torch.backends.cudnn.deterministic`
+setting discussed below.
+
+Avoiding nondeterministic algorithms
+....................................
+:meth:`torch.set_deterministic` lets you configure PyTorch to use deterministic
+algorithms instead of nondeterministic ones where available, and to throw an error
+if an operation is known to be nondeterministic (and without a deterministic
+alternative).
+
+Please check the documentation for :meth:`torch.set_deterministic()` for a full
+list of affected operations. If an operation does not act correctly according to
+the documentation, or if you need a deterministic implementation of an operation
+that does not have one, please submit an issue:
+`<https://github.com/pytorch/pytorch/issues?q=label:%22topic:%20determinism%22>`_
+
+For example, running the nondeterministic CUDA implementation of :meth:`torch.Tensor.index_add_`
+will throw an error::
+
+    >>> import torch
+    >>> torch.set_deterministic(True)
+    >>> torch.randn(2, 2).cuda().index_add_(0, torch.tensor([0, 1]), torch.randn(2, 2))
+    Traceback (most recent call last):
+    File "<stdin>", line 1, in <module>
+    RuntimeError: index_add_cuda_ does not have a deterministic implementation, but you set
+    'torch.set_deterministic(True)'. ...
+
+When :meth:`torch.bmm` is called with sparse-dense CUDA tensors it typically uses a
+nondeterministic algorithm, but when the deterministic flag is turned on, its alternate
+deterministic implementation will be used::
+
+    >>> import torch
+    >>> torch.set_deterministic(True)
+    >>> torch.bmm(torch.randn(2, 2, 2).to_sparse().cuda(), torch.randn(2, 2, 2).cuda())
+    tensor([[[ 1.1900, -2.3409],
+             [ 0.4796,  0.8003]],
+            [[ 0.1509,  1.8027],
+             [ 0.0333, -1.1444]]], device='cuda:0') 
+
+Furthermore, if you are using CUDA tensors, and your CUDA version is 10.2 or greater, you
+should set the environment variable `CUBLAS_WORKSPACE_CONFIG` according to CUDA documentation:
+`<https://docs.nvidia.com/cuda/cublas/index.html#cublasApi_reproducibility>`_
+
+CUDA convolution determinism
+----------------------------
+While disabling CUDA convolution benchmarking (discussed above) ensures that CUDA
+selects the same algorithm each time an application is run, that algorithm itself
+may be nondeterministic, unless either :code:`torch.set_deterministic(True)` or
+:code:`torch.backends.cudnn.deterministic = True` is set. The latter setting controls
+only this behavior, unlike :meth:`torch.set_deterministic` which will make other
+PyTorch operations behave deterministically, too.
+
+CUDA RNN and LSTM
+-----------------
+In some versions of CUDA, RNNs and LSTM networks may have non-deterministic behavior.
+See :meth:`torch.nn.RNN` and :meth:`torch.nn.LSTM` for details and workarounds.
+
