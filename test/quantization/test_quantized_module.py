@@ -766,8 +766,8 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         qparams = obs.calculate_qparams()
         # Quantize the weights to 8bits
         qweight = torch.quantize_per_channel(weights, qparams[0], qparams[1], axis=0, dtype=torch.quint8)
-        qemb = nnq.EmbeddingBag(num_embeddings=num_embeddings, embedding_dim=embedding_dim, include_last_offset=True, mode='sum')
-        qemb.set_weight(qweight)
+        qemb = nnq.EmbeddingBag(num_embeddings=num_embeddings, embedding_dim=embedding_dim,
+                                include_last_offset=True, mode='sum', _weight=qweight)
         qemb(indices, offsets)
 
         # Ensure the module has the correct weights
