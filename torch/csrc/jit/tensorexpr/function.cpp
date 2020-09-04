@@ -125,6 +125,20 @@ Tensor* Reduce(
       reduce_args);
 }
 
+Tensor* Reduce(
+    const std::string& func_name,
+    const std::vector<DimArg>& dim_args,
+    const Reducer& reducer,
+    Tensor* tensor,
+    const std::vector<DimArg>& reduce_args) {
+  return Reduce(
+      func_name,
+      dim_args,
+      reducer,
+      [&](ParameterList& p) { return tensor->call(p); },
+      reduce_args);
+}
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch
