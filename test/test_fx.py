@@ -497,6 +497,7 @@ class TestFX(JitTestCase):
         self.assertEqual(out, ref_out)
 
 
+    @skipIfNoTorchVision
     def test_module_qualname(self):
         class Bar(torch.nn.Module):
             def __init__(self):
