@@ -682,7 +682,7 @@ class QuantizationTestCase(TestCase):
         # Check state dict serialization and torch.save APIs
         if is_emb_bag:
             loaded_qemb = nnq.EmbeddingBag(num_embeddings=num_embeddings, embedding_dim=embedding_dim,
-                                            include_last_offset=True, mode='sum')
+                                           include_last_offset=True, mode='sum')
         else:
             loaded_qemb = nnq.Embedding(num_embeddings=num_embeddings, embedding_dim=embedding_dim)
         self.check_eager_serialization(qemb, loaded_qemb, inputs)
