@@ -48,7 +48,7 @@ Tensor view_as_complex(const Tensor& self) {
     self.scalar_type() == kFloat || self.scalar_type() == kDouble || self.scalar_type() == kHalf,
     "view_as_complex is only supported for half, float and double tensors, but got a tensor of scalar type: ", self.scalar_type());
 
-  TORCH_CHECK(self.dim() >= 2, "Tensor must have atleast 2 dimensions to view as 'a+bj'");
+  TORCH_CHECK(self.dim() >= 1, "Tensor must have atleast 1 dimensions to view as 'a+bj'");
 
   auto new_sizes = self.sizes().vec();
   TORCH_CHECK(new_sizes[self.dim()-1] == 2, "Tensor must have a last dimension of size 2");
