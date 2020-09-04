@@ -5,8 +5,6 @@ import builtins
 import torch
 import keyword
 
-from collections.abc import Iterable
-
 def _shadows_builtin_name(name: str) -> bool:
     return name in builtins.__dict__ or name in keyword.kwlist
 
@@ -176,6 +174,7 @@ class Graph:
 
     def __str__(self) -> str:
         placeholder_names = []
+
         def format_arg(arg) -> str:
             if isinstance(arg, list):
                 items = ', '.join(format_arg(a) for a in arg)
