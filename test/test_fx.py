@@ -10,7 +10,7 @@ from torch.fx.utils import extract_module, fully_outline_module
 
 from fx.quantization import Quantizer
 
-from typing import Any, Callable, Dict, Optional, Tuple, Union, List
+from typing import Any, Callable, Dict, Optional, Tuple, Union
 from torch.testing._internal.common_utils import run_tests, skipIfRocm
 from torch.testing._internal.jit_utils import JitTestCase
 
