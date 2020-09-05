@@ -17,6 +17,8 @@
 #include <THC/THCThrustAllocator.cuh>
 #include <thrust/execution_policy.h>
 #include <thrust/sort.h>
+#include <thrust/transform.h>
+#include <cub/cub.cuh>
 #include <THC/THCAtomics.cuh>
 
 #include <c10/macros/Macros.h>
@@ -838,6 +840,80 @@ Tensor index_select_cuda(const Tensor& self, int64_t dim, const Tensor& index) {
   Tensor out = at::empty({0}, self.options());
   index_select_out_cuda(out, self, dim, index);
   return out;
+}
+
+template<typename T>
+struct NonZeroOp
+{
+    __host__ __device__ __forceinline__ bool operator()(const T& a) const {
+      return (a!=T(0));
+    }
+};
+
+template<typename scalar_t>
+void nonzero_cuda_out_impl(const Tensor& self, Tensor& out){
+  Tensor self_ = self.contiguous();
+  int N = self_.numel();
+  //compute number of nonzero elements
+  void * d_temp_storage=NULL;
+  size_t temp_storage_bytes=0;
+  auto& allocator = *c10::cuda::CUDACachingAllocator::get();
+  auto num_nonzeros = allocator.allocate(sizeof(int));
+  cub::TransformInputIterator<bool, NonZeroOp<scalar_t>, scalar_t*> itr(self_.data_ptr<scalar_t>(), NonZeroOp<scalar_t>());
+  const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+  cub::DeviceReduce::Sum(d_temp_storage, temp_storage_bytes, itr, (int*)num_nonzeros.get(), N, stream);
+  auto temp_storage = allocator.allocate(temp_storage_bytes);
+  cub::DeviceReduce::Sum(temp_storage.get(), temp_storage_bytes, itr, (int*)num_nonzeros.get(), N, stream);
+  int num_nonzeros_h;
+  AT_CUDA_CHECK(cudaMemcpyAsync(&num_nonzeros_h, num_nonzeros.get(), sizeof(int), cudaMemcpyDeviceToHost, stream));
+  //need to synchronize to make sure data is available on the host
+  AT_CUDA_CHECK(cudaStreamSynchronize(stream));
+  out.resize_({self.dim(), num_nonzeros_h});
+  //Scalars are expected to produce output of size (1,0), so we can't write to it
+  if (self.dim()>0) {
+    cub::CountingInputIterator<int64_t> counting_itr(0);
+    d_temp_storage = NULL;
+    temp_storage_bytes = 0;
+    cub::DeviceSelect::Flagged(d_temp_storage, temp_storage_bytes, counting_itr, itr,
+      out.data_ptr<int64_t>(), (int*)num_nonzeros.get(), N, stream);
+    temp_storage = allocator.allocate(temp_storage_bytes);
+    cub::DeviceSelect::Flagged(temp_storage.get(), temp_storage_bytes, counting_itr, itr,
+      out.data_ptr<int64_t>(), (int*)num_nonzeros.get(), N, stream);
+
+    auto thrust_allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
+    if (num_nonzeros_h > 0 && self.dim()>1){
+        int64_t div = 1;
+        for (int dim = self.dim()-1; dim>=0; dim--){
+            int64_t dim_size = self.sizes()[dim];
+            thrust::transform(
+              thrust::cuda::par(thrust_allocator).on(stream),
+              thrust::device_ptr<int64_t>(out.data_ptr<int64_t>()),
+              thrust::device_ptr<int64_t>(out.data_ptr<int64_t>())+num_nonzeros_h,
+              thrust::device_ptr<int64_t>(out.data_ptr<int64_t>())+num_nonzeros_h * dim,
+              [=] C10_HOST_DEVICE (const int64_t val) {return (val/div) % dim_size;}
+            );
+            div *= dim_size;
+        }
+    }
+  }
+  //make out correct size
+  Tensor out_ = out.t();
+  out.set_(out_);
+}
+
+Tensor& nonzero_out_cuda(Tensor& out, const Tensor& self){
+  TORCH_CHECK(self.numel() < std::numeric_limits<int>::max(), "nonzero is not supported for tensors with more than INT_MAX elements, \
+  file a support request");
+  TORCH_CHECK(out.dtype()== at::kLong, "out tensor should have type ", at::kLong);
+  AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Bool, at::ScalarType::BFloat16, at::ScalarType::Half,
+    self.scalar_type(), "nonzero_cuda",
+    [&] {nonzero_cuda_out_impl<scalar_t>(self, out);});
+  return out;
+}
+
+Tensor nonzero_cuda(const Tensor& self){
+  Tensor out = at::native::empty_cuda({0}, self.options().dtype(kLong));
+  return nonzero_out_cuda(out, self);
 }
 
 

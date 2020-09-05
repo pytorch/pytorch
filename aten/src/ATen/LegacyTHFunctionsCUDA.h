@@ -24,8 +24,6 @@ Tensor & _th_masked_fill_(Tensor & self, const Tensor & mask, Scalar value);
 Tensor & _th_masked_fill_bool_(Tensor & self, const Tensor & mask, Scalar value);
 Tensor & _th_masked_scatter_(Tensor & self, const Tensor & mask, const Tensor & source);
 Tensor & _th_masked_scatter_bool_(Tensor & self, const Tensor & mask, const Tensor & source);
-Tensor & _th_nonzero_out(Tensor & result, const Tensor & self);
-Tensor _th_nonzero(const Tensor & self);
 Tensor & _th_index_copy_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source);
 Tensor & _th_take_out(Tensor & result, const Tensor & self, const Tensor & index);
 Tensor _th_take(const Tensor & self, const Tensor & index);
