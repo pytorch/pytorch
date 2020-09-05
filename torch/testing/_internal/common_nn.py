@@ -2117,7 +2117,7 @@ new_module_tests = [
         cudnn=True,
         check_with_long_tensor=True,
         with_tf32=True,
-        tf32_precision=0.005,
+        tf32_precision=0.05,
     ),
     dict(
         module_name='Conv3d',
@@ -2140,7 +2140,7 @@ new_module_tests = [
         desc='stride',
         check_with_long_tensor=True,
         with_tf32=True,
-        tf32_precision=0.005,
+        tf32_precision=0.05,
     ),
     dict(
         module_name='Conv3d',
@@ -2195,6 +2195,7 @@ new_module_tests = [
         cudnn=True,
         input_size=(1, 2, 4, 5, 4),
         with_tf32=True,
+        tf32_precision=0.05
     ),
     dict(
         module_name='ConvTranspose3d',
@@ -2205,6 +2206,7 @@ new_module_tests = [
         input_size=(1, 2, 4, 5, 4),
         desc='dilated',
         with_tf32=True,
+        tf32_precision=0.05
     ),
     dict(
         module_name='MaxPool3d',
@@ -5046,6 +5048,8 @@ class CriterionTest(InputVariableMixin, TestBase):
         self.check_bfloat16 = kwargs.get('check_bfloat16', False)
         self.convert_target = kwargs.get('convert_target', True)
         self.test_cpu = kwargs.get('test_cpu', True)
+        self.with_tf32 = kwargs.get('with_tf32', True)
+        self.tf32_precision = kwargs.get('tf32_precision', 0.001)
 
     def __call__(self, test_case):
         module = self.constructor(*self.constructor_args)
