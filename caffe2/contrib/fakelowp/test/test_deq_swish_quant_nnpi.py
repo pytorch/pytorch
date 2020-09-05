@@ -6,6 +6,9 @@ from caffe2.python import core, workspace
 from caffe2.python.onnx.onnxifi import onnxifi_caffe2_net
 from caffe2.python.fakelowp.test_utils import print_test_debug_info
 import caffe2.python.serialized_test.serialized_test_util as serial
+from caffe2.quantization.server import dnnlowp_pybind11
+from hypothesis import given, settings
+import hypothesis.strategies as st
 
 core.GlobalInit(["caffe2", "--caffe2_log_level=-3", "--glow_global_fp16=1"])
 
@@ -39,6 +42,174 @@ class DeqSwishQuantTest(serial.SerializedTestCase):
         workspace.FeedBlob("X", X_fp32)
         workspace.FeedBlob("W", W_fp32)
         workspace.FeedBlob("b", b_fp32)
+
+        workspace.RunOperatorOnce(
+            core.CreateOperator(
+                "Int8FCPackWeight",
+                ["W"],
+                ["W_int8"],
+                engine="DNNLOWP",
+                save_unpacked_weights=True,
+                in_scale=X_scale,
+            )
+        )
+
+        ref_net1 = core.Net("net")
+        ref_net1.Int8QuantizeNNPI(
+            ["X"],
+            ["X_int8"],
+            Y_scale=X_scale,
+            Y_zero_point=X_zero_point
+        )
+        ref_net1.Int8FCFakeAcc32NNPI(
+            ["X_int8", "W_int8", "b"],
+            ["U_int8"],
+            Y_scale=X_scale,
+            Y_zero_point=X_zero_point,
+        )
+        ref_net1.SwishFakeInt8NNPI(
+            ["U_int8"],
+            ["Y"],
+            X_scale=X_scale,
+            X_zero_point=X_zero_point,
+            Y_scale=Y_scale,
+            Y_zero_point=Y_zero_point
+        )
+        ref_net1.Proto().external_output.append("Y")
+
+        ref_net = core.Net("net")
+        ref_net.Int8QuantizeNNPI(
+            ["X"],
+            ["X_int8"],
+            Y_scale=X_scale,
+            Y_zero_point=X_zero_point
+        )
+        ref_net.Int8FCFakeAcc32NNPI(
+            ["X_int8", "W_int8", "b"],
+            ["U_int8"],
+            Y_scale=X_scale,
+            Y_zero_point=X_zero_point,
+        )
+        ref_net.Int8DequantizeNNPI(
+            ["U_int8"],
+            ["U_fp16"],
+            UsingOneOverScale=False
+        )
+        ref_net.SwishFakeFp16NNPI(
+            ["U_fp16"],
+            ["Y_fp16"]
+        )
+        ref_net.Int8QuantizeNNPI(
+            ["Y_fp16"],
+            ["Y"],
+            Y_scale=Y_scale,
+            Y_zero_point=Y_zero_point
+        )
+        ref_net.Proto().external_output.append("Y")
+
+        # run ref_net
+        workspace.RunNetOnce(ref_net1)
+        Y_fbgemm = workspace.FetchInt8Blob("Y")
+
+        # run onnxifi net
+        ref_net.Proto().op[0].type = "Int8Quantize"
+        ref_net.Proto().op[1].type = "Int8FC"
+        ref_net.Proto().op[2].type = "Int8Dequantize"
+        ref_net.Proto().op[3].type = "Swish"
+        ref_net.Proto().op[4].type = "Int8Quantize"
+        net_onnxified = onnxifi_caffe2_net(
+            ref_net.Proto(),
+            {},
+            debug=True,
+            adjust_batch=False,
+            use_onnx=False,
+            weight_names=["W_int8", "b"],
+        )
+        num_onnxified_ops = sum(
+            1 if o.type == "Onnxifi" else 0 for o in net_onnxified.op
+        )
+        np.testing.assert_equal(num_onnxified_ops, 1)
+        # TODO: add an assertion to check the optimized net
+        # fused Dequantize->Swish->Quantize to QuantizedSwish
+        workspace.CreateNet(net_onnxified)
+        workspace.RunNet(net_onnxified.name)
+        Y_glow = workspace.FetchInt8Blob("Y")
+        U_int8 = workspace.FetchInt8Blob("U_int8")
+
+        diff_Y = np.abs(Y_glow.data - Y_fbgemm.data)
+
+        num_mismatches = np.count_nonzero(diff_Y)
+        max_diff = np.max(diff_Y)
+        if max_diff > 0 or Y_glow.scale != Y_fbgemm.scale or \
+           Y_glow.zero_point != Y_fbgemm.zero_point:
+            print_test_debug_info(
+                "QuantizedSwish",
+                {
+                    "X": X_fp32,
+                    "X_scale": X_scale,
+                    "X_zero_point": X_zero_point,
+                    "Y_scale": Y_scale,
+                    "Y_zero_point": Y_zero_point,
+                    "U_int8": U_int8,
+                    "Y_fbgemm": Y_fbgemm,
+                    "Y_glow": Y_glow,
+                    "diff": diff_Y,
+                    "max_diff": max_diff,
+                    "num_mismatches": num_mismatches,
+                },
+            )
+            assert 0
+
+    @settings(max_examples=1, deadline=None)
+    @given(
+        quantization_kind=st.sampled_from(
+            [
+                "MIN_MAX_QUANTIZATION",
+                "L2_MIN_QUANTIZATION_APPROX",
+                "L2_MIN_QUANTIZATION",
+                "P99_QUANTIZATION"
+            ]
+        ),
+        preserve_sparsity=st.booleans(),
+        seed=st.integers(1, 5)
+    )
+    def test_qparam_blob_swish_int8(self, quantization_kind, preserve_sparsity, seed):
+        np.random.seed(seed)
+        workspace.ResetWorkspace()
+        n = 256
+        # cpu_do = caffe2_pb2.DeviceOption()
+
+        X_fp32 = np.linspace(-20.5, 8., num=n).astype(np.float32).reshape(1, n)
+        Y_fp32 = self._swish(X_fp32)
+        # X_scale, X_zero_point = self._get_scale_zp(X_fp32)
+        Y_scale, Y_zero_point = self._get_scale_zp(Y_fp32)
+        W_fp32 = np.identity(n, dtype=np.float32)
+        b_fp32 = np.zeros((n,), dtype=np.float32)
+
+        workspace.FeedBlob("X", X_fp32)
+        workspace.FeedBlob("W", W_fp32)
+        workspace.FeedBlob("b", b_fp32)
+
+        # Build a net to generate X's qparam using the Int8GenQuantParams op
+        dnnlowp_pybind11.CreateInt8QuantSchemeBlob(
+            "quant_scheme", quantization_kind, preserve_sparsity
+        )
+        assert workspace.HasBlob(
+            "quant_scheme"
+        ), "Failed to create the quant_scheme blob in current workspace"
+
+        gen_quant_params_net = core.Net("gen_quant_params")
+        gen_quant_params_op = core.CreateOperator(
+            "Int8GenQuantParams",
+            ["X", "quant_scheme"],
+            ["X_quant_param"]
+            # device_option=st.sampled_from([cpu_do]),
+        )
+        gen_quant_params_net.Proto().op.extend([gen_quant_params_op])
+        assert workspace.RunNetOnce(
+            gen_quant_params_net
+        ), "Failed to run the gen_quant_params net"
+        X_scale, X_zero_point = dnnlowp_pybind11.ObserveInt8QuantParamsBlob("X_quant_param")
 
         workspace.RunOperatorOnce(
             core.CreateOperator(
