@@ -7065,7 +7065,7 @@ class TestTorchDeviceType(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double)
-    @tf32_on_and_off(0.05)
+    @tf32_on_and_off(5.0)  # values are 40x.xx vs 40x.xx
     def test_matrix_exp_analytic(self, device, dtype):
         # check zero matrix
         x = torch.zeros(20, 20, dtype=dtype, device=device)
@@ -7208,7 +7208,7 @@ class TestTorchDeviceType(TestCase):
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double)
-    @tf32_on_and_off(1.0)
+    @tf32_on_and_off(1.0)  # values are about 331.xxx vs 331.xxx
     def test_matrix_exp_compare_with_taylor(self, device, dtype):
 
         def normalize_to_1_operator_norm(sample, desired_norm):
