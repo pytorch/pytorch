@@ -940,14 +940,14 @@ class HistogramObserver(_ObserverBase):
         if min_val.numel() > 0 and max_val.numel() > 0:
             same_values = min_val.item() == max_val.item()
         if min_val.numel() == 0 or max_val.numel() == 0 or same_values:
-            min_val, max_val = torch._min_max(x)
+            min_val, max_val = torch._aminmax(x)
             self.min_val.resize_(min_val.shape)
             self.min_val.copy_(min_val)
             self.max_val.resize_(max_val.shape)
             self.max_val.copy_(max_val)
             torch.histc(x, self.bins, min=min_val, max=max_val, out=self.histogram)
         else:
-            new_min, new_max = torch._min_max(x)
+            new_min, new_max = torch._aminmax(x)
             combined_min = torch.min(new_min, min_val)
             combined_max = torch.max(new_max, max_val)
             # combine the existing histogram and new histogram into 1 histogram

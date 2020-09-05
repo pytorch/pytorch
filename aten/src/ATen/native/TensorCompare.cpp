@@ -125,7 +125,6 @@ Tensor& isposinf_out(Tensor& result, const Tensor& self) {
   } else {
     auto iter = TensorIteratorConfig()
       .check_all_same_dtype(false)
-      .set_check_mem_overlap(true)
       .add_output(result)
       .add_input(self)
       .build();
@@ -150,7 +149,6 @@ Tensor& isneginf_out(Tensor& result, const Tensor& self) {
   } else {
     auto iter = TensorIteratorConfig()
       .check_all_same_dtype(false)
-      .set_check_mem_overlap(true)
       .add_output(result)
       .add_input(self)
       .build();
@@ -248,7 +246,6 @@ Tensor _s_where(const Tensor& condition, const Tensor& self, const Tensor& other
   Tensor ret = at::empty(self.sizes(), self.options());
   auto iter = at::TensorIteratorConfig()
     .check_all_same_dtype(false)
-    .set_check_mem_overlap(true)
     .add_output(ret)
     .add_input(condition)
     .add_input(self)
