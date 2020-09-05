@@ -6,9 +6,14 @@ namespace vulkan {
 namespace ops {
 namespace {
 
+bool can_be_image(const IntArrayRef sizes) {
+  return (1u <= sizes.size()) && (sizes.size() <= 4u);
+}
+
 VkFormat convert(const caffe2::TypeMeta dtype) {
   switch (c10::typeMetaToScalarType(dtype)) {
     case kFloat:
+      // Question for Ivan: VK_FORMAT_R32G32B32A32_SFLOAT ?
       return VK_FORMAT_R16G16B16A16_SFLOAT;
 
     default:
@@ -60,6 +65,16 @@ api::Resource::Buffer allocate_buffer(
   TORCH_CHECK(!sizes.empty(), "Invalid Vulkan tensor size!");
   verify(options);
 
+  VkFlags usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+
+  if (can_be_image(sizes)) {
+    usage |= VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+  }
+
+  if (!context->adapter().is_unified_memory_architecture()) {
+    usage |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+  }
+
   return context->resource().pool.allocate(
       api::Resource::Buffer::Descriptor{
         std::accumulate(
@@ -69,11 +84,7 @@ api::Resource::Buffer allocate_buffer(
             std::multiplies<int64_t>()),
         // Usage
         {
-          VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
-            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-            (context->adapter().is_unified_memory_architecture() ?
-                0u :
-                VK_BUFFER_USAGE_TRANSFER_DST_BIT),
+          usage,
           VMA_MEMORY_USAGE_GPU_ONLY,
         },
       });
@@ -153,7 +164,7 @@ api::Resource::Image maybe_allocate_image(
     api::Context* const context,
     const IntArrayRef sizes,
     const TensorOptions& options) {
-  if (sizes.size() > 4u) {
+  if (!can_be_image(sizes)) {
     return api::Resource::Image{};
   }
 
@@ -167,7 +178,7 @@ vTensor::vTensor()
     buffer_{},
     staging_{},
     context_{},
-    dirty{} {
+    dirty_{} {
 }
 
 vTensor::vTensor(
@@ -180,7 +191,39 @@ vTensor::vTensor(
     context_(context),
     sizes_(sizes.cbegin(), sizes.cend()),
     options_(options),
-    dirty{} {
+    dirty_{} {
+}
+
+VkBuffer vTensor::buffer() const {
+  if (!dirty_.staging && !dirty_.image) {
+    return buffer_.handle;
+  }
+
+  return buffer_.handle;
+}
+
+VkBuffer vTensor::buffer(const Access::Flags access) {
+  if (access & Access::Write) {
+    dirty_.buffer = 1;
+  }
+
+  return buffer();
+}
+
+VkImage vTensor::image() const {
+  if (dirty_.staging || dirty_.buffer) {
+    // context_->command().buffer();
+  }
+
+  return image_.handle;
+}
+
+VkImage vTensor::image(const Access::Flags access) {
+  if (access & Access::Write) {
+    dirty_.image = 1;
+  }
+
+  return image();
 }
 
 void verify(const TensorOptions& options) {

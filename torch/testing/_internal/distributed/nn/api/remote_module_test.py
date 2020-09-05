@@ -6,13 +6,14 @@ import torch
 import torch.testing._internal.dist_utils as dist_utils
 from torch import Tensor, nn
 from torch._jit_internal import Future
-from torch.distributed.nn.api.remote_module import (
-    _RemoteModule,
-)
 from torch.distributed.nn import RemoteModule
+from torch.distributed.nn.api.remote_module import _RemoteModule
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,
 )
+
+
+_PARAM_VAL = torch.nn.Parameter(torch.ones(1))
 
 
 class ModuleCreationMode(enum.Enum):
@@ -44,6 +45,7 @@ class RemoteMyModuleInterface:
 class MyModule(nn.Module):
     def __init__(self, first_arg, first_kwarg=-1):
         super().__init__()
+        self.param1 = _PARAM_VAL
 
     def forward(
         self, tensor: Tensor, number: int, word: str = "default"
@@ -76,9 +78,7 @@ class RemoteModuleTest(RpcAgentTestFixture):
         kwargs = dict(first_kwarg=2)
 
         if ModuleCreationMode.MODULE_CTOR in modes:
-            remote_module = RemoteModule(
-                dst_worker_name, MyModule, args, kwargs
-            )
+            remote_module = RemoteModule(dst_worker_name, MyModule, args, kwargs)
             yield remote_module
 
         if ModuleCreationMode.MODULE_CTOR_WITH_INTERFACE in modes:
@@ -193,3 +193,17 @@ class RemoteModuleTest(RpcAgentTestFixture):
 
             ret = remote_module.forward(*args, **kwargs)
             self.assertEqual(ret, tuple(reversed(args + ("3",))))
+
+    @dist_utils.dist_init
+    def test_remote_parameters(self):
+        if self.rank != 0:
+            return
+        dst_worker_name = dist_utils.worker_name((self.rank + 1) % self.world_size)
+
+        # Only test Python nn.Module, because script module methods don't support ``remote_parameters``.
+        for remote_module in self._create_remote_module_iter(
+            dst_worker_name, modes=[ModuleCreationMode.MODULE_CTOR]
+        ):
+            param_rrefs = remote_module.remote_parameters()
+            self.assertEqual(len(param_rrefs), 1)
+            self.assertTrue(torch.equal(param_rrefs[0].to_here(), _PARAM_VAL))
