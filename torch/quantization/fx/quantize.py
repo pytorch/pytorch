@@ -622,7 +622,6 @@ class Quantizer:
                             all_matched.add(n.name)
                         # break after finding the first match
                         break
-        print(match_map)
         return match_map
 
     def _find_quants(self, graph, matches):
