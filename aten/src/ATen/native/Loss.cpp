@@ -98,9 +98,9 @@ Tensor kl_div_backward_cpu(const Tensor& grad, const Tensor& input, const Tensor
   auto grad_expand = grad.expand_as(input);
   if (!log_target) {
     auto iter = TensorIteratorConfig()
+      .add_output(grad_input)
       .add_input(target)
       .add_input(grad_expand)
-      .add_output(grad_input)
       .build();
     AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "kl_div_backward_cpu", [&]() {
       cpu_serial_kernel(iter, [](scalar_t target_val, scalar_t grad_val) -> scalar_t{
