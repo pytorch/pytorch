@@ -1162,7 +1162,8 @@ bool InsertObserversHelper::valueNeedsToBeQuantized(
     const QConfig& qconfig) {
   if (isBiasOfConvOrLinear(v) ||
       !(v->type()->isSubtypeOf(TensorType::get()) ||
-        v->type()->isSubtypeOf(ListType::ofTensors()))) {
+        v->type()->isSubtypeOf(ListType::ofTensors())) ||
+      isEmbeddingBagNonInput(v)) {
     return false;
   }
   // For dynamic quantization we only insert observers at the input

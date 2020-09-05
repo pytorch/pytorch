@@ -29,6 +29,8 @@ TORCH_API bool isWeight(Value* v);
 // quantize
 TORCH_API bool isBiasOfConvOrLinear(Value* v);
 
+TORCH_API bool isEmbeddingBagNonInput(Value* v);
+
 // Get the use as scalar input of clamp ops for the input value
 c10::optional<Use> getClampScalarInputUse(Value* v);
 
@@ -108,6 +110,13 @@ TORCH_API std::shared_ptr<Graph> getCallFunctionGraph(Node* n);
 // Check if `use` is a CallFunction of name `func_name` and if value
 // `v` is the nth argument (if provided) of the function
 bool matchCallFuncToUse(
+    const Use& use,
+    const std::string& func_name,
+    c10::optional<int> nth_arg);
+
+// Check if `use` is a AtenFunction of name `func_name` and if value
+// `v` is the nth argument (if provided) of the function
+bool matchAtenFuncToUse(
     const Use& use,
     const std::string& func_name,
     c10::optional<int> nth_arg);
