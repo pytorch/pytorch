@@ -16,6 +16,7 @@
 #include "caffe2/utils/math.h"
 
 C10_DECLARE_EXPORT_CAFFE2_OP_TO_C10(GatherRangesOp);
+C10_DECLARE_EXPORT_CAFFE2_OP_TO_C10(LengthsGatherOp);
 
 namespace caffe2 {
 
