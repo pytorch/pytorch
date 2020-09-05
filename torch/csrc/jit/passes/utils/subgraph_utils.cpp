@@ -330,7 +330,7 @@ void mergeNodeIntoSubgraphAndUpdateAliasing(
     AliasDb& db) {
   executeSubgraphMergeAndUpdateAliasing(
       to_merge, db, [&](std::unordered_map<Value*, Value*>& vmap) {
-        SubgraphUtils::mergeNodeIntoSubgraph(to_merge, subgraphNode, vmap);
+        mergeNodeIntoSubgraph(to_merge, subgraphNode, vmap);
         return subgraphNode;
       });
 }
@@ -341,7 +341,7 @@ Node* createSingletonSubgraphAndUpdateAliasing(
     AliasDb& db) {
   return executeSubgraphMergeAndUpdateAliasing(
       to_merge, db, [&](std::unordered_map<Value*, Value*>& vmap) {
-        return SubgraphUtils::createSingletonSubgraph(
+        return createSingletonSubgraph(
             to_merge, subgraphKind, vmap);
       });
 }
