@@ -5765,26 +5765,18 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(len(w), 1)
 
     @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
-    @onlyOnCPUAndCUDA
-    @dtypes(torch.int8, torch.int32, torch.int64, torch.float, torch.double)
-    @dtypesIfCUDA(torch.int8, torch.int32, torch.int64, torch.half, torch.float, torch.double)
+    @dtypesIfCUDA(torch.half, torch.float, torch.double,
+                  torch.int8, torch.short, torch.int, torch.long)
+    @dtypes(torch.float, torch.double,
+            torch.int8, torch.short, torch.int, torch.long)
     def test_nanprod(self, device, dtype):
         x = (torch.randn(3, 3))
-        if dtype.is_floating_point:
+        if dtype in [torch.half, torch.float, torch.double]:
             x[x < 0.2] = float('nan')
         # Randomly scale the values
         x = (x * random.randint(10, 100)).tolist()
 
-        torch_fn_with_axis = partial(torch.nanprod, axis=0)
-        np_fn_with_axis = partial(np.nanprod, axis=0)
-
-        torch_fn_without_axis = partial(torch.nanprod)
-        np_fn_without_axis = partial(np.nanprod)
-
-        torch_fns = [torch_fn_with_axis, torch_fn_without_axis]
-        np_fns = [np_fn_with_axis, np_fn_without_axis]
-        for torch_fn, np_fn in zip(torch_fns, np_fns):
-            self.compare_with_numpy(torch_fn, np_fn, x, device, dtype)
+        self.compare_with_numpy(torch.nanprod, np.nanprod, x, device, dtype)
 
     @dtypes(*(torch.testing.get_all_complex_dtypes()))
     def test_nanprod_complex(self, device, dtype):
