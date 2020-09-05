@@ -281,6 +281,71 @@ Node* createSingletonSubgraph(Node* n, Symbol subgraphKind) {
   return createSingletonSubgraph(n, subgraphKind, vmap);
 }
 
+Node* executeSubgraphMergeAndUpdateAliasing(
+    Node* to_merge,
+    AliasDb& db,
+    const std::function<Node*(std::unordered_map<Value*, Value*>&)>& merge_fn) {
+  // When we merge a node into a subgraph, the new subgraph outputs
+  // have the same aliasing properties as the original node's outputs.
+  // Here we create a placeholder node, transfer the aliasing properties
+  // to the placeholder, execute the merge, and transfer the aliasing
+  // properties to the appropriate fusion group outputs
+  auto graph = to_merge->owningGraph();
+  Node* placeholder_node =
+      graph->insertNode(graph->create(prim::Uninitialized, 0));
+  std::vector<Value*> existing_values;
+  for (size_t i = 0; i < to_merge->outputs().size(); ++i) {
+    Value* existing = to_merge->outputs().at(i);
+    Value* new_value = placeholder_node->insertOutput(i)->copyMetadata(
+        to_merge->outputs().at(i));
+    db.replaceWithNewValue(existing, new_value);
+    existing_values.push_back(existing);
+  }
+  std::unordered_map<Value*, Value*> vmap;
+  Node* fusion_group = merge_fn(vmap);
+  for (size_t i = 0; i < existing_values.size(); ++i) {
+    TORCH_INTERNAL_ASSERT(vmap.count(existing_values.at(i)));
+    Value* subgraph_value = vmap[existing_values.at(i)];
+    auto subgraph = SubgraphUtils::getSubgraph(fusion_group);
+    size_t subgraph_output_index = 0;
+    for (; subgraph_output_index < subgraph->outputs().size();
+         ++subgraph_output_index) {
+      if (subgraph->outputs().at(subgraph_output_index) == subgraph_value) {
+        break;
+      }
+    }
+    if (subgraph_output_index != subgraph->outputs().size()) {
+      db.replaceWithNewValue(
+          placeholder_node->outputs().at(i),
+          fusion_group->outputs().at(subgraph_output_index));
+    }
+  }
+  placeholder_node->destroy();
+  return fusion_group;
+}
+
+void mergeNodeIntoSubgraphAndUpdateAliasing(
+    Node* to_merge,
+    Node* subgraphNode,
+    AliasDb& db) {
+  executeSubgraphMergeAndUpdateAliasing(
+      to_merge, db, [&](std::unordered_map<Value*, Value*>& vmap) {
+        SubgraphUtils::mergeNodeIntoSubgraph(to_merge, subgraphNode, vmap);
+        return subgraphNode;
+      });
+}
+
+Node* createSingletonSubgraphAndUpdateAliasing(
+    Node* to_merge,
+    Symbol subgraphKind,
+    AliasDb& db) {
+  return executeSubgraphMergeAndUpdateAliasing(
+      to_merge, db, [&](std::unordered_map<Value*, Value*>& vmap) {
+        return SubgraphUtils::createSingletonSubgraph(
+            to_merge, subgraphKind, vmap);
+      });
+}
+
 } // namespace SubgraphUtils
 } // namespace jit
 } // namespace torch
