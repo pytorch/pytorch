@@ -418,7 +418,7 @@ Tensor _s_dirichlet_cpu(const Tensor& alpha, c10::optional<Generator> gen) {
       .add_output(gamma)
       .add_input(alpha)
       .build();
-    cpu_serial_kernel(iter1, [generator](scalar_t alpha_val) -> scalar_t{
+    cpu_serial_kernel(iter1, [generator](scalar_t alpha_val) -> double{
       auto uniform_lambda = [generator] () {
         at::uniform_real_distribution<double> standard_uniform(0.0, 1.0);
         return standard_uniform(generator);
