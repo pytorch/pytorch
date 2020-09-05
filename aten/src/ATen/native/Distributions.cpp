@@ -417,6 +417,7 @@ Tensor _s_dirichlet_cpu(const Tensor& alpha, c10::optional<Generator> gen) {
     auto iter1 = TensorIteratorConfig()
       .add_output(gamma)
       .add_input(alpha)
+      .check_all_same_dtype(false)
       .build();
     cpu_serial_kernel(iter1, [generator](scalar_t alpha_val) -> double{
       auto uniform_lambda = [generator] () {
@@ -440,6 +441,7 @@ Tensor _s_dirichlet_cpu(const Tensor& alpha, c10::optional<Generator> gen) {
       .add_output(ret)
       .add_input(gamma)
       .add_input(gamma_sum)
+      .check_all_same_dtype(false)
       .build();
     cpu_serial_kernel(iter2, [](double gamma_val, double gamma_sum_val) -> scalar_t{
       auto ret_val = gamma_val / gamma_sum_val;
