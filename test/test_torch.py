@@ -5766,7 +5766,7 @@ class TestTorchDeviceType(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
     @onlyOnCPUAndCUDA
-    @dtypes(torch.int8, torch.int32, torch.int64, torch.complex64, torch.float, torch.double)
+    @dtypes(torch.int8, torch.int32, torch.int64, torch.complex64, torch.half, torch.float, torch.double)
     @dtypesIfCUDA(torch.int8, torch.int32, torch.int64, torch.half, torch.float, torch.double)
     def test_nanprod(self, device, dtype):
         x = (torch.randn(3, 3))
@@ -5795,13 +5795,14 @@ class TestTorchDeviceType(TestCase):
 
     @onlyOnCPUAndCUDA
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_half=False, include_bfloat16=False)))
+    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False)))
     @dtypesIfCUDA(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False)))
     def test_nanprod_vs_numpy(self, device, dtype):
-        self._test_sum_reduction_vs_numpy(torch.nanprod, np.nanprod, device, dtype)
-        self._test_sum_reduction_vs_numpy(torch.nanprod, np.nanprod, device, dtype, with_extremal=True)
-        self._test_sum_reduction_vs_numpy(torch.nanprod, np.nanprod, device, dtype, with_keepdim=True)
+        self._test_nanfunc_reduction_vs_numpy(torch.nanprod, np.nanprod, device, dtype)
+        self._test_nanfunc_reduction_vs_numpy(torch.nanprod, np.nanprod, device, dtype, with_extremal=True)
+        self._test_nanfunc_reduction_vs_numpy(torch.nanprod, np.nanprod, device, dtype, with_keepdim=True)
 
+    @onlyOnCPUAndCUDA
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_nanprod_out_dtype(self, device):
         dtypes = list(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False))
@@ -18296,7 +18297,7 @@ else:
         self._test_reduction_function_with_numpy(torch.count_nonzero, np.count_nonzero, device, dtype)
         self._test_reduction_function_with_numpy(torch.count_nonzero, np.count_nonzero, device, dtype, True)
 
-    def _test_sum_reduction_vs_numpy(self, torch_fn, np_fn, device, dtype, with_keepdim=False, with_extremal=False):
+    def _test_nanfunc_reduction_vs_numpy(self, torch_fn, np_fn, device, dtype, with_keepdim=False, with_extremal=False):
         def is_integral(dtype):
             return dtype in torch.testing.get_all_int_dtypes()
 
@@ -18330,17 +18331,17 @@ else:
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False)))
     def test_sum_vs_numpy(self, device, dtype):
-        self._test_sum_reduction_vs_numpy(torch.sum, np.sum, device, dtype)
-        self._test_sum_reduction_vs_numpy(torch.sum, np.sum, device, dtype, with_extremal=True)
-        self._test_sum_reduction_vs_numpy(torch.sum, np.sum, device, dtype, with_keepdim=True)
+        self._test_nanfunc_reduction_vs_numpy(torch.sum, np.sum, device, dtype)
+        self._test_nanfunc_reduction_vs_numpy(torch.sum, np.sum, device, dtype, with_extremal=True)
+        self._test_nanfunc_reduction_vs_numpy(torch.sum, np.sum, device, dtype, with_keepdim=True)
 
     @onlyOnCPUAndCUDA
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False)))
     def test_nansum_vs_numpy(self, device, dtype):
-        self._test_sum_reduction_vs_numpy(torch.nansum, np.nansum, device, dtype)
-        self._test_sum_reduction_vs_numpy(torch.nansum, np.nansum, device, dtype, with_extremal=True)
-        self._test_sum_reduction_vs_numpy(torch.nansum, np.nansum, device, dtype, with_keepdim=True)
+        self._test_nanfunc_reduction_vs_numpy(torch.nansum, np.nansum, device, dtype)
+        self._test_nanfunc_reduction_vs_numpy(torch.nansum, np.nansum, device, dtype, with_extremal=True)
+        self._test_nanfunc_reduction_vs_numpy(torch.nansum, np.nansum, device, dtype, with_keepdim=True)
 
     @dtypes(*(torch.testing.get_all_complex_dtypes()))
     def test_nansum_complex(self, device, dtype):
