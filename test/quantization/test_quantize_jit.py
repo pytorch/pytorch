@@ -2570,6 +2570,25 @@ class TestQuantizeJitOps(QuantizationTestCase):
                    .check("aten::dequantize(") \
                    .run(m2.graph)
 
+    @override_qengines
+    def test_conv_with_benchmark_flag(self):
+        r"""Verifies that convolutions get quantized when
+        torch.backends.cudnn.benchmark is enabled
+        """
+        if not qengine_is_qnnpack():
+            return
+        with torch.backends.cudnn.flags(enabled=True):
+            m = torch.nn.Sequential(torch.nn.Conv2d(1, 1, 1))
+            m.eval()
+            m = torch.jit.trace(m, torch.rand(4, 1, 4, 4))
+            qconfig = torch.quantization.get_default_qconfig('qnnpack')
+            prepared_model = torch.quantization.prepare_jit(m, {'': qconfig})
+            prepared_model(torch.rand(4, 1, 4, 4))
+            converted_model = torch.quantization.convert_jit(prepared_model)
+            FileCheck().check("quantized::conv2d") \
+                       .run(converted_model.graph)
+
+
 class TestQuantizeDynamicJitPasses(QuantizationTestCase):
     def test_prepare_dynamic(self):
         class M(torch.nn.Module):
