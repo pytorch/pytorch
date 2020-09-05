@@ -1,5 +1,4 @@
 #pragma once
-#include <ATen/cpu/vec256/vec256.h>
 #include <ATen/native/Math.h>
 #include <gtest/gtest.h>
 #include <chrono>
@@ -13,6 +12,7 @@
 #include <math.h>
 #include <float.h>
 #include <algorithm>
+#include <ATen/cpu/vec256/vec256.h>
 #define CACHE_LINE 32
 #if defined(__GNUC__)
 #define CACHE_ALIGN __attribute__((aligned(CACHE_LINE)))
@@ -100,15 +100,15 @@ template <typename T>
 using BitType = typename BitStr<sizeof(T)>::type;
 
 template<typename T>
-struct VecTypeHelper{
+struct VecTypeHelper {
     using holdType = typename T::value_type;
     using memStorageType = typename T::value_type;
-    static constexpr int holdCount= T::size(); 
+    static constexpr int holdCount = T::size();
     static constexpr int unitStorageCount = 1;
 };
 
 template<>
-struct VecTypeHelper<vcomplex>{
+struct VecTypeHelper<vcomplex> {
     using holdType = Complex<float>;
     using memStorageType = float;
     static constexpr int holdCount = vcomplex::size();
@@ -116,7 +116,7 @@ struct VecTypeHelper<vcomplex>{
 };
 
 template<>
-struct VecTypeHelper<vcomplexDbl>{
+struct VecTypeHelper<vcomplexDbl> {
     using holdType = Complex<double>;
     using memStorageType = double;
     static constexpr int holdCount = vcomplexDbl::size();
@@ -124,7 +124,7 @@ struct VecTypeHelper<vcomplexDbl>{
 };
 
 template<>
-struct VecTypeHelper<vqint8>{
+struct VecTypeHelper<vqint8> {
     using holdType = c10::qint8;
     using memStorageType = typename c10::qint8::underlying;
     static constexpr int holdCount = vqint8::size();
@@ -132,18 +132,18 @@ struct VecTypeHelper<vqint8>{
 };
 
 template<>
-struct VecTypeHelper<vquint8>{
+struct VecTypeHelper<vquint8> {
     using holdType = c10::quint8;
     using memStorageType = typename c10::quint8::underlying;
-    static constexpr int holdCount= vquint8::size(); 
+    static constexpr int holdCount = vquint8::size();
     static constexpr int unitStorageCount = 1;
 };
 
 template<>
-struct VecTypeHelper<vqint>{
+struct VecTypeHelper<vqint> {
     using holdType = c10::qint32;
     using memStorageType = typename c10::qint32::underlying;
-    static constexpr int holdCount= vqint::size(); 
+    static constexpr int holdCount = vqint::size();
     static constexpr int unitStorageCount = 1;
 };
 
@@ -236,7 +236,7 @@ std::ostream& operator<<(std::ostream& stream, const CheckWithinDomains<T>& dmn)
 
 template <class To, class From>
 typename std::enable_if<
-    (sizeof(To) == sizeof(From)) && std::is_trivially_copyable<From>::value &&
+    (sizeof(To) == sizeof(From)) && std::is_trivially_copyable<From>::value&&
     std::is_trivial<To>::value,
     // this implementation requires that To is trivially default constructible
     To>::type
@@ -277,6 +277,24 @@ std::enable_if_t<!std::is_floating_point<T>::value, bool> check_both_inf(T x,
     return false;
 }
 
+template<typename T>
+std::enable_if_t<!std::is_floating_point<T>::value, bool> check_both_big(T x, T y) {
+    return false;
+}
+
+template<typename T>
+std::enable_if_t<std::is_floating_point<T>::value, bool> check_both_big(T x, T y) {
+    T cmax = std::is_same<T, float>::value ? static_cast<T>(1e+30) : static_cast<T>(1e+300);
+    T cmin = std::is_same<T, float>::value ? static_cast<T>(-1e+30) : static_cast<T>(-1e+300);
+    //only allow when one is inf
+    bool x_inf = std::isinf(x);
+    bool y_inf = std::isinf(y);
+    bool px = x > 0;
+    bool py = y > 0;
+    return (px && x_inf && y >= cmax) || (py && y_inf && x >= cmax) ||
+        (!px && x_inf && y <= cmin) || (!py && y_inf && x <= cmin);
+}
+
 template<class T> struct is_complex : std::false_type {};
 
 template<class T> struct is_complex<Complex<T>> : std::true_type {};
@@ -286,12 +304,12 @@ T safe_fpt_division(T f1, T f2)
 {
     //code was taken from boost
     // Avoid overflow.
-    if( (f2 < static_cast<T>(1)) && (f1 > f2*std::numeric_limits<T>::max()) ){
+    if ((f2 < static_cast<T>(1)) && (f1 > f2 * std::numeric_limits<T>::max())) {
         return std::numeric_limits<T>::max();
     }
     // Avoid underflow.
-    if( (f1 == static_cast<T>(0)) ||
-        ((f2 > static_cast<T>(1)) && (f1 < f2*std::numeric_limits<T>::min())) ){
+    if ((f1 == static_cast<T>(0)) ||
+        ((f2 > static_cast<T>(1)) && (f1 < f2 * std::numeric_limits<T>::min()))) {
         return static_cast<T>(0);
     }
     return f1 / f2;
@@ -300,8 +318,8 @@ T safe_fpt_division(T f1, T f2)
 template<class T>
 std::enable_if_t<std::is_floating_point<T>::value, bool>
 nearlyEqual(T a, T b, T tolerance) {
-    if (check_both_inf<T>(a,b)) return true;
     if (check_both_nan<T>(a, b)) return true;
+    if (check_both_big(a, b)) return true;
     T absA = std::abs(a);
     T absB = std::abs(b);
     T diff = std::abs(a - b);
@@ -386,6 +404,15 @@ template <typename T>
 void filter_zero(T& val) {
     val = is_zero(val) ? (T)1 : val;
 }
+template <typename T>
+std::enable_if_t<is_complex<Complex<T>>::value, void> filter_zero(Complex<T>& val)
+{
+    T rr = val.real();
+    T ii = val.imag();
+    rr = is_zero(rr) ? (T)1 : rr;
+    ii = is_zero(ii) ? (T)1 : ii;
+    val = Complex<T>(rr, ii);
+}
 
 template <typename T>
 void filter_int_minimum(T& val) {
@@ -414,15 +441,16 @@ std::enable_if_t < !is_complex<T>::value, void> filter_add_overflow(T& a, T& b) 
     T min = std::numeric_limits<T>::min();
     // min <= (a +b) <= max;
     // min - b <= a  <= max - b 
-    if(b <0){
-        if(a < min - b){
+    if (b < 0) {
+        if (a < min - b) {
             a = min - b;
         }
-    }else{
-        if( a > max - b){
+    }
+    else {
+        if (a > max - b) {
             a = max - b;
         }
-    } 
+    }
 }
 
 template <typename T>
@@ -432,15 +460,16 @@ std::enable_if_t < !is_complex<T>::value, void> filter_sub_overflow(T& a, T& b) 
     T min = std::numeric_limits<T>::min();
     // min <= (a-b) <= max;
     // min + b <= a  <= max +b 
-    if(b <0){
-        if(a > max +b){
-            a = max +b;
+    if (b < 0) {
+        if (a > max + b) {
+            a = max + b;
         }
-    }else{
-        if( a < min +b){
+    }
+    else {
+        if (a < min + b) {
             a = min + b;
         }
-    } 
+    }
 }
 
 template <typename T>
@@ -475,7 +504,7 @@ filter_mult_overflow(T& val1, T& val2) {
 
 template <typename T>
 std::enable_if_t<!is_complex<T>::value, void>
-filter_div_ub(T& val1, T& val2) { 
+filter_div_ub(T& val1, T& val2) {
     if (is_zero(val2)) {
         val2 = 1;
     }
@@ -485,22 +514,22 @@ filter_div_ub(T& val1, T& val2) {
 }
 
 struct TestSeed {
-    TestSeed() : seed( std::chrono::high_resolution_clock::now().time_since_epoch().count()){
+    TestSeed() : seed(std::chrono::high_resolution_clock::now().time_since_epoch().count()) {
     }
     TestSeed(uint64_t seed) : seed(seed) {
     }
     uint64_t getSeed() {
         return seed;
     }
-    operator uint64_t () const{
+    operator uint64_t () const {
         return seed;
     }
 
-    TestSeed add(uint64_t index) { 
-        return TestSeed(seed + index); 
+    TestSeed add(uint64_t index) {
+        return TestSeed(seed + index);
     }
 private:
-    uint64_t seed; 
+    uint64_t seed;
 };
 
 template <typename T, bool is_floating_point = std::is_floating_point<T>::value, bool is_complex = is_complex<T>::value>
@@ -548,7 +577,7 @@ struct ValueGen<T, true, false>
         //make it  normal +-3sigma
         T divRange = static_cast<T>(6.0);
         T stdev = std::abs(stop / divRange - start / divRange);
-        normal = std::normal_distribution<T>{mean, stdev};
+        normal = std::normal_distribution<T>{ mean, stdev };
         // in real its hard to get rounded value
         // so we will force it by  uniform chance
         roundChance = std::uniform_int_distribution<int>(0, 5);
@@ -593,7 +622,7 @@ struct ValueGen<Complex<T>, false, true>
         //make it  normal +-3sigma
         T divRange = static_cast<T>(6.0);
         T stdev = std::abs(stop / divRange - start / divRange);
-        normal = std::normal_distribution<T>{mean, stdev};
+        normal = std::normal_distribution<T>{ mean, stdev };
         // in real its hard to get rounded value
         // so we will force it by  uniform chance
         roundChance = std::uniform_int_distribution<int>(0, 5);
@@ -638,8 +667,8 @@ int getTrialCount(int test_trials, int domains_size) {
     trialCount = test_trials < 1 ? trial_default : test_trials;
     if (domains_size > 1) {
         trialCount = trialCount / domains_size;
-        trialCount = trialCount < 1 ? 1 : trialCount; 
-    } 
+        trialCount = trialCount < 1 ? 1 : trialCount;
+    }
     return trialCount;
 }
 
@@ -737,25 +766,25 @@ template <typename T>
 class AssertVec256
 {
 public:
-    AssertVec256(const std::string &info, TestSeed seed, const T &expected, const T &actual, const T &input0)
+    AssertVec256(const std::string& info, TestSeed seed, const T& expected, const T& actual, const T& input0)
         : additionalInfo(info), testSeed(seed), exp(expected), act(actual), arg0(input0), argSize(1)
     {
     }
-    AssertVec256(const std::string &info, TestSeed seed, const T &expected, const T &actual, const T &input0, const T &input1)
+    AssertVec256(const std::string& info, TestSeed seed, const T& expected, const T& actual, const T& input0, const T& input1)
         : additionalInfo(info), testSeed(seed), exp(expected), act(actual), arg0(input0), arg1(input1), argSize(2)
     {
     }
-    AssertVec256(const std::string &info, TestSeed seed, const T &expected, const T &actual, const T &input0, const T &input1, const T &input2)
+    AssertVec256(const std::string& info, TestSeed seed, const T& expected, const T& actual, const T& input0, const T& input1, const T& input2)
         : additionalInfo(info), testSeed(seed), exp(expected), act(actual), arg0(input0), arg1(input1), arg2(input2), argSize(3)
     {
     }
-    AssertVec256(const std::string &info, TestSeed seed, const T &expected, const T &actual) : additionalInfo(info), testSeed(seed), exp(expected), act(actual)
+    AssertVec256(const std::string& info, TestSeed seed, const T& expected, const T& actual) : additionalInfo(info), testSeed(seed), exp(expected), act(actual)
     {
     }
-    AssertVec256(const std::string &info, const T &expected, const T &actual) : additionalInfo(info), exp(expected), act(actual), hasSeed(false)
+    AssertVec256(const std::string& info, const T& expected, const T& actual) : additionalInfo(info), exp(expected), act(actual), hasSeed(false)
     {
     }
-    
+
     std::string getDetail(int index) const
     {
         using UVT = UvalueType<T>;
@@ -811,7 +840,7 @@ public:
         {
             for (int i = 0; i < sizeX; i++)
             {
-                EXPECT_EQ(nearlyEqual<UVT>(expArr[i], actArr[i], absErr), true) << expArr[i]<<"!="<< actArr[i]<<"\n"<< getDetail(i / unitStorageCount);      
+                EXPECT_EQ(nearlyEqual<UVT>(expArr[i], actArr[i], absErr), true) << expArr[i] << "!=" << actArr[i] << "\n" << getDetail(i / unitStorageCount);
                 if (::testing::Test::HasFailure())
                     return true;
             }
@@ -822,7 +851,7 @@ public:
             {
                 if (std::is_same<UVT, float>::value)
                 {
-                    if (!check_both_nan(expArr[i], actArr[i])){
+                    if (!check_both_nan(expArr[i], actArr[i])) {
                         EXPECT_FLOAT_EQ(expArr[i], actArr[i]) << getDetail(i / unitStorageCount);
                     }
                 }
@@ -873,7 +902,7 @@ void test_unary(
     auto domains = testCase.getDomains();
     auto domains_size = domains.size();
     auto test_trials = testCase.getTrialCount();
-    int trialCount = getTrialCount<UVT>(test_trials, domains_size); 
+    int trialCount = getTrialCount<UVT>(test_trials, domains_size);
     TestSeed seed = testCase.getTestSeed();
     uint64_t changeSeedBy = 0;
     for (const CheckWithinDomains<UVT>& dmn : domains) {
@@ -893,8 +922,8 @@ void test_unary(
             auto actual = actualFunction(input);
             auto vec_expected = vec_type::loadu(expected);
             AssertVec256<vec_type> vecAssert(testNameInfo, seed, vec_expected, actual, input);
-            if(vecAssert.check(bitwise, dmn.CheckWithTolerance, dmn.ToleranceError)) return;
-             
+            if (vecAssert.check(bitwise, dmn.CheckWithTolerance, dmn.ToleranceError)) return;
+
         }// trial 
         //inrease Seed 
         changeSeedBy += 1;
@@ -906,7 +935,7 @@ void test_unary(
             auto actual = actualFunction(input);
             auto vec_expected = vec_type{ custom.expectedResult };
             AssertVec256<vec_type> vecAssert(testNameInfo, seed, vec_expected, actual, input);
-            if(vecAssert.check()) return;
+            if (vecAssert.check()) return;
         }
     }
 }
@@ -929,7 +958,7 @@ void test_binary(
     auto domains = testCase.getDomains();
     auto domains_size = domains.size();
     auto test_trials = testCase.getTrialCount();
-    int trialCount = getTrialCount<UVT>(test_trials, domains_size); 
+    int trialCount = getTrialCount<UVT>(test_trials, domains_size);
     TestSeed seed = testCase.getTestSeed();
     uint64_t changeSeedBy = 0;
     for (const CheckWithinDomains<UVT>& dmn : testCase.getDomains()) {
@@ -939,7 +968,7 @@ void test_binary(
         UVT start1 = dmn_argc > 1 ? dmn.ArgsDomain[1].start : default_start;
         UVT end1 = dmn_argc > 1 ? dmn.ArgsDomain[1].end : default_end;
         ValueGen<VT> generator0(start0, end0, seed.add(changeSeedBy));
-        ValueGen<VT> generator1(start1, end1, seed.add(changeSeedBy+1));
+        ValueGen<VT> generator1(start1, end1, seed.add(changeSeedBy + 1));
         for (int trial = 0; trial < trialCount; trial++) {
             for (int k = 0; k < el_count; k++) {
                 vals0[k] = generator0.get();
@@ -954,7 +983,7 @@ void test_binary(
             auto actual = actualFunction(input0, input1);
             auto vec_expected = vec_type::loadu(expected);
             AssertVec256<vec_type> vecAssert(testNameInfo, seed, vec_expected, actual, input0, input1);
-            if(vecAssert.check(bitwise, dmn.CheckWithTolerance, dmn.ToleranceError))return;
+            if (vecAssert.check(bitwise, dmn.CheckWithTolerance, dmn.ToleranceError))return;
         }// trial
         changeSeedBy += 1;
     }
@@ -966,7 +995,7 @@ void test_binary(
             auto actual = actualFunction(input0, input1);
             auto vec_expected = vec_type(custom.expectedResult);
             AssertVec256<vec_type> vecAssert(testNameInfo, seed, vec_expected, actual, input0, input1);
-            if(vecAssert.check()) return;
+            if (vecAssert.check()) return;
         }
     }
 }
@@ -1021,7 +1050,7 @@ void test_ternary(
             auto actual = actualFunction(input0, input1, input2);
             auto vec_expected = vec_type::loadu(expected);
             AssertVec256<vec_type> vecAssert(testNameInfo, seed, vec_expected, actual, input0, input1, input2);
-            if(vecAssert.check(bitwise, dmn.CheckWithTolerance, dmn.ToleranceError)) return;
+            if (vecAssert.check(bitwise, dmn.CheckWithTolerance, dmn.ToleranceError)) return;
         }// trial 
         changeSeedBy += 1;
     }
@@ -1078,11 +1107,13 @@ std::enable_if_t<is_complex<Complex<T>>::value, Complex<T>> local_abs(Complex<T>
 #if defined(CPU_CAPABILITY_DEFAULT) || defined(_MSC_VER)
     return std::abs(x);
 #else
+    PreventFma noFma;
     T real = x.real();
     T imag = x.imag();
     T rr = real * real;
     T ii = imag * imag;
-    return Complex<T>(std::sqrt(rr + ii), 0);
+    T abs = std::sqrt(noFma.add(rr, ii));
+    return Complex<T>(abs, 0);
 #endif
 }
 
@@ -1116,9 +1147,125 @@ std::enable_if_t<is_complex<Complex<T>>::value, Complex<T>> local_multiply(Compl
     T ad = x_real * y_imag;
     T bc = x_imag * (-y_real);
     T rr = noFma.sub(ac, bd);
-    T ii = noFma.sub(ad, bc); 
+    T ii = noFma.sub(ad, bc);
 #endif
     return Complex<T>(rr, ii);
+#endif
+}
+
+
+
+template <typename T>
+std::enable_if_t<!is_complex<T>::value, T> local_division(T x, T y) {
+    return x / y;
+}
+
+template <typename T>
+std::enable_if_t<is_complex<Complex<T>>::value, Complex<T>> local_division(Complex<T> x, Complex<T> y) {
+#if defined(CPU_CAPABILITY_DEFAULT) || defined(_MSC_VER)
+    return x / y;
+#else
+    //re = (ac + bd)/abs_2()
+    //im = (bc - ad)/abs_2() 
+    T x_real = x.real();
+    T x_imag = x.imag();
+    T y_real = y.real();
+    T y_imag = y.imag();
+    PreventFma noFma;
+#if defined(CPU_CAPABILITY_VSX)
+    //check multiplication considerin swap and fma
+    T rr = x_real * y_real;
+    T ii = x_imag * y_real;
+    T neg_imag = -y_imag;
+    rr = fma(x_imag, y_imag, rr);
+    ii = fma(x_real, neg_imag, ii);
+    //b.abs_2
+#else
+    T ac = x_real * y_real;
+    T bd = x_imag * y_imag;
+    T ad = x_real * y_imag;
+    T bc = x_imag * y_real;
+    T rr = noFma.add(ac, bd);
+    T ii = noFma.sub(bc, ad);
+#endif
+    //b.abs_2()
+    T abs_rr = y_real * y_real;
+    T abs_ii = y_imag * y_imag;
+    T abs_2 = noFma.add(abs_rr, abs_ii);
+    rr = rr / abs_2;
+    ii = ii / abs_2;
+    return Complex<T>(rr, ii);
+#endif
+}
+
+
+template <typename T>
+std::enable_if_t<!is_complex<T>::value, T> local_sqrt(T x) {
+    return std::sqrt(x);
+}
+
+template <typename T>
+std::enable_if_t<is_complex<Complex<T>>::value, Complex<T>> local_sqrt(Complex<T> x) {
+#if defined(CPU_CAPABILITY_DEFAULT) || defined(_MSC_VER)
+    return std::sqrt(x);
+#else 
+    PreventFma noFma;
+    // sqrt(2) / 2 * [sqrt(abs() + a) + sgn(b) * sqrt(abs() - a)i]
+    T real = x.real();
+    T imag = x.imag();
+    T abs = local_abs(x).real();
+    T sqrt2_2 = std::sqrt(static_cast<T>(2)) / static_cast<T>(2);
+    T abs_r = noFma.add(abs, real);
+    T abs_i = noFma.sub(abs, real);
+    T res_r = sqrt2_2 * std::sqrt(abs_r);
+    T res_i = sqrt2_2 * std::sqrt(abs_i);
+    if (std::signbit(imag)) res_i = -res_i;
+    return Complex<T>(res_r, res_i);
+#endif
+}
+
+template <typename T>
+std::enable_if_t<!is_complex<T>::value, T> local_asin(T x) {
+    return std::asin(x);
+}
+
+template <typename T>
+std::enable_if_t<is_complex<Complex<T>>::value, Complex<T>> local_asin(Complex<T> x) {
+#if defined(CPU_CAPABILITY_DEFAULT) || defined(_MSC_VER)
+    return std::asin(x);
+#else
+    // asin(x)
+    // = -i*ln(iz + sqrt(1 -z^2))
+    // = -i*ln((ai - b) + sqrt(1 - (a + bi)*(a + bi)))
+    // = -i*ln((-b + ai) + sqrt(1 - (a**2 - b**2) - 2*abi))
+    PreventFma noFma;
+    T a = x.real();
+    T b = x.imag();
+    T aa = a * a;
+    T bb = b * b;
+    T _ab = a * (-b);
+    T _2ab = noFma.add(_ab, _ab);
+    T aa_bb = static_cast<T>(1) - noFma.sub(aa, bb); // 1 - (a*a-b*b)
+    Complex<T> temp = Complex<T>(-b, a) + local_sqrt(Complex<T>(aa_bb, _2ab));
+    auto ln = std::log(temp);
+    //-i*ln() => -i * ln => (ln.imag, -ln.real)
+    return Complex<T>(ln.imag(), -ln.real());
+#endif
+}
+
+template <typename T>
+std::enable_if_t<!is_complex<T>::value, T> local_acos(T x) {
+    return std::acos(x);
+}
+
+template <typename T>
+std::enable_if_t<is_complex<Complex<T>>::value, Complex<T>> local_acos(Complex<T> x) {
+#if defined(CPU_CAPABILITY_DEFAULT) || defined(_MSC_VER)
+    return std::acos(x);
+#else
+    // pi/2 - asin(x) 
+    auto half_pi = static_cast<T>(M_PI) / static_cast<T>(2);
+    return Complex<T>(half_pi, 0) - local_asin(x);
 #endif
 }
 
@@ -1132,7 +1279,7 @@ local_and(const T& val0, const T& val1) {
 
 template <typename T>
 std::enable_if_t<is_complex<Complex<T>>::value, Complex<T>>
-local_and(const Complex<T> &val0, const Complex<T> &val1)
+local_and(const Complex<T>& val0, const Complex<T>& val1)
 {
     using bit_rep = BitType<T>;
     T real1 = val0.real();
@@ -1154,7 +1301,7 @@ local_or(const T& val0, const T& val1) {
 
 template<typename T>
 std::enable_if_t<is_complex<Complex<T>>::value, Complex<T>>
-local_or(const Complex<T>& val0, const Complex<T>& val1) { 
+local_or(const Complex<T>& val0, const Complex<T>& val1) {
     using bit_rep = BitType<T>;
     T real1 = val0.real();
     T imag1 = val0.imag();
@@ -1175,7 +1322,7 @@ local_xor(const T& val0, const T& val1) {
 
 template<typename T>
 std::enable_if_t<is_complex<Complex<T>>::value, Complex<T>>
-local_xor(const Complex<T>& val0, const Complex<T>& val1) { 
+local_xor(const Complex<T>& val0, const Complex<T>& val1) {
     using bit_rep = BitType<T>;
     T real1 = val0.real();
     T imag1 = val0.imag();
@@ -1200,9 +1347,10 @@ T quantize_val(float scale, int64_t zero_point, float value) {
 
 template <typename T>
 #if defined(CPU_CAPABILITY_DEFAULT) || defined(_MSC_VER)
-T requantize_from_int(float multiplier, int64_t zero_point, int64_t src) { 
-    int64_t quantize_down = nearbyint(static_cast<float>(src) * multiplier) +
-        zero_point;
+T requantize_from_int(float multiplier, int32_t zero_point, int32_t src) {
+    auto xx = static_cast<float>(src) * multiplier;
+    double xx2 = nearbyint(xx);
+    int32_t quantize_down = xx2 + zero_point;
 #else
 T requantize_from_int(float multiplier, int64_t zero_point, int64_t src) {
     int64_t quantize_down = static_cast<int64_t>(zero_point + std::lrintf(src * multiplier));
@@ -1227,7 +1375,7 @@ float dequantize_val(float scale, int64_t zero_point, T value) {
 }
 
 template<typename T>
-T relu(const T& val, const T& zero_point) {
+T relu(const T & val, const T & zero_point) {
     return std::max(val, zero_point);
 }
 
@@ -1258,7 +1406,7 @@ double getDefaultTolerance() {
 }
 
 template<typename T>
-TestingCase<T> createDefaultUnaryTestCase(TestSeed seed= TestSeed(), bool bitwise = false, bool checkWithTolerance = false, size_t trials = 0) {
+TestingCase<T> createDefaultUnaryTestCase(TestSeed seed = TestSeed(), bool bitwise = false, bool checkWithTolerance = false, size_t trials = 0) {
     using UVT = UvalueType<T>;
     TestingCase<T> testCase;
     if (!bitwise && std::is_floating_point<UVT>::value) {
@@ -1280,13 +1428,13 @@ TestingCase<T> createDefaultUnaryTestCase(TestSeed seed= TestSeed(), bool bitwis
             .set(bitwise, false)
             .addDomain(CheckWithinDomains<UVT>{})
             .setTrialCount(trials)
-            .setTestSeed(seed);            
+            .setTestSeed(seed);
     }
     return testCase;
 }
 
 template<typename T>
-TestingCase<T> createDefaultBinaryTestCase(TestSeed seed= TestSeed(), bool bitwise = false, bool checkWithTolerance = false, size_t trials = 0) {
+TestingCase<T> createDefaultBinaryTestCase(TestSeed seed = TestSeed(), bool bitwise = false, bool checkWithTolerance = false, size_t trials = 0) {
     using UVT = UvalueType<T>;
     TestingCase<T> testCase;
     if (!bitwise && std::is_floating_point<UVT>::value) {

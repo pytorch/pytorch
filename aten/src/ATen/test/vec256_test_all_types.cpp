@@ -101,10 +101,10 @@ namespace {
             v.store(storage);
             size_t count = std::min(i * sizeof(VT), b_size);
             bool cmp = (std::memcmp(ref_storage, storage, count) == 0);
-            ASSERT_TRUE(cmp) <<"Failure Details:\nTest Seed to reproduce: "<< seed
-                             << "\nCount: " << i;
+            ASSERT_TRUE(cmp) << "Failure Details:\nTest Seed to reproduce: " << seed
+                << "\nCount: " << i;
             if (::testing::Test::HasFailure()) {
-                 break;
+                break;
             }
             // clear storage
             std::memset(storage, 0, b_size);
@@ -120,10 +120,10 @@ namespace {
             }
             size_t written = p1 - ref_storage - offset;
             bool cmp = (std::memcmp(ref_storage + offset, storage + offset, written) == 0);
-            ASSERT_TRUE(cmp) <<"Failure Details:\nTest Seed to reproduce: "<< seed
-                             << "\nMismatch at unaligned offset: " << offset;
+            ASSERT_TRUE(cmp) << "Failure Details:\nTest Seed to reproduce: " << seed
+                << "\nMismatch at unaligned offset: " << offset;
             if (::testing::Test::HasFailure()) {
-                 break;
+                break;
             }
             // clear storage
             std::memset(storage, 0, sizeof storage);
@@ -135,7 +135,7 @@ namespace {
             NAME_INFO(absolute), RESOLVE_OVERLOAD(local_abs),
             [](vec v) { return v.abs(); },
             createDefaultUnaryTestCase<vec>(TestSeed()),
-            RESOLVE_OVERLOAD(filter_int_minimum) );
+            RESOLVE_OVERLOAD(filter_int_minimum));
     }
     TYPED_TEST(SignManipulation, Negate) {
         using vec = TypeParam;
@@ -144,7 +144,7 @@ namespace {
             NAME_INFO(negate), std::negate<ValueType<vec>>(),
             [](vec v) { return v.neg(); },
             createDefaultUnaryTestCase<vec>(TestSeed()),
-            RESOLVE_OVERLOAD(filter_int_minimum) );
+            RESOLVE_OVERLOAD(filter_int_minimum));
     }
     TYPED_TEST(Rounding, Round) {
         using vec = TypeParam;
@@ -167,7 +167,6 @@ namespace {
     }
     TYPED_TEST(Rounding, Ceil) {
         using vec = TypeParam;
-        using UVT = UvalueType<TypeParam>;
         test_unary<vec>(
             NAME_INFO(ceil),
             RESOLVE_OVERLOAD(std::ceil),
@@ -191,28 +190,14 @@ namespace {
             createDefaultUnaryTestCase<vec>(TestSeed()));
     }
     TYPED_TEST(SqrtAndReciprocal, Sqrt) {
-        //pytorch complex sqrt precision differs from std
-        //we will check for error under 0.001
-        using vec = TypeParam;
-        using UVT = UvalueType<TypeParam>;
-        auto test_case =  TestingCase<vec>::getBuilder()
-            .addDomain(CheckWithinDomains<UVT>{ { {0, 100}}, true, 1.e-3f})
-            .setTrialCount(200)
-            .setTestSeed(TestSeed());
-        test_unary<vec>(
-            NAME_INFO(sqrt),
-            RESOLVE_OVERLOAD(std::sqrt),
-            [](vec v) { return v.sqrt(); },
-            test_case);
-    }
-    TYPED_TEST(SqrtAndReciprocalReal, Sqrt) {
         using vec = TypeParam;
         test_unary<vec>(
             NAME_INFO(sqrt),
-            RESOLVE_OVERLOAD(std::sqrt),
+            RESOLVE_OVERLOAD(local_sqrt),
             [](vec v) { return v.sqrt(); },
             createDefaultUnaryTestCase<vec>(TestSeed(), false, true));
     }
+
     TYPED_TEST(SqrtAndReciprocalReal, RSqrt) {
         using vec = TypeParam;
         test_unary<vec>(
@@ -304,31 +289,50 @@ namespace {
             test_case);
     }
     TYPED_TEST(InverseTrigonometric, Asin) {
-        bool checkRelativeErr = is_complex<ValueType<TypeParam>>();
         using vec = TypeParam;
+        using UVT = UvalueType<TypeParam>;
+        bool checkRelativeErr = is_complex<ValueType<TypeParam>>();
+        auto test_case =
+            TestingCase<vec>::getBuilder()
+            .addDomain(CheckWithinDomains<UVT>{ { {-10, 10}}, checkRelativeErr, getDefaultTolerance<UVT>() })
+            .setTrialCount(125536)
+            .setTestSeed(TestSeed());
         test_unary<vec>(
             NAME_INFO(asin),
-            RESOLVE_OVERLOAD(std::asin),
+            RESOLVE_OVERLOAD(local_asin),
             [](vec v) { return v.asin(); },
-            createDefaultUnaryTestCase<vec>(TestSeed(), false, checkRelativeErr));
+            test_case);
     }
     TYPED_TEST(InverseTrigonometric, ACos) {
-        bool checkRelativeErr = is_complex<ValueType<TypeParam>>();
         using vec = TypeParam;
+        using UVT = UvalueType<TypeParam>;
+        bool checkRelativeErr = is_complex<ValueType<TypeParam>>();
+        auto test_case =
+            TestingCase<vec>::getBuilder()
+            .addDomain(CheckWithinDomains<UVT>{ { {-10, 10}}, checkRelativeErr, getDefaultTolerance<UVT>() })
+            .setTrialCount(125536)
+            .setTestSeed(TestSeed());
         test_unary<vec>(
             NAME_INFO(acos),
-             RESOLVE_OVERLOAD(std::acos),
+            RESOLVE_OVERLOAD(local_acos),
             [](vec v) { return v.acos(); },
-            createDefaultUnaryTestCase<vec>(TestSeed(), false, checkRelativeErr));
+            test_case);
     }
     TYPED_TEST(InverseTrigonometric, ATan) {
         bool checkRelativeErr = is_complex<ValueType<TypeParam>>();
         using vec = TypeParam;
+        using UVT = UvalueType<TypeParam>;
+        auto test_case =
+            TestingCase<vec>::getBuilder()
+            .addDomain(CheckWithinDomains<UVT>{ { {-100, 100}}, checkRelativeErr, getDefaultTolerance<UVT>()})
+            .setTrialCount(65536)
+            .setTestSeed(TestSeed());
         test_unary<vec>(
             NAME_INFO(atan),
             RESOLVE_OVERLOAD(std::atan),
             [](vec v) { return v.atan(); },
-            createDefaultUnaryTestCase<vec>(TestSeed(), false, checkRelativeErr));
+            test_case,
+            RESOLVE_OVERLOAD(filter_zero));
     }
     TYPED_TEST(Logarithm, Log) {
         using vec = TypeParam;
@@ -358,9 +362,9 @@ namespace {
         using vec = TypeParam;
         using UVT = UvalueType<TypeParam>;
         auto test_case =
-        TestingCase<vec>::getBuilder()
-            .addDomain(CheckWithinDomains<UVT>{{{-1, 1000}}, true, getDefaultTolerance<UVT>()})
-            .addDomain(CheckWithinDomains<UVT>{{{1000, 1.e+30}}, true, getDefaultTolerance<UVT>()})
+            TestingCase<vec>::getBuilder()
+            .addDomain(CheckWithinDomains<UVT>{ { {-1, 1000}}, true, getDefaultTolerance<UVT>()})
+            .addDomain(CheckWithinDomains<UVT>{ { {1000, 1.e+30}}, true, getDefaultTolerance<UVT>()})
             .setTrialCount(65536)
             .setTestSeed(TestSeed());
         test_unary<vec>(
@@ -417,12 +421,12 @@ namespace {
         using UVT = UvalueType<vec>;
         UVT tolerance = getDefaultTolerance<UVT>();
         // double: 2e+305  float: 4e+36 (https://sleef.org/purec.xhtml#eg)
-        UVT maxCorrect = std::is_same<UVT,float>::value? (UVT)4e+36 : (UVT)2e+305;
+        UVT maxCorrect = std::is_same<UVT, float>::value ? (UVT)4e+36 : (UVT)2e+305;
         TestingCase<vec> testCase = TestingCase<vec>::getBuilder()
-            .addDomain(CheckWithinDomains<UVT>{ { {(UVT)-100, (UVT)0}}, true, tolerance}) 
+            .addDomain(CheckWithinDomains<UVT>{ { {(UVT)-100, (UVT)0}}, true, tolerance})
             .addDomain(CheckWithinDomains<UVT>{ { {(UVT)0, (UVT)1000 }}, true, tolerance})
-            .addDomain(CheckWithinDomains<UVT>{ { {(UVT)1000, maxCorrect }}, true, tolerance}) 
-            .setTestSeed(TestSeed());      
+            .addDomain(CheckWithinDomains<UVT>{ { {(UVT)1000, maxCorrect }}, true, tolerance})
+            .setTestSeed(TestSeed());
         test_unary<vec>(
             NAME_INFO(lgamma),
             RESOLVE_OVERLOAD(std::lgamma),
@@ -445,7 +449,7 @@ namespace {
             NAME_INFO(pow),
             RESOLVE_OVERLOAD(std::pow),
             [](vec v0, vec v1) { return v0.pow(v1); },
-            createDefaultBinaryTestCase<vec>(TestSeed(), false, true) );
+            createDefaultBinaryTestCase<vec>(TestSeed(), false, true));
     }
     TYPED_TEST(RealTests, Hypot) {
         using vec = TypeParam;
@@ -453,7 +457,7 @@ namespace {
             NAME_INFO(hypot),
             RESOLVE_OVERLOAD(std::hypot),
             [](vec v0, vec v1) { return v0.hypot(v1); },
-            createDefaultBinaryTestCase<vec>(TestSeed(), false, true) );
+            createDefaultBinaryTestCase<vec>(TestSeed(), false, true));
     }
     TYPED_TEST(RealTests, NextAfter) {
         using vec = TypeParam;
@@ -461,7 +465,7 @@ namespace {
             NAME_INFO(nextafter),
             RESOLVE_OVERLOAD(std::nextafter),
             [](vec v0, vec v1) { return v0.nextafter(v1); },
-            createDefaultBinaryTestCase<vec>(TestSeed(), false, true) );
+            createDefaultBinaryTestCase<vec>(TestSeed(), false, true));
     }
     TYPED_TEST(Interleave, Interleave) {
         using vec = TypeParam;
@@ -510,7 +514,7 @@ namespace {
                 return v0 + v1;
             },
             createDefaultBinaryTestCase<vec>(TestSeed()),
-            RESOLVE_OVERLOAD(filter_add_overflow));
+                RESOLVE_OVERLOAD(filter_add_overflow));
     }
     TYPED_TEST(Arithmetics, Minus) {
         using vec = TypeParam;
@@ -522,78 +526,56 @@ namespace {
                 return v0 - v1;
             },
             createDefaultBinaryTestCase<vec>(TestSeed()),
-            RESOLVE_OVERLOAD(filter_sub_overflow));
+                RESOLVE_OVERLOAD(filter_sub_overflow));
     }
     TYPED_TEST(Arithmetics, Multiplication) {
         using vec = TypeParam;
-        using VT = ValueType<TypeParam>;
         test_binary<vec>(
             NAME_INFO(mult),
             RESOLVE_OVERLOAD(local_multiply),
-            [](const vec &v0, const vec &v1) { return v0 * v1; },
+            [](const vec& v0, const vec& v1) { return v0 * v1; },
             createDefaultBinaryTestCase<vec>(TestSeed(), false, true),
             RESOLVE_OVERLOAD(filter_mult_overflow));
     }
     TYPED_TEST(Arithmetics, Division) {
         using vec = TypeParam;
-        using VT = ValueType<TypeParam>;
-        //for complex we will use small range and absError against std implementation
-        //because inside our implementation we are using the same type and multiplication easily can become inf
-        // try for example Complex<float>(1.7852e+38,1.65523e+38)/Complex<float>(1.74044e+38,1.57524e+38)
         TestSeed seed;
-        if (is_complex<VT>()) {
-            using UVT = UvalueType<TypeParam>;
-            auto test_case = TestingCase<vec>::getBuilder()
-                .addDomain(CheckWithinDomains<UVT>{ { DomainRange<UVT>{(UVT)-10, (UVT)10}, DomainRange<UVT>{(UVT)-10, (UVT)10}}, true, (UVT)(1.e-5) })
-                .setTestSeed(seed);
-            test_binary<vec>(
-                NAME_INFO(division),
-                std::divides<VT>(),
-                [](const vec& v0, const vec& v1) { return v0 / v1; },
-                test_case,
-                RESOLVE_OVERLOAD(filter_div_ub));
-        }
-        else {
-            test_binary<vec>(
-                NAME_INFO(division),
-                std::divides<VT>(),
-                [](const vec& v0, const vec& v1) { return v0 / v1; },
-                createDefaultBinaryTestCase<vec>(seed),
-                RESOLVE_OVERLOAD(filter_div_ub));
-        }
+        test_binary<vec>(
+            NAME_INFO(division),
+            RESOLVE_OVERLOAD(local_division),
+            [](const vec& v0, const vec& v1) { return v0 / v1; },
+            createDefaultBinaryTestCase<vec>(seed),
+            RESOLVE_OVERLOAD(filter_div_ub));
     }
     TYPED_TEST(Bitwise, BitAnd) {
         using vec = TypeParam;
-        using VT = ValueType<TypeParam>;
         test_binary<vec>(
             NAME_INFO(bit_and),
             RESOLVE_OVERLOAD(local_and),
-            [](const vec &v0, const vec &v1) { return v0 & v1; },
+            [](const vec& v0, const vec& v1) { return v0 & v1; },
             createDefaultBinaryTestCase<vec>(TestSeed(), true));
     }
     TYPED_TEST(Bitwise, BitOr) {
         using vec = TypeParam;
-        using VT = ValueType<TypeParam>;
         test_binary<vec>(
             NAME_INFO(bit_or),
             RESOLVE_OVERLOAD(local_or),
-            [](const vec &v0, const vec &v1) { return v0 | v1; },
+            [](const vec& v0, const vec& v1) { return v0 | v1; },
             createDefaultBinaryTestCase<vec>(TestSeed(), true));
     }
     TYPED_TEST(Bitwise, BitXor) {
         using vec = TypeParam;
-        using VT = ValueType<TypeParam>;
         test_binary<vec>(
             NAME_INFO(bit_xor),
             RESOLVE_OVERLOAD(local_xor),
-            [](const vec &v0, const vec &v1) { return v0 ^ v1; },
+            [](const vec& v0, const vec& v1) { return v0 ^ v1; },
             createDefaultBinaryTestCase<vec>(TestSeed(), true));
     }
     TYPED_TEST(Comparison, Equal) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
         test_binary<vec>(
-            NAME_INFO(==),
+            NAME_INFO(== ),
             [](const VT& v1, const VT& v2) {return func_cmp(std::equal_to<VT>(), v1, v2); },
             [](const vec& v0, const vec& v1) { return v0 == v1; },
             createDefaultBinaryTestCase<vec>(TestSeed(), true));
@@ -602,7 +584,7 @@ namespace {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
         test_binary<vec>(
-            NAME_INFO(!=),
+            NAME_INFO(!= ),
             [](const VT& v1, const VT& v2) {return func_cmp(std::not_equal_to<VT>(), v1, v2); },
             [](const vec& v0, const vec& v1) { return v0 != v1; },
             createDefaultBinaryTestCase<vec>(TestSeed(), true));
@@ -611,7 +593,7 @@ namespace {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
         test_binary<vec>(
-            NAME_INFO(>),
+            NAME_INFO(> ),
             [](const VT& v1, const VT& v2) {return func_cmp(std::greater<VT>(), v1, v2); },
             [](const vec& v0, const vec& v1) { return v0 > v1; },
             createDefaultBinaryTestCase<vec>(TestSeed(), true));
@@ -620,7 +602,7 @@ namespace {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
         test_binary<vec>(
-            NAME_INFO(<),
+            NAME_INFO(< ),
             [](const VT& v1, const VT& v2) {return func_cmp(std::less<VT>(), v1, v2); },
             [](const vec& v0, const vec& v1) { return v0 < v1; },
             createDefaultBinaryTestCase<vec>(TestSeed(), true));
@@ -629,7 +611,7 @@ namespace {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
         test_binary<vec>(
-            NAME_INFO(>=),
+            NAME_INFO(>= ),
             [](const VT& v1, const VT& v2) {return func_cmp(std::greater_equal<VT>(), v1, v2); },
             [](const vec& v0, const vec& v1) { return v0 >= v1; },
             createDefaultBinaryTestCase<vec>(TestSeed(), true));
@@ -638,7 +620,7 @@ namespace {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
         test_binary<vec>(
-            NAME_INFO(<=),
+            NAME_INFO(<= ),
             [](const VT& v1, const VT& v2) {return func_cmp(std::less_equal<VT>(), v1, v2); },
             [](const vec& v0, const vec& v1) { return v0 <= v1; },
             createDefaultBinaryTestCase<vec>(TestSeed(), true));
@@ -696,7 +678,7 @@ namespace {
                 return clamp(v0, v1, v2);
             },
             createDefaultTernaryTestCase<vec>(TestSeed()),
-            RESOLVE_OVERLOAD(filter_clamp));
+                RESOLVE_OVERLOAD(filter_clamp));
     }
     TYPED_TEST(BitwiseFloatsAdditional, ZeroMask) {
         using vec = TypeParam;
@@ -716,9 +698,9 @@ namespace {
                 }
             }
             int actual = vec::loadu(test_vals).zero_mask();
-            ASSERT_EQ(expected, actual)<< "Failure Details:\n"
-                                       << std::hex <<"Expected:\n#\t"<<expected
-                                       << "\nActual:\n#\t"<< actual;
+            ASSERT_EQ(expected, actual) << "Failure Details:\n"
+                << std::hex << "Expected:\n#\t" << expected
+                << "\nActual:\n#\t" << actual;
         } //
     }
     template<typename vec, typename VT, int64_t mask>
@@ -746,8 +728,8 @@ namespace {
         auto vec_b = vec::loadu(b);
         auto expected = vec::loadu(expected_val);
         auto actual = vec::template blend<mask>(vec_a, vec_b);
-        auto mask_str = std::string("\nblend mask: ")+std::to_string(mask);
-        if(AssertVec256<vec>( std::string(NAME_INFO(test_blend )) + mask_str ,expected, actual).check()) return;
+        auto mask_str = std::string("\nblend mask: ") + std::to_string(mask);
+        if (AssertVec256<vec>(std::string(NAME_INFO(test_blend)) + mask_str, expected, actual).check()) return;
         test_blend<vec, VT, mask - 1>(expected_val, a, b);
     }
     template<typename T, int N>
@@ -819,7 +801,9 @@ namespace {
         //scale
         ValueGen<float> generator_sc(1.f, 15.f, seed.add(1));
         //value
-        ValueGen<float> gen(min_val * 2.f, max_val * 2.f, seed.add(2));
+        float minv = static_cast<float>(static_cast<double>(min_val) * 2.0);
+        float maxv = static_cast<float>(static_cast<double>(max_val) * 2.0);
+        ValueGen<float> gen(minv, maxv, seed.add(2));
         for (int i = 0; i < trials; i++) {
             float scale = generator_sc.get();
             float inv_scale = 1.0f / static_cast<float>(scale);
@@ -836,7 +820,7 @@ namespace {
             }
             auto expected = vec::loadu(expected_qint_vals);
             auto actual = vec::quantize(float_ret, scale, zero_point_val, inv_scale);
-            if(AssertVec256<vec>(NAME_INFO(Quantize), expected, actual).check()) return;
+            if (AssertVec256<vec>(NAME_INFO(Quantize), expected, actual).check()) return;
         } //trials;
     }
     TYPED_TEST(QuantizationTests, DeQuantize) {
@@ -876,11 +860,11 @@ namespace {
                     index++;
                 }
                 vfloat expected = vfloat::loadu(unit_exp_vals);
-                const auto &actual = actual_float_ret[j];
+                const auto& actual = actual_float_ret[j];
 #if  defined(CHECK_DEQUANT_WITH_LOW_PRECISION)
-                if(AssertVec256<vfloat>(NAME_INFO(DeQuantize), seed, expected, actual).check( false, true, 1.e-3f)) return;
+                if (AssertVec256<vfloat>(NAME_INFO(DeQuantize), seed, expected, actual).check(false, true, 1.e-3f)) return;
 #else
-                if(AssertVec256<vfloat>(NAME_INFO(DeQuantize), seed, expected, actual).check()) return;
+                if (AssertVec256<vfloat>(NAME_INFO(DeQuantize), seed, expected, actual).check()) return;
 #endif
             }
         } //trials;
@@ -889,27 +873,25 @@ namespace {
         using vec = TypeParam;
         using underlying = ValueType<vec>;
         constexpr int trials = 4000;
-        constexpr int min_val = std::numeric_limits<underlying>::min();
-        constexpr int max_val = std::numeric_limits<underlying>::max();
+        constexpr int min_val = -65535;
+        constexpr int max_val = 65535;
         constexpr int el_count = vint::size();
         CACHE_ALIGN c10::qint32 unit_int_vec[el_count];
         CACHE_ALIGN underlying expected_qint_vals[vec::size()];
         typename vec::int_vec_return_type  int_ret;
         auto seed = TestSeed();
-        //zero point
-        ValueGen<int32_t> generator_zp(min_val, max_val, seed);
+        //zero point and value
+        ValueGen<int32_t> generator(min_val, max_val, seed);
         //scale
         ValueGen<float> generator_sc(1.f, 15.f, seed.add(1));
-        //value
-        ValueGen<int32_t> gen(-65535, 65535, seed.add(2));
         for (int i = 0; i < trials; i++) {
             float multiplier = 1.f / (generator_sc.get());
-            auto zero_point_val = generator_zp.get();
+            auto zero_point_val = generator.get();
             int index = 0;
             for (int j = 0; j < vec::float_num_vecs(); j++) {
                 //generate vals
                 for (auto& v : unit_int_vec) {
-                    v = c10::qint32(gen.get());
+                    v = c10::qint32(generator.get());
                     expected_qint_vals[index] = requantize_from_int<underlying>(multiplier, zero_point_val, v.val_);
                     index++;
                 }
@@ -939,11 +921,11 @@ namespace {
             //generate vals
             for (int j = 0; j < vec::size(); j++) {
                 qint_vals[j] = generator.get();
-                qint_b[j] = generator.get(); 
-                if(std::is_same<underlying,int>::value){
+                qint_b[j] = generator.get();
+                if (std::is_same<underlying, int>::value) {
                     //filter overflow cases
                     filter_sub_overflow(qint_vals[j], qint_b[j]);
-                } 
+                }
             }
             int index = 0;
             auto qint_vec = vec::loadu(qint_vals);
@@ -955,8 +937,8 @@ namespace {
                     index++;
                 }
                 auto expected = vqint::loadu(unit_exp_vals);
-                const auto &actual = actual_int_ret[j];
-                if(AssertVec256<vqint>(NAME_INFO(WideningSubtract), seed, expected, actual).check()) return;
+                const auto& actual = actual_int_ret[j];
+                if (AssertVec256<vqint>(NAME_INFO(WideningSubtract), seed, expected, actual).check()) return;
             }
         } //trials;
     }
@@ -965,7 +947,7 @@ namespace {
         using VT = ValueType<TypeParam>;
         constexpr VT min_val = std::numeric_limits<VT>::min();
         constexpr VT max_val = std::numeric_limits<VT>::max();
-        constexpr VT fake_zp = max_val > 256 ? 65535 : 47;
+        constexpr VT fake_zp = sizeof(VT) > 1 ? static_cast<VT>(65535) : static_cast<VT>(47);
         auto test_case = TestingCase<vec>::getBuilder()
             .addDomain(CheckWithinDomains<VT>{ { DomainRange<VT>{min_val, max_val}, DomainRange<VT>{(VT)0, (VT)fake_zp}} })
             .setTestSeed(TestSeed());
@@ -982,8 +964,9 @@ namespace {
         using VT = ValueType<TypeParam>;
         constexpr VT min_val = std::numeric_limits<VT>::min();
         constexpr VT max_val = std::numeric_limits<VT>::max();
-        constexpr VT fake_zp = max_val > 256 ? 65535 : 47;
-        constexpr VT fake_qsix = max_val > 256 ? fake_zp + 12345 : fake_zp + 32;
+        constexpr VT fake_zp = sizeof(VT) > 1 ? static_cast<VT>(65535) : static_cast<VT>(47);
+        constexpr VT temp = sizeof(VT) > 1 ? static_cast<VT>(12345) : static_cast<VT>(32);
+        constexpr VT fake_qsix = fake_zp + temp;
         auto test_case = TestingCase<vec>::getBuilder()
             .addDomain(CheckWithinDomains<VT>{
                 {
@@ -992,13 +975,13 @@ namespace {
                         DomainRange<VT>{(VT)fake_zp, (VT)fake_qsix}
                 }})
             .setTestSeed(TestSeed());
-        test_ternary<vec>(
-            NAME_INFO(relu6),
-            RESOLVE_OVERLOAD(relu6),
-            [](/*const*/ vec& v0, const vec& v1, const vec& v2) {
-                return  v0.relu6(v1, v2);
-            },
-            test_case);
+                test_ternary<vec>(
+                    NAME_INFO(relu6),
+                    RESOLVE_OVERLOAD(relu6),
+                    [](/*const*/ vec& v0, const vec& v1, const vec& v2) {
+                        return  v0.relu6(v1, v2);
+                    },
+                    test_case);
     }
 #else
 #error GTEST does not have TYPED_TEST
