@@ -2419,6 +2419,8 @@
 
 - func: celu_(Tensor(a!) self, Scalar alpha=1.0) -> Tensor(a!)
 
+- func: siamese_loss(Tensor input1, Tensor input2, Tensor label, float margin=1.0, int reduction-Mean)
+  use_C10_dispatcher: full
 
 - func: sigmoid(Tensor self) -> Tensor
   use_c10_dispatcher: full
