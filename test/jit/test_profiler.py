@@ -19,7 +19,9 @@ class TestProfiler(JitTestCase):
         self.prev_profiling = torch._C._jit_set_profiling_mode(True)
         self.inline_autodiff = torch._C._debug_set_autodiff_subgraph_inlining(False)
         self.texpr_fuser_state = torch._C._jit_texpr_fuser_enabled()
+        self.can_fuse_on_cpu = torch._C._jit_can_fuse_on_cpu()
         torch._C._jit_set_texpr_fuser_enabled(True)
+        torch._C._jit_override_can_fuse_on_cpu(True)
         self.default_dtype = torch.get_default_dtype()
         torch.set_default_dtype(torch.double)
 
@@ -29,6 +31,7 @@ class TestProfiler(JitTestCase):
         torch._C._jit_set_profiling_mode(self.prev_profiling)
         torch._C._debug_set_autodiff_subgraph_inlining(self.inline_autodiff)
         torch._C._jit_set_texpr_fuser_enabled(self.texpr_fuser_state)
+        torch._C._jit_override_can_fuse_on_cpu(self.can_fuse_on_cpu)
         torch.set_default_dtype(self.default_dtype)
 
     def test_specialize_backward(self):
@@ -103,3 +106,13 @@ class TestProfiler(JitTestCase):
         g = torch.jit.last_executed_optimized_graph()
         self.assertEqual(len(list(g.findAllNodes("prim::TypeCheck"))), 2)
         FileCheck().check("TensorExpr").check("aten::add_").check("TensorExpr").run(g)
+
+    def test_not_fusing_scalar_ops(self):
+        @torch.jit.script
+        def foo(x: int, y: int):
+            return x + y + 2 + 4 + 5 + 6
+
+        foo(1, 2)
+        foo(2, 3)
+        g = torch.jit.last_executed_optimized_graph()
+        FileCheck().check_not("TensorExpr").run(g)

@@ -1037,4 +1037,17 @@ bool cpu_equal(const Tensor& self, const Tensor& other) {
   return result.load();
 }
 
+// max(dim), min(dim), topk(dim), mode(dim), are examples of reduction
+// functions that select values. value_selecting_reduction_backward is the
+// backward function for those operators; it propagates the grad to the
+// specific value locations referred to at `indices`.
+Tensor value_selecting_reduction_backward(const Tensor& grad, int64_t dim, const Tensor& indices, IntArrayRef sizes, bool keepdim) {
+  if (!keepdim && sizes.size() > 0) {
+    auto grad_ = grad.unsqueeze(dim);
+    auto indices_ = indices.unsqueeze(dim);
+    return at::zeros(sizes, grad_.options()).scatter_(dim, indices_, grad_);
+  }
+  return at::zeros(sizes, grad.options()).scatter_(dim, indices, grad);
+}
+
 }} // namespace at::native
