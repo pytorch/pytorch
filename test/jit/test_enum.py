@@ -17,16 +17,6 @@ if __name__ == '__main__':
                        "instead.")
 
 class TestEnum(JitTestCase):
-    def setUp(self):
-        super().setUp()
-        self.saved_enum_env_var = os.environ.get("EXPERIMENTAL_ENUM_SUPPORT", None)
-        os.environ["EXPERIMENTAL_ENUM_SUPPORT"] = "1"
-
-    def tearDown(self):
-        super().tearDown()
-        if self.saved_enum_env_var:
-            os.environ["EXPERIMENTAL_ENUM_SUPPORT"] = self.saved_enum_env_var
-
     def test_enum_value_types(self):
         global IntEnum
 
@@ -349,30 +339,3 @@ class TestEnum(JitTestCase):
         # PURPLE always appear last because we follow Python's Enum definition order.
         self.assertEqual(scripted(Color.RED), [Color.GREEN.value, Color.BLUE.value])
         self.assertEqual(scripted(Color.GREEN), [Color.RED.value, Color.BLUE.value])
-
-
-# Tests that Enum support features are properly guarded before they are mature.
-class TestEnumFeatureGuard(JitTestCase):
-    def setUp(self):
-        super().setUp()
-        self.saved_enum_env_var = os.environ.get("EXPERIMENTAL_ENUM_SUPPORT", None)
-        if self.saved_enum_env_var:
-            del os.environ["EXPERIMENTAL_ENUM_SUPPORT"]
-
-    def tearDown(self):
-        super().tearDown()
-        if self.saved_enum_env_var:
-            os.environ["EXPERIMENTAL_ENUM_SUPPORT"] = self.saved_enum_env_var
-
-    def test_enum_comp_disabled(self):
-        global Color
-
-        class Color(Enum):
-            RED = 1
-            GREEN = 2
-
-        def enum_comp(x: Color, y: Color) -> bool:
-            return x == y
-
-        with self.assertRaisesRegexWithHighlight(RuntimeError, "Unknown type name 'Color'", "Color"):
-            torch.jit.script(enum_comp)
