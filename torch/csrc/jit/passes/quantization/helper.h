@@ -100,6 +100,9 @@ TORCH_API bool nodeQuantizable(
     Node* n,
     QuantType quant_type = QuantType::STATIC);
 
+// Nodes which only require quantization of weight value, eg. embedding_bag
+bool isWeightOnlyStaticQuantOp(Node* n);
+
 // Check if a use of the value is quantizable, this depends on
 // both the use node and the offset
 TORCH_API bool useQuantizable(const Use& use, QuantType quant_type);
