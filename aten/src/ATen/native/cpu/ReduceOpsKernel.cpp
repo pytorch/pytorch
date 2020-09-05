@@ -126,7 +126,7 @@ static void logcumsumexp_cpu_kernel(Tensor& result, const Tensor& self, int64_t 
 
 // TODO: Implement `nansum` similar to the stable `sum`
 // implementation in cpu/SumKernel.cpp
-static void nansum_kernel_impl(TensorIterator& iter) {
+static void FLOATING_TYPESnansum_kernel_impl(TensorIterator& iter) {
   if (iter.dtype() == ScalarType::Half){
     binary_kernel_reduce(iter, NanSumOps<float, c10::Half>{}, float{0});
   } else {
@@ -174,9 +174,9 @@ static void nanprod_kernel_impl(TensorIterator& iter) {
         iter,
         NanProdOps<float, c10::Half>{},
         float{1}
-        );
+      );
   } else {
-      AT_DISPATCH_ALL_TYPES_AND_COMPLEX(iter.dtype(), "nanprod_cpu", [&] {
+      AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "nanprod_cpu", [&] {
         binary_kernel_reduce(
           iter,
           NanProdOps<scalar_t, scalar_t>{},

@@ -359,6 +359,8 @@ Tensor& prod_out(Tensor& result, const Tensor& self, Dimname dim,
 
 static Tensor& nanprod_out_impl(Tensor& result, const Tensor& self, IntArrayRef dim,
                         bool keepdim, c10::optional<ScalarType> opt_dtype) {
+  TORCH_CHECK(!c10::isComplexType(self.scalar_type()), "nanprod does not support complex inputs");
+  // For integral types, use existing prod as integral types don't have `Nan`.
   if (c10::isIntegralType(self.scalar_type(), true)) {
     return at::native::prod_out_impl(result, self, dim, keepdim, opt_dtype);
   }

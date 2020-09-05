@@ -150,8 +150,6 @@ struct NanProdOps {
     return WARP_SHFL_DOWN(data, offset);
   }
 #endif
-
-  NanProdOps() {}
 };
 
 template <typename acc_t, typename factor_t>
