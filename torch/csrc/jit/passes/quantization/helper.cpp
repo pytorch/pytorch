@@ -25,6 +25,7 @@ std::vector<std::string> _static_quantizable_call_funcs = {
     "layer_norm",
     "group_norm",
     "instance_norm",
+    "embedding_bag",
 };
 
 std::vector<std::string> _static_quantizable_aten_funcs = {
@@ -42,15 +43,21 @@ std::vector<std::string> _static_quantizable_aten_funcs = {
     "layer_norm",
     "group_norm",
     "instance_norm",
+    "embedding_bag",
 };
 
 std::vector<std::string> _dynamic_quantizable_call_funcs = {
     "linear",
-    "embedding_bag",
 };
 
 std::vector<std::string> _dynamic_quantizable_aten_funcs = {
     "linear",
+};
+
+std::vector<std::string> _static_weight_only_quant_aten_funcs = {
+    "embedding_bag",
+};
+std::vector<std::string> _static_weight_only_quant_call_funcs = {
     "embedding_bag",
 };
 
@@ -467,6 +474,13 @@ bool userDefinedCallFunction(Node* n) {
   return n->kind() == prim::CallFunction &&
       !isSingleInputGeneralCallFunction(n) &&
       !isFunctionNode(n, _static_quantizable_call_funcs, {});
+}
+
+bool isWeightOnlyStaticQuantOp(Node* n) {
+  return isFunctionNode(
+      n,
+      _static_weight_only_quant_call_funcs,
+      _static_weight_only_quant_aten_funcs);
 }
 
 bool nodeQuantizable(Node* n, QuantType quant_type) {

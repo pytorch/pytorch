@@ -403,8 +403,7 @@ void insertQuantizationOps(
   // Temporary solution to quantize embedding_bag operators. Will be re-written
   // once we support quantization of embedding_bag weights.
   auto embedding_bag_name = getEmbeddingBagObsName(module, observer);
-  if (quant_type == QuantType::DYNAMIC &&
-      isEmbeddingBagOp(observer, embedding_bag_name)) {
+  if (isEmbeddingBagOp(observer, embedding_bag_name)) {
     if (isWeight(module, observer_out)) {
       auto op_name = embedding_bag_name.value();
       Node* dequant = insertEmbeddingBagOps(observer, op_name);

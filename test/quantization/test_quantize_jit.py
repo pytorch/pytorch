@@ -23,6 +23,7 @@ from torch.quantization import (
     fuse_modules,
     quantize_jit,
     quantize_dynamic_jit,
+    PlaceholderObserver,
 )
 
 # torch.quantization.quantize_jit
@@ -2947,14 +2948,14 @@ class TestQuantizeDynamicJitOps(QuantizationTestCase):
                 m = torch.jit.trace(module, dummy_inputs)
             else:
                 m = torch.jit.script(module)
-            from torch.quantization import QConfigDynamic, PlaceholderObserver
-            int4_dynamic_qconfig = QConfigDynamic(activation=PlaceholderObserver.with_args(dtype=torch.float,
-                                                                                           custom_op_name="embedding_bag_4bit"),
-                                                  weight=PlaceholderObserver.with_args(custom_op_name="embedding_bag_4bit"))
-            int8_dynamic_qconfig = QConfigDynamic(activation=PlaceholderObserver.with_args(dtype=torch.float,
-                                                                                           custom_op_name="embedding_bag_byte"),
-                                                  weight=PlaceholderObserver.with_args(custom_op_name="embedding_bag_byte"))
-            m = quantize_dynamic_jit(m, {'embedding1' : int4_dynamic_qconfig, 'embedding2' : int8_dynamic_qconfig})
+            int4_qconfig = QConfig(activation=PlaceholderObserver.with_args(dtype=torch.float,
+                                                                            custom_op_name="embedding_bag_4bit"),
+                                   weight=PlaceholderObserver.with_args(custom_op_name="embedding_bag_4bit"))
+            int8_qconfig = QConfig(activation=PlaceholderObserver.with_args(dtype=torch.float,
+                                                                            custom_op_name="embedding_bag_byte"),
+                                   weight=PlaceholderObserver.with_args(custom_op_name="embedding_bag_byte"))
+            m = prepare_jit(m, {'embedding1' : int4_qconfig, 'embedding2' : int8_qconfig})
+            m = convert_jit(m)
             FileCheck().check("quantized::embedding_bag_4bit_rowwise_offsets") \
                        .check_next("quantized::embedding_bag_byte_rowwise_offsets") \
                        .run(m.graph)
