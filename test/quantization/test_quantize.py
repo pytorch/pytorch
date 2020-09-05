@@ -507,6 +507,7 @@ class TestPostTrainingStatic(QuantizationTestCase):
         torch.quantization.convert(model, inplace=True)
         checkHooksIsPresent(model, False)
 
+    @skipIfNoFBGEMM
     def test_quantized_embedding(self):
         r""" Test the post-training quantization flow, serialization and scripting
         of embedding modules
