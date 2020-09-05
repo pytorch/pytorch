@@ -88,7 +88,6 @@ class Embedding(torch.nn.Module):
         torch.Size([9, 12]
 
     """
-    _FLOAT_MODULE = nn.Embedding
     _version = 1
 
     def __init__(self, num_embeddings: int, embedding_dim: int, padding_idx: Optional[int] = None,
@@ -144,8 +143,8 @@ class Embedding(torch.nn.Module):
             mod (Module): a float module, either produced by torch.quantization
                           utilities or provided by user
         """
-        assert type(mod) == cls._FLOAT_MODULE, 'nnq.' + cls.__name__ + '.from_float only works for ' + \
-            cls._FLOAT_MODULE.__name__
+        assert type(mod) == nn.Embedding, 'nnq.' + cls.__name__ + '.from_float only works for ' + \
+            nn.Embedding.__name__
         assert hasattr(mod, 'qconfig'), 'Embedding input float module must have qconfig defined'
         from torch.quantization.qconfig import float_qparams_dynamic_qconfig
         if mod.qconfig is not None and mod.qconfig.weight is not None:
@@ -189,7 +188,6 @@ class EmbeddingBag(Embedding):
         torch.Size([5, 12]
 
     """
-    _FLOAT_MODULE = nn.EmbeddingBag
     _version = 1
 
     def __init__(self, num_embeddings: int, embedding_dim: int,
@@ -219,8 +217,8 @@ class EmbeddingBag(Embedding):
             mod (Module): a float module, either produced by torch.quantization
                           utilities or provided by user
         """
-        assert type(mod) == cls._FLOAT_MODULE, 'nnq.' + cls.__name__ + '.from_float only works for ' + \
-            cls._FLOAT_MODULE.__name__
+        assert type(mod) == nn.EmbeddingBag, 'nnq.' + cls.__name__ + '.from_float only works for ' + \
+            nn.EmbeddingBag.__name__
         assert hasattr(mod, 'qconfig'), 'EmbeddingBag input float module must have qconfig defined'
         from torch.quantization.qconfig import float_qparams_dynamic_qconfig
         if mod.qconfig is not None and mod.qconfig.weight is not None:
