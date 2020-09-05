@@ -43,6 +43,7 @@ class TestOptim(TestCase):
 
     def tearDown(self):
         self.tf32_disabler.__exit__(None, None, None)
+        super().tearDown()
 
     def _test_rosenbrock_sparse(self, constructor, scheduler_constructors=None,
                                 sparse_only=False):
