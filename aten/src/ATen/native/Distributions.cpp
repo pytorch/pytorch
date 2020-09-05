@@ -447,8 +447,7 @@ Tensor _s_dirichlet_cpu(const Tensor& alpha, c10::optional<Generator> gen) {
       auto ret_val = gamma_val / gamma_sum_val;
       auto min_val = std::numeric_limits<scalar_t>::min();
       auto max_val = std::nexttoward(static_cast<scalar_t>(1.0f), 0.0f);
-      ret_val = std::min(max_val, std::max(min_val, ret_val));
-      return static_cast<scalar_t>(ret_val);
+      return std::min(max_val, std::max(min_val, static_cast<scalar_t>(ret_val)));
     });
   });
   return ret;
