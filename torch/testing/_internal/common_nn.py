@@ -2151,7 +2151,7 @@ new_module_tests = [
         desc='stride_padding',
         check_with_long_tensor=True,
         with_tf32=True,
-        tf32_precision=0.01,
+        tf32_precision=0.05,
     ),
     dict(
         module_name='Conv3d',
@@ -2180,6 +2180,7 @@ new_module_tests = [
         cpp_constructor_args='torch::nn::Conv3dOptions(3, 4, 2).dilation(2)',
         input_size=(2, 3, 5, 5, 5),
         with_tf32=True,
+        tf32_precision=0.05,
     ),
     dict(
         fullname='Conv3d_dilated_strided',
@@ -2187,6 +2188,7 @@ new_module_tests = [
         cpp_constructor_args='torch::nn::Conv3dOptions(3, 4, 2).dilation(2).stride(2)',
         input_size=(2, 3, 5, 5, 5),
         with_tf32=True,
+        tf32_precision=0.05
     ),
     dict(
         module_name='ConvTranspose3d',
