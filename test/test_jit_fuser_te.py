@@ -1208,9 +1208,14 @@ class TestTEFuser(JitTestCase):
                 # neither does the fuser.  Catch everything to avoid needing to
                 # guess what errors might be thrown by eager.
                 continue
-            t = torch.jit.trace(fn, (x,))
-            torch.testing.assert_allclose(ref, t(x))
-            self.assertAllFused(t.graph_for(x))
+            try:
+                t = torch.jit.trace(fn, (x,))
+                torch.testing.assert_allclose(ref, t(x))
+                self.assertAllFused(t.graph_for(x))
+            except Exception as e:
+                raise RuntimeError(" ".join([
+                    "Failed:", str(dtype), op.__name__, device
+                    ]))
 
 if __name__ == '__main__':
     run_tests()

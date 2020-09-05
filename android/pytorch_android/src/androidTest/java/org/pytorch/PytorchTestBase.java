@@ -336,14 +336,11 @@ public abstract class PytorchTestBase {
     Tensor inputNHWDC = Tensor.fromBlob(dataNHWDC, shape, MemoryFormat.CHANNELS_LAST_3D);
     final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
     final IValue outputNCHWD = module.runMethod("contiguous", IValue.from(inputNHWDC));
-    assertIValueTensor(
-        outputNCHWD,
-        MemoryFormat.CONTIGUOUS,
-        shape,
-        dataNCHWD);
+    assertIValueTensor(outputNCHWD, MemoryFormat.CONTIGUOUS, shape, dataNCHWD);
 
     Tensor inputNCHWD = Tensor.fromBlob(dataNCHWD, shape, MemoryFormat.CONTIGUOUS);
-    final IValue outputNHWDC = module.runMethod("contiguousChannelsLast3d", IValue.from(inputNCHWD));
+    final IValue outputNHWDC =
+        module.runMethod("contiguousChannelsLast3d", IValue.from(inputNCHWD));
     assertIValueTensor(outputNHWDC, MemoryFormat.CHANNELS_LAST_3D, shape, dataNHWDC);
   }
 
@@ -363,16 +360,16 @@ public abstract class PytorchTestBase {
 
     final Module module = Module.load(assetFilePath(TEST_MODULE_ASSET_NAME));
 
-    final IValue outputNCHW = module.runMethod(
-        "conv2d", IValue.from(inputNCHW), IValue.from(wNCHW), IValue.from(false));
+    final IValue outputNCHW =
+        module.runMethod("conv2d", IValue.from(inputNCHW), IValue.from(wNCHW), IValue.from(false));
     assertIValueTensor(
         outputNCHW,
         MemoryFormat.CONTIGUOUS,
         new long[] {1, 3, 2, 2},
         new long[] {2, 4, 6, 8, 11, 12, 13, 14, -101, -102, -103, -104});
 
-    final IValue outputNHWC = module.runMethod(
-        "conv2d", IValue.from(inputNHWC), IValue.from(wNHWC), IValue.from(true));
+    final IValue outputNHWC =
+        module.runMethod("conv2d", IValue.from(inputNHWC), IValue.from(wNHWC), IValue.from(true));
     assertIValueTensor(
         outputNHWC,
         MemoryFormat.CHANNELS_LAST,
