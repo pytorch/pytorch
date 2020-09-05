@@ -169,21 +169,13 @@ static void prod_kernel_impl(TensorIterator& iter) {
 
 // TODO: Implement nanprod similar to prod kernel
 static void nanprod_kernel_impl(TensorIterator& iter) {
-  if (iter.dtype() == ScalarType::Half) {
-      binary_kernel_reduce(
-        iter,
-        NanProdOps<float, c10::Half>{},
-        float{1}
-      );
-  } else {
-      AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "nanprod_cpu", [&] {
-        binary_kernel_reduce(
-          iter,
-          NanProdOps<scalar_t, scalar_t>{},
-          scalar_t{1}
-        );
-      });
-  }
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "nanprod_cpu", [&] {
+    binary_kernel_reduce(
+      iter,
+      NanProdOps<scalar_t, scalar_t>{},
+      scalar_t{1}
+    );
+  });
 }
 
 static void norm_kernel_tensor_iterator_impl(

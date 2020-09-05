@@ -5766,7 +5766,7 @@ class TestTorchDeviceType(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
     @onlyOnCPUAndCUDA
-    @dtypes(torch.int8, torch.int32, torch.int64, torch.complex64, torch.half, torch.float, torch.double)
+    @dtypes(torch.int8, torch.int32, torch.int64, torch.complex64, torch.float, torch.double)
     @dtypesIfCUDA(torch.int8, torch.int32, torch.int64, torch.half, torch.float, torch.double)
     def test_nanprod(self, device, dtype):
         x = (torch.randn(3, 3))
@@ -5794,7 +5794,7 @@ class TestTorchDeviceType(TestCase):
 
     @onlyOnCPUAndCUDA
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False)))
+    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_half=False, include_bfloat16=False)))
     @dtypesIfCUDA(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False)))
     def test_nanprod_vs_numpy(self, device, dtype):
         self._test_nanfunc_reduction_vs_numpy(torch.nanprod, np.nanprod, device, dtype)
@@ -5804,7 +5804,10 @@ class TestTorchDeviceType(TestCase):
     @onlyOnCPUAndCUDA
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_nanprod_out_dtype(self, device):
-        dtypes = list(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False))
+        if device == "cuda":
+            dtypes = list(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_bfloat16=False))
+        else:
+            dtypes = list(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes(include_half=False, include_bfloat16=False))
         for inp_dtype, out_dtype in combinations(dtypes, 2):
             shape = self._rand_shape(random.randint(2, 5), min_size=5, max_size=10)
             x = self._generate_input(shape, inp_dtype, device, with_extremal=False)
