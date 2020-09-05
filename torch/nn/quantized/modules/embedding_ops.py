@@ -14,7 +14,7 @@ class EmbeddingPackedParams(torch.nn.Module):
         self.dtype = dtype
         if self.dtype == torch.quint8:
             scales = torch.ones(num_embeddings, dtype=torch.float)
-            zero_points = torch.ones(num_embeddings, dtype=torch.float)
+            zero_points = torch.zeros(num_embeddings, dtype=torch.float)
             wq = torch._empty_per_channel_affine_quantized([num_embeddings, embedding_dim], scales=scales,
                                                            zero_points=zero_points,
                                                            axis=0, dtype=torch.quint8)
@@ -96,11 +96,10 @@ class Embedding(torch.nn.Module):
         super(Embedding, self).__init__()
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
-        self.sparse = sparse
 
         if _weight is None:
             scales = torch.ones(num_embeddings, dtype=torch.float)
-            zero_points = torch.ones(num_embeddings, dtype=torch.float)
+            zero_points = torch.zeros(num_embeddings, dtype=torch.float)
             self.qweight = torch._empty_per_channel_affine_quantized([num_embeddings, embedding_dim],
                                                                      scales=scales, zero_points=zero_points,
                                                                      axis=0, dtype=torch.quint8)
@@ -113,7 +112,7 @@ class Embedding(torch.nn.Module):
         self._packed_params.set_weight(self.qweight)
 
     def forward(self, indices: Tensor) -> Tensor:
-        return torch.ops.quantized.embedding_byte(self._packed_params._packed_weight, indices, self.sparse)
+        return torch.ops.quantized.embedding_byte(self._packed_params._packed_weight, indices)
 
     def _get_name(self):
         return 'QuantizedEmbedding'
@@ -122,8 +121,8 @@ class Embedding(torch.nn.Module):
         return hide_packed_params_repr(self, EmbeddingPackedParams)
 
     def extra_repr(self):
-        extra_repr_str = 'num_embeddings={}, embedding_dim={}, dtype={}, qscheme={}, sparse={}'.format(
-            self.num_embeddings, self.embedding_dim, self._packed_params.dtype, self.qweight.qscheme(), self.sparse
+        extra_repr_str = 'num_embeddings={}, embedding_dim={}, dtype={}, qscheme={}'.format(
+            self.num_embeddings, self.embedding_dim, self._packed_params.dtype, self.qweight.qscheme()
         )
 
         return extra_repr_str
@@ -194,7 +193,7 @@ class EmbeddingBag(Embedding):
                  max_norm: Optional[float] = None, norm_type: float = 2., scale_grad_by_freq: bool = False,
                  mode: str = 'sum', sparse: bool = False, _weight: Optional[Tensor] = None,
                  include_last_offset: bool = False, dtype=torch.quint8) -> None:
-        super(EmbeddingBag, self).__init__(num_embeddings, embedding_dim, sparse=sparse, _weight=_weight)
+        super(EmbeddingBag, self).__init__(num_embeddings, embedding_dim, _weight=_weight)
 
         self.mode = mode
         self.sparse = sparse
