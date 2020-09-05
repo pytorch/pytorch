@@ -499,7 +499,7 @@ class TestFX(JitTestCase):
         st = SimpleTest()
         traced = symbolic_trace(st)
         printed = str(traced)
-        assert 'SimpleTest()' in printed
+        assert 'GraphModuleImpl()' in printed
         assert 'torch.relu' in printed
 
     def test_pretty_print_graph(self):
