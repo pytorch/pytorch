@@ -292,9 +292,10 @@ namespace {
         using vec = TypeParam;
         using UVT = UvalueType<TypeParam>;
         bool checkRelativeErr = is_complex<ValueType<TypeParam>>();
+        UVT tolerance = std::is_same<UVT, float>::value ? static_cast<UVT>(5.e-5) : getDefaultTolerance<UVT>();
         auto test_case =
             TestingCase<vec>::getBuilder()
-            .addDomain(CheckWithinDomains<UVT>{ { {-10, 10}}, checkRelativeErr, getDefaultTolerance<UVT>() })
+            .addDomain(CheckWithinDomains<UVT>{ { {-10, 10}}, checkRelativeErr, tolerance })
             .setTrialCount(125536)
             .setTestSeed(TestSeed());
         test_unary<vec>(
@@ -307,9 +308,10 @@ namespace {
         using vec = TypeParam;
         using UVT = UvalueType<TypeParam>;
         bool checkRelativeErr = is_complex<ValueType<TypeParam>>();
+        UVT tolerance = std::is_same<UVT, float>::value ? static_cast<UVT>(5.e-5) : getDefaultTolerance<UVT>();
         auto test_case =
             TestingCase<vec>::getBuilder()
-            .addDomain(CheckWithinDomains<UVT>{ { {-10, 10}}, checkRelativeErr, getDefaultTolerance<UVT>() })
+            .addDomain(CheckWithinDomains<UVT>{ { {-10, 10}}, checkRelativeErr, tolerance })
             .setTrialCount(125536)
             .setTestSeed(TestSeed());
         test_unary<vec>(
