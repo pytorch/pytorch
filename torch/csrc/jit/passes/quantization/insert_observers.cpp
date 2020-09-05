@@ -6,6 +6,7 @@
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/fuse_linear.h>
 #include <torch/csrc/jit/passes/graph_rewrite_helper.h>
+#include <torch/csrc/jit/passes/inline_fork_wait.h>
 #include <torch/csrc/jit/passes/quantization/helper.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
 
@@ -1133,6 +1134,8 @@ void InsertObserversHelper::preprocess(
 
   Method method = module.get_method(method_name);
   auto graph = method.graph();
+  // Inline fork-wait calls
+  InlineForkWait(graph);
   // fuse decomposed linear into aten::linear
   FuseLinear(graph);
   replaceConvolutionWithAtenConv(graph);
