@@ -86,6 +86,10 @@ def forward(self, {', '.join(free_variables)}):
     def __reduce__(self):
         return (deserialize_graphmodule, (self.root, self.code))
 
+    def __str__(self) -> str:
+        orig_str = super().__str__()
+        return '\n'.join([orig_str, self.code])
+
 # workarounds for issues in __torch_function__
 
 # WAR for __torch_function__ not handling tensor lists,

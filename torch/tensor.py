@@ -60,7 +60,7 @@ class Tensor(torch._C._TensorBase):
                             self.q_per_channel_zero_points(), \
                             self.q_per_channel_axis()
                     else:
-                        raise RuntimeError("Unsupported qscheme {} in deepcopy".format(self.qscheme()))
+                        raise RuntimeError(f"Unsupported qscheme {self.qscheme()} in deepcopy")
                     new_tensor = torch._utils._rebuild_qtensor(
                         new_storage,
                         self.storage_offset(),
@@ -114,7 +114,7 @@ class Tensor(torch._C._TensorBase):
                                     self.q_per_channel_zero_points(),
                                     self.q_per_channel_axis())
             else:
-                raise RuntimeError("Serialization is not supported for tensors of type {}".format(self.qscheme()))
+                raise RuntimeError(f"Serialization is not supported for tensors of type {self.qscheme()}")
             args = (self.storage(),
                     self.storage_offset(),
                     tuple(self.size()),
