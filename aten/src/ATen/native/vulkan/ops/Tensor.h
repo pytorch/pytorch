@@ -53,15 +53,21 @@ namespace ops {
 // away.
 //
 // vTensor tries to address a specific concern and intentionally does not expose
-// GPU tensor memory directly.  Please keep it that behavior intact as the whole
+// GPU tensor memory directly.  Please keep that behavior intact as the whole
 // data model fundamentally depends on limiting what the user can achieve through
 // the interface to guarantee performance and coherence.
+//
+// A vTensor is associated with an api::Context as preparation for multi-GPU
+// support.
 //
 
 class vTensor final {
  public:
   vTensor();
-  vTensor(api::Context* context, IntArrayRef sizes, const TensorOptions& options);
+  vTensor(
+      api::Context* context,
+      IntArrayRef sizes,
+      const TensorOptions& options);
 
   /*
     Access
@@ -74,6 +80,17 @@ class vTensor final {
       Read = 1u << 0u,
       Write = 1u << 1u,
     };
+  };
+
+  /*
+    Future
+  */
+
+  class Future final {
+   public:
+
+   private:
+    VkFence fence_;
   };
 
   /*
@@ -108,11 +125,11 @@ class vTensor final {
   c10::SmallVector<int64_t, 4u> sizes_;
   TensorOptions options_;
 
-  struct {
+  mutable struct {
     uint32_t image : 1u;
     uint32_t buffer : 1u;
     uint32_t staging : 1u;
-  } dirty;
+  } dirty_;
 };
 
 using vTensorImpl = VulkanOpaqueTensorImpl<vTensor>;
@@ -122,13 +139,14 @@ void verify(const TensorOptions& options);
 // Impl
 //
 
-// template<typename Type, typename Pointer>
-// api::Resource::Memory::Data<Pointer> vTensor::host() const {
-// }
+template<typename Type, typename Pointer>
+api::Resource::Memory::Data<Pointer> vTensor::host() const {
+}
 
-// template<typename Type, typename Pointer>
-// api::Resource::Memory::Data<Pointer> vTensor::host() {
-// }
+template<typename Type, typename Pointer>
+api::Resource::Memory::Data<Pointer> vTensor::host(
+    const Access::Flags access) {
+}
 
 } // namespace ops
 } // namespace vulkan
