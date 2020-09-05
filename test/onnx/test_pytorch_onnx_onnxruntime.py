@@ -2488,6 +2488,17 @@ class TestONNXRuntime(unittest.TestCase):
         input = torch.ones(7, 3, 5)
         self._argmin_argmax_model(input)
 
+    def test_repeat(self):
+        class RepeatModel(torch.nn.Module):
+            def forward(self, x, y):
+                x2 = x.repeat(y.shape[0], 1)
+                y1 = y.view(-1, 1)
+                return x2 + y1
+
+        x = torch.tensor([1, 2, 3])
+        y = torch.tensor([4, 5, 8, 9])
+        self.run_test(RepeatModel(), (x, y))
+
     def test_view(self):
         class ViewModel(torch.nn.Module):
             def forward(self, input):
