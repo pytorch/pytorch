@@ -75,6 +75,7 @@ Creation Ops
     dequantize
     complex
     polar
+    heaviside
 
 Indexing, Slicing, Joining, Mutating Ops
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -340,6 +341,10 @@ Reduction Ops
 
     argmax
     argmin
+    amax
+    amin
+    max
+    min
     dist
     logsumexp
     mean
@@ -384,9 +389,7 @@ Comparison Ops
     less_equal
     lt
     less
-    max
     maximum
-    min
     minimum
     ne
     not_equal
@@ -512,6 +515,7 @@ BLAS and LAPACK Operations
     lobpcg
     trapz
     triangular_solve
+    vdot
 
 Utilities
 ----------------------------------
@@ -522,5 +526,6 @@ Utilities
     compiled_with_cxx11_abi
     result_type
     can_cast
-
     promote_types
+    set_deterministic
+    is_deterministic

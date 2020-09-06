@@ -36,6 +36,7 @@ namespace c10 {
   _(prim, CudaFusionGroup)           \
   _(prim, FunctionalGraph)           \
   _(prim, DifferentiableGraph)       \
+  _(prim, TensorExprGroup)           \
   _(prim, If)                        \
   _(prim, Jump) /* debug */          \
   _(prim, JumpNZ) /* debug */        \
@@ -298,6 +299,7 @@ namespace c10 {
   _(onnx, SequenceConstruct)         \
   _(onnx, SequenceEmpty)             \
   _(onnx, SequenceInsert)            \
+  _(onnx, SequenceErase)             \
   _(onnx, ConcatFromSequence)        \
   _(onnx, Identity)                  \
   _(onnx, SoftmaxCrossEntropyLoss)   \

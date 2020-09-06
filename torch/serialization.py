@@ -105,7 +105,7 @@ def check_module_version_greater_or_equal(module, req_version_tuple, error_if_ma
             module.__name__, module.__version__, str(req_version_tuple)
         )
         if error_if_malformed:
-            raise RuntimeError(message)
+            raise RuntimeError(message) from e
         else:
             warnings.warn(message + ', but continuing assuming that requirement is met')
             requirement_is_met = True
@@ -137,12 +137,12 @@ def validate_cuda_device(location):
                            'If you are running on a CPU-only machine, '
                            'please use torch.load with map_location=torch.device(\'cpu\') '
                            'to map your storages to the CPU.')
-    if device >= torch.cuda.device_count():
+    device_count = torch.cuda.device_count()
+    if device >= device_count:
         raise RuntimeError('Attempting to deserialize object on CUDA device '
-                           '{device} but torch.cuda.device_count() is {device_count}. Please use '
+                           f'{device} but torch.cuda.device_count() is {device_count}. Please use '
                            'torch.load with map_location to map your storages '
-                           'to an existing device.'.format(
-                               device=device, device_count=torch.cuda.device_count()))
+                           'to an existing device.')
     return device
 
 
@@ -234,7 +234,7 @@ def _open_file_like(name_or_buffer, mode):
         elif 'r' in mode:
             return _open_buffer_reader(name_or_buffer)
         else:
-            raise RuntimeError("Expected 'r' or 'w' in mode but got {}".format(mode))
+            raise RuntimeError(f"Expected 'r' or 'w' in mode but got {mode}")
 
 
 class _open_zipfile_reader(_opener):
@@ -479,7 +479,7 @@ def _save(obj, zip_file, pickle_module, pickle_protocol):
 
     # Write each tensor to a file named tensor/the_tensor_key in the zip archive
     for key in sorted(serialized_storages.keys()):
-        name = 'data/{}'.format(key)
+        name = f'data/{key}'
         storage = serialized_storages[key]
         if storage.device.type == 'cpu':
             # If it's on the CPU we can directly copy it into the zip file
@@ -654,8 +654,7 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
                        "accessing the object's source attribute or set "
                        "`torch.nn.Module.dump_patches = True` and use the "
                        "patch tool to revert the changes.")
-            msg = ("source code of class '{container_type}' has changed. {msg}"
-                   .format(container_type=torch.typename(container_type), msg=msg))
+            msg = f"source code of class '{torch.typename(container_type)}' has changed. {msg}"
             warnings.warn(msg, SourceChangeWarning)
 
     def legacy_load(f):
@@ -698,8 +697,8 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
                     ndim, = struct.unpack('<i', f.read(4))
                     # skip next 4 bytes; legacy encoding treated ndim as 8 bytes
                     f.read(4)
-                    size = struct.unpack('<{}q'.format(ndim), f.read(8 * ndim))
-                    stride = struct.unpack('<{}q'.format(ndim), f.read(8 * ndim))
+                    size = struct.unpack(f'<{ndim}q', f.read(8 * ndim))
+                    stride = struct.unpack(f'<{ndim}q', f.read(8 * ndim))
                     storage_offset, = struct.unpack('<q', f.read(8))
                     tensor = tensor_type().set_(storage, storage_offset, size, stride)
                     deserialized_objects[key] = tensor
@@ -752,15 +751,15 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
             if _is_zipfile(f):
                 # .zip is used for torch.jit.save and will throw an un-pickling error here
                 raise RuntimeError(
-                    "{filename} is a zip archive (did you mean to use torch.jit.load()?)".format(filename=f.name))
+                    f"{f.name} is a zip archive (did you mean to use torch.jit.load()?)") from None
             # if not a tarfile, reset file offset and proceed
             f.seek(0)
 
     if not hasattr(f, 'readinto') and (3, 8, 0) <= sys.version_info < (3, 8, 2):
         raise RuntimeError(
             "torch.load does not work with file-like objects that do not implement readinto on Python 3.8.0 and 3.8.1. "
-            "Received object of type \"{}\". Please update to Python 3.8.2 or newer to restore this "
-            "functionality.".format(type(f)))
+            f"Received object of type \"{type(f)}\". Please update to Python 3.8.2 or newer to restore this "
+            "functionality.")
 
     magic_number = pickle_module.load(f, **pickle_load_args)
     if magic_number != MAGIC_NUMBER:
@@ -828,7 +827,7 @@ def _load(zip_file, map_location, pickle_module, **pickle_load_args):
     loaded_storages = {}
 
     def load_tensor(data_type, size, key, location):
-        name = 'data/{}'.format(key)
+        name = f'data/{key}'
         dtype = data_type(0).dtype
 
         storage = zip_file.get_storage_from_record(name, size, dtype).storage()
@@ -840,7 +839,7 @@ def _load(zip_file, map_location, pickle_module, **pickle_load_args):
         data = saved_id[1:]
 
         assert typename == 'storage', \
-            "Unknown typename for persistent_load, expected 'storage' but got '{}'".format(typename)
+            f"Unknown typename for persistent_load, expected 'storage' but got '{typename}'"
         data_type, key, location, size = data
         if key not in loaded_storages:
             load_tensor(data_type, size, key, _maybe_decode_ascii(location))

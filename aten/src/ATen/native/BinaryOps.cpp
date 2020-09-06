@@ -47,6 +47,7 @@ DEFINE_DISPATCH(gcd_stub);
 DEFINE_DISPATCH(lcm_stub);
 DEFINE_DISPATCH(hypot_stub);
 DEFINE_DISPATCH(nextafter_stub);
+DEFINE_DISPATCH(heaviside_stub);
 
 static Tensor wrapped_scalar_tensor(Scalar scalar) {
   auto tensor = scalar_to_tensor(scalar);
@@ -171,7 +172,6 @@ Tensor& remainder_(Tensor& self, const Tensor& other) {
 
 Tensor& true_divide_out(Tensor& result, const Tensor& self, const Tensor& divisor) {
   TensorIterator iter = TensorIteratorConfig()
-     .set_check_mem_overlap(true)
      .add_output(result)
      .add_input(self)
      .add_input(divisor)
@@ -990,6 +990,33 @@ Tensor& true_divide_(Tensor& self, Scalar divisor) {
 // It is undocumented and should not be used outside of tests.
 Tensor _test_serialization_subcmul(const Tensor& self, const Tensor& other, Scalar alpha) {
   return self - (other * alpha);
+}
+
+Tensor& heaviside_out(Tensor& result, const Tensor& self, const Tensor& values) {
+  TORCH_CHECK(!self.is_complex() && !result.is_complex() && !values.is_complex(),
+              "heaviside is not yet implemented for complex tensors.");
+  TORCH_CHECK(self.dtype() == values.dtype() &&  result.dtype() == self.dtype(),
+              "heaviside is not yet implemented for tensors with different dtypes.");
+
+  auto iter = TensorIterator::binary_op(result, self, values);
+  heaviside_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor heaviside(const Tensor& self, const Tensor& values) {
+  TORCH_CHECK(!self.is_complex() && !values.is_complex(),
+              "heaviside is not yet implemented for complex tensors.");
+  TORCH_CHECK(self.dtype() == values.dtype(),
+              "heaviside is not yet implemented for tensors with different dtypes.");
+
+  Tensor result;
+  auto iter = TensorIterator::binary_op(result, self, values);
+  heaviside_stub(iter.device_type(), iter);
+  return iter.output();
+}
+
+Tensor& heaviside_(Tensor& self, const Tensor& values) {
+  return at::heaviside_out(self, self, values);
 }
 
 // TODO: Deduplicate this with the TensorIterator logic.  This would

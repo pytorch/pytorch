@@ -194,6 +194,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: addr
    .. automethod:: addr_
    .. automethod:: allclose
+   .. automethod:: amax
+   .. automethod:: amin
    .. automethod:: angle
    .. automethod:: apply_
    .. automethod:: argmax
@@ -336,6 +338,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: greater_
    .. automethod:: half
    .. automethod:: hardshrink
+   .. automethod:: heaviside
    .. automethod:: histc
    .. automethod:: hypot
    .. automethod:: hypot_
@@ -596,6 +599,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: unsqueeze_
    .. automethod:: values
    .. automethod:: var
+   .. automethod:: vdot
    .. automethod:: view
    .. automethod:: view_as
    .. automethod:: where

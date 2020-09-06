@@ -37,6 +37,17 @@ bool fallbackAllowed() {
   return true;
 }
 
+bool fallbackEnforced() {
+  static const char* enable_c_str = std::getenv("PYTORCH_TENSOREXPR_FALLBACK");
+  if (!enable_c_str) {
+    return fallback_allowed;
+  }
+  if (std::string(enable_c_str) == "2") {
+    return true;
+  }
+  return false;
+}
+
 int& getTECudaPointwiseLoopLevels() {
   return te_cuda_pointwise_loop_levels;
 }
@@ -227,9 +238,7 @@ std::vector<ExprHandle> TensorExprKernel::inferSizesForValue(
     case aten::pow:
     case aten::fmod:
     case aten::remainder:
-    case aten::atan2:
-    case aten::_sigmoid_backward:
-    case aten::_tanh_backward: {
+    case aten::atan2: {
       std::vector<std::vector<ExprHandle>> shapes;
       for (size_t idx = 0; idx < 2; idx++) {
         torch::jit::Value* inp = v->node()->input(idx);
@@ -853,7 +862,8 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
 
     case aten::relu: {
       return computeOneOperand("aten_relu", v, [](const ExprHandle& a) {
-        return Max::make(a, 0, false);
+        auto zero = Cast::make(a.dtype(), 0);
+        return ifThenElse(CompareSelect::make(a, zero, kLT), zero, a);
       });
     } break;
 
@@ -1081,7 +1091,7 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
           [](const ExprHandle& a,
              const ExprHandle& threshold,
              const ExprHandle& value) {
-            return ifThenElse(CompareSelect::make(a, threshold, kGT), a, value);
+            return ifThenElse(CompareSelect::make(a, threshold, kLE), value, a);
           });
     } break;
 
@@ -1190,24 +1200,6 @@ Tensor* TensorExprKernel::computeValue(const torch::jit::Value* v) {
             }
 
             return tensorOrConstant(n->inputs()[0], indices);
-          });
-    }
-
-    case aten::_sigmoid_backward: {
-      return computeTwoOperand(
-          "aten_sigmoid_backward",
-          v,
-          [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return lhs * rhs * (ExprHandle(1.0f) - rhs);
-          });
-    }
-
-    case aten::_tanh_backward: {
-      return computeTwoOperand(
-          "aten_tanh_backward",
-          v,
-          [](const ExprHandle& lhs, const ExprHandle& rhs) {
-            return lhs * (ExprHandle(1.0f) - rhs * rhs);
           });
     }
 
@@ -1472,82 +1464,6 @@ std::vector<CodeGen::BufferArg> TensorExprKernel::prepareBufferArgs() {
 template <typename T>
 static bool isValidPrimProperty(const c10::optional<T>& a, T b) {
   return !a.has_value() || *a == b;
-}
-
-static bool isValidVaryingShape(
-    const c10::VaryingShape<int64_t>& vs,
-    at::IntArrayRef sz) {
-  if (!vs.size().has_value()) {
-    // TODO: does it make sense to have kernels with completely unspecified
-    // shapes/strides
-    return true;
-  }
-
-  if (*vs.size() != sz.size()) {
-    return false;
-  }
-
-  for (size_t i = 0; i < sz.size(); i++) {
-    if (!isValidPrimProperty(vs[i], sz[i])) {
-      return false;
-    }
-  }
-  return true;
-}
-
-static void checkInputs(
-    const at::ArrayRef<IValue>& inputs,
-    std::vector<TypePtr>& inputTypes) {
-  TORCH_INTERNAL_ASSERT(
-      inputs.size() == inputTypes.size(),
-      "number of actual inputs don't match with the number of inputs to a subgraph");
-  for (size_t i = 0; i < inputs.size(); i++) {
-    // enable this to debug the asserts below
-    GRAPH_DEBUG(
-        "Comparing input ",
-        i,
-        " ivalue ",
-        inputs[i],
-        " against type ",
-        *inputTypes[i]);
-    if (inputs[i].isTensor()) {
-      auto t = inputs[i].toTensor();
-      TORCH_INTERNAL_ASSERT(
-          t.defined(), "input ", i, " can't be an undefined tensor!");
-      auto tt = inputTypes[i]->cast<TensorType>();
-      TORCH_INTERNAL_ASSERT(tt, "input ", i, " expected to be a tensor!");
-      TORCH_INTERNAL_ASSERT(
-          isValidPrimProperty(tt->scalarType(), t.scalar_type()),
-          "input ",
-          i,
-          " scalar types don't match");
-      // TODO: do we need an extra check to make sure the device is specified
-      TORCH_INTERNAL_ASSERT(
-          isValidPrimProperty(tt->device(), t.device()),
-          "input ",
-          i,
-          " device types don't match");
-      TORCH_INTERNAL_ASSERT(
-          isValidVaryingShape(tt->sizes(), t.sizes()),
-          "input ",
-          i,
-          " sizes don't match");
-      TORCH_INTERNAL_ASSERT(
-          isValidVaryingShape(tt->strides(), t.strides()),
-          "input ",
-          i,
-          " strides don't match");
-    } else if (inputs[i].isInt()) {
-      TORCH_INTERNAL_ASSERT(
-          inputTypes[i]->cast<IntType>(), "type of ", i, " isn't an int!");
-    } else if (inputs[i].isDouble()) {
-      TORCH_INTERNAL_ASSERT(
-          inputTypes[i]->cast<FloatType>(), "type of ", i, " isn't an int!");
-    } else {
-      // TODO: cover more IValue types
-      // TODO: make it a hard error
-    }
-  }
 }
 
 at::Device TensorExprKernel::pickDeviceType(
@@ -1820,6 +1736,10 @@ TensorExprKernel::TensorExprKernel(const std::shared_ptr<Graph>& subgraph)
 }
 
 void TensorExprKernel::run(Stack& stack) {
+  if (fallbackEnforced()) {
+    fallback(stack);
+    return;
+  }
   if (!fallbackAllowed()) {
     runKernel(stack);
     return;
