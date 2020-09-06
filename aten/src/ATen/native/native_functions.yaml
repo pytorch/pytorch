@@ -5914,13 +5914,11 @@
   use_c10_dispatcher: full
   dispatch:
     CPU: legacy::cpu::_th_var
-    CUDA: legacy::cuda::_th_var
 
 - func: _std(Tensor self, bool unbiased=True) -> Tensor
   use_c10_dispatcher: full
   dispatch:
     CPU: legacy::cpu::_th_std
-    CUDA: legacy::cuda::_th_std
 
 - func: _amp_non_finite_check_and_unscale_(Tensor(a!) self, Tensor(b!) found_inf, Tensor inv_scale) -> ()
   use_c10_dispatcher: full
