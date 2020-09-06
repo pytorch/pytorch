@@ -644,43 +644,43 @@ static Tensor convolution_same(
                          dilation, false, output_padding, groups);
 }
 
-at::Tensor conv1d(
+Tensor _convolution_mode(
     const Tensor& input, const Tensor& weight, const Tensor& bias,
     IntArrayRef stride, std::string padding, IntArrayRef dilation,
     int64_t groups) {
   if (padding == "same") {
-    return at::native::convolution_same(input, weight, bias, stride, dilation, groups);
+    return at::native::convolution_same(
+        input, weight, bias, stride, dilation, groups);
   } else if (padding == "valid") {
     const int64_t padding_[] = {0};
-    return at::native::conv1d(input, weight, bias, stride, padding_, dilation, groups);
+    return at::native::convolution(
+        input, weight, bias, stride, padding_, dilation, false, padding_, groups);
   }
   TORCH_CHECK(false, "Invalid padding mode '", padding, "'");
+}
+
+at::Tensor conv1d(
+    const Tensor& input, const Tensor& weight, const Tensor& bias,
+    IntArrayRef stride, std::string padding, IntArrayRef dilation,
+    int64_t groups) {
+  return at::_convolution_mode(
+      input, weight, bias, stride, std::move(padding), dilation, groups);
 }
 
 at::Tensor conv2d(
     const Tensor& input, const Tensor& weight, const Tensor& bias,
     IntArrayRef stride, std::string padding, IntArrayRef dilation,
     int64_t groups) {
-  if (padding == "same") {
-    return at::native::convolution_same(input, weight, bias, stride, dilation, groups);
-  } else if (padding == "valid") {
-    const int64_t padding_[] = {0, 0};
-    return at::native::conv2d(input, weight, bias, stride, padding_, dilation, groups);
-  }
-  TORCH_CHECK(false, "Invalid padding mode '", padding, "'");
+  return at::_convolution_mode(
+      input, weight, bias, stride, std::move(padding), dilation, groups);
 }
 
 at::Tensor conv3d(
     const Tensor& input, const Tensor& weight, const Tensor& bias,
     IntArrayRef stride, std::string padding, IntArrayRef dilation,
     int64_t groups) {
-  if (padding == "same") {
-    return at::native::convolution_same(input, weight, bias, stride, dilation, groups);
-  } else if (padding == "valid") {
-    const int64_t padding_[] = {0, 0, 0};
-    return at::native::conv3d(input, weight, bias, stride, padding_, dilation, groups);
-  }
-  TORCH_CHECK(false, "Invalid padding mode '", padding, "'");
+  return at::_convolution_mode(
+      input, weight, bias, stride, std::move(padding), dilation, groups);
 }
 
 at::Tensor conv_transpose1d(
