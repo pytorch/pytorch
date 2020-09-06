@@ -1210,280 +1210,284 @@ double round_to_even(double a) {
 }
 
 RegisterOperators reg_from_fulljit(
-    {
-        OperatorGenerator(
-            TORCH_SELECTIVE_SCHEMA("aten::warn(str message, int stacklevel=2) -> ()"),
-            [](Stack* stack) {
-              TORCH_CHECK(
-                  false, "warn is implemented directly in the interpreter");
-            },
-            aliasAnalysisFromSchema()),
-        OperatorGenerator(
-            TORCH_SELECTIVE_SCHEMA("prim::AutogradAnyNonZero(...) -> bool"),
-            [](Stack* stack) {
-              auto num_inputs = pop(stack).toInt();
-              bool result = false;
-              for (const IValue& v : last(stack, num_inputs)) {
-                if (v.isTensor()) {
-                  if (v.toTensor().defined()) {
-                    result = true;
-                    break;
-                  }
-                } else if (v.isTensorList()) {
-                  for (const at::Tensor& t : v.toTensorVector()) {
-                    if (t.defined()) {
-                      result = true;
-                    }
-                  }
-                  if (result) {
-                    break;
-                  }
-                } else {
-                  TORCH_INTERNAL_ASSERT(false);
-                }
-              }
-              drop(stack, num_inputs);
-              stack->emplace_back(result);
-            },
-            aliasAnalysisFromSchema()),
-        OperatorGenerator(
-            TORCH_SELECTIVE_SCHEMA("prim::AutogradAdd(Any a, Any b) -> Any"),
-            [](Stack* stack) {
-              at::Tensor a, b;
-              pop(stack, a, b);
-              if (!a.defined() && !b.defined()) {
-                // undef + undef == undef
-                stack->emplace_back(a);
-              } else if (!a.defined()) {
-                stack->emplace_back(b);
-              } else if (!b.defined()) {
-                stack->emplace_back(a);
-              } else {
-                stack->emplace_back(a + b);
-              }
-            },
-            aliasAnalysisSpecialCase()),
-        OperatorGenerator(
-            TORCH_SELECTIVE_SCHEMA("aten::_grad_sum_to_size(Tensor(a) self, int[]? size) -> Tensor(a)"),
-            [](Stack* stack) {
-              IValue self, size;
-              pop(stack, self, size);
-              if (size.isNone()) {
-                push(stack, std::move(self));
-              } else {
-                push(stack, at::sum_to(self.toTensor(), size.toIntVector()));
-              }
-            },
-            aliasAnalysisFromSchema()),
-        OperatorGenerator(
-            TORCH_SELECTIVE_SCHEMA("aten::_size_if_not_equal(int[] self_size, int[] other_size) -> int[]?"),
-            [](Stack* stack) {
-              IValue self_size, other_size;
-              pop(stack, self_size, other_size);
-              auto s = self_size.toIntVector();
-              auto o = other_size.toIntVector();
-              if (s == o) {
-                push(stack, IValue());
-              } else {
-                push(stack, s);
-              }
-            },
-            aliasAnalysisFromSchema()),
-        OperatorGenerator(
-            TORCH_SELECTIVE_SCHEMA("prim::rangelist(int n) -> int[]"),
-            [](Stack* stack) {
-              int64_t n;
-              pop(stack, n);
-              c10::List<int64_t> elems;
-              elems.reserve(n);
-              for (int i = 0; i < n; i++) {
-                elems.push_back(i);
-              }
-              push(stack, std::move(elems));
-            },
-            aliasAnalysisFromSchema()),
-        // note: this op needs to share a name with the Scalar -> Tensor conversion
-        // because all _to_tensor conversion have to have the same operator namet
-        OperatorGenerator(
-            TORCH_SELECTIVE_SCHEMA("prim::NumToTensor.bool(bool a) -> Tensor"),
-            [](Stack* stack) {
-              bool b;
-              pop(stack, b);
-              push(stack, at::scalar_to_tensor(b));
-            },
-            aliasAnalysisFromSchema()),
-        OperatorGenerator(
-            TORCH_SELECTIVE_SCHEMA("aten::device(str a) -> Device"),
-            [](Stack* stack) {
-              push(stack, c10::Device(pop(stack).toStringRef()));
-            },
-            aliasAnalysisFromSchema()),
-        OperatorGenerator(
-            TORCH_SELECTIVE_SCHEMA("aten::to.prim_other(Tensor(a) self, bool non_blocking=False, bool copy=False) -> Tensor(a|b)"),
-            [](Stack* stack) {
-              at::Tensor self;
-              bool non_blocking;
-              bool copy;
-              pop(stack, self, non_blocking, copy);
-              c10::optional<c10::Device> device = c10::nullopt;
-              c10::optional<at::ScalarType> scalarType = c10::nullopt;
-              push(
-                  stack,
-                  to_dispatch(self, device, scalarType, non_blocking, copy));
-            },
-            aliasAnalysisFromSchema()),
-        OperatorGenerator(
-            TORCH_SELECTIVE_SCHEMA("aten::eq.device(Device a, Device b) -> bool"),
-            [](Stack* stack) {
-              auto a = pop(stack).toDevice();
-              auto b = pop(stack).toDevice();
-              push(stack, a == b);
-            },
-            aliasAnalysisFromSchema()),
-        OperatorGenerator(
-            TORCH_SELECTIVE_SCHEMA("prim::requires_grad(Tensor a) -> bool"),
-            [](Stack* stack) {
-              at::Tensor a;
-              pop(stack, a);
-              push(stack, a.requires_grad());
-            },
-            aliasAnalysisFromSchema()),
-        OperatorGenerator(
-            TORCH_SELECTIVE_SCHEMA("prim::grad(Tensor a) -> Tensor(*)"),
-            [](Stack* stack) {
-              at::Tensor a;
-              pop(stack, a);
-              push(stack, a.grad());
-            },
-            aliasAnalysisFromSchema()),
-        OperatorGenerator(
-            TORCH_SELECTIVE_SCHEMA("prim::is_sparse(Tensor a) -> bool"),
-            [](Stack* stack) {
-              at::Tensor a;
-              pop(stack, a);
-              push(stack, a.is_sparse());
-            },
-            aliasAnalysisFromSchema()),
-        OperatorGenerator(
-            TORCH_SELECTIVE_SCHEMA("prim::is_mkldnn(Tensor a) -> bool"),
-            [](Stack* stack) {
-              at::Tensor a;
-              pop(stack, a);
-              push(stack, a.is_mkldnn());
-            },
-            aliasAnalysisFromSchema()),
-        OperatorGenerator(
-            TORCH_SELECTIVE_SCHEMA("prim::is_quantized(Tensor a) -> bool"),
-            [](Stack* stack) {
-              at::Tensor a;
-              pop(stack, a);
-              push(stack, a.is_quantized());
-            },
-            aliasAnalysisFromSchema()),
-        OperatorGenerator(
-            TORCH_SELECTIVE_SCHEMA("prim::is_meta(Tensor a) -> bool"),
-            [](Stack* stack) {
-              at::Tensor a;
-              pop(stack, a);
-              push(stack, a.is_meta());
-            },
-            aliasAnalysisFromSchema()),
-        OperatorGenerator(
-            TORCH_SELECTIVE_SCHEMA("prim::name(Tensor a) -> str?"),
-            [](Stack* stack) {
-              at::Tensor a;
-              pop(stack, a);
-              if (a.name() == "") {
-                push(stack, IValue());
-              } else {
-                push(stack, a.name());
-              }
-            },
-            aliasAnalysisFromSchema()),
-        OperatorGenerator(
-            TORCH_SELECTIVE_SCHEMA("prim::layout(Tensor a) -> int"),
-            [](Stack* stack) {
-              at::Tensor a;
-              pop(stack, a);
-              push(stack, a.layout());
-            },
-            aliasAnalysisFromSchema()),
-        OperatorGenerator(
-            TORCH_SELECTIVE_SCHEMA("aten::cpu(Tensor(a) self) -> Tensor(a|b)"),
-            [](Stack* stack) {
-              at::Tensor a;
-              pop(stack, a);
-              push(stack, a.cpu());
-            },
-            aliasAnalysisFromSchema()),
-        OperatorGenerator(
-            TORCH_SELECTIVE_SCHEMA("prim::index(Device self) -> int?"),
-            [](Stack* stack) {
-              auto d = pop(stack).toDevice();
-              if (d.has_index()) {
-                push(stack, d.index());
-              } else {
-                push(stack, IValue());
-              }
-            },
-            aliasAnalysisFromSchema()),
-        OperatorGenerator(
-            // TODO return generator object when torchscript supports RNG
-            // first-class
-            TORCH_SELECTIVE_SCHEMA("aten::manual_seed(int seed) -> ()"),
-            [](Stack* stack) { at::manual_seed(pop(stack).toInt()); },
-            aliasAnalysisFromSchema()),
-        OperatorGenerator(
-            TORCH_SELECTIVE_SCHEMA("aten::cuda(Tensor(a) self) -> Tensor(a|b)"),
-            [](Stack* stack) {
-              at::Tensor a;
-              pop(stack, a);
-              push(stack, a.cuda());
-            },
-            aliasAnalysisFromSchema()),
-        OperatorGenerator(
-            TORCH_SELECTIVE_SCHEMA("prim::AutogradZero() -> Tensor"),
-            [](Stack* stack) { stack->emplace_back(at::Tensor()); },
-            aliasAnalysisSpecialCase()),
-        OperatorGenerator(
-            TORCH_SELECTIVE_SCHEMA("prim::BroadcastSizes(...) -> int[]"),
-            [](Stack* stack) {
-              auto num_inputs = pop(stack).toInt();
-              std::vector<int64_t> size;
-              size.reserve(8);
-              for (auto i = 0; i < num_inputs; ++i) {
-                size =
-                    at::infer_size(size, peek(stack, i, num_inputs).toIntVector());
-              }
-              drop(stack, num_inputs);
-              push(stack, IValue(std::move(size)));
-            },
-            aliasAnalysisSpecialCase()),
-        OperatorGenerator(
-            TORCH_SELECTIVE_SCHEMA("aten::dict() -> Dict(str, Tensor)"),
-            [](Stack* stack) {
-              auto dict =
-                  c10::impl::GenericDict(StringType::get(), TensorType::get());
-              push(stack, dict);
-            },
-            aliasAnalysisFromSchema()),
-        OperatorGenerator(
-            TORCH_SELECTIVE_SCHEMA("aten::_unwrap_optional(t(a)? optional) -> t(a)"),
-            [](Stack* stack) {
-              auto val = pop(stack);
-              TORCH_CHECK(!val.isNone(), "Unwrapping null optional");
-              push(stack, std::move(val));
-            },
-            aliasAnalysisFromSchema()),
-        OperatorGenerator(
-            TORCH_SELECTIVE_SCHEMA("aten::wait(Future(t) self) -> t"),
-            [](Stack* stack) {
-              TORCH_CHECK(
-                  false, "wait is implemented directly in the interpreter");
-            },
-            aliasAnalysisSpecialCase())
+    {OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA(
+             "aten::warn(str message, int stacklevel=2) -> ()"),
+         [](Stack* stack) {
+           TORCH_CHECK(
+               false, "warn is implemented directly in the interpreter");
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA("prim::AutogradAnyNonZero(...) -> bool"),
+         [](Stack* stack) {
+           auto num_inputs = pop(stack).toInt();
+           bool result = false;
+           for (const IValue& v : last(stack, num_inputs)) {
+             if (v.isTensor()) {
+               if (v.toTensor().defined()) {
+                 result = true;
+                 break;
+               }
+             } else if (v.isTensorList()) {
+               for (const at::Tensor& t : v.toTensorVector()) {
+                 if (t.defined()) {
+                   result = true;
+                 }
+               }
+               if (result) {
+                 break;
+               }
+             } else {
+               TORCH_INTERNAL_ASSERT(false);
+             }
+           }
+           drop(stack, num_inputs);
+           stack->emplace_back(result);
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA("prim::AutogradAdd(Any a, Any b) -> Any"),
+         [](Stack* stack) {
+           at::Tensor a, b;
+           pop(stack, a, b);
+           if (!a.defined() && !b.defined()) {
+             // undef + undef == undef
+             stack->emplace_back(a);
+           } else if (!a.defined()) {
+             stack->emplace_back(b);
+           } else if (!b.defined()) {
+             stack->emplace_back(a);
+           } else {
+             stack->emplace_back(a + b);
+           }
+         },
+         aliasAnalysisSpecialCase()),
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA(
+             "aten::_grad_sum_to_size(Tensor(a) self, int[]? size) -> Tensor(a)"),
+         [](Stack* stack) {
+           IValue self, size;
+           pop(stack, self, size);
+           if (size.isNone()) {
+             push(stack, std::move(self));
+           } else {
+             push(stack, at::sum_to(self.toTensor(), size.toIntVector()));
+           }
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA(
+             "aten::_size_if_not_equal(int[] self_size, int[] other_size) -> int[]?"),
+         [](Stack* stack) {
+           IValue self_size, other_size;
+           pop(stack, self_size, other_size);
+           auto s = self_size.toIntVector();
+           auto o = other_size.toIntVector();
+           if (s == o) {
+             push(stack, IValue());
+           } else {
+             push(stack, s);
+           }
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA("prim::rangelist(int n) -> int[]"),
+         [](Stack* stack) {
+           int64_t n;
+           pop(stack, n);
+           c10::List<int64_t> elems;
+           elems.reserve(n);
+           for (int i = 0; i < n; i++) {
+             elems.push_back(i);
+           }
+           push(stack, std::move(elems));
+         },
+         aliasAnalysisFromSchema()),
+     // note: this op needs to share a name with the Scalar -> Tensor conversion
+     // because all _to_tensor conversion have to have the same operator namet
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA("prim::NumToTensor.bool(bool a) -> Tensor"),
+         [](Stack* stack) {
+           bool b;
+           pop(stack, b);
+           push(stack, at::scalar_to_tensor(b));
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA("aten::device(str a) -> Device"),
+         [](Stack* stack) {
+           push(stack, c10::Device(pop(stack).toStringRef()));
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA(
+             "aten::to.prim_other(Tensor(a) self, bool non_blocking=False, bool copy=False) -> Tensor(a|b)"),
+         [](Stack* stack) {
+           at::Tensor self;
+           bool non_blocking;
+           bool copy;
+           pop(stack, self, non_blocking, copy);
+           c10::optional<c10::Device> device = c10::nullopt;
+           c10::optional<at::ScalarType> scalarType = c10::nullopt;
+           push(
+               stack,
+               to_dispatch(self, device, scalarType, non_blocking, copy));
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA("aten::eq.device(Device a, Device b) -> bool"),
+         [](Stack* stack) {
+           auto a = pop(stack).toDevice();
+           auto b = pop(stack).toDevice();
+           push(stack, a == b);
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA("prim::requires_grad(Tensor a) -> bool"),
+         [](Stack* stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, a.requires_grad());
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA("prim::grad(Tensor a) -> Tensor(*)"),
+         [](Stack* stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, a.grad());
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA("prim::is_sparse(Tensor a) -> bool"),
+         [](Stack* stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, a.is_sparse());
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA("prim::is_mkldnn(Tensor a) -> bool"),
+         [](Stack* stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, a.is_mkldnn());
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA("prim::is_quantized(Tensor a) -> bool"),
+         [](Stack* stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, a.is_quantized());
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA("prim::is_meta(Tensor a) -> bool"),
+         [](Stack* stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, a.is_meta());
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA("prim::name(Tensor a) -> str?"),
+         [](Stack* stack) {
+           at::Tensor a;
+           pop(stack, a);
+           if (a.name() == "") {
+             push(stack, IValue());
+           } else {
+             push(stack, a.name());
+           }
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA("prim::layout(Tensor a) -> int"),
+         [](Stack* stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, a.layout());
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA("aten::cpu(Tensor(a) self) -> Tensor(a|b)"),
+         [](Stack* stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, a.cpu());
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA("prim::index(Device self) -> int?"),
+         [](Stack* stack) {
+           auto d = pop(stack).toDevice();
+           if (d.has_index()) {
+             push(stack, d.index());
+           } else {
+             push(stack, IValue());
+           }
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
+         // TODO return generator object when torchscript supports RNG
+         // first-class
+         TORCH_SELECTIVE_SCHEMA("aten::manual_seed(int seed) -> ()"),
+         [](Stack* stack) { at::manual_seed(pop(stack).toInt()); },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA("aten::cuda(Tensor(a) self) -> Tensor(a|b)"),
+         [](Stack* stack) {
+           at::Tensor a;
+           pop(stack, a);
+           push(stack, a.cuda());
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA("prim::AutogradZero() -> Tensor"),
+         [](Stack* stack) { stack->emplace_back(at::Tensor()); },
+         aliasAnalysisSpecialCase()),
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA("prim::BroadcastSizes(...) -> int[]"),
+         [](Stack* stack) {
+           auto num_inputs = pop(stack).toInt();
+           std::vector<int64_t> size;
+           size.reserve(8);
+           for (auto i = 0; i < num_inputs; ++i) {
+             size =
+                 at::infer_size(size, peek(stack, i, num_inputs).toIntVector());
+           }
+           drop(stack, num_inputs);
+           push(stack, IValue(std::move(size)));
+         },
+         aliasAnalysisSpecialCase()),
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA("aten::dict() -> Dict(str, Tensor)"),
+         [](Stack* stack) {
+           auto dict =
+               c10::impl::GenericDict(StringType::get(), TensorType::get());
+           push(stack, dict);
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA(
+             "aten::_unwrap_optional(t(a)? optional) -> t(a)"),
+         [](Stack* stack) {
+           auto val = pop(stack);
+           TORCH_CHECK(!val.isNone(), "Unwrapping null optional");
+           push(stack, std::move(val));
+         },
+         aliasAnalysisFromSchema()),
+     OperatorGenerator(
+         TORCH_SELECTIVE_SCHEMA("aten::wait(Future(t) self) -> t"),
+         [](Stack* stack) {
+           TORCH_CHECK(
+               false, "wait is implemented directly in the interpreter");
+         },
+         aliasAnalysisSpecialCase())
 
-        });
+    });
 
 template <typename T>
 void hashValue(Stack* stack) {
@@ -1493,129 +1497,148 @@ void hashValue(Stack* stack) {
 }
 
 RegisterOperators reg2({
-                           // registered as Any[] so that heterogenous tuples can be called with len()
-                           OperatorGenerator(
-                               TORCH_SELECTIVE_SCHEMA("aten::len.any(Any[] a) -> int"),
-                               listLen,
-                               aliasAnalysisFromSchema()),
+    // registered as Any[] so that heterogenous tuples can be called with len()
+    OperatorGenerator(
+        TORCH_SELECTIVE_SCHEMA("aten::len.any(Any[] a) -> int"),
+        listLen,
+        aliasAnalysisFromSchema()),
 
 // these ops have a specialized implementation for the list element type
 #define CREATE_SPECIALIZED_LIST_OPS(decl_type, value_type) \
-  OperatorGenerator(                                                \
-      TORCH_SELECTIVE_SCHEMA("aten::remove." decl_type "(" decl_type              \
-      "[](a!) self,                                                           \
-        " decl_type " el) -> ()"),                          \
+  OperatorGenerator(                                       \
+      TORCH_SELECTIVE_SCHEMA(                              \
+          "aten::remove." decl_type "(" decl_type          \
+          "[](a!) self,                                                           \
+        " decl_type " el) -> ()"),                         \
       listRemove<value_type>,                              \
       aliasAnalysisFromSchema()),                          \
-      OperatorGenerator(                                            \
-          TORCH_SELECTIVE_SCHEMA("aten::index.list_" decl_type "(" decl_type      \
-          "[] self,                                                               \
-        " decl_type " el) -> int"),                         \
+      OperatorGenerator(                                   \
+          TORCH_SELECTIVE_SCHEMA(                          \
+              "aten::index.list_" decl_type "(" decl_type  \
+              "[] self,                                                               \
+        " decl_type " el) -> int"),                        \
           listIndex<value_type>,                           \
           aliasAnalysisFromSchema()),                      \
-      OperatorGenerator(                                            \
-          TORCH_SELECTIVE_SCHEMA("aten::count." decl_type "(" decl_type           \
-          "[] self,                                                               \
-        " decl_type " el) -> int"),                         \
+      OperatorGenerator(                                   \
+          TORCH_SELECTIVE_SCHEMA(                          \
+              "aten::count." decl_type "(" decl_type       \
+              "[] self,                                                               \
+        " decl_type " el) -> int"),                        \
           listCount<value_type>,                           \
           aliasAnalysisFromSchema()),
 
-                           CREATE_SPECIALIZED_LIST_OPS("int", int64_t)
-                           CREATE_SPECIALIZED_LIST_OPS("float", double)
-                           CREATE_SPECIALIZED_LIST_OPS("bool", bool)
-                           CREATE_SPECIALIZED_LIST_OPS("Tensor", at::Tensor)
-                           CREATE_SPECIALIZED_LIST_OPS("str", std::string)
+    CREATE_SPECIALIZED_LIST_OPS("int", int64_t)
+        CREATE_SPECIALIZED_LIST_OPS("float", double)
+            CREATE_SPECIALIZED_LIST_OPS("bool", bool)
+                CREATE_SPECIALIZED_LIST_OPS("Tensor", at::Tensor)
+                    CREATE_SPECIALIZED_LIST_OPS("str", std::string)
 
 #undef CREATE_GENERIC_LIST_OPS
 #undef CREATE_SPECIALIZED_LIST_OPS
 
-                           // `listContains<T>` is not implemented for non-primitive types
-                           // TODO: Add List[bool] once .to<c10::List<bool>> doesn't throw an error
-                           OperatorGenerator(
-                               TORCH_SELECTIVE_SCHEMA("aten::__contains__.int_list(int[] l, int item) -> bool"),
-                               listContains<int64_t>,
-                               aliasAnalysisFromSchema()),
-                           OperatorGenerator(
-                               TORCH_SELECTIVE_SCHEMA("aten::__contains__.float_list(float[] l, float item) -> bool"),
-                               listContains<double>,
-                               aliasAnalysisFromSchema()),
-                           OperatorGenerator(
-                               TORCH_SELECTIVE_SCHEMA("aten::sort.int(int[](a!) self, bool reverse=False) -> ()"),
-                               listSort<int64_t>,
-                               aliasAnalysisFromSchema()),
-                           OperatorGenerator(
-                               TORCH_SELECTIVE_SCHEMA("aten::sort.float(float[](a!) self, bool reverse=False) -> ()"),
-                               listSort<double>,
-                               aliasAnalysisFromSchema()),
-                           OperatorGenerator(
-                               TORCH_SELECTIVE_SCHEMA("aten::sort.Tensor(Tensor[](a!) self, bool reverse=False) -> ()"),
-                               listSort<at::Tensor>,
-                               aliasAnalysisFromSchema()),
-                           OperatorGenerator(
-                               TORCH_SELECTIVE_SCHEMA("aten::sort.bool(bool[](a!) self, bool reverse=False) -> ()"),
-                               listSort<bool>,
-                               aliasAnalysisFromSchema()),
-                           OperatorGenerator(
-                               TORCH_SELECTIVE_SCHEMA("aten::sort.str(str[](a!) self, bool reverse=False) -> ()"),
-                               listSort<std::string>,
-                               aliasAnalysisFromSchema()),
-                           OperatorGenerator(
-                               TORCH_SELECTIVE_SCHEMA("aten::sorted.int(int[](a) input) -> (int[])"),
-                               listCopyAndSort<int64_t>,
-                               aliasAnalysisFromSchema()),
-                           OperatorGenerator(
-                               TORCH_SELECTIVE_SCHEMA("aten::sorted.float(float[](a) input) -> (float[])"),
-                               listCopyAndSort<double>,
-                               aliasAnalysisFromSchema()),
-                           OperatorGenerator(
-                               TORCH_SELECTIVE_SCHEMA("aten::sorted.Tensor(Tensor[](a) input) -> (Tensor[])"),
-                               listCopyAndSort<at::Tensor>,
-                               aliasAnalysisFromSchema()),
-                           OperatorGenerator(
-                               TORCH_SELECTIVE_SCHEMA("aten::sorted.bool(bool[](a) input) -> (bool[])"),
-                               listCopyAndSort<bool>,
-                               aliasAnalysisFromSchema()),
-                           OperatorGenerator(
-                               TORCH_SELECTIVE_SCHEMA("aten::sorted.str(str[](a) input) -> (str[])"),
-                               listCopyAndSort<std::string>,
-                               aliasAnalysisFromSchema()),
+    // `listContains<T>` is not implemented for non-primitive types
+    // TODO: Add List[bool] once .to<c10::List<bool>> doesn't throw an error
+    OperatorGenerator(
+        TORCH_SELECTIVE_SCHEMA(
+            "aten::__contains__.int_list(int[] l, int item) -> bool"),
+        listContains<int64_t>,
+        aliasAnalysisFromSchema()),
+    OperatorGenerator(
+        TORCH_SELECTIVE_SCHEMA(
+            "aten::__contains__.float_list(float[] l, float item) -> bool"),
+        listContains<double>,
+        aliasAnalysisFromSchema()),
+    OperatorGenerator(
+        TORCH_SELECTIVE_SCHEMA(
+            "aten::sort.int(int[](a!) self, bool reverse=False) -> ()"),
+        listSort<int64_t>,
+        aliasAnalysisFromSchema()),
+    OperatorGenerator(
+        TORCH_SELECTIVE_SCHEMA(
+            "aten::sort.float(float[](a!) self, bool reverse=False) -> ()"),
+        listSort<double>,
+        aliasAnalysisFromSchema()),
+    OperatorGenerator(
+        TORCH_SELECTIVE_SCHEMA(
+            "aten::sort.Tensor(Tensor[](a!) self, bool reverse=False) -> ()"),
+        listSort<at::Tensor>,
+        aliasAnalysisFromSchema()),
+    OperatorGenerator(
+        TORCH_SELECTIVE_SCHEMA(
+            "aten::sort.bool(bool[](a!) self, bool reverse=False) -> ()"),
+        listSort<bool>,
+        aliasAnalysisFromSchema()),
+    OperatorGenerator(
+        TORCH_SELECTIVE_SCHEMA(
+            "aten::sort.str(str[](a!) self, bool reverse=False) -> ()"),
+        listSort<std::string>,
+        aliasAnalysisFromSchema()),
+    OperatorGenerator(
+        TORCH_SELECTIVE_SCHEMA("aten::sorted.int(int[](a) input) -> (int[])"),
+        listCopyAndSort<int64_t>,
+        aliasAnalysisFromSchema()),
+    OperatorGenerator(
+        TORCH_SELECTIVE_SCHEMA(
+            "aten::sorted.float(float[](a) input) -> (float[])"),
+        listCopyAndSort<double>,
+        aliasAnalysisFromSchema()),
+    OperatorGenerator(
+        TORCH_SELECTIVE_SCHEMA(
+            "aten::sorted.Tensor(Tensor[](a) input) -> (Tensor[])"),
+        listCopyAndSort<at::Tensor>,
+        aliasAnalysisFromSchema()),
+    OperatorGenerator(
+        TORCH_SELECTIVE_SCHEMA(
+            "aten::sorted.bool(bool[](a) input) -> (bool[])"),
+        listCopyAndSort<bool>,
+        aliasAnalysisFromSchema()),
+    OperatorGenerator(
+        TORCH_SELECTIVE_SCHEMA("aten::sorted.str(str[](a) input) -> (str[])"),
+        listCopyAndSort<std::string>,
+        aliasAnalysisFromSchema()),
 
-                           OperatorGenerator(
-                               TORCH_SELECTIVE_SCHEMA("aten::eq.float_list(float[] a, float[] b) -> bool"),
-                               listEq<double>,
-                               aliasAnalysisFromSchema()),
-                           OperatorGenerator(
-                               TORCH_SELECTIVE_SCHEMA("aten::eq.Tensor_list(Tensor[] a, Tensor[] b) -> bool"),
-                               listEq<at::Tensor>,
-                               aliasAnalysisFromSchema()),
-                           OperatorGenerator(
-                               TORCH_SELECTIVE_SCHEMA("aten::eq.bool_list(bool[] a, bool[] b) -> bool"),
-                               listEq<bool>,
-                               aliasAnalysisFromSchema()),
-                           OperatorGenerator(
-                               TORCH_SELECTIVE_SCHEMA("aten::eq.str_list(str[] a, str[] b) -> bool"),
-                               listEq<std::string>,
-                               aliasAnalysisFromSchema()),
-                           OperatorGenerator(
-                               TORCH_SELECTIVE_SCHEMA("aten::ne.float_list(float[] a, float[] b) -> bool"),
-                               listNe<double>,
-                               aliasAnalysisFromSchema()),
-                           OperatorGenerator(
-                               TORCH_SELECTIVE_SCHEMA("aten::ne.Tensor_list(Tensor[] a, Tensor[] b) -> bool"),
-                               listNe<at::Tensor>,
-                               aliasAnalysisFromSchema()),
-                           OperatorGenerator(
-                               TORCH_SELECTIVE_SCHEMA("aten::ne.bool_list(bool[] a, bool[] b) -> bool"),
-                               listNe<bool>,
-                               aliasAnalysisFromSchema()),
-                           OperatorGenerator(
-                               TORCH_SELECTIVE_SCHEMA("aten::ne.str_list(str[] a, str[] b) -> bool"),
-                               listNe<std::string>,
-                               aliasAnalysisFromSchema()),
+    OperatorGenerator(
+        TORCH_SELECTIVE_SCHEMA(
+            "aten::eq.float_list(float[] a, float[] b) -> bool"),
+        listEq<double>,
+        aliasAnalysisFromSchema()),
+    OperatorGenerator(
+        TORCH_SELECTIVE_SCHEMA(
+            "aten::eq.Tensor_list(Tensor[] a, Tensor[] b) -> bool"),
+        listEq<at::Tensor>,
+        aliasAnalysisFromSchema()),
+    OperatorGenerator(
+        TORCH_SELECTIVE_SCHEMA(
+            "aten::eq.bool_list(bool[] a, bool[] b) -> bool"),
+        listEq<bool>,
+        aliasAnalysisFromSchema()),
+    OperatorGenerator(
+        TORCH_SELECTIVE_SCHEMA("aten::eq.str_list(str[] a, str[] b) -> bool"),
+        listEq<std::string>,
+        aliasAnalysisFromSchema()),
+    OperatorGenerator(
+        TORCH_SELECTIVE_SCHEMA(
+            "aten::ne.float_list(float[] a, float[] b) -> bool"),
+        listNe<double>,
+        aliasAnalysisFromSchema()),
+    OperatorGenerator(
+        TORCH_SELECTIVE_SCHEMA(
+            "aten::ne.Tensor_list(Tensor[] a, Tensor[] b) -> bool"),
+        listNe<at::Tensor>,
+        aliasAnalysisFromSchema()),
+    OperatorGenerator(
+        TORCH_SELECTIVE_SCHEMA(
+            "aten::ne.bool_list(bool[] a, bool[] b) -> bool"),
+        listNe<bool>,
+        aliasAnalysisFromSchema()),
+    OperatorGenerator(
+        TORCH_SELECTIVE_SCHEMA("aten::ne.str_list(str[] a, str[] b) -> bool"),
+        listNe<std::string>,
+        aliasAnalysisFromSchema()),
 
 #define DEFINE_CONVERT_BASE_OP(op_name, prefix, char_op) \
-  OperatorGenerator(                                              \
-      TORCH_SELECTIVE_SCHEMA(#op_name "(int i) -> str"),                         \
+  OperatorGenerator(                                     \
+      TORCH_SELECTIVE_SCHEMA(#op_name "(int i) -> str"), \
       [](Stack* stack) {                                 \
         auto i = pop(stack).toInt();                     \
         std::stringstream ss;                            \
@@ -1628,317 +1651,319 @@ RegisterOperators reg2({
       },                                                 \
       aliasAnalysisFromSchema())
 
-                           DEFINE_CONVERT_BASE_OP(aten::hex, "x", std::hex),
-                           DEFINE_CONVERT_BASE_OP(aten::oct, "o", std::oct),
+    DEFINE_CONVERT_BASE_OP(aten::hex, "x", std::hex),
+    DEFINE_CONVERT_BASE_OP(aten::oct, "o", std::oct),
 
-                           OperatorGenerator(
-                               TORCH_SELECTIVE_SCHEMA("aten::bin(int i) -> str"),
-                               [](Stack* stack) {
-                                 auto i = pop(stack).toInt();
-                                 std::stringstream ss;
-                                 if (i == 0) {
-                                   push(stack, "0b0");
-                                 } else {
-                                   if (i < 0) {
-                                     ss << "-";
-                                     i = -i;
-                                   }
-                                   std::string str = std::bitset<8 * sizeof(i)>(i).to_string();
-                                   str.erase(0, std::min(str.find_first_not_of('0'), str.size() - 1));
-                                   ss << "0b" << str;
-                                   push(stack, ss.str());
-                                 }
-                               },
-                               aliasAnalysisFromSchema()),
-                           // TODO: deprecate this in favor of aten::getelem
-                           OperatorGenerator(
-                               TORCH_SELECTIVE_SCHEMA("prim::StringIndex(str string, int index) -> str"),
-                               [](Stack* stack) {
-                                 auto index = pop(stack).toInt();
-                                 auto string = pop(stack).toStringRef();
-                                 auto norm_index = normalizeIndex(index, string.size());
-                                 char c = string.at(norm_index);
-                                 push(stack, std::string(&c, 1));
-                               },
-                               aliasAnalysisFromSchema()),
-                           OperatorGenerator(
-                               TORCH_SELECTIVE_SCHEMA("aten::chr(int i) -> str"),
-                               [](Stack* stack) {
-                                 auto i = pop(stack).toInt();
-                                 std::stringstream ss;
-                                 TORCH_CHECK(
-                                     i >= 0 && i < 1114111,
-                                     "chr() arg not in range(0x110000), found ",
-                                     i);
-                                 char c = i;
-                                 ss << c;
-                                 push(stack, ss.str());
-                               },
-                               aliasAnalysisFromSchema()),
+    OperatorGenerator(
+        TORCH_SELECTIVE_SCHEMA("aten::bin(int i) -> str"),
+        [](Stack* stack) {
+          auto i = pop(stack).toInt();
+          std::stringstream ss;
+          if (i == 0) {
+            push(stack, "0b0");
+          } else {
+            if (i < 0) {
+              ss << "-";
+              i = -i;
+            }
+            std::string str = std::bitset<8 * sizeof(i)>(i).to_string();
+            str.erase(0, std::min(str.find_first_not_of('0'), str.size() - 1));
+            ss << "0b" << str;
+            push(stack, ss.str());
+          }
+        },
+        aliasAnalysisFromSchema()),
+    // TODO: deprecate this in favor of aten::getelem
+    OperatorGenerator(
+        TORCH_SELECTIVE_SCHEMA(
+            "prim::StringIndex(str string, int index) -> str"),
+        [](Stack* stack) {
+          auto index = pop(stack).toInt();
+          auto string = pop(stack).toStringRef();
+          auto norm_index = normalizeIndex(index, string.size());
+          char c = string.at(norm_index);
+          push(stack, std::string(&c, 1));
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGenerator(
+        TORCH_SELECTIVE_SCHEMA("aten::chr(int i) -> str"),
+        [](Stack* stack) {
+          auto i = pop(stack).toInt();
+          std::stringstream ss;
+          TORCH_CHECK(
+              i >= 0 && i < 1114111,
+              "chr() arg not in range(0x110000), found ",
+              i);
+          char c = i;
+          ss << c;
+          push(stack, ss.str());
+        },
+        aliasAnalysisFromSchema()),
 
-                           // only used in loop unrolling, not exposed to end users
-                           DEFINE_INT_OP(aten::__round_to_zero_floordiv, a / b),
+    // only used in loop unrolling, not exposed to end users
+    DEFINE_INT_OP(aten::__round_to_zero_floordiv, a / b),
 
-                           OperatorGenerator(
-                               TORCH_SELECTIVE_SCHEMA("aten::modf(float a) -> (float, float)"),
-                               [](Stack* stack) {
-                                 double a;
-                                 pop(stack, a);
-                                 double b, c;
-                                 b = modf(a, &c);
-                                 push(stack, b, c);
-                               },
-                               aliasAnalysisFromSchema()),
-                           OperatorGenerator(
-                               TORCH_SELECTIVE_SCHEMA("aten::frexp(float a) -> (float, int)"),
-                               [](Stack* stack) {
-                                 double a;
-                                 pop(stack, a);
-                                 double m;
-                                 int e;
-                                 m = std::frexp(a, &e);
-                                 push(stack, m, e);
-                               },
-                               aliasAnalysisFromSchema()),
-                           OperatorGenerator(
-                               TORCH_SELECTIVE_SCHEMA("aten::ldexp(float x, int i) -> float"),
-                               [](Stack* stack) {
-                                 double a;
-                                 int64_t b;
-                                 pop(stack, a, b);
-                                 push(stack, std::ldexp(a, b));
-                               },
-                               aliasAnalysisFromSchema()),
-                           DEFINE_BINARY_FLOAT_OP(aten::mathremainder, std::remainder(a, b)),
+    OperatorGenerator(
+        TORCH_SELECTIVE_SCHEMA("aten::modf(float a) -> (float, float)"),
+        [](Stack* stack) {
+          double a;
+          pop(stack, a);
+          double b, c;
+          b = modf(a, &c);
+          push(stack, b, c);
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGenerator(
+        TORCH_SELECTIVE_SCHEMA("aten::frexp(float a) -> (float, int)"),
+        [](Stack* stack) {
+          double a;
+          pop(stack, a);
+          double m;
+          int e;
+          m = std::frexp(a, &e);
+          push(stack, m, e);
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGenerator(
+        TORCH_SELECTIVE_SCHEMA("aten::ldexp(float x, int i) -> float"),
+        [](Stack* stack) {
+          double a;
+          int64_t b;
+          pop(stack, a, b);
+          push(stack, std::ldexp(a, b));
+        },
+        aliasAnalysisFromSchema()),
+    DEFINE_BINARY_FLOAT_OP(aten::mathremainder, std::remainder(a, b)),
 
-                           DEFINE_INT_OP(aten::__and__, a& b),
-                           DEFINE_INT_OP(aten::__or__, a | b),
-                           DEFINE_INT_OP(aten::__xor__, a ^ b),
-                           DEFINE_INT_OP(aten::__lshift__, a << b),
-                           DEFINE_INT_OP(aten::__rshift__, a >> b),
+    DEFINE_INT_OP(aten::__and__, a& b),
+    DEFINE_INT_OP(aten::__or__, a | b),
+    DEFINE_INT_OP(aten::__xor__, a ^ b),
+    DEFINE_INT_OP(aten::__lshift__, a << b),
+    DEFINE_INT_OP(aten::__rshift__, a >> b),
 
-                           DEFINE_UNARY_OP(aten::round, round_to_even(a), float, float),
-                           DEFINE_UNARY_OP(aten::log, std::log(a), float, float),
-                           DEFINE_GENERIC_BINARY_OP(aten::log, std::log(a) / std::log(b), float),
-                           DEFINE_INT_FLOAT_OP(aten::log, std::log(a) / std::log(b), float),
-                           DEFINE_SCALAR_SCALAR_BINARY_OP(
-                               aten::log,
-                               std::log(a) / std::log(b),
-                               std::log(a) / std::log(b),
-                               float),
-                           DEFINE_UNARY_OP(aten::log1p, std::log1p(a), float, float),
-                           DEFINE_UNARY_OP(aten::log10, std::log10(a), float, float),
-                           DEFINE_UNARY_OP(aten::sqrt, std::sqrt(a), float, float),
-                           DEFINE_UNARY_OP(aten::acos, std::acos(a), float, float),
-                           DEFINE_UNARY_OP(aten::asin, std::asin(a), float, float),
-                           DEFINE_UNARY_OP(aten::atan, std::atan(a), float, float),
-                           DEFINE_GENERIC_OP(
-                               aten::atan2,
-                               std::atan2(a, b),
-                               std::atan2(a, b),
-                               float,
-                               float),
-                           DEFINE_INT_FLOAT_OP(aten::atan2, std::atan2(a, b), float),
-                           DEFINE_SCALAR_SCALAR_BINARY_OP(
-                               aten::atan2,
-                               std::atan2(a, b),
-                               std::atan2(a, b),
-                               float),
-                           DEFINE_UNARY_OP(aten::cos, std::cos(a), float, float),
-                           DEFINE_UNARY_OP(aten::sin, std::sin(a), float, float),
-                           DEFINE_UNARY_OP(aten::tan, std::tan(a), float, float),
-                           DEFINE_UNARY_OP(aten::asinh, std::asinh(a), float, float),
-                           DEFINE_UNARY_OP(aten::atanh, std::atanh(a), float, float),
-                           DEFINE_UNARY_OP(aten::acosh, std::acosh(a), float, float),
-                           DEFINE_UNARY_OP(aten::sinh, std::sinh(a), float, float),
-                           DEFINE_UNARY_OP(aten::cosh, std::cosh(a), float, float),
-                           DEFINE_UNARY_OP(aten::tanh, std::tanh(a), float, float),
-                           DEFINE_UNARY_OP(aten::degrees, degrees(a), float, float),
-                           DEFINE_UNARY_OP(aten::radians, radians(a), float, float),
-                           DEFINE_BINARY_FLOAT_OP(aten::fmod, std::fmod(a, b)),
-                           DEFINE_UNARY_INT_OP(aten::factorial, factorial(a), int),
-                           DEFINE_UNARY_FLOAT_OP(aten::isnan, std::isnan(a), bool),
-                           DEFINE_UNARY_FLOAT_OP(aten::isfinite, std::isfinite(a), bool),
-                           DEFINE_UNARY_FLOAT_OP(aten::isinf, std::isinf(a), bool),
-                           DEFINE_UNARY_OP(aten::gamma, std::tgamma(a), float, float),
-                           DEFINE_UNARY_OP(aten::erf, std::erf(a), float, float),
-                           DEFINE_UNARY_OP(aten::erfc, std::erfc(a), float, float),
-                           DEFINE_UNARY_OP(aten::expm1, std::expm1(a), float, float),
-                           DEFINE_UNARY_OP(aten::fabs, std::fabs(a), float, float),
-                           DEFINE_UNARY_OP(aten::lgamma, std::lgamma(a), float, float),
+    DEFINE_UNARY_OP(aten::round, round_to_even(a), float, float),
+    DEFINE_UNARY_OP(aten::log, std::log(a), float, float),
+    DEFINE_GENERIC_BINARY_OP(aten::log, std::log(a) / std::log(b), float),
+    DEFINE_INT_FLOAT_OP(aten::log, std::log(a) / std::log(b), float),
+    DEFINE_SCALAR_SCALAR_BINARY_OP(
+        aten::log,
+        std::log(a) / std::log(b),
+        std::log(a) / std::log(b),
+        float),
+    DEFINE_UNARY_OP(aten::log1p, std::log1p(a), float, float),
+    DEFINE_UNARY_OP(aten::log10, std::log10(a), float, float),
+    DEFINE_UNARY_OP(aten::sqrt, std::sqrt(a), float, float),
+    DEFINE_UNARY_OP(aten::acos, std::acos(a), float, float),
+    DEFINE_UNARY_OP(aten::asin, std::asin(a), float, float),
+    DEFINE_UNARY_OP(aten::atan, std::atan(a), float, float),
+    DEFINE_GENERIC_OP(
+        aten::atan2,
+        std::atan2(a, b),
+        std::atan2(a, b),
+        float,
+        float),
+    DEFINE_INT_FLOAT_OP(aten::atan2, std::atan2(a, b), float),
+    DEFINE_SCALAR_SCALAR_BINARY_OP(
+        aten::atan2,
+        std::atan2(a, b),
+        std::atan2(a, b),
+        float),
+    DEFINE_UNARY_OP(aten::cos, std::cos(a), float, float),
+    DEFINE_UNARY_OP(aten::sin, std::sin(a), float, float),
+    DEFINE_UNARY_OP(aten::tan, std::tan(a), float, float),
+    DEFINE_UNARY_OP(aten::asinh, std::asinh(a), float, float),
+    DEFINE_UNARY_OP(aten::atanh, std::atanh(a), float, float),
+    DEFINE_UNARY_OP(aten::acosh, std::acosh(a), float, float),
+    DEFINE_UNARY_OP(aten::sinh, std::sinh(a), float, float),
+    DEFINE_UNARY_OP(aten::cosh, std::cosh(a), float, float),
+    DEFINE_UNARY_OP(aten::tanh, std::tanh(a), float, float),
+    DEFINE_UNARY_OP(aten::degrees, degrees(a), float, float),
+    DEFINE_UNARY_OP(aten::radians, radians(a), float, float),
+    DEFINE_BINARY_FLOAT_OP(aten::fmod, std::fmod(a, b)),
+    DEFINE_UNARY_INT_OP(aten::factorial, factorial(a), int),
+    DEFINE_UNARY_FLOAT_OP(aten::isnan, std::isnan(a), bool),
+    DEFINE_UNARY_FLOAT_OP(aten::isfinite, std::isfinite(a), bool),
+    DEFINE_UNARY_FLOAT_OP(aten::isinf, std::isinf(a), bool),
+    DEFINE_UNARY_OP(aten::gamma, std::tgamma(a), float, float),
+    DEFINE_UNARY_OP(aten::erf, std::erf(a), float, float),
+    DEFINE_UNARY_OP(aten::erfc, std::erfc(a), float, float),
+    DEFINE_UNARY_OP(aten::expm1, std::expm1(a), float, float),
+    DEFINE_UNARY_OP(aten::fabs, std::fabs(a), float, float),
+    DEFINE_UNARY_OP(aten::lgamma, std::lgamma(a), float, float),
 
-                           // TODO: move abs to aten namespace because it's schematized!
-                           DEFINE_UNARY_OP(prim::abs, std::abs(a), int, float),
-                           OperatorGenerator(
-    TORCH_SELECTIVE_SCHEMA("prim::abs(Tensor x) -> Tensor"),
-                               [](Stack* stack) {
-                                 at::Tensor x;
-                                 pop(stack, x);
-                                 push(stack, x.abs());
-                               },
-                               aliasAnalysisFromSchema()),
+    // TODO: move abs to aten namespace because it's schematized!
+    DEFINE_UNARY_OP(prim::abs, std::abs(a), int, float),
+    OperatorGenerator(
+        TORCH_SELECTIVE_SCHEMA("prim::abs(Tensor x) -> Tensor"),
+        [](Stack* stack) {
+          at::Tensor x;
+          pop(stack, x);
+          push(stack, x.abs());
+        },
+        aliasAnalysisFromSchema()),
 
-                           DEFINE_INT_OP(aten::gcd, gcd(a, b)),
+    DEFINE_INT_OP(aten::gcd, gcd(a, b)),
 
-                           DEFINE_GENERIC_OP(
-                               aten::copysign,
-                               std::copysign(a, b),
-                               std::copysign(a, b),
-                               float,
-                               float),
-                           DEFINE_INT_FLOAT_OP(aten::copysign, std::copysign(a, b), float),
-                           DEFINE_SCALAR_BINARY_OP(
-                               aten::copysign,
-                               std::copysign(a, b),
-                               std::copysign(a, b),
-                               float),
-                           OperatorGenerator(
-                               TORCH_SELECTIVE_SCHEMA("aten::_tensor_to_list(Tensor self) -> int[]"),
-                               [](Stack* stack) {
-                                 at::Tensor t;
-                                 pop(stack, t);
-                                 c10::List<int64_t> elems;
-                                 elems.reserve(t.size(0));
-                                 for (int i = 0; i < t.size(0); i++) {
-                                   elems.push_back(*t[i].data_ptr<int32_t>());
-                                 }
-                                 push(stack, std::move(elems));
-                               },
-                               aliasAnalysisFromSchema()),
-                           OperatorGenerator(
-                               TORCH_SELECTIVE_SCHEMA("aten::_list_to_tensor(int[] self) -> Tensor"),
-                               [](Stack* stack) {
-                                 c10::List<int64_t> l = pop(stack).toIntList();
-                                 auto t = torch::empty(
-                                     {static_cast<int64_t>(l.size())}, at::dtype(at::kInt));
-                                 for (size_t i = 0; i < l.size(); i++) {
-                                   t[i] = l.get(i);
-                                 }
-                                 push(stack, std::move(t));
-                               },
-                               aliasAnalysisFromSchema()),
-                           OperatorGenerator(
-                               TORCH_SELECTIVE_SCHEMA("aten::all.int(int[] self) -> bool"),
-                               [](Stack* stack) {
-                                 c10::List<int64_t> l = pop(stack).toIntList();
-                                 for (const auto& elem : l) {
-                                   if (!elem) {
-                                     push(stack, false);
-                                     return;
-                                   }
-                                 }
-                                 push(stack, true);
-                               },
-                               aliasAnalysisFromSchema()),
-                           OperatorGenerator(
-                               TORCH_SELECTIVE_SCHEMA("aten::all.float(float[] self) -> bool"),
-                               [](Stack* stack) {
-                                 c10::List<double> l = pop(stack).toDoubleList();
-                                 for (const auto& elem : l) {
-                                   if (!elem) {
-                                     push(stack, false);
-                                     return;
-                                   }
-                                 }
-                                 push(stack, true);
-                               },
-                               aliasAnalysisFromSchema()),
-                           OperatorGenerator(
-                               TORCH_SELECTIVE_SCHEMA("aten::all.bool(bool[] self) -> bool"),
-                               [](Stack* stack) {
-                                 c10::List<bool> l = pop(stack).toBoolList();
-                                 for (const auto& elem : l) {
-                                   if (!elem) {
-                                     push(stack, false);
-                                     return;
-                                   }
-                                 }
-                                 push(stack, true);
-                               },
-                               aliasAnalysisFromSchema()),
-                           OperatorGenerator(
-                               TORCH_SELECTIVE_SCHEMA("aten::divmod.int(int x, int y) -> (int, int)"),
-                               [](Stack* stack) {
-                                 int64_t a, b;
-                                 lldiv_t divresult = {};
-                                 pop(stack, a, b);
-                                 if (b == 0) {
-                                   throw std::runtime_error(
-                                       "ZeroDivisionError: integer division or modulo by zero");
-                                 }
-                                 divresult = lldiv(a, b);
-                                 if (divresult.rem && (a < 0) != (b < 0)) {
-                                   divresult.quot -= 1;
-                                   divresult.rem += b;
-                                 }
-                                 push(
-                                     stack,
-                                     static_cast<int64_t>(divresult.quot),
-                                     static_cast<int64_t>(divresult.rem));
-                               },
-                               aliasAnalysisFromSchema()),
-                           OperatorGenerator(
-                               TORCH_SELECTIVE_SCHEMA("aten::divmod.float(float x, float y) -> (float, float)"),
-                               [](Stack* stack) {
-                                 double a, b;
-                                 pop(stack, a, b);
-                                 if (b == 0) {
-                                   throw std::runtime_error("ZeroDivisionError: float divmod()");
-                                 }
-                                 double rem = fmod(a, b);
-                                 if (rem && (a < 0) != (b < 0)) {
-                                   rem += b;
-                                 }
-                                 push(stack, (a - rem) / b, rem);
-                               },
-                               aliasAnalysisFromSchema()),
-                           OperatorGenerator(
-                               TORCH_SELECTIVE_SCHEMA("prim::id(AnyClassType? x) -> int"),
-                               [](Stack* stack) {
-                                 IValue a;
-                                 pop(stack, a);
-                                 if (a.isNone()) {
-                                   push(stack, 0);
-                                 } else {
-                                   push(stack, reinterpret_cast<int64_t>(a.internalToPointer()));
-                                 }
-                               },
-                               aliasAnalysisFromSchema()),
+    DEFINE_GENERIC_OP(
+        aten::copysign,
+        std::copysign(a, b),
+        std::copysign(a, b),
+        float,
+        float),
+    DEFINE_INT_FLOAT_OP(aten::copysign, std::copysign(a, b), float),
+    DEFINE_SCALAR_BINARY_OP(
+        aten::copysign,
+        std::copysign(a, b),
+        std::copysign(a, b),
+        float),
+    OperatorGenerator(
+        TORCH_SELECTIVE_SCHEMA("aten::_tensor_to_list(Tensor self) -> int[]"),
+        [](Stack* stack) {
+          at::Tensor t;
+          pop(stack, t);
+          c10::List<int64_t> elems;
+          elems.reserve(t.size(0));
+          for (int i = 0; i < t.size(0); i++) {
+            elems.push_back(*t[i].data_ptr<int32_t>());
+          }
+          push(stack, std::move(elems));
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGenerator(
+        TORCH_SELECTIVE_SCHEMA("aten::_list_to_tensor(int[] self) -> Tensor"),
+        [](Stack* stack) {
+          c10::List<int64_t> l = pop(stack).toIntList();
+          auto t = torch::empty(
+              {static_cast<int64_t>(l.size())}, at::dtype(at::kInt));
+          for (size_t i = 0; i < l.size(); i++) {
+            t[i] = l.get(i);
+          }
+          push(stack, std::move(t));
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGenerator(
+        TORCH_SELECTIVE_SCHEMA("aten::all.int(int[] self) -> bool"),
+        [](Stack* stack) {
+          c10::List<int64_t> l = pop(stack).toIntList();
+          for (const auto& elem : l) {
+            if (!elem) {
+              push(stack, false);
+              return;
+            }
+          }
+          push(stack, true);
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGenerator(
+        TORCH_SELECTIVE_SCHEMA("aten::all.float(float[] self) -> bool"),
+        [](Stack* stack) {
+          c10::List<double> l = pop(stack).toDoubleList();
+          for (const auto& elem : l) {
+            if (!elem) {
+              push(stack, false);
+              return;
+            }
+          }
+          push(stack, true);
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGenerator(
+        TORCH_SELECTIVE_SCHEMA("aten::all.bool(bool[] self) -> bool"),
+        [](Stack* stack) {
+          c10::List<bool> l = pop(stack).toBoolList();
+          for (const auto& elem : l) {
+            if (!elem) {
+              push(stack, false);
+              return;
+            }
+          }
+          push(stack, true);
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGenerator(
+        TORCH_SELECTIVE_SCHEMA("aten::divmod.int(int x, int y) -> (int, int)"),
+        [](Stack* stack) {
+          int64_t a, b;
+          lldiv_t divresult = {};
+          pop(stack, a, b);
+          if (b == 0) {
+            throw std::runtime_error(
+                "ZeroDivisionError: integer division or modulo by zero");
+          }
+          divresult = lldiv(a, b);
+          if (divresult.rem && (a < 0) != (b < 0)) {
+            divresult.quot -= 1;
+            divresult.rem += b;
+          }
+          push(
+              stack,
+              static_cast<int64_t>(divresult.quot),
+              static_cast<int64_t>(divresult.rem));
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGenerator(
+        TORCH_SELECTIVE_SCHEMA(
+            "aten::divmod.float(float x, float y) -> (float, float)"),
+        [](Stack* stack) {
+          double a, b;
+          pop(stack, a, b);
+          if (b == 0) {
+            throw std::runtime_error("ZeroDivisionError: float divmod()");
+          }
+          double rem = fmod(a, b);
+          if (rem && (a < 0) != (b < 0)) {
+            rem += b;
+          }
+          push(stack, (a - rem) / b, rem);
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGenerator(
+        TORCH_SELECTIVE_SCHEMA("prim::id(AnyClassType? x) -> int"),
+        [](Stack* stack) {
+          IValue a;
+          pop(stack, a);
+          if (a.isNone()) {
+            push(stack, 0);
+          } else {
+            push(stack, reinterpret_cast<int64_t>(a.internalToPointer()));
+          }
+        },
+        aliasAnalysisFromSchema()),
 
-#define DEFINE_DIVMOD_MIXED_OP(type_a, type_b)                           \
-  OperatorGenerator(                                                              \
-      TORCH_SELECTIVE_SCHEMA("aten::divmod." #type_a "_" #type_b "(" #type_a " x," #type_b      \
-      " y) -> (float, float)"),                                           \
-      [](Stack* stack) {                                                 \
-        type_a a;                                                        \
-        type_b b;                                                        \
-        pop(stack, a, b);                                                \
-        if (b == 0) {                                                    \
-          throw std::runtime_error("ZeroDivisionError: float divmod()"); \
-        }                                                                \
-        double quot = floor(a / b);                                      \
-        double rem = a - (quot * b);                                     \
-        push(stack, quot, rem);                                          \
-      },                                                                 \
+#define DEFINE_DIVMOD_MIXED_OP(type_a, type_b)                               \
+  OperatorGenerator(                                                         \
+      TORCH_SELECTIVE_SCHEMA("aten::divmod." #type_a "_" #type_b "(" #type_a \
+                             " x," #type_b " y) -> (float, float)"),         \
+      [](Stack* stack) {                                                     \
+        type_a a;                                                            \
+        type_b b;                                                            \
+        pop(stack, a, b);                                                    \
+        if (b == 0) {                                                        \
+          throw std::runtime_error("ZeroDivisionError: float divmod()");     \
+        }                                                                    \
+        double quot = floor(a / b);                                          \
+        double rem = a - (quot * b);                                         \
+        push(stack, quot, rem);                                              \
+      },                                                                     \
       aliasAnalysisFromSchema())
 
-                           DEFINE_DIVMOD_MIXED_OP(int, float),
-                           DEFINE_DIVMOD_MIXED_OP(float, int),
+    DEFINE_DIVMOD_MIXED_OP(int, float),
+    DEFINE_DIVMOD_MIXED_OP(float, int),
 
 #undef DEFINE_DIVMOD_MIXED_OP
-                           OperatorGenerator(
-                               TORCH_SELECTIVE_SCHEMA("aten::hash.str(str t) -> int"),
-                               hashValue<std::string>,
-                               aliasAnalysisFromSchema()),
-                           OperatorGenerator(
-                               TORCH_SELECTIVE_SCHEMA("aten::hash.int(int t) -> int"),
-                               hashValue<int>,
-                               aliasAnalysisFromSchema()),
-                           OperatorGenerator(
-                               TORCH_SELECTIVE_SCHEMA("aten::hash.float(float t) -> int"),
-                               hashValue<double>,
-                               aliasAnalysisFromSchema()),
-                       });
+    OperatorGenerator(
+        TORCH_SELECTIVE_SCHEMA("aten::hash.str(str t) -> int"),
+        hashValue<std::string>,
+        aliasAnalysisFromSchema()),
+    OperatorGenerator(
+        TORCH_SELECTIVE_SCHEMA("aten::hash.int(int t) -> int"),
+        hashValue<int>,
+        aliasAnalysisFromSchema()),
+    OperatorGenerator(
+        TORCH_SELECTIVE_SCHEMA("aten::hash.float(float t) -> int"),
+        hashValue<double>,
+        aliasAnalysisFromSchema()),
+});
 
 } // namespace
 } // namespace jit
