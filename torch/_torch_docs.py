@@ -3171,6 +3171,29 @@ Example::
 
 """.format(**common_args))
 
+add_docstr(torch.i0,
+           r"""
+i0(input, *, out=None) -> Tensor
+
+Computes the zeroth order modified Bessel function of the first kind for each element of :attr:`input`.
+
+.. math::
+    \text{out}_{i} = I_0(\text{input}_{i}) = \sum_{k=0}^{\infty} \frac{(\text{input}_{i}^2/4)^k}{(k!)^2}
+
+""" + r"""
+Args:
+    input (Tensor): the input tensor
+
+Keyword args:
+    {out}
+
+Example::
+
+    >>> torch.i0(torch.arange(5, dtype=torch.float32))
+    tensor([ 1.0000,  1.2661,  2.2796,  4.8808, 11.3019])
+
+""".format(**common_args))
+
 add_docstr(torch.index_select,
            r"""
 index_select(input, dim, index, *, out=None) -> Tensor
