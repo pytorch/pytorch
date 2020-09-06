@@ -109,7 +109,7 @@ class Benchmark(object):
             return self.forward(*self.inputs)
 
     def run(self, args):
-        torch._C._jit_override_can_fuse_on_gpu(args.cuda_fuser == "old")
+        torch._C._jit_override_can_fuse_on_gpu(True)
         torch._C._jit_set_texpr_fuser_enabled(args.cuda_fuser == "te")
         with cuda_pointwise_context(
             args.cuda_pointwise_loop_levels,

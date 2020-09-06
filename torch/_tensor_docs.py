@@ -1464,6 +1464,20 @@ hypot_(other) -> Tensor
 In-place version of :meth:`~Tensor.hypot`
 """)
 
+add_docstr_all('i0',
+               r"""
+i0() -> Tensor
+
+See :func:`torch.i0`
+""")
+
+add_docstr_all('i0_',
+               r"""
+i0_() -> Tensor
+
+In-place version of :meth:`~Tensor.i0`
+""")
+
 add_docstr_all('indices',
                r"""
 indices() -> Tensor
@@ -3732,6 +3746,13 @@ add_docstr_all('var',
 var(dim=None, unbiased=True, keepdim=False) -> Tensor
 
 See :func:`torch.var`
+""")
+
+add_docstr_all('vdot',
+               r"""
+dot(other) -> Tensor
+
+See :func:`torch.vdot`
 """)
 
 add_docstr_all('view',

@@ -306,6 +306,7 @@ Pointwise Ops
     logical_xor
     logit
     hypot
+    i0
     mul
     mvlgamma
     neg
@@ -510,6 +511,7 @@ BLAS and LAPACK Operations
     lobpcg
     trapz
     triangular_solve
+    vdot
 
 Utilities
 ----------------------------------

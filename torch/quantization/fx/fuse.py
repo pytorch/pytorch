@@ -8,7 +8,7 @@ from torch.fx.graph import (
 )
 
 from .pattern_utils import (
-    matches,
+    is_match,
     get_fusion_patterns,
 )
 
@@ -17,7 +17,7 @@ from .fusion_patterns import *  # noqa: F401
 import copy
 class Fuser:
     def fuse(self, model, inplace=False):
-        input_root = model.root
+        input_root = model
         if not inplace:
             input_root = copy.deepcopy(input_root)
         input_graph = model.graph
@@ -61,7 +61,7 @@ class Fuser:
         for node in reversed(graph.nodes):
             if node.name not in match_map:
                 for pattern, value in patterns.items():
-                    if matches(modules, node, pattern):
+                    if is_match(modules, node, pattern):
                         apply_match(pattern, node, (node, value(self, node)))
 
         return match_map
