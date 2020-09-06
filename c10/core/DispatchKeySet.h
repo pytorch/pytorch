@@ -39,23 +39,23 @@ public:
 
   // NB: default constructor representation as zero is MANDATORY as
   // use of DispatchKeySet in TLS requires this.
-  DispatchKeySet()
+  constexpr DispatchKeySet()
     : repr_(0) {}
-  DispatchKeySet(Full)
+  constexpr DispatchKeySet(Full)
     : repr_(std::numeric_limits<decltype(repr_)>::max()) {}
-  DispatchKeySet(FullAfter, DispatchKey t)
+  constexpr DispatchKeySet(FullAfter, DispatchKey t)
     // LSB after t are OK, but not t itself.
     : repr_((1ULL << (static_cast<uint8_t>(t) - 1)) - 1) {}
   // Public version of DispatchKeySet(uint64_t) API; external users
   // must be explicit when they do this!
-  DispatchKeySet(Raw, uint64_t x)
+  constexpr DispatchKeySet(Raw, uint64_t x)
     : repr_(x) {}
-  explicit DispatchKeySet(DispatchKey t)
+  explicit constexpr DispatchKeySet(DispatchKey t)
     : repr_(t == DispatchKey::Undefined
               ? 0
               : 1ULL << (static_cast<uint8_t>(t) - 1)) {}
-  explicit DispatchKeySet(std::initializer_list<DispatchKey> ks)
-    : DispatchKeySet() {
+  explicit constexpr DispatchKeySet(std::initializer_list<DispatchKey> ks)
+  : repr_(0) {
     for (auto k : ks) {
       repr_ |= DispatchKeySet(k).repr_;
     }
@@ -64,6 +64,10 @@ public:
   bool has(DispatchKey t) const {
     TORCH_INTERNAL_ASSERT(t != DispatchKey::Undefined);
     return static_cast<bool>(repr_ & DispatchKeySet(t).repr_);
+  }
+  // Test if DispatchKeySet is a superset of ks.
+  bool isSupersetOf(DispatchKeySet ks) const {
+    return (repr_ & ks.repr_) == ks.repr_;
   }
   // Perform set union
   DispatchKeySet operator|(DispatchKeySet other) const {
@@ -108,6 +112,11 @@ public:
     // didn't do it for now.
     return static_cast<DispatchKey>(64 - llvm::countLeadingZeros(repr_));
   }
+
+  DispatchKey highestPriorityBackendTypeId() const {
+    return (*this & ((1ULL << static_cast<uint8_t>(DispatchKey::EndOfBackendKeys)) - 1))
+      .highestPriorityTypeId();
+  }
 private:
   DispatchKeySet(uint64_t repr) : repr_(repr) {}
   uint64_t repr_ = 0;
@@ -116,8 +125,18 @@ private:
 C10_API std::string toString(DispatchKeySet);
 C10_API std::ostream& operator<<(std::ostream&, DispatchKeySet);
 
-// all Autograd dispatch keys
-C10_API DispatchKeySet AutogradDispatchKeys();
+// Resolve alias dispatch key to DispatchKeySet if applicable
+C10_API DispatchKeySet getRuntimeDispatchKeySet(DispatchKey t);
+
+// TODO(#43441): Once we have iterator-like funtionality on DispatchKeySet
+//      we can remove this API and use c10::getRuntimeDispatchKeySet instead.
+//      This API is only used in aten/src/ATen/core/dispatch/OperatorEntry.cpp.
+C10_API ArrayRef<DispatchKey> getRuntimeDispatchKeys(DispatchKey k);
+
+// This API exists because we have a use case for checking
+// getRuntimeDispatchKeySet(alias).has(DispatchKey::Undefind)
+// in OperatorEntry.cpp but we disallow it in has() API.
+C10_API bool isIncludedInAlias(DispatchKey k, DispatchKey alias);
 
 // Historically, every tensor only had a single DispatchKey, and it was always
 // something like CPU, and there wasn't any of this business where TLS
@@ -129,17 +148,9 @@ static inline DispatchKey legacyExtractDispatchKey(DispatchKeySet s) {
   // NB: If you add any extra keys that can be stored in TensorImpl on
   // top of existing "normal" keys like CPU/CUDA, you need to add it
   // here.  At the moment, RequiresGrad (replacement for Variable)
-  // is the most likely key that will need this treatment; note that
-  // Autograd does NOT need this as it is applied universally
-  // (and doesn't show up in TensorImpl)
-  return s.highestPriorityTypeId();
+  // is the most likely key that will need this treatment;
+  // After Autograd keys are moved from globally enabled set to TensorImpl,
+  // we should remove all Autograd keys before taking highestPriority.
+  return (s - getRuntimeDispatchKeySet(DispatchKey::Autograd)).highestPriorityTypeId();
 }
-
-// For backwards compatibility with XLA repository
-// (I don't want to fix this in XLA right now because there might be
-// more renaming coming in the future.)
-static inline DispatchKeySet XLA() {
-  return DispatchKeySet{DispatchKey::XLA, DispatchKey::AutogradXLA};
-}
-
 }

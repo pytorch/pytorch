@@ -23,8 +23,6 @@ _(aten, _abs) \
 _(aten, _addmv) \
 _(aten, _addr) \
 _(aten, _arange) \
-_(aten, _asinh) \
-_(aten, _atanh) \
 _(aten, _argmax) \
 _(aten, _argmin) \
 _(aten, _baddbmm_mkl) \
@@ -109,7 +107,6 @@ _(aten, _rsqrt) \
 _(aten, _s_where) \
 _(aten, _shape_as_tensor) \
 _(aten, _sigmoid) \
-_(aten, _sigmoid_backward) \
 _(aten, _sigmoid_forward) \
 _(aten, _sin) \
 _(aten, _sinh) \
@@ -134,7 +131,6 @@ _(aten, _sum) \
 _(aten, _sum_cuda) \
 _(aten, _tan) \
 _(aten, _tanh) \
-_(aten, _tanh_backward) \
 _(aten, _tanh_forward) \
 _(aten, _th_baddbmm) \
 _(aten, _th_bmm) \
@@ -240,6 +236,8 @@ _(aten, clamp_min) \
 _(aten, clone) \
 _(aten, coalesce) \
 _(aten, combinations) \
+_(aten, _conj) \
+_(aten, conj) \
 _(aten, complex) \
 _(aten, polar) \
 _(aten, constant_pad_nd) \
@@ -369,6 +367,7 @@ _(aten, hardsigmoid_backward) \
 _(aten, hardtanh) \
 _(aten, hardtanh_backward) \
 _(aten, hardtanh_forward) \
+_(aten, heaviside) \
 _(aten, hinge_embedding_loss) \
 _(aten, histc) \
 _(aten, hspmm) \
@@ -656,8 +655,6 @@ _(aten, stft) \
 _(aten, storage_offset) \
 _(aten, stride) \
 _(aten, strides) \
-_(aten, sub) \
-_(aten, sub_) \
 _(aten, rsub) \
 _(aten, sum) \
 _(aten, sum_to_size) \
@@ -903,12 +900,14 @@ _(attr, max_val) \
 _(attr, max_values) \
 _(attr, maximum_indices) \
 _(attr, maxnorm) \
+_(attr, maximum) \
 _(attr, mean) \
 _(attr, median) \
 _(attr, min) \
 _(attr, min_indices) \
 _(attr, min_val) \
 _(attr, minlength) \
+_(attr, minimum) \
 _(attr, mode) \
 _(attr, momentum) \
 _(attr, n) \
