@@ -18,6 +18,13 @@ void mergeSubgraph(
   Node* nodeBeforeMergeFrom = mergeFrom->prev();
   Node* nodeAfterMergeFrom = mergeFrom->next();
 
+  // will be used later to map the node outputs -> new subgraph values
+  std::unordered_map<Value*, Value*> node_outputs_to_subgraph_values;
+  for (size_t i = 0; i < mergeFrom->outputs().size(); ++i) {
+    node_outputs_to_subgraph_values[mergeFrom->output(i)] =
+        getSubgraph(mergeFrom)->outputs().at(i);
+  }
+
   // unmerge_map will contain mapping from values from the mergeTo's subgraph
   // (we will call them "original" values) to the corresponding values that we
   // created in the main graph (we will call them "unmerged" values) as we
@@ -49,6 +56,11 @@ void mergeSubgraph(
     } else {
       vmap[kv.first] = kv.second;
     }
+  }
+
+  // fill the value mapping with node output -> new subgraph value
+  for (const auto& mapping : node_outputs_to_subgraph_values) {
+    vmap[mapping.first] = vmap[mapping.second];
   }
 }
 

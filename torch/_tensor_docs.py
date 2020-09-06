@@ -1464,6 +1464,20 @@ hypot_(other) -> Tensor
 In-place version of :meth:`~Tensor.hypot`
 """)
 
+add_docstr_all('i0',
+               r"""
+i0() -> Tensor
+
+See :func:`torch.i0`
+""")
+
+add_docstr_all('i0_',
+               r"""
+i0_() -> Tensor
+
+In-place version of :meth:`~Tensor.i0`
+""")
+
 add_docstr_all('indices',
                r"""
 indices() -> Tensor
@@ -1533,6 +1547,20 @@ add_docstr_all('hardshrink',
 hardshrink(lambd=0.5) -> Tensor
 
 See :func:`torch.nn.functional.hardshrink`
+""")
+
+add_docstr_all('heaviside',
+               r"""
+heaviside(values) -> Tensor
+
+See :func:`torch.heaviside`
+""")
+
+add_docstr_all('heaviside_',
+               r"""
+heaviside_(values) -> Tensor
+
+In-place version of :meth:`~Tensor.heaviside`
 """)
 
 add_docstr_all('histc',
@@ -2079,6 +2107,13 @@ max(dim=None, keepdim=False) -> Tensor or (Tensor, Tensor)
 See :func:`torch.max`
 """)
 
+add_docstr_all('amax',
+               r"""
+amax(dim=None, keepdim=False) -> Tensor
+
+See :func:`torch.amax`
+""")
+
 add_docstr_all('maximum',
                r"""
 maximum(other) -> Tensor
@@ -2112,6 +2147,13 @@ add_docstr_all('min',
 min(dim=None, keepdim=False) -> Tensor or (Tensor, Tensor)
 
 See :func:`torch.min`
+""")
+
+add_docstr_all('amin',
+               r"""
+amin(dim=None, keepdim=False) -> Tensor
+
+See :func:`torch.amin`
 """)
 
 add_docstr_all('minimum',
@@ -3704,6 +3746,13 @@ add_docstr_all('var',
 var(dim=None, unbiased=True, keepdim=False) -> Tensor
 
 See :func:`torch.var`
+""")
+
+add_docstr_all('vdot',
+               r"""
+dot(other) -> Tensor
+
+See :func:`torch.vdot`
 """)
 
 add_docstr_all('view',

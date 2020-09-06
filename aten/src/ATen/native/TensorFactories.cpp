@@ -127,7 +127,6 @@ void complex_check_dtype(
 Tensor& complex_out(Tensor& result, const Tensor& real, const Tensor& imag) {
   complex_check_dtype(result, real, imag);
   auto iter = TensorIteratorConfig()
-      .set_check_mem_overlap(true)
       .add_output(result)
       .add_input(real)
       .add_input(imag)
@@ -148,7 +147,6 @@ Tensor complex(const Tensor& real, const Tensor& imag) {
 Tensor& polar_out(Tensor& result, const Tensor& abs, const Tensor& angle) {
   complex_check_dtype(result, abs, angle);
   auto iter = TensorIteratorConfig()
-      .set_check_mem_overlap(true)
       .add_output(result)
       .add_input(abs)
       .add_input(angle)

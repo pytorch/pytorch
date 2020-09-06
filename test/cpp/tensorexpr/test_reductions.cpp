@@ -16,8 +16,6 @@
 #include "torch/csrc/jit/tensorexpr/loopnest.h"
 #include "torch/csrc/jit/tensorexpr/tensor.h"
 
-#include <torch/csrc/jit/testing/file_check.h>
-
 namespace torch {
 namespace jit {
 

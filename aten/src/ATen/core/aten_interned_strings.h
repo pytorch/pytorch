@@ -107,7 +107,6 @@ _(aten, _rsqrt) \
 _(aten, _s_where) \
 _(aten, _shape_as_tensor) \
 _(aten, _sigmoid) \
-_(aten, _sigmoid_backward) \
 _(aten, _sigmoid_forward) \
 _(aten, _sin) \
 _(aten, _sinh) \
@@ -132,7 +131,6 @@ _(aten, _sum) \
 _(aten, _sum_cuda) \
 _(aten, _tan) \
 _(aten, _tanh) \
-_(aten, _tanh_backward) \
 _(aten, _tanh_forward) \
 _(aten, _th_baddbmm) \
 _(aten, _th_bmm) \
@@ -238,6 +236,8 @@ _(aten, clamp_min) \
 _(aten, clone) \
 _(aten, coalesce) \
 _(aten, combinations) \
+_(aten, _conj) \
+_(aten, conj) \
 _(aten, complex) \
 _(aten, polar) \
 _(aten, constant_pad_nd) \
@@ -367,11 +367,14 @@ _(aten, hardsigmoid_backward) \
 _(aten, hardtanh) \
 _(aten, hardtanh_backward) \
 _(aten, hardtanh_forward) \
+_(aten, heaviside) \
 _(aten, hinge_embedding_loss) \
 _(aten, histc) \
 _(aten, hspmm) \
 _(aten, hstack) \
 _(aten, hypot) \
+_(aten, i0) \
+_(aten, i0_) \
 _(aten, ifft) \
 _(aten, index) \
 _(aten, index_add) \
