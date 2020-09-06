@@ -84,6 +84,10 @@ allow_list = [
     ("aten::linalg_outer", datetime.date(2020, 8, 30)),
     # WARNING: overload name here doesn't do anything
     ("aten::linalg_outer.out", datetime.date(2020, 8, 30)),
+    ("aten::linalg_norm", datetime.date(2020, 9, 30)),
+    ("aten::linalg_norm.ord_str", datetime.date(2020, 9, 30)),
+    ("aten::linalg_norm.out", datetime.date(2020, 9, 30)),
+    ("aten::linalg_norm.ord_str_out", datetime.date(2020, 9, 30)),
     ("aten::_compute_linear_combination", datetime.date(2020, 9, 1)),
     ("__getstate__", datetime.date(2020, 9, 1), "Conv[23]dPackedParams"),
     ("aten::_foreach_add_", datetime.date(2020, 10, 1)),
