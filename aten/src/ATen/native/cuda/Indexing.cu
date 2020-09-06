@@ -868,6 +868,12 @@ void nonzero_cuda_out_impl(const Tensor& self, Tensor& out){
   AT_CUDA_CHECK(cudaMemcpyAsync(&num_nonzeros_h, num_nonzeros.get(), sizeof(int), cudaMemcpyDeviceToHost, stream));
   //need to synchronize to make sure data is available on the host
   AT_CUDA_CHECK(cudaStreamSynchronize(stream));
+  //expected output size is num_nonzeros x ndim
+  //if someone provides an output tensor of that size, they expect that it is in-place modified
+  //but we need physical layout to be ndim x num_nonzeros, so if the passed tensor does not align
+  //we'll need to copy produced output to the passed output.
+  bool need_to_copy = out.dim()==2 && out.sizes()[0] == num_nonzeros_h && out.sizes()[1] == self.dim() && !out.t().is_contiguous();
+  at::Tensor out_temp = need_to_copy ? at::empty({self.dim(), num_nonzeros_h}, out.options()) :
   out.resize_({self.dim(), num_nonzeros_h});
   //Scalars are expected to produce output of size (1,0), so we can't write to it
   if (self.dim()>0) {
@@ -875,10 +881,10 @@ void nonzero_cuda_out_impl(const Tensor& self, Tensor& out){
     d_temp_storage = NULL;
     temp_storage_bytes = 0;
     cub::DeviceSelect::Flagged(d_temp_storage, temp_storage_bytes, counting_itr, itr,
-      out.data_ptr<int64_t>(), (int*)num_nonzeros.get(), N, stream);
+      out_temp.data_ptr<int64_t>(), (int*)num_nonzeros.get(), N, stream);
     temp_storage = allocator.allocate(temp_storage_bytes);
     cub::DeviceSelect::Flagged(temp_storage.get(), temp_storage_bytes, counting_itr, itr,
-      out.data_ptr<int64_t>(), (int*)num_nonzeros.get(), N, stream);
+      out_temp.data_ptr<int64_t>(), (int*)num_nonzeros.get(), N, stream);
 
     auto thrust_allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
     if (num_nonzeros_h > 0 && self.dim()>1){
@@ -887,18 +893,22 @@ void nonzero_cuda_out_impl(const Tensor& self, Tensor& out){
             int64_t dim_size = self.sizes()[dim];
             thrust::transform(
               thrust::cuda::par(thrust_allocator).on(stream),
-              thrust::device_ptr<int64_t>(out.data_ptr<int64_t>()),
-              thrust::device_ptr<int64_t>(out.data_ptr<int64_t>())+num_nonzeros_h,
-              thrust::device_ptr<int64_t>(out.data_ptr<int64_t>())+num_nonzeros_h * dim,
+              thrust::device_ptr<int64_t>(out_temp.data_ptr<int64_t>()),
+              thrust::device_ptr<int64_t>(out_temp.data_ptr<int64_t>())+num_nonzeros_h,
+              thrust::device_ptr<int64_t>(out_temp.data_ptr<int64_t>())+num_nonzeros_h * dim,
               [=] C10_HOST_DEVICE (const int64_t val) {return (val/div) % dim_size;}
             );
             div *= dim_size;
         }
     }
   }
-  //make out correct size
-  Tensor out_ = out.t();
-  out.set_(out_);
+  if (need_to_copy) {
+    out.copy_(out_temp.t());
+  } else {
+    //transpose out so it is correct size
+    Tensor out_ = out_temp.t();
+    out.set_(out_);
+  }
 }
 
 Tensor& nonzero_out_cuda(Tensor& out, const Tensor& self){
