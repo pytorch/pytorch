@@ -1,13 +1,13 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/core/op_registration/op_registration.h>
+#include <torch/library.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/quantized/Quantizer.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
 #include <ATen/native/quantized/cpu/qnnpack_utils.h>
-#include <caffe2/utils/threadpool/ThreadPoolMobile.h>
+#include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 
 #include <algorithm>
 
@@ -28,8 +28,11 @@ Tensor qnnpack_sigmoid(Tensor input) {
 
   initQNNPACK();
 
-  Tensor input_contig = input.contiguous();
-  size_t num_elems = input_contig.numel() / input_contig.size(0);
+  Tensor input_contig = input.contiguous(input.suggest_memory_format());
+  size_t num_elems = 1;
+  for (int i = 1; i < input_contig.ndimension(); ++i) {
+    num_elems *= input_contig.size(i);
+  }
 
   const auto zero_point = input_contig.q_zero_point();
   const auto scale = input_contig.q_scale();
@@ -63,7 +66,7 @@ Tensor qnnpack_sigmoid(Tensor input) {
   TORCH_INTERNAL_ASSERT(setupStatus == pytorch_qnnp_status_success,
                         "failed to setup QNNPACK sigmoid operator");
 
-  pthreadpool_t threadpool = caffe2::mobile_pthreadpool();
+  pthreadpool_t threadpool = caffe2::pthreadpool_();
 
   const pytorch_qnnp_status runStatus =
     pytorch_qnnp_run_operator(sigmoid_op, threadpool);
@@ -75,7 +78,7 @@ Tensor qnnpack_sigmoid(Tensor input) {
 }
 #endif  // USE_PYTORCH_QNNPACK
 
-Tensor quantized_sigmoid(const Tensor& qx) {
+Tensor sigmoid_quantized_cpu(const Tensor& qx) {
 #ifdef USE_PYTORCH_QNNPACK
   if (at::globalContext().qEngine() == at::QEngine::QNNPACK &&
       qx.scalar_type() == kQUInt8) {

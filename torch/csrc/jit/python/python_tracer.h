@@ -1,9 +1,9 @@
 #pragma once
 
+#include <torch/csrc/jit/frontend/source_range.h>
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/pybind.h>
-#include <torch/csrc/jit/frontend/source_range.h>
 
 #include <memory>
 #include <string>
@@ -29,6 +29,7 @@ std::pair<std::shared_ptr<Graph>, Stack> createGraphByTracing(
     const py::function& func,
     Stack inputs,
     const py::function& var_name_lookup_fn,
+    bool strict,
     bool force_outplace,
     Module* self = nullptr);
 } // namespace tracer

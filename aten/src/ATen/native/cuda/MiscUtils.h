@@ -1,4 +1,8 @@
+#pragma once
 #include <ATen/ATen.h>
+#include <ATen/cuda/Exceptions.h>
+#include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/PinnedMemoryAllocator.h>
 #include <THC/THC.h>  // for USE_MAGMA
 
 #ifdef USE_MAGMA
@@ -21,10 +25,17 @@ struct MAGMAQueue {
   // Constructor
   explicit MAGMAQueue(int64_t device_id) {
     auto& context = at::globalContext();
+    cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+#if CUDA_VERSION >= 11000
+    // Magma operations is numerically sensitive, so TF32 should be off
+    // regardless of the global flag.
+    TORCH_CUDABLAS_CHECK(cublasGetMathMode(handle, &original_math_mode));
+    TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
+#endif
     magma_queue_create_from_cuda(
       device_id,
       at::cuda::getCurrentCUDAStream(),
-      at::cuda::getCurrentCUDABlasHandle(),
+      handle,
       at::cuda::getCurrentCUDASparseHandle(),
       &magma_queue_);
   }
@@ -34,11 +45,20 @@ struct MAGMAQueue {
 
   // Destructor
   ~MAGMAQueue() {
+#if CUDA_VERSION >= 11000
+    // We've manually set the math mode to CUBLAS_DEFAULT_MATH, now we
+    // should restore the original math mode back
+    cublasHandle_t handle = magma_queue_get_cublas_handle(magma_queue_);
+    cublasSetMathMode(handle, original_math_mode);
+#endif
     magma_queue_destroy(magma_queue_);
   }
 
  private:
   magma_queue_t magma_queue_;
+#if CUDA_VERSION >= 11000
+  cublasMath_t original_math_mode;
+#endif
 };
 
 static inline magma_int_t magma_int_cast(int64_t value, const char* varname) {
@@ -49,6 +69,24 @@ static inline magma_int_t magma_int_cast(int64_t value, const char* varname) {
   }
   return result;
 }
+
+// MAGMA functions that don't take a magma_queue_t aren't stream safe
+// Work around this by synchronizing with the default stream
+struct MagmaStreamSyncGuard {
+  MagmaStreamSyncGuard() {
+    auto stream = at::cuda::getCurrentCUDAStream();
+    if (stream != at::cuda::getDefaultCUDAStream()) {
+      AT_CUDA_CHECK(cudaStreamSynchronize(stream));
+    }
+  }
+
+  ~MagmaStreamSyncGuard() noexcept(false) {
+    auto default_stream = at::cuda::getDefaultCUDAStream();
+    if (at::cuda::getCurrentCUDAStream() != default_stream) {
+      AT_CUDA_CHECK(cudaStreamSynchronize(default_stream));
+    }
+  }
+};
 #endif
 
 // Creates an array of size elements of type T, backed by pinned memory
@@ -58,11 +96,10 @@ static inline Storage pin_memory(int64_t size) {
   auto* allocator = cuda::getPinnedMemoryAllocator();
   int64_t adjusted_size = size * sizeof(T);
   return Storage(
-      caffe2::TypeMeta::Make<uint8_t>(),
+      Storage::use_byte_size_t(),
       adjusted_size,
       allocator,
-      /*resizable=*/false
-  );
+      /*resizable=*/false);
 }
 
 } // namespace native

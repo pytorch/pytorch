@@ -1,9 +1,9 @@
 #pragma once
 
-#include <ATen/core/jit_type.h>
-#include <ATen/core/alias_info.h>
-#include <torch/csrc/jit/frontend/lexer.h>
 #include <ATen/core/Macros.h>
+#include <ATen/core/alias_info.h>
+#include <ATen/core/jit_type.h>
+#include <torch/csrc/jit/frontend/lexer.h>
 
 namespace torch {
 namespace jit {
@@ -22,6 +22,8 @@ struct CAFFE2_API SchemaTypeParser {
   }
 
  private:
+  c10::optional<bool> tryToParseRequiresGrad();
+  c10::optional<c10::Device> tryToParseDeviceType();
   void parseList(
       int begin,
       int sep,

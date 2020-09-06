@@ -3,16 +3,11 @@
 #include <ATen/core/ivalue.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/grad_mode.h>
-#include <torch/csrc/jit/runtime/argument_spec.h>
-#include <torch/csrc/jit/runtime/autodiff.h>
-#include <torch/csrc/jit/runtime/custom_operator.h>
-#include <torch/csrc/jit/runtime/graph_executor_impl.h>
-#include <torch/csrc/jit/runtime/interpreter.h>
+#include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/jit_log.h>
-#include <torch/csrc/jit/passes/pass_manager.h>
 #include <torch/csrc/jit/passes/batch_mm.h>
-#include <torch/csrc/jit/passes/canonicalize_ops.h>
+#include <torch/csrc/jit/passes/canonicalize_graph_fuser_ops.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
@@ -26,16 +21,22 @@
 #include <torch/csrc/jit/passes/loop_unrolling.h>
 #include <torch/csrc/jit/passes/lower_grad_of.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
+#include <torch/csrc/jit/passes/pass_manager.h>
 #include <torch/csrc/jit/passes/peephole.h>
-#include <torch/csrc/jit/passes/quantization.h>
 #include <torch/csrc/jit/passes/remove_expands.h>
+#include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/requires_grad_analysis.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
+#include <torch/csrc/jit/passes/tensorexpr_fuser.h>
+#include <torch/csrc/jit/resource_guard.h>
+#include <torch/csrc/jit/runtime/argument_spec.h>
+#include <torch/csrc/jit/runtime/autodiff.h>
+#include <torch/csrc/jit/runtime/custom_operator.h>
+#include <torch/csrc/jit/runtime/graph_executor_impl.h>
+#include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/runtime/profiling_graph_executor_impl.h>
 #include <torch/csrc/jit/runtime/profiling_record.h>
-#include <torch/csrc/jit/resource_guard.h>
-#include <torch/csrc/jit/frontend/tracer.h>
 
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/function.h>
@@ -51,6 +52,20 @@
 
 namespace torch {
 namespace jit {
+
+EnableProfilingGuard::EnableProfilingGuard() {
+  auto& profiling_mode = getProfilingMode();
+  old_profiling_mode = profiling_mode;
+  profiling_mode = true;
+  auto& executor_mode = getExecutorMode();
+  old_executor_mode = executor_mode;
+  executor_mode = true;
+}
+
+EnableProfilingGuard::~EnableProfilingGuard() {
+  getProfilingMode() = old_profiling_mode;
+  getExecutorMode() = old_executor_mode;
+}
 
 namespace {
 c10::AliasAnalysisKind aliasAnalysisInternalSpecialCase() {
@@ -118,9 +133,7 @@ struct CaptureList {
     return capture_types_.size();
   }
 
-  void unpack(
-      Stack& stack,
-      const std::shared_ptr<autograd::Node>& saved_for) {
+  void unpack(Stack& stack, const std::shared_ptr<autograd::Node>& saved_for) {
     auto var_capture_it = var_captures_.begin();
     auto ivalue_capture_it = ivalue_captures_.begin();
     auto size_it = sizes_.begin();
@@ -199,7 +212,7 @@ struct UnpackInstructions {
 };
 
 // unpack values packed by `packReturnValuesIntoTuple`
-static void unpackReturnTuple(Stack &stack) {
+static void unpackReturnTuple(Stack& stack) {
   auto tuple = pop(stack).toTuple();
   stack.insert(stack.end(), tuple->elements().begin(), tuple->elements().end());
 }
@@ -259,7 +272,9 @@ struct DifferentiableGraphBackward : public autograd::Node {
 
   void addOutputForTensor(const at::Tensor& tensor) {
     auto v = Variable(tensor);
-    add_next_edge(v.defined() ? torch::autograd::impl::gradient_edge(v) : autograd::Edge{});
+    add_next_edge(
+        v.defined() ? torch::autograd::impl::gradient_edge(v)
+                    : autograd::Edge{});
   }
   void addOutputForIValue(const IValue& value) {
     if (value.isTensorList()) {
@@ -333,7 +348,7 @@ struct DifferentiableGraphOp {
         num_outputs(this->grad.f->outputs().size()) {}
 
   // XXX: keep in mind that stack can be larger than the inputs we need!
-  int operator()(Stack& stack) const {
+  void operator()(Stack* stack) const {
     auto grad_fn = std::make_shared<DifferentiableGraphBackward>(
         grad_executor,
         grad.df_input_vjps.size(),
@@ -350,8 +365,8 @@ struct DifferentiableGraphOp {
       captureInputs(*grad_fn, inputs);
     }
 
-    detachVariables(stack);
-    InterpreterState(f).run(stack);
+    detachVariables(*stack);
+    InterpreterState(f).run(*stack);
 
     {
       auto outputs = last(stack, num_outputs);
@@ -369,9 +384,8 @@ struct DifferentiableGraphOp {
       // drop the temporary outputs so that we return the same number of
       // outputs as if we were not also calculating gradient
       const size_t num_temporary_outputs = num_outputs - grad.f_real_outputs;
-      stack.erase(stack.end() - num_temporary_outputs, stack.end());
+      stack->erase(stack->end() - num_temporary_outputs, stack->end());
     }
-    return 0;
   }
 
  private:
@@ -381,7 +395,7 @@ struct DifferentiableGraphOp {
     if (!t.defined()) {
       return t;
     }
-    return autograd::as_variable_ref(t).detach();
+    return t.detach();
   }
 
   void detach(IValue& v) const {
@@ -481,14 +495,46 @@ void GraphExecutorImplBase::run(Stack& stack) {
   last_executed_optimized_graph = plan.graph;
 }
 
+c10::intrusive_ptr<Future> GraphExecutorImplBase::runAsync(Stack& stack) {
+  TORCH_CHECK(
+      stack.size() >= num_inputs,
+      "expected ",
+      num_inputs,
+      " inputs, but got only ",
+      stack.size());
+
+  C10_LOG_API_USAGE_ONCE("torch.graph_executor.runAsync");
+  logging::getLogger()->addStatValue(
+      logging::runtime_counters::GRAPH_EXECUTOR_INVOCATIONS, 1.0);
+
+  struct Frame {
+    explicit Frame(ExecutionPlan eplan)
+        : plan(std::move(eplan)), state(plan.code) {}
+    ExecutionPlan plan;
+    InterpreterState state;
+  };
+  auto frame = std::make_shared<Frame>(
+      getPlanFor(stack, GraphExecutor::getDefaultNumBailOuts()));
+  auto res = frame->state.runAsync(stack);
+  last_executed_optimized_graph = frame->plan.graph;
+  if (!res->completed()) {
+    // If not completed, persist the Frame until complete.
+    res->addCallback([frame] {});
+  }
+  return res;
+}
+
 // a Graph can be created via tracing, or via a language-based frontend
 // GraphExecutor runs it. It can run the same graph on many different sizes
 // and different requires_grad states, and handles specializations for each
 // situation. GraphExecutor is completely unaware of tracing or module
 // parameters to keep the tracing concerns separated.
 struct GraphExecutorImpl : public GraphExecutorImplBase {
-  GraphExecutorImpl(const std::shared_ptr<Graph>& graph, std::string function_name)
-      : GraphExecutorImplBase(graph, std::move(function_name)), arg_spec_creator_(*graph) {
+  GraphExecutorImpl(
+      const std::shared_ptr<Graph>& graph,
+      std::string function_name)
+      : GraphExecutorImplBase(graph, std::move(function_name)),
+        arg_spec_creator_(*graph) {
     logging::getLogger()->addStatValue(
         logging::runtime_counters::GRAPH_EXECUTORS_CONSTRUCTED, 1.0);
   }
@@ -553,15 +599,26 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
     // Phase 0. Inline functions, then clean up any artifacts that the inliner
     //          left in that may inhibit optimization
     Inline(*opt_graph);
+    GRAPH_DEBUG("After Inline, before LowerGradOf\n", *opt_graph);
     LowerGradOf(*opt_graph);
-    specializeAutogradZero(*opt_graph);
+    GRAPH_DEBUG(
+        "After LowerGradOf, before specializeAutogradZero\n", *opt_graph);
+    specializeAutogradZero(opt_graph);
+    GRAPH_DEBUG(
+        "After specializeAutogradZero, before LowerSimpleTuples\n", *opt_graph);
     LowerSimpleTuples(opt_graph);
+    GRAPH_DEBUG(
+        "After LowerSimpleTuples, before ConstantPooling\n", *opt_graph);
     ConstantPooling(opt_graph);
+    GRAPH_DEBUG(
+        "After ConstantPooling, before runRequiredPasses\n", *opt_graph);
 
     // Phase 1. Specialize to input definedness (this is very important for
     //          gradient graphs), and run required passes to bring the graph
     //          to an executable form.
     runRequiredPasses(opt_graph);
+    GRAPH_DEBUG(
+        "After runRequiredPasses, before ConstantPropagation\n", *opt_graph);
 
     // Phase 2. Propagate detailed information about the spec through the
     //          graph (enabled more specializations in later passes).
@@ -569,8 +626,15 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
     //          constants, and constant propagation doesn't need shape
     //          information anyway, so it's better to run it first.
     ConstantPropagation(opt_graph);
+    GRAPH_DEBUG(
+        "After ConstantPropagation, before PropagateInputShapes\n", *opt_graph);
     PropagateInputShapes(opt_graph);
+    GRAPH_DEBUG(
+        "After PropagateInputShapes, before PropagateRequiresGrad\n",
+        *opt_graph);
     PropagateRequiresGrad(opt_graph);
+    GRAPH_DEBUG(
+        "After PropagateRequiresGrad, before runOptimization\n", *opt_graph);
 
     // Phase 3. Run differentiable optimizations (i.e. simple graph rewrites
     //          that we can still execute using autograd).
@@ -584,28 +648,37 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
       auto diff_nodes = CreateAutodiffSubgraphs(
           opt_graph,
           autodiff_subgraph_inlining ? autodiffSubgraphNodeThreshold : 1);
+      GRAPH_DEBUG("After CreateAutodiffSubgraphs\n", *opt_graph);
+      size_t idx = 0;
       for (Node* dnode : diff_nodes) {
+        GRAPH_DEBUG("Optimizing diff node ", idx);
         auto diff_graph = std::move(dnode->g(attr::Subgraph));
         Gradient gradient = differentiate(diff_graph);
+        GRAPH_DEBUG("Forward graph:\n", *(gradient.f));
+        GRAPH_DEBUG("Backward graph:\n", *(gradient.df));
         // Run post differentiation optimizations, Autodiff will replace some
         // parts of graph with new graph, these new graphs usually consists of
         // control flows and miss shape information on nodes, so we run shape
         // prop and differentiable optimizations to ensure the graph is
         // optimized
         PropagateInputShapes(gradient.f);
+        GRAPH_DEBUG("After PropagateInputShapes\n", *(gradient.f));
         runOptimization(gradient.f);
         // run non diff optimization on the forward graph
         runNondiffOptimization(gradient.f);
         packGradient(gradient, dnode);
+        GRAPH_DEBUG("Finished optimizing diff node ", idx++);
       }
       InlineAutodiffSubgraphs(
           opt_graph,
           autodiff_subgraph_inlining ? autodiffSubgraphInlineThreshold : 1);
+      GRAPH_DEBUG("After InlineAutodiffSubgraphs\n", *opt_graph);
     } else {
       runNondiffOptimization(opt_graph);
     }
     // Make sure there are no leftovers from any passes.
     EliminateDeadCode(opt_graph);
+    GRAPH_DUMP("After compileSpec optimizations:", opt_graph);
     return ExecutionPlan(opt_graph, function_name_);
   }
 
@@ -621,15 +694,24 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
   std::unordered_map<ArgumentSpec, ExecutionPlan> plan_cache;
 };
 
-GraphExecutor::GraphExecutor(std::shared_ptr<Graph> graph, std::string function_name)
+GraphExecutor::GraphExecutor(
+    std::shared_ptr<Graph> graph,
+    std::string function_name)
     : pImpl(
-          getExecutorMode() ? dynamic_cast<GraphExecutorImplBase*>(
-                                  new ProfilingGraphExecutorImpl(graph, std::move(function_name)))
-                            : dynamic_cast<GraphExecutorImplBase*>(
-                                  new GraphExecutorImpl(graph, std::move(function_name)))) {}
+          IsNewExecutorEnabled()
+              ? dynamic_cast<GraphExecutorImplBase*>(
+                    new ProfilingGraphExecutorImpl(
+                        graph,
+                        std::move(function_name)))
+              : dynamic_cast<GraphExecutorImplBase*>(
+                    new GraphExecutorImpl(graph, std::move(function_name)))) {}
 
 void GraphExecutor::run(Stack& inputs) {
   return pImpl->run(inputs);
+}
+
+c10::intrusive_ptr<Future> GraphExecutor::runAsync(Stack& stack) {
+  return pImpl->runAsync(stack);
 }
 
 size_t GraphExecutor::getDefaultNumBailOuts() {
@@ -648,6 +730,13 @@ std::shared_ptr<Graph> GraphExecutor::graph() const {
 
 GraphExecutorState GraphExecutor::getDebugState() {
   return pImpl->getDebugState();
+}
+
+TORCH_API bool IsNewExecutorEnabled() {
+  static const auto disable_new_executor =
+      std::getenv("TORCH_JIT_DISABLE_NEW_EXECUTOR");
+  return getExecutorMode() && FLAGS_torch_jit_enable_new_executor &&
+      !disable_new_executor;
 }
 
 void runRequiredPasses(const std::shared_ptr<Graph>& g) {
@@ -708,51 +797,130 @@ bool needsGradient(const std::shared_ptr<const Graph>& graph) {
 void runNondiffOptimization(
     std::shared_ptr<Graph>& graph,
     bool strict_fuser_check) {
+  GRAPH_DEBUG(
+      "Before customPrePassses (beginning of runNondiffOptimization)\n",
+      *graph);
   // Run custom passes that different backends can register.
-  for (const auto& pass : getCustomPreFusionPasses()) {
-    pass(graph);
+  for (const auto& passPair : getCustomPrePasses()) {
+    passPair.first(graph);
   }
+  GRAPH_DEBUG("After customPrePassses\n", *graph);
 
   // decomposition pass, decompose certain ops that will be used in the
   // following passes (like batchmm and jit fusion)
   if (!getProfilingMode()) {
     DecomposeOps(graph);
+    GRAPH_DEBUG("After DecomposeOps\n", *graph);
   }
 
   // TupleConstruct / TupleUnpack pairs can still be present at this point
   // and must be removed for fusion.
   LowerSimpleTuples(graph);
+  GRAPH_DEBUG("After LowerSimpleTuples, before BatchMM\n", *graph);
 
   // Rewrite subgraphs with many MMs into expressions that batch them.
   BatchMM(graph);
 
-  // Fuse the dequant - op - quant patterns into quantized ops
-  QuantFusion(graph);
-
-  FuseGraph(graph, strict_fuser_check);
+  GRAPH_DEBUG("After BatchMM, before Fusion\n", *graph);
+  if (getProfilingMode()) {
+    if (tensorExprFuserEnabled()) {
+      FuseTensorExprs(graph);
+    }
+  } else {
+    FuseGraph(graph, strict_fuser_check);
+  }
+  GRAPH_DEBUG("After Fusion\n", *graph);
 
   // Run custom post-fusion passes
-  for (const auto& pass : getCustomPostFusionPasses()) {
-    pass(graph);
+  for (const auto& passPair : getCustomPostPasses()) {
+    passPair.first(graph);
   }
+  GRAPH_DEBUG(
+      "After customPostPassses (end of runNondiffOptimization)\n", *graph);
 }
 
 void runOptimization(std::shared_ptr<Graph>& graph, bool unroll) {
   // Basic graph preprocessing to eliminate noise.
+  GRAPH_DEBUG(
+      "Before EliminateDeadCode (beginning of runOptimization)\n", *graph);
   EliminateDeadCode(graph);
+  GRAPH_DEBUG(
+      "After EliminateDeadCode, before EliminateCommonSubexpression\n", *graph);
   EliminateCommonSubexpression(graph);
+  GRAPH_DEBUG(
+      "After EliminateCommonSubexpression, before PeepholeOptimize\n", *graph);
 
   PeepholeOptimize(graph);
+  GRAPH_DEBUG("After PeepholeOptimize, before ConstantPropagation\n", *graph);
   ConstantPropagation(graph);
+  GRAPH_DEBUG("After ConstantPropagation, before ConstantPooling\n", *graph);
   ConstantPooling(graph);
+  GRAPH_DEBUG("After ConstantPooling\n", *graph);
 
   // Unroll small loops, and eliminate expressions that are the same at every
   // iteration.
-  if (unroll)
+  if (unroll) {
     UnrollLoops(graph);
+    GRAPH_DEBUG("After UnrollLoops, before RemoveListMutation\n", *graph);
+    // run again with unrolled loops
+    RemoveListMutation(graph);
+    GRAPH_DEBUG("After RemoveListMutation, before PeepholeOptimize\n", *graph);
+    PeepholeOptimize(graph);
+    GRAPH_DEBUG("After PeepholeOptimize, before ConstantPropagation\n", *graph);
+    ConstantPropagation(graph);
+    GRAPH_DEBUG("After ConstantPropagation\n", *graph);
+  }
+
   EliminateCommonSubexpression(graph);
+  GRAPH_DEBUG(
+      "After EliminateCommonSubexpression, before CheckInplace\n", *graph);
 
   CheckInplace(graph);
+  GRAPH_DEBUG("After CheckInplace (end of runOptimization)", *graph);
+}
+
+Node* replaceBlockWithFallbackGraph(Block* b, ArrayRef<Value*> inputs) {
+  auto graph = std::make_shared<Graph>();
+
+  // we are copying the block inside If or prim::Loop otherwise we are copying
+  // the whole graph we need to differentiate the two cases  because cloneFrom
+  // automatically adds inputs if we are copying graph's block and we will
+  //  need the inputs from a user otherwise
+  if (b->owningNode() != nullptr) {
+    std::unordered_map<Value*, Value*> input_mapping;
+    auto value_map = [&input_mapping](Value* v) { return input_mapping[v]; };
+    for (auto inp : inputs) {
+      input_mapping[inp] = graph->block()->addInput();
+    }
+    graph->block()->cloneFrom(b, value_map);
+  } else {
+    auto value_map = [](Value* v) { return v; };
+    graph->block()->cloneFrom(b, value_map);
+  }
+
+  auto fallback = b->owningGraph()->create(
+      prim::FallbackGraph, inputs, b->outputs().size());
+  fallback->g_(attr::Subgraph, graph);
+  b->prependNode(fallback);
+
+  for (size_t i = 0; i < inputs.size(); i++) {
+    graph->inputs()[i]->setType(inputs[i]->type());
+    graph->inputs()[i]->copyMetadata(inputs[i]);
+  }
+
+  for (size_t i = 0; i < b->outputs().size(); i++) {
+    fallback->output(i)->setType(b->outputs()[i]->type());
+    fallback->output(i)->copyMetadata(b->outputs()[i]);
+    b->replaceOutput(i, fallback->output(i));
+  }
+
+  ProfilingRecord::removeProfilingNodes(graph->block());
+
+  for (auto it = b->nodes().rbegin(); it != fallback->iterator(); it++) {
+    it.destroyCurrent();
+  }
+
+  return fallback;
 }
 
 } // namespace jit

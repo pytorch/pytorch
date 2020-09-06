@@ -443,6 +443,14 @@ CAFFE2_MAKE_SINGULAR_ARGUMENT(string, s)
 #undef CAFFE2_MAKE_SINGULAR_ARGUMENT
 
 template <>
+C10_EXPORT Argument MakeArgument(const string& name, const NetDef& value) {
+  Argument arg;
+  arg.set_name(name);
+  *arg.mutable_n() = value;
+  return arg;
+}
+
+template <>
 C10_EXPORT bool ArgumentHelper::RemoveArgument(OperatorDef& def, int index);
 template <>
 bool ArgumentHelper::RemoveArgument(NetDef& def, int index);
@@ -533,6 +541,28 @@ C10_EXPORT const Argument& GetArgument(const NetDef& def, const string& name) {
   }
 }
 
+C10_EXPORT const Argument* GetArgumentPtr(
+    const OperatorDef& def,
+    const string& name) {
+  int index = GetArgumentIndex(def.arg(), name);
+  if (index != -1) {
+    return &def.arg(index);
+  } else {
+    return nullptr;
+  }
+}
+
+C10_EXPORT const Argument* GetArgumentPtr(
+    const NetDef& def,
+    const string& name) {
+  int index = GetArgumentIndex(def.arg(), name);
+  if (index != -1) {
+    return &def.arg(index);
+  } else {
+    return nullptr;
+  }
+}
+
 C10_EXPORT bool GetFlagArgument(
     const google::protobuf::RepeatedPtrField<Argument>& args,
     const string& name,
@@ -559,10 +589,11 @@ GetFlagArgument(const NetDef& def, const string& name, bool default_value) {
   return GetFlagArgument(def.arg(), name, default_value);
 }
 
-C10_EXPORT Argument* GetMutableArgument(
+template <typename Def>
+Argument* GetMutableArgumentImpl(
     const string& name,
     const bool create_if_missing,
-    OperatorDef* def) {
+    Def* def) {
   for (int i = 0; i < def->arg_size(); ++i) {
     if (def->arg(i).name() == name) {
       return def->mutable_arg(i);
@@ -576,6 +607,20 @@ C10_EXPORT Argument* GetMutableArgument(
   } else {
     return nullptr;
   }
+}
+
+C10_EXPORT Argument* GetMutableArgument(
+    const string& name,
+    const bool create_if_missing,
+    OperatorDef* def) {
+  return GetMutableArgumentImpl(name, create_if_missing, def);
+}
+
+C10_EXPORT Argument* GetMutableArgument(
+    const string& name,
+    const bool create_if_missing,
+    NetDef* def) {
+  return GetMutableArgumentImpl(name, create_if_missing, def);
 }
 
 C10_EXPORT void cleanupExternalInputsAndOutputs(NetDef* net) {

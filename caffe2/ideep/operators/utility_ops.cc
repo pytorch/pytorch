@@ -65,7 +65,8 @@ class CopyIDEEPToCPUOp final : public IDEEPOperator {
             OperatorBase::OutputTensor(0, dims, at::dtype<float>().device(CPU));
         X.to_public(Y->template mutable_data<float>());
       } else {
-        CAFFE_THROW("Unsupported ideep type: ", X.get_data_type());
+        CAFFE_THROW("Unsupported ideep type: ",
+                    static_cast<int>(X.get_data_type()));
       }
     }
     return true;

@@ -1,6 +1,6 @@
 ################################################################################################
 # Exclude and prepend functionalities
-function (exclude OUTPUT INPUT)
+function(exclude OUTPUT INPUT)
 set(EXCLUDES ${ARGN})
 foreach(EXCLUDE ${EXCLUDES})
         list(REMOVE_ITEM INPUT "${EXCLUDE}")
@@ -8,7 +8,7 @@ endforeach()
 set(${OUTPUT} ${INPUT} PARENT_SCOPE)
 endfunction(exclude)
 
-function (prepend OUTPUT PREPEND)
+function(prepend OUTPUT PREPEND)
 set(OUT "")
 foreach(ITEM ${ARGN})
         list(APPEND OUT "${PREPEND}${ITEM}")
@@ -142,7 +142,7 @@ endfunction()
 #
 function(dedent outvar text)
   # Use PYTHON_EXECUTABLE if it is defined, otherwise default to python
-  if ("${PYTHON_EXECUTABLE}" STREQUAL "")
+  if("${PYTHON_EXECUTABLE}" STREQUAL "")
     set(_python_exe "python")
   else()
     set(_python_exe "${PYTHON_EXECUTABLE}")
@@ -154,7 +154,7 @@ function(dedent outvar text)
     INPUT_FILE "${CMAKE_BINARY_DIR}/indented.txt"
     RESULT_VARIABLE _dedent_exitcode
     OUTPUT_VARIABLE _dedent_text)
-  if(NOT ${_dedent_exitcode} EQUAL 0)
+  if(NOT _dedent_exitcode EQUAL 0)
     message(ERROR " Failed to remove indentation from: \n\"\"\"\n${text}\n\"\"\"
     Python dedent failed with error code: ${_dedent_exitcode}")
     message(FATAL_ERROR " Python dedent failed with error code: ${_dedent_exitcode}")
@@ -167,7 +167,7 @@ endfunction()
 
 function(pycmd_no_exit outvar exitcode cmd)
   # Use PYTHON_EXECUTABLE if it is defined, otherwise default to python
-  if ("${PYTHON_EXECUTABLE}" STREQUAL "")
+  if("${PYTHON_EXECUTABLE}" STREQUAL "")
     set(_python_exe "python")
   else()
     set(_python_exe "${PYTHON_EXECUTABLE}")
@@ -202,7 +202,7 @@ function(pycmd outvar cmd)
   dedent(_dedent_cmd "${cmd}")
   pycmd_no_exit(_output _exitcode "${_dedent_cmd}")
 
-  if(NOT ${_exitcode} EQUAL 0)
+  if(NOT _exitcode EQUAL 0)
     message(ERROR " Failed when running python code: \"\"\"\n${_dedent_cmd}\n\"\"\"")
     message(FATAL_ERROR " Python command failed with error code: ${_exitcode}")
   endif()
@@ -226,15 +226,15 @@ function(print_target_properties tgt)
 
   # Get a list of all cmake properties TODO cache this lazily somehow
   execute_process(COMMAND cmake --help-property-list OUTPUT_VARIABLE CMAKE_PROPERTY_LIST)
-  STRING(REGEX REPLACE ";" "\\\\;" CMAKE_PROPERTY_LIST "${CMAKE_PROPERTY_LIST}")
-  STRING(REGEX REPLACE "\n" ";" CMAKE_PROPERTY_LIST "${CMAKE_PROPERTY_LIST}")
+  string(REGEX REPLACE ";" "\\\\;" CMAKE_PROPERTY_LIST "${CMAKE_PROPERTY_LIST}")
+  string(REGEX REPLACE "\n" ";" CMAKE_PROPERTY_LIST "${CMAKE_PROPERTY_LIST}")
 
-  foreach (prop ${CMAKE_PROPERTY_LIST})
+  foreach(prop ${CMAKE_PROPERTY_LIST})
     string(REPLACE "<CONFIG>" "${CMAKE_BUILD_TYPE}" prop ${prop})
     get_property(propval TARGET ${tgt} PROPERTY ${prop} SET)
-    if (propval)
+    if(propval)
       get_target_property(propval ${tgt} ${prop})
-      message ("${tgt} ${prop} = ${propval}")
+      message("${tgt} ${prop} = ${propval}")
     endif()
   endforeach(prop)
 endfunction(print_target_properties)

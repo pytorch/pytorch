@@ -7,10 +7,10 @@
 #include <limits>
 #include <sstream>
 
-#include "c10/macros/Macros.h"
-#include "c10/util/Exception.h"
-#include "c10/util/Flags.h"
-#include "c10/util/StringUtil.h"
+#include <c10/macros/Macros.h>
+#include <c10/util/Exception.h>
+#include <c10/util/Flags.h>
+#include <c10/util/StringUtil.h>
 
 // CAFFE2_LOG_THRESHOLD is a compile time flag that would allow us to turn off
 // logging at compile time so no logging message below that level is produced
@@ -23,9 +23,9 @@
 
 // Below are different implementations for glog and non-glog cases.
 #ifdef C10_USE_GLOG
-#include "c10/util/logging_is_google_glog.h"
+#include <c10/util/logging_is_google_glog.h>
 #else // !C10_USE_GLOG
-#include "c10/util/logging_is_not_google_glog.h"
+#include <c10/util/logging_is_not_google_glog.h>
 #endif // C10_USE_GLOG
 
 C10_DECLARE_int(caffe2_log_level);
@@ -185,12 +185,12 @@ class C10_API EnforceFailMessage {
   inline bool bad() const {
     return msg_ != nullptr;
   }
-  std::string get_message_and_free(std::string&& extra) const {
+  std::string get_message_and_free(const std::string& extra) const {
     std::string r;
     if (extra.empty()) {
       r = std::move(*msg_);
     } else {
-      r = ::c10::str(std::move(*msg_), ". ", std::move(extra));
+      r = ::c10::str(std::move(*msg_), ". ", extra);
     }
     delete msg_;
     return r;

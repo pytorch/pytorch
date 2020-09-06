@@ -4,10 +4,10 @@
 #include <torch/csrc/distributed/rpc/rref_context.h>
 #endif
 #include <torch/csrc/jit/api/function_impl.h>
-#include <torch/csrc/jit/serialization/pickler.h>
 #include <torch/csrc/jit/mobile/type_parser.h>
+#include <torch/csrc/jit/serialization/pickler.h>
+#include <torch/csrc/jit/serialization/unpickler.h>
 #include <string>
-#include "unpickler.h"
 
 namespace torch {
 namespace jit {
@@ -59,6 +59,7 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
       case IntType::Kind:
       case NoneType::Kind:
       case GeneratorType::Kind:
+      case QuantizerType::Kind:
       case BoolType::Kind:
       case VarType::Kind:
       case CapsuleType::Kind:
@@ -70,18 +71,16 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
       case LayoutType::Kind:
       case ScalarTypeType::Kind:
       case RRefType::Kind:
-        // no op, there is nothing to tag
-        break;
       case AnyType::Kind:
       case AnyListType::Kind:
       case AnyTupleType::Kind:
-        // if Any type does show up, we no longer have a way to precisely
-        // recover the type information since the w.value may be an untagged
-        // List/Dict. We should prevent objects being serialized from having the
-        // Any type and if we do allow it in functions limit it to non-heap
-        // locations.
-        TORCH_INTERNAL_ASSERT(
-            false, "AnyType, AnyTupleType, and AnyListType should not show up in the static type of objects");
+      case AnyClassType::Kind:
+      case AnyEnumType::Kind:
+        // no op, there is nothing to tag
+        break;
+      case EnumType::Kind:
+        // TODO(gmagogsfm): Implement serialization/deserialization of Enum.
+        AT_ASSERT(false);
       case TupleType::Kind: {
         auto t = w.value.toTuple();
         auto ttype = w.static_type->expect<TupleType>();
@@ -155,10 +154,9 @@ void restoreContainerTypeTags(IValue& ivalue, TypePtr type) {
   } else if (auto list_type = type->cast<ListType>()) {
     ivalue.toList().unsafeSetElementType(list_type->getElementType());
   } else {
-    AT_ERROR("Unknown type for tag restoration: " + type->python_str());
+    AT_ERROR("Unknown type for tag restoration: " + type->annotation_str());
   }
 }
-
 
 IValue Unpickler::parse_ivalue() {
   run();
@@ -409,9 +407,10 @@ PickleOpCode Unpickler::readInstruction() {
       }
       at::DataPtr storage_ptr = read_record_(key);
       int64_t numel = args.at(4).toInt();
+      caffe2::TypeMeta dtype = at::CPU(type).typeMeta();
       at::Storage storage(
-          at::CPU(type).typeMeta(),
-          numel,
+          c10::Storage::use_byte_size_t(),
+          numel * dtype.itemsize(),
           std::move(storage_ptr),
           /*allocator=*/nullptr,
           /*resizable=*/false); // NB: we didn't set any allocator for the
@@ -425,12 +424,12 @@ PickleOpCode Unpickler::readInstruction() {
         tensor = at::empty({0}, options).set_(storage);
       }
 
-      if (device.type() == at::DeviceType::CUDA) {
+      if (device.type() == DeviceType::CUDA) {
         tensor = tensor.to(device, tensor.scalar_type());
-      } else if (device.type() != at::DeviceType::CPU) {
+      } else if (device.type() != DeviceType::CPU) {
         AT_ERROR(
             "supported devices include CPU and CUDA, however got ",
-            at::DeviceTypeName(device.type(), false));
+            DeviceTypeName(device.type(), false));
       }
       stack_.push_back(std::move(tensor));
     } break;
@@ -489,7 +488,13 @@ void Unpickler::readGlobal(
         if (entry != type_cache_.end()) {
           type = entry->second;
         } else {
-          type = c10::parseType(type_str);
+          if (type_resolver_ == nullptr) {
+            // If we haven't injected a custom way of retrieving types from
+            // names, use a barebones type parser.
+            type = c10::parseType(type_str);
+          } else {
+            type = type_resolver_(type_str).type_;
+          }
           type_cache_[type_str] = type;
         }
         // TODO: Use lookahead to avoid creating the tuple and immediately
@@ -588,12 +593,28 @@ void Unpickler::readGlobal(
     AT_ASSERT(type_resolver_);
     at::StrongTypePtr type =
         type_resolver_(c10::QualifiedName(module_name, class_name));
-    globals_.emplace_back([this, type] {
-      auto val = stack_.back();
-      stack_.pop_back();
-      auto obj = obj_loader_(type, val);
-      stack_.emplace_back(std::move(obj));
-    });
+    if (auto enum_type = type.type_->cast<c10::EnumType>()) {
+      globals_.emplace_back([this, enum_type] {
+        auto val = stack_.back();
+        stack_.pop_back();
+        for (const auto& p : enum_type->enumNamesValues()) {
+          if (p.second == val) {
+            auto enum_holder = c10::make_intrusive<at::ivalue::EnumHolder>(
+                enum_type, p.first, p.second);
+            stack_.emplace_back(std::move(enum_holder));
+            return;
+          }
+        }
+      });
+    } else {
+      // Otherwise, global is a class/object type.
+      globals_.emplace_back([this, type] {
+        auto val = stack_.back();
+        stack_.pop_back();
+        auto obj = obj_loader_(type, val);
+        stack_.emplace_back(std::move(obj));
+      });
+    }
   }
   stack_.emplace_back(int64_t(globals_.size() - 1));
 }
@@ -619,16 +640,13 @@ void Unpickler::rebuildTensor(bool quantized) {
           result = at::_empty_affine_quantized(
               {0}, storage_tensor.options(), q_scale, q_zero_point);
         } break;
+        case at::kPerChannelAffineFloatQParams:
         case at::kPerChannelAffine: {
           const auto& scales = qparams.at(1).toTensor();
           const auto& zero_points = qparams.at(2).toTensor();
           int64_t axis = qparams.at(3).toInt();
           result = at::_empty_per_channel_affine_quantized(
-              {0},
-              scales,
-              zero_points,
-              axis,
-              storage_tensor.options());
+              {0}, scales, zero_points, axis, storage_tensor.options());
         } break;
         default:
           TORCH_CHECK(
@@ -640,10 +658,10 @@ void Unpickler::rebuildTensor(bool quantized) {
     } else {
       result = at::empty({0}, storage_tensor.options());
     }
-    bool requires_grad = elements.at(idx++).toBool();
+    bool requires_grad = elements.at(idx).toBool();
     // elements[idx++] is empty backwards hooks
     at::TensorImpl* impl = result.unsafeGetTensorImpl();
-    impl->set_storage(storage_tensor.storage());
+    impl->set_storage_keep_dtype(storage_tensor.storage());
     impl->set_storage_offset(storage_offset);
     impl->set_sizes_and_strides(size, stride);
     result = autograd::make_variable(result, requires_grad);
@@ -716,24 +734,27 @@ void Unpickler::readSlowWithBuffer(char* dest, size_t sz) {
 
 // Read a number of bytes from the input stream
 std::string Unpickler::readBytes(size_t length) {
-  std::string data(length, 0);
+  std::string data;
   static const size_t kSmallString = 64;
   if (length <= buffer_remaining_) {
     // Fast-path: entirely in buffer.
-    memcpy(&data[0], buffer_.data() + buffer_pos_, length);
+    data.assign(buffer_.data() + buffer_pos_, length);
     buffer_pos_ += length;
     buffer_remaining_ -= length;
   } else if (length <= kSmallString) {
     // If the string is smallish, do a full buffer read,
     // and read out of that buffer.
+    data.resize(length);
     readSlowWithBuffer(&data[0], length);
   } else {
     // Otherwise, for larger strings, read what we can from
     // the buffer, and then read directly to the destination.
     const size_t from_old_buf = buffer_remaining_;
     if (from_old_buf != 0) {
-      memcpy(&data[0], buffer_.data() + buffer_pos_, from_old_buf);
+      data.reserve(length);
+      data.append(buffer_.data() + buffer_pos_, from_old_buf);
     }
+    data.resize(length);
     const size_t needed = length - from_old_buf;
     size_t nread = reader_(&data[from_old_buf], needed);
     if (nread != needed) {

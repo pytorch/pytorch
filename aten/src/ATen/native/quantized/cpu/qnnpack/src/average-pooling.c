@@ -270,6 +270,67 @@ enum pytorch_qnnp_status pytorch_qnnp_setup_average_pooling2d_nhwc_q8(
    * buffer */
   const uint32_t mr = pytorch_qnnp_params.q8avgpool.mr;
 
+  /*
+   * Indirection buffer:
+   * Imagine a we want to do dw conv or avgpooling with these parameters:
+   * kernel_width/height=3 stride=2
+   * Input is:
+   *  ---------------
+   *  |0|1|2|3|4|5|6|
+   *  ---------------       -------
+   *  | | | | | | | |   to  |0|1|2|
+   *  ---------------       -------
+   *  | | | | | | | |       | | | |
+   *  ---------------       -------
+   *  | | | | | | | |
+   *  ---------------
+   *  | | | | | | | |
+   *  ---------------
+   *
+   *  Thus we are going from width=7 height=5 input to width=3 height=2
+   *  Convince yourself that input 5x7 with pooling params of 3x3 kernel
+   *  with 2x2 stride gets you to 2x3 output.
+   *  Now for each output place (0,0), (0,1), (0,2), (1,0), (1,1), (1,2)
+   *  we have 3x3 input.
+   *  For just the first row of output this will look like as follows:
+   *  pixel:0   pixel:1  pixel:2
+   *  -------   -------  -------
+   *  |0|1|2|   |2|3|4|  |4|5|6|
+   *  -------   -------  -------
+   *  | | | |   | | | |  | | | |
+   *  -------   -------  -------
+   *  | | | |   | | | |  | | | |
+   *  -------   -------  -------
+   *  As you can see there is some overlap in the input needed for each
+   *  output pixel.
+   *  What is indirection buffer:
+   *  Indirection buffer just stores the pointer to the underlying data.
+   *  In this case pointer for a particular input position will point to
+   *  all the input channels of that position in NHWC format.
+   *  So one option for the aforemnetioned storage would be:
+   *  For each output position: store a 3x3 array of pointers. Thus we
+   *  would have 3x3 * 3 (3 output pixel of the first row) = 27 pointers
+   *  stored.
+   *  Now instead we store the pointer in this format:
+   *  ---------------
+   *  |0|1|2|3|4|5|6|
+   *  ---------------
+   *  | | | | | | | |
+   *  ---------------
+   *  | | | | | | | |
+   *  ---------------
+   *  Then we have all the pointers needed as before, but with less duplication.
+   *  So instead of 27 pointers now we have:
+   *  (3 (# of output pixels) - 1) * (stride) * 3 (kernel height) * + 3 * 3 (kernel h*w)
+   *  = 4 * 3 + 9
+   *  = 21 pointers.
+   *  which is the equation below.
+   *  Now in order for this to work the kernel has to be adjusted.
+   *  Here the kernel produced output worth of entire width. Thus as you move from one
+   *  pixel to the next, the jump in the indirection buffer has to be not 3*3 = 9
+   *  but kernel height (3) * stride (2) = 6.
+   *  This you will see operator-run.c
+   */
   const size_t step_width = min(average_pooling->stride_width, pooling_width);
   const size_t step_height =
       pooling_size + (output_width * step_width - 1) * pooling_height;

@@ -64,8 +64,8 @@ TEST(TestScalar, TestScalar) {
   auto gen = at::detail::getDefaultCPUGenerator();
   {
     // See Note [Acquire lock when using random generators]
-    std::lock_guard<std::mutex> lock(gen->mutex_);
-    ASSERT_NO_THROW(gen->set_current_seed(std::random_device()()));
+    std::lock_guard<std::mutex> lock(gen.mutex());
+    ASSERT_NO_THROW(gen.set_current_seed(std::random_device()()));
   }
   auto&& C = at::globalContext();
   if (at::hasCUDA()) {

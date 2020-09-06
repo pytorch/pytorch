@@ -1,6 +1,6 @@
 #include <ATen/cuda/detail/CUDAHooks.h>
 
-#include <ATen/CUDAGenerator.h>
+#include <ATen/CUDAGeneratorImpl.h>
 #include <ATen/Context.h>
 #include <ATen/DeviceGuard.h>
 #include <ATen/DynamicLibrary.h>
@@ -57,7 +57,7 @@ std::unique_ptr<THCState, void (*)(THCState*)> CUDAHooks::initCUDA() const {
       });
 }
 
-Generator* CUDAHooks::getDefaultCUDAGenerator(DeviceIndex device_index) const {
+const Generator& CUDAHooks::getDefaultCUDAGenerator(DeviceIndex device_index) const {
   return at::cuda::detail::getDefaultCUDAGenerator(device_index);
 }
 
@@ -181,6 +181,10 @@ Allocator* CUDAHooks::getPinnedMemoryAllocator() const {
   return at::cuda::getPinnedMemoryAllocator();
 }
 
+Allocator* CUDAHooks::getCUDADeviceAllocator() const {
+  return at::cuda::getCUDADeviceAllocator();
+}
+
 bool CUDAHooks::compiledWithCuDNN() const {
   return AT_CUDNN_ENABLED();
 }
@@ -219,6 +223,24 @@ long CUDAHooks::versionCuDNN() const {
   return CUDNN_VERSION;
 #else
   AT_ERROR("Cannot query CuDNN version if ATen_cuda is not built with CuDNN");
+#endif
+}
+
+long CUDAHooks::versionCUDART() const {
+#ifdef CUDART_VERSION
+  return CUDART_VERSION;
+#else
+  TORCH_CHECK(
+    false,
+    "Cannot query CUDART version because CUDART is not available");
+#endif
+}
+
+bool CUDAHooks::hasCUDART() const {
+#ifdef CUDART_VERSION
+  return true;
+#else
+  return false;
 #endif
 }
 

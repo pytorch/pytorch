@@ -16,6 +16,10 @@ namespace onnx {
 class OnnxExporter;
 }
 
+// Split SparseLengthsSumSparse into SparseLengthsSumSparseLookup +
+// SparseLengthsSum
+CAFFE2_API void splitSparseLengthsSumSparse(NetDef* net, const Workspace& ws);
+
 struct OnnxifiTransformerOptions final : public BackendTransformOptions {
   explicit OnnxifiTransformerOptions() : BackendTransformOptions() {}
 
@@ -28,12 +32,21 @@ struct OnnxifiTransformerOptions final : public BackendTransformOptions {
   // Whether to lower model blob by blob
   bool load_model_by_blob{false};
 
+  // Whether to enforce fp32 inputs into fp16.
+  bool enforce_fp32_inputs_into_fp16{false};
+
   // Whether to combine fp32 batched inputs into one tensor and convert it to
   // fp16 or not
   bool merge_fp32_inputs_into_fp16{false};
 
   // Enter loop test mode
   bool loop_test{false};
+
+  // Whether the net has been ssaRewritten
+  bool predictor_net_ssa_rewritten{false};
+
+  // Inference timeout
+  int timeout{0};
 };
 
 class CAFFE2_API OnnxifiTransformer final : public BackendTransformerBase {
@@ -46,7 +59,7 @@ class CAFFE2_API OnnxifiTransformer final : public BackendTransformerBase {
       NetDef* pred_net,
       const std::vector<std::string>& weight_names,
       const ShapeInfoMap& shape_hints,
-      const std::unordered_set<int>& blacklisted_ops) override;
+      const std::unordered_set<int>& blocklisted_ops) override;
 
  private:
   // Since we create new tensors during the conversion process, we actually need
@@ -70,7 +83,6 @@ class CAFFE2_API OnnxifiTransformer final : public BackendTransformerBase {
   // We already have all the ops and external inputs and outputs!
   OperatorDef buildOnnxifiOp(
       const std::string& onnx_model_str,
-      const std::unordered_map<std::string, TensorShape>& output_size_hints,
       const std::unordered_set<std::string>& initialization_list,
       const std::vector<std::string>& external_inputs,
       const std::vector<std::string>& external_outputs,
@@ -80,7 +92,7 @@ class CAFFE2_API OnnxifiTransformer final : public BackendTransformerBase {
   NetDef TransformViaC2(
       NetDef* pred_net,
       const std::unordered_set<std::string>& weights,
-      const std::unordered_set<int>& blacklisted_ops,
+      const std::unordered_set<int>& blocklisted_ops,
       const ShapeInfoMap& shape_hints);
 
   // Transform by passing ONNX proto to backend
@@ -88,39 +100,52 @@ class CAFFE2_API OnnxifiTransformer final : public BackendTransformerBase {
       Workspace* ws,
       NetDef* pred_net,
       const std::unordered_set<std::string>& weights,
-      const std::unordered_set<int>& blacklisted_ops,
+      const std::unordered_set<int>& blocklisted_ops,
       ShapeInfoMap* shape_hints);
 
   // Query whether an operator is supported by passing C2 protobuf
   bool supportOpC2(
       const caffe2::OperatorDef& op,
       const ShapeInfoMap& shape_hints,
-      const std::unordered_set<int>& blacklisted_ops,
+      const std::unordered_set<std::string>& weights,
+      const std::unordered_set<int>& blocklisted_ops,
       onnxBackendID backend_id) const;
 
   // Query whether an operator is supported by passing ONNX protobuf
   bool supportOpOnnx(
       const caffe2::OperatorDef& op,
       onnx::OnnxExporter* exporter,
-      const std::unordered_set<int>& blacklisted_ops,
+      const std::unordered_set<int>& blocklisted_ops,
       onnxBackendID backend_id) const;
 
   // Tie the output of Gather to the scalar weight input of the
-  // SparseLengthsWeighted* op. If the latter is disabled, disable the former
-  // too.
+  // SparseLengthsWeighted* and SparseLengthsSumSparseLookup (which is split
+  // from the SparseLengthsWeighted*Sparse) ops. If the latter is disabled,
+  // disable the former too.
   void tieGatherAndSparseLengthsWeightedSumOps(
       const NetDef& net,
       const ShapeInfoMap& shape_hints,
-      std::unordered_set<int>* blacklisted_ops) const;
+      const std::unordered_set<std::string>& weights,
+      std::unordered_set<int>* blocklisted_ops) const;
+
+  // For net with partitioning info, blocklist ops that are supposed to run on
+  // CPU, whose partition info will contain empty device_id list.
+  void blocklistCpuPartition(
+      const NetDef& net,
+      std::unordered_set<int>* blocklisted_ops) const;
 
   // Rule based filtering
   void applyFilteringRules(
       const NetDef& net,
       const ShapeInfoMap& shape_hints,
-      std::unordered_set<int>* blacklisted_ops) const;
+      const std::unordered_set<std::string>& weights,
+      std::unordered_set<int>* blocklisted_ops) const;
 
   // Determine backend id
   void getBackendId();
+
+  // Extract partition info from the original net
+  void extractPartitionInfo(const NetDef& net);
 
   // Options
   OnnxifiTransformerOptions opts_;
@@ -145,5 +170,8 @@ class CAFFE2_API OnnxifiTransformer final : public BackendTransformerBase {
 
   // A cache for ONNX shape hints
   std::unordered_map<std::string, TensorShape> shape_hints_onnx_;
+
+  // Partition info
+  std::vector<PartitionInfo> partition_infos_;
 };
 } // namespace caffe2

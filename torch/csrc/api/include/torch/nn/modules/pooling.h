@@ -218,20 +218,24 @@ TORCH_MODULE(MaxPool3d);
 // ============================================================================
 
 /// Base class for all (dimension-specialized) adaptive maxpool modules.
-template <size_t D, typename Derived>
+template <size_t D, typename output_size_t, typename Derived>
 class TORCH_API AdaptiveMaxPoolImpl : public torch::nn::Cloneable<Derived> {
  public:
-  AdaptiveMaxPoolImpl(ExpandingArray<D> output_size)
-      : AdaptiveMaxPoolImpl(AdaptiveMaxPoolOptions<D>(output_size)) {}
-  explicit AdaptiveMaxPoolImpl(const AdaptiveMaxPoolOptions<D>& options_);
+  AdaptiveMaxPoolImpl(output_size_t output_size)
+      : AdaptiveMaxPoolImpl(AdaptiveMaxPoolOptions<output_size_t>(output_size)) {}
+  explicit AdaptiveMaxPoolImpl(
+    const AdaptiveMaxPoolOptions<output_size_t>& options_) : options(options_) {}
 
-  void reset() override;
+  void reset() override {};
 
   /// Pretty prints the `AdaptiveMaxPool{1,2,3}d` module into the given `stream`.
-  void pretty_print(std::ostream& stream) const override;
+  void pretty_print(std::ostream& stream) const override {
+    stream << "torch::nn::AdaptiveMaxPool" << D << "d"
+           << "(output_size=" << options.output_size() << ")";
+  }
 
   /// The options with which this `Module` was constructed.
-  AdaptiveMaxPoolOptions<D> options;
+  AdaptiveMaxPoolOptions<output_size_t> options;
 };
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~ AdaptiveMaxPool1d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -248,9 +252,9 @@ class TORCH_API AdaptiveMaxPoolImpl : public torch::nn::Cloneable<Derived> {
 /// AdaptiveMaxPool1d model(AdaptiveMaxPool1dOptions(3));
 /// ```
 class TORCH_API AdaptiveMaxPool1dImpl :
-  public AdaptiveMaxPoolImpl<1, AdaptiveMaxPool1dImpl> {
+  public AdaptiveMaxPoolImpl<1, ExpandingArray<1>, AdaptiveMaxPool1dImpl> {
  public:
-  using AdaptiveMaxPoolImpl<1, AdaptiveMaxPool1dImpl>::AdaptiveMaxPoolImpl;
+  using AdaptiveMaxPoolImpl<1, ExpandingArray<1>, AdaptiveMaxPool1dImpl>::AdaptiveMaxPoolImpl;
 
   Tensor forward(const Tensor& input);
 
@@ -280,9 +284,9 @@ TORCH_MODULE(AdaptiveMaxPool1d);
 /// AdaptiveMaxPool2d model(AdaptiveMaxPool2dOptions({3, 2}));
 /// ```
 class TORCH_API AdaptiveMaxPool2dImpl :
-  public AdaptiveMaxPoolImpl<2, AdaptiveMaxPool2dImpl> {
+  public AdaptiveMaxPoolImpl<2, ExpandingArrayWithOptionalElem<2>, AdaptiveMaxPool2dImpl> {
  public:
-  using AdaptiveMaxPoolImpl<2, AdaptiveMaxPool2dImpl>::AdaptiveMaxPoolImpl;
+  using AdaptiveMaxPoolImpl<2, ExpandingArrayWithOptionalElem<2>, AdaptiveMaxPool2dImpl>::AdaptiveMaxPoolImpl;
 
   Tensor forward(const Tensor& input);
 
@@ -312,9 +316,9 @@ TORCH_MODULE(AdaptiveMaxPool2d);
 /// AdaptiveMaxPool3d model(AdaptiveMaxPool3dOptions(3));
 /// ```
 class TORCH_API AdaptiveMaxPool3dImpl :
-  public AdaptiveMaxPoolImpl<3, AdaptiveMaxPool3dImpl> {
+  public AdaptiveMaxPoolImpl<3, ExpandingArrayWithOptionalElem<3>, AdaptiveMaxPool3dImpl> {
  public:
-  using AdaptiveMaxPoolImpl<3, AdaptiveMaxPool3dImpl>::AdaptiveMaxPoolImpl;
+  using AdaptiveMaxPoolImpl<3, ExpandingArrayWithOptionalElem<3>, AdaptiveMaxPool3dImpl>::AdaptiveMaxPoolImpl;
 
   Tensor forward(const Tensor& input);
 
@@ -333,20 +337,24 @@ TORCH_MODULE(AdaptiveMaxPool3d);
 // ============================================================================
 
 /// Base class for all (dimension-specialized) adaptive avgpool modules.
-template <size_t D, typename Derived>
+template <size_t D, typename output_size_t, typename Derived>
 class TORCH_API AdaptiveAvgPoolImpl : public torch::nn::Cloneable<Derived> {
  public:
-  AdaptiveAvgPoolImpl(ExpandingArray<D> output_size)
-      : AdaptiveAvgPoolImpl(AdaptiveAvgPoolOptions<D>(output_size)) {}
-  explicit AdaptiveAvgPoolImpl(const AdaptiveAvgPoolOptions<D>& options_);
+  AdaptiveAvgPoolImpl(output_size_t output_size)
+      : AdaptiveAvgPoolImpl(AdaptiveAvgPoolOptions<output_size_t>(output_size)) {}
+  explicit AdaptiveAvgPoolImpl(
+    const AdaptiveAvgPoolOptions<output_size_t>& options_) : options(options_) {}
 
-  void reset() override;
+  void reset() override {}
 
   /// Pretty prints the `AdaptiveAvgPool{1,2,3}d` module into the given `stream`.
-  void pretty_print(std::ostream& stream) const override;
+  void pretty_print(std::ostream& stream) const override {
+    stream << "torch::nn::AdaptiveAvgPool" << D << "d"
+           << "(output_size=" << options.output_size() << ")";
+  }
 
   /// The options with which this `Module` was constructed.
-  AdaptiveAvgPoolOptions<D> options;
+  AdaptiveAvgPoolOptions<output_size_t> options;
 };
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~ AdaptiveAvgPool1d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -363,9 +371,9 @@ class TORCH_API AdaptiveAvgPoolImpl : public torch::nn::Cloneable<Derived> {
 /// AdaptiveAvgPool1d model(AdaptiveAvgPool1dOptions(5));
 /// ```
 class TORCH_API AdaptiveAvgPool1dImpl :
-  public AdaptiveAvgPoolImpl<1, AdaptiveAvgPool1dImpl> {
+  public AdaptiveAvgPoolImpl<1, ExpandingArray<1>, AdaptiveAvgPool1dImpl> {
  public:
-  using AdaptiveAvgPoolImpl<1, AdaptiveAvgPool1dImpl>::AdaptiveAvgPoolImpl;
+  using AdaptiveAvgPoolImpl<1, ExpandingArray<1>, AdaptiveAvgPool1dImpl>::AdaptiveAvgPoolImpl;
 
   Tensor forward(const Tensor& input);
 };
@@ -391,9 +399,9 @@ TORCH_MODULE(AdaptiveAvgPool1d);
 /// AdaptiveAvgPool2d model(AdaptiveAvgPool2dOptions({3, 2}));
 /// ```
 class TORCH_API AdaptiveAvgPool2dImpl :
-  public AdaptiveAvgPoolImpl<2, AdaptiveAvgPool2dImpl> {
+  public AdaptiveAvgPoolImpl<2, ExpandingArrayWithOptionalElem<2>, AdaptiveAvgPool2dImpl> {
  public:
-  using AdaptiveAvgPoolImpl<2, AdaptiveAvgPool2dImpl>::AdaptiveAvgPoolImpl;
+  using AdaptiveAvgPoolImpl<2, ExpandingArrayWithOptionalElem<2>, AdaptiveAvgPool2dImpl>::AdaptiveAvgPoolImpl;
 
   Tensor forward(const Tensor& input);
 };
@@ -419,9 +427,9 @@ TORCH_MODULE(AdaptiveAvgPool2d);
 /// AdaptiveAvgPool3d model(AdaptiveAvgPool3dOptions(3));
 /// ```
 class TORCH_API AdaptiveAvgPool3dImpl :
-  public AdaptiveAvgPoolImpl<3, AdaptiveAvgPool3dImpl> {
+  public AdaptiveAvgPoolImpl<3, ExpandingArrayWithOptionalElem<3>, AdaptiveAvgPool3dImpl> {
  public:
-  using AdaptiveAvgPoolImpl<3, AdaptiveAvgPool3dImpl>::AdaptiveAvgPoolImpl;
+  using AdaptiveAvgPoolImpl<3, ExpandingArrayWithOptionalElem<3>, AdaptiveAvgPool3dImpl>::AdaptiveAvgPoolImpl;
 
   Tensor forward(const Tensor& input);
 };

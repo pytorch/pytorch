@@ -4,7 +4,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from caffe2.python import core
-from hypothesis import given
+from hypothesis import given, settings
 from hypothesis import strategies as st
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
@@ -35,9 +35,10 @@ class TestMathOps(serial.SerializedTestCase):
                                    grad_reference=powf_grad,
                                    ensure_outputs_are_inferred=True)
 
-    @serial.given(X=hu.tensor(),
+    @given(X=hu.tensor(),
            exponent=st.floats(min_value=-3.0, max_value=3.0),
            **hu.gcs)
+    @settings(deadline=10000)
     def test_sign(self, X, exponent, gc, dc):
         def signf(X):
             return [np.sign(X)]

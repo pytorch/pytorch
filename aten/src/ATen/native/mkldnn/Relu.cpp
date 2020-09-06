@@ -8,11 +8,11 @@
 namespace at { namespace native {
 
 Tensor mkldnn_relu(const Tensor& input) {
-  AT_ERROR("mkldnn_relu: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "mkldnn_relu: ATen not compiled with MKLDNN support");
 }
 
 Tensor& mkldnn_relu_(Tensor& input) {
-  AT_ERROR("mkldnn_relu_: ATen not compiled with MKLDNN support");
+  TORCH_CHECK(false, "mkldnn_relu_: ATen not compiled with MKLDNN support");
 }
 
 }}
@@ -26,14 +26,14 @@ namespace at { namespace native {
 Tensor mkldnn_relu(const Tensor& input) {
   const ideep::tensor& x = itensor_from_mkldnn(input);
   ideep::tensor y;
-  ideep::eltwise_forward::compute<AllocForMKLDNN>(
+  ideep::eltwise_forward::compute(
       x, y, ideep::algorithm::eltwise_relu, ideep::prop_kind::forward_training, /*alpha*/ 0.0);
   return new_with_itensor_mkldnn(std::move(y), input.options());
 }
 
 Tensor& mkldnn_relu_(Tensor& input) {
   ideep::tensor& x = itensor_from_mkldnn(input);
-  ideep::eltwise_forward::compute<AllocForMKLDNN>(
+  ideep::eltwise_forward::compute(
       x, x, ideep::algorithm::eltwise_relu, ideep::prop_kind::forward_training, /*alpha*/ 0.0);
   return input;
 }

@@ -3,15 +3,15 @@
 #include <ATen/core/ivalue.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/ir/ir.h>
-#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/ir/node_hashing.h>
-#include <torch/csrc/jit/runtime/operator.h>
-#include <torch/csrc/jit/ir/alias_analysis.h>
+#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
-#include <torch/csrc/utils/memory.h>
+#include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
+#include <torch/csrc/utils/memory.h>
 
 namespace torch {
 namespace jit {
@@ -55,9 +55,17 @@ c10::optional<std::vector<IValue>> runNodeIfInputsAreConstant(const Node* n) {
       isinstance(stack, n->tys(attr::types));
     } break;
     default: {
+      const auto& the_operator = n->getOperator();
+      if (the_operator.schema().is_vararg()) {
+        // vararg schemas require the number of inputs at the top of the stack
+        // but this is broken in other places in constant prop, so disable it
+        // for now
+        return c10::nullopt;
+      }
+
       auto op = n->getOperation();
       try {
-        op(stack);
+        op(&stack);
       } catch (...) {
         return c10::nullopt;
       }
@@ -85,6 +93,9 @@ std::unordered_set<Symbol> skip_list = {
     prim::Constant,
     prim::AutogradZero,
     prim::Uninitialized,
+    prim::Guard,
+    prim::profile,
+    prim::profile_optional,
     prim::unchecked_unwrap_optional, // TODO remove
     // TODO (zach): we should consider skipping tensor factories in the cases
     // where the constant tensor would be large but cheap to create.
@@ -116,7 +127,6 @@ struct ConstantPropagator {
       aliasDb_ = nullptr;
     }
   }
-
 
   void propagateNode(Node* n) {
     std::vector<IValue> outputs;
@@ -286,7 +296,7 @@ struct ConstantPropagator {
 
   bool noMutableValues(at::ArrayRef<Value*> values) {
     return std::none_of(values.begin(), values.end(), [](Value* v) {
-      return AliasDb::mutableType(v);
+      return AliasDb::isMutableType(v);
     });
   }
 

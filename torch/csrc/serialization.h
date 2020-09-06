@@ -5,6 +5,9 @@
 #include <TH/THGenerateAllTypes.h>
 
 #include <torch/csrc/generic/serialization.h>
+#include <TH/THGenerateComplexTypes.h>
+
+#include <torch/csrc/generic/serialization.h>
 #include <TH/THGenerateHalfType.h>
 
 #include <torch/csrc/generic/serialization.h>

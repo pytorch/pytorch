@@ -14,8 +14,7 @@ class MIOPENActivationOpBase : public Operator<HIPContext> {
   USE_OPERATOR_FUNCTIONS(HIPContext);
 
   MIOPENActivationOpBase(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<HIPContext>(operator_def, ws),
-        miopen_wrapper_(&context_) {
+      : Operator<HIPContext>(operator_def, ws), miopen_wrapper_(&context_) {
     MIOPEN_ENFORCE(miopenCreateTensorDescriptor(&data_desc_));
     MIOPEN_ENFORCE(miopenCreateActivationDescriptor(&act_desc_));
   }
@@ -30,7 +29,6 @@ class MIOPENActivationOpBase : public Operator<HIPContext> {
   miopenTensorDescriptor_t data_desc_;
   miopenActivationDescriptor_t act_desc_;
   vector<int64_t> mio_dims_;
-
 };
 
 template <miopenActivationMode_t kMIOPENActivationMode>
@@ -96,7 +94,7 @@ class MIOPENActivationGradientOp final : public MIOPENActivationOpBase {
   MIOPENActivationGradientOp(const OperatorDef& operator_def, Workspace* ws)
       : MIOPENActivationOpBase(operator_def, ws) {
     MIOPEN_ENFORCE(miopenSetActivationDescriptor(
-        act_desc_, kMIOPENActivationMode,  1.0, 1.0, 1.0));
+        act_desc_, kMIOPENActivationMode, 1.0, 1.0, 1.0));
   }
 
   bool RunOnDevice() override {

@@ -51,18 +51,27 @@
       retstmnt;                                                      \
     }                                                                \
     catch (const c10::IndexError& e) {                               \
-      auto msg = torch::processErrorMsg(e.what_without_backtrace()); \
-      PyErr_SetString(PyExc_IndexError, msg.c_str());                \
+      auto msg = torch::get_cpp_stacktraces_enabled() ?              \
+                    e.what() : e.what_without_backtrace();           \
+      PyErr_SetString(PyExc_IndexError, torch::processErrorMsg(msg).c_str()); \
       retstmnt;                                                      \
     }                                                                \
     catch (const c10::ValueError& e) {                               \
-      auto msg = torch::processErrorMsg(e.what_without_backtrace()); \
-      PyErr_SetString(PyExc_ValueError, msg.c_str());                \
+      auto msg = torch::get_cpp_stacktraces_enabled() ?              \
+                    e.what() : e.what_without_backtrace();           \
+      PyErr_SetString(PyExc_ValueError, torch::processErrorMsg(msg).c_str()); \
+      retstmnt;                                                      \
+    }                                                                \
+    catch (const c10::TypeError& e) {                               \
+      auto msg = torch::get_cpp_stacktraces_enabled() ?              \
+                    e.what() : e.what_without_backtrace();           \
+      PyErr_SetString(PyExc_TypeError, torch::processErrorMsg(msg).c_str()); \
       retstmnt;                                                      \
     }                                                                \
     catch (const c10::Error& e) {                                    \
-      auto msg = torch::processErrorMsg(e.what_without_backtrace()); \
-      PyErr_SetString(PyExc_RuntimeError, msg.c_str());              \
+      auto msg = torch::get_cpp_stacktraces_enabled() ?              \
+                    e.what() : e.what_without_backtrace();           \
+      PyErr_SetString(PyExc_RuntimeError, torch::processErrorMsg(msg).c_str()); \
       retstmnt;                                                      \
     }                                                                \
     catch (torch::PyTorchError & e) {                                \
@@ -223,6 +232,8 @@ namespace torch {
 
 THP_CLASS std::string processErrorMsg(std::string str);
 
+THP_API bool get_cpp_stacktraces_enabled();
+
 // Abstract base class for exceptions which translate to specific Python types
 struct PyTorchError : public std::exception {
   virtual PyObject* python_type() = 0;
@@ -265,6 +276,28 @@ struct ValueError : public PyTorchError {
   }
 };
 
+// Translates to Python NotImplementedError
+struct NotImplementedError : public PyTorchError {
+  NotImplementedError() {}
+  PyObject* python_type() override {
+    return PyExc_NotImplementedError;
+  }
+};
+
+struct WarningMeta {
+  WarningMeta(const c10::SourceLocation& _source_location,
+      const std::string& _msg,
+      const bool _verbatim) :
+      source_location_{_source_location},
+      msg_{_msg},
+      verbatim_{_verbatim} { }
+
+
+  const c10::SourceLocation source_location_;
+  const std::string msg_;
+  const bool verbatim_;
+};
+
 // ATen warning handler for Python
 struct PyWarningHandler: at::WarningHandler {
 public:
@@ -273,7 +306,8 @@ public:
   TORCH_API ~PyWarningHandler() noexcept(false) override;
 
   void process(const at::SourceLocation &source_location,
-               const std::string &msg) override;
+               const std::string &msg,
+               const bool verbatim) override;
 
   /** Call if an exception has been thrown
 
@@ -286,8 +320,7 @@ public:
   }
 
 private:
-  using warning_buffer_t =
-    std::vector<std::pair<c10::SourceLocation, std::string>>;
+  using warning_buffer_t = std::vector<WarningMeta>;
 
   warning_buffer_t warning_buffer_;
 

@@ -3,9 +3,12 @@
 # Author: Pearu Peterson
 # Created: February 2020
 
+from typing import Dict, Tuple, Optional
+
 import torch
+from torch import Tensor
 from . import _linalg_utils as _utils
-from ._overrides import has_torch_function, handle_torch_function
+from .overrides import has_torch_function, handle_torch_function
 
 
 __all__ = ['lobpcg']
@@ -73,7 +76,7 @@ def lobpcg(A,                   # type: Tensor
       n (integer, optional): if :math:`X` is not specified then `n`
                   specifies the size of the generated random
                   approximation of eigenvectors. Default value for `n`
-                  is `k`. If :math:`X` is specifed, the value of `n`
+                  is `k`. If :math:`X` is specified, the value of `n`
                   (when specified) must be the number of :math:`X`
                   columns.
 
@@ -146,18 +149,18 @@ def lobpcg(A,                   # type: Tensor
       Preconditioned Eigensolver: Locally Optimal Block Preconditioned
       Conjugate Gradient Method. SIAM J. Sci. Comput., 23(2),
       517-541. (25 pages)
-      `https://epubs.siam.org/doi/abs/10.1137/S1064827500366124`_
+      https://epubs.siam.org/doi/abs/10.1137/S1064827500366124
 
       [StathopoulosEtal2002] Andreas Stathopoulos and Kesheng
       Wu. (2002) A Block Orthogonalization Procedure with Constant
       Synchronization Requirements. SIAM J. Sci. Comput., 23(6),
       2165-2182. (18 pages)
-      `https://epubs.siam.org/doi/10.1137/S1064827500370883`_
+      https://epubs.siam.org/doi/10.1137/S1064827500370883
 
       [DuerschEtal2018] Jed A. Duersch, Meiyue Shao, Chao Yang, Ming
       Gu. (2018) A Robust and Efficient Implementation of LOBPCG.
       SIAM J. Sci. Comput., 40(5), C655-C676. (22 pages)
-      `https://epubs.siam.org/doi/abs/10.1137/17M1129830`_
+      https://epubs.siam.org/doi/abs/10.1137/17M1129830
 
     """
 
@@ -374,9 +377,8 @@ class LOBPCG(object):
                 # strict ordering of eigenpairs
                 break
             count += 1
-        assert count >= prev_count, (
-            'the number of converged eigenpairs '
-            '(was %s, got %s) cannot decrease' % (prev_count, count))
+        assert count >= prev_count, 'the number of converged eigenpairs ' \
+            '(was {}, got {}) cannot decrease'.format(prev_count, count)
         self.ivars['converged_count'] = count
         self.tvars['rerr'] = rerr
         return count
@@ -720,10 +722,14 @@ class LOBPCG(object):
             if rerr < tau_ortho:
                 break
             if m < U.shape[-1] + V.shape[-1]:
+                # TorchScript needs the class var to be assigned to a local to
+                # do optional type refinement
+                B = self.B
+                assert B is not None
                 raise ValueError(
                     'Overdetermined shape of U:'
                     ' #B-cols(={}) >= #U-cols(={}) + #V-cols(={}) must hold'
-                    .format(self.B.shape[-1], U.shape[-1], V.shape[-1]))
+                    .format(B.shape[-1], U.shape[-1], V.shape[-1]))
         self.ivars['ortho_i'] = i
         self.ivars['ortho_j'] = j
         return U

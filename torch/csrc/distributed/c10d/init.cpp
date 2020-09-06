@@ -23,8 +23,8 @@
 
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/distributed/c10d/comm.h>
-#include <torch/csrc/distributed/c10d/ddp.h>
 #include <torch/csrc/distributed/c10d/reducer.h>
+#include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/pybind.h>
 
@@ -107,6 +107,20 @@ class PythonStore : public ::c10d::Store {
   }
 };
 
+// This method is called from DDP's Python API. Its inputs are
+// a c10d reducer object, state, and callable comm_hook. State and
+// comm_hook inputs are Python objects and this function creates a
+// c10d PythonCommHook object using these inputs. It later calls
+// register_comm_hook function of the reducer input to register that
+// PythonCommHook object.
+void _register_comm_hook(
+    ::c10d::Reducer& reducer,
+    py::object state,
+    py::object comm_hook) {
+  reducer.register_comm_hook(std::make_unique<::c10d::PythonCommHook>(
+      std::move(state), std::move(comm_hook)));
+};
+
 PyObject* c10d_init(PyObject* _unused) {
   C10_LOG_API_USAGE_ONCE("c10d.python.import");
   auto c10d_module = THPObjectPtr(PyImport_ImportModule("torch.distributed"));
@@ -116,17 +130,43 @@ PyObject* c10d_init(PyObject* _unused) {
 
   auto module = py::handle(c10d_module).cast<py::module>();
 
+  module.def(
+      "_register_comm_hook",
+      &_register_comm_hook,
+      py::arg("ddp_model"),
+      py::arg("state"),
+      py::arg("comm_hook"));
+
+  shared_ptr_class_<::c10d::GradBucket>(module, "_GradBucket")
+      .def(py::init<std::vector<Tensor>&>(), py::arg("tensors"))
+      .def(
+          "get_tensors",
+          &::c10d::GradBucket::getTensors,
+          py::call_guard<py::gil_scoped_release>(),
+          R"(
+            ``get_tensors`` returns a list of ``torch.Tensor``. Each tensor in
+            the list refers to the replica on each device. There will be multiple
+            replicas only in the case of single process multiple device mode. In
+            the single process single device mode, this list would consist of only
+            a single tensor.
+           )");
+
   shared_ptr_class_<::c10d::Reducer>(module, "Reducer")
       .def(
           py::init<
               std::vector<std::vector<torch::autograd::Variable>>,
               std::vector<std::vector<size_t>>,
               std::shared_ptr<::c10d::ProcessGroup>,
-              std::vector<std::vector<bool>>>(),
+              std::vector<std::vector<bool>>,
+              int64_t,
+              bool>(),
           py::arg("replicas"),
           py::arg("bucket_indices"),
           py::arg("process_group"),
-          py::arg("expect_sparse_gradients") = std::vector<std::vector<bool>>())
+          py::arg("expect_sparse_gradients") = std::vector<std::vector<bool>>(),
+          py::arg("bucket_bytes_cap") = ::c10d::kDefaultBucketBytesCap,
+          py::arg("find_unused_parameters") = false,
+          py::call_guard<py::gil_scoped_release>())
       .def(
           "initialize_buckets",
           &::c10d::Reducer::initialize_buckets,
@@ -140,11 +180,30 @@ PyObject* c10d_init(PyObject* _unused) {
           [](::c10d::Reducer& reducer, const torch::autograd::Variable& output)
               -> void { reducer.prepare_for_backward({output}); },
           py::call_guard<py::gil_scoped_release>())
-      .def("get_backward_stats", &::c10d::Reducer::get_backward_stats);
+      .def("get_backward_stats", &::c10d::Reducer::get_backward_stats)
+      .def("_rebuild_buckets", &::c10d::Reducer::rebuild_buckets)
+      .def(
+          "get_bucket_tensors",
+          &::c10d::Reducer::get_bucket_tensors,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_push_all_rebuilt_params",
+          &::c10d::Reducer::push_rebuilt_params_for_all_indices,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_set_forward_pass_work_handle",
+          &::c10d::Reducer::set_forward_pass_work_handle,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_get_local_used_maps",
+          &::c10d::Reducer::get_local_used_maps_on_device);
 
   py::enum_<::c10d::ReduceOp>(module, "ReduceOp", R"(
 An enum-like class for available reduction operations: ``SUM``, ``PRODUCT``,
 ``MIN``, ``MAX``, ``BAND``, ``BOR``, and ``BXOR``.
+
+Note that ``BAND``, ``BOR``, and ``BXOR`` reductions are not available when
+using the ``NCCL`` backend.
 
 The values of this class can be accessed as attributes, e.g., ``ReduceOp.SUM``.
 They are used in specifying strategies for reduction collectives, e.g.,
@@ -203,6 +262,10 @@ They are used in specifying strategies for reduction collectives, e.g.,
   py::class_<::c10d::BarrierOptions>(module, "BarrierOptions")
       .def(py::init<>())
       .def_readwrite("timeout", &::c10d::BarrierOptions::timeout);
+
+  py::class_<::c10d::AllToAllOptions>(module, "AllToAllOptions")
+      .def(py::init<>())
+      .def_readwrite("timeout", &::c10d::AllToAllOptions::timeout);
 
   auto store =
       py::class_<::c10d::Store, std::shared_ptr<::c10d::Store>, PythonStore>(
@@ -470,6 +533,55 @@ They are used in specifying strategies for reduction collectives, e.g.,
               py::call_guard<py::gil_scoped_release>())
 
           .def(
+              "alltoall_base",
+              &::c10d::ProcessGroup::alltoall_base,
+              py::arg("output_tensor"),
+              py::arg("input_tensor"),
+              py::arg("output_split_sizes"),
+              py::arg("input_split_sizes"),
+              py::arg("opts") = ::c10d::AllToAllOptions(),
+              py::call_guard<py::gil_scoped_release>())
+
+          .def(
+              "alltoall_base",
+              [](::c10d::ProcessGroup& pg,
+                 at::Tensor& output,
+                 at::Tensor& input,
+                 std::vector<int64_t> outputSplitSizes,
+                 std::vector<int64_t> inputSplitSizes) {
+                return pg.alltoall_base(
+                    output,
+                    input,
+                    outputSplitSizes,
+                    inputSplitSizes,
+                    ::c10d::AllToAllOptions());
+              },
+              py::arg("output"),
+              py::arg("input"),
+              py::arg("output_split_sizes"),
+              py::arg("input_split_sizes"),
+              py::call_guard<py::gil_scoped_release>())
+
+          .def(
+              "alltoall",
+              &::c10d::ProcessGroup::alltoall,
+              py::arg("output_tensor"),
+              py::arg("input_tensor"),
+              py::arg("opts") = ::c10d::AllToAllOptions(),
+              py::call_guard<py::gil_scoped_release>())
+
+          .def(
+              "alltoall",
+              [](::c10d::ProcessGroup& pg,
+                 std::vector<at::Tensor>& output,
+                 std::vector<at::Tensor>& input) {
+                return pg.alltoall(output, input, ::c10d::AllToAllOptions());
+              },
+              py::arg("output"),
+              py::arg("input"),
+              py::call_guard<py::gil_scoped_release>())
+
+          .def(
               "send",
               &::c10d::ProcessGroup::send,
               py::call_guard<py::gil_scoped_release>())
@@ -569,7 +681,7 @@ They are used in specifying strategies for reduction collectives, e.g.,
           py::arg("store"),
           py::arg("rank"),
           py::arg("size"),
-          py::arg("timeout") = std::chrono::milliseconds(10 * 1000));
+          py::arg("timeout") = std::chrono::milliseconds(10 * 1000)); // NOLINT
 #endif
 
 #ifdef USE_C10D_NCCL
@@ -614,53 +726,52 @@ They are used in specifying strategies for reduction collectives, e.g.,
       .def(
           "wait",
           &::c10d::ProcessGroup::Work::wait,
-          py::call_guard<py::gil_scoped_release>());
+          py::arg("timeout") = kNoTimeout,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "get_future",
+          [](::c10d::ProcessGroup::Work& work)
+              -> std::shared_ptr<jit::PythonFutureWrapper> {
+            return std::make_shared<jit::PythonFutureWrapper>(work.getFuture());
+          },
+          R"(
+            Returns:
+                A ``torch._C.Future`` object which is associated with the completion of
+                the ``ProcessGroup::Work``. As an example, a future object can be retrieved
+                by ``fut = process_group.allreduce(tensors).get_future()``.
 
-#ifdef USE_CUDA
-  module.def(
-      "_dist_bucket_tensors",
-      &::c10d::bucketTensors,
-      py::arg("tensors"),
-      py::arg("bucket_size"),
-      py::arg("fine_grained"),
-      py::call_guard<py::gil_scoped_release>());
+            Example::
+                Below is an example of a simple allreduce DDP communication hook that uses
+                ``get_future` API to retrieve a Future associated with the completion of
+                ``allreduce`` work.
 
-  module.def(
-      "_dist_broadcast_coalesced",
-      &::c10d::distBroadcastCoalesced,
-      py::arg("process_group"),
-      py::arg("tensors"),
-      py::arg("buffer_size"),
-      py::arg("fine_grained"),
-      py::call_guard<py::gil_scoped_release>());
+                >>> def allreduce(state: object, bucket: dist._GradBucket): -> torch._C.Future
+                >>>     tensors = [t / process_group.world_size for t in bucket.get_tensors()]
+                >>>     work = process_group.allreduce(tensors)
+                >>>     return work.get_future()
 
-  module.def(
-      "_sync_params",
-      &::c10d::syncParams,
-      py::arg("process_group"),
-      py::arg("parameter_data"),
-      py::arg("buffer_data"),
-      py::arg("devices"),
-      py::arg("broadcast_bucket_size"),
-      py::arg("broadcast_buffers"),
-      py::call_guard<py::gil_scoped_release>());
+                >>> ddp_model._register_comm_hook(state = None, hook = allreduce)
 
-  module.def(
-      "_queue_reduction",
-      &::c10d::queueReduction,
-      py::arg("process_group"),
-      py::arg("grads_batch"),
-      py::arg("devices"),
-      py::call_guard<py::gil_scoped_release>());
+            .. warning ::
+                ``get_future`` API supports only NCCL backend and single-process single-device mode.
+                The ``torch._C.Future`` object returned by this API can be used in
+                ``DistributedDataParallel._register_comm_hook``, but it is subject to some subtle
+                differences compared to ``torch.futures.Future`` due to compromises made for performance
+                reasons.
 
-  module.def(
-      "_sync_reduction",
-      &::c10d::syncReduction,
-      py::arg("reduction_work"),
-      py::arg("grads_batch"),
-      py::arg("grads_batch_coalesced"),
-      py::call_guard<py::gil_scoped_release>());
-#endif
+                In the example above, ``allreduce`` work will be done on GPU using NCCL backend,
+                ``fut.wait()`` will return after synchronizing the appropriate NCCL streams
+                with PyTorch's default device streams to ensure we can have asynchronous CUDA
+                execution and it does not wait for the entire operation to complete on GPU. Note that
+                ``FutureNCCL``  does not support ``NCCL_BLOCKING_WAIT`` flag or NCCL's ``barrier()``.
+                In addition, if a callback function was added by ``fut.then()``, it will wait until
+                ``WorkNCCL``'s NCCL streams synchronize with ``ProcessGroupNCCL``'s dedicated callback
+                stream and invoke the callback inline after running the callback on the callback stream.
+                ``fut.then()`` will return another ``FutureNCCL`` that holds the return value of the
+                callback and a ``CUDAEvent`` that recorded the callback stream.
+
+                Note that ``fut.done()`` returns if the enire operation is completed on the GPU.
+           )");
 
   module.def(
       "_compute_bucket_assignment_by_size",
@@ -668,6 +779,7 @@ They are used in specifying strategies for reduction collectives, e.g.,
       py::arg("tensors"),
       py::arg("bucket_size"),
       py::arg("expect_sparse_gradient") = std::vector<bool>(),
+      py::arg("tensor_indices") = std::vector<int64_t>(),
       py::call_guard<py::gil_scoped_release>());
 
   module.def(
@@ -676,13 +788,17 @@ They are used in specifying strategies for reduction collectives, e.g.,
       // for the tensor list argument, but still pass it to the underlying
       // function as a c10::ArrayRef.
       [](std::shared_ptr<::c10d::ProcessGroup> process_group,
-         std::vector<at::Tensor> tensors,
-         size_t buffer_size) {
-        broadcast_coalesced(process_group, tensors, buffer_size);
+         std::vector<at::Tensor> tensors, // NOLINT
+         size_t buffer_size,
+         int rank) {
+        broadcast_coalesced(
+            std::move(process_group), tensors, buffer_size, rank);
       },
       py::arg("process_group"),
       py::arg("tensors"),
       py::arg("buffer_size"),
+      // The source of truth rank to broadcast the tensors from.
+      py::arg("src") = 0,
       py::call_guard<py::gil_scoped_release>());
 
   module.def(
@@ -737,13 +853,15 @@ They are used in specifying strategies for reduction collectives, e.g.,
       },
       py::call_guard<py::gil_scoped_release>());
 
+  module.attr("_DEFAULT_FIRST_BUCKET_BYTES") = ::c10d::kDefaultFirstBucketBytes;
+
   Py_RETURN_TRUE;
 }
 
 } // namespace
 
 // c10d methods on torch._C
-static PyMethodDef methods[] = {
+static PyMethodDef methods[] = { // NOLINT
     {"_c10d_init", (PyCFunction)c10d_init, METH_NOARGS, nullptr},
     {nullptr, nullptr, 0, nullptr}};
 

@@ -164,9 +164,13 @@ static void check_single_result(PyObject* _original, PyObject* _result, PyObject
 }
 
 static std::string hook_name(PyObject* hook) {
-  THPObjectPtr name(PyObject_GetAttrString(hook, "__name__"));
-  if (name && THPUtils_checkString(name.get())) {
-    return THPUtils_unpackString(name.get());
+  if (PyObject_HasAttrString(hook, "__name__")) {
+    THPObjectPtr name(PyObject_GetAttrString(hook, "__name__"));
+    if (!name) throw python_error();
+
+    if (name && THPUtils_checkString(name.get())) {
+      return THPUtils_unpackString(name.get());
+    }
   }
   return "<unknown>";
 }

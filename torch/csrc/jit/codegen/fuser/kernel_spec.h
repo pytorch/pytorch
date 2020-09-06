@@ -1,14 +1,14 @@
 #pragma once
 
 #include <ATen/ATen.h>
+#include <ATen/core/stack.h>
 #include <c10/util/Optional.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/codegen/fuser/arg_spec.h>
 #include <torch/csrc/jit/codegen/fuser/fused_kernel.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
-#include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/ir/ir.h>
-#include <ATen/core/stack.h>
+#include <torch/csrc/jit/runtime/interpreter.h>
 
 #include <cstdint>
 #include <memory>
@@ -139,7 +139,7 @@ struct TORCH_API KernelSpec {
   bool has_random_;
   mutable std::mutex mutex_;
   mutable std::
-      unordered_map<ArgSpec, std::shared_ptr<FusedKernel>, torch::hash<ArgSpec>>
+      unordered_map<ArgSpec, std::shared_ptr<FusedKernel>, c10::hash<ArgSpec>>
           kernels_;
 };
 

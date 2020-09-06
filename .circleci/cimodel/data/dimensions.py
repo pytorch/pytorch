@@ -5,11 +5,10 @@ CUDA_VERSIONS = [
     "92",
     "101",
     "102",
+    "110"
 ]
 
 STANDARD_PYTHON_VERSIONS = [
-    "2.7",
-    "3.5",
     "3.6",
     "3.7",
     "3.8"

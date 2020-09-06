@@ -35,6 +35,11 @@ ARG GCC_VERSION
 ADD ./common/install_gcc.sh install_gcc.sh
 RUN bash ./install_gcc.sh && rm install_gcc.sh
 
+# Install clang
+ARG CLANG_VERSION
+ADD ./common/install_clang.sh install_clang.sh
+RUN bash ./install_clang.sh && rm install_clang.sh
+
 # Install non-standard Python versions (via Travis binaries)
 ARG TRAVIS_PYTHON_VERSION
 ENV PATH /opt/python/$TRAVIS_PYTHON_VERSION/bin:$PATH
@@ -80,6 +85,9 @@ ENV BUILD_ENVIRONMENT ${BUILD_ENVIRONMENT}
 # AWS specific CUDA build guidance
 ENV TORCH_CUDA_ARCH_LIST Maxwell
 ENV TORCH_NVCC_FLAGS "-Xfatbin -compress-all"
+
+# Install LLVM dev version (Defined in the pytorch/builder github repository)
+COPY --from=pytorch/llvm:9.0.1 /opt/llvm /opt/llvm
 
 USER jenkins
 CMD ["bash"]

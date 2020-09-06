@@ -1,0 +1,2087 @@
+load("@bazel_skylib//lib:paths.bzl", "paths")
+load("@pybind11_bazel//:build_defs.bzl", "pybind_extension")
+load("@rules_proto//proto:defs.bzl", "proto_library")
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_proto_library", "cc_test")
+load("//third_party:substitution.bzl", "header_template_rule")
+load("//:tools/build_variables.bzl", "torch_cpp_srcs", "libtorch_python_core_sources", "libtorch_core_sources", "libtorch_distributed_sources", "libtorch_extra_sources", "jit_core_sources")
+load("//tools/rules:cu.bzl", "cu_library")
+load("//tools/config:defs.bzl", "if_cuda")
+load("//:aten.bzl", "intern_build_aten_ops")
+
+COMMON_COPTS = [
+    "-DHAVE_MALLOC_USABLE_SIZE=1",
+    "-DHAVE_MMAP=1",
+    "-DHAVE_SHM_OPEN=1",
+    "-DHAVE_SHM_UNLINK=1",
+    "-D_FILE_OFFSET_BITS=64",
+    "-DHAVE_GCC_GET_CPUID",
+    "-DUSE_GCC_GET_CPUID",
+    "-DTH_HAVE_THREAD",
+    "-DUSE_FBGEMM",
+    "-DUSE_DISTRIBUTED",
+    "-DATEN_THREADING=NATIVE",
+    "-DNO_CUDNN_DESTROY_HANDLE",
+] + if_cuda([
+    "-DUSE_CUDA",
+    "-DUSE_CUDNN",
+])
+
+# c10
+header_template_rule(
+    name = "cmake_macros_h",
+    src = "c10/macros/cmake_macros.h.in",
+    out = "c10/macros/cmake_macros.h",
+    substitutions = {
+        "cmakedefine": "define",
+        "#define FEATURE_TORCH_MOBILE": "/* #undef FEATURE_TORCH_MOBILE */",
+        "#define C10_USE_NUMA": "/* #undef C10_USE_NUMA */",
+    },
+)
+
+header_template_rule(
+    name = "cuda_cmake_macros_h",
+    src = "c10/cuda/impl/cuda_cmake_macros.h.in",
+    out = "c10/cuda/impl/cuda_cmake_macros.h",
+    substitutions = {
+        "cmakedefine": "define",
+    },
+)
+
+cc_library(
+    name = "c10_headers",
+    hdrs = glob([
+        "c10/core/*.h",
+        "c10/core/impl/*.h",
+        "c10/cuda/*.h",
+        "c10/cuda/impl/*.h",
+        "c10/macros/*.h",
+        "c10/util/*.h",
+        "c10/util/*.hpp",
+    ]),
+    deps = [
+        "@com_github_gflags_gflags//:gflags",
+        "@com_github_glog//:glog",
+        ":cmake_macros_h",
+        ":cuda_cmake_macros_h",
+    ],
+)
+
+cc_library(
+    name = "c10",
+    srcs = glob([
+        "c10/core/*.cpp",
+        "c10/core/impl/*.cpp",
+        "c10/util/*.cpp",
+    ]) + if_cuda(
+        glob([
+            "c10/cuda/*.cpp",
+            "c10/cuda/impl/*.cpp",
+        ]),
+        [],
+    ),
+    copts = ["-DCAFFE2_BUILD_MAIN_LIB"],
+    deps = [
+        ":c10_headers",
+    ] + if_cuda(
+        ["@cuda"],
+        [],
+    ),
+    alwayslink = True,
+)
+
+cc_test(
+    name = "c10_tests",
+    size = "small",
+    srcs = glob([
+        "c10/test/util/*.cpp",
+        "c10/test/util/*.h",
+        "c10/test/core/*.cpp",
+        "c10/test/core/impl/*.cpp",
+    ]),
+    copts = ["-Wno-deprecated-declarations"],
+    deps = [
+        ":c10",
+        ":c10_headers",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
+# TODO: refactor this into its own library (but how to make
+# a binary based off of a module in a library?)
+py_binary(
+    name = "gen",
+    srcs = ["tools/setup_helpers/gen.py"],
+    deps = [
+        ":tools_codegen"
+    ],
+)
+
+genrule(
+    name = "generated_cpp",
+    srcs = [
+        "aten/src/ATen/native/native_functions.yaml",
+    ] + glob(["aten/src/ATen/templates/**"]),
+    outs = [
+        "aten/src/ATen/Declarations.yaml",
+        "aten/src/ATen/BackendSelectRegister.cpp",
+        "aten/src/ATen/CPUType.h",
+        "aten/src/ATen/CPUType.cpp",
+        "aten/src/ATen/Functions.h",
+        "aten/src/ATen/Functions.cpp",
+        "aten/src/ATen/NativeFunctions.h",
+        "aten/src/ATen/MkldnnCPUType.h",
+        "aten/src/ATen/MkldnnCPUType.cpp",
+        "aten/src/ATen/QuantizedCPUType.h",
+        "aten/src/ATen/QuantizedCPUType.cpp",
+        "aten/src/ATen/SparseCPUType.h",
+        "aten/src/ATen/SparseCPUType.cpp",
+        "aten/src/ATen/TypeDefault.h",
+        "aten/src/ATen/TypeDefault.cpp",
+        "aten/src/ATen/core/TensorBody.h",
+        "aten/src/ATen/core/TensorMethods.cpp",
+        "aten/src/ATen/core/ATenOpList.cpp",
+    ],
+    cmd = "$(location :gen) --source-path aten/src/ATen --install_dir `dirname $(location aten/src/ATen/Declarations.yaml)`",
+    tools = [":gen"],
+)
+
+py_library(
+    name = "tools_codegen",
+    srcs = glob(["tools/codegen/**/*.py"]),
+)
+
+py_library(
+    name = "tools_autograd",
+    srcs = glob(["tools/autograd/*.py"]),
+    data = glob([
+        "tools/autograd/*.yaml",
+        "tools/autograd/templates/*",
+    ]),
+    deps = [":tools_codegen"],
+)
+
+py_library(
+    name = "tools_jit",
+    srcs = glob(["tools/jit/*.py"]),
+    data = glob(["tools/jit/templates/*"]),
+)
+
+py_binary(
+    name = "generate_code",
+    srcs = ["tools/setup_helpers/generate_code.py"],
+    deps = [
+        ":tools_autograd",
+        ":tools_jit",
+    ],
+)
+
+libtorch_cpp_generated_sources = [
+        "torch/csrc/autograd/generated/VariableType.h",
+        "torch/csrc/autograd/generated/VariableType_0.cpp",
+        "torch/csrc/autograd/generated/VariableType_1.cpp",
+        "torch/csrc/autograd/generated/VariableType_2.cpp",
+        "torch/csrc/autograd/generated/VariableType_3.cpp",
+        "torch/csrc/autograd/generated/VariableType_4.cpp",
+        # "torch/csrc/autograd/generated/VariableTypeEverything.cpp",
+        "torch/csrc/autograd/generated/TraceType_0.cpp",
+        "torch/csrc/autograd/generated/TraceType_1.cpp",
+        "torch/csrc/autograd/generated/TraceType_2.cpp",
+        "torch/csrc/autograd/generated/TraceType_3.cpp",
+        "torch/csrc/autograd/generated/TraceType_4.cpp",
+        # "torch/csrc/autograd/generated/TraceTypeEverything.cpp",
+        "torch/csrc/autograd/generated/RegistrationDeclarations.h",
+        "torch/csrc/autograd/generated/Functions.h",
+        "torch/csrc/autograd/generated/Functions.cpp",
+        "torch/csrc/autograd/generated/variable_factories.h",
+        "torch/csrc/jit/generated/generated_unboxing_wrappers_0.cpp",
+        "torch/csrc/jit/generated/generated_unboxing_wrappers_1.cpp",
+        "torch/csrc/jit/generated/generated_unboxing_wrappers_2.cpp",
+]
+
+libtorch_python_generated_sources = [
+        "torch/csrc/autograd/generated/python_functions.h",
+        "torch/csrc/autograd/generated/python_functions.cpp",
+        "torch/csrc/autograd/generated/python_variable_methods.cpp",
+        "torch/csrc/autograd/generated/python_torch_functions.cpp",
+        "torch/csrc/autograd/generated/python_nn_functions.cpp",
+        "torch/csrc/autograd/generated/python_fft_functions.cpp",
+        "torch/csrc/autograd/generated/python_linalg_functions.cpp",
+]
+
+genrule(
+    name = "all_generated_code",
+    srcs = [
+        "aten/src/ATen/Declarations.yaml",
+    ],
+    outs = libtorch_cpp_generated_sources + libtorch_python_generated_sources,
+    cmd = "$(location :generate_code) --install_dir `dirname $(location torch/csrc/autograd/generated/variable_factories.h)`/../.. --declarations-path $(location aten/src/ATen/Declarations.yaml) --nn-path aten/src",
+    tools = [":generate_code"],
+)
+
+filegroup(
+    name = "cpp_generated_code",
+    data = [":all_generated_code"],
+    srcs = libtorch_cpp_generated_sources,
+)
+
+filegroup(
+    name = "python_generated_code",
+    data = [":all_generated_code"],
+    srcs = libtorch_python_generated_sources,
+)
+
+exports_files(
+    srcs = ["aten/src/ATen/cpu/tbb/extra/version_string.ver.in"],
+)
+
+# ATen
+filegroup(
+    name = "aten_base_cpp",
+    srcs = glob([
+        "aten/src/ATen/*.cpp",
+        "aten/src/ATen/detail/*.cpp",
+        "aten/src/ATen/cpu/*.cpp",
+    ]),
+)
+
+filegroup(
+    name = "ATen_CORE_SRCS",
+    srcs = glob(
+        [
+            "aten/src/ATen/core/**/*.cpp",
+        ],
+        exclude = [
+            "aten/src/ATen/core/**/*_test.cpp",
+        ],
+    ),
+)
+
+filegroup(
+    name = "aten_native_cpp",
+    srcs = glob(["aten/src/ATen/native/*.cpp"]),
+)
+
+filegroup(
+    name = "aten_native_sparse_cpp",
+    srcs = glob(["aten/src/ATen/native/sparse/*.cpp"]),
+)
+
+filegroup(
+    name = "aten_native_quantized_cpp",
+    srcs = glob(
+        [
+            "aten/src/ATen/native/quantized/*.cpp",
+            "aten/src/ATen/native/quantized/cpu/*.cpp",
+        ],
+    ),
+)
+
+filegroup(
+    name = "aten_native_mkl_cpp",
+    srcs = glob(["aten/src/ATen/native/mkl/*.cpp"]),
+)
+
+filegroup(
+    name = "aten_native_mkldnn_cpp",
+    srcs = glob(["aten/src/ATen/native/mkldnn/*.cpp"]),
+)
+
+filegroup(
+    name = "aten_native_xnnpack",
+    srcs = glob(["aten/src/ATen/native/xnnpack/*.cpp"]),
+)
+
+filegroup(
+    name = "aten_base_vulkan",
+    srcs = glob(["aten/src/ATen/vulkan/*.cpp"]),
+)
+
+filegroup(
+    name = "ATen_QUANTIZED_SRCS",
+    srcs = glob(
+        [
+            "aten/src/ATen/quantized/**/*.cpp",
+        ],
+        exclude = [
+            "aten/src/ATen/quantized/**/*_test.cpp",
+        ],
+    ),
+)
+
+filegroup(
+    name = "th_srcs",
+    srcs = [
+        "aten/src/TH/THAllocator.cpp",
+        "aten/src/TH/THBlas.cpp",
+        "aten/src/TH/THGeneral.cpp",
+        "aten/src/TH/THLapack.cpp",
+        "aten/src/TH/THStorageFunctions.cpp",
+        "aten/src/TH/THTensor.cpp",
+        "aten/src/TH/THTensorEvenMoreMath.cpp",
+        "aten/src/TH/THTensorLapack.cpp",
+        "aten/src/TH/THTensorMath.cpp",
+        "aten/src/TH/THTensorMoreMath.cpp",
+        "aten/src/TH/THTensorRandom.cpp",
+        "aten/src/TH/THVector.cpp",
+        "aten/src/TH/vector/AVX.cpp",
+    ],
+)
+
+filegroup(
+    name = "aten_cuda_srcs",
+    srcs = [
+        "aten/src/ATen/cuda/CUDABlas.cpp",
+        "aten/src/ATen/cuda/CUDAContext.cpp",
+        "aten/src/ATen/cuda/CUDAGenerator.cpp",
+        "aten/src/ATen/cuda/CuSparseHandlePool.cpp",
+        "aten/src/ATen/cuda/CublasHandlePool.cpp",
+        "aten/src/ATen/cuda/PinnedMemoryAllocator.cpp",
+        "aten/src/ATen/cuda/detail/CUDAHooks.cpp",
+        "aten/src/ATen/cudnn/AutocastRNN.cpp",
+        "aten/src/ATen/cudnn/Descriptors.cpp",
+        "aten/src/ATen/cudnn/Handle.cpp",
+        "aten/src/ATen/cudnn/Types.cpp",
+        "aten/src/ATen/native/cuda/CUDAUnaryOps.cpp",
+        "aten/src/ATen/native/cuda/LegacyDefinitions.cpp",
+        "aten/src/ATen/native/cuda/TensorShapeCUDA.cpp",
+        "aten/src/ATen/native/cudnn/AffineGridGenerator.cpp",
+        "aten/src/ATen/native/cudnn/BatchNorm.cpp",
+        "aten/src/ATen/native/cudnn/Conv.cpp",
+        "aten/src/ATen/native/cudnn/GridSampler.cpp",
+        "aten/src/ATen/native/cudnn/LossCTC.cpp",
+        "aten/src/ATen/native/cudnn/RNN.cpp",
+        "aten/src/ATen/native/miopen/BatchNorm_miopen.cpp",
+        "aten/src/ATen/native/miopen/Conv_miopen.cpp",
+        "aten/src/ATen/native/miopen/RNN_miopen.cpp",
+        "aten/src/ATen/native/sparse/cuda/SparseCUDATensor.cpp",
+        "aten/src/THC/THCCachingHostAllocator.cpp",
+        "aten/src/THC/THCGeneral.cpp",
+        "aten/src/THC/THCStorageCopy.cpp",
+        "aten/src/THC/THCTensor.cpp",
+    ],
+)
+
+filegroup(
+    name = "thc_srcs_cu",
+    srcs = [
+        "aten/src/THC/THCBlas.cu.cc",
+        "aten/src/THC/THCReduceApplyUtils.cu.cc",
+        "aten/src/THC/THCSleep.cu.cc",
+        "aten/src/THC/THCSortUtils.cu.cc",
+        "aten/src/THC/THCStorage.cu.cc",
+        "aten/src/THC/THCStorageCopy.cu.cc",
+        "aten/src/THC/THCTensor.cu.cc",
+        "aten/src/THC/THCTensorCopy.cu.cc",
+        "aten/src/THC/THCTensorIndex.cu.cc",
+        "aten/src/THC/THCTensorMath.cu.cc",
+        "aten/src/THC/THCTensorMathBlas.cu.cc",
+        "aten/src/THC/THCTensorMathMagma.cu.cc",
+        "aten/src/THC/THCTensorMathPairwise.cu.cc",
+        "aten/src/THC/THCTensorMathReduce.cu.cc",
+        "aten/src/THC/THCTensorMathScan.cu.cc",
+        "aten/src/THC/THCTensorMode.cu.cc",
+        "aten/src/THC/THCTensorRandom.cu.cc",
+        "aten/src/THC/THCTensorScatterGather.cu.cc",
+        "aten/src/THC/THCTensorSort.cu.cc",
+        "aten/src/THC/THCTensorTopK.cu.cc",
+        "aten/src/THC/generated/THCTensorMaskedBFloat16.cu.cc",
+        "aten/src/THC/generated/THCTensorMaskedBool.cu.cc",
+        "aten/src/THC/generated/THCTensorMaskedByte.cu.cc",
+        "aten/src/THC/generated/THCTensorMaskedChar.cu.cc",
+        "aten/src/THC/generated/THCTensorMaskedDouble.cu.cc",
+        "aten/src/THC/generated/THCTensorMaskedFloat.cu.cc",
+        "aten/src/THC/generated/THCTensorMaskedHalf.cu.cc",
+        "aten/src/THC/generated/THCTensorMaskedInt.cu.cc",
+        "aten/src/THC/generated/THCTensorMaskedLong.cu.cc",
+        "aten/src/THC/generated/THCTensorMaskedShort.cu.cc",
+        "aten/src/THC/generated/THCTensorMathPointwiseBool.cu.cc",
+        "aten/src/THC/generated/THCTensorMathPointwiseByte.cu.cc",
+        "aten/src/THC/generated/THCTensorMathPointwiseChar.cu.cc",
+        "aten/src/THC/generated/THCTensorMathPointwiseDouble.cu.cc",
+        "aten/src/THC/generated/THCTensorMathPointwiseFloat.cu.cc",
+        "aten/src/THC/generated/THCTensorMathPointwiseHalf.cu.cc",
+        "aten/src/THC/generated/THCTensorMathPointwiseInt.cu.cc",
+        "aten/src/THC/generated/THCTensorMathPointwiseLong.cu.cc",
+        "aten/src/THC/generated/THCTensorMathPointwiseShort.cu.cc",
+        "aten/src/THC/generated/THCTensorMathReduceBFloat16.cu.cc",
+        "aten/src/THC/generated/THCTensorMathReduceBool.cu.cc",
+        "aten/src/THC/generated/THCTensorMathReduceByte.cu.cc",
+        "aten/src/THC/generated/THCTensorMathReduceChar.cu.cc",
+        "aten/src/THC/generated/THCTensorMathReduceDouble.cu.cc",
+        "aten/src/THC/generated/THCTensorMathReduceFloat.cu.cc",
+        "aten/src/THC/generated/THCTensorMathReduceHalf.cu.cc",
+        "aten/src/THC/generated/THCTensorMathReduceInt.cu.cc",
+        "aten/src/THC/generated/THCTensorMathReduceLong.cu.cc",
+        "aten/src/THC/generated/THCTensorMathReduceShort.cu.cc",
+        "aten/src/THC/generated/THCTensorSortByte.cu.cc",
+        "aten/src/THC/generated/THCTensorSortChar.cu.cc",
+        "aten/src/THC/generated/THCTensorSortDouble.cu.cc",
+        "aten/src/THC/generated/THCTensorSortFloat.cu.cc",
+        "aten/src/THC/generated/THCTensorSortHalf.cu.cc",
+        "aten/src/THC/generated/THCTensorSortInt.cu.cc",
+        "aten/src/THC/generated/THCTensorSortLong.cu.cc",
+        "aten/src/THC/generated/THCTensorSortShort.cu.cc",
+    ],
+)
+
+filegroup(
+    name = "thcunn_srcs_cu",
+    srcs = [
+        "aten/src/THCUNN/BCECriterion.cu.cc",
+        "aten/src/THCUNN/ClassNLLCriterion.cu.cc",
+        "aten/src/THCUNN/ELU.cu.cc",
+        "aten/src/THCUNN/GatedLinearUnit.cu.cc",
+        "aten/src/THCUNN/HardTanh.cu.cc",
+        "aten/src/THCUNN/LeakyReLU.cu.cc",
+        "aten/src/THCUNN/LogSigmoid.cu.cc",
+        "aten/src/THCUNN/MultiLabelMarginCriterion.cu.cc",
+        "aten/src/THCUNN/MultiMarginCriterion.cu.cc",
+        "aten/src/THCUNN/RReLU.cu.cc",
+        "aten/src/THCUNN/SoftMarginCriterion.cu.cc",
+        "aten/src/THCUNN/SoftPlus.cu.cc",
+        "aten/src/THCUNN/SoftShrink.cu.cc",
+        "aten/src/THCUNN/SpatialClassNLLCriterion.cu.cc",
+        "aten/src/THCUNN/SpatialConvolutionMM.cu.cc",
+        "aten/src/THCUNN/SpatialDepthwiseConvolution.cu.cc",
+        "aten/src/THCUNN/Tanh.cu.cc",
+    ],
+)
+
+filegroup(
+    name = "aten_srcs_cu",
+    srcs = [
+        "aten/src/ATen/cuda/detail/IndexUtils.cu.cc",
+        "aten/src/ATen/native/cuda/Activation.cu.cc",
+        "aten/src/ATen/native/cuda/AdaptiveAveragePooling.cu.cc",
+        "aten/src/ATen/native/cuda/AdaptiveAveragePooling3d.cu.cc",
+        "aten/src/ATen/native/cuda/AdaptiveMaxPooling2d.cu.cc",
+        "aten/src/ATen/native/cuda/AdaptiveMaxPooling3d.cu.cc",
+        "aten/src/ATen/native/cuda/AveragePool2d.cu.cc",
+        "aten/src/ATen/native/cuda/AveragePool3d.cu.cc",
+        "aten/src/ATen/native/cuda/BatchLinearAlgebra.cu.cc",
+        "aten/src/ATen/native/cuda/BinaryArithmeticKernel.cu.cc",
+        "aten/src/ATen/native/cuda/BinaryCompareKernel.cu.cc",
+        "aten/src/ATen/native/cuda/BinaryMiscOpsKernels.cu.cc",
+        "aten/src/ATen/native/cuda/CUDAScalar.cu.cc",
+        "aten/src/ATen/native/cuda/Col2Im.cu.cc",
+        "aten/src/ATen/native/cuda/Copy.cu.cc",
+        "aten/src/ATen/native/cuda/CrossKernel.cu.cc",
+        "aten/src/ATen/native/cuda/DilatedMaxPool2d.cu.cc",
+        "aten/src/ATen/native/cuda/DilatedMaxPool3d.cu.cc",
+        "aten/src/ATen/native/cuda/DistanceKernel.cu.cc",
+        "aten/src/ATen/native/cuda/Distributions.cu.cc",
+        "aten/src/ATen/native/cuda/Dropout.cu.cc",
+        "aten/src/ATen/native/cuda/Embedding.cu.cc",
+        "aten/src/ATen/native/cuda/EmbeddingBackwardKernel.cu.cc",
+        "aten/src/ATen/native/cuda/EmbeddingBag.cu.cc",
+        "aten/src/ATen/native/cuda/FillKernel.cu.cc",
+        "aten/src/ATen/native/cuda/FractionalMaxPool2d.cu.cc",
+        "aten/src/ATen/native/cuda/FractionalMaxPool3d.cu.cc",
+        "aten/src/ATen/native/cuda/GridSampler.cu.cc",
+        "aten/src/ATen/native/cuda/Im2Col.cu.cc",
+        "aten/src/ATen/native/cuda/IndexKernel.cu.cc",
+        "aten/src/ATen/native/cuda/Indexing.cu.cc",
+        "aten/src/ATen/native/cuda/Lerp.cu.cc",
+        "aten/src/ATen/native/cuda/LinearAlgebra.cu.cc",
+        "aten/src/ATen/native/cuda/Loss.cu.cc",
+        "aten/src/ATen/native/cuda/LossCTC.cu.cc",
+        "aten/src/ATen/native/cuda/MaxUnpooling.cu.cc",
+        "aten/src/ATen/native/cuda/MultinomialKernel.cu.cc",
+        "aten/src/ATen/native/cuda/NaiveConvolutionTranspose2d.cu.cc",
+        "aten/src/ATen/native/cuda/NaiveConvolutionTranspose3d.cu.cc",
+        "aten/src/ATen/native/cuda/NaiveDilatedConvolution.cu.cc",
+        "aten/src/ATen/native/cuda/Normalization.cu.cc",
+        "aten/src/ATen/native/cuda/PointwiseOpsKernel.cu.cc",
+        "aten/src/ATen/native/cuda/PowKernel.cu.cc",
+        "aten/src/ATen/native/cuda/RNN.cu.cc",
+        "aten/src/ATen/native/cuda/RangeFactories.cu.cc",
+        "aten/src/ATen/native/cuda/Reduce.cu.cc",
+        "aten/src/ATen/native/cuda/ReduceOpsKernel.cu.cc",
+        "aten/src/ATen/native/cuda/ReflectionPad.cu.cc",
+        "aten/src/ATen/native/cuda/Repeat.cu.cc",
+        "aten/src/ATen/native/cuda/ReplicationPadding.cu.cc",
+        "aten/src/ATen/native/cuda/Resize.cu.cc",
+        "aten/src/ATen/native/cuda/SoftMax.cu.cc",
+        "aten/src/ATen/native/cuda/SortingKthValue.cu.cc",
+        "aten/src/ATen/native/cuda/SparseMM.cu.cc",
+        "aten/src/ATen/native/cuda/SpectralOps.cu.cc",
+        "aten/src/ATen/native/cuda/SummaryOps.cu.cc",
+        "aten/src/ATen/native/cuda/TensorCompare.cu.cc",
+        "aten/src/ATen/native/cuda/TensorFactories.cu.cc",
+        "aten/src/ATen/native/cuda/TensorTransformations.cu.cc",
+        "aten/src/ATen/native/cuda/TriangularOps.cu.cc",
+        "aten/src/ATen/native/cuda/UnaryOpsKernel.cu.cc",
+        "aten/src/ATen/native/cuda/Unique.cu.cc",
+        "aten/src/ATen/native/cuda/UpSampleBicubic2d.cu.cc",
+        "aten/src/ATen/native/cuda/UpSampleBilinear2d.cu.cc",
+        "aten/src/ATen/native/cuda/UpSampleLinear1d.cu.cc",
+        "aten/src/ATen/native/cuda/UpSampleNearest1d.cu.cc",
+        "aten/src/ATen/native/cuda/UpSampleNearest2d.cu.cc",
+        "aten/src/ATen/native/cuda/UpSampleNearest3d.cu.cc",
+        "aten/src/ATen/native/cuda/UpSampleTrilinear3d.cu.cc",
+        "aten/src/ATen/native/cuda/WeightNorm.cu.cc",
+        "aten/src/ATen/native/cuda/layer_norm_kernel.cu.cc",
+        "aten/src/ATen/native/quantized/cuda/fake_quantize_core.cu.cc",
+        "aten/src/ATen/native/sparse/cuda/SparseCUDABlas.cu.cc",
+        "aten/src/ATen/native/sparse/cuda/SparseCUDATensor.cu.cc",
+        "aten/src/ATen/native/sparse/cuda/SparseCUDATensorMath.cu.cc",
+    ],
+)
+
+header_template_rule(
+    name = "aten_src_ATen_config",
+    src = "aten/src/ATen/Config.h.in",
+    out = "aten/src/ATen/Config.h",
+    substitutions = {
+        "@AT_MKLDNN_ENABLED@": "1",
+        "@AT_MKL_ENABLED@": "0",
+        "@AT_NNPACK_ENABLED@": "0",
+        "@CAFFE2_STATIC_LINK_CUDA_INT@": "0",
+        "@USE_BLAS@": "1",
+        "@AT_PARALLEL_OPENMP@": "0",
+        "@AT_PARALLEL_NATIVE@": "1",
+        "@AT_PARALLEL_NATIVE_TBB@": "0",
+    },
+)
+
+header_template_rule(
+    name = "aten_src_ATen_cuda_config",
+    src = "aten/src/ATen/cuda/CUDAConfig.h.in",
+    out = "aten/src/ATen/cuda/CUDAConfig.h",
+    substitutions = {
+        "@AT_CUDNN_ENABLED@": "1",
+        "@AT_ROCM_ENABLED@": "0",
+        "@NVCC_FLAGS_EXTRA@": "",
+    },
+)
+
+header_template_rule(
+    name = "aten_src_TH_THGeneral",
+    src = "aten/src/TH/THGeneral.h.in",
+    out = "aten/src/TH/THGeneral.h",
+    substitutions = {
+        "#cmakedefine USE_BLAS": "#define USE_BLAS",
+        "#cmakedefine USE_LAPACK": "#define USE_LAPACK",
+        "#cmakedefine BLAS_F2C": "/* #undef BLAS_F2C */",
+        "#cmakedefine BLAS_USE_CBLAS_DOT": "#define BLAS_USE_CBLAS_DOT",
+    },
+)
+
+header_template_rule(
+    name = "aten_src_THC_THCGeneral",
+    src = "aten/src/THC/THCGeneral.h.in",
+    out = "aten/src/THC/THCGeneral.h",
+    substitutions = {
+        "#cmakedefine USE_MAGMA": "",
+    },
+)
+
+cc_library(
+    name = "aten_headers",
+    hdrs = [
+        "torch/csrc/WindowsTorchApiMacro.h",
+        "torch/csrc/jit/frontend/function_schema_parser.h",
+    ] + glob([
+        "aten/src/**/*.h",
+        "aten/src/**/*.hpp",
+        "aten/src/TH/**/*.cpp",
+        "aten/src/THC/**/*.cpp",
+        "aten/src/THC/*.cuh",
+        "aten/src/THC/generic/*.cu.cc",
+        "aten/src/THCUNN/*.cuh",
+        "aten/src/THCUNN/generic/*.cu.cc",
+    ]) + [
+        ":generated_cpp",
+        ":aten_src_ATen_config",
+    ],
+    includes = [
+        "aten/src",
+        "aten/src/TH",
+    ],
+    deps = [
+        ":c10_headers",
+        ":aten_src_TH_THGeneral",
+        ":aten_src_THC_THCGeneral",
+    ],
+)
+
+ATEN_COPTS = COMMON_COPTS + [
+    "-DUSE_AVX",
+    "-DUSE_AVX2",
+    "-DCAFFE2_BUILD_MAIN_LIBS",
+    "-DHAVE_AVX_CPU_DEFINITION",
+    "-DHAVE_AVX2_CPU_DEFINITION",
+    "-fvisibility-inlines-hidden",
+    "-fno-math-errno",
+    "-fno-trapping-math",
+]
+
+intern_build_aten_ops(
+    copts = ATEN_COPTS,
+    deps = [
+        ":aten_headers",
+        "@sleef",
+        "@fbgemm",
+    ],
+)
+
+cc_library(
+    name = "th",
+    srcs = [
+        ":th_srcs",
+    ],
+    copts = ATEN_COPTS + [
+        "-mavx",
+    ],
+    deps = [
+        ":aten_headers",
+        "@fbgemm",
+    ],
+)
+
+cc_library(
+    name = "aten",
+    srcs = [
+        ":ATen_CORE_SRCS",
+        ":ATen_QUANTIZED_SRCS",
+        ":aten_base_cpp",
+        ":aten_base_vulkan",
+        ":aten_native_cpp",
+        ":aten_native_mkl_cpp",
+        ":aten_native_mkldnn_cpp",
+        ":aten_native_quantized_cpp",
+        ":aten_native_sparse_cpp",
+        ":aten_native_xnnpack",
+        ":aten_src_ATen_config",
+        ":generated_cpp",
+    ],
+    copts = ATEN_COPTS,
+    data = if_cuda(
+        [":libcaffe2_nvrtc.so"],
+        [],
+    ),
+    visibility = ["//visibility:public"],
+    deps = [
+        ":ATen_CPU",
+        ":aten_headers",
+        ":caffe2_for_aten_headers",
+        ":th",
+        ":torch_headers",
+        "@fbgemm",
+        "@ideep",
+    ],
+    alwayslink = True,
+)
+
+cc_library(
+    name = "aten_nvrtc",
+    srcs = glob([
+        "aten/src/ATen/cuda/nvrtc_stub/*.cpp",
+    ]),
+    copts = ATEN_COPTS,
+    linkstatic = True,
+    visibility = ["//visibility:public"],
+    deps = [
+        ":aten_headers",
+        ":c10_headers",
+        "@cuda",
+        "@cuda//:cuda_driver",
+        "@cuda//:nvrtc",
+    ],
+    alwayslink = True,
+)
+
+cc_binary(
+    name = "libcaffe2_nvrtc.so",
+    linkshared = True,
+    visibility = ["//visibility:public"],
+    deps = [
+        ":aten_nvrtc",
+    ],
+)
+
+cc_library(
+    name = "aten_cuda_cpp",
+    srcs = [":aten_cuda_srcs"],
+    copts = ATEN_COPTS,
+    visibility = ["//visibility:public"],
+    deps = [
+        ":aten",
+        "@cuda",
+        "@cuda//:nvrtc",
+        "@cudnn",
+    ],
+    alwayslink = True,
+)
+
+torch_cuda_half_options = [
+    "-DCUDA_HAS_FP16=1",
+    "-D__CUDA_NO_HALF_OPERATORS__",
+    "-D__CUDA_NO_HALF_CONVERSIONS__",
+    "-D__CUDA_NO_HALF2_OPERATORS__",
+]
+
+cu_library(
+    name = "aten_cuda",
+    srcs = [
+        ":aten_srcs_cu",
+        ":thc_srcs_cu",
+        ":thcunn_srcs_cu",
+    ],
+    copts = ATEN_COPTS + torch_cuda_half_options,
+    visibility = ["//visibility:public"],
+    deps = [
+        ":aten_cuda_cpp",
+        "@cuda//:cublas",
+        "@cuda//:cufft",
+        "@cuda//:cusparse",
+    ],
+    alwayslink = True,
+)
+
+# caffe2
+CAFFE2_COPTS = COMMON_COPTS + [
+    "-Dcaffe2_EXPORTS",
+    "-DCAFFE2_USE_GLOO",
+    "-DCAFFE2_USE_CUDNN",
+    "-DCAFFE2_BUILD_MAIN_LIB",
+    "-fvisibility-inlines-hidden",
+    "-fno-math-errno",
+    "-fno-trapping-math",
+]
+
+proto_library(
+    name = "caffe2_proto_source",
+    srcs = glob([
+        "caffe2/proto/*.proto",
+    ]),
+    visibility = ["//visibility:public"],
+)
+
+cc_proto_library(
+    name = "caffe2_protos",
+    deps = [":caffe2_proto_source"],
+)
+
+header_template_rule(
+    name = "caffe2_core_macros_h",
+    src = "caffe2/core/macros.h.in",
+    out = "caffe2/core/macros.h",
+    substitutions = {
+        "@CAFFE2_VERSION_MAJOR@": "1",
+        "@CAFFE2_VERSION_MINOR@": "3",
+        "@CAFFE2_VERSION_PATCH@": "0",
+        "cmakedefine": "define",
+        "#define CAFFE2_FORCE_FALLBACK_CUDA_MPI": "/* #undef CAFFE2_FORCE_FALLBACK_CUDA_MPI */",
+        "#define CAFFE2_HAS_MKL_DNN": "/* #undef CAFFE2_HAS_MKL_DNN */",
+        "#define CAFFE2_HAS_MKL_SGEMM_PACK": "/* #undef CAFFE2_HAS_MKL_SGEMM_PACK */",
+        "#define CAFFE2_THREADPOOL_MAIN_IMBALANCE": "/* #undef CAFFE2_THREADPOOL_MAIN_IMBALANCE */",
+        "#define CAFFE2_THREADPOOL_STATS": "/* #undef CAFFE2_THREADPOOL_STATS */",
+        "#define CAFFE2_USE_ACCELERATE": "/* #undef CAFFE2_USE_ACCELERATE */",
+        "#define CAFFE2_USE_EIGEN_FOR_BLAS": "/* #undef CAFFE2_USE_EIGEN_FOR_BLAS */",
+        "#define CAFFE2_USE_FBCODE": "/* #undef CAFFE2_USE_FBCODE */",
+        "#define CAFFE2_USE_GOOGLE_GLOG": "/* #undef CAFFE2_USE_GOOGLE_GLOG */",
+        "#define CAFFE2_USE_LITE_PROTO": "/* #undef CAFFE2_USE_LITE_PROTO */",
+        "#define CAFFE2_USE_MKL\n": "/* #undef CAFFE2_USE_MKL */\n",
+        "#define CAFFE2_USE_NVTX": "/* #undef CAFFE2_USE_NVTX */",
+        "#define CAFFE2_USE_TRT": "/* #undef CAFFE2_USE_TRT */",
+    },
+)
+
+filegroup(
+    name = "caffe2_contrib_srcs",
+    srcs = [
+        "caffe2/contrib/gloo/allgather_ops.cc",
+        "caffe2/contrib/gloo/allreduce_ops.cc",
+        "caffe2/contrib/gloo/barrier_ops.cc",
+        "caffe2/contrib/gloo/broadcast_ops.cc",
+        "caffe2/contrib/gloo/common.cc",
+        "caffe2/contrib/gloo/common_world_ops.cc",
+        "caffe2/contrib/gloo/context.cc",
+        "caffe2/contrib/gloo/reduce_scatter_ops.cc",
+        "caffe2/contrib/gloo/store_handler.cc",
+    ],
+)
+
+filegroup(
+    name = "caffe2_core_srcs",
+    srcs = [
+        "caffe2/core/allocator.cc",
+        "caffe2/core/blob_serialization.cc",
+        "caffe2/core/blob_stats.cc",
+        "caffe2/core/common.cc",
+        "caffe2/core/context.cc",
+        "caffe2/core/context_base.cc",
+        "caffe2/core/db.cc",
+        "caffe2/core/event.cc",
+        "caffe2/core/export_c10_op_to_caffe2.cc",
+        "caffe2/core/graph.cc",
+        "caffe2/core/init.cc",
+        "caffe2/core/init_denormals.cc",
+        "caffe2/core/init_intrinsics_check.cc",
+        "caffe2/core/init_omp.cc",
+        "caffe2/core/int8_serialization.cc",
+        "caffe2/core/memonger.cc",
+        "caffe2/core/module.cc",
+        "caffe2/core/net.cc",
+        "caffe2/core/net_async_base.cc",
+        "caffe2/core/net_async_scheduling.cc",
+        "caffe2/core/net_async_task.cc",
+        "caffe2/core/net_async_task_future.cc",
+        "caffe2/core/net_async_task_graph.cc",
+        "caffe2/core/net_async_tracing.cc",
+        "caffe2/core/net_dag_utils.cc",
+        "caffe2/core/net_parallel.cc",
+        "caffe2/core/net_simple.cc",
+        "caffe2/core/net_simple_refcount.cc",
+        "caffe2/core/nomnigraph/Representations/NeuralNet.cc",
+        "caffe2/core/nomnigraph/tests/test_util.cc",
+        "caffe2/core/numa.cc",
+        "caffe2/core/operator.cc",
+        "caffe2/core/operator_schema.cc",
+        "caffe2/core/plan_executor.cc",
+        "caffe2/core/prof_dag_counters.cc",
+        "caffe2/core/qtensor.cc",
+        "caffe2/core/qtensor_serialization.cc",
+        "caffe2/core/stats.cc",
+        "caffe2/core/tensor.cc",
+        "caffe2/core/tensor_int8.cc",
+        "caffe2/core/test_utils.cc",
+        "caffe2/core/transform.cc",
+        "caffe2/core/types.cc",
+        "caffe2/core/workspace.cc",
+    ],
+)
+
+filegroup(
+    name = "caffe2_distributed_srcs",
+    srcs = [
+        "caffe2/distributed/file_store_handler.cc",
+        "caffe2/distributed/file_store_handler_op.cc",
+        "caffe2/distributed/store_handler.cc",
+        "caffe2/distributed/store_ops.cc",
+    ],
+)
+
+filegroup(
+    name = "caffe2_ideep_srcs",
+    srcs = [
+        "caffe2/ideep/operators/adam_op.cc",
+        "caffe2/ideep/operators/channel_shuffle_op.cc",
+        "caffe2/ideep/operators/concat_split_op.cc",
+        "caffe2/ideep/operators/conv_op.cc",
+        "caffe2/ideep/operators/conv_transpose_op.cc",
+        "caffe2/ideep/operators/dropout_op.cc",
+        "caffe2/ideep/operators/elementwise_sum_op.cc",
+        "caffe2/ideep/operators/expand_squeeze_dims_op.cc",
+        "caffe2/ideep/operators/fully_connected_op.cc",
+        "caffe2/ideep/operators/local_response_normalization_op.cc",
+        "caffe2/ideep/operators/momentum_sgd_op.cc",
+        "caffe2/ideep/operators/operator_fallback_ideep.cc",
+        "caffe2/ideep/operators/order_switch_ops.cc",
+        "caffe2/ideep/operators/pool_op.cc",
+        "caffe2/ideep/operators/quantization/int8_add_op.cc",
+        "caffe2/ideep/operators/quantization/int8_conv_op.cc",
+        "caffe2/ideep/operators/quantization/int8_dequantize_op.cc",
+        "caffe2/ideep/operators/quantization/int8_fully_connected_op.cc",
+        "caffe2/ideep/operators/quantization/int8_given_tensor_fill_op.cc",
+        "caffe2/ideep/operators/quantization/int8_pool_op.cc",
+        "caffe2/ideep/operators/quantization/int8_quantize_op.cc",
+        "caffe2/ideep/operators/quantization/int8_relu_op.cc",
+        "caffe2/ideep/operators/queue_ops.cc",
+        "caffe2/ideep/operators/relu_op.cc",
+        "caffe2/ideep/operators/reshape_op.cc",
+        "caffe2/ideep/operators/shape_op.cc",
+        "caffe2/ideep/operators/sigmoid_op.cc",
+        "caffe2/ideep/operators/spatial_batch_norm_op.cc",
+        "caffe2/ideep/operators/transpose_op.cc",
+        "caffe2/ideep/operators/utility_ops.cc",
+        "caffe2/ideep/utils/ideep_register.cc",
+    ],
+)
+
+filegroup(
+    name = "caffe2_onnx_srcs",
+    srcs = [
+        "caffe2/onnx/backend.cc",
+        "caffe2/onnx/backend_rep.cc",
+        "caffe2/onnx/device.cc",
+        "caffe2/onnx/helper.cc",
+        "caffe2/onnx/offline_tensor.cc",
+        "caffe2/onnx/onnx_exporter.cc",
+        "caffe2/onnx/onnxifi_graph_info.cc",
+        "caffe2/onnx/onnxifi_init.cc",
+    ],
+)
+
+filegroup(
+    name = "caffe2_operators_srcs",
+    srcs = [
+        "caffe2/operators/abs_op.cc",
+        "caffe2/operators/accumulate_op.cc",
+        "caffe2/operators/accuracy_op.cc",
+        "caffe2/operators/acos_op.cc",
+        "caffe2/operators/affine_channel_op.cc",
+        "caffe2/operators/alias_with_name.cc",
+        "caffe2/operators/apmeter_op.cc",
+        "caffe2/operators/arg_ops.cc",
+        "caffe2/operators/asin_op.cc",
+        "caffe2/operators/assert_op.cc",
+        "caffe2/operators/atan_op.cc",
+        "caffe2/operators/atomic_ops.cc",
+        "caffe2/operators/batch_box_cox_op.cc",
+        "caffe2/operators/batch_bucketize_op.cc",
+        "caffe2/operators/batch_gather_ops.cc",
+        "caffe2/operators/batch_matmul_op.cc",
+        "caffe2/operators/batch_moments_op.cc",
+        "caffe2/operators/batch_permutation_op.cc",
+        "caffe2/operators/batch_sparse_to_dense_op.cc",
+        "caffe2/operators/bbox_transform_op.cc",
+        "caffe2/operators/bisect_percentile_op.cc",
+        "caffe2/operators/boolean_mask_ops.cc",
+        "caffe2/operators/boolean_unmask_ops.cc",
+        "caffe2/operators/box_with_nms_limit_op.cc",
+        "caffe2/operators/bucketize_op.cc",
+        "caffe2/operators/byte_weight_dequant_op.cc",
+        "caffe2/operators/cast_op.cc",
+        "caffe2/operators/cbrt_op.cc",
+        "caffe2/operators/cc_bmm_bg_op.cc",
+        "caffe2/operators/ceil_op.cc",
+        "caffe2/operators/channel_backprop_stats_op.cc",
+        "caffe2/operators/channel_shuffle_op.cc",
+        "caffe2/operators/channel_stats_op.cc",
+        "caffe2/operators/clip_op.cc",
+        "caffe2/operators/collect_and_distribute_fpn_rpn_proposals_op.cc",
+        "caffe2/operators/communicator_op.cc",
+        "caffe2/operators/concat_split_op.cc",
+        "caffe2/operators/conditional_op.cc",
+        "caffe2/operators/conv_gradient_op.cc",
+        "caffe2/operators/conv_op.cc",
+        "caffe2/operators/conv_op_eigen.cc",
+        "caffe2/operators/conv_op_shared.cc",
+        "caffe2/operators/conv_transpose_gradient_op.cc",
+        "caffe2/operators/conv_transpose_op_mobile.cc",
+        "caffe2/operators/copy_op.cc",
+        "caffe2/operators/copy_rows_to_tensor_op.cc",
+        "caffe2/operators/cos_op.cc",
+        "caffe2/operators/cosh_op.cc",
+        "caffe2/operators/cosine_embedding_criterion_op.cc",
+        "caffe2/operators/counter_ops.cc",
+        "caffe2/operators/crash_op.cc",
+        "caffe2/operators/create_scope_op.cc",
+        "caffe2/operators/crf_viterbi_op.cc",
+        "caffe2/operators/cross_entropy_op.cc",
+        "caffe2/operators/ctc_beam_search_decoder_op.cc",
+        "caffe2/operators/ctc_greedy_decoder_op.cc",
+        "caffe2/operators/cube_op.cc",
+        "caffe2/operators/data_couple.cc",
+        "caffe2/operators/dataset_ops.cc",
+        "caffe2/operators/deform_conv_gradient_op.cc",
+        "caffe2/operators/deform_conv_op.cc",
+        "caffe2/operators/dense_vector_to_id_list_op.cc",
+        "caffe2/operators/distance_op.cc",
+        "caffe2/operators/do_op.cc",
+        "caffe2/operators/dropout_op.cc",
+        "caffe2/operators/elementwise_add_gradient_op.cc",
+        "caffe2/operators/elementwise_add_op.cc",
+        "caffe2/operators/elementwise_div_gradient_op.cc",
+        "caffe2/operators/elementwise_div_op.cc",
+        "caffe2/operators/elementwise_linear_op.cc",
+        "caffe2/operators/elementwise_logical_ops.cc",
+        "caffe2/operators/elementwise_mul_gradient_op.cc",
+        "caffe2/operators/elementwise_mul_op.cc",
+        "caffe2/operators/elementwise_ops.cc",
+        "caffe2/operators/elementwise_ops_schema.cc",
+        "caffe2/operators/elementwise_ops_utils.cc",
+        "caffe2/operators/elementwise_sub_gradient_op.cc",
+        "caffe2/operators/elementwise_sub_op.cc",
+        "caffe2/operators/elementwise_sum_op.cc",
+        "caffe2/operators/elu_op.cc",
+        "caffe2/operators/enforce_finite_op.cc",
+        "caffe2/operators/ensure_clipped_op.cc",
+        "caffe2/operators/ensure_cpu_output_op.cc",
+        "caffe2/operators/erf_op.cc",
+        "caffe2/operators/exp_op.cc",
+        "caffe2/operators/expand_op.cc",
+        "caffe2/operators/expand_squeeze_dims_op.cc",
+        "caffe2/operators/fc_inference.cc",
+        "caffe2/operators/feature_maps_ops.cc",
+        "caffe2/operators/feed_blob_op.cc",
+        "caffe2/operators/filler_op.cc",
+        "caffe2/operators/find_duplicate_elements_op.cc",
+        "caffe2/operators/find_op.cc",
+        "caffe2/operators/flatten_op.cc",
+        "caffe2/operators/flexible_top_k.cc",
+        "caffe2/operators/floor_op.cc",
+        "caffe2/operators/free_op.cc",
+        "caffe2/operators/fully_connected_op.cc",
+        "caffe2/operators/fused_rowwise_8bit_conversion_ops.cc",
+        "caffe2/operators/fused_rowwise_random_quantization_ops.cc",
+        "caffe2/operators/gather_fused_8bit_rowwise_op.cc",
+        "caffe2/operators/gather_op.cc",
+        "caffe2/operators/gather_ranges_to_dense_op.cc",
+        "caffe2/operators/gelu_op.cc",
+        "caffe2/operators/generate_proposals_op.cc",
+        "caffe2/operators/given_tensor_byte_string_to_uint8_fill_op.cc",
+        "caffe2/operators/given_tensor_fill_op.cc",
+        "caffe2/operators/glu_op.cc",
+        "caffe2/operators/group_norm_op.cc",
+        "caffe2/operators/gru_unit_op.cc",
+        "caffe2/operators/h_softmax_op.cc",
+        "caffe2/operators/half_float_ops.cc",
+        "caffe2/operators/hard_sigmoid_op.cc",
+        "caffe2/operators/heatmap_max_keypoint_op.cc",
+        "caffe2/operators/if_op.cc",
+        "caffe2/operators/im2col_op.cc",
+        "caffe2/operators/index_hash_ops.cc",
+        "caffe2/operators/index_ops.cc",
+        "caffe2/operators/inference_lstm_op.cc",
+        "caffe2/operators/instance_norm_gradient_op.cc",
+        "caffe2/operators/instance_norm_op.cc",
+        "caffe2/operators/integral_image_op.cc",
+        "caffe2/operators/is_empty_op.cc",
+        "caffe2/operators/jsd_op.cc",
+        "caffe2/operators/key_split_ops.cc",
+        "caffe2/operators/last_n_window_collector.cc",
+        "caffe2/operators/layer_norm_op.cc",
+        "caffe2/operators/leaky_relu_op.cc",
+        "caffe2/operators/length_split_op.cc",
+        "caffe2/operators/lengths_pad_op.cc",
+        "caffe2/operators/lengths_reducer_fused_8bit_rowwise_ops.cc",
+        "caffe2/operators/lengths_reducer_ops.cc",
+        "caffe2/operators/lengths_reducer_rowwise_8bit_ops.cc",
+        "caffe2/operators/lengths_tile_op.cc",
+        "caffe2/operators/lengths_top_k_op.cc",
+        "caffe2/operators/listwise_l2r_op.cc",
+        "caffe2/operators/load_save_op.cc",
+        "caffe2/operators/load_save_op_util.cc",
+        "caffe2/operators/local_response_normalization_op.cc",
+        "caffe2/operators/locally_connected_op.cc",
+        "caffe2/operators/locally_connected_op_util.cc",
+        "caffe2/operators/log_op.cc",
+        "caffe2/operators/logit_op.cc",
+        "caffe2/operators/loss_op.cc",
+        "caffe2/operators/lp_pool_op.cc",
+        "caffe2/operators/lpnorm_op.cc",
+        "caffe2/operators/lstm_unit_op.cc",
+        "caffe2/operators/map_ops.cc",
+        "caffe2/operators/margin_ranking_criterion_op.cc",
+        "caffe2/operators/matmul_op.cc",
+        "caffe2/operators/mean_op.cc",
+        "caffe2/operators/merge_id_lists_op.cc",
+        "caffe2/operators/minmax_gradient_ops.cc",
+        "caffe2/operators/minmax_ops.cc",
+        "caffe2/operators/mod_op.cc",
+        "caffe2/operators/moments_op.cc",
+        "caffe2/operators/multi_class_accuracy_op.cc",
+        "caffe2/operators/negate_gradient_op.cc",
+        "caffe2/operators/negative_op.cc",
+        "caffe2/operators/ngram_ops.cc",
+        "caffe2/operators/norm_planar_yuv_op.cc",
+        "caffe2/operators/normalize_l1_op.cc",
+        "caffe2/operators/normalize_op.cc",
+        "caffe2/operators/numpy_tile_op.cc",
+        "caffe2/operators/one_hot_ops.cc",
+        "caffe2/operators/onnx_while_op.cc",
+        "caffe2/operators/order_switch_ops.cc",
+        "caffe2/operators/pack_rnn_sequence_op.cc",
+        "caffe2/operators/pack_segments.cc",
+        "caffe2/operators/pad_op.cc",
+        "caffe2/operators/partition_ops.cc",
+        "caffe2/operators/percentile_op.cc",
+        "caffe2/operators/perplexity_op.cc",
+        "caffe2/operators/piecewise_linear_transform_op.cc",
+        "caffe2/operators/pool_gradient_op.cc",
+        "caffe2/operators/pool_op.cc",
+        "caffe2/operators/pool_op_util.cc",
+        "caffe2/operators/pow_op.cc",
+        "caffe2/operators/prelu_op.cc",
+        "caffe2/operators/prepend_dim_op.cc",
+        "caffe2/operators/quant_decode_op.cc",
+        "caffe2/operators/rank_loss_op.cc",
+        "caffe2/operators/reciprocal_gradient_op.cc",
+        "caffe2/operators/reciprocal_op.cc",
+        "caffe2/operators/reduce_front_back_max_ops.cc",
+        "caffe2/operators/reduce_front_back_mean_ops.cc",
+        "caffe2/operators/reduce_front_back_sum_ops.cc",
+        "caffe2/operators/reduce_ops.cc",
+        "caffe2/operators/reduction_ops.cc",
+        "caffe2/operators/relu_n_op.cc",
+        "caffe2/operators/relu_op.cc",
+        "caffe2/operators/remove_data_blocks_op.cc",
+        "caffe2/operators/replace_nan_op.cc",
+        "caffe2/operators/reservoir_sampling.cc",
+        "caffe2/operators/reshape_op.cc",
+        "caffe2/operators/resize_3d_op.cc",
+        "caffe2/operators/resize_op.cc",
+        "caffe2/operators/reverse_packed_segs_op.cc",
+        "caffe2/operators/rmac_regions_op.cc",
+        "caffe2/operators/rnn/recurrent_network_blob_fetcher_op.cc",
+        "caffe2/operators/rnn/recurrent_network_executor.cc",
+        "caffe2/operators/rnn/recurrent_network_op.cc",
+        "caffe2/operators/roi_align_gradient_op.cc",
+        "caffe2/operators/roi_align_op.cc",
+        "caffe2/operators/roi_align_rotated_gradient_op.cc",
+        "caffe2/operators/roi_align_rotated_op.cc",
+        "caffe2/operators/roi_pool_op.cc",
+        "caffe2/operators/rowmul_op.cc",
+        "caffe2/operators/rsqrt_op.cc",
+        "caffe2/operators/scale_blobs_op.cc",
+        "caffe2/operators/scale_op.cc",
+        "caffe2/operators/segment_reduction_op.cc",
+        "caffe2/operators/selu_op.cc",
+        "caffe2/operators/sequence_ops.cc",
+        "caffe2/operators/shape_op.cc",
+        "caffe2/operators/sigmoid_gradient_op.cc",
+        "caffe2/operators/sigmoid_op.cc",
+        "caffe2/operators/sin_op.cc",
+        "caffe2/operators/sinh_op.cc",
+        "caffe2/operators/sinusoid_position_encoding_op.cc",
+        "caffe2/operators/slice_op.cc",
+        "caffe2/operators/softmax_op.cc",
+        "caffe2/operators/softmax_utils.cc",
+        "caffe2/operators/softmax_with_loss_op.cc",
+        "caffe2/operators/softplus_op.cc",
+        "caffe2/operators/softsign_op.cc",
+        "caffe2/operators/space_batch_op.cc",
+        "caffe2/operators/sparse_dropout_with_replacement_op.cc",
+        "caffe2/operators/sparse_normalize_op.cc",
+        "caffe2/operators/sparse_to_dense_mask_op.cc",
+        "caffe2/operators/sparse_to_dense_op.cc",
+        "caffe2/operators/spatial_batch_norm_gradient_op.cc",
+        "caffe2/operators/spatial_batch_norm_op.cc",
+        "caffe2/operators/spatial_softmax_with_loss_op.cc",
+        "caffe2/operators/sqr_op.cc",
+        "caffe2/operators/sqrt_op.cc",
+        "caffe2/operators/square_root_divide_op.cc",
+        "caffe2/operators/stats_ops.cc",
+        "caffe2/operators/stats_put_ops.cc",
+        "caffe2/operators/stop_gradient.cc",
+        "caffe2/operators/string_ops.cc",
+        "caffe2/operators/stump_func_op.cc",
+        "caffe2/operators/stylizer_ops.cc",
+        "caffe2/operators/summarize_op.cc",
+        "caffe2/operators/swish_op.cc",
+        "caffe2/operators/tan_op.cc",
+        "caffe2/operators/tanh_gradient_op.cc",
+        "caffe2/operators/tanh_op.cc",
+        "caffe2/operators/tensor_protos_db_input.cc",
+        "caffe2/operators/text_file_reader.cc",
+        "caffe2/operators/text_file_reader_utils.cc",
+        "caffe2/operators/thresholded_relu_op.cc",
+        "caffe2/operators/tile_op.cc",
+        "caffe2/operators/top_k.cc",
+        "caffe2/operators/transpose_op.cc",
+        "caffe2/operators/tt_linear_op.cc",
+        "caffe2/operators/unique_ops.cc",
+        "caffe2/operators/upsample_op.cc",
+        "caffe2/operators/utility_ops.cc",
+        "caffe2/operators/variable_length_sequence_padding.cc",
+        "caffe2/operators/weighted_multi_sampling_op.cc",
+        "caffe2/operators/weighted_sample_op.cc",
+        "caffe2/operators/while_op.cc",
+        "caffe2/operators/workspace_ops.cc",
+        "caffe2/operators/zero_gradient_op.cc",
+    ],
+)
+
+filegroup(
+    name = "caffe2_opt_srcs",
+    srcs = [
+        "caffe2/opt/annotations.cc",
+        "caffe2/opt/backend_cutting.cc",
+        "caffe2/opt/backend_transformer_base.cc",
+        "caffe2/opt/bound_shape_inferencer.cc",
+        "caffe2/opt/converter.cc",
+        "caffe2/opt/dead_code_elim.cc",
+        "caffe2/opt/device.cc",
+        "caffe2/opt/distributed.cc",
+        "caffe2/opt/distributed_converter.cc",
+        "caffe2/opt/fusion.cc",
+        "caffe2/opt/mobile.cc",
+        "caffe2/opt/onnxifi_op.cc",
+        "caffe2/opt/onnxifi_transformer.cc",
+        "caffe2/opt/optimize_ideep.cc",
+        "caffe2/opt/optimizer.cc",
+        "caffe2/opt/passes.cc",
+        "caffe2/opt/shape_info.cc",
+        "caffe2/opt/tvm_transformer.cc",
+    ],
+)
+
+filegroup(
+    name = "caffe2_perfkernels_srcs",
+    srcs = [
+        "caffe2/perfkernels/adagrad.cc",
+        "caffe2/perfkernels/embedding_lookup.cc",
+        "caffe2/perfkernels/embedding_lookup_idx.cc",
+        "caffe2/perfkernels/fused_8bit_rowwise_embedding_lookup.cc",
+        "caffe2/perfkernels/fused_8bit_rowwise_embedding_lookup_idx.cc",
+        "caffe2/perfkernels/fused_nbit_rowwise_conversion.cc",
+        "caffe2/perfkernels/lstm_unit_cpu_common.cc",
+        "caffe2/perfkernels/math_cpu_base.cc",
+        "caffe2/perfkernels/typed_axpy.cc",
+    ],
+)
+
+filegroup(
+    name = "caffe2_predictor_srcs",
+    srcs = [
+        "caffe2/predictor/emulator/data_filler.cc",
+        "caffe2/predictor/emulator/data_filler.h",
+        "caffe2/predictor/predictor.cc",
+        "caffe2/predictor/predictor_config.cc",
+        "caffe2/predictor/predictor_utils.cc",
+    ],
+)
+
+filegroup(
+    name = "caffe2_quantization_srcs",
+    srcs = [
+        "caffe2/quantization/server/activation_distribution_observer.cc",
+        "caffe2/quantization/server/batch_matmul_dnnlowp_op.cc",
+        "caffe2/quantization/server/caffe2_dnnlowp_utils.cc",
+        "caffe2/quantization/server/channel_shuffle_dnnlowp_op.cc",
+        "caffe2/quantization/server/concat_dnnlowp_op.cc",
+        "caffe2/quantization/server/conv_dnnlowp_acc16_op.cc",
+        "caffe2/quantization/server/conv_dnnlowp_op.cc",
+        "caffe2/quantization/server/conv_relu_op.cc",
+        "caffe2/quantization/server/dequantize_dnnlowp_op.cc",
+        "caffe2/quantization/server/dnnlowp.cc",
+        "caffe2/quantization/server/dnnlowp_partition.cc",
+        "caffe2/quantization/server/dynamic_histogram.cc",
+        "caffe2/quantization/server/elementwise_add_dnnlowp_op.cc",
+        "caffe2/quantization/server/elementwise_linear_dnnlowp_op.cc",
+        "caffe2/quantization/server/elementwise_mul_dnnlowp_op.cc",
+        "caffe2/quantization/server/elementwise_sum_dnnlowp_op.cc",
+        "caffe2/quantization/server/elementwise_sum_relu_op.cc",
+        "caffe2/quantization/server/fbgemm_pack_matrix_cache.cc",
+        "caffe2/quantization/server/fbgemm_pack_op.cc",
+        "caffe2/quantization/server/fully_connected_dnnlowp_acc16_op.cc",
+        "caffe2/quantization/server/fully_connected_dnnlowp_op.cc",
+        "caffe2/quantization/server/fully_connected_fake_lowp_op.cc",
+        "caffe2/quantization/server/group_norm_dnnlowp_op.cc",
+        "caffe2/quantization/server/int8_gen_quant_params.cc",
+        "caffe2/quantization/server/kl_minimization.cc",
+        "caffe2/quantization/server/lstm_unit_dnnlowp_op.cc",
+        "caffe2/quantization/server/norm_minimization.cc",
+        "caffe2/quantization/server/p99.cc",
+        "caffe2/quantization/server/pool_dnnlowp_op.cc",
+        "caffe2/quantization/server/quantize_dnnlowp_op.cc",
+        "caffe2/quantization/server/relu_dnnlowp_op.cc",
+        "caffe2/quantization/server/sigmoid.cc",
+        "caffe2/quantization/server/sigmoid_dnnlowp_op.cc",
+        "caffe2/quantization/server/spatial_batch_norm_dnnlowp_op.cc",
+        "caffe2/quantization/server/tanh.cc",
+        "caffe2/quantization/server/tanh_dnnlowp_op.cc",
+        "caffe2/quantization/server/utility_dnnlowp_ops.cc",
+    ],
+)
+
+filegroup(
+    name = "caffe2_queue_srcs",
+    srcs = [
+        "caffe2/queue/blobs_queue.cc",
+        "caffe2/queue/blobs_queue_db.cc",
+        "caffe2/queue/queue_ops.cc",
+        "caffe2/queue/rebatching_queue.cc",
+        "caffe2/queue/rebatching_queue_ops.cc",
+    ],
+)
+
+filegroup(
+    name = "caffe2_serialize_srcs",
+    srcs = [
+        "caffe2/serialize/file_adapter.cc",
+        "caffe2/serialize/inline_container.cc",
+        "caffe2/serialize/istream_adapter.cc",
+        "caffe2/serialize/read_adapter_interface.cc",
+    ],
+)
+
+filegroup(
+    name = "caffe2_sgd_srcs",
+    srcs = [
+        "caffe2/sgd/adadelta_op.cc",
+        "caffe2/sgd/adagrad_op.cc",
+        "caffe2/sgd/adam_op.cc",
+        "caffe2/sgd/clip_tensor_op.cc",
+        "caffe2/sgd/ftrl_op.cc",
+        "caffe2/sgd/gftrl_op.cc",
+        "caffe2/sgd/iter_op.cc",
+        "caffe2/sgd/lars_op.cc",
+        "caffe2/sgd/learning_rate_adaption_op.cc",
+        "caffe2/sgd/learning_rate_op.cc",
+        "caffe2/sgd/momentum_sgd_op.cc",
+        "caffe2/sgd/rmsprop_op.cc",
+        "caffe2/sgd/wngrad_op.cc",
+        "caffe2/sgd/yellowfin_op.cc",
+    ],
+)
+
+filegroup(
+    name = "caffe2_transforms_srcs",
+    srcs = [
+        "caffe2/transforms/common_subexpression_elimination.cc",
+        "caffe2/transforms/conv_to_nnpack_transform.cc",
+        "caffe2/transforms/pattern_net_transform.cc",
+        "caffe2/transforms/single_op_transform.cc",
+    ],
+)
+
+filegroup(
+    name = "caffe2_utils_srcs",
+    srcs = [
+        "caffe2/utils/bench_utils.cc",
+        "caffe2/utils/cpuid.cc",
+        "caffe2/utils/math/broadcast.cc",
+        "caffe2/utils/math/elementwise.cc",
+        "caffe2/utils/math/reduce.cc",
+        "caffe2/utils/math/transpose.cc",
+        "caffe2/utils/math/utils.cc",
+        "caffe2/utils/math_cpu.cc",
+        "caffe2/utils/murmur_hash3.cc",
+        "caffe2/utils/proto_convert.cc",
+        "caffe2/utils/proto_utils.cc",
+        "caffe2/utils/proto_wrap.cc",
+        "caffe2/utils/signal_handler.cc",
+        "caffe2/utils/smart_tensor_printer.cc",
+        "caffe2/utils/string_utils.cc",
+        "caffe2/utils/threadpool/ThreadPool.cc",
+        "caffe2/utils/threadpool/pthreadpool.cc",
+        "caffe2/utils/threadpool/pthreadpool_impl.cc",
+    ],
+)
+
+filegroup(
+    name = "caffe2_cuda_srcs",
+    srcs = [
+        "caffe2/contrib/aten/aten_op_gpu.cc",
+        "caffe2/contrib/gloo/allreduce_ops_gpu.cc",
+        "caffe2/contrib/gloo/broadcast_ops_gpu.cc",
+        "caffe2/contrib/gloo/common_world_ops_gpu.cc",
+        "caffe2/core/blob_serialization_gpu.cc",
+        "caffe2/core/common_cudnn.cc",
+        "caffe2/core/common_gpu.cc",
+        "caffe2/core/event_gpu.cc",
+        "caffe2/db/create_db_op_gpu.cc",
+        "caffe2/distributed/file_store_handler_op_gpu.cc",
+        "caffe2/operators/communicator_op_gpu.cc",
+        "caffe2/operators/concat_split_op_gpu.cc",
+        "caffe2/operators/conv_op_cache_cudnn.cc",
+        "caffe2/operators/conv_op_cudnn.cc",
+        "caffe2/operators/conv_op_gpu.cc",
+        "caffe2/operators/conv_op_shared_gpu.cc",
+        "caffe2/operators/conv_transpose_op_cudnn.cc",
+        "caffe2/operators/conv_transpose_op_gpu.cc",
+        "caffe2/operators/counter_ops_gpu.cc",
+        "caffe2/operators/do_op_gpu.cc",
+        "caffe2/operators/dropout_op_cudnn.cc",
+        "caffe2/operators/elementwise_add_op_gpu.cc",
+        "caffe2/operators/elementwise_sub_op_gpu.cc",
+        "caffe2/operators/elu_op_cudnn.cc",
+        "caffe2/operators/exp_op_gpu.cc",
+        "caffe2/operators/expand_op_gpu.cc",
+        "caffe2/operators/expand_squeeze_dims_op_gpu.cc",
+        "caffe2/operators/free_op_gpu.cc",
+        "caffe2/operators/fully_connected_op_gpu.cc",
+        "caffe2/operators/if_op_gpu.cc",
+        "caffe2/operators/im2col_op_gpu.cc",
+        "caffe2/operators/load_save_op_gpu.cc",
+        "caffe2/operators/local_response_normalization_op_cudnn.cc",
+        "caffe2/operators/locally_connected_op_gpu.cc",
+        "caffe2/operators/log_op_gpu.cc",
+        "caffe2/operators/matmul_op_gpu.cc",
+        "caffe2/operators/negate_gradient_op_gpu.cc",
+        "caffe2/operators/negative_op_gpu.cc",
+        "caffe2/operators/order_switch_ops_cudnn.cc",
+        "caffe2/operators/order_switch_ops_gpu.cc",
+        "caffe2/operators/pool_op_cudnn.cc",
+        "caffe2/operators/prepend_dim_op_gpu.cc",
+        "caffe2/operators/reshape_op_gpu.cc",
+        "caffe2/operators/rnn/recurrent_network_blob_fetcher_op_gpu.cc",
+        "caffe2/operators/rnn/recurrent_network_executor_gpu.cc",
+        "caffe2/operators/rnn/recurrent_op_cudnn.cc",
+        "caffe2/operators/scale_op_gpu.cc",
+        "caffe2/operators/shape_op_gpu.cc",
+        "caffe2/operators/sigmoid_op_cudnn.cc",
+        "caffe2/operators/softmax_op_cudnn.cc",
+        "caffe2/operators/sqr_op_gpu.cc",
+        "caffe2/operators/sqrt_op_gpu.cc",
+        "caffe2/operators/stop_gradient_gpu.cc",
+        "caffe2/operators/tanh_op_cudnn.cc",
+        "caffe2/operators/tensor_protos_db_input_gpu.cc",
+        "caffe2/operators/transpose_op_cudnn.cc",
+        "caffe2/operators/while_op_gpu.cc",
+        "caffe2/operators/zero_gradient_op_gpu.cc",
+        "caffe2/queue/queue_ops_gpu.cc",
+        "caffe2/sgd/iter_op_gpu.cc",
+        "caffe2/sgd/learning_rate_op_gpu.cc",
+    ],
+)
+
+filegroup(
+    name = "caffe2_cu_srcs",
+    srcs = [
+        "caffe2/core/context_gpu.cu.cc",
+        "caffe2/operators/abs_op.cu.cc",
+        "caffe2/operators/accumulate_op.cu.cc",
+        "caffe2/operators/accuracy_op.cu.cc",
+        "caffe2/operators/acos_op.cu.cc",
+        "caffe2/operators/affine_channel_op.cu.cc",
+        "caffe2/operators/alias_with_name.cu.cc",
+        "caffe2/operators/arg_ops.cu.cc",
+        "caffe2/operators/asin_op.cu.cc",
+        "caffe2/operators/assert_op.cu.cc",
+        "caffe2/operators/atan_op.cu.cc",
+        "caffe2/operators/batch_gather_ops.cu.cc",
+        "caffe2/operators/batch_matmul_op.cu.cc",
+        "caffe2/operators/batch_moments_op.cu.cc",
+        "caffe2/operators/batch_permutation_op.cu.cc",
+        "caffe2/operators/batch_sparse_to_dense_op.cu.cc",
+        "caffe2/operators/boolean_mask_ops.cu.cc",
+        "caffe2/operators/boolean_unmask_ops.cu.cc",
+        "caffe2/operators/bucketize_op.cu.cc",
+        "caffe2/operators/cast_op.cu.cc",
+        "caffe2/operators/cbrt_op.cu.cc",
+        "caffe2/operators/ceil_op.cu.cc",
+        "caffe2/operators/channel_backprop_stats_op.cu.cc",
+        "caffe2/operators/channel_shuffle_op.cu.cc",
+        "caffe2/operators/channel_stats_op.cu.cc",
+        "caffe2/operators/channelwise_conv3d_op_cudnn.cu.cc",
+        "caffe2/operators/clip_op.cu.cc",
+        "caffe2/operators/copy_op.cu.cc",
+        "caffe2/operators/cos_op.cu.cc",
+        "caffe2/operators/cosh_op.cu.cc",
+        "caffe2/operators/cosine_embedding_criterion_op.cu.cc",
+        "caffe2/operators/cross_entropy_op.cu.cc",
+        "caffe2/operators/cube_op.cu.cc",
+        "caffe2/operators/data_couple_gpu.cu.cc",
+        "caffe2/operators/deform_conv_op.cu.cc",
+        "caffe2/operators/depthwise_3x3_conv_op_cudnn.cu.cc",
+        "caffe2/operators/distance_op.cu.cc",
+        "caffe2/operators/dropout_op.cu.cc",
+        "caffe2/operators/elementwise_div_op.cu.cc",
+        "caffe2/operators/elementwise_linear_op.cu.cc",
+        "caffe2/operators/elementwise_mul_op.cu.cc",
+        "caffe2/operators/elementwise_ops.cu.cc",
+        "caffe2/operators/elu_op.cu.cc",
+        "caffe2/operators/enforce_finite_op.cu.cc",
+        "caffe2/operators/ensure_cpu_output_op.cu.cc",
+        "caffe2/operators/erf_op.cu.cc",
+        "caffe2/operators/filler_op.cu.cc",
+        "caffe2/operators/find_op.cu.cc",
+        "caffe2/operators/floor_op.cu.cc",
+        "caffe2/operators/gather_op.cu.cc",
+        "caffe2/operators/gelu_op.cu.cc",
+        "caffe2/operators/generate_proposals_op.cu.cc",
+        "caffe2/operators/generate_proposals_op_util_nms_gpu.cu.cc",
+        "caffe2/operators/given_tensor_byte_string_to_uint8_fill_op.cu.cc",
+        "caffe2/operators/given_tensor_fill_op.cu.cc",
+        "caffe2/operators/glu_op.cu.cc",
+        "caffe2/operators/group_norm_op.cu.cc",
+        "caffe2/operators/gru_unit_op_gpu.cu.cc",
+        "caffe2/operators/half_float_ops.cu.cc",
+        "caffe2/operators/hard_sigmoid_op.cu.cc",
+        "caffe2/operators/instance_norm_op.cu.cc",
+        "caffe2/operators/integral_image_op.cu.cc",
+        "caffe2/operators/layer_norm_op.cu.cc",
+        "caffe2/operators/leaky_relu_op.cu.cc",
+        "caffe2/operators/lengths_pad_op.cu.cc",
+        "caffe2/operators/lengths_tile_op.cu.cc",
+        "caffe2/operators/local_response_normalization_op.cu.cc",
+        "caffe2/operators/logit_op.cu.cc",
+        "caffe2/operators/loss_op.cu.cc",
+        "caffe2/operators/lp_pool_op.cu.cc",
+        "caffe2/operators/lstm_unit_op_gpu.cu.cc",
+        "caffe2/operators/margin_ranking_criterion_op.cu.cc",
+        "caffe2/operators/max_pool_with_index.cu.cc",
+        "caffe2/operators/mean_op.cu.cc",
+        "caffe2/operators/mem_query_op.cu.cc",
+        "caffe2/operators/minmax_ops.cu.cc",
+        "caffe2/operators/moments_op.cu.cc",
+        "caffe2/operators/multi_class_accuracy_op.cu.cc",
+        "caffe2/operators/normalize_ops.cu.cc",
+        "caffe2/operators/one_hot_ops.cu.cc",
+        "caffe2/operators/pack_segments.cu.cc",
+        "caffe2/operators/pad_op_gpu.cu.cc",
+        "caffe2/operators/perplexity_op.cu.cc",
+        "caffe2/operators/piecewise_linear_transform_op.cu.cc",
+        "caffe2/operators/pool_op.cu.cc",
+        "caffe2/operators/pow_op.cu.cc",
+        "caffe2/operators/prelu_op.cu.cc",
+        "caffe2/operators/reciprocal_op.cu.cc",
+        "caffe2/operators/reduce_front_back_max_ops.cu.cc",
+        "caffe2/operators/reduce_front_back_sum_mean_ops.cu.cc",
+        "caffe2/operators/reduce_ops.cu.cc",
+        "caffe2/operators/reduction_ops.cu.cc",
+        "caffe2/operators/relu_n_op.cu.cc",
+        "caffe2/operators/relu_op.cu.cc",
+        "caffe2/operators/replace_nan_op.cu.cc",
+        "caffe2/operators/resize_3d_op.cu.cc",
+        "caffe2/operators/resize_op.cu.cc",
+        "caffe2/operators/reverse_packed_segs_op.cu.cc",
+        "caffe2/operators/rmac_regions_op.cu.cc",
+        "caffe2/operators/rnn/recurrent_network_op_gpu.cu.cc",
+        "caffe2/operators/roi_align_gradient_op.cu.cc",
+        "caffe2/operators/roi_align_op.cu.cc",
+        "caffe2/operators/roi_align_rotated_gradient_op.cu.cc",
+        "caffe2/operators/roi_align_rotated_op.cu.cc",
+        "caffe2/operators/roi_pool_op.cu.cc",
+        "caffe2/operators/rsqrt_op.cu.cc",
+        "caffe2/operators/scale_blobs_op.cu.cc",
+        "caffe2/operators/segment_reduction_op_gpu.cu.cc",
+        "caffe2/operators/selu_op.cu.cc",
+        "caffe2/operators/sequence_ops.cu.cc",
+        "caffe2/operators/sigmoid_op.cu.cc",
+        "caffe2/operators/sin_op.cu.cc",
+        "caffe2/operators/sinh_op.cu.cc",
+        "caffe2/operators/slice_op.cu.cc",
+        "caffe2/operators/softmax_ops.cu.cc",
+        "caffe2/operators/softplus_op.cu.cc",
+        "caffe2/operators/softsign_op.cu.cc",
+        "caffe2/operators/space_batch_op_gpu.cu.cc",
+        "caffe2/operators/sparse_normalize_op_gpu.cu.cc",
+        "caffe2/operators/sparse_to_dense_op.cu.cc",
+        "caffe2/operators/spatial_batch_norm_op.cu.cc",
+        "caffe2/operators/spatial_batch_norm_op_cudnn.cu.cc",
+        "caffe2/operators/stump_func_op.cu.cc",
+        "caffe2/operators/summarize_op.cu.cc",
+        "caffe2/operators/swish_op.cu.cc",
+        "caffe2/operators/tan_op.cu.cc",
+        "caffe2/operators/tanh_op.cu.cc",
+        "caffe2/operators/thresholded_relu_op.cu.cc",
+        "caffe2/operators/tile_op.cu.cc",
+        "caffe2/operators/top_k.cu.cc",
+        "caffe2/operators/transpose_op.cu.cc",
+        "caffe2/operators/unique_ops.cu.cc",
+        "caffe2/operators/upsample_op.cu.cc",
+        "caffe2/operators/utility_ops.cu.cc",
+        "caffe2/operators/weighted_sample_op.cu.cc",
+        "caffe2/sgd/adadelta_op_gpu.cu.cc",
+        "caffe2/sgd/adagrad_op_gpu.cu.cc",
+        "caffe2/sgd/adam_op_gpu.cu.cc",
+        "caffe2/sgd/fp16_momentum_sgd_op.cu.cc",
+        "caffe2/sgd/fp32_momentum_sgd_op.cu.cc",
+        "caffe2/sgd/lars_op_gpu.cu.cc",
+        "caffe2/sgd/momentum_sgd_op_gpu.cu.cc",
+        "caffe2/sgd/rmsprop_op_gpu.cu.cc",
+        "caffe2/sgd/yellowfin_op_gpu.cu.cc",
+        "caffe2/utils/math/broadcast.cu.cc",
+        "caffe2/utils/math/elementwise.cu.cc",
+        "caffe2/utils/math/reduce.cu.cc",
+        "caffe2/utils/math/transpose.cu.cc",
+        "caffe2/utils/math_gpu.cu.cc",
+    ],
+)
+
+# To achieve finer granularity and make debug easier, caffe2 is split into three libraries:
+# ATen, caffe2 and caffe2_for_aten_headers. ATen lib group up source codes under
+# aten/ directory and caffe2 contains most files under `caffe2/` directory. Since the
+# ATen lib and the caffe2 lib would depend on each other, `caffe2_for_aten_headers` is splitted
+# out from `caffe2` to avoid dependency cycle.
+cc_library(
+    name = "caffe2_for_aten_headers",
+    hdrs = [
+        "caffe2/core/common.h",
+        "caffe2/core/logging.h",
+        "caffe2/core/types.h",
+        "caffe2/perfkernels/common.h",
+        "caffe2/perfkernels/embedding_lookup.h",
+        "caffe2/perfkernels/embedding_lookup_idx.h",
+        "caffe2/utils/fixed_divisor.h",
+        "caffe2/utils/cpuid.h",
+    ] + glob([
+        "caffe2/utils/threadpool/*.h",
+        "caffe2/proto/*.h",
+    ]),
+    copts = CAFFE2_COPTS,
+    visibility = ["//visibility:public"],
+    deps = [
+        ":c10_headers",
+        ":caffe2_protos",
+        ":caffe2_core_macros_h",
+    ],
+)
+
+cc_library(
+    name = "caffe2_headers",
+    hdrs = glob([
+        "caffe2/contrib/aten/*.h",
+        "caffe2/contrib/gloo/*.h",
+        "caffe2/core/*.h",
+        "caffe2/core/nomnigraph/include/nomnigraph/Converters/*.h",
+        "caffe2/core/nomnigraph/include/nomnigraph/Generated/*.h",
+        "caffe2/core/nomnigraph/include/nomnigraph/Graph/*.h",
+        "caffe2/core/nomnigraph/include/nomnigraph/Representations/*.h",
+        "caffe2/core/nomnigraph/include/nomnigraph/Support/*.h",
+        "caffe2/core/nomnigraph/include/nomnigraph/Transformations/*.h",
+        "caffe2/core/nomnigraph/tests/*.h",
+        "caffe2/db/*.h",
+        "caffe2/distributed/*.h",
+        "caffe2/ideep/*.h",
+        "caffe2/ideep/operators/*.h",
+        "caffe2/ideep/operators/quantization/*.h",
+        "caffe2/ideep/utils/*.h",
+        "caffe2/onnx/*.h",
+        "caffe2/operators/*.h",
+        "caffe2/operators/rnn/*.h",
+        "caffe2/opt/*.h",
+        "caffe2/perfkernels/*.h",
+        "caffe2/predictor/*.h",
+        "caffe2/predictor/emulator/*.h",
+        "caffe2/proto/*.h",
+        "caffe2/quantization/server/*.h",
+        "caffe2/queue/*.h",
+        "caffe2/serialize/*.h",
+        "caffe2/sgd/*.h",
+        "caffe2/share/contrib/depthwise/*.h",
+        "caffe2/transforms/*.h",
+        "caffe2/utils/*.h",
+        "caffe2/utils/math/*.h",
+        "caffe2/utils/threadpool/*.h",
+        "modules/**/*.h",
+    ]) + if_cuda(glob([
+        "caffe2/**/*.cuh",
+        "caffe2/image/*.h",
+    ])),
+    copts = CAFFE2_COPTS,
+    includes = [
+        "caffe2/contrib/aten",
+        "caffe2/core/nomnigraph/include",
+        "third_party/miniz-2.0.8",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":caffe2_for_aten_headers",
+        ":caffe2_protos",
+    ],
+)
+
+cc_library(
+    name = "caffe2_dnnlowp_avx2_ops",
+    srcs = [
+        "caffe2/quantization/server/elementwise_sum_dnnlowp_op_avx2.cc",
+        "caffe2/quantization/server/fully_connected_fake_lowp_op_avx2.cc",
+        "caffe2/quantization/server/group_norm_dnnlowp_op_avx2.cc",
+        "caffe2/quantization/server/norm_minimization_avx2.cc",
+        "caffe2/quantization/server/pool_dnnlowp_op_avx2.cc",
+        "caffe2/quantization/server/relu_dnnlowp_op_avx2.cc",
+        "caffe2/quantization/server/spatial_batch_norm_dnnlowp_op_avx2.cc",
+        "caffe2/quantization/server/transpose.cc",
+    ],
+    copts = CAFFE2_COPTS + [
+        "-mf16c",
+        "-mavx2",
+        "-mfma",
+        "-mxsave",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":caffe2_headers",
+        "@fbgemm",
+    ],
+    alwayslink = True,
+)
+
+cc_library(
+    name = "caffe2",
+    srcs = [
+        "caffe2/db/create_db_op.cc",
+        "caffe2/db/protodb.cc",
+        "caffe2/share/contrib/depthwise/depthwise3x3_conv_op.cc",
+        ":caffe2_contrib_srcs",
+        ":caffe2_core_srcs",
+        ":caffe2_distributed_srcs",
+        ":caffe2_ideep_srcs",
+        ":caffe2_onnx_srcs",
+        ":caffe2_operators_srcs",
+        ":caffe2_opt_srcs",
+        ":caffe2_perfkernels_srcs",
+        ":caffe2_predictor_srcs",
+        ":caffe2_quantization_srcs",
+        ":caffe2_queue_srcs",
+        ":caffe2_serialize_srcs",
+        ":caffe2_sgd_srcs",
+        ":caffe2_transforms_srcs",
+        ":caffe2_utils_srcs",
+    ],
+    copts = CAFFE2_COPTS + ["-mf16c"],
+    linkstatic = 1,
+    visibility = ["//visibility:public"],
+    deps = [
+        ":caffe2_headers",
+        ":caffe2_dnnlowp_avx2_ops",
+        ":caffe2_perfkernels_avx",
+        ":caffe2_perfkernels_avx2",
+        ":caffe2_perfkernels_avx512",
+        ":caffe2_protos",
+        "//third_party/miniz-2.0.8:miniz",
+        "@com_google_protobuf//:protobuf",
+        "@eigen",
+        "@fbgemm//:fbgemm_src_headers",
+        "@foxi",
+        "@gloo",
+        "@onnx",
+        "@fmt",
+        "@tensorpipe",
+    ] + if_cuda(
+        [
+            ":caffe2_cpp_cuda",
+            ":aten_cuda",
+        ],
+        [":aten"],
+    ),
+    alwayslink = True,
+)
+
+cc_library(
+    name = "caffe2_cpp_cuda",
+    srcs = [":caffe2_cuda_srcs"],
+    copts = CAFFE2_COPTS,
+    visibility = ["//visibility:public"],
+    deps = [
+        ":caffe2_cuda",
+        ":caffe2_headers",
+    ],
+    alwayslink = True,
+)
+
+cu_library(
+    name = "caffe2_cuda",
+    srcs = [":caffe2_cu_srcs"],
+    copts = CAFFE2_COPTS + torch_cuda_half_options,
+    visibility = ["//visibility:public"],
+    deps = [
+        ":aten",
+        ":caffe2_headers",
+        "@cub",
+        "@cuda//:cublas",
+        "@cuda//:curand",
+        "@cudnn",
+        "@eigen",
+        "@gloo",
+        "@tensorpipe",
+    ],
+    alwayslink = True,
+)
+
+PERF_COPTS = [
+    "-DHAVE_GCC_GET_CPUID",
+    "-DUSE_AVX",
+    "-DUSE_AVX2",
+    "-DTH_HAVE_THREAD",
+    "-DHAVE_AVX_CPU_DEFINITION",
+    "-DHAVE_AVX2_CPU_DEFINITION",
+    "-DENABLE_ALIAS=1",
+    "-DHAVE_MALLOC_USABLE_SIZE=1",
+    "-DHAVE_MMAP=1",
+    "-DHAVE_SHM_OPEN=1",
+    "-DHAVE_SHM_UNLINK=1",
+    "-DSLEEF_STATIC_LIBS=1",
+    "-D_FILE_OFFSET_BITS=64",
+    "-DUSE_FBGEMM",
+    "-fvisibility-inlines-hidden",
+    "-Wunused-parameter",
+    "-fno-math-errno",
+    "-fno-trapping-math",
+    "-mf16c",
+]
+
+PERF_HEADERS = glob([
+    "caffe2/perfkernels/*.h",
+    "caffe2/core/*.h",
+])
+
+cc_library(
+    name = "caffe2_perfkernels_avx",
+    srcs = glob([
+        "caffe2/perfkernels/*_avx.cc",
+    ]),
+    hdrs = PERF_HEADERS,
+    copts = PERF_COPTS + [
+        "-mavx",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":caffe2_headers",
+        ":c10",
+    ],
+    alwayslink = True,
+)
+
+cc_library(
+    name = "caffe2_perfkernels_avx2",
+    srcs = glob([
+        "caffe2/perfkernels/*_avx2.cc",
+    ]),
+    hdrs = PERF_HEADERS,
+    copts = PERF_COPTS + [
+        "-mavx2",
+        "-mfma",
+        "-mavx",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":caffe2_headers",
+        ":c10",
+    ],
+    alwayslink = True,
+)
+
+cc_library(
+    name = "caffe2_perfkernels_avx512",
+    srcs = [
+        "caffe2/perfkernels/common_avx512.cc",
+    ],
+    hdrs = PERF_HEADERS,
+    copts = PERF_COPTS + [
+        "-mavx512f",
+        "-mavx512dq",
+        "-mavx512vl",
+        "-mavx2",
+        "-mfma",
+        "-mavx",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":caffe2_headers",
+        ":c10",
+    ],
+    alwayslink = True,
+)
+
+# torch
+torch_cuda_headers = glob(["torch/csrc/cuda/*.h"])
+cc_library(
+    name = "torch_headers",
+    hdrs = if_cuda(
+        torch_cuda_headers,
+    ) + glob(
+        [
+            "torch/*.h",
+            "torch/csrc/**/*.h",
+            "torch/lib/libshm/*.h",
+            "torch/lib/c10d/*.hpp",
+        ],
+        exclude = [
+            "torch/lib/c10d/ProcessGroupMPI.hpp",
+            "torch/lib/c10d/ProcessGroupNCCL.hpp",
+        ] + torch_cuda_headers,
+    ) + [":cpp_generated_code"],
+    includes = [
+        "torch/csrc",
+        "torch/csrc/api/include",
+        "torch/lib",
+        "torch/lib/libshm",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":aten_headers",
+        ":c10_headers",
+        ":caffe2_headers",
+        "@local_config_python//:python_headers",
+        "@onnx",
+    ],
+    alwayslink = True,
+)
+
+TORCH_COPTS = COMMON_COPTS + [
+    "-Dtorch_EXPORTS",
+    "-DHAVE_AVX_CPU_DEFINITION",
+    "-DHAVE_AVX2_CPU_DEFINITION",
+    "-DCAFFE2_USE_GLOO",
+    "-fvisibility-inlines-hidden",
+    "-fno-math-errno ",
+    "-fno-trapping-math",
+]
+
+cc_library(
+    name = "torch",
+    srcs = if_cuda(glob(
+        [
+            "torch/csrc/cuda/*.cpp",
+            "torch/csrc/autograd/functions/comm.cpp",
+        ],
+        exclude = [
+            "torch/csrc/cuda/python_nccl.cpp",
+            "torch/csrc/cuda/nccl.cpp",
+        ],
+    )) + libtorch_core_sources + libtorch_distributed_sources + torch_cpp_srcs + libtorch_extra_sources + jit_core_sources + [
+        ":cpp_generated_code",
+    ],
+    copts = TORCH_COPTS + if_cuda(["-DUSE_CUDA=1"]),
+    defines = [
+        "CAFFE2_NIGHTLY_VERSION=20200115",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":caffe2",
+        ":torch_headers",
+    ],
+    alwayslink = True,
+)
+
+cc_library(
+    name = "shm",
+    srcs = glob(["torch/lib/libshm/*.cpp"]),
+    deps = [
+        ":torch",
+    ],
+)
+
+cc_library(
+    name = "libtorch_headers",
+    hdrs = glob([
+        "**/*.h",
+        "**/*.cuh",
+    ]) + [
+        ":generated_code",
+    ],
+    includes = [
+        ".",
+        "torch/csrc/api/include",
+        "torch/lib",
+        "torch/lib/libshm",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":aten_headers",
+        ":c10_headers",
+        ":caffe2_headers",
+    ],
+)
+
+cc_library(
+    name = "torch_python",
+    srcs = libtorch_python_core_sources + [":python_generated_code"],
+    hdrs = glob([
+        "torch/csrc/generic/*.cpp",
+    ]),
+    deps = [
+        ":torch",
+        ":shm",
+    ],
+)
+
+pybind_extension(
+    name = "_C",
+    srcs = ["torch/csrc/stub.c"],
+    deps = [
+        ":torch_python"
+    ],
+)
+
+# cpp api tests
+cc_library(
+    name = "test_support",
+    testonly = True,
+    srcs = [
+        "test/cpp/api/support.cpp",
+    ],
+    hdrs = [
+        "test/cpp/api/init_baseline.h",
+        "test/cpp/api/optim_baseline.h",
+        "test/cpp/api/support.h",
+        "test/cpp/common/support.h",
+    ],
+    deps = [
+        ":torch",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
+# Torch integration tests rely on a labeled data set from the MNIST database.
+# http://yann.lecun.com/exdb/mnist/
+
+cpp_api_tests = glob(["test/cpp/api/*.cpp"])
+[
+  cc_test(
+      name = paths.split_extension(paths.basename(filename))[0].replace("-","_") + "_test",
+    size = "medium",
+      srcs = [filename],
+      deps = [
+          ":test_support",
+          "@com_google_googletest//:gtest_main",
+      ],
+  ) for filename in cpp_api_tests
+]
+
+test_suite(
+    name = "api_tests",
+    tests = [
+        "any_test",
+        "autograd_test",
+        "dataloader_test",
+        "enum_test",
+        "expanding_array_test",
+        "functional_test",
+        "init_test",
+        "integration_test",
+        "jit_test",
+        "memory_test",
+        "misc_test",
+        "module_test",
+        "modulelist_test",
+        "modules_test",
+        "nn_utils_test",
+        "optim_test",
+        "ordered_dict_test",
+        "rnn_test",
+        "sequential_test",
+        "serialize_test",
+        "static_test",
+        "tensor_options_test",
+        "tensor_test",
+        "torch_include_test",
+    ],
+)
+
+# dist autograd tests
+cc_test(
+    name = "torch_dist_autograd_test",
+    size = "small",
+    srcs = ["test/cpp/dist_autograd/test_dist_autograd.cpp"],
+    tags = [
+        "exclusive",
+        "gpu-required",
+    ],
+    deps = [
+        ":torch",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
+# jit tests
+# Because these individual unit tests require custom registering,
+# it is easier to mimic the cmake build by globing together a single test.
+cc_test(
+    name = "jit_tests",
+    size = "small",
+    srcs = glob([
+        "test/cpp/jit/*.cpp",
+        "test/cpp/jit/*.h",
+        "test/cpp/tensorexpr/*.cpp",
+        "test/cpp/tensorexpr/*.h",
+    ]),
+    linkstatic = True,
+    tags = [
+        "exclusive",
+        "gpu-required",
+    ],
+    deps = [
+        ":torch",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
+# all tests
+test_suite(
+    name = "all_tests",
+    tests = [
+        "api_tests",
+        "c10_tests",
+        "jit_tests",
+        "torch_dist_autograd_test",
+    ],
+)

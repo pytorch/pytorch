@@ -6,7 +6,7 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/operators/reducer_functors.h"
-#include "caffe2/perfkernels/fused_8bit_rowwise_conversion.h"
+#include "caffe2/perfkernels/fused_nbit_rowwise_conversion.h"
 #include "caffe2/utils/math.h"
 
 C10_DECLARE_EXPORT_CAFFE2_OP_TO_C10(Fused8BitRowwiseQuantizedToFloat);
@@ -63,7 +63,8 @@ class FloatToFused8BitRowwiseQuantizedOp : public Operator<Context> {
     if (!HAS_CONVERT) {
       CAFFE_ENFORCE(is_float, "convert can be nullptr only if T is float");
       if (out_sb_half) {
-        FloatToFused8BitRowwiseQuantizedSBHalf(
+        FloatToFusedNBitRowwiseQuantizedSBHalf(
+            8,
             reinterpret_cast<const float*>(input_data),
             input_rows,
             input_columns,
@@ -83,8 +84,12 @@ class FloatToFused8BitRowwiseQuantizedOp : public Operator<Context> {
       for (size_t row = 0; row < input_rows; ++row) {
         convert(tmp.data(), input_data + row * input_columns, input_columns);
         if (out_sb_half) {
-          FloatToFused8BitRowwiseQuantizedSBHalf(
-              tmp.data(), 1, input_columns, output_data + row * output_columns);
+          FloatToFusedNBitRowwiseQuantizedSBHalf(
+              8,
+              tmp.data(),
+              1,
+              input_columns,
+              output_data + row * output_columns);
         } else {
           FloatToFused8BitRowwiseQuantized(
               tmp.data(), 1, input_columns, output_data + row * output_columns);
@@ -138,7 +143,8 @@ class Fused8BitRowwiseQuantizedToFloatOp : public Operator<Context> {
       CAFFE_ENFORCE(is_float, "convert can be nullptr only if T is float");
 
       if (in_sb_half) {
-        Fused8BitRowwiseQuantizedSBHalfToFloat(
+        FusedNBitRowwiseQuantizedSBHalfToFloat(
+            8,
             input_data,
             input_rows,
             input_columns,
@@ -157,8 +163,12 @@ class Fused8BitRowwiseQuantizedToFloatOp : public Operator<Context> {
       vector<float> tmp(input_columns);
       for (size_t row = 0; row < input_rows; ++row) {
         if (in_sb_half) {
-          Fused8BitRowwiseQuantizedSBHalfToFloat(
-              input_data + row * input_columns, 1, input_columns, tmp.data());
+          FusedNBitRowwiseQuantizedSBHalfToFloat(
+              8,
+              input_data + row * input_columns,
+              1,
+              input_columns,
+              tmp.data());
         } else {
           Fused8BitRowwiseQuantizedToFloat(
               input_data + row * input_columns, 1, input_columns, tmp.data());

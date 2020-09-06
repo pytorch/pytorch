@@ -6,19 +6,20 @@
 
 // These used to be distinct types; for some measure of backwards compatibility and documentation
 // alias these to the single THCStorage type.
-#define THCudaStorage           THCStorage
-#define THCudaDoubleStorage     THCStorage
-#define THCudaHalfStorage       THCStorage
-#define THCudaByteStorage       THCStorage
-#define THCudaCharStorage       THCStorage
-#define THCudaShortStorage      THCStorage
-#define THCudaIntStorage        THCStorage
-#define THCudaLongStorage       THCStorage
-#define THCudaBoolStorage       THCStorage
-#define THCudaBFloat16Storage   THCStorage
+#define THCudaStorage                       THCStorage
+#define THCudaDoubleStorage                 THCStorage
+#define THCudaHalfStorage                   THCStorage
+#define THCudaByteStorage                   THCStorage
+#define THCudaCharStorage                   THCStorage
+#define THCudaShortStorage                  THCStorage
+#define THCudaIntStorage                    THCStorage
+#define THCudaLongStorage                   THCStorage
+#define THCudaBoolStorage                   THCStorage
+#define THCudaBFloat16Storage               THCStorage
+#define THCudaComplexFloatStorage           THCStorage
+#define THCudaComplexDoubleStorage          THCStorage
 
 THC_API scalar_t* THCStorage_(data)(THCState *state, const THCStorage*);
-THC_API ptrdiff_t THCStorage_(size)(THCState *state, const THCStorage*);
 THC_API int THCStorage_(elementSize)(THCState *state);
 
 /* slow access -- checks everything */
@@ -42,7 +43,8 @@ THC_API void THCStorage_(clearFlag)(THCState *state, THCStorage *storage, const 
 THC_API void THCStorage_(retain)(THCState *state, THCStorage *storage);
 
 THC_API void THCStorage_(free)(THCState *state, THCStorage *storage);
-THC_API void THCStorage_(resize)(THCState *state, THCStorage *storage, ptrdiff_t size);
+THC_API void THCStorage_(
+    resizeBytes)(THCState* state, THCStorage* storage, ptrdiff_t size_bytes);
 THC_API void THCStorage_(fill)(THCState *state, THCStorage *storage, scalar_t value);
 
 THC_API int THCStorage_(getDevice)(THCState* state, const THCStorage* storage);

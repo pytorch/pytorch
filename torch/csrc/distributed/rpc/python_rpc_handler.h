@@ -17,10 +17,17 @@ namespace rpc {
 // torch/distributed/internal_rpc_utils.py are imported only once.
 class PYBIND11_EXPORT PythonRpcHandler {
  public:
+  struct RRefProxyFunctions {
+    py::object rrefProxyCtor_;
+    py::object rpcSync_;
+    py::object rpcAsync_;
+    py::object remote_;
+  };
+
   static PythonRpcHandler& getInstance();
 
   // Run a pickled Python UDF and return the result py::object
-  py::object runPythonUdf(py::object&& pythonUdf);
+  py::object runPythonUdf(const py::object& pythonUdf);
 
   // Serialized a py::object into a string
   SerializedPyObj serialize(const py::object& obj);
@@ -32,6 +39,8 @@ class PYBIND11_EXPORT PythonRpcHandler {
   void handleException(const py::object& obj);
   // Alternative if the caller is already holding the GIL.
   void handleExceptionGILHeld(const py::object& obj);
+  // Check if obj is an RemoteException instance.
+  bool isRemoteException(const py::object& obj);
 
   // Explicitly clean up py::objects to avoid segment faults when
   // py::objects with CPython are cleaned up later at program exit
@@ -61,7 +70,10 @@ class PYBIND11_EXPORT PythonRpcHandler {
   // to resolve types according to the above rules.
   TypePtr parseTypeFromStr(const std::string& typeStr);
 
+  const RRefProxyFunctions& getRRefProxyFunctions() const;
+
  private:
+  void init();
   PythonRpcHandler();
   ~PythonRpcHandler() = default;
 
@@ -82,6 +94,8 @@ class PYBIND11_EXPORT PythonRpcHandler {
   // Ref to 'torch.distributed.rpc.internal._handle_exception'
   py::object pyHandleException_;
 
+  RRefProxyFunctions rrefProxyFunctions_;
+
   // Shared ptr to python compilation unit in jit, it is constructed in python
   // side (see _python_cu = torch._C.CompilationUnit() in jit/__init__.py)
   // and imported in C++ (see get_python_cu() in
@@ -92,6 +106,12 @@ class PYBIND11_EXPORT PythonRpcHandler {
   // jit type parser to parse type_str back to TypePtr for RRef type
   // recovery when pickling and unpickling RRef
   std::shared_ptr<jit::ScriptTypeParser> typeParser_;
+
+  // Indicates whether or not we have properly initialized the handler.
+  bool initialized_;
+
+  // Lock to protect initialization.
+  std::mutex init_lock_;
 };
 
 } // namespace rpc

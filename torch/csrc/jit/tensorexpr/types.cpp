@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/tensorexpr/types.h>
+
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/tensorexpr/exceptions.h>
 
@@ -10,6 +11,7 @@ namespace tensorexpr {
 
 bool is_integral(const ScalarType& type) {
   switch (type) {
+    case ScalarType::Bool:
     case ScalarType::Byte:
     case ScalarType::Char:
     case ScalarType::Short:
@@ -49,6 +51,7 @@ AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, DTYPE_DEFINE)
 
 TORCH_API Dtype kHandle(ScalarType::Handle, 1);
 TORCH_API Dtype kUninitialized(ScalarType::Uninitialized, 1);
+TORCH_API Dtype kVoid(ScalarType::None, 1);
 
 Dtype ToDtype(ScalarType type) {
   switch (type) {
@@ -63,6 +66,8 @@ Dtype ToDtype(ScalarType type) {
       return kHandle;
     case ScalarType::Uninitialized:
       return kUninitialized;
+    case ScalarType::None:
+      return kVoid;
     default:
       throw unsupported_dtype();
   }

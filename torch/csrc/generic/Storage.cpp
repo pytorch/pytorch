@@ -135,7 +135,7 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
 static Py_ssize_t THPStorage_(length)(THPStorage *self)
 {
   HANDLE_TH_ERRORS
-  return THWStorage_(size)(LIBRARY_STATE self->cdata);
+  return self->cdata->nbytes() / sizeof(scalar_t);
   END_HANDLE_TH_ERRORS_RET(-1)
 }
 
@@ -146,10 +146,15 @@ static PyObject * THPStorage_(get)(THPStorage *self, PyObject *index)
   if (THPUtils_checkLong(index)) {
     int64_t nindex = THPUtils_unpackLong(index);
     if (nindex < 0)
-      nindex += THWStorage_(size)(LIBRARY_STATE self->cdata);
-    if (nindex < 0 || nindex >= self->cdata->numel()) {
-      PyErr_Format(PyExc_IndexError, "index %" PRId64 " out of range for storage of "
-              "size %" PRId64, (int64_t) nindex, (int64_t) self->cdata->numel());
+      nindex += (self->cdata->nbytes() / sizeof(scalar_t));
+    if (nindex < 0 || nindex >= (self->cdata->nbytes() / sizeof(scalar_t))) {
+      PyErr_Format(
+          PyExc_IndexError,
+          "index %" PRId64
+          " out of range for storage of "
+          "size %" PRId64,
+          (int64_t)nindex,
+          (int64_t)(self->cdata->nbytes() / sizeof(scalar_t)));
       return nullptr;
     }
     scalar_t value = THWStorage_(get)(LIBRARY_STATE self->cdata, nindex);
@@ -157,7 +162,7 @@ static PyObject * THPStorage_(get)(THPStorage *self, PyObject *index)
   /* Slice index */
   } else if (PySlice_Check(index)) {
     Py_ssize_t start, stop, slicelength, step;
-    int64_t len = THWStorage_(size)(LIBRARY_STATE self->cdata);
+    int64_t len = self->cdata->nbytes() / sizeof(scalar_t);
     if (!THPUtils_parseSlice(index, len, &start, &stop, &step, &slicelength))
       return nullptr;
     if (step != 1) {
@@ -171,14 +176,21 @@ static PyObject * THPStorage_(get)(THPStorage *self, PyObject *index)
     at::StorageImpl* old_storage = self->cdata;
     c10::raw::intrusive_ptr::incref(old_storage);
     at::Storage new_storage(c10::make_intrusive<at::StorageImpl>(
-      old_storage->dtype(),
-      slicelength,
-      at::DataPtr(static_cast<void*>(data + start),
-                  old_storage,
-                  [](void* s) { c10::raw::intrusive_ptr::decref(static_cast<at::StorageImpl*>(s)); },
-                  old_storage->device()),
-      old_storage->allocator(),
-      /* resizable */ false));
+        c10::StorageImpl::use_byte_size_t(),
+#ifdef THQUANTIZED
+        slicelength * sizeof(quantized_t),
+#else
+        slicelength * sizeof(scalar_t),
+#endif
+        at::DataPtr(
+            static_cast<void*>(data + start),
+            old_storage,
+            [](void* s) {
+              c10::raw::intrusive_ptr::decref(static_cast<at::StorageImpl*>(s));
+            },
+            old_storage->device()),
+        old_storage->allocator(),
+        /* resizable */ false));
 
     PyObject *_ret = THPStorage_(New)(new_storage.unsafeReleaseStorageImpl());
     return _ret;
@@ -206,7 +218,7 @@ static int THPStorage_(set)(THPStorage *self, PyObject *index, PyObject *value)
     return 0;
   } else if (PySlice_Check(index)) {
     Py_ssize_t start, stop, slicelength, step;
-    int64_t len = THWStorage_(size)(LIBRARY_STATE self->cdata);
+    int64_t len = self->cdata->nbytes() / sizeof(scalar_t);
     if (!THPUtils_parseSlice(index, len, &start, &stop, &step, &slicelength))
       return -1;
     if (step != 1) {
@@ -289,7 +301,13 @@ static PyObject * THPStorage_(dtype)(THPStorage *self, void *unused)
 {
   HANDLE_TH_ERRORS
   return torch::autograd::utils::wrap(
-      torch::getDtype(at::typeMetaToScalarType(self->cdata->dtype())));
+      torch::getTHPDtype(at::typeMetaToScalarType(
+#ifdef THQUANTIZED
+          caffe2::TypeMeta::Make<quantized_t>()
+#else
+          caffe2::TypeMeta::Make<scalar_t>()
+#endif
+              )));
   END_HANDLE_TH_ERRORS
 }
 
@@ -308,52 +326,70 @@ void THPStorage_(initCopyMethods)()
 {
   auto& h = THWStorage_(copy_functions);
   // copy from CPU types
-  THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPByteStorageType, h, &THWStorage_(copyByte));
-  THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPCharStorageType, h, &THWStorage_(copyChar));
-  THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPShortStorageType, h, &THWStorage_(copyShort));
-  THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPIntStorageType, h, &THWStorage_(copyInt));
-  THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPLongStorageType, h, &THWStorage_(copyLong));
-  THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPHalfStorageType, h, &THWStorage_(copyHalf));
-  THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPFloatStorageType, h, &THWStorage_(copyFloat));
-  THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPDoubleStorageType, h, &THWStorage_(copyDouble));
-  THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPBoolStorageType, h, &THWStorage_(copyBool));
-  THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPBFloat16StorageType, h, &THWStorage_(copyBFloat16));
+  // TODO: Add cross-dtype storage copy for complex storage
+#if !defined(TH_REAL_IS_COMPLEXFLOAT) && !defined(TH_REAL_IS_COMPLEXDOUBLE) && \
+    !defined(THC_REAL_IS_COMPLEXFLOAT) && !defined(THC_REAL_IS_COMPLEXDOUBLE)
+    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPByteStorageType, h, &THWStorage_(copyByte));
+    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPCharStorageType, h, &THWStorage_(copyChar));
+    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPShortStorageType, h, &THWStorage_(copyShort));
+    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPIntStorageType, h, &THWStorage_(copyInt));
+    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPLongStorageType, h, &THWStorage_(copyLong));
+    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPHalfStorageType, h, &THWStorage_(copyHalf));
+    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPFloatStorageType, h, &THWStorage_(copyFloat));
+    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPDoubleStorageType, h, &THWStorage_(copyDouble));
+    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPBoolStorageType, h, &THWStorage_(copyBool));
+    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPBFloat16StorageType, h, &THWStorage_(copyBFloat16));
 #ifdef THQUINT8
-  THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPQUInt8StorageType, h, &THWStorage_(copyQUInt8));
+      THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPQUInt8StorageType, h, &THWStorage_(copyQUInt8));
 #endif
 #ifdef THQINT8
-  THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPQInt8StorageType, h, &THWStorage_(copyQInt8));
+      THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPQInt8StorageType, h, &THWStorage_(copyQInt8));
 #endif
 #ifdef THQINT32
-  THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPQInt32StorageType, h, &THWStorage_(copyQInt32));
+      THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPQInt32StorageType, h, &THWStorage_(copyQInt32));
 #endif
+#else
+    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPComplexFloatStorageType, h, &THWStorage_(copyComplexFloat));
+    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPComplexDoubleStorageType, h, &THWStorage_(copyComplexDouble));
+#endif
+
 #ifdef THC_GENERIC_FILE
   // copy from GPU types
-  THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPByteStorageType, h, &THWStorage_(copyCudaByte));
-  THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPCharStorageType, h, &THWStorage_(copyCudaChar));
-  THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPShortStorageType, h, &THWStorage_(copyCudaShort));
-  THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPIntStorageType, h, &THWStorage_(copyCudaInt));
-  THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPLongStorageType, h, &THWStorage_(copyCudaLong));
-  THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPFloatStorageType, h, &THWStorage_(copyCudaFloat));
-  THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPDoubleStorageType, h, &THWStorage_(copyCudaDouble));
-  THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPHalfStorageType, h, &THWStorage_(copyCudaHalf));
-  THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPBoolStorageType, h, &THWStorage_(copyCudaBool));
-  THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPBFloat16StorageType, h, &THWStorage_(copyCudaBFloat16));
+  #if !defined(THC_REAL_IS_COMPLEXFLOAT) && !defined(THC_REAL_IS_COMPLEXDOUBLE) && !defined(TH_REAL_IS_COMPLEXFLOAT) && !defined(TH_REAL_IS_COMPLEXDOUBLE)
+    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPByteStorageType, h, &THWStorage_(copyCudaByte));
+    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPCharStorageType, h, &THWStorage_(copyCudaChar));
+    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPShortStorageType, h, &THWStorage_(copyCudaShort));
+    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPIntStorageType, h, &THWStorage_(copyCudaInt));
+    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPLongStorageType, h, &THWStorage_(copyCudaLong));
+    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPFloatStorageType, h, &THWStorage_(copyCudaFloat));
+    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPDoubleStorageType, h, &THWStorage_(copyCudaDouble));
+    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPHalfStorageType, h, &THWStorage_(copyCudaHalf));
+    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPBoolStorageType, h, &THWStorage_(copyCudaBool));
+    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPBFloat16StorageType, h, &THWStorage_(copyCudaBFloat16));
+  #else
+    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPComplexFloatStorageType, h, &THWStorage_(copyCudaComplexFloat));
+    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPComplexDoubleStorageType, h, &THWStorage_(copyCudaComplexDouble));
+  #endif
   // add CPU <- GPU copies to base type
   /// #define THPCpuStorage TH_CONCAT_3(THP, Real, Storage)
   #define THCpuStorage_(name) TH_CONCAT_4(TH, Real, Storage_, name)
   extern THPCopyList THCpuStorage_(copy_functions);
   auto& b = THCpuStorage_(copy_functions);
-  THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPByteStorageType, b, &THCpuStorage_(copyCudaByte));
-  THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPCharStorageType, b, &THCpuStorage_(copyCudaChar));
-  THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPShortStorageType, b, &THCpuStorage_(copyCudaShort));
-  THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPIntStorageType, b, &THCpuStorage_(copyCudaInt));
-  THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPLongStorageType, b, &THCpuStorage_(copyCudaLong));
-  THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPFloatStorageType, b, &THCpuStorage_(copyCudaFloat));
-  THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPDoubleStorageType, b, &THCpuStorage_(copyCudaDouble));
-  THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPHalfStorageType, b, &THCpuStorage_(copyCudaHalf));
-  THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPBoolStorageType, b, &THCpuStorage_(copyCudaBool));
-  THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPBFloat16StorageType, b, &THCpuStorage_(copyCudaBFloat16));
+  #if !defined(THC_REAL_IS_COMPLEXFLOAT) && !defined(THC_REAL_IS_COMPLEXDOUBLE) && !defined(TH_REAL_IS_COMPLEXFLOAT) && !defined(TH_REAL_IS_COMPLEXDOUBLE)
+    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPByteStorageType, b, &THCpuStorage_(copyCudaByte));
+    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPCharStorageType, b, &THCpuStorage_(copyCudaChar));
+    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPShortStorageType, b, &THCpuStorage_(copyCudaShort));
+    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPIntStorageType, b, &THCpuStorage_(copyCudaInt));
+    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPLongStorageType, b, &THCpuStorage_(copyCudaLong));
+    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPFloatStorageType, b, &THCpuStorage_(copyCudaFloat));
+    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPDoubleStorageType, b, &THCpuStorage_(copyCudaDouble));
+    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPHalfStorageType, b, &THCpuStorage_(copyCudaHalf));
+    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPBoolStorageType, b, &THCpuStorage_(copyCudaBool));
+    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPBFloat16StorageType, b, &THCpuStorage_(copyCudaBFloat16));
+  #else
+    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPComplexFloatStorageType, b, &THCpuStorage_(copyCudaComplexFloat));
+    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPComplexDoubleStorageType, b, &THCpuStorage_(copyCudaComplexDouble));
+  #endif
   #undef THCpuStorage
   #undef THCpuStorage_
 #endif

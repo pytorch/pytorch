@@ -2,12 +2,15 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/TensorUtils.h>
 
-#include <TH/THBlasUtils.h>
-
+#include <ATen/native/CPUBlas.h>
 #include <ATen/native/im2col.h>
 
 namespace at {
 namespace native {
+
+template<typename scalar_t>
+void gemv(char trans, int64_t m, int64_t n, scalar_t alpha, scalar_t *a, int64_t lda, scalar_t *x, int64_t incx, scalar_t beta, scalar_t *y, int64_t incy);
+
 namespace {
 
 static inline void slow_conv_transpose2d_shape_check(
@@ -267,9 +270,9 @@ void slow_conv_transpose2d_out_cpu_template(
 
           // Do GEMM (note: this is a bit confusing because gemm assumes
           // column-major matrices)
-          THBlas_gemm<scalar_t>(
-              'n',
-              't',
+          cpublas::gemm(
+              cpublas::NoTranspose,
+              cpublas::Transpose,
               n,
               m,
               k,
@@ -310,9 +313,9 @@ void slow_conv_transpose2d_out_cpu_template(
           // Do GEMM (note: this is a bit confusing because gemm assumes
           // column-major matrices)
           if (bias_.defined()) {
-            THBlas_gemm<scalar_t>(
-                't',
-                'n',
+            cpublas::gemm(
+                cpublas::Transpose,
+                cpublas::NoTranspose,
                 n_,
                 m_,
                 k_,
@@ -476,9 +479,9 @@ static void slow_conv_transpose2d_backward_out_cpu_template(
 
           // Do GEMM (note: this is a bit confusing because gemm assumes
           // column-major matrices)
-          THBlas_gemm<scalar_t>(
-              'n',
-              'n',
+          cpublas::gemm(
+              cpublas::NoTranspose,
+              cpublas::NoTranspose,
               n,
               m,
               k,
@@ -667,9 +670,9 @@ void slow_conv_transpose2d_acc_grad_parameters_cpu(
 
             // Do GEMM (note: this is a bit confusing because gemm assumes
             // column-major matrices)
-            THBlas_gemm<scalar_t>(
-                't',
-                'n',
+            cpublas::gemm(
+                cpublas::Transpose,
+                cpublas::NoTranspose,
                 n,
                 m,
                 k,
@@ -692,7 +695,7 @@ void slow_conv_transpose2d_acc_grad_parameters_cpu(
 
             // Do GEMV (note: this is a bit confusing because gemv assumes
             // column-major matrices)
-            THBlas_gemv<scalar_t>(
+            native::gemv<scalar_t>(
                 't',
                 k_,
                 m_,

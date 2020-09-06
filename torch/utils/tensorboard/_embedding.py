@@ -31,7 +31,7 @@ def make_sprite(label_img, save_path):
     arranged_img_CHW = make_grid(make_np(label_img), ncols=nrow)
 
     # augment images so that #images equals nrow*nrow
-    arranged_augment_square_HWC = np.ndarray((arranged_img_CHW.shape[2], arranged_img_CHW.shape[2], 3))
+    arranged_augment_square_HWC = np.zeros((arranged_img_CHW.shape[2], arranged_img_CHW.shape[2], 3))
     arranged_img_HWC = arranged_img_CHW.transpose(1, 2, 0)  # chw -> hwc
     arranged_augment_square_HWC[:arranged_img_HWC.shape[0], :, :] = arranged_img_HWC
     im = Image.fromarray(np.uint8((arranged_augment_square_HWC * 255).clip(0, 255)))

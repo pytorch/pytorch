@@ -45,8 +45,8 @@ void getLaunchConfig(dim3* block, dim3* grid, int64_t numel) {
   int curDevice = -1;
   cudaGetDevice(&curDevice);
   *block = cuda::getApplyBlock();
-  AT_ASSERTM(cuda::getApplyGrid(numel, *grid, curDevice),
-             "Could not get grid size for pointwise apply.");
+  TORCH_INTERNAL_ASSERT(cuda::getApplyGrid(numel, *grid, curDevice),
+                        "Could not get grid size for pointwise apply.");
 }
 
 template<typename T, typename T2>
@@ -534,6 +534,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_fused_lstm_cell_backwar
       const Tensor& grad_hy, const Tensor& grad_cy,
       const Tensor& cx, const Tensor& cy,
       const Tensor& workspace, bool has_bias) {
+  if (!grad_hy.defined() && !grad_cy.defined()) {
+    return std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor>();
+  }
   checkLSTMBackwardSizes({grad_hy, "grad_hy", 1}, {grad_cy, "grad_cy", 2},
                          {cx, "cx", 3}, {cy, "cy", 4},
                          {workspace, "workspace", 5});

@@ -1,23 +1,24 @@
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
+#include <ATen/core/Reduction.h>
+#include <c10/util/string_utils.h>
 #include <torch/csrc/jit/frontend/lexer.h>
 #include <torch/csrc/jit/frontend/parse_string_literal.h>
 #include <torch/csrc/jit/frontend/schema_type_parser.h>
-#include <c10/util/string_utils.h>
-#include <ATen/core/Reduction.h>
 
 #include <functional>
 #include <memory>
 #include <vector>
 
-using c10::FunctionSchema;
-using c10::OperatorName;
+using at::TypeKind;
 using c10::Argument;
+using c10::either;
+using c10::FunctionSchema;
 using c10::IValue;
 using c10::ListType;
-using c10::either;
-using c10::make_right;
 using c10::make_left;
-using at::TypeKind;
+using c10::make_right;
+using c10::OperatorName;
+using c10::OptionalType;
 
 namespace torch {
 namespace jit {
@@ -64,7 +65,7 @@ struct SchemaParser {
       parseList('(', ',', ')', [&] {
         if (is_varret) {
           throw ErrorReport(L.cur())
-            << "... must be the last element of the return list";
+              << "... must be the last element of the return list";
         }
         if (L.nextIf(TK_DOTS)) {
           is_varret = true;
@@ -109,7 +110,6 @@ struct SchemaParser {
   }
 
   Argument parseArgument(size_t idx, bool is_return, bool kwarg_only) {
-    Argument result;
     auto p = type_parser.parseType();
     auto type = std::move(p.first);
     auto alias_info = std::move(p.second);
@@ -127,6 +127,9 @@ struct SchemaParser {
         container->addContainedType(std::move(*alias_info));
       }
       alias_info = std::move(container);
+      if (L.nextIf('?')) {
+        type = OptionalType::create(type);
+      }
     }
     if (is_return) {
       // optionally field names in return values
@@ -234,7 +237,8 @@ struct SchemaParser {
     auto range = L.cur().range;
     switch (arg_type->kind()) {
       case TypeKind::TensorType:
-      case TypeKind::GeneratorType: {
+      case TypeKind::GeneratorType:
+      case TypeKind::QuantizerType: {
         return parseTensorDefault(range);
       } break;
       case TypeKind::StringType:
@@ -290,14 +294,25 @@ struct SchemaParser {
 };
 } // namespace
 
-C10_EXPORT either<OperatorName, FunctionSchema> parseSchemaOrName(const std::string& schemaOrName) {
+C10_EXPORT either<OperatorName, FunctionSchema> parseSchemaOrName(
+    const std::string& schemaOrName) {
   return SchemaParser(schemaOrName).parseDeclarations().at(0);
 }
 
 C10_EXPORT FunctionSchema parseSchema(const std::string& schema) {
   auto parsed = parseSchemaOrName(schema);
-  TORCH_CHECK(parsed.is_right(), "Tried to parse a function schema but only the operator name was given");
+  TORCH_CHECK(
+      parsed.is_right(),
+      "Tried to parse a function schema but only the operator name was given");
   return parsed.right();
+}
+
+C10_EXPORT OperatorName parseName(const std::string& name) {
+  auto parsed = parseSchemaOrName(name);
+  TORCH_CHECK(
+      parsed.is_left(),
+      "Tried to parse an operator name but function schema was given");
+  return parsed.left();
 }
 
 } // namespace jit

@@ -3,11 +3,13 @@
 #include <atomic>
 #include <memory>
 
+#include <torch/csrc/jit/ir/ir.h>
+#include <torch/csrc/jit/python/update_graph_executor_opt.h>
 #include <torch/csrc/jit/runtime/argument_spec.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
-#include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/variable_tensor_list.h>
-#include <torch/csrc/jit/python/update_graph_executor_opt.h>
+
+C10_DECLARE_bool(torch_jit_enable_new_executor);
 
 namespace torch {
 namespace jit {
@@ -20,7 +22,8 @@ struct ExecutionPlan {
       std::shared_ptr<Graph> graph,
       std::string function_name,
       size_t remaining_bailout_depth = 0)
-      : code(graph, std::move(function_name), remaining_bailout_depth), graph(std::move(graph)) {}
+      : code(graph, std::move(function_name), remaining_bailout_depth),
+        graph(std::move(graph)) {}
 
   operator bool() const {
     return static_cast<bool>(graph);
@@ -40,11 +43,23 @@ struct GraphExecutorState {
   std::unordered_map<ArgumentSpec, ExecutionPlan> execution_plans;
 };
 
+struct TORCH_API EnableProfilingGuard {
+  EnableProfilingGuard();
+  ~EnableProfilingGuard();
+
+ private:
+  bool old_executor_mode = false;
+  bool old_profiling_mode = false;
+};
+
 struct GraphExecutorImplBase;
 struct TORCH_API GraphExecutor {
   GraphExecutor() = default;
   GraphExecutor(std::shared_ptr<Graph> graph, std::string function_name);
+
   void run(Stack& inputs);
+  c10::intrusive_ptr<Future> runAsync(Stack& stack);
+
   // `remaining_bailout_depth` stands for the maximum number of profiled and
   // specialized recompilations allowed for the current `GraphExecutor`. if
   // remaining_bailout_depth is equal to 0, `GraphExecutor` won't perform any
@@ -58,6 +73,9 @@ struct TORCH_API GraphExecutor {
   explicit operator bool() const {
     return pImpl != nullptr;
   }
+  void reset() {
+    pImpl.reset();
+  }
   std::shared_ptr<Graph> graph() const;
   GraphExecutorState getDebugState();
 
@@ -67,6 +85,10 @@ struct TORCH_API GraphExecutor {
   std::shared_ptr<GraphExecutorImplBase> pImpl;
 };
 
+TORCH_API Node* replaceBlockWithFallbackGraph(
+    Block* b,
+    ArrayRef<Value*> inputs);
+
 // These passes need to run before it is valid to pass to the interpreter
 // regardless of whether sizes have been specialized or not.
 TORCH_API void runRequiredPasses(const std::shared_ptr<Graph>& g);
@@ -74,10 +96,11 @@ TORCH_API void runRequiredPasses(const std::shared_ptr<Graph>& g);
 TORCH_API void debugSetAutodiffSubgraphInlining(bool state);
 TORCH_API std::shared_ptr<Graph> lastExecutedOptimizedGraph();
 
-TORCH_API std::atomic<bool> &getProfilingMode();
+TORCH_API std::atomic<bool>& getProfilingMode();
 TORCH_API std::atomic<bool>& getExecutorMode();
 TORCH_API std::atomic<size_t>& getNumProfiledRuns();
 TORCH_API std::atomic<size_t>& getBailoutDepth();
+TORCH_API bool IsNewExecutorEnabled();
 
 struct TORCH_API GraphOptimizerEnabledGuard {
   GraphOptimizerEnabledGuard(bool state)

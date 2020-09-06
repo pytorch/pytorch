@@ -1,13 +1,13 @@
-#include "ATen/ATen.h"
-#include "ATen/cuda/CUDAApplyUtils.cuh"
-#include "ATen/cuda/CUDAContext.h"
-#include "ATen/NativeFunctions.h"
-#include "ATen/TensorUtils.h"
-#include "ATen/Utils.h"
-#include "c10/util/Exception.h"
+#include <ATen/ATen.h>
+#include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <ATen/cuda/CUDAContext.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/TensorUtils.h>
+#include <ATen/Utils.h>
+#include <c10/util/Exception.h>
 #include <THC/THCAtomics.cuh>
 #include <THC/THCGeneral.h>
-#include "THC/THCNumerics.cuh"
+#include <THC/THCNumerics.cuh>
 #include <ATen/native/cuda/LaunchUtils.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 
@@ -643,7 +643,7 @@ namespace {
         const dim3 block(block_x, block_y, block_z);
         int kernel_stride_C = cuda::ATenCeilDiv(sizeC, block_x * 4);
         int kernel_size_C = cuda::ATenCeilDiv(sizeC, block_x * kernel_stride_C);
-        
+
         // Do NOT clip grid_x, striding on Batch dimension is not in the kernel,
         // although it could be easily implemented given current kernel.
         int grid_x = sizeB*kernel_stride_C;
@@ -757,6 +757,8 @@ namespace {
     const Tensor& gradOutput,
     const Tensor& input)
   {
+    // Nondeterministic because of atomicAdd usage
+    globalContext().alertNotDeterministic("adaptive_avg_pool2d_backward_out_cuda");
     gradInput.resize_as_(input);
     adaptive_avg_pool2d_backward_out_cuda_template(
       gradInput, gradOutput, input);
@@ -767,6 +769,8 @@ namespace {
     const Tensor& gradOutput,
     const Tensor& input)
   {
+    // Nondeterministic because of atomicAdd usage
+    globalContext().alertNotDeterministic("adaptive_avg_pool2d_backward_cuda");
     auto gradInput = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     adaptive_avg_pool2d_backward_out_cuda_template(
       gradInput, gradOutput, input);

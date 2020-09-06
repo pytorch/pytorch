@@ -5,14 +5,14 @@ import cimodel.lib.conf_tree as conf_tree
 from cimodel.lib.conf_tree import Ver
 import cimodel.lib.miniutils as miniutils
 from cimodel.data.caffe2_build_data import CONFIG_TREE_DATA, TopLevelNode
-
+from cimodel.data.simple.util.branch_filters import gen_filter_dict
 
 from dataclasses import dataclass
 
 
 DOCKER_IMAGE_PATH_BASE = "308535385114.dkr.ecr.us-east-1.amazonaws.com/caffe2/"
 
-DOCKER_IMAGE_VERSION = "345"
+DOCKER_IMAGE_VERSION = "376"
 
 
 @dataclass
@@ -33,8 +33,7 @@ class Conf:
     # TODO: Eventually we can probably just remove the cudnn7 everywhere.
     def get_cudnn_insertion(self):
 
-        omit = self.language == "onnx_py2" \
-            or self.language == "onnx_main_py3.6" \
+        omit = self.language == "onnx_main_py3.6" \
             or self.language == "onnx_ort1_py3.6" \
             or self.language == "onnx_ort2_py3.6" \
             or set(self.compiler_names).intersection({"android", "mkl", "clang"}) \
@@ -71,11 +70,10 @@ class Conf:
     def gen_docker_image(self):
 
         lang_substitutions = {
-            "onnx_py2": "py2",
             "onnx_main_py3.6": "py3.6",
             "onnx_ort1_py3.6": "py3.6",
             "onnx_ort2_py3.6": "py3.6",
-            "cmake": "py2",
+            "cmake": "py3",
         }
 
         lang = miniutils.override(self.language, lang_substitutions)
@@ -85,7 +83,7 @@ class Conf:
     def gen_workflow_params(self, phase):
         parameters = OrderedDict()
         lang_substitutions = {
-            "onnx_py2": "onnx-py2",
+            "onnx_py3": "onnx-py3",
             "onnx_main_py3.6": "onnx-main-py3.6",
             "onnx_ort1_py3.6": "onnx-ort1-py3.6",
             "onnx_ort2_py3.6": "onnx-ort2-py3.6",
@@ -120,16 +118,15 @@ class Conf:
     def gen_workflow_job(self, phase):
         job_def = OrderedDict()
         job_def["name"] = self.construct_phase_name(phase)
-        job_def["requires"] = ["setup"]
 
         if phase == "test":
-            job_def["requires"].append(self.construct_phase_name("build"))
+            job_def["requires"] = [self.construct_phase_name("build")]
             job_name = "caffe2_" + self.get_platform() + "_test"
         else:
             job_name = "caffe2_" + self.get_platform() + "_build"
 
         if not self.is_important:
-            job_def["filters"] = {"branches": {"only": ["master", r"/ci-all\/.*/"]}}
+            job_def["filters"] = gen_filter_dict()
         job_def.update(self.gen_workflow_params(phase))
         return {job_name : job_def}
 

@@ -12,44 +12,17 @@
  * https://github.com/python/cpython#copyright-and-license-information
  */
 
-#include "torch/csrc/utils/structseq.h"
-#include "torch/csrc/utils/six.h"
-#include "structmember.h"
+#include <torch/csrc/utils/structseq.h>
+#include <torch/csrc/utils/six.h>
+#include <structmember.h>
 #include <sstream>
 
 namespace torch {
 namespace utils {
 
-#if PY_MAJOR_VERSION == 2
-PyObject *structseq_slice(PyStructSequence *obj, Py_ssize_t low, Py_ssize_t high)
-{
-    PyTupleObject *np;
-    Py_ssize_t i;
-
-    if (low < 0) {
-        low = 0;
-    }
-    if (high > Py_SIZE(obj)) {
-        high = Py_SIZE(obj);
-    }
-    if (high < low) {
-        high = low;
-    }
-    np = (PyTupleObject *)PyTuple_New(high-low);
-    if (np == nullptr) {
-        return nullptr;
-    }
-    for(i = low; i < high; ++i) {
-        PyObject *v = obj->ob_item[i];
-        Py_INCREF(v);
-        PyTuple_SET_ITEM(np, i-low, v);
-    }
-    return (PyObject *) np;
-}
-
-#define PyUnicode_AsUTF8 PyString_AsString
-#endif
-
+// NOTE: The built-in repr method from PyStructSequence was updated in
+// https://github.com/python/cpython/commit/c70ab02df2894c34da2223fc3798c0404b41fd79
+// so this function might not be required in Python 3.8+.
 PyObject *returned_structseq_repr(PyStructSequence *obj) {
     PyTypeObject *typ = Py_TYPE(obj);
     THPObjectPtr tup = six::maybeAsTuple(obj);

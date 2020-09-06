@@ -153,6 +153,24 @@ static void slow_conv2d_update_output_frame(
     int64_t n_output_plane,
     int64_t output_height,
     int64_t output_width) {
+  // Note: this is a no_group conv2d
+  if ((input.ndimension() == 4) && (kernel_height == 1) && (stride_height == 1) && (pad_height == 0) &&
+      (kernel_width == 1) && (stride_width == 1) && (pad_width == 0)) {
+    auto output2d =
+        output.reshape({n_output_plane, output_height * output_width});
+    auto weight_new =
+        weight.view({n_output_plane, n_input_plane});
+    auto input_new =
+        input.view({n_input_plane, output_height * output_width});
+
+    if (bias.defined()) {
+      output.copy_(bias.unsqueeze(-1).unsqueeze(-1));
+      output2d.addmm_(weight_new, input_new, 1, 1);
+    } else {
+      at::mm_out(output2d, weight_new, input_new);
+    }
+    return;
+  }
   unfolded2d_copy_stub(
       kCPU,
       finput,
@@ -172,9 +190,7 @@ static void slow_conv2d_update_output_frame(
   auto output2d =
       output.reshape({n_output_plane, output_height * output_width});
   if (bias.defined()) {
-    for (int64_t i = 0; i < n_output_plane; i++) {
-      output[i].fill_(bias[i].item());
-    }
+    output.copy_(bias.unsqueeze(-1).unsqueeze(-1));
   } else {
     output.zero_();
   }
@@ -569,6 +585,16 @@ std::tuple<Tensor, Tensor, Tensor> slow_conv2d_backward_cpu(
       fgrad_input);
 
   return std::make_tuple(grad_input, grad_weight, grad_bias);
+}
+
+Tensor & thnn_conv2d_out(Tensor & output, const Tensor & self, const Tensor & weight, IntArrayRef kernel_size, const Tensor & bias, IntArrayRef stride, IntArrayRef padding) {
+  Tensor finput = at::empty({0}, self.options());
+  Tensor fgrad_input = at::empty({0}, self.options());
+  return std::get<0>(at::thnn_conv2d_forward_out(output, finput, fgrad_input, self, weight, kernel_size, bias, stride, padding));
+}
+
+Tensor thnn_conv2d(const Tensor & self, const Tensor & weight, IntArrayRef kernel_size, const Tensor & bias, IntArrayRef stride, IntArrayRef padding) {
+  return std::get<0>(at::thnn_conv2d_forward(self, weight, kernel_size, bias, stride, padding));
 }
 
 } // namespace native

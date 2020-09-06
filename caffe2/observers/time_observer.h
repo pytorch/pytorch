@@ -28,8 +28,9 @@ class CAFFE2_API TimeCounter {
   int iterations_ = 0;
 };
 
-class CAFFE2_API TimeOperatorObserver final : public TimeCounter,
-                                              public ObserverBase<OperatorBase> {
+class CAFFE2_API TimeOperatorObserver final
+    : public TimeCounter,
+      public ObserverBase<OperatorBase> {
  public:
   explicit TimeOperatorObserver(OperatorBase* subject) = delete;
   explicit TimeOperatorObserver(

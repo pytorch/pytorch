@@ -4,7 +4,8 @@
 
 #include <ATen/native/Activation.h>
 
-#include <math.h>
+#include <cmath>
+#include <functional>
 
 #include <ATen/ATen.h>
 #include <ATen/Config.h>
@@ -188,12 +189,12 @@ void GeluBackwardMKLKernelImpl(TensorIterator* it) {
 
 template <typename T>
 void GeluMKLKernelImpl(TensorIterator* /* it */) {
-  AT_ASSERTM(false, "ATen not compiled with MKL");
+  TORCH_CHECK(false, "ATen not compiled with MKL");
 }
 
 template <typename T>
 void GeluBackwardMKLKernelImpl(TensorIterator* /* it */) {
-  AT_ASSERTM(false, "ATen not compiled with MKL");
+  TORCH_CHECK(false, "ATen not compiled with MKL");
 }
 
 #endif // AT_MKL_ENABLED()
@@ -339,20 +340,22 @@ void hardsigmoid_kernel(TensorIterator& iter) {
 
 void hardsigmoid_backward_kernel(TensorIterator& iter) {
   AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "hardsigmoid_backward", [&] {
-    auto zero = scalar_t(0.0f);
-    auto one = scalar_t(1.0f);
+    const scalar_t zero(0.0f);
+    const scalar_t three(3.0f);
+    const scalar_t neg_three(-3.0f);
+    const scalar_t one_sixth(1.0f / 6.0f);
     using Vec = Vec256<scalar_t>;
     Vec kZeroVec(0.0f);
     Vec kOneSixthVec(1.0f / 6.0f);
     cpu_kernel_vec(
         iter,
         [=](scalar_t grad_val, scalar_t self_val) {
-          return (self_val >= zero && self_val <= one)
-            ? grad_val / 6.0f
-            : scalar_t(0);
+          return (self_val >= neg_three && self_val <= three)
+            ? grad_val * one_sixth
+            : zero;
         },
         [=](Vec grad_val, Vec self_val) {
-          Vec gradNonZeroMask = (self_val > zero) & (self_val < one);
+          Vec gradNonZeroMask = (self_val > neg_three) & (self_val < three);
           return Vec::blendv(kZeroVec, grad_val * kOneSixthVec, gradNonZeroMask);
         });
   });
@@ -409,6 +412,67 @@ void hardtanh_backward_kernel(TensorIterator& iter, Scalar min, Scalar max) {
         [=](Vec256<scalar_t> grad_val, Vec256<scalar_t> self_val) {
           return ((self_val > min_val) & (self_val < max_val)) & grad_val;
         });
+  });
+}
+
+void hardswish_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "hardswish_cpu", [&]() {
+    const scalar_t zero(0.0f);
+    const scalar_t three(3.0f);
+    const scalar_t six(6.0f);
+    using Vec = vec256::Vec256<scalar_t>;
+    const Vec kZeroVec(zero);
+    const Vec kThreeVec(three);
+    const Vec kSixVec(six);
+    cpu_kernel_vec(
+      iter,
+      [&](scalar_t x) {
+        return x * std::min(std::max(x + three, zero), six) / six;
+      },
+      [&](Vec x_vec) {
+        return x_vec * vec256::minimum(
+          vec256::maximum(x_vec + kThreeVec, kZeroVec),
+          kSixVec
+        ) / kSixVec;
+      }
+    );
+  });
+}
+
+void hardswish_backward_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "hardswish_backward_cpu", [&]() {
+    const scalar_t zero(0.0f);
+    const scalar_t three(3.0f);
+    const scalar_t neg_three(-3.0f);
+    const scalar_t one_half(0.5f);
+    using Vec = vec256::Vec256<scalar_t>;
+    const Vec kZeroVec(zero);
+    const Vec kThreeVec(three);
+    const Vec kNegThreeVec(neg_three);
+    const Vec kOneHalfVec(one_half);
+    cpu_kernel_vec(
+      iter,
+      [&](scalar_t grad_val, scalar_t self_val) {
+        if (self_val < neg_three) {
+          return zero;
+        } else if (self_val <= three) {
+          return grad_val * ((self_val / three) + one_half);
+        } else {
+          return grad_val;
+        }
+      },
+      [&](Vec grad_val, Vec self_val) {
+        return Vec::blendv(
+          Vec::blendv(
+            grad_val * ((self_val / kThreeVec) + kOneHalfVec),
+            grad_val,
+            self_val >= kThreeVec
+          ),
+          kZeroVec,
+          self_val < kNegThreeVec
+        );
+      }
+    );
   });
 }
 
@@ -526,6 +590,40 @@ void glu_backward_kernel(TensorIterator& iter) {
   });
 }
 
+void silu_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(
+      kBFloat16, iter.dtype(), "silu_cpu", [&]() {
+        const Vec256<scalar_t> kOneVec(scalar_t(1));
+        cpu_kernel_vec(
+            iter,
+            [](scalar_t x) {
+              return x / (scalar_t(1) + std::exp(-x));
+            },
+            [kOneVec](Vec256<scalar_t> x_vec) {
+              return x_vec / (kOneVec + x_vec.neg().exp());
+            });
+      });
+}
+
+void silu_backward_kernel(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(
+      kBFloat16, iter.dtype(), "silu_backward_cpu", [&]() {
+        const Vec256<scalar_t> kOneVec(scalar_t(1));
+        cpu_kernel_vec(
+            iter,
+            [](scalar_t dy, scalar_t x) {
+              const scalar_t sigmoid =
+                  scalar_t(1) / (scalar_t(1) + std::exp(-x));
+              return dy * sigmoid * (scalar_t(1) + x * (scalar_t(1) - sigmoid));
+            },
+            [kOneVec](Vec256<scalar_t> dy_vec, Vec256<scalar_t> x_vec) {
+              const Vec256<scalar_t> sigmoid =
+                  kOneVec / (kOneVec + x_vec.neg().exp());
+              return dy_vec * sigmoid * (kOneVec + x_vec * (kOneVec - sigmoid));
+            });
+      });
+}
+
 } // namespace
 
 REGISTER_DISPATCH(log_sigmoid_cpu_stub, &log_sigmoid_cpu_kernel);
@@ -538,6 +636,8 @@ REGISTER_DISPATCH(GeluBackwardKernel, &GeluBackwardKernelImpl);
 REGISTER_DISPATCH(hardtanh_backward_stub, &hardtanh_backward_kernel);
 REGISTER_DISPATCH(hardsigmoid_stub, &hardsigmoid_kernel);
 REGISTER_DISPATCH(hardsigmoid_backward_stub, &hardsigmoid_backward_kernel);
+REGISTER_DISPATCH(hardswish_stub, &hardswish_kernel);
+REGISTER_DISPATCH(hardswish_backward_stub, &hardswish_backward_kernel);
 REGISTER_DISPATCH(hardshrink_stub, &hardshrink_kernel);
 REGISTER_DISPATCH(softshrink_stub, &softshrink_kernel);
 REGISTER_DISPATCH(shrink_backward_stub, &shrink_backward_kernel);
@@ -547,6 +647,8 @@ REGISTER_DISPATCH(softplus_stub, &softplus_kernel);
 REGISTER_DISPATCH(softplus_backward_stub, &softplus_backward_kernel);
 REGISTER_DISPATCH(glu_stub, &glu_kernel);
 REGISTER_DISPATCH(glu_backward_stub, &glu_backward_kernel);
+REGISTER_DISPATCH(silu_stub, &silu_kernel);
+REGISTER_DISPATCH(silu_backward_stub, &silu_backward_kernel);
 
 } // namespace native
 } // namespace at

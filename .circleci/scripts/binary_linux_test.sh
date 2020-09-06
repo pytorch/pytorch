@@ -9,8 +9,6 @@ set -eux -o pipefail
 if [[ "$PACKAGE_TYPE" == conda ]]; then
   retry conda create -qyn testenv python="$DESIRED_PYTHON"
   source activate testenv >/dev/null
-elif [[ "$DESIRED_PYTHON" == 2.7mu ]]; then
-  export PATH="/opt/python/cp27-cp27mu/bin:\$PATH"
 elif [[ "$PACKAGE_TYPE" != libtorch ]]; then
   python_nodot="\$(echo $DESIRED_PYTHON | tr -d m.u)"
   python_path="/opt/python/cp\$python_nodot-cp\${python_nodot}"
@@ -42,7 +40,7 @@ if [[ "$PACKAGE_TYPE" == conda ]]; then
     else
       cu_ver="${DESIRED_CUDA:2:2}.${DESIRED_CUDA:4}"
     fi
-    retry conda install -yq -c pytorch "cudatoolkit=\${cu_ver}"
+    retry conda install -yq -c nvidia -c pytorch "cudatoolkit=\${cu_ver}"
   fi
 elif [[ "$PACKAGE_TYPE" != libtorch ]]; then
   pip install "\$pkg"
@@ -56,6 +54,7 @@ fi
 
 # Test the package
 /builder/check_binary.sh
+
 # =================== The above code will be executed inside Docker container ===================
 EOL
 echo

@@ -27,7 +27,7 @@ class SumReluOp : public SumOp<Context> {
 
   template <typename T, typename M>
   bool DoRunWithType() {
-    if (!SumOp<Context>::template DoRunWithType<T, M>()) {
+    if (!SumOp<Context>::template DoRunWithType<T>()) {
       return false;
     }
 

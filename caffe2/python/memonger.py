@@ -126,7 +126,7 @@ def optimize_inference_for_dag(net, input_blobs, namescope=""):
             if is_activation_blob(b):
                 activation_blobs.add(b)
                 if b not in seen_as_output:
-                    assert False, "{} not in external input".format(b)
+                    raise AssertionError("{} not in external input".format(b))
         for b in op.output:
             if is_activation_blob(b):
                 activation_blobs.add(b)
@@ -333,13 +333,12 @@ def _get_path(pred_list, dist_list):
     ret = []
     cur = target
 
-
     while cur is not None:
         ret.append(cur)
         # Hack to get networkx 2.0 happy: it uses list in pred.
         # TODO(tulloch): are there cases with multiple predecessors?
         try:
-            cur = pred_list[cur][0]
+            cur = pred_list[cur][0] if pred_list[cur] else None
         except TypeError:
             cur = pred_list[cur]
 
@@ -357,7 +356,7 @@ def _get_longest_paths(g, source_nodes):
 
     ret = {}
     for cn in source_nodes:
-        pred, dist = nx.bellman_ford(ng, cn, weight="weight")
+        pred, dist = nx.bellman_ford_predecessor_and_distance(ng, cn, weight="weight")
         path = _get_path(pred, dist)
         assert path[0] == cn
         assert len(path) - 1 == -dist[path[-1]]

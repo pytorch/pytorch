@@ -14,8 +14,4 @@
 #include <TH/THTensorApply.h>
 #include <TH/THTensorDimApply.h>
 
-#include <TH/THFile.h>
-#include <TH/THDiskFile.h>
-#include <TH/THMemoryFile.h>
-
 #endif

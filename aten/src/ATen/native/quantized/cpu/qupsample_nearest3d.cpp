@@ -112,7 +112,7 @@ static void upsample_nearest3d_out_frame_nhwc(
   }
 }
 
-Tensor quantized_upsample_nearest3d_cpu(
+Tensor upsample_nearest3d_quantized_cpu(
     const Tensor& input,
     IntArrayRef output_size,
     c10::optional<double> scales_d,
@@ -141,10 +141,10 @@ Tensor quantized_upsample_nearest3d_cpu(
   if (input.is_contiguous(c10::MemoryFormat::ChannelsLast3d)) {
     Tensor output = at::_empty_affine_quantized(
         {nbatch, channels, output_depth, output_height, output_width},
-        input.options(),
+        input.options().memory_format(input.suggest_memory_format()),
         input.q_scale(),
         input.q_zero_point(),
-        input.suggest_memory_format());
+        c10::nullopt);
 
     AT_DISPATCH_QINT_TYPES(input.scalar_type(), "upsample_nearest3d", [&] {
       auto* idata = static_cast<scalar_t*>(input.data_ptr());
@@ -194,6 +194,20 @@ Tensor quantized_upsample_nearest3d_cpu(
     });
     return output;
   }
+}
+
+using at::native::upsample::compute_output_size;
+using at::native::upsample::get_scale_value;
+
+Tensor upsample_nearest3d_quantized_cpu(
+    const Tensor& input,
+    c10::optional<IntArrayRef> output_size,
+    c10::optional<ArrayRef<double>> scale_factors) {
+  auto osize = compute_output_size(input.sizes(), output_size, scale_factors);
+  auto scale_d = get_scale_value(scale_factors, 0);
+  auto scale_h = get_scale_value(scale_factors, 1);
+  auto scale_w = get_scale_value(scale_factors, 2);
+  return upsample_nearest3d_quantized_cpu(input, osize, scale_d, scale_h, scale_w);
 }
 
 } // namespace native

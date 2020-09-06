@@ -95,14 +95,6 @@ MKLDNN
 -  Junjie Bai (`bddppq <https://github.com/bddppq>`__)
 -  Yinghai Lu (`yinghai <https://github.com/yinghai>`__)
 
-XLA
-~~~
-
--  Ailing Zhang (`ailzhang <https://github.com/ailzhang>`__)
--  Gregory Chanan (`gchanan <https://github.com/gchanan>`__)
--  Davide Libenzi (`dlibenzi <https://github.com/dlibenzi>`__)
--  Alex Suhan (`asuhan <https://github.com/asuhan>`__)
-
 AMD/ROCm/HIP
 ~~~~~~~~~~~~
 
@@ -146,8 +138,48 @@ Windows
 ~~~~~~~
 
 -  Peter Johnson (`peterjc123 <https://github.com/peterjc123>`__)
+-  Guoliang Hua (`nbcsm <https://github.com/nbcsm>`__)
+-  Teng Gao (`smartcat2010 <https://github.com/smartcat2010>`__)
 
 PowerPC
 ~~~~~~~
 
 -  Alfredo Mendoza (`avmgithub <https://github.com/avmgithub>`__)
+
+Library-level maintainers
+-------------------------
+
+XLA
+~~~
+
+-  Ailing Zhang (`ailzhang <https://github.com/ailzhang>`__)
+-  Gregory Chanan (`gchanan <https://github.com/gchanan>`__)
+-  Davide Libenzi (`dlibenzi <https://github.com/dlibenzi>`__)
+-  Alex Suhan (`asuhan <https://github.com/asuhan>`__)
+
+TorchServe
+~~~~~~~~~~
+
+- Geeta Chauhan (`chauhang <https://github.com/chauhang>`__)
+- Manoj Rao (`mycpuorg <https://github.com/mycpuorg>`__)
+- Vamshi Dantu (`vdantu <https://github.com/vdantu>`__)
+- Dhanasekar Karuppasamy (`dhanainme <https://github.com/dhanainme>`__)
+
+TorchVision
+~~~~~~~~~~~
+
+- Francisco Massa (`fmassa <https://github.com/fmassa>`__)
+
+TorchText
+~~~~~~~~~
+
+- Guanheng George Zhang (`zhangguanheng66 <https://github.com/zhangguanheng66>`__)
+- Christian Puhrsch (`cpuhrsch <https://github.com/cpuhrsch>`__)
+
+TorchAudio
+~~~~~~~~~~
+
+- Vincent QB (`vincentqb <https://github.com/vincentqb>`__)
+
+
+

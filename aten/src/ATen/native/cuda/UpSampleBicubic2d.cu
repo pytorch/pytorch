@@ -342,6 +342,8 @@ Tensor& upsample_bicubic2d_backward_out_cuda(
     bool align_corners,
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
+  // Nondeterministic because of atomicAdd usage
+  globalContext().alertNotDeterministic("upsample_bicubic2d_backward_out_cuda");
   upsample_bicubic2d_backward_out_cuda_template(
       grad_input, grad_output, output_size, input_size, align_corners, scales_h, scales_w);
   return grad_input;
@@ -354,9 +356,42 @@ Tensor upsample_bicubic2d_backward_cuda(
     bool align_corners,
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
+  // Nondeterministic because of atomicAdd usage
+  globalContext().alertNotDeterministic("upsample_bicubic2d_backward_cuda");
   Tensor grad_input = at::empty_like(grad_output, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   upsample_bicubic2d_backward_out_cuda_template(
       grad_input, grad_output, output_size, input_size, align_corners, scales_h, scales_w);
+  return grad_input;
+}
+
+using at::native::upsample::compute_output_size;
+using at::native::upsample_cuda::get_scale_value;
+
+Tensor upsample_bicubic2d_cuda(
+    const Tensor& input,
+    c10::optional<IntArrayRef> output_size,
+    bool align_corners,
+    c10::optional<ArrayRef<double>> scale_factors) {
+  auto output = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  auto osize = compute_output_size(input.sizes(), output_size, scale_factors);
+  auto scale_h = get_scale_value(scale_factors, 0);
+  auto scale_w = get_scale_value(scale_factors, 1);
+  upsample_bicubic2d_out_cuda_template(output, input, osize, align_corners, scale_h, scale_w);
+  return output;
+}
+
+Tensor upsample_bicubic2d_backward_cuda(
+    const Tensor& grad_output,
+    c10::optional<IntArrayRef> output_size,
+    IntArrayRef input_size,
+    bool align_corners,
+    c10::optional<ArrayRef<double>> scale_factors) {
+  auto osize = compute_output_size(input_size, output_size, scale_factors);
+  auto scale_h = get_scale_value(scale_factors, 0);
+  auto scale_w = get_scale_value(scale_factors, 1);
+  auto grad_input = at::empty_like(grad_output, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  upsample_bicubic2d_backward_out_cuda_template(
+      grad_input, grad_output, osize, input_size, align_corners, scale_h, scale_w);
   return grad_input;
 }
 
