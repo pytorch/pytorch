@@ -3,6 +3,10 @@ from .node import Node, Argument, Target
 from typing import Callable, Any, List, Dict, Optional, Tuple
 import builtins
 import torch
+import keyword
+
+def _shadows_builtin_name(name: str) -> bool:
+    return name in builtins.__dict__ or name in keyword.kwlist
 
 def _is_magic(x: str) -> bool:
     return x.startswith('__') and x.endswith('__')
@@ -71,16 +75,16 @@ class Graph:
             return n
         map_arg(a, add_use)
 
-    def create_node(self, op: str, target: Target, 
-                    args: Optional[Tuple[Argument, ...]] = None, 
-                    kwargs: Optional[Dict[str, Argument]] = None, 
+    def create_node(self, op: str, target: Target,
+                    args: Optional[Tuple[Argument, ...]] = None,
+                    kwargs: Optional[Dict[str, Argument]] = None,
                     name: Optional[str] = None):
         assert op in ('call_function', 'call_method', 'get_param', 'call_module', 'placeholder')
         args = () if args is None else args
         kwargs = {} if kwargs is None else kwargs
         self._mark_uses(args)
         self._mark_uses(kwargs)
-        n = Node(self, name if name is not None else self._name(target or op), op, target, args, kwargs)
+        n = Node(self, name if name is not None else self._name(target), op, target, args, kwargs)
         self.nodes.append(n)
         return n
 
@@ -91,9 +95,12 @@ class Graph:
         kwargs = map_arg(node.kwargs, arg_transform)
         assert isinstance(args, tuple)
         assert isinstance(kwargs, dict)
-        return self.create_node(
-            node.op, node.target, args, kwargs,
-            self._name(node.name))
+        if node.op == "placeholder":
+            # Placeholder names are user-visible, so they should be copied as-is without normalizing them.
+            name = node.name
+        else:
+            name = self._name(node.name)
+        return self.create_node(node.op, node.target, args, kwargs, name)
 
     def output(self, result: Argument):
         self.result = result
@@ -112,16 +119,14 @@ class Graph:
 
         if op not in self._used_names:
             self._used_names[op] = 0
-            if not hasattr(torch, op) and not hasattr(torch.nn.functional, op) and not hasattr(torch.nn, op):
+            # Avoid shadowing PyTorch and Python builtins.
+            if not hasattr(torch, op) and \
+               not hasattr(torch.nn.functional, op) and \
+               not hasattr(torch.nn, op) and \
+               not _shadows_builtin_name(op):
                 return op
         i = self._used_names[op] = self._used_names[op] + 1
         return f'{op}_{i}'
-
-    def get_param(self, name: str) -> Node:
-        return self.create_node('get_param', name)
-
-    def placeholder(self, name: str) -> Node:
-        return self.create_node('placeholder', target=name, name=name.replace('*', ''))
 
     def python_code(self, root_module: str) -> Tuple[str, str, List[str]]:
         free_vars: List[str] = []
@@ -166,6 +171,48 @@ class Graph:
 
         src = ''.join(body)
         return src, str(self.result), free_vars
+
+    def __str__(self) -> str:
+        placeholder_names : List[str] = []
+
+        def format_arg(arg) -> str:
+            if isinstance(arg, list):
+                items = ', '.join(format_arg(a) for a in arg)
+                return f'[{items}]'
+            elif isinstance(arg, tuple):
+                items = ', '.join(format_arg(a) for a in arg)
+                maybe_comma = ',' if len(arg) == 1 else ''
+                return f'({items}{maybe_comma})'
+            elif isinstance(arg, dict):
+                items_str = ','.join(f'{k}: {format_arg(v)}' for k, v in arg.items())
+                return f'{{{items_str}}}'
+
+            if isinstance(arg, Node):
+                return '%' + str(arg)
+            else:
+                return str(arg)
+
+        def format_node(n : Node) -> Optional[str]:
+            if n.op == 'placeholder':
+                assert isinstance(n.target, str)
+                placeholder_names.append(n.target)
+                return None
+            elif n.op == 'get_param':
+                return f'%{n.name} : [uses={n.uses}]= {n.target}'
+            else:
+                return f'%{n.name} : [uses={n.uses}] = {n.op}[target={n.target}](' \
+                       f'args = {format_arg(n.args)}, kwargs = {format_arg(n.kwargs)})'
+
+
+        node_strs = [format_node(node) for node in self.nodes]
+        param_str = ', '.join(placeholder_names)
+        s = f'graph({param_str}):'
+        for node_str in node_strs:
+            if node_str:
+                s += '\n    ' + node_str
+        if self.result:
+            s += f'\n    return {format_arg(self.result)}'
+        return s
 
 reflectable_magic_methods = {
     'add': '{} + {}',

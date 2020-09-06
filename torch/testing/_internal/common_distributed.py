@@ -1,5 +1,6 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 
+from multiprocessing import Manager
 import os
 import sys
 import tempfile
@@ -144,7 +145,7 @@ def skip_if_rocm(func):
     return wrapper
 
 TIMEOUT_DEFAULT = 100
-TIMEOUT_OVERRIDE = {}
+TIMEOUT_OVERRIDE = {"test_ddp_uneven_inputs": 400}
 
 
 def get_timeout(test_id):
@@ -281,6 +282,13 @@ class MultiProcessTestCase(TestCase):
         return self.id().split(".")[-1]
 
     def _start_processes(self, proc):
+        test_skips_manager = Manager()
+        test_skips = test_skips_manager.dict()
+        global TEST_SKIPS
+        test_skips.update(TEST_SKIPS)
+        TEST_SKIPS = test_skips
+
+        self.processes = []
         for rank in range(int(self.world_size)):
             process = proc(
                 target=self.__class__._run,
