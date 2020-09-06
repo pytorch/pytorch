@@ -13019,7 +13019,11 @@ class TestTorchDeviceType(TestCase):
         ]
 
         def gen_nontrivial_input(shape, dtype, device):
-            return torch.randint(2, shape, device=device, dtype=dtype)
+            if dtype != torch.bfloat16:
+                return torch.randint(2, shape, device=device, dtype=dtype)
+            else:
+                # windows does not work for bfloat16 randing
+                return torch.randint(2, shape, device=device, dtype=torch.float).to(dtype)
 
         for shape in shapes:
             tensor = gen_nontrivial_input(shape, dtype, device)
