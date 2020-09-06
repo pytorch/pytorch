@@ -94,6 +94,8 @@ allow_list = [
     ("aten::linspace.out", datetime.date(2020, 9, 30)),
     ("aten::logspace", datetime.date(2020, 9, 30)),
     ("aten::logspace.out", datetime.date(2020, 9, 30)),
+    ("aten::_var", datetime.date(2020, 10, 1)),
+    ("aten::_std", datetime.date(2020, 10, 1)),
     ("aten::_foreach_add_", datetime.date(2020, 10, 1)),
 ]
 
