@@ -873,8 +873,9 @@ void nonzero_cuda_out_impl(const Tensor& self, Tensor& out){
   //but we need physical layout to be ndim x num_nonzeros, so if the passed tensor does not align
   //we'll need to copy produced output to the passed output.
   bool need_to_copy = out.dim()==2 && out.sizes()[0] == num_nonzeros_h && out.sizes()[1] == self.dim() && !out.t().is_contiguous();
-  at::Tensor out_temp = need_to_copy ? at::empty({self.dim(), num_nonzeros_h}, out.options()) :
-  out.resize_({self.dim(), num_nonzeros_h});
+  at::Tensor out_temp = need_to_copy ?
+    at::empty({self.dim(), num_nonzeros_h}, out.options().device(kCUDA)) :
+    out.resize_({self.dim(), num_nonzeros_h});
   //Scalars are expected to produce output of size (1,0), so we can't write to it
   if (self.dim()>0) {
     cub::CountingInputIterator<int64_t> counting_itr(0);
@@ -885,7 +886,6 @@ void nonzero_cuda_out_impl(const Tensor& self, Tensor& out){
     temp_storage = allocator.allocate(temp_storage_bytes);
     cub::DeviceSelect::Flagged(temp_storage.get(), temp_storage_bytes, counting_itr, itr,
       out_temp.data_ptr<int64_t>(), (int*)num_nonzeros.get(), N, stream);
-
     auto thrust_allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
     if (num_nonzeros_h > 0 && self.dim()>1){
         int64_t div = 1;
@@ -914,7 +914,7 @@ void nonzero_cuda_out_impl(const Tensor& self, Tensor& out){
 Tensor& nonzero_out_cuda(Tensor& out, const Tensor& self){
   TORCH_CHECK(self.numel() < std::numeric_limits<int>::max(), "nonzero is not supported for tensors with more than INT_MAX elements, \
   file a support request");
-  TORCH_CHECK(out.dtype()== at::kLong, "out tensor should have type ", at::kLong);
+  TORCH_CHECK(out.dtype()== at::kLong, "Expected object of scalar type ", at::kLong, " as out, but got ", out.dtype());
   AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Bool, at::ScalarType::BFloat16, at::ScalarType::Half,
     self.scalar_type(), "nonzero_cuda",
     [&] {nonzero_cuda_out_impl<scalar_t>(self, out);});
