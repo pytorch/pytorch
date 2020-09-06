@@ -13019,8 +13019,7 @@ class TestTorchDeviceType(TestCase):
         ]
 
         def gen_nontrivial_input(shape, dtype, device):
-            tensor = torch.randint(2, shape, device=device, dtype=dtype)
-            return tensor
+            return torch.randint(2, shape, device=device, dtype=dtype)
 
         for shape in shapes:
             tensor = gen_nontrivial_input(shape, dtype, device)
@@ -13032,12 +13031,19 @@ class TestTorchDeviceType(TestCase):
                 TypeError,
                 "received an invalid combination of arguments",
                 lambda: torch.nonzero(tensor, as_tuple=True, out=dst3))
-            self.assertRaisesRegex(
-                RuntimeError,
-                "scalar type Long",
-                lambda: torch.nonzero(tensor, out=torch.empty([], dtype=torch.float))
-
-            )
+            if self.device_type != 'xla':
+                # xla does not raise runtime error
+                self.assertRaisesRegex(
+                    RuntimeError,
+                    "scalar type Long",
+                    lambda: torch.nonzero(tensor, out=torch.empty([], dtype=torch.float))
+                )
+            if self.device_type == 'cuda':
+                self.assertRaisesRegex(
+                    RuntimeError,
+                    "on the same device",
+                    lambda: torch.nonzero(tensor, out=torch.empty([], dtype=torch.long))
+                )
             np_array = tensor.cpu().numpy() if dtype != torch.bfloat16 else tensor.float().cpu().numpy()
             np_result = torch.from_numpy(np.stack(np_array.nonzero())).t()
             self.assertEqual(dst1.cpu(), np_result, atol=0, rtol=0)
@@ -13050,6 +13056,7 @@ class TestTorchDeviceType(TestCase):
             self.assertEqual(tup1, np_result, atol=0, rtol=0)
             self.assertEqual(tup2, np_result, atol=0, rtol=0)
 
+    @onlyOnCPUAndCUDA
     def test_nonzero_discontiguous(self, device):
         shape = (4, 4)
         tensor = torch.randint(2, shape, device=device)
@@ -13064,7 +13071,7 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(data_ptr, dst3.data_ptr())
         self.assertEqual(dst1, dst3, atol=0, rtol=0)
         # discontiguous out
-        dst4 = torch.empty(dst1.size(0), dst1.size(1) * 2, dtype=torch.long)[:, ::2]
+        dst4 = torch.empty(dst1.size(0), dst1.size(1) * 2, dtype=torch.long, device=device)[:, ::2]
         data_ptr = dst4.data_ptr()
         strides = dst4.stride()
         torch.nonzero(tensor, out=dst4)
