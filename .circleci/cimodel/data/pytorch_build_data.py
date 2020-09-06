@@ -3,17 +3,13 @@ from cimodel.lib.conf_tree import ConfigNode, X, XImportant
 
 CONFIG_TREE_DATA = [
     ("xenial", [
-        ("rocm", [
-            ("3.5.1", [
-                X("3.6"),
-            ]),
-        ]),
         ("gcc", [
             ("5.4", [  # All this subtree rebases to master and then build
                 ("3.6", [
                     ("important", [X(True)]),
                     ("parallel_tbb", [X(True)]),
                     ("parallel_native", [X(True)]),
+                    ("pure_torch", [X(True)]),
                 ]),
             ]),
             # TODO: bring back libtorch test
@@ -72,6 +68,13 @@ CONFIG_TREE_DATA = [
             ("9", [
                 ("3.8", [
                     ("coverage", [XImportant(True)]),
+                ]),
+            ]),
+        ]),
+        ("rocm", [
+            ("3.7", [
+                ("3.6", [
+                    ('build_only', [XImportant(True)]),
                 ]),
             ]),
         ]),
@@ -151,8 +154,20 @@ class ExperimentalFeatureConfigNode(TreeConfigNode):
             "build_only": BuildOnlyConfigNode,
             "cuda_gcc_override": CudaGccOverrideConfigNode,
             "coverage": CoverageConfigNode,
+            "pure_torch": PureTorchConfigNode,
         }
         return next_nodes[experimental_feature]
+
+
+class PureTorchConfigNode(TreeConfigNode):
+    def modify_label(self, label):
+        return "PURE_TORCH=" + str(label)
+
+    def init2(self, node_name):
+        self.props["is_pure_torch"] = node_name
+
+    def child_constructor(self):
+        return ImportantConfigNode
 
 
 class XlaConfigNode(TreeConfigNode):
