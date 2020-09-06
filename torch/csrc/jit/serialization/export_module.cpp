@@ -13,6 +13,7 @@
 #include <torch/csrc/jit/serialization/python_print.h>
 #include <torch/csrc/jit/serialization/source_range_serialization.h>
 #include <torch/csrc/jit/serialization/type_name_uniquer.h>
+#include <torch/csrc/Exceptions.h>
 
 #include <caffe2/serialize/inline_container.h>
 
@@ -267,24 +268,33 @@ class ScriptModuleSerializer {
       bool bytecode_format,
       bool save_mobile_debug_info) {
     C10_LOG_API_USAGE_ONCE("torch.script.save");
-    writeExtraFiles(module, extra_files);
-    // Serialize the model object
-    writeArchive("data", module._ivalue());
-    // Then we serialize all code info.
-    writeCode(module.type());
-    // The tensor constants from the code are written to a separate archive
-    // so loading the code does not depend on loading the data
-    std::vector<IValue> ivalue_constants(
-        constant_table_.begin(), constant_table_.end());
-    writeArchive("constants", c10::ivalue::Tuple::create(ivalue_constants));
-    if (bytecode_format) {
-      writeByteCode(module, save_mobile_debug_info);
-      writeMobileMetadata(module, extra_files);
-    }
 
-    // Acquires and sets minimum (dynamic) version
-    for (auto& item : file_streams_) {
-      writer_.setMinVersion(item.value().minVersion());
+    try {
+      writeExtraFiles(module, extra_files);
+      // Serialize the model object
+      writeArchive("data", module._ivalue());
+      // Then we serialize all code info.
+      writeCode(module.type());
+      // The tensor constants from the code are written to a separate archive
+      // so loading the code does not depend on loading the data
+      std::vector<IValue> ivalue_constants(
+          constant_table_.begin(), constant_table_.end());
+      writeArchive("constants", c10::ivalue::Tuple::create(ivalue_constants));
+      if (bytecode_format) {
+        writeByteCode(module, save_mobile_debug_info);
+        writeMobileMetadata(module, extra_files);
+      }
+
+      // Acquires and sets minimum (dynamic) version
+      for (auto& item : file_streams_) {
+        writer_.setMinVersion(item.value().minVersion());
+      }
+    } catch (c10::Error& error) {
+      std::cerr << "Error in module serializer: " << error.what() << std::endl;
+      std::terminate();
+    } catch (...) {
+      std::cerr << "Error in module serializer: " << std::endl;
+      std::terminate();
     }
   }
 
