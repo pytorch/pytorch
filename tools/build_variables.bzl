@@ -177,6 +177,7 @@ core_sources_full = [
     "torch/csrc/jit/passes/hoist_conv_packed_params.cpp",
     "torch/csrc/jit/passes/inline_autodiff_subgraphs.cpp",
     "torch/csrc/jit/passes/inline_forked_closures.cpp",
+    "torch/csrc/jit/passes/inline_fork_wait.cpp",
     "torch/csrc/jit/passes/inliner.cpp",
     "torch/csrc/jit/passes/inplace_check.cpp",
     "torch/csrc/jit/passes/insert_guards.cpp",
@@ -302,7 +303,6 @@ jit_sources_full = [
     "torch/csrc/jit/runtime/register_prim_ops_fulljit.cpp",
     "torch/csrc/jit/runtime/register_special_ops.cpp",
     "torch/csrc/jit/runtime/register_string_ops.cpp",
-    "torch/csrc/jit/passes/inline_fork_wait.cpp",
     "torch/csrc/jit/passes/remove_inplace_ops.cpp",
     "torch/csrc/jit/passes/utils/check_alias_annotation.cpp",
 ]

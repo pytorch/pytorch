@@ -338,6 +338,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: histc
    .. automethod:: hypot
    .. automethod:: hypot_
+   .. automethod:: i0
+   .. automethod:: i0_
    .. automethod:: ifft
    .. automethod:: index_add_
    .. automethod:: index_add
