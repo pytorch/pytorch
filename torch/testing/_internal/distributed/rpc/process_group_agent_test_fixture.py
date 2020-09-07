@@ -27,7 +27,7 @@ class ProcessGroupRpcAgentTestFixture(RpcAgentTestFixture):
             "Exception in thread pool task",
             "Connection reset by peer",
             "Connection closed by peer",
-            "RPC ran for more than \d+(\d+)* milliseconds and timed out"
+            "RPC ran for more than \d+(\d+)* milliseconds and timed out"  # noqa: W605
         ]
         return "|".join(["({})".format(error_str) for error_str in error_regexes])
 
