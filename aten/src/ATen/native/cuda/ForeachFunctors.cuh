@@ -79,7 +79,6 @@ struct BinaryOpScalarFunctor {
             n -= chunk_idx * chunk_size;
 
             T r_x[kILP];
-            T r_out[kILP];
 
             // to make things simple, we put aligned case in a different code path
             if(n % kILP == 0 && chunk_size % kILP == 0 && is_aligned(x) && is_aligned(out)) {
@@ -88,10 +87,10 @@ struct BinaryOpScalarFunctor {
                     load_store(r_x, x, 0 , i_start);
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
-                        r_out[ii] = Op<T>()(static_cast<T>(r_x[ii]), scalar);
+                        r_x[ii] = Op<T>()(static_cast<T>(r_x[ii]), scalar);
                     }
                     // store
-                    load_store(out, r_out, i_start, 0);
+                    load_store(out, r_x, i_start, 0);
                 }
             }
             else {
@@ -106,13 +105,13 @@ struct BinaryOpScalarFunctor {
                     }
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
-                        r_out[ii] = Op<T>()(static_cast<T>(r_x[ii]), scalar);
+                        r_x[ii] = Op<T>()(static_cast<T>(r_x[ii]), scalar);
                     }
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
                         int i = i_start + threadIdx.x + ii * blockDim.x;
                         if(i < n && i < chunk_size)
-                            out[i] = r_out[ii];
+                            out[i] = r_x[ii];
                     }
                 }
             }
@@ -204,7 +203,6 @@ struct BinaryOpListAlphaFunctor {
 
             T r_x[kILP];
             T r_y[kILP];
-            T r_out[kILP];
 
             // to make things simple, we put aligned case in a different code path
             if(n % kILP == 0 && chunk_size % kILP == 0 && is_aligned(x) && is_aligned(y) && is_aligned(out)) {
@@ -214,10 +212,10 @@ struct BinaryOpListAlphaFunctor {
                     load_store(r_y, y, 0 , i_start);
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
-                        r_out[ii] = Op<T>()(static_cast<T>(r_x[ii]), alpha * static_cast<T>(r_y[ii]));
+                        r_x[ii] = Op<T>()(static_cast<T>(r_x[ii]), alpha * static_cast<T>(r_y[ii]));
                     }
                     // store
-                    load_store(out, r_out, i_start , 0);
+                    load_store(out, r_x, i_start , 0);
                 }
             }
             else {
@@ -234,13 +232,13 @@ struct BinaryOpListAlphaFunctor {
                     }
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
-                        r_out[ii] = Op<T>()(static_cast<T>(r_x[ii]), alpha * static_cast<T>(r_y[ii]));
+                        r_x[ii] = Op<T>()(static_cast<T>(r_x[ii]), alpha * static_cast<T>(r_y[ii]));
                     }
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
                         int i = i_start + threadIdx.x + ii * blockDim.x;
                         if(i < n && i < chunk_size)
-                            out[i] = r_out[ii];
+                            out[i] = r_x[ii];
                     }
                 }
             }
@@ -319,7 +317,6 @@ struct UnaryOpFunctor {
             n -= chunk_idx * chunk_size;
 
             T r_x[kILP];
-            T r_out[kILP];
 
             // to make things simple, we put aligned case in a different code path
             if(n % kILP == 0 && chunk_size % kILP == 0 && is_aligned(x) && is_aligned(out)) {
@@ -328,10 +325,10 @@ struct UnaryOpFunctor {
                     load_store(r_x, x, 0 , i_start);
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
-                        r_out[ii] = Op<T>()(static_cast<T>(r_x[ii]));
+                        r_x[ii] = Op<T>()(static_cast<T>(r_x[ii]));
                     }
                     // store
-                    load_store(out, r_out, i_start, 0);
+                    load_store(out, r_x, i_start, 0);
                 }
             }
             else {
@@ -346,13 +343,13 @@ struct UnaryOpFunctor {
                     }
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
-                        r_out[ii] = Op<T>()(static_cast<T>(r_x[ii]));
+                        r_x[ii] = Op<T>()(static_cast<T>(r_x[ii]));
                     }
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
                         int i = i_start + threadIdx.x + ii * blockDim.x;
                         if(i < n && i < chunk_size)
-                            out[i] = r_out[ii];
+                            out[i] = r_x[ii];
                     }
                 }
             }
@@ -371,7 +368,7 @@ struct PointwiseOpFunctor_ {
 
             T* x = (T*)tl.addresses[0][tensor_loc];
             x += chunk_idx * chunk_size;
-            
+
             T* y = (T*)tl.addresses[1][tensor_loc];
             y += chunk_idx * chunk_size;
 
@@ -397,8 +394,6 @@ struct PointwiseOpFunctor_ {
                     }
                     // store
                     load_store(x, r_x, i_start, 0);
-                    load_store(y, r_y, i_start, 0);
-                    load_store(z, r_z, i_start, 0);
                 }
             }
             else {
@@ -457,7 +452,6 @@ struct PointwiseOpFunctor {
             T r_x[kILP];
             T r_y[kILP];
             T r_z[kILP];
-            T r_out[kILP];
 
             // to make things simple, we put aligned case in a different code path
             if(n % kILP == 0 && chunk_size % kILP == 0 && is_aligned(x) && is_aligned(y) && is_aligned(z) && is_aligned(out)) {
@@ -468,10 +462,10 @@ struct PointwiseOpFunctor {
                     load_store(r_z, z, 0 , i_start);
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
-                        r_out[ii] = static_cast<T>(r_x[ii]) + scalar * Op<T>()(static_cast<T>(r_y[ii]), static_cast<T>(r_z[ii]));
+                        r_x[ii] = static_cast<T>(r_x[ii]) + scalar * Op<T>()(static_cast<T>(r_y[ii]), static_cast<T>(r_z[ii]));
                     }
                     // store
-                    load_store(out, r_out, i_start, 0);
+                    load_store(out, r_x, i_start, 0);
                 }
             }
             else {
@@ -491,13 +485,13 @@ struct PointwiseOpFunctor {
                     }
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
-                        r_out[ii] = static_cast<T>(r_x[ii]) + scalar * Op<T>()(static_cast<T>(r_y[ii]), static_cast<T>(r_z[ii]));
+                        r_x[ii] = static_cast<T>(r_x[ii]) + scalar * Op<T>()(static_cast<T>(r_y[ii]), static_cast<T>(r_z[ii]));
                     }
 #pragma unroll
                     for(int ii = 0; ii < kILP; ii++) {
                         int i = i_start + threadIdx.x + ii * blockDim.x;
                         if(i < n && i < chunk_size)
-                            out[i] = r_out[ii];
+                            out[i] = r_x[ii];
                     }
                 }
             }
