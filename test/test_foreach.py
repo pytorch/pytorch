@@ -294,12 +294,10 @@ class TestForeach(TestCase):
     @dtypes(*torch.testing.get_all_dtypes())
     def test_sub_list(self, device, dtype):
         if dtype == torch.bool:
-            with self.assertRaisesRegex(RuntimeError, 
-                                        "Subtraction, the `-` operator, with two bool tensors is not supported."):
+            with self.assertRaisesRegex(RuntimeError, "Subtraction, the `-` operator, with two bool"):
                 self._test_bin_op_list(device, dtype, torch._foreach_sub, torch._foreach_sub_, torch.sub)
 
-            with self.assertRaisesRegex(RuntimeError, 
-                                       "Subtraction, the `-` operator, with a bool tensor"):
+            with self.assertRaisesRegex(RuntimeError, "Subtraction, the `-` operator, with a bool tensor"):
                 self._test_bin_op_list_alpha(device, dtype, torch._foreach_sub, torch._foreach_sub_, torch.sub)
         else:
             self._test_bin_op_list(device, dtype, torch._foreach_sub, torch._foreach_sub_, torch.sub)
