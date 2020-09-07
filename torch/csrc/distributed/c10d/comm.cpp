@@ -88,7 +88,7 @@ void broadcast_coalesced(
 GradBucket::GradBucket(std::vector<at::Tensor> tensors)
     : tensors_(std::move(tensors)){};
 
-const std::vector<at::Tensor>& GradBucket::getTensors() {
+const std::vector<at::Tensor>& GradBucket::getTensors() const {
   return tensors_;
 }
 
