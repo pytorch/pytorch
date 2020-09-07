@@ -196,8 +196,6 @@ class TestDispatch(TestCase):
             lambda m: m.impl_t_t("foo"),
             # m.impl("test_def", kCPU, [](const Tensor& x) { return x })
             lambda m: m.impl_t_t("foo", dispatch="cpu"),
-            # m.impl("test_def", kAutograd, [](const Tensor& x) { return x })
-            lambda m: m.impl_t_t("foo", dispatch="autograd"),
             # m.impl("test_def", kAutogradCPU, [](const Tensor& x) { return x })
             lambda m: m.impl_t_t("foo", dispatch="autogradcpu")
         ])
@@ -208,7 +206,6 @@ debug: registered at /dev/null:0
 alias analysis kind: FROM_SCHEMA
 CPU: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 AutogradCPU: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
-Autograd[alias]: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 catchall: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 ''')
 
@@ -229,8 +226,6 @@ catchall: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
             lambda m: m.def_name_t_t("foo"),
             # m.impl("foo", torch::kCPU, [](const Tensor & x) { return x })
             lambda m: m.impl_t_t("foo", "cpu"),
-            # m.impl("foo", torch::kAutograd, [](const Tensor & x) { return x })
-            lambda m: m.impl_t_t("foo", "autograd"),
             # m.impl("foo", torch::kAutogradCPU, [](const Tensor & x) { return x })
             lambda m: m.impl_t_t("foo", "autogradcpu")
         ])
@@ -241,7 +236,6 @@ debug: registered at /dev/null:0
 alias analysis kind: CONSERVATIVE
 CPU: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 AutogradCPU: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
-Autograd[alias]: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 catchall: default_def_name_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 ''')
 
@@ -263,8 +257,6 @@ alias analysis kind: FROM_SCHEMA
             lambda m: m.impl_t_t("foo"),
             # m.impl("foo", torch::kCPU, [](const Tensor& x) { return x })
             lambda m: m.impl_t_t("foo", "cpu"),
-            # m.impl("foo", torch::kAutograd, [](const Tensor& x) { return x })
-            lambda m: m.impl_t_t("foo", "autograd"),
             # m.impl("foo", torch::kAutogradCPU, [](const Tensor& x) { return x })
             lambda m: m.impl_t_t("foo", "autogradcpu")
         ])
@@ -273,7 +265,6 @@ name: test::foo
 schema: (none)
 CPU: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 AutogradCPU: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
-Autograd[alias]: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 catchall: impl_t_t :: (Tensor _0) -> (Tensor _0) [ boxed unboxed ]
 ''')
 
