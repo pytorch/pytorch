@@ -63,7 +63,7 @@ class Adamax(Optimizer):
                 if p.grad is not None:
                     if p.grad.is_sparse:
                         raise RuntimeError('Adamax does not support sparse gradients')
-                
+
                     grads.append(p.grad)
                     params_with_grad.append(p)
 
@@ -86,7 +86,7 @@ class Adamax(Optimizer):
 
             # Update biased first moment estimate.
             torch._foreach_mul_(exp_avgs, beta1)
-            torch._foreach_add_(exp_avgs, grads, alpha=1-beta1)
+            torch._foreach_add_(exp_avgs, grads, alpha=1 - beta1)
 
             # Update the exponentially weighted infinity norm.
             torch._foreach_mul_(exp_infs, beta2)
