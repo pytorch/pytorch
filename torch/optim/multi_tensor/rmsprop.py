@@ -76,7 +76,7 @@ class RMSprop(Optimizer):
                 if p.grad is not None:
                     if p.grad.is_sparse:
                         raise RuntimeError('RMSprop does not support sparse gradients')
-                    
+
                     grads.append(p.grad)
                     params_with_grad.append(p)
 
@@ -99,13 +99,13 @@ class RMSprop(Optimizer):
                 torch._foreach_add_(grads, p, alpha=group['weight_decay'])
 
             torch._foreach_mul_(square_avg, alpha)
-            torch._foreach_addcmul_(square_avg, grads, grads, value = 1 - alpha)
+            torch._foreach_addcmul_(square_avg, grads, grads, value=1 - alpha)
 
             if group['centered']:
                 grad_avgs = [s['grad_avg'] for s in states]
                 torch._foreach_mul_(grad_avgs, alpha)
-                torch._foreach_add_(grad_avgs, grads, alpha= 1 - alpha)
-                avg = torch._foreach_addcmul(square_avg, grad_avgs, grad_avgs, value = -1)
+                torch._foreach_add_(grad_avgs, grads, alpha=1 - alpha)
+                avg = torch._foreach_addcmul(square_avg, grad_avgs, grad_avgs, value=-1)
                 torch._foreach_sqrt_(avg)
                 torch._foreach_add_(avg, group['eps'])
             else:
@@ -116,8 +116,8 @@ class RMSprop(Optimizer):
                 buf = [s['momentum_buffer'] for s in states]
                 torch._foreach_mul_(buf, group['momentum'])
                 torch._foreach_addcdiv_(buf, grads, avg)
-                torch._foreach_add_(params_with_grad, buf, alpha = -group['lr'])
+                torch._foreach_add_(params_with_grad, buf, alpha=-group['lr'])
             else:
-                torch._foreach_addcdiv_(params_with_grad, grads, avg, value = -group['lr'])
+                torch._foreach_addcdiv_(params_with_grad, grads, avg, value=-group['lr'])
 
         return loss
