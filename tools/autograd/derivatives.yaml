@@ -534,6 +534,9 @@
   self: grad * self / result
   other: grad * other / result
 
+- name: i0(Tensor self) -> Tensor
+  self: not_implemented("i0")
+
 - name: index.Tensor(Tensor self, Tensor?[] indices) -> Tensor
   self: index_backward(zeros_like(self), indices, grad)
   indices: TensorList()
