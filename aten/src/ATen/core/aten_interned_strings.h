@@ -341,7 +341,6 @@ _(aten, full) \
 _(aten, full_like) \
 _(aten, gather) \
 _(aten, gcd) \
-_(aten, ge) \
 _(aten, gelu) \
 _(aten, geometric) \
 _(aten, geqrf) \
@@ -357,7 +356,6 @@ _(aten, grid_sampler_3d_backward) \
 _(aten, group_norm) \
 _(aten, gru) \
 _(aten, gru_cell) \
-_(aten, gt) \
 _(aten, hamming_window) \
 _(aten, hann_window) \
 _(aten, hardshrink) \
@@ -410,7 +408,6 @@ _(aten, l1_loss_backward) \
 _(aten, l1_loss_forward) \
 _(aten, layer_norm) \
 _(aten, lcm) \
-_(aten, le) \
 _(aten, leaky_relu) \
 _(aten, leaky_relu_backward) \
 _(aten, leaky_relu_forward) \
@@ -437,7 +434,6 @@ _(aten, logsumexp) \
 _(aten, lstm) \
 _(aten, lstm_cell) \
 _(aten, lstsq) \
-_(aten, lt) \
 _(aten, lu_solve) \
 _(aten, margin_ranking_loss) \
 _(aten, masked_fill) \
@@ -519,7 +515,6 @@ _(aten, native_pow) \
 _(aten, native_resize_as) \
 _(aten, native_tensor) \
 _(aten, native_zero) \
-_(aten, ne) \
 _(aten, nextafter) \
 _(aten, bitwise_and) \
 _(aten, bitwise_not) \
