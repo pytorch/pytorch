@@ -414,6 +414,7 @@ Spectral Ops
     blackman_window
     hamming_window
     hann_window
+    kaiser_window
 
 
 Other Operations

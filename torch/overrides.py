@@ -113,6 +113,7 @@ def get_ignored_functions() -> Set[Callable]:
         torch.full,
         torch.hamming_window,
         torch.hann_window,
+        torch.kaiser_window,
         torch.linspace,
         torch.logspace,
         torch.mkldnn_adaptive_avg_pool2d,
