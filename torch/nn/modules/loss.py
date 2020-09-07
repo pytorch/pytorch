@@ -1246,7 +1246,7 @@ class TripletMarginLoss(_Loss):
                                      eps=self.eps, swap=self.swap, reduction=self.reduction)
 
 class SiameseLoss(_Loss):
-   r"""Creates a criterion that measure the loss given 
+    r"""Creates a criterion that measure the loss given 
     inputs :math:'x1', :math:'x2', and a binary label :math:'y' (containing 0 or 1)
 
     This is used for measuring a relative smilarity between pair of samples.
