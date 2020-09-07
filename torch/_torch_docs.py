@@ -8934,11 +8934,15 @@ kaiser_window(window_length, beta, periodic=True, dtype=None, \
 layout=torch.strided, device=None, requires_grad=False) -> Tensor
 """ + r"""
 Kaiser window function.
+
 .. math::
     w[n] = I_0 \left( \beta \sqrt{1 - \frac{4n^2}{(M-1)^2}} \right) / I_0( \beta )
+
 with
+
 .. math::
     -\frac{M-1}{2} \leq n \leq \frac{M-1}{2}
+
 where :math:`N` is the full window size.
 The input :attr:`window_length` is a positive integer controlling the
 returned window size. :attr:`periodic` flag determines whether the returned
@@ -8948,6 +8952,7 @@ ready to be used as a periodic window with functions like
 above formula is in fact :math:`\text{window\_length} + 1`. Also, we always have
 ``torch.kaiser_window(L, B, periodic=True)`` equal to
 ``torch.kaiser_window(L + 1, B, periodic=False)[:-1])``.
+
 .. note::
     If :attr:`window_length` :math:`=1`, the returned window contains a single value 1.
 """ + r"""
@@ -8960,8 +8965,10 @@ Arguments:
           ``torch.strided`` (dense layout) is supported.
     {device}
     {requires_grad}
+
 Returns:
     Tensor: A 1-D tensor of size :math:`(\text{{window\_length}},)` containing the window
+
 """.format(**factory_common_args))
 
 

@@ -1003,8 +1003,9 @@ Tensor kaiser_window(
   if (periodic) {
     window_length += 1;
   }
-  auto window = native::arange(window_length, options);
-  auto iter = TensorIterator::unary_op(window, window);
+  auto initial = native::arange(window_length, options);
+  auto window = native::zeros(window_length, options);
+  auto iter = TensorIterator::unary_op(window, initial);
   kaiser_window_stub(iter.device_type(), iter, window_length, beta);
   return periodic ? window.narrow(0, 0, window_length - 1) : window;
 }
