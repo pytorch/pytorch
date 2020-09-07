@@ -125,6 +125,13 @@ WORKFLOW_DATA = [
         "binary_windows_wheel_3_7_cu102_build",
         is_master_only=True,
     ),
+    SmoketestJob(
+        "binary_windows_build",
+        ["conda", "3.7", "cu102"],
+        None,
+        "binary_windows_conda_3_7_cu102_build",
+        is_master_only=False,
+    ),
 
     SmoketestJob(
         "binary_windows_test",
