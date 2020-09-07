@@ -51,7 +51,7 @@ set(C10D_SRCS
   Utils.cpp
   )
 
-if(LINUX)
+if(NOT MSVC)
   list(APPEND C10D_SRCS HashStore.cpp ProcessGroupRoundRobin.cpp TCPStore.cpp)
 endif()
 
@@ -79,7 +79,7 @@ add_library(c10d STATIC ${C10D_SRCS})
 set_property(TARGET c10d PROPERTY POSITION_INDEPENDENT_CODE ON)
 set_property(TARGET c10d PROPERTY CXX_STANDARD 14)
 
-if(LINUX)
+if(NOT MSVC)
   target_compile_options(c10d PUBLIC
     -Wall
     -Wextra
@@ -131,7 +131,7 @@ if(USE_GLOO)
   copy_header(ProcessGroupGloo.hpp)
   copy_header(GlooDeviceFactory.hpp)
 endif()
-if(LINUX)
+if(NOT MSVC)
   copy_header(HashStore.hpp)
   copy_header(TCPStore.hpp)
 endif()
