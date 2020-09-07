@@ -59,45 +59,6 @@ op_bench.generate_pt_test(add_long_configs + add_short_configs, AddBenchmark)
 op_bench.generate_pt_gradient_test(add_long_configs + add_short_configs, AddBenchmark)
 
 
-"""Mircobenchmark for addmm operator."""
-addmm_short_fuzzed_configs = fuzz_utils.make_fuzzed_config(
-    fuzz_utils.Fuzzers.MATMUL,
-    fuzz_utils.Scale.SMALL,
-    n=10,
-    seed="AddMM",
-    cross_product_configs={
-        'device': ['cpu', 'cuda'],
-    },
-    tags=["short"],
-    checksum=5944,
-)
-
-addmm_long_fuzzed_configs = fuzz_utils.make_fuzzed_config(
-    fuzz_utils.Fuzzers.MATMUL,
-    fuzz_utils.Scale.MEDIUM,
-    n=10,
-    seed="AddMM",
-    cross_product_configs={
-        'device': ['cpu', 'cuda'],
-    },
-    tags=["long"],
-    checksum=11136,
-)
-
-class AddmmBenchmark(op_bench.TorchBenchmarkBase):
-    def init(self, X_SIZE, Y_SIZE, device):
-        self.input_one = torch.rand(X_SIZE[0], Y_SIZE[1], device=device, requires_grad=self.auto_set())
-        self.mat1 = torch.rand(*X_SIZE, device=device, requires_grad=self.auto_set())
-        self.mat2 = torch.rand(*Y_SIZE, device=device, requires_grad=self.auto_set())
-        self.set_module_name("addmm")
-
-    def forward(self):
-        return torch.addmm(self.input_one, self.mat1, self.mat2)
-
-op_bench.generate_pt_test(addmm_short_fuzzed_configs + addmm_long_fuzzed_configs, AddmmBenchmark)
-op_bench.generate_pt_gradient_test(addmm_short_fuzzed_configs + addmm_long_fuzzed_configs, AddmmBenchmark)
-
-
 """Mircobenchmark for addr operator."""
 def make_addr_configs(device, dtypes):
     return fuzz_utils.make_fuzzed_config(
@@ -133,45 +94,6 @@ class AddrBenchmark(op_bench.TorchBenchmarkBase):
 
 op_bench.generate_pt_test(addr_fuzzed_configs, AddrBenchmark)
 op_bench.generate_pt_gradient_test(addr_fuzzed_configs, AddrBenchmark)
-
-
-"""Mircobenchmark for addbmm operator."""
-baddmm_short_fuzzed_configs = fuzz_utils.make_fuzzed_config(
-    fuzz_utils.Fuzzers.BATCH_MATMUL,
-    fuzz_utils.Scale.SMALL,
-    n=10,
-    seed="BAddMM",
-    cross_product_configs={
-        'device': ['cpu', 'cuda'],
-    },
-    tags=["short"],
-    checksum=1685,
-)
-
-baddmm_long_fuzzed_configs = fuzz_utils.make_fuzzed_config(
-    fuzz_utils.Fuzzers.BATCH_MATMUL,
-    fuzz_utils.Scale.MEDIUM,
-    n=10,
-    seed="BAddMM",
-    cross_product_configs={
-        'device': ['cpu', 'cuda'],
-    },
-    tags=["long"],
-    checksum=4466,
-)
-
-class AddbmmBenchmark(op_bench.TorchBenchmarkBase):
-    def init(self, X_SIZE, Y_SIZE, device):
-        self.input_one = torch.rand((X_SIZE[1], Y_SIZE[2]), device=device, requires_grad=self.auto_set())
-        self.batch1 = torch.rand(X_SIZE, device=device, requires_grad=self.auto_set())
-        self.batch2 = torch.rand(Y_SIZE, device=device, requires_grad=self.auto_set())
-        self.set_module_name("addbmm")
-
-    def forward(self):
-        return torch.addbmm(self.input_one, self.batch1, self.batch2)
-
-op_bench.generate_pt_test(baddmm_short_fuzzed_configs + baddmm_long_fuzzed_configs, AddbmmBenchmark)
-op_bench.generate_pt_gradient_test(baddmm_short_fuzzed_configs + baddmm_long_fuzzed_configs, AddbmmBenchmark)
 
 
 if __name__ == "__main__":

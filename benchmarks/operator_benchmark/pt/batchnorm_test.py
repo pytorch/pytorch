@@ -25,8 +25,8 @@ class BatchNormBenchmark(op_bench.TorchBenchmarkBase):
     def forward(self):
         return F.batch_norm(self.input_one, self.mean, self.var, self.weight, self.bias)
 
-op_bench.generate_pt_test(configs.norm_fuzzed_configs_short + configs.norm_fuzzed_configs_long, BatchNormBenchmark)
-op_bench.generate_pt_gradient_test(configs.norm_fuzzed_configs_short + configs.norm_fuzzed_configs_long, BatchNormBenchmark)
+op_bench.generate_pt_test(configs.norm_fuzzed_configs, BatchNormBenchmark)
+op_bench.generate_pt_gradient_test(configs.norm_fuzzed_configs, BatchNormBenchmark)
 
 
 if __name__ == "__main__":

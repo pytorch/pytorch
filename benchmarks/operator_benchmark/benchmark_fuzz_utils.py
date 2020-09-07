@@ -5,7 +5,7 @@ import hashlib
 from typing import Optional, Union
 
 from torch.utils._benchmark.op_fuzzers.constants import Scale
-from torch.utils._benchmark.op_fuzzers import binary, matmul, unary
+from torch.utils._benchmark.op_fuzzers import binary, convolution, matmul, unary
 
 import benchmark_utils
 
@@ -15,6 +15,9 @@ class Fuzzers(enum.Enum):
     BINARY = 1
     MATMUL = 2
     BATCH_MATMUL = 3
+    CONV1D = 4
+    CONV2D = 5
+    CONV3D = 6
 
 
 def fuzzer_factory(fuzzer: Fuzzers, scale: Scale, seed: Union[int, str], fuzzer_kwargs: Optional[dict]):
@@ -44,6 +47,13 @@ def fuzzer_factory(fuzzer: Fuzzers, scale: Scale, seed: Union[int, str], fuzzer_
         attr_names = (matmul.X_SIZE, matmul.Y_SIZE)
         return matmul.BatchMatMulFuzzer(**kwargs), attr_names
 
+    if fuzzer in (Fuzzers.CONV1D, Fuzzers.CONV2D, Fuzzers.CONV3D):
+        dim = {Fuzzers.CONV1D: 3, Fuzzers.CONV2D: 4, Fuzzers.CONV3D: 5}[fuzzer]
+        attr_names = (convolution.X_SIZE, convolution.C_OUT, convolution.KERNEL_SIZE, convolution.STRIDE)
+        if "groups" in kwargs:
+            attr_names += (convolution.GROUPS,)
+        return convolution.ConvFuzzer(dim=dim, **kwargs), attr_names
+
     raise NotImplementedError(f"Unknown fuzzer.")
 
 
@@ -69,7 +79,7 @@ def make_fuzzed_config(
     if checksum is not None:
         total = 0
         for a in attrs:
-            total += sum(sum(i) for i in a)
+            total += sum(i if isinstance(i, int) else sum(i) for i in a)
         if total != checksum:
             raise ValueError(f"Checksum failed: Total {total} != {checksum}")
 

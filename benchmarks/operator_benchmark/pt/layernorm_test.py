@@ -15,6 +15,7 @@ from . import configs
 class LayerNormBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, X_SIZE, device):
         self.X = (torch.rand(X_SIZE, device=device) - 0.5) * 256
+        self.X.requires_grad_(requires_grad=self.auto_set())
         self.weight = torch.rand(X_SIZE[1:], dtype=torch.float, device=device)
         self.bias = torch.rand(X_SIZE[1:], dtype=torch.float, device=device)
         self.eps = 1e-5
@@ -24,7 +25,8 @@ class LayerNormBenchmark(op_bench.TorchBenchmarkBase):
             self.X, self.X.size()[1:], weight=self.weight, bias=self.bias, eps=self.eps)
 
 
-op_bench.generate_pt_test(configs.norm_fuzzed_configs_short + configs.norm_fuzzed_configs_long, LayerNormBenchmark)
+op_bench.generate_pt_test(configs.norm_fuzzed_configs, LayerNormBenchmark)
+op_bench.generate_pt_gradient_test(configs.norm_fuzzed_configs, LayerNormBenchmark)
 
 
 if __name__ == "__main__":

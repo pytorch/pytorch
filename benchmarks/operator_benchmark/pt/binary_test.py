@@ -64,8 +64,8 @@ binary_short_int_configs = fuzz_utils.make_fuzzed_config(
         'device': ['cpu', 'cuda'],
         'dtypes': [
             (torch.int32, torch.int32),
-            # (torch.int8, torch.int8),
-            # (torch.int32, torch.int8),  # Test type promotion.
+            (torch.int8, torch.int8),
+            (torch.int32, torch.int8),  # Test type promotion.
         ],
     },
     tags=["short"],

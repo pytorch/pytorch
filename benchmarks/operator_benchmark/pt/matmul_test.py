@@ -3,50 +3,128 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
+import benchmark_fuzz_utils as fuzz_utils
 import operator_benchmark as op_bench
 import torch
 
-"""Microbenchmarks for MatMul operator"""
-
-# Configs for PT Matmul operator
-mm_short_configs = op_bench.config_list(
-    attr_names=["M", "N", "K", "trans_a", "trans_b"],
-    attrs=[
-        [1, 1, 1, True, False],
-        [128, 128, 128, True, False],
-        [256, 256, 256, False, True],
-    ],
+"""Microbenchmarks for addmm operator"""
+mm_short_fuzzed_configs = fuzz_utils.make_fuzzed_config(
+    fuzz_utils.Fuzzers.MATMUL,
+    fuzz_utils.Scale.SMALL,
+    n=10,
+    seed="AddMM",
     cross_product_configs={
-        'device': ['cpu', 'cuda'],
+        "device": ["cpu", "cuda"],
+        "trans_x": [False],
+        "trans_y": [False],
     },
     tags=["short"],
+    checksum=5944,
 )
 
-
-mm_long_configs = op_bench.cross_product_configs(
-    M=[32],
-    N=[512, 128],
-    K=[64],
-    trans_a=[False, True],
-    trans_b=[True, False],
-    device=['cpu', 'cuda'],
-    tags=["long"]
+mm_long_fuzzed_configs = fuzz_utils.make_fuzzed_config(
+    fuzz_utils.Fuzzers.MATMUL,
+    fuzz_utils.Scale.MEDIUM,
+    n=10,
+    seed="AddMM",
+    cross_product_configs={
+        "device": ["cpu", "cuda"],
+        "trans_x": [True, False],
+        "trans_y": [True, False],
+    },
+    tags=["long"],
+    checksum=11136,
 )
 
+def make_tensor(shape, device, transposed_layout=None):
+    if transposed_layout is None:
+        return torch.rand(*shape, device=device)
 
+    shape = list(shape)
+    d0, d1 = transposed_layout
+    shape[d0], shape[d1] = shape[d1], shape[d0]
+    return torch.rand(*shape, device=device).transpose(d0, d1)
+
+class AddmmBenchmark(op_bench.TorchBenchmarkBase):
+    def init(self, X_SIZE, Y_SIZE, device, trans_x, trans_y):
+        self.input_one = torch.rand(X_SIZE[0], Y_SIZE[1], device=device, requires_grad=self.auto_set())
+        self.mat1 = make_tensor(X_SIZE, device, (0, 1) if trans_x else None)
+        self.mat2 = make_tensor(Y_SIZE, device, (0, 1) if trans_y else None)
+
+        self.mat1.requires_grad_(requires_grad=self.auto_set())
+        self.mat2.requires_grad_(requires_grad=self.auto_set())
+        self.set_module_name("addmm")
+
+    def forward(self):
+        return torch.addmm(self.input_one, self.mat1, self.mat2)
+
+# op_bench.generate_pt_test(mm_short_fuzzed_configs + mm_long_fuzzed_configs, AddmmBenchmark)
+# op_bench.generate_pt_gradient_test(mm_short_fuzzed_configs + mm_long_fuzzed_configs, AddmmBenchmark)
+
+
+"""Microbenchmarks for MatMul operator"""
 class MatMulBenchmark(op_bench.TorchBenchmarkBase):
-    def init(self, M, N, K, trans_a, trans_b, device):
-        self.input_one = torch.rand(M, N, device=device) if trans_a \
-            else torch.rand(N, M, device=device).t()
-        self.input_two = torch.rand(N, K, device=device) if trans_b \
-            else torch.rand(K, N, device=device).t()
+    def init(self, X_SIZE, Y_SIZE, device, trans_x, trans_y):
+        self.mat1 = make_tensor(X_SIZE, device, (0, 1) if trans_x else None)
+        self.mat2 = make_tensor(Y_SIZE, device, (0, 1) if trans_y else None)
+
+        self.mat1.requires_grad_(requires_grad=self.auto_set())
+        self.mat2.requires_grad_(requires_grad=self.auto_set())
         self.set_module_name("matmul")
 
     def forward(self):
-        return torch.matmul(self.input_one, self.input_two)
+        return torch.matmul(self.mat1, self.mat2)
+
+# matmul will generally follow the same path as addmm, so a restricted set is
+# tested as a sanity check.
+# op_bench.generate_pt_test(mm_short_fuzzed_configs[:2], MatMulBenchmark)
+# op_bench.generate_pt_gradient_test(mm_short_fuzzed_configs[:2], MatMulBenchmark)
 
 
-op_bench.generate_pt_test(mm_long_configs + mm_short_configs, MatMulBenchmark)
+"""Mircobenchmark for addbmm operator."""
+baddmm_short_fuzzed_configs = fuzz_utils.make_fuzzed_config(
+    fuzz_utils.Fuzzers.BATCH_MATMUL,
+    fuzz_utils.Scale.SMALL,
+    n=10,
+    seed="BAddMM",
+    cross_product_configs={
+        "device": ["cpu", "cuda"],
+        "trans_x": [False],
+        "trans_y": [False],
+    },
+    tags=["short"],
+    checksum=1685,
+)
+
+baddmm_long_fuzzed_configs = fuzz_utils.make_fuzzed_config(
+    fuzz_utils.Fuzzers.BATCH_MATMUL,
+    fuzz_utils.Scale.MEDIUM,
+    n=10,
+    seed="BAddMM",
+    cross_product_configs={
+        "device": ["cpu", "cuda"],
+        "trans_x": [True, False],
+        "trans_y": [True, False],
+    },
+    tags=["long"],
+    checksum=4466,
+)
+
+class AddbmmBenchmark(op_bench.TorchBenchmarkBase):
+    def init(self, X_SIZE, Y_SIZE, device, trans_x, trans_y):
+        self.input_one = torch.rand((X_SIZE[1], Y_SIZE[2]), device=device, requires_grad=self.auto_set())
+        self.batch1 = make_tensor(X_SIZE, device, (1, 2) if trans_x else None)
+        self.batch2 = make_tensor(Y_SIZE, device, (1, 2) if trans_y else None)
+
+        self.batch1.requires_grad_(requires_grad=self.auto_set())
+        self.batch2.requires_grad_(requires_grad=self.auto_set())
+        self.set_module_name("addbmm")
+
+    def forward(self):
+        return torch.addbmm(self.input_one, self.batch1, self.batch2)
+
+op_bench.generate_pt_test(baddmm_short_fuzzed_configs + baddmm_long_fuzzed_configs, AddbmmBenchmark)
+op_bench.generate_pt_gradient_test(baddmm_short_fuzzed_configs + baddmm_long_fuzzed_configs, AddbmmBenchmark)
 
 
 if __name__ == "__main__":

@@ -4,100 +4,125 @@ from torch.utils._benchmark import Fuzzer, FuzzedParameter, ParameterAlias, Fuzz
 from torch.utils._benchmark.op_fuzzers import constants
 
 
+X_SIZE = "x_size"
+KERNEL_SIZE = "kernel_size"
+STRIDE = "stride"
+C_OUT = "C_out"
+GROUPS = "groups"
+
 BATCH_LIMITS = {
     constants.Scale.SMALL: 8,
     constants.Scale.MEDIUM: 256,
     constants.Scale.LARGE: 4096,
 }
+CHANNEL_LIMITS = {
+    constants.Scale.SMALL: 8,
+    constants.Scale.MEDIUM: 256,
+    constants.Scale.LARGE: 2048,
+}
+SIZE_LIMITS = {
+    constants.Scale.SMALL: 64,
+    constants.Scale.MEDIUM: 256,
+    constants.Scale.LARGE: 512,
+}
+
+
+def mixed_distribution(name, minval, maxval, distribution=None):
+    k_any, k_pow_2 = f"{name}_any", f"{name}_pow_2"
+    distribution = distribution or {k_any: 0.5, k_pow_2: 0.5}
+    assert k_any in distribution and k_pow_2 in distribution
+    return [
+        FuzzedParameter(name=k_any, minval=minval, maxval=maxval, distribution="loguniform"),
+        FuzzedParameter(name=k_pow_2, distribution=constants.pow_2_values(minval, maxval)),
+        FuzzedParameter(name=name, distribution={
+            ParameterAlias(k) if isinstance(k, str) else k: v
+            for k, v in distribution.items()
+        })
+    ]
 
 
 class ConvFuzzer(Fuzzer):
-    def __init__(self, seed, dtype=torch.float32, cuda=False, scale=constants.Scale.LARGE, dim=4):
+    def __init__(self, seed, dtype=torch.float32, cuda=False, scale=constants.Scale.LARGE, dim=4, groups=None):
         assert scale in (constants.Scale.SMALL, constants.Scale.MEDIUM, constants.Scale.LARGE)
         assert dim in (3, 4, 5), "Only Conv1/2/3D are supported."
-        raise NotImplementedError("TODO: finish.")
+
+        l_params = mixed_distribution("L", 4, SIZE_LIMITS[scale])
+        hw_params = (
+            mixed_distribution("H", 4, SIZE_LIMITS[scale]) +
+
+            # Square images are particularly common, so half the time Width
+            # simply mirrors height.
+            mixed_distribution(
+                "W", 4, SIZE_LIMITS[scale],
+                {"H": 0.5, "W_any": 0.25, "W_pow_2": 0.25})
+        )
+        dhw_params = mixed_distribution("D", 4, SIZE_LIMITS[scale]) + hw_params
+
+        if dim == 3:
+            size = ("N", "C", "L")
+            spatial_params = l_params
+        if dim == 4:
+            size = ("N", "C", "H", "W")
+            spatial_params = hw_params
+        if dim == 5:
+            size = ("N", "C", "D", "H", "W")
+            spatial_params = dhw_params
+
+        def kernel_size_constraint(params):
+            kernel_size = params["kernel_size"]
+            return all(
+                kernel_size <= params.get(k, kernel_size)
+                for k in ("L", "D", "H", "W"))
 
         super().__init__(
             parameters=[
                 # Batch Size
-                FuzzedParameter(name="N_any", minval=2, maxval=BATCH_LIMITS[scale], distribution="loguniform"),
-                FuzzedParameter(name="N_pow_2", distribution=constants.pow_2_values(2, BATCH_LIMITS[scale])),
-                FuzzedParameter(name="N", distribution={
-                    1: 1,  # Batch 1 inference is an especially important use case.
-                    ParameterAlias("N_any"): 0.45,
-                    ParameterAlias("N_pow_2"): 0.45,
+                mixed_distribution("N", 2, BATCH_LIMITS[scale], {
+                    1: 0.1,  # Batch 1 inference is a particularly important use case.
+                    "N_any": 0.45,
+                    "N_pow_2": 0.45,
                 }),
 
-                # Channels
-                #   Channels are generally either:
-                #    A) A power of two due to taking as input the output of a prior
-                #       convolution with power of two number of channels.
-                #    B) Three, due to RGB
-                #   As a result, these two are given extra probability.
-                FuzzedParameter(name="C_any", minval=1, maxval=1024, distribution="loguniform"),
-                FuzzedParameter(name="C_pow_2", distribution=as_normalized_dict(_POW_TWO_SIZES)),
-                FuzzedParameter(name="C", distribution={
-                    ParameterAlias("C_any"): 0.25,
-                    ParameterAlias("C_pow_2"): 0.65,
-                    3: 0.1,
-                }),
+                # L, HW, or DHW for Conv1/2/3d respectively.
+                spatial_params,
 
-                # H and W
-                FuzzedParameter("H_any", minval=7, maxval=500, distribution="loguniform"),
-                FuzzedParameter("H_pow2", distribution=as_normalized_dict(_POW_TWO_SIZES, minval=8)),
-                FuzzedParameter("H_resnet", distribution=as_normalized_dict(_RESNET_SIZES)),
-
-                FuzzedParameter("W_any", minval=7, maxval=500, distribution="loguniform"),
-                FuzzedParameter("W_pow2", distribution=as_normalized_dict(_POW_TWO_SIZES, minval=8)),
-
-                FuzzedParameter("H", distribution={
-                    ParameterAlias("H_any"): 0.4,
-                    ParameterAlias("H_pow2"): 0.4,
-                    ParameterAlias("H_resnet"): 0.2,
-                }),
-
-                # Square images are unusually common, so half the time Width simply
-                # mirrors height.
-                FuzzedParameter("W", distribution={
-                    ParameterAlias("H"): 0.5,
-                    ParameterAlias("W_any"): 0.25,
-                    ParameterAlias("W_pow2"): 0.25,
-                }),
-
-                # Output channels
-                FuzzedParameter("out_channels_any", minval=4, maxval=1024, distribution="loguniform"),
-                FuzzedParameter("out_channels_pow2", distribution=as_normalized_dict(_POW_TWO_SIZES)),
-                FuzzedParameter("out_channels", distribution={
-                    ParameterAlias("out_channels_any"): 0.5,
-                    ParameterAlias("out_channels_pow2"): 0.5,
-                }),
-
-                # Kernel sizes and strides
-                FuzzedParameter("kernel_H", minval=1, maxval=7, distribution="uniform"),
-                FuzzedParameter("kernel_W_candidate", minval=1, maxval=7, distribution="uniform"),
-                FuzzedParameter("kernel_W", distribution={
-                    ParameterAlias("kernel_H"): 0.5,
-                    ParameterAlias("kernel_W_candidate"): 0.5,
-                }),
-
-                FuzzedParameter("stride_H", minval=1, maxval=3, distribution="uniform"),
-                FuzzedParameter("stride_W_candidate", minval=1, maxval=3, distribution="uniform"),
-                FuzzedParameter("stride_W", distribution={
-                    ParameterAlias("stride_H"): 0.5,
-                    ParameterAlias("stride_W_candidate"): 0.5,
-                }),
-
+                mixed_distribution("C", 1, CHANNEL_LIMITS[scale]),
+                mixed_distribution(C_OUT, 1, CHANNEL_LIMITS[scale]),
+                FuzzedParameter(KERNEL_SIZE, distribution={1: 0.25, 3: 0.25, 5: 0.25, 7: 0.25}, strict=True),
+                FuzzedParameter(STRIDE, distribution={1: 0.9, 2: 0.05, 3: 0.05}),
+                [FuzzedParameter(GROUPS, distribution=groups, strict=True)] if groups else [],
             ],
             tensors=[
                 FuzzedTensor(
                     name="x",
-                    size=("N", "C", "H", "W"),
-                    # TODO(robieta): steps
-                    probability_contiguous=0.8,
+                    size=size,
+                    probability_contiguous=1,
                     max_elements=1024 ** 2,
                     dtype=dtype,
                     cuda=False,
                 ),
             ],
+            constraints=[
+                kernel_size_constraint,
+                lambda params: not (
+                    params["C"] % params.get(GROUPS, 1) or
+                    params[C_OUT] % params.get(GROUPS, 1))
+            ],
             seed=seed,
         )
+
+    @staticmethod
+    def structure_params(params: dict):
+        if "L" in params:
+            size = ("N", "C", "L")
+        elif "D" in params:
+            size = ("N", "C", "D", "H", "W")
+        else:
+            size = ("N", "C", "H", "W")
+        return {
+            X_SIZE: tuple(params.pop(k) for k in size),
+            KERNEL_SIZE: params[KERNEL_SIZE],
+            STRIDE: params[STRIDE],
+            C_OUT: params[C_OUT],
+            GROUPS: params.get(GROUPS),
+        }
