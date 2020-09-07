@@ -1250,12 +1250,12 @@ class SiameseLoss(_Loss):
     inputs :math:'x1', :math:'x2', and a binary label :math:'y' (containing 0 or 1)
 
     This is used for measuring a relative smilarity between pair of samples.
- 
+
     The loss function for pair of positive and negative samples is:
     .. math:: 
 
     L = \left\{\begin{matrix} & d(r_a,r_p) & & if & PositivePair \\ & max(0, m - d(r_a,r_n)) & & if & NegativePair \end{matrix}\right.
-	
+    
     The complete loss function is:
 
     L(r_0,r_1,y) = mean((y) \\left \| d(r_0, r_1) \right \| ^2_2 + (1-y) max(0,m - \left \| d(r_0, r_1) \right \| ^2_2)
@@ -1267,7 +1267,6 @@ class SiameseLoss(_Loss):
         is the pairwise distance between r_0 and r_1	
 
     .. math::
-       	      
 
     Args:
     label (tensor): A tensor binary content. 0 for negative pairs and 1 for positive pairs.
@@ -1287,7 +1286,6 @@ class SiameseLoss(_Loss):
         elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
         and :attr:`reduce` are in the process of being deprecated, and in the meantime,
         specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``		
-	
 
     Shape:
         - Input: :math: `(N, D)` where 'N' is the batch size and  `D` is the vector dimension.
@@ -1301,26 +1299,22 @@ class SiameseLoss(_Loss):
         >>> output.backward()
 	
         .. _Dimensionality Reduction by Learning an Invariant Mapping:
-        http://yann.lecun.com/exdb/publis/pdf/hadsell-chopra-lecun-06.pdf
+                http://yann.lecun.com/exdb/publis/pdf/hadsell-chopra-lecun-06.pdf
 
         Discriminative Learning of Deep Convolutional Feature Point Descriptors
-        https://www.cv-foundation.org/openaccess/content_iccv_2015/papers/Simo-Serra_Discriminative_Learning_of_ICCV_2015_paper.pdf
+                https://www.cv-foundation.org/openaccess/content_iccv_2015/papers/Simo-Serra_Discriminative_Learning_of_ICCV_2015_paper.pdf
 
         """
-        __constants__ = ['margin','reduction']
+        __constants__ = ['margin', 'reduction']
         margin: float
 
-
-
-        def __init__(self, margin: float=1.0, size_average=None, reduce=None, reduction: str='mean'):
-                super(SiameseLoss, self).__init__(size_average, reduce, reduction)
-                self.margin = margin
+        def __init__(self, margin: float=1.0, size_average = None, reduce = None, reduction: str = 'mean'):
+            super(SiameseLoss, self).__init__(size_average, reduce, reduction)
+            self.margin = margin
 
         def forward(self, anchor: Tensor, positive: Tensor, label: Tensor) -> Tensor:
-                return F.siames_loss(anchor, positive, margin=self.margin, reduction=self.reduction)
-    
-    
-    
+            return F.siames_loss(anchor, positive, margin = self.margin, reduction = self.reduction)
+
 
 class CTCLoss(_Loss):
     r"""The Connectionist Temporal Classification loss.
