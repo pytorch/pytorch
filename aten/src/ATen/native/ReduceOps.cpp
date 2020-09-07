@@ -358,6 +358,9 @@ Tensor& prod_out(Tensor& result, const Tensor& self, Dimname dim,
 
 Tensor &mean_out_cpu_gpu(Tensor &result, const Tensor &self, IntArrayRef dim,
                  bool keepdim, c10::optional<ScalarType> opt_dtype) {
+  auto dim_set = std::set<IntArrayRef::value_type>(dim.cbegin(), dim.cend());
+  TORCH_CHECK(dim_set.size() == dim.size(), "mean: repeated dimension in `dim` (", dim, ")");
+
   ScalarType scalarType = opt_dtype.has_value() ? opt_dtype.value() : self.scalar_type();
   TORCH_CHECK(
       at::isFloatingType(scalarType) || at::isComplexType(scalarType),
