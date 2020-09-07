@@ -8,6 +8,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/TypeProperties.h>
+#include <ATen/native/Resize.h>
 
 #include <torch/library.h>
 
@@ -214,9 +215,15 @@ Tensor& true_divide_(Tensor& self, const Tensor& divisor) {
   return native::true_divide_out(self, self, divisor);
 }
 
+// NOTE: integer floor division != C++ integer division. Integer division in
+//   C++ is equivalent to torch.trunc(torch.true_divide(a, b)), while
+//   floor division is equivalent to torch.floor(torch.true_divide(a, b)).
+//   For example, in Python -5 // 2 = -3, while in C++ -5 / 2 = -2.
+// NOTE: floor divide, like Python and NumPy's floor divide, participates in
+//   type promotion.
 Tensor& floor_divide_out(Tensor& result, const Tensor& self, const Tensor& other) {
-  auto r = self.true_divide(other).floor_();
-  result.resize_(r.sizes().vec());
+  const auto r = self.true_divide(other).floor_();
+  resize_output(result, r.sizes().vec());
   result.copy_(r);
   return result;
 }
@@ -1037,6 +1044,31 @@ Tensor binary_op_with_scalar_meta(const Tensor& self, const Tensor& other, Scala
 
 TORCH_LIBRARY_IMPL(aten, Meta, m) {
   m.impl("add.Tensor", binary_op_with_scalar_meta);
+}
+
+// Implements C++-like division. Performs true division with float input(s),
+//   and integer division with integer inputs. Note that integer division is
+//   not equivalent to floor division. Integer division truncates its
+//   quotient while floor division, as the name suggests, floors it.
+Tensor _c_style_div(const Tensor& self, const Tensor& other) {
+  Tensor result;
+  auto iter = TensorIterator::binary_op(result, self, other);
+  div_stub(iter.device_type(), iter);
+  return iter.output();
+}
+
+Tensor& _c_style_div_(Tensor& self, const Tensor& other) {
+  auto iter = TensorIterator::binary_op(self, self, other);
+  div_stub(iter.device_type(), iter);
+  return self;
+}
+
+Tensor _c_style_div(const Tensor& self, Scalar other) {
+  return self._c_style_div(wrapped_scalar_tensor(other)); // redispatch!
+}
+
+Tensor& _c_style_div_(Tensor& self, Scalar other) {
+  return self._c_style_div_(wrapped_scalar_tensor(other)); // redispatch!
 }
 
 } // namespace native
