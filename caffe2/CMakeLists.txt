@@ -6,6 +6,11 @@ if(USE_VULKAN)
   include(../cmake/VulkanCodegen.cmake)
 endif()
 
+# ---[ MSVC OpenMP modification 
+if(MSVC)
+  include(../cmake/public/utils.cmake)
+endif()
+
 # ATen parallelism settings
 #  OMP - OpenMP for intra-op, native thread pool for inter-op parallelism
 #  NATIVE - using native thread pool for intra- and inter-op parallelism
@@ -895,6 +900,13 @@ if(USE_OPENMP)
   find_package(OpenMP QUIET)
 endif()
 if(USE_OPENMP AND OPENMP_FOUND)
+  if(MSVC AND OpenMP_CXX_LIBRARIES MATCHES "libiomp5md\\.lib")
+    set(AT_MKL_MT 1)
+    set(OpenMP_CXX_FLAGS "${OpenMP_CXX_FLAGS} -D_OPENMP_NOFORCE_MANIFEST")
+    set(OpenMP_CXX_LIBRARIES "${OpenMP_CXX_LIBRARIES} -NODEFAULTLIB:vcomp -NODEFAULTLIB:vcompd")
+  else()
+    set(AT_MKL_MT 0)
+  endif()
   message(STATUS "pytorch is compiling with OpenMP. \n"
     "OpenMP CXX_FLAGS: ${OpenMP_CXX_FLAGS}. \n"
     "OpenMP libraries: ${OpenMP_CXX_LIBRARIES}.")
@@ -1385,6 +1397,7 @@ if(BUILD_PYTHON)
   if(NOT MSVC)
     set_target_properties(caffe2_pybind11_state PROPERTIES COMPILE_FLAGS "-fvisibility=hidden")
   endif()
+  torch_set_target_props(caffe2_pybind11_state)
   set_target_properties(caffe2_pybind11_state PROPERTIES PREFIX "" DEBUG_POSTFIX "")
   set_target_properties(caffe2_pybind11_state PROPERTIES SUFFIX ${PY_EXT_SUFFIX})
   set_target_properties(caffe2_pybind11_state PROPERTIES LINK_FLAGS "${_caffe2_pybind11_state_linker_flags}")
