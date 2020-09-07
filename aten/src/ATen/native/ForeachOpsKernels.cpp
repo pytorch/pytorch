@@ -74,8 +74,7 @@ std::vector<Tensor> foreach_tensor_##NAME##_slow(TensorList input, TensorList te
                                                                                                                               \
   std::vector<Tensor> result;                                                                                                 \
   for (int i = 0; i < input.size(); i++) {                                                                                    \
-    auto temp = input[i].NAME(tensors1[i], tensors2[i], scalar);                                                              \
-    result.emplace_back(temp);                                                                                                \
+    result.emplace_back(input[i].NAME(tensors1[i], tensors2[i], scalar));                                                     \
   }                                                                                                                           \
                                                                                                                               \
   return result;                                                                                                              \
