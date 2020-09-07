@@ -7042,9 +7042,6 @@ workflows:
                 - /ci-all\/.*/
                 - /release\/.*/
           name: binary_windows_wheel_3_7_cu102_build
-      - binary_windows_build:
-          build_environment: conda 3.7 cu102
-          name: binary_windows_conda_3_7_cu102_build
       - binary_windows_test:
           build_environment: libtorch 3.7 cpu debug
           name: binary_windows_libtorch_3_7_cpu_debug_test
