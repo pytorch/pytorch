@@ -857,6 +857,7 @@ template<typename scalar_t>
 void nonzero_cuda_out_impl(const Tensor& self, Tensor& out){
   Tensor self_ = self.contiguous();
   int N = self_.numel();
+  const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 // compute number of nonzero elements
 #ifdef __HIP_PLATFORM_HCC__
   auto thrust_allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
@@ -869,7 +870,6 @@ void nonzero_cuda_out_impl(const Tensor& self, Tensor& out){
   auto& allocator = *c10::cuda::CUDACachingAllocator::get();
   auto num_nonzeros = allocator.allocate(sizeof(int));
   cub::TransformInputIterator<bool, NonZeroOp<scalar_t>, scalar_t*> itr(self_.data_ptr<scalar_t>(), NonZeroOp<scalar_t>());
-  const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   cub::DeviceReduce::Sum(nullptr, temp_storage_bytes, itr, (int*)num_nonzeros.get(), N, stream);
   auto temp_storage = allocator.allocate(temp_storage_bytes);
   cub::DeviceReduce::Sum(temp_storage.get(), temp_storage_bytes, itr, (int*)num_nonzeros.get(), N, stream);
