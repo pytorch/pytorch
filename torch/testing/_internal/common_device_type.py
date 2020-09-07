@@ -229,33 +229,40 @@ class DeviceTypeTestBase(TestCase):
 
         def instantiate_test_helper(cls, name, *, test, dtype, op):
 
-            # wraps test with op decorators
-            if op is not None and op.decorators is not None:
-                for decorator in op.decorators:
-                    test = decorator(test)
-
             # Constructs the test's name
             test_name = _construct_test_name(name, op, cls.device_type, dtype)
 
+            # wraps instantiated test with op decorators
+            # NOTE: test_wrapper exists because we don't want to apply
+            #   op-specific decorators to the original test.
+            #   Test-sepcific decorators are applied to the original test,
+            #   however.
+            def test_wrapper(*args, **kwargs):
+                return test(*args, **kwargs)
+
+            if op is not None and op.decorators is not None:
+                for decorator in op.decorators:
+                    test_wrapper = decorator(test_wrapper)
+
             # Constructs the test
-            @wraps(test)
+            @wraps(test_wrapper)
             def instantiated_test(self, name=name, test=test, dtype=dtype, op=op):
                 if op is not None and op.should_skip(generic_cls.__name__, name,
                                                      self.device_type, dtype):
                     self.skipTest("Skipped!")
 
                 device_arg = cls.get_primary_device()
-                if hasattr(test, 'num_required_devices'):
+                if hasattr(test_wrapper, 'num_required_devices'):
                     device_arg = cls.get_all_devices()
 
                 # Sets precision and runs test
                 # Note: precision is reset after the test is run
                 guard_precision = self.precision
                 try:
-                    self.precision = self._get_precision_override(test, dtype)
+                    self.precision = self._get_precision_override(test_wrapper, dtype)
                     args = (device_arg, dtype, op)
                     args = (arg for arg in args if arg is not None)
-                    result = test(self, *args)
+                    result = test_wrapper(self, *args)
                 finally:
                     self.precision = guard_precision
 
