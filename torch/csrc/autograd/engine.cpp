@@ -375,6 +375,7 @@ auto Engine::thread_main(const std::shared_ptr<GraphTask>& graph_task) -> void {
           // queue_callback() to find the target GraphTask to append final
           // callbacks.
           GraphTaskGuard guard(local_graph_task);
+          NodeGuard ndguard(task.fn_);
           evaluate_function(local_graph_task, task.fn_.get(), task.inputs_, local_graph_task->cpu_ready_queue_);
         } catch (std::exception& e) {
           thread_on_exception(local_graph_task, task.fn_, e);
@@ -441,7 +442,7 @@ void Engine::thread_on_exception(
     std::shared_ptr<GraphTask> graph_task,
     const std::shared_ptr<Node>& fn,
     std::exception& e) {
-  graph_task->set_exception(e, fn);
+  graph_task->set_exception(std::current_exception(), fn);
 }
 
 bool GraphTask::completed() {
@@ -472,7 +473,7 @@ void GraphTask::mark_as_completed_and_run_post_processing() {
     lock.unlock();
     future_result_->markCompleted(std::move(vars));
   } catch (std::exception& e) {
-    future_result_->setErrorIfNeeded(e.what());
+    future_result_->setErrorIfNeeded(std::current_exception());
   }
 }
 
@@ -522,11 +523,11 @@ void GraphTask::set_exception_without_signal(const std::shared_ptr<Node>& fn) {
 }
 
 void GraphTask::set_exception(
-    std::exception& e,
+    std::exception_ptr eptr,
     const std::shared_ptr<Node>& fn) {
   set_exception_without_signal(fn);
   if (!future_completed_.exchange(true)) {
-    future_result_->setError(e.what());
+    future_result_->setError(std::move(eptr));
   }
 }
 
