@@ -2807,12 +2807,11 @@ def cosine_embedding_loss(input1, input2, target, margin=0, size_average=None,
         reduction_enum = _Reduction.get_enum(reduction)
     return torch.cosine_embedding_loss(input1, input2, target, margin, reduction_enum)
 
-def siamese_loss(input1, input2, label, margin=1.0, size_average=None,reduce=None, reduction=None):
+def siamese_loss(input1, input2, label, margin=1.0, size_average=None, reduce=None, reduction=None):
     # type: (Tensor, Tensor, Tensor, float, Optional[bool], Optional[bool], str) -> Tensor
-
     r"""siamese_loss(input1, input2, label, margin=1.0, reduction) -> Tensor
 
-    See :class: `~torch.nn.SiameseLoss` for details.
+    See :class:`~torch.nn.SiameseLoss` for details.
     """ 
     if not torch.jit.is_scripting():
         tens_ops = (anchor, input2, label)
