@@ -174,13 +174,23 @@ auto PyNode::apply(variable_list&& inputs) -> variable_list {
     if (output == Py_None) {
       results.emplace_back();
     } else {
-      if (!THPVariable_Check(output)) {
+      PyTypeObject *tp = Py_TYPE(output);
+      bool is_tuple = tp == &PyTuple_Type;
+      // We allowed backward on tuples of variables
+      if (is_tuple && was_variable) {
+        auto num_elems = PyTuple_GET_SIZE(output);
+        for (int j = 0; j < num_elems; j++) {
+          PyObject *elem = PyTuple_GET_ITEM(output, j);
+          results.emplace_back(((THPVariable*)elem)->cdata);
+        }
+      } else if (THPVariable_Check(output)) {
+        results.emplace_back(((THPVariable*)output)->cdata);
+      } else {
         std::string msg("expected Variable or None (got ");
         msg += THPUtils_typename(output);
         msg += ")";
         throw std::runtime_error(msg);
       }
-      results.emplace_back(((THPVariable*)output)->cdata);
     }
   }
 
@@ -462,27 +472,55 @@ std::pair<UnpackedInput, InputFlags> unpack_input(PyObject *args) {
   flags.needs_input_grad = PyTuple_New(num_args);
   for (int i = 0; i < num_args; i++) {
     PyObject *arg = PyTuple_GET_ITEM(args, i);
-
-    bool is_variable = THPVariable_Check(arg);
-    flags.is_variable_input.push_back(is_variable);
-    if (!is_variable) {
-      // TODO: remove this code path once Variable and Tensor are merged in Python
-      if (enforce_variables) {
-        THPUtils_setError("expected a Variable argument, but got %s",
-                          THPUtils_typename(arg));
-        throw python_error();
+    // We need to unpack and check if the variable is a tuple of variables
+    PyTypeObject *tp = Py_TYPE(arg);
+    if (tp == &PyTuple_Type) {
+      auto num_elems = PyTuple_GET_SIZE(arg);
+      bool all_vars = true;
+      for (int j = 0; j < num_elems; j++) {
+        PyObject *elem = PyTuple_GET_ITEM(arg, j);
+        //Check that all elems are variables
+        all_vars &= THPVariable_Check(elem);
       }
-      Py_INCREF(Py_False);
-      PyTuple_SET_ITEM(flags.needs_input_grad.get(), i, Py_False);
+      if (all_vars) {
+        for (int j = 0; j < num_elems; j++) {
+          PyObject *elem = PyTuple_GET_ITEM(arg, j);
+          THPVariable* variable = (THPVariable*)elem;
+          unpacked.input_vars.push_back(variable->cdata);
+          PyObject* needs_grad = variable->cdata.requires_grad() ? Py_True : Py_False;
+          Py_INCREF(needs_grad);
+          Py_INCREF(elem);
+          PyTuple_SET_ITEM(flags.needs_input_grad.get(), i, needs_grad);
+        }
+      } else {
+        Py_INCREF(Py_False);
+        PyTuple_SET_ITEM(flags.needs_input_grad.get(), i, Py_False);
+      }
+      flags.is_variable_input.push_back(all_vars);
+      Py_INCREF(arg);
+      PyTuple_SET_ITEM(unpacked.input_tuple.get(), i, arg);
     } else {
-      THPVariable* variable = (THPVariable*)arg;
-      unpacked.input_vars.push_back(variable->cdata);
-      PyObject* needs_grad = variable->cdata.requires_grad() ? Py_True : Py_False;
-      Py_INCREF(needs_grad);
-      PyTuple_SET_ITEM(flags.needs_input_grad.get(), i, needs_grad);
+      bool is_variable = THPVariable_Check(arg);
+      flags.is_variable_input.push_back(is_variable);
+      if (!is_variable) {
+        // TODO: remove this code path once Variable and Tensor are merged in Python
+        if (enforce_variables) {
+          THPUtils_setError("expected a Variable argument, but got %s",
+                            THPUtils_typename(arg));
+          throw python_error();
+        }
+        Py_INCREF(Py_False);
+        PyTuple_SET_ITEM(flags.needs_input_grad.get(), i, Py_False);
+      } else {
+        THPVariable* variable = (THPVariable*)arg;
+        unpacked.input_vars.push_back(variable->cdata);
+        PyObject* needs_grad = variable->cdata.requires_grad() ? Py_True : Py_False;
+        Py_INCREF(needs_grad);
+        PyTuple_SET_ITEM(flags.needs_input_grad.get(), i, needs_grad);
+      }
+      Py_INCREF(arg);
+      PyTuple_SET_ITEM(unpacked.input_tuple.get(), i, arg);
     }
-    Py_INCREF(arg);
-    PyTuple_SET_ITEM(unpacked.input_tuple.get(), i, arg);
   }
 
   flags.is_executable = GradMode::is_enabled() && any_variable_requires_grad(unpacked.input_vars);
