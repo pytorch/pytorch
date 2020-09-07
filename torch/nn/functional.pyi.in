@@ -318,8 +318,8 @@ def triplet_margin_loss(anchor: Tensor, positive: Tensor, negative: Tensor, marg
                         eps: float = ..., swap: bool = ..., size_average: Optional[bool] = ...,
                         reduce: Optional[bool] = ..., reduction: str = ...) -> Tensor: ...
 
-def siamese_loss(input1: Tensor, input2: Tensor, target: Tensor, margin: float = ...,
-	size_average: Optional[bool] = ..., reduce:Optional[bool] = ..., reduction: str = ...) -> Tensor: ....
+def siamese_loss(input1: Tensor, input2: Tensor, target: Tensor, margin: float = ..., size_average: Optional[bool] = ..., 
+                 reduce:Optional[bool] = ..., reduction: str = ...) -> Tensor: ....
   
 
 def normalize(input: Tensor, p: float = ..., dim: int = ..., eps: float = ...,
