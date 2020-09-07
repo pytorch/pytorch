@@ -14,9 +14,7 @@ template <typename T>
 bool MishFunctor<CPUContext>::
 operator()(const int N, const T* X, T* Y, CPUContext* /* context */) const {
   ConstEigenVectorArrayMap<T> X_arr(X, N);
-  EigenVectorArrayMap<T>(Y, N) = X_arr *
-      ((T(1) + X_arr.exp()) - T(1) / (T(1) + X_arr.exp())) /
-      ((T(1) + X_arr.exp()) + T(1) / (T(1) + X_arr.exp()));
+  EigenVectorArrayMap<T>(Y, N) = X_arr * (T(1) + X_arr.exp()).log().tanh();
   return true;
 }
 
@@ -44,11 +42,9 @@ bool MishGradientOp<CPUContext>::DoRunWithType() {
   // w = e^(3x) + 4*e^2x + e^x * (6 + 4x) + 4(1 + x)
   // q = (e^x + 1)^2 + 1
   // dX = dY * e^x * w / q^2
-  dXvec = dYvec * Xvec.exp() *
-      ((T(3) * Xvec).exp() + T(4) * (T(2) * Xvec).exp() +
-       Xvec.exp() * (T(6) + T(4) * Xvec) + T(4) * (T(1) + Xvec)) /
-      (((Xvec.exp() + T(1)) * (Xvec.exp() + T(1)) + T(1)) *
-       ((Xvec.exp() + T(1)) * (Xvec.exp() + T(1)) + T(1)));
+  dXvec = dYvec *
+      (T(4) * (Xvec+T(1)) * (-T(3)*Xvec).exp() + T(4)*(-Xvec).exp() + T(1) + (T(4)*Xvec+T(6))*(-T(2)*Xvec).exp()) /
+      (T(1) + T(4)*(-Xvec).exp() + T(8)*(-T(2)*Xvec).exp() + T(8)*(-T(3)*Xvec).exp() + T(4)*(-T(4)*Xvec).exp());
 
   return true;
 }
@@ -68,7 +64,7 @@ OPERATOR_SCHEMA(Mish)
     .IdenticalTypeAndShape()
     .SetDoc(R"DOC(
 Mish takes one input data (Tensor) and produces one output data
-(Tensor) where the Mish function, y = x / (1 + exp(-x)), is applied to the
+(Tensor) where the Mish function, y = x * tanh(ln(1 + exp(x))), is applied to the
 tensor elementwise.
 )DOC")
     .Input(0, "X", "1D input tensor")

@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/serialization/import.h>
 #include <ATen/core/functional.h>
+#include <ATen/core/ivalue_inl.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/serialization/import_export_helpers.h>
 #ifndef C10_MOBILE
@@ -129,7 +130,7 @@ class ScriptModuleDeserializer final {
   std::shared_ptr<CompilationUnit> compilation_unit_;
   std::unique_ptr<PyTorchStreamReader> reader_;
   c10::optional<at::Device> device_;
-  std::vector<at::Tensor> constants_table_;
+  std::vector<at::IValue> constants_table_;
   SourceImporter source_importer_;
   std::string export_prefix_ = "code/";
 };
@@ -264,7 +265,7 @@ Module ScriptModuleDeserializer::deserialize(
   }
   auto tuple = readArchive("constants").toTuple();
   for (auto constant : tuple->elements()) {
-    constants_table_.push_back(constant.toTensor());
+    constants_table_.push_back(constant.toIValue());
   }
   auto m = Module(readArchive("data").toObject());
   rewriteQuantizedConvForBC(m);

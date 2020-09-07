@@ -12,7 +12,7 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_utils import run_tests, IS_SANDCASTLE, ProfilingMode, GRAPH_EXECUTOR, \
     enable_profiling_mode_for_profiling_tests
 from torch.testing._internal.jit_utils import JitTestCase, enable_cpu_fuser, _inline_everything, \
-    RUN_CUDA, RUN_CUDA_HALF, RUN_CUDA_MULTI_GPU
+    RUN_CUDA, RUN_CUDA_HALF, RUN_CUDA_MULTI_GPU, warmup_backward
 from textwrap import dedent
 from itertools import product, permutations
 
@@ -27,19 +27,6 @@ if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
 def strip_profiling_nodes(nodes):
     profiling_opcodes = set(['prim::BailoutTemplate', 'prim::BailOut'])
     return [n for n in nodes if n.kind() not in profiling_opcodes]
-
-
-def warmup_backward(f, *args):
-    profiling_count = 2
-    results = []
-    for i in range(profiling_count):
-        if len(args) > 0:
-            r = torch.autograd.grad(f, *args)
-            results.append(r)
-        else:
-            f.backward(retain_graph=True)
-
-    return results
 
 
 def warmup_forward(f, *args):
@@ -293,6 +280,24 @@ class TestFuser(JitTestCase):
         self.assertAllFused(ge.graph_for(*inputs))
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    def test_minmax(self):
+        def tmax(a, b):
+            return torch.max(2 * a, b)
+
+        def tmin(a, b):
+            return torch.min(2 * a, b)
+
+        a = torch.randn(4, 4, dtype=torch.float, device="cuda")
+        b = torch.randn(4, 4, dtype=torch.float, device="cuda")
+        nan = torch.tensor(float('nan'), dtype=torch.float, device="cuda")
+
+        for f, inputs in product(
+                (tmax, tmin),
+                ([a, b], [a, nan], [b, nan])):
+            s = self.checkScript(f, inputs)
+            self.assertAllFused(s.graph_for(*inputs))
+
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_clamp(self):
         def func2(a, b):
             return torch.clamp(a + b, min=0, max=2)
@@ -474,7 +479,7 @@ class TestFuser(JitTestCase):
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, "broken with profiling on")
-    @torch.jit._disable_emit_hooks_decorator
+    @torch._jit_internal._disable_emit_hooks_decorator
     @_inline_everything
     def test_fuse_decompose_normalization(self):
         class ResLike(torch.jit.ScriptModule):

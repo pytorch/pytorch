@@ -112,7 +112,7 @@ Tensor _add_scalar_out(Tensor& out, const Tensor& self, Scalar other) {
       out.set_quantizer_(make_per_tensor_affine_quantizer(
           s_prime, z_prime, self.scalar_type()));
       if (ReLUFused) {
-        at::native::quantized_relu_(out);
+        at::native::relu_quantized_cpu_(out);
       }
     }
   });
@@ -267,7 +267,14 @@ Tensor qadd_scalar_tensor_out(Tensor qa, Tensor b, Tensor out) {
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
   m.impl("add",                 TORCH_FN(qadd</*ReLUFused=*/false>));
+  m.impl("add.out",             TORCH_FN(qadd_out</*ReLUFused=*/false>));
+  m.impl("add.Scalar",          TORCH_FN(qadd_scalar</*ReLUFused=*/false>));
+  m.impl("add.Scalar_out",      TORCH_FN(qadd_scalar_out</*ReLUFused=*/false>));
   m.impl("add_relu",            TORCH_FN(qadd</*ReLUFused=*/true>));
+  m.impl("add_relu.out",        TORCH_FN(qadd_out</*ReLUFused=*/true>));
+  m.impl("add_relu.Scalar",     TORCH_FN(qadd_scalar</*ReLUFused=*/true>));
+  m.impl("add_relu.Scalar_out", TORCH_FN(qadd_scalar_out</*ReLUFused=*/true>));
+  // deprecated functions, kept for backward compatibility
   m.impl("add_out",             TORCH_FN(qadd_out</*ReLUFused=*/false>));
   m.impl("add_relu_out",        TORCH_FN(qadd_out</*ReLUFused=*/true>));
   m.impl("add_scalar",          TORCH_FN(qadd_scalar</*ReLUFused=*/false>));

@@ -162,6 +162,7 @@ void THCudaBlas_HgemmStridedBatched(THCState *state, char transa, char transb, i
                              at::Half alpha, const at::Half *a, int64_t lda, int64_t strideA, const at::Half *b, int64_t ldb, int64_t strideB,
                              at::Half beta, at::Half *c, int64_t ldc, int64_t strideC, int64_t batchCount)
 {
+  at::globalContext().alertCuBLASConfigNotDeterministic();
   if( (m >= INT_MAX) || (n >= INT_MAX) || (k >= INT_MAX) || (lda >= INT_MAX)  || (ldb >= INT_MAX) || (ldc >= INT_MAX) || (batchCount >= INT_MAX) )
 
   {
@@ -185,14 +186,22 @@ void THCudaBlas_HgemmStridedBatched(THCState *state, char transa, char transb, i
                                    (int) batchCount, rocblas_datatype_f32_r, rocblas_gemm_algo_standard,
                                    0, 0));
 #else
+#if defined(CUDA_VERSION) && CUDA_VERSION < 11000
+  // On CUDA versions prior to 11, users are required to set the math mode to CUBLAS_TENSOR_OP_MATH
+  // manually to be able to use tensor cores for FP16. On CUDA 11, this is no longer required.
   THCublasCheck(cublasSetMathMode(handle, CUBLAS_TENSOR_OP_MATH));
+#endif  // CUDA_VERSION < 11000 
   THCublasCheck(cublasGemmStridedBatchedEx(handle,
                                    opa, opb, (int)m, (int)n, (int)k,
                                    (void*)&fAlpha, a, CUDA_R_16F, (int)lda, strideA,
                                    b, CUDA_R_16F, (int)ldb, strideB,
                                    (void*)&fBeta, c, CUDA_R_16F, (int)ldc, strideC,
                                    (int)batchCount, CUDA_R_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP));
+#if defined(CUDA_VERSION) && CUDA_VERSION < 11000
+  // On CUDA versions prior to 11, users are required to set the math mode to CUBLAS_TENSOR_OP_MATH
+  // manually to be able to use tensor cores for FP16. On CUDA 11, this is no longer required.
   THCublasCheck(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
+#endif  // CUDA_VERSION < 11000
 #endif // __HIP_PLATFORM_HCC__
 }
 #endif // CUDA_VERSION or __HIP_PLATFORM_HCC__
@@ -230,6 +239,7 @@ void THCudaBlas_SgemmBatched(THCState *state, char transa, char transb, int64_t 
                              float alpha, const float *a[], int64_t lda, const float *b[], int64_t ldb,
                              float beta, float *c[], int64_t ldc, int64_t batchCount)
 {
+  at::globalContext().alertCuBLASConfigNotDeterministic();
   if( (m >= INT_MAX) || (n >= INT_MAX) || (k >= INT_MAX) || (lda >= INT_MAX)  || (ldb >= INT_MAX) || (ldc >= INT_MAX) || (batchCount >= INT_MAX) )
   {
     THError("Cublas_SgemmBatched only supports m, n, k, lda, ldb, ldc, batchCount"
@@ -263,6 +273,7 @@ void THCudaBlas_SgemmStridedBatched(THCState *state, char transa, char transb, i
                              float alpha, const float *a, int64_t lda, int64_t strideA, const float *b, int64_t ldb, int64_t strideB,
                              float beta, float *c, int64_t ldc, int64_t strideC, int64_t batchCount)
 {
+  at::globalContext().alertCuBLASConfigNotDeterministic();
   if( (m >= INT_MAX) || (n >= INT_MAX) || (k >= INT_MAX) || (lda >= INT_MAX)  || (ldb >= INT_MAX) || (ldc >= INT_MAX) || (batchCount >= INT_MAX) )
 
   {
@@ -286,6 +297,7 @@ void THCudaBlas_DgemmBatched(THCState *state, char transa, char transb, int64_t 
                              double alpha, const double *a[], int64_t lda, const double *b[], int64_t ldb,
                              double beta, double *c[], int64_t ldc, int64_t batchCount)
 {
+  at::globalContext().alertCuBLASConfigNotDeterministic();
   if( (m >= INT_MAX) || (n >= INT_MAX) || (k >= INT_MAX) || (lda >= INT_MAX)  || (ldb >= INT_MAX) || (ldc >= INT_MAX) || (batchCount >= INT_MAX) )
   {
     THError("Cublas_DgemmBatched only supports m, n, k, lda, ldb, ldc, batchCount"
@@ -319,6 +331,7 @@ void THCudaBlas_DgemmStridedBatched(THCState *state, char transa, char transb, i
                              double alpha, const double *a, int64_t lda, int64_t strideA, const double *b, int64_t ldb, int64_t strideB,
                              double beta, double *c, int64_t ldc, int64_t strideC, int64_t batchCount)
 {
+  at::globalContext().alertCuBLASConfigNotDeterministic();
   if( (m >= INT_MAX) || (n >= INT_MAX) || (k >= INT_MAX) || (lda >= INT_MAX)  || (ldb >= INT_MAX) || (ldc >= INT_MAX) || (batchCount >= INT_MAX) )
   {
     THError("Cublas_DgemmBatched only supports m, n, k, lda, ldb, ldc, batchCount"

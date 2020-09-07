@@ -70,7 +70,7 @@ Tensor qnnpack_hardsigmoid(Tensor input) {
 #endif // USE_PYTORCH_QNNPACK
 
 } // namespace
-Tensor quantized_hardsigmoid(const Tensor& qx) {
+Tensor hardsigmoid_quantized_cpu(const Tensor& qx) {
 #ifdef USE_PYTORCH_QNNPACK
   if (at::globalContext().qEngine() == at::QEngine::QNNPACK &&
       qx.scalar_type() == kQUInt8) {

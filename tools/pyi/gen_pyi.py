@@ -50,7 +50,7 @@ FACTORY_PARAMS = f"dtype: Optional[_dtype]=None, {DEVICE_PARAM}, requires_grad: 
 # this could be more precise w.r.t list contents etc. How to do Ellipsis?
 INDICES = "indices: Union[None, _int, slice, Tensor, List, Tuple]"
 
-blacklist = [
+blocklist = [
     '__init_subclass__',
     '__new__',
     '__subclasshook__',
@@ -90,6 +90,9 @@ blacklist = [
     'norm',
     'split',
     'unique_consecutive',
+    'atleast_1d',
+    'atleast_2d',
+    'atleast_3d',
     # These are handled specially by python_arg_parser.cpp
     'add',
     'add_',
@@ -195,11 +198,11 @@ binary_ops = ('add', 'sub', 'mul', 'div', 'pow', 'lshift', 'rshift', 'mod', 'tru
               'radd', 'rsub', 'rmul', 'rtruediv', 'rfloordiv', 'rpow',          # reverse arithmetic
               'and', 'or', 'xor',                   # logic
               'iadd', 'iand', 'idiv', 'ilshift', 'imul',
-              'ior', 'irshift', 'isub', 'itruediv', 'ixor',  # inplace ops
+              'ior', 'irshift', 'isub', 'ixor',  # inplace ops
               )
 comparison_ops = ('eq', 'ne', 'ge', 'gt', 'lt', 'le')
 unary_ops = ('neg', 'abs', 'invert')
-to_py_type_ops = ('bool', 'float', 'long', 'index', 'int', 'nonzero')
+to_py_type_ops = ('bool', 'float', 'complex', 'long', 'index', 'int', 'nonzero')
 all_ops = binary_ops + comparison_ops + unary_ops + to_py_type_ops
 
 
@@ -221,13 +224,13 @@ def sig_for_ops(opname):
     elif name in unary_ops:
         return ['def {}(self) -> Tensor: ...'.format(opname)]
     elif name in to_py_type_ops:
-        if name in {'bool', 'float'}:
+        if name in {'bool', 'float', 'complex'}:
             tname = name
         elif name == 'nonzero':
             tname = 'bool'
         else:
             tname = 'int'
-        if tname in {'float', 'int', 'bool'}:
+        if tname in {'float', 'int', 'bool', 'complex'}:
             tname = 'builtins.' + tname
         return ['def {}(self) -> {}: ...'.format(opname, tname)]
     else:
@@ -248,7 +251,7 @@ def generate_type_hints(fname, decls, namedtuples, is_tensor=False):
     This function currently encodes quite a bit about the semantics of
     the translation C++ -> Python.
     """
-    if fname in blacklist:
+    if fname in blocklist:
         return []
 
     type_hints = []
@@ -544,6 +547,7 @@ def gen_pyi(declarations_path, out):
         'requires_grad_': ['def requires_grad_(self, mode: _bool=True) -> Tensor: ...'],
         'element_size': ['def element_size(self) -> _int: ...'],
         'dim': ['def dim(self) -> _int: ...'],
+        'nonzero': ['def nonzero(self, *, as_tuple: _bool=...) -> Tensor: ...'],
         'numel': ['def numel(self) -> _int: ...'],
         'ndimension': ['def ndimension(self) -> _int: ...'],
         'nelement': ['def nelement(self) -> _int: ...'],
@@ -676,6 +680,7 @@ def gen_pyi(declarations_path, out):
 
     write(out, 'torch/_C/__init__.pyi', TORCH_C_TYPE_STUBS, env)
     write(out, 'torch/_C/_VariableFunctions.pyi', TORCH_C_VARIABLE_FUNCTIONS_TYPE_STUBS, env)
+    write(out, 'torch/_VF.pyi', TORCH_C_VARIABLE_FUNCTIONS_TYPE_STUBS, env)
     gen_nn_pyi(out)
 
 

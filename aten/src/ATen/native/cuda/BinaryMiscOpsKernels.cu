@@ -1,6 +1,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/cuda/Loops.cuh>
+#include <ATen/native/cuda/Math.cuh>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/BinaryOps.h>
 
@@ -67,10 +68,56 @@ void logaddexp2_kernel_cuda(TensorIterator& iter) {
   });
 }
 
+void gcd_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "gcd_cuda", [&]() {
+    gpu_kernel(iter, [] GPU_LAMBDA (scalar_t a, scalar_t b) -> scalar_t {
+      return calc_gcd(a, b);
+    });
+  });
+}
+
+void lcm_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "lcm_cuda", [&]() {
+    gpu_kernel(iter, [] GPU_LAMBDA (scalar_t a, scalar_t b) -> scalar_t {
+      scalar_t g = calc_gcd(a, b);
+      return (g == 0) ? 0 : ::abs(a / g * b);
+    });
+  });
+}
+
+void hypot_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.common_dtype(), "hypot_cuda", [&]() {
+    gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+      return ::hypot(a, b);
+    });
+  });
+}
+
+void nextafter_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "nextafter_cuda", [&]() {
+    gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+      return ::nextafter(a, b);
+    });
+  });
+}
+
+void heaviside_kernel_cuda(TensorIterator& iter) {
+  AT_DISPATCH_ALL_TYPES_AND3(kHalf, kBool, kBFloat16, iter.dtype(), "heaviside_cuda", [&]() {
+    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
+      return a == 0 ? b : static_cast<scalar_t>(a > 0);
+    });
+  });
+}
+
 REGISTER_DISPATCH(atan2_stub, &atan2_kernel_cuda);
 REGISTER_DISPATCH(smooth_l1_stub, &smooth_l1_kernel_cuda);
 REGISTER_DISPATCH(mse_stub, &mse_kernel_cuda);
 REGISTER_DISPATCH(logaddexp_stub, &logaddexp_kernel_cuda);
 REGISTER_DISPATCH(logaddexp2_stub, &logaddexp2_kernel_cuda);
+REGISTER_DISPATCH(gcd_stub, &gcd_kernel_cuda);
+REGISTER_DISPATCH(lcm_stub, &lcm_kernel_cuda);
+REGISTER_DISPATCH(hypot_stub, &hypot_kernel_cuda);
+REGISTER_DISPATCH(nextafter_stub, &nextafter_kernel_cuda);
+REGISTER_DISPATCH(heaviside_stub, &heaviside_kernel_cuda);
 
 }} // namespace at::native

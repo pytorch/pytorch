@@ -1,16 +1,265 @@
-import torch
-from torch._six import inf, istuple
 from functools import reduce
 from operator import mul, itemgetter
 import collections
-from torch.autograd import Variable
-from torch.testing import make_non_contiguous
-from torch.testing._internal.common_device_type import skipCUDAIfNoMagma, skipCPUIfNoLapack, expectedFailureCUDA
-from torch.testing._internal.common_utils import (prod_single_zero, random_square_matrix_of_rank,
-                                                  random_symmetric_matrix, random_symmetric_psd_matrix,
-                                                  random_symmetric_pd_matrix, make_nonzero_det,
-                                                  random_fullrank_matrix_distinct_singular_value, set_rng_seed)
 
+import torch
+import numpy as np
+from torch._six import inf, istuple
+from torch.autograd import Variable
+
+from torch.testing import \
+    (make_non_contiguous,
+     _dispatch_dtypes,
+     floating_types, floating_types_and,
+     floating_and_complex_types, floating_and_complex_types_and,
+     all_types_and_complex_and)
+from torch.testing._internal.common_device_type import \
+    (skipCUDAIfNoMagma, skipCPUIfNoLapack, expectedFailureCUDA,
+     expectedAlertNondeterministic, precisionOverride)
+from torch.testing._internal.common_utils import \
+    (prod_single_zero, random_square_matrix_of_rank,
+     random_symmetric_matrix, random_symmetric_psd_matrix,
+     random_symmetric_pd_matrix, make_nonzero_det,
+     random_fullrank_matrix_distinct_singular_value, set_rng_seed,
+     TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, make_tensor)
+
+
+class SkipInfo(object):
+    """Describes which test, or type of tests, should be skipped when testing
+       an operator. Any test that matches all provided arguments will be skipped.
+       The skip will only be checked if the active_if argument is True."""
+
+    __slots__ = ['cls_name', 'test_name', 'device_type', 'dtypes', 'active_if']
+
+    def __init__(self, cls_name=None, test_name=None, *,
+                 device_type=None, dtypes=None, active_if=True):
+        self.cls_name = cls_name
+        self.test_name = test_name
+        self.device_type = device_type
+        self.dtypes = dtypes
+        self.active_if = active_if
+
+class SampleInput(object):
+    """Represents sample inputs to a function."""
+
+    __slots__ = ['input', 'args', 'kwargs']
+
+    def __init__(self, input, *, args=tuple(), kwargs=None):
+        self.input = input
+        self.args = args
+        self.kwargs = kwargs if kwargs is not None else {}
+
+
+# Classes and methods for the operator database
+class OpInfo(object):
+    """Operator information and helper functions for acquiring it."""
+
+    def __init__(self,
+                 name,  # the string name of the function
+                 *,
+                 op=None,  # the function variant of the operation, populated as torch.<name> if None
+                 dtypes=floating_types(),  # dtypes this function is expected to work with
+                 dtypesIfCPU=None,  # dtypes this function is expected to work with on CPU
+                 dtypesIfCUDA=None,  # dtypes this function is expected to work with on CUDA
+                 dtypesIfROCM=None,  # dtypes this function is expected to work with on ROCM
+                 skips=tuple(),  # information about which tests to skip
+                 decorators=None):  # decorators to apply to generated tests
+        # Validates the dtypes are generated from the dispatch-related functions
+        for dtype_list in (dtypes, dtypesIfCPU, dtypesIfCUDA, dtypesIfROCM):
+            assert isinstance(dtype_list, _dispatch_dtypes)
+
+        self.name = name
+
+        self.dtypes = dtypes
+        self.dtypesIfCPU = dtypesIfCPU if dtypesIfCPU is not None else dtypes
+        self.dtypesIfCUDA = dtypesIfCUDA if dtypesIfCUDA is not None else dtypes
+        self.dtypesIfROCM = dtypesIfROCM if dtypesIfROCM is not None else dtypes
+
+        # NOTE: if the op is unspecified it is assumed to be under the torch namespace
+        if op is None:
+            assert hasattr(torch, self.name)
+        self.op = op if op else getattr(torch, self.name)
+        self.method_variant = getattr(torch.Tensor, name) if hasattr(torch.Tensor, name) else None
+        inplace_name = name + "_"
+        self.inplace_variant = getattr(torch.Tensor, inplace_name) if hasattr(torch.Tensor, name) else None
+
+        self.skips = skips
+        self.decorators = decorators
+
+    def __call__(self, *args, **kwargs):
+        """Calls the function variant of the operator."""
+        return self.op(*args, **kwargs)
+
+    def get_op(self):
+        """Returns the function variant of the operator, torch.<op_name>."""
+        return self.op
+
+    def get_method(self):
+        """Returns the method variant of the operator, torch.Tensor.<op_name>.
+        Returns None if the operator has no method variant.
+        """
+        return self.method_variant
+
+    def get_inplace(self):
+        """Returns the inplace variant of the operator, torch.Tensor.<op_name>_.
+        Returns None if the operator has no inplace variant.
+        """
+        return self.inplace_variant
+
+    def sample_inputs(self, device, dtype, requires_grad=False):
+        """Returns an iterable of SampleInputs."""
+        return tuple()
+
+    # Returns True if the test should be skipped and False otherwise
+    def should_skip(self, cls_name, test_name, device_type, dtype):
+        for si in self.skips:
+            if not si.active_if:
+                continue
+
+            cls_name_match = si.cls_name is None or cls_name == si.cls_name
+            name_match = si.test_name is None or test_name == si.test_name
+            device_type_match = si.device_type is None or device_type == si.device_type
+            dtype_match = si.dtypes is None or dtype in si.dtypes
+            if cls_name_match and name_match and device_type_match and dtype_match:
+                return True
+
+        return False
+
+    def supports_dtype(self, dtype, device_type):
+        if device_type == 'cpu':
+            return dtype in self.dtypesIfCPU
+        if device_type == 'cuda':
+            if TEST_WITH_ROCM:
+                return dtype in self.dtypesIfROCM
+            return dtype in self.dtypesIfCUDA
+
+        return dtype in self.dtypes
+
+
+L = 20
+M = 10
+S = 5
+
+
+# Metadata class for unary "universal functions (ufuncs)" that accept a single
+# tensor and have common properties like:
+class UnaryUfuncInfo(OpInfo):
+    """Operator information for 'universal unary functions (unary ufuncs).'
+    These are functions of a single tensor with common properties like:
+      - they are elementwise functions
+      - the input shape is the output shape
+      - they typically have method and inplace variants
+      - they typically support the out kwarg
+      - they typically have NumPy or SciPy references
+
+    See NumPy's universal function documentation
+    (https://numpy.org/doc/1.18/reference/ufuncs.html) for more details
+    about the concept of ufuncs.
+    """
+
+    def __init__(self,
+                 name,  # the string name of the function
+                 *,
+                 ref,  # a reference function
+                 dtypes=floating_types(),
+                 dtypesIfCPU=floating_and_complex_types_and(torch.bfloat16),
+                 dtypesIfCUDA=floating_and_complex_types_and(torch.half),
+                 dtypesIfROCM=floating_types_and(torch.half),
+                 domain=(None, None),  # the [low, high) domain of the function
+                 handles_large_floats=True,  # whether the op correctly handles large float values (like 1e20)
+                 handles_extremals=True,  # whether the op correctly handles extremal values (like inf)
+                 handles_complex_extremals=True,  # whether the op correct handles complex extremals (like inf -infj)
+                 **kwargs):
+        super(UnaryUfuncInfo, self).__init__(name,
+                                             dtypes=dtypes,
+                                             dtypesIfCPU=dtypesIfCPU,
+                                             dtypesIfCUDA=dtypesIfCUDA,
+                                             dtypesIfROCM=dtypesIfROCM,
+                                             **kwargs)
+        self.ref = ref
+        self.domain = domain
+        self.handles_large_floats = handles_large_floats
+        self.handles_extremals = handles_extremals
+        self.handles_complex_extremals = handles_complex_extremals
+
+        # Epsilon to ensure grad and gradgrad checks don't test values
+        #   outside a function's domain.
+        self._domain_eps = 1e-5
+
+    def sample_inputs(self, device, dtype, requires_grad=False):
+        low, high = self.domain
+        low = low if low is None else low + self._domain_eps
+        high = high if high is None else high - self._domain_eps
+
+        return (SampleInput(make_tensor((L,), device, dtype,
+                                        low=low, high=high,
+                                        requires_grad=requires_grad)),)
+
+
+
+# Operator database
+op_db = [
+    # NOTE: CPU complex acos produces incorrect outputs (https://github.com/pytorch/pytorch/issues/42952)
+    UnaryUfuncInfo('acos',
+                   ref=np.arccos,
+                   domain=(-1, 1),
+                   handles_complex_extremals=False,
+                   decorators=(precisionOverride({torch.bfloat16: 1e-1,
+                                                  torch.complex64: 1e-2}),),
+                   skips=(
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                dtypes=[torch.cfloat, torch.cdouble], active_if=IS_WINDOWS),
+                       SkipInfo('TestGradients', 'test_fn_grad',
+                                dtypes=[torch.cdouble], active_if=IS_WINDOWS),
+                       SkipInfo('TestGradients', 'test_method_grad',
+                                dtypes=[torch.cdouble], active_if=IS_WINDOWS),
+                       SkipInfo('TestGradients', 'test_inplace_grad',
+                                dtypes=[torch.cdouble], active_if=IS_WINDOWS),
+                   )),
+    UnaryUfuncInfo('cos',
+                   ref=np.cos,
+                   dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
+                   handles_large_floats=False,
+                   decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
+                   skips=(
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                dtypes=[torch.cfloat, torch.cdouble], active_if=IS_WINDOWS),
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics', device_type='cpu',
+                                dtypes=[torch.cfloat, torch.cdouble], active_if=IS_MACOS),
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                dtypes=[torch.float], active_if=TEST_WITH_ROCM),
+                   )),
+    UnaryUfuncInfo('cosh',
+                   ref=np.cosh,
+                   dtypesIfCPU=floating_and_complex_types(),
+                   skips=(
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                dtypes=[torch.cfloat, torch.cdouble], active_if=IS_WINDOWS),
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics', device_type='cpu',
+                                dtypes=[torch.cfloat, torch.cdouble], active_if=IS_MACOS),
+                   )),
+    UnaryUfuncInfo('sin',
+                   ref=np.sin,
+                   handles_large_floats=False,
+                   handles_complex_extremals=False,
+                   decorators=(precisionOverride({torch.bfloat16: 1e-2}),),
+                   skips=(
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                dtypes=[torch.cfloat, torch.cdouble], active_if=IS_WINDOWS),
+                       SkipInfo('TestUnaryUfuncs', 'test_reference_numerics',
+                                dtypes=[torch.float], active_if=TEST_WITH_ROCM),
+                   )),
+    UnaryUfuncInfo('neg',
+                   ref=np.negative,
+                   dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
+                   dtypesIfCPU=all_types_and_complex_and(torch.half, torch.bfloat16),
+                   dtypesIfCUDA=all_types_and_complex_and(torch.half)),
+]
+
+# Common operator groupings
+unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo)]
 
 def index_variable(shape, max_indices):
     if not isinstance(shape, tuple):
@@ -92,9 +341,6 @@ class NoArgsClass(object):
         return 0
 
 NO_ARGS = NoArgsClass()
-L = 20
-M = 10
-S = 5
 
 def ident(x):
     return x
@@ -179,22 +425,22 @@ def method_tests():
         ('__rpow__', torch.rand(S, S, S) + 1e-3, (3.14,), 'constant', (True, 'aten::pow')),
         ('pow', uniform_scalar(1e-3, requires_grad=True), (3.14,), 'scalar_constant', (True,)),
         ('__rpow__', uniform_scalar(1e-3, requires_grad=True), (3.14,), 'scalar_constant', (True, 'aten::pow')),
-        ('transpose', (1, 2, 3), (1, 2), 'dim', (True,), [0, 1]),
-        ('transpose', (), (0, 0), 'scalar', (True,)),
-        ('transpose', (1,), (0, 0), '1d', (True,)),
-        ('transpose', (L, L), (0, 1), '2d', (True,)),
-        ('transpose', (S, S, S), (2, 0), '3d', (True,)),
-        ('t', (1, 2), NO_ARGS, '', (True,)),
-        ('view', (S, S, S), (S * S, S), '', (True,)),
-        ('view', (S, S, S), (torch.Size([S * S, S]),), 'size', (True,)),
-        ('view', (S,), (S,), '1d', (True,)),
-        ('view', (), (dont_convert(()),), 'scalar_to_scalar', (True,)),
-        ('view', (), (1,), 'scalar_to_1d', (True,)),
-        ('reshape', (S, S, S), (S * S, S), '', (True,)),
-        ('reshape', (S, S, S), (torch.Size([S * S, S]),), 'size', (True,)),
-        ('reshape', (S,), (S,), '1d', (True,)),
-        ('reshape', (), (dont_convert(()),), 'scalar_to_scalar', (True,)),
-        ('reshape', (), (1,), 'scalar_to_1d', (True,)),
+        ('transpose', (1, 2, 3), (1, 2), 'dim', (False,), [0, 1]),
+        ('transpose', (), (0, 0), 'scalar', (False,)),
+        ('transpose', (1,), (0, 0), '1d', (False,)),
+        ('transpose', (L, L), (0, 1), '2d', (False,)),
+        ('transpose', (S, S, S), (2, 0), '3d', (False,)),
+        ('t', (1, 2), NO_ARGS, '', (False,)),
+        ('view', (S, S, S), (S * S, S), '', (False,)),
+        ('view', (S, S, S), (torch.Size([S * S, S]),), 'size', (False,)),
+        ('view', (S,), (S,), '1d', (False,)),
+        ('view', (), (dont_convert(()),), 'scalar_to_scalar', (False,)),
+        ('view', (), (1,), 'scalar_to_1d', (False,)),
+        ('reshape', (S, S, S), (S * S, S), '', (False,)),
+        ('reshape', (S, S, S), (torch.Size([S * S, S]),), 'size', (False,)),
+        ('reshape', (S,), (S,), '1d', (False,)),
+        ('reshape', (), (dont_convert(()),), 'scalar_to_scalar', (False,)),
+        ('reshape', (), (1,), 'scalar_to_1d', (False,)),
         ('reshape_as', (S, S, S), (non_differentiable(torch.rand(S * S, S)),)),
         ('reshape_as', (), (non_differentiable(torch.tensor(42.)),), 'scalar'),
         ('reshape_as', (), (non_differentiable(torch.rand(1, 1)),), 'scalar_to_dims'),
@@ -220,14 +466,14 @@ def method_tests():
         ('view_as', (S, S, S), (non_differentiable(torch.rand(S * S, S)),)),
         ('view_as', (), (non_differentiable(torch.tensor(5.5)),), 'scalar'),
         ('view_as', (), (non_differentiable(torch.rand(1, 1)),), 'scalar_to_dims'),
-        ('expand', (S, 1, 1), (S, S, S), '', (True,)),
-        ('expand', (torch.Size([S, 1, S]),), (S, S, S), 'size', (True,)),
-        ('expand', (S, 1), (S, S, S), 'new_dim', (True,)),
-        ('expand', (1,), (S, S, S), '1_element', (True,)),
-        ('expand', (1, S), (1, 1, S), 'new_dim_front_old_front_1', (True,)),
+        ('expand', (S, 1, 1), (S, S, S), '', (False,)),
+        ('expand', (torch.Size([S, 1, S]),), (S, S, S), 'size', (False,)),
+        ('expand', (S, 1), (S, S, S), 'new_dim', (False,)),
+        ('expand', (1,), (S, S, S), '1_element', (False,)),
+        ('expand', (1, S), (1, 1, S), 'new_dim_front_old_front_1', (False,)),
         ('expand', (), (dont_convert(()),), 'scalar_to_scalar'),
-        ('expand', (), (1, 3, 2), 'scalar_to_dims', (True,)),
-        ('expand_as', (S, 1, 1), (torch.rand(S, S, S),), '', (True,)),
+        ('expand', (), (1, 3, 2), 'scalar_to_dims', (False,)),
+        ('expand_as', (S, 1, 1), (torch.rand(S, S, S),), '', (False,)),
         ('exp', (S, S, S), NO_ARGS, '', (True,)),
         ('exp', (), NO_ARGS, 'scalar', (True,)),
         ('expm1', (S, S, S), NO_ARGS, '', (True,)),
@@ -256,14 +502,16 @@ def method_tests():
         ('tanh', (), NO_ARGS, 'scalar', (True,)),
         ('sigmoid', (S, S, S), NO_ARGS, '', (True,)),
         ('sigmoid', (), NO_ARGS, 'scalar', (True,)),
+        ('logit', torch.randn(S, S, S).clamp(0.1, 0.9).requires_grad_(True), NO_ARGS, ''),
+        ('logit', torch.randn(S, S, S).clamp(0.1, 0.9).requires_grad_(True), (0.2,), 'eps'),
+        ('logit', uniform_scalar().clamp(0.1, 0.9).requires_grad_(True), NO_ARGS, 'scalar'),
+        ('logit', uniform_scalar().clamp(0.1, 0.9).requires_grad_(True), (0.2,), 'scalar_eps'),
         ('sinh', (S, S, S), NO_ARGS, '', (True,)),
         ('sinh', (), NO_ARGS, 'scalar', (True,)),
         ('cosh', (S, S, S), NO_ARGS, '', (True,)),
         ('cosh', (), NO_ARGS, 'scalar', (True,)),
         ('abs', (S, S, S), NO_ARGS, '', (True,)),
         ('abs', (), NO_ARGS, 'scalar', (True,)),
-        ('absolute', (S, S, S), NO_ARGS, '', (False,)),
-        ('absolute_', (S, S, S), NO_ARGS, '', (False,)),
         ('clamp', (S, S, S), (0, 1), '', (True,)),
         ('clamp', (S, S, S), (None, 0.5), 'min', (True,)),
         ('clamp', (S, S, S), (0.5, None), 'max', (True,)),
@@ -317,6 +565,7 @@ def method_tests():
         ('fmod', (), (non_differentiable(uniform_scalar(1.5)),), 'scalar_tensor'),
         ('fmod', (), (non_differentiable(torch.rand(S, S, S) + 1.5),), 'scalar_tensor_broadcast_lhs'),
         ('fmod', (S, S, S), (non_differentiable(uniform_scalar(1.5)),), 'scalar_tensor_broadcast_rhs'),
+        ('hypot', (S, S), ((S, S),)),
         ('remainder', (S, S, S), (1.5,), '', (True,)),
         ('remainder', (), (1.5,), 'scalar', (True,)),
         ('remainder', (S, S, S), (non_differentiable(torch.rand(S, S, S) + 1.5),), 'tensor'),
@@ -357,6 +606,20 @@ def method_tests():
         ('min', (), ((),), 'scalar_elementwise', (True,)),
         ('min', (S, S, S), ((),), 'scalar_elementwise_broadcast_rhs', (True,)),
         ('min', (), ((S, S, S),), 'scalar_elementwise_broadcast_lhs', (True,)),
+        ('amax', (S, S, S), NO_ARGS),
+        ('amax', (S, S, S), (1,), 'dim'),
+        ('amax', (S, S, S), ([1, 2],), 'multiple_dim'),
+        ('amax', (S, S, S), (1, True,), 'keepdim_dim'),
+        ('amax', (), NO_ARGS, 'scalar'),
+        ('amax', (), (0,), 'scalar_dim'),
+        ('amax', (), (0, True,), 'scalar_keepdim_dim'),
+        ('amin', (S, S, S), NO_ARGS, ),
+        ('amin', (S, S, S), (1,), 'dim',),
+        ('amin', (S, S, S), ([1, 2],), 'multiple_dim'),
+        ('amin', (S, S, S), (1, True,), 'keepdim_dim'),
+        ('amin', (), NO_ARGS, 'scalar'),
+        ('amin', (), (0,), 'scalar_dim'),
+        ('amin', (), (0, True,), 'scalar_keepdim_dim'),
         ('mean', (S, S, S), NO_ARGS, '', (True,)),
         ('mean', (S, S, S), (1,), 'dim', (True,), [0]),
         ('mean', (S, S, S), (1, True,), 'keepdim_dim', (True,), [0]),
@@ -396,6 +659,14 @@ def method_tests():
         ('sum', (), (0, True,), 'scalar_keepdim_dim', (), [0]),
         ('sum', (S, S, S), ([1, 2],), 'multi_dim'),
         ('sum', (S, S, S), ([1, 2], True,), 'multi_dim_keepdim'),
+        ('nansum', (S, S, S), NO_ARGS),
+        ('nansum', (S, S, S), (1,), 'dim', (), [0]),
+        ('nansum', (S, S, S), (1, True,), 'keepdim_dim', (), [0]),
+        ('nansum', (), NO_ARGS, 'scalar'),
+        ('nansum', (), (0,), 'scalar_dim', (), [0]),
+        ('nansum', (), (0, True,), 'scalar_keepdim_dim', (), [0]),
+        ('nansum', (S, S, S), ([1, 2],), 'multi_dim'),
+        ('nansum', (S, S, S), ([1, 2], True,), 'multi_dim_keepdim'),
         ('prod', (S, S, S), NO_ARGS),
         ('prod', (S, S, S), (1,), 'dim', (), [0]),
         ('prod', (S, S, S), (1, True,), 'keepdim_dim', (), [0]),
@@ -544,6 +815,8 @@ def method_tests():
          NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
         ('matrix_power', lambda: random_fullrank_matrix_distinct_singular_value(S, S), [-2], "n=-2", (),
          NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
+        ('matrix_exp', (S, S), NO_ARGS, "single_matrix"),
+        ('matrix_exp', (S, S, S), NO_ARGS, "batch_of_matrices"),
         ('mvlgamma', torch.empty(S,).uniform_(0.5, 1), [1], "p=1"),
         ('mvlgamma', torch.empty(S,).uniform_(1, 2), [2], "p=2"),
         ('mvlgamma', torch.empty(S, S).uniform_(1.5, 3), [3], "p=3"),
@@ -672,6 +945,8 @@ def method_tests():
         ('index_add', (S, S), (0, index_variable(2, S), (2, S)), 'dim', (), [0]),
         ('index_add', (), (0, torch.tensor([0], dtype=torch.int64), (1,)), 'scalar_input_dim', (), [0]),
         ('index_add', (), (0, torch.tensor(0, dtype=torch.int64), ()), 'scalar_all_dim', (), [0]),
+        ('index_add', (S, S), (0, index_variable(2, S), (2, S)), 'alert_nondeterministic', (), [0],
+            [expectedAlertNondeterministic('index_add_cuda_', 'cuda')]),
         ('index_copy', (S, S), (0, index_perm_variable(2, S), (2, S)), 'dim', (), [0]),
         ('index_copy', (), (0, torch.tensor([0], dtype=torch.int64), (1,)), 'scalar_input_dim', (), [0]),
         ('index_copy', (), (0, torch.tensor(0, dtype=torch.int64), ()), 'scalar_all_dim', (), [0]),
@@ -782,10 +1057,13 @@ def method_tests():
          lambda usv: (usv[0][..., :, :(S - 2)], usv[1], usv[2])),
         ('qr', (S, S), (False,), 'square_single', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
         ('qr', (S, S - 2), (True,), 'tall_single' , (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
+        ('qr', (S - 2, S), (False,), 'wide_single' , (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
         ('qr', (3, S, S), (False,), 'square_batched', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
         ('qr', (3, S, S - 2), (True,), 'tall_batched', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
+        ('qr', (3, S - 2, S), (True,), 'wide_batched' , (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
         ('qr', (3, 2, S, S), (False,), 'square_many_batched', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
         ('qr', (3, 2, S, S - 2), (True,), 'tall_many_batched', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
+        ('qr', (3, 2, S - 2, S), (True,), 'wide_many_batched', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
         ('solve', (S, S), (random_fullrank_matrix_distinct_singular_value(
             S, silent=True),), '', (), NO_ARGS, [skipCPUIfNoLapack, skipCUDAIfNoMagma]),
         ('solve', (S, S, S), (random_fullrank_matrix_distinct_singular_value(S, S, silent=True),),
@@ -875,6 +1153,8 @@ def method_tests():
         ('scatter_add', (M, S), (0, gather_variable((S, S), 1, M), (S, S)), 'dim0', (), [0]),
         ('scatter_add', (M, S), (1, gather_variable((M, S // 2), 0, S), (M, S // 2)), 'dim1', (), [0]),
         ('scatter_add', (), (0, torch.tensor(0, dtype=torch.int64), ()), 'scalar_all_dim0', (), [0]),
+        ('scatter_add', (M, S), (0, gather_variable((S, S), 1, M), (S, S)), 'alert_nondeterministic', (), [0],
+            [expectedAlertNondeterministic('scatter_add_cuda_kernel', 'cuda')]),
         ('masked_select', (M, M), (mask_not_all_zeros((M, M)),)),
         ('masked_select', (M, M), (mask_not_all_zeros((M,)),), 'broadcast_rhs'),
         ('masked_select', (M,), (mask_not_all_zeros((M, M)),), 'broadcast_lhs'),
@@ -900,6 +1180,8 @@ def method_tests():
         ('masked_scatter', (M, M), (bernoulli_scalar(), (M, M)), 'scalar'),
         ('masked_scatter', (M, M), (bernoulli_scalar(), (M, M)),
          'scalar_broadcast_rhs'),
+        ('maximum', (S, S), ((S, S),)),
+        ('minimum', (S, S), ((S, S),)),
         ('resize_', (S, S, S), (torch.Size([S * S, S])), 'fewer_dims'),
         ('resize_', (), (dont_convert(()),), 'scalar'),
         ('resize_', (), (torch.Size([1, 1, 1])), 'scalar_to_dims'),

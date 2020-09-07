@@ -9,6 +9,7 @@
 
 namespace at { namespace native {
 
+DECLARE_DISPATCH(void(*)(TensorIterator&, Scalar, Scalar, Scalar), arange_stub);
 DECLARE_DISPATCH(void(*)(TensorIterator&, Scalar, Scalar, int64_t), linspace_stub);
 
 Tensor& linspace_cpu_out(Tensor& result, Scalar start, Scalar end, int64_t steps) {
@@ -23,8 +24,12 @@ Tensor& linspace_cpu_out(Tensor& result, Scalar start, Scalar end, int64_t steps
   } else if (steps == 1) {
     result.fill_(start);
   } else {
-    auto iter = TensorIterator::nullary_op(result);
+    Tensor r = result.is_contiguous() ? result : result.contiguous();
+    auto iter = TensorIterator::nullary_op(r);
     linspace_stub(iter.device_type(), iter, start, end, steps);
+    if (!result.is_contiguous()) {
+      result.copy_(r);
+    }
   }
 
   return result;
@@ -168,14 +173,8 @@ Tensor& arange_cpu_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
     }
 
     Tensor r = result.is_contiguous() ? result : result.contiguous();
-    scalar_t *data_ptr = r.data_ptr<scalar_t>();
-
-    at::parallel_for(0, size, internal::GRAIN_SIZE, [&](int64_t p_begin, int64_t p_end) {
-      scalar_t is = p_begin;
-      for (int64_t i = p_begin; i < p_end; ++i, ++is) {
-        data_ptr[i] = xstart + is * xstep;
-      }
-    });
+    auto iter = TensorIterator::nullary_op(r);
+    arange_stub(iter.device_type(), iter, start, size, step);
     if (!result.is_contiguous()) {
       result.copy_(r);
     }
@@ -184,6 +183,7 @@ Tensor& arange_cpu_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
   return result;
 }
 
+DEFINE_DISPATCH(arange_stub);
 DEFINE_DISPATCH(linspace_stub);
 
 }} // namespace at::native

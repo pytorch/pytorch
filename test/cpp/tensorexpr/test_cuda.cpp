@@ -83,6 +83,65 @@ void testCudaTestVectorAdd01_impl() {
   cudaFree(c_dev);
 }
 
+float sigmoid(float x) {
+  return 1.0f / (1.0f + expf(-0.0f - x));
+}
+
+void testCudaSigmoid() {
+  KernelScope kernel_scope;
+  const int num_iter = 3;
+  const int block_count = 16;
+  const int block_size = 128;
+  Dtype dtype = ToDtype<float>();
+  Buffer a_buf("a", dtype, {num_iter, block_count, block_size});
+  Tensor* c = Compute(
+      "c",
+      {
+          {num_iter, "n"},
+          {block_count, "b_id"},
+          {block_size, "t_id"},
+      },
+      [&](const VarHandle& n, const VarHandle& b_id, const VarHandle& t_id) {
+        return sigmoid(sigmoid(a_buf(n, b_id, t_id)));
+      });
+  LoopNest l({c});
+  std::vector<For*> loops = l.getLoopStmtsFor(c);
+  l.setGPUBlockIndex(loops[1], 0);
+  l.setGPUThreadIndex(loops[2], 0);
+  l.prepareForCodegen();
+  Stmt* stmt = l.root_stmt();
+  CudaCodeGen cuda_cg(stmt, c, a_buf);
+  const int N = block_count * block_size * num_iter;
+  PaddedBuffer<float> a_v(N);
+  PaddedBuffer<float> c_v(N);
+  PaddedBuffer<float> c_ref(N);
+
+  for (int i = 0; i < N; i++) {
+    a_v(i) = float(i);
+    c_ref(i) = sigmoid(sigmoid(a_v(i)));
+  }
+
+  // TODO: move gpu support into PaddedBuffer
+  float* a_dev = nullptr;
+  cudaMalloc(&a_dev, N * sizeof(float));
+  float* c_dev = nullptr;
+  cudaMalloc(&c_dev, N * sizeof(float));
+  cudaMemcpy(a_dev, a_v.data(), N * sizeof(float), cudaMemcpyHostToDevice);
+  cudaMemcpy(c_dev, c_v.data(), N * sizeof(float), cudaMemcpyHostToDevice);
+  cudaDeviceSynchronize();
+
+  cuda_cg(c_dev, a_dev);
+
+  cudaDeviceSynchronize();
+  cudaMemcpy(c_v.data(), c_dev, N * sizeof(float), cudaMemcpyDeviceToHost);
+  cudaDeviceSynchronize();
+
+  ExpectAllNear(c_v, c_ref, 1e-5);
+
+  cudaFree(a_dev);
+  cudaFree(c_dev);
+}
+
 void testCudaTestVectorAdd01() {
   // floating types.
   testCudaTestVectorAdd01_impl<float>();
@@ -156,6 +215,45 @@ static void testCudaTestVectorAdd02_impl(int N, int block_size) {
 void testCudaTestVectorAdd02() {
   testCudaTestVectorAdd02_impl(1024, 128);
   testCudaTestVectorAdd02_impl(1030, 128);
+}
+
+void testCudaHalfCast() {
+  KernelScope ks;
+  auto half = ToDtype<at::Half>();
+  Buffer a("a", half, {4});
+  Tensor* b = Compute("b", {{4, "n"}}, [&](const VarHandle& i) {
+    return Cast::make(kFloat, a(i));
+  });
+
+  LoopNest l({b});
+  l.prepareForCodegen();
+  Stmt* s = l.root_stmt();
+  CudaCodeGen cg(s, {a, b});
+
+  std::vector<at::Half> aData(4, 2.0f);
+  std::vector<float> bData(4, 0.0f);
+  at::Half* aDev = nullptr;
+  float* bDev = nullptr;
+  auto aSize = aData.size() * sizeof(aData[0]);
+  auto bSize = bData.size() * sizeof(bData[0]);
+
+  cudaMalloc(&aDev, aSize);
+  cudaMalloc(&bDev, bSize);
+  cudaMemcpy(aDev, aData.data(), aSize, cudaMemcpyHostToDevice);
+  cudaMemcpy(bDev, bData.data(), bSize, cudaMemcpyHostToDevice);
+  cudaDeviceSynchronize();
+
+  cg.call({aDev, bDev});
+  cudaDeviceSynchronize();
+
+  cudaMemcpy(aData.data(), aDev, aSize, cudaMemcpyDeviceToHost);
+  cudaMemcpy(bData.data(), bDev, bSize, cudaMemcpyDeviceToHost);
+  cudaDeviceSynchronize();
+
+  assertAllEqual(bData, 2.0f);
+
+  cudaFree(aDev);
+  cudaFree(bDev);
 }
 
 void testCudaDynamicShape2D() {

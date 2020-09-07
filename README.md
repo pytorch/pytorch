@@ -6,7 +6,7 @@ PyTorch is a Python package that provides two high-level features:
 - Tensor computation (like NumPy) with strong GPU acceleration
 - Deep neural networks built on a tape-based autograd system
 
-You can reuse your favorite Python packages such as NumPy, SciPy and Cython to extend PyTorch when needed.
+You can reuse your favorite Python packages such as NumPy, SciPy, and Cython to extend PyTorch when needed.
 
 - [More about PyTorch](#more-about-pytorch)
 - [Installation](#installation)
@@ -45,7 +45,7 @@ At a granular level, PyTorch is a library that consists of the following compone
 | [**torch.multiprocessing**](https://pytorch.org/docs/stable/multiprocessing.html) | Python multiprocessing, but with magical memory sharing of torch Tensors across processes. Useful for data loading and Hogwild training |
 | [**torch.utils**](https://pytorch.org/docs/stable/data.html) | DataLoader and other utility functions for convenience |
 
-Usually PyTorch is used either as:
+Usually, PyTorch is used either as:
 
 - a replacement for NumPy to use the power of GPUs.
 - a deep learning research platform that provides maximum flexibility and speed.
@@ -58,7 +58,7 @@ If you use NumPy, then you have used Tensors (a.k.a. ndarray).
 
 ![Tensor illustration](./docs/source/_static/img/tensor_illustration.png)
 
-PyTorch provides Tensors that can live either on the CPU or the GPU, and accelerates the
+PyTorch provides Tensors that can live either on the CPU or the GPU and accelerates the
 computation by a huge amount.
 
 We provide a wide variety of tensor routines to accelerate and fit your scientific computation needs
@@ -69,8 +69,8 @@ And they are fast!
 
 PyTorch has a unique way of building neural networks: using and replaying a tape recorder.
 
-Most frameworks such as TensorFlow, Theano, Caffe and CNTK have a static view of the world.
-One has to build a neural network, and reuse the same structure again and again.
+Most frameworks such as TensorFlow, Theano, Caffe, and CNTK have a static view of the world.
+One has to build a neural network and reuse the same structure again and again.
 Changing the way the network behaves means that one has to start from scratch.
 
 With PyTorch, we use a technique called reverse-mode auto-differentiation, which allows you to
@@ -91,21 +91,21 @@ PyTorch is not a Python binding into a monolithic C++ framework.
 It is built to be deeply integrated into Python.
 You can use it naturally like you would use [NumPy](https://www.numpy.org/) / [SciPy](https://www.scipy.org/) / [scikit-learn](https://scikit-learn.org) etc.
 You can write your new neural network layers in Python itself, using your favorite libraries
-and use packages such as Cython and Numba.
+and use packages such as [Cython](https://cython.org/) and [Numba](http://numba.pydata.org/).
 Our goal is to not reinvent the wheel where appropriate.
 
 ### Imperative Experiences
 
-PyTorch is designed to be intuitive, linear in thought and easy to use.
+PyTorch is designed to be intuitive, linear in thought, and easy to use.
 When you execute a line of code, it gets executed. There isn't an asynchronous view of the world.
-When you drop into a debugger, or receive error messages and stack traces, understanding them is straightforward.
+When you drop into a debugger or receive error messages and stack traces, understanding them is straightforward.
 The stack trace points to exactly where your code was defined.
 We hope you never spend hours debugging your code because of bad stack traces or asynchronous and opaque execution engines.
 
 ### Fast and Lean
 
 PyTorch has minimal framework overhead. We integrate acceleration libraries
-such as [Intel MKL](https://software.intel.com/mkl) and NVIDIA (cuDNN, NCCL) to maximize speed.
+such as [Intel MKL](https://software.intel.com/mkl) and NVIDIA ([cuDNN](https://developer.nvidia.com/cudnn), [NCCL](https://developer.nvidia.com/nccl)) to maximize speed.
 At the core, its CPU and GPU Tensor and neural network backends
 (TH, THC, THNN, THCUNN) are mature and have been tested for years.
 
@@ -135,7 +135,7 @@ Commands to install from binaries via Conda or pip wheels are on our website:
 [https://pytorch.org](https://pytorch.org)
 
 
-#### NVIDIA Jetson platforms
+#### NVIDIA Jetson Platforms
 
 Python wheels for NVIDIA's Jetson Nano, Jetson TX2, and Jetson AGX Xavier are available via the following URLs:
 
@@ -149,7 +149,7 @@ They require JetPack 4.2 and above, and [@dusty-nv](https://github.com/dusty-nv)
 
 ### From Source
 
-If you are installing from source, you will need a C++14 compiler. Also, we highly recommend installing an [Anaconda](https://www.anaconda.com/distribution/#download-section) environment.
+If you are installing from source, you will need Python 3.6 or later and a C++14 compiler. Also, we highly recommend installing an [Anaconda](https://www.anaconda.com/distribution/#download-section) environment.
 You will get a high-quality BLAS library (MKL) and you get controlled dependency versions regardless of your Linux distro.
 
 Once you have [Anaconda](https://www.anaconda.com/distribution/#download-section) installed, here are the instructions.
@@ -168,14 +168,20 @@ If you are building for NVIDIA's Jetson platforms (Jetson Nano, TX1, TX2, AGX Xa
 #### Install Dependencies
 
 Common
-```
-conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi
+```bash
+conda install numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing_extensions future six requests dataclasses
 ```
 
 On Linux
 ```bash
 # Add LAPACK support for the GPU if needed
 conda install -c pytorch magma-cuda102  # or [ magma-cuda101 | magma-cuda100 | magma-cuda92 ] depending on your cuda version
+```
+
+On MacOS
+```bash
+# Add these packages if torch.distributed is needed
+conda install pkg-config libuv
 ```
 
 #### Get the PyTorch Source
@@ -220,10 +226,10 @@ If the version of Visual Studio 2017 is higher than 15.6, installing of "VC++ 20
 NVTX is a part of CUDA distributive, where it is called "Nsight Compute". To install it onto already installed CUDA run CUDA installation once again and check the corresponding checkbox.
 Be sure that CUDA with Nsight Compute is installed after Visual Studio 2017.
 
-Currently VS 2017, VS 2019 and Ninja are supported as the generator of CMake. If `ninja.exe` is detected in `PATH`, then Ninja will be used as the default generator, otherwise it will use VS 2017.
-<br/> If Ninja is selected as the generator, the latest MSVC which is newer than VS 2015 (14.0) will get selected as the underlying toolchain if you have Python > 3.5, otherwise VS 2015 will be selected so you'll have to activate the environment. If you use CMake <= 3.14.2 and has VS 2019 installed, then even if you specify VS 2017 as the generator, VS 2019 will get selected as the generator.
+Currently, VS 2017, VS 2019, and Ninja are supported as the generator of CMake. If `ninja.exe` is detected in `PATH`, then Ninja will be used as the default generator, otherwise, it will use VS 2017.
+<br/> If Ninja is selected as the generator, the latest MSVC which is newer than VS 2015 (14.0) will get selected as the underlying toolchain. If you use CMake <= 3.14.2 and has VS 2019 installed, then even if you specify VS 2017 as the generator, VS 2019 will get selected as the generator.
 
-CUDA and MSVC have strong version dependencies, so even if you use VS 2017 / 2019, you will get build errors like `nvcc fatal : Host compiler targets unsupported OS`. For this kind of problem, please install the corresponding VS toolchain in the table below and then you can either specify the toolset during activation (recommended) or set `CUDAHOSTCXX` to override the cuda host compiler (not recommended if there are big version differences).
+CUDA and MSVC have strong version dependencies, so even if you use VS 2017 / 2019, you will get build errors like `nvcc fatal : Host compiler targets unsupported OS`. For this kind of problem, please install the corresponding VS toolchain in the table below, and then you can either specify the toolset during activation (recommended) or set `CUDAHOSTCXX` to override the Cuda host compiler (not recommended if there are big version differences).
 
 | CUDA version | Newest supported VS version                             |
 | ------------ | ------------------------------------------------------- |
@@ -246,7 +252,7 @@ set CMAKE_GENERATOR_TOOLSET_VERSION=14.11
 set DISTUTILS_USE_SDK=1
 for /f "usebackq tokens=*" %i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -version [15^,16^) -products * -latest -property installationPath`) do call "%i\VC\Auxiliary\Build\vcvarsall.bat" x64 -vcvars_ver=%CMAKE_GENERATOR_TOOLSET_VERSION%
 
-:: [Optional] If you want to override the cuda host compiler
+:: [Optional] If you want to override the Cuda host compiler
 set CUDAHOSTCXX=C:\Program Files (x86)\Microsoft Visual Studio\2017\Enterprise\VC\Tools\MSVC\14.11.25503\bin\HostX64\x64\cl.exe
 
 python setup.py install
@@ -291,7 +297,7 @@ should increase shared memory size either with `--ipc=host` or `--shm-size` comm
 
 **NOTE:** Must be built with a docker version > 18.06
 
-The `Dockerfile` is supplied to build images with cuda support and cudnn v7.
+The `Dockerfile` is supplied to build images with Cuda support and cuDNN v7.
 You can pass `PYTHON_VERSION=x.y` make variable to specify which Python version is to be used by Miniconda, or leave it
 unset to use the default.
 ```bash
@@ -304,12 +310,15 @@ make -f docker.Makefile
 To build documentation in various formats, you will need [Sphinx](http://www.sphinx-doc.org) and the
 readthedocs theme.
 
-```
+```bash
 cd docs/
 pip install -r requirements.txt
 ```
 You can then build the documentation by running ``make <format>`` from the
 ``docs/`` folder. Run ``make`` to get a list of all available output formats.
+
+If you get a katex error run ```npm install katex```.  If it persists, try
+```npm install -g katex```
 
 ### Previous Versions
 
@@ -319,7 +328,7 @@ on [our website](https://pytorch.org/previous-versions).
 
 ## Getting Started
 
-Three pointers to get you started:
+Three-pointers to get you started:
 - [Tutorials: get you started with understanding and using PyTorch](https://pytorch.org/tutorials/)
 - [Examples: easy to understand pytorch code across all domains](https://github.com/pytorch/examples)
 - [The API Reference](https://pytorch.org/docs/)
@@ -341,30 +350,31 @@ Three pointers to get you started:
 ## Communication
 * forums: discuss implementations, research, etc. https://discuss.pytorch.org
 * GitHub issues: bug reports, feature requests, install issues, RFCs, thoughts, etc.
-* Slack: The [PyTorch Slack](https://pytorch.slack.com/) hosts a primary audience of moderate to experienced PyTorch users and developers for general chat, online discussions, collaboration etc. If you are a beginner looking for help, the primary medium is [PyTorch Forums](https://discuss.pytorch.org). If you need a slack invite, please fill this form: https://goo.gl/forms/PP1AGvNHpSaJP8to1
-* newsletter: no-noise, one-way email newsletter with important announcements about pytorch. You can sign-up here: https://eepurl.com/cbG0rv
+* Slack: The [PyTorch Slack](https://pytorch.slack.com/) hosts a primary audience of moderate to experienced PyTorch users and developers for general chat, online discussions, collaboration, etc. If you are a beginner looking for help, the primary medium is [PyTorch Forums](https://discuss.pytorch.org). If you need a slack invite, please fill this form: https://goo.gl/forms/PP1AGvNHpSaJP8to1
+* newsletter: no-noise, a one-way email newsletter with important announcements about PyTorch. You can sign-up here: https://eepurl.com/cbG0rv
+* Facebook page: important announcements about PyTorch. https://www.facebook.com/pytorch
 * for brand guidelines, please visit our website at [pytorch.org](https://pytorch.org/)
 
 ## Releases and Contributing
 
-PyTorch has a 90 day release cycle (major releases). Please let us know if you encounter a bug by [filing an issue](https://github.com/pytorch/pytorch/issues).
+PyTorch has a 90-day release cycle (major releases). Please let us know if you encounter a bug by [filing an issue](https://github.com/pytorch/pytorch/issues).
 
 We appreciate all contributions. If you are planning to contribute back bug-fixes, please do so without any further discussion.
 
-If you plan to contribute new features, utility functions or extensions to the core, please first open an issue and discuss the feature with us.
-Sending a PR without discussion might end up resulting in a rejected PR, because we might be taking the core in a different direction than you might be aware of.
+If you plan to contribute new features, utility functions, or extensions to the core, please first open an issue and discuss the feature with us.
+Sending a PR without discussion might end up resulting in a rejected PR because we might be taking the core in a different direction than you might be aware of.
 
 To learn more about making a contribution to Pytorch, please see our [Contribution page](CONTRIBUTING.md).
 
 ## The Team
 
-PyTorch is a community driven project with several skillful engineers and researchers contributing to it.
+PyTorch is a community-driven project with several skillful engineers and researchers contributing to it.
 
 PyTorch is currently maintained by [Adam Paszke](https://apaszke.github.io/), [Sam Gross](https://github.com/colesbury), [Soumith Chintala](http://soumith.ch) and [Gregory Chanan](https://github.com/gchanan) with major contributions coming from hundreds of talented individuals in various forms and means.
 A non-exhaustive but growing list needs to mention: Trevor Killeen, Sasank Chilamkurthy, Sergey Zagoruyko, Adam Lerer, Francisco Massa, Alykhan Tejani, Luca Antiga, Alban Desmaison, Andreas Koepf, James Bradbury, Zeming Lin, Yuandong Tian, Guillaume Lample, Marat Dukhan, Natalia Gimelshein, Christian Sarofeen, Martin Raison, Edward Yang, Zachary Devito.
 
-Note: this project is unrelated to [hughperkins/pytorch](https://github.com/hughperkins/pytorch) with the same name. Hugh is a valuable contributor in the Torch community and has helped with many things Torch and PyTorch.
+Note: this project is unrelated to [hughperkins/pytorch](https://github.com/hughperkins/pytorch) with the same name. Hugh is a valuable contributor to the Torch community and has helped with many things Torch and PyTorch.
 
 ## License
 
-PyTorch is BSD-style licensed, as found in the [LICENSE](LICENSE) file.
+PyTorch is a BSD-style licensed, as found in the [LICENSE](LICENSE) file.

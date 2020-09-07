@@ -798,6 +798,27 @@ graph(%a_quant, %alpha, %scale, %input_scale, %r_scale, %r_zero_point, %r_dtype)
   auto mean2 = getInputTensorQParamOpFusionInfo(
       "aten::mean", {"%dim", "%keepdim", "%out"});
 
+  auto upsample_nearest1d_vec = getInputTensorQParamOpFusionInfo(
+      "aten::upsample_nearest1d", {"%output_size", "%scale_factors"});
+
+  auto upsample_nearest2d_vec = getInputTensorQParamOpFusionInfo(
+      "aten::upsample_nearest2d", {"%output_size", "%scale_factors"});
+
+  auto upsample_nearest3d_vec = getInputTensorQParamOpFusionInfo(
+      "aten::upsample_nearest3d", {"%output_size", "%scale_factors"});
+
+  auto upsample_linear1d_vec = getInputTensorQParamOpFusionInfo(
+      "aten::upsample_linear1d",
+      {"%output_size", "%align_corners", "%scale_factors"});
+
+  auto upsample_bilinear2d_vec = getInputTensorQParamOpFusionInfo(
+      "aten::upsample_bilinear2d",
+      {"%output_size", "%align_corners", "%scale_factors"});
+
+  auto upsample_trilinear3d_vec = getInputTensorQParamOpFusionInfo(
+      "aten::upsample_trilinear3d",
+      {"%output_size", "%align_corners", "%scale_factors"});
+
   auto upsample_nearest1d = getInputTensorQParamOpFusionInfo(
       "aten::upsample_nearest1d", {"%output_size", "%scales"});
 
@@ -974,6 +995,12 @@ graph(%a_quant, %alpha, %scale, %input_scale, %r_scale, %r_zero_point, %r_dtype)
       upsample_linear1d,
       upsample_bilinear2d,
       upsample_trilinear3d,
+      upsample_nearest1d_vec,
+      upsample_nearest2d_vec,
+      upsample_nearest3d_vec,
+      upsample_linear1d_vec,
+      upsample_bilinear2d_vec,
+      upsample_trilinear3d_vec,
       clamp,
       hardtanh,
       hardtanh_,
@@ -1006,15 +1033,13 @@ graph(%packed_params, %a, %reduce_range, %a_dtype):
         return (%r) )";
 
   std::string linear_dynamic_fp16 = R"(
-graph(%packed_params, %a, %dtype_fp16, %dtype_fp32, %false):
-        %fp16_tensor = aten::to(%a, %dtype_fp16, %false, %false)
-        %fp32_tensor = aten::to(%fp16_tensor, %dtype_fp32, %false, %false)
+graph(%packed_params, %a):
         %w_unpacked : Tensor, %b : Tensor? = quantized::linear_unpack_fp16(%packed_params)
-        %r = aten::linear(%fp32_tensor, %w_unpacked, %b)
+        %r = aten::linear(%a, %w_unpacked, %b)
         return (%r) )";
 
   std::string quantized_linear_dynamic_fp16 = R"(
-graph(%packed_params, %a, %dtype_fp16, %dtype_fp32, %false):
+graph(%packed_params, %a):
         %r = quantized::linear_dynamic_fp16(%a, %packed_params)
         return (%r) )";
 
@@ -1022,8 +1047,92 @@ graph(%packed_params, %a, %dtype_fp16, %dtype_fp32, %false):
       {"quantized::linear_dynamic", linear_dynamic, quantized_linear_dynamic},
       {"quantized::linear_dynamic_fp16",
        linear_dynamic_fp16,
-       quantized_linear_dynamic_fp16,
-       {is_half_dtype, is_float_dtype, is_false_value}},
+       quantized_linear_dynamic_fp16},
+  };
+}
+
+std::vector<QuantFusionInfo> linear_prepack_unpack_patterns() {
+  std::string linear_with_quant = R"(
+graph(%a_dequant, %w_quant, %b):
+        %w_dequant = aten::dequantize(%w_quant)
+        %r = aten::linear(%a_dequant, %w_dequant, %b)
+        return (%r) )";
+
+  std::string linear_with_quant_prepack = R"(
+graph(%a_dequant, %w_quant, %b):
+        %packed_params = quantized::linear_prepack(%w_quant, %b)
+        %w_quant_unpacked : Tensor, %b_unpacked : Tensor? = quantized::linear_unpack(%packed_params)
+        %w_dequant = aten::dequantize(%w_quant_unpacked)
+        %r = aten::linear(%a_dequant, %w_dequant, %b_unpacked)
+        return (%r) )";
+  std::string linear_fp16_with_cast = R"(
+graph(%w, %a_dq, %b):
+        %fp16_tensor = aten::_saturate_weight_to_fp16(%w)
+        %r = aten::linear(%a_dq, %fp16_tensor, %b)
+        return (%r) )";
+  std::string linear_fp16_with_prepack = R"(
+graph(%w, %a_dq, %b):
+        %packed_params = quantized::linear_prepack_fp16(%w, %b)
+        %w_unpacked : Tensor, %b_unpacked : Tensor? = quantized::linear_unpack_fp16(%packed_params)
+        %r = aten::linear(%a_dq, %w_unpacked, %b_unpacked)
+        return (%r) )";
+
+  return {
+      {"linear_prepack_unpack", linear_with_quant, linear_with_quant_prepack},
+      {"linear_fp16_prepack_unpack",
+       linear_fp16_with_cast,
+       linear_fp16_with_prepack},
+  };
+}
+
+std::vector<QuantFusionInfo> conv_prepack_unpack_patterns() {
+  std::string conv1d_with_quant = R"(
+graph(%a_dequant, %w_quant, %b, %stride, %padding, %dilation, %groups):
+        %w_dequant = aten::dequantize(%w_quant)
+        %r = aten::conv1d(%a_dequant, %w_dequant, %b, %stride, %padding, %dilation, %groups)
+        return (%r) )";
+
+  std::string conv1d_with_quant_prepack = R"(
+graph(%a_dequant, %w_quant, %b, %stride, %padding, %dilation, %groups):
+        %packed_params : __torch__.torch.classes.quantized.Conv2dPackedParamsBase = quantized::conv1d_prepack(%w_quant, %b, %stride, %padding, %dilation, %groups)
+        %w_quant_unpacked : Tensor, %b_unpacked : Tensor? = quantized::conv1d_unpack(%packed_params)
+        %w_dequant = aten::dequantize(%w_quant_unpacked)
+        %r = aten::conv1d(%a_dequant, %w_dequant, %b_unpacked, %stride, %padding, %dilation, %groups)
+        return (%r) )";
+
+  std::string conv2d_with_quant = R"(
+graph(%a_dequant, %w_quant, %b, %stride, %padding, %dilation, %groups):
+        %w_dequant = aten::dequantize(%w_quant)
+        %r = aten::conv2d(%a_dequant, %w_dequant, %b, %stride, %padding, %dilation, %groups)
+        return (%r) )";
+
+  std::string conv2d_with_quant_prepack = R"(
+graph(%a_dequant, %w_quant, %b, %stride, %padding, %dilation, %groups):
+        %packed_params : __torch__.torch.classes.quantized.Conv2dPackedParamsBase = quantized::conv2d_prepack(%w_quant, %b, %stride, %padding, %dilation, %groups)
+        %w_quant_unpacked : Tensor, %b_unpacked : Tensor? = quantized::conv2d_unpack(%packed_params)
+        %w_dequant = aten::dequantize(%w_quant_unpacked)
+        %r = aten::conv2d(%a_dequant, %w_dequant, %b_unpacked, %stride, %padding, %dilation, %groups)
+        return (%r) )";
+
+  std::string conv3d_with_quant = R"(
+graph(%a_dequant, %w_quant, %b, %stride, %padding, %dilation, %groups):
+        %w_dequant = aten::dequantize(%w_quant)
+        %r = aten::conv3d(%a_dequant, %w_dequant, %b, %stride, %padding, %dilation, %groups)
+        return (%r) )";
+
+  std::string conv3d_with_quant_prepack = R"(
+graph(%a_dequant, %w_quant, %b, %stride, %padding, %dilation, %groups):
+        %packed_params : __torch__.torch.classes.quantized.Conv3dPackedParamsBase = quantized::conv3d_prepack(%w_quant, %b, %stride, %padding, %dilation, %groups)
+        %w_quant_unpacked : Tensor, %b_unpacked : Tensor? = quantized::conv3d_unpack(%packed_params)
+        %w_dequant = aten::dequantize(%w_quant_unpacked)
+        %r = aten::conv3d(%a_dequant, %w_dequant, %b_unpacked, %stride, %padding, %dilation, %groups)
+        return (%r) )";
+
+  return {
+      {"conv1d_prepack_unpack", conv1d_with_quant, conv1d_with_quant_prepack},
+      {"conv2d_prepack_unpack", conv2d_with_quant, conv2d_with_quant_prepack},
+      {"conv3d_prepack_unpack", conv3d_with_quant, conv3d_with_quant_prepack}
+
   };
 }
 

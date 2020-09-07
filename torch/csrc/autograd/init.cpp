@@ -52,13 +52,29 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .def("cuda_memory_usage", &Event::cuda_memory_usage)
       .def("handle", &Event::handle)
       .def("node_id", &Event::node_id)
-      .def("is_remote", &Event::isRemote);
+      .def("is_remote", &Event::isRemote)
+      .def("sequence_nr", &Event::sequence_nr);
 
   m.def("_enable_profiler", enableProfiler);
   m.def("_disable_profiler", disableProfiler);
   m.def("_profiler_enabled", profilerEnabled);
   m.def("_enable_record_function", [](bool enable) {
     at::enableRecordFunction(enable);
+  });
+  m.def("_set_empty_test_observer", [](bool is_global, double sampling_prob) {
+    auto cb = at::RecordFunctionCallback(
+        [](const at::RecordFunction&) {},
+        [](const at::RecordFunction&) {})
+      .needsInputs(true)
+      .samplingProb(sampling_prob);
+    if (is_global) {
+      at::addGlobalCallback(cb);
+    } else {
+      at::addThreadLocalCallback(cb);
+    }
+  });
+  m.def("_clear_callbacks", []() {
+    at::clearCallbacks();
   });
 
   Py_RETURN_TRUE;
@@ -147,7 +163,7 @@ static PyObject * is_anomaly_mode_enabled(PyObject* _unused, PyObject *arg) {
 
 // autograd methods on torch._C
 static PyMethodDef methods[] = { // NOLINT
-  {"set_grad_enabled", (PyCFunction)set_grad_enabled, METH_O, nullptr},
+  {"_set_grad_enabled", (PyCFunction)set_grad_enabled, METH_O, nullptr},
   {"is_grad_enabled", (PyCFunction)is_grad_enabled, METH_NOARGS, nullptr},
   {"set_autocast_enabled", (PyCFunction)set_autocast_enabled, METH_O, nullptr},
   {"is_autocast_enabled", (PyCFunction)is_autocast_enabled, METH_NOARGS, nullptr},

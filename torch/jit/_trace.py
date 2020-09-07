@@ -9,17 +9,21 @@ functionalities in `torch.jit`.
 """
 import torch
 
+import copy
 import os
 import contextlib
+import functools
 import warnings
 import inspect
 import re
+from typing import Any, Dict, List, Optional, Set
 
 from torch.jit._state import _python_cu, _enabled
-from torch.jit._script import ScriptModule, _CachedForward
+from torch.jit._script import ScriptModule, _CachedForward, script
 from torch._jit_internal import _qualified_name
 from torch.autograd import function
 from torch import _jit_internal
+from torch.nn import Module
 
 _flatten = torch._C._jit_flatten
 _unflatten = torch._C._jit_unflatten
@@ -28,9 +32,14 @@ _unflatten = torch._C._jit_unflatten
 def _create_interpreter_name_lookup_fn(frames_up=1):
     def _get_interpreter_name_for_var(var):
         frame = inspect.currentframe()
+        if not frame:
+            raise RuntimeError("failed to inspect frame")
+
         i = 0
         while i < frames_up + 1:
             frame = frame.f_back
+            if not frame:
+                raise RuntimeError("failed to get frame")
             i += 1
 
         f_locals = frame.f_locals
@@ -50,7 +59,7 @@ def _unique_state_dict(module, keep_vars=False):
     # as values, and deduplicate the params using Parameters and Buffers
     state_dict = module.state_dict(keep_vars=True)
     filtered_dict = type(state_dict)()
-    seen_ids = set()
+    seen_ids: Set[int] = set()
     for k, v in state_dict.items():
         if id(v) in seen_ids:
             continue
@@ -81,7 +90,7 @@ class ONNXTracedModule(torch.nn.Module):
         self._return_inputs = return_inputs
         self._return_inputs_states = return_inputs_states
 
-    def forward(self, *args):
+    def forward(self, *args: torch.Tensor):
         in_vars, in_desc = _flatten(args)
         # NOTE: use full state, because we need it for BatchNorm export
         # This differs from the compiler path, which doesn't support it at the moment.
@@ -92,13 +101,19 @@ class ONNXTracedModule(torch.nn.Module):
         outs = []
 
         def wrapper(*args):
-            trace_inputs = _unflatten(args[: len(in_vars)], in_desc)
+            in_args: List[torch.Tensor] = []
+            for i in range(len(in_vars)):
+                if not isinstance(args[i], torch.Tensor):
+                    raise RuntimeError('Expected Tensor argument')
+                in_args.append(args[i])
+
+            trace_inputs = _unflatten(in_args, in_desc)
 
             ret_inputs.append(
                 tuple(x.clone(memory_format=torch.preserve_format) for x in args)
             )
             if self._return_inputs_states:
-                inputs_states.append(_unflatten(args[: len(in_vars)], in_desc))
+                inputs_states.append(_unflatten(in_args, in_desc))
             outs.append(self.inner(*trace_inputs))
             if self._return_inputs_states:
                 inputs_states[0] = (inputs_states[0], trace_inputs)
@@ -203,7 +218,7 @@ def verify(model, args, loss_fn=torch.sum, devices=None):
 
     # TODO: Consider adding a utility function to torch.jit to test
     # for this case
-    if not isinstance(model, torch._C.CompiledFunction):
+    if not isinstance(model, torch._C.CompiledFunction):  # type: ignore
         raise TypeError(
             "Cannot verify an uncompiled module.  Add @torch.jit.compile to compile it"
         )
@@ -428,13 +443,13 @@ def _check_trace(
                 outs = [out for out in outs if isinstance(out, torch.Tensor)]
                 return outs
             except Exception as e:
+                graph_diff_errors, tensor_compare_errors = graph_diagnostic_info()
+                msg = f"encountered an exception while running the {running_what} with test inputs.\nException:\n{indent(str(e))}"
                 raise TracingCheckError(
-                    *graph_diagnostic_info(),
-                    extra_msg="Encountered an exception while running the "
-                    + running_what
-                    + " with test inputs.\nException:\n"
-                    + indent(str(e))
-                )
+                    graph_diff_errors,
+                    tensor_compare_errors,
+                    extra_msg=msg,
+                ) from e
 
         has_warned = [False]
 
@@ -631,11 +646,12 @@ def trace(
             tensors. When a module is passed `torch.jit.trace`, only the
             ``forward`` method is run and traced (see :func:`torch.jit.trace
             <torch.jit.trace_module>` for details).
-        example_inputs (tuple):  A tuple of example inputs that will be passed
-            to the function while tracing. The resulting trace can be run with
-            inputs of different types and shapes assuming the traced operations
-            support those types and shapes. `example_inputs` may also be a
-            single Tensor in which case it is automatically wrapped in a tuple.
+        example_inputs (tuple or torch.Tensor):  A tuple of example inputs that
+            will be passed to the function while tracing. The resulting trace
+            can be run with inputs of different types and shapes assuming the
+            traced operations support those types and shapes. `example_inputs`
+            may also be a single Tensor in which case it is automatically
+            wrapped in a tuple.
 
     Keyword arguments:
         check_trace (``bool``, optional): Check if the same inputs run through
@@ -658,7 +674,7 @@ def trace(
         strict (``bool``, optional): run the tracer in a strict mode or not
             (default: ``True``). Only turn this off when you want the tracer to
             record your mutable container types (currently ``list``/``dict``)
-            and you are sure that the containuer you are using in your
+            and you are sure that the container you are using in your
             problem is a ``constant`` structure and does not get used as
             control flow (if, for) conditions.
 
@@ -804,7 +820,7 @@ def trace(
     return traced
 
 
-_trace_module_map = None
+_trace_module_map: Optional[Dict[Any, Any]] = None
 
 
 def trace_module(
@@ -823,7 +839,7 @@ def trace_module(
     Trace a module and return an executable :class:`ScriptModule` that will be optimized
     using just-in-time compilation. When a module is passed to :func:`torch.jit.trace <torch.jit.trace>`, only
     the ``forward`` method is run and traced. With ``trace_module``, you can specify a dictionary of
-    method names to example inputs to trace (see the ``example_inputs``) argument below.
+    method names to example inputs to trace (see the ``inputs``) argument below.
 
     See :func:`torch.jit.trace <torch.jit.trace>` for more information on tracing.
 
@@ -845,10 +861,10 @@ def trace_module(
         check_inputs (list of dicts, optional): A list of dicts of input arguments that should be used
                                                  to check the trace against what is expected. Each tuple
                                                  is equivalent to a set of input arguments that would
-                                                 be specified in ``example_inputs``. For best results, pass in a
+                                                 be specified in ``inputs``. For best results, pass in a
                                                  set of checking inputs representative of the space of
                                                  shapes and types of inputs you expect the network to see.
-                                                 If not specified, the original ``example_inputs`` are used for checking
+                                                 If not specified, the original ``inputs`` are used for checking
         check_tolerance (float, optional): Floating-point comparison tolerance to use in the checker procedure.
                                            This can be used to relax the checker strictness in the event that
                                            results diverge numerically for a known reason, such as operator fusion.
@@ -910,15 +926,16 @@ def trace_module(
 
     old_module_map = torch.jit._trace._trace_module_map
     try:
-        torch.jit._trace._trace_module_map = {}
+        trace_module_map: Dict[Any, Any] = {}
 
         def register_submods(mod, prefix):
             for name, child in mod.named_children():
                 submod_qualname = prefix + "." + name
-                torch.jit._trace._trace_module_map[child] = submod_qualname
+                trace_module_map[child] = submod_qualname
                 register_submods(child, submod_qualname)
 
-        torch.jit._trace._trace_module_map["__module"] = mod
+        trace_module_map["__module"] = mod
+        torch.jit._trace._trace_module_map = trace_module_map
         register_submods(mod, "__module")
 
         module = make_module(mod, _module_class, _compilation_unit)
@@ -972,7 +989,7 @@ def is_tracing():
     Returns ``True`` in tracing (if a function is called during the tracing of
     code with ``torch.jit.trace``) and ``False`` otherwise.
     """
-    return torch._C._is_tracing
+    return torch._C._is_tracing()
 
 
 class TracedModule(ScriptModule):
@@ -994,7 +1011,7 @@ class TracedModule(ScriptModule):
         class QualnameWrapper(torch.nn.Module):
             pass
 
-        QualnameWrapper._jit_override_qualname = torch._jit_internal._qualified_name(
+        QualnameWrapper._jit_override_qualname = torch._jit_internal._qualified_name(  # type: ignore
             type(orig)
         )
 
@@ -1076,3 +1093,70 @@ class TopLevelTracedModule(TracedModule):
             cpp_module: The C++ module that this TopLevelTracedModule will be rebuilt around.
         """
         self.__dict__["_actual_script_module"]._reconstruct(cpp_module)
+
+
+def _script_if_tracing(fn):
+    """
+    Compiles ``fn`` when it is first called during tracing. ``torch.jit.script``
+    has a non-negligible start up time when it is first called due to
+    lazy-initializations of many compiler builtins. Therefore you should not use
+    it in library code. However, you may want to have parts of your library work
+    in tracing even if they use control flow. In these cases, you should use
+    ``@torch.jit._script_if_tracing`` to substitute for
+    ``torch.jit.script``.
+    """
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not is_tracing():
+            # Not tracing, don't do anything
+            return fn(*args, **kwargs)
+
+        compiled_fn = script(wrapper.__original_fn)  # type: ignore
+        return compiled_fn(*args, **kwargs)
+
+    wrapper.__original_fn = fn  # type: ignore
+    wrapper.__script_if_tracing_wrapper = True  # type: ignore
+
+    return wrapper
+
+
+def _get_trace_graph(f, args=(), kwargs=None, strict=True, _force_outplace=False,
+                     return_inputs=False, _return_inputs_states=False):
+    """
+    .. warning::
+        This function is internal-only and should only be used by the ONNX
+        exporter. If you are trying to get a graph through tracing, please go
+        through the public API instead::
+
+            trace = torch.jit.trace(nn.LSTMCell(), (input, hidden))
+            trace_graph = trace.graph
+
+    Trace a function or model, returning a tuple consisting of the both the
+    *trace* of an execution, as well as the original return value. If return_inputs,
+    also returns the trace inputs as part of the tuple
+
+    Tracing is guaranteed not to change the semantics of the function/module
+    that is traced.
+
+    Arguments:
+        f (torch.nn.Module or function): the function or module
+            to be traced.
+        args (tuple or Tensor): the positional arguments to pass to the
+            function/module to be traced.  A non-tuple is assumed to
+            be a single positional argument to be passed to the model.
+        kwargs (dict): the keyword arguments to pass to the function/module
+            to be traced.
+
+    Example (trace a cell):
+
+    .. testcode::
+
+        trace = torch.jit.trace(nn.LSTMCell(), (input, hidden))
+    """
+    if kwargs is None:
+        kwargs = {}
+    if not isinstance(args, tuple):
+        args = (args,)
+    outs = ONNXTracedModule(f, strict, _force_outplace, return_inputs, _return_inputs_states)(*args, **kwargs)
+    return outs

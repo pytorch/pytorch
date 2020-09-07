@@ -30,5 +30,7 @@ void isinstance(Stack& stack, at::ArrayRef<at::TypePtr> types);
 
 void tupleSlice(Stack& stack, size_t begin, size_t end);
 
+void dequantize(Stack& stack);
+
 } // namespace jit
 } // namespace torch

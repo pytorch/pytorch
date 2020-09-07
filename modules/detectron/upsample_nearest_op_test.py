@@ -6,7 +6,7 @@ import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
 import numpy as np
 from caffe2.python import core, dyndep
-from hypothesis import given
+from hypothesis import given, settings
 
 
 dyndep.InitOpsLibrary("@/caffe2/modules/detectron:detectron_ops")
@@ -20,6 +20,7 @@ class TestUpsampleNearestOp(hu.HypothesisTestCase):
         scale=st.integers(1, 3),
         **hu.gcs
     )
+    @settings(deadline=None, max_examples=20)
     def test_upsample_nearest_op(self, N, H, W, scale, gc, dc):
         C = 32
         X = np.random.randn(N, C, H, W).astype(np.float32)

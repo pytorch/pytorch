@@ -1,4 +1,5 @@
 import torch.jit
+from torch.jit._builtins import _find_builtin
 import inspect
 import textwrap
 # this file is for generating documentation using sphinx autodoc
@@ -36,10 +37,10 @@ def _emit_schema(mod, name, schema, arg_start=0, padding=4):
         qualified_name = name
     else:
         qualified_name = "{}.{}".format(mod, name)
-    schema = "{}({}) -> {}".format(qualified_name,
-                                   _emit_args(len(qualified_name) + 1 + padding, schema.arguments[arg_start:]),
-                                   _emit_rets(schema.returns))
-    return schema
+    schema_str = "{}({}) -> {}".format(qualified_name,
+                                       _emit_args(len(qualified_name) + 1 + padding, schema.arguments[arg_start:]),
+                                       _emit_rets(schema.returns))
+    return schema_str
 
 def _get_tensor_ops():
     def is_tensor_method(schema):
@@ -75,7 +76,11 @@ def _get_nn_functional_ops():
             # Ignore non-functions and internal methods
             continue
 
-        if 'torch.nn.functional' not in inspect.getmodule(attr).__name__:
+        attr_module = inspect.getmodule(attr)
+        if not attr_module:
+            raise RuntimeError(f'Module for {attr} not found')
+
+        if 'torch.nn.functional' not in attr_module.__name__:
             # Ignore functions from outside torch.nn.functional
             continue
 
@@ -92,7 +97,7 @@ def _get_nn_functional_ops():
     for mod in torch.jit._builtins._modules_containing_builtins:
         name = mod.__name__
         for elem in dir(mod):
-            builtin = torch.jit._find_builtin(getattr(mod, elem))
+            builtin = _find_builtin(getattr(mod, elem))
             if builtin is not None:
                 schemas = torch._C._jit_get_schemas_for_operator(builtin)
                 for schema in schemas:
@@ -105,6 +110,7 @@ def _get_builtins_helper():
     builtins = []
     for fn, _builtin_name in torch.jit._builtins._builtin_ops:
         mod = inspect.getmodule(fn)
+
         if not hasattr(fn, '__name__'):
             # typing classes
             continue
@@ -123,17 +129,22 @@ def _get_builtins_helper():
 
 def _is_math_fn(fn):
     mod = inspect.getmodule(fn)
+    if not mod:
+        raise RuntimeError(f'Module for {fn} not found')
+
     return mod.__name__ == 'math'
 
 
 def _get_torchscript_builtins():
     functions = []
     builtins = filter(lambda fn: not _is_math_fn(fn[0]), _get_builtins_helper())
-    builtins = list(builtins)
+    builtins_list = list(builtins)
     # Iterate over the specially added builtins
-    for fn, _builtin_name in builtins:
+    for fn, _builtin_name in builtins_list:
         mod = inspect.getmodule(fn)
-        builtin = torch.jit._find_builtin(fn)
+        if not mod:
+            raise RuntimeError(f'Module for {fn} not found')
+        builtin = _find_builtin(fn)
         if builtin is not None:
             schemas = torch._C._jit_get_schemas_for_operator(builtin)
             for schema in schemas:
@@ -146,16 +157,18 @@ def _get_torchscript_builtins():
 def _get_math_builtins():
     functions = []
     builtins = filter(lambda fn: _is_math_fn(fn[0]), _get_builtins_helper())
-    builtins = list(builtins)
+    builtins_list = list(builtins)
     # Iterate over the specially added builtins
-    for fn, _builtin_name in builtins:
+    for fn, _builtin_name in builtins_list:
         mod = inspect.getmodule(fn)
-        builtin = torch.jit._find_builtin(fn)
+        if not mod:
+            raise RuntimeError(f'Module for {fn} not found')
+        builtin = _find_builtin(fn)
         if builtin is not None:
             schemas = torch._C._jit_get_schemas_for_operator(builtin)
             for schema in schemas:
-                schema = _emit_schema(mod.__name__, fn.__name__, schema)
-                if 'Tensor' in schema:
+                schema_str = _emit_schema(mod.__name__, fn.__name__, schema)
+                if 'Tensor' in schema_str:
                     # Skip Tensor ops that have the same name as math functions
                     # (they will show up in the tensor methods section)
                     continue
@@ -248,12 +261,12 @@ def _get_global_builtins():
             table_row = '":any:`{}`", "{}"'.format(fn, schemaless_op_explanations[fn])
             schemaless_ops.append(table_row)
 
-    schematized_ops = '\n'.join(schematized_ops)
-    schemaless_ops = '\n'.join(schemaless_ops)
-    magic_methods_rows = '\n'.join(magic_methods_rows)
-    schematized_ops = textwrap.indent(schematized_ops, '\t')
-    schemaless_ops = textwrap.indent(schemaless_ops, '\t')
-    magic_methods_rows = textwrap.indent(magic_methods_rows, '\t')
+    schematized_ops_str = '\n'.join(schematized_ops)
+    schemaless_ops_str = '\n'.join(schemaless_ops)
+    magic_methods_rows_str = '\n'.join(magic_methods_rows)
+    schematized_ops_str = textwrap.indent(schematized_ops_str, '\t')
+    schemaless_ops_str = textwrap.indent(schemaless_ops_str, '\t')
+    magic_methods_rows_str = textwrap.indent(magic_methods_rows_str, '\t')
     section = """
 The functions in the following table are supported but do not have a static schema
 
@@ -276,7 +289,7 @@ These built-in functions use the schema
 ::
 
 {}
-    """.format(schemaless_ops, magic_methods_rows, schematized_ops)
+    """.format(schemaless_ops_str, magic_methods_rows_str, schematized_ops_str)
 
     return "Python Built-in Functions", section
 

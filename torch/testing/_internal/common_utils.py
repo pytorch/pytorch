@@ -11,6 +11,7 @@ import platform
 import re
 import gc
 import types
+import math
 from functools import partial
 import inspect
 import io
@@ -36,7 +37,9 @@ import errno
 from typing import cast, Any, Iterable, Optional
 
 from torch.testing._internal import expecttest
-from torch.testing import _compare_tensors_internal, _compare_scalars_internal, _compare_return_type
+from torch.testing import \
+    (_compare_tensors_internal, _compare_scalars_internal, _compare_return_type,
+     floating_types_and, integral_types, complex_types)
 
 import torch
 import torch.cuda
@@ -387,6 +390,44 @@ def skipIfRocm(fn):
             fn(*args, **kwargs)
     return wrapper
 
+# This decorator can be used for API tests that call torch.set_deterministic().
+# When the test is finished, it will restore the previous deterministic flag
+# setting. Also, if CUDA >= 10.2, this will set the environment variable
+# CUBLAS_WORKSPACE_CONFIG=:4096:8 so that the error associated with that setting
+# is not thrown during the test unless the test changes that variable on purpose.
+# The previous CUBLAS_WORKSPACE_CONFIG setting will also be restored once the
+# test is finished.
+def wrapDeterministicFlagAPITest(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        deterministic_restore = torch.is_deterministic()
+
+        is_cuda10_2_or_higher = (
+            (torch.version.cuda is not None)
+            and ([int(x) for x in torch.version.cuda.split(".")] >= [10, 2]))
+
+        if is_cuda10_2_or_higher:
+            cublas_var_name = 'CUBLAS_WORKSPACE_CONFIG'
+            cublas_config_restore = os.environ.get(cublas_var_name)
+            os.environ[cublas_var_name] = ':4096:8'
+
+        def restore():
+            torch.set_deterministic(deterministic_restore)
+            if is_cuda10_2_or_higher:
+                cur_cublas_config = os.environ.get(cublas_var_name)
+                if cublas_config_restore is None:
+                    if cur_cublas_config is not None:
+                        del os.environ[cublas_var_name]
+                else:
+                    os.environ[cublas_var_name] = cublas_config_restore
+        try:
+            fn(*args, **kwargs)
+        except RuntimeError:
+            restore()
+            raise
+        else:
+            restore()
+    return wrapper
 
 def skipIfCompiledWithoutNumpy(fn):
     # Even if the numpy module is present, if `USE_NUMPY=0` is used during the
@@ -636,7 +677,7 @@ try:
             derandomize=True,
             suppress_health_check=[hypothesis.HealthCheck.too_slow],
             database=None,
-            max_examples=100,
+            max_examples=50,
             verbosity=hypothesis.Verbosity.normal))
     hypothesis.settings.register_profile(
         "dev",
@@ -868,7 +909,8 @@ class TestCase(expecttest.TestCase):
     #   arguments then wrap the function in a lambda or pass a partial function.
     # TODO: support bfloat16 comparisons
     # TODO: add args/kwargs for passing to assertEqual (e.g. rtol, atol)
-    def compare_with_numpy(self, torch_fn, np_fn, tensor_like, device=None, dtype=None):
+    def compare_with_numpy(self, torch_fn, np_fn, tensor_like,
+                           device=None, dtype=None, **kwargs):
         assert TEST_NUMPY
         assert dtype is not torch.bfloat16
 
@@ -893,7 +935,7 @@ class TestCase(expecttest.TestCase):
                 #   for example, the array has negative strides.
                 np_result = torch.from_numpy(np_result.copy())
 
-        self.assertEqual(np_result, torch_result)
+        self.assertEqual(np_result, torch_result, **kwargs)
 
     # Some analysis of tolerance by logging tests from test_torch.py can be found
     # in https://github.com/pytorch/pytorch/pull/32538.
@@ -1123,13 +1165,6 @@ class TestCase(expecttest.TestCase):
         else:
             super().assertEqual(x, y, msg=msg)
 
-    def assertAlmostEqual(self, x, y, *, places=None, msg=None, delta=None):
-        prec = delta
-        if places:
-            prec = 10**(-places)
-        rtol = None if prec is None else 0
-        self.assertEqual(x, y, msg=msg, atol=prec, rtol=rtol)
-
     def assertNotEqual(self, x, y, msg: Optional[str] = None, *,
                        atol: Optional[float] = None, rtol: Optional[float] = None, **kwargs) -> None:
         with self.assertRaises(AssertionError, msg=msg):
@@ -1234,7 +1269,10 @@ class TestCase(expecttest.TestCase):
         def accept_output(update_type):
             print("Accepting {} for {}{}:\n\n{}".format(update_type, munged_id, subname_output, s))
             with open(expected_file, 'w') as f:
-                f.write(s)
+                # Adjust for producer_version, leave s unmodified
+                s_tag = re.sub(r'(producer_version): "[0-9.]*"',
+                               r'\1producer_version: "CURRENT_VERSION"', s)
+                f.write(s_tag)
 
         try:
             with open(expected_file) as f:
@@ -1248,7 +1286,7 @@ class TestCase(expecttest.TestCase):
                 raise RuntimeError(
                     ("I got this output for {}{}:\n\n{}\n\n"
                      "No expect file exists; to accept the current output, run:\n"
-                     "python {} {} --accept").format(munged_id, subname_output, s, __main__.__file__, munged_id))
+                     "python {} {} --accept").format(munged_id, subname_output, s, __main__.__file__, munged_id)) from None
 
         # a hack for JIT tests
         if IS_WINDOWS:
@@ -1257,7 +1295,7 @@ class TestCase(expecttest.TestCase):
 
         # Adjust for producer_version
         expected = expected.replace(
-            'producer_version: "XXX"',
+            'producer_version: "CURRENT_VERSION"',
             'producer_version: "{}"'.format(torch.onnx.producer_version)
         )
         if expecttest.ACCEPT:
@@ -1315,10 +1353,10 @@ def download_file(url, binary=True):
         with open(path, 'wb' if binary else 'w') as f:
             f.write(data)
         return path
-    except error.URLError:
+    except error.URLError as e:
         msg = "could not download test file '{}'".format(url)
         warnings.warn(msg, RuntimeWarning)
-        raise unittest.SkipTest(msg)
+        raise unittest.SkipTest(msg) from e
 
 
 def find_free_port():
@@ -1379,8 +1417,57 @@ def retry(ExceptionToCheck, tries=3, delay=3, skip_after_retries=False):
     return deco_retry
 
 
-# Methods for matrix generation
+# Methods for matrix and tensor generation
+
 # Used in test_autograd.py and test_torch.py
+def make_tensor(size, device: torch.device, dtype: torch.dtype, *,
+                low, high, requires_grad: bool = False) -> torch.Tensor:
+    """Returns a tensor of the specified size on the given device and dtype.
+       The tensors values are between -9 and 9, inclusive, for most dtypes,
+       unless low (high) is not None in which case the values are between
+       max(-9, low) and min(9, high).
+       For unsigned types the values are between 0 and 9, and for complex
+       dtypes the real and imaginary parts are each between -9 and 9,
+       independently."""
+
+    assert low is None or low < 9, "low value too high!"
+    assert high is None or high > -9, "high value too low!"
+
+    if dtype is torch.bool:
+        return torch.randint(0, 2, size, device=device, dtype=dtype)
+
+    if dtype is torch.uint8:
+        low = math.floor(0 if low is None else max(low, 0))
+        high = math.ceil(10 if high is None else min(high, 10))
+        return torch.randint(low, high, size, device=device, dtype=dtype)
+    elif dtype in integral_types():
+        low = math.floor(-9 if low is None else max(low, -9))
+        high = math.ceil(10 if high is None else min(high, 10))
+        return torch.randint(low, high, size, device=device, dtype=dtype)
+    elif dtype in floating_types_and(torch.half, torch.bfloat16):
+        low = -9 if low is None else max(low, -9)
+        high = 9 if high is None else min(high, 10)
+        span = high - low
+        # Windows doesn't support torch.rand(bfloat16) on CUDA
+        if IS_WINDOWS and torch.device(device).type == 'cuda' and dtype is torch.bfloat16:
+            t = (torch.rand(size, device=device, dtype=torch.float32) * span - (span / 2)).to(torch.bfloat16)
+        else:
+            t = torch.rand(size, device=device, dtype=dtype) * span - (span / 2)
+        t.requires_grad = requires_grad
+        return t
+    else:
+        assert dtype in complex_types()
+        low = -9 if low is None else max(low, -9)
+        high = 9 if high is None else min(high, 10)
+        span = high - low
+        float_dtype = torch.float if dtype is torch.cfloat else torch.double
+        real = torch.rand(size, device=device, dtype=float_dtype) * span - (span / 2)
+        imag = torch.rand(size, device=device, dtype=float_dtype) * span - (span / 2)
+        c = torch.complex(real, imag)
+        c.requires_grad = requires_grad
+        return c
+
+
 def prod_single_zero(dim_size):
     result = torch.randn(dim_size, dim_size)
     result[0, 1] = 0

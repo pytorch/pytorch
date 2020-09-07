@@ -4,10 +4,10 @@ from __future__ import division
 from __future__ import print_function
 
 from caffe2.proto import caffe2_pb2
-from caffe2.python import core
+from caffe2.python import core, workspace
 import caffe2.python.hypothesis_test_util as hu
 import caffe2.python.serialized_test.serialized_test_util as serial
-from hypothesis import given
+from hypothesis import given, settings
 import hypothesis.strategies as st
 import numpy as np
 import unittest
@@ -73,6 +73,7 @@ class TestConcatSplitOps(serial.SerializedTestCase):
 
     @given(tensor_splits=_tensor_splits(add_axis=True),
            **hu.gcs)
+    @settings(deadline=10000)
     def test_concat_add_axis(self, tensor_splits, gc, dc):
         axis, _, splits = tensor_splits
 
@@ -142,32 +143,46 @@ class TestConcatSplitOps(serial.SerializedTestCase):
             ensure_outputs_are_inferred=True,
         )
 
-    @serial.given(
+    @given(
         inputs=hu.lengths_tensor(
             dtype=np.float32,
             min_value=1,
-            max_value=5,
+            max_value=11,
             allow_empty=True,
         ),
+        split_by_scaling_lengths=st.booleans(),
         **hu.gcs
     )
-    def test_split_by_lengths(self, inputs, gc, dc):
+    @settings(deadline=10000)
+    def test_split_by_lengths(self, inputs, split_by_scaling_lengths, gc, dc):
         data, lengths = inputs
         len_len = len(lengths)
 
         def _find_factor_simple(x):
-            for i in [2, 3, 5]:
+            for i in [2, 3, 5, 7, 9, 11]:
                 if x % i == 0:
                     return i
             return x
 
         num_output = _find_factor_simple(len_len)
+        scaling_factor = 1
+
+        if split_by_scaling_lengths:
+            sum_len = sum(lengths)
+            sum_scaling_lengths = _find_factor_simple(sum_len)
+            if sum_scaling_lengths != sum_len and sum_scaling_lengths >= num_output:
+                scaling_lengths = [1] * (num_output - 1) + [sum_scaling_lengths - num_output + 1]
+                len_len = len(scaling_lengths)
+                lengths = np.array(scaling_lengths, dtype=np.int32)
+                scaling_factor = (sum_len // sum_scaling_lengths) if sum_scaling_lengths else 1
+
         axis = 0
         op = core.CreateOperator(
             "SplitByLengths",
             ["data", "lengths"],
             ['X_{}'.format(i) for i in range(num_output)],
             axis=axis,
+            use_scaling_lengths=split_by_scaling_lengths,
         )
 
         def split_by_lengths_ref(data, lengths, num_output=num_output, axis=0):
@@ -176,8 +191,8 @@ class TestConcatSplitOps(serial.SerializedTestCase):
                 np.array(
                     data.take(
                         np.arange(
-                            idxs[i * len_len // num_output],
-                            idxs[(i + 1) * len_len // num_output]
+                            scaling_factor * idxs[i * len_len // num_output],
+                            scaling_factor * idxs[(i + 1) * len_len // num_output]
                         ),
                         axis=axis
                     )

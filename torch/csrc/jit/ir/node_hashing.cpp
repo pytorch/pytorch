@@ -6,9 +6,9 @@
 #include <ATen/core/functional.h>
 #include <ATen/core/interned_strings.h>
 #include <c10/util/Exception.h>
+#include <c10/util/hash.h>
 #include <torch/csrc/jit/ir/node_hashing.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
-#include <torch/csrc/utils/hash.h>
 
 namespace torch {
 namespace jit {
@@ -123,6 +123,9 @@ bool ivaluesEqual(const IValue& a1, const IValue& a2) {
     }
     return true;
   }
+  if (a1.isEnum()) {
+    return a1.toEnumHolder() == a2.toEnumHolder();
+  }
   TORCH_INTERNAL_ASSERT(false);
 }
 
@@ -200,7 +203,7 @@ size_t HashNode::operator()(const Node* k) const {
     } else if (
         type->isSubtypeOf(NumberType::get()) &&
         k->kindOf(attr::value) == AttributeKind::f) {
-      constant_hash = std::hash<float>{}(k->f(attr::value));
+      constant_hash = std::hash<double>{}(k->f(attr::value));
     } else if (type->isSubtypeOf(BoolType::get())) {
       constant_hash = std::hash<bool>{}(k->i(attr::value));
     }

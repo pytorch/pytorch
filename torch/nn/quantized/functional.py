@@ -1,9 +1,4 @@
 r""" Functional interface (quantized)."""
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
 from typing import List, Optional
 
 import torch
@@ -100,7 +95,7 @@ def adaptive_avg_pool3d(input, output_size):
     Applies a 3D adaptive average pooling over a quantized input signal composed
     of several quantized input planes.
 
-    .. note:: The input quantization paramteres propagate to the output.
+    .. note:: The input quantization parameters propagate to the output.
 
     See :class:`~torch.nn.quantized.AdaptiveAvgPool3d` for details and output shape.
 
@@ -381,6 +376,23 @@ def max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1,
     return torch.nn.functional.max_pool2d(input, kernel_size, stride, padding,
                                           dilation, ceil_mode, return_indices)
 
+def celu(input, scale, zero_point, alpha=1.):
+    # type: (Tensor, float, int, Optional[float]) -> Tensor
+    r"""celu(input, scale, zero_point, alpha=1.) -> Tensor
+
+    Applies the quantized CELU function element-wise.
+    .. math::
+        \text{CELU}(x) = \max(0,x) + \min(0, \alpha * (\exp(x / \alpha) - 1))
+
+    Args:
+        input: quantized input
+        alpha: the :math:`\alpha` value for the CELU formulation. Default: 1.0
+    """
+    if not input.is_quantized:
+        raise ValueError("Input to 'quantized.celu' must be quantized!")
+    return torch.ops.quantized.celu(input, scale, zero_point, alpha)
+
+
 def relu(input, inplace=False):
     # type: (Tensor, bool) -> Tensor
     r"""relu(input, inplace=False) -> Tensor
@@ -413,7 +425,7 @@ def leaky_relu(input, negative_slope=0.01, inplace=False,
         input: Quaintized input
         negative_slope: The slope of the negative input
         inplace: Inplace modification of the input tensor
-        scale, zero_point: Scale and zero point of thhe output tensor.
+        scale, zero_point: Scale and zero point of the output tensor.
 
     See :class:`~torch.nn.LeakyReLU` for more details.
     """

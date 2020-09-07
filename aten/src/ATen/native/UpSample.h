@@ -45,6 +45,22 @@
 namespace at {
 namespace native {
 
+namespace upsample {
+
+TORCH_API c10::SmallVector<int64_t, 3> compute_output_size(
+    c10::IntArrayRef input_size,  // Full input tensor size.
+    c10::optional<c10::IntArrayRef> output_size,
+    c10::optional<c10::ArrayRef<double>> scale_factors);
+
+inline c10::optional<double> get_scale_value(c10::optional<c10::ArrayRef<double>> scales, int idx) {
+  if (!scales) {
+    return nullopt;
+  }
+  return scales->at(idx);
+}
+
+} // namespace upsample
+
 using scale_t = c10::optional<double>;
 using upsampling_nearest1d = void(*)(Tensor& output, const Tensor& input, scale_t scales_w);
 using upsampling_nearest2d = void(*)(Tensor& output, const Tensor& input, scale_t scales_h, scale_t scales_w);

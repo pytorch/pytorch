@@ -8,7 +8,7 @@ import os
 import inspect
 
 try:
-    import mypy.api
+    import mypy.api  # type: ignore
     HAVE_MYPY = True
 except ImportError:
     HAVE_MYPY = False
@@ -59,7 +59,7 @@ def get_all_examples():
     This function grabs (hopefully all) examples from the torch documentation
     strings and puts them in one nonsensical module returned as a string.
     """
-    blacklist = {
+    blocklist = {
         "_np",
     }
     allexamples = ""
@@ -83,7 +83,7 @@ def get_all_examples():
     for fname in dir(torch):
         fn = getattr(torch, fname)
         docstr = inspect.getdoc(fn)
-        if docstr and fname not in blacklist:
+        if docstr and fname not in blocklist:
             e = get_examples_from_docstring(docstr)
             if e:
                 example_file_lines.append("\n\ndef example_torch_{}():".format(fname))
@@ -92,7 +92,7 @@ def get_all_examples():
     for fname in dir(torch.Tensor):
         fn = getattr(torch.Tensor, fname)
         docstr = inspect.getdoc(fn)
-        if docstr and fname not in blacklist:
+        if docstr and fname not in blocklist:
             e = get_examples_from_docstring(docstr)
             if e:
                 example_file_lines.append("\n\ndef example_torch_tensor_{}():".format(fname))
@@ -204,14 +204,40 @@ class TestTypeHints(TestCase):
             self.skipTest("Typeannotations in numpy-1.20.0-dev are broken")
 
         cwd = os.getcwd()
+        # TODO: Would be better not to chdir here, this affects the entire
+        # process!
         os.chdir(repo_rootdir)
-        (stdout, stderr, result) = mypy.api.run([
-            '--check-untyped-defs',
-            '--follow-imports', 'silent',
-        ])
-        os.chdir(cwd)
+        try:
+            (stdout, stderr, result) = mypy.api.run([
+                '--check-untyped-defs',
+                '--follow-imports', 'silent',
+            ])
+        finally:
+            os.chdir(cwd)
         if result != 0:
-            self.fail("mypy failed: {}".format(stdout))
+            self.fail("mypy failed: {} {}".format(stdout, stderr))
+
+    @unittest.skipIf(not HAVE_MYPY, "need mypy")
+    def test_run_mypy_strict(self):
+        """
+        Runs mypy over all files specified in mypy-strict.ini
+        """
+        test_dir = os.path.dirname(os.path.realpath(__file__))
+        repo_rootdir = os.path.join(test_dir, '..')
+        mypy_inifile = os.path.join(repo_rootdir, 'mypy-strict.ini')
+        if not os.path.exists(mypy_inifile):
+            self.skipTest("Can't find PyTorch MyPy strict config file")
+
+        cwd = os.getcwd()
+        os.chdir(repo_rootdir)
+        try:
+            (stdout, stderr, result) = mypy.api.run([
+                '--config', mypy_inifile,
+            ])
+        finally:
+            os.chdir(cwd)
+        if result != 0:
+            self.fail("mypy failed: {} {}".format(stdout, stderr))
 
 if __name__ == '__main__':
     run_tests()

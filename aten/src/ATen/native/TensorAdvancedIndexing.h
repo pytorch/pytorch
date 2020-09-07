@@ -17,7 +17,7 @@ using index_fn = void(*)(TensorIterator &, IntArrayRef indexed_sizes, IntArrayRe
 using index_put_fn = void(*)(TensorIterator &, IntArrayRef indexed_sizes, IntArrayRef indexed_strides, bool accumulate);
 using index_put_accum_fn = void(*)(Tensor &, TensorList , const Tensor &, bool unsafe);
 using masked_fill_fn = void(*)(TensorIterator &, Scalar scalar);
-using masked_select_fn = void(*)(TensorIterator &);
+using masked_select_fn = void(*)(TensorIterator &, int64_t orig_stride);
 
 using gather_fn = void (*)(Tensor & result, const Tensor & self, int64_t dim, const Tensor & index);
 using scatter_fn = void(*)(Tensor& self, int64_t dim, const Tensor& index, const Tensor& src);
@@ -27,7 +27,7 @@ using scatter_reduce_fn = void(*)(Tensor& self, const int64_t dim, const Tensor&
                                   const Tensor& src, const SCATTER_GATHER_OP& reduce);
 using scatter_scalar_reduce_fn = void(*)(Tensor& self, const int64_t dim, const Tensor& index,
                                          Scalar& value, const SCATTER_GATHER_OP& reduce);
-    
+
 DECLARE_DISPATCH(index_fn, index_stub);
 DECLARE_DISPATCH(index_put_fn, index_put_stub);
 DECLARE_DISPATCH(index_put_accum_fn, index_put_accum_stub);

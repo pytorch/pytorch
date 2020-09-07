@@ -162,11 +162,25 @@
 #      When turned on, the following cmake variables will be toggled as well:
 #        USE_SYSTEM_CPUINFO=ON USE_SYSTEM_SLEEF=ON BUILD_CUSTOM_PROTOBUF=OFF
 
+from __future__ import print_function
 import sys
 if sys.version_info < (3,):
-    raise Exception("Python 2 has reached end-of-life and is no longer supported by PyTorch.")
+    print("Python 2 has reached end-of-life and is no longer supported by PyTorch.")
+    sys.exit(-1)
 if sys.platform == 'win32' and sys.maxsize.bit_length() == 31:
-    raise Exception("32-bit Windows Python runtime is not supported. Please switch to 64-bit Python.")
+    print("32-bit Windows Python runtime is not supported. Please switch to 64-bit Python.")
+    sys.exit(-1)
+
+import platform
+python_min_version = (3, 6, 1)
+python_min_version_str = '.'.join((str(num) for num in python_min_version))
+python_max_version = (3, 9, 0)
+python_max_version_str = '.'.join((str(num) for num in python_max_version))
+if sys.version_info < python_min_version or sys.version_info >= python_max_version:
+    print("You are using Python {}. Python >={},<{} is required.".format(platform.python_version(),
+                                                                         python_min_version_str,
+                                                                         python_max_version_str))
+    sys.exit(-1)
 
 from setuptools import setup, Extension, distutils, find_packages
 from collections import defaultdict
@@ -337,8 +351,8 @@ def build_deps():
 
     # Use copies instead of symbolic files.
     # Windows has very poor support for them.
-    sym_files = ['tools/shared/cwrap_common.py', 'tools/shared/_utils_internal.py']
-    orig_files = ['aten/src/ATen/common_with_cwrap.py', 'torch/_utils_internal.py']
+    sym_files = ['tools/shared/_utils_internal.py']
+    orig_files = ['torch/_utils_internal.py']
     for sym_file, orig_file in zip(sym_files, orig_files):
         same = False
         if os.path.exists(sym_file):
@@ -354,7 +368,7 @@ def build_deps():
 ################################################################################
 
 # the list of runtime dependencies required by this built package
-install_requires = ['future']
+install_requires = ['future', 'typing_extensions', 'dataclasses']
 
 missing_pydep = '''
 Missing build dependency: Unable to `import {importname}`.
@@ -869,6 +883,7 @@ if __name__ == '__main__':
                 'share/cmake/Caffe2/Modules_CUDA_fix/upstream/*.cmake',
                 'share/cmake/Caffe2/Modules_CUDA_fix/upstream/FindCUDA/*.cmake',
                 'share/cmake/Gloo/*.cmake',
+                'share/cmake/Tensorpipe/*.cmake',
                 'share/cmake/Torch/*.cmake',
             ],
             'caffe2': [
@@ -879,7 +894,7 @@ if __name__ == '__main__':
         download_url='https://github.com/pytorch/pytorch/tags',
         author='PyTorch Team',
         author_email='packages@pytorch.org',
-        python_requires='>=3.6.1',
+        python_requires='>={},<{}'.format(python_min_version_str, python_max_version_str),
         # PyPI package information.
         classifiers=[
             'Development Status :: 5 - Production/Stable',
@@ -887,18 +902,15 @@ if __name__ == '__main__':
             'Intended Audience :: Education',
             'Intended Audience :: Science/Research',
             'License :: OSI Approved :: BSD License',
-            'Programming Language :: C++',
-            'Programming Language :: Python :: 3',
-            'Programming Language :: Python :: 3.6',
-            'Programming Language :: Python :: 3.7',
-            'Programming Language :: Python :: 3.8',
             'Topic :: Scientific/Engineering',
             'Topic :: Scientific/Engineering :: Mathematics',
             'Topic :: Scientific/Engineering :: Artificial Intelligence',
             'Topic :: Software Development',
             'Topic :: Software Development :: Libraries',
             'Topic :: Software Development :: Libraries :: Python Modules',
-        ],
+            'Programming Language :: C++',
+            'Programming Language :: Python :: 3',
+        ] + ['Programming Language :: Python :: 3.{}' for i in range(python_min_version[1], python_max_version[1])],
         license='BSD-3',
         keywords='pytorch machine learning',
     )

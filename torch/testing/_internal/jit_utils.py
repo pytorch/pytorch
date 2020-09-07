@@ -159,7 +159,7 @@ class JitTestCase(TestCase):
             return code_files, debug_files
 
         # disable the hook while we parse code, otherwise we will re-enter the hook
-        with torch.jit._disable_emit_hooks():
+        with torch._jit_internal._disable_emit_hooks():
             try:
                 # short-circuit if this is an empty function or module
                 if len(m.code) == 0:
@@ -270,9 +270,17 @@ class JitTestCase(TestCase):
                            consider_subgraphs)
             return
 
-        nodes = [node for node in graph.nodes()
-                 if node.kind() == kind]
-        perform_assert(graph, kind, len(nodes), num_kind_nodes,
+        def nodes(block):
+            out = []
+            for node in block.nodes():
+                if node.kind() == kind:
+                    out.append(node)
+                for block in node.blocks():
+                    out += nodes(block)
+            return out
+
+        out_nodes = nodes(graph)
+        perform_assert(graph, kind, len(out_nodes), num_kind_nodes,
                        consider_subgraphs)
 
     def assertExpectedONNXGraph(self, g, *args, **kwargs):
@@ -668,7 +676,14 @@ def attrs_with_prefix(module, prefix):
     return [x for x, _ in module._modules._c.items()
             if x.startswith(prefix)]
 
-op_alias_mappings = {
-    "absolute" : "abs",
-    "absolute_" : "abs_",
-}
+def warmup_backward(f, *args):
+    profiling_count = 2
+    results = []
+    for i in range(profiling_count):
+        if len(args) > 0:
+            r = torch.autograd.grad(f, *args)
+            results.append(r)
+        else:
+            f.backward(retain_graph=True)
+
+    return results

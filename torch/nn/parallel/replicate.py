@@ -21,7 +21,7 @@ def _init_script_module():
 
 def _is_jit_enabled():
     import torch.jit
-    return torch.jit._enabled
+    return torch.jit._state._enabled
 
 
 # Check if we can safely replicate the module.
@@ -111,8 +111,8 @@ def replicate(network, devices, detach=False):
         module_indices[module] = i
         for j in range(num_replicas):
             replica = module._replicate_for_data_parallel()
-            # This is a temporary fix for DDP. DDP needs to access the 
-            # replicated model parameters. It used to do so through 
+            # This is a temporary fix for DDP. DDP needs to access the
+            # replicated model parameters. It used to do so through
             # `mode.parameters()`. The fix added in #33907 for DP stops the
             # `parameters()` API from exposing the replicated parameters.
             # Hence, we add a `_former_parameters` dict here to support DDP.

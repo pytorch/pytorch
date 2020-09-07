@@ -73,6 +73,9 @@ Creation Ops
     quantize_per_tensor
     quantize_per_channel
     dequantize
+    complex
+    polar
+    heaviside
 
 Indexing, Slicing, Joining, Mutating Ops
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -82,9 +85,12 @@ Indexing, Slicing, Joining, Mutating Ops
 
     cat
     chunk
+    dstack
     gather
+    hstack
     index_select
     masked_select
+    movedim
     narrow
     nonzero
     reshape
@@ -96,6 +102,7 @@ Indexing, Slicing, Joining, Mutating Ops
     transpose
     unbind
     unsqueeze
+    vstack
     where
 
 .. _generators:
@@ -245,15 +252,21 @@ Pointwise Ops
     abs
     absolute
     acos
+    arccos
     acosh
+    arccosh
     add
     addcdiv
     addcmul
     angle
     asin
+    arcsin
     asinh
+    arcsinh
     atan
+    arctan
     atanh
+    arctanh
     atan2
     bitwise_not
     bitwise_and
@@ -261,6 +274,7 @@ Pointwise Ops
     bitwise_xor
     ceil
     clamp
+    clip
     conj
     cos
     cosh
@@ -272,6 +286,7 @@ Pointwise Ops
     erfinv
     exp
     expm1
+    fix
     floor
     floor_divide
     fmod
@@ -289,9 +304,14 @@ Pointwise Ops
     logical_not
     logical_or
     logical_xor
+    logit
+    hypot
+    i0
     mul
     mvlgamma
     neg
+    negative
+    nextafter
     polygamma
     pow
     rad2deg
@@ -302,10 +322,13 @@ Pointwise Ops
     rsqrt
     sigmoid
     sign
+    signbit
     sin
     sinh
     sqrt
     square
+    sub
+    subtract
     tan
     tanh
     true_divide
@@ -319,13 +342,19 @@ Reduction Ops
 
     argmax
     argmin
+    amax
+    amin
+    max
+    min
     dist
     logsumexp
     mean
     median
     mode
     norm
+    nansum
     prod
+    quantile
     std
     std_mean
     sum
@@ -346,17 +375,25 @@ Comparison Ops
     eq
     equal
     ge
+    greater_equal
     gt
+    greater
     isclose
     isfinite
     isinf
+    isposinf
+    isneginf
     isnan
+    isreal
     kthvalue
     le
+    less_equal
     lt
-    max
-    min
+    less
+    maximum
+    minimum
     ne
+    not_equal
     sort
     topk
 
@@ -386,12 +423,16 @@ Other Operations
     :toctree: generated
     :nosignatures:
 
+    atleast_1d
+    atleast_2d
+    atleast_3d
     bincount
     block_diag
     broadcast_tensors
     bucketize
     cartesian_prod
     cdist
+    clone
     combinations
     cross
     cummax
@@ -408,8 +449,10 @@ Other Operations
     fliplr
     flipud
     rot90
+    gcd
     histc
     meshgrid
+    lcm
     logcumsumexp
     renorm
     repeat_interleave
@@ -457,10 +500,12 @@ BLAS and LAPACK Operations
     matmul
     matrix_power
     matrix_rank
+    matrix_exp
     mm
     mv
     orgqr
     ormqr
+    outer
     pinverse
     qr
     solve
@@ -471,6 +516,7 @@ BLAS and LAPACK Operations
     lobpcg
     trapz
     triangular_solve
+    vdot
 
 Utilities
 ----------------------------------
@@ -481,5 +527,6 @@ Utilities
     compiled_with_cxx11_abi
     result_type
     can_cast
-
     promote_types
+    set_deterministic
+    is_deterministic

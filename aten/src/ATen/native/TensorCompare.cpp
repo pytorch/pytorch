@@ -13,6 +13,9 @@ namespace at { namespace native {
 DEFINE_DISPATCH(where_kernel);
 DEFINE_DISPATCH(max_stub);
 DEFINE_DISPATCH(min_stub);
+DEFINE_DISPATCH(_aminmax_stub);
+DEFINE_DISPATCH(isposinf_stub);
+DEFINE_DISPATCH(isneginf_stub);
 
 bool allclose(const Tensor& self, const Tensor& other, double rtol, double atol, bool equal_nan) {
   return at::isclose(self, other, rtol, atol, equal_nan).all().item<uint8_t>();
@@ -79,6 +82,16 @@ Tensor isnan(const Tensor& self) {
   return self != self;
 }
 
+Tensor isreal(const Tensor& self) {
+  // Note: Integral and Floating tensor values are always real
+  if (c10::isIntegralType(self.scalar_type(), /*include_bool=*/true) ||
+      c10::isFloatingType(self.scalar_type())) {
+    return at::ones_like(self, at::kBool, at::MemoryFormat::Preserve);
+  }
+
+  return at::imag(self) == 0;
+}
+
 Tensor isinf(const Tensor &self) {
   // Note: Integral tensor values are never infinite
   if (c10::isIntegralType(self.scalar_type(), /*include_bool=*/true)) {
@@ -94,6 +107,54 @@ Tensor isinf(const Tensor &self) {
   return AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.scalar_type(), "isinf", [&]() {
     return self.abs() == std::numeric_limits<scalar_t>::infinity();
   });
+}
+
+Tensor isposinf(const Tensor &self) {
+  Tensor result = at::empty_like(self, at::kBool, at::MemoryFormat::Preserve);
+  at::isposinf_out(result, self);
+  return result;
+}
+
+Tensor& isposinf_out(Tensor& result, const Tensor& self) {
+  TORCH_CHECK(!self.is_complex(), "isposinf does not support complex inputs.");
+  TORCH_CHECK(result.scalar_type() == at::kBool, "isposinf does not support non-boolean outputs.");
+  result.resize_(self.sizes());
+
+  if (c10::isIntegralType(self.scalar_type(), /*include_bool=*/true)) {
+    result.fill_(false);
+  } else {
+    auto iter = TensorIteratorConfig()
+      .check_all_same_dtype(false)
+      .add_output(result)
+      .add_input(self)
+      .build();
+    isposinf_stub(iter.device_type(), iter);
+  }
+  return result;
+}
+
+Tensor isneginf(const Tensor &self) {
+  Tensor result = at::empty_like(self, at::kBool, at::MemoryFormat::Preserve);
+  at::isneginf_out(result, self);
+  return result;
+}
+
+Tensor& isneginf_out(Tensor& result, const Tensor& self) {
+  TORCH_CHECK(!self.is_complex(), "isneginf does not support complex inputs.");
+  TORCH_CHECK(result.scalar_type() == at::kBool, "isneginf does not support non-boolean outputs.");
+  result.resize_(self.sizes());
+
+  if (c10::isIntegralType(self.scalar_type(), /*include_bool=*/true)) {
+    result.fill_(false);
+  } else {
+    auto iter = TensorIteratorConfig()
+      .check_all_same_dtype(false)
+      .add_output(result)
+      .add_input(self)
+      .build();
+    isneginf_stub(iter.device_type(), iter);
+  }
+  return result;
 }
 
 Tensor isfinite(const Tensor& self) {
@@ -130,6 +191,24 @@ bool is_nonzero(const Tensor& self) {
   TORCH_INTERNAL_ASSERT(false, "Expected non-Tensor backend scalar");
 }
 
+namespace {
+
+static Tensor wrapped_scalar_tensor(
+    Scalar scalar,
+    Device device,
+    bool use_default_dtype = false) {
+  at::Tensor tensor;
+  if (use_default_dtype) {
+    tensor = scalar_to_tensor_default_dtype(scalar, device);
+  } else {
+    tensor = scalar_to_tensor(scalar, device);
+  }
+  tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
+  return tensor;
+}
+
+} // anonymous namespace
+
 Tensor where(const Tensor& condition, const Tensor& self, const Tensor& other) {
   TORCH_CHECK(condition.device() == self.device() && self.device() == other.device(),
               "Expected condition, x and y to be on the same device, but condition is on ",
@@ -143,6 +222,21 @@ Tensor where(const Tensor& condition, const Tensor& self, const Tensor& other) {
   return at::_s_where(b_condition, b_self, b_other);
 }
 
+Tensor where(const Tensor& condition, Scalar self, const Tensor& other) {
+  return at::where(condition, wrapped_scalar_tensor(self, other.device()), other);
+}
+
+Tensor where(const Tensor& condition, const Tensor& self, Scalar other) {
+  return at::where(condition, self, wrapped_scalar_tensor(other, self.device()));
+}
+
+Tensor where(const Tensor& condition, Scalar self, Scalar other) {
+  const auto device = condition.device();
+  const Tensor& other_t = wrapped_scalar_tensor(other, device, /*use_default_dtype=*/true);
+  const Tensor& self_t = wrapped_scalar_tensor(self, device, /*use_default_dtype=*/true);
+  return at::where(condition, self_t, other_t);
+}
+
 std::vector<Tensor> where(const Tensor& condition) {
   return condition.nonzero_numpy();
 }
@@ -152,7 +246,6 @@ Tensor _s_where(const Tensor& condition, const Tensor& self, const Tensor& other
   Tensor ret = at::empty(self.sizes(), self.options());
   auto iter = at::TensorIteratorConfig()
     .check_all_same_dtype(false)
-    .set_check_mem_overlap(true)
     .add_output(ret)
     .add_input(condition)
     .add_input(self)
@@ -251,6 +344,40 @@ std::tuple<Tensor, Tensor> min(const Tensor& self, int64_t dim, bool keepdim) {
     Tensor min = at::empty({0}, self.options());
     return at::native::min_out(min, min_indices, self, dim, keepdim);
   }
+}
+
+static std::tuple<Tensor &, Tensor &> _aminmax_out_impl(Tensor& min, Tensor& max,
+                                                  const Tensor& self, int64_t dim, bool keepdim) {
+  TORCH_CHECK(!self.is_complex(), "max is not yet implemented for complex tensors.");
+  TORCH_CHECK(self.device().type() == DeviceType::CPU || self.device().type() == DeviceType::CUDA,
+              "min_max_val only supports CPU AND CUDA device type, got: ", self.device().type());
+  TORCH_CHECK(self.layout() == Layout::Strided,
+              "min_max only supports strided layout, got: ", self.layout());
+  TORCH_CHECK(self.device() == min.device(),
+              "expected device ", self.device(), " but got ",
+              min.device(), " for min values output");
+  TORCH_CHECK(self.device() == max.device(),
+              "expected device ", self.device(), " but got ",
+              max.device(), " for max values output");
+  dim = maybe_wrap_dim(dim, self.dim());
+  if (_dimreduce_return_trivial_no_ident(min, self, dim, keepdim, "min") &&
+      _dimreduce_return_trivial_no_ident(max, self, dim, keepdim, "max")) {
+    return std::forward_as_tuple(min, max);
+  } else {
+    _aminmax_stub(self.device().type(), min, max, self, dim, keepdim);
+    return std::tuple<Tensor &, Tensor &>{min, max};
+  }
+}
+
+std::tuple<Tensor, Tensor> _aminmax(const Tensor& self, int64_t dim, bool keepdim) {
+  TORCH_CHECK(!self.is_complex(), "min_max is not yet implemented for complex tensors.");
+  TORCH_CHECK(!self.is_quantized(), "min is not yet implemented for quantized tensors.");
+
+  Tensor min = at::empty({0}, self.options());
+  Tensor max = at::empty({0}, self.options());
+
+  auto result = _aminmax_out_impl(min, max, self, dim, keepdim);
+  return result;
 }
 
 static std::tuple<Tensor &,Tensor &> min_out_impl(Tensor& min, Tensor& min_indices,

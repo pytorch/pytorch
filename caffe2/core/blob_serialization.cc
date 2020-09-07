@@ -234,7 +234,7 @@ static void SerializeUsingBytesOrInt32(
     unique_ptr<uint8_t[]> buffer(new uint8_t[bufSize]);
     context->template CopyToCPU<uint8_t>(bufSize, byteData, buffer.get());
     context->FinishDeviceComputation();
-    proto.set_byte_data(buffer.release(), bufSize);
+    proto.set_byte_data(buffer.get(), bufSize);
   } else {
     detail::CopyToProtoWithCast(
         chunkSize,

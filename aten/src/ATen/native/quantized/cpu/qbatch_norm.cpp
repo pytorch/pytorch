@@ -40,6 +40,105 @@ void compute_fused_params(
 }
 
 template <bool ReluFused>
+Tensor q_batch_norm1d_impl(
+    Tensor qx,
+    c10::optional<Tensor> mb_weight,
+    c10::optional<Tensor> mb_bias,
+    Tensor mean,
+    Tensor var,
+    double eps,
+    double output_scale,
+    int64_t output_zero_point) {
+
+  TORCH_CHECK(mb_weight.has_value(), "Weight must be provided");
+  TORCH_CHECK(mb_bias.has_value(), "Bias must be provided");
+  const auto& weight = *mb_weight;
+  const auto& bias = *mb_bias;
+
+  if (qx.numel() == 0) {
+    auto out = qx.clone();
+    return out;
+  }
+  int64_t ndim = qx.dim();
+  TORCH_CHECK(ndim == 3, "Expecting the input tensor of rank 3.");
+  const int64_t N = qx.size(0);
+  const int64_t C = qx.size(1);
+  const int64_t H = qx.size(2);
+
+  TORCH_CHECK(weight.numel() == C, "Expect weight size to match C");
+  TORCH_CHECK(bias.numel() == C, "Expect weight size to match C");
+
+  const float* weight_data = weight.template data_ptr<float>();
+  const float* bias_data = bias.template data_ptr<float>();
+
+  TORCH_CHECK(mean.numel() == C, "Mean size must match channel dimension");
+  TORCH_CHECK(var.numel() == C, "Variance size must match channel dimension");
+
+  Tensor alpha = at::empty_like(mean, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  Tensor beta = at::empty_like(mean, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  float* alpha_data = alpha.data_ptr<float>();
+  float* beta_data = beta.data_ptr<float>();
+
+  const float* mean_data = mean.template data_ptr<float>();
+  const float* var_data = var.template data_ptr<float>();
+
+  // create a fake W dimension so we can use NHWC
+  qx = qx.unsqueeze(-1);
+
+  auto oSizes = qx.sizes();
+  auto qx_nhwc = qx.contiguous(MemoryFormat::ChannelsLast);
+  Tensor qy = at::_empty_affine_quantized(
+      oSizes,
+      at::device(kCPU)
+        .dtype(qx_nhwc.scalar_type())
+        .memory_format(MemoryFormat::ChannelsLast),
+      output_scale,
+      output_zero_point,
+      c10::nullopt);
+
+  compute_fused_params(
+      C,
+      weight_data,
+      bias_data,
+      mean_data,
+      var_data,
+      eps,
+      qx.q_scale(),
+      output_scale,
+      alpha_data,
+      beta_data);
+  if (ReluFused) {
+    qbatch_norm_relu_stub(
+        qx.device().type(),
+        N,
+        C,
+        H,
+        qx.q_zero_point(),
+        output_zero_point,
+        qx_nhwc,
+        alpha,
+        beta,
+        qy);
+  } else {
+    qbatch_norm_stub(
+        qx.device().type(),
+        N,
+        C,
+        H,
+        qx.q_zero_point(),
+        output_zero_point,
+        qx_nhwc,
+        alpha,
+        beta,
+        qy);
+  }
+  // Remove the fake dimension, and go back to contiguous format
+  // (since there is no 4th channel). Note, this has a performance
+  // cost.
+  return qy.contiguous(MemoryFormat::Contiguous).squeeze(-1);
+}
+
+template <bool ReluFused>
 Tensor q_batch_norm2d_impl(
     Tensor qx,
     c10::optional<Tensor> mb_weight,
@@ -242,14 +341,17 @@ Tensor q_batch_norm_impl(
     int64_t output_zero_point) {
   Tensor qy;
   int64_t dim = qx.dim();
-  if (dim == 4) {
+  if (dim == 3) {
+    qy = q_batch_norm1d_impl<ReluFused>(
+        qx, mb_weight, mb_bias, mean, var, eps, output_scale, output_zero_point);
+  } else if (dim == 4) {
     qy = q_batch_norm2d_impl<ReluFused>(
         qx, mb_weight, mb_bias, mean, var, eps, output_scale, output_zero_point);
   } else if (dim == 5) {
     qy = q_batch_norm3d_impl<ReluFused>(
         qx, mb_weight, mb_bias, mean, var, eps, output_scale, output_zero_point);
   } else {
-    TORCH_CHECK(false, "quantized::batch_norm only support 4d or 5d inputs.");
+    TORCH_CHECK(false, "quantized::batch_norm only support 3d, 4d or 5d inputs.");
   }
   return qy;
 }
@@ -278,6 +380,8 @@ Tensor quantized_batch_norm(
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
   m.impl("batch_norm",        TORCH_FN(q_batch_norm_impl<false>));
   m.impl("batch_norm_relu",   TORCH_FN(q_batch_norm_impl<true>));
+  m.impl("batch_norm1d",      TORCH_FN(q_batch_norm1d_impl<false>));
+  m.impl("batch_norm1d_relu", TORCH_FN(q_batch_norm1d_impl<true>));
   m.impl("batch_norm2d",      TORCH_FN(q_batch_norm2d_impl<false>));
   m.impl("batch_norm2d_relu", TORCH_FN(q_batch_norm2d_impl<true>));
   m.impl("batch_norm3d",      TORCH_FN(q_batch_norm3d_impl<false>));

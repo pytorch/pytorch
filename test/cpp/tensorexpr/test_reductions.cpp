@@ -16,8 +16,6 @@
 #include "torch/csrc/jit/tensorexpr/loopnest.h"
 #include "torch/csrc/jit/tensorexpr/tensor.h"
 
-#include <torch/csrc/jit/testing/file_check.h>
-
 namespace torch {
 namespace jit {
 
@@ -619,7 +617,7 @@ void testReduceRfactor() {
   ASSERT_EQ(out[0], 4950);
 }
 
-void testReduce3DRfactor() {
+void testReduce3DRfactorInternal() {
   KernelScope kernel_scope;
 
   const int M = 10;
@@ -654,7 +652,7 @@ void testReduce3DRfactor() {
   ASSERT_EQ(out[0], 499500);
 }
 
-void testReduce3DRfactor2() {
+void testReduce3DRfactorInner() {
   KernelScope kernel_scope;
 
   const int M = 10;
@@ -689,7 +687,7 @@ void testReduce3DRfactor2() {
   ASSERT_EQ(out[0], 499500);
 }
 
-void testReduce3DRfactor3() {
+void testReduce3DRfactorOuter() {
   KernelScope kernel_scope;
 
   const int M = 10;

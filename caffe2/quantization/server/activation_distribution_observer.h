@@ -175,6 +175,9 @@ class OutputColumnMaxHistogramNetObserver final : public NetObserver {
       bool mul_nets = false,
       string delimiter = " ");
   ~OutputColumnMaxHistogramNetObserver();
+  void DumpOutputColumnMaxHistogramFile() {
+    DumpAndReset_(out_file_name_, false);
+  }
 
  private:
   void Stop() override;

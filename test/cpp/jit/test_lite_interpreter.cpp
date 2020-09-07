@@ -8,6 +8,8 @@
 #include <torch/custom_class.h>
 #include <torch/torch.h>
 
+#include <unordered_set>
+
 // Tests go in torch::jit
 namespace torch {
 namespace jit {
@@ -81,7 +83,7 @@ void testLiteInterpreterConv() {
   m.register_parameter("bias", torch::ones({20}), false);
   m.define(R"(
     def forward(self, input):
-      return torch._convolution(input, self.weight, self.bias, [1, 1], [0, 0], [1, 1], False, [0, 0], 1, False, False, True)
+      return torch._convolution(input, self.weight, self.bias, [1, 1], [0, 0], [1, 1], False, [0, 0], 1, False, False, True, True)
   )");
 
   inputs.push_back(torch::ones({1, 1, 28, 28}));
@@ -232,64 +234,6 @@ void testLiteInterpreterWrongMethodName() {
   ASSERT_THROWS_WITH(bc.run_method("forward", inputs), "is not defined");
 }
 
-void testLiteInterpreterParams() {
-  Module m("m");
-  m.register_parameter("foo", torch::ones({1}, at::requires_grad()), false);
-  m.define(R"(
-    def forward(self, x):
-      b = 1.0
-      return self.foo * x + b
-  )");
-  double learning_rate = 0.1, momentum = 0.1;
-  int n_epoc = 10;
-  // init: y = x + 1;
-  // target: y = 2 x + 1
-  std::vector<std::pair<Tensor, Tensor>> trainData{
-      {1 * torch::ones({1}), 3 * torch::ones({1})},
-  };
-  // Reference: Full jit
-  std::stringstream ms;
-  m.save(ms);
-  auto mm = load(ms);
-  //  mm.train();
-  std::vector<::at::Tensor> parameters;
-  for (auto parameter : mm.parameters()) {
-    parameters.emplace_back(parameter);
-  }
-  ::torch::optim::SGD optimizer(
-      parameters, ::torch::optim::SGDOptions(learning_rate).momentum(momentum));
-  for (int epoc = 0; epoc < n_epoc; ++epoc) {
-    for (auto& data : trainData) {
-      auto source = data.first, targets = data.second;
-      optimizer.zero_grad();
-      std::vector<IValue> train_inputs{source};
-      auto output = mm.forward(train_inputs).toTensor();
-      auto loss = ::torch::l1_loss(output, targets);
-      loss.backward();
-      optimizer.step();
-    }
-  }
-  std::stringstream ss;
-  m._save_for_mobile(ss);
-  mobile::Module bc = _load_for_mobile(ss);
-  std::vector<::at::Tensor> bc_parameters = bc.parameters();
-  ::torch::optim::SGD bc_optimizer(
-      bc_parameters,
-      ::torch::optim::SGDOptions(learning_rate).momentum(momentum));
-  for (int epoc = 0; epoc < n_epoc; ++epoc) {
-    for (auto& data : trainData) {
-      auto source = data.first, targets = data.second;
-      bc_optimizer.zero_grad();
-      std::vector<IValue> train_inputs{source};
-      auto output = bc.forward(train_inputs).toTensor();
-      auto loss = ::torch::l1_loss(output, targets);
-      loss.backward();
-      bc_optimizer.step();
-    }
-  }
-  AT_ASSERT(parameters[0].item<float>() == bc_parameters[0].item<float>());
-}
-
 void testLiteInterpreterSetState() {
   Module m("m");
   m.register_parameter("foo", torch::ones({}), false);
@@ -356,6 +300,341 @@ void testLiteInterpreterBuiltinFunction() {
   auto str = res.toStringRef();
   std::string expected = "Hello! Your tensor has 12 elements!";
   AT_ASSERT(str == expected);
+}
+
+void testLiteInterpreterModuleInfoBasic() {
+  Module m("M");
+  m.define(R"JIT(
+    def forward(self, x):
+      return 2 * x
+  )JIT");
+
+  std::stringstream ss;
+  m._save_for_mobile(ss, {}, true);
+  mobile::Module bc = _load_for_mobile(ss);
+
+  std::unordered_set<std::string> module_debug_info_set;
+  size_t pc = 0;
+  while (true) {
+    try {
+      std::string module_info = bc.get_forward_method_debug_info(pc);
+      if (!module_info.empty() && module_info != "<no module info>") {
+        module_debug_info_set.insert(module_info);
+      }
+      ++pc;
+    } catch (const std::exception& e) {
+      break;
+    }
+  }
+
+  std::unordered_set<std::string> expected_result({"top(M).forward"});
+  AT_ASSERT(module_debug_info_set == expected_result);
+}
+
+void testLiteInterpreterNotSavingModuleInfo() {
+  Module m("M");
+  m.define(R"JIT(
+    def forward(self, x):
+      return x + 5
+  )JIT");
+
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+  mobile::Module bc = _load_for_mobile(ss);
+
+  size_t pc = 0;
+  while (true) {
+    try {
+      std::string module_info = bc.get_forward_method_debug_info(pc);
+      AT_ASSERT(module_info.empty() || module_info == "<no module info>");
+      ++pc;
+    } catch (const std::exception& e) {
+      break;
+    }
+  }
+}
+
+void testLiteInterpreterOneSubmoduleModuleInfo() {
+  Module a("A");
+  a.define(R"JIT(
+    def forward(self, x):
+      return 2 * x + 5
+  )JIT");
+  Module b("B");
+  b.register_module("A0", a);
+  b.define(R"JIT(
+    def forward(self, x):
+      return self.A0.forward(x) + 1
+  )JIT");
+
+  std::stringstream ss;
+  b._save_for_mobile(ss, {}, true);
+  mobile::Module bc = _load_for_mobile(ss);
+
+  std::unordered_set<std::string> module_debug_info_set;
+  size_t pc = 0;
+  while (true) {
+    try {
+      std::string module_info = bc.get_forward_method_debug_info(pc);
+      if (!module_info.empty() && module_info != "<no module info>") {
+        module_debug_info_set.insert(module_info);
+      }
+      ++pc;
+    } catch (const std::exception& e) {
+      break;
+    }
+  }
+
+  std::unordered_set<std::string> expected_result(
+      {"top(B).forward", "top(B).A0(A).forward"});
+  AT_ASSERT(module_debug_info_set == expected_result);
+}
+
+void testLiteInterpreterTwoSubmodulesModuleInfo() {
+  Module a("A");
+  a.define(R"JIT(
+    def forward(self, x):
+      return x + 1
+  )JIT");
+  Module b("B");
+  b.define(R"JIT(
+    def forward(self, x):
+      return x + 2
+  )JIT");
+  Module c("C");
+  c.register_module("A0", a);
+  c.register_module("B0", b);
+  c.define(R"JIT(
+    def forward(self, x):
+      return self.A0.forward(x) + self.B0.forward(x)
+  )JIT");
+
+  std::stringstream ss;
+  c._save_for_mobile(ss, {}, true);
+  mobile::Module bc = _load_for_mobile(ss);
+
+  std::unordered_set<std::string> module_debug_info_set;
+  size_t pc = 0;
+  while (true) {
+    try {
+      std::string module_info = bc.get_forward_method_debug_info(pc);
+      if (!module_info.empty() && module_info != "<no module info>") {
+        module_debug_info_set.insert(module_info);
+      }
+      ++pc;
+    } catch (const std::exception& e) {
+      break;
+    }
+  }
+
+  std::unordered_set<std::string> expected_result(
+      {"top(C).forward", "top(C).A0(A).forward", "top(C).B0(B).forward"});
+  AT_ASSERT(module_debug_info_set == expected_result);
+}
+
+void testLiteInterpreterSequentialModuleInfo() {
+  Module a("A");
+  a.define(R"JIT(
+    def forward(self, x):
+      return x + 1
+  )JIT");
+  Module b("B");
+  b.define(R"JIT(
+    def forward(self, x):
+      return x + 2
+  )JIT");
+  Module c("C");
+  c.register_module("A0", a);
+  c.register_module("B0", b);
+  c.define(R"JIT(
+    def forward(self, x):
+      return self.A0.forward(self.B0.forward(x))
+  )JIT");
+
+  std::stringstream ss;
+  c._save_for_mobile(ss, {}, true);
+  mobile::Module bc = _load_for_mobile(ss);
+
+  std::unordered_set<std::string> module_debug_info_set;
+  size_t pc = 0;
+  while (true) {
+    try {
+      std::string module_info = bc.get_forward_method_debug_info(pc);
+      if (!module_info.empty() && module_info != "<no module info>") {
+        module_debug_info_set.insert(module_info);
+      }
+      ++pc;
+    } catch (const std::exception& e) {
+      break;
+    }
+  }
+
+  std::unordered_set<std::string> expected_result(
+      {"top(C).A0(A).forward", "top(C).B0(B).forward"});
+  AT_ASSERT(module_debug_info_set == expected_result);
+}
+
+void testLiteInterpreterHierarchyModuleInfo() {
+  Module a("A");
+  a.define(R"JIT(
+    def forward(self, x):
+      return x + 1
+  )JIT");
+  Module b("B");
+  b.register_module("A0", a);
+  b.define(R"JIT(
+    def forward(self, x):
+      return self.A0.forward(x) + 1
+  )JIT");
+  Module c("C");
+  c.register_module("B0", b);
+  c.define(R"JIT(
+    def forward(self, x):
+      return self.B0.forward(x) + 1
+  )JIT");
+
+  std::stringstream ss;
+  c._save_for_mobile(ss, {}, true);
+  mobile::Module bc = _load_for_mobile(ss);
+
+  std::unordered_set<std::string> module_debug_info_set;
+  size_t pc = 0;
+  while (true) {
+    try {
+      std::string module_info = bc.get_forward_method_debug_info(pc);
+      if (!module_info.empty() && module_info != "<no module info>") {
+        module_debug_info_set.insert(module_info);
+      }
+      ++pc;
+    } catch (const std::exception& e) {
+      break;
+    }
+  }
+
+  // There are 3 module information strings here.
+  // "top(C).forward": for the add operator in top.
+  // "top(C).B0(B).forward": for the add operator in B0.
+  // "top(C).B0(B).A0(A).forward": for the add operator in A0.
+  std::unordered_set<std::string> expected_result(
+      {"top(C).forward", "top(C).B0(B).forward", "top(C).B0(B).A0(A).forward"});
+  AT_ASSERT(module_debug_info_set == expected_result);
+}
+
+void testLiteInterpreterDuplicatedClassTypeModuleInfo() {
+  Module a("A");
+  a.define(R"JIT(
+    def forward(self, x):
+      return x + 5
+  )JIT");
+  Module b("B");
+  b.register_module("A0", a);
+  b.register_module("A1", a);
+  b.define(R"JIT(
+    def forward(self, x):
+      return self.A0.forward(x) + self.A1.forward(x)
+  )JIT");
+
+  std::stringstream ss;
+  b._save_for_mobile(ss, {}, true);
+  mobile::Module bc = _load_for_mobile(ss);
+
+  std::unordered_set<std::string> module_debug_info_set;
+  size_t pc = 0;
+  while (true) {
+    try {
+      std::string module_info = bc.get_forward_method_debug_info(pc);
+      if (!module_info.empty() && module_info != "<no module info>") {
+        module_debug_info_set.insert(module_info);
+      }
+      ++pc;
+    } catch (const std::exception& e) {
+      break;
+    }
+  }
+
+  // The current approach is not able to distinguish between A0 and A1,
+  // which have the same class type. Hence, it only records module
+  // information for A1.
+  std::unordered_set<std::string> expected_result(
+      {"top(B).forward", "top(B).A1(A).forward"});
+  AT_ASSERT(module_debug_info_set == expected_result);
+}
+
+void testLiteInterpreterEval() {
+  std::vector<torch::jit::IValue> inputs;
+
+  Module m("m");
+  m.define(R"(
+    def __init__(self, x):
+      self.training = True
+
+    def forward(self, input):
+      return torch.dropout(input, 1.0, self.training)
+  )");
+
+  inputs.push_back(torch::ones({1, 1, 28, 28}));
+  m.eval();
+  auto outputref = m.forward(inputs).toTensor();
+
+  // save m in training mode to make sure that mobile eval() will correctly
+  // change back to eval mode
+  m.train();
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+  mobile::Module bc = _load_for_mobile(ss);
+  bc.eval();
+  IValue res;
+  for (int i = 0; i < 3; ++i) {
+    res = bc.run_method("forward", inputs);
+  }
+  auto output = res.toTensor();
+  AT_ASSERT(outputref.dim() == output.dim());
+  AT_ASSERT(
+      outputref[0][0][0][0].item<int>() == output[0][0][0][0].item<int>());
+}
+
+void testLiteInterpreterFindWrongMethodName() {
+  Module m("m");
+  m.register_parameter("foo", torch::ones({}), false);
+  m.define(R"(
+    def add(self, x):
+      b = 4
+      return self.foo + x + b
+  )");
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+  mobile::Module bc = _load_for_mobile(ss);
+  ASSERT_TRUE(bc.find_method("forward") == c10::nullopt);
+}
+
+void testLiteInterpreterFindAndRunMethod() {
+  Module m("m");
+  m.register_parameter("foo", torch::ones({}), false);
+  m.define(R"(
+    def add_it(self, x):
+      b = 4
+      return self.foo + x + b
+  )");
+
+  std::vector<IValue> inputs;
+  auto minput = 5 * torch::ones({});
+  inputs.emplace_back(minput);
+  auto ref = m.get_method("add_it")(inputs);
+
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+  mobile::Module bc = _load_for_mobile(ss);
+  IValue res;
+  for (int i = 0; i < 3; ++i) {
+    auto bcinputs = inputs;
+    auto method = bc.find_method("add_it");
+    AT_ASSERT(method != c10::nullopt);
+    res = (*method)(std::move(bcinputs));
+  }
+
+  auto resd = res.toTensor().item<float>();
+  auto refd = ref.toTensor().item<float>();
+  AT_ASSERT(resd == refd);
 }
 
 namespace {

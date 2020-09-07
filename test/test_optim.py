@@ -357,6 +357,10 @@ class TestOptim(TestCase):
         )
         with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 0: 1.0"):
             optim.SparseAdam(None, lr=1e-2, betas=(1.0, 0.0))
+        with self.assertRaisesRegex(ValueError, "SparseAdam requires dense parameter tensors"):
+            optim.SparseAdam([torch.zeros(3, layout=torch.sparse_coo)])
+        with self.assertRaisesRegex(ValueError, "SparseAdam requires dense parameter tensors"):
+            optim.SparseAdam([{"params": [torch.zeros(3, layout=torch.sparse_coo)]}])
 
     # ROCm precision is too low to pass this test
     @skipIfRocm
@@ -490,6 +494,14 @@ class TestOptim(TestCase):
     def test_invalid_param_type(self):
         with self.assertRaises(TypeError):
             optim.SGD(Variable(torch.randn(5, 5)), lr=3)
+
+    def test_duplicate_params_in_param_group(self):
+        param = Variable(torch.randn(5, 5))
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            optim.SGD([param, param], lr=0.1)
+            self.assertEqual(len(w), 1)
+            self.assertIn('a parameter group with duplicate parameters', str(w[0].message))
 
 
 class SchedulerTestNet(torch.nn.Module):
@@ -719,7 +731,7 @@ class TestLRScheduler(TestCase):
         for _ in range(10):
             scheduler.step(2)
             l.append(self.opt.param_groups[0]['lr'])
-        self.assertAlmostEqual(min(l), max(l))
+        self.assertEqual(min(l), max(l))
 
     def test_step_lr_is_constant_for_constant_epoch(self):
         scheduler = StepLR(self.opt, 2)
@@ -1405,9 +1417,9 @@ class TestLRScheduler(TestCase):
     def _test_swalr(self, swa_scheduler, scheduler, targets, swa_start, epochs):
         for epoch in range(epochs):
             for param_group, target in zip(self.opt.param_groups, targets):
-                self.assertAlmostEqual(target[epoch], param_group['lr'],
-                                       msg='LR is wrong in epoch {}: expected {}, got {}'.format(
-                                           epoch, target[epoch], param_group['lr']), delta=1e-5)
+                self.assertEqual(target[epoch], param_group['lr'],
+                                 msg='LR is wrong in epoch {}: expected {}, got {}'.format(
+                                     epoch, target[epoch], param_group['lr']), atol=1e-5, rtol=0)
             if epoch >= swa_start:
                 swa_scheduler.step()
             elif scheduler is not None:
@@ -1498,8 +1510,8 @@ class TestLRScheduler(TestCase):
         scheduler_copy.load_state_dict(scheduler.state_dict())
         for key in scheduler.__dict__.keys():
             if key != 'optimizer':
-                self.assertAlmostEqual(scheduler.__dict__[key], scheduler_copy.__dict__[key])
-        self.assertAlmostEqual(scheduler.get_last_lr(), scheduler_copy.get_last_lr())
+                self.assertEqual(scheduler.__dict__[key], scheduler_copy.__dict__[key])
+        self.assertEqual(scheduler.get_last_lr(), scheduler_copy.get_last_lr())
 
     def _test_get_last_lr(self, schedulers, targets, epochs=10):
         if isinstance(schedulers, _LRScheduler):
@@ -1509,9 +1521,9 @@ class TestLRScheduler(TestCase):
             [scheduler.step() for scheduler in schedulers]
             target = [[t[epoch] for t in targets]] * len(schedulers)
             for t, r in zip(target, result):
-                self.assertAlmostEqual(target, result,
-                                       msg='LR is wrong in epoch {}: expected {}, got {}'.format(
-                                           epoch, t, r), delta=1e-5)
+                self.assertEqual(target, result,
+                                 msg='LR is wrong in epoch {}: expected {}, got {}'.format(
+                                     epoch, t, r), atol=1e-5, rtol=0)
 
     def _test_with_epoch(self, schedulers, targets, epochs=10):
         if isinstance(schedulers, _LRScheduler):
@@ -1519,18 +1531,18 @@ class TestLRScheduler(TestCase):
         for epoch in range(epochs):
             [scheduler.step(epoch) for scheduler in schedulers]  # step before assert: skip initial lr
             for param_group, target in zip(self.opt.param_groups, targets):
-                self.assertAlmostEqual(target[epoch], param_group['lr'],
-                                       msg='LR is wrong in epoch {}: expected {}, got {}'.format(
-                                           epoch, target[epoch], param_group['lr']), delta=1e-5)
+                self.assertEqual(target[epoch], param_group['lr'],
+                                 msg='LR is wrong in epoch {}: expected {}, got {}'.format(
+                                     epoch, target[epoch], param_group['lr']), atol=1e-5, rtol=0)
 
     def _test(self, schedulers, targets, epochs=10):
         if isinstance(schedulers, _LRScheduler):
             schedulers = [schedulers]
         for epoch in range(epochs):
             for param_group, target in zip(self.opt.param_groups, targets):
-                self.assertAlmostEqual(target[epoch], param_group['lr'],
-                                       msg='LR is wrong in epoch {}: expected {}, got {}'.format(
-                                           epoch, target[epoch], param_group['lr']), delta=1e-5)
+                self.assertEqual(target[epoch], param_group['lr'],
+                                 msg='LR is wrong in epoch {}: expected {}, got {}'.format(
+                                     epoch, target[epoch], param_group['lr']), atol=1e-5, rtol=0)
             [scheduler.step() for scheduler in schedulers]
 
     def _test_CosineAnnealingWarmRestarts(self, scheduler, targets, epochs=10):
@@ -1538,17 +1550,17 @@ class TestLRScheduler(TestCase):
             epoch = round(epoch.item(), 1)
             scheduler.step(epoch)
             for param_group, target in zip(self.opt.param_groups, targets):
-                self.assertAlmostEqual(target[index], param_group['lr'],
-                                       msg='LR is wrong in epoch {}: expected {}, got {}'.format(
-                                           epoch, target[index], param_group['lr']), delta=1e-5)
+                self.assertEqual(target[index], param_group['lr'],
+                                 msg='LR is wrong in epoch {}: expected {}, got {}'.format(
+                                     epoch, target[index], param_group['lr']), atol=1e-5, rtol=0)
 
     def _test_interleaved_CosineAnnealingWarmRestarts(self, scheduler, targets, epochs):
         for index, epoch in enumerate(epochs):
             scheduler.step(epoch)
             for param_group, target in zip(self.opt.param_groups, targets):
-                self.assertAlmostEqual(target[index], param_group['lr'],
-                                       msg='LR is wrong in epoch {}: expected {}, got {}'.format(
-                                           epoch, target[index], param_group['lr']), delta=1e-5)
+                self.assertEqual(target[index], param_group['lr'],
+                                 msg='LR is wrong in epoch {}: expected {}, got {}'.format(
+                                     epoch, target[index], param_group['lr']), atol=1e-5, rtol=0)
 
     def _test_against_closed_form(self, scheduler, closed_form_scheduler, epochs=10):
         self.setUp()
@@ -1560,9 +1572,9 @@ class TestLRScheduler(TestCase):
         for epoch in range(epochs):
             scheduler.step()
             for i, param_group in enumerate(self.opt.param_groups):
-                self.assertAlmostEqual(targets[epoch][i], param_group['lr'],
-                                       msg='LR is wrong in epoch {}: expected {}, got {}'.format(
-                                           epoch, targets[epoch][i], param_group['lr']), delta=1e-5)
+                self.assertEqual(targets[epoch][i], param_group['lr'],
+                                 msg='LR is wrong in epoch {}: expected {}, got {}'.format(
+                                     epoch, targets[epoch][i], param_group['lr']), atol=1e-5, rtol=0)
 
     def _test_reduce_lr_on_plateau(self, schedulers, targets, metrics, epochs=10, verbose=False):
         if isinstance(schedulers, _LRScheduler) or isinstance(schedulers, ReduceLROnPlateau):
@@ -1576,9 +1588,9 @@ class TestLRScheduler(TestCase):
             if verbose:
                 print('epoch{}:\tlr={}'.format(epoch, self.opt.param_groups[0]['lr']))
             for param_group, target in zip(self.opt.param_groups, targets):
-                self.assertAlmostEqual(target[epoch], param_group['lr'],
-                                       msg='LR is wrong in epoch {}: expected {}, got {}'.format(
-                                           epoch, target[epoch], param_group['lr']), delta=1e-5)
+                self.assertEqual(target[epoch], param_group['lr'],
+                                 msg='LR is wrong in epoch {}: expected {}, got {}'.format(
+                                     epoch, target[epoch], param_group['lr']), atol=1e-5, rtol=0)
 
     def _test_cycle_lr(self, scheduler, lr_targets, momentum_targets, batch_iterations, verbose=False, use_beta1=False):
         for batch_num in range(batch_iterations):
@@ -1593,21 +1605,21 @@ class TestLRScheduler(TestCase):
                     print('batch{}:\tlr={}'.format(batch_num, self.opt.param_groups[0]['lr']))
 
             for param_group, lr_target, momentum_target in zip(self.opt.param_groups, lr_targets, momentum_targets):
-                self.assertAlmostEqual(
+                self.assertEqual(
                     lr_target[batch_num], param_group['lr'],
                     msg='LR is wrong in batch_num {}: expected {}, got {}'.format(
-                        batch_num, lr_target[batch_num], param_group['lr']), delta=1e-5)
+                        batch_num, lr_target[batch_num], param_group['lr']), atol=1e-5, rtol=0)
 
                 if use_beta1 and 'betas' in param_group.keys():
-                    self.assertAlmostEqual(
+                    self.assertEqual(
                         momentum_target[batch_num], param_group['betas'][0],
                         msg='Beta1 is wrong in batch_num {}: expected {}, got {}'.format(
-                            batch_num, momentum_target[batch_num], param_group['betas'][0]), delta=1e-5)
+                            batch_num, momentum_target[batch_num], param_group['betas'][0]), atol=1e-5, rtol=0)
                 elif 'momentum' in param_group.keys():
-                    self.assertAlmostEqual(
+                    self.assertEqual(
                         momentum_target[batch_num], param_group['momentum'],
                         msg='Momentum is wrong in batch_num {}: expected {}, got {}'.format(
-                            batch_num, momentum_target[batch_num], param_group['momentum']), delta=1e-5)
+                            batch_num, momentum_target[batch_num], param_group['momentum']), atol=1e-5, rtol=0)
             scheduler.step()
 
     def test_cosine_then_cyclic(self):
@@ -1691,7 +1703,7 @@ class TestSWAUtils(TestCase):
             averaged_dnn.update_parameters(dnn)
 
         for p_avg, p_swa in zip(averaged_params, averaged_dnn.parameters()):
-            self.assertAlmostEqual(p_avg, p_swa)
+            self.assertEqual(p_avg, p_swa)
             # Check that AveragedModel is on the correct device
             self.assertTrue(p_swa.device == swa_device)
             self.assertTrue(p.device == net_device)
@@ -1725,7 +1737,7 @@ class TestSWAUtils(TestCase):
             averaged_dnn.update_parameters(dnn)
 
         for p_avg, p_swa in zip(averaged_params, averaged_dnn.parameters()):
-            self.assertAlmostEqual(p_avg, p_swa)
+            self.assertEqual(p_avg, p_swa)
             # Check that AveragedModel is on the correct device
             self.assertTrue(p_avg.device == p_swa.device)
 
@@ -1743,7 +1755,7 @@ class TestSWAUtils(TestCase):
             averaged_dnn.update_parameters(dnn)
         averaged_dnn2.load_state_dict(averaged_dnn.state_dict())
         for p_swa, p_swa2 in zip(averaged_dnn.parameters(), averaged_dnn2.parameters()):
-            self.assertAlmostEqual(p_swa, p_swa2)
+            self.assertEqual(p_swa, p_swa2)
         self.assertTrue(averaged_dnn.n_averaged == averaged_dnn2.n_averaged)
 
     def test_averaged_model_exponential(self):
@@ -1772,7 +1784,7 @@ class TestSWAUtils(TestCase):
             averaged_params = updated_averaged_params
 
         for p_avg, p_swa in zip(averaged_params, averaged_dnn.parameters()):
-            self.assertAlmostEqual(p_avg, p_swa)
+            self.assertEqual(p_avg, p_swa)
 
     def _test_update_bn(self, dnn, dl_x, dl_xy, cuda):
 

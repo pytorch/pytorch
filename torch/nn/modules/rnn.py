@@ -192,7 +192,7 @@ class RNNBase(Module):
     def check_hidden_size(self, hx: Tensor, expected_hidden_size: Tuple[int, int, int],
                           msg: str = 'Expected hidden size {}, got {}') -> None:
         if hx.size() != expected_hidden_size:
-            raise RuntimeError(msg.format(expected_hidden_size, tuple(hx.size())))
+            raise RuntimeError(msg.format(expected_hidden_size, list(hx.size())))
 
     def check_forward_args(self, input: Tensor, hidden: Tensor, batch_sizes: Optional[Tensor]):
         self.check_input(input, batch_sizes)
@@ -380,6 +380,8 @@ class RNN(RNNBase):
         All the weights and biases are initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`
         where :math:`k = \frac{1}{\text{hidden\_size}}`
 
+    .. include:: ../cudnn_rnn_determinism.rst
+
     .. include:: ../cudnn_persistent_rnn.rst
 
     Examples::
@@ -506,6 +508,8 @@ class LSTM(RNNBase):
     .. note::
         All the weights and biases are initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`
         where :math:`k = \frac{1}{\text{hidden\_size}}`
+
+    .. include:: ../cudnn_rnn_determinism.rst
 
     .. include:: ../cudnn_persistent_rnn.rst
 
@@ -944,7 +948,7 @@ class LSTMCell(RNNCellBase):
     Examples::
 
         >>> rnn = nn.LSTMCell(10, 20)
-        >>> input = torch.randn(6, 3, 10)
+        >>> input = torch.randn(3, 10)
         >>> hx = torch.randn(3, 20)
         >>> cx = torch.randn(3, 20)
         >>> output = []

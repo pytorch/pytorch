@@ -143,6 +143,37 @@ Tensor upsample_nearest3d_backward_cpu(
   return grad_input;
 }
 
+using at::native::upsample::compute_output_size;
+using at::native::upsample::get_scale_value;
+
+Tensor upsample_nearest3d_cpu(
+    const Tensor& input,
+    c10::optional<IntArrayRef> output_size,
+    c10::optional<ArrayRef<double>> scale_factors) {
+  auto output = at::empty({0}, input.options());
+  auto osize = compute_output_size(input.sizes(), output_size, scale_factors);
+  auto scale_d = get_scale_value(scale_factors, 0);
+  auto scale_h = get_scale_value(scale_factors, 1);
+  auto scale_w = get_scale_value(scale_factors, 2);
+  upsample_nearest3d_out_cpu_template(output, input, osize, scale_d, scale_h, scale_w);
+  return output;
+}
+
+Tensor upsample_nearest3d_backward_cpu(
+    const Tensor& grad_output,
+    c10::optional<IntArrayRef> output_size,
+    IntArrayRef input_size,
+    c10::optional<ArrayRef<double>> scale_factors) {
+  auto osize = compute_output_size(input_size, output_size, scale_factors);
+  auto scale_d = get_scale_value(scale_factors, 0);
+  auto scale_h = get_scale_value(scale_factors, 1);
+  auto scale_w = get_scale_value(scale_factors, 2);
+  auto grad_input = at::zeros(input_size, grad_output.options());
+  upsample_nearest3d_backward_out_cpu_template(
+      grad_input, grad_output, osize, input_size, scale_d, scale_h, scale_w);
+  return grad_input;
+}
+
 DEFINE_DISPATCH(upsample_nearest3d_kernel);
 DEFINE_DISPATCH(upsample_nearest3d_backward_kernel);
 

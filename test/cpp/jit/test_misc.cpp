@@ -45,8 +45,10 @@
 #include "torch/csrc/autograd/engine.h"
 #include "torch/csrc/autograd/variable.h"
 
+#include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/testing/file_check.h>
 #include <torch/script.h>
+
 #include "torch/csrc/jit/api/module.h"
 #include "torch/csrc/jit/frontend/ir_emitter.h"
 #include "torch/csrc/jit/runtime/profiling_record.h"
@@ -737,16 +739,17 @@ void checkTracedInputs(const TracedTestInputs& inputs) {
   for (const auto& input : inputs) {
     const auto& fn = std::get<0>(input);
     const auto& sizes = std::get<1>(input);
+
     if (fn == "test") {
       found_test = true;
       TORCH_CHECK(sizes.size() == 1);
       TORCH_CHECK(sizes[0] == std::vector<int64_t>({1, 2, 3}));
-    } else if (fn == "pow") {
+    } else if (fn == "aten::pow") {
       found_pow = true;
       TORCH_CHECK(sizes.size() == 2);
       TORCH_CHECK(sizes[0] == std::vector<int64_t>({1, 2, 3}));
       TORCH_CHECK(sizes[1].empty());
-    } else if (fn == "mul") {
+    } else if (fn == "aten::mul") {
       found_mul = true;
       TORCH_CHECK(sizes.size() > 1);
       TORCH_CHECK(sizes[0] == std::vector<int64_t>({1, 2, 3}));
@@ -820,8 +823,6 @@ void checkScopeCallbacks() {
 }
 
 void testRecordFunction() {
-  // enable observers
-  c10::impl::IncludeDispatchKeyGuard observer_guard(c10::DispatchKey::Profiler);
   // disabling the inlining of method calls
   GraphOptimizerEnabledGuard opt_guard(false);
 
@@ -1015,8 +1016,6 @@ void testRecordFunction() {
   ids.clear();
 
   auto th = std::thread([&ids]() {
-    c10::impl::IncludeDispatchKeyGuard observer_guard(
-        c10::DispatchKey::Profiler);
     addThreadLocalCallback(RecordFunctionCallback(
         [&ids](const RecordFunction& fn) { ids.push_back(2); },
         [](const RecordFunction&) {}));
@@ -1127,9 +1126,6 @@ void checkDebugInfo(c10::DebugInfoKind kind, int model_id) {
 }
 
 void testThreadLocalDebugInfo() {
-  // enable observers
-  c10::impl::IncludeDispatchKeyGuard observer_guard(c10::DispatchKey::Profiler);
-
   TORCH_CHECK(
       c10::ThreadLocalDebugInfo::get(c10::DebugInfoKind::TEST_INFO) == nullptr);
   auto debug_info = std::make_shared<TestThreadLocalDebugInfo>();
@@ -1199,6 +1195,82 @@ void testThreadLocalDebugInfo() {
         }
       }
     }
+  }
+}
+
+void testFallbackGraphs() {
+  static const auto nestGraphIntoFallbackGraph =
+      [](const std::shared_ptr<Graph>& graph) {
+        ProfilingRecord::removeProfileCounter(graph->block());
+        auto fallback =
+            replaceBlockWithFallbackGraph(graph->block(), graph->inputs());
+        for (size_t i = 0; i < graph->outputs().size(); i++) {
+          graph->outputs()[i]->replaceAllUsesWith(fallback->output(i));
+          fallback->output(i)->copyMetadata(graph->outputs()[i]);
+        }
+        for (auto it = graph->block()->nodes().rbegin();
+             it != fallback->iterator();
+             it++) {
+          it.destroyCurrent();
+        }
+      };
+
+  auto x = at::randn({1}, at::kCPU);
+  auto y = at::randn({1}, at::kCPU);
+  auto stack = createStack({x.clone(), y.clone()});
+
+  auto graph_string = R"IR(
+    graph(%0 : Float(1),
+          %1 : Float(1)):
+      %2 : Tensor = aten::mul(%0, %1)
+      %3 : Tensor = aten::mul(%2, %0)
+      return (%3))IR";
+  auto graph = std::make_shared<Graph>();
+  torch::jit::parseIR(graph_string, graph.get());
+
+  {
+    Code code(graph, "");
+    InterpreterState interpreter{code};
+    interpreter.run(stack);
+  }
+  at::Tensor et;
+  pop(stack, et);
+  float ef = et.item<float>();
+  {
+    EnableProfilingGuard epg;
+    GraphFunction f("fallbackGraphs", graph, nullptr);
+    for (size_t i = 0; i < getNumProfiledRuns() + 1; i++) {
+      stack.emplace_back(x.clone());
+      stack.emplace_back(y.clone());
+      if (i == getNumProfiledRuns()) {
+        // we will be modifying a profiled graph
+        // before ProfilingGraphExecutor
+        // will optimize it in the next iteration
+        auto opt_graph = lastExecutedOptimizedGraph();
+        // this is safe to do since we are done profiling
+        ProfilingRecord::removeProfileCounter(opt_graph->block());
+        replaceBlockWithFallbackGraph(opt_graph->block(), opt_graph->inputs());
+        auto it = opt_graph->block()->nodes().begin();
+        ASSERT_EQ(it->kind(), prim::FallbackGraph);
+        auto fallback = *it++;
+        ASSERT_EQ(it, opt_graph->block()->nodes().end());
+        ASSERT_TRUE(fallback->hasAttribute(attr::Subgraph));
+        testing::FileCheck()
+            .check("Tensor = aten::mul")
+            ->check("Tensor = aten::mul")
+            ->run(*fallback->g(attr::Subgraph));
+      }
+      f.run(stack);
+      at::Tensor at;
+      pop(stack, at);
+      float af = at.item<float>();
+      ASSERT_EQ(af, ef);
+    }
+
+    auto opt_graph = lastExecutedOptimizedGraph();
+    testing::FileCheck()
+        .check("(Tensor) = prim::CallFunction")
+        ->run(*opt_graph);
   }
 }
 
@@ -1328,14 +1400,17 @@ graph(%a):
   }
 }
 
+static void checkShape(TypePtr typ, std::vector<int64_t> expected) {
+  auto ptp = typ->expect<TensorType>();
+  ASSERT_EQ(ptp->sizes().concrete_sizes().value(), expected);
+}
+
 static void checkShape(
     Node* n,
     std::vector<int64_t> expected,
     bool prev = true) {
   auto profile = (prev) ? n->inputs().at(0)->node() : n;
-  auto tp = profile->output()->type();
-  auto ptp = tp->expect<TensorType>();
-  ASSERT_EQ(ptp->sizes().concrete_sizes().value(), expected);
+  checkShape(profile->output()->type(), expected);
 }
 
 void count_(
@@ -1598,6 +1673,7 @@ void testInsertAndEliminateRedundantGuards() {
   InterpreterState is{cd};
   is.run(stack);
   auto copy = pr->profiled_graph_->copy();
+  ProfilingRecord::removeProfileCounter(copy->block());
   InsertGuards(copy);
   auto nodes = copy->block()->nodes();
   auto guard = std::find_if(nodes.begin(), nodes.end(), [](Node* n) {
@@ -1648,6 +1724,7 @@ void testInsertBailOuts() {
   InterpreterState is{cd};
   is.run(stack);
   auto copy = pr->profiled_graph_->copy();
+  ProfilingRecord::removeProfileCounter(copy->block());
   InsertGuards(copy);
   EliminateRedundantGuards(copy);
   auto nodes = copy->block()->nodes();
@@ -1691,6 +1768,14 @@ void testProfiler() {
   InterpreterState is{cd};
   is.run(stack);
 
+  // profiled types are stored as attributes and show up in the dump, e.g.
+  // Tensor = prim::profile[profiled_type=Double(4:256, 256:1, requires_grad=0,
+  // device=cpu)
+  testing::FileCheck()
+      .check("Tensor = prim::profile[profiled_type")
+      ->check_same("256")
+      ->run(*pr->profiled_graph_);
+
   auto begin = pr->profiled_graph_->block()->nodes().begin();
   auto end = pr->profiled_graph_->block()->nodes().end();
   auto mm =
@@ -1698,14 +1783,14 @@ void testProfiler() {
   ASSERT_NE(mm, end);
   std::vector<int64_t> mm_expected{4, 2048};
   std::vector<int64_t> eltwise{4, 512};
-  checkShape(*mm, mm_expected);
+  checkShape(mm->inputs().at(0)->node()->ty(attr::profiled_type), mm_expected);
   auto mul_n =
       std::find_if(begin, end, [](Node* n) { return n->kind() == aten::mul; });
   ASSERT_NE(mul_n, end);
-  checkShape(*mul_n, eltwise);
+  checkShape(mul_n->inputs().at(0)->node()->ty(attr::profiled_type), eltwise);
   auto tanh_n =
       std::find_if(begin, end, [](Node* n) { return n->kind() == aten::tanh; });
-  checkShape(*tanh_n, eltwise);
+  checkShape(tanh_n->inputs().at(0)->node()->ty(attr::profiled_type), eltwise);
 }
 
 void testCallStack() {
@@ -1899,7 +1984,8 @@ void testFutures() {
     int sat1 = 0;
     int sat2 = 0;
     f1->addCallback([&]() { ++sat1; });
-    f1->setError("Failed");
+    f1->setError(
+        std::make_exception_ptr(c10::ivalue::Future::FutureError("Failed")));
     ASSERT_EQ(sat1, 1);
     ASSERT_TRUE(f1->completed());
     ASSERT_TRUE(f1->hasError());
@@ -1913,8 +1999,9 @@ void testFutures() {
     f1->addCallback([&]() { ++sat2; });
     ASSERT_EQ(sat1, 1);
     ASSERT_EQ(sat2, 1);
-    f1->setErrorIfNeeded("Dup");
-    ASSERT_TRUE(strcmp(f1->error()->what(), "Failed") == 0);
+    f1->setErrorIfNeeded(
+        std::make_exception_ptr(c10::ivalue::Future::FutureError("Dup")));
+    ASSERT_TRUE(strcmp(f1->tryRetrieveErrorMessage().c_str(), "Failed") == 0);
     ASSERT_EQ(sat1, 1);
     ASSERT_EQ(sat2, 1);
   }
@@ -1994,7 +2081,8 @@ void testFutures() {
     futures.push_back(s4);
     auto c5 = collectAll(futures);
     ASSERT_FALSE(c5->completed());
-    s4->setError("Failed");
+    s4->setError(
+        std::make_exception_ptr(c10::ivalue::Future::FutureError("Failed")));
     ASSERT_TRUE(c5->completed());
     ASSERT_EQ(c5->value().toList().size(), 4);
     try {
@@ -2043,6 +2131,45 @@ void testFutures() {
     ASSERT_EQ(c4->value().toInt(), 7);
     s2->markCompleted(1);
     ASSERT_EQ(c4->value().toInt(), 7);
+  }
+}
+
+void testTLSFutureCallbacks() {
+  // cb that verifies the profiler is enabled
+  auto profilerEnabledCb = []() {
+    ASSERT_TRUE(torch::autograd::profiler::profilerEnabled());
+  };
+  // test running callbacks with propagation of TLS state.
+  {
+    // Enable the profiler in this thread
+    torch::autograd::profiler::enableProfiler(
+        torch::autograd::profiler::ProfilerConfig(
+            torch::autograd::profiler::ProfilerState::CPU, false, false));
+    auto s1 = c10::make_intrusive<Future>(IntType::get());
+    s1->addCallback(wrapPropagateTLSState<void>(profilerEnabledCb));
+    std::thread t([s1 = std::move(s1)]() { s1->markCompleted(); });
+    // Since we join here, we can ensure that all callbacks corresponding to
+    // markCompleted() have finished.
+    t.join();
+    torch::autograd::profiler::disableProfiler();
+  }
+  // then() with TLS State
+  {
+    // Enable the profiler in this thread
+    torch::autograd::profiler::enableProfiler(
+        torch::autograd::profiler::ProfilerConfig(
+            torch::autograd::profiler::ProfilerState::CPU, false, false));
+    auto s1 = c10::make_intrusive<Future>(IntType::get());
+    auto s2 = s1->then(
+        wrapPropagateTLSState<c10::IValue>([&profilerEnabledCb]() {
+          profilerEnabledCb();
+          return at::IValue(1);
+        }),
+        IntType::get());
+    std::thread t([s1 = std::move(s1)]() { s1->markCompleted(); });
+    t.join();
+    s2->wait();
+    torch::autograd::profiler::disableProfiler();
   }
 }
 

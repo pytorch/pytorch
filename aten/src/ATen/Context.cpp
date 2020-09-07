@@ -78,12 +78,58 @@ void Context::alertNotDeterministic(c10::string_view const& caller) {
   }
 }
 
+bool Context::allowTF32CuDNN() const {
+  return allow_tf32_cudnn;
+}
+
+void Context::setAllowTF32CuDNN(bool b) {
+  allow_tf32_cudnn = b;
+}
+
+static const char cublas_config_var_name[] = "CUBLAS_WORKSPACE_CONFIG";
+static const char* const cublas_deterministic_configs[] = { ":4096:8", ":16:8" };
+
+bool Context::checkCuBLASConfigDeterministic() {
+  bool cublas_config_deterministic = true;
+  // If using CUDA 10.2 or greater, need to make sure CuBLAS workspace config
+  // is set to deterministic setting
+  if (hasCUDART() && (versionCUDART() >= 10020)) {
+    char* workspace_config = std::getenv(cublas_config_var_name);
+    cublas_config_deterministic = (workspace_config != nullptr) && (
+      (strcmp(workspace_config, cublas_deterministic_configs[0]) == 0)
+      || (strcmp(workspace_config, cublas_deterministic_configs[1]) == 0)
+    );
+  }
+  return cublas_config_deterministic;
+}
+
+void Context::alertCuBLASConfigNotDeterministic() {
+  static bool cublas_config_deterministic = checkCuBLASConfigDeterministic();
+  TORCH_CHECK(!deterministic() || cublas_config_deterministic,
+    "Deterministic behavior was enabled with either `torch.set_deterministic(True)` or ",
+    "`at::Context::setDeterministic(true)`, but this operation is not deterministic because ",
+    "it uses CuBLAS and you have CUDA >= 10.2. To enable deterministic behavior in this ",
+    "case, you must set an environment variable before running your PyTorch application: ",
+    cublas_config_var_name, "=", cublas_deterministic_configs[0], " or ",
+    cublas_config_var_name, "=", cublas_deterministic_configs[1], ". For more information, go to ",
+    "https://docs.nvidia.com/cuda/cublas/index.html#cublasApi_reproducibility"
+  );
+}
+
 bool Context::benchmarkCuDNN() const {
   return benchmark_cudnn;
 }
 
 void Context::setBenchmarkCuDNN(bool b) {
   benchmark_cudnn = b;
+}
+
+bool Context::allowTF32CuBLAS() const {
+  return allow_tf32_cublas;
+}
+
+void Context::setAllowTF32CuBLAS(bool b) {
+  allow_tf32_cublas = b;
 }
 
 bool Context::hasMKL() const {

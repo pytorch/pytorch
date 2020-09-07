@@ -81,7 +81,7 @@ Tensor qnnpack_relu(Tensor input) {
 }
 #endif
 
-Tensor quantized_relu(const Tensor& qx) {
+Tensor relu_quantized_cpu(const Tensor& qx) {
   #ifdef USE_PYTORCH_QNNPACK
   if (at::globalContext().qEngine() == at::QEngine::QNNPACK && qx.scalar_type() == kQUInt8) {
     return qnnpack_relu(qx);
@@ -91,7 +91,7 @@ Tensor quantized_relu(const Tensor& qx) {
   qrelu_stub(qx.device().type(), qx, qy);
   return qy;
 }
-Tensor& quantized_relu_(Tensor& qx) {
+Tensor& relu_quantized_cpu_(Tensor& qx) {
   const auto zero_point = qx.q_zero_point();
   AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qrelu", [&]() {
     using Vec = Vec256<scalar_t>;
@@ -107,13 +107,13 @@ Tensor& quantized_relu_(Tensor& qx) {
   return qx;
 }
 
-Tensor& quantized_leaky_relu_out(Tensor& result, const Tensor& self,
+Tensor& leaky_relu_out_quantized_cpu(Tensor& result, const Tensor& self,
                                  Scalar negval) {
   qrelu_leaky_stub(self.device().type(), result, self, negval);
   return result;
 }
 
-Tensor quantized_leaky_relu(const Tensor& self, Scalar negval) {
+Tensor heaky_relu_quantized_cpu(const Tensor& self, Scalar negval) {
   const auto qx = self.contiguous(self.suggest_memory_format());
   auto qy = at::_empty_affine_quantized(qx.sizes(),
       at::device(kCPU).dtype(self.scalar_type()),
@@ -124,7 +124,7 @@ Tensor quantized_leaky_relu(const Tensor& self, Scalar negval) {
   return qy;
 }
 
-Tensor& quantized_leaky_relu_(Tensor& self, Scalar negval) {
+Tensor& leaky_relu_quantized_cpu_(Tensor& self, Scalar negval) {
   qrelu_leaky_stub(self.device().type(), self, self, negval);
   return self;
 }

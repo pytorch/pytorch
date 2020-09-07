@@ -239,9 +239,15 @@ public:
   Vec256<c10::complex<double>> floor() const {
     return _mm256_floor_pd(values);
   }
+  Vec256<c10::complex<double>> hypot(const Vec256<c10::complex<double>> &b) const {
+    AT_ERROR("not supported for complex numbers");
+  }
   Vec256<c10::complex<double>> neg() const {
     auto zero = _mm256_setzero_pd();
     return _mm256_sub_pd(zero, values);
+  }
+  Vec256<c10::complex<double>> nextafter(const Vec256<c10::complex<double>> &b) const {
+    AT_ERROR("not supported for complex numbers");
   }
   Vec256<c10::complex<double>> round() const {
     return _mm256_round_pd(values, (_MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));

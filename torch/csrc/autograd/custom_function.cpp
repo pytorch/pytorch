@@ -73,7 +73,7 @@ variable_list _wrap_outputs(const variable_list &input_vars,
 
       // If the input was modified, transplant the grad_fn in the graph:
       // grad_fn <- variable <- self  ==>  grad_fn <- self <- variable
-      var.grad().reset();
+      var.mutable_grad().reset();
       impl::clear_hooks(var);
       if (auto grad_acc_fn = impl::try_get_grad_accumulator(var)) {
         auto grad_acc = dynamic_cast<AccumulateGrad*>(grad_acc_fn.get());
@@ -232,6 +232,10 @@ void AutogradContext::mark_non_differentiable(const variable_list &outputs) {
   for(auto& var : outputs) {
     non_differentiable_.insert(var.unsafeGetTensorImpl());
   }
+}
+
+void AutogradContext::set_materialize_grads(bool value) {
+  materialize_grads_ = value;
 }
 
 const std::unordered_set<at::TensorImpl*>& AutogradContext::get_and_bump_dirty() const {

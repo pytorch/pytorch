@@ -30,6 +30,8 @@ DEFINE_DISPATCH(softshrink_stub);
 DEFINE_DISPATCH(shrink_backward_stub);
 DEFINE_DISPATCH(leaky_relu_stub);
 DEFINE_DISPATCH(leaky_relu_backward_stub);
+DEFINE_DISPATCH(silu_stub);
+DEFINE_DISPATCH(silu_backward_stub);
 
 Tensor hardtanh(const Tensor& self, Scalar min, Scalar max) {
   return at::clamp(self, min, max);
@@ -181,15 +183,46 @@ Tensor & selu_(Tensor & self) {
 }
 
 Tensor celu(const Tensor & self, Scalar alpha) {
+  TORCH_CHECK(alpha.to<double>() != 0,
+      "ZeroDivisionError: alpha cannot be 0 for CELU");
   double inv_alpha = 1. / alpha.to<double>();
   return at::elu(self, alpha, Scalar(1.0), Scalar(inv_alpha));
 }
 
 Tensor & celu_(Tensor & self, Scalar alpha) {
+  TORCH_CHECK(alpha.to<double>() != 0,
+      "ZeroDivisionError: alpha cannot be 0 for CELU");
   double inv_alpha = 1. / alpha.to<double>();
   return at::elu_(self, alpha, Scalar(1.0), Scalar(inv_alpha));
 }
 
+Tensor silu(const Tensor& self) {
+  Tensor result = at::empty({0}, self.options());
+  at::silu_out(result, self);
+  return result;
+}
+
+Tensor& silu_(Tensor& self) {
+  return at::silu_out(self, self);
+}
+
+Tensor& silu_out(Tensor& result, const Tensor& self) {
+  TORCH_CHECK(
+      result.dtype() == self.dtype(),
+      "Output Tensor should have the same type as in Input Tensor.")
+  auto iter = TensorIterator::unary_op(result, self);
+  silu_stub(iter.device_type(), iter);
+  return result;
+}
+
+Tensor silu_backward(
+    const Tensor& grad_output,
+    const Tensor& input) {
+  Tensor grad_input = at::empty({0}, input.options());
+  auto iter = TensorIterator::binary_op(grad_input, grad_output, input);
+  silu_backward_stub(iter.device_type(), iter);
+  return grad_input;
+}
 
 template <typename scalar_t>
 inline void _rrelu_with_noise_train(
@@ -339,7 +372,16 @@ static Tensor threshold_out(
     Scalar value,
     const Tensor& other) {
   Tensor result = opt_result.value_or(Tensor());
-  auto iter = TensorIterator::binary_op(result, self, other);
+  auto iter = TensorIteratorConfig()
+    .set_check_mem_overlap(false)  // threshold is idempotent, so overlap is okay
+    .add_output(result)
+    .add_input(self)
+    .add_input(other)
+    .allow_cpu_scalars(true)
+    .promote_inputs_to_common_dtype(true)
+    .cast_common_dtype_to_outputs(true)
+    .enforce_safe_casting_to_output(true)
+    .build();
   threshold_stub(iter.device_type(), iter, threshold, value);
   return iter.output();
 }
@@ -757,7 +799,6 @@ Tensor log_sigmoid(const Tensor & self) {
 Tensor log_sigmoid_backward_cpu(const Tensor& grad_output, const Tensor& input, const Tensor& buffer) {
   Tensor grad_input;
   auto iter = at::TensorIteratorConfig()
-    .set_check_mem_overlap(true)
     .add_output(grad_input)
     .add_input(input)
     .add_input(buffer)
@@ -773,7 +814,6 @@ Tensor& log_sigmoid_backward_out_cpu(
     const Tensor& input,
     const Tensor& buffer) {
   auto iter = TensorIteratorConfig()
-    .set_check_mem_overlap(true)
     .add_output(grad_input)
     .add_input(input)
     .add_input(buffer)

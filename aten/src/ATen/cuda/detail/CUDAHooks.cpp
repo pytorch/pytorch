@@ -181,6 +181,10 @@ Allocator* CUDAHooks::getPinnedMemoryAllocator() const {
   return at::cuda::getPinnedMemoryAllocator();
 }
 
+Allocator* CUDAHooks::getCUDADeviceAllocator() const {
+  return at::cuda::getCUDADeviceAllocator();
+}
+
 bool CUDAHooks::compiledWithCuDNN() const {
   return AT_CUDNN_ENABLED();
 }
@@ -219,6 +223,24 @@ long CUDAHooks::versionCuDNN() const {
   return CUDNN_VERSION;
 #else
   AT_ERROR("Cannot query CuDNN version if ATen_cuda is not built with CuDNN");
+#endif
+}
+
+long CUDAHooks::versionCUDART() const {
+#ifdef CUDART_VERSION
+  return CUDART_VERSION;
+#else
+  TORCH_CHECK(
+    false,
+    "Cannot query CUDART version because CUDART is not available");
+#endif
+}
+
+bool CUDAHooks::hasCUDART() const {
+#ifdef CUDART_VERSION
+  return true;
+#else
+  return false;
 #endif
 }
 

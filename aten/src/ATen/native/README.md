@@ -46,7 +46,7 @@ signature.
 - `Tensor`.  A `Tensor` argument translates into a C++ argument of type `const Tensor&`
   (except when the argument is "inplace"; in this case, it is simply `Tensor&`).
   A trailing `?`, as in `Tensor?`, indicates that the tensor argument is optional
-  and may be omitted by passing an undefined tensor.  When a function takes multiple
+  and may be omitted by passing c10::nullopt.  When a function takes multiple
   `Tensor` arguments, these tensors are assumed to be the same type (e.g.,
   if one argument is a `FloatTensor`, all other arguments are checked
   to be `FloatTensor`s).
@@ -335,9 +335,13 @@ or just omit the argument because 'with_codegenerated_unboxing_wrapper' is the d
 manual_kernel_registration: True
 ```
 
-With this flag set, we will not generate code to automatically register the C++ operator
-implementation with the dispatcher. This is a workaround for ops that need manual
-Variable code (see VariableTypeManual.cpp) and should only be used rarely.
+With this flag set, we will not generate code to automatically register the C++ operator implementation
+to TypeDefault (catchAll dispatch key) with the dispatcher.
+It doesn't make sense to have both `dispatch` section and `manual_kernel_registration: True` for the same op.
+You can find the manual registrations in torch/csrc/autograd/VariableTypeManual.cpp.
+Currently ops have this field set to True should match `MANUAL_CATCHALL` in tools/autograd/gen_variable_type.py
+(It can be a superset of `MANUAL_CATCHALL` but we don't have a use case for it).
+This field should only be used rarely.
 
 ## Writing an implementation in C++
 
@@ -375,7 +379,9 @@ name that we skip in python binding generation, e.g. `*_backward`. Check
 `tools/autograd/gen_python_functions.py` for the latest rules.
 
 The generated bindings are either exposed as methods on python_variable or functions on
-torch._C._nn object(marked with `python_module: nn`).
+the torch._C._nn (marked with `python_module: nn`),
+torch._C._fft (marked with `python_module: fft`),
+or torch._C._linalg (marked with `python_module: linalg`) objects.
 
 ### Can it handle being passed Variables?
 
