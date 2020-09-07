@@ -2,6 +2,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
+from collections import defaultdict
 
 import unittest
 import contextlib
@@ -78,34 +79,33 @@ class TestTEFuser(JitTestCase):
 
     def assertAllFused(self, graph, except_for=()):
 
-        diff_graphs = [n for n in graph.nodes() if n.kind() == 'prim::DifferentiableGraph']
-        if len(diff_graphs) > 0:
-            self.assertEqual(len(diff_graphs), 1)
-            graph = diff_graphs[0].g('Subgraph')
+        # note this helper collects nodes on 'fast path' only
+        # i.e. the true blocks of specialized checks
+        def get_nodes_and_parents_recursively(block, kind, acc):
+            for node in block.nodes():
+                if node.kind() == kind:
+                    acc[block].append(node)
+                elif node.kind() == 'prim::DifferentiableGraph':
+                    get_nodes_and_parents_recursively(node.g('Subgraph'), kind, acc)
+                elif node.kind() == 'prim::If' and (node.inputs().__next__().node().kind() == 'aten::all' or 
+                                                    node.inputs().__next__().node().kind() == 'prim::TypeCheck'):
+                    get_nodes_and_parents_recursively(node.blocks().__next__(), kind, acc)
+                else:
+                    for inner_block in node.blocks():
+                        get_nodes_and_parents_recursively(inner_block, kind, acc)
 
         allowed_nodes = {'prim::Constant', FUSION_GROUP, 'prim::BailoutTemplate',
                          'prim::TupleConstruct', 'prim::If', 'prim::TypeCheck'} | set(except_for)
 
-        if_nodes = [node for node in graph.nodes() if node.kind() == 'prim::If']
-        if_node = if_nodes[0]
-        self.assertTrue(len(if_nodes) == 1)
-        typecheck_nodes = [node for node in graph.nodes() if node.kind() == 'prim::TypeCheck']
-        if len(typecheck_nodes) == 0:
-            self.assertTrue([inp.node().kind() for inp in if_node.inputs() if inp.node().kind()].count('aten::all') == 1)
-            true_block = if_node.blocks().__next__()
-            typecheck_nodes = [node for node in true_block.nodes() if node.kind() == 'prim::TypeCheck']
-            self.assertTrue(all(node.kind() in allowed_nodes for node in true_block.nodes()),
-                            'got {}'.format(graph))
-            self.assertTrue(len(typecheck_nodes) == 1)
-            if_nodes = [node for node in true_block.nodes() if node.kind() == 'prim::If']
-            if_node = if_nodes[0]
-            self.assertTrue(len(if_nodes) == 1)
-
-        true_block = if_node.blocks().__next__()
-        self.assertTrue([node.kind() for node in true_block.nodes()].count(FUSION_GROUP) == 1)
-
-        self.assertTrue(all(node.kind() in allowed_nodes for node in true_block.nodes()),
+        fusion_groups = defaultdict(list)
+        get_nodes_and_parents_recursively(graph, FUSION_GROUP, fusion_groups)
+        self.assertTrue(len(fusion_groups) == 1, 'got {}'.format(graph))
+        (graph, fusion_nodes) = list(fusion_groups.items())[0]
+        # the block contains one FUSION_GROUP and the rest of nodes are `allowed_nodes`
+        self.assertTrue(len(fusion_nodes) == 1, 'got {}'.format(graph))
+        self.assertTrue(all(node.kind() in allowed_nodes for node in graph.nodes()),
                         'got {}'.format(graph))
+
 
     def findFusionGroups(self, graph):
         result = []
@@ -552,9 +552,10 @@ class TestTEFuser(JitTestCase):
         graph = ge_weight_scalar.graph_for(start, end)
         self.assertAllFused(graph)
 
-        ge_weight_tensor = self.checkTrace(foo_weight_tensor, (start, end))
-        graph = ge_weight_tensor.graph_for(start, end)
-        self.assertAllFused(graph)
+        # TODO: uncomment when TE enables support for scalar tensors
+        # ge_weight_tensor = self.checkTrace(foo_weight_tensor, (start, end))
+        # graph = ge_weight_tensor.graph_for(start, end)
+        # self.assertAllFused(graph)
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_concat_cuda(self):
@@ -1012,8 +1013,8 @@ class TestTEFuser(JitTestCase):
         def fn(x, y):
             return 2 * x + y
 
-        x = torch.tensor(0.1, dtype=torch.float, device='cpu')
-        y = torch.tensor(1, dtype=torch.float, device='cpu')
+        x = torch.tensor([0.1, 0.1], dtype=torch.float, device='cpu')
+        y = torch.tensor([1, 1], dtype=torch.float, device='cpu')
         ge = self.checkScript(fn, (x, y))
         self.assertAllFused(ge.graph_for(x, y))
 
